@@ -1,4 +1,7 @@
-import type { BoxedExpression } from '../global-types';
+import type {
+  BoxedExpression,
+  IComputeEngine as ComputeEngine,
+} from '../global-types';
 
 import { isRelationalOperator } from '../latex-syntax/utils';
 import { isBoxedNumber, isBoxedFunction } from './type-guards';
@@ -7,6 +10,16 @@ import { NumericValue } from '../numeric-value/types';
 import { Product, commonTerms, mul } from './arithmetic-mul-div';
 import { add } from './arithmetic-add';
 import { polynomialDegree, getPolynomialCoefficients } from './polynomials';
+
+function hasNonTrivialRadical(value: unknown): boolean {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    'radical' in value &&
+    typeof value.radical === 'number' &&
+    value.radical !== 1
+  );
+}
 
 /** Combine rational expressions into a single fraction */
 export function together(op: BoxedExpression): BoxedExpression {
@@ -119,7 +132,7 @@ export function factorPerfectSquare(
  */
 function extractSquareRoot(
   term: BoxedExpression,
-  ce: any
+  ce: ComputeEngine
 ): BoxedExpression | null {
   // Try taking the square root and simplifying it
   // Using .simplify() here is safe - see comment above
@@ -131,9 +144,7 @@ function extractSquareRoot(
   // Check if it's a Number with a radical component (like √8)
   // These are represented as Number with numericValue.radical property
   if (isBoxedNumber(sqrt)) {
-    const nv = sqrt.numericValue as any;
-    // If radical exists and is not 1, it's an irrational sqrt
-    if (nv.radical !== undefined && nv.radical !== 1) return null;
+    if (hasNonTrivialRadical(sqrt.numericValue)) return null;
   }
 
   // For expressions with Abs, extract the inner value since we're looking for
@@ -273,9 +284,7 @@ export function factorQuadratic(
 
   // Check if it's a Number with a radical component (like √8)
   if (isBoxedNumber(sqrtDisc)) {
-    const nv = sqrtDisc.numericValue as any;
-    // If radical exists and is not 1, it's an irrational sqrt
-    if (nv.radical !== undefined && nv.radical !== 1) return null;
+    if (hasNonTrivialRadical(sqrtDisc.numericValue)) return null;
   }
 
   // Additional check: verify both roots will be rational
@@ -288,8 +297,7 @@ export function factorQuadratic(
   const checkRadical = (expr: BoxedExpression): boolean => {
     if (expr.operator === 'Sqrt') return true;
     if (isBoxedNumber(expr)) {
-      const nv = expr.numericValue as any;
-      if (nv.radical !== undefined && nv.radical !== 1) return true;
+      if (hasNonTrivialRadical(expr.numericValue)) return true;
     }
     // Check in subexpressions
     if (isBoxedFunction(expr)) {

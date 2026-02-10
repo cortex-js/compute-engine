@@ -215,7 +215,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
           expr,
           serializer.level
         );
-        const args = operands(expr).slice(1) as any as Expression[];
+        const args = operands(expr).slice(1) as Expression[];
         return (
           serializer.serializeFunction(
             lhs!,
@@ -232,7 +232,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       const rhs = operand(expr, 2); // The first argument
       if (typeof lhs === 'string' || !rhs) {
         // e.g. "Apply(f, x)" -> "f(x)"
-        const fn = operands(expr).slice(1) as any as Expression;
+        const fn = operands(expr).slice(1) as unknown as Expression;
         return serializer.serialize(fn);
       }
 

@@ -30,6 +30,7 @@ import {
   isBoxedString,
   isBoxedSymbol,
 } from './type-guards';
+import type { NumericPrimitiveType } from '../../common/type/types';
 import { Type } from '../../common/type/types';
 import { BoxedType } from '../../common/type/boxed-type';
 import { parseType } from '../../common/type/parse';
@@ -1492,7 +1493,9 @@ function type(expr: BoxedFunction): Type {
       const argTypes = expr.ops.map((op) => op.type.type);
       if (
         argTypes.every(
-          (t) => typeof t === 'string' && NUMERIC_TYPES.includes(t as any)
+          (t) =>
+            typeof t === 'string' &&
+            NUMERIC_TYPES.includes(t as NumericPrimitiveType)
         )
       ) {
         const widened = widen(...argTypes);

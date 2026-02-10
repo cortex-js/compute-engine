@@ -46,6 +46,7 @@ import {
   isOperatorDef,
   isValueDef,
   normalizedUnknownsForSolve,
+  updateDef,
 } from './utils';
 import { pow } from './arithmetic-power';
 import { add } from './arithmetic-add';
@@ -158,7 +159,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     return this.engine.symbol(this._id);
   }
 
-  is(other: any): boolean {
+  is(other: unknown): boolean {
     // Shortcuts
     if (other === true)
       return (
@@ -175,10 +176,18 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       return this.symbol === other.symbol;
 
     // Check if the _value_ of this symbol is equal to the value of other
-    return (
-      this.value?.is(other instanceof _BoxedExpression ? other.value : other) ??
-      false
-    );
+    const rhs = other instanceof _BoxedExpression ? other.value : other;
+    if (
+      typeof rhs === 'string' ||
+      typeof rhs === 'number' ||
+      typeof rhs === 'bigint' ||
+      typeof rhs === 'boolean' ||
+      rhs instanceof _BoxedExpression
+    ) {
+      return this.value?.is(rhs) ?? false;
+    }
+
+    return false;
   }
 
   toNumericValue(): [NumericValue, BoxedExpression] {
@@ -381,8 +390,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         return true;
       }
       // The type is no longer a function, use a value definition
-      delete (def as any).operator;
-      (def as any).value = { value: { type: newType } };
+      updateDef(this.engine, this._id, def, { type: newType.type });
       return true;
     }
 
@@ -522,17 +530,15 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         this._def.operator.signature = t;
       } else {
         // We are changing a symbol to a function
-        delete (this._def as any).value;
-        (this._def as any).operator = { signature: t };
+        updateDef(this.engine, this._id, this._def, { signature: t });
       }
     } else {
       if (isOperatorDef(this._def)) {
         // We are changing a function to a symbol
-        delete (this._def as any).operator;
-        (this._def as any).value = { type: t };
+        updateDef(this.engine, this._id, this._def, { type: t });
       } else {
         // We are changing the type of a symbol
-        (this._def as any).value.type = t;
+        this._def.value.type = this.engine.type(t);
       }
     }
   }

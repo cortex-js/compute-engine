@@ -154,7 +154,7 @@ export abstract class NumericValue {
   }
 
   /** Object.toJSON */
-  toJSON(): any {
+  toJSON(): unknown {
     if (this.im === 0) {
       const r = this.re;
       // JSON cannot represent NaN, Infinity, -Infinity

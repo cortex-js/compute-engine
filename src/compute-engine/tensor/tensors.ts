@@ -161,7 +161,7 @@ export abstract class AbstractTensor<
   get array(): NestedArray<DataTypeMap[DT]> {
     const shape = this.shape;
     const rank = this.rank;
-    const data: DataTypeMap[DT][] = this.data as any as DataTypeMap[DT][];
+    const data = this.data;
 
     if (rank === 1) return data;
     if (rank === 2) {

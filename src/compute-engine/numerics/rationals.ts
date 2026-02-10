@@ -6,17 +6,17 @@ import {
 } from './numeric-bigint';
 import { Rational, SmallInteger } from './types';
 
-export function isRational(x: any | null): x is Rational {
+export function isRational(x: unknown | null): x is Rational {
   return x !== null && Array.isArray(x);
 }
 
 export function isMachineRational(
-  x: any | null
+  x: unknown | null
 ): x is [SmallInteger, SmallInteger] {
   return x !== null && Array.isArray(x) && typeof x[0] === 'number';
 }
 
-export function isBigRational(x: any | null): x is [bigint, bigint] {
+export function isBigRational(x: unknown | null): x is [bigint, bigint] {
   return x !== null && Array.isArray(x) && typeof x[0] === 'bigint';
 }
 

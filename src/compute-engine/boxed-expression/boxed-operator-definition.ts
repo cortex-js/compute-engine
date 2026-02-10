@@ -149,7 +149,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
 
   /** For debugging */
   toJSON() {
-    const result: any = { name: this.name };
+    const result: Record<string, unknown> = { name: this.name };
     if (this.wikidata) result.wikidata = this.wikidata;
     if (this.description) result.description = this.description;
     if (this.url) result.url = this.url;
@@ -305,7 +305,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       // }
     }
 
-    let evaluate: ((xs) => BoxedExpression | undefined) | undefined = undefined;
+    let evaluate: _BoxedOperatorDefinition['evaluate'] | undefined = undefined;
     if (def.evaluate && typeof def.evaluate !== 'function') {
       // If the function is scoped, create a local scope
       const scope: Scope | undefined = this.scoped
@@ -340,11 +340,15 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       }
 
       const fn = applicable(boxedFn);
-      evaluate = (xs) => fn(xs);
+      evaluate = (xs, _options) => fn(xs);
       Object.defineProperty(evaluate, 'toString', {
         value: () => boxedFn.toString(),
       }); // For debugging/_printScope
-    } else evaluate = (def.evaluate as any) ?? this.evaluate;
+    } else if (typeof def.evaluate === 'function') {
+      evaluate = def.evaluate;
+    } else {
+      evaluate = this.evaluate;
+    }
 
     this.evaluate = evaluate;
   }

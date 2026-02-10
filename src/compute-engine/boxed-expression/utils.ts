@@ -67,7 +67,7 @@ export function hasSymbolicTranscendental(expr: BoxedExpression): boolean {
 }
 
 export function isDictionary(
-  expr: any | null | undefined
+  expr: unknown
 ): expr is DictionaryInterface {
   return (
     expr !== null &&
@@ -79,6 +79,19 @@ export function isDictionary(
 
 export function isBoxedExpression(x: unknown): x is BoxedExpression {
   return x instanceof _BoxedExpression;
+}
+
+function isRecord(x: unknown): x is Record<PropertyKey, unknown> {
+  return x !== null && typeof x === 'object';
+}
+
+function isIterable(x: unknown): x is Iterable<unknown> {
+  return (
+    x !== null &&
+    x !== undefined &&
+    typeof (x as { [Symbol.iterator]?: unknown })[Symbol.iterator] ===
+      'function'
+  );
 }
 
 /**
@@ -119,10 +132,15 @@ export function normalizedUnknownsForSolve(
     return normalizedUnknownsForSolve(
       isBoxedSymbol(syms) ? syms.symbol : undefined
     );
-  if (typeof syms[Symbol.iterator] === 'function')
-    return Array.from(syms as Iterable<any>).map((s) =>
-      typeof s === 'string' ? s : isBoxedSymbol(s) ? s.symbol : ''
-    );
+  if (isIterable(syms)) {
+    const result: string[] = [];
+    for (const s of syms) {
+      if (typeof s === 'string') result.push(s);
+      else if (isBoxedExpression(s) && isBoxedSymbol(s)) result.push(s.symbol);
+      else result.push('');
+    }
+    return result;
+  }
   return [];
 }
 
@@ -323,10 +341,9 @@ export function getPiTerm(
 }
 
 export function isValidOperatorDef(
-  def: any
+  def: unknown
 ): def is Partial<OperatorDefinition> {
-  if (def === undefined || def === null || typeof def !== 'object')
-    return false;
+  if (!isRecord(def)) return false;
   if (isBoxedExpression(def)) return false;
   if ('signature' in def || 'complexity' in def) {
     if ('constant' in def) {
@@ -361,9 +378,8 @@ export function isValidOperatorDef(
   return true;
 }
 
-export function isValidValueDef(def: any): def is Partial<ValueDefinition> {
-  if (def === undefined || def === null || typeof def !== 'object')
-    return false;
+export function isValidValueDef(def: unknown): def is Partial<ValueDefinition> {
+  if (!isRecord(def)) return false;
 
   if (isBoxedExpression(def)) return false;
 
@@ -428,18 +444,23 @@ export function updateDef(
     | Partial<ValueDefinition>
     | BoxedValueDefinition
 ): void {
+  const mutableDef = def as {
+    value?: BoxedValueDefinition;
+    operator?: BoxedOperatorDefinition;
+  };
+
   if (newDef instanceof _BoxedValueDefinition) {
-    delete (def as any).operator;
-    (def as any).value = newDef.value;
+    delete mutableDef.operator;
+    mutableDef.value = newDef;
   } else if (isValidValueDef(newDef)) {
-    delete (def as any).operator;
-    (def as any).value = new _BoxedValueDefinition(ce, name, newDef);
+    delete mutableDef.operator;
+    mutableDef.value = new _BoxedValueDefinition(ce, name, newDef);
   } else if (newDef instanceof _BoxedOperatorDefinition) {
-    delete (def as any).value;
-    (def as any).operator = newDef;
+    delete mutableDef.value;
+    mutableDef.operator = newDef;
   } else if (isValidOperatorDef(newDef)) {
-    delete (def as any).value;
-    (def as any).operator = new _BoxedOperatorDefinition(ce, name, newDef);
+    delete mutableDef.value;
+    mutableDef.operator = new _BoxedOperatorDefinition(ce, name, newDef);
   }
 }
 

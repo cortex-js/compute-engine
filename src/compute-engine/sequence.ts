@@ -632,7 +632,7 @@ function tryFinalizeSequence(ce: ComputeEngine, name: string): void {
 
   // Check if the symbol already exists in the current scope
   // (it may have been auto-declared when parsing the recurrence expression)
-  const scope = (ce as any).context.lexicalScope;
+  const scope = ce.context.lexicalScope;
   const existingDef = scope.bindings.get(name);
 
   if (existingDef) {

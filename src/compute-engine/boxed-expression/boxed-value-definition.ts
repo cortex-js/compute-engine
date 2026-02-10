@@ -173,7 +173,10 @@ export class _BoxedValueDefinition
 
   /** For debugging */
   toJSON() {
-    const result: any = { name: this.name, isConstant: this._isConstant };
+    const result: Record<string, unknown> = {
+      name: this.name,
+      isConstant: this._isConstant,
+    };
     if (this.wikidata) result.wikidata = this.wikidata;
     if (this.description) result.description = this.description;
     if (this.url) result.url = this.url;

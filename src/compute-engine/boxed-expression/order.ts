@@ -42,7 +42,7 @@ const TRIGONOMETRIC_OPERATORS: { [key: string]: boolean } = {
   Arsech: true,
 };
 
-function isTrigonometricFunction(operator: any): boolean {
+function isTrigonometricFunction(operator: unknown): boolean {
   if (!operator || typeof operator !== 'string') return false;
   return operator in TRIGONOMETRIC_OPERATORS;
 }

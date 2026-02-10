@@ -115,7 +115,7 @@ export class BoxedNumber
       return value;
     }
 
-    return value.toJSON();
+    return value.toJSON() as Expression;
   }
 
   get operator(): string {

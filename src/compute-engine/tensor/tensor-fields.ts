@@ -18,18 +18,18 @@ export function makeTensorField<DT extends keyof DataTypeMap>(
     case 'float32':
     case 'int32':
     case 'uint8':
-      return new TensorFieldNumber(ce) as any as TensorField<DataTypeMap[DT]>;
+      return new TensorFieldNumber(ce) as unknown as TensorField<DataTypeMap[DT]>;
     case 'complex128':
     case 'complex64':
-      return new TensorFieldComplex(ce) as any as TensorField<DataTypeMap[DT]>;
+      return new TensorFieldComplex(ce) as unknown as TensorField<DataTypeMap[DT]>;
     case 'bool':
     // case 'string':
     case 'expression':
-      return new TensorFieldExpression(ce) as any as TensorField<
+      return new TensorFieldExpression(ce) as unknown as TensorField<
         DataTypeMap[DT]
       >;
     case undefined:
-      return new TensorFieldNumber(ce) as any as TensorField<DataTypeMap[DT]>;
+      return new TensorFieldNumber(ce) as unknown as TensorField<DataTypeMap[DT]>;
   }
 
   throw new Error(`Unknown dtype ${dtype}`);
@@ -208,7 +208,26 @@ export class TensorFieldExpression implements TensorField<BoxedExpression> {
     | boolean[]
     // | string[]
     | BoxedExpression[] {
-    if (Array.isArray(x)) return x.map((x) => this.cast(x, dtype as any)!);
+    if (Array.isArray(x)) {
+      switch (dtype) {
+        case 'float64':
+          return x.map((item) => this.cast(item, 'float64')!);
+        case 'float32':
+          return x.map((item) => this.cast(item, 'float32')!);
+        case 'int32':
+          return x.map((item) => this.cast(item, 'int32')!);
+        case 'uint8':
+          return x.map((item) => this.cast(item, 'uint8')!);
+        case 'complex128':
+          return x.map((item) => this.cast(item, 'complex128')!);
+        case 'complex64':
+          return x.map((item) => this.cast(item, 'complex64')!);
+        case 'bool':
+          return x.map((item) => this.cast(item, 'bool')!);
+        case 'expression':
+          return x.map((item) => this.cast(item, 'expression')!);
+      }
+    }
 
     switch (dtype) {
       case 'float64':
@@ -350,7 +369,24 @@ export class TensorFieldComplex implements TensorField<Complex> {
     // | string[]
     | BoxedExpression[] {
     if (Array.isArray(x)) {
-      return x.map((x) => this.cast(x, dtype as any)!);
+      switch (dtype) {
+        case 'float64':
+          return x.map((item) => this.cast(item, 'float64')!);
+        case 'float32':
+          return x.map((item) => this.cast(item, 'float32')!);
+        case 'int32':
+          return x.map((item) => this.cast(item, 'int32')!);
+        case 'uint8':
+          return x.map((item) => this.cast(item, 'uint8')!);
+        case 'complex128':
+          return x.map((item) => this.cast(item, 'complex128')!);
+        case 'complex64':
+          return x.map((item) => this.cast(item, 'complex64')!);
+        case 'bool':
+          return x.map((item) => this.cast(item, 'bool')!);
+        case 'expression':
+          return x.map((item) => this.cast(item, 'expression')!);
+      }
     }
     switch (dtype) {
       case 'float64':

@@ -22,6 +22,7 @@ import { CancellationError } from '../../common/interruptible';
 import type {
   BoxedExpression,
   OperatorDefinition,
+  SemiBoxedExpression,
   SymbolDefinitions,
 } from '../global-types';
 import { BoxedType } from '../types';
@@ -1539,14 +1540,18 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         );
       }
 
-      const fillArray = (dims: number[], index: number[], level = 0): any => {
+      const fillArray = (
+        dims: number[],
+        index: number[],
+        level = 0
+      ): SemiBoxedExpression => {
         // Apply the function `fn` to the current index array
         if (level === dims.length) {
           const idx = index.map((i) => ce.number(i));
-          return fn(idx);
+          return fn(idx) ?? ce.Nothing;
         }
 
-        const arr: any[] = ['List'];
+        const arr: ['List', ...SemiBoxedExpression[]] = ['List'];
         for (let i = 1; i <= dims[level]; i++) {
           index[level] = i;
           arr.push(fillArray(dims, index, level + 1));

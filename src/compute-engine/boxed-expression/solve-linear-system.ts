@@ -7,6 +7,21 @@ import { findUnivariateRoots } from './solve';
 import { expand } from './expand';
 import { isBoxedNumber, isBoxedFunction, isBoxedSymbol } from './type-guards';
 
+function numericRealPart(value: unknown): number | undefined {
+  if (typeof value === 'number') return value;
+
+  if (
+    value !== null &&
+    typeof value === 'object' &&
+    're' in value &&
+    typeof value.re === 'number'
+  ) {
+    return value.re;
+  }
+
+  return undefined;
+}
+
 /**
  * Check if an expression is linear in the given variables.
  * Returns false if any term contains a product of multiple variables (e.g., xy).
@@ -586,23 +601,9 @@ function compareAbsoluteValues(
 
   // If both are numeric values (not expressions), compare them exactly
   if (aNum !== undefined && bNum !== undefined) {
-    // Handle machine numbers
-    if (typeof aNum === 'number' && typeof bNum === 'number') {
-      if (aNum === bNum) return 0;
-      return aNum > bNum ? 1 : -1;
-    }
-
-    // Handle NumericValue objects (exact rationals, etc.)
-    if (typeof aNum === 'object' && 're' in aNum) {
-      const aRe = aNum.re;
-      const bRe = typeof bNum === 'number' ? bNum : (bNum as any).re;
-      if (aRe === bRe) return 0;
-      return aRe > bRe ? 1 : -1;
-    }
-
-    if (typeof bNum === 'object' && 're' in bNum) {
-      const aRe = typeof aNum === 'number' ? aNum : (aNum as any).re;
-      const bRe = bNum.re;
+    const aRe = numericRealPart(aNum);
+    const bRe = numericRealPart(bNum);
+    if (aRe !== undefined && bRe !== undefined) {
       if (aRe === bRe) return 0;
       return aRe > bRe ? 1 : -1;
     }
@@ -616,8 +617,8 @@ function compareAbsoluteValues(
 
   if (aVal === undefined || bVal === undefined) return undefined;
 
-  const aReal = typeof aVal === 'number' ? aVal : ((aVal as any).re ?? aVal);
-  const bReal = typeof bVal === 'number' ? bVal : ((bVal as any).re ?? bVal);
+  const aReal = numericRealPart(aVal);
+  const bReal = numericRealPart(bVal);
 
   if (typeof aReal !== 'number' || typeof bReal !== 'number') return undefined;
   if (isNaN(aReal) || isNaN(bReal)) return undefined;
@@ -645,7 +646,7 @@ function isEffectivelyZero(expr: BoxedExpression | undefined): boolean {
   const numVal = isBoxedNumber(exprN) ? exprN.numericValue : undefined;
   if (numVal === undefined) return false;
 
-  const re = typeof numVal === 'number' ? numVal : (numVal as any).re;
+  const re = numericRealPart(numVal);
   if (typeof re === 'number' && Math.abs(re) < 1e-14) return true;
 
   return false;

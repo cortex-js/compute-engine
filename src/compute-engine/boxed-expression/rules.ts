@@ -491,7 +491,7 @@ function parseRule(
         // Check if we have some accumulated conditions from inline modifiers
         // i.e. a:positive or a_{positive}
         //
-        const conditions: any[] = [];
+        const conditions: Expression[] = [];
         for (const id in wildcardConditions) {
           const xs = wildcardConditions[id].split(',');
           if (xs.length === 0) continue;
@@ -999,11 +999,15 @@ function includesWildcards(a: BoxedExpression, b: BoxedExpression): boolean {
 
 /** @category Rules */
 
-function isRuleStep(x: any): x is RuleStep {
-  return x && typeof x === 'object' && 'because' in x && 'value' in x;
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function isRuleStep(x: unknown): x is RuleStep {
+  return isRecord(x) && 'because' in x && 'value' in x;
 }
 
 /** @category Rules */
-function isBoxedRule(x: any): x is BoxedRule {
-  return x && typeof x === 'object' && x._tag === 'boxed-rule';
+function isBoxedRule(x: unknown): x is BoxedRule {
+  return isRecord(x) && x._tag === 'boxed-rule';
 }

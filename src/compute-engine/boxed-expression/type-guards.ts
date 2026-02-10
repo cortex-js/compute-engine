@@ -11,12 +11,13 @@ import type {
 } from '../global-types';
 
 export function isBoxedExpression(x: unknown): x is BoxedExpression {
+  const boxed = x as { _kind?: unknown } | null | undefined;
   return (
-    x !== null &&
-    x !== undefined &&
-    typeof x === 'object' &&
-    '_kind' in x &&
-    typeof (x as any)._kind === 'string'
+    boxed !== null &&
+    boxed !== undefined &&
+    typeof boxed === 'object' &&
+    '_kind' in boxed &&
+    typeof boxed._kind === 'string'
   );
 }
 

@@ -8,6 +8,27 @@ import type {
 } from '../global-types';
 import { isBoxedNumber, isBoxedFunction, isBoxedSymbol } from './type-guards';
 
+function numericApproximation(value: unknown): number | undefined {
+  if (typeof value === 'number') return value;
+  if (value === null || value === undefined || typeof value !== 'object')
+    return undefined;
+
+  if (
+    'decimal' in value &&
+    value.decimal !== null &&
+    value.decimal !== undefined &&
+    typeof value.decimal === 'object' &&
+    'toNumber' in value.decimal &&
+    typeof value.decimal.toNumber === 'function'
+  ) {
+    return value.decimal.toNumber();
+  }
+
+  if ('re' in value && typeof value.re === 'number') return value.re;
+
+  return undefined;
+}
+
 //
 // Solve Rules
 //
@@ -960,12 +981,7 @@ function solveTwoSqrtEquationCore(
     // Check if lhs ≈ e
     const diff = lhs.sub(eVal).abs().N();
     const diffNum = isBoxedNumber(diff) ? diff.numericValue : undefined;
-    let diffReal = 0;
-    if (typeof diffNum === 'number') {
-      diffReal = diffNum;
-    } else if (diffNum && typeof diffNum === 'object' && 'decimal' in diffNum) {
-      diffReal = (diffNum as any).decimal?.toNumber?.() ?? 0;
-    }
+    const diffReal = numericApproximation(diffNum) ?? 0;
 
     if (diffReal < 1e-9) {
       validSolutions.push(sol);
@@ -1132,20 +1148,8 @@ function solveNestedSqrtEquation(
     // Also check numericValue for cases where isNegative might not be set
     const uNum = isBoxedNumber(uNumeric) ? uNumeric.numericValue : undefined;
     if (uNum !== undefined) {
-      let uReal: number | null = null;
-      if (typeof uNum === 'number') {
-        uReal = uNum;
-      } else if (typeof uNum === 'object' && 'decimal' in uNum) {
-        // BigNumericValue object - extract numeric value from decimal
-        const decimal = (uNum as any).decimal;
-        if (decimal && typeof decimal.toNumber === 'function') {
-          uReal = decimal.toNumber();
-        }
-      } else if (typeof uNum === 'object' && 're' in uNum) {
-        // Complex number object
-        uReal = (uNum as any).re;
-      }
-      if (uReal !== null && uReal < -1e-10) continue; // Skip negative u values
+      const uReal = numericApproximation(uNum);
+      if (uReal !== undefined && uReal < -1e-10) continue; // Skip negative u values
     }
 
     // x = u²

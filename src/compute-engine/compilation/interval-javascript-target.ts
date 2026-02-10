@@ -258,19 +258,29 @@ export class ComputeEngineIntervalFunction extends Function {
  * - { x: {...}, y: {...} } - Object with interval-valued properties
  * - number - Convert to point interval
  */
-function processInput(input: any): any {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object';
+}
+
+function hasIntervalBounds(
+  value: unknown
+): value is { lo: unknown; hi: unknown } {
+  return isRecord(value) && 'lo' in value && 'hi' in value;
+}
+
+function processInput(input: unknown): unknown {
   if (input === null || input === undefined) {
     return input;
   }
 
   // Already an interval
-  if (typeof input === 'object' && 'lo' in input && 'hi' in input) {
+  if (hasIntervalBounds(input)) {
     return input;
   }
 
   // Object with properties - process recursively
-  if (typeof input === 'object') {
-    const result: any = {};
+  if (isRecord(input)) {
+    const result: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(input)) {
       result[key] = processInput(value);
     }

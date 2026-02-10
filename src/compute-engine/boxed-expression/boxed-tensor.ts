@@ -269,10 +269,8 @@ export class BoxedTensor<T extends TensorDataType>
 
   contains(other: BoxedExpression): boolean | undefined {
     if (['float64', 'float32', 'int32', 'uint8'].includes(this.tensor.dtype)) {
-      type ElementType<T extends Tensor<any>> = T['dtype'];
-      type DataType = DataTypeMap[ElementType<typeof this.tensor>];
-      const data = this.tensor.data as DataType[];
-      return data.includes(other.re as DataType);
+      const data = this.tensor.data;
+      return data.includes(other.re as DataTypeMap[T]);
     }
     return this.tensor.data.some((x) =>
       other.isSame(
@@ -291,7 +289,7 @@ export class BoxedTensor<T extends TensorDataType>
 
     // Scalar tensor: yield itself
     if (rank === 0) {
-      return (function* (self: BoxedTensor<any>) {
+      return (function* (self: BoxedTensor<TensorDataType>) {
         yield self;
       })(this);
     }
@@ -299,7 +297,7 @@ export class BoxedTensor<T extends TensorDataType>
     const count = shape[0];
 
     if (rank === 1) {
-      return (function* (self: BoxedTensor<any>) {
+      return (function* (self: BoxedTensor<TensorDataType>) {
         // 1D tensor: yield each element as boxed expression
         for (let i = 1; i <= count; i += 1) {
           // 0-based index for .data
@@ -313,7 +311,7 @@ export class BoxedTensor<T extends TensorDataType>
     }
 
     // Higher rank tensor: yield slices along the first axis
-    return (function* (self: BoxedTensor<any>) {
+    return (function* (self: BoxedTensor<TensorDataType>) {
       for (let i = 1; i <= count; i += 1) {
         // slice(i - 1) returns a tensor of rank-1 less
         const row = self.tensor.slice(i - 1);
@@ -392,7 +390,9 @@ export class BoxedTensor<T extends TensorDataType>
   }
 }
 
-export function isBoxedTensor(val: unknown): val is BoxedTensor<any> {
+export function isBoxedTensor(
+  val: unknown
+): val is BoxedTensor<TensorDataType> {
   return val instanceof BoxedTensor;
 }
 

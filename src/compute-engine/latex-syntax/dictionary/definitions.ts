@@ -147,6 +147,19 @@ const DEFAULT_DELIMITER: { [key: string]: LatexString } = {
   '\\rfloor': '\\rfloor',
 };
 
+function prependIndexedEntry<T>(
+  index: Map<string, T[]>,
+  trigger: string,
+  entry: T
+): void {
+  const existing = index.get(trigger);
+  if (existing) {
+    existing.unshift(entry); // Prepend - maintain reverse order
+  } else {
+    index.set(trigger, [entry]);
+  }
+}
+
 function addEntry(
   result: IndexedLatexDictionary,
   entry: LatexDictionaryEntry,
@@ -194,13 +207,13 @@ function addEntry(
     addEntry(
       result,
       {
-        ...(entry as any),
+        ...(entry as Record<string, unknown>),
         kind,
         name: undefined,
         serialize: undefined,
         parse,
         latexTrigger: [tokensTrigger[0], '<{>', tokensTrigger[1], '<}>'],
-      },
+      } as LatexDictionaryEntry,
       onError
     );
   }
@@ -255,36 +268,28 @@ function addEntry(
   //
   if (indexedEntry.latexTrigger && indexedEntry.latexTrigger !== '') {
     const trigger = indexedEntry.latexTrigger;
-    let index: Map<string, any> | undefined;
-
     switch (indexedEntry.kind) {
       case 'infix':
-        index = result.infixByTrigger;
+        prependIndexedEntry(result.infixByTrigger, trigger, indexedEntry);
         break;
       case 'prefix':
-        index = result.prefixByTrigger;
+        prependIndexedEntry(result.prefixByTrigger, trigger, indexedEntry);
         break;
       case 'postfix':
-        index = result.postfixByTrigger;
+        prependIndexedEntry(result.postfixByTrigger, trigger, indexedEntry);
         break;
       case 'function':
-        index = result.functionByTrigger;
+        prependIndexedEntry(result.functionByTrigger, trigger, indexedEntry);
         break;
       case 'symbol':
-        index = result.symbolByTrigger;
+        prependIndexedEntry(result.symbolByTrigger, trigger, indexedEntry);
         break;
       case 'expression':
-        index = result.expressionByTrigger;
+        prependIndexedEntry(result.expressionByTrigger, trigger, indexedEntry);
         break;
-    }
-
-    if (index) {
-      const existing = index.get(trigger);
-      if (existing) {
-        existing.unshift(indexedEntry as any); // Prepend - maintain reverse order
-      } else {
-        index.set(trigger, [indexedEntry as any]);
-      }
+      case 'environment':
+      case 'matchfix':
+        break;
     }
   }
 
@@ -490,7 +495,9 @@ function makeIndexedEntry(
   // Make a default parser if none was provided, but a trigger was provided
   //
   const parse = makeParseHandler(entry, tokensTrigger, idTrigger);
-  if (parse) result.parse = parse as any;
+  if (parse)
+    result.parse =
+      parse as unknown as Partial<IndexedLatexDictionaryEntry>['parse'];
 
   // Carry over the arguments mode for function entries
   if (result.kind === 'function' && 'arguments' in entry)

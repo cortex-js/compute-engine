@@ -27,6 +27,7 @@ import type {
   IComputeEngine as ComputeEngine,
   Scope,
   Tensor,
+  TensorDataType,
 } from '../global-types';
 
 import type { NumericValue } from '../numeric-value/types';
@@ -516,7 +517,7 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return undefined;
   }
 
-  get tensor(): Tensor<any> | undefined {
+  get tensor(): Tensor<TensorDataType> | undefined {
     return undefined;
   }
 
@@ -697,7 +698,7 @@ export abstract class _BoxedExpression implements BoxedExpression {
     return undefined;
   }
 
-  set value(_value: any) {
+  set value(_value: unknown) {
     throw new Error(`Can't change the value of \\(${this.toString()}\\)`);
   }
 

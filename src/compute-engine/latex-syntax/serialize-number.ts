@@ -655,7 +655,7 @@ function insertGroupSeparator(
     return insertSeparatorEveryNDigitsFromLeft(numberString, 3, separator);
   }
 
-  if ((group as any as boolean) === false || group <= 0) return numberString;
+  if ((group as unknown) === false || group <= 0) return numberString;
   if (part === 1)
     return insertSeparatorEveryNDigitsFromLeft(numberString, group, separator);
   return insertSeparatorEveryNDigitsFromRight(numberString, group, separator);

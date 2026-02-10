@@ -1,6 +1,5 @@
 import { NumericValue } from '../numeric-value/types';
 import type { BoxedExpression } from '../global-types';
-import { AbstractTensor } from '../tensor/tensors';
 import { getInequalityBoundsFromAssumptions } from './inequality-bounds';
 import {
   isBoxedNumber,
@@ -69,9 +68,7 @@ export function same(a: BoxedExpression, b: BoxedExpression): boolean {
       if (a.rank !== b.rank) return false;
       for (let i = 0; i < a.rank; i++)
         if (a.shape[i] !== b.shape[i]) return false;
-      return (a.tensor as AbstractTensor<any>).equals(
-        b.tensor as AbstractTensor<any>
-      );
+      return a.tensor.equals(b.tensor);
     }
   }
 
@@ -485,10 +482,7 @@ export function cmp(
   //
   if (isBoxedTensor(a)) {
     if (!isBoxedTensor(b)) return undefined;
-    if (
-      (a.tensor as AbstractTensor<any>).equals(b.tensor as AbstractTensor<any>)
-    )
-      return '=';
+    if (a.tensor.equals(b.tensor)) return '=';
     return undefined;
   }
 
