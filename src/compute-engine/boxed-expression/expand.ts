@@ -141,7 +141,25 @@ export function expandFunction(
   //
   // Multiply
   //
-  if (h === 'Multiply') return expandProducts(ce, ops);
+  if (h === 'Multiply') {
+    // First expand Power operands (e.g., (x+h)^2 -> x^2+2xh+h^2)
+    // so that expandProducts can distribute the coefficient.
+    // Only expand Power-of-Add, not other operands, to avoid
+    // losing Add structure (e.g., Add(x, sqrt(2)*x) -> x*(1+sqrt(2)))
+    const expandedOps = ops.map((op) => {
+      if (
+        isBoxedFunction(op) &&
+        op.operator === 'Power' &&
+        isBoxedFunction(op.op1) &&
+        op.op1.operator === 'Add'
+      ) {
+        const exp = asSmallInteger(op.op2);
+        if (exp !== null && exp >= 2) return expandPower(op.op1, exp) ?? op;
+      }
+      return op;
+    });
+    return expandProducts(ce, expandedOps);
+  }
 
   //
   // Negate

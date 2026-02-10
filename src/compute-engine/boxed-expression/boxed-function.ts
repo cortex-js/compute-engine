@@ -447,14 +447,17 @@ export class BoxedFunction
       return [coef.abs(), ce.function('Abs', [rest])];
     }
     console.assert(expr.operator !== 'Complex');
-    console.assert(expr.operator !== 'Exp');
 
     //
-    // Log/Ln
+    // Exp/Log/Ln
     //
-    // Logarithms don't have numeric coefficients to extract.
+    // Exp and logarithms don't have numeric coefficients to extract.
     // Keep them symbolic - don't evaluate or expand.
-    if (expr.operator === 'Log' || expr.operator === 'Ln')
+    if (
+      expr.operator === 'Exp' ||
+      expr.operator === 'Log' ||
+      expr.operator === 'Ln'
+    )
       return [ce._numericValue(1), this];
 
     // @todo:  could consider others: Exp, trig functions

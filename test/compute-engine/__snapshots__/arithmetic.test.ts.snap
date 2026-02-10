@@ -265,6 +265,7 @@ N-mach    = 0.845154254728518
 
 exports[`EXACT EVALUATION Sqrt: Inexact Fractional part 1`] = `
 box       = ["Sqrt", 5.1]
+simplify  = 2.25831795812724298497
 eval-auto = 2.25831795812724298497
 eval-mach = 2.25831795812724
 `;
@@ -1039,7 +1040,7 @@ exports[`SQRT √ of list 1`] = `[2,1,7.4833147735478827711674974646330986035120
 
 exports[`SQRT √(3+4i) 1`] = `
 box       = ["Sqrt", ["Complex", 3, 4]]
-eval-auto = (2 + i)
+simplify  = (2 + i)
 `;
 
 exports[`SQRT √(3^2) 1`] = `
@@ -1117,12 +1118,14 @@ canonical = 0
 
 exports[`SQRT √2.5 1`] = `
 box       = ["Sqrt", 2.5]
+simplify  = 1.581138830084189666
 eval-auto = 1.581138830084189666
 eval-mach = 1.58113883008419
 `;
 
 exports[`SQRT √123456789.01234567890 1`] = `
 box       = ["Sqrt", "123456789.0123456789"]
+simplify  = 11111.1110611111109936
 eval-auto = 11111.1110611111109936
 eval-mach = 11111.1110611111
 `;

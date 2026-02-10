@@ -3,6 +3,7 @@ import {
   isBoxedFunction,
   isBoxedNumber,
 } from '../boxed-expression/type-guards';
+import { asRational } from '../boxed-expression/numerics';
 
 /**
  * Division simplification rules consolidated from simplify-rules.ts.
@@ -83,6 +84,47 @@ export function simplifyDivide(x: BoxedExpression): RuleStep | undefined {
         value: num.mul(denomDenom).div(denomNum),
         because: 'a/(b/c) -> a*c/b',
       };
+    }
+  }
+
+  // Power(base, a) / Power(base, b) -> Power(base, a - b)
+  // This covers cases like x^{sqrt(2)} / x^3 -> x^{sqrt(2)-3}
+  // where the exponents are not rational and can't be combined during
+  // canonicalization
+  {
+    let numBase: BoxedExpression | undefined;
+    let numExp: BoxedExpression | undefined;
+    let denomBase: BoxedExpression | undefined;
+    let denomExp: BoxedExpression | undefined;
+
+    if (num.operator === 'Power' && isBoxedFunction(num)) {
+      numBase = num.op1;
+      numExp = num.op2;
+    } else {
+      numBase = num;
+      numExp = ce.One;
+    }
+    if (denom.operator === 'Power' && isBoxedFunction(denom)) {
+      denomBase = denom.op1;
+      denomExp = denom.op2;
+    } else {
+      denomBase = denom;
+      denomExp = ce.One;
+    }
+
+    if (numBase && denomBase && numBase.isSame(denomBase)) {
+      // Only apply when at least one exponent is non-rational (symbolic)
+      // Rational cases are already handled by canonicalization
+      if (!asRational(numExp!) || !asRational(denomExp!)) {
+        const diffExp = ce.function('Add', [numExp!, denomExp!.neg()]);
+        if (diffExp.is(0)) return { value: ce.One, because: 'x^a/x^a -> 1' };
+        if (diffExp.is(1))
+          return { value: numBase, because: 'x^a/x^b -> x when a-b=1' };
+        return {
+          value: ce._fn('Power', [numBase, diffExp]),
+          because: 'x^a/x^b -> x^(a-b)',
+        };
+      }
     }
   }
 

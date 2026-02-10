@@ -166,6 +166,60 @@ export function simplifyPower(x: BoxedExpression): RuleStep | undefined {
         }
       }
     }
+
+    // Root of Multiply: root(a*b*..., n) -> root(a,n) * root(b,n) * ...
+    // Distribute root over product when some factors have perfect nth roots
+    if (arg.operator === 'Multiply' && isBoxedFunction(arg) && arg.ops.length >= 2) {
+      const n = rootIndex.re;
+      if (n !== undefined && Number.isInteger(n) && n >= 2) {
+        const insideRoot: BoxedExpression[] = [];
+        const outsideRoot: BoxedExpression[] = [];
+
+        for (const factor of arg.ops) {
+          // Try to simplify root(factor, n) individually
+          const rootOfFactor = ce._fn('Root', [factor, rootIndex]);
+          const simplified = simplifyPower(rootOfFactor);
+          if (simplified && !simplified.value.isSame(rootOfFactor)) {
+            outsideRoot.push(simplified.value);
+          } else {
+            // Check if factor is a numeric perfect nth power
+            const numVal = factor.re;
+            if (numVal !== undefined && numVal > 0) {
+              const nthRoot = Math.round(Math.pow(numVal, 1 / n));
+              if (Math.pow(nthRoot, n) === numVal) {
+                outsideRoot.push(ce.number(nthRoot));
+                continue;
+              }
+            }
+            insideRoot.push(factor);
+          }
+        }
+
+        if (outsideRoot.length > 0) {
+          const outside =
+            outsideRoot.length === 1
+              ? outsideRoot[0]
+              : ce._fn('Multiply', outsideRoot);
+          if (insideRoot.length === 0) {
+            return {
+              value: outside,
+              because: 'root(product, n) -> factored',
+            };
+          }
+          const inside =
+            insideRoot.length === 1
+              ? insideRoot[0]
+              : ce._fn('Multiply', insideRoot);
+          return {
+            value: ce._fn('Multiply', [
+              outside,
+              ce._fn('Root', [inside, rootIndex]),
+            ]),
+            because: 'root(product, n) -> factored',
+          };
+        }
+      }
+    }
   }
 
   // Handle Sqrt operator
@@ -479,6 +533,14 @@ export function simplifyPower(x: BoxedExpression): RuleStep | undefined {
             because: '(-x)^{n/m} -> -x^{n/m} when n and m are odd',
           };
         }
+        // (-x)^{odd/even} -> x^{odd/even} (e.g., (-x)^{3/4} -> x^{3/4})
+        // Even root eliminates the sign
+        if (numIsOdd && !denomIsOdd) {
+          return {
+            value: innerBase.pow(exp),
+            because: '(-x)^{n/m} -> x^{n/m} when m is even',
+          };
+        }
       }
     }
 
@@ -594,8 +656,11 @@ export function simplifyPower(x: BoxedExpression): RuleStep | undefined {
       const expDenom = denom.op2;
 
       if (baseNum?.isSame(baseDenom) && expNum && expDenom) {
+        // Use symbolic Add to preserve exact forms (e.g., sqrt(2) - 3)
+        // instead of .sub() which evaluates numerically
+        const diffExp = ce.function('Add', [expNum, expDenom.neg()]);
         return {
-          value: baseNum.pow(expNum.sub(expDenom)),
+          value: baseNum.pow(diffExp),
           because: 'a^m / a^n -> a^{m-n}',
         };
       }
@@ -607,8 +672,9 @@ export function simplifyPower(x: BoxedExpression): RuleStep | undefined {
       isBoxedFunction(num) &&
       num.op1.isSame(denom)
     ) {
+      const diffExp = ce.function('Add', [num.op2, ce.NegativeOne]);
       return {
-        value: denom.pow(num.op2.sub(ce.One)),
+        value: denom.pow(diffExp),
         because: 'a^m / a -> a^{m-1}',
       };
     }
@@ -619,8 +685,9 @@ export function simplifyPower(x: BoxedExpression): RuleStep | undefined {
       isBoxedFunction(denom) &&
       denom.op1.isSame(num)
     ) {
+      const diffExp = ce.function('Add', [ce.One, denom.op2.neg()]);
       return {
-        value: num.pow(ce.One.sub(denom.op2)),
+        value: num.pow(diffExp),
         because: 'a / a^n -> a^{1-n}',
       };
     }
