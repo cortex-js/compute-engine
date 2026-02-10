@@ -29,7 +29,7 @@ $ npm install --save @cortex-js/compute-engine
 No setup required:
 
 ```js
-import { parse, simplify, evaluate, N, assign } from "@cortex-js/compute-engine";
+import { simplify, evaluate, N, assign } from "@cortex-js/compute-engine";
 
 simplify("x + x + 1").print();
 // ➔ 2x + 1
@@ -107,27 +107,30 @@ if (isBoxedFunction(expr)) {
 ```js
 import { parse, simplify, expand } from "@cortex-js/compute-engine";
 
-
 // Simplify expressions
 simplify("x + x").print();
 // ➔ 2x
 
-// Expand expressions (free function)
-const expr = parse("(x + 1)^2");
-expand(expr).print();
+// Expand from LaTeX or BoxedExpression
+expand("(x + 1)^2").print();
 // ➔ x^2 + 2x + 1
 
 // Substitute values
-const expr2 = parse("x^2 + 2x + 1");
-expr2.subs({ x: 3 }).evaluate().print();
+const expr = parse("x^2 + 2x + 1");
+expr.subs({ x: 3 }).evaluate().print();
 // ➔ 16
 ```
 
 ### Solving Equations
 
 ```js
+import { solve, parse } from "@cortex-js/compute-engine";
 
-// Solve linear system
+// Solve from LaTeX
+solve("x^2 - 5x + 6 = 0", "x");
+// ➔ [2, 3]
+
+// Solve a linear system
 const system = parse("\\begin{cases}x+y=5\\\\x-y=1\\end{cases}");
 const solution = system.solve(["x", "y"]);
 

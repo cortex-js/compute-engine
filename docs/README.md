@@ -13,30 +13,28 @@ read the repository [`README.md`](../README.md).
 | Goal | Recommended doc |
 | --- | --- |
 | Learn package usage quickly | [`../README.md`](../README.md) |
-| Use parse-and-transform helper methods | This file (Workflow Helpers section) |
+| Use free functions for common operations | This file (Free Functions section) |
 | Understand simplification behavior snapshots | [`SIMPLIFY.md`](./SIMPLIFY.md), [`SIMPLIFICATIONS.md`](./SIMPLIFICATIONS.md) |
 | Review playground sample outcomes | [`PLAYGROUND.md`](./PLAYGROUND.md) |
 | Review internal architecture boundaries | [`architecture/README.md`](./architecture/README.md) |
 
-## Workflow Helpers
+## Free Functions
 
-High-level workflow entrypoints:
+Top-level free functions for common operations — no `ComputeEngine` setup required:
 
-- `ce.parseSimplify(latex, options?)`
-- `ce.parseEvaluate(latex, options?)`
-- `ce.parseNumeric(latex, options?)`
+- `parse(latex)` — parse a LaTeX string into a `BoxedExpression`
+- `simplify(latex | expr)` — simplify a LaTeX string or expression
+- `evaluate(latex | expr)` — evaluate a LaTeX string or expression
+- `N(latex | expr)` — compute a numeric approximation
+- `expand(latex | expr)` — expand products and powers (distributive law)
+- `expandAll(latex | expr)` — recursively expand all sub-expressions
+- `factor(latex | expr)` — factor an expression as a product
+- `solve(latex | expr, vars)` — solve an equation or system for the given variables
+- `compile(latex | expr, options?)` — compile an expression to JavaScript (or another target)
+- `assign(id, value)` / `assign({...})` — assign values in the shared engine
 
-Policy presets:
-
-- Parse policy: `parseMode: 'strict' | 'permissive'`
-- Evaluation policy: `evaluateMode: 'exact' | 'numeric'` (`parseEvaluate`)
-- Simplification policy: `simplifyMode: 'default' | 'trigonometric'` (`parseSimplify`)
-
-Option precedence (explicit low-level options win):
-
-- `parse.strict` overrides `parseMode`
-- `evaluate.numericApproximation` overrides `evaluateMode`
-- `simplify.strategy` overrides `simplifyMode`
+These use a shared `ComputeEngine` instance created on first call.
+Use `getDefaultEngine()` to configure it (precision, angular unit, etc.).
 
 ## Extension Contracts
 
