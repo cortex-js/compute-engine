@@ -41,6 +41,31 @@ ce.parse("2^{11}-1 \\in \\Z").evaluate().print();
 // ➔ True
 ```
 
+### Workflow Helpers (Parse + Transform)
+
+For common app flows, you can use the high-level workflow helpers:
+
+```js
+import { ComputeEngine } from "@cortex-js/compute-engine";
+
+const ce = new ComputeEngine();
+
+// Parse then simplify
+ce.parseSimplify("x + x + 1").print();
+// ➔ 2x + 1
+
+// Parse then evaluate (using current context)
+ce.assign("x", 3);
+ce.parseEvaluate("x + 2").print();
+// ➔ 5
+
+// Parse then compute numeric approximation
+ce.parseNumeric("\\sqrt{2}").print();
+// ➔ 1.414213562...
+```
+
+These methods return `null` when the input LaTeX is `null`.
+
 ### Working with Numbers (Type-Safe)
 
 Use type guards to safely access specialized properties:

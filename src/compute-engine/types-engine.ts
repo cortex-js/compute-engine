@@ -298,6 +298,69 @@ export interface IComputeEngine extends IBigNum {
     options?: Partial<ParseLatexOptions> & { form?: FormOption }
   ): BoxedExpression | null;
 
+  parseSimplify(
+    latex: null,
+    options?: {
+      parse?: Partial<ParseLatexOptions> & { form?: FormOption };
+      simplify?: Parameters<BoxedExpression['simplify']>[0];
+    }
+  ): null;
+  parseSimplify(
+    latex: LatexString,
+    options?: {
+      parse?: Partial<ParseLatexOptions> & { form?: FormOption };
+      simplify?: Parameters<BoxedExpression['simplify']>[0];
+    }
+  ): BoxedExpression;
+  parseSimplify(
+    latex: LatexString | null,
+    options?: {
+      parse?: Partial<ParseLatexOptions> & { form?: FormOption };
+      simplify?: Parameters<BoxedExpression['simplify']>[0];
+    }
+  ): BoxedExpression | null;
+
+  parseEvaluate(
+    latex: null,
+    options?: {
+      parse?: Partial<ParseLatexOptions> & { form?: FormOption };
+      evaluate?: Parameters<BoxedExpression['evaluate']>[0];
+    }
+  ): null;
+  parseEvaluate(
+    latex: LatexString,
+    options?: {
+      parse?: Partial<ParseLatexOptions> & { form?: FormOption };
+      evaluate?: Parameters<BoxedExpression['evaluate']>[0];
+    }
+  ): BoxedExpression;
+  parseEvaluate(
+    latex: LatexString | null,
+    options?: {
+      parse?: Partial<ParseLatexOptions> & { form?: FormOption };
+      evaluate?: Parameters<BoxedExpression['evaluate']>[0];
+    }
+  ): BoxedExpression | null;
+
+  parseNumeric(
+    latex: null,
+    options?: {
+      parse?: Partial<ParseLatexOptions> & { form?: FormOption };
+    }
+  ): null;
+  parseNumeric(
+    latex: LatexString,
+    options?: {
+      parse?: Partial<ParseLatexOptions> & { form?: FormOption };
+    }
+  ): BoxedExpression;
+  parseNumeric(
+    latex: LatexString | null,
+    options?: {
+      parse?: Partial<ParseLatexOptions> & { form?: FormOption };
+    }
+  ): BoxedExpression | null;
+
   pushScope(scope?: Scope, name?: string): void;
   popScope(): void;
 

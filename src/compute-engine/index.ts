@@ -7,7 +7,6 @@ import {
   TypeString,
 } from '../common/type/types';
 import { BoxedType } from '../common/type/boxed-type';
-import { typeToString } from '../common/type/serialize';
 
 import type { OneOf } from '../common/one-of';
 import { hidePrivateProperties } from '../common/utils';
@@ -57,13 +56,10 @@ import type {
   LatexDictionaryEntry,
   LatexString,
   LibraryCategory,
-  ParseLatexOptions,
 } from './latex-syntax/types';
 import {
   type IndexedLatexDictionary,
 } from './latex-syntax/dictionary/definitions';
-import { parse } from './latex-syntax/parse';
-import { asLatexString, isLatexString } from './latex-syntax/utils';
 
 import { getStandardLibrary } from './library/library';
 
@@ -82,7 +78,6 @@ import { MachineNumericValue } from './numeric-value/machine-numeric-value';
 
 import { box, boxFunction, formToInternal } from './boxed-expression/box';
 import type { FormOption } from './types-serialization';
-import { isValueDef, isOperatorDef } from './boxed-expression/utils';
 import { boxRules } from './boxed-expression/rules';
 import { validatePattern } from './boxed-expression/boxed-patterns';
 import { BoxedString } from './boxed-expression/boxed-string';
@@ -168,9 +163,25 @@ import {
 import { EngineLatexDictionaryState } from './engine-latex-dictionary-state';
 import { SimplificationRuleStore } from './engine-simplification-rules';
 import { EngineNumericConfiguration } from './engine-numeric-configuration';
+import {
+  parseLatexEntrypoint,
+  type ParseEntrypointOptions,
+} from './engine-parse-entrypoint';
 import { EngineRuntimeState } from './engine-runtime-state';
 import { EngineStartupCoordinator } from './engine-startup-coordinator';
 import { createTypeResolver } from './engine-type-resolver';
+import {
+  createErrorExpression,
+  createTypeErrorExpression,
+} from './engine-validation-entrypoints';
+import {
+  parseAndEvaluate,
+  parseAndNumeric,
+  parseAndSimplify,
+  type ParseEvaluateOptions,
+  type ParseNumericOptions,
+  type ParseSimplifyOptions,
+} from './engine-workflow-entrypoints';
 
 export * from './global-types';
 
@@ -1546,27 +1557,7 @@ export class ComputeEngine implements IComputeEngine {
    * The result is canonical.
    */
   error(message: string | string[], where?: string): BoxedExpression {
-    let msg: BoxedExpression;
-    if (typeof message === 'string') msg = this.string(message);
-    else
-      msg = this.function(
-        'ErrorCode',
-        message.map((x) => this.string(x))
-      );
-
-    let whereExpr: BoxedExpression | undefined = undefined;
-    if (where && isLatexString(where)) {
-      whereExpr = this.function('LatexString', [
-        this.string(asLatexString(where)!),
-      ]);
-    } else if (typeof where === 'string' && where.length > 0) {
-      whereExpr = this.string(where);
-    }
-
-    const ops = [this.box(msg)];
-    if (whereExpr) ops.push(whereExpr);
-
-    return this.function('Error', ops);
+    return createErrorExpression(this, message, where);
   }
 
   typeError(
@@ -1574,12 +1565,7 @@ export class ComputeEngine implements IComputeEngine {
     actual: undefined | Type | BoxedType,
     where?: string
   ): BoxedExpression {
-    if (actual)
-      return this.error(
-        ['incompatible-type', typeToString(expected), actual.toString()],
-        where
-      );
-    return this.error(['incompatible-type', typeToString(expected)], where);
+    return createTypeErrorExpression(this, expected, actual, where);
   }
 
   /**
@@ -1721,73 +1707,77 @@ export class ComputeEngine implements IComputeEngine {
    */
   parse(
     latex: null,
-    options?: Partial<ParseLatexOptions> & { form?: FormOption }
+    options?: ParseEntrypointOptions
   ): null;
   parse(
     latex: LatexString,
-    options?: Partial<ParseLatexOptions> & { form?: FormOption }
+    options?: ParseEntrypointOptions
   ): BoxedExpression;
   parse(
     latex: LatexString | null,
-    options?: Partial<ParseLatexOptions> & { form?: FormOption }
+    options?: ParseEntrypointOptions
   ): BoxedExpression | null {
-    if (latex === null || latex === undefined) return null;
-    if (typeof latex !== 'string')
-      throw Error('ce.parse(): expected a LaTeX string');
+    return parseLatexEntrypoint(this, latex, options);
+  }
 
-    const defaultOptions: ParseLatexOptions = {
-      imaginaryUnit: '\\imaginaryI',
+  /**
+   * Parse a LaTeX expression then simplify it.
+   *
+   * This is a high-level workflow helper that combines parse and simplify.
+   */
+  parseSimplify(
+    latex: null,
+    options?: ParseSimplifyOptions
+  ): null;
+  parseSimplify(
+    latex: LatexString,
+    options?: ParseSimplifyOptions
+  ): BoxedExpression;
+  parseSimplify(
+    latex: LatexString | null,
+    options?: ParseSimplifyOptions
+  ): BoxedExpression | null {
+    return parseAndSimplify(this, latex, options);
+  }
 
-      positiveInfinity: '\\infty',
-      negativeInfinity: '-\\infty',
-      notANumber: '\\operatorname{NaN}',
+  /**
+   * Parse a LaTeX expression then evaluate it.
+   *
+   * This is a high-level workflow helper that combines parse and evaluate.
+   */
+  parseEvaluate(
+    latex: null,
+    options?: ParseEvaluateOptions
+  ): null;
+  parseEvaluate(
+    latex: LatexString,
+    options?: ParseEvaluateOptions
+  ): BoxedExpression;
+  parseEvaluate(
+    latex: LatexString | null,
+    options?: ParseEvaluateOptions
+  ): BoxedExpression | null {
+    return parseAndEvaluate(this, latex, options);
+  }
 
-      decimalSeparator: this.decimalSeparator,
-
-      digitGroup: 3,
-      digitGroupSeparator: '\\,', // for thousands, etc...
-
-      exponentProduct: '\\cdot',
-      beginExponentMarker: '10^{', // could be 'e'
-      endExponentMarker: '}',
-
-      truncationMarker: '\\ldots',
-
-      repeatingDecimal: 'auto', // auto will accept any notation
-
-      strict: true,
-      skipSpace: true,
-      parseNumbers: 'auto',
-      getSymbolType: (id) => {
-        // This handler is called by the parser when encountering a symbol
-        // It should return the type of the symbol
-        const def = this.lookupDefinition(id);
-        if (!def) return BoxedType.unknown;
-        if (isOperatorDef(def)) return def.operator.signature;
-        if (isValueDef(def)) return def.value.type;
-
-        return BoxedType.unknown;
-      },
-      hasSubscriptEvaluate: (id) => {
-        // Check if the symbol has a custom subscript evaluation handler
-        const def = this.lookupDefinition(id);
-        if (isValueDef(def) && def.value.subscriptEvaluate) return true;
-        return false;
-      },
-      parseUnexpectedToken: (_lhs, _parser) => null,
-      preserveLatex: false,
-      quantifierScope: 'tight',
-      timeDerivativeVariable: 't',
-    };
-
-    const result = parse(
-      asLatexString(latex) ?? latex,
-      this._indexedLatexDictionary,
-      { ...defaultOptions, ...options }
-    );
-    if (result === null) throw Error('Failed to parse LaTeX string');
-    const { canonical } = formToInternal(options?.form);
-    return box(this, result, { canonical });
+  /**
+   * Parse a LaTeX expression then compute a numeric approximation.
+   *
+   * This is a high-level workflow helper that combines parse and `N()`.
+   */
+  parseNumeric(
+    latex: null,
+    options?: ParseNumericOptions
+  ): null;
+  parseNumeric(
+    latex: LatexString,
+    options?: ParseNumericOptions
+  ): BoxedExpression;
+  parseNumeric(
+    latex: LatexString | null,
+    options?: ParseNumericOptions
+  ): BoxedExpression | null {
+    return parseAndNumeric(this, latex, options);
   }
 
   /**
