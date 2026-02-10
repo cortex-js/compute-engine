@@ -83,7 +83,6 @@ import {
   UNIVARIATE_ROOTS,
 } from './boxed-expression/solve';
 import {
-  factor,
   factorPerfectSquare,
   factorDifferenceOfSquares,
   factorQuadratic,
@@ -167,7 +166,7 @@ import {
   createTypeErrorExpression,
 } from './engine-validation-entrypoints';
 
-export * from './global-types';
+export type * from './global-types';
 
 // Free functions backed by a lazily-instantiated global engine
 export {

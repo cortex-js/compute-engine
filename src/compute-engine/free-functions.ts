@@ -1,6 +1,13 @@
-import type { BoxedExpression, AssignValue, IComputeEngine } from './global-types';
+import type {
+  BoxedExpression,
+  AssignValue,
+  IComputeEngine,
+} from './global-types';
 import type { LatexString } from './latex-syntax/types';
-import { expand as expandExpr, expandAll as expandAllExpr } from './boxed-expression/expand';
+import {
+  expand as expandExpr,
+  expandAll as expandAllExpr,
+} from './boxed-expression/expand';
 import { factor as factorExpr } from './boxed-expression/factor';
 import { compile as compileExpr } from './compilation/compile-expression';
 
@@ -61,11 +68,7 @@ export function expand(
 
 export function solve(
   latex: LatexString | BoxedExpression,
-  vars?:
-    | string
-    | Iterable<string>
-    | BoxedExpression
-    | Iterable<BoxedExpression>
+  vars?: string | Iterable<string> | BoxedExpression | Iterable<BoxedExpression>
 ):
   | null
   | ReadonlyArray<BoxedExpression>
@@ -84,9 +87,7 @@ export function expandAll(
   return expandAllExpr(expr);
 }
 
-export function factor(
-  latex: LatexString | BoxedExpression
-): BoxedExpression {
+export function factor(latex: LatexString | BoxedExpression): BoxedExpression {
   const expr =
     typeof latex === 'string' ? getDefaultEngine().parse(latex) : latex;
   return factorExpr(expr);

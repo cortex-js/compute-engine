@@ -14,8 +14,6 @@ import {
   asMachineRational,
   inverse,
   isOne,
-  machineDenominator,
-  machineNumerator,
   neg,
   rationalGcd,
   reducedRational,

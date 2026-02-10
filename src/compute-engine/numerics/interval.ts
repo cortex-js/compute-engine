@@ -1,9 +1,9 @@
-import type { BoxedExpression } from '../global-types';
-import {
-  isBoxedSymbol,
-  isBoxedNumber,
-  isBoxedFunction,
-} from '../boxed-expression/type-guards';
+import type {
+  BoxedExpression,
+  FunctionInterface,
+  NumberLiteralInterface,
+  SymbolInterface,
+} from '../global-types';
 
 /** An interval is a continuous set of real numbers */
 export type Interval = {
@@ -12,6 +12,24 @@ export type Interval = {
   end: number;
   openEnd: boolean;
 };
+
+function isBoxedNumber(
+  expr: BoxedExpression | null | undefined
+): expr is BoxedExpression & NumberLiteralInterface {
+  return expr?._kind === 'number';
+}
+
+function isBoxedSymbol(
+  expr: BoxedExpression | null | undefined
+): expr is BoxedExpression & SymbolInterface {
+  return expr?._kind === 'symbol';
+}
+
+function isBoxedFunction(
+  expr: BoxedExpression | null | undefined
+): expr is BoxedExpression & FunctionInterface {
+  return expr?._kind === 'function' || expr?._kind === 'tensor';
+}
 
 export function interval(expr: BoxedExpression): Interval | undefined {
   if (expr.operator === 'Interval' && isBoxedFunction(expr)) {

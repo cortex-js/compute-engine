@@ -9,6 +9,31 @@
 
 export type * from './types-expression';
 export type * from './types-serialization';
-export type * from './types-definitions';
+export type {
+  ValueDefinition,
+  SequenceDefinition,
+  SequenceStatus,
+  SequenceInfo,
+  OEISSequenceInfo,
+  OEISOptions,
+  OperatorDefinition,
+  BaseDefinition,
+  SimplifyOptions,
+  SymbolDefinition,
+  SymbolDefinitions,
+  LibraryDefinition,
+  AngularUnit,
+  Sign,
+  BaseCollectionHandlers,
+  IndexedCollectionHandlers,
+  CollectionHandlers,
+  TaggedValueDefinition,
+  TaggedOperatorDefinition,
+  BoxedDefinition,
+  BoxedBaseDefinition,
+  BoxedValueDefinition,
+  OperatorDefinitionFlags,
+  BoxedOperatorDefinition,
+} from './types-definitions';
 export type * from './types-evaluation';
 export type * from './types-engine';

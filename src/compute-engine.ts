@@ -8,7 +8,7 @@ export const version = '{{SDK_VERSION}}';
 import { ComputeEngine } from './compute-engine/index';
 export { ComputeEngine } from './compute-engine/index';
 
-export * from './compute-engine/types';
+export type * from './compute-engine/types';
 
 // Export compilation types and classes for advanced users
 export type {
