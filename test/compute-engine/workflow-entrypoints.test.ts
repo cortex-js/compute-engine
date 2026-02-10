@@ -5,6 +5,11 @@ import {
   evaluate,
   N,
   assign,
+  expand,
+  expandAll,
+  factor,
+  solve,
+  compile,
   getDefaultEngine,
 } from '../../src/compute-engine';
 
@@ -88,5 +93,76 @@ describe('Free Functions', () => {
     expect(result.toString()).toBe('42');
     // Reset
     getDefaultEngine().forget('w');
+  });
+
+  test('expand() expands a LaTeX string', () => {
+    const result = expand('(x+1)^2');
+    expect(result).not.toBeNull();
+    expect(result!.latex).toBe('x^2+2x+1');
+  });
+
+  test('expand() expands a BoxedExpression', () => {
+    const expr = parse('(x+1)(x+2)');
+    const result = expand(expr);
+    expect(result).not.toBeNull();
+    expect(result!.latex).toBe('x^2+3x+2');
+  });
+
+  test('solve() solves from a LaTeX string', () => {
+    const result = solve('x^2 - 5x + 6 = 0', 'x');
+    expect(result).not.toBeNull();
+    expect(Array.isArray(result)).toBe(true);
+    const values = (result as any[]).map((r) => r.valueOf());
+    expect(values).toContain(2);
+    expect(values).toContain(3);
+  });
+
+  test('solve() solves from a BoxedExpression', () => {
+    const expr = parse('x^2 - 5x + 6 = 0');
+    const result = solve(expr, 'x');
+    expect(result).not.toBeNull();
+    expect(Array.isArray(result)).toBe(true);
+    const values = (result as any[]).map((r) => r.valueOf());
+    expect(values).toContain(2);
+    expect(values).toContain(3);
+  });
+
+  test('expandAll() expands from a LaTeX string', () => {
+    const result = expandAll('(x+1)(x+2) + (a+b)^2');
+    expect(result).not.toBeNull();
+  });
+
+  test('expandAll() expands from a BoxedExpression', () => {
+    const expr = parse('(x+1)^2');
+    const result = expandAll(expr);
+    expect(result).not.toBeNull();
+    expect(result!.latex).toBe('x^2+2x+1');
+  });
+
+  test('factor() factors from a LaTeX string', () => {
+    const result = factor('(2x)(4y)');
+    expect(result).toBeDefined();
+    expect(result.latex).toBe('8xy');
+  });
+
+  test('factor() factors from a BoxedExpression', () => {
+    const expr = parse('(2x)(4y)');
+    const result = factor(expr);
+    expect(result).toBeDefined();
+    expect(result.latex).toBe('8xy');
+  });
+
+  test('compile() compiles from a LaTeX string', () => {
+    const result = compile('x^2 + 1');
+    expect(result).toBeDefined();
+    expect(result.success).toBe(true);
+    expect(typeof result.code).toBe('string');
+  });
+
+  test('compile() compiles from a BoxedExpression', () => {
+    const expr = parse('x^2 + 1');
+    const result = compile(expr);
+    expect(result).toBeDefined();
+    expect(result.success).toBe(true);
   });
 });

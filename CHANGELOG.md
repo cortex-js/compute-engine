@@ -52,15 +52,45 @@ ce.function('Add', [1, 'x'], { form: 'structural' }); // bound, not fully canoni
 ce.box(['Add', 1, 'x'], { form: ['Number', 'Order'] }); // selective passes
 ```
 
+#### New Free Functions: `parse()`, `simplify()`, `evaluate()`, `N()`, `assign()`
+
+Top-level free functions are now available for the most common operations. They
+use a shared `ComputeEngine` instance created on first call, so no setup is
+required.
+
+```ts
+import { parse, simplify, evaluate, N, assign } from '@cortex-js/compute-engine';
+
+simplify('x + x + 1');     // 2x + 1
+evaluate('2^{11} - 1');    // 2047
+N('\\sqrt{2}');             // 1.414213562…
+
+assign('x', 3);
+evaluate('x + 2');          // 5
+```
+
+Except for `parse()` (which only accepts a LaTeX string), each function accepts
+either a LaTeX string or an existing `BoxedExpression`:
+
+```ts
+const expr = parse('x + x + 1');
+simplify(expr);             // same as simplify('x + x + 1')
+```
+
+Use `getDefaultEngine()` to access the shared engine for configuration
+(precision, angular unit, etc.) or to call methods like `forget()`.
+
 #### `compile()` Is Now a Free Function
 
 The `expr.compile()` method has been replaced by a standalone `compile()`
-function with a structured `CompilationResult` return type.
+function with a structured `CompilationResult` return type. It accepts either a
+LaTeX string or a `BoxedExpression`.
 
 ```ts
 import { compile } from '@cortex-js/compute-engine';
 
-const result = compile(ce.parse('x^2 + 1'));
+// From a LaTeX string
+const result = compile('x^2 + 1');
 result.run({ x: 3 });  // 10
 result.code;            // generated source
 result.success;         // true
@@ -79,24 +109,51 @@ Custom compilation targets can be registered and unregistered dynamically via
 while `expandAll()` applies it recursively. Both return `null` if the expression
 cannot be expanded.
 
+Both accept a LaTeX string or a `BoxedExpression`, consistent with the other free
+functions (`simplify`, `evaluate`, `N`).
+
 ```ts
 import { expand, expandAll } from '@cortex-js/compute-engine';
 
+// From a LaTeX string
+expand('(x+1)^2');         // x^2 + 2x + 1
+expandAll('(x+1)(x+2) + (a+b)^2');  // recursive expansion
+
+// From a BoxedExpression
 const expr = ce.parse('(x+1)(x+2)');
 expand(expr);               // x^2 + 3x + 2
-expandAll(complexExpr);     // recursive expansion
 
 // Returns null when not expandable — use ?? for fallback
 const result = expand(expr) ?? expr;
 ```
 
+#### `solve()` Is a Free Function
+
+A new `solve()` free function is available for solving equations without
+explicitly creating a `ComputeEngine` instance. Like the other free functions, it
+accepts either a LaTeX string or a `BoxedExpression`.
+
+```ts
+import { solve } from '@cortex-js/compute-engine';
+
+// Solve from LaTeX
+solve('x^2 - 5x + 6 = 0', 'x');  // [2, 3]
+
+// Solve from a BoxedExpression
+const expr = ce.parse('x^2 - 5x + 6 = 0');
+solve(expr, 'x');                   // [2, 3]
+```
+
 #### `factor()` Is a Free Function
 
-Polynomial factoring functions are now standalone free functions.
+Polynomial factoring functions are now standalone free functions. `factor()`
+accepts a LaTeX string or a `BoxedExpression`. The specialized variants
+(`factorPolynomial`, `factorQuadratic`, etc.) accept only a `BoxedExpression`.
 
 ```ts
 import { factor, factorPolynomial, factorQuadratic } from '@cortex-js/compute-engine';
 
+factor('(2x)(4y)');        // 8xy — from LaTeX
 factor(expr);              // general factoring
 factorPolynomial(expr);    // polynomial-specific
 factorQuadratic(expr);     // quadratic-specific

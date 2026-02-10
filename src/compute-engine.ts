@@ -29,9 +29,6 @@ export { IntervalJavaScriptTarget } from './compute-engine/compilation/interval-
 export { IntervalGLSLTarget } from './compute-engine/compilation/interval-glsl-target';
 export { BaseCompiler } from './compute-engine/compilation/base-compiler';
 
-export { expand } from './compute-engine/boxed-expression/expand';
-export { compile } from './compute-engine/compilation/compile-expression';
-
 // Free functions backed by a lazily-instantiated global engine
 export {
   parse,
@@ -39,6 +36,11 @@ export {
   evaluate,
   N,
   assign,
+  expand,
+  expandAll,
+  factor,
+  solve,
+  compile,
   getDefaultEngine,
 } from './compute-engine/free-functions';
 

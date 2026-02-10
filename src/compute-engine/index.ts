@@ -176,22 +176,23 @@ export {
   evaluate,
   N,
   assign,
+  expand,
+  expandAll,
+  factor,
+  solve,
+  compile,
   getDefaultEngine,
 } from './free-functions';
 
 export { validatePattern };
 
-// Export polynomial factoring functions for advanced users
+// Export specialized polynomial factoring functions for advanced users
 export {
-  factor,
   factorPerfectSquare,
   factorDifferenceOfSquares,
   factorQuadratic,
   factorPolynomial,
 };
-
-// Export expression expansion functions
-export { expand, expandAll } from './boxed-expression/expand';
 
 // Export compilation types and classes for advanced users
 export type {
