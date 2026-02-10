@@ -1,8 +1,6 @@
 import { Complex } from 'complex-esm';
 import { Decimal } from 'decimal.js';
 
-import { isValidSymbol, validateSymbol } from '../math-json/symbols';
-
 import {
   Type,
   TypeResolver,
@@ -14,10 +12,7 @@ import { typeToString } from '../common/type/serialize';
 import type { OneOf } from '../common/one-of';
 import { hidePrivateProperties } from '../common/utils';
 
-import {
-  ConfigurationChangeTracker,
-  ConfigurationChangeListener,
-} from '../common/configuration-change';
+import type { ConfigurationChangeListener } from '../common/configuration-change';
 
 import type {
   Expression,
@@ -26,8 +21,6 @@ import type {
 } from '../math-json/types';
 
 import {
-  DEFAULT_PRECISION,
-  DEFAULT_TOLERANCE,
   MACHINE_PRECISION,
   MAX_BIGINT_DIGITS,
   SMALL_INTEGER,
@@ -68,17 +61,11 @@ import type {
 } from './latex-syntax/types';
 import {
   type IndexedLatexDictionary,
-  indexLatexDictionary,
 } from './latex-syntax/dictionary/definitions';
 import { parse } from './latex-syntax/parse';
 import { asLatexString, isLatexString } from './latex-syntax/utils';
 
-import {
-  setSymbolDefinitions,
-  getStandardLibrary,
-  STANDARD_LIBRARIES,
-  sortLibraries,
-} from './library/library';
+import { getStandardLibrary } from './library/library';
 
 import { DEFAULT_COST_FUNCTION } from './cost-function';
 
@@ -99,9 +86,7 @@ import { isValueDef, isOperatorDef } from './boxed-expression/utils';
 import { boxRules } from './boxed-expression/rules';
 import { validatePattern } from './boxed-expression/boxed-patterns';
 import { BoxedString } from './boxed-expression/boxed-string';
-import { BoxedNumber, canonicalNumber } from './boxed-expression/boxed-number';
 import { BoxedFunction } from './boxed-expression/boxed-function';
-import { BoxedSymbol } from './boxed-expression/boxed-symbol';
 import { _BoxedExpression } from './boxed-expression/abstract-boxed-expression';
 import { _BoxedOperatorDefinition } from './boxed-expression/boxed-operator-definition';
 import {
@@ -166,8 +151,25 @@ import {
   checkSequenceOEIS as checkSequenceOEISImpl,
 } from './engine-sequences';
 import { EngineCacheStore } from './engine-cache';
+import {
+  type CommonSymbolTable,
+  resetCommonSymbols,
+} from './engine-common-symbols';
 import { CompilationTargetRegistry } from './engine-compilation-targets';
+import { EngineConfigurationLifecycle } from './engine-configuration-lifecycle';
+import {
+  type CommonNumberTable,
+  createNumberExpression,
+  createSymbolExpression,
+} from './engine-expression-entrypoints';
+import {
+  getLatexDictionaryForDomain,
+} from './engine-library-bootstrap';
+import { EngineLatexDictionaryState } from './engine-latex-dictionary-state';
 import { SimplificationRuleStore } from './engine-simplification-rules';
+import { EngineNumericConfiguration } from './engine-numeric-configuration';
+import { EngineRuntimeState } from './engine-runtime-state';
+import { EngineStartupCoordinator } from './engine-startup-coordinator';
 import { createTypeResolver } from './engine-type-resolver';
 
 export * from './global-types';
@@ -270,47 +272,21 @@ export class ComputeEngine implements IComputeEngine {
    *
    * Note that this is a LaTeX string and is used when parsing or serializing
    * LaTeX. MathJSON always uses a period.
-   *
-   * */
+  *
+  * */
   decimalSeparator: LatexString = '.';
 
   /** @internal */
-  _BIGNUM_NAN: Decimal;
-
-  /** @internal */
-  _BIGNUM_ZERO: Decimal;
-
-  /** @internal */
-  _BIGNUM_ONE: Decimal;
-
-  /** @internal */
-  _BIGNUM_TWO: Decimal;
-
-  /** @internal */
-  _BIGNUM_HALF: Decimal;
-
-  /** @internal */
-  _BIGNUM_PI: Decimal;
-
-  /** @internal */
-  _BIGNUM_NEGATIVE_ONE: Decimal;
-
-  /** @internal */
-  private _precision: number;
-
-  /** @ internal */
-  private _angularUnit: AngularUnit;
-
-  /** @internal */
-  private _tolerance: number;
-  /** @internal */
-  private _bignumTolerance: Decimal;
-  private _negBignumTolerance: Decimal;
+  private _numericConfiguration: EngineNumericConfiguration;
 
   /** @internal */
   private _cacheStore = new EngineCacheStore();
 
-  private _configurationChangeTracker = new ConfigurationChangeTracker();
+  /** @internal Runtime execution limits and verification mode state */
+  private _runtimeState = new EngineRuntimeState();
+
+  /** @internal Configuration change generation/tracking lifecycle */
+  private _configurationLifecycle = new EngineConfigurationLifecycle();
 
   /** @internal */
   private _cost?: (expr: BoxedExpression) => number;
@@ -327,7 +303,7 @@ export class ComputeEngine implements IComputeEngine {
   _fuAlgorithm = _fu;
 
   /** @internal */
-  private _commonSymbols: { [symbol: string]: null | BoxedExpression } = {
+  private _commonSymbols: CommonSymbolTable = {
     Pi: null,
 
     True: null,
@@ -343,7 +319,7 @@ export class ComputeEngine implements IComputeEngine {
   };
 
   /** @internal */
-  private _commonNumbers: { [num: number]: null | BoxedExpression } = {
+  private _commonNumbers: CommonNumberTable = {
     '-5': null,
     '-4': null,
     '-3': null,
@@ -385,6 +361,41 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   /** @internal */
+  get _BIGNUM_NAN(): Decimal {
+    return this._numericConfiguration.bignumNaN;
+  }
+
+  /** @internal */
+  get _BIGNUM_ZERO(): Decimal {
+    return this._numericConfiguration.bignumZero;
+  }
+
+  /** @internal */
+  get _BIGNUM_ONE(): Decimal {
+    return this._numericConfiguration.bignumOne;
+  }
+
+  /** @internal */
+  get _BIGNUM_TWO(): Decimal {
+    return this._numericConfiguration.bignumTwo;
+  }
+
+  /** @internal */
+  get _BIGNUM_HALF(): Decimal {
+    return this._numericConfiguration.bignumHalf;
+  }
+
+  /** @internal */
+  get _BIGNUM_PI(): Decimal {
+    return this._numericConfiguration.bignumPi;
+  }
+
+  /** @internal */
+  get _BIGNUM_NEGATIVE_ONE(): Decimal {
+    return this._numericConfiguration.bignumNegativeOne;
+  }
+
+  /** @internal */
   get _typeResolver(): TypeResolver {
     return createTypeResolver(this);
   }
@@ -419,7 +430,13 @@ export class ComputeEngine implements IComputeEngine {
    * It is used to invalidate caches.
    * @internal
    */
-  _generation: number = 0;
+  get _generation(): number {
+    return this._configurationLifecycle.generation;
+  }
+
+  set _generation(value: number) {
+    this._configurationLifecycle.generation = value;
+  }
 
   /** In strict mode (the default) the Compute Engine performs
    * validation of domains and signature and may report errors.
@@ -432,11 +449,6 @@ export class ComputeEngine implements IComputeEngine {
    */
   strict: boolean;
 
-  /** Absolute time beyond which evaluation should not proceed.
-   * @internal
-   */
-  deadline?: number;
-
   /**
    * Return symbol tables suitable for the specified categories, or `"all"`
    * for all categories (`"arithmetic"`, `"algebra"`, etc...).
@@ -446,13 +458,9 @@ export class ComputeEngine implements IComputeEngine {
    */
 
   /** @internal */
-  private _latexDictionaryInput: Readonly<LatexDictionaryEntry[]>;
-
-  /** @internal */
-  __indexedLatexDictionary: IndexedLatexDictionary;
-
-  /** @internal */
-  _bignum: Decimal.Constructor;
+  private _latexDictionaryState = new EngineLatexDictionaryState(() =>
+    ComputeEngine.getLatexDictionary()
+  );
 
   static getStandardLibrary(
     categories?: LibraryCategory[] | LibraryCategory | 'all'
@@ -495,17 +503,7 @@ export class ComputeEngine implements IComputeEngine {
   static getLatexDictionary(
     domain?: LibraryCategory | 'all'
   ): readonly Readonly<LatexDictionaryEntry>[] {
-    const libs =
-      !domain || domain === 'all'
-        ? STANDARD_LIBRARIES
-        : STANDARD_LIBRARIES.filter((l) => l.name === domain);
-
-    const result: LatexDictionaryEntry[] = [];
-    for (const lib of libs) {
-      if (lib.latexDictionary)
-        result.push(...(lib.latexDictionary as LatexDictionaryEntry[]));
-    }
-    return result;
+    return getLatexDictionaryForDomain(domain);
   }
 
   /**
@@ -539,29 +537,25 @@ export class ComputeEngine implements IComputeEngine {
 
     this.strict = true;
 
-    // Set the default precision for calculations
-    let precision = options?.precision ?? DEFAULT_PRECISION;
-    if (precision === 'machine') precision = Math.floor(MACHINE_PRECISION);
-    this._bignum = Decimal.clone({ precision });
-    this._precision = precision;
-
-    this.tolerance = options?.tolerance ?? 'auto';
-
-    this._angularUnit = 'rad';
-
-    this.Zero = new BoxedNumber(this, 0);
-    this.One = new BoxedNumber(this, 1);
-    this.Half = new BoxedNumber(this, { rational: [1, 2] });
-    this.NegativeOne = new BoxedNumber(this, -1);
-    this.Two = new BoxedNumber(this, 2);
-    this.NaN = new BoxedNumber(this, Number.NaN);
-    this.PositiveInfinity = new BoxedNumber(this, Number.POSITIVE_INFINITY);
-    this.NegativeInfinity = new BoxedNumber(this, Number.NEGATIVE_INFINITY);
-    this.I = new BoxedNumber(this, { im: 1 });
-    this.ComplexInfinity = new BoxedNumber(this, {
-      re: Infinity,
-      im: Infinity,
+    this._numericConfiguration = new EngineNumericConfiguration({
+      precision: options?.precision,
+      tolerance: options?.tolerance ?? 'auto',
+      angularUnit: 'rad',
     });
+
+    const startup = new EngineStartupCoordinator(this);
+    const commonNumbers = startup.initializeCommonNumbers();
+
+    this.Zero = commonNumbers.Zero;
+    this.One = commonNumbers.One;
+    this.Half = commonNumbers.Half;
+    this.NegativeOne = commonNumbers.NegativeOne;
+    this.Two = commonNumbers.Two;
+    this.NaN = commonNumbers.NaN;
+    this.PositiveInfinity = commonNumbers.PositiveInfinity;
+    this.NegativeInfinity = commonNumbers.NegativeInfinity;
+    this.I = commonNumbers.I;
+    this.ComplexInfinity = commonNumbers.ComplexInfinity;
 
     // Reset the caches/create (precision-dependent) numeric constants
     this._reset();
@@ -572,53 +566,16 @@ export class ComputeEngine implements IComputeEngine {
     // Declare the standard types
     this.declareType('limits', 'expression<Limits>');
 
-    // Resolve libraries
-    let libs: LibraryDefinition[];
-    if (options?.libraries) {
-      libs = sortLibraries(
-        options.libraries.map((lib) => {
-          if (typeof lib === 'string') {
-            const found = STANDARD_LIBRARIES.find((l) => l.name === lib);
-            if (!found) throw new Error(`Unknown standard library: "${lib}"`);
-            return found;
-          }
-          return lib;
-        })
-      );
-    } else {
-      libs = [...getStandardLibrary()];
-    }
+    startup.bootstrapLibraries(options?.libraries);
 
-    // Load symbol definitions
-    for (const lib of libs) {
-      const defs = lib.definitions;
-      if (defs) {
-        const tables = Array.isArray(defs) ? defs : [defs];
-        for (const table of tables) setSymbolDefinitions(this, table);
-      }
-    }
-
-    // Collect and set LaTeX dictionary from loaded libraries
-    const latexEntries: LatexDictionaryEntry[] = [];
-    for (const lib of libs) {
-      if (lib.latexDictionary)
-        latexEntries.push(...(lib.latexDictionary as LatexDictionaryEntry[]));
-    }
-    if (latexEntries.length > 0) this.latexDictionary = latexEntries;
-
-    // Populate the table of common symbols
-    // (they should be in the global context)
-    for (const sym of Object.keys(this._commonSymbols)) {
-      this._commonSymbols[sym] = new BoxedSymbol(this, sym, {
-        def: this.lookupDefinition(sym),
-      });
-    }
-
-    this.True = this._commonSymbols.True!;
-    this.False = this._commonSymbols.False!;
-    this.Pi = this._commonSymbols.Pi!;
-    this.E = this._commonSymbols.ExponentialE!;
-    this.Nothing = this._commonSymbols.Nothing!;
+    const commonSymbols = startup.initializeCommonSymbolBindings(
+      this._commonSymbols
+    );
+    this.True = commonSymbols.True;
+    this.False = commonSymbols.False;
+    this.Pi = commonSymbols.Pi;
+    this.E = commonSymbols.E;
+    this.Nothing = commonSymbols.Nothing;
 
     // Push a fresh scope to protect system definitions:
     // this will be the "global" scope
@@ -637,24 +594,15 @@ export class ComputeEngine implements IComputeEngine {
   [Symbol.toStringTag]: string = 'ComputeEngine';
 
   get latexDictionary(): Readonly<LatexDictionaryEntry[]> {
-    return this._latexDictionaryInput ?? ComputeEngine.getLatexDictionary();
+    return this._latexDictionaryState.dictionary;
   }
 
   set latexDictionary(dic: Readonly<LatexDictionaryEntry[]>) {
-    this._latexDictionaryInput = dic;
-    this.__indexedLatexDictionary = indexLatexDictionary(dic, (sig) => {
-      throw Error(
-        typeof sig.message === 'string' ? sig.message : sig.message.join(',')
-      );
-    });
+    this._latexDictionaryState.dictionary = dic;
   }
 
   get _indexedLatexDictionary(): IndexedLatexDictionary {
-    this.__indexedLatexDictionary ??= indexLatexDictionary(
-      this.latexDictionary,
-      (sig) => console.error(sig)
-    );
-    return this.__indexedLatexDictionary;
+    return this._latexDictionaryState.indexedDictionary;
   }
 
   /** After the configuration of the engine has changed, clear the caches
@@ -665,35 +613,18 @@ export class ComputeEngine implements IComputeEngine {
    * @internal
    */
   _reset(): void {
-    console.assert(this._bignum);
-
-    this._generation += 1;
-
-    // Recreate the bignum constants (they depend on the engine's precision)
-    this._BIGNUM_NEGATIVE_ONE = this.bignum(-1);
-    this._BIGNUM_NAN = this.bignum(NaN);
-    this._BIGNUM_ZERO = this.bignum(0);
-    this._BIGNUM_ONE = this.bignum(1);
-    this._BIGNUM_TWO = this.bignum(2);
-    this._BIGNUM_HALF = this._BIGNUM_ONE.div(this._BIGNUM_TWO);
-    this._BIGNUM_PI = this._BIGNUM_NEGATIVE_ONE.acos();
-
-    // Reset all the common  expressions (probably not necessary)
-    for (const d of Object.values(this._commonSymbols)) d?.reset();
-
-    // Purge any caches
-    this._cacheStore.purgeValues();
-
-    // Notify all the listeners that the configuration has changed. This
-    // includes all the value and operator definitions
-    this._configurationChangeTracker.notifyNow();
+    this._configurationLifecycle.reset({
+      refreshNumericConstants: () => this._numericConfiguration.refreshConstants(),
+      resetCommonSymbols: () => resetCommonSymbols(this._commonSymbols),
+      purgeCaches: () => this._cacheStore.purgeValues(),
+    });
   }
 
   /** @internal */
   listenToConfigurationChange(
     tracker: ConfigurationChangeListener
   ): () => void {
-    return this._configurationChangeTracker.listen(tracker);
+    return this._configurationLifecycle.listen(tracker);
   }
 
   /**
@@ -774,7 +705,7 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   get precision(): number {
-    return this._precision;
+    return this._numericConfiguration.precision;
   }
 
   /** The precision, or number of significant digits, of numeric
@@ -790,31 +721,11 @@ export class ComputeEngine implements IComputeEngine {
    * per IEEE 754-2008), with a 52-bit mantissa, which gives about 15
    * digits of precision.
    *
-   * If the precision is set to `auto`, the precision is set to a default value.
-   *
-   */
+  * If the precision is set to `auto`, the precision is set to a default value.
+  *
+  */
   set precision(p: number | 'machine' | 'auto') {
-    if (p === 'machine') p = MACHINE_PRECISION;
-    if (p === 'auto') p = DEFAULT_PRECISION;
-    const currentPrecision = this._precision;
-
-    if (p === currentPrecision) return;
-
-    if (typeof p !== 'number' || p <= 0)
-      throw Error('Expected "machine" or a positive number');
-
-    // Set the display precision as requested.
-    // It may be less than the effective precision, which is never less than 15
-
-    this._precision = Math.max(p, MACHINE_PRECISION);
-
-    this._bignum = this._bignum.config({ precision: this._precision });
-
-    // Reset the tolerance
-    this.tolerance = 'auto';
-
-    // Reset the caches
-    // (the values in the cache depend on the current precision)
+    if (!this._numericConfiguration.setPrecision(p)) return;
     this._reset();
   }
 
@@ -826,18 +737,14 @@ export class ComputeEngine implements IComputeEngine {
    * - `grad`: gradians, 400 gradians is a full circle
    * - `turn`: turn, 1 turn is a full circle
    *
-   * Default is `"rad"` (radians).
-   */
+  * Default is `"rad"` (radians).
+  */
   get angularUnit(): AngularUnit {
-    return this._angularUnit;
+    return this._numericConfiguration.angularUnit;
   }
 
   set angularUnit(u: AngularUnit) {
-    if (u === this._angularUnit) return;
-
-    if (typeof u !== 'string') throw Error('Expected a string');
-
-    this._angularUnit = u;
+    if (!this._numericConfiguration.setAngularUnit(u)) return;
     this._reset();
   }
 
@@ -848,22 +755,35 @@ export class ComputeEngine implements IComputeEngine {
    *
    */
   get timeLimit(): number {
-    return this._timeLimit;
+    return this._runtimeState.timeLimit;
   }
 
   set timeLimit(t: number) {
-    if (t <= 0) t = Number.POSITIVE_INFINITY;
-    this._timeLimit = t;
+    this._runtimeState.timeLimit = t;
   }
 
-  private _timeLimit: number = 2000;
+  /** Absolute time beyond which evaluation should not proceed.
+   * @internal
+   */
+  get deadline(): number | undefined {
+    return this._runtimeState.deadline;
+  }
+
+  set deadline(value: number | undefined) {
+    this._runtimeState.deadline = value;
+  }
 
   /** The time after which the time limit has been exceeded */
-  _deadline: number | undefined = undefined;
+  get _deadline(): number | undefined {
+    return this._runtimeState.deadline;
+  }
+
+  set _deadline(value: number | undefined) {
+    this._runtimeState.deadline = value;
+  }
 
   get _timeRemaining(): number {
-    if (this.deadline === undefined) return Number.POSITIVE_INFINITY;
-    return this.deadline - Date.now();
+    return this._runtimeState.timeRemaining;
   }
 
   /** Throw `CancellationError` `iteration-limit-exceeded` when the iteration limit
@@ -872,14 +792,11 @@ export class ComputeEngine implements IComputeEngine {
    * @experimental
    */
   get iterationLimit(): number {
-    return this._iterationLimit;
+    return this._runtimeState.iterationLimit;
   }
   set iterationLimit(t: number) {
-    if (t <= 0) t = Number.POSITIVE_INFINITY;
-    this._iterationLimit = t;
+    this._runtimeState.iterationLimit = t;
   }
-
-  private _iterationLimit: number = 1024;
 
   /** Signal `recursion-depth-exceeded` when the recursion depth for this
    * scope is exceeded.
@@ -887,14 +804,11 @@ export class ComputeEngine implements IComputeEngine {
    * @experimental
    */
   get recursionLimit(): number {
-    return this._recursionLimit;
+    return this._runtimeState.recursionLimit;
   }
   set recursionLimit(t: number) {
-    if (t <= 0) t = Number.POSITIVE_INFINITY;
-    this._recursionLimit = t;
+    this._runtimeState.recursionLimit = t;
   }
-
-  private _recursionLimit: number = 1024;
 
   /**
    * Flag to prevent infinite recursion in the verify/ask/equality checking cycle.
@@ -914,12 +828,18 @@ export class ComputeEngine implements IComputeEngine {
    *   logic in verification mode while still returning False/True in normal mode
    *
    * @see verify() in index.ts
-   * @see ask() in index.ts
-   * @see eq() in compare.ts
-   * @see Equal/NotEqual operators in relational-operator.ts
-   */
+  * @see ask() in index.ts
+  * @see eq() in compare.ts
+  * @see Equal/NotEqual operators in relational-operator.ts
+  */
   /** @internal */
-  _isVerifying: boolean = false;
+  get _isVerifying(): boolean {
+    return this._runtimeState.isVerifying;
+  }
+
+  set _isVerifying(value: boolean) {
+    this._runtimeState.isVerifying = value;
+  }
 
   /**
    * @internal
@@ -927,26 +847,19 @@ export class ComputeEngine implements IComputeEngine {
    * Used to prevent recursion and to enable 3-valued logic in verification mode.
    */
   get isVerifying(): boolean {
-    return this._isVerifying;
+    return this._runtimeState.isVerifying;
   }
 
   get tolerance(): number {
-    return this._tolerance;
+    return this._numericConfiguration.tolerance;
   }
   /**
    * Values smaller than the tolerance are considered to be zero for the
-   * purpose of comparison, i.e. if `|b - a| <= tolerance`, `b` is considered
-   * equal to `a`.
-   */
+  * purpose of comparison, i.e. if `|b - a| <= tolerance`, `b` is considered
+  * equal to `a`.
+  */
   set tolerance(val: number | 'auto') {
-    if (val === 'auto') val = DEFAULT_TOLERANCE;
-
-    if (!Number.isFinite(val) || val < 0)
-      val = Math.pow(10, -this._precision + 2);
-
-    this._tolerance = val;
-    this._bignumTolerance = this.bignum(val);
-    this._negBignumTolerance = this.bignum(-val);
+    this._numericConfiguration.setTolerance(val);
   }
 
   /** Replace a number that is close to 0 with the exact integer 0.
@@ -957,22 +870,25 @@ export class ComputeEngine implements IComputeEngine {
   chop(n: Decimal): Decimal | 0;
   chop(n: Complex): Complex | 0;
   chop(n: number | Decimal | Complex): number | Decimal | Complex {
+    const tolerance = this._numericConfiguration.tolerance;
     if (typeof n === 'number') {
-      if (Math.abs(n) <= this._tolerance) return 0;
+      if (Math.abs(n) <= tolerance) return 0;
       return n;
     }
 
     if (n instanceof Decimal) {
-      if (n.isPositive() && n.lte(this._bignumTolerance)) return 0;
-      if (n.isNegative() && n.gte(this._negBignumTolerance)) return 0;
+      if (n.isPositive() && n.lte(this._numericConfiguration.bignumTolerance))
+        return 0;
+      if (n.isNegative() && n.gte(this._numericConfiguration.negBignumTolerance))
+        return 0;
       if (n.isZero()) return 0;
       return n;
     }
 
     if (
       n instanceof Complex &&
-      Math.abs(n.re) <= this._tolerance &&
-      Math.abs(n.im) <= this._tolerance
+      Math.abs(n.re) <= tolerance &&
+      Math.abs(n.im) <= tolerance
     )
       return 0;
 
@@ -1026,17 +942,11 @@ export class ComputeEngine implements IComputeEngine {
    * - `isNegative()`
    * - `isPositive()`
    * - `isZero()`
-   * - `sign()` (1, 0 or -1)
-   * 
-   */
+  * - `sign()` (1, 0 or -1)
+  * 
+  */
   bignum(a: Decimal.Value | bigint): Decimal {
-    if (typeof a === 'bigint') return new this._bignum(a.toString());
-    try {
-      return new this._bignum(a);
-    } catch (e) {
-      console.error(e.message);
-    }
-    return this._BIGNUM_NAN;
+    return this._numericConfiguration.bignum(a);
   }
 
   /** Create a complex number.
@@ -1108,7 +1018,7 @@ export class ComputeEngine implements IComputeEngine {
 
     const bignum = (x) => this.bignum(x);
     const makeNumericValue =
-      this._precision > MACHINE_PRECISION
+      this._numericConfiguration.precision > MACHINE_PRECISION
         ? (x) => new BigNumericValue(x, bignum)
         : (x) => new MachineNumericValue(x, bignum);
 
@@ -1565,10 +1475,10 @@ export class ComputeEngine implements IComputeEngine {
    * - an error has been signaled
    * - the time limit or memory limit has been exceeded
    *
-   * @internal
-   */
+  * @internal
+  */
   _shouldContinueExecution(): boolean {
-    return this.deadline === undefined || this.deadline >= Date.now();
+    return this._runtimeState.shouldContinueExecution();
   }
 
   /** @internal */
@@ -1710,37 +1620,7 @@ export class ComputeEngine implements IComputeEngine {
     name: string,
     options?: { canonical?: CanonicalOptions; metadata?: Metadata }
   ): BoxedExpression {
-    const canonical = options?.canonical ?? true;
-    const metadata = options?.metadata;
-
-    // Symbols should use the Unicode NFC canonical form
-    name = name.normalize();
-
-    // These are not valid symbols, but we allow them
-    const lcName = name.toLowerCase();
-    if (lcName === 'infinity' || lcName === '+infinity')
-      return this.PositiveInfinity;
-    if (lcName === '-infinity') return this.NegativeInfinity;
-
-    if (this.strict && !isValidSymbol(name))
-      return this.error(['invalid-symbol', validateSymbol(name)], name);
-
-    if (!canonical) return new BoxedSymbol(this, name, { metadata });
-
-    const result = this._commonSymbols[name];
-    if (result) return result;
-
-    // Is there a value definition for this name?
-    let def = this.lookupDefinition(name);
-
-    if (isValueDef(def) && def.value.holdUntil === 'never')
-      return def.value.value ?? this.Nothing;
-
-    if (def) return new BoxedSymbol(this, name, { metadata, def });
-
-    // There was no definition for this name, so we create a new one
-    def = this._declareSymbolValue(name, { type: 'unknown', inferred: true });
-    return new BoxedSymbol(this, name, { metadata, def });
+    return createSymbolExpression(this, this._commonSymbols, name, options);
   }
 
   /**
@@ -1759,61 +1639,7 @@ export class ComputeEngine implements IComputeEngine {
       | Rational,
     options?: { metadata: Metadata; canonical: CanonicalOptions }
   ): BoxedExpression {
-    const metadata = options?.metadata;
-    let canonical = false;
-    if (!options || options.canonical === undefined) canonical = true;
-    else if (options.canonical === 'Number' || options.canonical === true)
-      canonical = true;
-    else if (
-      Array.isArray(options.canonical) &&
-      options.canonical.includes('Number')
-    )
-      canonical = true;
-
-    // We have been asked for a non-canonical rational...
-    if (!canonical && isRational(value)) {
-      return this._fn(
-        'Rational',
-        [this.number(value[0]), this.number(value[1])],
-        { ...metadata, canonical: false }
-      );
-    }
-
-    // If not a rational, it's always canonical
-    value = canonicalNumber(this, value);
-
-    //
-    // Is this number eligible to be a cached number expression?
-    // (i.e. it has no associated metadata)
-    //
-    if (metadata === undefined) {
-      if (typeof value === 'number') {
-        const n = value;
-        if (n === 1) return this.One;
-        if (n === 0) return this.Zero;
-        if (n === -1) return this.NegativeOne;
-        if (n === 2) return this.Two;
-
-        if (Number.isInteger(n) && this._commonNumbers[n] !== undefined) {
-          this._commonNumbers[n] ??= new BoxedNumber(this, value);
-          return this._commonNumbers[n];
-        }
-
-        if (Number.isNaN(n)) return this.NaN;
-
-        if (!Number.isFinite(n))
-          return n < 0 ? this.NegativeInfinity : this.PositiveInfinity;
-      } else if (value instanceof NumericValue) {
-        if (value.isZero) return this.Zero;
-        if (value.isOne) return this.One;
-        if (value.isNegativeOne) return this.NegativeOne;
-        if (value.isNaN) return this.NaN;
-        if (value.isNegativeInfinity) return this.NegativeInfinity;
-        if (value.isPositiveInfinity) return this.PositiveInfinity;
-      }
-    }
-
-    return new BoxedNumber(this, value, { metadata });
+    return createNumberExpression(this, this._commonNumbers, value, options);
   }
 
   rules(
