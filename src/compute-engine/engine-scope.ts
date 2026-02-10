@@ -12,7 +12,7 @@ import { isValidSymbol, validateSymbol } from '../math-json/symbols';
 import type { MathJsonSymbol } from '../math-json/types';
 
 import type {
-  BoxedExpression,
+  Expression,
   BoxedDefinition,
   IComputeEngine,
   Scope,
@@ -57,7 +57,7 @@ export function pushEvalContext(
   // The values in the evaluation context are all the non-constant symbols
   // in the scope.
   //
-  const values: { [id: string]: BoxedExpression | undefined } = {};
+  const values: { [id: string]: Expression | undefined } = {};
   for (const [id, def] of scope.bindings.entries()) {
     if (isValueDef(def) && !def.value.isConstant) values[id] = def.value.value;
   }
@@ -207,7 +207,7 @@ export function swapContext(ce: IComputeEngine, context: EvalContext): void {
 function defToString(
   name: string,
   def: BoxedDefinition,
-  v?: BoxedExpression
+  v?: Expression
 ): string {
   let result = '';
   if (isValueDef(def)) {

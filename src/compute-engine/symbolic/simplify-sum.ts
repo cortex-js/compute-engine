@@ -1,4 +1,4 @@
-import type { BoxedExpression, RuleStep } from '../global-types';
+import type { Expression, RuleStep } from '../global-types';
 import {
   isFunction,
   isNumber,
@@ -9,7 +9,7 @@ import {
  * Sum simplification rules extracted from simplify-rules.ts.
  * Handles 16 patterns for simplifying Sum expressions.
  */
-export function simplifySum(x: BoxedExpression): RuleStep | undefined {
+export function simplifySum(x: Expression): RuleStep | undefined {
   if (x.operator !== 'Sum' || !isFunction(x)) return undefined;
 
   const body = x.op1;
@@ -180,8 +180,8 @@ export function simplifySum(x: BoxedExpression): RuleStep | undefined {
   // Arithmetic progression: Sum(a + d*n, [n, 0, b]) → (b+1)*a + d*b*(b+1)/2
   // Detect pattern: Add with constant and index-linear term
   if (body.operator === 'Add' && isFunction(body)) {
-    let constant: BoxedExpression | null = null;
-    let coefficient: BoxedExpression | null = null;
+    let constant: Expression | null = null;
+    let coefficient: Expression | null = null;
 
     for (const term of body.ops) {
       const termUnknowns = new Set(term.unknowns);
@@ -294,7 +294,7 @@ export function simplifySum(x: BoxedExpression): RuleStep | undefined {
   if (body.operator === 'Multiply' && isFunction(body) && lower.is(0)) {
     let hasBinomial = false;
     let hasAlternating = false;
-    let binomialN: BoxedExpression | null = null;
+    let binomialN: Expression | null = null;
 
     for (const op of body.ops) {
       if (
@@ -600,8 +600,8 @@ export function simplifySum(x: BoxedExpression): RuleStep | undefined {
 
   // Factor out constants: Sum(c * f(n), [n, a, b]) → c * Sum(f(n), [n, a, b])
   if (body.operator === 'Multiply' && isFunction(body)) {
-    const constantFactors: BoxedExpression[] = [];
-    const indexFactors: BoxedExpression[] = [];
+    const constantFactors: Expression[] = [];
+    const indexFactors: Expression[] = [];
 
     for (const factor of body.ops) {
       const factorUnknowns = new Set(factor.unknowns);

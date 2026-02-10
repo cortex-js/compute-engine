@@ -1,10 +1,10 @@
-import type { MathJsonExpression as Expression } from '../../math-json';
+import type { MathJsonExpression } from '../../math-json';
 import { isNumberExpression, isNumberObject } from '../../math-json/utils';
 import { bigint } from './bigint';
 import { numberToString } from './strings';
 
 export function bigintValue(
-  expr: Expression | null | undefined
+  expr: MathJsonExpression | null | undefined
 ): bigint | null {
   if (typeof expr === 'number')
     return Number.isInteger(expr) ? BigInt(expr) : null;
@@ -34,7 +34,7 @@ export function bigintValue(
 export function numberToExpression(
   num: number | bigint,
   fractionalDigits?: string | number
-): Expression {
+): MathJsonExpression {
   if (typeof num === 'number') {
     if (isNaN(num)) return 'NaN';
     if (!Number.isFinite(num))

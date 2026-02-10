@@ -1,7 +1,7 @@
 import { Complex } from 'complex-esm';
 import { Decimal } from 'decimal.js';
 
-import type { MathJsonExpression as Expression } from '../../math-json/types';
+import type { MathJsonExpression } from '../../math-json/types';
 import type { LatexString } from '../latex-syntax/types';
 
 import { apply } from './apply';
@@ -9,7 +9,7 @@ import { apply } from './apply';
 import { canonicalAngle } from './utils';
 
 import type {
-  BoxedExpression,
+  Expression,
   IComputeEngine as ComputeEngine,
   Sign,
 } from '../global-types';
@@ -18,7 +18,7 @@ import { isNumber, isSymbol, isFunction } from './type-guards';
 
 type ConstructibleTrigValues = [
   [numerator: number, denominator: number],
-  { [operator: string]: BoxedExpression },
+  { [operator: string]: Expression },
 ][];
 
 // For each trig function, by quadrant (0..π/2, π/2..π, π..3π/2, 3π/2..2π),
@@ -63,17 +63,17 @@ const TRIG_IDENTITIES: { [key: string]: [sign: number, name: string][] } = {
   ],
 };
 
-const S2: Expression = ['Sqrt', 2];
-const S3: Expression = ['Sqrt', 3];
-const S5: Expression = ['Sqrt', 5];
-const S6: Expression = ['Sqrt', 6];
+const S2: MathJsonExpression = ['Sqrt', 2];
+const S3: MathJsonExpression = ['Sqrt', 3];
+const S5: MathJsonExpression = ['Sqrt', 5];
+const S6: MathJsonExpression = ['Sqrt', 6];
 // From https://en.wikipedia.org/wiki/Trigonometric_functions
 // and https://en.wikipedia.org/wiki/Exact_trigonometric_values
 
 // The key is the argument in radian, as (num * π / den)
 const CONSTRUCTIBLE_VALUES: [
   key: [numerator: number, denominator: number],
-  values: { [name: string]: Expression | LatexString },
+  values: { [name: string]: MathJsonExpression | LatexString },
 ][] = [
   [
     [0, 1],
@@ -222,11 +222,11 @@ const CONSTRUCTIBLE_VALUES: [
 ];
 
 function applyAngle(
-  angle: BoxedExpression,
+  angle: Expression,
   fn: (x: number) => number | Complex,
   bigFn?: (x: Decimal) => Decimal | Complex | number,
   complexFn?: (x: Complex) => number | Complex
-): BoxedExpression | undefined {
+): Expression | undefined {
   const theta = canonicalAngle(angle)?.N();
   if (theta === undefined) return undefined;
   return apply(theta, fn, bigFn, complexFn);
@@ -234,8 +234,8 @@ function applyAngle(
 
 /** Assuming x in an expression in radians, convert to current angular unit. */
 export function radiansToAngle(
-  x: BoxedExpression | undefined
-): BoxedExpression | undefined {
+  x: Expression | undefined
+): Expression | undefined {
   if (!x) return x;
   const ce = x.engine;
   const angularUnit = ce.angularUnit;
@@ -251,8 +251,8 @@ export function radiansToAngle(
 
 export function evalTrig(
   name: string,
-  op: BoxedExpression | undefined
-): BoxedExpression | undefined {
+  op: Expression | undefined
+): Expression | undefined {
   if (!op) return undefined;
   const ce = op.engine;
 
@@ -516,8 +516,8 @@ function inverseTrigFuncName(name: string): string | undefined {
 
 export function processInverseFunction(
   ce: ComputeEngine,
-  xs: ReadonlyArray<BoxedExpression>
-): BoxedExpression | undefined {
+  xs: ReadonlyArray<Expression>
+): Expression | undefined {
   if (xs.length !== 1 || !xs[0].isValid) return undefined;
   const expr = xs[0];
   if (expr.operator === 'InverseFunction' && isFunction(expr))
@@ -538,9 +538,9 @@ function trigFuncParity(name: string): number {
 function constructibleValuesInverse(
   ce: ComputeEngine,
   operator: string,
-  x: BoxedExpression | undefined,
+  x: Expression | undefined,
   specialValues: ConstructibleTrigValues
-): undefined | BoxedExpression {
+): undefined | Expression {
   if (!x) return undefined;
   let x_N = x.N().re;
   if (Number.isNaN(x_N)) return undefined;
@@ -552,7 +552,7 @@ function constructibleValuesInverse(
   // specialValues of inv_operator function
   //
   type ConstructibleTrigValuesInverse = [
-    [match_arg: BoxedExpression, match_arg_N: number],
+    [match_arg: Expression, match_arg_N: number],
     angle: [numerator: number, denominator: number],
   ][];
   const specialInverseValues = ce._cache<ConstructibleTrigValuesInverse>(
@@ -605,7 +605,7 @@ function constructibleValuesInverse(
 
 export function trigSign(
   operator: string,
-  x: BoxedExpression
+  x: Expression
 ): Sign | undefined {
   const [q, pos] = quadrant(x);
   if (q === undefined) return undefined;
@@ -625,7 +625,7 @@ export function trigSign(
   }[operator]?.[q] as Sign;
 }
 
-export function isConstructible(x: string | BoxedExpression): boolean {
+export function isConstructible(x: string | Expression): boolean {
   return ['Sin', 'Cos', 'Tan', 'Csc', 'Sec', 'Cot'].includes(
     typeof x === 'string' ? x : x.operator
   );
@@ -633,8 +633,8 @@ export function isConstructible(x: string | BoxedExpression): boolean {
 
 export function constructibleValues(
   operator: string,
-  x: BoxedExpression | undefined
-): undefined | BoxedExpression {
+  x: Expression | undefined
+): undefined | Expression {
   if (!x || !isConstructible(operator)) return undefined;
   const ce = x.engine;
 
@@ -706,7 +706,7 @@ export function constructibleValues(
 // Return the quadrant of the angle (1..4) and the position on the
 // circle 0...4 corresponding to 0, π/2, π, 3π/2, 2π.
 function quadrant(
-  theta: BoxedExpression
+  theta: Expression
 ): [number | undefined, number | undefined] {
   // theta = theta.N();
   if (!theta.isValid || !isNumber(theta)) return [undefined, undefined];

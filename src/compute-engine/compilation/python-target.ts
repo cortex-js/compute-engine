@@ -1,4 +1,4 @@
-import type { BoxedExpression } from '../global-types';
+import type { Expression } from '../global-types';
 
 import type {
   CompileTarget,
@@ -39,7 +39,7 @@ const PYTHON_OPERATORS: CompiledOperators = {
  * Maps mathematical functions to their NumPy equivalents.
  * Most functions are available in the numpy module with np. prefix.
  */
-const PYTHON_FUNCTIONS: CompiledFunctions<BoxedExpression> = {
+const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   // Basic arithmetic (for when they're called as functions)
   Add: (args, compile) => {
     if (args.length === 0) return '0';
@@ -266,7 +266,7 @@ const PYTHON_FUNCTIONS: CompiledFunctions<BoxedExpression> = {
  * The generated code is compatible with NumPy arrays and supports
  * vectorized operations.
  */
-export class PythonTarget implements LanguageTarget<BoxedExpression> {
+export class PythonTarget implements LanguageTarget<Expression> {
   /** Whether to include 'import numpy as np' in generated code */
   private includeImports: boolean;
 
@@ -282,13 +282,13 @@ export class PythonTarget implements LanguageTarget<BoxedExpression> {
     return PYTHON_OPERATORS;
   }
 
-  getFunctions(): CompiledFunctions<BoxedExpression> {
+  getFunctions(): CompiledFunctions<Expression> {
     return PYTHON_FUNCTIONS;
   }
 
   createTarget(
-    options: Partial<CompileTarget<BoxedExpression>> = {}
-  ): CompileTarget<BoxedExpression> {
+    options: Partial<CompileTarget<Expression>> = {}
+  ): CompileTarget<Expression> {
     return {
       language: 'python',
       operators: (op) => PYTHON_OPERATORS[op],
@@ -332,8 +332,8 @@ export class PythonTarget implements LanguageTarget<BoxedExpression> {
    * Returns Python code as a string. To execute it, use Python runtime.
    */
   compile(
-    expr: BoxedExpression,
-    options: CompilationOptions<BoxedExpression> = {}
+    expr: Expression,
+    options: CompilationOptions<Expression> = {}
   ): CompilationResult {
     const code = this.compileToSource(expr, options);
     return { target: 'python', success: true, code };
@@ -345,8 +345,8 @@ export class PythonTarget implements LanguageTarget<BoxedExpression> {
    * Returns the Python code as a string.
    */
   compileToSource(
-    expr: BoxedExpression,
-    _options: CompilationOptions<BoxedExpression> = {}
+    expr: Expression,
+    _options: CompilationOptions<Expression> = {}
   ): string {
     // Dynamic import to avoid circular dependency
     const { BaseCompiler } = require('./base-compiler');
@@ -373,7 +373,7 @@ export class PythonTarget implements LanguageTarget<BoxedExpression> {
    * @param docstring - Optional docstring for the function
    */
   compileFunction(
-    expr: BoxedExpression,
+    expr: Expression,
     functionName: string,
     parameters: string[],
     docstring?: string
@@ -417,7 +417,7 @@ export class PythonTarget implements LanguageTarget<BoxedExpression> {
    * @param docstring - Optional docstring
    */
   compileVectorized(
-    expr: BoxedExpression,
+    expr: Expression,
     functionName: string,
     parameters: string[],
     docstring?: string
@@ -443,7 +443,7 @@ export class PythonTarget implements LanguageTarget<BoxedExpression> {
    * @param expr - The expression to compile
    * @param parameters - Parameter names
    */
-  compileLambda(expr: BoxedExpression, parameters: string[]): string {
+  compileLambda(expr: Expression, parameters: string[]): string {
     // Dynamic import to avoid circular dependency
     const { BaseCompiler } = require('./base-compiler');
 

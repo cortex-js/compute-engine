@@ -10,7 +10,7 @@
  * @module compilation/interval-glsl-target
  */
 
-import type { BoxedExpression } from '../global-types';
+import type { Expression } from '../global-types';
 import { isSymbol, isNumber } from '../boxed-expression/type-guards';
 
 import { BaseCompiler } from './base-compiler';
@@ -1043,7 +1043,7 @@ const INTERVAL_GLSL_OPERATORS: CompiledOperators = {
 /**
  * GLSL interval function implementations
  */
-const INTERVAL_GLSL_FUNCTIONS: CompiledFunctions<BoxedExpression> = {
+const INTERVAL_GLSL_FUNCTIONS: CompiledFunctions<Expression> = {
   Add: (args, compile) => {
     if (args.length === 0) return 'ia_point(0.0)';
     if (args.length === 1) return compile(args[0]);
@@ -1204,12 +1204,12 @@ const INTERVAL_GLSL_FUNCTIONS: CompiledFunctions<BoxedExpression> = {
 /**
  * GLSL interval arithmetic target implementation.
  */
-export class IntervalGLSLTarget implements LanguageTarget<BoxedExpression> {
+export class IntervalGLSLTarget implements LanguageTarget<Expression> {
   getOperators(): CompiledOperators {
     return INTERVAL_GLSL_OPERATORS;
   }
 
-  getFunctions(): CompiledFunctions<BoxedExpression> {
+  getFunctions(): CompiledFunctions<Expression> {
     return INTERVAL_GLSL_FUNCTIONS;
   }
 
@@ -1223,8 +1223,8 @@ export class IntervalGLSLTarget implements LanguageTarget<BoxedExpression> {
   }
 
   createTarget(
-    options: Partial<CompileTarget<BoxedExpression>> = {}
-  ): CompileTarget<BoxedExpression> {
+    options: Partial<CompileTarget<Expression>> = {}
+  ): CompileTarget<Expression> {
     return {
       language: 'interval-glsl',
       // Don't use operators - all arithmetic goes through functions
@@ -1260,8 +1260,8 @@ export class IntervalGLSLTarget implements LanguageTarget<BoxedExpression> {
   }
 
   compile(
-    expr: BoxedExpression,
-    options: CompilationOptions<BoxedExpression> = {}
+    expr: Expression,
+    options: CompilationOptions<Expression> = {}
   ): CompilationResult {
     const { functions, vars } = options;
 
@@ -1297,8 +1297,8 @@ export class IntervalGLSLTarget implements LanguageTarget<BoxedExpression> {
    * Compile an expression to GLSL interval code string.
    */
   compileToSource(
-    expr: BoxedExpression,
-    _options: CompilationOptions<BoxedExpression> = {}
+    expr: Expression,
+    _options: CompilationOptions<Expression> = {}
   ): string {
     const target = this.createTarget();
     return BaseCompiler.compile(expr, target);
@@ -1312,7 +1312,7 @@ export class IntervalGLSLTarget implements LanguageTarget<BoxedExpression> {
    * @param parameters - Parameter names (each becomes a vec2 interval input)
    */
   compileFunction(
-    expr: BoxedExpression,
+    expr: Expression,
     functionName: string,
     parameters: string[]
   ): string {
@@ -1333,7 +1333,7 @@ export class IntervalGLSLTarget implements LanguageTarget<BoxedExpression> {
    * @param options - Shader options
    */
   compileShaderFunction(
-    expr: BoxedExpression,
+    expr: Expression,
     options: {
       functionName?: string;
       version?: string;

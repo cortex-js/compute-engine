@@ -1,7 +1,7 @@
-import type { BoxedExpression, Sign } from '../global-types';
+import type { Expression, Sign } from '../global-types';
 import { isFunction, isSymbol, isNumber } from './type-guards';
 
-export function sgn(expr: BoxedExpression): Sign | undefined {
+export function sgn(expr: Expression): Sign | undefined {
   const ce = expr.engine;
 
   // If we have a hold expression, we don't know the sign

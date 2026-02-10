@@ -1,4 +1,4 @@
-import type { BoxedExpression, RuleStep } from '../global-types';
+import type { Expression, RuleStep } from '../global-types';
 import {
   isFunction,
   isNumber,
@@ -19,7 +19,7 @@ import { asRational } from '../boxed-expression/numerics';
  * IMPORTANT: Do not call .simplify() on results to avoid infinite recursion.
  */
 
-export function simplifyDivide(x: BoxedExpression): RuleStep | undefined {
+export function simplifyDivide(x: Expression): RuleStep | undefined {
   if (x.operator !== 'Divide' || !isFunction(x)) return undefined;
 
   const num = x.op1;
@@ -92,10 +92,10 @@ export function simplifyDivide(x: BoxedExpression): RuleStep | undefined {
   // where the exponents are not rational and can't be combined during
   // canonicalization
   {
-    let numBase: BoxedExpression | undefined;
-    let numExp: BoxedExpression | undefined;
-    let denomBase: BoxedExpression | undefined;
-    let denomExp: BoxedExpression | undefined;
+    let numBase: Expression | undefined;
+    let numExp: Expression | undefined;
+    let denomBase: Expression | undefined;
+    let denomExp: Expression | undefined;
 
     if (num.operator === 'Power' && isFunction(num)) {
       numBase = num.op1;

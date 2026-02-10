@@ -6,7 +6,7 @@ import { totalDegree } from '../boxed-expression/polynomial-degree';
 import { checkArity } from '../boxed-expression/validate';
 import { isFiniteIndexedCollection } from '../collection-utils';
 import {
-  BoxedExpression,
+  Expression,
   IComputeEngine as ComputeEngine,
   SymbolDefinitions,
   Sign,
@@ -86,7 +86,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           `list<number^${shapeOps?.map((x) => x.toString()).join('x') ?? ''}>`
         );
       },
-      evaluate: (ops, { engine: ce }): BoxedExpression | undefined => {
+      evaluate: (ops, { engine: ce }): Expression | undefined => {
         let op1 = ops[0].evaluate();
         const targetShape = isFunction(ops[1])
           ? ops[1].ops.map((op) => op.re)
@@ -517,7 +517,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     MatrixMultiply: {
       complexity: 8300,
       signature: '(matrix|vector, matrix|vector) -> matrix|vector',
-      evaluate: (ops, { engine: ce }): BoxedExpression | undefined => {
+      evaluate: (ops, { engine: ce }): Expression | undefined => {
         const A = ops[0].evaluate();
         const B = ops[1].evaluate();
 
@@ -537,7 +537,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
 
           // Dot product: sum of element-wise products
           const n = shapeA[0];
-          let sum: BoxedExpression = ce.Zero;
+          let sum: Expression = ce.Zero;
           for (let i = 0; i < n; i++) {
             const aVal = A.tensor.at(i + 1) ?? ce.Zero;
             const bVal = B.tensor.at(i + 1) ?? ce.Zero;
@@ -552,9 +552,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           if (n !== shapeB[0])
             return ce.error('incompatible-dimensions', `${n} vs ${shapeB[0]}`);
 
-          const result: BoxedExpression[] = [];
+          const result: Expression[] = [];
           for (let i = 0; i < m; i++) {
-            let sum: BoxedExpression = ce.Zero;
+            let sum: Expression = ce.Zero;
             for (let k = 0; k < n; k++) {
               const aVal = A.tensor.at(i + 1, k + 1) ?? ce.Zero;
               const bVal = B.tensor.at(k + 1) ?? ce.Zero;
@@ -572,9 +572,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           if (shapeA[0] !== m)
             return ce.error('incompatible-dimensions', `${shapeA[0]} vs ${m}`);
 
-          const result: BoxedExpression[] = [];
+          const result: Expression[] = [];
           for (let j = 0; j < n; j++) {
-            let sum: BoxedExpression = ce.Zero;
+            let sum: Expression = ce.Zero;
             for (let k = 0; k < m; k++) {
               const aVal = A.tensor.at(k + 1) ?? ce.Zero;
               const bVal = B.tensor.at(k + 1, j + 1) ?? ce.Zero;
@@ -593,11 +593,11 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
             return ce.error('incompatible-dimensions', `${n1} vs ${n2}`);
 
           const n = n1;
-          const rows: BoxedExpression[] = [];
+          const rows: Expression[] = [];
           for (let i = 0; i < m; i++) {
-            const row: BoxedExpression[] = [];
+            const row: Expression[] = [];
             for (let j = 0; j < p; j++) {
-              let sum: BoxedExpression = ce.Zero;
+              let sum: Expression = ce.Zero;
               for (let k = 0; k < n; k++) {
                 const aVal = A.tensor.at(i + 1, k + 1) ?? ce.Zero;
                 const bVal = B.tensor.at(k + 1, j + 1) ?? ce.Zero;
@@ -634,10 +634,10 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           // Vector → create diagonal matrix
           if (shape.length === 1) {
             const n = shape[0];
-            const rows: BoxedExpression[] = [];
+            const rows: Expression[] = [];
             const elements = [...op1.each()];
             for (let i = 0; i < n; i++) {
-              const row: BoxedExpression[] = [];
+              const row: Expression[] = [];
               for (let j = 0; j < n; j++) {
                 row.push(i === j ? elements[i] : ce.Zero);
               }
@@ -650,7 +650,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           if (shape.length === 2) {
             const [m, n] = shape;
             const minDim = Math.min(m, n);
-            const diagonal: BoxedExpression[] = [];
+            const diagonal: Expression[] = [];
             for (let i = 0; i < minDim; i++) {
               diagonal.push(op1.tensor.at(i + 1, i + 1) ?? ce.Zero);
             }
@@ -669,16 +669,16 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     IdentityMatrix: {
       complexity: 8100,
       signature: '(integer) -> matrix',
-      evaluate: (ops, { engine: ce }): BoxedExpression | undefined => {
+      evaluate: (ops, { engine: ce }): Expression | undefined => {
         const nExpr = ops[0].evaluate();
         const n = nExpr.re;
 
         if (n === undefined || !Number.isInteger(n) || n < 1)
           return ce.error('expected-positive-integer', nExpr.toString());
 
-        const rows: BoxedExpression[] = [];
+        const rows: Expression[] = [];
         for (let i = 0; i < n; i++) {
-          const row: BoxedExpression[] = [];
+          const row: Expression[] = [];
           for (let j = 0; j < n; j++) {
             row.push(i === j ? ce.One : ce.Zero);
           }
@@ -692,7 +692,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     ZeroMatrix: {
       complexity: 8100,
       signature: '(integer, integer?) -> matrix',
-      evaluate: (ops, { engine: ce }): BoxedExpression | undefined => {
+      evaluate: (ops, { engine: ce }): Expression | undefined => {
         const mExpr = ops[0].evaluate();
         const m = mExpr.re;
 
@@ -708,9 +708,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
             return ce.error('expected-positive-integer', nExpr.toString());
         }
 
-        const rows: BoxedExpression[] = [];
+        const rows: Expression[] = [];
         for (let i = 0; i < m; i++) {
-          const row: BoxedExpression[] = [];
+          const row: Expression[] = [];
           for (let j = 0; j < n; j++) {
             row.push(ce.Zero);
           }
@@ -724,7 +724,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     OnesMatrix: {
       complexity: 8100,
       signature: '(integer, integer?) -> matrix',
-      evaluate: (ops, { engine: ce }): BoxedExpression | undefined => {
+      evaluate: (ops, { engine: ce }): Expression | undefined => {
         const mExpr = ops[0].evaluate();
         const m = mExpr.re;
 
@@ -740,9 +740,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
             return ce.error('expected-positive-integer', nExpr.toString());
         }
 
-        const rows: BoxedExpression[] = [];
+        const rows: Expression[] = [];
         for (let i = 0; i < m; i++) {
-          const row: BoxedExpression[] = [];
+          const row: Expression[] = [];
           for (let j = 0; j < n; j++) {
             row.push(ce.One);
           }
@@ -763,7 +763,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     Norm: {
       complexity: 8200,
       signature: '(value, number|string?) -> number',
-      evaluate: (ops, { engine: ce }): BoxedExpression | undefined => {
+      evaluate: (ops, { engine: ce }): Expression | undefined => {
         const x = ops[0].evaluate();
         const normTypeExpr = ops.length > 1 ? ops[1].evaluate() : undefined;
 
@@ -800,7 +800,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
 
         // Vector norm (rank 1)
         if (shape.length === 1) {
-          const elements: BoxedExpression[] = [];
+          const elements: Expression[] = [];
           const n = shape[0];
           for (let i = 0; i < n; i++) {
             const val = x.tensor.at(i + 1);
@@ -809,7 +809,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
 
           if (normType === 1) {
             // L1 norm: sum of absolute values
-            let sum: BoxedExpression = ce.Zero;
+            let sum: Expression = ce.Zero;
             for (const el of elements) {
               sum = sum.add(ce.box(['Abs', el]).evaluate());
             }
@@ -818,7 +818,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
 
           if (normType === 2) {
             // L2 norm: sqrt of sum of squares
-            let sumSq: BoxedExpression = ce.Zero;
+            let sumSq: Expression = ce.Zero;
             for (const el of elements) {
               const absEl = ce.box(['Abs', el]).evaluate();
               sumSq = sumSq.add(absEl.mul(absEl));
@@ -828,7 +828,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
 
           if (normType === 'infinity') {
             // L∞ norm: max absolute value
-            let maxVal: BoxedExpression = ce.Zero;
+            let maxVal: Expression = ce.Zero;
             for (const el of elements) {
               const absEl = ce.box(['Abs', el]).evaluate();
               // Compare: use numeric comparison
@@ -844,7 +844,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           // General Lp norm: (Σ|xi|^p)^(1/p)
           if (typeof normType === 'number' && normType > 0) {
             const p = normType;
-            let sumPow: BoxedExpression = ce.Zero;
+            let sumPow: Expression = ce.Zero;
             for (const el of elements) {
               const absEl = ce.box(['Abs', el]).evaluate();
               sumPow = sumPow.add(ce.box(['Power', absEl, p]).evaluate());
@@ -866,7 +866,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
 
           // Frobenius norm (default for matrices): √(ΣΣ|aij|²)
           if (normType === 2 || normType === 'frobenius') {
-            let sumSq: BoxedExpression = ce.Zero;
+            let sumSq: Expression = ce.Zero;
             for (let i = 0; i < m; i++) {
               for (let j = 0; j < n; j++) {
                 const val = x.tensor.at(i + 1, j + 1);
@@ -924,7 +924,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     Eigenvalues: {
       complexity: 8500,
       signature: '(matrix) -> list',
-      evaluate: (ops, { engine: ce }): BoxedExpression | undefined => {
+      evaluate: (ops, { engine: ce }): Expression | undefined => {
         const M = ops[0].evaluate();
 
         if (!isTensor(M)) return undefined;
@@ -946,7 +946,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         // Check if matrix is diagonal or triangular (eigenvalues are diagonal elements)
         const isDiagonalOrTriangular = checkDiagonalOrTriangular(M, n);
         if (isDiagonalOrTriangular) {
-          const eigenvalues: BoxedExpression[] = [];
+          const eigenvalues: Expression[] = [];
           for (let i = 0; i < n; i++) {
             const val = M.tensor.at(i + 1, i + 1);
             eigenvalues.push(val !== undefined ? ce.box(val) : ce.Zero);
@@ -991,7 +991,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     Eigenvectors: {
       complexity: 8600,
       signature: '(matrix) -> list',
-      evaluate: (ops, { engine: ce }): BoxedExpression | undefined => {
+      evaluate: (ops, { engine: ce }): Expression | undefined => {
         const M = ops[0].evaluate();
 
         if (!isTensor(M)) return undefined;
@@ -1017,7 +1017,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         const eigenvalues = eigenvaluesExpr.ops;
 
         // For each eigenvalue, compute the corresponding eigenvector
-        const eigenvectors: BoxedExpression[] = [];
+        const eigenvectors: Expression[] = [];
         for (const lambda of eigenvalues) {
           const eigenvector = computeEigenvector(M, lambda, n, ce);
           if (eigenvector) {
@@ -1037,7 +1037,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     Eigen: {
       complexity: 8700,
       signature: '(matrix) -> tuple',
-      evaluate: (ops, { engine: ce }): BoxedExpression | undefined => {
+      evaluate: (ops, { engine: ce }): Expression | undefined => {
         const M = ops[0].evaluate();
 
         if (!isTensor(M)) return undefined;
@@ -1063,7 +1063,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     LUDecomposition: {
       complexity: 8600,
       signature: '(matrix) -> tuple',
-      evaluate: (ops, { engine: ce }): BoxedExpression | undefined => {
+      evaluate: (ops, { engine: ce }): Expression | undefined => {
         const M = ops[0].evaluate();
 
         if (!isTensor(M)) return undefined;
@@ -1088,7 +1088,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     QRDecomposition: {
       complexity: 8600,
       signature: '(matrix) -> tuple',
-      evaluate: (ops, { engine: ce }): BoxedExpression | undefined => {
+      evaluate: (ops, { engine: ce }): Expression | undefined => {
         const M = ops[0].evaluate();
 
         if (!isTensor(M)) return undefined;
@@ -1113,7 +1113,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     CholeskyDecomposition: {
       complexity: 8600,
       signature: '(matrix) -> matrix',
-      evaluate: (ops, { engine: ce }): BoxedExpression | undefined => {
+      evaluate: (ops, { engine: ce }): Expression | undefined => {
         const M = ops[0].evaluate();
 
         if (!isTensor(M)) return undefined;
@@ -1134,7 +1134,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     SVD: {
       complexity: 8700,
       signature: '(matrix) -> tuple',
-      evaluate: (ops, { engine: ce }): BoxedExpression | undefined => {
+      evaluate: (ops, { engine: ce }): Expression | undefined => {
         const M = ops[0].evaluate();
 
         if (!isTensor(M)) return undefined;
@@ -1161,10 +1161,10 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
  * Returns P, L, U such that PA = LU
  */
 function computeLU(
-  M: BoxedExpression,
+  M: Expression,
   n: number,
   ce: ComputeEngine
-): { P: BoxedExpression; L: BoxedExpression; U: BoxedExpression } | undefined {
+): { P: Expression; L: Expression; U: Expression } | undefined {
   if (!isTensor(M)) return undefined;
 
   // Convert matrix to numeric array
@@ -1234,7 +1234,7 @@ function computeLU(
   }
 
   // Build permutation matrix P
-  const P: BoxedExpression[][] = [];
+  const P: Expression[][] = [];
   for (let i = 0; i < n; i++) {
     P[i] = [];
     for (let j = 0; j < n; j++) {
@@ -1261,11 +1261,11 @@ function computeLU(
  * For m×n matrix, returns Q (m×m orthogonal) and R (m×n upper triangular)
  */
 function computeQR(
-  M: BoxedExpression,
+  M: Expression,
   m: number,
   n: number,
   ce: ComputeEngine
-): { Q: BoxedExpression; R: BoxedExpression } | undefined {
+): { Q: Expression; R: Expression } | undefined {
   if (!isTensor(M)) return undefined;
 
   // Convert matrix to numeric array
@@ -1372,10 +1372,10 @@ function computeQR(
  * Only works for positive definite matrices
  */
 function computeCholesky(
-  M: BoxedExpression,
+  M: Expression,
   n: number,
   ce: ComputeEngine
-): BoxedExpression | undefined {
+): Expression | undefined {
   if (!isTensor(M)) return undefined;
 
   // Convert matrix to numeric array
@@ -1440,11 +1440,11 @@ function computeCholesky(
  * Uses iterative algorithm based on QR iteration
  */
 function computeSVD(
-  M: BoxedExpression,
+  M: Expression,
   m: number,
   n: number,
   ce: ComputeEngine
-): { U: BoxedExpression; S: BoxedExpression; V: BoxedExpression } | undefined {
+): { U: Expression; S: Expression; V: Expression } | undefined {
   if (!isTensor(M)) return undefined;
 
   // Convert matrix to numeric array
@@ -1630,11 +1630,11 @@ function computeSVD(
  * Get element from matrix at 1-based indices
  */
 function getElement(
-  M: BoxedExpression,
+  M: Expression,
   i: number,
   j: number,
   ce: ComputeEngine
-): BoxedExpression {
+): Expression {
   if (!isTensor(M)) return ce.Zero;
   const val = M.tensor.at(i, j);
   return val !== undefined ? ce.box(val) : ce.Zero;
@@ -1643,7 +1643,7 @@ function getElement(
 /**
  * Check if matrix is diagonal or triangular
  */
-function checkDiagonalOrTriangular(M: BoxedExpression, n: number): boolean {
+function checkDiagonalOrTriangular(M: Expression, n: number): boolean {
   if (!isTensor(M)) return false;
 
   let isUpperTriangular = true;
@@ -1669,9 +1669,9 @@ function checkDiagonalOrTriangular(M: BoxedExpression, n: number): boolean {
  * Compute eigenvalues for a 3×3 matrix using Cardano's formula
  */
 function computeEigenvalues3x3(
-  M: BoxedExpression,
+  M: Expression,
   ce: ComputeEngine
-): BoxedExpression | undefined {
+): Expression | undefined {
   if (!isTensor(M)) return undefined;
 
   // Get matrix elements
@@ -1769,10 +1769,10 @@ function solveCubic(p: number, q: number, shift: number): number[] {
  * Compute eigenvalues using QR algorithm (numeric)
  */
 function computeEigenvaluesQR(
-  M: BoxedExpression,
+  M: Expression,
   n: number,
   ce: ComputeEngine
-): BoxedExpression | undefined {
+): Expression | undefined {
   if (!isTensor(M)) return undefined;
 
   // Convert matrix to numeric array
@@ -1821,7 +1821,7 @@ function computeEigenvaluesQR(
   }
 
   // Eigenvalues are on the diagonal
-  const eigenvalues: BoxedExpression[] = [];
+  const eigenvalues: Expression[] = [];
   for (let i = 0; i < n; i++) {
     eigenvalues.push(ce.number(A[i][i]));
   }
@@ -1897,11 +1897,11 @@ function dot(a: number[], b: number[]): number {
  * Compute eigenvector for a given eigenvalue
  */
 function computeEigenvector(
-  M: BoxedExpression,
-  lambda: BoxedExpression,
+  M: Expression,
+  lambda: Expression,
   n: number,
   ce: ComputeEngine
-): BoxedExpression | undefined {
+): Expression | undefined {
   if (!isTensor(M)) return undefined;
 
   const lambdaNum = lambda.re;
@@ -1934,10 +1934,10 @@ function computeEigenvector(
  * Compute eigenvector for 2×2 matrix symbolically
  */
 function computeEigenvector2x2Symbolic(
-  M: BoxedExpression,
-  lambda: BoxedExpression,
+  M: Expression,
+  lambda: Expression,
   ce: ComputeEngine
-): BoxedExpression | undefined {
+): Expression | undefined {
   if (!isTensor(M)) return undefined;
 
   const a = getElement(M, 1, 1, ce);
@@ -2012,7 +2012,7 @@ function solveNullSpace(A: number[][], n: number): number[] | undefined {
  *
  * `tensor.tensor.at()` (AbstractTensor.at) returns raw storage values
  * whose type depends on the tensor's dtype: number for float64,
- * {re, im} for complex128, boolean for bool, or BoxedExpression for
+ * {re, im} for complex128, boolean for bool, or Expression for
  * expression tensors. This function handles all those cases via
  * duck-typing, which is the appropriate strategy for raw storage values.
  */
@@ -2049,7 +2049,7 @@ function asRealNumber(value: unknown): number | undefined {
  * Convert a boxed vector/matrix tensor into a numeric matrix.
  */
 function tensorToNumericMatrix(
-  tensor: BoxedExpression,
+  tensor: Expression,
   rowCount: number,
   columnCount: number
 ): number[][] | undefined {
@@ -2163,7 +2163,7 @@ function computeNullSpaceBasis(A: number[][]): number[][] {
 /**
  * Infer the finite dimension of a value when possible.
  */
-function finiteDimension(value: BoxedExpression): number | undefined {
+function finiteDimension(value: Expression): number | undefined {
   if (value.isNumber) return 1;
 
   // Access the internal type representation. BoxedType.type returns the
@@ -2204,7 +2204,7 @@ function finiteDimension(value: BoxedExpression): number | undefined {
 /**
  * Infer the dimension of a kernel basis representation.
  */
-function kernelBasisDimension(value: BoxedExpression): number | undefined {
+function kernelBasisDimension(value: Expression): number | undefined {
   if (isFunction(value) && value.operator === 'List') {
     if (value.ops.length === 0) return 0;
     if (
@@ -2223,7 +2223,7 @@ function kernelBasisDimension(value: BoxedExpression): number | undefined {
 /**
  * Return true if `value` is a polynomial expression in its unknowns.
  */
-function isPolynomialExpression(value: BoxedExpression): boolean {
+function isPolynomialExpression(value: Expression): boolean {
   if (value.isNumber) return true;
   if (isSymbol(value)) return !value.isConstant;
   if (!isFunction(value)) return false;
@@ -2262,13 +2262,13 @@ function isPolynomialExpression(value: BoxedExpression): boolean {
  */
 function reshapeWithCycling(
   ce: ComputeEngine,
-  flatElements: BoxedExpression[],
+  flatElements: Expression[],
   targetShape: number[]
-): BoxedExpression {
+): Expression {
   const totalNeeded = targetShape.reduce((a, b) => a * b, 1);
 
   // Cycle the elements to fill target shape
-  const cycledElements: BoxedExpression[] = [];
+  const cycledElements: Expression[] = [];
   for (let i = 0; i < totalNeeded; i++) {
     cycledElements.push(flatElements[i % flatElements.length]);
   }
@@ -2282,10 +2282,10 @@ function reshapeWithCycling(
  */
 function buildNestedList(
   ce: ComputeEngine,
-  data: BoxedExpression[],
+  data: Expression[],
   shape: number[],
   offset: number
-): BoxedExpression {
+): Expression {
   if (shape.length === 1) {
     // Base case: return a single list
     return ce.box(['List', ...data.slice(offset, offset + shape[0])]);
@@ -2295,7 +2295,7 @@ function buildNestedList(
   const outerSize = shape[0];
   const innerShape = shape.slice(1);
   const innerSize = innerShape.reduce((a, b) => a * b, 1);
-  const rows: BoxedExpression[] = [];
+  const rows: Expression[] = [];
 
   for (let i = 0; i < outerSize; i++) {
     rows.push(buildNestedList(ce, data, innerShape, offset + i * innerSize));
@@ -2305,9 +2305,9 @@ function buildNestedList(
 }
 
 function canonicalMatrix(
-  ops: BoxedExpression[],
+  ops: Expression[],
   { engine: ce }: { engine: ComputeEngine }
-): BoxedExpression | null {
+): Expression | null {
   const operator = 'Matrix';
   if (ops.length === 0) return ce._fn(operator, []);
 

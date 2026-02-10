@@ -1,4 +1,4 @@
-import type { MathJsonExpression as Expression } from '../../../math-json/types';
+import type { MathJsonExpression } from '../../../math-json/types';
 import {
   operator,
   isEmptySequence,
@@ -26,14 +26,14 @@ import { LatexDictionary, Parser, Serializer } from '../types';
  *
  */
 function parseIntegral(command: string) {
-  return (parser: Parser): Expression | null => {
+  return (parser: Parser): MathJsonExpression | null => {
     let done = false;
 
     //
     // 1/ Capture the limits of integration
     //
-    const subs: Expression[] = [];
-    const sups: Expression[] = [];
+    const subs: MathJsonExpression[] = [];
+    const sups: MathJsonExpression[] = [];
     while (!done) {
       // Skip space or a `\limits` command
       parser.skipVisualSpace();
@@ -42,8 +42,8 @@ function parseIntegral(command: string) {
 
       // Are there some superscripts or subscripts?
 
-      let sup: Expression | null = null;
-      let sub: Expression | null = null;
+      let sup: MathJsonExpression | null = null;
+      let sub: MathJsonExpression | null = null;
       while (
         !(sub !== null && sup !== null) &&
         (parser.peek === '_' || parser.peek === '^')
@@ -76,12 +76,12 @@ function parseIntegral(command: string) {
       if (operator(fn) === 'Add' || operator(fn) === 'Subtract') {
         // If the function is an addition, it could appear in any of the terms,
         // e.g. `\int \sin xdx + 1`
-        const newOp: Expression[] = [];
-        const rest: Expression[] = [];
+        const newOp: MathJsonExpression[] = [];
+        const rest: MathJsonExpression[] = [];
         for (const op of operands(fn)) {
           if (indexes) rest.push(op);
           else {
-            let op2: Expression | null;
+            let op2: MathJsonExpression | null;
             [op2, indexes] = parseSubintegrand(op);
             newOp.push(op2 ?? op);
           }
@@ -99,7 +99,7 @@ function parseIntegral(command: string) {
         }
       } else if (operator(fn) === 'Divide') {
         // We recognize \frac{dx}{x} as an integral
-        let altNumerator: Expression | null;
+        let altNumerator: MathJsonExpression | null;
         [altNumerator, indexes] = parseSubintegrand(operand(fn, 1)!);
         if (altNumerator !== null && indexes !== null) {
           fn = ['Divide', altNumerator, operand(fn, 2)!];
@@ -116,13 +116,13 @@ function parseIntegral(command: string) {
 
 function makeIntegral(
   command: string,
-  fn: Expression | null,
+  fn: MathJsonExpression | null,
   limits: {
     indexes: string[];
-    subs: Expression[];
-    sups: Expression[];
+    subs: MathJsonExpression[];
+    sups: MathJsonExpression[];
   }
-): Expression | null {
+): MathJsonExpression | null {
   if (!fn) return null;
 
   //
@@ -175,9 +175,9 @@ function makeIntegral(
   const tuples = indexes.map((idx, i) => {
     const sup = limits.sups[i];
     const sub = limits.subs[i];
-    if (sub === 'Nothing' && sup === 'Nothing') return idx as Expression;
+    if (sub === 'Nothing' && sup === 'Nothing') return idx as MathJsonExpression;
 
-    return ['Tuple', idx, sub, sup] as Expression;
+    return ['Tuple', idx, sub, sup] as MathJsonExpression;
   });
 
   return [command, fn, ...tuples];
@@ -186,7 +186,7 @@ function makeIntegral(
 /**  Parse the body of an integral (up to a relational operator, or the boundary) */
 function parseIntegralBody(
   parser: Parser
-): [body: Expression | null, indexes: string[]] {
+): [body: MathJsonExpression | null, indexes: string[]] {
   let found = false;
 
   const fn = parser.parseExpression({
@@ -223,8 +223,8 @@ function parseIndexes(parser: Parser): string[] {
 
 /** Parse a sub expression that may contain indexes, for example `2xdx` */
 function parseSubintegrand(
-  expr: Expression
-): [body: Expression | null, indexes: string[]] {
+  expr: MathJsonExpression
+): [body: MathJsonExpression | null, indexes: string[]] {
   const h = operator(expr);
   const op1 = operand(expr, 1);
   if (!op1) return [expr, []];
@@ -282,7 +282,7 @@ function parseSubintegrand(
       // e.g. \sin 2xdx
       const [arg2, indexes] = parseSubintegrand(args[0]);
       if (indexes.length > 0)
-        return [[operator(expr), arg2] as Expression, indexes];
+        return [[operator(expr), arg2] as MathJsonExpression, indexes];
     }
   }
 
@@ -290,7 +290,7 @@ function parseSubintegrand(
 }
 
 function serializeIntegral(command: string) {
-  return (serializer: Serializer, expr: Expression): string => {
+  return (serializer: Serializer, expr: MathJsonExpression): string => {
     if (!operand(expr, 1)) return command;
 
     // The arguments of the Integrate command are:
@@ -305,7 +305,7 @@ function serializeIntegral(command: string) {
     //    - index: symbol (an unknown, that must be an argument of the function)
 
     let body = operand(expr, 1);
-    let args: ReadonlyArray<Expression> = [];
+    let args: ReadonlyArray<MathJsonExpression> = [];
     if (operator(body) === 'BuiltInFunction') {
       args = ['x'];
       body = [operand(body, 1) as string, 'x'];
@@ -457,9 +457,9 @@ function matchDifferentialOperator(parser: Parser): boolean {
 }
 
 function parseFinalDiffOperators(
-  xs: ReadonlyArray<Expression>
-): [rest: ReadonlyArray<Expression>, indexes: string[]] {
-  let rest: ReadonlyArray<Expression> = [...xs];
+  xs: ReadonlyArray<MathJsonExpression>
+): [rest: ReadonlyArray<MathJsonExpression>, indexes: string[]] {
+  let rest: ReadonlyArray<MathJsonExpression> = [...xs];
   const indexes: string[] = [];
 
   while (rest.length > 0) {
@@ -473,8 +473,8 @@ function parseFinalDiffOperators(
 }
 
 function parseFinalDiffOperator(
-  expr: ReadonlyArray<Expression>
-): [rest: ReadonlyArray<Expression>, index: string] {
+  expr: ReadonlyArray<MathJsonExpression>
+): [rest: ReadonlyArray<MathJsonExpression>, index: string] {
   // If the second to last term is a differential operator, we capture the last term as the index
 
   if (expr.length < 2) return [expr, ''];

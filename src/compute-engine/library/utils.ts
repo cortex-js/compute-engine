@@ -1,5 +1,5 @@
 import type {
-  BoxedExpression,
+  Expression,
   IComputeEngine as ComputeEngine,
   Scope,
 } from '../global-types';
@@ -66,7 +66,7 @@ export type IndexingSet = {
  * @returns
  */
 export function normalizeIndexingSet(
-  indexingSet: BoxedExpression
+  indexingSet: Expression
 ): IndexingSet {
   console.assert(indexingSet?.operator === 'Limits');
   console.assert(
@@ -80,7 +80,7 @@ export function normalizeIndexingSet(
   let isFinite = true;
 
   // We've asserted it's a function above; narrow the type
-  const fn = indexingSet as BoxedExpression &
+  const fn = indexingSet as Expression &
     import('../global-types').FunctionInterface;
   const op1 = fn.op1;
   index = isSymbol(op1) ? op1.symbol : undefined;
@@ -104,7 +104,7 @@ export function normalizeIndexingSet(
 }
 
 export function normalizeIndexingSets(
-  ops: ReadonlyArray<BoxedExpression>
+  ops: ReadonlyArray<Expression>
 ): IndexingSet[] {
   return ops.map((op) => normalizeIndexingSet(op));
 }
@@ -168,16 +168,16 @@ export function cartesianProduct(
  *
  */
 export function canonicalLimitsSequence(
-  ops: ReadonlyArray<BoxedExpression>,
+  ops: ReadonlyArray<Expression>,
   options: { engine: ComputeEngine }
-): BoxedExpression[] {
+): Expression[] {
   const ce = options.engine;
-  const result: BoxedExpression[] = [];
+  const result: Expression[] = [];
   for (let i = 0; i < ops.length; i++) {
     const op = ops[i];
     if (op.operator === 'Range') {
       // ["Range", 1, 10]
-      const rangeFn = op as BoxedExpression &
+      const rangeFn = op as Expression &
         import('../global-types').FunctionInterface;
       result.push(
         canonicalLimits([ce.Nothing, rangeFn.op1, rangeFn.op2], options) ??
@@ -192,7 +192,7 @@ export function canonicalLimitsSequence(
       // ["Tuple", "n", 1, 10]
       // ["Limits", "n", 1, 10]
       // ["Hold", "x"]
-      const fnOp = op as BoxedExpression &
+      const fnOp = op as Expression &
         import('../global-types').FunctionInterface;
       result.push(canonicalLimits(fnOp.ops, options) ?? ce.error('missing'));
     } else if (isSymbol(op)) {
@@ -223,9 +223,9 @@ export function canonicalLimitsSequence(
 }
 
 export function canonicalLimits(
-  ops: ReadonlyArray<BoxedExpression>,
+  ops: ReadonlyArray<Expression>,
   { engine: ce }: { engine: ComputeEngine }
-): BoxedExpression | null {
+): Expression | null {
   if (ops.length === 1) {
     // ["Limits", "n"]
     // ["Limits", ["Hold", "n"]]
@@ -239,9 +239,9 @@ export function canonicalLimits(
     // We didn't find a symbol, so we can't create a Limits expression
     return ce._fn('Limits', [ce.typeError('symbol', undefined, op)]);
   } else if (ops.length > 1) {
-    let index: BoxedExpression = ce.Nothing;
-    let lower: BoxedExpression | null = ce.Nothing;
-    let upper: BoxedExpression | null = ops[1].canonical;
+    let index: Expression = ce.Nothing;
+    let lower: Expression | null = ce.Nothing;
+    let upper: Expression | null = ops[1].canonical;
     if (ops.length === 2) {
       // ["Limits", "n", 10]
       // ["Limits", ["Hold", "n"], 10]]
@@ -284,12 +284,12 @@ export function canonicalLimits(
  * (i.e. `pushScope()` has been called)
  */
 export function canonicalIndexingSet(
-  expr: BoxedExpression
-): BoxedExpression | undefined {
+  expr: Expression
+): Expression | undefined {
   const ce = expr.engine;
-  let index: BoxedExpression;
-  let upper: BoxedExpression | null = null;
-  let lower: BoxedExpression | null = null;
+  let index: Expression;
+  let upper: Expression | null = null;
+  let lower: Expression | null = null;
 
   // Handle Element expressions - preserve them in canonical form
   // e.g., ["Element", "n", ["Set", 1, 2, 3]]
@@ -354,10 +354,10 @@ export function canonicalIndexingSet(
 
 export function canonicalBigop(
   bigOp: string,
-  body: BoxedExpression,
-  indexingSets: BoxedExpression[],
+  body: Expression,
+  indexingSets: Expression[],
   scope: Scope | undefined
-): BoxedExpression | null {
+): Expression | null {
   const ce = body.engine;
 
   // Sum is a scoped function (to declare the indexes)
@@ -395,7 +395,7 @@ export const NON_ENUMERABLE_DOMAIN = Symbol('non-enumerable-domain');
  */
 export type BigOpResult<T> =
   | { status: 'success'; value: T }
-  | { status: 'non-enumerable'; reason: string; domain?: BoxedExpression }
+  | { status: 'non-enumerable'; reason: string; domain?: Expression }
   | { status: 'error'; reason: string };
 
 /**
@@ -414,9 +414,9 @@ export type BigOpResult<T> =
  * domain cannot be enumerated (in which case the expression should remain symbolic).
  */
 export function* reduceBigOp<T>(
-  body: BoxedExpression,
-  indexes: ReadonlyArray<BoxedExpression>,
-  fn: (acc: T, x: BoxedExpression) => T | null,
+  body: Expression,
+  indexes: ReadonlyArray<Expression>,
+  fn: (acc: T, x: Expression) => T | null,
   initial: T
 ): Generator<T | typeof NON_ENUMERABLE_DOMAIN | undefined> {
   // If the body is a collection, reduce it
@@ -504,7 +504,7 @@ export function* reduceBigOp<T>(
  */
 export type ReduceElementResult<T> =
   | { status: 'success'; value: T }
-  | { status: 'non-enumerable'; reason: string; domain?: BoxedExpression }
+  | { status: 'non-enumerable'; reason: string; domain?: Expression }
   | { status: 'error'; reason: string };
 
 /**
@@ -517,16 +517,16 @@ export type ReduceElementResult<T> =
  * - Error: invalid indexing expression
  */
 function* reduceElementIndexingSets<T>(
-  body: BoxedExpression,
-  indexes: ReadonlyArray<BoxedExpression>,
-  fn: (acc: T, x: BoxedExpression) => T | null,
+  body: Expression,
+  indexes: ReadonlyArray<Expression>,
+  fn: (acc: T, x: Expression) => T | null,
   initial: T,
   returnReason = false
 ): Generator<T | ReduceElementResult<T> | undefined> {
   const ce = body.engine;
 
   // Separate Element and Limits indexing sets
-  const elementDomains: Array<{ variable: string; values: BoxedExpression[] }> =
+  const elementDomains: Array<{ variable: string; values: Expression[] }> =
     [];
   const limitsSets: IndexingSet[] = [];
 
@@ -590,7 +590,7 @@ function* reduceElementIndexingSets<T>(
     // Mixed case: combine Element domains with Limits ranges
     // Convert Limits to a similar format
     for (const limits of limitsSets) {
-      const values: BoxedExpression[] = [];
+      const values: Expression[] = [];
       for (let i = limits.lower; i <= limits.upper; i++) {
         values.push(ce.number(i));
       }

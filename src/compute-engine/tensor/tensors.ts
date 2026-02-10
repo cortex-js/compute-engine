@@ -1,7 +1,7 @@
 import { Complex } from 'complex-esm';
 import { getSupertype, makeTensorField } from './tensor-fields';
 import type {
-  BoxedExpression,
+  Expression,
   IComputeEngine as ComputeEngine,
   DataTypeMap,
   TensorData,
@@ -23,7 +23,7 @@ import type {
 // The data is stored in a linear array, the shape indicates how to
 // interpret the data as a tensor.
 //
-// - BoxedTensor: a general purpose tensor (lists of lists of lists ...) with arbitrary elements (BoxedExpression).
+// - BoxedTensor: a general purpose tensor (lists of lists of lists ...) with arbitrary elements (Expression).
 // Has limited support for operations.
 // - Vector: a column vector (1D tensor) of scalars (numbers, boolean, Complex). Has full support for operations.
 // - Matrix: a matrix (2D tensor) of scalars. Has full support for operations.
@@ -121,7 +121,7 @@ export abstract class AbstractTensor<
   abstract get data(): DataTypeMap[DT][];
 
   // A Boxed Expression that represents the tensor
-  get expression(): BoxedExpression {
+  get expression(): Expression {
     // Recursively fill the tensor with expressions
     // according to the shape
 
@@ -134,7 +134,7 @@ export abstract class AbstractTensor<
     const data = this.data;
     const index = this._index.bind(this);
     const expression = this.field.expression.bind(this.field);
-    const fill = (indices: number[]): BoxedExpression => {
+    const fill = (indices: number[]): Expression => {
       if (indices.length === rank - 1) {
         // Base case: vector
         const idx = index(indices);
@@ -144,7 +144,7 @@ export abstract class AbstractTensor<
         );
       } else {
         // Recursive case: tensor
-        const list: BoxedExpression[] = [];
+        const list: Expression[] = [];
         for (let i = 1; i <= shape[indices.length]; i++)
           list.push(fill([...indices, i]));
 
@@ -156,7 +156,7 @@ export abstract class AbstractTensor<
 
   /**
    * Like expression(), but return a nested JS array instead
-   * of a BoxedExpression
+   * of a Expression
    */
   get array(): NestedArray<DataTypeMap[DT]> {
     const shape = this.shape;
@@ -891,11 +891,11 @@ class BooleanTensor extends AbstractTensor<'bool'> {
 
 class GenericTensor extends AbstractTensor<'expression'> {
   readonly dtype = 'expression' as const;
-  readonly data: BoxedExpression[];
+  readonly data: Expression[];
 
   constructor(ce: ComputeEngine, data: TensorData<'expression'>) {
     super(ce, data);
-    this.data = data.data as BoxedExpression[];
+    this.data = data.data as Expression[];
   }
 }
 

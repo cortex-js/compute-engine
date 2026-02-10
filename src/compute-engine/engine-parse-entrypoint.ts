@@ -5,7 +5,7 @@ import { box, formToInternal } from './boxed-expression/box';
 import { isOperatorDef, isValueDef } from './boxed-expression/utils';
 import type {
   IComputeEngine as ComputeEngine,
-  BoxedExpression,
+  Expression,
 } from './global-types';
 import { parse } from './latex-syntax/parse';
 import type { LatexString, ParseLatexOptions } from './latex-syntax/types';
@@ -39,7 +39,7 @@ export function parseLatexEntrypoint(
   engine: ComputeEngine,
   latex: LatexString | null,
   options?: ParseEntrypointOptions
-): BoxedExpression | null {
+): Expression | null {
   if (latex === null || latex === undefined) return null;
   if (typeof latex !== 'string')
     throw Error('ce.parse(): expected a LaTeX string');

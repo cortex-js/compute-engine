@@ -4,7 +4,7 @@ import { flatten } from './flatten';
 import { isSubtype } from '../../common/type/subtype';
 import { Type } from '../../common/type/types';
 import type {
-  BoxedExpression,
+  Expression,
   IComputeEngine as ComputeEngine,
   Scope,
 } from '../global-types';
@@ -64,9 +64,9 @@ function typeCouldBeNumericCollection(type: Type): boolean {
  */
 export function checkArity(
   ce: ComputeEngine,
-  ops: ReadonlyArray<BoxedExpression>,
+  ops: ReadonlyArray<Expression>,
   count: number
-): ReadonlyArray<BoxedExpression> {
+): ReadonlyArray<Expression> {
   ops = flatten(ops);
 
   // @fastpath
@@ -74,7 +74,7 @@ export function checkArity(
 
   if (ops.length === count) return ops;
 
-  const xs: BoxedExpression[] = [...ops.slice(0, count)];
+  const xs: Expression[] = [...ops.slice(0, count)];
   let i = Math.min(count, ops.length);
   while (i < count) {
     xs.push(ce.error('missing'));
@@ -105,9 +105,9 @@ export function checkArity(
  */
 export function checkNumericArgs(
   ce: ComputeEngine,
-  ops: ReadonlyArray<BoxedExpression>,
+  ops: ReadonlyArray<Expression>,
   options?: number | { count?: number; flatten?: string }
-): ReadonlyArray<BoxedExpression> {
+): ReadonlyArray<Expression> {
   let count = typeof options === 'number' ? options : options?.count;
   const flattenHead =
     typeof options === 'number' ? undefined : options?.flatten;
@@ -133,7 +133,7 @@ export function checkNumericArgs(
 
   count ??= ops.length;
 
-  const xs: BoxedExpression[] = [];
+  const xs: Expression[] = [];
   for (let i = 0; i <= Math.max(count - 1, ops.length - 1); i++) {
     const op = ops[i];
     if (i > count - 1) {
@@ -226,9 +226,9 @@ export function checkNumericArgs(
  */
 export function checkType(
   ce: ComputeEngine,
-  arg: BoxedExpression | undefined | null,
+  arg: Expression | undefined | null,
   type: Type | undefined
-): BoxedExpression {
+): Expression {
   if (arg === undefined || arg === null) return ce.error('missing');
   if (type === undefined)
     return ce.error('unexpected-argument', arg.toString());
@@ -244,9 +244,9 @@ export function checkType(
 
 export function checkTypes(
   ce: ComputeEngine,
-  args: ReadonlyArray<BoxedExpression>,
+  args: ReadonlyArray<Expression>,
   types: Type[]
-): ReadonlyArray<BoxedExpression> {
+): ReadonlyArray<Expression> {
   // Do a quick check for the common case where everything is as expected.
   // Avoid allocating arrays and objects
   if (
@@ -255,7 +255,7 @@ export function checkTypes(
   )
     return args;
 
-  const xs: BoxedExpression[] = [];
+  const xs: Expression[] = [];
   for (let i = 0; i <= types.length - 1; i++)
     xs.push(checkType(ce, args[i], types[i]));
 
@@ -270,8 +270,8 @@ export function checkTypes(
  */
 export function checkPure(
   ce: ComputeEngine,
-  arg: BoxedExpression | BoxedExpression | undefined | null
-): BoxedExpression {
+  arg: Expression | Expression | undefined | null
+): Expression {
   if (arg === undefined || arg === null) return ce.error('missing');
   arg = arg.canonical;
   if (!arg.isValid) return arg;
@@ -298,18 +298,18 @@ export function checkPure(
  */
 export function validateArguments(
   ce: ComputeEngine,
-  ops: ReadonlyArray<BoxedExpression>,
+  ops: ReadonlyArray<Expression>,
   signature: Type,
   lazy?: boolean,
   threadable?: boolean
-): ReadonlyArray<BoxedExpression> | null {
+): ReadonlyArray<Expression> | null {
   // @fastpath
   if (!ce.strict) return null;
 
   if (typeof signature === 'string') return null;
   if (signature.kind !== 'signature') return null;
 
-  const result: BoxedExpression[] = [];
+  const result: Expression[] = [];
   let isValid = true;
 
   const params = signature.args?.map((x) => x.type) ?? [];
@@ -517,7 +517,7 @@ export function validateArguments(
 /** Recursively examine the symbols and operators and for any
  * that don't have a definition, suggest an alternative name.
  */
-function spellcheckSymbols(expr: BoxedExpression): Record<string, string> {
+function spellcheckSymbols(expr: Expression): Record<string, string> {
   let suggestions: Record<string, string> = {};
   const knownSymbols = getSymbolNames(expr.engine);
   const knownOperators = getOperatorNames(expr.engine);
@@ -579,7 +579,7 @@ function getSymbolNames(ce: ComputeEngine): string[] {
   return names;
 }
 
-export function spellCheckMessage(expr: BoxedExpression): string {
+export function spellCheckMessage(expr: Expression): string {
   const suggestions = spellcheckSymbols(expr);
   if (Object.keys(suggestions).length === 0) return '';
 

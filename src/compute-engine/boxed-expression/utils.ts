@@ -1,5 +1,5 @@
 import type {
-  BoxedExpression,
+  Expression,
   OperatorDefinition,
   ValueDefinition,
   IComputeEngine as ComputeEngine,
@@ -28,7 +28,7 @@ import { isNumber, isFunction, isSymbol } from './type-guards';
  * - sin(0) -> 0
  * - cos(0) -> 1
  */
-export function hasSymbolicTranscendental(expr: BoxedExpression): boolean {
+export function hasSymbolicTranscendental(expr: Expression): boolean {
   const op = expr.operator;
   // Transcendental functions applied to numeric constants
   const transcendentals = [
@@ -75,7 +75,7 @@ export function isDictionary(expr: unknown): expr is DictionaryInterface {
   );
 }
 
-export function isExpression(x: unknown): x is BoxedExpression {
+export function isExpression(x: unknown): x is Expression {
   return x instanceof _BoxedExpression;
 }
 
@@ -100,7 +100,7 @@ export function bignumPreferred(ce: ComputeEngine): boolean {
   return ce.precision > MACHINE_PRECISION;
 }
 
-// export function getMeta(expr: BoxedExpression): Partial<Metadata> {
+// export function getMeta(expr: Expression): Partial<Metadata> {
 //   const result: Partial<Metadata> = {};
 //   if (expr.verbatimLatex !== undefined) result.latex = expr.verbatimLatex;
 //   if (expr.wikidata !== undefined) result.latex = expr.wikidata;
@@ -119,8 +119,8 @@ export function normalizedUnknownsForSolve(
   syms:
     | string
     | Iterable<string>
-    | BoxedExpression
-    | Iterable<BoxedExpression>
+    | Expression
+    | Iterable<Expression>
     | null
     | undefined
 ): string[] {
@@ -148,12 +148,12 @@ export function normalizedUnknownsForSolve(
  * expression in a `Block` expression.
  *
  */
-export function getLocalVariables(expr: BoxedExpression): string[] {
+export function getLocalVariables(expr: Expression): string[] {
   if (expr.localScope) return [...expr.localScope?.bindings.keys()];
   return [];
 }
 
-export function domainToType(expr: BoxedExpression): Type {
+export function domainToType(expr: Expression): Type {
   if (!isSymbol(expr)) return 'unknown';
   // if (expr.symbol === 'Booleans') return 'boolean';
   // if (expr.symbol === 'Strings') return 'string';
@@ -167,8 +167,8 @@ export function domainToType(expr: BoxedExpression): Type {
 }
 
 function angleToRadians(
-  x: BoxedExpression | undefined
-): BoxedExpression | undefined {
+  x: Expression | undefined
+): Expression | undefined {
   if (!x) return x;
   const ce = x.engine;
   const angularUnit = ce.angularUnit;
@@ -187,8 +187,8 @@ function angleToRadians(
  * @returns
  */
 export function canonicalAngle(
-  x: BoxedExpression | undefined
-): BoxedExpression | undefined {
+  x: Expression | undefined
+): Expression | undefined {
   if (!x) return x;
   const theta = angleToRadians(x);
   if (!theta) return undefined;
@@ -218,8 +218,8 @@ export function canonicalAngle(
  *
  */
 export function getImaginaryFactor(
-  expr: number | BoxedExpression
-): BoxedExpression | undefined {
+  expr: number | Expression
+): Expression | undefined {
   if (typeof expr === 'number') return undefined;
   const ce = expr.engine;
   if (isSymbol(expr) && expr.symbol === 'ImaginaryUnit') return ce.One;
@@ -269,7 +269,7 @@ export function getImaginaryFactor(
  * @param expr
  * @returns
  */
-export function isImaginaryUnit(expr: BoxedExpression): boolean {
+export function isImaginaryUnit(expr: Expression): boolean {
   const { engine } = expr;
   // Shortcut: boxed engine imaginary unit
   if (expr === engine.I) return true;
@@ -289,7 +289,7 @@ export function isImaginaryUnit(expr: BoxedExpression): boolean {
  * If no pi factor is found, or k or t are not numeric values, return [0, 0].
  */
 export function getPiTerm(
-  expr: BoxedExpression
+  expr: Expression
 ): [k: NumericValue, t: NumericValue] {
   const ce = expr.engine;
   if (isSymbol(expr) && expr.symbol === 'Pi')

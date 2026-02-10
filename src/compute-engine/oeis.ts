@@ -9,7 +9,7 @@
 
 import type {
   IComputeEngine as ComputeEngine,
-  BoxedExpression,
+  Expression,
 } from './global-types';
 
 // ============================================================================
@@ -264,7 +264,7 @@ export async function lookupOEISById(
  */
 export async function lookupSequence(
   ce: ComputeEngine,
-  terms: (number | BoxedExpression)[],
+  terms: (number | Expression)[],
   options: OEISOptions = {}
 ): Promise<OEISSequenceInfo[]> {
   // Convert BoxedExpressions to numbers and validate all are integers

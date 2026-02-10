@@ -1,5 +1,5 @@
 import type {
-  BoxedExpression,
+  Expression,
   PatternMatchOptions,
   BoxedSubstitution,
   IComputeEngine as ComputeEngine,
@@ -52,7 +52,7 @@ export class BoxedString extends _BoxedExpression implements StringInterface {
     return;
   }
 
-  get value(): BoxedExpression {
+  get value(): Expression {
     return this;
   }
 
@@ -83,7 +83,7 @@ export class BoxedString extends _BoxedExpression implements StringInterface {
   }
 
   match(
-    pattern: BoxedExpression,
+    pattern: Expression,
     _options?: PatternMatchOptions
   ): BoxedSubstitution | null {
     if (!isExpression(pattern))

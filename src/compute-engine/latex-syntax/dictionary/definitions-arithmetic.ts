@@ -1,4 +1,4 @@
-import { MathJsonExpression as Expression } from '../../../math-json/types';
+import { MathJsonExpression } from '../../../math-json/types';
 import {
   machineValue,
   foldAssociativeOperator,
@@ -34,10 +34,10 @@ import { joinLatex, supsub } from '../tokenizer';
  * negative exponents in the denominator, and all the terms
  * with a positive exponent (or no exponent) in the numerator.
  */
-function numeratorDenominator(expr: Expression): [Expression[], Expression[]] {
+function numeratorDenominator(expr: MathJsonExpression): [MathJsonExpression[], MathJsonExpression[]] {
   if (operator(expr) !== 'Multiply') return [[], []];
-  const numerator: Expression[] = [];
-  const denominator: Expression[] = [];
+  const numerator: MathJsonExpression[] = [];
+  const denominator: MathJsonExpression[] = [];
   for (const arg of operands(expr)) {
     if (operator(arg) === 'Power') {
       const op1 = operand(arg, 1);
@@ -74,7 +74,7 @@ function numeratorDenominator(expr: Expression): [Expression[], Expression[]] {
   return [numerator, denominator];
 }
 
-function parseRoot(parser: Parser): Expression | null {
+function parseRoot(parser: Parser): MathJsonExpression | null {
   const degree = parser.parseOptionalGroup();
   const base = parser.parseGroup() ?? parser.parseToken();
   if (isEmptySequence(base)) {
@@ -88,8 +88,8 @@ function parseRoot(parser: Parser): Expression | null {
 function serializeRoot(
   serializer: Serializer,
   style: 'radical' | 'quotient' | 'solidus',
-  base: Expression | null | undefined,
-  degree: Expression | null | undefined
+  base: MathJsonExpression | null | undefined,
+  degree: MathJsonExpression | null | undefined
 ): string {
   if (base === null || base === undefined) return '\\sqrt{}';
   degree = degree ?? 2;
@@ -119,7 +119,7 @@ function serializeRoot(
   );
 }
 
-function serializeAdd(serializer: Serializer, expr: Expression): string {
+function serializeAdd(serializer: Serializer, expr: MathJsonExpression): string {
   // "add" doesn't increase the "level" for styling purposes
   // so, preventively decrease it now.
   serializer.level -= 1;
@@ -234,7 +234,7 @@ function serializeAdd(serializer: Serializer, expr: Expression): string {
 
 function serializeMultiply(
   serializer: Serializer,
-  expr: Expression | null
+  expr: MathJsonExpression | null
 ): string {
   if (expr === null) return '';
 
@@ -272,7 +272,7 @@ function serializeMultiply(
   }
 
   let isNegative = false;
-  let arg: Expression | null | undefined = null;
+  let arg: MathJsonExpression | null | undefined = null;
   const count = nops(expr) + 1;
   let xs = operands(expr);
 
@@ -382,9 +382,9 @@ function serializeMultiply(
   return isNegative ? '-' + result : result;
 }
 
-function parseFraction(parser: Parser): Expression | null {
-  let numer: Expression | null = parser.parseGroup();
-  let denom: Expression | null = null;
+function parseFraction(parser: Parser): MathJsonExpression | null {
+  let numer: MathJsonExpression | null = parser.parseGroup();
+  let denom: MathJsonExpression | null = null;
   if (numer === null) {
     numer = parser.parseToken();
     denom = parser.parseToken();
@@ -407,7 +407,7 @@ function parseFraction(parser: Parser): Expression | null {
     if (fn === null || fn === undefined)
       fn = missingIfEmpty(parser.parseExpression());
 
-    let vars: Expression[] = [];
+    let vars: MathJsonExpression[] = [];
     if (operator(denom) === 'Multiply') {
       // ?/∂x∂y
       for (const arg of operands(denom)) {
@@ -441,9 +441,9 @@ function parseFraction(parser: Parser): Expression | null {
     // - 'dx' (single symbol)
     // - ['Sequence', 'd', 'x']
     // - ['Multiply', 'd', 'x']
-    const vars: Expression[] = [];
+    const vars: MathJsonExpression[] = [];
 
-    const collectVars = (expr: Expression | null) => {
+    const collectVars = (expr: MathJsonExpression | null) => {
       if (!expr) return;
       const s = symbol(expr);
       // If it's a symbol that's not a differential operator, it's a variable
@@ -481,7 +481,7 @@ function parseFraction(parser: Parser): Expression | null {
 
 function serializeFraction(
   serializer: Serializer,
-  expr: Expression | null
+  expr: MathJsonExpression | null
 ): string {
   // console.assert(getFunctionName(expr) === 'Divide');
   if (expr === null) return '';
@@ -526,7 +526,7 @@ function serializeFraction(
 
 function serializePower(
   serializer: Serializer,
-  expr: Expression | null
+  expr: MathJsonExpression | null
 ): string {
   if (!expr) return '';
 
@@ -623,8 +623,8 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     latexTrigger: ['\\degree'],
     kind: 'postfix',
     precedence: 880,
-    parse: (_parser, lhs) => ['Degrees', lhs] as Expression,
-    serialize: (serializer: Serializer, expr: Expression): string => {
+    parse: (_parser, lhs) => ['Degrees', lhs] as MathJsonExpression,
+    serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
       return joinLatex([serializer.serialize(operand(expr, 1)), '\\degree']);
     },
   },
@@ -632,31 +632,31 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     latexTrigger: ['\\degree'],
     kind: 'postfix',
     precedence: 880,
-    parse: (_parser, lhs) => ['Degrees', lhs] as Expression,
+    parse: (_parser, lhs) => ['Degrees', lhs] as MathJsonExpression,
   },
   {
     latexTrigger: ['^', '<{>', '\\circ', '<}>'],
     kind: 'postfix',
-    parse: (_parser, lhs) => ['Degrees', lhs] as Expression,
+    parse: (_parser, lhs) => ['Degrees', lhs] as MathJsonExpression,
   },
 
   {
     latexTrigger: ['^', '\\circ'],
     kind: 'postfix',
-    parse: (_parser, lhs) => ['Degrees', lhs] as Expression,
+    parse: (_parser, lhs) => ['Degrees', lhs] as MathJsonExpression,
   },
   {
     latexTrigger: ['°'],
     kind: 'postfix',
     precedence: 880,
-    parse: (_parser, lhs) => ['Degrees', lhs] as Expression,
+    parse: (_parser, lhs) => ['Degrees', lhs] as MathJsonExpression,
   },
 
   {
     latexTrigger: ['\\ang'],
-    parse: (parser: Parser): Expression => {
+    parse: (parser: Parser): MathJsonExpression => {
       const arg = parser.parseGroup();
-      return (arg === null ? ['Degrees'] : ['Degrees', arg]) as Expression;
+      return (arg === null ? ['Degrees'] : ['Degrees', arg]) as MathJsonExpression;
     },
   },
   {
@@ -701,16 +701,16 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     symbolTrigger: 'exp',
     parse: (parser: Parser) => {
       const args = parser.parseArguments('implicit');
-      if (args === null) return 'Exp' as Expression;
-      return ['Exp', ...args] as Expression;
+      if (args === null) return 'Exp' as MathJsonExpression;
+      return ['Exp', ...args] as MathJsonExpression;
     },
   },
   {
     latexTrigger: '\\exp',
     parse: (parser: Parser) => {
       const args = parser.parseArguments('implicit');
-      if (args === null) return 'Exp' as Expression;
-      return ['Exp', ...args] as Expression;
+      if (args === null) return 'Exp' as MathJsonExpression;
+      return ['Exp', ...args] as MathJsonExpression;
     },
   },
   {
@@ -737,14 +737,14 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     openTrigger: '|',
     closeTrigger: '|',
     parse: (_parser, body) =>
-      isEmptySequence(body) ? null : (['Abs', body] as Expression),
+      isEmptySequence(body) ? null : (['Abs', body] as MathJsonExpression),
   },
   {
     kind: 'matchfix',
     openTrigger: ['\\vert'],
     closeTrigger: ['\\vert'],
     parse: (_parser, body) =>
-      isEmptySequence(body) ? null : (['Abs', body] as Expression),
+      isEmptySequence(body) ? null : (['Abs', body] as MathJsonExpression),
   },
   {
     symbolTrigger: 'abs',
@@ -785,14 +785,14 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     openTrigger: '\\lceil',
     closeTrigger: '\\rceil',
     parse: (_parser, body) =>
-      isEmptySequence(body) ? null : (['Ceil', body] as Expression),
+      isEmptySequence(body) ? null : (['Ceil', body] as MathJsonExpression),
   },
   {
     kind: 'matchfix',
     openTrigger: ['\u2308'], // ⌈ U+2308 LEFT CEILING
     closeTrigger: ['\u2309'], // ⌉ U+2309 RIGHT CEILING
     parse: (_parser, body) =>
-      isEmptySequence(body) ? null : (['Ceil', body] as Expression),
+      isEmptySequence(body) ? null : (['Ceil', body] as MathJsonExpression),
   },
   {
     symbolTrigger: 'ceil',
@@ -803,7 +803,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   {
     name: 'Complex',
     precedence: ADDITION_PRECEDENCE - 1, // One less than precedence of `Add`: used for correct wrapping
-    serialize: (serializer: Serializer, expr: Expression): string => {
+    serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
       const rePart = serializer.serialize(operand(expr, 1));
 
       const im = machineValue(operand(expr, 2));
@@ -870,7 +870,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   },
   {
     name: 'Exp',
-    serialize: (serializer: Serializer, expr: Expression): string => {
+    serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
       const op1 = operand(expr, 1);
       if (symbol(op1) || machineValue(op1) !== null)
         return joinLatex(['\\exponentialE^{', serializer.serialize(op1), '}']);
@@ -896,14 +896,14 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     openTrigger: '\\lfloor',
     closeTrigger: '\\rfloor',
     parse: (_parser, body) =>
-      isEmptySequence(body) ? null : (['Floor', body] as Expression),
+      isEmptySequence(body) ? null : (['Floor', body] as MathJsonExpression),
   },
   {
     kind: 'matchfix',
     openTrigger: ['\u230a'], // ⌊ U+230A LEFT FLOOR
     closeTrigger: ['\u230b'], // ⌋ U+230B RIGHT FLOOR
     parse: (_parser, body) =>
-      isEmptySequence(body) ? null : (['Floor', body] as Expression),
+      isEmptySequence(body) ? null : (['Floor', body] as MathJsonExpression),
   },
   {
     symbolTrigger: 'floor',
@@ -1051,8 +1051,8 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
       '\\log_{10}' + serializer.wrapArguments(expr),
     parse: (parser: Parser) => {
       const args = parser.parseArguments('implicit');
-      if (args === null) return 'Lg' as Expression;
-      return ['Log', ...args, 10] as Expression;
+      if (args === null) return 'Lg' as MathJsonExpression;
+      return ['Log', ...args, 10] as MathJsonExpression;
     },
   },
   {
@@ -1060,8 +1060,8 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     latexTrigger: '\\lb',
     parse: (parser: Parser) => {
       const args = parser.parseArguments('implicit');
-      if (args === null) return 'Log' as Expression;
-      return ['Log', args[0], 2] as Expression;
+      if (args === null) return 'Log' as MathJsonExpression;
+      return ['Log', args[0], 2] as MathJsonExpression;
     },
   },
   {
@@ -1153,7 +1153,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
         'Limit',
         ['Function', expr[0], operand(base, 1)],
         operand(base, 2),
-      ] as Expression;
+      ] as MathJsonExpression;
     },
     serialize: (serializer, expr) => {
       const fn = operand(expr, 1);
@@ -1262,7 +1262,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     latexTrigger: ['-'],
     kind: 'prefix',
     precedence: EXPONENTIATION_PRECEDENCE + 1,
-    parse: (parser, terminator): Expression | null => {
+    parse: (parser, terminator): MathJsonExpression | null => {
       parser.skipSpace();
       const rhs = parser.parseExpression({
         ...terminator,
@@ -1300,7 +1300,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     openTrigger: '||',
     closeTrigger: '||',
     parse: (_parser, expr) =>
-      isEmptySequence(expr) ? null : (['Norm', expr] as Expression),
+      isEmptySequence(expr) ? null : (['Norm', expr] as MathJsonExpression),
   },
   {
     //   /** If the argument is a vector */
@@ -1310,16 +1310,16 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     openTrigger: ['\\left', '\\Vert'],
     closeTrigger: ['\\right', '\\Vert'],
     parse: (_parser, expr) =>
-      isEmptySequence(expr) ? null : (['Norm', expr] as Expression),
+      isEmptySequence(expr) ? null : (['Norm', expr] as MathJsonExpression),
     serialize: (serializer, expr) => {
       const arg = operand(expr, 1);
       if (operator(arg) === 'Matrix') {
         // Re-inject ‖‖ delimiters so the Matrix serializer outputs Vmatrix
         const data = operand(arg, 1);
         const colSpec = operand(arg, 2);
-        const matrixWithDelims: Expression = colSpec
-          ? (['Matrix', data, { str: '‖‖' }, colSpec] as Expression)
-          : (['Matrix', data, { str: '‖‖' }] as Expression);
+        const matrixWithDelims: MathJsonExpression = colSpec
+          ? (['Matrix', data, { str: '‖‖' }, colSpec] as MathJsonExpression)
+          : (['Matrix', data, { str: '‖‖' }] as MathJsonExpression);
         return serializer.serialize(matrixWithDelims);
       }
       return `\\left\\Vert ${serializer.serialize(arg)}\\right\\Vert`;
@@ -1350,7 +1350,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     precedence: ARROW_PRECEDENCE,
     parse: (parser, terminator) => {
       const rhs = parser.parseExpression({ ...terminator, minPrec: 400 });
-      return ['PlusMinus', 0, missingIfEmpty(rhs)] as Expression;
+      return ['PlusMinus', 0, missingIfEmpty(rhs)] as MathJsonExpression;
     },
   },
   {
@@ -1360,7 +1360,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     precedence: ARROW_PRECEDENCE,
     parse: (parser, lhs, terminator) => {
       const rhs = parser.parseExpression({ ...terminator, minPrec: 400 });
-      return ['PlusMinus', lhs, missingIfEmpty(rhs)] as Expression;
+      return ['PlusMinus', lhs, missingIfEmpty(rhs)] as MathJsonExpression;
     },
   },
   {
@@ -1369,7 +1369,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     precedence: ARROW_PRECEDENCE,
     parse: (parser, terminator) => {
       const rhs = parser.parseExpression({ ...terminator, minPrec: 400 });
-      return ['PlusMinus', missingIfEmpty(rhs)] as Expression;
+      return ['PlusMinus', missingIfEmpty(rhs)] as MathJsonExpression;
     },
   },
   {
@@ -1396,7 +1396,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   {
     name: 'Rational',
     precedence: DIVISION_PRECEDENCE,
-    serialize: (serializer: Serializer, expr: Expression | null): string => {
+    serialize: (serializer: Serializer, expr: MathJsonExpression | null): string => {
       if (expr && nops(expr) === 1)
         return '\\operatorname{Rational}' + serializer.wrapArguments(expr);
       return serializeFraction(serializer, expr);
@@ -1404,7 +1404,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   },
   {
     name: 'Reduce',
-    serialize: (serializer: Serializer, expr: Expression): string => {
+    serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
       const collection = operand(expr, 1);
       if (!collection) return '';
 
@@ -1475,7 +1475,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
         minPrec: ADDITION_PRECEDENCE + 3,
       });
       if (rhs === null) return null;
-      return ['Add', lhs, rhs] as Expression;
+      return ['Add', lhs, rhs] as MathJsonExpression;
     },
     serialize: (serializer, expr) => {
       const lhs = serializer.wrap(operand(expr, 1), ADDITION_PRECEDENCE + 2);
@@ -1491,14 +1491,14 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
  *
  */
 function getIndexAssignment(
-  expr: Expression | null,
-  upper?: Expression | undefined
+  expr: MathJsonExpression | null,
+  upper?: MathJsonExpression | undefined
 ):
   | {
       index: string;
-      lower?: Expression;
-      upper?: Expression;
-      element?: Expression;
+      lower?: MathJsonExpression;
+      upper?: MathJsonExpression;
+      element?: MathJsonExpression;
     }
   | undefined {
   if (expr === null) return undefined;
@@ -1543,7 +1543,7 @@ function getIndexAssignment(
  * an indexing set assignment or Element expression.
  * Conditions are typically relational expressions like `n > 0`, `x < 10`, etc.
  */
-function isConditionExpression(expr: Expression): boolean {
+function isConditionExpression(expr: MathJsonExpression): boolean {
   const op = operator(expr);
   if (!op) return false;
   // Common relational operators that indicate conditions
@@ -1565,7 +1565,7 @@ function isConditionExpression(expr: Expression): boolean {
  * Extract operands from a sequence-like expression.
  * Handles Sequence, Tuple, and single expressions.
  */
-function getSequenceOrTuple(expr: Expression | null): Expression[] {
+function getSequenceOrTuple(expr: MathJsonExpression | null): MathJsonExpression[] {
   if (expr === null) return [];
 
   // First try getSequence (handles Sequence and Delimiter)
@@ -1583,13 +1583,13 @@ function getSequenceOrTuple(expr: Expression | null): Expression[] {
 }
 
 function getIndexes(
-  sub: Expression | null,
-  sup: Expression | null
+  sub: MathJsonExpression | null,
+  sup: MathJsonExpression | null
 ): {
   index: string;
-  lower?: Expression;
-  upper?: Expression;
-  element?: Expression;
+  lower?: MathJsonExpression;
+  upper?: MathJsonExpression;
+  element?: MathJsonExpression;
 }[] {
   if (isEmptySequence(sub)) sub = null;
   if (isEmptySequence(sup)) sup = null;
@@ -1608,9 +1608,9 @@ function getIndexes(
   // EL-3: Process subscripts, attaching conditions to preceding Element expressions
   const results: {
     index: string;
-    lower?: Expression;
-    upper?: Expression;
-    element?: Expression;
+    lower?: MathJsonExpression;
+    upper?: MathJsonExpression;
+    element?: MathJsonExpression;
   }[] = [];
 
   let i = 0;
@@ -1635,7 +1635,7 @@ function getIndexes(
           const elementExpr = assignment.element;
           if (Array.isArray(elementExpr) && elementExpr.length >= 3) {
             // Create a new array with the condition appended
-            const newElement: Expression = [
+            const newElement: MathJsonExpression = [
               elementExpr[0] as string,
               ...elementExpr.slice(1),
               nextExpr,
@@ -1654,7 +1654,7 @@ function getIndexes(
 }
 
 function parseBigOp(name: string, reduceOp: string, minPrec: number) {
-  return (parser: Parser): Expression | null => {
+  return (parser: Parser): MathJsonExpression | null => {
     parser.skipSpace();
 
     // Push a symbol table early to isolate subscript/superscript parsing
@@ -1666,8 +1666,8 @@ function parseBigOp(name: string, reduceOp: string, minPrec: number) {
     // Capture the subscripts and superscripts
     // e.g. \sum_{i=1}^{10} i -> sup = `10`, sub = `i=1`
     //
-    let sup: Expression | null = null;
-    let sub: Expression | null = null;
+    let sup: MathJsonExpression | null = null;
+    let sub: MathJsonExpression | null = null;
     while (!(sub && sup) && (parser.peek === '_' || parser.peek === '^')) {
       if (parser.match('_')) sub = parser.parseGroup() ?? parser.parseToken();
       else if (parser.match('^'))
@@ -1700,7 +1700,7 @@ function parseBigOp(name: string, reduceOp: string, minPrec: number) {
     //
     // Turn the indexing sets into a sequence of tuples or Element expressions
     //
-    const indexingSetArguments: Expression[] = [];
+    const indexingSetArguments: MathJsonExpression[] = [];
     for (const indexingSet of indexes) {
       // Handle Element expressions: preserve them directly
       if (indexingSet.element) {
@@ -1731,15 +1731,15 @@ const INDEXING_SET_HEADS = new Set([
 ]);
 
 function sanitizeLimitOperand(
-  expr: Expression | null | undefined
-): Expression | null {
+  expr: MathJsonExpression | null | undefined
+): MathJsonExpression | null {
   if (expr === null || expr === undefined) return null;
   if (symbol(expr) === 'Nothing') return null;
   return expr;
 }
 
-function collectIndexingSets(expr: Expression): Expression[] {
-  const result: Expression[] = [];
+function collectIndexingSets(expr: MathJsonExpression): MathJsonExpression[] {
+  const result: MathJsonExpression[] = [];
   const args = operands(expr);
   if (args.length <= 1) return result;
   for (const candidate of args.slice(1)) {
@@ -1755,7 +1755,7 @@ function collectIndexingSets(expr: Expression): Expression[] {
 
 function serializeIndexingSet(
   serializer: Serializer,
-  indexingSet: Expression
+  indexingSet: MathJsonExpression
 ): { sub?: string; sup?: string } {
   // Handle Element expressions: ["Element", "n", "N"]
   // Serialize as `n\in N`
@@ -1789,7 +1789,7 @@ function serializeIndexingSet(
 }
 
 function serializeBigOp(command: string) {
-  return (serializer: Serializer, expr: Expression): string => {
+  return (serializer: Serializer, expr: MathJsonExpression): string => {
     const body = operand(expr, 1);
     if (!body) return command;
 
@@ -1813,21 +1813,21 @@ function serializeBigOp(command: string) {
   };
 }
 
-function parseLog(command: string, parser: Parser): Expression | null {
-  let sub: Expression | null = null;
+function parseLog(command: string, parser: Parser): MathJsonExpression | null {
+  let sub: MathJsonExpression | null = null;
 
   if (parser.match('_')) sub = parser.parseGroup() ?? parser.parseToken();
 
   const args = parser.parseArguments('implicit');
 
-  if (args === null && sub === null) return [command] as Expression;
-  if (args === null) return [command, sub] as Expression;
+  if (args === null && sub === null) return [command] as MathJsonExpression;
+  if (args === null) return [command, sub] as MathJsonExpression;
 
-  if (sub === null) return [command, ...args] as Expression;
+  if (sub === null) return [command, ...args] as MathJsonExpression;
 
-  if (sub === 10) return ['Log', args[0]] as Expression;
-  if (sub === 2) return ['Lb', ...args] as Expression;
-  return ['Log', args[0], sub] as Expression;
+  if (sub === 10) return ['Log', args[0]] as MathJsonExpression;
+  if (sub === 2) return ['Lb', ...args] as MathJsonExpression;
+  return ['Log', args[0], sub] as MathJsonExpression;
 }
 
 /**
@@ -1838,7 +1838,7 @@ function parseLog(command: string, parser: Parser): Expression | null {
  * This will be used when serialization additions to insert the negative
  * sign in the correct place.
  */
-function unsign(expr: Expression): [Expression, -1 | 1] {
+function unsign(expr: MathJsonExpression): [MathJsonExpression, -1 | 1] {
   let sign: -1 | 1 = 1;
   let newExpr = expr;
   do {

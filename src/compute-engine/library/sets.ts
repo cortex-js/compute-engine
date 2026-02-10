@@ -13,7 +13,7 @@ import {
   MAX_SIZE_EAGER_COLLECTION,
 } from '../collection-utils';
 import type {
-  BoxedExpression,
+  Expression,
   SymbolDefinitions,
   IComputeEngine as ComputeEngine,
 } from '../global-types';
@@ -41,8 +41,8 @@ function typeIntersection(a: Type, b: Type): Type {
  */
 function listToIntervalInSetContext(
   ce: ComputeEngine,
-  expr: BoxedExpression
-): BoxedExpression {
+  expr: Expression
+): Expression {
   // Transform List with 2 elements to closed Interval
   if (expr.operator === 'List' && isFunction(expr) && expr.nops === 2) {
     return ce.function('Interval', [expr.op1.canonical, expr.op2.canonical]);
@@ -944,8 +944,8 @@ export const SETS_LIBRARY: SymbolDefinitions = {
 };
 
 function subset(
-  lhs: BoxedExpression,
-  rhs: BoxedExpression,
+  lhs: Expression,
+  rhs: Expression,
   strict = true
 ): boolean {
   if (!lhs.isCollection || !rhs.isCollection) return false;
@@ -954,9 +954,9 @@ function subset(
 }
 
 function union(
-  ops: ReadonlyArray<BoxedExpression>,
+  ops: ReadonlyArray<Expression>,
   { engine: ce }: { engine: ComputeEngine }
-): BoxedExpression | undefined {
+): Expression | undefined {
   // ops should be collections. If there are scalars, convert them to singleton sets
   const xs = ops.map((op) => (op.isCollection ? op : ce.function('Set', [op])));
 
@@ -964,7 +964,7 @@ function union(
   if (totalSize > MAX_SIZE_EAGER_COLLECTION) return ce._fn('Union', xs);
 
   // Keep only unique elements
-  const elements: BoxedExpression[] = [];
+  const elements: Expression[] = [];
   for (const op of xs) {
     for (const elem of op.each()) {
       if (elements.every((e) => !e.isSame(elem))) elements.push(elem);
@@ -976,12 +976,12 @@ function union(
 }
 
 function intersection(
-  ops: ReadonlyArray<BoxedExpression>,
+  ops: ReadonlyArray<Expression>,
   { engine: ce }: { engine: ComputeEngine }
-): BoxedExpression {
+): Expression {
   // @fixme: need to account for eager/lazy collections. See Union
   const firstOps = isFunction(ops[0]) ? ops[0].ops : [];
-  let elements: BoxedExpression[] = [...firstOps];
+  let elements: Expression[] = [...firstOps];
 
   // Remove elements that are not in all the other sets
   for (const op of ops.slice(1)) {
@@ -1000,18 +1000,18 @@ function intersection(
 }
 
 function setMinus(
-  _ops: BoxedExpression[],
+  _ops: Expression[],
   { engine: ce }: { engine: ComputeEngine }
-): BoxedExpression {
+): Expression {
   return ce.symbol('EmptySet');
 }
 
 function imaginaryIterator(
-  self: BoxedExpression
-): Iterator<BoxedExpression, undefined, any> {
+  self: Expression
+): Iterator<Expression, undefined, any> {
   const iterator = cantorEnumerateRationals();
   return {
-    next: (): IteratorResult<BoxedExpression, undefined> => {
+    next: (): IteratorResult<Expression, undefined> => {
       const { value, done } = iterator.next();
       if (done) return { value: undefined, done: true };
       const [n, d] = value;
@@ -1024,11 +1024,11 @@ function imaginaryIterator(
 }
 
 function complexIterator(
-  self: BoxedExpression
-): Iterator<BoxedExpression, undefined, any> {
+  self: Expression
+): Iterator<Expression, undefined, any> {
   const iterator = cantorEnumerateComplexNumbers();
   return {
-    next: (): IteratorResult<BoxedExpression, undefined> => {
+    next: (): IteratorResult<Expression, undefined> => {
       const { value, done } = iterator.next();
       if (done) return { value: undefined, done: true };
       const [re, im] = value;
@@ -1038,9 +1038,9 @@ function complexIterator(
 }
 
 function* rationalIterator(
-  self: BoxedExpression,
+  self: Expression,
   options?: { sign?: '+' | '-' | '+-'; includeZero?: boolean }
-): Generator<BoxedExpression> {
+): Generator<Expression> {
   const signOpt = options?.sign ?? '+-';
   const includeZero = options?.includeZero ?? true;
 
@@ -1062,7 +1062,7 @@ function* rationalIterator(
   }
 }
 
-function* integerIterator(self: BoxedExpression): Generator<BoxedExpression> {
+function* integerIterator(self: Expression): Generator<Expression> {
   for (const n of cantorEnumerateIntegers()) yield self.engine.number(n);
 }
 
@@ -1070,7 +1070,7 @@ function* integerRangeIterator(
   ce: ComputeEngine,
   start: number,
   step: number
-): Generator<BoxedExpression> {
+): Generator<Expression> {
   let n = start;
   while (true) {
     yield ce.number(n);
@@ -1079,10 +1079,10 @@ function* integerRangeIterator(
 }
 
 function* unionIterator(
-  col: BoxedExpression
-): Generator<BoxedExpression, undefined, any> {
+  col: Expression
+): Generator<Expression, undefined, any> {
   if (!isFunction(col)) return;
-  const seen: BoxedExpression[] = [];
+  const seen: Expression[] = [];
   for (const op of col.ops) {
     for (const elem of op.each()) {
       if (seen.every((e) => !e.contains(elem))) {
@@ -1094,8 +1094,8 @@ function* unionIterator(
 }
 
 function* setMinusIterator(
-  expr: BoxedExpression
-): Generator<BoxedExpression, undefined, any> {
+  expr: Expression
+): Generator<Expression, undefined, any> {
   if (!isFunction(expr)) return;
   const [col, ...values] = expr.ops;
   for (const elem of col.each()) {
@@ -1105,8 +1105,8 @@ function* setMinusIterator(
   }
 }
 function* complementIterator(
-  expr: BoxedExpression
-): Generator<BoxedExpression, undefined, any> {
+  expr: Expression
+): Generator<Expression, undefined, any> {
   if (!isFunction(expr)) return;
   const [col, ...others] = expr.ops;
   for (const elem of col.each()) {
@@ -1117,8 +1117,8 @@ function* complementIterator(
 }
 
 function* intersectionIterator(
-  expr: BoxedExpression
-): Generator<BoxedExpression, undefined, any> {
+  expr: Expression
+): Generator<Expression, undefined, any> {
   if (!isFunction(expr)) return;
   for (const elem of expr.ops[0].each()) {
     if (expr.ops.slice(1).every((op) => op.contains(elem))) {
@@ -1127,8 +1127,8 @@ function* intersectionIterator(
   }
 }
 function* symmetricDifferenceIterator(
-  expr: BoxedExpression
-): Generator<BoxedExpression, undefined, any> {
+  expr: Expression
+): Generator<Expression, undefined, any> {
   if (!isFunction(expr)) return;
   const [a, b] = expr.ops;
   for (const elem of a.each()) {
@@ -1145,8 +1145,8 @@ function* symmetricDifferenceIterator(
 
 // Helpers for efficient counting of set elements
 function countMatchingElements(
-  expr: BoxedExpression,
-  filter: (elem: BoxedExpression) => boolean
+  expr: Expression,
+  filter: (elem: Expression) => boolean
 ): number {
   if (!isFunction(expr)) return 0;
   if (expr.ops.some((op) => op.count === Infinity)) return Infinity;
@@ -1158,12 +1158,12 @@ function countMatchingElements(
 }
 
 function countMatchingUnion(
-  expr: BoxedExpression,
-  isUnique: (elem: BoxedExpression, seen: BoxedExpression[]) => boolean
+  expr: Expression,
+  isUnique: (elem: Expression, seen: Expression[]) => boolean
 ): number {
   if (!isFunction(expr)) return 0;
   if (expr.ops.some((op) => op.count === Infinity)) return Infinity;
-  const seen: BoxedExpression[] = [];
+  const seen: Expression[] = [];
   let count = 0;
   for (const op of expr.ops) {
     for (const elem of op.each()) {
@@ -1174,7 +1174,7 @@ function countMatchingUnion(
   return count;
 }
 
-function containsAll(expr: BoxedExpression, x: BoxedExpression): boolean {
+function containsAll(expr: Expression, x: Expression): boolean {
   if (!isFunction(expr)) return false;
   return expr.ops.every((op) => op.contains(x) ?? false);
 }

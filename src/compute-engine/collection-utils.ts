@@ -1,5 +1,5 @@
 import { widen } from '../common/type/utils';
-import { BoxedExpression, CollectionHandlers } from './global-types';
+import { Expression, CollectionHandlers } from './global-types';
 import { isFunction } from './boxed-expression/type-guards';
 
 /** If a collection has fewer than this many elements, eagerly evaluate it.
@@ -13,14 +13,14 @@ import { isFunction } from './boxed-expression/type-guards';
  */
 export const MAX_SIZE_EAGER_COLLECTION = 100;
 
-export function isFiniteIndexedCollection(col: BoxedExpression): boolean {
+export function isFiniteIndexedCollection(col: Expression): boolean {
   return (col.isFiniteCollection ?? false) && col.isIndexedCollection;
 }
 
 export function repeat(
-  value: BoxedExpression,
+  value: Expression,
   count?: number
-): Iterator<BoxedExpression> {
+): Iterator<Expression> {
   if (typeof count === 'number') {
     if (count < 0) count = 0;
     return {
@@ -53,8 +53,8 @@ export function repeat(
  * ```
  */
 export function zip(
-  items: ReadonlyArray<BoxedExpression>
-): Iterator<BoxedExpression[]> {
+  items: ReadonlyArray<Expression>
+): Iterator<Expression[]> {
   if (items.length === 0) {
     return {
       next() {
@@ -119,8 +119,8 @@ export function zip(
 }
 
 function collectionSubset(
-  a: BoxedExpression,
-  b: BoxedExpression,
+  a: Expression,
+  b: Expression,
   strict: boolean
 ): boolean | undefined {
   if (a.isFiniteCollection !== true || b.isFiniteCollection !== true)
@@ -142,8 +142,8 @@ function collectionSubset(
 }
 
 function basicCollectionIndexWhere(
-  expr: BoxedExpression,
-  predicate: (element: BoxedExpression) => boolean
+  expr: Expression,
+  predicate: (element: Expression) => boolean
 ): number | undefined {
   if (!isFunction(expr)) return undefined;
   for (let i = 0; i !== expr.nops; i += 1)
@@ -153,8 +153,8 @@ function basicCollectionIndexWhere(
 }
 
 function collectionIndexWhere(
-  expr: BoxedExpression,
-  predicate: (element: BoxedExpression) => boolean
+  expr: Expression,
+  predicate: (element: Expression) => boolean
 ): number | undefined {
   if (expr.isIndexedCollection !== true) return undefined;
 
@@ -170,8 +170,8 @@ function collectionIndexWhere(
 }
 
 function collectionContains(
-  expr: BoxedExpression,
-  target: BoxedExpression
+  expr: Expression,
+  target: Expression
 ): boolean | undefined {
   if (expr.isFiniteCollection !== true) return undefined;
 
@@ -223,9 +223,9 @@ export function basicIndexedCollectionHandlers(): CollectionHandlers {
     subsetOf: collectionSubset,
 
     at: (
-      expr: BoxedExpression,
+      expr: Expression,
       index: number | string
-    ): undefined | BoxedExpression => {
+    ): undefined | Expression => {
       if (typeof index !== 'number' || !isFunction(expr)) return undefined;
       if (index < 0) index = expr.nops + index + 1;
       if (index < 1 || index > expr.nops) return undefined;

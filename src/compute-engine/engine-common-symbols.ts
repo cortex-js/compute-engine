@@ -2,12 +2,12 @@ import { BoxedSymbol } from './boxed-expression/boxed-symbol';
 
 import type {
   BoxedDefinition,
-  BoxedExpression,
+  Expression,
   IComputeEngine as ComputeEngine,
 } from './global-types';
 
 export type CommonSymbolTable = {
-  [symbol: string]: null | BoxedExpression;
+  [symbol: string]: null | Expression;
 };
 
 function lookupDefinition(

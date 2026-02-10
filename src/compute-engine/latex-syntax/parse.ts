@@ -1,5 +1,5 @@
 import type {
-  MathJsonExpression as Expression,
+  MathJsonExpression,
   ExpressionObject,
   MathJsonSymbol,
 } from '../../math-json/types';
@@ -433,7 +433,7 @@ export class _Parser implements Parser {
     return match;
   }
 
-  boundaryError(msg: string | [string, ...Expression[]]): Expression {
+  boundaryError(msg: string | [string, ...MathJsonExpression[]]): MathJsonExpression {
     const currentBoundary = this._boundaries[this._boundaries.length - 1];
     this._boundaries.pop();
     return this.error(msg, currentBoundary.index);
@@ -985,7 +985,7 @@ export class _Parser implements Parser {
     return true;
   }
 
-  parseGroup(): Expression | null {
+  parseGroup(): MathJsonExpression | null {
     const start = this.index;
     this.skipSpaceTokens();
     if (this.match('<{>')) {
@@ -1004,7 +1004,7 @@ export class _Parser implements Parser {
     return null;
   }
 
-  parseOptionalGroup(): Expression | null {
+  parseOptionalGroup(): MathJsonExpression | null {
     const index = this.index;
     this.skipSpaceTokens();
     if (this.match('[')) {
@@ -1022,7 +1022,7 @@ export class _Parser implements Parser {
   // for example `^` , `\sqrt` or `\frac`.
   // This argument will usually be a single token, but can be a sequence of
   // tokens (e.g. `\sqrt\frac12` or `\sqrt\operatorname{speed}`).
-  parseToken(): Expression | null {
+  parseToken(): MathJsonExpression | null {
     // Skip any white space, for example in `\frac5 7`
     this.skipSpace();
 
@@ -1047,11 +1047,11 @@ export class _Parser implements Parser {
    * Return rows of sparse columns: empty rows are indicated with `Nothing`,
    * and empty cells are also indicated with `Nothing`.
    */
-  parseTabular(): null | Expression[][] {
-    const result: Expression[][] = [];
+  parseTabular(): null | MathJsonExpression[][] {
+    const result: MathJsonExpression[][] = [];
 
-    let row: Expression[] = [];
-    let expr: Expression | null = null;
+    let row: MathJsonExpression[] = [];
+    let expr: MathJsonExpression | null = null;
     while (!this.atBoundary) {
       this.skipSpace();
 
@@ -1072,7 +1072,7 @@ export class _Parser implements Parser {
         row = [];
         expr = null;
       } else {
-        const cell: Expression[] = [];
+        const cell: MathJsonExpression[] = [];
         let peek = this.peek;
         while (
           peek !== '&' &&
@@ -1164,7 +1164,7 @@ export class _Parser implements Parser {
 
   /** Parse an environment: `\begin{env}...\end{end}`
    */
-  private parseEnvironment(until?: Readonly<Terminator>): Expression | null {
+  private parseEnvironment(until?: Readonly<Terminator>): MathJsonExpression | null {
     const index = this.index;
 
     if (!this.match('\\begin')) return null;
@@ -1202,11 +1202,11 @@ export class _Parser implements Parser {
     return _parseRepeatingDecimal(this, this._numberFormatTokens);
   }
 
-  parseNumber(): Expression | null {
+  parseNumber(): MathJsonExpression | null {
     return _parseNumber(this, this._numberFormatTokens);
   }
 
-  private parsePrefixOperator(until?: Readonly<Terminator>): Expression | null {
+  private parsePrefixOperator(until?: Readonly<Terminator>): MathJsonExpression | null {
     if (!until) until = { minPrec: 0 };
     if (!until.minPrec) until = { ...until, minPrec: 0 };
 
@@ -1221,9 +1221,9 @@ export class _Parser implements Parser {
   }
 
   private parseInfixOperator(
-    lhs: Expression,
+    lhs: MathJsonExpression,
     until?: Readonly<Terminator>
-  ): Expression | null {
+  ): MathJsonExpression | null {
     until ??= { minPrec: 0 };
     console.assert(until.minPrec !== undefined);
     if (until.minPrec === undefined) until = { ...until, minPrec: 0 };
@@ -1253,7 +1253,7 @@ export class _Parser implements Parser {
   parseArguments(
     kind: 'enclosure' | 'implicit' = 'enclosure',
     until?: Readonly<Terminator>
-  ): ReadonlyArray<Expression> | null {
+  ): ReadonlyArray<MathJsonExpression> | null {
     if (this.atTerminator(until)) return null;
 
     const savedIndex = this.index;
@@ -1304,7 +1304,7 @@ export class _Parser implements Parser {
    * optionally followed multiple times by a separator and another expression,
    * and finally a closing matching operator.
    */
-  parseEnclosure(): Expression | null {
+  parseEnclosure(): MathJsonExpression | null {
     const start = this.index;
     const currentToken = this.peek;
 
@@ -1410,11 +1410,11 @@ export class _Parser implements Parser {
 
   private parseGenericExpression(
     until?: Readonly<Terminator>
-  ): Expression | null {
+  ): MathJsonExpression | null {
     if (this.atTerminator(until)) return null;
 
     const start = this.index;
-    let expr: Expression | null = null;
+    let expr: MathJsonExpression | null = null;
     const fnDefs = this.peekDefinitions('expression') ?? [];
     for (const [def, tokenCount] of fnDefs) {
       // Skip the trigger tokens
@@ -1437,7 +1437,7 @@ export class _Parser implements Parser {
    * (`\prime`...) and some arguments.
    */
 
-  private parseFunction(until?: Readonly<Terminator>): Expression | null {
+  private parseFunction(until?: Readonly<Terminator>): MathJsonExpression | null {
     if (this.atTerminator(until)) return null;
 
     const start = this.index;
@@ -1445,7 +1445,7 @@ export class _Parser implements Parser {
     // Is there a definition for this as a function? (a string wrapped in
     //  `\\mathrm`, etc...)
     //
-    let fn: Expression | null = null;
+    let fn: MathJsonExpression | null = null;
     let argMode: 'enclosure' | 'implicit' = 'enclosure';
     for (const [def, tokenCount] of this.peekDefinitions('function')) {
       // Skip the trigger tokens
@@ -1509,7 +1509,7 @@ export class _Parser implements Parser {
     return typeof fn === 'string' ? [fn, ...args] : ['Apply', fn!, ...args];
   }
 
-  parseSymbol(until?: Readonly<Terminator>): Expression | null {
+  parseSymbol(until?: Readonly<Terminator>): MathJsonExpression | null {
     if (this.atTerminator(until)) return null;
 
     const start = this.index;
@@ -1547,7 +1547,7 @@ export class _Parser implements Parser {
    */
   private tryParseBareFunction(
     until?: Readonly<Terminator>
-  ): Expression | null {
+  ): MathJsonExpression | null {
     if (this.options.strict !== false) return null;
 
     const start = this.index;
@@ -1658,7 +1658,7 @@ export class _Parser implements Parser {
    * - furthermore, in LaTeX `x^a^b` parses the same as `x^a{}^b`.
    *
    */
-  private parseSupsub(lhs: Expression): Expression | null {
+  private parseSupsub(lhs: MathJsonExpression): MathJsonExpression | null {
     if (this.atEnd) return lhs;
     console.assert(lhs !== null);
 
@@ -1668,8 +1668,8 @@ export class _Parser implements Parser {
     //
     // 1/ Gather possible superscript/subscripts
     //
-    const superscripts: Expression[] = [];
-    const subscripts: Expression[] = [];
+    const superscripts: MathJsonExpression[] = [];
+    const subscripts: MathJsonExpression[] = [];
     let subIndex = index;
     while (this.peek === '_' || this.peek === '^') {
       if (this.match('_')) {
@@ -1718,7 +1718,7 @@ export class _Parser implements Parser {
       return lhs;
     }
 
-    let result: Expression | null = lhs;
+    let result: MathJsonExpression | null = lhs;
 
     //
     // 2/ Apply subscripts (first)
@@ -1728,7 +1728,7 @@ export class _Parser implements Parser {
         (x) => x.latexTrigger === '_'
       ) as IndexedInfixEntry[];
       if (defs) {
-        const arg: Expression = [
+        const arg: MathJsonExpression = [
           'Subscript',
           result,
           subscripts.length === 1 ? subscripts[0] : ['List', ...subscripts],
@@ -1753,13 +1753,13 @@ export class _Parser implements Parser {
       if (defs) {
         const nonEmptySuperscripts = superscripts.filter(
           (x) => !isEmptySequence(x)
-        ) as Expression[];
+        ) as MathJsonExpression[];
         if (nonEmptySuperscripts.length !== 0) {
-          const superscriptExpression: Expression =
+          const superscriptExpression: MathJsonExpression =
             nonEmptySuperscripts.length === 1
               ? nonEmptySuperscripts[0]
               : ['List', ...nonEmptySuperscripts];
-          const arg: Expression = [
+          const arg: MathJsonExpression = [
             'Superscript',
             result!,
             superscriptExpression,
@@ -1781,9 +1781,9 @@ export class _Parser implements Parser {
   }
 
   parsePostfixOperator(
-    lhs: Expression | null,
+    lhs: MathJsonExpression | null,
     until?: Readonly<Terminator>
-  ): Expression | null {
+  ): MathJsonExpression | null {
     console.assert(lhs !== null); // @todo validate
     if (lhs === null || this.atEnd) return null;
 
@@ -1810,7 +1810,7 @@ export class _Parser implements Parser {
    * to any entry in the LaTeX dictionary, or ran into it in an unexpected
    * context (postfix operator lacking an argument, for example)
    */
-  parseSyntaxError(): Expression {
+  parseSyntaxError(): MathJsonExpression {
     const start = this.index;
 
     //
@@ -1958,12 +1958,12 @@ export class _Parser implements Parser {
    *  <matchfix-op-close>
    *
    */
-  private parsePrimary(until?: Readonly<Terminator>): Expression | null {
+  private parsePrimary(until?: Readonly<Terminator>): MathJsonExpression | null {
     if (this.atBoundary) return null;
 
     if (this.atTerminator(until)) return null;
 
-    let result: Expression | null = null;
+    let result: MathJsonExpression | null = null;
     const start = this.index;
 
     //
@@ -2038,7 +2038,7 @@ export class _Parser implements Parser {
     //
     if (result !== null) {
       result = this.decorate(result, start);
-      let postfix: Expression | null = null;
+      let postfix: MathJsonExpression | null = null;
       let index = this.index;
       do {
         postfix = this.parsePostfixOperator(result, until);
@@ -2080,7 +2080,7 @@ export class _Parser implements Parser {
    * Stop when an operator of precedence less than `until.minPrec`
    * is encountered
    */
-  parseExpression(until?: Readonly<Terminator>): Expression | null {
+  parseExpression(until?: Readonly<Terminator>): MathJsonExpression | null {
     // We want to skip spaces before parsing the expression
     // That way, an "empty" `{}` expression is still considered
     // valid.
@@ -2159,14 +2159,14 @@ export class _Parser implements Parser {
   /**
    * Add LaTeX or other requested metadata to the expression
    */
-  decorate(expr: Expression | null, start: number): Expression | null {
+  decorate(expr: MathJsonExpression | null, start: number): MathJsonExpression | null {
     if (expr === null) return null;
     if (!this.options.preserveLatex) return expr;
 
     const latex = this.latex(start, this.index);
 
     if (Array.isArray(expr)) {
-      expr = { latex, fn: expr } as Expression;
+      expr = { latex, fn: expr } as MathJsonExpression;
     } else if (typeof expr === 'number') {
       expr = { latex, num: Number(expr).toString() };
     } else if (typeof expr === 'string') {
@@ -2184,10 +2184,10 @@ export class _Parser implements Parser {
   }
 
   error(
-    code: string | [string, ...Expression[]],
+    code: string | [string, ...MathJsonExpression[]],
     fromToken: number
-  ): Expression {
-    let msg: Expression;
+  ): MathJsonExpression {
+    let msg: MathJsonExpression;
     if (typeof code === 'string') {
       console.assert(!code.startsWith("'"));
       msg = { str: code };
@@ -2307,7 +2307,7 @@ export function parse(
   latex: string,
   dictionary: IndexedLatexDictionary,
   options: Readonly<ParseLatexOptions>
-): Expression | null {
+): MathJsonExpression | null {
   const parser = new _Parser(tokenize(latex), dictionary, options);
 
   let expr = parser.parseExpression();
@@ -2323,7 +2323,7 @@ export function parse(
   expr ??= 'Nothing';
 
   if (options.preserveLatex) {
-    if (Array.isArray(expr)) return { latex, fn: expr } as Expression;
+    if (Array.isArray(expr)) return { latex, fn: expr } as MathJsonExpression;
 
     if (typeof expr === 'number')
       return { latex, num: Number(expr).toString() };

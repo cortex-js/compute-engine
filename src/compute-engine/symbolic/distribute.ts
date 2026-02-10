@@ -1,12 +1,12 @@
-import type { BoxedExpression } from '../global-types';
+import type { Expression } from '../global-types';
 import { isFunction } from '../boxed-expression/type-guards';
 
 function distribute2(
-  lhs: BoxedExpression,
-  rhs: BoxedExpression,
+  lhs: Expression,
+  rhs: Expression,
   g: string,
   f: string
-): BoxedExpression {
+): Expression {
   const ce = lhs.engine;
 
   if (lhs.operator === g && isFunction(lhs))
@@ -22,10 +22,10 @@ function distribute2(
  */
 
 export function distribute(
-  expr: BoxedExpression,
+  expr: Expression,
   g = 'Add',
   f = 'Multiply'
-): BoxedExpression {
+): Expression {
   if (expr.operator !== f || !isFunction(expr)) return expr;
   const ops = expr.ops;
   if (ops.length < 2) return expr;

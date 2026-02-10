@@ -2,7 +2,7 @@ import { MathJsonSymbol } from '../math-json';
 import { cmp } from './boxed-expression/compare';
 import type {
   BoxedDefinition,
-  BoxedExpression,
+  Expression,
   IComputeEngine as ComputeEngine,
   Scope,
 } from './global-types';
@@ -47,8 +47,8 @@ import { isSymbol, isFunction } from './boxed-expression/type-guards';
  * From an expression, return a predicate function, which can be used to filter.
  */
 export function predicate(
-  _expr: BoxedExpression
-): (...args: BoxedExpression[]) => boolean {
+  _expr: Expression
+): (...args: Expression[]) => boolean {
   // @todo
   return () => false;
 }
@@ -57,13 +57,13 @@ export function predicate(
  * From an expression, create an ordering function, which can be used to sort.
  */
 export function order(
-  _expr: BoxedExpression
-): (a: BoxedExpression, b: BoxedExpression) => -1 | 0 | 1 {
+  _expr: Expression
+): (a: Expression, b: Expression) => -1 | 0 | 1 {
   // @todo
   //
   // Default comparator
   //
-  return (a: BoxedExpression, b: BoxedExpression) => {
+  return (a: Expression, b: Expression) => {
     const c = cmp(a, b);
     if (c === '=') return 0;
     if (c === '<' || c === '<=') return -1;
@@ -102,8 +102,8 @@ export function order(
  *
  */
 export function canonicalFunctionLiteral(
-  expr: BoxedExpression | undefined
-): BoxedExpression | undefined {
+  expr: Expression | undefined
+): Expression | undefined {
   if (!expr) return undefined;
 
   //
@@ -170,7 +170,7 @@ export function canonicalFunctionLiteral(
     // We need to extract the wildcards from the body. The wildcards can
     // be `_`, `_1`, `_2`, etc.
     let i = 1;
-    let params: BoxedExpression[] = [];
+    let params: Expression[] = [];
     while (i < 10) {
       if (body.has(`_${i}`))
         params.push(body.engine.symbol(`_${i}`, { canonical: false }));
@@ -207,8 +207,8 @@ export function canonicalFunctionLiteral(
  */
 export function canonicalFunctionLiteralArguments(
   ce: ComputeEngine,
-  ops: ReadonlyArray<BoxedExpression>
-): BoxedExpression | undefined {
+  ops: ReadonlyArray<Expression>
+): Expression | undefined {
   if (ops.length === 0) return undefined;
 
   // If the body is not scoped, we need to create a new scope
@@ -249,9 +249,9 @@ export function canonicalFunctionLiteralArguments(
  * - the symbol for a function, e.g. `Sin`.
  */
 export function apply(
-  fn: BoxedExpression,
-  args: ReadonlyArray<BoxedExpression>
-): BoxedExpression {
+  fn: Expression,
+  args: ReadonlyArray<Expression>
+): Expression {
   const result = makeLambda(fn)?.(args);
   if (result) return result;
   return fn.engine.function('Apply', [fn, ...args]);
@@ -263,8 +263,8 @@ export function apply(
  */
 
 function makeLambda(
-  expr: BoxedExpression
-): (params: ReadonlyArray<BoxedExpression>) => BoxedExpression | undefined {
+  expr: Expression
+): (params: ReadonlyArray<Expression>) => Expression | undefined {
   const ce = expr.engine;
 
   // If the expression is a symbol, interpret it as an operator
@@ -378,7 +378,7 @@ function makeLambda(
  * created and there is a single numeric argument
  */
 export function makeLambdaN1(
-  expr: BoxedExpression
+  expr: Expression
 ): ((arg: number) => number) | undefined {
   const lambda = makeLambda(expr);
   if (!lambda) return undefined;
@@ -397,8 +397,8 @@ export function makeLambdaN1(
  * return a JS function that can be called with arguments.
  */
 export function applicable(
-  fn: BoxedExpression
-): (xs: ReadonlyArray<BoxedExpression>) => BoxedExpression | undefined {
+  fn: Expression
+): (xs: ReadonlyArray<Expression>) => Expression | undefined {
   return (
     makeLambda(fn) ??
     ((xs) => fn.engine.function('Apply', [fn, ...xs]).evaluate())
@@ -413,7 +413,7 @@ export function applicable(
  * with an argument.
  *
  */
-export function applicableN1(fn: BoxedExpression): (x: number) => number {
+export function applicableN1(fn: Expression): (x: number) => number {
   const lambda = makeLambda(fn);
   const ce = fn.engine;
 

@@ -1,5 +1,5 @@
 import type {
-  BoxedExpression,
+  Expression,
   IComputeEngine as ComputeEngine,
 } from '../global-types';
 import { isOperatorDef } from '../boxed-expression/utils';
@@ -23,8 +23,8 @@ export class BaseCompiler {
    * Compile an expression to target language source code
    */
   static compile(
-    expr: BoxedExpression | undefined,
-    target: CompileTarget<BoxedExpression>,
+    expr: Expression | undefined,
+    target: CompileTarget<Expression>,
     prec = 0
   ): TargetSource {
     if (expr === undefined) return '';
@@ -74,9 +74,9 @@ export class BaseCompiler {
   static compileExpr(
     engine: ComputeEngine,
     h: string,
-    args: ReadonlyArray<BoxedExpression>,
+    args: ReadonlyArray<Expression>,
     prec: number,
-    target: CompileTarget<BoxedExpression>
+    target: CompileTarget<Expression>
   ): TargetSource {
     if (h === 'Error') throw new Error('Error');
 
@@ -209,8 +209,8 @@ export class BaseCompiler {
    * Compile a block expression
    */
   private static compileBlock(
-    args: ReadonlyArray<BoxedExpression>,
-    target: CompileTarget<BoxedExpression>
+    args: ReadonlyArray<Expression>,
+    target: CompileTarget<Expression>
   ): TargetSource {
     // Get all the Declare statements
     const locals: string[] = [];
@@ -247,8 +247,8 @@ export class BaseCompiler {
    */
   private static compileLoop(
     h: string,
-    args: ReadonlyArray<BoxedExpression>,
-    target: CompileTarget<BoxedExpression>
+    args: ReadonlyArray<Expression>,
+    target: CompileTarget<Expression>
   ): string {
     if (args === null) throw new Error('Sum/Product: no arguments');
     if (!args[0]) throw new Error('Sum/Product: no body');

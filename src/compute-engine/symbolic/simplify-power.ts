@@ -1,4 +1,4 @@
-import type { BoxedExpression, RuleStep } from '../global-types';
+import type { Expression, RuleStep } from '../global-types';
 import { asRational } from '../boxed-expression/numerics';
 import {
   factorPerfectSquare,
@@ -23,7 +23,7 @@ import {
  * IMPORTANT: Do not call .simplify() on results to avoid infinite recursion.
  */
 
-export function simplifyPower(x: BoxedExpression): RuleStep | undefined {
+export function simplifyPower(x: Expression): RuleStep | undefined {
   const op = x.operator;
   const ce = x.engine;
 
@@ -176,8 +176,8 @@ export function simplifyPower(x: BoxedExpression): RuleStep | undefined {
     ) {
       const n = rootIndex.re;
       if (n !== undefined && Number.isInteger(n) && n >= 2) {
-        const insideRoot: BoxedExpression[] = [];
-        const outsideRoot: BoxedExpression[] = [];
+        const insideRoot: Expression[] = [];
+        const outsideRoot: Expression[] = [];
 
         for (const factor of arg.ops) {
           // Try to simplify root(factor, n) individually
@@ -332,8 +332,8 @@ export function simplifyPower(x: BoxedExpression): RuleStep | undefined {
     // sqrt(x^2 * y) -> |x| * sqrt(y)
     // sqrt(x^{2n} * y) -> |x|^n * sqrt(y)
     if (arg.operator === 'Multiply' && isFunction(arg)) {
-      const perfectSquares: BoxedExpression[] = [];
-      const remaining: BoxedExpression[] = [];
+      const perfectSquares: Expression[] = [];
+      const remaining: Expression[] = [];
 
       for (const factor of arg.ops) {
         if (

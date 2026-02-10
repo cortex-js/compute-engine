@@ -1,4 +1,4 @@
-import type { MathJsonExpression as Expression } from '../../../math-json/types';
+import type { MathJsonExpression } from '../../../math-json/types';
 import { isValidSymbol } from '../../../math-json/symbols';
 import {
   foldAssociativeOperator,
@@ -200,7 +200,7 @@ function addEntry(
     let parse = entry.parse;
     if (!parse && entry.name) {
       if (kind === 'postfix' || kind === 'prefix')
-        parse = (_parser, expr) => [entry.name!, expr] as Expression;
+        parse = (_parser, expr) => [entry.name!, expr] as MathJsonExpression;
       else parse = entry.name;
     }
 
@@ -453,7 +453,7 @@ function makeIndexedEntry(
   }
 
   //
-  // 3. Expression definition
+  // 3. MathJsonExpression definition
   //
   if (result.kind === 'expression' && isExpressionEntry(entry)) {
     result.precedence = entry.precedence ?? 10000;
@@ -639,7 +639,7 @@ function makeParseHandler(
 
   const kind = ('kind' in entry ? entry.kind : 'expression') ?? 'expression';
 
-  // If there is a parse handler as an Expression , use the
+  // If there is a parse handler as an MathJsonExpression , use the
   // expression, but depending on the kind of the entry
 
   //
@@ -782,12 +782,12 @@ function makeParseHandler(
   }
 
   //
-  // Expression
+  // MathJsonExpression
   //
   if (kind === 'expression') {
     // If no parse funtion provided, parse as a symbol
     const parseResult = entry.parse ?? entry.name ?? idTrigger;
-    if (parseResult) return () => parseResult as Expression;
+    if (parseResult) return () => parseResult as MathJsonExpression;
   }
 
   //
@@ -795,7 +795,7 @@ function makeParseHandler(
   //
   if ('parse' in entry) {
     const parseResult = entry.parse;
-    return () => parseResult as Expression;
+    return () => parseResult as MathJsonExpression;
   }
 
   return undefined;

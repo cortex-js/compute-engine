@@ -1,4 +1,4 @@
-import type { BoxedExpression } from '../global-types';
+import type { Expression } from '../global-types';
 import { asSmallInteger } from './numerics';
 import { isSymbol, isFunction, isNumber } from './type-guards';
 
@@ -8,7 +8,7 @@ import { isSymbol, isFunction, isNumber } from './type-guards';
  *
  * `3√2x^5y^3` -> 5 + 3 = 8
  */
-export function totalDegree(expr: BoxedExpression): number {
+export function totalDegree(expr: Expression): number {
   // e.g. "x"
   if (isSymbol(expr) && !expr.isConstant) return 1;
 
@@ -51,7 +51,7 @@ export function totalDegree(expr: BoxedExpression): number {
  * `3√2x^5y^3` -> 5
  *
  */
-export function maxDegree(expr: BoxedExpression): number {
+export function maxDegree(expr: Expression): number {
   // e.g. "x"
   if (isSymbol(expr) && !expr.isConstant) return 1;
 
@@ -83,7 +83,7 @@ export function maxDegree(expr: BoxedExpression): number {
   return 0;
 }
 
-export function lex(expr: BoxedExpression): string {
+export function lex(expr: Expression): string {
   // Consider symbols, but ignore constants such as "Pi" or "ExponentialE"
   if (isSymbol(expr) && !expr.isConstant) return expr.symbol;
   if (!isFunction(expr)) return '';
@@ -93,6 +93,6 @@ export function lex(expr: BoxedExpression): string {
     .trim();
 }
 
-export function revlex(expr: BoxedExpression): string {
+export function revlex(expr: Expression): string {
   return lex(expr).split(' ').reverse().join(' ').trim();
 }

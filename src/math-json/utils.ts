@@ -1,5 +1,5 @@
 import type {
-  MathJsonExpression as Expression,
+  MathJsonExpression,
   ExpressionObject,
   MathJsonAttributes,
   MathJsonFunctionObject,
@@ -11,10 +11,10 @@ import type {
   DictionaryValue,
 } from './types';
 
-export const MISSING: Expression = ['Error', "'missing'"];
+export const MISSING: MathJsonExpression = ['Error', "'missing'"];
 
 export function isNumberExpression(
-  expr: Expression | null
+  expr: MathJsonExpression | null
 ): expr is number | string | MathJsonNumberObject {
   if (typeof expr === 'number' || isNumberObject(expr)) return true;
   if (typeof expr === 'string' && matchesNumber(expr)) return true;
@@ -22,25 +22,25 @@ export function isNumberExpression(
 }
 
 export function isNumberObject(
-  expr: Expression | null
+  expr: MathJsonExpression | null
 ): expr is MathJsonNumberObject {
   return expr !== null && typeof expr === 'object' && 'num' in expr;
 }
 
 export function isSymbolObject(
-  expr: Expression | null
+  expr: MathJsonExpression | null
 ): expr is MathJsonSymbolObject {
   return expr !== null && typeof expr === 'object' && 'sym' in expr;
 }
 
 export function isStringObject(
-  expr: Expression | null
+  expr: MathJsonExpression | null
 ): expr is MathJsonStringObject {
   return expr !== null && typeof expr === 'object' && 'str' in expr;
 }
 
 export function isDictionaryObject(
-  expr: Expression | null
+  expr: MathJsonExpression | null
 ): expr is MathJsonDictionaryObject {
   return (
     expr !== null &&
@@ -53,7 +53,7 @@ export function isDictionaryObject(
 }
 
 export function isFunctionObject(
-  expr: Expression | null
+  expr: MathJsonExpression | null
 ): expr is MathJsonFunctionObject {
   return (
     expr !== null &&
@@ -66,7 +66,7 @@ export function isFunctionObject(
 }
 
 export function isExpressionObject(
-  expr: Expression | null
+  expr: MathJsonExpression | null
 ): expr is ExpressionObject {
   return (
     expr !== null &&
@@ -80,7 +80,7 @@ export function isExpressionObject(
  * (`latex` or `wikidata`) with a non-undefined value.
  */
 export function hasMetaData(
-  expr: Expression | null
+  expr: MathJsonExpression | null
 ): expr is ExpressionObject & Partial<MathJsonAttributes> {
   return (
     isExpressionObject(expr) &&
@@ -95,7 +95,7 @@ export function hasMetaData(
  * **U+0027 APOSTROPHE** : **`'`** or an object literal with a `str` key.
  */
 export function stringValue(
-  expr: Expression | null | undefined
+  expr: MathJsonExpression | null | undefined
 ): string | null {
   if (expr === null || expr === undefined) return null;
   if (typeof expr === 'object' && 'str' in expr) return expr.str;
@@ -107,8 +107,8 @@ export function stringValue(
 }
 
 export function stripText(
-  expr: Expression | null | undefined
-): Expression | null {
+  expr: MathJsonExpression | null | undefined
+): MathJsonExpression | null {
   if (expr === null || expr === undefined || stringValue(expr) !== null)
     return null;
 
@@ -130,7 +130,7 @@ export function stripText(
  * Examples:
  * * `["Negate", 5]`  -> `"Negate"`
  */
-export function operator(expr: Expression | null | undefined): MathJsonSymbol {
+export function operator(expr: MathJsonExpression | null | undefined): MathJsonSymbol {
   if (Array.isArray(expr)) return expr[0];
 
   if (expr === null || expr === undefined) return '';
@@ -145,9 +145,9 @@ export function operator(expr: Expression | null | undefined): MathJsonSymbol {
  * or no arguments.
  */
 export function operands(
-  expr: Expression | null | undefined
-): ReadonlyArray<Expression> {
-  if (Array.isArray(expr)) return expr.slice(1) as Expression[];
+  expr: MathJsonExpression | null | undefined
+): ReadonlyArray<MathJsonExpression> {
+  if (Array.isArray(expr)) return expr.slice(1) as MathJsonExpression[];
   if (expr !== undefined && isFunctionObject(expr)) return expr.fn.slice(1);
 
   return [];
@@ -155,9 +155,9 @@ export function operands(
 
 /** Return the nth operand of a function expression */
 export function operand(
-  expr: Expression | null,
+  expr: MathJsonExpression | null,
   n: 1 | 2 | 3
-): Expression | null {
+): MathJsonExpression | null {
   if (Array.isArray(expr)) return expr[n] ?? null;
 
   if (expr === null || !isFunctionObject(expr)) return null;
@@ -165,20 +165,20 @@ export function operand(
   return expr.fn[n] ?? null;
 }
 
-export function nops(expr: Expression | null | undefined): number {
+export function nops(expr: MathJsonExpression | null | undefined): number {
   if (expr === null || expr === undefined) return 0;
   if (Array.isArray(expr)) return Math.max(0, expr.length - 1);
   if (isFunctionObject(expr)) return Math.max(0, expr.fn.length - 1);
   return 0;
 }
 
-export function unhold(expr: Expression | null): Expression | null {
+export function unhold(expr: MathJsonExpression | null): MathJsonExpression | null {
   if (expr === null || expr === undefined) return null;
   if (operator(expr) === 'Hold') return operand(expr, 1);
   return expr;
 }
 
-export function symbol(expr: Expression | null | undefined): string | null {
+export function symbol(expr: MathJsonExpression | null | undefined): string | null {
   // Is it a symbol shorthand?
   if (typeof expr === 'string' && matchesSymbol(expr)) {
     if (expr.length >= 2 && expr.at(0) === '`' && expr.at(-1) === '`')
@@ -193,8 +193,8 @@ export function symbol(expr: Expression | null | undefined): string | null {
 }
 
 function keyValuePair(
-  expr: Expression | null | undefined
-): null | [key: string, value: Expression] {
+  expr: MathJsonExpression | null | undefined
+): null | [key: string, value: MathJsonExpression] {
   const h = operator(expr);
   if (h === 'KeyValuePair' || h === 'Tuple' || h === 'Pair') {
     const [k, v] = operands(expr);
@@ -210,7 +210,7 @@ function keyValuePair(
 // - a `Dictionary` expression
 // - a `KeyValuePair` or `Tuple` expression
 export function dictionaryFromExpression(
-  expr: Expression | null
+  expr: MathJsonExpression | null
 ): null | MathJsonDictionaryObject {
   if (expr === null) return null;
 
@@ -238,8 +238,8 @@ export function dictionaryFromExpression(
 }
 
 export function dictionaryFromEntries(
-  dict: Record<string, Expression>
-): Expression {
+  dict: Record<string, MathJsonExpression>
+): MathJsonExpression {
   const entries: Record<string, unknown> = Object.fromEntries(
     Object.entries(dict).map(([k, v]) => [
       k,
@@ -275,7 +275,7 @@ function machineValueOfString(s: string): number {
  *  has a precision outside of the machine range.
  */
 export function machineValue(
-  expr: Expression | null | undefined
+  expr: MathJsonExpression | null | undefined
 ): number | null {
   if (typeof expr === 'number') return expr;
 
@@ -301,7 +301,7 @@ export function machineValue(
  * The denominator is always > 0.
  */
 export function rationalValue(
-  expr: Expression | undefined | null
+  expr: MathJsonExpression | undefined | null
 ): [number, number] | null {
   if (expr === undefined || expr === null) return null;
 
@@ -359,9 +359,9 @@ export function rationalValue(
  * Apply a substitution to an expression.
  */
 export function subs(
-  expr: Expression,
-  s: { [symbol: string]: Expression }
-): Expression {
+  expr: MathJsonExpression,
+  s: { [symbol: string]: MathJsonExpression }
+): MathJsonExpression {
   const sym = symbol(expr);
   if (sym && s[sym]) return s[sym];
 
@@ -378,8 +378,8 @@ export function subs(
 /**
  * Apply a function to the arguments of a function and return an array of T
  */
-export function mapArgs<T>(expr: Expression, fn: (x: Expression) => T): T[] {
-  let args: Expression[] | null = null;
+export function mapArgs<T>(expr: MathJsonExpression, fn: (x: MathJsonExpression) => T): T[] {
+  let args: MathJsonExpression[] | null = null;
   if (Array.isArray(expr)) args = expr;
   if (isFunctionObject(expr)) args = expr.fn;
   if (args === null) return [];
@@ -399,9 +399,9 @@ export function mapArgs<T>(expr: Expression, fn: (x: Expression) => T): T[] {
  */
 export function foldAssociativeOperator(
   op: string,
-  lhs: Expression,
-  rhs: Expression
-): Expression {
+  lhs: MathJsonExpression,
+  rhs: MathJsonExpression
+): MathJsonExpression {
   const lhsName = operator(lhs);
   const rhsName = operator(rhs);
 
@@ -415,8 +415,8 @@ export function foldAssociativeOperator(
 
 /** Return the elements of a sequence, or null if the expression is not a sequence. The sequence can be optionally enclosed by a`["Delimiter"]` expression  */
 export function getSequence(
-  expr: Expression | null | undefined
-): ReadonlyArray<Expression> | null {
+  expr: MathJsonExpression | null | undefined
+): ReadonlyArray<MathJsonExpression> | null {
   if (expr === null || expr === undefined) return null;
 
   let h = operator(expr);
@@ -434,7 +434,7 @@ export function getSequence(
 
 /** `Nothing` or the empty sequence (`["Sequence"]`) */
 export function isEmptySequence(
-  expr: Expression | null | undefined
+  expr: MathJsonExpression | null | undefined
 ): expr is null | undefined {
   if (expr === null || expr === undefined) return true;
   if (expr === 'Nothing') return true;
@@ -442,12 +442,12 @@ export function isEmptySequence(
 }
 
 export function missingIfEmpty(
-  expr: Expression | null | undefined
-): Expression {
+  expr: MathJsonExpression | null | undefined
+): MathJsonExpression {
   return isEmptySequence(expr) ? MISSING : expr;
 }
 
-function countFunctionLeaves(xs: Expression[]): number {
+function countFunctionLeaves(xs: MathJsonExpression[]): number {
   if (xs[0] === 'Square') {
     // Square is synonym with Power(..., 2)
     return countFunctionLeaves(xs.slice(1)) + 2;
@@ -456,7 +456,7 @@ function countFunctionLeaves(xs: Expression[]): number {
 }
 
 /** The number of leaves (atomic expressions) in the expression */
-export function countLeaves(expr: Expression | null): number {
+export function countLeaves(expr: MathJsonExpression | null): number {
   if (expr === null) return 0;
   if (typeof expr === 'number' || typeof expr === 'string') return 1;
   if (isNumberExpression(expr) || isSymbolObject(expr) || isStringObject(expr))
@@ -502,7 +502,7 @@ export function matchesString(s: string): boolean {
   return !matchesNumber(s) && !matchesSymbol(s);
 }
 
-function jsValueToExpression(v: any): Expression | null {
+function jsValueToExpression(v: any): MathJsonExpression | null {
   if (typeof v === 'string') {
     return { str: v };
   } else if (typeof v === 'number') {
@@ -514,7 +514,7 @@ function jsValueToExpression(v: any): Expression | null {
   } else if (v === null) {
     return null;
   } else if (typeof v === 'object') {
-    const dict: Record<string, Expression> = {};
+    const dict: Record<string, MathJsonExpression> = {};
     for (const key in v) {
       dict[key] = jsValueToExpression(v[key]) ?? 'Nothing';
     }
@@ -527,13 +527,13 @@ function jsValueToExpression(v: any): Expression | null {
     isStringObject(v) ||
     isDictionaryObject(v)
   ) {
-    return v as Expression;
+    return v as MathJsonExpression;
   }
   return null;
 }
 
 function expressionToDictionaryValue(
-  expr: Expression | null | undefined
+  expr: MathJsonExpression | null | undefined
 ): DictionaryValue | null {
   if (expr === null || expr === undefined) return null;
   if (isStringObject(expr)) return expr.str;

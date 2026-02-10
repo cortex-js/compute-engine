@@ -7,7 +7,7 @@
  * @module compilation/interval-javascript-target
  */
 
-import type { BoxedExpression } from '../global-types';
+import type { Expression } from '../global-types';
 import { isSymbol, isNumber } from '../boxed-expression/type-guards';
 
 import { BaseCompiler } from './base-compiler';
@@ -48,7 +48,7 @@ const INTERVAL_JAVASCRIPT_OPERATORS: CompiledOperators = {
 /**
  * Interval arithmetic function implementations.
  */
-const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<BoxedExpression> = {
+const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // Basic arithmetic - using function call syntax
   Add: (args, compile) => {
     if (args.length === 0) return '_IA.point(0)';
@@ -298,18 +298,18 @@ function processInput(input: unknown): unknown {
 /**
  * Interval arithmetic JavaScript target implementation.
  */
-export class IntervalJavaScriptTarget implements LanguageTarget<BoxedExpression> {
+export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
   getOperators(): CompiledOperators {
     return INTERVAL_JAVASCRIPT_OPERATORS;
   }
 
-  getFunctions(): CompiledFunctions<BoxedExpression> {
+  getFunctions(): CompiledFunctions<Expression> {
     return INTERVAL_JAVASCRIPT_FUNCTIONS;
   }
 
   createTarget(
-    options: Partial<CompileTarget<BoxedExpression>> = {}
-  ): CompileTarget<BoxedExpression> {
+    options: Partial<CompileTarget<Expression>> = {}
+  ): CompileTarget<Expression> {
     return {
       language: 'interval-javascript',
       // Don't use operators - all arithmetic goes through functions
@@ -340,8 +340,8 @@ export class IntervalJavaScriptTarget implements LanguageTarget<BoxedExpression>
   }
 
   compile(
-    expr: BoxedExpression,
-    options: CompilationOptions<BoxedExpression> = {}
+    expr: Expression,
+    options: CompilationOptions<Expression> = {}
   ): CompilationResult {
     const { functions, vars, preamble } = options;
     const unknowns = expr.unknowns;
@@ -394,8 +394,8 @@ export class IntervalJavaScriptTarget implements LanguageTarget<BoxedExpression>
  * Compile expression to interval JavaScript executable.
  */
 function compileToIntervalTarget(
-  expr: BoxedExpression,
-  target: CompileTarget<BoxedExpression>
+  expr: Expression,
+  target: CompileTarget<Expression>
 ): CompilationResult {
   const js = BaseCompiler.compile(expr, target);
   const fn = new ComputeEngineIntervalFunction(js, target.preamble);

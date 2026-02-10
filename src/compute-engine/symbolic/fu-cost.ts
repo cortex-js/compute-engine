@@ -5,7 +5,7 @@
  * with secondary consideration for overall expression complexity.
  */
 
-import type { BoxedExpression } from '../global-types';
+import type { Expression } from '../global-types';
 import {
   isFunction,
   isNumber,
@@ -18,7 +18,7 @@ const TRIG_FUNCS = new Set(['Sin', 'Cos', 'Tan', 'Cot', 'Sec', 'Csc']);
  * Count the number of trigonometric function occurrences in an expression.
  * This is the primary metric for the Fu algorithm.
  */
-export function countTrigFunctions(expr: BoxedExpression): number {
+export function countTrigFunctions(expr: Expression): number {
   let count = 0;
 
   if (TRIG_FUNCS.has(expr.operator)) {
@@ -38,7 +38,7 @@ export function countTrigFunctions(expr: BoxedExpression): number {
  * Count the number of leaves (atoms) in an expression.
  * Includes symbols, numbers, and function names.
  */
-export function countLeaves(expr: BoxedExpression): number {
+export function countLeaves(expr: Expression): number {
   // Symbols and numbers are leaves
   if (isSymbol(expr)) return 1;
   if (isNumber(expr)) return 1;
@@ -64,7 +64,7 @@ export function countLeaves(expr: BoxedExpression): number {
  * This ensures that expressions with fewer trig functions are always
  * preferred, even if they have slightly more total operations.
  */
-export function trigCost(expr: BoxedExpression): number {
+export function trigCost(expr: Expression): number {
   const trigCount = countTrigFunctions(expr);
   const leaves = countLeaves(expr);
 
@@ -72,7 +72,7 @@ export function trigCost(expr: BoxedExpression): number {
   return trigCount * 1000 + leaves;
 }
 
-export type TrigCostFunction = (expr: BoxedExpression) => number;
+export type TrigCostFunction = (expr: Expression) => number;
 
 /**
  * Default cost function for the Fu algorithm

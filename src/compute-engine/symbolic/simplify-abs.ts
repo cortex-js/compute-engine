@@ -1,4 +1,4 @@
-import type { BoxedExpression, RuleStep } from '../global-types';
+import type { Expression, RuleStep } from '../global-types';
 import { isFunction } from '../boxed-expression/type-guards';
 
 /**
@@ -40,7 +40,7 @@ const ODD_HYPER = new Set([
 // Even functions: f(-x) = f(x), so f(|x|) = f(x)
 const EVEN_FUNCS = new Set(['Cos', 'Sec', 'Cosh', 'Sech']);
 
-export function simplifyAbs(x: BoxedExpression): RuleStep | undefined {
+export function simplifyAbs(x: Expression): RuleStep | undefined {
   if (x.operator !== 'Abs' || !isFunction(x)) return undefined;
 
   const op = x.op1;
@@ -231,7 +231,7 @@ export function simplifyAbs(x: BoxedExpression): RuleStep | undefined {
  * Simplify expressions where Abs appears as the base of a power.
  * |x|^n -> x^n when n is even
  */
-export function simplifyAbsPower(x: BoxedExpression): RuleStep | undefined {
+export function simplifyAbsPower(x: Expression): RuleStep | undefined {
   if (x.operator !== 'Power' || !isFunction(x)) return undefined;
 
   const base = x.op1;
@@ -282,7 +282,7 @@ export function simplifyAbsPower(x: BoxedExpression): RuleStep | undefined {
  * This rule handles Cos, Sec, Cosh, Sech with Abs argument
  */
 export function simplifyEvenFunctionAbs(
-  x: BoxedExpression
+  x: Expression
 ): RuleStep | undefined {
   const op = x.operator;
   if (!EVEN_FUNCS.has(op) || !isFunction(x)) return undefined;

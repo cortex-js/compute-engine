@@ -1,9 +1,9 @@
-import type { MathJsonExpression as Expression } from '../../math-json/types';
+import type { MathJsonExpression } from '../../math-json/types';
 import type {
   SimplifyOptions,
   ReplaceOptions,
   PatternMatchOptions,
-  BoxedExpression,
+  Expression,
   BoxedBaseDefinition,
   BoxedOperatorDefinition,
   BoxedRuleSet,
@@ -105,7 +105,7 @@ export class BoxedFunction
   private readonly _operator: string;
 
   // The operands of the function expression
-  private readonly _ops: ReadonlyArray<BoxedExpression>;
+  private readonly _ops: ReadonlyArray<Expression>;
 
   // Only canonical expressions have an associated def (are bound)
   // If `null`, the expression is not bound, if `undefined`, the expression
@@ -128,11 +128,11 @@ export class BoxedFunction
   private _hash: number | undefined;
 
   // Cached properties of the expression
-  private _value: CachedValue<BoxedExpression> = {
+  private _value: CachedValue<Expression> = {
     value: null,
     generation: -1,
   };
-  private _valueN: CachedValue<BoxedExpression> = {
+  private _valueN: CachedValue<Expression> = {
     value: null,
     generation: -1,
   };
@@ -148,7 +148,7 @@ export class BoxedFunction
   constructor(
     ce: ComputeEngine,
     operator: string,
-    ops: ReadonlyArray<BoxedExpression>,
+    ops: ReadonlyArray<Expression>,
     options?: {
       metadata?: Metadata;
       canonical?: boolean;
@@ -227,7 +227,7 @@ export class BoxedFunction
     // this._def = null;
   }
 
-  get value(): BoxedExpression | undefined {
+  get value(): Expression | undefined {
     return undefined;
   }
 
@@ -256,7 +256,7 @@ export class BoxedFunction
     return this.isConstant ? this.value : undefined;
   }
 
-  get json(): Expression {
+  get json(): MathJsonExpression {
     const s = this.structural;
     const ops = isFunction(s) ? s.ops : this._ops;
     return [this._operator, ...ops.map((x) => x.json)];
@@ -266,7 +266,7 @@ export class BoxedFunction
     return this._operator;
   }
 
-  get ops(): ReadonlyArray<BoxedExpression> {
+  get ops(): ReadonlyArray<Expression> {
     return this._ops;
   }
 
@@ -274,13 +274,13 @@ export class BoxedFunction
     return this._ops.length;
   }
 
-  get op1(): BoxedExpression {
+  get op1(): Expression {
     return this._ops[0] ?? this.engine.Nothing;
   }
-  get op2(): BoxedExpression {
+  get op2(): Expression {
     return this._ops[1] ?? this.engine.Nothing;
   }
-  get op3(): BoxedExpression {
+  get op3(): Expression {
     return this._ops[2] ?? this.engine.Nothing;
   }
 
@@ -300,18 +300,18 @@ export class BoxedFunction
   /** Note: if the expression is not canonical, this will return a canonical
    * version of the expression in the current lexical scope.
    */
-  get canonical(): BoxedExpression {
+  get canonical(): Expression {
     if (this.isCanonical || !this.isValid) return this;
     return this.engine.function(this._operator, this._ops);
   }
 
-  get structural(): BoxedExpression {
+  get structural(): Expression {
     if (this.isStructural) return this;
     const def = this.operatorDefinition;
     if (def?.associative || def?.commutative) {
       // Flatten the arguments if they are the same as the operator
-      const xs: BoxedExpression[] = this.ops.map((x) => x.structural);
-      let ys: BoxedExpression[] = [];
+      const xs: Expression[] = this.ops.map((x) => x.structural);
+      let ys: Expression[] = [];
       if (!def.associative) ys = xs;
       else {
         for (const x of xs) {
@@ -339,7 +339,7 @@ export class BoxedFunction
     return this._isStructural;
   }
 
-  toNumericValue(): [NumericValue, BoxedExpression] {
+  toNumericValue(): [NumericValue, Expression] {
     console.assert(this.isCanonical || this.isStructural);
 
     const ce = this.engine;
@@ -353,7 +353,7 @@ export class BoxedFunction
     //
     //  use factor() to factor out common factors
     // eslint-disable-next-line @typescript-eslint/no-this-alias
-    let expr: BoxedExpression = this;
+    let expr: Expression = this;
     if (expr.operator === 'Add') {
       expr = factor(this);
       if (isNumber(expr)) {
@@ -378,7 +378,7 @@ export class BoxedFunction
     // Multiply
     //
     if (expr.operator === 'Multiply' && isFunction(expr)) {
-      const rest: BoxedExpression[] = [];
+      const rest: Expression[] = [];
       let coef = ce._numericValue(1);
       for (const arg of expr.ops) {
         const [c, r] = arg.toNumericValue();
@@ -474,7 +474,7 @@ export class BoxedFunction
   subs(
     sub: Substitution,
     options?: { canonical?: CanonicalOptions }
-  ): BoxedExpression {
+  ): Expression {
     options ??= { canonical: undefined };
     if (options.canonical === undefined)
       options = { canonical: this.isCanonical || this.isStructural };
@@ -497,12 +497,12 @@ export class BoxedFunction
   replace(
     rules: BoxedRuleSet | Rule | Rule[],
     options?: Partial<ReplaceOptions>
-  ): BoxedExpression | null {
+  ): Expression | null {
     return replace(this, rules, options).at(-1)?.value ?? null;
   }
 
   match(
-    pattern: BoxedExpression,
+    pattern: Expression,
     options?: PatternMatchOptions
   ): BoxedSubstitution | null {
     return match(this, pattern, options);
@@ -578,15 +578,15 @@ export class BoxedFunction
     return nonPositiveSign(this.sgn);
   }
 
-  get numerator(): BoxedExpression {
+  get numerator(): Expression {
     return this.numeratorDenominator[0];
   }
 
-  get denominator(): BoxedExpression {
+  get denominator(): Expression {
     return this.numeratorDenominator[1];
   }
 
-  get numeratorDenominator(): [BoxedExpression, BoxedExpression] {
+  get numeratorDenominator(): [Expression, Expression] {
     if (!(this.isCanonical || this.isStructural))
       return [this, this.engine.One];
     if (this.isNumber !== true)
@@ -639,13 +639,13 @@ export class BoxedFunction
   // ALGEBRAIC OPERATIONS
   //
 
-  neg(): BoxedExpression {
+  neg(): Expression {
     if (!(this.isCanonical || this.isStructural))
       throw new Error('Not canonical');
     return negate(this);
   }
 
-  inv(): BoxedExpression {
+  inv(): Expression {
     if (!(this.isCanonical || this.isStructural))
       throw new Error('Not canonical');
     if (this.isOne) return this;
@@ -670,7 +670,7 @@ export class BoxedFunction
     return this.engine._fn('Divide', [this.engine.One, this]);
   }
 
-  abs(): BoxedExpression {
+  abs(): Expression {
     if (!(this.isCanonical || this.isStructural))
       throw new Error('Not canonical');
     if (this.operator === 'Abs' || this.operator === 'Negate') return this;
@@ -679,14 +679,14 @@ export class BoxedFunction
     return this.engine._fn('Abs', [this]);
   }
 
-  add(rhs: number | BoxedExpression): BoxedExpression {
+  add(rhs: number | Expression): Expression {
     if (rhs === 0) return this;
     if (!(this.isCanonical || this.isStructural))
       throw new Error('Not canonical');
     return add(this, this.engine.box(rhs));
   }
 
-  mul(rhs: NumericValue | number | BoxedExpression): BoxedExpression {
+  mul(rhs: NumericValue | number | Expression): Expression {
     if (!(this.isCanonical || this.isStructural))
       throw new Error('Not canonical');
     if (rhs === 0) return this.engine.Zero;
@@ -702,17 +702,17 @@ export class BoxedFunction
     return mul(this, this.engine.box(rhs));
   }
 
-  div(rhs: number | BoxedExpression): BoxedExpression {
+  div(rhs: number | Expression): Expression {
     if (!(this.isCanonical || this.isStructural))
       throw new Error('Not canonical');
     return div(this, rhs);
   }
 
-  pow(exp: number | BoxedExpression): BoxedExpression {
+  pow(exp: number | Expression): Expression {
     return pow(this, exp, { numericApproximation: false });
   }
 
-  root(exp: number | BoxedExpression): BoxedExpression {
+  root(exp: number | Expression): Expression {
     if (
       !(this.isCanonical || this.isStructural) ||
       (typeof exp !== 'number' && !(exp.isCanonical || exp.isStructural))
@@ -785,11 +785,11 @@ export class BoxedFunction
     return this.engine._fn('Root', [this, this.engine.box(exp)]);
   }
 
-  sqrt(): BoxedExpression {
+  sqrt(): Expression {
     return this.root(2);
   }
 
-  ln(semiBase?: number | BoxedExpression): BoxedExpression {
+  ln(semiBase?: number | Expression): Expression {
     const base = semiBase ? this.engine.box(semiBase) : undefined;
     if (!(this.isCanonical || this.isStructural))
       throw new Error('Not canonical');
@@ -923,19 +923,19 @@ export class BoxedFunction
     return this.shape.length;
   }
 
-  simplify(options?: Partial<SimplifyOptions>): BoxedExpression {
+  simplify(options?: Partial<SimplifyOptions>): Expression {
     return simplify(this, options).at(-1)?.value ?? this;
   }
 
-  evaluate(options?: Partial<EvaluateOptions>): BoxedExpression {
+  evaluate(options?: Partial<EvaluateOptions>): Expression {
     return withDeadline(this.engine, this._computeValue(options))();
   }
 
-  evaluateAsync(options?: Partial<EvaluateOptions>): Promise<BoxedExpression> {
+  evaluateAsync(options?: Partial<EvaluateOptions>): Promise<Expression> {
     return withDeadlineAsync(this.engine, this._computeValueAsync(options))();
   }
 
-  N(): BoxedExpression {
+  N(): Expression {
     return this.evaluate({ numericApproximation: true });
   }
 
@@ -943,13 +943,13 @@ export class BoxedFunction
     vars?:
       | Iterable<string>
       | string
-      | BoxedExpression
-      | Iterable<BoxedExpression>
+      | Expression
+      | Iterable<Expression>
   ):
     | null
-    | ReadonlyArray<BoxedExpression>
-    | Record<string, BoxedExpression>
-    | Array<Record<string, BoxedExpression>> {
+    | ReadonlyArray<Expression>
+    | Record<string, Expression>
+    | Array<Record<string, Expression>> {
     const varNames = normalizedUnknownsForSolve(vars ?? this.unknowns);
 
     // Handle List or And of equations (system of equations)
@@ -1002,7 +1002,7 @@ export class BoxedFunction
     return def?.isLazy?.(this) ?? false;
   }
 
-  contains(rhs: BoxedExpression): boolean | undefined {
+  contains(rhs: Expression): boolean | undefined {
     return this.baseDefinition?.collection?.contains?.(this, rhs);
   }
 
@@ -1020,7 +1020,7 @@ export class BoxedFunction
     return this.operatorDefinition?.collection?.isFinite?.(this);
   }
 
-  each(): Generator<BoxedExpression> {
+  each(): Generator<Expression> {
     const iter = this.operatorDefinition?.collection?.iterator?.(this);
 
     // Return an empty generator if no iterator is defined
@@ -1039,11 +1039,11 @@ export class BoxedFunction
     })();
   }
 
-  at(index: number): BoxedExpression | undefined {
+  at(index: number): Expression | undefined {
     return this.operatorDefinition?.collection?.at?.(this, index);
   }
 
-  get(index: BoxedExpression | string): BoxedExpression | undefined {
+  get(index: Expression | string): Expression | undefined {
     if (typeof index === 'string')
       return this.operatorDefinition?.collection?.at?.(this, index);
 
@@ -1052,7 +1052,7 @@ export class BoxedFunction
   }
 
   indexWhere(
-    predicate: (element: BoxedExpression) => boolean
+    predicate: (element: Expression) => boolean
   ): number | undefined {
     if (this.operatorDefinition?.collection?.indexWhere)
       return this.operatorDefinition.collection.indexWhere(this, predicate);
@@ -1066,14 +1066,14 @@ export class BoxedFunction
     return undefined;
   }
 
-  subsetOf(rhs: BoxedExpression, strict: boolean): boolean {
+  subsetOf(rhs: Expression, strict: boolean): boolean {
     return (
       this.operatorDefinition?.collection?.subsetOf?.(this, rhs, strict) ??
       false
     );
   }
 
-  _computeValue(options?: Partial<EvaluateOptions>): () => BoxedExpression {
+  _computeValue(options?: Partial<EvaluateOptions>): () => Expression {
     return () => {
       if (!this.isValid || !this._def) return this;
 
@@ -1106,7 +1106,7 @@ export class BoxedFunction
         const items = zip(this._ops);
         if (!items) return this.engine.Nothing;
 
-        const results: BoxedExpression[] = [];
+        const results: Expression[] = [];
         while (true) {
           const { done, value } = items.next();
           if (done) break;
@@ -1165,7 +1165,7 @@ export class BoxedFunction
 
   _computeValueAsync(
     options?: Partial<EvaluateOptions>
-  ): () => Promise<BoxedExpression> {
+  ): () => Promise<Expression> {
     return async () => {
       if (!this.isValid || !this._def) return this;
 
@@ -1196,7 +1196,7 @@ export class BoxedFunction
         const items = zip(this._ops);
         if (!items) return this.engine.Nothing;
 
-        const results: Promise<BoxedExpression>[] = [];
+        const results: Promise<Expression>[] = [];
         while (true) {
           const { done, value } = items.next();
           if (done) break;
@@ -1269,12 +1269,12 @@ export class BoxedFunction
  * expressions (from List or And). Returns null if no solution found. */
 function solveSystem(
   ce: ComputeEngine,
-  equations: ReadonlyArray<BoxedExpression>,
+  equations: ReadonlyArray<Expression>,
   varNames: string[]
 ):
   | null
-  | Record<string, BoxedExpression>
-  | Array<Record<string, BoxedExpression>> {
+  | Record<string, Expression>
+  | Array<Record<string, Expression>> {
   if (equations && equations.every((eq) => eq.operator === 'Equal')) {
     // Try linear system first
     const linearResult = solveLinearSystem([...equations], varNames);
@@ -1351,8 +1351,8 @@ function solveSystem(
 /** Check whether a solution record satisfies all inequality constraints.
  * Substitutes the solution into each inequality and evaluates. */
 function satisfiesInequalities(
-  solution: Record<string, BoxedExpression>,
-  inequalities: ReadonlyArray<BoxedExpression>
+  solution: Record<string, Expression>,
+  inequalities: ReadonlyArray<Expression>
 ): boolean {
   return inequalities.every((ineq) => {
     const substituted = ineq.subs(solution, { canonical: true }).evaluate();
@@ -1361,21 +1361,21 @@ function satisfiesInequalities(
 }
 
 /** Solve an Or expression by solving each operand independently and merging
- * results. For univariate: collects BoxedExpression[], deduplicates via JSON.
+ * results. For univariate: collects Expression[], deduplicates via JSON.
  * For multivariate: collects Record[], deduplicates similarly. */
 function solveOr(
-  operands: ReadonlyArray<BoxedExpression>,
+  operands: ReadonlyArray<Expression>,
   varNames: string[]
 ):
   | null
-  | ReadonlyArray<BoxedExpression>
-  | Array<Record<string, BoxedExpression>> {
+  | ReadonlyArray<Expression>
+  | Array<Record<string, Expression>> {
   if (varNames.length === 1) {
     // Univariate: collect all roots, deduplicate
     const seen = new Set<string>();
-    const results: BoxedExpression[] = [];
+    const results: Expression[] = [];
     for (const op of operands) {
-      const sol = op.solve(varNames) as ReadonlyArray<BoxedExpression> | null;
+      const sol = op.solve(varNames) as ReadonlyArray<Expression> | null;
       if (!sol || !Array.isArray(sol)) continue;
       for (const s of sol) {
         const key = JSON.stringify(s.json);
@@ -1390,13 +1390,13 @@ function solveOr(
 
   // Multivariate: collect Record solutions, deduplicate
   const seen = new Set<string>();
-  const results: Array<Record<string, BoxedExpression>> = [];
+  const results: Array<Record<string, Expression>> = [];
   for (const op of operands) {
     const sol = op.solve(varNames);
     if (!sol) continue;
     // Single Record result
     if (!Array.isArray(sol)) {
-      const rec = sol as Record<string, BoxedExpression>;
+      const rec = sol as Record<string, Expression>;
       const key = JSON.stringify(
         Object.fromEntries(Object.entries(rec).map(([k, v]) => [k, v.json]))
       );
@@ -1407,7 +1407,7 @@ function solveOr(
       continue;
     }
     // Array of Records
-    for (const s of sol as Array<Record<string, BoxedExpression>>) {
+    for (const s of sol as Array<Record<string, Expression>>) {
       const key = JSON.stringify(
         Object.fromEntries(Object.entries(s).map(([k, v]) => [k, v.json]))
       );
@@ -1427,7 +1427,7 @@ function solveOr(
 function filterSolutionByTypes(
   ce: ComputeEngine,
   variables: string[],
-  solution: Record<string, BoxedExpression>
+  solution: Record<string, Expression>
 ): boolean {
   for (const v of variables) {
     const varTypeObj = ce.symbol(v).type;
@@ -1557,7 +1557,7 @@ function applyFunctionLiteral(
   expr: BoxedFunction,
   def: BoxedValueDefinition,
   options?: Partial<EvaluateOptions>
-): BoxedExpression {
+): Expression {
   const value = def.isConstant
     ? def.value
     : expr.engine._getSymbolValue(expr.operator);
@@ -1589,7 +1589,7 @@ function materialize(
   expr: BoxedFunction,
   def: BoxedOperatorDefinition,
   options?: Partial<EvaluateOptions>
-): BoxedExpression {
+): Expression {
   if (!expr.isValid || options?.materialization === false) return expr;
 
   let materialization = options?.materialization ?? false;
@@ -1599,7 +1599,7 @@ function materialize(
   const isIndexed = expr.isIndexedCollection;
   const isFinite = expr.isFiniteCollection;
 
-  const xs: BoxedExpression[] = [];
+  const xs: Expression[] = [];
 
   if (!expr.isEmptyCollection) {
     if (!isIndexed || !isFinite) {

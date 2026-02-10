@@ -3,7 +3,7 @@ import { Decimal } from 'decimal.js';
 
 import type { Rational } from '../numerics/types';
 
-import type { BoxedExpression, ExpressionInput } from '../global-types';
+import type { Expression, ExpressionInput } from '../global-types';
 import { isExpression } from './utils';
 
 import { SMALL_INTEGER } from '../numerics/numeric';
@@ -15,7 +15,7 @@ import { bigintValue } from '../numerics/expression';
 import { MathJsonExpression } from '../types';
 import { isNumber } from './type-guards';
 
-export function asRational(expr: BoxedExpression): Rational | undefined {
+export function asRational(expr: Expression): Rational | undefined {
   if (!isNumber(expr)) return undefined;
   const num = expr.numericValue;
   if (typeof num === 'number' && !Number.isFinite(num)) return undefined;
@@ -87,7 +87,7 @@ export function asBigint(
   return bigintValue(x as MathJsonExpression);
 }
 
-export function asBignum(expr: BoxedExpression | undefined): Decimal | null {
+export function asBignum(expr: Expression | undefined): Decimal | null {
   if (expr === undefined || expr === null) return null;
   if (!isNumber(expr)) return null;
   const num = typeof expr === 'number' ? expr : expr.numericValue;
@@ -110,7 +110,7 @@ export function asBignum(expr: BoxedExpression | undefined): Decimal | null {
  * integer. `toInteger()` will round the value to the nearest integer.
  */
 export function asSmallInteger(
-  expr: number | BoxedExpression | undefined
+  expr: number | Expression | undefined
 ): number | null {
   if (expr === undefined || expr === null) return null;
   if (typeof expr === 'number') {
@@ -150,7 +150,7 @@ export function asSmallInteger(
  * value to the nearest integer if it is a number.
  *
  */
-export function toInteger(expr: BoxedExpression | undefined): number | null {
+export function toInteger(expr: Expression | undefined): number | null {
   if (!expr || !isNumber(expr)) return null;
   const num = expr.numericValue;
 
@@ -162,7 +162,7 @@ export function toInteger(expr: BoxedExpression | undefined): number | null {
  * If the expression is a complex number, only the real part is considered.
  * If the real part is not an integer, it is rounded to the nearest integer.
  */
-export function toBigint(expr: BoxedExpression | undefined): bigint | null {
+export function toBigint(expr: Expression | undefined): bigint | null {
   if (expr === undefined || expr === null) return null;
   if (!isNumber(expr)) return null;
   const num = expr.numericValue;

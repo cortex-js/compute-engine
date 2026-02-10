@@ -1,5 +1,5 @@
 import type {
-  BoxedExpression,
+  Expression,
   IComputeEngine as ComputeEngine,
 } from '../global-types';
 
@@ -22,7 +22,7 @@ function hasNonTrivialRadical(value: unknown): boolean {
 }
 
 /** Combine rational expressions into a single fraction */
-export function together(op: BoxedExpression): BoxedExpression {
+export function together(op: Expression): Expression {
   const ce = op.engine;
   const h = op.operator;
 
@@ -43,7 +43,7 @@ export function together(op: BoxedExpression): BoxedExpression {
           } else acc[0].push(x);
           return acc;
         },
-        [[], []] as BoxedExpression[][]
+        [[], []] as Expression[][]
       );
       return add(...numer).div(add(...denom));
     }
@@ -66,8 +66,8 @@ export function together(op: BoxedExpression): BoxedExpression {
  * IMPORTANT: Does not call .simplify() to avoid infinite recursion.
  */
 export function factorPerfectSquare(
-  expr: BoxedExpression
-): BoxedExpression | null {
+  expr: Expression
+): Expression | null {
   const ce = expr.engine;
 
   // Must be an Add expression
@@ -131,9 +131,9 @@ export function factorPerfectSquare(
  * 3. We're not in a simplification loop yet - we're in the factoring phase
  */
 function extractSquareRoot(
-  term: BoxedExpression,
+  term: Expression,
   ce: ComputeEngine
-): BoxedExpression | null {
+): Expression | null {
   // Try taking the square root and simplifying it
   // Using .simplify() here is safe - see comment above
   const sqrt = term.sqrt().simplify();
@@ -178,8 +178,8 @@ function extractSquareRoot(
  * IMPORTANT: Does not call .simplify() on the result to avoid infinite recursion.
  */
 export function factorDifferenceOfSquares(
-  expr: BoxedExpression
-): BoxedExpression | null {
+  expr: Expression
+): Expression | null {
   const ce = expr.engine;
 
   // Must be an Add expression with exactly 2 terms (one positive, one negative)
@@ -191,7 +191,7 @@ export function factorDifferenceOfSquares(
   // Try to extract square roots of both terms
   // One should be positive, one negative
   const results: Array<{
-    sqrt: BoxedExpression;
+    sqrt: Expression;
     isNegative: boolean;
   }> = [];
 
@@ -248,9 +248,9 @@ export function factorDifferenceOfSquares(
  * IMPORTANT: Does not call .simplify() to avoid infinite recursion.
  */
 export function factorQuadratic(
-  expr: BoxedExpression,
+  expr: Expression,
   variable: string
-): BoxedExpression | null {
+): Expression | null {
   const ce = expr.engine;
 
   // Check if it's a quadratic polynomial
@@ -294,7 +294,7 @@ export function factorQuadratic(
   const root2 = b.neg().sub(sqrtDisc).div(twoA);
 
   // Check if roots have radical components
-  const checkRadical = (expr: BoxedExpression): boolean => {
+  const checkRadical = (expr: Expression): boolean => {
     if (expr.operator === 'Sqrt') return true;
     if (isNumber(expr)) {
       if (hasNonTrivialRadical(expr.numericValue)) return true;
@@ -334,9 +334,9 @@ export function factorQuadratic(
  * IMPORTANT: Does not call .simplify() to avoid infinite recursion.
  */
 export function factorPolynomial(
-  expr: BoxedExpression,
+  expr: Expression,
   variable?: string
-): BoxedExpression {
+): Expression {
   // Try perfect square trinomial
   const perfectSquare = factorPerfectSquare(expr);
   if (perfectSquare !== null) return perfectSquare;
@@ -361,7 +361,7 @@ export function factorPolynomial(
  * - 2x < 4 -> x < 2
  * - (2x) * (2y) -> 4xy
  */
-export function factor(expr: BoxedExpression): BoxedExpression {
+export function factor(expr: Expression): Expression {
   const h = expr.operator;
   if (isFunction(expr) && isRelationalOperator(h)) {
     let lhs = Product.from(expr.op1);
@@ -399,7 +399,7 @@ export function factor(expr: BoxedExpression): BoxedExpression {
     let common: NumericValue | undefined = undefined;
 
     // Calculate the GCD of all coefficients
-    const terms: { coeff: NumericValue; term: BoxedExpression }[] = [];
+    const terms: { coeff: NumericValue; term: Expression }[] = [];
     for (const op of expr.ops) {
       const [coeff, term] = op.toNumericValue();
       common = common ? common.gcd(coeff) : coeff;

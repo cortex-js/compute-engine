@@ -1,6 +1,6 @@
 import type {
   IComputeEngine as ComputeEngine,
-  BoxedExpression,
+  Expression,
 } from '../global-types';
 
 import { isRelationalOperator } from '../latex-syntax/utils';
@@ -66,9 +66,9 @@ function* powers(n: number, exp: number): Generator<number[]> {
  */
 
 function expandPower(
-  base: BoxedExpression,
+  base: Expression,
   exp: number
-): BoxedExpression | null {
+): Expression | null {
   const ce = base.engine;
   if (exp < 0) {
     const expr = expandPower(base, -exp);
@@ -105,7 +105,7 @@ function expandPower(
   const terms = base.ops;
   const it = powers(terms.length, exp);
 
-  const result: BoxedExpression[] = [];
+  const result: Expression[] = [];
   for (const val of it) {
     const product = [ce.number(multinomialCoefficient(val))];
     for (let i = 0; i < val.length; i += 1) {
@@ -123,9 +123,9 @@ function expandPower(
 export function expandFunction(
   ce: ComputeEngine,
   h: string,
-  ops: ReadonlyArray<BoxedExpression>
-): BoxedExpression | null {
-  let result: BoxedExpression | null = null;
+  ops: ReadonlyArray<Expression>
+): Expression | null {
+  let result: Expression | null = null;
 
   //
   // Divide
@@ -193,8 +193,8 @@ export function expandFunction(
  * Return null if the expression cannot be expanded.
  */
 export function expand(
-  expr: BoxedExpression | undefined
-): BoxedExpression | null {
+  expr: Expression | undefined
+): Expression | null {
   // To expand an expression, we need to use its canonical form
   expr = expr?.canonical;
 
@@ -223,7 +223,7 @@ export function expand(
  *
  * `expand()` only expands the top level of the expression.
  */
-export function expandAll(expr: BoxedExpression): BoxedExpression | null {
+export function expandAll(expr: Expression): Expression | null {
   if (!expr.operator || !isFunction(expr)) return null;
 
   const ops = expr.ops.map((x) => expandAll(x) ?? x);

@@ -3,7 +3,7 @@ import type { BigNumFactory, SmallInteger } from '../numerics/types';
 import { NumericValue, NumericValueData } from './types';
 import { ExactNumericValue } from './exact-numeric-value';
 import { isInMachineRange } from '../numerics/numeric-bignum';
-import { MathJsonExpression as Expression } from '../../math-json/types';
+import { MathJsonExpression } from '../../math-json/types';
 import { numberToExpression } from '../numerics/expression';
 import { numberToString } from '../numerics/strings';
 import { bigint } from '../numerics/bigint';
@@ -63,7 +63,7 @@ export class BigNumericValue extends NumericValue {
     return this._makeExact(bigint(this.decimal)!);
   }
 
-  toJSON(): Expression {
+  toJSON(): MathJsonExpression {
     if (this.isNaN) return 'NaN';
     if (this.isPositiveInfinity) return 'PositiveInfinity';
     if (this.isNegativeInfinity) return 'NegativeInfinity';

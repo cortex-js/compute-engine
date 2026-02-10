@@ -4,39 +4,48 @@
 
 This release includes several breaking changes to the public API.
 
-The most significant is the restructuring of the `BoxedExpression` class
-hierarchy and the introduction of type-guarded role interfaces, which improves
-type safety and API ergonomics but requires updates to code that accessed
-role-specific properties directly on `BoxedExpression` instances.
+The most significant is the restructuring of the `Expression` type hierarchy and
+the introduction of type-guarded role interfaces, which improves type safety and
+API ergonomics but requires updates to code that accessed role-specific
+properties directly on expression instances.
+
+#### Naming Alignment: `Expression`, `MathJsonExpression`, and `ExpressionInput`
+
+- The compute-engine runtime type is now `Expression` (preferred name).
+  `BoxedExpression` is retained as a deprecated alias for migration.
+- The MathJSON type is now `MathJsonExpression` (the old MathJSON `Expression`
+  name has been removed from the `math-json` entrypoint).
+- `SemiBoxedExpression` is now `ExpressionInput` (with a deprecated alias for
+  migration).
 
 #### Role-Specific Properties Moved to Type-Guarded Interfaces
 
-Properties that were previously on all `BoxedExpression` instances (returning
+Properties that were previously on all `Expression` instances (returning
 `undefined` when not applicable) have been moved to role interfaces. They are
 now only accessible after narrowing with a type guard.
 
-| Removed from `BoxedExpression`        | Access via                                     |
-| :------------------------------------ | :--------------------------------------------- |
-| `.symbol`                             | `isBoxedSymbol(expr)` then `expr.symbol`       |
-| `.string`                             | `isBoxedString(expr)` then `expr.string`       |
-| `.ops`, `.nops`, `.op1`/`.op2`/`.op3` | `isBoxedFunction(expr)` then `expr.ops` etc.   |
-| `.numericValue`, `.isNumberLiteral`   | `isBoxedNumber(expr)` then `expr.numericValue` |
-| `.tensor`                             | `isBoxedTensor(expr)` then `expr.tensor`       |
+| Removed from `Expression`             | Access via                                |
+| :------------------------------------ | :---------------------------------------- |
+| `.symbol`                             | `isSymbol(expr)` then `expr.symbol`       |
+| `.string`                             | `isString(expr)` then `expr.string`       |
+| `.ops`, `.nops`, `.op1`/`.op2`/`.op3` | `isFunction(expr)` then `expr.ops` etc.   |
+| `.numericValue`, `.isNumberLiteral`   | `isNumber(expr)` then `expr.numericValue` |
+| `.tensor`                             | `isTensor(expr)` then `expr.tensor`       |
 
 ```ts
 // Before
 if (expr.symbol !== null) console.log(expr.symbol);
 
 // After
-import { isBoxedSymbol, sym } from '@cortex-js/compute-engine';
+import { isSymbol, sym } from '@cortex-js/compute-engine';
 
-if (isBoxedSymbol(expr)) console.log(expr.symbol);
+if (isSymbol(expr)) console.log(expr.symbol);
 // or use the convenience helper:
 if (sym(expr) === 'Pi') { /* ... */ }
 ```
 
-Properties that remain on `BoxedExpression`: `.operator`, `.re`/`.im`, `.shape`,
-all arithmetic methods (`.add()`, `.mul()`, etc.), and all numeric predicates
+Properties that remain on `Expression`: `.operator`, `.re`/`.im`, `.shape`, all
+arithmetic methods (`.add()`, `.mul()`, etc.), and all numeric predicates
 (`.isPositive`, `.isInteger`, etc.).
 
 #### Expression Creation: `form` Replaces `canonical`/`structural`
@@ -70,7 +79,7 @@ evaluate('x + 2');          // 5
 ```
 
 Except for `parse()` (which only accepts a LaTeX string), each function accepts
-either a LaTeX string or an existing `BoxedExpression`:
+either a LaTeX string or an existing `Expression`:
 
 ```ts
 const expr = parse('x + x + 1');
@@ -84,7 +93,7 @@ Use `getDefaultEngine()` to access the shared engine for configuration
 
 The `expr.compile()` method has been replaced by a standalone `compile()`
 function with a structured `CompilationResult` return type. It accepts either a
-LaTeX string or a `BoxedExpression`.
+LaTeX string or an `Expression`.
 
 ```ts
 import { compile } from '@cortex-js/compute-engine';
@@ -109,7 +118,7 @@ Custom compilation targets can be registered and unregistered dynamically via
 while `expandAll()` applies it recursively. Both return `null` if the expression
 cannot be expanded.
 
-Both accept a LaTeX string or a `BoxedExpression`, consistent with the other free
+Both accept a LaTeX string or an `Expression`, consistent with the other free
 functions (`simplify`, `evaluate`, `N`).
 
 ```ts
@@ -119,7 +128,7 @@ import { expand, expandAll } from '@cortex-js/compute-engine';
 expand('(x+1)^2');         // x^2 + 2x + 1
 expandAll('(x+1)(x+2) + (a+b)^2');  // recursive expansion
 
-// From a BoxedExpression
+// From an Expression
 const expr = ce.parse('(x+1)(x+2)');
 expand(expr);               // x^2 + 3x + 2
 
@@ -130,8 +139,8 @@ const result = expand(expr) ?? expr;
 #### `solve()` Is a Free Function
 
 A new `solve()` free function is available for solving equations without
-explicitly creating a `ComputeEngine` instance. Like the other free functions, it
-accepts either a LaTeX string or a `BoxedExpression`.
+explicitly creating a `ComputeEngine` instance. Like the other free functions,
+it accepts either a LaTeX string or an `Expression`.
 
 ```ts
 import { solve } from '@cortex-js/compute-engine';
@@ -139,7 +148,7 @@ import { solve } from '@cortex-js/compute-engine';
 // Solve from LaTeX
 solve('x^2 - 5x + 6 = 0', 'x');  // [2, 3]
 
-// Solve from a BoxedExpression
+// Solve from an Expression
 const expr = ce.parse('x^2 - 5x + 6 = 0');
 solve(expr, 'x');                   // [2, 3]
 ```
@@ -147,8 +156,8 @@ solve(expr, 'x');                   // [2, 3]
 #### `factor()` Is a Free Function
 
 Polynomial factoring functions are now standalone free functions. `factor()`
-accepts a LaTeX string or a `BoxedExpression`. The specialized variants
-(`factorPolynomial`, `factorQuadratic`, etc.) accept only a `BoxedExpression`.
+accepts a LaTeX string or an `Expression`. The specialized variants
+(`factorPolynomial`, `factorQuadratic`, etc.) accept only an `Expression`.
 
 ```ts
 import { factor, factorPolynomial, factorQuadratic } from '@cortex-js/compute-engine';
@@ -404,31 +413,30 @@ ce.simplificationRules.push({
 
 - **Infinity handling for 24+ functions**: `arctan(∞)`, `arccot(±∞)`,
   `tanh/coth/sech/csch(±∞)`, `arsinh(-∞)`, `arcosh(-∞)`, `arccoth(±∞)`,
-  `arcsch(±∞)`, `π^∞`, `∞^n`, `(-∞)^{-n}`, `log_∞(x)`, `log_{0.5}(∞)`,
-  `√∞`, `∛∞` now all return correct limits.
+  `arcsch(±∞)`, `π^∞`, `∞^n`, `(-∞)^{-n}`, `log_∞(x)`, `log_{0.5}(∞)`, `√∞`,
+  `∛∞` now all return correct limits.
 
 - **Root edge cases**: `Root(x, 0) → NaN`, `Root(0, n)`, `Root(1, n)`,
   `Root(+∞, n)`, and `Sqrt(+∞)` now handled correctly.
 
-- **Division edge cases**: `a/a → 1` now works for compound expressions
-  (e.g., `(π+1)/(π+1)`); `2/0 → ComplexInfinity` and `1/(1/0) → 0` propagate
-  correctly.
+- **Division edge cases**: `a/a → 1` now works for compound expressions (e.g.,
+  `(π+1)/(π+1)`); `2/0 → ComplexInfinity` and `1/(1/0) → 0` propagate correctly.
 
-- **Logarithm edge cases**: Fixed infinity detection in `simplify-log.ts`
-  (was using `sym()` which fails on `BoxedNumber` infinity values); added
+- **Logarithm edge cases**: Fixed infinity detection in `simplify-log.ts` (was
+  using `sym()` which fails on `BoxedNumber` infinity values); added
   `log_∞(∞) → NaN`, base-aware `log_c(0)`, guards for `log_1(x)` and
   `log_c(c^x)` evaluation.
 
-- **Absolute value of odd functions**: `|arcsin(x)|`, `|sinh(x)|`, `|arsinh(x)|`,
-  `|artanh(x)|` now simplify to `f(|x|)`.
+- **Absolute value of odd functions**: `|arcsin(x)|`, `|sinh(x)|`,
+  `|arsinh(x)|`, `|artanh(x)|` now simplify to `f(|x|)`.
 
 - **Even function with abs argument**: `cosh(|x+2|) → cosh(x+2)`.
 
 - **Trig period shifts**: `cot(π+x) → cot(x)`, `csc(π+x) → -csc(x)`.
 
-- **Ln simplification in Add/Multiply operands**: `ln(x^3) − 3·ln(x) → 0`
-  and `ln(x^√2) → √2·ln(x)` now work; cost function bypassed for log rules
-  that are mathematically valid but structurally more expensive.
+- **Ln simplification in Add/Multiply operands**: `ln(x^3) − 3·ln(x) → 0` and
+  `ln(x^√2) → √2·ln(x)` now work; cost function bypassed for log rules that are
+  mathematically valid but structurally more expensive.
 
 - **Preserved function identity**: Removed unconditional expansions of
   `sinh/cosh → exp`, `arsinh/arcosh/artanh → ln`, and `arcsin → arctan2` that
@@ -505,7 +513,7 @@ ce.simplificationRules.push({
   the `type` property and enables more precise pattern matching and type
   discrimination in user code. **Breaking change**: Code that explicitly checks
   for `.operator === 'Number'` will need to be updated to check for specific
-  numeric types or use the `isBoxedNumber()` type guard instead.
+  numeric types or use the `isNumber()` type guard instead.
 
 - **Non-XIDC Unicode characters in symbol names now encoded correctly**: When
   parsing LaTeX symbols containing non-identifier Unicode characters via

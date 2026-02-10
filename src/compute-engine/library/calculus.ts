@@ -1,4 +1,4 @@
-import type { BoxedExpression, SymbolDefinitions } from '../global-types';
+import type { Expression, SymbolDefinitions } from '../global-types';
 
 import { checkType } from '../boxed-expression/validate';
 import { hasSymbolicTranscendental } from '../boxed-expression/utils';
@@ -146,7 +146,7 @@ volumes
         return ce._fn('D', [f, ...ops!.slice(1)], { scope });
       },
       evaluate: (ops, { engine: _engine }) => {
-        let f: BoxedExpression | undefined = ops[0].canonical;
+        let f: Expression | undefined = ops[0].canonical;
         f = f.evaluate();
         const params = ops.slice(1);
         if (params.length === 0) f = undefined;
@@ -264,7 +264,7 @@ volumes
         let isIndefinite = true;
         for (let i = limitsSequence.length - 1; i >= 0; i--) {
           if (!isFunction(limitsSequence[i])) continue;
-          const limitFn = limitsSequence[i] as BoxedExpression &
+          const limitFn = limitsSequence[i] as Expression &
             import('../global-types').FunctionInterface;
           const [varExpr, lower, upper] = limitFn.ops;
           let variable = sym(varExpr);

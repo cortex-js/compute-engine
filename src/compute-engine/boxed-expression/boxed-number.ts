@@ -2,7 +2,7 @@ import { Complex } from 'complex-esm';
 import { Decimal } from 'decimal.js';
 
 import type {
-  MathJsonExpression as Expression,
+  MathJsonExpression,
   MathJsonNumberObject,
 } from '../../math-json';
 
@@ -45,7 +45,7 @@ import type {
   Rule,
   Sign,
   Substitution,
-  BoxedExpression,
+  Expression,
   PatternMatchOptions,
   ReplaceOptions,
   SimplifyOptions,
@@ -102,7 +102,7 @@ export class BoxedNumber
     return this._hash;
   }
 
-  get json(): Expression {
+  get json(): MathJsonExpression {
     // Note: the `.json` property outputs a "default" serialization
     // which does not attempt to capture all the information in the
     // expression.
@@ -118,7 +118,7 @@ export class BoxedNumber
       return value;
     }
 
-    return value.toJSON() as Expression;
+    return value.toJSON() as MathJsonExpression;
   }
 
   get operator(): string {
@@ -214,7 +214,7 @@ export class BoxedNumber
     return this.engine.bignum(this._value.im);
   }
 
-  neg(): BoxedExpression {
+  neg(): Expression {
     const n = this._value;
     if (n === 0) return this;
 
@@ -223,7 +223,7 @@ export class BoxedNumber
     return this.engine.number(n.neg());
   }
 
-  inv(): BoxedExpression {
+  inv(): Expression {
     if (typeof this._value === 'number') {
       if (Math.abs(this._value) === 1) return this;
       if (!Number.isInteger(this._value))
@@ -236,7 +236,7 @@ export class BoxedNumber
     return this.engine.number(this._value.inv());
   }
 
-  abs(): BoxedExpression {
+  abs(): Expression {
     if (this.isPositive) return this;
     if (typeof this._value === 'number')
       return this.engine.number(-this._value);
@@ -244,7 +244,7 @@ export class BoxedNumber
     return this.engine.number(this._value.abs());
   }
 
-  add(rhs: number | BoxedExpression): BoxedExpression {
+  add(rhs: number | Expression): Expression {
     const ce = this.engine;
     if (this.is(0)) return ce.box(rhs);
     if (typeof rhs === 'number') {
@@ -267,7 +267,7 @@ export class BoxedNumber
     return add(this, rhs.canonical);
   }
 
-  mul(rhs: NumericValue | number | BoxedExpression): BoxedExpression {
+  mul(rhs: NumericValue | number | Expression): Expression {
     if (this.is(1)) return this.engine.box(rhs);
     if (this.is(-1)) return this.engine.box(rhs).neg();
 
@@ -300,15 +300,15 @@ export class BoxedNumber
     return mul(this, rhs);
   }
 
-  div(rhs: number | BoxedExpression): BoxedExpression {
+  div(rhs: number | Expression): Expression {
     return div(this, rhs);
   }
 
-  pow(exp: number | BoxedExpression): BoxedExpression {
+  pow(exp: number | Expression): Expression {
     return pow(this, exp, { numericApproximation: false });
   }
 
-  root(exp: number | BoxedExpression): BoxedExpression {
+  root(exp: number | Expression): Expression {
     if (typeof exp === 'number') {
       if (exp === 0) return this.engine.NaN;
       if (exp === 1) return this;
@@ -343,7 +343,7 @@ export class BoxedNumber
     return this.engine._fn('Root', [this, this.engine.box(exp)]);
   }
 
-  sqrt(): BoxedExpression {
+  sqrt(): Expression {
     // @fastpath
     if (typeof this._value === 'number') {
       if (this._value === 0 || this._value === 1) return this;
@@ -365,7 +365,7 @@ export class BoxedNumber
     return this.engine.number(this._value.sqrt());
   }
 
-  ln(semiBase?: number | BoxedExpression): BoxedExpression {
+  ln(semiBase?: number | Expression): Expression {
     const base = semiBase ? this.engine.box(semiBase) : undefined;
 
     // Mathematica returns `Log[0]` as `-∞`
@@ -404,7 +404,7 @@ export class BoxedNumber
     return this.engine._fn('Ln', [this]);
   }
 
-  get value(): BoxedExpression {
+  get value(): Expression {
     return this;
   }
 
@@ -438,17 +438,17 @@ export class BoxedNumber
     return 'negative';
   }
 
-  get numerator(): BoxedExpression {
+  get numerator(): Expression {
     if (typeof this._value === 'number') return this;
     return this.engine.number(this._value.numerator);
   }
 
-  get denominator(): BoxedExpression {
+  get denominator(): Expression {
     if (typeof this._value === 'number') return this.engine.One;
     return this.engine.number(this._value.denominator);
   }
 
-  get numeratorDenominator(): [BoxedExpression, BoxedExpression] {
+  get numeratorDenominator(): [Expression, Expression] {
     if (typeof this._value === 'number') return [this, this.engine.One];
     const ce = this.engine;
     return [
@@ -460,7 +460,7 @@ export class BoxedNumber
   subs(
     sub: Substitution,
     options?: { canonical?: CanonicalOptions }
-  ): BoxedExpression {
+  ): Expression {
     if (this.isStructural) return this;
     // Apply the substition to the structural version of the number.
     // For example, `3/4` will be replaced by
@@ -471,14 +471,14 @@ export class BoxedNumber
   replace(
     rules: BoxedRuleSet | Rule | Rule[],
     options?: Partial<ReplaceOptions>
-  ): BoxedExpression | null {
+  ): Expression | null {
     // Apply the replace on the structural version of the number.
     // This will allow transformations to be applied on ["Rational", 3, 4]
     // for example.
     return replace(this.structural, rules, options).at(-1)?.value ?? null;
   }
   match(
-    pattern: BoxedExpression,
+    pattern: Expression,
     options?: PatternMatchOptions
   ): BoxedSubstitution | null {
     return match(this.structural, pattern, options);
@@ -582,7 +582,7 @@ export class BoxedNumber
     return isSubtype(this._value.type, 'real');
   }
 
-  is(other: BoxedExpression | number | bigint | boolean): boolean {
+  is(other: Expression | number | bigint | boolean): boolean {
     if (typeof other === 'number') {
       // We want to be able to compare NaN with NaN, so we have to use
       // Object.is() instead of === (which return false for NaN === NaN)
@@ -600,7 +600,7 @@ export class BoxedNumber
     return this.isSame(other);
   }
 
-  get canonical(): BoxedExpression {
+  get canonical(): Expression {
     return this;
   }
 
@@ -611,12 +611,12 @@ export class BoxedNumber
     return true;
   }
 
-  get structural(): BoxedExpression {
+  get structural(): Expression {
     if (this.isStructural) return this;
     return this.engine.box(this.json, { form: 'structural' });
   }
 
-  toNumericValue(): [NumericValue, BoxedExpression] {
+  toNumericValue(): [NumericValue, Expression] {
     const v = this._value;
     if (typeof v === 'number')
       return [this.engine._numericValue(v), this.engine.One];
@@ -624,18 +624,18 @@ export class BoxedNumber
     return [v, this.engine.One];
   }
 
-  simplify(options?: Partial<SimplifyOptions>): BoxedExpression {
+  simplify(options?: Partial<SimplifyOptions>): Expression {
     const results = simplify(this.structural, options);
 
     return results.at(-1)!.value ?? this;
   }
 
-  evaluate(options?: Partial<EvaluateOptions>): BoxedExpression {
+  evaluate(options?: Partial<EvaluateOptions>): Expression {
     if (options?.numericApproximation) return this.N();
     return this;
   }
 
-  N(): BoxedExpression {
+  N(): Expression {
     const v = this._value;
     if (typeof v === 'number') return this;
     // NumericValue

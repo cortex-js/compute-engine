@@ -12,7 +12,7 @@ import { isRational } from './numerics/rationals';
 import type { Rational } from './numerics/types';
 import type {
   BoxedDefinition,
-  BoxedExpression,
+  Expression,
   CanonicalOptions,
   Metadata,
   ValueDefinition,
@@ -20,33 +20,33 @@ import type {
 } from './global-types';
 
 export type CommonNumberTable = {
-  [num: number]: null | BoxedExpression;
+  [num: number]: null | Expression;
 };
 
 type SymbolHost = ComputeEngine & {
   strict: boolean;
-  Nothing: BoxedExpression;
+  Nothing: Expression;
   lookupDefinition(id: MathJsonSymbol): undefined | BoxedDefinition;
   _declareSymbolValue(
     name: MathJsonSymbol,
     def: Partial<ValueDefinition>
   ): BoxedDefinition;
-  error(message: string | string[], where?: string): BoxedExpression;
+  error(message: string | string[], where?: string): Expression;
 };
 
 type NumberHost = ComputeEngine & {
-  Zero: BoxedExpression;
-  One: BoxedExpression;
-  NegativeOne: BoxedExpression;
-  Two: BoxedExpression;
-  NaN: BoxedExpression;
-  PositiveInfinity: BoxedExpression;
-  NegativeInfinity: BoxedExpression;
+  Zero: Expression;
+  One: Expression;
+  NegativeOne: Expression;
+  Two: Expression;
+  NaN: Expression;
+  PositiveInfinity: Expression;
+  NegativeInfinity: Expression;
   _fn(
     name: MathJsonSymbol,
-    ops: ReadonlyArray<BoxedExpression>,
+    ops: ReadonlyArray<Expression>,
     options?: { metadata?: Metadata; canonical?: boolean }
-  ): BoxedExpression;
+  ): Expression;
   number(
     value:
       | number
@@ -58,7 +58,7 @@ type NumberHost = ComputeEngine & {
       | Complex
       | Rational,
     options?: { metadata: Metadata; canonical: CanonicalOptions }
-  ): BoxedExpression;
+  ): Expression;
 };
 
 function isNumberCanonicalized(canonical?: CanonicalOptions): boolean {
@@ -70,10 +70,10 @@ function isNumberCanonicalized(canonical?: CanonicalOptions): boolean {
 
 export function createSymbolExpression(
   engine: SymbolHost,
-  commonSymbols: { [symbol: string]: null | BoxedExpression },
+  commonSymbols: { [symbol: string]: null | Expression },
   symbolName: string,
   options?: { canonical?: CanonicalOptions; metadata?: Metadata }
-): BoxedExpression {
+): Expression {
   const canonical = options?.canonical ?? true;
   const metadata = options?.metadata;
 
@@ -117,7 +117,7 @@ export function createNumberExpression(
     | Complex
     | Rational,
   options?: { metadata: Metadata; canonical: CanonicalOptions }
-): BoxedExpression {
+): Expression {
   const metadata = options?.metadata;
   const canonical = isNumberCanonicalized(options?.canonical);
 

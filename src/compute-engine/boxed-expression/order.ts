@@ -1,4 +1,4 @@
-import type { BoxedExpression } from '../global-types';
+import type { Expression } from '../global-types';
 
 import { maxDegree, revlex, totalDegree } from './polynomial-degree';
 import { asRadical } from './arithmetic-power';
@@ -60,7 +60,7 @@ function isTrigonometricFunction(operator: unknown): boolean {
  * - 2x^2y^3 + 5x^3y
  */
 
-export function addOrder(a: BoxedExpression, b: BoxedExpression): number {
+export function addOrder(a: Expression, b: Expression): number {
   const aTotalDeg = totalDegree(a);
   const bTotalDeg = totalDegree(b);
   if (aTotalDeg !== bTotalDeg) return bTotalDeg - aTotalDeg;
@@ -82,11 +82,11 @@ export function addOrder(a: BoxedExpression, b: BoxedExpression): number {
   return order(a, b);
 }
 
-export function equalOrder(a: BoxedExpression, b: BoxedExpression): number {
+export function equalOrder(a: Expression, b: Expression): number {
   // Rank 1: symbols
   // Ranks 2: expression
   // Rank 3: numbers
-  const eqRank = (x: BoxedExpression): number => {
+  const eqRank = (x: Expression): number => {
     if (isSymbol(x)) return 1;
     if (isNumber(x)) return 3;
     return 2;
@@ -111,7 +111,7 @@ export function equalOrder(a: BoxedExpression, b: BoxedExpression): number {
   return order(a, b);
 }
 
-// export function isSorted(expr: BoxedExpression): BoxedExpression {
+// export function isSorted(expr: Expression): Expression {
 
 // }
 
@@ -140,7 +140,7 @@ export type Rank = (typeof RANKS)[number];
  * Return the "rank", the order in which the expression should be
  * sorted.
  */
-function rank(expr: BoxedExpression): Rank {
+function rank(expr: Expression): Rank {
   if (isNumber(expr)) {
     if (typeof expr.numericValue === 'number') {
       return Number.isInteger(expr.numericValue) ? 'integer' : 'real';
@@ -230,7 +230,7 @@ function rank(expr: BoxedExpression): Rank {
  * description of the ordering of expressions in Mathematica.
  *
  */
-export function order(a: BoxedExpression, b: BoxedExpression): number {
+export function order(a: Expression, b: Expression): number {
   if (a === b) return 0;
 
   const rankA = rank(a);
@@ -381,14 +381,14 @@ export function order(a: BoxedExpression, b: BoxedExpression): number {
  * canonical order
  */
 export function canonicalOrder(
-  expr: BoxedExpression,
+  expr: Expression,
   { recursive = false }: { recursive?: boolean }
-): BoxedExpression {
+): Expression {
   // If the expression is already in canonical form, return it as is
   if (expr.isCanonical || expr.isStructural || !isFunction(expr))
     return expr;
 
-  let ops: ReadonlyArray<BoxedExpression> = expr.ops;
+  let ops: ReadonlyArray<Expression> = expr.ops;
   if (recursive) ops = ops.map((x) => canonicalOrder(x, { recursive }));
 
   ops = sortOperands(expr.operator, ops);
@@ -398,8 +398,8 @@ export function canonicalOrder(
 
 export function sortOperands(
   operator: string,
-  xs: ReadonlyArray<BoxedExpression>
-): ReadonlyArray<BoxedExpression> {
+  xs: ReadonlyArray<Expression>
+): ReadonlyArray<Expression> {
   if (xs.length === 0) return xs;
   const ce = xs[0].engine;
 
@@ -424,7 +424,7 @@ export function sortOperands(
  * to the deglex polynomial ordering
  *
  */
-export function polynomialOrder(expr: BoxedExpression): BoxedExpression {
+export function polynomialOrder(expr: Expression): Expression {
   // Empirically, the Total Degree Reverse Lexicographic Order (grevlex)
   // is often the fastest to calculate Gröbner basis. We use it as the
   // default ordering for polynomials.
@@ -432,48 +432,48 @@ export function polynomialOrder(expr: BoxedExpression): BoxedExpression {
 }
 
 export function lexicographicOrder(
-  expr: BoxedExpression,
+  expr: Expression,
   vars?: ReadonlyArray<string>
-): BoxedExpression {
+): Expression {
   // @todo
   const _vars = vars ?? expr.unknowns;
   return expr;
 }
 
 export function degreeLexicographicOrder(
-  expr: BoxedExpression,
+  expr: Expression,
   vars?: ReadonlyArray<string>
-): BoxedExpression {
+): Expression {
   // @todo
   const _vars = vars ?? expr.unknowns;
   return expr;
 }
 
 export function degreeReverseLexicographicOrder(
-  expr: BoxedExpression,
+  expr: Expression,
   vars?: ReadonlyArray<string>
-): BoxedExpression {
+): Expression {
   // @todo
   const _vars = vars ?? expr.unknowns;
   return expr;
 }
 
 export function eliminationOrder(
-  expr: BoxedExpression,
+  expr: Expression,
   vars?: ReadonlyArray<string>
-): BoxedExpression {
+): Expression {
   // @todo
   const _vars = vars ?? expr.unknowns;
   return expr;
 }
 
 /** Get the number of atomic elements in the expression */
-function getLeafCount(expr: BoxedExpression): number {
+function getLeafCount(expr: Expression): number {
   if (!isFunction(expr)) return 1;
   return 1 + [...expr.ops].reduce((acc, x) => acc + getLeafCount(x), 0);
 }
 
-function getComplex(a: BoxedExpression): [number, number] {
+function getComplex(a: Expression): [number, number] {
   if (isSymbol(a) && a.symbol === 'ImaginaryUnit') return [0, 1];
   if (isNumber(a)) {
     if (typeof a.numericValue === 'number') return [a.numericValue, 0];

@@ -1,4 +1,4 @@
-import type { BoxedExpression } from '../global-types';
+import type { Expression } from '../global-types';
 import { asSmallInteger } from './numerics';
 import { add } from './arithmetic-add';
 import { expand } from './expand';
@@ -20,8 +20,8 @@ export { totalDegree, maxDegree, lex, revlex } from './polynomial-degree';
  * If a coefficient does not apply (there are no corresponding term), it is `null`.
  *
  */
-export type UnivariateCoefficients = (null | BoxedExpression)[];
-export type MultivariateCoefficients = (null | (null | BoxedExpression)[])[];
+export type UnivariateCoefficients = (null | Expression)[];
+export type MultivariateCoefficients = (null | (null | Expression)[])[];
 
 /**
  * Return a list of coefficient of powers of `vars` in `poly`,
@@ -30,15 +30,15 @@ export type MultivariateCoefficients = (null | (null | BoxedExpression)[])[];
  * If `poly`  is not a polynomial, return `null`.
  */
 export function coefficients(
-  poly: BoxedExpression,
+  poly: Expression,
   vars: string
 ): UnivariateCoefficients | null;
 export function coefficients(
-  poly: BoxedExpression,
+  poly: Expression,
   vars: string[]
 ): MultivariateCoefficients | null;
 export function coefficients(
-  _poly: BoxedExpression,
+  _poly: Expression,
   _vars: string | string[]
 ): UnivariateCoefficients | MultivariateCoefficients | null {
   // @todo
@@ -55,18 +55,18 @@ export function coefficients(
 // export function polynomial(
 //   coefs: UnivariateCoefficients,
 //   vars: string
-// ): BoxedExpression;
+// ): Expression;
 // export function polynomial(
 //   coefs: MultivariateCoefficients,
 //   vars: string[]
-// ): BoxedExpression;
+// ): Expression;
 
 // export function polynomial(
 //   coefs: UnivariateCoefficients | MultivariateCoefficients,
 //   vars: string | string[]
-// ): BoxedExpression {
+// ): Expression {
 //   if (typeof vars === 'string') vars = [vars];
-//   const terms: BoxedExpression[] = [];
+//   const terms: Expression[] = [];
 
 //   let degree = 0;
 //   for (const coef of coefs) {
@@ -75,7 +75,7 @@ export function coefficients(
 //       // Constant term
 //       terms.push(coef[0]);
 //     } else if (degree === 1) {
-//       const term: BoxedExpression[] = [];
+//       const term: Expression[] = [];
 //       for (const [i, v] of vars) {
 //         if (coef[i]) {
 //         }
@@ -104,7 +104,7 @@ function univariateCoefficients(
 /**
  * Return the sum of positive integer exponents for an expression.
  */
-function _getDegree(expr: BoxedExpression | undefined): number {
+function _getDegree(expr: Expression | undefined): number {
   if (expr === undefined) return 0;
 
   if (isSymbol(expr)) {
@@ -143,7 +143,7 @@ function _getDegree(expr: BoxedExpression | undefined): number {
  * - `polynomialDegree(sin(x), 'x')` → -1 (not a polynomial)
  */
 export function polynomialDegree(
-  expr: BoxedExpression,
+  expr: Expression,
   variable: string
 ): number {
   // Constant or different symbol
@@ -213,28 +213,28 @@ export function polynomialDegree(
  * - `getPolynomialCoefficients(3x^2 - x + 5, 'x')` → [5, -1, 3]
  */
 export function getPolynomialCoefficients(
-  expr: BoxedExpression,
+  expr: Expression,
   variable: string
-): BoxedExpression[] | null {
+): Expression[] | null {
   const ce = expr.engine;
   const degree = polynomialDegree(expr, variable);
   if (degree < 0) return null;
 
   // Initialize coefficient array with zeros
-  const coeffs: BoxedExpression[] = new Array(degree + 1).fill(ce.Zero);
+  const coeffs: Expression[] = new Array(degree + 1).fill(ce.Zero);
 
   // Expand the expression to get standard form
   const expanded = expand(expr) ?? expr;
 
   // Helper to add a term's coefficient at a specific degree
-  const addCoefficient = (coef: BoxedExpression, deg: number): boolean => {
+  const addCoefficient = (coef: Expression, deg: number): boolean => {
     if (deg > degree) return false;
     coeffs[deg] = coeffs[deg].add(coef);
     return true;
   };
 
   // Process a single term (not an Add expression)
-  const processTerm = (term: BoxedExpression): boolean => {
+  const processTerm = (term: Expression): boolean => {
     // Get the degree and coefficient of this term
     const termDeg = polynomialDegree(term, variable);
     if (termDeg < 0) return false;
@@ -283,7 +283,7 @@ export function getPolynomialCoefficients(
     if (isFunction(term) && term.operator === 'Multiply') {
       // Separate coefficient from variable part
       const factors = term.ops;
-      let coef: BoxedExpression = ce.One;
+      let coef: Expression = ce.One;
       let varDeg = 0;
 
       for (const factor of factors) {
@@ -335,14 +335,14 @@ export function getPolynomialCoefficients(
  * - `fromCoefficients([5, -1, 3], 'x')` → 3x^2 - x + 5
  */
 export function fromCoefficients(
-  coeffs: BoxedExpression[],
+  coeffs: Expression[],
   variable: string
-): BoxedExpression {
+): Expression {
   if (coeffs.length === 0) return coeffs[0]?.engine.Zero ?? null!;
 
   const ce = coeffs[0].engine;
   const x = ce.symbol(variable);
-  const terms: BoxedExpression[] = [];
+  const terms: Expression[] = [];
 
   for (let i = 0; i < coeffs.length; i++) {
     const coef = coeffs[i];
@@ -388,10 +388,10 @@ export function fromCoefficients(
  * - `polynomialDivide(x^3+2x+1, x+1, 'x')` → [x^2-x+3, -2]
  */
 export function polynomialDivide(
-  dividend: BoxedExpression,
-  divisor: BoxedExpression,
+  dividend: Expression,
+  divisor: Expression,
   variable: string
-): [BoxedExpression, BoxedExpression] | null {
+): [Expression, Expression] | null {
   const ce = dividend.engine;
 
   // Get coefficients
@@ -404,7 +404,7 @@ export function polynomialDivide(
   if (divisorCoeffs.every((c) => c.is(0))) return null;
 
   // Find the actual degree (ignore trailing zeros)
-  const actualDegree = (coeffs: BoxedExpression[]): number => {
+  const actualDegree = (coeffs: Expression[]): number => {
     for (let i = coeffs.length - 1; i >= 0; i--) {
       if (!coeffs[i].is(0)) return i;
     }
@@ -427,7 +427,7 @@ export function polynomialDivide(
 
   // Clone coefficients for manipulation
   const remainder = dividendCoeffs.map((c) => c);
-  const quotientCoeffs: BoxedExpression[] = new Array(
+  const quotientCoeffs: Expression[] = new Array(
     dividendDeg - divisorDeg + 1
   ).fill(ce.Zero);
 
@@ -468,10 +468,10 @@ export function polynomialDivide(
  * - `polynomialGCD(x^3-1, x^2-1, 'x')` → x-1
  */
 export function polynomialGCD(
-  a: BoxedExpression,
-  b: BoxedExpression,
+  a: Expression,
+  b: Expression,
   variable: string
-): BoxedExpression {
+): Expression {
   const ce = a.engine;
 
   // Handle trivial cases
@@ -518,13 +518,13 @@ export function polynomialGCD(
 /**
  * Make a polynomial monic (leading coefficient = 1).
  */
-function makeMonic(poly: BoxedExpression, variable: string): BoxedExpression {
+function makeMonic(poly: Expression, variable: string): Expression {
   const coeffs = getPolynomialCoefficients(poly, variable);
 
   if (!coeffs) return poly;
 
   // Find leading coefficient
-  let leadingCoef: BoxedExpression | null = null;
+  let leadingCoef: Expression | null = null;
   for (let i = coeffs.length - 1; i >= 0; i--) {
     if (!coeffs[i].is(0)) {
       leadingCoef = coeffs[i];
@@ -550,9 +550,9 @@ function makeMonic(poly: BoxedExpression, variable: string): BoxedExpression {
  * - `cancelCommonFactors((x+1)/(x^2+3x+2), 'x')` → 1/(x+2)
  */
 export function cancelCommonFactors(
-  expr: BoxedExpression,
+  expr: Expression,
   variable: string
-): BoxedExpression {
+): Expression {
   if (!isFunction(expr) || expr.operator !== 'Divide') return expr;
 
   const numerator = expr.op1;

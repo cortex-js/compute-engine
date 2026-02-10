@@ -1,7 +1,7 @@
 import { replace } from './rules';
 import { holdMap } from './hold';
 import type {
-  BoxedExpression,
+  Expression,
   SimplifyOptions,
   BoxedRuleSet,
   RuleSteps,
@@ -35,7 +35,7 @@ const CONSTRUCTIBLE_TRIG = ['Sin', 'Cos', 'Tan', 'Csc', 'Sec', 'Cot'];
  * in its subexpressions. Used to determine if we need to recursively
  * simplify an operand to get constructible value simplification.
  */
-function containsConstructibleTrig(expr: BoxedExpression): boolean {
+function containsConstructibleTrig(expr: Expression): boolean {
   if (CONSTRUCTIBLE_TRIG.includes(expr.operator)) return true;
   if (!isFunction(expr)) return false;
   return expr.ops.some((op) => containsConstructibleTrig(op));
@@ -46,7 +46,7 @@ function containsConstructibleTrig(expr: BoxedExpression): boolean {
  * This handles cases like Power(x, Add(1,2)) where Add(1,2) should become 3.
  * Unlike full simplification, this won't expand polynomial factors.
  */
-function evaluateNumericSubexpressions(expr: BoxedExpression): BoxedExpression {
+function evaluateNumericSubexpressions(expr: Expression): Expression {
   // Number literals are already simplified
   if (isNumber(expr)) return expr;
 
@@ -84,11 +84,11 @@ function evaluateNumericSubexpressions(expr: BoxedExpression): BoxedExpression {
 }
 
 export function simplify(
-  expr: BoxedExpression,
+  expr: Expression,
   options?: Partial<InternalSimplifyOptions>,
   steps?: RuleSteps
 ): RuleSteps {
-  const hasSeen = (x: BoxedExpression) =>
+  const hasSeen = (x: Expression) =>
     steps && steps.some((y) => y.value.isSame(x));
 
   // Check we are not recursing infinitely
@@ -130,7 +130,7 @@ export function simplify(
     // 1. Fu first (preserves symbolic patterns like Morrie's law)
     // 2. Simplify first, then Fu (handles period reduction for angle contraction)
 
-    const costFn = (e: BoxedExpression) => ce.costFunction(e);
+    const costFn = (e: Expression) => ce.costFunction(e);
 
     // Approach 1: Fu first (for Morrie-like patterns)
     const fuFirst = ce._fuAlgorithm(expr);
@@ -190,9 +190,9 @@ export function simplify(
 }
 
 function isCheaper(
-  oldExpr: BoxedExpression,
-  newExpr: BoxedExpression | null | undefined,
-  costFunction?: (expr: BoxedExpression) => number
+  oldExpr: Expression,
+  newExpr: Expression | null | undefined,
+  costFunction?: (expr: Expression) => number
 ): boolean {
   if (newExpr === null || newExpr === undefined) return false;
   if (oldExpr === newExpr) return false;
@@ -214,9 +214,9 @@ function isCheaper(
 }
 
 function simplifyOperands(
-  expr: BoxedExpression,
+  expr: Expression,
   options?: Partial<SimplifyOptions>
-): BoxedExpression {
+): Expression {
   if (!isFunction(expr)) return expr;
 
   const def = expr.operatorDefinition;
@@ -335,7 +335,7 @@ function simplifyOperands(
 }
 
 function simplifyExpression(
-  expr: BoxedExpression,
+  expr: Expression,
   rules: BoxedRuleSet,
   options: SimplifyOptions,
   steps: RuleSteps
@@ -397,7 +397,7 @@ function simplifyExpression(
 }
 
 function simplifyNonCommutativeFunction(
-  expr: BoxedExpression,
+  expr: Expression,
   rules: BoxedRuleSet,
   options: Partial<InternalSimplifyOptions>,
   steps: RuleSteps
@@ -458,7 +458,7 @@ function simplifyNonCommutativeFunction(
         last.nops <= expr.nops
       ) {
         // Check if original had Power-of-Add that was expanded away
-        const hasPowerOfAdd = (e: BoxedExpression): boolean => {
+        const hasPowerOfAdd = (e: Expression): boolean => {
           if (
             e.operator === 'Power' &&
             isFunction(e) &&

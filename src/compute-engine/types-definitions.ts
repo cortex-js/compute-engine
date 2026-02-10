@@ -3,7 +3,7 @@ import type { Type, TypeString } from '../common/type/types';
 import type { BoxedType } from '../common/type/boxed-type';
 import type { LatexString, LatexDictionaryEntry } from './latex-syntax/types';
 import type {
-  BoxedExpression,
+  Expression,
   ExpressionInput,
   CompiledExpression,
 } from './types-expression';
@@ -25,10 +25,10 @@ import type {
  */
 export interface ComputeEngine {}
 
-type EvaluateOptions = KernelEvaluateOptions<BoxedExpression>;
-type Rule = KernelRule<BoxedExpression, ExpressionInput, ComputeEngine>;
-type BoxedRule = KernelBoxedRule<BoxedExpression, ComputeEngine>;
-type BoxedRuleSet = KernelBoxedRuleSet<BoxedExpression, ComputeEngine>;
+type EvaluateOptions = KernelEvaluateOptions<Expression>;
+type Rule = KernelRule<Expression, ExpressionInput, ComputeEngine>;
+type BoxedRule = KernelBoxedRule<Expression, ComputeEngine>;
+type BoxedRuleSet = KernelBoxedRuleSet<Expression, ComputeEngine>;
 type Scope = KernelScope<BoxedDefinition>;
 
 /**
@@ -54,11 +54,11 @@ export type ValueDefinition = BaseDefinition & {
   value:
     | LatexString
     | ExpressionInput
-    | ((ce: ComputeEngine) => BoxedExpression | null);
+    | ((ce: ComputeEngine) => Expression | null);
 
-  eq: (a: BoxedExpression) => boolean | undefined;
-  neq: (a: BoxedExpression) => boolean | undefined;
-  cmp: (a: BoxedExpression) => '=' | '>' | '<' | undefined;
+  eq: (a: Expression) => boolean | undefined;
+  neq: (a: Expression) => boolean | undefined;
+  cmp: (a: Expression) => '=' | '>' | '<' | undefined;
 
   collection: CollectionHandlers;
 
@@ -71,9 +71,9 @@ export type ValueDefinition = BaseDefinition & {
    * @returns The evaluated result, or `undefined` to fall back to symbolic form
    */
   subscriptEvaluate?: (
-    subscript: BoxedExpression,
+    subscript: Expression,
     options: { engine: ComputeEngine; numericApproximation?: boolean }
-  ) => BoxedExpression | undefined;
+  ) => Expression | undefined;
 };
 
 /**
@@ -128,10 +128,10 @@ export interface SequenceDefinition {
    * Pattern keys use variable names to match any value. When the same
    * variable appears multiple times (e.g., 'n,n'), the indices must be equal.
    */
-  base: Record<number | string, number | BoxedExpression>;
+  base: Record<number | string, number | Expression>;
 
-  /** Recurrence relation as LaTeX string or BoxedExpression */
-  recurrence: string | BoxedExpression;
+  /** Recurrence relation as LaTeX string or Expression */
+  recurrence: string | Expression;
 
   /** Whether to memoize computed values (default: true) */
   memoize?: boolean;
@@ -160,7 +160,7 @@ export interface SequenceDefinition {
    *
    * Example: `'k <= n'` for Pascal's triangle (only valid when k ≤ n)
    */
-  constraints?: string | BoxedExpression;
+  constraints?: string | Expression;
 }
 
 /**
@@ -307,7 +307,7 @@ export type OperatorDefinition = Partial<BaseDefinition> &
      *
      */
     type?: (
-      ops: ReadonlyArray<BoxedExpression>,
+      ops: ReadonlyArray<Expression>,
       options: { engine: ComputeEngine }
     ) => Type | TypeString | BoxedType | undefined;
 
@@ -325,7 +325,7 @@ export type OperatorDefinition = Partial<BaseDefinition> &
      *
      */
     sgn?: (
-      ops: ReadonlyArray<BoxedExpression>,
+      ops: ReadonlyArray<Expression>,
       options: { engine: ComputeEngine }
     ) => Sign | undefined;
 
@@ -358,7 +358,7 @@ export type OperatorDefinition = Partial<BaseDefinition> &
      * or if it is a complex number).
      */
     even?: (
-      ops: ReadonlyArray<BoxedExpression>,
+      ops: ReadonlyArray<Expression>,
       options: { engine: ComputeEngine }
     ) => boolean | undefined;
 
@@ -424,9 +424,9 @@ export type OperatorDefinition = Partial<BaseDefinition> &
      *
      */
     canonical?: (
-      ops: ReadonlyArray<BoxedExpression>,
+      ops: ReadonlyArray<Expression>,
       options: { engine: ComputeEngine; scope: Scope | undefined }
-    ) => BoxedExpression | null;
+    ) => Expression | null;
 
     /**
      * Evaluate a function expression.
@@ -447,33 +447,33 @@ export type OperatorDefinition = Partial<BaseDefinition> &
      */
     evaluate?:
       | ((
-          ops: ReadonlyArray<BoxedExpression>,
+          ops: ReadonlyArray<Expression>,
           options: EvaluateOptions & { engine: ComputeEngine }
-        ) => BoxedExpression | undefined)
-      | BoxedExpression;
+        ) => Expression | undefined)
+      | Expression;
 
     /**
      * An asynchronous version of `evaluate`.
      *
      */
     evaluateAsync?: (
-      ops: ReadonlyArray<BoxedExpression>,
+      ops: ReadonlyArray<Expression>,
       options: EvaluateOptions & { engine: ComputeEngine }
-    ) => Promise<BoxedExpression | undefined>;
+    ) => Promise<Expression | undefined>;
 
     /** Dimensional analysis
      * @experimental
      */
     evalDimension?: (
-      args: ReadonlyArray<BoxedExpression>,
+      args: ReadonlyArray<Expression>,
       options: EvaluateOptions & { engine: ComputeEngine }
-    ) => BoxedExpression;
+    ) => Expression;
 
     /** Return a compiled (optimized) expression. */
-    xcompile?: (expr: BoxedExpression) => CompiledExpression;
+    xcompile?: (expr: Expression) => CompiledExpression;
 
-    eq?: (a: BoxedExpression, b: BoxedExpression) => boolean | undefined;
-    neq?: (a: BoxedExpression, b: BoxedExpression) => boolean | undefined;
+    eq?: (a: Expression, b: Expression) => boolean | undefined;
+    neq?: (a: Expression, b: Expression) => boolean | undefined;
 
     collection?: CollectionHandlers;
   };
@@ -516,7 +516,7 @@ export interface BaseDefinition {
   readonly isConstant?: boolean;
 }
 
-/** Options for `BoxedExpression.simplify()`
+/** Options for `Expression.simplify()`
  *
  * @category Boxed Expression
  */
@@ -533,7 +533,7 @@ export type SimplifyOptions = {
    * If not provided, `ce.costFunction`, the cost function of the engine is
    * used.
    */
-  costFunction?: (expr: BoxedExpression) => number;
+  costFunction?: (expr: Expression) => number;
 
   /**
    * The simplification strategy to use.
@@ -667,20 +667,20 @@ export interface BaseCollectionHandlers {
    * @category Definitions
    */
   iterator: (
-    collection: BoxedExpression
-  ) => Iterator<BoxedExpression, undefined> | undefined;
+    collection: Expression
+  ) => Iterator<Expression, undefined> | undefined;
 
   /** Return the number of elements in the collection.
    *
    * An empty collection has a count of 0.
    */
-  count: (collection: BoxedExpression) => number | undefined;
+  count: (collection: Expression) => number | undefined;
 
   /** Optional flag to quickly check if the collection is empty, without having to count exactly how may elements it has (useful for lazy evaluation). */
-  isEmpty?: (collection: BoxedExpression) => boolean | undefined;
+  isEmpty?: (collection: Expression) => boolean | undefined;
 
   /** Optional flag to quickly check if the collection is finite, without having to count exactly how many elements it has (useful for lazy evaluation). */
-  isFinite?: (collection: BoxedExpression) => boolean | undefined;
+  isFinite?: (collection: Expression) => boolean | undefined;
 
   /** Return `true` if the collection is lazy, `false` otherwise.
    * If the collection is lazy, it means that the elements are not
@@ -689,7 +689,7 @@ export interface BaseCollectionHandlers {
    *
    * Default: `true`
    */
-  isLazy?: (collection: BoxedExpression) => boolean;
+  isLazy?: (collection: Expression) => boolean;
 
   /**
    * Return `true` if the target expression is in the collection,
@@ -698,8 +698,8 @@ export interface BaseCollectionHandlers {
    * Return `undefined` if the membership cannot be determined.
    */
   contains?: (
-    collection: BoxedExpression,
-    target: BoxedExpression
+    collection: Expression,
+    target: Expression
   ) => boolean | undefined;
 
   /**
@@ -712,16 +712,16 @@ export interface BaseCollectionHandlers {
    * Return `undefined` if the subset relation cannot be determined.
    */
   subsetOf?: (
-    collection: BoxedExpression,
-    other: BoxedExpression,
+    collection: Expression,
+    other: Expression,
     strict: boolean
   ) => boolean | undefined;
 
   /** Return the sign of all the elements of the collection. */
-  eltsgn?: (collection: BoxedExpression) => Sign | undefined;
+  eltsgn?: (collection: Expression) => Sign | undefined;
 
   /** Return the widest type of all the elements in the collection */
-  elttype?: (collection: BoxedExpression) => Type | undefined;
+  elttype?: (collection: Expression) => Type | undefined;
 }
 
 /**
@@ -747,9 +747,9 @@ export interface IndexedCollectionHandlers {
    * If the index is invalid, return `undefined`.
    */
   at: (
-    collection: BoxedExpression,
+    collection: Expression,
     index: number | string
-  ) => undefined | BoxedExpression;
+  ) => undefined | Expression;
 
   /**
    * Return the index of the first element that matches the predicate.
@@ -757,8 +757,8 @@ export interface IndexedCollectionHandlers {
    * If no element matches the predicate, return `undefined`.
    */
   indexWhere: (
-    collection: BoxedExpression,
-    predicate: (element: BoxedExpression) => boolean
+    collection: Expression,
+    predicate: (element: Expression) => boolean
   ) => number | undefined;
 }
 
@@ -849,11 +849,11 @@ export interface BoxedValueDefinition extends BoxedBaseDefinition {
    *  Otherwise, the current value is tracked in the evaluation context.
    *
    */
-  readonly value: BoxedExpression | undefined;
+  readonly value: Expression | undefined;
 
-  eq?: (a: BoxedExpression) => boolean | undefined;
-  neq?: (a: BoxedExpression) => boolean | undefined;
-  cmp?: (a: BoxedExpression) => '=' | '>' | '<' | undefined;
+  eq?: (a: Expression) => boolean | undefined;
+  neq?: (a: Expression) => boolean | undefined;
+  cmp?: (a: Expression) => '=' | '>' | '<' | undefined;
 
   /**
    * True if the type has been inferred. An inferred type can be updated as
@@ -870,9 +870,9 @@ export interface BoxedValueDefinition extends BoxedBaseDefinition {
    * Called when evaluating `Subscript(symbol, index)`.
    */
   subscriptEvaluate?: (
-    subscript: BoxedExpression,
+    subscript: Expression,
     options: { engine: ComputeEngine; numericApproximation?: boolean }
-  ) => BoxedExpression | undefined;
+  ) => Expression | undefined;
 }
 
 /**
@@ -939,7 +939,7 @@ export type OperatorDefinitionFlags = {
    *
    */
   commutativeOrder:
-    | ((a: BoxedExpression, b: BoxedExpression) => number)
+    | ((a: Expression, b: Expression) => number)
     | undefined;
 
   /** If `true`, when the operator is univariate, `["f", ["Multiply", x, c]]`
@@ -1005,7 +1005,7 @@ export interface BoxedOperatorDefinition
    * should *not* be evaluated, only their types should be used.
    */
   type?: (
-    ops: ReadonlyArray<BoxedExpression>,
+    ops: ReadonlyArray<Expression>,
     options: { engine: ComputeEngine }
   ) => Type | TypeString | BoxedType | undefined;
 
@@ -1020,34 +1020,34 @@ export interface BoxedOperatorDefinition
    * simplifications are valid.
    */
   sgn?: (
-    ops: ReadonlyArray<BoxedExpression>,
+    ops: ReadonlyArray<Expression>,
     options: { engine: ComputeEngine }
   ) => Sign | undefined;
 
-  eq?: (a: BoxedExpression, b: BoxedExpression) => boolean | undefined;
-  neq?: (a: BoxedExpression, b: BoxedExpression) => boolean | undefined;
+  eq?: (a: Expression, b: Expression) => boolean | undefined;
+  neq?: (a: Expression, b: Expression) => boolean | undefined;
 
   canonical?: (
-    ops: ReadonlyArray<BoxedExpression>,
+    ops: ReadonlyArray<Expression>,
     options: { engine: ComputeEngine; scope: Scope | undefined }
-  ) => BoxedExpression | null;
+  ) => Expression | null;
 
   evaluate?: (
-    ops: ReadonlyArray<BoxedExpression>,
+    ops: ReadonlyArray<Expression>,
     options: Partial<EvaluateOptions> & { engine?: ComputeEngine }
-  ) => BoxedExpression | undefined;
+  ) => Expression | undefined;
 
   evaluateAsync?: (
-    ops: ReadonlyArray<BoxedExpression>,
+    ops: ReadonlyArray<Expression>,
     options?: Partial<EvaluateOptions> & { engine?: ComputeEngine }
-  ) => Promise<BoxedExpression | undefined>;
+  ) => Promise<Expression | undefined>;
 
   evalDimension?: (
-    ops: ReadonlyArray<BoxedExpression>,
+    ops: ReadonlyArray<Expression>,
     options: { engine: ComputeEngine }
-  ) => BoxedExpression;
+  ) => Expression;
 
-  compile?: (expr: BoxedExpression) => CompiledExpression;
+  compile?: (expr: Expression) => CompiledExpression;
 
   /** @internal */
   update(def: OperatorDefinition): void;

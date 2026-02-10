@@ -1,5 +1,5 @@
 import type {
-  BoxedExpression,
+  Expression,
   IComputeEngine as ComputeEngine,
 } from '../global-types';
 import { polynomialDegree } from './polynomials';
@@ -32,11 +32,11 @@ function numericRealPart(value: unknown): number | undefined {
  * - `x^2 + 1` → false (quadratic, but caught by polynomialDegree check)
  */
 function isLinearInVariables(
-  expr: BoxedExpression,
+  expr: Expression,
   variables: string[]
 ): boolean {
   // Count how many of the given variables appear in the expression
-  const countVariables = (e: BoxedExpression): number => {
+  const countVariables = (e: Expression): number => {
     let count = 0;
     for (const v of variables) {
       if (isSymbol(e) && e.symbol === v) return 1;
@@ -46,7 +46,7 @@ function isLinearInVariables(
   };
 
   // Check each term
-  const checkTerm = (term: BoxedExpression): boolean => {
+  const checkTerm = (term: Expression): boolean => {
     // If the term doesn't contain any variable, it's fine (constant)
     const varCount = countVariables(term);
     if (varCount === 0) return true;
@@ -101,7 +101,7 @@ function isLinearInVariables(
 /**
  * Solve a system of linear equations.
  *
- * @param equations - Array of BoxedExpression representing equations (Equal expressions)
+ * @param equations - Array of Expression representing equations (Equal expressions)
  * @param variables - Array of variable names to solve for
  * @returns Object mapping variable names to their solutions, or null if unsolvable
  *
@@ -113,7 +113,7 @@ function isLinearInVariables(
  * // Unique solution
  * const e = ce.parse('\\begin{cases}x+y=70\\\\2x-4y=80\\end{cases}');
  * const result = e.solve(['x', 'y']);
- * // result = { x: BoxedExpression(60), y: BoxedExpression(10) }
+ * // result = { x: Expression(60), y: Expression(10) }
  *
  * // Parametric solution (under-determined)
  * const e2 = ce.parse('\\begin{cases}x+y=5\\end{cases}');
@@ -122,9 +122,9 @@ function isLinearInVariables(
  * ```
  */
 export function solveLinearSystem(
-  equations: BoxedExpression[],
+  equations: Expression[],
   variables: string[]
-): Record<string, BoxedExpression> | null {
+): Record<string, Expression> | null {
   if (equations.length === 0 || variables.length === 0) return null;
 
   const ce = equations[0].engine;
@@ -147,7 +147,7 @@ export function solveLinearSystem(
   if (!solutions) return null;
 
   // Build result object
-  const result: Record<string, BoxedExpression> = {};
+  const result: Record<string, Expression> = {};
   for (let i = 0; i < n; i++) {
     result[variables[i]] = solutions[i].simplify();
   }
@@ -167,13 +167,13 @@ export function solveLinearSystem(
  * where c is the constant on the RHS
  */
 function extractLinearCoefficients(
-  equation: BoxedExpression,
+  equation: Expression,
   variables: string[]
-): { coefficients: BoxedExpression[]; constant: BoxedExpression } | null {
+): { coefficients: Expression[]; constant: Expression } | null {
   const ce = equation.engine;
 
   // Handle Equal(lhs, rhs) -> lhs - rhs = 0
-  let expr: BoxedExpression;
+  let expr: Expression;
   if (equation.operator === 'Equal' && isFunction(equation)) {
     const lhs = equation.op1;
     const rhs = equation.op2;
@@ -195,7 +195,7 @@ function extractLinearCoefficients(
   if (!isLinearInVariables(expr, variables)) return null;
 
   // Extract coefficient for each variable
-  const coefficients: BoxedExpression[] = [];
+  const coefficients: Expression[] = [];
   for (const v of variables) {
     const coef = extractCoefficient(expr, v, ce);
     if (coef === null) return null;
@@ -213,10 +213,10 @@ function extractLinearCoefficients(
  * For 2x + 3y + 5, extractCoefficient(expr, 'x') returns 2.
  */
 function extractCoefficient(
-  expr: BoxedExpression,
+  expr: Expression,
   variable: string,
   ce: ComputeEngine
-): BoxedExpression | null {
+): Expression | null {
   // If the expression doesn't contain the variable, coefficient is 0
   if (!expr.has(variable)) return ce.Zero;
 
@@ -232,7 +232,7 @@ function extractCoefficient(
   // Handle Multiply: look for variable * coefficient
   if (expr.operator === 'Multiply' && isFunction(expr)) {
     const ops = expr.ops;
-    let coef: BoxedExpression = ce.One;
+    let coef: Expression = ce.One;
     let foundVar = false;
 
     for (const op of ops) {
@@ -251,7 +251,7 @@ function extractCoefficient(
 
   // Handle Add: sum the coefficients from each term
   if (expr.operator === 'Add' && isFunction(expr)) {
-    let totalCoef: BoxedExpression = ce.Zero;
+    let totalCoef: Expression = ce.Zero;
     for (const term of expr.ops) {
       const termCoef = extractCoefficient(term, variable, ce);
       if (termCoef === null) return null;
@@ -281,17 +281,17 @@ function extractCoefficient(
  * Extract the constant term (terms not containing any of the variables).
  */
 function extractConstantTerm(
-  expr: BoxedExpression,
+  expr: Expression,
   variables: string[],
   ce: ComputeEngine
-): BoxedExpression {
+): Expression {
   // Check if expression contains any variable
   const hasAnyVar = variables.some((v) => expr.has(v));
   if (!hasAnyVar) return expr;
 
   // Handle Add: collect constant terms
   if (expr.operator === 'Add' && isFunction(expr)) {
-    let constant: BoxedExpression = ce.Zero;
+    let constant: Expression = ce.Zero;
     for (const term of expr.ops) {
       const termHasVar = variables.some((v) => term.has(v));
       if (!termHasVar) {
@@ -321,13 +321,13 @@ function extractConstantTerm(
  * Build the augmented matrix [A|b] from a system of linear equations.
  */
 function buildAugmentedMatrix(
-  equations: BoxedExpression[],
+  equations: Expression[],
   variables: string[]
-): { A: BoxedExpression[][]; b: BoxedExpression[] } | null {
+): { A: Expression[][]; b: Expression[] } | null {
   const m = equations.length;
 
-  const A: BoxedExpression[][] = [];
-  const b: BoxedExpression[] = [];
+  const A: Expression[][] = [];
+  const b: Expression[] = [];
 
   for (let i = 0; i < m; i++) {
     const result = extractLinearCoefficients(equations[i], variables);
@@ -348,15 +348,15 @@ function buildAugmentedMatrix(
  * throughout the computation for exact results.
  */
 function gaussianElimination(
-  A: BoxedExpression[][],
-  b: BoxedExpression[],
+  A: Expression[][],
+  b: Expression[],
   n: number,
   ce: ComputeEngine
-): BoxedExpression[] | null {
+): Expression[] | null {
   const m = A.length;
 
   // Create augmented matrix [A|b]
-  const aug: BoxedExpression[][] = [];
+  const aug: Expression[][] = [];
   for (let i = 0; i < m; i++) {
     aug.push([...A[i], b[i]]);
   }
@@ -419,7 +419,7 @@ function gaussianElimination(
 
   // Back substitution
   // Division preserves exact rationals when possible
-  const solution: BoxedExpression[] = new Array(n);
+  const solution: Expression[] = new Array(n);
 
   for (let i = n - 1; i >= 0; i--) {
     let sum = aug[i][n]; // RHS
@@ -449,16 +449,16 @@ function gaussianElimination(
  * @returns Object mapping variable names to their solutions (may contain free variables)
  */
 function solveParametric(
-  A: BoxedExpression[][],
-  b: BoxedExpression[],
+  A: Expression[][],
+  b: Expression[],
   variables: string[],
   ce: ComputeEngine
-): Record<string, BoxedExpression> | null {
+): Record<string, Expression> | null {
   const m = A.length; // number of equations
   const n = variables.length; // number of variables
 
   // Create augmented matrix [A|b]
-  const aug: BoxedExpression[][] = [];
+  const aug: Expression[][] = [];
   for (let i = 0; i < m; i++) {
     aug.push([...A[i], b[i]]);
   }
@@ -535,7 +535,7 @@ function solveParametric(
   }
 
   // Build solution: start with free variables as themselves
-  const solution: BoxedExpression[] = new Array(n);
+  const solution: Expression[] = new Array(n);
   for (let col = 0; col < n; col++) {
     if (!isPivotCol[col]) {
       // Free variable: equals itself
@@ -564,7 +564,7 @@ function solveParametric(
   }
 
   // Build result object, omitting free variables (self-referential symbols)
-  const result: Record<string, BoxedExpression> = {};
+  const result: Record<string, Expression> = {};
   for (let i = 0; i < n; i++) {
     const sol = solution[i];
     if (isSymbol(sol) && sol.symbol === variables[i]) continue;
@@ -585,8 +585,8 @@ function solveParametric(
  * Uses symbolic comparison when possible, falling back to numeric.
  */
 function compareAbsoluteValues(
-  a: BoxedExpression | undefined,
-  b: BoxedExpression | undefined
+  a: Expression | undefined,
+  b: Expression | undefined
 ): 1 | 0 | -1 | undefined {
   if (!a || !b) return undefined;
 
@@ -628,10 +628,10 @@ function compareAbsoluteValues(
 }
 
 /**
- * Check if a BoxedExpression is zero (or effectively zero).
+ * Check if a Expression is zero (or effectively zero).
  * Uses symbolic check first, then numeric fallback with tolerance.
  */
-function isEffectivelyZero(expr: BoxedExpression | undefined): boolean {
+function isEffectivelyZero(expr: Expression | undefined): boolean {
   if (!expr) return true;
 
   // Try symbolic zero check first
@@ -658,7 +658,7 @@ function isEffectivelyZero(expr: BoxedExpression | undefined): boolean {
  * 1. Product + sum pattern: xy = p, x + y = s (2 equations, 2 variables)
  * 2. Substitution-reducible: one equation is linear in one variable
  *
- * @param equations - Array of BoxedExpression representing equations (Equal expressions)
+ * @param equations - Array of Expression representing equations (Equal expressions)
  * @param variables - Array of variable names to solve for
  * @returns Array of solution objects, or null if unsolvable
  *
@@ -671,9 +671,9 @@ function isEffectivelyZero(expr: BoxedExpression | undefined): boolean {
  * ```
  */
 export function solvePolynomialSystem(
-  equations: BoxedExpression[],
+  equations: Expression[],
   variables: string[]
-): Array<Record<string, BoxedExpression>> | null {
+): Array<Record<string, Expression>> | null {
   if (equations.length !== 2 || variables.length !== 2) return null;
 
   const ce = equations[0].engine;
@@ -705,15 +705,15 @@ export function solvePolynomialSystem(
  * Solution: x and y are roots of t² - st + p = 0
  */
 function tryProductSumPattern(
-  equations: BoxedExpression[],
+  equations: Expression[],
   x: string,
   y: string,
   ce: ComputeEngine
-): Array<Record<string, BoxedExpression>> | null {
-  let productEq: BoxedExpression | null = null;
-  let sumEq: BoxedExpression | null = null;
-  let product: BoxedExpression | null = null;
-  let sum: BoxedExpression | null = null;
+): Array<Record<string, Expression>> | null {
+  let productEq: Expression | null = null;
+  let sumEq: Expression | null = null;
+  let product: Expression | null = null;
+  let sum: Expression | null = null;
 
   for (const eq of equations) {
     // Check if this is a product equation: xy - p = 0 or p - xy = 0
@@ -750,7 +750,7 @@ function tryProductSumPattern(
   if (realRoots.length === 0) return null;
 
   // Build solution pairs
-  const solutions: Array<Record<string, BoxedExpression>> = [];
+  const solutions: Array<Record<string, Expression>> = [];
 
   if (realRoots.length === 1) {
     // Double root - both x and y have the same value
@@ -775,11 +775,11 @@ function tryProductSumPattern(
  * Returns the product value p, or null if not a product equation.
  */
 function extractProductEquation(
-  eq: BoxedExpression,
+  eq: Expression,
   x: string,
   y: string,
   ce: ComputeEngine
-): { product: BoxedExpression } | null {
+): { product: Expression } | null {
   // eq is in the form: lhs - rhs = 0 (already expanded)
   // We're looking for: xy - p = 0 or c*xy - p = 0
 
@@ -807,13 +807,13 @@ function extractProductEquation(
  * Extract coefficient of xy term and constant from an expression.
  */
 function extractXYCoefficient(
-  expr: BoxedExpression,
+  expr: Expression,
   x: string,
   y: string,
   ce: ComputeEngine
-): { coef: BoxedExpression; constant: BoxedExpression } | null {
-  let xyCoef: BoxedExpression = ce.Zero;
-  let constant: BoxedExpression = ce.Zero;
+): { coef: Expression; constant: Expression } | null {
+  let xyCoef: Expression = ce.Zero;
+  let constant: Expression = ce.Zero;
 
   // Handle Add
   if (expr.operator === 'Add' && isFunction(expr)) {
@@ -836,11 +836,11 @@ function extractXYCoefficient(
  * Extract xy coefficient from a single term.
  */
 function extractXYCoefficientFromTerm(
-  term: BoxedExpression,
+  term: Expression,
   x: string,
   y: string,
   ce: ComputeEngine
-): { coef: BoxedExpression; constant: BoxedExpression } | null {
+): { coef: Expression; constant: Expression } | null {
   const hasX = term.has(x);
   const hasY = term.has(y);
 
@@ -856,7 +856,7 @@ function extractXYCoefficientFromTerm(
 
   // Term has both x and y - should be c*x*y
   if (term.operator === 'Multiply' && isFunction(term)) {
-    let coef: BoxedExpression = ce.One;
+    let coef: Expression = ce.One;
     let foundX = false;
     let foundY = false;
 
@@ -893,11 +893,11 @@ function extractXYCoefficientFromTerm(
  * Returns the sum value s, or null if not a sum equation.
  */
 function extractSumEquation(
-  eq: BoxedExpression,
+  eq: Expression,
   x: string,
   y: string,
   ce: ComputeEngine
-): { sum: BoxedExpression } | null {
+): { sum: Expression } | null {
   // eq is in the form: lhs - rhs = 0 (already expanded)
   // We're looking for: ax + by - s = 0 where equation is linear in both vars
 
@@ -944,9 +944,9 @@ function extractSumEquation(
 }
 
 /**
- * Check if a BoxedExpression represents a real value (not complex).
+ * Check if a Expression represents a real value (not complex).
  */
-function isRealValue(expr: BoxedExpression): boolean {
+function isRealValue(expr: Expression): boolean {
   const simplified = expr.simplify();
   // Check if it's a complex number
   if (simplified.operator === 'Complex') return false;
@@ -960,8 +960,8 @@ function isRealValue(expr: BoxedExpression): boolean {
  * Filter roots to only include real values (exclude complex numbers).
  */
 function filterRealRoots(
-  roots: ReadonlyArray<BoxedExpression>
-): BoxedExpression[] {
+  roots: ReadonlyArray<Expression>
+): Expression[] {
   return roots.filter((r) => isRealValue(r));
 }
 
@@ -971,11 +971,11 @@ function filterRealRoots(
  * and substitute into the other equation.
  */
 function trySubstitutionMethod(
-  equations: BoxedExpression[],
+  equations: Expression[],
   x: string,
   y: string,
   ce: ComputeEngine
-): Array<Record<string, BoxedExpression>> | null {
+): Array<Record<string, Expression>> | null {
   // Try each equation and each variable
   for (let i = 0; i < equations.length; i++) {
     const eq = equations[i];
@@ -992,7 +992,7 @@ function trySubstitutionMethod(
       // Solve the resulting univariate equation for y
       const yRoots = filterRealRoots(findUnivariateRoots(substituted, y));
       if (yRoots.length > 0) {
-        const solutions: Array<Record<string, BoxedExpression>> = [];
+        const solutions: Array<Record<string, Expression>> = [];
         for (const yVal of yRoots) {
           const ySimplified = yVal.simplify();
           const xVal = solveForXResult
@@ -1018,7 +1018,7 @@ function trySubstitutionMethod(
       // Solve the resulting univariate equation for x
       const xRoots = filterRealRoots(findUnivariateRoots(substituted, x));
       if (xRoots.length > 0) {
-        const solutions: Array<Record<string, BoxedExpression>> = [];
+        const solutions: Array<Record<string, Expression>> = [];
         for (const xVal of xRoots) {
           const xSimplified = xVal.simplify();
           const yVal = solveForYResult
@@ -1044,11 +1044,11 @@ function trySubstitutionMethod(
  * For equation ax + f(y) = 0, returns x = -f(y)/a
  */
 function trySolveLinearFor(
-  eq: BoxedExpression,
+  eq: Expression,
   solveFor: string,
   otherVar: string,
   ce: ComputeEngine
-): BoxedExpression | null {
+): Expression | null {
   // Check if the equation is linear in solveFor
   const deg = polynomialDegree(eq, solveFor);
   if (deg !== 1) return null;
@@ -1096,7 +1096,7 @@ interface LinearConstraint {
  * Solve a system of linear inequalities in 2 variables.
  * Returns the vertices of the feasible region (convex polygon).
  *
- * @param inequalities - Array of BoxedExpression representing inequalities
+ * @param inequalities - Array of Expression representing inequalities
  * @param variables - Array of exactly 2 variable names
  * @returns Array of vertex coordinate objects, or null if unsolvable/unbounded
  *
@@ -1108,9 +1108,9 @@ interface LinearConstraint {
  * ```
  */
 export function solveLinearInequalitySystem(
-  inequalities: BoxedExpression[],
+  inequalities: Expression[],
   variables: string[]
-): Array<Record<string, BoxedExpression>> | null {
+): Array<Record<string, Expression>> | null {
   // Only support 2-variable systems
   if (variables.length !== 2) return null;
   if (inequalities.length < 2) return null;
@@ -1153,7 +1153,7 @@ export function solveLinearInequalitySystem(
   // Order vertices in convex hull order (counterclockwise)
   const orderedVertices = orderConvexHull(uniqueVertices);
 
-  // Convert to BoxedExpression result format
+  // Convert to Expression result format
   return orderedVertices.map((pt) => ({
     [xVar]: ce.number(pt.x).simplify(),
     [yVar]: ce.number(pt.y).simplify(),
@@ -1165,7 +1165,7 @@ export function solveLinearInequalitySystem(
  * Normalizes to form: a*x + b*y + c <= 0 (or < 0)
  */
 function extractLinearConstraint(
-  ineq: BoxedExpression,
+  ineq: Expression,
   xVar: string,
   yVar: string,
   ce: ComputeEngine
@@ -1182,7 +1182,7 @@ function extractLinearConstraint(
   // Normalize: move everything to left side
   // For Less/LessEqual: lhs < rhs => lhs - rhs < 0
   // For Greater/GreaterEqual: lhs > rhs => rhs - lhs < 0
-  let expr: BoxedExpression;
+  let expr: Expression;
   let strict: boolean;
 
   if (op === 'Less' || op === 'LessEqual') {

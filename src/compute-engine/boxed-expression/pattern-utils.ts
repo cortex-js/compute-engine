@@ -6,7 +6,7 @@
  * has dependencies that create cycles through boxed-symbol.ts.
  */
 
-import type { BoxedExpression } from '../global-types';
+import type { Expression } from '../global-types';
 import { isFunction, isSymbol } from './type-guards';
 
 /**
@@ -15,7 +15,7 @@ import { isFunction, isSymbol } from './type-guards';
  * @param expr - The expression to check
  * @returns `true` if the expression is any type of wildcard
  */
-export function isWildcard(expr: BoxedExpression): boolean {
+export function isWildcard(expr: Expression): boolean {
   return (
     (isSymbol(expr) && expr.symbol.startsWith('_')) ||
     expr.operator === 'Wildcard' ||
@@ -38,7 +38,7 @@ export function isWildcard(expr: BoxedExpression): boolean {
  * @param expr - The expression to get the wildcard name from
  * @returns The wildcard string, or `null` if not a wildcard
  */
-export function wildcardName(expr: BoxedExpression): string | null {
+export function wildcardName(expr: Expression): string | null {
   if (isSymbol(expr) && expr.symbol.startsWith('_')) return expr.symbol;
 
   if (isFunction(expr) && expr.nops === 1) {
@@ -58,7 +58,7 @@ export function wildcardName(expr: BoxedExpression): string | null {
 /**
  * Determine the type of wildcard.
  *
- * @param expr - A BoxedExpression or wildcard symbol string
+ * @param expr - A Expression or wildcard symbol string
  * @returns
  * - `'Wildcard'` - Universal wildcard (`_` or `_name`), matches exactly one element
  * - `'Sequence'` - Sequence wildcard (`__` or `__name`), matches one or more elements
@@ -66,7 +66,7 @@ export function wildcardName(expr: BoxedExpression): string | null {
  * - `null` - Not a wildcard
  */
 export function wildcardType(
-  expr: BoxedExpression | string
+  expr: Expression | string
 ): 'Wildcard' | 'Sequence' | 'OptionalSequence' | null {
   if (typeof expr === 'string') {
     if (expr.startsWith('_')) {

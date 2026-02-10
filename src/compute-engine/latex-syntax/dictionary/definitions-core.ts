@@ -1,4 +1,4 @@
-import { MathJsonExpression as Expression } from '../../../math-json/types';
+import { MathJsonExpression } from '../../../math-json/types';
 import {
   machineValue,
   mapArgs,
@@ -47,13 +47,13 @@ import { BoxedType } from '../../../common/type/boxed-type';
 function parseSequence(
   parser: Parser,
   terminator: Readonly<Terminator> | undefined,
-  lhs: Expression | null,
+  lhs: MathJsonExpression | null,
   prec: number,
   sep: string
-): Expression[] | null {
+): MathJsonExpression[] | null {
   if (terminator && terminator.minPrec >= prec) return null;
 
-  const result: Expression[] = lhs ? [lhs] : ['Nothing'];
+  const result: MathJsonExpression[] = lhs ? [lhs] : ['Nothing'];
   let done = false;
   while (!done) {
     done = true;
@@ -81,7 +81,7 @@ function parseSequence(
 }
 
 function serializeOps(sep = '') {
-  return (serializer: Serializer, expr: Expression | null): string => {
+  return (serializer: Serializer, expr: MathJsonExpression | null): string => {
     if (!expr) return '';
     const xs = operands(expr);
     if (xs.length === 0) return '';
@@ -148,7 +148,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     latexTrigger: ['\\mapsto'],
     kind: 'infix',
     precedence: ARROW_PRECEDENCE, // MathML rightwards arrow
-    parse: (parser: Parser, lhs: Expression, _until) => {
+    parse: (parser: Parser, lhs: MathJsonExpression, _until) => {
       let params: string[] = [];
       if (operator(lhs) === 'Delimiter') lhs = operand(lhs, 1) ?? 'Nothing';
       if (operator(lhs) === 'Sequence') {
@@ -166,9 +166,9 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       if (operator(rhs) === 'Delimiter') rhs = operand(rhs, 1) ?? 'Nothing';
       if (operator(rhs) === 'Sequence') rhs = ['Block', ...operands(rhs)];
 
-      return ['Function', rhs, ...params] as Expression;
+      return ['Function', rhs, ...params] as MathJsonExpression;
     },
-    serialize: (serializer: Serializer, expr: Expression): string => {
+    serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
       const args = operands(expr);
       if (args.length < 1) return '()\\mapsto()';
       if (args.length === 1)
@@ -204,7 +204,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     name: 'Apply',
     kind: 'function',
     symbolTrigger: 'apply',
-    serialize: (serializer: Serializer, expr: Expression): string => {
+    serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
       const lhs = operand(expr, 1); // The function body
 
       const h = operator(lhs);
@@ -215,7 +215,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
           expr,
           serializer.level
         );
-        const args = operands(expr).slice(1) as Expression[];
+        const args = operands(expr).slice(1) as MathJsonExpression[];
         return (
           serializer.serializeFunction(
             lhs!,
@@ -232,7 +232,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       const rhs = operand(expr, 2); // The first argument
       if (typeof lhs === 'string' || !rhs) {
         // e.g. "Apply(f, x)" -> "f(x)"
-        const fn = operands(expr).slice(1) as unknown as Expression;
+        const fn = operands(expr).slice(1) as unknown as MathJsonExpression;
         return serializer.serialize(fn);
       }
 
@@ -271,9 +271,9 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     latexTrigger: '\\rhd',
     kind: 'infix',
     precedence: 20,
-    parse: (parser: Parser, lhs: Expression, _until) => {
+    parse: (parser: Parser, lhs: MathJsonExpression, _until) => {
       const rhs = parser.parseExpression({ minPrec: 21 }) ?? 'Nothing';
-      return ['Apply', rhs, lhs] as Expression;
+      return ['Apply', rhs, lhs] as MathJsonExpression;
     },
   },
 
@@ -283,7 +283,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     closeTrigger: '|',
 
     kind: 'matchfix',
-    serialize: (serializer: Serializer, expr: Expression): string => {
+    serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
       const fn = operand(expr, 1);
       if (!fn) return '';
       const args = operands(expr).slice(1);
@@ -315,7 +315,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     kind: 'infix',
     associativity: 'right',
     precedence: ASSIGNMENT_PRECEDENCE,
-    serialize: (serializer: Serializer, expr: Expression): string => {
+    serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
       const id = unhold(operand(expr, 1));
 
       if (operator(operand(expr, 2)) === 'Function') {
@@ -420,7 +420,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     // The second (optional) argument is a string specifying the
     // delimiters and separator.
     name: 'Delimiter',
-    serialize: (serializer: Serializer, expr: Expression): string => {
+    serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
       const style = serializer.options.groupStyle(expr, serializer.level + 1);
 
       const arg1 = operand(expr, 1);
@@ -435,7 +435,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
         String: '""',
       }[operator(arg1)];
 
-      const items = delims ? arg1 : (['Sequence', arg1] as Expression);
+      const items = delims ? arg1 : (['Sequence', arg1] as MathJsonExpression);
 
       delims ??= '(,)';
 
@@ -507,7 +507,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   },
   {
     latexTrigger: ['\\error'],
-    parse: (parser: Parser) => ['Error', parser.parseGroup()] as Expression,
+    parse: (parser: Parser) => ['Error', parser.parseGroup()] as MathJsonExpression,
   },
   {
     name: 'Error',
@@ -619,7 +619,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   {
     kind: 'postfix',
     latexTrigger: ['_'],
-    parse: (parser: Parser, lhs: Expression, _until?: Readonly<Terminator>) => {
+    parse: (parser: Parser, lhs: MathJsonExpression, _until?: Readonly<Terminator>) => {
       // Parse either a group or a single symbol
       let rhs = parser.parseGroup() ?? parser.parseToken();
       // In non-strict mode, also accept parenthesized expressions
@@ -672,9 +672,9 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     // ["Sequence", 1, ["Delimiter", ["List", 2, 3],  "()", ","]]],
     parse: (
       parser: Parser,
-      lhs: Expression,
+      lhs: MathJsonExpression,
       terminator: Readonly<Terminator>
-    ): Expression | null => {
+    ): MathJsonExpression | null => {
       const seq = parseSequence(parser, terminator, lhs, 20, ',');
       if (seq === null) return null;
       return ['Delimiter', ['Sequence', ...seq], { str: ',' }];
@@ -686,7 +686,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     latexTrigger: [','],
     kind: 'prefix',
     precedence: 20,
-    parse: (parser, terminator): Expression | null => {
+    parse: (parser, terminator): MathJsonExpression | null => {
       const seq = parseSequence(parser, terminator, null, 20, ',');
       if (seq === null) return null;
       return ['Delimiter', ['Sequence', ...seq], { str: ',' }];
@@ -699,7 +699,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     // associativity: 'left',
     precedence: 800,
     parse: parseRange,
-    serialize: (serializer: Serializer, expr: Expression): string => {
+    serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
       const args = operands(expr);
       if (args.length === 0) return '';
       if (args.length === 1)
@@ -747,20 +747,20 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     precedence: 19,
     parse: (
       parser: Parser,
-      lhs: Expression,
+      lhs: MathJsonExpression,
       terminator: Readonly<Terminator>
     ) => {
       const seq = parseSequence(parser, terminator, lhs, 19, ';');
       if (seq === null) return null;
 
-      return ['Delimiter', ['Sequence', ...seq], "';'"] as Expression;
+      return ['Delimiter', ['Sequence', ...seq], "';'"] as MathJsonExpression;
     },
   },
   {
     name: 'String',
     latexTrigger: ['\\text'],
     parse: (scanner) => parseTextRun(scanner),
-    serialize: (serializer: Serializer, expr: Expression): string => {
+    serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
       const args = operands(expr);
       if (args.length === 0) return '\\text{}';
       return joinLatex([
@@ -774,7 +774,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     name: 'Subscript',
     latexTrigger: ['_'],
     kind: 'infix',
-    serialize: (serializer: Serializer, expr: Expression): string => {
+    serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
       if (nops(expr) === 2) {
         return (
           serializer.serialize(operand(expr, 1)) +
@@ -793,20 +793,20 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   {
     latexTrigger: ['^', '*'],
     kind: 'postfix',
-    parse: (_parser, lhs) => ['Superstar', lhs] as Expression,
+    parse: (_parser, lhs) => ['Superstar', lhs] as MathJsonExpression,
   },
   // { name: 'Superstar', latexTrigger: ['^', '\\star'], kind: 'postfix' },
   {
     latexTrigger: ['_', '*'],
     kind: 'postfix',
-    parse: (_parser, lhs) => ['Substar', lhs] as Expression,
+    parse: (_parser, lhs) => ['Substar', lhs] as MathJsonExpression,
   },
   { name: 'Substar', latexTrigger: ['_', '\\star'], kind: 'postfix' },
   { name: 'Superdagger', latexTrigger: ['^', '\\dagger'], kind: 'postfix' },
   {
     latexTrigger: ['^', '\\dag'],
     kind: 'postfix',
-    parse: (_parser, lhs) => ['Superdagger', lhs] as Expression,
+    parse: (_parser, lhs) => ['Superdagger', lhs] as MathJsonExpression,
   },
   {
     name: 'Prime',
@@ -814,7 +814,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     // Note: we don't need a precedence because the trigger is '^'
     // and '^' (and '_') are treated specially by the parser.
     kind: 'postfix',
-    parse: (parser: Parser, lhs: Expression) => parsePrime(parser, lhs, 1),
+    parse: (parser: Parser, lhs: MathJsonExpression) => parsePrime(parser, lhs, 1),
     serialize: (serializer, expr) => {
       const n2 = machineValue(operand(expr, 2)) ?? 1;
       const base = serializer.serialize(operand(expr, 1));
@@ -827,46 +827,46 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   {
     latexTrigger: '^{\\prime\\prime}',
     kind: 'postfix',
-    parse: (parser: Parser, lhs: Expression) => parsePrime(parser, lhs, 2),
+    parse: (parser: Parser, lhs: MathJsonExpression) => parsePrime(parser, lhs, 2),
   },
   {
     latexTrigger: '^{\\prime\\prime\\prime}',
     kind: 'postfix',
-    parse: (parser: Parser, lhs: Expression) => parsePrime(parser, lhs, 3),
+    parse: (parser: Parser, lhs: MathJsonExpression) => parsePrime(parser, lhs, 3),
   },
   {
     latexTrigger: ['^', '\\doubleprime'],
     kind: 'postfix',
-    parse: (parser: Parser, lhs: Expression) => parsePrime(parser, lhs, 2),
+    parse: (parser: Parser, lhs: MathJsonExpression) => parsePrime(parser, lhs, 2),
   },
   {
     latexTrigger: ['^', '\\tripleprime'],
     kind: 'postfix',
-    parse: (parser: Parser, lhs: Expression) => parsePrime(parser, lhs, 3),
+    parse: (parser: Parser, lhs: MathJsonExpression) => parsePrime(parser, lhs, 3),
   },
   {
     latexTrigger: "'",
     kind: 'postfix',
     precedence: 810,
-    parse: (parser: Parser, lhs: Expression) => parsePrime(parser, lhs, 1),
+    parse: (parser: Parser, lhs: MathJsonExpression) => parsePrime(parser, lhs, 1),
   },
   {
     latexTrigger: '\\prime',
     kind: 'postfix',
     precedence: 810,
-    parse: (parser: Parser, lhs: Expression) => parsePrime(parser, lhs, 1),
+    parse: (parser: Parser, lhs: MathJsonExpression) => parsePrime(parser, lhs, 1),
   },
   {
     latexTrigger: '\\doubleprime',
     kind: 'postfix',
     precedence: 810,
-    parse: (parser: Parser, lhs: Expression) => parsePrime(parser, lhs, 2),
+    parse: (parser: Parser, lhs: MathJsonExpression) => parsePrime(parser, lhs, 2),
   },
   {
     latexTrigger: '\\tripleprime',
     kind: 'postfix',
     precedence: 810,
-    parse: (parser: Parser, lhs: Expression) => parsePrime(parser, lhs, 3),
+    parse: (parser: Parser, lhs: MathJsonExpression) => parsePrime(parser, lhs, 3),
   },
 
   // Lagrange Notation for n-th order derivatives,
@@ -884,7 +884,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
 
       if (!parser.match('<}>')) return null;
 
-      return ['Derivative', lhs, expr] as Expression;
+      return ['Derivative', lhs, expr] as MathJsonExpression;
     },
   },
 
@@ -892,11 +892,11 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     name: 'InverseFunction',
     latexTrigger: '^{-1', // Note: the closing brace is not included
     kind: 'postfix',
-    parse: (parser: Parser, lhs: Expression) => {
+    parse: (parser: Parser, lhs: MathJsonExpression) => {
       // If the lhs is a Matrix expression, return the matrix inverse
       if (operator(lhs) === 'Matrix') {
         parser.match('<}>');
-        return ['Inverse', lhs] as Expression;
+        return ['Inverse', lhs] as MathJsonExpression;
       }
 
       const sym = symbol(lhs);
@@ -908,7 +908,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       // i.e. A^{-1} -> Inverse(A)
       if (symType.matches(new BoxedType('matrix'))) {
         parser.match('<}>');
-        return ['Inverse', lhs] as Expression;
+        return ['Inverse', lhs] as MathJsonExpression;
       }
 
       // If the lhs is a function, return the inverse function
@@ -927,15 +927,15 @@ export const DEFINITIONS_CORE: LatexDictionary = [
         else return null;
       }
       if (primeCount === 1)
-        return ['Derivative', ['InverseFunction', lhs]] as Expression;
+        return ['Derivative', ['InverseFunction', lhs]] as MathJsonExpression;
       if (primeCount > 0)
         return [
           'Derivative',
           ['InverseFunction', lhs],
           primeCount,
-        ] as Expression;
+        ] as MathJsonExpression;
 
-      return ['InverseFunction', lhs] as Expression;
+      return ['InverseFunction', lhs] as MathJsonExpression;
     },
     serialize: (serializer, expr) =>
       serializer.serialize(operand(expr, 1)) + '^{-1}',
@@ -948,7 +948,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     // `\partial`: `\partial_{x} f`,  `\partial_{x,y} f`
     // Newton notation (\dot{v}, \ddot{v}) is implemented below
 
-    serialize: (serializer: Serializer, expr: Expression): string => {
+    serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
       const degree = machineValue(operand(expr, 2)) ?? 1;
       const base = serializer.serialize(operand(expr, 1));
       if (degree === 1) return base + '^{\\prime}';
@@ -962,7 +962,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   // Serializer for D (partial derivative) - outputs Leibniz notation
   {
     name: 'D',
-    serialize: (serializer: Serializer, expr: Expression): string => {
+    serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
       // Only handle D function expressions, not the plain symbol D
       if (operator(expr) !== 'D') return 'D';
 
@@ -1012,11 +1012,11 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     latexTrigger: ['\\dot'],
     kind: 'prefix',
     precedence: 740,
-    parse: (parser: Parser): Expression | null => {
+    parse: (parser: Parser): MathJsonExpression | null => {
       const body = parser.parseGroup();
       if (body === null) return null;
       const t = parser.options.timeDerivativeVariable;
-      return ['D', body, t] as Expression;
+      return ['D', body, t] as MathJsonExpression;
     },
   },
   {
@@ -1024,11 +1024,11 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     latexTrigger: ['\\ddot'],
     kind: 'prefix',
     precedence: 740,
-    parse: (parser: Parser): Expression | null => {
+    parse: (parser: Parser): MathJsonExpression | null => {
       const body = parser.parseGroup();
       if (body === null) return null;
       const t = parser.options.timeDerivativeVariable;
-      return ['D', ['D', body, t], t] as Expression;
+      return ['D', ['D', body, t], t] as MathJsonExpression;
     },
   },
   {
@@ -1036,11 +1036,11 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     latexTrigger: ['\\dddot'],
     kind: 'prefix',
     precedence: 740,
-    parse: (parser: Parser): Expression | null => {
+    parse: (parser: Parser): MathJsonExpression | null => {
       const body = parser.parseGroup();
       if (body === null) return null;
       const t = parser.options.timeDerivativeVariable;
-      return ['D', ['D', ['D', body, t], t], t] as Expression;
+      return ['D', ['D', ['D', body, t], t], t] as MathJsonExpression;
     },
   },
   {
@@ -1048,11 +1048,11 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     latexTrigger: ['\\ddddot'],
     kind: 'prefix',
     precedence: 740,
-    parse: (parser: Parser): Expression | null => {
+    parse: (parser: Parser): MathJsonExpression | null => {
       const body = parser.parseGroup();
       if (body === null) return null;
       const t = parser.options.timeDerivativeVariable;
-      return ['D', ['D', ['D', ['D', body, t], t], t], t] as Expression;
+      return ['D', ['D', ['D', ['D', body, t], t], t], t] as MathJsonExpression;
     },
   },
 
@@ -1062,9 +1062,9 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     name: 'EulerDerivative',
     latexTrigger: ['D'],
     kind: 'expression',
-    parse: (parser: Parser): Expression | null => {
+    parse: (parser: Parser): MathJsonExpression | null => {
       let degree = 1;
-      let variable: Expression | null = null;
+      let variable: MathJsonExpression | null = null;
 
       // Parse subscript and superscript in either order (D_x^2 or D^2_x)
       let done = false;
@@ -1091,9 +1091,9 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       if (!fn) return null;
 
       // Build nested D for the degree
-      let result: Expression = fn;
+      let result: MathJsonExpression = fn;
       for (let i = 0; i < degree; i++) {
-        result = ['D', result, variable] as Expression;
+        result = ['D', result, variable] as MathJsonExpression;
       }
       return result;
     },
@@ -1104,7 +1104,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     name: 'Which',
     symbolTrigger: 'cases',
     parse: parseCasesEnvironment,
-    serialize: (serialize: Serializer, expr: Expression): string => {
+    serialize: (serialize: Serializer, expr: MathJsonExpression): string => {
       const rows: string[] = [];
       const args = operands(expr);
       if (args.length > 0) {
@@ -1161,10 +1161,10 @@ export const DEFINITIONS_CORE: LatexDictionary = [
 function parseTextRun(
   parser: Parser,
   style?: { [key: string]: string }
-): Expression {
+): MathJsonExpression {
   if (!parser.match('<{>')) return "''";
 
-  const runs: Expression[] = [];
+  const runs: MathJsonExpression[] = [];
   let text = '';
   let runinStyle: { [key: string]: string } | null = null;
 
@@ -1304,7 +1304,7 @@ function parseTextRun(
   // Apply leftovers
   flush();
 
-  let body: Expression;
+  let body: MathJsonExpression;
   if (runs.length === 1) body = runs[0];
   else {
     if (runs.every((x) => stringValue(x) !== null))
@@ -1317,7 +1317,7 @@ function parseTextRun(
 
 function serializeLatexTokens(
   serializer: Serializer,
-  expr: Expression | null
+  expr: MathJsonExpression | null
 ): string {
   if (expr === null) return '';
   return joinLatex(
@@ -1359,7 +1359,7 @@ function sanitizeLatex(s: string | null): string {
 
 function errorContextAsLatex(
   serializer: Serializer,
-  error: Expression
+  error: MathJsonExpression
 ): string {
   const arg = operand(error, 2);
   if (!arg) return '';
@@ -1374,9 +1374,9 @@ function errorContextAsLatex(
 
 function parsePrime(
   parser: Parser,
-  lhs: Expression,
+  lhs: MathJsonExpression,
   order: number
-): Expression | null {
+): MathJsonExpression | null {
   // Accumulate additional prime marks (e.g., f''' -> order 3)
   while (!parser.atEnd) {
     if (parser.match("'") || parser.match('\\prime')) order++;
@@ -1412,13 +1412,13 @@ function parsePrime(
     // Build function call: f(x, y, ...) -> ['f', x, y, ...]
     const fnCall =
       typeof lhs === 'string'
-        ? ([lhs, ...args] as Expression)
-        : (['Apply', lhs, ...args] as Expression);
+        ? ([lhs, ...args] as MathJsonExpression)
+        : (['Apply', lhs, ...args] as MathJsonExpression);
 
     // Wrap with nested D for the order
-    let result: Expression = fnCall;
+    let result: MathJsonExpression = fnCall;
     for (let i = 0; i < order; i++) {
-      result = ['D', result, variable] as Expression;
+      result = ['D', result, variable] as MathJsonExpression;
     }
     return result;
   }
@@ -1437,8 +1437,8 @@ function parsePrime(
 
 function parseParenDelimiter(
   _parser: Parser,
-  body: Expression
-): Expression | null {
+  body: MathJsonExpression
+): MathJsonExpression | null {
   // During parsing, we keep a Delimiter expression as it captures the most
   // information (separator and fences).
   // The Delimiter canonicalization will turn it into something else if
@@ -1492,8 +1492,8 @@ function parseParenDelimiter(
  */
 function parseBrackets(
   parser: Parser,
-  body: Expression | null | undefined
-): Expression {
+  body: MathJsonExpression | null | undefined
+): MathJsonExpression {
   if (isEmptySequence(body)) return ['List'];
 
   const h = operator(body);
@@ -1523,7 +1523,7 @@ function parseBrackets(
 /** A "List" expression can represent a collection of arbitrary elements,
  * or a system of equations.
  */
-function serializeList(serializer: Serializer, expr: Expression): string {
+function serializeList(serializer: Serializer, expr: MathJsonExpression): string {
   // Is it a system of equations?
   if (
     nops(expr) > 1 &&
@@ -1550,7 +1550,7 @@ function serializeList(serializer: Serializer, expr: Expression): string {
  * A range is a sequence of numbers, e.g. `1..10`.
  * Optionally, they may include a step, e.g. `1..3..10`.
  */
-function parseRange(parser: Parser, lhs: Expression | null): Expression | null {
+function parseRange(parser: Parser, lhs: MathJsonExpression | null): MathJsonExpression | null {
   if (lhs === null) return null;
 
   const second = parser.parseExpression({ minPrec: 270 });
@@ -1605,7 +1605,7 @@ export function latexToDelimiterShorthand(s: string): string | undefined {
   return undefined;
 }
 
-function parseAssign(parser: Parser, lhs: Expression): Expression | null {
+function parseAssign(parser: Parser, lhs: MathJsonExpression): MathJsonExpression | null {
   //
   // 0/ Convert compound symbols back to Subscript form for sequence definitions
   // e.g., "L_0" → ['Subscript', 'L', 0]
@@ -1619,7 +1619,7 @@ function parseAssign(parser: Parser, lhs: Expression): Expression | null {
 
     // Try to parse subscript as integer
     const subscriptNum = parseInt(subscriptStr, 10);
-    const subscript: Expression =
+    const subscript: MathJsonExpression =
       !isNaN(subscriptNum) && String(subscriptNum) === subscriptStr
         ? subscriptNum
         : subscriptStr; // Keep as symbol string
@@ -1643,7 +1643,7 @@ function parseAssign(parser: Parser, lhs: Expression): Expression | null {
     if (rhs === null) return null;
 
     const delimBody = operand(operand(lhs, 2), 1);
-    let args: Expression[] = [];
+    let args: MathJsonExpression[] = [];
     if (operator(delimBody) === 'Sequence') args = [...operands(delimBody)];
     else if (delimBody) args = [delimBody!];
 
@@ -1710,8 +1710,8 @@ function parseAssign(parser: Parser, lhs: Expression): Expression | null {
  * or a system of equations (a "List" of equations or inequalities).
  *
  */
-function parseCasesEnvironment(parser: Parser): Expression | null {
-  const rows: Expression[][] | null = parser.parseTabular();
+function parseCasesEnvironment(parser: Parser): MathJsonExpression | null {
+  const rows: MathJsonExpression[][] | null = parser.parseTabular();
   if (!rows) return ['List'];
 
   //
@@ -1739,7 +1739,7 @@ function parseCasesEnvironment(parser: Parser): Expression | null {
   // Note: return `True` for the condition, because it must be present
   // as the second element of the Tuple. Return an empty sequence for the
   // value, because it is optional
-  const result: Expression[] = [];
+  const result: MathJsonExpression[] = [];
   for (const row of rows) {
     if (row.length === 1) {
       result.push('True');
@@ -1754,14 +1754,14 @@ function parseCasesEnvironment(parser: Parser): Expression | null {
   return ['Which', ...result];
 }
 
-function parseAt(...close: string[]): (parser, lhs) => Expression | null {
+function parseAt(...close: string[]): (parser, lhs) => MathJsonExpression | null {
   // @todo: if there are no `close` symbols, parse as a subscript: either
   // a single symbol, or a group.
-  return (parser: Parser, lhs: Expression): Expression | null => {
+  return (parser: Parser, lhs: MathJsonExpression): MathJsonExpression | null => {
     // If the lhs is a symbol or a List literal...
     if (!symbol(lhs) && operator(lhs) !== 'List') return null;
 
-    let rhs: Expression | null = null;
+    let rhs: MathJsonExpression | null = null;
     if (close.length === 0) rhs = parser.parseGroup();
     rhs ??= parser.parseExpression({ minPrec: 0 });
     if (rhs === null) return null;

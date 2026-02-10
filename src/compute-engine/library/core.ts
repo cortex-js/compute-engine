@@ -33,7 +33,7 @@ import { parseType } from '../../common/type/parse';
 import { canonicalMultiply } from '../boxed-expression/arithmetic-mul-div';
 // BoxedDictionary will be dynamically imported to avoid circular dependency
 import type {
-  BoxedExpression,
+  Expression,
   SymbolDefinitions,
   CanonicalForm,
 } from '../global-types';
@@ -1147,7 +1147,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         let n = Math.max(3, toInteger(ops[1]) ?? 3);
 
         let timings: number[] = [];
-        let result: BoxedExpression;
+        let result: Expression;
         while (n > 0) {
           const start = globalThis.performance.now();
           result = ops[0].evaluate();

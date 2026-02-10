@@ -17,7 +17,7 @@ import type {
 } from './latex-syntax/types';
 import type { IndexedLatexDictionary } from './latex-syntax/dictionary/definitions';
 
-import type { BoxedExpression, ExpressionInput } from './types-expression';
+import type { Expression, ExpressionInput } from './types-expression';
 import type {
   Metadata,
   CanonicalOptions,
@@ -48,17 +48,17 @@ import type {
 } from './types-kernel-evaluation';
 import type { LanguageTarget, CompilationResult } from './compilation/types';
 
-type Rule = KernelRule<BoxedExpression, ExpressionInput, IComputeEngine>;
-type BoxedRule = KernelBoxedRule<BoxedExpression, IComputeEngine>;
-type BoxedRuleSet = KernelBoxedRuleSet<BoxedExpression, IComputeEngine>;
-type RuleStep = KernelRuleStep<BoxedExpression>;
+type Rule = KernelRule<Expression, ExpressionInput, IComputeEngine>;
+type BoxedRule = KernelBoxedRule<Expression, IComputeEngine>;
+type BoxedRuleSet = KernelBoxedRuleSet<Expression, IComputeEngine>;
+type RuleStep = KernelRuleStep<Expression>;
 type AssignValue = KernelAssignValue<
-  BoxedExpression,
+  Expression,
   ExpressionInput,
   IComputeEngine
 >;
 type Scope = KernelScope<BoxedDefinition>;
-type EvalContext = KernelEvalContext<BoxedExpression, BoxedDefinition>;
+type EvalContext = KernelEvalContext<Expression, BoxedDefinition>;
 
 /** @internal */
 export interface IComputeEngine extends IBigNum {
@@ -70,22 +70,22 @@ export interface IComputeEngine extends IBigNum {
   decimalSeparator: LatexString;
 
   // Common symbols
-  readonly True: BoxedExpression;
-  readonly False: BoxedExpression;
-  readonly Pi: BoxedExpression;
-  readonly E: BoxedExpression;
-  readonly Nothing: BoxedExpression;
+  readonly True: Expression;
+  readonly False: Expression;
+  readonly Pi: Expression;
+  readonly E: Expression;
+  readonly Nothing: Expression;
 
-  readonly Zero: BoxedExpression;
-  readonly One: BoxedExpression;
-  readonly Half: BoxedExpression;
-  readonly NegativeOne: BoxedExpression;
+  readonly Zero: Expression;
+  readonly One: Expression;
+  readonly Half: Expression;
+  readonly NegativeOne: Expression;
   /** ImaginaryUnit */
-  readonly I: BoxedExpression;
-  readonly NaN: BoxedExpression;
-  readonly PositiveInfinity: BoxedExpression;
-  readonly NegativeInfinity: BoxedExpression;
-  readonly ComplexInfinity: BoxedExpression;
+  readonly I: Expression;
+  readonly NaN: Expression;
+  readonly PositiveInfinity: Expression;
+  readonly NegativeInfinity: Expression;
+  readonly ComplexInfinity: Expression;
 
   /** @internal */
   readonly _BIGNUM_NAN: BigNum;
@@ -159,7 +159,7 @@ export interface IComputeEngine extends IBigNum {
 
   angularUnit: AngularUnit;
 
-  costFunction: (expr: BoxedExpression) => number;
+  costFunction: (expr: Expression) => number;
 
   /** The rules used by `.simplify()` when no explicit `rules` option is passed.
    *  Initialized to the built-in simplification rules.
@@ -174,7 +174,7 @@ export interface IComputeEngine extends IBigNum {
       form?: FormOption;
       scope?: Scope;
     }
-  ): BoxedExpression;
+  ): Expression;
 
   function(
     name: string,
@@ -184,7 +184,7 @@ export interface IComputeEngine extends IBigNum {
       form?: FormOption;
       scope?: Scope;
     }
-  ): BoxedExpression;
+  ): Expression;
 
   /**
    * This is a primitive to create a boxed function.
@@ -201,30 +201,30 @@ export interface IComputeEngine extends IBigNum {
    */
   _fn(
     name: string,
-    ops: ReadonlyArray<BoxedExpression>,
+    ops: ReadonlyArray<Expression>,
     options?: {
       metadata?: Metadata;
       canonical?: boolean;
       scope?: Scope;
     }
-  ): BoxedExpression;
+  ): Expression;
 
   /** @internal Compile a boxed expression. */
   _compile(
-    expr: BoxedExpression,
+    expr: Expression,
     options?: Record<string, unknown>
   ): CompilationResult;
 
   /** Register a custom compilation target. */
   registerCompilationTarget(
     name: string,
-    target: LanguageTarget<BoxedExpression>
+    target: LanguageTarget<Expression>
   ): void;
 
   /** Get a registered compilation target by name. */
   getCompilationTarget(
     name: string
-  ): LanguageTarget<BoxedExpression> | undefined;
+  ): LanguageTarget<Expression> | undefined;
 
   /** Return the names of all registered compilation targets. */
   listCompilationTargets(): string[];
@@ -234,7 +234,7 @@ export interface IComputeEngine extends IBigNum {
 
   /** @internal Fu trigonometric simplification algorithm */
   _fuAlgorithm(
-    expr: BoxedExpression,
+    expr: Expression,
     options?: Record<string, unknown>
   ): RuleStep | undefined;
 
@@ -249,27 +249,27 @@ export interface IComputeEngine extends IBigNum {
       | Complex
       | Rational,
     options?: { metadata?: Metadata; canonical?: CanonicalOptions }
-  ): BoxedExpression;
+  ): Expression;
 
   symbol(
     sym: string,
     options?: { canonical?: CanonicalOptions; metadata?: Metadata }
-  ): BoxedExpression;
+  ): Expression;
 
-  string(s: string, metadata?: Metadata): BoxedExpression;
+  string(s: string, metadata?: Metadata): Expression;
 
-  error(message: string | string[], where?: string): BoxedExpression;
+  error(message: string | string[], where?: string): Expression;
 
   typeError(
     expectedType: Type,
     actualType: undefined | Type | BoxedType,
     where?: ExpressionInput
-  ): BoxedExpression;
+  ): Expression;
 
-  hold(expr: ExpressionInput): BoxedExpression;
+  hold(expr: ExpressionInput): Expression;
 
-  tuple(...elements: ReadonlyArray<number>): BoxedExpression;
-  tuple(...elements: ReadonlyArray<BoxedExpression>): BoxedExpression;
+  tuple(...elements: ReadonlyArray<number>): Expression;
+  tuple(...elements: ReadonlyArray<Expression>): Expression;
 
   type(type: Type | TypeString | BoxedType): BoxedType;
 
@@ -294,11 +294,11 @@ export interface IComputeEngine extends IBigNum {
   parse(
     latex: LatexString,
     options?: Partial<ParseLatexOptions> & { form?: FormOption }
-  ): BoxedExpression;
+  ): Expression;
   parse(
     latex: LatexString | null,
     options?: Partial<ParseLatexOptions> & { form?: FormOption }
-  ): BoxedExpression | null;
+  ): Expression | null;
 
   pushScope(scope?: Scope, name?: string): void;
   popScope(): void;
@@ -366,13 +366,13 @@ export interface IComputeEngine extends IBigNum {
   /**
    * Use `ce.box(id)` instead
    * @internal */
-  _getSymbolValue(id: MathJsonSymbol): BoxedExpression | undefined;
+  _getSymbolValue(id: MathJsonSymbol): Expression | undefined;
   /**
    * Use `ce.assign(id, value)` instead.
    * @internal */
   _setSymbolValue(
     id: MathJsonSymbol,
-    value: BoxedExpression | boolean | number | undefined
+    value: Expression | boolean | number | undefined
   ): void;
 
   /**
@@ -381,7 +381,7 @@ export interface IComputeEngine extends IBigNum {
    * @internal */
   _setCurrentContextValue(
     id: MathJsonSymbol,
-    value: BoxedExpression | boolean | number | undefined
+    value: Expression | boolean | number | undefined
   ): void;
 
   /** A list of the function calls to the current evaluation context */
@@ -421,7 +421,7 @@ export interface IComputeEngine extends IBigNum {
     arg3?: Scope
   ): IComputeEngine;
 
-  assume(predicate: BoxedExpression): AssumeResult;
+  assume(predicate: Expression): AssumeResult;
 
   /**
    * Declare a sequence with a recurrence relation.
@@ -482,7 +482,7 @@ export interface IComputeEngine extends IBigNum {
    */
   getSequenceCache(
     name: string
-  ): Map<number | string, BoxedExpression> | undefined;
+  ): Map<number | string, Expression> | undefined;
 
   /**
    * Generate a list of sequence terms from start to end (inclusive).
@@ -505,7 +505,7 @@ export interface IComputeEngine extends IBigNum {
     start: number,
     end: number,
     step?: number
-  ): BoxedExpression[] | undefined;
+  ): Expression[] | undefined;
 
   /**
    * Look up sequences in OEIS by their terms.
@@ -521,7 +521,7 @@ export interface IComputeEngine extends IBigNum {
    * ```
    */
   lookupOEIS(
-    terms: (number | BoxedExpression)[],
+    terms: (number | Expression)[],
     options?: OEISOptions
   ): Promise<OEISSequenceInfo[]>;
 
@@ -548,9 +548,9 @@ export interface IComputeEngine extends IBigNum {
 
   forget(symbol?: MathJsonSymbol | MathJsonSymbol[]): void;
 
-  ask(pattern: BoxedExpression): BoxedSubstitution[];
+  ask(pattern: Expression): BoxedSubstitution[];
 
-  verify(query: BoxedExpression): boolean | undefined;
+  verify(query: Expression): boolean | undefined;
 
   /** @internal */
   _shouldContinueExecution(): boolean;

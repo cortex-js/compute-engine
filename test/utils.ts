@@ -21,7 +21,7 @@ engine.declare('f', 'function');
  * Special printing utility for printing the *MathJson* representation - of either a boxed or
  * un-boxed expression.
  *
- * If a *BoxedExpression*, the **pretty** (prettified) MathJson representation is printed.
+ * If an *Expression*, the **pretty** (prettified) MathJson representation is printed.
  *
  * Conveniently - prints on one line if expr. is less than local `MAX_LINE_LENGTH` (e.g. 72).
  *
@@ -31,10 +31,7 @@ engine.declare('f', 'function');
  * @param start
  * @returns
  */
-function exprToStringRecursive(
-  expr: ExpressionInput,
-  start: number
-): string {
+function exprToStringRecursive(expr: ExpressionInput, start: number): string {
   const indent = ' '.repeat(start);
 
   if (start > 50) return indent + '...';
@@ -92,9 +89,7 @@ function exprToStringRecursive(
   return JSON.stringify(expr, null, 2);
 }
 
-export function exprToString(
-  expr: ExpressionInput | null | undefined
-): string {
+export function exprToString(expr: ExpressionInput | null | undefined): string {
   if (typeof expr === 'number') return expr.toString();
   if (!expr) return '';
   return exprToStringRecursive(expr, 0);

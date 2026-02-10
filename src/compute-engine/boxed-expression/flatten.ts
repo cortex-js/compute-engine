@@ -1,4 +1,4 @@
-import type { BoxedExpression } from '../global-types';
+import type { Expression } from '../global-types';
 import { isFunction, isSymbol } from './type-guards';
 
 /**
@@ -15,16 +15,16 @@ import { isFunction, isSymbol } from './type-guards';
  * Note: *not* recursive
  */
 export function flatten<
-  T extends ReadonlyArray<BoxedExpression> | BoxedExpression[],
+  T extends ReadonlyArray<Expression> | Expression[],
 >(ops: T, operator?: string, canonicalize = true): T {
   // Optionally make all the arguments canonical.
-  const xs: ReadonlyArray<BoxedExpression> =
+  const xs: ReadonlyArray<Expression> =
     !canonicalize || ops.every((x) => x.isCanonical)
       ? ops
       : ops.map((x) => x.canonical);
 
   if (operator) {
-    const shouldFlatten = (x: BoxedExpression) =>
+    const shouldFlatten = (x: Expression) =>
       (isSymbol(x) && x.symbol === 'Nothing') ||
       x.operator === operator ||
       x.operator === 'Sequence';
@@ -33,7 +33,7 @@ export function flatten<
     if (xs.every((x) => !shouldFlatten(x))) return xs as T;
 
     // Iterate over the list of expressions and flatten them
-    const ys: BoxedExpression[] = [];
+    const ys: Expression[] = [];
     for (const x of xs) {
       // Skip Nothing
       if (isSymbol(x) && x.symbol === 'Nothing') continue;
@@ -61,7 +61,7 @@ export function flatten<
     return xs as T;
 
   // Iterate over the list of expressions and flatten them
-  const ys: BoxedExpression[] = [];
+  const ys: Expression[] = [];
   for (const x of xs) {
     // Skip Nothing
     if (isSymbol(x) && x.symbol === 'Nothing') continue;
@@ -75,13 +75,13 @@ export function flatten<
 }
 
 export function flattenSequence(
-  xs: ReadonlyArray<BoxedExpression>
-): ReadonlyArray<BoxedExpression> {
+  xs: ReadonlyArray<Expression>
+): ReadonlyArray<Expression> {
   // Bypass memory allocation for the common case where there are no sequences or delimiters
   if (xs.every((x) => x.operator !== 'Sequence' && x.operator !== 'Delimiter'))
     return xs;
 
-  const ys: BoxedExpression[] = [];
+  const ys: Expression[] = [];
   for (const x of xs) {
     if (!x.isValid) ys.push(x);
     else if (isFunction(x) && x.operator === 'Delimiter') {

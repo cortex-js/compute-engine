@@ -1,17 +1,17 @@
 import { Complex } from 'complex-esm';
 import { Decimal } from 'decimal.js';
 
-import type { BoxedExpression } from '../global-types';
+import type { Expression } from '../global-types';
 
 import { bignumPreferred } from './utils';
 import { isNumber } from './type-guards';
 
 export function apply(
-  expr: BoxedExpression,
+  expr: Expression,
   fn: (x: number) => number | Complex,
   bigFn?: (x: Decimal) => Decimal | Complex | number,
   complexFn?: (x: Complex) => number | Complex
-): BoxedExpression | undefined {
+): Expression | undefined {
   if (!isNumber(expr)) return undefined;
   const ce = expr.engine;
 
@@ -35,12 +35,12 @@ export function apply(
 }
 
 export function apply2(
-  expr1: BoxedExpression,
-  expr2: BoxedExpression,
+  expr1: Expression,
+  expr2: Expression,
   fn: (x1: number, x2: number) => number | Complex,
   bigFn?: (x1: Decimal, x2: Decimal) => Decimal | Complex | number,
   complexFn?: (x1: Complex, x2: number | Complex) => Complex | number
-): BoxedExpression | undefined {
+): Expression | undefined {
   if (!isNumber(expr1) || !isNumber(expr2)) return undefined;
 
   const ce = expr1.engine;

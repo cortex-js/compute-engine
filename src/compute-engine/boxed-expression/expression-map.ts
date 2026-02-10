@@ -1,31 +1,31 @@
-import type { BoxedExpression, ExpressionMapInterface } from '../global-types';
+import type { Expression, ExpressionMapInterface } from '../global-types';
 
 export class ExpressionMap<U> implements ExpressionMapInterface<U> {
-  readonly _items: Map<BoxedExpression, U>;
+  readonly _items: Map<Expression, U>;
 
   constructor(
     source?:
       | ExpressionMapInterface<U>
-      | readonly (readonly [BoxedExpression, U])[]
+      | readonly (readonly [Expression, U])[]
   ) {
     if (!source) {
-      this._items = new Map<BoxedExpression, U>();
+      this._items = new Map<Expression, U>();
     } else if (source instanceof ExpressionMap) {
-      this._items = new Map<BoxedExpression, U>(source._items);
+      this._items = new Map<Expression, U>(source._items);
     } else {
-      this._items = new Map<BoxedExpression, U>(
-        source as readonly (readonly [BoxedExpression, U])[]
+      this._items = new Map<Expression, U>(
+        source as readonly (readonly [Expression, U])[]
       );
     }
   }
 
-  has(expr: BoxedExpression): boolean {
+  has(expr: Expression): boolean {
     for (const x of this._items.keys()) if (x.isSame(expr)) return true;
 
     return false;
   }
 
-  get(expr: BoxedExpression): U | undefined {
+  get(expr: Expression): U | undefined {
     for (const [x, v] of this._items) if (x.isSame(expr)) return v;
 
     return undefined;
@@ -35,7 +35,7 @@ export class ExpressionMap<U> implements ExpressionMapInterface<U> {
     this._items.clear();
   }
 
-  set(expr: BoxedExpression, value: U): void {
+  set(expr: Expression, value: U): void {
     for (const x of this._items.keys()) {
       if (x.isSame(expr)) {
         this._items.set(x, value);
@@ -45,15 +45,15 @@ export class ExpressionMap<U> implements ExpressionMapInterface<U> {
     this._items.set(expr, value);
   }
 
-  delete(expr: BoxedExpression): void {
+  delete(expr: Expression): void {
     this._items.delete(expr);
   }
 
-  [Symbol.iterator](): IterableIterator<[BoxedExpression, U]> {
+  [Symbol.iterator](): IterableIterator<[Expression, U]> {
     return this._items.entries();
   }
 
-  entries(): IterableIterator<[BoxedExpression, U]> {
+  entries(): IterableIterator<[Expression, U]> {
     return this._items.entries();
   }
 }

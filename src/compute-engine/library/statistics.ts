@@ -19,7 +19,7 @@ import {
   skewness,
   variance,
 } from '../numerics/statistics';
-import type { BoxedExpression, SymbolDefinitions } from '../global-types';
+import type { Expression, SymbolDefinitions } from '../global-types';
 import { bignumPreferred } from '../boxed-expression/utils';
 import { toInteger } from '../boxed-expression/numerics';
 import { isFunction } from '../boxed-expression/type-guards';
@@ -239,7 +239,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       evaluate: ([xs, binsArg], { engine: ce }) => {
         if (!xs.isFiniteCollection) return undefined;
 
-        const data = (Array.from(xs.each()) as BoxedExpression[])
+        const data = (Array.from(xs.each()) as Expression[])
           .map((x) => x.re)
           .filter(Number.isFinite);
         if (data.length === 0) return undefined;
@@ -288,7 +288,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       evaluate: ([xs, binsArg], { engine: ce }) => {
         if (!xs.isFiniteCollection) return undefined;
 
-        const data = (Array.from(xs.each()) as BoxedExpression[])
+        const data = (Array.from(xs.each()) as Expression[])
           .map((x) => x.re)
           .filter(Number.isFinite);
         if (data.length === 0) return undefined;
@@ -347,8 +347,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         )
           return undefined;
 
-        const data = Array.from(xs.each()) as BoxedExpression[];
-        const result: BoxedExpression[] = [];
+        const data = Array.from(xs.each()) as Expression[];
+        const result: Expression[] = [];
 
         for (let i = 0; i <= data.length - windowSize; i += stepSize) {
           result.push(ce.function('List', data.slice(i, i + windowSize)));
@@ -370,7 +370,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         const k = toInteger(nArg);
         if (k === null || k < 0) return undefined;
 
-        const data = Array.from(xs.each()) as BoxedExpression[];
+        const data = Array.from(xs.each()) as Expression[];
         if (k > data.length) return undefined;
 
         // Fisher-Yates shuffle first k elements
@@ -387,8 +387,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
 ];
 
 function* flattenArguments(
-  args: ReadonlyArray<BoxedExpression>
-): Generator<BoxedExpression> {
+  args: ReadonlyArray<Expression>
+): Generator<Expression> {
   // Go over each argument and yield it if a scalar, otherwise yield its elements
   for (const arg of args) {
     if (arg.isFiniteCollection) yield* arg.each();
@@ -396,11 +396,11 @@ function* flattenArguments(
   }
 }
 
-function* flattenScalars(args: ReadonlyArray<BoxedExpression>) {
+function* flattenScalars(args: ReadonlyArray<Expression>) {
   for (const op of flattenArguments(args)) yield op.re;
 }
 
-function* flattenBigScalars(args: ReadonlyArray<BoxedExpression>) {
+function* flattenBigScalars(args: ReadonlyArray<Expression>) {
   for (const op of flattenArguments(args))
     yield op.bignumRe ?? op.engine.bignum(op.re);
 }

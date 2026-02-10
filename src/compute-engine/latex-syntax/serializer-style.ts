@@ -1,31 +1,31 @@
-import { MathJsonExpression as Expression } from '../../math-json/types';
+import { MathJsonExpression } from '../../math-json/types';
 import { countLeaves, operator, operands } from '../../math-json/utils';
 import { DelimiterScale } from './types';
 import { joinLatex } from './tokenizer';
 
 export function getApplyFunctionStyle(
-  _expr: Expression,
+  _expr: MathJsonExpression,
   _level: number
 ): DelimiterScale {
   return 'normal';
 }
 
 export function getGroupStyle(
-  _expr: Expression,
+  _expr: MathJsonExpression,
   _level: number
 ): DelimiterScale {
   return 'normal';
 }
 
 export function getRootStyle(
-  _expr: Expression | null,
+  _expr: MathJsonExpression | null,
   level: number
 ): 'radical' | 'quotient' | 'solidus' {
   return level > 2 ? 'solidus' : 'radical';
 }
 
 export function getFractionStyle(
-  expr: Expression,
+  expr: MathJsonExpression,
   level: number
 ):
   | 'quotient'
@@ -52,7 +52,7 @@ export function getFractionStyle(
 
 // https://en.wikipedia.org/wiki/Logical_connective
 export function getLogicStyle(
-  _expr: Expression,
+  _expr: MathJsonExpression,
   _level: number
 ): 'word' | 'boolean' | 'uppercase-word' | 'punctuation' {
   // punctuation = & | !
@@ -63,7 +63,7 @@ export function getLogicStyle(
 }
 
 export function getPowerStyle(
-  _expr: Expression,
+  _expr: MathJsonExpression,
   _level: number
 ): 'root' | 'solidus' | 'quotient' {
   return 'solidus';
@@ -106,7 +106,7 @@ export function getPowerStyle(
 // Interval     [0, 1..]
 // Set Builder  { x \in \Z | x > 0 }
 export function getNumericSetStyle(
-  _expr: Expression,
+  _expr: MathJsonExpression,
   _level: number
 ): 'compact' | 'regular' | 'interval' | 'set-builder' {
   return 'compact';

@@ -9,36 +9,36 @@ import {
   resolveBootstrapLibraries,
 } from './engine-library-bootstrap';
 import type {
-  BoxedExpression,
+  Expression,
   IComputeEngine as ComputeEngine,
   LibraryDefinition,
 } from './global-types';
 
 export type CommonNumberBindings = {
-  Zero: BoxedExpression;
-  One: BoxedExpression;
-  Half: BoxedExpression;
-  NegativeOne: BoxedExpression;
-  Two: BoxedExpression;
-  I: BoxedExpression;
-  NaN: BoxedExpression;
-  PositiveInfinity: BoxedExpression;
-  NegativeInfinity: BoxedExpression;
-  ComplexInfinity: BoxedExpression;
+  Zero: Expression;
+  One: Expression;
+  Half: Expression;
+  NegativeOne: Expression;
+  Two: Expression;
+  I: Expression;
+  NaN: Expression;
+  PositiveInfinity: Expression;
+  NegativeInfinity: Expression;
+  ComplexInfinity: Expression;
 };
 
 export type CommonSymbolBindings = {
-  True: BoxedExpression;
-  False: BoxedExpression;
-  Pi: BoxedExpression;
-  E: BoxedExpression;
-  Nothing: BoxedExpression;
+  True: Expression;
+  False: Expression;
+  Pi: Expression;
+  E: Expression;
+  Nothing: Expression;
 };
 
 function expectCommonSymbol(
   commonSymbols: CommonSymbolTable,
   name: string
-): BoxedExpression {
+): Expression {
   const result = commonSymbols[name];
   if (!result) throw new Error(`Common symbol "${name}" failed to initialize`);
   return result;

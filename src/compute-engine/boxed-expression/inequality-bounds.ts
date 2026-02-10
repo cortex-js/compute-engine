@@ -1,5 +1,5 @@
 import type {
-  BoxedExpression,
+  Expression,
   IComputeEngine as ComputeEngine,
 } from '../global-types';
 import { isFunction, isSymbol, isNumber } from './type-guards';
@@ -22,15 +22,15 @@ export function getInequalityBoundsFromAssumptions(
   ce: ComputeEngine,
   symbol: string
 ): {
-  lowerBound?: BoxedExpression;
+  lowerBound?: Expression;
   lowerStrict?: boolean;
-  upperBound?: BoxedExpression;
+  upperBound?: Expression;
   upperStrict?: boolean;
 } {
   const result: {
-    lowerBound?: BoxedExpression;
+    lowerBound?: Expression;
     lowerStrict?: boolean;
-    upperBound?: BoxedExpression;
+    upperBound?: Expression;
     upperStrict?: boolean;
   } = {};
 

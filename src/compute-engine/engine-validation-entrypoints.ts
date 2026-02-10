@@ -4,27 +4,27 @@ import { BoxedType } from '../common/type/boxed-type';
 
 import { asLatexString, isLatexString } from './latex-syntax/utils';
 import type {
-  BoxedExpression,
+  Expression,
   Metadata,
   ExpressionInput,
 } from './global-types';
 
 type ValidationHost = {
-  string(s: string, metadata?: Metadata): BoxedExpression;
+  string(s: string, metadata?: Metadata): Expression;
   function(
     name: string,
     ops: ReadonlyArray<ExpressionInput>,
     options?: { metadata?: Metadata }
-  ): BoxedExpression;
-  box(expr: ExpressionInput): BoxedExpression;
+  ): Expression;
+  box(expr: ExpressionInput): Expression;
 };
 
 export function createErrorExpression(
   engine: ValidationHost,
   message: string | string[],
   where?: string
-): BoxedExpression {
-  let msg: BoxedExpression;
+): Expression {
+  let msg: Expression;
   if (typeof message === 'string') msg = engine.string(message);
   else
     msg = engine.function(
@@ -32,7 +32,7 @@ export function createErrorExpression(
       message.map((part) => engine.string(part))
     );
 
-  let whereExpr: BoxedExpression | undefined;
+  let whereExpr: Expression | undefined;
   if (where && isLatexString(where)) {
     whereExpr = engine.function('LatexString', [
       engine.string(asLatexString(where)!),
@@ -41,7 +41,7 @@ export function createErrorExpression(
     whereExpr = engine.string(where);
   }
 
-  const ops: BoxedExpression[] = [engine.box(msg)];
+  const ops: Expression[] = [engine.box(msg)];
   if (whereExpr) ops.push(whereExpr);
 
   return engine.function('Error', ops);
@@ -52,7 +52,7 @@ export function createTypeErrorExpression(
   expected: Type,
   actual: undefined | Type | BoxedType,
   where?: string
-): BoxedExpression {
+): Expression {
   if (actual) {
     return createErrorExpression(
       engine,

@@ -1,4 +1,4 @@
-import type { MathJsonExpression as Expression, MathJsonSymbol } from '../../math-json/types';
+import type { MathJsonExpression, MathJsonSymbol } from '../../math-json/types';
 import { isValidSymbol, validateSymbol } from '../../math-json/symbols';
 
 import type { Type, TypeString } from '../../common/type/types';
@@ -11,7 +11,7 @@ import type { BigNum } from '../numerics/types';
 import { NumericValue } from '../numeric-value/types';
 
 import type {
-  BoxedExpression,
+  Expression,
   SimplifyOptions,
   PatternMatchOptions,
   ReplaceOptions,
@@ -120,7 +120,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     this._def = options?.def;
   }
 
-  get json(): Expression {
+  get json(): MathJsonExpression {
     return matchesSymbol(this._id) ? this._id : { sym: this._id };
   }
 
@@ -151,7 +151,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     );
   }
 
-  get canonical(): BoxedExpression {
+  get canonical(): Expression {
     // The symbol is canonical if it has a definition
     if (this._def) return this;
 
@@ -190,7 +190,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     return false;
   }
 
-  toNumericValue(): [NumericValue, BoxedExpression] {
+  toNumericValue(): [NumericValue, Expression] {
     console.assert(this.isCanonical);
     const ce = this.engine;
 
@@ -211,26 +211,26 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     return [ce._numericValue(1), this];
   }
 
-  neg(): BoxedExpression {
+  neg(): Expression {
     return negate(this);
   }
 
-  inv(): BoxedExpression {
+  inv(): Expression {
     return this.engine._fn('Divide', [this.engine.One, this]);
   }
 
-  abs(): BoxedExpression {
+  abs(): Expression {
     if (this.isNonNegative) return this;
     if (this.isNonPositive) return this.neg();
     return this.engine._fn('Abs', [this]);
   }
 
-  add(rhs: number | BoxedExpression): BoxedExpression {
+  add(rhs: number | Expression): Expression {
     if (rhs === 0) return this;
     return add(this, this.engine.box(rhs));
   }
 
-  mul(rhs: NumericValue | number | BoxedExpression): BoxedExpression {
+  mul(rhs: NumericValue | number | Expression): Expression {
     if (rhs === 1) return this;
     if (rhs === -1) return this.neg();
     if (rhs === 0 && !this.isNaN) return this.engine.Zero;
@@ -242,15 +242,15 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     return mul(this, this.engine.box(rhs));
   }
 
-  div(rhs: number | BoxedExpression): BoxedExpression {
+  div(rhs: number | Expression): Expression {
     return div(this, rhs);
   }
 
-  pow(exp: number | BoxedExpression): BoxedExpression {
+  pow(exp: number | Expression): Expression {
     return pow(this, exp, { numericApproximation: false });
   }
 
-  root(n: number | BoxedExpression): BoxedExpression {
+  root(n: number | Expression): Expression {
     const e = typeof n === 'number' ? n : n.im === 0 ? n.re : undefined;
 
     const ce = this.engine;
@@ -263,7 +263,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     return ce._fn('Root', [this, ce.box(n)]);
   }
 
-  sqrt(): BoxedExpression {
+  sqrt(): Expression {
     const ce = this.engine;
     if (this.symbol === 'ComplexInfinity') return ce.NaN;
     if (this.is(0)) return this;
@@ -273,7 +273,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     return ce._fn('Sqrt', [this]);
   }
 
-  ln(semiBase?: number | BoxedExpression): BoxedExpression {
+  ln(semiBase?: number | Expression): Expression {
     const base = semiBase ? this.engine.box(semiBase) : undefined;
 
     // Mathematica returns `Log[0]` as `-∞`
@@ -299,9 +299,9 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     vars?:
       | Iterable<string>
       | string
-      | BoxedExpression
-      | Iterable<BoxedExpression>
-  ): null | ReadonlyArray<BoxedExpression> {
+      | Expression
+      | Iterable<Expression>
+  ): null | ReadonlyArray<Expression> {
     const varNames = normalizedUnknownsForSolve(vars);
     if (varNames.length !== 1) return null;
     if (varNames.includes(this.symbol)) return [this.engine.Zero];
@@ -399,7 +399,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   }
 
   /** Return the value of the symbol, undefined if an operator or not bound */
-  get _value(): BoxedExpression | undefined {
+  get _value(): Expression | undefined {
     if (!this._def || isOperatorDef(this._def)) return undefined;
 
     // If the symbol is a constant, the definition has the value
@@ -409,7 +409,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     return this.engine._getSymbolValue(this._id);
   }
 
-  get value(): BoxedExpression | undefined {
+  get value(): Expression | undefined {
     // If the definition is an operator definition, return a special value
     // @todo:  not clear this is something useful... Could return a hash of the operator, and keep a map of hash to their definitions...
     if (isOperatorDef(this._def))
@@ -428,7 +428,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
           [
             { re: number; im: number },
             { num: number; denom: number },
-            BoxedExpression,
+            Expression,
           ]
         >
       | number
@@ -447,7 +447,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     //
     // Determine the new value
     //
-    let v: BoxedExpression | undefined;
+    let v: Expression | undefined;
     if (typeof value === 'boolean') value = value ? ce.True : ce.False;
     if (typeof value === 'string') value = ce.string(value);
     if (typeof value === 'object') {
@@ -464,7 +464,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     }
 
     if (value !== undefined) {
-      const boxedValue = ce.box(value as BoxedExpression);
+      const boxedValue = ce.box(value as Expression);
       v = boxedValue.evaluate();
     }
 
@@ -549,7 +549,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   }
 
   match(
-    pattern: BoxedExpression,
+    pattern: Expression,
     options?: PatternMatchOptions
   ): BoxedSubstitution | null {
     return match(this, pattern, options);
@@ -660,11 +660,11 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     return this.value?.bignumIm;
   }
 
-  simplify(options?: Partial<SimplifyOptions>): BoxedExpression {
+  simplify(options?: Partial<SimplifyOptions>): Expression {
     return simplify(this, options).at(-1)?.value ?? this;
   }
 
-  evaluate(options?: Partial<EvaluateOptions>): BoxedExpression {
+  evaluate(options?: Partial<EvaluateOptions>): Expression {
     const def = this.valueDefinition;
     if (!def) return this;
     const hold = def.holdUntil;
@@ -690,7 +690,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     return this;
   }
 
-  N(): BoxedExpression {
+  N(): Expression {
     const def = this.valueDefinition;
     if (def && def.holdUntil === 'never') return this;
     // For non-constants, check the evaluation context value first
@@ -704,14 +704,14 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   replace(
     rules: Rule | (Rule | BoxedRule)[] | BoxedRuleSet,
     options?: Partial<ReplaceOptions>
-  ): BoxedExpression | null {
+  ): Expression | null {
     return replace(this, rules, options).at(-1)?.value ?? null;
   }
 
   subs(
     sub: Substitution,
     options?: { canonical?: CanonicalOptions }
-  ): BoxedExpression {
+  ): Expression {
     const canonical = options?.canonical ?? this.isCanonical;
     if (sub[this._id] === undefined) return canonical ? this.canonical : this;
 
@@ -751,7 +751,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     );
   }
 
-  contains(rhs: BoxedExpression): boolean | undefined {
+  contains(rhs: Expression): boolean | undefined {
     return (
       this._asCollection?.contains?.(this._value ?? this, rhs) ??
       this._value?.contains?.(rhs)
@@ -780,7 +780,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     );
   }
 
-  each(): Generator<BoxedExpression> {
+  each(): Generator<Expression> {
     const iter = this._asCollection?.iterator?.(this._value ?? this);
     if (iter)
       return (function* () {
@@ -793,26 +793,26 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     return this._value?.each() ?? (function* () {})();
   }
 
-  at(index: number): BoxedExpression | undefined {
+  at(index: number): Expression | undefined {
     return (
       this._asCollection?.at?.(this._value ?? this, index) ??
       this._value?.at?.(index)
     );
   }
 
-  get(index: BoxedExpression | string): BoxedExpression | undefined {
+  get(index: Expression | string): Expression | undefined {
     return this._value?.get?.(index);
   }
 
   indexWhere(
-    predicate: (element: BoxedExpression) => boolean
+    predicate: (element: Expression) => boolean
   ): number | undefined {
     if (this._asCollection?.indexWhere)
       return this._asCollection.indexWhere(this._value ?? this, predicate);
     return this._value?.indexWhere(predicate);
   }
 
-  subsetOf(rhs: BoxedExpression, strict: boolean): boolean {
+  subsetOf(rhs: Expression, strict: boolean): boolean {
     return (
       this._asCollection?.subsetOf?.(this._value ?? this, rhs, strict) ??
       this._value?.subsetOf?.(rhs, strict) ??

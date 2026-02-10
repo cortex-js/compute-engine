@@ -1,4 +1,4 @@
-import type { BoxedExpression, ExpressionInput } from './types-expression';
+import type { Expression, ExpressionInput } from './types-expression';
 
 import type {
   BoxedSubstitution as KernelBoxedSubstitution,
@@ -37,12 +37,12 @@ export type Substitution<T = ExpressionInput> = KernelSubstitution<T>;
 /**
  * @category Pattern Matching
  */
-export type BoxedSubstitution<T = BoxedExpression> = KernelBoxedSubstitution<T>;
+export type BoxedSubstitution<T = Expression> = KernelBoxedSubstitution<T>;
 
 /**
  * Control how a pattern is matched to an expression.
  *
  * @category Pattern Matching
  */
-export type PatternMatchOptions<T = BoxedExpression> =
+export type PatternMatchOptions<T = Expression> =
   KernelPatternMatchOptions<T>;

@@ -1,5 +1,5 @@
 import type {
-  MathJsonExpression as Expression,
+  MathJsonExpression,
   MathJsonSymbol,
 } from '../../math-json';
 import { EMOJIS, isValidSymbol, validateSymbol } from '../../math-json/symbols';
@@ -260,7 +260,7 @@ function matchPrefixedSymbol(parser: Parser): string | null {
 /** For error handling, if we have a symbol prefix, assume
  * the symbol is invalid (it would have been captured by
  * `matchSymbol()` otherwise) and return an error expression */
-export function parseInvalidSymbol(parser: Parser): Expression | null {
+export function parseInvalidSymbol(parser: Parser): MathJsonExpression | null {
   const start = parser.index;
   const id = matchPrefixedSymbol(parser);
   if (id === null || isValidSymbol(id)) return null;

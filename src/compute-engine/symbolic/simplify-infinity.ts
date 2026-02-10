@@ -1,4 +1,4 @@
-import type { BoxedExpression, RuleStep } from '../global-types';
+import type { Expression, RuleStep } from '../global-types';
 import {
   isFunction,
   isSymbol,
@@ -17,7 +17,7 @@ import {
  * IMPORTANT: Do not call .simplify() on results to avoid infinite recursion.
  */
 
-export function simplifyInfinity(x: BoxedExpression): RuleStep | undefined {
+export function simplifyInfinity(x: Expression): RuleStep | undefined {
   const op = x.operator;
   const ce = x.engine;
 

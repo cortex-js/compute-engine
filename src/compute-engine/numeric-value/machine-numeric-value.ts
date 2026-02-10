@@ -1,7 +1,7 @@
 import { Decimal } from 'decimal.js';
 import type { BigNumFactory, SmallInteger } from '../numerics/types';
 import { NumericValue, NumericValueData } from './types';
-import type { MathJsonExpression as Expression } from '../../math-json/types';
+import type { MathJsonExpression } from '../../math-json/types';
 import { numberToString } from '../numerics/strings';
 import { numberToExpression } from '../numerics/expression';
 import { NumericPrimitiveType } from '../../common/type/types';
@@ -73,7 +73,7 @@ export class MachineNumericValue extends NumericValue {
     return this._makeExact(this.decimal);
   }
 
-  toJSON(): Expression {
+  toJSON(): MathJsonExpression {
     if (this.isNaN) return 'NaN';
     if (this.isPositiveInfinity) return 'PositiveInfinity';
     if (this.isNegativeInfinity) return 'NegativeInfinity';

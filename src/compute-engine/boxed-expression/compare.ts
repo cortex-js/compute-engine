@@ -1,5 +1,5 @@
 import { NumericValue } from '../numeric-value/types';
-import type { BoxedExpression } from '../global-types';
+import type { Expression } from '../global-types';
 import { getInequalityBoundsFromAssumptions } from './inequality-bounds';
 import {
   isNumber,
@@ -14,7 +14,7 @@ import {
 /**
  * Structural equality of boxed expressions.
  */
-export function same(a: BoxedExpression, b: BoxedExpression): boolean {
+export function same(a: Expression, b: Expression): boolean {
   if (a === b) return true;
 
   //
@@ -82,8 +82,8 @@ export function same(a: BoxedExpression, b: BoxedExpression): boolean {
  * ([Richardson's theorem](https://en.wikipedia.org/wiki/Richardson%27s_theorem)) but this works often...
  */
 export function eq(
-  a: BoxedExpression,
-  inputB: number | BoxedExpression
+  a: Expression,
+  inputB: number | Expression
 ): boolean | undefined {
   // We want to give a chance to the eq handler of the functions first
   if (a.operatorDefinition?.eq) {
@@ -179,8 +179,8 @@ export function eq(
 }
 
 export function cmp(
-  a: BoxedExpression,
-  b: number | BoxedExpression
+  a: Expression,
+  b: number | Expression
 ): '<' | '=' | '>' | '>=' | '<=' | undefined {
   if (isNumber(a)) {
     //
@@ -489,7 +489,7 @@ export function cmp(
   return undefined;
 }
 
-function isZeroWithTolerance(expr: BoxedExpression): boolean {
+function isZeroWithTolerance(expr: Expression): boolean {
   if (!isNumber(expr)) return false;
   const n = expr.numericValue;
   const ce = expr.engine;
@@ -497,7 +497,7 @@ function isZeroWithTolerance(expr: BoxedExpression): boolean {
   return n.isZeroWithTolerance(ce.tolerance);
 }
 
-function sameUnknowns(a: BoxedExpression, b: BoxedExpression): boolean {
+function sameUnknowns(a: Expression, b: Expression): boolean {
   const ua = a.unknowns;
   const ub = b.unknowns;
   if (ua.length !== ub.length) return false;

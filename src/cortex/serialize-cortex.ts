@@ -16,7 +16,7 @@ import {
   COMPARISON_PRECEDENCE,
   NumberSerializationFormat,
 } from '../compute-engine/latex-syntax/types';
-import { MathJsonExpression as Expression } from '../math-json/types';
+import { MathJsonExpression } from '../math-json/types';
 import {
   serializeHexFloat,
   serializeNumber,
@@ -65,7 +65,7 @@ export const NUMBER_FORMATTING_OPTIONS: NumberSerializationFormat = {
  *
  */
 export function serializeCortex(
-  expr: Expression,
+  expr: MathJsonExpression,
   options?: FormattingOptions & {
     fancySymbols?: boolean;
   }
@@ -86,7 +86,7 @@ export function serializeCortex(
     ...options,
   });
 
-  function serializeExpression(expr: Expression | null): FormattingBlock {
+  function serializeExpression(expr: MathJsonExpression | null): FormattingBlock {
     if (expr === null) return new EmptyBlock(this);
     // Is this a string literal?
     if (typeof expr === 'string' && matchesString(expr)) {
@@ -152,7 +152,7 @@ export function serializeCortex(
     return fmt.text(`"${escapeString(s)}"`);
   }
 
-  function serializeComment(expr: Expression): FormattingBlock {
+  function serializeComment(expr: MathJsonExpression): FormattingBlock {
     if (!(typeof expr === 'object')) return fmt.text();
     if ('comment' in expr) {
       if (expr.comment && expr.comment.length > 0) {
@@ -241,11 +241,11 @@ export function serializeCortex(
   //
   // Functions with a custom serializer: BaseForm, String, List, Set
   //
-  const FUNCTIONS: { [key: string]: (exp: Expression) => FormattingBlock } = {
+  const FUNCTIONS: { [key: string]: (exp: MathJsonExpression) => FormattingBlock } = {
     //
     // BaseForm
     //
-    BaseForm: (expr: Expression): FormattingBlock => {
+    BaseForm: (expr: MathJsonExpression): FormattingBlock => {
       // CAUTION: machineValue will truncate number expessions to a machine
       // number, which may result in a loss of precision
       const base = machineValue(operand(expr, 2)) ?? 16;
@@ -286,7 +286,7 @@ export function serializeCortex(
     // String
     //
     // Interpolated string, e.g. `["String", "'hello '", "name"]`
-    String: (expr: Expression): FormattingBlock =>
+    String: (expr: MathJsonExpression): FormattingBlock =>
       fmt.wrap(
         '"',
         ...mapArgs<FormattingBlock>(expr, (x) => {
@@ -301,7 +301,7 @@ export function serializeCortex(
     // List
     //
     // Interpolated string, e.g. `["String", "'hello '", "name"]`
-    List: (expr: Expression): FormattingBlock =>
+    List: (expr: MathJsonExpression): FormattingBlock =>
       fmt.fencedList(
         '{',
         fmt.separator(','),
@@ -313,7 +313,7 @@ export function serializeCortex(
     // Set
     //
     // Interpolated string, e.g. `["String", "'hello '", "name"]`
-    Set: (expr: Expression): FormattingBlock => {
+    Set: (expr: MathJsonExpression): FormattingBlock => {
       if (nops(expr) === 0) return fmt.text('EmptySet');
       return fmt.fencedList(
         '[',
@@ -326,11 +326,11 @@ export function serializeCortex(
     // @todo: Dictionary, Do, If
   };
 
-  function serializeFunction(expr: Expression): FormattingBlock | null {
+  function serializeFunction(expr: MathJsonExpression): FormattingBlock | null {
     return FUNCTIONS[operator(expr)]?.(expr) ?? null;
   }
 
-  function serializeGenericFunction(expr: Expression): FormattingBlock {
+  function serializeGenericFunction(expr: MathJsonExpression): FormattingBlock {
     const h = operator(expr);
     if (h) {
       // It's a function application with a named function
@@ -361,7 +361,7 @@ export function serializeCortex(
   }
 
   // @todo: 2x, 2(x+1)
-  function serializeOperator(expr: Expression): FormattingBlock | null {
+  function serializeOperator(expr: MathJsonExpression): FormattingBlock | null {
     const opName = operator(expr);
     if (!opName) return null;
 

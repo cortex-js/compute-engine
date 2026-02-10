@@ -1,4 +1,4 @@
-import type { BoxedExpression } from '../global-types';
+import type { Expression } from '../global-types';
 
 import { flatten } from './flatten';
 import { isFunction } from './type-guards';
@@ -11,9 +11,9 @@ import { isFunction } from './type-guards';
  * If `f` returns `null`, the element is not added to the result
  */
 export function holdMap(
-  expr: BoxedExpression,
-  f: (x: BoxedExpression) => BoxedExpression | null
-): ReadonlyArray<BoxedExpression> {
+  expr: Expression,
+  f: (x: Expression) => Expression | null
+): ReadonlyArray<Expression> {
   if (!isFunction(expr)) return [];
 
   let xs = expr.ops;
@@ -30,7 +30,7 @@ export function holdMap(
   //
   if (def.lazy) return xs;
 
-  const result: BoxedExpression[] = [];
+  const result: Expression[] = [];
   for (const x of xs) {
     const h = x.operator;
     if (h === 'Hold') result.push(x);
@@ -46,9 +46,9 @@ export function holdMap(
 }
 
 export async function holdMapAsync(
-  expr: BoxedExpression,
-  f: (x: BoxedExpression) => Promise<BoxedExpression | null>
-): Promise<ReadonlyArray<BoxedExpression>> {
+  expr: Expression,
+  f: (x: Expression) => Promise<Expression | null>
+): Promise<ReadonlyArray<Expression>> {
   if (!isFunction(expr)) return [];
 
   let xs = expr.ops;
@@ -65,7 +65,7 @@ export async function holdMapAsync(
   //
   if (def.lazy) return xs;
 
-  const result: BoxedExpression[] = [];
+  const result: Expression[] = [];
   for (const x of xs) {
     const h = x.operator;
     if (h === 'Hold') result.push(x);

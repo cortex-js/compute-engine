@@ -60,33 +60,33 @@ type BaseDefinition = {
 
 interface BaseCollectionHandlers {
   iterator: (
-    collection: BoxedExpression
-  ) => Iterator<BoxedExpression, undefined> | undefined;
-  count: (collection: BoxedExpression) => number | undefined;
-  isEmpty?: (collection: BoxedExpression) => boolean | undefined;
-  isFinite?: (collection: BoxedExpression) => boolean | undefined;
-  isLazy?: (collection: BoxedExpression) => boolean;
+    collection: Expression
+  ) => Iterator<Expression, undefined> | undefined;
+  count: (collection: Expression) => number | undefined;
+  isEmpty?: (collection: Expression) => boolean | undefined;
+  isFinite?: (collection: Expression) => boolean | undefined;
+  isLazy?: (collection: Expression) => boolean;
   contains?: (
-    collection: BoxedExpression,
-    target: BoxedExpression
+    collection: Expression,
+    target: Expression
   ) => boolean | undefined;
   subsetOf?: (
-    collection: BoxedExpression,
-    other: BoxedExpression,
+    collection: Expression,
+    other: Expression,
     strict: boolean
   ) => boolean | undefined;
-  eltsgn?: (collection: BoxedExpression) => Sign | undefined;
-  elttype?: (collection: BoxedExpression) => Type | undefined;
+  eltsgn?: (collection: Expression) => Sign | undefined;
+  elttype?: (collection: Expression) => Type | undefined;
 }
 
 interface IndexedCollectionHandlers {
   at: (
-    collection: BoxedExpression,
+    collection: Expression,
     index: number | string
-  ) => undefined | BoxedExpression;
+  ) => undefined | Expression;
   indexWhere: (
-    collection: BoxedExpression,
-    predicate: (element: BoxedExpression) => boolean
+    collection: Expression,
+    predicate: (element: Expression) => boolean
   ) => number | undefined;
 }
 
@@ -99,19 +99,19 @@ interface BoxedBaseDefinition extends Partial<BaseDefinition> {
 
 interface BoxedValueDefinition extends BoxedBaseDefinition {
   holdUntil: 'never' | 'evaluate' | 'N';
-  readonly value: BoxedExpression | undefined;
-  eq?: (a: BoxedExpression) => boolean | undefined;
-  neq?: (a: BoxedExpression) => boolean | undefined;
-  cmp?: (a: BoxedExpression) => '=' | '>' | '<' | undefined;
+  readonly value: Expression | undefined;
+  eq?: (a: Expression) => boolean | undefined;
+  neq?: (a: Expression) => boolean | undefined;
+  cmp?: (a: Expression) => '=' | '>' | '<' | undefined;
   inferredType: boolean;
   type: BoxedType;
   subscriptEvaluate?: (
-    subscript: BoxedExpression,
+    subscript: Expression,
     options: {
       engine: ExpressionComputeEngine;
       numericApproximation?: boolean;
     }
-  ) => BoxedExpression | undefined;
+  ) => Expression | undefined;
 }
 
 type OperatorDefinitionFlags = {
@@ -121,7 +121,7 @@ type OperatorDefinitionFlags = {
   associative: boolean;
   commutative: boolean;
   commutativeOrder:
-    | ((a: BoxedExpression, b: BoxedExpression) => number)
+    | ((a: Expression, b: Expression) => number)
     | undefined;
   idempotent: boolean;
   involution: boolean;
@@ -134,32 +134,32 @@ interface BoxedOperatorDefinition
   inferredSignature: boolean;
   signature: BoxedType;
   type?: (
-    ops: ReadonlyArray<BoxedExpression>,
+    ops: ReadonlyArray<Expression>,
     options: { engine: ExpressionComputeEngine }
   ) => Type | TypeString | BoxedType | undefined;
   sgn?: (
-    ops: ReadonlyArray<BoxedExpression>,
+    ops: ReadonlyArray<Expression>,
     options: { engine: ExpressionComputeEngine }
   ) => Sign | undefined;
-  eq?: (a: BoxedExpression, b: BoxedExpression) => boolean | undefined;
-  neq?: (a: BoxedExpression, b: BoxedExpression) => boolean | undefined;
+  eq?: (a: Expression, b: Expression) => boolean | undefined;
+  neq?: (a: Expression, b: Expression) => boolean | undefined;
   canonical?: (
-    ops: ReadonlyArray<BoxedExpression>,
+    ops: ReadonlyArray<Expression>,
     options: { engine: ExpressionComputeEngine; scope: Scope | undefined }
-  ) => BoxedExpression | null;
+  ) => Expression | null;
   evaluate?: (
-    ops: ReadonlyArray<BoxedExpression>,
+    ops: ReadonlyArray<Expression>,
     options: Partial<EvaluateOptions> & { engine?: ExpressionComputeEngine }
-  ) => BoxedExpression | undefined;
+  ) => Expression | undefined;
   evaluateAsync?: (
-    ops: ReadonlyArray<BoxedExpression>,
+    ops: ReadonlyArray<Expression>,
     options?: Partial<EvaluateOptions> & { engine?: ExpressionComputeEngine }
-  ) => Promise<BoxedExpression | undefined>;
+  ) => Promise<Expression | undefined>;
   evalDimension?: (
-    ops: ReadonlyArray<BoxedExpression>,
+    ops: ReadonlyArray<Expression>,
     options: { engine: ExpressionComputeEngine }
-  ) => BoxedExpression;
-  compile?: (expr: BoxedExpression) => CompiledExpression;
+  ) => Expression;
+  compile?: (expr: Expression) => CompiledExpression;
   update(def: unknown): void;
 }
 
@@ -168,21 +168,21 @@ type BoxedDefinition =
   | { operator: BoxedOperatorDefinition };
 
 type Scope = KernelScope<BoxedDefinition>;
-type EvaluateOptions = KernelEvaluateOptions<BoxedExpression>;
+type EvaluateOptions = KernelEvaluateOptions<Expression>;
 type Rule = KernelRule<
-  BoxedExpression,
+  Expression,
   ExpressionInput,
   ExpressionComputeEngine
 >;
-type BoxedRule = KernelBoxedRule<BoxedExpression, ExpressionComputeEngine>;
+type BoxedRule = KernelBoxedRule<Expression, ExpressionComputeEngine>;
 type BoxedRuleSet = KernelBoxedRuleSet<
-  BoxedExpression,
+  Expression,
   ExpressionComputeEngine
 >;
 
 type SimplifyOptions = {
   rules?: null | Rule | ReadonlyArray<BoxedRule | Rule> | BoxedRuleSet;
-  costFunction?: (expr: BoxedExpression) => number;
+  costFunction?: (expr: Expression) => number;
   strategy?: 'default' | 'fu';
 };
 
@@ -199,8 +199,8 @@ export type JSSource = string;
 /** @category Compiling */
 export type CompiledExpression = {
   evaluate?: (scope: {
-    [symbol: string]: BoxedExpression;
-  }) => number | BoxedExpression;
+    [symbol: string]: Expression;
+  }) => number | Expression;
 };
 
 /**
@@ -216,7 +216,7 @@ export type DataTypeMap = {
   complex64: Complex;
   bool: boolean;
   // string: string;
-  expression: BoxedExpression;
+  expression: Expression;
 };
 
 /**
@@ -241,7 +241,7 @@ export interface TensorData<DT extends TensorDataType> {
 
 /** @category Tensors */
 export interface TensorField<
-  T extends number | Complex | BoxedExpression | boolean | string = number,
+  T extends number | Complex | Expression | boolean | string = number,
 > {
   readonly one: T;
   readonly zero: T;
@@ -255,7 +255,7 @@ export interface TensorField<
   cast(x: T, dtype: 'complex64'): undefined | Complex;
   cast(x: T, dtype: 'bool'): undefined | boolean;
   // cast(x: T, dtype: 'string'): undefined | string;
-  cast(x: T, dtype: 'expression'): undefined | BoxedExpression;
+  cast(x: T, dtype: 'expression'): undefined | Expression;
   cast(x: T[], dtype: 'float64'): undefined | number[];
   cast(x: T[], dtype: 'float32'): undefined | number[];
   cast(x: T[], dtype: 'int32'): undefined | number[];
@@ -264,7 +264,7 @@ export interface TensorField<
   cast(x: T[], dtype: 'complex64'): undefined | Complex[];
   cast(x: T[], dtype: 'bool'): undefined | boolean[];
   // cast(x: T[], dtype: 'string'): undefined | string[];
-  cast(x: T[], dtype: 'expression'): undefined | BoxedExpression[];
+  cast(x: T[], dtype: 'expression'): undefined | Expression[];
   cast(
     x: T | T[],
     dtype: TensorDataType
@@ -274,15 +274,15 @@ export interface TensorField<
     | number
     | boolean
     // | string
-    | BoxedExpression
+    | Expression
     | Complex[]
     | number[]
     | boolean[]
     // | string[]
-    | BoxedExpression[];
+    | Expression[];
 
   // Synonym for `cast(x, 'expression')`
-  expression(x: T): BoxedExpression;
+  expression(x: T): Expression;
 
   isZero(x: T): boolean;
   isOne(x: T): boolean;
@@ -311,7 +311,7 @@ export interface Tensor<DT extends TensorDataType> extends TensorData<DT> {
   data: DataTypeMap[DT][];
 
   readonly field: TensorField<DT>;
-  readonly expression: BoxedExpression;
+  readonly expression: Expression;
   readonly array: NestedArray<DataTypeMap[DT]>;
   readonly isSquare: boolean;
   readonly isSymmetric: boolean;
@@ -359,18 +359,18 @@ export interface Tensor<DT extends TensorDataType> extends TensorData<DT> {
 }
 
 //
-// ── BoxedExpression ─────────────────────────────────────────────────────
+// ── Expression ─────────────────────────────────────────────────────
 //
 
 /**
  * :::info[THEORY OF OPERATIONS]
  *
- * The `BoxedExpression` interface includes the methods and properties
+ * The `Expression` interface includes the methods and properties
  * applicable to all kinds of expression. For example it includes `expr.symbol`
  * which only applies to symbols or `expr.ops` which only applies to
  * function expressions.
  *
- * When a property is not applicable to this `BoxedExpression` its value is
+ * When a property is not applicable to this `Expression` its value is
  * `undefined`. For example `expr.symbol` for a `BoxedNumber` is `undefined`.
  *
  * This convention makes it convenient to manipulate expressions without
@@ -600,7 +600,7 @@ export interface Expression {
    *
    * Note that lazy collections are eagerly evaluated.
    *
-   * Used when coercing a `BoxedExpression` to a `String`.
+   * Used when coercing a `Expression` to a `String`.
    *
    * @category Primitive Methods
    */
@@ -693,7 +693,7 @@ export interface Expression {
    *
    * The structural form of an expression is used when applying rules to
    * an expression. For example, a rational number is represented as a
-   * function expression instead of a `BoxedExpression` object.
+   * function expression instead of a `Expression` object.
    *
    */
   get isStructural(): boolean;
@@ -728,13 +728,13 @@ export interface Expression {
    * :::
    *
    */
-  get canonical(): BoxedExpression;
+  get canonical(): Expression;
 
   /**
    * Return the structural form of this expression.
    *
    * Some expressions, such as rational numbers, are represented with
-   * a `BoxedExpression` object. In some cases, for example when doing a
+   * a `Expression` object. In some cases, for example when doing a
    * structural comparison of two expressions, it is useful to have a
    * structural representation of the expression where the rational numbers
    * is represented by a function expression instead.
@@ -743,7 +743,7 @@ export interface Expression {
    * otherwise return `this`.
    *
    */
-  get structural(): BoxedExpression;
+  get structural(): Expression;
 
   /** `false` if this expression or any of its subexpressions is an `["Error"]`
    * expression.
@@ -808,7 +808,7 @@ export interface Expression {
    * :::
    *
    */
-  readonly errors: ReadonlyArray<BoxedExpression>;
+  readonly errors: ReadonlyArray<Expression>;
 
   /** All the subexpressions matching the named operator, recursively.
    *
@@ -825,7 +825,7 @@ export interface Expression {
    * :::
    *
    */
-  getSubexpressions(operator: string): ReadonlyArray<BoxedExpression>;
+  getSubexpressions(operator: string): ReadonlyArray<Expression>;
 
   /** All the subexpressions in this expression, recursively
    *
@@ -842,7 +842,7 @@ export interface Expression {
    * :::
    *
    */
-  readonly subexpressions: ReadonlyArray<BoxedExpression>;
+  readonly subexpressions: ReadonlyArray<Expression>;
 
   /**
    *
@@ -882,7 +882,7 @@ export interface Expression {
    * ```
    */
 
-  toNumericValue(): [NumericValue, BoxedExpression];
+  toNumericValue(): [NumericValue, Expression];
 
   /**
    * If the value of this expression is not an **integer** return `undefined`.
@@ -1001,43 +1001,43 @@ export interface Expression {
    *
    */
   /** Negate (additive inverse) */
-  neg(): BoxedExpression;
+  neg(): Expression;
   /** Inverse (multiplicative inverse) */
-  inv(): BoxedExpression;
+  inv(): Expression;
   /** Absolute value */
-  abs(): BoxedExpression;
+  abs(): Expression;
   /** Addition */
-  add(rhs: number | BoxedExpression): BoxedExpression;
+  add(rhs: number | Expression): Expression;
   /** Subtraction */
-  sub(rhs: BoxedExpression): BoxedExpression;
+  sub(rhs: Expression): Expression;
   /** Multiplication */
-  mul(rhs: NumericValue | number | BoxedExpression): BoxedExpression;
+  mul(rhs: NumericValue | number | Expression): Expression;
   /** Division */
-  div(rhs: number | BoxedExpression): BoxedExpression;
+  div(rhs: number | Expression): Expression;
   /** Power */
-  pow(exp: number | BoxedExpression): BoxedExpression;
+  pow(exp: number | Expression): Expression;
   /** Exponentiation */
-  root(exp: number | BoxedExpression): BoxedExpression;
+  root(exp: number | Expression): Expression;
   /** Square root */
-  sqrt(): BoxedExpression;
+  sqrt(): Expression;
   /** Logarithm (natural by default) */
-  ln(base?: number | BoxedExpression): BoxedExpression;
-  // exp(): BoxedExpression;
+  ln(base?: number | Expression): Expression;
+  // exp(): Expression;
 
   /**
    * Return this expression expressed as a numerator.
    */
-  get numerator(): BoxedExpression;
+  get numerator(): Expression;
 
   /**
    * Return this expression expressed as a denominator.
    */
-  get denominator(): BoxedExpression;
+  get denominator(): Expression;
 
   /**
    * Return this expression expressed as a numerator and denominator.
    */
-  get numeratorDenominator(): [BoxedExpression, BoxedExpression];
+  get numeratorDenominator(): [Expression, Expression];
 
   /**
    * The name of the operator of the expression.
@@ -1089,7 +1089,7 @@ export interface Expression {
   subs(
     sub: Substitution<ExpressionInput>,
     options?: { canonical?: CanonicalOptions }
-  ): BoxedExpression;
+  ): Expression;
 
   /**
    * Recursively replace all the subexpressions in the expression as indicated.
@@ -1109,9 +1109,9 @@ export interface Expression {
    * :::
    */
   map(
-    fn: (expr: BoxedExpression) => BoxedExpression,
+    fn: (expr: Expression) => Expression,
     options?: { canonical: CanonicalOptions; recursive?: boolean }
-  ): BoxedExpression;
+  ): Expression;
 
   /**
    * Transform the expression by applying one or more replacement rules:
@@ -1129,7 +1129,7 @@ export interface Expression {
    * the replacement occurs at the top-level, or within/recursively.
    *
    * - If otherwise, the *direct replacement will be canonical* if either the 'replaced' expression
-   * is canonical, or the given replacement (- is a BoxedExpression and -) is canonical.
+   * is canonical, or the given replacement (- is a Expression and -) is canonical.
    * Notably also, if this replacement takes place recursively (not at the top-level), then exprs.
    * containing the replaced expr. will still however have their (previous) canonical-status
    * *preserved*... unless this expr. was previously non-canonical, and *replacements have resulted
@@ -1140,14 +1140,14 @@ export interface Expression {
    * Applicable to canonical and non-canonical expressions.
    *
    * To match a specific symbol (not a wildcard pattern), the `match` must be
-   * a `BoxedExpression` (e.g., `{ match: ce.box('x'), replace: ... }`).
+   * a `Expression` (e.g., `{ match: ce.box('x'), replace: ... }`).
    * For simple symbol substitution, consider using `subs()` instead.
    * :::
    */
   replace(
     rules: BoxedRuleSet | Rule | Rule[],
     options?: Partial<ReplaceOptions>
-  ): null | BoxedExpression;
+  ): null | Expression;
 
   /**
    * True if the expression includes a symbol `v` or a function operator `v`.
@@ -1170,17 +1170,17 @@ export interface Expression {
    *
    * @category Relational Operator
    */
-  isSame(rhs: BoxedExpression): boolean;
+  isSame(rhs: Expression): boolean;
 
   /**
-   * Equivalent to `BoxedExpression.isSame()` but the argument can be
+   * Equivalent to `Expression.isSame()` but the argument can be
    * a JavaScript primitive. For example, `expr.is(2)` is equivalent to
    * `expr.isSame(ce.number(2))`.
    *
    * @category Primitive Methods
    *
    */
-  is(other: BoxedExpression | number | bigint | boolean | string): boolean;
+  is(other: Expression | number | bigint | boolean | string): boolean;
 
   /**
    * If this expression matches `pattern`, return a substitution that makes
@@ -1201,9 +1201,9 @@ export interface Expression {
    *
    */
   match(
-    pattern: BoxedExpression,
-    options?: PatternMatchOptions<BoxedExpression>
-  ): BoxedSubstitution<BoxedExpression> | null;
+    pattern: Expression,
+    options?: PatternMatchOptions<Expression>
+  ): BoxedSubstitution<Expression> | null;
 
   /**
    *
@@ -1250,7 +1250,7 @@ export interface Expression {
    *
    * @category Relational Operator
    */
-  isLess(other: number | BoxedExpression): boolean | undefined;
+  isLess(other: number | Expression): boolean | undefined;
 
   /**
    * The value of both expressions are compared.
@@ -1258,7 +1258,7 @@ export interface Expression {
    * If the expressions cannot be compared, return `undefined`
    * @category Relational Operator
    */
-  isLessEqual(other: number | BoxedExpression): boolean | undefined;
+  isLessEqual(other: number | Expression): boolean | undefined;
 
   /**
    * The value of both expressions are compared.
@@ -1266,7 +1266,7 @@ export interface Expression {
    * If the expressions cannot be compared, return `undefined`
    * @category Relational Operator
    */
-  isGreater(other: number | BoxedExpression): boolean | undefined;
+  isGreater(other: number | Expression): boolean | undefined;
 
   /**
    * The value of both expressions are compared.
@@ -1274,7 +1274,7 @@ export interface Expression {
    * If the expressions cannot be compared, return `undefined`
    * @category Relational Operator
    */
-  isGreaterEqual(other: number | BoxedExpression): boolean | undefined;
+  isGreaterEqual(other: number | Expression): boolean | undefined;
 
   /**
    * If true, the value of this expression is "Not a Number".
@@ -1431,7 +1431,7 @@ export interface Expression {
    * To manipulate symbolically non-canonical expressions, use `expr.replace()`.
    *
    */
-  simplify(options?: Partial<SimplifyOptions>): BoxedExpression;
+  simplify(options?: Partial<SimplifyOptions>): Expression;
 
   /**
    * Return the value of the canonical form of this expression.
@@ -1452,7 +1452,7 @@ export interface Expression {
    * The result is in canonical form.
    *
    */
-  evaluate(options?: Partial<EvaluateOptions>): BoxedExpression;
+  evaluate(options?: Partial<EvaluateOptions>): Expression;
 
   /** Asynchronous version of `evaluate()`.
    *
@@ -1460,7 +1460,7 @@ export interface Expression {
    * `AbortSignal` object. If the signal is aborted, a `CancellationError` is thrown.
    *
    */
-  evaluateAsync(options?: Partial<EvaluateOptions>): Promise<BoxedExpression>;
+  evaluateAsync(options?: Partial<EvaluateOptions>): Promise<Expression>;
 
   /** Return a numeric approximation of the canonical form of this expression.
    *
@@ -1477,7 +1477,7 @@ export interface Expression {
    *
    * The result is in canonical form.
    */
-  N(): BoxedExpression;
+  N(): Expression;
 
   /**
    * If this is an equation, solve the equation for the variables in vars.
@@ -1507,13 +1507,13 @@ export interface Expression {
     vars?:
       | Iterable<string>
       | string
-      | BoxedExpression
-      | Iterable<BoxedExpression>
+      | Expression
+      | Iterable<Expression>
   ):
     | null
-    | ReadonlyArray<BoxedExpression>
-    | Record<string, BoxedExpression>
-    | Array<Record<string, BoxedExpression>>;
+    | ReadonlyArray<Expression>
+    | Record<string, Expression>
+    | Array<Record<string, Expression>>;
 
   /**
    * If this expression is a number literal, a string literal or a function
@@ -1525,7 +1525,7 @@ export interface Expression {
    * symbol, i.e. a symbol with no value, return `undefined`.
    *
    */
-  get value(): BoxedExpression | undefined;
+  get value(): Expression | undefined;
 
   /**
    * If the expression is a symbol, set the value of the symbol.
@@ -1546,7 +1546,7 @@ export interface Expression {
           [
             { re: number; im: number },
             { num: number; denom: number },
-            BoxedExpression,
+            Expression,
           ]
         >
       | number[]
@@ -1662,7 +1662,7 @@ export interface Expression {
    *
    * @category Relational Operator
    */
-  isEqual(other: number | BoxedExpression): boolean | undefined;
+  isEqual(other: number | Expression): boolean | undefined;
 
   /**
    * Is `true` if the expression is a collection.
@@ -1691,7 +1691,7 @@ export interface Expression {
    *    as for a collection.
    * - has an `at(index: number)` method that returns the element at the
    *    specified index.
-   * - has an `indexWhere(predicate: (element: BoxedExpression) => boolean)`
+   * - has an `indexWhere(predicate: (element: Expression) => boolean)`
    *    method that returns the index of the first element that matches the
    *    predicate.
    */
@@ -1721,7 +1721,7 @@ export interface Expression {
    * }
    * ```
    */
-  each(): Generator<BoxedExpression>;
+  each(): Generator<Expression>;
 
   /**
    * If this is a collection, return true if the `rhs` expression is in the
@@ -1730,7 +1730,7 @@ export interface Expression {
    * Return `undefined` if the membership cannot be determined without
    * iterating over the collection.
    */
-  contains(rhs: BoxedExpression): boolean | undefined;
+  contains(rhs: Expression): boolean | undefined;
 
   /**
    * Check if this collection is a subset of another collection.
@@ -1738,7 +1738,7 @@ export interface Expression {
    * @param other The other collection to check against.
    * @param strict If true, the subset relation is strict (i.e., proper subset).
    */
-  subsetOf(other: BoxedExpression, strict: boolean): boolean | undefined;
+  subsetOf(other: Expression, strict: boolean): boolean | undefined;
 
   /**
    * If this is a collection, return the number of elements in the collection.
@@ -1769,15 +1769,15 @@ export interface Expression {
    * The last element is at index -1.
    *
    */
-  at(index: number): BoxedExpression | undefined;
+  at(index: number): Expression | undefined;
 
   /** If this is a keyed collection (map, record, tuple), return the value of
    * the corresponding key.
    *
-   * If `key` is a `BoxedExpression`, it should be a string.
+   * If `key` is a `Expression`, it should be a string.
    *
    */
-  get(key: string | BoxedExpression): BoxedExpression | undefined;
+  get(key: string | Expression): Expression | undefined;
 
   /**
    * If this is an indexed collection, return the index of the first element
@@ -1785,14 +1785,14 @@ export interface Expression {
    *
    */
   indexWhere(
-    predicate: (element: BoxedExpression) => boolean
+    predicate: (element: Expression) => boolean
   ): number | undefined;
 }
 
 //
 // ── Role Interfaces ─────────────────────────────────────────────────────
 //
-// These interfaces narrow `BoxedExpression` to expression-kind-specific
+// These interfaces narrow `Expression` to expression-kind-specific
 // members.  Use the corresponding type guard (`isNumber`, etc.) to
 // narrow an expression, then access these members without `undefined`.
 //
@@ -1829,11 +1829,11 @@ export interface SymbolInterface {
  */
 export interface FunctionInterface {
   readonly isFunctionExpression: true;
-  readonly ops: ReadonlyArray<BoxedExpression>;
+  readonly ops: ReadonlyArray<Expression>;
   readonly nops: number;
-  readonly op1: BoxedExpression;
-  readonly op2: BoxedExpression;
-  readonly op3: BoxedExpression;
+  readonly op1: Expression;
+  readonly op2: Expression;
+  readonly op3: Expression;
 }
 
 /**
@@ -1869,9 +1869,9 @@ export interface TensorInterface {
  */
 export interface CollectionInterface {
   readonly isCollection: true;
-  each(): Generator<BoxedExpression>;
-  contains(rhs: BoxedExpression): boolean | undefined;
-  subsetOf(other: BoxedExpression, strict: boolean): boolean | undefined;
+  each(): Generator<Expression>;
+  contains(rhs: Expression): boolean | undefined;
+  subsetOf(other: Expression, strict: boolean): boolean | undefined;
   readonly count: number | undefined;
   readonly isFiniteCollection: boolean | undefined;
   readonly isEmptyCollection: boolean | undefined;
@@ -1887,9 +1887,9 @@ export interface CollectionInterface {
  */
 export interface IndexedCollectionInterface extends CollectionInterface {
   readonly isIndexedCollection: true;
-  at(index: number): BoxedExpression | undefined;
+  at(index: number): Expression | undefined;
   indexWhere(
-    predicate: (element: BoxedExpression) => boolean
+    predicate: (element: Expression) => boolean
   ): number | undefined;
 }
 
@@ -1918,11 +1918,11 @@ export type ExpressionInput =
  * Use `isDictionary()` to check if an expression is a dictionary.
  */
 export interface DictionaryInterface {
-  get(key: string): BoxedExpression | undefined;
+  get(key: string): Expression | undefined;
   has(key: string): boolean;
   get keys(): string[];
-  get entries(): [string, BoxedExpression][];
-  get values(): BoxedExpression[];
+  get entries(): [string, Expression][];
+  get values(): Expression[];
 }
 
 /**
@@ -1936,8 +1936,8 @@ export interface DictionaryInterface {
  *
  */
 export interface EqHandlers {
-  eq: (a: BoxedExpression, b: BoxedExpression) => boolean | undefined;
-  neq: (a: BoxedExpression, b: BoxedExpression) => boolean | undefined;
+  eq: (a: Expression, b: Expression) => boolean | undefined;
+  neq: (a: Expression, b: Expression) => boolean | undefined;
 }
 
 /** @deprecated Use `Expression` instead. */

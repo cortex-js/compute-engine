@@ -1,7 +1,7 @@
 import { flatten } from './flatten';
 import { isImaginaryUnit, isOperatorDef } from './utils';
 import type {
-  BoxedExpression,
+  Expression,
   IComputeEngine as ComputeEngine,
 } from '../global-types';
 import {
@@ -12,9 +12,9 @@ import {
 } from './type-guards';
 
 export function canonicalInvisibleOperator(
-  ops: ReadonlyArray<BoxedExpression>,
+  ops: ReadonlyArray<Expression>,
   { engine: ce }: { engine: ComputeEngine }
-): BoxedExpression | null {
+): Expression | null {
   if (ops.length === 0) return null;
 
   const lhs = ops[0];
@@ -181,9 +181,9 @@ export function canonicalInvisibleOperator(
 }
 
 function flattenInvisibleOperator(
-  ops: ReadonlyArray<BoxedExpression>
-): BoxedExpression[] {
-  const ys: BoxedExpression[] = [];
+  ops: ReadonlyArray<Expression>
+): Expression[] {
+  const ys: Expression[] = [];
   for (const x of ops) {
     if (x.operator === 'InvisibleOperator' && isFunction(x))
       ys.push(...flattenInvisibleOperator(x.ops));
@@ -192,7 +192,7 @@ function flattenInvisibleOperator(
   return ys;
 }
 
-function asInteger(expr: BoxedExpression): number {
+function asInteger(expr: Expression): number {
   if (isNumber(expr)) {
     const n = expr.re;
     if (Number.isInteger(n)) return n;

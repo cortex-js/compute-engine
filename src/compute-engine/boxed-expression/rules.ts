@@ -1,4 +1,4 @@
-import type { MathJsonExpression as Expression } from '../../math-json/types';
+import type { MathJsonExpression } from '../../math-json/types';
 
 import { _BoxedExpression } from './abstract-boxed-expression';
 import type {
@@ -12,7 +12,7 @@ import type {
   RuleReplaceFunction,
   RuleStep,
   RuleSteps,
-  BoxedExpression,
+  Expression,
   ReplaceOptions,
   ExpressionInput,
 } from '../global-types';
@@ -166,77 +166,77 @@ export const ConditionParent = {
 };
 
 export const CONDITIONS = {
-  boolean: (x: BoxedExpression) => x.type.matches('boolean'),
-  string: (x: BoxedExpression) => isString(x),
-  number: (x: BoxedExpression) => isNumber(x),
-  symbol: (x: BoxedExpression) => isSymbol(x),
-  expression: (_x: BoxedExpression) => true,
+  boolean: (x: Expression) => x.type.matches('boolean'),
+  string: (x: Expression) => isString(x),
+  number: (x: Expression) => isNumber(x),
+  symbol: (x: Expression) => isSymbol(x),
+  expression: (_x: Expression) => true,
 
-  numeric: (x: BoxedExpression) => {
+  numeric: (x: Expression) => {
     const [_c, term] = x.toNumericValue();
     return term.is(1);
   },
-  integer: (x: BoxedExpression) => x.isInteger,
-  rational: (x: BoxedExpression) => x.isRational,
-  irrational: (x: BoxedExpression) => x.isRational === false,
-  real: (x: BoxedExpression) => x.isReal,
-  notreal: (x: BoxedExpression) => !x.isReal,
+  integer: (x: Expression) => x.isInteger,
+  rational: (x: Expression) => x.isRational,
+  irrational: (x: Expression) => x.isRational === false,
+  real: (x: Expression) => x.isReal,
+  notreal: (x: Expression) => !x.isReal,
 
   // number with a non-zero imaginary part:
-  complex: (x: BoxedExpression) => x.type.matches('complex'),
+  complex: (x: Expression) => x.type.matches('complex'),
   // number with a zero real part and non-zero imaginary part:
-  imaginary: (x: BoxedExpression) => x.type.matches('imaginary'),
+  imaginary: (x: Expression) => x.type.matches('imaginary'),
 
-  positive: (x: BoxedExpression) => x.isPositive,
-  negative: (x: BoxedExpression) => x.isNegative,
-  nonnegative: (x: BoxedExpression) => x.isNonNegative,
-  nonpositive: (x: BoxedExpression) => x.isNonPositive,
+  positive: (x: Expression) => x.isPositive,
+  negative: (x: Expression) => x.isNegative,
+  nonnegative: (x: Expression) => x.isNonNegative,
+  nonpositive: (x: Expression) => x.isNonPositive,
 
-  even: (x: BoxedExpression) => x.isEven,
-  odd: (x: BoxedExpression) => x.isOdd,
+  even: (x: Expression) => x.isEven,
+  odd: (x: Expression) => x.isOdd,
 
-  prime: (x: BoxedExpression) => isPrime(x) === true,
-  composite: (x: BoxedExpression) => isPrime(x) === false,
+  prime: (x: Expression) => isPrime(x) === true,
+  composite: (x: Expression) => isPrime(x) === false,
 
-  notzero: (x: BoxedExpression) => x.is(0) === false,
-  notone: (x: BoxedExpression) => x.is(1) === false,
+  notzero: (x: Expression) => x.is(0) === false,
+  notone: (x: Expression) => x.is(1) === false,
 
-  finite: (x: BoxedExpression) => x.isFinite,
-  infinite: (x: BoxedExpression) => x.isFinite === false,
+  finite: (x: Expression) => x.isFinite,
+  infinite: (x: Expression) => x.isFinite === false,
 
-  constant: (x: BoxedExpression) => x.valueDefinition?.isConstant ?? false,
-  variable: (x: BoxedExpression) => !(x.valueDefinition?.isConstant ?? true),
-  function: (x: BoxedExpression) => x.operatorDefinition !== undefined,
+  constant: (x: Expression) => x.valueDefinition?.isConstant ?? false,
+  variable: (x: Expression) => !(x.valueDefinition?.isConstant ?? true),
+  function: (x: Expression) => x.operatorDefinition !== undefined,
 
-  relation: (x: BoxedExpression) => isRelationalOperator(x.operator),
-  equation: (x: BoxedExpression) => x.operator === 'Equal',
-  inequality: (x: BoxedExpression) => isInequalityOperator(x.operator),
+  relation: (x: Expression) => isRelationalOperator(x.operator),
+  equation: (x: Expression) => x.operator === 'Equal',
+  inequality: (x: Expression) => isInequalityOperator(x.operator),
 
-  collection: (x: BoxedExpression) => x.isCollection,
-  list: (x: BoxedExpression) => x.operator === 'List',
-  set: (x: BoxedExpression) => x.operator === 'Set',
-  tuple: (x: BoxedExpression) =>
+  collection: (x: Expression) => x.isCollection,
+  list: (x: Expression) => x.operator === 'List',
+  set: (x: Expression) => x.operator === 'Set',
+  tuple: (x: Expression) =>
     x.operator === 'Tuple' ||
     x.operator === 'Single' ||
     x.operator === 'Pair' ||
     x.operator === 'Triple',
-  single: (x: BoxedExpression) => x.operator === 'Single',
-  pair: (x: BoxedExpression) => x.operator === 'Pair',
-  triple: (x: BoxedExpression) => x.operator === 'Triple',
+  single: (x: Expression) => x.operator === 'Single',
+  pair: (x: Expression) => x.operator === 'Pair',
+  triple: (x: Expression) => x.operator === 'Triple',
 
-  scalar: (x: BoxedExpression) => x.rank === 0,
-  tensor: (x: BoxedExpression) => x.rank > 0,
-  vector: (x: BoxedExpression) => x.rank === 1,
-  matrix: (x: BoxedExpression) => x.rank === 2,
+  scalar: (x: Expression) => x.rank === 0,
+  tensor: (x: Expression) => x.rank > 0,
+  vector: (x: Expression) => x.rank === 1,
+  matrix: (x: Expression) => x.rank === 2,
 
-  unit: (x: BoxedExpression) => x.operator === 'Unit',
-  dimension: (x: BoxedExpression) => x.operator === 'Dimension',
-  angle: (x: BoxedExpression) => x.operator === 'Angle',
-  polynomial: (x: BoxedExpression) => x.unknowns.length === 1,
+  unit: (x: Expression) => x.operator === 'Unit',
+  dimension: (x: Expression) => x.operator === 'Dimension',
+  angle: (x: Expression) => x.operator === 'Angle',
+  polynomial: (x: Expression) => x.unknowns.length === 1,
 };
 
 export function checkConditions(
-  x: BoxedExpression,
+  x: Expression,
   conditions: string[]
 ): boolean {
   // Check for !== true, because result could also be undefined
@@ -355,7 +355,7 @@ function parseRulePart(
   ce: ComputeEngine,
   rule?: string | ExpressionInput | RuleReplaceFunction | RuleFunction,
   options?: { canonical?: boolean; autoWildcard?: boolean }
-): BoxedExpression | undefined {
+): Expression | undefined {
   if (rule === undefined || typeof rule === 'function') return undefined;
   if (typeof rule === 'string') {
     let expr = ce.parse(rule, {
@@ -462,7 +462,7 @@ function parseRule(
         // Check if we have a condition part after a semicolon
         // i.e. "a + b -> c; a > 0"
         //
-        let conditionPredicate: Expression | null = null;
+        let conditionPredicate: MathJsonExpression | null = null;
         if (parser.match(';')) {
           // Condition is either a predicate, or a sequence of wildcards + ":" + modifiers
           // Try the sequence of wildcards first
@@ -491,7 +491,7 @@ function parseRule(
         // Check if we have some accumulated conditions from inline modifiers
         // i.e. a:positive or a_{positive}
         //
-        const conditions: Expression[] = [];
+        const conditions: MathJsonExpression[] = [];
         for (const id in wildcardConditions) {
           const xs = wildcardConditions[id].split(',');
           if (xs.length === 0) continue;
@@ -500,7 +500,7 @@ function parseRule(
           } else conditions.push(['Condition', wildcards[id], ['And', ...xs]]);
         }
 
-        let conditionExpression: Expression | undefined = undefined;
+        let conditionExpression: MathJsonExpression | undefined = undefined;
         if (conditionPredicate && conditions.length > 0) {
           conditionExpression = ['And', conditionPredicate, ...conditions];
         } else if (conditionPredicate) conditionExpression = conditionPredicate;
@@ -758,7 +758,7 @@ export function boxRules(
  */
 export function applyRule(
   rule: Readonly<BoxedRule>,
-  expr: BoxedExpression,
+  expr: Expression,
   substitution: BoxedSubstitution,
   options?: Readonly<Partial<ReplaceOptions>>
 ): RuleStep | null {
@@ -878,7 +878,7 @@ export function applyRule(
 
   if (!isExpression(result)) {
     throw new Error(
-      'Invalid rule replacement result: expected a BoxedExpression or RuleStep'
+      'Invalid rule replacement result: expected a Expression or RuleStep'
     );
   }
 
@@ -896,7 +896,7 @@ export function applyRule(
  *
  */
 export function replace(
-  expr: BoxedExpression,
+  expr: Expression,
   rules: Rule | (Rule | BoxedRule)[] | BoxedRuleSet,
   options?: Partial<ReplaceOptions>
 ): RuleSteps {
@@ -955,12 +955,12 @@ export function replace(
  * @param rules
  */
 export function matchAnyRules(
-  expr: BoxedExpression,
+  expr: Expression,
   rules: BoxedRuleSet,
   sub: BoxedSubstitution,
   options?: Partial<ReplaceOptions>
-): BoxedExpression[] {
-  const results: BoxedExpression[] = [];
+): Expression[] {
+  const results: Expression[] = [];
   for (const rule of rules.rules) {
     const r = applyRule(rule, expr, sub, options);
 
@@ -975,7 +975,7 @@ export function matchAnyRules(
 /**
  * Replace all occurrences of a wildcard in an expression with a the corresponding non-wildcard, e.g. `_x` -> `x`
  */
-function dewildcard(expr: BoxedExpression): BoxedExpression {
+function dewildcard(expr: Expression): Expression {
   if (isSymbol(expr)) {
     if (expr.symbol.startsWith('_'))
       return expr.engine.symbol(expr.symbol.slice(1));
@@ -987,7 +987,7 @@ function dewildcard(expr: BoxedExpression): BoxedExpression {
   return expr;
 }
 
-function getWildcards(expr: BoxedExpression): string[] {
+function getWildcards(expr: Expression): string[] {
   const wildcards: string[] = [];
   if (isSymbol(expr) && expr.symbol.startsWith('_'))
     wildcards.push(expr.symbol);
@@ -997,7 +997,7 @@ function getWildcards(expr: BoxedExpression): string[] {
 }
 
 /** Return true if all the wildcards of a are included in b */
-function includesWildcards(a: BoxedExpression, b: BoxedExpression): boolean {
+function includesWildcards(a: Expression, b: Expression): boolean {
   const awc = getWildcards(a);
   const bwc = getWildcards(b);
   return awc.every((x) => bwc.includes(x));
@@ -1018,6 +1018,6 @@ function isBoxedRule(x: unknown): x is BoxedRule {
   return isRecord(x) && x._tag === 'boxed-rule';
 }
 
-function isExpression(value: unknown): value is BoxedExpression {
+function isExpression(value: unknown): value is Expression {
   return value instanceof _BoxedExpression;
 }

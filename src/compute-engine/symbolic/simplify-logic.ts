@@ -1,4 +1,4 @@
-import type { BoxedExpression } from '../global-types';
+import type { Expression } from '../global-types';
 import { isFunction } from '../boxed-expression/type-guards';
 import {
   evaluateAnd,
@@ -12,8 +12,8 @@ import {
 } from './logic-utils';
 
 export function simplifyLogicFunction(
-  x: BoxedExpression
-): { value: BoxedExpression; because: string } | undefined {
+  x: Expression
+): { value: Expression; because: string } | undefined {
   const fn = {
     And: evaluateAnd,
     Or: evaluateOr,

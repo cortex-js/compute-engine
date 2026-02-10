@@ -1,6 +1,6 @@
 import { apply } from '../function-utils';
 import { mul } from '../boxed-expression/arithmetic-mul-div';
-import type { BoxedExpression } from '../global-types';
+import type { Expression } from '../global-types';
 import { add } from '../boxed-expression/arithmetic-add';
 import {
   isNumber,
@@ -37,7 +37,7 @@ const MAX_DIFFERENTIATION_DEPTH = 100;
  *
  * The arithmetic operations (add, mul, etc.) already produce canonical forms.
  */
-function simplifyDerivative(expr: BoxedExpression): BoxedExpression {
+function simplifyDerivative(expr: Expression): Expression {
   return expr;
 }
 
@@ -169,9 +169,9 @@ const DERIVATIVES_TABLE = {
  * respect to the variables in `degrees`.
  */
 export function derivative(
-  fn: BoxedExpression,
+  fn: Expression,
   order: number
-): BoxedExpression | undefined {
+): Expression | undefined {
   if (order === 0) return fn;
   const ce = fn.engine;
   let v = '_';
@@ -184,7 +184,7 @@ export function derivative(
     v = sym(fn.ops[1]) ?? '_';
     fn = fn.ops[0];
   }
-  let result: BoxedExpression | undefined = fn;
+  let result: Expression | undefined = fn;
   while (order-- > 0 && result) result = differentiate(result, v);
   return result;
 }
@@ -213,10 +213,10 @@ export function derivative(
  * @returns The derivative expression, or `undefined` if unable to differentiate
  */
 export function differentiate(
-  expr: BoxedExpression,
+  expr: Expression,
   v: string,
   depth: number = 0
-): BoxedExpression | undefined {
+): Expression | undefined {
   // Guard against runaway recursion
   if (depth > MAX_DIFFERENTIATION_DEPTH) {
     console.assert(
@@ -237,7 +237,7 @@ export function differentiate(
   }
   if (!expr.operator || !isFunction(expr)) return undefined;
 
-  // From here on, expr is narrowed to BoxedExpression & FunctionInterface
+  // From here on, expr is narrowed to Expression & FunctionInterface
   if (expr.operator === 'Negate') {
     const gPrime = differentiate(expr.op1, v, depth + 1);
     if (gPrime) return gPrime.neg();
@@ -261,7 +261,7 @@ export function differentiate(
   if (expr.operator === 'Add') {
     const terms = expr.ops.map((op) => differentiate(op, v, depth + 1));
     if (terms.some((term) => term === undefined)) return undefined;
-    return simplifyDerivative(add(...(terms as BoxedExpression[])));
+    return simplifyDerivative(add(...(terms as Expression[])));
   }
 
   // Product rule
@@ -275,7 +275,7 @@ export function differentiate(
       return gPrime.mul(otherProduct);
     });
     if (terms.some((term) => term === undefined)) return undefined;
-    return simplifyDerivative(add(...(terms as BoxedExpression[])));
+    return simplifyDerivative(add(...(terms as Expression[])));
   }
 
   // Root rule: Root(base, n) = base^(1/n)
@@ -426,7 +426,7 @@ export function differentiate(
     const nMinus1 = order.sub(ce.One);
     const nPlus1 = order.add(ce.One);
 
-    let derivative: BoxedExpression;
+    let derivative: Expression;
     if (op === 'BesselJ' || op === 'BesselY') {
       // d/dx J_n(x) = (J_{n-1}(x) - J_{n+1}(x))/2
       // d/dx Y_n(x) = (Y_{n-1}(x) - Y_{n+1}(x))/2

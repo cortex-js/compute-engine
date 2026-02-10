@@ -10,7 +10,7 @@ import type {
   ValueDefinition,
   OperatorDefinition,
   AssignValue,
-  BoxedExpression,
+  Expression,
   BoxedDefinition,
   SymbolDefinition,
   IComputeEngine,
@@ -94,7 +94,7 @@ export function declareSymbolOperator(
 export function getSymbolValue(
   ce: IComputeEngine,
   id: MathJsonSymbol
-): BoxedExpression | undefined {
+): Expression | undefined {
   // Iterate over all the frames, starting with the most recent
   // and going back to the root frame
   const l = ce._evalContextStack.length - 1;
@@ -109,7 +109,7 @@ export function getSymbolValue(
 export function setSymbolValue(
   ce: IComputeEngine,
   id: MathJsonSymbol,
-  value: BoxedExpression | boolean | number | undefined
+  value: Expression | boolean | number | undefined
 ): void {
   // Iterate over all the frames, starting with the most recent
   // and going back to the root frame
@@ -142,7 +142,7 @@ export function setSymbolValue(
 export function setCurrentContextValue(
   ce: IComputeEngine,
   id: MathJsonSymbol,
-  value: BoxedExpression | boolean | number | undefined
+  value: Expression | boolean | number | undefined
 ): void {
   const l = ce._evalContextStack.length - 1;
   if (l < 0) throw new Error(`No evaluation context`);
@@ -359,7 +359,7 @@ export function assignFn(
 function assignValueAsValue(
   ce: IComputeEngine,
   value: AssignValue
-): BoxedExpression | undefined {
+): Expression | undefined {
   if (value === undefined || value === null) return undefined;
   if (typeof value === 'function') return undefined;
 

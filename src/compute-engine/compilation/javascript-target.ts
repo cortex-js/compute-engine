@@ -1,4 +1,4 @@
-import type { BoxedExpression } from '../global-types';
+import type { Expression } from '../global-types';
 import type { MathJsonSymbol } from '../../math-json/types';
 import {
   isSymbol,
@@ -56,7 +56,7 @@ const JAVASCRIPT_OPERATORS: CompiledOperators = {
 /**
  * JavaScript function implementations
  */
-const JAVASCRIPT_FUNCTIONS: CompiledFunctions<BoxedExpression> = {
+const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Abs: 'Math.abs',
   Add: (args, compile) => {
     if (args.length === 1) return compile(args[0]);
@@ -376,18 +376,18 @@ export class ComputeEngineFunctionLiteral extends Function {
 /**
  * JavaScript language target implementation
  */
-export class JavaScriptTarget implements LanguageTarget<BoxedExpression> {
+export class JavaScriptTarget implements LanguageTarget<Expression> {
   getOperators(): CompiledOperators {
     return JAVASCRIPT_OPERATORS;
   }
 
-  getFunctions(): CompiledFunctions<BoxedExpression> {
+  getFunctions(): CompiledFunctions<Expression> {
     return JAVASCRIPT_FUNCTIONS;
   }
 
   createTarget(
-    options: Partial<CompileTarget<BoxedExpression>> = {}
-  ): CompileTarget<BoxedExpression> {
+    options: Partial<CompileTarget<Expression>> = {}
+  ): CompileTarget<Expression> {
     return {
       language: 'javascript',
       operators: (op) => JAVASCRIPT_OPERATORS[op],
@@ -416,8 +416,8 @@ export class JavaScriptTarget implements LanguageTarget<BoxedExpression> {
   }
 
   compile(
-    expr: BoxedExpression,
-    options: CompilationOptions<BoxedExpression> = {}
+    expr: Expression,
+    options: CompilationOptions<Expression> = {}
   ): CompilationResult {
     const { operators, functions, vars, imports = [], preamble } = options;
     const unknowns = expr.unknowns;
@@ -496,8 +496,8 @@ export class JavaScriptTarget implements LanguageTarget<BoxedExpression> {
  * Compile expression to JavaScript executable
  */
 function compileToTarget(
-  expr: BoxedExpression,
-  target: CompileTarget<BoxedExpression>
+  expr: Expression,
+  target: CompileTarget<Expression>
 ): CompilationResult {
   if (expr.operator === 'Function' && isFunction(expr)) {
     const args = expr.ops;
@@ -546,7 +546,7 @@ function compileToTarget(
 function compileIntegrate(
   args,
   _,
-  target: CompileTarget<BoxedExpression>
+  target: CompileTarget<Expression>
 ): string {
   const { index, lower, upper } = normalizeIndexingSet(args[1]);
   const f = BaseCompiler.compile(args[0], {

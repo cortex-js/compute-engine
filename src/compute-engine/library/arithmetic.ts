@@ -80,7 +80,7 @@ import { numericTypeHandler } from './type-handlers';
 import { range, rangeLast } from './collections';
 import { run, runAsync } from '../../common/interruptible';
 import type {
-  BoxedExpression,
+  Expression,
   IComputeEngine as ComputeEngine,
   SymbolDefinitions,
   Sign,
@@ -165,7 +165,7 @@ function oppositeSgn(x: Sign | undefined): Sign | undefined {
 }
 
 /** Determines sgn of ln(x) */
-function lnSign(x: BoxedExpression): Sign | undefined {
+function lnSign(x: Expression): Sign | undefined {
   if (x.isGreater(1)) return 'positive';
   if (x.isGreaterEqual(1)) return 'non-negative';
   if (x.isLessEqual(1) && x.isGreaterEqual(0)) return 'non-positive';
@@ -1794,7 +1794,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           reduceBigOp(
             ops[0],
             ops.slice(1),
-            (acc: BoxedExpression, x) => acc.mul(x.evaluate(options)),
+            (acc: Expression, x) => acc.mul(x.evaluate(options)),
             ce.One
           ),
           ce._timeRemaining
@@ -1813,7 +1813,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           reduceBigOp(
             ops[0],
             ops.slice(1),
-            (acc: BoxedExpression, x) => acc.mul(x.evaluate(options)),
+            (acc: Expression, x) => acc.mul(x.evaluate(options)),
             ce.One
           ),
           ce._timeRemaining,
@@ -1845,7 +1845,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           reduceBigOp(
             body,
             indexes,
-            (acc: BoxedExpression, x) => acc.add(x.evaluate()),
+            (acc: Expression, x) => acc.add(x.evaluate()),
             engine.Zero
           ),
           engine._timeRemaining
@@ -1864,7 +1864,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           reduceBigOp(
             xs[0],
             xs.slice(1),
-            (acc: BoxedExpression, x) => acc.add(x.evaluate()),
+            (acc: Expression, x) => acc.add(x.evaluate()),
             engine.Zero
           ),
           engine._timeRemaining,
@@ -1880,7 +1880,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
   },
 ];
 
-function evaluateAbs(arg: BoxedExpression): BoxedExpression | undefined {
+function evaluateAbs(arg: Expression): Expression | undefined {
   const ce = arg.engine;
   if (isNumber(arg)) {
     const num = arg.numericValue;
@@ -1893,9 +1893,9 @@ function evaluateAbs(arg: BoxedExpression): BoxedExpression | undefined {
 }
 
 function processMinMaxItem(
-  item: BoxedExpression,
+  item: Expression,
   mode: 'Min' | 'Max' | 'Supremum' | 'Infimum'
-): [BoxedExpression | undefined, ReadonlyArray<BoxedExpression>] {
+): [Expression | undefined, ReadonlyArray<Expression>] {
   const ce = item.engine;
   const upper = mode === 'Max' || mode === 'Supremum';
 
@@ -1926,8 +1926,8 @@ function processMinMaxItem(
   }
 
   if (item.isCollection) {
-    let result: BoxedExpression | undefined = undefined;
-    const rest: BoxedExpression[] = [];
+    let result: Expression | undefined = undefined;
+    const rest: Expression[] = [];
     for (const op of item.each()) {
       const [val, others] = processMinMaxItem(op, mode);
       if (val) {
@@ -1951,9 +1951,9 @@ function processMinMaxItem(
 
 function evaluateMinMax(
   ce: ComputeEngine,
-  ops: ReadonlyArray<BoxedExpression>,
+  ops: ReadonlyArray<Expression>,
   mode: 'Min' | 'Max' | 'Supremum' | 'Infimum'
-): BoxedExpression {
+): Expression {
   const upper = mode === 'Max' || mode === 'Supremum';
 
   ops = flatten(ops);
@@ -1961,8 +1961,8 @@ function evaluateMinMax(
   if (ops.length === 0)
     return upper ? ce.NegativeInfinity : ce.PositiveInfinity;
 
-  let result: BoxedExpression | undefined = undefined;
-  const rest: BoxedExpression[] = [];
+  let result: Expression | undefined = undefined;
+  const rest: Expression[] = [];
 
   for (const op of ops) {
     const [val, others] = processMinMaxItem(op, mode);
@@ -1982,14 +1982,14 @@ function evaluateMinMax(
 }
 
 function evaluateGcdLcm(
-  ops: ReadonlyArray<BoxedExpression>,
+  ops: ReadonlyArray<Expression>,
   mode: 'LCM' | 'GCD'
-): BoxedExpression {
+): Expression {
   const ce = ops[0].engine;
   const fn = mode === 'LCM' ? lcm : gcd;
   const bigFn = mode === 'LCM' ? bigLcm : bigGcd;
 
-  const rest: BoxedExpression[] = [];
+  const rest: Expression[] = [];
   if (bignumPreferred(ce)) {
     let result: Decimal | null = null;
     for (const op of ops) {

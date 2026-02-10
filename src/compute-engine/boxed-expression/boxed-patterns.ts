@@ -54,7 +54,7 @@
  * @module boxed-patterns
  */
 
-import type { BoxedExpression } from '../global-types';
+import type { Expression } from '../global-types';
 
 import { isWildcard, wildcardName, wildcardType } from './pattern-utils';
 import { isFunction } from './type-guards';
@@ -78,7 +78,7 @@ export { isWildcard, wildcardName, wildcardType };
  * @param pattern - The pattern to validate
  * @throws Error if the pattern contains invalid wildcard combinations
  */
-export function validatePattern(pattern: BoxedExpression): void {
+export function validatePattern(pattern: Expression): void {
   if (!isFunction(pattern)) return;
 
   for (let i = 0; i < pattern.ops.length - 1; i++) {

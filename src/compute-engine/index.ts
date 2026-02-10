@@ -27,7 +27,7 @@ import type {
   AngularUnit,
   AssignValue,
   AssumeResult,
-  BoxedExpression,
+  Expression,
   BoxedRule,
   BoxedRuleSet,
   BoxedSubstitution,
@@ -251,23 +251,23 @@ import { fu as _fu } from './symbolic/fu';
  */
 export class ComputeEngine implements IComputeEngine {
   // Common symbols
-  readonly True: BoxedExpression;
-  readonly False: BoxedExpression;
-  readonly Pi: BoxedExpression;
-  readonly E: BoxedExpression;
-  readonly Nothing: BoxedExpression;
+  readonly True: Expression;
+  readonly False: Expression;
+  readonly Pi: Expression;
+  readonly E: Expression;
+  readonly Nothing: Expression;
 
   // Common numbers
-  readonly Zero: BoxedExpression;
-  readonly One: BoxedExpression;
-  readonly Half: BoxedExpression;
-  readonly NegativeOne: BoxedExpression;
-  readonly Two: BoxedExpression;
-  readonly I: BoxedExpression;
-  readonly NaN: BoxedExpression;
-  readonly PositiveInfinity: BoxedExpression;
-  readonly NegativeInfinity: BoxedExpression;
-  readonly ComplexInfinity: BoxedExpression;
+  readonly Zero: Expression;
+  readonly One: Expression;
+  readonly Half: Expression;
+  readonly NegativeOne: Expression;
+  readonly Two: Expression;
+  readonly I: Expression;
+  readonly NaN: Expression;
+  readonly PositiveInfinity: Expression;
+  readonly NegativeInfinity: Expression;
+  readonly ComplexInfinity: Expression;
 
   /** The symbol separating the whole part of a number from its fractional
    *  part in a LaTeX string.
@@ -294,7 +294,7 @@ export class ComputeEngine implements IComputeEngine {
   private _configurationLifecycle = new EngineConfigurationLifecycle();
 
   /** @internal */
-  private _cost?: (expr: BoxedExpression) => number;
+  private _cost?: (expr: Expression) => number;
 
   /** @internal Backing state for simplificationRules */
   private _simplificationRules = new SimplificationRuleStore([
@@ -670,7 +670,7 @@ export class ComputeEngine implements IComputeEngine {
    */
   registerCompilationTarget(
     name: string,
-    target: LanguageTarget<BoxedExpression>
+    target: LanguageTarget<Expression>
   ): void {
     this._compilationTargets.register(name, target);
   }
@@ -683,7 +683,7 @@ export class ComputeEngine implements IComputeEngine {
    */
   getCompilationTarget(
     name: string
-  ): LanguageTarget<BoxedExpression> | undefined {
+  ): LanguageTarget<Expression> | undefined {
     return this._compilationTargets.get(name);
   }
 
@@ -712,7 +712,7 @@ export class ComputeEngine implements IComputeEngine {
 
   /** @internal Compile a boxed expression. */
   _compile(
-    expr: BoxedExpression,
+    expr: Expression,
     options?: Parameters<typeof _compile>[1]
   ): ReturnType<typeof _compile> {
     return _compile(expr, options);
@@ -1130,11 +1130,11 @@ export class ComputeEngine implements IComputeEngine {
   /**
    * The cost function is used to determine the "cost" of an expression. For example, when simplifying an expression, the simplification that results in the lowest cost is chosen.
    */
-  get costFunction(): (expr: BoxedExpression) => number {
+  get costFunction(): (expr: Expression) => number {
     return this._cost ?? DEFAULT_COST_FUNCTION;
   }
 
-  set costFunction(fn: ((expr: BoxedExpression) => number) | undefined) {
+  set costFunction(fn: ((expr: Expression) => number) | undefined) {
     if (typeof fn !== 'function') this._cost = DEFAULT_COST_FUNCTION;
     this._cost = fn;
   }
@@ -1244,7 +1244,7 @@ export class ComputeEngine implements IComputeEngine {
   /**
    * Use `ce.box(name)` instead
    * @internal */
-  _getSymbolValue(id: MathJsonSymbol): BoxedExpression | undefined {
+  _getSymbolValue(id: MathJsonSymbol): Expression | undefined {
     return getSymbolValueImpl(this, id);
   }
 
@@ -1254,7 +1254,7 @@ export class ComputeEngine implements IComputeEngine {
    */
   _setSymbolValue(
     id: MathJsonSymbol,
-    value: BoxedExpression | boolean | number | undefined
+    value: Expression | boolean | number | undefined
   ): void {
     setSymbolValueImpl(this, id, value);
   }
@@ -1267,7 +1267,7 @@ export class ComputeEngine implements IComputeEngine {
    */
   _setCurrentContextValue(
     id: MathJsonSymbol,
-    value: BoxedExpression | boolean | number | undefined
+    value: Expression | boolean | number | undefined
   ): void {
     setCurrentContextValueImpl(this, id, value);
   }
@@ -1376,7 +1376,7 @@ export class ComputeEngine implements IComputeEngine {
    */
   getSequenceCache(
     name: string
-  ): Map<number | string, BoxedExpression> | undefined {
+  ): Map<number | string, Expression> | undefined {
     return getSequenceCacheImpl(this, name);
   }
 
@@ -1401,7 +1401,7 @@ export class ComputeEngine implements IComputeEngine {
     start: number,
     end: number,
     step?: number
-  ): BoxedExpression[] | undefined {
+  ): Expression[] | undefined {
     return getSequenceTermsImpl(this, name, start, end, step);
   }
 
@@ -1419,7 +1419,7 @@ export class ComputeEngine implements IComputeEngine {
    * ```
    */
   lookupOEIS(
-    terms: (number | BoxedExpression)[],
+    terms: (number | Expression)[],
     options?: OEISOptions
   ): Promise<OEISSequenceInfo[]> {
     return lookupOEISImpl(this, terms, options);
@@ -1508,7 +1508,7 @@ export class ComputeEngine implements IComputeEngine {
 
   // assert(
   //   condition: boolean,
-  //   expr: BoxedExpression,
+  //   expr: Expression,
   //   msg: string,
   //   code?: SignalMessage
   // ) {
@@ -1533,20 +1533,20 @@ export class ComputeEngine implements IComputeEngine {
       form?: FormOption;
       scope?: Scope | undefined;
     }
-  ): BoxedExpression {
+  ): Expression {
     const { canonical, structural } = formToInternal(options?.form);
     return box(this, expr, { canonical, structural, scope: options?.scope });
   }
 
   function(
     name: string,
-    ops: ReadonlyArray<BoxedExpression> | ReadonlyArray<MathJsonExpression>,
+    ops: ReadonlyArray<Expression> | ReadonlyArray<MathJsonExpression>,
     options?: {
       metadata?: Metadata;
       form?: FormOption;
       scope?: Scope | undefined;
     }
-  ): BoxedExpression {
+  ): Expression {
     const { canonical, structural } = formToInternal(options?.form);
     return boxFunction(this, name, ops, {
       metadata: options?.metadata,
@@ -1562,7 +1562,7 @@ export class ComputeEngine implements IComputeEngine {
    *
    * The result is canonical.
    */
-  error(message: string | string[], where?: string): BoxedExpression {
+  error(message: string | string[], where?: string): Expression {
     return createErrorExpression(this, message, where);
   }
 
@@ -1570,14 +1570,14 @@ export class ComputeEngine implements IComputeEngine {
     expected: Type,
     actual: undefined | Type | BoxedType,
     where?: string
-  ): BoxedExpression {
+  ): Expression {
     return createTypeErrorExpression(this, expected, actual, where);
   }
 
   /**
    * Add a `["Hold"]` wrapper to `expr`.
    */
-  hold(expr: ExpressionInput): BoxedExpression {
+  hold(expr: ExpressionInput): Expression {
     return this._fn('Hold', [this.box(expr, { form: 'raw' })]);
   }
 
@@ -1585,9 +1585,9 @@ export class ComputeEngine implements IComputeEngine {
    *
    * The result is canonical.
    */
-  tuple(...elements: ReadonlyArray<number>): BoxedExpression;
-  tuple(...elements: ReadonlyArray<BoxedExpression>): BoxedExpression;
-  tuple(...elements: ReadonlyArray<number | BoxedExpression>): BoxedExpression {
+  tuple(...elements: ReadonlyArray<number>): Expression;
+  tuple(...elements: ReadonlyArray<Expression>): Expression;
+  tuple(...elements: ReadonlyArray<number | Expression>): Expression {
     return new BoxedFunction(
       this,
       'Tuple',
@@ -1603,7 +1603,7 @@ export class ComputeEngine implements IComputeEngine {
     return new BoxedType(type, this._typeResolver);
   }
 
-  string(s: string, metadata?: Metadata): BoxedExpression {
+  string(s: string, metadata?: Metadata): Expression {
     return new BoxedString(this, s, metadata);
   }
 
@@ -1611,7 +1611,7 @@ export class ComputeEngine implements IComputeEngine {
   symbol(
     name: string,
     options?: { canonical?: CanonicalOptions; metadata?: Metadata }
-  ): BoxedExpression {
+  ): Expression {
     return createSymbolExpression(this, this._commonSymbols, name, options);
   }
 
@@ -1630,7 +1630,7 @@ export class ComputeEngine implements IComputeEngine {
       | Complex
       | Rational,
     options?: { metadata: Metadata; canonical: CanonicalOptions }
-  ): BoxedExpression {
+  ): Expression {
     return createNumberExpression(this, this._commonNumbers, value, options);
   }
 
@@ -1696,27 +1696,27 @@ export class ComputeEngine implements IComputeEngine {
    * @internal */
   _fn(
     name: MathJsonSymbol,
-    ops: ReadonlyArray<BoxedExpression>,
+    ops: ReadonlyArray<Expression>,
     options?: { metadata?: Metadata; canonical?: boolean; scope?: Scope }
-  ): BoxedExpression {
+  ): Expression {
     const canonical = options?.canonical ?? true;
 
     return new BoxedFunction(this, name, ops, { ...options, canonical });
   }
 
   /**
-   * Parse a string of LaTeX and return a corresponding `BoxedExpression`.
+   * Parse a string of LaTeX and return a corresponding `Expression`.
    *
    * If the `form` option is set to `'canonical'` (the default), the result
    * will be canonical.
    *
    */
   parse(latex: null, options?: ParseEntrypointOptions): null;
-  parse(latex: LatexString, options?: ParseEntrypointOptions): BoxedExpression;
+  parse(latex: LatexString, options?: ParseEntrypointOptions): Expression;
   parse(
     latex: LatexString | null,
     options?: ParseEntrypointOptions
-  ): BoxedExpression | null {
+  ): Expression | null {
     return parseLatexEntrypoint(this, latex, options);
   }
 
@@ -1729,7 +1729,7 @@ export class ComputeEngine implements IComputeEngine {
    *  //  -> [{'val': 0}]
    * ```
    */
-  ask(pattern: BoxedExpression): BoxedSubstitution[] {
+  ask(pattern: Expression): BoxedSubstitution[] {
     return askImpl(this, pattern);
   }
 
@@ -1738,7 +1738,7 @@ export class ComputeEngine implements IComputeEngine {
    *
    */
 
-  verify(query: BoxedExpression): boolean | undefined {
+  verify(query: Expression): boolean | undefined {
     return verifyImpl(this, query);
   }
 
@@ -1755,7 +1755,7 @@ export class ComputeEngine implements IComputeEngine {
    *
    *
    */
-  assume(predicate: BoxedExpression): AssumeResult {
+  assume(predicate: Expression): AssumeResult {
     return assumeFnImpl(this, predicate);
   }
 

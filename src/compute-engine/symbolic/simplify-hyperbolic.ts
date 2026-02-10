@@ -1,4 +1,4 @@
-import type { BoxedExpression, RuleStep } from '../global-types';
+import type { Expression, RuleStep } from '../global-types';
 import { isFunction } from '../boxed-expression/type-guards';
 
 /**
@@ -41,7 +41,7 @@ const INVERSE_HYPERBOLIC = new Set([
   'Arcsch',
 ]);
 
-export function simplifyHyperbolic(x: BoxedExpression): RuleStep | undefined {
+export function simplifyHyperbolic(x: Expression): RuleStep | undefined {
   const op = x.operator;
   const ce = x.engine;
 

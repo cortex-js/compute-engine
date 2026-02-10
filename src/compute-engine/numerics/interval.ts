@@ -1,5 +1,5 @@
 import type {
-  BoxedExpression,
+  Expression,
   FunctionInterface,
   NumberLiteralInterface,
   SymbolInterface,
@@ -14,27 +14,27 @@ export type Interval = {
 };
 
 function isNumber(
-  expr: BoxedExpression | null | undefined
-): expr is BoxedExpression & NumberLiteralInterface {
+  expr: Expression | null | undefined
+): expr is Expression & NumberLiteralInterface {
   return expr?._kind === 'number';
 }
 
 function isSymbol(
-  expr: BoxedExpression | null | undefined
-): expr is BoxedExpression & SymbolInterface {
+  expr: Expression | null | undefined
+): expr is Expression & SymbolInterface {
   return expr?._kind === 'symbol';
 }
 
 function isFunction(
-  expr: BoxedExpression | null | undefined
-): expr is BoxedExpression & FunctionInterface {
+  expr: Expression | null | undefined
+): expr is Expression & FunctionInterface {
   return expr?._kind === 'function' || expr?._kind === 'tensor';
 }
 
-export function interval(expr: BoxedExpression): Interval | undefined {
+export function interval(expr: Expression): Interval | undefined {
   if (expr.operator === 'Interval' && isFunction(expr)) {
-    let op1: BoxedExpression = expr.op1;
-    let op2: BoxedExpression = expr.op2;
+    let op1: Expression = expr.op1;
+    let op2: Expression = expr.op2;
     let openStart = false;
     let openEnd = false;
     if (op1.operator === 'Open' && isFunction(op1)) {

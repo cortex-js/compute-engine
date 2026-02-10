@@ -1,5 +1,5 @@
 import type {
-  BoxedExpression,
+  Expression,
   SymbolDefinitions,
   IComputeEngine as ComputeEngine,
 } from '../global-types';
@@ -89,7 +89,7 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     broadcastable: true,
     complexity: 10200,
     signature: '(boolean, boolean) -> boolean',
-    canonical: (args: BoxedExpression[], { engine: ce }) => {
+    canonical: (args: Expression[], { engine: ce }) => {
       const lhs = sym(args[0]);
       const rhs = sym(args[1]);
       if (
@@ -246,9 +246,9 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
  * - ∀x∈S. ∀y∈T. P(x,y) evaluates over the Cartesian product S × T
  */
 function evaluateForAll(
-  args: ReadonlyArray<BoxedExpression>,
+  args: ReadonlyArray<Expression>,
   { engine: ce }: { engine: ComputeEngine }
-): BoxedExpression | undefined {
+): Expression | undefined {
   if (args.length < 2) return undefined;
 
   const condition = args[0];
@@ -324,9 +324,9 @@ function evaluateForAll(
  * - ∃x∈S. ∃y∈T. P(x,y) evaluates over the Cartesian product S × T
  */
 function evaluateExists(
-  args: ReadonlyArray<BoxedExpression>,
+  args: ReadonlyArray<Expression>,
   { engine: ce }: { engine: ComputeEngine }
-): BoxedExpression | undefined {
+): Expression | undefined {
   if (args.length < 2) return undefined;
 
   const condition = args[0];
@@ -390,9 +390,9 @@ function evaluateExists(
  * ∃!x∈S. P(x) is true iff exactly one x in S satisfies P(x).
  */
 function evaluateExistsUnique(
-  args: ReadonlyArray<BoxedExpression>,
+  args: ReadonlyArray<Expression>,
   { engine: ce }: { engine: ComputeEngine }
-): BoxedExpression | undefined {
+): Expression | undefined {
   if (args.length < 2) return undefined;
 
   const condition = args[0];

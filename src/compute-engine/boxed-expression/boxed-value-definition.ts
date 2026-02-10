@@ -1,5 +1,5 @@
 import type {
-  BoxedExpression,
+  Expression,
   ExpressionInput,
   ValueDefinition,
   BoxedValueDefinition,
@@ -58,7 +58,7 @@ export class _BoxedValueDefinition
 
   // If `null`, the value needs to be recalculated from _defValue
   // If `undefined`, the value is not defined (for example, the symbol `True` does not have a value: the symbol itself *is* the value)
-  private _value: BoxedExpression | undefined | null;
+  private _value: Expression | undefined | null;
 
   // If `null`, the type is the type of the value
   // Note that `_type` may be different (wider) than the value's type
@@ -77,18 +77,18 @@ export class _BoxedValueDefinition
 
   // Those optional handlers are used to compare the symbol with other
   // symbols or values. This is useful for example with sets
-  eq?: (a: BoxedExpression) => boolean | undefined;
-  neq?: (a: BoxedExpression) => boolean | undefined;
-  cmp?: (a: BoxedExpression) => '=' | '>' | '<' | undefined;
+  eq?: (a: Expression) => boolean | undefined;
+  neq?: (a: Expression) => boolean | undefined;
+  cmp?: (a: Expression) => '=' | '>' | '<' | undefined;
 
   // This optional handler is used to do collection operations on the symbol
   collection?: CollectionHandlers;
 
   // This optional handler is used to evaluate subscripted expressions of this symbol
   subscriptEvaluate?: (
-    subscript: BoxedExpression,
+    subscript: Expression,
     options: { engine: ComputeEngine; numericApproximation?: boolean }
-  ) => BoxedExpression | undefined;
+  ) => Expression | undefined;
 
   constructor(ce: ComputeEngine, name: string, def: Partial<ValueDefinition>) {
     this._engine = ce;
@@ -192,7 +192,7 @@ export class _BoxedValueDefinition
     return this._isConstant;
   }
 
-  get value(): BoxedExpression | undefined {
+  get value(): Expression | undefined {
     if (this._value === null)
       this._value = dynamicValue(this._engine, this._defValue);
     return this._value;
@@ -245,7 +245,7 @@ function dynamicValue(
 
 function inferTypeFromValue(
   ce: ComputeEngine,
-  value: BoxedExpression | undefined
+  value: Expression | undefined
 ): BoxedType {
   if (!value) return ce.type('unknown');
 

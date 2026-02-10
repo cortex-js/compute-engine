@@ -1,6 +1,6 @@
 import type { NumericPrimitiveType, Type } from '../../common/type/types';
 import { BoxedType } from '../../common/type/boxed-type';
-import type { BoxedExpression } from '../global-types';
+import type { Expression } from '../global-types';
 import { SMALL_INTEGER } from '../numerics/numeric';
 import type { Rational } from '../numerics/types';
 
@@ -9,7 +9,7 @@ import { canonicalAngle, getImaginaryFactor } from './utils';
 import { apply, apply2 } from './apply';
 import { isNumber, isFunction, isSymbol } from './type-guards';
 
-function isSqrt(expr: BoxedExpression): boolean {
+function isSqrt(expr: Expression): boolean {
   if (!isFunction(expr)) return false;
   return (
     expr.operator === 'Sqrt' ||
@@ -23,7 +23,7 @@ function isSqrt(expr: BoxedExpression): boolean {
 // : sqrt(n/m), return n/m
 // : 1/sqrt(n), return 1/n
 // : (could do): sqrt(n)/m, return n/m^2
-export function asRadical(expr: BoxedExpression): Rational | null {
+export function asRadical(expr: Expression): Rational | null {
   if (isSqrt(expr) && isFunction(expr))
     return asRational(expr.op1) ?? null;
 
@@ -60,9 +60,9 @@ export function asRadical(expr: BoxedExpression): Rational | null {
  * @returns
  */
 export function canonicalPower(
-  a: BoxedExpression,
-  b: BoxedExpression
-): BoxedExpression {
+  a: Expression,
+  b: Expression
+): Expression {
   const ce = a.engine;
 
   const fullyCanonical =
@@ -342,9 +342,9 @@ export function canonicalPower(
 }
 
 export function canonicalRoot(
-  a: BoxedExpression,
-  b: BoxedExpression | number
-): BoxedExpression {
+  a: Expression,
+  b: Expression | number
+): Expression {
   const ce = a.engine;
   let exp: number | undefined = undefined;
   if (typeof b === 'number') exp = b;
@@ -383,10 +383,10 @@ export function canonicalRoot(
  *
  */
 export function pow(
-  x: BoxedExpression,
-  exp: number | BoxedExpression,
+  x: Expression,
+  exp: number | Expression,
   { numericApproximation }: { numericApproximation: boolean }
-): BoxedExpression {
+): Expression {
   if (
     !(x.isCanonical || x.isStructural) ||
     (typeof exp !== 'number' && !(exp.isCanonical || exp.isStructural))
@@ -576,10 +576,10 @@ export function pow(
 }
 
 export function root(
-  a: BoxedExpression,
-  b: BoxedExpression,
+  a: Expression,
+  b: Expression,
   { numericApproximation }: { numericApproximation: boolean }
-): BoxedExpression {
+): Expression {
   if (!(a.isCanonical || a.isStructural) || !(b.isCanonical || b.isStructural))
     return a.engine._fn('Root', [a, b], { canonical: false });
 

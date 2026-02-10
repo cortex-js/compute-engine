@@ -1,4 +1,4 @@
-import type { BoxedExpression, RuleStep } from '../global-types';
+import type { Expression, RuleStep } from '../global-types';
 import { isFunction, sym } from '../boxed-expression/type-guards';
 
 /**
@@ -15,7 +15,7 @@ import { isFunction, sym } from '../boxed-expression/type-guards';
  * IMPORTANT: Do not call .simplify() on results to avoid infinite recursion.
  */
 
-export function simplifyLog(x: BoxedExpression): RuleStep | undefined {
+export function simplifyLog(x: Expression): RuleStep | undefined {
   const op = x.operator;
   const ce = x.engine;
 
@@ -643,15 +643,15 @@ export function simplifyLog(x: BoxedExpression): RuleStep | undefined {
     // positive: true means ln(x), false means -ln(x) which represents subtraction
     const lnTerms: Array<{
       index: number;
-      arg: BoxedExpression;
+      arg: Expression;
       positive: boolean;
     }> = [];
     const logTerms: Map<
       string,
       Array<{
         index: number;
-        arg: BoxedExpression;
-        base: BoxedExpression;
+        arg: Expression;
+        base: Expression;
         positive: boolean;
       }>
     > = new Map();

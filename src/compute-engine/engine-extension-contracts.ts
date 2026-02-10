@@ -1,4 +1,4 @@
-import type { BoxedExpression, LibraryDefinition } from './global-types';
+import type { Expression, LibraryDefinition } from './global-types';
 import type {
   LanguageTarget,
   CompileTarget,
@@ -51,7 +51,7 @@ const REQUIRED_TARGET_METHODS = [
 
 export function assertCompilationTargetContract(
   target: unknown
-): asserts target is LanguageTarget<BoxedExpression> {
+): asserts target is LanguageTarget<Expression> {
   if (!isRecord(target))
     throw new Error(
       'Invalid compilation target: expected an object implementing LanguageTarget'
@@ -138,7 +138,7 @@ export function assertLibraryDefinitionContract(
 
 function assertCompileTargetContract(
   target: unknown
-): asserts target is CompileTarget<BoxedExpression> {
+): asserts target is CompileTarget<Expression> {
   if (!isRecord(target))
     throw new Error('Invalid compile target: expected an object');
 
@@ -253,7 +253,7 @@ function assertCompilationOptionsImports(value: unknown): void {
 
 export function assertCompilationOptionsContract(
   options: unknown
-): asserts options is CompilationOptions<BoxedExpression> & {
+): asserts options is CompilationOptions<Expression> & {
   fallback?: boolean;
 } {
   if (options === undefined) return;

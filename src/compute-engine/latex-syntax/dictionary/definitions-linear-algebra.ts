@@ -1,4 +1,4 @@
-import type { MathJsonExpression as Expression } from '../../../math-json';
+import type { MathJsonExpression } from '../../../math-json';
 import {
   stringValue,
   operands,
@@ -15,7 +15,7 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
   // The third, optional, argument is the column specification.
   {
     name: 'Matrix',
-    serialize: (serializer: Serializer, expr: Expression): string => {
+    serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
       const rows = operands(operand(expr, 1));
 
       return serializeTabular(
@@ -30,7 +30,7 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
   // Vector is a specialized collection to represent a column vector.
   {
     name: 'Vector',
-    serialize: (serializer: Serializer, expr: Expression): string => {
+    serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
       const columns = operands(expr);
 
       // Flip the columns into rows
@@ -51,11 +51,11 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
       const [operator, cells] = parseCells(parser);
 
       if (columns)
-        return [operator, cells, { str: '()' }, { str: columns }] as Expression;
+        return [operator, cells, { str: '()' }, { str: columns }] as MathJsonExpression;
 
       // `pmatrix` is the default environment, so no need to specify the
       // delimiters
-      return [operator, cells] as Expression;
+      return [operator, cells] as MathJsonExpression;
     },
   },
 
@@ -67,9 +67,9 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
       const [operator, cells] = parseCells(parser);
 
       if (columns)
-        return [operator, cells, { str: '[]' }, { str: columns }] as Expression;
+        return [operator, cells, { str: '[]' }, { str: columns }] as MathJsonExpression;
 
-      return [operator, cells, { str: '[]' }] as Expression;
+      return [operator, cells, { str: '[]' }] as MathJsonExpression;
     },
   },
 
@@ -81,9 +81,9 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
       const [operator, cells] = parseCells(parser);
 
       if (columns)
-        return [operator, cells, { str: '{}' }, { str: columns }] as Expression;
+        return [operator, cells, { str: '{}' }, { str: columns }] as MathJsonExpression;
 
-      return [operator, cells, { str: '{}' }] as Expression;
+      return [operator, cells, { str: '{}' }] as MathJsonExpression;
     },
   },
 
@@ -95,9 +95,9 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
       const [op, cells] = parseCells(parser);
 
       if (columns)
-        return ['Determinant', [op, cells, { str: columns }]] as Expression;
+        return ['Determinant', [op, cells, { str: columns }]] as MathJsonExpression;
 
-      return ['Determinant', [op, cells]] as Expression;
+      return ['Determinant', [op, cells]] as MathJsonExpression;
     },
   },
 
@@ -108,9 +108,9 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
       const columns = parseColumnFormat(parser);
       const [op, cells] = parseCells(parser);
 
-      if (columns) return ['Norm', [op, cells, { str: columns }]] as Expression;
+      if (columns) return ['Norm', [op, cells, { str: columns }]] as MathJsonExpression;
 
-      return ['Norm', [op, cells]] as Expression;
+      return ['Norm', [op, cells]] as MathJsonExpression;
     },
   },
 
@@ -122,9 +122,9 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
       const [operator, cells] = parseCells(parser);
 
       if (columns)
-        return [operator, cells, { str: '()' }, { str: columns }] as Expression;
+        return [operator, cells, { str: '()' }, { str: columns }] as MathJsonExpression;
 
-      return [operator, cells] as Expression;
+      return [operator, cells] as MathJsonExpression;
     },
   },
 
@@ -136,9 +136,9 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
       const [operator, cells] = parseCells(parser);
 
       if (columns)
-        return [operator, cells, { str: '..' }, { str: columns }] as Expression;
+        return [operator, cells, { str: '..' }, { str: columns }] as MathJsonExpression;
 
-      return [operator, cells, { str: '..' }] as Expression;
+      return [operator, cells, { str: '..' }] as MathJsonExpression;
     },
   },
 
@@ -150,9 +150,9 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
       const [operator, cells] = parseCells(parser);
 
       if (columns)
-        return [operator, cells, { str: '..' }, { str: columns }] as Expression;
+        return [operator, cells, { str: '..' }, { str: columns }] as MathJsonExpression;
 
-      return [operator, cells, { str: '..' }] as Expression;
+      return [operator, cells, { str: '..' }] as MathJsonExpression;
     },
   },
   {
@@ -163,9 +163,9 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
       const [operator, cells] = parseCells(parser);
 
       if (columns)
-        return [operator, cells, { str: '..' }, { str: columns }] as Expression;
+        return [operator, cells, { str: '..' }, { str: columns }] as MathJsonExpression;
 
-      return [operator, cells, { str: '..' }] as Expression;
+      return [operator, cells, { str: '..' }] as MathJsonExpression;
     },
   },
 
@@ -184,7 +184,7 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
   {
     kind: 'postfix',
     latexTrigger: ['^', '\\dagger'],
-    parse: (_parser: Parser, lhs): Expression => {
+    parse: (_parser: Parser, lhs): MathJsonExpression => {
       return ['ConjugateTranspose', lhs];
     },
   },
@@ -192,7 +192,7 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
   {
     kind: 'postfix',
     latexTrigger: ['^', '\\ast'],
-    parse: (_parser: Parser, lhs): Expression => {
+    parse: (_parser: Parser, lhs): MathJsonExpression => {
       return ['ConjugateTranspose', lhs];
     },
   },
@@ -200,7 +200,7 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
   {
     kind: 'postfix',
     latexTrigger: ['^', '\\top'],
-    parse: (parser: Parser, lhs: Expression): Expression => {
+    parse: (parser: Parser, lhs: MathJsonExpression): MathJsonExpression => {
       return ['Transpose', lhs];
     },
   },
@@ -208,7 +208,7 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
   {
     kind: 'postfix',
     latexTrigger: ['^', '\\intercal'],
-    parse: (parser: Parser, lhs: Expression): Expression => {
+    parse: (parser: Parser, lhs: MathJsonExpression): MathJsonExpression => {
       return ['Transpose', lhs];
     },
   },
@@ -227,7 +227,7 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
 
   {
     name: 'Inverse',
-    serialize: (serializer: Serializer, expr: Expression): string =>
+    serialize: (serializer: Serializer, expr: MathJsonExpression): string =>
       serializer.serialize(operand(expr, 1)) + '^{-1}',
   },
 
@@ -236,7 +236,7 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
     kind: 'function',
     latexTrigger: '\\tr',
     arguments: 'implicit',
-    serialize: (serializer: Serializer, expr: Expression): string =>
+    serialize: (serializer: Serializer, expr: MathJsonExpression): string =>
       serializeImplicitOperator(serializer, expr, '\\tr'),
   },
 
@@ -253,7 +253,7 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
     kind: 'function',
     latexTrigger: '\\ker',
     arguments: 'implicit',
-    serialize: (serializer: Serializer, expr: Expression): string =>
+    serialize: (serializer: Serializer, expr: MathJsonExpression): string =>
       serializeImplicitOperator(serializer, expr, '\\ker'),
   },
   {
@@ -268,7 +268,7 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
     kind: 'function',
     latexTrigger: '\\dim',
     arguments: 'implicit',
-    serialize: (serializer: Serializer, expr: Expression): string =>
+    serialize: (serializer: Serializer, expr: MathJsonExpression): string =>
       serializeImplicitOperator(serializer, expr, '\\dim'),
   },
   {
@@ -283,7 +283,7 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
     kind: 'function',
     latexTrigger: '\\deg',
     arguments: 'implicit',
-    serialize: (serializer: Serializer, expr: Expression): string =>
+    serialize: (serializer: Serializer, expr: MathJsonExpression): string =>
       serializeImplicitOperator(serializer, expr, '\\deg'),
   },
   {
@@ -298,7 +298,7 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
     kind: 'function',
     latexTrigger: '\\hom',
     arguments: 'implicit',
-    serialize: (serializer: Serializer, expr: Expression): string =>
+    serialize: (serializer: Serializer, expr: MathJsonExpression): string =>
       serializeImplicitOperator(serializer, expr, '\\hom'),
   },
   {
@@ -313,7 +313,7 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
     kind: 'function',
     latexTrigger: '\\det',
     arguments: 'implicit',
-    serialize: (serializer: Serializer, expr: Expression): string => {
+    serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
       const arg = operand(expr, 1);
       if (operator(arg) === 'Matrix') {
         // Serialize as vmatrix environment
@@ -340,7 +340,7 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
   // MatrixMultiply serializes as multiplication with \cdot
   {
     name: 'MatrixMultiply',
-    serialize: (serializer: Serializer, expr: Expression): string => {
+    serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
       const lhs = serializer.serialize(operand(expr, 1));
       const rhs = serializer.serialize(operand(expr, 2));
       return `${lhs} \\cdot ${rhs}`;
@@ -350,16 +350,16 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
 
 function parseCells(
   parser: Parser
-): [operator: string, cells: Expression | null] {
-  const tabular: Expression[][] | null = parser.parseTabular();
+): [operator: string, cells: MathJsonExpression | null] {
+  const tabular: MathJsonExpression[][] | null = parser.parseTabular();
   // @todo tensor: check if it's a vector, Victor.
   if (!tabular) return ['', null];
   return [
     'Matrix',
     [
       'List',
-      ...tabular.map((row) => ['List', ...row] as Expression),
-    ] as Expression,
+      ...tabular.map((row) => ['List', ...row] as MathJsonExpression),
+    ] as MathJsonExpression,
   ];
 }
 
@@ -380,7 +380,7 @@ function parseColumnFormat(parser: Parser, optional = true): string {
 
 function serializeImplicitOperator(
   serializer: Serializer,
-  expr: Expression,
+  expr: MathJsonExpression,
   command: string
 ): string {
   const args = operands(expr);
@@ -395,7 +395,7 @@ function serializeImplicitOperator(
 
 function serializeTabular(
   serializer: Serializer,
-  rows: ReadonlyArray<Expression>,
+  rows: ReadonlyArray<MathJsonExpression>,
   delims: string | undefined | null,
   colSpec: string | undefined | null
 ): string {

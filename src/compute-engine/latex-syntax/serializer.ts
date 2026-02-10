@@ -1,4 +1,4 @@
-import type { MathJsonExpression as Expression } from '../../math-json/types';
+import type { MathJsonExpression } from '../../math-json/types';
 import {
   nops,
   stringValue,
@@ -84,7 +84,7 @@ export class Serializer {
    * of precedence less than or equal to prec, wrap it in some parens.
    * @todo: don't wrap Abs, Floor, Ceil, Delimiter
    */
-  wrap(expr: Expression | null | undefined, prec?: number): string {
+  wrap(expr: MathJsonExpression | null | undefined, prec?: number): string {
     if (expr === null || expr === undefined) return '';
     if (prec === undefined) {
       return this.wrapString(
@@ -126,7 +126,7 @@ export class Serializer {
    * This is called by the serializer for power and division (i.e. "(a+1)/b")
    *
    */
-  wrapShort(expr: Expression | null | undefined): string {
+  wrapShort(expr: MathJsonExpression | null | undefined): string {
     if (expr === null || expr === undefined) return '';
     const exprStr = this.serialize(expr);
 
@@ -184,7 +184,7 @@ export class Serializer {
     return openFence + s + closeFence;
   }
 
-  wrapArguments(expr: Expression): string {
+  wrapArguments(expr: MathJsonExpression): string {
     return this.wrapString(
       operands(expr)
         .map((x) => this.serialize(x))
@@ -194,7 +194,7 @@ export class Serializer {
   }
 
   serializeSymbol(
-    expr: Expression,
+    expr: MathJsonExpression,
     def?: IndexedLatexDictionaryEntry
   ): LatexString {
     console.assert(typeof expr === 'string' || isSymbolObject(expr));
@@ -208,7 +208,7 @@ export class Serializer {
   }
 
   serializeFunction(
-    expr: Expression,
+    expr: MathJsonExpression,
     def?: IndexedLatexDictionaryEntry
   ): LatexString {
     //
@@ -223,7 +223,7 @@ export class Serializer {
     return serializeSymbol(h, 'auto') + this.wrapArguments(expr);
   }
 
-  serialize(expr: Expression | null | undefined): LatexString {
+  serialize(expr: MathJsonExpression | null | undefined): LatexString {
     if (expr === null || expr === undefined) return '';
 
     this.level += 1;
@@ -282,23 +282,23 @@ export class Serializer {
     this.level -= 1;
     return '';
   }
-  applyFunctionStyle(expr: Expression, level: number): DelimiterScale {
+  applyFunctionStyle(expr: MathJsonExpression, level: number): DelimiterScale {
     return this.options.applyFunctionStyle(expr, level);
   }
 
-  groupStyle(expr: Expression, level: number): DelimiterScale {
+  groupStyle(expr: MathJsonExpression, level: number): DelimiterScale {
     return this.options.groupStyle(expr, level);
   }
 
   rootStyle(
-    expr: Expression,
+    expr: MathJsonExpression,
     level: number
   ): 'radical' | 'quotient' | 'solidus' {
     return this.options.rootStyle(expr, level);
   }
 
   fractionStyle(
-    expr: Expression,
+    expr: MathJsonExpression,
     level: number
   ):
     | 'quotient'
@@ -312,18 +312,18 @@ export class Serializer {
   }
 
   logicStyle(
-    expr: Expression,
+    expr: MathJsonExpression,
     level: number
   ): 'word' | 'boolean' | 'uppercase-word' | 'punctuation' {
     return this.options.logicStyle(expr, level);
   }
 
-  powerStyle(expr: Expression, level: number): 'root' | 'solidus' | 'quotient' {
+  powerStyle(expr: MathJsonExpression, level: number): 'root' | 'solidus' | 'quotient' {
     return this.options.powerStyle(expr, level);
   }
 
   numericSetStyle(
-    expr: Expression,
+    expr: MathJsonExpression,
     level: number
   ): 'compact' | 'regular' | 'interval' | 'set-builder' {
     return this.options.numericSetStyle(expr, level);
@@ -595,7 +595,7 @@ function serializeSymbol(
 }
 
 export function serializeLatex(
-  expr: Expression | null,
+  expr: MathJsonExpression | null,
   dict: IndexedLatexDictionary,
   options: Readonly<SerializeLatexOptions>
 ): string {

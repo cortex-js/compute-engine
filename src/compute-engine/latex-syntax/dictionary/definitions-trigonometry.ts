@@ -1,4 +1,4 @@
-import { MathJsonExpression as Expression } from '../../../math-json/types';
+import { MathJsonExpression } from '../../../math-json/types';
 import {
   ExpressionParseHandler,
   LatexDictionary,
@@ -14,7 +14,7 @@ import {
  *
  */
 function parseTrig(op: string): ExpressionParseHandler {
-  return (parser: Parser, until?: Terminator): Expression | null => {
+  return (parser: Parser, until?: Terminator): MathJsonExpression | null => {
     // Note: names as per NIST-DLMF
     const trigCommands = {
       '\\arcsin': 'Arcsin',
@@ -73,12 +73,12 @@ function parseTrig(op: string): ExpressionParseHandler {
       '\\tanh': 'Tanh',
       '\\th': 'Tanh', // Non-standard
     };
-    const operator: Expression = trigCommands[op ?? ''] ?? op ?? '';
+    const operator: MathJsonExpression = trigCommands[op ?? ''] ?? op ?? '';
 
     if (parser.atTerminator(until)) return operator;
 
     // Check for \sin' x, \sin^{-1} x, etc.
-    let fn: Expression | null = operator;
+    let fn: MathJsonExpression | null = operator;
     do {
       const pf = parser.parsePostfixOperator(fn, until);
       if (pf === null) break;
@@ -88,7 +88,7 @@ function parseTrig(op: string): ExpressionParseHandler {
     parser.skipSpace();
 
     // Check for \sin^2 x
-    let sup: Expression | null = null;
+    let sup: MathJsonExpression | null = null;
     if (parser.match('^')) sup = parser.parseGroup() ?? parser.parseToken();
 
     parser.skipSpace();
@@ -102,7 +102,7 @@ function parseTrig(op: string): ExpressionParseHandler {
         trigCommands[parser.peek] || (until?.condition?.(parser) ?? false),
     });
 
-    const appliedFn: Expression =
+    const appliedFn: MathJsonExpression =
       args === null
         ? fn
         : typeof fn === 'string'

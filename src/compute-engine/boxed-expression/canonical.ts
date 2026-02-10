@@ -1,4 +1,4 @@
-import type { BoxedExpression, CanonicalOptions, Scope } from '../global-types';
+import type { Expression, CanonicalOptions, Scope } from '../global-types';
 
 import { canonicalInvisibleOperator } from './invisible-operator';
 
@@ -12,10 +12,10 @@ import { isOperatorDef, isImaginaryUnit } from './utils';
 import { isFunction, isNumber, isSymbol } from './type-guards';
 
 export function canonicalForm(
-  expr: BoxedExpression,
+  expr: Expression,
   forms: CanonicalOptions,
   scope?: Scope
-): BoxedExpression {
+): Expression {
   // No canonical form?
   if (forms === false) return expr;
 
@@ -91,7 +91,7 @@ export function canonicalForm(
  *
  * This function is recursive.
  */
-function flattenForm(expr: BoxedExpression) {
+function flattenForm(expr: Expression) {
   if (!expr.operator) return expr;
 
   if (!isFunction(expr) || expr.nops === 0) return expr;
@@ -119,7 +119,7 @@ function flattenForm(expr: BoxedExpression) {
   return expr;
 }
 
-function invisibleOperatorForm(expr: BoxedExpression) {
+function invisibleOperatorForm(expr: Expression) {
   if (!isFunction(expr)) return expr;
 
   if (expr.operator === 'InvisibleOperator') {
@@ -165,7 +165,7 @@ function invisibleOperatorForm(expr: BoxedExpression) {
  * -->
  *
  */
-function numberForm(expr: BoxedExpression): BoxedExpression {
+function numberForm(expr: Expression): Expression {
   //(↓note: this is redundant, since numbers are _always_ boxed as canonical (v27.0), but preserving
   //for explicitness in case things change)
   if (isNumber(expr)) return expr.canonical;
@@ -261,7 +261,7 @@ function numberForm(expr: BoxedExpression): BoxedExpression {
  * `.canonical` on them, consistent with `addForm` and `powerForm`.
  * `canonicalMultiply` documents that "The input ops may not be canonical."
  */
-function multiplyForm(expr: BoxedExpression) {
+function multiplyForm(expr: Expression) {
   // Recursively visit all sub-expressions
   if (!isFunction(expr)) return expr;
   const ops = expr.ops.map(multiplyForm);
@@ -275,7 +275,7 @@ function multiplyForm(expr: BoxedExpression) {
   return expr;
 }
 
-function addForm(expr: BoxedExpression) {
+function addForm(expr: Expression) {
   // Recursively visit all sub-expressions
   if (!isFunction(expr)) return expr;
   const ops = expr.ops.map(addForm);
@@ -297,7 +297,7 @@ function addForm(expr: BoxedExpression) {
  * passing them to `canonicalDivide`, since division canonicalization benefits
  * from normalized power expressions.
  */
-function powerForm(expr: BoxedExpression) {
+function powerForm(expr: Expression) {
   if (!isFunction(expr)) return expr;
 
   const ops = expr.ops.map((expr) => powerForm(expr));
@@ -314,7 +314,7 @@ function powerForm(expr: BoxedExpression) {
  * @param expr
  * @returns
  */
-function symbolForm(expr: BoxedExpression): BoxedExpression {
+function symbolForm(expr: Expression): Expression {
   if (isSymbol(expr)) return expr.canonical;
   if (!isFunction(expr)) return expr;
 
@@ -333,7 +333,7 @@ function symbolForm(expr: BoxedExpression): BoxedExpression {
  * This is the only form that internally applies another form (`Power`) to
  * its operands.
  */
-function divideForm(expr: BoxedExpression) {
+function divideForm(expr: Expression) {
   // If this is a divide, canonicalize it
   if (expr.operator === 'Divide' && isFunction(expr))
     return canonicalDivide(powerForm(expr.op1), powerForm(expr.op2));

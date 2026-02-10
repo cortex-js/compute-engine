@@ -1,4 +1,4 @@
-import type { BoxedExpression } from '../global-types';
+import type { Expression } from '../global-types';
 
 import type {
   CompileTarget,
@@ -38,7 +38,7 @@ const GLSL_OPERATORS: CompiledOperators = {
  * GLSL has built-in functions for common mathematical operations.
  * Note: No 'Math.' prefix like JavaScript
  */
-const GLSL_FUNCTIONS: CompiledFunctions<BoxedExpression> = {
+const GLSL_FUNCTIONS: CompiledFunctions<Expression> = {
   // Basic arithmetic (for when they're called as functions, e.g., with vectors)
   Add: (args, compile) => {
     if (args.length === 0) return '0.0';
@@ -222,18 +222,18 @@ const GLSL_FUNCTIONS: CompiledFunctions<BoxedExpression> = {
 /**
  * GLSL language target implementation
  */
-export class GLSLTarget implements LanguageTarget<BoxedExpression> {
+export class GLSLTarget implements LanguageTarget<Expression> {
   getOperators(): CompiledOperators {
     return GLSL_OPERATORS;
   }
 
-  getFunctions(): CompiledFunctions<BoxedExpression> {
+  getFunctions(): CompiledFunctions<Expression> {
     return GLSL_FUNCTIONS;
   }
 
   createTarget(
-    options: Partial<CompileTarget<BoxedExpression>> = {}
-  ): CompileTarget<BoxedExpression> {
+    options: Partial<CompileTarget<Expression>> = {}
+  ): CompileTarget<Expression> {
     return {
       language: 'glsl',
       operators: (op) => GLSL_OPERATORS[op],
@@ -272,8 +272,8 @@ export class GLSLTarget implements LanguageTarget<BoxedExpression> {
    * GLSL doesn't run in JavaScript, so this returns source code only.
    */
   compile(
-    expr: BoxedExpression,
-    options: CompilationOptions<BoxedExpression> = {}
+    expr: Expression,
+    options: CompilationOptions<Expression> = {}
   ): CompilationResult {
     const { functions, vars } = options;
 
@@ -316,8 +316,8 @@ export class GLSLTarget implements LanguageTarget<BoxedExpression> {
    * Returns the GLSL code as a string.
    */
   compileToSource(
-    expr: BoxedExpression,
-    _options: CompilationOptions<BoxedExpression> = {}
+    expr: Expression,
+    _options: CompilationOptions<Expression> = {}
   ): string {
     // Dynamic import to avoid circular dependency
     const { BaseCompiler } = require('./base-compiler');
@@ -334,7 +334,7 @@ export class GLSLTarget implements LanguageTarget<BoxedExpression> {
    * @param parameters - Parameter declarations (e.g., [['x', 'float'], ['y', 'vec3']])
    */
   compileFunction(
-    expr: BoxedExpression,
+    expr: Expression,
     functionName: string,
     returnType: string,
     parameters: Array<[name: string, type: string]>
@@ -371,7 +371,7 @@ export class GLSLTarget implements LanguageTarget<BoxedExpression> {
     /** Uniform variables */
     uniforms?: Array<{ name: string; type: string }>;
     /** Main function body expressions */
-    body: Array<{ variable: string; expression: BoxedExpression }>;
+    body: Array<{ variable: string; expression: Expression }>;
   }): string {
     const {
       type,

@@ -10,10 +10,10 @@ import {
   isEmptySequence,
   symbol,
 } from '../../../math-json/utils';
-import { MathJsonExpression as Expression, MathJsonSymbol } from '../../../math-json/types';
+import { MathJsonExpression, MathJsonSymbol } from '../../../math-json/types';
 import { joinLatex } from '../tokenizer';
 
-function parseSingleArg(cmd: string): (parser: Parser) => Expression {
+function parseSingleArg(cmd: string): (parser: Parser) => MathJsonExpression {
   return (parser) => {
     const arg = parser.parseGroup();
     return arg === null ? [cmd] : [cmd, arg];
@@ -41,7 +41,7 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
     parse: (_parser, lhs) => {
       // If lhs is not a symbol, ignore it, i.e. "5++"
       if (symbol(lhs) === null) return null;
-      return ['Increment', lhs] as Expression;
+      return ['Increment', lhs] as MathJsonExpression;
     },
   },
   {
@@ -52,7 +52,7 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
     parse: (_parser, lhs) => {
       // If lhs is not a symbol, ignore it, i.e. "5--"
       if (symbol(lhs) === null) return null;
-      return ['Decrement', lhs] as Expression;
+      return ['Decrement', lhs] as MathJsonExpression;
     },
   },
   {
@@ -60,7 +60,7 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
     latexTrigger: ['+', '+'],
     kind: 'prefix',
     precedence: 880,
-    parse: (parser, until): Expression | null => {
+    parse: (parser, until): MathJsonExpression | null => {
       const rhs = parser.parseExpression(until);
       if (symbol(rhs) === null) return null;
       return ['PreIncrement', rhs!];
@@ -71,7 +71,7 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
     latexTrigger: ['-', '-'],
     kind: 'prefix',
     precedence: 880,
-    parse: (parser, until): Expression | null => {
+    parse: (parser, until): MathJsonExpression | null => {
       const rhs = parser.parseExpression(until);
       if (symbol(rhs) === null) return null;
       return ['PreDecrement', rhs!];
@@ -106,8 +106,8 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
     kind: 'prefix',
     parse: (parser: Parser) => {
       let done = false;
-      let sup: Expression | null = 'Nothing';
-      let sub: Expression | null = 'Nothing';
+      let sup: MathJsonExpression | null = 'Nothing';
+      let sub: MathJsonExpression | null = 'Nothing';
       while (!done) {
         parser.skipSpace();
         if (parser.match('_')) {
@@ -127,9 +127,9 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
         const args = parser.parseArguments() ?? ['Nothing'];
         rhs = [rhs as MathJsonSymbol, ...args];
       }
-      return ['PartialDerivative', rhs, sub, sup] as Expression;
+      return ['PartialDerivative', rhs, sub, sup] as MathJsonExpression;
     },
-    serialize: (serializer: Serializer, expr: Expression): string => {
+    serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
       let result = '\\partial';
       const fn = operand(expr, 1);
       const vars = operand(expr, 2);
@@ -225,7 +225,7 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
 
   {
     latexTrigger: ['\\textcolor'],
-    parse: (parser: Parser): Expression => {
+    parse: (parser: Parser): MathJsonExpression => {
       const pos = parser.index;
       const color = parser.parseStringGroup();
       const body = parser.parseGroup();
@@ -362,39 +362,39 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
   },
   {
     latexTrigger: ['\\!'],
-    parse: () => ['HorizontalSpacing', -3] as Expression,
+    parse: () => ['HorizontalSpacing', -3] as MathJsonExpression,
   },
   {
     latexTrigger: ['\\ '],
-    parse: () => ['HorizontalSpacing', 6] as Expression,
+    parse: () => ['HorizontalSpacing', 6] as MathJsonExpression,
   },
   {
     latexTrigger: ['\\:'],
-    parse: () => ['HorizontalSpacing', 4] as Expression,
+    parse: () => ['HorizontalSpacing', 4] as MathJsonExpression,
   },
   {
     latexTrigger: ['\\enskip'],
-    parse: () => ['HorizontalSpacing', 9] as Expression,
+    parse: () => ['HorizontalSpacing', 9] as MathJsonExpression,
   },
   {
     latexTrigger: ['\\quad'],
-    parse: () => ['HorizontalSpacing', 18] as Expression,
+    parse: () => ['HorizontalSpacing', 18] as MathJsonExpression,
   },
   {
     latexTrigger: ['\\qquad'],
-    parse: () => ['HorizontalSpacing', 36] as Expression,
+    parse: () => ['HorizontalSpacing', 36] as MathJsonExpression,
   },
   {
     latexTrigger: ['\\,'],
-    parse: () => ['HorizontalSpacing', 3] as Expression,
+    parse: () => ['HorizontalSpacing', 3] as MathJsonExpression,
   },
   {
     latexTrigger: ['\\;'],
-    parse: () => ['HorizontalSpacing', 5] as Expression,
+    parse: () => ['HorizontalSpacing', 5] as MathJsonExpression,
   },
   {
     latexTrigger: ['\\enspace'],
-    parse: () => ['HorizontalSpacing', 9] as Expression,
+    parse: () => ['HorizontalSpacing', 9] as MathJsonExpression,
   },
   {
     latexTrigger: ['\\phantom'],

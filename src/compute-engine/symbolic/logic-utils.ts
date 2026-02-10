@@ -1,5 +1,5 @@
 import type {
-  BoxedExpression,
+  Expression,
   IComputeEngine as ComputeEngine,
 } from '../global-types';
 
@@ -15,19 +15,19 @@ import {
  */
 
 /** Helper to get `.op1` from a function expression, or undefined. */
-function fnOp1(expr: BoxedExpression): BoxedExpression | undefined {
+function fnOp1(expr: Expression): Expression | undefined {
   return isFunction(expr) ? expr.op1 : undefined;
 }
 
 /** Helper to get `.op2` from a function expression, or undefined. */
-function fnOp2(expr: BoxedExpression): BoxedExpression | undefined {
+function fnOp2(expr: Expression): Expression | undefined {
   return isFunction(expr) ? expr.op2 : undefined;
 }
 
 /** Helper to get `.ops` from a function expression, or undefined. */
 function fnOps(
-  expr: BoxedExpression
-): ReadonlyArray<BoxedExpression> | undefined {
+  expr: Expression
+): ReadonlyArray<Expression> | undefined {
   return isFunction(expr) ? expr.ops : undefined;
 }
 
@@ -35,7 +35,7 @@ function fnOps(
  * Check if an And expression is a contradiction (contains A and Not(A)).
  * Non-recursive to avoid infinite loops.
  */
-function isContradiction(args: ReadonlyArray<BoxedExpression>): boolean {
+function isContradiction(args: ReadonlyArray<Expression>): boolean {
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     for (let j = i + 1; j < args.length; j++) {
@@ -55,7 +55,7 @@ function isContradiction(args: ReadonlyArray<BoxedExpression>): boolean {
  * Check if an Or expression is a tautology (contains A and Not(A)).
  * Non-recursive to avoid infinite loops.
  */
-function isTautologyCheck(args: ReadonlyArray<BoxedExpression>): boolean {
+function isTautologyCheck(args: ReadonlyArray<Expression>): boolean {
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     for (let j = i + 1; j < args.length; j++) {
@@ -72,11 +72,11 @@ function isTautologyCheck(args: ReadonlyArray<BoxedExpression>): boolean {
 }
 
 export function evaluateAnd(
-  args: ReadonlyArray<BoxedExpression>,
+  args: ReadonlyArray<Expression>,
   { engine: ce }: { engine: ComputeEngine }
-): BoxedExpression | undefined {
+): Expression | undefined {
   if (args.length === 0) return ce.True;
-  const ops: BoxedExpression[] = [];
+  const ops: Expression[] = [];
   for (let arg of args) {
     // Check if an Or operand is a tautology (contains A and Not(A))
     // For example: Or(A, Not(A)) -> True, and And(..., True, ...) simplifies
@@ -122,8 +122,8 @@ export function evaluateAnd(
  * Apply absorption law for And: A ∧ (A ∨ B) → A
  * If any operand is an Or that contains another operand of the And, remove the Or.
  */
-function applyAbsorptionAnd(ops: BoxedExpression[]): BoxedExpression[] {
-  const result: BoxedExpression[] = [];
+function applyAbsorptionAnd(ops: Expression[]): Expression[] {
+  const result: Expression[] = [];
   for (const op of ops) {
     // Check if this Or can be absorbed by another operand
     const orOps = op.operator === 'Or' ? fnOps(op) : undefined;
@@ -149,11 +149,11 @@ function applyAbsorptionAnd(ops: BoxedExpression[]): BoxedExpression[] {
 }
 
 export function evaluateOr(
-  args: ReadonlyArray<BoxedExpression>,
+  args: ReadonlyArray<Expression>,
   { engine: ce }: { engine: ComputeEngine }
-): BoxedExpression | undefined {
+): Expression | undefined {
   if (args.length === 0) return ce.True;
-  const ops: BoxedExpression[] = [];
+  const ops: Expression[] = [];
   for (let arg of args) {
     // Check if an And operand is a contradiction (contains A and Not(A))
     // For example: And(A, Not(A)) -> False, and Or(..., False, ...) is removed
@@ -199,8 +199,8 @@ export function evaluateOr(
  * Apply absorption law for Or: A ∨ (A ∧ B) → A
  * If any operand is an And that contains another operand of the Or, remove the And.
  */
-function applyAbsorptionOr(ops: BoxedExpression[]): BoxedExpression[] {
-  const result: BoxedExpression[] = [];
+function applyAbsorptionOr(ops: Expression[]): Expression[] {
+  const result: Expression[] = [];
   for (const op of ops) {
     // Check if this And can be absorbed by another operand
     const andOps = op.operator === 'And' ? fnOps(op) : undefined;
@@ -226,9 +226,9 @@ function applyAbsorptionOr(ops: BoxedExpression[]): BoxedExpression[] {
 }
 
 export function evaluateNot(
-  args: ReadonlyArray<BoxedExpression>,
+  args: ReadonlyArray<Expression>,
   { engine: ce }: { engine: ComputeEngine }
-): BoxedExpression | undefined {
+): Expression | undefined {
   const op1 = sym(args[0]);
   if (op1 === 'True') return ce.False;
   if (op1 === 'False') return ce.True;
@@ -236,9 +236,9 @@ export function evaluateNot(
 }
 
 export function evaluateEquivalent(
-  args: ReadonlyArray<BoxedExpression>,
+  args: ReadonlyArray<Expression>,
   { engine: ce }: { engine: ComputeEngine }
-): BoxedExpression | undefined {
+): Expression | undefined {
   const lhs = sym(args[0]);
   const rhs = sym(args[1]);
   if (
@@ -255,9 +255,9 @@ export function evaluateEquivalent(
 }
 
 export function evaluateImplies(
-  args: ReadonlyArray<BoxedExpression>,
+  args: ReadonlyArray<Expression>,
   { engine: ce }: { engine: ComputeEngine }
-): BoxedExpression | undefined {
+): Expression | undefined {
   const lhs = sym(args[0]);
   const rhs = sym(args[1]);
   if (
@@ -271,15 +271,15 @@ export function evaluateImplies(
 }
 
 export function evaluateXor(
-  args: ReadonlyArray<BoxedExpression>,
+  args: ReadonlyArray<Expression>,
   { engine: ce }: { engine: ComputeEngine }
-): BoxedExpression | undefined {
+): Expression | undefined {
   // N-ary XOR is true when an odd number of operands are true
   // (equivalent to parity check)
   if (args.length === 0) return ce.False;
 
   let trueCount = 0;
-  const unknowns: BoxedExpression[] = [];
+  const unknowns: Expression[] = [];
 
   for (const arg of args) {
     if (sym(arg) === 'True') {
@@ -311,9 +311,9 @@ export function evaluateXor(
 }
 
 export function evaluateNand(
-  args: ReadonlyArray<BoxedExpression>,
+  args: ReadonlyArray<Expression>,
   { engine: ce }: { engine: ComputeEngine }
-): BoxedExpression | undefined {
+): Expression | undefined {
   // N-ary NAND is the negation of AND
   // NAND(a, b, c, ...) = NOT(AND(a, b, c, ...))
   if (args.length === 0) return ce.False; // NOT(True) = False
@@ -338,9 +338,9 @@ export function evaluateNand(
 }
 
 export function evaluateNor(
-  args: ReadonlyArray<BoxedExpression>,
+  args: ReadonlyArray<Expression>,
   { engine: ce }: { engine: ComputeEngine }
-): BoxedExpression | undefined {
+): Expression | undefined {
   // N-ary NOR is the negation of OR
   // NOR(a, b, c, ...) = NOT(OR(a, b, c, ...))
   if (args.length === 0) return ce.True; // NOT(False) = True
@@ -370,9 +370,9 @@ export function evaluateNor(
  * This is a prerequisite for CNF/DNF conversion.
  */
 export function toNNF(
-  expr: BoxedExpression,
+  expr: Expression,
   ce: ComputeEngine
-): BoxedExpression {
+): Expression {
   const op = expr.operator;
 
   // Base cases
@@ -536,9 +536,9 @@ export function toNNF(
  * (A ∧ B) ∨ C → (A ∨ C) ∧ (B ∨ C)
  */
 function distributeOrOverAnd(
-  expr: BoxedExpression,
+  expr: Expression,
   ce: ComputeEngine
-): BoxedExpression {
+): Expression {
   const op = expr.operator;
 
   if (op !== 'Or') {
@@ -552,7 +552,7 @@ function distributeOrOverAnd(
   }
 
   // Collect all operands, flattening nested Ors
-  const orOperands: BoxedExpression[] = [];
+  const orOperands: Expression[] = [];
   for (const operand of fnOps(expr)!) {
     if (operand.operator === 'Or') {
       orOperands.push(...fnOps(operand)!);
@@ -590,9 +590,9 @@ function distributeOrOverAnd(
  * Convert a boolean expression to Conjunctive Normal Form (CNF).
  */
 export function toCNF(
-  expr: BoxedExpression,
+  expr: Expression,
   ce: ComputeEngine
-): BoxedExpression {
+): Expression {
   // First convert to NNF
   const nnf = toNNF(expr, ce);
 
@@ -608,9 +608,9 @@ export function toCNF(
  * (A ∨ B) ∧ C → (A ∧ C) ∨ (B ∧ C)
  */
 function distributeAndOverOr(
-  expr: BoxedExpression,
+  expr: Expression,
   ce: ComputeEngine
-): BoxedExpression {
+): Expression {
   const op = expr.operator;
 
   if (op !== 'And') {
@@ -624,7 +624,7 @@ function distributeAndOverOr(
   }
 
   // Collect all operands, flattening nested Ands
-  const andOperands: BoxedExpression[] = [];
+  const andOperands: Expression[] = [];
   for (const operand of fnOps(expr)!) {
     if (operand.operator === 'And') {
       andOperands.push(...fnOps(operand)!);
@@ -664,9 +664,9 @@ function distributeAndOverOr(
  * Convert a boolean expression to Disjunctive Normal Form (DNF).
  */
 export function toDNF(
-  expr: BoxedExpression,
+  expr: Expression,
   ce: ComputeEngine
-): BoxedExpression {
+): Expression {
   // First convert to NNF
   const nnf = toNNF(expr, ce);
 
@@ -681,10 +681,10 @@ export function toDNF(
  * Extract all propositional variables from a boolean expression.
  * Returns a sorted array of unique variable names.
  */
-export function extractVariables(expr: BoxedExpression): string[] {
+export function extractVariables(expr: Expression): string[] {
   const variables = new Set<string>();
 
-  function visit(e: BoxedExpression) {
+  function visit(e: Expression) {
     // Skip True/False constants
     if (sym(e) === 'True' || sym(e) === 'False') return;
 
@@ -711,12 +711,12 @@ export function extractVariables(expr: BoxedExpression): string[] {
  * Returns True, False, or undefined if the expression cannot be evaluated.
  */
 export function evaluateWithAssignment(
-  expr: BoxedExpression,
+  expr: Expression,
   assignment: Record<string, boolean>,
   ce: ComputeEngine
-): BoxedExpression {
+): Expression {
   // Build substitution map
-  const subs: Record<string, BoxedExpression> = {};
+  const subs: Record<string, Expression> = {};
   for (const [variable, value] of Object.entries(assignment)) {
     subs[variable] = value ? ce.True : ce.False;
   }

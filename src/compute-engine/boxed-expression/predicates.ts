@@ -1,9 +1,9 @@
-import type { BoxedExpression } from '../global-types';
+import type { Expression } from '../global-types';
 import { asBigint, toInteger } from './numerics';
 import { isPrime as isPrimeMachine, isPrimeBigint } from '../numerics/primes';
 import { isNumber } from './type-guards';
 
-export function isPrime(expr: BoxedExpression): boolean | undefined {
+export function isPrime(expr: Expression): boolean | undefined {
   if (!expr.isInteger) return undefined;
   if (expr.isNegative) return undefined;
 

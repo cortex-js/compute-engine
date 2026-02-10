@@ -1,7 +1,7 @@
 import { isSubtype } from '../../common/type/subtype';
 
 import type {
-  BoxedExpression,
+  Expression,
   IComputeEngine as ComputeEngine,
 } from '../global-types';
 import { isNumber, isFunction, isSymbol } from './type-guards';
@@ -57,20 +57,20 @@ export class Product {
 
   // Other terms of the product, `term` is the key
   terms: {
-    term: BoxedExpression;
+    term: Expression;
     exponent: Rational;
   }[] = [];
 
   // If `false`, the running products are not calculated
   private _isCanonical = true;
 
-  static from(expr: BoxedExpression): Product {
+  static from(expr: Expression): Product {
     return new Product(expr.engine, [expr]);
   }
 
   constructor(
     ce: ComputeEngine,
-    xs?: ReadonlyArray<BoxedExpression>,
+    xs?: ReadonlyArray<Expression>,
     readonly options?: { canonical?: boolean }
   ) {
     options = options ? { ...options } : {};
@@ -89,7 +89,7 @@ export class Product {
    * If `this._isCanonical` a running product of exact terms is kept.
    * Otherwise, terms and their exponent are tallied.
    */
-  mul(term: BoxedExpression, exp?: Rational) {
+  mul(term: Expression, exp?: Rational) {
     console.assert(term.isCanonical || term.isStructural);
     if (this.coefficient.isNaN) return;
 
@@ -286,7 +286,7 @@ export class Product {
   }
 
   /** Divide the product by a term of coefficient */
-  div(term: NumericValue | BoxedExpression) {
+  div(term: NumericValue | Expression) {
     if (term instanceof NumericValue)
       this.coefficient = this.coefficient.div(term);
     else this.mul(term, [-1, 1]);
@@ -304,7 +304,7 @@ export class Product {
   groupedByDegrees(options?: { mode?: 'rational' | 'expression' | 'numeric' }):
     | {
         exponent: Rational;
-        terms: BoxedExpression[];
+        terms: Expression[];
       }[]
     | null {
     options ??= {};
@@ -334,7 +334,7 @@ export class Product {
       }
     }
 
-    const xs: { exponent: Rational; terms: BoxedExpression[] }[] = [];
+    const xs: { exponent: Rational; terms: Expression[] }[] = [];
     if (!this.coefficient.isOne) {
       if (mode === 'rational' && this.coefficient.type === 'finite_rational') {
         // Numerator
@@ -374,7 +374,7 @@ export class Product {
 
   asExpression(
     options: { numericApproximation: boolean } = { numericApproximation: false }
-  ): BoxedExpression {
+  ): Expression {
     const ce = this.engine;
 
     const coef = this.coefficient;
@@ -403,7 +403,7 @@ export class Product {
   }
 
   /** The product, expressed as a numerator and denominator */
-  asNumeratorDenominator(): [BoxedExpression, BoxedExpression] {
+  asNumeratorDenominator(): [Expression, Expression] {
     const ce = this.engine;
     const coef = this.coefficient;
     if (coef.isZero) return [ce.Zero, ce.One];
@@ -443,7 +443,7 @@ export class Product {
     ];
   }
 
-  asRationalExpression(): BoxedExpression {
+  asRationalExpression(): Expression {
     const [numerator, denominator] = this.asNumeratorDenominator();
     return canonicalDivide(numerator, denominator);
   }
@@ -452,7 +452,7 @@ export class Product {
 export function commonTerms(
   lhs: Product,
   rhs: Product
-): [NumericValue, BoxedExpression] {
+): [NumericValue, Expression] {
   const ce = lhs.engine;
 
   //
@@ -466,7 +466,7 @@ export function commonTerms(
   // Extract common terms between the two products
   //
 
-  const xs: BoxedExpression[] = [];
+  const xs: Expression[] = [];
 
   for (const x of lhs.terms) {
     // Find the term in the rhs product
@@ -488,8 +488,8 @@ export function commonTerms(
 
 function termsAsExpression(
   ce: ComputeEngine,
-  terms: { exponent: Rational; terms: ReadonlyArray<BoxedExpression> }[]
-): BoxedExpression {
+  terms: { exponent: Rational; terms: ReadonlyArray<Expression> }[]
+): Expression {
   let result = terms.map(({ terms, exponent }) => {
     const t = flatten(terms, 'Multiply');
     const base = t.length <= 1 ? t[0] : ce._fn('Multiply', [...t].sort(order));
@@ -517,9 +517,9 @@ function termsAsExpression(
  * - evaluate number literals
  */
 export function canonicalDivide(
-  op1: BoxedExpression,
-  op2: BoxedExpression
-): BoxedExpression {
+  op1: Expression,
+  op2: Expression
+): Expression {
   const ce = op1.engine;
   if (!op1.isValid || !op2.isValid) return ce._fn('Divide', [op1, op2]);
 
@@ -720,9 +720,9 @@ export function canonicalDivide(
 }
 
 export function div(
-  num: BoxedExpression,
-  denom: number | BoxedExpression
-): BoxedExpression {
+  num: Expression,
+  denom: number | Expression
+): Expression {
   const ce = num.engine;
 
   num = num.canonical;
@@ -828,13 +828,13 @@ export function div(
 
 export function canonicalMultiply(
   ce: ComputeEngine,
-  ops: ReadonlyArray<BoxedExpression>
-): BoxedExpression {
+  ops: ReadonlyArray<Expression>
+): Expression {
   //
   // Remove negations and negative numbers
   //
   let sign = 1;
-  let xs: BoxedExpression[] = [];
+  let xs: Expression[] = [];
   for (const op of ops) {
     const [o, s] = unnegate(op);
     sign *= s;
@@ -852,7 +852,7 @@ export function canonicalMultiply(
   //
   {
     const exactNumerics: NumericValue[] = [];
-    const nonNumeric: BoxedExpression[] = [];
+    const nonNumeric: Expression[] = [];
     for (const x of xs) {
       if (isNumber(x) && !x.isInfinity && !x.isNaN) {
         const nv = x.numericValue;
@@ -884,7 +884,7 @@ export function canonicalMultiply(
   // If an integer or a rational is followed by a sqrt or an imaginary unit
   // we promote it
   //
-  const ys: BoxedExpression[] = [];
+  const ys: Expression[] = [];
   for (let i = 0; i < xs.length; i++) {
     const x = xs[i];
     // Last item?
@@ -985,7 +985,7 @@ export function canonicalMultiply(
   return ce._fn('Multiply', [...ys].sort(order));
 }
 
-function unnegate(op: BoxedExpression): [BoxedExpression, sign: number] {
+function unnegate(op: Expression): [Expression, sign: number] {
   let sign = 1;
   while (isFunction(op) && op.operator === 'Negate') {
     sign = -sign;
@@ -1003,9 +1003,9 @@ function unnegate(op: BoxedExpression): [BoxedExpression, sign: number] {
 
 // Moved from expand.ts to break expand ↔ arithmetic-mul-div cycle
 function expandProduct(
-  lhs: Readonly<BoxedExpression>,
-  rhs: Readonly<BoxedExpression>
-): BoxedExpression {
+  lhs: Readonly<Expression>,
+  rhs: Readonly<Expression>
+): Expression {
   if (
     isFunction(lhs) &&
     lhs.operator === 'Negate' &&
@@ -1037,11 +1037,11 @@ function expandProduct(
     return expandProduct(lhs, rhs.op1).div(rhs.op2);
 
   if (isFunction(lhs) && lhs.operator === 'Add') {
-    const terms: BoxedExpression[] = lhs.ops.map((x) => expandProduct(x, rhs));
+    const terms: Expression[] = lhs.ops.map((x) => expandProduct(x, rhs));
     return add(...terms);
   }
   if (isFunction(rhs) && rhs.operator === 'Add') {
-    const terms: BoxedExpression[] = rhs.ops.map((x) => expandProduct(lhs, x));
+    const terms: Expression[] = rhs.ops.map((x) => expandProduct(lhs, x));
     return add(...terms);
   }
 
@@ -1050,8 +1050,8 @@ function expandProduct(
 
 export function expandProducts(
   ce: ComputeEngine,
-  ops: ReadonlyArray<BoxedExpression>
-): BoxedExpression | null {
+  ops: ReadonlyArray<Expression>
+): Expression | null {
   if (ops.length === 0) return null;
   if (ops.length === 1) return ops[0];
   if (ops.length === 2) return expandProduct(ops[0], ops[1]);
@@ -1060,7 +1060,7 @@ export function expandProducts(
   return rhs === null ? null : expandProduct(ops[0], rhs);
 }
 
-export function mul(...xs: ReadonlyArray<BoxedExpression>): BoxedExpression {
+export function mul(...xs: ReadonlyArray<Expression>): Expression {
   console.assert(xs.length > 0);
   if (xs.length === 1) return xs[0];
 
@@ -1075,7 +1075,7 @@ export function mul(...xs: ReadonlyArray<BoxedExpression>): BoxedExpression {
   return new Product(ce, xs).asRationalExpression();
 }
 
-export function mulN(...xs: ReadonlyArray<BoxedExpression>): BoxedExpression {
+export function mulN(...xs: ReadonlyArray<Expression>): Expression {
   console.assert(xs.length > 0);
   const ce = xs[0].engine;
   xs = xs.map((x) => x.N());

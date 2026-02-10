@@ -1,18 +1,18 @@
 import type {
-  MathJsonExpression as Expression,
+  MathJsonExpression,
   MathJsonSymbol,
 } from '../../math-json';
 
-function oneOf<T = Expression>(xs: T[]): T {
+function oneOf<T = MathJsonExpression>(xs: T[]): T {
   return xs[Math.floor(Math.random() * xs.length)];
 }
 
 function randomExpressionWithHead(
   operator: MathJsonSymbol,
   level: number
-): Expression {
+): MathJsonExpression {
   if (operator === 'Add' || operator === 'Multiply') {
-    const ops: Expression[] = [];
+    const ops: MathJsonExpression[] = [];
     let count = 1 + Math.floor(Math.random() * 12);
     while (count > 0) {
       ops.push(randomExpression(level + 1));
@@ -32,7 +32,7 @@ function randomExpressionWithHead(
   return [operator, randomExpression(level + 1)];
 }
 
-function randomTrig(): Expression {
+function randomTrig(): MathJsonExpression {
   return [
     oneOf(['Cos', 'Sin', 'Tan', 'Sinh', 'Arccos', 'Arsinh']),
     oneOf([
@@ -54,10 +54,10 @@ function randomTrig(): Expression {
   ];
 }
 
-export function randomExpression(level?: number): Expression {
+export function randomExpression(level?: number): MathJsonExpression {
   level ??= 1;
   if (level === 1) {
-    const h: Expression = oneOf([
+    const h: MathJsonExpression = oneOf([
       [
         'Sqrt',
         [
@@ -90,7 +90,7 @@ export function randomExpression(level?: number): Expression {
       'trig',
     ]);
     if (typeof h === 'string') return randomExpressionWithHead(h, 1);
-    return h as Expression;
+    return h as MathJsonExpression;
   }
   if (level === 2) {
     const r = Math.random();

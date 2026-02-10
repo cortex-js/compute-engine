@@ -1,5 +1,5 @@
 import type {
-  BoxedExpression,
+  Expression,
   OperatorDefinition,
   SymbolDefinitions,
   IComputeEngine as ComputeEngine,
@@ -148,7 +148,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
 
     evaluate: (ops, { engine: ce }) => {
       if (ops.length < 2) return ce.True;
-      let lhs: BoxedExpression | undefined = undefined;
+      let lhs: Expression | undefined = undefined;
       for (const arg of ops) {
         if (!lhs) lhs = arg;
         else {
@@ -195,7 +195,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
 
     evaluate: (ops, { engine: ce }) => {
       if (ops.length < 2) return ce.False;
-      let lhs: BoxedExpression | undefined = undefined;
+      let lhs: Expression | undefined = undefined;
       for (const arg of ops!) {
         if (!lhs) lhs = arg;
         else {
@@ -237,7 +237,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
       }
       if (ops.length < 2) return ce.True;
       // Less can have multiple arguments, i.e. a < b < c < d
-      let lhs: BoxedExpression | undefined = undefined;
+      let lhs: Expression | undefined = undefined;
       for (const arg of ops!) {
         if (!lhs) lhs = arg;
         else {
@@ -290,7 +290,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
       }
       if (ops.length < 2) return ce.True;
       // LessEqual can have multiple arguments, i.e. a <= b <= c <= d
-      let lhs: BoxedExpression | undefined = undefined;
+      let lhs: Expression | undefined = undefined;
       for (const arg of ops!) {
         if (!lhs) lhs = arg;
         else {
@@ -463,7 +463,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
  * values differ by at most `ce.tolerance`.
  * Returns `true`, `false`, or `undefined` if the comparison can't be made.
  */
-function approxEq(a: BoxedExpression, b: BoxedExpression): boolean | undefined {
+function approxEq(a: Expression, b: Expression): boolean | undefined {
   const ce = a.engine;
   const aN = a.N();
   const bN = b.N();
@@ -483,9 +483,9 @@ function approxEq(a: BoxedExpression, b: BoxedExpression): boolean | undefined {
  * `a ≈ b ≈ c` means `a ≈ b` and `b ≈ c`.
  */
 function evaluateApproxChain(
-  ops: ReadonlyArray<BoxedExpression>,
+  ops: ReadonlyArray<Expression>,
   ce: ComputeEngine
-): BoxedExpression | undefined {
+): Expression | undefined {
   if (ops.length < 2) return ce.True;
   let prev = ops[0];
   for (let i = 1; i < ops.length; i++) {
@@ -500,12 +500,12 @@ function evaluateApproxChain(
 function canonicalRelational(
   ce: ComputeEngine,
   operator: string,
-  ops: ReadonlyArray<BoxedExpression>
-): BoxedExpression {
+  ops: ReadonlyArray<Expression>
+): Expression {
   ops = flatten(ops, operator);
 
-  const nestedRelational: BoxedExpression[] = [];
-  const newOps: BoxedExpression[] = [];
+  const nestedRelational: Expression[] = [];
+  const newOps: Expression[] = [];
   // Separate any nested relational operators
   for (const op of ops) {
     if (isRelationalOperator(op.operator) && isFunction(op)) {
@@ -522,8 +522,8 @@ function canonicalRelational(
 }
 
 function inequalityEq(
-  a: BoxedExpression,
-  b: BoxedExpression,
+  a: Expression,
+  b: Expression,
   oppositeOperator?: string
 ): boolean {
   if (!isFunction(a) || !isFunction(b)) return false;

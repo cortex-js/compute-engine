@@ -1,5 +1,5 @@
 import type {
-  BoxedExpression,
+  Expression,
   PatternMatchOptions,
   BoxedSubstitution,
   IComputeEngine as ComputeEngine,
@@ -12,7 +12,7 @@ import { _BoxedExpression } from './abstract-boxed-expression';
 import { hashCode } from './utils';
 import { isWildcard, wildcardName } from './pattern-utils';
 import { BoxedType } from '../../common/type/boxed-type';
-import { DictionaryValue, MathJsonExpression as Expression } from '../../math-json/types';
+import { DictionaryValue, MathJsonExpression } from '../../math-json/types';
 import { widen } from '../../common/type/utils';
 import {
   isFunction,
@@ -33,13 +33,13 @@ export class BoxedDictionary
   override readonly _kind = 'dictionary';
 
   [Symbol.toStringTag]: string = '[BoxedDictionary]';
-  private readonly _keyValues: Record<string, BoxedExpression> = {};
+  private readonly _keyValues: Record<string, Expression> = {};
   private _type: BoxedType | undefined;
 
   /** The input to the constructor is either a ["Dictionary", ["KeyValuePair", ..., ...], ...] expression or a record of key-value pairs */
   constructor(
     ce: ComputeEngine,
-    keyValues: Record<string, DictionaryValue> | BoxedExpression,
+    keyValues: Record<string, DictionaryValue> | Expression,
     options?: {
       metadata?: Metadata;
       canonical?: boolean;
@@ -77,7 +77,7 @@ export class BoxedDictionary
     }
   }
 
-  private _initFromExpression(dictionary: BoxedExpression) {
+  private _initFromExpression(dictionary: Expression) {
     // Return early if already a BoxedDictionary
     if (dictionary instanceof BoxedDictionary) {
       Object.assign(this._keyValues, dictionary._keyValues);
@@ -131,7 +131,7 @@ export class BoxedDictionary
     // Default to empty dictionary for unrecognized expressions
   }
 
-  get json(): Expression {
+  get json(): MathJsonExpression {
     return {
       dict: Object.fromEntries(
         Object.entries(this._keyValues).map(([k, v]) => [
@@ -142,14 +142,14 @@ export class BoxedDictionary
     };
   }
 
-  toMathJson(options: Readonly<JsonSerializationOptions>): Expression {
+  toMathJson(options: Readonly<JsonSerializationOptions>): MathJsonExpression {
     if (options.shorthands.includes('dictionary')) {
       const result = this.json;
       return result;
     }
     if (this.isEmptyCollection) return { dict: {} };
 
-    const result: Record<string, Expression> = {};
+    const result: Record<string, MathJsonExpression> = {};
     for (const [key, value] of this.entries)
       result[key] = value.toMathJson(options);
 
@@ -184,7 +184,7 @@ export class BoxedDictionary
     return;
   }
 
-  get value(): BoxedExpression | undefined {
+  get value(): Expression | undefined {
     return undefined;
   }
 
@@ -204,7 +204,7 @@ export class BoxedDictionary
     return false;
   }
 
-  contains(_rhs: BoxedExpression): boolean | undefined {
+  contains(_rhs: Expression): boolean | undefined {
     return undefined;
   }
 
@@ -220,7 +220,7 @@ export class BoxedDictionary
     return true;
   }
 
-  each(): Generator<BoxedExpression> {
+  each(): Generator<Expression> {
     // Return a tuple for each key-value pair
     const ce = this.engine;
     return (function* (self: BoxedDictionary) {
@@ -230,7 +230,7 @@ export class BoxedDictionary
     })(this);
   }
 
-  get(key: string): BoxedExpression | undefined {
+  get(key: string): Expression | undefined {
     return this._keyValues[key];
   }
 
@@ -242,16 +242,16 @@ export class BoxedDictionary
     return Object.keys(this._keyValues);
   }
 
-  get entries(): [string, BoxedExpression][] {
+  get entries(): [string, Expression][] {
     return Object.entries(this._keyValues);
   }
 
-  get values(): BoxedExpression[] {
+  get values(): Expression[] {
     return Object.values(this._keyValues);
   }
 
   match(
-    pattern: BoxedExpression,
+    pattern: Expression,
     _options?: PatternMatchOptions
   ): BoxedSubstitution | null {
     if (isWildcard(pattern)) return { [wildcardName(pattern)!]: this };
@@ -276,7 +276,7 @@ export class BoxedDictionary
 }
 
 function boxedExpressionToDictionaryValue(
-  value: BoxedExpression
+  value: Expression
 ): DictionaryValue {
   if (isString(value)) return value.string;
   if (isSymbol(value)) {
@@ -297,7 +297,7 @@ function dictionaryValueToBoxedExpression(
   ce: ComputeEngine,
   value: DictionaryValue | null | undefined,
   options?: { canonical?: boolean }
-): BoxedExpression {
+): Expression {
   if (value === null || value === undefined) return ce.Nothing;
   if (value instanceof _BoxedExpression) return value;
   if (typeof value === 'string') return ce.string(value);

@@ -3,7 +3,7 @@ export type Hold = 'none' | 'all' | 'first' | 'rest' | 'last' | 'most';
 
 /**
  * Options to control serialization to MathJSON when using
- * `BoxedExpression.toMathJson()`.
+ * `Expression.toMathJson()`.
  *
  * @category Serialization
  */
@@ -94,7 +94,7 @@ export type PatternMatchOptions<T = unknown> = {
 };
 
 /**
- * Options for `BoxedExpression.replace()`.
+ * Options for `Expression.replace()`.
  *
  * @category Boxed Expression
  */

@@ -1,4 +1,4 @@
-import type { BoxedExpression } from './global-types';
+import type { Expression } from './global-types';
 import type { NumericValue } from './numeric-value/types.js';
 import {
   isSymbol,
@@ -70,7 +70,7 @@ function numericCostFunction(n: NumericValue | number): number {
  * to the `simplify` function.
  *
  */
-export function costFunction(expr: BoxedExpression): number {
+export function costFunction(expr: Expression): number {
   // Special-case: Encourage the "exp/log separation" rewrite used by
   // `simplifyLog()` for base-10 logs:
   //
@@ -91,9 +91,9 @@ export function costFunction(expr: BoxedExpression): number {
       return null;
 
     const match = (
-      xPow: BoxedExpression,
-      ePow: BoxedExpression
-    ): { xBase: BoxedExpression; eExp: BoxedExpression } | null => {
+      xPow: Expression,
+      ePow: Expression
+    ): { xBase: Expression; eExp: Expression } | null => {
       if (!isFunction(ePow) || ePow.operator !== 'Power') return null;
       if (!isSymbol(ePow.op1) || ePow.op1.symbol !== 'ExponentialE')
         return null;
@@ -271,7 +271,7 @@ export function costFunction(expr: BoxedExpression): number {
   );
 }
 
-export function leafCount(expr: BoxedExpression): number {
+export function leafCount(expr: Expression): number {
   if (isSymbol(expr)) return 1;
   if (isNumber(expr)) return numericCostFunction(expr.numericValue);
   const fnExpr = isFunction(expr) ? expr : undefined;

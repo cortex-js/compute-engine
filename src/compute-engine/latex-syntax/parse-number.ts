@@ -5,7 +5,7 @@
  * that holds the pre-tokenized formatting strings from ParseLatexOptions.
  */
 
-import type { MathJsonExpression as Expression } from '../../math-json/types';
+import type { MathJsonExpression } from '../../math-json/types';
 import type { LatexToken, Parser } from './types';
 import { SMALL_INTEGER } from '../numerics/numeric';
 
@@ -256,7 +256,7 @@ export function parseRepeatingDecimal(
  *
  * For zero, always use a {num} object to avoid confusion with null/undefined.
  */
-function numberExpression(n: number): Expression {
+function numberExpression(n: number): MathJsonExpression {
   if (n === 0) return { num: '0' };
   if (Number.isInteger(n) && Math.abs(n) < SMALL_INTEGER) return n;
   return { num: n.toString() };
@@ -269,7 +269,7 @@ function numberExpression(n: number): Expression {
 export function parseNumber(
   parser: Parser,
   fmt: NumberFormatTokens
-): Expression | null {
+): MathJsonExpression | null {
   // If we don't parse numbers, we'll return them as individual tokens
   const parseNumbersOption = parser.options.parseNumbers as unknown;
   if (parseNumbersOption === false || parseNumbersOption === 'never')

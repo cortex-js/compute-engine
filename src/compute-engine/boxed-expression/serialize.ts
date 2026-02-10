@@ -1,7 +1,7 @@
 import { Complex } from 'complex-esm';
 import { Decimal } from 'decimal.js';
 
-import type { MathJsonExpression as Expression } from '../../math-json/types';
+import type { MathJsonExpression } from '../../math-json/types';
 
 import { Rational } from '../numerics/types';
 import { isInMachineRange } from '../numerics/numeric-bignum';
@@ -26,7 +26,7 @@ import { asSmallInteger } from './numerics';
 import type {
   IComputeEngine as ComputeEngine,
   Metadata,
-  BoxedExpression,
+  Expression,
   JsonSerializationOptions,
 } from '../global-types';
 import { isOperatorDef } from './utils';
@@ -52,11 +52,11 @@ function _escapeJsonString(s: string | undefined): string | undefined {
  */
 function serializeSubtract(
   ce: ComputeEngine,
-  a: BoxedExpression,
-  b: BoxedExpression,
+  a: Expression,
+  b: Expression,
   options: Readonly<JsonSerializationOptions>,
   metadata?: Metadata
-): Expression | null {
+): MathJsonExpression | null {
   if (isNumber(a) && a.isNegative) {
     const v = a.numericValue;
     if (typeof v === 'number') {
@@ -94,10 +94,10 @@ function serializeSubtract(
 function serializePrettyJsonFunction(
   ce: ComputeEngine,
   name: string,
-  args: ReadonlyArray<BoxedExpression>,
+  args: ReadonlyArray<Expression>,
   options: Readonly<JsonSerializationOptions>,
   metadata?: Metadata
-): Expression {
+): MathJsonExpression {
   const exclusions = options.exclude;
 
   if (name === 'Add' && args.length === 2 && !exclusions.includes('Subtract')) {
@@ -321,10 +321,10 @@ function serializePrettyJsonFunction(
 function serializeJsonFunction(
   ce: ComputeEngine,
   name: string,
-  args: ReadonlyArray<undefined | BoxedExpression>,
+  args: ReadonlyArray<undefined | Expression>,
   options: Readonly<JsonSerializationOptions>,
   metadata?: Metadata
-): Expression {
+): MathJsonExpression {
   const exclusions = options.exclude;
 
   //
@@ -440,7 +440,7 @@ function serializeJsonFunction(
 
   const jsonHead = _escapeJsonString(name);
 
-  const fn: Expression = [
+  const fn: MathJsonExpression = [
     jsonHead,
     ...args.map((x) => (x ? serializeJson(ce, x, options) : 'Undefined')),
   ];
@@ -450,7 +450,7 @@ function serializeJsonFunction(
   // Determine if we need some LaTeX metadata
   if (options.metadata.includes('latex')) {
     md.latex = _escapeJsonString(
-      md.latex ?? ce.box({ fn } as Expression).latex
+      md.latex ?? ce.box({ fn } as MathJsonExpression).latex
     );
   } else md.latex = '';
 
@@ -463,16 +463,16 @@ function serializeJsonFunction(
 
   // No shorthand allowed, or some metadata to include
   if (md.latex && md.wikidata)
-    return { fn, latex: md.latex, wikidata: md.wikidata } as Expression;
-  if (md.latex) return { fn, latex: md.latex } as Expression;
-  if (md.wikidata) return { fn, wikidata: md.wikidata } as Expression;
-  return { fn } as Expression;
+    return { fn, latex: md.latex, wikidata: md.wikidata } as MathJsonExpression;
+  if (md.latex) return { fn, latex: md.latex } as MathJsonExpression;
+  if (md.wikidata) return { fn, wikidata: md.wikidata } as MathJsonExpression;
+  return { fn } as MathJsonExpression;
 }
 
 function serializeJsonString(
   s: string,
   options: Readonly<JsonSerializationOptions>
-): Expression {
+): MathJsonExpression {
   s = _escapeJsonString(s);
   if (options.shorthands.includes('string')) {
     // Does it need to be quoted?
@@ -487,7 +487,7 @@ function serializeJsonSymbol(
   sym: string,
   options: Readonly<JsonSerializationOptions>,
   metadata?: Metadata
-): Expression {
+): MathJsonExpression {
   if (sym === 'Half' && options.exclude.includes('Half')) {
     return serializeJsonNumber(ce, [1, 2], options, metadata);
   }
@@ -600,7 +600,7 @@ function serializeJsonNumber(
   value: number | bigint | NumericValue | Decimal | Complex | Rational,
   options: Readonly<JsonSerializationOptions>,
   metadata?: Metadata
-): Expression {
+): MathJsonExpression {
   metadata = { ...metadata };
 
   if (!options.metadata.includes('latex')) metadata.latex = undefined;
@@ -645,7 +645,7 @@ function serializeJsonNumber(
           'Rational',
           serializeJsonNumber(ce, value.rational[0], options),
           serializeJsonNumber(ce, value.rational[1], options),
-        ] as Expression;
+        ] as MathJsonExpression;
       };
 
       if (value.radical === 1) return rationalExpr(value.rational);
@@ -845,9 +845,9 @@ function serializeJsonNumber(
 
 export function serializeJson(
   ce: ComputeEngine,
-  expr: BoxedExpression,
+  expr: Expression,
   options: Readonly<JsonSerializationOptions>
-): Expression {
+): MathJsonExpression {
   const wikidata = expr.wikidata;
 
   // Is it a number literal?

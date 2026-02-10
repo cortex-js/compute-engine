@@ -1,5 +1,5 @@
 import { toBigint, toInteger } from '../boxed-expression/numerics';
-import type { BoxedExpression, SymbolDefinitions } from '../global-types';
+import type { Expression, SymbolDefinitions } from '../global-types';
 import { choose } from '../boxed-expression/expand';
 import { isFunction } from '../boxed-expression/type-guards';
 
@@ -125,14 +125,14 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
       evaluate: ([xs, kExpr], { engine: ce }) => {
         if (!xs.isFiniteCollection) return undefined;
 
-        const all = Array.from(xs.each()) as BoxedExpression[];
+        const all = Array.from(xs.each()) as Expression[];
         const k = kExpr ? toInteger(kExpr) : all.length;
         if (k === null || k < 0 || k > all.length) return undefined;
 
         function* permute(
-          prefix: BoxedExpression[],
-          rest: BoxedExpression[]
-        ): Generator<BoxedExpression[]> {
+          prefix: Expression[],
+          rest: Expression[]
+        ): Generator<Expression[]> {
           if (prefix.length === k) {
             yield prefix;
             return;
@@ -158,14 +158,14 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
       evaluate: ([xs, kExpr], { engine: ce }) => {
         if (!xs.isFiniteCollection) return undefined;
 
-        const all = Array.from(xs.each()) as BoxedExpression[];
+        const all = Array.from(xs.each()) as Expression[];
         const k = toInteger(kExpr);
         if (k === null || k < 0 || k > all.length) return undefined;
 
         function* combine(
           start: number,
-          combo: BoxedExpression[]
-        ): Generator<BoxedExpression[]> {
+          combo: Expression[]
+        ): Generator<Expression[]> {
           if (combo.length === k) {
             yield combo;
             return;
@@ -247,11 +247,11 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
 ];
 
 function* cartesianProductIterator(
-  expr: BoxedExpression
-): Generator<BoxedExpression, undefined, any> {
+  expr: Expression
+): Generator<Expression, undefined, any> {
   if (!isFunction(expr)) return;
   const factors = expr.ops;
-  const iterators = factors.map((f) => [...f.each()] as BoxedExpression[]);
+  const iterators = factors.map((f) => [...f.each()] as Expression[]);
   const lengths = iterators.map((it) => it.length);
   if (lengths.some((len) => len === 0)) return;
 
@@ -273,16 +273,16 @@ function* cartesianProductIterator(
 }
 
 function* powerSetIterator(
-  expr: BoxedExpression
-): Generator<BoxedExpression, undefined, any> {
+  expr: Expression
+): Generator<Expression, undefined, any> {
   if (!isFunction(expr)) return;
-  const elements = [...expr.ops[0].each()] as BoxedExpression[];
+  const elements = [...expr.ops[0].each()] as Expression[];
   const n = elements.length;
   const ce = expr.engine;
 
   const total = 1 << n; // 2ⁿ subsets
   for (let mask = 0; mask < total; mask++) {
-    const subset: BoxedExpression[] = [];
+    const subset: Expression[] = [];
     for (let i = 0; i < n; i++) {
       if ((mask & (1 << i)) !== 0) {
         subset.push(elements[i]);

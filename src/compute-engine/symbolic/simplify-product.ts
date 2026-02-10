@@ -1,4 +1,4 @@
-import type { BoxedExpression, RuleStep } from '../global-types';
+import type { Expression, RuleStep } from '../global-types';
 import {
   isFunction,
   isNumber,
@@ -9,7 +9,7 @@ import {
  * Product simplification rules extracted from simplify-rules.ts.
  * Handles 13 patterns for simplifying Product expressions.
  */
-export function simplifyProduct(x: BoxedExpression): RuleStep | undefined {
+export function simplifyProduct(x: Expression): RuleStep | undefined {
   if (x.operator !== 'Product' || !isFunction(x)) return undefined;
 
   const body = x.op1;
@@ -100,8 +100,8 @@ export function simplifyProduct(x: BoxedExpression): RuleStep | undefined {
     lower.is(1)
   ) {
     const [op1, op2] = body.ops;
-    let indexTerm: BoxedExpression | null = null;
-    let constTerm: BoxedExpression | null = null;
+    let indexTerm: Expression | null = null;
+    let constTerm: Expression | null = null;
 
     if (sym(op1) === index && !new Set(op2.unknowns).has(index)) {
       indexTerm = op1;
@@ -283,7 +283,7 @@ export function simplifyProduct(x: BoxedExpression): RuleStep | undefined {
     body.ops.length === 2 &&
     lower.is(0)
   ) {
-    let base: BoxedExpression | null = null;
+    let base: Expression | null = null;
     let hasIndex = false;
 
     for (const op of body.ops) {
@@ -305,7 +305,7 @@ export function simplifyProduct(x: BoxedExpression): RuleStep | undefined {
   // Falling factorial: Product(x-k, [k, 0, n-1]) → x! / (x-n)!
   // Pattern: body is Subtract or Add with negative index
   if (lower.is(0)) {
-    let base: BoxedExpression | null = null;
+    let base: Expression | null = null;
     let hasNegIndex = false;
 
     if (
@@ -350,8 +350,8 @@ export function simplifyProduct(x: BoxedExpression): RuleStep | undefined {
 
   // Factor out constants: Product(c * f(n), [n, a, b]) → c^(b-a+1) * Product(f(n), [n, a, b])
   if (body.operator === 'Multiply' && isFunction(body)) {
-    const constantFactors: BoxedExpression[] = [];
-    const indexFactors: BoxedExpression[] = [];
+    const constantFactors: Expression[] = [];
+    const indexFactors: Expression[] = [];
 
     for (const factor of body.ops) {
       const factorUnknowns = new Set(factor.unknowns);

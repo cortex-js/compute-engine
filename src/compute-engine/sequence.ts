@@ -6,7 +6,7 @@
  */
 
 import type {
-  BoxedExpression,
+  Expression,
   IComputeEngine as ComputeEngine,
   SequenceDefinition,
   SequenceStatus,
@@ -40,19 +40,19 @@ interface SequenceMetadata {
    * For single-index: numeric keys (0, 1, 2, ...)
    * For multi-index: string keys ('0,0', 'n,0', 'n,n', ...)
    */
-  base: Map<number | string, BoxedExpression>;
+  base: Map<number | string, Expression>;
   memoize: boolean;
   /**
    * Memoization cache.
    * For single-index: numeric keys
    * For multi-index: string keys like '5,2'
    */
-  memo: Map<number | string, BoxedExpression> | null;
+  memo: Map<number | string, Expression> | null;
   domain:
     | { min?: number; max?: number }
     | Record<string, { min?: number; max?: number }>;
   /** Constraint expression for multi-index sequences */
-  constraints?: BoxedExpression;
+  constraints?: Expression;
 }
 
 /**
@@ -161,7 +161,7 @@ function matchPattern(pattern: ParsedPattern, indices: number[]): boolean {
  */
 interface PreparedBaseCase {
   pattern: ParsedPattern;
-  value: BoxedExpression;
+  value: Expression;
   /** Number of variables in pattern (more specific = fewer variables) */
   variableCount: number;
 }
@@ -171,7 +171,7 @@ interface PreparedBaseCase {
  * Order: exact matches first, then patterns with fewer variables (more specific first).
  */
 function prepareBaseCases(
-  base: Map<number | string, BoxedExpression>
+  base: Map<number | string, Expression>
 ): PreparedBaseCase[] {
   const cases: PreparedBaseCase[] = [];
 
@@ -200,7 +200,7 @@ function prepareBaseCases(
 function findMatchingBaseCase(
   cases: PreparedBaseCase[],
   indices: number[]
-): BoxedExpression | undefined {
+): Expression | undefined {
   for (const { pattern, value } of cases) {
     if (matchPattern(pattern, indices)) {
       return value;
@@ -236,12 +236,12 @@ function validateMultiIndexDomain(
  */
 function checkConstraints(
   ce: ComputeEngine,
-  constraints: BoxedExpression,
+  constraints: Expression,
   variables: string[],
   indices: number[]
 ): boolean {
   // Substitute variable values
-  const subs: Record<string, BoxedExpression> = {};
+  const subs: Record<string, Expression> = {};
   for (let i = 0; i < variables.length; i++) {
     subs[variables[i]] = ce.number(indices[i]);
   }
@@ -277,9 +277,9 @@ export function createSequenceHandler(
   name: string,
   def: SequenceDefinition
 ): (
-  subscript: BoxedExpression,
+  subscript: Expression,
   options: { engine: ComputeEngine; numericApproximation?: boolean }
-) => BoxedExpression | undefined {
+) => Expression | undefined {
   // Determine if this is a multi-index sequence
   const isMultiIndex = def.variables !== undefined && def.variables.length > 1;
   const variables = def.variables ?? [def.variable ?? 'n'];
@@ -287,15 +287,15 @@ export function createSequenceHandler(
 
   const memoize = def.memoize ?? true;
   // Use string keys for multi-index, number keys for single-index
-  const memo = memoize ? new Map<number | string, BoxedExpression>() : null;
+  const memo = memoize ? new Map<number | string, Expression>() : null;
   const domain = def.domain ?? {};
 
   // Store recurrence source for lazy parsing
   const recurrenceSource = def.recurrence;
-  let recurrence: BoxedExpression | null = null;
+  let recurrence: Expression | null = null;
 
   // Parse and box constraint expression
-  let constraintsExpr: BoxedExpression | null = null;
+  let constraintsExpr: Expression | null = null;
   if (def.constraints) {
     constraintsExpr =
       typeof def.constraints === 'string'
@@ -304,7 +304,7 @@ export function createSequenceHandler(
   }
 
   // Box base cases
-  const base = new Map<number | string, BoxedExpression>();
+  const base = new Map<number | string, Expression>();
   for (const [k, v] of Object.entries(def.base)) {
     const key = isMultiIndex ? String(k) : Number(k);
     base.set(key, typeof v === 'number' ? ce.number(v) : v);
@@ -414,7 +414,7 @@ export function createSequenceHandler(
     }
 
     // Evaluate recurrence by substituting all variables
-    const subs: Record<string, BoxedExpression> = {};
+    const subs: Record<string, Expression> = {};
     for (let i = 0; i < variables.length; i++) {
       subs[variables[i]] = engine.number(indices[i]);
     }
@@ -485,10 +485,10 @@ export function validateSequenceDefinition(
 interface PendingSequence {
   /**
    * Base cases.
-   * For single-index: Map<number, BoxedExpression>
-   * For multi-index: Map<string, BoxedExpression> with keys like '0,0', 'n,0'
+   * For single-index: Map<number, Expression>
+   * For multi-index: Map<string, Expression> with keys like '0,0', 'n,0'
    */
-  base: Map<number | string, BoxedExpression>;
+  base: Map<number | string, Expression>;
   /**
    * Recurrence definition.
    * For single-index: variable is a string (e.g., 'n')
@@ -527,7 +527,7 @@ export function addSequenceBaseCase(
   ce: ComputeEngine,
   name: string,
   index: number,
-  value: BoxedExpression
+  value: Expression
 ): void {
   const pending = getOrCreatePending(ce, name);
   pending.base.set(index, value);
@@ -544,7 +544,7 @@ export function addMultiIndexBaseCase(
   ce: ComputeEngine,
   name: string,
   key: string,
-  value: BoxedExpression
+  value: Expression
 ): void {
   const pending = getOrCreatePending(ce, name);
   pending.base.set(key, value);
@@ -556,7 +556,7 @@ export function addMultiIndexBaseCase(
  * Add a recurrence relation for a single-index sequence definition.
  * e.g., from `L_n := L_{n-1} + 1`
  *
- * We store the recurrence as a LaTeX string rather than a BoxedExpression
+ * We store the recurrence as a LaTeX string rather than a Expression
  * because the expression may have been parsed before the symbol was declared
  * with subscriptEvaluate. Storing as LaTeX allows us to re-parse fresh when
  * creating the handler, ensuring proper binding.
@@ -565,7 +565,7 @@ export function addSequenceRecurrence(
   ce: ComputeEngine,
   name: string,
   variable: string,
-  expr: BoxedExpression
+  expr: Expression
 ): void {
   const pending = getOrCreatePending(ce, name);
   // Convert to LaTeX for deferred parsing
@@ -583,7 +583,7 @@ export function addMultiIndexRecurrence(
   ce: ComputeEngine,
   name: string,
   variables: string[],
-  expr: BoxedExpression
+  expr: Expression
 ): void {
   const pending = getOrCreatePending(ce, name);
   pending.recurrence = { variables, latex: expr.latex };
@@ -602,7 +602,7 @@ function tryFinalizeSequence(ce: ComputeEngine, name: string): void {
   if (pending.base.size === 0 || !pending.recurrence) return;
 
   // Convert to SequenceDefinition format
-  const base: Record<number | string, BoxedExpression> = {};
+  const base: Record<number | string, Expression> = {};
   for (const [k, v] of pending.base) {
     base[k] = v;
   }
@@ -656,7 +656,7 @@ function tryFinalizeSequence(ce: ComputeEngine, name: string): void {
  * e.g., `a_{n-1}` when defining sequence 'a'
  */
 export function containsSelfReference(
-  expr: BoxedExpression,
+  expr: Expression,
   seqName: string
 ): boolean {
   if (isFunction(expr)) {
@@ -678,7 +678,7 @@ export function containsSelfReference(
  * e.g., from `n-1` extract 'n', from `2*k` extract 'k'
  */
 export function extractIndexVariable(
-  subscript: BoxedExpression
+  subscript: Expression
 ): string | undefined {
   // Simple symbol
   if (isSymbol(subscript)) return subscript.symbol;
@@ -859,7 +859,7 @@ export function clearSequenceCache(ce: ComputeEngine, name?: string): void {
 export function getSequenceCache(
   ce: ComputeEngine,
   name: string
-): Map<number | string, BoxedExpression> | undefined {
+): Map<number | string, Expression> | undefined {
   const registry = sequenceRegistry.get(ce);
   const metadata = registry?.get(name);
 
@@ -896,7 +896,7 @@ export function generateSequenceTerms(
   start: number,
   end: number,
   step: number = 1
-): BoxedExpression[] | undefined {
+): Expression[] | undefined {
   // Validate inputs
   if (!Number.isInteger(start) || !Number.isInteger(end)) {
     return undefined;
@@ -910,7 +910,7 @@ export function generateSequenceTerms(
     return undefined;
   }
 
-  const terms: BoxedExpression[] = [];
+  const terms: Expression[] = [];
 
   // Generate terms by evaluating subscripted expressions
   for (let n = start; step > 0 ? n <= end : n >= end; n += step) {

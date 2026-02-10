@@ -1,4 +1,4 @@
-import { MathJsonExpression as Expression, MathJsonSymbol } from '../math-json/types';
+import { MathJsonExpression, MathJsonSymbol } from '../math-json/types';
 import { Origin } from '../common/debug';
 import {
   FatalParsingError,
@@ -41,10 +41,10 @@ import { parseWhitespace } from '../point-free-parser/whitespace-parsers';
 import { escapeJsonString } from '../common/json';
 
 // eslint-disable-next-line prefer-const
-const grammar = new Grammar<Expression>();
+const grammar = new Grammar<MathJsonExpression>();
 
 // For debugging purposes, output an expression as a string
-function expressionToString(expr: Expression | undefined | null): string {
+function expressionToString(expr: MathJsonExpression | undefined | null): string {
   if (expr === undefined || expr === null) return '';
   const strValue = stringValue(expr);
   if (strValue !== null) return strValue;
@@ -57,18 +57,18 @@ function expressionToString(expr: Expression | undefined | null): string {
  * (offset range in the source code)
  */
 function exprOrigin(
-  expr: Expression,
+  expr: MathJsonExpression,
   offsets: [number, number] | Result
-): Expression {
+): MathJsonExpression {
   if (!Array.isArray(offsets)) offsets = offsets.range;
   if (Array.isArray(expr))
     return {
-      fn: expr as [MathJsonSymbol, ...Expression[]],
+      fn: expr as [MathJsonSymbol, ...MathJsonExpression[]],
       sourceOffsets: offsets,
     };
 
   if (typeof expr === 'object')
-    return { ...expr, sourceOffsets: offsets } as Expression;
+    return { ...expr, sourceOffsets: offsets } as MathJsonExpression;
 
   if (typeof expr === 'number')
     return { num: expr.toString(), sourceOffsets: offsets };
@@ -100,7 +100,7 @@ grammar.rule(
       literal('#date'),
       literal('#time'),
     ],
-    (fn: Result<string>): Expression => {
+    (fn: Result<string>): MathJsonExpression => {
       if (fn.value === '#date') {
         const today = new Date();
         return (
@@ -154,7 +154,7 @@ grammar.rule(
       ]),
       'function-call-argument-clause',
     ],
-    (fn: Result<string>, args: Result<Expression>): Expression => {
+    (fn: Result<string>, args: Result<MathJsonExpression>): MathJsonExpression => {
       if (fn.value === '#warning') {
         const message = mapArgs<string>(args.value!, (x) =>
           expressionToString(x)
@@ -194,7 +194,7 @@ grammar.rule(
     'expression',
     ',',
     ')',
-    (values: Result<Expression>[]): Expression => {
+    (values: Result<MathJsonExpression>[]): MathJsonExpression => {
       return ['List', ...values.map((x) => x.value!)];
     }
   )
@@ -205,8 +205,8 @@ grammar.rule(
   '_numerical-constant_ | (\\[_sign_\\] (_binary-number_ | _hexadecimal-number_ | _decimal-number_)'
 );
 
-grammar.rule('signed-number', (parser: Parser): Result<Expression> => {
-  const result = new Result<Expression>(parser);
+grammar.rule('signed-number', (parser: Parser): Result<MathJsonExpression> => {
+  const result = new Result<MathJsonExpression>(parser);
   let litResult = parseString(parser, 'NaN');
   if (litResult.isFailure) litResult = parseString(parser, '+Infinity');
   if (litResult.isFailure) litResult = parseString(parser, '-Infinity');
@@ -231,8 +231,8 @@ grammar.rule('signed-number', (parser: Parser): Result<Expression> => {
 
 grammar.rule('symbol', '_verbatim-symbol_ | _inline-symbol_');
 
-grammar.rule('symbol', (parser: Parser): Result<Expression> => {
-  const result = new Result<Expression>(parser);
+grammar.rule('symbol', (parser: Parser): Result<MathJsonExpression> => {
+  const result = new Result<MathJsonExpression>(parser);
   const res = parseIdentifier(parser);
   result.copyDiagnostics(res);
   result.end = res.end;
@@ -246,7 +246,7 @@ grammar.rule(
   'string',
   '_single-line-string_ | _multiline-string_ | _extended-string_'
 );
-grammar.rule('string', (parser: Parser): Result<Expression> => {
+grammar.rule('string', (parser: Parser): Result<MathJsonExpression> => {
   let result: Result<any> = parseSingleLineString(parser, 'expression');
   if (result.isFailure) result = parseMultilineString(parser, 'expression');
 
@@ -277,7 +277,7 @@ grammar.rule('string', (parser: Parser): Result<Expression> => {
 
   if (typeof previousString === 'string') values.push(previousString);
 
-  let value: Expression;
+  let value: MathJsonExpression;
   if (values.length === 1 && typeof values[0] === 'string') {
     // It's a simple, non-interpolated string
     value = exprOrigin({ str: escapeJsonString(values[0]) }, result);
@@ -310,7 +310,7 @@ grammar.rule(
 
 grammar.rule(
   'expression',
-  operatorSequence<Expression, string>(
+  operatorSequence<MathJsonExpression, string>(
     [
       ['NotElement', '!in', 160],
       ['Element', 'in', 240],
@@ -337,7 +337,7 @@ grammar.rule(
       ['Not', '!', 820, 'prefix'],
     ],
     'primary',
-    (op: string, lhs: Expression, rhs: Expression): Expression => {
+    (op: string, lhs: MathJsonExpression, rhs: MathJsonExpression): MathJsonExpression => {
       if (!lhs && rhs) {
         if (op === 'Negate') {
           const val = machineValue(rhs);
@@ -364,7 +364,7 @@ grammar.rule(
         // maybe('front-matter'),
         some(
           'expression',
-          (...expressions: Result<Expression>[]): Expression => {
+          (...expressions: Result<MathJsonExpression>[]): MathJsonExpression => {
             console.assert(expressions && expressions.length > 0);
             const exprs = expressions.filter((x) => !x.isEmpty && !x.isFailure);
             if (exprs.length === 0) {
@@ -384,9 +384,9 @@ grammar.rule(
       ],
       (
         _shebang: Result<boolean>,
-        expr: Result<Expression>,
+        expr: Result<MathJsonExpression>,
         _eof: Result<boolean>
-      ): Expression => exprOrigin(expr.value ?? 'Nothing', expr)
+      ): MathJsonExpression => exprOrigin(expr.value ?? 'Nothing', expr)
     )
   )
 );
@@ -404,7 +404,7 @@ export function analyzeErrors(
 export function parseCortex(
   source: string,
   url?: string
-): [Expression, ParsingDiagnostic[]] {
+): [MathJsonExpression, ParsingDiagnostic[]] {
   const result = grammar.parse('cortex', source, url);
 
   // Yay!

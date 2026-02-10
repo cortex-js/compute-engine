@@ -1,4 +1,4 @@
-import type { BoxedExpression } from './types-expression';
+import type { Expression } from './types-expression';
 import type { LanguageTarget } from './compilation/types';
 import {
   assertCompilationTargetContract,
@@ -20,16 +20,16 @@ import { IntervalGLSLTarget } from './compilation/interval-glsl-target';
 export class CompilationTargetRegistry {
   private readonly _targets = new Map<
     string,
-    LanguageTarget<BoxedExpression>
+    LanguageTarget<Expression>
   >();
 
-  register(name: string, target: LanguageTarget<BoxedExpression>): void {
+  register(name: string, target: LanguageTarget<Expression>): void {
     assertCompilationTargetName(name);
     assertCompilationTargetContract(target);
     this._targets.set(name, target);
   }
 
-  get(name: string): LanguageTarget<BoxedExpression> | undefined {
+  get(name: string): LanguageTarget<Expression> | undefined {
     return this._targets.get(name);
   }
 

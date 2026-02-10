@@ -21,7 +21,7 @@ import {
   NumericValue,
   NumericValueFactory,
 } from './types';
-import { MathJsonExpression as Expression } from '../../math-json/types';
+import { MathJsonExpression } from '../../math-json/types';
 import { numberToExpression } from '../numerics/expression';
 import { numberToString } from '../numerics/strings';
 import { NumericPrimitiveType } from '../../common/type/types';
@@ -123,7 +123,7 @@ export class ExactNumericValue extends NumericValue {
     return this;
   }
 
-  toJSON(): Expression {
+  toJSON(): MathJsonExpression {
     if (this.isNaN) return 'NaN';
     if (this.isPositiveInfinity) return 'PositiveInfinity';
     if (this.isNegativeInfinity) return 'NegativeInfinity';
@@ -140,7 +140,7 @@ export class ExactNumericValue extends NumericValue {
         'Rational',
         numberToExpression(r[0]),
         numberToExpression(r[1]),
-      ] as Expression;
+      ] as MathJsonExpression;
     };
 
     // Only have a rational

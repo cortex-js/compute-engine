@@ -1,5 +1,5 @@
 import type {
-  BoxedExpression,
+  Expression,
   AssignValue,
   IComputeEngine,
 } from './global-types';
@@ -24,27 +24,27 @@ export function getDefaultEngine(): IComputeEngine {
   return _defaultEngine!;
 }
 
-export function parse(latex: LatexString): BoxedExpression {
+export function parse(latex: LatexString): Expression {
   return getDefaultEngine().parse(latex);
 }
 
 export function simplify(
-  latex: LatexString | BoxedExpression
-): BoxedExpression {
+  latex: LatexString | Expression
+): Expression {
   if (typeof latex === 'string')
     return getDefaultEngine().parse(latex).simplify();
   return latex.simplify();
 }
 
 export function evaluate(
-  latex: LatexString | BoxedExpression
-): BoxedExpression {
+  latex: LatexString | Expression
+): Expression {
   if (typeof latex === 'string')
     return getDefaultEngine().parse(latex).evaluate();
   return latex.evaluate();
 }
 
-export function N(latex: LatexString | BoxedExpression): BoxedExpression {
+export function N(latex: LatexString | Expression): Expression {
   if (typeof latex === 'string') return getDefaultEngine().parse(latex).N();
   return latex.N();
 }
@@ -59,42 +59,42 @@ export function assign(
 }
 
 export function expand(
-  latex: LatexString | BoxedExpression
-): BoxedExpression | null {
+  latex: LatexString | Expression
+): Expression | null {
   const expr =
     typeof latex === 'string' ? getDefaultEngine().parse(latex) : latex;
   return expandExpr(expr);
 }
 
 export function solve(
-  latex: LatexString | BoxedExpression,
-  vars?: string | Iterable<string> | BoxedExpression | Iterable<BoxedExpression>
+  latex: LatexString | Expression,
+  vars?: string | Iterable<string> | Expression | Iterable<Expression>
 ):
   | null
-  | ReadonlyArray<BoxedExpression>
-  | Record<string, BoxedExpression>
-  | Array<Record<string, BoxedExpression>> {
+  | ReadonlyArray<Expression>
+  | Record<string, Expression>
+  | Array<Record<string, Expression>> {
   const expr =
     typeof latex === 'string' ? getDefaultEngine().parse(latex) : latex;
   return expr.solve(vars);
 }
 
 export function expandAll(
-  latex: LatexString | BoxedExpression
-): BoxedExpression | null {
+  latex: LatexString | Expression
+): Expression | null {
   const expr =
     typeof latex === 'string' ? getDefaultEngine().parse(latex) : latex;
   return expandAllExpr(expr);
 }
 
-export function factor(latex: LatexString | BoxedExpression): BoxedExpression {
+export function factor(latex: LatexString | Expression): Expression {
   const expr =
     typeof latex === 'string' ? getDefaultEngine().parse(latex) : latex;
   return factorExpr(expr);
 }
 
 export function compile(
-  latex: LatexString | BoxedExpression,
+  latex: LatexString | Expression,
   options?: Parameters<typeof compileExpr>[1]
 ): ReturnType<typeof compileExpr> {
   const expr =

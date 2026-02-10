@@ -7,7 +7,7 @@ import {
   stringValue,
 } from '../../../math-json/utils';
 import { joinLatex } from '../tokenizer';
-import { MathJsonExpression as Expression } from '../../../math-json/types';
+import { MathJsonExpression } from '../../../math-json/types';
 import {
   LatexDictionary,
   Serializer,
@@ -25,17 +25,17 @@ import {
  * @returns An Interval expression or null if the body doesn't have exactly 2 elements
  */
 function parseIntervalBody(
-  body: Expression,
+  body: MathJsonExpression,
   openLeft: boolean,
   openRight: boolean
-): Expression | null {
+): MathJsonExpression | null {
   // Handle empty body
   if (isEmptySequence(body)) return null;
 
   // Extract the two endpoints from the body
   // The body is typically a Delimiter with a comma separator: ["Delimiter", ["Sequence", a, b], ","]
   // or just a Sequence: ["Sequence", a, b]
-  let elements: Expression[];
+  let elements: MathJsonExpression[];
 
   const h = operator(body);
   if (h === 'Delimiter') {
@@ -61,8 +61,8 @@ function parseIntervalBody(
   const [lower, upper] = elements;
 
   // Build the Interval expression with Open wrappers for open endpoints
-  const lowerExpr: Expression = openLeft ? ['Open', lower] : lower;
-  const upperExpr: Expression = openRight ? ['Open', upper] : upper;
+  const lowerExpr: MathJsonExpression = openLeft ? ['Open', lower] : lower;
+  const upperExpr: MathJsonExpression = openRight ? ['Open', upper] : upper;
 
   return ['Interval', lowerExpr, upperExpr];
 }
@@ -214,7 +214,7 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     latexTrigger: ['^', '\\complement'],
     kind: 'postfix',
     parse: (_parser, lhs) => {
-      return ['Complement', lhs] as Expression;
+      return ['Complement', lhs] as MathJsonExpression;
     },
 
     // precedence: 240,
@@ -250,28 +250,28 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     kind: 'matchfix',
     openTrigger: ['['],
     closeTrigger: [')'],
-    parse: (_parser: Parser, body: Expression): Expression | null =>
+    parse: (_parser: Parser, body: MathJsonExpression): MathJsonExpression | null =>
       parseIntervalBody(body, false, true),
   },
   {
     kind: 'matchfix',
     openTrigger: ['\\lbrack'],
     closeTrigger: ['\\rparen'],
-    parse: (_parser: Parser, body: Expression): Expression | null =>
+    parse: (_parser: Parser, body: MathJsonExpression): MathJsonExpression | null =>
       parseIntervalBody(body, false, true),
   },
   {
     kind: 'matchfix',
     openTrigger: ['\\lbrack'],
     closeTrigger: [')'],
-    parse: (_parser: Parser, body: Expression): Expression | null =>
+    parse: (_parser: Parser, body: MathJsonExpression): MathJsonExpression | null =>
       parseIntervalBody(body, false, true),
   },
   {
     kind: 'matchfix',
     openTrigger: ['['],
     closeTrigger: ['\\rparen'],
-    parse: (_parser: Parser, body: Expression): Expression | null =>
+    parse: (_parser: Parser, body: MathJsonExpression): MathJsonExpression | null =>
       parseIntervalBody(body, false, true),
   },
 
@@ -280,28 +280,28 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     kind: 'matchfix',
     openTrigger: ['('],
     closeTrigger: [']'],
-    parse: (_parser: Parser, body: Expression): Expression | null =>
+    parse: (_parser: Parser, body: MathJsonExpression): MathJsonExpression | null =>
       parseIntervalBody(body, true, false),
   },
   {
     kind: 'matchfix',
     openTrigger: ['\\lparen'],
     closeTrigger: ['\\rbrack'],
-    parse: (_parser: Parser, body: Expression): Expression | null =>
+    parse: (_parser: Parser, body: MathJsonExpression): MathJsonExpression | null =>
       parseIntervalBody(body, true, false),
   },
   {
     kind: 'matchfix',
     openTrigger: ['\\lparen'],
     closeTrigger: [']'],
-    parse: (_parser: Parser, body: Expression): Expression | null =>
+    parse: (_parser: Parser, body: MathJsonExpression): MathJsonExpression | null =>
       parseIntervalBody(body, true, false),
   },
   {
     kind: 'matchfix',
     openTrigger: ['('],
     closeTrigger: ['\\rbrack'],
-    parse: (_parser: Parser, body: Expression): Expression | null =>
+    parse: (_parser: Parser, body: MathJsonExpression): MathJsonExpression | null =>
       parseIntervalBody(body, true, false),
   },
 
@@ -310,14 +310,14 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     kind: 'matchfix',
     openTrigger: [']'],
     closeTrigger: ['['],
-    parse: (_parser: Parser, body: Expression): Expression | null =>
+    parse: (_parser: Parser, body: MathJsonExpression): MathJsonExpression | null =>
       parseIntervalBody(body, true, true),
   },
   {
     kind: 'matchfix',
     openTrigger: ['\\rbrack'],
     closeTrigger: ['\\lbrack'],
-    parse: (_parser: Parser, body: Expression): Expression | null =>
+    parse: (_parser: Parser, body: MathJsonExpression): MathJsonExpression | null =>
       parseIntervalBody(body, true, true),
   },
 
@@ -342,7 +342,7 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     openTrigger: '{',
     closeTrigger: '}',
     // @todo: the set syntax can also include conditions...
-    parse: (_parser: Parser, body: Expression): Expression => {
+    parse: (_parser: Parser, body: MathJsonExpression): MathJsonExpression => {
       if (isEmptySequence(body)) return 'EmptySet';
       if (
         operator(body) == 'Delimiter' &&
@@ -353,7 +353,7 @@ export const DEFINITIONS_SETS: LatexDictionary = [
       if (operator(body) !== 'Sequence') return ['Set', body];
       return ['Set', ...operands(body)];
     },
-    serialize: (serializer: Serializer, expr: Expression): string => {
+    serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
       return joinLatex([
         '\\lbrace',
         operands(expr)
@@ -383,7 +383,7 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     kind: 'infix',
     associativity: 'none',
     precedence: 160, // As per MathML, lower precedence
-    parse: (parser, lhs, terminator): Expression | null => {
+    parse: (parser, lhs, terminator): MathJsonExpression | null => {
       const rhs = parser.parseExpression(terminator);
       return rhs === null ? null : ['Element', rhs, lhs];
     },
@@ -535,7 +535,7 @@ export const DEFINITIONS_SETS: LatexDictionary = [
 
 function serializeSet(
   serializer: Serializer,
-  expr: Expression | null
+  expr: MathJsonExpression | null
 ): LatexString {
   if (expr === null) return '';
   const h = operator(expr);
@@ -636,7 +636,7 @@ function serializeSet(
 }
 
 // Return true if `["Set", 0]`
-// function isZeroSet(expr: Expression): boolean {
+// function isZeroSet(expr: MathJsonExpression): boolean {
 //   return (
 //     getFunctionName(expr) === 'Set' && getNumberValue(getArg(expr, 1)) === 0
 //   );

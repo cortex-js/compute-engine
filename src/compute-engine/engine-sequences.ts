@@ -1,5 +1,5 @@
 import type {
-  BoxedExpression,
+  Expression,
   IComputeEngine,
   SequenceDefinition,
   SequenceStatus,
@@ -94,7 +94,7 @@ export function clearSequenceCache(ce: IComputeEngine, name?: string): void {
 export function getSequenceCache(
   ce: IComputeEngine,
   name: string
-): Map<number | string, BoxedExpression> | undefined {
+): Map<number | string, Expression> | undefined {
   return getSequenceCacheImpl(ce, name);
 }
 
@@ -104,13 +104,13 @@ export function getSequenceTerms(
   start: number,
   end: number,
   step?: number
-): BoxedExpression[] | undefined {
+): Expression[] | undefined {
   return generateSequenceTermsImpl(ce, name, start, end, step);
 }
 
 export function lookupOEIS(
   ce: IComputeEngine,
-  terms: (number | BoxedExpression)[],
+  terms: (number | Expression)[],
   options?: OEISOptions
 ): Promise<OEISSequenceInfo[]> {
   return lookupSequenceImpl(ce, terms, options);

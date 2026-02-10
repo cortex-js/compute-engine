@@ -1,5 +1,5 @@
 import type { OneOf } from '../../common/one-of';
-import type { MathJsonExpression as Expression, MathJsonSymbol } from '../../math-json/types';
+import type { MathJsonExpression, MathJsonSymbol } from '../../math-json/types';
 import type { TypeString } from '../../common/type/types';
 import { BoxedType } from '../../common/type/boxed-type';
 
@@ -240,7 +240,7 @@ export type ParseHandler =
 export type ExpressionParseHandler = (
   parser: Parser,
   until?: Readonly<Terminator>
-) => Expression | null;
+) => MathJsonExpression | null;
 
 /**
  * @category Latex Parsing and Serialization
@@ -248,7 +248,7 @@ export type ExpressionParseHandler = (
 export type PrefixParseHandler = (
   parser: Parser,
   until?: Readonly<Terminator>
-) => Expression | null;
+) => MathJsonExpression | null;
 
 /**
  * @category Latex Parsing and Serialization
@@ -256,7 +256,7 @@ export type PrefixParseHandler = (
 export type SymbolParseHandler = (
   parser: Parser,
   until?: Readonly<Terminator>
-) => Expression | null;
+) => MathJsonExpression | null;
 
 /**
  * @category Latex Parsing and Serialization
@@ -264,7 +264,7 @@ export type SymbolParseHandler = (
 export type FunctionParseHandler = (
   parser: Parser,
   until?: Readonly<Terminator>
-) => Expression | null;
+) => MathJsonExpression | null;
 
 /**
  * @category Latex Parsing and Serialization
@@ -272,33 +272,33 @@ export type FunctionParseHandler = (
 export type EnvironmentParseHandler = (
   parser: Parser,
   until?: Readonly<Terminator>
-) => Expression | null;
+) => MathJsonExpression | null;
 
 /**
  * @category Latex Parsing and Serialization
  */
 export type PostfixParseHandler = (
   parser: Parser,
-  lhs: Expression,
+  lhs: MathJsonExpression,
   until?: Readonly<Terminator>
-) => Expression | null;
+) => MathJsonExpression | null;
 
 /**
  * @category Latex Parsing and Serialization
  */
 export type InfixParseHandler = (
   parser: Parser,
-  lhs: Expression,
+  lhs: MathJsonExpression,
   until: Readonly<Terminator>
-) => Expression | null;
+) => MathJsonExpression | null;
 
 /**
  * @category Latex Parsing and Serialization
  */
 export type MatchfixParseHandler = (
   parser: Parser,
-  body: Expression
-) => Expression | null;
+  body: MathJsonExpression
+) => MathJsonExpression | null;
 
 /**
  * @category Latex Parsing and Serialization
@@ -373,7 +373,7 @@ export type BaseEntry = {
  */
 export type DefaultEntry = BaseEntry &
   Trigger & {
-    parse?: Expression | ExpressionParseHandler;
+    parse?: MathJsonExpression | ExpressionParseHandler;
   };
 
 /**
@@ -383,7 +383,7 @@ export type ExpressionEntry = BaseEntry &
   Trigger & {
     kind: 'expression'; // Default entry is "expression"
 
-    parse?: Expression | ExpressionParseHandler;
+    parse?: MathJsonExpression | ExpressionParseHandler;
 
     precedence?: Precedence;
   };
@@ -490,7 +490,7 @@ export type SymbolEntry = BaseEntry &
     /** Used for appropriate wrapping (i.e. when to surround it with parens) */
     precedence?: Precedence;
 
-    parse: Expression | SymbolParseHandler;
+    parse: MathJsonExpression | SymbolParseHandler;
   };
 
 /**
@@ -506,7 +506,7 @@ export type SymbolEntry = BaseEntry &
 export type FunctionEntry = BaseEntry &
   Trigger & {
     kind: 'function';
-    parse?: Expression | FunctionParseHandler;
+    parse?: MathJsonExpression | FunctionParseHandler;
 
     /**
      * How arguments are parsed:
@@ -770,9 +770,9 @@ export type ParseLatexOptions = NumberFormat & {
    * recognized.
    */
   parseUnexpectedToken: (
-    lhs: Expression | null,
+    lhs: MathJsonExpression | null,
     parser: Parser
-  ) => Expression | null;
+  ) => MathJsonExpression | null;
 
   /**
    * If true, the expression will be decorated with the LaTeX
@@ -893,9 +893,9 @@ export interface Parser {
 
   /** Return an error expression with the specified code and arguments */
   error(
-    code: string | [string, ...Expression[]],
+    code: string | [string, ...MathJsonExpression[]],
     fromToken: number
-  ): Expression;
+  ): MathJsonExpression;
 
   /** If there are any space, advance the index until a non-space is encountered */
   skipSpace(): boolean;
@@ -931,7 +931,7 @@ export interface Parser {
    * Return `null` if none was found
    * Return `Nothing` if an empty group `{}` was found
    */
-  parseGroup(): Expression | null;
+  parseGroup(): MathJsonExpression | null;
 
   /**
    * Some LaTeX commands (but not all) can accept arguments as single
@@ -947,17 +947,17 @@ export interface Parser {
    *
    * The excluded tokens include `!"#$%&(),/;:?@[]`|~", `\left`, `\bigl`, etc...
    */
-  parseToken(): Expression | null;
+  parseToken(): MathJsonExpression | null;
 
   /**
    * Parse an expression enclosed in a LaTeX optional group enclosed in square brackets `[]`.
    *
    * Return `null` if none was found.
    */
-  parseOptionalGroup(): Expression | null;
+  parseOptionalGroup(): MathJsonExpression | null;
 
   /** Parse an enclosure (open paren/close paren, etc..) and return the expression inside the enclosure */
-  parseEnclosure(): Expression | null;
+  parseEnclosure(): MathJsonExpression | null;
 
   /**
    * Some LaTeX commands have arguments that are not interpreted as
@@ -982,7 +982,7 @@ export interface Parser {
    * - a single LaTeX command: `\pi`
    * - a multi-letter symbol: `\operatorname{speed}`
    */
-  parseSymbol(until?: Partial<Terminator>): Expression | null;
+  parseSymbol(until?: Partial<Terminator>): MathJsonExpression | null;
 
   /**
    * Parse an expression in a tabular format, where rows are separated by `\\`
@@ -991,7 +991,7 @@ export interface Parser {
    * Return rows of sparse columns: empty rows are indicated with `Nothing`,
    * and empty cells are also indicated with `Nothing`.
    */
-  parseTabular(): null | Expression[][];
+  parseTabular(): null | MathJsonExpression[][];
 
   /**
    * Parse an argument list, for example: `(12, x+1)` or `\left(x\right)`
@@ -1007,7 +1007,7 @@ export interface Parser {
   parseArguments(
     kind?: 'implicit' | 'enclosure',
     until?: Terminator
-  ): ReadonlyArray<Expression> | null;
+  ): ReadonlyArray<MathJsonExpression> | null;
 
   /**
    * Parse a postfix operator, such as `'` or `!`.
@@ -1017,9 +1017,9 @@ export interface Parser {
    */
 
   parsePostfixOperator(
-    lhs: Expression | null,
+    lhs: MathJsonExpression | null,
     until?: Partial<Terminator>
-  ): Expression | null;
+  ): MathJsonExpression | null;
 
   /**
    * Parse an expression:
@@ -1047,12 +1047,12 @@ export interface Parser {
    *
    * `until` is `{ minPrec:0 }` by default.
    */
-  parseExpression(until?: Partial<Terminator>): Expression | null;
+  parseExpression(until?: Partial<Terminator>): MathJsonExpression | null;
 
   /**
    * Parse a number.
    */
-  parseNumber(): Expression | null;
+  parseNumber(): MathJsonExpression | null;
 
   /**
    * Boundaries are used to detect the end of an expression.
@@ -1071,7 +1071,7 @@ export interface Parser {
   removeBoundary(): void;
   get atBoundary(): boolean;
   matchBoundary(): boolean;
-  boundaryError(msg: string | [string, ...Expression[]]): Expression;
+  boundaryError(msg: string | [string, ...MathJsonExpression[]]): MathJsonExpression;
 }
 
 /**
@@ -1144,17 +1144,17 @@ export type SerializeLatexOptions = NumberSerializationFormat & {
   missingSymbol: LatexString; // e.g. '\\placeholder{}'
 
   // Styles
-  applyFunctionStyle: (expr: Expression, level: number) => DelimiterScale;
+  applyFunctionStyle: (expr: MathJsonExpression, level: number) => DelimiterScale;
 
-  groupStyle: (expr: Expression, level: number) => DelimiterScale;
+  groupStyle: (expr: MathJsonExpression, level: number) => DelimiterScale;
 
   rootStyle: (
-    expr: Expression,
+    expr: MathJsonExpression,
     level: number
   ) => 'radical' | 'quotient' | 'solidus';
 
   fractionStyle: (
-    expr: Expression,
+    expr: MathJsonExpression,
     level: number
   ) =>
     | 'quotient'
@@ -1166,17 +1166,17 @@ export type SerializeLatexOptions = NumberSerializationFormat & {
     | 'factor';
 
   logicStyle: (
-    expr: Expression,
+    expr: MathJsonExpression,
     level: number
   ) => 'word' | 'boolean' | 'uppercase-word' | 'punctuation';
 
   powerStyle: (
-    expr: Expression,
+    expr: MathJsonExpression,
     level: number
   ) => 'root' | 'solidus' | 'quotient';
 
   numericSetStyle: (
-    expr: Expression,
+    expr: MathJsonExpression,
     level: number
   ) => 'compact' | 'regular' | 'interval' | 'set-builder';
 };
@@ -1219,14 +1219,14 @@ export interface Serializer {
   level: number;
 
   /** Output a LaTeX string representing the expression */
-  serialize: (expr: Expression | null | undefined) => string;
+  serialize: (expr: MathJsonExpression | null | undefined) => string;
 
   serializeFunction(
-    expr: Expression,
+    expr: MathJsonExpression,
     def?: SerializerDictionaryEntry
   ): LatexString;
 
-  serializeSymbol(expr: Expression): LatexString;
+  serializeSymbol(expr: MathJsonExpression): LatexString;
 
   /** Output `s` surrounded by delimiters.
    *
@@ -1242,30 +1242,30 @@ export interface Serializer {
   /** A string with the arguments of expr fenced appropriately and separated by
    * commas.
    */
-  wrapArguments(expr: Expression): LatexString;
+  wrapArguments(expr: MathJsonExpression): LatexString;
 
   /** Add a group fence around the expression if it is
    * an operator of precedence less than or equal to `prec`.
    */
-  wrap: (expr: Expression | null | undefined, prec?: number) => LatexString;
+  wrap: (expr: MathJsonExpression | null | undefined, prec?: number) => LatexString;
 
   /** Add a group fence around the expression if it is
    * short (not a function)
    */
-  wrapShort(expr: Expression | null | undefined): LatexString;
+  wrapShort(expr: MathJsonExpression | null | undefined): LatexString;
 
   /** Styles */
-  applyFunctionStyle: (expr: Expression, level: number) => DelimiterScale;
+  applyFunctionStyle: (expr: MathJsonExpression, level: number) => DelimiterScale;
 
-  groupStyle: (expr: Expression, level: number) => DelimiterScale;
+  groupStyle: (expr: MathJsonExpression, level: number) => DelimiterScale;
 
   rootStyle: (
-    expr: Expression,
+    expr: MathJsonExpression,
     level: number
   ) => 'radical' | 'quotient' | 'solidus';
 
   fractionStyle: (
-    expr: Expression,
+    expr: MathJsonExpression,
     level: number
   ) =>
     | 'quotient'
@@ -1277,17 +1277,17 @@ export interface Serializer {
     | 'factor';
 
   logicStyle: (
-    expr: Expression,
+    expr: MathJsonExpression,
     level: number
   ) => 'word' | 'boolean' | 'uppercase-word' | 'punctuation';
 
   powerStyle: (
-    expr: Expression,
+    expr: MathJsonExpression,
     level: number
   ) => 'root' | 'solidus' | 'quotient';
 
   numericSetStyle: (
-    expr: Expression,
+    expr: MathJsonExpression,
     level: number
   ) => 'compact' | 'regular' | 'interval' | 'set-builder';
 }
@@ -1300,5 +1300,5 @@ export interface Serializer {
  */
 export type SerializeHandler = (
   serializer: Serializer,
-  expr: Expression
+  expr: MathJsonExpression
 ) => string;

@@ -3,7 +3,7 @@ import { BoxedType } from '../../common/type/boxed-type';
 
 import type {
   OperatorDefinition,
-  BoxedExpression,
+  Expression,
   BoxedOperatorDefinition,
   CollectionHandlers,
   CompiledExpression,
@@ -74,7 +74,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
   associative = false;
   commutative = false;
   commutativeOrder:
-    | ((a: BoxedExpression, b: BoxedExpression) => number)
+    | ((a: Expression, b: Expression) => number)
     | undefined;
   idempotent = false;
   involution = false;
@@ -89,44 +89,44 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
   inferredSignature = true;
 
   type?: (
-    ops: ReadonlyArray<BoxedExpression>,
+    ops: ReadonlyArray<Expression>,
     options: { engine: ComputeEngine }
   ) => BoxedType | Type | TypeString | undefined;
 
   sgn?: (
-    ops: ReadonlyArray<BoxedExpression>,
+    ops: ReadonlyArray<Expression>,
     options: { engine: ComputeEngine }
   ) => Sign | undefined;
 
-  eq?: (a: BoxedExpression, b: BoxedExpression) => boolean | undefined;
-  neq?: (a: BoxedExpression, b: BoxedExpression) => boolean | undefined;
+  eq?: (a: Expression, b: Expression) => boolean | undefined;
+  neq?: (a: Expression, b: Expression) => boolean | undefined;
 
   even?: (
-    ops: ReadonlyArray<BoxedExpression>,
+    ops: ReadonlyArray<Expression>,
     options: { engine: ComputeEngine }
   ) => boolean | undefined;
 
   canonical?: (
-    ops: ReadonlyArray<BoxedExpression>,
+    ops: ReadonlyArray<Expression>,
     options: { engine: ComputeEngine }
-  ) => BoxedExpression | null;
+  ) => Expression | null;
 
   evaluate?: (
-    ops: ReadonlyArray<BoxedExpression>,
+    ops: ReadonlyArray<Expression>,
     options: Partial<EvaluateOptions> & { engine: ComputeEngine }
-  ) => BoxedExpression | undefined;
+  ) => Expression | undefined;
 
   evaluateAsync?: (
-    ops: ReadonlyArray<BoxedExpression>,
+    ops: ReadonlyArray<Expression>,
     options?: Partial<EvaluateOptions> & { engine?: ComputeEngine }
-  ) => Promise<BoxedExpression | undefined>;
+  ) => Promise<Expression | undefined>;
 
   evalDimension?: (
-    ops: ReadonlyArray<BoxedExpression>,
+    ops: ReadonlyArray<Expression>,
     options: { engine: ComputeEngine }
-  ) => BoxedExpression;
+  ) => Expression;
 
-  compile?: (expr: BoxedExpression) => CompiledExpression;
+  compile?: (expr: Expression) => CompiledExpression;
 
   collection?: CollectionHandlers;
 

@@ -10,7 +10,7 @@
  * trigonometric expressions.
  */
 
-import type { BoxedExpression, RuleStep } from '../global-types';
+import type { Expression, RuleStep } from '../global-types';
 
 import {
   hasTrigFunction,
@@ -58,9 +58,9 @@ export interface FuOptions {
  * Select the expression with the lowest cost from a list of candidates.
  */
 function bestOf(
-  exprs: BoxedExpression[],
+  exprs: Expression[],
   measure: TrigCostFunction
-): BoxedExpression {
+): Expression {
   if (exprs.length === 0) throw new Error('bestOf called with empty array');
   if (exprs.length === 1) return exprs[0];
 
@@ -82,9 +82,9 @@ function bestOf(
  * Apply a transformation and return the result only if it's different.
  */
 function tryTransform(
-  expr: BoxedExpression,
-  transform: (e: BoxedExpression) => BoxedExpression
-): BoxedExpression | null {
+  expr: Expression,
+  transform: (e: Expression) => Expression
+): Expression | null {
   const result = transform(expr);
   // Only return if actually different
   if (result.isSame(expr)) return null;
@@ -101,9 +101,9 @@ function tryTransform(
  * Tries: original, TR5 (sin² -> 1-cos²), TR6 (cos² -> 1-sin²)
  */
 function CTR1(
-  expr: BoxedExpression,
+  expr: Expression,
   measure: TrigCostFunction
-): BoxedExpression {
+): Expression {
   const tr5Result = tryTransform(expr, applyTR5);
   const tr6Result = tryTransform(expr, applyTR6);
 
@@ -118,9 +118,9 @@ function CTR1(
  * CTR2: Same as CTR1, used after TR11 in RL2
  */
 function CTR2(
-  expr: BoxedExpression,
+  expr: Expression,
   measure: TrigCostFunction
-): BoxedExpression {
+): Expression {
   return CTR1(expr, measure);
 }
 
@@ -129,9 +129,9 @@ function CTR2(
  * Tries: original, TR8 (product-to-sum), TR8 then TR10i (contract angles)
  */
 function CTR3(
-  expr: BoxedExpression,
+  expr: Expression,
   measure: TrigCostFunction
-): BoxedExpression {
+): Expression {
   const tr8Result = tryTransform(expr, applyTR8);
 
   const candidates = [expr];
@@ -150,9 +150,9 @@ function CTR3(
  * Tries: original, TR10i (angle contraction)
  */
 function CTR4(
-  expr: BoxedExpression,
+  expr: Expression,
   measure: TrigCostFunction
-): BoxedExpression {
+): Expression {
   const tr10iResult = tryTransform(expr, applyTR10i);
 
   const candidates = [expr];
@@ -171,9 +171,9 @@ function CTR4(
  * Applies tan addition formula and tan*tan/cot*cot identities
  */
 function RL1(
-  expr: BoxedExpression,
+  expr: Expression,
   _measure: TrigCostFunction
-): BoxedExpression {
+): Expression {
   // Apply TR12 (tan addition) then TR13 (tan products)
   let result = applyTR12(expr);
   result = applyTR13(result);
@@ -185,9 +185,9 @@ function RL1(
  * The main simplification sequence for sin/cos expressions.
  */
 function RL2(
-  expr: BoxedExpression,
+  expr: Expression,
   measure: TrigCostFunction
-): BoxedExpression {
+): Expression {
   let result = expr;
 
   // Expand angles, then double angles, apply Pythagorean, power reduction, double angles again
@@ -238,7 +238,7 @@ function RL2(
  * @returns RuleStep with simplified expression, or undefined if no simplification
  */
 export function fu(
-  expr: BoxedExpression,
+  expr: Expression,
   options?: FuOptions
 ): RuleStep | undefined {
   // Skip if no trig functions
@@ -254,7 +254,7 @@ export function fu(
   let bestResult = expr;
   let bestCost = measure(expr);
 
-  const updateBest = (candidate: BoxedExpression) => {
+  const updateBest = (candidate: Expression) => {
     const cost = measure(candidate);
     if (cost < bestCost) {
       bestResult = candidate;
@@ -396,9 +396,9 @@ export function fu(
  * Simplified entry point that returns the expression directly.
  */
 export function fuSimplify(
-  expr: BoxedExpression,
+  expr: Expression,
   options?: FuOptions
-): BoxedExpression {
+): Expression {
   const result = fu(expr, options);
   return result?.value ?? expr;
 }

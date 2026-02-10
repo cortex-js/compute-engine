@@ -1,5 +1,5 @@
 import type {
-  BoxedExpression,
+  Expression,
   IComputeEngine as ComputeEngine,
   Scope,
 } from '../global-types';
@@ -9,9 +9,9 @@ import type {
  */
 export function canonical(
   ce: ComputeEngine,
-  xs: ReadonlyArray<BoxedExpression>,
+  xs: ReadonlyArray<Expression>,
   scope?: Scope
-): ReadonlyArray<BoxedExpression> {
+): ReadonlyArray<Expression> {
   // Avoid memory allocation if possible
   if (xs.every((x) => x.isCanonical)) return xs;
 

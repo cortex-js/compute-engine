@@ -1,4 +1,4 @@
-import { MathJsonExpression as Expression } from '../../math-json/types';
+import { MathJsonExpression } from '../../math-json/types';
 import { NumberFormat, NumberSerializationFormat } from './types';
 
 // Some vocabulary:
@@ -103,7 +103,7 @@ function formatExponent(exp: string, options: NumberFormat): string {
  * `options`
  */
 export function serializeNumber(
-  expr: Expression | null,
+  expr: MathJsonExpression | null,
   options: NumberSerializationFormat
 ): string {
   if (expr === null) return '';

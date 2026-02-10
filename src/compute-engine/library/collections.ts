@@ -20,7 +20,7 @@ import {
 import { interval } from '../numerics/interval';
 import { CancellationError } from '../../common/interruptible';
 import type {
-  BoxedExpression,
+  Expression,
   OperatorDefinition,
   ExpressionInput,
   SymbolDefinitions,
@@ -98,7 +98,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       parseType(`set<${BoxedType.widen(...ops.map((op) => op.type))}>`),
 
     canonical: canonicalSet,
-    eq: (a: BoxedExpression, b: BoxedExpression) => {
+    eq: (a: Expression, b: Expression) => {
       if (a.operator !== b.operator) return false;
       if (!isFunction(a) || !isFunction(b)) return false;
       if (a.nops !== b.nops) return false;
@@ -194,7 +194,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       ]);
     },
 
-    eq: (a: BoxedExpression, b: BoxedExpression) => {
+    eq: (a: Expression, b: Expression) => {
       if (a.operator !== b.operator) return false;
       const [al, au, as] = range(a);
       const [bl, bu, bs] = range(b);
@@ -243,9 +243,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // Return the nth step of the range.
       // Questionable if this is useful.
       at: (
-        expr: BoxedExpression,
+        expr: Expression,
         index: number | string
-      ): undefined | BoxedExpression => {
+      ): undefined | Expression => {
         if (typeof index !== 'number') return undefined;
         const [lower, upper, step] = range(expr);
         if (index < 1 || index > 1 + (upper - lower) / step) return undefined;
@@ -300,7 +300,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       if (!lower.isValid || !upper.isValid) return null;
       return engine._fn('Interval', [lower, upper]);
     },
-    eq: (a: BoxedExpression, b: BoxedExpression) => {
+    eq: (a: Expression, b: Expression) => {
       const intervalA = interval(a);
       const intervalB = interval(b);
       if (!intervalA || !intervalB) return false;
@@ -416,9 +416,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         return Math.max(0, Math.floor(count));
       },
       at: (
-        expr: BoxedExpression,
+        expr: Expression,
         index: number | string
-      ): undefined | BoxedExpression => {
+      ): undefined | Expression => {
         if (typeof index !== 'number') return undefined;
         if (!isFunction(expr)) return undefined;
         const lower = expr.op1.re;
@@ -595,7 +595,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           },
         };
       },
-      at: (expr: BoxedExpression, index: number | string) => {
+      at: (expr: Expression, index: number | string) => {
         if (!isFunction(expr)) return undefined;
         if (!expr.isIndexedCollection) return undefined;
         if (typeof index !== 'number') return undefined;
@@ -688,9 +688,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
        * as soon as the requested element is found.
        */
       at: (
-        expr: BoxedExpression,
+        expr: Expression,
         index: number | string
-      ): BoxedExpression | undefined => {
+      ): Expression | undefined => {
         // Only numeric indexes are supported
         if (typeof index !== 'number' || !Number.isFinite(index) || index === 0)
           return undefined;
@@ -902,9 +902,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       },
       iterator: takeIterator,
       at: (
-        expr: BoxedExpression,
+        expr: Expression,
         index: number | string
-      ): undefined | BoxedExpression => {
+      ): undefined | Expression => {
         if (typeof index !== 'number' || index === 0) return undefined;
         if (!isFunction(expr)) return undefined;
         const n = Math.max(0, toInteger(expr.op2) ?? 0);
@@ -965,9 +965,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         };
       },
       at: (
-        expr: BoxedExpression,
+        expr: Expression,
         index: number | string
-      ): undefined | BoxedExpression => {
+      ): undefined | Expression => {
         if (typeof index !== 'number') return undefined;
         if (!isFunction(expr)) return undefined;
         const [xs, nExpr] = expr.ops;
@@ -1041,9 +1041,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         };
       },
       at: (
-        expr: BoxedExpression,
+        expr: Expression,
         index: number | string
-      ): undefined | BoxedExpression => {
+      ): undefined | Expression => {
         if (typeof index !== 'number') return undefined;
         if (!isFunction(expr)) return undefined;
 
@@ -1095,9 +1095,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         };
       },
       at: (
-        expr: BoxedExpression,
+        expr: Expression,
         index: number | string
-      ): undefined | BoxedExpression => {
+      ): undefined | Expression => {
         if (typeof index !== 'number') return undefined;
         if (!isFunction(expr)) return undefined;
         const l = expr.op1.count;
@@ -1131,9 +1131,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       },
       isFinite: (_expr) => true,
       at: (
-        expr: BoxedExpression,
+        expr: Expression,
         index: number | string
-      ): undefined | BoxedExpression => {
+      ): undefined | Expression => {
         if (typeof index !== 'number') return undefined;
         if (!isFunction(expr)) return undefined;
         const count = expr.op1.count;
@@ -1215,9 +1215,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         };
       },
       at: (
-        expr: BoxedExpression,
+        expr: Expression,
         index: number | string
-      ): undefined | BoxedExpression => {
+      ): undefined | Expression => {
         if (typeof index !== 'number') return undefined;
         if (!isFunction(expr)) return undefined;
         return expr.op1.at(-index);
@@ -1271,9 +1271,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         };
       },
       at: (
-        expr: BoxedExpression,
+        expr: Expression,
         index: number | string
-      ): undefined | BoxedExpression => {
+      ): undefined | Expression => {
         if (typeof index !== 'number') return undefined;
         if (!isFunction(expr)) return undefined;
         const l = expr.op1.count;
@@ -1326,9 +1326,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         };
       },
       at: (
-        expr: BoxedExpression,
+        expr: Expression,
         index: number | string
-      ): undefined | BoxedExpression => {
+      ): undefined | Expression => {
         if (typeof index !== 'number') return undefined;
         if (!isFunction(expr)) return undefined;
         const l = expr.op1.count;
@@ -1430,7 +1430,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     evaluate: ([xs, fn], { engine: ce }) => {
       const f = applicable(fn);
       if (!f) return ce.function('List', []);
-      const indices: BoxedExpression[] = [];
+      const indices: Expression[] = [];
       let index = 1;
       for (const item of xs.each()) {
         const pred = sym(f([item]));
@@ -1614,7 +1614,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const k = toInteger(arg);
       if (k !== null && k > 0) {
         const all = Array.from(xs.each());
-        const result: BoxedExpression[] = [];
+        const result: Expression[] = [];
         const chunkSize = Math.ceil(all.length / k);
 
         for (let i = 0; i < k; i++) {
@@ -1629,8 +1629,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const fn = applicable(arg);
       if (!fn) return undefined;
 
-      const trueGroup: BoxedExpression[] = [];
-      const falseGroup: BoxedExpression[] = [];
+      const trueGroup: Expression[] = [];
+      const falseGroup: Expression[] = [];
       for (const item of xs.each()) {
         const pred = sym(fn([item]));
         if (pred === 'True') trueGroup.push(item);
@@ -1657,7 +1657,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       if (!xs.isFiniteCollection || k === null || k <= 0) return undefined;
 
       const all = Array.from(xs.each());
-      const result: BoxedExpression[] = [];
+      const result: Expression[] = [];
       const chunkSize = Math.ceil(all.length / k);
 
       for (let i = 0; i < k; i++) {
@@ -1680,7 +1680,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const f = applicable(fn);
       if (!f) return undefined;
 
-      const groups: Record<string, BoxedExpression[]> = {};
+      const groups: Record<string, Expression[]> = {};
 
       for (const item of xs.each()) {
         const keyExpr = f([item]) ?? ce.Nothing;
@@ -1737,7 +1737,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
             if (items.some((x) => x === undefined))
               return { value: undefined, done: true };
             return {
-              value: expr.engine.tuple(...(items as BoxedExpression[])),
+              value: expr.engine.tuple(...(items as Expression[])),
               done: false,
             };
           },
@@ -1751,7 +1751,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           return undefined;
         const items = expr.ops.map((op) => op.at(index));
         if (items.some((x) => x === undefined)) return undefined;
-        return expr.engine.tuple(...(items as BoxedExpression[]));
+        return expr.engine.tuple(...(items as Expression[]));
       },
     },
   },
@@ -1909,7 +1909,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           next: () => {
             if (index === last + 1) return { value: undefined, done: true };
             index += 1;
-            const row: BoxedExpression[] = [];
+            const row: Expression[] = [];
             for (let j = 1; j <= cols; j++) {
               row.push(
                 f([expr.engine.number(index - 1), expr.engine.number(j)]) ??
@@ -1960,12 +1960,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       return parseType(`list<${typeToString(type)}>`);
     },
     evaluate: (ops, { engine: ce }) => {
-      const elements: BoxedExpression[] = [];
+      const elements: Expression[] = [];
       for (const xs of ops) {
         if (!xs.isCollection) elements.push(xs);
         else {
           if (!xs.isFiniteCollection) return undefined;
-          elements.push(...(Array.from(xs.each()) as BoxedExpression[]));
+          elements.push(...(Array.from(xs.each()) as Expression[]));
         }
       }
       return ce.function('List', elements);
@@ -1986,12 +1986,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       return parseType(`set<${typeToString(type)}>`);
     },
     evaluate: (ops, { engine: ce }) => {
-      const elements: BoxedExpression[] = [];
+      const elements: Expression[] = [];
       for (const xs of ops) {
         if (xs.isCollection) elements.push(xs);
         else {
           if (!xs.isFiniteCollection) return undefined;
-          elements.push(...(Array.from(xs.each()) as BoxedExpression[]));
+          elements.push(...(Array.from(xs.each()) as Expression[]));
         }
       }
       return ce.function('Set', elements);
@@ -2003,12 +2003,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 8200,
     signature: '(value*) -> tuple',
     evaluate: (ops, { engine: ce }) => {
-      const elements: BoxedExpression[] = [];
+      const elements: Expression[] = [];
       for (const xs of ops) {
         if (xs.isCollection) elements.push(xs);
         else {
           if (!xs.isFiniteCollection) return undefined;
-          elements.push(...(Array.from(xs.each()) as BoxedExpression[]));
+          elements.push(...(Array.from(xs.each()) as Expression[]));
         }
       }
       return ce.tuple(...elements);
@@ -2027,7 +2027,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       if (xs.operator === 'Record' && isFunction(xs))
         return ce.function('Dictionary', [...xs.ops]);
 
-      const entries: BoxedExpression[] = [];
+      const entries: Expression[] = [];
       for (const keyValue of xs.each()) {
         if (!isFunction(keyValue) || keyValue.nops !== 2) {
           throw new Error(
@@ -2057,7 +2057,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       if (xs.operator === 'Dictionary' && isFunction(xs))
         return ce.function('Record', [...xs.ops]);
 
-      const entries: BoxedExpression[] = [];
+      const entries: Expression[] = [];
       for (const keyValue of xs.each()) {
         if (!isFunction(keyValue) || keyValue.nops !== 2) {
           throw new Error(
@@ -2084,7 +2084,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
  *
  */
 export function range(
-  expr: BoxedExpression
+  expr: Expression
 ): [lower: number, upper: number, step: number] {
   if (!isFunction(expr)) return [1, 0, 0];
   if (expr.nops === 0) return [1, 0, 0];
@@ -2135,7 +2135,7 @@ export function rangeLast(
  *
  */
 function _indexRangeArg(
-  op: BoxedExpression | undefined,
+  op: Expression | undefined,
   l: number
 ): [lower: number, upper: number, step: number] {
   if (!op) return [0, 0, 0];
@@ -2169,9 +2169,9 @@ function _indexRangeArg(
 }
 
 function canonicalList(
-  ops: BoxedExpression[],
+  ops: Expression[],
   { engine: ce }
-): BoxedExpression {
+): Expression {
   // Do we have a matrix with a custom delimiter, i.e.
   // \left\lbrack \begin{array}...\end{array} \right\rbrack
 
@@ -2201,11 +2201,11 @@ function canonicalList(
 }
 
 function canonicalSet(
-  ops: ReadonlyArray<BoxedExpression>,
+  ops: ReadonlyArray<Expression>,
   { engine }
-): BoxedExpression {
+): Expression {
   // Check that each element is only present once
-  const set: BoxedExpression[] = [];
+  const set: Expression[] = [];
   const has = (x) => set.some((y) => y.isSame(x));
 
   for (const op of ops) if (!has(op)) set.push(op);
@@ -2214,12 +2214,12 @@ function canonicalSet(
 }
 
 function tally(
-  collection: BoxedExpression
-): [ReadonlyArray<BoxedExpression>, number[]] {
-  const values: BoxedExpression[] = [];
+  collection: Expression
+): [ReadonlyArray<Expression>, number[]] {
+  const values: Expression[] = [];
   const counts: number[] = [];
 
-  const indexOf = (expr: BoxedExpression) => {
+  const indexOf = (expr: Expression) => {
     for (let i = 0; i < values.length; i++)
       if (values[i].isSame(expr)) return i;
     return -1;
@@ -2245,8 +2245,8 @@ function tally(
  * If the iteration completes, the final accumulator is returned.
  */
 export function* reduceCollection<T>(
-  collection: BoxedExpression,
-  fn: (acc: T, next: BoxedExpression) => T | null,
+  collection: Expression,
+  fn: (acc: T, next: Expression) => T | null,
   initial: T
 ): Generator<T | undefined> {
   let acc = initial;
@@ -2261,14 +2261,14 @@ export function* reduceCollection<T>(
   return acc;
 }
 
-function joinResultType(ops: ReadonlyArray<BoxedExpression>): Type {
+function joinResultType(ops: ReadonlyArray<Expression>): Type {
   if (ops.some((op) => op.type.matches('record'))) return 'record';
   if (ops.some((op) => op.type.matches('dictionary'))) return 'dictionary';
   if (ops.some((op) => op.type.matches('set'))) return 'set';
   return 'list';
 }
 
-function defaultCollectionEq(a: BoxedExpression, b: BoxedExpression) {
+function defaultCollectionEq(a: Expression, b: Expression) {
   // Compare two collections
   if (a.operator !== b.operator) return false;
   if (!isFunction(a) || !isFunction(b)) return false;
@@ -2283,16 +2283,16 @@ export function fromRange(start: number, end: number): number[] {
 }
 
 export function sortedIndices(
-  expr: BoxedExpression,
-  fn: BoxedExpression | undefined = undefined
+  expr: Expression,
+  fn: Expression | undefined = undefined
 ): number[] | undefined {
   const f = fn ? applicable(fn) : undefined;
   const cmpFn = f
-    ? (a: BoxedExpression, b: BoxedExpression) => {
+    ? (a: Expression, b: Expression) => {
         const r = f([a, b]);
         return r?.isNegative ? -1 : r?.is(0) ? 0 : 1;
       }
-    : (a: BoxedExpression, b: BoxedExpression) => {
+    : (a: Expression, b: Expression) => {
         if (a.isLess(b)) return -1;
         if (a.isEqual(b)) return 0;
         return 1;
@@ -2319,10 +2319,10 @@ export function sortedIndices(
  *
  */
 
-function enlist(xs: ReadonlyArray<BoxedExpression>): BoxedExpression[] {
+function enlist(xs: ReadonlyArray<Expression>): Expression[] {
   if (xs.length === 0) return [];
 
-  const result: BoxedExpression[] = [];
+  const result: Expression[] = [];
   // let s: string | undefined = undefined;
   for (const x of xs) {
     if (sym(x) === 'Nothing') continue;
@@ -2357,7 +2357,7 @@ function enlist(xs: ReadonlyArray<BoxedExpression>): BoxedExpression[] {
   return result;
 }
 
-function takeIterator(expr: BoxedExpression): Iterator<BoxedExpression> {
+function takeIterator(expr: Expression): Iterator<Expression> {
   if (!isFunction(expr))
     return { next: () => ({ value: undefined, done: true }) };
   // Number of elements to take
@@ -2380,7 +2380,7 @@ function takeIterator(expr: BoxedExpression): Iterator<BoxedExpression> {
   };
 }
 
-function takeCount(expr: BoxedExpression): number | undefined {
+function takeCount(expr: Expression): number | undefined {
   if (!isFunction(expr)) return undefined;
   const [xs, op2] = expr.ops;
   const count = xs.count;
@@ -2390,7 +2390,7 @@ function takeCount(expr: BoxedExpression): number | undefined {
   return Math.min(count, n);
 }
 
-function zipCount(expr: BoxedExpression): number | undefined {
+function zipCount(expr: Expression): number | undefined {
   if (!isFunction(expr)) return undefined;
   const counts = expr.ops.map((x) => x.count);
   if (counts.some((c) => c === undefined)) return undefined;

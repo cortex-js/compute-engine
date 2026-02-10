@@ -1,5 +1,5 @@
 import type {
-  BoxedExpression,
+  Expression,
   BoxedSubstitution,
   IComputeEngine,
   AssumeResult,
@@ -19,12 +19,12 @@ import { isLatexString } from './latex-syntax/utils';
 
 export function ask(
   ce: IComputeEngine,
-  pattern: BoxedExpression
+  pattern: Expression
 ): BoxedSubstitution[] {
   const pat = ce.box(pattern, { form: 'raw' });
   const result: BoxedSubstitution[] = [];
 
-  const patternHasWildcards = (expr: BoxedExpression): boolean => {
+  const patternHasWildcards = (expr: Expression): boolean => {
     if (expr.operator?.startsWith('_')) return true;
     if (isWildcard(expr)) return true;
     if (isFunction(expr)) return expr.ops.some(patternHasWildcards);
@@ -65,8 +65,8 @@ export function ask(
   };
 
   const normalizedInequalityPatterns = (
-    expr: BoxedExpression
-  ): Array<{ pattern: BoxedExpression; matchPermutations?: boolean }> => {
+    expr: Expression
+  ): Array<{ pattern: Expression; matchPermutations?: boolean }> => {
     const op = expr.operator;
     if (
       op !== 'Less' &&
@@ -196,7 +196,7 @@ export function ask(
 
 export function verify(
   ce: IComputeEngine,
-  query: BoxedExpression
+  query: Expression
 ): boolean | undefined {
   // Prevent recursive verify() -> ask() -> verify() loops
   if (ce._isVerifying) return undefined;
@@ -257,7 +257,7 @@ export function verify(
 
 export function assumeFn(
   ce: IComputeEngine,
-  predicate: BoxedExpression
+  predicate: Expression
 ): AssumeResult {
   try {
     const pred = isLatexString(predicate)

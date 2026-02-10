@@ -1,7 +1,7 @@
 import type {
   BoxedSubstitution,
   PatternMatchOptions,
-  BoxedExpression,
+  Expression,
 } from '../global-types';
 
 import { permutations } from '../../common/utils';
@@ -15,7 +15,7 @@ import {
   isString,
 } from './type-guards';
 
-function hasWildcards(expr: string | BoxedExpression): boolean {
+function hasWildcards(expr: string | Expression): boolean {
   if (typeof expr === 'string') return expr.startsWith('_');
 
   if (isWildcard(expr)) return true;
@@ -42,7 +42,7 @@ function hasWildcards(expr: string | BoxedExpression): boolean {
  */
 function captureWildcard(
   wildcard: string,
-  expr: BoxedExpression,
+  expr: Expression,
   substitution: BoxedSubstitution
 ): BoxedSubstitution | null {
   console.assert(wildcard.startsWith('_'));
@@ -75,8 +75,8 @@ function captureWildcard(
  *
  */
 function matchOnce(
-  expr: BoxedExpression,
-  pattern: BoxedExpression,
+  expr: Expression,
+  pattern: Expression,
   substitution: BoxedSubstitution,
   options: PatternMatchOptions & {
     acceptVariants?: boolean;
@@ -282,8 +282,8 @@ function matchOnce(
  * to the arguments of the function.
  */
 function matchRecursive(
-  expr: BoxedExpression,
-  pattern: BoxedExpression,
+  expr: Expression,
+  pattern: Expression,
   substitution: BoxedSubstitution,
   options: PatternMatchOptions & {
     acceptVariants?: boolean;
@@ -310,8 +310,8 @@ function matchRecursive(
  * 'Square(x)' as a match for 'Power(x, 2)`.
  */
 function matchVariations(
-  expr: BoxedExpression,
-  pattern: BoxedExpression,
+  expr: Expression,
+  pattern: Expression,
   substitution: BoxedSubstitution,
   options: PatternMatchOptions
 ): BoxedSubstitution | null {
@@ -434,8 +434,8 @@ function matchVariations(
  * @returns
  */
 function matchPermutation(
-  expr: BoxedExpression,
-  pattern: BoxedExpression,
+  expr: Expression,
+  pattern: Expression,
   substitution: BoxedSubstitution,
   options: PatternMatchOptions
 ): BoxedSubstitution | null {
@@ -548,7 +548,7 @@ function matchPermutation(
   // Note: Sequence/OptionalSequence followed by universal Wildcard (_) is VALID
   // because the single-element wildcard provides an anchor point.
   const cond = (
-    xs: ReadonlyArray<BoxedExpression> /* , generated: Set<string> */
+    xs: ReadonlyArray<Expression> /* , generated: Set<string> */
   ) =>
     !xs.some((x, index) => {
       if (!isWildcard(x)) return false;
@@ -595,7 +595,7 @@ const MAX_COMBINATIONS = 1000;
  * - Simple functions: medium specificity
  * - Complex expressions: lower specificity
  */
-function anchorSpecificity(anchor: BoxedExpression): number {
+function anchorSpecificity(anchor: Expression): number {
   if (isNumber(anchor)) return 100;
   if (isSymbol(anchor)) return 80;
   if (isString(anchor)) return 90;
@@ -614,8 +614,8 @@ function anchorSpecificity(anchor: BoxedExpression): number {
 }
 
 function matchCommutativeWithAnchors(
-  expr: BoxedExpression,
-  pattern: BoxedExpression,
+  expr: Expression,
+  pattern: Expression,
   substitution: BoxedSubstitution,
   options: PatternMatchOptions
 ): BoxedSubstitution | null {
@@ -625,10 +625,10 @@ function matchCommutativeWithAnchors(
   const exprOps = [...expr.ops];
 
   // Categorize pattern operands
-  const anchors: BoxedExpression[] = [];
-  const universalWildcards: BoxedExpression[] = [];
-  const sequenceWildcards: BoxedExpression[] = [];
-  const optionalSeqWildcards: BoxedExpression[] = [];
+  const anchors: Expression[] = [];
+  const universalWildcards: Expression[] = [];
+  const sequenceWildcards: Expression[] = [];
+  const optionalSeqWildcards: Expression[] = [];
 
   for (const op of patternOps) {
     const wType = wildcardType(op);
@@ -671,7 +671,7 @@ function matchCommutativeWithAnchors(
 
   function tryMatchAnchors(
     anchorIndex: number,
-    remainingOps: BoxedExpression[],
+    remainingOps: Expression[],
     sub: BoxedSubstitution
   ): BoxedSubstitution | null {
     // All anchors matched - now assign remaining ops to wildcards
@@ -709,7 +709,7 @@ function matchCommutativeWithAnchors(
   }
 
   function assignWildcards(
-    remainingOps: BoxedExpression[],
+    remainingOps: Expression[],
     sub: BoxedSubstitution
   ): BoxedSubstitution | null {
     const result: BoxedSubstitution | null = sub;
@@ -732,8 +732,8 @@ function matchCommutativeWithAnchors(
   }
 
   function tryAssignWildcards(
-    wildcards: BoxedExpression[],
-    remaining: BoxedExpression[],
+    wildcards: Expression[],
+    remaining: Expression[],
     sub: BoxedSubstitution
   ): BoxedSubstitution | null {
     if (wildcards.length === 0) {
@@ -832,7 +832,7 @@ function matchCommutativeWithAnchors(
     return null;
   }
 
-  function countMinNeeded(wildcards: BoxedExpression[]): number {
+  function countMinNeeded(wildcards: Expression[]): number {
     return wildcards.reduce((sum, wc) => {
       const wType = wildcardType(wc);
       if (wType === 'Wildcard') return sum + 1;
@@ -841,7 +841,7 @@ function matchCommutativeWithAnchors(
     }, 0);
   }
 
-  function wrapCaptured(captured: BoxedExpression[]): BoxedExpression {
+  function wrapCaptured(captured: Expression[]): Expression {
     if (captured.length === 1) return captured[0];
     // For associative operators, wrap in the same operator
     const def = ce.lookupDefinition(expr.operator);
@@ -899,8 +899,8 @@ function matchCommutativeWithAnchors(
  * @returns
  */
 function matchArguments(
-  expr: BoxedExpression,
-  patterns: ReadonlyArray<BoxedExpression>,
+  expr: Expression,
+  patterns: ReadonlyArray<Expression>,
   substitution: BoxedSubstitution,
   options: PatternMatchOptions
 ): BoxedSubstitution | null {
@@ -932,7 +932,7 @@ function matchArguments(
    * @returns
    */
   function matchRemaining(
-    patterns: ReadonlyArray<BoxedExpression>,
+    patterns: ReadonlyArray<Expression>,
     substitution: BoxedSubstitution
   ): BoxedSubstitution | null {
     let result: BoxedSubstitution | null = { ...substitution };
@@ -1113,8 +1113,8 @@ function matchArguments(
      * @param qty
      * @returns
      */
-    function captureOps(qty: number): BoxedExpression {
-      let value: BoxedExpression;
+    function captureOps(qty: number): Expression {
+      let value: Expression;
       if (qty < 1) {
         // Otherwise must be an optional-sequence match: this is permitted.
         if (expr.operator === 'Add') value = ce.Zero;
@@ -1179,8 +1179,8 @@ function matchArguments(
  *
  */
 export function match(
-  subject: BoxedExpression,
-  pattern: BoxedExpression,
+  subject: Expression,
+  pattern: Expression,
   options?: PatternMatchOptions
 ): BoxedSubstitution | null {
   pattern = pattern.structural;

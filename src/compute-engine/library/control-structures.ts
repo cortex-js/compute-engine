@@ -3,7 +3,7 @@ import { checkConditions } from '../boxed-expression/rules';
 import { widen } from '../../common/type/utils';
 import { CancellationError, run, runAsync } from '../../common/interruptible';
 import type {
-  BoxedExpression,
+  Expression,
   SymbolDefinitions,
   EvaluateOptions,
   IComputeEngine as ComputeEngine,
@@ -100,9 +100,9 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
 ];
 
 function evaluateWhich(
-  args: ReadonlyArray<BoxedExpression>,
+  args: ReadonlyArray<Expression>,
   options: EvaluateOptions & { engine: ComputeEngine }
-): BoxedExpression {
+): Expression {
   let i = 0;
   while (i < args.length - 1) {
     const cond = sym(args[i].evaluate());
@@ -122,13 +122,13 @@ function evaluateWhich(
 
 /** Evaluate a Block expression */
 function evaluateBlock(
-  ops: ReadonlyArray<BoxedExpression>,
+  ops: ReadonlyArray<Expression>,
   { engine: ce }
-): BoxedExpression {
+): Expression {
   // Empty block?
   if (ops.length === 0) return ce.Nothing;
 
-  let result: BoxedExpression | undefined = undefined;
+  let result: Expression | undefined = undefined;
   for (const op of ops) {
     const h = op.operator;
     if (h === 'Return' && isFunction(op)) {
@@ -156,9 +156,9 @@ function evaluateBlock(
  */
 
 function canonicalBlock(
-  ops: ReadonlyArray<BoxedExpression>,
+  ops: ReadonlyArray<Expression>,
   options: { engine: ComputeEngine; scope: Scope | undefined }
-): BoxedExpression | null {
+): Expression | null {
   const { engine: ce, scope } = options;
   // Empty block?
   if (ops.length === 0) return null;
@@ -173,10 +173,10 @@ function canonicalBlock(
 }
 
 function* runLoop(
-  body: BoxedExpression,
-  collection: BoxedExpression,
+  body: Expression,
+  collection: Expression,
   ce: ComputeEngine
-): Generator<BoxedExpression> {
+): Generator<Expression> {
   body ??= ce.Nothing;
   if (sym(body) === 'Nothing') return body;
 
@@ -184,7 +184,7 @@ function* runLoop(
     //
     // Iterate over the elements of a collection
     //
-    let result: BoxedExpression | undefined = undefined;
+    let result: Expression | undefined = undefined;
     const fn = applicable(body);
     let i = 0;
 

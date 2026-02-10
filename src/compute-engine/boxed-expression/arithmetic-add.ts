@@ -7,7 +7,7 @@ import { widen } from '../../common/type/utils';
 import { isSubtype } from '../../common/type/subtype';
 import { BoxedType } from '../../common/type/boxed-type';
 import type {
-  BoxedExpression,
+  Expression,
   TensorInterface,
   IComputeEngine as ComputeEngine,
 } from '../global-types';
@@ -31,8 +31,8 @@ import { MachineNumericValue } from '../numeric-value/machine-numeric-value';
  */
 export function canonicalAdd(
   ce: ComputeEngine,
-  ops: ReadonlyArray<BoxedExpression>
-): BoxedExpression {
+  ops: ReadonlyArray<Expression>
+): Expression {
   // Make canonical, flatten, and lift nested expressions (associative)
   ops = flatten(ops, 'Add');
 
@@ -48,7 +48,7 @@ export function canonicalAdd(
   //
   {
     const exactNumerics: NumericValue[] = [];
-    const rest: BoxedExpression[] = [];
+    const rest: Expression[] = [];
     for (const op of ops) {
       if (isNumber(op) && !op.isInfinity && !op.isNaN) {
         const nv = op.numericValue;
@@ -75,7 +75,7 @@ export function canonicalAdd(
 
   // Combine pure-real and pure-imaginary BoxedNumber operands into complex numbers.
   // First pass: check if there are any imaginary terms (otherwise skip entirely)
-  const xs: BoxedExpression[] = [];
+  const xs: Expression[] = [];
   {
     let imSum = 0;
     let hasIm = false;
@@ -146,14 +146,14 @@ export function canonicalAdd(
 }
 
 export function addType(
-  args: ReadonlyArray<BoxedExpression>
+  args: ReadonlyArray<Expression>
 ): Type | BoxedType {
   if (args.length === 0) return 'finite_integer'; // = 0
   if (args.length === 1) return args[0].type;
   return widen(...args.map((x) => x.type.type));
 }
 
-export function add(...xs: ReadonlyArray<BoxedExpression>): BoxedExpression {
+export function add(...xs: ReadonlyArray<Expression>): Expression {
   console.assert(xs.length > 0);
   if (!xs.every((x) => x.isValid)) return xs[0].engine._fn('Add', xs);
 
@@ -164,7 +164,7 @@ export function add(...xs: ReadonlyArray<BoxedExpression>): BoxedExpression {
   return new Terms(xs[0].engine, xs).asExpression();
 }
 
-export function addN(...xs: ReadonlyArray<BoxedExpression>): BoxedExpression {
+export function addN(...xs: ReadonlyArray<Expression>): Expression {
   console.assert(xs.length > 0);
   if (!xs.every((x) => x.isValid)) return xs[0].engine._fn('Add', xs);
 
@@ -188,11 +188,11 @@ export function addN(...xs: ReadonlyArray<BoxedExpression>): BoxedExpression {
  */
 function addTensors(
   ce: ComputeEngine,
-  ops: ReadonlyArray<BoxedExpression>
-): BoxedExpression {
+  ops: ReadonlyArray<Expression>
+): Expression {
   // Separate tensors and scalars
-  const tensors: (BoxedExpression & TensorInterface)[] = [];
-  const scalars: BoxedExpression[] = [];
+  const tensors: (Expression & TensorInterface)[] = [];
+  const scalars: Expression[] = [];
 
   for (const op of ops) {
     const evaluated = op.evaluate();
@@ -226,7 +226,7 @@ function addTensors(
   }
 
   // Compute scalar sum (to add to each element)
-  let scalarSum: BoxedExpression = ce.Zero;
+  let scalarSum: Expression = ce.Zero;
   for (const s of scalars) {
     scalarSum = scalarSum.add(s);
   }
@@ -234,7 +234,7 @@ function addTensors(
   // For vectors (rank 1)
   if (referenceShape.length === 1) {
     const n = referenceShape[0];
-    const result: BoxedExpression[] = [];
+    const result: Expression[] = [];
     for (let i = 0; i < n; i++) {
       let sum = scalarSum;
       for (const tensor of tensors) {
@@ -250,9 +250,9 @@ function addTensors(
   // For matrices (rank 2)
   if (referenceShape.length === 2) {
     const [m, n] = referenceShape;
-    const rows: BoxedExpression[] = [];
+    const rows: Expression[] = [];
     for (let i = 0; i < m; i++) {
-      const row: BoxedExpression[] = [];
+      const row: Expression[] = [];
       for (let j = 0; j < n; j++) {
         let sum = scalarSum;
         for (const tensor of tensors) {
@@ -278,9 +278,9 @@ function addTensors(
 // Represent a sum of terms
 export class Terms {
   private engine: ComputeEngine;
-  private terms: { coef: NumericValue[]; term: BoxedExpression }[] = [];
+  private terms: { coef: NumericValue[]; term: Expression }[] = [];
 
-  constructor(ce: ComputeEngine, terms: ReadonlyArray<BoxedExpression>) {
+  constructor(ce: ComputeEngine, terms: ReadonlyArray<Expression>) {
     this.engine = ce;
     let posInfinityCount = 0;
     let negInfinityCount = 0;
@@ -329,7 +329,7 @@ export class Terms {
     }
   }
 
-  private _add(coef: NumericValue, term: BoxedExpression): void {
+  private _add(coef: NumericValue, term: Expression): void {
     if (term.is(0) || coef.isZero) return;
     if (term.is(1)) {
       // We have a numeric value. Keep it in the terms,
@@ -365,18 +365,18 @@ export class Terms {
     this.terms.push({ coef: [coef], term });
   }
 
-  private find(term: BoxedExpression): number {
+  private find(term: Expression): number {
     return this.terms.findIndex((x) => x.term.isSame(term));
   }
 
-  N(): BoxedExpression {
+  N(): Expression {
     const ce = this.engine;
 
     const terms = this.terms;
 
     if (terms.length === 0) return ce.Zero;
 
-    const rest: BoxedExpression[] = [];
+    const rest: Expression[] = [];
     const numericValues: NumericValue[] = [];
 
     // Gather all the numericValues and the rest
@@ -406,7 +406,7 @@ export class Terms {
     return canonicalAdd(ce, rest);
   }
 
-  asExpression(): BoxedExpression {
+  asExpression(): Expression {
     const ce = this.engine;
 
     const terms = this.terms;

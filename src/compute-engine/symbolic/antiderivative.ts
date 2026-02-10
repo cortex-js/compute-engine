@@ -1,4 +1,4 @@
-import type { BoxedExpression, BoxedSubstitution, Rule } from '../global-types';
+import type { Expression, BoxedSubstitution, Rule } from '../global-types';
 
 import { mul } from '../boxed-expression/arithmetic-mul-div';
 import { add } from '../boxed-expression/arithmetic-add';
@@ -31,7 +31,7 @@ import {
  * T: Trigonometric (2)
  * E: Exponential (1)
  */
-function liatePriority(expr: BoxedExpression, index: string): number {
+function liatePriority(expr: Expression, index: string): number {
   if (!expr.has(index)) return 0; // Constants have lowest priority
 
   const op = expr.operator;
@@ -93,10 +93,10 @@ function liatePriority(expr: BoxedExpression, index: string): number {
  * doesn't apply or leads to a more complex integral.
  */
 function tryIntegrationByParts(
-  factors: ReadonlyArray<BoxedExpression>,
+  factors: ReadonlyArray<Expression>,
   index: string,
   depth: number = 0
-): BoxedExpression | null {
+): Expression | null {
   if (factors.length < 2 || depth > 2) return null; // Limit recursion depth
 
   // Sort factors by LIATE priority (descending)
@@ -133,9 +133,9 @@ function tryIntegrationByParts(
  * Simple antiderivative without integration by parts (to avoid recursion).
  */
 function antiderivativeSimple(
-  fn: BoxedExpression,
+  fn: Expression,
   index: string
-): BoxedExpression | null {
+): Expression | null {
   const ce = fn.engine;
 
   // Is it the index?
@@ -184,10 +184,10 @@ function antiderivativeSimple(
  * Antiderivative with optional integration by parts.
  */
 function antiderivativeWithByParts(
-  fn: BoxedExpression,
+  fn: Expression,
   index: string,
   depth: number
-): BoxedExpression {
+): Expression {
   // First try simple antiderivative
   const simple = antiderivativeSimple(fn, index);
   if (simple) return simple;
@@ -219,9 +219,9 @@ function antiderivativeWithByParts(
  * Returns the result if successful, or null if u-substitution doesn't apply.
  */
 function tryUSubstitution(
-  fn: BoxedExpression,
+  fn: Expression,
   index: string
-): BoxedExpression | null {
+): Expression | null {
   if (fn.operator !== 'Multiply' || !isFunction(fn)) return null;
 
   const ce = fn.engine;
@@ -275,9 +275,9 @@ function tryUSubstitution(
  * Returns { outer: f, inner: g(x) } or null if not a composite.
  */
 function getInnerFunction(
-  expr: BoxedExpression,
+  expr: Expression,
   index: string
-): { outer: string; inner: BoxedExpression } | null {
+): { outer: string; inner: Expression } | null {
   const op = expr.operator;
   if (!op) return null;
 
@@ -332,9 +332,9 @@ function getInnerFunction(
  */
 function applyOuter(
   outer: string,
-  arg: BoxedExpression,
-  ce: BoxedExpression['engine']
-): BoxedExpression {
+  arg: Expression,
+  ce: Expression['engine']
+): Expression {
   // Exp is represented as ['Power', 'ExponentialE', arg] in canonical form
   if (outer === 'Exp') {
     return ce.box(['Power', 'ExponentialE', arg]);
@@ -347,9 +347,9 @@ function applyOuter(
  * Handles cases where the integrand is a composite function with a linear inner function.
  */
 function tryLinearSubstitution(
-  fn: BoxedExpression,
+  fn: Expression,
   index: string
-): BoxedExpression | null {
+): Expression | null {
   const ce = fn.engine;
   const innerInfo = getInnerFunction(fn, index);
   if (!innerInfo) return null;
@@ -358,7 +358,7 @@ function tryLinearSubstitution(
 
   // Check if inner is linear in index: ax + b form
   // or just ax (when b = 0)
-  let coefficient: BoxedExpression | null = null;
+  let coefficient: Expression | null = null;
 
   if (inner.operator === 'Multiply' && isFunction(inner)) {
     // Check if it's c*x form
@@ -376,8 +376,8 @@ function tryLinearSubstitution(
   } else if (inner.operator === 'Add' && isFunction(inner)) {
     // Check for ax + b form
     const terms = inner.ops;
-    let linearTerm: BoxedExpression | null = null;
-    const constantTerms: BoxedExpression[] = [];
+    let linearTerm: Expression | null = null;
+    const constantTerms: Expression[] = [];
 
     for (const term of terms) {
       if (!term.has(index)) {
@@ -427,10 +427,10 @@ function tryLinearSubstitution(
  * Returns c if true, null otherwise.
  */
 function tryGetConstantRatio(
-  expr1: BoxedExpression,
-  expr2: BoxedExpression,
+  expr1: Expression,
+  expr2: Expression,
   index: string
-): BoxedExpression | null {
+): Expression | null {
   const ce = expr1.engine;
 
   // Simple case: exact match
@@ -456,14 +456,14 @@ function tryGetConstantRatio(
  * ∫ e^x * cos(ax+b) dx = (e^x/(a² + 1)) * (a*sin(ax+b) + cos(ax+b))
  */
 function tryCyclicExpTrigIntegral(
-  factors: ReadonlyArray<BoxedExpression>,
+  factors: ReadonlyArray<Expression>,
   index: string
-): BoxedExpression | null {
+): Expression | null {
   if (factors.length !== 2) return null;
 
   const ce = factors[0].engine;
-  let expFactor: BoxedExpression | null = null;
-  let trigFactor: BoxedExpression | null = null;
+  let expFactor: Expression | null = null;
+  let trigFactor: Expression | null = null;
 
   for (const f of factors) {
     // Check for e^x
@@ -516,7 +516,7 @@ function tryCyclicExpTrigIntegral(
   // Case 2: sin(ax) where argument is just a*x (Multiply)
   if (trigArg.operator === 'Multiply' && isFunction(trigArg)) {
     // Find the coefficient and the variable
-    let coefficient: BoxedExpression | null = null;
+    let coefficient: Expression | null = null;
     let hasIndex = false;
 
     for (const op of trigArg.ops) {
@@ -1448,9 +1448,9 @@ const INTEGRATION_RULES: Rule[] = [
  * Returns the coefficients { a, b } if it is, null otherwise.
  */
 function getLinearCoefficients(
-  expr: BoxedExpression,
+  expr: Expression,
   index: string
-): { a: BoxedExpression; b: BoxedExpression } | null {
+): { a: Expression; b: Expression } | null {
   const ce = expr.engine;
 
   // Just the variable: x -> a=1, b=0
@@ -1462,8 +1462,8 @@ function getLinearCoefficients(
   if (expr.operator !== 'Add' || !isFunction(expr)) return null;
 
   const ops = expr.ops;
-  let a: BoxedExpression | null = null;
-  let b: BoxedExpression = ce.Zero;
+  let a: Expression | null = null;
+  let b: Expression = ce.Zero;
 
   for (const op of ops) {
     if (!op.has(index)) {
@@ -1506,9 +1506,9 @@ function getLinearCoefficients(
  * Returns null if the expression is not quadratic in the given variable.
  */
 function getQuadraticCoefficients(
-  expr: BoxedExpression,
+  expr: Expression,
   index: string
-): { a: BoxedExpression; b: BoxedExpression; c: BoxedExpression } | null {
+): { a: Expression; b: Expression; c: Expression } | null {
   const ce = expr.engine;
 
   // Must be an Add expression (or equivalent)
@@ -1549,9 +1549,9 @@ function getQuadraticCoefficients(
 
   if (!isFunction(expr)) return null;
   const ops = expr.ops;
-  let a: BoxedExpression = ce.Zero; // coefficient of x²
-  let b: BoxedExpression = ce.Zero; // coefficient of x
-  let c: BoxedExpression = ce.Zero; // constant term
+  let a: Expression = ce.Zero; // coefficient of x²
+  let b: Expression = ce.Zero; // coefficient of x
+  let c: Expression = ce.Zero; // constant term
 
   for (const op of ops) {
     if (!op.has(index)) {
@@ -1622,9 +1622,9 @@ function getQuadraticCoefficients(
 
 /** Calculate the antiderivative of fn, as an expression (not a function) */
 export function antiderivative(
-  fn: BoxedExpression,
+  fn: Expression,
   index: string
-): BoxedExpression {
+): Expression {
   if (fn.operator === 'Function' && isFunction(fn))
     return antiderivative(fn.op1, index);
   if (fn.operator === 'Block' && isFunction(fn))
@@ -1643,7 +1643,7 @@ export function antiderivative(
   // Apply the chain rule
   if (fn.operator === 'Add' && isFunction(fn)) {
     const terms = fn.ops.map((op) => antiderivative(op, index));
-    return add(...(terms as BoxedExpression[])).evaluate();
+    return add(...(terms as Expression[])).evaluate();
   }
 
   if (fn.operator === 'Negate' && isFunction(fn))
@@ -1651,8 +1651,8 @@ export function antiderivative(
 
   if (fn.operator === 'Multiply' && isFunction(fn)) {
     // Separate constant factors from variable factors
-    const constantFactors: BoxedExpression[] = [];
-    const variableFactors: BoxedExpression[] = [];
+    const constantFactors: Expression[] = [];
+    const variableFactors: Expression[] = [];
 
     for (const op of fn.ops) {
       if (!op.has(index)) {
@@ -2030,9 +2030,9 @@ export function antiderivative(
         denominator.nops === 2
       ) {
         const factors = denominator.ops;
-        let linearFactor: BoxedExpression | null = null;
-        let quadFactor: BoxedExpression | null = null;
-        let linearRoot: BoxedExpression | null = null;
+        let linearFactor: Expression | null = null;
+        let quadFactor: Expression | null = null;
+        let linearRoot: Expression | null = null;
 
         for (const factor of factors) {
           const linCoeffs = getLinearCoefficients(factor, index);
@@ -2124,7 +2124,7 @@ export function antiderivative(
           // Use partial fraction decomposition
           // For 1/((x-r1)(x-r2)...(x-rn)), each coefficient Ai = 1/∏(ri-rj) for j≠i
           // Then ∫1/((x-r1)...(x-rn)) dx = Σ Ai * ln|x-ri|
-          const resultTerms: BoxedExpression[] = [];
+          const resultTerms: Expression[] = [];
 
           for (let i = 0; i < roots.length; i++) {
             // Compute coefficient Ai using cover-up method
@@ -2508,7 +2508,7 @@ export function antiderivative(
   return integrate(fn, index);
 }
 
-function integrate(expr: BoxedExpression, variable: string): BoxedExpression {
+function integrate(expr: Expression, variable: string): Expression {
   const ce = expr.engine;
   return ce.function('Integrate', [
     expr,

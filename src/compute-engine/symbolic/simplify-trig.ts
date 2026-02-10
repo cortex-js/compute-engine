@@ -1,5 +1,5 @@
 import type {
-  BoxedExpression,
+  Expression,
   IComputeEngine as ComputeEngine,
   RuleStep,
 } from '../global-types';
@@ -90,9 +90,9 @@ const INVERSE_TRIG = new Set([
  */
 function reduceTrigPeriodicity(
   fn: 'Sin' | 'Cos' | 'Tan' | 'Cot' | 'Sec' | 'Csc',
-  arg: BoxedExpression,
+  arg: Expression,
   ce: ComputeEngine
-): BoxedExpression | null {
+): Expression | null {
   // Only handle Add expressions
   if (!isFunction(arg) || arg.operator !== 'Add') return null;
 
@@ -181,7 +181,7 @@ function reduceTrigPeriodicity(
   if (reduced === piCoeff % period && reduced === piCoeff) return null;
 
   // Build the new argument
-  let newArg: BoxedExpression;
+  let newArg: Expression;
   if (remainingTerms.length === 0) {
     newArg = ce.Zero;
   } else if (remainingTerms.length === 1) {
@@ -201,7 +201,7 @@ function reduceTrigPeriodicity(
   return ce.box([fn, newArg]);
 }
 
-export function simplifyTrig(x: BoxedExpression): RuleStep | undefined {
+export function simplifyTrig(x: Expression): RuleStep | undefined {
   const op = x.operator;
   const ce = x.engine;
 
@@ -308,8 +308,8 @@ export function simplifyTrig(x: BoxedExpression): RuleStep | undefined {
     // Handle canonical form: Add(Negate(x), Multiply(1/2, Pi)) = π/2 - x
     if (isFunction(arg) && arg.operator === 'Add' && arg.nops === 2) {
       const argOps = arg.ops;
-      let piOver2Term: BoxedExpression | null = null;
-      let negatedTerm: BoxedExpression | null = null;
+      let piOver2Term: Expression | null = null;
+      let negatedTerm: Expression | null = null;
 
       for (const term of argOps) {
         // Check for π/2 term: Multiply(1/2, Pi) or Multiply(Rational(1,2), Pi)
@@ -411,9 +411,9 @@ export function simplifyTrig(x: BoxedExpression): RuleStep | undefined {
     // This includes the case of 2*sin(x)*cos(x) -> sin(2x)
     if (x.ops.length >= 2) {
       // Find sin and cos terms
-      let sinTerm: (BoxedExpression & { op1: BoxedExpression }) | null = null;
-      let cosTerm: (BoxedExpression & { op1: BoxedExpression }) | null = null;
-      const otherTerms: BoxedExpression[] = [];
+      let sinTerm: (Expression & { op1: Expression }) | null = null;
+      let cosTerm: (Expression & { op1: Expression }) | null = null;
+      const otherTerms: Expression[] = [];
 
       for (const term of x.ops) {
         if (isFunction(term) && term.operator === 'Sin' && !sinTerm) {
@@ -686,7 +686,7 @@ export function simplifyTrig(x: BoxedExpression): RuleStep | undefined {
       b.operator === 'Multiply'
     ) {
       // Extract coefficient and trig functions
-      const extractCoeffAndTrig = (expr: BoxedExpression) => {
+      const extractCoeffAndTrig = (expr: Expression) => {
         if (
           !isFunction(expr) ||
           expr.operator !== 'Multiply' ||
@@ -744,8 +744,8 @@ export function simplifyTrig(x: BoxedExpression): RuleStep | undefined {
 
     // Check for "1 + Negate(sin²(x))" or "Negate(sin²(x)) + 1" pattern (1 - sin²(x))
     // Find the "1" and the negated trig squared term
-    let one: BoxedExpression | null = null;
-    let negatedTrigSquared: BoxedExpression | null = null;
+    let one: Expression | null = null;
+    let negatedTrigSquared: Expression | null = null;
 
     if (a.is(1) && isFunction(b) && b.operator === 'Negate') {
       one = a;
@@ -782,8 +782,8 @@ export function simplifyTrig(x: BoxedExpression): RuleStep | undefined {
 
     // Check for "sin²(x) + (-1)" or "(-1) + sin²(x)" pattern (sin²(x) - 1)
     // This simplifies to -cos²(x)
-    let negOne: BoxedExpression | null = null;
-    let trigSquared: BoxedExpression | null = null;
+    let negOne: Expression | null = null;
+    let trigSquared: Expression | null = null;
 
     if (
       a.is(-1) &&
@@ -837,8 +837,8 @@ export function simplifyTrig(x: BoxedExpression): RuleStep | undefined {
 
     // Check for "-1 + sec²(x)" pattern (sec²(x) - 1)
     // Also handle Negate(1) which is -1
-    let negOneAlt: BoxedExpression | null = null;
-    let secOrCscSquared: BoxedExpression | null = null;
+    let negOneAlt: Expression | null = null;
+    let secOrCscSquared: Expression | null = null;
 
     if (
       isFunction(a) &&

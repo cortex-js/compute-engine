@@ -1,6 +1,6 @@
 import type { BoxedDefinition } from './types-definitions';
 import type { IComputeEngine as ComputeEngine } from './types-engine';
-import type { BoxedExpression, ExpressionInput } from './types-expression';
+import type { Expression, ExpressionInput } from './types-expression';
 import type {
   Assumption as KernelAssumption,
   AssumeResult,
@@ -28,7 +28,7 @@ export type { AssumeResult };
  *
  * @category Boxed Expression
  */
-export type EvaluateOptions = KernelEvaluateOptions<BoxedExpression>;
+export type EvaluateOptions = KernelEvaluateOptions<Expression>;
 
 /**
  * Map-like interface keyed by boxed expressions.
@@ -37,28 +37,28 @@ export type EvaluateOptions = KernelEvaluateOptions<BoxedExpression>;
  */
 export type ExpressionMapInterface<U> = KernelExpressionMapInterface<
   U,
-  BoxedExpression
+  Expression
 >;
 
 /** A single rule application step with provenance. */
-export type RuleStep = KernelRuleStep<BoxedExpression>;
+export type RuleStep = KernelRuleStep<Expression>;
 
 /** A list of rule application steps. */
-export type RuleSteps = KernelRuleSteps<BoxedExpression>;
+export type RuleSteps = KernelRuleSteps<Expression>;
 
 /**
  * Assumption predicates bound to this compute engine.
  *
  * @category Assumptions
  */
-export type Assumption = KernelAssumption<BoxedExpression, ComputeEngine>;
+export type Assumption = KernelAssumption<Expression, ComputeEngine>;
 
 /**
  * Rule replacement callback specialized to boxed expressions.
  *
  * @category Rules
  */
-export type RuleReplaceFunction = KernelRuleReplaceFunction<BoxedExpression>;
+export type RuleReplaceFunction = KernelRuleReplaceFunction<Expression>;
 
 /**
  * Rule condition callback with access to the compute engine.
@@ -66,7 +66,7 @@ export type RuleReplaceFunction = KernelRuleReplaceFunction<BoxedExpression>;
  * @category Rules
  */
 export type RuleConditionFunction = KernelRuleConditionFunction<
-  BoxedExpression,
+  Expression,
   ComputeEngine
 >;
 
@@ -75,7 +75,7 @@ export type RuleConditionFunction = KernelRuleConditionFunction<
  *
  * @category Rules
  */
-export type RuleFunction = KernelRuleFunction<BoxedExpression>;
+export type RuleFunction = KernelRuleFunction<Expression>;
 
 /**
  * Rule declaration specialized to boxed expression and compute engine types.
@@ -83,16 +83,16 @@ export type RuleFunction = KernelRuleFunction<BoxedExpression>;
  * @category Rules
  */
 export type Rule = KernelRule<
-  BoxedExpression,
+  Expression,
   ExpressionInput,
   ComputeEngine
 >;
 
 /** A boxed/normalized rule form. */
-export type BoxedRule = KernelBoxedRule<BoxedExpression, ComputeEngine>;
+export type BoxedRule = KernelBoxedRule<Expression, ComputeEngine>;
 
 /** Collection of boxed rules. */
-export type BoxedRuleSet = KernelBoxedRuleSet<BoxedExpression, ComputeEngine>;
+export type BoxedRuleSet = KernelBoxedRuleSet<Expression, ComputeEngine>;
 
 /**
  * Assignable value for `ce.assign()`.
@@ -100,7 +100,7 @@ export type BoxedRuleSet = KernelBoxedRuleSet<BoxedExpression, ComputeEngine>;
  * @category Compute Engine
  */
 export type AssignValue = KernelAssignValue<
-  BoxedExpression,
+  Expression,
   ExpressionInput,
   ComputeEngine
 >;
@@ -109,4 +109,4 @@ export type AssignValue = KernelAssignValue<
 export type Scope = KernelScope<BoxedDefinition>;
 
 /** Evaluation context specialized to this engine/runtime model. */
-export type EvalContext = KernelEvalContext<BoxedExpression, BoxedDefinition>;
+export type EvalContext = KernelEvalContext<Expression, BoxedDefinition>;

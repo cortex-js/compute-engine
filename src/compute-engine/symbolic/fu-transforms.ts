@@ -15,7 +15,7 @@
  * to avoid infinite recursion when called from the simplification pipeline.
  */
 
-import type { BoxedExpression } from '../global-types';
+import type { Expression } from '../global-types';
 import {
   isFunction,
   isNumber,
@@ -31,7 +31,7 @@ const TRIG_FUNC_REGEX = /^(Sin|Cos|Tan|Cot|Sec|Csc)$/;
 /**
  * Check if an expression contains any trigonometric functions
  */
-export function hasTrigFunction(expr: BoxedExpression): boolean {
+export function hasTrigFunction(expr: Expression): boolean {
   if (TRIG_FUNC_REGEX.test(expr.operator)) return true;
   if (!isFunction(expr)) return false;
   return expr.ops.some(hasTrigFunction);
@@ -40,7 +40,7 @@ export function hasTrigFunction(expr: BoxedExpression): boolean {
 /**
  * Check if expression contains specific operators anywhere in the tree
  */
-export function hasOperator(expr: BoxedExpression, ...ops: string[]): boolean {
+export function hasOperator(expr: Expression, ...ops: string[]): boolean {
   if (ops.includes(expr.operator)) return true;
   if (!isFunction(expr)) return false;
   return expr.ops.some((x) => hasOperator(x, ...ops));
@@ -50,9 +50,9 @@ export function hasOperator(expr: BoxedExpression, ...ops: string[]): boolean {
  * Apply a transformation function to all subexpressions (bottom-up)
  */
 function mapSubexpressions(
-  expr: BoxedExpression,
-  fn: (e: BoxedExpression) => BoxedExpression | undefined
-): BoxedExpression {
+  expr: Expression,
+  fn: (e: Expression) => Expression | undefined
+): Expression {
   const ce = expr.engine;
 
   // First, recursively process operands
@@ -72,7 +72,7 @@ function mapSubexpressions(
 /**
  * Check if two expressions have the same argument (for trig functions)
  */
-function sameArg(a: BoxedExpression, b: BoxedExpression): boolean {
+function sameArg(a: Expression, b: Expression): boolean {
   if (!isFunction(a) || !isFunction(b)) return false;
   const argA = a.op1;
   const argB = b.op1;
@@ -84,7 +84,7 @@ function sameArg(a: BoxedExpression, b: BoxedExpression): boolean {
 // Convert secant and cosecant to reciprocal forms
 // ============================================================================
 
-export function TR1(expr: BoxedExpression): BoxedExpression | undefined {
+export function TR1(expr: Expression): Expression | undefined {
   const ce = expr.engine;
   const op = expr.operator;
   if (!isFunction(expr)) return undefined;
@@ -108,7 +108,7 @@ export function TR1(expr: BoxedExpression): BoxedExpression | undefined {
 /**
  * Apply TR1 to all subexpressions
  */
-export function applyTR1(expr: BoxedExpression): BoxedExpression {
+export function applyTR1(expr: Expression): Expression {
   return mapSubexpressions(expr, TR1);
 }
 
@@ -117,7 +117,7 @@ export function applyTR1(expr: BoxedExpression): BoxedExpression {
 // Convert tangent and cotangent to ratio forms
 // ============================================================================
 
-export function TR2(expr: BoxedExpression): BoxedExpression | undefined {
+export function TR2(expr: Expression): Expression | undefined {
   const ce = expr.engine;
   const op = expr.operator;
   if (!isFunction(expr)) return undefined;
@@ -141,7 +141,7 @@ export function TR2(expr: BoxedExpression): BoxedExpression | undefined {
 /**
  * Apply TR2 to all subexpressions
  */
-export function applyTR2(expr: BoxedExpression): BoxedExpression {
+export function applyTR2(expr: Expression): Expression {
   return mapSubexpressions(expr, TR2);
 }
 
@@ -150,7 +150,7 @@ export function applyTR2(expr: BoxedExpression): BoxedExpression {
 // Inverse of TR2 - convert ratios back to tan/cot
 // ============================================================================
 
-export function TR2i(expr: BoxedExpression): BoxedExpression | undefined {
+export function TR2i(expr: Expression): Expression | undefined {
   const ce = expr.engine;
 
   if (expr.operator !== 'Divide') return undefined;
@@ -179,7 +179,7 @@ export function TR2i(expr: BoxedExpression): BoxedExpression | undefined {
 /**
  * Apply TR2i to all subexpressions
  */
-export function applyTR2i(expr: BoxedExpression): BoxedExpression {
+export function applyTR2i(expr: Expression): Expression {
   return mapSubexpressions(expr, TR2i);
 }
 
@@ -198,7 +198,7 @@ export function applyTR2i(expr: BoxedExpression): BoxedExpression {
  * Check if an expression is a negation (either Negate or multiply by -1)
  * Returns the inner expression if it's a negation, undefined otherwise
  */
-function getNegatedArg(expr: BoxedExpression): BoxedExpression | undefined {
+function getNegatedArg(expr: Expression): Expression | undefined {
   // Check for Negate(x)
   if (expr.operator === 'Negate' && isFunction(expr)) {
     return expr.op1;
@@ -217,7 +217,7 @@ function getNegatedArg(expr: BoxedExpression): BoxedExpression | undefined {
   return undefined;
 }
 
-export function TR3(expr: BoxedExpression): BoxedExpression | undefined {
+export function TR3(expr: Expression): Expression | undefined {
   const ce = expr.engine;
   const op = expr.operator;
   if (!isFunction(expr)) return undefined;
@@ -261,7 +261,7 @@ export function TR3(expr: BoxedExpression): BoxedExpression | undefined {
 /**
  * Apply TR3 to all subexpressions
  */
-export function applyTR3(expr: BoxedExpression): BoxedExpression {
+export function applyTR3(expr: Expression): Expression {
   return mapSubexpressions(expr, TR3);
 }
 
@@ -270,7 +270,7 @@ export function applyTR3(expr: BoxedExpression): BoxedExpression {
 // Pythagorean substitution for sin^2
 // ============================================================================
 
-export function TR5(expr: BoxedExpression): BoxedExpression | undefined {
+export function TR5(expr: Expression): Expression | undefined {
   const ce = expr.engine;
 
   // Check for Power(Sin(x), 2)
@@ -295,7 +295,7 @@ export function TR5(expr: BoxedExpression): BoxedExpression | undefined {
 /**
  * Apply TR5 to all subexpressions
  */
-export function applyTR5(expr: BoxedExpression): BoxedExpression {
+export function applyTR5(expr: Expression): Expression {
   return mapSubexpressions(expr, TR5);
 }
 
@@ -304,7 +304,7 @@ export function applyTR5(expr: BoxedExpression): BoxedExpression {
 // Pythagorean substitution for cos^2
 // ============================================================================
 
-export function TR6(expr: BoxedExpression): BoxedExpression | undefined {
+export function TR6(expr: Expression): Expression | undefined {
   const ce = expr.engine;
 
   // Check for Power(Cos(x), 2)
@@ -329,7 +329,7 @@ export function TR6(expr: BoxedExpression): BoxedExpression | undefined {
 /**
  * Apply TR6 to all subexpressions
  */
-export function applyTR6(expr: BoxedExpression): BoxedExpression {
+export function applyTR6(expr: Expression): Expression {
   return mapSubexpressions(expr, TR6);
 }
 
@@ -338,7 +338,7 @@ export function applyTR6(expr: BoxedExpression): BoxedExpression {
 // Power reduction using double angle
 // ============================================================================
 
-export function TR7(expr: BoxedExpression): BoxedExpression | undefined {
+export function TR7(expr: Expression): Expression | undefined {
   const ce = expr.engine;
 
   // Check for Power(Cos(x), 2)
@@ -363,7 +363,7 @@ export function TR7(expr: BoxedExpression): BoxedExpression | undefined {
 /**
  * Apply TR7 to all subexpressions
  */
-export function applyTR7(expr: BoxedExpression): BoxedExpression {
+export function applyTR7(expr: Expression): Expression {
   return mapSubexpressions(expr, TR7);
 }
 
@@ -373,7 +373,7 @@ export function applyTR7(expr: BoxedExpression): BoxedExpression {
 // (1 + cos(2x))/2 -> cos^2(x)
 // ============================================================================
 
-export function TR7i(expr: BoxedExpression): BoxedExpression | undefined {
+export function TR7i(expr: Expression): Expression | undefined {
   const ce = expr.engine;
 
   // Looking for pattern: (1 +/- cos(2x))/2
@@ -399,7 +399,7 @@ export function TR7i(expr: BoxedExpression): BoxedExpression | undefined {
     }
   }
 
-  const isHalf = (f: BoxedExpression): boolean => {
+  const isHalf = (f: Expression): boolean => {
     // Check .re property for numeric 0.5
     if (f.re === 0.5 && f.im === 0) return true;
     // Also check isSame with ce.Half
@@ -430,11 +430,11 @@ export function TR7i(expr: BoxedExpression): BoxedExpression | undefined {
     isFunction(expr) &&
     expr.ops.length === 2
   ) {
-    let halfTerm: BoxedExpression | undefined;
-    let cosTerm: BoxedExpression | undefined;
+    let halfTerm: Expression | undefined;
+    let cosTerm: Expression | undefined;
     let isNegCos = false;
 
-    const isNegHalf = (f: BoxedExpression): boolean => {
+    const isNegHalf = (f: Expression): boolean => {
       if (f.re === -0.5 && f.im === 0) return true;
       return false;
     };
@@ -501,7 +501,7 @@ export function TR7i(expr: BoxedExpression): BoxedExpression | undefined {
       if (!cosArg) return undefined;
 
       // Check if cos argument is 2*x
-      let x: BoxedExpression | undefined;
+      let x: Expression | undefined;
 
       if (cosArg.operator === 'Multiply' && isFunction(cosArg)) {
         const twoIndex = cosArg.ops.findIndex((f) => f.is(2));
@@ -533,9 +533,9 @@ export function TR7i(expr: BoxedExpression): BoxedExpression | undefined {
  * Helper for TR7i: Check if ops form pattern [1, +/-cos(2x)] or [+/-cos(2x), 1]
  */
 function checkHalfAnglePattern(
-  ce: BoxedExpression['engine'],
-  ops: readonly BoxedExpression[]
-): BoxedExpression | undefined {
+  ce: Expression['engine'],
+  ops: readonly Expression[]
+): Expression | undefined {
   let oneIndex = -1;
   let cosIndex = -1;
   let isNegCos = false;
@@ -558,7 +558,7 @@ function checkHalfAnglePattern(
   if (oneIndex < 0 || cosIndex < 0) return undefined;
 
   // Get the cos expression
-  let cosExpr: BoxedExpression;
+  let cosExpr: Expression;
   if (isNegCos) {
     const negExpr = ops[cosIndex];
     if (!isFunction(negExpr)) return undefined;
@@ -573,7 +573,7 @@ function checkHalfAnglePattern(
   if (!cosArg) return undefined;
 
   // Check if cos argument is 2*x
-  let x: BoxedExpression | undefined;
+  let x: Expression | undefined;
 
   if (cosArg.operator === 'Multiply' && isFunction(cosArg)) {
     const twoIndex = cosArg.ops.findIndex((f) => f.is(2));
@@ -599,7 +599,7 @@ function checkHalfAnglePattern(
 /**
  * Apply TR7i to all subexpressions
  */
-export function applyTR7i(expr: BoxedExpression): BoxedExpression {
+export function applyTR7i(expr: Expression): Expression {
   return mapSubexpressions(expr, TR7i);
 }
 
@@ -610,7 +610,7 @@ export function applyTR7i(expr: BoxedExpression): BoxedExpression {
 // sin(x)sin(y) -> (cos(x-y) - cos(x+y))/2
 // ============================================================================
 
-export function TR8(expr: BoxedExpression): BoxedExpression | undefined {
+export function TR8(expr: Expression): Expression | undefined {
   const ce = expr.engine;
 
   if (expr.operator !== 'Multiply') return undefined;
@@ -631,7 +631,7 @@ export function TR8(expr: BoxedExpression): BoxedExpression | undefined {
 
       if (!argA || !argB) continue;
 
-      let result: BoxedExpression | undefined;
+      let result: Expression | undefined;
 
       // sin(x)cos(y) -> (sin(x+y) + sin(x-y))/2
       if (a.operator === 'Sin' && b.operator === 'Cos') {
@@ -679,7 +679,7 @@ export function TR8(expr: BoxedExpression): BoxedExpression | undefined {
 /**
  * Apply TR8 to all subexpressions
  */
-export function applyTR8(expr: BoxedExpression): BoxedExpression {
+export function applyTR8(expr: Expression): Expression {
   return mapSubexpressions(expr, TR8);
 }
 
@@ -691,7 +691,7 @@ export function applyTR8(expr: BoxedExpression): BoxedExpression {
 // cos(x) - cos(y) -> -2sin((x+y)/2)sin((x-y)/2)
 // ============================================================================
 
-export function TR9(expr: BoxedExpression): BoxedExpression | undefined {
+export function TR9(expr: Expression): Expression | undefined {
   const ce = expr.engine;
 
   if (expr.operator !== 'Add') return undefined;
@@ -706,7 +706,7 @@ export function TR9(expr: BoxedExpression): BoxedExpression | undefined {
       const a = ops[i];
       const b = ops[j];
 
-      let result: BoxedExpression | undefined;
+      let result: Expression | undefined;
 
       // sin(x) + sin(y)
       if (a.operator === 'Sin' && b.operator === 'Sin') {
@@ -788,7 +788,7 @@ export function TR9(expr: BoxedExpression): BoxedExpression | undefined {
 /**
  * Apply TR9 to all subexpressions
  */
-export function applyTR9(expr: BoxedExpression): BoxedExpression {
+export function applyTR9(expr: Expression): Expression {
   return mapSubexpressions(expr, TR9);
 }
 
@@ -800,7 +800,7 @@ export function applyTR9(expr: BoxedExpression): BoxedExpression {
 // cos(x-y) -> cos(x)cos(y) + sin(x)sin(y)
 // ============================================================================
 
-export function TR10(expr: BoxedExpression): BoxedExpression | undefined {
+export function TR10(expr: Expression): Expression | undefined {
   const ce = expr.engine;
   const op = expr.operator;
 
@@ -856,7 +856,7 @@ export function TR10(expr: BoxedExpression): BoxedExpression | undefined {
 /**
  * Apply TR10 to all subexpressions
  */
-export function applyTR10(expr: BoxedExpression): BoxedExpression {
+export function applyTR10(expr: Expression): Expression {
   return mapSubexpressions(expr, TR10);
 }
 
@@ -868,7 +868,7 @@ export function applyTR10(expr: BoxedExpression): BoxedExpression {
 // cos(x)cos(y) + sin(x)sin(y) -> cos(x-y)
 // ============================================================================
 
-export function TR10i(expr: BoxedExpression): BoxedExpression | undefined {
+export function TR10i(expr: Expression): Expression | undefined {
   const ce = expr.engine;
 
   if (expr.operator !== 'Add') return undefined;
@@ -885,8 +885,8 @@ export function TR10i(expr: BoxedExpression): BoxedExpression | undefined {
 
       // Extract products: looking for sin(x)cos(y) type patterns
       const extractSinCos = (
-        term: BoxedExpression
-      ): { sin: BoxedExpression; cos: BoxedExpression } | null => {
+        term: Expression
+      ): { sin: Expression; cos: Expression } | null => {
         if (term.operator !== 'Multiply') return null;
         if (!isFunction(term)) return null;
         const factors = term.ops;
@@ -903,8 +903,8 @@ export function TR10i(expr: BoxedExpression): BoxedExpression | undefined {
       };
 
       const extractCosCos = (
-        term: BoxedExpression
-      ): { cos1: BoxedExpression; cos2: BoxedExpression } | null => {
+        term: Expression
+      ): { cos1: Expression; cos2: Expression } | null => {
         if (term.operator !== 'Multiply') return null;
         if (!isFunction(term)) return null;
         const factors = term.ops;
@@ -918,8 +918,8 @@ export function TR10i(expr: BoxedExpression): BoxedExpression | undefined {
       };
 
       const extractSinSin = (
-        term: BoxedExpression
-      ): { sin1: BoxedExpression; sin2: BoxedExpression } | null => {
+        term: Expression
+      ): { sin1: Expression; sin2: Expression } | null => {
         if (term.operator !== 'Multiply') return null;
         if (!isFunction(term)) return null;
         const factors = term.ops;
@@ -933,7 +933,7 @@ export function TR10i(expr: BoxedExpression): BoxedExpression | undefined {
       };
 
       /** Helper to get .op1 from an expression known to be a function */
-      const getOp1 = (e: BoxedExpression): BoxedExpression | undefined =>
+      const getOp1 = (e: Expression): Expression | undefined =>
         isFunction(e) ? e.op1 : undefined;
 
       // Check for sin(x)cos(y) + cos(x)sin(y) -> sin(x+y)
@@ -1131,7 +1131,7 @@ export function TR10i(expr: BoxedExpression): BoxedExpression | undefined {
 /**
  * Apply TR10i to all subexpressions
  */
-export function applyTR10i(expr: BoxedExpression): BoxedExpression {
+export function applyTR10i(expr: Expression): Expression {
   return mapSubexpressions(expr, TR10i);
 }
 
@@ -1141,7 +1141,7 @@ export function applyTR10i(expr: BoxedExpression): BoxedExpression {
 // cos(2x) -> 2cos^2(x) - 1  (or cos^2(x) - sin^2(x) or 1 - 2sin^2(x))
 // ============================================================================
 
-export function TR11(expr: BoxedExpression): BoxedExpression | undefined {
+export function TR11(expr: Expression): Expression | undefined {
   const ce = expr.engine;
   const op = expr.operator;
 
@@ -1182,7 +1182,7 @@ export function TR11(expr: BoxedExpression): BoxedExpression | undefined {
 /**
  * Apply TR11 to all subexpressions
  */
-export function applyTR11(expr: BoxedExpression): BoxedExpression {
+export function applyTR11(expr: Expression): Expression {
   return mapSubexpressions(expr, TR11);
 }
 
@@ -1194,7 +1194,7 @@ export function applyTR11(expr: BoxedExpression): BoxedExpression {
 // 1 - 2sin^2(x) -> cos(2x)
 // ============================================================================
 
-export function TR11i(expr: BoxedExpression): BoxedExpression | undefined {
+export function TR11i(expr: Expression): Expression | undefined {
   const ce = expr.engine;
 
   // 2sin(x)cos(x) -> sin(2x)
@@ -1206,8 +1206,8 @@ export function TR11i(expr: BoxedExpression): BoxedExpression | undefined {
     if (twoIndex >= 0) {
       const remaining = ops.filter((_, i) => i !== twoIndex);
 
-      let sinTerm: BoxedExpression | undefined;
-      let cosTerm: BoxedExpression | undefined;
+      let sinTerm: Expression | undefined;
+      let cosTerm: Expression | undefined;
 
       for (const f of remaining) {
         if (f.operator === 'Sin' && !sinTerm) sinTerm = f;
@@ -1269,8 +1269,8 @@ export function TR11i(expr: BoxedExpression): BoxedExpression | undefined {
     // 2cos^2(x) - 1 -> cos(2x)
     // Pattern: Add(Multiply(2, Power(Cos(x), 2)), -1) or Add(-1, Multiply(2, Power(Cos(x), 2)))
     const extractTwoCosSq = (
-      term: BoxedExpression
-    ): BoxedExpression | undefined => {
+      term: Expression
+    ): Expression | undefined => {
       if (term.operator !== 'Multiply' || !isFunction(term))
         return undefined;
       const twoIdx = term.ops.findIndex((f) => f.is(2));
@@ -1311,8 +1311,8 @@ export function TR11i(expr: BoxedExpression): BoxedExpression | undefined {
     // 1 - 2sin^2(x) -> cos(2x)
     // Pattern: Add(1, Negate(Multiply(2, Power(Sin(x), 2)))) or similar
     const extractTwoSinSq = (
-      term: BoxedExpression
-    ): BoxedExpression | undefined => {
+      term: Expression
+    ): Expression | undefined => {
       if (term.operator !== 'Multiply' || !isFunction(term))
         return undefined;
       const twoIdx = term.ops.findIndex((f) => f.is(2));
@@ -1348,8 +1348,8 @@ export function TR11i(expr: BoxedExpression): BoxedExpression | undefined {
 
     // Also handle: 1 + (-2)sin^2(x) where -2 is a single number
     const extractNegTwoSinSq = (
-      term: BoxedExpression
-    ): BoxedExpression | undefined => {
+      term: Expression
+    ): Expression | undefined => {
       if (term.operator !== 'Multiply' || !isFunction(term))
         return undefined;
       const negTwoIdx = term.ops.findIndex((f) => f.is(-2));
@@ -1390,7 +1390,7 @@ export function TR11i(expr: BoxedExpression): BoxedExpression | undefined {
 /**
  * Apply TR11i to all subexpressions
  */
-export function applyTR11i(expr: BoxedExpression): BoxedExpression {
+export function applyTR11i(expr: Expression): Expression {
   return mapSubexpressions(expr, TR11i);
 }
 
@@ -1400,7 +1400,7 @@ export function applyTR11i(expr: BoxedExpression): BoxedExpression {
 // tan(x-y) -> (tan(x) - tan(y))/(1 + tan(x)tan(y))
 // ============================================================================
 
-export function TR12(expr: BoxedExpression): BoxedExpression | undefined {
+export function TR12(expr: Expression): Expression | undefined {
   const ce = expr.engine;
 
   if (expr.operator !== 'Tan') return undefined;
@@ -1439,7 +1439,7 @@ export function TR12(expr: BoxedExpression): BoxedExpression | undefined {
 /**
  * Apply TR12 to all subexpressions
  */
-export function applyTR12(expr: BoxedExpression): BoxedExpression {
+export function applyTR12(expr: Expression): Expression {
   return mapSubexpressions(expr, TR12);
 }
 
@@ -1482,8 +1482,8 @@ function findTanAngle(
  * Returns [coef, tanArg1, tanArg2] if the term is coef*tan(a)*tan(b)
  */
 function extractTanProduct(
-  expr: BoxedExpression
-): [number, BoxedExpression, BoxedExpression] | undefined {
+  expr: Expression
+): [number, Expression, Expression] | undefined {
   if (expr.operator !== 'Multiply') return undefined;
   if (!isFunction(expr)) return undefined;
 
@@ -1491,7 +1491,7 @@ function extractTanProduct(
   if (ops.length < 2) return undefined;
 
   // Find tan factors and numeric coefficient
-  const tanFactors: BoxedExpression[] = [];
+  const tanFactors: Expression[] = [];
   let coef = 1;
 
   for (const op of ops) {
@@ -1540,7 +1540,7 @@ function extractTanProduct(
  * Extract the angle from a tan argument, returning [numerator, denominator]
  * representing the fraction of pi.
  */
-function extractPiFraction(arg: BoxedExpression): [number, number] | undefined {
+function extractPiFraction(arg: Expression): [number, number] | undefined {
   // Check for k*pi pattern where k is a Rational
   if (arg.operator === 'Multiply' && isFunction(arg)) {
     let piFound = false;
@@ -1572,7 +1572,7 @@ function extractPiFraction(arg: BoxedExpression): [number, number] | undefined {
   return undefined;
 }
 
-export function TR12i(expr: BoxedExpression): BoxedExpression | undefined {
+export function TR12i(expr: Expression): Expression | undefined {
   const ce = expr.engine;
 
   if (expr.operator !== 'Add') return undefined;
@@ -1583,12 +1583,12 @@ export function TR12i(expr: BoxedExpression): BoxedExpression | undefined {
 
   // Find the pattern: tan(A) + tan(B) + product_term
   // where product_term = -k*tan(A)*tan(B) for some k
-  const tanTerms: { arg: BoxedExpression; index: number }[] = [];
+  const tanTerms: { arg: Expression; index: number }[] = [];
   let productTerm:
     | {
         coef: number;
-        arg1: BoxedExpression;
-        arg2: BoxedExpression;
+        arg1: Expression;
+        arg2: Expression;
         index: number;
       }
     | undefined;
@@ -1689,7 +1689,7 @@ function gcd(a: number, b: number): number {
 /**
  * Apply TR12i to all subexpressions
  */
-export function applyTR12i(expr: BoxedExpression): BoxedExpression {
+export function applyTR12i(expr: Expression): Expression {
   return mapSubexpressions(expr, TR12i);
 }
 
@@ -1699,7 +1699,7 @@ export function applyTR12i(expr: BoxedExpression): BoxedExpression {
 // cot(x)cot(y) -> 1 + (cot(x) + cot(y))cot(x+y)
 // ============================================================================
 
-export function TR13(expr: BoxedExpression): BoxedExpression | undefined {
+export function TR13(expr: Expression): Expression | undefined {
   const ce = expr.engine;
 
   if (expr.operator !== 'Multiply') return undefined;
@@ -1756,7 +1756,7 @@ export function TR13(expr: BoxedExpression): BoxedExpression | undefined {
 /**
  * Apply TR13 to all subexpressions
  */
-export function applyTR13(expr: BoxedExpression): BoxedExpression {
+export function applyTR13(expr: Expression): Expression {
   return mapSubexpressions(expr, TR13);
 }
 
@@ -1768,7 +1768,7 @@ export function applyTR13(expr: BoxedExpression): BoxedExpression {
 // csc^2(x) -> 1 + cot^2(x)
 // ============================================================================
 
-export function TR22(expr: BoxedExpression): BoxedExpression | undefined {
+export function TR22(expr: Expression): Expression | undefined {
   const ce = expr.engine;
 
   if (expr.operator !== 'Power') return undefined;
@@ -1810,7 +1810,7 @@ export function TR22(expr: BoxedExpression): BoxedExpression | undefined {
 /**
  * Apply TR22 to all subexpressions
  */
-export function applyTR22(expr: BoxedExpression): BoxedExpression {
+export function applyTR22(expr: Expression): Expression {
   return mapSubexpressions(expr, TR22);
 }
 
@@ -1822,7 +1822,7 @@ export function applyTR22(expr: BoxedExpression): BoxedExpression {
 // 1 + cot^2(x) -> csc^2(x)
 // ============================================================================
 
-export function TR22i(expr: BoxedExpression): BoxedExpression | undefined {
+export function TR22i(expr: Expression): Expression | undefined {
   const ce = expr.engine;
 
   if (expr.operator !== 'Add') return undefined;
@@ -1838,8 +1838,8 @@ export function TR22i(expr: BoxedExpression): BoxedExpression | undefined {
   // sec^2(x) - tan^2(x) = 1
 
   const extractPower2 = (
-    op: BoxedExpression
-  ): { func: string; arg: BoxedExpression; neg: boolean } | null => {
+    op: Expression
+  ): { func: string; arg: Expression; neg: boolean } | null => {
     let neg = false;
     let powerOp = op;
 
@@ -1965,7 +1965,7 @@ export function TR22i(expr: BoxedExpression): BoxedExpression | undefined {
 /**
  * Apply TR22i to all subexpressions
  */
-export function applyTR22i(expr: BoxedExpression): BoxedExpression {
+export function applyTR22i(expr: Expression): Expression {
   return mapSubexpressions(expr, TR22i);
 }
 
@@ -1983,8 +1983,8 @@ export function applyTR22i(expr: BoxedExpression): BoxedExpression {
  * Handles both plain numbers and Rationals.
  */
 function extractMultiplier(
-  expr: BoxedExpression
-): [number, BoxedExpression, BoxedExpression] | undefined {
+  expr: Expression
+): [number, Expression, Expression] | undefined {
   const ce = expr.engine;
 
   if (expr.operator !== 'Multiply' || !isFunction(expr)) {
@@ -2013,7 +2013,7 @@ function extractMultiplier(
   return [1, ce.One, expr];
 }
 
-export function TRmorrie(expr: BoxedExpression): BoxedExpression | undefined {
+export function TRmorrie(expr: Expression): Expression | undefined {
   const ce = expr.engine;
 
   if (expr.operator !== 'Multiply') return undefined;
@@ -2024,11 +2024,11 @@ export function TRmorrie(expr: BoxedExpression): BoxedExpression | undefined {
 
   // Find all cos factors, preserving symbolic coefficients
   const cosFactors: {
-    arg: BoxedExpression;
+    arg: Expression;
     numericMult: number;
-    symbolicCoeff: BoxedExpression;
+    symbolicCoeff: Expression;
   }[] = [];
-  const otherFactors: BoxedExpression[] = [];
+  const otherFactors: Expression[] = [];
 
   for (const op of ops) {
     if (op.operator === 'Cos' && isFunction(op) && op.op1) {
@@ -2169,7 +2169,7 @@ export function TRmorrie(expr: BoxedExpression): BoxedExpression | undefined {
 /**
  * Apply TRmorrie to all subexpressions
  */
-export function applyTRmorrie(expr: BoxedExpression): BoxedExpression {
+export function applyTRmorrie(expr: Expression): Expression {
   return mapSubexpressions(expr, TRmorrie);
 }
 
@@ -2183,8 +2183,8 @@ export function applyTRmorrie(expr: BoxedExpression): BoxedExpression {
  * Extract sin^2 or cos^2 term info from an expression
  */
 function extractSquaredTrig(
-  op: BoxedExpression
-): { func: 'Sin' | 'Cos'; arg: BoxedExpression; coef: number } | null {
+  op: Expression
+): { func: 'Sin' | 'Cos'; arg: Expression; coef: number } | null {
   // Direct Power(Sin/Cos, 2)
   if (op.operator === 'Power' && isFunction(op) && op.op2?.is(2)) {
     const base = op.op1;
@@ -2199,7 +2199,7 @@ function extractSquaredTrig(
   // Multiply(coef, Power(Sin/Cos, 2))
   if (op.operator === 'Multiply' && isFunction(op)) {
     let coef = 1;
-    let trigPower: BoxedExpression | undefined;
+    let trigPower: Expression | undefined;
 
     for (const factor of op.ops) {
       if (
@@ -2241,8 +2241,8 @@ function extractSquaredTrig(
 }
 
 export function TRpythagorean(
-  expr: BoxedExpression
-): BoxedExpression | undefined {
+  expr: Expression
+): Expression | undefined {
   const ce = expr.engine;
 
   if (expr.operator !== 'Add') return undefined;
@@ -2254,11 +2254,11 @@ export function TRpythagorean(
   // Look for sin^2(x) + cos^2(x) pairs with the same argument
   const trigTerms: {
     func: 'Sin' | 'Cos';
-    arg: BoxedExpression;
+    arg: Expression;
     coef: number;
     index: number;
   }[] = [];
-  const otherTerms: { expr: BoxedExpression; index: number }[] = [];
+  const otherTerms: { expr: Expression; index: number }[] = [];
   const constantTerms: { value: number; index: number }[] = [];
 
   for (let i = 0; i < ops.length; i++) {
@@ -2339,6 +2339,6 @@ export function TRpythagorean(
 /**
  * Apply TRpythagorean to all subexpressions
  */
-export function applyTRpythagorean(expr: BoxedExpression): BoxedExpression {
+export function applyTRpythagorean(expr: Expression): Expression {
   return mapSubexpressions(expr, TRpythagorean);
 }

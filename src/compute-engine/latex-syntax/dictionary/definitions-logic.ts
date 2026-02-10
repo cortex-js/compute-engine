@@ -13,7 +13,7 @@ import {
   operands,
   symbol,
 } from '../../../math-json/utils';
-import type { MathJsonExpression as Expression } from '../../../math-json';
+import type { MathJsonExpression } from '../../../math-json';
 import { DEFINITIONS_INEQUALITIES } from './definitions-relational-operators';
 
 // See https://en.wikipedia.org/wiki/List_of_logic_symbols
@@ -249,7 +249,7 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
     precedence: 219,
     parse: (
       parser: Parser,
-      lhs: Expression,
+      lhs: MathJsonExpression,
       terminator: Readonly<Terminator>
     ) => {
       const rhs = parser.parseExpression({ ...terminator, minPrec: 219 });
@@ -261,7 +261,7 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
         return ['Congruent', lhs, rhs, missingIfEmpty(operand(modulus, 1))];
 
       parser.index = index;
-      return ['Equivalent', lhs, missingIfEmpty(rhs)] as Expression;
+      return ['Equivalent', lhs, missingIfEmpty(rhs)] as MathJsonExpression;
     },
   } as InfixEntry,
 
@@ -336,7 +336,7 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
     kind: 'prefix',
     latexTrigger: ['\\delta', '_'],
     precedence: 200,
-    serialize: (serializer: Serializer, expr: Expression) => {
+    serialize: (serializer: Serializer, expr: MathJsonExpression) => {
       const args = operands(expr);
       if (args.length === 0) return '\\delta';
 
@@ -383,7 +383,7 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
     kind: 'matchfix',
     openTrigger: '[',
     closeTrigger: ']',
-    // serialize: (serializer: Serializer, expr: Expression) => {
+    // serialize: (serializer: Serializer, expr: MathJsonExpression) => {
     //   const args = ops(expr);
     //   return `[${serializer.serialize(arg)}]`;
     // },
@@ -391,7 +391,7 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
       const h = operator(body);
       if (!h) return null;
       if (!DEFINITIONS_INEQUALITIES.some((x) => x.name === h)) return null;
-      return ['Boole', body] as Expression;
+      return ['Boole', body] as MathJsonExpression;
     },
   },
 
@@ -403,7 +403,7 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
       const h = operator(body);
       if (!h) return null;
       if (!DEFINITIONS_INEQUALITIES.some((x) => x.name === h)) return null;
-      return ['Boole', body] as Expression;
+      return ['Boole', body] as MathJsonExpression;
     },
   },
 
@@ -411,7 +411,7 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
   // ["Predicate", "P", "x", "y"] serializes to "P(x, y)"
   {
     name: 'Predicate',
-    serialize: (serializer: Serializer, expr: Expression): string => {
+    serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
       const args = operands(expr);
       if (args.length === 0) return '';
       const pred = args[0];
@@ -426,7 +426,7 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
 
 function serializeQuantifier(
   quantifierSymbol: string
-): (serializer: Serializer, expr: Expression) => string {
+): (serializer: Serializer, expr: MathJsonExpression) => string {
   return (serializer, expr) => {
     const args = operands(expr);
     if (args.length === 0) return quantifierSymbol;
@@ -462,7 +462,7 @@ function tightBindingCondition(
 
 function parseQuantifier(
   kind: 'NotForAll' | 'NotExists' | 'ForAll' | 'Exists' | 'ExistsUnique'
-): (parser: Parser, terminator: Readonly<Terminator>) => Expression | null {
+): (parser: Parser, terminator: Readonly<Terminator>) => MathJsonExpression | null {
   return (parser, terminator) => {
     const index = parser.index;
     const useTightBinding = parser.options.quantifierScope !== 'loose';
@@ -510,7 +510,7 @@ function parseQuantifier(
         parser.enterQuantifierScope();
         const body = parser.parseExpression(bodyTerminator);
         parser.exitQuantifierScope();
-        return [kind, symbol, missingIfEmpty(body)] as Expression;
+        return [kind, symbol, missingIfEmpty(body)] as MathJsonExpression;
       }
       // Enter quantifier scope so predicates are recognized
       parser.enterQuantifierScope();
@@ -540,7 +540,7 @@ function parseQuantifier(
       parser.enterQuantifierScope();
       const body = parser.parseExpression(bodyTerminator);
       parser.exitQuantifierScope();
-      return [kind, condition, missingIfEmpty(body)] as Expression;
+      return [kind, condition, missingIfEmpty(body)] as MathJsonExpression;
     }
     if (parser.match('(')) {
       // Parenthesized body - parse normally within the parens
@@ -549,7 +549,7 @@ function parseQuantifier(
       const body = parser.parseExpression(terminator);
       parser.exitQuantifierScope();
       if (!parser.match(')')) return null;
-      return [kind, condition, missingIfEmpty(body)] as Expression;
+      return [kind, condition, missingIfEmpty(body)] as MathJsonExpression;
     }
 
     return null;

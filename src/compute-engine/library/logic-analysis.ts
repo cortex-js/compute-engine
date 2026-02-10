@@ -1,5 +1,5 @@
 import type {
-  BoxedExpression,
+  Expression,
   IComputeEngine as ComputeEngine,
 } from '../global-types';
 import { asSmallInteger } from '../boxed-expression/numerics';
@@ -26,11 +26,11 @@ import {
  * - `status: 'error'` - Invalid Element expression (missing variable, malformed domain)
  */
 export type ExtractDomainResult =
-  | { status: 'success'; variable: string; values: BoxedExpression[] }
+  | { status: 'success'; variable: string; values: Expression[] }
   | {
       status: 'non-enumerable';
       variable: string;
-      domain: BoxedExpression;
+      domain: Expression;
       reason: string;
     }
   | { status: 'error'; reason: string };
@@ -40,11 +40,11 @@ export type ExtractDomainResult =
  * Evaluates the condition for each value and returns only those where the condition is true.
  */
 function filterValuesWithCondition(
-  values: BoxedExpression[],
+  values: Expression[],
   variable: string,
-  conditionExpr: BoxedExpression,
+  conditionExpr: Expression,
   _ce: ComputeEngine
-): BoxedExpression[] {
+): Expression[] {
   return values.filter((value) => {
     // Substitute the variable with the value in the condition
     const substituted = conditionExpr.subs({ [variable]: value });
@@ -65,7 +65,7 @@ function filterValuesWithCondition(
  * Returns detailed result indicating success, non-enumerable domain, or error.
  */
 export function extractFiniteDomainWithReason(
-  condition: BoxedExpression,
+  condition: Expression,
   ce: ComputeEngine
 ): ExtractDomainResult {
   // Check for ["Element", var, set] or ["Element", var, set, condition] pattern
@@ -99,7 +99,7 @@ export function extractFiniteDomainWithReason(
       : null;
 
   // Helper to return success result with optional condition filtering
-  const successResult = (values: BoxedExpression[]): ExtractDomainResult => {
+  const successResult = (values: Expression[]): ExtractDomainResult => {
     if (filterCondition) {
       const filteredValues = filterValuesWithCondition(
         values,
@@ -125,7 +125,7 @@ export function extractFiniteDomainWithReason(
         if (start !== null && end !== null) {
           const count = end - start + 1;
           if (count > 0 && count <= 1000) {
-            const rangeValues: BoxedExpression[] = [];
+            const rangeValues: Expression[] = [];
             for (let i = start; i <= end; i++) {
               rangeValues.push(ce.number(i));
             }
@@ -164,7 +164,7 @@ export function extractFiniteDomainWithReason(
     if (start !== null && end !== null && step !== null && step !== 0) {
       const count = Math.floor((end - start) / step) + 1;
       if (count > 0 && count <= 1000) {
-        const values: BoxedExpression[] = [];
+        const values: Expression[] = [];
         for (let i = start; step > 0 ? i <= end : i >= end; i += step) {
           values.push(ce.number(i));
         }
@@ -193,8 +193,8 @@ export function extractFiniteDomainWithReason(
   // e.g., ["Interval", ["Open", 0], 5] → iterates 1, 2, 3, 4, 5
   // e.g., ["Interval", 1, ["Open", 6]] → iterates 1, 2, 3, 4, 5
   if (domain.operator === 'Interval' && isFunction(domain)) {
-    let op1: BoxedExpression | undefined = domain.op1;
-    let op2: BoxedExpression | undefined = domain.op2;
+    let op1: Expression | undefined = domain.op1;
+    let op2: Expression | undefined = domain.op2;
     let openStart = false;
     let openEnd = false;
 
@@ -223,7 +223,7 @@ export function extractFiniteDomainWithReason(
 
       const count = end - start + 1;
       if (count > 0 && count <= 1000) {
-        const values: BoxedExpression[] = [];
+        const values: Expression[] = [];
         for (let i = start; i <= end; i++) {
           values.push(ce.number(i));
         }
@@ -319,7 +319,7 @@ export function extractFiniteDomainWithReason(
  * Check if an expression contains a reference to a specific variable.
  */
 export function bodyContainsVariable(
-  expr: BoxedExpression,
+  expr: Expression,
   variable: string
 ): boolean {
   if (sym(expr) === variable) return true;
@@ -336,9 +336,9 @@ export function bodyContainsVariable(
  * Returns an array of {variable, values} for nested ForAll/Exists with finite domains.
  */
 export function collectNestedDomains(
-  body: BoxedExpression,
+  body: Expression,
   ce: ComputeEngine
-): { variable: string; values: BoxedExpression[] }[] {
+): { variable: string; values: Expression[] }[] {
   const canonicalBody = body.canonical;
   const op = canonicalBody.operator;
 
@@ -366,7 +366,7 @@ export function collectNestedDomains(
 /**
  * Get the innermost body of nested quantifiers.
  */
-export function getInnermostBody(body: BoxedExpression): BoxedExpression {
+export function getInnermostBody(body: Expression): Expression {
   const canonicalBody = body.canonical;
   const op = canonicalBody.operator;
 
@@ -383,10 +383,10 @@ export function getInnermostBody(body: BoxedExpression): BoxedExpression {
  * Returns True if the predicate holds for all combinations.
  */
 export function evaluateForAllCartesian(
-  domains: { variable: string; values: BoxedExpression[] }[],
-  body: BoxedExpression,
+  domains: { variable: string; values: Expression[] }[],
+  body: Expression,
   ce: ComputeEngine
-): BoxedExpression | undefined {
+): Expression | undefined {
   // Generate Cartesian product indices
   const indices = domains.map(() => 0);
   const lengths = domains.map((d) => d.values.length);
@@ -396,7 +396,7 @@ export function evaluateForAllCartesian(
 
   while (true) {
     // Build substitution map for current combination
-    const subs: Record<string, BoxedExpression> = {};
+    const subs: Record<string, Expression> = {};
     for (let i = 0; i < domains.length; i++) {
       subs[domains[i].variable] = domains[i].values[indices[i]];
     }
@@ -431,10 +431,10 @@ export function evaluateForAllCartesian(
  * Returns True if the predicate holds for at least one combination.
  */
 export function evaluateExistsCartesian(
-  domains: { variable: string; values: BoxedExpression[] }[],
-  body: BoxedExpression,
+  domains: { variable: string; values: Expression[] }[],
+  body: Expression,
   ce: ComputeEngine
-): BoxedExpression | undefined {
+): Expression | undefined {
   // Generate Cartesian product indices
   const indices = domains.map(() => 0);
   const lengths = domains.map((d) => d.values.length);
@@ -444,7 +444,7 @@ export function evaluateExistsCartesian(
 
   while (true) {
     // Build substitution map for current combination
-    const subs: Record<string, BoxedExpression> = {};
+    const subs: Record<string, Expression> = {};
     for (let i = 0; i < domains.length; i++) {
       subs[domains[i].variable] = domains[i].values[indices[i]];
     }
@@ -510,9 +510,9 @@ export function evaluateExistsCartesian(
  *          unevaluated expression if the variable limit is exceeded
  */
 export function isSatisfiable(
-  expr: BoxedExpression,
+  expr: Expression,
   ce: ComputeEngine
-): BoxedExpression {
+): Expression {
   const variables = extractVariables(expr);
 
   // Handle constant expressions
@@ -575,9 +575,9 @@ export function isSatisfiable(
  *          expression if the variable limit is exceeded
  */
 export function isTautology(
-  expr: BoxedExpression,
+  expr: Expression,
   ce: ComputeEngine
-): BoxedExpression {
+): Expression {
   const variables = extractVariables(expr);
 
   // Handle constant expressions
@@ -637,9 +637,9 @@ export function isTautology(
  *          unevaluated expression if the variable limit is exceeded
  */
 export function generateTruthTable(
-  expr: BoxedExpression,
+  expr: Expression,
   ce: ComputeEngine
-): BoxedExpression {
+): Expression {
   const variables = extractVariables(expr);
 
   // Limit the number of variables to prevent explosion
@@ -648,7 +648,7 @@ export function generateTruthTable(
     return ce._fn('TruthTable', [expr]);
   }
 
-  const rows: BoxedExpression[] = [];
+  const rows: Expression[] = [];
 
   // Header row: variable names + "Result"
   const header = ce._fn('List', [
@@ -764,9 +764,9 @@ function termToString(term: QMTerm): string {
  * @returns A Set of expressions representing prime implicants
  */
 export function findPrimeImplicants(
-  expr: BoxedExpression,
+  expr: Expression,
   ce: ComputeEngine
-): BoxedExpression[] | null {
+): Expression[] | null {
   const variables = extractVariables(expr);
 
   // Limit variables to prevent explosion
@@ -820,9 +820,9 @@ export function findPrimeImplicants(
  * @returns A Set of expressions representing prime implicates (clauses)
  */
 export function findPrimeImplicates(
-  expr: BoxedExpression,
+  expr: Expression,
   ce: ComputeEngine
-): BoxedExpression[] | null {
+): Expression[] | null {
   const variables = extractVariables(expr);
 
   // Limit variables to prevent explosion
@@ -939,15 +939,15 @@ function quineMcCluskey(minterms: number[], numVars: number): QMTerm[] {
 }
 
 /**
- * Convert a QM term (for minterms) to a BoxedExpression.
+ * Convert a QM term (for minterms) to a Expression.
  * Each term becomes an And of literals.
  */
 function qmTermToExpression(
   term: QMTerm,
   variables: string[],
   ce: ComputeEngine
-): BoxedExpression {
-  const literals: BoxedExpression[] = [];
+): Expression {
+  const literals: Expression[] = [];
 
   for (let i = 0; i < term.length; i++) {
     if (term[i] === 1) {
@@ -973,8 +973,8 @@ function qmTermToClause(
   term: QMTerm,
   variables: string[],
   ce: ComputeEngine
-): BoxedExpression {
-  const literals: BoxedExpression[] = [];
+): Expression {
+  const literals: Expression[] = [];
 
   for (let i = 0; i < term.length; i++) {
     if (term[i] === 0) {
@@ -1003,9 +1003,9 @@ function qmTermToClause(
  * @returns The minimal DNF, or null if too many variables
  */
 export function minimalDNF(
-  expr: BoxedExpression,
+  expr: Expression,
   ce: ComputeEngine
-): BoxedExpression | null {
+): Expression | null {
   const variables = extractVariables(expr);
 
   if (variables.length > 12) {
@@ -1055,9 +1055,9 @@ export function minimalDNF(
  * @returns The minimal CNF, or null if too many variables
  */
 export function minimalCNF(
-  expr: BoxedExpression,
+  expr: Expression,
   ce: ComputeEngine
-): BoxedExpression | null {
+): Expression | null {
   const variables = extractVariables(expr);
 
   if (variables.length > 12) {

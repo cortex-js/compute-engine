@@ -1,11 +1,11 @@
 import type {
-  BoxedExpression,
+  Expression,
   IComputeEngine as ComputeEngine,
 } from '../global-types';
 import { isNumber, isFunction } from './type-guards';
 import { addOrder, order } from './order';
 
-export function canonicalNegate(expr: BoxedExpression): BoxedExpression {
+export function canonicalNegate(expr: Expression): Expression {
   // Negate(Negate(x)) -> x
   let sign = -1;
   while (isFunction(expr) && expr.operator === 'Negate') {
@@ -26,7 +26,7 @@ export function canonicalNegate(expr: BoxedExpression): BoxedExpression {
  * It is important to do all these to handle cases like
  * `-3x` -> ["Negate, ["Multiply", 3, "x"]] -> ["Multiply, -3, x]
  */
-export function negate(expr: BoxedExpression): BoxedExpression {
+export function negate(expr: Expression): Expression {
   // Negate(Negate(x)) -> x
   let sign = -1;
   while (isFunction(expr) && expr.operator === 'Negate') {
@@ -69,12 +69,12 @@ export function negate(expr: BoxedExpression): BoxedExpression {
 // 3/ `Negate` expressions
 export function negateProduct(
   ce: ComputeEngine,
-  args: ReadonlyArray<BoxedExpression>
-): BoxedExpression {
+  args: ReadonlyArray<Expression>
+): Expression {
   if (args.length === 0) return ce.NegativeOne;
   if (args.length === 1) return negate(args[0]);
 
-  let result: BoxedExpression[] = [];
+  let result: Expression[] = [];
 
   // Look for an argument that can be negated. We do multiple passes to
   // give priority as follow:

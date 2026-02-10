@@ -1,7 +1,7 @@
 import { matchAnyRules } from './rules';
 import { expand } from './expand';
 import type {
-  BoxedExpression,
+  Expression,
   BoxedSubstitution,
   IComputeEngine as ComputeEngine,
   Rule,
@@ -624,9 +624,9 @@ export const UNIVARIATE_ROOTS: Rule[] = [
  * becomes `a - bx` after multiplying by x).
  */
 function clearDenominators(
-  expr: BoxedExpression,
+  expr: Expression,
   _variable?: string
-): BoxedExpression {
+): Expression {
   if (expr.operator !== 'Add' || !isFunction(expr)) return expr;
 
   const ops = expr.ops;
@@ -639,7 +639,7 @@ function clearDenominators(
 
   // Build LCM by collecting unique denominator factors
   // This avoids multiplying by the same factor twice
-  const lcmFactors: BoxedExpression[] = [];
+  const lcmFactors: Expression[] = [];
 
   for (const denom of denominators) {
     // Check if this denominator (or an equivalent) is already in our factors
@@ -697,9 +697,9 @@ function clearDenominators(
  * roots against the original equation using validateRoots().
  */
 function transformSqrtLinearEquation(
-  expr: BoxedExpression,
+  expr: Expression,
   variable: string
-): BoxedExpression {
+): Expression {
   if (expr.operator !== 'Add' || !isFunction(expr)) return expr;
 
   const ce = expr.engine;
@@ -707,7 +707,7 @@ function transformSqrtLinearEquation(
   if (ops.length === 0) return expr;
 
   // Find the sqrt term(s) in the expression
-  let sqrtTerm: BoxedExpression | null = null;
+  let sqrtTerm: Expression | null = null;
   let sqrtIndex = -1;
 
   for (let i = 0; i < ops.length; i++) {
@@ -749,7 +749,7 @@ function transformSqrtLinearEquation(
   if (nonSqrtTerms.length === 0) return expr;
 
   // g(x) = -(sum of non-sqrt terms), since √f(x) + g(x) = 0 means √f(x) = -g(x)
-  let gExpr: BoxedExpression;
+  let gExpr: Expression;
   if (nonSqrtTerms.length === 1) {
     gExpr = nonSqrtTerms[0].neg();
   } else {
@@ -783,9 +783,9 @@ function transformSqrtLinearEquation(
  * Returns solutions for x, or null if pattern not detected.
  */
 function solveTwoSqrtEquation(
-  expr: BoxedExpression,
+  expr: Expression,
   variable: string
-): BoxedExpression[] | null {
+): Expression[] | null {
   if (expr.operator !== 'Add' || !isFunction(expr)) return null;
 
   const ce = expr.engine;
@@ -794,8 +794,8 @@ function solveTwoSqrtEquation(
 
   // Find all sqrt terms in the expression
   const sqrtTerms: {
-    term: BoxedExpression;
-    arg: BoxedExpression;
+    term: Expression;
+    arg: Expression;
     index: number;
   }[] = [];
 
@@ -849,7 +849,7 @@ function solveTwoSqrtEquation(
   const nonSqrtTerms = ops.filter((_, i) => !sqrtIndices.has(i));
 
   // The constant term e (from √f + √g + (-e) = 0, so e = -(non-sqrt terms))
-  let eExpr: BoxedExpression;
+  let eExpr: Expression;
   if (nonSqrtTerms.length === 0) {
     // √f + √g = 0 case - only works if both are 0
     return null;
@@ -925,12 +925,12 @@ function solveTwoSqrtEquation(
  */
 function solveTwoSqrtEquationCore(
   ce: ComputeEngine,
-  fExpr: BoxedExpression,
-  gExpr: BoxedExpression,
-  eExpr: BoxedExpression,
+  fExpr: Expression,
+  gExpr: Expression,
+  eExpr: Expression,
   gSign: number,
   variable: string
-): BoxedExpression[] | null {
+): Expression[] | null {
   // We have: √f = e - gSign·√g
   // Square both sides: f = e² - 2·e·gSign·√g + g
   // Rearrange: f - e² - g = -2·e·gSign·√g
@@ -962,7 +962,7 @@ function solveTwoSqrtEquationCore(
   // 3. e - gSign·√g ≥ 0 (for √f = e - gSign·√g, the RHS must be non-negative)
   // 4. The actual equation √f + gSign·√g = e holds
 
-  const validSolutions: BoxedExpression[] = [];
+  const validSolutions: Expression[] = [];
 
   for (const sol of solutions) {
     // Substitute into f and g
@@ -1002,9 +1002,9 @@ function solveTwoSqrtEquationCore(
  * Returns the solutions for x, or null if pattern not detected.
  */
 function solveNestedSqrtEquation(
-  expr: BoxedExpression,
+  expr: Expression,
   variable: string
-): BoxedExpression[] | null {
+): Expression[] | null {
   if (expr.operator !== 'Add' || !isFunction(expr)) return null;
 
   const ce = expr.engine;
@@ -1012,7 +1012,7 @@ function solveNestedSqrtEquation(
   if (ops.length === 0) return null;
 
   // Find the outer sqrt term
-  let outerSqrt: BoxedExpression | null = null;
+  let outerSqrt: Expression | null = null;
   let sqrtIndex = -1;
 
   for (let i = 0; i < ops.length; i++) {
@@ -1086,7 +1086,7 @@ function solveNestedSqrtEquation(
   if (nonSqrtTerms.length === 0) return null;
 
   // a = -(sum of non-sqrt terms)
-  let aExpr: BoxedExpression;
+  let aExpr: Expression;
   if (nonSqrtTerms.length === 1) {
     aExpr = nonSqrtTerms[0].neg();
   } else {
@@ -1136,7 +1136,7 @@ function solveNestedSqrtEquation(
 
   // Convert u solutions back to x = u²
   // Only keep solutions where u ≥ 0 (since u = √x ≥ 0)
-  const xSolutions: BoxedExpression[] = [];
+  const xSolutions: Expression[] = [];
 
   for (const uVal of uSolutions) {
     // Check if u is real and non-negative (since u = √x ≥ 0)
@@ -1161,15 +1161,15 @@ function solveNestedSqrtEquation(
 }
 
 /**
- * Expression is a function of a single variable (`x`) or an Equality
+ * MathJsonExpression is a function of a single variable (`x`) or an Equality
  *
  * Return the roots of that variable
  *
  */
 export function findUnivariateRoots(
-  expr: BoxedExpression,
+  expr: Expression,
   x: string
-): ReadonlyArray<BoxedExpression> {
+): ReadonlyArray<Expression> {
   const ce = expr.engine;
 
   if (expr.operator === 'Equal' && isFunction(expr)) {
@@ -1258,7 +1258,7 @@ export function findUnivariateRoots(
   if (result.length === 0) {
     exprs = exprs
       .flatMap((expr) => expand(expr.canonical))
-      .filter((x) => x !== null) as BoxedExpression[];
+      .filter((x) => x !== null) as Expression[];
     exprs = exprs.flatMap((expr) => harmonize(expr));
     result = exprs.flatMap((expr) =>
       matchAnyRules(
@@ -1381,17 +1381,17 @@ export const HARMONIZATION_RULES: Rule[] = [
 /** Transform expr into one or more equivalent expressions that
  * are easier to solve
  */
-function harmonize(expr: BoxedExpression): BoxedExpression[] {
+function harmonize(expr: Expression): Expression[] {
   const ce = expr.engine;
   const rules = ce.getRuleSet('harmonization')!;
   return matchAnyRules(expr, rules, { _x: ce.symbol('_x') });
 }
 
 function validateRoots(
-  expr: BoxedExpression,
+  expr: Expression,
   x: string,
-  roots: ReadonlyArray<BoxedExpression>
-): BoxedExpression[] {
+  roots: ReadonlyArray<Expression>
+): Expression[] {
   const validRoots = roots.filter((root) => {
     // Evaluate the expression at the root
     const value = expr.subs({ [x]: root }).canonical.evaluate();
@@ -1406,7 +1406,7 @@ function validateRoots(
   });
 
   // Deduplicate roots (e.g., arccos(1) and -arccos(1) both equal 0)
-  const uniqueRoots: BoxedExpression[] = [];
+  const uniqueRoots: Expression[] = [];
   for (const root of validRoots) {
     const isDuplicate = uniqueRoots.some(
       (existing) => existing.isSame(root) || existing.isEqual(root)
@@ -1423,8 +1423,8 @@ function validateRoots(
 function filterRootsByType(
   ce: ComputeEngine,
   x: string,
-  roots: ReadonlyArray<BoxedExpression>
-): ReadonlyArray<BoxedExpression> {
+  roots: ReadonlyArray<Expression>
+): ReadonlyArray<Expression> {
   const varTypeObj = ce.symbol(x).type;
   const vt = varTypeObj.type;
   // Only filter for specific numeric subtypes

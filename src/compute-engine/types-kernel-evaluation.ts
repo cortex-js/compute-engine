@@ -53,7 +53,7 @@ export type AssumeResult =
   | 'tautology'
   | 'ok';
 
-/** Options for `BoxedExpression.evaluate()`
+/** Options for `Expression.evaluate()`
  *
  * @category Boxed Expression
  */

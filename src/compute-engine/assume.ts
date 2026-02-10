@@ -4,7 +4,7 @@ import { BoxedType } from '../common/type/boxed-type';
 
 import {
   AssumeResult,
-  BoxedExpression,
+  Expression,
   IComputeEngine as ComputeEngine,
   Sign,
 } from './global-types';
@@ -32,7 +32,7 @@ import {
  */
 function inferTypeFromValue(
   ce: ComputeEngine,
-  value: BoxedExpression
+  value: Expression
 ): BoxedType {
   // finite_integer, integer, etc. -> integer
   if (value.type.matches('integer')) return ce.type('integer');
@@ -73,7 +73,7 @@ function inferTypeFromValue(
  *
  */
 
-export function assume(proposition: BoxedExpression): AssumeResult {
+export function assume(proposition: Expression): AssumeResult {
   if (proposition.operator === 'Element') return assumeElement(proposition);
   if (proposition.operator === 'Equal') return assumeEquality(proposition);
   if (isInequalityOperator(proposition.operator))
@@ -84,7 +84,7 @@ export function assume(proposition: BoxedExpression): AssumeResult {
   );
 }
 
-function assumeEquality(proposition: BoxedExpression): AssumeResult {
+function assumeEquality(proposition: Expression): AssumeResult {
   console.assert(proposition.operator === 'Equal');
   // Four cases:
   // 1/ proposition contains no unknowns
@@ -181,7 +181,7 @@ function assumeEquality(proposition: BoxedExpression): AssumeResult {
   return 'ok';
 }
 
-function assumeInequality(proposition: BoxedExpression): AssumeResult {
+function assumeInequality(proposition: Expression): AssumeResult {
   //
   // 1/ lhs is a single **undefined** free var e.g. "x < 0"
   //    => define a new var, if the domain can be inferred set it, otherwise
@@ -236,8 +236,8 @@ function assumeInequality(proposition: BoxedExpression): AssumeResult {
   // Normalize to Less, LessEqual
   if (!isFunction(proposition)) return 'internal-error';
   let op = '';
-  let lhs: BoxedExpression;
-  let rhs: BoxedExpression;
+  let lhs: Expression;
+  let rhs: Expression;
   if (proposition.operator === 'Less') {
     lhs = proposition.op1;
     rhs = proposition.op2;
@@ -424,7 +424,7 @@ function assumeInequality(proposition: BoxedExpression): AssumeResult {
   return 'ok';
 }
 
-function assumeElement(proposition: BoxedExpression): AssumeResult {
+function assumeElement(proposition: Expression): AssumeResult {
   console.assert(proposition.operator === 'Element');
 
   // Four cases:
@@ -503,7 +503,7 @@ function hasDef(ce: ComputeEngine, s: string): boolean {
   return ce.lookupDefinition(s) !== undefined;
 }
 
-function undefinedIdentifiers(expr: BoxedExpression): string[] {
+function undefinedIdentifiers(expr: Expression): string[] {
   return expr.symbols.filter((x) => !hasDef(expr.engine, x));
 }
 

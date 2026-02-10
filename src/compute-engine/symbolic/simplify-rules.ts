@@ -5,7 +5,7 @@ import {
 } from '../boxed-expression/trigonometry';
 import { mul } from '../boxed-expression/arithmetic-mul-div';
 import { simplifyLogicFunction } from './simplify-logic';
-import type { BoxedExpression, Rule, RuleStep } from '../global-types';
+import type { Expression, Rule, RuleStep } from '../global-types';
 import {
   isFunction,
   isNumber,
@@ -110,10 +110,10 @@ import { simplifyDivide } from './simplify-divide';
  *
  * where `lhs` is rewritten as `rhs` if `condition` is true.
  *
- * `lhs` and `rhs` can be either an Expression or a LaTeX string.
+ * `lhs` and `rhs` can be either an MathJsonExpression or a LaTeX string.
  *
- * If using an Expression, the expression is *not* canonicalized before being
- * used. Therefore in some cases using Expression, while more verbose,
+ * If using an MathJsonExpression, the expression is *not* canonicalized before being
+ * used. Therefore in some cases using MathJsonExpression, while more verbose,
  * may be necessary as the expression could be simplified by the canonicalization.
  */
 export const SIMPLIFY_RULES: Rule[] = [
@@ -233,11 +233,11 @@ export const SIMPLIFY_RULES: Rule[] = [
     // e.g., e^x * e^2 should become e^{x+2}, not 7.389... * e^x
     // Also handle bare symbols (a = a^1) as having an implicit power
     const ops = x.ops;
-    const powerBases = new Map<string, BoxedExpression[]>();
+    const powerBases = new Map<string, Expression[]>();
     for (const op of ops) {
       // Get the base: for Power it's op1, for symbols it's the symbol itself
       let baseKey: string | null = null;
-      let baseOp: BoxedExpression | null = null;
+      let baseOp: Expression | null = null;
       if (op.operator === 'Power' && isFunction(op)) {
         baseKey = JSON.stringify(op.op1.json);
         baseOp = op;
@@ -709,15 +709,15 @@ export const SIMPLIFY_RULES: Rule[] = [
     const baseGroups = new Map<
       string,
       {
-        base: BoxedExpression;
-        terms: Array<{ term: BoxedExpression; exp: BoxedExpression }>;
+        base: Expression;
+        terms: Array<{ term: Expression; exp: Expression }>;
       }
     >();
-    const otherTerms: BoxedExpression[] = [];
+    const otherTerms: Expression[] = [];
 
     for (const term of x.ops) {
-      let base: BoxedExpression;
-      let exp: BoxedExpression;
+      let base: Expression;
+      let exp: Expression;
 
       if (term.operator === 'Power' && isFunction(term)) {
         base = term.op1;
@@ -929,7 +929,7 @@ export const SIMPLIFY_RULES: Rule[] = [
     if (!hasCombinations) return undefined;
 
     // Build result
-    const resultTerms: BoxedExpression[] = [...otherTerms];
+    const resultTerms: Expression[] = [...otherTerms];
 
     for (const group of baseGroups.values()) {
       if (group.terms.length === 1) {
@@ -973,7 +973,7 @@ function isExact(n: number | NumericValue | undefined): boolean {
 //
 
 function simplifyRelationalOperator(
-  expr: BoxedExpression
+  expr: Expression
 ): RuleStep | undefined {
   const h = expr.operator;
   if (!isInequalityOperator(h) && !isEquationOperator(h)) return undefined;
@@ -1014,7 +1014,7 @@ function simplifyRelationalOperator(
 }
 
 function simplifySystemOfEquations(
-  expr: BoxedExpression
+  expr: Expression
 ): RuleStep | undefined {
   if (expr.operator !== 'List' || !isFunction(expr)) return undefined;
 
