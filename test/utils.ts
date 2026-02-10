@@ -412,7 +412,7 @@ function emoji(a, b): string {
 
 // Serializer for Boxed Expressions
 expect.addSnapshotSerializer({
-  // Is the value to serialize an instance of the BoxedExpression class?
+  // Is the value to serialize an instance of the Expression class?
   test: (val): boolean => val && val instanceof _BoxedExpression,
 
   serialize: (val, _config, _indentation, _depth, _refs, _printer): string =>

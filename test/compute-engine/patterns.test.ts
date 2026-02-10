@@ -1,27 +1,27 @@
 import {
-  BoxedExpression,
+  Expression,
   PatternMatchOptions,
   ExpressionInput,
   Substitution,
 } from '../../src/compute-engine';
 import { _BoxedExpression } from '../../src/compute-engine/boxed-expression/abstract-boxed-expression';
 import { validatePattern } from '../../src/compute-engine/boxed-expression/boxed-patterns';
-import { MathJsonExpression as Expression } from '../../src/math-json/types';
+import { MathJsonExpression } from '../../src/math-json/types';
 import { engine, latex } from '../utils';
 
 const ce = engine;
 
 function match(
   pattern: ExpressionInput,
-  expr: BoxedExpression | Expression,
+  expr: Expression | MathJsonExpression,
   options?: PatternMatchOptions
 ): Substitution | null {
   // Avoid re-boxing both expr & pattern so as to preserve canonical-status
   expr =
-    expr instanceof _BoxedExpression ? (expr as BoxedExpression) : ce.box(expr);
+    expr instanceof _BoxedExpression ? (expr as Expression) : ce.box(expr);
   pattern =
     pattern instanceof _BoxedExpression
-      ? (pattern as BoxedExpression)
+      ? (pattern as Expression)
       : ce.box(pattern);
 
   const result = expr.match(pattern, {
@@ -35,7 +35,7 @@ function match(
 }
 
 describe('Examples from Patterns and Rules guide', () => {
-  const pattern: Expression = ['Add', '_', 'x'];
+  const pattern: MathJsonExpression = ['Add', '_', 'x'];
 
   // console.log("x+42", ce.box(["Add", "x", 42]).match(pattern));
   // ➔ { } : the expression matches the pattern by commutativity
@@ -970,7 +970,7 @@ describe('NON EXACT WILDCARDS', () => {
   });
 });
 
-// GitHub Issue #258: BoxedExpression.match() with a Rational pattern
+// GitHub Issue #258: Expression.match() with a Rational pattern
 describe('RATIONAL PATTERN MATCHING', () => {
   it('should match Rational(3, 2) with Rational pattern', () => {
     // Rational with two integers becomes a BoxedNumber

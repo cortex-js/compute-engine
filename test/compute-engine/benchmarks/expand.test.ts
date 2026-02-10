@@ -1,11 +1,11 @@
-import type { BoxedExpression } from '../../../src/compute-engine/public';
+import type { Expression } from '../../../src/compute-engine/public';
 import { benchmark, engine } from '../../utils';
 
 //
 // Expand Benchmark
 //
 
-function expand(e: BoxedExpression): BoxedExpression {
+function expand(e: Expression): Expression {
   return engine.box(['Expand', e]).evaluate();
 }
 

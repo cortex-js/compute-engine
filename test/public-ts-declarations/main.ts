@@ -1,5 +1,5 @@
 import { ComputeEngine, version } from 'compute-engine';
-import type { BoxedExpression, Parser } from 'compute-engine';
+import type { Parser } from 'compute-engine';
 
 console.log(version);
 const ce = new ComputeEngine();
@@ -24,5 +24,5 @@ ce.declare('Ln', {
   },
 });
 
-const expr: BoxedExpression = ce.parse('x^2 + 2x + 1');
+const expr = ce.parse('x^2 + 2x + 1');
 console.log(expr.toString());

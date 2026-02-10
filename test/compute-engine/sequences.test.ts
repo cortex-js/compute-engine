@@ -57,7 +57,7 @@ describe('DECLARATIVE SEQUENCE DEFINITIONS', () => {
       expect(ce.parse('T_{5}').evaluate().re).toBe(15);
     });
 
-    test('Sequence with BoxedExpression base case', () => {
+    test('Sequence with Expression base case', () => {
       const ce = new ComputeEngine();
       ce.declareSequence('B', {
         base: { 0: ce.number(10) },

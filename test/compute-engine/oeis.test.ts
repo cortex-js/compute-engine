@@ -47,7 +47,7 @@ describeIfNetwork('OEIS Integration (SUB-12)', () => {
       expect(Array.isArray(results)).toBe(true);
     });
 
-    test('handles BoxedExpression terms', async () => {
+    test('handles Expression terms', async () => {
       const ce = new ComputeEngine();
       const terms = [
         ce.number(0),

@@ -671,7 +671,7 @@ describe('CANONICAL FORMS', () => {
         canonical  = ["Power", "a", 12]
       `);
       //note: 'Multiply' args. are ordered in the output JSON: but the result 'Power'
-      //BoxedExpression still has (ordered) operands [b, c].
+      //Expression still has (ordered) operands [b, c].
       expect(checkPower('{a^{{b^2}^e}}^{0.5*\\pi}')).toMatchInlineSnapshot(`
         box        = [
           "Power",

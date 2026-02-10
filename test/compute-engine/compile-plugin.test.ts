@@ -1,7 +1,7 @@
 import { engine as ce } from '../utils';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import type { LanguageTarget, CompileTarget, CompiledOperators, CompiledFunctions, CompilationResult } from '../../src/compute-engine/compilation/types';
-import type { BoxedExpression } from '../../src/compute-engine/global-types';
+import type { Expression } from '../../src/compute-engine/global-types';
 
 /**
  * Example custom target: Python-like compilation
@@ -47,7 +47,7 @@ class PythonTarget implements LanguageTarget {
   }
 
   compile(
-    expr: BoxedExpression,
+    expr: Expression,
     options: any = {}
   ): CompilationResult {
     const { BaseCompiler } = require('../../src/compute-engine/compilation/base-compiler');
@@ -101,7 +101,7 @@ class RPNTarget implements LanguageTarget {
     };
   }
 
-  compile(expr: BoxedExpression, options: any = {}): CompilationResult {
+  compile(expr: Expression, options: any = {}): CompilationResult {
     const { BaseCompiler } = require('../../src/compute-engine/compilation/base-compiler');
     const target = this.createTarget();
     const rpnCode = BaseCompiler.compile(expr, target);

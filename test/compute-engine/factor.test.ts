@@ -1,4 +1,4 @@
-import { BoxedExpression, ComputeEngine } from '../../src/compute-engine';
+import { Expression, ComputeEngine } from '../../src/compute-engine';
 import {
   factorPerfectSquare,
   factorDifferenceOfSquares,
@@ -8,7 +8,7 @@ import {
 
 const ce = new ComputeEngine();
 
-function parse(latex: string): BoxedExpression {
+function parse(latex: string): Expression {
   return ce.parse(latex);
 }
 

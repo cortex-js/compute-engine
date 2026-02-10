@@ -1,14 +1,14 @@
-import type { BoxedExpression } from '../../src/compute-engine/global-types';
+import type { Expression } from '../../src/compute-engine/global-types';
 import { engine } from '../utils';
 
-function parse(expr: string): BoxedExpression {
+function parse(expr: string): Expression {
   return engine.parse(expr)!;
 }
 
 // Helper to create D expressions using MathJSON directly
 // Note: D(f, x) in LaTeX now parses as Predicate, not the derivative function.
 // Use this helper or Leibniz notation (\frac{d}{dx}) for derivatives.
-function D(expr: string, ...vars: string[]): BoxedExpression {
+function D(expr: string, ...vars: string[]): Expression {
   return engine.box(['D', engine.parse(expr), ...vars]);
 }
 

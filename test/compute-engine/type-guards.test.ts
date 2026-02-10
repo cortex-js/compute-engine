@@ -92,7 +92,7 @@ describe('isFunction', () => {
   test('narrows type to FunctionInterface', () => {
     const expr = ce.parse('x + 1');
     if (isFunction(expr)) {
-      // After guard, ops is ReadonlyArray<BoxedExpression> (no undefined)
+      // After guard, ops is ReadonlyArray<Expression> (no undefined)
       expect(expr.ops.length).toBeGreaterThan(0);
       expect(expr.nops).toBeGreaterThan(0);
       expect(expr.isFunctionExpression).toBe(true);

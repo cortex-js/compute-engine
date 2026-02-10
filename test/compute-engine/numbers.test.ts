@@ -1,5 +1,5 @@
 import { Expression } from '../../src/math-json/types.ts';
-import type { BoxedExpression } from '../../src/compute-engine/global-types.ts';
+import type { Expression } from '../../src/compute-engine/global-types.ts';
 import { engine as ce } from '../utils';
 
 describe('BOXING OF NUMBER', () => {
@@ -50,7 +50,7 @@ describe('BOXING OF NUMBER', () => {
   });
 });
 
-function checkProps(x: BoxedExpression): string {
+function checkProps(x: Expression): string {
   const result: string[] = [];
   result.push('number literal: ' + x.isNumberLiteral);
   result.push('type: ' + x.type.toString());

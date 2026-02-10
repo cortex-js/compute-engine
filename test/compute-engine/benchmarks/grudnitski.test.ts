@@ -1,13 +1,13 @@
-import { BoxedExpression, ComputeEngine } from '../../../src/compute-engine';
+import { Expression, ComputeEngine } from '../../../src/compute-engine';
 
 export const ce = new ComputeEngine();
 
-function isEquivalent(a: string | BoxedExpression, b: string): boolean {
+function isEquivalent(a: string | Expression, b: string): boolean {
   const lhs = typeof a === 'string' ? ce.parse(a) : a;
   return lhs.isSame(ce.parse(b));
 }
 
-function isEquivalentSimplify(a: string | BoxedExpression, b: string): boolean {
+function isEquivalentSimplify(a: string | Expression, b: string): boolean {
   const lhs = typeof a === 'string' ? ce.parse(a) : a;
   return lhs.simplify().isSame(ce.parse(b).simplify());
 }

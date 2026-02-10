@@ -8,20 +8,20 @@ import type {
   CompilationResult,
   LanguageTarget,
 } from '../../src/compute-engine/compilation/types';
-import type { BoxedExpression, LibraryDefinition } from '../../src/compute-engine/global-types';
+import type { Expression, LibraryDefinition } from '../../src/compute-engine/global-types';
 
-class ContractTarget implements LanguageTarget<BoxedExpression> {
+class ContractTarget implements LanguageTarget<Expression> {
   getOperators(): CompiledOperators {
     return { Add: ['+', 11] };
   }
 
-  getFunctions(): CompiledFunctions<BoxedExpression> {
+  getFunctions(): CompiledFunctions<Expression> {
     return {};
   }
 
   createTarget(
-    options: Partial<CompileTarget<BoxedExpression>> = {}
-  ): CompileTarget<BoxedExpression> {
+    options: Partial<CompileTarget<Expression>> = {}
+  ): CompileTarget<Expression> {
     const ops = this.getOperators();
     const fns = this.getFunctions();
     return {
@@ -38,7 +38,7 @@ class ContractTarget implements LanguageTarget<BoxedExpression> {
     };
   }
 
-  compile(expr: BoxedExpression): CompilationResult {
+  compile(expr: Expression): CompilationResult {
     const { BaseCompiler } = require('../../src/compute-engine/compilation/base-compiler');
     return {
       target: 'contract',
@@ -105,7 +105,7 @@ describe('Extension Contracts', () => {
         number: (n: number) => String(n),
         preamble: '',
         indent: 0,
-      } as unknown as CompileTarget<BoxedExpression>;
+      } as unknown as CompileTarget<Expression>;
 
       expect(() => compile(expr, { target: invalidTarget })).toThrow(/"ws\(\)"/);
     });
@@ -141,7 +141,7 @@ describe('Extension Contracts', () => {
 
     test('rejects target objects that do not implement LanguageTarget', () => {
       const ce = new ComputeEngine();
-      const invalidTarget = {} as unknown as LanguageTarget<BoxedExpression>;
+      const invalidTarget = {} as unknown as LanguageTarget<Expression>;
 
       expect(() =>
         ce.registerCompilationTarget('broken-target', invalidTarget)
@@ -246,7 +246,7 @@ describe('Extension Contracts', () => {
       const rules = ce.rules([
         {
           match: 'x',
-          replace: () => 'not-an-expression' as unknown as BoxedExpression,
+          replace: () => 'not-an-expression' as unknown as Expression,
         },
       ]);
 
@@ -254,7 +254,7 @@ describe('Extension Contracts', () => {
       const rule = rules.rules[0];
 
       expect(() => applyRule(rule, expr, {})).toThrow(
-        /expected a BoxedExpression or RuleStep/
+        /expected a Expression or RuleStep/
       );
     });
   });

@@ -14,7 +14,7 @@ import {
 } from '../../src/compute-engine';
 
 describe('Free Functions', () => {
-  test('parse() returns a BoxedExpression', () => {
+  test('parse() returns a Expression', () => {
     const result = parse('x^2');
     expect(result).toBeDefined();
     expect(result.operator).toBe('Power');
@@ -25,7 +25,7 @@ describe('Free Functions', () => {
     expect(result.toString()).toBe('2x + 1');
   });
 
-  test('simplify() simplifies an existing BoxedExpression', () => {
+  test('simplify() simplifies an existing Expression', () => {
     const expr = parse('x + x + 1');
     const result = simplify(expr);
     expect(result.toString()).toBe('2x + 1');
@@ -36,7 +36,7 @@ describe('Free Functions', () => {
     expect(result.toString()).toBe('2047');
   });
 
-  test('evaluate() evaluates an existing BoxedExpression', () => {
+  test('evaluate() evaluates an existing Expression', () => {
     const expr = parse('2^{11} - 1');
     const result = evaluate(expr);
     expect(result.toString()).toBe('2047');
@@ -50,7 +50,7 @@ describe('Free Functions', () => {
     expect(result.toString()).not.toBe('Sqrt(2)');
   });
 
-  test('N() returns numeric approximation from BoxedExpression', () => {
+  test('N() returns numeric approximation from Expression', () => {
     const expr = parse('\\sqrt{2}');
     const result = N(expr);
     expect(result).toBeDefined();
@@ -101,7 +101,7 @@ describe('Free Functions', () => {
     expect(result!.latex).toBe('x^2+2x+1');
   });
 
-  test('expand() expands a BoxedExpression', () => {
+  test('expand() expands a Expression', () => {
     const expr = parse('(x+1)(x+2)');
     const result = expand(expr);
     expect(result).not.toBeNull();
@@ -117,7 +117,7 @@ describe('Free Functions', () => {
     expect(values).toContain(3);
   });
 
-  test('solve() solves from a BoxedExpression', () => {
+  test('solve() solves from a Expression', () => {
     const expr = parse('x^2 - 5x + 6 = 0');
     const result = solve(expr, 'x');
     expect(result).not.toBeNull();
@@ -132,7 +132,7 @@ describe('Free Functions', () => {
     expect(result).not.toBeNull();
   });
 
-  test('expandAll() expands from a BoxedExpression', () => {
+  test('expandAll() expands from a Expression', () => {
     const expr = parse('(x+1)^2');
     const result = expandAll(expr);
     expect(result).not.toBeNull();
@@ -145,7 +145,7 @@ describe('Free Functions', () => {
     expect(result.latex).toBe('8xy');
   });
 
-  test('factor() factors from a BoxedExpression', () => {
+  test('factor() factors from a Expression', () => {
     const expr = parse('(2x)(4y)');
     const result = factor(expr);
     expect(result).toBeDefined();
@@ -159,7 +159,7 @@ describe('Free Functions', () => {
     expect(typeof result.code).toBe('string');
   });
 
-  test('compile() compiles from a BoxedExpression', () => {
+  test('compile() compiles from a Expression', () => {
     const expr = parse('x^2 + 1');
     const result = compile(expr);
     expect(result).toBeDefined();
