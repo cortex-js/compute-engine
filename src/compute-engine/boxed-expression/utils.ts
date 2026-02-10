@@ -66,9 +66,7 @@ export function hasSymbolicTranscendental(expr: BoxedExpression): boolean {
   return false;
 }
 
-export function isDictionary(
-  expr: unknown
-): expr is DictionaryInterface {
+export function isDictionary(expr: unknown): expr is DictionaryInterface {
   return (
     expr !== null &&
     expr !== undefined &&

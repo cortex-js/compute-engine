@@ -2,7 +2,10 @@ import type {
   IComputeEngine as ComputeEngine,
   LibraryDefinition,
 } from './global-types';
-import type { LatexDictionaryEntry, LibraryCategory } from './latex-syntax/types';
+import type {
+  LatexDictionaryEntry,
+  LibraryCategory,
+} from './latex-syntax/types';
 import { assertLibraryDefinitionContract } from './engine-extension-contracts';
 
 import {

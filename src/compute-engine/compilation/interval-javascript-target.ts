@@ -298,9 +298,7 @@ function processInput(input: unknown): unknown {
 /**
  * Interval arithmetic JavaScript target implementation.
  */
-export class IntervalJavaScriptTarget
-  implements LanguageTarget<BoxedExpression>
-{
+export class IntervalJavaScriptTarget implements LanguageTarget<BoxedExpression> {
   getOperators(): CompiledOperators {
     return INTERVAL_JAVASCRIPT_OPERATORS;
   }

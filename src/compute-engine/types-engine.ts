@@ -258,7 +258,9 @@ export interface IComputeEngine extends IBigNum {
   ): void;
 
   /** Get a registered compilation target by name. */
-  getCompilationTarget(name: string): LanguageTarget<BoxedExpression> | undefined;
+  getCompilationTarget(
+    name: string
+  ): LanguageTarget<BoxedExpression> | undefined;
 
   /** Return the names of all registered compilation targets. */
   listCompilationTargets(): string[];
@@ -334,10 +336,7 @@ export interface IComputeEngine extends IBigNum {
     options?: Partial<ParseLatexOptions> & { form?: FormOption }
   ): BoxedExpression | null;
 
-  parseSimplify(
-    latex: null,
-    options?: WorkflowSimplifyOptions
-  ): null;
+  parseSimplify(latex: null, options?: WorkflowSimplifyOptions): null;
   parseSimplify(
     latex: LatexString,
     options?: WorkflowSimplifyOptions
@@ -347,10 +346,7 @@ export interface IComputeEngine extends IBigNum {
     options?: WorkflowSimplifyOptions
   ): BoxedExpression | null;
 
-  parseEvaluate(
-    latex: null,
-    options?: WorkflowEvaluateOptions
-  ): null;
+  parseEvaluate(latex: null, options?: WorkflowEvaluateOptions): null;
   parseEvaluate(
     latex: LatexString,
     options?: WorkflowEvaluateOptions
@@ -360,10 +356,7 @@ export interface IComputeEngine extends IBigNum {
     options?: WorkflowEvaluateOptions
   ): BoxedExpression | null;
 
-  parseNumeric(
-    latex: null,
-    options?: WorkflowNumericOptions
-  ): null;
+  parseNumeric(latex: null, options?: WorkflowNumericOptions): null;
   parseNumeric(
     latex: LatexString,
     options?: WorkflowNumericOptions

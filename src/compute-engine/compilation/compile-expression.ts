@@ -1,9 +1,6 @@
 import type { MathJsonSymbol } from '../../math-json/types';
 import type { BoxedExpression, JSSource } from '../global-types';
-import type {
-  CompileTarget,
-  CompilationResult,
-} from './types';
+import type { CompileTarget, CompilationResult } from './types';
 import { BaseCompiler } from './base-compiler';
 import { applicableN1 } from '../function-utils';
 import { assertCompilationOptionsContract } from '../engine-extension-contracts';

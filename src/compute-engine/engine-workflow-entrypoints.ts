@@ -37,7 +37,9 @@ export type ParseNumericOptions = {
   parse?: ParseEntrypointOptions;
 };
 
-function getParseOptions(options?: WorkflowParseOptions): ParseEntrypointOptions | undefined {
+function getParseOptions(
+  options?: WorkflowParseOptions
+): ParseEntrypointOptions | undefined {
   if (options?.parseMode === undefined) return options?.parse;
 
   const strict = options.parseMode === 'strict';

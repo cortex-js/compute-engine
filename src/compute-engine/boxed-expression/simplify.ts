@@ -440,22 +440,38 @@ function simplifyNonCommutativeFunction(
   const isQuotientPowerRule = because === 'a / (b/c)^d -> a * (c/b)^d';
   // Expand may produce more nodes but enables term cancellation
   // Accept when expansion reduces terms or eliminates Power-of-Add patterns
-  const isExpandWithSimplification = because === 'expand' && (() => {
-    if (!isBoxedFunction(last) || !isBoxedFunction(expr)) return false;
-    // Fewer terms means cancellation happened
-    if (expr.operator === 'Add' && last.operator === 'Add' && last.nops < expr.nops) return true;
-    // Expansion eliminated Power(Add(...), n) patterns — the result is flatter
-    if (expr.operator === 'Add' && last.operator === 'Add' && last.nops <= expr.nops) {
-      // Check if original had Power-of-Add that was expanded away
-      const hasPowerOfAdd = (e: BoxedExpression): boolean => {
-        if (e.operator === 'Power' && isBoxedFunction(e) && e.op1?.operator === 'Add') return true;
-        if (isBoxedFunction(e)) return e.ops.some(hasPowerOfAdd);
-        return false;
-      };
-      return hasPowerOfAdd(expr) && !hasPowerOfAdd(last);
-    }
-    return false;
-  })();
+  const isExpandWithSimplification =
+    because === 'expand' &&
+    (() => {
+      if (!isBoxedFunction(last) || !isBoxedFunction(expr)) return false;
+      // Fewer terms means cancellation happened
+      if (
+        expr.operator === 'Add' &&
+        last.operator === 'Add' &&
+        last.nops < expr.nops
+      )
+        return true;
+      // Expansion eliminated Power(Add(...), n) patterns — the result is flatter
+      if (
+        expr.operator === 'Add' &&
+        last.operator === 'Add' &&
+        last.nops <= expr.nops
+      ) {
+        // Check if original had Power-of-Add that was expanded away
+        const hasPowerOfAdd = (e: BoxedExpression): boolean => {
+          if (
+            e.operator === 'Power' &&
+            isBoxedFunction(e) &&
+            e.op1?.operator === 'Add'
+          )
+            return true;
+          if (isBoxedFunction(e)) return e.ops.some(hasPowerOfAdd);
+          return false;
+        };
+        return hasPowerOfAdd(expr) && !hasPowerOfAdd(last);
+      }
+      return false;
+    })();
   if (
     !isCheaper(expr, last, options?.costFunction) &&
     !isPowerCombination &&

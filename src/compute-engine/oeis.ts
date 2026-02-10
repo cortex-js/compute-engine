@@ -101,7 +101,9 @@ function parseFormula(value: unknown): string | undefined {
 function parseComments(value: unknown): string[] | undefined {
   if (typeof value === 'string') return [value];
   if (!Array.isArray(value)) return undefined;
-  const comments = value.filter((item): item is string => typeof item === 'string');
+  const comments = value.filter(
+    (item): item is string => typeof item === 'string'
+  );
   return comments.length > 0 ? comments : undefined;
 }
 

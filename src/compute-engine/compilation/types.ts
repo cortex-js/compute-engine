@@ -77,10 +77,7 @@ export interface LanguageTarget<Expr = unknown> {
   createTarget(options?: Partial<CompileTarget<Expr>>): CompileTarget<Expr>;
 
   /** Compile an expression to this language */
-  compile(
-    expr: Expr,
-    options?: CompilationOptions<Expr>
-  ): CompilationResult;
+  compile(expr: Expr, options?: CompilationOptions<Expr>): CompilationResult;
 }
 
 /**

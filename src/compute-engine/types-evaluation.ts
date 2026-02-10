@@ -58,9 +58,7 @@ export type Assumption = KernelAssumption<BoxedExpression, ComputeEngine>;
  *
  * @category Rules
  */
-export type RuleReplaceFunction = KernelRuleReplaceFunction<
-  BoxedExpression
->;
+export type RuleReplaceFunction = KernelRuleReplaceFunction<BoxedExpression>;
 
 /**
  * Rule condition callback with access to the compute engine.

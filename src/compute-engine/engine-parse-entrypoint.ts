@@ -3,7 +3,10 @@ import type { MathJsonSymbol } from '../math-json/types';
 
 import { box, formToInternal } from './boxed-expression/box';
 import { isOperatorDef, isValueDef } from './boxed-expression/utils';
-import type { IComputeEngine as ComputeEngine, BoxedExpression } from './global-types';
+import type {
+  IComputeEngine as ComputeEngine,
+  BoxedExpression,
+} from './global-types';
 import { parse } from './latex-syntax/parse';
 import type { LatexString, ParseLatexOptions } from './latex-syntax/types';
 import { asLatexString } from './latex-syntax/utils';
@@ -24,7 +27,10 @@ function symbolType(
   return BoxedType.unknown;
 }
 
-function hasSubscriptEvaluate(engine: ComputeEngine, id: MathJsonSymbol): boolean {
+function hasSubscriptEvaluate(
+  engine: ComputeEngine,
+  id: MathJsonSymbol
+): boolean {
   const def = engine.lookupDefinition(id);
   return !!(isValueDef(def) && def.value.subscriptEvaluate);
 }

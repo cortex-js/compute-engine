@@ -169,7 +169,11 @@ export function simplifyPower(x: BoxedExpression): RuleStep | undefined {
 
     // Root of Multiply: root(a*b*..., n) -> root(a,n) * root(b,n) * ...
     // Distribute root over product when some factors have perfect nth roots
-    if (arg.operator === 'Multiply' && isBoxedFunction(arg) && arg.ops.length >= 2) {
+    if (
+      arg.operator === 'Multiply' &&
+      isBoxedFunction(arg) &&
+      arg.ops.length >= 2
+    ) {
       const n = rootIndex.re;
       if (n !== undefined && Number.isInteger(n) && n >= 2) {
         const insideRoot: BoxedExpression[] = [];

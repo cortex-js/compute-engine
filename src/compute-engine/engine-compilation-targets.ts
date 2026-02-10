@@ -18,7 +18,10 @@ import { IntervalGLSLTarget } from './compilation/interval-glsl-target';
  * @internal
  */
 export class CompilationTargetRegistry {
-  private readonly _targets = new Map<string, LanguageTarget<BoxedExpression>>();
+  private readonly _targets = new Map<
+    string,
+    LanguageTarget<BoxedExpression>
+  >();
 
   register(name: string, target: LanguageTarget<BoxedExpression>): void {
     assertCompilationTargetName(name);

@@ -272,10 +272,7 @@ export function parseNumber(
 ): Expression | null {
   // If we don't parse numbers, we'll return them as individual tokens
   const parseNumbersOption = parser.options.parseNumbers as unknown;
-  if (
-    parseNumbersOption === false ||
-    parseNumbersOption === 'never'
-  )
+  if (parseNumbersOption === false || parseNumbersOption === 'never')
     return null;
 
   const start = parser.index;

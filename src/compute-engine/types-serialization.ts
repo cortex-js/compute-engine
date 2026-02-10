@@ -1,7 +1,4 @@
-import type {
-  BoxedExpression,
-  SemiBoxedExpression,
-} from './types-expression';
+import type { BoxedExpression, SemiBoxedExpression } from './types-expression';
 
 import type {
   BoxedSubstitution as KernelBoxedSubstitution,
@@ -40,8 +37,7 @@ export type Substitution<T = SemiBoxedExpression> = KernelSubstitution<T>;
 /**
  * @category Pattern Matching
  */
-export type BoxedSubstitution<T = BoxedExpression> =
-  KernelBoxedSubstitution<T>;
+export type BoxedSubstitution<T = BoxedExpression> = KernelBoxedSubstitution<T>;
 
 /**
  * Control how a pattern is matched to an expression.
@@ -50,4 +46,3 @@ export type BoxedSubstitution<T = BoxedExpression> =
  */
 export type PatternMatchOptions<T = BoxedExpression> =
   KernelPatternMatchOptions<T>;
-

@@ -30,4 +30,3 @@ export class SimplificationRuleStore {
     this._cachedLength = this._rules.length;
   }
 }
-

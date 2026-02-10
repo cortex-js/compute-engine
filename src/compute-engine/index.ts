@@ -1,11 +1,7 @@
 import { Complex } from 'complex-esm';
 import { Decimal } from 'decimal.js';
 
-import {
-  Type,
-  TypeResolver,
-  TypeString,
-} from '../common/type/types';
+import { Type, TypeResolver, TypeString } from '../common/type/types';
 import { BoxedType } from '../common/type/boxed-type';
 
 import type { OneOf } from '../common/one-of';
@@ -57,9 +53,7 @@ import type {
   LatexString,
   LibraryCategory,
 } from './latex-syntax/types';
-import {
-  type IndexedLatexDictionary,
-} from './latex-syntax/dictionary/definitions';
+import { type IndexedLatexDictionary } from './latex-syntax/dictionary/definitions';
 
 import { getStandardLibrary } from './library/library';
 
@@ -157,9 +151,7 @@ import {
   createNumberExpression,
   createSymbolExpression,
 } from './engine-expression-entrypoints';
-import {
-  getLatexDictionaryForDomain,
-} from './engine-library-bootstrap';
+import { getLatexDictionaryForDomain } from './engine-library-bootstrap';
 import { EngineLatexDictionaryState } from './engine-latex-dictionary-state';
 import { SimplificationRuleStore } from './engine-simplification-rules';
 import { EngineNumericConfiguration } from './engine-numeric-configuration';
@@ -283,8 +275,8 @@ export class ComputeEngine implements IComputeEngine {
    *
    * Note that this is a LaTeX string and is used when parsing or serializing
    * LaTeX. MathJSON always uses a period.
-  *
-  * */
+   *
+   * */
   decimalSeparator: LatexString = '.';
 
   /** @internal */
@@ -629,7 +621,8 @@ export class ComputeEngine implements IComputeEngine {
    */
   _reset(): void {
     this._configurationLifecycle.reset({
-      refreshNumericConstants: () => this._numericConfiguration.refreshConstants(),
+      refreshNumericConstants: () =>
+        this._numericConfiguration.refreshConstants(),
       resetCommonSymbols: () => resetCommonSymbols(this._commonSymbols),
       purgeCaches: () => this._cacheStore.purgeValues(),
     });
@@ -740,9 +733,9 @@ export class ComputeEngine implements IComputeEngine {
    * per IEEE 754-2008), with a 52-bit mantissa, which gives about 15
    * digits of precision.
    *
-  * If the precision is set to `auto`, the precision is set to a default value.
-  *
-  */
+   * If the precision is set to `auto`, the precision is set to a default value.
+   *
+   */
   set precision(p: number | 'machine' | 'auto') {
     if (!this._numericConfiguration.setPrecision(p)) return;
     this._reset();
@@ -756,8 +749,8 @@ export class ComputeEngine implements IComputeEngine {
    * - `grad`: gradians, 400 gradians is a full circle
    * - `turn`: turn, 1 turn is a full circle
    *
-  * Default is `"rad"` (radians).
-  */
+   * Default is `"rad"` (radians).
+   */
   get angularUnit(): AngularUnit {
     return this._numericConfiguration.angularUnit;
   }
@@ -847,10 +840,10 @@ export class ComputeEngine implements IComputeEngine {
    *   logic in verification mode while still returning False/True in normal mode
    *
    * @see verify() in index.ts
-  * @see ask() in index.ts
-  * @see eq() in compare.ts
-  * @see Equal/NotEqual operators in relational-operator.ts
-  */
+   * @see ask() in index.ts
+   * @see eq() in compare.ts
+   * @see Equal/NotEqual operators in relational-operator.ts
+   */
   /** @internal */
   get _isVerifying(): boolean {
     return this._runtimeState.isVerifying;
@@ -874,9 +867,9 @@ export class ComputeEngine implements IComputeEngine {
   }
   /**
    * Values smaller than the tolerance are considered to be zero for the
-  * purpose of comparison, i.e. if `|b - a| <= tolerance`, `b` is considered
-  * equal to `a`.
-  */
+   * purpose of comparison, i.e. if `|b - a| <= tolerance`, `b` is considered
+   * equal to `a`.
+   */
   set tolerance(val: number | 'auto') {
     this._numericConfiguration.setTolerance(val);
   }
@@ -898,7 +891,10 @@ export class ComputeEngine implements IComputeEngine {
     if (n instanceof Decimal) {
       if (n.isPositive() && n.lte(this._numericConfiguration.bignumTolerance))
         return 0;
-      if (n.isNegative() && n.gte(this._numericConfiguration.negBignumTolerance))
+      if (
+        n.isNegative() &&
+        n.gte(this._numericConfiguration.negBignumTolerance)
+      )
         return 0;
       if (n.isZero()) return 0;
       return n;
@@ -1494,8 +1490,8 @@ export class ComputeEngine implements IComputeEngine {
    * - an error has been signaled
    * - the time limit or memory limit has been exceeded
    *
-  * @internal
-  */
+   * @internal
+   */
   _shouldContinueExecution(): boolean {
     return this._runtimeState.shouldContinueExecution();
   }
@@ -1713,14 +1709,8 @@ export class ComputeEngine implements IComputeEngine {
    * will be canonical.
    *
    */
-  parse(
-    latex: null,
-    options?: ParseEntrypointOptions
-  ): null;
-  parse(
-    latex: LatexString,
-    options?: ParseEntrypointOptions
-  ): BoxedExpression;
+  parse(latex: null, options?: ParseEntrypointOptions): null;
+  parse(latex: LatexString, options?: ParseEntrypointOptions): BoxedExpression;
   parse(
     latex: LatexString | null,
     options?: ParseEntrypointOptions
@@ -1745,10 +1735,7 @@ export class ComputeEngine implements IComputeEngine {
    * If both `simplifyMode` and `simplify.strategy` are provided,
    * `simplify.strategy` wins.
    */
-  parseSimplify(
-    latex: null,
-    options?: ParseSimplifyOptions
-  ): null;
+  parseSimplify(latex: null, options?: ParseSimplifyOptions): null;
   parseSimplify(
     latex: LatexString,
     options?: ParseSimplifyOptions
@@ -1772,10 +1759,7 @@ export class ComputeEngine implements IComputeEngine {
    * If both `evaluateMode` and `evaluate.numericApproximation` are provided,
    * `evaluate.numericApproximation` wins.
    */
-  parseEvaluate(
-    latex: null,
-    options?: ParseEvaluateOptions
-  ): null;
+  parseEvaluate(latex: null, options?: ParseEvaluateOptions): null;
   parseEvaluate(
     latex: LatexString,
     options?: ParseEvaluateOptions
@@ -1795,10 +1779,7 @@ export class ComputeEngine implements IComputeEngine {
    * Supports the same parse-mode options as `parseSimplify()` and
    * `parseEvaluate()`.
    */
-  parseNumeric(
-    latex: null,
-    options?: ParseNumericOptions
-  ): null;
+  parseNumeric(latex: null, options?: ParseNumericOptions): null;
   parseNumeric(
     latex: LatexString,
     options?: ParseNumericOptions

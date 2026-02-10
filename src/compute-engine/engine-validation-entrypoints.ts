@@ -3,7 +3,11 @@ import { typeToString } from '../common/type/serialize';
 import { BoxedType } from '../common/type/boxed-type';
 
 import { asLatexString, isLatexString } from './latex-syntax/utils';
-import type { BoxedExpression, Metadata, SemiBoxedExpression } from './global-types';
+import type {
+  BoxedExpression,
+  Metadata,
+  SemiBoxedExpression,
+} from './global-types';
 
 type ValidationHost = {
   string(s: string, metadata?: Metadata): BoxedExpression;

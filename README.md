@@ -54,6 +54,10 @@ const ce = new ComputeEngine();
 ce.parseSimplify("x + x + 1").print();
 // ➔ 2x + 1
 
+// Select simplification strategy presets
+ce.parseSimplify("2\\sin(x)\\cos(x)", { simplifyMode: "trigonometric" }).print();
+// ➔ sin(2x)
+
 // Parse then evaluate (using current context)
 ce.assign("x", 3);
 ce.parseEvaluate("x + 2").print();
@@ -62,9 +66,35 @@ ce.parseEvaluate("x + 2").print();
 // Parse then compute numeric approximation
 ce.parseNumeric("\\sqrt{2}").print();
 // ➔ 1.414213562...
+
+// Use permissive parsing for plain function names such as sin(x)
+ce.parseSimplify("sin(x)", { parseMode: "permissive" }).print();
+// ➔ sin(x)
+
+// Choose exact or numeric evaluation behavior
+ce.parseEvaluate("\\sqrt{2}", { evaluateMode: "exact" }).print();
+// ➔ sqrt(2)
+ce.parseEvaluate("\\sqrt{2}", { evaluateMode: "numeric" }).print();
+// ➔ 1.414213562...
 ```
 
 These methods return `null` when the input LaTeX is `null`.
+When both a preset and explicit options are provided, explicit `parse`/`evaluate`
+options take precedence. Likewise, explicit `simplify.strategy` takes precedence
+over `simplifyMode`.
+
+### Extension Contracts
+
+Plugin-facing extension points now enforce runtime contracts:
+
+- `ce.registerCompilationTarget(name, target)` validates target names and
+  required `LanguageTarget` methods (`getOperators()`, `getFunctions()`,
+  `createTarget()`, `compile()`).
+- Custom libraries passed with `new ComputeEngine({ libraries: [...] })` are
+  validated for `name`, `requires`, `definitions`, and `latexDictionary` shape.
+- Rule replacement callbacks must return a boxed expression or a valid rule step.
+
+Architecture snapshot: [docs/architecture/CURRENT-ARCHITECTURE.md](docs/architecture/CURRENT-ARCHITECTURE.md)
 
 ### Working with Numbers (Type-Safe)
 

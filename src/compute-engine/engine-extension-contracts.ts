@@ -1,6 +1,6 @@
 import type { BoxedExpression, LibraryDefinition } from './global-types';
-import type { LanguageTarget } from './compilation/types';
 import type {
+  LanguageTarget,
   CompileTarget,
   CompilationOptions,
 } from './compilation/types';
@@ -108,7 +108,10 @@ function assertLibraryDefinitions(value: unknown, libraryName: string): void {
   }
 }
 
-function assertLibraryLatexDictionary(value: unknown, libraryName: string): void {
+function assertLibraryLatexDictionary(
+  value: unknown,
+  libraryName: string
+): void {
   if (value === undefined) return;
 
   if (!Array.isArray(value)) {
@@ -156,11 +159,17 @@ function assertCompileTargetContract(
   if (!isFiniteNumber(target.indent))
     throw new Error('Invalid compile target: "indent" must be a finite number');
 
-  if (target.operators !== undefined && typeof target.operators !== 'function') {
+  if (
+    target.operators !== undefined &&
+    typeof target.operators !== 'function'
+  ) {
     throw new Error('Invalid compile target: "operators" must be a function');
   }
 
-  if (target.functions !== undefined && typeof target.functions !== 'function') {
+  if (
+    target.functions !== undefined &&
+    typeof target.functions !== 'function'
+  ) {
     throw new Error('Invalid compile target: "functions" must be a function');
   }
 
@@ -169,10 +178,7 @@ function assertCompileTargetContract(
   }
 }
 
-function assertOperatorEntry(
-  operator: string,
-  value: unknown
-): void {
+function assertOperatorEntry(operator: string, value: unknown): void {
   if (value === undefined) return;
 
   if (
@@ -247,7 +253,9 @@ function assertCompilationOptionsImports(value: unknown): void {
 
 export function assertCompilationOptionsContract(
   options: unknown
-): asserts options is CompilationOptions<BoxedExpression> & { fallback?: boolean } {
+): asserts options is CompilationOptions<BoxedExpression> & {
+  fallback?: boolean;
+} {
   if (options === undefined) return;
 
   if (!isRecord(options) || Array.isArray(options)) {
@@ -272,6 +280,8 @@ export function assertCompilationOptionsContract(
   }
 
   if (options.fallback !== undefined && typeof options.fallback !== 'boolean') {
-    throw new Error('Invalid compilation option "fallback": expected a boolean');
+    throw new Error(
+      'Invalid compilation option "fallback": expected a boolean'
+    );
   }
 }

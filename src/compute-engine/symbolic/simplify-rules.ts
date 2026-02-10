@@ -406,8 +406,7 @@ export const SIMPLIFY_RULES: Rule[] = [
       if (isExact(isBoxedNumber(val) ? val.numericValue : undefined))
         return { value: val, because: 'sqrt' };
       // If the input is already non-exact (a float), return the computed value
-      if (!isExact(x.op1.numericValue))
-        return { value: val, because: 'sqrt' };
+      if (!isExact(x.op1.numericValue)) return { value: val, because: 'sqrt' };
       return undefined;
     }
 

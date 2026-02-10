@@ -18,10 +18,14 @@ export function makeTensorField<DT extends keyof DataTypeMap>(
     case 'float32':
     case 'int32':
     case 'uint8':
-      return new TensorFieldNumber(ce) as unknown as TensorField<DataTypeMap[DT]>;
+      return new TensorFieldNumber(ce) as unknown as TensorField<
+        DataTypeMap[DT]
+      >;
     case 'complex128':
     case 'complex64':
-      return new TensorFieldComplex(ce) as unknown as TensorField<DataTypeMap[DT]>;
+      return new TensorFieldComplex(ce) as unknown as TensorField<
+        DataTypeMap[DT]
+      >;
     case 'bool':
     // case 'string':
     case 'expression':
@@ -29,7 +33,9 @@ export function makeTensorField<DT extends keyof DataTypeMap>(
         DataTypeMap[DT]
       >;
     case undefined:
-      return new TensorFieldNumber(ce) as unknown as TensorField<DataTypeMap[DT]>;
+      return new TensorFieldNumber(ce) as unknown as TensorField<
+        DataTypeMap[DT]
+      >;
   }
 
   throw new Error(`Unknown dtype ${dtype}`);
