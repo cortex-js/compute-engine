@@ -474,6 +474,14 @@ ce.simplificationRules.push({
   output. Previously, these characters passed through raw and caused symbol
   validation to fail.
 
+- **Assign to compound symbol names no longer misinterpreted as sequence
+  definitions** (fixes [#286](https://github.com/cortex-js/compute-engine/issues/286)):
+  `ce.box(["Assign", "t_half", 10])` previously failed because the Assign
+  evaluate handler split any symbol containing `_` and treated it as a
+  subscripted sequence definition. User-provided compound symbols like
+  `t_half` or `half_life` are now assigned correctly. Sequence definitions
+  via parsed LaTeX (e.g., `L_0 := 1`) continue to work as before.
+
 ## 0.35.6 _2026-02-07_
 
 ### Bug Fixes

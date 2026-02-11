@@ -465,10 +465,14 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
 
         // Check if LHS is a Subscript expression (for sequence definitions)
         // e.g., ['Subscript', 'L', 0] or ['Subscript', 'a', 'n']
+        // Preserve both LHS and RHS as non-canonical to avoid single-letter
+        // symbols being canonicalized to known constants (e.g., "G" →
+        // "CatalanConstant", "i" → "ImaginaryUnit"). The evaluate handler
+        // needs the raw symbol names for sequence registration and
+        // self-reference detection.
         const lhs = args[0];
-        if (lhs.operator === 'Subscript') {
-          // Preserve Subscript form for sequence definitions
-          return ce._fn('Assign', [lhs.canonical, args[1].canonical]);
+        if (lhs.operator === 'Subscript' && isFunction(lhs)) {
+          return ce._fn('Assign', [lhs, args[1]]);
         }
 
         // Note: we can't use checkType() because it canonicalized/bind the argument.
@@ -481,38 +485,6 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         return ce._fn('Assign', [symbol, args[1].canonical]);
       },
       evaluate: ([op1, op2], { engine: ce }) => {
-        //
-        // Check for compound symbol LHS (sequence definition from parser)
-        // e.g., "L_0" which the parser creates when it sees L_0 := 1
-        // We need to detect this and treat it as a sequence base case
-        //
-        const op1Sym = sym(op1);
-        if (op1Sym && op1Sym.includes('_')) {
-          const underscoreIndex = op1Sym.indexOf('_');
-          const seqName = op1Sym.substring(0, underscoreIndex);
-          const subscriptStr = op1Sym.substring(underscoreIndex + 1);
-
-          // Try to parse subscript as integer (base case)
-          const subscriptNum = parseInt(subscriptStr, 10);
-          if (!isNaN(subscriptNum) && String(subscriptNum) === subscriptStr) {
-            // Numeric subscript → base case
-            const value = op2.evaluate();
-            addSequenceBaseCase(ce, seqName, subscriptNum, value);
-            return ce.Nothing;
-          }
-
-          // Symbol subscript → check for self-reference (recurrence)
-          if (containsSelfReference(op2, seqName)) {
-            addSequenceRecurrence(ce, seqName, subscriptStr, op2);
-            return ce.Nothing;
-          }
-
-          // No self-reference → function definition
-          const fnDef = ce.function('Function', [op2, ce.symbol(subscriptStr)]);
-          ce.assign(seqName, fnDef);
-          return ce.Nothing;
-        }
-
         //
         // Check for Subscript LHS (sequence definition)
         // e.g., Subscript(L, 0) := 1  OR  Subscript(a, n) := a_{n-1} + 1
@@ -529,11 +501,17 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           //
           // Check for multi-index subscript: P_{n,k}
           // Parser produces: Subscript(P, Sequence(n, k))
+          // When non-canonical, it may be wrapped in Delimiter:
+          //   Subscript(P, Delimiter(Sequence(n, k), ","))
           //
+          let multiSub = subscript;
+          if (multiSub?.operator === 'Delimiter' && isFunction(multiSub))
+            multiSub = multiSub.op1;
           if (
-            subscript?.operator === 'Sequence' &&
-            isFunction(subscript)
+            multiSub?.operator === 'Sequence' &&
+            isFunction(multiSub)
           ) {
+            const subscript = multiSub;
             const indices = subscript.ops;
 
             // Case M1: All numeric → multi-index base case
@@ -970,6 +948,11 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       },
 
       canonical: ([op1, op2], { engine: ce }) => {
+        // Save the raw symbol name BEFORE canonicalization, so that
+        // `i` stays `i` (not `ImaginaryUnit`) and `e` stays `e`
+        // (not `ExponentialE`) when creating compound symbols.
+        const rawName = sym(op1);
+
         op1 = op1.canonical;
         // Is it a string in a base form:
         // `"deadbeef"_{16}` `"0101010"_2?
@@ -1014,13 +997,14 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         }
 
         // Is it a compound symbol `x_\operatorname{max}`, `\mu_0`
-        if (op1Name) {
+        // Use rawName (pre-canonical) so `i_A` doesn't become `ImaginaryUnit_A`
+        if (rawName) {
           const subStr =
             (isString(op2) ? op2.string : undefined) ??
             sym(op2) ??
             asSmallInteger(op2)?.toString();
 
-          if (subStr) return ce.symbol(op1Name + '_' + subStr);
+          if (subStr) return ce.symbol(rawName + '_' + subStr);
 
           // If subscript is an InvisibleOperator of symbols/numbers (not wrapped
           // in a Delimiter), concatenate them to form a compound symbol name.
@@ -1031,7 +1015,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
               (x) => sym(x) ?? asSmallInteger(x)?.toString()
             );
             if (parts.every((p) => p !== undefined && p !== null)) {
-              return ce.symbol(op1Name + '_' + parts.join(''));
+              return ce.symbol(rawName + '_' + parts.join(''));
             }
           }
         }
