@@ -8,6 +8,7 @@ import type {
   CompilationOptions,
   CompilationResult,
 } from './types';
+import { BaseCompiler } from './base-compiler';
 
 /**
  * GPU shader operators shared by GLSL and WGSL.
@@ -303,8 +304,6 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     const allFunctions = this.getFunctions();
     const constants = this.getConstants();
 
-    // Dynamic import to avoid circular dependency
-    const { BaseCompiler } = require('./base-compiler');
 
     const target = this.createTarget({
       functions: (id) => {
@@ -330,8 +329,6 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     expr: Expression,
     _options: CompilationOptions<Expression> = {}
   ): string {
-    // Dynamic import to avoid circular dependency
-    const { BaseCompiler } = require('./base-compiler');
     const target = this.createTarget();
     return BaseCompiler.compile(expr, target);
   }

@@ -51,6 +51,15 @@ import { cmp, eq, same } from './compare';
 import { CancellationError } from '../../common/interruptible';
 import { isSymbol, isString, isFunction } from './type-guards';
 
+// Lazy reference to break circular dependency:
+// serialize → numerics → utils → abstract-boxed-expression
+import type { serializeJson as _SerializeJsonFn } from './serialize';
+let _serializeJson: typeof _SerializeJsonFn;
+/** @internal */
+export function _setSerializeJson(fn: typeof _SerializeJsonFn) {
+  _serializeJson = fn;
+}
+
 /**
  * _BoxedExpression
  *
@@ -303,9 +312,7 @@ export abstract class _BoxedExpression implements Expression {
       metadata: defaultOptions.metadata,
     };
 
-    // Dynamic import to avoid circular dependency
-    const { serializeJson } = require('./serialize');
-    return serializeJson(this.engine, this, opts);
+    return _serializeJson(this.engine, this, opts);
   }
 
   print(): void {

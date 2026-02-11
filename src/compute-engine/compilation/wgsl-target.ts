@@ -1,6 +1,7 @@
 import type { Expression } from '../global-types';
 import type { CompiledFunctions } from './types';
 import { GPUShaderTarget } from './gpu-target';
+import { BaseCompiler } from './base-compiler';
 
 /**
  * WGSL-specific function overrides.
@@ -66,9 +67,6 @@ export class WGSLTarget extends GPUShaderTarget {
     returnType: string,
     parameters: Array<[name: string, type: string]>
   ): string {
-    // Dynamic import to avoid circular dependency
-    const { BaseCompiler } = require('./base-compiler');
-
     const target = this.createTarget();
     const body = BaseCompiler.compile(expr, target);
 

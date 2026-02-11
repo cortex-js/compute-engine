@@ -8,6 +8,7 @@ import type {
   CompilationOptions,
   CompilationResult,
 } from './types';
+import { BaseCompiler } from './base-compiler';
 
 /**
  * Python operator mappings
@@ -348,8 +349,6 @@ export class PythonTarget implements LanguageTarget<Expression> {
     expr: Expression,
     _options: CompilationOptions<Expression> = {}
   ): string {
-    // Dynamic import to avoid circular dependency
-    const { BaseCompiler } = require('./base-compiler');
     const target = this.createTarget();
     const code = BaseCompiler.compile(expr, target);
 
@@ -378,8 +377,6 @@ export class PythonTarget implements LanguageTarget<Expression> {
     parameters: string[],
     docstring?: string
   ): string {
-    // Dynamic import to avoid circular dependency
-    const { BaseCompiler } = require('./base-compiler');
 
     const target = this.createTarget();
     const body = BaseCompiler.compile(expr, target);
@@ -444,8 +441,6 @@ export class PythonTarget implements LanguageTarget<Expression> {
    * @param parameters - Parameter names
    */
   compileLambda(expr: Expression, parameters: string[]): string {
-    // Dynamic import to avoid circular dependency
-    const { BaseCompiler } = require('./base-compiler');
 
     const target = this.createTarget();
     const body = BaseCompiler.compile(expr, target);

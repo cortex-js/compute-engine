@@ -77,6 +77,7 @@ import { validatePattern } from './boxed-expression/boxed-patterns';
 import { BoxedString } from './boxed-expression/boxed-string';
 import { BoxedFunction } from './boxed-expression/boxed-function';
 import { _BoxedExpression } from './boxed-expression/abstract-boxed-expression';
+import './boxed-expression/init-lazy-refs';
 import { _BoxedOperatorDefinition } from './boxed-expression/boxed-operator-definition';
 import {
   HARMONIZATION_RULES,

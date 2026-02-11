@@ -27,11 +27,21 @@ import type {
   IComputeEngine as ComputeEngine,
   Metadata,
   Expression,
+  FunctionInterface,
   JsonSerializationOptions,
 } from '../global-types';
 import { isOperatorDef } from './utils';
 import { isNumber, isSymbol, isString, isFunction } from './type-guards';
 import { matchesNumber, matchesSymbol } from '../../math-json/utils';
+
+// Lazy reference to break circular dependency:
+// product → arithmetic-mul-div → ... → abstract-boxed-expression → serialize
+import type { Product as _ProductClass } from './product';
+let _Product: typeof _ProductClass;
+/** @internal */
+export function _setProduct(fn: typeof _ProductClass) {
+  _Product = fn;
+}
 
 function _escapeJsonString(s: undefined): undefined;
 function _escapeJsonString(s: string): string;
@@ -129,20 +139,13 @@ function serializePrettyJsonFunction(
   if (name === 'Multiply' && !exclusions.includes('Divide')) {
     // Display a product with negative exponents as a division if
     // there are terms with a negative degree.
-    // Dynamic require to avoid circular dependency:
-    // serialize → product → ... → abstract-boxed-expression → serialize
-    const { Product } = require('./product');
-    const result = new Product(ce, args, {
+    const result = new _Product(ce, args, {
       canonical: false,
     }).asRationalExpression();
-    if (result.operator === 'Divide')
-      return serializeJsonFunction(
-        ce,
-        result.operator,
-        result.ops!,
-        options,
-        metadata
-      );
+    if (result.operator === 'Divide') {
+      const ops = (result as Expression & FunctionInterface).ops;
+      return serializeJsonFunction(ce, result.operator, ops, options, metadata);
+    }
   }
 
   if (name === 'Power') {

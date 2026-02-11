@@ -8,8 +8,15 @@ import {
   isString,
   isTensor,
 } from './type-guards';
-// Dynamic import for expand to avoid circular dependency
-// (expand → arithmetic-add → boxed-tensor → abstract-boxed-expression → compare)
+
+// Lazy reference to break circular dependency:
+// expand → arithmetic-add → boxed-tensor → abstract-boxed-expression → compare
+import type { expand as _ExpandFn } from './expand';
+let _expand: typeof _ExpandFn;
+/** @internal */
+export function _setExpand(fn: typeof _ExpandFn) {
+  _expand = fn;
+}
 
 /**
  * Structural equality of boxed expressions.
@@ -129,9 +136,8 @@ export function eq(
     // If the expression have some unknowns, we only try to prove equality
     // if they have the same unknowns and are structurally equal after
     // expansing and simplification
-    const { expand } = require('./expand');
-    a = (expand(a) ?? a).simplify();
-    b = (expand(b) ?? b).simplify();
+    a = (_expand(a) ?? a).simplify();
+    b = (_expand(b) ?? b).simplify();
     if (!sameUnknowns(a, b)) return undefined;
     return same(a, b);
   }

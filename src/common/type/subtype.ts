@@ -14,16 +14,8 @@ import type {
   TypeCompatibility,
   TypeString,
 } from './types';
-
-// Lazy import to break subtype → parse cycle
-let _parseType: typeof import('./parse').parseType | undefined;
-function lazyParseType(s: string): Type {
-  if (!_parseType) {
-    const m = './parse';
-    _parseType = require(m).parseType;
-  }
-  return _parseType!(s);
-}
+import { parseType } from './parse';
+import { widen } from './utils';
 
 /** For each key, *all* the primitive subtypes of the type corresponding to that key */
 const PRIMITIVE_SUBTYPES: Record<PrimitiveType, PrimitiveType[]> = {
@@ -119,12 +111,12 @@ export function isSubtype(
     typeof lhs === 'string' &&
     !PRIMITIVE_TYPES.includes(lhs as PrimitiveType)
   )
-    lhs = lazyParseType(lhs);
+    lhs = parseType(lhs);
   if (
     typeof rhs === 'string' &&
     !PRIMITIVE_TYPES.includes(rhs as PrimitiveType)
   )
-    rhs = lazyParseType(rhs);
+    rhs = parseType(rhs);
 
   // Every type is a subtype of `any`, the top type
   if (rhs === 'any') return true;
@@ -431,9 +423,6 @@ export function isSubtype(
       );
 
     if (lhs.kind === 'record') {
-      // Lazy import widen to break subtype → utils cycle
-      const m2 = './utils';
-      const { widen } = require(m2);
       return isSubtype(
         {
           kind: 'tuple',
