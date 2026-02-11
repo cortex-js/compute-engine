@@ -215,9 +215,9 @@ describe('NON-STRICT MODE (Math-ASCII/Typst-like syntax)', () => {
     });
 
     test('Unknown function names are rejected', () => {
-      // 'foo' is not a recognized function name, should parse as symbols
+      // 'foo' is not a recognized function: 'f' is a symbol, 'oo' is infinity
       expect(ce.parse('foo(x)', { strict: false })).toMatchInlineSnapshot(
-        `["Tuple", "f", "o", "o", "x"]`
+        `["Triple", "f", "PositiveInfinity", "x"]`
       );
     });
   });
@@ -239,6 +239,219 @@ describe('NON-STRICT MODE (Math-ASCII/Typst-like syntax)', () => {
       expect(ce.parse('sin(cos(x))', { strict: false })).toMatchInlineSnapshot(
         `["Sin", ["Cos", "x"]]`
       );
+    });
+  });
+
+  describe('Bare symbols (Greek letters, constants)', () => {
+    test('Greek lowercase', () => {
+      expect(ce.parse('alpha', { strict: false })).toMatchInlineSnapshot(
+        `alpha`
+      );
+      expect(ce.parse('beta', { strict: false })).toMatchInlineSnapshot(
+        `beta`
+      );
+      expect(ce.parse('omega', { strict: false })).toMatchInlineSnapshot(
+        `omega`
+      );
+      expect(ce.parse('theta', { strict: false })).toMatchInlineSnapshot(
+        `theta`
+      );
+    });
+
+    test('Greek uppercase', () => {
+      expect(ce.parse('Gamma', { strict: false })).toMatchInlineSnapshot(
+        `Gamma`
+      );
+      expect(ce.parse('Delta', { strict: false })).toMatchInlineSnapshot(
+        `Delta`
+      );
+      expect(ce.parse('Omega', { strict: false })).toMatchInlineSnapshot(
+        `Omega`
+      );
+    });
+
+    test('pi maps to Pi', () => {
+      expect(ce.parse('pi', { strict: false })).toMatchInlineSnapshot(`Pi`);
+    });
+
+    test('Infinity: oo', () => {
+      expect(ce.parse('oo', { strict: false })).toMatchInlineSnapshot(
+        `PositiveInfinity`
+      );
+    });
+
+    test('Infinity: inf', () => {
+      expect(ce.parse('inf', { strict: false })).toMatchInlineSnapshot(
+        `PositiveInfinity`
+      );
+    });
+
+    test('Imaginary unit: ii', () => {
+      expect(ce.parse('ii', { strict: false })).toMatchInlineSnapshot(
+        `ImaginaryUnit`
+      );
+    });
+
+    test('Bare symbol in expression: 2*pi', () => {
+      expect(ce.parse('2*pi', { strict: false })).toMatchInlineSnapshot(
+        `["Multiply", 2, "Pi"]`
+      );
+    });
+
+    test('Strict mode: bare symbols are not recognized', () => {
+      // In strict mode, 'alpha' should be parsed as individual symbols
+      expect(parse('alpha')).toMatchInlineSnapshot(
+        `["Multiply", "a", "a", "h", "l", "p"]`
+      );
+    });
+  });
+
+  describe('Arrow operators', () => {
+    test('-> maps to To', () => {
+      expect(ce.parse('x -> y', { strict: false })).toMatchInlineSnapshot(
+        `["To", "x", "y"]`
+      );
+    });
+
+    test('=> maps to Implies', () => {
+      expect(ce.parse('p => q', { strict: false })).toMatchInlineSnapshot(
+        `["Implies", "p", "q"]`
+      );
+    });
+
+    test('<=> maps to Equivalent', () => {
+      expect(ce.parse('p <=> q', { strict: false })).toMatchInlineSnapshot(
+        `["Equivalent", "p", "q"]`
+      );
+    });
+  });
+
+  describe('Inline division', () => {
+    test('a/b', () => {
+      expect(ce.parse('a/b', { strict: false })).toMatchInlineSnapshot(
+        `["Divide", "a", "b"]`
+      );
+    });
+
+    test('a+b/c+d tight binding', () => {
+      expect(ce.parse('a+b/c+d', { strict: false })).toMatchInlineSnapshot(
+        `["Add", "a", ["Divide", "b", "c"], "d"]`
+      );
+    });
+  });
+
+  describe('Double star exponentiation', () => {
+    test('x**2', () => {
+      expect(ce.parse('x**2', { strict: false })).toMatchInlineSnapshot(
+        `["Square", "x"]`
+      );
+    });
+
+    test('x**3', () => {
+      expect(ce.parse('x**3', { strict: false })).toMatchInlineSnapshot(
+        `["Power", "x", 3]`
+      );
+    });
+
+    test('Strict mode: ** is not power', () => {
+      // In strict mode, ** should not be treated as exponentiation
+      // (produces a type error due to missing operand)
+      expect(parse('x**2')).toMatchInlineSnapshot(`
+        [
+          "Multiply",
+          "x",
+          [
+            "Error",
+            [
+              "ErrorCode",
+              "incompatible-type",
+              "'number'",
+              "tuple<string, finite_integer>"
+            ]
+          ]
+        ]
+      `);
+    });
+  });
+
+  describe('Multi-digit exponents and subscripts', () => {
+    test('x^123', () => {
+      expect(ce.parse('x^123', { strict: false })).toMatchInlineSnapshot(
+        `["Power", "x", 123]`
+      );
+    });
+
+    test('x^-1', () => {
+      expect(ce.parse('x^-1', { strict: false })).toMatchInlineSnapshot(
+        `["Divide", 1, "x"]`
+      );
+    });
+
+    test('x^-12', () => {
+      expect(ce.parse('x^-12', { strict: false })).toMatchInlineSnapshot(
+        `["Divide", 1, ["Power", "x", 12]]`
+      );
+    });
+
+    test('x_12', () => {
+      // Absorbed into compound symbol x_12
+      expect(ce.parse('x_12', { strict: false })).toMatchInlineSnapshot(
+        `x_12`
+      );
+    });
+
+    test('x^2+y^3 expression', () => {
+      expect(
+        ce.parse('x^2+y^3', { strict: false })
+      ).toMatchInlineSnapshot(
+        `["Add", ["Power", "y", 3], ["Square", "x"]]`
+      );
+    });
+  });
+
+  describe('Extended bare functions', () => {
+    test('cbrt(x)', () => {
+      expect(ce.parse('cbrt(x)', { strict: false })).toMatchInlineSnapshot(
+        `["Root", "x", 3]`
+      );
+    });
+
+    test('cbrt(8)', () => {
+      expect(ce.parse('cbrt(8)', { strict: false })).toMatchInlineSnapshot(
+        `["Root", 8, 3]`
+      );
+    });
+
+    test('binom(n, k)', () => {
+      expect(ce.parse('binom(n, k)', { strict: false })).toMatchInlineSnapshot(`
+        [
+          "Binomial",
+          [
+            "Error",
+            ["ErrorCode", "incompatible-type", "'integer'", "'number'"]
+          ],
+          [
+            "Error",
+            ["ErrorCode", "incompatible-type", "'integer'", "'number'"]
+          ]
+        ]
+      `);
+    });
+
+    test('nCr(n, k)', () => {
+      expect(ce.parse('nCr(n, k)', { strict: false })).toMatchInlineSnapshot(`
+        [
+          "Binomial",
+          [
+            "Error",
+            ["ErrorCode", "incompatible-type", "'integer'", "'number'"]
+          ],
+          [
+            "Error",
+            ["ErrorCode", "incompatible-type", "'integer'", "'number'"]
+          ]
+        ]
+      `);
     });
   });
 });

@@ -1626,6 +1626,11 @@ export class _Parser implements Parser {
       min: 'Min',
       gcd: 'Gcd',
       lcm: 'Lcm',
+      // Roots
+      cbrt: 'Root', // Special-cased below to add index 3
+      // Combinatorics
+      binom: 'Binomial',
+      nCr: 'Binomial',
     };
 
     const fnName = BARE_FUNCTION_MAP[name];
@@ -1644,7 +1649,87 @@ export class _Parser implements Parser {
       return null;
     }
 
+    // Special case: cbrt(x) -> ['Root', x, 3]
+    if (name === 'cbrt')
+      return ['Root', args[0] ?? 'Nothing', 3];
+
     return [fnName, ...args];
+  }
+
+  private static readonly BARE_SYMBOL_MAP: Record<string, string> = {
+    // Greek lowercase
+    alpha: 'alpha',
+    beta: 'beta',
+    gamma: 'gamma',
+    delta: 'delta',
+    epsilon: 'epsilon',
+    varepsilon: 'varepsilon',
+    zeta: 'zeta',
+    eta: 'eta',
+    theta: 'theta',
+    vartheta: 'vartheta',
+    iota: 'iota',
+    kappa: 'kappa',
+    lambda: 'lambda',
+    mu: 'mu',
+    nu: 'nu',
+    xi: 'xi',
+    omicron: 'omicron',
+    pi: 'Pi',
+    rho: 'rho',
+    sigma: 'sigma',
+    tau: 'tau',
+    upsilon: 'upsilon',
+    phi: 'phi',
+    varphi: 'varphi',
+    chi: 'chi',
+    psi: 'psi',
+    omega: 'omega',
+    // Greek uppercase
+    Gamma: 'Gamma',
+    Delta: 'Delta',
+    Theta: 'Theta',
+    Lambda: 'Lambda',
+    Xi: 'Xi',
+    Sigma: 'Sigma',
+    Upsilon: 'Upsilon',
+    Phi: 'Phi',
+    Psi: 'Psi',
+    Omega: 'Omega',
+    // Special constants
+    oo: 'PositiveInfinity',
+    inf: 'PositiveInfinity',
+    ii: 'ImaginaryUnit',
+  };
+
+  /**
+   * In non-strict mode, try to parse a bare symbol name like a Greek letter
+   * or special constant (e.g., `alpha`, `pi`, `oo`, `ii`).
+   */
+  private tryParseBareSymbol(): MathJsonExpression | null {
+    if (this.options.strict !== false) return null;
+
+    const start = this.index;
+
+    // Collect consecutive letter tokens
+    let name = '';
+    while (!this.atEnd && /^[a-zA-Z]$/.test(this.peek)) {
+      name += this.peek;
+      this.index++;
+    }
+
+    if (!name) {
+      this.index = start;
+      return null;
+    }
+
+    const symbolName = _Parser.BARE_SYMBOL_MAP[name];
+    if (!symbolName) {
+      this.index = start;
+      return null;
+    }
+
+    return symbolName;
   }
 
   /**
@@ -1677,7 +1762,18 @@ export class _Parser implements Parser {
         if (this.match('_') || this.match('^'))
           subscripts.push(this.error('syntax-error', subIndex));
         else {
-          let sub = this.parseGroup() ?? this.parseToken();
+          let sub = this.parseGroup();
+          // In non-strict mode, consume consecutive digits as subscript
+          // before parseToken(), which would only consume a single digit
+          if (sub === null && this.options.strict === false) {
+            let digits = '';
+            while (!this.atEnd && /^[0-9]$/.test(this.peek)) {
+              digits += this.peek;
+              this.index++;
+            }
+            if (digits) sub = parseInt(digits);
+          }
+          sub ??= this.parseToken();
           // In non-strict mode, also accept parenthesized expressions
           // Note: After match('_'), peek has changed but TypeScript doesn't know
           if (
@@ -1696,7 +1792,29 @@ export class _Parser implements Parser {
         if (this.match('_') || this.match('^'))
           superscripts.push(this.error('syntax-error', subIndex));
         else {
-          let sup = this.parseGroup() ?? this.parseToken();
+          let sup = this.parseGroup();
+          // In non-strict mode, consume optional '-' and consecutive digits
+          // before parseToken(), which would only consume a single digit
+          if (sup === null && this.options.strict === false) {
+            const digitStart = this.index;
+            let neg = false;
+            if ((this.peek as string) === '-') {
+              neg = true;
+              this.index++;
+            }
+            let digits = '';
+            while (!this.atEnd && /^[0-9]$/.test(this.peek)) {
+              digits += this.peek;
+              this.index++;
+            }
+            if (digits) {
+              const num = parseInt(digits);
+              sup = neg ? -num : num;
+            } else {
+              this.index = digitStart;
+            }
+          }
+          sup ??= this.parseToken();
           // In non-strict mode, also accept parenthesized expressions
           // Note: After match('^'), peek has changed but TypeScript doesn't know
           if (
@@ -2012,6 +2130,9 @@ export class _Parser implements Parser {
 
     // In non-strict mode, try to parse bare function names like sin(x)
     result ??= this.tryParseBareFunction(until);
+
+    // In non-strict mode, try to parse bare symbol names like alpha, pi, oo
+    result ??= this.tryParseBareSymbol();
 
     // ParseGenericExpression() has priority. Some generic expressions
     // may include symbols which have not been explicitly defined

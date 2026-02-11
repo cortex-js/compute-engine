@@ -1,8 +1,34 @@
-import { ComputeEngine, Expression, InfixEntry } from '../src/compute-engine';
+import {
+  ComputeEngine,
+  Expression,
+  InfixEntry,
+  simplify,
+} from '../src/compute-engine';
 import { expand } from '../src/compute-engine/boxed-expression/expand';
 
 const ce = new ComputeEngine();
 const engine = ce;
+
+// 1. sin(theta)**2 + cos(theta)**2 → 1 — Clean trig identity, but too simple.
+// 2. (alpha**2 - beta**2) / (alpha - beta) → didn't simplify. Engine doesn't cancel the
+// difference of squares factoring here.
+// 3. sqrt(2) * sin(pi/4) + sqrt(3) * cos(pi/6) → 5/2 — Nice! Evaluates special angle values
+// and simplifies radical products. A good runner-up.
+// 4. (x**3 - 1) / (x - 1) + 2*x + 3 → didn't simplify. Engine doesn't do the polynomial long
+// division.
+// 5. cbrt(27) + sqrt(16) - 2**3 + sin(pi) → -1 — Exercises cbrt, sqrt, **, sin, pi.
+// Surprising result (3 + 4 - 8 + 0 = -1). Fun but purely numeric, no variables.
+// 6. (sin(alpha)**2 + cos(alpha)**2) * (x**2 + 2*x + 1) / (x + 1) → x + 1 — The winner.
+// Combines trig identity simplification with polynomial cancellation.
+// 7. (1 + 1/x)**2 - (1 - 1/x)**2 → 2 + 2/x² — Partially simplified but not fully (should be
+// 4/x). Not ideal.
+// 8. sqrt(2)*cos(pi/4) + cbrt(8)*sin(pi/6) + ln(exp(3)) → 5 — Also great: three independent
+// terms each collapse (1 + 1 + 3). Exercises sqrt, cbrt, cos, sin, ln, exp, pi, *. Pure
+// numeric though.
+
+simplify(
+  '(sin(alpha)**2 + cos(alpha)**2) * (x**2 + 2*x + 1) / (x + 1)'
+).print();
 
 console.log(ce.parse('x = \\textcolor{red}{y + 1} - z').json);
 

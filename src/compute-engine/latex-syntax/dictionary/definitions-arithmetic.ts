@@ -1387,12 +1387,22 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     serialize: serializeBigOp('\\prod'),
   },
 
-  // {
-  //   trigger: ['*', '*'],
-  //   kind: 'infix',
-  //   associativity: 'none',
-  //   precedence: 720,
-  // },
+  {
+    // Non-strict mode: ** for exponentiation (Python-style)
+    latexTrigger: ['*', '*'],
+    kind: 'infix',
+    associativity: 'right',
+    precedence: EXPONENTIATION_PRECEDENCE,
+    parse: (parser, lhs, terminator) => {
+      if (parser.options.strict !== false) return null;
+      const rhs = parser.parseExpression({
+        ...terminator,
+        minPrec: EXPONENTIATION_PRECEDENCE,
+      });
+      if (rhs === null) return null;
+      return ['Power', lhs, rhs];
+    },
+  },
   {
     name: 'Rational',
     precedence: DIVISION_PRECEDENCE,

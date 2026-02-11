@@ -369,8 +369,22 @@ export function parseSymbol(parser: Parser): MathJsonSymbol | null {
         id += '_' + sub;
       } else {
         // Unbraced subscript: only accept a single letter or digit
+        // In non-strict mode, consume all consecutive digits
         const subToken = parser.peek;
-        if (/^[a-zA-Z0-9]$/.test(subToken) || /^\p{XIDS}$/u.test(subToken)) {
+        if (
+          parser.options.strict === false &&
+          /^[0-9]$/.test(subToken)
+        ) {
+          let digits = '';
+          while (!parser.atEnd && /^[0-9]$/.test(parser.peek)) {
+            digits += parser.peek;
+            parser.nextToken();
+          }
+          id += '_' + digits;
+        } else if (
+          /^[a-zA-Z0-9]$/.test(subToken) ||
+          /^\p{XIDS}$/u.test(subToken)
+        ) {
           parser.nextToken();
           id += '_' + subToken;
         } else {

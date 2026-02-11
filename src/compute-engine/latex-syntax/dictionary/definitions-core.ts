@@ -788,7 +788,17 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   },
   { name: 'Superplus', latexTrigger: ['^', '+'], kind: 'postfix' },
   { name: 'Subplus', latexTrigger: ['_', '+'], kind: 'postfix' },
-  { name: 'Superminus', latexTrigger: ['^', '-'], kind: 'postfix' },
+  {
+    name: 'Superminus',
+    latexTrigger: ['^', '-'],
+    kind: 'postfix',
+    parse: (parser, lhs) => {
+      // In non-strict mode, ^-digits should be Power(x, -n), not Superminus
+      if (parser.options.strict === false && /^[0-9]$/.test(parser.peek))
+        return null;
+      return ['Superminus', lhs] as MathJsonExpression;
+    },
+  },
   { name: 'Subminus', latexTrigger: ['_', '-'], kind: 'postfix' },
   {
     latexTrigger: ['^', '*'],

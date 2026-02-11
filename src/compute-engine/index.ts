@@ -182,6 +182,7 @@ export {
   compile,
   getDefaultEngine,
 } from './free-functions';
+import { _setComputeEngineClass } from './free-functions';
 
 export { validatePattern };
 
@@ -1772,3 +1773,7 @@ export class ComputeEngine implements IComputeEngine {
     forgetImpl(this, symbol);
   }
 }
+
+// Register the class with the free-functions module so it can lazily
+// instantiate a default engine without importing back from this file.
+_setComputeEngineClass(ComputeEngine);

@@ -206,6 +206,19 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
     associativity: 'right',
     parse: 'Implies',
   },
+  {
+    // Non-strict mode: => for implies
+    latexTrigger: ['=', '>'],
+    kind: 'infix',
+    precedence: 220,
+    associativity: 'right',
+    parse: (parser, lhs, until) => {
+      if (parser.options.strict !== false) return null;
+      const rhs = parser.parseExpression({ ...until, minPrec: 220 });
+      if (rhs === null) return null;
+      return ['Implies', lhs, rhs];
+    },
+  },
 
   {
     name: 'Equivalent', // MathML: identical to, Mathematica: Congruent
@@ -241,6 +254,19 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
     associativity: 'right',
     precedence: 219,
     parse: 'Equivalent',
+  },
+  {
+    // Non-strict mode: <=> for equivalence
+    latexTrigger: ['<', '=', '>'],
+    kind: 'infix',
+    precedence: 219,
+    associativity: 'right',
+    parse: (parser, lhs, until) => {
+      if (parser.options.strict !== false) return null;
+      const rhs = parser.parseExpression({ ...until, minPrec: 219 });
+      if (rhs === null) return null;
+      return ['Equivalent', lhs, rhs];
+    },
   },
   {
     latexTrigger: ['\\equiv'],
