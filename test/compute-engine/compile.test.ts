@@ -4,6 +4,8 @@ import { JavaScriptTarget } from '../../src/compute-engine/compilation/javascrip
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
 import { IntervalJavaScriptTarget } from '../../src/compute-engine/compilation/interval-javascript-target';
 import { IntervalGLSLTarget } from '../../src/compute-engine/compilation/interval-glsl-target';
+import { IntervalWGSLTarget } from '../../src/compute-engine/compilation/interval-wgsl-target';
+import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 
 describe('COMPILE', () => {
@@ -350,8 +352,28 @@ describe('COMPILE', () => {
         'Refract',
         'List',
       ]),
+      'wgsl': new Set([
+        'Clamp',
+        'Mix',
+        'Smoothstep',
+        'Step',
+        'Degrees',
+        'Radians',
+        'Exp2',
+        'Log2',
+        'Inversesqrt',
+        'Cross',
+        'Distance',
+        'Dot',
+        'Length',
+        'Normalize',
+        'Reflect',
+        'Refract',
+        'List',
+      ]),
       'interval-javascript': new Set(['If']),
       'interval-glsl': new Set([]),
+      'interval-wgsl': new Set([]),
       'python': new Set([
         'Arctan2',
         'Real',
@@ -378,8 +400,10 @@ describe('COMPILE', () => {
     > = [
       ['javascript', new JavaScriptTarget()],
       ['glsl', new GLSLTarget()],
+      ['wgsl', new WGSLTarget()],
       ['interval-javascript', new IntervalJavaScriptTarget()],
       ['interval-glsl', new IntervalGLSLTarget()],
+      ['interval-wgsl', new IntervalWGSLTarget()],
       ['python', new PythonTarget()],
     ];
 
@@ -484,8 +508,10 @@ describe('COMPILE', () => {
     > = [
       ['javascript', new JavaScriptTarget()],
       ['glsl', new GLSLTarget()],
+      ['wgsl', new WGSLTarget()],
       ['interval-javascript', new IntervalJavaScriptTarget()],
       ['interval-glsl', new IntervalGLSLTarget()],
+      ['interval-wgsl', new IntervalWGSLTarget()],
       ['python', new PythonTarget()],
     ];
 
@@ -506,8 +532,10 @@ describe('COMPILE', () => {
         const expectedMissing: Record<string, string[]> = {
           'javascript': [],
           'glsl': [],
+          'wgsl': [],
           'interval-javascript': [],
           'interval-glsl': [],
+          'interval-wgsl': [],
           'python': [],
         };
 

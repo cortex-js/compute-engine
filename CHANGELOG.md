@@ -414,6 +414,12 @@ ce.simplificationRules.push({
   - `@vertex`/`@fragment`/`@compute` entry points with struct-based I/O
   - `@group`/`@binding` uniform declarations and `@workgroup_size` for compute
 
+- **Interval WGSL Compilation Target**: New `interval-wgsl` target for interval
+  arithmetic in WebGPU shaders, mirroring the existing `interval-glsl` target.
+  Since WGSL does not support function overloading, the library uses `_v`
+  suffixes for internal vec2f-parameter implementations (e.g., `ia_add_v`),
+  while the public API (`ia_add`, `ia_sin`, etc.) takes `IntervalResult` values.
+
 ### Bug Fixes
 
 - **`Sequence` type inference now returns a proper tuple type**: Multi-argument

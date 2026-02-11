@@ -91,6 +91,9 @@ export interface CompilationOptions<Expr = unknown> {
    * - `'javascript'` (default) - Compile to JavaScript
    * - `'glsl'` - Compile to GLSL (OpenGL Shading Language)
    * - `'wgsl'` - Compile to WGSL (WebGPU Shading Language)
+   * - `'interval-js'` - Compile to JavaScript with interval arithmetic
+   * - `'interval-glsl'` - Compile to GLSL with interval arithmetic
+   * - `'interval-wgsl'` - Compile to WGSL with interval arithmetic
    *
    * Custom targets can be registered using `ce.registerCompilationTarget()`.
    *
