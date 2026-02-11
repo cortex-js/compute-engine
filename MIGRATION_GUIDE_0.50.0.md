@@ -1,8 +1,8 @@
-# API Transition Guide
+# Migration Guide to Compute Engine 0.50.0
 
 This guide covers the breaking changes introduced in the latest architecture
-revision of `@cortex-js/compute-engine`. Each section shows the old API, the
-new API, and a brief rationale.
+revision of `@cortex-js/compute-engine`. Each section shows the old API, the new
+API, and a brief rationale.
 
 ---
 
@@ -67,23 +67,22 @@ type FormOption =
 ## 2. Role-Specific Properties Moved to Role Interfaces
 
 Properties that were previously available on all `Expression` instances
-(returning `null` or `undefined` when not applicable) have been removed from
-the base interface. They are now only accessible after narrowing with a type
-guard.
+(returning `null` or `undefined` when not applicable) have been removed from the
+base interface. They are now only accessible after narrowing with a type guard.
 
 ### Removed from `Expression`
 
-| Property           | Access via                                       |
-|:-------------------|:-------------------------------------------------|
-| `.symbol`          | `isSymbol(expr)` then `expr.symbol`         |
-| `.string`          | `isString(expr)` then `expr.string`         |
-| `.ops`             | `isFunction(expr)` then `expr.ops`          |
-| `.nops`            | `isFunction(expr)` then `expr.nops`         |
-| `.op1`/`.op2`/`.op3` | `isFunction(expr)` then `expr.op1` etc.  |
+| Property                | Access via                                          |
+| :---------------------- | :-------------------------------------------------- |
+| `.symbol`               | `isSymbol(expr)` then `expr.symbol`                 |
+| `.string`               | `isString(expr)` then `expr.string`                 |
+| `.ops`                  | `isFunction(expr)` then `expr.ops`                  |
+| `.nops`                 | `isFunction(expr)` then `expr.nops`                 |
+| `.op1`/`.op2`/`.op3`    | `isFunction(expr)` then `expr.op1` etc.             |
 | `.isFunctionExpression` | `isFunction(expr)` then `expr.isFunctionExpression` |
-| `.numericValue`    | `isNumber(expr)` then `expr.numericValue`   |
-| `.isNumberLiteral` | `isNumber(expr)` then `expr.isNumberLiteral` |
-| `.tensor`          | `isTensor(expr)` then `expr.tensor`         |
+| `.numericValue`         | `isNumber(expr)` then `expr.numericValue`           |
+| `.isNumberLiteral`      | `isNumber(expr)` then `expr.isNumberLiteral`        |
+| `.tensor`               | `isTensor(expr)` then `expr.tensor`                 |
 
 ### Before
 
@@ -120,16 +119,18 @@ if (sym(expr) === 'Pi') {
 
 See Section 6 for the full list of type guards and role interfaces.
 
-**Note:** The `sym()` helper combines `isSymbol()` check with symbol name access,
-making simple symbol comparisons more concise.
+**Note:** The `sym()` helper combines `isSymbol()` check with symbol name
+access, making simple symbol comparisons more concise.
 
 ### Still on `Expression`
 
 - `.re` / `.im` — typed `number`, return `NaN` when not applicable
 - `.shape` — typed `number[]`, returns `[]` for scalars
 - `.operator` — returns the operator name for all expression types
-- All arithmetic methods (`.add()`, `.mul()`, etc.) — work symbolically on all expressions
-- All numeric predicates (`.isPositive`, `.isInteger`, etc.) — meaningful with assumptions
+- All arithmetic methods (`.add()`, `.mul()`, etc.) — work symbolically on all
+  expressions
+- All numeric predicates (`.isPositive`, `.isInteger`, etc.) — meaningful with
+  assumptions
 
 ---
 
@@ -213,16 +214,16 @@ console.log(expanded.latex);  // "x^2+3x+2"
 ```
 
 > **Note**: `expand()` returns `null` if the expression cannot be expanded.
-> Handle this with `expand(expr) ?? expr` if you want the original expression
-> as a fallback.
+> Handle this with `expand(expr) ?? expr` if you want the original expression as
+> a fallback.
 
 ---
 
 ## 5. Library System
 
-The constructor now accepts a `libraries` option for controlling which
-libraries are loaded. Libraries declare their dependencies explicitly and are
-loaded in topological order.
+The constructor now accepts a `libraries` option for controlling which libraries
+are loaded. Libraries declare their dependencies explicitly and are loaded in
+topological order.
 
 ### Before
 
@@ -362,25 +363,25 @@ const name = sym(expr);  // string | undefined
 
 ### Role Interfaces
 
-| Guard              | Narrows to                                 |
-|:-------------------|:-------------------------------------------|
-| `isNumber`    | `Expression & NumberLiteralInterface`  |
-| `isSymbol`    | `Expression & SymbolInterface`         |
-| `isFunction`  | `Expression & FunctionInterface`       |
-| `isString`    | `Expression & StringInterface`         |
-| `isTensor`    | `Expression & TensorInterface`         |
-| `isDictionary`     | `Expression & DictionaryInterface`     |
-| `isCollection`     | `Expression & CollectionInterface`     |
+| Guard                 | Narrows to                                |
+| :-------------------- | :---------------------------------------- |
+| `isNumber`            | `Expression & NumberLiteralInterface`     |
+| `isSymbol`            | `Expression & SymbolInterface`            |
+| `isFunction`          | `Expression & FunctionInterface`          |
+| `isString`            | `Expression & StringInterface`            |
+| `isTensor`            | `Expression & TensorInterface`            |
+| `isDictionary`        | `Expression & DictionaryInterface`        |
+| `isCollection`        | `Expression & CollectionInterface`        |
 | `isIndexedCollection` | `Expression & IndexedCollectionInterface` |
-| `isExpression`        | `Expression` (from `unknown`)      |
+| `isExpression`        | `Expression` (from `unknown`)             |
 
 ---
 
 ## 7. Compilation Targets
 
 Custom compilation targets can now be registered and unregistered dynamically.
-Built-in targets (`'javascript'`, `'glsl'`, `'python'`, `'interval-javascript'`,
-`'interval-glsl'`) are pre-registered.
+Built-in targets (`'javascript'`, `'glsl'`, 'wgsl', `'python'`,
+`'interval-javascript'`, `'interval-glsl'`) are pre-registered.
 
 ### Before
 
@@ -470,8 +471,8 @@ expr.simplify({ rules: otherRules });
 
 ## 9. Subpath Exports
 
-`Expression` now refers to the compute-engine runtime expression type.
-The MathJSON type has been renamed to `MathJsonExpression`.
+`Expression` now refers to the compute-engine runtime expression type. The
+MathJSON type has been renamed to `MathJsonExpression`.
 
 ### Before
 
@@ -495,21 +496,21 @@ import { MathJsonExpression } from '@cortex-js/compute-engine/math-json';
 
 ## 10. Removed Properties
 
-The following properties have been removed from the `Expression` base
-interface. They are now only available on the corresponding role interfaces,
-accessed via type guards.
+The following properties have been removed from the `Expression` base interface.
+They are now only available on the corresponding role interfaces, accessed via
+type guards.
 
-| Removed Property            | Type Guard → Interface                            |
-|:----------------------------|:--------------------------------------------------|
-| `expr.numericValue`         | `isNumber()` → `NumberLiteralInterface`      |
-| `expr.isNumberLiteral`      | `isNumber()` → `NumberLiteralInterface`      |
-| `expr.symbol`               | `isSymbol()` → `SymbolInterface`             |
-| `expr.string`               | `isString()` → `StringInterface`             |
-| `expr.isFunctionExpression` | `isFunction()` → `FunctionInterface`         |
-| `expr.ops`                  | `isFunction()` → `FunctionInterface`         |
-| `expr.nops`                 | `isFunction()` → `FunctionInterface`         |
-| `expr.op1` / `op2` / `op3` | `isFunction()` → `FunctionInterface`         |
-| `expr.tensor`               | `isTensor()` → `TensorInterface`             |
+| Removed Property            | Type Guard → Interface                  |
+| :-------------------------- | :-------------------------------------- |
+| `expr.numericValue`         | `isNumber()` → `NumberLiteralInterface` |
+| `expr.isNumberLiteral`      | `isNumber()` → `NumberLiteralInterface` |
+| `expr.symbol`               | `isSymbol()` → `SymbolInterface`        |
+| `expr.string`               | `isString()` → `StringInterface`        |
+| `expr.isFunctionExpression` | `isFunction()` → `FunctionInterface`    |
+| `expr.ops`                  | `isFunction()` → `FunctionInterface`    |
+| `expr.nops`                 | `isFunction()` → `FunctionInterface`    |
+| `expr.op1` / `op2` / `op3`  | `isFunction()` → `FunctionInterface`    |
+| `expr.tensor`               | `isTensor()` → `TensorInterface`        |
 
 Accessing these properties without first narrowing with a type guard is now a
 TypeScript compile error.
@@ -531,6 +532,7 @@ if (isSymbol(expr)) {
 ### Pattern: Checking Multiple Expression Types
 
 **Before:**
+
 ```ts
 if (expr.symbol !== null) {
   return expr.symbol;
@@ -542,6 +544,7 @@ if (expr.symbol !== null) {
 ```
 
 **After:**
+
 ```ts
 import { isSymbol, isNumber, isFunction } from '@cortex-js/compute-engine';
 
@@ -557,6 +560,7 @@ if (isSymbol(expr)) {
 ### Pattern: Processing Function Arguments
 
 **Before:**
+
 ```ts
 if (expr.ops) {
   for (const arg of expr.ops) {
@@ -566,6 +570,7 @@ if (expr.ops) {
 ```
 
 **After:**
+
 ```ts
 import { isFunction } from '@cortex-js/compute-engine';
 
@@ -579,11 +584,13 @@ if (isFunction(expr)) {
 ### Pattern: Safe Numeric Value Access
 
 **Before:**
+
 ```ts
 const value = expr.numericValue ?? 0;  // Default to 0 if not a number
 ```
 
 **After:**
+
 ```ts
 import { isNumber } from '@cortex-js/compute-engine';
 
@@ -593,11 +600,13 @@ const value = isNumber(expr) ? expr.numericValue : 0;
 ### Pattern: Symbol Name Extraction
 
 **Before:**
+
 ```ts
 const name = expr.symbol || 'unknown';
 ```
 
 **After:**
+
 ```ts
 import { sym } from '@cortex-js/compute-engine';
 
@@ -607,11 +616,13 @@ const name = sym(expr) ?? 'unknown';
 ### Pattern: Working with Decomposition Results
 
 **Before:**
+
 ```ts
 const [P, L, U] = luDecomposition.ops;  // Unsafe - ops might be null
 ```
 
 **After:**
+
 ```ts
 import { isFunction } from '@cortex-js/compute-engine';
 
@@ -639,17 +650,14 @@ ce.box(json, { canonical: false });
 
 // New
 import {
-  ComputeEngine,
+  getDefaultEngine,
   compile,
   expand,
   isFunction,
 } from '@cortex-js/compute-engine';
 
-const ce = new ComputeEngine();
-const expr = ce.parse('x^2 + 1');
-
-// New free function calls
-expand(expr);
+const expr = parse('x^2 + 1');
+expand(expr); // or expand("x^2 + 1")
 compile(expr);
-ce.box(json, { form: 'raw' });
+getDefaultEngine().box(json, { form: 'raw' });
 ```

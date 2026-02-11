@@ -9,6 +9,10 @@ the introduction of type-guarded role interfaces, which improves type safety and
 API ergonomics but requires updates to code that accessed role-specific
 properties directly on expression instances.
 
+See
+[`MIGRATION_GUIDE_0.50.0.md`](https://github.com/cortex-js/compute-engine/blob/main/MIGRATION_GUIDE_0.50.0.md)
+for details.
+
 #### Naming Alignment: `Expression`, `MathJsonExpression`, and `ExpressionInput`
 
 - The compute-engine runtime type is now `Expression` (preferred name).
@@ -66,19 +70,19 @@ ce.box(['Add', 1, 'x'], { form: ['Number', 'Order'] }); // selective passes
 Top-level free functions are now available for common operations and use a
 shared `ComputeEngine` instance created on first call.
 
-| Function | Purpose |
-| :-- | :-- |
-| `getDefaultEngine()` | Return the shared default `ComputeEngine` instance. |
-| `parse(latex)` | Parse a LaTeX string into an `Expression`. |
-| `simplify(exprOrLatex)` | Simplify an expression or LaTeX input. |
-| `evaluate(exprOrLatex)` | Evaluate an expression or LaTeX input symbolically. |
-| `N(exprOrLatex)` | Numerically evaluate an expression or LaTeX input. |
-| `assign(id, value)` / `assign(record)` | Assign one symbol value or many at once. |
-| `expand(exprOrLatex)` | Expand distributively at the top level (`Expression \| null`). |
-| `expandAll(exprOrLatex)` | Expand distributively recursively (`Expression \| null`). |
-| `solve(exprOrLatex, vars?)` | Solve equations/systems (returns solve result variants). |
-| `factor(exprOrLatex)` | Factor an expression. |
-| `compile(exprOrLatex, options?)` | Compile to a target language with `CompilationResult`. |
+| Function                               | Purpose                                                        |
+| :------------------------------------- | :------------------------------------------------------------- |
+| `getDefaultEngine()`                   | Return the shared default `ComputeEngine` instance.            |
+| `parse(latex)`                         | Parse a LaTeX string into an `Expression`.                     |
+| `simplify(exprOrLatex)`                | Simplify an expression or LaTeX input.                         |
+| `evaluate(exprOrLatex)`                | Evaluate an expression or LaTeX input symbolically.            |
+| `N(exprOrLatex)`                       | Numerically evaluate an expression or LaTeX input.             |
+| `assign(id, value)` / `assign(record)` | Assign one symbol value or many at once.                       |
+| `expand(exprOrLatex)`                  | Expand distributively at the top level (`Expression \| null`). |
+| `expandAll(exprOrLatex)`               | Expand distributively recursively (`Expression \| null`).      |
+| `solve(exprOrLatex, vars?)`            | Solve equations/systems (returns solve result variants).       |
+| `factor(exprOrLatex)`                  | Factor an expression.                                          |
+| `compile(exprOrLatex, options?)`       | Compile to a target language with `CompilationResult`.         |
 
 ```ts
 import {
@@ -103,19 +107,19 @@ factor('(2x)(4y)');         // 8xy
 compile('x^2 + 1').run({ x: 3 }); // 10
 ```
 
-Except for `parse()`, `assign()`, and `getDefaultEngine()`, these free
-functions accept either a LaTeX string or an existing `Expression`.
+Except for `parse()`, `assign()`, and `getDefaultEngine()`, these free functions
+accept either a LaTeX string or an existing `Expression`.
 
 #### Free Function Notes
 
 - `compile()` is now a top-level entry point returning `CompilationResult`.
-  Custom compilation targets are managed with
-  `ce.registerCompilationTarget()` and `ce.unregisterCompilationTarget()`.
+  Custom compilation targets are managed with `ce.registerCompilationTarget()`
+  and `ce.unregisterCompilationTarget()`.
 - `expand()` and `expandAll()` return `null` when an expression is not
   expandable.
 - `solve()` is available as a top-level wrapper over equation/system solving.
-- `factor()` is the top-level factoring entry point. Specialized helpers such
-  as `factorPolynomial()` and `factorQuadratic()` remain expression-only APIs.
+- `factor()` is the top-level factoring entry point. Specialized helpers such as
+  `factorPolynomial()` and `factorQuadratic()` remain expression-only APIs.
 
 #### `trigSimplify()` Method Removed
 
@@ -391,6 +395,25 @@ ce.simplificationRules.push({
   `sinh/cosh → exp`, `arsinh/arcosh/artanh → ln`, and `arcsin → arctan2` that
   prevented abs/odd-function rules from firing.
 
+### Compilation
+
+- **WGSL (WebGPU Shading Language) Compilation Target**: New built-in WGSL
+  target for compiling mathematical expressions to WebGPU shaders.
+
+  ```ts
+  // Via the registry
+  const result = compile(expr, { to: 'wgsl' });
+  ```
+
+  WGSL-specific differences from GLSL:
+  - `inverseSqrt` (camelCase) instead of `inversesqrt`
+  - `%` operator for mod instead of `mod()` function
+  - `vec2f`/`vec3f`/`vec4f` constructors instead of `vec2`/`vec3`/`vec4`
+  - `array<f32, n>()` instead of `float[n]()`
+  - `fn name(x: f32) -> f32` instead of `float name(float x)`
+  - `@vertex`/`@fragment`/`@compute` entry points with struct-based I/O
+  - `@group`/`@binding` uniform declarations and `@workgroup_size` for compute
+
 ### Bug Fixes
 
 - **`Sequence` type inference now returns a proper tuple type**: Multi-argument
@@ -475,12 +498,13 @@ ce.simplificationRules.push({
   validation to fail.
 
 - **Assign to compound symbol names no longer misinterpreted as sequence
-  definitions** (fixes [#286](https://github.com/cortex-js/compute-engine/issues/286)):
+  definitions** (fixes
+  [#286](https://github.com/cortex-js/compute-engine/issues/286)):
   `ce.box(["Assign", "t_half", 10])` previously failed because the Assign
   evaluate handler split any symbol containing `_` and treated it as a
-  subscripted sequence definition. User-provided compound symbols like
-  `t_half` or `half_life` are now assigned correctly. Sequence definitions
-  via parsed LaTeX (e.g., `L_0 := 1`) continue to work as before.
+  subscripted sequence definition. User-provided compound symbols like `t_half`
+  or `half_life` are now assigned correctly. Sequence definitions via parsed
+  LaTeX (e.g., `L_0 := 1`) continue to work as before.
 
 ## 0.35.6 _2026-02-07_
 

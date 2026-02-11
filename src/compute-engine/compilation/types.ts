@@ -90,6 +90,7 @@ export interface CompilationOptions<Expr = unknown> {
    * Built-in targets:
    * - `'javascript'` (default) - Compile to JavaScript
    * - `'glsl'` - Compile to GLSL (OpenGL Shading Language)
+   * - `'wgsl'` - Compile to WGSL (WebGPU Shading Language)
    *
    * Custom targets can be registered using `ce.registerCompilationTarget()`.
    *

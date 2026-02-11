@@ -1,338 +1,41 @@
 import type { Expression } from '../global-types';
-
-import type {
-  CompileTarget,
-  CompiledOperators,
-  CompiledFunctions,
-  LanguageTarget,
-  CompilationOptions,
-  CompilationResult,
-} from './types';
+import type { CompiledFunctions } from './types';
+import { GPUShaderTarget } from './gpu-target';
 
 /**
- * GLSL (OpenGL Shading Language) operator mappings
+ * GLSL-specific function overrides.
  *
- * GLSL uses the same operators as C/JavaScript for basic arithmetic,
- * but they work natively on vectors and matrices.
- */
-const GLSL_OPERATORS: CompiledOperators = {
-  Add: ['+', 11],
-  Negate: ['-', 14], // Unary operator
-  Subtract: ['-', 11],
-  Multiply: ['*', 12],
-  Divide: ['/', 13],
-  Equal: ['==', 8],
-  NotEqual: ['!=', 8],
-  LessEqual: ['<=', 9],
-  GreaterEqual: ['>=', 9],
-  Less: ['<', 9],
-  Greater: ['>', 9],
-  And: ['&&', 4],
-  Or: ['||', 3],
-  Not: ['!', 14], // Unary operator
-};
-
-/**
- * GLSL function implementations
- *
- * GLSL has built-in functions for common mathematical operations.
- * Note: No 'Math.' prefix like JavaScript
+ * These override or extend the shared GPU functions for GLSL-specific naming
+ * and syntax: `inversesqrt`, `mod()`, and `vec2`/`vec3`/`vec4` constructors.
  */
 const GLSL_FUNCTIONS: CompiledFunctions<Expression> = {
-  // Basic arithmetic (for when they're called as functions, e.g., with vectors)
-  Add: (args, compile) => {
-    if (args.length === 0) return '0.0';
-    if (args.length === 1) return compile(args[0]);
-    return args.map((x) => compile(x)).join(' + ');
-  },
-  Multiply: (args, compile) => {
-    if (args.length === 0) return '1.0';
-    if (args.length === 1) return compile(args[0]);
-    return args.map((x) => compile(x)).join(' * ');
-  },
-  Subtract: (args, compile) => {
-    if (args.length === 0) return '0.0';
-    if (args.length === 1) return compile(args[0]);
-    if (args.length === 2) return `${compile(args[0])} - ${compile(args[1])}`;
-    // For more than 2 args, fold left
-    let result = compile(args[0]);
-    for (let i = 1; i < args.length; i++) {
-      result = `${result} - ${compile(args[i])}`;
-    }
-    return result;
-  },
-  Divide: (args, compile) => {
-    if (args.length === 0) return '1.0';
-    if (args.length === 1) return compile(args[0]);
-    if (args.length === 2) return `${compile(args[0])} / ${compile(args[1])}`;
-    // For more than 2 args, fold left
-    let result = compile(args[0]);
-    for (let i = 1; i < args.length; i++) {
-      result = `${result} / ${compile(args[i])}`;
-    }
-    return result;
-  },
-
-  Abs: 'abs',
-  Arccos: 'acos',
-  Arcsin: 'asin',
-  Arctan: 'atan',
-  Ceil: 'ceil',
-  Clamp: 'clamp',
-  Cos: 'cos',
-  Degrees: 'degrees',
-  Exp: 'exp',
-  Exp2: 'exp2',
-  Floor: 'floor',
-  Fract: 'fract',
   Inversesqrt: 'inversesqrt',
-  Ln: 'log', // Natural logarithm in GLSL
-  Log2: 'log2',
-  Max: 'max',
-  Min: 'min',
-  Mix: 'mix',
   Mod: 'mod',
-  Power: 'pow',
-  Radians: 'radians',
-  Round: 'round',
-  Sign: 'sign',
-  Sin: 'sin',
-  Smoothstep: 'smoothstep',
-  Sqrt: 'sqrt',
-  Step: 'step',
-  Tan: 'tan',
-  Truncate: 'trunc',
-  Remainder: ([a, b], compile) => {
-    if (a === null || b === null)
-      throw new Error('Remainder: missing argument');
-    return `(${compile(a)} - ${compile(b)} * round(${compile(a)} / ${compile(b)}))`;
-  },
 
-  // Reciprocal trigonometric functions (no GLSL built-ins)
-  Cot: ([x], compile) => {
-    if (x === null) throw new Error('Cot: no argument');
-    const arg = compile(x);
-    return `(cos(${arg}) / sin(${arg}))`;
-  },
-  Csc: ([x], compile) => {
-    if (x === null) throw new Error('Csc: no argument');
-    return `(1.0 / sin(${compile(x)}))`;
-  },
-  Sec: ([x], compile) => {
-    if (x === null) throw new Error('Sec: no argument');
-    return `(1.0 / cos(${compile(x)}))`;
-  },
-
-  // Inverse trigonometric (reciprocal)
-  Arccot: ([x], compile) => {
-    if (x === null) throw new Error('Arccot: no argument');
-    return `atan(1.0 / (${compile(x)}))`;
-  },
-  Arccsc: ([x], compile) => {
-    if (x === null) throw new Error('Arccsc: no argument');
-    return `asin(1.0 / (${compile(x)}))`;
-  },
-  Arcsec: ([x], compile) => {
-    if (x === null) throw new Error('Arcsec: no argument');
-    return `acos(1.0 / (${compile(x)}))`;
-  },
-
-  // Hyperbolic functions (GLSL ES 3.0+ built-ins)
-  Sinh: 'sinh',
-  Cosh: 'cosh',
-  Tanh: 'tanh',
-
-  // Reciprocal hyperbolic functions
-  Coth: ([x], compile) => {
-    if (x === null) throw new Error('Coth: no argument');
-    const arg = compile(x);
-    return `(cosh(${arg}) / sinh(${arg}))`;
-  },
-  Csch: ([x], compile) => {
-    if (x === null) throw new Error('Csch: no argument');
-    return `(1.0 / sinh(${compile(x)}))`;
-  },
-  Sech: ([x], compile) => {
-    if (x === null) throw new Error('Sech: no argument');
-    return `(1.0 / cosh(${compile(x)}))`;
-  },
-
-  // Inverse hyperbolic functions (GLSL ES 3.0+ built-ins)
-  Arcosh: 'acosh',
-  Arsinh: 'asinh',
-  Artanh: 'atanh',
-
-  // Inverse hyperbolic (reciprocal)
-  Arcoth: ([x], compile) => {
-    if (x === null) throw new Error('Arcoth: no argument');
-    return `atanh(1.0 / (${compile(x)}))`;
-  },
-  Arcsch: ([x], compile) => {
-    if (x === null) throw new Error('Arcsch: no argument');
-    return `asinh(1.0 / (${compile(x)}))`;
-  },
-  Arsech: ([x], compile) => {
-    if (x === null) throw new Error('Arsech: no argument');
-    return `acosh(1.0 / (${compile(x)}))`;
-  },
-
-  // Additional math functions
-  // Sign is already registered in the standard functions above
-  Lb: 'log2',
-  Log: (args, compile) => {
-    if (args.length === 0) throw new Error('Log: no argument');
-    if (args.length === 1) return `(log(${compile(args[0])}) / log(10.0))`;
-    return `(log(${compile(args[0])}) / log(${compile(args[1])}))`;
-  },
-  Square: ([x], compile) => {
-    if (x === null) throw new Error('Square: no argument');
-    const arg = compile(x);
-    return `(${arg} * ${arg})`;
-  },
-  Root: ([x, n], compile) => {
-    if (x === null) throw new Error('Root: no argument');
-    if (n === null || n === undefined) return `sqrt(${compile(x)})`;
-    if (n?.re === 2) return `sqrt(${compile(x)})`;
-    return `pow(${compile(x)}, 1.0 / ${compile(n)})`;
-  },
-
-  // Vector/Matrix operations
-  Cross: 'cross',
-  Distance: 'distance',
-  Dot: 'dot',
-  Length: 'length',
-  Normalize: 'normalize',
-  Reflect: 'reflect',
-  Refract: 'refract',
-
-  // Common patterns
   List: (args, compile) => {
-    // Detect vector type from number of elements
     if (args.length === 2)
       return `vec2(${args.map((x) => compile(x)).join(', ')})`;
     if (args.length === 3)
       return `vec3(${args.map((x) => compile(x)).join(', ')})`;
     if (args.length === 4)
       return `vec4(${args.map((x) => compile(x)).join(', ')})`;
-    // For arrays or other cases, use array notation
     return `float[${args.length}](${args.map((x) => compile(x)).join(', ')})`;
   },
 };
 
 /**
- * GLSL language target implementation
+ * GLSL (OpenGL Shading Language) compilation target.
+ *
+ * Extends the shared GPU base class with GLSL-specific function names,
+ * C-style function declarations, and `#version`-based shader structure.
  */
-export class GLSLTarget implements LanguageTarget<Expression> {
-  getOperators(): CompiledOperators {
-    return GLSL_OPERATORS;
-  }
+export class GLSLTarget extends GPUShaderTarget {
+  protected readonly languageId = 'glsl';
 
-  getFunctions(): CompiledFunctions<Expression> {
+  protected getLanguageSpecificFunctions(): CompiledFunctions<Expression> {
     return GLSL_FUNCTIONS;
   }
 
-  createTarget(
-    options: Partial<CompileTarget<Expression>> = {}
-  ): CompileTarget<Expression> {
-    return {
-      language: 'glsl',
-      operators: (op) => GLSL_OPERATORS[op],
-      functions: (id) => GLSL_FUNCTIONS[id],
-      var: (id) => {
-        // GLSL constants
-        const constants = {
-          Pi: '3.14159265359',
-          ExponentialE: '2.71828182846',
-          GoldenRatio: '1.61803398875',
-          CatalanConstant: '0.91596559417',
-          EulerGamma: '0.57721566490',
-        };
-        if (id in constants) return constants[id as keyof typeof constants];
-        return id; // Variables use their names directly
-      },
-      string: (str) => JSON.stringify(str),
-      number: (n) => {
-        // GLSL requires float literals to have decimal point
-        const str = n.toString();
-        if (!str.includes('.') && !str.includes('e') && !str.includes('E')) {
-          return `${str}.0`;
-        }
-        return str;
-      },
-      indent: 0,
-      ws: (s?: string) => s ?? '',
-      preamble: '',
-      ...options,
-    };
-  }
-
-  /**
-   * Compile to GLSL source code (not executable)
-   *
-   * GLSL doesn't run in JavaScript, so this returns source code only.
-   */
-  compile(
-    expr: Expression,
-    options: CompilationOptions<Expression> = {}
-  ): CompilationResult {
-    const { functions, vars } = options;
-
-    // Dynamic import to avoid circular dependency
-    const { BaseCompiler } = require('./base-compiler');
-
-    const target = this.createTarget({
-      functions: (id) => {
-        if (functions && id in functions) {
-          const fn = functions[id];
-          if (typeof fn === 'string') return fn;
-          // For GLSL, we can't use JavaScript functions directly
-          // Return the function name and expect it to be defined in GLSL
-          if (typeof fn === 'function') return fn.name || id;
-        }
-        return GLSL_FUNCTIONS[id];
-      },
-      var: (id) => {
-        if (vars && id in vars) return vars[id] as string;
-        const constants = {
-          Pi: '3.14159265359',
-          ExponentialE: '2.71828182846',
-          GoldenRatio: '1.61803398875',
-          CatalanConstant: '0.91596559417',
-          EulerGamma: '0.57721566490',
-        };
-        if (id in constants) return constants[id as keyof typeof constants];
-        return id;
-      },
-    });
-
-    const glslCode = BaseCompiler.compile(expr, target);
-
-    return { target: 'glsl', success: true, code: glslCode };
-  }
-
-  /**
-   * Compile an expression to GLSL source code
-   *
-   * Returns the GLSL code as a string.
-   */
-  compileToSource(
-    expr: Expression,
-    _options: CompilationOptions<Expression> = {}
-  ): string {
-    // Dynamic import to avoid circular dependency
-    const { BaseCompiler } = require('./base-compiler');
-    const target = this.createTarget();
-    return BaseCompiler.compile(expr, target);
-  }
-
-  /**
-   * Create a complete GLSL function from an expression
-   *
-   * @param expr - The expression to compile
-   * @param functionName - Name of the GLSL function
-   * @param returnType - GLSL return type (e.g., 'float', 'vec3')
-   * @param parameters - Parameter declarations (e.g., [['x', 'float'], ['y', 'vec3']])
-   */
   compileFunction(
     expr: Expression,
     functionName: string,
@@ -354,23 +57,12 @@ export class GLSLTarget implements LanguageTarget<Expression> {
 }`;
   }
 
-  /**
-   * Create a complete GLSL shader from expressions
-   *
-   * @param options - Shader compilation options
-   */
   compileShader(options: {
-    /** Shader type: 'vertex' or 'fragment' */
     type: 'vertex' | 'fragment';
-    /** GLSL version (e.g., '300 es', '330', '450') */
     version?: string;
-    /** Input variables (attributes or varyings) */
     inputs?: Array<{ name: string; type: string }>;
-    /** Output variables */
     outputs?: Array<{ name: string; type: string }>;
-    /** Uniform variables */
     uniforms?: Array<{ name: string; type: string }>;
-    /** Main function body expressions */
     body: Array<{ variable: string; expression: Expression }>;
   }): string {
     const {
@@ -384,12 +76,10 @@ export class GLSLTarget implements LanguageTarget<Expression> {
 
     let code = `#version ${version}\n\n`;
 
-    // Add precision qualifier for fragment shaders
     if (type === 'fragment') {
       code += 'precision highp float;\n\n';
     }
 
-    // Add inputs
     const inputKeyword =
       version.startsWith('300') || version.startsWith('3')
         ? 'in'
@@ -401,7 +91,6 @@ export class GLSLTarget implements LanguageTarget<Expression> {
     }
     if (inputs.length > 0) code += '\n';
 
-    // Add outputs
     const outputKeyword =
       version.startsWith('300') || version.startsWith('3') ? 'out' : 'varying';
     for (const output of outputs) {
@@ -409,13 +98,11 @@ export class GLSLTarget implements LanguageTarget<Expression> {
     }
     if (outputs.length > 0) code += '\n';
 
-    // Add uniforms
     for (const uniform of uniforms) {
       code += `uniform ${uniform.type} ${uniform.name};\n`;
     }
     if (uniforms.length > 0) code += '\n';
 
-    // Add main function
     code += 'void main() {\n';
     for (const assignment of body) {
       const glsl = this.compileToSource(assignment.expression);
