@@ -1,106 +1,134 @@
-# Simplification Snapshot (Issue #178)
+# Simplification Status Report
 
-> This file tracks issue-specific simplification snapshots and is not the
-> canonical API guide. For current API usage and workflow helper options, see
-> [`docs/README.md`](./README.md) and [`README.md`](../README.md).
+This document tracks the current status of simplification in the Compute Engine, including working features, known limitations, and remaining tasks.
 
-Source: cortex-js/compute-engine#178 ("x+x does not simplify to 2x")
+**Checked**: 2026-02-10
+**Compute Engine version**: 0.35.6
 
-Checked: 2026-02-01 Compute Engine version (package.json): 0.33.0
+---
 
-Method: `ce.parse(<latex>, { canonical: false }).simplify()` and record
-`simplified.latex`. Note: some items in the issue comment omit LaTeX backslashes
-(e.g. `log(1)`); these are normalized to LaTeX (e.g. `\log(1)`) for
-`ce.parse()`.
+## 1. Summary of Progress
 
-**Note**: As of the latest version, exact numeric literals (integers, rationals,
-radicals) are folded during canonicalization itself. This means expressions like
-`2 + 3` become `5` at parse time (when using default canonical mode), before
-`.simplify()` is called. The tests below use `{ canonical: false }` and then
-call `.simplify()`, so they exercise the simplification path rather than the
-canonicalization path. With default canonical parsing, many of these reductions
-happen even earlier.
+| Category           | Working | Limitations | Total  |
+| ------------------ | ------- | ----------- | ------ |
+| Division/Fractions | 7       | 2*          | 9      |
+| Powers & Exponents | 18      | 0           | 18     |
+| Square Roots       | 7       | 0           | 7      |
+| Logarithms         | 12      | 2*          | 14     |
+| Negative Signs     | 5       | 0           | 5      |
+| Infinity           | 10      | 0           | 10     |
+| Trigonometry       | 11      | 1*          | 12     |
+| Parsing            | 1       | 0           | 1      |
+| **Total**          | **71**  | **5**       | **76** |
 
-## Still notable / requires explicit evaluation or assumptions
+\*Limitations are by-design decisions or architectural constraints, not bugs.
 
-- \frac{0}{1-1}: \(\frac{0}{1-1}\) — No longer incorrectly simplifies to 0
-  (requires explicit evaluation to reach 0/0).
-- \frac{1-1}{0}: \(\tilde\infty\) — Requires explicit evaluation to detect 0/0.
-- 2(x+h)^2-2x^2: \(2(h+x)^2-2x^2\) — Does not expand powers during simplify().
-- ln(\frac{x}{y}): \(\ln(\frac{x}{y})\) — Quotient expansion is
-  domain-sensitive; not applied without positivity assumptions.
+### Exact Numeric Folding (Canonicalization)
 
-## Full results
+Canonicalization now folds exact numeric operands in `Add` and `Multiply` expressions. This happens automatically when expressions are boxed or parsed (before any `.simplify()` call).
 
-| Section   | Issue text                            | LaTeX parsed                          | Simplified (LaTeX)                                         | Notes                                                                                                        |
-| --------- | ------------------------------------- | ------------------------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| Base      | `x+x`                                 | `x+x`                                 | `2x`                                                       |                                                                                                              |
-| Hard      | `\frac{0}{1-1}`                       | `\frac{0}{1-1}`                       | `\frac{0}{1-1}`                                            | Now stays as a fraction (no longer incorrectly simplifies to 0).                                             |
-| Hard      | `\frac{1-1}{0}`                       | `\frac{1-1}{0}`                       | `\tilde\infty`                                             | Without an explicit evaluation of (1-1), this may not reduce to NaN.                                         |
-| Hard      | `\frac{0}{0}`                         | `\frac{0}{0}`                         | `\operatorname{NaN}`                                       |                                                                                                              |
-| Hard      | `2(x+h)^2-2x^2`                       | `2(x+h)^2-2x^2`                       | `2(h+x)^2-2x^2`                                            | Default simplify does not expand powers; an explicit `.expand()` may be required to reach a polynomial form. |
-| Hard      | `\frac{\pi+1}{\pi+1}`                 | `\frac{\pi+1}{\pi+1}`                 | `1`                                                        |                                                                                                              |
-| Hard      | `\frac{x^2}{5x^2}`                    | `\frac{x^2}{5x^2}`                    | `\frac{1}{5}`                                              |                                                                                                              |
-| Hard      | `\frac{5x^2}{x^2}`                    | `\frac{5x^2}{x^2}`                    | `5`                                                        |                                                                                                              |
-| Hard      | `(-1)^{3/5}`                          | `(-1)^{3/5}`                          | `-1`                                                       |                                                                                                              |
-| Hard      | `\frac{\frac{1}{x^6}}{\frac{1}{y^4}}` | `\frac{\frac{1}{x^6}}{\frac{1}{y^4}}` | `\frac{y^4}{x^6}`                                          |                                                                                                              |
-| Hard      | `\left(\frac{x^3}{y^2}\right)^{-2}`   | `\left(\frac{x^3}{y^2}\right)^{-2}`   | `\frac{y^4}{x^6}`                                          |                                                                                                              |
-| Hard      | `exp(x)exp(2)`                        | `\exp(x)\exp(2)`                      | `\exp(x+2)`                                                | Normalized to LaTeX (\exp) for ce.parse().                                                                   |
-| Hard      | `\frac{x+1-1+1}{x+1}`                 | `\frac{x+1-1+1}{x+1}`                 | `1`                                                        |                                                                                                              |
-| Hard      | `\frac{x+1-1+1}{x}`                   | `\frac{x+1-1+1}{x}`                   | `\frac{1}{x}+1`                                            |                                                                                                              |
-| Hard      | `(-2x)^{3/5}x`                        | `(-2x)^{3/5}x`                        | `-(2^{\frac{3}{5}}x^{\frac{8}{5}})`                        |                                                                                                              |
-| Hard      | `(2x)^{3/5}x`                         | `(2x)^{3/5}x`                         | `1.515\,716\,566\,510\,398\,082\,35x^{\frac{8}{5}}`        |                                                                                                              |
-| Hard      | `(x^3y^2)^2`                          | `(x^3y^2)^2`                          | `x^6y^4`                                                   |                                                                                                              |
-| Hard      | `\frac{2\sqrt{3}}{\sqrt{3}}`          | `\frac{2\sqrt{3}}{\sqrt{3}}`          | `2`                                                        |                                                                                                              |
-| Hard      | `\frac{\sqrt{12x}}{\sqrt{3x}}`        | `\frac{\sqrt{12x}}{\sqrt{3x}}`        | `2`                                                        |                                                                                                              |
-| Hard      | `\sqrt{12}`                           | `\sqrt{12}`                           | `2\sqrt{3}`                                                |                                                                                                              |
-| Hard      | `\sqrt{x^2y}`                         | `\sqrt{x^2y}`                         | `\vert x\vert\sqrt{y}`                                     |                                                                                                              |
-| Hard      | `\sqrt{x^2}`                          | `\sqrt{x^2}`                          | `\vert x\vert`                                             |                                                                                                              |
-| Hard      | `\sqrt[4]{x^4}`                       | `\sqrt[4]{x^4}`                       | `\vert x\vert`                                             |                                                                                                              |
-| Hard      | `\sqrt[4]{x^6}`                       | `\sqrt[4]{x^6}`                       | `\sqrt{\vert x\vert}^{3}`                                  |                                                                                                              |
-| Logs      | `log(e^xy)`                           | `\log(\exp(xy))`                      | `0.434\,294\,481\,903\,251\,768\,053xy`                    | Compute Engine: \log is base-10, \ln is natural.                                                             |
-| Logs      | `ln(\frac{x}{y})`                     | `\ln(\frac{x}{y})`                    | `\ln(\frac{x}{y})`                                         |                                                                                                              |
-| Logs      | `log(xy)-log(x)-log(y)`               | `\log(xy)-\log(x)-\log(y)`            | `0`                                                        |                                                                                                              |
-| Logs      | `log(1)`                              | `\log(1)`                             | `0`                                                        |                                                                                                              |
-| Logs      | `log(e)`                              | `\log(\exponentialE)`                 | `0.434\,294\,481\,903\,251\,768\,053`                      |                                                                                                              |
-| Logs      | `exp(log(x))`                         | `\exp(\log(x))`                       | `x^{0.434\,294\,481\,903\,251\,768\,053}`                  |                                                                                                              |
-| Logs      | `exp(log(x)+y)`                       | `\exp(\log(x)+y)`                     | `\exponentialE^{y}x^{0.434\,294\,481\,903\,251\,768\,053}` | Separates the log term; accepted via a targeted default cost-function preference.                            |
-| Logs      | `exp(log(x)-y)`                       | `\exp(\log(x)-y)`                     | `\exp(-y)x^{0.434\,294\,481\,903\,251\,768\,053}`          | Separates the log term; accepted via a targeted default cost-function preference.                            |
-| Logs      | `log(exp(x))`                         | `\log(\exp(x))`                       | `0.434\,294\,481\,903\,251\,768\,053x`                     |                                                                                                              |
-| Logs      | `\log(\sqrt{2})`                      | `\log(\sqrt{2})`                      | `0.150\,514\,997\,831\,990\,597\,606`                      |                                                                                                              |
-| Logs      | `\ln(\sqrt{2})`                       | `\ln(\sqrt{2})`                       | `0.346\,573\,590\,279\,972\,654\,707`                      |                                                                                                              |
-| Negative  | `(-x)(-6)`                            | `(-x)(-6)`                            | `6x`                                                       |                                                                                                              |
-| Negative  | `-\frac{-1}{x}`                       | `-\frac{-1}{x}`                       | `\frac{1}{x}`                                              |                                                                                                              |
-| Negative  | `(-x)^2`                              | `(-x)^2`                              | `x^2`                                                      |                                                                                                              |
-| Exponents | `2xx`                                 | `2xx`                                 | `2x^2`                                                     |                                                                                                              |
-| Exponents | `xx`                                  | `xx`                                  | `x^2`                                                      | Now simplifies to x^2.                                                                                       |
-| Exponents | `\frac{e^x}{e}`                       | `\frac{e^x}{e}`                       | `\exp(x-1)`                                                |                                                                                                              |
-| Exponents | `\frac{e}{e^x}`                       | `\frac{e}{e^x}`                       | `\exp(1-x)`                                                |                                                                                                              |
-| Exponents | `e^xe`                                | `e^xe`                                | `\exp(x+1)`                                                |                                                                                                              |
-| Exponents | `e^xe^1`                              | `e^xe^1`                              | `\exp(x+1)`                                                |                                                                                                              |
-| Exponents | `\left(\frac{1}{x}\right)^{-1}`       | `\left(\frac{1}{x}\right)^{-1}`       | `x`                                                        |                                                                                                              |
-| Powers    | `0^0`                                 | `0^0`                                 | `\operatorname{NaN}`                                       |                                                                                                              |
-| Powers    | `0^\pi`                               | `0^\pi`                               | `0`                                                        |                                                                                                              |
-| Infinity  | `\infty^0`                            | `\infty^0`                            | `\operatorname{NaN}`                                       |                                                                                                              |
-| Infinity  | `\infty(1-1)`                         | `\infty(1-1)`                         | `\operatorname{NaN}`                                       |                                                                                                              |
-| Infinity  | `1^\infty`                            | `1^\infty`                            | `\operatorname{NaN}`                                       |                                                                                                              |
-| Infinity  | `-\infty(-2)`                         | `-\infty(-2)`                         | `\infty`                                                   |                                                                                                              |
-| Infinity  | `\infty(-2)`                          | `\infty(-2)`                          | `-\infty`                                                  |                                                                                                              |
-| Infinity  | `-\infty(2)`                          | `-\infty(2)`                          | `-\infty`                                                  |                                                                                                              |
-| Infinity  | `\infty(2)`                           | `\infty(2)`                           | `\infty`                                                   |                                                                                                              |
-| Infinity  | `\frac{\infty}{2}`                    | `\frac{\infty}{2}`                    | `\infty`                                                   |                                                                                                              |
-| Infinity  | `\frac{\infty}{\infty}`               | `\frac{\infty}{\infty}`               | `\operatorname{NaN}`                                       |                                                                                                              |
-| Infinity  | `\frac{\infty}{\infty^{-2}}`          | `\frac{\infty}{\infty^{-2}}`          | `\tilde\infty`                                             |                                                                                                              |
-| Misc      | `\frac{1}{0}`                         | `\frac{1}{0}`                         | `\tilde\infty`                                             |                                                                                                              |
-| Trig      | `sec(-x)`                             | `\sec(-x)`                            | `\sec(x)`                                                  |                                                                                                              |
-| Trig      | `csc(pi+x)`                           | `\csc(\pi+x)`                         | `-\csc(x)`                                                 |                                                                                                              |
-| Trig      | `tan(pi/2-x)`                         | `\tan(\pi/2-x)`                       | `\cot(x)`                                                  |                                                                                                              |
-| Trig      | `sec(pi/2-x)`                         | `\sec(\pi/2-x)`                       | `\csc(x)`                                                  |                                                                                                              |
-| Trig      | `csc(pi/2-x)`                         | `\csc(\pi/2-x)`                       | `\sec(x)`                                                  |                                                                                                              |
-| Trig      | `cot(pi+x)`                           | `\cot(\pi+x)`                         | `\cot(x)`                                                  |                                                                                                              |
-| Trig      | `tan(-x)cot(x)`                       | `\tan(-x)\cot(x)`                     | `-1`                                                       |                                                                                                              |
-| Trig      | `tan(x)cot(x)`                        | `\tan(x)\cot(x)`                      | `1`                                                        |                                                                                                              |
-| Trig      | `sin^2(x)`                            | `\sin^2(x)`                           | `\sin(x)^2`                                                |                                                                                                              |
-| Trig      | `2sin^2(x)`                           | `2\sin^2(x)`                          | `2\sin(x)^2`                                               |                                                                                                              |
-| Trig      | `sin(x)cos(x)`                        | `\sin(x)\cos(x)`                      | `\frac{\sin(2x)}{2}`                                       |                                                                                                              |
-| Trig      | `2sin(x)cos(x)`                       | `2\sin(x)\cos(x)`                     | `\sin(2x)`                                                 |                                                                                                              |
+**Folding rules applied:**
+- `Add(2, x, 5)` → `Add(x, 7)`
+- `Add(1/3, x, 2/3)` → `Add(x, 1)`
+- `Add(√2, x, √2)` → `Add(x, 2√2)`
+- `Multiply(2, x, 5)` → `Multiply(10, x)`
+- `Multiply(1/2, x, 2)` → `x`
+
+---
+
+## 2. Remaining Tasks (Skipped Tests)
+
+There are **19 skipped tests** remaining in `test/compute-engine/simplify.test.ts`. This list identifies items still requiring resolution.
+
+### 2.1 Logarithm Rules
+- **Log of quotient involving e** (Line 498): `ln((x+1)/e^{2x})` → `ln(x+1) - 2x`. Operand simplification expands the fraction before the log quotient rule fires. Deep ordering issue.
+- **Mixed log product identity** (Line 548): `log_c(a) * ln(a)` → `ln(c)`. **Note**: This test is mathematically wrong. `log_c(a)*ln(a) = ln(a)²/ln(c)`, not `ln(c)`. Likely intended: `log_a(c)*ln(a) = ln(c)`.
+
+### 2.2 Powers and Roots
+- **Negative base** (Line 404): `(-x)^{3/4}` → `x^{3/4}`. **Wrong test** — complex for x > 0.
+- **Symbolic exponent** (Line 441): `x^{sqrt(2)}/x^3` → `x^{sqrt(2)-3}`. `sqrt(2).sub(3)` evaluates to float.
+- **Root factoring** (Line 447): `root4(16b^4)` → `2|b|`. Factor numeric coefficients from roots.
+
+### 2.3 Common Denominator (Lines 458, 460)
+- `1/(x+1) - 1/x` → `-1/(x^2+x)`
+- `1/x - 1/(x+1)` → `1/(x^2+x)`
+Requires finding a common denominator for fractions with polynomial denominators — a significant new capability.
+
+### 2.4 Multi-Variable Expansion (Line 466)
+- `2*(x+h)^2 - 2*x^2` → `4xh + 2h^2`. Single-variable `(x+1)^2 - x^2 = 2x+1` works. Multi-variable expansion (`(x+h)^2`) does not expand.
+
+### 2.5 Float / Mixed Arithmetic (Lines 43, 58)
+- `sqrt(3.1)` → `1.76068168616590091458` (decimal)
+- `sqrt(3) + 0.3` → `2.0320508075688772` (decimal)
+`simplify()` should trigger numeric evaluation when floats are present.
+
+### 2.6 Inequality Simplification (Line 113)
+- `(2*pi + 2*pi*e) < 4*pi` → `1 + e < 2`. Extend inequality GCD-factor-out to handle sums with common factors.
+
+### 2.7 Inverse Hyperbolic ↔ Logarithm Rewrites (Lines 822-835)
+- `1/2*ln((x+1)/(x-1))` → `arccoth(x)`
+- `ln(x + sqrt(x^2+1))` → `arsinh(x)`
+- `ln(x + sqrt(x^2-1))` → `arcosh(x)`
+- `1/2*ln((1+x)/(1-x))` → `artanh(x)`
+- `ln((1+sqrt(1-x^2))/x)` → `arsech(x)`
+- `ln(1/x + sqrt(1/x^2+1))` → `arcsch(x)`
+
+### 2.8 Inverse Trig / Other (Lines 843, 1279)
+- `arctan(x/sqrt(1-x^2))` → `arcsin(x)`
+- `1 - (1/4)*sin^2(2x) - sin^2(y) - cos^4(x)` → `sin(x+y)*sin(x-y)` (Fu Trig Simplification — Phase 14)
+
+---
+
+## 3. Current Behavior Snapshot (Issue #178)
+
+Checked using `ce.parse(<latex>, { canonical: false }).simplify()`.
+
+| Section   | Issue text                            | Simplified (LaTeX)                                         | Notes                                                                                                        |
+| --------- | ------------------------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Base      | `x+x`                                 | `2x`                                                       |                                                                                                              |
+| Hard      | `\frac{0}{1-1}`                       | `\frac{0}{1-1}`                                            | No longer incorrectly simplifies to 0.                                                                       |
+| Hard      | `\frac{1-1}{0}`                       | `\tilde\infty`                                             | Requires explicit evaluation of (1-1) to reach 0/0.                                                          |
+| Hard      | `\frac{0}{0}`                         | `\operatorname{NaN}`                                       |                                                                                                              |
+| Hard      | `2(x+h)^2-2x^2`                       | `2(h+x)^2-2x^2`                                            | Default simplify does not expand powers.                                                                     |
+| Hard      | `\frac{\pi+1}{\pi+1}`                 | `1`                                                        |                                                                                                              |
+| Hard      | `\frac{x^2}{5x^2}`                    | `\frac{1}{5}`                                              |                                                                                                              |
+| Hard      | `(-1)^{3/5}`                          | `-1`                                                       |                                                                                                              |
+| Hard      | `\exp(x)\exp(2)`                      | `\exp(x+2)`                                                | Adjacent `\exp()` calls parse correctly as multiplication.                                                   |
+| Hard      | `\frac{x+1-1+1}{x}`                   | `\frac{1}{x}+1`                                            |                                                                                                              |
+| Hard      | `\sqrt{12}`                           | `2\sqrt{3}`                                                |                                                                                                              |
+| Hard      | `\sqrt{x^2}`                          | `\vert x\vert`                                             |                                                                                                              |
+| Logs      | `\ln(\frac{x}{y})`                    | `\ln(\frac{x}{y})`                                         | Quotient expansion is domain-sensitive.                                                                      |
+| Logs      | `log(xy)-log(x)-log(y)`               | `0`                                                        |                                                                                                              |
+| Exponents | `xx`                                  | `x^2`                                                      | Now simplifies to x^2.                                                                                       |
+| Trig      | `2\sin(x)\cos(x)`                     | `\sin(2x)`                                                 |                                                                                                              |
+
+---
+
+## 4. Completed Fixes & Phases
+
+### Phase 9
+- ✅ `x * √2` → `√2 · x` (preserve symbolic radicals instead of evaluating to floats)
+- ✅ `x * ∛2` → `x · ∛2` (preserve symbolic roots)
+- ✅ `\exp(x)\exp(2)` → `e^{x+2}` (fixed adjacent `\exp()` parsing as multiplication)
+
+### Phase 8
+- ✅ `ln(x/y)` → `ln(x) - ln(y)` (quotient rule expansion for positive arguments)
+- ✅ `log(x/y)` → `log(x) - log(y)` (quotient rule for any base)
+- ✅ `exp(log(x))` → `x^{1/ln(10)}` (exp-log composition rule)
+
+### Phase 6
+- ✅ `log(x) + log(y)` → `log(xy)` (fixed base-10 log combination preserving base)
+- ✅ `√(x²y)` → `|x|√y` (factor perfect squares from radicals via cost function adjustment)
+
+### Phase 5
+- ✅ `(x^3)^2 * (y^2)^2` → `x^6y^4` (evaluate numeric exponents in Multiply operands)
+- ✅ `(x³/y²)^{-2}` → `y⁴/x⁶` (distribute negative exponents on fractions)
+
+### Phases 1-4
+- ✅ 0/0 → NaN, 1/0 → ~∞ (ComplexInfinity)
+- ✅ csc(π+x) → -csc(x), cot(π+x) → cot(x)
+- ✅ log(exp(x)) → x/ln(10), log(e) → 1/ln(10)
+- ✅ (x³y²)² → x⁶y⁴, (-2x)² → 4x², (-x)² → x²
+- ✅ e^x / e → e^{x-1}, e^x · e² → e^{x+2}
+- ✅ tan(π/2-x) → cot(x), 2sin(x)cos(x) → sin(2x)
+- ✅ 0^π → 0 (symbolic positive exponents)
