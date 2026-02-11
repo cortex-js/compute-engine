@@ -1,4 +1,4 @@
-## [Unreleased]
+## 0.50.1 _2026-02-11_
 
 ### Compilation
 
