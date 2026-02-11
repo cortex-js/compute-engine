@@ -1,3 +1,15 @@
+## [Unreleased]
+
+### Compilation
+
+- **`CompilationResult.preamble` for shader targets**: `compile()` with
+  `interval-wgsl` and `interval-glsl` targets now returns a `preamble` field
+  containing the interval arithmetic library (struct definitions, helper
+  functions). Previously, the compiled `code` referenced functions like `ia_div`
+  and `ia_sin` that were not included in the output. Use `preamble + code` for a
+  self-contained shader, or call `compileShaderFunction()` on the target
+  directly.
+
 ## 0.50.0 _2026-02-11_
 
 ### Breaking API Changes
