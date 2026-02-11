@@ -1,4 +1,4 @@
-import type { Expression } from './types';
+import type { MathJsonExpression as Expression } from './types';
 import { operand, machineValue, symbol, operator, operands } from './utils';
 
 function serializeBaseForm(expr: Expression): string | null {
