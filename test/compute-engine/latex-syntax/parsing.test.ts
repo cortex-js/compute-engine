@@ -215,9 +215,9 @@ describe('NON-STRICT MODE (Math-ASCII/Typst-like syntax)', () => {
     });
 
     test('Unknown function names are rejected', () => {
-      // 'foo' is not a recognized function: 'f' is a symbol, 'oo' is infinity
+      // 'foo' is not a recognized function, should parse as individual symbols
       expect(ce.parse('foo(x)', { strict: false })).toMatchInlineSnapshot(
-        `["Triple", "f", "PositiveInfinity", "x"]`
+        `["Tuple", "f", "o", "o", "x"]`
       );
     });
   });

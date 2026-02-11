@@ -1552,6 +1552,11 @@ export class _Parser implements Parser {
 
     const start = this.index;
 
+    // Word boundary: if the preceding token is a letter, we're in the
+    // middle of a word that was partially consumed — don't match.
+    if (start > 0 && /^[a-zA-Z]$/.test(this._tokens[start - 1]))
+      return null;
+
     // Collect consecutive letter tokens to form a potential function name
     let name = '';
     while (!this.atEnd && /^[a-zA-Z]$/.test(this.peek)) {
@@ -1710,6 +1715,11 @@ export class _Parser implements Parser {
     if (this.options.strict !== false) return null;
 
     const start = this.index;
+
+    // Word boundary: if the preceding token is a letter, we're in the
+    // middle of a word that was partially consumed — don't match.
+    if (start > 0 && /^[a-zA-Z]$/.test(this._tokens[start - 1]))
+      return null;
 
     // Collect consecutive letter tokens
     let name = '';
