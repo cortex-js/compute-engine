@@ -1290,7 +1290,12 @@ export class IntervalGLSLTarget implements LanguageTarget<Expression> {
 
     const glslCode = BaseCompiler.compile(expr, target);
 
-    return { target: 'interval-glsl', success: true, code: glslCode };
+    return {
+      target: 'interval-glsl',
+      success: true,
+      code: glslCode,
+      preamble: GLSL_INTERVAL_LIBRARY,
+    };
   }
 
   /**

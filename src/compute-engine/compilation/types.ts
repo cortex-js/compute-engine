@@ -177,6 +177,18 @@ export interface CompilationResult {
   /** Generated source code */
   code: string;
 
+  /**
+   * Library/helper code that must be included before the compiled `code`.
+   *
+   * For shader targets (e.g. `interval-wgsl`, `interval-glsl`), this contains
+   * the interval arithmetic library (struct definitions, helper functions, etc.)
+   * that the compiled expression references.
+   *
+   * To produce a complete shader, concatenate `preamble + code` or use the
+   * target's `compileShaderFunction()` method directly.
+   */
+  preamble?: string;
+
   /** Executable function (present for JS-executable targets only) */
   run?: (...args: number[]) => number;
 }

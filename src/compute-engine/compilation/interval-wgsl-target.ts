@@ -1266,7 +1266,12 @@ export class IntervalWGSLTarget implements LanguageTarget<Expression> {
 
     const wgslCode = BaseCompiler.compile(expr, target);
 
-    return { target: 'interval-wgsl', success: true, code: wgslCode };
+    return {
+      target: 'interval-wgsl',
+      success: true,
+      code: wgslCode,
+      preamble: WGSL_INTERVAL_LIBRARY,
+    };
   }
 
   /**
