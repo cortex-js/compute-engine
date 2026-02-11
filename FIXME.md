@@ -137,3 +137,45 @@ Fallback compilation path incomplete for multi-argument functions
 
 - \max/\min with subscripts — Expressions like \max\_{x \in S} f(x) are common
   in math but involve subscript handling that's a separate parsing concern.
+
+---
+
+## Priority 5: Test Debt & Identified Gaps (Inventory from `todo` comments)
+
+### 1. Simplification & Arithmetic Rules
+- **Rational Expressions**: Implement common denominator rules for additions like `1/(x+1) - 1/x = -1/(x^2+x)` (`simplify-noskip.test.ts`).
+- **Logarithmic Rules**: Correct canonicalization order to allow log rules to fire before expansion (e.g., `ln((x+1)/e^{2x})`) (`simplify-noskip.test.ts`).
+- **Inverse Hyperbolic/Trigonometric**: Add rules for converting logarithms to inverse hyperbolic functions and inverse trig conversions (e.g., `arctan(x/sqrt(1-x^2)) = arcsin(x)`).
+- **Factor Extraction**: Improve `factor()` to extract common factors from `Add` expressions like `(2pi + 2pi*e)`.
+
+### 2. Equation Solving
+- **Systems of Equations**: Enable solving systems with symbolic coefficients (e.g., `ax + by = c`).
+- **Inequalities**: Fully implement and test solving for linear inequalities (e.g., `2x + 1 < 5`).
+- **Sqrt Patterns**: Complete edge cases for Sqrt-linear, Two-sqrt terms, and Nested sqrt patterns referenced in `solve.test.ts` and `TODO #15`.
+
+### 3. Latex Syntax & Set Notation
+- **Infinite Sets**: Support parsing and serializing set notation with ellipses (e.g., `\{1, 2, 3...\}`, `\{...-2, -1, 0\}`).
+- **Serialization**: Address remaining edge cases in LaTeX serialization noted in `serialize.test.ts`.
+
+### 4. Cortex Language Features
+- **Indexed Access & Sets**: Implement support for indexed access (e.g., `a[i]`) and set membership validation in Cortex tests.
+
+### 5. Pattern Matching
+- **Wildcards**: Extend support for repeated wildcards in deeply nested contexts (TODO #3) and repeated-match cases.
+- **Auto-wildcarding**: Verify if `.replace()` still incorrectly auto-wildcards single-char symbols (Regression check for TODO #23).
+
+### 6. Performance & Benchmarking
+- **Precision**: Extend Wester benchmarks to support precision 50.
+- **Notation**: Verify consistency for scientific vs. engineering notation in `toLatex()`.
+
+### 7. Unicode & Normalization
+- **Normalization**: Add tests for non-NFC normalized Unicode characters (e.g., `café` vs. `café`) to `dictionary.test.ts`.
+
+### 8. Calculus & Special Functions
+- **Integration**: Implement additional integration patterns identified in `calculus.test.ts`.
+- **Signatures**: Add tests for special functions type signatures (Issue #1).
+
+### 9. Ambiguous / Unclear
+- **Empty TODOs**: `patterns.test.ts:625` contains an empty `//@todo`.
+- **General Revisit**: `cortex-parse.test.ts:234` and `playground.ts:66` require general logic reviews.
+
