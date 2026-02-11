@@ -65,9 +65,7 @@ export function together(op: Expression): Expression {
  *
  * IMPORTANT: Does not call .simplify() to avoid infinite recursion.
  */
-export function factorPerfectSquare(
-  expr: Expression
-): Expression | null {
+export function factorPerfectSquare(expr: Expression): Expression | null {
   const ce = expr.engine;
 
   // Must be an Add expression
@@ -177,9 +175,7 @@ function extractSquareRoot(
  *
  * IMPORTANT: Does not call .simplify() on the result to avoid infinite recursion.
  */
-export function factorDifferenceOfSquares(
-  expr: Expression
-): Expression | null {
+export function factorDifferenceOfSquares(expr: Expression): Expression | null {
   const ce = expr.engine;
 
   // Must be an Add expression with exactly 2 terms (one positive, one negative)

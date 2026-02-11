@@ -488,7 +488,10 @@ function tightBindingCondition(
 
 function parseQuantifier(
   kind: 'NotForAll' | 'NotExists' | 'ForAll' | 'Exists' | 'ExistsUnique'
-): (parser: Parser, terminator: Readonly<Terminator>) => MathJsonExpression | null {
+): (
+  parser: Parser,
+  terminator: Readonly<Terminator>
+) => MathJsonExpression | null {
   return (parser, terminator) => {
     const index = parser.index;
     const useTightBinding = parser.options.quantifierScope !== 'loose';

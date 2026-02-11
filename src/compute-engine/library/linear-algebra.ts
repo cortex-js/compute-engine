@@ -2207,9 +2207,7 @@ function finiteDimension(value: Expression): number | undefined {
 function kernelBasisDimension(value: Expression): number | undefined {
   if (isFunction(value) && value.operator === 'List') {
     if (value.ops.length === 0) return 0;
-    if (
-      value.ops.every((op) => isFunction(op) && op.operator === 'List')
-    ) {
+    if (value.ops.every((op) => isFunction(op) && op.operator === 'List')) {
       return value.ops.length;
     }
   }

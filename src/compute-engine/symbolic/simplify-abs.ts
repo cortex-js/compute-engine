@@ -281,9 +281,7 @@ export function simplifyAbsPower(x: Expression): RuleStep | undefined {
  * Even functions: f(|x|) -> f(x)
  * This rule handles Cos, Sec, Cosh, Sech with Abs argument
  */
-export function simplifyEvenFunctionAbs(
-  x: Expression
-): RuleStep | undefined {
+export function simplifyEvenFunctionAbs(x: Expression): RuleStep | undefined {
   const op = x.operator;
   if (!EVEN_FUNCS.has(op) || !isFunction(x)) return undefined;
 

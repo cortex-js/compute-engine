@@ -121,9 +121,7 @@ export function isIndexedCollection(
  * so callers can write `sym(expr) === 'Pi'` instead of the more verbose
  * `isSymbol(expr) && expr.symbol === 'Pi'`.
  */
-export function sym(
-  expr: Expression | null | undefined
-): string | undefined {
+export function sym(expr: Expression | null | undefined): string | undefined {
   return expr !== null && expr !== undefined && expr._kind === 'symbol'
     ? (expr as Expression & SymbolInterface).symbol
     : undefined;

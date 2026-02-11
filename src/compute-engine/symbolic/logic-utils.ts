@@ -3,11 +3,7 @@ import type {
   IComputeEngine as ComputeEngine,
 } from '../global-types';
 
-import {
-  isFunction,
-  isSymbol,
-  sym,
-} from '../boxed-expression/type-guards';
+import { isFunction, isSymbol, sym } from '../boxed-expression/type-guards';
 
 /**
  * Basic evaluation functions for logical operators.
@@ -25,9 +21,7 @@ function fnOp2(expr: Expression): Expression | undefined {
 }
 
 /** Helper to get `.ops` from a function expression, or undefined. */
-function fnOps(
-  expr: Expression
-): ReadonlyArray<Expression> | undefined {
+function fnOps(expr: Expression): ReadonlyArray<Expression> | undefined {
   return isFunction(expr) ? expr.ops : undefined;
 }
 
@@ -369,10 +363,7 @@ export function evaluateNor(
  * In NNF, negations only appear directly before variables (literals).
  * This is a prerequisite for CNF/DNF conversion.
  */
-export function toNNF(
-  expr: Expression,
-  ce: ComputeEngine
-): Expression {
+export function toNNF(expr: Expression, ce: ComputeEngine): Expression {
   const op = expr.operator;
 
   // Base cases
@@ -535,10 +526,7 @@ export function toNNF(
  * Distribute Or over And to get CNF.
  * (A ∧ B) ∨ C → (A ∨ C) ∧ (B ∨ C)
  */
-function distributeOrOverAnd(
-  expr: Expression,
-  ce: ComputeEngine
-): Expression {
+function distributeOrOverAnd(expr: Expression, ce: ComputeEngine): Expression {
   const op = expr.operator;
 
   if (op !== 'Or') {
@@ -589,10 +577,7 @@ function distributeOrOverAnd(
 /**
  * Convert a boolean expression to Conjunctive Normal Form (CNF).
  */
-export function toCNF(
-  expr: Expression,
-  ce: ComputeEngine
-): Expression {
+export function toCNF(expr: Expression, ce: ComputeEngine): Expression {
   // First convert to NNF
   const nnf = toNNF(expr, ce);
 
@@ -607,10 +592,7 @@ export function toCNF(
  * Distribute And over Or to get DNF.
  * (A ∨ B) ∧ C → (A ∧ C) ∨ (B ∧ C)
  */
-function distributeAndOverOr(
-  expr: Expression,
-  ce: ComputeEngine
-): Expression {
+function distributeAndOverOr(expr: Expression, ce: ComputeEngine): Expression {
   const op = expr.operator;
 
   if (op !== 'And') {
@@ -663,10 +645,7 @@ function distributeAndOverOr(
 /**
  * Convert a boolean expression to Disjunctive Normal Form (DNF).
  */
-export function toDNF(
-  expr: Expression,
-  ce: ComputeEngine
-): Expression {
+export function toDNF(expr: Expression, ce: ComputeEngine): Expression {
   // First convert to NNF
   const nnf = toNNF(expr, ce);
 

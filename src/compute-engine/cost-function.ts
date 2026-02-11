@@ -1,10 +1,6 @@
 import type { Expression } from './global-types';
 import type { NumericValue } from './numeric-value/types.js';
-import {
-  isSymbol,
-  isNumber,
-  isFunction,
-} from './boxed-expression/type-guards';
+import { isSymbol, isNumber, isFunction } from './boxed-expression/type-guards';
 
 /**
  * The Cost Function is used to select the simplest between two expressions:
@@ -102,8 +98,7 @@ export function costFunction(expr: Expression): number {
 
       // Match exponent: 1/ln(10)
       const exponent = xPow.op2;
-      if (!isFunction(exponent) || exponent.operator !== 'Divide')
-        return null;
+      if (!isFunction(exponent) || exponent.operator !== 'Divide') return null;
       if (exponent.op1?.is(1) !== true) return null;
 
       const denom = exponent.op2;

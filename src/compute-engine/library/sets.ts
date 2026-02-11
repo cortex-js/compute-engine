@@ -943,11 +943,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
   },
 };
 
-function subset(
-  lhs: Expression,
-  rhs: Expression,
-  strict = true
-): boolean {
+function subset(lhs: Expression, rhs: Expression, strict = true): boolean {
   if (!lhs.isCollection || !rhs.isCollection) return false;
   if (lhs.baseDefinition?.collection?.subsetOf?.(lhs, rhs, strict)) return true;
   return false;

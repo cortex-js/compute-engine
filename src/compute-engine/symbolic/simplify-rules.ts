@@ -359,11 +359,7 @@ export const SIMPLIFY_RULES: Rule[] = [
       }
       // Also skip if one is a power and the other is the same base
       // e.g., e^x / e -> e^{x-1}
-      if (
-        num.operator === 'Power' &&
-        isFunction(num) &&
-        num.op1.isSame(denom)
-      )
+      if (num.operator === 'Power' && isFunction(num) && num.op1.isSame(denom))
         return undefined;
       if (
         denom.operator === 'Power' &&
@@ -629,8 +625,7 @@ export const SIMPLIFY_RULES: Rule[] = [
   // Inverse Function (i.e. sin^{-1})
   //
   (x): RuleStep | undefined => {
-    if (x.operator !== 'InverseFunction' || !isFunction(x))
-      return undefined;
+    if (x.operator !== 'InverseFunction' || !isFunction(x)) return undefined;
     const value = processInverseFunction(x.engine, x.ops);
     if (!value) return undefined;
     return { value, because: 'inverse function' };
@@ -972,9 +967,7 @@ function isExact(n: number | NumericValue | undefined): boolean {
 // Helper functions for relational operators and system of equations
 //
 
-function simplifyRelationalOperator(
-  expr: Expression
-): RuleStep | undefined {
+function simplifyRelationalOperator(expr: Expression): RuleStep | undefined {
   const h = expr.operator;
   if (!isInequalityOperator(h) && !isEquationOperator(h)) return undefined;
 
@@ -1013,9 +1006,7 @@ function simplifyRelationalOperator(
   return { value: expr, because: 'simplify-relational-operator' };
 }
 
-function simplifySystemOfEquations(
-  expr: Expression
-): RuleStep | undefined {
+function simplifySystemOfEquations(expr: Expression): RuleStep | undefined {
   if (expr.operator !== 'List' || !isFunction(expr)) return undefined;
 
   // Check if every element is an equation or inequality

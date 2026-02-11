@@ -1,8 +1,4 @@
-import type {
-  Expression,
-  AssignValue,
-  IComputeEngine,
-} from './global-types';
+import type { Expression, AssignValue, IComputeEngine } from './global-types';
 import type { LatexString } from './latex-syntax/types';
 import {
   expand as expandExpr,
@@ -16,9 +12,7 @@ let _ComputeEngineClass: (new () => IComputeEngine) | null = null;
 
 /** @internal Called by index.ts to register the ComputeEngine class,
  *  avoiding a circular dependency (index.ts re-exports this file). */
-export function _setComputeEngineClass(
-  cls: new () => IComputeEngine
-): void {
+export function _setComputeEngineClass(cls: new () => IComputeEngine): void {
   _ComputeEngineClass = cls;
 }
 
@@ -37,24 +31,21 @@ export function parse(latex: LatexString): Expression {
   return getDefaultEngine().parse(latex, { strict: false });
 }
 
-export function simplify(
-  latex: LatexString | Expression
-): Expression {
+export function simplify(latex: LatexString | Expression): Expression {
   if (typeof latex === 'string')
     return getDefaultEngine().parse(latex, { strict: false }).simplify();
   return latex.simplify();
 }
 
-export function evaluate(
-  latex: LatexString | Expression
-): Expression {
+export function evaluate(latex: LatexString | Expression): Expression {
   if (typeof latex === 'string')
     return getDefaultEngine().parse(latex, { strict: false }).evaluate();
   return latex.evaluate();
 }
 
 export function N(latex: LatexString | Expression): Expression {
-  if (typeof latex === 'string') return getDefaultEngine().parse(latex, { strict: false }).N();
+  if (typeof latex === 'string')
+    return getDefaultEngine().parse(latex, { strict: false }).N();
   return latex.N();
 }
 
@@ -67,11 +58,11 @@ export function assign(
   getDefaultEngine().assign(arg1 as any, arg2 as any);
 }
 
-export function expand(
-  latex: LatexString | Expression
-): Expression | null {
+export function expand(latex: LatexString | Expression): Expression | null {
   const expr =
-    typeof latex === 'string' ? getDefaultEngine().parse(latex, { strict: false }) : latex;
+    typeof latex === 'string'
+      ? getDefaultEngine().parse(latex, { strict: false })
+      : latex;
   return expandExpr(expr);
 }
 
@@ -84,21 +75,25 @@ export function solve(
   | Record<string, Expression>
   | Array<Record<string, Expression>> {
   const expr =
-    typeof latex === 'string' ? getDefaultEngine().parse(latex, { strict: false }) : latex;
+    typeof latex === 'string'
+      ? getDefaultEngine().parse(latex, { strict: false })
+      : latex;
   return expr.solve(vars);
 }
 
-export function expandAll(
-  latex: LatexString | Expression
-): Expression | null {
+export function expandAll(latex: LatexString | Expression): Expression | null {
   const expr =
-    typeof latex === 'string' ? getDefaultEngine().parse(latex, { strict: false }) : latex;
+    typeof latex === 'string'
+      ? getDefaultEngine().parse(latex, { strict: false })
+      : latex;
   return expandAllExpr(expr);
 }
 
 export function factor(latex: LatexString | Expression): Expression {
   const expr =
-    typeof latex === 'string' ? getDefaultEngine().parse(latex, { strict: false }) : latex;
+    typeof latex === 'string'
+      ? getDefaultEngine().parse(latex, { strict: false })
+      : latex;
   return factorExpr(expr);
 }
 
@@ -107,6 +102,8 @@ export function compile(
   options?: Parameters<typeof compileExpr>[1]
 ): ReturnType<typeof compileExpr> {
   const expr =
-    typeof latex === 'string' ? getDefaultEngine().parse(latex, { strict: false }) : latex;
+    typeof latex === 'string'
+      ? getDefaultEngine().parse(latex, { strict: false })
+      : latex;
   return compileExpr(expr, options);
 }

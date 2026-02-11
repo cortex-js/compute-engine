@@ -682,9 +682,7 @@ export class ComputeEngine implements IComputeEngine {
    * @param name - The name of the target (e.g., 'javascript', 'glsl', 'python')
    * @returns The LanguageTarget implementation, or undefined if not found
    */
-  getCompilationTarget(
-    name: string
-  ): LanguageTarget<Expression> | undefined {
+  getCompilationTarget(name: string): LanguageTarget<Expression> | undefined {
     return this._compilationTargets.get(name);
   }
 
@@ -1375,9 +1373,7 @@ export class ComputeEngine implements IComputeEngine {
    * For single-index sequences, keys are numbers.
    * For multi-index sequences, keys are comma-separated strings (e.g., '5,2').
    */
-  getSequenceCache(
-    name: string
-  ): Map<number | string, Expression> | undefined {
+  getSequenceCache(name: string): Map<number | string, Expression> | undefined {
     return getSequenceCacheImpl(this, name);
   }
 

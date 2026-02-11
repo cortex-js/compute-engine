@@ -82,11 +82,7 @@ export type RuleFunction = KernelRuleFunction<Expression>;
  *
  * @category Rules
  */
-export type Rule = KernelRule<
-  Expression,
-  ExpressionInput,
-  ComputeEngine
->;
+export type Rule = KernelRule<Expression, ExpressionInput, ComputeEngine>;
 
 /** A boxed/normalized rule form. */
 export type BoxedRule = KernelBoxedRule<Expression, ComputeEngine>;

@@ -2168,10 +2168,7 @@ function _indexRangeArg(
   return [lower, upper, step];
 }
 
-function canonicalList(
-  ops: Expression[],
-  { engine: ce }
-): Expression {
+function canonicalList(ops: Expression[], { engine: ce }): Expression {
   // Do we have a matrix with a custom delimiter, i.e.
   // \left\lbrack \begin{array}...\end{array} \right\rbrack
 
@@ -2180,10 +2177,7 @@ function canonicalList(
     // Adjust the matrix to have the correct delimiter
     const [body, delimiters, columns] = op1.ops;
 
-    if (
-      !delimiters ||
-      (isString(delimiters) && delimiters.string === '..')
-    ) {
+    if (!delimiters || (isString(delimiters) && delimiters.string === '..')) {
       if (!columns) return ce._fn('Matrix', [body, delimiters]);
       return ce._fn('Matrix', [body, ce.string('[]'), columns]);
     }
@@ -2200,10 +2194,7 @@ function canonicalList(
   return ce._fn('List', ops);
 }
 
-function canonicalSet(
-  ops: ReadonlyArray<Expression>,
-  { engine }
-): Expression {
+function canonicalSet(ops: ReadonlyArray<Expression>, { engine }): Expression {
   // Check that each element is only present once
   const set: Expression[] = [];
   const has = (x) => set.some((y) => y.isSame(x));
@@ -2213,9 +2204,7 @@ function canonicalSet(
   return engine._fn('Set', set);
 }
 
-function tally(
-  collection: Expression
-): [ReadonlyArray<Expression>, number[]] {
+function tally(collection: Expression): [ReadonlyArray<Expression>, number[]] {
   const values: Expression[] = [];
   const counts: number[] = [];
 

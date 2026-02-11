@@ -123,8 +123,7 @@ export function canonicalFunctionLiteral(
   //    This operator is just a "tag" indicating the nature of the
   //    symbol.
   //
-  if (expr.operator === 'BuiltinFunction' && isFunction(expr))
-    return expr.op1;
+  if (expr.operator === 'BuiltinFunction' && isFunction(expr)) return expr.op1;
 
   //
   // 4/ Parenthesized expression, e.g. ["Delimiter", ["Sin", "_"], "'()'"]
@@ -143,9 +142,7 @@ export function canonicalFunctionLiteral(
       }
     }
 
-    return canonicalFunctionLiteral(
-      isFunction(expr) ? expr.op1 : undefined
-    );
+    return canonicalFunctionLiteral(isFunction(expr) ? expr.op1 : undefined);
   }
 
   //
@@ -333,10 +330,7 @@ function makeLambda(
       const substitutions = Object.fromEntries(
         params
           .slice(args.length)
-          .map((param, i) => [
-            isSymbol(param) ? param.symbol : '',
-            extras[i],
-          ])
+          .map((param, i) => [isSymbol(param) ? param.symbol : '', extras[i]])
       );
 
       // Apply known arguments and substitute remaining parameters

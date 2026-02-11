@@ -8,12 +8,7 @@ import { permutations } from '../../common/utils';
 
 import { isWildcard, wildcardName, wildcardType } from './pattern-utils';
 import { isOperatorDef } from './utils';
-import {
-  isNumber,
-  isFunction,
-  isSymbol,
-  isString,
-} from './type-guards';
+import { isNumber, isFunction, isSymbol, isString } from './type-guards';
 
 function hasWildcards(expr: string | Expression): boolean {
   if (typeof expr === 'string') return expr.startsWith('_');
@@ -141,11 +136,7 @@ function matchOnce(
 
     // Special case: Match a BoxedNumber rational against a Divide pattern
     // This allows patterns like ['Divide', '_num', '_den'] to match rationals like 3/2
-    if (
-      operator === 'Divide' &&
-      isNumber(expr) &&
-      !expr.denominator.is(1)
-    ) {
+    if (operator === 'Divide' && isNumber(expr) && !expr.denominator.is(1)) {
       // Create a synthetic Divide expression to match against
       const divideExpr = ce.function(
         'Divide',
@@ -215,11 +206,7 @@ function matchOnce(
 
     // Special case: Match Root(x, n) against a Power pattern
     // This handles cases like x^(1/3) which is canonicalized as Root(x, 3)
-    if (
-      operator === 'Power' &&
-      isFunction(expr) &&
-      expr.operator === 'Root'
-    ) {
+    if (operator === 'Power' && isFunction(expr) && expr.operator === 'Root') {
       // Create a synthetic Power expression: Power(x, 1/n)
       const powerExpr = ce.function(
         'Power',
@@ -547,9 +534,7 @@ function matchPermutation(
   // - OptionalSequence followed by Sequence or OptionalSequence
   // Note: Sequence/OptionalSequence followed by universal Wildcard (_) is VALID
   // because the single-element wildcard provides an anchor point.
-  const cond = (
-    xs: ReadonlyArray<Expression> /* , generated: Set<string> */
-  ) =>
+  const cond = (xs: ReadonlyArray<Expression> /* , generated: Set<string> */) =>
     !xs.some((x, index) => {
       if (!isWildcard(x)) return false;
       const xType = wildcardType(x);

@@ -390,11 +390,7 @@ export function TR7i(expr: Expression): Expression | undefined {
     if (!num || !den || !den.is(2)) return undefined;
 
     // Check numerator is Add(1, +/-cos(2x))
-    if (
-      num.operator === 'Add' &&
-      isFunction(num) &&
-      num.ops.length === 2
-    ) {
+    if (num.operator === 'Add' && isFunction(num) && num.ops.length === 2) {
       return checkHalfAnglePattern(ce, num.ops);
     }
   }
@@ -425,11 +421,7 @@ export function TR7i(expr: Expression): Expression | undefined {
   // Check for expanded form: 1/2 +/- cos(2x)/2
   // This appears as Add(1/2, +/-Multiply(1/2, Cos(2x))) or Add(1/2, +/-Divide(Cos(2x), 2))
   // Also handles: Add(Multiply(-1/2, Cos(2x)), 1/2) where -1/2 is Rational(-1, 2)
-  if (
-    expr.operator === 'Add' &&
-    isFunction(expr) &&
-    expr.ops.length === 2
-  ) {
+  if (expr.operator === 'Add' && isFunction(expr) && expr.ops.length === 2) {
     let halfTerm: Expression | undefined;
     let cosTerm: Expression | undefined;
     let isNegCos = false;
@@ -1232,11 +1224,7 @@ export function TR11i(expr: Expression): Expression | undefined {
 
   // cos^2(x) - sin^2(x) -> cos(2x)
   // This appears as Add(Power(Cos(x), 2), Negate(Power(Sin(x), 2)))
-  if (
-    expr.operator === 'Add' &&
-    isFunction(expr) &&
-    expr.ops.length === 2
-  ) {
+  if (expr.operator === 'Add' && isFunction(expr) && expr.ops.length === 2) {
     const [a, b] = expr.ops;
 
     // Check for cos^2(x) + (-sin^2(x))
@@ -1268,11 +1256,8 @@ export function TR11i(expr: Expression): Expression | undefined {
 
     // 2cos^2(x) - 1 -> cos(2x)
     // Pattern: Add(Multiply(2, Power(Cos(x), 2)), -1) or Add(-1, Multiply(2, Power(Cos(x), 2)))
-    const extractTwoCosSq = (
-      term: Expression
-    ): Expression | undefined => {
-      if (term.operator !== 'Multiply' || !isFunction(term))
-        return undefined;
+    const extractTwoCosSq = (term: Expression): Expression | undefined => {
+      if (term.operator !== 'Multiply' || !isFunction(term)) return undefined;
       const twoIdx = term.ops.findIndex((f) => f.is(2));
       if (twoIdx < 0) return undefined;
       const rest = term.ops.filter((_, i) => i !== twoIdx);
@@ -1294,27 +1279,22 @@ export function TR11i(expr: Expression): Expression | undefined {
     let cosArg = extractTwoCosSq(a);
     if (
       cosArg &&
-      (b.is(-1) ||
-        (b.operator === 'Negate' && isFunction(b) && b.op1?.is(1)))
+      (b.is(-1) || (b.operator === 'Negate' && isFunction(b) && b.op1?.is(1)))
     ) {
       return ce._fn('Cos', [cosArg.mul(2)]);
     }
     cosArg = extractTwoCosSq(b);
     if (
       cosArg &&
-      (a.is(-1) ||
-        (a.operator === 'Negate' && isFunction(a) && a.op1?.is(1)))
+      (a.is(-1) || (a.operator === 'Negate' && isFunction(a) && a.op1?.is(1)))
     ) {
       return ce._fn('Cos', [cosArg.mul(2)]);
     }
 
     // 1 - 2sin^2(x) -> cos(2x)
     // Pattern: Add(1, Negate(Multiply(2, Power(Sin(x), 2)))) or similar
-    const extractTwoSinSq = (
-      term: Expression
-    ): Expression | undefined => {
-      if (term.operator !== 'Multiply' || !isFunction(term))
-        return undefined;
+    const extractTwoSinSq = (term: Expression): Expression | undefined => {
+      if (term.operator !== 'Multiply' || !isFunction(term)) return undefined;
       const twoIdx = term.ops.findIndex((f) => f.is(2));
       if (twoIdx < 0) return undefined;
       const rest = term.ops.filter((_, i) => i !== twoIdx);
@@ -1347,11 +1327,8 @@ export function TR11i(expr: Expression): Expression | undefined {
     }
 
     // Also handle: 1 + (-2)sin^2(x) where -2 is a single number
-    const extractNegTwoSinSq = (
-      term: Expression
-    ): Expression | undefined => {
-      if (term.operator !== 'Multiply' || !isFunction(term))
-        return undefined;
+    const extractNegTwoSinSq = (term: Expression): Expression | undefined => {
+      if (term.operator !== 'Multiply' || !isFunction(term)) return undefined;
       const negTwoIdx = term.ops.findIndex((f) => f.is(-2));
       if (negTwoIdx < 0) return undefined;
       const rest = term.ops.filter((_, i) => i !== negTwoIdx);
@@ -1505,11 +1482,7 @@ function extractTanProduct(
       const sqrtExpr = op.op1;
       if (isFunction(sqrtExpr)) {
         const sqrtArg = sqrtExpr.op1;
-        if (
-          sqrtArg &&
-          isNumber(sqrtArg) &&
-          typeof sqrtArg.re === 'number'
-        ) {
+        if (sqrtArg && isNumber(sqrtArg) && typeof sqrtArg.re === 'number') {
           coef *= -Math.sqrt(sqrtArg.re);
         } else {
           return undefined;
@@ -1912,18 +1885,10 @@ export function TR22i(expr: Expression): Expression | undefined {
     } else if (op.is(-1)) {
       oneIndex = i;
       isNegOne = true;
-    } else if (
-      op.operator === 'Negate' &&
-      isFunction(op) &&
-      op.op1?.is(1)
-    ) {
+    } else if (op.operator === 'Negate' && isFunction(op) && op.op1?.is(1)) {
       oneIndex = i;
       isNegOne = true;
-    } else if (
-      op.operator === 'Power' &&
-      isFunction(op) &&
-      op.op2?.is(2)
-    ) {
+    } else if (op.operator === 'Power' && isFunction(op) && op.op2?.is(2)) {
       powerIndex = i;
     }
   }
@@ -2218,20 +2183,10 @@ function extractSquaredTrig(
 
     if (trigPower && isFunction(trigPower)) {
       const base = trigPower.op1;
-      if (
-        base &&
-        base.operator === 'Sin' &&
-        isFunction(base) &&
-        base.op1
-      ) {
+      if (base && base.operator === 'Sin' && isFunction(base) && base.op1) {
         return { func: 'Sin', arg: base.op1, coef };
       }
-      if (
-        base &&
-        base.operator === 'Cos' &&
-        isFunction(base) &&
-        base.op1
-      ) {
+      if (base && base.operator === 'Cos' && isFunction(base) && base.op1) {
         return { func: 'Cos', arg: base.op1, coef };
       }
     }
@@ -2240,9 +2195,7 @@ function extractSquaredTrig(
   return null;
 }
 
-export function TRpythagorean(
-  expr: Expression
-): Expression | undefined {
+export function TRpythagorean(expr: Expression): Expression | undefined {
   const ce = expr.engine;
 
   if (expr.operator !== 'Add') return undefined;

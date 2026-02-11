@@ -4,11 +4,7 @@ import type {
   RuleStep,
 } from '../global-types';
 import { add } from '../boxed-expression/arithmetic-add';
-import {
-  isFunction,
-  isNumber,
-  sym,
-} from '../boxed-expression/type-guards';
+import { isFunction, isNumber, sym } from '../boxed-expression/type-guards';
 
 /**
  * Trigonometric simplification rules consolidated from simplify-rules.ts.
@@ -418,11 +414,7 @@ export function simplifyTrig(x: Expression): RuleStep | undefined {
       for (const term of x.ops) {
         if (isFunction(term) && term.operator === 'Sin' && !sinTerm) {
           sinTerm = term;
-        } else if (
-          isFunction(term) &&
-          term.operator === 'Cos' &&
-          !cosTerm
-        ) {
+        } else if (isFunction(term) && term.operator === 'Cos' && !cosTerm) {
           cosTerm = term;
         } else {
           otherTerms.push(term);
@@ -538,12 +530,7 @@ export function simplifyTrig(x: Expression): RuleStep | undefined {
       // Power reduction identities:
       // 2sin²(x) -> 1 - cos(2x)
       // 2cos²(x) -> 1 + cos(2x)
-      if (
-        a.is(2) &&
-        isFunction(b) &&
-        b.operator === 'Power' &&
-        b.op2?.is(2)
-      ) {
+      if (a.is(2) && isFunction(b) && b.operator === 'Power' && b.op2?.is(2)) {
         const base = b.op1;
         if (isFunction(base) && base.operator === 'Sin' && base.op1) {
           const cos2x = ce._fn('Cos', [base.op1.mul(2)]);
@@ -561,12 +548,7 @@ export function simplifyTrig(x: Expression): RuleStep | undefined {
         }
       }
       // Also check reversed order (Power first, then 2)
-      if (
-        b.is(2) &&
-        isFunction(a) &&
-        a.operator === 'Power' &&
-        a.op2?.is(2)
-      ) {
+      if (b.is(2) && isFunction(a) && a.operator === 'Power' && a.op2?.is(2)) {
         const base = a.op1;
         if (isFunction(base) && base.operator === 'Sin' && base.op1) {
           const cos2x = ce._fn('Cos', [base.op1.mul(2)]);
@@ -623,12 +605,7 @@ export function simplifyTrig(x: Expression): RuleStep | undefined {
 
     // tan²(x) + 1 -> sec²(x) and 1 + tan²(x) -> sec²(x)
     // (one operand is Power, the other is 1)
-    if (
-      isFunction(a) &&
-      a.operator === 'Power' &&
-      a.op2?.is(2) &&
-      b.is(1)
-    ) {
+    if (isFunction(a) && a.operator === 'Power' && a.op2?.is(2) && b.is(1)) {
       if (isFunction(a.op1) && a.op1.operator === 'Tan') {
         return {
           value: ce._fn('Sec', [a.op1.op1]).pow(2),
@@ -636,12 +613,7 @@ export function simplifyTrig(x: Expression): RuleStep | undefined {
         };
       }
     }
-    if (
-      isFunction(b) &&
-      b.operator === 'Power' &&
-      b.op2?.is(2) &&
-      a.is(1)
-    ) {
+    if (isFunction(b) && b.operator === 'Power' && b.op2?.is(2) && a.is(1)) {
       if (isFunction(b.op1) && b.op1.operator === 'Tan') {
         return {
           value: ce._fn('Sec', [b.op1.op1]).pow(2),
@@ -651,12 +623,7 @@ export function simplifyTrig(x: Expression): RuleStep | undefined {
     }
 
     // 1 + cot²(x) -> csc²(x) and cot²(x) + 1 -> csc²(x)
-    if (
-      isFunction(a) &&
-      a.operator === 'Power' &&
-      a.op2?.is(2) &&
-      b.is(1)
-    ) {
+    if (isFunction(a) && a.operator === 'Power' && a.op2?.is(2) && b.is(1)) {
       if (isFunction(a.op1) && a.op1.operator === 'Cot') {
         return {
           value: ce._fn('Csc', [a.op1.op1]).pow(2),
@@ -664,12 +631,7 @@ export function simplifyTrig(x: Expression): RuleStep | undefined {
         };
       }
     }
-    if (
-      isFunction(b) &&
-      b.operator === 'Power' &&
-      b.op2?.is(2) &&
-      a.is(1)
-    ) {
+    if (isFunction(b) && b.operator === 'Power' && b.op2?.is(2) && a.is(1)) {
       if (isFunction(b.op1) && b.op1.operator === 'Cot') {
         return {
           value: ce._fn('Csc', [b.op1.op1]).pow(2),
@@ -785,12 +747,7 @@ export function simplifyTrig(x: Expression): RuleStep | undefined {
     let negOne: Expression | null = null;
     let trigSquared: Expression | null = null;
 
-    if (
-      a.is(-1) &&
-      isFunction(b) &&
-      b.operator === 'Power' &&
-      b.op2?.is(2)
-    ) {
+    if (a.is(-1) && isFunction(b) && b.operator === 'Power' && b.op2?.is(2)) {
       negOne = a;
       trigSquared = b;
     } else if (

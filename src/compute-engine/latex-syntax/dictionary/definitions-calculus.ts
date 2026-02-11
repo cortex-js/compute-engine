@@ -175,7 +175,8 @@ function makeIntegral(
   const tuples = indexes.map((idx, i) => {
     const sup = limits.sups[i];
     const sub = limits.subs[i];
-    if (sub === 'Nothing' && sup === 'Nothing') return idx as MathJsonExpression;
+    if (sub === 'Nothing' && sup === 'Nothing')
+      return idx as MathJsonExpression;
 
     return ['Tuple', idx, sub, sup] as MathJsonExpression;
   });

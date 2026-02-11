@@ -20,10 +20,7 @@ import { IntervalWGSLTarget } from './compilation/interval-wgsl-target';
  * @internal
  */
 export class CompilationTargetRegistry {
-  private readonly _targets = new Map<
-    string,
-    LanguageTarget<Expression>
-  >();
+  private readonly _targets = new Map<string, LanguageTarget<Expression>>();
 
   register(name: string, target: LanguageTarget<Expression>): void {
     assertCompilationTargetName(name);

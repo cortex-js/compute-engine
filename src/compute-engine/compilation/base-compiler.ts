@@ -139,9 +139,7 @@ export class BaseCompiler {
     // Handle special constructs
     if (h === 'Function') {
       // Anonymous function
-      const params = args
-        .slice(1)
-        .map((x) => (isSymbol(x) ? x.symbol : '_'));
+      const params = args.slice(1).map((x) => (isSymbol(x) ? x.symbol : '_'));
       return `((${params.join(', ')}) => ${BaseCompiler.compile(
         args[0].canonical,
         {

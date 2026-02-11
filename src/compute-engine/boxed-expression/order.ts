@@ -3,12 +3,7 @@ import type { Expression } from '../global-types';
 import { maxDegree, revlex, totalDegree } from './polynomial-degree';
 import { asRadical } from './arithmetic-power';
 import { isOperatorDef } from './utils';
-import {
-  isNumber,
-  isFunction,
-  isSymbol,
-  isString,
-} from './type-guards';
+import { isNumber, isFunction, isSymbol, isString } from './type-guards';
 
 export type Order = 'lex' | 'dexlex' | 'grevlex' | 'elim';
 
@@ -385,8 +380,7 @@ export function canonicalOrder(
   { recursive = false }: { recursive?: boolean }
 ): Expression {
   // If the expression is already in canonical form, return it as is
-  if (expr.isCanonical || expr.isStructural || !isFunction(expr))
-    return expr;
+  if (expr.isCanonical || expr.isStructural || !isFunction(expr)) return expr;
 
   let ops: ReadonlyArray<Expression> = expr.ops;
   if (recursive) ops = ops.map((x) => canonicalOrder(x, { recursive }));

@@ -65,9 +65,7 @@ export type IndexingSet = {
  * @param indexingSet
  * @returns
  */
-export function normalizeIndexingSet(
-  indexingSet: Expression
-): IndexingSet {
+export function normalizeIndexingSet(indexingSet: Expression): IndexingSet {
   console.assert(indexingSet?.operator === 'Limits');
   console.assert(
     isFunction(indexingSet),
@@ -231,8 +229,7 @@ export function canonicalLimits(
     // ["Limits", ["Hold", "n"]]
     // ["Limits", "10"] --> ???
     const op = ops[0];
-    if (isSymbol(op))
-      return ce._fn('Limits', [op, ce.Nothing, ce.Nothing]);
+    if (isSymbol(op)) return ce._fn('Limits', [op, ce.Nothing, ce.Nothing]);
     if (op.operator === 'Hold' && isFunction(op))
       return canonicalLimits(op.ops, { engine: ce });
 
@@ -264,8 +261,7 @@ export function canonicalLimits(
     }
     if (index.operator === 'Hold' && isFunction(index)) index = index.op1;
 
-    if (!isSymbol(index))
-      index = ce.typeError('symbol', index.type, index);
+    if (!isSymbol(index)) index = ce.typeError('symbol', index.type, index);
 
     return ce._fn('Limits', [index, lower, upper]);
   }
@@ -283,9 +279,7 @@ export function canonicalLimits(
  * Assume we are in the context of a big operator
  * (i.e. `pushScope()` has been called)
  */
-export function canonicalIndexingSet(
-  expr: Expression
-): Expression | undefined {
+export function canonicalIndexingSet(expr: Expression): Expression | undefined {
   const ce = expr.engine;
   let index: Expression;
   let upper: Expression | null = null;
@@ -526,8 +520,7 @@ function* reduceElementIndexingSets<T>(
   const ce = body.engine;
 
   // Separate Element and Limits indexing sets
-  const elementDomains: Array<{ variable: string; values: Expression[] }> =
-    [];
+  const elementDomains: Array<{ variable: string; values: Expression[] }> = [];
   const limitsSets: IndexingSet[] = [];
 
   for (const idx of indexes) {

@@ -433,7 +433,9 @@ export class _Parser implements Parser {
     return match;
   }
 
-  boundaryError(msg: string | [string, ...MathJsonExpression[]]): MathJsonExpression {
+  boundaryError(
+    msg: string | [string, ...MathJsonExpression[]]
+  ): MathJsonExpression {
     const currentBoundary = this._boundaries[this._boundaries.length - 1];
     this._boundaries.pop();
     return this.error(msg, currentBoundary.index);
@@ -1164,7 +1166,9 @@ export class _Parser implements Parser {
 
   /** Parse an environment: `\begin{env}...\end{end}`
    */
-  private parseEnvironment(until?: Readonly<Terminator>): MathJsonExpression | null {
+  private parseEnvironment(
+    until?: Readonly<Terminator>
+  ): MathJsonExpression | null {
     const index = this.index;
 
     if (!this.match('\\begin')) return null;
@@ -1206,7 +1210,9 @@ export class _Parser implements Parser {
     return _parseNumber(this, this._numberFormatTokens);
   }
 
-  private parsePrefixOperator(until?: Readonly<Terminator>): MathJsonExpression | null {
+  private parsePrefixOperator(
+    until?: Readonly<Terminator>
+  ): MathJsonExpression | null {
     if (!until) until = { minPrec: 0 };
     if (!until.minPrec) until = { ...until, minPrec: 0 };
 
@@ -1437,7 +1443,9 @@ export class _Parser implements Parser {
    * (`\prime`...) and some arguments.
    */
 
-  private parseFunction(until?: Readonly<Terminator>): MathJsonExpression | null {
+  private parseFunction(
+    until?: Readonly<Terminator>
+  ): MathJsonExpression | null {
     if (this.atTerminator(until)) return null;
 
     const start = this.index;
@@ -1554,8 +1562,7 @@ export class _Parser implements Parser {
 
     // Word boundary: if the preceding token is a letter, we're in the
     // middle of a word that was partially consumed — don't match.
-    if (start > 0 && /^[a-zA-Z]$/.test(this._tokens[start - 1]))
-      return null;
+    if (start > 0 && /^[a-zA-Z]$/.test(this._tokens[start - 1])) return null;
 
     // Collect consecutive letter tokens to form a potential function name
     let name = '';
@@ -1655,8 +1662,7 @@ export class _Parser implements Parser {
     }
 
     // Special case: cbrt(x) -> ['Root', x, 3]
-    if (name === 'cbrt')
-      return ['Root', args[0] ?? 'Nothing', 3];
+    if (name === 'cbrt') return ['Root', args[0] ?? 'Nothing', 3];
 
     return [fnName, ...args];
   }
@@ -1718,8 +1724,7 @@ export class _Parser implements Parser {
 
     // Word boundary: if the preceding token is a letter, we're in the
     // middle of a word that was partially consumed — don't match.
-    if (start > 0 && /^[a-zA-Z]$/.test(this._tokens[start - 1]))
-      return null;
+    if (start > 0 && /^[a-zA-Z]$/.test(this._tokens[start - 1])) return null;
 
     // Collect consecutive letter tokens
     let name = '';
@@ -2086,7 +2091,9 @@ export class _Parser implements Parser {
    *  <matchfix-op-close>
    *
    */
-  private parsePrimary(until?: Readonly<Terminator>): MathJsonExpression | null {
+  private parsePrimary(
+    until?: Readonly<Terminator>
+  ): MathJsonExpression | null {
     if (this.atBoundary) return null;
 
     if (this.atTerminator(until)) return null;
@@ -2290,7 +2297,10 @@ export class _Parser implements Parser {
   /**
    * Add LaTeX or other requested metadata to the expression
    */
-  decorate(expr: MathJsonExpression | null, start: number): MathJsonExpression | null {
+  decorate(
+    expr: MathJsonExpression | null,
+    start: number
+  ): MathJsonExpression | null {
     if (expr === null) return null;
     if (!this.options.preserveLatex) return expr;
 

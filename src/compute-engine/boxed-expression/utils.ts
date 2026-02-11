@@ -127,9 +127,7 @@ export function normalizedUnknownsForSolve(
   if (syms === null || syms === undefined) return [];
   if (typeof syms === 'string') return [syms];
   if (isExpression(syms))
-    return normalizedUnknownsForSolve(
-      isSymbol(syms) ? syms.symbol : undefined
-    );
+    return normalizedUnknownsForSolve(isSymbol(syms) ? syms.symbol : undefined);
   if (isIterable(syms)) {
     const result: string[] = [];
     for (const s of syms) {
@@ -166,9 +164,7 @@ export function domainToType(expr: Expression): Type {
   return 'unknown';
 }
 
-function angleToRadians(
-  x: Expression | undefined
-): Expression | undefined {
+function angleToRadians(x: Expression | undefined): Expression | undefined {
   if (!x) return x;
   const ce = x.engine;
   const angularUnit = ce.angularUnit;
@@ -234,22 +230,16 @@ export function getImaginaryFactor(
     return undefined;
   }
 
-  if (
-    isFunction(expr) &&
-    expr.operator === 'Multiply' &&
-    expr.nops === 2
-  ) {
+  if (isFunction(expr) && expr.operator === 'Multiply' && expr.nops === 2) {
     const [op1, op2] = expr.ops;
     if (isSymbol(op1) && op1.symbol === 'ImaginaryUnit') return op2;
     if (isSymbol(op2) && op2.symbol === 'ImaginaryUnit') return op1;
 
     // c * (bi)
-    if (isNumber(op2) && op2.re === 0 && op2.im !== 0)
-      return op1.mul(op2.im!);
+    if (isNumber(op2) && op2.re === 0 && op2.im !== 0) return op1.mul(op2.im!);
 
     // (bi) * c
-    if (isNumber(op1) && op1.re === 0 && op1.im !== 0)
-      return op2.mul(op1.im!);
+    if (isNumber(op1) && op1.re === 0 && op1.im !== 0) return op2.mul(op1.im!);
   }
 
   if (isFunction(expr) && expr.operator === 'Divide') {
@@ -306,11 +296,7 @@ export function getPiTerm(
     return [k1.add(k2), t1.add(t2)];
   }
 
-  if (
-    isFunction(expr) &&
-    expr.operator === 'Multiply' &&
-    expr.nops === 2
-  ) {
+  if (isFunction(expr) && expr.operator === 'Multiply' && expr.nops === 2) {
     if (isNumber(expr.op1)) {
       const [k, t] = getPiTerm(expr.op2);
       const n = expr.op1.numericValue;

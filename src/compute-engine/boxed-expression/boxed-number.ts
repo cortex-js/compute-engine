@@ -1,10 +1,7 @@
 import { Complex } from 'complex-esm';
 import { Decimal } from 'decimal.js';
 
-import type {
-  MathJsonExpression,
-  MathJsonNumberObject,
-} from '../../math-json';
+import type { MathJsonExpression, MathJsonNumberObject } from '../../math-json';
 
 import { mul, div } from './arithmetic-mul-div';
 

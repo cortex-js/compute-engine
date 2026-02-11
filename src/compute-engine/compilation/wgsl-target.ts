@@ -83,9 +83,24 @@ export class WGSLTarget extends GPUShaderTarget {
 
   compileShader(options: {
     type: 'vertex' | 'fragment' | 'compute';
-    inputs?: Array<{ name: string; type: string; location?: number; builtin?: string }>;
-    outputs?: Array<{ name: string; type: string; location?: number; builtin?: string }>;
-    uniforms?: Array<{ name: string; type: string; group?: number; binding?: number }>;
+    inputs?: Array<{
+      name: string;
+      type: string;
+      location?: number;
+      builtin?: string;
+    }>;
+    outputs?: Array<{
+      name: string;
+      type: string;
+      location?: number;
+      builtin?: string;
+    }>;
+    uniforms?: Array<{
+      name: string;
+      type: string;
+      group?: number;
+      binding?: number;
+    }>;
     workgroupSize?: [number, number?, number?];
     body: Array<{ variable: string; expression: Expression }>;
   }): string {
@@ -114,8 +129,7 @@ export class WGSLTarget extends GPUShaderTarget {
 
     // Generate output struct
     if (outputs.length > 0) {
-      const structName =
-        type === 'vertex' ? 'VertexOutput' : 'FragmentOutput';
+      const structName = type === 'vertex' ? 'VertexOutput' : 'FragmentOutput';
       code += `struct ${structName} {\n`;
       for (const output of outputs) {
         const attr = output.builtin

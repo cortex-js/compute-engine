@@ -490,11 +490,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // e.g., Subscript(L, 0) := 1  OR  Subscript(a, n) := a_{n-1} + 1
         // Also handles multi-index: Subscript(P, Sequence(n, k)) := ...
         //
-        if (
-          op1.operator === 'Subscript' &&
-          isFunction(op1) &&
-          sym(op1.op1)
-        ) {
+        if (op1.operator === 'Subscript' && isFunction(op1) && sym(op1.op1)) {
           const seqName = sym(op1.op1)!;
           const subscript = op1.op2;
 
@@ -507,19 +503,14 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           let multiSub = subscript;
           if (multiSub?.operator === 'Delimiter' && isFunction(multiSub))
             multiSub = multiSub.op1;
-          if (
-            multiSub?.operator === 'Sequence' &&
-            isFunction(multiSub)
-          ) {
+          if (multiSub?.operator === 'Sequence' && isFunction(multiSub)) {
             const subscript = multiSub;
             const indices = subscript.ops;
 
             // Case M1: All numeric → multi-index base case
             // e.g., P_{0,0} := 1
             if (
-              indices.every(
-                (op) => isNumber(op) && Number.isInteger(op.re)
-              )
+              indices.every((op) => isNumber(op) && Number.isInteger(op.re))
             ) {
               const key = indices.map((op) => op.re).join(',');
               addMultiIndexBaseCase(ce, seqName, key, op2.evaluate());
@@ -729,12 +720,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // Let's try to evaluate the function
         const fLower = apply(f, [lower]);
         const fUpper = apply(f, [upper]);
-        if (
-          fLower &&
-          fUpper &&
-          isNumber(fLower.N()) &&
-          isNumber(fUpper.N())
-        ) {
+        if (fLower && fUpper && isNumber(fLower.N()) && isNumber(fUpper.N())) {
           return fUpper.sub(fLower);
         }
         // Fallback: return unevaluated symbolic form
@@ -904,8 +890,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
 
       signature: '(collection, any) -> any',
       type: ([op1, op2], { engine: ce }) => {
-        if (isString(op1) && asSmallInteger(op2) !== null)
-          return 'integer';
+        if (isString(op1) && asSmallInteger(op2) !== null) return 'integer';
         if (op1.isIndexedCollection)
           return collectionElementType(op1.type.type) ?? 'any';
 
@@ -1228,8 +1213,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       signature: '(any, format:string?) -> string',
       evaluate: ([value, format], { engine }) => {
         if (value === undefined) return engine.string('');
-        const fmt =
-          (isString(format) ? format.string : undefined) ?? 'default';
+        const fmt = (isString(format) ? format.string : undefined) ?? 'default';
 
         if (fmt === 'default') return engine.string(value.toString());
 

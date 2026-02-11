@@ -218,10 +218,7 @@ function antiderivativeWithByParts(
  *
  * Returns the result if successful, or null if u-substitution doesn't apply.
  */
-function tryUSubstitution(
-  fn: Expression,
-  index: string
-): Expression | null {
+function tryUSubstitution(fn: Expression, index: string): Expression | null {
   if (fn.operator !== 'Multiply' || !isFunction(fn)) return null;
 
   const ce = fn.engine;
@@ -297,11 +294,7 @@ function getInnerFunction(
     'Sqrt',
   ];
 
-  if (
-    compositeFunctions.includes(op) &&
-    isFunction(expr) &&
-    expr.nops === 1
-  ) {
+  if (compositeFunctions.includes(op) && isFunction(expr) && expr.nops === 1) {
     const inner = expr.op1;
     // Only interesting if inner is more complex than just the variable
     if (sym(inner) === index) return null;
@@ -311,11 +304,7 @@ function getInnerFunction(
   }
 
   // Handle e^(g(x)) which is ['Power', 'ExponentialE', g(x)]
-  if (
-    op === 'Power' &&
-    isFunction(expr) &&
-    sym(expr.op1) === 'ExponentialE'
-  ) {
+  if (op === 'Power' && isFunction(expr) && sym(expr.op1) === 'ExponentialE') {
     const inner = expr.op2;
     // Only interesting if inner is more complex than just the variable
     if (sym(inner) === index) return null;
@@ -1621,10 +1610,7 @@ function getQuadraticCoefficients(
 }
 
 /** Calculate the antiderivative of fn, as an expression (not a function) */
-export function antiderivative(
-  fn: Expression,
-  index: string
-): Expression {
+export function antiderivative(fn: Expression, index: string): Expression {
   if (fn.operator === 'Function' && isFunction(fn))
     return antiderivative(fn.op1, index);
   if (fn.operator === 'Block' && isFunction(fn))
@@ -2247,18 +2233,10 @@ export function antiderivative(
   // Canonical form: ['Sqrt', ['Divide', 1, ['Add', ['Negate', ['Power', 'x', 2]], 1]]]
   if (fn.operator === 'Sqrt' && isFunction(fn)) {
     const inner = fn.op1;
-    if (
-      inner.operator === 'Divide' &&
-      isFunction(inner) &&
-      inner.op1.is(1)
-    ) {
+    if (inner.operator === 'Divide' && isFunction(inner) && inner.op1.is(1)) {
       const denom = inner.op2;
       // Check for 1-x² form: ['Add', ['Negate', ['Power', 'x', 2]], 1]
-      if (
-        denom.operator === 'Add' &&
-        isFunction(denom) &&
-        denom.nops === 2
-      ) {
+      if (denom.operator === 'Add' && isFunction(denom) && denom.nops === 2) {
         const addOps = denom.ops;
         const oneTerm = addOps.find((op) => op.is(1));
         const negPowerTerm = addOps.find(
@@ -2298,11 +2276,7 @@ export function antiderivative(
 
     // Trigonometric substitution patterns for direct √(...) integrals
     // These handle ∫√(a² ± x²) dx and ∫√(x² - a²) dx
-    if (
-      inner.operator === 'Add' &&
-      isFunction(inner) &&
-      inner.nops === 2
-    ) {
+    if (inner.operator === 'Add' && isFunction(inner) && inner.nops === 2) {
       const addOps = inner.ops;
 
       // Find x² term

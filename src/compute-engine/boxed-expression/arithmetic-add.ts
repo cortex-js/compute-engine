@@ -145,9 +145,7 @@ export function canonicalAdd(
   return ce._fn('Add', [...xs].sort(addOrder));
 }
 
-export function addType(
-  args: ReadonlyArray<Expression>
-): Type | BoxedType {
+export function addType(args: ReadonlyArray<Expression>): Type | BoxedType {
   if (args.length === 0) return 'finite_integer'; // = 0
   if (args.length === 1) return args[0].type;
   return widen(...args.map((x) => x.type.type));

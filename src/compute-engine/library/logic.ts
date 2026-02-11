@@ -15,11 +15,7 @@ import {
   toCNF,
   toDNF,
 } from '../symbolic/logic-utils';
-import {
-  isSymbol,
-  isFunction,
-  sym,
-} from '../boxed-expression/type-guards';
+import { isSymbol, isFunction, sym } from '../boxed-expression/type-guards';
 import {
   extractFiniteDomainWithReason,
   bodyContainsVariable,

@@ -318,7 +318,10 @@ export class Serializer {
     return this.options.logicStyle(expr, level);
   }
 
-  powerStyle(expr: MathJsonExpression, level: number): 'root' | 'solidus' | 'quotient' {
+  powerStyle(
+    expr: MathJsonExpression,
+    level: number
+  ): 'root' | 'solidus' | 'quotient' {
     return this.options.powerStyle(expr, level);
   }
 

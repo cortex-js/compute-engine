@@ -1,8 +1,5 @@
 import type { Expression, RuleStep } from '../global-types';
-import {
-  isFunction,
-  isNumber,
-} from '../boxed-expression/type-guards';
+import { isFunction, isNumber } from '../boxed-expression/type-guards';
 import { asRational } from '../boxed-expression/numerics';
 
 /**

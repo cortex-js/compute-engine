@@ -16,11 +16,7 @@ import {
   isOperatorDef,
 } from './boxed-expression/utils';
 import { isInequalityOperator } from './latex-syntax/utils';
-import {
-  isFunction,
-  isSymbol,
-  isNumber,
-} from './boxed-expression/type-guards';
+import { isFunction, isSymbol, isNumber } from './boxed-expression/type-guards';
 
 /**
  * Infer a promoted type from a value expression.
@@ -30,10 +26,7 @@ import {
  * - finite_real_number -> real
  * - complex/imaginary -> number
  */
-function inferTypeFromValue(
-  ce: ComputeEngine,
-  value: Expression
-): BoxedType {
+function inferTypeFromValue(ce: ComputeEngine, value: Expression): BoxedType {
   // finite_integer, integer, etc. -> integer
   if (value.type.matches('integer')) return ce.type('integer');
 
@@ -262,8 +255,7 @@ function assumeInequality(proposition: Expression): AssumeResult {
   const result = ce.box([op === '<' ? 'Less' : 'LessEqual', p, 0]).evaluate();
 
   if (isSymbol(result) && result.symbol === 'True') return 'tautology';
-  if (isSymbol(result) && result.symbol === 'False')
-    return 'contradiction';
+  if (isSymbol(result) && result.symbol === 'False') return 'contradiction';
 
   const unknowns = result.unknowns;
   if (unknowns.length === 0) return 'not-a-predicate';
@@ -583,19 +575,11 @@ export function getSignFromAssumptions(
       const [a, b] = lhs.ops;
       if (a && b) {
         // a - x < 0 => x > a
-        if (
-          isSymbol(b) &&
-          b.symbol === symbol &&
-          a.isNonNegative === true
-        ) {
+        if (isSymbol(b) && b.symbol === symbol && a.isNonNegative === true) {
           if (op === 'Less') return 'positive';
         }
         // x - a < 0 => x < a
-        if (
-          isSymbol(a) &&
-          a.symbol === symbol &&
-          b.isNonPositive === true
-        ) {
+        if (isSymbol(a) && a.symbol === symbol && b.isNonPositive === true) {
           if (op === 'Less') return 'negative';
         }
       }

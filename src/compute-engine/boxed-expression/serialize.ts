@@ -30,12 +30,7 @@ import type {
   JsonSerializationOptions,
 } from '../global-types';
 import { isOperatorDef } from './utils';
-import {
-  isNumber,
-  isSymbol,
-  isString,
-  isFunction,
-} from './type-guards';
+import { isNumber, isSymbol, isString, isFunction } from './type-guards';
 import { matchesNumber, matchesSymbol } from '../../math-json/utils';
 
 function _escapeJsonString(s: undefined): undefined;
@@ -876,9 +871,7 @@ export function serializeJson(
   // Is it a function?
   if (isFunction(expr)) {
     const structuralExpr = expr.structural;
-    const structuralOps = isFunction(structuralExpr)
-      ? structuralExpr.ops
-      : [];
+    const structuralOps = isFunction(structuralExpr) ? structuralExpr.ops : [];
     if (
       expr.isValid &&
       (expr.isCanonical || expr.isStructural) &&

@@ -14,12 +14,7 @@ import { isWildcard, wildcardName } from './pattern-utils';
 import { BoxedType } from '../../common/type/boxed-type';
 import { DictionaryValue, MathJsonExpression } from '../../math-json/types';
 import { widen } from '../../common/type/utils';
-import {
-  isFunction,
-  isString,
-  isSymbol,
-  isNumber,
-} from './type-guards';
+import { isFunction, isString, isSymbol, isNumber } from './type-guards';
 
 /**
  * BoxedDictionary
@@ -275,9 +270,7 @@ export class BoxedDictionary
   }
 }
 
-function boxedExpressionToDictionaryValue(
-  value: Expression
-): DictionaryValue {
+function boxedExpressionToDictionaryValue(value: Expression): DictionaryValue {
   if (isString(value)) return value.string;
   if (isSymbol(value)) {
     if (value.symbol === 'True') return true;

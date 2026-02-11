@@ -24,8 +24,7 @@ function isSqrt(expr: Expression): boolean {
 // : 1/sqrt(n), return 1/n
 // : (could do): sqrt(n)/m, return n/m^2
 export function asRadical(expr: Expression): Rational | null {
-  if (isSqrt(expr) && isFunction(expr))
-    return asRational(expr.op1) ?? null;
+  if (isSqrt(expr) && isFunction(expr)) return asRational(expr.op1) ?? null;
 
   if (
     isFunction(expr) &&
@@ -59,10 +58,7 @@ export function asRadical(expr: Expression): Rational | null {
  * @param b
  * @returns
  */
-export function canonicalPower(
-  a: Expression,
-  b: Expression
-): Expression {
+export function canonicalPower(a: Expression, b: Expression): Expression {
   const ce = a.engine;
 
   const fullyCanonical =
@@ -124,11 +120,7 @@ export function canonicalPower(
   // @consider:possible exceptions where function-expressions are reasonable :Rational,Half,
   // Negate... (However, provided that canonicalNumber provided prior, should not be missing anything
   // here)
-  if (
-    isFunction(b) ||
-    isSymbol(b) ||
-    !b.type.matches('number' as Type)
-  )
+  if (isFunction(b) || isSymbol(b) || !b.type.matches('number' as Type))
     return unchanged();
 
   // Zero as base

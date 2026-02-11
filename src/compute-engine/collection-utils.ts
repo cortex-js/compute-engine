@@ -52,9 +52,7 @@ export function repeat(
  * }
  * ```
  */
-export function zip(
-  items: ReadonlyArray<Expression>
-): Iterator<Expression[]> {
+export function zip(items: ReadonlyArray<Expression>): Iterator<Expression[]> {
   if (items.length === 0) {
     return {
       next() {
@@ -222,10 +220,7 @@ export function basicIndexedCollectionHandlers(): CollectionHandlers {
 
     subsetOf: collectionSubset,
 
-    at: (
-      expr: Expression,
-      index: number | string
-    ): undefined | Expression => {
+    at: (expr: Expression, index: number | string): undefined | Expression => {
       if (typeof index !== 'number' || !isFunction(expr)) return undefined;
       if (index < 0) index = expr.nops + index + 1;
       if (index < 1 || index > expr.nops) return undefined;

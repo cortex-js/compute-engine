@@ -623,10 +623,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
  * Also handles the case where the variable is in the denominator (e.g., `a/x - b`
  * becomes `a - bx` after multiplying by x).
  */
-function clearDenominators(
-  expr: Expression,
-  _variable?: string
-): Expression {
+function clearDenominators(expr: Expression, _variable?: string): Expression {
   if (expr.operator !== 'Add' || !isFunction(expr)) return expr;
 
   const ops = expr.ops;
@@ -824,11 +821,7 @@ function solveTwoSqrtEquation(
     // Check for coefficient * Sqrt(...)
     if (op.operator === 'Multiply' && isFunction(op)) {
       for (const factor of op.ops) {
-        if (
-          factor.operator === 'Sqrt' &&
-          isFunction(factor) &&
-          factor.op1
-        ) {
+        if (factor.operator === 'Sqrt' && isFunction(factor) && factor.op1) {
           sqrtTerms.push({ term: op, arg: factor.op1, index: i });
           break;
         }

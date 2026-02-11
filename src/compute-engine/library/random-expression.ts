@@ -1,7 +1,4 @@
-import type {
-  MathJsonExpression,
-  MathJsonSymbol,
-} from '../../math-json';
+import type { MathJsonExpression, MathJsonSymbol } from '../../math-json';
 
 function oneOf<T = MathJsonExpression>(xs: T[]): T {
   return xs[Math.floor(Math.random() * xs.length)];

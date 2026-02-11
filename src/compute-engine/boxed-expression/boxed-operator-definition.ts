@@ -73,9 +73,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
   broadcastable = false;
   associative = false;
   commutative = false;
-  commutativeOrder:
-    | ((a: Expression, b: Expression) => number)
-    | undefined;
+  commutativeOrder: ((a: Expression, b: Expression) => number) | undefined;
   idempotent = false;
   involution = false;
   pure = true;

@@ -8,11 +8,7 @@ import {
   evaluateWithAssignment,
   generateAssignments,
 } from '../symbolic/logic-utils';
-import {
-  isSymbol,
-  isFunction,
-  sym,
-} from '../boxed-expression/type-guards';
+import { isSymbol, isFunction, sym } from '../boxed-expression/type-guards';
 
 /**
  * Quantifier domain helpers and boolean analysis functions.
@@ -77,9 +73,7 @@ export function extractFiniteDomainWithReason(
     return { status: 'error', reason: 'expected-element-expression' };
   }
 
-  const variable = isSymbol(condition.op1)
-    ? condition.op1.symbol
-    : undefined;
+  const variable = isSymbol(condition.op1) ? condition.op1.symbol : undefined;
   if (!variable) {
     return { status: 'error', reason: 'expected-index-variable' };
   }
@@ -509,10 +503,7 @@ export function evaluateExistsCartesian(
  * @returns `True` if satisfiable, `False` if unsatisfiable, or the
  *          unevaluated expression if the variable limit is exceeded
  */
-export function isSatisfiable(
-  expr: Expression,
-  ce: ComputeEngine
-): Expression {
+export function isSatisfiable(expr: Expression, ce: ComputeEngine): Expression {
   const variables = extractVariables(expr);
 
   // Handle constant expressions
@@ -574,10 +565,7 @@ export function isSatisfiable(
  * @returns `True` if a tautology, `False` if not, or the unevaluated
  *          expression if the variable limit is exceeded
  */
-export function isTautology(
-  expr: Expression,
-  ce: ComputeEngine
-): Expression {
+export function isTautology(expr: Expression, ce: ComputeEngine): Expression {
   const variables = extractVariables(expr);
 
   // Handle constant expressions

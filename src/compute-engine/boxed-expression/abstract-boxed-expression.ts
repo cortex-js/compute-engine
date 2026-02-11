@@ -466,8 +466,7 @@ export abstract class _BoxedExpression implements Expression {
 
     if (typeof other === 'boolean') {
       const val = this.value;
-      if (other === true)
-        return isSymbol(val) ? val.symbol === 'True' : false;
+      if (other === true) return isSymbol(val) ? val.symbol === 'True' : false;
       if (other === false)
         return isSymbol(val) ? val.symbol === 'False' : false;
       return false;
@@ -628,11 +627,7 @@ export abstract class _BoxedExpression implements Expression {
   }
 
   solve(
-    _vars?:
-      | Iterable<string>
-      | string
-      | Expression
-      | Iterable<Expression>
+    _vars?: Iterable<string> | string | Expression | Iterable<Expression>
   ):
     | null
     | ReadonlyArray<Expression>
@@ -792,9 +787,7 @@ export abstract class _BoxedExpression implements Expression {
     return undefined;
   }
 
-  indexWhere(
-    _predicate: (element: Expression) => boolean
-  ): number | undefined {
+  indexWhere(_predicate: (element: Expression) => boolean): number | undefined {
     return undefined;
   }
 }

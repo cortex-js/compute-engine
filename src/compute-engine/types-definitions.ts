@@ -938,9 +938,7 @@ export type OperatorDefinitionFlags = {
    * default order of the arguments.
    *
    */
-  commutativeOrder:
-    | ((a: Expression, b: Expression) => number)
-    | undefined;
+  commutativeOrder: ((a: Expression, b: Expression) => number) | undefined;
 
   /** If `true`, when the operator is univariate, `["f", ["Multiply", x, c]]`
    * simplifies to `["Multiply", ["f", x], c]` where `c` is constant

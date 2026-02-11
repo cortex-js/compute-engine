@@ -86,7 +86,9 @@ export function serializeCortex(
     ...options,
   });
 
-  function serializeExpression(expr: MathJsonExpression | null): FormattingBlock {
+  function serializeExpression(
+    expr: MathJsonExpression | null
+  ): FormattingBlock {
     if (expr === null) return new EmptyBlock(this);
     // Is this a string literal?
     if (typeof expr === 'string' && matchesString(expr)) {
@@ -241,7 +243,9 @@ export function serializeCortex(
   //
   // Functions with a custom serializer: BaseForm, String, List, Set
   //
-  const FUNCTIONS: { [key: string]: (exp: MathJsonExpression) => FormattingBlock } = {
+  const FUNCTIONS: {
+    [key: string]: (exp: MathJsonExpression) => FormattingBlock;
+  } = {
     //
     // BaseForm
     //

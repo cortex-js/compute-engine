@@ -120,9 +120,7 @@ type OperatorDefinitionFlags = {
   broadcastable: boolean;
   associative: boolean;
   commutative: boolean;
-  commutativeOrder:
-    | ((a: Expression, b: Expression) => number)
-    | undefined;
+  commutativeOrder: ((a: Expression, b: Expression) => number) | undefined;
   idempotent: boolean;
   involution: boolean;
   pure: boolean;
@@ -169,16 +167,9 @@ type BoxedDefinition =
 
 type Scope = KernelScope<BoxedDefinition>;
 type EvaluateOptions = KernelEvaluateOptions<Expression>;
-type Rule = KernelRule<
-  Expression,
-  ExpressionInput,
-  ExpressionComputeEngine
->;
+type Rule = KernelRule<Expression, ExpressionInput, ExpressionComputeEngine>;
 type BoxedRule = KernelBoxedRule<Expression, ExpressionComputeEngine>;
-type BoxedRuleSet = KernelBoxedRuleSet<
-  Expression,
-  ExpressionComputeEngine
->;
+type BoxedRuleSet = KernelBoxedRuleSet<Expression, ExpressionComputeEngine>;
 
 type SimplifyOptions = {
   rules?: null | Rule | ReadonlyArray<BoxedRule | Rule> | BoxedRuleSet;
@@ -198,9 +189,7 @@ export type JSSource = string;
 
 /** @category Compiling */
 export type CompiledExpression = {
-  evaluate?: (scope: {
-    [symbol: string]: Expression;
-  }) => number | Expression;
+  evaluate?: (scope: { [symbol: string]: Expression }) => number | Expression;
 };
 
 /**
@@ -1504,11 +1493,7 @@ export interface Expression {
    * ```
    */
   solve(
-    vars?:
-      | Iterable<string>
-      | string
-      | Expression
-      | Iterable<Expression>
+    vars?: Iterable<string> | string | Expression | Iterable<Expression>
   ):
     | null
     | ReadonlyArray<Expression>
@@ -1784,9 +1769,7 @@ export interface Expression {
    * that matches the predicate.
    *
    */
-  indexWhere(
-    predicate: (element: Expression) => boolean
-  ): number | undefined;
+  indexWhere(predicate: (element: Expression) => boolean): number | undefined;
 }
 
 //
@@ -1888,9 +1871,7 @@ export interface CollectionInterface {
 export interface IndexedCollectionInterface extends CollectionInterface {
   readonly isIndexedCollection: true;
   at(index: number): Expression | undefined;
-  indexWhere(
-    predicate: (element: Expression) => boolean
-  ): number | undefined;
+  indexWhere(predicate: (element: Expression) => boolean): number | undefined;
 }
 
 /** An expression input is a MathJSON expression which can include some

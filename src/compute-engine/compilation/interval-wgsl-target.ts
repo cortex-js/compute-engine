@@ -1315,10 +1315,7 @@ export class IntervalWGSLTarget implements LanguageTarget<Expression> {
       parameters?: string[];
     } = {}
   ): string {
-    const {
-      functionName = 'evaluateInterval',
-      parameters = ['x'],
-    } = options;
+    const { functionName = 'evaluateInterval', parameters = ['x'] } = options;
 
     const target = this.createTarget();
     const body = BaseCompiler.compile(expr, target);

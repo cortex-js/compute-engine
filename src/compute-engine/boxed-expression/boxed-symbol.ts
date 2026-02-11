@@ -296,11 +296,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   }
 
   solve(
-    vars?:
-      | Iterable<string>
-      | string
-      | Expression
-      | Iterable<Expression>
+    vars?: Iterable<string> | string | Expression | Iterable<Expression>
   ): null | ReadonlyArray<Expression> {
     const varNames = normalizedUnknownsForSolve(vars);
     if (varNames.length !== 1) return null;
@@ -804,9 +800,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     return this._value?.get?.(index);
   }
 
-  indexWhere(
-    predicate: (element: Expression) => boolean
-  ): number | undefined {
+  indexWhere(predicate: (element: Expression) => boolean): number | undefined {
     if (this._asCollection?.indexWhere)
       return this._asCollection.indexWhere(this._value ?? this, predicate);
     return this._value?.indexWhere(predicate);

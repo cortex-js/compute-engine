@@ -4,9 +4,7 @@ export class ExpressionMap<U> implements ExpressionMapInterface<U> {
   readonly _items: Map<Expression, U>;
 
   constructor(
-    source?:
-      | ExpressionMapInterface<U>
-      | readonly (readonly [Expression, U])[]
+    source?: ExpressionMapInterface<U> | readonly (readonly [Expression, U])[]
   ) {
     if (!source) {
       this._items = new Map<Expression, U>();

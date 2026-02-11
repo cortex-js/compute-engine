@@ -195,10 +195,7 @@ export class TensorFieldExpression implements TensorField<Expression> {
   cast(x: Expression[], dtype: 'complex64'): undefined | Complex[];
   cast(x: Expression[], dtype: 'bool'): undefined | boolean[];
   // cast(x: Expression[], dtype: 'string'): undefined | string[];
-  cast(
-    x: Expression[],
-    dtype: 'expression'
-  ): undefined | Expression[];
+  cast(x: Expression[], dtype: 'expression'): undefined | Expression[];
   cast(
     x: Expression | Expression[],
     dtype: TensorDataType

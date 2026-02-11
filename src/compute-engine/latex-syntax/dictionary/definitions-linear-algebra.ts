@@ -51,7 +51,12 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
       const [operator, cells] = parseCells(parser);
 
       if (columns)
-        return [operator, cells, { str: '()' }, { str: columns }] as MathJsonExpression;
+        return [
+          operator,
+          cells,
+          { str: '()' },
+          { str: columns },
+        ] as MathJsonExpression;
 
       // `pmatrix` is the default environment, so no need to specify the
       // delimiters
@@ -67,7 +72,12 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
       const [operator, cells] = parseCells(parser);
 
       if (columns)
-        return [operator, cells, { str: '[]' }, { str: columns }] as MathJsonExpression;
+        return [
+          operator,
+          cells,
+          { str: '[]' },
+          { str: columns },
+        ] as MathJsonExpression;
 
       return [operator, cells, { str: '[]' }] as MathJsonExpression;
     },
@@ -81,7 +91,12 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
       const [operator, cells] = parseCells(parser);
 
       if (columns)
-        return [operator, cells, { str: '{}' }, { str: columns }] as MathJsonExpression;
+        return [
+          operator,
+          cells,
+          { str: '{}' },
+          { str: columns },
+        ] as MathJsonExpression;
 
       return [operator, cells, { str: '{}' }] as MathJsonExpression;
     },
@@ -95,7 +110,10 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
       const [op, cells] = parseCells(parser);
 
       if (columns)
-        return ['Determinant', [op, cells, { str: columns }]] as MathJsonExpression;
+        return [
+          'Determinant',
+          [op, cells, { str: columns }],
+        ] as MathJsonExpression;
 
       return ['Determinant', [op, cells]] as MathJsonExpression;
     },
@@ -108,7 +126,8 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
       const columns = parseColumnFormat(parser);
       const [op, cells] = parseCells(parser);
 
-      if (columns) return ['Norm', [op, cells, { str: columns }]] as MathJsonExpression;
+      if (columns)
+        return ['Norm', [op, cells, { str: columns }]] as MathJsonExpression;
 
       return ['Norm', [op, cells]] as MathJsonExpression;
     },
@@ -122,7 +141,12 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
       const [operator, cells] = parseCells(parser);
 
       if (columns)
-        return [operator, cells, { str: '()' }, { str: columns }] as MathJsonExpression;
+        return [
+          operator,
+          cells,
+          { str: '()' },
+          { str: columns },
+        ] as MathJsonExpression;
 
       return [operator, cells] as MathJsonExpression;
     },
@@ -136,7 +160,12 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
       const [operator, cells] = parseCells(parser);
 
       if (columns)
-        return [operator, cells, { str: '..' }, { str: columns }] as MathJsonExpression;
+        return [
+          operator,
+          cells,
+          { str: '..' },
+          { str: columns },
+        ] as MathJsonExpression;
 
       return [operator, cells, { str: '..' }] as MathJsonExpression;
     },
@@ -150,7 +179,12 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
       const [operator, cells] = parseCells(parser);
 
       if (columns)
-        return [operator, cells, { str: '..' }, { str: columns }] as MathJsonExpression;
+        return [
+          operator,
+          cells,
+          { str: '..' },
+          { str: columns },
+        ] as MathJsonExpression;
 
       return [operator, cells, { str: '..' }] as MathJsonExpression;
     },
@@ -163,7 +197,12 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
       const [operator, cells] = parseCells(parser);
 
       if (columns)
-        return [operator, cells, { str: '..' }, { str: columns }] as MathJsonExpression;
+        return [
+          operator,
+          cells,
+          { str: '..' },
+          { str: columns },
+        ] as MathJsonExpression;
 
       return [operator, cells, { str: '..' }] as MathJsonExpression;
     },

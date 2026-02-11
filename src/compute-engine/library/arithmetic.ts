@@ -85,10 +85,7 @@ import type {
   SymbolDefinitions,
   Sign,
 } from '../global-types';
-import {
-  isNumber,
-  isFunction,
-} from '../boxed-expression/type-guards';
+import { isNumber, isFunction } from '../boxed-expression/type-guards';
 import { canonical } from '../boxed-expression/canonical-utils';
 
 // When processing an arithmetic expression, the following are the core

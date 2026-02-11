@@ -26,12 +26,7 @@ import {
 import { Parser } from '../latex-syntax/types';
 
 import { isPrime } from './predicates';
-import {
-  isString,
-  isNumber,
-  isSymbol,
-  isFunction,
-} from './type-guards';
+import { isString, isNumber, isSymbol, isFunction } from './type-guards';
 // @todo:
 // export function fixPoint(rule: Rule);
 // export function chain(rules: RuleSet);
@@ -235,10 +230,7 @@ export const CONDITIONS = {
   polynomial: (x: Expression) => x.unknowns.length === 1,
 };
 
-export function checkConditions(
-  x: Expression,
-  conditions: string[]
-): boolean {
+export function checkConditions(x: Expression, conditions: string[]): boolean {
   // Check for !== true, because result could also be undefined
   for (const cond of conditions) if (CONDITIONS[cond](x) !== true) return false;
 

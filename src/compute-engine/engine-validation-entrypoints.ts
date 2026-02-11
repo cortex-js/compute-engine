@@ -3,11 +3,7 @@ import { typeToString } from '../common/type/serialize';
 import { BoxedType } from '../common/type/boxed-type';
 
 import { asLatexString, isLatexString } from './latex-syntax/utils';
-import type {
-  Expression,
-  Metadata,
-  ExpressionInput,
-} from './global-types';
+import type { Expression, Metadata, ExpressionInput } from './global-types';
 
 type ValidationHost = {
   string(s: string, metadata?: Metadata): Expression;

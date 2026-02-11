@@ -44,7 +44,9 @@ import { escapeJsonString } from '../common/json';
 const grammar = new Grammar<MathJsonExpression>();
 
 // For debugging purposes, output an expression as a string
-function expressionToString(expr: MathJsonExpression | undefined | null): string {
+function expressionToString(
+  expr: MathJsonExpression | undefined | null
+): string {
   if (expr === undefined || expr === null) return '';
   const strValue = stringValue(expr);
   if (strValue !== null) return strValue;
@@ -154,7 +156,10 @@ grammar.rule(
       ]),
       'function-call-argument-clause',
     ],
-    (fn: Result<string>, args: Result<MathJsonExpression>): MathJsonExpression => {
+    (
+      fn: Result<string>,
+      args: Result<MathJsonExpression>
+    ): MathJsonExpression => {
       if (fn.value === '#warning') {
         const message = mapArgs<string>(args.value!, (x) =>
           expressionToString(x)
@@ -337,7 +342,11 @@ grammar.rule(
       ['Not', '!', 820, 'prefix'],
     ],
     'primary',
-    (op: string, lhs: MathJsonExpression, rhs: MathJsonExpression): MathJsonExpression => {
+    (
+      op: string,
+      lhs: MathJsonExpression,
+      rhs: MathJsonExpression
+    ): MathJsonExpression => {
       if (!lhs && rhs) {
         if (op === 'Negate') {
           const val = machineValue(rhs);
@@ -364,7 +373,9 @@ grammar.rule(
         // maybe('front-matter'),
         some(
           'expression',
-          (...expressions: Result<MathJsonExpression>[]): MathJsonExpression => {
+          (
+            ...expressions: Result<MathJsonExpression>[]
+          ): MathJsonExpression => {
             console.assert(expressions && expressions.length > 0);
             const exprs = expressions.filter((x) => !x.isEmpty && !x.isFailure);
             if (exprs.length === 0) {

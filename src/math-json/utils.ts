@@ -130,7 +130,9 @@ export function stripText(
  * Examples:
  * * `["Negate", 5]`  -> `"Negate"`
  */
-export function operator(expr: MathJsonExpression | null | undefined): MathJsonSymbol {
+export function operator(
+  expr: MathJsonExpression | null | undefined
+): MathJsonSymbol {
   if (Array.isArray(expr)) return expr[0];
 
   if (expr === null || expr === undefined) return '';
@@ -172,13 +174,17 @@ export function nops(expr: MathJsonExpression | null | undefined): number {
   return 0;
 }
 
-export function unhold(expr: MathJsonExpression | null): MathJsonExpression | null {
+export function unhold(
+  expr: MathJsonExpression | null
+): MathJsonExpression | null {
   if (expr === null || expr === undefined) return null;
   if (operator(expr) === 'Hold') return operand(expr, 1);
   return expr;
 }
 
-export function symbol(expr: MathJsonExpression | null | undefined): string | null {
+export function symbol(
+  expr: MathJsonExpression | null | undefined
+): string | null {
   // Is it a symbol shorthand?
   if (typeof expr === 'string' && matchesSymbol(expr)) {
     if (expr.length >= 2 && expr.at(0) === '`' && expr.at(-1) === '`')
@@ -378,7 +384,10 @@ export function subs(
 /**
  * Apply a function to the arguments of a function and return an array of T
  */
-export function mapArgs<T>(expr: MathJsonExpression, fn: (x: MathJsonExpression) => T): T[] {
+export function mapArgs<T>(
+  expr: MathJsonExpression,
+  fn: (x: MathJsonExpression) => T
+): T[] {
   let args: MathJsonExpression[] | null = null;
   if (Array.isArray(expr)) args = expr;
   if (isFunctionObject(expr)) args = expr.fn;

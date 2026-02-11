@@ -1,8 +1,5 @@
 import type { Expression, RuleStep } from '../global-types';
-import {
-  isFunction,
-  isSymbol,
-} from '../boxed-expression/type-guards';
+import { isFunction, isSymbol } from '../boxed-expression/type-guards';
 
 /**
  * Infinity simplification rules consolidated from simplify-rules.ts.
@@ -195,19 +192,11 @@ export function simplifyInfinity(x: Expression): RuleStep | undefined {
       const expIsNegInf = expIsInf && exp.isNegative === true;
 
       // e^(+inf) -> +inf (handle exponential base explicitly)
-      if (
-        isSymbol(base) &&
-        base.symbol === 'ExponentialE' &&
-        expIsPosInf
-      ) {
+      if (isSymbol(base) && base.symbol === 'ExponentialE' && expIsPosInf) {
         return { value: ce.PositiveInfinity, because: 'e^(+inf) -> +inf' };
       }
       // e^(-inf) -> 0
-      if (
-        isSymbol(base) &&
-        base.symbol === 'ExponentialE' &&
-        expIsNegInf
-      ) {
+      if (isSymbol(base) && base.symbol === 'ExponentialE' && expIsNegInf) {
         return { value: ce.Zero, because: 'e^(-inf) -> 0' };
       }
 

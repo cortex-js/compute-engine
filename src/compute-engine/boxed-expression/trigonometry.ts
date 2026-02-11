@@ -603,10 +603,7 @@ function constructibleValuesInverse(
   return undefined;
 }
 
-export function trigSign(
-  operator: string,
-  x: Expression
-): Sign | undefined {
+export function trigSign(operator: string, x: Expression): Sign | undefined {
   const [q, pos] = quadrant(x);
   if (q === undefined) return undefined;
   if (pos !== undefined) {
@@ -705,9 +702,7 @@ export function constructibleValues(
 
 // Return the quadrant of the angle (1..4) and the position on the
 // circle 0...4 corresponding to 0, π/2, π, 3π/2, 2π.
-function quadrant(
-  theta: Expression
-): [number | undefined, number | undefined] {
+function quadrant(theta: Expression): [number | undefined, number | undefined] {
   // theta = theta.N();
   if (!theta.isValid || !isNumber(theta)) return [undefined, undefined];
   if (theta.im !== 0) return [undefined, undefined];

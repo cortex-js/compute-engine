@@ -222,9 +222,7 @@ export interface IComputeEngine extends IBigNum {
   ): void;
 
   /** Get a registered compilation target by name. */
-  getCompilationTarget(
-    name: string
-  ): LanguageTarget<Expression> | undefined;
+  getCompilationTarget(name: string): LanguageTarget<Expression> | undefined;
 
   /** Return the names of all registered compilation targets. */
   listCompilationTargets(): string[];
@@ -480,9 +478,7 @@ export interface IComputeEngine extends IBigNum {
    * For single-index sequences, keys are numbers.
    * For multi-index sequences, keys are comma-separated strings (e.g., '5,2').
    */
-  getSequenceCache(
-    name: string
-  ): Map<number | string, Expression> | undefined;
+  getSequenceCache(name: string): Map<number | string, Expression> | undefined;
 
   /**
    * Generate a list of sequence terms from start to end (inclusive).

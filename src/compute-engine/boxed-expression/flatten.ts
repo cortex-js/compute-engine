@@ -14,9 +14,11 @@ import { isFunction, isSymbol } from './type-guards';
  *
  * Note: *not* recursive
  */
-export function flatten<
-  T extends ReadonlyArray<Expression> | Expression[],
->(ops: T, operator?: string, canonicalize = true): T {
+export function flatten<T extends ReadonlyArray<Expression> | Expression[]>(
+  ops: T,
+  operator?: string,
+  canonicalize = true
+): T {
   // Optionally make all the arguments canonical.
   const xs: ReadonlyArray<Expression> =
     !canonicalize || ops.every((x) => x.isCanonical)
@@ -52,10 +54,7 @@ export function flatten<
   if (
     xs.every(
       (x) =>
-        !(
-          (isSymbol(x) && x.symbol === 'Nothing') ||
-          x.operator === 'Sequence'
-        )
+        !((isSymbol(x) && x.symbol === 'Nothing') || x.operator === 'Sequence')
     )
   )
     return xs as T;

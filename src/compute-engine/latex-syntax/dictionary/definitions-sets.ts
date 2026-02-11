@@ -250,29 +250,37 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     kind: 'matchfix',
     openTrigger: ['['],
     closeTrigger: [')'],
-    parse: (_parser: Parser, body: MathJsonExpression): MathJsonExpression | null =>
-      parseIntervalBody(body, false, true),
+    parse: (
+      _parser: Parser,
+      body: MathJsonExpression
+    ): MathJsonExpression | null => parseIntervalBody(body, false, true),
   },
   {
     kind: 'matchfix',
     openTrigger: ['\\lbrack'],
     closeTrigger: ['\\rparen'],
-    parse: (_parser: Parser, body: MathJsonExpression): MathJsonExpression | null =>
-      parseIntervalBody(body, false, true),
+    parse: (
+      _parser: Parser,
+      body: MathJsonExpression
+    ): MathJsonExpression | null => parseIntervalBody(body, false, true),
   },
   {
     kind: 'matchfix',
     openTrigger: ['\\lbrack'],
     closeTrigger: [')'],
-    parse: (_parser: Parser, body: MathJsonExpression): MathJsonExpression | null =>
-      parseIntervalBody(body, false, true),
+    parse: (
+      _parser: Parser,
+      body: MathJsonExpression
+    ): MathJsonExpression | null => parseIntervalBody(body, false, true),
   },
   {
     kind: 'matchfix',
     openTrigger: ['['],
     closeTrigger: ['\\rparen'],
-    parse: (_parser: Parser, body: MathJsonExpression): MathJsonExpression | null =>
-      parseIntervalBody(body, false, true),
+    parse: (
+      _parser: Parser,
+      body: MathJsonExpression
+    ): MathJsonExpression | null => parseIntervalBody(body, false, true),
   },
 
   // (a, b] - Open-closed interval (American notation)
@@ -280,29 +288,37 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     kind: 'matchfix',
     openTrigger: ['('],
     closeTrigger: [']'],
-    parse: (_parser: Parser, body: MathJsonExpression): MathJsonExpression | null =>
-      parseIntervalBody(body, true, false),
+    parse: (
+      _parser: Parser,
+      body: MathJsonExpression
+    ): MathJsonExpression | null => parseIntervalBody(body, true, false),
   },
   {
     kind: 'matchfix',
     openTrigger: ['\\lparen'],
     closeTrigger: ['\\rbrack'],
-    parse: (_parser: Parser, body: MathJsonExpression): MathJsonExpression | null =>
-      parseIntervalBody(body, true, false),
+    parse: (
+      _parser: Parser,
+      body: MathJsonExpression
+    ): MathJsonExpression | null => parseIntervalBody(body, true, false),
   },
   {
     kind: 'matchfix',
     openTrigger: ['\\lparen'],
     closeTrigger: [']'],
-    parse: (_parser: Parser, body: MathJsonExpression): MathJsonExpression | null =>
-      parseIntervalBody(body, true, false),
+    parse: (
+      _parser: Parser,
+      body: MathJsonExpression
+    ): MathJsonExpression | null => parseIntervalBody(body, true, false),
   },
   {
     kind: 'matchfix',
     openTrigger: ['('],
     closeTrigger: ['\\rbrack'],
-    parse: (_parser: Parser, body: MathJsonExpression): MathJsonExpression | null =>
-      parseIntervalBody(body, true, false),
+    parse: (
+      _parser: Parser,
+      body: MathJsonExpression
+    ): MathJsonExpression | null => parseIntervalBody(body, true, false),
   },
 
   // ]a, b[ - Open interval (ISO/European reversed bracket notation)
@@ -310,15 +326,19 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     kind: 'matchfix',
     openTrigger: [']'],
     closeTrigger: ['['],
-    parse: (_parser: Parser, body: MathJsonExpression): MathJsonExpression | null =>
-      parseIntervalBody(body, true, true),
+    parse: (
+      _parser: Parser,
+      body: MathJsonExpression
+    ): MathJsonExpression | null => parseIntervalBody(body, true, true),
   },
   {
     kind: 'matchfix',
     openTrigger: ['\\rbrack'],
     closeTrigger: ['\\lbrack'],
-    parse: (_parser: Parser, body: MathJsonExpression): MathJsonExpression | null =>
-      parseIntervalBody(body, true, true),
+    parse: (
+      _parser: Parser,
+      body: MathJsonExpression
+    ): MathJsonExpression | null => parseIntervalBody(body, true, true),
   },
 
   // Note: ISO notation ]a, b] (open-closed) and [a, b[ (closed-open) are NOT

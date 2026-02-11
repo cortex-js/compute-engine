@@ -1071,7 +1071,9 @@ export interface Parser {
   removeBoundary(): void;
   get atBoundary(): boolean;
   matchBoundary(): boolean;
-  boundaryError(msg: string | [string, ...MathJsonExpression[]]): MathJsonExpression;
+  boundaryError(
+    msg: string | [string, ...MathJsonExpression[]]
+  ): MathJsonExpression;
 }
 
 /**
@@ -1144,7 +1146,10 @@ export type SerializeLatexOptions = NumberSerializationFormat & {
   missingSymbol: LatexString; // e.g. '\\placeholder{}'
 
   // Styles
-  applyFunctionStyle: (expr: MathJsonExpression, level: number) => DelimiterScale;
+  applyFunctionStyle: (
+    expr: MathJsonExpression,
+    level: number
+  ) => DelimiterScale;
 
   groupStyle: (expr: MathJsonExpression, level: number) => DelimiterScale;
 
@@ -1247,7 +1252,10 @@ export interface Serializer {
   /** Add a group fence around the expression if it is
    * an operator of precedence less than or equal to `prec`.
    */
-  wrap: (expr: MathJsonExpression | null | undefined, prec?: number) => LatexString;
+  wrap: (
+    expr: MathJsonExpression | null | undefined,
+    prec?: number
+  ) => LatexString;
 
   /** Add a group fence around the expression if it is
    * short (not a function)
@@ -1255,7 +1263,10 @@ export interface Serializer {
   wrapShort(expr: MathJsonExpression | null | undefined): LatexString;
 
   /** Styles */
-  applyFunctionStyle: (expr: MathJsonExpression, level: number) => DelimiterScale;
+  applyFunctionStyle: (
+    expr: MathJsonExpression,
+    level: number
+  ) => DelimiterScale;
 
   groupStyle: (expr: MathJsonExpression, level: number) => DelimiterScale;
 

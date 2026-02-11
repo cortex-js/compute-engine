@@ -516,10 +516,7 @@ function termsAsExpression(
  *   or Rational expression
  * - evaluate number literals
  */
-export function canonicalDivide(
-  op1: Expression,
-  op2: Expression
-): Expression {
+export function canonicalDivide(op1: Expression, op2: Expression): Expression {
   const ce = op1.engine;
   if (!op1.isValid || !op2.isValid) return ce._fn('Divide', [op1, op2]);
 
@@ -531,8 +528,7 @@ export function canonicalDivide(
   // tan(π/2)/tan(π/2) during canonicalization. We use `unknowns` instead of
   // `symbols` because `symbols` includes mathematical constants like Pi and E,
   // which would let expressions like tan(π/2) slip through the guard.
-  const op2IsConstantExpression =
-    op2.unknowns.length === 0 && !isNumber(op2);
+  const op2IsConstantExpression = op2.unknowns.length === 0 && !isNumber(op2);
 
   // 0/0 = NaN, a/0 = ~∞ (a≠0)
   // Note: We only check .is(0) here, not .N().is(0), because .N() can be
@@ -719,10 +715,7 @@ export function canonicalDivide(
   return ce._fn('Divide', [op1, op2]);
 }
 
-export function div(
-  num: Expression,
-  denom: number | Expression
-): Expression {
+export function div(num: Expression, denom: number | Expression): Expression {
   const ce = num.engine;
 
   num = num.canonical;
@@ -926,10 +919,7 @@ export function canonicalMultiply(
           i++;
           continue;
         }
-      } else if (
-        isNumber(next) &&
-        next.numericValue instanceof NumericValue
-      ) {
+      } else if (isNumber(next) && next.numericValue instanceof NumericValue) {
         // Do we have a radical as a numeric value?
         const nextNv = next.numericValue;
         if (

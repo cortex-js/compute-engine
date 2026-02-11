@@ -44,5 +44,4 @@ export type BoxedSubstitution<T = Expression> = KernelBoxedSubstitution<T>;
  *
  * @category Pattern Matching
  */
-export type PatternMatchOptions<T = Expression> =
-  KernelPatternMatchOptions<T>;
+export type PatternMatchOptions<T = Expression> = KernelPatternMatchOptions<T>;

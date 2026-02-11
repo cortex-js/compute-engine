@@ -6,12 +6,7 @@ import type {
   BoxedRuleSet,
   RuleSteps,
 } from '../global-types';
-import {
-  isNumber,
-  isSymbol,
-  isFunction,
-  isString,
-} from './type-guards';
+import { isNumber, isSymbol, isFunction, isString } from './type-guards';
 
 type InternalSimplifyOptions = SimplifyOptions & {
   useVariations: boolean;

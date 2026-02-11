@@ -24,12 +24,7 @@ import type {
 
 import { isFiniteIndexedCollection, zip } from '../collection-utils';
 import { isTensor } from './boxed-tensor';
-import {
-  isNumber,
-  isFunction,
-  isString,
-  isSymbol,
-} from './type-guards';
+import { isNumber, isFunction, isString, isSymbol } from './type-guards';
 import type { NumericPrimitiveType } from '../../common/type/types';
 import { Type } from '../../common/type/types';
 import { BoxedType } from '../../common/type/boxed-type';
@@ -315,8 +310,7 @@ export class BoxedFunction
       if (!def.associative) ys = xs;
       else {
         for (const x of xs) {
-          if (x.operator === this.operator && isFunction(x))
-            ys.push(...x.ops);
+          if (x.operator === this.operator && isFunction(x)) ys.push(...x.ops);
           else ys.push(x);
         }
       }
@@ -940,11 +934,7 @@ export class BoxedFunction
   }
 
   solve(
-    vars?:
-      | Iterable<string>
-      | string
-      | Expression
-      | Iterable<Expression>
+    vars?: Iterable<string> | string | Expression | Iterable<Expression>
   ):
     | null
     | ReadonlyArray<Expression>
@@ -1051,9 +1041,7 @@ export class BoxedFunction
     return this.operatorDefinition?.collection?.at?.(this, index.string);
   }
 
-  indexWhere(
-    predicate: (element: Expression) => boolean
-  ): number | undefined {
+  indexWhere(predicate: (element: Expression) => boolean): number | undefined {
     if (this.operatorDefinition?.collection?.indexWhere)
       return this.operatorDefinition.collection.indexWhere(this, predicate);
     if (!this.isIndexedCollection) return undefined;
@@ -1271,10 +1259,7 @@ function solveSystem(
   ce: ComputeEngine,
   equations: ReadonlyArray<Expression>,
   varNames: string[]
-):
-  | null
-  | Record<string, Expression>
-  | Array<Record<string, Expression>> {
+): null | Record<string, Expression> | Array<Record<string, Expression>> {
   if (equations && equations.every((eq) => eq.operator === 'Equal')) {
     // Try linear system first
     const linearResult = solveLinearSystem([...equations], varNames);
@@ -1366,10 +1351,7 @@ function satisfiesInequalities(
 function solveOr(
   operands: ReadonlyArray<Expression>,
   varNames: string[]
-):
-  | null
-  | ReadonlyArray<Expression>
-  | Array<Record<string, Expression>> {
+): null | ReadonlyArray<Expression> | Array<Record<string, Expression>> {
   if (varNames.length === 1) {
     // Univariate: collect all roots, deduplicate
     const seen = new Set<string>();

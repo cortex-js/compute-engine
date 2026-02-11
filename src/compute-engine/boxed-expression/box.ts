@@ -603,10 +603,7 @@ function makeCanonicalFunction(
   // Flatten any sequence
   // f(a, Sequence(b, c), Sequence(), d) -> f(a, b, c, d)
   //
-  const args: Expression[] = flatten(
-    xs,
-    opDef.associative ? name : undefined
-  );
+  const args: Expression[] = flatten(xs, opDef.associative ? name : undefined);
 
   // Skip validation for function literals with inferred signatures.
   // These will be validated during evaluation by the lambda function,
@@ -729,10 +726,7 @@ function makeNumericFunction(
   return null;
 }
 
-function fromNumericValue(
-  ce: ComputeEngine,
-  value: NumericValue
-): Expression {
+function fromNumericValue(ce: ComputeEngine, value: NumericValue): Expression {
   if (value.isZero) return ce.Zero;
   if (value.isOne) return ce.One;
   if (value.isNegativeOne) return ce.NegativeOne;

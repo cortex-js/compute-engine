@@ -1,9 +1,6 @@
 import type { Expression } from '../global-types';
 import type { MathJsonSymbol } from '../../math-json/types';
-import {
-  isSymbol,
-  isFunction,
-} from '../boxed-expression/type-guards';
+import { isSymbol, isFunction } from '../boxed-expression/type-guards';
 
 import { chop, factorial, gcd, lcm, limit } from '../numerics/numeric';
 import { gamma, gammaln } from '../numerics/special-functions';
@@ -501,9 +498,7 @@ function compileToTarget(
 ): CompilationResult {
   if (expr.operator === 'Function' && isFunction(expr)) {
     const args = expr.ops;
-    const params = args
-      .slice(1)
-      .map((x) => (isSymbol(x) ? x.symbol : '_'));
+    const params = args.slice(1).map((x) => (isSymbol(x) ? x.symbol : '_'));
     const body = BaseCompiler.compile(args[0].canonical, {
       ...target,
       var: (id) => (params.includes(id) ? id : target.var(id)),
@@ -543,11 +538,7 @@ function compileToTarget(
 /**
  * Compile integration function
  */
-function compileIntegrate(
-  args,
-  _,
-  target: CompileTarget<Expression>
-): string {
+function compileIntegrate(args, _, target: CompileTarget<Expression>): string {
   const { index, lower, upper } = normalizeIndexingSet(args[1]);
   const f = BaseCompiler.compile(args[0], {
     ...target,

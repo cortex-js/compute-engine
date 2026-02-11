@@ -142,10 +142,7 @@ function _getDegree(expr: Expression | undefined): number {
  * - `polynomialDegree(x*y + y^2, 'x')` → 1
  * - `polynomialDegree(sin(x), 'x')` → -1 (not a polynomial)
  */
-export function polynomialDegree(
-  expr: Expression,
-  variable: string
-): number {
+export function polynomialDegree(expr: Expression, variable: string): number {
   // Constant or different symbol
   if (isNumber(expr)) return 0;
   if (isSymbol(expr)) {

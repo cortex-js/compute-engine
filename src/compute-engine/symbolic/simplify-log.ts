@@ -502,8 +502,7 @@ export function simplifyLog(x: Expression): RuleStep | undefined {
       // e^(log_c(x) + y) -> x^{1/ln(c)} * e^y
       for (let i = 0; i < exp.ops.length; i++) {
         const term = exp.ops[i];
-        if (term.operator !== 'Log' || !isFunction(term) || !term.op1)
-          continue;
+        if (term.operator !== 'Log' || !isFunction(term) || !term.op1) continue;
 
         const otherTerms = exp.ops.filter((_, idx) => idx !== i);
         const remaining =
@@ -567,11 +566,7 @@ export function simplifyLog(x: Expression): RuleStep | undefined {
     }
 
     // c^log_c(x) -> x
-    if (
-      exp.operator === 'Log' &&
-      isFunction(exp) &&
-      exp.op2?.isSame(base)
-    ) {
+    if (exp.operator === 'Log' && isFunction(exp) && exp.op2?.isSame(base)) {
       return { value: exp.op1, because: 'c^log_c(x) -> x' };
     }
 

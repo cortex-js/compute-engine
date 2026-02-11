@@ -4,10 +4,7 @@ import {
   factorPerfectSquare,
   factorDifferenceOfSquares,
 } from '../boxed-expression/factor';
-import {
-  isFunction,
-  isNumber,
-} from '../boxed-expression/type-guards';
+import { isFunction, isNumber } from '../boxed-expression/type-guards';
 
 /**
  * Power simplification rules consolidated from simplify-rules.ts.
@@ -169,11 +166,7 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
 
     // Root of Multiply: root(a*b*..., n) -> root(a,n) * root(b,n) * ...
     // Distribute root over product when some factors have perfect nth roots
-    if (
-      arg.operator === 'Multiply' &&
-      isFunction(arg) &&
-      arg.ops.length >= 2
-    ) {
+    if (arg.operator === 'Multiply' && isFunction(arg) && arg.ops.length >= 2) {
       const n = rootIndex.re;
       if (n !== undefined && Number.isInteger(n) && n >= 2) {
         const insideRoot: Expression[] = [];
@@ -671,11 +664,7 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
     }
 
     // a^m / a -> a^{m-1}
-    if (
-      num.operator === 'Power' &&
-      isFunction(num) &&
-      num.op1.isSame(denom)
-    ) {
+    if (num.operator === 'Power' && isFunction(num) && num.op1.isSame(denom)) {
       const diffExp = ce.function('Add', [num.op2, ce.NegativeOne]);
       return {
         value: denom.pow(diffExp),

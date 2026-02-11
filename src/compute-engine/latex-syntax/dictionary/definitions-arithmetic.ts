@@ -34,7 +34,9 @@ import { joinLatex, supsub } from '../tokenizer';
  * negative exponents in the denominator, and all the terms
  * with a positive exponent (or no exponent) in the numerator.
  */
-function numeratorDenominator(expr: MathJsonExpression): [MathJsonExpression[], MathJsonExpression[]] {
+function numeratorDenominator(
+  expr: MathJsonExpression
+): [MathJsonExpression[], MathJsonExpression[]] {
   if (operator(expr) !== 'Multiply') return [[], []];
   const numerator: MathJsonExpression[] = [];
   const denominator: MathJsonExpression[] = [];
@@ -119,7 +121,10 @@ function serializeRoot(
   );
 }
 
-function serializeAdd(serializer: Serializer, expr: MathJsonExpression): string {
+function serializeAdd(
+  serializer: Serializer,
+  expr: MathJsonExpression
+): string {
   // "add" doesn't increase the "level" for styling purposes
   // so, preventively decrease it now.
   serializer.level -= 1;
@@ -656,7 +661,9 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     latexTrigger: ['\\ang'],
     parse: (parser: Parser): MathJsonExpression => {
       const arg = parser.parseGroup();
-      return (arg === null ? ['Degrees'] : ['Degrees', arg]) as MathJsonExpression;
+      return (
+        arg === null ? ['Degrees'] : ['Degrees', arg]
+      ) as MathJsonExpression;
     },
   },
   {
@@ -1406,7 +1413,10 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   {
     name: 'Rational',
     precedence: DIVISION_PRECEDENCE,
-    serialize: (serializer: Serializer, expr: MathJsonExpression | null): string => {
+    serialize: (
+      serializer: Serializer,
+      expr: MathJsonExpression | null
+    ): string => {
       if (expr && nops(expr) === 1)
         return '\\operatorname{Rational}' + serializer.wrapArguments(expr);
       return serializeFraction(serializer, expr);
@@ -1575,7 +1585,9 @@ function isConditionExpression(expr: MathJsonExpression): boolean {
  * Extract operands from a sequence-like expression.
  * Handles Sequence, Tuple, and single expressions.
  */
-function getSequenceOrTuple(expr: MathJsonExpression | null): MathJsonExpression[] {
+function getSequenceOrTuple(
+  expr: MathJsonExpression | null
+): MathJsonExpression[] {
   if (expr === null) return [];
 
   // First try getSequence (handles Sequence and Delimiter)

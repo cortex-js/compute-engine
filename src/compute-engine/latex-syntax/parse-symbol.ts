@@ -1,7 +1,4 @@
-import type {
-  MathJsonExpression,
-  MathJsonSymbol,
-} from '../../math-json';
+import type { MathJsonExpression, MathJsonSymbol } from '../../math-json';
 import { EMOJIS, isValidSymbol, validateSymbol } from '../../math-json/symbols';
 import { SYMBOLS } from './dictionary/definitions-symbols';
 import { Parser } from './types';
@@ -371,10 +368,7 @@ export function parseSymbol(parser: Parser): MathJsonSymbol | null {
         // Unbraced subscript: only accept a single letter or digit
         // In non-strict mode, consume all consecutive digits
         const subToken = parser.peek;
-        if (
-          parser.options.strict === false &&
-          /^[0-9]$/.test(subToken)
-        ) {
+        if (parser.options.strict === false && /^[0-9]$/.test(subToken)) {
           let digits = '';
           while (!parser.atEnd && /^[0-9]$/.test(parser.peek)) {
             digits += parser.peek;

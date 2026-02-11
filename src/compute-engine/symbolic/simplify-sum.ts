@@ -1,9 +1,5 @@
 import type { Expression, RuleStep } from '../global-types';
-import {
-  isFunction,
-  isNumber,
-  sym,
-} from '../boxed-expression/type-guards';
+import { isFunction, isNumber, sym } from '../boxed-expression/type-guards';
 
 /**
  * Sum simplification rules extracted from simplify-rules.ts.
@@ -14,12 +10,7 @@ export function simplifySum(x: Expression): RuleStep | undefined {
 
   const body = x.op1;
   const limits = x.op2;
-  if (
-    !body ||
-    !limits ||
-    limits.operator !== 'Limits' ||
-    !isFunction(limits)
-  )
+  if (!body || !limits || limits.operator !== 'Limits' || !isFunction(limits))
     return undefined;
 
   const index = sym(limits.op1);

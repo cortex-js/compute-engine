@@ -65,10 +65,7 @@ function* powers(n: number, exp: number): Generator<number[]> {
  *    -> 'a^3 + 3a^2b + 3ab^2 + b^3'
  */
 
-function expandPower(
-  base: Expression,
-  exp: number
-): Expression | null {
+function expandPower(base: Expression, exp: number): Expression | null {
   const ce = base.engine;
   if (exp < 0) {
     const expr = expandPower(base, -exp);
@@ -192,9 +189,7 @@ export function expandFunction(
  * If the exression is a relational operator, expand the operands.
  * Return null if the expression cannot be expanded.
  */
-export function expand(
-  expr: Expression | undefined
-): Expression | null {
+export function expand(expr: Expression | undefined): Expression | null {
   // To expand an expression, we need to use its canonical form
   expr = expr?.canonical;
 

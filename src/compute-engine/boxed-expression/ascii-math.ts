@@ -1,12 +1,7 @@
 import type { Expression, FunctionInterface } from '../global-types';
 
 import { isRational } from '../numerics/rationals';
-import {
-  isFunction,
-  isSymbol,
-  isString,
-  isNumber,
-} from './type-guards';
+import { isFunction, isSymbol, isString, isNumber } from './type-guards';
 
 /** Helper type for expressions known to be function expressions (in operator/function callbacks) */
 type FnExpr = Expression & FunctionInterface;
@@ -18,10 +13,7 @@ export type AsciiMathSerializer = (
 
 export type AsciiMathOptions = {
   symbols: Record<string, string>;
-  operators: Record<
-    string,
-    [string | ((expr: Expression) => string), number]
-  >;
+  operators: Record<string, [string | ((expr: Expression) => string), number]>;
   functions: Record<
     string,
     string | ((expr: Expression, serialize: AsciiMathSerializer) => string)
@@ -214,8 +206,7 @@ const FUNCTIONS: Record<
   string,
   string | ((expr: Expression, serialize: AsciiMathSerializer) => string)
 > = {
-  Abs: (expr: Expression, serialize) =>
-    `|${serialize((expr as FnExpr).op1)}|`,
+  Abs: (expr: Expression, serialize) => `|${serialize((expr as FnExpr).op1)}|`,
   Norm: (expr: Expression, serialize) =>
     `||${serialize((expr as FnExpr).op1)}||`,
 
@@ -294,8 +285,7 @@ const FUNCTIONS: Record<
 
   Sum: (expr: Expression, serialize) => bigOp(expr, 'sum', serialize),
   Product: (expr: Expression, serialize) => bigOp(expr, 'prod', serialize),
-  Integrate: (expr: Expression, serialize) =>
-    bigOp(expr, 'int', serialize),
+  Integrate: (expr: Expression, serialize) => bigOp(expr, 'int', serialize),
   Limit: (expr_: Expression, serialize) => {
     const expr = expr_ as FnExpr;
     const [fn, val] = expr.ops;
@@ -319,9 +309,7 @@ const FUNCTIONS: Record<
   // we need to correctly handle `["Delimiter"]`
   Delimiter: (expr_: Expression, serialize) => {
     const expr = expr_ as FnExpr;
-    const delimStr = isString(expr.ops[1])
-      ? expr.ops[1].string
-      : undefined;
+    const delimStr = isString(expr.ops[1]) ? expr.ops[1].string : undefined;
     return delimiter(expr.ops[0], delimStr, serialize);
   },
   Sequence: (expr_: Expression, serialize) => {
@@ -379,11 +367,7 @@ const FUNCTIONS: Record<
     if (expr.op1.operator === 'Block' && isFunction(expr.op1)) {
       if (expr.op1.nops === 0) return `(${serializedArgs()}) |-> {}`;
       if (expr.op1.nops === 1) {
-        if (
-          args.length === 1 &&
-          isSymbol(args[0]) &&
-          args[0].symbol === '_1'
-        ) {
+        if (args.length === 1 && isSymbol(args[0]) && args[0].symbol === '_1') {
           // If there is a single argument and it's _1, we can use _ instead
           return `(_) |-> ${serialize(expr.op1.op1.subs({ _1: '_' }))}`;
         }
@@ -429,8 +413,7 @@ function bigOp(
   if (fn?.operator === 'Function' && isFunction(fn)) {
     args = fn.ops.slice(1);
     const b = fn.op1 ?? fn;
-    if (b.operator === 'Block' && isFunction(b))
-      body = serialize(b.op1 ?? b);
+    if (b.operator === 'Block' && isFunction(b)) body = serialize(b.op1 ?? b);
     else body = serialize(b);
   } else if (fn) {
     // Handle symbols and general expressions (e.g., Multiply, Add)
@@ -471,9 +454,7 @@ function bigOp(
         indexes.push(limit.op1);
         index = isSymbol(limit.op1) ? limit.op1.symbol : '';
       }
-      const start = !(
-        isSymbol(limit.op2) && limit.op2.symbol === 'Nothing'
-      )
+      const start = !(isSymbol(limit.op2) && limit.op2.symbol === 'Nothing')
         ? limit.op2
         : null;
       const end = !(isSymbol(limit.op3) && limit.op3.symbol === 'Nothing')

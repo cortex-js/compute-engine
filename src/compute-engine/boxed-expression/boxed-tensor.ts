@@ -374,11 +374,7 @@ export class BoxedTensor<T extends TensorDataType>
   }
 
   solve(
-    vars?:
-      | Iterable<string>
-      | string
-      | Expression
-      | Iterable<Expression>
+    vars?: Iterable<string> | string | Expression | Iterable<Expression>
   ):
     | null
     | ReadonlyArray<Expression>
@@ -390,9 +386,7 @@ export class BoxedTensor<T extends TensorDataType>
   }
 }
 
-export function isTensor(
-  val: unknown
-): val is BoxedTensor<TensorDataType> {
+export function isTensor(val: unknown): val is BoxedTensor<TensorDataType> {
   return val instanceof BoxedTensor;
 }
 

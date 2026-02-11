@@ -31,10 +31,7 @@ function numericRealPart(value: unknown): number | undefined {
  * - `x*y + 1` → false (contains product of variables)
  * - `x^2 + 1` → false (quadratic, but caught by polynomialDegree check)
  */
-function isLinearInVariables(
-  expr: Expression,
-  variables: string[]
-): boolean {
+function isLinearInVariables(expr: Expression, variables: string[]): boolean {
   // Count how many of the given variables appear in the expression
   const countVariables = (e: Expression): number => {
     let count = 0;
@@ -959,9 +956,7 @@ function isRealValue(expr: Expression): boolean {
 /**
  * Filter roots to only include real values (exclude complex numbers).
  */
-function filterRealRoots(
-  roots: ReadonlyArray<Expression>
-): Expression[] {
+function filterRealRoots(roots: ReadonlyArray<Expression>): Expression[] {
   return roots.filter((r) => isRealValue(r));
 }
 

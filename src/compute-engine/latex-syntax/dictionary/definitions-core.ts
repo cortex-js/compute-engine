@@ -507,7 +507,8 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   },
   {
     latexTrigger: ['\\error'],
-    parse: (parser: Parser) => ['Error', parser.parseGroup()] as MathJsonExpression,
+    parse: (parser: Parser) =>
+      ['Error', parser.parseGroup()] as MathJsonExpression,
   },
   {
     name: 'Error',
@@ -619,7 +620,11 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   {
     kind: 'postfix',
     latexTrigger: ['_'],
-    parse: (parser: Parser, lhs: MathJsonExpression, _until?: Readonly<Terminator>) => {
+    parse: (
+      parser: Parser,
+      lhs: MathJsonExpression,
+      _until?: Readonly<Terminator>
+    ) => {
       // Parse either a group or a single symbol
       let rhs = parser.parseGroup() ?? parser.parseToken();
       // In non-strict mode, also accept parenthesized expressions
@@ -824,7 +829,8 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     // Note: we don't need a precedence because the trigger is '^'
     // and '^' (and '_') are treated specially by the parser.
     kind: 'postfix',
-    parse: (parser: Parser, lhs: MathJsonExpression) => parsePrime(parser, lhs, 1),
+    parse: (parser: Parser, lhs: MathJsonExpression) =>
+      parsePrime(parser, lhs, 1),
     serialize: (serializer, expr) => {
       const n2 = machineValue(operand(expr, 2)) ?? 1;
       const base = serializer.serialize(operand(expr, 1));
@@ -837,46 +843,54 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   {
     latexTrigger: '^{\\prime\\prime}',
     kind: 'postfix',
-    parse: (parser: Parser, lhs: MathJsonExpression) => parsePrime(parser, lhs, 2),
+    parse: (parser: Parser, lhs: MathJsonExpression) =>
+      parsePrime(parser, lhs, 2),
   },
   {
     latexTrigger: '^{\\prime\\prime\\prime}',
     kind: 'postfix',
-    parse: (parser: Parser, lhs: MathJsonExpression) => parsePrime(parser, lhs, 3),
+    parse: (parser: Parser, lhs: MathJsonExpression) =>
+      parsePrime(parser, lhs, 3),
   },
   {
     latexTrigger: ['^', '\\doubleprime'],
     kind: 'postfix',
-    parse: (parser: Parser, lhs: MathJsonExpression) => parsePrime(parser, lhs, 2),
+    parse: (parser: Parser, lhs: MathJsonExpression) =>
+      parsePrime(parser, lhs, 2),
   },
   {
     latexTrigger: ['^', '\\tripleprime'],
     kind: 'postfix',
-    parse: (parser: Parser, lhs: MathJsonExpression) => parsePrime(parser, lhs, 3),
+    parse: (parser: Parser, lhs: MathJsonExpression) =>
+      parsePrime(parser, lhs, 3),
   },
   {
     latexTrigger: "'",
     kind: 'postfix',
     precedence: 810,
-    parse: (parser: Parser, lhs: MathJsonExpression) => parsePrime(parser, lhs, 1),
+    parse: (parser: Parser, lhs: MathJsonExpression) =>
+      parsePrime(parser, lhs, 1),
   },
   {
     latexTrigger: '\\prime',
     kind: 'postfix',
     precedence: 810,
-    parse: (parser: Parser, lhs: MathJsonExpression) => parsePrime(parser, lhs, 1),
+    parse: (parser: Parser, lhs: MathJsonExpression) =>
+      parsePrime(parser, lhs, 1),
   },
   {
     latexTrigger: '\\doubleprime',
     kind: 'postfix',
     precedence: 810,
-    parse: (parser: Parser, lhs: MathJsonExpression) => parsePrime(parser, lhs, 2),
+    parse: (parser: Parser, lhs: MathJsonExpression) =>
+      parsePrime(parser, lhs, 2),
   },
   {
     latexTrigger: '\\tripleprime',
     kind: 'postfix',
     precedence: 810,
-    parse: (parser: Parser, lhs: MathJsonExpression) => parsePrime(parser, lhs, 3),
+    parse: (parser: Parser, lhs: MathJsonExpression) =>
+      parsePrime(parser, lhs, 3),
   },
 
   // Lagrange Notation for n-th order derivatives,
@@ -1533,7 +1547,10 @@ function parseBrackets(
 /** A "List" expression can represent a collection of arbitrary elements,
  * or a system of equations.
  */
-function serializeList(serializer: Serializer, expr: MathJsonExpression): string {
+function serializeList(
+  serializer: Serializer,
+  expr: MathJsonExpression
+): string {
   // Is it a system of equations?
   if (
     nops(expr) > 1 &&
@@ -1560,7 +1577,10 @@ function serializeList(serializer: Serializer, expr: MathJsonExpression): string
  * A range is a sequence of numbers, e.g. `1..10`.
  * Optionally, they may include a step, e.g. `1..3..10`.
  */
-function parseRange(parser: Parser, lhs: MathJsonExpression | null): MathJsonExpression | null {
+function parseRange(
+  parser: Parser,
+  lhs: MathJsonExpression | null
+): MathJsonExpression | null {
   if (lhs === null) return null;
 
   const second = parser.parseExpression({ minPrec: 270 });
@@ -1615,7 +1635,10 @@ export function latexToDelimiterShorthand(s: string): string | undefined {
   return undefined;
 }
 
-function parseAssign(parser: Parser, lhs: MathJsonExpression): MathJsonExpression | null {
+function parseAssign(
+  parser: Parser,
+  lhs: MathJsonExpression
+): MathJsonExpression | null {
   //
   // 0/ Convert compound symbols back to Subscript form for sequence definitions
   // e.g., "L_0" → ['Subscript', 'L', 0]
@@ -1764,10 +1787,15 @@ function parseCasesEnvironment(parser: Parser): MathJsonExpression | null {
   return ['Which', ...result];
 }
 
-function parseAt(...close: string[]): (parser, lhs) => MathJsonExpression | null {
+function parseAt(
+  ...close: string[]
+): (parser, lhs) => MathJsonExpression | null {
   // @todo: if there are no `close` symbols, parse as a subscript: either
   // a single symbol, or a group.
-  return (parser: Parser, lhs: MathJsonExpression): MathJsonExpression | null => {
+  return (
+    parser: Parser,
+    lhs: MathJsonExpression
+  ): MathJsonExpression | null => {
     // If the lhs is a symbol or a List literal...
     if (!symbol(lhs) && operator(lhs) !== 'List') return null;
 

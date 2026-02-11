@@ -4,12 +4,7 @@ import type {
   Expression,
   IComputeEngine as ComputeEngine,
 } from '../global-types';
-import {
-  isFunction,
-  isSymbol,
-  isString,
-  isNumber,
-} from './type-guards';
+import { isFunction, isSymbol, isString, isNumber } from './type-guards';
 
 export function canonicalInvisibleOperator(
   ops: ReadonlyArray<Expression>,
@@ -64,11 +59,7 @@ export function canonicalInvisibleOperator(
     // Note: lhs might be a Subscript (e.g., f_\text{a}) which canonicalizes
     // to a symbol (f_a). Canonicalize first to handle this case.
     const lhsCanon = lhs.canonical;
-    if (
-      isSymbol(lhsCanon) &&
-      rhs.operator === 'Delimiter' &&
-      isFunction(rhs)
-    ) {
+    if (isSymbol(lhsCanon) && rhs.operator === 'Delimiter' && isFunction(rhs)) {
       // We have encountered something like `f(a+b)`, where `f` is not
       // defined. But it also could be `x(x+1)` where `x` is a number.
       // So, start with boxing the arguments and see if it makes sense.
