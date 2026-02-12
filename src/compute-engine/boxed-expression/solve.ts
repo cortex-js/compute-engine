@@ -1121,9 +1121,12 @@ function solveNestedSqrtEquation(
   ce.pushScope();
   ce.declare(uSymbolName, { type: 'real' });
 
-  const uSolutions = findUnivariateRoots(uEquation, uSymbolName);
-
-  ce.popScope();
+  let uSolutions: ReadonlyArray<Expression>;
+  try {
+    uSolutions = findUnivariateRoots(uEquation, uSymbolName);
+  } finally {
+    ce.popScope();
+  }
 
   if (uSolutions.length === 0) return null;
 
@@ -1211,59 +1214,62 @@ export function findUnivariateRoots(
   // Create a lexical scope for the unknown
   ce.pushScope();
 
-  // Use the declared type of the variable, if any, otherwise assume 'number'
-  const varType = ce.symbol(x).type.type;
-  ce.declare('_x', typeof varType === 'string' ? varType : 'number');
+  let result: Expression[] = [];
+  try {
+    // Use the declared type of the variable, if any, otherwise assume 'number'
+    const varType = ce.symbol(x).type.type;
+    ce.declare('_x', typeof varType === 'string' ? varType : 'number');
 
-  let result = exprs.flatMap((expr) =>
-    matchAnyRules(
-      expr,
-      rules,
-      { _x: ce.symbol('_x') },
-      { useVariations: true, canonical: true }
-    )
-  );
-
-  // If we didn't find a solution yet, try modifying the expression
-  //expr.
-  // Note: @todo we can try different heuristics here:
-  // Collection: reduce the numbers of occurrences of the unknown
-  // Attraction: bring the occurrences of the unknown closer together
-  // Function Swapping: replacing function with ones easier to solve
-  //    - square roots: square both sides
-  //    - logs: exponentiate both sides
-  //    - trig functions: use inverse trig functions
-  // Homogenization: replace a function of the unknown by a new variable,
-  // e.g. exp(x) -> y, then solve for y
-
-  if (result.length === 0) {
-    exprs = exprs.flatMap((expr) => harmonize(expr));
     result = exprs.flatMap((expr) =>
       matchAnyRules(
         expr,
         rules,
-        { _x: ce.symbol(x) },
+        { _x: ce.symbol('_x') },
         { useVariations: true, canonical: true }
       )
     );
-  }
 
-  if (result.length === 0) {
-    exprs = exprs
-      .flatMap((expr) => expand(expr.canonical))
-      .filter((x) => x !== null) as Expression[];
-    exprs = exprs.flatMap((expr) => harmonize(expr));
-    result = exprs.flatMap((expr) =>
-      matchAnyRules(
-        expr,
-        rules,
-        { _x: ce.symbol(x) },
-        { useVariations: true, canonical: true }
-      )
-    );
-  }
+    // If we didn't find a solution yet, try modifying the expression
+    //expr.
+    // Note: @todo we can try different heuristics here:
+    // Collection: reduce the numbers of occurrences of the unknown
+    // Attraction: bring the occurrences of the unknown closer together
+    // Function Swapping: replacing function with ones easier to solve
+    //    - square roots: square both sides
+    //    - logs: exponentiate both sides
+    //    - trig functions: use inverse trig functions
+    // Homogenization: replace a function of the unknown by a new variable,
+    // e.g. exp(x) -> y, then solve for y
 
-  ce.popScope(); // End lexical scope for the unknown
+    if (result.length === 0) {
+      exprs = exprs.flatMap((expr) => harmonize(expr));
+      result = exprs.flatMap((expr) =>
+        matchAnyRules(
+          expr,
+          rules,
+          { _x: ce.symbol(x) },
+          { useVariations: true, canonical: true }
+        )
+      );
+    }
+
+    if (result.length === 0) {
+      exprs = exprs
+        .flatMap((expr) => expand(expr.canonical))
+        .filter((x) => x !== null) as Expression[];
+      exprs = exprs.flatMap((expr) => harmonize(expr));
+      result = exprs.flatMap((expr) =>
+        matchAnyRules(
+          expr,
+          rules,
+          { _x: ce.symbol(x) },
+          { useVariations: true, canonical: true }
+        )
+      );
+    }
+  } finally {
+    ce.popScope();
+  }
 
   // Validate the roots against the ORIGINAL expression (before clearing
   // denominators and harmonization). This filters out extraneous roots that

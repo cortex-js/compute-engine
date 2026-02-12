@@ -15,6 +15,7 @@ import {
   mul,
   isMachineRational,
   rationalGcd,
+  inverse,
 } from '../numerics/rationals';
 import {
   ExactNumericValueData,
@@ -285,8 +286,7 @@ export class ExactNumericValue extends NumericValue {
     //
     if (this.radical >= 4) {
       const [factor, root] = canonicalInteger(this.radical, 2);
-      if (typeof this.rational[0] === 'number') this.rational[0] *= factor;
-      else this.rational = mul(this.rational, [factor, 1]);
+      if (factor !== 1) this.rational = mul(this.rational, [factor, 1]);
       this.radical = root;
     }
 
@@ -356,9 +356,10 @@ export class ExactNumericValue extends NumericValue {
     // inv(a/b√c) = b/(a√c) = (b√c)/(ac) = (b/ac)√c
 
     return this.clone({
-      rational: isMachineRational(this.rational)
-        ? [this.rational[1], this.rational[0] * this.radical]
-        : [this.rational[1], this.rational[0] * BigInt(this.radical)],
+      rational: mul(
+        [this.rational[1], 1],
+        inverse([BigInt(this.rational[0]) * BigInt(this.radical), BigInt(1)])
+      ),
       radical: this.radical,
     });
   }
@@ -368,12 +369,7 @@ export class ExactNumericValue extends NumericValue {
       if (other === 0) return this;
       if (Number.isInteger(other) && this.radical === 1)
         return this.clone({
-          rational: isMachineRational(this.rational)
-            ? [this.rational[0] + other * this.rational[1], this.rational[1]]
-            : [
-                this.rational[0] + BigInt(other) * this.rational[1],
-                this.rational[1],
-              ],
+          rational: add(this.rational, [other, 1]),
         });
       return this.factory(this.bignumRe).add(other);
     }
@@ -410,9 +406,7 @@ export class ExactNumericValue extends NumericValue {
     if (typeof other === 'number') {
       if (Number.isInteger(other))
         return this.clone({
-          rational: isMachineRational(this.rational)
-            ? [this.rational[0] * other, this.rational[1]]
-            : [this.rational[0] * BigInt(other), this.rational[1]],
+          rational: mul(this.rational, [other, 1]),
           radical: this.radical,
         });
       return this.factory(this.bignumRe).mul(other);
@@ -444,9 +438,13 @@ export class ExactNumericValue extends NumericValue {
 
     if (!(other instanceof ExactNumericValue)) return other.mul(this);
 
+    const radical = BigInt(this.radical) * BigInt(other.radical);
+    if (radical > BigInt(SMALL_INTEGER))
+      return this.factory(this.bignumRe).mul(other);
+
     return this.clone({
       rational: mul(this.rational, other.rational),
-      radical: this.radical * other.radical,
+      radical: Number(radical),
     });
   }
 
@@ -456,9 +454,7 @@ export class ExactNumericValue extends NumericValue {
       if (other === -1) return this.neg();
       if (other === 0) return this.clone(NaN);
       return this.clone({
-        rational: isMachineRational(this.rational)
-          ? [this.rational[0], this.rational[1] * other]
-          : [this.rational[0], this.rational[1] * BigInt(other)],
+        rational: mul(this.rational, [1, other]),
         radical: this.radical,
       });
     }
@@ -478,18 +474,16 @@ export class ExactNumericValue extends NumericValue {
     if (other.im !== 0) return this.factory(this.bignumRe).div(other);
 
     // (a/b √c) / (d/e √f) = (ae/bdf) * √(cf)
-    let rational: Rational;
-    if (isMachineRational(this.rational) && isMachineRational(other.rational)) {
-      const [a, b] = this.rational;
-      const [d, e] = other.rational;
-      rational = [a * e, b * d * other.radical];
-    } else {
-      rational = mul(this.rational, [
-        BigInt(other.rational[1]),
-        BigInt(other.rational[0]) * BigInt(other.radical),
-      ]);
-    }
-    return this.clone({ rational, radical: this.radical * other.radical });
+    const rational = mul(this.rational, [
+      BigInt(other.rational[1]),
+      BigInt(other.rational[0]) * BigInt(other.radical),
+    ]);
+
+    const radical = BigInt(this.radical) * BigInt(other.radical);
+    if (radical > BigInt(SMALL_INTEGER))
+      return this.factory(this.bignumRe).div(other);
+
+    return this.clone({ rational, radical: Number(radical) });
   }
 
   pow(
@@ -574,30 +568,31 @@ export class ExactNumericValue extends NumericValue {
     if (this.sign < 0) {
       if (Number.isInteger(exponent)) {
         const sign = exponent % 2 === 0 ? 1 : -1;
+        const bigExp = BigInt(exponent);
+        const radical = BigInt(this.radical) ** bigExp;
+        if (radical > BigInt(SMALL_INTEGER))
+          return this.factory(this.bignumRe).pow(exponent);
         return this.clone({
-          rational: isMachineRational(this.rational)
-            ? [
-                sign * (-this.rational[0]) ** exponent,
-                this.rational[1] ** exponent,
-              ]
-            : [
-                BigInt(sign) * (-this.rational[0]) ** BigInt(exponent),
-                this.rational[1] ** BigInt(exponent),
-              ],
-          radical: this.radical ** exponent,
+          rational: [
+            BigInt(sign) * (-BigInt(this.rational[0])) ** bigExp,
+            BigInt(this.rational[1]) ** bigExp,
+          ],
+          radical: Number(radical),
         });
       }
       return this.factory({ im: (-this.re) ** exponent });
     } else {
       if (Number.isInteger(exponent)) {
+        const bigExp = BigInt(exponent);
+        const radical = BigInt(this.radical) ** bigExp;
+        if (radical > BigInt(SMALL_INTEGER))
+          return this.factory(this.bignumRe).pow(exponent);
         return this.clone({
-          rational: isMachineRational(this.rational)
-            ? [this.rational[0] ** exponent, this.rational[1] ** exponent]
-            : [
-                BigInt(this.rational[0]) ** BigInt(exponent),
-                this.rational[1] ** BigInt(exponent),
-              ],
-          radical: this.radical ** exponent,
+          rational: [
+            BigInt(this.rational[0]) ** bigExp,
+            BigInt(this.rational[1]) ** bigExp,
+          ],
+          radical: Number(radical),
         });
       }
     }

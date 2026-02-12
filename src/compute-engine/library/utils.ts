@@ -357,15 +357,18 @@ export function canonicalBigop(
   // Sum is a scoped function (to declare the indexes)
   ce.pushScope(scope);
 
-  // Note: we need to canonicalize the indexes before canonicalizing the body
-  // since we need the indexes to be declared before we can bind them
-  const indexes = indexingSets.map(
-    (x) => canonicalIndexingSet(x) ?? ce.error('missing')
-  );
+  let indexes: Expression[];
+  try {
+    // Note: we need to canonicalize the indexes before canonicalizing the body
+    // since we need the indexes to be declared before we can bind them
+    indexes = indexingSets.map(
+      (x) => canonicalIndexingSet(x) ?? ce.error('missing')
+    );
 
-  body = body?.canonical ?? ce.error('missing');
-
-  ce.popScope();
+    body = body?.canonical ?? ce.error('missing');
+  } finally {
+    ce.popScope();
+  }
 
   if (body.isCollection) {
     if (bigOp === 'Sum') return ce.box(['Reduce', body, 'Add', 0]);

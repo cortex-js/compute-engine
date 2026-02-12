@@ -117,14 +117,15 @@ export function canonicalInteger(
     if (result) return result;
   }
   const factors = primeFactors(n);
-  let f = 1;
-  let r = 1;
+  let f = BigInt(1);
+  let r = BigInt(1);
   for (const k of Object.keys(factors)) {
-    const v = parseInt(k);
-    f = f * Math.pow(v, Math.floor(factors[k] / exponent));
-    r = r * Math.pow(v, factors[k] % exponent);
+    const v = BigInt(parseInt(k));
+    const exponentBase = BigInt(exponent);
+    f = f * v ** (BigInt(factors[k]) / exponentBase);
+    r = r * v ** (BigInt(factors[k]) % exponentBase);
   }
-  return [f, r];
+  return [Number(f), Number(r)];
 }
 
 export function gcd(a: number, b: number): number {
@@ -161,7 +162,9 @@ var gcd = function (a, b) {
 */
 
 export function lcm(a: number, b: number): number {
-  return (a * b) / gcd(a, b);
+  if (a === 0 || b === 0) return 0;
+  const res = (BigInt(a) * BigInt(b)) / BigInt(gcd(a, b));
+  return Number(res);
 }
 
 export function factorial(n: number): number {

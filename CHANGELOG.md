@@ -2,6 +2,9 @@
 
 ### Numerics
 
+- **Centralized overflow protection**: Improved robustness of `Rational` and
+  `ExactNumericValue` arithmetic by centralizing overflow checks and automatic
+  promotion to `BigInt`.
 - **\[#287\](https://github.com/cortex-js/compute-engine/issues/287) Improved
   precision for large integer products**: Multiplications and additions of large
   integers that would previously lose precision (exceeding
@@ -10,12 +13,13 @@
 
 ### Evaluation
 
-- **Fixed scope leak**: Ensured that evaluation contexts are correctly popped
-  even when an error or timeout occurs during function evaluation.
-- **Improved numerical evaluation performance**: `Sum`, `Product`, and `Divide`
-  now correctly propagate the `numericApproximation` option to their arguments,
-  significantly speeding up large numerical calculations by avoiding expensive
-  exact rational arithmetic.
+- **Fixed scope leaks**: Ensured that evaluation contexts are correctly popped
+  even when an error or timeout occurs in `BoxedFunction.evaluate()`,
+  `findUnivariateRoots()`, and rule-boxing operations.
+- **Improved numerical evaluation performance**: `Sum`, `Product`, `Divide`,
+  and statistical operators (`Mean`, `Variance`, etc.) now correctly propagate
+  the `numericApproximation` option, significantly speeding up large numerical
+  calculations by avoiding expensive exact arithmetic.
 
 ## 0.50.1 _2026-02-11_
 

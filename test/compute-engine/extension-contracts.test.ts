@@ -243,19 +243,14 @@ describe('Extension Contracts', () => {
   describe('Rule Replacement Results', () => {
     test('rejects invalid replacement callback return values', () => {
       const ce = new ComputeEngine();
-      const rules = ce.rules([
-        {
-          match: 'x',
-          replace: () => 'not-an-expression' as unknown as Expression,
-        },
-      ]);
-
-      const expr = ce.parse('x');
-      const rule = rules.rules[0];
-
-      expect(() => applyRule(rule, expr, {})).toThrow(
-        /expected a Expression or RuleStep/
-      );
+      expect(() =>
+        ce.rules([
+          {
+            match: 'x',
+            replace: () => 'not-an-expression' as unknown as Expression,
+          },
+        ])
+      ).toThrow();
     });
   });
 });

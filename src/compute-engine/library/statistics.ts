@@ -72,12 +72,14 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       signature: '((collection|number)+) -> number',
       type: () => 'finite_real',
       description: 'The most frequently occurring value in the collection.',
-      evaluate: (ops, { engine }) =>
-        engine.number(
+      evaluate: (ops, { engine, numericApproximation }) => {
+        const xs = ops.map((x) => x.evaluate({ numericApproximation }));
+        return engine.number(
           bignumPreferred(engine)
-            ? bigMean(engine.bignum.bind(engine), flattenBigScalars(ops))
-            : mean(flattenScalars(ops))
-        ),
+            ? bigMean(engine.bignum.bind(engine), flattenBigScalars(xs))
+            : mean(flattenScalars(xs))
+        );
+      },
     },
 
     Median: {
@@ -87,12 +89,14 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       type: () => 'finite_real',
       description: 'The most frequently occurring value in the collection.',
       examples: ['Mode([1, 2, 2, 3])  // Returns 2'],
-      evaluate: (ops, { engine }) =>
-        engine.number(
+      evaluate: (ops, { engine, numericApproximation }) => {
+        const xs = ops.map((x) => x.evaluate({ numericApproximation }));
+        return engine.number(
           bignumPreferred(engine)
-            ? bigMedian(flattenBigScalars(ops))
-            : median(flattenScalars(ops))
-        ),
+            ? bigMedian(flattenBigScalars(xs))
+            : median(flattenScalars(xs))
+        );
+      },
     },
 
     Variance: {
@@ -100,12 +104,14 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       broadcastable: false,
       signature: '((collection|number)+) -> number',
       type: () => 'finite_real',
-      evaluate: (ops, { engine }) =>
-        engine.number(
+      evaluate: (ops, { engine, numericApproximation }) => {
+        const xs = ops.map((x) => x.evaluate({ numericApproximation }));
+        return engine.number(
           bignumPreferred(engine)
-            ? bigVariance(engine.bignum.bind(engine), flattenBigScalars(ops))
-            : variance(flattenScalars(ops))
-        ),
+            ? bigVariance(engine.bignum.bind(engine), flattenBigScalars(xs))
+            : variance(flattenScalars(xs))
+        );
+      },
     },
 
     PopulationVariance: {
@@ -113,15 +119,17 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       broadcastable: false,
       signature: '((collection|number)+) -> number',
       type: () => 'finite_real',
-      evaluate: (ops, { engine }) =>
-        engine.number(
+      evaluate: (ops, { engine, numericApproximation }) => {
+        const xs = ops.map((x) => x.evaluate({ numericApproximation }));
+        return engine.number(
           bignumPreferred(engine)
             ? bigPopulationVariance(
                 engine.bignum.bind(engine),
-                flattenBigScalars(ops)
+                flattenBigScalars(xs)
               )
-            : populationVariance(flattenScalars(ops))
-        ),
+            : populationVariance(flattenScalars(xs))
+        );
+      },
     },
 
     StandardDeviation: {
@@ -130,15 +138,17 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       description: 'Sample Standard Deviation of a collection of numbers.',
       signature: '((collection|number)+) -> number',
       type: () => 'finite_real',
-      evaluate: (ops, { engine }) =>
-        engine.number(
+      evaluate: (ops, { engine, numericApproximation }) => {
+        const xs = ops.map((x) => x.evaluate({ numericApproximation }));
+        return engine.number(
           bignumPreferred(engine)
             ? bigVariance(
                 engine.bignum.bind(engine),
-                flattenBigScalars(ops)
+                flattenBigScalars(xs)
               ).sqrt()
-            : Math.sqrt(variance(flattenScalars(ops)))
-        ),
+            : Math.sqrt(variance(flattenScalars(xs)))
+        );
+      },
     },
 
     PopulationStandardDeviation: {
@@ -147,15 +157,17 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       description: 'Population Standard Deviation of a collection of numbers.',
       signature: '((collection|number)+) -> number',
       type: () => 'finite_real',
-      evaluate: (ops, { engine }) =>
-        engine.number(
+      evaluate: (ops, { engine, numericApproximation }) => {
+        const xs = ops.map((x) => x.evaluate({ numericApproximation }));
+        return engine.number(
           bignumPreferred(engine)
             ? bigPopulationVariance(
                 engine.bignum.bind(engine),
-                flattenBigScalars(ops)
+                flattenBigScalars(xs)
               ).sqrt()
-            : Math.sqrt(populationVariance(flattenScalars(ops)))
-        ),
+            : Math.sqrt(populationVariance(flattenScalars(xs)))
+        );
+      },
     },
 
     Kurtosis: {
@@ -163,12 +175,14 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       broadcastable: false,
       signature: '((collection|number)+) -> number',
       type: () => 'finite_real',
-      evaluate: (ops, { engine }) =>
-        engine.number(
+      evaluate: (ops, { engine, numericApproximation }) => {
+        const xs = ops.map((x) => x.evaluate({ numericApproximation }));
+        return engine.number(
           bignumPreferred(engine)
-            ? bigKurtosis(engine.bignum.bind(engine), flattenBigScalars(ops))
-            : kurtosis(flattenScalars(ops))
-        ),
+            ? bigKurtosis(engine.bignum.bind(engine), flattenBigScalars(xs))
+            : kurtosis(flattenScalars(xs))
+        );
+      },
     },
 
     Skewness: {
@@ -176,12 +190,14 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       broadcastable: false,
       signature: '((collection|number)+) -> number',
       type: () => 'finite_real',
-      evaluate: (ops, { engine }) =>
-        engine.number(
+      evaluate: (ops, { engine, numericApproximation }) => {
+        const xs = ops.map((x) => x.evaluate({ numericApproximation }));
+        return engine.number(
           bignumPreferred(engine)
-            ? bigSkewness(engine.bignum.bind(engine), flattenBigScalars(ops))
-            : skewness(flattenScalars(ops))
-        ),
+            ? bigSkewness(engine.bignum.bind(engine), flattenBigScalars(xs))
+            : skewness(flattenScalars(xs))
+        );
+      },
     },
 
     Mode: {
@@ -189,12 +205,14 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       broadcastable: false,
       signature: '((collection|number)+) -> number',
       type: () => 'finite_real',
-      evaluate: (ops, { engine }) =>
-        engine.number(
+      evaluate: (ops, { engine, numericApproximation }) => {
+        const xs = ops.map((x) => x.evaluate({ numericApproximation }));
+        return engine.number(
           bignumPreferred(engine)
-            ? bigMode(engine.bignum.bind(engine), flattenBigScalars(ops))
-            : mode(flattenScalars(ops))
-        ),
+            ? bigMode(engine.bignum.bind(engine), flattenBigScalars(xs))
+            : mode(flattenScalars(xs))
+        );
+      },
     },
 
     Quartiles: {
@@ -203,11 +221,12 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       signature:
         '((collection|number)+) -> tuple<mid:number, lower:number, upper:number>',
       examples: ['Quartiles([1, 2, 3, 4, 5])  // Returns (3, 2, 4)'],
-      evaluate: (ops, { engine }) => {
+      evaluate: (ops, { engine, numericApproximation }) => {
+        const xs = ops.map((x) => x.evaluate({ numericApproximation }));
         const [mid, lower, upper] = (
           bignumPreferred(engine)
-            ? bigQuartiles(flattenBigScalars(ops))
-            : quartiles(flattenScalars(ops))
+            ? bigQuartiles(flattenBigScalars(xs))
+            : quartiles(flattenScalars(xs))
         ).map((v) => engine.number(v));
         return engine.tuple(mid, lower, upper);
       },
@@ -219,12 +238,14 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       signature: '((collection|number)+) -> number',
       type: () => 'finite_real',
 
-      evaluate: (ops, { engine }) =>
-        engine.number(
+      evaluate: (ops, { engine, numericApproximation }) => {
+        const xs = ops.map((x) => x.evaluate({ numericApproximation }));
+        return engine.number(
           bignumPreferred(engine)
-            ? bigInterquartileRange(flattenBigScalars(ops))
-            : interquartileRange(flattenScalars(ops))
-        ),
+            ? bigInterquartileRange(flattenBigScalars(xs))
+            : interquartileRange(flattenScalars(xs))
+        );
+      },
     },
 
     Histogram: {

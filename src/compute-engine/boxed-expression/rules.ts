@@ -516,67 +516,64 @@ function parseRule(
     ce.pushScope({ parent: systemScope, bindings: new Map() });
   }
 
-  const expr = ce.parse(rule);
+  let expr: Expression;
+  try {
+    expr = ce.parse(rule);
 
-  ce.latexDictionary = previousDictionary;
+    ce.latexDictionary = previousDictionary;
 
-  if (!expr.isValid || expr.operator !== 'Rule') {
-    if (systemScope) {
-      ce.popScope();
-    }
-    throw new Error(
-      `Invalid rule "${rule}"\n|   ${dewildcard(expr).toString()}\n|   A rule should be of the form:\n|   <match> -> <replace>; <condition>`
-    );
-  }
-
-  if (!isFunction(expr)) {
-    if (systemScope) {
-      ce.popScope();
-    }
-    throw new Error(`Invalid rule "${rule}"`);
-  }
-  const [match_, replace_, condition] = expr.ops;
-
-  let match = match_;
-  let replace = replace_;
-  if (canonical) {
-    match = match.canonical;
-    replace = replace.canonical;
-  }
-
-  // Pop the clean scope AFTER canonicalization to avoid pollution
-  if (systemScope) {
-    ce.popScope();
-  }
-
-  // Check that all the wildcards in the replace also appear in the match
-  if (!includesWildcards(replace, match))
-    throw new Error(
-      `Invalid rule "${rule}"\n|   The replace expression contains wildcards not present in the match expression`
-    );
-
-  if (match.isSame(replace)) {
-    throw new Error(
-      `Invalid rule "${rule}"\n|   The match and replace expressions are the same.\n|   This may be because the rule is not necessary due to canonical simplification`
-    );
-  }
-
-  let condFn: undefined | RuleConditionFunction = undefined;
-  if (condition !== undefined) {
-    // Verify that all the wildcards in the condition also appear in the match
-    if (!includesWildcards(condition, match))
+    if (!expr.isValid || expr.operator !== 'Rule') {
       throw new Error(
-        `Invalid rule "${rule}"\n|   The condition expression contains wildcards not present in the match expression`
+        `Invalid rule "${rule}"\n|   ${dewildcard(expr).toString()}\n|   A rule should be of the form:\n|   <match> -> <replace>; <condition>`
+      );
+    }
+
+    if (!isFunction(expr)) {
+      throw new Error(`Invalid rule "${rule}"`);
+    }
+    const [match_, replace_, condition] = expr.ops;
+
+    let match = match_;
+    let replace = replace_;
+    if (canonical) {
+      match = match.canonical;
+      replace = replace.canonical;
+    }
+
+    // Check that all the wildcards in the replace also appear in the match
+    if (!includesWildcards(replace, match))
+      throw new Error(
+        `Invalid rule "${rule}"\n|   The replace expression contains wildcards not present in the match expression`
       );
 
-    // Evaluate the condition as a predicate
-    condFn = (sub: BoxedSubstitution): boolean => {
-      const evaluated = condition.subs(sub).canonical.evaluate();
-      return isSymbol(evaluated) && evaluated.symbol === 'True';
-    };
-  }
+    if (match.isSame(replace)) {
+      throw new Error(
+        `Invalid rule "${rule}"\n|   The match and replace expressions are the same.\n|   This may be because the rule is not necessary due to canonical simplification`
+      );
+    }
 
-  return boxRule(ce, { match, replace, condition: condFn, id: rule }, options);
+    let condFn: undefined | RuleConditionFunction = undefined;
+    if (condition !== undefined) {
+      // Verify that all the wildcards in the condition also appear in the match
+      if (!includesWildcards(condition, match))
+        throw new Error(
+          `Invalid rule "${rule}"\n|   The condition expression contains wildcards not present in the match expression`
+        );
+
+      // Evaluate the condition as a predicate
+      condFn = (sub: BoxedSubstitution): boolean => {
+        const evaluated = condition.subs(sub).canonical.evaluate();
+        return isSymbol(evaluated) && evaluated.symbol === 'True';
+      };
+    }
+
+    return boxRule(ce, { match, replace, condition: condFn, id: rule }, options);
+  } finally {
+    // Pop the clean scope AFTER canonicalization to avoid pollution
+    if (systemScope) {
+      ce.popScope();
+    }
+  }
 }
 
 function boxRule(
@@ -654,15 +651,22 @@ function boxRule(
   } else {
     ce.pushScope();
   }
-  // Match patterns should never be canonicalized - they need to preserve their
-  // structure with wildcards for pattern matching. For example, ['Divide', '_a', '_a']
-  // should remain as a Divide expression, not be simplified to 1.
-  const matchExpr = parseRulePart(ce, match, {
-    canonical: false,
-    autoWildcard: false,
-  });
-  const replaceExpr = parseRulePart(ce, replace, options);
-  ce.popScope();
+
+  let matchExpr: Expression | null;
+  let replaceExpr: Expression | ((...args: any[]) => Expression | null);
+  try {
+    // Match patterns should never be canonicalized - they need to preserve their
+    // structure with wildcards for pattern matching. For example, ['Divide', '_a', '_a']
+    // should remain as a Divide expression, not be simplified to 1.
+    matchExpr = parseRulePart(ce, match, {
+      canonical: false,
+      autoWildcard: false,
+    });
+    replaceExpr =
+      typeof replace === 'function' ? replace : parseRulePart(ce, replace, options);
+  } finally {
+    ce.popScope();
+  }
 
   // Make up an id if none is provided
   if (!id) {
@@ -754,6 +758,7 @@ export function applyRule(
   substitution: BoxedSubstitution,
   options?: Readonly<Partial<ReplaceOptions>>
 ): RuleStep | null {
+  if (!rule) return null;
   let canonical = options?.canonical ?? (expr.isCanonical || expr.isStructural);
 
   let operandsMatched = false;
