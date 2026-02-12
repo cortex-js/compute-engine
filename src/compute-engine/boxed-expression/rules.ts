@@ -567,7 +567,11 @@ function parseRule(
       };
     }
 
-    return boxRule(ce, { match, replace, condition: condFn, id: rule }, options);
+    return boxRule(
+      ce,
+      { match, replace, condition: condFn, id: rule },
+      options
+    );
   } finally {
     // Pop the clean scope AFTER canonicalization to avoid pollution
     if (systemScope) {
@@ -663,7 +667,9 @@ function boxRule(
       autoWildcard: false,
     });
     replaceExpr =
-      typeof replace === 'function' ? replace : parseRulePart(ce, replace, options);
+      typeof replace === 'function'
+        ? replace
+        : parseRulePart(ce, replace, options);
   } finally {
     ce.popScope();
   }

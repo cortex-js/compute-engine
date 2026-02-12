@@ -377,7 +377,6 @@ export class PythonTarget implements LanguageTarget<Expression> {
     parameters: string[],
     docstring?: string
   ): string {
-
     const target = this.createTarget();
     const body = BaseCompiler.compile(expr, target);
 
@@ -441,7 +440,6 @@ export class PythonTarget implements LanguageTarget<Expression> {
    * @param parameters - Parameter names
    */
   compileLambda(expr: Expression, parameters: string[]): string {
-
     const target = this.createTarget();
     const body = BaseCompiler.compile(expr, target);
 

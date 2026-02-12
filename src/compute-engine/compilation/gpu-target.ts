@@ -304,7 +304,6 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     const allFunctions = this.getFunctions();
     const constants = this.getConstants();
 
-
     const target = this.createTarget({
       functions: (id) => {
         if (userFunctions && id in userFunctions) {
