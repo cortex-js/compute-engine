@@ -892,6 +892,27 @@ describe('SUM', () => {
     ).toMatchInlineSnapshot(`25`);
   });
 
+  // Regression test for #287: product of Choose values losing precision
+  it('should compute product of large Choose values exactly', () => {
+    // Choose(35,7)*Choose(28,7)*Choose(21,7)*Choose(14,7)*Choose(7,7) = 35!/(7!)^5
+    const expr1 = ce.box([
+      'Multiply',
+      ['Binomial', 35, 7],
+      ['Binomial', 28, 7],
+      ['Binomial', 21, 7],
+      ['Binomial', 14, 7],
+      ['Binomial', 7, 7],
+    ]);
+    const expr2 = ce.box([
+      'Divide',
+      ['Factorial', 35],
+      ['Power', ['Factorial', 7], 5],
+    ]);
+    expect(expr1.evaluate().sub(expr2.evaluate()).evaluate().toString()).toBe(
+      '0'
+    );
+  });
+
   // Sum of binomial coefficients
   it('should simplify sum of binomial coefficients', () => {
     expect(

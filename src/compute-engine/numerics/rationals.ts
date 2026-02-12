@@ -96,7 +96,7 @@ export function add(lhs: Rational, rhs: Rational): Rational {
   if (n <= 9007199254740991 && n >= -9007199254740991 && d <= 9007199254740991)
     return [n, d];
 
-  if (!Number.isFinite(n) || !Number.isFinite(d)) return [n, d];
+  if (!Number.isFinite(n) || !Number.isFinite(d)) return [NaN, 1];
 
   return [
     BigInt(rhsNum[1]) * BigInt(lhs[0]) + BigInt(rhsNum[0]) * BigInt(lhs[1]),
@@ -115,7 +115,7 @@ export function mul(lhs: Rational, rhs: Rational): Rational {
     )
       return [n, d];
 
-    if (!Number.isFinite(n) || !Number.isFinite(d)) return [n, d];
+    if (!Number.isFinite(n) || !Number.isFinite(d)) return [NaN, 1];
 
     return [BigInt(lhs[0]) * BigInt(rhs[0]), BigInt(lhs[1]) * BigInt(rhs[1])];
   }
