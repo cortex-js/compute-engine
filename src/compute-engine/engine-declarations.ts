@@ -295,18 +295,19 @@ export function assignFn(
 
   if (isOperatorDef(def)) {
     const value = assignValueAsValue(ce, arg2);
-    if (value) throw Error(`Cannot change the operator "${id}" to a value`);
+    if (value !== undefined) {
+      // Allow converting an operator to a value.
+      // Existing expressions using this symbol as a function head (e.g.
+      // ["g", 2]) will produce a type error at evaluation time if the
+      // new value is not callable — which is the correct semantic.
+      updateDef(ce, id, def, { value });
+      ce._setSymbolValue(id, value);
+      return ce;
+    }
 
     // Update the operator definition.
-    // Note: this is a potentially dangerous operation, since the
-    // operator may be used in other expressions that are not
-    // re-canonicalized. However, it might be desirable to override the
-    // evaluation of an operator in a specific context, even a system
-    // operator.
-    // However, it is preferable to use `ce.declare()` to create a new
-    // operator.
     const fnDef = assignValueAsOperatorDef(ce, arg2);
-    if (!fnDef) throw Error(`Cannot change the operator "${id}" to a value`);
+    if (!fnDef) throw Error(`Invalid definition for symbol "${id}"`);
     updateDef(ce, id, def, fnDef);
     return ce;
   }

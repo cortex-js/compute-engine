@@ -11,6 +11,14 @@
   `Number.MAX_SAFE_INTEGER`) are now automatically promoted to `BigInt` to
   maintain exact results.
 
+### Symbols
+
+- **[\#288](https://github.com/cortex-js/compute-engine/issues/288) Allow
+  reassigning a symbol from operator to value**: `ce.assign()` no longer throws
+  when assigning a plain value to a symbol that was previously declared as a
+  function. Existing expressions using the symbol as a function head will
+  produce a type error at evaluation time if the new value is not callable.
+
 ### Evaluation
 
 - **Fixed scope leaks**: Ensured that evaluation contexts are correctly popped

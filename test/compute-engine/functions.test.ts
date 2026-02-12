@@ -223,9 +223,12 @@ describe('Changing type from function to non-function', () => {
     engine.pushScope();
     engine.declare('f20', 'any');
     engine.assign('f20', ['Function', ['Multiply', 'x', 2], 'x']);
-    expect(() => engine.assign('f20', 42)).toThrow();
+    expect(engine.box(['f20', 3]).evaluate().re).toEqual(6);
 
-    // expect(engine.box('f20').re).toEqual(42);
+    // Reassigning from operator to value is allowed (#288)
+    engine.assign('f20', 42);
+    expect(engine.box('f20').evaluate().re).toEqual(42);
+
     engine.popScope();
   });
 });
