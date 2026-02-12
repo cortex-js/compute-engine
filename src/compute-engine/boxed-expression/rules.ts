@@ -657,7 +657,7 @@ function boxRule(
   }
 
   let matchExpr: Expression | null;
-  let replaceExpr: Expression | ((...args: any[]) => Expression | null);
+  let replaceExpr: Expression | RuleReplaceFunction | RuleFunction | undefined;
   try {
     // Match patterns should never be canonicalized - they need to preserve their
     // structure with wildcards for pattern matching. For example, ['Divide', '_a', '_a']
@@ -699,7 +699,11 @@ function boxRule(
     );
   }
 
-  if (replaceExpr && !replaceExpr.isValid) {
+  if (
+    replaceExpr &&
+    typeof replaceExpr !== 'function' &&
+    !replaceExpr.isValid
+  ) {
     throw new Error(
       `Invalid rule ${id ?? JSON.stringify(rule, undefined, 4)}\n|   The replace expression is not valid: ${replaceExpr?.toString()}`
     );

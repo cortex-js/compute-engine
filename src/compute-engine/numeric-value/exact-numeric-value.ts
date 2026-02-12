@@ -357,7 +357,7 @@ export class ExactNumericValue extends NumericValue {
 
     return this.clone({
       rational: mul(
-        [this.rational[1], 1],
+        [BigInt(this.rational[1]), BigInt(1)],
         inverse([BigInt(this.rational[0]) * BigInt(this.radical), BigInt(1)])
       ),
       radical: this.radical,
