@@ -710,10 +710,17 @@ describe('SUM', () => {
   it('should compute the sum of a function over an open interval', () =>
     expect(
       ce
-        .box(['Sum', ['Divide', 1, 'x'], 'x'])
+        .box(['Sum', ['Divide', 1, 'x'], ['Tuple', 'x', 1, 100]])
         .evaluate()
         .toString()
-    ).toMatchInlineSnapshot(`5690887772881993/581432233225878`));
+    ).toMatchInlineSnapshot(
+      `14466636279520351160221518043104131447711/2788815009188499086581352357412492142272`
+    ));
+
+  it('should compute the sum of a function over an open interval numerically', () => {
+    const result = ce.box(['Sum', ['Divide', 1, 'x'], 'x']).N();
+    expect(result.re).toBeCloseTo(9.787606036044382);
+  });
 
   it('should compute the sum of a collection', () =>
     expect(

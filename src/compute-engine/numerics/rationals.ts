@@ -87,12 +87,39 @@ export function add(lhs: Rational, rhs: Rational): Rational {
     const bigRhs = [BigInt(rhsNum[0]), BigInt(rhsNum[1])];
     return [bigRhs[1] * lhs[0] + bigRhs[0] * lhs[1], bigRhs[1] * lhs[1]];
   }
-  return [rhsNum[1] * lhs[0] + rhsNum[0] * lhs[1], rhsNum[1] * lhs[1]];
+
+  const n =
+    (rhsNum[1] as number) * (lhs[0] as number) +
+    (rhsNum[0] as number) * (lhs[1] as number);
+  const d = (rhsNum[1] as number) * (lhs[1] as number);
+
+  if (n <= 9007199254740991 && n >= -9007199254740991 && d <= 9007199254740991)
+    return [n, d];
+
+  if (!Number.isFinite(n) || !Number.isFinite(d)) return [n, d];
+
+  return [
+    BigInt(rhsNum[1]) * BigInt(lhs[0]) + BigInt(rhsNum[0]) * BigInt(lhs[1]),
+    BigInt(rhsNum[1]) * BigInt(lhs[1]),
+  ];
 }
 
 export function mul(lhs: Rational, rhs: Rational): Rational {
-  if (isMachineRational(lhs) && isMachineRational(rhs))
-    return [lhs[0] * rhs[0], lhs[1] * rhs[1]];
+  if (isMachineRational(lhs) && isMachineRational(rhs)) {
+    const n = lhs[0] * rhs[0];
+    const d = lhs[1] * rhs[1];
+    if (
+      n <= 9007199254740991 &&
+      n >= -9007199254740991 &&
+      d <= 9007199254740991
+    )
+      return [n, d];
+
+    if (!Number.isFinite(n) || !Number.isFinite(d)) return [n, d];
+
+    return [BigInt(lhs[0]) * BigInt(rhs[0]), BigInt(lhs[1]) * BigInt(rhs[1])];
+  }
+
   if (isMachineRational(lhs))
     return [
       BigInt(lhs[0]) * (rhs[0] as bigint),

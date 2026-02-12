@@ -323,7 +323,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
         return result;
       },
-      evaluate: ([num, den]) => num.div(den),
+      evaluate: ([num, den], { numericApproximation }) => {
+        const res = num.div(den);
+        if (numericApproximation && res.operator !== 'Divide') return res.N();
+        return res;
+      },
     },
 
     Exp: {
@@ -1787,11 +1791,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
       evaluate: (ops, options) => {
         const ce = options.engine;
+        const numericApproximation = options.numericApproximation;
         const result = run(
           reduceBigOp(
             ops[0],
             ops.slice(1),
-            (acc: Expression, x) => acc.mul(x.evaluate(options)),
+            (acc: Expression, x) =>
+              acc.mul(x.evaluate({ numericApproximation })),
             ce.One
           ),
           ce._timeRemaining
@@ -1801,16 +1807,18 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           return undefined; // Return undefined to keep expression symbolic
         }
         // Evaluate the accumulated result to combine numeric factors
-        return result?.evaluate() ?? ce.NaN;
+        return result?.evaluate({ numericApproximation }) ?? ce.NaN;
       },
 
       evaluateAsync: async (ops, options) => {
         const ce = options.engine;
+        const numericApproximation = options.numericApproximation;
         const result = await runAsync(
           reduceBigOp(
             ops[0],
             ops.slice(1),
-            (acc: Expression, x) => acc.mul(x.evaluate(options)),
+            (acc: Expression, x) =>
+              acc.mul(x.evaluate({ numericApproximation })),
             ce.One
           ),
           ce._timeRemaining,
@@ -1820,7 +1828,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (result === NON_ENUMERABLE_DOMAIN) {
           return undefined; // Return undefined to keep expression symbolic
         }
-        return result?.evaluate() ?? ce.NaN;
+        return result?.evaluate({ numericApproximation }) ?? ce.NaN;
       },
     },
 
@@ -1837,12 +1845,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       canonical: ([body, ...bounds], { scope }) =>
         canonicalBigop('Sum', body, bounds, scope),
 
-      evaluate: ([body, ...indexes], { engine }) => {
+      evaluate: ([body, ...indexes], { engine, numericApproximation }) => {
         const result = run(
           reduceBigOp(
             body,
             indexes,
-            (acc: Expression, x) => acc.add(x.evaluate()),
+            (acc: Expression, x) =>
+              acc.add(x.evaluate({ numericApproximation })),
             engine.Zero
           ),
           engine._timeRemaining
@@ -1853,15 +1862,16 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         }
         // Evaluate the accumulated result to combine numeric terms
         // e.g., 3x + 1 + 2 + 3 → 3x + 6
-        return result?.evaluate() ?? engine.NaN;
+        return result?.evaluate({ numericApproximation }) ?? engine.NaN;
       },
 
-      evaluateAsync: async (xs, { engine, signal }) => {
+      evaluateAsync: async (xs, { engine, signal, numericApproximation }) => {
         const result = await runAsync(
           reduceBigOp(
             xs[0],
             xs.slice(1),
-            (acc: Expression, x) => acc.add(x.evaluate()),
+            (acc: Expression, x) =>
+              acc.add(x.evaluate({ numericApproximation })),
             engine.Zero
           ),
           engine._timeRemaining,
@@ -1871,7 +1881,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (result === NON_ENUMERABLE_DOMAIN) {
           return undefined; // Return undefined to keep expression symbolic
         }
-        return result?.evaluate() ?? engine.NaN;
+        return result?.evaluate({ numericApproximation }) ?? engine.NaN;
       },
     },
   },

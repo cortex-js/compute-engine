@@ -1139,12 +1139,16 @@ export class BoxedFunction
       //
       // 6/ Call the `evaluate` handler
       //
-      const evalResult = def.evaluate?.(tail, {
-        numericApproximation,
-        engine: this.engine,
-        materialization: materialization,
-      });
-      if (isScoped) this.engine._popEvalContext();
+      let evalResult: Expression | undefined;
+      try {
+        evalResult = def.evaluate?.(tail, {
+          numericApproximation,
+          engine: this.engine,
+          materialization: materialization,
+        });
+      } finally {
+        if (isScoped) this.engine._popEvalContext();
+      }
 
       // Fallback to a symbolic result if we could not evaluate
       return evalResult ?? this.engine.function(this._operator, tail);

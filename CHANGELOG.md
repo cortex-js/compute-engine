@@ -1,3 +1,22 @@
+## [Unreleased]
+
+### Numerics
+
+- **\[#287\](https://github.com/cortex-js/compute-engine/issues/287) Improved
+  precision for large integer products**: Multiplications and additions of large
+  integers that would previously lose precision (exceeding
+  `Number.MAX_SAFE_INTEGER`) are now automatically promoted to `BigInt` to
+  maintain exact results.
+
+### Evaluation
+
+- **Fixed scope leak**: Ensured that evaluation contexts are correctly popped
+  even when an error or timeout occurs during function evaluation.
+- **Improved numerical evaluation performance**: `Sum`, `Product`, and `Divide`
+  now correctly propagate the `numericApproximation` option to their arguments,
+  significantly speeding up large numerical calculations by avoiding expensive
+  exact rational arithmetic.
+
 ## 0.50.1 _2026-02-11_
 
 ### Compilation
