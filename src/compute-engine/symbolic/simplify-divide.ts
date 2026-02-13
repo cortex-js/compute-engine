@@ -1,10 +1,10 @@
 import type { Expression, RuleStep } from '../global-types';
 import { isFunction, isNumber } from '../boxed-expression/type-guards';
 import { asRational } from '../boxed-expression/numerics';
+import { baseOffset } from './simplify-factorial';
 
 /**
  * Division simplification rules consolidated from simplify-rules.ts.
- * Handles ~5 patterns for simplifying Divide expressions.
  *
  * Patterns:
  * - a/a -> 1 (when a ≠ 0)
@@ -12,6 +12,9 @@ import { asRational } from '../boxed-expression/numerics';
  * - a/(1/b) -> a*b (when b ≠ 0)
  * - a/(b/c) -> a*c/b (when c ≠ 0)
  * - 0/a -> 0 (when a ≠ 0)
+ * - n!/k! -> partial product (concrete integers)
+ * - n!/k! -> (k+1)(k+2)...n (symbolic, small constant diff)
+ * - n!/(k!(n-k)!) -> Binomial(n, k)
  *
  * IMPORTANT: Do not call .simplify() on results to avoid infinite recursion.
  */
@@ -120,6 +123,120 @@ export function simplifyDivide(x: Expression): RuleStep | undefined {
         return {
           value: ce._fn('Power', [numBase, diffExp]),
           because: 'x^a/x^b -> x^(a-b)',
+        };
+      }
+    }
+  }
+
+  // ── Factorial quotient: Factorial(a) / Factorial(b) ──
+  if (
+    num.operator === 'Factorial' &&
+    denom.operator === 'Factorial' &&
+    isFunction(num) &&
+    isFunction(denom)
+  ) {
+    const a = num.op1;
+    const b = denom.op1;
+
+    // Concrete integer case: compute partial product directly
+    if (
+      isNumber(a) &&
+      isNumber(b) &&
+      a.isInteger &&
+      b.isInteger &&
+      a.isNonNegative &&
+      b.isNonNegative
+    ) {
+      const aVal = BigInt(a.re);
+      const bVal = BigInt(b.re);
+      if (aVal >= bVal) {
+        // n!/k! = (k+1)(k+2)...n
+        let result = 1n;
+        for (let i = bVal + 1n; i <= aVal; i++) result *= i;
+        return { value: ce.number(result), because: 'n!/k! partial product' };
+      } else {
+        // n < k: n!/k! = 1/((n+1)(n+2)...k)
+        let result = 1n;
+        for (let i = aVal + 1n; i <= bVal; i++) result *= i;
+        return {
+          value: ce.number([1, result]),
+          because: 'n!/k! -> 1/(partial product)',
+        };
+      }
+    }
+
+    // Symbolic case: check if a and b differ by a small integer constant
+    const aBO = baseOffset(a);
+    const bBO = baseOffset(b);
+    if (aBO && bBO && aBO.base.isSame(bBO.base)) {
+      const d = aBO.offset - bBO.offset;
+      if (Number.isInteger(d) && d >= 1 && d <= 8) {
+        // a!/b! = (b+1)(b+2)...a
+        let product: Expression = b.add(ce.One);
+        for (let i = 2; i <= d; i++) {
+          product = product.mul(b.add(ce.number(i)));
+        }
+        return { value: product, because: 'n!/k! -> (k+1)..n' };
+      }
+      if (Number.isInteger(d) && d <= -1 && d >= -8) {
+        // a < b: a!/b! = 1/((a+1)(a+2)...b)
+        let product: Expression = a.add(ce.One);
+        for (let i = 2; i <= -d; i++) {
+          product = product.mul(a.add(ce.number(i)));
+        }
+        return {
+          value: ce.One.div(product),
+          because: 'n!/k! -> 1/((n+1)..k)',
+        };
+      }
+    }
+  }
+
+  // ── Binomial detection: n! / (k! * (n-k)!) → Binomial(n, k) ──
+  if (
+    num.operator === 'Factorial' &&
+    isFunction(num) &&
+    denom.operator === 'Multiply' &&
+    isFunction(denom)
+  ) {
+    const n = num.op1;
+    const factorialOps = denom.ops.filter(
+      (op) => op.operator === 'Factorial' && isFunction(op)
+    );
+    const otherOps = denom.ops.filter(
+      (op) => !(op.operator === 'Factorial' && isFunction(op))
+    );
+
+    if (
+      factorialOps.length === 2 &&
+      otherOps.length === 0 &&
+      isFunction(factorialOps[0]) &&
+      isFunction(factorialOps[1])
+    ) {
+      const k = factorialOps[0].op1;
+      const m = factorialOps[1].op1;
+
+      // Check if k + m = n (numeric)
+      if (
+        isNumber(n) &&
+        isNumber(k) &&
+        isNumber(m) &&
+        k.re + m.re === n.re
+      ) {
+        // Use the smaller of k, m for efficiency
+        const smaller = k.re <= m.re ? k : m;
+        return {
+          value: ce._fn('Binomial', [n, smaller]),
+          because: 'n!/(k!(n-k)!) -> Binomial',
+        };
+      }
+
+      // Symbolic: check if k + m structurally equals n
+      const sum = k.add(m);
+      if (sum.isSame(n)) {
+        return {
+          value: ce._fn('Binomial', [n, k]),
+          because: 'n!/(k!(n-k)!) -> Binomial',
         };
       }
     }

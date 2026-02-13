@@ -1611,3 +1611,145 @@ describe('SPECIAL FUNCTIONS TYPE SIGNATURES', () => {
     expect(expr.toString()).toMatchInlineSnapshot(`PolyGamma(2, x) + 1`);
   });
 });
+
+describe('Factorial simplification', () => {
+  // Factorial division: concrete integers
+  it('10!/7! should simplify to 720', () => {
+    expect(
+      ce
+        .box(['Divide', ['Factorial', 10], ['Factorial', 7]])
+        .simplify()
+        .toString()
+    ).toMatchInlineSnapshot(`720`);
+  });
+
+  it('5!/10! should simplify to 1/30240', () => {
+    expect(
+      ce
+        .box(['Divide', ['Factorial', 5], ['Factorial', 10]])
+        .simplify()
+        .toString()
+    ).toMatchInlineSnapshot(`1/30240`);
+  });
+
+  it('7!/7! should simplify to 1', () => {
+    expect(
+      ce
+        .box(['Divide', ['Factorial', 7], ['Factorial', 7]])
+        .simplify()
+        .toString()
+    ).toMatchInlineSnapshot(`1`);
+  });
+
+  // Factorial division: symbolic
+  it('(b+1)!/b! should simplify to b + 1', () => {
+    expect(
+      ce
+        .box(['Divide', ['Factorial', ['Add', 'b', 1]], ['Factorial', 'b']])
+        .simplify()
+        .toString()
+    ).toMatchInlineSnapshot(`b + 1`);
+  });
+
+  it('b!/(b-1)! should simplify to b', () => {
+    expect(
+      ce
+        .box([
+          'Divide',
+          ['Factorial', 'b'],
+          ['Factorial', ['Add', 'b', -1]],
+        ])
+        .simplify()
+        .toString()
+    ).toMatchInlineSnapshot(`b`);
+  });
+
+  // Binomial detection from factorial division
+  it('10!/(3!*7!) should simplify to 120', () => {
+    expect(
+      ce
+        .box([
+          'Divide',
+          ['Factorial', 10],
+          ['Multiply', ['Factorial', 3], ['Factorial', 7]],
+        ])
+        .simplify()
+        .toString()
+    ).toMatchInlineSnapshot(`120`);
+  });
+
+  // Factorial sums/differences: symbolic factoring
+  it('(b+1)! - b! should simplify to b * b!', () => {
+    expect(
+      ce
+        .box([
+          'Subtract',
+          ['Factorial', ['Add', 'b', 1]],
+          ['Factorial', 'b'],
+        ])
+        .simplify()
+        .toString()
+    ).toMatchInlineSnapshot(`b * b!`);
+  });
+
+  it('(b+1)! + b! should simplify to (b + 2) * b!', () => {
+    expect(
+      ce
+        .box(['Add', ['Factorial', ['Add', 'b', 1]], ['Factorial', 'b']])
+        .simplify()
+        .toString()
+    ).toMatchInlineSnapshot(`(b + 2) * b!`);
+  });
+
+  it('b! - (b-1)! should simplify to (b - 1) * (b - 1)!', () => {
+    expect(
+      ce
+        .box([
+          'Subtract',
+          ['Factorial', 'b'],
+          ['Factorial', ['Add', 'b', -1]],
+        ])
+        .simplify()
+        .toString()
+    ).toMatchInlineSnapshot(`(b - 1) * (b - 1)!`);
+  });
+
+  it('2*b! + (b+1)! should simplify to (b + 3) * b!', () => {
+    expect(
+      ce
+        .box([
+          'Add',
+          ['Multiply', 2, ['Factorial', 'b']],
+          ['Factorial', ['Add', 'b', 1]],
+        ])
+        .simplify()
+        .toString()
+    ).toMatchInlineSnapshot(`(b + 3) * b!`);
+  });
+});
+
+describe('Binomial/Choose simplification', () => {
+  it('Binomial(b, 0) should simplify to 1', () => {
+    expect(
+      ce.box(['Binomial', 'b', 0]).simplify().toString()
+    ).toMatchInlineSnapshot(`1`);
+  });
+
+  it('Binomial(b, 1) should simplify to b', () => {
+    expect(
+      ce.box(['Binomial', 'b', 1]).simplify().toString()
+    ).toMatchInlineSnapshot(`b`);
+  });
+
+  it('Binomial(b, b) should simplify to 1', () => {
+    expect(
+      ce.box(['Binomial', 'b', 'b']).simplify().toString()
+    ).toMatchInlineSnapshot(`1`);
+  });
+
+  it('Binomial(5, 2) should evaluate to 10', () => {
+    expect(
+      ce.box(['Binomial', 5, 2]).evaluate().toString()
+    ).toMatchInlineSnapshot(`10`);
+  });
+});

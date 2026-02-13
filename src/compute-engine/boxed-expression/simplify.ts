@@ -433,6 +433,8 @@ function simplifyNonCommutativeFunction(
   const isAbsRule = because?.startsWith('|');
   // Quotient-power distribution: a/(b/c)^d -> a*(c/b)^d eliminates nested fractions
   const isQuotientPowerRule = because === 'a / (b/c)^d -> a * (c/b)^d';
+  // Factorial factoring: n! - (n-1)! -> (n-1)! * (n-1) is structurally preferred
+  const isFactorialFactoring = because === 'factor common factorial';
   // Expand may produce more nodes but enables term cancellation
   // Accept when expansion reduces terms or eliminates Power-of-Add patterns
   const isExpandWithSimplification =
@@ -474,6 +476,7 @@ function simplifyNonCommutativeFunction(
     !isRootSignRule &&
     !isAbsRule &&
     !isQuotientPowerRule &&
+    !isFactorialFactoring &&
     !isExpandWithSimplification
   )
     return steps;

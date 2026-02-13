@@ -38,6 +38,10 @@ import { simplifyPower } from './simplify-power';
 import { simplifyTrig } from './simplify-trig';
 import { simplifyHyperbolic } from './simplify-hyperbolic';
 import { simplifyDivide } from './simplify-divide';
+import {
+  simplifyBinomial,
+  simplifyFactorialAdd,
+} from './simplify-factorial';
 
 /**
  * # Performance Optimization Notes for Simplification Rules
@@ -167,6 +171,15 @@ export const SIMPLIFY_RULES: Rule[] = [
   // Try to expand the expression:
   // x*(y+z) -> x*y + x*z
   (x) => {
+    // Skip expand for products containing Factorial to prevent cycles
+    // with factorial factoring: (n-1)! * (n-1) should NOT re-expand
+    if (
+      x.operator === 'Multiply' &&
+      isFunction(x) &&
+      x.ops.some((op) => op.operator === 'Factorial')
+    )
+      return undefined;
+
     // Skip expand for Multiply expressions with same-base powers
     // Let simplifyPower handle e^x * e^2 -> e^{x+2} instead of evaluating e^2
     // Also handle bare symbols (a = a^1) as having an implicit power
@@ -192,6 +205,10 @@ export const SIMPLIFY_RULES: Rule[] = [
     const value = expand(x);
     return value ? { value, because: 'expand' } : undefined;
   },
+
+  // Factor out common factorial from sums/differences (must fire before Add)
+  // e.g., n! - (n-1)! → (n-1)! * (n-1)
+  simplifyFactorialAdd,
 
   //
   // Add, Negate
@@ -286,6 +303,14 @@ export const SIMPLIFY_RULES: Rule[] = [
       if (hasTan && hasCot) return undefined;
     }
 
+    // Skip Multiply when Factorial is multiplied by a sum (Add) expression
+    // to preserve factorial factoring results like (n-1)! * (n-1)
+    if (
+      ops.some((op) => op.operator === 'Factorial') &&
+      ops.some((op) => op.operator === 'Add')
+    )
+      return undefined;
+
     // The Multiply function has a 'lazy' property, so we need to ensure operands are canonical.
     // Also evaluate purely numeric operands (no unknowns) to simplify expressions.
     // IMPORTANT: Don't call .simplify() on operands to avoid infinite recursion.
@@ -372,6 +397,23 @@ export const SIMPLIFY_RULES: Rule[] = [
         denom.operator === 'Power' &&
         isFunction(denom) &&
         denom.op1.operator === 'Divide'
+      )
+        return undefined;
+
+      // Skip Factorial divisions — let simplifyDivide handle factorial quotients
+      // e.g., 35!/7!, n!/(n-2)!
+      if (
+        num.operator === 'Factorial' &&
+        denom.operator === 'Factorial'
+      )
+        return undefined;
+
+      // Skip n! / (k! * m!) — let simplifyDivide handle binomial detection
+      if (
+        num.operator === 'Factorial' &&
+        denom.operator === 'Multiply' &&
+        isFunction(denom) &&
+        denom.ops.some((op) => op.operator === 'Factorial')
       )
         return undefined;
 
@@ -689,8 +731,11 @@ export const SIMPLIFY_RULES: Rule[] = [
   // Hyperbolic trig simplifications
   simplifyHyperbolic,
 
-  // Division simplifications
+  // Division simplifications (includes factorial quotient and binomial detection)
   simplifyDivide,
+
+  // Binomial/Choose identity simplifications
+  simplifyBinomial,
 
   //
   // Power combination for 2+ operands in Multiply
