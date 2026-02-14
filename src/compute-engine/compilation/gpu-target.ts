@@ -176,10 +176,54 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     return `acosh(1.0 / (${compile(x)}))`;
   },
 
+  // Trigonometric (additional)
+  Arctan2: (args, compile) => {
+    if (args.length < 2) throw new Error('Arctan2: need two arguments');
+    return `atan(${compile(args[0])}, ${compile(args[1])})`;
+  },
+  Hypot: ([x, y], compile) => {
+    if (x === null || y === null) throw new Error('Hypot: need two arguments');
+    return `length(vec2(${compile(x)}, ${compile(y)}))`;
+  },
+  Haversine: ([x], compile) => {
+    if (x === null) throw new Error('Haversine: no argument');
+    return `((1.0 - cos(${compile(x)})) * 0.5)`;
+  },
+  InverseHaversine: ([x], compile) => {
+    if (x === null) throw new Error('InverseHaversine: no argument');
+    return `(2.0 * asin(sqrt(${compile(x)})))`;
+  },
+
   // Special functions
   Gamma: ([x], compile) => {
     if (x === null) throw new Error('Gamma: no argument');
     return `_gpu_gamma(${compile(x)})`;
+  },
+  GammaLn: ([x], compile) => {
+    if (x === null) throw new Error('GammaLn: no argument');
+    return `_gpu_gammaln(${compile(x)})`;
+  },
+  Factorial: ([x], compile) => {
+    if (x === null) throw new Error('Factorial: no argument');
+    return `_gpu_gamma(${compile(x)} + 1.0)`;
+  },
+  Beta: ([a, b], compile) => {
+    if (a === null || b === null) throw new Error('Beta: need two arguments');
+    const ca = compile(a);
+    const cb = compile(b);
+    return `(_gpu_gamma(${ca}) * _gpu_gamma(${cb}) / _gpu_gamma(${ca} + ${cb}))`;
+  },
+  Erf: ([x], compile) => {
+    if (x === null) throw new Error('Erf: no argument');
+    return `_gpu_erf(${compile(x)})`;
+  },
+  Erfc: ([x], compile) => {
+    if (x === null) throw new Error('Erfc: no argument');
+    return `(1.0 - _gpu_erf(${compile(x)}))`;
+  },
+  ErfInv: ([x], compile) => {
+    if (x === null) throw new Error('ErfInv: no argument');
+    return `_gpu_erfinv(${compile(x)})`;
   },
 
   // Additional math functions
@@ -188,6 +232,14 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     if (args.length === 0) throw new Error('Log: no argument');
     if (args.length === 1) return `(log(${compile(args[0])}) / log(10.0))`;
     return `(log(${compile(args[0])}) / log(${compile(args[1])}))`;
+  },
+  Log10: ([x], compile) => {
+    if (x === null) throw new Error('Log10: no argument');
+    return `(log(${compile(x)}) * 0.4342944819032518)`;
+  },
+  Lg: ([x], compile) => {
+    if (x === null) throw new Error('Lg: no argument');
+    return `(log(${compile(x)}) * 0.4342944819032518)`;
   },
   Square: ([x], compile) => {
     if (x === null) throw new Error('Square: no argument');
@@ -286,6 +338,40 @@ float _gpu_gamma(float z) {
   x += 1.5056327351493116e-7 / (z + 8.0);
   float t = z + 7.5;
   return sqrt(2.0 * PI) * pow(t, z + 0.5) * exp(-t) * x;
+}
+
+float _gpu_gammaln(float z) {
+  // Stirling asymptotic expansion for ln(Gamma(z)), z > 0
+  float z3 = z * z * z;
+  return z * log(z) - z - 0.5 * log(z)
+    + 0.5 * log(2.0 * 3.14159265358979)
+    + 1.0 / (12.0 * z)
+    - 1.0 / (360.0 * z3)
+    + 1.0 / (1260.0 * z3 * z * z);
+}
+`;
+
+/**
+ * GPU error function using Abramowitz & Stegun approximation.
+ * Maximum error: |epsilon(x)| <= 1.5e-7.
+ */
+export const GPU_ERF_PREAMBLE = `
+float _gpu_erf(float x) {
+  float ax = abs(x);
+  float t = 1.0 / (1.0 + 0.3275911 * ax);
+  float y = ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t;
+  float result = 1.0 - y * exp(-ax * ax);
+  return x < 0.0 ? -result : result;
+}
+
+float _gpu_erfinv(float x) {
+  float pi = 3.14159265358979;
+  float x2 = x * x;
+  float x3 = x * x2;
+  float x5 = x3 * x2;
+  float x7 = x5 * x2;
+  float x9 = x7 * x2;
+  return sqrt(pi) * 0.5 * (x + (pi / 12.0) * x3 + (7.0 * pi * pi / 480.0) * x5 + (127.0 * pi * pi * pi / 40320.0) * x7 + (4369.0 * pi * pi * pi * pi / 5806080.0) * x9);
 }
 `;
 
@@ -410,7 +496,10 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       success: true,
       code,
     };
-    if (code.includes('_gpu_gamma')) result.preamble = GPU_GAMMA_PREAMBLE;
+    let preamble = '';
+    if (code.includes('_gpu_gamma')) preamble += GPU_GAMMA_PREAMBLE;
+    if (code.includes('_gpu_erf')) preamble += GPU_ERF_PREAMBLE;
+    if (preamble) result.preamble = preamble;
     return result;
   }
 

@@ -1000,6 +1000,31 @@ IntervalResult ia_gamma(IntervalResult x) {
   return ia_gamma(x.value);
 }
 
+// Log-gamma using Stirling asymptotic expansion, z > 0
+float _gpu_gammaln(float z) {
+  float z3 = z * z * z;
+  return z * log(z) - z - 0.5 * log(z)
+    + 0.5 * log(2.0 * 3.14159265358979)
+    + 1.0 / (12.0 * z)
+    - 1.0 / (360.0 * z3)
+    + 1.0 / (1260.0 * z3 * z * z);
+}
+
+// Interval log-gamma — monotonically increasing for x > 0
+IntervalResult ia_gammaln(vec2 x) {
+  if (x.y <= 0.0) return ia_empty();
+  if (x.x > 0.0) {
+    return ia_ok(vec2(_gpu_gammaln(x.x) - IA_EPS, _gpu_gammaln(x.y) + IA_EPS));
+  }
+  // Partial: clipped at lo
+  return ia_partial(vec2(0.0, _gpu_gammaln(x.y) + IA_EPS), IA_PARTIAL_LO);
+}
+
+IntervalResult ia_gammaln(IntervalResult x) {
+  if (ia_is_error(x.status)) return x;
+  return ia_gammaln(x.value);
+}
+
 // Boolean interval comparisons
 // Returns 1.0 = true, 0.0 = false, 0.5 = maybe
 const float IA_TRUE = 1.0;
@@ -1148,6 +1173,7 @@ const INTERVAL_GLSL_FUNCTIONS: CompiledFunctions<Expression> = {
 
   // Special functions
   Gamma: (args, compile) => `ia_gamma(${compile(args[0])})`,
+  GammaLn: (args, compile) => `ia_gammaln(${compile(args[0])})`,
 
   // Elementary functions
   Abs: (args, compile) => `ia_abs(${compile(args[0])})`,

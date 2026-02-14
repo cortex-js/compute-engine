@@ -2,8 +2,34 @@ import type { Expression } from '../global-types';
 import type { MathJsonSymbol } from '../../math-json/types';
 import { isSymbol, isFunction } from '../boxed-expression/type-guards';
 
-import { chop, factorial, gcd, lcm, limit } from '../numerics/numeric';
-import { gamma, gammaln } from '../numerics/special-functions';
+import {
+  chop,
+  factorial,
+  factorial2,
+  gcd,
+  lcm,
+  limit,
+} from '../numerics/numeric';
+import {
+  gamma,
+  gammaln,
+  erf,
+  erfc,
+  erfInv,
+  beta,
+  digamma,
+  trigamma,
+  polygamma,
+  zeta,
+  lambertW,
+  besselJ,
+  besselY,
+  besselI,
+  besselK,
+  airyAi,
+  airyBi,
+} from '../numerics/special-functions';
+import { choose } from '../boxed-expression/expand';
 import {
   interquartileRange,
   kurtosis,
@@ -288,6 +314,85 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       throw new Error('Remainder: missing argument');
     return `(${compile(a)} - ${compile(b)} * Math.round(${compile(a)} / ${compile(b)}))`;
   },
+
+  // Arithmetic operators handled as functions for completeness
+  Subtract: ([a, b], compile) => {
+    if (a === null || b === null) throw new Error('Subtract: missing argument');
+    return `(${compile(a)} - ${compile(b)})`;
+  },
+  Divide: ([a, b], compile) => {
+    if (a === null || b === null) throw new Error('Divide: missing argument');
+    return `(${compile(a)} / ${compile(b)})`;
+  },
+  Negate: ([x], compile) => {
+    if (x === null) throw new Error('Negate: no argument');
+    return `(-${compile(x)})`;
+  },
+
+  // Factorial and double factorial
+  Factorial: '_SYS.factorial',
+  Factorial2: '_SYS.factorial2',
+
+  // Additional logarithmic functions
+  Exp2: ([x], compile) => {
+    if (x === null) throw new Error('Exp2: no argument');
+    return `Math.pow(2, ${compile(x)})`;
+  },
+  Log2: 'Math.log2',
+  Log10: 'Math.log10',
+  Lg: 'Math.log10',
+
+  // Trigonometric
+  Arctan2: 'Math.atan2',
+  Hypot: 'Math.hypot',
+  Degrees: ([x], compile) => {
+    if (x === null) throw new Error('Degrees: no argument');
+    return `(${compile(x)} * Math.PI / 180)`;
+  },
+  Haversine: ([x], compile) => {
+    if (x === null) throw new Error('Haversine: no argument');
+    return BaseCompiler.inlineExpression(
+      '(1 - Math.cos(${x})) / 2',
+      compile(x)
+    );
+  },
+  InverseHaversine: ([x], compile) => {
+    if (x === null) throw new Error('InverseHaversine: no argument');
+    return `(2 * Math.asin(Math.sqrt(${compile(x)})))`;
+  },
+
+  // Error functions
+  Erf: '_SYS.erf',
+  Erfc: '_SYS.erfc',
+  ErfInv: '_SYS.erfInv',
+
+  // Special functions
+  Beta: '_SYS.beta',
+  Digamma: '_SYS.digamma',
+  Trigamma: '_SYS.trigamma',
+  PolyGamma: (args, compile) =>
+    `_SYS.polygamma(${compile(args[0])}, ${compile(args[1])})`,
+  Zeta: '_SYS.zeta',
+  LambertW: '_SYS.lambertW',
+
+  // Bessel functions
+  BesselJ: (args, compile) =>
+    `_SYS.besselJ(${compile(args[0])}, ${compile(args[1])})`,
+  BesselY: (args, compile) =>
+    `_SYS.besselY(${compile(args[0])}, ${compile(args[1])})`,
+  BesselI: (args, compile) =>
+    `_SYS.besselI(${compile(args[0])}, ${compile(args[1])})`,
+  BesselK: (args, compile) =>
+    `_SYS.besselK(${compile(args[0])}, ${compile(args[1])})`,
+
+  // Airy functions
+  AiryAi: '_SYS.airyAi',
+  AiryBi: '_SYS.airyBi',
+
+  // Combinatorics
+  Binomial: (args, compile) =>
+    `_SYS.binomial(${compile(args[0])}, ${compile(args[1])})`,
+  Fibonacci: '_SYS.fibonacci',
 };
 
 /**
@@ -297,6 +402,7 @@ export class ComputeEngineFunction extends Function {
   SYS = {
     chop: chop,
     factorial: factorial,
+    factorial2: factorial2,
     gamma: gamma,
     gcd: gcd,
     integrate: (f, a, b) => monteCarloEstimate(f, a, b, 10e6).estimate,
@@ -314,6 +420,23 @@ export class ComputeEngineFunction extends Function {
     mode,
     quartiles,
     interquartileRange,
+    erf,
+    erfc,
+    erfInv,
+    beta,
+    digamma,
+    trigamma,
+    polygamma,
+    zeta,
+    lambertW,
+    besselJ,
+    besselY,
+    besselI,
+    besselK,
+    airyAi,
+    airyBi,
+    binomial: choose,
+    fibonacci: fibonacci,
   };
 
   constructor(body: string, preamble = '') {
@@ -341,6 +464,7 @@ export class ComputeEngineFunctionLiteral extends Function {
   SYS = {
     chop: chop,
     factorial: factorial,
+    factorial2: factorial2,
     gamma: gamma,
     gcd: gcd,
     integrate: (f, a, b) => monteCarloEstimate(f, a, b, 10e6).estimate,
@@ -358,6 +482,23 @@ export class ComputeEngineFunctionLiteral extends Function {
     mode,
     quartiles,
     interquartileRange,
+    erf,
+    erfc,
+    erfInv,
+    beta,
+    digamma,
+    trigamma,
+    polygamma,
+    zeta,
+    lambertW,
+    besselJ,
+    besselY,
+    besselI,
+    besselK,
+    airyAi,
+    airyBi,
+    binomial: choose,
+    fibonacci: fibonacci,
   };
 
   constructor(body: string, args: string[]) {
@@ -561,4 +702,21 @@ function isTrulyNamed(func: Function): boolean {
   const source = func.toString();
   if (source.includes('=>')) return false;
   return source.startsWith('function ') && source.includes(func.name);
+}
+
+/**
+ * Compute the nth Fibonacci number using iterative doubling.
+ */
+function fibonacci(n: number): number {
+  if (!Number.isInteger(n)) return NaN;
+  if (n < 0) return n % 2 === 0 ? -fibonacci(-n) : fibonacci(-n);
+  if (n <= 1) return n;
+  let a = 0;
+  let b = 1;
+  for (let i = 2; i <= n; i++) {
+    const next = a + b;
+    a = b;
+    b = next;
+  }
+  return b;
 }

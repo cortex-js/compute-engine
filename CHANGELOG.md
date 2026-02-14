@@ -11,10 +11,21 @@
   `mat2x2f`/`mat3x3f`/`mat4x4f` in WGSL) with proper column-major
   transposition. Column vectors are flattened to `vecN`/`vecNf` instead of
   nested single-element arrays.
-- **Gamma function compilation**: `Gamma` can now be compiled to `interval-js`,
-  `glsl`, `wgsl`, and `interval-glsl` targets. The interval targets include
-  pole detection at non-positive integers and correct monotonicity handling
-  around the minimum at x ≈ 1.46.
+- **Gamma function compilation**: `Gamma` and `GammaLn` can now be compiled to
+  `interval-js`, `glsl`, `wgsl`, and `interval-glsl` targets. The interval
+  targets include pole detection at non-positive integers and correct
+  monotonicity handling around the minimum at x ≈ 1.46.
+- **Special function compilation**: 27 additional functions can now be compiled
+  to JavaScript: `Erf`, `Erfc`, `ErfInv`, `Beta`, `Digamma`, `Trigamma`,
+  `PolyGamma`, `Zeta`, `LambertW`, `BesselJ`, `BesselY`, `BesselI`, `BesselK`,
+  `AiryAi`, `AiryBi`, `Factorial`, `Factorial2`, `Exp2`, `Log2`, `Log10`, `Lg`,
+  `Arctan2`, `Hypot`, `Degrees`, `Haversine`, `InverseHaversine`, `Binomial`,
+  and `Fibonacci`.
+- **GPU special functions**: `Erf`, `Erfc`, `ErfInv`, `Beta`, `Factorial`,
+  `Arctan2`, `Hypot`, `Haversine`, `InverseHaversine`, `Log10`, and `Lg` can
+  now be compiled to GLSL and WGSL targets. `Erf`/`ErfInv` use Abramowitz &
+  Stegun polynomial approximations; `Beta` and `Factorial` leverage the existing
+  GPU Gamma preamble.
 
 ### Simplification
 

@@ -187,6 +187,7 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
 
   // Special functions
   Gamma: (args, compile) => `_IA.gamma(${compile(args[0])})`,
+  GammaLn: (args, compile) => `_IA.gammaln(${compile(args[0])})`,
 
   // Elementary
   Fract: (args, compile) => `_IA.fract(${compile(args[0])})`,

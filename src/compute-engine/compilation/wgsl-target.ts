@@ -28,6 +28,12 @@ const WGSL_FUNCTIONS: CompiledFunctions<Expression> = {
     return `(${compile(a)} % ${compile(b)})`;
   },
 
+  // Override Hypot to use vec2f instead of vec2
+  Hypot: ([x, y], compile) => {
+    if (x === null || y === null) throw new Error('Hypot: need two arguments');
+    return `length(vec2f(${compile(x)}, ${compile(y)}))`;
+  },
+
   List: compileWGSLList,
   Matrix: (args, compile) =>
     compileGPUMatrix(
