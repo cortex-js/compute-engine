@@ -18,7 +18,7 @@ import {
  * `UnitExpression` (string or JSON array) that `unit-data.ts` functions
  * can work with.
  */
-function boxedToUnitExpression(expr: Expression): UnitExpression | null {
+export function boxedToUnitExpression(expr: Expression): UnitExpression | null {
   if (!expr) return null;
 
   // Simple symbol unit

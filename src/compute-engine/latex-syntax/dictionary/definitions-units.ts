@@ -83,6 +83,13 @@ function readBracedText(parser: Parser): string | null {
       continue;
     }
 
+    // `\cdot` is used for unit multiplication in LaTeX: `m\cdot s^{-1}`
+    if (token === '\\cdot') {
+      text += '*';
+      parser.nextToken();
+      continue;
+    }
+
     // `^` followed by `{...}` is common LaTeX notation for exponents.
     // We want to collect `^{2}` as `^2`.
     if (token === '^') {

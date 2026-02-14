@@ -16,7 +16,7 @@ import type { OperatorDefinition, SymbolDefinitions } from '../global-types';
 import type { Expression } from '../types-expression';
 import { isFunction, isNumber, isSymbol } from '../boxed-expression/type-guards';
 import { numericTypeHandler } from './type-handlers';
-import { getUnitDimension, getUnitScale } from './unit-data';
+import { getUnitScale } from './unit-data';
 
 //
 // Note: The name of trigonometric functions follow NIST DLMF
@@ -240,6 +240,8 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
   },
 ];
 
+const ANGULAR_UNITS = new Set(['deg', 'rad', 'grad', 'turn', 'arcmin', 'arcsec']);
+
 /**
  * If `expr` is a `Quantity` with an angular unit (deg, rad, grad, etc.),
  * return a plain numeric expression in radians.  Otherwise return `null`.
@@ -253,9 +255,7 @@ function angularQuantityToRadians(
   if (!isSymbol(unitArg)) return null;
   const unitSymbol = unitArg.symbol;
 
-  const dim = getUnitDimension(unitSymbol);
-  // Angular units are dimensionless: [0,0,0,0,0,0,0]
-  if (!dim || !dim.every((v) => v === 0)) return null;
+  if (!ANGULAR_UNITS.has(unitSymbol)) return null;
 
   const scale = getUnitScale(unitSymbol);
   if (scale === null) return null;
@@ -283,7 +283,8 @@ function trigFunction(
         const radians = angularQuantityToRadians(ops[0]);
         if (radians) return ce._fn(operator, [radians]);
       }
-      // Default: create canonical form with the original arguments
+      // Validate arity (inserts error markers for missing args)
+      ops = checkArity(ce, ops, 1);
       return ce._fn(operator, ops);
     },
     evaluate: ([x], { numericApproximation }) => {

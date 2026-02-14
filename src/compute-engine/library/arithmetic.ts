@@ -78,6 +78,7 @@ import { parseType } from '../../common/type/parse';
 import { widen } from '../../common/type/utils';
 import { numericTypeHandler } from './type-handlers';
 import { convertUnit, convertCompoundUnit, type UnitExpression } from './unit-data';
+import { boxedToUnitExpression } from './units';
 import { range, rangeLast } from './collections';
 import { run, runAsync } from '../../common/interruptible';
 import type {
@@ -2083,46 +2084,6 @@ function unitSymbol(q: QuantityExpr): string | null {
  */
 function unitExpr(q: QuantityExpr): Expression {
   return q.op2;
-}
-
-/**
- * Convert a boxed expression representing a unit into a plain
- * `UnitExpression` (string or JSON array) suitable for `unit-data.ts`.
- */
-function boxedToUnitExpression(expr: Expression): UnitExpression | null {
-  if (!expr) return null;
-
-  // Simple symbol unit
-  if (isSymbol(expr)) return expr.symbol;
-
-  const op = expr.operator;
-  if (!op || !isFunction(expr)) return null;
-
-  if (op === 'Multiply') {
-    const parts: UnitExpression[] = [];
-    for (const child of expr.ops) {
-      const c = boxedToUnitExpression(child);
-      if (!c) return null;
-      parts.push(c);
-    }
-    return ['Multiply', ...parts];
-  }
-
-  if (op === 'Divide') {
-    const a = boxedToUnitExpression(expr.op1);
-    const b = boxedToUnitExpression(expr.op2);
-    if (!a || !b) return null;
-    return ['Divide', a, b];
-  }
-
-  if (op === 'Power') {
-    const base = boxedToUnitExpression(expr.op1);
-    const exp = expr.op2?.re;
-    if (!base || exp === undefined) return null;
-    return ['Power', base, exp];
-  }
-
-  return null;
 }
 
 /**
