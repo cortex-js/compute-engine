@@ -529,3 +529,38 @@ describe('PHYSICS CONSTANTS', () => {
     expect(expr.op1.re).toBeCloseTo(9.80665);
   });
 });
+
+describe('INTEGRATION', () => {
+  test('Parse and evaluate: 12 cm + 1 m', () => {
+    const expr = engine.parse('12\\,\\mathrm{cm}+1\\,\\mathrm{m}').evaluate();
+    expect(expr.operator).toBe('Quantity');
+    expect(expr.op1.re).toBeCloseTo(112);
+    expect(expr.op2.symbol).toBe('cm');
+  });
+
+  test('Parse and evaluate: 5 km', () => {
+    const expr = engine.parse('5\\,\\mathrm{km}').evaluate();
+    expect(expr.operator).toBe('Quantity');
+    expect(expr.op1.re).toBe(5);
+    expect(expr.op2.symbol).toBe('km');
+  });
+
+  test('LaTeX round-trip: simple quantity', () => {
+    const latex = '5\\,\\mathrm{m}';
+    const parsed = engine.parse(latex);
+    expect(parsed.latex).toBe(latex);
+  });
+
+  test('Incompatible add remains unevaluated', () => {
+    // Adding m + s cannot be combined; the engine returns an unevaluated Add
+    const expr = engine
+      .box(['Add', ['Quantity', 5, 'm'], ['Quantity', 3, 's']])
+      .evaluate();
+    expect(expr.operator).toBe('Add');
+  });
+
+  test('Logarithmic unit parse', () => {
+    const expr = engine.box(['Quantity', 30, 'dB']);
+    expect(expr.isValid).toBe(true);
+  });
+});
