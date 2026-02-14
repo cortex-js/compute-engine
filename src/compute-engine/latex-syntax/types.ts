@@ -72,7 +72,8 @@ export type LibraryCategory =
   | 'polynomials'
   | 'relop'
   | 'statistics'
-  | 'trigonometry';
+  | 'trigonometry'
+  | 'units';
 
 /**
  *

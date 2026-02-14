@@ -13,6 +13,7 @@ import { RELOP_LIBRARY } from './relational-operator';
 import { SETS_LIBRARY } from './sets';
 import { STATISTICS_LIBRARY } from './statistics';
 import { TRIGONOMETRY_LIBRARY } from './trigonometry';
+import { UNITS_LIBRARY } from './units';
 
 import { DEFINITIONS_ALGEBRA } from '../latex-syntax/dictionary/definitions-algebra';
 import { DEFINITIONS_ARITHMETIC } from '../latex-syntax/dictionary/definitions-arithmetic';
@@ -127,8 +128,13 @@ export const STANDARD_LIBRARIES: LibraryDefinition[] = [
     latexDictionary: DEFINITIONS_STATISTICS,
   },
   {
-    name: 'physics',
+    name: 'units',
     requires: ['arithmetic'],
+    definitions: UNITS_LIBRARY,
+  },
+  {
+    name: 'physics',
+    requires: ['arithmetic', 'units'],
     definitions: {
       Mu0: {
         description: 'Vaccum permeability',
