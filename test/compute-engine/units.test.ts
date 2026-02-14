@@ -476,6 +476,36 @@ describe('UNIT DIMENSION', () => {
   });
 });
 
+describe('ANGULAR UNITS', () => {
+  test('Sin of Quantity in degrees', () => {
+    const expr = engine
+      .box(['Sin', ['Quantity', 90, 'deg']])
+      .evaluate();
+    expect(expr.re).toBe(1);
+  });
+
+  test('Sin of Quantity in radians', () => {
+    const expr = engine
+      .box(['Sin', ['Quantity', Math.PI / 2, 'rad']])
+      .N();
+    expect(expr.re).toBeCloseTo(1);
+  });
+
+  test('Convert degrees to radians', () => {
+    const expr = engine
+      .box(['UnitConvert', ['Quantity', 180, 'deg'], 'rad'])
+      .evaluate();
+    expect(expr.op1.re).toBeCloseTo(Math.PI);
+  });
+
+  test('Convert grad to deg', () => {
+    const expr = engine
+      .box(['UnitConvert', ['Quantity', 100, 'grad'], 'deg'])
+      .evaluate();
+    expect(expr.op1.re).toBeCloseTo(90);
+  });
+});
+
 describe('PHYSICS CONSTANTS', () => {
   test('Speed of light is a Quantity', () => {
     const expr = engine.box('SpeedOfLight').evaluate();

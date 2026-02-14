@@ -13,8 +13,10 @@ import { apply2 } from '../boxed-expression/apply';
 
 import { reducedRational } from '../numerics/rationals';
 import type { OperatorDefinition, SymbolDefinitions } from '../global-types';
-import { isNumber } from '../boxed-expression/type-guards';
+import type { Expression } from '../types-expression';
+import { isFunction, isNumber, isSymbol } from '../boxed-expression/type-guards';
 import { numericTypeHandler } from './type-handlers';
+import { getUnitDimension, getUnitScale } from './unit-data';
 
 //
 // Note: The name of trigonometric functions follow NIST DLMF
@@ -238,6 +240,32 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
   },
 ];
 
+/**
+ * If `expr` is a `Quantity` with an angular unit (deg, rad, grad, etc.),
+ * return a plain numeric expression in radians.  Otherwise return `null`.
+ */
+function angularQuantityToRadians(
+  expr: Expression
+): Expression | null {
+  if (!isFunction(expr) || expr.operator !== 'Quantity') return null;
+
+  const unitArg = expr.op2;
+  if (!isSymbol(unitArg)) return null;
+  const unitSymbol = unitArg.symbol;
+
+  const dim = getUnitDimension(unitSymbol);
+  // Angular units are dimensionless: [0,0,0,0,0,0,0]
+  if (!dim || !dim.every((v) => v === 0)) return null;
+
+  const scale = getUnitScale(unitSymbol);
+  if (scale === null) return null;
+
+  const magnitude = expr.op1.re;
+  if (!Number.isFinite(magnitude)) return null;
+
+  return expr.engine.number(magnitude * scale);
+}
+
 function trigFunction(
   operator: string,
   complexity: number,
@@ -250,6 +278,14 @@ function trigFunction(
     signature: '(number) -> number',
     type: (ops) => numericTypeHandler(ops),
     sgn: ([x]) => trigSign(operator, x),
+    canonical: (ops, { engine: ce }) => {
+      if (ops.length === 1) {
+        const radians = angularQuantityToRadians(ops[0]);
+        if (radians) return ce._fn(operator, [radians]);
+      }
+      // Default: create canonical form with the original arguments
+      return ce._fn(operator, ops);
+    },
     evaluate: ([x], { numericApproximation }) => {
       if (numericApproximation) return evalTrig(operator, x);
       const a = constructibleValues(operator, x);
