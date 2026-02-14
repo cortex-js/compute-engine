@@ -936,6 +936,70 @@ IntervalResult ia_asech(IntervalResult x) {
   return ia_asech(x.value);
 }
 
+// Gamma function using Lanczos approximation (g=7, n=9 coefficients)
+// Poles at non-positive integers; minimum at x ≈ 1.4616
+float _gpu_gamma(float z) {
+  const float PI = 3.14159265358979;
+  if (z < 0.5) {
+    return PI / (sin(PI * z) * _gpu_gamma(1.0 - z));
+  }
+  z -= 1.0;
+  float x = 0.99999999999980993;
+  x += 676.5203681218851 / (z + 1.0);
+  x += -1259.1392167224028 / (z + 2.0);
+  x += 771.32342877765313 / (z + 3.0);
+  x += -176.61502916214059 / (z + 4.0);
+  x += 12.507343278686905 / (z + 5.0);
+  x += -0.13857109526572012 / (z + 6.0);
+  x += 9.9843695780195716e-6 / (z + 7.0);
+  x += 1.5056327351493116e-7 / (z + 8.0);
+  float t = z + 7.5;
+  return sqrt(2.0 * PI) * pow(t, z + 0.5) * exp(-t) * x;
+}
+
+// Interval gamma function
+// Handles poles at non-positive integers and the minimum at x ≈ 1.4616
+IntervalResult ia_gamma(vec2 x) {
+  const float GAMMA_MIN_X = 1.4616321;
+  const float GAMMA_MIN_Y = 0.8856032;
+
+  // Check for poles: interval crosses or touches zero
+  if (x.x <= 0.0 && x.y >= 0.0) {
+    return ia_singular(0.0);
+  }
+
+  // Entirely negative: check if interval spans a negative integer
+  if (x.x < 0.0) {
+    float ceilLo = ceil(x.x);
+    float floorHi = floor(x.y);
+    if (ceilLo <= floorHi) {
+      return ia_singular(ceilLo);
+    }
+    // No pole — both endpoints between same consecutive negative integers
+    float gLo = _gpu_gamma(x.x);
+    float gHi = _gpu_gamma(x.y);
+    return ia_ok(vec2(min(gLo, gHi) - IA_EPS, max(gLo, gHi) + IA_EPS));
+  }
+
+  // Entirely positive
+  if (x.x >= GAMMA_MIN_X) {
+    // Monotonically increasing
+    return ia_ok(vec2(_gpu_gamma(x.x) - IA_EPS, _gpu_gamma(x.y) + IA_EPS));
+  }
+  if (x.y <= GAMMA_MIN_X) {
+    // Monotonically decreasing
+    return ia_ok(vec2(_gpu_gamma(x.y) - IA_EPS, _gpu_gamma(x.x) + IA_EPS));
+  }
+  // Crosses the minimum
+  float gMax = max(_gpu_gamma(x.x), _gpu_gamma(x.y));
+  return ia_ok(vec2(GAMMA_MIN_Y - IA_EPS, gMax + IA_EPS));
+}
+
+IntervalResult ia_gamma(IntervalResult x) {
+  if (ia_is_error(x.status)) return x;
+  return ia_gamma(x.value);
+}
+
 // Boolean interval comparisons
 // Returns 1.0 = true, 0.0 = false, 0.5 = maybe
 const float IA_TRUE = 1.0;
@@ -1081,6 +1145,9 @@ const INTERVAL_GLSL_FUNCTIONS: CompiledFunctions<Expression> = {
     return result;
   },
   Negate: (args, compile) => `ia_negate(${compile(args[0])})`,
+
+  // Special functions
+  Gamma: (args, compile) => `ia_gamma(${compile(args[0])})`,
 
   // Elementary functions
   Abs: (args, compile) => `ia_abs(${compile(args[0])})`,

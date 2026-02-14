@@ -176,6 +176,12 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     return `acosh(1.0 / (${compile(x)}))`;
   },
 
+  // Special functions
+  Gamma: ([x], compile) => {
+    if (x === null) throw new Error('Gamma: no argument');
+    return `_gpu_gamma(${compile(x)})`;
+  },
+
   // Additional math functions
   Lb: 'log2',
   Log: (args, compile) => {
@@ -255,6 +261,33 @@ export function compileGPUMatrix(
   // Default: compile the nested list structure as-is
   return compile(body);
 }
+
+/**
+ * GPU gamma function using Lanczos approximation (g=7, n=9 coefficients).
+ *
+ * Uses reflection formula for z < 0.5 and Lanczos for z >= 0.5.
+ * Valid for both GLSL and WGSL (uses standard math builtins).
+ */
+export const GPU_GAMMA_PREAMBLE = `
+float _gpu_gamma(float z) {
+  const float PI = 3.14159265358979;
+  if (z < 0.5) {
+    return PI / (sin(PI * z) * _gpu_gamma(1.0 - z));
+  }
+  z -= 1.0;
+  float x = 0.99999999999980993;
+  x += 676.5203681218851 / (z + 1.0);
+  x += -1259.1392167224028 / (z + 2.0);
+  x += 771.32342877765313 / (z + 3.0);
+  x += -176.61502916214059 / (z + 4.0);
+  x += 12.507343278686905 / (z + 5.0);
+  x += -0.13857109526572012 / (z + 6.0);
+  x += 9.9843695780195716e-6 / (z + 7.0);
+  x += 1.5056327351493116e-7 / (z + 8.0);
+  float t = z + 7.5;
+  return sqrt(2.0 * PI) * pow(t, z + 0.5) * exp(-t) * x;
+}
+`;
 
 /** Constants shared by both GLSL and WGSL */
 const GPU_CONSTANTS: Record<string, string> = {
@@ -372,7 +405,13 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     });
 
     const code = BaseCompiler.compile(expr, target);
-    return { target: this.languageId, success: true, code };
+    const result: CompilationResult = {
+      target: this.languageId,
+      success: true,
+      code,
+    };
+    if (code.includes('_gpu_gamma')) result.preamble = GPU_GAMMA_PREAMBLE;
+    return result;
   }
 
   compileToSource(

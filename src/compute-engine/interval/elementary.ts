@@ -7,6 +7,7 @@
 import type { Interval, IntervalResult } from './types';
 import { ok, containsZero, isNegative, unwrapOrPropagate } from './util';
 import { sub, mul, div } from './arithmetic';
+import { gamma as scalarGamma } from '../numerics/special-functions';
 
 /**
  * Square root of an interval (or IntervalResult).
@@ -516,4 +517,64 @@ export function sign(x: Interval | IntervalResult): IntervalResult {
   if (xVal.lo === 0 && xVal.hi === 0) return ok({ lo: 0, hi: 0 });
   // Interval spans zero — discontinuity
   return { kind: 'singular', at: 0 };
+}
+
+// x coordinate of gamma's minimum: the positive root of digamma(x) = 0
+const GAMMA_MIN_X = 1.4616321449683622;
+// gamma(GAMMA_MIN_X) ≈ 0.8856031944108887
+const GAMMA_MIN_Y = 0.8856031944108887;
+
+/**
+ * Gamma function on an interval.
+ *
+ * Gamma has poles at non-positive integers (0, -1, -2, ...) and
+ * a unique minimum at x ≈ 1.4616 for positive x. Between consecutive
+ * negative integers it is monotonic (but alternates direction).
+ */
+export function gamma(x: Interval | IntervalResult): IntervalResult {
+  const unwrapped = unwrapOrPropagate(x);
+  if (!Array.isArray(unwrapped)) return unwrapped;
+  const [xVal] = unwrapped;
+  return _gamma(xVal);
+}
+
+function _gamma(x: Interval): IntervalResult {
+  // Check for poles: gamma has poles at every non-positive integer.
+  // If the interval contains any non-positive integer, report singular.
+  if (x.hi >= 0 && x.lo <= 0) {
+    // Interval crosses or touches zero — pole at 0
+    return { kind: 'singular', at: 0 };
+  }
+  if (x.lo < 0) {
+    // Entirely negative: check if interval spans a negative integer
+    const ceilLo = Math.ceil(x.lo);
+    const floorHi = Math.floor(x.hi);
+    // If any integer in [ceil(lo), floor(hi)] is <= 0, there's a pole
+    if (ceilLo <= floorHi) {
+      return { kind: 'singular', at: ceilLo };
+    }
+    // No pole in interval — both endpoints are between same consecutive
+    // negative integers, gamma is monotonic here. Evaluate endpoints.
+    const gLo = scalarGamma(x.lo);
+    const gHi = scalarGamma(x.hi);
+    return ok({ lo: Math.min(gLo, gHi), hi: Math.max(gLo, gHi) });
+  }
+
+  // x.lo > 0: entirely positive
+
+  // Case 1: Entirely above the minimum — monotonically increasing
+  if (x.lo >= GAMMA_MIN_X) {
+    return ok({ lo: scalarGamma(x.lo), hi: scalarGamma(x.hi) });
+  }
+
+  // Case 2: Entirely below the minimum — monotonically decreasing
+  if (x.hi <= GAMMA_MIN_X) {
+    return ok({ lo: scalarGamma(x.hi), hi: scalarGamma(x.lo) });
+  }
+
+  // Case 3: Interval crosses the minimum
+  return ok({
+    lo: GAMMA_MIN_Y,
+    hi: Math.max(scalarGamma(x.lo), scalarGamma(x.hi)),
+  });
 }

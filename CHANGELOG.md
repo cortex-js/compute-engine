@@ -11,6 +11,10 @@
   `mat2x2f`/`mat3x3f`/`mat4x4f` in WGSL) with proper column-major
   transposition. Column vectors are flattened to `vecN`/`vecNf` instead of
   nested single-element arrays.
+- **Gamma function compilation**: `Gamma` can now be compiled to `interval-js`,
+  `glsl`, `wgsl`, and `interval-glsl` targets. The interval targets include
+  pole detection at non-positive integers and correct monotonicity handling
+  around the minimum at x ≈ 1.46.
 
 ### Simplification
 
