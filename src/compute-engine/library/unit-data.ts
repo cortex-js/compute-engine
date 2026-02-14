@@ -319,3 +319,210 @@ export function convertUnit(
   // result   = value_SI / to.scale
   return (value * from.scale) / to.scale;
 }
+
+// ---------------------------------------------------------------------------
+// Compound unit expressions
+// ---------------------------------------------------------------------------
+
+/**
+ * A MathJSON-like unit expression: either a string (simple unit symbol) or
+ * an array like `["Divide", "m", "s"]`.
+ */
+export type UnitExpression = string | [string, ...any[]];
+
+/**
+ * Compute the dimension vector for a MathJSON unit expression.
+ *
+ * - If `expr` is a string, delegates to `getUnitDimension`.
+ * - `["Multiply", a, b, ...]` — adds dimension vectors component-wise.
+ * - `["Divide", a, b]` — subtracts b's dimension from a's.
+ * - `["Power", base, exp]` — multiplies base dimension by exp.
+ *
+ * Returns `null` if any component is unrecognised.
+ */
+export function getExpressionDimension(
+  expr: UnitExpression
+): DimensionVector | null {
+  if (typeof expr === 'string') return getUnitDimension(expr);
+
+  if (!Array.isArray(expr) || expr.length < 2) return null;
+
+  const op = expr[0];
+
+  if (op === 'Multiply') {
+    const result: DimensionVector = [0, 0, 0, 0, 0, 0, 0];
+    for (let i = 1; i < expr.length; i++) {
+      const d = getExpressionDimension(expr[i]);
+      if (!d) return null;
+      for (let j = 0; j < 7; j++) result[j] += d[j];
+    }
+    return result;
+  }
+
+  if (op === 'Divide') {
+    if (expr.length !== 3) return null;
+    const da = getExpressionDimension(expr[1]);
+    const db = getExpressionDimension(expr[2]);
+    if (!da || !db) return null;
+    return da.map((v, i) => v - db[i]) as DimensionVector;
+  }
+
+  if (op === 'Power') {
+    if (expr.length !== 3) return null;
+    const d = getExpressionDimension(expr[1]);
+    const exp = expr[2];
+    if (!d || typeof exp !== 'number') return null;
+    return d.map((v) => v * exp) as DimensionVector;
+  }
+
+  return null;
+}
+
+/**
+ * Compute the scale factor for a MathJSON unit expression relative to
+ * coherent SI.
+ *
+ * - If `expr` is a string, delegates to `getUnitScale`.
+ * - `["Multiply", a, b, ...]` — multiplies scales.
+ * - `["Divide", a, b]` — a.scale / b.scale.
+ * - `["Power", base, exp]` — base.scale ^ exp.
+ *
+ * Returns `null` if any component is unrecognised.
+ */
+export function getExpressionScale(
+  expr: UnitExpression
+): number | null {
+  if (typeof expr === 'string') return getUnitScale(expr);
+
+  if (!Array.isArray(expr) || expr.length < 2) return null;
+
+  const op = expr[0];
+
+  if (op === 'Multiply') {
+    let result = 1;
+    for (let i = 1; i < expr.length; i++) {
+      const s = getExpressionScale(expr[i]);
+      if (s === null) return null;
+      result *= s;
+    }
+    return result;
+  }
+
+  if (op === 'Divide') {
+    if (expr.length !== 3) return null;
+    const sa = getExpressionScale(expr[1]);
+    const sb = getExpressionScale(expr[2]);
+    if (sa === null || sb === null || sb === 0) return null;
+    return sa / sb;
+  }
+
+  if (op === 'Power') {
+    if (expr.length !== 3) return null;
+    const s = getExpressionScale(expr[1]);
+    const exp = expr[2];
+    if (s === null || typeof exp !== 'number') return null;
+    return Math.pow(s, exp);
+  }
+
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// DSL string parsing
+// ---------------------------------------------------------------------------
+
+/**
+ * Parse a unit token like `"s^2"` into a MathJSON expression.
+ * A plain unit (no `^`) stays as a string; `"s^2"` becomes
+ * `["Power", "s", 2]`.
+ */
+function parseUnitToken(token: string): UnitExpression {
+  const caretIdx = token.indexOf('^');
+  if (caretIdx === -1) return token;
+
+  const base = token.slice(0, caretIdx);
+  const expStr = token.slice(caretIdx + 1);
+  const exp = parseInt(expStr, 10);
+  if (isNaN(exp)) return token;
+
+  return ['Power', base, exp];
+}
+
+/**
+ * Parse a product group (the numerator or denominator half of a DSL string)
+ * into a MathJSON expression.  Tokens are separated by `*`.
+ *
+ * - A single token stays as-is (possibly with a `^` power).
+ * - Multiple tokens become `["Multiply", ...]`.
+ */
+function parseProductGroup(s: string): UnitExpression {
+  // Split on `*` (explicit multiplication)
+  const tokens = s.split('*').map((t) => t.trim()).filter((t) => t.length > 0);
+  if (tokens.length === 0) return s;
+  if (tokens.length === 1) return parseUnitToken(tokens[0]);
+  return ['Multiply', ...tokens.map(parseUnitToken)];
+}
+
+/**
+ * Parse a unit DSL string like `"m/s^2"` or `"kg*m/s^2"` into a
+ * MathJSON unit expression.
+ *
+ * Grammar:
+ * - `*` = multiplication
+ * - `/` = division (everything after `/` is in denominator)
+ * - `^N` = power (integer exponent)
+ * - Simple units (no operators) stay as strings.
+ *
+ * Examples:
+ * ```
+ * parseUnitDSL("m")       // "m"
+ * parseUnitDSL("km")      // "km"
+ * parseUnitDSL("m/s")     // ["Divide", "m", "s"]
+ * parseUnitDSL("m/s^2")   // ["Divide", "m", ["Power", "s", 2]]
+ * parseUnitDSL("kg*m/s^2")// ["Divide", ["Multiply", "kg", "m"], ["Power", "s", 2]]
+ * ```
+ */
+export function parseUnitDSL(s: string): UnitExpression {
+  s = s.trim();
+  if (s.length === 0) return s;
+
+  const slashIdx = s.indexOf('/');
+  if (slashIdx === -1) {
+    // No division — just a product group (or single unit)
+    return parseProductGroup(s);
+  }
+
+  const numStr = s.slice(0, slashIdx).trim();
+  const denStr = s.slice(slashIdx + 1).trim();
+
+  const num = parseProductGroup(numStr);
+  const den = parseProductGroup(denStr);
+
+  return ['Divide', num, den];
+}
+
+/**
+ * Convert a numeric `value` between two compound unit expressions.
+ *
+ * Both `fromUnit` and `toUnit` may be simple strings or MathJSON arrays.
+ * Returns the converted value, or `null` on dimensional mismatch or
+ * unknown units.
+ */
+export function convertCompoundUnit(
+  value: number,
+  fromUnit: UnitExpression,
+  toUnit: UnitExpression
+): number | null {
+  const fromDim = getExpressionDimension(fromUnit);
+  const toDim = getExpressionDimension(toUnit);
+  if (!fromDim || !toDim) return null;
+
+  // Dimensional compatibility check
+  if (!fromDim.every((v, i) => v === toDim[i])) return null;
+
+  const fromScale = getExpressionScale(fromUnit);
+  const toScale = getExpressionScale(toUnit);
+  if (fromScale === null || toScale === null || toScale === 0) return null;
+
+  return (value * fromScale) / toScale;
+}

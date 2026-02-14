@@ -3,6 +3,9 @@ import {
   getUnitDimension,
   areCompatibleUnits,
   getUnitScale,
+  getExpressionDimension,
+  getExpressionScale,
+  parseUnitDSL,
 } from '../../src/compute-engine/library/unit-data';
 
 describe('UNITS LIBRARY', () => {
@@ -214,5 +217,103 @@ describe('UNIT CONVERT', () => {
     expect(expr.operator).toBe('Quantity');
     expect(expr.op1.re).toBe(300);
     expect(expr.op2.symbol).toBe('s');
+  });
+});
+
+describe('COMPOUND UNITS', () => {
+  test('Dimension of m/s', () => {
+    expect(getExpressionDimension(['Divide', 'm', 's'])).toEqual([
+      1, 0, -1, 0, 0, 0, 0,
+    ]);
+  });
+
+  test('Dimension of m/s^2', () => {
+    expect(
+      getExpressionDimension(['Divide', 'm', ['Power', 's', 2]])
+    ).toEqual([1, 0, -2, 0, 0, 0, 0]);
+  });
+
+  test('Dimension of kg*m*s^-2 (newton)', () => {
+    expect(
+      getExpressionDimension([
+        'Multiply',
+        'kg',
+        'm',
+        ['Power', 's', -2],
+      ])
+    ).toEqual([1, 1, -2, 0, 0, 0, 0]);
+  });
+
+  test('Scale of km/h', () => {
+    const scale = getExpressionScale(['Divide', 'km', 'h']);
+    expect(scale).toBeCloseTo(1000 / 3600);
+  });
+
+  test('Compound unit Quantity is valid', () => {
+    const expr = engine.box(['Quantity', 10, ['Divide', 'm', 's']]);
+    expect(expr.isValid).toBe(true);
+  });
+
+  test('Compound unit Quantity with Power', () => {
+    const expr = engine.box([
+      'Quantity',
+      1,
+      ['Multiply', 'kg', 'm', ['Power', 's', -2]],
+    ]);
+    expect(expr.isValid).toBe(true);
+  });
+});
+
+describe('DSL STRING PARSING', () => {
+  test('Simple unit stays as string', () => {
+    expect(parseUnitDSL('m')).toBe('m');
+  });
+
+  test('Prefixed unit stays as string', () => {
+    expect(parseUnitDSL('km')).toBe('km');
+  });
+
+  test('Division: m/s', () => {
+    const result = parseUnitDSL('m/s');
+    expect(result).toEqual(['Divide', 'm', 's']);
+  });
+
+  test('Division with power: m/s^2', () => {
+    const result = parseUnitDSL('m/s^2');
+    expect(result).toEqual(['Divide', 'm', ['Power', 's', 2]]);
+  });
+
+  test('Multiplication with division: kg*m/s^2', () => {
+    const result = parseUnitDSL('kg*m/s^2');
+    expect(result).toEqual([
+      'Divide',
+      ['Multiply', 'kg', 'm'],
+      ['Power', 's', 2],
+    ]);
+  });
+
+  test('DSL in Quantity canonical form', () => {
+    const expr = engine.box(['Quantity', 9.8, 'm/s^2']);
+    expect(expr.isValid).toBe(true);
+    expect(expr.op2.operator).toBe('Divide');
+  });
+
+  test('DSL: kg*m/s^2', () => {
+    const expr = engine.box(['Quantity', 1, 'kg*m/s^2']);
+    expect(expr.isValid).toBe(true);
+  });
+});
+
+describe('COMPOUND UNIT CONVERT', () => {
+  test('Convert km/h to m/s', () => {
+    const expr = engine
+      .box([
+        'UnitConvert',
+        ['Quantity', 36, ['Divide', 'km', 'h']],
+        ['Divide', 'm', 's'],
+      ])
+      .evaluate();
+    expect(expr.operator).toBe('Quantity');
+    expect(expr.op1.re).toBeCloseTo(10);
   });
 });

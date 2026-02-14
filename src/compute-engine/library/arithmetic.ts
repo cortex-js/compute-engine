@@ -77,7 +77,7 @@ import {
 import { parseType } from '../../common/type/parse';
 import { widen } from '../../common/type/utils';
 import { numericTypeHandler } from './type-handlers';
-import { convertUnit } from './unit-data';
+import { convertUnit, convertCompoundUnit, type UnitExpression } from './unit-data';
 import { range, rangeLast } from './collections';
 import { run, runAsync } from '../../common/interruptible';
 import type {
@@ -2070,8 +2070,7 @@ function isQuantity(expr: Expression): expr is QuantityExpr {
 /**
  * Extract the unit symbol string from a Quantity's unit operand.
  * For simple units this is the symbol string.  For compound units
- * (e.g. `["Multiply", "m", "s"]`) it returns `null` (not yet supported
- * for conversion).
+ * (e.g. `["Multiply", "m", "s"]`) it returns `null`.
  */
 function unitSymbol(q: QuantityExpr): string | null {
   const u = q.op2;
@@ -2087,8 +2086,50 @@ function unitExpr(q: QuantityExpr): Expression {
 }
 
 /**
+ * Convert a boxed expression representing a unit into a plain
+ * `UnitExpression` (string or JSON array) suitable for `unit-data.ts`.
+ */
+function boxedToUnitExpression(expr: Expression): UnitExpression | null {
+  if (!expr) return null;
+
+  // Simple symbol unit
+  if (isSymbol(expr)) return expr.symbol;
+
+  const op = expr.operator;
+  if (!op || !isFunction(expr)) return null;
+
+  if (op === 'Multiply') {
+    const parts: UnitExpression[] = [];
+    for (const child of expr.ops) {
+      const c = boxedToUnitExpression(child);
+      if (!c) return null;
+      parts.push(c);
+    }
+    return ['Multiply', ...parts];
+  }
+
+  if (op === 'Divide') {
+    const a = boxedToUnitExpression(expr.op1);
+    const b = boxedToUnitExpression(expr.op2);
+    if (!a || !b) return null;
+    return ['Divide', a, b];
+  }
+
+  if (op === 'Power') {
+    const base = boxedToUnitExpression(expr.op1);
+    const exp = expr.op2?.re;
+    if (!base || exp === undefined) return null;
+    return ['Power', base, exp];
+  }
+
+  return null;
+}
+
+/**
  * Add Quantity expressions.  All operands must be Quantities with
  * compatible dimensions.  The result uses the first operand's unit.
+ *
+ * Supports both simple symbol units and compound unit expressions.
  */
 function quantityAdd(
   ce: ComputeEngine,
@@ -2099,29 +2140,46 @@ function quantityAdd(
   // Find the target unit from the first Quantity operand
   const first = ops.find((x): x is QuantityExpr => isQuantity(x));
   if (!first) return undefined;
-  const targetUnit = unitSymbol(first);
-  if (!targetUnit) return undefined;
+
+  // Get the target unit as both a symbol (fast path) and UnitExpression
+  const targetSymbol = unitSymbol(first);
+  const targetUE = boxedToUnitExpression(first.op2);
+  if (!targetSymbol && !targetUE) return undefined;
 
   let total = 0;
   for (const op of ops) {
     if (isQuantity(op)) {
       const mag = op.op1.re;
-      const u = unitSymbol(op);
-      if (u === null || mag === undefined) return undefined;
-      if (u === targetUnit) {
-        total += mag;
-      } else {
-        const converted = convertUnit(mag, u, targetUnit);
-        if (converted === null) return undefined; // incompatible dimensions
-        total += converted;
+      if (mag === undefined) return undefined;
+
+      const opSymbol = unitSymbol(op);
+
+      // Fast path: both are simple symbol units
+      if (targetSymbol && opSymbol) {
+        if (opSymbol === targetSymbol) {
+          total += mag;
+        } else {
+          const converted = convertUnit(mag, opSymbol, targetSymbol);
+          if (converted === null) return undefined;
+          total += converted;
+        }
+        continue;
       }
+
+      // Compound unit path
+      const opUE = boxedToUnitExpression(op.op2);
+      if (!opUE || !targetUE) return undefined;
+      const converted = convertCompoundUnit(mag, opUE, targetUE);
+      if (converted === null) return undefined;
+      total += converted;
     } else {
       // Non-Quantity operand mixed with Quantities — not valid
       return undefined;
     }
   }
 
-  return ce._fn('Quantity', [ce.number(total), ce.symbol(targetUnit)]);
+  // Preserve the original unit expression from the first Quantity
+  return ce._fn('Quantity', [ce.number(total), unitExpr(first)]);
 }
 
 /**
