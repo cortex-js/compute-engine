@@ -475,3 +475,27 @@ describe('UNIT DIMENSION', () => {
     expect(expr.operator).toBe('List');
   });
 });
+
+describe('PHYSICS CONSTANTS', () => {
+  test('Speed of light is a Quantity', () => {
+    const expr = engine.box('SpeedOfLight').evaluate();
+    expect(expr.operator).toBe('Quantity');
+    expect(expr.op1.re).toBe(299792458);
+  });
+
+  test('Planck constant is a Quantity', () => {
+    const expr = engine.box('PlanckConstant').evaluate();
+    expect(expr.operator).toBe('Quantity');
+  });
+
+  test('Mu0 is a Quantity (updated)', () => {
+    const expr = engine.box('Mu0').evaluate();
+    expect(expr.operator).toBe('Quantity');
+  });
+
+  test('Standard gravity', () => {
+    const expr = engine.box('StandardGravity').evaluate();
+    expect(expr.operator).toBe('Quantity');
+    expect(expr.op1.re).toBeCloseTo(9.80665);
+  });
+});

@@ -138,17 +138,60 @@ export const STANDARD_LIBRARIES: LibraryDefinition[] = [
     name: 'physics',
     requires: ['arithmetic', 'units'],
     definitions: {
+      SpeedOfLight: {
+        description: 'Speed of light in vacuum',
+        isConstant: true,
+        wikidata: 'Q2111',
+        type: 'value',
+        value: (ce) =>
+          ce._fn('Quantity', [
+            ce.number(299792458),
+            ce._fn('Divide', [ce.symbol('m'), ce.symbol('s')]),
+          ]),
+      },
+      PlanckConstant: {
+        description: 'Planck constant',
+        isConstant: true,
+        wikidata: 'Q524',
+        type: 'value',
+        value: (ce) =>
+          ce._fn('Quantity', [
+            ce.number(6.62607015e-34),
+            ce._fn('Multiply', [ce.symbol('J'), ce.symbol('s')]),
+          ]),
+      },
       Mu0: {
-        description: 'Vaccum permeability',
+        description: 'Vacuum permeability',
         isConstant: true,
         wikidata: 'Q1515261',
-        type: 'real',
-        value: 1.25663706212e-6,
+        type: 'value',
+        value: (ce) =>
+          ce._fn('Quantity', [
+            ce.number(1.25663706212e-6),
+            ce._fn('Divide', [
+              ce.symbol('N'),
+              ce._fn('Power', [ce.symbol('A'), ce.number(2)]),
+            ]),
+          ]),
+      },
+      StandardGravity: {
+        description: 'Standard acceleration due to gravity',
+        isConstant: true,
+        wikidata: 'Q30006',
+        type: 'value',
+        value: (ce) =>
+          ce._fn('Quantity', [
+            ce.number(9.80665),
+            ce._fn('Divide', [
+              ce.symbol('m'),
+              ce._fn('Power', [ce.symbol('s'), ce.number(2)]),
+            ]),
+          ]),
       },
     },
     latexDictionary: [
       {
-        name: 'mu0',
+        name: 'Mu0',
         kind: 'symbol',
         latexTrigger: '\\mu_0',
       },
