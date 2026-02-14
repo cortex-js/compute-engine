@@ -141,6 +141,32 @@ export function canonicalInvisibleOperator(
   //  boxing the arguments)
   ops = flattenInvisibleOperator(ops);
 
+  //
+  // Is it a number juxtaposed with a tagged unit expression?
+  // e.g. `12\,\mathrm{cm}` or `9.8\,\mathrm{m/s^2}`
+  //
+  // The unit expression handler in definitions-units.ts wraps recognised
+  // units in `['__unit__', unitExpr]`.  We check BEFORE `flatten` because
+  // flatten canonicalizes, which would strip the __unit__ wrapper.
+  //
+  // Filter out HorizontalSpacing (visual-space like `\,`) which
+  // canonicalizes to Nothing but hasn't been flattened away yet.
+  //
+  {
+    const significant = ops.filter(
+      (x) => x.operator !== 'HorizontalSpacing'
+    );
+    if (significant.length === 2) {
+      const [a, b] = significant;
+      if (isNumber(a) && isFunction(b) && b.operator === '__unit__') {
+        return ce._fn('Quantity', [a.canonical, b.op1.canonical]);
+      }
+      if (isNumber(b) && isFunction(a) && a.operator === '__unit__') {
+        return ce._fn('Quantity', [b.canonical, a.op1.canonical]);
+      }
+    }
+  }
+
   // Only call flatten here, because it will bind (auto-declare) the arguments
   ops = flatten(ops);
 
@@ -194,3 +220,4 @@ function asInteger(expr: Expression): number {
   }
   return Number.NaN;
 }
+

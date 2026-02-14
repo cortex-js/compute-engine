@@ -349,6 +349,31 @@ describe('LATEX PARSING', () => {
     const expr = engine.parse('5\\;\\mathrm{m/s}');
     expect(expr.operator).toBe('Quantity');
   });
+
+  // Regression: \mathrm{e} → ExponentialE must NOT be broken by unit parsing.
+  // The 4-token trigger `\mathrm{e}` (ExponentialE) takes priority over
+  // the 1-token `\mathrm` expression entry (unit parser).
+  test('\\mathrm{e} alone is ExponentialE', () => {
+    const expr = engine.parse('\\mathrm{e}');
+    expect(expr.symbol).toBe('ExponentialE');
+  });
+
+  test('Number followed by \\mathrm{e} is multiplication by ExponentialE', () => {
+    const expr = engine.parse('2\\mathrm{e}');
+    expect(expr.operator).toBe('Multiply');
+    expect(expr.json).toEqual(['Multiply', 2, 'ExponentialE']);
+  });
+
+  test('\\mathrm{i} alone is ImaginaryUnit', () => {
+    const expr = engine.parse('\\mathrm{i}');
+    expect(expr.symbol).toBe('ImaginaryUnit');
+  });
+
+  test('Non-unit \\mathrm{xyz} falls through to symbol parsing', () => {
+    const expr = engine.parse('\\mathrm{xyz}');
+    // Should not be an error; falls through to normal parsing
+    expect(expr.operator).not.toBe('Error');
+  });
 });
 
 describe('LATEX SERIALIZATION', () => {

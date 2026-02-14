@@ -5,11 +5,19 @@
  * Parsing:  `12\,\mathrm{cm}`  →  `['Quantity', 12, 'cm']`
  * Serializing:  `['Quantity', 12, 'cm']`  →  `12\,\mathrm{cm}`
  *
- * Registers `\mathrm` and `\text` as **postfix** operators (with optional
- * leading visual-space tokens `\,` and `\;`).  When the braced content is
- * a recognised unit the handler returns a `Quantity` expression; otherwise
- * it returns `null` so the parser backtracks and the normal symbol-parsing
- * takes over.
+ * Registers `\mathrm` and `\text` as **expression** entries.  When the braced
+ * content is a recognised unit the handler returns the unit expression;
+ * otherwise it returns `null` so the parser backtracks and the normal
+ * symbol-parsing takes over.
+ *
+ * The number-times-unit → Quantity conversion is handled during
+ * canonicalization of `InvisibleOperator` (juxtaposition) in
+ * `invisible-operator.ts`.
+ *
+ * CRITICAL: The expression entry trigger `\mathrm` (1 token) coexists with
+ * existing longer triggers like `\mathrm{e}` (4 tokens, ExponentialE).  The
+ * parser tries longer triggers first, so `\mathrm{e}` will always match before
+ * our 1-token `\mathrm` entry.
  */
 
 import type { MathJsonExpression } from '../../../math-json/types';
@@ -18,9 +26,8 @@ import type {
   LatexDictionary,
   Parser,
   Serializer,
-  PostfixParseHandler,
+  ExpressionParseHandler,
 } from '../types';
-import { POSTFIX_PRECEDENCE } from '../types';
 import { joinLatex } from '../tokenizer';
 import {
   getUnitDimension,
@@ -93,6 +100,18 @@ function readBracedText(parser: Parser): string | null {
 }
 
 /**
+ * Single-character symbols that should NOT be treated as unit names even
+ * though they appear in the unit registry.  These have primary meanings
+ * in mathematics that would be broken by unit parsing:
+ *
+ * - `d` — differential operator (`\mathrm{d}x`)
+ *
+ * Multi-character units (e.g. `cm`, `kg`) and single-character units
+ * NOT in this set (`m`, `s`, `g`, `h`, `t`) are still recognised.
+ */
+const UNIT_BLOCKLIST = new Set(['d']);
+
+/**
  * Check whether a raw text string from `\mathrm{...}` or `\text{...}`
  * represents a known unit (simple or compound).
  *
@@ -100,6 +119,9 @@ function readBracedText(parser: Parser): string | null {
  */
 function resolveUnitText(text: string): MathJsonExpression | null {
   if (!text || text.length === 0) return null;
+
+  // Block symbols that have primary mathematical meanings
+  if (UNIT_BLOCKLIST.has(text)) return null;
 
   // Simple unit check: is the whole string a known unit?
   if (getUnitDimension(text) !== null) return text;
@@ -139,18 +161,25 @@ function isValidUnitExpression(expr: UnitExpression): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// Postfix parse handler
+// Expression parse handler
 // ---------------------------------------------------------------------------
 
 /**
- * Shared postfix parse handler for `\mathrm{...}` and `\text{...}` after
- * a numeric expression.  The trigger tokens (including optional space)
- * have already been consumed.  The parser is pointing right after `\mathrm`
- * or `\text`.
+ * Shared expression parse handler for `\mathrm{...}` and `\text{...}`.
+ * The trigger token (`\mathrm` or `\text`) has already been consumed.
+ *
+ * If the braced content is a recognised unit, returns
+ * `['__unit__', unitExpr]` — a tagged wrapper that signals to
+ * `canonicalInvisibleOperator` that this came from a unit context.
+ * This prevents bare variables like `h` or `t` (which happen to be
+ * recognised units) from being treated as units.
+ *
+ * If the content is NOT a recognised unit, restores the parser index and
+ * returns `null` so that longer triggers (like `\mathrm{e}` → ExponentialE)
+ * or normal symbol parsing can take over.
  */
-const parseUnitPostfix: PostfixParseHandler = (
-  parser: Parser,
-  lhs: MathJsonExpression
+const parseUnitExpression: ExpressionParseHandler = (
+  parser: Parser
 ): MathJsonExpression | null => {
   const saved = parser.index;
 
@@ -166,7 +195,10 @@ const parseUnitPostfix: PostfixParseHandler = (
     return null;
   }
 
-  return ['Quantity', lhs, unit];
+  // Wrap in __unit__ tag so that canonicalInvisibleOperator can
+  // distinguish explicit unit annotations (from \mathrm/\text) from
+  // bare variable symbols that happen to share a unit name.
+  return ['__unit__', unit];
 };
 
 // ---------------------------------------------------------------------------
@@ -233,31 +265,21 @@ function unitToMathrm(expr: MathJsonExpression): string {
 // Dictionary entries
 // ---------------------------------------------------------------------------
 
-/**
- * Build a postfix entry for a given trigger.
- */
-function makePostfixEntry(trigger: string | string[]) {
-  return {
-    latexTrigger: trigger,
-    kind: 'postfix' as const,
-    precedence: POSTFIX_PRECEDENCE,
-    parse: parseUnitPostfix,
-  };
-}
-
 export const DEFINITIONS_UNITS: LatexDictionary = [
-  // -- \mathrm variants --
-  makePostfixEntry(['\\mathrm']), // no space
-  makePostfixEntry(['\\,', '\\mathrm']), // thin space
-  makePostfixEntry(['\\;', '\\mathrm']), // medium space
-  makePostfixEntry(['\\:', '\\mathrm']), // medium-math space
-  makePostfixEntry(['\\!', '\\mathrm']), // negative thin space (rare but possible)
-
-  // -- \text variants --
-  makePostfixEntry(['\\text']), // no space
-  makePostfixEntry(['\\,', '\\text']), // thin space
-  makePostfixEntry(['\\;', '\\text']), // medium space
-  makePostfixEntry(['\\:', '\\text']), // medium-math space
+  // -- Expression entries for unit parsing --
+  // These are tried as primary expressions.  Longer triggers (like
+  // `\mathrm{e}` → ExponentialE in definitions-arithmetic.ts) are tried
+  // first, so there is no conflict.
+  {
+    latexTrigger: '\\mathrm',
+    kind: 'expression',
+    parse: parseUnitExpression,
+  },
+  {
+    latexTrigger: '\\text',
+    kind: 'expression',
+    parse: parseUnitExpression,
+  },
 
   // -- Quantity serialization --
   {

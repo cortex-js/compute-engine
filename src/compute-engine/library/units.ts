@@ -49,6 +49,20 @@ function boxedToUnitExpression(expr: Expression): UnitExpression | null {
 }
 
 export const UNITS_LIBRARY: SymbolDefinitions = {
+  // Internal marker produced by the \mathrm/\text expression handler in
+  // definitions-units.ts.  When juxtaposed with a number the
+  // InvisibleOperator canonical detects this wrapper and produces
+  // ['Quantity', number, unit].  If the marker reaches canonicalization
+  // without InvisibleOperator (e.g. standalone `\mathrm{cm}`), unwrap it
+  // to just the unit expression.
+  __unit__: {
+    signature: '(value) -> value',
+    canonical: (args, { engine: ce }) => {
+      if (args.length === 1) return args[0].canonical;
+      return ce.error('incompatible-type');
+    },
+  },
+
   Quantity: {
     description: 'A value paired with a physical unit',
     wikidata: 'Q309314',
