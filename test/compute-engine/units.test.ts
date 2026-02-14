@@ -118,3 +118,101 @@ describe('UNIT REGISTRY', () => {
     expect(getUnitDimension('deg')).toEqual([0, 0, 0, 0, 0, 0, 0]);
   });
 });
+
+describe('QUANTITY ARITHMETIC', () => {
+  test('Scalar multiplication', () => {
+    const expr = engine
+      .box(['Multiply', 2, ['Quantity', 5, 'kg']])
+      .evaluate();
+    expect(expr.operator).toBe('Quantity');
+    expect(expr.op1.re).toBe(10);
+    expect(expr.op2.symbol).toBe('kg');
+  });
+
+  test('Addition - same unit', () => {
+    const expr = engine
+      .box(['Add', ['Quantity', 3, 'm'], ['Quantity', 7, 'm']])
+      .evaluate();
+    expect(expr.operator).toBe('Quantity');
+    expect(expr.op1.re).toBe(10);
+    expect(expr.op2.symbol).toBe('m');
+  });
+
+  test('Addition - compatible units, first operand wins', () => {
+    const expr = engine
+      .box(['Add', ['Quantity', 12, 'cm'], ['Quantity', 1, 'm']])
+      .evaluate();
+    expect(expr.operator).toBe('Quantity');
+    expect(expr.op1.re).toBe(112);
+    expect(expr.op2.symbol).toBe('cm');
+  });
+
+  test('Addition - compatible units, reversed', () => {
+    // Note: canonical form reorders operands, so the first Quantity
+    // in canonical order (cm < m lexically) determines the result unit.
+    const expr = engine
+      .box(['Add', ['Quantity', 1, 'm'], ['Quantity', 12, 'cm']])
+      .evaluate();
+    expect(expr.operator).toBe('Quantity');
+    expect(expr.op1.re).toBeCloseTo(112);
+    expect(expr.op2.symbol).toBe('cm');
+  });
+
+  test('Multiplication of quantities', () => {
+    const expr = engine
+      .box(['Multiply', ['Quantity', 5, 'm'], ['Quantity', 3, 's']])
+      .evaluate();
+    expect(expr.operator).toBe('Quantity');
+    expect(expr.op1.re).toBe(15);
+  });
+
+  test('Division of quantities', () => {
+    const expr = engine
+      .box(['Divide', ['Quantity', 100, 'm'], ['Quantity', 10, 's']])
+      .evaluate();
+    expect(expr.operator).toBe('Quantity');
+    expect(expr.op1.re).toBe(10);
+  });
+
+  test('Power of quantity', () => {
+    const expr = engine
+      .box(['Power', ['Quantity', 3, 'm'], 2])
+      .evaluate();
+    expect(expr.operator).toBe('Quantity');
+    expect(expr.op1.re).toBe(9);
+  });
+});
+
+describe('UNIT CONVERT', () => {
+  test('UnitConvert operator is defined', () => {
+    const def = engine.lookupDefinition('UnitConvert');
+    expect(def).toBeDefined();
+  });
+
+  test('Convert m to km', () => {
+    const expr = engine
+      .box(['UnitConvert', ['Quantity', 1500, 'm'], 'km'])
+      .evaluate();
+    expect(expr.operator).toBe('Quantity');
+    expect(expr.op1.re).toBe(1.5);
+    expect(expr.op2.symbol).toBe('km');
+  });
+
+  test('Convert km to m', () => {
+    const expr = engine
+      .box(['UnitConvert', ['Quantity', 2.5, 'km'], 'm'])
+      .evaluate();
+    expect(expr.operator).toBe('Quantity');
+    expect(expr.op1.re).toBe(2500);
+    expect(expr.op2.symbol).toBe('m');
+  });
+
+  test('Convert min to s', () => {
+    const expr = engine
+      .box(['UnitConvert', ['Quantity', 5, 'min'], 's'])
+      .evaluate();
+    expect(expr.operator).toBe('Quantity');
+    expect(expr.op1.re).toBe(300);
+    expect(expr.op2.symbol).toBe('s');
+  });
+});

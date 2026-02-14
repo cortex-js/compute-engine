@@ -148,6 +148,10 @@ export function checkNumericArgs(
     } else if (op.isNumber) {
       // The argument is a number literal or a function whose result is a number
       xs.push(op);
+    } else if (op.operator === 'Quantity') {
+      // Quantity expressions are accepted in arithmetic contexts;
+      // the evaluate handler will handle unit arithmetic.
+      xs.push(op);
     } else if (isSymbol(op) && !ce.lookupDefinition(op.symbol)) {
       // We have an unknown symbol, we'll infer it's a number later
       xs.push(op);

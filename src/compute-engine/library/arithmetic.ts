@@ -77,6 +77,7 @@ import {
 import { parseType } from '../../common/type/parse';
 import { widen } from '../../common/type/utils';
 import { numericTypeHandler } from './type-handlers';
+import { convertUnit } from './unit-data';
 import { range, rangeLast } from './collections';
 import { run, runAsync } from '../../common/interruptible';
 import type {
@@ -85,7 +86,7 @@ import type {
   SymbolDefinitions,
   Sign,
 } from '../global-types';
-import { isNumber, isFunction } from '../boxed-expression/type-guards';
+import { isNumber, isFunction, isSymbol } from '../boxed-expression/type-guards';
 import { canonical } from '../boxed-expression/canonical-utils';
 
 // When processing an arithmetic expression, the following are the core
@@ -220,13 +221,19 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
       // @fastpath: canonicalization is done in the function
       // makeNumericFunction().
-      evaluate: (ops, { numericApproximation }) =>
+      evaluate: (ops, { numericApproximation, engine }) => {
+        // Check if any operand is a Quantity expression
+        const evaluated = ops.map((x) => x.evaluate());
+        if (evaluated.some((x) => x.operator === 'Quantity')) {
+          return quantityAdd(engine!, evaluated);
+        }
         // Do not evaluate in the case of numericApproximation
         // to avoid premature rounding errors.
         // For example: `\\frac{2}{3}+\\frac{12345678912345678}{987654321987654321}+\\frac{987654321987654321}{12345678912345678}`
-        numericApproximation
+        return numericApproximation
           ? addN(...ops)
-          : add(...ops.map((x) => x.evaluate())),
+          : add(...evaluated);
+      },
     },
 
     Ceil: {
@@ -323,7 +330,15 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
         return result;
       },
-      evaluate: ([num, den], { numericApproximation }) => {
+      evaluate: ([num, den], { numericApproximation, engine }) => {
+        const evalNum = num.evaluate();
+        const evalDen = den.evaluate();
+        if (
+          evalNum.operator === 'Quantity' ||
+          evalDen.operator === 'Quantity'
+        ) {
+          return quantityDivide(engine!, evalNum, evalDen);
+        }
         const res = num.div(den);
         if (numericApproximation && res.operator !== 'Divide') return res.N();
         return res;
@@ -962,11 +977,17 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           return 'not-zero';
         return undefined;
       },
-      evaluate: (ops, { numericApproximation }) =>
-        // Use evaluate i both cases: do not introduce premature rounding errors
-        numericApproximation
+      evaluate: (ops, { numericApproximation, engine }) => {
+        // Check if any operand is a Quantity expression
+        const evaluated = ops.map((x) => x.evaluate());
+        if (evaluated.some((x) => x.operator === 'Quantity')) {
+          return quantityMultiply(engine!, evaluated);
+        }
+        // Use evaluate in both cases: do not introduce premature rounding errors
+        return numericApproximation
           ? mulN(...ops)
-          : mul(...ops.map((x) => x.evaluate())),
+          : mul(...evaluated);
+      },
     },
 
     Negate: {
@@ -1067,8 +1088,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       },
       // x^n
       // evaluate: (ops) => ops[0].pow(ops[1]),
-      evaluate: ([x, n], { numericApproximation }) =>
-        pow(x, n, { numericApproximation: numericApproximation ?? false }),
+      evaluate: ([x, n], { numericApproximation, engine }) => {
+        const evalBase = x.evaluate();
+        if (evalBase.operator === 'Quantity') {
+          return quantityPower(engine!, evalBase, n.evaluate());
+        }
+        return pow(x, n, { numericApproximation: numericApproximation ?? false });
+      },
       // Defined as RealNumbers for all power in RealNumbers when base > 0;
       // when x < 0, only defined if n is an integer
       // if x is a non-zero complex, defined as ComplexNumbers
@@ -2027,4 +2053,190 @@ function evaluateGcdLcm(
   if (rest.length === 0) return result === null ? ce.One : ce.number(result);
   if (result === null) return ce._fn(mode, rest);
   return ce._fn(mode, [ce.number(result), ...rest]);
+}
+
+// ---------------------------------------------------------------------------
+// Quantity arithmetic helpers
+// ---------------------------------------------------------------------------
+
+/** Type alias for a Quantity function expression with op1 and op2 access. */
+type QuantityExpr = Expression & { readonly op1: Expression; readonly op2: Expression; readonly ops: ReadonlyArray<Expression> };
+
+/** Check if an expression is a Quantity and narrow the type. */
+function isQuantity(expr: Expression): expr is QuantityExpr {
+  return expr.operator === 'Quantity' && isFunction(expr);
+}
+
+/**
+ * Extract the unit symbol string from a Quantity's unit operand.
+ * For simple units this is the symbol string.  For compound units
+ * (e.g. `["Multiply", "m", "s"]`) it returns `null` (not yet supported
+ * for conversion).
+ */
+function unitSymbol(q: QuantityExpr): string | null {
+  const u = q.op2;
+  if (isSymbol(u)) return u.symbol;
+  return null;
+}
+
+/**
+ * Get the unit expression from a Quantity (op2).
+ */
+function unitExpr(q: QuantityExpr): Expression {
+  return q.op2;
+}
+
+/**
+ * Add Quantity expressions.  All operands must be Quantities with
+ * compatible dimensions.  The result uses the first operand's unit.
+ */
+function quantityAdd(
+  ce: ComputeEngine,
+  ops: ReadonlyArray<Expression>
+): Expression | undefined {
+  if (ops.length === 0) return undefined;
+
+  // Find the target unit from the first Quantity operand
+  const first = ops.find((x): x is QuantityExpr => isQuantity(x));
+  if (!first) return undefined;
+  const targetUnit = unitSymbol(first);
+  if (!targetUnit) return undefined;
+
+  let total = 0;
+  for (const op of ops) {
+    if (isQuantity(op)) {
+      const mag = op.op1.re;
+      const u = unitSymbol(op);
+      if (u === null || mag === undefined) return undefined;
+      if (u === targetUnit) {
+        total += mag;
+      } else {
+        const converted = convertUnit(mag, u, targetUnit);
+        if (converted === null) return undefined; // incompatible dimensions
+        total += converted;
+      }
+    } else {
+      // Non-Quantity operand mixed with Quantities — not valid
+      return undefined;
+    }
+  }
+
+  return ce._fn('Quantity', [ce.number(total), ce.symbol(targetUnit)]);
+}
+
+/**
+ * Multiply expressions where at least one is a Quantity.
+ * - scalar * Quantity => Quantity with scaled magnitude
+ * - Quantity * Quantity => Quantity with compound unit
+ */
+function quantityMultiply(
+  ce: ComputeEngine,
+  ops: ReadonlyArray<Expression>
+): Expression | undefined {
+  // Separate scalars from quantities
+  const scalars: Expression[] = [];
+  const quantities: QuantityExpr[] = [];
+
+  for (const op of ops) {
+    if (isQuantity(op)) quantities.push(op);
+    else scalars.push(op);
+  }
+
+  if (quantities.length === 0) return undefined;
+
+  // Compute scalar product
+  let scalarValue = 1;
+  for (const s of scalars) {
+    const v = s.re;
+    if (v === undefined) return undefined;
+    scalarValue *= v;
+  }
+
+  if (quantities.length === 1) {
+    // scalar * Quantity
+    const q = quantities[0];
+    const mag = q.op1.re;
+    if (mag === undefined) return undefined;
+    return ce._fn('Quantity', [
+      ce.number(scalarValue * mag),
+      unitExpr(q),
+    ]);
+  }
+
+  // Multiple quantities: multiply magnitudes, combine units
+  let totalMag = scalarValue;
+  const unitParts: Expression[] = [];
+  for (const q of quantities) {
+    const mag = q.op1.re;
+    if (mag === undefined) return undefined;
+    totalMag *= mag;
+    unitParts.push(unitExpr(q));
+  }
+
+  const combinedUnit =
+    unitParts.length === 1
+      ? unitParts[0]
+      : ce._fn('Multiply', unitParts);
+
+  return ce._fn('Quantity', [ce.number(totalMag), combinedUnit]);
+}
+
+/**
+ * Divide two expressions where at least one is a Quantity.
+ */
+function quantityDivide(
+  ce: ComputeEngine,
+  num: Expression,
+  den: Expression
+): Expression | undefined {
+  const numQ = isQuantity(num) ? num : null;
+  const denQ = isQuantity(den) ? den : null;
+
+  if (numQ && denQ) {
+    // Quantity / Quantity => Quantity with divided units
+    const numMag = numQ.op1.re;
+    const denMag = denQ.op1.re;
+    if (numMag === undefined || denMag === undefined || denMag === 0)
+      return undefined;
+    const resultUnit = ce._fn('Divide', [unitExpr(numQ), unitExpr(denQ)]);
+    return ce._fn('Quantity', [ce.number(numMag / denMag), resultUnit]);
+  }
+
+  if (numQ && !denQ) {
+    // Quantity / scalar
+    const mag = numQ.op1.re;
+    const scalar = den.re;
+    if (mag === undefined || scalar === undefined || scalar === 0)
+      return undefined;
+    return ce._fn('Quantity', [ce.number(mag / scalar), unitExpr(numQ)]);
+  }
+
+  if (!numQ && denQ) {
+    // scalar / Quantity => Quantity with inverted unit
+    const scalar = num.re;
+    const mag = denQ.op1.re;
+    if (scalar === undefined || mag === undefined || mag === 0)
+      return undefined;
+    const invertedUnit = ce._fn('Power', [unitExpr(denQ), ce.number(-1)]);
+    return ce._fn('Quantity', [ce.number(scalar / mag), invertedUnit]);
+  }
+
+  return undefined;
+}
+
+/**
+ * Raise a Quantity to a power.
+ */
+function quantityPower(
+  ce: ComputeEngine,
+  base: Expression,
+  exp: Expression
+): Expression | undefined {
+  if (!isQuantity(base)) return undefined;
+  const mag = base.op1.re;
+  const n = exp.re;
+  if (mag === undefined || n === undefined) return undefined;
+
+  const resultUnit = ce._fn('Power', [unitExpr(base), exp]);
+  return ce._fn('Quantity', [ce.number(Math.pow(mag, n)), resultUnit]);
 }

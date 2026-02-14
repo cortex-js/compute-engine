@@ -1,4 +1,5 @@
 import type { SymbolDefinitions } from '../global-types';
+import { convertUnit } from './unit-data';
 
 export const UNITS_LIBRARY: SymbolDefinitions = {
   Quantity: {
@@ -34,6 +35,29 @@ export const UNITS_LIBRARY: SymbolDefinitions = {
       const arg = ops[0];
       if (arg?.operator === 'Quantity') return arg.op2;
       return undefined;
+    },
+  },
+
+  UnitConvert: {
+    description: 'Convert a quantity to a different compatible unit',
+    complexity: 1200,
+    signature: '(value, value) -> value',
+    evaluate: (ops, { engine: ce }) => {
+      if (!ce) return undefined;
+      const quantity = ops[0]?.evaluate();
+      const targetUnitExpr = ops[1];
+      if (!quantity || quantity.operator !== 'Quantity') return undefined;
+
+      const mag = quantity.op1.re;
+      const fromUnit = quantity.op2?.symbol;
+      const toUnit = targetUnitExpr?.symbol;
+
+      if (mag === undefined || !fromUnit || !toUnit) return undefined;
+
+      const converted = convertUnit(mag, fromUnit, toUnit);
+      if (converted === null) return undefined;
+
+      return ce._fn('Quantity', [ce.number(converted), ce.symbol(toUnit)]);
     },
   },
 };
