@@ -1,5 +1,40 @@
 ## [Unreleased]
 
+### Units and Quantities
+
+- **New `units` library**: A comprehensive unit system for physical quantities,
+  available as the `"units"` library category. Supports SI base units, 18 named
+  derived units, SI prefixes (quetta through quecto), and common non-SI units
+  (imperial, angles, logarithmic).
+- **`Quantity` expression**: Pairs a numeric value with a unit:
+  `["Quantity", 9.8, ["Divide", "m", ["Power", "s", 2]]]`. Accessors
+  `QuantityMagnitude` and `QuantityUnit` extract the parts.
+- **Quantity arithmetic**: `Add`, `Subtract`, `Multiply`, `Divide`, and `Power`
+  are unit-aware. Addition and subtraction automatically convert compatible units
+  (e.g., `12 cm + 1 m` evaluates to `112 cm`). Incompatible dimensions remain
+  unevaluated.
+- **Unit conversion**: `UnitConvert` converts between compatible units, including
+  compound units like `m/s` to `km/h`. `UnitSimplify` reduces compound units to
+  named derived units when possible (e.g., `kg*m/s^2` to `N`).
+- **Dimensional analysis**: `CompatibleUnitQ` tests dimensional compatibility.
+  `UnitDimension` returns the 7-element SI dimension vector.
+- **LaTeX parsing**: `\mathrm{...}` and `\text{...}` containing recognized units
+  produce `Quantity` expressions when juxtaposed with numbers.
+  Compound units with `/`, `^`, and `\cdot` are supported
+  (e.g., `5\,\mathrm{m/s^{2}}`).
+- **siunitx commands**: `\qty{value}{unit}`, `\SI{value}{unit}`,
+  `\unit{unit}`, and `\si{unit}` are parsed.
+- **LaTeX serialization**: `Quantity` expressions serialize to
+  `value\,\mathrm{unit}` notation.
+- **DSL string sugar**: Compound units can be specified as strings in MathJSON:
+  `["Quantity", 9.8, "m/s^2"]` is canonicalized to the structured form.
+- **Angular unit unification**: Trigonometric functions (`Sin`, `Cos`, `Tan`,
+  etc.) accept `Quantity` arguments with angular units (`deg`, `rad`, `grad`,
+  `arcmin`, `arcsec`) and convert to radians automatically.
+- **Physics constants**: `SpeedOfLight`, `PlanckConstant`, `Mu0`, and
+  `StandardGravity` are defined as `Quantity` expressions with proper units in
+  the `physics` library.
+
 ### Compilation
 
 - **Tuple and Matrix compilation**: `Tuple` and `Matrix` expressions can now be
