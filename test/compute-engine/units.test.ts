@@ -395,3 +395,40 @@ describe('LATEX SERIALIZATION', () => {
     expect(expr.latex).toBe('9.8\\,\\mathrm{m/s^{2}}');
   });
 });
+
+describe('SIUNITX PARSING', () => {
+  test('\\qty command', () => {
+    const expr = engine.parse('\\qty{12}{cm}');
+    expect(expr.operator).toBe('Quantity');
+    expect(expr.op1.re).toBe(12);
+  });
+
+  test('\\SI command (legacy)', () => {
+    const expr = engine.parse('\\SI{5}{kg}');
+    expect(expr.operator).toBe('Quantity');
+  });
+
+  test('\\unit command (unit only)', () => {
+    const expr = engine.parse('\\unit{m/s}');
+    // Should produce a unit expression, not a Quantity
+    expect(expr.operator).not.toBe('Quantity');
+  });
+
+  test('\\si command (legacy, unit only)', () => {
+    const expr = engine.parse('\\si{MHz}');
+    expect(expr.symbol).toBe('MHz');
+  });
+
+  test('\\qty with compound unit', () => {
+    const expr = engine.parse('\\qty{9.8}{m/s^2}');
+    expect(expr.operator).toBe('Quantity');
+    expect(expr.op1.re).toBe(9.8);
+  });
+
+  test('\\SI with prefixed unit', () => {
+    const expr = engine.parse('\\SI{1.5}{km}');
+    expect(expr.operator).toBe('Quantity');
+    expect(expr.op1.re).toBe(1.5);
+    expect(expr.op2.symbol).toBe('km');
+  });
+});

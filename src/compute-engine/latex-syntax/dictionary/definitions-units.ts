@@ -281,6 +281,101 @@ export const DEFINITIONS_UNITS: LatexDictionary = [
     parse: parseUnitExpression,
   },
 
+  // -- siunitx commands --
+  // \qty{value}{unit} - modern siunitx command for quantities
+  {
+    latexTrigger: '\\qty',
+    parse: (parser: Parser): MathJsonExpression | null => {
+      // First group: the numeric value (parse as math expression)
+      const value = parser.parseGroup();
+      if (value === null) return null;
+
+      // Second group: the unit (read as raw text)
+      const saved = parser.index;
+      const unitText = readBracedText(parser);
+      if (unitText === null) {
+        parser.index = saved;
+        return null;
+      }
+
+      const unit = resolveUnitText(unitText);
+      if (unit === null) {
+        parser.index = saved;
+        return null;
+      }
+
+      return ['Quantity', value, unit];
+    },
+  },
+
+  // \SI{value}{unit} - legacy siunitx command for quantities
+  {
+    latexTrigger: '\\SI',
+    parse: (parser: Parser): MathJsonExpression | null => {
+      // First group: the numeric value (parse as math expression)
+      const value = parser.parseGroup();
+      if (value === null) return null;
+
+      // Second group: the unit (read as raw text)
+      const saved = parser.index;
+      const unitText = readBracedText(parser);
+      if (unitText === null) {
+        parser.index = saved;
+        return null;
+      }
+
+      const unit = resolveUnitText(unitText);
+      if (unit === null) {
+        parser.index = saved;
+        return null;
+      }
+
+      return ['Quantity', value, unit];
+    },
+  },
+
+  // \unit{unit} - modern siunitx command for units only
+  {
+    latexTrigger: '\\unit',
+    parse: (parser: Parser): MathJsonExpression | null => {
+      const saved = parser.index;
+      const unitText = readBracedText(parser);
+      if (unitText === null) {
+        parser.index = saved;
+        return null;
+      }
+
+      const unit = resolveUnitText(unitText);
+      if (unit === null) {
+        parser.index = saved;
+        return null;
+      }
+
+      return unit; // Just the unit expression, not wrapped in Quantity
+    },
+  },
+
+  // \si{unit} - legacy siunitx command for units only
+  {
+    latexTrigger: '\\si',
+    parse: (parser: Parser): MathJsonExpression | null => {
+      const saved = parser.index;
+      const unitText = readBracedText(parser);
+      if (unitText === null) {
+        parser.index = saved;
+        return null;
+      }
+
+      const unit = resolveUnitText(unitText);
+      if (unit === null) {
+        parser.index = saved;
+        return null;
+      }
+
+      return unit; // Just the unit expression, not wrapped in Quantity
+    },
+  },
+
   // -- Quantity serialization --
   {
     name: 'Quantity',
