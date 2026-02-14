@@ -1753,3 +1753,106 @@ describe('Binomial/Choose simplification', () => {
     ).toMatchInlineSnapshot(`10`);
   });
 });
+
+describe('Pochhammer from factorial quotient', () => {
+  it('(b+10)!/b! should use Pochhammer', () => {
+    expect(
+      ce
+        .box([
+          'Divide',
+          ['Factorial', ['Add', 'b', 10]],
+          ['Factorial', 'b'],
+        ])
+        .simplify()
+        .toString()
+    ).toMatchInlineSnapshot(`Pochhammer(b + 1, 10)`);
+  });
+});
+
+describe('Gamma function simplification', () => {
+  it('Gamma(1) should simplify to 1', () => {
+    expect(
+      ce.box(['Gamma', 1]).simplify().toString()
+    ).toMatchInlineSnapshot(`1`);
+  });
+
+  it('Gamma(5) should simplify to 4!', () => {
+    expect(
+      ce.box(['Gamma', 5]).simplify().toString()
+    ).toMatchInlineSnapshot(`4!`);
+  });
+
+  it('Gamma(b+1) should simplify to b!', () => {
+    expect(
+      ce.box(['Gamma', ['Add', 'b', 1]]).simplify().toString()
+    ).toMatchInlineSnapshot(`b!`);
+  });
+
+  it('Gamma(b+3)/Gamma(b+1) should simplify to (b+1)(b+2)', () => {
+    expect(
+      ce
+        .box([
+          'Divide',
+          ['Gamma', ['Add', 'b', 3]],
+          ['Gamma', ['Add', 'b', 1]],
+        ])
+        .simplify()
+        .toString()
+    ).toMatchInlineSnapshot(`b^2 + 3b + 2`);
+  });
+});
+
+describe('Double factorial (Factorial2) simplification', () => {
+  it('0!! should be 1', () => {
+    expect(
+      ce.box(['Factorial2', 0]).simplify().toString()
+    ).toMatchInlineSnapshot(`1`);
+  });
+
+  it('1!! should be 1', () => {
+    expect(
+      ce.box(['Factorial2', 1]).simplify().toString()
+    ).toMatchInlineSnapshot(`1`);
+  });
+
+  it('(-1)!! should be 1', () => {
+    expect(
+      ce.box(['Factorial2', -1]).simplify().toString()
+    ).toMatchInlineSnapshot(`1`);
+  });
+
+  it('(2b)!! should simplify to 2^b * b!', () => {
+    expect(
+      ce
+        .box(['Factorial2', ['Multiply', 2, 'b']])
+        .simplify()
+        .toString()
+    ).toMatchInlineSnapshot(`b! * 2^b`);
+  });
+
+  it('10!!/4!! should simplify to 480', () => {
+    expect(
+      ce
+        .box([
+          'Divide',
+          ['Factorial2', 10],
+          ['Factorial2', 4],
+        ])
+        .simplify()
+        .toString()
+    ).toMatchInlineSnapshot(`480`);
+  });
+
+  it('9!!/3!! should simplify to 315', () => {
+    expect(
+      ce
+        .box([
+          'Divide',
+          ['Factorial2', 9],
+          ['Factorial2', 3],
+        ])
+        .simplify()
+        .toString()
+    ).toMatchInlineSnapshot(`315`);
+  });
+});

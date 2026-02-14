@@ -39,8 +39,12 @@ import { simplifyTrig } from './simplify-trig';
 import { simplifyHyperbolic } from './simplify-hyperbolic';
 import { simplifyDivide } from './simplify-divide';
 import {
+  addRelatesToFactorial,
   simplifyBinomial,
   simplifyFactorialAdd,
+  simplifyFactorial2,
+  simplifyFactorial2Divide,
+  simplifyGamma,
 } from './simplify-factorial';
 
 /**
@@ -171,14 +175,19 @@ export const SIMPLIFY_RULES: Rule[] = [
   // Try to expand the expression:
   // x*(y+z) -> x*y + x*z
   (x) => {
-    // Skip expand for products containing Factorial to prevent cycles
-    // with factorial factoring: (n-1)! * (n-1) should NOT re-expand
-    if (
-      x.operator === 'Multiply' &&
-      isFunction(x) &&
-      x.ops.some((op) => op.operator === 'Factorial')
-    )
-      return undefined;
+    // Skip expand for products containing Factorial * Add where the Add
+    // relates to the factorial argument (prevents cycles with factorial factoring)
+    // e.g., (n-1)! * (n-1) should NOT re-expand, but 3! * (x+y) is fine
+    if (x.operator === 'Multiply' && isFunction(x)) {
+      const factOp = x.ops.find(
+        (op) => op.operator === 'Factorial' && isFunction(op)
+      );
+      if (factOp && isFunction(factOp)) {
+        const addOp = x.ops.find((op) => op.operator === 'Add');
+        if (addOp && addRelatesToFactorial(addOp, factOp.op1))
+          return undefined;
+      }
+    }
 
     // Skip expand for Multiply expressions with same-base powers
     // Let simplifyPower handle e^x * e^2 -> e^{x+2} instead of evaluating e^2
@@ -303,13 +312,19 @@ export const SIMPLIFY_RULES: Rule[] = [
       if (hasTan && hasCot) return undefined;
     }
 
-    // Skip Multiply when Factorial is multiplied by a sum (Add) expression
-    // to preserve factorial factoring results like (n-1)! * (n-1)
-    if (
-      ops.some((op) => op.operator === 'Factorial') &&
-      ops.some((op) => op.operator === 'Add')
-    )
-      return undefined;
+    // Skip Multiply when Factorial is multiplied by an Add expression that
+    // relates to the factorial argument (preserves factorial factoring results)
+    // e.g., (n-1)! * (n-1) should stay, but 3! * (x+y) can proceed
+    {
+      const factOp = ops.find(
+        (op) => op.operator === 'Factorial' && isFunction(op)
+      );
+      if (factOp && isFunction(factOp)) {
+        const addOp = ops.find((op) => op.operator === 'Add');
+        if (addOp && addRelatesToFactorial(addOp, factOp.op1))
+          return undefined;
+      }
+    }
 
     // The Multiply function has a 'lazy' property, so we need to ensure operands are canonical.
     // Also evaluate purely numeric operands (no unknowns) to simplify expressions.
@@ -415,6 +430,17 @@ export const SIMPLIFY_RULES: Rule[] = [
         isFunction(denom) &&
         denom.ops.some((op) => op.operator === 'Factorial')
       )
+        return undefined;
+
+      // Skip Factorial2 divisions — let simplifyFactorial2Divide handle
+      if (
+        num.operator === 'Factorial2' &&
+        denom.operator === 'Factorial2'
+      )
+        return undefined;
+
+      // Skip Gamma quotients — let simplifyDivide handle
+      if (num.operator === 'Gamma' && denom.operator === 'Gamma')
         return undefined;
 
       return { value: num.div(denom), because: 'division' };
@@ -731,11 +757,18 @@ export const SIMPLIFY_RULES: Rule[] = [
   // Hyperbolic trig simplifications
   simplifyHyperbolic,
 
-  // Division simplifications (includes factorial quotient and binomial detection)
+  // Division simplifications (includes factorial quotient, binomial, and Gamma)
   simplifyDivide,
 
   // Binomial/Choose identity simplifications
   simplifyBinomial,
+
+  // Gamma function simplifications (Gamma(n+1) → n!, etc.)
+  simplifyGamma,
+
+  // Double factorial simplifications (identities and quotients)
+  simplifyFactorial2,
+  simplifyFactorial2Divide,
 
   //
   // Power combination for 2+ operands in Multiply

@@ -435,6 +435,14 @@ function simplifyNonCommutativeFunction(
   const isQuotientPowerRule = because === 'a / (b/c)^d -> a * (c/b)^d';
   // Factorial factoring: n! - (n-1)! -> (n-1)! * (n-1) is structurally preferred
   const isFactorialFactoring = because === 'factor common factorial';
+  // Double factorial identity: (2n)!! -> 2^n * n! converts to standard form
+  const isDoubleFactorialIdentity = because === '(2n)!! -> 2^n * n!';
+  // Gamma to factorial: Gamma(n+1) -> n! is always preferred
+  const isGammaToFactorial =
+    because === 'Gamma(n+1) -> n!' ||
+    because === 'Gamma(n) -> (n-1)!' ||
+    because === 'Gamma(1) -> 1' ||
+    because === 'Gamma(n) -> (n-1)!';
   // Expand may produce more nodes but enables term cancellation
   // Accept when expansion reduces terms or eliminates Power-of-Add patterns
   const isExpandWithSimplification =
@@ -477,6 +485,8 @@ function simplifyNonCommutativeFunction(
     !isAbsRule &&
     !isQuotientPowerRule &&
     !isFactorialFactoring &&
+    !isDoubleFactorialIdentity &&
+    !isGammaToFactorial &&
     !isExpandWithSimplification
   )
     return steps;

@@ -14,7 +14,9 @@ import { baseOffset } from './simplify-factorial';
  * - 0/a -> 0 (when a ≠ 0)
  * - n!/k! -> partial product (concrete integers)
  * - n!/k! -> (k+1)(k+2)...n (symbolic, small constant diff)
+ * - n!/k! -> Pochhammer(k+1, n-k) (symbolic, large diff)
  * - n!/(k!(n-k)!) -> Binomial(n, k)
+ * - Gamma(a)/Gamma(b) -> partial product or Pochhammer
  *
  * IMPORTANT: Do not call .simplify() on results to avoid infinite recursion.
  */
@@ -189,6 +191,23 @@ export function simplifyDivide(x: Expression): RuleStep | undefined {
           because: 'n!/k! -> 1/((n+1)..k)',
         };
       }
+      // Large symbolic diff: express as Pochhammer
+      // a!/b! = Pochhammer(b+1, a-b) when a > b (diff > 0)
+      // a!/b! = 1/Pochhammer(a+1, b-a) when a < b (diff < 0)
+      if (Number.isInteger(d) && d > 8) {
+        const count = a.sub(b);
+        return {
+          value: ce._fn('Pochhammer', [b.add(ce.One), count]),
+          because: 'n!/k! -> Pochhammer(k+1, n-k)',
+        };
+      }
+      if (Number.isInteger(d) && d < -8) {
+        const count = b.sub(a);
+        return {
+          value: ce.One.div(ce._fn('Pochhammer', [a.add(ce.One), count])),
+          because: 'n!/k! -> 1/Pochhammer(n+1, k-n)',
+        };
+      }
     }
   }
 
@@ -238,6 +257,57 @@ export function simplifyDivide(x: Expression): RuleStep | undefined {
           value: ce._fn('Binomial', [n, k]),
           because: 'n!/(k!(n-k)!) -> Binomial',
         };
+      }
+    }
+  }
+
+  // ── Gamma quotient: Gamma(a) / Gamma(b) → factorial quotient ──
+  // Gamma(n+1)/Gamma(k+1) = n!/k!
+  if (
+    num.operator === 'Gamma' &&
+    denom.operator === 'Gamma' &&
+    isFunction(num) &&
+    isFunction(denom)
+  ) {
+    const a = num.op1;
+    const b = denom.op1;
+    const aBO = baseOffset(a);
+    const bBO = baseOffset(b);
+    if (aBO && bBO && aBO.base.isSame(bBO.base)) {
+      const d = aBO.offset - bBO.offset;
+      if (Number.isInteger(d) && d !== 0) {
+        // Gamma(a)/Gamma(b) = (b)(b+1)...(a-1) when a > b
+        // Gamma(a)/Gamma(b) = 1/((a)(a+1)...(b-1)) when a < b
+        if (d >= 1 && d <= 8) {
+          let product: Expression = b;
+          for (let i = 1; i < d; i++) {
+            product = product.mul(b.add(ce.number(i)));
+          }
+          return { value: product, because: 'Gamma(a)/Gamma(b) quotient' };
+        }
+        if (d <= -1 && d >= -8) {
+          let product: Expression = a;
+          for (let i = 1; i < -d; i++) {
+            product = product.mul(a.add(ce.number(i)));
+          }
+          return {
+            value: ce.One.div(product),
+            because: 'Gamma(a)/Gamma(b) quotient',
+          };
+        }
+        // Large diff: use Pochhammer
+        if (d > 8) {
+          return {
+            value: ce._fn('Pochhammer', [b, ce.number(d)]),
+            because: 'Gamma(a)/Gamma(b) -> Pochhammer',
+          };
+        }
+        if (d < -8) {
+          return {
+            value: ce.One.div(ce._fn('Pochhammer', [a, ce.number(-d)])),
+            because: 'Gamma(a)/Gamma(b) -> 1/Pochhammer',
+          };
+        }
       }
     }
   }

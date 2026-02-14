@@ -15,6 +15,7 @@ describe('NUMERIC gamma', () => {
   test(`Gamma(1)`, () =>
     expect(checkJson(['Gamma', 1])).toMatchInlineSnapshot(`
       box       = ["Gamma", 1]
+      simplify  = 1
       eval-auto = Gamma(1)
       eval-mach = Gamma(1)
       N-auto    = 1
@@ -24,6 +25,7 @@ describe('NUMERIC gamma', () => {
   test(`Gamma(5)`, () =>
     expect(checkJson(['Gamma', 5])).toMatchInlineSnapshot(`
       box       = ["Gamma", 5]
+      simplify  = 4!
       eval-auto = Gamma(5)
       eval-mach = Gamma(5)
       N-auto    = 23.9999999999999999994
