@@ -1,3 +1,18 @@
+## [Unreleased]
+
+### Simplification
+
+- **Factorial quotient simplification**: `n!/k!` is now simplified to a partial
+  product for both concrete integers (e.g., `10!/7!` → `720`) and symbolic
+  expressions with small constant difference (e.g., `n!/(n-2)!` → `n(n-1)`).
+- **Binomial detection**: Expressions of the form `n!/(k!(n-k)!)` are
+  automatically recognized and simplified to `Binomial(n, k)`.
+- **Binomial identity simplification**: `C(n,0)` → `1`, `C(n,1)` → `n`,
+  `C(n,n)` → `1`, `C(n,n-1)` → `n`.
+- **Factorial sum factoring**: Sums and differences of factorials with related
+  arguments are factored out, e.g., `n! - (n-1)!` → `(n-1)! * (n-1)`,
+  `(n+1)! + n!` → `n! * (n+2)`.
+
 ## 0.50.2 _2026-02-12_
 
 ### Numerics
@@ -24,9 +39,9 @@
 - **Fixed scope leaks**: Ensured that evaluation contexts are correctly popped
   even when an error or timeout occurs in `BoxedFunction.evaluate()`,
   `findUnivariateRoots()`, and rule-boxing operations.
-- **Improved numerical evaluation performance**: `Sum`, `Product`, `Divide`,
-  and statistical operators (`Mean`, `Variance`, etc.) now correctly propagate
-  the `numericApproximation` option, significantly speeding up large numerical
+- **Improved numerical evaluation performance**: `Sum`, `Product`, `Divide`, and
+  statistical operators (`Mean`, `Variance`, etc.) now correctly propagate the
+  `numericApproximation` option, significantly speeding up large numerical
   calculations by avoiding expensive exact arithmetic.
 
 ## 0.50.1 _2026-02-11_

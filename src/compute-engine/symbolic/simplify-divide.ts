@@ -147,8 +147,10 @@ export function simplifyDivide(x: Expression): RuleStep | undefined {
       a.isNonNegative &&
       b.isNonNegative
     ) {
-      const aVal = BigInt(a.re);
-      const bVal = BigInt(b.re);
+      const aVal = BigInt(Math.trunc(a.re));
+      const bVal = BigInt(Math.trunc(b.re));
+      const diff = aVal > bVal ? aVal - bVal : bVal - aVal;
+      if (diff > 1000n) return undefined; // cap to avoid huge loops
       if (aVal >= bVal) {
         // n!/k! = (k+1)(k+2)...n
         let result = 1n;
@@ -217,12 +219,7 @@ export function simplifyDivide(x: Expression): RuleStep | undefined {
       const m = factorialOps[1].op1;
 
       // Check if k + m = n (numeric)
-      if (
-        isNumber(n) &&
-        isNumber(k) &&
-        isNumber(m) &&
-        k.re + m.re === n.re
-      ) {
+      if (isNumber(n) && isNumber(k) && isNumber(m) && k.re + m.re === n.re) {
         // Use the smaller of k, m for efficiency
         const smaller = k.re <= m.re ? k : m;
         return {
