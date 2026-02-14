@@ -4,6 +4,12 @@ import {
   convertUnit,
   convertCompoundUnit,
   parseUnitDSL,
+  getUnitDimension,
+  getUnitScale,
+  areCompatibleUnits,
+  getExpressionDimension,
+  getExpressionScale,
+  findNamedUnit,
   type UnitExpression,
 } from './unit-data';
 
@@ -146,6 +152,69 @@ export const UNITS_LIBRARY: SymbolDefinitions = {
       if (converted === null) return undefined;
 
       return ce._fn('Quantity', [ce.number(converted), targetUnitExpr]);
+    },
+  },
+
+  UnitSimplify: {
+    description: 'Simplify a quantity unit to a named derived unit if possible',
+    complexity: 1200,
+    signature: '(value) -> value',
+    evaluate: (ops, { engine: ce }) => {
+      const arg = ops[0]?.evaluate();
+      if (!arg || arg.operator !== 'Quantity') return arg;
+
+      const mag = arg.op1.re;
+      const unitExpr = arg.op2;
+
+      // Get the unit expression as a UnitExpression for dimension calculation
+      const ue = boxedToUnitExpression(unitExpr);
+      if (!ue) return arg;
+
+      // Compute dimension vector of the compound unit
+      const dim = getExpressionDimension(ue);
+      if (!dim) return arg;
+
+      // Search named derived units for a matching dimension with scale=1
+      const match = findNamedUnit(dim);
+      if (!match) return arg;
+
+      // Adjust magnitude for scale difference
+      const scale = getExpressionScale(ue);
+      if (scale === null) return arg;
+      const matchScale = getUnitScale(match);
+      if (matchScale === null) return arg;
+      const newMag = (mag * scale) / matchScale;
+
+      return ce._fn('Quantity', [ce.number(newMag), ce.symbol(match)]);
+    },
+  },
+
+  CompatibleUnitQ: {
+    description: 'Check if two units have the same dimension',
+    complexity: 1200,
+    signature: '(value, value) -> value',
+    evaluate: (ops, { engine: ce }) => {
+      const a = ops[0]?.symbol;
+      const b = ops[1]?.symbol;
+      if (!a || !b) return undefined;
+
+      const result = areCompatibleUnits(a, b);
+      return ce.symbol(result ? 'True' : 'False');
+    },
+  },
+
+  UnitDimension: {
+    description: 'Return the dimension vector of a unit',
+    complexity: 1200,
+    signature: '(value) -> value',
+    evaluate: (ops, { engine: ce }) => {
+      const sym = ops[0]?.symbol;
+      if (!sym) return undefined;
+
+      const dim = getUnitDimension(sym);
+      if (!dim) return undefined;
+
+      return ce._fn('List', dim.map((d) => ce.number(d)));
     },
   },
 };

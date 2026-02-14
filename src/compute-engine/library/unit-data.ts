@@ -16,4 +16,5 @@ export {
   getExpressionScale,
   parseUnitDSL,
   convertCompoundUnit,
+  findNamedUnit,
 } from '../numerics/unit-data';

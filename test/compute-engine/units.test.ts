@@ -432,3 +432,46 @@ describe('SIUNITX PARSING', () => {
     expect(expr.op2.symbol).toBe('km');
   });
 });
+
+describe('UNIT SIMPLIFY', () => {
+  test('kg⋅m⋅s⁻² simplifies to N', () => {
+    const expr = engine.box([
+      'UnitSimplify',
+      ['Quantity', 100, ['Multiply', 'kg', 'm', ['Power', 's', -2]]],
+    ]).evaluate();
+    expect(expr.operator).toBe('Quantity');
+    expect(expr.op1.re).toBe(100);
+    expect(expr.op2.symbol).toBe('N');
+  });
+
+  test('No simpler form returns unchanged', () => {
+    const expr = engine.box([
+      'UnitSimplify',
+      ['Quantity', 5, ['Divide', 'kg', 'L']],
+    ]).evaluate();
+    expect(expr.operator).toBe('Quantity');
+    expect(expr.op1.re).toBe(5);
+    // kg/L has dimension [0, 1, 0, 0, 0, 0, 0] - [3, 0, 0, 0, 0, 0, 0] = [-3, 1, 0, 0, 0, 0, 0]
+    // which has no named SI unit (it's density), so should remain unchanged
+    expect(expr.op2.operator).toBe('Divide');
+  });
+});
+
+describe('COMPATIBLE UNIT Q', () => {
+  test('m and km are compatible', () => {
+    const expr = engine.box(['CompatibleUnitQ', 'm', 'km']).evaluate();
+    expect(expr.symbol).toBe('True');
+  });
+
+  test('m and s are not compatible', () => {
+    const expr = engine.box(['CompatibleUnitQ', 'm', 's']).evaluate();
+    expect(expr.symbol).toBe('False');
+  });
+});
+
+describe('UNIT DIMENSION', () => {
+  test('Dimension of meter', () => {
+    const expr = engine.box(['UnitDimension', 'm']).evaluate();
+    expect(expr.operator).toBe('List');
+  });
+});
