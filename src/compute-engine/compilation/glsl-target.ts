@@ -1,6 +1,6 @@
 import type { Expression } from '../global-types';
 import type { CompiledFunctions } from './types';
-import { GPUShaderTarget } from './gpu-target';
+import { GPUShaderTarget, compileGPUMatrix } from './gpu-target';
 import { BaseCompiler } from './base-compiler';
 
 /**
@@ -9,19 +9,31 @@ import { BaseCompiler } from './base-compiler';
  * These override or extend the shared GPU functions for GLSL-specific naming
  * and syntax: `inversesqrt`, `mod()`, and `vec2`/`vec3`/`vec4` constructors.
  */
+function compileGLSLList(args, compile) {
+  if (args.length === 2)
+    return `vec2(${args.map((x) => compile(x)).join(', ')})`;
+  if (args.length === 3)
+    return `vec3(${args.map((x) => compile(x)).join(', ')})`;
+  if (args.length === 4)
+    return `vec4(${args.map((x) => compile(x)).join(', ')})`;
+  return `float[${args.length}](${args.map((x) => compile(x)).join(', ')})`;
+}
+
 const GLSL_FUNCTIONS: CompiledFunctions<Expression> = {
   Inversesqrt: 'inversesqrt',
   Mod: 'mod',
 
-  List: (args, compile) => {
-    if (args.length === 2)
-      return `vec2(${args.map((x) => compile(x)).join(', ')})`;
-    if (args.length === 3)
-      return `vec3(${args.map((x) => compile(x)).join(', ')})`;
-    if (args.length === 4)
-      return `vec4(${args.map((x) => compile(x)).join(', ')})`;
-    return `float[${args.length}](${args.map((x) => compile(x)).join(', ')})`;
-  },
+  List: compileGLSLList,
+  Matrix: (args, compile) =>
+    compileGPUMatrix(
+      args,
+      compile,
+      (n) => `vec${n}`,
+      (n) => `mat${n}`,
+      (n) => `float[${n}]`
+    ),
+  // Tuple compiles identically to List
+  Tuple: compileGLSLList,
 };
 
 /**

@@ -205,6 +205,57 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   Refract: 'refract',
 };
 
+/**
+ * Compile a Matrix expression to GPU-native types when possible.
+ *
+ * Handles two optimizations:
+ * - Column vectors (Nx1): flatten to vecN instead of nested single-element arrays
+ * - Square matrices (NxN, N=2,3,4): use native matN types with column-major transposition
+ *
+ * Falls back to compiling the nested List structure for other shapes.
+ */
+export function compileGPUMatrix(
+  args: ReadonlyArray<Expression>,
+  compile: (expr: Expression) => string,
+  vecFn: (n: number) => string,
+  matFn: (n: number) => string,
+  arrayFn: (n: number) => string
+): string {
+  const body = args[0];
+  const rows = body.ops;
+  if (!rows || rows.length === 0) return compile(body);
+
+  const numRows = rows.length;
+  const numCols = rows[0].nops;
+
+  // Column vector (Nx1): flatten to vecN or array<f32, N>
+  if (numCols === 1 && rows.every((row) => row.nops === 1)) {
+    const elements = rows.map((row) => compile(row.ops[0]));
+    if (numRows >= 2 && numRows <= 4)
+      return `${vecFn(numRows)}(${elements.join(', ')})`;
+    return `${arrayFn(numRows)}(${elements.join(', ')})`;
+  }
+
+  // Square matrix NxN (N=2,3,4): use native matrix type
+  // GPU matrices are column-major, our Matrix is row-major → transpose
+  if (
+    numRows === numCols &&
+    numRows >= 2 &&
+    numRows <= 4 &&
+    rows.every((row) => row.nops === numCols)
+  ) {
+    const cols: string[] = [];
+    for (let c = 0; c < numCols; c++) {
+      const colElements = rows.map((row) => compile(row.ops[c]));
+      cols.push(`${vecFn(numRows)}(${colElements.join(', ')})`);
+    }
+    return `${matFn(numRows)}(${cols.join(', ')})`;
+  }
+
+  // Default: compile the nested list structure as-is
+  return compile(body);
+}
+
 /** Constants shared by both GLSL and WGSL */
 const GPU_CONSTANTS: Record<string, string> = {
   Pi: '3.14159265359',

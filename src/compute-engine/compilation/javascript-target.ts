@@ -129,6 +129,11 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     `_SYS.limit(${compile(args[0])}, ${compile(args[1])})`,
   Ln: 'Math.log',
   List: (args, compile) => `[${args.map((x) => compile(x)).join(', ')}]`,
+  // Matrix wraps List(List(...), ...) — compile the body (first arg) which
+  // is the nested List structure; remaining args are delimiters/column spec
+  Matrix: (args, compile) => compile(args[0]),
+  // Tuple compiles identically to List
+  Tuple: (args, compile) => `[${args.map((x) => compile(x)).join(', ')}]`,
   Log: (args, compile) => {
     if (args.length === 1) return `Math.log10(${compile(args[0])})`;
     return `(Math.log(${compile(args[0])}) / Math.log(${compile(args[1])}))`;

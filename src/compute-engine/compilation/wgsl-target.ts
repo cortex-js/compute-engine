@@ -1,6 +1,6 @@
 import type { Expression } from '../global-types';
 import type { CompiledFunctions } from './types';
-import { GPUShaderTarget } from './gpu-target';
+import { GPUShaderTarget, compileGPUMatrix } from './gpu-target';
 import { BaseCompiler } from './base-compiler';
 
 /**
@@ -10,6 +10,16 @@ import { BaseCompiler } from './base-compiler';
  * and syntax: `inverseSqrt`, `%` for mod, and `vec2f`/`vec3f`/`vec4f`
  * constructors.
  */
+function compileWGSLList(args, compile) {
+  if (args.length === 2)
+    return `vec2f(${args.map((x) => compile(x)).join(', ')})`;
+  if (args.length === 3)
+    return `vec3f(${args.map((x) => compile(x)).join(', ')})`;
+  if (args.length === 4)
+    return `vec4f(${args.map((x) => compile(x)).join(', ')})`;
+  return `array<f32, ${args.length}>(${args.map((x) => compile(x)).join(', ')})`;
+}
+
 const WGSL_FUNCTIONS: CompiledFunctions<Expression> = {
   Inversesqrt: 'inverseSqrt',
 
@@ -18,15 +28,17 @@ const WGSL_FUNCTIONS: CompiledFunctions<Expression> = {
     return `(${compile(a)} % ${compile(b)})`;
   },
 
-  List: (args, compile) => {
-    if (args.length === 2)
-      return `vec2f(${args.map((x) => compile(x)).join(', ')})`;
-    if (args.length === 3)
-      return `vec3f(${args.map((x) => compile(x)).join(', ')})`;
-    if (args.length === 4)
-      return `vec4f(${args.map((x) => compile(x)).join(', ')})`;
-    return `array<f32, ${args.length}>(${args.map((x) => compile(x)).join(', ')})`;
-  },
+  List: compileWGSLList,
+  Matrix: (args, compile) =>
+    compileGPUMatrix(
+      args,
+      compile,
+      (n) => `vec${n}f`,
+      (n) => `mat${n}x${n}f`,
+      (n) => `array<f32, ${n}>`
+    ),
+  // Tuple compiles identically to List
+  Tuple: compileWGSLList,
 };
 
 /** Map common GLSL/MathJSON types to WGSL types */

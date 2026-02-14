@@ -327,6 +327,131 @@ describe('COMPILE', () => {
     });
   });
 
+  describe('Tuples and Matrices', () => {
+    describe('Tuple compilation', () => {
+      it('should compile a tuple from LaTeX', () => {
+        const expr = ce.parse('(\\sin(t), \\cos(t))');
+        expect(expr.operator).toBe('Tuple');
+        expect(compile(expr)?.code).toMatchInlineSnapshot(
+          `[Math.sin(_.t), Math.cos(_.t)]`
+        );
+      });
+
+      it('should compile a tuple from box', () => {
+        const expr = ce.box(['Tuple', 1, 2, 3]);
+        expect(compile(expr)?.code).toMatchInlineSnapshot(`[1, 2, 3]`);
+      });
+
+      it('should compile a tuple and execute it', () => {
+        const expr = ce.box(['Tuple', ['Sin', 'x'], ['Cos', 'x']]);
+        const result = compile(expr)?.run?.({ x: 0 });
+        expect(result).toEqual([0, 1]);
+      });
+
+      it('should compile a tuple to GLSL', () => {
+        const expr = ce.box(['Tuple', ['Sin', 't'], ['Cos', 't']]);
+        const compiled = compile(expr, { to: 'glsl' });
+        expect(compiled?.code).toMatchInlineSnapshot(
+          `vec2(sin(t), cos(t))`
+        );
+      });
+
+      it('should compile a tuple to WGSL', () => {
+        const expr = ce.box(['Tuple', ['Sin', 't'], ['Cos', 't']]);
+        const compiled = compile(expr, { to: 'wgsl' });
+        expect(compiled?.code).toMatchInlineSnapshot(
+          `vec2f(sin(t), cos(t))`
+        );
+      });
+    });
+
+    describe('Matrix compilation', () => {
+      it('should compile a column vector matrix from LaTeX', () => {
+        const expr = ce.parse(
+          '\\begin{pmatrix}\\sin(t)\\\\ \\cos(t)\\end{pmatrix}'
+        );
+        expect(expr.operator).toBe('Matrix');
+        expect(compile(expr)?.code).toMatchInlineSnapshot(
+          `[[Math.sin(_.t)], [Math.cos(_.t)]]`
+        );
+      });
+
+      it('should compile a 2x2 matrix from box', () => {
+        const expr = ce.box([
+          'Matrix',
+          ['List', ['List', 1, 2], ['List', 3, 4]],
+        ]);
+        expect(compile(expr)?.code).toMatchInlineSnapshot(`[[1, 2], [3, 4]]`);
+      });
+
+      it('should compile a matrix and execute it', () => {
+        const expr = ce.box([
+          'Matrix',
+          ['List', ['List', 1, 0], ['List', 0, 1]],
+        ]);
+        const result = compile(expr)?.run?.();
+        expect(result).toEqual([[1, 0], [0, 1]]);
+      });
+
+      it('should compile a column vector to GLSL', () => {
+        const expr = ce.parse(
+          '\\begin{pmatrix}1\\\\ 2\\\\ 3\\end{pmatrix}'
+        );
+        const compiled = compile(expr, { to: 'glsl' });
+        // Column vector Nx1 is flattened to vecN
+        expect(compiled?.code).toMatchInlineSnapshot(`vec3(1.0, 2.0, 3.0)`);
+      });
+
+      it('should compile a column vector to WGSL', () => {
+        const expr = ce.parse(
+          '\\begin{pmatrix}1\\\\ 2\\\\ 3\\end{pmatrix}'
+        );
+        const compiled = compile(expr, { to: 'wgsl' });
+        expect(compiled?.code).toMatchInlineSnapshot(`vec3f(1.0, 2.0, 3.0)`);
+      });
+
+      it('should compile a 2x2 matrix to GLSL with native mat2', () => {
+        const expr = ce.box([
+          'Matrix',
+          ['List', ['List', 1, 2], ['List', 3, 4]],
+        ]);
+        const compiled = compile(expr, { to: 'glsl' });
+        // Column-major: col0=(1,3), col1=(2,4)
+        expect(compiled?.code).toMatchInlineSnapshot(
+          `mat2(vec2(1.0, 3.0), vec2(2.0, 4.0))`
+        );
+      });
+
+      it('should compile a 2x2 matrix to WGSL with native mat2x2f', () => {
+        const expr = ce.box([
+          'Matrix',
+          ['List', ['List', 1, 2], ['List', 3, 4]],
+        ]);
+        const compiled = compile(expr, { to: 'wgsl' });
+        // Column-major: col0=(1,3), col1=(2,4)
+        expect(compiled?.code).toMatchInlineSnapshot(
+          `mat2x2f(vec2f(1.0, 3.0), vec2f(2.0, 4.0))`
+        );
+      });
+
+      it('should compile a 3x3 matrix to GLSL', () => {
+        const expr = ce.box([
+          'Matrix',
+          [
+            'List',
+            ['List', 1, 0, 0],
+            ['List', 0, 1, 0],
+            ['List', 0, 0, 1],
+          ],
+        ]);
+        const compiled = compile(expr, { to: 'glsl' });
+        expect(compiled?.code).toMatchInlineSnapshot(
+          `mat3(vec3(1.0, 0.0, 0.0), vec3(0.0, 1.0, 0.0), vec3(0.0, 0.0, 1.0))`
+        );
+      });
+    });
+  });
+
   describe('Cross-reference: target functions exist in ComputeEngine library', () => {
     // Functions that are target-specific and intentionally not in the CE library.
     // These are GLSL graphics built-ins, Python-specific numpy/scipy functions,

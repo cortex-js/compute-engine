@@ -245,6 +245,10 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     // Python list notation
     return `[${args.map((x) => compile(x)).join(', ')}]`;
   },
+  // Matrix wraps List(List(...), ...) — compile as np.array for proper matrix ops
+  Matrix: (args, compile) => `np.array(${compile(args[0])})`,
+  // Tuple compiles to a Python tuple
+  Tuple: (args, compile) => `(${args.map((x) => compile(x)).join(', ')})`,
   Sequence: (args, compile) => {
     // NumPy array
     return `np.array([${args.map((x) => compile(x)).join(', ')}])`;

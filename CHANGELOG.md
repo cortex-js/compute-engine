@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+### Compilation
+
+- **Tuple and Matrix compilation**: `Tuple` and `Matrix` expressions can now be
+  compiled across all targets. `compile('(\\sin(t), \\cos(t))')` produces
+  `[Math.sin(t), Math.cos(t)]` in JavaScript, `vec2(sin(t), cos(t))` in GLSL,
+  `vec2f(sin(t), cos(t))` in WGSL, and `(np.sin(t), np.cos(t))` in Python.
+- **GPU-native matrix types**: Square matrices (2x2, 3x3, 4x4) compile to
+  native GPU matrix constructors (`mat2`/`mat3`/`mat4` in GLSL,
+  `mat2x2f`/`mat3x3f`/`mat4x4f` in WGSL) with proper column-major
+  transposition. Column vectors are flattened to `vecN`/`vecNf` instead of
+  nested single-element arrays.
+
 ### Simplification
 
 - **Factorial quotient simplification**: `n!/k!` is now simplified to a partial
