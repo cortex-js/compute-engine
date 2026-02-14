@@ -317,3 +317,56 @@ describe('COMPOUND UNIT CONVERT', () => {
     expect(expr.op1.re).toBeCloseTo(10);
   });
 });
+
+describe('LATEX PARSING', () => {
+  test('Number with \\mathrm unit', () => {
+    const expr = engine.parse('12\\,\\mathrm{cm}');
+    expect(expr.operator).toBe('Quantity');
+    expect(expr.op1.re).toBe(12);
+  });
+
+  test('Number with \\text unit', () => {
+    const expr = engine.parse('3\\,\\text{kg}');
+    expect(expr.operator).toBe('Quantity');
+  });
+
+  test('Compound unit in \\mathrm', () => {
+    const expr = engine.parse('9.8\\,\\mathrm{m/s^2}');
+    expect(expr.operator).toBe('Quantity');
+  });
+
+  test('No space between number and unit', () => {
+    const expr = engine.parse('12\\mathrm{cm}');
+    expect(expr.operator).toBe('Quantity');
+  });
+
+  test('Thin space \\, between number and unit', () => {
+    const expr = engine.parse('5\\,\\mathrm{m}');
+    expect(expr.operator).toBe('Quantity');
+  });
+
+  test('Medium space \\; between number and unit', () => {
+    const expr = engine.parse('5\\;\\mathrm{m/s}');
+    expect(expr.operator).toBe('Quantity');
+  });
+});
+
+describe('LATEX SERIALIZATION', () => {
+  test('Simple quantity', () => {
+    const expr = engine.box(['Quantity', 5, 'm']);
+    expect(expr.latex).toBe('5\\,\\mathrm{m}');
+  });
+
+  test('Prefixed unit', () => {
+    const expr = engine.box(['Quantity', 12, 'cm']);
+    expect(expr.latex).toBe('12\\,\\mathrm{cm}');
+  });
+
+  test('Compound unit', () => {
+    const expr = engine.box([
+      'Quantity', 9.8,
+      ['Divide', 'm', ['Power', 's', 2]],
+    ]);
+    expect(expr.latex).toBe('9.8\\,\\mathrm{m/s^{2}}');
+  });
+});
