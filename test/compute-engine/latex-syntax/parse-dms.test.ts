@@ -29,4 +29,20 @@ describe('DMS Parsing', () => {
   test('parse simple degrees unchanged', () => {
     check('9°', ['Degrees', 9]);
   });
+
+  test('parse degrees and arc-minutes', () => {
+    check("9°30'", [
+      'Add',
+      ['Quantity', 9, 'deg'],
+      ['Quantity', 30, 'arcmin'],
+    ]);
+  });
+
+  test('parse degrees and arc-minutes with \\prime', () => {
+    check('9°30\\prime', [
+      'Add',
+      ['Quantity', 9, 'deg'],
+      ['Quantity', 30, 'arcmin'],
+    ]);
+  });
 });

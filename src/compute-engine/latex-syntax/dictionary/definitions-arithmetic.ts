@@ -617,6 +617,56 @@ function serializePower(
     serializer.serialize(exp)
   );
 }
+/**
+ * Parse degrees-minutes-seconds (DMS) angle notation.
+ * Handles: 9°, 9°30', 9°30'15"
+ *
+ * Only interprets ' and " as arcmin/arcsec when immediately following
+ * a degree symbol, avoiding conflict with Prime (derivative) notation.
+ */
+function parseDMS(
+  parser: Parser,
+  lhs: MathJsonExpression
+): MathJsonExpression {
+  const parts: MathJsonExpression[] = [['Quantity', lhs, 'deg']];
+
+  parser.skipSpace();
+
+  // Check for arc-minutes: 30'
+  const savepoint = parser.index;
+  const minValue = parser.parseNumber();
+
+  if (minValue !== null &&
+      (parser.match("'") || parser.match('\\prime'))) {
+    // Found arc-minutes
+    parts.push(['Quantity', minValue, 'arcmin']);
+    parser.skipSpace();
+
+    // Check for arc-seconds: 15"
+    const secSavepoint = parser.index;
+    const secValue = parser.parseNumber();
+
+    if (secValue !== null &&
+        (parser.match('"') || parser.match('\\doubleprime'))) {
+      // Found arc-seconds
+      parts.push(['Quantity', secValue, 'arcsec']);
+    } else {
+      // No arc-seconds, restore position
+      parser.index = secSavepoint;
+    }
+  } else {
+    // No arc-minutes, restore position
+    parser.index = savepoint;
+  }
+
+  if (parts.length === 1) {
+    // Just degrees, use existing Degrees function
+    return ['Degrees', lhs];
+  }
+
+  // Multiple parts, return Add
+  return ['Add', ...parts];
+}
 
 export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   // Constants
@@ -648,13 +698,15 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   {
     latexTrigger: ['^', '\\circ'],
     kind: 'postfix',
-    parse: (_parser, lhs) => ['Degrees', lhs] as MathJsonExpression,
+    parse: (parser: Parser, lhs: MathJsonExpression) =>
+      parseDMS(parser, lhs),
   },
   {
     latexTrigger: ['°'],
     kind: 'postfix',
     precedence: 880,
-    parse: (_parser, lhs) => ['Degrees', lhs] as MathJsonExpression,
+    parse: (parser: Parser, lhs: MathJsonExpression) =>
+      parseDMS(parser, lhs),
   },
 
   {
