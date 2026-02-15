@@ -549,4 +549,127 @@ describe('Color compilation', () => {
     // Should be black
     expect(result[0]).toBeCloseTo(0, 1);
   });
+
+  test('compile Colormap with name only', () => {
+    const expr = ce.box(['Colormap', "'graph6'"]);
+    const compiled = compile(expr);
+    expect(compiled.success).toBe(true);
+    expect(compiled.run).toBeDefined();
+    const result = compiled.run!() as unknown as number[][];
+    expect(result.length).toBe(6);
+    expect(result[0]).toHaveLength(3);
+  });
+
+  test('compile Colormap with integer n', () => {
+    const expr = ce.box(['Colormap', "'viridis'", 5]);
+    const compiled = compile(expr);
+    expect(compiled.success).toBe(true);
+    const result = compiled.run!() as unknown as number[][];
+    expect(result.length).toBe(5);
+    expect(result[0]).toHaveLength(3);
+  });
+
+  test('compile Colormap with float t', () => {
+    const expr = ce.box(['Colormap', "'viridis'", 0.5]);
+    const compiled = compile(expr);
+    expect(compiled.success).toBe(true);
+    const result = compiled.run!() as unknown as number[];
+    expect(result).toHaveLength(3);
+    // Each component should be in [0, 1]
+    expect(result[0]).toBeGreaterThanOrEqual(0);
+    expect(result[0]).toBeLessThanOrEqual(1);
+  });
+});
+
+describe('oklab() parsing', () => {
+  test('parse oklab(0.628 0.225 0.126)', () => {
+    // This should produce a reddish color
+    const result = evaluateColor('oklab(0.628 0.225 0.126)');
+    expect(result).toHaveLength(3);
+    // Red channel should be dominant
+    expect(result[0]).toBeGreaterThan(0.5);
+  });
+
+  test('oklab with alpha', () => {
+    const result = evaluateColor('oklab(0.628 0.225 0.126 / 0.5)');
+    expect(result).toHaveLength(4);
+    expect(result[3]).toBeCloseTo(0.5, 1);
+  });
+
+  test('oklab with percentage lightness', () => {
+    const result = evaluateColor('oklab(62.8% 0.225 0.126)');
+    expect(result).toHaveLength(3);
+    expect(result[0]).toBeGreaterThan(0.5);
+  });
+
+  test('oklab roundtrip through Color operator', () => {
+    const expr = ce.box(['Color', "'oklab(0.628 0.225 0.126)'"]);
+    const result = expr.evaluate();
+    expect(result.operator).toBe('Tuple');
+    expect(result.ops!.length).toBe(3);
+  });
+});
+
+describe('GPU color compilation', () => {
+  test('compile ColorMix to GLSL', () => {
+    const expr = ce.box([
+      'ColorMix',
+      ['Tuple', 1, 0, 0],
+      ['Tuple', 0, 0, 1],
+      0.5,
+    ]);
+    const compiled = compile(expr, { to: 'glsl' });
+    expect(compiled.success).toBe(true);
+    expect(compiled.code).toContain('_gpu_color_mix');
+    expect(compiled.preamble).toContain('_gpu_srgb_to_linear');
+    // GLSL uses vec3
+    expect(compiled.preamble).toContain('vec3 _gpu_srgb_to_oklab');
+  });
+
+  test('compile ColorContrast to WGSL', () => {
+    const expr = ce.box([
+      'ColorContrast',
+      ['Tuple', 1, 1, 1],
+      ['Tuple', 0, 0, 0],
+    ]);
+    const compiled = compile(expr, { to: 'wgsl' });
+    expect(compiled.success).toBe(true);
+    expect(compiled.code).toContain('_gpu_apca');
+    expect(compiled.preamble).toContain('fn _gpu_srgb_to_linear');
+    // WGSL uses vec3f
+    expect(compiled.preamble).toContain('vec3f');
+  });
+
+  test('compile ColorToColorspace to GLSL', () => {
+    const expr = ce.box([
+      'ColorToColorspace',
+      ['Tuple', 1, 0, 0],
+      "'oklab'",
+    ]);
+    const compiled = compile(expr, { to: 'glsl' });
+    expect(compiled.success).toBe(true);
+    expect(compiled.code).toContain('_gpu_srgb_to_oklab');
+  });
+
+  test('compile ColorFromColorspace to WGSL', () => {
+    const expr = ce.box([
+      'ColorFromColorspace',
+      ['Tuple', 0.6, 0.2, 0.1],
+      "'oklab'",
+    ]);
+    const compiled = compile(expr, { to: 'wgsl' });
+    expect(compiled.success).toBe(true);
+    expect(compiled.code).toContain('_gpu_oklab_to_srgb');
+  });
+
+  test('compile ContrastingColor to GLSL', () => {
+    const expr = ce.box([
+      'ContrastingColor',
+      ['Tuple', 1, 1, 1],
+    ]);
+    const compiled = compile(expr, { to: 'glsl' });
+    expect(compiled.success).toBe(true);
+    expect(compiled.code).toContain('_gpu_apca');
+    expect(compiled.code).toContain('vec3(0.0)');
+  });
 });

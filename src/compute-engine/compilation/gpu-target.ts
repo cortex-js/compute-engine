@@ -1,5 +1,5 @@
 import type { Expression } from '../global-types';
-import { isFunction } from '../boxed-expression/type-guards';
+import { isFunction, isSymbol } from '../boxed-expression/type-guards';
 
 import type {
   CompileTarget,
@@ -34,74 +34,236 @@ export const GPU_OPERATORS: CompiledOperators = {
   Not: ['!', 14],
 };
 
+/** Return the vec2 constructor name for the target language. */
+function gpuVec2(target?: CompileTarget<Expression>): string {
+  return target?.language === 'wgsl' ? 'vec2f' : 'vec2';
+}
+
 /**
  * GPU shader functions shared by GLSL and WGSL.
  *
  * Both languages share identical built-in math functions. Language-specific
  * functions (inversesqrt naming, mod, vector constructors) are provided
  * by subclass overrides.
+ *
+ * Complex numbers are represented as vec2(re, im). Functions that can
+ * operate on complex values check `BaseCompiler.isComplexValued()` and
+ * dispatch to `_gpu_c*` helper functions from the complex preamble.
  */
 export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   // Variadic arithmetic (for function-call form, e.g., with vectors)
-  Add: (args, compile) => {
+  Add: (args, compile, target) => {
     if (args.length === 0) return '0.0';
     if (args.length === 1) return compile(args[0]);
-    return args.map((x) => compile(x)).join(' + ');
+    const anyComplex = args.some((a) => BaseCompiler.isComplexValued(a));
+    if (!anyComplex) return args.map((x) => compile(x)).join(' + ');
+    // Complex: promote real operands to vec2(x, 0.0)
+    const v2 = gpuVec2(target);
+    return args
+      .map((a) => {
+        const code = compile(a);
+        return BaseCompiler.isComplexValued(a) ? code : `${v2}(${code}, 0.0)`;
+      })
+      .join(' + ');
   },
-  Multiply: (args, compile) => {
+  Multiply: (args, compile, target) => {
     if (args.length === 0) return '1.0';
     if (args.length === 1) return compile(args[0]);
-    return args.map((x) => compile(x)).join(' * ');
-  },
-  Subtract: (args, compile) => {
-    if (args.length === 0) return '0.0';
-    if (args.length === 1) return compile(args[0]);
-    if (args.length === 2) return `${compile(args[0])} - ${compile(args[1])}`;
+    const anyComplex = args.some((a) => BaseCompiler.isComplexValued(a));
+    if (!anyComplex) return args.map((x) => compile(x)).join(' * ');
+    // Complex multiply: pairwise reduction
     let result = compile(args[0]);
+    let resultIsComplex = BaseCompiler.isComplexValued(args[0]);
     for (let i = 1; i < args.length; i++) {
-      result = `${result} - ${compile(args[i])}`;
+      const code = compile(args[i]);
+      const argIsComplex = BaseCompiler.isComplexValued(args[i]);
+      if (!resultIsComplex && !argIsComplex) {
+        result = `(${result} * ${code})`;
+      } else if (resultIsComplex && !argIsComplex) {
+        // complex * real: scalar multiplication (native)
+        result = `(${code} * ${result})`;
+      } else if (!resultIsComplex && argIsComplex) {
+        // real * complex: scalar multiplication (native)
+        result = `(${result} * ${code})`;
+        resultIsComplex = true;
+      } else {
+        // complex * complex
+        result = `_gpu_cmul(${result}, ${code})`;
+      }
     }
     return result;
   },
-  Divide: (args, compile) => {
-    if (args.length === 0) return '1.0';
+  Subtract: (args, compile, target) => {
+    if (args.length === 0) return '0.0';
     if (args.length === 1) return compile(args[0]);
-    if (args.length === 2) return `${compile(args[0])} / ${compile(args[1])}`;
-    let result = compile(args[0]);
+    const anyComplex = args.some((a) => BaseCompiler.isComplexValued(a));
+    if (!anyComplex) {
+      if (args.length === 2) return `${compile(args[0])} - ${compile(args[1])}`;
+      let result = compile(args[0]);
+      for (let i = 1; i < args.length; i++) {
+        result = `${result} - ${compile(args[i])}`;
+      }
+      return result;
+    }
+    // Complex: promote real operands
+    const v2 = gpuVec2(target);
+    const promote = (a: Expression) => {
+      const code = compile(a);
+      return BaseCompiler.isComplexValued(a) ? code : `${v2}(${code}, 0.0)`;
+    };
+    if (args.length === 2) return `${promote(args[0])} - ${promote(args[1])}`;
+    let result = promote(args[0]);
     for (let i = 1; i < args.length; i++) {
-      result = `${result} / ${compile(args[i])}`;
+      result = `${result} - ${promote(args[i])}`;
     }
     return result;
+  },
+  Divide: (args, compile, target) => {
+    if (args.length === 0) return '1.0';
+    if (args.length === 1) return compile(args[0]);
+    const ac = BaseCompiler.isComplexValued(args[0]);
+    const bc = args.length >= 2 && BaseCompiler.isComplexValued(args[1]);
+    if (!ac && !bc) {
+      if (args.length === 2) return `${compile(args[0])} / ${compile(args[1])}`;
+      let result = compile(args[0]);
+      for (let i = 1; i < args.length; i++) {
+        result = `${result} / ${compile(args[i])}`;
+      }
+      return result;
+    }
+    // Complex division
+    if (ac && bc) return `_gpu_cdiv(${compile(args[0])}, ${compile(args[1])})`;
+    if (ac && !bc) {
+      // complex / real: scalar division (native)
+      return `(${compile(args[0])} / ${compile(args[1])})`;
+    }
+    // real / complex
+    const v2 = gpuVec2(target);
+    return `_gpu_cdiv(${v2}(${compile(args[0])}, 0.0), ${compile(args[1])})`;
+  },
+  Negate: ([x], compile) => {
+    if (x === null) throw new Error('Negate: no argument');
+    // Unary minus works natively on both float and vec2
+    return `(-${compile(x)})`;
   },
 
-  // Standard math functions (identical names in both GLSL and WGSL)
-  Abs: 'abs',
-  Arccos: 'acos',
-  Arcsin: 'asin',
-  Arctan: 'atan',
+  // Standard math functions with complex dispatch
+  Abs: (args, compile) => {
+    if (BaseCompiler.isComplexValued(args[0]))
+      return `length(${compile(args[0])})`;
+    return `abs(${compile(args[0])})`;
+  },
+  Arccos: (args, compile) => {
+    if (BaseCompiler.isComplexValued(args[0]))
+      return `_gpu_cacos(${compile(args[0])})`;
+    return `acos(${compile(args[0])})`;
+  },
+  Arcsin: (args, compile) => {
+    if (BaseCompiler.isComplexValued(args[0]))
+      return `_gpu_casin(${compile(args[0])})`;
+    return `asin(${compile(args[0])})`;
+  },
+  Arctan: (args, compile) => {
+    if (BaseCompiler.isComplexValued(args[0]))
+      return `_gpu_catan(${compile(args[0])})`;
+    return `atan(${compile(args[0])})`;
+  },
   Ceil: 'ceil',
   Clamp: 'clamp',
-  Cos: 'cos',
+  Cos: (args, compile) => {
+    if (BaseCompiler.isComplexValued(args[0]))
+      return `_gpu_ccos(${compile(args[0])})`;
+    return `cos(${compile(args[0])})`;
+  },
   Degrees: 'degrees',
-  Exp: 'exp',
+  Exp: (args, compile) => {
+    if (BaseCompiler.isComplexValued(args[0]))
+      return `_gpu_cexp(${compile(args[0])})`;
+    return `exp(${compile(args[0])})`;
+  },
   Exp2: 'exp2',
   Floor: 'floor',
   Fract: 'fract',
-  Ln: 'log',
+  Ln: (args, compile) => {
+    if (BaseCompiler.isComplexValued(args[0]))
+      return `_gpu_cln(${compile(args[0])})`;
+    return `log(${compile(args[0])})`;
+  },
   Log2: 'log2',
   Max: 'max',
   Min: 'min',
   Mix: 'mix',
-  Power: 'pow',
+  Power: (args, compile, target) => {
+    const base = args[0];
+    const exp = args[1];
+    if (base === null) throw new Error('Power: no argument');
+    if (
+      BaseCompiler.isComplexValued(base) ||
+      BaseCompiler.isComplexValued(exp)
+    ) {
+      // Optimize: e^z → _gpu_cexp(z) when base is ExponentialE
+      if (isSymbol(base) && base.symbol === 'ExponentialE')
+        return `_gpu_cexp(${compile(exp)})`;
+      // Promote real operands to vec2
+      const v2 = gpuVec2(target);
+      const bCode = BaseCompiler.isComplexValued(base)
+        ? compile(base)
+        : `${v2}(${compile(base)}, 0.0)`;
+      const eCode = BaseCompiler.isComplexValued(exp)
+        ? compile(exp)
+        : `${v2}(${compile(exp)}, 0.0)`;
+      return `_gpu_cpow(${bCode}, ${eCode})`;
+    }
+    return `pow(${compile(base)}, ${compile(exp)})`;
+  },
   Radians: 'radians',
   Round: 'round',
   Sign: 'sign',
-  Sin: 'sin',
+  Sin: (args, compile) => {
+    if (BaseCompiler.isComplexValued(args[0]))
+      return `_gpu_csin(${compile(args[0])})`;
+    return `sin(${compile(args[0])})`;
+  },
   Smoothstep: 'smoothstep',
-  Sqrt: 'sqrt',
+  Sqrt: (args, compile) => {
+    if (BaseCompiler.isComplexValued(args[0]))
+      return `_gpu_csqrt(${compile(args[0])})`;
+    return `sqrt(${compile(args[0])})`;
+  },
   Step: 'step',
-  Tan: 'tan',
+  Tan: (args, compile) => {
+    if (BaseCompiler.isComplexValued(args[0]))
+      return `_gpu_ctan(${compile(args[0])})`;
+    return `tan(${compile(args[0])})`;
+  },
   Truncate: 'trunc',
+
+  // Complex-specific functions
+  Re: (args, compile) => {
+    if (BaseCompiler.isComplexValued(args[0]))
+      return `(${compile(args[0])}).x`;
+    return compile(args[0]);
+  },
+  Im: (args, compile) => {
+    if (BaseCompiler.isComplexValued(args[0]))
+      return `(${compile(args[0])}).y`;
+    return '0.0';
+  },
+  Arg: (args, compile) => {
+    if (BaseCompiler.isComplexValued(args[0])) {
+      const code = compile(args[0]);
+      return `atan(${code}.y, ${code}.x)`;
+    }
+    return `(${compile(args[0])} >= 0.0 ? 0.0 : 3.14159265359)`;
+  },
+  Conjugate: (args, compile, target) => {
+    if (BaseCompiler.isComplexValued(args[0])) {
+      const v2 = gpuVec2(target);
+      const code = compile(args[0]);
+      return `${v2}(${code}.x, -${code}.y)`;
+    }
+    return compile(args[0]);
+  },
 
   Remainder: ([a, b], compile) => {
     if (a === null || b === null)
@@ -112,15 +274,25 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   // Reciprocal trigonometric functions (no GPU built-ins)
   Cot: ([x], compile) => {
     if (x === null) throw new Error('Cot: no argument');
+    if (BaseCompiler.isComplexValued(x))
+      return `_gpu_cdiv(_gpu_ccos(${compile(x)}), _gpu_csin(${compile(x)}))`;
     const arg = compile(x);
     return `(cos(${arg}) / sin(${arg}))`;
   },
-  Csc: ([x], compile) => {
+  Csc: ([x], compile, target) => {
     if (x === null) throw new Error('Csc: no argument');
+    if (BaseCompiler.isComplexValued(x)) {
+      const v2 = gpuVec2(target);
+      return `_gpu_cdiv(${v2}(1.0, 0.0), _gpu_csin(${compile(x)}))`;
+    }
     return `(1.0 / sin(${compile(x)}))`;
   },
-  Sec: ([x], compile) => {
+  Sec: ([x], compile, target) => {
     if (x === null) throw new Error('Sec: no argument');
+    if (BaseCompiler.isComplexValued(x)) {
+      const v2 = gpuVec2(target);
+      return `_gpu_cdiv(${v2}(1.0, 0.0), _gpu_ccos(${compile(x)}))`;
+    }
     return `(1.0 / cos(${compile(x)}))`;
   },
 
@@ -138,23 +310,45 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     return `acos(1.0 / (${compile(x)}))`;
   },
 
-  // Hyperbolic functions
-  Sinh: 'sinh',
-  Cosh: 'cosh',
-  Tanh: 'tanh',
+  // Hyperbolic functions with complex dispatch
+  Sinh: (args, compile) => {
+    if (BaseCompiler.isComplexValued(args[0]))
+      return `_gpu_csinh(${compile(args[0])})`;
+    return `sinh(${compile(args[0])})`;
+  },
+  Cosh: (args, compile) => {
+    if (BaseCompiler.isComplexValued(args[0]))
+      return `_gpu_ccosh(${compile(args[0])})`;
+    return `cosh(${compile(args[0])})`;
+  },
+  Tanh: (args, compile) => {
+    if (BaseCompiler.isComplexValued(args[0]))
+      return `_gpu_ctanh(${compile(args[0])})`;
+    return `tanh(${compile(args[0])})`;
+  },
 
   // Reciprocal hyperbolic functions
   Coth: ([x], compile) => {
     if (x === null) throw new Error('Coth: no argument');
+    if (BaseCompiler.isComplexValued(x))
+      return `_gpu_cdiv(_gpu_ccosh(${compile(x)}), _gpu_csinh(${compile(x)}))`;
     const arg = compile(x);
     return `(cosh(${arg}) / sinh(${arg}))`;
   },
-  Csch: ([x], compile) => {
+  Csch: ([x], compile, target) => {
     if (x === null) throw new Error('Csch: no argument');
+    if (BaseCompiler.isComplexValued(x)) {
+      const v2 = gpuVec2(target);
+      return `_gpu_cdiv(${v2}(1.0, 0.0), _gpu_csinh(${compile(x)}))`;
+    }
     return `(1.0 / sinh(${compile(x)}))`;
   },
-  Sech: ([x], compile) => {
+  Sech: ([x], compile, target) => {
     if (x === null) throw new Error('Sech: no argument');
+    if (BaseCompiler.isComplexValued(x)) {
+      const v2 = gpuVec2(target);
+      return `_gpu_cdiv(${v2}(1.0, 0.0), _gpu_ccosh(${compile(x)}))`;
+    }
     return `(1.0 / cosh(${compile(x)}))`;
   },
 
@@ -586,6 +780,167 @@ fn _gpu_apca(bg: vec3f, fg: vec3f) -> f32 {
 }
 `;
 
+/**
+ * GPU complex number arithmetic preamble (GLSL syntax).
+ *
+ * Complex numbers are represented as vec2(re, im).
+ * Provides: multiplication, division, exponential, logarithm,
+ * power, square root, and trigonometric/hyperbolic functions.
+ *
+ * Addition, subtraction, negation, and scalar multiplication
+ * use native vec2 operators and do not need helper functions.
+ */
+export const GPU_COMPLEX_PREAMBLE_GLSL = `
+vec2 _gpu_cmul(vec2 a, vec2 b) {
+  return vec2(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x);
+}
+
+vec2 _gpu_cdiv(vec2 a, vec2 b) {
+  float d = b.x * b.x + b.y * b.y;
+  return vec2((a.x * b.x + a.y * b.y) / d, (a.y * b.x - a.x * b.y) / d);
+}
+
+vec2 _gpu_cexp(vec2 z) {
+  float e = exp(z.x);
+  return vec2(e * cos(z.y), e * sin(z.y));
+}
+
+vec2 _gpu_cln(vec2 z) {
+  return vec2(log(length(z)), atan(z.y, z.x));
+}
+
+vec2 _gpu_cpow(vec2 z, vec2 w) {
+  return _gpu_cexp(_gpu_cmul(w, _gpu_cln(z)));
+}
+
+vec2 _gpu_csqrt(vec2 z) {
+  float r = length(z);
+  float theta = atan(z.y, z.x);
+  return sqrt(r) * vec2(cos(theta * 0.5), sin(theta * 0.5));
+}
+
+vec2 _gpu_csin(vec2 z) {
+  return vec2(sin(z.x) * cosh(z.y), cos(z.x) * sinh(z.y));
+}
+
+vec2 _gpu_ccos(vec2 z) {
+  return vec2(cos(z.x) * cosh(z.y), -sin(z.x) * sinh(z.y));
+}
+
+vec2 _gpu_ctan(vec2 z) {
+  return _gpu_cdiv(_gpu_csin(z), _gpu_ccos(z));
+}
+
+vec2 _gpu_csinh(vec2 z) {
+  return vec2(sinh(z.x) * cos(z.y), cosh(z.x) * sin(z.y));
+}
+
+vec2 _gpu_ccosh(vec2 z) {
+  return vec2(cosh(z.x) * cos(z.y), sinh(z.x) * sin(z.y));
+}
+
+vec2 _gpu_ctanh(vec2 z) {
+  return _gpu_cdiv(_gpu_csinh(z), _gpu_ccosh(z));
+}
+
+vec2 _gpu_casin(vec2 z) {
+  vec2 iz = vec2(-z.y, z.x);
+  vec2 s = _gpu_csqrt(vec2(1.0 - z.x * z.x + z.y * z.y, -2.0 * z.x * z.y));
+  vec2 l = _gpu_cln(iz + s);
+  return vec2(l.y, -l.x);
+}
+
+vec2 _gpu_cacos(vec2 z) {
+  vec2 s = _gpu_casin(z);
+  return vec2(1.5707963268 - s.x, -s.y);
+}
+
+vec2 _gpu_catan(vec2 z) {
+  vec2 iz = vec2(-z.y, z.x);
+  vec2 a = _gpu_cln(vec2(1.0 - iz.x, -iz.y));
+  vec2 b = _gpu_cln(vec2(1.0 + iz.x, iz.y));
+  vec2 d = vec2(a.x - b.x, a.y - b.y);
+  return vec2(-0.5 * d.y, 0.5 * d.x);
+}
+`;
+
+/**
+ * GPU complex number arithmetic preamble (WGSL syntax).
+ */
+export const GPU_COMPLEX_PREAMBLE_WGSL = `
+fn _gpu_cmul(a: vec2f, b: vec2f) -> vec2f {
+  return vec2f(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x);
+}
+
+fn _gpu_cdiv(a: vec2f, b: vec2f) -> vec2f {
+  let d = b.x * b.x + b.y * b.y;
+  return vec2f((a.x * b.x + a.y * b.y) / d, (a.y * b.x - a.x * b.y) / d);
+}
+
+fn _gpu_cexp(z: vec2f) -> vec2f {
+  let e = exp(z.x);
+  return vec2f(e * cos(z.y), e * sin(z.y));
+}
+
+fn _gpu_cln(z: vec2f) -> vec2f {
+  return vec2f(log(length(z)), atan2(z.y, z.x));
+}
+
+fn _gpu_cpow(z: vec2f, w: vec2f) -> vec2f {
+  return _gpu_cexp(_gpu_cmul(w, _gpu_cln(z)));
+}
+
+fn _gpu_csqrt(z: vec2f) -> vec2f {
+  let r = length(z);
+  let theta = atan2(z.y, z.x);
+  return sqrt(r) * vec2f(cos(theta * 0.5), sin(theta * 0.5));
+}
+
+fn _gpu_csin(z: vec2f) -> vec2f {
+  return vec2f(sin(z.x) * cosh(z.y), cos(z.x) * sinh(z.y));
+}
+
+fn _gpu_ccos(z: vec2f) -> vec2f {
+  return vec2f(cos(z.x) * cosh(z.y), -sin(z.x) * sinh(z.y));
+}
+
+fn _gpu_ctan(z: vec2f) -> vec2f {
+  return _gpu_cdiv(_gpu_csin(z), _gpu_ccos(z));
+}
+
+fn _gpu_csinh(z: vec2f) -> vec2f {
+  return vec2f(sinh(z.x) * cos(z.y), cosh(z.x) * sin(z.y));
+}
+
+fn _gpu_ccosh(z: vec2f) -> vec2f {
+  return vec2f(cosh(z.x) * cos(z.y), sinh(z.x) * sin(z.y));
+}
+
+fn _gpu_ctanh(z: vec2f) -> vec2f {
+  return _gpu_cdiv(_gpu_csinh(z), _gpu_ccosh(z));
+}
+
+fn _gpu_casin(z: vec2f) -> vec2f {
+  let iz = vec2f(-z.y, z.x);
+  let s = _gpu_csqrt(vec2f(1.0 - z.x * z.x + z.y * z.y, -2.0 * z.x * z.y));
+  let l = _gpu_cln(iz + s);
+  return vec2f(l.y, -l.x);
+}
+
+fn _gpu_cacos(z: vec2f) -> vec2f {
+  let s = _gpu_casin(z);
+  return vec2f(1.5707963268 - s.x, -s.y);
+}
+
+fn _gpu_catan(z: vec2f) -> vec2f {
+  let iz = vec2f(-z.y, z.x);
+  let a = _gpu_cln(vec2f(1.0 - iz.x, -iz.y));
+  let b = _gpu_cln(vec2f(1.0 + iz.x, iz.y));
+  let d = vec2f(a.x - b.x, a.y - b.y);
+  return vec2f(-0.5 * d.y, 0.5 * d.x);
+}
+`;
+
 /** Constants shared by both GLSL and WGSL */
 const GPU_CONSTANTS: Record<string, string> = {
   Pi: '3.14159265359',
@@ -660,16 +1015,20 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
   ): CompileTarget<Expression> {
     const functions = this.getFunctions();
     const constants = this.getConstants();
+    const v2 = this.languageId === 'wgsl' ? 'vec2f' : 'vec2';
     return {
       language: this.languageId,
       operators: (op) => GPU_OPERATORS[op],
       functions: (id) => functions[id],
       var: (id) => {
+        if (id === 'ImaginaryUnit') return `${v2}(0.0, 1.0)`;
         if (id in constants) return constants[id];
         return id;
       },
       string: (str) => JSON.stringify(str),
       number: formatGPUNumber,
+      complex: (re, im) =>
+        `${v2}(${formatGPUNumber(re)}, ${formatGPUNumber(im)})`,
       indent: 0,
       ws: (s?: string) => s ?? '',
       preamble: '',
@@ -685,6 +1044,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     const allFunctions = this.getFunctions();
     const constants = this.getConstants();
 
+    const v2 = this.languageId === 'wgsl' ? 'vec2f' : 'vec2';
     const target = this.createTarget({
       functions: (id) => {
         if (userFunctions && id in userFunctions) {
@@ -696,6 +1056,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       },
       var: (id) => {
         if (vars && id in vars) return vars[id] as string;
+        if (id === 'ImaginaryUnit') return `${v2}(0.0, 1.0)`;
         if (id in constants) return constants[id];
         return id;
       },
@@ -708,6 +1069,10 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       code,
     };
     let preamble = '';
+    if (/_gpu_c(?:mul|div|exp|ln|pow|sqrt|sin|cos|tan|sinh|cosh|tanh|asin|acos|atan)\b/.test(code))
+      preamble += this.languageId === 'wgsl'
+        ? GPU_COMPLEX_PREAMBLE_WGSL
+        : GPU_COMPLEX_PREAMBLE_GLSL;
     if (code.includes('_gpu_gamma')) preamble += GPU_GAMMA_PREAMBLE;
     if (code.includes('_gpu_erf')) preamble += GPU_ERF_PREAMBLE;
     if (code.includes('_gpu_srgb_to') || code.includes('_gpu_oklab') ||

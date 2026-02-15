@@ -271,4 +271,158 @@ describe('GLSL COMPILATION', () => {
       expect(code).toMatchInlineSnapshot(`0.0 < x && y < 1.0`);
     });
   });
+
+  describe('Complex Numbers', () => {
+    beforeAll(() => {
+      ce.pushScope();
+      ce.declare('z', 'complex');
+      ce.declare('w', 'complex');
+    });
+    afterAll(() => {
+      ce.popScope();
+    });
+
+    it('should compile complex literal as vec2', () => {
+      const code = glsl.compile(ce.box(['Complex', 3, 4])).code;
+      expect(code).toMatchInlineSnapshot(`vec2(3.0, 4.0)`);
+    });
+
+    it('should compile ImaginaryUnit as vec2(0, 1)', () => {
+      const code = glsl.compile(ce.box('ImaginaryUnit')).code;
+      expect(code).toMatchInlineSnapshot(`vec2(0.0, 1.0)`);
+    });
+
+    it('should compile complex power z^2', () => {
+      const expr = ce.box(['Power', 'z', 2]);
+      const code = glsl.compile(expr).code;
+      expect(code).toMatchInlineSnapshot(`_gpu_cpow(z, vec2(2.0, 0.0))`);
+    });
+
+    it('should compile z^2 + 2z', () => {
+      const expr = ce.parse('z^2+2z');
+      const code = glsl.compile(expr).code;
+      expect(code).toMatchInlineSnapshot(
+        `_gpu_cpow(z, vec2(2.0, 0.0)) + (2.0 * z)`
+      );
+    });
+
+    it('should compile complex multiply z*w', () => {
+      const code = glsl.compile(ce.box(['Multiply', 'z', 'w'])).code;
+      expect(code).toMatchInlineSnapshot(`_gpu_cmul(w, z)`);
+    });
+
+    it('should compile scalar * complex (native)', () => {
+      const code = glsl.compile(ce.box(['Multiply', 2, 'z'])).code;
+      expect(code).toMatchInlineSnapshot(`(2.0 * z)`);
+    });
+
+    it('should compile complex divide', () => {
+      const code = glsl.compile(
+        ce.box(['Divide', 'z', ['Complex', 1, 2]])
+      ).code;
+      expect(code).toMatchInlineSnapshot(`_gpu_cdiv(z, vec2(1.0, 2.0))`);
+    });
+
+    it('should compile complex / real (native)', () => {
+      const code = glsl.compile(ce.box(['Divide', 'z', 3])).code;
+      expect(code).toMatchInlineSnapshot(`(0.3333333333333333 * z)`);
+    });
+
+    it('should compile real / complex', () => {
+      const code = glsl.compile(ce.box(['Divide', 5, 'z'])).code;
+      expect(code).toMatchInlineSnapshot(`_gpu_cdiv(vec2(5.0, 0.0), z)`);
+    });
+
+    it('should compile complex addition with real promotion', () => {
+      const code = glsl.compile(ce.box(['Add', 'z', 5])).code;
+      expect(code).toMatchInlineSnapshot(`z + vec2(5.0, 0.0)`);
+    });
+
+    it('should compile sin of complex variable', () => {
+      const code = glsl.compile(ce.box(['Sin', 'z'])).code;
+      expect(code).toMatchInlineSnapshot(`_gpu_csin(z)`);
+    });
+
+    it('should compile cos of complex variable', () => {
+      const code = glsl.compile(ce.box(['Cos', 'z'])).code;
+      expect(code).toMatchInlineSnapshot(`_gpu_ccos(z)`);
+    });
+
+    it('should compile tan of complex variable', () => {
+      const code = glsl.compile(ce.box(['Tan', 'z'])).code;
+      expect(code).toMatchInlineSnapshot(`_gpu_ctan(z)`);
+    });
+
+    it('should compile exp(z) via Power(E, z) as _gpu_cexp', () => {
+      const expr = ce.box(['Exp', 'z']);
+      const code = glsl.compile(expr).code;
+      expect(code).toMatchInlineSnapshot(`_gpu_cexp(z)`);
+    });
+
+    it('should compile ln of complex variable', () => {
+      // Ln is canonicalized, check the operator
+      const expr = ce.box(['Ln', 'z']);
+      const code = glsl.compile(expr).code;
+      expect(code).toMatchInlineSnapshot(`_gpu_cln(z)`);
+    });
+
+    it('should compile sqrt of complex variable', () => {
+      const code = glsl.compile(ce.box(['Sqrt', 'z'])).code;
+      expect(code).toMatchInlineSnapshot(`_gpu_csqrt(z)`);
+    });
+
+    it('should compile abs of complex as length', () => {
+      const code = glsl.compile(ce.box(['Abs', 'z'])).code;
+      expect(code).toMatchInlineSnapshot(`length(z)`);
+    });
+
+    it('should compile Re and Im of complex', () => {
+      expect(glsl.compile(ce.box(['Re', 'z'])).code).toMatchInlineSnapshot(
+        `(z).x`
+      );
+      expect(glsl.compile(ce.box(['Im', 'z'])).code).toMatchInlineSnapshot(
+        `(z).y`
+      );
+    });
+
+    it('should compile Conjugate of complex', () => {
+      const code = glsl.compile(ce.box(['Conjugate', 'z'])).code;
+      expect(code).toMatchInlineSnapshot(`vec2(z.x, -z.y)`);
+    });
+
+    it('should compile Arg of complex', () => {
+      const code = glsl.compile(ce.box(['Arg', 'z'])).code;
+      expect(code).toMatchInlineSnapshot(`atan(z.y, z.x)`);
+    });
+
+    it('should compile sinh/cosh/tanh of complex', () => {
+      expect(glsl.compile(ce.box(['Sinh', 'z'])).code).toMatchInlineSnapshot(
+        `_gpu_csinh(z)`
+      );
+      expect(glsl.compile(ce.box(['Cosh', 'z'])).code).toMatchInlineSnapshot(
+        `_gpu_ccosh(z)`
+      );
+      expect(glsl.compile(ce.box(['Tanh', 'z'])).code).toMatchInlineSnapshot(
+        `_gpu_ctanh(z)`
+      );
+    });
+
+    it('should include complex preamble when needed', () => {
+      const result = glsl.compile(ce.box(['Multiply', 'z', 'w']));
+      expect(result.preamble).toContain('_gpu_cmul');
+      expect(result.preamble).toContain('_gpu_cdiv');
+      expect(result.preamble).toContain('_gpu_cexp');
+    });
+
+    it('should not include complex preamble for real expressions', () => {
+      const result = glsl.compile(ce.parse('x + y'));
+      expect(result.preamble).toBeUndefined();
+    });
+
+    it('should keep real expressions unchanged', () => {
+      // Verify no regressions with complex declarations in scope
+      const code = glsl.compile(ce.parse('\\sin(x) + \\cos(y)')).code;
+      expect(code).toMatchInlineSnapshot(`sin(x) + cos(y)`);
+    });
+  });
 });

@@ -6,22 +6,12 @@ import {
   compile,
   parse,
   evaluate,
+  declare,
 } from '../src/compute-engine';
 import { expand } from '../src/compute-engine/boxed-expression/expand';
 
 const ce = new ComputeEngine();
 const engine = ce;
-
-ce.parse('f(x):=2x').evaluate();
-console.log(ce.parse('\\frac{d}{dx}f').json);
-console.log(ce.parse('D_x f').json);
-console.log(JSON.stringify(ce.parse("f'(x)").json));
-// -> ["D",["Function",["Block",["f","x"]],"x"],"x"]
-console.log(ce.parse('\\dot{x}').json);
-// -> [ 'D', [ 'Function', [ 'Block', 'x' ], 't' ], 't' ]
-
-ce.parse('f(x):=2x').evaluate();
-ce.parse('\\frac{d}{dx} f').evaluate().print(); // evaluates to 0
 
 // 1. sin(theta)**2 + cos(theta)**2 → 1 — Clean trig identity, but too simple.
 // 2. (alpha**2 - beta**2) / (alpha - beta) → didn't simplify. Engine doesn't cancel the
