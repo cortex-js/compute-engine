@@ -291,6 +291,37 @@ export class BaseCompiler {
   }
 
   /**
+   * Determine at compile time whether an expression produces a complex value.
+   *
+   * Rules:
+   * - Numbers: complex if im !== 0
+   * - Symbols: ImaginaryUnit is complex; others use expr.isReal
+   *   (undefined is treated as real -- assume-real policy)
+   * - Functions: Abs, Arg, Re, Im always return real.
+   *   All others: complex if any operand is complex.
+   */
+  static isComplexValued(expr: Expression): boolean {
+    if (isNumber(expr)) return expr.im !== 0;
+
+    if (isSymbol(expr)) {
+      if (expr.symbol === 'ImaginaryUnit') return true;
+      // isReal: true -> real, undefined -> assume real, false -> complex
+      return expr.isReal === false;
+    }
+
+    if (isFunction(expr)) {
+      const op = expr.operator;
+      // These functions always return real regardless of input
+      if (op === 'Abs' || op === 'Arg' || op === 'Re' || op === 'Im')
+        return false;
+      // For all other functions, complex if any operand is complex
+      return expr.ops.some((arg) => BaseCompiler.isComplexValued(arg));
+    }
+
+    return false;
+  }
+
+  /**
    * Generate a temporary variable name
    */
   static tempVar(): string {
