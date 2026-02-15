@@ -410,3 +410,46 @@ describe('COMPILE COMPLEX - integration', () => {
     expect(val.im).toBeCloseTo(0, 10);
   });
 });
+
+describe('COMPILE COMPLEX - runtime variables', () => {
+  it('should compile with complex-typed variable', () => {
+    ce.declare('z', 'complex');
+    const expr = ce.box(['Add', 'z', 1]);
+    const result = compile(expr, { fallback: false });
+    // z is complex-typed, so Add should use complex path
+    const val = result.run!({ z: { re: 3, im: 4 } }) as {
+      re: number;
+      im: number;
+    };
+    expect(val.re).toBeCloseTo(4);
+    expect(val.im).toBeCloseTo(4);
+    ce.forget('z');
+  });
+
+  it('should compile Sin of complex variable', () => {
+    ce.declare('w', 'complex');
+    const expr = ce.box(['Sin', 'w']);
+    const result = compile(expr, { fallback: false });
+    // Should use _SYS.csin since w is complex
+    expect(result.code).toContain('_SYS.csin');
+    ce.forget('w');
+  });
+
+  it('should compile Abs of complex variable', () => {
+    ce.declare('u', 'complex');
+    const expr = ce.box(['Abs', 'u']);
+    const result = compile(expr, { fallback: false });
+    // Should use _SYS.cabs
+    expect(result.code).toContain('_SYS.cabs');
+    const val = result.run!({ u: { re: 3, im: 4 } });
+    expect(val).toBeCloseTo(5);
+    ce.forget('u');
+  });
+
+  it('untyped variable stays real', () => {
+    const expr = ce.box(['Sin', 'x']);
+    const result = compile(expr, { fallback: false });
+    expect(result.code).toContain('Math.sin');
+    expect(result.code).not.toContain('_SYS.csin');
+  });
+});
