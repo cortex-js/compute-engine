@@ -1,3 +1,7 @@
+## [Unreleased]
+
+- Updated color palettes
+
 ## 0.51.0 _2026-02-14_
 
 ### Colors
@@ -14,8 +18,8 @@
   using OKLCh color space with shorter-arc hue interpolation. Includes 8
   sequential palettes (viridis, inferno, magma, plasma, cividis, turbo, rocket,
   mako), 6 categorical palettes (graph6, spectrum6, spectrum12, tableau10,
-  tycho11, kelly22), and 12 diverging palettes (roma, vik, broc, rdbu,
-  coolwarm, ocean-balance, plus reversed variants).
+  tycho11, kelly22), and 12 diverging palettes (roma, vik, broc, rdbu, coolwarm,
+  ocean-balance, plus reversed variants).
 - **`ColorToColorspace`**: Convert an sRGB color (string or `Tuple`) to
   components in `"rgb"`, `"hsl"`, `"oklch"`, or `"oklab"` (alias `"lab"`).
   Preserves alpha when present.
@@ -23,20 +27,20 @@
   sRGB `Tuple`. Accepts the same color space names as `ColorToColorspace`.
 - **`ColorToString`**: Convert a color (string or sRGB `Tuple`) to a formatted
   string. Supports optional format argument: `"hex"` (default), `"rgb"`,
-  `"hsl"`, or `"oklch"` for CSS-style output. Alpha is included when not
-  equal to 1.
+  `"hsl"`, or `"oklch"` for CSS-style output. Alpha is included when not equal
+  to 1.
 - **`ColorMix`**: Blend two colors in OKLCh space with an optional ratio
   (default 0.5). Accepts color strings or sRGB `Tuple` values. Interpolates
   lightness and chroma linearly, hue with shorter-arc interpolation.
-- **`ColorContrast`**: Compute the APCA contrast ratio between a background
-  and foreground color. Returns a positive value for dark-on-light and
-  negative for light-on-dark.
+- **`ColorContrast`**: Compute the APCA contrast ratio between a background and
+  foreground color. Returns a positive value for dark-on-light and negative for
+  light-on-dark.
 - **`ContrastingColor`**: Choose the foreground color with better APCA contrast
   against a background. With one argument, picks between white and black. With
   three arguments, picks the better of two foreground candidates.
 - **LaTeX color support**: `\textcolor{color}{body}`, `\colorbox{color}{body}`,
-  and `\boxed{body}` now roundtrip through `Annotated` expressions. Parsing
-  and serialization are handled in the core `Annotated` infrastructure.
+  and `\boxed{body}` now roundtrip through `Annotated` expressions. Parsing and
+  serialization are handled in the core `Annotated` infrastructure.
 - **LaTeX font annotations**: `\textbf`, `\textit`, `\texttt`, `\textsf`,
   `\textup` now serialize correctly from `Annotated` expressions via
   `fontWeight`, `fontStyle`, and `fontFamily` dict keys.
@@ -47,8 +51,8 @@
   `oklab(L a b / alpha)` syntax, matching the existing `oklch()` support.
 - **GPU compilation**: `ColorMix`, `ColorContrast`, `ContrastingColor`,
   `ColorToColorspace`, and `ColorFromColorspace` now compile to GLSL and WGSL.
-  Preamble functions provide sRGB ↔ OKLab ↔ OKLCh conversion, color mixing
-  with shorter-arc hue interpolation, and APCA contrast on the GPU.
+  Preamble functions provide sRGB ↔ OKLab ↔ OKLCh conversion, color mixing with
+  shorter-arc hue interpolation, and APCA contrast on the GPU.
 - Added `rgbToHsl()` conversion function. Exported `hslToRgb()` (previously
   private).
 

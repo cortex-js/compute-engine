@@ -31,12 +31,12 @@ reference color values, and palettes.
 Four color spaces are used. **sRGB** is the canonical storage format; all others
 are conversion targets/sources.
 
-| Color space | Components | Ranges | Role |
-| ----------- | ---------------------------------- | ------------------------------------------------- | ---- |
-| **sRGB** | `r`, `g`, `b` | 0–1 each (may exceed 1 for wide-gamut) | Canonical. Every color-returning function produces sRGB tuples. |
-| **OKLCh** | `L` (lightness), `C` (chroma), `h` (hue) | L: 0–1, C: 0–0.4, h: 0–360° | Perceptually uniform cylindrical space. Used for all interpolation, gamut mapping, and lightness/chroma manipulation. |
-| **OKLab** | `L` (lightness), `a` (green–red), `b` (blue–yellow) | L: 0–1, a: −0.4–0.4, b: −0.4–0.4 | Perceptually uniform rectangular space. OKLCh is its cylindrical form. Useful for computing color differences (ΔE). Accepted as `"oklab"` or `"lab"`. |
-| **HSL** | `h` (hue), `s` (saturation), `l` (lightness) | h: 0–360°, s: 0–1, l: 0–1 | Legacy CSS color space. Familiar to web developers. Not perceptually uniform. |
+| Color space | Components                                          | Ranges                                 | Role                                                                                                                                                  |
+| ----------- | --------------------------------------------------- | -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **sRGB**    | `r`, `g`, `b`                                       | 0–1 each (may exceed 1 for wide-gamut) | Canonical. Every color-returning function produces sRGB tuples.                                                                                       |
+| **OKLCh**   | `L` (lightness), `C` (chroma), `h` (hue)            | L: 0–1, C: 0–0.4, h: 0–360°            | Perceptually uniform cylindrical space. Used for all interpolation, gamut mapping, and lightness/chroma manipulation.                                 |
+| **OKLab**   | `L` (lightness), `a` (green–red), `b` (blue–yellow) | L: 0–1, a: −0.4–0.4, b: −0.4–0.4       | Perceptually uniform rectangular space. OKLCh is its cylindrical form. Useful for computing color differences (ΔE). Accepted as `"oklab"` or `"lab"`. |
+| **HSL**     | `h` (hue), `s` (saturation), `l` (lightness)        | h: 0–360°, s: 0–1, l: 0–1              | Legacy CSS color space. Familiar to web developers. Not perceptually uniform.                                                                         |
 
 ### Why OKLCh for interpolation?
 
@@ -61,8 +61,8 @@ HSL ⟷ sRGB ⟷ OKLab ⟷ OKLCh
 ```
 
 Full bidirectional conversion exists between all four spaces, with sRGB as the
-hub. Conversions between non-adjacent spaces go through sRGB (e.g.
-HSL → sRGB → OKLab).
+hub. Conversions between non-adjacent spaces go through sRGB (e.g. HSL → sRGB →
+OKLab).
 
 **Implementation note**: `hslToRgb` exists in `src/color/manipulation.ts`.
 `rgbToHsl` needs to be added for the reverse direction.
@@ -81,18 +81,18 @@ Color(input: string) -> Tuple<real, real, real> | Tuple<real, real, real, real>
 
 #### Accepted input formats
 
-| Format              | Example                        | Notes                                              |
-| ------------------- | ------------------------------ | -------------------------------------------------- |
-| Hex (3 digits)      | `"#f2c"`                       | Expanded to `#ff22cc`                               |
-| Hex (6 digits)      | `"#fedaca"`                    |                                                    |
-| Hex (8 digits)      | `"#fedacaff"`                  | Last two digits are alpha                          |
-| `rgb()` / `rgba()`  | `"rgb(255, 100, 20)"`         | Values 0–255; values ≤ 1.0 treated as fractions    |
-| `rgb()` modern      | `"rgb(255 100 20 / 0.5)"`     | Space-separated, slash-alpha                       |
-| `rgb()` percent     | `"rgb(50%, 25%, 10%)"`        | Percentages                                        |
-| `hsl()` / `hsla()`  | `"hsl(210, 80%, 50%)"`        | H: 0–360°, S/L: 0–100%                            |
-| `oklch()`           | `"oklch(0.7 0.15 210)"`       | L: 0–1, C: 0–0.4, H: 0–360°                       |
-| Named color         | `"red"`, `"teal"`, `"white"`  | See named colors table                             |
-| `"transparent"`     | `"transparent"`                | Returns `(0, 0, 0, 0)`                            |
+| Format             | Example                      | Notes                                           |
+| ------------------ | ---------------------------- | ----------------------------------------------- |
+| Hex (3 digits)     | `"#f2c"`                     | Expanded to `#ff22cc`                           |
+| Hex (6 digits)     | `"#fedaca"`                  |                                                 |
+| Hex (8 digits)     | `"#fedacaff"`                | Last two digits are alpha                       |
+| `rgb()` / `rgba()` | `"rgb(255, 100, 20)"`        | Values 0–255; values ≤ 1.0 treated as fractions |
+| `rgb()` modern     | `"rgb(255 100 20 / 0.5)"`    | Space-separated, slash-alpha                    |
+| `rgb()` percent    | `"rgb(50%, 25%, 10%)"`       | Percentages                                     |
+| `hsl()` / `hsla()` | `"hsl(210, 80%, 50%)"`       | H: 0–360°, S/L: 0–100%                          |
+| `oklch()`          | `"oklch(0.7 0.15 210)"`      | L: 0–1, C: 0–0.4, H: 0–360°                     |
+| Named color        | `"red"`, `"teal"`, `"white"` | See named colors table                          |
+| `"transparent"`    | `"transparent"`              | Returns `(0, 0, 0, 0)`                          |
 
 #### Named colors
 
@@ -170,21 +170,19 @@ ensure perceptual uniformity. Hue interpolation uses the shorter arc.
 
 #### Available palettes
 
-**Sequential** (256-stop, perceptually uniform):
-`turbo`, `inferno`, `magma`, `plasma`, `viridis`, `cividis`, `rocket`, `mako`
+**Sequential** (256-stop, perceptually uniform): `turbo`, `inferno`, `magma`,
+`plasma`, `viridis`, `cividis`, `rocket`, `mako`
 
-Each sequential palette also has a `-reversed` variant (e.g. `viridis-reversed`).
+Each sequential palette also has a `-reversed` variant (e.g.
+`viridis-reversed`).
 
-**Sequential (short)**:
-`grey` (18 stops)
+**Sequential (short)**: `grey` (18 stops)
 
-**Categorical** (discrete, not meaningful to interpolate between):
-`tycho11` (11), `tableau10` (10), `kelly22` (22), `graph6` (6),
-`spectrum6` (6), `spectrum12` (12)
+**Categorical** (discrete, not meaningful to interpolate between): `tycho11`
+(11), `tableau10` (10), `kelly22` (22), `graph6` (6), `spectrum12` (12)
 
-**Diverging** (symmetric around a neutral midpoint):
-`roma` (261), `vik` (9), `broc` (9), `rdbu` (21), `coolwarm` (21),
-`ocean-balance` (22)
+**Diverging** (symmetric around a neutral midpoint): `roma` (261), `vik` (9),
+`broc` (9), `rdbu` (21), `coolwarm` (21), `ocean-balance` (22)
 
 Each diverging palette also has a `-reversed` variant.
 
@@ -207,16 +205,17 @@ Convert a color to component values in a target color space.
 ColorToColorspace(color, colorspace: string) -> Tuple
 ```
 
-The first argument may be a canonical RGB tuple or any value accepted by `Color`.
+The first argument may be a canonical RGB tuple or any value accepted by
+`Color`.
 
 #### Supported color spaces
 
-| Name                  | Components             | Ranges                                      |
-| --------------------- | ---------------------- | ------------------------------------------- |
-| `"rgb"`               | `(r, g, b)`           | 0–1 each (sRGB)                             |
-| `"hsl"`               | `(h, s, l)`           | h: 0–360, s: 0–1, l: 0–1                   |
-| `"oklch"`             | `(L, C, h)`           | L: 0–1, C: 0–0.4, h: 0–360                 |
-| `"oklab"` or `"lab"`  | `(L, a, b)`           | L: 0–1, a: −0.4–0.4, b: −0.4–0.4           |
+| Name                 | Components  | Ranges                           |
+| -------------------- | ----------- | -------------------------------- |
+| `"rgb"`              | `(r, g, b)` | 0–1 each (sRGB)                  |
+| `"hsl"`              | `(h, s, l)` | h: 0–360, s: 0–1, l: 0–1         |
+| `"oklch"`            | `(L, C, h)` | L: 0–1, C: 0–0.4, h: 0–360       |
+| `"oklab"` or `"lab"` | `(L, a, b)` | L: 0–1, a: −0.4–0.4, b: −0.4–0.4 |
 
 Alpha, if present and ≠ 1, is appended as a fourth component in every case.
 
@@ -240,9 +239,9 @@ ColorFromColorspace(components: Tuple, colorspace: string) -> Tuple
 ```
 
 The same color space names as `ColorToColorspace` are accepted (`"rgb"`,
-`"hsl"`, `"oklch"`, `"oklab"` / `"lab"`). If the input color is outside the
-sRGB gamut, chroma is reduced (in OKLCh) while preserving hue until the color
-fits, using a binary-search gamut-mapping algorithm (see Color Spaces section).
+`"hsl"`, `"oklch"`, `"oklab"` / `"lab"`). If the input color is outside the sRGB
+gamut, chroma is reduced (in OKLCh) while preserving hue until the color fits,
+using a binary-search gamut-mapping algorithm (see Color Spaces section).
 
 #### Examples
 

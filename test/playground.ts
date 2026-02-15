@@ -13,6 +13,17 @@ import { expand } from '../src/compute-engine/boxed-expression/expand';
 const ce = new ComputeEngine();
 const engine = ce;
 
+compile('sin(2x) + x').code;
+// -> "Math.sin(2*x) + x"
+
+compile('f(x) := sin(2x) + x').code;
+// -> "f = ((x) => x + Math.sin(2 * x))"
+
+compile('(x) \\mapsto sin(2x) + x').code;
+// -> "(x) => x + Math.sin(2 * x)"
+
+evaluate(['UnitConvert', ['Quantity', 132, 'km'], 'mi']).print();
+
 // 1. sin(theta)**2 + cos(theta)**2 → 1 — Clean trig identity, but too simple.
 // 2. (alpha**2 - beta**2) / (alpha - beta) → didn't simplify. Engine doesn't cancel the
 // difference of squares factoring here.
