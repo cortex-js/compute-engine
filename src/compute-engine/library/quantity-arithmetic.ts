@@ -259,10 +259,7 @@ function simplifyQuantityUnit(
         // the compound unit's scale to get the magnitude in the named unit.
         const scale = getExpressionScale(ue);
         if (scale !== null)
-          return ce._fn('Quantity', [
-            ce.number(mag * scale),
-            ce.symbol(match),
-          ]);
+          return ce._fn('Quantity', [ce.number(mag * scale), ce.symbol(match)]);
       }
     }
   }

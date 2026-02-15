@@ -324,12 +324,36 @@ export function areCompatibleUnits(a: string, b: string): boolean {
   return dimensionsEqual(da, db);
 }
 
-/** Map from dimension-vector key to named derived SI unit symbol. */
+/**
+ * Map from dimension-vector key to the preferred named derived SI unit.
+ *
+ * Some dimensions are shared by multiple SI units:
+ * - `[0,0,-1,…]` → Hz (frequency) and Bq (radioactive decay)
+ * - `[2,0,-2,…]` → Gy (absorbed dose) and Sv (dose equivalent)
+ *
+ * We keep only the more general unit (Hz, Gy).  Domain-specific aliases
+ * (Bq, Sv) are still in UNIT_TABLE for conversion and display; they're
+ * just not the automatic simplification targets.
+ */
 const NAMED_UNIT_BY_DIMENSION: Map<string, string> = new Map(
   [
-    'N', 'J', 'W', 'Pa', 'Hz', 'C', 'V', 'F',
-    'ohm', 'S', 'Wb', 'T', 'H', 'lm', 'lx',
-    'Bq', 'Gy', 'Sv', 'kat',
+    'N',
+    'J',
+    'W',
+    'Pa',
+    'Hz',
+    'C',
+    'V',
+    'F',
+    'ohm',
+    'S',
+    'Wb',
+    'T',
+    'H',
+    'lm',
+    'lx',
+    'Gy',
+    'kat',
   ].map((unit) => [UNIT_TABLE[unit].dimension.join(','), unit])
 );
 

@@ -21,7 +21,6 @@ import {
   hslToRgb,
   apca,
   contrastingColor,
-  asRgb,
 } from '../../color';
 import {
   gamma,
@@ -630,9 +629,12 @@ function toRI(c: Complex): { re: number; im: number } {
  * Normalize a color input (string or [r, g, b, a?] array with 0-1 values)
  * to an RgbColor {r, g, b, alpha?} with 0-255 r/g/b values.
  */
-function toRgb255(
-  input: string | number[]
-): { r: number; g: number; b: number; alpha?: number } {
+function toRgb255(input: string | number[]): {
+  r: number;
+  g: number;
+  b: number;
+  alpha?: number;
+} {
   if (typeof input === 'string') {
     const c = parseColor(input);
     return {
@@ -665,10 +667,7 @@ const colorHelpers = {
   color(input: string): number[] {
     return packedToArray(parseColor(input));
   },
-  colorToString(
-    input: string | number[],
-    format?: string
-  ): string {
+  colorToString(input: string | number[], format?: string): string {
     const rgb = toRgb255(input);
     const fmt = (format ?? 'hex').toLowerCase();
     switch (fmt) {
@@ -743,10 +742,7 @@ const colorHelpers = {
     const alpha = a1 + (a2 - a1) * ratio;
     return Math.abs(alpha - 1) > 1e-4 ? [r, g, b, alpha] : [r, g, b];
   },
-  colorContrast(
-    bg: string | number[],
-    fg: string | number[]
-  ): number {
+  colorContrast(bg: string | number[], fg: string | number[]): number {
     return apca(toRgb255(bg), toRgb255(fg));
   },
   contrastingColor(
@@ -762,10 +758,7 @@ const colorHelpers = {
     }
     return packedToArray(contrastingColor(bgRgb));
   },
-  colorToColorspace(
-    input: string | number[],
-    space: string
-  ): number[] {
+  colorToColorspace(input: string | number[], space: string): number[] {
     const rgb = toRgb255(input);
     const alpha = rgb.alpha;
     let result: number[];
@@ -795,10 +788,7 @@ const colorHelpers = {
     if (alpha !== undefined && Math.abs(alpha - 1) > 1e-4) result.push(alpha);
     return result;
   },
-  colorFromColorspace(
-    components: number[],
-    space: string
-  ): number[] {
+  colorFromColorspace(components: number[], space: string): number[] {
     const c0 = components[0];
     const c1 = components[1];
     const c2 = components[2];

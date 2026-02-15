@@ -2077,4 +2077,3 @@ function evaluateGcdLcm(
   if (result === null) return ce._fn(mode, rest);
   return ce._fn(mode, [ce.number(result), ...rest]);
 }
-
