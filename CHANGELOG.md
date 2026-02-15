@@ -1,5 +1,29 @@
 ## [Unreleased]
 
+### Colors
+
+- **New `colors` library**: Four MathJSON operators for color manipulation and
+  color space conversion, available as the `"colors"` library category.
+- **`Color`**: Parse a color string (hex 3/6/8-digit, `rgb()`, `hsl()`, named
+  CSS color, `transparent`) into a canonical sRGB `Tuple` with components
+  normalized to 0-1. Alpha is included as a fourth component when not equal
+  to 1.
+- **`Colormap`**: Sample named visualization palettes. Three variants: no second
+  argument returns the full palette as a `List`; integer _n_ >= 2 resamples to
+  _n_ evenly spaced colors; real _t_ in [0, 1] interpolates at position _t_
+  using OKLCh color space with shorter-arc hue interpolation. Includes 8
+  sequential palettes (viridis, inferno, magma, plasma, cividis, turbo, rocket,
+  mako), 6 categorical palettes (graph6, spectrum6, spectrum12, tableau10,
+  tycho11, kelly22), and 12 diverging palettes (roma, vik, broc, rdbu,
+  coolwarm, ocean-balance, plus reversed variants).
+- **`ColorToColorspace`**: Convert an sRGB color (string or `Tuple`) to
+  components in `"rgb"`, `"hsl"`, `"oklch"`, or `"oklab"` (alias `"lab"`).
+  Preserves alpha when present.
+- **`ColorFromColorspace`**: Convert color space components back to a canonical
+  sRGB `Tuple`. Accepts the same color space names as `ColorToColorspace`.
+- Added `rgbToHsl()` conversion function. Exported `hslToRgb()` (previously
+  private).
+
 ### Bug Fixes
 
 - **(#290) Derivatives of user-defined functions**: `\frac{d}{dx} f` and `f'(x)`

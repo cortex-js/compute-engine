@@ -407,7 +407,8 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     // Guard: when a function parameter is bound to an argument with the same
     // name (e.g., f(x) called with argument x), the eval context maps x → x,
     // creating an infinite loop. Return undefined to treat as a free variable.
-    if (result !== undefined && result.symbol === this._id) return undefined;
+    if (result !== undefined && 'symbol' in result && result.symbol === this._id)
+      return undefined;
 
     return result;
   }
