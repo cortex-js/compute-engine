@@ -459,12 +459,12 @@ describe('UNIT SIMPLIFY', () => {
 
 describe('COMPATIBLE UNIT Q', () => {
   test('m and km are compatible', () => {
-    const expr = engine.box(['CompatibleUnitQ', 'm', 'km']).evaluate();
+    const expr = engine.box(['IsCompatibleUnit', 'm', 'km']).evaluate();
     expect(expr.symbol).toBe('True');
   });
 
   test('m and s are not compatible', () => {
-    const expr = engine.box(['CompatibleUnitQ', 'm', 's']).evaluate();
+    const expr = engine.box(['IsCompatibleUnit', 'm', 's']).evaluate();
     expect(expr.symbol).toBe('False');
   });
 });
@@ -625,27 +625,27 @@ describe('INCOMPATIBLE UNIT CONVERT', () => {
 });
 
 describe('COMPOUND UNIT QUERIES', () => {
-  test('CompatibleUnitQ with compound units: m/s vs km/h', () => {
+  test('IsCompatibleUnit with compound units: m/s vs km/h', () => {
     const expr = engine.box([
-      'CompatibleUnitQ',
+      'IsCompatibleUnit',
       ['Divide', 'm', 's'],
       ['Divide', 'km', 'h'],
     ]).evaluate();
     expect(expr.symbol).toBe('True');
   });
 
-  test('CompatibleUnitQ compound vs simple: J vs kg*m^2/s^2', () => {
+  test('IsCompatibleUnit compound vs simple: J vs kg*m^2/s^2', () => {
     const expr = engine.box([
-      'CompatibleUnitQ',
+      'IsCompatibleUnit',
       'J',
       ['Divide', ['Multiply', 'kg', ['Power', 'm', 2]], ['Power', 's', 2]],
     ]).evaluate();
     expect(expr.symbol).toBe('True');
   });
 
-  test('CompatibleUnitQ incompatible compounds: m/s vs kg*m', () => {
+  test('IsCompatibleUnit incompatible compounds: m/s vs kg*m', () => {
     const expr = engine.box([
-      'CompatibleUnitQ',
+      'IsCompatibleUnit',
       ['Divide', 'm', 's'],
       ['Multiply', 'kg', 'm'],
     ]).evaluate();

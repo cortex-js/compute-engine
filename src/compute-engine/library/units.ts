@@ -191,7 +191,7 @@ export const UNITS_LIBRARY: SymbolDefinitions = {
     },
   },
 
-  CompatibleUnitQ: {
+  IsCompatibleUnit: {
     description: 'Check if two units have the same dimension',
     complexity: 1200,
     signature: '(value, value) -> value',

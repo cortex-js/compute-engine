@@ -11,13 +11,17 @@
   `QuantityMagnitude` and `QuantityUnit` extract the parts.
 - **Quantity arithmetic**: `Add`, `Subtract`, `Multiply`, `Divide`, and `Power`
   are unit-aware. Addition and subtraction automatically convert compatible units
-  (e.g., `12 cm + 1 m` evaluates to `112 cm`). Incompatible dimensions remain
+  and express the result in the unit with the largest scale factor
+  (e.g., `12 cm + 1 m` evaluates to `1.12 m`). Incompatible dimensions remain
   unevaluated.
 - **Unit conversion**: `UnitConvert` converts between compatible units, including
-  compound units like `m/s` to `km/h`. `UnitSimplify` reduces compound units to
-  named derived units when possible (e.g., `kg*m/s^2` to `N`).
-- **Dimensional analysis**: `CompatibleUnitQ` tests dimensional compatibility.
-  `UnitDimension` returns the 7-element SI dimension vector.
+  compound units like `m/s` to `km/h`. Supports affine temperature conversions
+  (`degC`, `degF`, `K`). Returns an error for incompatible units.
+  `UnitSimplify` reduces compound units to named derived units when possible
+  (e.g., `kg*m/s^2` to `N`).
+- **Dimensional analysis**: `IsCompatibleUnit` tests dimensional compatibility.
+  `UnitDimension` returns the 7-element SI dimension vector. Both support
+  compound unit expressions.
 - **LaTeX parsing**: `\mathrm{...}` and `\text{...}` containing recognized units
   produce `Quantity` expressions when juxtaposed with numbers.
   Compound units with `/`, `^`, and `\cdot` are supported
@@ -28,12 +32,16 @@
   `value\,\mathrm{unit}` notation.
 - **DSL string sugar**: Compound units can be specified as strings in MathJSON:
   `["Quantity", 9.8, "m/s^2"]` is canonicalized to the structured form.
+  Parentheses are supported for grouping: `"kg/(m*s^2)"`.
+- **Temperature units**: `degC` and `degF` with affine offset conversions.
 - **Angular unit unification**: Trigonometric functions (`Sin`, `Cos`, `Tan`,
   etc.) accept `Quantity` arguments with angular units (`deg`, `rad`, `grad`,
   `arcmin`, `arcsec`) and convert to radians automatically.
-- **Physics constants**: `SpeedOfLight`, `PlanckConstant`, `Mu0`, and
-  `StandardGravity` are defined as `Quantity` expressions with proper units in
-  the `physics` library.
+- **Physics constants**: 11 CODATA 2018 constants defined as `Quantity`
+  expressions: `SpeedOfLight`, `PlanckConstant`, `Mu0`, `StandardGravity`,
+  `ElementaryCharge`, `BoltzmannConstant`, `AvogadroConstant`,
+  `VacuumPermittivity`, `GravitationalConstant`, `StefanBoltzmannConstant`,
+  and `GasConstant`.
 
 ### Compilation
 
