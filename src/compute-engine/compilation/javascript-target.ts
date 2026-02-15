@@ -21,7 +21,11 @@ import {
   hslToRgb,
   apca,
   contrastingColor,
+  asRgb,
 } from '../../color';
+import { SEQUENTIAL_PALETTES } from '../../color/sequential';
+import { CATEGORICAL_PALETTES } from '../../color/categorical';
+import { DIVERGING_PALETTES } from '../../color/diverging-palettes';
 import {
   gamma,
   gammaln,
@@ -618,6 +622,12 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       throw new Error('ColorFromColorspace: need components and space');
     return `_SYS.colorFromColorspace(${compile(components)}, ${compile(space)})`;
   },
+  Colormap: (args, compile) => {
+    if (args.length === 0) throw new Error('Colormap: no argument');
+    if (args.length >= 2)
+      return `_SYS.colormap(${compile(args[0])}, ${compile(args[1])})`;
+    return `_SYS.colormap(${compile(args[0])})`;
+  },
 };
 
 /** Convert a Complex instance to a plain {re, im} object */
@@ -788,6 +798,80 @@ const colorHelpers = {
     if (alpha !== undefined && Math.abs(alpha - 1) > 1e-4) result.push(alpha);
     return result;
   },
+  colormap(name: string, arg?: number): number[] | number[][] {
+    const allPalettes = {
+      ...SEQUENTIAL_PALETTES,
+      ...CATEGORICAL_PALETTES,
+      ...DIVERGING_PALETTES,
+    };
+    const palette = allPalettes[name as keyof typeof allPalettes];
+    if (!palette) throw new Error(`Unknown palette: ${name}`);
+
+    // Convert hex strings to [r, g, b] arrays (0-1)
+    const colors = (palette as readonly string[]).map((hex: string) => {
+      const rgb = asRgb(parseColor(hex));
+      return [rgb.r / 255, rgb.g / 255, rgb.b / 255] as [
+        number,
+        number,
+        number,
+      ];
+    });
+
+    // No second arg → return full palette
+    if (arg === undefined) return colors;
+
+    // Integer n >= 2 → resample to n evenly spaced colors
+    if (Number.isInteger(arg) && arg >= 2) {
+      const n = arg;
+      const result: number[][] = [];
+      for (let i = 0; i < n; i++) {
+        const t = n === 1 ? 0 : i / (n - 1);
+        result.push(this._interpolatePalette(colors, t));
+      }
+      return result;
+    }
+
+    // Float t in [0, 1] → interpolate at position t
+    const t = Math.max(0, Math.min(1, arg));
+    return this._interpolatePalette(colors, t);
+  },
+
+  _interpolatePalette(
+    colors: [number, number, number][],
+    t: number
+  ): number[] {
+    if (colors.length === 0) return [0, 0, 0];
+    if (t <= 0) return [...colors[0]];
+    if (t >= 1) return [...colors[colors.length - 1]];
+
+    const pos = t * (colors.length - 1);
+    const i = Math.floor(pos);
+    const frac = pos - i;
+
+    if (frac === 0 || i >= colors.length - 1) return [...colors[Math.min(i, colors.length - 1)]];
+
+    // Interpolate in OKLCh for perceptual uniformity
+    const rgb1 = { r: colors[i][0] * 255, g: colors[i][1] * 255, b: colors[i][2] * 255 };
+    const rgb2 = { r: colors[i + 1][0] * 255, g: colors[i + 1][1] * 255, b: colors[i + 1][2] * 255 };
+    const c1 = rgbToOklch(rgb1);
+    const c2 = rgbToOklch(rgb2);
+
+    // Shorter arc hue interpolation
+    let dh = c2.H - c1.H;
+    if (dh > 180) dh -= 360;
+    if (dh < -180) dh += 360;
+    let H = c1.H + dh * frac;
+    if (H < 0) H += 360;
+    if (H >= 360) H -= 360;
+
+    const mixed = oklchToRgb({
+      L: c1.L + (c2.L - c1.L) * frac,
+      C: c1.C + (c2.C - c1.C) * frac,
+      H,
+    });
+    return [mixed.r / 255, mixed.g / 255, mixed.b / 255];
+  },
+
   colorFromColorspace(components: number[], space: string): number[] {
     const c0 = components[0];
     const c1 = components[1];

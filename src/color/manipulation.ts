@@ -536,6 +536,7 @@ export function isNamedColor(s: string): boolean {
  * - rgba: rgba(r, g, b, a)
  * - rgb: rgb(r, g, b) or rgb(r, g, b / a) or rgb(r g b / a) or rgb(r g b)
  * - oklch: oklch(l c h / a) or oklch(l c h) or oklch(l, c, h / a) or oklch(l, c, h), when l is a percentage, c is a number between 0 and 0.4, and h is a number between 0 and 360, for example "oklch(50% 0.3 240 / 0.8)" or "oklch(50% 0.3 240 / 80%)"
+ * - oklab: oklab(L a b / alpha) or oklab(L a b), where L is 0-1 (or percentage), a is ~-0.4 to 0.4, b is ~-0.4 to 0.4
  * - hsl: hsl(h, s, l) or hsl(h, s, l / a) or hsl(h s l / a) or hsl(h s l), where h is a number between 0 and 360, s is a percentage, l is a percentage and a is a percentage
  * - named: color names from the FOREGROUND_COLORS palette (e.g. "red", "blue", "cyan", "dark-grey") or "transparent"
  */
@@ -647,6 +648,41 @@ export function parseColor(s: string): number {
     const rgb = oklch(l * 100, c, h);
     const a = Math.round(alpha * 255);
     return (rgb & 0xffffff00) | a;
+  }
+
+  // OKLab format
+  const oklabMatch = str.match(/^oklab\s*\(\s*([^)]+)\s*\)$/);
+  if (oklabMatch) {
+    const parts = oklabMatch[1].replace(/[,/]/g, ' ').trim().split(/\s+/);
+    let l = parseFloat(parts[0]);
+    if (parts[0].includes('%')) l = l / 100;
+    else if (l > 1) l = l / 100; // Assume 0-100 range
+
+    const labA = parseFloat(parts[1]) || 0;
+    const labB = parseFloat(parts[2]) || 0;
+
+    let alpha = 1;
+    if (parts.length >= 4) {
+      alpha = parseFloat(parts[3]);
+      if (parts[3].includes('%')) alpha = alpha / 100;
+      else if (alpha > 1) alpha = alpha / 255;
+    }
+
+    // OKLab → linear RGB using local helpers
+    const lms = lmsFromLab(l, labA, labB);
+    const lin = linSRGBFromLMS(lms);
+
+    // Gamma correct and clamp
+    let r = Math.max(0, Math.min(1, gammaCorrect(lin.r)));
+    let g = Math.max(0, Math.min(1, gammaCorrect(lin.g)));
+    let b = Math.max(0, Math.min(1, gammaCorrect(lin.b)));
+
+    const rByte = Math.round(r * 255);
+    const gByte = Math.round(g * 255);
+    const bByte = Math.round(b * 255);
+    const alphaByte = Math.round(alpha * 255);
+
+    return ((rByte << 24) | (gByte << 16) | (bByte << 8) | alphaByte) >>> 0;
   }
 
   // HSL format

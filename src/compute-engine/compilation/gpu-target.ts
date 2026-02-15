@@ -254,6 +254,42 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     return `pow(${compile(x)}, 1.0 / ${compile(n)})`;
   },
 
+  // Color functions (pure-math, GPU-compilable)
+  ColorMix: (args, compile) => {
+    if (args.length < 2) throw new Error('ColorMix: need two colors');
+    const c1 = compile(args[0]);
+    const c2 = compile(args[1]);
+    const ratio = args.length >= 3 ? compile(args[2]) : '0.5';
+    return `_gpu_color_mix(${c1}, ${c2}, ${ratio})`;
+  },
+  ColorContrast: ([bg, fg], compile) => {
+    if (bg === null || fg === null)
+      throw new Error('ColorContrast: need two colors');
+    return `_gpu_apca(${compile(bg)}, ${compile(fg)})`;
+  },
+  ContrastingColor: (args, compile, target) => {
+    if (args.length === 0) throw new Error('ContrastingColor: no argument');
+    const bg = compile(args[0]);
+    if (args.length >= 3) {
+      const fg1 = compile(args[1]);
+      const fg2 = compile(args[2]);
+      return `(abs(_gpu_apca(${bg}, ${fg1})) >= abs(_gpu_apca(${bg}, ${fg2})) ? ${fg1} : ${fg2})`;
+    }
+    const isWGSL = target?.language === 'wgsl';
+    const v3 = isWGSL ? 'vec3f' : 'vec3';
+    return `((_gpu_apca(${bg}, ${v3}(0.0)) > 50.0) ? ${v3}(0.0) : ${v3}(1.0))`;
+  },
+  ColorToColorspace: ([color, space], compile) => {
+    if (color === null || space === null)
+      throw new Error('ColorToColorspace: need color and space');
+    return `_gpu_srgb_to_oklab(${compile(color)})`;
+  },
+  ColorFromColorspace: ([components, space], compile) => {
+    if (components === null || space === null)
+      throw new Error('ColorFromColorspace: need components and space');
+    return `_gpu_oklab_to_srgb(${compile(components)})`;
+  },
+
   // Vector/Matrix operations
   Cross: 'cross',
   Distance: 'distance',
@@ -383,6 +419,173 @@ float _gpu_erfinv(float x) {
 }
 `;
 
+/**
+ * GPU color space conversion preamble (GLSL syntax).
+ *
+ * Provides sRGB ↔ OKLab ↔ OKLCh conversions, color mixing in OKLCh
+ * with shorter-arc hue interpolation, and APCA contrast calculation.
+ *
+ * WGSL targets must adapt syntax (vec3f, atan2→atan2, etc.).
+ */
+export const GPU_COLOR_PREAMBLE_GLSL = `
+float _gpu_srgb_to_linear(float c) {
+  if (c <= 0.04045) return c / 12.92;
+  return pow((c + 0.055) / 1.055, 2.4);
+}
+
+float _gpu_linear_to_srgb(float c) {
+  if (c <= 0.0031308) return 12.92 * c;
+  return 1.055 * pow(c, 1.0 / 2.4) - 0.055;
+}
+
+vec3 _gpu_srgb_to_oklab(vec3 rgb) {
+  float r = _gpu_srgb_to_linear(rgb.x);
+  float g = _gpu_srgb_to_linear(rgb.y);
+  float b = _gpu_srgb_to_linear(rgb.z);
+  float l_ = pow(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b, 1.0 / 3.0);
+  float m_ = pow(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b, 1.0 / 3.0);
+  float s_ = pow(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b, 1.0 / 3.0);
+  return vec3(
+    0.2104542553 * l_ + 0.793617785 * m_ - 0.0040720468 * s_,
+    1.9779984951 * l_ - 2.428592205 * m_ + 0.4505937099 * s_,
+    0.0259040371 * l_ + 0.7827717662 * m_ - 0.808675766 * s_
+  );
+}
+
+vec3 _gpu_oklab_to_srgb(vec3 lab) {
+  float l_ = lab.x + 0.3963377774 * lab.y + 0.2158037573 * lab.z;
+  float m_ = lab.x - 0.1055613458 * lab.y - 0.0638541728 * lab.z;
+  float s_ = lab.x - 0.0894841775 * lab.y - 1.291485548 * lab.z;
+  float l = l_ * l_ * l_;
+  float m = m_ * m_ * m_;
+  float s = s_ * s_ * s_;
+  float r = 4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s;
+  float g = -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s;
+  float b = -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s;
+  return clamp(vec3(_gpu_linear_to_srgb(r), _gpu_linear_to_srgb(g), _gpu_linear_to_srgb(b)), 0.0, 1.0);
+}
+
+vec3 _gpu_oklab_to_oklch(vec3 lab) {
+  float C = length(lab.yz);
+  float H = atan(lab.z, lab.y);
+  return vec3(lab.x, C, H);
+}
+
+vec3 _gpu_oklch_to_oklab(vec3 lch) {
+  return vec3(lch.x, lch.y * cos(lch.z), lch.y * sin(lch.z));
+}
+
+vec3 _gpu_color_mix(vec3 rgb1, vec3 rgb2, float t) {
+  vec3 lch1 = _gpu_oklab_to_oklch(_gpu_srgb_to_oklab(rgb1));
+  vec3 lch2 = _gpu_oklab_to_oklch(_gpu_srgb_to_oklab(rgb2));
+  float L = mix(lch1.x, lch2.x, t);
+  float C = mix(lch1.y, lch2.y, t);
+  float dh = lch2.z - lch1.z;
+  const float PI = 3.14159265359;
+  if (dh > PI) dh -= 2.0 * PI;
+  if (dh < -PI) dh += 2.0 * PI;
+  float H = lch1.z + dh * t;
+  return _gpu_oklab_to_srgb(_gpu_oklch_to_oklab(vec3(L, C, H)));
+}
+
+float _gpu_apca(vec3 bg, vec3 fg) {
+  float bgR = _gpu_srgb_to_linear(bg.x);
+  float bgG = _gpu_srgb_to_linear(bg.y);
+  float bgB = _gpu_srgb_to_linear(bg.z);
+  float fgR = _gpu_srgb_to_linear(fg.x);
+  float fgG = _gpu_srgb_to_linear(fg.y);
+  float fgB = _gpu_srgb_to_linear(fg.z);
+  float bgY = 0.2126729 * bgR + 0.7151522 * bgG + 0.0721750 * bgB;
+  float fgY = 0.2126729 * fgR + 0.7151522 * fgG + 0.0721750 * fgB;
+  float bgC = pow(bgY, 0.56);
+  float fgC = pow(fgY, 0.57);
+  float contrast = (bgC > fgC)
+    ? (bgC - fgC) * 1.14
+    : (bgC - fgC) * 1.14;
+  return contrast * 100.0;
+}
+`;
+
+/**
+ * GPU color space conversion preamble (WGSL syntax).
+ */
+export const GPU_COLOR_PREAMBLE_WGSL = `
+fn _gpu_srgb_to_linear(c: f32) -> f32 {
+  if (c <= 0.04045) { return c / 12.92; }
+  return pow((c + 0.055) / 1.055, 2.4);
+}
+
+fn _gpu_linear_to_srgb(c: f32) -> f32 {
+  if (c <= 0.0031308) { return 12.92 * c; }
+  return 1.055 * pow(c, 1.0 / 2.4) - 0.055;
+}
+
+fn _gpu_srgb_to_oklab(rgb: vec3f) -> vec3f {
+  let r = _gpu_srgb_to_linear(rgb.x);
+  let g = _gpu_srgb_to_linear(rgb.y);
+  let b = _gpu_srgb_to_linear(rgb.z);
+  let l_ = pow(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b, 1.0 / 3.0);
+  let m_ = pow(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b, 1.0 / 3.0);
+  let s_ = pow(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b, 1.0 / 3.0);
+  return vec3f(
+    0.2104542553 * l_ + 0.793617785 * m_ - 0.0040720468 * s_,
+    1.9779984951 * l_ - 2.428592205 * m_ + 0.4505937099 * s_,
+    0.0259040371 * l_ + 0.7827717662 * m_ - 0.808675766 * s_
+  );
+}
+
+fn _gpu_oklab_to_srgb(lab: vec3f) -> vec3f {
+  let l_ = lab.x + 0.3963377774 * lab.y + 0.2158037573 * lab.z;
+  let m_ = lab.x - 0.1055613458 * lab.y - 0.0638541728 * lab.z;
+  let s_ = lab.x - 0.0894841775 * lab.y - 1.291485548 * lab.z;
+  let l = l_ * l_ * l_;
+  let m = m_ * m_ * m_;
+  let s = s_ * s_ * s_;
+  let r = 4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s;
+  let g = -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s;
+  let b = -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s;
+  return clamp(vec3f(_gpu_linear_to_srgb(r), _gpu_linear_to_srgb(g), _gpu_linear_to_srgb(b)), vec3f(0.0), vec3f(1.0));
+}
+
+fn _gpu_oklab_to_oklch(lab: vec3f) -> vec3f {
+  let C = length(lab.yz);
+  let H = atan2(lab.z, lab.y);
+  return vec3f(lab.x, C, H);
+}
+
+fn _gpu_oklch_to_oklab(lch: vec3f) -> vec3f {
+  return vec3f(lch.x, lch.y * cos(lch.z), lch.y * sin(lch.z));
+}
+
+fn _gpu_color_mix(rgb1: vec3f, rgb2: vec3f, t: f32) -> vec3f {
+  let lch1 = _gpu_oklab_to_oklch(_gpu_srgb_to_oklab(rgb1));
+  let lch2 = _gpu_oklab_to_oklch(_gpu_srgb_to_oklab(rgb2));
+  let L = mix(lch1.x, lch2.x, t);
+  let C = mix(lch1.y, lch2.y, t);
+  let PI = 3.14159265359;
+  var dh = lch2.z - lch1.z;
+  if (dh > PI) { dh -= 2.0 * PI; }
+  if (dh < -PI) { dh += 2.0 * PI; }
+  let H = lch1.z + dh * t;
+  return _gpu_oklab_to_srgb(_gpu_oklch_to_oklab(vec3f(L, C, H)));
+}
+
+fn _gpu_apca(bg: vec3f, fg: vec3f) -> f32 {
+  let bgR = _gpu_srgb_to_linear(bg.x);
+  let bgG = _gpu_srgb_to_linear(bg.y);
+  let bgB = _gpu_srgb_to_linear(bg.z);
+  let fgR = _gpu_srgb_to_linear(fg.x);
+  let fgG = _gpu_srgb_to_linear(fg.y);
+  let fgB = _gpu_srgb_to_linear(fg.z);
+  let bgY = 0.2126729 * bgR + 0.7151522 * bgG + 0.0721750 * bgB;
+  let fgY = 0.2126729 * fgR + 0.7151522 * fgG + 0.0721750 * fgB;
+  let bgC = pow(bgY, 0.56);
+  let fgC = pow(fgY, 0.57);
+  let contrast = (bgC - fgC) * 1.14;
+  return contrast * 100.0;
+}
+`;
+
 /** Constants shared by both GLSL and WGSL */
 const GPU_CONSTANTS: Record<string, string> = {
   Pi: '3.14159265359',
@@ -507,6 +710,13 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     let preamble = '';
     if (code.includes('_gpu_gamma')) preamble += GPU_GAMMA_PREAMBLE;
     if (code.includes('_gpu_erf')) preamble += GPU_ERF_PREAMBLE;
+    if (code.includes('_gpu_srgb_to') || code.includes('_gpu_oklab') ||
+        code.includes('_gpu_oklch') || code.includes('_gpu_color_mix') ||
+        code.includes('_gpu_apca')) {
+      preamble += this.languageId === 'wgsl'
+        ? GPU_COLOR_PREAMBLE_WGSL
+        : GPU_COLOR_PREAMBLE_GLSL;
+    }
     if (preamble) result.preamble = preamble;
     return result;
   }

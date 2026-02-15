@@ -42,7 +42,13 @@
   `fontWeight`, `fontStyle`, and `fontFamily` dict keys.
 - **JavaScript compilation**: All color operators (`Color`, `ColorToString`,
   `ColorMix`, `ColorContrast`, `ContrastingColor`, `ColorToColorspace`,
-  `ColorFromColorspace`) now compile to JavaScript.
+  `ColorFromColorspace`, `Colormap`) now compile to JavaScript.
+- **`oklab()` CSS parsing**: `parseColor()` now accepts `oklab(L a b)` and
+  `oklab(L a b / alpha)` syntax, matching the existing `oklch()` support.
+- **GPU compilation**: `ColorMix`, `ColorContrast`, `ContrastingColor`,
+  `ColorToColorspace`, and `ColorFromColorspace` now compile to GLSL and WGSL.
+  Preamble functions provide sRGB ↔ OKLab ↔ OKLCh conversion, color mixing
+  with shorter-arc hue interpolation, and APCA contrast on the GPU.
 - Added `rgbToHsl()` conversion function. Exported `hslToRgb()` (previously
   private).
 
