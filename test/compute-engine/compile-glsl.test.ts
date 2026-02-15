@@ -407,11 +407,47 @@ describe('GLSL COMPILATION', () => {
       );
     });
 
-    it('should include complex preamble when needed', () => {
+    it('should compile arcsinh of complex variable', () => {
+      const code = glsl.compile(ce.box(['Arsinh', 'z'])).code;
+      expect(code).toMatchInlineSnapshot(`_gpu_casinh(z)`);
+    });
+
+    it('should compile arccosh of complex variable', () => {
+      const code = glsl.compile(ce.box(['Arcosh', 'z'])).code;
+      expect(code).toMatchInlineSnapshot(`_gpu_cacosh(z)`);
+    });
+
+    it('should compile arctanh of complex variable', () => {
+      const code = glsl.compile(ce.box(['Artanh', 'z'])).code;
+      expect(code).toMatchInlineSnapshot(`_gpu_catanh(z)`);
+    });
+
+    it('should include only cmul in preamble for z*w', () => {
       const result = glsl.compile(ce.box(['Multiply', 'z', 'w']));
       expect(result.preamble).toContain('_gpu_cmul');
-      expect(result.preamble).toContain('_gpu_cdiv');
+      // Should NOT include unrelated functions
+      expect(result.preamble).not.toContain('_gpu_csin');
+      expect(result.preamble).not.toContain('_gpu_cexp');
+    });
+
+    it('should include cpow deps (cexp, cmul, cln) for z^2', () => {
+      const result = glsl.compile(ce.box(['Power', 'z', 2]));
+      expect(result.preamble).toContain('_gpu_cpow');
       expect(result.preamble).toContain('_gpu_cexp');
+      expect(result.preamble).toContain('_gpu_cmul');
+      expect(result.preamble).toContain('_gpu_cln');
+      // Should NOT include trig
+      expect(result.preamble).not.toContain('_gpu_csin');
+    });
+
+    it('should include ctan deps (cdiv, csin, ccos) for tan(z)', () => {
+      const result = glsl.compile(ce.box(['Tan', 'z']));
+      expect(result.preamble).toContain('_gpu_ctan');
+      expect(result.preamble).toContain('_gpu_cdiv');
+      expect(result.preamble).toContain('_gpu_csin');
+      expect(result.preamble).toContain('_gpu_ccos');
+      // Should NOT include unrelated
+      expect(result.preamble).not.toContain('_gpu_cexp');
     });
 
     it('should not include complex preamble for real expressions', () => {

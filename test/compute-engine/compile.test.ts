@@ -479,6 +479,7 @@ describe('COMPILE', () => {
         'Re',
         'Im',
         'Arg',
+        'Conjugate',
       ]),
       'wgsl': new Set([
         'Clamp',
@@ -501,6 +502,7 @@ describe('COMPILE', () => {
         'Re',
         'Im',
         'Arg',
+        'Conjugate',
       ]),
       'interval-javascript': new Set(['If']),
       'interval-glsl': new Set([]),

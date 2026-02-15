@@ -352,10 +352,22 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     return `(1.0 / cosh(${compile(x)}))`;
   },
 
-  // Inverse hyperbolic functions
-  Arcosh: 'acosh',
-  Arsinh: 'asinh',
-  Artanh: 'atanh',
+  // Inverse hyperbolic functions with complex dispatch
+  Arcosh: (args, compile) => {
+    if (BaseCompiler.isComplexValued(args[0]))
+      return `_gpu_cacosh(${compile(args[0])})`;
+    return `acosh(${compile(args[0])})`;
+  },
+  Arsinh: (args, compile) => {
+    if (BaseCompiler.isComplexValued(args[0]))
+      return `_gpu_casinh(${compile(args[0])})`;
+    return `asinh(${compile(args[0])})`;
+  },
+  Artanh: (args, compile) => {
+    if (BaseCompiler.isComplexValued(args[0]))
+      return `_gpu_catanh(${compile(args[0])})`;
+    return `atanh(${compile(args[0])})`;
+  },
 
   // Inverse hyperbolic (reciprocal)
   Arcoth: ([x], compile) => {
@@ -781,165 +793,255 @@ fn _gpu_apca(bg: vec3f, fg: vec3f) -> f32 {
 `;
 
 /**
- * GPU complex number arithmetic preamble (GLSL syntax).
+ * Per-function complex arithmetic definitions with dependency metadata.
  *
- * Complex numbers are represented as vec2(re, im).
- * Provides: multiplication, division, exponential, logarithm,
- * power, square root, and trigonometric/hyperbolic functions.
+ * Each entry maps a helper function name to its GLSL source, WGSL source,
+ * and the list of other helper functions it calls. The preamble builder
+ * uses this to emit only the functions actually referenced by compiled code,
+ * in topological (dependency) order.
  *
- * Addition, subtraction, negation, and scalar multiplication
- * use native vec2 operators and do not need helper functions.
+ * Addition, subtraction, negation, and scalar multiplication use native
+ * vec2 operators and do not need helper functions.
  */
-export const GPU_COMPLEX_PREAMBLE_GLSL = `
-vec2 _gpu_cmul(vec2 a, vec2 b) {
-  return vec2(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x);
+interface ComplexFunctionDef {
+  glsl: string;
+  wgsl: string;
+  deps: string[];
 }
 
-vec2 _gpu_cdiv(vec2 a, vec2 b) {
+const GPU_COMPLEX_FUNCTIONS: Record<string, ComplexFunctionDef> = {
+  _gpu_cmul: {
+    deps: [],
+    glsl: `vec2 _gpu_cmul(vec2 a, vec2 b) {
+  return vec2(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x);
+}`,
+    wgsl: `fn _gpu_cmul(a: vec2f, b: vec2f) -> vec2f {
+  return vec2f(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x);
+}`,
+  },
+  _gpu_cdiv: {
+    deps: [],
+    glsl: `vec2 _gpu_cdiv(vec2 a, vec2 b) {
   float d = b.x * b.x + b.y * b.y;
   return vec2((a.x * b.x + a.y * b.y) / d, (a.y * b.x - a.x * b.y) / d);
-}
-
-vec2 _gpu_cexp(vec2 z) {
+}`,
+    wgsl: `fn _gpu_cdiv(a: vec2f, b: vec2f) -> vec2f {
+  let d = b.x * b.x + b.y * b.y;
+  return vec2f((a.x * b.x + a.y * b.y) / d, (a.y * b.x - a.x * b.y) / d);
+}`,
+  },
+  _gpu_cexp: {
+    deps: [],
+    glsl: `vec2 _gpu_cexp(vec2 z) {
   float e = exp(z.x);
   return vec2(e * cos(z.y), e * sin(z.y));
-}
-
-vec2 _gpu_cln(vec2 z) {
+}`,
+    wgsl: `fn _gpu_cexp(z: vec2f) -> vec2f {
+  let e = exp(z.x);
+  return vec2f(e * cos(z.y), e * sin(z.y));
+}`,
+  },
+  _gpu_cln: {
+    deps: [],
+    glsl: `vec2 _gpu_cln(vec2 z) {
   return vec2(log(length(z)), atan(z.y, z.x));
-}
-
-vec2 _gpu_cpow(vec2 z, vec2 w) {
+}`,
+    wgsl: `fn _gpu_cln(z: vec2f) -> vec2f {
+  return vec2f(log(length(z)), atan2(z.y, z.x));
+}`,
+  },
+  _gpu_cpow: {
+    deps: ['_gpu_cexp', '_gpu_cmul', '_gpu_cln'],
+    glsl: `vec2 _gpu_cpow(vec2 z, vec2 w) {
   return _gpu_cexp(_gpu_cmul(w, _gpu_cln(z)));
-}
-
-vec2 _gpu_csqrt(vec2 z) {
+}`,
+    wgsl: `fn _gpu_cpow(z: vec2f, w: vec2f) -> vec2f {
+  return _gpu_cexp(_gpu_cmul(w, _gpu_cln(z)));
+}`,
+  },
+  _gpu_csqrt: {
+    deps: [],
+    glsl: `vec2 _gpu_csqrt(vec2 z) {
   float r = length(z);
   float theta = atan(z.y, z.x);
   return sqrt(r) * vec2(cos(theta * 0.5), sin(theta * 0.5));
-}
-
-vec2 _gpu_csin(vec2 z) {
+}`,
+    wgsl: `fn _gpu_csqrt(z: vec2f) -> vec2f {
+  let r = length(z);
+  let theta = atan2(z.y, z.x);
+  return sqrt(r) * vec2f(cos(theta * 0.5), sin(theta * 0.5));
+}`,
+  },
+  _gpu_csin: {
+    deps: [],
+    glsl: `vec2 _gpu_csin(vec2 z) {
   return vec2(sin(z.x) * cosh(z.y), cos(z.x) * sinh(z.y));
-}
-
-vec2 _gpu_ccos(vec2 z) {
+}`,
+    wgsl: `fn _gpu_csin(z: vec2f) -> vec2f {
+  return vec2f(sin(z.x) * cosh(z.y), cos(z.x) * sinh(z.y));
+}`,
+  },
+  _gpu_ccos: {
+    deps: [],
+    glsl: `vec2 _gpu_ccos(vec2 z) {
   return vec2(cos(z.x) * cosh(z.y), -sin(z.x) * sinh(z.y));
-}
-
-vec2 _gpu_ctan(vec2 z) {
+}`,
+    wgsl: `fn _gpu_ccos(z: vec2f) -> vec2f {
+  return vec2f(cos(z.x) * cosh(z.y), -sin(z.x) * sinh(z.y));
+}`,
+  },
+  _gpu_ctan: {
+    deps: ['_gpu_cdiv', '_gpu_csin', '_gpu_ccos'],
+    glsl: `vec2 _gpu_ctan(vec2 z) {
   return _gpu_cdiv(_gpu_csin(z), _gpu_ccos(z));
-}
-
-vec2 _gpu_csinh(vec2 z) {
+}`,
+    wgsl: `fn _gpu_ctan(z: vec2f) -> vec2f {
+  return _gpu_cdiv(_gpu_csin(z), _gpu_ccos(z));
+}`,
+  },
+  _gpu_csinh: {
+    deps: [],
+    glsl: `vec2 _gpu_csinh(vec2 z) {
   return vec2(sinh(z.x) * cos(z.y), cosh(z.x) * sin(z.y));
-}
-
-vec2 _gpu_ccosh(vec2 z) {
+}`,
+    wgsl: `fn _gpu_csinh(z: vec2f) -> vec2f {
+  return vec2f(sinh(z.x) * cos(z.y), cosh(z.x) * sin(z.y));
+}`,
+  },
+  _gpu_ccosh: {
+    deps: [],
+    glsl: `vec2 _gpu_ccosh(vec2 z) {
   return vec2(cosh(z.x) * cos(z.y), sinh(z.x) * sin(z.y));
-}
-
-vec2 _gpu_ctanh(vec2 z) {
+}`,
+    wgsl: `fn _gpu_ccosh(z: vec2f) -> vec2f {
+  return vec2f(cosh(z.x) * cos(z.y), sinh(z.x) * sin(z.y));
+}`,
+  },
+  _gpu_ctanh: {
+    deps: ['_gpu_cdiv', '_gpu_csinh', '_gpu_ccosh'],
+    glsl: `vec2 _gpu_ctanh(vec2 z) {
   return _gpu_cdiv(_gpu_csinh(z), _gpu_ccosh(z));
-}
-
-vec2 _gpu_casin(vec2 z) {
+}`,
+    wgsl: `fn _gpu_ctanh(z: vec2f) -> vec2f {
+  return _gpu_cdiv(_gpu_csinh(z), _gpu_ccosh(z));
+}`,
+  },
+  _gpu_casin: {
+    deps: ['_gpu_csqrt', '_gpu_cln'],
+    glsl: `vec2 _gpu_casin(vec2 z) {
   vec2 iz = vec2(-z.y, z.x);
   vec2 s = _gpu_csqrt(vec2(1.0 - z.x * z.x + z.y * z.y, -2.0 * z.x * z.y));
   vec2 l = _gpu_cln(iz + s);
   return vec2(l.y, -l.x);
-}
-
-vec2 _gpu_cacos(vec2 z) {
+}`,
+    wgsl: `fn _gpu_casin(z: vec2f) -> vec2f {
+  let iz = vec2f(-z.y, z.x);
+  let s = _gpu_csqrt(vec2f(1.0 - z.x * z.x + z.y * z.y, -2.0 * z.x * z.y));
+  let l = _gpu_cln(iz + s);
+  return vec2f(l.y, -l.x);
+}`,
+  },
+  _gpu_cacos: {
+    deps: ['_gpu_casin'],
+    glsl: `vec2 _gpu_cacos(vec2 z) {
   vec2 s = _gpu_casin(z);
   return vec2(1.5707963268 - s.x, -s.y);
-}
-
-vec2 _gpu_catan(vec2 z) {
+}`,
+    wgsl: `fn _gpu_cacos(z: vec2f) -> vec2f {
+  let s = _gpu_casin(z);
+  return vec2f(1.5707963268 - s.x, -s.y);
+}`,
+  },
+  _gpu_catan: {
+    deps: ['_gpu_cln'],
+    glsl: `vec2 _gpu_catan(vec2 z) {
   vec2 iz = vec2(-z.y, z.x);
   vec2 a = _gpu_cln(vec2(1.0 - iz.x, -iz.y));
   vec2 b = _gpu_cln(vec2(1.0 + iz.x, iz.y));
   vec2 d = vec2(a.x - b.x, a.y - b.y);
   return vec2(-0.5 * d.y, 0.5 * d.x);
-}
-`;
-
-/**
- * GPU complex number arithmetic preamble (WGSL syntax).
- */
-export const GPU_COMPLEX_PREAMBLE_WGSL = `
-fn _gpu_cmul(a: vec2f, b: vec2f) -> vec2f {
-  return vec2f(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x);
-}
-
-fn _gpu_cdiv(a: vec2f, b: vec2f) -> vec2f {
-  let d = b.x * b.x + b.y * b.y;
-  return vec2f((a.x * b.x + a.y * b.y) / d, (a.y * b.x - a.x * b.y) / d);
-}
-
-fn _gpu_cexp(z: vec2f) -> vec2f {
-  let e = exp(z.x);
-  return vec2f(e * cos(z.y), e * sin(z.y));
-}
-
-fn _gpu_cln(z: vec2f) -> vec2f {
-  return vec2f(log(length(z)), atan2(z.y, z.x));
-}
-
-fn _gpu_cpow(z: vec2f, w: vec2f) -> vec2f {
-  return _gpu_cexp(_gpu_cmul(w, _gpu_cln(z)));
-}
-
-fn _gpu_csqrt(z: vec2f) -> vec2f {
-  let r = length(z);
-  let theta = atan2(z.y, z.x);
-  return sqrt(r) * vec2f(cos(theta * 0.5), sin(theta * 0.5));
-}
-
-fn _gpu_csin(z: vec2f) -> vec2f {
-  return vec2f(sin(z.x) * cosh(z.y), cos(z.x) * sinh(z.y));
-}
-
-fn _gpu_ccos(z: vec2f) -> vec2f {
-  return vec2f(cos(z.x) * cosh(z.y), -sin(z.x) * sinh(z.y));
-}
-
-fn _gpu_ctan(z: vec2f) -> vec2f {
-  return _gpu_cdiv(_gpu_csin(z), _gpu_ccos(z));
-}
-
-fn _gpu_csinh(z: vec2f) -> vec2f {
-  return vec2f(sinh(z.x) * cos(z.y), cosh(z.x) * sin(z.y));
-}
-
-fn _gpu_ccosh(z: vec2f) -> vec2f {
-  return vec2f(cosh(z.x) * cos(z.y), sinh(z.x) * sin(z.y));
-}
-
-fn _gpu_ctanh(z: vec2f) -> vec2f {
-  return _gpu_cdiv(_gpu_csinh(z), _gpu_ccosh(z));
-}
-
-fn _gpu_casin(z: vec2f) -> vec2f {
-  let iz = vec2f(-z.y, z.x);
-  let s = _gpu_csqrt(vec2f(1.0 - z.x * z.x + z.y * z.y, -2.0 * z.x * z.y));
-  let l = _gpu_cln(iz + s);
-  return vec2f(l.y, -l.x);
-}
-
-fn _gpu_cacos(z: vec2f) -> vec2f {
-  let s = _gpu_casin(z);
-  return vec2f(1.5707963268 - s.x, -s.y);
-}
-
-fn _gpu_catan(z: vec2f) -> vec2f {
+}`,
+    wgsl: `fn _gpu_catan(z: vec2f) -> vec2f {
   let iz = vec2f(-z.y, z.x);
   let a = _gpu_cln(vec2f(1.0 - iz.x, -iz.y));
   let b = _gpu_cln(vec2f(1.0 + iz.x, iz.y));
   let d = vec2f(a.x - b.x, a.y - b.y);
   return vec2f(-0.5 * d.y, 0.5 * d.x);
+}`,
+  },
+  _gpu_casinh: {
+    deps: ['_gpu_csqrt', '_gpu_cln'],
+    glsl: `vec2 _gpu_casinh(vec2 z) {
+  vec2 z2 = vec2(z.x * z.x - z.y * z.y, 2.0 * z.x * z.y);
+  vec2 s = _gpu_csqrt(vec2(1.0 + z2.x, z2.y));
+  return _gpu_cln(z + s);
+}`,
+    wgsl: `fn _gpu_casinh(z: vec2f) -> vec2f {
+  let z2 = vec2f(z.x * z.x - z.y * z.y, 2.0 * z.x * z.y);
+  let s = _gpu_csqrt(vec2f(1.0 + z2.x, z2.y));
+  return _gpu_cln(z + s);
+}`,
+  },
+  _gpu_cacosh: {
+    deps: ['_gpu_csqrt', '_gpu_cln'],
+    glsl: `vec2 _gpu_cacosh(vec2 z) {
+  vec2 z2 = vec2(z.x * z.x - z.y * z.y, 2.0 * z.x * z.y);
+  vec2 s = _gpu_csqrt(vec2(z2.x - 1.0, z2.y));
+  return _gpu_cln(z + s);
+}`,
+    wgsl: `fn _gpu_cacosh(z: vec2f) -> vec2f {
+  let z2 = vec2f(z.x * z.x - z.y * z.y, 2.0 * z.x * z.y);
+  let s = _gpu_csqrt(vec2f(z2.x - 1.0, z2.y));
+  return _gpu_cln(z + s);
+}`,
+  },
+  _gpu_catanh: {
+    deps: ['_gpu_cln'],
+    glsl: `vec2 _gpu_catanh(vec2 z) {
+  vec2 a = _gpu_cln(vec2(1.0 + z.x, z.y));
+  vec2 b = _gpu_cln(vec2(1.0 - z.x, -z.y));
+  return vec2(0.5 * (a.x - b.x), 0.5 * (a.y - b.y));
+}`,
+    wgsl: `fn _gpu_catanh(z: vec2f) -> vec2f {
+  let a = _gpu_cln(vec2f(1.0 + z.x, z.y));
+  let b = _gpu_cln(vec2f(1.0 - z.x, -z.y));
+  return vec2f(0.5 * (a.x - b.x), 0.5 * (a.y - b.y));
+}`,
+  },
+};
+
+/**
+ * Build a minimal complex preamble containing only the helper functions
+ * actually referenced by `code`, plus their transitive dependencies,
+ * emitted in topological (dependency-first) order.
+ */
+function buildComplexPreamble(code: string, language: string): string {
+  // 1. Find all _gpu_c* calls in the compiled code
+  const needed = new Set<string>();
+  for (const name of Object.keys(GPU_COMPLEX_FUNCTIONS)) {
+    if (code.includes(name)) needed.add(name);
+  }
+  if (needed.size === 0) return '';
+
+  // 2. Resolve transitive dependencies
+  const resolved = new Set<string>();
+  function resolve(name: string): void {
+    if (resolved.has(name)) return;
+    const def = GPU_COMPLEX_FUNCTIONS[name];
+    if (!def) return;
+    for (const dep of def.deps) resolve(dep);
+    resolved.add(name);
+  }
+  for (const name of needed) resolve(name);
+
+  // 3. `resolved` is already in topological order (deps before dependents)
+  const lang = language === 'wgsl' ? 'wgsl' : 'glsl';
+  const parts: string[] = [];
+  for (const name of resolved) {
+    parts.push(GPU_COMPLEX_FUNCTIONS[name][lang]);
+  }
+  return '\n' + parts.join('\n\n') + '\n';
 }
-`;
 
 /** Constants shared by both GLSL and WGSL */
 const GPU_CONSTANTS: Record<string, string> = {
@@ -1069,10 +1171,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       code,
     };
     let preamble = '';
-    if (/_gpu_c(?:mul|div|exp|ln|pow|sqrt|sin|cos|tan|sinh|cosh|tanh|asin|acos|atan)\b/.test(code))
-      preamble += this.languageId === 'wgsl'
-        ? GPU_COMPLEX_PREAMBLE_WGSL
-        : GPU_COMPLEX_PREAMBLE_GLSL;
+    preamble += buildComplexPreamble(code, this.languageId);
     if (code.includes('_gpu_gamma')) preamble += GPU_GAMMA_PREAMBLE;
     if (code.includes('_gpu_erf')) preamble += GPU_ERF_PREAMBLE;
     if (code.includes('_gpu_srgb_to') || code.includes('_gpu_oklab') ||
