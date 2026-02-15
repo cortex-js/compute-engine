@@ -62,7 +62,14 @@
   Transcendental functions (Sin, Cos, Exp, Ln, Sqrt, Power, and others) delegate
   to runtime helpers backed by the `complex-esm` library. Mixed real/complex
   operands are promoted inline. `ImaginaryUnit` compiles to `{re: 0, im: 1}`.
-  Symbols with unknown type are assumed real.
+  Symbols with unknown type are assumed real. Complex-aware `Sum` and `Product`
+  loops emit `{re, im}` accumulators when the loop body is complex-valued.
+  Reciprocal trig/hyperbolic functions (Cot, Sec, Csc, Coth, Sech, Csch) and
+  their inverses dispatch to complex helpers when operands are complex.
+- **Python complex compilation**: The Python target now supports complex-valued
+  expressions using Python's native `complex()` constructor and the `cmath`
+  module for transcendental functions. Real-valued expressions continue to use
+  NumPy.
 - **Gamma function compilation**: `Gamma` and `GammaLn` can now be compiled to
   `interval-js`, `glsl`, `wgsl`, and `interval-glsl` targets. The interval
   targets include pole detection at non-positive integers and correct

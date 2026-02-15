@@ -31,46 +31,55 @@ def is_verbose() -> bool:
 
 # Generated benchmark functions
 
+import numpy as np
 def simple_power(x, y, z):
     r"""Simple Power: x^2 + y^2 + z^2"""
     return x ** 2 + y ** 2 + z ** 2
 
 
+import numpy as np
 def polynomial(x):
     r"""Polynomial: x^4 + 3x^3 + 2x^2 + x + 1"""
     return x ** 4 + 3 * x ** 3 + 2 * x ** 2 + x + 1
 
 
+import numpy as np
 def trigonometric(x, y, z):
     r"""Trigonometric: \sin(x) + \cos(y) + \tan(z)"""
     return np.sin(x) + np.cos(y) + np.tan(z)
 
 
+import numpy as np
 def nested_expression(x, y, z, a, b, c):
     r"""Nested Expression: \sqrt{(x-a)^2 + (y-b)^2 + (z-c)^2}"""
     return np.sqrt((-a + x) ** 2 + (-b + y) ** 2 + (-c + z) ** 2)
 
 
+import numpy as np
 def large_expression__50_terms_(x):
     r"""Large Expression (50 terms): x^0 + x^1 + x^2 + x^3 + x^4 + x^5 + x^6 + x^7 + x^8 + x^9 + x^10 + x^11 + x^12 + x^13 + x^14 + x^15 + x^16 + x^17 + x^18 + x^19 + x^20 + x^21 + x^22 + x^23 + x^24 + x^25 + x^26 + x^27 + x^28 + x^29 + x^30 + x^31 + x^32 + x^33 + x^34 + x^35 + x^36 + x^37 + x^38 + x^39 + x^40 + x^41 + x^42 + x^43 + x^44 + x^45 + x^46 + x^47 + x^48 + x^49"""
     return x ** 9 + x ** 8 + x ** 7 + x ** 6 + x ** 5 + 0 * x ** 4 + 2 * x ** 4 + 3 * x ** 4 + 4 * x ** 4 + 5 * x ** 4 + 6 * x ** 4 + 7 * x ** 4 + 8 * x ** 4 + 9 * x ** 4 + x ** 4 + x ** 4 + 0 * x ** 3 + 2 * x ** 3 + 3 * x ** 3 + 4 * x ** 3 + 5 * x ** 3 + 6 * x ** 3 + 7 * x ** 3 + 8 * x ** 3 + 9 * x ** 3 + x ** 3 + x ** 3 + 0 * x ** 2 + 2 * x ** 2 + 3 * x ** 2 + 4 * x ** 2 + 5 * x ** 2 + 6 * x ** 2 + 7 * x ** 2 + 8 * x ** 2 + 9 * x ** 2 + x ** 2 + x ** 2 + x + x + 0 * x + 2 * x + 3 * x + 4 * x + 5 * x + 6 * x + 7 * x + 8 * x + 9 * x + x ** 0
 
 
+import numpy as np
 def many_variables__20_vars_(x_0, x_1, x_2, x_3, x_4, x_5, x_6, x_7, x_8, x_9, x_10, x_11, x_12, x_13, x_14, x_15, x_16, x_17, x_18, x_19):
     r"""Many Variables (20 vars): x_{0} + x_{1} + x_{2} + x_{3} + x_{4} + x_{5} + x_{6} + x_{7} + x_{8} + x_{9} + x_{10} + x_{11} + x_{12} + x_{13} + x_{14} + x_{15} + x_{16} + x_{17} + x_{18} + x_{19}"""
     return x_0 + x_1 + x_10 + x_11 + x_12 + x_13 + x_14 + x_15 + x_16 + x_17 + x_18 + x_19 + x_2 + x_3 + x_4 + x_5 + x_6 + x_7 + x_8 + x_9
 
 
+import numpy as np
 def distance_formula(x_1, y_1, x_2, y_2):
     r"""Distance Formula: \sqrt{(x_2-x_1)^2 + (y_2-y_1)^2}"""
     return np.sqrt((-x_1 + x_2) ** 2 + (-y_1 + y_2) ** 2)
 
 
+import numpy as np
 def quadratic_formula(a, b, c):
     r"""Quadratic Formula: \frac{-b + \sqrt{b^2 - 4ac}}{2a}"""
     return (-b + np.sqrt(b ** 2 + -4 * a * c)) / (2 * a)
 
 
+import numpy as np
 def kinematics(u, a, t):
     r"""Kinematics: u \cdot t + \frac{1}{2} a \cdot t^2"""
     return 0.5 * a * t ** 2 + t * u
