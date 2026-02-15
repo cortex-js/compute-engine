@@ -68,7 +68,7 @@ const STYLE_MODIFIERS = {
 };
 
 export class Serializer {
-  options: Readonly<SerializeLatexOptions>;
+  options: Readonly<Required<SerializeLatexOptions>>;
   readonly dictionary: IndexedLatexDictionary;
   level = -1;
   constructor(
@@ -76,7 +76,12 @@ export class Serializer {
     options: SerializeLatexOptions
   ) {
     this.dictionary = dictionary;
-    this.options = options;
+    // Ensure all required properties are present with defaults
+    this.options = {
+      dmsFormat: false,
+      angleNormalization: 'none',
+      ...options,
+    } as Required<SerializeLatexOptions>;
   }
 
   /**

@@ -208,6 +208,9 @@ export abstract class _BoxedExpression implements Expression {
 
       missingSymbol: '\\blacksquare',
 
+      dmsFormat: false,
+      angleNormalization: 'none' as const,
+
       // openGroup: '(',
       // closeGroup: ')',
       // divide: '\\frac{#1}{#2}',
