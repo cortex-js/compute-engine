@@ -38,6 +38,7 @@ export {
   simplify,
   evaluate,
   N,
+  declare,
   assign,
   expand,
   expandAll,

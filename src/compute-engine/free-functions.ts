@@ -2,8 +2,10 @@ import type {
   Expression,
   ExpressionInput,
   AssignValue,
+  SymbolDefinition,
   IComputeEngine,
 } from './global-types';
+import type { Type, TypeString } from '../common/type/types';
 import type { LatexString } from './latex-syntax/types';
 import { isExpression } from './boxed-expression/type-guards';
 import {
@@ -56,6 +58,22 @@ export function evaluate(expr: LatexString | ExpressionInput): Expression {
 
 export function N(expr: LatexString | ExpressionInput): Expression {
   return toExpression(expr).N();
+}
+
+export function declare(
+  id: string,
+  def: Type | TypeString | Partial<SymbolDefinition>
+): void;
+export function declare(symbols: {
+  [id: string]: Type | TypeString | Partial<SymbolDefinition>;
+}): void;
+export function declare(
+  arg1:
+    | string
+    | { [id: string]: Type | TypeString | Partial<SymbolDefinition> },
+  arg2?: Type | TypeString | Partial<SymbolDefinition>
+): void {
+  getDefaultEngine().declare(arg1 as any, arg2 as any);
 }
 
 export function assign(id: string, value: AssignValue): void;

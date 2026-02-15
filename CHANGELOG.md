@@ -73,6 +73,9 @@
   and `Expression`. This means you can pass numbers, MathJSON objects, or tuple
   arrays directly — e.g., `evaluate(["Add", 1, 2])` or
   `simplify(["Power", "x", 2])`.
+- Added `declare()` free function to declare symbols without instantiating a
+  `ComputeEngine` explicitly — e.g., `declare('x', 'integer')` or
+  `declare({ x: 'integer', y: 'real' })`.
 
 ### Units and Quantities
 
