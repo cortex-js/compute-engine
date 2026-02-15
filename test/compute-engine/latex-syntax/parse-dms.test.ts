@@ -1,5 +1,12 @@
 import { ComputeEngine } from '../../../src/compute-engine';
 import type { SerializeLatexOptions } from '../../../src/compute-engine';
+import type { MathJsonExpression as Expression } from '../../../src/math-json/types';
+
+function check(latex: string, expected: Expression): void {
+  const ce = new ComputeEngine();
+  const expr = ce.parse(latex, { form: 'raw' });
+  expect(expr.json).toEqual(expected);
+}
 
 describe('DMS Serialization Configuration', () => {
   test('SerializeLatexOptions accepts dmsFormat', () => {
@@ -19,19 +26,7 @@ describe('DMS Serialization Configuration', () => {
 });
 
 describe('DMS Parsing', () => {
-  const ce = new ComputeEngine();
-
   test('parse simple degrees unchanged', () => {
-    expect(ce.parse('9°')).toMatchInlineSnapshot(`
-      [
-        "Multiply",
-        [
-          "Rational",
-          1,
-          20,
-        ],
-        "Pi",
-      ]
-    `);
+    check('9°', ['Degrees', 9]);
   });
 });
