@@ -188,12 +188,109 @@ export const STANDARD_LIBRARIES: LibraryDefinition[] = [
             ]),
           ]),
       },
+      ElementaryCharge: {
+        description: 'Elementary electric charge',
+        isConstant: true,
+        wikidata: 'Q2101',
+        type: 'value',
+        value: (ce) =>
+          ce._fn('Quantity', [ce.number(1.602176634e-19), ce.symbol('C')]),
+      },
+      BoltzmannConstant: {
+        description: 'Boltzmann constant',
+        isConstant: true,
+        wikidata: 'Q131536',
+        type: 'value',
+        value: (ce) =>
+          ce._fn('Quantity', [
+            ce.number(1.380649e-23),
+            ce._fn('Divide', [ce.symbol('J'), ce.symbol('K')]),
+          ]),
+      },
+      AvogadroConstant: {
+        description: 'Avogadro constant',
+        isConstant: true,
+        wikidata: 'Q47574',
+        type: 'value',
+        value: (ce) =>
+          ce._fn('Quantity', [
+            ce.number(6.02214076e23),
+            ce._fn('Power', [ce.symbol('mol'), ce.number(-1)]),
+          ]),
+      },
+      VacuumPermittivity: {
+        description: 'Vacuum permittivity (electric constant)',
+        isConstant: true,
+        wikidata: 'Q176908',
+        type: 'value',
+        value: (ce) =>
+          ce._fn('Quantity', [
+            ce.number(8.8541878128e-12),
+            ce._fn('Divide', [
+              ce.symbol('F'),
+              ce.symbol('m'),
+            ]),
+          ]),
+      },
+      GravitationalConstant: {
+        description: 'Newtonian constant of gravitation',
+        isConstant: true,
+        wikidata: 'Q30022',
+        type: 'value',
+        value: (ce) =>
+          ce._fn('Quantity', [
+            ce.number(6.67430e-11),
+            ce._fn('Divide', [
+              ce._fn('Power', [ce.symbol('m'), ce.number(3)]),
+              ce._fn('Multiply', [
+                ce.symbol('kg'),
+                ce._fn('Power', [ce.symbol('s'), ce.number(2)]),
+              ]),
+            ]),
+          ]),
+      },
+      StefanBoltzmannConstant: {
+        description: 'Stefan-Boltzmann constant',
+        isConstant: true,
+        wikidata: 'Q196898',
+        type: 'value',
+        value: (ce) =>
+          ce._fn('Quantity', [
+            ce.number(5.670374419e-8),
+            ce._fn('Divide', [
+              ce.symbol('W'),
+              ce._fn('Multiply', [
+                ce._fn('Power', [ce.symbol('m'), ce.number(2)]),
+                ce._fn('Power', [ce.symbol('K'), ce.number(4)]),
+              ]),
+            ]),
+          ]),
+      },
+      GasConstant: {
+        description: 'Molar gas constant',
+        isConstant: true,
+        wikidata: 'Q39600',
+        type: 'value',
+        value: (ce) =>
+          ce._fn('Quantity', [
+            ce.number(8.314462618),
+            ce._fn('Divide', [
+              ce.symbol('J'),
+              ce._fn('Multiply', [ce.symbol('mol'), ce.symbol('K')]),
+            ]),
+          ]),
+      },
     },
     latexDictionary: [
       {
         name: 'Mu0',
         kind: 'symbol',
         latexTrigger: '\\mu_0',
+      },
+      {
+        name: 'VacuumPermittivity',
+        kind: 'symbol',
+        latexTrigger: '\\varepsilon_0',
       },
     ],
   },

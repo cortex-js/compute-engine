@@ -141,6 +141,8 @@ export const UNITS_LIBRARY: SymbolDefinitions = {
             ce.number(converted),
             ce.symbol(toSymbol),
           ]);
+        // If conversion returned null, units are incompatible
+        return ce.error('incompatible-type');
       }
 
       // Fall back to compound unit conversion
@@ -149,7 +151,7 @@ export const UNITS_LIBRARY: SymbolDefinitions = {
       if (!fromUE || !toUE) return undefined;
 
       const converted = convertCompoundUnit(mag, fromUE, toUE);
-      if (converted === null) return undefined;
+      if (converted === null) return ce.error('incompatible-type');
 
       return ce._fn('Quantity', [ce.number(converted), targetUnitExpr]);
     },
@@ -194,12 +196,17 @@ export const UNITS_LIBRARY: SymbolDefinitions = {
     complexity: 1200,
     signature: '(value, value) -> value',
     evaluate: (ops, { engine: ce }) => {
-      const a = ops[0]?.symbol;
-      const b = ops[1]?.symbol;
-      if (!a || !b) return undefined;
+      // Support both simple symbols and compound unit expressions
+      const aUE = boxedToUnitExpression(ops[0]);
+      const bUE = boxedToUnitExpression(ops[1]);
+      if (!aUE || !bUE) return undefined;
 
-      const result = areCompatibleUnits(a, b);
-      return ce.symbol(result ? 'True' : 'False');
+      const da = getExpressionDimension(aUE);
+      const db = getExpressionDimension(bUE);
+      if (!da || !db) return undefined;
+
+      const compatible = da.every((v, i) => v === db[i]);
+      return ce.symbol(compatible ? 'True' : 'False');
     },
   },
 
@@ -208,10 +215,11 @@ export const UNITS_LIBRARY: SymbolDefinitions = {
     complexity: 1200,
     signature: '(value) -> value',
     evaluate: (ops, { engine: ce }) => {
-      const sym = ops[0]?.symbol;
-      if (!sym) return undefined;
+      // Support both simple symbols and compound unit expressions
+      const ue = boxedToUnitExpression(ops[0]);
+      if (!ue) return undefined;
 
-      const dim = getUnitDimension(sym);
+      const dim = getExpressionDimension(ue);
       if (!dim) return undefined;
 
       return ce._fn('List', dim.map((d) => ce.number(d)));

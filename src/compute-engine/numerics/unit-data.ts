@@ -35,6 +35,12 @@ interface UnitEntry {
   dimension: DimensionVector;
   /** Scale factor relative to the coherent SI unit for the same dimension. */
   scale: number;
+  /**
+   * Offset for affine temperature conversions.
+   * To convert to SI: SI_value = (value + offset) * scale
+   * Only used by degC and degF.
+   */
+  offset?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -147,6 +153,11 @@ const UNIT_TABLE: Record<string, UnitEntry> = {
   'Gy': { dimension: [2, 0, -2, 0, 0, 0, 0], scale: 1 },
   'Sv': { dimension: [2, 0, -2, 0, 0, 0, 0], scale: 1 },
   'kat': { dimension: [0, 0, -1, 0, 0, 1, 0], scale: 1 },
+
+  // ---- Temperature units with affine offset ----
+  // To convert to kelvin: K = (value + offset) * scale
+  'degC': { dimension: [0, 0, 0, 0, 1, 0, 0], scale: 1, offset: 273.15 },
+  'degF': { dimension: [0, 0, 0, 0, 1, 0, 0], scale: 5 / 9, offset: 459.67 },
 
   // ---- Non-SI accepted for use with SI ----
   'min': { dimension: [0, 0, 1, 0, 0, 0, 0], scale: 60 },
@@ -323,8 +334,8 @@ export function findNamedUnit(dim: DimensionVector): string | null {
  * Returns the converted value, or `null` when the units are unknown or
  * dimensionally incompatible.
  *
- * Note: this performs a simple linear conversion via SI scale factors.
- * Affine temperature conversions (degC, degF) are **not** handled here.
+ * Handles both linear conversions (most units) and affine conversions
+ * (degC, degF) via the optional `offset` field.
  */
 export function convertUnit(
   value: number,
@@ -338,9 +349,13 @@ export function convertUnit(
   // Dimensional compatibility check
   if (!from.dimension.every((v, i) => v === to.dimension[i])) return null;
 
-  // value_SI = value * from.scale
-  // result   = value_SI / to.scale
-  return (value * from.scale) / to.scale;
+  // Affine conversion: SI_value = (value + offset) * scale
+  // Then: result = SI_value / to.scale - to.offset
+  const fromOffset = from.offset ?? 0;
+  const toOffset = to.offset ?? 0;
+
+  const siValue = (value + fromOffset) * from.scale;
+  return siValue / to.scale - toOffset;
 }
 
 // ---------------------------------------------------------------------------
@@ -488,6 +503,74 @@ function parseProductGroup(s: string): UnitExpression {
 }
 
 /**
+ * Find the index of the top-level `/` in a DSL string, skipping over
+ * parenthesized groups.  Returns -1 if no top-level `/` is found.
+ */
+function findTopLevelSlash(s: string): number {
+  let depth = 0;
+  for (let i = 0; i < s.length; i++) {
+    if (s[i] === '(') depth++;
+    else if (s[i] === ')') depth--;
+    else if (s[i] === '/' && depth === 0) return i;
+  }
+  return -1;
+}
+
+/**
+ * Parse a DSL group, which may contain parenthesized sub-expressions.
+ * Handles `(m*s^2)` by stripping outer parens and recursing.
+ */
+function parseDSLGroup(s: string): UnitExpression {
+  s = s.trim();
+  if (s.length === 0) return s;
+
+  // Strip outer parentheses: "(m*s^2)" → "m*s^2"
+  if (s[0] === '(' && s[s.length - 1] === ')') {
+    // Verify the parens are matched (not like "(a)*(b)")
+    let depth = 0;
+    let matched = true;
+    for (let i = 0; i < s.length - 1; i++) {
+      if (s[i] === '(') depth++;
+      else if (s[i] === ')') depth--;
+      if (depth === 0 && i < s.length - 1) { matched = false; break; }
+    }
+    if (matched) return parseDSLGroup(s.slice(1, -1));
+  }
+
+  // Check for top-level `/` inside this group
+  const slashIdx = findTopLevelSlash(s);
+  if (slashIdx !== -1) {
+    const numStr = s.slice(0, slashIdx).trim();
+    const denStr = s.slice(slashIdx + 1).trim();
+    return ['Divide', parseDSLGroup(numStr), parseDSLGroup(denStr)];
+  }
+
+  // Split on top-level `*` (skip parens)
+  const tokens: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < s.length; i++) {
+    if (s[i] === '(') depth++;
+    else if (s[i] === ')') depth--;
+    else if (s[i] === '*' && depth === 0) {
+      tokens.push(s.slice(start, i).trim());
+      start = i + 1;
+    }
+  }
+  tokens.push(s.slice(start).trim());
+  const filtered = tokens.filter((t) => t.length > 0);
+
+  if (filtered.length === 0) return s;
+  if (filtered.length === 1) {
+    const t = filtered[0];
+    // Might be a parenthesized group or a unit token with ^
+    if (t[0] === '(') return parseDSLGroup(t);
+    return parseUnitToken(t);
+  }
+  return ['Multiply', ...filtered.map((t) => parseDSLGroup(t))];
+}
+
+/**
  * Parse a unit DSL string like `"m/s^2"` or `"kg*m/s^2"` into a
  * MathJSON unit expression.
  *
@@ -495,34 +578,27 @@ function parseProductGroup(s: string): UnitExpression {
  * - `*` = multiplication
  * - `/` = division (everything after `/` is in denominator)
  * - `^N` = power (integer exponent)
+ * - `(...)` = grouping
  * - Simple units (no operators) stay as strings.
  *
  * Examples:
  * ```
- * parseUnitDSL("m")       // "m"
- * parseUnitDSL("km")      // "km"
- * parseUnitDSL("m/s")     // ["Divide", "m", "s"]
- * parseUnitDSL("m/s^2")   // ["Divide", "m", ["Power", "s", 2]]
- * parseUnitDSL("kg*m/s^2")// ["Divide", ["Multiply", "kg", "m"], ["Power", "s", 2]]
+ * parseUnitDSL("m")          // "m"
+ * parseUnitDSL("km")         // "km"
+ * parseUnitDSL("m/s")        // ["Divide", "m", "s"]
+ * parseUnitDSL("m/s^2")      // ["Divide", "m", ["Power", "s", 2]]
+ * parseUnitDSL("kg*m/s^2")   // ["Divide", ["Multiply", "kg", "m"], ["Power", "s", 2]]
+ * parseUnitDSL("kg/(m*s^2)") // ["Divide", "kg", ["Multiply", "m", ["Power", "s", 2]]]
  * ```
  */
 export function parseUnitDSL(s: string): UnitExpression {
   s = s.trim();
   if (s.length === 0) return s;
 
-  const slashIdx = s.indexOf('/');
-  if (slashIdx === -1) {
-    // No division — just a product group (or single unit)
-    return parseProductGroup(s);
-  }
+  // Fast path: no operators at all
+  if (!/[/*^()]/.test(s)) return s;
 
-  const numStr = s.slice(0, slashIdx).trim();
-  const denStr = s.slice(slashIdx + 1).trim();
-
-  const num = parseProductGroup(numStr);
-  const den = parseProductGroup(denStr);
-
-  return ['Divide', num, den];
+  return parseDSLGroup(s);
 }
 
 /**

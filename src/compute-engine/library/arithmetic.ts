@@ -77,7 +77,11 @@ import {
 import { parseType } from '../../common/type/parse';
 import { widen } from '../../common/type/utils';
 import { numericTypeHandler } from './type-handlers';
-import { convertUnit, convertCompoundUnit, type UnitExpression } from './unit-data';
+import {
+  convertUnit,
+  convertCompoundUnit,
+  getExpressionScale,
+} from './unit-data';
 import { boxedToUnitExpression } from './units';
 import { range, rangeLast } from './collections';
 import { run, runAsync } from '../../common/interruptible';
@@ -87,7 +91,11 @@ import type {
   SymbolDefinitions,
   Sign,
 } from '../global-types';
-import { isNumber, isFunction, isSymbol } from '../boxed-expression/type-guards';
+import {
+  isNumber,
+  isFunction,
+  isSymbol,
+} from '../boxed-expression/type-guards';
 import { canonical } from '../boxed-expression/canonical-utils';
 
 // When processing an arithmetic expression, the following are the core
@@ -231,9 +239,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // Do not evaluate in the case of numericApproximation
         // to avoid premature rounding errors.
         // For example: `\\frac{2}{3}+\\frac{12345678912345678}{987654321987654321}+\\frac{987654321987654321}{12345678912345678}`
-        return numericApproximation
-          ? addN(...ops)
-          : add(...evaluated);
+        return numericApproximation ? addN(...ops) : add(...evaluated);
       },
     },
 
@@ -985,9 +991,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           return quantityMultiply(engine!, evaluated);
         }
         // Use evaluate in both cases: do not introduce premature rounding errors
-        return numericApproximation
-          ? mulN(...ops)
-          : mul(...evaluated);
+        return numericApproximation ? mulN(...ops) : mul(...evaluated);
       },
     },
 
@@ -1094,7 +1098,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (evalBase.operator === 'Quantity') {
           return quantityPower(engine!, evalBase, n.evaluate());
         }
-        return pow(x, n, { numericApproximation: numericApproximation ?? false });
+        return pow(x, n, {
+          numericApproximation: numericApproximation ?? false,
+        });
       },
       // Defined as RealNumbers for all power in RealNumbers when base > 0;
       // when x < 0, only defined if n is an integer
@@ -2061,7 +2067,11 @@ function evaluateGcdLcm(
 // ---------------------------------------------------------------------------
 
 /** Type alias for a Quantity function expression with op1 and op2 access. */
-type QuantityExpr = Expression & { readonly op1: Expression; readonly op2: Expression; readonly ops: ReadonlyArray<Expression> };
+type QuantityExpr = Expression & {
+  readonly op1: Expression;
+  readonly op2: Expression;
+  readonly ops: ReadonlyArray<Expression>;
+};
 
 /** Check if an expression is a Quantity and narrow the type. */
 function isQuantity(expr: Expression): expr is QuantityExpr {
@@ -2088,7 +2098,8 @@ function unitExpr(q: QuantityExpr): Expression {
 
 /**
  * Add Quantity expressions.  All operands must be Quantities with
- * compatible dimensions.  The result uses the first operand's unit.
+ * compatible dimensions.  The result uses the unit with the largest
+ * scale factor (e.g. `m` wins over `cm`, `km` wins over `m`).
  *
  * Supports both simple symbol units and compound unit expressions.
  */
@@ -2098,49 +2109,60 @@ function quantityAdd(
 ): Expression | undefined {
   if (ops.length === 0) return undefined;
 
-  // Find the target unit from the first Quantity operand
-  const first = ops.find((x): x is QuantityExpr => isQuantity(x));
-  if (!first) return undefined;
-
-  // Get the target unit as both a symbol (fast path) and UnitExpression
-  const targetSymbol = unitSymbol(first);
-  const targetUE = boxedToUnitExpression(first.op2);
-  if (!targetSymbol && !targetUE) return undefined;
-
-  let total = 0;
+  // Collect all Quantity operands
+  const quantities: QuantityExpr[] = [];
   for (const op of ops) {
-    if (isQuantity(op)) {
-      const mag = op.op1.re;
-      if (mag === undefined) return undefined;
+    if (!isQuantity(op)) return undefined; // non-Quantity mixed in
+    quantities.push(op);
+  }
+  if (quantities.length === 0) return undefined;
 
-      const opSymbol = unitSymbol(op);
-
-      // Fast path: both are simple symbol units
-      if (targetSymbol && opSymbol) {
-        if (opSymbol === targetSymbol) {
-          total += mag;
-        } else {
-          const converted = convertUnit(mag, opSymbol, targetSymbol);
-          if (converted === null) return undefined;
-          total += converted;
-        }
-        continue;
-      }
-
-      // Compound unit path
-      const opUE = boxedToUnitExpression(op.op2);
-      if (!opUE || !targetUE) return undefined;
-      const converted = convertCompoundUnit(mag, opUE, targetUE);
-      if (converted === null) return undefined;
-      total += converted;
-    } else {
-      // Non-Quantity operand mixed with Quantities — not valid
-      return undefined;
+  // Find the unit with the largest scale factor
+  let bestQ = quantities[0];
+  let bestScale = 0;
+  for (const q of quantities) {
+    const ue = boxedToUnitExpression(q.op2);
+    if (!ue) return undefined;
+    const s = getExpressionScale(ue);
+    if (s === null) return undefined;
+    if (s > bestScale) {
+      bestScale = s;
+      bestQ = q;
     }
   }
 
-  // Preserve the original unit expression from the first Quantity
-  return ce._fn('Quantity', [ce.number(total), unitExpr(first)]);
+  const targetSymbol = unitSymbol(bestQ);
+  const targetUE = boxedToUnitExpression(bestQ.op2);
+  if (!targetSymbol && !targetUE) return undefined;
+
+  let total = 0;
+  for (const q of quantities) {
+    const mag = q.op1.re;
+    if (mag === undefined) return undefined;
+
+    const opSymbol = unitSymbol(q);
+
+    // Fast path: both are simple symbol units
+    if (targetSymbol && opSymbol) {
+      if (opSymbol === targetSymbol) {
+        total += mag;
+      } else {
+        const converted = convertUnit(mag, opSymbol, targetSymbol);
+        if (converted === null) return undefined;
+        total += converted;
+      }
+      continue;
+    }
+
+    // Compound unit path
+    const opUE = boxedToUnitExpression(q.op2);
+    if (!opUE || !targetUE) return undefined;
+    const converted = convertCompoundUnit(mag, opUE, targetUE);
+    if (converted === null) return undefined;
+    total += converted;
+  }
+
+  return ce._fn('Quantity', [ce.number(total), unitExpr(bestQ)]);
 }
 
 /**
@@ -2176,10 +2198,7 @@ function quantityMultiply(
     const q = quantities[0];
     const mag = q.op1.re;
     if (mag === undefined) return undefined;
-    return ce._fn('Quantity', [
-      ce.number(scalarValue * mag),
-      unitExpr(q),
-    ]);
+    return ce._fn('Quantity', [ce.number(scalarValue * mag), unitExpr(q)]);
   }
 
   // Multiple quantities: multiply magnitudes, combine units
@@ -2193,9 +2212,7 @@ function quantityMultiply(
   }
 
   const combinedUnit =
-    unitParts.length === 1
-      ? unitParts[0]
-      : ce._fn('Multiply', unitParts);
+    unitParts.length === 1 ? unitParts[0] : ce._fn('Multiply', unitParts);
 
   return ce._fn('Quantity', [ce.number(totalMag), combinedUnit]);
 }

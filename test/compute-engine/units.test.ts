@@ -141,24 +141,24 @@ describe('QUANTITY ARITHMETIC', () => {
     expect(expr.op2.symbol).toBe('m');
   });
 
-  test('Addition - compatible units, first operand wins', () => {
+  test('Addition - compatible units, largest-scale-unit wins', () => {
+    // m (scale=1) > cm (scale=0.01), so result is in meters
     const expr = engine
       .box(['Add', ['Quantity', 12, 'cm'], ['Quantity', 1, 'm']])
       .evaluate();
     expect(expr.operator).toBe('Quantity');
-    expect(expr.op1.re).toBe(112);
-    expect(expr.op2.symbol).toBe('cm');
+    expect(expr.op1.re).toBeCloseTo(1.12);
+    expect(expr.op2.symbol).toBe('m');
   });
 
-  test('Addition - compatible units, reversed', () => {
-    // Note: canonical form reorders operands, so the first Quantity
-    // in canonical order (cm < m lexically) determines the result unit.
+  test('Addition - compatible units, reversed order same result', () => {
+    // Regardless of operand order, largest-scale-unit (m) wins
     const expr = engine
       .box(['Add', ['Quantity', 1, 'm'], ['Quantity', 12, 'cm']])
       .evaluate();
     expect(expr.operator).toBe('Quantity');
-    expect(expr.op1.re).toBeCloseTo(112);
-    expect(expr.op2.symbol).toBe('cm');
+    expect(expr.op1.re).toBeCloseTo(1.12);
+    expect(expr.op2.symbol).toBe('m');
   });
 
   test('Multiplication of quantities', () => {
@@ -530,12 +530,188 @@ describe('PHYSICS CONSTANTS', () => {
   });
 });
 
+describe('DSL PARENTHESES', () => {
+  test('Parenthesized denominator: kg/(m*s^2)', () => {
+    const result = parseUnitDSL('kg/(m*s^2)');
+    expect(result).toEqual([
+      'Divide',
+      'kg',
+      ['Multiply', 'm', ['Power', 's', 2]],
+    ]);
+  });
+
+  test('Parenthesized numerator: (kg*m)/s^2', () => {
+    const result = parseUnitDSL('(kg*m)/s^2');
+    expect(result).toEqual([
+      'Divide',
+      ['Multiply', 'kg', 'm'],
+      ['Power', 's', 2],
+    ]);
+  });
+
+  test('Nested parens: (kg*m)/(s^2*A)', () => {
+    const result = parseUnitDSL('(kg*m)/(s^2*A)');
+    expect(result).toEqual([
+      'Divide',
+      ['Multiply', 'kg', 'm'],
+      ['Multiply', ['Power', 's', 2], 'A'],
+    ]);
+  });
+
+  test('Parenthesized Quantity DSL', () => {
+    const expr = engine.box(['Quantity', 1, 'kg/(m*s^2)']);
+    expect(expr.isValid).toBe(true);
+    expect(expr.op2.operator).toBe('Divide');
+  });
+});
+
+describe('TEMPERATURE CONVERSION', () => {
+  test('degC to K', () => {
+    const expr = engine
+      .box(['UnitConvert', ['Quantity', 100, 'degC'], 'K'])
+      .evaluate();
+    expect(expr.operator).toBe('Quantity');
+    expect(expr.op1.re).toBeCloseTo(373.15);
+    expect(expr.op2.symbol).toBe('K');
+  });
+
+  test('degF to K', () => {
+    const expr = engine
+      .box(['UnitConvert', ['Quantity', 212, 'degF'], 'K'])
+      .evaluate();
+    expect(expr.operator).toBe('Quantity');
+    expect(expr.op1.re).toBeCloseTo(373.15);
+  });
+
+  test('degC to degF', () => {
+    const expr = engine
+      .box(['UnitConvert', ['Quantity', 100, 'degC'], 'degF'])
+      .evaluate();
+    expect(expr.operator).toBe('Quantity');
+    expect(expr.op1.re).toBeCloseTo(212);
+  });
+
+  test('degF to degC', () => {
+    const expr = engine
+      .box(['UnitConvert', ['Quantity', 32, 'degF'], 'degC'])
+      .evaluate();
+    expect(expr.operator).toBe('Quantity');
+    expect(expr.op1.re).toBeCloseTo(0);
+  });
+
+  test('0 K to degC', () => {
+    const expr = engine
+      .box(['UnitConvert', ['Quantity', 0, 'K'], 'degC'])
+      .evaluate();
+    expect(expr.operator).toBe('Quantity');
+    expect(expr.op1.re).toBeCloseTo(-273.15);
+  });
+});
+
+describe('INCOMPATIBLE UNIT CONVERT', () => {
+  test('Converting m to s returns error', () => {
+    const expr = engine
+      .box(['UnitConvert', ['Quantity', 5, 'm'], 's'])
+      .evaluate();
+    expect(expr.operator).toBe('Error');
+  });
+
+  test('Converting kg to A returns error', () => {
+    const expr = engine
+      .box(['UnitConvert', ['Quantity', 1, 'kg'], 'A'])
+      .evaluate();
+    expect(expr.operator).toBe('Error');
+  });
+});
+
+describe('COMPOUND UNIT QUERIES', () => {
+  test('CompatibleUnitQ with compound units: m/s vs km/h', () => {
+    const expr = engine.box([
+      'CompatibleUnitQ',
+      ['Divide', 'm', 's'],
+      ['Divide', 'km', 'h'],
+    ]).evaluate();
+    expect(expr.symbol).toBe('True');
+  });
+
+  test('CompatibleUnitQ compound vs simple: J vs kg*m^2/s^2', () => {
+    const expr = engine.box([
+      'CompatibleUnitQ',
+      'J',
+      ['Divide', ['Multiply', 'kg', ['Power', 'm', 2]], ['Power', 's', 2]],
+    ]).evaluate();
+    expect(expr.symbol).toBe('True');
+  });
+
+  test('CompatibleUnitQ incompatible compounds: m/s vs kg*m', () => {
+    const expr = engine.box([
+      'CompatibleUnitQ',
+      ['Divide', 'm', 's'],
+      ['Multiply', 'kg', 'm'],
+    ]).evaluate();
+    expect(expr.symbol).toBe('False');
+  });
+
+  test('UnitDimension of compound unit m/s^2', () => {
+    const expr = engine.box([
+      'UnitDimension',
+      ['Divide', 'm', ['Power', 's', 2]],
+    ]).evaluate();
+    expect(expr.operator).toBe('List');
+    // [1, 0, -2, 0, 0, 0, 0] = acceleration
+    expect(expr.op1.re).toBe(1);  // length
+  });
+});
+
+describe('ADDITIONAL PHYSICS CONSTANTS', () => {
+  test('Elementary charge', () => {
+    const expr = engine.box('ElementaryCharge').evaluate();
+    expect(expr.operator).toBe('Quantity');
+    expect(expr.op1.re).toBeCloseTo(1.602176634e-19);
+  });
+
+  test('Boltzmann constant', () => {
+    const expr = engine.box('BoltzmannConstant').evaluate();
+    expect(expr.operator).toBe('Quantity');
+    expect(expr.op1.re).toBeCloseTo(1.380649e-23);
+  });
+
+  test('Avogadro constant', () => {
+    const expr = engine.box('AvogadroConstant').evaluate();
+    expect(expr.operator).toBe('Quantity');
+    expect(expr.op1.re).toBeCloseTo(6.02214076e23);
+  });
+
+  test('Vacuum permittivity', () => {
+    const expr = engine.box('VacuumPermittivity').evaluate();
+    expect(expr.operator).toBe('Quantity');
+  });
+
+  test('Gravitational constant', () => {
+    const expr = engine.box('GravitationalConstant').evaluate();
+    expect(expr.operator).toBe('Quantity');
+    expect(expr.op1.re).toBeCloseTo(6.67430e-11);
+  });
+
+  test('Stefan-Boltzmann constant', () => {
+    const expr = engine.box('StefanBoltzmannConstant').evaluate();
+    expect(expr.operator).toBe('Quantity');
+  });
+
+  test('Gas constant', () => {
+    const expr = engine.box('GasConstant').evaluate();
+    expect(expr.operator).toBe('Quantity');
+    expect(expr.op1.re).toBeCloseTo(8.314462618);
+  });
+});
+
 describe('INTEGRATION', () => {
   test('Parse and evaluate: 12 cm + 1 m', () => {
+    // Largest-scale-unit wins: m (scale=1) > cm (scale=0.01)
     const expr = engine.parse('12\\,\\mathrm{cm}+1\\,\\mathrm{m}').evaluate();
     expect(expr.operator).toBe('Quantity');
-    expect(expr.op1.re).toBeCloseTo(112);
-    expect(expr.op2.symbol).toBe('cm');
+    expect(expr.op1.re).toBeCloseTo(1.12);
+    expect(expr.op2.symbol).toBe('m');
   });
 
   test('Parse and evaluate: 5 km', () => {
