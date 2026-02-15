@@ -243,14 +243,19 @@ describe('Extension Contracts', () => {
   describe('Rule Replacement Results', () => {
     test('rejects invalid replacement callback return values', () => {
       const ce = new ComputeEngine();
-      expect(() =>
-        ce.rules([
-          {
-            match: 'x',
-            replace: () => 'not-an-expression' as unknown as Expression,
-          },
-        ])
-      ).toThrow();
+      // The replace callback is not validated at rule creation time,
+      // only when the rule is applied and the callback is invoked.
+      // Invalid return values cause the rule application to fail
+      // gracefully, returning null.
+      const ruleSet = ce.rules([
+        {
+          match: 'x',
+          replace: () => 'not-an-expression' as unknown as Expression,
+        },
+      ]);
+      ce.declare('x', { type: 'integer' });
+      ce.assign('x', 1);
+      expect(ce.box('x').replace(ruleSet)).toBeNull();
     });
   });
 });

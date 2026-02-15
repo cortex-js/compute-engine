@@ -5886,6 +5886,7 @@ type LibraryCategory =
   | "arithmetic"
   | "calculus"
   | "collections"
+  | "colors"
   | "control-structures"
   | "combinatorics"
   | "core"
@@ -5897,7 +5898,8 @@ type LibraryCategory =
   | "polynomials"
   | "relop"
   | "statistics"
-  | "trigonometry";
+  | "trigonometry"
+  | "units";
 ```
 
 </MemberCard>

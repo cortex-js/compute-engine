@@ -1,4 +1,5 @@
 import type { Expression } from '../global-types';
+import { isFunction } from '../boxed-expression/type-guards';
 
 import type {
   CompileTarget,
@@ -280,15 +281,23 @@ export function compileGPUMatrix(
   arrayFn: (n: number) => string
 ): string {
   const body = args[0];
+  if (!isFunction(body)) return compile(body);
+
   const rows = body.ops;
-  if (!rows || rows.length === 0) return compile(body);
+  if (rows.length === 0) return compile(body);
 
   const numRows = rows.length;
-  const numCols = rows[0].nops;
+  const firstRow = rows[0];
+  const numCols = isFunction(firstRow) ? firstRow.nops : 0;
 
   // Column vector (Nx1): flatten to vecN or array<f32, N>
-  if (numCols === 1 && rows.every((row) => row.nops === 1)) {
-    const elements = rows.map((row) => compile(row.ops[0]));
+  if (
+    numCols === 1 &&
+    rows.every((row) => isFunction(row) && row.nops === 1)
+  ) {
+    const elements = rows.map((row) =>
+      compile(isFunction(row) ? row.ops[0] : row)
+    );
     if (numRows >= 2 && numRows <= 4)
       return `${vecFn(numRows)}(${elements.join(', ')})`;
     return `${arrayFn(numRows)}(${elements.join(', ')})`;
@@ -300,11 +309,13 @@ export function compileGPUMatrix(
     numRows === numCols &&
     numRows >= 2 &&
     numRows <= 4 &&
-    rows.every((row) => row.nops === numCols)
+    rows.every((row) => isFunction(row) && row.nops === numCols)
   ) {
     const cols: string[] = [];
     for (let c = 0; c < numCols; c++) {
-      const colElements = rows.map((row) => compile(row.ops[c]));
+      const colElements = rows.map((row) =>
+        compile(isFunction(row) ? row.ops[c] : row)
+      );
       cols.push(`${vecFn(numRows)}(${colElements.join(', ')})`);
     }
     return `${matFn(numRows)}(${cols.join(', ')})`;
