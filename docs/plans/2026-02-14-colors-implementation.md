@@ -196,6 +196,12 @@ describe('Color', () => {
     expect(result[0]).toBeGreaterThan(0.5);
   });
 
+  test('named custom color', () => {
+    const result = evaluateColor('brown');
+    expect(result).toHaveLength(3);
+    expect(result[0]).toBeCloseTo(0.549, 2); // Brown color
+  });
+
   test('transparent', () => {
     const result = evaluateColor('transparent');
     expect(result).toEqual([0, 0, 0, 0]);

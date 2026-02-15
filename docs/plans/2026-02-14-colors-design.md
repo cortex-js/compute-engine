@@ -25,8 +25,7 @@ Standard algorithm: max/min of RGB channels, derive H/S/L. Returns
 
 Four operator definitions following existing library patterns:
 
-- **`Color`**: calls `parseColor()`, normalizes 0-255 result to 0-1, returns
-  `Tuple`.
+- **`Color`**: calls `parseColor()` with support for named colors from the `NAMED_COLORS` palette (e.g. "red", "blue", "cyan", "dark-grey", "brown", "olive", etc.) or "transparent", normalizes 0-255 result to 0-1, returns `Tuple`.
 - **`Colormap`**: looks up palette by name from `SEQUENTIAL_PALETTES`,
   `CATEGORICAL_PALETTES`, `DIVERGING_PALETTES`. Three variants dispatched by
   second arg type (missing → full palette, integer → resample, real → sample).
