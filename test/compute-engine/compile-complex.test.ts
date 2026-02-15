@@ -264,6 +264,37 @@ describe('COMPILE COMPLEX - operator path bypass', () => {
   });
 });
 
+describe('COMPILE COMPLEX - Sum/Product loops', () => {
+  it('should sum complex values in a loop', () => {
+    // Sum(Complex(k, 1), k, 1, 3) = (1+i) + (2+i) + (3+i) = 6+3i
+    const expr = ce.box(['Sum', ['Complex', 'k', 1], ['Tuple', 'k', 1, 3]]);
+    const result = compile(expr, { fallback: false });
+    const val = result.run!() as { re: number; im: number };
+    expect(val.re).toBeCloseTo(6);
+    expect(val.im).toBeCloseTo(3);
+  });
+
+  it('should multiply complex values in a loop', () => {
+    // Product(Complex(1, 1), k, 1, 2) = (1+i)*(1+i) = 2i
+    const expr = ce.box([
+      'Product',
+      ['Complex', 1, 1],
+      ['Tuple', 'k', 1, 2],
+    ]);
+    const result = compile(expr, { fallback: false });
+    const val = result.run!() as { re: number; im: number };
+    expect(val.re).toBeCloseTo(0);
+    expect(val.im).toBeCloseTo(2);
+  });
+
+  it('should handle real Sum unchanged', () => {
+    // Sum(k, k, 1, 3) = 6
+    const expr = ce.box(['Sum', 'k', ['Tuple', 'k', 1, 3]]);
+    const result = compile(expr, { fallback: false });
+    expect(result.run!()).toBeCloseTo(6);
+  });
+});
+
 describe('COMPILE COMPLEX - integration', () => {
   it('should compile and run nested complex expression', () => {
     // (3+2i) * (1+i) + (0+1i) = (3*1-2*1) + (3*1+2*1)i + i = 1 + 5i + i = 1+6i

@@ -265,15 +265,24 @@ export class BaseCompiler {
       upper,
       isFinite: _isFinite,
     } = normalizeIndexingSet(args[1]);
-    const op = h === 'Sum' ? '+' : '*';
+    const isSum = h === 'Sum';
+    const op = isSum ? '+' : '*';
+    const bodyIsComplex = BaseCompiler.isComplexValued(args[0]);
 
     if (!index) {
       // Loop over a collection
       const indexVar = BaseCompiler.tempVar();
       const acc = BaseCompiler.tempVar();
       const col = BaseCompiler.compile(args[0], target);
+      if (bodyIsComplex) {
+        if (isSum) {
+          return `${col}.reduce((${acc}, ${indexVar}) => ({ re: ${acc}.re + ${indexVar}.re, im: ${acc}.im + ${indexVar}.im }), { re: 0, im: 0 })`;
+        }
+        // Product
+        return `${col}.reduce((${acc}, ${indexVar}) => ({ re: ${acc}.re * ${indexVar}.re - ${acc}.im * ${indexVar}.im, im: ${acc}.re * ${indexVar}.im + ${acc}.im * ${indexVar}.re }), { re: 1, im: 0 })`;
+      }
       return `${col}.reduce((${acc}, ${indexVar}) => ${acc} ${op} ${indexVar}, ${
-        op === '+' ? '0' : '1'
+        isSum ? '0' : '1'
       })`;
     }
 
@@ -287,8 +296,35 @@ export class BaseCompiler {
 
     const acc = BaseCompiler.tempVar();
 
+    if (bodyIsComplex) {
+      const val = BaseCompiler.tempVar();
+      if (isSum) {
+        return `(() => {
+  let ${acc} = { re: 0, im: 0 };
+  let ${index} = ${lower};
+  while (${index} <= ${upper}) {
+    const ${val} = ${fn};
+    ${acc} = { re: ${acc}.re + ${val}.re, im: ${acc}.im + ${val}.im };
+    ${index}++;
+  }
+  return ${acc};
+})()`;
+      }
+      // Product
+      return `(() => {
+  let ${acc} = { re: 1, im: 0 };
+  let ${index} = ${lower};
+  while (${index} <= ${upper}) {
+    const ${val} = ${fn};
+    ${acc} = { re: ${acc}.re * ${val}.re - ${acc}.im * ${val}.im, im: ${acc}.re * ${val}.im + ${acc}.im * ${val}.re };
+    ${index}++;
+  }
+  return ${acc};
+})()`;
+    }
+
     return `(() => {
-  let ${acc} = ${op === '+' ? '0' : '1'};
+  let ${acc} = ${isSum ? '0' : '1'};
   let ${index} = ${lower};
   while (${index} <= ${upper}) {
     ${acc} ${op}= ${fn};
