@@ -47,7 +47,11 @@ export class BaseCompiler {
 
     // Is it a number?
     if (isNumber(expr)) {
-      if (expr.im !== 0) throw new Error('Complex numbers are not supported');
+      if (expr.im !== 0) {
+        if (!target.complex)
+          throw new Error('Complex numbers are not supported by this target');
+        return target.complex(expr.re, expr.im);
+      }
       return target.number(expr.re);
     }
 

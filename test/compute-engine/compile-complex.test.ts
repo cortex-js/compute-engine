@@ -1,5 +1,6 @@
 import { engine as ce } from '../utils';
 import { BaseCompiler } from '../../src/compute-engine/compilation/base-compiler';
+import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 describe('COMPILE COMPLEX - isComplexValued', () => {
   it('real number literal is not complex', () => {
@@ -78,5 +79,25 @@ describe('COMPILE COMPLEX - isComplexValued', () => {
         ce.box(['Multiply', ['Add', 'ImaginaryUnit', 1], 3])
       )
     ).toBe(true);
+  });
+});
+
+describe('COMPILE COMPLEX - literals', () => {
+  it('should compile a complex number literal', () => {
+    const expr = ce.box(['Complex', 3, 2]);
+    const result = compile(expr, { fallback: false });
+    expect(result.code).toBe('({ re: 3, im: 2 })');
+  });
+
+  it('should compile a pure imaginary literal', () => {
+    const expr = ce.box(['Complex', 0, 1]);
+    const result = compile(expr, { fallback: false });
+    expect(result.code).toBe('({ re: 0, im: 1 })');
+  });
+
+  it('should compile ImaginaryUnit symbol', () => {
+    const expr = ce.box('ImaginaryUnit');
+    const result = compile(expr, { fallback: false });
+    expect(result.code).toBe('({ re: 0, im: 1 })');
   });
 });
