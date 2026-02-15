@@ -111,26 +111,32 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Arcosh: 'Math.acosh',
   Arccot: ([x], compile) => {
     if (x === null) throw new Error('Arccot: no argument');
+    if (BaseCompiler.isComplexValued(x)) return `_SYS.cacot(${compile(x)})`;
     return `Math.atan(1 / (${compile(x)}))`;
   },
   Arcoth: ([x], compile) => {
     if (x === null) throw new Error('Arcoth: no argument');
+    if (BaseCompiler.isComplexValued(x)) return `_SYS.cacoth(${compile(x)})`;
     return `Math.atanh(1 / (${compile(x)}))`;
   },
   Arccsc: ([x], compile) => {
     if (x === null) throw new Error('Arccsc: no argument');
+    if (BaseCompiler.isComplexValued(x)) return `_SYS.cacsc(${compile(x)})`;
     return `Math.asin(1 / (${compile(x)}))`;
   },
   Arcsch: ([x], compile) => {
     if (x === null) throw new Error('Arcsch: no argument');
+    if (BaseCompiler.isComplexValued(x)) return `_SYS.cacsch(${compile(x)})`;
     return `Math.asinh(1 / (${compile(x)}))`;
   },
   Arcsec: ([x], compile) => {
     if (x === null) throw new Error('Arcsec: no argument');
+    if (BaseCompiler.isComplexValued(x)) return `_SYS.casec(${compile(x)})`;
     return `Math.acos(1 / (${compile(x)}))`;
   },
   Arsech: ([x], compile) => {
     if (x === null) throw new Error('Arsech: no argument');
+    if (BaseCompiler.isComplexValued(x)) return `_SYS.casech(${compile(x)})`;
     return `Math.acosh(1 / (${compile(x)}))`;
   },
   Arcsin: (args, compile) => {
@@ -159,6 +165,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   Cot: ([x], compile) => {
     if (x === null) throw new Error('Cot: no argument');
+    if (BaseCompiler.isComplexValued(x)) return `_SYS.ccot(${compile(x)})`;
     return BaseCompiler.inlineExpression(
       'Math.cos(${x}) / Math.sin(${x})',
       compile(x)
@@ -166,6 +173,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   Coth: ([x], compile) => {
     if (x === null) throw new Error('Coth: no argument');
+    if (BaseCompiler.isComplexValued(x)) return `_SYS.ccoth(${compile(x)})`;
     return BaseCompiler.inlineExpression(
       '(Math.cosh(${x}) / Math.sinh(${x}))',
       compile(x)
@@ -173,10 +181,12 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   Csc: ([x], compile) => {
     if (x === null) throw new Error('Csc: no argument');
+    if (BaseCompiler.isComplexValued(x)) return `_SYS.ccsc(${compile(x)})`;
     return `1 / Math.sin(${compile(x)})`;
   },
   Csch: ([x], compile) => {
     if (x === null) throw new Error('Csch: no argument');
+    if (BaseCompiler.isComplexValued(x)) return `_SYS.ccsch(${compile(x)})`;
     return `1 / Math.sinh(${compile(x)})`;
   },
   Exp: (args, compile) => {
@@ -342,11 +352,13 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Sec: (args, compile) => {
     const arg = args[0];
     if (arg === null) throw new Error('Sec: no argument');
+    if (BaseCompiler.isComplexValued(arg)) return `_SYS.csec(${compile(arg)})`;
     return `1 / Math.cos(${compile(arg)})`;
   },
   Sech: (args, compile) => {
     const arg = args[0];
     if (arg === null) throw new Error('Sech: no argument');
+    if (BaseCompiler.isComplexValued(arg)) return `_SYS.csech(${compile(arg)})`;
     return `1 / Math.cosh(${compile(arg)})`;
   },
   Sign: 'Math.sign',
@@ -604,6 +616,18 @@ export class ComputeEngineFunction extends Function {
         typeof w === 'number' ? new Complex(w, 0) : new Complex(w.re, w.im);
       return toRI(zz.pow(ww));
     },
+    ccot: (z) => toRI(new Complex(z.re, z.im).cot()),
+    csec: (z) => toRI(new Complex(z.re, z.im).sec()),
+    ccsc: (z) => toRI(new Complex(z.re, z.im).csc()),
+    ccoth: (z) => toRI(new Complex(z.re, z.im).coth()),
+    csech: (z) => toRI(new Complex(z.re, z.im).sech()),
+    ccsch: (z) => toRI(new Complex(z.re, z.im).csch()),
+    cacot: (z) => toRI(new Complex(z.re, z.im).acot()),
+    casec: (z) => toRI(new Complex(z.re, z.im).asec()),
+    cacsc: (z) => toRI(new Complex(z.re, z.im).acsc()),
+    cacoth: (z) => toRI(new Complex(z.re, z.im).acoth()),
+    casech: (z) => toRI(new Complex(z.re, z.im).asech()),
+    cacsch: (z) => toRI(new Complex(z.re, z.im).acsch()),
     cabs: (z) => new Complex(z.re, z.im).abs(),
     carg: (z) => new Complex(z.re, z.im).arg(),
     cconj: (z) => toRI(new Complex(z.re, z.im).conjugate()),
@@ -690,6 +714,18 @@ export class ComputeEngineFunctionLiteral extends Function {
         typeof w === 'number' ? new Complex(w, 0) : new Complex(w.re, w.im);
       return toRI(zz.pow(ww));
     },
+    ccot: (z) => toRI(new Complex(z.re, z.im).cot()),
+    csec: (z) => toRI(new Complex(z.re, z.im).sec()),
+    ccsc: (z) => toRI(new Complex(z.re, z.im).csc()),
+    ccoth: (z) => toRI(new Complex(z.re, z.im).coth()),
+    csech: (z) => toRI(new Complex(z.re, z.im).sech()),
+    ccsch: (z) => toRI(new Complex(z.re, z.im).csch()),
+    cacot: (z) => toRI(new Complex(z.re, z.im).acot()),
+    casec: (z) => toRI(new Complex(z.re, z.im).asec()),
+    cacsc: (z) => toRI(new Complex(z.re, z.im).acsc()),
+    cacoth: (z) => toRI(new Complex(z.re, z.im).acoth()),
+    casech: (z) => toRI(new Complex(z.re, z.im).asech()),
+    cacsch: (z) => toRI(new Complex(z.re, z.im).acsch()),
     cabs: (z) => new Complex(z.re, z.im).abs(),
     carg: (z) => new Complex(z.re, z.im).arg(),
     cconj: (z) => toRI(new Complex(z.re, z.im).conjugate()),

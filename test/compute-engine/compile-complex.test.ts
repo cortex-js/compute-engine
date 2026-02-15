@@ -295,6 +295,53 @@ describe('COMPILE COMPLEX - Sum/Product loops', () => {
   });
 });
 
+describe('COMPILE COMPLEX - reciprocal trig functions', () => {
+  it('should compute complex cot', () => {
+    // cot(i) = -i * coth(1)
+    const expr = ce.box(['Cot', ['Complex', 0, 1]]);
+    const result = compile(expr, { fallback: false });
+    const val = result.run!() as { re: number; im: number };
+    expect(val.re).toBeCloseTo(0, 5);
+    expect(val.im).toBeCloseTo(-1 / Math.tanh(1), 5);
+  });
+
+  it('should compute complex sec', () => {
+    const expr = ce.box(['Sec', ['Complex', 0, 1]]);
+    const result = compile(expr, { fallback: false });
+    const val = result.run!() as { re: number; im: number };
+    // sec(i) = 1/cos(i) = 1/cosh(1)
+    expect(val.re).toBeCloseTo(1 / Math.cosh(1), 5);
+    expect(val.im).toBeCloseTo(0, 5);
+  });
+
+  it('should compute complex csc', () => {
+    // csc(i) = 1/sin(i) = 1/(i*sinh(1)) = -i/sinh(1)
+    const expr = ce.box(['Csc', ['Complex', 0, 1]]);
+    const result = compile(expr, { fallback: false });
+    const val = result.run!() as { re: number; im: number };
+    expect(val.re).toBeCloseTo(0, 5);
+    expect(val.im).toBeCloseTo(-1 / Math.sinh(1), 5);
+  });
+
+  it('real cot unchanged', () => {
+    const expr = ce.box(['Cot', 1]);
+    const result = compile(expr, { fallback: false });
+    expect(result.run!()).toBeCloseTo(Math.cos(1) / Math.sin(1));
+  });
+
+  it('real sec unchanged', () => {
+    const expr = ce.box(['Sec', 1]);
+    const result = compile(expr, { fallback: false });
+    expect(result.run!()).toBeCloseTo(1 / Math.cos(1));
+  });
+
+  it('real csc unchanged', () => {
+    const expr = ce.box(['Csc', 1]);
+    const result = compile(expr, { fallback: false });
+    expect(result.run!()).toBeCloseTo(1 / Math.sin(1));
+  });
+});
+
 describe('COMPILE COMPLEX - integration', () => {
   it('should compile and run nested complex expression', () => {
     // (3+2i) * (1+i) + (0+1i) = (3*1-2*1) + (3*1+2*1)i + i = 1 + 5i + i = 1+6i
