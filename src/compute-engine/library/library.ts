@@ -232,10 +232,7 @@ export const STANDARD_LIBRARIES: LibraryDefinition[] = [
         value: (ce) =>
           ce._fn('Quantity', [
             ce.number(8.8541878128e-12),
-            ce._fn('Divide', [
-              ce.symbol('F'),
-              ce.symbol('m'),
-            ]),
+            ce._fn('Divide', [ce.symbol('F'), ce.symbol('m')]),
           ]),
       },
       GravitationalConstant: {
@@ -245,7 +242,7 @@ export const STANDARD_LIBRARIES: LibraryDefinition[] = [
         type: 'value',
         value: (ce) =>
           ce._fn('Quantity', [
-            ce.number(6.67430e-11),
+            ce.number(6.6743e-11),
             ce._fn('Divide', [
               ce._fn('Power', [ce.symbol('m'), ce.number(3)]),
               ce._fn('Multiply', [

@@ -1,18 +1,18 @@
-import { parseColorToRgb } from "./manipulation";
-import type { RgbColor, OklchColor, OklabColor, Color } from "./types";
+import { parseColorToRgb } from './manipulation';
+import type { RgbColor, OklchColor, OklabColor, Color } from './types';
 
 export function asOklch(
-  color: string | RgbColor | OklchColor | OklabColor,
+  color: string | RgbColor | OklchColor | OklabColor
 ): OklchColor {
-  if (typeof color === "string") return rgbToOklch(parseColorToRgb(color));
+  if (typeof color === 'string') return rgbToOklch(parseColorToRgb(color));
 
-  if ("C" in color) return color;
-  if ("a" in color && "b" in color) return oklabToOklch(color as OklabColor);
+  if ('C' in color) return color;
+  if ('a' in color && 'b' in color) return oklabToOklch(color as OklabColor);
   return rgbToOklch(color as RgbColor);
 }
 
 export function asRgb(color: number | Color): RgbColor {
-  if (typeof color === "number") {
+  if (typeof color === 'number') {
     return {
       r: (color >>> 24) & 0xff,
       g: (color >>> 16) & 0xff,
@@ -20,10 +20,10 @@ export function asRgb(color: number | Color): RgbColor {
       alpha: (color & 0xff) / 255,
     };
   }
-  if (typeof color === "string") return parseColorToRgb(color);
+  if (typeof color === 'string') return parseColorToRgb(color);
 
-  if ("C" in color) return oklchToRgb(color);
-  if ("a" in color && "b" in color) return oklabToRgb(color as OklabColor);
+  if ('C' in color) return oklchToRgb(color);
+  if ('a' in color && 'b' in color) return oklabToRgb(color as OklabColor);
   return color as RgbColor;
 }
 
@@ -75,15 +75,15 @@ export function oklabToUnclippedRgb(_: OklabColor): number[] {
 
   const L = Math.pow(
     0.9999999984505198 * l + 0.39633779217376786 * a + 0.2158037580607588 * b,
-    3,
+    3
   );
   const M = Math.pow(
     1.00000000888176 * l - 0.10556134232365635 * a - 0.0638541747717059 * b,
-    3,
+    3
   );
   const S = Math.pow(
     l * 1.000000054672411 - 0.0894841820949657 * a - 1.2914855378640917 * b,
-    3,
+    3
   );
 
   const r =

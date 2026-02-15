@@ -153,9 +153,7 @@ export function canonicalInvisibleOperator(
   // canonicalizes to Nothing but hasn't been flattened away yet.
   //
   {
-    const significant = ops.filter(
-      (x) => x.operator !== 'HorizontalSpacing'
-    );
+    const significant = ops.filter((x) => x.operator !== 'HorizontalSpacing');
     if (significant.length === 2) {
       const [a, b] = significant;
       if (isNumber(a) && isFunction(b) && b.operator === '__unit__') {
@@ -220,4 +218,3 @@ function asInteger(expr: Expression): number {
   }
   return Number.NaN;
 }
-

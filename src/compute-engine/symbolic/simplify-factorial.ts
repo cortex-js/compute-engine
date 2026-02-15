@@ -56,12 +56,7 @@ export function simplifyBinomial(x: Expression): RuleStep | undefined {
   // C(n, n-1) → n (structural check via baseOffset)
   const nBO = baseOffset(n);
   const kBO = baseOffset(k);
-  if (
-    nBO &&
-    kBO &&
-    nBO.base.isSame(kBO.base) &&
-    nBO.offset - kBO.offset === 1
-  )
+  if (nBO && kBO && nBO.base.isSame(kBO.base) && nBO.offset - kBO.offset === 1)
     return { value: n, because: 'C(n,n-1) -> n' };
 
   return undefined;
@@ -198,9 +193,7 @@ export function simplifyFactorialAdd(x: Expression): RuleStep | undefined {
 
   // Sum the inner terms
   const innerSum =
-    innerTerms.length === 1
-      ? innerTerms[0]
-      : ce.function('Add', innerTerms);
+    innerTerms.length === 1 ? innerTerms[0] : ce.function('Add', innerTerms);
 
   // Result: Factorial(minFactArg) * innerSum
   // Use _fn to avoid canonicalization that might re-distribute the product

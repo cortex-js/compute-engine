@@ -95,9 +95,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       const code = compile(a);
       return { code, isComplex: BaseCompiler.isComplexValued(a) };
     });
-    const reTerms = parts.map((p) =>
-      p.isComplex ? `(${p.code}).re` : p.code
-    );
+    const reTerms = parts.map((p) => (p.isComplex ? `(${p.code}).re` : p.code));
     const imTerms = parts
       .filter((p) => p.isComplex)
       .map((p) => `(${p.code}).im`);
@@ -467,12 +465,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
 
     // Accumulate with intermediate variables
     const firstIsComplex = BaseCompiler.isComplexValued(args[0]);
-    parts.push(
-      `let _re = ${firstIsComplex ? `${temps[0]}.re` : temps[0]}`
-    );
-    parts.push(
-      `let _im = ${firstIsComplex ? `${temps[0]}.im` : '0'}`
-    );
+    parts.push(`let _re = ${firstIsComplex ? `${temps[0]}.re` : temps[0]}`);
+    parts.push(`let _im = ${firstIsComplex ? `${temps[0]}.im` : '0'}`);
 
     for (let i = 1; i < args.length; i++) {
       const t = temps[i];

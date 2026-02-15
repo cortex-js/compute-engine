@@ -1,7 +1,7 @@
 // Helper functions for color calculations
 
-import type { RgbColor } from "./types";
-import { FOREGROUND_COLORS } from "./palette";
+import type { RgbColor } from './types';
+import { FOREGROUND_COLORS } from './palette';
 
 // sRGB gamma correction
 export function gammaCorrect(channel: number): number {
@@ -20,7 +20,7 @@ export function inverseGammaCorrect(channel: number): number {
 function lmsFromLab(
   L: number,
   a: number,
-  b: number,
+  b: number
 ): { l: number; m: number; s: number } {
   const l_ = L + 0.3963377774 * a + 0.2158037573 * b;
   const m_ = L - 0.1055613458 * a - 0.0638541728 * b;
@@ -50,7 +50,7 @@ function inSRGB(r: number, g: number, b: number): boolean {
 function findMaxChromaInGamut(
   l: number,
   h: number,
-  targetChroma: number,
+  targetChroma: number
 ): number {
   // If target chroma is very low, no need to reduce it
   if (targetChroma <= 0.01) return targetChroma;
@@ -112,7 +112,7 @@ function findMaxChromaInGamut(
 export function hslToRgb(
   h: number,
   s: number,
-  l: number,
+  l: number
 ): { r: number; g: number; b: number } {
   h = h / 360;
   let r: number, g: number, b: number;
@@ -147,7 +147,7 @@ export function hslToRgb(
 export function rgbToHsl(
   r: number,
   g: number,
-  b: number,
+  b: number
 ): { h: number; s: number; l: number } {
   r /= 255;
   g /= 255;
@@ -265,13 +265,13 @@ export function oklchFromRGB(rgba: number): {
 
   // Linear RGB to OKLab
   const l_ = Math.cbrt(
-    0.4122214708 * rLinear + 0.5363325363 * gLinear + 0.0514459929 * bLinear,
+    0.4122214708 * rLinear + 0.5363325363 * gLinear + 0.0514459929 * bLinear
   );
   const m_ = Math.cbrt(
-    0.2119034982 * rLinear + 0.6806995451 * gLinear + 0.1073969566 * bLinear,
+    0.2119034982 * rLinear + 0.6806995451 * gLinear + 0.1073969566 * bLinear
   );
   const s_ = Math.cbrt(
-    0.0883024619 * rLinear + 0.2817188376 * gLinear + 0.6299787005 * bLinear,
+    0.0883024619 * rLinear + 0.2817188376 * gLinear + 0.6299787005 * bLinear
   );
 
   const lValue = 0.2104542553 * l_ + 0.793617785 * m_ - 0.0040720468 * s_;
@@ -325,7 +325,7 @@ function interpolateColor(color1: number, color2: number, t: number): number {
 export function lightnessRangeForHue(
   Hdeg: number,
   Cmin: number = 0.04,
-  step: number = 0.002,
+  step: number = 0.002
 ): { darkestL: number | null; lightestL: number | null } {
   let Lmin: number | null = null;
   let Lmax: number | null = null;
@@ -352,7 +352,7 @@ export function lightnessRangeForHue(
 export function getOptimalHueRange(
   hue: number,
   chromaBackoff: number = 0.1,
-  _minChroma: number = 0.04,
+  _minChroma: number = 0.04
 ): { darkest: number; lightest: number } {
   // Target chroma values based on perceptual requirements
   const targetDarkChroma = 0.15; // Dark colors need higher chroma for visible tint
@@ -409,7 +409,7 @@ export function getOptimalHueRange(
   // Ensure we have at least some visible chroma
   bestLightChroma = Math.max(
     0.015,
-    Math.min(targetLightChroma, bestLightChroma),
+    Math.min(targetLightChroma, bestLightChroma)
   );
 
   // Convert back to 0-100 lightness range for oklch function
@@ -464,31 +464,31 @@ export function shade(
         darkest: number | string;
         mid?: number | string;
       },
-  index: number,
+  index: number
 ): number {
   // Clamp index to 0-1000 range
   const idx = Math.max(0, Math.min(1000, index));
 
   let darkest: number, mid: number, lightest: number;
 
-  if (typeof color === "object") {
+  if (typeof color === 'object') {
     // Parse the provided colors
     darkest =
-      typeof color.darkest === "string"
+      typeof color.darkest === 'string'
         ? parseColor(color.darkest)
         : color.darkest;
     lightest =
-      typeof color.lightest === "string"
+      typeof color.lightest === 'string'
         ? parseColor(color.lightest)
         : color.lightest;
     mid = color.mid
-      ? typeof color.mid === "string"
+      ? typeof color.mid === 'string'
         ? parseColor(color.mid)
         : color.mid
       : 0;
   } else {
     // Single color provided - generate shades using gamut-aware algorithm
-    mid = typeof color === "string" ? parseColor(color) : color;
+    mid = typeof color === 'string' ? parseColor(color) : color;
     const { h } = oklchFromRGB(mid);
     const alpha = mid & 0xff;
 
@@ -502,7 +502,7 @@ export function shade(
   }
 
   // If no mid color was provided, use the center point
-  if (!mid && typeof color === "object" && !color.mid)
+  if (!mid && typeof color === 'object' && !color.mid)
     mid = interpolateColor(darkest, lightest, 0.5);
 
   // S-curve interpolation with consistent smooth step function
@@ -527,7 +527,7 @@ export function shade(
  */
 export function isNamedColor(s: string): boolean {
   const str = s.trim().toLowerCase();
-  return str === "transparent" || str in FOREGROUND_COLORS;
+  return str === 'transparent' || str in FOREGROUND_COLORS;
 }
 
 /**
@@ -544,7 +544,7 @@ export function parseColor(s: string): number {
   const str = s.trim().toLowerCase();
 
   // Hex format
-  if (str.startsWith("#")) {
+  if (str.startsWith('#')) {
     const hex = str.substring(1);
     let r: number,
       g: number,
@@ -575,7 +575,7 @@ export function parseColor(s: string): number {
   // RGB/RGBA format
   const rgbMatch = str.match(/^rgba?\s*\(\s*([^)]+)\s*\)$/);
   if (rgbMatch) {
-    const parts = rgbMatch[1].replace(/[,/]/g, " ").trim().split(/\s+/);
+    const parts = rgbMatch[1].replace(/[,/]/g, ' ').trim().split(/\s+/);
 
     // Parse RGB values (can be 0-255 or 0-1)
     let r = parseFloat(parts[0]) || 0;
@@ -584,14 +584,14 @@ export function parseColor(s: string): number {
 
     // Check if RGB values are percentages or 0-1 range
     if (
-      parts[0].includes("%") ||
-      parts[1].includes("%") ||
-      parts[2].includes("%")
+      parts[0].includes('%') ||
+      parts[1].includes('%') ||
+      parts[2].includes('%')
     ) {
       // Handle percentage values
-      if (parts[0].includes("%")) r = (r / 100) * 255;
-      if (parts[1].includes("%")) g = (g / 100) * 255;
-      if (parts[2].includes("%")) b = (b / 100) * 255;
+      if (parts[0].includes('%')) r = (r / 100) * 255;
+      if (parts[1].includes('%')) g = (g / 100) * 255;
+      if (parts[2].includes('%')) b = (b / 100) * 255;
     } else if (r <= 1 && g <= 1 && b <= 1) {
       // If all values are <= 1, treat as 0-1 range
       r = r * 255;
@@ -607,7 +607,7 @@ export function parseColor(s: string): number {
     let a = 255;
     if (parts.length >= 4) {
       let alpha = parseFloat(parts[3]);
-      if (parts[3].includes("%")) alpha = alpha / 100;
+      if (parts[3].includes('%')) alpha = alpha / 100;
       else if (alpha > 1) alpha = alpha / 255;
 
       // Otherwise alpha is already in 0-1 range
@@ -620,9 +620,9 @@ export function parseColor(s: string): number {
   // OKLCH format
   const oklchMatch = str.match(/^oklch\s*\(\s*([^)]+)\s*\)$/);
   if (oklchMatch) {
-    const parts = oklchMatch[1].replace(/[,/]/g, " ").trim().split(/\s+/);
+    const parts = oklchMatch[1].replace(/[,/]/g, ' ').trim().split(/\s+/);
     let l = parseFloat(parts[0]);
-    if (parts[0].includes("%")) l = l / 100;
+    if (parts[0].includes('%')) l = l / 100;
     else if (l <= 1) {
       // If value is 0-1, treat as percentage
       // l is already in the correct range
@@ -636,7 +636,7 @@ export function parseColor(s: string): number {
 
     if (parts.length >= 4) {
       alpha = parseFloat(parts[3]);
-      if (parts[3].includes("%")) alpha = alpha / 100;
+      if (parts[3].includes('%')) alpha = alpha / 100;
       else if (alpha > 1) {
         // If alpha > 1, assume 0-255 range
         alpha = alpha / 255;
@@ -652,12 +652,12 @@ export function parseColor(s: string): number {
   // HSL format
   const hslMatch = str.match(/^hsl\s*\(\s*([^)]+)\s*\)$/);
   if (hslMatch) {
-    const parts = hslMatch[1].replace(/[,/]/g, " ").trim().split(/\s+/);
+    const parts = hslMatch[1].replace(/[,/]/g, ' ').trim().split(/\s+/);
     const h = parseFloat(parts[0]) || 0;
 
     // Parse saturation
     let s = parseFloat(parts[1]) || 0;
-    if (parts[1].includes("%")) s = s / 100;
+    if (parts[1].includes('%')) s = s / 100;
     else if (s <= 1) {
       // Already in 0-1 range
     } else {
@@ -667,7 +667,7 @@ export function parseColor(s: string): number {
 
     // Parse lightness
     let l = parseFloat(parts[2]) || 0;
-    if (parts[2].includes("%")) l = l / 100;
+    if (parts[2].includes('%')) l = l / 100;
     else if (l <= 1) {
       // Already in 0-1 range
     } else {
@@ -678,7 +678,7 @@ export function parseColor(s: string): number {
     let alpha = 1;
     if (parts.length >= 4) {
       alpha = parseFloat(parts[3]);
-      if (parts[3].includes("%")) alpha = alpha / 100;
+      if (parts[3].includes('%')) alpha = alpha / 100;
       else if (alpha > 1) {
         // If alpha > 1, assume 0-255 range
         alpha = alpha / 255;
@@ -691,7 +691,7 @@ export function parseColor(s: string): number {
     return ((r << 24) | (g << 16) | (b << 8) | a) >>> 0;
   }
 
-  if (str === "transparent") return 0;
+  if (str === 'transparent') return 0;
 
   // Named color lookup
   if (str in FOREGROUND_COLORS)

@@ -1,12 +1,14 @@
 import type { SymbolDefinitions, Expression } from '../global-types';
-import { isSymbol, isString, isFunction } from '../boxed-expression/type-guards';
+import {
+  isSymbol,
+  isString,
+  isFunction,
+} from '../boxed-expression/type-guards';
 import {
   convertUnit,
   convertCompoundUnit,
   parseUnitDSL,
-  getUnitDimension,
   getUnitScale,
-  areCompatibleUnits,
   getExpressionDimension,
   getExpressionScale,
   findNamedUnit,
@@ -136,7 +138,11 @@ export const UNITS_LIBRARY: SymbolDefinitions = {
       if (!ce) return undefined;
       const quantity = ops[0]?.evaluate();
       const targetUnitExpr = ops[1];
-      if (!quantity || !isFunction(quantity) || quantity.operator !== 'Quantity')
+      if (
+        !quantity ||
+        !isFunction(quantity) ||
+        quantity.operator !== 'Quantity'
+      )
         return undefined;
 
       const mag = quantity.op1.re;
@@ -248,7 +254,10 @@ export const UNITS_LIBRARY: SymbolDefinitions = {
       const dim = getExpressionDimension(ue);
       if (!dim) return undefined;
 
-      return ce._fn('List', dim.map((d) => ce.number(d)));
+      return ce._fn(
+        'List',
+        dim.map((d) => ce.number(d))
+      );
     },
   },
 };

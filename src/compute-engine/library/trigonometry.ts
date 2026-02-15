@@ -14,7 +14,11 @@ import { apply2 } from '../boxed-expression/apply';
 import { reducedRational } from '../numerics/rationals';
 import type { OperatorDefinition, SymbolDefinitions } from '../global-types';
 import type { Expression } from '../types-expression';
-import { isFunction, isNumber, isSymbol } from '../boxed-expression/type-guards';
+import {
+  isFunction,
+  isNumber,
+  isSymbol,
+} from '../boxed-expression/type-guards';
 import { numericTypeHandler } from './type-handlers';
 import { getUnitScale } from './unit-data';
 
@@ -240,15 +244,20 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
   },
 ];
 
-const ANGULAR_UNITS = new Set(['deg', 'rad', 'grad', 'turn', 'arcmin', 'arcsec']);
+const ANGULAR_UNITS = new Set([
+  'deg',
+  'rad',
+  'grad',
+  'turn',
+  'arcmin',
+  'arcsec',
+]);
 
 /**
  * If `expr` is a `Quantity` with an angular unit (deg, rad, grad, etc.),
  * return a plain numeric expression in radians.  Otherwise return `null`.
  */
-function angularQuantityToRadians(
-  expr: Expression
-): Expression | null {
+function angularQuantityToRadians(expr: Expression): Expression | null {
   if (!isFunction(expr) || expr.operator !== 'Quantity') return null;
 
   const unitArg = expr.op2;

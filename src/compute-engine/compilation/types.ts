@@ -194,5 +194,7 @@ export interface CompilationResult {
   preamble?: string;
 
   /** Executable function (present for JS-executable targets only) */
-  run?: (...args: (number | { re: number; im: number })[]) => number | { re: number; im: number };
+  run?: (
+    ...args: (number | { re: number; im: number })[]
+  ) => number | { re: number; im: number };
 }

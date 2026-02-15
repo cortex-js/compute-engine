@@ -218,7 +218,8 @@ volumes
         if (isNaN(xValue)) return undefined;
 
         const compiled = engine._compile(body);
-        const fn = (compiled.run as (x: number) => number) ?? applicableN1(body);
+        const fn =
+          (compiled.run as (x: number) => number) ?? applicableN1(body);
         return engine.number(centeredDiff8thOrder(fn, xValue));
       },
     },
@@ -258,7 +259,8 @@ volumes
           const fnExpr =
             f.operator === 'Function' ? f : ce.box(['Function', f, variable]);
           const compiled = ce._compile(fnExpr);
-          const jsf = (compiled.run as (x: number) => number) ?? applicableN1(fnExpr);
+          const jsf =
+            (compiled.run as (x: number) => number) ?? applicableN1(fnExpr);
 
           const mce = monteCarloEstimate(
             jsf,

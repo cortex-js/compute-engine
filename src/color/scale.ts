@@ -1,5 +1,5 @@
-import { Color, OklchColor } from "./types";
-import { asOklch } from "./conversion";
+import { Color, OklchColor } from './types';
+import { asOklch } from './conversion';
 
 /**
  * Calculate a scale of colors from a base color.

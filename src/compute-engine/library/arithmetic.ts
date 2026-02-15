@@ -1016,10 +1016,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (isFunction(evalX) && evalX.operator === 'Quantity') {
           const mag = evalX.op1.re;
           if (mag !== undefined)
-            return engine._fn('Quantity', [
-              engine.number(-mag),
-              evalX.op2,
-            ]);
+            return engine._fn('Quantity', [engine.number(-mag), evalX.op2]);
         }
         return x.neg();
       },
@@ -2365,8 +2362,7 @@ function quantityPower(
       resultUnit = ce._fn('Power', [unit, exp]);
     }
   } else {
-    resultUnit =
-      n === 1 ? unit : ce._fn('Power', [unit, exp]);
+    resultUnit = n === 1 ? unit : ce._fn('Power', [unit, exp]);
   }
 
   return ce._fn('Quantity', [ce.number(Math.pow(mag, n)), resultUnit]);

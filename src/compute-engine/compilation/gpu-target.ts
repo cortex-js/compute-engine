@@ -291,10 +291,7 @@ export function compileGPUMatrix(
   const numCols = isFunction(firstRow) ? firstRow.nops : 0;
 
   // Column vector (Nx1): flatten to vecN or array<f32, N>
-  if (
-    numCols === 1 &&
-    rows.every((row) => isFunction(row) && row.nops === 1)
-  ) {
+  if (numCols === 1 && rows.every((row) => isFunction(row) && row.nops === 1)) {
     const elements = rows.map((row) =>
       compile(isFunction(row) ? row.ops[0] : row)
     );

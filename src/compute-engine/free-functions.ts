@@ -46,15 +46,11 @@ export function parse(latex: LatexString): Expression {
   return getDefaultEngine().parse(latex, { strict: false });
 }
 
-export function simplify(
-  expr: LatexString | ExpressionInput
-): Expression {
+export function simplify(expr: LatexString | ExpressionInput): Expression {
   return toExpression(expr).simplify();
 }
 
-export function evaluate(
-  expr: LatexString | ExpressionInput
-): Expression {
+export function evaluate(expr: LatexString | ExpressionInput): Expression {
   return toExpression(expr).evaluate();
 }
 
@@ -71,9 +67,7 @@ export function assign(
   getDefaultEngine().assign(arg1 as any, arg2 as any);
 }
 
-export function expand(
-  expr: LatexString | ExpressionInput
-): Expression | null {
+export function expand(expr: LatexString | ExpressionInput): Expression | null {
   return expandExpr(toExpression(expr));
 }
 
@@ -94,9 +88,7 @@ export function expandAll(
   return expandAllExpr(toExpression(expr));
 }
 
-export function factor(
-  expr: LatexString | ExpressionInput
-): Expression {
+export function factor(expr: LatexString | ExpressionInput): Expression {
   return factorExpr(toExpression(expr));
 }
 

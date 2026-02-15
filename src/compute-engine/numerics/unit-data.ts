@@ -313,14 +313,34 @@ export function areCompatibleUnits(a: string, b: string): boolean {
  */
 export function findNamedUnit(dim: DimensionVector): string | null {
   const namedUnits = [
-    'N', 'J', 'W', 'Pa', 'Hz', 'C', 'V', 'F', 'ohm', 'S', 'Wb', 'T', 'H',
-    'lm', 'lx', 'Bq', 'Gy', 'Sv', 'kat',
+    'N',
+    'J',
+    'W',
+    'Pa',
+    'Hz',
+    'C',
+    'V',
+    'F',
+    'ohm',
+    'S',
+    'Wb',
+    'T',
+    'H',
+    'lm',
+    'lx',
+    'Bq',
+    'Gy',
+    'Sv',
+    'kat',
   ];
 
   for (const unit of namedUnits) {
     const entry = UNIT_TABLE[unit];
-    if (entry && entry.scale === 1 &&
-        entry.dimension.every((v, i) => v === dim[i])) {
+    if (
+      entry &&
+      entry.scale === 1 &&
+      entry.dimension.every((v, i) => v === dim[i])
+    ) {
       return unit;
     }
   }
@@ -532,7 +552,10 @@ function parseDSLGroup(s: string): UnitExpression {
     for (let i = 0; i < s.length - 1; i++) {
       if (s[i] === '(') depth++;
       else if (s[i] === ')') depth--;
-      if (depth === 0 && i < s.length - 1) { matched = false; break; }
+      if (depth === 0 && i < s.length - 1) {
+        matched = false;
+        break;
+      }
     }
     if (matched) return parseDSLGroup(s.slice(1, -1));
   }

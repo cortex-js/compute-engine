@@ -1,5 +1,14 @@
 import type { SymbolDefinitions } from '../global-types';
-import { asOklch, oklchToRgb, oklabToRgb, rgbToOklab, rgbToOklch, rgbToHsl, hslToRgb, parseColor } from '../../color';
+import {
+  asOklch,
+  oklchToRgb,
+  oklabToRgb,
+  rgbToOklab,
+  rgbToOklch,
+  rgbToHsl,
+  hslToRgb,
+  parseColor,
+} from '../../color';
 import type { RgbColor } from '../../color';
 import { SEQUENTIAL_PALETTES } from '../../color/sequential';
 import { CATEGORICAL_PALETTES } from '../../color/categorical';
@@ -7,10 +16,7 @@ import { DIVERGING_PALETTES } from '../../color/diverging-palettes';
 import { isFunction, isString } from '../boxed-expression/type-guards';
 
 /** Convert a 0xRRGGBBAA packed integer to a Tuple of 0-1 sRGB components. */
-function colorNumberToTuple(
-  ce: any,
-  color: number
-): any {
+function colorNumberToTuple(ce: any, color: number): any {
   const r = ((color >>> 24) & 0xff) / 255;
   const g = ((color >>> 16) & 0xff) / 255;
   const b = ((color >>> 8) & 0xff) / 255;
@@ -63,11 +69,9 @@ function samplePalette(ce: any, palette: readonly string[], t: number): any {
   const i = Math.floor(pos);
   const frac = pos - i;
 
-  if (i >= n - 1)
-    return colorNumberToTuple(ce, parseColor(palette[n - 1]));
+  if (i >= n - 1) return colorNumberToTuple(ce, parseColor(palette[n - 1]));
 
-  if (frac < 1e-9)
-    return colorNumberToTuple(ce, parseColor(palette[i]));
+  if (frac < 1e-9) return colorNumberToTuple(ce, parseColor(palette[i]));
 
   const rgb = interpolateOklch(palette[i], palette[i + 1], frac);
   // oklchToRgb returns 0-255
@@ -103,11 +107,7 @@ function extractRgb(ce: any, arg: any): RgbColor | undefined {
 }
 
 /** Build a Tuple expression from components, appending alpha if not 1. */
-function componentsTuple(
-  ce: any,
-  components: number[],
-  alpha?: number
-): any {
+function componentsTuple(ce: any, components: number[], alpha?: number): any {
   const args = components.map((v) => ce.number(v));
   if (alpha !== undefined && Math.abs(alpha - 1) > 1e-4)
     args.push(ce.number(alpha));
@@ -185,7 +185,11 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
 
       switch (space) {
         case 'rgb':
-          return componentsTuple(ce, [rgb.r / 255, rgb.g / 255, rgb.b / 255], alpha);
+          return componentsTuple(
+            ce,
+            [rgb.r / 255, rgb.g / 255, rgb.b / 255],
+            alpha
+          );
 
         case 'hsl': {
           const hsl = rgbToHsl(rgb.r, rgb.g, rgb.b);
@@ -215,7 +219,11 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
     signature: '(tuple, string) -> tuple',
     evaluate: (ops, { engine: ce }) => {
       const tuple = ops[0];
-      if (!isFunction(tuple) || tuple.operator !== 'Tuple' || tuple.ops.length < 3)
+      if (
+        !isFunction(tuple) ||
+        tuple.operator !== 'Tuple' ||
+        tuple.ops.length < 3
+      )
         return ce.error('incompatible-type');
 
       const c0 = tuple.ops[0].re;
@@ -243,12 +251,20 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
 
         case 'oklch':
           rgb = oklchToRgb({ L: c0, C: c1, H: c2 });
-          return componentsTuple(ce, [rgb.r / 255, rgb.g / 255, rgb.b / 255], alpha);
+          return componentsTuple(
+            ce,
+            [rgb.r / 255, rgb.g / 255, rgb.b / 255],
+            alpha
+          );
 
         case 'oklab':
         case 'lab':
           rgb = oklabToRgb({ L: c0, a: c1, b: c2 });
-          return componentsTuple(ce, [rgb.r / 255, rgb.g / 255, rgb.b / 255], alpha);
+          return componentsTuple(
+            ce,
+            [rgb.r / 255, rgb.g / 255, rgb.b / 255],
+            alpha
+          );
 
         default:
           return ce.error('expected-value');

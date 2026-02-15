@@ -8,12 +8,9 @@ import type {
 import { isRelationalOperator } from '../latex-syntax/utils';
 import { flatten } from '../boxed-expression/flatten';
 import { eq } from '../boxed-expression/compare';
-import { isNumber, isFunction, isSymbol } from '../boxed-expression/type-guards';
+import { isNumber, isFunction } from '../boxed-expression/type-guards';
 import { boxedToUnitExpression } from './units';
-import {
-  getExpressionDimension,
-  getExpressionScale,
-} from './unit-data';
+import { getExpressionDimension, getExpressionScale } from './unit-data';
 
 /**
  * Compare two Quantity expressions.

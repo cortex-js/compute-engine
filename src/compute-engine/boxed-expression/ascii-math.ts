@@ -14,8 +14,7 @@ function unitToString(expr: Expression): string {
   const op = expr.operator;
   if (op === 'Divide')
     return `${unitToString(expr.op1)}/${unitToString(expr.op2)}`;
-  if (op === 'Multiply')
-    return expr.ops.map(unitToString).join('\u22C5');
+  if (op === 'Multiply') return expr.ops.map(unitToString).join('\u22C5');
   if (op === 'Power') {
     const exp = expr.op2?.re;
     return exp !== undefined

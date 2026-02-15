@@ -38,10 +38,7 @@ import { simplifyPower } from './simplify-power';
 import { simplifyTrig } from './simplify-trig';
 import { simplifyHyperbolic } from './simplify-hyperbolic';
 import { simplifyDivide } from './simplify-divide';
-import {
-  simplifyBinomial,
-  simplifyFactorialAdd,
-} from './simplify-factorial';
+import { simplifyBinomial, simplifyFactorialAdd } from './simplify-factorial';
 
 /**
  * # Performance Optimization Notes for Simplification Rules
@@ -402,10 +399,7 @@ export const SIMPLIFY_RULES: Rule[] = [
 
       // Skip Factorial divisions — let simplifyDivide handle factorial quotients
       // e.g., 35!/7!, n!/(n-2)!
-      if (
-        num.operator === 'Factorial' &&
-        denom.operator === 'Factorial'
-      )
+      if (num.operator === 'Factorial' && denom.operator === 'Factorial')
         return undefined;
 
       // Skip n! / (k! * m!) — let simplifyDivide handle binomial detection
