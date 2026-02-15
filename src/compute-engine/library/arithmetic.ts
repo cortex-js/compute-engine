@@ -81,6 +81,8 @@ import {
   convertUnit,
   convertCompoundUnit,
   getExpressionScale,
+  getExpressionDimension,
+  findNamedUnit,
 } from './unit-data';
 import { boxedToUnitExpression } from './units';
 import { range, rangeLast } from './collections';
@@ -1011,7 +1013,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       },
       evaluate: ([x], { engine }) => {
         const evalX = x.evaluate();
-        if (evalX.operator === 'Quantity') {
+        if (isFunction(evalX) && evalX.operator === 'Quantity') {
           const mag = evalX.op1.re;
           if (mag !== undefined)
             return engine._fn('Quantity', [
@@ -2236,7 +2238,7 @@ function quantityMultiply(
   const combinedUnit =
     unitParts.length === 1 ? unitParts[0] : ce._fn('Multiply', unitParts);
 
-  return ce._fn('Quantity', [ce.number(totalMag), combinedUnit]);
+  return simplifyQuantityUnit(ce, totalMag, combinedUnit);
 }
 
 /**
@@ -2251,13 +2253,31 @@ function quantityDivide(
   const denQ = isQuantity(den) ? den : null;
 
   if (numQ && denQ) {
-    // Quantity / Quantity => Quantity with divided units
+    // Quantity / Quantity
     const numMag = numQ.op1.re;
     const denMag = denQ.op1.re;
     if (numMag === undefined || denMag === undefined || denMag === 0)
       return undefined;
+    const resultMag = numMag / denMag;
+
+    // Check if units cancel (same dimension → dimensionless scalar)
+    const numUE = boxedToUnitExpression(unitExpr(numQ));
+    const denUE = boxedToUnitExpression(unitExpr(denQ));
+    if (numUE && denUE) {
+      const numDim = getExpressionDimension(numUE);
+      const denDim = getExpressionDimension(denUE);
+      if (numDim && denDim && numDim.every((v, i) => v === denDim[i])) {
+        // Same dimension — convert to common scale and return scalar
+        const numScale = getExpressionScale(numUE);
+        const denScale = getExpressionScale(denUE);
+        if (numScale !== null && denScale !== null)
+          return ce.number((numMag * numScale) / (denMag * denScale));
+      }
+    }
+
+    // Different dimensions — produce compound unit, then try to simplify
     const resultUnit = ce._fn('Divide', [unitExpr(numQ), unitExpr(denQ)]);
-    return ce._fn('Quantity', [ce.number(numMag / denMag), resultUnit]);
+    return simplifyQuantityUnit(ce, resultMag, resultUnit);
   }
 
   if (numQ && !denQ) {
@@ -2283,6 +2303,41 @@ function quantityDivide(
 }
 
 /**
+ * Try to simplify a compound unit to a named derived unit.
+ * E.g. Multiply(N, m) → J, Divide(kg, Multiply(m, Power(s, 2))) → Pa.
+ * If no simplification is found, returns the Quantity as-is.
+ */
+function simplifyQuantityUnit(
+  ce: ComputeEngine,
+  mag: number,
+  unitExpr: Expression
+): Expression {
+  const ue = boxedToUnitExpression(unitExpr);
+  if (ue) {
+    const dim = getExpressionDimension(ue);
+    if (dim) {
+      // Check if the result is dimensionless (all zeros)
+      if (dim.every((v) => v === 0)) {
+        const scale = getExpressionScale(ue);
+        if (scale !== null) return ce.number(mag * scale);
+      }
+      const match = findNamedUnit(dim);
+      if (match) {
+        // Adjust magnitude for scale difference
+        const scale = getExpressionScale(ue);
+        const matchScale = 1; // findNamedUnit only returns scale=1 units
+        if (scale !== null)
+          return ce._fn('Quantity', [
+            ce.number((mag * scale) / matchScale),
+            ce.symbol(match),
+          ]);
+      }
+    }
+  }
+  return ce._fn('Quantity', [ce.number(mag), unitExpr]);
+}
+
+/**
  * Raise a Quantity to a power.
  */
 function quantityPower(
@@ -2298,7 +2353,7 @@ function quantityPower(
   // Simplify unit exponents: Power(Power(u, a), b) → Power(u, a*b)
   const unit = unitExpr(base);
   let resultUnit: Expression;
-  if (unit.operator === 'Power') {
+  if (isFunction(unit) && unit.operator === 'Power') {
     const innerExp = unit.op2?.re;
     if (innerExp !== undefined) {
       const combined = innerExp * n;

@@ -946,3 +946,108 @@ describe('LATEX ROUND-TRIP COMPOUND UNITS', () => {
     expect(parsed.latex).toBe(original);
   });
 });
+
+describe('UNIT CANCELLATION', () => {
+  test('Same unit division gives scalar', () => {
+    const expr = engine
+      .box(['Divide', ['Quantity', 10, 'm'], ['Quantity', 2, 'm']])
+      .evaluate();
+    expect(expr.re).toBe(5);
+    expect(expr.operator).not.toBe('Quantity');
+  });
+
+  test('Compatible unit division gives scalar with scale', () => {
+    const expr = engine
+      .box(['Divide', ['Quantity', 1, 'km'], ['Quantity', 500, 'm']])
+      .evaluate();
+    expect(expr.re).toBe(2);
+  });
+
+  test('Different dimension division gives compound unit', () => {
+    const expr = engine
+      .box(['Divide', ['Quantity', 100, 'm'], ['Quantity', 10, 's']])
+      .evaluate();
+    expect(expr.operator).toBe('Quantity');
+    expect(expr.op1.re).toBe(10);
+  });
+});
+
+describe('AUTO-SIMPLIFY COMPOUND UNITS', () => {
+  test('N * m simplifies to J', () => {
+    const expr = engine
+      .box(['Multiply', ['Quantity', 5, 'N'], ['Quantity', 2, 'm']])
+      .evaluate();
+    expect(expr.operator).toBe('Quantity');
+    expect(expr.op1.re).toBe(10);
+    expect(expr.op2.symbol).toBe('J');
+  });
+
+  test('J / m simplifies to N', () => {
+    const expr = engine
+      .box(['Divide', ['Quantity', 100, 'J'], ['Quantity', 10, 'm']])
+      .evaluate();
+    expect(expr.operator).toBe('Quantity');
+    expect(expr.op1.re).toBe(10);
+    expect(expr.op2.symbol).toBe('N');
+  });
+
+  test('J / s simplifies to W', () => {
+    const expr = engine
+      .box(['Divide', ['Quantity', 60, 'J'], ['Quantity', 2, 's']])
+      .evaluate();
+    expect(expr.operator).toBe('Quantity');
+    expect(expr.op1.re).toBe(30);
+    expect(expr.op2.symbol).toBe('W');
+  });
+});
+
+describe('QUANTITY COMPARISON', () => {
+  test('Less: 500m < 1km', () => {
+    const expr = engine
+      .box(['Less', ['Quantity', 500, 'm'], ['Quantity', 1, 'km']])
+      .evaluate();
+    expect(expr.symbol).toBe('True');
+  });
+
+  test('Less: 1km < 500m is False', () => {
+    const expr = engine
+      .box(['Less', ['Quantity', 1, 'km'], ['Quantity', 500, 'm']])
+      .evaluate();
+    expect(expr.symbol).toBe('False');
+  });
+
+  test('Greater: 1km > 500m', () => {
+    const expr = engine
+      .box(['Greater', ['Quantity', 1, 'km'], ['Quantity', 500, 'm']])
+      .evaluate();
+    expect(expr.symbol).toBe('True');
+  });
+
+  test('Equal: 100cm == 1m', () => {
+    const expr = engine
+      .box(['Equal', ['Quantity', 100, 'cm'], ['Quantity', 1, 'm']])
+      .evaluate();
+    expect(expr.symbol).toBe('True');
+  });
+
+  test('Equal: 1km == 1000m', () => {
+    const expr = engine
+      .box(['Equal', ['Quantity', 1, 'km'], ['Quantity', 1000, 'm']])
+      .evaluate();
+    expect(expr.symbol).toBe('True');
+  });
+
+  test('LessEqual: 1km <= 1000m', () => {
+    const expr = engine
+      .box(['LessEqual', ['Quantity', 1, 'km'], ['Quantity', 1000, 'm']])
+      .evaluate();
+    expect(expr.symbol).toBe('True');
+  });
+
+  test('Incompatible units stay unevaluated', () => {
+    const expr = engine
+      .box(['Less', ['Quantity', 5, 'm'], ['Quantity', 3, 's']])
+      .evaluate();
+    expect(expr.operator).toBe('Less');
+  });
+});

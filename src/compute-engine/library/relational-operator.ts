@@ -8,7 +8,42 @@ import type {
 import { isRelationalOperator } from '../latex-syntax/utils';
 import { flatten } from '../boxed-expression/flatten';
 import { eq } from '../boxed-expression/compare';
-import { isNumber, isFunction } from '../boxed-expression/type-guards';
+import { isNumber, isFunction, isSymbol } from '../boxed-expression/type-guards';
+import { boxedToUnitExpression } from './units';
+import {
+  getExpressionDimension,
+  getExpressionScale,
+} from './unit-data';
+
+/**
+ * Compare two Quantity expressions.
+ * Returns negative if a < b, 0 if equal, positive if a > b,
+ * or null if incompatible or not both quantities.
+ */
+function quantityCompare(a: Expression, b: Expression): number | null {
+  if (!isFunction(a) || !isFunction(b)) return null;
+  if (a.operator !== 'Quantity' || b.operator !== 'Quantity') return null;
+
+  const aMag = a.op1.re;
+  const bMag = b.op1.re;
+  if (aMag === undefined || bMag === undefined) return null;
+
+  const aUE = boxedToUnitExpression(a.op2);
+  const bUE = boxedToUnitExpression(b.op2);
+  if (!aUE || !bUE) return null;
+
+  // Check compatible dimensions
+  const aDim = getExpressionDimension(aUE);
+  const bDim = getExpressionDimension(bUE);
+  if (!aDim || !bDim || !aDim.every((v, i) => v === bDim[i])) return null;
+
+  // Convert both to SI
+  const aScale = getExpressionScale(aUE);
+  const bScale = getExpressionScale(bUE);
+  if (aScale === null || bScale === null) return null;
+
+  return aMag * aScale - bMag * bScale;
+}
 
 //   // eq, lt, leq, gt, geq, neq, approx
 //   //     shortLogicalImplies: 52, // ➔
@@ -149,6 +184,14 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
       for (const arg of ops) {
         if (!lhs) lhs = arg;
         else {
+          // Try quantity comparison first
+          const qcmp = quantityCompare(lhs, arg);
+          if (qcmp !== null) {
+            if (Math.abs(qcmp) > ce.tolerance) return ce.False;
+            lhs = arg;
+            continue;
+          }
+
           const test = eq(lhs, arg);
           if (test === false) return ce.False;
 
@@ -228,6 +271,9 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     evaluate: (ops, { engine: ce }) => {
       if (ops.length === 2) {
         const [lhs, rhs] = ops;
+        // Try quantity comparison first
+        const qcmp = quantityCompare(lhs, rhs);
+        if (qcmp !== null) return qcmp < 0 ? ce.True : ce.False;
         const cmp = lhs.isLess(rhs);
         if (cmp === undefined) return undefined;
         return cmp ? ce.True : ce.False;
@@ -238,9 +284,14 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
       for (const arg of ops!) {
         if (!lhs) lhs = arg;
         else {
-          const cmp = arg.isLess(lhs);
-          if (cmp === undefined) return undefined;
-          if (cmp === false) return ce.False;
+          const qcmp = quantityCompare(lhs, arg);
+          if (qcmp !== null) {
+            if (qcmp >= 0) return ce.False;
+          } else {
+            const cmp = lhs.isLess(arg);
+            if (cmp === undefined) return undefined;
+            if (cmp === false) return ce.False;
+          }
           lhs = arg;
         }
       }
@@ -281,6 +332,8 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     evaluate: (ops, { engine: ce }) => {
       if (ops.length === 2) {
         const [lhs, rhs] = ops;
+        const qcmp = quantityCompare(lhs, rhs);
+        if (qcmp !== null) return qcmp <= 0 ? ce.True : ce.False;
         const cmp = lhs.isLessEqual(rhs);
         if (cmp === undefined) return undefined;
         return cmp ? ce.True : ce.False;
@@ -291,9 +344,14 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
       for (const arg of ops!) {
         if (!lhs) lhs = arg;
         else {
-          const cmp = arg.isLessEqual(lhs);
-          if (cmp === undefined) return undefined;
-          if (cmp === false) return ce.False;
+          const qcmp = quantityCompare(lhs, arg);
+          if (qcmp !== null) {
+            if (qcmp > 0) return ce.False;
+          } else {
+            const cmp = lhs.isLessEqual(arg);
+            if (cmp === undefined) return undefined;
+            if (cmp === false) return ce.False;
+          }
           lhs = arg;
         }
       }

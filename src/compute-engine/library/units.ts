@@ -1,5 +1,5 @@
 import type { SymbolDefinitions, Expression } from '../global-types';
-import { isSymbol, isFunction } from '../boxed-expression/type-guards';
+import { isSymbol, isString, isFunction } from '../boxed-expression/type-guards';
 import {
   convertUnit,
   convertCompoundUnit,
@@ -84,7 +84,7 @@ export const UNITS_LIBRARY: SymbolDefinitions = {
       // If the second argument is a string containing DSL operators,
       // parse it into a structured MathJSON unit expression.
       const unitArg = args[1];
-      if (unitArg.string && /[/*^()]/.test(unitArg.string)) {
+      if (isString(unitArg) && /[/*^()]/.test(unitArg.string)) {
         const parsed = parseUnitDSL(unitArg.string);
         if (typeof parsed !== 'string') {
           const boxed = ce.box(parsed as any);
@@ -135,14 +135,16 @@ export const UNITS_LIBRARY: SymbolDefinitions = {
       if (!ce) return undefined;
       const quantity = ops[0]?.evaluate();
       const targetUnitExpr = ops[1];
-      if (!quantity || quantity.operator !== 'Quantity') return undefined;
+      if (!quantity || !isFunction(quantity) || quantity.operator !== 'Quantity')
+        return undefined;
 
       const mag = quantity.op1.re;
       if (mag === undefined) return undefined;
 
       // Try simple symbol-based conversion first
-      const fromSymbol = quantity.op2?.symbol;
-      const toSymbol = targetUnitExpr?.symbol;
+      const fromUnit = quantity.op2;
+      const fromSymbol = isSymbol(fromUnit) ? fromUnit.symbol : null;
+      const toSymbol = isSymbol(targetUnitExpr) ? targetUnitExpr.symbol : null;
 
       if (fromSymbol && toSymbol) {
         const converted = convertUnit(mag, fromSymbol, toSymbol);
@@ -156,7 +158,7 @@ export const UNITS_LIBRARY: SymbolDefinitions = {
       }
 
       // Fall back to compound unit conversion
-      const fromUE = boxedToUnitExpression(quantity.op2);
+      const fromUE = boxedToUnitExpression(fromUnit);
       const toUE = boxedToUnitExpression(targetUnitExpr);
       if (!fromUE || !toUE) return undefined;
 
@@ -173,7 +175,7 @@ export const UNITS_LIBRARY: SymbolDefinitions = {
     signature: '(value) -> value',
     evaluate: (ops, { engine: ce }) => {
       const arg = ops[0]?.evaluate();
-      if (!arg || arg.operator !== 'Quantity') return arg;
+      if (!arg || !isFunction(arg) || arg.operator !== 'Quantity') return arg;
 
       const mag = arg.op1.re;
       const unitExpr = arg.op2;
