@@ -46,6 +46,12 @@ import {
  * Handles nested braces for LaTeX exponents like `s^{2}` → `s^2` and
  * `s^{-1}` → `s^-1`.
  *
+ * **Limitation**: Nested braces are silently consumed (not emitted into
+ * the output string).  This means `\mathrm{m^{2}s}` produces `m^2s` —
+ * which the DSL parser reads as a single token and will fail to resolve.
+ * Use `\mathrm{m^{2}\cdot s}` (with explicit `\cdot`) for multi-unit
+ * expressions that include braced exponents.
+ *
  * Returns `null` if no opening brace is found.
  */
 function readBracedText(parser: Parser): string | null {
@@ -107,14 +113,18 @@ function readBracedText(parser: Parser): string | null {
 }
 
 /**
- * Single-character symbols that should NOT be treated as unit names even
- * though they appear in the unit registry.  These have primary meanings
- * in mathematics that would be broken by unit parsing:
+ * Symbols that should NOT be treated as unit names even though they
+ * appear in the unit registry, because they have primary meanings in
+ * mathematics that would be broken by unit parsing.
  *
  * - `d` — differential operator (`\mathrm{d}x`)
  *
- * Multi-character units (e.g. `cm`, `kg`) and single-character units
- * NOT in this set (`m`, `s`, `g`, `h`, `t`) are still recognised.
+ * Other single-character units like `h` (hour), `t` (tonne), `s`
+ * (second) are intentionally NOT blocked: the `__unit__` wrapper
+ * mechanism in `invisible-operator.ts` prevents bare variable symbols
+ * from being mis-identified as units.  Only symbols inside an explicit
+ * `\mathrm{...}` or `\text{...}` reach this code path, where the
+ * user's intent is unambiguous.
  */
 const UNIT_BLOCKLIST = new Set(['d']);
 
@@ -138,7 +148,8 @@ function resolveUnitText(text: string): MathJsonExpression | null {
     try {
       const parsed = parseUnitDSL(text);
       // Verify the parsed expression represents valid units
-      if (isValidUnitExpression(parsed)) return parsed as MathJsonExpression;
+      if (parsed !== null && isValidUnitExpression(parsed))
+        return parsed as MathJsonExpression;
     } catch {
       return null;
     }
@@ -269,6 +280,52 @@ function unitToMathrm(expr: MathJsonExpression): string {
 }
 
 // ---------------------------------------------------------------------------
+// siunitx shared parse helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Parse `\qty{value}{unit}` or `\SI{value}{unit}`.
+ * First braced group is a math expression (magnitude), second is raw
+ * text (unit).  Returns `['Quantity', value, unit]` or `null`.
+ */
+function parseSiunitxQuantity(parser: Parser): MathJsonExpression | null {
+  const value = parser.parseGroup();
+  if (value === null) return null;
+
+  const unit = readBracedUnit(parser);
+  if (unit === null) return null;
+
+  return ['Quantity', value, unit];
+}
+
+/**
+ * Parse `\unit{unit}` or `\si{unit}`.
+ * Single braced group of raw text.  Returns the unit expression or `null`.
+ */
+function parseSiunitxUnit(parser: Parser): MathJsonExpression | null {
+  return readBracedUnit(parser);
+}
+
+/**
+ * Read a braced group as raw text, resolve it as a unit, and restore the
+ * parser on failure.  Shared by siunitx handlers.
+ */
+function readBracedUnit(parser: Parser): MathJsonExpression | null {
+  const saved = parser.index;
+  const unitText = readBracedText(parser);
+  if (unitText === null) {
+    parser.index = saved;
+    return null;
+  }
+  const unit = resolveUnitText(unitText);
+  if (unit === null) {
+    parser.index = saved;
+    return null;
+  }
+  return unit;
+}
+
+// ---------------------------------------------------------------------------
 // Dictionary entries
 // ---------------------------------------------------------------------------
 
@@ -289,99 +346,12 @@ export const DEFINITIONS_UNITS: LatexDictionary = [
   },
 
   // -- siunitx commands --
-  // \qty{value}{unit} - modern siunitx command for quantities
-  {
-    latexTrigger: '\\qty',
-    parse: (parser: Parser): MathJsonExpression | null => {
-      // First group: the numeric value (parse as math expression)
-      const value = parser.parseGroup();
-      if (value === null) return null;
-
-      // Second group: the unit (read as raw text)
-      const saved = parser.index;
-      const unitText = readBracedText(parser);
-      if (unitText === null) {
-        parser.index = saved;
-        return null;
-      }
-
-      const unit = resolveUnitText(unitText);
-      if (unit === null) {
-        parser.index = saved;
-        return null;
-      }
-
-      return ['Quantity', value, unit];
-    },
-  },
-
-  // \SI{value}{unit} - legacy siunitx command for quantities
-  {
-    latexTrigger: '\\SI',
-    parse: (parser: Parser): MathJsonExpression | null => {
-      // First group: the numeric value (parse as math expression)
-      const value = parser.parseGroup();
-      if (value === null) return null;
-
-      // Second group: the unit (read as raw text)
-      const saved = parser.index;
-      const unitText = readBracedText(parser);
-      if (unitText === null) {
-        parser.index = saved;
-        return null;
-      }
-
-      const unit = resolveUnitText(unitText);
-      if (unit === null) {
-        parser.index = saved;
-        return null;
-      }
-
-      return ['Quantity', value, unit];
-    },
-  },
-
-  // \unit{unit} - modern siunitx command for units only
-  {
-    latexTrigger: '\\unit',
-    parse: (parser: Parser): MathJsonExpression | null => {
-      const saved = parser.index;
-      const unitText = readBracedText(parser);
-      if (unitText === null) {
-        parser.index = saved;
-        return null;
-      }
-
-      const unit = resolveUnitText(unitText);
-      if (unit === null) {
-        parser.index = saved;
-        return null;
-      }
-
-      return unit; // Just the unit expression, not wrapped in Quantity
-    },
-  },
-
-  // \si{unit} - legacy siunitx command for units only
-  {
-    latexTrigger: '\\si',
-    parse: (parser: Parser): MathJsonExpression | null => {
-      const saved = parser.index;
-      const unitText = readBracedText(parser);
-      if (unitText === null) {
-        parser.index = saved;
-        return null;
-      }
-
-      const unit = resolveUnitText(unitText);
-      if (unit === null) {
-        parser.index = saved;
-        return null;
-      }
-
-      return unit; // Just the unit expression, not wrapped in Quantity
-    },
-  },
+  // \qty{value}{unit} and \SI{value}{unit} — quantity with magnitude + unit
+  { latexTrigger: '\\qty', parse: parseSiunitxQuantity },
+  { latexTrigger: '\\SI', parse: parseSiunitxQuantity },
+  // \unit{unit} and \si{unit} — bare unit expression (no magnitude)
+  { latexTrigger: '\\unit', parse: parseSiunitxUnit },
+  { latexTrigger: '\\si', parse: parseSiunitxUnit },
 
   // -- Quantity serialization --
   {

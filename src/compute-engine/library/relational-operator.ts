@@ -9,8 +9,13 @@ import { isRelationalOperator } from '../latex-syntax/utils';
 import { flatten } from '../boxed-expression/flatten';
 import { eq } from '../boxed-expression/compare';
 import { isNumber, isFunction } from '../boxed-expression/type-guards';
+import { isQuantity } from './quantity-arithmetic';
 import { boxedToUnitExpression } from './units';
-import { getExpressionDimension, getExpressionScale } from './unit-data';
+import {
+  dimensionsEqual,
+  getExpressionDimension,
+  getExpressionScale,
+} from './unit-data';
 
 /**
  * Compare two Quantity expressions.
@@ -18,8 +23,7 @@ import { getExpressionDimension, getExpressionScale } from './unit-data';
  * or null if incompatible or not both quantities.
  */
 function quantityCompare(a: Expression, b: Expression): number | null {
-  if (!isFunction(a) || !isFunction(b)) return null;
-  if (a.operator !== 'Quantity' || b.operator !== 'Quantity') return null;
+  if (!isQuantity(a) || !isQuantity(b)) return null;
 
   const aMag = a.op1.re;
   const bMag = b.op1.re;
@@ -32,7 +36,7 @@ function quantityCompare(a: Expression, b: Expression): number | null {
   // Check compatible dimensions
   const aDim = getExpressionDimension(aUE);
   const bDim = getExpressionDimension(bUE);
-  if (!aDim || !bDim || !aDim.every((v, i) => v === bDim[i])) return null;
+  if (!aDim || !bDim || !dimensionsEqual(aDim, bDim)) return null;
 
   // Convert both to SI
   const aScale = getExpressionScale(aUE);

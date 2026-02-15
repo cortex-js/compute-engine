@@ -8,6 +8,8 @@
 export {
   type DimensionVector,
   type UnitExpression,
+  dimensionsEqual,
+  isDimensionless,
   getUnitDimension,
   getUnitScale,
   areCompatibleUnits,

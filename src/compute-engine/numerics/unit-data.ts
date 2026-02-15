@@ -204,12 +204,31 @@ const UNIT_TABLE: Record<string, UnitEntry> = {
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-/**
- * Look up a unit symbol directly in the table (no prefix parsing).
- * Returns the entry or `null` if not found.
- */
-function lookupUnit(symbol: string): UnitEntry | null {
-  return UNIT_TABLE[symbol] ?? null;
+export function dimensionsEqual(
+  a: DimensionVector,
+  b: DimensionVector
+): boolean {
+  return (
+    a[0] === b[0] &&
+    a[1] === b[1] &&
+    a[2] === b[2] &&
+    a[3] === b[3] &&
+    a[4] === b[4] &&
+    a[5] === b[5] &&
+    a[6] === b[6]
+  );
+}
+
+export function isDimensionless(dim: DimensionVector): boolean {
+  return (
+    dim[0] === 0 &&
+    dim[1] === 0 &&
+    dim[2] === 0 &&
+    dim[3] === 0 &&
+    dim[4] === 0 &&
+    dim[5] === 0 &&
+    dim[6] === 0
+  );
 }
 
 /**
@@ -252,7 +271,7 @@ function parsePrefixedUnit(
  * or `null` for unknown symbols.
  */
 function resolveUnit(symbol: string): UnitEntry | null {
-  const direct = lookupUnit(symbol);
+  const direct = UNIT_TABLE[symbol];
   if (direct) return direct;
 
   const prefixed = parsePrefixedUnit(symbol);
@@ -302,8 +321,17 @@ export function areCompatibleUnits(a: string, b: string): boolean {
   const da = getUnitDimension(a);
   const db = getUnitDimension(b);
   if (!da || !db) return false;
-  return da.every((v, i) => v === db[i]);
+  return dimensionsEqual(da, db);
 }
+
+/** Map from dimension-vector key to named derived SI unit symbol. */
+const NAMED_UNIT_BY_DIMENSION: Map<string, string> = new Map(
+  [
+    'N', 'J', 'W', 'Pa', 'Hz', 'C', 'V', 'F',
+    'ohm', 'S', 'Wb', 'T', 'H', 'lm', 'lx',
+    'Bq', 'Gy', 'Sv', 'kat',
+  ].map((unit) => [UNIT_TABLE[unit].dimension.join(','), unit])
+);
 
 /**
  * Search for a named derived SI unit that matches the given dimension vector
@@ -312,40 +340,7 @@ export function areCompatibleUnits(a: string, b: string): boolean {
  * Returns the unit symbol (e.g., 'N', 'J', 'W') or `null` if no match.
  */
 export function findNamedUnit(dim: DimensionVector): string | null {
-  const namedUnits = [
-    'N',
-    'J',
-    'W',
-    'Pa',
-    'Hz',
-    'C',
-    'V',
-    'F',
-    'ohm',
-    'S',
-    'Wb',
-    'T',
-    'H',
-    'lm',
-    'lx',
-    'Bq',
-    'Gy',
-    'Sv',
-    'kat',
-  ];
-
-  for (const unit of namedUnits) {
-    const entry = UNIT_TABLE[unit];
-    if (
-      entry &&
-      entry.scale === 1 &&
-      entry.dimension.every((v, i) => v === dim[i])
-    ) {
-      return unit;
-    }
-  }
-
-  return null;
+  return NAMED_UNIT_BY_DIMENSION.get(dim.join(',')) ?? null;
 }
 
 /**
@@ -367,7 +362,7 @@ export function convertUnit(
   if (!from || !to) return null;
 
   // Dimensional compatibility check
-  if (!from.dimension.every((v, i) => v === to.dimension[i])) return null;
+  if (!dimensionsEqual(from.dimension, to.dimension)) return null;
 
   // Affine conversion: SI_value = (value + offset) * scale
   // Then: result = SI_value / to.scale - to.offset
@@ -505,44 +500,16 @@ function parseUnitToken(token: string): UnitExpression {
 }
 
 /**
- * Parse a product group (the numerator or denominator half of a DSL string)
- * into a MathJSON expression.  Tokens are separated by `*`.
- *
- * - A single token stays as-is (possibly with a `^` power).
- * - Multiple tokens become `["Multiply", ...]`.
- */
-function parseProductGroup(s: string): UnitExpression {
-  // Split on `*` (explicit multiplication)
-  const tokens = s
-    .split('*')
-    .map((t) => t.trim())
-    .filter((t) => t.length > 0);
-  if (tokens.length === 0) return s;
-  if (tokens.length === 1) return parseUnitToken(tokens[0]);
-  return ['Multiply', ...tokens.map(parseUnitToken)];
-}
-
-/**
- * Find the index of the top-level `/` in a DSL string, skipping over
- * parenthesized groups.  Returns -1 if no top-level `/` is found.
- */
-function findTopLevelSlash(s: string): number {
-  let depth = 0;
-  for (let i = 0; i < s.length; i++) {
-    if (s[i] === '(') depth++;
-    else if (s[i] === ')') depth--;
-    else if (s[i] === '/' && depth === 0) return i;
-  }
-  return -1;
-}
-
-/**
  * Parse a DSL group, which may contain parenthesized sub-expressions.
  * Handles `(m*s^2)` by stripping outer parens and recursing.
+ *
+ * A single pass finds both the first top-level `/` and all top-level `*`
+ * split points.  `/` binds more loosely than `*`, so if a slash is found
+ * the string is split there first.
  */
-function parseDSLGroup(s: string): UnitExpression {
+function parseDSLGroup(s: string): UnitExpression | null {
   s = s.trim();
-  if (s.length === 0) return s;
+  if (s.length === 0) return null;
 
   // Strip outer parentheses: "(m*s^2)" → "m*s^2"
   if (s[0] === '(' && s[s.length - 1] === ')') {
@@ -560,37 +527,50 @@ function parseDSLGroup(s: string): UnitExpression {
     if (matched) return parseDSLGroup(s.slice(1, -1));
   }
 
-  // Check for top-level `/` inside this group
-  const slashIdx = findTopLevelSlash(s);
-  if (slashIdx !== -1) {
-    const numStr = s.slice(0, slashIdx).trim();
-    const denStr = s.slice(slashIdx + 1).trim();
-    return ['Divide', parseDSLGroup(numStr), parseDSLGroup(denStr)];
-  }
-
-  // Split on top-level `*` (skip parens)
-  const tokens: string[] = [];
+  // Single pass: find top-level `/` and `*` positions
+  let slashIdx = -1;
+  const starPositions: number[] = [];
   let depth = 0;
-  let start = 0;
   for (let i = 0; i < s.length; i++) {
     if (s[i] === '(') depth++;
     else if (s[i] === ')') depth--;
-    else if (s[i] === '*' && depth === 0) {
-      tokens.push(s.slice(start, i).trim());
-      start = i + 1;
+    else if (depth === 0) {
+      if (s[i] === '/' && slashIdx === -1) slashIdx = i;
+      else if (s[i] === '*') starPositions.push(i);
     }
   }
-  tokens.push(s.slice(start).trim());
-  const filtered = tokens.filter((t) => t.length > 0);
 
-  if (filtered.length === 0) return s;
-  if (filtered.length === 1) {
-    const t = filtered[0];
-    // Might be a parenthesized group or a unit token with ^
-    if (t[0] === '(') return parseDSLGroup(t);
-    return parseUnitToken(t);
+  // `/` binds more loosely — split there first
+  if (slashIdx !== -1) {
+    const numStr = s.slice(0, slashIdx).trim();
+    const denStr = s.slice(slashIdx + 1).trim();
+    const num = parseDSLGroup(numStr);
+    const den = parseDSLGroup(denStr);
+    if (!num || !den) return null;
+    return ['Divide', num, den];
   }
-  return ['Multiply', ...filtered.map((t) => parseDSLGroup(t))];
+
+  // Split on top-level `*`
+  if (starPositions.length > 0) {
+    const tokens: string[] = [];
+    let start = 0;
+    for (const pos of starPositions) {
+      tokens.push(s.slice(start, pos).trim());
+      start = pos + 1;
+    }
+    tokens.push(s.slice(start).trim());
+    const parts = tokens
+      .filter((t) => t.length > 0)
+      .map((t) => parseDSLGroup(t));
+    if (parts.some((p) => p === null)) return null;
+    if (parts.length === 1) return parts[0];
+    return ['Multiply', ...parts];
+  }
+
+  // Single token — if it starts with `(` we already tried paren-stripping
+  // at the top and it didn't match, so the parens are unbalanced.
+  if (s[0] === '(') return null;
+  return parseUnitToken(s);
 }
 
 /**
@@ -614,9 +594,9 @@ function parseDSLGroup(s: string): UnitExpression {
  * parseUnitDSL("kg/(m*s^2)") // ["Divide", "kg", ["Multiply", "m", ["Power", "s", 2]]]
  * ```
  */
-export function parseUnitDSL(s: string): UnitExpression {
+export function parseUnitDSL(s: string): UnitExpression | null {
   s = s.trim();
-  if (s.length === 0) return s;
+  if (s.length === 0) return null;
 
   // Fast path: no operators at all
   if (!/[/*^()]/.test(s)) return s;
@@ -630,18 +610,24 @@ export function parseUnitDSL(s: string): UnitExpression {
  * Both `fromUnit` and `toUnit` may be simple strings or MathJSON arrays.
  * Returns the converted value, or `null` on dimensional mismatch or
  * unknown units.
+ *
+ * For simple string units, delegates to `convertUnit` so that affine
+ * offsets (degC, degF) are handled correctly.
  */
 export function convertCompoundUnit(
   value: number,
   fromUnit: UnitExpression,
   toUnit: UnitExpression
 ): number | null {
+  // For two simple symbols, delegate to convertUnit (handles affine offsets)
+  if (typeof fromUnit === 'string' && typeof toUnit === 'string')
+    return convertUnit(value, fromUnit, toUnit);
+
   const fromDim = getExpressionDimension(fromUnit);
   const toDim = getExpressionDimension(toUnit);
   if (!fromDim || !toDim) return null;
 
-  // Dimensional compatibility check
-  if (!fromDim.every((v, i) => v === toDim[i])) return null;
+  if (!dimensionsEqual(fromDim, toDim)) return null;
 
   const fromScale = getExpressionScale(fromUnit);
   const toScale = getExpressionScale(toUnit);

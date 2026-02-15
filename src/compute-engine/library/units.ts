@@ -7,8 +7,8 @@ import {
 import {
   convertUnit,
   convertCompoundUnit,
+  dimensionsEqual,
   parseUnitDSL,
-  getUnitScale,
   getExpressionDimension,
   getExpressionScale,
   findNamedUnit,
@@ -88,7 +88,7 @@ export const UNITS_LIBRARY: SymbolDefinitions = {
       const unitArg = args[1];
       if (isString(unitArg) && /[/*^()]/.test(unitArg.string)) {
         const parsed = parseUnitDSL(unitArg.string);
-        if (typeof parsed !== 'string') {
+        if (parsed !== null && typeof parsed !== 'string') {
           const boxed = ce.box(parsed as any);
           return ce._fn('Quantity', [mag, boxed]);
         }
@@ -199,14 +199,12 @@ export const UNITS_LIBRARY: SymbolDefinitions = {
       const match = findNamedUnit(dim);
       if (!match) return arg;
 
-      // Adjust magnitude for scale difference
+      // findNamedUnit only returns scale=1 units, so just multiply mag
+      // by the compound unit's scale to get the magnitude in the named unit.
       const scale = getExpressionScale(ue);
       if (scale === null) return arg;
-      const matchScale = getUnitScale(match);
-      if (matchScale === null) return arg;
-      const newMag = (mag * scale) / matchScale;
 
-      return ce._fn('Quantity', [ce.number(newMag), ce.symbol(match)]);
+      return ce._fn('Quantity', [ce.number(mag * scale), ce.symbol(match)]);
     },
   },
 
@@ -231,8 +229,7 @@ export const UNITS_LIBRARY: SymbolDefinitions = {
       const db = getExpressionDimension(bUE);
       if (!da || !db) return undefined;
 
-      const compatible = da.every((v, i) => v === db[i]);
-      return ce.symbol(compatible ? 'True' : 'False');
+      return ce.symbol(dimensionsEqual(da, db) ? 'True' : 'False');
     },
   },
 

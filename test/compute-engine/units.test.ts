@@ -6,7 +6,11 @@ import {
   getExpressionDimension,
   getExpressionScale,
   parseUnitDSL,
+  convertCompoundUnit,
+  dimensionsEqual,
+  isDimensionless,
 } from '../../src/compute-engine/library/unit-data';
+import { boxedToUnitExpression } from '../../src/compute-engine/library/units';
 
 describe('UNITS LIBRARY', () => {
   test('Quantity operator is defined in the engine', () => {
@@ -1049,5 +1053,140 @@ describe('QUANTITY COMPARISON', () => {
       .box(['Less', ['Quantity', 5, 'm'], ['Quantity', 3, 's']])
       .evaluate();
     expect(expr.operator).toBe('Less');
+  });
+});
+
+describe('DIMENSIONS EQUAL / IS DIMENSIONLESS', () => {
+  test('Same dimension vectors are equal', () => {
+    expect(dimensionsEqual([1, 0, -2, 0, 0, 0, 0], [1, 0, -2, 0, 0, 0, 0])).toBe(true);
+  });
+
+  test('Different dimension vectors are not equal', () => {
+    expect(dimensionsEqual([1, 0, 0, 0, 0, 0, 0], [0, 1, 0, 0, 0, 0, 0])).toBe(false);
+  });
+
+  test('Zero vector is dimensionless', () => {
+    expect(isDimensionless([0, 0, 0, 0, 0, 0, 0])).toBe(true);
+  });
+
+  test('Non-zero vector is not dimensionless', () => {
+    expect(isDimensionless([1, 0, 0, 0, 0, 0, 0])).toBe(false);
+  });
+});
+
+describe('BOXED TO UNIT EXPRESSION', () => {
+  test('Simple symbol unit', () => {
+    const expr = engine.box('m');
+    expect(boxedToUnitExpression(expr)).toBe('m');
+  });
+
+  test('Divide expression', () => {
+    const expr = engine.box(['Divide', 'm', 's']);
+    const ue = boxedToUnitExpression(expr);
+    expect(ue).toEqual(['Divide', 'm', 's']);
+  });
+
+  test('Multiply expression', () => {
+    const expr = engine.box(['Multiply', 'kg', 'm']);
+    const ue = boxedToUnitExpression(expr);
+    expect(ue).toEqual(['Multiply', 'kg', 'm']);
+  });
+
+  test('Power expression', () => {
+    const expr = engine.box(['Power', 's', 2]);
+    const ue = boxedToUnitExpression(expr);
+    expect(ue).toEqual(['Power', 's', 2]);
+  });
+
+  test('Nested compound expression', () => {
+    const expr = engine.box(['Divide', ['Multiply', 'kg', 'm'], ['Power', 's', 2]]);
+    const ue = boxedToUnitExpression(expr);
+    expect(ue).toEqual(['Divide', ['Multiply', 'kg', 'm'], ['Power', 's', 2]]);
+  });
+
+  test('Non-unit expression returns null', () => {
+    const expr = engine.box(['Add', 1, 2]);
+    expect(boxedToUnitExpression(expr)).toBeNull();
+  });
+
+  test('Number expression returns null', () => {
+    const expr = engine.box(42);
+    expect(boxedToUnitExpression(expr)).toBeNull();
+  });
+});
+
+describe('PARSE UNIT DSL EDGE CASES', () => {
+  test('Empty string returns null', () => {
+    expect(parseUnitDSL('')).toBeNull();
+  });
+
+  test('Whitespace-only returns null', () => {
+    expect(parseUnitDSL('   ')).toBeNull();
+  });
+
+  test('Malformed exponent falls back to plain token', () => {
+    // m/s^abc — parseInt('abc') is NaN, so parseUnitToken returns 's^abc' as-is
+    const result = parseUnitDSL('m/s^abc');
+    expect(result).toEqual(['Divide', 'm', 's^abc']);
+  });
+
+  test('Negative exponent', () => {
+    const result = parseUnitDSL('s^-2');
+    expect(result).toEqual(['Power', 's', -2]);
+  });
+
+  test('Deeply nested parens', () => {
+    const result = parseUnitDSL('((m))');
+    expect(result).toBe('m');
+  });
+
+  test('Unbalanced parens do not crash', () => {
+    // Should not throw; may return unusual result
+    expect(() => parseUnitDSL('(m/s')).not.toThrow();
+    expect(() => parseUnitDSL('m/s)')).not.toThrow();
+  });
+
+  test('Multiple products with parens: (kg*m)/(s^2*A)', () => {
+    const result = parseUnitDSL('(kg*m)/(s^2*A)');
+    expect(result).toEqual([
+      'Divide',
+      ['Multiply', 'kg', 'm'],
+      ['Multiply', ['Power', 's', 2], 'A'],
+    ]);
+  });
+});
+
+describe('CONVERT COMPOUND UNIT WITH SIMPLE STRINGS', () => {
+  test('Simple string units delegate to convertUnit (linear)', () => {
+    // km to m — linear conversion
+    const result = convertCompoundUnit(1, 'km', 'm');
+    expect(result).toBe(1000);
+  });
+
+  test('Simple string units handle affine offset (degC to K)', () => {
+    const result = convertCompoundUnit(100, 'degC', 'K');
+    expect(result).toBeCloseTo(373.15);
+  });
+
+  test('Simple string units handle affine offset (degC to degF)', () => {
+    const result = convertCompoundUnit(0, 'degC', 'degF');
+    expect(result).toBeCloseTo(32);
+  });
+
+  test('Incompatible simple strings return null', () => {
+    expect(convertCompoundUnit(1, 'm', 's')).toBeNull();
+  });
+});
+
+describe('TEMPERATURE ARITHMETIC EDGE CASES', () => {
+  test('Adding degC quantities uses convertUnit (affine-aware)', () => {
+    // Adding two degC values: the largest-scale-unit strategy picks degC
+    // for both, so no conversion needed — just sums the magnitudes.
+    // This is a "temperature difference" interpretation.
+    const expr = engine
+      .box(['Add', ['Quantity', 20, 'degC'], ['Quantity', 10, 'degC']])
+      .evaluate();
+    expect(expr.operator).toBe('Quantity');
+    expect(expr.op1.re).toBe(30);
   });
 });
