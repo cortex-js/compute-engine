@@ -50,6 +50,10 @@ export interface CompileTarget<Expr = unknown> {
   /** Format numeric literals for the target language */
   number: (n: number) => string;
 
+  /** Format a complex numeric literal for the target language.
+   *  Only called when the imaginary part is non-zero. */
+  complex?: (re: number, im: number) => string;
+
   /** Format whitespace for the target language */
   ws: (s?: string) => string;
 
@@ -190,5 +194,5 @@ export interface CompilationResult {
   preamble?: string;
 
   /** Executable function (present for JS-executable targets only) */
-  run?: (...args: number[]) => number;
+  run?: (...args: (number | { re: number; im: number })[]) => number | { re: number; im: number };
 }

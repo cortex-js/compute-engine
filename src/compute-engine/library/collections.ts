@@ -764,7 +764,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         let first = true;
         for (const item of collection.each()) {
           if (first) accumulator = item.re;
-          else accumulator = compiled.run(accumulator, item.re);
+          else accumulator = compiled.run(accumulator, item.re) as number;
           first = false;
         }
 
