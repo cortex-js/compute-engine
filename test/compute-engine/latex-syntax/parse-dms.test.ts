@@ -45,4 +45,22 @@ describe('DMS Parsing', () => {
       ['Quantity', 30, 'arcmin'],
     ]);
   });
+
+  test('parse full DMS notation', () => {
+    check('9°30\'15"', [
+      'Add',
+      ['Quantity', 9, 'deg'],
+      ['Quantity', 30, 'arcmin'],
+      ['Quantity', 15, 'arcsec'],
+    ]);
+  });
+
+  test('parse DMS with \\doubleprime', () => {
+    check('9°30\\prime 15\\doubleprime', [
+      'Add',
+      ['Quantity', 9, 'deg'],
+      ['Quantity', 30, 'arcmin'],
+      ['Quantity', 15, 'arcsec'],
+    ]);
+  });
 });
