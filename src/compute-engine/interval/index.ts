@@ -55,6 +55,8 @@ import {
   mod as _mod,
   remainder as _remainder,
   sign as _sign,
+  gamma as _gamma,
+  gammaln as _gammaln,
 } from './elementary';
 import {
   sin as _sin,
@@ -144,6 +146,8 @@ export {
   mod,
   remainder,
   sign,
+  gamma,
+  gammaln,
 } from './elementary';
 
 // Trigonometric functions
@@ -242,6 +246,8 @@ export const IntervalArithmetic = {
   mod: _mod,
   remainder: _remainder,
   sign: _sign,
+  gamma: _gamma,
+  gammaln: _gammaln,
 
   // Trigonometric
   sin: _sin,

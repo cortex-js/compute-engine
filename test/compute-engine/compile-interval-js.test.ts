@@ -123,6 +123,20 @@ describe('INTERVAL JS COMPILATION - FUNCTIONS', () => {
     const fn = compile(expr, { to: 'interval-js' });
     expect(fn.code).toContain('_IA.piecewise');
   });
+
+  test('compiles Gamma', () => {
+    const expr = ce.parse('\\Gamma(x)');
+    const fn = compile(expr, { to: 'interval-js' });
+    expect(fn.success).toBe(true);
+    expect(fn.code).toContain('_IA.gamma');
+  });
+
+  test('compiles GammaLn', () => {
+    const expr = ce.box(['GammaLn', 'x']);
+    const fn = compile(expr, { to: 'interval-js' });
+    expect(fn.success).toBe(true);
+    expect(fn.code).toContain('_IA.gammaln');
+  });
 });
 
 describe('INTERVAL JS EXECUTION', () => {
@@ -420,5 +434,36 @@ describe('INTERVAL JS COMPLEX EXPRESSIONS', () => {
     expect(result.kind).toBe('interval');
     expect(result.value.lo).toBeCloseTo(Math.exp(-1), 5);
     expect(result.value.hi).toBeCloseTo(1, 5);
+  });
+
+  test('Gamma function positive values', () => {
+    const expr = ce.parse('\\Gamma(x)');
+    const fn = compile(expr, { to: 'interval-js' });
+
+    // Gamma(2.5) ≈ 1.329
+    const result = fn.run!({ x: { lo: 2.5, hi: 2.5 } });
+    expect(result.kind).toBe('interval');
+    expect(result.value.lo).toBeCloseTo(1.329, 2);
+    expect(result.value.hi).toBeCloseTo(1.329, 2);
+  });
+
+  test('Gamma function detects singularity at zero', () => {
+    const expr = ce.parse('\\Gamma(x)');
+    const fn = compile(expr, { to: 'interval-js' });
+
+    // Interval crossing zero should detect the pole
+    const result = fn.run!({ x: { lo: -0.5, hi: 0.5 } });
+    expect(result.kind).toBe('singular');
+  });
+
+  test('GammaLn function', () => {
+    const expr = ce.box(['GammaLn', 'x']);
+    const fn = compile(expr, { to: 'interval-js' });
+
+    // GammaLn(2.5) ≈ ln(1.329) ≈ 0.284
+    const result = fn.run!({ x: { lo: 2.5, hi: 2.5 } });
+    expect(result.kind).toBe('interval');
+    expect(result.value.lo).toBeCloseTo(0.284, 2);
+    expect(result.value.hi).toBeCloseTo(0.284, 2);
   });
 });

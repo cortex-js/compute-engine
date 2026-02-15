@@ -1,5 +1,11 @@
 ## [Unreleased]
 
+### Bug Fixes
+
+- **Interval-JS compilation for Gamma functions**
+
+### Other Changes
+
 - Updated color palettes
 
 ## 0.51.0 _2026-02-14_

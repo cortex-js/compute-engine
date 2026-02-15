@@ -7,7 +7,10 @@
 import type { Interval, IntervalResult } from './types';
 import { ok, containsZero, isNegative, unwrapOrPropagate } from './util';
 import { sub, mul, div } from './arithmetic';
-import { gamma as scalarGamma } from '../numerics/special-functions';
+import {
+  gamma as scalarGamma,
+  gammaln as scalarGammaln,
+} from '../numerics/special-functions';
 
 /**
  * Square root of an interval (or IntervalResult).
@@ -577,4 +580,45 @@ function _gamma(x: Interval): IntervalResult {
     lo: GAMMA_MIN_Y,
     hi: Math.max(scalarGamma(x.lo), scalarGamma(x.hi)),
   });
+}
+
+/**
+ * Natural logarithm of the absolute value of the gamma function.
+ *
+ * gammaln(x) = ln(|gamma(x)|)
+ *
+ * Has the same poles as gamma (at non-positive integers), but approaches
+ * -Infinity near poles instead of ±Infinity. For positive x, gammaln is
+ * monotonically increasing.
+ */
+export function gammaln(x: Interval | IntervalResult): IntervalResult {
+  const unwrapped = unwrapOrPropagate(x);
+  if (!Array.isArray(unwrapped)) return unwrapped;
+  const [xVal] = unwrapped;
+  return _gammaln(xVal);
+}
+
+function _gammaln(x: Interval): IntervalResult {
+  // Check for poles: gammaln has poles at every non-positive integer.
+  if (x.hi >= 0 && x.lo <= 0) {
+    // Interval crosses or touches zero — pole at 0
+    return { kind: 'singular', at: 0 };
+  }
+  if (x.lo < 0) {
+    // Entirely negative: check if interval spans a negative integer
+    const ceilLo = Math.ceil(x.lo);
+    const floorHi = Math.floor(x.hi);
+    // If any integer in [ceil(lo), floor(hi)] is <= 0, there's a pole
+    if (ceilLo <= floorHi) {
+      return { kind: 'singular', at: ceilLo };
+    }
+    // No pole in interval — gammaln is continuous between poles
+    const gLo = scalarGammaln(x.lo);
+    const gHi = scalarGammaln(x.hi);
+    return ok({ lo: Math.min(gLo, gHi), hi: Math.max(gLo, gHi) });
+  }
+
+  // x.lo > 0: entirely positive
+  // gammaln is monotonically increasing for x > 0
+  return ok({ lo: scalarGammaln(x.lo), hi: scalarGammaln(x.hi) });
 }
