@@ -1,6 +1,7 @@
 import { ARITHMETIC_LIBRARY } from './arithmetic';
 import { CALCULUS_LIBRARY } from './calculus';
 import { COLLECTIONS_LIBRARY } from './collections';
+import { COLORS_LIBRARY } from './colors';
 import { CONTROL_STRUCTURES_LIBRARY } from './control-structures';
 import { COMBINATORICS_LIBRARY } from './combinatorics';
 import { COMPLEX_LIBRARY } from './complex';
@@ -76,6 +77,11 @@ export const STANDARD_LIBRARIES: LibraryDefinition[] = [
     requires: ['core'],
     definitions: [SETS_LIBRARY, COLLECTIONS_LIBRARY],
     latexDictionary: DEFINITIONS_SETS,
+  },
+  {
+    name: 'colors',
+    requires: ['core'],
+    definitions: COLORS_LIBRARY,
   },
   {
     name: 'relop',

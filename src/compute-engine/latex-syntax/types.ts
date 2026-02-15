@@ -61,6 +61,7 @@ export type LibraryCategory =
   | 'arithmetic'
   | 'calculus'
   | 'collections'
+  | 'colors'
   | 'control-structures'
   | 'combinatorics'
   | 'core'
