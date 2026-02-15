@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+### Free Functions
+
+- Free functions (`simplify`, `evaluate`, `N`, `expand`, `expandAll`, `factor`,
+  `solve`, `compile`) now accept `ExpressionInput` in addition to
+  `LatexString` and `Expression`. This means you can pass numbers, MathJSON
+  objects, or tuple arrays directly — e.g., `evaluate(["Add", 1, 2])` or
+  `simplify(["Power", "x", 2])`.
+
 ### Units and Quantities
 
 - **New `units` library**: A comprehensive unit system for physical quantities,

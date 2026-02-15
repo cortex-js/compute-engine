@@ -1,5 +1,11 @@
-import type { Expression, AssignValue, IComputeEngine } from './global-types';
+import type {
+  Expression,
+  ExpressionInput,
+  AssignValue,
+  IComputeEngine,
+} from './global-types';
 import type { LatexString } from './latex-syntax/types';
+import { isExpression } from './boxed-expression/type-guards';
 import {
   expand as expandExpr,
   expandAll as expandAllExpr,
@@ -27,26 +33,33 @@ export function getDefaultEngine(): IComputeEngine {
   return _defaultEngine!;
 }
 
+/** Convert a LatexString, Expression, or ExpressionInput to a boxed Expression.
+ *  Strings are treated as LaTeX and parsed. */
+function toExpression(input: LatexString | ExpressionInput): Expression {
+  if (typeof input === 'string')
+    return getDefaultEngine().parse(input, { strict: false });
+  if (isExpression(input)) return input;
+  return getDefaultEngine().box(input);
+}
+
 export function parse(latex: LatexString): Expression {
   return getDefaultEngine().parse(latex, { strict: false });
 }
 
-export function simplify(latex: LatexString | Expression): Expression {
-  if (typeof latex === 'string')
-    return getDefaultEngine().parse(latex, { strict: false }).simplify();
-  return latex.simplify();
+export function simplify(
+  expr: LatexString | ExpressionInput
+): Expression {
+  return toExpression(expr).simplify();
 }
 
-export function evaluate(latex: LatexString | Expression): Expression {
-  if (typeof latex === 'string')
-    return getDefaultEngine().parse(latex, { strict: false }).evaluate();
-  return latex.evaluate();
+export function evaluate(
+  expr: LatexString | ExpressionInput
+): Expression {
+  return toExpression(expr).evaluate();
 }
 
-export function N(latex: LatexString | Expression): Expression {
-  if (typeof latex === 'string')
-    return getDefaultEngine().parse(latex, { strict: false }).N();
-  return latex.N();
+export function N(expr: LatexString | ExpressionInput): Expression {
+  return toExpression(expr).N();
 }
 
 export function assign(id: string, value: AssignValue): void;
@@ -58,52 +71,38 @@ export function assign(
   getDefaultEngine().assign(arg1 as any, arg2 as any);
 }
 
-export function expand(latex: LatexString | Expression): Expression | null {
-  const expr =
-    typeof latex === 'string'
-      ? getDefaultEngine().parse(latex, { strict: false })
-      : latex;
-  return expandExpr(expr);
+export function expand(
+  expr: LatexString | ExpressionInput
+): Expression | null {
+  return expandExpr(toExpression(expr));
 }
 
 export function solve(
-  latex: LatexString | Expression,
+  expr: LatexString | ExpressionInput,
   vars?: string | Iterable<string> | Expression | Iterable<Expression>
 ):
   | null
   | ReadonlyArray<Expression>
   | Record<string, Expression>
   | Array<Record<string, Expression>> {
-  const expr =
-    typeof latex === 'string'
-      ? getDefaultEngine().parse(latex, { strict: false })
-      : latex;
-  return expr.solve(vars);
+  return toExpression(expr).solve(vars);
 }
 
-export function expandAll(latex: LatexString | Expression): Expression | null {
-  const expr =
-    typeof latex === 'string'
-      ? getDefaultEngine().parse(latex, { strict: false })
-      : latex;
-  return expandAllExpr(expr);
+export function expandAll(
+  expr: LatexString | ExpressionInput
+): Expression | null {
+  return expandAllExpr(toExpression(expr));
 }
 
-export function factor(latex: LatexString | Expression): Expression {
-  const expr =
-    typeof latex === 'string'
-      ? getDefaultEngine().parse(latex, { strict: false })
-      : latex;
-  return factorExpr(expr);
+export function factor(
+  expr: LatexString | ExpressionInput
+): Expression {
+  return factorExpr(toExpression(expr));
 }
 
 export function compile(
-  latex: LatexString | Expression,
+  expr: LatexString | ExpressionInput,
   options?: Parameters<typeof compileExpr>[1]
 ): ReturnType<typeof compileExpr> {
-  const expr =
-    typeof latex === 'string'
-      ? getDefaultEngine().parse(latex, { strict: false })
-      : latex;
-  return compileExpr(expr, options);
+  return compileExpr(toExpression(expr), options);
 }
