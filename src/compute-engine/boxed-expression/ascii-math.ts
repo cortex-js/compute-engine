@@ -6,6 +6,25 @@ import { isFunction, isSymbol, isString, isNumber } from './type-guards';
 /** Helper type for expressions known to be function expressions (in operator/function callbacks) */
 type FnExpr = Expression & FunctionInterface;
 
+/** Serialize a unit expression to a human-readable string like "m/s^2". */
+function unitToString(expr: Expression): string {
+  if (isSymbol(expr)) return expr.symbol;
+  if (isNumber(expr)) return String(expr.re);
+  if (!isFunction(expr)) return '';
+  const op = expr.operator;
+  if (op === 'Divide')
+    return `${unitToString(expr.op1)}/${unitToString(expr.op2)}`;
+  if (op === 'Multiply')
+    return expr.ops.map(unitToString).join('\u22C5');
+  if (op === 'Power') {
+    const exp = expr.op2?.re;
+    return exp !== undefined
+      ? `${unitToString(expr.op1)}^${exp}`
+      : unitToString(expr.op1);
+  }
+  return '';
+}
+
 export type AsciiMathSerializer = (
   expr: Expression,
   precedence?: number
@@ -262,6 +281,11 @@ const FUNCTIONS: Record<
   Det: 'det',
   Dim: 'dim',
   Mod: 'mod',
+
+  Quantity: (expr_, serialize) => {
+    const expr = expr_ as FnExpr;
+    return `${serialize(expr.op1)} ${unitToString(expr.op2)}`;
+  },
 
   GCD: 'gcd',
   LCM: 'lcm',
