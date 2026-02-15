@@ -54,6 +54,15 @@
   `mat2x2f`/`mat3x3f`/`mat4x4f` in WGSL) with proper column-major
   transposition. Column vectors are flattened to `vecN`/`vecNf` instead of
   nested single-element arrays.
+- **Complex number compilation**: The JavaScript compilation target now supports
+  complex-valued expressions. The compiler performs static type analysis at
+  compile time to determine whether each subexpression is real or complex, and
+  emits the appropriate code path. Simple arithmetic (Add, Subtract, Multiply,
+  Divide, Negate) uses inline `{re, im}` field math to avoid allocation.
+  Transcendental functions (Sin, Cos, Exp, Ln, Sqrt, Power, and others) delegate
+  to runtime helpers backed by the `complex-esm` library. Mixed real/complex
+  operands are promoted inline. `ImaginaryUnit` compiles to `{re: 0, im: 1}`.
+  Symbols with unknown type are assumed real.
 - **Gamma function compilation**: `Gamma` and `GammaLn` can now be compiled to
   `interval-js`, `glsl`, `wgsl`, and `interval-glsl` targets. The interval
   targets include pole detection at non-positive integers and correct

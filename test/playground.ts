@@ -4,11 +4,14 @@ import {
   InfixEntry,
   simplify,
   compile,
+  parse,
 } from '../src/compute-engine';
 import { expand } from '../src/compute-engine/boxed-expression/expand';
 
 const ce = new ComputeEngine();
 const engine = ce;
+
+console.log(parse('3 \\mathrm{cm} + 5\\mathrm{m}').evaluate().json);
 
 // 1. sin(theta)**2 + cos(theta)**2 → 1 — Clean trig identity, but too simple.
 // 2. (alpha**2 - beta**2) / (alpha - beta) → didn't simplify. Engine doesn't cancel the
