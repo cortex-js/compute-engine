@@ -75,17 +75,53 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     return result;
   },
 
-  // Trigonometric functions
-  Sin: 'np.sin',
-  Cos: 'np.cos',
-  Tan: 'np.tan',
-  Arcsin: 'np.arcsin',
-  Arccos: 'np.arccos',
-  Arctan: 'np.arctan',
+  // Trigonometric functions (with complex dispatch via cmath)
+  Sin: (args, compile) => {
+    if (BaseCompiler.isComplexValued(args[0]))
+      return `cmath.sin(${compile(args[0])})`;
+    return `np.sin(${compile(args[0])})`;
+  },
+  Cos: (args, compile) => {
+    if (BaseCompiler.isComplexValued(args[0]))
+      return `cmath.cos(${compile(args[0])})`;
+    return `np.cos(${compile(args[0])})`;
+  },
+  Tan: (args, compile) => {
+    if (BaseCompiler.isComplexValued(args[0]))
+      return `cmath.tan(${compile(args[0])})`;
+    return `np.tan(${compile(args[0])})`;
+  },
+  Arcsin: (args, compile) => {
+    if (BaseCompiler.isComplexValued(args[0]))
+      return `cmath.asin(${compile(args[0])})`;
+    return `np.arcsin(${compile(args[0])})`;
+  },
+  Arccos: (args, compile) => {
+    if (BaseCompiler.isComplexValued(args[0]))
+      return `cmath.acos(${compile(args[0])})`;
+    return `np.arccos(${compile(args[0])})`;
+  },
+  Arctan: (args, compile) => {
+    if (BaseCompiler.isComplexValued(args[0]))
+      return `cmath.atan(${compile(args[0])})`;
+    return `np.arctan(${compile(args[0])})`;
+  },
   Arctan2: 'np.arctan2',
-  Sinh: 'np.sinh',
-  Cosh: 'np.cosh',
-  Tanh: 'np.tanh',
+  Sinh: (args, compile) => {
+    if (BaseCompiler.isComplexValued(args[0]))
+      return `cmath.sinh(${compile(args[0])})`;
+    return `np.sinh(${compile(args[0])})`;
+  },
+  Cosh: (args, compile) => {
+    if (BaseCompiler.isComplexValued(args[0]))
+      return `cmath.cosh(${compile(args[0])})`;
+    return `np.cosh(${compile(args[0])})`;
+  },
+  Tanh: (args, compile) => {
+    if (BaseCompiler.isComplexValued(args[0]))
+      return `cmath.tanh(${compile(args[0])})`;
+    return `np.tanh(${compile(args[0])})`;
+  },
   Arsinh: 'np.arcsinh',
   Arcosh: 'np.arccosh',
   Artanh: 'np.arctanh',
@@ -158,8 +194,16 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   },
 
   // Exponential and logarithmic
-  Exp: 'np.exp',
-  Ln: 'np.log', // Natural logarithm
+  Exp: (args, compile) => {
+    if (BaseCompiler.isComplexValued(args[0]))
+      return `cmath.exp(${compile(args[0])})`;
+    return `np.exp(${compile(args[0])})`;
+  },
+  Ln: (args, compile) => {
+    if (BaseCompiler.isComplexValued(args[0]))
+      return `cmath.log(${compile(args[0])})`;
+    return `np.log(${compile(args[0])})`;
+  },
   Log: (args, compile) => {
     // Log with base: log(x, base)
     if (args.length === 1) return `np.log10(${compile(args[0])})`;
@@ -174,9 +218,18 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   // Power and roots
   Power: (args, compile) => {
     if (args.length !== 2) return 'np.power';
+    if (
+      BaseCompiler.isComplexValued(args[0]) ||
+      BaseCompiler.isComplexValued(args[1])
+    )
+      return `(${compile(args[0])} ** ${compile(args[1])})`;
     return `np.power(${compile(args[0])}, ${compile(args[1])})`;
   },
-  Sqrt: 'np.sqrt',
+  Sqrt: (args, compile) => {
+    if (BaseCompiler.isComplexValued(args[0]))
+      return `cmath.sqrt(${compile(args[0])})`;
+    return `np.sqrt(${compile(args[0])})`;
+  },
   Root: (args, compile) => {
     // Root(x, n) = x^(1/n)
     if (args.length !== 2) return 'np.power';
@@ -184,7 +237,11 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   },
 
   // Rounding and absolute value
-  Abs: 'np.abs',
+  Abs: (args, compile) => {
+    if (BaseCompiler.isComplexValued(args[0]))
+      return `abs(${compile(args[0])})`;
+    return `np.abs(${compile(args[0])})`;
+  },
   Sign: 'np.sign',
   Floor: 'np.floor',
   Ceil: 'np.ceil',
@@ -314,6 +371,7 @@ export class PythonTarget implements LanguageTarget<Expression> {
         if (id in constants) return constants[id as keyof typeof constants];
         return id; // Variables use their names directly
       },
+      complex: (re, im) => `complex(${re}, ${im})`,
       string: (str) => JSON.stringify(str),
       number: (n) => {
         // Python number literals
@@ -358,6 +416,7 @@ export class PythonTarget implements LanguageTarget<Expression> {
 
     if (this.includeImports) {
       let imports = 'import numpy as np\n';
+      imports += 'import cmath\n';
       if (this.useScipy) {
         imports += 'import scipy.special\n';
       }
@@ -389,6 +448,7 @@ export class PythonTarget implements LanguageTarget<Expression> {
 
     if (this.includeImports) {
       code += 'import numpy as np\n';
+      code += 'import cmath\n';
       if (this.useScipy) {
         code += 'import scipy.special\n';
       }
