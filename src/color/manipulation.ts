@@ -1,7 +1,7 @@
 // Helper functions for color calculations
 
 import type { RgbColor } from './types';
-import { FOREGROUND_COLORS } from './palette';
+import { NAMED_COLORS } from './palette';
 
 // sRGB gamma correction
 export function gammaCorrect(channel: number): number {
@@ -522,12 +522,12 @@ export function shade(
 }
 
 /**
- * Return true if `s` is a named color from the FOREGROUND_COLORS palette
+ * Return true if `s` is a named color from the NAMED_COLORS palette
  * (e.g. "red", "blue", "dark-grey") or "transparent".
  */
 export function isNamedColor(s: string): boolean {
   const str = s.trim().toLowerCase();
-  return str === 'transparent' || str in FOREGROUND_COLORS;
+  return str === 'transparent' || str in NAMED_COLORS;
 }
 
 /**
@@ -538,7 +538,7 @@ export function isNamedColor(s: string): boolean {
  * - oklch: oklch(l c h / a) or oklch(l c h) or oklch(l, c, h / a) or oklch(l, c, h), when l is a percentage, c is a number between 0 and 0.4, and h is a number between 0 and 360, for example "oklch(50% 0.3 240 / 0.8)" or "oklch(50% 0.3 240 / 80%)"
  * - oklab: oklab(L a b / alpha) or oklab(L a b), where L is 0-1 (or percentage), a is ~-0.4 to 0.4, b is ~-0.4 to 0.4
  * - hsl: hsl(h, s, l) or hsl(h, s, l / a) or hsl(h s l / a) or hsl(h s l), where h is a number between 0 and 360, s is a percentage, l is a percentage and a is a percentage
- * - named: color names from the FOREGROUND_COLORS palette (e.g. "red", "blue", "cyan", "dark-grey") or "transparent"
+ * - named: color names from the NAMED_COLORS palette (e.g. "red", "blue", "cyan", "dark-grey") or "transparent"
  */
 
 export function parseColor(s: string): number {
@@ -730,8 +730,8 @@ export function parseColor(s: string): number {
   if (str === 'transparent') return 0;
 
   // Named color lookup
-  if (str in FOREGROUND_COLORS)
-    return parseColor(FOREGROUND_COLORS[str as keyof typeof FOREGROUND_COLORS]);
+  if (str in NAMED_COLORS)
+    return parseColor(NAMED_COLORS[str as keyof typeof NAMED_COLORS]);
 
   console.warn(`parseColor: unrecognized color "${s}"`);
   return 0;
