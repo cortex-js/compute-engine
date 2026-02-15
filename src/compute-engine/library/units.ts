@@ -73,22 +73,26 @@ export const UNITS_LIBRARY: SymbolDefinitions = {
     description: 'A value paired with a physical unit',
     wikidata: 'Q309314',
     complexity: 1200,
+    lazy: true,
     signature: '(value, value) -> value',
     canonical: (args, { engine: ce }) => {
       if (args.length !== 2) return ce.error('incompatible-type');
 
+      // Canonicalize the magnitude (first arg) but leave the unit as-is
+      const mag = args[0].canonical;
+
       // If the second argument is a string containing DSL operators,
       // parse it into a structured MathJSON unit expression.
       const unitArg = args[1];
-      if (unitArg.string && /[/*^]/.test(unitArg.string)) {
+      if (unitArg.string && /[/*^()]/.test(unitArg.string)) {
         const parsed = parseUnitDSL(unitArg.string);
         if (typeof parsed !== 'string') {
           const boxed = ce.box(parsed as any);
-          return ce._fn('Quantity', [args[0], boxed]);
+          return ce._fn('Quantity', [mag, boxed]);
         }
       }
 
-      return ce._fn('Quantity', args);
+      return ce._fn('Quantity', [mag, unitArg.canonical]);
     },
     evaluate: (ops, { engine: ce }) => {
       return ce._fn('Quantity', [...ops]);
@@ -120,7 +124,13 @@ export const UNITS_LIBRARY: SymbolDefinitions = {
   UnitConvert: {
     description: 'Convert a quantity to a different compatible unit',
     complexity: 1200,
+    lazy: true,
     signature: '(value, value) -> value',
+    canonical: (args, { engine: ce }) => {
+      if (args.length !== 2) return ce.error('incompatible-type');
+      // Canonicalize the quantity (first arg) but leave the target unit as-is
+      return ce._fn('UnitConvert', [args[0].canonical, args[1].canonical]);
+    },
     evaluate: (ops, { engine: ce }) => {
       if (!ce) return undefined;
       const quantity = ops[0]?.evaluate();
@@ -194,7 +204,14 @@ export const UNITS_LIBRARY: SymbolDefinitions = {
   IsCompatibleUnit: {
     description: 'Check if two units have the same dimension',
     complexity: 1200,
+    lazy: true,
     signature: '(value, value) -> value',
+    canonical: (args, { engine: ce }) => {
+      if (args.length !== 2) return ce.error('incompatible-type');
+      // Don't canonicalize unit arguments — they may be symbols like 'N'
+      // that conflict with function definitions
+      return ce._fn('IsCompatibleUnit', args);
+    },
     evaluate: (ops, { engine: ce }) => {
       // Support both simple symbols and compound unit expressions
       const aUE = boxedToUnitExpression(ops[0]);
@@ -213,7 +230,13 @@ export const UNITS_LIBRARY: SymbolDefinitions = {
   UnitDimension: {
     description: 'Return the dimension vector of a unit',
     complexity: 1200,
+    lazy: true,
     signature: '(value) -> value',
+    canonical: (args, { engine: ce }) => {
+      if (args.length !== 1) return ce.error('incompatible-type');
+      // Don't canonicalize unit argument — same reason as IsCompatibleUnit
+      return ce._fn('UnitDimension', args);
+    },
     evaluate: (ops, { engine: ce }) => {
       // Support both simple symbols and compound unit expressions
       const ue = boxedToUnitExpression(ops[0]);

@@ -1009,7 +1009,18 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
         return args[0].neg();
       },
-      evaluate: ([x]) => x.neg(),
+      evaluate: ([x], { engine }) => {
+        const evalX = x.evaluate();
+        if (evalX.operator === 'Quantity') {
+          const mag = evalX.op1.re;
+          if (mag !== undefined)
+            return engine._fn('Quantity', [
+              engine.number(-mag),
+              evalX.op2,
+            ]);
+        }
+        return x.neg();
+      },
     },
 
     PlusMinus: {
@@ -1197,8 +1208,15 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         //note: args. are canonicalized prior.
         return canonicalRoot(base, exp);
       },
-      evaluate: ([x, n], { numericApproximation }) =>
-        root(x, n, { numericApproximation }),
+      evaluate: ([x, n], { numericApproximation, engine }) => {
+        const evalX = x.evaluate();
+        if (evalX.operator === 'Quantity') {
+          const nVal = n.re;
+          if (nVal !== undefined && nVal !== 0)
+            return quantityPower(engine, evalX, engine.number(1 / nVal));
+        }
+        return root(x, n, { numericApproximation });
+      },
     },
 
     Remainder: {
@@ -1319,6 +1337,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         return undefined;
       },
       evaluate: ([x], { numericApproximation, engine }) => {
+        const evalX = x.evaluate();
+        if (evalX.operator === 'Quantity')
+          return quantityPower(engine, evalX, engine.number(0.5));
+
         if (!numericApproximation) return x.sqrt();
 
         const [c, rest] = x.toNumericValue();
@@ -2273,6 +2295,24 @@ function quantityPower(
   const n = exp.re;
   if (mag === undefined || n === undefined) return undefined;
 
-  const resultUnit = ce._fn('Power', [unitExpr(base), exp]);
+  // Simplify unit exponents: Power(Power(u, a), b) → Power(u, a*b)
+  const unit = unitExpr(base);
+  let resultUnit: Expression;
+  if (unit.operator === 'Power') {
+    const innerExp = unit.op2?.re;
+    if (innerExp !== undefined) {
+      const combined = innerExp * n;
+      resultUnit =
+        combined === 1
+          ? unit.op1
+          : ce._fn('Power', [unit.op1, ce.number(combined)]);
+    } else {
+      resultUnit = ce._fn('Power', [unit, exp]);
+    }
+  } else {
+    resultUnit =
+      n === 1 ? unit : ce._fn('Power', [unit, exp]);
+  }
+
   return ce._fn('Quantity', [ce.number(Math.pow(mag, n)), resultUnit]);
 }

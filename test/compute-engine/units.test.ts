@@ -740,3 +740,209 @@ describe('INTEGRATION', () => {
     expect(expr.isValid).toBe(true);
   });
 });
+
+describe('NEGATE QUANTITIES', () => {
+  test('Negate a simple quantity', () => {
+    const expr = engine
+      .box(['Negate', ['Quantity', 5, 'm']])
+      .evaluate();
+    expect(expr.operator).toBe('Quantity');
+    expect(expr.op1.re).toBe(-5);
+    expect(expr.op2.symbol).toBe('m');
+  });
+
+  test('Negate a quantity with compound unit', () => {
+    const expr = engine
+      .box(['Negate', ['Quantity', 10, ['Divide', 'm', 's']]])
+      .evaluate();
+    expect(expr.operator).toBe('Quantity');
+    expect(expr.op1.re).toBe(-10);
+  });
+
+  test('Negate via Subtract produces correct result', () => {
+    // Subtract canonicalizes to Add + Negate, testing the indirect path
+    const expr = engine
+      .box(['Subtract', ['Quantity', 0, 'kg'], ['Quantity', 3, 'kg']])
+      .evaluate();
+    expect(expr.operator).toBe('Quantity');
+    expect(expr.op1.re).toBe(-3);
+    expect(expr.op2.symbol).toBe('kg');
+  });
+});
+
+describe('SUBTRACT QUANTITIES', () => {
+  test('Subtract same units', () => {
+    const expr = engine
+      .box(['Subtract', ['Quantity', 5, 'm'], ['Quantity', 2, 'm']])
+      .evaluate();
+    expect(expr.operator).toBe('Quantity');
+    expect(expr.op1.re).toBe(3);
+    expect(expr.op2.symbol).toBe('m');
+  });
+
+  test('Subtract compatible units (different scales)', () => {
+    const expr = engine
+      .box(['Subtract', ['Quantity', 1, 'm'], ['Quantity', 20, 'cm']])
+      .evaluate();
+    expect(expr.operator).toBe('Quantity');
+    expect(expr.op1.re).toBeCloseTo(0.8);
+    expect(expr.op2.symbol).toBe('m');
+  });
+
+  test('Subtract to zero', () => {
+    const expr = engine
+      .box(['Subtract', ['Quantity', 5, 'kg'], ['Quantity', 5, 'kg']])
+      .evaluate();
+    expect(expr.operator).toBe('Quantity');
+    expect(expr.op1.re).toBe(0);
+  });
+});
+
+describe('FRACTIONAL POWERS ON QUANTITIES', () => {
+  test('Sqrt of m^2 quantity', () => {
+    const expr = engine
+      .box(['Sqrt', ['Quantity', 9, ['Power', 'm', 2]]])
+      .evaluate();
+    expect(expr.operator).toBe('Quantity');
+    expect(expr.op1.re).toBe(3);
+    expect(expr.op2.symbol).toBe('m');
+  });
+
+  test('Cube root of m^3 quantity', () => {
+    const expr = engine
+      .box(['Power', ['Quantity', 8, ['Power', 'm', 3]], ['Rational', 1, 3]])
+      .evaluate();
+    expect(expr.operator).toBe('Quantity');
+    expect(expr.op1.re).toBe(2);
+    expect(expr.op2.symbol).toBe('m');
+  });
+
+  test('Sqrt of non-power unit gives fractional exponent', () => {
+    const expr = engine
+      .box(['Sqrt', ['Quantity', 4, 'm']])
+      .evaluate();
+    expect(expr.operator).toBe('Quantity');
+    expect(expr.op1.re).toBe(2);
+    // Unit should be Power(m, 0.5)
+    expect(expr.op2.operator).toBe('Power');
+  });
+
+  test('Power(quantity, 2) squares the unit', () => {
+    const expr = engine
+      .box(['Power', ['Quantity', 3, 'm'], 2])
+      .evaluate();
+    expect(expr.operator).toBe('Quantity');
+    expect(expr.op1.re).toBe(9);
+    expect(expr.op2.operator).toBe('Power');
+  });
+});
+
+describe('MULTIPLY QUANTITY ORDERINGS', () => {
+  test('scalar * quantity', () => {
+    const expr = engine
+      .box(['Multiply', 2, ['Quantity', 5, 'm']])
+      .evaluate();
+    expect(expr.operator).toBe('Quantity');
+    expect(expr.op1.re).toBe(10);
+    expect(expr.op2.symbol).toBe('m');
+  });
+
+  test('quantity * scalar', () => {
+    const expr = engine
+      .box(['Multiply', ['Quantity', 5, 'm'], 2])
+      .evaluate();
+    expect(expr.operator).toBe('Quantity');
+    expect(expr.op1.re).toBe(10);
+    expect(expr.op2.symbol).toBe('m');
+  });
+
+  test('multiple scalars * quantity', () => {
+    const expr = engine
+      .box(['Multiply', 2, 3, ['Quantity', 5, 'm']])
+      .evaluate();
+    expect(expr.operator).toBe('Quantity');
+    expect(expr.op1.re).toBe(30);
+    expect(expr.op2.symbol).toBe('m');
+  });
+
+  test('quantity * quantity produces combined unit', () => {
+    const expr = engine
+      .box(['Multiply', ['Quantity', 2, 'm'], ['Quantity', 3, 's']])
+      .evaluate();
+    expect(expr.operator).toBe('Quantity');
+    expect(expr.op1.re).toBe(6);
+    expect(expr.op2.operator).toBe('Multiply');
+  });
+});
+
+describe('N SYMBOL AS NEWTON', () => {
+  test('Quantity(5, N) is valid', () => {
+    const expr = engine.box(['Quantity', 5, 'N']);
+    expect(expr.isValid).toBe(true);
+    expect(expr.operator).toBe('Quantity');
+    expect(expr.op1.re).toBe(5);
+  });
+
+  test('UnitDimension(N) returns force dimension', () => {
+    const expr = engine.box(['UnitDimension', 'N']).evaluate();
+    expect(expr.operator).toBe('List');
+    // Force: [1, 1, -2, 0, 0, 0, 0]
+    expect(expr.op1.re).toBe(1); // length
+  });
+
+  test('IsCompatibleUnit(N, N) is True', () => {
+    const expr = engine.box(['IsCompatibleUnit', 'N', 'N']).evaluate();
+    expect(expr.symbol).toBe('True');
+  });
+
+  test('UnitConvert(1000 N, kN) works', () => {
+    const expr = engine
+      .box(['UnitConvert', ['Quantity', 1000, 'N'], 'kN'])
+      .evaluate();
+    expect(expr.operator).toBe('Quantity');
+    expect(expr.op1.re).toBe(1);
+    expect(expr.op2.symbol).toBe('kN');
+  });
+
+  test('Parse 5 mathrm{N} as Newton', () => {
+    const expr = engine.parse('5\\,\\mathrm{N}');
+    expect(expr.operator).toBe('Quantity');
+    expect(expr.op1.re).toBe(5);
+    expect(expr.op2.symbol).toBe('N');
+  });
+
+  test('LaTeX round-trip for Newton', () => {
+    const expr = engine.box(['Quantity', 5, 'N']);
+    expect(expr.latex).toBe('5\\,\\mathrm{N}');
+  });
+});
+
+describe('LATEX ROUND-TRIP COMPOUND UNITS', () => {
+  test('m/s serializes correctly', () => {
+    const expr = engine.box(['Quantity', 10, ['Divide', 'm', 's']]);
+    expect(expr.latex).toBe('10\\,\\mathrm{m/s}');
+  });
+
+  test('m/s^2 serializes correctly', () => {
+    const expr = engine.box([
+      'Quantity', 9.8,
+      ['Divide', 'm', ['Power', 's', 2]],
+    ]);
+    expect(expr.latex).toBe('9.8\\,\\mathrm{m/s^{2}}');
+  });
+
+  test('kg*m*s^-2 serializes with cdot', () => {
+    const expr = engine.box([
+      'Quantity', 100,
+      ['Multiply', 'kg', 'm', ['Power', 's', -2]],
+    ]);
+    // Negative exponent in Multiply → converted to fraction form
+    expect(expr.latex).toContain('\\mathrm{');
+  });
+
+  test('Parsed compound unit round-trips', () => {
+    const original = '9.8\\,\\mathrm{m/s^{2}}';
+    const parsed = engine.parse(original);
+    expect(parsed.latex).toBe(original);
+  });
+});
