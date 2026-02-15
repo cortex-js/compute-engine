@@ -2,7 +2,7 @@ import type { Expression, SymbolDefinitions } from '../global-types';
 
 import { checkType } from '../boxed-expression/validate';
 import { hasSymbolicTranscendental } from '../boxed-expression/utils';
-import { isFunction, sym } from '../boxed-expression/type-guards';
+import { isFunction, isSymbol, sym } from '../boxed-expression/type-guards';
 
 import {
   applicableN1,
@@ -140,6 +140,23 @@ volumes
       signature:
         '(expression, variable:symbol, variables:symbol+) -> expression',
       canonical: (ops, { engine: ce, scope }) => {
+        // If the first argument is a function symbol (e.g., f where f(x):=2x),
+        // apply it to the differentiation variables to produce a function call.
+        // e.g., ['D', 'f', 'x'] → ['D', ['f', 'x'], 'x']
+        if (isSymbol(ops[0]) && ops[0].canonical.operatorDefinition) {
+          const vars = ops.slice(1);
+          const fCall = ce.function(ops[0].symbol, vars);
+          return ce._fn('D', [fCall, ...vars], { scope });
+        }
+
+        // If the first argument is already a function call (e.g., f'(x)
+        // parsed as ['D', ['f', 'x'], 'x']), use it directly rather than
+        // wrapping in Function(Block(...)).
+        const op0 = ops[0].canonical;
+        if (isFunction(op0) && op0.operator) {
+          return ce._fn('D', [op0, ...ops.slice(1)], { scope });
+        }
+
         const f = canonicalFunctionLiteralArguments(ce, ops);
         if (!f) return null;
 
@@ -147,7 +164,15 @@ volumes
       },
       evaluate: (ops, { engine: _engine }) => {
         let f: Expression | undefined = ops[0].canonical;
-        f = f.evaluate();
+
+        // Unwrap Function literals to get the body for differentiation.
+        // For non-Function expressions (e.g., ['f', 'x']), do NOT call
+        // .evaluate() before differentiating — that would prematurely
+        // substitute variable values (e.g., x=5) and lose structural info.
+        if (f.operator === 'Function' && isFunction(f)) {
+          f = f.op1;
+        }
+
         const params = ops.slice(1);
         if (params.length === 0) f = undefined;
         for (const param of params) {
@@ -156,7 +181,6 @@ volumes
             f = undefined;
             break;
           }
-          if (f && f.operator === 'Function' && isFunction(f)) f = f.op1;
           f = differentiate(f!, paramSym);
           if (f === undefined) break;
         }

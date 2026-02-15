@@ -541,6 +541,46 @@ describe('Multi-argument function derivatives', () => {
   });
 });
 
+describe('User-defined function derivatives', () => {
+  // Use a local engine so f(x) := 2x doesn't affect other tests
+  let ce: InstanceType<typeof import('../../src/compute-engine').ComputeEngine>;
+
+  beforeAll(async () => {
+    const { ComputeEngine } = await import('../../src/compute-engine');
+    ce = new ComputeEngine();
+    ce.parse('f(x) := 2x').evaluate();
+  });
+
+  it('f(x) should evaluate to 2x without stack overflow', () => {
+    const result = ce.parse('f(x)').evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(`2x`);
+  });
+
+  it('d/dx f(x) where f(x) := 2x should be 2', () => {
+    const expr = ce.box(['D', ['f', 'x'], 'x']);
+    const result = expr.evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(`2`);
+  });
+
+  it('d/dx f as a function symbol where f(x) := 2x should be 2', () => {
+    // D(Function(Block(f), x)) — Leibniz notation parses f as a function symbol
+    const expr = ce.parse('\\frac{d}{dx} f');
+    const result = expr.evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(`2`);
+  });
+
+  it('d/dx f(x^2) where f(x) := 2x should be 4x', () => {
+    const expr = ce.box(['D', ['f', ['Square', 'x']], 'x']);
+    const result = expr.evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(`4x`);
+  });
+
+  it('f(3) should evaluate to 6', () => {
+    const result = ce.parse('f(3)').evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(`6`);
+  });
+});
+
 describe('ND', () => {
   it('should compute the numerical approximation of the derivative of a polynomial', () => {
     const expr = parse('\\mathrm{ND}(x \\mapsto x^3 + 2x - 4, 2)');

@@ -73,9 +73,9 @@ D
 `;
 
 exports[`EULER DERIVATIVE NOTATION D^2_x f - second derivative 1`] = `
-\\frac{\\mathrm{d}}{\\mathrm{d}x}\\frac{\\mathrm{d}}{\\mathrm{d}x}f
-D((x) |-> D((x) |-> f, x), x)
-["D", ["Function", ["D", ["Function", "f", "x"], "x"], "x"], "x"]
+\\frac{\\mathrm{d}^{2}}{\\mathrm{d}x^{2}}f
+D(D((x) |-> f, x), x)
+["D", ["D", ["Function", "f", "x"], "x"], "x"]
 `;
 
 exports[`EULER DERIVATIVE NOTATION D_t x - different variable 1`] = `
@@ -86,8 +86,8 @@ D((t) |-> x, t)
 
 exports[`EULER DERIVATIVE NOTATION D_x (x^2 + 1) - derivative of expression 1`] = `
 \\frac{\\mathrm{d}}{\\mathrm{d}x}x^2+1
-D((x) |-> x^2 + 1, x)
-["D", ["Function", ["Add", ["Square", "x"], 1], "x"], "x"]
+D(x^2 + 1, x)
+["D", ["Add", ["Square", "x"], 1], "x"]
 `;
 
 exports[`EULER DERIVATIVE NOTATION D_x f - first derivative 1`] = `
@@ -418,8 +418,8 @@ int(sin(x) dx) + 1 === 2
 
 exports[`LAGRANGE PRIME NOTATION WITH ARGUMENTS \\sin'(x) - known function with prime 1`] = `
 \\frac{\\mathrm{d}}{\\mathrm{d}x}\\sin(x)
-D((x) |-> sin(x), x)
-["D", ["Function", ["Sin", "x"], "x"], "x"]
+D(sin(x), x)
+["D", ["Sin", "x"], "x"]
 `;
 
 exports[`LAGRANGE PRIME NOTATION WITH ARGUMENTS f' without arguments - returns Derivative 1`] = `
@@ -429,49 +429,33 @@ Derivative(f)
 `;
 
 exports[`LAGRANGE PRIME NOTATION WITH ARGUMENTS f'''(x) - triple prime with argument 1`] = `
-\\frac{\\mathrm{d}}{\\mathrm{d}x}\\frac{\\mathrm{d}}{\\mathrm{d}x}\\frac{\\mathrm{d}}{\\mathrm{d}x}f(x)
-D((x) |-> D((x) |-> D((x) |-> f(x), x), x), x)
-[
-  "D",
-  [
-    "Function",
-    [
-      "D",
-      ["Function", ["D", ["Function", ["f", "x"], "x"], "x"], "x"],
-      "x"
-    ],
-    "x"
-  ],
-  "x"
-]
+\\frac{\\mathrm{d}^{3}}{\\mathrm{d}x^{3}}f(x)
+D(D(D(f(x), x), x), x)
+["D", ["D", ["D", ["f", "x"], "x"], "x"], "x"]
 `;
 
 exports[`LAGRANGE PRIME NOTATION WITH ARGUMENTS f''(x) - double prime with argument 1`] = `
-\\frac{\\mathrm{d}}{\\mathrm{d}x}\\frac{\\mathrm{d}}{\\mathrm{d}x}f(x)
-D((x) |-> D((x) |-> f(x), x), x)
-[
-  "D",
-  ["Function", ["D", ["Function", ["f", "x"], "x"], "x"], "x"],
-  "x"
-]
+\\frac{\\mathrm{d}^{2}}{\\mathrm{d}x^{2}}f(x)
+D(D(f(x), x), x)
+["D", ["D", ["f", "x"], "x"], "x"]
 `;
 
 exports[`LAGRANGE PRIME NOTATION WITH ARGUMENTS f'(x) - single prime with argument 1`] = `
 \\frac{\\mathrm{d}}{\\mathrm{d}x}f(x)
-D((x) |-> f(x), x)
-["D", ["Function", ["f", "x"], "x"], "x"]
+D(f(x), x)
+["D", ["f", "x"], "x"]
 `;
 
 exports[`LAGRANGE PRIME NOTATION WITH ARGUMENTS f'(x, y) - multiple arguments uses first as variable 1`] = `
 \\frac{\\mathrm{d}}{\\mathrm{d}x}f(x, y)
-D((x) |-> f(x, y), x)
-["D", ["Function", ["f", "x", "y"], "x"], "x"]
+D(f(x, y), x)
+["D", ["f", "x", "y"], "x"]
 `;
 
 exports[`LAGRANGE PRIME NOTATION WITH ARGUMENTS g'(t) - different variable 1`] = `
 \\frac{\\mathrm{d}}{\\mathrm{d}t}g(t)
-D((t) |-> g(t), t)
-["D", ["Function", ["g", "t"], "t"], "t"]
+D(g(t), t)
+["D", ["g", "t"], "t"]
 `;
 
 exports[`MULTIPLE INTEGRALS Double integral 1`] = `
@@ -612,49 +596,21 @@ D((t) |-> x, t)
 `;
 
 exports[`NEWTON DOT NOTATION Fourth derivative \\ddddot{z} 1`] = `
-\\frac{\\mathrm{d}}{\\mathrm{d}t}\\frac{\\mathrm{d}}{\\mathrm{d}t}\\frac{\\mathrm{d}}{\\mathrm{d}t}\\frac{\\mathrm{d}}{\\mathrm{d}t}z
-D((t) |-> D((t) |-> D((t) |-> D((t) |-> z, t), t), t), t)
-[
-  "D",
-  [
-    "Function",
-    [
-      "D",
-      [
-        "Function",
-        [
-          "D",
-          ["Function", ["D", ["Function", "z", "t"], "t"], "t"],
-          "t"
-        ],
-        "t"
-      ],
-      "t"
-    ],
-    "t"
-  ],
-  "t"
-]
+\\frac{\\mathrm{d}^{4}}{\\mathrm{d}t^{4}}z
+D(D(D(D((t) |-> z, t), t), t), t)
+["D", ["D", ["D", ["D", ["Function", "z", "t"], "t"], "t"], "t"], "t"]
 `;
 
 exports[`NEWTON DOT NOTATION Second derivative \\ddot{x} 1`] = `
-\\frac{\\mathrm{d}}{\\mathrm{d}t}\\frac{\\mathrm{d}}{\\mathrm{d}t}x
-D((t) |-> D((t) |-> x, t), t)
-["D", ["Function", ["D", ["Function", "x", "t"], "t"], "t"], "t"]
+\\frac{\\mathrm{d}^{2}}{\\mathrm{d}t^{2}}x
+D(D((t) |-> x, t), t)
+["D", ["D", ["Function", "x", "t"], "t"], "t"]
 `;
 
 exports[`NEWTON DOT NOTATION Third derivative \\dddot{y} 1`] = `
-\\frac{\\mathrm{d}}{\\mathrm{d}t}\\frac{\\mathrm{d}}{\\mathrm{d}t}\\frac{\\mathrm{d}}{\\mathrm{d}t}y
-D((t) |-> D((t) |-> D((t) |-> y, t), t), t)
-[
-  "D",
-  [
-    "Function",
-    ["D", ["Function", ["D", ["Function", "y", "t"], "t"], "t"], "t"],
-    "t"
-  ],
-  "t"
-]
+\\frac{\\mathrm{d}^{3}}{\\mathrm{d}t^{3}}y
+D(D(D((t) |-> y, t), t), t)
+["D", ["D", ["D", ["Function", "y", "t"], "t"], "t"], "t"]
 `;
 
 exports[`REAL WORLD INTEGRALS Integral with non standard typesetting 1`] = `

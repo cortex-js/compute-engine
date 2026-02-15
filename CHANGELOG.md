@@ -1,5 +1,21 @@
 ## [Unreleased]
 
+### Bug Fixes
+
+- **Derivatives of user-defined functions** (#290): `\frac{d}{dx} f` and `f'(x)`
+  now correctly evaluate when `f` is a user-defined function (e.g.,
+  `f(x) := 2x`). Previously `\frac{d}{dx} f` returned `0` and `f'(x)` returned
+  a symbolic `Apply(Derivative(...))`.
+- **Stack overflow with same-name arguments**: Evaluating `f(x)` no longer
+  causes a stack overflow when the argument name matches the parameter name.
+- **Cleaner `D` canonical form**: `f'(x)` now canonicalizes to
+  `["D", ["f", "x"], "x"]` instead of the verbose
+  `["D", ["Function", ["Block", ["f", "x"]], "x"], "x"]`. Function calls are
+  no longer redundantly wrapped in `Function(Block(...))`. Similarly,
+  `\frac{d}{dx} f` where `f` is a known function symbol canonicalizes to
+  `["D", ["f", "x"], "x"]` by applying the function to the differentiation
+  variable.
+
 ### Free Functions
 
 - Free functions (`simplify`, `evaluate`, `N`, `expand`, `expandAll`, `factor`,

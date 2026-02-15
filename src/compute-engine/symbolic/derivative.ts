@@ -233,6 +233,19 @@ export function differentiate(
   if (isNumber(expr)) return expr.engine.Zero;
   if (isSymbol(expr)) {
     if (expr.symbol === v) return expr.engine.One;
+
+    // Resolve user-defined functions: e.g. f where f(x) := 2x
+    if (expr.operatorDefinition) {
+      const ce = expr.engine;
+      const wildcard = ce.symbol('_');
+      const body = ce.function(expr.symbol, [wildcard]).evaluate();
+      // If the body resolved (is not just the same function call), differentiate it
+      if (body.operator !== expr.symbol) {
+        const bodyWithV = body.subs({ _: ce.symbol(v) });
+        return differentiate(bodyWithV, v, depth + 1);
+      }
+    }
+
     return expr.engine.Zero;
   }
   if (!expr.operator || !isFunction(expr)) return undefined;
@@ -450,6 +463,27 @@ export function differentiate(
 
   const h = DERIVATIVES_TABLE[expr.operator];
   if (h === undefined) {
+    // Try resolving user-defined function calls before falling back to
+    // symbolic chain rule. Apply the function to wildcards, evaluate to
+    // get the body, substitute actual arguments, and differentiate.
+    const opSym = ce.symbol(expr.operator);
+    if (opSym.operatorDefinition) {
+      const args = expr.ops;
+      const wildcards =
+        args.length === 1
+          ? [ce.symbol('_')]
+          : args.map((_, i) => ce.symbol(`_${i + 1}`));
+      const body = ce.function(expr.operator, wildcards).evaluate();
+      if (body.operator !== expr.operator) {
+        const subsMap: Record<string, Expression> = {};
+        wildcards.forEach((w, i) => {
+          subsMap[sym(w)!] = args[i];
+        });
+        const bodyWithArgs = body.subs(subsMap);
+        return differentiate(bodyWithArgs, v, depth + 1);
+      }
+    }
+
     if (expr.nops > 1) return undefined;
 
     // If we don't know how to differentiate this function, assume it's a

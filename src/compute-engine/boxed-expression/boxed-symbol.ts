@@ -402,7 +402,14 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     if (this._def.value.isConstant) return this._def.value.value;
 
     // Lookup the value in the current evaluation context
-    return this.engine._getSymbolValue(this._id);
+    const result = this.engine._getSymbolValue(this._id);
+
+    // Guard: when a function parameter is bound to an argument with the same
+    // name (e.g., f(x) called with argument x), the eval context maps x → x,
+    // creating an infinite loop. Return undefined to treat as a free variable.
+    if (result !== undefined && result.symbol === this._id) return undefined;
+
+    return result;
   }
 
   get value(): Expression | undefined {
