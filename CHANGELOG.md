@@ -2,16 +2,14 @@
 
 ### Bug Fixes
 
-- **Derivatives of user-defined functions** (#290): `\frac{d}{dx} f` and `f'(x)`
+- **(#290) Derivatives of user-defined functions**: `\frac{d}{dx} f` and `f'(x)`
   now correctly evaluate when `f` is a user-defined function (e.g.,
-  `f(x) := 2x`). Previously `\frac{d}{dx} f` returned `0` and `f'(x)` returned
-  a symbolic `Apply(Derivative(...))`.
-- **Stack overflow with same-name arguments**: Evaluating `f(x)` no longer
-  causes a stack overflow when the argument name matches the parameter name.
+  `f(x) := 2x`). Previously `\frac{d}{dx} f` returned `0` and `f'(x)` returned a
+  symbolic `Apply(Derivative(...))`.
 - **Cleaner `D` canonical form**: `f'(x)` now canonicalizes to
   `["D", ["f", "x"], "x"]` instead of the verbose
-  `["D", ["Function", ["Block", ["f", "x"]], "x"], "x"]`. Function calls are
-  no longer redundantly wrapped in `Function(Block(...))`. Similarly,
+  `["D", ["Function", ["Block", ["f", "x"]], "x"], "x"]`. Function calls are no
+  longer redundantly wrapped in `Function(Block(...))`. Similarly,
   `\frac{d}{dx} f` where `f` is a known function symbol canonicalizes to
   `["D", ["f", "x"], "x"]` by applying the function to the differentiation
   variable.
@@ -19,9 +17,9 @@
 ### Free Functions
 
 - Free functions (`simplify`, `evaluate`, `N`, `expand`, `expandAll`, `factor`,
-  `solve`, `compile`) now accept `ExpressionInput` in addition to
-  `LatexString` and `Expression`. This means you can pass numbers, MathJSON
-  objects, or tuple arrays directly — e.g., `evaluate(["Add", 1, 2])` or
+  `solve`, `compile`) now accept `ExpressionInput` in addition to `LatexString`
+  and `Expression`. This means you can pass numbers, MathJSON objects, or tuple
+  arrays directly — e.g., `evaluate(["Add", 1, 2])` or
   `simplify(["Power", "x", 2])`.
 
 ### Units and Quantities
@@ -34,24 +32,23 @@
   `["Quantity", 9.8, ["Divide", "m", ["Power", "s", 2]]]`. Accessors
   `QuantityMagnitude` and `QuantityUnit` extract the parts.
 - **Quantity arithmetic**: `Add`, `Subtract`, `Multiply`, `Divide`, and `Power`
-  are unit-aware. Addition and subtraction automatically convert compatible units
-  and express the result in the unit with the largest scale factor
-  (e.g., `12 cm + 1 m` evaluates to `1.12 m`). Incompatible dimensions remain
+  are unit-aware. Addition and subtraction automatically convert compatible
+  units and express the result in the unit with the largest scale factor (e.g.,
+  `12 cm + 1 m` evaluates to `1.12 m`). Incompatible dimensions remain
   unevaluated.
-- **Unit conversion**: `UnitConvert` converts between compatible units, including
-  compound units like `m/s` to `km/h`. Supports affine temperature conversions
-  (`degC`, `degF`, `K`). Returns an error for incompatible units.
+- **Unit conversion**: `UnitConvert` converts between compatible units,
+  including compound units like `m/s` to `km/h`. Supports affine temperature
+  conversions (`degC`, `degF`, `K`). Returns an error for incompatible units.
   `UnitSimplify` reduces compound units to named derived units when possible
   (e.g., `kg*m/s^2` to `N`).
 - **Dimensional analysis**: `IsCompatibleUnit` tests dimensional compatibility.
   `UnitDimension` returns the 7-element SI dimension vector. Both support
   compound unit expressions.
 - **LaTeX parsing**: `\mathrm{...}` and `\text{...}` containing recognized units
-  produce `Quantity` expressions when juxtaposed with numbers.
-  Compound units with `/`, `^`, and `\cdot` are supported
-  (e.g., `5\,\mathrm{m/s^{2}}`).
-- **siunitx commands**: `\qty{value}{unit}`, `\SI{value}{unit}`,
-  `\unit{unit}`, and `\si{unit}` are parsed.
+  produce `Quantity` expressions when juxtaposed with numbers. Compound units
+  with `/`, `^`, and `\cdot` are supported (e.g., `5\,\mathrm{m/s^{2}}`).
+- **siunitx commands**: `\qty{value}{unit}`, `\SI{value}{unit}`, `\unit{unit}`,
+  and `\si{unit}` are parsed.
 - **LaTeX serialization**: `Quantity` expressions serialize to
   `value\,\mathrm{unit}` notation.
 - **DSL string sugar**: Compound units can be specified as strings in MathJSON:
@@ -64,8 +61,8 @@
 - **Physics constants**: 11 CODATA 2018 constants defined as `Quantity`
   expressions: `SpeedOfLight`, `PlanckConstant`, `Mu0`, `StandardGravity`,
   `ElementaryCharge`, `BoltzmannConstant`, `AvogadroConstant`,
-  `VacuumPermittivity`, `GravitationalConstant`, `StefanBoltzmannConstant`,
-  and `GasConstant`.
+  `VacuumPermittivity`, `GravitationalConstant`, `StefanBoltzmannConstant`, and
+  `GasConstant`.
 
 ### Compilation
 
@@ -73,11 +70,11 @@
   compiled across all targets. `compile('(\\sin(t), \\cos(t))')` produces
   `[Math.sin(t), Math.cos(t)]` in JavaScript, `vec2(sin(t), cos(t))` in GLSL,
   `vec2f(sin(t), cos(t))` in WGSL, and `(np.sin(t), np.cos(t))` in Python.
-- **GPU-native matrix types**: Square matrices (2x2, 3x3, 4x4) compile to
-  native GPU matrix constructors (`mat2`/`mat3`/`mat4` in GLSL,
-  `mat2x2f`/`mat3x3f`/`mat4x4f` in WGSL) with proper column-major
-  transposition. Column vectors are flattened to `vecN`/`vecNf` instead of
-  nested single-element arrays.
+- **GPU-native matrix types**: Square matrices (2x2, 3x3, 4x4) compile to native
+  GPU matrix constructors (`mat2`/`mat3`/`mat4` in GLSL,
+  `mat2x2f`/`mat3x3f`/`mat4x4f` in WGSL) with proper column-major transposition.
+  Column vectors are flattened to `vecN`/`vecNf` instead of nested
+  single-element arrays.
 - **Complex number compilation**: The JavaScript compilation target now supports
   complex-valued expressions. The compiler performs static type analysis at
   compile time to determine whether each subexpression is real or complex, and
@@ -105,10 +102,10 @@
   `Arctan2`, `Hypot`, `Degrees`, `Haversine`, `InverseHaversine`, `Binomial`,
   and `Fibonacci`.
 - **GPU special functions**: `Erf`, `Erfc`, `ErfInv`, `Beta`, `Factorial`,
-  `Arctan2`, `Hypot`, `Haversine`, `InverseHaversine`, `Log10`, and `Lg` can
-  now be compiled to GLSL and WGSL targets. `Erf`/`ErfInv` use Abramowitz &
-  Stegun polynomial approximations; `Beta` and `Factorial` leverage the existing
-  GPU Gamma preamble.
+  `Arctan2`, `Hypot`, `Haversine`, `InverseHaversine`, `Log10`, and `Lg` can now
+  be compiled to GLSL and WGSL targets. `Erf`/`ErfInv` use Abramowitz & Stegun
+  polynomial approximations; `Beta` and `Factorial` leverage the existing GPU
+  Gamma preamble.
 
 ### Simplification
 
@@ -117,8 +114,8 @@
   expressions with small constant difference (e.g., `n!/(n-2)!` → `n(n-1)`).
 - **Binomial detection**: Expressions of the form `n!/(k!(n-k)!)` are
   automatically recognized and simplified to `Binomial(n, k)`.
-- **Binomial identity simplification**: `C(n,0)` → `1`, `C(n,1)` → `n`,
-  `C(n,n)` → `1`, `C(n,n-1)` → `n`.
+- **Binomial identity simplification**: `C(n,0)` → `1`, `C(n,1)` → `n`, `C(n,n)`
+  → `1`, `C(n,n-1)` → `n`.
 - **Factorial sum factoring**: Sums and differences of factorials with related
   arguments are factored out, e.g., `n! - (n-1)!` → `(n-1)! * (n-1)`,
   `(n+1)! + n!` → `n! * (n+2)`.
