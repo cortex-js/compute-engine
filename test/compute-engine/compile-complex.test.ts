@@ -101,3 +101,70 @@ describe('COMPILE COMPLEX - literals', () => {
     expect(result.code).toBe('({ re: 0, im: 1 })');
   });
 });
+
+describe('COMPILE COMPLEX - _SYS helpers (execution)', () => {
+  it('should execute csin', () => {
+    // sin(i) = i * sinh(1) ≈ { re: 0, im: 1.1752... }
+    const expr = ce.box(['Sin', ['Complex', 0, 1]]);
+    const result = compile(expr, { fallback: false });
+    const val = result.run!() as { re: number; im: number };
+    expect(val.re).toBeCloseTo(0, 10);
+    expect(val.im).toBeCloseTo(1.1752011936438014, 10);
+  });
+
+  it('should execute csqrt', () => {
+    // sqrt(-1) is real path: Math.sqrt(-1) = NaN
+    const expr = ce.box(['Sqrt', -1]);
+    const result = compile(expr, { fallback: false });
+    expect(result.run!()).toBeNaN();
+  });
+
+  it('should execute csqrt on complex input', () => {
+    // sqrt(i) = (1+i)/sqrt(2)
+    const expr = ce.box(['Sqrt', ['Complex', 0, 1]]);
+    const result = compile(expr, { fallback: false });
+    const val = result.run!() as { re: number; im: number };
+    expect(val.re).toBeCloseTo(Math.SQRT1_2, 10);
+    expect(val.im).toBeCloseTo(Math.SQRT1_2, 10);
+  });
+
+  it('should execute cexp', () => {
+    // exp(i*pi) = -1 + 0i
+    const expr = ce.box(['Exp', ['Complex', 0, Math.PI]]);
+    const result = compile(expr, { fallback: false });
+    const val = result.run!() as { re: number; im: number };
+    expect(val.re).toBeCloseTo(-1, 10);
+    expect(val.im).toBeCloseTo(0, 10);
+  });
+
+  it('should execute cabs', () => {
+    // |3+4i| = 5
+    const expr = ce.box(['Abs', ['Complex', 3, 4]]);
+    const result = compile(expr, { fallback: false });
+    expect(result.run!()).toBeCloseTo(5, 10);
+  });
+
+  it('should execute carg', () => {
+    // arg(1+i) = pi/4
+    const expr = ce.box(['Arg', ['Complex', 1, 1]]);
+    const result = compile(expr, { fallback: false });
+    expect(result.run!()).toBeCloseTo(Math.PI / 4, 10);
+  });
+
+  it('should execute cln', () => {
+    // ln(i) = i*pi/2
+    const expr = ce.box(['Ln', ['Complex', 0, 1]]);
+    const result = compile(expr, { fallback: false });
+    const val = result.run!() as { re: number; im: number };
+    expect(val.re).toBeCloseTo(0, 10);
+    expect(val.im).toBeCloseTo(Math.PI / 2, 10);
+  });
+
+  it('should execute conjugate', () => {
+    const expr = ce.box(['Conjugate', ['Complex', 3, 4]]);
+    const result = compile(expr, { fallback: false });
+    const val = result.run!() as { re: number; im: number };
+    expect(val.re).toBeCloseTo(3, 10);
+    expect(val.im).toBeCloseTo(-4, 10);
+  });
+});

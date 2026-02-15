@@ -1,6 +1,7 @@
 import type { Expression } from '../global-types';
 import type { MathJsonSymbol } from '../../math-json/types';
 import { isSymbol, isFunction } from '../boxed-expression/type-guards';
+import { Complex } from 'complex-esm';
 
 import {
   chop,
@@ -395,6 +396,11 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Fibonacci: '_SYS.fibonacci',
 };
 
+/** Convert a Complex instance to a plain {re, im} object */
+function toRI(c: Complex): { re: number; im: number } {
+  return { re: c.re, im: c.im };
+}
+
 /**
  * JavaScript-specific function extension that provides system functions
  */
@@ -437,6 +443,30 @@ export class ComputeEngineFunction extends Function {
     airyBi,
     binomial: choose,
     fibonacci: fibonacci,
+    // Complex helpers
+    csin: (z) => toRI(new Complex(z.re, z.im).sin()),
+    ccos: (z) => toRI(new Complex(z.re, z.im).cos()),
+    ctan: (z) => toRI(new Complex(z.re, z.im).tan()),
+    casin: (z) => toRI(new Complex(z.re, z.im).asin()),
+    cacos: (z) => toRI(new Complex(z.re, z.im).acos()),
+    catan: (z) => toRI(new Complex(z.re, z.im).atan()),
+    csinh: (z) => toRI(new Complex(z.re, z.im).sinh()),
+    ccosh: (z) => toRI(new Complex(z.re, z.im).cosh()),
+    ctanh: (z) => toRI(new Complex(z.re, z.im).tanh()),
+    csqrt: (z) => toRI(new Complex(z.re, z.im).sqrt()),
+    cexp: (z) => toRI(new Complex(z.re, z.im).exp()),
+    cln: (z) => toRI(new Complex(z.re, z.im).log()),
+    cpow: (z, w) => {
+      const zz =
+        typeof z === 'number' ? new Complex(z, 0) : new Complex(z.re, z.im);
+      const ww =
+        typeof w === 'number' ? new Complex(w, 0) : new Complex(w.re, w.im);
+      return toRI(zz.pow(ww));
+    },
+    cabs: (z) => new Complex(z.re, z.im).abs(),
+    carg: (z) => new Complex(z.re, z.im).arg(),
+    cconj: (z) => toRI(new Complex(z.re, z.im).conjugate()),
+    cneg: (z) => ({ re: -z.re, im: -z.im }),
   };
 
   constructor(body: string, preamble = '') {
@@ -499,6 +529,30 @@ export class ComputeEngineFunctionLiteral extends Function {
     airyBi,
     binomial: choose,
     fibonacci: fibonacci,
+    // Complex helpers
+    csin: (z) => toRI(new Complex(z.re, z.im).sin()),
+    ccos: (z) => toRI(new Complex(z.re, z.im).cos()),
+    ctan: (z) => toRI(new Complex(z.re, z.im).tan()),
+    casin: (z) => toRI(new Complex(z.re, z.im).asin()),
+    cacos: (z) => toRI(new Complex(z.re, z.im).acos()),
+    catan: (z) => toRI(new Complex(z.re, z.im).atan()),
+    csinh: (z) => toRI(new Complex(z.re, z.im).sinh()),
+    ccosh: (z) => toRI(new Complex(z.re, z.im).cosh()),
+    ctanh: (z) => toRI(new Complex(z.re, z.im).tanh()),
+    csqrt: (z) => toRI(new Complex(z.re, z.im).sqrt()),
+    cexp: (z) => toRI(new Complex(z.re, z.im).exp()),
+    cln: (z) => toRI(new Complex(z.re, z.im).log()),
+    cpow: (z, w) => {
+      const zz =
+        typeof z === 'number' ? new Complex(z, 0) : new Complex(z.re, z.im);
+      const ww =
+        typeof w === 'number' ? new Complex(w, 0) : new Complex(w.re, w.im);
+      return toRI(zz.pow(ww));
+    },
+    cabs: (z) => new Complex(z.re, z.im).abs(),
+    carg: (z) => new Complex(z.re, z.im).arg(),
+    cconj: (z) => toRI(new Complex(z.re, z.im).conjugate()),
+    cneg: (z) => ({ re: -z.re, im: -z.im }),
   };
 
   constructor(body: string, args: string[]) {
