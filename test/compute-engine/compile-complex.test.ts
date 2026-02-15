@@ -263,3 +263,44 @@ describe('COMPILE COMPLEX - operator path bypass', () => {
     expect(val.im).toBeCloseTo(4);
   });
 });
+
+describe('COMPILE COMPLEX - integration', () => {
+  it('should compile and run nested complex expression', () => {
+    // (3+2i) * (1+i) + (0+1i) = (3*1-2*1) + (3*1+2*1)i + i = 1 + 5i + i = 1+6i
+    const expr = ce.box([
+      'Add',
+      ['Multiply', ['Complex', 3, 2], ['Complex', 1, 1]],
+      ['Complex', 0, 1],
+    ]);
+    const result = compile(expr, { fallback: false });
+    const val = result.run!() as { re: number; im: number };
+    expect(val.re).toBeCloseTo(1);
+    expect(val.im).toBeCloseTo(6);
+  });
+
+  it('Abs of complex sum', () => {
+    // |3+4i| = 5
+    const expr = ce.box(['Abs', ['Add', ['Complex', 3, 0], ['Complex', 0, 4]]]);
+    const result = compile(expr, { fallback: false });
+    expect(result.run!()).toBeCloseTo(5);
+  });
+
+  it('all-real expressions are unchanged', () => {
+    // Verify no regressions: 2 * sin(pi/4) = sqrt(2)
+    const expr = ce.parse('2\\sin(\\frac{\\pi}{4})');
+    const result = compile(expr, { fallback: false });
+    expect(result.run!()).toBeCloseTo(Math.SQRT2);
+  });
+
+  it('should handle Euler formula: e^(i*pi) + 1 = 0', () => {
+    const expr = ce.box([
+      'Add',
+      ['Exp', ['Complex', 0, Math.PI]],
+      1,
+    ]);
+    const result = compile(expr, { fallback: false });
+    const val = result.run!() as { re: number; im: number };
+    expect(val.re).toBeCloseTo(0, 10);
+    expect(val.im).toBeCloseTo(0, 10);
+  });
+});
