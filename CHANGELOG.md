@@ -21,6 +21,28 @@
   Preserves alpha when present.
 - **`ColorFromColorspace`**: Convert color space components back to a canonical
   sRGB `Tuple`. Accepts the same color space names as `ColorToColorspace`.
+- **`ColorToString`**: Convert a color (string or sRGB `Tuple`) to a formatted
+  string. Supports optional format argument: `"hex"` (default), `"rgb"`,
+  `"hsl"`, or `"oklch"` for CSS-style output. Alpha is included when not
+  equal to 1.
+- **`ColorMix`**: Blend two colors in OKLCh space with an optional ratio
+  (default 0.5). Accepts color strings or sRGB `Tuple` values. Interpolates
+  lightness and chroma linearly, hue with shorter-arc interpolation.
+- **`ColorContrast`**: Compute the APCA contrast ratio between a background
+  and foreground color. Returns a positive value for dark-on-light and
+  negative for light-on-dark.
+- **`ContrastingColor`**: Choose the foreground color with better APCA contrast
+  against a background. With one argument, picks between white and black. With
+  three arguments, picks the better of two foreground candidates.
+- **LaTeX color support**: `\textcolor{color}{body}`, `\colorbox{color}{body}`,
+  and `\boxed{body}` now roundtrip through `Annotated` expressions. Parsing
+  and serialization are handled in the core `Annotated` infrastructure.
+- **LaTeX font annotations**: `\textbf`, `\textit`, `\texttt`, `\textsf`,
+  `\textup` now serialize correctly from `Annotated` expressions via
+  `fontWeight`, `fontStyle`, and `fontFamily` dict keys.
+- **JavaScript compilation**: All color operators (`Color`, `ColorToString`,
+  `ColorMix`, `ColorContrast`, `ContrastingColor`, `ColorToColorspace`,
+  `ColorFromColorspace`) now compile to JavaScript.
 - Added `rgbToHsl()` conversion function. Exported `hslToRgb()` (previously
   private).
 

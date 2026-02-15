@@ -256,6 +256,10 @@ const ANGULAR_UNITS = new Set([
 /**
  * If `expr` is a `Quantity` with an angular unit (deg, rad, grad, etc.),
  * return a plain numeric expression in radians.  Otherwise return `null`.
+ *
+ * Only handles simple symbol units (not compound expressions).
+ * The `Number.isFinite` check intentionally rejects both `undefined`
+ * (from `.re` on non-numeric expressions) and `Infinity`.
  */
 function angularQuantityToRadians(expr: Expression): Expression | null {
   if (!isFunction(expr) || expr.operator !== 'Quantity') return null;

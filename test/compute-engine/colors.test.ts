@@ -1,4 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
+import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 const ce = new ComputeEngine();
 
@@ -235,5 +236,317 @@ describe('Edge cases', () => {
     expect(back.ops![0].re).toBeCloseTo(original.ops![0].re, 2);
     expect(back.ops![1].re).toBeCloseTo(original.ops![1].re, 2);
     expect(back.ops![2].re).toBeCloseTo(original.ops![2].re, 2);
+  });
+});
+
+describe('ColorToString', () => {
+  test('string input roundtrip', () => {
+    const result = ce.box(['ColorToString', "'#ff0000'"]).evaluate();
+    expect(result.string).toBe('#ff0000');
+  });
+
+  test('tuple input', () => {
+    const result = ce
+      .box(['ColorToString', ['Tuple', 1, 0, 0]])
+      .evaluate();
+    expect(result.string).toBe('#ff0000');
+  });
+
+  test('alpha included when not 1', () => {
+    const result = ce
+      .box(['ColorToString', "'#ff000080'"])
+      .evaluate();
+    expect(result.string).toBe('#ff000080');
+  });
+
+  test('alpha omitted when 1', () => {
+    const result = ce
+      .box(['ColorToString', "'#ff0000ff'"])
+      .evaluate();
+    expect(result.string).toBe('#ff0000');
+  });
+
+  test('3-component tuple', () => {
+    const result = ce
+      .box(['ColorToString', ['Tuple', 0, 1, 0]])
+      .evaluate();
+    expect(result.string).toBe('#00ff00');
+  });
+});
+
+describe('ColorMix', () => {
+  test('equal mix of red and blue', () => {
+    const result = ce
+      .box(['ColorMix', "'#ff0000'", "'#0000ff'"])
+      .evaluate();
+    expect(result.operator).toBe('Tuple');
+    expect(result.ops!.length).toBe(3);
+  });
+
+  test('ratio=0 returns first color', () => {
+    const result = ce
+      .box(['ColorMix', "'#ff0000'", "'#0000ff'", 0])
+      .evaluate();
+    expect(result.operator).toBe('Tuple');
+    // Should be red
+    expect(result.ops![0].re).toBeCloseTo(1, 1);
+    expect(result.ops![1].re).toBeCloseTo(0, 1);
+    expect(result.ops![2].re).toBeCloseTo(0, 1);
+  });
+
+  test('ratio=1 returns second color', () => {
+    const result = ce
+      .box(['ColorMix', "'#ff0000'", "'#0000ff'", 1])
+      .evaluate();
+    expect(result.operator).toBe('Tuple');
+    // Should be blue (OKLCh roundtrip has slight gamut clipping)
+    expect(result.ops![2].re).toBeGreaterThan(0.85);
+    expect(result.ops![0].re).toBeLessThan(0.15);
+  });
+
+  test('default ratio is 0.5', () => {
+    const withDefault = ce
+      .box(['ColorMix', "'#ff0000'", "'#0000ff'"])
+      .evaluate();
+    const withExplicit = ce
+      .box(['ColorMix', "'#ff0000'", "'#0000ff'", 0.5])
+      .evaluate();
+    expect(withDefault.ops![0].re).toBeCloseTo(withExplicit.ops![0].re, 5);
+    expect(withDefault.ops![1].re).toBeCloseTo(withExplicit.ops![1].re, 5);
+    expect(withDefault.ops![2].re).toBeCloseTo(withExplicit.ops![2].re, 5);
+  });
+
+  test('string + tuple inputs', () => {
+    const result = ce
+      .box(['ColorMix', "'#ff0000'", ['Tuple', 0, 0, 1], 0.5])
+      .evaluate();
+    expect(result.operator).toBe('Tuple');
+    expect(result.ops!.length).toBe(3);
+  });
+});
+
+describe('ColorContrast', () => {
+  test('black on white has high positive contrast', () => {
+    const result = ce
+      .box(['ColorContrast', "'#ffffff'", "'#000000'"])
+      .evaluate();
+    expect(result.re).toBeGreaterThan(1);
+  });
+
+  test('white on black has high negative contrast', () => {
+    const result = ce
+      .box(['ColorContrast', "'#000000'", "'#ffffff'"])
+      .evaluate();
+    expect(result.re).toBeLessThan(-1);
+  });
+
+  test('same color returns 0', () => {
+    const result = ce
+      .box(['ColorContrast', "'#808080'", "'#808080'"])
+      .evaluate();
+    expect(result.re).toBe(0);
+  });
+
+  test('accepts tuple inputs', () => {
+    const result = ce
+      .box(['ColorContrast', ['Tuple', 1, 1, 1], ['Tuple', 0, 0, 0]])
+      .evaluate();
+    expect(result.re).toBeGreaterThan(1);
+  });
+});
+
+describe('LaTeX color annotations', () => {
+  test('parse \\textcolor{red}{x}', () => {
+    const expr = ce.parse('\\textcolor{red}{x}');
+    expect(expr.json).toEqual(['Annotated', 'x', { dict: { color: 'red' } }]);
+  });
+
+  test('serialize Annotated with color', () => {
+    const expr = ce.box(['Annotated', 'x', { dict: { color: 'red' } }]);
+    expect(expr.latex).toBe('\\textcolor{red}{x}');
+  });
+
+  test('parse \\colorbox{#ff0000}{x}', () => {
+    const expr = ce.parse('\\colorbox{#ff0000}{x}');
+    expect(expr.json).toEqual([
+      'Annotated',
+      'x',
+      { dict: { backgroundColor: '#ff0000' } },
+    ]);
+  });
+
+  test('serialize Annotated with backgroundColor', () => {
+    const expr = ce.box([
+      'Annotated',
+      'x',
+      { dict: { backgroundColor: 'blue' } },
+    ]);
+    expect(expr.latex).toBe('\\colorbox{blue}{x}');
+  });
+
+  test('roundtrip \\textcolor', () => {
+    const latex = '\\textcolor{red}{x}';
+    const expr = ce.parse(latex);
+    expect(expr.latex).toBe(latex);
+  });
+
+  test('parse \\boxed{x}', () => {
+    const expr = ce.parse('\\boxed{x}');
+    expect(expr.json).toEqual(['Annotated', 'x', { dict: { border: true } }]);
+  });
+
+  test('serialize Annotated with border', () => {
+    const expr = ce.box(['Annotated', 'x', { dict: { border: true } }]);
+    expect(expr.latex).toBe('\\boxed{x}');
+  });
+
+  test('roundtrip \\boxed', () => {
+    const latex = '\\boxed{x}';
+    const expr = ce.parse(latex);
+    expect(expr.latex).toBe(latex);
+  });
+});
+
+describe('ColorToString formats', () => {
+  test('default format is hex', () => {
+    const result = ce.box(['ColorToString', "'#ff0000'"]).evaluate();
+    expect(result.string).toBe('#ff0000');
+  });
+
+  test('explicit hex format', () => {
+    const result = ce
+      .box(['ColorToString', "'#ff0000'", "'hex'"])
+      .evaluate();
+    expect(result.string).toBe('#ff0000');
+  });
+
+  test('rgb format', () => {
+    const result = ce
+      .box(['ColorToString', "'#ff0000'", "'rgb'"])
+      .evaluate();
+    expect(result.string).toBe('rgb(255 0 0)');
+  });
+
+  test('hsl format', () => {
+    const result = ce
+      .box(['ColorToString', "'#ff0000'", "'hsl'"])
+      .evaluate();
+    expect(result.string).toMatch(/^hsl\(/);
+  });
+
+  test('oklch format', () => {
+    const result = ce
+      .box(['ColorToString', "'#ff0000'", "'oklch'"])
+      .evaluate();
+    expect(result.string).toMatch(/^oklch\(/);
+  });
+
+  test('rgb format with alpha', () => {
+    const result = ce
+      .box(['ColorToString', "'#ff000080'", "'rgb'"])
+      .evaluate();
+    expect(result.string).toMatch(/^rgb\(255 0 0 \//);
+  });
+});
+
+describe('ContrastingColor', () => {
+  test('white bg defaults to black text', () => {
+    const result = ce
+      .box(['ContrastingColor', "'#ffffff'"])
+      .evaluate();
+    expect(result.operator).toBe('Tuple');
+    // Should be black (0, 0, 0)
+    expect(result.ops![0].re).toBeCloseTo(0, 1);
+    expect(result.ops![1].re).toBeCloseTo(0, 1);
+    expect(result.ops![2].re).toBeCloseTo(0, 1);
+  });
+
+  test('black bg defaults to white text', () => {
+    const result = ce
+      .box(['ContrastingColor', "'#000000'"])
+      .evaluate();
+    expect(result.operator).toBe('Tuple');
+    // Should be white (1, 1, 1)
+    expect(result.ops![0].re).toBeCloseTo(1, 1);
+    expect(result.ops![1].re).toBeCloseTo(1, 1);
+    expect(result.ops![2].re).toBeCloseTo(1, 1);
+  });
+
+  test('with two fg candidates', () => {
+    const result = ce
+      .box([
+        'ContrastingColor',
+        "'#ffffff'",
+        "'#ff0000'",
+        "'#0000ff'",
+      ])
+      .evaluate();
+    expect(result.operator).toBe('Tuple');
+    expect(result.ops!.length).toBeGreaterThanOrEqual(3);
+  });
+
+  test('accepts tuple input', () => {
+    const result = ce
+      .box(['ContrastingColor', ['Tuple', 1, 1, 1]])
+      .evaluate();
+    expect(result.operator).toBe('Tuple');
+  });
+});
+
+describe('Color compilation', () => {
+  test('compile Color', () => {
+    const expr = ce.box(['Color', "'#ff0000'"]);
+    const compiled = compile(expr);
+    expect(compiled.success).toBe(true);
+    expect(compiled.run).toBeDefined();
+    const result = compiled.run!() as unknown as number[];
+    expect(result).toEqual([1, 0, 0]);
+  });
+
+  test('compile ColorContrast', () => {
+    const expr = ce.box(['ColorContrast', "'#ffffff'", "'#000000'"]);
+    const compiled = compile(expr);
+    expect(compiled.success).toBe(true);
+    expect(compiled.run).toBeDefined();
+    const result = compiled.run!() as unknown as number;
+    expect(result).toBeGreaterThan(1);
+  });
+
+  test('compile ColorToString', () => {
+    const expr = ce.box(['ColorToString', "'#ff0000'"]);
+    const compiled = compile(expr);
+    expect(compiled.success).toBe(true);
+    expect(compiled.run).toBeDefined();
+    const result = compiled.run!() as unknown as string;
+    expect(result).toBe('#ff0000');
+  });
+
+  test('compile ColorMix', () => {
+    const expr = ce.box(['ColorMix', "'#ff0000'", "'#0000ff'", 0.5]);
+    const compiled = compile(expr);
+    expect(compiled.success).toBe(true);
+    expect(compiled.run).toBeDefined();
+    const result = compiled.run!() as unknown as number[];
+    expect(result).toHaveLength(3);
+  });
+
+  test('compile ColorToColorspace', () => {
+    const expr = ce.box(['ColorToColorspace', "'#ff0000'", "'oklch'"]);
+    const compiled = compile(expr);
+    expect(compiled.success).toBe(true);
+    expect(compiled.run).toBeDefined();
+    const result = compiled.run!() as unknown as number[];
+    expect(result).toHaveLength(3);
+    expect(result[0]).toBeGreaterThan(0.5);
+  });
+
+  test('compile ContrastingColor', () => {
+    const expr = ce.box(['ContrastingColor', "'#ffffff'"]);
+    const compiled = compile(expr);
+    expect(compiled.success).toBe(true);
+    expect(compiled.run).toBeDefined();
+    const result = compiled.run!() as unknown as number[];
+    // Should be black
+    expect(result[0]).toBeCloseTo(0, 1);
   });
 });

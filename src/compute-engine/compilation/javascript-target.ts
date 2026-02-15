@@ -12,6 +12,18 @@ import {
   limit,
 } from '../numerics/numeric';
 import {
+  parseColor,
+  rgbToOklch,
+  oklchToRgb,
+  rgbToOklab,
+  oklabToRgb,
+  rgbToHsl,
+  hslToRgb,
+  apca,
+  contrastingColor,
+  asRgb,
+} from '../../color';
+import {
   gamma,
   gammaln,
   erf,
@@ -568,12 +580,257 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       return `_SYS.cconj(${compile(args[0])})`;
     return compile(args[0]);
   },
+
+  // Color functions
+  Color: ([color], compile) => {
+    if (color === null) throw new Error('Color: no argument');
+    return `_SYS.color(${compile(color)})`;
+  },
+  ColorToString: (args, compile) => {
+    if (args.length === 0) throw new Error('ColorToString: no argument');
+    if (args.length >= 2)
+      return `_SYS.colorToString(${compile(args[0])}, ${compile(args[1])})`;
+    return `_SYS.colorToString(${compile(args[0])})`;
+  },
+  ColorMix: (args, compile) => {
+    if (args.length < 2) throw new Error('ColorMix: need two colors');
+    if (args.length >= 3)
+      return `_SYS.colorMix(${compile(args[0])}, ${compile(args[1])}, ${compile(args[2])})`;
+    return `_SYS.colorMix(${compile(args[0])}, ${compile(args[1])})`;
+  },
+  ColorContrast: ([bg, fg], compile) => {
+    if (bg === null || fg === null)
+      throw new Error('ColorContrast: need two colors');
+    return `_SYS.colorContrast(${compile(bg)}, ${compile(fg)})`;
+  },
+  ContrastingColor: (args, compile) => {
+    if (args.length === 0) throw new Error('ContrastingColor: no argument');
+    if (args.length >= 3)
+      return `_SYS.contrastingColor(${compile(args[0])}, ${compile(args[1])}, ${compile(args[2])})`;
+    return `_SYS.contrastingColor(${compile(args[0])})`;
+  },
+  ColorToColorspace: ([color, space], compile) => {
+    if (color === null || space === null)
+      throw new Error('ColorToColorspace: need color and space');
+    return `_SYS.colorToColorspace(${compile(color)}, ${compile(space)})`;
+  },
+  ColorFromColorspace: ([components, space], compile) => {
+    if (components === null || space === null)
+      throw new Error('ColorFromColorspace: need components and space');
+    return `_SYS.colorFromColorspace(${compile(components)}, ${compile(space)})`;
+  },
 };
 
 /** Convert a Complex instance to a plain {re, im} object */
 function toRI(c: Complex): { re: number; im: number } {
   return { re: c.re, im: c.im };
 }
+
+/**
+ * Normalize a color input (string or [r, g, b, a?] array with 0-1 values)
+ * to an RgbColor {r, g, b, alpha?} with 0-255 r/g/b values.
+ */
+function toRgb255(
+  input: string | number[]
+): { r: number; g: number; b: number; alpha?: number } {
+  if (typeof input === 'string') {
+    const c = parseColor(input);
+    return {
+      r: (c >>> 24) & 0xff,
+      g: (c >>> 16) & 0xff,
+      b: (c >>> 8) & 0xff,
+      alpha: (c & 0xff) / 255,
+    };
+  }
+  const rgb: { r: number; g: number; b: number; alpha?: number } = {
+    r: input[0] * 255,
+    g: input[1] * 255,
+    b: input[2] * 255,
+  };
+  if (input.length >= 4) rgb.alpha = input[3];
+  return rgb;
+}
+
+/** Packed 0xRRGGBBAA integer to [r, g, b] or [r, g, b, a] with 0-1 values. */
+function packedToArray(c: number): number[] {
+  const r = ((c >>> 24) & 0xff) / 255;
+  const g = ((c >>> 16) & 0xff) / 255;
+  const b = ((c >>> 8) & 0xff) / 255;
+  const a = (c & 0xff) / 255;
+  return Math.abs(a - 1) < 1e-4 ? [r, g, b] : [r, g, b, a];
+}
+
+/** Color runtime helpers shared by both SYS objects. */
+const colorHelpers = {
+  color(input: string): number[] {
+    return packedToArray(parseColor(input));
+  },
+  colorToString(
+    input: string | number[],
+    format?: string
+  ): string {
+    const rgb = toRgb255(input);
+    const fmt = (format ?? 'hex').toLowerCase();
+    switch (fmt) {
+      case 'hex': {
+        const r = Math.round(Math.max(0, Math.min(255, rgb.r)));
+        const g = Math.round(Math.max(0, Math.min(255, rgb.g)));
+        const b = Math.round(Math.max(0, Math.min(255, rgb.b)));
+        let hex = `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+        if (rgb.alpha !== undefined && Math.abs(rgb.alpha - 1) > 1e-4) {
+          const a = Math.round(Math.max(0, Math.min(255, rgb.alpha * 255)));
+          hex += a.toString(16).padStart(2, '0');
+        }
+        return hex;
+      }
+      case 'rgb': {
+        const r = Math.round(rgb.r);
+        const g = Math.round(rgb.g);
+        const b = Math.round(rgb.b);
+        if (rgb.alpha !== undefined && Math.abs(rgb.alpha - 1) > 1e-4)
+          return `rgb(${r} ${g} ${b} / ${rgb.alpha})`;
+        return `rgb(${r} ${g} ${b})`;
+      }
+      case 'hsl': {
+        const hsl = rgbToHsl(rgb.r, rgb.g, rgb.b);
+        const h = Math.round(hsl.h * 10) / 10;
+        const s = Math.round(hsl.s * 1000) / 10;
+        const l = Math.round(hsl.l * 1000) / 10;
+        if (rgb.alpha !== undefined && Math.abs(rgb.alpha - 1) > 1e-4)
+          return `hsl(${h} ${s}% ${l}% / ${rgb.alpha})`;
+        return `hsl(${h} ${s}% ${l}%)`;
+      }
+      case 'oklch': {
+        const c = rgbToOklch(rgb);
+        const L = Math.round(c.L * 1000) / 1000;
+        const C = Math.round(c.C * 1000) / 1000;
+        const H = Math.round(c.H * 10) / 10;
+        if (rgb.alpha !== undefined && Math.abs(rgb.alpha - 1) > 1e-4)
+          return `oklch(${L} ${C} ${H} / ${rgb.alpha})`;
+        return `oklch(${L} ${C} ${H})`;
+      }
+      default:
+        throw new Error(`Unknown color format: ${fmt}`);
+    }
+  },
+  colorMix(
+    input1: string | number[],
+    input2: string | number[],
+    ratio = 0.5
+  ): number[] {
+    const rgb1 = toRgb255(input1);
+    const rgb2 = toRgb255(input2);
+    ratio = Math.max(0, Math.min(1, ratio));
+    const c1 = rgbToOklch(rgb1);
+    const c2 = rgbToOklch(rgb2);
+    // Shorter arc hue interpolation
+    let dh = c2.H - c1.H;
+    if (dh > 180) dh -= 360;
+    if (dh < -180) dh += 360;
+    let H = c1.H + dh * ratio;
+    if (H < 0) H += 360;
+    if (H >= 360) H -= 360;
+    const mixed = oklchToRgb({
+      L: c1.L + (c2.L - c1.L) * ratio,
+      C: c1.C + (c2.C - c1.C) * ratio,
+      H,
+    });
+    const r = mixed.r / 255;
+    const g = mixed.g / 255;
+    const b = mixed.b / 255;
+    const a1 = rgb1.alpha ?? 1;
+    const a2 = rgb2.alpha ?? 1;
+    const alpha = a1 + (a2 - a1) * ratio;
+    return Math.abs(alpha - 1) > 1e-4 ? [r, g, b, alpha] : [r, g, b];
+  },
+  colorContrast(
+    bg: string | number[],
+    fg: string | number[]
+  ): number {
+    return apca(toRgb255(bg), toRgb255(fg));
+  },
+  contrastingColor(
+    bg: string | number[],
+    fg1?: string | number[],
+    fg2?: string | number[]
+  ): number[] {
+    const bgRgb = toRgb255(bg);
+    if (fg1 !== undefined && fg2 !== undefined) {
+      return packedToArray(
+        contrastingColor({ bg: bgRgb, fg1: toRgb255(fg1), fg2: toRgb255(fg2) })
+      );
+    }
+    return packedToArray(contrastingColor(bgRgb));
+  },
+  colorToColorspace(
+    input: string | number[],
+    space: string
+  ): number[] {
+    const rgb = toRgb255(input);
+    const alpha = rgb.alpha;
+    let result: number[];
+    switch (space.toLowerCase()) {
+      case 'rgb':
+        result = [rgb.r / 255, rgb.g / 255, rgb.b / 255];
+        break;
+      case 'hsl': {
+        const hsl = rgbToHsl(rgb.r, rgb.g, rgb.b);
+        result = [hsl.h, hsl.s, hsl.l];
+        break;
+      }
+      case 'oklch': {
+        const c = rgbToOklch(rgb);
+        result = [c.L, c.C, c.H];
+        break;
+      }
+      case 'oklab':
+      case 'lab': {
+        const lab = rgbToOklab(rgb);
+        result = [lab.L, lab.a, lab.b];
+        break;
+      }
+      default:
+        throw new Error(`Unknown color space: ${space}`);
+    }
+    if (alpha !== undefined && Math.abs(alpha - 1) > 1e-4) result.push(alpha);
+    return result;
+  },
+  colorFromColorspace(
+    components: number[],
+    space: string
+  ): number[] {
+    const c0 = components[0];
+    const c1 = components[1];
+    const c2 = components[2];
+    const alpha = components.length >= 4 ? components[3] : undefined;
+    let result: number[];
+    switch (space.toLowerCase()) {
+      case 'rgb':
+        result = [c0, c1, c2];
+        break;
+      case 'hsl': {
+        const r = hslToRgb(c0, c1, c2);
+        result = [r.r / 255, r.g / 255, r.b / 255];
+        break;
+      }
+      case 'oklch': {
+        const r = oklchToRgb({ L: c0, C: c1, H: c2 });
+        result = [r.r / 255, r.g / 255, r.b / 255];
+        break;
+      }
+      case 'oklab':
+      case 'lab': {
+        const r = oklabToRgb({ L: c0, a: c1, b: c2 });
+        result = [r.r / 255, r.g / 255, r.b / 255];
+        break;
+      }
+      default:
+        throw new Error(`Unknown color space: ${space}`);
+    }
+    if (alpha !== undefined && Math.abs(alpha - 1) > 1e-4) result.push(alpha);
+    return result;
+  },
+};
 
 /**
  * JavaScript-specific function extension that provides system functions
@@ -653,6 +910,8 @@ export class ComputeEngineFunction extends Function {
     carg: (z) => new Complex(z.re, z.im).arg(),
     cconj: (z) => toRI(new Complex(z.re, z.im).conjugate()),
     cneg: (z) => ({ re: -z.re, im: -z.im }),
+    // Color helpers
+    ...colorHelpers,
   };
 
   constructor(body: string, preamble = '') {
@@ -751,6 +1010,8 @@ export class ComputeEngineFunctionLiteral extends Function {
     carg: (z) => new Complex(z.re, z.im).arg(),
     cconj: (z) => toRI(new Complex(z.re, z.im).conjugate()),
     cneg: (z) => ({ re: -z.re, im: -z.im }),
+    // Color helpers
+    ...colorHelpers,
   };
 
   constructor(body: string, args: string[]) {

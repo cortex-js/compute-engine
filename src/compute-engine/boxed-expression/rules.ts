@@ -946,8 +946,7 @@ export function replace(
           done = false;
           expr = result.value;
         }
-      } catch (e) {
-        console.error(`\n${expr.toString()}\n${rule.id}\n${e.message}`);
+      } catch (_e) {
         return steps;
       }
     }

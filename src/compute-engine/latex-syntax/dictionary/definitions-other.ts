@@ -240,6 +240,29 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
     },
   },
   {
+    latexTrigger: ['\\colorbox'],
+    parse: (parser: Parser): MathJsonExpression => {
+      const pos = parser.index;
+      const backgroundColor = parser.parseStringGroup();
+      const body = parser.parseGroup();
+      if (backgroundColor !== null) {
+        if (body !== null)
+          return ['Annotated', body, { dict: { backgroundColor } }];
+        return 'Nothing';
+      }
+      parser.index = pos;
+      return 'Nothing';
+    },
+  },
+  {
+    latexTrigger: ['\\boxed'],
+    parse: (parser: Parser): MathJsonExpression => {
+      const body = parser.parseGroup();
+      if (body !== null) return ['Annotated', body, { dict: { border: true } }];
+      return 'Nothing';
+    },
+  },
+  {
     latexTrigger: ['\\displaystyle'],
     parse: () => 'Nothing', // @todo: parse as ['Annotated'...]
   },
@@ -340,18 +363,48 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
       //
       // Font family
       //
+      if (dict.dict.fontFamily === 'monospace')
+        result = joinLatex(['\\texttt{', result, '}']);
+      else if (dict.dict.fontFamily === 'sans-serif')
+        result = joinLatex(['\\textsf{', result, '}']);
+
+      if (dict.dict.fontWeight === 'bold')
+        result = joinLatex(['\\textbf{', result, '}']);
+
+      if (dict.dict.fontStyle === 'italic')
+        result = joinLatex(['\\textit{', result, '}']);
+      else if (dict.dict.fontStyle === 'normal')
+        result = joinLatex(['\\textup{', result, '}']);
 
       //
       // Color
       //
+      if (dict.dict.color)
+        result = joinLatex([
+          '\\textcolor{',
+          dict.dict.color as string,
+          '}{',
+          result,
+          '}',
+        ]);
 
       //
       // Background Color
       //
+      if (dict.dict.backgroundColor)
+        result = joinLatex([
+          '\\colorbox{',
+          dict.dict.backgroundColor as string,
+          '}{',
+          result,
+          '}',
+        ]);
 
       //
       // Border
       //
+      if (dict.dict.border === true)
+        result = joinLatex(['\\boxed{', result, '}']);
 
       //
       // Annotation
