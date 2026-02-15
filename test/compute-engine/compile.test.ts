@@ -457,7 +457,7 @@ describe('COMPILE', () => {
     // These are GLSL graphics built-ins, Python-specific numpy/scipy functions,
     // or control-flow constructs handled by the compiler.
     const TARGET_SPECIFIC: Record<string, Set<string>> = {
-      'javascript': new Set(['If', 'List', 'Range', 'Integrate']),
+      'javascript': new Set(['If', 'List', 'Range', 'Integrate', 'Re', 'Im', 'Arg']),
       'glsl': new Set([
         'Clamp',
         'Mix',

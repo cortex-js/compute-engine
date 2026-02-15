@@ -168,3 +168,98 @@ describe('COMPILE COMPLEX - _SYS helpers (execution)', () => {
     expect(val.im).toBeCloseTo(-4, 10);
   });
 });
+
+describe('COMPILE COMPLEX - inline arithmetic', () => {
+  it('should add two complex numbers', () => {
+    const expr = ce.box(['Add', ['Complex', 1, 2], ['Complex', 3, 4]]);
+    const result = compile(expr, { fallback: false });
+    const val = result.run!() as { re: number; im: number };
+    expect(val.re).toBeCloseTo(4);
+    expect(val.im).toBeCloseTo(6);
+  });
+
+  it('should multiply two complex numbers', () => {
+    // (1+2i) * (3+4i) = -5+10i
+    const expr = ce.box(['Multiply', ['Complex', 1, 2], ['Complex', 3, 4]]);
+    const result = compile(expr, { fallback: false });
+    const val = result.run!() as { re: number; im: number };
+    expect(val.re).toBeCloseTo(-5);
+    expect(val.im).toBeCloseTo(10);
+  });
+
+  it('should negate a complex number', () => {
+    const expr = ce.box(['Negate', ['Complex', 3, 4]]);
+    const result = compile(expr, { fallback: false });
+    const val = result.run!() as { re: number; im: number };
+    expect(val.re).toBeCloseTo(-3);
+    expect(val.im).toBeCloseTo(-4);
+  });
+
+  it('should subtract complex numbers', () => {
+    const expr = ce.box(['Subtract', ['Complex', 5, 3], ['Complex', 2, 1]]);
+    const result = compile(expr, { fallback: false });
+    const val = result.run!() as { re: number; im: number };
+    expect(val.re).toBeCloseTo(3);
+    expect(val.im).toBeCloseTo(2);
+  });
+
+  it('should divide complex numbers', () => {
+    // (1+2i) / (3+4i) = (11/25) + (2/25)i
+    const expr = ce.box(['Divide', ['Complex', 1, 2], ['Complex', 3, 4]]);
+    const result = compile(expr, { fallback: false });
+    const val = result.run!() as { re: number; im: number };
+    expect(val.re).toBeCloseTo(11 / 25);
+    expect(val.im).toBeCloseTo(2 / 25);
+  });
+});
+
+describe('COMPILE COMPLEX - real/complex promotion', () => {
+  it('should add real + complex', () => {
+    const expr = ce.box(['Add', 5, ['Complex', 3, 4]]);
+    const result = compile(expr, { fallback: false });
+    const val = result.run!() as { re: number; im: number };
+    expect(val.re).toBeCloseTo(8);
+    expect(val.im).toBeCloseTo(4);
+  });
+
+  it('should multiply real * complex', () => {
+    const expr = ce.box(['Multiply', 2, ['Complex', 3, 4]]);
+    const result = compile(expr, { fallback: false });
+    const val = result.run!() as { re: number; im: number };
+    expect(val.re).toBeCloseTo(6);
+    expect(val.im).toBeCloseTo(8);
+  });
+
+  it('should handle Re of complex', () => {
+    const expr = ce.box(['Re', ['Complex', 3, 4]]);
+    const result = compile(expr, { fallback: false });
+    expect(result.run!()).toBeCloseTo(3);
+  });
+
+  it('should handle Im of complex', () => {
+    const expr = ce.box(['Im', ['Complex', 3, 4]]);
+    const result = compile(expr, { fallback: false });
+    expect(result.run!()).toBeCloseTo(4);
+  });
+});
+
+describe('COMPILE COMPLEX - Power', () => {
+  it('should compute complex power', () => {
+    // (1+i)^2 = 2i
+    const expr = ce.box(['Power', ['Complex', 1, 1], 2]);
+    const result = compile(expr, { fallback: false });
+    const val = result.run!() as { re: number; im: number };
+    expect(val.re).toBeCloseTo(0, 10);
+    expect(val.im).toBeCloseTo(2, 10);
+  });
+});
+
+describe('COMPILE COMPLEX - operator path bypass', () => {
+  it('should use complex multiply even when operator exists', () => {
+    const expr = ce.box(['Multiply', 2, ['Complex', 1, 2]]);
+    const result = compile(expr, { fallback: false });
+    const val = result.run!() as { re: number; im: number };
+    expect(val.re).toBeCloseTo(2);
+    expect(val.im).toBeCloseTo(4);
+  });
+});

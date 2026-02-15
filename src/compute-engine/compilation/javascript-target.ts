@@ -81,12 +81,33 @@ const JAVASCRIPT_OPERATORS: CompiledOperators = {
  * JavaScript function implementations
  */
 const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
-  Abs: 'Math.abs',
+  Abs: (args, compile) => {
+    if (BaseCompiler.isComplexValued(args[0]))
+      return `_SYS.cabs(${compile(args[0])})`;
+    return `Math.abs(${compile(args[0])})`;
+  },
   Add: (args, compile) => {
     if (args.length === 1) return compile(args[0]);
-    return `(${args.map((x) => compile(x)).join(' + ')})`;
+    const anyComplex = args.some((a) => BaseCompiler.isComplexValued(a));
+    if (!anyComplex) return `(${args.map((x) => compile(x)).join(' + ')})`;
+
+    const parts = args.map((a) => {
+      const code = compile(a);
+      return { code, isComplex: BaseCompiler.isComplexValued(a) };
+    });
+    const reTerms = parts.map((p) =>
+      p.isComplex ? `(${p.code}).re` : p.code
+    );
+    const imTerms = parts
+      .filter((p) => p.isComplex)
+      .map((p) => `(${p.code}).im`);
+    return `({ re: ${reTerms.join(' + ')}, im: ${imTerms.join(' + ')} })`;
   },
-  Arccos: 'Math.acos',
+  Arccos: (args, compile) => {
+    if (BaseCompiler.isComplexValued(args[0]))
+      return `_SYS.cacos(${compile(args[0])})`;
+    return `Math.acos(${compile(args[0])})`;
+  },
   Arcosh: 'Math.acosh',
   Arccot: ([x], compile) => {
     if (x === null) throw new Error('Arccot: no argument');
@@ -112,14 +133,30 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     if (x === null) throw new Error('Arsech: no argument');
     return `Math.acosh(1 / (${compile(x)}))`;
   },
-  Arcsin: 'Math.asin',
+  Arcsin: (args, compile) => {
+    if (BaseCompiler.isComplexValued(args[0]))
+      return `_SYS.casin(${compile(args[0])})`;
+    return `Math.asin(${compile(args[0])})`;
+  },
   Arsinh: 'Math.asinh',
-  Arctan: 'Math.atan',
+  Arctan: (args, compile) => {
+    if (BaseCompiler.isComplexValued(args[0]))
+      return `_SYS.catan(${compile(args[0])})`;
+    return `Math.atan(${compile(args[0])})`;
+  },
   Artanh: 'Math.atanh',
   Ceil: 'Math.ceil',
   Chop: '_SYS.chop',
-  Cos: 'Math.cos',
-  Cosh: 'Math.cosh',
+  Cos: (args, compile) => {
+    if (BaseCompiler.isComplexValued(args[0]))
+      return `_SYS.ccos(${compile(args[0])})`;
+    return `Math.cos(${compile(args[0])})`;
+  },
+  Cosh: (args, compile) => {
+    if (BaseCompiler.isComplexValued(args[0]))
+      return `_SYS.ccosh(${compile(args[0])})`;
+    return `Math.cosh(${compile(args[0])})`;
+  },
   Cot: ([x], compile) => {
     if (x === null) throw new Error('Cot: no argument');
     return BaseCompiler.inlineExpression(
@@ -142,7 +179,11 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     if (x === null) throw new Error('Csch: no argument');
     return `1 / Math.sinh(${compile(x)})`;
   },
-  Exp: 'Math.exp',
+  Exp: (args, compile) => {
+    if (BaseCompiler.isComplexValued(args[0]))
+      return `_SYS.cexp(${compile(args[0])})`;
+    return `Math.exp(${compile(args[0])})`;
+  },
   Floor: 'Math.floor',
   Fract: ([x], compile) => {
     if (x === null) throw new Error('Fract: no argument');
@@ -154,7 +195,11 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   LCM: '_SYS.lcm',
   Limit: (args, compile) =>
     `_SYS.limit(${compile(args[0])}, ${compile(args[1])})`,
-  Ln: 'Math.log',
+  Ln: (args, compile) => {
+    if (BaseCompiler.isComplexValued(args[0]))
+      return `_SYS.cln(${compile(args[0])})`;
+    return `Math.log(${compile(args[0])})`;
+  },
   List: (args, compile) => `[${args.map((x) => compile(x)).join(', ')}]`,
   // Matrix wraps List(List(...), ...) — compile the body (first arg) which
   // is the nested List structure; remaining args are delimiters/column spec
@@ -228,15 +273,22 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   Min: 'Math.min',
   Power: (args, compile) => {
-    const arg = args[0];
-    if (arg === null) throw new Error('Power: no argument');
-    const exp = args[1].re;
-    if (exp === 0.5) return `Math.sqrt(${compile(arg)})`;
-    if (exp === 1 / 3) return `Math.cbrt(${compile(arg)})`;
-    if (exp === 1) return compile(arg);
-    if (exp === -1) return `(1 / (${compile(arg)}))`;
-    if (exp === -0.5) return `(1 / Math.sqrt(${compile(arg)}))`;
-    return `Math.pow(${compile(arg)}, ${compile(args[1])})`;
+    const base = args[0];
+    const exp = args[1];
+    if (base === null) throw new Error('Power: no argument');
+    if (
+      BaseCompiler.isComplexValued(base) ||
+      BaseCompiler.isComplexValued(exp)
+    ) {
+      return `_SYS.cpow(${compile(base)}, ${compile(exp)})`;
+    }
+    const expVal = exp.re;
+    if (expVal === 0.5) return `Math.sqrt(${compile(base)})`;
+    if (expVal === 1 / 3) return `Math.cbrt(${compile(base)})`;
+    if (expVal === 1) return compile(base);
+    if (expVal === -1) return `(1 / (${compile(base)}))`;
+    if (expVal === -0.5) return `(1 / Math.sqrt(${compile(base)}))`;
+    return `Math.pow(${compile(base)}, ${compile(exp)})`;
   },
   Range: (args, compile) => {
     if (args.length === 0) return '[]';
@@ -298,11 +350,31 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     return `1 / Math.cosh(${compile(arg)})`;
   },
   Sign: 'Math.sign',
-  Sin: 'Math.sin',
-  Sinh: 'Math.sinh',
-  Sqrt: 'Math.sqrt',
-  Tan: 'Math.tan',
-  Tanh: 'Math.tanh',
+  Sin: (args, compile) => {
+    if (BaseCompiler.isComplexValued(args[0]))
+      return `_SYS.csin(${compile(args[0])})`;
+    return `Math.sin(${compile(args[0])})`;
+  },
+  Sinh: (args, compile) => {
+    if (BaseCompiler.isComplexValued(args[0]))
+      return `_SYS.csinh(${compile(args[0])})`;
+    return `Math.sinh(${compile(args[0])})`;
+  },
+  Sqrt: (args, compile) => {
+    if (BaseCompiler.isComplexValued(args[0]))
+      return `_SYS.csqrt(${compile(args[0])})`;
+    return `Math.sqrt(${compile(args[0])})`;
+  },
+  Tan: (args, compile) => {
+    if (BaseCompiler.isComplexValued(args[0]))
+      return `_SYS.ctan(${compile(args[0])})`;
+    return `Math.tan(${compile(args[0])})`;
+  },
+  Tanh: (args, compile) => {
+    if (BaseCompiler.isComplexValued(args[0]))
+      return `_SYS.ctanh(${compile(args[0])})`;
+    return `Math.tanh(${compile(args[0])})`;
+  },
   Mod: ([a, b], compile) => {
     if (a === null || b === null) throw new Error('Mod: missing argument');
     const ca = compile(a);
@@ -319,15 +391,62 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // Arithmetic operators handled as functions for completeness
   Subtract: ([a, b], compile) => {
     if (a === null || b === null) throw new Error('Subtract: missing argument');
-    return `(${compile(a)} - ${compile(b)})`;
+    const ac = BaseCompiler.isComplexValued(a);
+    const bc = BaseCompiler.isComplexValued(b);
+    if (!ac && !bc) return `(${compile(a)} - ${compile(b)})`;
+
+    const ca = compile(a);
+    const cb = compile(b);
+    const reA = ac ? `(${ca}).re` : ca;
+    const imA = ac ? `(${ca}).im` : '0';
+    const reB = bc ? `(${cb}).re` : cb;
+    const imB = bc ? `(${cb}).im` : '0';
+    return `({ re: ${reA} - ${reB}, im: ${imA} - ${imB} })`;
   },
   Divide: ([a, b], compile) => {
     if (a === null || b === null) throw new Error('Divide: missing argument');
-    return `(${compile(a)} / ${compile(b)})`;
+    const ac = BaseCompiler.isComplexValued(a);
+    const bc = BaseCompiler.isComplexValued(b);
+    if (!ac && !bc) return `(${compile(a)} / ${compile(b)})`;
+
+    if (ac && bc) {
+      return `(() => { const _a = ${compile(a)}, _b = ${compile(b)}, _d = _b.re * _b.re + _b.im * _b.im; return { re: (_a.re * _b.re + _a.im * _b.im) / _d, im: (_a.im * _b.re - _a.re * _b.im) / _d }; })()`;
+    }
+    if (ac && !bc) {
+      return `(() => { const _a = ${compile(a)}, _r = ${compile(b)}; return { re: _a.re / _r, im: _a.im / _r }; })()`;
+    }
+    return `(() => { const _r = ${compile(a)}, _b = ${compile(b)}, _d = _b.re * _b.re + _b.im * _b.im; return { re: _r * _b.re / _d, im: -_r * _b.im / _d }; })()`;
   },
   Negate: ([x], compile) => {
     if (x === null) throw new Error('Negate: no argument');
-    return `(-${compile(x)})`;
+    if (!BaseCompiler.isComplexValued(x)) return `(-${compile(x)})`;
+    return `_SYS.cneg(${compile(x)})`;
+  },
+  Multiply: (args, compile) => {
+    if (args.length === 1) return compile(args[0]);
+    const anyComplex = args.some((a) => BaseCompiler.isComplexValued(a));
+    if (!anyComplex) return `(${args.map((x) => compile(x)).join(' * ')})`;
+
+    let result = compile(args[0]);
+    let resultIsComplex = BaseCompiler.isComplexValued(args[0]);
+
+    for (let i = 1; i < args.length; i++) {
+      const argCode = compile(args[i]);
+      const argIsComplex = BaseCompiler.isComplexValued(args[i]);
+
+      if (!resultIsComplex && !argIsComplex) {
+        result = `(${result} * ${argCode})`;
+      } else if (resultIsComplex && !argIsComplex) {
+        result = `(() => { const _a = ${result}, _r = ${argCode}; return { re: _a.re * _r, im: _a.im * _r }; })()`;
+        resultIsComplex = true;
+      } else if (!resultIsComplex && argIsComplex) {
+        result = `(() => { const _r = ${result}, _b = ${argCode}; return { re: _r * _b.re, im: _r * _b.im }; })()`;
+        resultIsComplex = true;
+      } else {
+        result = `(() => { const _a = ${result}, _b = ${argCode}; return { re: _a.re * _b.re - _a.im * _b.im, im: _a.re * _b.im + _a.im * _b.re }; })()`;
+      }
+    }
+    return result;
   },
 
   // Factorial and double factorial
@@ -394,6 +513,28 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Binomial: (args, compile) =>
     `_SYS.binomial(${compile(args[0])}, ${compile(args[1])})`,
   Fibonacci: '_SYS.fibonacci',
+
+  // Complex-specific functions
+  Re: (args, compile) => {
+    if (BaseCompiler.isComplexValued(args[0]))
+      return `(${compile(args[0])}).re`;
+    return compile(args[0]);
+  },
+  Im: (args, compile) => {
+    if (BaseCompiler.isComplexValued(args[0]))
+      return `(${compile(args[0])}).im`;
+    return '0';
+  },
+  Arg: (args, compile) => {
+    if (BaseCompiler.isComplexValued(args[0]))
+      return `_SYS.carg(${compile(args[0])})`;
+    return `(${compile(args[0])} >= 0 ? 0 : Math.PI)`;
+  },
+  Conjugate: (args, compile) => {
+    if (BaseCompiler.isComplexValued(args[0]))
+      return `_SYS.cconj(${compile(args[0])})`;
+    return compile(args[0]);
+  },
 };
 
 /** Convert a Complex instance to a plain {re, im} object */

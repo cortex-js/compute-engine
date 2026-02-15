@@ -97,45 +97,49 @@ export class BaseCompiler {
     const op = target.operators?.(h);
 
     if (op !== undefined) {
-      // Check if this looks like a function name rather than an operator
-      // Function names are alphanumeric identifiers, operators are symbols
-      const isFunction = /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(op[0]);
+      // Skip infix operators for complex operands — fall through to function dispatch
+      const hasComplex = args.some((a) => BaseCompiler.isComplexValued(a));
+      if (!hasComplex) {
+        // Check if this looks like a function name rather than an operator
+        // Function names are alphanumeric identifiers, operators are symbols
+        const isFunction = /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(op[0]);
 
-      if (isFunction) {
-        // Compile as a function call (works for both scalar and collection arguments)
-        if (args === null) return `${op[0]}()`;
-        return `${op[0]}(${args.map((arg) => BaseCompiler.compile(arg, target)).join(', ')})`;
-      } else {
-        // Compile as an operator (only for non-collection arguments)
-        if (args.every((x) => !x.isCollection)) {
-          if (isRelationalOperator(h) && args.length > 2) {
-            // Chain relational operators
-            const result: string[] = [];
-            for (let i = 0; i < args.length - 1; i++) {
-              result.push(
-                BaseCompiler.compileExpr(
-                  engine,
-                  h,
-                  [args[i], args[i + 1]],
-                  op[1],
-                  target
-                )
-              );
+        if (isFunction) {
+          // Compile as a function call (works for both scalar and collection arguments)
+          if (args === null) return `${op[0]}()`;
+          return `${op[0]}(${args.map((arg) => BaseCompiler.compile(arg, target)).join(', ')})`;
+        } else {
+          // Compile as an operator (only for non-collection arguments)
+          if (args.every((x) => !x.isCollection)) {
+            if (isRelationalOperator(h) && args.length > 2) {
+              // Chain relational operators
+              const result: string[] = [];
+              for (let i = 0; i < args.length - 1; i++) {
+                result.push(
+                  BaseCompiler.compileExpr(
+                    engine,
+                    h,
+                    [args[i], args[i + 1]],
+                    op[1],
+                    target
+                  )
+                );
+              }
+              return `(${result.join(') && (')})`;
             }
-            return `(${result.join(') && (')})`;
-          }
 
-          if (args === null) return '';
-          let resultStr: string;
-          if (args.length === 1) {
-            // Unary operator, assume prefix
-            resultStr = `${op[0]}${BaseCompiler.compile(args[0], target, op[1])}`;
-          } else {
-            resultStr = args
-              .map((arg) => BaseCompiler.compile(arg, target, op[1]))
-              .join(` ${op[0]} `);
+            if (args === null) return '';
+            let resultStr: string;
+            if (args.length === 1) {
+              // Unary operator, assume prefix
+              resultStr = `${op[0]}${BaseCompiler.compile(args[0], target, op[1])}`;
+            } else {
+              resultStr = args
+                .map((arg) => BaseCompiler.compile(arg, target, op[1]))
+                .join(` ${op[0]} `);
+            }
+            return op[1] < prec ? `(${resultStr})` : resultStr;
           }
-          return op[1] < prec ? `(${resultStr})` : resultStr;
         }
       }
     }
@@ -309,8 +313,13 @@ export class BaseCompiler {
 
     if (isSymbol(expr)) {
       if (expr.symbol === 'ImaginaryUnit') return true;
-      // isReal: true -> real, undefined -> assume real, false -> complex
-      return expr.isReal === false;
+      // A symbol is complex-valued if its type is a subtype of complex
+      // but NOT a subtype of real (e.g., 'complex', 'imaginary',
+      // 'finite_complex'). Symbols typed as 'number' or 'real' (or its
+      // subtypes like 'finite_real', 'integer') are treated as real.
+      const t = expr.type;
+      if (!t) return false;
+      return t.matches('complex') && !t.matches('real');
     }
 
     if (isFunction(expr)) {
