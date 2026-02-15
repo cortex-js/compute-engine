@@ -187,6 +187,34 @@ describe('COMPILE COMPLEX - inline arithmetic', () => {
     expect(val.im).toBeCloseTo(10);
   });
 
+  it('should multiply 3 complex numbers in single IIFE', () => {
+    // (1+i) * (2+i) * (1-i) = (1+i)(2+i) = (2-1)+(1+2)i = 1+3i
+    // then (1+3i)(1-i) = (1+3)+(3-1)i = 4+2i
+    const expr = ce.box([
+      'Multiply',
+      ['Complex', 1, 1],
+      ['Complex', 2, 1],
+      ['Complex', 1, -1],
+    ]);
+    const result = compile(expr, { fallback: false });
+    const val = result.run!() as { re: number; im: number };
+    expect(val.re).toBeCloseTo(4);
+    expect(val.im).toBeCloseTo(2);
+  });
+
+  it('should generate flat code for 3-operand multiply', () => {
+    const expr = ce.box([
+      'Multiply',
+      ['Complex', 1, 1],
+      ['Complex', 2, 1],
+      ['Complex', 1, -1],
+    ]);
+    const result = compile(expr, { fallback: false });
+    // Should be a single IIFE, not nested
+    const iifes = result.code.match(/\(\(\) =>/g);
+    expect(iifes?.length).toBe(1);
+  });
+
   it('should negate a complex number', () => {
     const expr = ce.box(['Negate', ['Complex', 3, 4]]);
     const result = compile(expr, { fallback: false });

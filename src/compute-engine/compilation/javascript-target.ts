@@ -439,26 +439,53 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     const anyComplex = args.some((a) => BaseCompiler.isComplexValued(a));
     if (!anyComplex) return `(${args.map((x) => compile(x)).join(' * ')})`;
 
-    let result = compile(args[0]);
-    let resultIsComplex = BaseCompiler.isComplexValued(args[0]);
+    if (args.length === 2) {
+      // Optimize: single IIFE for 2 operands
+      const ac = BaseCompiler.isComplexValued(args[0]);
+      const bc = BaseCompiler.isComplexValued(args[1]);
+      const ca = compile(args[0]);
+      const cb = compile(args[1]);
+
+      if (ac && bc) {
+        return `(() => { const _a = ${ca}, _b = ${cb}; return { re: _a.re * _b.re - _a.im * _b.im, im: _a.re * _b.im + _a.im * _b.re }; })()`;
+      }
+      if (ac && !bc) {
+        return `(() => { const _a = ${ca}, _r = ${cb}; return { re: _a.re * _r, im: _a.im * _r }; })()`;
+      }
+      // !ac && bc
+      return `(() => { const _r = ${ca}, _b = ${cb}; return { re: _r * _b.re, im: _r * _b.im }; })()`;
+    }
+
+    // 3+ operands: single IIFE, sequential accumulation
+    const parts: string[] = [];
+    const temps: string[] = [];
+    for (let i = 0; i < args.length; i++) {
+      const t = `_v${i}`;
+      temps.push(t);
+      parts.push(`const ${t} = ${compile(args[i])}`);
+    }
+
+    // Accumulate with intermediate variables
+    const firstIsComplex = BaseCompiler.isComplexValued(args[0]);
+    parts.push(
+      `let _re = ${firstIsComplex ? `${temps[0]}.re` : temps[0]}`
+    );
+    parts.push(
+      `let _im = ${firstIsComplex ? `${temps[0]}.im` : '0'}`
+    );
 
     for (let i = 1; i < args.length; i++) {
-      const argCode = compile(args[i]);
-      const argIsComplex = BaseCompiler.isComplexValued(args[i]);
-
-      if (!resultIsComplex && !argIsComplex) {
-        result = `(${result} * ${argCode})`;
-      } else if (resultIsComplex && !argIsComplex) {
-        result = `(() => { const _a = ${result}, _r = ${argCode}; return { re: _a.re * _r, im: _a.im * _r }; })()`;
-        resultIsComplex = true;
-      } else if (!resultIsComplex && argIsComplex) {
-        result = `(() => { const _r = ${result}, _b = ${argCode}; return { re: _r * _b.re, im: _r * _b.im }; })()`;
-        resultIsComplex = true;
-      } else {
-        result = `(() => { const _a = ${result}, _b = ${argCode}; return { re: _a.re * _b.re - _a.im * _b.im, im: _a.re * _b.im + _a.im * _b.re }; })()`;
-      }
+      const t = temps[i];
+      const tIsComplex = BaseCompiler.isComplexValued(args[i]);
+      const tRe = tIsComplex ? `${t}.re` : t;
+      const tIm = tIsComplex ? `${t}.im` : '0';
+      parts.push(`const _nre${i} = _re * ${tRe} - _im * ${tIm}`);
+      parts.push(`const _nim${i} = _re * ${tIm} + _im * ${tRe}`);
+      parts.push(`_re = _nre${i}`);
+      parts.push(`_im = _nim${i}`);
     }
-    return result;
+
+    return `(() => { ${parts.join('; ')}; return { re: _re, im: _im }; })()`;
   },
 
   // Factorial and double factorial
