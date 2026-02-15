@@ -94,8 +94,9 @@ export const UNITS_LIBRARY: SymbolDefinitions = {
 
       return ce._fn('Quantity', [mag, unitArg.canonical]);
     },
-    evaluate: (ops, { engine: ce }) => {
-      return ce._fn('Quantity', [...ops]);
+    evaluate: (ops, { numericApproximation, engine: ce }) => {
+      const mag = numericApproximation ? ops[0].N() : ops[0].evaluate();
+      return ce._fn('Quantity', [mag, ops[1]]);
     },
   },
 
