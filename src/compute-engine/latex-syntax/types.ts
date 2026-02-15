@@ -1186,6 +1186,36 @@ export type SerializeLatexOptions = NumberSerializationFormat & {
     expr: MathJsonExpression,
     level: number
   ) => 'compact' | 'regular' | 'interval' | 'set-builder';
+
+  /**
+   * When true, serialize angle quantities in degrees-minutes-seconds format.
+   * When false (default), use decimal degrees.
+   *
+   * @example
+   * // dmsFormat: true
+   * Quantity(9.5, deg) → "9°30'"
+   *
+   * // dmsFormat: false (default)
+   * Quantity(9.5, deg) → "9.5°"
+   */
+  dmsFormat?: boolean;
+
+  /**
+   * Normalize angles to a specific range during serialization.
+   *
+   * @default 'none'
+   *
+   * @example
+   * // 'none': Show exact value
+   * Degrees(370) → "370°"
+   *
+   * // '0...360': Normalize to [0, 360)
+   * Degrees(370) → "10°"
+   *
+   * // '-180...180': Normalize to [-180, 180]
+   * Degrees(190) → "-170°"
+   */
+  angleNormalization?: 'none' | '0...360' | '-180...180';
 };
 
 /** @internal */
