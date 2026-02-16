@@ -673,9 +673,9 @@ export function parseColor(s: string): number {
     const lin = linSRGBFromLMS(lms);
 
     // Gamma correct and clamp
-    let r = Math.max(0, Math.min(1, gammaCorrect(lin.r)));
-    let g = Math.max(0, Math.min(1, gammaCorrect(lin.g)));
-    let b = Math.max(0, Math.min(1, gammaCorrect(lin.b)));
+    const r = Math.max(0, Math.min(1, gammaCorrect(lin.r)));
+    const g = Math.max(0, Math.min(1, gammaCorrect(lin.g)));
+    const b = Math.max(0, Math.min(1, gammaCorrect(lin.b)));
 
     const rByte = Math.round(r * 255);
     const gByte = Math.round(g * 255);

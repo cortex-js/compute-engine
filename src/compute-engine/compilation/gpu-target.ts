@@ -240,13 +240,11 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
 
   // Complex-specific functions
   Re: (args, compile) => {
-    if (BaseCompiler.isComplexValued(args[0]))
-      return `(${compile(args[0])}).x`;
+    if (BaseCompiler.isComplexValued(args[0])) return `(${compile(args[0])}).x`;
     return compile(args[0]);
   },
   Im: (args, compile) => {
-    if (BaseCompiler.isComplexValued(args[0]))
-      return `(${compile(args[0])}).y`;
+    if (BaseCompiler.isComplexValued(args[0])) return `(${compile(args[0])}).y`;
     return '0.0';
   },
   Arg: (args, compile) => {
@@ -1174,12 +1172,17 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     preamble += buildComplexPreamble(code, this.languageId);
     if (code.includes('_gpu_gamma')) preamble += GPU_GAMMA_PREAMBLE;
     if (code.includes('_gpu_erf')) preamble += GPU_ERF_PREAMBLE;
-    if (code.includes('_gpu_srgb_to') || code.includes('_gpu_oklab') ||
-        code.includes('_gpu_oklch') || code.includes('_gpu_color_mix') ||
-        code.includes('_gpu_apca')) {
-      preamble += this.languageId === 'wgsl'
-        ? GPU_COLOR_PREAMBLE_WGSL
-        : GPU_COLOR_PREAMBLE_GLSL;
+    if (
+      code.includes('_gpu_srgb_to') ||
+      code.includes('_gpu_oklab') ||
+      code.includes('_gpu_oklch') ||
+      code.includes('_gpu_color_mix') ||
+      code.includes('_gpu_apca')
+    ) {
+      preamble +=
+        this.languageId === 'wgsl'
+          ? GPU_COLOR_PREAMBLE_WGSL
+          : GPU_COLOR_PREAMBLE_GLSL;
     }
     if (preamble) result.preamble = preamble;
     return result;

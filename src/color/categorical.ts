@@ -214,19 +214,19 @@ const SPECTRUM_12 = [
 ];
 
 export const CATEGORICAL_PALETTES = {
-  tycho11: TYCHO_11,
+  'tycho11': TYCHO_11,
   'tycho-dark11': TYCHO_DARK_11,
   'tycho-robust11': TYCHO_ROBUST_11,
   'tycho-soft11': TYCHO_SOFT_11,
   'tycho-soft-dark11': TYCHO_SOFT_DARK_11,
   'tycho-bold11': TYCHO_BOLD_11,
   'tycho-bold-dark11': TYCHO_BOLD_DARK_11,
-  tableau10: TABLEAU_10,
-  kelly22: KELLY_22,
-  mathematica10: MATHEMATICA_10,
-  cupertino10: CUPERTINO_10,
+  'tableau10': TABLEAU_10,
+  'kelly22': KELLY_22,
+  'mathematica10': MATHEMATICA_10,
+  'cupertino10': CUPERTINO_10,
   'cupertino-dark10': CUPERTINO_DARK_10,
-  spectrum12: SPECTRUM_12,
+  'spectrum12': SPECTRUM_12,
 } as const;
 
 export type CategoricalPaletteName = keyof typeof CATEGORICAL_PALETTES;

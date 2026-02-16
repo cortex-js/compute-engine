@@ -836,10 +836,7 @@ const colorHelpers = {
     return this._interpolatePalette(colors, t);
   },
 
-  _interpolatePalette(
-    colors: [number, number, number][],
-    t: number
-  ): number[] {
+  _interpolatePalette(colors: [number, number, number][], t: number): number[] {
     if (colors.length === 0) return [0, 0, 0];
     if (t <= 0) return [...colors[0]];
     if (t >= 1) return [...colors[colors.length - 1]];
@@ -848,11 +845,20 @@ const colorHelpers = {
     const i = Math.floor(pos);
     const frac = pos - i;
 
-    if (frac === 0 || i >= colors.length - 1) return [...colors[Math.min(i, colors.length - 1)]];
+    if (frac === 0 || i >= colors.length - 1)
+      return [...colors[Math.min(i, colors.length - 1)]];
 
     // Interpolate in OKLCh for perceptual uniformity
-    const rgb1 = { r: colors[i][0] * 255, g: colors[i][1] * 255, b: colors[i][2] * 255 };
-    const rgb2 = { r: colors[i + 1][0] * 255, g: colors[i + 1][1] * 255, b: colors[i + 1][2] * 255 };
+    const rgb1 = {
+      r: colors[i][0] * 255,
+      g: colors[i][1] * 255,
+      b: colors[i][2] * 255,
+    };
+    const rgb2 = {
+      r: colors[i + 1][0] * 255,
+      g: colors[i + 1][1] * 255,
+      b: colors[i + 1][2] * 255,
+    };
     const c1 = rgbToOklch(rgb1);
     const c2 = rgbToOklch(rgb2);
 
