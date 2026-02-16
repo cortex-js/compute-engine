@@ -9,6 +9,7 @@
 
 import type { Expression } from '../global-types';
 import { isSymbol, isNumber } from '../boxed-expression/type-guards';
+import { normalizeIndexingSet } from '../library/utils';
 
 import { BaseCompiler } from './base-compiler';
 import type {
@@ -185,6 +186,13 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Arcsch: (args, compile) => `_IA.acsch(${compile(args[0])})`,
   Arsech: (args, compile) => `_IA.asech(${compile(args[0])})`,
 
+  // Cardinal sine
+  Sinc: (args, compile) => `_IA.sinc(${compile(args[0])})`,
+
+  // Fresnel integrals
+  FresnelS: (args, compile) => `_IA.fresnelS(${compile(args[0])})`,
+  FresnelC: (args, compile) => `_IA.fresnelC(${compile(args[0])})`,
+
   // Special functions
   Gamma: (args, compile) => `_IA.gamma(${compile(args[0])})`,
   GammaLn: (args, compile) => `_IA.gammaln(${compile(args[0])})`,
@@ -198,6 +206,12 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Remainder: (args, compile) =>
     `_IA.remainder(${compile(args[0])}, ${compile(args[1])})`,
 
+  // Sum / Product
+  Sum: (args, compile, target) =>
+    compileIntervalSumProduct('Sum', args, compile, target),
+  Product: (args, compile, target) =>
+    compileIntervalSumProduct('Product', args, compile, target),
+
   // Conditionals
   If: (args, compile) => {
     if (args.length !== 3) throw new Error('If: wrong number of arguments');
@@ -207,6 +221,26 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       () => ${compile(args[1])},
       () => ${compile(args[2])}
     )`;
+  },
+  Which: (args, compile) => {
+    if (args.length < 2 || args.length % 2 !== 0)
+      throw new Error('Which: expected even number of arguments (condition/value pairs)');
+    // Build nested piecewise calls for each condition/value pair
+    const buildPiecewise = (i: number): string => {
+      if (i >= args.length) return `{ kind: 'empty' }`;
+      const cond = args[i];
+      const val = args[i + 1];
+      // If condition is the symbol True, it's the default branch
+      if (isSymbol(cond) && cond.symbol === 'True') {
+        return compile(val);
+      }
+      return `_IA.piecewise(
+      ${compile(cond)},
+      () => ${compile(val)},
+      () => ${buildPiecewise(i + 2)}
+    )`;
+    };
+    return buildPiecewise(0);
   },
   // Comparisons
   Equal: (args, compile) =>
@@ -226,6 +260,66 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
 };
 
 /**
+ * Maximum number of terms to unroll in an interval Sum/Product.
+ */
+const INTERVAL_UNROLL_LIMIT = 100;
+
+/**
+ * Compile Sum or Product for the interval arithmetic target.
+ *
+ * The iteration variable is substituted with `_IA.point(k)` so the
+ * body compiles correctly as interval expressions.  Accumulation uses
+ * `_IA.add` / `_IA.mul`.
+ */
+function compileIntervalSumProduct(
+  kind: 'Sum' | 'Product',
+  args: ReadonlyArray<Expression>,
+  _compile: (expr: Expression) => string,
+  target: CompileTarget<Expression>
+): string {
+  if (!args[0]) throw new Error(`${kind}: no body`);
+  if (!args[1]) throw new Error(`${kind}: no indexing set`);
+
+  const { index, lower, upper } = normalizeIndexingSet(args[1]);
+  const isSum = kind === 'Sum';
+  const iaOp = isSum ? '_IA.add' : '_IA.mul';
+  const identity = isSum ? '_IA.point(0)' : '_IA.point(1)';
+
+  // Empty range
+  if (lower > upper) return identity;
+
+  const termCount = upper - lower + 1;
+
+  if (termCount <= INTERVAL_UNROLL_LIMIT) {
+    // --- Unroll: substitute iteration variable with _IA.point(k) ---
+    const terms: string[] = [];
+    for (let k = lower; k <= upper; k++) {
+      const innerTarget: CompileTarget<Expression> = {
+        ...target,
+        var: (id) => (id === index ? `_IA.point(${k})` : target.var(id)),
+      };
+      terms.push(BaseCompiler.compile(args[0], innerTarget));
+    }
+
+    // Nest: _IA.add(t0, _IA.add(t1, _IA.add(t2, t3)))
+    let result = terms[terms.length - 1];
+    for (let i = terms.length - 2; i >= 0; i--) {
+      result = `${iaOp}(${terms[i]}, ${result})`;
+    }
+    return result;
+  }
+
+  // --- Large range: emit a loop ---
+  const acc = BaseCompiler.tempVar();
+  const bodyCode = BaseCompiler.compile(args[0], {
+    ...target,
+    var: (id) => (id === index ? `_IA.point(${index})` : target.var(id)),
+  });
+
+  return `(() => { let ${acc} = ${identity}; for (let ${index} = ${lower}; ${index} <= ${upper}; ${index}++) { ${acc} = ${iaOp}(${acc}, ${bodyCode}); } return ${acc}; })()`;
+}
+
+/**
  * JavaScript function that wraps compiled interval arithmetic code.
  *
  * Injects the _IA library and provides input conversion from various formats.
@@ -241,9 +335,15 @@ export class ComputeEngineIntervalFunction extends Function {
     );
     return new Proxy(this, {
       apply: (target, thisArg, argumentsList) => {
-        // Process input arguments - convert to interval format
-        const processedArgs = argumentsList.map(processInput);
-        return super.apply(thisArg, [this.IA, ...processedArgs]);
+        try {
+          // Process input arguments - convert to interval format
+          const processedArgs = argumentsList.map(processInput);
+          return super.apply(thisArg, [this.IA, ...processedArgs]);
+        } catch {
+          // Runtime error (e.g., missing _IA method) — return "entire"
+          // to signal "cannot bound this" rather than crashing.
+          return { kind: 'entire' };
+        }
       },
       get: (target, prop) => {
         if (prop === 'toString') return (): string => body;
@@ -401,12 +501,19 @@ function compileToIntervalTarget(
   expr: Expression,
   target: CompileTarget<Expression>
 ): CompilationResult {
-  const js = BaseCompiler.compile(expr, target);
+  let js: string;
+  try {
+    js = BaseCompiler.compile(expr, target);
+  } catch {
+    // Expression contains operators/functions not supported by the interval
+    // target. Report failure so the caller can fall back to another target.
+    return { target: 'interval-js', success: false, code: '' };
+  }
   const fn = new ComputeEngineIntervalFunction(js, target.preamble);
   return {
     target: 'interval-js',
     success: true,
     code: js,
-    run: fn as unknown as (...args: number[]) => number,
+    run: fn as unknown as CompilationResult['run'],
   };
 }

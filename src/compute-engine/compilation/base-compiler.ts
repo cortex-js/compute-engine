@@ -90,6 +90,19 @@ export class BaseCompiler {
     }
 
     if (h === 'Sum' || h === 'Product') {
+      // Delegate to target-specific function handler if available,
+      // otherwise fall back to the generic loop compilation.
+      const sumProdFn = target.functions?.(h);
+      if (typeof sumProdFn === 'function') {
+        return sumProdFn(
+          args,
+          (expr) => BaseCompiler.compile(expr, target),
+          target
+        );
+      }
+      if (typeof sumProdFn === 'string') {
+        return `${sumProdFn}(${args.map((x) => BaseCompiler.compile(x, target)).join(', ')})`;
+      }
       return BaseCompiler.compileLoop(h, args, target);
     }
 
@@ -106,7 +119,6 @@ export class BaseCompiler {
 
         if (isFunction) {
           // Compile as a function call (works for both scalar and collection arguments)
-          if (args === null) return `${op[0]}()`;
           return `${op[0]}(${args.map((arg) => BaseCompiler.compile(arg, target)).join(', ')})`;
         } else {
           // Compile as an operator (only for non-collection arguments)
@@ -128,7 +140,6 @@ export class BaseCompiler {
               return `(${result.join(') && (')})`;
             }
 
-            if (args === null) return '';
             let resultStr: string;
             if (args.length === 1) {
               // Unary operator, assume prefix
@@ -163,6 +174,10 @@ export class BaseCompiler {
       return `${isSymbol(args[0]) ? args[0].symbol : '_'} = ${BaseCompiler.compile(args[1], target)}`;
     if (h === 'Return')
       return `return ${BaseCompiler.compile(args[0], target)}`;
+    if (h === 'Break') return 'break';
+    if (h === 'Continue') return 'continue';
+
+    if (h === 'Loop') return BaseCompiler.compileForLoop(args, target);
 
     if (h === 'If') {
       if (args.length !== 3) throw new Error('If: wrong number of arguments');
@@ -171,13 +186,36 @@ export class BaseCompiler {
         if (typeof fn === 'function') {
           return fn(args, (expr) => BaseCompiler.compile(expr, target), target);
         }
-        if (args === null) return `${fn}()`;
         return `${fn}(${args.map((x) => BaseCompiler.compile(x, target)).join(', ')})`;
       }
       return `((${BaseCompiler.compile(args[0], target)}) ? (${BaseCompiler.compile(
         args[1],
         target
       )}) : (${BaseCompiler.compile(args[2], target)}))`;
+    }
+
+    if (h === 'Which') {
+      if (args.length < 2 || args.length % 2 !== 0)
+        throw new Error('Which: expected even number of arguments (condition/value pairs)');
+      const fn = target.functions?.(h);
+      if (fn) {
+        if (typeof fn === 'function') {
+          return fn(args, (expr) => BaseCompiler.compile(expr, target), target);
+        }
+        return `${fn}(${args.map((x) => BaseCompiler.compile(x, target)).join(', ')})`;
+      }
+      // Compile to chained ternaries
+      const compilePair = (i: number): string => {
+        if (i >= args.length) return 'NaN';
+        const cond = args[i];
+        const val = args[i + 1];
+        // If condition is the symbol True, it's the default branch
+        if (isSymbol(cond) && cond.symbol === 'True') {
+          return `(${BaseCompiler.compile(val, target)})`;
+        }
+        return `((${BaseCompiler.compile(cond, target)}) ? (${BaseCompiler.compile(val, target)}) : ${compilePair(i + 2)})`;
+      };
+      return compilePair(0);
     }
 
     if (h === 'Block') {
@@ -207,7 +245,6 @@ export class BaseCompiler {
       return fn(args, (expr) => BaseCompiler.compile(expr, target), target);
     }
 
-    if (args === null) return `${fn}()`;
     return `${fn}(${args.map((x) => BaseCompiler.compile(x, target)).join(', ')})`;
   }
 
@@ -249,6 +286,82 @@ export class BaseCompiler {
   }
 
   /**
+   * Compile a Loop expression with Element(index, Range(lo, hi)) indexing.
+   * Generates: (() => { for (let i = lo; i <= hi; i++) { body } })()
+   */
+  private static compileForLoop(
+    args: ReadonlyArray<Expression>,
+    target: CompileTarget<Expression>
+  ): TargetSource {
+    if (!args[0]) throw new Error('Loop: no body');
+    if (!args[1]) throw new Error('Loop: no indexing set');
+
+    const indexing = args[1];
+    if (indexing.operator !== 'Element' || !isFunction(indexing))
+      throw new Error('Loop: expected Element(index, Range(lo, hi))');
+
+    const indexExpr = indexing.ops[0];
+    const rangeExpr = indexing.ops[1];
+
+    if (!isSymbol(indexExpr))
+      throw new Error('Loop: index must be a symbol');
+    if (rangeExpr.operator !== 'Range' || !isFunction(rangeExpr))
+      throw new Error('Loop: expected Range(lo, hi)');
+
+    const index = indexExpr.symbol;
+    const lower = BaseCompiler.compile(rangeExpr.ops[0], target);
+    const upper = BaseCompiler.compile(rangeExpr.ops[1], target);
+
+    const bodyTarget: CompileTarget<Expression> = {
+      ...target,
+      var: (id: string) => (id === index ? index : target.var(id)),
+    };
+
+    const bodyStmts = BaseCompiler.compileLoopBody(args[0], bodyTarget);
+
+    return `(() => {${target.ws('\n')}for (let ${index} = ${lower}; ${index} <= ${upper}; ${index}++) {${target.ws('\n')}${bodyStmts}${target.ws('\n')}}${target.ws('\n')}})()`;
+  }
+
+  /**
+   * Compile a loop body expression as statements (not wrapped in IIFE).
+   * Handles Break, Continue, Return as statements, and If as if-else when
+   * branches contain control flow.
+   */
+  private static compileLoopBody(
+    expr: Expression,
+    target: CompileTarget<Expression>
+  ): string {
+    // Nothing is a no-op in statement context
+    if (isSymbol(expr) && expr.symbol === 'Nothing') return '';
+    if (!isFunction(expr)) return BaseCompiler.compile(expr, target);
+
+    const h = expr.operator;
+
+    if (h === 'Break') return 'break';
+    if (h === 'Continue') return 'continue';
+    if (h === 'Return')
+      return `return ${BaseCompiler.compile(expr.ops[0], target)}`;
+
+    if (h === 'If') {
+      const cond = BaseCompiler.compile(expr.ops[0], target);
+      const thenBranch = BaseCompiler.compileLoopBody(expr.ops[1], target);
+      if (expr.ops.length > 2) {
+        const elseBranch = BaseCompiler.compileLoopBody(expr.ops[2], target);
+        if (elseBranch) return `if (${cond}) { ${thenBranch} } else { ${elseBranch} }`;
+      }
+      return `if (${cond}) { ${thenBranch} }`;
+    }
+
+    if (h === 'Block') {
+      return expr.ops
+        .map((s) => BaseCompiler.compileLoopBody(s, target))
+        .join('; ');
+    }
+
+    return BaseCompiler.compile(expr, target);
+  }
+
+  /**
    * Compile loop constructs (Sum/Product)
    */
   private static compileLoop(
@@ -256,7 +369,6 @@ export class BaseCompiler {
     args: ReadonlyArray<Expression>,
     target: CompileTarget<Expression>
   ): string {
-    if (args === null) throw new Error('Sum/Product: no arguments');
     if (!args[0]) throw new Error('Sum/Product: no body');
 
     const {

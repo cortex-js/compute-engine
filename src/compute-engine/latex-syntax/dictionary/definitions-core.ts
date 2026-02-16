@@ -758,13 +758,196 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       const seq = parseSequence(parser, terminator, lhs, 19, ';');
       if (seq === null) return null;
 
+      // If any element is an Assign, produce a Block
+      if (seq.some((e) => operator(e) === 'Assign'))
+        return buildBlockFromSequence(seq);
+
       return ['Delimiter', ['Sequence', ...seq], "';'"] as MathJsonExpression;
     },
   },
+  // \text{where} — variable binding infix
+  {
+    latexTrigger: ['\\text'],
+    kind: 'infix',
+    associativity: 'none',
+    precedence: 21, // Above ; (19) and , (20), very low binding
+    parse: (
+      parser: Parser,
+      lhs: MathJsonExpression,
+      until: Readonly<Terminator>
+    ): MathJsonExpression | null => {
+      const start = parser.index;
+      if (!matchTextKeyword(parser, 'where')) {
+        parser.index = start;
+        return null;
+      }
+      return parseWhereExpression(parser, lhs, until);
+    },
+  },
+  // \operatorname{where}
+  {
+    symbolTrigger: 'where',
+    kind: 'infix',
+    associativity: 'none',
+    precedence: 21,
+    parse: (
+      parser: Parser,
+      lhs: MathJsonExpression,
+      until: Readonly<Terminator>
+    ): MathJsonExpression | null => parseWhereExpression(parser, lhs, until),
+  },
+  // Block serializer — used by both `where` and semicolon blocks
+  {
+    name: 'Block',
+    serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
+      const args = operands(expr);
+      if (!args || args.length === 0) return '';
+      // Skip Declare statements (implicit in LaTeX — the := implies declaration)
+      const parts = args
+        .filter((a) => operator(a) !== 'Declare')
+        .map((a) => serializer.serialize(a));
+      return parts.join(';\\; ');
+    },
+  },
+  // Serializer for If expressions (separate from the parser entry
+  // because name-based entries affect kind-based indexing)
+  {
+    name: 'If',
+    serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
+      const args = operands(expr);
+      if (!args || args.length < 3) return '';
+      return joinLatex([
+        '\\text{if }',
+        serializer.serialize(args[0]),
+        '\\text{ then }',
+        serializer.serialize(args[1]),
+        '\\text{ else }',
+        serializer.serialize(args[2]),
+      ]);
+    },
+  },
+  // Serializer for Loop expressions
+  {
+    name: 'Loop',
+    serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
+      const args = operands(expr);
+      if (!args || args.length < 2) return '';
+      const body = args[0];
+      const indexing = args[1]; // Element(i, Range(lo, hi))
+      if (operator(indexing) === 'Element') {
+        const index = operand(indexing, 1);
+        const range = operand(indexing, 2);
+        if (operator(range) === 'Range') {
+          const lo = operand(range, 1);
+          const hi = operand(range, 2);
+          return joinLatex([
+            '\\text{for }',
+            serializer.serialize(index),
+            '\\text{ from }',
+            serializer.serialize(lo),
+            '\\text{ to }',
+            serializer.serialize(hi),
+            '\\text{ do }',
+            serializer.serialize(body),
+          ]);
+        }
+      }
+      return joinLatex([
+        '\\operatorname{Loop}(',
+        serializer.serialize(body),
+        ', ',
+        serializer.serialize(indexing),
+        ')',
+      ]);
+    },
+  },
+  // Serializer for Break
+  { name: 'Break', serialize: (): string => '\\text{break}' },
+  // Serializer for Continue
+  { name: 'Continue', serialize: (): string => '\\text{continue}' },
+  // Serializer for Return
+  {
+    name: 'Return',
+    serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
+      const arg = operand(expr, 1);
+      if (!arg || symbol(arg) === 'Nothing')
+        return '\\text{return}';
+      return joinLatex(['\\text{return }', serializer.serialize(arg)]);
+    },
+  },
+  // Also match `\operatorname{if}` / `\mathrm{if}`
+  {
+    symbolTrigger: 'if',
+    kind: 'prefix',
+    precedence: 245,
+    parse: (
+      parser: Parser,
+      until?: Readonly<Terminator>
+    ): MathJsonExpression | null => {
+      return parseIfExpression(parser, until);
+    },
+  },
+  // \operatorname{for}
+  {
+    symbolTrigger: 'for',
+    kind: 'prefix',
+    precedence: 245,
+    parse: (
+      parser: Parser,
+      until?: Readonly<Terminator>
+    ): MathJsonExpression | null => parseForExpression(parser, until),
+  },
+  // \operatorname{break}
+  {
+    symbolTrigger: 'break',
+    kind: 'prefix',
+    precedence: 245,
+    parse: (): MathJsonExpression => ['Break'],
+  },
+  // \operatorname{continue}
+  {
+    symbolTrigger: 'continue',
+    kind: 'prefix',
+    precedence: 245,
+    parse: (): MathJsonExpression => ['Continue'],
+  },
+  // \operatorname{return}
+  {
+    symbolTrigger: 'return',
+    kind: 'prefix',
+    precedence: 245,
+    parse: (
+      parser: Parser,
+      until?: Readonly<Terminator>
+    ): MathJsonExpression =>
+      ['Return', parser.parseExpression(until) ?? 'Nothing'],
+  },
+
   {
     name: 'String',
     latexTrigger: ['\\text'],
-    parse: (scanner) => parseTextRun(scanner),
+    parse: (parser: Parser, until?: Readonly<Terminator>) => {
+      const start = parser.index;
+      if (matchTextKeyword(parser, 'if'))
+        return parseIfExpression(parser, until);
+      parser.index = start;
+      if (matchTextKeyword(parser, 'for'))
+        return parseForExpression(parser, until);
+      parser.index = start;
+      if (matchTextKeyword(parser, 'break'))
+        return ['Break'] as MathJsonExpression;
+      parser.index = start;
+      if (matchTextKeyword(parser, 'continue'))
+        return ['Continue'] as MathJsonExpression;
+      parser.index = start;
+      if (matchTextKeyword(parser, 'return'))
+        return [
+          'Return',
+          parser.parseExpression(until) ?? 'Nothing',
+        ] as MathJsonExpression;
+      parser.index = start;
+      return parseTextRun(parser);
+    },
     serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
       const args = operands(expr);
       if (args.length === 0) return '\\text{}';
@@ -1637,7 +1820,8 @@ export function latexToDelimiterShorthand(s: string): string | undefined {
 
 function parseAssign(
   parser: Parser,
-  lhs: MathJsonExpression
+  lhs: MathJsonExpression,
+  until?: Readonly<Terminator>
 ): MathJsonExpression | null {
   //
   // 0/ Convert compound symbols back to Subscript form for sequence definitions
@@ -1672,7 +1856,7 @@ function parseAssign(
     const fn = symbol(operand(lhs, 1));
     if (!fn) return null;
 
-    const rhs = parser.parseExpression({ minPrec: 0 });
+    const rhs = parser.parseExpression({ ...(until ?? {}), minPrec: 20 });
     if (rhs === null) return null;
 
     const delimBody = operand(operand(lhs, 2), 1);
@@ -1691,7 +1875,7 @@ function parseAssign(
     const fn = symbol(operand(lhs, 1));
     if (!fn) return null;
 
-    const rhs = parser.parseExpression({ minPrec: 0 });
+    const rhs = parser.parseExpression({ ...(until ?? {}), minPrec: 20 });
     if (rhs === null) return null;
 
     const sub = operand(lhs, 2);
@@ -1723,7 +1907,7 @@ function parseAssign(
       // We have f_n := or f^n := ...
     }
     const args = operands(lhs);
-    const rhs = parser.parseExpression({ minPrec: 0 });
+    const rhs = parser.parseExpression({ ...(until ?? {}), minPrec: 20 });
     if (rhs === null) return null;
 
     return ['Assign', fn, ['Function', rhs, ...args]];
@@ -1731,7 +1915,7 @@ function parseAssign(
 
   if (!symbol(lhs)) return null;
 
-  const rhs = parser.parseExpression({ minPrec: 0 });
+  const rhs = parser.parseExpression({ ...(until ?? {}), minPrec: 20 });
   if (rhs === null) return null;
 
   return ['Assign', lhs, rhs];
@@ -1785,6 +1969,239 @@ function parseCasesEnvironment(parser: Parser): MathJsonExpression | null {
     }
   }
   return ['Which', ...result];
+}
+
+/**
+ * Try to match `\text{keyword}` where `keyword` is the content between braces.
+ * Handles optional surrounding spaces: `\text{ if }` matches "if".
+ * If matched, tokens are consumed. If not, parser index is unchanged.
+ */
+function matchTextKeyword(parser: Parser, keyword: string): boolean {
+  const start = parser.index;
+
+  // We expect <{> after \text (the latexTrigger already consumed \text)
+  if (!parser.match('<{>')) {
+    parser.index = start;
+    return false;
+  }
+
+  // Skip leading spaces
+  while (parser.match('<space>')) {}
+
+  // Accumulate alphabetic characters
+  let text = '';
+  while (!parser.atEnd && parser.peek !== '<}>' && parser.peek !== '<space>') {
+    const tok = parser.peek;
+    // Only accumulate alpha chars
+    if (/^[a-zA-Z]$/.test(tok)) {
+      text += tok;
+      parser.nextToken();
+    } else {
+      break;
+    }
+  }
+
+  // Skip trailing spaces
+  while (parser.match('<space>')) {}
+
+  // Must close with <}>
+  if (!parser.match('<}>')) {
+    parser.index = start;
+    return false;
+  }
+
+  if (text !== keyword) {
+    parser.index = start;
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * Match either `\text{keyword}` or `\operatorname{keyword}` (and variants
+ * like `\mathrm{keyword}`).
+ * Consumes tokens on success, leaves parser unchanged on failure.
+ */
+function matchKeyword(parser: Parser, keyword: string): boolean {
+  const start = parser.index;
+
+  // Try \text{keyword} — need to check for \text trigger first
+  if (parser.match('\\text')) {
+    if (matchTextKeyword(parser, keyword)) return true;
+    parser.index = start;
+  }
+
+  // Try \operatorname{keyword}, \mathrm{keyword}, etc.
+  // parseComplexId in parse.ts handles these via parseSymbol
+  const saved = parser.index;
+  const sym = parser.parseSymbol();
+  if (sym !== null && symbol(sym) === keyword) return true;
+  parser.index = saved;
+
+  return false;
+}
+
+/**
+ * Non-consuming check: returns true if the next tokens form `keyword`
+ * (via \text{keyword} or \operatorname{keyword}), without advancing.
+ */
+function peekKeyword(parser: Parser, keyword: string): boolean {
+  const start = parser.index;
+  const result = matchKeyword(parser, keyword);
+  parser.index = start;
+  return result;
+}
+
+/**
+ * Parse the body of an if expression after the "if" keyword has been consumed.
+ * Parses: condition \text{then} trueBranch \text{else} falseBranch
+ */
+function parseIfExpression(
+  parser: Parser,
+  until?: Readonly<Terminator>
+): MathJsonExpression | null {
+  // Parse condition — stop at "then" keyword
+  const condition = parser.parseExpression({
+    minPrec: 0,
+    condition: (p) => peekKeyword(p, 'then'),
+  });
+  if (condition === null) return null;
+
+  // Consume "then"
+  if (!matchKeyword(parser, 'then')) return null;
+
+  // Parse true branch — stop at "else" keyword
+  const trueBranch = parser.parseExpression({
+    minPrec: 0,
+    condition: (p) => peekKeyword(p, 'else'),
+  });
+  if (trueBranch === null) return null;
+
+  // Consume "else"
+  if (!matchKeyword(parser, 'else')) return null;
+
+  // Parse false branch — use outer terminator
+  const falseBranch = parser.parseExpression(until) ?? 'Nothing';
+
+  return ['If', condition, trueBranch, falseBranch] as MathJsonExpression;
+}
+
+/**
+ * Parse a for expression after the "for" keyword has been consumed.
+ * Parses: index \text{from} lower \text{to} upper \text{do} body
+ * Returns: ["Loop", body, ["Element", index, ["Range", lower, upper]]]
+ */
+function parseForExpression(
+  parser: Parser,
+  until?: Readonly<Terminator>
+): MathJsonExpression | null {
+  // Parse index variable — stop at "from" keyword
+  const indexExpr = parser.parseExpression({
+    minPrec: 0,
+    condition: (p) => peekKeyword(p, 'from'),
+  });
+  const index = indexExpr ? symbol(indexExpr) : null;
+  if (!index) return null;
+
+  // Consume "from"
+  if (!matchKeyword(parser, 'from')) return null;
+
+  // Parse lower bound — stop at "to" keyword
+  const lower = parser.parseExpression({
+    minPrec: 0,
+    condition: (p) => peekKeyword(p, 'to'),
+  });
+  if (lower === null) return null;
+
+  // Consume "to"
+  if (!matchKeyword(parser, 'to')) return null;
+
+  // Parse upper bound — stop at "do" keyword
+  const upper = parser.parseExpression({
+    minPrec: 0,
+    condition: (p) => peekKeyword(p, 'do'),
+  });
+  if (upper === null) return null;
+
+  // Consume "do"
+  if (!matchKeyword(parser, 'do')) return null;
+
+  // Parse body — use outer terminator
+  const body = parser.parseExpression(until) ?? 'Nothing';
+
+  return [
+    'Loop',
+    body,
+    ['Element', index, ['Range', lower, upper]],
+  ] as MathJsonExpression;
+}
+
+/**
+ * Parse the bindings after "where" has been consumed.
+ * Bindings are comma-separated expressions (typically Assign).
+ * Produces a Block: declarations first, then body (lhs) last.
+ */
+function parseWhereExpression(
+  parser: Parser,
+  lhs: MathJsonExpression,
+  until?: Readonly<Terminator>
+): MathJsonExpression | null {
+  // Stop at commas so each binding is parsed separately
+  const bindingTerminator: Terminator = {
+    minPrec: 21, // Above comma (20) and ; (19)
+    condition: (p) => {
+      // Check if the outer terminator says to stop
+      if (until?.condition?.(p)) return true;
+      // Check for comma (skip spaces first)
+      const saved = p.index;
+      p.skipSpace();
+      const isComma = p.peek === ',';
+      p.index = saved;
+      return isComma;
+    },
+  };
+
+  const bindings: MathJsonExpression[] = [];
+  do {
+    parser.skipSpace();
+    const binding = parser.parseExpression(bindingTerminator);
+    if (!binding) break;
+    bindings.push(binding);
+    parser.skipSpace();
+  } while (parser.match(','));
+
+  if (bindings.length === 0) return null;
+
+  // Build Block: Declare+Assign for each binding, body (lhs) last
+  const block: MathJsonExpression[] = [];
+  for (const b of bindings) {
+    if (operator(b) === 'Assign') {
+      block.push(['Declare', operand(b, 1)!]);
+      block.push(b);
+    } else {
+      block.push(b);
+    }
+  }
+  block.push(lhs); // body is last in Block
+  return ['Block', ...block] as MathJsonExpression;
+}
+
+/**
+ * Convert a sequence of expressions to a Block, inserting Declare
+ * before each Assign.
+ */
+function buildBlockFromSequence(
+  seq: MathJsonExpression[]
+): MathJsonExpression {
+  const block: MathJsonExpression[] = [];
+  for (const s of seq) {
+    if (operator(s) === 'Assign') {
+      block.push(['Declare', operand(s, 1)!]);
+    }
+    block.push(s);
+  }
+  return ['Block', ...block] as MathJsonExpression;
 }
 
 function parseAt(

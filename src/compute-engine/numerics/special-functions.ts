@@ -1319,3 +1319,155 @@ function airyBiNegAsymptotic(absX: number, xi: number): number {
   const x14 = Math.pow(absX, 0.25);
   return Math.cos(xi + Math.PI / 4) / (Math.sqrt(Math.PI) * x14);
 }
+
+// ──────────────────────────────────────────────────────────────────
+// Fresnel integrals
+//
+// S(x) = ∫₀ˣ sin(π t²/2) dt
+// C(x) = ∫₀ˣ cos(π t²/2) dt
+//
+// Rational Chebyshev approximation from Cephes / scipy.
+// Three regions: |x|<1.6, 1.6≤|x|<36, |x|≥36.
+// ──────────────────────────────────────────────────────────────────
+
+// Region 1 (|x| < 1.6): S(x) = x³ P(x⁴)/Q(x⁴)
+// Coefficients from Cephes (π/2 factor is baked into the coefficients)
+const SN = [
+  -2.99181919401019853726e3, 7.08840045257738576863e5,
+  -6.29741486205862506537e7, 2.54890880573376359104e9,
+  -4.42979518059697779103e10, 3.18016297876567817986e11,
+];
+const SD = [
+  1.0, 2.81376268889994315696e2, 4.55847810806532581675e4,
+  5.17343888770096400730e6, 4.19320245898111231129e8,
+  2.24411795645340920940e10, 6.07366389490084914091e11,
+];
+
+// Region 1 (|x| < 1.6): C(x) = x P(x⁴)/Q(x⁴)
+const CN = [
+  -4.98843114573573548651e-8, 9.50428062829859605134e-6,
+  -6.45191435683965050962e-4, 1.88843319396703850064e-2,
+  -2.05525900955013891793e-1, 9.99999999999999998822e-1,
+];
+const CD = [
+  3.99982968972495980367e-12, 9.15439215774657478799e-10,
+  1.25001862479598821474e-7, 1.22262789024179030997e-5,
+  8.68029542941784300606e-4, 4.12142090722199792936e-2,
+  1.00000000000000000118e0,
+];
+
+// Region 2 (1.6 ≤ |x| < 36): auxiliary f(x), g(x) as rational approx of u=1/(π²x⁴)
+const FN = [
+  4.21543555043677546506e-1, 1.43407919780758885261e-1,
+  1.15220955073585758835e-2, 3.45017939782574027900e-4,
+  4.63613749287867322088e-6, 3.05568983790257605827e-8,
+  1.02304514164907233465e-10, 1.72010743268161828879e-13,
+  1.34283276233062758925e-16, 3.76329711269987889006e-20,
+];
+const FD = [
+  1.0, 7.51586398353378947175e-1, 1.16888925859191382142e-1,
+  6.44051526508858611005e-3, 1.55934409164153020873e-4,
+  1.84627567348930545870e-6, 1.12699224763999035261e-8,
+  3.60140029589371370404e-11, 5.88754533621578410010e-14,
+  4.52001434074129701496e-17, 1.25443237090011264384e-20,
+];
+
+// Region 2: auxiliary g(x)
+const GN = [
+  5.04442073643383265887e-1, 1.97102833525523411709e-1,
+  1.87648584092575249293e-2, 6.84079380915393090172e-4,
+  1.15138826111884280931e-5, 9.82852443688422223854e-8,
+  4.45344415861750144738e-10, 1.08268041139020870318e-12,
+  1.37555460633261799868e-15, 8.36354435630677421531e-19,
+  1.86958710162783235106e-22,
+];
+const GD = [
+  1.0, 1.47495759925128324529e0, 3.37748989120019970451e-1,
+  2.53603741420338795122e-2, 8.14679107184306179049e-4,
+  1.27545075667729118702e-5, 1.04314589657571990585e-7,
+  4.60680728515232032307e-10, 1.10273215066240270757e-12,
+  1.38796531259578871258e-15, 8.39158816283118707363e-19,
+  1.86958710162783236342e-22,
+];
+
+/** Horner form polynomial evaluation (highest degree coefficient first) */
+function polevl(x: number, coef: number[]): number {
+  let ans = coef[0];
+  for (let i = 1; i < coef.length; i++) ans = ans * x + coef[i];
+  return ans;
+}
+
+/**
+ * Fresnel sine integral: S(x) = ∫₀ˣ sin(π t²/2) dt
+ *
+ * S is odd, S(∞) → 1/2.
+ */
+export function fresnelS(x: number): number {
+  if (!isFinite(x)) {
+    if (x !== x) return NaN; // NaN
+    return x > 0 ? 0.5 : -0.5; // ±Infinity
+  }
+  const sign = x < 0 ? -1 : 1;
+  x = Math.abs(x);
+
+  if (x < 1.6) {
+    const x2 = x * x;
+    const t = x2 * x2; // x⁴
+    return sign * x * x2 * polevl(t, SN) / polevl(t, SD);
+  }
+
+  if (x < 36) {
+    const x2 = x * x;
+    const t = Math.PI * x2;       // πx²
+    const u = 1 / (t * t);        // 1/(π²x⁴)
+    const f = 1 - u * polevl(u, FN) / polevl(u, FD);
+    const g = (1 / t) * polevl(u, GN) / polevl(u, GD);
+    const z = (Math.PI / 2) * x2; // πx²/2
+    const c = Math.cos(z);
+    const s = Math.sin(z);
+    return sign * (0.5 - (f * c + g * s) / (Math.PI * x));
+  }
+
+  // Asymptotic: |x| >= 36
+  return sign * 0.5;
+}
+
+/**
+ * Fresnel cosine integral: C(x) = ∫₀ˣ cos(π t²/2) dt
+ *
+ * C is odd, C(∞) → 1/2.
+ */
+export function fresnelC(x: number): number {
+  if (!isFinite(x)) {
+    if (x !== x) return NaN; // NaN
+    return x > 0 ? 0.5 : -0.5; // ±Infinity
+  }
+  const sign = x < 0 ? -1 : 1;
+  x = Math.abs(x);
+
+  if (x < 1.6) {
+    const x2 = x * x;
+    const t = x2 * x2; // x⁴
+    return sign * x * polevl(t, CN) / polevl(t, CD);
+  }
+
+  if (x < 36) {
+    const x2 = x * x;
+    const t = Math.PI * x2;       // πx²
+    const u = 1 / (t * t);        // 1/(π²x⁴)
+    const f = 1 - u * polevl(u, FN) / polevl(u, FD);
+    const g = (1 / t) * polevl(u, GN) / polevl(u, GD);
+    const z = (Math.PI / 2) * x2; // πx²/2
+    const c = Math.cos(z);
+    const s = Math.sin(z);
+    return sign * (0.5 + (f * s - g * c) / (Math.PI * x));
+  }
+
+  // Asymptotic: |x| >= 36
+  return sign * 0.5;
+}
+
+/** Unnormalized cardinal sine: sinc(x) = sin(x)/x, sinc(0) = 1. */
+export function sinc(x: number): number {
+  return x === 0 ? 1 : Math.sin(x) / x;
+}

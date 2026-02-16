@@ -48,6 +48,10 @@ export function parse(latex: LatexString): Expression {
   return getDefaultEngine().parse(latex, { strict: false });
 }
 
+export function box(expr: ExpressionInput): Expression {
+  return getDefaultEngine().box(expr);
+}
+
 export function simplify(expr: LatexString | ExpressionInput): Expression {
   return toExpression(expr).simplify();
 }

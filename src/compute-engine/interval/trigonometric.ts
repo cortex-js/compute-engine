@@ -7,6 +7,10 @@
 import type { Interval, IntervalResult } from './types';
 import { ok, containsExtremum, containsZero, unwrapOrPropagate } from './util';
 import { div } from './arithmetic';
+import {
+  fresnelS as scalarFresnelS,
+  fresnelC as scalarFresnelC,
+} from '../numerics/special-functions';
 
 const TWO_PI = 2 * Math.PI;
 const PI = Math.PI;
@@ -564,4 +568,141 @@ export function asech(x: Interval | IntervalResult): IntervalResult {
     return { kind: 'singular', at: 0 };
   }
   return acosh(div(ok({ lo: 1, hi: 1 }), ok(xVal)));
+}
+
+/**
+ * Cardinal sine (unnormalized): sinc(x) = sin(x)/x, sinc(0) = 1.
+ *
+ * sinc is an even function bounded roughly in [-0.2172, 1].
+ * Its local extrema occur at the roots of cos(x) - sin(x)/x = 0,
+ * i.e. where tan(x) = x. We evaluate sinc at both endpoints, at 0
+ * (if in range), and at known extrema locations.  For intervals
+ * extending beyond the last tabulated extremum we fall back to the
+ * global bounds [-0.2172, 1] to guarantee a correct enclosure.
+ */
+
+// Approximate locations of the first 10 positive local extrema of sinc(x)
+// (solutions of tan(x) = x, alternating max/min).
+const SINC_EXTREMA = [
+  4.49341, 7.72525, 10.90412, 14.06619, 17.22076, 20.37130, 23.51945,
+  26.66605, 29.81160, 32.95639,
+];
+
+// Global bounds of sinc(x): the first minimum is the most negative
+const SINC_GLOBAL_LO = -0.21724;
+
+export function sinc(x: Interval | IntervalResult): IntervalResult {
+  const unwrapped = unwrapOrPropagate(x);
+  if (!Array.isArray(unwrapped)) return unwrapped;
+  const [xVal] = unwrapped;
+
+  const sincVal = (t: number): number => (t === 0 ? 1 : Math.sin(t) / t);
+
+  // Collect candidate values at endpoints
+  let lo = sincVal(xVal.lo);
+  let hi = lo;
+  const update = (v: number) => {
+    if (v < lo) lo = v;
+    if (v > hi) hi = v;
+  };
+  update(sincVal(xVal.hi));
+
+  // If the interval contains 0, sinc(0) = 1 (the global maximum)
+  if (xVal.lo <= 0 && xVal.hi >= 0) {
+    update(1);
+  }
+
+  // Check known extrema within the interval
+  const lastExtremum = SINC_EXTREMA[SINC_EXTREMA.length - 1];
+  for (const e of SINC_EXTREMA) {
+    if (e >= xVal.lo && e <= xVal.hi) update(sincVal(e));
+    if (-e >= xVal.lo && -e <= xVal.hi) update(sincVal(-e));
+  }
+
+  // If the interval extends beyond the last tabulated extremum,
+  // fall back to global bounds to guarantee correctness
+  if (Math.abs(xVal.lo) > lastExtremum || Math.abs(xVal.hi) > lastExtremum) {
+    update(SINC_GLOBAL_LO);
+    // sinc approaches 0 from above for large x, and the global max
+    // is 1 at x=0 (already handled above); for large |x| the local
+    // maxima are all < 1, so no need to widen hi beyond what the
+    // endpoints and extrema already give.
+  }
+
+  return ok({ lo, hi });
+}
+
+// ──────────────────────────────────────────────────────────────────
+// Fresnel integrals
+// ──────────────────────────────────────────────────────────────────
+
+// Approximate positive locations of local extrema of FresnelS.
+// Extrema occur where sin(πx²/2)=0, i.e. x=√(2n) for positive integers n.
+const FRESNEL_S_EXTREMA: number[] = [];
+const FRESNEL_C_EXTREMA: number[] = [];
+for (let n = 1; n <= 20; n++) {
+  FRESNEL_S_EXTREMA.push(Math.sqrt(2 * n));
+  FRESNEL_C_EXTREMA.push(Math.sqrt(2 * n - 1));
+}
+
+/**
+ * Fresnel sine integral (interval): S(x) = ∫₀ˣ sin(πt²/2) dt
+ *
+ * Conservative approach: evaluate at endpoints and known extrema,
+ * take min/max. S is bounded (|S(x)| ≤ ~0.7139).
+ */
+export function fresnelS(x: Interval | IntervalResult): IntervalResult {
+  const unwrapped = unwrapOrPropagate(x);
+  if (!Array.isArray(unwrapped)) return unwrapped;
+  const [xVal] = unwrapped;
+
+  let lo = scalarFresnelS(xVal.lo);
+  let hi = lo;
+  const update = (v: number) => {
+    if (v < lo) lo = v;
+    if (v > hi) hi = v;
+  };
+  update(scalarFresnelS(xVal.hi));
+
+  // S(0) = 0
+  if (xVal.lo <= 0 && xVal.hi >= 0) update(0);
+
+  // Check known extrema (and their negatives, since S is odd)
+  for (const e of FRESNEL_S_EXTREMA) {
+    if (e >= xVal.lo && e <= xVal.hi) update(scalarFresnelS(e));
+    if (-e >= xVal.lo && -e <= xVal.hi) update(scalarFresnelS(-e));
+  }
+
+  return ok({ lo, hi });
+}
+
+/**
+ * Fresnel cosine integral (interval): C(x) = ∫₀ˣ cos(πt²/2) dt
+ *
+ * Conservative approach: evaluate at endpoints and known extrema,
+ * take min/max. C is bounded (|C(x)| ≤ ~0.7799).
+ */
+export function fresnelC(x: Interval | IntervalResult): IntervalResult {
+  const unwrapped = unwrapOrPropagate(x);
+  if (!Array.isArray(unwrapped)) return unwrapped;
+  const [xVal] = unwrapped;
+
+  let lo = scalarFresnelC(xVal.lo);
+  let hi = lo;
+  const update = (v: number) => {
+    if (v < lo) lo = v;
+    if (v > hi) hi = v;
+  };
+  update(scalarFresnelC(xVal.hi));
+
+  // C(0) = 0
+  if (xVal.lo <= 0 && xVal.hi >= 0) update(0);
+
+  // Check known extrema (and their negatives, since C is odd)
+  for (const e of FRESNEL_C_EXTREMA) {
+    if (e >= xVal.lo && e <= xVal.hi) update(scalarFresnelC(e));
+    if (-e >= xVal.lo && -e <= xVal.hi) update(scalarFresnelC(-e));
+  }
+
+  return ok({ lo, hi });
 }

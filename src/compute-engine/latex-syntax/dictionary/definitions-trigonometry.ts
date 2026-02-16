@@ -434,4 +434,19 @@ export const DEFINITIONS_TRIGONOMETRY: LatexDictionary = [
 
     parse: parseTrig('Sin'),
   },
+  {
+    name: 'Sinc',
+    symbolTrigger: 'sinc',
+    kind: 'function',
+  },
+  {
+    name: 'FresnelS',
+    symbolTrigger: 'FresnelS',
+    kind: 'function',
+  },
+  {
+    name: 'FresnelC',
+    symbolTrigger: 'FresnelC',
+    kind: 'function',
+  },
 ];

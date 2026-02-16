@@ -44,6 +44,9 @@ import {
   besselK,
   airyAi,
   airyBi,
+  fresnelS,
+  fresnelC,
+  sinc,
 } from '../numerics/special-functions';
 import { choose } from '../boxed-expression/expand';
 import {
@@ -216,6 +219,10 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   GCD: '_SYS.gcd',
   Integrate: (args, compile, target) => compileIntegrate(args, compile, target),
   LCM: '_SYS.lcm',
+  Product: (args, compile, target) =>
+    compileSumProduct('Product', args, compile, target),
+  Sum: (args, compile, target) =>
+    compileSumProduct('Sum', args, compile, target),
   Limit: (args, compile) =>
     `_SYS.limit(${compile(args[0])}, ${compile(args[1])})`,
   Ln: (args, compile) => {
@@ -375,6 +382,9 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     return `1 / Math.cosh(${compile(arg)})`;
   },
   Sign: 'Math.sign',
+  Sinc: '_SYS.sinc',
+  FresnelS: '_SYS.fresnelS',
+  FresnelC: '_SYS.fresnelC',
   Sin: (args, compile) => {
     if (BaseCompiler.isComplexValued(args[0]))
       return `_SYS.csin(${compile(args[0])})`;
@@ -913,86 +923,95 @@ const colorHelpers = {
 };
 
 /**
+ * Runtime helpers injected as `_SYS` into compiled JavaScript functions.
+ * Shared by both ComputeEngineFunction and ComputeEngineFunctionLiteral.
+ */
+const SYS_HELPERS = {
+  chop,
+  factorial,
+  factorial2,
+  gamma,
+  gcd,
+  integrate: (f, a, b) => monteCarloEstimate(f, a, b, 10e6).estimate,
+  lcm,
+  lngamma: gammaln,
+  limit,
+  mean,
+  median,
+  variance,
+  populationVariance,
+  standardDeviation,
+  populationStandardDeviation,
+  kurtosis,
+  skewness,
+  mode,
+  quartiles,
+  interquartileRange,
+  erf,
+  erfc,
+  erfInv,
+  beta,
+  digamma,
+  trigamma,
+  polygamma,
+  zeta,
+  lambertW,
+  besselJ,
+  besselY,
+  besselI,
+  besselK,
+  airyAi,
+  airyBi,
+  sinc,
+  fresnelS,
+  fresnelC,
+  binomial: choose,
+  fibonacci,
+  // Complex helpers
+  csin: (z) => toRI(new Complex(z.re, z.im).sin()),
+  ccos: (z) => toRI(new Complex(z.re, z.im).cos()),
+  ctan: (z) => toRI(new Complex(z.re, z.im).tan()),
+  casin: (z) => toRI(new Complex(z.re, z.im).asin()),
+  cacos: (z) => toRI(new Complex(z.re, z.im).acos()),
+  catan: (z) => toRI(new Complex(z.re, z.im).atan()),
+  csinh: (z) => toRI(new Complex(z.re, z.im).sinh()),
+  ccosh: (z) => toRI(new Complex(z.re, z.im).cosh()),
+  ctanh: (z) => toRI(new Complex(z.re, z.im).tanh()),
+  csqrt: (z) => toRI(new Complex(z.re, z.im).sqrt()),
+  cexp: (z) => toRI(new Complex(z.re, z.im).exp()),
+  cln: (z) => toRI(new Complex(z.re, z.im).log()),
+  cpow: (z, w) => {
+    const zz =
+      typeof z === 'number' ? new Complex(z, 0) : new Complex(z.re, z.im);
+    const ww =
+      typeof w === 'number' ? new Complex(w, 0) : new Complex(w.re, w.im);
+    return toRI(zz.pow(ww));
+  },
+  ccot: (z) => toRI(new Complex(z.re, z.im).cot()),
+  csec: (z) => toRI(new Complex(z.re, z.im).sec()),
+  ccsc: (z) => toRI(new Complex(z.re, z.im).csc()),
+  ccoth: (z) => toRI(new Complex(z.re, z.im).coth()),
+  csech: (z) => toRI(new Complex(z.re, z.im).sech()),
+  ccsch: (z) => toRI(new Complex(z.re, z.im).csch()),
+  cacot: (z) => toRI(new Complex(z.re, z.im).acot()),
+  casec: (z) => toRI(new Complex(z.re, z.im).asec()),
+  cacsc: (z) => toRI(new Complex(z.re, z.im).acsc()),
+  cacoth: (z) => toRI(new Complex(z.re, z.im).acoth()),
+  casech: (z) => toRI(new Complex(z.re, z.im).asech()),
+  cacsch: (z) => toRI(new Complex(z.re, z.im).acsch()),
+  cabs: (z) => new Complex(z.re, z.im).abs(),
+  carg: (z) => new Complex(z.re, z.im).arg(),
+  cconj: (z) => toRI(new Complex(z.re, z.im).conjugate()),
+  cneg: (z) => ({ re: -z.re, im: -z.im }),
+  // Color helpers
+  ...colorHelpers,
+};
+
+/**
  * JavaScript-specific function extension that provides system functions
  */
 export class ComputeEngineFunction extends Function {
-  SYS = {
-    chop: chop,
-    factorial: factorial,
-    factorial2: factorial2,
-    gamma: gamma,
-    gcd: gcd,
-    integrate: (f, a, b) => monteCarloEstimate(f, a, b, 10e6).estimate,
-    lcm: lcm,
-    lngamma: gammaln,
-    limit: limit,
-    mean,
-    median,
-    variance,
-    populationVariance,
-    standardDeviation,
-    populationStandardDeviation,
-    kurtosis,
-    skewness,
-    mode,
-    quartiles,
-    interquartileRange,
-    erf,
-    erfc,
-    erfInv,
-    beta,
-    digamma,
-    trigamma,
-    polygamma,
-    zeta,
-    lambertW,
-    besselJ,
-    besselY,
-    besselI,
-    besselK,
-    airyAi,
-    airyBi,
-    binomial: choose,
-    fibonacci: fibonacci,
-    // Complex helpers
-    csin: (z) => toRI(new Complex(z.re, z.im).sin()),
-    ccos: (z) => toRI(new Complex(z.re, z.im).cos()),
-    ctan: (z) => toRI(new Complex(z.re, z.im).tan()),
-    casin: (z) => toRI(new Complex(z.re, z.im).asin()),
-    cacos: (z) => toRI(new Complex(z.re, z.im).acos()),
-    catan: (z) => toRI(new Complex(z.re, z.im).atan()),
-    csinh: (z) => toRI(new Complex(z.re, z.im).sinh()),
-    ccosh: (z) => toRI(new Complex(z.re, z.im).cosh()),
-    ctanh: (z) => toRI(new Complex(z.re, z.im).tanh()),
-    csqrt: (z) => toRI(new Complex(z.re, z.im).sqrt()),
-    cexp: (z) => toRI(new Complex(z.re, z.im).exp()),
-    cln: (z) => toRI(new Complex(z.re, z.im).log()),
-    cpow: (z, w) => {
-      const zz =
-        typeof z === 'number' ? new Complex(z, 0) : new Complex(z.re, z.im);
-      const ww =
-        typeof w === 'number' ? new Complex(w, 0) : new Complex(w.re, w.im);
-      return toRI(zz.pow(ww));
-    },
-    ccot: (z) => toRI(new Complex(z.re, z.im).cot()),
-    csec: (z) => toRI(new Complex(z.re, z.im).sec()),
-    ccsc: (z) => toRI(new Complex(z.re, z.im).csc()),
-    ccoth: (z) => toRI(new Complex(z.re, z.im).coth()),
-    csech: (z) => toRI(new Complex(z.re, z.im).sech()),
-    ccsch: (z) => toRI(new Complex(z.re, z.im).csch()),
-    cacot: (z) => toRI(new Complex(z.re, z.im).acot()),
-    casec: (z) => toRI(new Complex(z.re, z.im).asec()),
-    cacsc: (z) => toRI(new Complex(z.re, z.im).acsc()),
-    cacoth: (z) => toRI(new Complex(z.re, z.im).acoth()),
-    casech: (z) => toRI(new Complex(z.re, z.im).asech()),
-    cacsch: (z) => toRI(new Complex(z.re, z.im).acsch()),
-    cabs: (z) => new Complex(z.re, z.im).abs(),
-    carg: (z) => new Complex(z.re, z.im).arg(),
-    cconj: (z) => toRI(new Complex(z.re, z.im).conjugate()),
-    cneg: (z) => ({ re: -z.re, im: -z.im }),
-    // Color helpers
-    ...colorHelpers,
-  };
+  SYS = SYS_HELPERS;
 
   constructor(body: string, preamble = '') {
     super(
@@ -1016,83 +1035,7 @@ export class ComputeEngineFunction extends Function {
  * JavaScript function literal with parameters
  */
 export class ComputeEngineFunctionLiteral extends Function {
-  SYS = {
-    chop: chop,
-    factorial: factorial,
-    factorial2: factorial2,
-    gamma: gamma,
-    gcd: gcd,
-    integrate: (f, a, b) => monteCarloEstimate(f, a, b, 10e6).estimate,
-    lcm: lcm,
-    lngamma: gammaln,
-    limit: limit,
-    mean,
-    median,
-    variance,
-    populationVariance,
-    standardDeviation,
-    populationStandardDeviation,
-    kurtosis,
-    skewness,
-    mode,
-    quartiles,
-    interquartileRange,
-    erf,
-    erfc,
-    erfInv,
-    beta,
-    digamma,
-    trigamma,
-    polygamma,
-    zeta,
-    lambertW,
-    besselJ,
-    besselY,
-    besselI,
-    besselK,
-    airyAi,
-    airyBi,
-    binomial: choose,
-    fibonacci: fibonacci,
-    // Complex helpers
-    csin: (z) => toRI(new Complex(z.re, z.im).sin()),
-    ccos: (z) => toRI(new Complex(z.re, z.im).cos()),
-    ctan: (z) => toRI(new Complex(z.re, z.im).tan()),
-    casin: (z) => toRI(new Complex(z.re, z.im).asin()),
-    cacos: (z) => toRI(new Complex(z.re, z.im).acos()),
-    catan: (z) => toRI(new Complex(z.re, z.im).atan()),
-    csinh: (z) => toRI(new Complex(z.re, z.im).sinh()),
-    ccosh: (z) => toRI(new Complex(z.re, z.im).cosh()),
-    ctanh: (z) => toRI(new Complex(z.re, z.im).tanh()),
-    csqrt: (z) => toRI(new Complex(z.re, z.im).sqrt()),
-    cexp: (z) => toRI(new Complex(z.re, z.im).exp()),
-    cln: (z) => toRI(new Complex(z.re, z.im).log()),
-    cpow: (z, w) => {
-      const zz =
-        typeof z === 'number' ? new Complex(z, 0) : new Complex(z.re, z.im);
-      const ww =
-        typeof w === 'number' ? new Complex(w, 0) : new Complex(w.re, w.im);
-      return toRI(zz.pow(ww));
-    },
-    ccot: (z) => toRI(new Complex(z.re, z.im).cot()),
-    csec: (z) => toRI(new Complex(z.re, z.im).sec()),
-    ccsc: (z) => toRI(new Complex(z.re, z.im).csc()),
-    ccoth: (z) => toRI(new Complex(z.re, z.im).coth()),
-    csech: (z) => toRI(new Complex(z.re, z.im).sech()),
-    ccsch: (z) => toRI(new Complex(z.re, z.im).csch()),
-    cacot: (z) => toRI(new Complex(z.re, z.im).acot()),
-    casec: (z) => toRI(new Complex(z.re, z.im).asec()),
-    cacsc: (z) => toRI(new Complex(z.re, z.im).acsc()),
-    cacoth: (z) => toRI(new Complex(z.re, z.im).acoth()),
-    casech: (z) => toRI(new Complex(z.re, z.im).asech()),
-    cacsch: (z) => toRI(new Complex(z.re, z.im).acsch()),
-    cabs: (z) => new Complex(z.re, z.im).abs(),
-    carg: (z) => new Complex(z.re, z.im).arg(),
-    cconj: (z) => toRI(new Complex(z.re, z.im).conjugate()),
-    cneg: (z) => ({ re: -z.re, im: -z.im }),
-    // Color helpers
-    ...colorHelpers,
-  };
+  SYS = SYS_HELPERS;
 
   constructor(body: string, args: string[]) {
     super('_SYS', ...args, `return ${body}`);
@@ -1156,7 +1099,8 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
     expr: Expression,
     options: CompilationOptions<Expression> = {}
   ): CompilationResult {
-    const { operators, functions, vars, imports = [], preamble } = options;
+    const { operators, functions, vars, imports = [], preamble, realOnly } =
+      options;
     const unknowns = expr.unknowns;
 
     // Process imports
@@ -1225,16 +1169,31 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       preamble: (preamble ?? '') + preambleImports,
     });
 
-    return compileToTarget(expr, target);
+    return compileToTarget(expr, target, realOnly);
   }
 }
 
 /**
  * Compile expression to JavaScript executable
  */
+function wrapRealOnly(
+  result: CompilationResult
+): CompilationResult {
+  if (!result.run) return result;
+  const origRun = result.run;
+  result.run = ((...args: unknown[]) => {
+    const r = origRun(...args);
+    if (typeof r === 'object' && r !== null && 'im' in r)
+      return r.im === 0 ? r.re : NaN;
+    return r;
+  }) as CompilationResult['run'];
+  return result;
+}
+
 function compileToTarget(
   expr: Expression,
-  target: CompileTarget<Expression>
+  target: CompileTarget<Expression>,
+  realOnly?: boolean
 ): CompilationResult {
   if (expr.operator === 'Function' && isFunction(expr)) {
     const args = expr.ops;
@@ -1248,7 +1207,7 @@ function compileToTarget(
       target: 'javascript',
       success: true,
       code: `(${params.join(', ')}) => ${body}`,
-      run: fn as unknown as (...args: number[]) => number,
+      run: fn as unknown as CompilationResult['run'],
     };
   }
 
@@ -1260,19 +1219,110 @@ function compileToTarget(
         target: 'javascript',
         success: true,
         code: `(a, b) => a ${op[0]} b`,
-        run: fn as unknown as (...args: number[]) => number,
+        run: fn as unknown as CompilationResult['run'],
       };
     }
   }
 
   const js = BaseCompiler.compile(expr, target);
   const fn = new ComputeEngineFunction(js, target.preamble);
-  return {
+  const result: CompilationResult = {
     target: 'javascript',
     success: true,
     code: js,
-    run: fn as unknown as (...args: number[]) => number,
+    run: fn as unknown as CompilationResult['run'],
   };
+  return realOnly ? wrapRealOnly(result) : result;
+}
+
+/**
+ * Maximum number of terms to unroll in a Sum/Product.
+ * Beyond this threshold a loop is emitted instead.
+ */
+const UNROLL_LIMIT = 100;
+
+/**
+ * Compile Sum or Product with fixed integer bounds.
+ *
+ * Small ranges (<=UNROLL_LIMIT terms) are unrolled into explicit
+ * additions/multiplications.  Larger ranges emit a while-loop wrapped
+ * in an IIFE.
+ */
+function compileSumProduct(
+  kind: 'Sum' | 'Product',
+  args: ReadonlyArray<Expression>,
+  _compile: (expr: Expression) => string,
+  target: CompileTarget<Expression>
+): string {
+  if (!args[0]) throw new Error(`${kind}: no body`);
+  if (!args[1]) throw new Error(`${kind}: no indexing set`);
+
+  const { index, lower, upper } = normalizeIndexingSet(args[1]);
+  const isSum = kind === 'Sum';
+  const op = isSum ? '+' : '*';
+  const identity = isSum ? '0' : '1';
+
+  // Empty range
+  if (lower > upper) return identity;
+
+  const termCount = upper - lower + 1;
+  const bodyIsComplex = BaseCompiler.isComplexValued(args[0]);
+
+  if (termCount <= UNROLL_LIMIT) {
+    // --- Unroll: substitute the iteration variable with each literal value ---
+    const terms: string[] = [];
+    for (let k = lower; k <= upper; k++) {
+      const innerTarget: CompileTarget<Expression> = {
+        ...target,
+        var: (id) => (id === index ? String(k) : target.var(id)),
+      };
+      terms.push(`(${BaseCompiler.compile(args[0], innerTarget)})`);
+    }
+
+    if (!bodyIsComplex) {
+      return `(${terms.join(` ${op} `)})`;
+    }
+
+    // Complex unrolling: use an IIFE with temp variables
+    // to add/multiply complex terms properly
+    const temps = terms.map((_, i) => `_t${i}`);
+    const assignments = terms.map((t, i) => `const ${temps[i]} = ${t}`).join('; ');
+
+    if (isSum) {
+      const reSum = temps.map((t) => `${t}.re`).join(' + ');
+      const imSum = temps.map((t) => `${t}.im`).join(' + ');
+      return `(() => { ${assignments}; return { re: ${reSum}, im: ${imSum} }; })()`;
+    }
+
+    // Complex product: accumulate sequentially
+    let acc = temps[0];
+    const parts = [assignments];
+    for (let i = 1; i < temps.length; i++) {
+      const prev = acc;
+      acc = `_p${i}`;
+      parts.push(
+        `const ${acc} = { re: ${prev}.re * ${temps[i]}.re - ${prev}.im * ${temps[i]}.im, im: ${prev}.re * ${temps[i]}.im + ${prev}.im * ${temps[i]}.re }`
+      );
+    }
+    return `(() => { ${parts.join('; ')}; return ${acc}; })()`;
+  }
+
+  const bodyCode = BaseCompiler.compile(args[0], {
+    ...target,
+    var: (id) => (id === index ? index : target.var(id)),
+  });
+
+  const acc = BaseCompiler.tempVar();
+
+  if (bodyIsComplex) {
+    const val = BaseCompiler.tempVar();
+    if (isSum) {
+      return `(() => { let ${acc} = { re: 0, im: 0 }; let ${index} = ${lower}; while (${index} <= ${upper}) { const ${val} = ${bodyCode}; ${acc} = { re: ${acc}.re + ${val}.re, im: ${acc}.im + ${val}.im }; ${index}++; } return ${acc}; })()`;
+    }
+    return `(() => { let ${acc} = { re: 1, im: 0 }; let ${index} = ${lower}; while (${index} <= ${upper}) { const ${val} = ${bodyCode}; ${acc} = { re: ${acc}.re * ${val}.re - ${acc}.im * ${val}.im, im: ${acc}.re * ${val}.im + ${acc}.im * ${val}.re }; ${index}++; } return ${acc}; })()`;
+  }
+
+  return `(() => { let ${acc} = ${identity}; let ${index} = ${lower}; while (${index} <= ${upper}) { ${acc} ${op}= ${bodyCode}; ${index}++; } return ${acc}; })()`;
 }
 
 /**

@@ -2256,7 +2256,11 @@ export class _Parser implements Parser {
         let result = this.parseInfixOperator(lhs, until);
         if (result === null && until.minPrec <= INVISIBLE_OP_PRECEDENCE) {
           // If any operator, no sequence to apply
-          if (this.peekDefinitions('operator').length === 0) {
+          const opDefs = this.peekDefinitions('operator');
+          if (
+            opDefs.length === 0 ||
+            opDefs.every(([def]) => def.latexTrigger === '\\text')
+          ) {
             // No infix operator, join the expressions with a Sequence
             const rhs = this.parseExpression({
               ...until,

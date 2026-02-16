@@ -166,6 +166,16 @@ export interface CompilationOptions<Expr = unknown> {
 
   /** Additional preamble code */
   preamble?: string;
+
+  /**
+   * When true, complex results (`{ re, im }`) are converted to real numbers:
+   * - If the imaginary part is zero, the real part is returned
+   * - Otherwise, `NaN` is returned
+   *
+   * This avoids object allocations for callers that only need real-valued
+   * results (e.g., plotting).
+   */
+  realOnly?: boolean;
 }
 
 /**
@@ -193,8 +203,18 @@ export interface CompilationResult {
    */
   preamble?: string;
 
-  /** Executable function (present for JS-executable targets only) */
-  run?: (
-    ...args: (number | { re: number; im: number })[]
-  ) => number | { re: number; im: number };
+  /**
+   * Executable function (present for JS-executable targets only).
+   *
+   * For plain expressions, call with a vars object:
+   * ```typescript
+   * result.run({ x: 0.5 })
+   * ```
+   *
+   * For `Function` (lambda) expressions, call with positional arguments:
+   * ```typescript
+   * result.run(0.5)
+   * ```
+   */
+  run?: (...args: unknown[]) => number | { re: number; im: number };
 }

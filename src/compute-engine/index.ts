@@ -172,6 +172,7 @@ export type * from './global-types';
 // Free functions backed by a lazily-instantiated global engine
 export {
   parse,
+  box,
   simplify,
   evaluate,
   N,

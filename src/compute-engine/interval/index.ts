@@ -84,6 +84,9 @@ import {
   acoth as _acoth,
   acsch as _acsch,
   asech as _asech,
+  sinc as _sinc,
+  fresnelS as _fresnelS,
+  fresnelC as _fresnelC,
 } from './trigonometric';
 import {
   less as _less,
@@ -177,6 +180,9 @@ export {
   acoth,
   acsch,
   asech,
+  sinc,
+  fresnelS,
+  fresnelC,
 } from './trigonometric';
 
 // Comparison operations
@@ -275,6 +281,9 @@ export const IntervalArithmetic = {
   acoth: _acoth,
   acsch: _acsch,
   asech: _asech,
+  sinc: _sinc,
+  fresnelS: _fresnelS,
+  fresnelC: _fresnelC,
 
   // Comparison
   less: _less,

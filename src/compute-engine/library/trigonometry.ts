@@ -21,6 +21,7 @@ import {
 } from '../boxed-expression/type-guards';
 import { numericTypeHandler } from './type-handlers';
 import { getUnitScale } from './unit-data';
+import { sinc, fresnelS, fresnelC } from '../numerics/special-functions';
 
 //
 // Note: The name of trigonometric functions follow NIST DLMF
@@ -250,6 +251,42 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
     Arccsc: trigFunction('Arccsc', 5650),
 
     Coth: trigFunction('Coth', 6300),
+
+    /** sinc(x) = sin(x)/x with sinc(0) = 1 (unnormalized cardinal sine) */
+    Sinc: {
+      complexity: 5100,
+      broadcastable: true,
+      signature: '(number) -> real',
+      type: () => 'finite_real',
+      evaluate: ([x], { engine: ce }) => {
+        if (!x || !isNumber(x)) return undefined;
+        return ce.number(sinc(x.re));
+      },
+    },
+
+    /** FresnelS(x) = ∫₀ˣ sin(πt²/2) dt — odd function, S(∞) = 1/2 */
+    FresnelS: {
+      complexity: 5200,
+      broadcastable: true,
+      signature: '(number) -> real',
+      type: () => 'finite_real',
+      evaluate: ([x], { engine: ce }) => {
+        if (!x || !isNumber(x)) return undefined;
+        return ce.number(fresnelS(x.re));
+      },
+    },
+
+    /** FresnelC(x) = ∫₀ˣ cos(πt²/2) dt — odd function, C(∞) = 1/2 */
+    FresnelC: {
+      complexity: 5200,
+      broadcastable: true,
+      signature: '(number) -> real',
+      type: () => 'finite_real',
+      evaluate: ([x], { engine: ce }) => {
+        if (!x || !isNumber(x)) return undefined;
+        return ce.number(fresnelC(x.re));
+      },
+    },
 
     /* converts (radius, angle) -> (x, y) */
     // FromPolarCoordinates: {

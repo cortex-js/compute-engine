@@ -5,8 +5,9 @@ converted from raw JavaScript to LaTeX/CE compilation.
 
 ## Summary
 
-**Total functions analyzed:** ~51 **Converted to LaTeX:** 17 (33%) **Must remain
-as JS:** 34 (67%)
+**Total functions analyzed:** ~51 **Converted to LaTeX:** 17 (33%) **Could be
+converted with current CE:** ~10 more (see below) **Genuine CE gaps:** ~5
+features needed for the remainder
 
 ## Categories of Unconvertible Functions
 
@@ -30,15 +31,22 @@ function fourierSquare(nTerms) {
 }
 ```
 
-**Why unconvertible:** Requires loop to sum terms. Would need explicit LaTeX
-formula for each term count (1, 3, 7, 15 terms).
+**Status: CONVERTIBLE** (with explicit expansion)
 
-**Potential solution:** Could generate explicit LaTeX strings for specific term
-counts:
+CE supports `\sum` notation (`Sum` operator), but the `Sum` operator does not
+currently compile to JavaScript — it can only be evaluated symbolically or
+numerically. However, for fixed term counts the expressions can be expanded:
 
-- 1 term: `"(4/\\pi)\\sin(x)"`
-- 3 terms: `"(4/\\pi)(\\sin(x) + \\sin(3x)/3 + \\sin(5x)/5)"`
-- etc.
+- 1 term: `"\frac{4}{\pi}\sin(x)"`
+- 3 terms: `"\frac{4}{\pi}(\sin(x) + \frac{\sin(3x)}{3} + \frac{\sin(5x)}{5})"`
+- 7 terms: expand similarly
+- 15 terms: expand similarly
+
+A helper function could generate these LaTeX strings at setup time.
+
+**CE Gap:** `Sum` with fixed integer bounds does not compile. If it did, all
+Fourier and Taylor series could be written as
+`\sum_{k=0}^{n} \frac{(-1)^k}{(2k+1)!} x^{2k+1}` and compiled directly.
 
 #### Taylor Series Approximations
 
@@ -57,24 +65,20 @@ function taylorSin(order) {
 }
 ```
 
-**Why unconvertible:** Nested loops for factorial calculation and term
-summation.
+**Status: CONVERTIBLE** (with explicit expansion)
 
-**Potential solution:** Explicit formulas:
+Same approach as Fourier — expand for each specific order:
 
 - Order 0: `"x"`
 - Order 1: `"x - x^3/6"`
 - Order 2: `"x - x^3/6 + x^5/120"`
-- etc.
 
-**CE Gap:** No support for summation notation (`\sum_{k=0}^{n}`) with runtime
-variable `n`.
+CE already supports `!` (factorial) and all the needed arithmetic, so the
+expanded forms compile fine.
 
 ---
 
 ### 2. Conditional Logic (6 functions)
-
-Functions with branching logic based on runtime conditions.
 
 #### Single-Slit Diffraction Pattern
 
@@ -82,24 +86,59 @@ Functions with branching logic based on runtime conditions.
 fn: (x) => (Math.abs(x) < 0.001 ? 1.0 : Math.pow(Math.sin(x) / x, 2));
 ```
 
-**Why unconvertible:** Conditional to avoid division by zero at x=0.
+**Status: CONVERTIBLE NOW**
 
-**CE Gap:** No piecewise function support in LaTeX, or sinc function that
-handles x=0 correctly.
+CE supports `If` (compiles to JS ternary, and to `_IA.piecewise` for
+interval-js). Use `\begin{cases}` or construct the MathJSON directly:
 
-**Potential workaround:** Use limit behavior:
-`"\left(\frac{\sin(x)}{x}\right)^2"` and rely on CE to handle the singularity.
+LaTeX:
+```latex
+\begin{cases} 1 & |x| < 0.001 \\ \left(\frac{\sin(x)}{x}\right)^2 & \text{otherwise} \end{cases}
+```
 
-#### Step Function
+MathJSON: `["If", ["Less", ["Abs", "x"], 0.001], 1, ["Power", ["Divide", ["Sin", "x"], "x"], 2]]`
+
+Both `If` and `Abs` compile on all targets (JS, interval-js, GLSL).
+
+**Alternative:** A dedicated `Sinc` function would be cleaner. See CE gaps
+below.
+
+#### Square Wave
+
+```javascript
+fn: (x) => Math.sign(Math.sin(x));
+```
+
+**Status: CONVERTIBLE NOW**
+
+CE has `Sign` (LaTeX: `\operatorname{sgn}`), which compiles to `Math.sign` (JS)
+and `_IA.sign` (interval-js):
+
+```latex
+\operatorname{sgn}(\sin(x))
+```
+
+#### Step Function (Heaviside)
 
 ```javascript
 fn: (t) => (t >= 0 ? 1 : 0);
 ```
 
-**Why unconvertible:** Conditional logic.
+**Status: CONVERTIBLE NOW**
 
-**CE Gap:** No Heaviside step function `H(t)` or support for `\begin{cases}`
-piecewise notation.
+Use `If` with a comparison:
+
+LaTeX:
+```latex
+\begin{cases} 1 & t \geq 0 \\ 0 & \text{otherwise} \end{cases}
+```
+
+MathJSON: `["If", ["GreaterEqual", "t", 0], 1, 0]`
+
+Alternatively, express using `Sign`: `\frac{1 + \operatorname{sgn}(t)}{2}`
+
+**Note:** A dedicated `Heaviside` function would be more idiomatic. See CE gaps
+below.
 
 #### Step Response (Control Systems)
 
@@ -115,7 +154,20 @@ fn: (t) =>
         );
 ```
 
-**Why unconvertible:** Conditional with complex expression.
+**Status: CONVERTIBLE NOW**
+
+CE compiles `If`, `Exp`, `Sqrt`, `Sin`, and `Arctan2` (LaTeX:
+`\operatorname{Arctan2}`). With `zeta` inlined as a constant (e.g., 0.3):
+
+```latex
+\begin{cases}
+  0 & t < 0 \\
+  1 - \frac{e^{-0.3t}}{\sqrt{1 - 0.09}} \sin(\sqrt{1 - 0.09} \cdot t + \operatorname{Arctan2}(\sqrt{1 - 0.09}, 0.3)) & \text{otherwise}
+\end{cases}
+```
+
+If you want `zeta` as a parameter, use a lambda:
+`\zeta \mapsto t \mapsto \begin{cases}...\end{cases}`
 
 ---
 
@@ -135,37 +187,35 @@ function planckArb(lambda, T) {
 // Called with: fn: (lambda) => planckArb(lambda, T)
 ```
 
-**Why unconvertible:**
+**Status: CONVERTIBLE NOW**
 
-- Uses helper function with intermediate calculation
-- Has overflow protection conditional
-- Temperature `T` is external parameter
-
-**Potential solution:** Inline the formula with constants:
+The core formula inlines directly. The overflow guard can use `If`. With T
+inlined (e.g., T=5000):
 
 ```latex
-\frac{1}{\lambda^5(\exp(5/(T\lambda/3000)) - 1)}
+\begin{cases}
+  10^{-20} & \frac{5}{\frac{T}{3000} \lambda} > 500 \\
+  \frac{1}{\lambda^5 (\exp(\frac{5}{\frac{T}{3000} \lambda}) - 1)} & \text{otherwise}
+\end{cases}
 ```
 
-But still needs conditional logic for overflow protection.
+For multiple temperature curves, generate a LaTeX string per temperature value.
 
-#### Radioactive Decay Chain (A → B → C)
+#### Radioactive Decay Chain (A -> B -> C)
 
 ```javascript
-const lambda_A = 0.5, lambda_B = 0.3;
+const lambda_A = 0.5,
+  lambda_B = 0.3;
 const decayA = (t) => Math.exp(-lambda_A * t);
 const decayB = (t) => /* complex expression */;
 const decayC = (t) => /* complex expression */;
-
-// Stacked area plot uses:
-fn: (t) => decayC(t) + decayB(t) + decayA(t)
 ```
 
-**Why unconvertible:** Requires solving coupled differential equations; formulas
-are very long.
+**Status: CONVERTIBLE** (verbose but straightforward)
 
-**Potential solution:** Could inline if formulas are expanded, but expressions
-become unwieldy.
+Each decay function is a closed-form expression using `Exp`. Inline the
+constants and write each as a separate LaTeX expression. The Bateman equations
+are long but contain only arithmetic and exponentials — all of which compile.
 
 #### Gaussian Distribution
 
@@ -177,50 +227,58 @@ function gaussian(x) {
 }
 ```
 
-**Why unconvertible:** Uses helper function.
+**Status: CONVERTIBLE NOW**
 
-**Potential solution:** Inline:
-`"\frac{1}{1.5\sqrt{2\pi}}\exp(-x^2/(2 \cdot 1.5^2))"` ✅
+```latex
+\frac{1}{1.5\sqrt{2\pi}} \exp\left(\frac{-x^2}{2 \cdot 1.5^2}\right)
+```
 
-**This could be converted!**
+All components (`Sqrt`, `Exp`, `Pi`) compile to JS, interval-js, and GLSL.
 
 #### Kernel Density Estimation (KDE)
 
 ```javascript
 function kde(x) {
   let sum = 0;
-  const h = 0.5; // bandwidth
+  const h = 0.5;
   for (const xi of kdeSamples) {
     const u = (x - xi) / h;
-    sum += gaussian(u); // Epanechnikov kernel
+    sum += gaussian(u);
   }
   return sum / (kdeSamples.length * h);
 }
 ```
 
-**Why unconvertible:** Loop over data points, calls gaussian helper.
+**Status: MUST REMAIN AS JS**
+
+Requires iterating over a runtime data array. This is fundamentally
+non-compilable — the data points are not known at LaTeX-authoring time.
+
+**Potential approach:** For a fixed dataset, generate an expanded sum like
+`\frac{1}{Nh}(G(\frac{x - x_1}{h}) + G(\frac{x - x_2}{h}) + \cdots)` with
+constants inlined. Impractical for large datasets.
 
 ---
 
 #### Dose-Response Sigmoid
 
 ```javascript
-const doseA = 0.1,
-  doseB = 0.9,
-  doseC = 5.0,
-  doseN = 2.5;
+const doseA = 0.1, doseB = 0.9, doseC = 5.0, doseN = 2.5;
 fn: (x) => doseA + doseB / (1 + Math.pow(x / doseC, doseN));
 ```
 
-**Why unconvertible:** Uses external constants.
+**Status: CONVERTIBLE NOW**
 
-**Potential solution:** Inline constants: `"0.1 + 0.9/(1 + (x/5)^{2.5})"` ✅
+```latex
+0.1 + \frac{0.9}{1 + (x/5)^{2.5}}
+```
 
-**This could be converted!**
+#### Chemical Kinetics (A -> B -> C)
 
-#### Chemical Kinetics (A → B → C)
+Same situation as radioactive decay — closed-form Bateman equations. Verbose but
+all operators compile.
 
-Similar to radioactive decay - complex coupled expressions.
+**Status: CONVERTIBLE** (inline constants, expand formulas)
 
 ---
 
@@ -232,7 +290,6 @@ Functions involving multi-step transformations or special functions.
 
 ```javascript
 fn: (theta, phi) => {
-  // Real spherical harmonic Y_3^2
   const cost = Math.cos(theta);
   const sint = Math.sin(theta);
   const Y = /* complex expression with associated Legendre polynomials */;
@@ -241,17 +298,22 @@ fn: (theta, phi) => {
 }
 ```
 
-**Why unconvertible:** Requires intermediate calculations, special functions
-(associated Legendre polynomials).
+**Status: PARTIALLY CONVERTIBLE**
 
-**CE Gap:** No support for spherical harmonics `Y_l^m(\theta, \phi)`.
+For *specific* (l, m) values, the associated Legendre polynomial reduces to a
+known closed-form expression. For example, Y_2^0 involves only `cos(theta)` and
+constants. The tuple output compiles as separate components.
+
+For *general* spherical harmonics, CE lacks `SphericalHarmonic` and
+`AssociatedLegendre` functions.
+
+**CE Gap:** No `SphericalHarmonic(l, m, theta, phi)` or
+`AssociatedLegendreP(n, m, x)` functions.
 
 #### Joukowski Transformation (Airfoil)
 
 ```javascript
-const cx = -0.1,
-  cy = 0.14,
-  radius = 1.02;
+const cx = -0.1, cy = 0.14, radius = 1.02;
 fn: (t) => {
   const zx = cx + radius * Math.cos(t);
   const zy = cy + radius * Math.sin(t);
@@ -261,11 +323,34 @@ fn: (t) => {
 };
 ```
 
-**Why unconvertible:** Multi-step transformation requiring intermediate
-variables.
+**Status: CONVERTIBLE NOW**
 
-**Potential solution:** Could be expanded into a single tuple expression, but
-would be very complex.
+CE supports `Block` with `Declare`/`Assign` for intermediate variables, and
+this compiles to JavaScript. The Joukowski transform can be written as a block:
+
+MathJSON:
+```json
+["Block",
+  ["Declare", "zx"], ["Assign", "zx", ["Add", -0.1, ["Multiply", 1.02, ["Cos", "t"]]]],
+  ["Declare", "zy"], ["Assign", "zy", ["Add", 0.14, ["Multiply", 1.02, ["Sin", "t"]]]],
+  ["Declare", "r2"], ["Assign", "r2", ["Add", ["Power", "zx", 2], ["Power", "zy", 2]]],
+  ["Tuple",
+    ["Add", "zx", ["Divide", "zx", "r2"]],
+    ["Subtract", "zy", ["Divide", "zy", "r2"]]
+  ]
+]
+```
+
+Alternatively, inline everything into a single (verbose) tuple expression — no
+intermediate variables needed since `zx`, `zy` are simple.
+
+With constants inlined into a tuple:
+```latex
+\left(
+  (-0.1 + 1.02\cos t) + \frac{-0.1 + 1.02\cos t}{(-0.1 + 1.02\cos t)^2 + (0.14 + 1.02\sin t)^2},\;
+  (0.14 + 1.02\sin t) - \frac{0.14 + 1.02\sin t}{(-0.1 + 1.02\cos t)^2 + (0.14 + 1.02\sin t)^2}
+\right)
+```
 
 #### Antenna Radiation Patterns
 
@@ -279,7 +364,32 @@ function dipoleGain(theta) {
 fn: (t) => [dipoleGain(t) * Math.cos(t), dipoleGain(t) * Math.sin(t)];
 ```
 
-**Why unconvertible:** Conditional in gain calculation, complex expression.
+**Status: CONVERTIBLE NOW**
+
+Use `If` for the conditional, inline the gain into each tuple component. The
+expression is repeated but compilable:
+
+```latex
+\begin{cases}
+  (0, 0) & |\sin\theta| < 0.01 \\
+  \left(\left(\frac{\cos(\frac{\pi}{2}\cos\theta)}{\sin\theta}\right)^2 \cos\theta,\;
+        \left(\frac{\cos(\frac{\pi}{2}\cos\theta)}{\sin\theta}\right)^2 \sin\theta\right) & \text{otherwise}
+\end{cases}
+```
+
+Or use `Block` with an intermediate variable for the gain to avoid repetition.
+
+#### Spirograph, Heart Curve, Butterfly Curve, Limacon
+
+**Status: CONVERTIBLE NOW**
+
+These are all closed-form parametric expressions using only trig and arithmetic.
+They may look complex in JS due to helper variables, but inline directly to
+LaTeX tuples. Examples:
+
+- **Heart curve:** `(\sin^3 t, \frac{13\cos t - 5\cos(2t) - 2\cos(3t) - \cos(4t)}{16})`
+- **Spirograph:** `((R-r)\cos t + d\cos(\frac{R-r}{r}t),\; (R-r)\sin t - d\sin(\frac{R-r}{r}t))`
+- **Butterfly:** `r(\theta) = e^{\sin\theta} - 2\cos(4\theta) + \sin^5(\frac{2\theta - \pi}{24})`
 
 ---
 
@@ -297,11 +407,12 @@ fn: (i) => {
 }
 ```
 
-**Why unconvertible:** Requires array lookup. Fresnel integrals don't have
-closed-form expressions.
+**Status: MUST REMAIN AS JS** (without Fresnel integrals)
 
-**CE Gap:** No support for Fresnel integrals
-`C(t) = \int_0^t \cos(\pi u^2/2) du`.
+The parametric form `(C(t), S(t))` where `C` and `S` are Fresnel integrals
+would be ideal, but CE does not implement Fresnel integrals.
+
+**CE Gap:** No `FresnelC(t)` or `FresnelS(t)` functions.
 
 ---
 
@@ -312,115 +423,193 @@ Functions that use values computed at runtime from dynamic data.
 #### Linear Regression Fit
 
 ```javascript
-// Compute least-squares fit from random data
 const m = num / den; // slope
 const b = yMean - m * xMean; // intercept
 fn: (x) => m * x + b;
 ```
 
-**Why unconvertible:** `m` and `b` are computed from runtime data.
+**Status: CONVERTIBLE** (once m, b are known)
 
-**Potential solution:** Use `DerivedSeries`! The plot library now supports
-derived series that can reference other series' data.
+After computing `m` and `b`, generate a LaTeX string with the values inlined:
+`"${m}x + ${b}"`. The `compile` free function accepts LaTeX strings directly.
 
-**Action item:** Investigate using `type: 'derived'` with fit operations.
-
----
-
-## Recommendations
-
-### Immediate Wins (Could be converted with effort)
-
-1. **Gaussian Distribution** - Inline constants
-2. **Dose-Response Sigmoid** - Inline constants
-3. **Fourier/Taylor Series** - Generate explicit LaTeX for specific term counts
-4. **Some parametric surfaces** - Expand multi-step calculations into single
-   expressions
-
-### CE Feature Requests
-
-1. **Piecewise functions** - Support `\begin{cases}` or Heaviside `H(x)`
-2. **Summation notation** - Support `\sum_{k=0}^{n}` with runtime `n`
-3. **Special functions** - Fresnel integrals, spherical harmonics, Bessel
-   functions
-4. **Sign function** - `\operatorname{sgn}(x)`
-
-### Integration with DerivedSeries
-
-The plot library supports `type: 'derived'` series that can:
-
-- Reference other series via `source: 'series-id'`
-- Apply transformations: `transform: 'cumsum'`, `'derivative'`,
-  `'moving-average'`
-- Compute regression fits
-
-**Investigation needed:** Can DerivedSeries replace runtime-computed parameters
-like the regression fit?
+Alternatively, use `DerivedSeries` if the plot library supports regression fits
+natively.
 
 ---
 
-## Conversion Statistics
+## Genuine CE Gaps
 
-| Category               | Count  | % of Total |
-| ---------------------- | ------ | ---------- |
-| Procedural (loops)     | 10     | 20%        |
-| Conditionals           | 6      | 12%        |
-| Helper functions       | 15     | 29%        |
-| Complex transforms     | 7      | 14%        |
-| Array indexing         | 2      | 4%         |
-| Runtime parameters     | 1      | 2%         |
-| **Converted to LaTeX** | **17** | **33%**    |
-| **Total**              | **51** | **100%**   |
+These are features that would meaningfully expand what can be compiled:
+
+### 1. Compilable `Sum`/`Product` with fixed bounds (HIGH IMPACT)
+
+`\sum_{k=0}^{n} f(k)` parses correctly but does not compile. Adding compilation
+for fixed integer bounds would enable all Fourier series, Taylor series, and
+similar constructs without explicit expansion.
+
+**Suggested implementation:** When both bounds are numeric literals, unroll the
+loop in the generated code:
+
+```javascript
+// \sum_{k=0}^{3} sin((2k+1)x)/(2k+1)
+// Compiles to:
+(Math.sin(1*_.x)/1 + Math.sin(3*_.x)/3 + Math.sin(5*_.x)/5 + Math.sin(7*_.x)/7)
+```
+
+### 2. `Which` compilation (MEDIUM IMPACT)
+
+`\begin{cases}` parses to `Which` but `Which` does not compile — only `If`
+(two-branch conditional) compiles. Multi-branch piecewise functions require
+manually nesting `If` expressions.
+
+**Suggested implementation:** Compile to chained ternaries:
+```javascript
+// Which(cond1, val1, cond2, val2, True, default)
+(cond1 ? val1 : (cond2 ? val2 : default))
+```
+
+### 3. Fresnel Integrals (LOW-MEDIUM IMPACT)
+
+`FresnelC(t)` and `FresnelS(t)` would enable Cornu spirals and diffraction
+patterns without pre-computed data arrays. These have well-known series
+expansions and rational approximations suitable for compilation.
+
+### 4. `Sinc` function (LOW IMPACT, CONVENIENCE)
+
+`\operatorname{sinc}(x) = \sin(x)/x` with correct handling at x=0. Currently
+requires a piecewise workaround. Not critical since `If` works, but would be
+more natural.
+
+### 5. Spherical Harmonics / Associated Legendre (LOW IMPACT, SPECIALIZED)
+
+Only needed for advanced 3D surface visualizations. Low priority since specific
+(l, m) values can be expanded to closed-form expressions manually.
 
 ---
 
-## Appendix: Full List of Unconvertible Functions
+## Updated Conversion Assessment
 
-### Procedural Logic
+With the findings above, many more functions are convertible than originally
+estimated:
 
-1. Fourier square wave (4 variants: 1, 3, 7, 15 terms)
-2. Taylor series sin(x) (4 variants: orders 0-3)
-3. KDE (kernel density estimation)
+| Category               | Total | Convertible Now | Was marked unconvertible |
+| ---------------------- | ----- | --------------- | ----------------------- |
+| Procedural (loops)     | 10    | 8 (expand)      | All 10                  |
+| Conditionals           | 6     | 6 (`If`, `Sign`)| All 6                   |
+| Helper functions       | 15    | 12 (inline)     | All 15                  |
+| Complex transforms     | 7     | 6 (inline/Block)| All 7                   |
+| Array indexing         | 2     | 0               | 2                       |
+| Runtime parameters     | 1     | 1 (inline vals) | 1                       |
+| **Already converted**  | **17**| **17**          | -                       |
+| **Total**              | **51**| **50**          |                         |
 
-### Conditionals
+**Revised conversion rate:** ~50/51 (98%) can be expressed in LaTeX/MathJSON
+with current CE capabilities. The only truly unconvertible function is KDE
+(requires iterating over a runtime data array).
 
-4. Square wave: `Math.sign(Math.sin(x))`
-5. Diffraction pattern: `Math.abs(x) < 0.001 ? 1.0 : pow(sin(x)/x, 2)`
-6. Step input: `t >= 0 ? 1 : 0`
-7. Step response (control systems)
+The Cornu spiral *could* be converted if Fresnel integrals were added to CE.
 
-### Helper Functions
+---
 
-8. Planck's law (blackbody radiation)
-9. Radioactive decay chain (3 stacked functions)
-10. Gaussian distribution (2 instances) - **Could be converted**
-11. Dose-response sigmoid - **Could be converted**
-12. Chemical kinetics (3 stacked functions)
-13. Drumhead vibration (Bessel functions)
+## Key Techniques for Conversion
 
-### Complex Transformations
+### Using `If` for conditionals
 
-14. Spherical harmonics
-15. Joukowski airfoil (2 curves: circle + airfoil)
-16. Dipole antenna pattern
-17. Cardioid antenna pattern
-18. Spirograph
-19. Heart curve
-20. Limaçon (depends on complexity)
-21. Butterfly curve
+CE's `If` operator compiles to JS (ternary), interval-js (`_IA.piecewise`), and
+GLSL. It is the primary tool for piecewise functions:
 
-### Array Indexing
+```latex
+\begin{cases} \text{value}_1 & \text{condition} \\ \text{value}_2 & \text{otherwise} \end{cases}
+```
 
-22. Cornu spiral (2 branches: positive + negative)
+For multi-branch, nest `If` expressions until `Which` compilation is added:
 
-### Runtime Parameters
+MathJSON: `["If", cond1, val1, ["If", cond2, val2, default]]`
 
-23. Linear regression fit - **Investigate DerivedSeries**
+### Using `Block` for intermediate variables
 
-### Verified Complex Surfaces (Multi-statement)
+CE compiles `Block` with `Declare`/`Assign` to JavaScript. This avoids
+repeating subexpressions:
 
-24. Torus - **CONVERTED** ✅
-25. Klein bottle
-26. Helicoid - **CONVERTED** ✅
-27. Möbius strip
-28. Seashell
+```json
+["Block",
+  ["Declare", "r2"],
+  ["Assign", "r2", ["Add", ["Power", "x", 2], ["Power", "y", 2]]],
+  ["Divide", 1, "r2"]
+]
+```
+
+Note: `Block` does not currently have a standard LaTeX input syntax — construct
+via MathJSON directly.
+
+### Using lambdas for parameterized families
+
+For families of curves (e.g., Planck's law at different temperatures), use
+`\mapsto` to define the parameter:
+
+```latex
+T \mapsto \frac{1}{\lambda^5 (\exp(\frac{15000}{T \lambda}) - 1)}
+```
+
+Then generate multiple compiled functions by providing different `T` values.
+
+### Inlining constants
+
+Most "helper function" patterns are just inlining constants into a formula.
+Generate LaTeX strings programmatically:
+
+```typescript
+function planckLatex(T: number): string {
+  const c = 5.0 / (T / 3000);
+  return `\\frac{1}{\\lambda^5 (\\exp(\\frac{${c}}{\\lambda}) - 1)}`;
+}
+```
+
+---
+
+## Appendix: Full List with Updated Status
+
+### Now Convertible (were marked unconvertible)
+
+1. Fourier square wave (4 variants) - expand terms explicitly
+2. Taylor series sin(x) (4 variants) - expand terms explicitly
+3. Square wave - `\operatorname{sgn}(\sin(x))`
+4. Diffraction pattern - `If` with `Abs`
+5. Step input - `If` with comparison
+6. Step response - `If` with `Exp`, `Sin`, `Arctan2`
+7. Planck's law - `If` for overflow guard, inline formula
+8. Radioactive decay chain - Bateman equations, inline constants
+9. Gaussian distribution (2 instances) - inline constants
+10. Dose-response sigmoid - inline constants
+11. Chemical kinetics - Bateman equations, inline constants
+12. Joukowski airfoil - inline or `Block`
+13. Dipole antenna pattern - `If` with inline gain
+14. Cardioid antenna pattern - polar trig expression
+15. Spirograph - parametric tuple
+16. Heart curve - parametric tuple
+17. Limacon - polar expression
+18. Butterfly curve - polar expression
+19. Linear regression fit - inline computed m, b
+
+### Must Remain as JS
+
+20. KDE - runtime data array iteration
+
+### Convertible if CE Gaps Are Filled
+
+21. Cornu spiral - needs `FresnelC`, `FresnelS`
+22. Drumhead vibration - needs nothing extra (`BesselJ` already compiles!)
+
+### Already Converted
+
+23-51. (17 previously converted + Torus, Helicoid, etc.)
+
+### Verified: Previously Thought Unconvertible but Actually Work
+
+- **Drumhead vibration (Bessel functions):** CE has `BesselJ`, `BesselY`,
+  `BesselI`, `BesselK` — all compile to JS via `_SYS.besselJ` etc. The
+  drumhead `J_n(x)` expressions compile directly.
+- **Mobius strip, Seashell, Klein bottle:** These are parametric surfaces using
+  only trig and arithmetic — all operators compile. They are verbose but
+  expressible as tuple LaTeX.

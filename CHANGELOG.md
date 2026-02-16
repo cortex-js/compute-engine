@@ -15,10 +15,25 @@
 - **`angleNormalization` serialization option**: Normalize angles during
   serialization with `'0...360'` (useful for bearings) or `'-180...180'` (useful
   for longitude). Default is `'none'`.
+- **`realOnly` compilation option**: Pass `{ realOnly: true }` to `compile()` to
+  automatically convert complex `{ re, im }` results to real numbers — returns
+  `re` when `im === 0`, `NaN` otherwise. Useful for plotting and other contexts
+  that only need real-valued output.
+- **Fresnel integrals (`FresnelS`, `FresnelC`)**: Numeric evaluation using
+  Cephes rational Chebyshev approximation, LaTeX parsing via
+  `\operatorname{FresnelS}` / `\operatorname{FresnelC}`, JavaScript and
+  interval-arithmetic compilation targets.
 
 ### Bug Fixes
 
 - **Interval-JS compilation for Gamma functions**
+- **Interval-JS graceful fallback**: The `interval-js` target no longer throws
+  when encountering unsupported functions. Unsupported operators now produce
+  `{ success: false }` at compile time, and runtime errors return
+  `{ kind: "entire" }` instead of propagating.
+- **`CompilationResult.run` type signature**: The TypeScript type for `run` now
+  correctly reflects the actual calling convention (`(...args: unknown[])`)
+  instead of the previous misleading `(...args: (number | {re, im})[])`.
 
 ### Other Changes
 

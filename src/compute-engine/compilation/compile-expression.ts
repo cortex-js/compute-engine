@@ -78,7 +78,7 @@ export function compile(
         target: options?.to ?? 'javascript',
         success: false,
         code: '',
-        run: applicableN1(expr),
+        run: applicableN1(expr) as CompilationResult['run'],
       };
     }
     throw e;
