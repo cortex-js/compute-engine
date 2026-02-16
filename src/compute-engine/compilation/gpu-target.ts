@@ -571,21 +571,23 @@ export function compileGPUMatrix(
 export const GPU_GAMMA_PREAMBLE = `
 float _gpu_gamma(float z) {
   const float PI = 3.14159265358979;
-  if (z < 0.5) {
-    return PI / (sin(PI * z) * _gpu_gamma(1.0 - z));
-  }
-  z -= 1.0;
+  // For z < 0.5, use reflection formula with inlined Lanczos (non-recursive)
+  float w = z;
+  if (z < 0.5) w = 1.0 - z;
+  w -= 1.0;
   float x = 0.99999999999980993;
-  x += 676.5203681218851 / (z + 1.0);
-  x += -1259.1392167224028 / (z + 2.0);
-  x += 771.32342877765313 / (z + 3.0);
-  x += -176.61502916214059 / (z + 4.0);
-  x += 12.507343278686905 / (z + 5.0);
-  x += -0.13857109526572012 / (z + 6.0);
-  x += 9.9843695780195716e-6 / (z + 7.0);
-  x += 1.5056327351493116e-7 / (z + 8.0);
-  float t = z + 7.5;
-  return sqrt(2.0 * PI) * pow(t, z + 0.5) * exp(-t) * x;
+  x += 676.5203681218851 / (w + 1.0);
+  x += -1259.1392167224028 / (w + 2.0);
+  x += 771.32342877765313 / (w + 3.0);
+  x += -176.61502916214059 / (w + 4.0);
+  x += 12.507343278686905 / (w + 5.0);
+  x += -0.13857109526572012 / (w + 6.0);
+  x += 9.9843695780195716e-6 / (w + 7.0);
+  x += 1.5056327351493116e-7 / (w + 8.0);
+  float t = w + 7.5;
+  float g = sqrt(2.0 * PI) * pow(t, w + 0.5) * exp(-t) * x;
+  if (z < 0.5) return PI / (sin(PI * z) * g);
+  return g;
 }
 
 float _gpu_gammaln(float z) {

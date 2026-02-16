@@ -31,4 +31,31 @@ describe('SEMICOLON BLOCKS - PARSING', () => {
       `["Block", ["Declare", "x"], ["Assign", "x", 10], ["Square", "x"]]`
     );
   });
+
+  test('Semicolon followed by thin space (;\\;) parses correctly', () => {
+    // ;\; is natural LaTeX spacing but previously created an InvisibleOperator
+    // that made isValid false and broke compilation
+    const expr = ce.parse('a \\coloneq 5;\\; a + 1');
+    expect(expr.isValid).toBe(true);
+    expect(expr).toMatchInlineSnapshot(
+      `["Block", ["Declare", "a"], ["Assign", "a", 5], ["Add", "a", 1]]`
+    );
+  });
+
+  test('Multiple ;\\; separators parse correctly', () => {
+    const expr = ce.parse(
+      'a \\coloneq 1;\\; b \\coloneq 2;\\; a + b'
+    );
+    expect(expr.isValid).toBe(true);
+    expect(expr).toMatchInlineSnapshot(`
+      [
+        "Block",
+        ["Declare", "a"],
+        ["Assign", "a", 1],
+        ["Declare", "b"],
+        ["Assign", "b", 2],
+        ["Add", "a", "b"]
+      ]
+    `);
+  });
 });

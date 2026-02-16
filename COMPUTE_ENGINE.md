@@ -425,7 +425,15 @@ indices, product indices) and free variables. `expr.unknowns` should only return
 truly free variables, or CE should provide a separate `expr.freeVariables`
 property.
 
-**Fixed in next version of Compute Engine**
+> **CE Response:** Fixed. `expr.unknowns` now correctly excludes locally bound
+> variables from `Sum`, `Product`, `Integrate`, and `Block` constructs. Bound
+> variables are identified structurally from `Limits`/`Element`/`Assign`/`Declare`
+> expressions, so symbolic upper bounds like `M` in `\sum_{k=0}^{M}` are
+> correctly *included* as unknowns while the index `k` is excluded. A new
+> `expr.freeVariables` property is also available (identical to `unknowns`).
+> Your `extractVarNames()` workaround for default-name preference is still a
+> reasonable defense-in-depth measure but should no longer be necessary for
+> the bound-variable issue.
 
 ### 2. Interval-js fails for `(-1)^k` in `\sum`
 
@@ -441,7 +449,15 @@ without adaptive break detection from interval arithmetic.
 minimum as a special case returning
 `{ kind: "interval", value: { lo: -1, hi: 1 } }`.
 
-**Fixed in next version of Compute Engine**
+> **CE Response:** Fixed. `powInterval()` now handles `(-1)^k` correctly via two
+> paths: (1) when the exponent is a point interval with an integer value (e.g.,
+> `k` is a loop index), it delegates to `intPow()` which preserves even/odd
+> parity; (2) when the base is exactly `-1` and the exponent spans multiple
+> integers, it returns the conservative interval `[-1, 1]`. Additionally,
+> `Factorial` and `Factorial2` are now supported in interval-js compilation, so
+> Taylor series patterns like `\frac{(-1)^k x^{2k+1}}{(2k+1)!}` compile
+> successfully to the interval-js target. The GLSL/WGSL interval targets also
+> gained `ia_pow_interval()` for variable-exponent power expressions.
 
 ### 3. Degenerate interval probe (defense-in-depth)
 
@@ -485,6 +501,14 @@ a constant, a conditional branch, or a complex expression. **This has been
 confirmed as a known issue and will be resolved in the next CE release.** The
 `normalizeIntervalResult()` workaround should be kept as defense-in-depth.
 
+> **CE Response:** Fixed. The `piecewise()` function in the interval arithmetic
+> runtime now wraps all branch results through `toResult()`, which normalizes raw
+> `{lo, hi}` objects to `{kind: "interval", value: {lo, hi}}`. Constants are
+> compiled as `_IA.point(n)` which produces proper `{lo, hi}` intervals, and the
+> `piecewise` handler ensures the final return is always a valid `IntervalResult`.
+> We agree that keeping `normalizeIntervalResult()` as defense-in-depth is a good
+> practice.
+
 ### 5. `;\;` (semicolon + thin space) breaks CE parsing
 
 **Problem:** When semicolon block statements use `;\;` as the separator
@@ -512,6 +536,15 @@ separator.
 **Upstream note:** CE could either ignore `\;` after semicolons or document this
 restriction. The current behavior is a parsing pitfall since `;\;` looks natural
 in LaTeX.
+
+> **CE Response:** Fixed. The `parseSequence()` function in the LaTeX parser now
+> calls `skipVisualSpace()` (which handles `\;`, `\,`, `\:`, `\quad`, `\qquad`,
+> and other LaTeX spacing commands) instead of `skipSpace()` when parsing around
+> separators like semicolons. This means `;\;` now parses identically to plain
+> `;` — the `\;` is consumed as visual spacing and does not create an
+> `InvisibleOperator` node. Your existing `;\;` expressions should now parse
+> correctly with `isValid: true` and compile successfully. The CE serializer
+> continues to emit `;\;` for readability, and these now round-trip correctly.
 
 ### 6. CE features exercised and test results
 
@@ -556,13 +589,11 @@ intermediate variable bindings — no variable leakage. All four semicolon block
 expressions (Joukowski, Seashell, Gravitational Potential, Electric Dipole)
 compile and render correctly.
 
-> **Warning**: Use plain `;` (optionally followed by a regular space) as the
-> statement separator. Do NOT use `;\;` (semicolon + thin space `\;`) — the `\;`
-> after a semicolon creates an `InvisibleOperator` node in the CE parse tree,
-> which makes the expression `isValid: false` and causes compilation to fail
-> silently (falling back to the slower expression interpreter). Note that `\;`
-> _inside_ tuple components (e.g., `(a,\; b)`) is fine — it only causes problems
-> immediately after a semicolon statement separator.
+> ~~**Warning**: Use plain `;` (optionally followed by a regular space) as the
+> statement separator. Do NOT use `;\;` (semicolon + thin space `\;`).~~
+> **Update:** This has been fixed in CE. `;\;` now parses correctly — the `\;`
+> is consumed as visual spacing and does not create an `InvisibleOperator` node.
+> Both `;\;` and plain `;` work as statement separators.
 
 #### `\text{if}…\text{then}…\text{else}` syntax
 
@@ -624,6 +655,22 @@ both the `z >= 0.5` and `z < 0.5` branches inline without recursion.
 implementations. Either replace the recursive gamma with a Lanczos/Stirling
 approximation, or emit the preamble selectively (only include functions that the
 compiled expression actually references).
+
+> **CE Response:** Fixed. The `_gpu_gamma()` function in both the GLSL preamble
+> (`gpu-target.ts`) and the interval-GLSL preamble (`interval-glsl-target.ts`)
+> has been replaced with a non-recursive implementation. For `z < 0.5`, the
+> reflection formula now inlines the Lanczos computation for `Gamma(1-z)` instead
+> of recursing, since `1-z >= 0.5` guarantees the Lanczos path is always taken.
+> The mathematical result is identical — same Lanczos coefficients (g=7, n=9) —
+> but the function is now GLSL-legal. Your `sanitizeIntervalPreamble()` workaround
+> should no longer be necessary, though keeping it as a safety net is fine.
+>
+> Regarding selective preamble emission: the `glsl` target already does this for
+> complex-number helpers (via `buildComplexPreamble()` which scans the compiled
+> code for `_gpu_c*` calls and resolves transitive dependencies). The
+> `interval-glsl` target still emits the full library monolithically. Making it
+> selective is on our radar but is a larger refactoring effort — the full library
+> approach ensures correctness while we work toward that.
 
 ## Conversion Patterns
 
@@ -774,7 +821,8 @@ warning if `false` — silent fallback to interpretation is a debugging trap.
 If `expr.isValid` is `false`, the parse tree contains `Error` nodes and
 compilation will always fail. Common causes:
 
-- `;\;` after semicolons (creates `InvisibleOperator` — see gap #5)
+- ~~`;\;` after semicolons (creates `InvisibleOperator` — see gap #5)~~ **Fixed
+  in CE — `;\;` now parses correctly.**
 - Subscripted variable names like `r_1` in semicolon blocks (CE parses as
   `Subscript(r, 1)`, not a single variable — use simple names like `a`, `b`)
 - Mismatched delimiters or unrecognized LaTeX commands
@@ -795,8 +843,10 @@ canonical variable names (x, y, t, etc.) to the expression's actual names.
 ### 4. Interval arithmetic has coverage gaps
 
 Not all functions that compile to `javascript` also compile to `interval-js`.
-Notable gaps: `(-1)^k` in sums (gap #2), and various special functions. The
-fallback from `interval-js` → `js` is graceful but loses break detection.
+~~Notable gaps: `(-1)^k` in sums (gap #2), and~~ Various special functions
+remain JS-only. The fallback from `interval-js` → `js` is graceful but loses
+break detection. **Note:** `(-1)^k` and `Factorial` are now supported in
+interval-js (see gap #2 CE response).
 
 **Best practice:** Always attempt interval compilation first, fall back to
 scalar JS. Use `isIntervalDegenerate1D/2D()` to detect degenerate interval
@@ -815,11 +865,11 @@ often more readable.
 ### 6. `\;` placement matters in LaTeX
 
 - `\;` between tuple components (`(a,\; b)`) — fine, just spacing
-- `\;` after semicolons (`;\;`) — breaks parsing (gap #5)
+- `\;` after semicolons (`;\;`) — ~~breaks parsing (gap #5)~~ **now fixed in
+  CE**, `;\;` is handled correctly
 - `\;` inside `\text{if}` syntax (`\text{if}\; x \geq 0`) — fine
 
-**Best practice:** Never use `\;` immediately after a semicolon statement
-separator. Use plain `;` followed by a regular space if needed.
+**Best practice:** `;\;` now works correctly, but plain `;` is equally valid.
 
 ### 7. The `realOnly` flag prevents complex-number surprises
 
@@ -857,18 +907,33 @@ plotting integration. Ordered by impact.
    spacing commands after semicolons or document this restriction clearly. `;\;`
    is natural LaTeX and a common pitfall.
 
+   > **CE Response: Fixed.** The parser's `parseSequence()` now calls
+   > `skipVisualSpace()` around separators, which consumes `\;`, `\,`, `\:`,
+   > `\quad`, etc. as whitespace. `;\;` now parses identically to `;`. See gap
+   > #5 for details.
+
 2. **Fix `expr.unknowns` for bound variables (gap #1)**: Summation/product
    indices should not appear in `unknowns`. Either filter them out or provide a
    separate `expr.freeVariables` property. **Confirmed fixed in next release.**
+
+   > **CE Response: Fixed.** Both `expr.unknowns` and the new
+   > `expr.freeVariables` property now correctly exclude bound variables. See gap
+   > #1 for details.
 
 3. **Fix interval-js constant branch wrapping (gap #4)**: Constant branches in
    `\text{if}` return raw `{lo, hi}` instead of
    `{kind: "interval", value: {lo, hi}}`. All return values should be properly
    typed `IntervalResult`. **Confirmed fixed in next release.**
 
+   > **CE Response: Fixed.** The `piecewise()` runtime wraps all branch results
+   > through `toResult()`. See gap #4 for details.
+
 4. **Support `(-1)^k` in interval-js (gap #2)**: Alternating sign patterns fail
    interval compilation. At minimum, recognize `(-1)^n` as returning
    `{lo: -1, hi: 1}`. **Confirmed fixed in next release.**
+
+   > **CE Response: Fixed.** `powInterval()` handles integer exponents and the
+   > `(-1)^n` pattern. `Factorial` also added. See gap #2 for details.
 
 ### Medium Priority
 
@@ -878,16 +943,41 @@ plotting integration. Ordered by impact.
    approximation. Ideally, also emit the preamble selectively (only include
    functions the expression actually uses) to reduce shader size.
 
+   > **CE Response: Fixed.** `_gpu_gamma()` in both the GLSL and interval-GLSL
+   > preambles now uses a non-recursive Lanczos implementation that inlines the
+   > reflection formula. Selective preamble emission for interval-GLSL is on our
+   > radar but deferred. See gap #8 for details.
+
 6. **Warn on `success: false` fallback**: When compilation fails but `run` is
    still set (interpreter fallback), emit a console warning. The current silent
    behavior makes it very hard to detect compilation failures.
+
+   > **CE Response: Fixed.** `compile()` now emits a `console.warn` when a
+   > language target returns `success: false`, with a message indicating whether
+   > an interpreter fallback is available. This covers both the case where the
+   > target itself catches an error (e.g., interval-js unsupported operator) and
+   > the case where an exception propagates up. The warning includes the target
+   > name and the expression's LaTeX representation for easier debugging.
 
 7. **Add `SphericalHarmonic(l, m, theta, phi)` and
    `AssociatedLegendreP(n, m, x)`**: Would allow general spherical harmonics
    without manual expansion for each (l, m) pair.
 
+   > **CE Response: Acknowledged, deferred.** This is on our list but is low
+   > priority given that specific `(l, m)` values can be expanded to closed-form
+   > trig expressions. We may revisit if there's demand beyond the plotting use
+   > case.
+
 8. **Support `\prod` in interval-js**: Currently only `\sum` compiles to
    interval-js. Product accumulation with `_IA.mul` would be analogous.
+
+   > **CE Response: Already implemented.** `\prod` has been supported in
+   > interval-js since the same release that added `\sum` support. The
+   > `compileIntervalSumProduct()` function handles both `Sum` and `Product`,
+   > using `_IA.mul` accumulation with identity `_IA.point(1)` for products.
+   > Small constant ranges are unrolled; larger ranges and symbolic bounds use
+   > loops. If you were seeing failures, they may have been caused by gap #2
+   > (`(-1)^k` in the product body) rather than the product construct itself.
 
 ### Low Priority (Nice to Have)
 
@@ -895,6 +985,19 @@ plotting integration. Ordered by impact.
    today. GLSL preamble-based implementations would enable GPU-accelerated
    rendering of plots using these functions.
 
+   > **CE Response: Acknowledged.** These would require non-trivial preamble
+   > implementations (series approximations, asymptotic expansions). We'll
+   > consider adding them as preamble helpers if there's sufficient demand. For
+   > now, falling back to JS for these functions is the intended path.
+
 10. **Subscripted variable names in blocks**: Allow `r_1 \coloneq expr` to
     define a variable named `r_1` rather than parsing as `Subscript(r, 1)`. This
     is common in mathematical notation for intermediate values.
+
+    > **CE Response: Acknowledged, complex change.** The parser currently treats
+    > `_` as the subscript operator uniformly, producing `Subscript(r, 1)` — a
+    > function application. Making assignment targets context-sensitive (treating
+    > `r_1` as a single identifier on the LHS of `\coloneq` but as a subscript
+    > elsewhere) would require significant parser changes and could introduce
+    > ambiguity. For now, the recommended workaround is to use simple identifiers
+    > (`a`, `b`, `r`) in blocks. We'll explore this if there's broader demand.

@@ -22,7 +22,26 @@
   (Lanczos approximation) and `ia_gammaln` (Stirling asymptotic) to the WGSL
   target, matching existing GLSL implementations.
 
+- **`compile()` warns on `success: false`**: When a compilation target returns
+  `success: false`, the `compile()` function now emits a `console.warn` with
+  the target name, expression LaTeX, and whether an interpreter fallback is
+  available. Previously, failed compilations were silent, making it difficult
+  to detect when code was falling back to the slower expression interpreter.
+
 ### Bug Fixes
+
+- **`;\;` (semicolon + thin space) no longer breaks block parsing**: The LaTeX
+  parser's `parseSequence()` function now calls `skipVisualSpace()` around
+  separators, which consumes `\;`, `\,`, `\:`, `\quad`, and other LaTeX spacing
+  commands. Previously, `;\;` created an `InvisibleOperator` node that made
+  `expr.isValid` false and caused compilation to fail. The serializer continues
+  to emit `;\;` for readability, and these now round-trip correctly.
+
+- **Non-recursive `_gpu_gamma` in GLSL preambles**: The `_gpu_gamma()` function
+  in both the GLSL and interval-GLSL preambles previously used a recursive call
+  via the reflection formula `Gamma(z) = pi / (sin(pi*z) * Gamma(1-z))`, which
+  is illegal in GLSL. Replaced with a non-recursive Lanczos implementation that
+  inlines the computation for both `z >= 0.5` and `z < 0.5` branches.
 
 - **Sum/Product with symbolic bounds compiled incorrectly**: Expressions like
   `\sum_{k=0}^{n} f(k, x)` where the upper bound is a variable produced loops

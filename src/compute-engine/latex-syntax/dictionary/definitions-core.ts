@@ -58,10 +58,10 @@ function parseSequence(
   while (!done) {
     done = true;
 
-    parser.skipSpace();
+    parser.skipVisualSpace();
     while (parser.match(sep)) {
       result.push('Nothing');
-      parser.skipSpace();
+      parser.skipVisualSpace();
     }
 
     if (parser.atTerminator(terminator)) {
@@ -72,7 +72,7 @@ function parseSequence(
       done = rhs === null;
     }
     if (!done) {
-      parser.skipSpace();
+      parser.skipVisualSpace();
       done = !parser.match(sep);
     }
   }

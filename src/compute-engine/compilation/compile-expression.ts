@@ -61,13 +61,24 @@ export function compile(
     }
 
     // Use the language target to compile
-    return languageTarget.compile(expr, {
+    const result = languageTarget.compile(expr, {
       operators: options?.operators,
       functions: options?.functions,
       vars: options?.vars,
       imports: options?.imports,
       preamble: options?.preamble,
     });
+
+    if (!result.success) {
+      console.warn(
+        `Compilation to "${targetName}" failed for "${expr.latex ?? expr.operator}". ` +
+          (result.run
+            ? 'Falling back to interpreter.'
+            : 'No fallback available.')
+      );
+    }
+
+    return result;
   } catch (e) {
     // @fixme: the fallback needs to handle multiple arguments
     if (options?.fallback ?? true) {
