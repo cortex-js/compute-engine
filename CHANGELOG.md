@@ -32,7 +32,9 @@
   `\sum_{k=0}^{M} k \cdot x`, the symbolic upper bound `M` was incorrectly
   excluded from `unknowns` because the scope's bindings map captured all symbols
   referenced during canonicalization. Now extracts bound variables structurally
-  from `Limits`/`Element` expressions, so only true index variables are excluded.
+  from `Limits`/`Element`/`Assign`/`Declare` expressions, so only true bound
+  variables are excluded. This also fixes `Block` expressions where locally
+  assigned variables (via `Assign` or `Declare`) were reported as unknowns.
 
 - **Interval `piecewise` with constant branches**: Fixed `piecewise()` returning
   raw `Interval` objects instead of `IntervalResult` when branches evaluated to
