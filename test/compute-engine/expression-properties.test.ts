@@ -284,3 +284,33 @@ describe('FREE_VARIABLES', () => {
     expect(engine.parse('5 + 3').freeVariables).toEqual([]);
   });
 });
+
+
+describe('SCOPED_UNKNOWNS', () => {
+  it('Block: should exclude locally assigned variables', () => {
+    // x is free, y is locally assigned
+    const block = engine.box(['Block', ['Assign', 'y', 5], ['Add', 'x', 'y']]);
+    expect(block.unknowns).toContain('x');
+    expect(block.unknowns).not.toContain('y');
+  });
+
+  it('Block: should exclude locally declared variables', () => {
+    const block = engine.box(['Block', ['Declare', 'z', 'integer'], ['Add', 'x', 'z']]);
+    expect(block.unknowns).toContain('x');
+    expect(block.unknowns).not.toContain('z');
+  });
+
+  it('D: differentiation variable remains free', () => {
+    // In D(x^2 + a, x), both x and a are free — x is still in the result
+    const d = engine.box(['D', ['Add', ['Power', 'x', 2], 'a'], 'x']);
+    expect(d.unknowns).toContain('a');
+    expect(d.unknowns).toContain('x');
+  });
+
+  it('ForAll: should exclude quantified variable', () => {
+    // n is free, k is bound by the quantifier
+    const forall = engine.box(['ForAll', ['Element', 'k', ['Range', 1, 'n']], ['Greater', 'k', 0]]);
+    expect(forall.unknowns).toContain('n');
+    expect(forall.unknowns).not.toContain('k');
+  });
+});

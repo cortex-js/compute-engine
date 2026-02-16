@@ -854,16 +854,22 @@ function getUnknowns(expr: Expression, result: Set<string>): void {
   if (isFunction(expr)) {
     if (expr.isScoped && expr.localScope) {
       // For scoped functions (Sum, Product, Integrate, Block, etc.),
-      // collect unknowns from ops then exclude the index variables.
+      // collect unknowns from ops then exclude the bound variables.
       // The scope's bindings map includes all symbols referenced during
       // canonicalization (including free variables like upper bounds),
-      // so we extract the actual bound variables from the structure:
-      // each Limits/Element expression's first operand is an index variable.
+      // so we extract the actual bound variables from the structure.
       const boundVars = new Set<string>();
       for (const op of expr.ops) {
+        if (!isFunction(op)) continue;
+        // Sum/Product/Integrate: Limits(index, ...) or Element(index, ...)
         if (
-          isFunction(op) &&
           (op.operator === 'Limits' || op.operator === 'Element') &&
+          isSymbol(op.op1)
+        )
+          boundVars.add(op.op1.symbol);
+        // Block: Assign(symbol, value) or Declare(symbol, ...)
+        if (
+          (op.operator === 'Assign' || op.operator === 'Declare') &&
           isSymbol(op.op1)
         )
           boundVars.add(op.op1.symbol);
