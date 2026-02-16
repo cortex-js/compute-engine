@@ -1,5 +1,21 @@
 ## [Unreleased]
 
+### Features
+
+- **#172 Degrees-Minutes-Seconds (DMS) notation**: Parse and serialize
+  geographic angle notation such as `9°30'15"`. The LaTeX parser now recognizes
+  arc-minute (`'`, `\prime`) and arc-second (`"`, `\doubleprime`) symbols when
+  they follow a degree symbol, producing
+  `Add(Quantity(…, deg), Quantity(…, arcmin), …)` expressions that evaluate and
+  simplify through the existing unit system. Negative angles (e.g. `-45°30'`)
+  are fully supported for latitude/longitude coordinates.
+- **`dmsFormat` serialization option**: Set `dmsFormat: true` in
+  `SerializeLatexOptions` to serialize angle quantities as DMS notation (e.g.
+  `Quantity(9.5, deg)` → `9°30'`).
+- **`angleNormalization` serialization option**: Normalize angles during
+  serialization with `'0...360'` (useful for bearings) or `'-180...180'` (useful
+  for longitude). Default is `'none'`.
+
 ### Bug Fixes
 
 - **Interval-JS compilation for Gamma functions**
