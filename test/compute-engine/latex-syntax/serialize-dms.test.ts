@@ -109,3 +109,53 @@ describe('DMS Formatting', () => {
     expect(result.sec).toBeCloseTo(15, 2);
   });
 });
+
+describe('Round-Trip Parsing and Serialization', () => {
+  const ce = new ComputeEngine();
+
+  test('parse and serialize DMS maintains value', () => {
+    const input = "9°30'15\"";
+    const expr = ce.parse(input);
+
+    // Evaluate to get a single Quantity, then serialize with DMS format
+    const evaluated = expr.N();
+    const serialized = evaluated.toLatex({ dmsFormat: true });
+
+    // Should serialize to same or equivalent DMS
+    const reparsed = ce.parse(serialized);
+    const reparsedEvaluated = reparsed.N();
+
+    // Compare the numeric values (should be approximately equal)
+    expect(evaluated.json).toEqual(['Quantity', { num: '9.504166666666666' }, 'deg']);
+    expect(reparsedEvaluated.json).toEqual(['Quantity', { num: '9.504166666666666' }, 'deg']);
+  });
+
+  test('parse decimal degrees, serialize as DMS', () => {
+    // Use Quantity to preserve the degree unit (parsing 9.5° converts to radians)
+    const expr = ce.box(['Quantity', 9.5, 'deg']);
+    const latex = expr.toLatex({ dmsFormat: true });
+    expect(latex).toBe("9°30'");
+  });
+
+  test('parse DMS, serialize as decimal', () => {
+    const expr = ce.parse("9°30'");
+
+    // Evaluate to get a single Quantity
+    const evaluated = expr.N();
+    const latex = evaluated.toLatex({ dmsFormat: false });
+
+    // Should use decimal degrees
+    expect(latex).toBe('9.5\\,\\mathrm{deg}');
+  });
+
+  test('normalization preserves mathematical value modulo period', () => {
+    // Use Quantity to preserve the degree unit
+    const expr = ce.box(['Quantity', 370, 'deg']);
+    const normalized = expr.toLatex({ angleNormalization: '0...360' });
+    expect(normalized).toBe('10°');
+
+    // 370° and 10° differ by exactly 360°
+    const diff = 370 - 10;
+    expect(diff).toBe(360);
+  });
+});
