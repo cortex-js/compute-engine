@@ -1099,8 +1099,14 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
     expr: Expression,
     options: CompilationOptions<Expression> = {}
   ): CompilationResult {
-    const { operators, functions, vars, imports = [], preamble, realOnly } =
-      options;
+    const {
+      operators,
+      functions,
+      vars,
+      imports = [],
+      preamble,
+      realOnly,
+    } = options;
     const unknowns = expr.unknowns;
 
     // Process imports
@@ -1176,9 +1182,7 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
 /**
  * Compile expression to JavaScript executable
  */
-function wrapRealOnly(
-  result: CompilationResult
-): CompilationResult {
+function wrapRealOnly(result: CompilationResult): CompilationResult {
   if (!result.run) return result;
   const origRun = result.run;
   result.run = ((...args: unknown[]) => {
@@ -1286,7 +1290,9 @@ function compileSumProduct(
     // Complex unrolling: use an IIFE with temp variables
     // to add/multiply complex terms properly
     const temps = terms.map((_, i) => `_t${i}`);
-    const assignments = terms.map((t, i) => `const ${temps[i]} = ${t}`).join('; ');
+    const assignments = terms
+      .map((t, i) => `const ${temps[i]} = ${t}`)
+      .join('; ');
 
     if (isSum) {
       const reSum = temps.map((t) => `${t}.re`).join(' + ');

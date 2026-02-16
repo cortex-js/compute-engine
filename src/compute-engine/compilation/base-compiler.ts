@@ -196,7 +196,9 @@ export class BaseCompiler {
 
     if (h === 'Which') {
       if (args.length < 2 || args.length % 2 !== 0)
-        throw new Error('Which: expected even number of arguments (condition/value pairs)');
+        throw new Error(
+          'Which: expected even number of arguments (condition/value pairs)'
+        );
       const fn = target.functions?.(h);
       if (fn) {
         if (typeof fn === 'function') {
@@ -303,8 +305,7 @@ export class BaseCompiler {
     const indexExpr = indexing.ops[0];
     const rangeExpr = indexing.ops[1];
 
-    if (!isSymbol(indexExpr))
-      throw new Error('Loop: index must be a symbol');
+    if (!isSymbol(indexExpr)) throw new Error('Loop: index must be a symbol');
     if (rangeExpr.operator !== 'Range' || !isFunction(rangeExpr))
       throw new Error('Loop: expected Range(lo, hi)');
 
@@ -347,7 +348,8 @@ export class BaseCompiler {
       const thenBranch = BaseCompiler.compileLoopBody(expr.ops[1], target);
       if (expr.ops.length > 2) {
         const elseBranch = BaseCompiler.compileLoopBody(expr.ops[2], target);
-        if (elseBranch) return `if (${cond}) { ${thenBranch} } else { ${elseBranch} }`;
+        if (elseBranch)
+          return `if (${cond}) { ${thenBranch} } else { ${elseBranch} }`;
       }
       return `if (${cond}) { ${thenBranch} }`;
     }

@@ -224,7 +224,9 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   Which: (args, compile) => {
     if (args.length < 2 || args.length % 2 !== 0)
-      throw new Error('Which: expected even number of arguments (condition/value pairs)');
+      throw new Error(
+        'Which: expected even number of arguments (condition/value pairs)'
+      );
     // Build nested piecewise calls for each condition/value pair
     const buildPiecewise = (i: number): string => {
       if (i >= args.length) return `{ kind: 'empty' }`;

@@ -584,8 +584,8 @@ export function asech(x: Interval | IntervalResult): IntervalResult {
 // Approximate locations of the first 10 positive local extrema of sinc(x)
 // (solutions of tan(x) = x, alternating max/min).
 const SINC_EXTREMA = [
-  4.49341, 7.72525, 10.90412, 14.06619, 17.22076, 20.37130, 23.51945,
-  26.66605, 29.81160, 32.95639,
+  4.49341, 7.72525, 10.90412, 14.06619, 17.22076, 20.3713, 23.51945, 26.66605,
+  29.8116, 32.95639,
 ];
 
 // Global bounds of sinc(x): the first minimum is the most negative

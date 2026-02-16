@@ -870,8 +870,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     name: 'Return',
     serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
       const arg = operand(expr, 1);
-      if (!arg || symbol(arg) === 'Nothing')
-        return '\\text{return}';
+      if (!arg || symbol(arg) === 'Nothing') return '\\text{return}';
       return joinLatex(['\\text{return }', serializer.serialize(arg)]);
     },
   },
@@ -919,8 +918,10 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     parse: (
       parser: Parser,
       until?: Readonly<Terminator>
-    ): MathJsonExpression =>
-      ['Return', parser.parseExpression(until) ?? 'Nothing'],
+    ): MathJsonExpression => [
+      'Return',
+      parser.parseExpression(until) ?? 'Nothing',
+    ],
   },
 
   {
@@ -2191,9 +2192,7 @@ function parseWhereExpression(
  * Convert a sequence of expressions to a Block, inserting Declare
  * before each Assign.
  */
-function buildBlockFromSequence(
-  seq: MathJsonExpression[]
-): MathJsonExpression {
+function buildBlockFromSequence(seq: MathJsonExpression[]): MathJsonExpression {
   const block: MathJsonExpression[] = [];
   for (const s of seq) {
     if (operator(s) === 'Assign') {

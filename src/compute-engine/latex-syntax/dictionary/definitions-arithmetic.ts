@@ -675,8 +675,7 @@ function parseDMS(parser: Parser, lhs: MathJsonExpression): MathJsonExpression {
   // Fallback for symbolic values: return structured Add form
   const parts: MathJsonExpression[] = [['Quantity', lhs, 'deg']];
   parts.push(['Quantity', minExpr!, 'arcmin']);
-  if (secNum !== null)
-    parts.push(['Quantity', secNum, 'arcsec']);
+  if (secNum !== null) parts.push(['Quantity', secNum, 'arcsec']);
   return ['Add', ...parts];
 }
 
@@ -703,7 +702,10 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
         const argValue = machineValue(arg);
         if (argValue !== null) {
           let degrees = argValue;
-          if (options.angleNormalization && options.angleNormalization !== 'none')
+          if (
+            options.angleNormalization &&
+            options.angleNormalization !== 'none'
+          )
             degrees = normalizeAngle(degrees, options.angleNormalization);
 
           if (options.dmsFormat) return formatDMS(degrees);
