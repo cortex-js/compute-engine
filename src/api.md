@@ -7237,6 +7237,8 @@ type SerializeLatexOptions = NumberSerializationFormat & {
   logicStyle: (expr, level) => "word" | "boolean" | "uppercase-word" | "punctuation";
   powerStyle: (expr, level) => "root" | "solidus" | "quotient";
   numericSetStyle: (expr, level) => "compact" | "regular" | "interval" | "set-builder";
+  dmsFormat: boolean;
+  angleNormalization: "none" | "0...360" | "-180...180";
 };
 ```
 
@@ -7318,6 +7320,81 @@ missingSymbol: LatexString;
 ```
 
 Serialize the expression `["Error", "'missing'"]`,  with this LaTeX string
+
+#### SerializeLatexOptions.dmsFormat?
+
+```ts
+optional dmsFormat: boolean;
+```
+
+When true, serialize angle quantities in degrees-minutes-seconds format.
+When false (default), use decimal degrees.
+
+##### Default
+
+```ts
+false
+```
+
+##### Example
+
+```typescript
+const ce = new ComputeEngine();
+const angle = ce.box(['Quantity', 9.5, 'deg']);
+
+// DMS format
+angle.latex({ dmsFormat: true });  // "9°30'"
+
+// Decimal format (default)
+angle.latex({ dmsFormat: false }); // "9.5°"
+
+// Full DMS notation
+ce.box(['Quantity', 9.504166, 'deg'])
+  .latex({ dmsFormat: true });     // "9°30'15\""
+```
+
+#### SerializeLatexOptions.angleNormalization?
+
+```ts
+optional angleNormalization: "none" | "0...360" | "-180...180";
+```
+
+Normalize angles to a specific range during serialization.
+Useful for geographic coordinates and rotations.
+
+##### Default
+
+```ts
+'none'
+```
+
+##### Example
+
+```typescript
+const ce = new ComputeEngine();
+
+// No normalization (show exact value)
+ce.box(['Degrees', 370])
+  .latex({ angleNormalization: 'none' });  // "370°"
+
+// Normalize to [0, 360) - useful for bearings
+ce.box(['Degrees', 370])
+  .latex({ angleNormalization: '0...360' }); // "10°"
+
+ce.box(['Degrees', -45])
+  .latex({ angleNormalization: '0...360' }); // "315°"
+
+// Normalize to [-180, 180] - useful for longitude
+ce.box(['Degrees', 190])
+  .latex({ angleNormalization: '-180...180' }); // "-170°"
+
+// Combine with DMS format
+ce.box(['Degrees', 370])
+  .latex({
+    dmsFormat: true,
+    angleNormalization: '0...360'
+  }); // "10°0'0\""
+```
 
 </MemberCard>
 

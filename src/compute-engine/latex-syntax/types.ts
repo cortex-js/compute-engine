@@ -1191,29 +1191,58 @@ export type SerializeLatexOptions = NumberSerializationFormat & {
    * When true, serialize angle quantities in degrees-minutes-seconds format.
    * When false (default), use decimal degrees.
    *
-   * @example
-   * // dmsFormat: true
-   * Quantity(9.5, deg) → "9°30'"
+   * @default false
    *
-   * // dmsFormat: false (default)
-   * Quantity(9.5, deg) → "9.5°"
+   * @example
+   * ```typescript
+   * const ce = new ComputeEngine();
+   * const angle = ce.box(['Quantity', 9.5, 'deg']);
+   *
+   * // DMS format
+   * angle.latex({ dmsFormat: true });  // "9°30'"
+   *
+   * // Decimal format (default)
+   * angle.latex({ dmsFormat: false }); // "9.5°"
+   *
+   * // Full DMS notation
+   * ce.box(['Quantity', 9.504166, 'deg'])
+   *   .latex({ dmsFormat: true });     // "9°30'15\""
+   * ```
    */
   dmsFormat?: boolean;
 
   /**
    * Normalize angles to a specific range during serialization.
+   * Useful for geographic coordinates and rotations.
    *
    * @default 'none'
    *
    * @example
-   * // 'none': Show exact value
-   * Degrees(370) → "370°"
+   * ```typescript
+   * const ce = new ComputeEngine();
    *
-   * // '0...360': Normalize to [0, 360)
-   * Degrees(370) → "10°"
+   * // No normalization (show exact value)
+   * ce.box(['Degrees', 370])
+   *   .latex({ angleNormalization: 'none' });  // "370°"
    *
-   * // '-180...180': Normalize to [-180, 180]
-   * Degrees(190) → "-170°"
+   * // Normalize to [0, 360) - useful for bearings
+   * ce.box(['Degrees', 370])
+   *   .latex({ angleNormalization: '0...360' }); // "10°"
+   *
+   * ce.box(['Degrees', -45])
+   *   .latex({ angleNormalization: '0...360' }); // "315°"
+   *
+   * // Normalize to [-180, 180] - useful for longitude
+   * ce.box(['Degrees', 190])
+   *   .latex({ angleNormalization: '-180...180' }); // "-170°"
+   *
+   * // Combine with DMS format
+   * ce.box(['Degrees', 370])
+   *   .latex({
+   *     dmsFormat: true,
+   *     angleNormalization: '0...360'
+   *   }); // "10°0'0\""
+   * ```
    */
   angleNormalization?: 'none' | '0...360' | '-180...180';
 };
