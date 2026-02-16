@@ -1248,11 +1248,53 @@ function compileToTarget(
 const UNROLL_LIMIT = 100;
 
 /**
- * Compile Sum or Product with fixed integer bounds.
+ * Extract index, lower, and upper from a Limits expression.
+ * Returns the raw Expression nodes so they can be compiled (not just evaluated
+ * to numbers). Also provides numeric values when bounds are constant.
+ */
+function extractLimits(limitsExpr: Expression): {
+  index: string;
+  lowerExpr: Expression;
+  upperExpr: Expression;
+  lowerNum: number | undefined;
+  upperNum: number | undefined;
+} {
+  console.assert(limitsExpr.operator === 'Limits');
+  const fn = limitsExpr as Expression & { op1: Expression; op2: Expression; op3: Expression };
+  const index = isSymbol(fn.op1) ? fn.op1.symbol : '_';
+  const lowerExpr = fn.op2;
+  const upperExpr = fn.op3;
+  const lowerRe = lowerExpr.re;
+  const upperRe = upperExpr.re;
+  return {
+    index,
+    lowerExpr,
+    upperExpr,
+    lowerNum: !isNaN(lowerRe) && Number.isFinite(lowerRe) ? Math.floor(lowerRe) : undefined,
+    upperNum: !isNaN(upperRe) && Number.isFinite(upperRe) ? Math.floor(upperRe) : undefined,
+  };
+}
+
+/**
+ * Compile a bound expression to JavaScript code.
+ * For numeric constants, emits the number directly.
+ * For symbolic expressions, compiles using Math.floor() to ensure integer bounds.
+ */
+function compileBound(
+  expr: Expression,
+  numVal: number | undefined,
+  target: CompileTarget<Expression>
+): string {
+  if (numVal !== undefined) return String(numVal);
+  return `Math.floor(${BaseCompiler.compile(expr, target)})`;
+}
+
+/**
+ * Compile Sum or Product.
  *
- * Small ranges (<=UNROLL_LIMIT terms) are unrolled into explicit
- * additions/multiplications.  Larger ranges emit a while-loop wrapped
- * in an IIFE.
+ * When both bounds are constant integers, small ranges (<=UNROLL_LIMIT terms)
+ * are unrolled into explicit additions/multiplications. Larger ranges or
+ * symbolic bounds emit a while-loop wrapped in an IIFE.
  */
 function compileSumProduct(
   kind: 'Sum' | 'Product',
@@ -1263,57 +1305,61 @@ function compileSumProduct(
   if (!args[0]) throw new Error(`${kind}: no body`);
   if (!args[1]) throw new Error(`${kind}: no indexing set`);
 
-  const { index, lower, upper } = normalizeIndexingSet(args[1]);
+  const { index, lowerExpr, upperExpr, lowerNum, upperNum } = extractLimits(args[1]);
   const isSum = kind === 'Sum';
   const op = isSum ? '+' : '*';
   const identity = isSum ? '0' : '1';
-
-  // Empty range
-  if (lower > upper) return identity;
-
-  const termCount = upper - lower + 1;
   const bodyIsComplex = BaseCompiler.isComplexValued(args[0]);
 
-  if (termCount <= UNROLL_LIMIT) {
-    // --- Unroll: substitute the iteration variable with each literal value ---
-    const terms: string[] = [];
-    for (let k = lower; k <= upper; k++) {
-      const innerTarget: CompileTarget<Expression> = {
-        ...target,
-        var: (id) => (id === index ? String(k) : target.var(id)),
-      };
-      terms.push(`(${BaseCompiler.compile(args[0], innerTarget)})`);
-    }
+  const bothConstant = lowerNum !== undefined && upperNum !== undefined;
 
-    if (!bodyIsComplex) {
-      return `(${terms.join(` ${op} `)})`;
-    }
+  // Empty range (only knowable when both bounds are constant)
+  if (bothConstant && lowerNum > upperNum) return identity;
 
-    // Complex unrolling: use an IIFE with temp variables
-    // to add/multiply complex terms properly
-    const temps = terms.map((_, i) => `_t${i}`);
-    const assignments = terms
-      .map((t, i) => `const ${temps[i]} = ${t}`)
-      .join('; ');
+  // Unroll when both bounds are constant and range is small
+  if (bothConstant) {
+    const termCount = upperNum - lowerNum + 1;
+    if (termCount <= UNROLL_LIMIT) {
+      const terms: string[] = [];
+      for (let k = lowerNum; k <= upperNum; k++) {
+        const innerTarget: CompileTarget<Expression> = {
+          ...target,
+          var: (id) => (id === index ? String(k) : target.var(id)),
+        };
+        terms.push(`(${BaseCompiler.compile(args[0], innerTarget)})`);
+      }
 
-    if (isSum) {
-      const reSum = temps.map((t) => `${t}.re`).join(' + ');
-      const imSum = temps.map((t) => `${t}.im`).join(' + ');
-      return `(() => { ${assignments}; return { re: ${reSum}, im: ${imSum} }; })()`;
-    }
+      if (!bodyIsComplex) {
+        return `(${terms.join(` ${op} `)})`;
+      }
 
-    // Complex product: accumulate sequentially
-    let acc = temps[0];
-    const parts = [assignments];
-    for (let i = 1; i < temps.length; i++) {
-      const prev = acc;
-      acc = `_p${i}`;
-      parts.push(
-        `const ${acc} = { re: ${prev}.re * ${temps[i]}.re - ${prev}.im * ${temps[i]}.im, im: ${prev}.re * ${temps[i]}.im + ${prev}.im * ${temps[i]}.re }`
-      );
+      const temps = terms.map((_, i) => `_t${i}`);
+      const assignments = terms
+        .map((t, i) => `const ${temps[i]} = ${t}`)
+        .join('; ');
+
+      if (isSum) {
+        const reSum = temps.map((t) => `${t}.re`).join(' + ');
+        const imSum = temps.map((t) => `${t}.im`).join(' + ');
+        return `(() => { ${assignments}; return { re: ${reSum}, im: ${imSum} }; })()`;
+      }
+
+      let acc = temps[0];
+      const parts = [assignments];
+      for (let i = 1; i < temps.length; i++) {
+        const prev = acc;
+        acc = `_p${i}`;
+        parts.push(
+          `const ${acc} = { re: ${prev}.re * ${temps[i]}.re - ${prev}.im * ${temps[i]}.im, im: ${prev}.re * ${temps[i]}.im + ${prev}.im * ${temps[i]}.re }`
+        );
+      }
+      return `(() => { ${parts.join('; ')}; return ${acc}; })()`;
     }
-    return `(() => { ${parts.join('; ')}; return ${acc}; })()`;
   }
+
+  // Emit a loop (either large constant range or symbolic bounds)
+  const lowerCode = compileBound(lowerExpr, lowerNum, target);
+  const upperCode = compileBound(upperExpr, upperNum, target);
 
   const bodyCode = BaseCompiler.compile(args[0], {
     ...target,
@@ -1325,12 +1371,12 @@ function compileSumProduct(
   if (bodyIsComplex) {
     const val = BaseCompiler.tempVar();
     if (isSum) {
-      return `(() => { let ${acc} = { re: 0, im: 0 }; let ${index} = ${lower}; while (${index} <= ${upper}) { const ${val} = ${bodyCode}; ${acc} = { re: ${acc}.re + ${val}.re, im: ${acc}.im + ${val}.im }; ${index}++; } return ${acc}; })()`;
+      return `(() => { let ${acc} = { re: 0, im: 0 }; let ${index} = ${lowerCode}; const _upper = ${upperCode}; while (${index} <= _upper) { const ${val} = ${bodyCode}; ${acc} = { re: ${acc}.re + ${val}.re, im: ${acc}.im + ${val}.im }; ${index}++; } return ${acc}; })()`;
     }
-    return `(() => { let ${acc} = { re: 1, im: 0 }; let ${index} = ${lower}; while (${index} <= ${upper}) { const ${val} = ${bodyCode}; ${acc} = { re: ${acc}.re * ${val}.re - ${acc}.im * ${val}.im, im: ${acc}.re * ${val}.im + ${acc}.im * ${val}.re }; ${index}++; } return ${acc}; })()`;
+    return `(() => { let ${acc} = { re: 1, im: 0 }; let ${index} = ${lowerCode}; const _upper = ${upperCode}; while (${index} <= _upper) { const ${val} = ${bodyCode}; ${acc} = { re: ${acc}.re * ${val}.re - ${acc}.im * ${val}.im, im: ${acc}.re * ${val}.im + ${acc}.im * ${val}.re }; ${index}++; } return ${acc}; })()`;
   }
 
-  return `(() => { let ${acc} = ${identity}; let ${index} = ${lower}; while (${index} <= ${upper}) { ${acc} ${op}= ${bodyCode}; ${index}++; } return ${acc}; })()`;
+  return `(() => { let ${acc} = ${identity}; let ${index} = ${lowerCode}; const _upper = ${upperCode}; while (${index} <= _upper) { ${acc} ${op}= ${bodyCode}; ${index}++; } return ${acc}; })()`;
 }
 
 /**

@@ -620,3 +620,98 @@ describe('INTERVAL JS - NEGATIVE BASE POWER', () => {
     expect(Number.isFinite(result.value.hi)).toBe(true);
   });
 });
+
+/**
+ * Helper to extract numeric interval from result
+ */
+function unwrapInterval(val: unknown): { lo: number; hi: number } {
+  if (val && typeof val === 'object') {
+    if ('kind' in val && (val as any).kind === 'interval')
+      return (val as any).value;
+    if ('lo' in val && 'hi' in val) return val as { lo: number; hi: number };
+  }
+  throw new Error(`Expected interval result, got: ${JSON.stringify(val)}`);
+}
+
+describe('INTERVAL JS - ADDITIONAL FUNCTIONS', () => {
+  test('Binomial(5, 2) = 10', () => {
+    const expr = ce.box(['Binomial', 5, 2]);
+    const fn = compile(expr, { to: 'interval-js' });
+    expect(fn.success).toBe(true);
+    const val = unwrapInterval(fn.run!());
+    expect(val.lo).toBeCloseTo(10, 10);
+    expect(val.hi).toBeCloseTo(10, 10);
+  });
+
+  test('GCD(12, 8) = 4', () => {
+    const expr = ce.box(['GCD', 12, 8]);
+    const fn = compile(expr, { to: 'interval-js' });
+    expect(fn.success).toBe(true);
+    const val = unwrapInterval(fn.run!());
+    expect(val.lo).toBeCloseTo(4, 10);
+    expect(val.hi).toBeCloseTo(4, 10);
+  });
+
+  test('LCM(12, 8) = 24', () => {
+    const expr = ce.box(['LCM', 12, 8]);
+    const fn = compile(expr, { to: 'interval-js' });
+    expect(fn.success).toBe(true);
+    const val = unwrapInterval(fn.run!());
+    expect(val.lo).toBeCloseTo(24, 10);
+    expect(val.hi).toBeCloseTo(24, 10);
+  });
+
+  test('Chop(5) = 5', () => {
+    const expr = ce.box(['Chop', 5]);
+    const fn = compile(expr, { to: 'interval-js' });
+    expect(fn.success).toBe(true);
+    const val = unwrapInterval(fn.run!());
+    expect(val.lo).toBeCloseTo(5, 10);
+    expect(val.hi).toBeCloseTo(5, 10);
+  });
+
+  test('Erf(1) ≈ 0.8427', () => {
+    const expr = ce.box(['Erf', 1]);
+    const fn = compile(expr, { to: 'interval-js' });
+    expect(fn.success).toBe(true);
+    const val = unwrapInterval(fn.run!());
+    expect(val.lo).toBeCloseTo(0.8427, 3);
+    expect(val.hi).toBeCloseTo(0.8427, 3);
+  });
+
+  test('Erfc(0) ≈ 1', () => {
+    const expr = ce.box(['Erfc', 0]);
+    const fn = compile(expr, { to: 'interval-js' });
+    expect(fn.success).toBe(true);
+    const val = unwrapInterval(fn.run!());
+    expect(val.lo).toBeCloseTo(1, 3);
+    expect(val.hi).toBeCloseTo(1, 3);
+  });
+
+  test('Exp2(3) = 8', () => {
+    const expr = ce.box(['Exp2', 3]);
+    const fn = compile(expr, { to: 'interval-js' });
+    expect(fn.success).toBe(true);
+    const val = unwrapInterval(fn.run!());
+    expect(val.lo).toBeCloseTo(8, 10);
+    expect(val.hi).toBeCloseTo(8, 10);
+  });
+
+  test('Arctan2(1, 1) ≈ π/4', () => {
+    const expr = ce.box(['Arctan2', 1, 1]);
+    const fn = compile(expr, { to: 'interval-js' });
+    expect(fn.success).toBe(true);
+    const val = unwrapInterval(fn.run!());
+    expect(val.lo).toBeCloseTo(Math.PI / 4, 10);
+    expect(val.hi).toBeCloseTo(Math.PI / 4, 10);
+  });
+
+  test('Hypot(3, 4) = 5', () => {
+    const expr = ce.box(['Hypot', 3, 4]);
+    const fn = compile(expr, { to: 'interval-js' });
+    expect(fn.success).toBe(true);
+    const val = unwrapInterval(fn.run!());
+    expect(val.lo).toBeCloseTo(5, 10);
+    expect(val.hi).toBeCloseTo(5, 10);
+  });
+});

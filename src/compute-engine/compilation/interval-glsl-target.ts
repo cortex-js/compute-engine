@@ -726,6 +726,56 @@ IntervalResult ia_pow(IntervalResult base, float exp) {
   return ia_pow(base.value, exp);
 }
 
+// Power with interval exponent
+IntervalResult ia_pow_interval(vec2 base, vec2 exp) {
+  // Point integer exponent: delegate to constant-exponent ia_pow
+  if (exp.x == exp.y && fract(exp.x) == 0.0) {
+    return ia_pow(base, exp.x);
+  }
+  // base == [-1, -1] and exponent spans >=2 integers
+  if (base.x == -1.0 && base.y == -1.0 && (exp.y - exp.x) >= 2.0) {
+    return ia_ok(vec2(-1.0, 1.0));
+  }
+  // Entirely non-positive base: undefined for non-integer exponents
+  if (base.y <= 0.0) {
+    return ia_empty();
+  }
+  // Positive part of base: exp(exp * ln(base))
+  float bLo = max(base.x, 1e-300);
+  float bHi = base.y;
+  float lnLo = log(bLo);
+  float lnHi = log(bHi);
+  // Four corners of exp * ln(base)
+  float c1 = exp.x * lnLo;
+  float c2 = exp.x * lnHi;
+  float c3 = exp.y * lnLo;
+  float c4 = exp.y * lnHi;
+  float minC = min(min(c1, c2), min(c3, c4));
+  float maxC = max(max(c1, c2), max(c3, c4));
+  float lo = exp(minC) - IA_EPS;
+  float hi = exp(maxC) + IA_EPS;
+  if (base.x < 0.0) {
+    return ia_partial(vec2(lo, hi), IA_PARTIAL_LO);
+  }
+  return ia_ok(vec2(lo, hi));
+}
+
+IntervalResult ia_pow_interval(IntervalResult base, IntervalResult exp) {
+  if (ia_is_error(base.status)) return base;
+  if (ia_is_error(exp.status)) return exp;
+  return ia_pow_interval(base.value, exp.value);
+}
+
+IntervalResult ia_pow_interval(vec2 base, IntervalResult exp) {
+  if (ia_is_error(exp.status)) return exp;
+  return ia_pow_interval(base, exp.value);
+}
+
+IntervalResult ia_pow_interval(IntervalResult base, vec2 exp) {
+  if (ia_is_error(base.status)) return base;
+  return ia_pow_interval(base.value, exp);
+}
+
 IntervalResult ia_sin(IntervalResult x) {
   if (ia_is_error(x.status)) return x;
   return ia_sin(x.value);
@@ -1222,8 +1272,8 @@ const INTERVAL_GLSL_FUNCTIONS: CompiledFunctions<Expression> = {
       if (expVal === 2) return `ia_square(${compile(base)})`;
       return `ia_pow(${compile(base)}, ${expVal})`;
     }
-    // Variable exponent - not fully supported in this simple implementation
-    throw new Error('Interval GLSL does not support variable exponents');
+    // Variable exponent - use interval pow
+    return `ia_pow_interval(${compile(base)}, ${compile(exp)})`;
   },
   Root: (args, compile) => {
     const [arg, exp] = args;

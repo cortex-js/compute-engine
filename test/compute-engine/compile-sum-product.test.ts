@@ -124,6 +124,62 @@ describe('COMPILE Sum - interval-js', () => {
   });
 });
 
+describe('COMPILE Sum - symbolic bounds', () => {
+  test('JS: sum_{k=0}^{n} k with n=4 => 0+1+2+3+4 = 10', () => {
+    const expr = ce.parse('\\sum_{k=0}^{n} k');
+    const result = compile(expr);
+    expect(result.success).toBe(true);
+    expect(result.run!({ n: 4 })).toBe(10);
+  });
+
+  test('JS: Taylor sin(x) = sum_{k=0}^{n} (-1)^k x^(2k+1)/(2k+1)!', () => {
+    const expr = ce.parse(
+      '\\sum_{k=0}^{n} \\frac{(-1)^k x^{2k+1}}{(2k+1)!}'
+    );
+    const result = compile(expr);
+    expect(result.success).toBe(true);
+    const val = result.run!({ x: 0.5, n: 10 });
+    expect(val).toBeCloseTo(Math.sin(0.5), 10);
+  });
+
+  test('JS: product with symbolic bound: prod_{k=1}^{n} k = n!', () => {
+    const expr = ce.parse('\\prod_{k=1}^{n} k');
+    const result = compile(expr);
+    expect(result.success).toBe(true);
+    expect(result.run!({ n: 5 })).toBe(120);
+    expect(result.run!({ n: 0 })).toBe(1); // empty range
+  });
+
+  test('interval-js: sum_{k=0}^{n} k with n=4 => 10', () => {
+    const expr = ce.parse('\\sum_{k=0}^{n} k');
+    const result = compile(expr, { to: 'interval-js' });
+    expect(result.success).toBe(true);
+    const val = unwrapInterval(result.run!({ n: 4 }));
+    expect(val.lo).toBeCloseTo(10, 10);
+    expect(val.hi).toBeCloseTo(10, 10);
+  });
+
+  test('interval-js: Taylor sin(x) with symbolic n', () => {
+    const expr = ce.parse(
+      '\\sum_{k=0}^{n} \\frac{(-1)^k x^{2k+1}}{(2k+1)!}'
+    );
+    const result = compile(expr, { to: 'interval-js' });
+    expect(result.success).toBe(true);
+    const val = unwrapInterval(result.run!({ x: 0.5, n: 10 }));
+    expect(val.lo).toBeCloseTo(Math.sin(0.5), 10);
+    expect(val.hi).toBeCloseTo(Math.sin(0.5), 10);
+  });
+
+  test('interval-js: product with symbolic bound: prod_{k=1}^{n} k', () => {
+    const expr = ce.parse('\\prod_{k=1}^{n} k');
+    const result = compile(expr, { to: 'interval-js' });
+    expect(result.success).toBe(true);
+    const val = unwrapInterval(result.run!({ n: 5 }));
+    expect(val.lo).toBeCloseTo(120, 10);
+    expect(val.hi).toBeCloseTo(120, 10);
+  });
+});
+
 describe('COMPILE Product - interval-js', () => {
   test('factorial: prod_{k=1}^{4} k = 24', () => {
     const expr = ce.parse('\\prod_{k=1}^{4} k');

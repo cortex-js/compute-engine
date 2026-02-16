@@ -711,6 +711,46 @@ fn ia_pow(base: IntervalResult, e: f32) -> IntervalResult {
   return ia_pow_v(base.value, e);
 }
 
+// Power with interval exponent
+fn ia_pow_interval_v(base: vec2f, e: vec2f) -> IntervalResult {
+  // Point integer exponent: delegate to constant-exponent ia_pow_v
+  if (e.x == e.y && fract(e.x) == 0.0) {
+    return ia_pow_v(base, e.x);
+  }
+  // base == [-1, -1] and exponent spans >=2 integers
+  if (base.x == -1.0 && base.y == -1.0 && (e.y - e.x) >= 2.0) {
+    return ia_ok(vec2f(-1.0, 1.0));
+  }
+  // Entirely non-positive base: undefined for non-integer exponents
+  if (base.y <= 0.0) {
+    return ia_empty();
+  }
+  // Positive part of base: exp(exp * ln(base))
+  let bLo = max(base.x, 1e-300);
+  let bHi = base.y;
+  let lnLo = log(bLo);
+  let lnHi = log(bHi);
+  // Four corners of exp * ln(base)
+  let c1 = e.x * lnLo;
+  let c2 = e.x * lnHi;
+  let c3 = e.y * lnLo;
+  let c4 = e.y * lnHi;
+  let minC = min(min(c1, c2), min(c3, c4));
+  let maxC = max(max(c1, c2), max(c3, c4));
+  let lo = exp(minC) - IA_EPS;
+  let hi = exp(maxC) + IA_EPS;
+  if (base.x < 0.0) {
+    return ia_partial(vec2f(lo, hi), IA_PARTIAL_LO);
+  }
+  return ia_ok(vec2f(lo, hi));
+}
+
+fn ia_pow_interval(base: IntervalResult, e: IntervalResult) -> IntervalResult {
+  if (ia_is_error(base.status)) { return base; }
+  if (ia_is_error(e.status)) { return e; }
+  return ia_pow_interval_v(base.value, e.value);
+}
+
 fn ia_sin(x: IntervalResult) -> IntervalResult {
   if (ia_is_error(x.status)) { return x; }
   return ia_sin_v(x.value);
@@ -1109,7 +1149,8 @@ const INTERVAL_WGSL_FUNCTIONS: CompiledFunctions<Expression> = {
       if (expVal === 2) return `ia_square(${compile(base)})`;
       return `ia_pow(${compile(base)}, ${expVal})`;
     }
-    throw new Error('Interval WGSL does not support variable exponents');
+    // Variable exponent - use interval pow
+    return `ia_pow_interval(${compile(base)}, ${compile(exp)})`;
   },
   Root: (args, compile) => {
     const [arg, exp] = args;

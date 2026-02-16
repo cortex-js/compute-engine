@@ -9,7 +9,6 @@
 
 import type { Expression } from '../global-types';
 import { isSymbol, isNumber } from '../boxed-expression/type-guards';
-import { normalizeIndexingSet } from '../library/utils';
 
 import { BaseCompiler } from './base-compiler';
 import type {
@@ -199,6 +198,20 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Factorial2: (args, compile) => `_IA.factorial2(${compile(args[0])})`,
   Gamma: (args, compile) => `_IA.gamma(${compile(args[0])})`,
   GammaLn: (args, compile) => `_IA.gammaln(${compile(args[0])})`,
+  Binomial: (args, compile) =>
+    `_IA.binomial(${compile(args[0])}, ${compile(args[1])})`,
+  GCD: (args, compile) =>
+    `_IA.gcd(${compile(args[0])}, ${compile(args[1])})`,
+  LCM: (args, compile) =>
+    `_IA.lcm(${compile(args[0])}, ${compile(args[1])})`,
+  Chop: (args, compile) => `_IA.chop(${compile(args[0])})`,
+  Erf: (args, compile) => `_IA.erf(${compile(args[0])})`,
+  Erfc: (args, compile) => `_IA.erfc(${compile(args[0])})`,
+  Exp2: (args, compile) => `_IA.exp2(${compile(args[0])})`,
+  Arctan2: (args, compile) =>
+    `_IA.atan2(${compile(args[0])}, ${compile(args[1])})`,
+  Hypot: (args, compile) =>
+    `_IA.hypot(${compile(args[0])}, ${compile(args[1])})`,
 
   // Elementary
   Fract: (args, compile) => `_IA.fract(${compile(args[0])})`,
@@ -270,11 +283,60 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
 const INTERVAL_UNROLL_LIMIT = 100;
 
 /**
+ * Extract index, lower, and upper from a Limits expression.
+ * Returns the raw Expression nodes so they can be compiled.
+ */
+function extractIntervalLimits(limitsExpr: Expression): {
+  index: string;
+  lowerExpr: Expression;
+  upperExpr: Expression;
+  lowerNum: number | undefined;
+  upperNum: number | undefined;
+} {
+  console.assert(limitsExpr.operator === 'Limits');
+  const fn = limitsExpr as Expression & { op1: Expression; op2: Expression; op3: Expression };
+  const index = isSymbol(fn.op1) ? fn.op1.symbol : '_';
+  const lowerExpr = fn.op2;
+  const upperExpr = fn.op3;
+  const lowerRe = lowerExpr.re;
+  const upperRe = upperExpr.re;
+  return {
+    index,
+    lowerExpr,
+    upperExpr,
+    lowerNum: !isNaN(lowerRe) && Number.isFinite(lowerRe) ? Math.floor(lowerRe) : undefined,
+    upperNum: !isNaN(upperRe) && Number.isFinite(upperRe) ? Math.floor(upperRe) : undefined,
+  };
+}
+
+/**
+ * Compile a bound expression to a scalar JavaScript value for use as a loop
+ * counter. For the interval target, bounds must be plain numbers (not intervals).
+ *
+ * At runtime, compiled interval expressions produce {lo, hi} objects.
+ * For integer loop bounds we extract the scalar via .hi (for point intervals
+ * lo === hi so either works).
+ */
+function compileIntervalBound(
+  expr: Expression,
+  numVal: number | undefined,
+  target: CompileTarget<Expression>
+): string {
+  if (numVal !== undefined) return String(numVal);
+  // Compile the bound expression (produces interval at runtime), then
+  // extract the scalar value via .hi for the loop counter.
+  const compiled = BaseCompiler.compile(expr, target);
+  return `Math.floor((${compiled}).hi)`;
+}
+
+/**
  * Compile Sum or Product for the interval arithmetic target.
  *
  * The iteration variable is substituted with `_IA.point(k)` so the
  * body compiles correctly as interval expressions.  Accumulation uses
  * `_IA.add` / `_IA.mul`.
+ *
+ * When bounds are symbolic, emits a loop with compiled bound expressions.
  */
 function compileIntervalSumProduct(
   kind: 'Sum' | 'Product',
@@ -285,43 +347,48 @@ function compileIntervalSumProduct(
   if (!args[0]) throw new Error(`${kind}: no body`);
   if (!args[1]) throw new Error(`${kind}: no indexing set`);
 
-  const { index, lower, upper } = normalizeIndexingSet(args[1]);
+  const { index, lowerExpr, upperExpr, lowerNum, upperNum } = extractIntervalLimits(args[1]);
   const isSum = kind === 'Sum';
   const iaOp = isSum ? '_IA.add' : '_IA.mul';
   const identity = isSum ? '_IA.point(0)' : '_IA.point(1)';
 
-  // Empty range
-  if (lower > upper) return identity;
+  const bothConstant = lowerNum !== undefined && upperNum !== undefined;
 
-  const termCount = upper - lower + 1;
+  // Empty range (only knowable when both bounds are constant)
+  if (bothConstant && lowerNum > upperNum) return identity;
 
-  if (termCount <= INTERVAL_UNROLL_LIMIT) {
-    // --- Unroll: substitute iteration variable with _IA.point(k) ---
-    const terms: string[] = [];
-    for (let k = lower; k <= upper; k++) {
-      const innerTarget: CompileTarget<Expression> = {
-        ...target,
-        var: (id) => (id === index ? `_IA.point(${k})` : target.var(id)),
-      };
-      terms.push(BaseCompiler.compile(args[0], innerTarget));
+  // Unroll when both bounds are constant and range is small
+  if (bothConstant) {
+    const termCount = upperNum - lowerNum + 1;
+    if (termCount <= INTERVAL_UNROLL_LIMIT) {
+      const terms: string[] = [];
+      for (let k = lowerNum; k <= upperNum; k++) {
+        const innerTarget: CompileTarget<Expression> = {
+          ...target,
+          var: (id) => (id === index ? `_IA.point(${k})` : target.var(id)),
+        };
+        terms.push(BaseCompiler.compile(args[0], innerTarget));
+      }
+
+      let result = terms[terms.length - 1];
+      for (let i = terms.length - 2; i >= 0; i--) {
+        result = `${iaOp}(${terms[i]}, ${result})`;
+      }
+      return result;
     }
-
-    // Nest: _IA.add(t0, _IA.add(t1, _IA.add(t2, t3)))
-    let result = terms[terms.length - 1];
-    for (let i = terms.length - 2; i >= 0; i--) {
-      result = `${iaOp}(${terms[i]}, ${result})`;
-    }
-    return result;
   }
 
-  // --- Large range: emit a loop ---
+  // Emit a loop (either large constant range or symbolic bounds)
+  const lowerCode = compileIntervalBound(lowerExpr, lowerNum, target);
+  const upperCode = compileIntervalBound(upperExpr, upperNum, target);
+
   const acc = BaseCompiler.tempVar();
   const bodyCode = BaseCompiler.compile(args[0], {
     ...target,
     var: (id) => (id === index ? `_IA.point(${index})` : target.var(id)),
   });
 
-  return `(() => { let ${acc} = ${identity}; for (let ${index} = ${lower}; ${index} <= ${upper}; ${index}++) { ${acc} = ${iaOp}(${acc}, ${bodyCode}); } return ${acc}; })()`;
+  return `(() => { let ${acc} = ${identity}; const _upper = ${upperCode}; for (let ${index} = ${lowerCode}; ${index} <= _upper; ${index}++) { ${acc} = ${iaOp}(${acc}, ${bodyCode}); } return ${acc}; })()`;
 }
 
 /**

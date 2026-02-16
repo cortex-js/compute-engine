@@ -60,6 +60,14 @@ import {
   gammaln as _gammaln,
   factorial as _factorial,
   factorial2 as _factorial2,
+  binomial as _binomial,
+  gcd as _gcd,
+  lcm as _lcm,
+  chop as _chop,
+  erf as _erf,
+  erfc as _erfc,
+  exp2 as _exp2,
+  hypot as _hypot,
 } from './elementary';
 import {
   sin as _sin,
@@ -263,6 +271,14 @@ export const IntervalArithmetic = {
   gammaln: _gammaln,
   factorial: _factorial,
   factorial2: _factorial2,
+  binomial: _binomial,
+  gcd: _gcd,
+  lcm: _lcm,
+  chop: _chop,
+  erf: _erf,
+  erfc: _erfc,
+  exp2: _exp2,
+  hypot: _hypot,
 
   // Trigonometric
   sin: _sin,

@@ -7,7 +7,27 @@
   not operators, not bound to a value, and not locally scoped by constructs like
   `Sum` or `Product`. Semantically identical to `expr.unknowns`.
 
+- **New interval-js compilation functions**: Added `Binomial`, `GCD`, `LCM`,
+  `Chop`, `Erf`, `Erfc`, `Exp2`, `Arctan2`, and `Hypot` to the interval-js
+  compilation target, with corresponding interval arithmetic implementations.
+
+- **GLSL/WGSL variable exponent support**: The interval GLSL and WGSL targets
+  now support `Power` with variable exponents (e.g. `(-1)^k`, `x^n`). Previously
+  these threw at compile time. Added `ia_pow_interval()` to both GPU library
+  preambles using four-corner `exp(exp * ln(base))` evaluation with special cases
+  for point-integer exponents and `(-1)^n`.
+
 ### Bug Fixes
+
+- **Sum/Product with symbolic bounds compiled incorrectly**: Expressions like
+  `\sum_{k=0}^{n} f(k, x)` where the upper bound is a variable produced loops
+  that iterated 10001 times instead of using the variable `n`. The compilation
+  extracted bounds via `normalizeIndexingSet()` which converted symbolic bounds
+  to `NaN` and fell back to a hardcoded limit. Now bounds are extracted as
+  expressions and compiled to code (e.g. `Math.floor(_.n)` for JS,
+  `Math.floor((_.n).hi)` for interval-js). This fixes Taylor series patterns
+  like `\sum_{k=0}^{n} \frac{(-1)^k x^{2k+1}}{(2k+1)!}` for both JS and
+  interval-js targets.
 
 - **Interval `(-1)^k` returned `empty` instead of correct value**: The
   `powInterval()` function required positive bases for variable exponents,

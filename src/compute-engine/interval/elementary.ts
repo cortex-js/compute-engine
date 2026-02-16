@@ -10,11 +10,17 @@ import { sub, mul, div } from './arithmetic';
 import {
   gamma as scalarGamma,
   gammaln as scalarGammaln,
+  erf as scalarErf,
+  erfc as scalarErfc,
 } from '../numerics/special-functions';
 import {
   factorial as scalarFactorial,
   factorial2 as scalarFactorial2,
+  gcd as scalarGcd,
+  lcm as scalarLcm,
+  chop as scalarChop,
 } from '../numerics/numeric';
+import { choose as scalarBinomial } from '../boxed-expression/expand';
 
 /**
  * Square root of an interval (or IntervalResult).
@@ -694,4 +700,144 @@ export function factorial2(x: Interval | IntervalResult): IntervalResult {
   if (!Number.isFinite(fLo) || !Number.isFinite(fHi))
     return ok({ lo: Math.min(fLo, fHi), hi: Math.max(fLo, fHi) });
   return ok({ lo: fLo, hi: fHi });
+}
+
+/**
+ * Binomial coefficient C(n, k) on intervals.
+ * Both arguments are rounded to nearest integer. Monotonic in n for fixed k.
+ */
+export function binomial(
+  n: Interval | IntervalResult,
+  k: Interval | IntervalResult
+): IntervalResult {
+  const uN = unwrapOrPropagate(n);
+  if (!Array.isArray(uN)) return uN;
+  const uK = unwrapOrPropagate(k);
+  if (!Array.isArray(uK)) return uK;
+  const [nVal] = uN;
+  const [kVal] = uK;
+  // Evaluate at four corners and take min/max
+  const vals = [
+    scalarBinomial(Math.round(nVal.lo), Math.round(kVal.lo)),
+    scalarBinomial(Math.round(nVal.lo), Math.round(kVal.hi)),
+    scalarBinomial(Math.round(nVal.hi), Math.round(kVal.lo)),
+    scalarBinomial(Math.round(nVal.hi), Math.round(kVal.hi)),
+  ];
+  return ok({ lo: Math.min(...vals), hi: Math.max(...vals) });
+}
+
+/**
+ * GCD on intervals. Both arguments rounded to nearest integer.
+ */
+export function gcd(
+  a: Interval | IntervalResult,
+  b: Interval | IntervalResult
+): IntervalResult {
+  const uA = unwrapOrPropagate(a);
+  if (!Array.isArray(uA)) return uA;
+  const uB = unwrapOrPropagate(b);
+  if (!Array.isArray(uB)) return uB;
+  const [aVal] = uA;
+  const [bVal] = uB;
+  const vals = [
+    scalarGcd(Math.round(aVal.lo), Math.round(bVal.lo)),
+    scalarGcd(Math.round(aVal.lo), Math.round(bVal.hi)),
+    scalarGcd(Math.round(aVal.hi), Math.round(bVal.lo)),
+    scalarGcd(Math.round(aVal.hi), Math.round(bVal.hi)),
+  ];
+  return ok({ lo: Math.min(...vals), hi: Math.max(...vals) });
+}
+
+/**
+ * LCM on intervals. Both arguments rounded to nearest integer.
+ */
+export function lcm(
+  a: Interval | IntervalResult,
+  b: Interval | IntervalResult
+): IntervalResult {
+  const uA = unwrapOrPropagate(a);
+  if (!Array.isArray(uA)) return uA;
+  const uB = unwrapOrPropagate(b);
+  if (!Array.isArray(uB)) return uB;
+  const [aVal] = uA;
+  const [bVal] = uB;
+  const vals = [
+    scalarLcm(Math.round(aVal.lo), Math.round(bVal.lo)),
+    scalarLcm(Math.round(aVal.lo), Math.round(bVal.hi)),
+    scalarLcm(Math.round(aVal.hi), Math.round(bVal.lo)),
+    scalarLcm(Math.round(aVal.hi), Math.round(bVal.hi)),
+  ];
+  return ok({ lo: Math.min(...vals), hi: Math.max(...vals) });
+}
+
+/**
+ * Chop: replace small values with zero.
+ * Monotonic (identity except near zero).
+ */
+export function chop(x: Interval | IntervalResult): IntervalResult {
+  const unwrapped = unwrapOrPropagate(x);
+  if (!Array.isArray(unwrapped)) return unwrapped;
+  const [xVal] = unwrapped;
+  return ok({ lo: scalarChop(xVal.lo), hi: scalarChop(xVal.hi) });
+}
+
+/**
+ * Error function on an interval.
+ * erf is monotonically increasing, so evaluate at endpoints.
+ */
+export function erf(x: Interval | IntervalResult): IntervalResult {
+  const unwrapped = unwrapOrPropagate(x);
+  if (!Array.isArray(unwrapped)) return unwrapped;
+  const [xVal] = unwrapped;
+  return ok({ lo: scalarErf(xVal.lo), hi: scalarErf(xVal.hi) });
+}
+
+/**
+ * Complementary error function on an interval.
+ * erfc is monotonically decreasing, so swap endpoints.
+ */
+export function erfc(x: Interval | IntervalResult): IntervalResult {
+  const unwrapped = unwrapOrPropagate(x);
+  if (!Array.isArray(unwrapped)) return unwrapped;
+  const [xVal] = unwrapped;
+  // erfc is decreasing: erfc(lo) >= erfc(hi)
+  return ok({ lo: scalarErfc(xVal.hi), hi: scalarErfc(xVal.lo) });
+}
+
+/**
+ * 2^x on an interval. Monotonically increasing.
+ */
+export function exp2(x: Interval | IntervalResult): IntervalResult {
+  const unwrapped = unwrapOrPropagate(x);
+  if (!Array.isArray(unwrapped)) return unwrapped;
+  const [xVal] = unwrapped;
+  return ok({ lo: Math.pow(2, xVal.lo), hi: Math.pow(2, xVal.hi) });
+}
+
+/**
+ * Hypot(x, y) = sqrt(x^2 + y^2) on intervals.
+ * Always non-negative, evaluate four corners.
+ */
+export function hypot(
+  x: Interval | IntervalResult,
+  y: Interval | IntervalResult
+): IntervalResult {
+  const uX = unwrapOrPropagate(x);
+  if (!Array.isArray(uX)) return uX;
+  const uY = unwrapOrPropagate(y);
+  if (!Array.isArray(uY)) return uY;
+  const [xVal] = uX;
+  const [yVal] = uY;
+  const vals = [
+    Math.hypot(xVal.lo, yVal.lo),
+    Math.hypot(xVal.lo, yVal.hi),
+    Math.hypot(xVal.hi, yVal.lo),
+    Math.hypot(xVal.hi, yVal.hi),
+  ];
+  // Hypot can be smaller at interior points if intervals straddle zero
+  let lo = Math.min(...vals);
+  if (xVal.lo <= 0 && xVal.hi >= 0) lo = Math.min(lo, Math.abs(yVal.lo), Math.abs(yVal.hi));
+  if (yVal.lo <= 0 && yVal.hi >= 0) lo = Math.min(lo, Math.abs(xVal.lo), Math.abs(xVal.hi));
+  if (xVal.lo <= 0 && xVal.hi >= 0 && yVal.lo <= 0 && yVal.hi >= 0) lo = 0;
+  return ok({ lo, hi: Math.max(...vals) });
 }
