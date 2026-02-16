@@ -26,6 +26,9 @@
   Cephes rational Chebyshev approximation, LaTeX parsing via
   `\operatorname{FresnelS}` / `\operatorname{FresnelC}`, JavaScript and
   interval-arithmetic compilation targets.
+- **`Heaviside` step function**: `H(x) = 0` for `x < 0`, `1/2` for `x = 0`,
+  `1` for `x > 0`. LaTeX parsing via `\operatorname{Heaviside}`, JavaScript
+  and interval-arithmetic compilation with singularity detection at zero.
 
 ### LaTeX Syntax
 
@@ -60,10 +63,21 @@
 - **`CompilationResult.run` type signature**: The TypeScript type for `run` now
   correctly reflects the actual calling convention (`(...args: unknown[])`)
   instead of the previous misleading `(...args: (number | {re, im})[])`.
+- **`Loop` compilation for interval-js target**: Loop counter now uses raw
+  numbers (not `_IA.point()`) for the `for` statement, with loop index
+  references properly wrapped in the body. Conditions in `if`/`break`/
+  `continue` statements inside loops use scalar comparisons instead of
+  interval comparison functions.
 
 ### Other Changes
 
 - Updated color palettes
+- Deduplicated runtime helper object (`SYS_HELPERS`) shared between
+  `ComputeEngineFunction` and `ComputeEngineFunctionLiteral` in compilation
+  target
+- Centralized `sinc` implementation in `numerics/special-functions.ts` (shared
+  by library evaluation and JS compilation runtime)
+- Removed dead `args === null` checks in compilation base class
 
 ## 0.51.0 _2026-02-14_
 
