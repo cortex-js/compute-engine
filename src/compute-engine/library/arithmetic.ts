@@ -997,7 +997,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       wikidata: 'Q715358',
       complexity: 2000,
       broadcastable: true,
-      signature: '(number) -> number',
+      signature: '(value) -> value',
       type: ([x]) => x.type,
       sgn: ([x]) => oppositeSgn(x.sgn),
       canonical: (args, { engine }) => {

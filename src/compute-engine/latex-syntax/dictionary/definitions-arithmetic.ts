@@ -28,7 +28,7 @@ import {
 } from '../types';
 import { latexTemplate } from '../serializer-style';
 import { joinLatex, supsub } from '../tokenizer';
-import { normalizeAngle, degreesToDMS } from '../serialize-dms';
+import { normalizeAngle, formatDMS } from '../serialize-dms';
 
 /**
  * If expression is a product, collect all the terms with a
@@ -624,33 +624,35 @@ function serializePower(
  *
  * Only interprets ' and " as arcmin/arcsec when immediately following
  * a degree symbol, avoiding conflict with Prime (derivative) notation.
+ *
+ * When all components are numeric, computes decimal degrees and returns
+ * Degrees(total). This ensures negation works correctly: -9°30' becomes
+ * Negate(Degrees(9.5)) which canonicalizes to -9.5°.
  */
-function parseDMS(
-  parser: Parser,
-  lhs: MathJsonExpression
-): MathJsonExpression {
-  const parts: MathJsonExpression[] = [['Quantity', lhs, 'deg']];
-
+function parseDMS(parser: Parser, lhs: MathJsonExpression): MathJsonExpression {
   parser.skipSpace();
 
   // Check for arc-minutes: 30'
   const savepoint = parser.index;
-  const minValue = parser.parseNumber();
+  const minExpr = parser.parseNumber();
 
-  if (minValue !== null &&
-      (parser.match("'") || parser.match('\\prime'))) {
+  let minNum: number | null = null;
+  let secNum: number | null = null;
+
+  if (minExpr !== null && (parser.match("'") || parser.match('\\prime'))) {
     // Found arc-minutes
-    parts.push(['Quantity', minValue, 'arcmin']);
+    minNum = machineValue(minExpr);
     parser.skipSpace();
 
     // Check for arc-seconds: 15"
     const secSavepoint = parser.index;
-    const secValue = parser.parseNumber();
+    const secExpr = parser.parseNumber();
 
-    if (secValue !== null &&
-        (parser.match('"') || parser.match('\\doubleprime'))) {
-      // Found arc-seconds
-      parts.push(['Quantity', secValue, 'arcsec']);
+    if (
+      secExpr !== null &&
+      (parser.match('"') || parser.match('\\doubleprime'))
+    ) {
+      secNum = machineValue(secExpr);
     } else {
       // No arc-seconds, restore position
       parser.index = secSavepoint;
@@ -658,14 +660,23 @@ function parseDMS(
   } else {
     // No arc-minutes, restore position
     parser.index = savepoint;
-  }
-
-  if (parts.length === 1) {
-    // Just degrees, use existing Degrees function
     return ['Degrees', lhs];
   }
 
-  // Multiple parts, return Add
+  // Compute total decimal degrees when all components are numeric.
+  // This avoids Negate(Add(Quantity...)) which fails canonicalization.
+  const degNum = machineValue(lhs);
+  if (degNum !== null && minNum !== null) {
+    let total = degNum + minNum / 60;
+    if (secNum !== null) total += secNum / 3600;
+    return ['Degrees', total];
+  }
+
+  // Fallback for symbolic values: return structured Add form
+  const parts: MathJsonExpression[] = [['Quantity', lhs, 'deg']];
+  parts.push(['Quantity', minExpr!, 'arcmin']);
+  if (secNum !== null)
+    parts.push(['Quantity', secNum, 'arcsec']);
   return ['Add', ...parts];
 }
 
@@ -679,45 +690,24 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     latexTrigger: ['\\degree'],
     kind: 'postfix',
     precedence: 880,
-    parse: (_parser, lhs) => ['Degrees', lhs] as MathJsonExpression,
+    parse: (parser: Parser, lhs: MathJsonExpression) => parseDMS(parser, lhs),
     serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
       const options = serializer.options;
       const arg = operand(expr, 1);
 
       // Check if DMS format or normalization is requested
-      if (options.dmsFormat || options.angleNormalization !== 'none') {
-        // Get numeric value
+      if (
+        options.dmsFormat ||
+        (options.angleNormalization && options.angleNormalization !== 'none')
+      ) {
         const argValue = machineValue(arg);
         if (argValue !== null) {
-          // Apply normalization
           let degrees = argValue;
-          if (options.angleNormalization !== 'none') {
+          if (options.angleNormalization && options.angleNormalization !== 'none')
             degrees = normalizeAngle(degrees, options.angleNormalization);
-          }
 
-          // Format as DMS if requested
-          if (options.dmsFormat) {
-            const { deg, min, sec } = degreesToDMS(degrees);
-
-            let result = `${deg}°`;
-
-            if (Math.abs(sec) > 0.001) {
-              // Include seconds
-              const secStr = sec % 1 === 0 ? sec.toString() : sec.toFixed(2);
-              result += `${Math.abs(min)}'${Math.abs(Number(secStr))}"`;
-            } else if (Math.abs(min) > 0) {
-              // Include minutes only
-              result += `${Math.abs(min)}'`;
-            } else {
-              // Degrees only, show 0'0" for consistency
-              result += `0'0"`;
-            }
-
-            return result;
-          } else {
-            // Just normalize, use decimal degrees
-            return `${degrees}°`;
-          }
+          if (options.dmsFormat) return formatDMS(degrees);
+          return `${degrees}°`;
         }
       }
 
@@ -729,26 +719,27 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     latexTrigger: ['\\degree'],
     kind: 'postfix',
     precedence: 880,
-    parse: (_parser, lhs) => ['Degrees', lhs] as MathJsonExpression,
+    parse: (parser: Parser, lhs: MathJsonExpression) => parseDMS(parser, lhs),
   },
+  // No `precedence` on these entries: the dictionary validator
+  // (definitions.ts:947-968) rejects `precedence` on entries whose
+  // `latexTrigger` starts with `^` or `_`, since their binding is
+  // governed by LaTeX grouping rules, not operator precedence.
   {
     latexTrigger: ['^', '<{>', '\\circ', '<}>'],
     kind: 'postfix',
-    parse: (_parser, lhs) => ['Degrees', lhs] as MathJsonExpression,
+    parse: (parser: Parser, lhs: MathJsonExpression) => parseDMS(parser, lhs),
   },
-
   {
     latexTrigger: ['^', '\\circ'],
     kind: 'postfix',
-    parse: (parser: Parser, lhs: MathJsonExpression) =>
-      parseDMS(parser, lhs),
+    parse: (parser: Parser, lhs: MathJsonExpression) => parseDMS(parser, lhs),
   },
   {
     latexTrigger: ['°'],
     kind: 'postfix',
     precedence: 880,
-    parse: (parser: Parser, lhs: MathJsonExpression) =>
-      parseDMS(parser, lhs),
+    parse: (parser: Parser, lhs: MathJsonExpression) => parseDMS(parser, lhs),
   },
 
   {
@@ -758,6 +749,32 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
       return (
         arg === null ? ['Degrees'] : ['Degrees', arg]
       ) as MathJsonExpression;
+    },
+  },
+  {
+    name: 'DMS',
+    serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
+      const deg = machineValue(operand(expr, 1));
+      const min = machineValue(operand(expr, 2));
+      const sec = machineValue(operand(expr, 3));
+
+      // For numeric args, format as DMS notation
+      if (deg !== null) {
+        const m = min ?? 0;
+        const s = sec ?? 0;
+        let result = `${deg}°`;
+        if (m !== 0 || s !== 0) result += `${m}'`;
+        if (s !== 0) result += `${s}"`;
+        return result;
+      }
+
+      // Fallback for symbolic args
+      const args = [];
+      for (const i of [1, 2, 3] as const) {
+        const op = operand(expr, i);
+        if (op !== undefined) args.push(serializer.serialize(op));
+      }
+      return `\\operatorname{DMS}(${args.join(', ')})`;
     },
   },
   {

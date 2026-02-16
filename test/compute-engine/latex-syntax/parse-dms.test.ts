@@ -31,37 +31,30 @@ describe('DMS Parsing', () => {
   });
 
   test('parse degrees and arc-minutes', () => {
-    check("9°30'", [
-      'Add',
-      ['Quantity', 9, 'deg'],
-      ['Quantity', 30, 'arcmin'],
-    ]);
+    // DMS components are computed to decimal degrees at parse time
+    check("9°30'", ['Degrees', 9.5]);
   });
 
   test('parse degrees and arc-minutes with \\prime', () => {
-    check('9°30\\prime', [
-      'Add',
-      ['Quantity', 9, 'deg'],
-      ['Quantity', 30, 'arcmin'],
-    ]);
+    check('9°30\\prime', ['Degrees', 9.5]);
   });
 
   test('parse full DMS notation', () => {
-    check('9°30\'15"', [
-      'Add',
-      ['Quantity', 9, 'deg'],
-      ['Quantity', 30, 'arcmin'],
-      ['Quantity', 15, 'arcsec'],
-    ]);
+    check('9°30\'15"', ['Degrees', { num: '9.504166666666666' }]);
   });
 
   test('parse DMS with \\doubleprime', () => {
     check('9°30\\prime 15\\doubleprime', [
-      'Add',
-      ['Quantity', 9, 'deg'],
-      ['Quantity', 30, 'arcmin'],
-      ['Quantity', 15, 'arcsec'],
+      'Degrees',
+      { num: '9.504166666666666' },
     ]);
+  });
+
+  test('parse DMS via \\degree trigger', () => {
+    // \\degree should also support DMS
+    const ce = new ComputeEngine();
+    const expr = ce.parse("9\\degree 30'", { form: 'raw' });
+    expect(expr.json).toEqual(['Degrees', 9.5]);
   });
 });
 
@@ -84,28 +77,31 @@ describe('Prime Disambiguation', () => {
 });
 
 describe('Negative Angles', () => {
-  test('parse negative DMS with parentheses', () => {
-    check("(-9)°30'", [
-      'Add',
-      ['Quantity', ['Delimiter', ['Negate', 9]], 'deg'],
-      ['Quantity', 30, 'arcmin'],
-    ]);
+  test('parse negative DMS', () => {
+    // -9°30' means -(9°30') = -9.5° (geographic convention)
+    check("-9°30'", ['Negate', ['Degrees', 9.5]]);
   });
 
   test('negative DMS evaluates correctly', () => {
     const ce = new ComputeEngine();
-    const expr = ce.parse("(-9)°30'");
-    // (-9)° + 30' = -9° + 0.5° = -8.5°
-    expect(expr.N().json).toEqual(['Quantity', -8.5, 'deg']);
+    const expr = ce.parse("-9°30'");
+    // -9.5° = -0.165806... radians
+    expect(expr.N().re).toBeCloseTo(-0.165806, 5);
   });
 
   test('negative full DMS', () => {
-    check('(-45)°30\'15"', [
-      'Add',
-      ['Quantity', ['Delimiter', ['Negate', 45]], 'deg'],
-      ['Quantity', 30, 'arcmin'],
-      ['Quantity', 15, 'arcsec'],
+    check('-45°30\'15"', [
+      'Negate',
+      ['Degrees', 45.50416666666667],
     ]);
+  });
+
+  test('Negate(Quantity) evaluates correctly', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.box(['Negate', ['Quantity', 9.5, 'deg']]);
+    const result = expr.evaluate();
+    // Result is Quantity(-9.5, deg) — check the magnitude
+    expect(result.op1.re).toBeCloseTo(-9.5, 10);
   });
 });
 
@@ -113,52 +109,42 @@ describe('DMS Arithmetic', () => {
   test('add two DMS angles', () => {
     const ce = new ComputeEngine();
     const expr = ce.parse("9°0'0\" + 1°0'0\"");
-    // 9° + 1° = 10°
-    expect(expr.N().json).toEqual(['Quantity', 10, 'deg']);
+    // 9° + 1° = 10° ≈ 0.174533 radians
+    expect(expr.N().re).toBeCloseTo(0.174533, 5);
   });
 
   test('add DMS to simple degree', () => {
     const ce = new ComputeEngine();
     const expr = ce.parse("45°30' + 44°30'");
-    // 45.5° + 44.5° = 90°
-    expect(expr.N().json).toEqual(['Quantity', 90, 'deg']);
+    // 45.5° + 44.5° = 90° = π/2 ≈ 1.5708 radians
+    expect(expr.N().re).toBeCloseTo(Math.PI / 2, 5);
   });
 
   test('parse subtraction in raw form', () => {
     const ce = new ComputeEngine();
     const expr = ce.parse("10°30' - 1°15'", { form: 'raw' });
-    // Should parse as Add with Negate
     expect(expr.json).toEqual([
       'Add',
-      ['Add', ['Quantity', 10, 'deg'], ['Quantity', 30, 'arcmin']],
-      ['Negate', ['Add', ['Quantity', 1, 'deg'], ['Quantity', 15, 'arcmin']]],
+      ['Degrees', 10.5],
+      ['Negate', ['Degrees', 1.25]],
     ]);
   });
 });
 
 describe('Edge Cases', () => {
   test('decimal arc-minutes', () => {
-    check("9°30.5'", [
-      'Add',
-      ['Quantity', 9, 'deg'],
-      ['Quantity', 30.5, 'arcmin'],
-    ]);
+    check("9°30.5'", ['Degrees', { num: '9.508333333333333' }]);
   });
 
   test('out of range values are mathematically valid', () => {
     const ce = new ComputeEngine();
     const expr = ce.parse("9°90'");
-    // 9° + 90' = 9° + 1.5° = 10.5°
-    expect(expr.N().json).toEqual(['Quantity', 10.5, 'deg']);
+    // 9° + 90' = 9° + 1.5° = 10.5° ≈ 0.183260 radians
+    expect(expr.N().re).toBeCloseTo(0.183260, 5);
   });
 
   test('zero components', () => {
-    check("0°0'0\"", [
-      'Add',
-      ['Quantity', 0, 'deg'],
-      ['Quantity', 0, 'arcmin'],
-      ['Quantity', 0, 'arcsec'],
-    ]);
+    check("0°0'0\"", ['Degrees', 0]);
   });
 
   test('minutes only (no degree symbol) is derivative', () => {
@@ -179,5 +165,62 @@ describe('Edge Cases', () => {
       15,
       ['__unit__', 'arcsec'],
     ]);
+  });
+});
+
+describe('DMS Function', () => {
+  test('DMS(45) is equivalent to Degrees(45)', () => {
+    const ce = new ComputeEngine();
+    const dms = ce.box(['DMS', 45]);
+    const deg = ce.box(['Degrees', 45]);
+    expect(dms.N().re).toBeCloseTo(deg.N().re!, 10);
+  });
+
+  test('DMS(9, 30) produces 9.5 degrees in radians', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.box(['DMS', 9, 30]);
+    // 9.5° = 0.165806... radians
+    expect(expr.N().re).toBeCloseTo(9.5 * Math.PI / 180, 10);
+  });
+
+  test('DMS(9, 30, 15) produces correct radians', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.box(['DMS', 9, 30, 15]);
+    // 9 + 30/60 + 15/3600 = 9.504166... degrees
+    const expectedRad = (9 + 30 / 60 + 15 / 3600) * Math.PI / 180;
+    expect(expr.N().re).toBeCloseTo(expectedRad, 10);
+  });
+
+  test('DMS with angularUnit=deg', () => {
+    const ce = new ComputeEngine();
+    ce.angularUnit = 'deg';
+    const expr = ce.box(['DMS', 9, 30, 15]);
+    // In degree mode, should return decimal degrees directly
+    expect(expr.N().re).toBeCloseTo(9 + 30 / 60 + 15 / 3600, 10);
+  });
+
+  test('Negate(DMS(9, 30, 15)) works', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.box(['Negate', ['DMS', 9, 30, 15]]);
+    const expectedRad = -(9 + 30 / 60 + 15 / 3600) * Math.PI / 180;
+    expect(expr.N().re).toBeCloseTo(expectedRad, 10);
+  });
+
+  test('DMS serialization produces DMS notation', () => {
+    const ce = new ComputeEngine();
+    const expr = ce._fn('DMS', [ce.number(9), ce.number(30), ce.number(15)]);
+    expect(expr.toLatex()).toBe('9°30\'15"');
+  });
+
+  test('DMS serialization with degrees only', () => {
+    const ce = new ComputeEngine();
+    const expr = ce._fn('DMS', [ce.number(45)]);
+    expect(expr.toLatex()).toBe('45°');
+  });
+
+  test('DMS serialization with degrees and minutes', () => {
+    const ce = new ComputeEngine();
+    const expr = ce._fn('DMS', [ce.number(9), ce.number(30)]);
+    expect(expr.toLatex()).toBe("9°30'");
   });
 });

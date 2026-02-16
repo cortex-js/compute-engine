@@ -89,6 +89,34 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       },
     },
 
+    // DMS(degrees, minutes?, seconds?) — programmatic angle construction
+    DMS: {
+      signature: '(real, real?, real?) -> real',
+      type: () => 'finite_real',
+      canonical: (ops, { engine: ce }) => {
+        const deg = ops[0]?.re ?? NaN;
+        const min = ops[1]?.re ?? 0;
+        const sec = ops[2]?.re ?? 0;
+
+        if (Number.isNaN(deg)) return ce._fn('DMS', ops);
+
+        const total = deg + min / 60 + sec / 3600;
+        return ce.function('Degrees', [ce.number(total)]);
+      },
+      evaluate: (ops, options) => {
+        const ce = options.engine;
+        const deg = ops[0]?.re ?? NaN;
+        const min = ops[1]?.re ?? 0;
+        const sec = ops[2]?.re ?? 0;
+
+        if (Number.isNaN(deg)) return ce._fn('DMS', ops);
+
+        const total = deg + min / 60 + sec / 3600;
+        if (ce.angularUnit === 'deg') return ce.number(total);
+        return ce.number(total).div(180).mul(ce.Pi).evaluate(options);
+      },
+    },
+
     // Hypot: sqrt(x*x + y*y)
     Hypot: {
       broadcastable: true,

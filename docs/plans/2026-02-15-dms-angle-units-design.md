@@ -1,7 +1,7 @@
 # DMS Angle Units Design
 
 **Date:** 2026-02-15
-**Status:** Approved
+**Status:** Implemented
 **Issue:** https://github.com/cortex-js/compute-engine/issues/172
 
 ## Overview
@@ -14,11 +14,12 @@ Support geographic coordinate notation like `9°30'15"` by treating arc-minutes 
 
 ### Key Design Decisions
 
-- `9°30'15"` parses as `Add(Quantity(9, deg), Quantity(30, arcmin), Quantity(15, arcsec))`
+- `9°30'15"` parses as `Degrees(9.504166...)` — DMS components are computed to decimal degrees at parse time
 - Prime symbols (`'`, `"`) are only interpreted as arcmin/arcsec when immediately following a degree symbol (`°`)
-- Units `arcmin` and `arcsec` already exist in the registry with correct scale factors
-- Canonicalization automatically simplifies DMS to decimal degrees/radians
-- Serialization is configurable: output as decimal degrees or preserve DMS format
+- `DMS(9, 30, 15)` provides programmatic angle construction, canonicalizing to `Degrees(9.504166...)`
+- Canonicalization converts `Degrees(n)` to radians (or preserves decimal degrees when `angularUnit === 'deg'`)
+- Serialization is configurable: output as decimal degrees or DMS format
+- `Negate` accepts `value` type (not just `number`), so `Negate(Degrees(9.5))` works correctly
 - Support both shorthand (`9°30'`) and explicit (`\mathrm{arcmin}`) notation
 
 ### Files to Modify
@@ -36,8 +37,7 @@ Support geographic coordinate notation like `9°30'15"` by treating arc-minutes 
 
 - All DMS logic in one place (the degree parser)
 - Natural parsing flow
-- Reuses existing unit system
-- Clean separation: parsing creates Add, canonicalization simplifies it
+- Decimal-degree computation at parse time ensures `Negate` wraps a single `Degrees(n)` expression, avoiding issues with `Negate(Add(Quantity(...)))` canonicalization
 - Avoids precedence conflicts with existing Prime operators
 
 ### Alternatives Considered
@@ -55,39 +55,25 @@ The degree parser (lines 640-658) handles `^\circ` and `°` postfix operators an
 
 ### New Behavior
 
-Extend the degree parser to look ahead and consume arc-minutes and arc-seconds:
+Extend the degree parser to look ahead, consume arc-minutes and arc-seconds, and compute decimal degrees at parse time:
 
 ```typescript
-parse: (parser, lhs) => {
-  const degValue = lhs;  // e.g., 9
-  const parts = [['Quantity', degValue, 'deg']];
-
-  parser.skipSpace();
-
-  // Check for arc-minutes: 30'
-  if (parser.peek is number) {
-    const minValue = parser.parseNumber();
-    if (parser.match("'") || parser.match('\\prime')) {
-      parts.push(['Quantity', minValue, 'arcmin']);
-      parser.skipSpace();
-
-      // Check for arc-seconds: 15"
-      if (parser.peek is number) {
-        const secValue = parser.parseNumber();
-        if (parser.match('"') || parser.match('\\doubleprime')) {
-          parts.push(['Quantity', secValue, 'arcsec']);
-        }
-      }
+function parseDMS(parser, lhs) {
+  // Look ahead for arc-minutes: 30'
+  const minExpr = parser.parseNumber();
+  if (minExpr && (parser.match("'") || parser.match('\\prime'))) {
+    // Look ahead for arc-seconds: 15"
+    const secExpr = parser.parseNumber();
+    if (secExpr && (parser.match('"') || parser.match('\\doubleprime'))) {
+      secNum = machineValue(secExpr);
     }
+
+    // Compute total decimal degrees
+    const total = degNum + minNum / 60 + secNum / 3600;
+    return ['Degrees', total];
   }
 
-  if (parts.length === 1) {
-    // Just degrees, use existing logic
-    return ['Degrees', degValue];
-  }
-
-  // Multiple parts, return Add
-  return ['Add', ...parts];
+  return ['Degrees', lhs];
 }
 ```
 
@@ -96,14 +82,16 @@ parse: (parser, lhs) => {
 - Only consume `'`/`"` if they immediately follow a number after the degree symbol
 - Stop consuming if we don't see the expected pattern
 - Fall back to single `Degrees` if no arc-minutes/seconds found
-- Existing canonicalization handles converting `Add(Quantity(...), Quantity(...))` to a single angle value
+- Compute decimal degrees at parse time (not `Add(Quantity(...))`) so negation produces `Negate(Degrees(n))`
+- Symbolic fallback: if components aren't all numeric, falls back to `Add(Quantity(...))` form
 
 ### Edge Cases
 
 - `9°` → `Degrees(9)` (no change)
-- `9° 30'` → `Add(Quantity(9, deg), Quantity(30, arcmin))`
+- `9°30'` → `Degrees(9.5)`
 - `9° f'(x)` → `Degrees(9)` followed by `f'(x)` (prime is derivative, not arcmin)
-- `9°30'15"` → `Add(Quantity(9, deg), Quantity(30, arcmin), Quantity(15, arcsec))`
+- `9°30'15"` → `Degrees(9.504166...)`
+- `-9°30'` → `Negate(Degrees(9.5))`
 
 ## Unit Registry & Canonicalization
 
@@ -121,17 +109,10 @@ No changes needed. ✓
 
 ### Canonicalization
 
-The existing `Add` canonicalization handles combining quantities with compatible units. When it sees:
-```
-Add(Quantity(9, deg), Quantity(30, arcmin), Quantity(15, arcsec))
-```
-
-It will:
-1. Convert all to the same unit (radians, since that's the base)
-2. Sum them: `9°` + `30'` + `15"` = `9.504166...°` = `0.165806... rad`
-3. Return the simplified form
-
-If `engine.angularUnit === 'deg'`, the result stays in degrees rather than converting to radians.
+DMS components are computed to decimal degrees at parse time. The `Degrees` canonical handler then:
+1. Converts the decimal degrees to radians (e.g., `Degrees(9.5)` → `9.5π/180`)
+2. Applies rational reduction for integer degree values (e.g., `Degrees(90)` → `π/2`)
+3. If `engine.angularUnit === 'deg'`, returns just the numeric value without conversion
 
 ## Serialization & Configuration
 
@@ -237,11 +218,12 @@ serialize(Degrees(370), {
 Negative DMS notation preserves the sign correctly (critical for latitude/longitude):
 
 **Parsing:**
-- `-9°30'15"` → Negate the entire DMS expression
-- Parse as: `Negate(Add(Quantity(9, deg), Quantity(30, arcmin), Quantity(15, arcsec)))`
-- Result: `-9.504166...°`
+- `-9°30'15"` → `Negate(Degrees(9.504166...))`
+- The minus sign produces `Negate`, and the DMS parser computes decimal degrees for the positive part
 
 **Convention:** In geographic notation, `-9°30'` means "9 degrees 30 minutes South/West", not "minus 9 degrees plus 30 minutes"
+
+**`Negate` type:** Uses `'(value) -> value'` signature (not just `number`), so it correctly handles `Degrees` and `Quantity` expressions
 
 ### No Canonical Normalization
 
@@ -266,21 +248,14 @@ All handled by existing quantity system:
 **1. Basic DMS Parsing:**
 ```typescript
 check('9°', ['Degrees', 9])
-check('9°30\'', ['Add', ['Quantity', 9, 'deg'], ['Quantity', 30, 'arcmin']])
-check('9°30\'15"', ['Add',
-  ['Quantity', 9, 'deg'],
-  ['Quantity', 30, 'arcmin'],
-  ['Quantity', 15, 'arcsec']
-])
+check('9°30\'', ['Degrees', 9.5])
+check('9°30\'15"', ['Degrees', { num: '9.504166666666666' }])
 check('30\\,\\mathrm{arcmin}', ['Quantity', 30, 'arcmin'])
 ```
 
 **2. Negative Angles:**
 ```typescript
-check('-9°30\'', ['Negate', ['Add',
-  ['Quantity', 9, 'deg'],
-  ['Quantity', 30, 'arcmin']
-]])
+check('-9°30\'', ['Negate', ['Degrees', 9.5]])
 // Evaluates to -9.5° ≈ -0.1658 radians
 ```
 
@@ -325,8 +300,7 @@ The degree parser has precedence 880 (postfix). This is higher than Prime (810),
 
 ### Future Enhancements
 
-Possible future additions (not part of initial implementation):
+Possible future additions:
 - Cardinal directions: `45°30'N` or `9°15'W`
 - Latitude/longitude validation functions
-- Direct DMS input function: `DMS(9, 30, 15)`
 - Smarter DMS serialization (only use when "nice" decimal values)
