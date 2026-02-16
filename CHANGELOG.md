@@ -19,14 +19,40 @@
   automatically convert complex `{ re, im }` results to real numbers — returns
   `re` when `im === 0`, `NaN` otherwise. Useful for plotting and other contexts
   that only need real-valued output.
+- **`Sinc` function**: Unnormalized cardinal sine `sinc(x) = sin(x)/x` with
+  `sinc(0) = 1`. Includes LaTeX parsing via `\operatorname{sinc}`, JavaScript
+  and interval-arithmetic compilation targets.
 - **Fresnel integrals (`FresnelS`, `FresnelC`)**: Numeric evaluation using
   Cephes rational Chebyshev approximation, LaTeX parsing via
   `\operatorname{FresnelS}` / `\operatorname{FresnelC}`, JavaScript and
   interval-arithmetic compilation targets.
 
+### LaTeX Syntax
+
+- **`Which` compilation**: `\begin{cases}` expressions now compile to JavaScript
+  and interval-js targets as chained ternary operators with `NaN` fallback when
+  no condition matches.
+- **`Sum`/`Product` compilation**: `\sum_{k=a}^{b}` and `\prod_{k=a}^{b}`
+  expressions with numeric bounds now compile to JavaScript loops with
+  accumulator variables, including complex number support.
+- **`Loop` compilation**: `Loop`, `Break`, `Continue`, and `Return` operators
+  compile to JavaScript `for` loops wrapped in IIFEs with standard control flow
+  keywords.
+- **Inline `If` syntax**: Parse `\text{if } C \text{ then } A \text{ else } B`
+  (or `\operatorname{if}`) to `["If", C, A, B]` expressions.
+- **`where` syntax**: Parse `E \text{ where } x \coloneq V` to `Block`
+  expressions with implicit variable declarations.
+- **Semicolon block syntax**: Semicolons (`;`, `\;`) act as statement
+  separators, building `Block` expressions with auto-declared variables when
+  assignments are present.
+- **`for` loop syntax**: Parse
+  `\text{for } i \text{ from } a \text{ to } b \text{ do } body` to
+  `["Loop", body, ["Element", "i", ["Range", a, b]]]`.
+
 ### Bug Fixes
 
-- **Interval-JS compilation for Gamma functions**
+- **Interval-JS compilation for Gamma functions**: Added missing `gamma` and
+  `gammaln` exports and implementations in the interval-arithmetic library.
 - **Interval-JS graceful fallback**: The `interval-js` target no longer throws
   when encountering unsupported functions. Unsupported operators now produce
   `{ success: false }` at compile time, and runtime errors return
