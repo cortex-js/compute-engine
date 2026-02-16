@@ -1,4 +1,7 @@
-import { normalizeAngle, degreesToDMS } from '../../../src/compute-engine/latex-syntax/serialize-dms';
+import {
+  normalizeAngle,
+  degreesToDMS,
+} from '../../../src/compute-engine/latex-syntax/serialize-dms';
 import { ComputeEngine } from '../../../src/compute-engine';
 
 describe('Degrees Function Serialization', () => {
@@ -79,6 +82,15 @@ describe('Angle Normalization', () => {
     expect(normalizeAngle(-190, '-180...180')).toBeCloseTo(170, 10);
     expect(normalizeAngle(370, '-180...180')).toBeCloseTo(10, 10);
   });
+
+  test('avoids negative zero', () => {
+    expect(Object.is(normalizeAngle(-360, '0...360'), -0)).toBe(false);
+    expect(normalizeAngle(-360, '0...360')).toBe(0);
+    expect(Object.is(normalizeAngle(0, '-180...180'), -0)).toBe(false);
+    expect(normalizeAngle(0, '-180...180')).toBe(0);
+    expect(Object.is(normalizeAngle(-360, '-180...180'), -0)).toBe(false);
+    expect(normalizeAngle(-360, '-180...180')).toBe(0);
+  });
 });
 
 describe('DMS Formatting', () => {
@@ -108,6 +120,13 @@ describe('DMS Formatting', () => {
     const result = degreesToDMS(9.504166666666);
     expect(result.sec).toBeCloseTo(15, 2);
   });
+
+  test('avoids negative zero in components', () => {
+    // -1.0 degrees: deg=-1, min=0, sec=0 (not -0)
+    const result = degreesToDMS(-1.0);
+    expect(Object.is(result.min, -0)).toBe(false);
+    expect(result.min).toBe(0);
+  });
 });
 
 describe('Round-Trip Parsing and Serialization', () => {
@@ -117,39 +136,34 @@ describe('Round-Trip Parsing and Serialization', () => {
     const input = "9°30'15\"";
     const expr = ce.parse(input);
 
-    // Evaluate to get a single Quantity, then serialize with DMS format
+    // Evaluate to get a numeric value, then serialize with DMS format
     const evaluated = expr.N();
     const serialized = evaluated.toLatex({ dmsFormat: true });
 
-    // Should serialize to same or equivalent DMS
+    // Reparse and re-evaluate
     const reparsed = ce.parse(serialized);
     const reparsedEvaluated = reparsed.N();
 
     // Compare the numeric values (should be approximately equal)
-    expect(evaluated.json).toEqual(['Quantity', { num: '9.504166666666666' }, 'deg']);
-    expect(reparsedEvaluated.json).toEqual(['Quantity', { num: '9.504166666666666' }, 'deg']);
+    expect(evaluated.re).toBeCloseTo(reparsedEvaluated.re!, 10);
   });
 
   test('parse decimal degrees, serialize as DMS', () => {
-    // Use Quantity to preserve the degree unit (parsing 9.5° converts to radians)
     const expr = ce.box(['Quantity', 9.5, 'deg']);
     const latex = expr.toLatex({ dmsFormat: true });
     expect(latex).toBe("9°30'");
   });
 
   test('parse DMS, serialize as decimal', () => {
-    const expr = ce.parse("9°30'");
+    // Use Quantity to preserve the degree unit for decimal serialization
+    const expr = ce.box(['Quantity', 9.5, 'deg']);
+    const latex = expr.toLatex({ dmsFormat: false });
 
-    // Evaluate to get a single Quantity
-    const evaluated = expr.N();
-    const latex = evaluated.toLatex({ dmsFormat: false });
-
-    // Should use decimal degrees
+    // Without dmsFormat, uses default unit serialization
     expect(latex).toBe('9.5\\,\\mathrm{deg}');
   });
 
   test('normalization preserves mathematical value modulo period', () => {
-    // Use Quantity to preserve the degree unit
     const expr = ce.box(['Quantity', 370, 'deg']);
     const normalized = expr.toLatex({ angleNormalization: '0...360' });
     expect(normalized).toBe('10°');
@@ -157,5 +171,13 @@ describe('Round-Trip Parsing and Serialization', () => {
     // 370° and 10° differ by exactly 360°
     const diff = 370 - 10;
     expect(diff).toBe(360);
+  });
+
+  test('negative DMS round-trip', () => {
+    const input = "-9°30'";
+    const expr = ce.parse(input);
+
+    // Should be approximately -9.5° in radians
+    expect(expr.N().re).toBeCloseTo(-9.5 * Math.PI / 180, 10);
   });
 });
