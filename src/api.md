@@ -2357,7 +2357,11 @@ Applicable to canonical and non-canonical expressions.
 readonly symbols: readonly string[];
 ```
 
-All the symbols in the expression, recursively
+All the symbols in the expression, recursively, including
+bound variables (e.g., summation/product index variables).
+
+Use [unknowns](#unknowns) or [freeVariables](#freevariables) to get only the
+symbols that are free (not bound by a scoping construct).
 
 ```js
 const expr = ce.parse('a + b * c + d');
@@ -2381,6 +2385,22 @@ readonly unknowns: readonly string[];
 
 All the symbols used in the expression that do not have a value
 associated with them, i.e. they are declared but not defined.
+
+</MemberCard>
+
+<MemberCard>
+
+##### Expression.freeVariables
+
+```ts
+readonly freeVariables: readonly string[];
+```
+
+The free variables of the expression: symbols that are not constants,
+not operators, not bound to a value, and not locally scoped (e.g.,
+summation/product index variables are excluded).
+
+This is an alias for [unknowns](#unknowns).
 
 </MemberCard>
 
