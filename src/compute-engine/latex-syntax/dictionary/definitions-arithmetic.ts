@@ -28,6 +28,7 @@ import {
 } from '../types';
 import { latexTemplate } from '../serializer-style';
 import { joinLatex, supsub } from '../tokenizer';
+import { normalizeAngle, degreesToDMS } from '../serialize-dms';
 
 /**
  * If expression is a product, collect all the terms with a
@@ -680,7 +681,48 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     precedence: 880,
     parse: (_parser, lhs) => ['Degrees', lhs] as MathJsonExpression,
     serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
-      return joinLatex([serializer.serialize(operand(expr, 1)), '\\degree']);
+      const options = serializer.options;
+      const arg = operand(expr, 1);
+
+      // Check if DMS format or normalization is requested
+      if (options.dmsFormat || options.angleNormalization !== 'none') {
+        // Get numeric value
+        const argValue = machineValue(arg);
+        if (argValue !== null) {
+          // Apply normalization
+          let degrees = argValue;
+          if (options.angleNormalization !== 'none') {
+            degrees = normalizeAngle(degrees, options.angleNormalization);
+          }
+
+          // Format as DMS if requested
+          if (options.dmsFormat) {
+            const { deg, min, sec } = degreesToDMS(degrees);
+
+            let result = `${deg}°`;
+
+            if (Math.abs(sec) > 0.001) {
+              // Include seconds
+              const secStr = sec % 1 === 0 ? sec.toString() : sec.toFixed(2);
+              result += `${Math.abs(min)}'${Math.abs(Number(secStr))}"`;
+            } else if (Math.abs(min) > 0) {
+              // Include minutes only
+              result += `${Math.abs(min)}'`;
+            } else {
+              // Degrees only, show 0'0" for consistency
+              result += `0'0"`;
+            }
+
+            return result;
+          } else {
+            // Just normalize, use decimal degrees
+            return `${degrees}°`;
+          }
+        }
+      }
+
+      // Fall back to default serialization
+      return joinLatex([serializer.serialize(arg), '\\degree']);
     },
   },
   {

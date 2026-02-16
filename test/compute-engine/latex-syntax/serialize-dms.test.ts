@@ -1,4 +1,43 @@
 import { normalizeAngle, degreesToDMS } from '../../../src/compute-engine/latex-syntax/serialize-dms';
+import { ComputeEngine } from '../../../src/compute-engine';
+
+describe('DMS Serialization Integration', () => {
+  const ce = new ComputeEngine();
+
+  test('serialize Quantity with dmsFormat', () => {
+    const expr = ce.box(['Quantity', 9.5, 'deg']);
+    const latex = expr.toLatex({ dmsFormat: true });
+    expect(latex).toBe("9°30'");
+  });
+
+  test('serialize full DMS', () => {
+    const expr = ce.box(['Quantity', 9.504166666666666, 'deg']);
+    const latex = expr.toLatex({ dmsFormat: true });
+    expect(latex).toBe('9°30\'15"');
+  });
+
+  test('serialize without dmsFormat uses decimal', () => {
+    const expr = ce.box(['Quantity', 9.5, 'deg']);
+    const latex = expr.toLatex({ dmsFormat: false });
+    // Without dmsFormat, uses default unit serialization
+    expect(latex).toBe('9.5\\,\\mathrm{deg}');
+  });
+
+  test('serialize with angle normalization', () => {
+    const expr = ce.box(['Quantity', 370, 'deg']);
+    const latex = expr.toLatex({ angleNormalization: '0...360' });
+    expect(latex).toBe('10°');
+  });
+
+  test('combine DMS format with normalization', () => {
+    const expr = ce.box(['Quantity', 370, 'deg']);
+    const latex = expr.toLatex({
+      dmsFormat: true,
+      angleNormalization: '0...360',
+    });
+    expect(latex).toBe("10°0'0\"");
+  });
+});
 
 describe('Angle Normalization', () => {
   test('none: no normalization', () => {

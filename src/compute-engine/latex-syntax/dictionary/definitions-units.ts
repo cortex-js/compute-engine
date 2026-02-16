@@ -21,7 +21,12 @@
  */
 
 import type { MathJsonExpression } from '../../../math-json/types';
-import { operand, operator, symbol } from '../../../math-json/utils';
+import {
+  operand,
+  operator,
+  symbol,
+  machineValue,
+} from '../../../math-json/utils';
 import type {
   LatexDictionary,
   Parser,
@@ -34,6 +39,7 @@ import {
   parseUnitDSL,
   type UnitExpression,
 } from '../../numerics/unit-data';
+import { normalizeAngle, degreesToDMS } from '../serialize-dms';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -362,6 +368,71 @@ export const DEFINITIONS_UNITS: LatexDictionary = [
 
       if (magnitude === null || unit === null) return '';
 
+      // Check if this is an angle unit and DMS format is requested
+      const unitSymbol = symbol(unit);
+      const isAngleUnit =
+        unitSymbol === 'deg' ||
+        unitSymbol === 'rad' ||
+        unitSymbol === 'arcmin' ||
+        unitSymbol === 'arcsec';
+
+      const options = serializer.options;
+
+      if (
+        isAngleUnit &&
+        (options.dmsFormat || options.angleNormalization !== 'none')
+      ) {
+        // Get numeric value
+        const magnitudeValue = machineValue(magnitude);
+        if (magnitudeValue === null) {
+          // Fall back to default serialization if we can't get a numeric value
+          const magLatex = serializer.serialize(magnitude);
+          const unitStr = unitToMathrm(unit);
+          return joinLatex([magLatex, '\\,', `\\mathrm{${unitStr}}`]);
+        }
+
+        // Convert to degrees
+        let degrees = magnitudeValue;
+
+        if (unitSymbol === 'rad') {
+          degrees = (degrees * 180) / Math.PI;
+        } else if (unitSymbol === 'arcmin') {
+          degrees = degrees / 60;
+        } else if (unitSymbol === 'arcsec') {
+          degrees = degrees / 3600;
+        }
+
+        // Apply normalization
+        if (options.angleNormalization !== 'none') {
+          degrees = normalizeAngle(degrees, options.angleNormalization);
+        }
+
+        // Format as DMS if requested
+        if (options.dmsFormat) {
+          const { deg, min, sec } = degreesToDMS(degrees);
+
+          let result = `${deg}°`;
+
+          if (Math.abs(sec) > 0.001) {
+            // Include seconds
+            const secStr = sec % 1 === 0 ? sec.toString() : sec.toFixed(2);
+            result += `${Math.abs(min)}'${Math.abs(Number(secStr))}"`;
+          } else if (Math.abs(min) > 0) {
+            // Include minutes only
+            result += `${Math.abs(min)}'`;
+          } else {
+            // Degrees only, show 0'0" for consistency
+            result += `0'0"`;
+          }
+
+          return result;
+        } else {
+          // Just normalize, use decimal degrees
+          return `${degrees}°`;
+        }
+      }
+
+      // Fall through to default Quantity serialization
       const magLatex = serializer.serialize(magnitude);
       const unitStr = unitToMathrm(unit);
 
