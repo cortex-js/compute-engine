@@ -52,7 +52,6 @@ import {
 // compose (compose(f, g) -> a new function such that compose(f, g)(x) -> f(g(x))
 
 // Symbols() -> return list of all known symbols
-// FreeVariables(expr) -> return list of all free variables in expr
 
 // xcas/gias https://www-fourier.ujf-grenoble.fr/~parisse/giac/doc/en/cascmd_en/cascmd_en.html
 // https://www.haskell.org/onlinereport/haskell2010/haskellch9.html#x16-1720009.1

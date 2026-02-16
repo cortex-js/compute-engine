@@ -507,3 +507,116 @@ describe('INTERVAL JS COMPLEX EXPRESSIONS', () => {
     expect(result.value.hi).toBeCloseTo(0.284, 2);
   });
 });
+
+describe('INTERVAL JS - NEGATIVE BASE POWER', () => {
+  test('(-1)^k with point integer exponent', () => {
+    // (-1)^k where k is a variable — powInterval path
+    const expr = ce.box(['Power', -1, 'k']);
+    const fn = compile(expr, { to: 'interval-js' });
+    expect(fn.success).toBe(true);
+
+    // Even exponent → 1
+    const r0 = fn.run!({ k: { lo: 0, hi: 0 } });
+    expect(r0.kind).toBe('interval');
+    expect(r0.value.lo).toBe(1);
+    expect(r0.value.hi).toBe(1);
+
+    // Odd exponent → -1
+    const r1 = fn.run!({ k: { lo: 1, hi: 1 } });
+    expect(r1.kind).toBe('interval');
+    expect(r1.value.lo).toBe(-1);
+    expect(r1.value.hi).toBe(-1);
+
+    // Even exponent → 1
+    const r4 = fn.run!({ k: { lo: 4, hi: 4 } });
+    expect(r4.kind).toBe('interval');
+    expect(r4.value.lo).toBe(1);
+    expect(r4.value.hi).toBe(1);
+  });
+
+  test('(-2)^k with point integer exponent', () => {
+    const expr = ce.box(['Power', -2, 'k']);
+    const fn = compile(expr, { to: 'interval-js' });
+    expect(fn.success).toBe(true);
+
+    // (-2)^3 = -8
+    const r3 = fn.run!({ k: { lo: 3, hi: 3 } });
+    expect(r3.kind).toBe('interval');
+    expect(r3.value.lo).toBe(-8);
+    expect(r3.value.hi).toBe(-8);
+
+    // (-2)^2 = 4
+    const r2 = fn.run!({ k: { lo: 2, hi: 2 } });
+    expect(r2.kind).toBe('interval');
+    expect(r2.value.lo).toBe(4);
+    expect(r2.value.hi).toBe(4);
+  });
+
+  test('(-1)^k with interval exponent spanning integers', () => {
+    const expr = ce.box(['Power', -1, 'k']);
+    const fn = compile(expr, { to: 'interval-js' });
+
+    // Exponent spans both even and odd → [-1, 1]
+    const r = fn.run!({ k: { lo: 0, hi: 3 } });
+    expect(r.kind).toBe('interval');
+    expect(r.value.lo).toBe(-1);
+    expect(r.value.hi).toBe(1);
+  });
+
+  test('Factorial compiles and executes', () => {
+    const expr = ce.box(['Factorial', 'n']);
+    const fn = compile(expr, { to: 'interval-js' });
+    expect(fn.success).toBe(true);
+
+    // 5! = 120
+    const r5 = fn.run!({ n: { lo: 5, hi: 5 } });
+    expect(r5.kind).toBe('interval');
+    expect(r5.value.lo).toBe(120);
+    expect(r5.value.hi).toBe(120);
+
+    // 0! = 1
+    const r0 = fn.run!({ n: { lo: 0, hi: 0 } });
+    expect(r0.kind).toBe('interval');
+    expect(r0.value.lo).toBe(1);
+    expect(r0.value.hi).toBe(1);
+  });
+
+  test('alternating sign summation: sum of (-1)^k', () => {
+    // Sum((-1)^k, k=0..5) = 1-1+1-1+1-1 = 0
+    const expr = ce.box([
+      'Sum',
+      ['Power', -1, 'k'],
+      ['Limits', 'k', 0, 5],
+    ]);
+    const fn = compile(expr, { to: 'interval-js' });
+    expect(fn.success).toBe(true);
+
+    const result = fn.run!({});
+    expect(result.kind).toBe('interval');
+    expect(result.value.lo).toBe(0);
+    expect(result.value.hi).toBe(0);
+  });
+
+  test('Taylor-like: sum of (-1)^k * x^(2k+1) / (2k+1)!', () => {
+    // First 4 terms of arctan(x) Taylor series: x - x^3/3! + x^5/5! - x^7/7!
+    // But with factorial denominators approximating arctan
+    const expr = ce.box([
+      'Sum',
+      [
+        'Divide',
+        ['Multiply', ['Power', -1, 'k'], ['Power', 'x', ['Add', ['Multiply', 2, 'k'], 1]]],
+        ['Factorial', ['Add', ['Multiply', 2, 'k'], 1]],
+      ],
+      ['Limits', 'k', 0, 3],
+    ]);
+    const fn = compile(expr, { to: 'interval-js' });
+    expect(fn.success).toBe(true);
+
+    // Evaluate at x = 0.5 (point interval)
+    const result = fn.run!({ x: { lo: 0.5, hi: 0.5 } });
+    expect(result.kind).toBe('interval');
+    // Should be a finite number (not empty/singular)
+    expect(Number.isFinite(result.value.lo)).toBe(true);
+    expect(Number.isFinite(result.value.hi)).toBe(true);
+  });
+});

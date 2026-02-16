@@ -246,4 +246,41 @@ describe('UNKNOWNS', () => {
     const expr = engine.parse('\\sum_{k=1}^{10} k^2');
     expect(expr.unknowns).toEqual([]);
   });
+
+  it('should include symbolic upper bound as unknown', () => {
+    // Sum_{k=0}^{M} k*x  — k is bound, M and x are free
+    const expr = engine.parse('\\sum_{k=0}^{M} k \\cdot x');
+    const unknowns = expr.unknowns;
+    expect(unknowns).not.toContain('k');
+    expect(unknowns).toContain('M');
+    expect(unknowns).toContain('x');
+  });
+});
+
+describe('FREE_VARIABLES', () => {
+  it('should return same result as unknowns', () => {
+    const expr = engine.parse('x + y');
+    expect(expr.freeVariables).toEqual(expr.unknowns);
+  });
+
+  it('should not include constants', () => {
+    expect(engine.parse('\\pi + x').freeVariables).toEqual(['x']);
+  });
+
+  it('should not include summation index variable', () => {
+    const expr = engine.parse('\\sum_{k=0}^{10} k \\cdot x');
+    expect(expr.freeVariables).not.toContain('k');
+    expect(expr.freeVariables).toContain('x');
+  });
+
+  it('should include symbolic upper bound', () => {
+    const expr = engine.parse('\\sum_{k=0}^{M} k \\cdot x');
+    expect(expr.freeVariables).not.toContain('k');
+    expect(expr.freeVariables).toContain('M');
+    expect(expr.freeVariables).toContain('x');
+  });
+
+  it('should return empty for constant expression', () => {
+    expect(engine.parse('5 + 3').freeVariables).toEqual([]);
+  });
 });

@@ -195,6 +195,8 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   FresnelC: (args, compile) => `_IA.fresnelC(${compile(args[0])})`,
 
   // Special functions
+  Factorial: (args, compile) => `_IA.factorial(${compile(args[0])})`,
+  Factorial2: (args, compile) => `_IA.factorial2(${compile(args[0])})`,
   Gamma: (args, compile) => `_IA.gamma(${compile(args[0])})`,
   GammaLn: (args, compile) => `_IA.gammaln(${compile(args[0])})`,
 

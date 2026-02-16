@@ -554,6 +554,10 @@ export abstract class _BoxedExpression implements Expression {
     return Array.from(set).sort();
   }
 
+  get freeVariables(): ReadonlyArray<string> {
+    return this.unknowns;
+  }
+
   get errors(): ReadonlyArray<Expression> {
     return this.getSubexpressions('Error');
   }
@@ -850,12 +854,25 @@ function getUnknowns(expr: Expression, result: Set<string>): void {
   if (isFunction(expr)) {
     if (expr.isScoped && expr.localScope) {
       // For scoped functions (Sum, Product, Integrate, Block, etc.),
-      // collect unknowns from ops then exclude the locally bound variables
+      // collect unknowns from ops then exclude the index variables.
+      // The scope's bindings map includes all symbols referenced during
+      // canonicalization (including free variables like upper bounds),
+      // so we extract the actual bound variables from the structure:
+      // each Limits/Element expression's first operand is an index variable.
+      const boundVars = new Set<string>();
+      for (const op of expr.ops) {
+        if (
+          isFunction(op) &&
+          (op.operator === 'Limits' || op.operator === 'Element') &&
+          isSymbol(op.op1)
+        )
+          boundVars.add(op.op1.symbol);
+      }
+
       const inner = new Set<string>();
       for (const op of expr.ops) getUnknowns(op, inner);
-      const bound = expr.localScope.bindings;
       for (const s of inner) {
-        if (!bound.has(s)) result.add(s);
+        if (!boundVars.has(s)) result.add(s);
       }
     } else {
       for (const op of expr.ops) getUnknowns(op, result);

@@ -58,6 +58,8 @@ import {
   sign as _sign,
   gamma as _gamma,
   gammaln as _gammaln,
+  factorial as _factorial,
+  factorial2 as _factorial2,
 } from './elementary';
 import {
   sin as _sin,
@@ -153,6 +155,8 @@ export {
   sign,
   gamma,
   gammaln,
+  factorial,
+  factorial2,
 } from './elementary';
 
 // Trigonometric functions
@@ -257,6 +261,8 @@ export const IntervalArithmetic = {
   sign: _sign,
   gamma: _gamma,
   gammaln: _gammaln,
+  factorial: _factorial,
+  factorial2: _factorial2,
 
   // Trigonometric
   sin: _sin,

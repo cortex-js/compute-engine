@@ -1,12 +1,38 @@
 ### [Unreleased]
 
+### Features
+
+- **`expr.freeVariables` property**: New property on `BoxedExpression` that
+  returns the free variables of an expression — symbols that are not constants,
+  not operators, not bound to a value, and not locally scoped by constructs like
+  `Sum` or `Product`. Semantically identical to `expr.unknowns`.
+
 ### Bug Fixes
+
+- **Interval `(-1)^k` returned `empty` instead of correct value**: The
+  `powInterval()` function required positive bases for variable exponents,
+  causing `(-1)^k` patterns in summations (e.g. Taylor series) to fail at
+  runtime. Now correctly delegates to `intPow()` when the exponent is a point
+  interval with an integer value, preserving even/odd parity. Also handles the
+  case where base is `-1` and the exponent spans multiple integers by returning
+  the conservative interval `[-1, 1]`.
+
+- **`Factorial` missing from interval-js compilation target**: Expressions
+  containing `n!` (e.g. `\frac{(-1)^k x^{2k+1}}{(2k+1)!}`) failed interval-js
+  compilation with `success: false`. Added `Factorial` and `Factorial2` interval
+  functions and compilation handlers.
 
 - **`expr.unknowns` included bound variables**: Scoped constructs like `Sum`,
   `Product`, `Integrate`, and `Block` bind index variables in a local scope, but
   `expr.unknowns` was reporting them as free unknowns. For example,
   `\sum_{k=0}^{10} k \cdot x` returned `["k", "x"]` instead of `["x"]`.
   Now correctly excludes locally bound variables from the result.
+
+- **Symbolic upper bounds missing from `expr.unknowns`**: In expressions like
+  `\sum_{k=0}^{M} k \cdot x`, the symbolic upper bound `M` was incorrectly
+  excluded from `unknowns` because the scope's bindings map captured all symbols
+  referenced during canonicalization. Now extracts bound variables structurally
+  from `Limits`/`Element` expressions, so only true index variables are excluded.
 
 - **Interval `piecewise` with constant branches**: Fixed `piecewise()` returning
   raw `Interval` objects instead of `IntervalResult` when branches evaluated to

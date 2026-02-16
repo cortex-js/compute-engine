@@ -834,8 +834,11 @@ export interface Expression {
   readonly subexpressions: ReadonlyArray<Expression>;
 
   /**
+   * All the symbols in the expression, recursively, including
+   * bound variables (e.g., summation/product index variables).
    *
-   * All the symbols in the expression, recursively
+   * Use {@link unknowns} or {@link freeVariables} to get only the
+   * symbols that are free (not bound by a scoping construct).
    *
    * ```js
    * const expr = ce.parse('a + b * c + d');
@@ -855,6 +858,15 @@ export interface Expression {
    * associated with them, i.e. they are declared but not defined.
    */
   readonly unknowns: ReadonlyArray<string>;
+
+  /**
+   * The free variables of the expression: symbols that are not constants,
+   * not operators, not bound to a value, and not locally scoped (e.g.,
+   * summation/product index variables are excluded).
+   *
+   * This is an alias for {@link unknowns}.
+   */
+  readonly freeVariables: ReadonlyArray<string>;
 
   /**
    * Attempt to factor a numeric coefficient `c` and a `rest` out of a

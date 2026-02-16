@@ -11,6 +11,10 @@ import {
   gamma as scalarGamma,
   gammaln as scalarGammaln,
 } from '../numerics/special-functions';
+import {
+  factorial as scalarFactorial,
+  factorial2 as scalarFactorial2,
+} from '../numerics/numeric';
 
 /**
  * Square root of an interval (or IntervalResult).
@@ -170,8 +174,26 @@ export function powInterval(
   const unwrapped = unwrapOrPropagate(base, exp);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [baseVal, expVal] = unwrapped;
-  // For real-valued results, base must be positive
+
+  // Special case: exponent is a point interval with an integer value.
+  // For integer exponents, negative bases are well-defined (parity matters).
+  // This is critical for patterns like (-1)^k in summations.
+  if (expVal.lo === expVal.hi && Number.isInteger(expVal.lo)) {
+    return pow(baseVal, expVal.lo);
+  }
+
+  // For real-valued results with non-integer exponents, base must be positive
   if (baseVal.hi <= 0) {
+    // Special case: base is exactly -1 and exponent spans at least two
+    // consecutive integers. (-1)^n alternates between -1 and 1, so the
+    // tightest enclosure is [-1, 1].
+    if (
+      baseVal.lo === -1 &&
+      baseVal.hi === -1 &&
+      Math.floor(expVal.hi) > Math.floor(expVal.lo)
+    ) {
+      return ok({ lo: -1, hi: 1 });
+    }
     return { kind: 'empty' };
   }
   if (baseVal.lo <= 0) {
@@ -638,4 +660,38 @@ function _gammaln(x: Interval): IntervalResult {
   // x.lo > 0: entirely positive
   // gammaln is monotonically increasing for x > 0
   return ok({ lo: scalarGammaln(x.lo), hi: scalarGammaln(x.hi) });
+}
+
+/**
+ * Factorial function on an interval.
+ *
+ * Factorial is only defined for non-negative integers and is monotonically
+ * increasing. For interval arguments, we evaluate at both endpoints.
+ * Non-integer or negative values produce NaN.
+ */
+export function factorial(x: Interval | IntervalResult): IntervalResult {
+  const unwrapped = unwrapOrPropagate(x);
+  if (!Array.isArray(unwrapped)) return unwrapped;
+  const [xVal] = unwrapped;
+  if (xVal.lo < 0) return { kind: 'empty' };
+  const fLo = scalarFactorial(Math.round(xVal.lo));
+  const fHi = scalarFactorial(Math.round(xVal.hi));
+  if (!Number.isFinite(fLo) || !Number.isFinite(fHi))
+    return ok({ lo: Math.min(fLo, fHi), hi: Math.max(fLo, fHi) });
+  return ok({ lo: fLo, hi: fHi });
+}
+
+/**
+ * Double factorial on an interval.
+ */
+export function factorial2(x: Interval | IntervalResult): IntervalResult {
+  const unwrapped = unwrapOrPropagate(x);
+  if (!Array.isArray(unwrapped)) return unwrapped;
+  const [xVal] = unwrapped;
+  if (xVal.lo < 0) return { kind: 'empty' };
+  const fLo = scalarFactorial2(Math.round(xVal.lo));
+  const fHi = scalarFactorial2(Math.round(xVal.hi));
+  if (!Number.isFinite(fLo) || !Number.isFinite(fHi))
+    return ok({ lo: Math.min(fLo, fHi), hi: Math.max(fLo, fHi) });
+  return ok({ lo: fLo, hi: fHi });
 }
