@@ -1,6 +1,29 @@
 import { normalizeAngle, degreesToDMS } from '../../../src/compute-engine/latex-syntax/serialize-dms';
 import { ComputeEngine } from '../../../src/compute-engine';
 
+describe('Degrees Function Serialization', () => {
+  const ce = new ComputeEngine();
+
+  test('serialize Degrees with normalization', () => {
+    // Use ce._fn() to bypass canonicalization which converts Degrees to radians
+    const expr = ce._fn('Degrees', [ce.number(370)]);
+    const latex = expr.toLatex({ angleNormalization: '0...360' });
+    expect(latex).toBe('10°');
+  });
+
+  test('serialize Degrees with DMS format', () => {
+    const expr = ce._fn('Degrees', [ce.number(9.5)]);
+    const latex = expr.toLatex({ dmsFormat: true });
+    expect(latex).toBe("9°30'");
+  });
+
+  test('serialize negative Degrees with DMS', () => {
+    const expr = ce._fn('Degrees', [ce.number(-45.5)]);
+    const latex = expr.toLatex({ dmsFormat: true });
+    expect(latex).toBe("-45°30'");
+  });
+});
+
 describe('DMS Serialization Integration', () => {
   const ce = new ComputeEngine();
 
