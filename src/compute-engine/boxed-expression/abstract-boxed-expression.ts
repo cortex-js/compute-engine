@@ -847,5 +847,18 @@ function getUnknowns(expr: Expression, result: Set<string>): void {
     return;
   }
 
-  if (isFunction(expr)) for (const op of expr.ops) getUnknowns(op, result);
+  if (isFunction(expr)) {
+    if (expr.isScoped && expr.localScope) {
+      // For scoped functions (Sum, Product, Integrate, Block, etc.),
+      // collect unknowns from ops then exclude the locally bound variables
+      const inner = new Set<string>();
+      for (const op of expr.ops) getUnknowns(op, inner);
+      const bound = expr.localScope.bindings;
+      for (const s of inner) {
+        if (!bound.has(s)) result.add(s);
+      }
+    } else {
+      for (const op of expr.ops) getUnknowns(op, result);
+    }
+  }
 }

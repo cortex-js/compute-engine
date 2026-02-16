@@ -2,6 +2,12 @@
 
 ### Bug Fixes
 
+- **`expr.unknowns` included bound variables**: Scoped constructs like `Sum`,
+  `Product`, `Integrate`, and `Block` bind index variables in a local scope, but
+  `expr.unknowns` was reporting them as free unknowns. For example,
+  `\sum_{k=0}^{10} k \cdot x` returned `["k", "x"]` instead of `["x"]`.
+  Now correctly excludes locally bound variables from the result.
+
 - **Interval `piecewise` with constant branches**: Fixed `piecewise()` returning
   raw `Interval` objects instead of `IntervalResult` when branches evaluated to
   constants (e.g. `_IA.point(1)`). This caused `If` expressions like

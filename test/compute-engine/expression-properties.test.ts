@@ -207,3 +207,43 @@ describe('IS_POSITIVE', () => {
     expect(expression.isPositive).toBeUndefined();
   });
 });
+
+describe('UNKNOWNS', () => {
+  it('should return free variables for simple expressions', () => {
+    expect(engine.parse('x + y').unknowns).toEqual(['x', 'y']);
+  });
+
+  it('should not include constants', () => {
+    expect(engine.parse('\\pi + x').unknowns).toEqual(['x']);
+  });
+
+  it('should not include summation index variable', () => {
+    // Sum_{k=0}^{10} k*x  — k is bound, x is free
+    const expr = engine.parse('\\sum_{k=0}^{10} k \\cdot x');
+    const unknowns = expr.unknowns;
+    expect(unknowns).not.toContain('k');
+    expect(unknowns).toContain('x');
+  });
+
+  it('should not include product index variable', () => {
+    // Product_{i=1}^{5} (x + i)  — i is bound, x is free
+    const expr = engine.parse('\\prod_{i=1}^{5} (x + i)');
+    const unknowns = expr.unknowns;
+    expect(unknowns).not.toContain('i');
+    expect(unknowns).toContain('x');
+  });
+
+  it('should handle nested scoped functions', () => {
+    // Sum_{k=0}^{5} Sum_{j=0}^{k} (x + j)
+    const expr = engine.parse('\\sum_{k=0}^{5} \\sum_{j=0}^{k} (x + j)');
+    const unknowns = expr.unknowns;
+    expect(unknowns).not.toContain('k');
+    expect(unknowns).not.toContain('j');
+    expect(unknowns).toContain('x');
+  });
+
+  it('should return empty for fully constant sum', () => {
+    const expr = engine.parse('\\sum_{k=1}^{10} k^2');
+    expect(expr.unknowns).toEqual([]);
+  });
+});
