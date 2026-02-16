@@ -20,7 +20,7 @@ export function normalizeAngle(
   if (mode === '0...360') {
     // Normalize to [0, 360)
     const normalized = degrees % 360;
-    return normalized < 0 ? normalized + 360 : normalized;
+    return (normalized < 0 ? normalized + 360 : normalized) || 0; // Avoid -0
   }
 
   if (mode === '-180...180') {
@@ -28,7 +28,7 @@ export function normalizeAngle(
     let normalized = degrees % 360;
     if (normalized > 180) normalized -= 360;
     if (normalized < -180) normalized += 360;
-    return normalized;
+    return normalized || 0; // Avoid -0
   }
 
   return degrees;
@@ -54,7 +54,7 @@ export function degreesToDMS(totalDegrees: number): DMSComponents {
   let finalMin = min;
   let finalDeg = deg;
 
-  if (sec >= 59.999) {
+  if (sec >= 60) {
     sec = 0;
     finalMin++;
   }
@@ -66,8 +66,29 @@ export function degreesToDMS(totalDegrees: number): DMSComponents {
   }
 
   return {
-    deg: sign * finalDeg,
-    min: sign * finalMin,
-    sec: sec === 0 ? 0 : sign * sec, // Avoid -0
+    deg: sign * finalDeg || 0, // Avoid -0
+    min: sign * finalMin || 0, // Avoid -0
+    sec: sec === 0 ? 0 : sign * sec,
   };
+}
+
+/**
+ * Format a decimal degree value as a DMS LaTeX string.
+ * Used by both Degrees and Quantity serializers.
+ */
+export function formatDMS(degrees: number): string {
+  const { deg, min, sec } = degreesToDMS(degrees);
+
+  let result = `${deg}°`;
+
+  if (Math.abs(sec) > 0.001) {
+    const secStr = sec % 1 === 0 ? sec.toString() : sec.toFixed(2);
+    result += `${Math.abs(min)}'${Math.abs(Number(secStr))}"`;
+  } else if (Math.abs(min) > 0) {
+    result += `${Math.abs(min)}'`;
+  } else {
+    result += `0'0"`;
+  }
+
+  return result;
 }

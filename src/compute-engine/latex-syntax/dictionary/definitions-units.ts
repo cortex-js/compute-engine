@@ -39,7 +39,7 @@ import {
   parseUnitDSL,
   type UnitExpression,
 } from '../../numerics/unit-data';
-import { normalizeAngle, degreesToDMS } from '../serialize-dms';
+import { normalizeAngle, formatDMS } from '../serialize-dms';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -380,7 +380,8 @@ export const DEFINITIONS_UNITS: LatexDictionary = [
 
       if (
         isAngleUnit &&
-        (options.dmsFormat || options.angleNormalization !== 'none')
+        (options.dmsFormat ||
+          (options.angleNormalization && options.angleNormalization !== 'none'))
       ) {
         // Get numeric value
         const magnitudeValue = machineValue(magnitude);
@@ -403,33 +404,11 @@ export const DEFINITIONS_UNITS: LatexDictionary = [
         }
 
         // Apply normalization
-        if (options.angleNormalization !== 'none') {
+        if (options.angleNormalization && options.angleNormalization !== 'none')
           degrees = normalizeAngle(degrees, options.angleNormalization);
-        }
 
-        // Format as DMS if requested
-        if (options.dmsFormat) {
-          const { deg, min, sec } = degreesToDMS(degrees);
-
-          let result = `${deg}°`;
-
-          if (Math.abs(sec) > 0.001) {
-            // Include seconds
-            const secStr = sec % 1 === 0 ? sec.toString() : sec.toFixed(2);
-            result += `${Math.abs(min)}'${Math.abs(Number(secStr))}"`;
-          } else if (Math.abs(min) > 0) {
-            // Include minutes only
-            result += `${Math.abs(min)}'`;
-          } else {
-            // Degrees only, show 0'0" for consistency
-            result += `0'0"`;
-          }
-
-          return result;
-        } else {
-          // Just normalize, use decimal degrees
-          return `${degrees}°`;
-        }
+        if (options.dmsFormat) return formatDMS(degrees);
+        return `${degrees}°`;
       }
 
       // Fall through to default Quantity serialization
