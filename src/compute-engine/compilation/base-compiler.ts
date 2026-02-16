@@ -290,6 +290,10 @@ export class BaseCompiler {
   /**
    * Compile a Loop expression with Element(index, Range(lo, hi)) indexing.
    * Generates: (() => { for (let i = lo; i <= hi; i++) { body } })()
+   *
+   * The loop counter is always a raw number. For targets that wrap numeric
+   * values (e.g. interval-js wraps with `_IA.point()`), references to the
+   * loop index inside the body are wrapped via `target.number`.
    */
   private static compileForLoop(
     args: ReadonlyArray<Expression>,
@@ -310,12 +314,29 @@ export class BaseCompiler {
       throw new Error('Loop: expected Range(lo, hi)');
 
     const index = indexExpr.symbol;
-    const lower = BaseCompiler.compile(rangeExpr.ops[0], target);
-    const upper = BaseCompiler.compile(rangeExpr.ops[1], target);
+
+    // Use raw numeric values for the for-loop counter (not target-wrapped).
+    // This ensures `for (let i = 1; i <= 5; i++)` uses plain numbers even
+    // when the target wraps values (e.g. interval-js would produce
+    // `_IA.point(1)` which breaks `i++`).
+    const lower = Math.floor(rangeExpr.ops[0].re);
+    const upper = Math.floor(rangeExpr.ops[1].re);
+
+    if (!Number.isFinite(lower) || !Number.isFinite(upper))
+      throw new Error('Loop: bounds must be finite numbers');
+
+    // Check if the target wraps numeric values (e.g. interval-js).
+    // If so, references to the loop index in the body must be wrapped.
+    const needsWrap = target.number(0) !== '0';
 
     const bodyTarget: CompileTarget<Expression> = {
       ...target,
-      var: (id: string) => (id === index ? index : target.var(id)),
+      var: (id: string) =>
+        id === index
+          ? needsWrap
+            ? target.number(0).replace('0', index)
+            : index
+          : target.var(id),
     };
 
     const bodyStmts = BaseCompiler.compileLoopBody(args[0], bodyTarget);
@@ -344,7 +365,12 @@ export class BaseCompiler {
       return `return ${BaseCompiler.compile(expr.ops[0], target)}`;
 
     if (h === 'If') {
-      const cond = BaseCompiler.compile(expr.ops[0], target);
+      // For the imperative `if` statement, the condition must produce a
+      // boolean.  Interval targets compile comparisons to interval results
+      // (e.g. `_IA.greater(...)` returns an object, not a boolean), which
+      // would always be truthy.  Use scalar operators for the condition.
+      const condTarget = BaseCompiler.scalarConditionTarget(target);
+      const cond = BaseCompiler.compile(expr.ops[0], condTarget);
       const thenBranch = BaseCompiler.compileLoopBody(expr.ops[1], target);
       if (expr.ops.length > 2) {
         const elseBranch = BaseCompiler.compileLoopBody(expr.ops[2], target);
@@ -361,6 +387,53 @@ export class BaseCompiler {
     }
 
     return BaseCompiler.compile(expr, target);
+  }
+
+  /**
+   * Create a target that compiles conditions as plain JS booleans.
+   * Used inside `compileLoopBody` so that `if (cond)` gets a real boolean,
+   * not an interval result object (which would always be truthy).
+   *
+   * Overrides comparison and logical operators to use plain JS, and
+   * numeric values/variables to use raw numbers (the loop counter is
+   * already a plain number).
+   */
+  private static scalarConditionTarget(
+    target: CompileTarget<Expression>
+  ): CompileTarget<Expression> {
+    const SCALAR_OPS: Record<string, [string, number]> = {
+      Less: ['<', 20],
+      Greater: ['>', 20],
+      LessEqual: ['<=', 20],
+      GreaterEqual: ['>=', 20],
+      Equal: ['===', 20],
+      NotEqual: ['!==', 20],
+      And: ['&&', 6],
+      Or: ['||', 5],
+      Not: ['!', 16],
+    };
+
+    // If the target doesn't wrap numbers, no override needed
+    if (target.number(0) === '0') return target;
+
+    return {
+      ...target,
+      number: (n: number) => String(n),
+      var: (id: string) => {
+        // Resolve through original target, then strip interval wrapping
+        // e.g. '_IA.point(i)' → 'i', plain 'x' stays 'x'
+        const resolved = target.var(id);
+        if (!resolved) return undefined as any;
+        const match = resolved.match(/^_IA\.point\((.+)\)$/);
+        return match ? match[1] : resolved;
+      },
+      operators: (op: string) => SCALAR_OPS[op] ?? target.operators?.(op),
+      functions: (id: string) => {
+        // Comparison functions should not be used — operators handle them
+        if (id in SCALAR_OPS) return undefined;
+        return target.functions?.(id);
+      },
+    };
   }
 
   /**

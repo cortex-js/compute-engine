@@ -381,6 +381,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     if (BaseCompiler.isComplexValued(arg)) return `_SYS.csech(${compile(arg)})`;
     return `1 / Math.cosh(${compile(arg)})`;
   },
+  Heaviside: '_SYS.heaviside',
   Sign: 'Math.sign',
   Sinc: '_SYS.sinc',
   FresnelS: '_SYS.fresnelS',
@@ -932,6 +933,7 @@ const SYS_HELPERS = {
   factorial2,
   gamma,
   gcd,
+  heaviside: (x: number) => (x < 0 ? 0 : x === 0 ? 0.5 : 1),
   integrate: (f, a, b) => monteCarloEstimate(f, a, b, 10e6).estimate,
   lcm,
   lngamma: gammaln,

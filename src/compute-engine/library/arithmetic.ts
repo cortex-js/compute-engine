@@ -1261,6 +1261,21 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         ),
     },
 
+    /** Heaviside step function: H(x) = 0 for x < 0, 1/2 for x = 0, 1 for x > 0 */
+    Heaviside: {
+      complexity: 1200,
+      broadcastable: true,
+      signature: '(number) -> real',
+      type: () => 'finite_real',
+      sgn: () => 'non-negative',
+      evaluate: ([x], { engine }) => {
+        if (x.is(0)) return engine.Half;
+        if (x.isPositive) return engine.One;
+        if (x.isNegative) return engine.Zero;
+        return undefined;
+      },
+    },
+
     Sign: {
       complexity: 1200,
       broadcastable: true,

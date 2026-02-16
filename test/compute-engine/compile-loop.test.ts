@@ -121,3 +121,73 @@ describe('COMPILE Break / Continue', () => {
     expect(result.code).toContain('continue');
   });
 });
+
+describe('COMPILE Loop (interval-js)', () => {
+  test('simple accumulation loop', () => {
+    const expr = ce.box([
+      'Block',
+      ['Declare', 's'],
+      ['Assign', 's', 0],
+      ['Loop',
+        ['Assign', 's', ['Add', 's', 'i']],
+        ['Element', 'i', ['Range', 1, 5]],
+      ],
+      's',
+    ]);
+    const result = compile(expr, { to: 'interval-js' })!;
+    expect(result.success).toBe(true);
+    // Loop counter should be raw numbers, not _IA.point()
+    expect(result.code).toContain('for (let i = 1; i <= 5; i++)');
+    // Body should wrap index as interval
+    expect(result.code).toContain('_IA.point(i)');
+    // sum 1..5 = 15
+    const out = result.run!() as any;
+    const val = out.kind === 'interval' ? out.value : out;
+    expect(val.lo).toBe(15);
+    expect(val.hi).toBe(15);
+  });
+
+  test('loop with break', () => {
+    const expr = ce.box([
+      'Block',
+      ['Declare', 's'],
+      ['Assign', 's', 0],
+      ['Loop',
+        ['Block',
+          ['If', ['Greater', 'i', 3], ['Break'], 'Nothing'],
+          ['Assign', 's', ['Add', 's', 'i']],
+        ],
+        ['Element', 'i', ['Range', 1, 100]],
+      ],
+      's',
+    ]);
+    const result = compile(expr, { to: 'interval-js' })!;
+    expect(result.success).toBe(true);
+    // sum 1..3 = 6
+    const out = result.run!() as any;
+    const val = out.kind === 'interval' ? out.value : out;
+    expect(val.lo).toBe(6);
+    expect(val.hi).toBe(6);
+  });
+
+  test('loop with trig in body', () => {
+    // sum of sin(i) for i = 1..3
+    const expr = ce.box([
+      'Block',
+      ['Declare', 's'],
+      ['Assign', 's', 0],
+      ['Loop',
+        ['Assign', 's', ['Add', 's', ['Sin', 'i']]],
+        ['Element', 'i', ['Range', 1, 3]],
+      ],
+      's',
+    ]);
+    const result = compile(expr, { to: 'interval-js' })!;
+    expect(result.success).toBe(true);
+    const expected = Math.sin(1) + Math.sin(2) + Math.sin(3);
+    const out = result.run!() as any;
+    const val = out.kind === 'interval' ? out.value : out;
+    expect(val.lo).toBeCloseTo(expected, 10);
+    expect(val.hi).toBeCloseTo(expected, 10);
+  });
+});

@@ -1582,6 +1582,11 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     serialize: serializeBigOp('\\sum'),
   },
   {
+    name: 'Heaviside',
+    symbolTrigger: 'Heaviside',
+    kind: 'function',
+  },
+  {
     name: 'Sign',
     // As per ISO 80000-2, "signum" is 'sgn'
     symbolTrigger: 'sgn',

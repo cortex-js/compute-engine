@@ -154,6 +154,7 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     return `_IA.powInterval(${compile(arg)}, _IA.div(_IA.point(1), ${compile(exp)}))`;
   },
   Round: (args, compile) => `_IA.round(${compile(args[0])})`,
+  Heaviside: (args, compile) => `_IA.heaviside(${compile(args[0])})`,
   Sign: (args, compile) => `_IA.sign(${compile(args[0])})`,
   Sqrt: (args, compile) => `_IA.sqrt(${compile(args[0])})`,
   Square: (args, compile) => `_IA.square(${compile(args[0])})`,

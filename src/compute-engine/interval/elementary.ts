@@ -506,6 +506,23 @@ export function remainder(
 }
 
 /**
+ * Heaviside step function on an interval.
+ *
+ * H(x) = 0 for x < 0, 1/2 for x = 0, 1 for x > 0.
+ * Has a jump discontinuity at 0.
+ */
+export function heaviside(x: Interval | IntervalResult): IntervalResult {
+  const unwrapped = unwrapOrPropagate(x);
+  if (!Array.isArray(unwrapped)) return unwrapped;
+  const [xVal] = unwrapped;
+  if (xVal.lo > 0) return ok({ lo: 1, hi: 1 });
+  if (xVal.hi < 0) return ok({ lo: 0, hi: 0 });
+  if (xVal.lo === 0 && xVal.hi === 0) return ok({ lo: 0.5, hi: 0.5 });
+  // Interval spans zero — discontinuity
+  return { kind: 'singular', at: 0 };
+}
+
+/**
  * Sign function.
  *
  * Returns -1, 0, or 1 depending on the sign.
