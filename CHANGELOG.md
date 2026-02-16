@@ -1,3 +1,14 @@
+### [Unreleased]
+
+### Bug Fixes
+
+- **Interval `piecewise` with constant branches**: Fixed `piecewise()` returning
+  raw `Interval` objects instead of `IntervalResult` when branches evaluated to
+  constants (e.g. `_IA.point(1)`). This caused `If` expressions like
+  `\text{if}\; x \geq 0 \;\text{then}\; 1 \;\text{else}\; 0` to return
+  `undefined` kind on definite conditions and `'entire'` on indeterminate
+  conditions when compiled to `interval-js`.
+
 ## 0.51.1 _2026-02-15_
 
 ### Features
@@ -26,9 +37,9 @@
   Cephes rational Chebyshev approximation, LaTeX parsing via
   `\operatorname{FresnelS}` / `\operatorname{FresnelC}`, JavaScript and
   interval-arithmetic compilation targets.
-- **`Heaviside` step function**: `H(x) = 0` for `x < 0`, `1/2` for `x = 0`,
-  `1` for `x > 0`. LaTeX parsing via `\operatorname{Heaviside}`, JavaScript
-  and interval-arithmetic compilation with singularity detection at zero.
+- **`Heaviside` step function**: `H(x) = 0` for `x < 0`, `1/2` for `x = 0`, `1`
+  for `x > 0`. LaTeX parsing via `\operatorname{Heaviside}`, JavaScript and
+  interval-arithmetic compilation with singularity detection at zero.
 
 ### LaTeX Syntax
 
@@ -66,8 +77,8 @@
 - **`Loop` compilation for interval-js target**: Loop counter now uses raw
   numbers (not `_IA.point()`) for the `for` statement, with loop index
   references properly wrapped in the body. Conditions in `if`/`break`/
-  `continue` statements inside loops use scalar comparisons instead of
-  interval comparison functions.
+  `continue` statements inside loops use scalar comparisons instead of interval
+  comparison functions.
 
 ### Other Changes
 

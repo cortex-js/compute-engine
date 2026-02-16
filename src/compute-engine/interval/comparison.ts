@@ -7,6 +7,12 @@
 import type { Interval, IntervalResult, BoolInterval } from './types';
 import { unionResults, unwrapOrPropagate } from './util';
 
+/** Normalize a value that may be a plain Interval or an IntervalResult. */
+function toResult(x: Interval | IntervalResult): IntervalResult {
+  if ('kind' in x) return x;
+  return { kind: 'interval', value: x };
+}
+
 /**
  * Less than comparison for intervals.
  *
@@ -148,28 +154,36 @@ export function not(a: BoolInterval): BoolInterval {
  */
 export function piecewise(
   xOrCond: Interval | IntervalResult | BoolInterval,
-  conditionOrTrue: ((x: Interval) => BoolInterval) | (() => IntervalResult),
-  trueOrFalse: ((x: Interval) => IntervalResult) | (() => IntervalResult),
-  falseBranch?: (x: Interval) => IntervalResult
+  conditionOrTrue:
+    | ((x: Interval) => BoolInterval)
+    | (() => Interval | IntervalResult),
+  trueOrFalse:
+    | ((x: Interval) => Interval | IntervalResult)
+    | (() => Interval | IntervalResult),
+  falseBranch?: (x: Interval) => Interval | IntervalResult
 ): IntervalResult {
   if (xOrCond === 'true' || xOrCond === 'false' || xOrCond === 'maybe') {
     const cond = xOrCond;
-    const trueBranch = conditionOrTrue as () => IntervalResult;
-    const falseBranchFn = trueOrFalse as () => IntervalResult;
+    const trueBranch = conditionOrTrue as () => Interval | IntervalResult;
+    const falseBranchFn = trueOrFalse as () => Interval | IntervalResult;
     switch (cond) {
       case 'true':
-        return trueBranch();
+        return toResult(trueBranch());
       case 'false':
-        return falseBranchFn();
+        return toResult(falseBranchFn());
       case 'maybe':
-        return unionResults(trueBranch(), falseBranchFn());
+        return unionResults(toResult(trueBranch()), toResult(falseBranchFn()));
     }
   }
 
   const x = xOrCond as Interval | IntervalResult;
   const condition = conditionOrTrue as (x: Interval) => BoolInterval;
-  const trueBranch = trueOrFalse as (x: Interval) => IntervalResult;
-  const falseBranchFn = falseBranch as (x: Interval) => IntervalResult;
+  const trueBranch = trueOrFalse as (
+    x: Interval
+  ) => Interval | IntervalResult;
+  const falseBranchFn = falseBranch as (
+    x: Interval
+  ) => Interval | IntervalResult;
 
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
@@ -178,14 +192,14 @@ export function piecewise(
 
   switch (cond) {
     case 'true':
-      return trueBranch(xVal);
+      return toResult(trueBranch(xVal));
     case 'false':
-      return falseBranchFn(xVal);
+      return toResult(falseBranchFn(xVal));
     case 'maybe':
       // Condition is indeterminate - must evaluate both branches
       // and return their union
-      const t = trueBranch(xVal);
-      const f = falseBranchFn(xVal);
+      const t = toResult(trueBranch(xVal));
+      const f = toResult(falseBranchFn(xVal));
       return unionResults(t, f);
   }
 }

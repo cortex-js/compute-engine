@@ -324,6 +324,46 @@ describe('INTERVAL JS EXECUTION', () => {
     expect(result.value.hi).toBeCloseTo(2, 6);
   });
 
+  test('piecewise with constant branches (Heaviside)', () => {
+    const expr = ce.box(['If', ['GreaterEqual', 'x', 0], 1, 0]);
+    const fn = compile(expr, { to: 'interval-js' });
+
+    // x definitely >= 0 → 1
+    const r1 = fn.run!({ x: { lo: 2, hi: 3 } });
+    expect(r1.kind).toBe('interval');
+    expect(r1.value.lo).toBeCloseTo(1, 10);
+    expect(r1.value.hi).toBeCloseTo(1, 10);
+
+    // x definitely < 0 → 0
+    const r2 = fn.run!({ x: { lo: -3, hi: -1 } });
+    expect(r2.kind).toBe('interval');
+    expect(r2.value.lo).toBeCloseTo(0, 10);
+    expect(r2.value.hi).toBeCloseTo(0, 10);
+
+    // x spans 0 → union [0, 1]
+    const r3 = fn.run!({ x: { lo: -1, hi: 1 } });
+    expect(r3.kind).toBe('interval');
+    expect(r3.value.lo).toBeCloseTo(0, 10);
+    expect(r3.value.hi).toBeCloseTo(1, 10);
+
+    // x exactly 0 → 1 (>= includes 0)
+    const r4 = fn.run!({ x: { lo: 0, hi: 0 } });
+    expect(r4.kind).toBe('interval');
+    expect(r4.value.lo).toBeCloseTo(1, 10);
+    expect(r4.value.hi).toBeCloseTo(1, 10);
+  });
+
+  test('piecewise from text{if} LaTeX', () => {
+    const expr = ce.parse('\\text{if} x \\geq 0 \\text{then} 1 \\text{else} 0');
+    expect(expr.operator).toBe('If');
+    const fn = compile(expr, { to: 'interval-js' });
+    expect(fn.success).toBe(true);
+
+    const result = fn.run!({ x: { lo: 2, hi: 3 } });
+    expect(result.kind).toBe('interval');
+    expect(result.value.lo).toBeCloseTo(1, 10);
+  });
+
   test('multiplication widens interval', () => {
     const expr = ce.parse('x \\cdot y');
     const fn = compile(expr, { to: 'interval-js' });
