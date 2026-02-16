@@ -953,6 +953,101 @@ fn ia_asech(x: IntervalResult) -> IntervalResult {
   return ia_asech_v(x.value);
 }
 
+// Gamma function using Lanczos approximation (g=7, n=9 coefficients)
+// Poles at non-positive integers; minimum at x ≈ 1.4616
+fn _gpu_gamma(z_in: f32) -> f32 {
+  let PI = 3.14159265358979;
+  var z = z_in;
+  if (z < 0.5) {
+    return PI / (sin(PI * z) * _gpu_gamma(1.0 - z));
+  }
+  z -= 1.0;
+  var x = 0.99999999999980993;
+  x += 676.5203681218851 / (z + 1.0);
+  x += -1259.1392167224028 / (z + 2.0);
+  x += 771.32342877765313 / (z + 3.0);
+  x += -176.61502916214059 / (z + 4.0);
+  x += 12.507343278686905 / (z + 5.0);
+  x += -0.13857109526572012 / (z + 6.0);
+  x += 9.9843695780195716e-6 / (z + 7.0);
+  x += 1.5056327351493116e-7 / (z + 8.0);
+  let t = z + 7.5;
+  return sqrt(2.0 * PI) * pow(t, z + 0.5) * exp(-t) * x;
+}
+
+// Interval gamma function
+// Handles poles at non-positive integers and the minimum at x ≈ 1.4616
+fn ia_gamma_v(x: vec2f) -> IntervalResult {
+  let GAMMA_MIN_X = 1.4616321;
+  let GAMMA_MIN_Y = 0.8856032;
+
+  // Check for poles: interval crosses or touches zero
+  if (x.x <= 0.0 && x.y >= 0.0) {
+    return ia_singular(0.0);
+  }
+
+  // Entirely negative: check if interval spans a negative integer
+  if (x.x < 0.0) {
+    let ceilLo = ceil(x.x);
+    let floorHi = floor(x.y);
+    if (ceilLo <= floorHi) {
+      return ia_singular(ceilLo);
+    }
+    // No pole — both endpoints between same consecutive negative integers
+    let gLo = _gpu_gamma(x.x);
+    let gHi = _gpu_gamma(x.y);
+    return ia_ok(vec2f(min(gLo, gHi) - IA_EPS, max(gLo, gHi) + IA_EPS));
+  }
+
+  // Entirely positive
+  if (x.x >= GAMMA_MIN_X) {
+    // Monotonically increasing
+    return ia_ok(vec2f(_gpu_gamma(x.x) - IA_EPS, _gpu_gamma(x.y) + IA_EPS));
+  }
+  if (x.y <= GAMMA_MIN_X) {
+    // Monotonically decreasing
+    return ia_ok(vec2f(_gpu_gamma(x.y) - IA_EPS, _gpu_gamma(x.x) + IA_EPS));
+  }
+  // Crosses the minimum
+  let gMax = max(_gpu_gamma(x.x), _gpu_gamma(x.y));
+  return ia_ok(vec2f(GAMMA_MIN_Y - IA_EPS, gMax + IA_EPS));
+}
+
+fn ia_gamma(x: IntervalResult) -> IntervalResult {
+  if (ia_is_error(x.status)) { return x; }
+  return ia_gamma_v(x.value);
+}
+
+// Log-gamma using Stirling asymptotic expansion, z > 0
+fn _gpu_gammaln(z: f32) -> f32 {
+  let z3 = z * z * z;
+  return z * log(z) - z - 0.5 * log(z)
+    + 0.5 * log(2.0 * 3.14159265358979)
+    + 1.0 / (12.0 * z)
+    - 1.0 / (360.0 * z3)
+    + 1.0 / (1260.0 * z3 * z * z);
+}
+
+// Interval log-gamma — monotonically increasing for x > 0
+fn ia_gammaln_v(x: vec2f) -> IntervalResult {
+  if (x.y <= 0.0) { return ia_empty(); }
+  if (x.x > 0.0) {
+    return ia_ok(vec2f(_gpu_gammaln(x.x) - IA_EPS, _gpu_gammaln(x.y) + IA_EPS));
+  }
+  // Partial: clipped at lo
+  return ia_partial(vec2f(0.0, _gpu_gammaln(x.y) + IA_EPS), IA_PARTIAL_LO);
+}
+
+fn ia_gammaln(x: IntervalResult) -> IntervalResult {
+  if (ia_is_error(x.status)) { return x; }
+  return ia_gammaln_v(x.value);
+}
+
+// Factorial via gamma: n! = gamma(n+1)
+fn ia_factorial(x: IntervalResult) -> IntervalResult {
+  return ia_gamma(ia_add(x, ia_point(1.0)));
+}
+
 // Boolean interval comparisons
 // Returns 1.0 = true, 0.0 = false, 0.5 = maybe
 const IA_TRUE: f32 = 1.0;
@@ -1102,6 +1197,11 @@ const INTERVAL_WGSL_FUNCTIONS: CompiledFunctions<Expression> = {
     return result;
   },
   Negate: (args, compile) => `ia_negate(${compile(args[0])})`,
+
+  // Special functions
+  Gamma: (args, compile) => `ia_gamma(${compile(args[0])})`,
+  GammaLn: (args, compile) => `ia_gammaln(${compile(args[0])})`,
+  Factorial: (args, compile) => `ia_factorial(${compile(args[0])})`,
 
   // Elementary functions
   Abs: (args, compile) => `ia_abs(${compile(args[0])})`,

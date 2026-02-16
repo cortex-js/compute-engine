@@ -1075,6 +1075,16 @@ IntervalResult ia_gammaln(IntervalResult x) {
   return ia_gammaln(x.value);
 }
 
+// Factorial via gamma: n! = gamma(n+1)
+IntervalResult ia_factorial(vec2 x) {
+  return ia_gamma(ia_add(ia_ok(x), ia_point(1.0)));
+}
+
+IntervalResult ia_factorial(IntervalResult x) {
+  if (ia_is_error(x.status)) return x;
+  return ia_factorial(x.value);
+}
+
 // Boolean interval comparisons
 // Returns 1.0 = true, 0.0 = false, 0.5 = maybe
 const float IA_TRUE = 1.0;
@@ -1224,6 +1234,7 @@ const INTERVAL_GLSL_FUNCTIONS: CompiledFunctions<Expression> = {
   // Special functions
   Gamma: (args, compile) => `ia_gamma(${compile(args[0])})`,
   GammaLn: (args, compile) => `ia_gammaln(${compile(args[0])})`,
+  Factorial: (args, compile) => `ia_factorial(${compile(args[0])})`,
 
   // Elementary functions
   Abs: (args, compile) => `ia_abs(${compile(args[0])})`,

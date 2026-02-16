@@ -63,7 +63,6 @@ import {
   variance,
 } from '../numerics/statistics';
 import { monteCarloEstimate } from '../numerics/monte-carlo';
-import { normalizeIndexingSet } from '../library/utils';
 
 import { BaseCompiler } from './base-compiler';
 import type {
@@ -1383,13 +1382,23 @@ function compileSumProduct(
  * Compile integration function
  */
 function compileIntegrate(args, _, target: CompileTarget<Expression>): string {
-  const { index, lower, upper } = normalizeIndexingSet(args[1]);
+  const { index, lowerExpr, upperExpr, lowerNum, upperNum } =
+    extractLimits(args[1]);
   const f = BaseCompiler.compile(args[0], {
     ...target,
     var: (id) => (id === index ? id : target.var(id)),
   });
 
-  return `_SYS.integrate((${index}) => (${f}), ${lower}, ${upper})`;
+  const lo =
+    lowerNum !== undefined
+      ? String(lowerNum)
+      : BaseCompiler.compile(lowerExpr, target);
+  const hi =
+    upperNum !== undefined
+      ? String(upperNum)
+      : BaseCompiler.compile(upperExpr, target);
+
+  return `_SYS.integrate((${index}) => (${f}), ${lo}, ${hi})`;
 }
 
 /**

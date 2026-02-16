@@ -1,10 +1,10 @@
-# Compute Engine Integration
+**NOTE** The following document has been authored by the maintainers of a
+scientific plotting library that integrates the Compute Engine for LaTeX
+expression compilation. It provides context on how CE is used within the
+plotting system and the section "Requests for CE Maintainers" outlines specific
+features and fixes needed from CE to support the plotting use case.
 
-**NOTE** This document has been authored by the maintainers of a scientific
-plotting library that integrates the Compute Engine for LaTeX expression
-compilation. It provides context on how CE is used within the plotting system
-and the section "Requests for CE Maintainers" outlines specific features and
-fixes needed from CE to support the plotting use case.
+# Compute Engine Integration
 
 How the Compute Engine (CE) is used for compiling LaTeX expressions into
 executable functions for the plotting system.
@@ -600,6 +600,31 @@ converted after adding LaTeX string support to `VectorFunction2DInput`:
 - `VectorFunction2DInput` in `types.ts` — now accepts `string` alongside
   `(x, y) => [number, number]` and `{ kind: "js", fn }`
 
+### 8. Recursive `_gpu_gamma` in `interval-glsl` preamble
+
+**Problem:** The CE's `interval-glsl` compilation target emits a monolithic
+~29KB preamble containing the full interval arithmetic library. This preamble
+includes a `_gpu_gamma(float z)` function that uses the reflection formula
+`Gamma(z) = pi / (sin(pi*z) * Gamma(1-z))` — a recursive call. GLSL forbids
+recursion, so any shader that includes this preamble fails to compile. The
+preamble is always emitted in full regardless of whether the expression actually
+uses the gamma function, so even simple expressions like `x^2 + y^2 - 1` are
+affected.
+
+**Discovery:** GPU interval arithmetic for implicit curves produced no visual
+output. Manual shader compilation in the browser console revealed the GLSL
+compiler error pointing to the recursive `_gpu_gamma` call.
+
+**Workaround:** `sanitizeIntervalPreamble()` in `shader-templates.ts` detects
+the recursive `_gpu_gamma` function via regex and replaces it with a
+non-recursive Lanczos approximation (`NON_RECURSIVE_GPU_GAMMA`) that handles
+both the `z >= 0.5` and `z < 0.5` branches inline without recursion.
+
+**Upstream fix:** The `interval-glsl` preamble should use non-recursive function
+implementations. Either replace the recursive gamma with a Lanczos/Stirling
+approximation, or emit the preamble selectively (only include functions that the
+compiled expression actually references).
+
 ## Conversion Patterns
 
 50 of 51 functions in `grid_paper.html` were converted from JS to LaTeX/CE. The
@@ -847,23 +872,29 @@ plotting integration. Ordered by impact.
 
 ### Medium Priority
 
-5. **Warn on `success: false` fallback**: When compilation fails but `run` is
+5. **Fix recursive `_gpu_gamma` in `interval-glsl` preamble (gap #8)**: The
+   preamble uses `Gamma(z) = pi / (sin(pi*z) * Gamma(1-z))` — a recursive call
+   that GLSL forbids. Replace with a non-recursive Lanczos/Stirling
+   approximation. Ideally, also emit the preamble selectively (only include
+   functions the expression actually uses) to reduce shader size.
+
+6. **Warn on `success: false` fallback**: When compilation fails but `run` is
    still set (interpreter fallback), emit a console warning. The current silent
    behavior makes it very hard to detect compilation failures.
 
-6. **Add `SphericalHarmonic(l, m, theta, phi)` and
+7. **Add `SphericalHarmonic(l, m, theta, phi)` and
    `AssociatedLegendreP(n, m, x)`**: Would allow general spherical harmonics
    without manual expansion for each (l, m) pair.
 
-7. **Support `\prod` in interval-js**: Currently only `\sum` compiles to
+8. **Support `\prod` in interval-js**: Currently only `\sum` compiles to
    interval-js. Product accumulation with `_IA.mul` would be analogous.
 
 ### Low Priority (Nice to Have)
 
-8. **GLSL compilation for Bessel, Airy, Zeta, LambertW**: These are JS-only
+9. **GLSL compilation for Bessel, Airy, Zeta, LambertW**: These are JS-only
    today. GLSL preamble-based implementations would enable GPU-accelerated
    rendering of plots using these functions.
 
-9. **Subscripted variable names in blocks**: Allow `r_1 \coloneq expr` to define
-   a variable named `r_1` rather than parsing as `Subscript(r, 1)`. This is
-   common in mathematical notation for intermediate values.
+10. **Subscripted variable names in blocks**: Allow `r_1 \coloneq expr` to
+    define a variable named `r_1` rather than parsing as `Subscript(r, 1)`. This
+    is common in mathematical notation for intermediate values.

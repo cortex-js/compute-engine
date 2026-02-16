@@ -178,6 +178,37 @@ describe('COMPILE Sum - symbolic bounds', () => {
     expect(val.lo).toBeCloseTo(120, 10);
     expect(val.hi).toBeCloseTo(120, 10);
   });
+
+  // Symbolic LOWER bound tests
+  test('JS: sum_{k=m}^{10} k with m=3 => 3+4+...+10 = 52', () => {
+    const expr = ce.parse('\\sum_{k=m}^{10} k');
+    const result = compile(expr);
+    expect(result.success).toBe(true);
+    expect(result.run!({ m: 3 })).toBe(52);
+  });
+
+  test('JS: sum_{k=m}^{n} k with m=1 n=4 => 10', () => {
+    const expr = ce.parse('\\sum_{k=m}^{n} k');
+    const result = compile(expr);
+    expect(result.success).toBe(true);
+    expect(result.run!({ m: 1, n: 4 })).toBe(10);
+  });
+
+  test('interval-js: sum_{k=m}^{10} k with m=3 => 52', () => {
+    const expr = ce.parse('\\sum_{k=m}^{10} k');
+    const result = compile(expr, { to: 'interval-js' });
+    expect(result.success).toBe(true);
+    const val = unwrapInterval(result.run!({ m: 3 }));
+    expect(val.lo).toBeCloseTo(52, 10);
+    expect(val.hi).toBeCloseTo(52, 10);
+  });
+
+  test('JS: prod_{k=m}^{5} k with m=3 => 3*4*5 = 60', () => {
+    const expr = ce.parse('\\prod_{k=m}^{5} k');
+    const result = compile(expr);
+    expect(result.success).toBe(true);
+    expect(result.run!({ m: 3 })).toBe(60);
+  });
 });
 
 describe('COMPILE Product - interval-js', () => {
@@ -206,5 +237,24 @@ describe('COMPILE Product - interval-js', () => {
     const val = unwrapInterval(result.run!());
     expect(val.lo).toBe(1);
     expect(val.hi).toBe(1);
+  });
+});
+
+describe('COMPILE Integrate - symbolic bounds', () => {
+  test('JS: int_0^a x dx with a=2 => 2', () => {
+    const expr = ce.parse('\\int_0^a x \\, dx');
+    const result = compile(expr);
+    expect(result.success).toBe(true);
+    // int_0^2 x dx = x^2/2 |_0^2 = 2
+    const val = result.run!({ a: 2 });
+    expect(val).toBeCloseTo(2, 1);
+  });
+
+  test('JS: int_a^b x dx with a=0 b=1 => 0.5', () => {
+    const expr = ce.parse('\\int_a^b x \\, dx');
+    const result = compile(expr);
+    expect(result.success).toBe(true);
+    const val = result.run!({ a: 0, b: 1 });
+    expect(val).toBeCloseTo(0.5, 1);
   });
 });

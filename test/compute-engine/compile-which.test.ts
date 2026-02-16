@@ -109,16 +109,16 @@ describe('COMPILE Which', () => {
       expect(result.code).toContain('_IA.piecewise');
 
       // Test execution with point intervals
-      // piecewise returns either {lo, hi} (plain interval) or {kind, value}
+      // piecewise returns IntervalResult: {kind: 'interval', value: {lo, hi}}
       const positiveResult = result.run!({ x: 5 }) as any;
-      // When condition is definitely true, piecewise returns the true branch
-      // which is _IA.point(1) = {lo: 1, hi: 1}
-      expect(positiveResult.lo).toBe(1);
-      expect(positiveResult.hi).toBe(1);
+      const posVal = positiveResult.kind === 'interval' ? positiveResult.value : positiveResult;
+      expect(posVal.lo).toBe(1);
+      expect(posVal.hi).toBe(1);
 
       const negativeResult = result.run!({ x: -3 }) as any;
-      expect(negativeResult.lo).toBe(-1);
-      expect(negativeResult.hi).toBe(-1);
+      const negVal = negativeResult.kind === 'interval' ? negativeResult.value : negativeResult;
+      expect(negVal.lo).toBe(-1);
+      expect(negVal.hi).toBe(-1);
     });
 
     it('should compile multi-branch Which to nested piecewise', () => {

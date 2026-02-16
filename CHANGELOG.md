@@ -17,6 +17,11 @@
   preambles using four-corner `exp(exp * ln(base))` evaluation with special cases
   for point-integer exponents and `(-1)^n`.
 
+- **`Factorial`, `Gamma`, `GammaLn` for GLSL/WGSL interval targets**: Added
+  `ia_factorial` (via `ia_gamma(x+1)`) to both GPU targets. Added `ia_gamma`
+  (Lanczos approximation) and `ia_gammaln` (Stirling asymptotic) to the WGSL
+  target, matching existing GLSL implementations.
+
 ### Bug Fixes
 
 - **Sum/Product with symbolic bounds compiled incorrectly**: Expressions like
@@ -56,12 +61,15 @@
   variables are excluded. This also fixes `Block` expressions where locally
   assigned variables (via `Assign` or `Declare`) were reported as unknowns.
 
-- **Interval `piecewise` with constant branches**: Fixed `piecewise()` returning
-  raw `Interval` objects instead of `IntervalResult` when branches evaluated to
-  constants (e.g. `_IA.point(1)`). This caused `If` expressions like
-  `\text{if}\; x \geq 0 \;\text{then}\; 1 \;\text{else}\; 0` to return
-  `undefined` kind on definite conditions and `'entire'` on indeterminate
-  conditions when compiled to `interval-js`.
+- **`Integrate` with symbolic bounds compiled incorrectly**: Same issue as
+  Sum/Product — `compileIntegrate()` used `normalizeIndexingSet()` which
+  converted symbolic bounds to `NaN`. Now uses `extractLimits()` and compiles
+  bounds as expressions.
+
+- **Interval `piecewise` test fix**: Fixed test that incorrectly accessed
+  `result.lo` directly instead of unwrapping the `IntervalResult` envelope
+  (`result.value.lo`). The `piecewise()` function correctly returns
+  `IntervalResult` objects.
 
 ## 0.51.1 _2026-02-15_
 
