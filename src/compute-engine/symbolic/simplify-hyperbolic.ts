@@ -86,7 +86,7 @@ export function simplifyHyperbolic(x: Expression): RuleStep | undefined {
     }
 
     // Odd/even function properties with negation
-    if (arg.operator === 'Negate' && isFunction(arg)) {
+    if (isFunction(arg, 'Negate')) {
       const innerArg = arg.op1;
       if (innerArg) {
         // Odd functions: f(-x) = -f(x)

@@ -52,7 +52,7 @@ function evaluateNumericSubexpressions(expr: Expression): Expression {
   // - e^n (for potential combination with e^x)
   // - n^{p/q} where result is irrational (e.g., 2^{3/5})
   if (expr.operator === 'Power') {
-    if (isSymbol(expr.op1) && expr.op1.symbol === 'ExponentialE') {
+    if (isSymbol(expr.op1, 'ExponentialE')) {
       return expr;
     }
     // Skip n^{p/q} with non-integer exponent - these produce irrational results
@@ -263,18 +263,13 @@ function simplifyOperands(
       if (x.operator === 'Abs') {
         return simplify(x, options).at(-1)!.value;
       }
-      if (
-        x.operator === 'Negate' &&
-        isFunction(x) &&
-        x.op1?.operator === 'Abs'
-      ) {
+      if (isFunction(x, 'Negate') && x.op1?.operator === 'Abs') {
         return simplify(x, options).at(-1)!.value;
       }
       // Power expressions with fractional exponents may need sign factoring
       // e.g., (-2x)^{3/5} should become -(2x)^{3/5} for correct real evaluation
       if (
-        x.operator === 'Power' &&
-        isFunction(x) &&
+        isFunction(x, 'Power') &&
         x.op2?.isRational === true &&
         !x.op2.isInteger
       ) {
@@ -311,7 +306,7 @@ function simplifyOperands(
       if (BASIC_ARITHMETIC.includes(x.operator)) {
         // Don't evaluate Power expressions that produce irrational results
         if (x.operator === 'Power') {
-          if (isSymbol(x.op1) && x.op1.symbol === 'ExponentialE') return x;
+          if (isSymbol(x.op1, 'ExponentialE')) return x;
           if (x.op2?.isRational === true && x.op2?.isInteger === false)
             return x;
         }
@@ -456,12 +451,7 @@ function simplifyNonCommutativeFunction(
       ) {
         // Check if original had Power-of-Add that was expanded away
         const hasPowerOfAdd = (e: Expression): boolean => {
-          if (
-            e.operator === 'Power' &&
-            isFunction(e) &&
-            e.op1?.operator === 'Add'
-          )
-            return true;
+          if (isFunction(e, 'Power') && e.op1?.operator === 'Add') return true;
           if (isFunction(e)) return e.ops.some(hasPowerOfAdd);
           return false;
         };

@@ -44,12 +44,12 @@ function listToIntervalInSetContext(
   expr: Expression
 ): Expression {
   // Transform List with 2 elements to closed Interval
-  if (expr.operator === 'List' && isFunction(expr) && expr.nops === 2) {
+  if (isFunction(expr, 'List') && expr.nops === 2) {
     return ce.function('Interval', [expr.op1.canonical, expr.op2.canonical]);
   }
 
   // Transform Tuple with 2 elements to open Interval
-  if (expr.operator === 'Tuple' && isFunction(expr) && expr.nops === 2) {
+  if (isFunction(expr, 'Tuple') && expr.nops === 2) {
     return ce.function('Interval', [
       ce.function('Open', [expr.op1.canonical]),
       ce.function('Open', [expr.op2.canonical]),
@@ -425,7 +425,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       isEmpty: () => false,
       isFinite: () => false,
       subsetOf: (_, rhs, strict) => {
-        if (rhs.operator === 'Range' && isFunction(rhs)) {
+        if (isFunction(rhs, 'Range')) {
           const low = rhs.ops[0].re;
           const high = rhs.ops[1].re;
           return low < 0 && high < 0;
@@ -454,7 +454,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       isEmpty: () => false,
       isFinite: () => false,
       subsetOf: (_, rhs, strict) => {
-        if (rhs.operator === 'Range' && isFunction(rhs)) {
+        if (isFunction(rhs, 'Range')) {
           const low = rhs.ops[0].re;
           const high = rhs.ops[1].re;
           return low <= 0 && high <= 0;
@@ -482,7 +482,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       isEmpty: () => false,
       isFinite: () => false,
       subsetOf: (_, rhs, strict) => {
-        if (rhs.operator === 'Range' && isFunction(rhs)) {
+        if (isFunction(rhs, 'Range')) {
           const low = rhs.ops[0].re;
           const high = rhs.ops[1].re;
           return low > 0 && high > 0;
@@ -510,7 +510,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       isEmpty: () => false,
       isFinite: () => false,
       subsetOf: (_, rhs, strict) => {
-        if (rhs.operator === 'Range' && isFunction(rhs)) {
+        if (isFunction(rhs, 'Range')) {
           const low = rhs.ops[0].re;
           const high = rhs.ops[1].re;
           return low > 0 && high > 0;

@@ -210,9 +210,7 @@ export type ExpressionRunner<R = number | ComplexResult> = (
  * result.run(0.5, 1.0)
  * ```
  */
-export type LambdaRunner<R = number | ComplexResult> = (
-  ...args: number[]
-) => R;
+export type LambdaRunner<R = number | ComplexResult> = (...args: number[]) => R;
 
 /**
  * Overloaded callable that accepts both calling conventions.

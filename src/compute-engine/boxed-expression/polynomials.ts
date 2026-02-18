@@ -242,11 +242,11 @@ export function getPolynomialCoefficients(
     }
 
     // For terms containing the variable, extract the coefficient
-    if (isSymbol(term) && term.symbol === variable) {
+    if (isSymbol(term, variable)) {
       return addCoefficient(ce.One, 1);
     }
 
-    if (isFunction(term) && term.operator === 'Negate') {
+    if (isFunction(term, 'Negate')) {
       const innerDeg = polynomialDegree(term.op1, variable);
       if (innerDeg === 0) {
         return addCoefficient(term, 0);
@@ -262,9 +262,9 @@ export function getPolynomialCoefficients(
       return true;
     }
 
-    if (isFunction(term) && term.operator === 'Power') {
+    if (isFunction(term, 'Power')) {
       // x^n case
-      if (isSymbol(term.op1) && term.op1.symbol === variable) {
+      if (isSymbol(term.op1, variable)) {
         const exp = asSmallInteger(term.op2);
         if (exp !== null && exp >= 0) {
           return addCoefficient(ce.One, exp);
@@ -277,7 +277,7 @@ export function getPolynomialCoefficients(
       return false;
     }
 
-    if (isFunction(term) && term.operator === 'Multiply') {
+    if (isFunction(term, 'Multiply')) {
       // Separate coefficient from variable part
       const factors = term.ops;
       let coef: Expression = ce.One;
@@ -286,13 +286,11 @@ export function getPolynomialCoefficients(
       for (const factor of factors) {
         if (!factor.has(variable)) {
           coef = coef.mul(factor);
-        } else if (isSymbol(factor) && factor.symbol === variable) {
+        } else if (isSymbol(factor, variable)) {
           varDeg += 1;
         } else if (
-          isFunction(factor) &&
-          factor.operator === 'Power' &&
-          isSymbol(factor.op1) &&
-          factor.op1.symbol === variable
+          isFunction(factor, 'Power') &&
+          isSymbol(factor.op1, variable)
         ) {
           const exp = asSmallInteger(factor.op2);
           if (exp !== null && exp >= 0) {
@@ -312,7 +310,7 @@ export function getPolynomialCoefficients(
   };
 
   // Process the expanded expression
-  if (isFunction(expanded) && expanded.operator === 'Add') {
+  if (isFunction(expanded, 'Add')) {
     for (const term of expanded.ops) {
       if (!processTerm(term)) return null;
     }
@@ -550,7 +548,7 @@ export function cancelCommonFactors(
   expr: Expression,
   variable: string
 ): Expression {
-  if (!isFunction(expr) || expr.operator !== 'Divide') return expr;
+  if (!isFunction(expr, 'Divide')) return expr;
 
   const numerator = expr.op1;
   const denominator = expr.op2;

@@ -27,7 +27,7 @@ export function flatten<T extends ReadonlyArray<Expression> | Expression[]>(
 
   if (operator) {
     const shouldFlatten = (x: Expression) =>
-      (isSymbol(x) && x.symbol === 'Nothing') ||
+      isSymbol(x, 'Nothing') ||
       x.operator === operator ||
       x.operator === 'Sequence';
 
@@ -38,7 +38,7 @@ export function flatten<T extends ReadonlyArray<Expression> | Expression[]>(
     const ys: Expression[] = [];
     for (const x of xs) {
       // Skip Nothing
-      if (isSymbol(x) && x.symbol === 'Nothing') continue;
+      if (isSymbol(x, 'Nothing')) continue;
 
       // If the operator matches, flatten the expression
       if (
@@ -51,22 +51,17 @@ export function flatten<T extends ReadonlyArray<Expression> | Expression[]>(
     return ys as T;
   }
 
-  if (
-    xs.every(
-      (x) =>
-        !((isSymbol(x) && x.symbol === 'Nothing') || x.operator === 'Sequence')
-    )
-  )
+  if (xs.every((x) => !(isSymbol(x, 'Nothing') || x.operator === 'Sequence')))
     return xs as T;
 
   // Iterate over the list of expressions and flatten them
   const ys: Expression[] = [];
   for (const x of xs) {
     // Skip Nothing
-    if (isSymbol(x) && x.symbol === 'Nothing') continue;
+    if (isSymbol(x, 'Nothing')) continue;
 
     // If the operator matches, flatten the expression
-    if (isFunction(x) && x.operator === 'Sequence')
+    if (isFunction(x, 'Sequence'))
       ys.push(...flatten(x.ops, operator, canonicalize));
     else ys.push(x);
   }
@@ -83,14 +78,14 @@ export function flattenSequence(
   const ys: Expression[] = [];
   for (const x of xs) {
     if (!x.isValid) ys.push(x);
-    else if (isFunction(x) && x.operator === 'Delimiter') {
+    else if (isFunction(x, 'Delimiter')) {
       if (x.op1.operator === 'Sequence') {
         const seq = isFunction(x.op1) ? x.op1.ops : [];
         // If this is an empty delimiter, i.e. `()`, preserve it as a tuple, don't flatten it.
         if (seq.length === 0) ys.push(x.engine.box(['Tuple']));
         else ys.push(...flattenSequence(seq));
       } else ys.push(x.op1);
-    } else if (isFunction(x) && x.operator === 'Sequence') {
+    } else if (isFunction(x, 'Sequence')) {
       ys.push(...x.ops);
     } else ys.push(x);
   }

@@ -230,8 +230,7 @@ export function canonicalLimits(
     // ["Limits", "10"] --> ???
     const op = ops[0];
     if (isSymbol(op)) return ce._fn('Limits', [op, ce.Nothing, ce.Nothing]);
-    if (op.operator === 'Hold' && isFunction(op))
-      return canonicalLimits(op.ops, { engine: ce });
+    if (isFunction(op, 'Hold')) return canonicalLimits(op.ops, { engine: ce });
 
     // We didn't find a symbol, so we can't create a Limits expression
     return ce._fn('Limits', [ce.typeError('symbol', undefined, op)]);
@@ -243,7 +242,7 @@ export function canonicalLimits(
       // ["Limits", "n", 10]
       // ["Limits", ["Hold", "n"], 10]]
       // ["Limits", 0, 10]
-      if (ops[0].operator === 'Hold' && isFunction(ops[0])) {
+      if (isFunction(ops[0], 'Hold')) {
         index = ops[0].op1;
         upper = ops[1].canonical;
       } else if (isSymbol(ops[0])) {
@@ -259,7 +258,7 @@ export function canonicalLimits(
       lower = ops[1]?.canonical ?? ce.Nothing;
       upper = ops[2]?.canonical ?? ce.Nothing;
     }
-    if (index.operator === 'Hold' && isFunction(index)) index = index.op1;
+    if (isFunction(index, 'Hold')) index = index.op1;
 
     if (!isSymbol(index)) index = ce.typeError('symbol', index.type, index);
 
@@ -288,7 +287,7 @@ export function canonicalIndexingSet(expr: Expression): Expression | undefined {
   // Handle Element expressions - preserve them in canonical form
   // e.g., ["Element", "n", ["Set", 1, 2, 3]]
   // or with condition: ["Element", "n", ["Set", 1, 2, 3], ["Greater", "n", 0]]
-  if (expr.operator === 'Element' && isFunction(expr)) {
+  if (isFunction(expr, 'Element')) {
     const indexExpr = expr.op1;
     const collection = expr.op2;
     const condition = expr.op3; // Optional condition (EL-3)
@@ -307,7 +306,7 @@ export function canonicalIndexingSet(expr: Expression): Expression | undefined {
   // If this is already a canonical Limits expression, return it (after
   // canonicalizing its operands) so re-canonicalization paths (like `subs`)
   // preserve the bounds.
-  if (expr.operator === 'Limits' && isFunction(expr)) {
+  if (isFunction(expr, 'Limits')) {
     const canonicalIndex = expr.op1.canonical;
     const canonicalLower = expr.op2?.canonical ?? ce.Nothing;
     const canonicalUpper = expr.op3?.canonical ?? ce.Nothing;
@@ -334,7 +333,7 @@ export function canonicalIndexingSet(expr: Expression): Expression | undefined {
     upper = expr.ops[2]?.canonical ?? null;
   } else index = expr;
 
-  if (index.operator === 'Hold' && isFunction(index)) index = index.op1;
+  if (isFunction(index, 'Hold')) index = index.op1;
 
   if (!isSymbol(index)) return undefined;
 

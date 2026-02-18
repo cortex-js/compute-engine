@@ -8,7 +8,7 @@ import { addOrder, order } from './order';
 export function canonicalNegate(expr: Expression): Expression {
   // Negate(Negate(x)) -> x
   let sign = -1;
-  while (isFunction(expr) && expr.operator === 'Negate') {
+  while (isFunction(expr, 'Negate')) {
     expr = expr.op1;
     sign = -sign;
   }
@@ -29,7 +29,7 @@ export function canonicalNegate(expr: Expression): Expression {
 export function negate(expr: Expression): Expression {
   // Negate(Negate(x)) -> x
   let sign = -1;
-  while (isFunction(expr) && expr.operator === 'Negate') {
+  while (isFunction(expr, 'Negate')) {
     expr = expr.op1;
     sign = -sign;
   }
@@ -85,7 +85,7 @@ export function negateProduct(
   let done = false;
   // If there is `Negate` as one of the args, remove it
   for (const arg of args) {
-    if (!done && isFunction(arg) && arg.operator === 'Negate') {
+    if (!done && isFunction(arg, 'Negate')) {
       done = true;
       if (!arg.op1.is(1)) result.push(arg.op1);
     } else result.push(arg);

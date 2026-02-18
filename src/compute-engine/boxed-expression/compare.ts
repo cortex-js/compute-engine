@@ -503,11 +503,3 @@ function isZeroWithTolerance(expr: Expression): boolean {
   if (typeof n === 'number') return ce.chop(n) === 0;
   return n.isZeroWithTolerance(ce.tolerance);
 }
-
-function sameUnknowns(a: Expression, b: Expression): boolean {
-  const ua = a.unknowns;
-  const ub = b.unknowns;
-  if (ua.length !== ub.length) return false;
-  for (const u of ua) if (!ub.includes(u)) return false;
-  return true;
-}

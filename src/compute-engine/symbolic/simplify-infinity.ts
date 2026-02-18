@@ -167,11 +167,11 @@ export function simplifyInfinity(x: Expression): RuleStep | undefined {
     const arg = x.op1;
     if (arg) {
       // exp(+inf) -> +inf
-      if (isSymbol(arg) && arg.symbol === 'PositiveInfinity') {
+      if (isSymbol(arg, 'PositiveInfinity')) {
         return { value: ce.PositiveInfinity, because: 'exp(+inf) -> +inf' };
       }
       // exp(-inf) -> 0
-      if (isSymbol(arg) && arg.symbol === 'NegativeInfinity') {
+      if (isSymbol(arg, 'NegativeInfinity')) {
         return { value: ce.Zero, because: 'exp(-inf) -> 0' };
       }
     }
@@ -192,11 +192,11 @@ export function simplifyInfinity(x: Expression): RuleStep | undefined {
       const expIsNegInf = expIsInf && exp.isNegative === true;
 
       // e^(+inf) -> +inf (handle exponential base explicitly)
-      if (isSymbol(base) && base.symbol === 'ExponentialE' && expIsPosInf) {
+      if (isSymbol(base, 'ExponentialE') && expIsPosInf) {
         return { value: ce.PositiveInfinity, because: 'e^(+inf) -> +inf' };
       }
       // e^(-inf) -> 0
-      if (isSymbol(base) && base.symbol === 'ExponentialE' && expIsNegInf) {
+      if (isSymbol(base, 'ExponentialE') && expIsNegInf) {
         return { value: ce.Zero, because: 'e^(-inf) -> 0' };
       }
 

@@ -149,7 +149,7 @@ export function extractFiniteDomainWithReason(
   }
 
   // Handle Range: ["Range", start, end] or ["Range", start, end, step]
-  if (domain.operator === 'Range' && isFunction(domain)) {
+  if (isFunction(domain, 'Range')) {
     const start = asSmallInteger(domain.op1);
     const end = asSmallInteger(domain.op2);
     // op3 may be Nothing (a symbol) when not specified, so check ops length
@@ -186,24 +186,24 @@ export function extractFiniteDomainWithReason(
   // EL-6: Support Open/Closed boundary wrappers
   // e.g., ["Interval", ["Open", 0], 5] → iterates 1, 2, 3, 4, 5
   // e.g., ["Interval", 1, ["Open", 6]] → iterates 1, 2, 3, 4, 5
-  if (domain.operator === 'Interval' && isFunction(domain)) {
+  if (isFunction(domain, 'Interval')) {
     let op1: Expression | undefined = domain.op1;
     let op2: Expression | undefined = domain.op2;
     let openStart = false;
     let openEnd = false;
 
     // Unwrap Open/Closed boundary markers
-    if (op1?.operator === 'Open' && isFunction(op1)) {
+    if (isFunction(op1, 'Open')) {
       openStart = true;
       op1 = op1.op1;
-    } else if (op1?.operator === 'Closed' && isFunction(op1)) {
+    } else if (isFunction(op1, 'Closed')) {
       op1 = op1.op1;
     }
 
-    if (op2?.operator === 'Open' && isFunction(op2)) {
+    if (isFunction(op2, 'Open')) {
       openEnd = true;
       op2 = op2.op1;
-    } else if (op2?.operator === 'Closed' && isFunction(op2)) {
+    } else if (isFunction(op2, 'Closed')) {
       op2 = op2.op1;
     }
 

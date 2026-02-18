@@ -25,7 +25,7 @@ export function ask(
   const result: BoxedSubstitution[] = [];
 
   const patternHasWildcards = (expr: Expression): boolean => {
-    if (expr.operator?.startsWith('_')) return true;
+    if (expr.operator.startsWith('_')) return true;
     if (isWildcard(expr)) return true;
     if (isFunction(expr)) return expr.ops.some(patternHasWildcards);
     return false;
@@ -101,7 +101,7 @@ export function ask(
   };
 
   // B1: Element(x, _T) can be answered from the declared/inferred type of x
-  if (pat.operator === 'Element' && isFunction(pat)) {
+  if (isFunction(pat, 'Element')) {
     const patOp1 = pat.op1;
     const patOp2 = pat.op2;
     if (isSymbol(patOp1) && isWildcard(patOp2)) {

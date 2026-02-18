@@ -14,7 +14,17 @@ export function _setCompile(fn: CompileFn) {
   _compile = fn;
 }
 
-const WELL_KNOWN_POINTS = [0, -1, 1, Math.PI, Math.E, -Math.PI, -Math.E, 0.5, -0.5];
+const WELL_KNOWN_POINTS = [
+  0,
+  -1,
+  1,
+  Math.PI,
+  Math.E,
+  -Math.PI,
+  -Math.E,
+  0.5,
+  -0.5,
+];
 const NUM_RANDOM = 41;
 const RANDOM_RANGE = 1000;
 
@@ -42,24 +52,31 @@ export function stochasticEqual(
 
   try {
     const compiledA = _compile(a);
-    if (compiledA.run)
-      evalA = (vars) => toComplex(compiledA.run!(vars));
-  } catch { /* fall back to subs */ }
+    if (compiledA.run) evalA = (vars) => toComplex(compiledA.run!(vars));
+  } catch {
+    /* fall back to subs */
+  }
 
   try {
     const compiledB = _compile(b);
-    if (compiledB.run)
-      evalB = (vars) => toComplex(compiledB.run!(vars));
-  } catch { /* fall back to subs */ }
+    if (compiledB.run) evalB = (vars) => toComplex(compiledB.run!(vars));
+  } catch {
+    /* fall back to subs */
+  }
 
   // Fallback evaluator using subs + N (returns both re and im)
-  const subsEval = (expr: Expression, vars: Record<string, number>): ComplexValue => {
+  const subsEval = (
+    expr: Expression,
+    vars: Record<string, number>
+  ): ComplexValue => {
     const result = expr.subs(vars).N();
     return { re: result.re, im: result.im };
   };
 
-  const doEvalA = evalA ?? ((vars: Record<string, number>) => subsEval(a, vars));
-  const doEvalB = evalB ?? ((vars: Record<string, number>) => subsEval(b, vars));
+  const doEvalA =
+    evalA ?? ((vars: Record<string, number>) => subsEval(a, vars));
+  const doEvalB =
+    evalB ?? ((vars: Record<string, number>) => subsEval(b, vars));
 
   let informativeCount = 0;
 
@@ -74,8 +91,13 @@ export function stochasticEqual(
     }
 
     // If either value has a NaN component, skip — likely a singularity/pole
-    if (Number.isNaN(va.re) || Number.isNaN(va.im) ||
-        Number.isNaN(vb.re) || Number.isNaN(vb.im)) return undefined;
+    if (
+      Number.isNaN(va.re) ||
+      Number.isNaN(va.im) ||
+      Number.isNaN(vb.re) ||
+      Number.isNaN(vb.im)
+    )
+      return undefined;
 
     // Check real parts
     const reResult = compareComponent(va.re, vb.re, tolerance);

@@ -65,7 +65,7 @@ export function simplifyLog(x: Expression): RuleStep | undefined {
     }
 
     // ln(x^n) -> n*ln(x) when x >= 0 or n is odd or n is irrational
-    if (arg.operator === 'Power' && isFunction(arg)) {
+    if (isFunction(arg, 'Power')) {
       const base = arg.op1;
       const exp = arg.op2;
       if (base && exp) {
@@ -91,23 +91,15 @@ export function simplifyLog(x: Expression): RuleStep | undefined {
     }
 
     // ln(e^x) -> x
-    if (
-      arg.operator === 'Power' &&
-      isFunction(arg) &&
-      sym(arg.op1) === 'ExponentialE'
-    ) {
+    if (isFunction(arg, 'Power') && sym(arg.op1) === 'ExponentialE') {
       return { value: arg.op2, because: 'ln(e^x) -> x' };
     }
 
     // ln(e^x * y) -> x + ln(y)
-    if (arg.operator === 'Multiply' && isFunction(arg)) {
+    if (isFunction(arg, 'Multiply')) {
       for (let i = 0; i < arg.ops.length; i++) {
         const factor = arg.ops[i];
-        if (
-          factor.operator === 'Power' &&
-          isFunction(factor) &&
-          sym(factor.op1) === 'ExponentialE'
-        ) {
+        if (isFunction(factor, 'Power') && sym(factor.op1) === 'ExponentialE') {
           const exp = factor.op2;
           const otherFactors = arg.ops.filter((_, idx) => idx !== i);
           const remaining =
@@ -123,7 +115,7 @@ export function simplifyLog(x: Expression): RuleStep | undefined {
     }
 
     // ln(e^x / y) -> x - ln(y)
-    if (arg.operator === 'Divide' && isFunction(arg)) {
+    if (isFunction(arg, 'Divide')) {
       if (
         arg.op1?.operator === 'Power' &&
         isFunction(arg.op1) &&
@@ -138,7 +130,7 @@ export function simplifyLog(x: Expression): RuleStep | undefined {
 
     // ln(x/y) -> ln(x) - ln(y) (quotient rule expansion)
     // Only apply when both x and y are positive (to avoid branch cut issues)
-    if (arg.operator === 'Divide' && isFunction(arg)) {
+    if (isFunction(arg, 'Divide')) {
       const num = arg.op1;
       const denom = arg.op2;
       if (num.isPositive === true && denom.isPositive === true) {
@@ -150,7 +142,7 @@ export function simplifyLog(x: Expression): RuleStep | undefined {
     }
 
     // ln(y / e^x) -> ln(y) - x
-    if (arg.operator === 'Divide' && isFunction(arg)) {
+    if (isFunction(arg, 'Divide')) {
       if (
         arg.op2?.operator === 'Power' &&
         isFunction(arg.op2) &&
@@ -252,19 +244,14 @@ export function simplifyLog(x: Expression): RuleStep | undefined {
     }
 
     // log_c(c^x) -> x
-    if (
-      arg.operator === 'Power' &&
-      isFunction(arg) &&
-      arg.op1?.isSame(logBase)
-    ) {
+    if (isFunction(arg, 'Power') && arg.op1?.isSame(logBase)) {
       return { value: arg.op2, because: 'log_c(c^x) -> x' };
     }
 
     // log_c(e^x) -> x / ln(c) when c ≠ e
     // This handles log_10(e^x) -> x/ln(10)
     if (
-      arg.operator === 'Power' &&
-      isFunction(arg) &&
+      isFunction(arg, 'Power') &&
       sym(arg.op1) === 'ExponentialE' &&
       !sym(logBase)?.match(/ExponentialE/)
     ) {
@@ -276,8 +263,7 @@ export function simplifyLog(x: Expression): RuleStep | undefined {
 
     // log_c(Exp(x)) -> x / ln(c) when c ≠ e
     if (
-      arg.operator === 'Exp' &&
-      isFunction(arg) &&
+      isFunction(arg, 'Exp') &&
       arg.op1 &&
       !sym(logBase)?.match(/ExponentialE/)
     ) {
@@ -288,7 +274,7 @@ export function simplifyLog(x: Expression): RuleStep | undefined {
     }
 
     // log_c(x^n) -> n*log_c(x) when x >= 0 or n is odd or n is irrational
-    if (arg.operator === 'Power' && isFunction(arg)) {
+    if (isFunction(arg, 'Power')) {
       const powerBase = arg.op1;
       const exp = arg.op2;
       if (powerBase && exp) {
@@ -338,14 +324,10 @@ export function simplifyLog(x: Expression): RuleStep | undefined {
     }
 
     // log_c(c^x * y) -> x + log_c(y)
-    if (arg.operator === 'Multiply' && isFunction(arg)) {
+    if (isFunction(arg, 'Multiply')) {
       for (let i = 0; i < arg.ops.length; i++) {
         const factor = arg.ops[i];
-        if (
-          factor.operator === 'Power' &&
-          isFunction(factor) &&
-          factor.op1?.isSame(logBase)
-        ) {
+        if (isFunction(factor, 'Power') && factor.op1?.isSame(logBase)) {
           const exp = factor.op2;
           const otherFactors = arg.ops.filter((_, idx) => idx !== i);
           const remaining =
@@ -361,7 +343,7 @@ export function simplifyLog(x: Expression): RuleStep | undefined {
     }
 
     // log_c(c^x / y) -> x - log_c(y)
-    if (arg.operator === 'Divide' && isFunction(arg)) {
+    if (isFunction(arg, 'Divide')) {
       if (
         arg.op1?.operator === 'Power' &&
         isFunction(arg.op1) &&
@@ -375,7 +357,7 @@ export function simplifyLog(x: Expression): RuleStep | undefined {
     }
 
     // log_c(y / c^x) -> log_c(y) - x
-    if (arg.operator === 'Divide' && isFunction(arg)) {
+    if (isFunction(arg, 'Divide')) {
       if (
         arg.op2?.operator === 'Power' &&
         isFunction(arg.op2) &&
@@ -390,7 +372,7 @@ export function simplifyLog(x: Expression): RuleStep | undefined {
 
     // log_c(x/y) -> log_c(x) - log_c(y) (quotient rule expansion)
     // Only apply when both x and y are positive (to avoid branch cut issues)
-    if (arg.operator === 'Divide' && isFunction(arg)) {
+    if (isFunction(arg, 'Divide')) {
       const num = arg.op1;
       const denom = arg.op2;
       if (num.isPositive === true && denom.isPositive === true) {
@@ -410,11 +392,7 @@ export function simplifyLog(x: Expression): RuleStep | undefined {
     }
 
     // Change of base: log_{1/c}(a) -> -log_c(a)
-    if (
-      logBase.operator === 'Divide' &&
-      isFunction(logBase) &&
-      logBase.op1?.is(1)
-    ) {
+    if (isFunction(logBase, 'Divide') && logBase.op1?.is(1)) {
       return {
         value: ce._fn('Log', [arg, logBase.op2]).neg(),
         because: 'log_{1/c}(a) -> -log_c(a)',
@@ -484,7 +462,7 @@ export function simplifyLog(x: Expression): RuleStep | undefined {
     ) {
       for (let i = 0; i < exp.ops.length; i++) {
         const term = exp.ops[i];
-        if (term.operator === 'Ln' && isFunction(term)) {
+        if (isFunction(term, 'Ln')) {
           const otherTerms = exp.ops.filter((_, idx) => idx !== i);
           const remaining =
             otherTerms.length === 0
@@ -502,7 +480,7 @@ export function simplifyLog(x: Expression): RuleStep | undefined {
       // e^(log_c(x) + y) -> x^{1/ln(c)} * e^y
       for (let i = 0; i < exp.ops.length; i++) {
         const term = exp.ops[i];
-        if (term.operator !== 'Log' || !isFunction(term) || !term.op1) continue;
+        if (!isFunction(term, 'Log') || !term.op1) continue;
 
         const otherTerms = exp.ops.filter((_, idx) => idx !== i);
         const remaining =
@@ -537,7 +515,7 @@ export function simplifyLog(x: Expression): RuleStep | undefined {
     ) {
       for (let i = 0; i < exp.ops.length; i++) {
         const factor = exp.ops[i];
-        if (factor.operator === 'Ln' && isFunction(factor)) {
+        if (isFunction(factor, 'Ln')) {
           const otherFactors = exp.ops.filter((_, idx) => idx !== i);
           const y =
             otherFactors.length === 1
@@ -566,19 +544,15 @@ export function simplifyLog(x: Expression): RuleStep | undefined {
     }
 
     // c^log_c(x) -> x
-    if (exp.operator === 'Log' && isFunction(exp) && exp.op2?.isSame(base)) {
+    if (isFunction(exp, 'Log') && exp.op2?.isSame(base)) {
       return { value: exp.op1, because: 'c^log_c(x) -> x' };
     }
 
     // c^(log_c(x) + y) -> x * c^y
-    if (exp.operator === 'Add' && isFunction(exp)) {
+    if (isFunction(exp, 'Add')) {
       for (let i = 0; i < exp.ops.length; i++) {
         const term = exp.ops[i];
-        if (
-          term.operator === 'Log' &&
-          isFunction(term) &&
-          term.op2?.isSame(base)
-        ) {
+        if (isFunction(term, 'Log') && term.op2?.isSame(base)) {
           const otherTerms = exp.ops.filter((_, idx) => idx !== i);
           const remaining =
             otherTerms.length === 0
@@ -595,14 +569,10 @@ export function simplifyLog(x: Expression): RuleStep | undefined {
     }
 
     // c^(log_c(x) * y) -> x^y
-    if (exp.operator === 'Multiply' && isFunction(exp)) {
+    if (isFunction(exp, 'Multiply')) {
       for (let i = 0; i < exp.ops.length; i++) {
         const factor = exp.ops[i];
-        if (
-          factor.operator === 'Log' &&
-          isFunction(factor) &&
-          factor.op2?.isSame(base)
-        ) {
+        if (isFunction(factor, 'Log') && factor.op2?.isSame(base)) {
           const otherFactors = exp.ops.filter((_, idx) => idx !== i);
           const y =
             otherFactors.length === 1
@@ -618,8 +588,7 @@ export function simplifyLog(x: Expression): RuleStep | undefined {
 
     // c^(log_c(x) / y) -> x^(1/y)
     if (
-      exp.operator === 'Divide' &&
-      isFunction(exp) &&
+      isFunction(exp, 'Divide') &&
       exp.op1?.operator === 'Log' &&
       isFunction(exp.op1) &&
       exp.op1.op2?.isSame(base)
@@ -655,21 +624,16 @@ export function simplifyLog(x: Expression): RuleStep | undefined {
       const term = x.ops[i];
 
       // Direct Ln term
-      if (term.operator === 'Ln' && isFunction(term)) {
+      if (isFunction(term, 'Ln')) {
         lnTerms.push({ index: i, arg: term.op1, positive: true });
       }
       // Negated Ln or Log term: -ln(x) or -log_c(x) which comes from subtraction
-      else if (term.operator === 'Negate' && isFunction(term)) {
+      else if (isFunction(term, 'Negate')) {
         const innerTerm = term.op1;
-        if (
-          innerTerm.operator === 'Ln' &&
-          isFunction(innerTerm) &&
-          innerTerm.op1
-        ) {
+        if (isFunction(innerTerm, 'Ln') && innerTerm.op1) {
           lnTerms.push({ index: i, arg: innerTerm.op1, positive: false });
         } else if (
-          innerTerm.operator === 'Log' &&
-          isFunction(innerTerm) &&
+          isFunction(innerTerm, 'Log') &&
           innerTerm.op1 &&
           innerTerm.op2
         ) {
@@ -686,12 +650,7 @@ export function simplifyLog(x: Expression): RuleStep | undefined {
         }
       }
       // Direct Log term
-      else if (
-        term.operator === 'Log' &&
-        isFunction(term) &&
-        term.op1 &&
-        term.op2
-      ) {
+      else if (isFunction(term, 'Log') && term.op1 && term.op2) {
         const baseKey = JSON.stringify(term.op2.json);
         if (!logTerms.has(baseKey)) {
           logTerms.set(baseKey, []);
@@ -782,8 +741,7 @@ export function simplifyLog(x: Expression): RuleStep | undefined {
     if (num && denom) {
       // log_c(a) / log_c(b) -> ln(a) / ln(b)
       if (
-        num.operator === 'Log' &&
-        isFunction(num) &&
+        isFunction(num, 'Log') &&
         denom.operator === 'Log' &&
         isFunction(denom) &&
         num.op2?.isSame(denom.op2)
@@ -796,8 +754,7 @@ export function simplifyLog(x: Expression): RuleStep | undefined {
 
       // log_c(a) / ln(a) -> 1/ln(c)
       if (
-        num.operator === 'Log' &&
-        isFunction(num) &&
+        isFunction(num, 'Log') &&
         denom.operator === 'Ln' &&
         isFunction(denom) &&
         num.op1?.isSame(denom.op1)
@@ -810,8 +767,7 @@ export function simplifyLog(x: Expression): RuleStep | undefined {
 
       // ln(a) / log_c(a) -> ln(c)
       if (
-        num.operator === 'Ln' &&
-        isFunction(num) &&
+        isFunction(num, 'Ln') &&
         denom.operator === 'Log' &&
         isFunction(denom) &&
         num.op1?.isSame(denom.op1)
@@ -824,8 +780,7 @@ export function simplifyLog(x: Expression): RuleStep | undefined {
 
       // ln(a) / ln(b) -> k when a = b^k for positive integers a, b
       if (
-        num.operator === 'Ln' &&
-        isFunction(num) &&
+        isFunction(num, 'Ln') &&
         denom.operator === 'Ln' &&
         isFunction(denom)
       ) {

@@ -563,7 +563,7 @@ function parseRule(
       // Evaluate the condition as a predicate
       condFn = (sub: BoxedSubstitution): boolean => {
         const evaluated = condition.subs(sub).canonical.evaluate();
-        return isSymbol(evaluated) && evaluated.symbol === 'True';
+        return isSymbol(evaluated, 'True');
       };
     }
 
@@ -628,7 +628,7 @@ function boxRule(
       // then evaluate the condition
       condFn = (x: BoxedSubstitution, _ce: ComputeEngine): boolean => {
         const evaluated = condPattern.subs(x).evaluate();
-        return isSymbol(evaluated) && evaluated.symbol === 'True';
+        return isSymbol(evaluated, 'True');
       };
     }
   } else {

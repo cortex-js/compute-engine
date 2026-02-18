@@ -147,24 +147,22 @@ function antiderivativeSimple(
     return ce.box(['Multiply', fn, ce.symbol(index)]).simplify();
 
   // Basic trig
-  if (fn.operator === 'Sin' && isFunction(fn) && sym(fn.op1) === index)
+  if (isFunction(fn, 'Sin') && sym(fn.op1) === index)
     return ce.box(['Negate', ['Cos', index]]);
-  if (fn.operator === 'Cos' && isFunction(fn) && sym(fn.op1) === index)
+  if (isFunction(fn, 'Cos') && sym(fn.op1) === index)
     return ce.box(['Sin', index]);
 
   // Exponential
-  if (fn.operator === 'Exp' && isFunction(fn) && sym(fn.op1) === index)
-    return fn;
+  if (isFunction(fn, 'Exp') && sym(fn.op1) === index) return fn;
   if (
-    fn.operator === 'Power' &&
-    isFunction(fn) &&
+    isFunction(fn, 'Power') &&
     sym(fn.op1) === 'ExponentialE' &&
     sym(fn.op2) === index
   )
     return fn;
 
   // Power rule: x^n -> x^(n+1)/(n+1)
-  if (fn.operator === 'Power' && isFunction(fn) && sym(fn.op1) === index) {
+  if (isFunction(fn, 'Power') && sym(fn.op1) === index) {
     const exponent = fn.op2;
     if (!exponent.has(index) && !exponent.is(-1)) {
       return ce
@@ -193,7 +191,7 @@ function antiderivativeWithByParts(
   if (simple) return simple;
 
   // For products, try integration by parts
-  if (fn.operator === 'Multiply' && isFunction(fn)) {
+  if (isFunction(fn, 'Multiply')) {
     const variableFactors = fn.ops.filter((op) => op.has(index));
     if (variableFactors.length >= 2) {
       const result = tryIntegrationByParts(variableFactors, index, depth);
@@ -219,7 +217,7 @@ function antiderivativeWithByParts(
  * Returns the result if successful, or null if u-substitution doesn't apply.
  */
 function tryUSubstitution(fn: Expression, index: string): Expression | null {
-  if (fn.operator !== 'Multiply' || !isFunction(fn)) return null;
+  if (!isFunction(fn, 'Multiply')) return null;
 
   const ce = fn.engine;
   const factors = fn.ops;
@@ -349,7 +347,7 @@ function tryLinearSubstitution(
   // or just ax (when b = 0)
   let coefficient: Expression | null = null;
 
-  if (inner.operator === 'Multiply' && isFunction(inner)) {
+  if (isFunction(inner, 'Multiply')) {
     // Check if it's c*x form
     const factors = inner.ops;
     const varFactor = factors.find((f) => sym(f) === index);
@@ -362,7 +360,7 @@ function tryLinearSubstitution(
             : ce.box(['Multiply', ...constFactors]);
       }
     }
-  } else if (inner.operator === 'Add' && isFunction(inner)) {
+  } else if (isFunction(inner, 'Add')) {
     // Check for ax + b form
     const terms = inner.ops;
     let linearTerm: Expression | null = null;
@@ -373,7 +371,7 @@ function tryLinearSubstitution(
         constantTerms.push(term);
       } else if (sym(term) === index) {
         linearTerm = ce.One;
-      } else if (term.operator === 'Multiply' && isFunction(term)) {
+      } else if (isFunction(term, 'Multiply')) {
         const factors = term.ops;
         const varFactor = factors.find((f) => sym(f) === index);
         if (varFactor) {
@@ -456,11 +454,10 @@ function tryCyclicExpTrigIntegral(
 
   for (const f of factors) {
     // Check for e^x
-    if (f.operator === 'Exp' && isFunction(f) && sym(f.op1) === index) {
+    if (isFunction(f, 'Exp') && sym(f.op1) === index) {
       expFactor = f;
     } else if (
-      f.operator === 'Power' &&
-      isFunction(f) &&
+      isFunction(f, 'Power') &&
       sym(f.op1) === 'ExponentialE' &&
       sym(f.op2) === index
     ) {
@@ -472,7 +469,7 @@ function tryCyclicExpTrigIntegral(
     }
   }
 
-  if (!expFactor || !trigFactor || !isFunction(trigFactor)) return null;
+  if (!expFactor || !isFunction(trigFactor)) return null;
 
   const trigOp = trigFactor.operator as 'Sin' | 'Cos';
   const trigArg = trigFactor.op1;
@@ -503,7 +500,7 @@ function tryCyclicExpTrigIntegral(
   }
 
   // Case 2: sin(ax) where argument is just a*x (Multiply)
-  if (trigArg.operator === 'Multiply' && isFunction(trigArg)) {
+  if (isFunction(trigArg, 'Multiply')) {
     // Find the coefficient and the variable
     let coefficient: Expression | null = null;
     let hasIndex = false;
@@ -1448,7 +1445,7 @@ function getLinearCoefficients(
   }
 
   // Must be an Add expression
-  if (expr.operator !== 'Add' || !isFunction(expr)) return null;
+  if (!isFunction(expr, 'Add')) return null;
 
   const ops = expr.ops;
   let a: Expression | null = null;
@@ -1461,7 +1458,7 @@ function getLinearCoefficients(
     } else if (sym(op) === index) {
       // Just x (coefficient 1)
       a = a ? a.add(ce.One) : ce.One;
-    } else if (op.operator === 'Multiply' && isFunction(op)) {
+    } else if (isFunction(op, 'Multiply')) {
       // Check for c*x form
       const factors = op.ops;
       const varFactor = factors.find((f) => sym(f) === index);
@@ -1504,21 +1501,16 @@ function getQuadraticCoefficients(
   if (expr.operator !== 'Add') {
     // Check if it's just x² or c*x²
     if (
-      expr.operator === 'Power' &&
-      isFunction(expr) &&
+      isFunction(expr, 'Power') &&
       sym(expr.op1) === index &&
       expr.op2.is(2)
     ) {
       return { a: ce.One, b: ce.Zero, c: ce.Zero };
     }
-    if (expr.operator === 'Multiply' && isFunction(expr)) {
+    if (isFunction(expr, 'Multiply')) {
       const factors = expr.ops;
       const powerFactor = factors.find(
-        (f) =>
-          f.operator === 'Power' &&
-          isFunction(f) &&
-          sym(f.op1) === index &&
-          f.op2.is(2)
+        (f) => isFunction(f, 'Power') && sym(f.op1) === index && f.op2.is(2)
       );
       if (powerFactor) {
         const constFactors = factors.filter((f) => f !== powerFactor);
@@ -1550,22 +1542,17 @@ function getQuadraticCoefficients(
       // Just x (coefficient 1 for linear term)
       b = b.add(ce.One);
     } else if (
-      op.operator === 'Power' &&
-      isFunction(op) &&
+      isFunction(op, 'Power') &&
       sym(op.op1) === index &&
       op.op2.is(2)
     ) {
       // x² term
       a = a.add(ce.One);
-    } else if (op.operator === 'Multiply' && isFunction(op)) {
+    } else if (isFunction(op, 'Multiply')) {
       const factors = op.ops;
       // Check for c*x² form
       const powerFactor = factors.find(
-        (f) =>
-          f.operator === 'Power' &&
-          isFunction(f) &&
-          sym(f.op1) === index &&
-          f.op2.is(2)
+        (f) => isFunction(f, 'Power') && sym(f.op1) === index && f.op2.is(2)
       );
       if (powerFactor) {
         const constFactors = factors.filter((f) => f !== powerFactor);
@@ -1611,12 +1598,9 @@ function getQuadraticCoefficients(
 
 /** Calculate the antiderivative of fn, as an expression (not a function) */
 export function antiderivative(fn: Expression, index: string): Expression {
-  if (fn.operator === 'Function' && isFunction(fn))
-    return antiderivative(fn.op1, index);
-  if (fn.operator === 'Block' && isFunction(fn))
-    return antiderivative(fn.op1, index);
-  if (fn.operator === 'Delimiter' && isFunction(fn))
-    return antiderivative(fn.op1, index);
+  if (isFunction(fn, 'Function')) return antiderivative(fn.op1, index);
+  if (isFunction(fn, 'Block')) return antiderivative(fn.op1, index);
+  if (isFunction(fn, 'Delimiter')) return antiderivative(fn.op1, index);
 
   const ce = fn.engine;
 
@@ -1627,15 +1611,14 @@ export function antiderivative(fn: Expression, index: string): Expression {
   if (!fn.has(index)) return ce.box(['Multiply', fn, ce.symbol(index)]);
 
   // Apply the chain rule
-  if (fn.operator === 'Add' && isFunction(fn)) {
+  if (isFunction(fn, 'Add')) {
     const terms = fn.ops.map((op) => antiderivative(op, index));
     return add(...(terms as Expression[])).evaluate();
   }
 
-  if (fn.operator === 'Negate' && isFunction(fn))
-    return antiderivative(fn.op1, index).neg();
+  if (isFunction(fn, 'Negate')) return antiderivative(fn.op1, index).neg();
 
-  if (fn.operator === 'Multiply' && isFunction(fn)) {
+  if (isFunction(fn, 'Multiply')) {
     // Separate constant factors from variable factors
     const constantFactors: Expression[] = [];
     const variableFactors: Expression[] = [];
@@ -1694,7 +1677,7 @@ export function antiderivative(fn: Expression, index: string): Expression {
     // Fall through to rule-based matching
   }
 
-  if (fn.operator === 'Divide' && isFunction(fn)) {
+  if (isFunction(fn, 'Divide')) {
     // First try to cancel common factors in the numerator and denominator
     // This helps with cases like ∫ (x+1)/(x²+3x+2) dx where (x+1) cancels
     const cancelled = cancelCommonFactors(fn, index);
@@ -1746,11 +1729,7 @@ export function antiderivative(fn: Expression, index: string): Expression {
       const addOps = fn.op2.ops;
       // Check for x² + 1 form
       const powerTerm = addOps.find(
-        (op) =>
-          op.operator === 'Power' &&
-          isFunction(op) &&
-          sym(op.op1) === index &&
-          op.op2.is(2)
+        (op) => isFunction(op, 'Power') && sym(op.op1) === index && op.op2.is(2)
       );
       const oneTerm = addOps.find((op) => op.is(1));
       if (powerTerm && oneTerm) {
@@ -1773,21 +1752,14 @@ export function antiderivative(fn: Expression, index: string): Expression {
       const mulOps = fn.op2.ops;
       const xTerm = mulOps.find((op) => sym(op) === index);
       const sqrtTerm = mulOps.find((op) => op.operator === 'Sqrt');
-      if (xTerm && sqrtTerm && isFunction(sqrtTerm)) {
+      if (xTerm && isFunction(sqrtTerm)) {
         const sqrtInner = sqrtTerm.op1;
         // Check if sqrt inner is x² - 1: ['Add', ['Power', 'x', 2], -1]
-        if (
-          sqrtInner.operator === 'Add' &&
-          isFunction(sqrtInner) &&
-          sqrtInner.nops === 2
-        ) {
+        if (isFunction(sqrtInner, 'Add') && sqrtInner.nops === 2) {
           const innerOps = sqrtInner.ops;
           const powerTerm = innerOps.find(
             (op) =>
-              op.operator === 'Power' &&
-              isFunction(op) &&
-              sym(op.op1) === index &&
-              op.op2.is(2)
+              isFunction(op, 'Power') && sym(op.op1) === index && op.op2.is(2)
           );
           const negOneTerm = innerOps.find((op) => op.is(-1));
           if (powerTerm && negOneTerm) {
@@ -1878,7 +1850,7 @@ export function antiderivative(fn: Expression, index: string): Expression {
     // ∫ 1/(ax+b)^n dx = -1/(a(n-1)(ax+b)^(n-1))
     if (fn.op1.is(1) || !fn.op1.has(index)) {
       const denom = fn.op2;
-      if (denom.operator === 'Power' && isFunction(denom)) {
+      if (isFunction(denom, 'Power')) {
         const base = denom.op1;
         const exp = denom.op2;
         const n = exp.re;
@@ -1953,7 +1925,7 @@ export function antiderivative(fn: Expression, index: string): Expression {
     // Reduction formula: ∫ 1/(x²+a²)^n dx = x/(2a²(n-1)(x²+a²)^(n-1)) + (2n-3)/(2a²(n-1)) * ∫ 1/(x²+a²)^(n-1) dx
     if (fn.op1.is(1) || !fn.op1.has(index)) {
       const denom = fn.op2;
-      if (denom.operator === 'Power' && isFunction(denom)) {
+      if (isFunction(denom, 'Power')) {
         const base = denom.op1;
         const exp = denom.op2;
         const n = exp.re;
@@ -2010,11 +1982,7 @@ export function antiderivative(fn: Expression, index: string): Expression {
 
       // Case F: Check if denominator is already in factored form (Multiply of linear and quadratic)
       // Handle ∫ 1/((x-r)(x²+bx+c)) dx where quadratic is irreducible
-      if (
-        denominator.operator === 'Multiply' &&
-        isFunction(denominator) &&
-        denominator.nops === 2
-      ) {
+      if (isFunction(denominator, 'Multiply') && denominator.nops === 2) {
         const factors = denominator.ops;
         let linearFactor: Expression | null = null;
         let quadFactor: Expression | null = null;
@@ -2231,18 +2199,17 @@ export function antiderivative(fn: Expression, index: string): Expression {
 
   // Handle ∫ √(1/(1-x²)) dx = arcsin(x)
   // Canonical form: ['Sqrt', ['Divide', 1, ['Add', ['Negate', ['Power', 'x', 2]], 1]]]
-  if (fn.operator === 'Sqrt' && isFunction(fn)) {
+  if (isFunction(fn, 'Sqrt')) {
     const inner = fn.op1;
-    if (inner.operator === 'Divide' && isFunction(inner) && inner.op1.is(1)) {
+    if (isFunction(inner, 'Divide') && inner.op1.is(1)) {
       const denom = inner.op2;
       // Check for 1-x² form: ['Add', ['Negate', ['Power', 'x', 2]], 1]
-      if (denom.operator === 'Add' && isFunction(denom) && denom.nops === 2) {
+      if (isFunction(denom, 'Add') && denom.nops === 2) {
         const addOps = denom.ops;
         const oneTerm = addOps.find((op) => op.is(1));
         const negPowerTerm = addOps.find(
           (op) =>
-            op.operator === 'Negate' &&
-            isFunction(op) &&
+            isFunction(op, 'Negate') &&
             op.op1.operator === 'Power' &&
             isFunction(op.op1) &&
             sym(op.op1.op1) === index &&
@@ -2256,10 +2223,7 @@ export function antiderivative(fn: Expression, index: string): Expression {
         // ∫ 1/√(x²+1) dx = arcsinh(x)
         const powerTerm = addOps.find(
           (op) =>
-            op.operator === 'Power' &&
-            isFunction(op) &&
-            sym(op.op1) === index &&
-            op.op2.is(2)
+            isFunction(op, 'Power') && sym(op.op1) === index && op.op2.is(2)
         );
         if (oneTerm && powerTerm) {
           return ce.box(['Arsinh', index]);
@@ -2276,22 +2240,17 @@ export function antiderivative(fn: Expression, index: string): Expression {
 
     // Trigonometric substitution patterns for direct √(...) integrals
     // These handle ∫√(a² ± x²) dx and ∫√(x² - a²) dx
-    if (inner.operator === 'Add' && isFunction(inner) && inner.nops === 2) {
+    if (isFunction(inner, 'Add') && inner.nops === 2) {
       const addOps = inner.ops;
 
       // Find x² term
       const x2Term = addOps.find(
-        (op) =>
-          op.operator === 'Power' &&
-          isFunction(op) &&
-          sym(op.op1) === index &&
-          op.op2.is(2)
+        (op) => isFunction(op, 'Power') && sym(op.op1) === index && op.op2.is(2)
       );
       // Find -x² term (for a² - x² patterns)
       const negX2Term = addOps.find(
         (op) =>
-          op.operator === 'Negate' &&
-          isFunction(op) &&
+          isFunction(op, 'Negate') &&
           op.op1.operator === 'Power' &&
           isFunction(op.op1) &&
           sym(op.op1.op1) === index &&
@@ -2365,27 +2324,27 @@ export function antiderivative(fn: Expression, index: string): Expression {
   }
 
   // Handle basic functions: e^x, sin(x), cos(x), ln(x), x^n
-  if (fn.operator === 'Exp' && isFunction(fn) && sym(fn.op1) === index) {
+  if (isFunction(fn, 'Exp') && sym(fn.op1) === index) {
     // ∫e^x dx = e^x
     return fn;
   }
 
-  if (fn.operator === 'Sin' && isFunction(fn) && sym(fn.op1) === index) {
+  if (isFunction(fn, 'Sin') && sym(fn.op1) === index) {
     // ∫sin(x) dx = -cos(x)
     return ce.box(['Negate', ['Cos', index]]);
   }
 
-  if (fn.operator === 'Cos' && isFunction(fn) && sym(fn.op1) === index) {
+  if (isFunction(fn, 'Cos') && sym(fn.op1) === index) {
     // ∫cos(x) dx = sin(x)
     return ce.box(['Sin', index]);
   }
 
-  if (fn.operator === 'Ln' && isFunction(fn) && sym(fn.op1) === index) {
+  if (isFunction(fn, 'Ln') && sym(fn.op1) === index) {
     // ∫ln(x) dx = x*ln(x) - x
     return ce.box(['Subtract', ['Multiply', index, ['Ln', index]], index]);
   }
 
-  if (fn.operator === 'Power' && isFunction(fn)) {
+  if (isFunction(fn, 'Power')) {
     // ∫e^x dx = e^x (e^x is parsed as ['Power', 'ExponentialE', 'x'])
     if (sym(fn.op1) === 'ExponentialE' && sym(fn.op2) === index) {
       return fn;

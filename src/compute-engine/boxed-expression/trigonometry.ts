@@ -520,8 +520,7 @@ export function processInverseFunction(
 ): Expression | undefined {
   if (xs.length !== 1 || !xs[0].isValid) return undefined;
   const expr = xs[0];
-  if (expr.operator === 'InverseFunction' && isFunction(expr))
-    return expr.op1.canonical;
+  if (isFunction(expr, 'InverseFunction')) return expr.op1.canonical;
 
   if (!isSymbol(expr)) return undefined;
   const name = expr.symbol;
@@ -693,7 +692,7 @@ export function constructibleValues(
   for (const [[n, d], value] of specialValues) {
     const r = value[operator];
     if (r && Math.abs(theta - (Math.PI * n) / d) <= 1e-12) {
-      if (isSymbol(r) && r.symbol === 'ComplexInfinity') return r;
+      if (isSymbol(r, 'ComplexInfinity')) return r;
       return identitySign * sign < 0 ? r.neg() : r;
     }
   }

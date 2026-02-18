@@ -10,6 +10,7 @@ import {
   isFunction,
   isNumber,
   isSymbol,
+  numericValue,
   sym,
 } from '../boxed-expression/type-guards';
 import { expand } from '../boxed-expression/expand';
@@ -155,7 +156,7 @@ export const SIMPLIFY_RULES: Rule[] = [
   // Quick a/a -> 1 check for identical numerator/denominator
   // Must run before expand to avoid decomposing the fraction first
   (x): RuleStep | undefined => {
-    if (x.operator !== 'Divide' || !isFunction(x)) return undefined;
+    if (!isFunction(x, 'Divide')) return undefined;
     const num = x.op1;
     const denom = x.op2;
     if (!num || !denom) return undefined;
@@ -171,8 +172,7 @@ export const SIMPLIFY_RULES: Rule[] = [
     // Skip expand for products containing Factorial to prevent cycles
     // with factorial factoring: (n-1)! * (n-1) should NOT re-expand
     if (
-      x.operator === 'Multiply' &&
-      isFunction(x) &&
+      isFunction(x, 'Multiply') &&
       x.ops.some((op) => op.operator === 'Factorial')
     )
       return undefined;
@@ -180,12 +180,12 @@ export const SIMPLIFY_RULES: Rule[] = [
     // Skip expand for Multiply expressions with same-base powers
     // Let simplifyPower handle e^x * e^2 -> e^{x+2} instead of evaluating e^2
     // Also handle bare symbols (a = a^1) as having an implicit power
-    if (x.operator === 'Multiply' && isFunction(x)) {
+    if (isFunction(x, 'Multiply')) {
       const powerBases = new Map<string, number>();
       for (const op of x.ops) {
         // Get the base: for Power it's op1, for symbols it's the symbol itself
         let baseKey: string | null = null;
-        if (op.operator === 'Power' && isFunction(op)) {
+        if (isFunction(op, 'Power')) {
           baseKey = JSON.stringify(op.op1.json);
         } else if (isSymbol(op)) {
           baseKey = JSON.stringify(op.json);
@@ -211,7 +211,7 @@ export const SIMPLIFY_RULES: Rule[] = [
   // Add, Negate
   //
   (x): RuleStep | undefined => {
-    if (x.operator !== 'Add' || !isFunction(x)) return undefined;
+    if (!isFunction(x, 'Add')) return undefined;
     // The Add function has a 'lazy' property, so we need to ensure operands are canonical.
     // Also evaluate purely numeric operands (no unknowns) to simplify expressions like √(1+2) → √3.
     // IMPORTANT: Don't call .simplify() on operands to avoid infinite recursion.
@@ -233,7 +233,7 @@ export const SIMPLIFY_RULES: Rule[] = [
   },
 
   (x): RuleStep | undefined => {
-    if (x.operator !== 'Negate' || !isFunction(x)) return undefined;
+    if (!isFunction(x, 'Negate')) return undefined;
     return { value: x.op1.neg(), because: 'negation' };
   },
 
@@ -241,7 +241,7 @@ export const SIMPLIFY_RULES: Rule[] = [
   // Multiply
   //
   (x): RuleStep | undefined => {
-    if (x.operator !== 'Multiply' || !isFunction(x)) return undefined;
+    if (!isFunction(x, 'Multiply')) return undefined;
 
     // Check if there are same-base powers that should be combined by simplifyPower
     // e.g., e^x * e^2 should become e^{x+2}, not 7.389... * e^x
@@ -252,7 +252,7 @@ export const SIMPLIFY_RULES: Rule[] = [
       // Get the base: for Power it's op1, for symbols it's the symbol itself
       let baseKey: string | null = null;
       let baseOp: Expression | null = null;
-      if (op.operator === 'Power' && isFunction(op)) {
+      if (isFunction(op, 'Power')) {
         baseKey = JSON.stringify(op.op1.json);
         baseOp = op;
       } else if (isSymbol(op)) {
@@ -278,12 +278,10 @@ export const SIMPLIFY_RULES: Rule[] = [
       const [a, b] = ops;
       // Check for coefficient * trig²(x) pattern (e.g., 2sin²(x) -> 1-cos(2x))
       const hasTrigSquared =
-        (a.operator === 'Power' &&
-          isFunction(a) &&
+        (isFunction(a, 'Power') &&
           a.op2.is(2) &&
           ['Sin', 'Cos'].includes(a.op1.operator || '')) ||
-        (b.operator === 'Power' &&
-          isFunction(b) &&
+        (isFunction(b, 'Power') &&
           b.op2.is(2) &&
           ['Sin', 'Cos'].includes(b.op1.operator || ''));
       const hasCoefficient = isNumber(a) || isNumber(b);
@@ -350,7 +348,7 @@ export const SIMPLIFY_RULES: Rule[] = [
   // Divide, Rational
   //
   (x): RuleStep | undefined => {
-    if (x.operator === 'Divide' && isFunction(x)) {
+    if (isFunction(x, 'Divide')) {
       // Be conservative about simplifying division when the denominator is a
       // constant expression (no unknowns) that is not already a number literal.
       // In particular, avoid turning 0/(1-1) into 0, or (1-1)/(1-1) into 1,
@@ -381,20 +379,10 @@ export const SIMPLIFY_RULES: Rule[] = [
       }
       // Also skip if one is a power and the other is the same base
       // e.g., e^x / e -> e^{x-1}
-      if (num.operator === 'Power' && isFunction(num) && num.op1.isSame(denom))
-        return undefined;
-      if (
-        denom.operator === 'Power' &&
-        isFunction(denom) &&
-        denom.op1.isSame(num)
-      )
-        return undefined;
+      if (isFunction(num, 'Power') && num.op1.isSame(denom)) return undefined;
+      if (isFunction(denom, 'Power') && denom.op1.isSame(num)) return undefined;
       // Skip a / (b/c)^d — let simplifyPower handle it
-      if (
-        denom.operator === 'Power' &&
-        isFunction(denom) &&
-        denom.op1.operator === 'Divide'
-      )
+      if (isFunction(denom, 'Power') && denom.op1.operator === 'Divide')
         return undefined;
 
       // Skip Factorial divisions — let simplifyDivide handle factorial quotients
@@ -413,7 +401,7 @@ export const SIMPLIFY_RULES: Rule[] = [
 
       return { value: num.div(denom), because: 'division' };
     }
-    if (x.operator === 'Rational' && isFunction(x) && x.nops === 2)
+    if (isFunction(x, 'Rational') && x.nops === 2)
       return { value: x.op1.div(x.op2), because: 'rational' };
     return undefined;
   },
@@ -435,8 +423,7 @@ export const SIMPLIFY_RULES: Rule[] = [
           because: 'sqrt',
         };
       const val = x.op1.sqrt();
-      if (isExact(isNumber(val) ? val.numericValue : undefined))
-        return { value: val, because: 'sqrt' };
+      if (isExact(numericValue(val))) return { value: val, because: 'sqrt' };
       // If the input is already non-exact (a float), return the computed value
       if (!isExact(x.op1.numericValue)) return { value: val, because: 'sqrt' };
       return undefined;
@@ -459,7 +446,7 @@ export const SIMPLIFY_RULES: Rule[] = [
         return { value: x.op1.pow(x.op2), because: 'power' };
       if (x.operator === 'Root') {
         const val = x.op1.root(x.op2);
-        if (isExact(isNumber(val) ? val.numericValue : undefined))
+        if (isExact(numericValue(val)))
           return { value: x.op1.root(x.op2), because: 'root' };
       }
     }
@@ -505,15 +492,11 @@ export const SIMPLIFY_RULES: Rule[] = [
       if (x.op1.is(0)) return undefined;
       if (x.op1.isInfinity === true) return undefined;
       // Skip log_c(c^x) — simplifyLog returns x directly
-      if (
-        x.op1.operator === 'Power' &&
-        isFunction(x.op1) &&
-        x.op1.op1?.isSame(baseExpr)
-      )
+      if (isFunction(x.op1, 'Power') && x.op1.op1?.isSame(baseExpr))
         return undefined;
       // Skip Power args — simplifyLog handles these with proper sign/abs tracking:
       // irrational exponents, non-integer rationals, and even exponents (need |x|)
-      if (x.op1.operator === 'Power' && isFunction(x.op1) && x.op1.op2) {
+      if (isFunction(x.op1, 'Power') && x.op1.op2) {
         const exp = x.op1.op2;
         if (
           exp.isRational === false ||
@@ -530,19 +513,15 @@ export const SIMPLIFY_RULES: Rule[] = [
       }
       // Skip Multiply args containing a factor that is Power(base, ...) —
       // simplifyLog has log_c(c^x * y) → x + log_c(y) rule
-      if (x.op1.operator === 'Multiply' && isFunction(x.op1)) {
+      if (isFunction(x.op1, 'Multiply')) {
         for (const factor of x.op1.ops) {
-          if (
-            factor.operator === 'Power' &&
-            isFunction(factor) &&
-            factor.op1?.isSame(baseExpr)
-          )
+          if (isFunction(factor, 'Power') && factor.op1?.isSame(baseExpr))
             return undefined;
         }
       }
       // Skip Divide args containing base match in numerator or denominator —
       // simplifyLog has log_c(c^x/y) and log_c(y/c^x) rules
-      if (x.op1.operator === 'Divide' && isFunction(x.op1)) {
+      if (isFunction(x.op1, 'Divide')) {
         const num = x.op1.op1;
         const denom = x.op1.op2;
         if (
@@ -592,7 +571,7 @@ export const SIMPLIFY_RULES: Rule[] = [
   // Derivative
   //
   (x): RuleStep | undefined => {
-    if (x.operator !== 'Derivative' || !isFunction(x)) return undefined;
+    if (!isFunction(x, 'Derivative')) return undefined;
     const ce = x.engine;
     const [f, degree] = x.ops;
     if (x.nops === 2)
@@ -613,7 +592,7 @@ export const SIMPLIFY_RULES: Rule[] = [
   // Hypot
   //
   (x): RuleStep | undefined => {
-    if (x.operator !== 'Hypot' || !isFunction(x)) return undefined;
+    if (!isFunction(x, 'Hypot')) return undefined;
     const ce = x.engine;
     return {
       value: ce
@@ -627,7 +606,7 @@ export const SIMPLIFY_RULES: Rule[] = [
   // Congruent
   //
   (x): RuleStep | undefined => {
-    if (x.operator !== 'Congruent' || !isFunction(x)) return undefined;
+    if (!isFunction(x, 'Congruent')) return undefined;
     if (x.nops < 3) return undefined;
     const ce = x.engine;
     return {
@@ -661,7 +640,7 @@ export const SIMPLIFY_RULES: Rule[] = [
   // Inverse Function (i.e. sin^{-1})
   //
   (x): RuleStep | undefined => {
-    if (x.operator !== 'InverseFunction' || !isFunction(x)) return undefined;
+    if (!isFunction(x, 'InverseFunction')) return undefined;
     const value = processInverseFunction(x.engine, x.ops);
     if (!value) return undefined;
     return { value, because: 'inverse function' };
@@ -671,7 +650,7 @@ export const SIMPLIFY_RULES: Rule[] = [
   // Arctan2
   //
   (expr): RuleStep | undefined => {
-    if (expr.operator !== 'Arctan2' || !isFunction(expr)) return undefined;
+    if (!isFunction(expr, 'Arctan2')) return undefined;
     // See https://en.wikipedia.org/wiki/Argument_(complex_analysis)#Realizations_of_the_function_in_computer_languages
     const [y, x] = expr.ops;
     const ce = expr.engine;
@@ -735,8 +714,7 @@ export const SIMPLIFY_RULES: Rule[] = [
   // Power combination for 2+ operands in Multiply
   //
   (x): RuleStep | undefined => {
-    if (x.operator !== 'Multiply' || !isFunction(x) || x.ops.length < 2)
-      return undefined;
+    if (!isFunction(x, 'Multiply') || x.ops.length < 2) return undefined;
 
     const ce = x.engine;
     // Group ALL terms by base (including unknown symbols)
@@ -753,7 +731,7 @@ export const SIMPLIFY_RULES: Rule[] = [
       let base: Expression;
       let exp: Expression;
 
-      if (term.operator === 'Power' && isFunction(term)) {
+      if (isFunction(term, 'Power')) {
         base = term.op1;
         exp = term.op2;
       } else if (isSymbol(term)) {
@@ -1046,7 +1024,7 @@ function simplifyRelationalOperator(expr: Expression): RuleStep | undefined {
 }
 
 function simplifySystemOfEquations(expr: Expression): RuleStep | undefined {
-  if (expr.operator !== 'List' || !isFunction(expr)) return undefined;
+  if (!isFunction(expr, 'List')) return undefined;
 
   // Check if every element is an equation or inequality
   if (

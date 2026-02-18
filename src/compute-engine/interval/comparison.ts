@@ -178,9 +178,7 @@ export function piecewise(
 
   const x = xOrCond as Interval | IntervalResult;
   const condition = conditionOrTrue as (x: Interval) => BoolInterval;
-  const trueBranch = trueOrFalse as (
-    x: Interval
-  ) => Interval | IntervalResult;
+  const trueBranch = trueOrFalse as (x: Interval) => Interval | IntervalResult;
   const falseBranchFn = falseBranch as (
     x: Interval
   ) => Interval | IntervalResult;

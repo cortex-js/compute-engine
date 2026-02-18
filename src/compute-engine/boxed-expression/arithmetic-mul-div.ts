@@ -4,7 +4,7 @@ import type {
   Expression,
   IComputeEngine as ComputeEngine,
 } from '../global-types';
-import { isNumber, isFunction, isSymbol } from './type-guards';
+import { isNumber, isFunction, isSymbol, numericValue } from './type-guards';
 import { NumericValue } from '../numeric-value/types';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
 import type { Rational } from '../numerics/types';
@@ -98,25 +98,25 @@ export class Product {
       return;
     }
 
-    if (isFunction(term) && term.operator === 'Multiply') {
+    if (isFunction(term, 'Multiply')) {
       for (const t of term.ops) this.mul(t, exp);
       return;
     }
 
-    if (isFunction(term) && term.operator === 'Negate') {
+    if (isFunction(term, 'Negate')) {
       this.mul(term.op1, exp);
       this.coefficient = this.coefficient.neg();
       return;
     }
 
     if (this._isCanonical) {
-      if (isSymbol(term) && term.symbol === 'Nothing') return;
+      if (isSymbol(term, 'Nothing')) return;
 
       exp ??= [1, 1];
 
       // If we're calculating a canonical product, fold exact literals into
       // running terms
-      const num = isNumber(term) ? term.numericValue : undefined;
+      const num = numericValue(term);
       if (num !== undefined) {
         if (term.is(1)) return;
 
@@ -217,7 +217,7 @@ export class Product {
     const exponent: Rational = exp ?? [1, 1];
 
     // If this is a power expression, extract the exponent
-    if (isFunction(term) && term.operator === 'Power') {
+    if (isFunction(term, 'Power')) {
       // Term is `Power(op1, op2)`
       const r = asRational(term.op2);
       if (r) {
@@ -234,7 +234,7 @@ export class Product {
       }
     }
 
-    if (isFunction(term) && term.operator === 'Sqrt') {
+    if (isFunction(term, 'Sqrt')) {
       // Term is `Sqrt(op1)`
       // Don't extract non-integer exponents for numeric bases
       // This keeps √2 symbolic instead of evaluating to 1.414...
@@ -246,7 +246,7 @@ export class Product {
       // Otherwise, keep the Sqrt expression as a single term
     }
 
-    if (isFunction(term) && term.operator === 'Root') {
+    if (isFunction(term, 'Root')) {
       // Term is `Root(op1, op2)`
       const r = asRational(term.op2);
       if (r) {
@@ -261,7 +261,7 @@ export class Product {
       }
     }
 
-    if (isFunction(term) && term.operator === 'Divide') {
+    if (isFunction(term, 'Divide')) {
       // In order to correctly account for the denominator, invert it.
       // For example, in the case `a^4/a^2' we want to add
       // `a^(-2)` to the product, not `1/a^2`. The former will get the exponent
@@ -577,8 +577,7 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
 
   // -a/-b = a/b
   if (
-    isFunction(op1) &&
-    op1.operator === 'Negate' &&
+    isFunction(op1, 'Negate') &&
     isFunction(op2) &&
     op2.operator === 'Negate'
   ) {
@@ -588,8 +587,7 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
 
   // (a/b)/(c/d) = (a*d)/(b*c)
   if (
-    isFunction(op1) &&
-    op1.operator === 'Divide' &&
+    isFunction(op1, 'Divide') &&
     isFunction(op2) &&
     op2.operator === 'Divide'
   ) {
@@ -600,11 +598,11 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
   }
 
   // (a/b)/c = a/(b*c)
-  if (isFunction(op1) && op1.operator === 'Divide')
+  if (isFunction(op1, 'Divide'))
     return canonicalDivide(op1.op1, canonicalMultiply(ce, [op1.op2, op2]));
 
   // a/(b/c) = (a*c)/b
-  if (isFunction(op2) && op2.operator === 'Divide')
+  if (isFunction(op2, 'Divide'))
     return canonicalDivide(canonicalMultiply(ce, [op1, op2.op2]), op2.op1);
 
   // a/1 = a
@@ -619,23 +617,18 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
   // Note: (-1)/a ≠ -(a^-1). We distribute Negate over Divide.
 
   // √a/√b = (1/b)√(ab) as a numeric value
-  if (
-    isFunction(op1) &&
-    op1.operator === 'Sqrt' &&
-    isFunction(op2) &&
-    op2.operator === 'Sqrt'
-  ) {
+  if (isFunction(op1, 'Sqrt') && isFunction(op2) && op2.operator === 'Sqrt') {
     const a = asSmallInteger(op1.op1);
     const b = asSmallInteger(op2.op1);
     if (a !== null && b !== null)
       return ce.number(ce._numericValue({ radical: a * b, rational: [1, b] }));
-  } else if (isFunction(op1) && op1.operator === 'Sqrt') {
+  } else if (isFunction(op1, 'Sqrt')) {
     // √a/b = (1/b)√a as a numeric value
     const a = asSmallInteger(op1.op1);
     const b = asSmallInteger(op2);
     if (a !== null && b !== null)
       return ce.number(ce._numericValue({ radical: a, rational: [1, b] }));
-  } else if (isFunction(op2) && op2.operator === 'Sqrt') {
+  } else if (isFunction(op2, 'Sqrt')) {
     // a/√b = (a/b)√b as a numeric value
     const a = asSmallInteger(op1);
     const b = asSmallInteger(op2.op1);
@@ -644,8 +637,8 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
   }
 
   // Are both op1 and op2 a numeric value?
-  const v1 = isNumber(op1) ? op1.numericValue : undefined;
-  const v2 = isNumber(op2) ? op2.numericValue : undefined;
+  const v1 = numericValue(op1);
+  const v2 = numericValue(op2);
   if (v1 !== undefined && v2 !== undefined) {
     if (
       (typeof v1 !== 'number' && v1.im !== 0) ||
@@ -892,8 +885,7 @@ export function canonicalMultiply(
     if (isNumber(x)) {
       // Do we have a Sqrt expression?
       if (
-        isFunction(next) &&
-        next.operator === 'Sqrt' &&
+        isFunction(next, 'Sqrt') &&
         isNumber(next.op1) &&
         next.op1.type.matches('finite_integer')
       ) {
@@ -977,7 +969,7 @@ export function canonicalMultiply(
 
 function unnegate(op: Expression): [Expression, sign: number] {
   let sign = 1;
-  while (isFunction(op) && op.operator === 'Negate') {
+  while (isFunction(op, 'Negate')) {
     sign = -sign;
     op = op.op1;
   }
@@ -996,24 +988,16 @@ function expandProduct(
   lhs: Readonly<Expression>,
   rhs: Readonly<Expression>
 ): Expression {
-  if (
-    isFunction(lhs) &&
-    lhs.operator === 'Negate' &&
-    isFunction(rhs) &&
-    rhs.operator === 'Negate'
-  )
+  if (isFunction(lhs, 'Negate') && isFunction(rhs) && rhs.operator === 'Negate')
     return expandProduct(lhs.op1, rhs.op1);
 
   const ce = lhs.engine;
 
-  if (isFunction(lhs) && lhs.operator === 'Negate')
-    return expandProduct(lhs.op1, rhs).neg();
-  if (isFunction(rhs) && rhs.operator === 'Negate')
-    return expandProduct(lhs, rhs.op1).neg();
+  if (isFunction(lhs, 'Negate')) return expandProduct(lhs.op1, rhs).neg();
+  if (isFunction(rhs, 'Negate')) return expandProduct(lhs, rhs.op1).neg();
 
   if (
-    isFunction(lhs) &&
-    lhs.operator === 'Divide' &&
+    isFunction(lhs, 'Divide') &&
     isFunction(rhs) &&
     rhs.operator === 'Divide'
   ) {
@@ -1021,16 +1005,16 @@ function expandProduct(
     return expandProduct(lhs.op1, rhs.op1).div(denom);
   }
 
-  if (isFunction(lhs) && lhs.operator === 'Divide')
+  if (isFunction(lhs, 'Divide'))
     return expandProduct(lhs.op1, rhs).div(lhs.op2);
-  if (isFunction(rhs) && rhs.operator === 'Divide')
+  if (isFunction(rhs, 'Divide'))
     return expandProduct(lhs, rhs.op1).div(rhs.op2);
 
-  if (isFunction(lhs) && lhs.operator === 'Add') {
+  if (isFunction(lhs, 'Add')) {
     const terms: Expression[] = lhs.ops.map((x) => expandProduct(x, rhs));
     return add(...terms);
   }
-  if (isFunction(rhs) && rhs.operator === 'Add') {
+  if (isFunction(rhs, 'Add')) {
     const terms: Expression[] = rhs.ops.map((x) => expandProduct(lhs, x));
     return add(...terms);
   }

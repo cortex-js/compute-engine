@@ -130,11 +130,11 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     const exp = args[1];
     if (base === null) throw new Error('Power: no argument');
     // Check if this is e^x (base is ExponentialE)
-    if (isSymbol(base) && base.symbol === 'ExponentialE') {
+    if (isSymbol(base, 'ExponentialE')) {
       return `_IA.exp(${compile(exp)})`;
     }
     // Check if exponent is a constant number
-    if (exp && isNumber(exp) && exp.im === 0) {
+    if (isNumber(exp) && exp.im === 0) {
       const expVal = exp.re;
       if (expVal === 0.5) return `_IA.sqrt(${compile(base)})`;
       if (expVal === 2) return `_IA.square(${compile(base)})`;
@@ -149,7 +149,7 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     if (exp === null) return `_IA.sqrt(${compile(arg)})`;
     if (exp?.re === 2) return `_IA.sqrt(${compile(arg)})`;
     // nth root = x^(1/n)
-    if (exp && isNumber(exp) && exp.im === 0) {
+    if (isNumber(exp) && exp.im === 0) {
       return `_IA.pow(${compile(arg)}, ${1 / exp.re})`;
     }
     return `_IA.powInterval(${compile(arg)}, _IA.div(_IA.point(1), ${compile(exp)}))`;
@@ -202,10 +202,8 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   GammaLn: (args, compile) => `_IA.gammaln(${compile(args[0])})`,
   Binomial: (args, compile) =>
     `_IA.binomial(${compile(args[0])}, ${compile(args[1])})`,
-  GCD: (args, compile) =>
-    `_IA.gcd(${compile(args[0])}, ${compile(args[1])})`,
-  LCM: (args, compile) =>
-    `_IA.lcm(${compile(args[0])}, ${compile(args[1])})`,
+  GCD: (args, compile) => `_IA.gcd(${compile(args[0])}, ${compile(args[1])})`,
+  LCM: (args, compile) => `_IA.lcm(${compile(args[0])}, ${compile(args[1])})`,
   Chop: (args, compile) => `_IA.chop(${compile(args[0])})`,
   Erf: (args, compile) => `_IA.erf(${compile(args[0])})`,
   Erfc: (args, compile) => `_IA.erfc(${compile(args[0])})`,
@@ -251,7 +249,7 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       const cond = args[i];
       const val = args[i + 1];
       // If condition is the symbol True, it's the default branch
-      if (isSymbol(cond) && cond.symbol === 'True') {
+      if (isSymbol(cond, 'True')) {
         return compile(val);
       }
       return `_IA.piecewise(
@@ -296,7 +294,11 @@ function extractIntervalLimits(limitsExpr: Expression): {
   upperNum: number | undefined;
 } {
   console.assert(limitsExpr.operator === 'Limits');
-  const fn = limitsExpr as Expression & { op1: Expression; op2: Expression; op3: Expression };
+  const fn = limitsExpr as Expression & {
+    op1: Expression;
+    op2: Expression;
+    op3: Expression;
+  };
   const index = isSymbol(fn.op1) ? fn.op1.symbol : '_';
   const lowerExpr = fn.op2;
   const upperExpr = fn.op3;
@@ -306,8 +308,14 @@ function extractIntervalLimits(limitsExpr: Expression): {
     index,
     lowerExpr,
     upperExpr,
-    lowerNum: !isNaN(lowerRe) && Number.isFinite(lowerRe) ? Math.floor(lowerRe) : undefined,
-    upperNum: !isNaN(upperRe) && Number.isFinite(upperRe) ? Math.floor(upperRe) : undefined,
+    lowerNum:
+      !isNaN(lowerRe) && Number.isFinite(lowerRe)
+        ? Math.floor(lowerRe)
+        : undefined,
+    upperNum:
+      !isNaN(upperRe) && Number.isFinite(upperRe)
+        ? Math.floor(upperRe)
+        : undefined,
   };
 }
 
@@ -349,7 +357,8 @@ function compileIntervalSumProduct(
   if (!args[0]) throw new Error(`${kind}: no body`);
   if (!args[1]) throw new Error(`${kind}: no indexing set`);
 
-  const { index, lowerExpr, upperExpr, lowerNum, upperNum } = extractIntervalLimits(args[1]);
+  const { index, lowerExpr, upperExpr, lowerNum, upperNum } =
+    extractIntervalLimits(args[1]);
   const isSum = kind === 'Sum';
   const iaOp = isSum ? '_IA.add' : '_IA.mul';
   const identity = isSum ? '_IA.point(0)' : '_IA.point(1)';

@@ -90,7 +90,7 @@ function reduceTrigPeriodicity(
   ce: ComputeEngine
 ): Expression | null {
   // Only handle Add expressions
-  if (!isFunction(arg) || arg.operator !== 'Add') return null;
+  if (!isFunction(arg, 'Add')) return null;
 
   const terms = arg.ops;
 
@@ -109,7 +109,7 @@ function reduceTrigPeriodicity(
     }
 
     // Check for n * Pi or Pi * n
-    if (isFunction(term) && term.operator === 'Multiply') {
+    if (isFunction(term, 'Multiply')) {
       const termOps = term.ops;
       // Look for Pi among the factors
       const piIndex = termOps.findIndex((op) => sym(op) === 'Pi');
@@ -136,11 +136,7 @@ function reduceTrigPeriodicity(
     }
 
     // Check for Negate(Pi) = -Pi
-    if (
-      isFunction(term) &&
-      term.operator === 'Negate' &&
-      sym(term.op1) === 'Pi'
-    ) {
+    if (isFunction(term, 'Negate') && sym(term.op1) === 'Pi') {
       piCoeff = -1;
       piTermIndex = i;
       break;
@@ -213,7 +209,7 @@ export function simplifyTrig(x: Expression): RuleStep | undefined {
     }
 
     // Odd/even function properties with negation
-    if (isFunction(arg) && arg.operator === 'Negate') {
+    if (isFunction(arg, 'Negate')) {
       const innerArg = arg.op1;
       if (innerArg) {
         // Odd functions: f(-x) = -f(x)
@@ -234,7 +230,7 @@ export function simplifyTrig(x: Expression): RuleStep | undefined {
     }
 
     // π - x transformations
-    if (isFunction(arg) && arg.operator === 'Subtract') {
+    if (isFunction(arg, 'Subtract')) {
       const left = arg.op1;
       const right = arg.op2;
       if (sym(left) === 'Pi' && right) {
@@ -250,7 +246,7 @@ export function simplifyTrig(x: Expression): RuleStep | undefined {
     }
 
     // π + x transformations (when Pi appears in Add)
-    if (isFunction(arg) && arg.operator === 'Add') {
+    if (isFunction(arg, 'Add')) {
       // Check if Pi is one of the operands
       const piIndex = arg.ops.findIndex((term) => sym(term) === 'Pi');
       if (piIndex >= 0) {
@@ -275,15 +271,14 @@ export function simplifyTrig(x: Expression): RuleStep | undefined {
 
     // Co-function identities: f(π/2 - x) -> g(x)
     // Handle both Subtract form and canonical Add form (Add(Negate(x), π/2))
-    if (isFunction(arg) && arg.operator === 'Subtract') {
+    if (isFunction(arg, 'Subtract')) {
       const left = arg.op1;
       const right = arg.op2;
 
       // Check if left is π/2
       let isPiOver2 = false;
       if (
-        isFunction(left) &&
-        left.operator === 'Divide' &&
+        isFunction(left, 'Divide') &&
         sym(left.op1) === 'Pi' &&
         left.op2?.is(2)
       ) {
@@ -302,18 +297,14 @@ export function simplifyTrig(x: Expression): RuleStep | undefined {
     }
 
     // Handle canonical form: Add(Negate(x), Multiply(1/2, Pi)) = π/2 - x
-    if (isFunction(arg) && arg.operator === 'Add' && arg.nops === 2) {
+    if (isFunction(arg, 'Add') && arg.nops === 2) {
       const argOps = arg.ops;
       let piOver2Term: Expression | null = null;
       let negatedTerm: Expression | null = null;
 
       for (const term of argOps) {
         // Check for π/2 term: Multiply(1/2, Pi) or Multiply(Rational(1,2), Pi)
-        if (
-          isFunction(term) &&
-          term.operator === 'Multiply' &&
-          term.nops === 2
-        ) {
+        if (isFunction(term, 'Multiply') && term.nops === 2) {
           const [coef, symExpr] = [term.op1, term.op2];
           if (sym(symExpr) === 'Pi') {
             // Check if coefficient is 1/2 using .re for numeric comparison
@@ -324,7 +315,7 @@ export function simplifyTrig(x: Expression): RuleStep | undefined {
           }
         }
         // Check for negated term: Negate(x)
-        if (isFunction(term) && term.operator === 'Negate' && term.op1) {
+        if (isFunction(term, 'Negate') && term.op1) {
           negatedTerm = term.op1;
         }
       }
@@ -412,9 +403,9 @@ export function simplifyTrig(x: Expression): RuleStep | undefined {
       const otherTerms: Expression[] = [];
 
       for (const term of x.ops) {
-        if (isFunction(term) && term.operator === 'Sin' && !sinTerm) {
+        if (isFunction(term, 'Sin') && !sinTerm) {
           sinTerm = term;
-        } else if (isFunction(term) && term.operator === 'Cos' && !cosTerm) {
+        } else if (isFunction(term, 'Cos') && !cosTerm) {
           cosTerm = term;
         } else {
           otherTerms.push(term);
@@ -460,12 +451,7 @@ export function simplifyTrig(x: Expression): RuleStep | undefined {
       const [a, b] = x.ops;
 
       // sin(x) * sin(y) -> (cos(x-y) - cos(x+y))/2
-      if (
-        isFunction(a) &&
-        a.operator === 'Sin' &&
-        isFunction(b) &&
-        b.operator === 'Sin'
-      ) {
+      if (isFunction(a, 'Sin') && isFunction(b) && b.operator === 'Sin') {
         const argA = a.op1;
         const argB = b.op1;
         if (argA && argB) {
@@ -480,12 +466,7 @@ export function simplifyTrig(x: Expression): RuleStep | undefined {
       }
 
       // cos(x) * cos(y) -> (cos(x-y) + cos(x+y))/2
-      if (
-        isFunction(a) &&
-        a.operator === 'Cos' &&
-        isFunction(b) &&
-        b.operator === 'Cos'
-      ) {
+      if (isFunction(a, 'Cos') && isFunction(b) && b.operator === 'Cos') {
         const argA = a.op1;
         const argB = b.op1;
         if (argA && argB) {
@@ -500,12 +481,7 @@ export function simplifyTrig(x: Expression): RuleStep | undefined {
       }
 
       // tan(x) * cot(x) -> 1
-      if (
-        isFunction(a) &&
-        a.operator === 'Tan' &&
-        isFunction(b) &&
-        b.operator === 'Cot'
-      ) {
+      if (isFunction(a, 'Tan') && isFunction(b) && b.operator === 'Cot') {
         const argA = a.op1;
         const argB = b.op1;
         if (argA?.isSame(argB)) {
@@ -514,12 +490,7 @@ export function simplifyTrig(x: Expression): RuleStep | undefined {
       }
 
       // cot(x) * tan(x) -> 1
-      if (
-        isFunction(a) &&
-        a.operator === 'Cot' &&
-        isFunction(b) &&
-        b.operator === 'Tan'
-      ) {
+      if (isFunction(a, 'Cot') && isFunction(b) && b.operator === 'Tan') {
         const argA = a.op1;
         const argB = b.op1;
         if (argA?.isSame(argB)) {
@@ -530,16 +501,16 @@ export function simplifyTrig(x: Expression): RuleStep | undefined {
       // Power reduction identities:
       // 2sin²(x) -> 1 - cos(2x)
       // 2cos²(x) -> 1 + cos(2x)
-      if (a.is(2) && isFunction(b) && b.operator === 'Power' && b.op2?.is(2)) {
+      if (a.is(2) && isFunction(b, 'Power') && b.op2?.is(2)) {
         const base = b.op1;
-        if (isFunction(base) && base.operator === 'Sin' && base.op1) {
+        if (isFunction(base, 'Sin') && base.op1) {
           const cos2x = ce._fn('Cos', [base.op1.mul(2)]);
           return {
             value: ce.One.sub(cos2x),
             because: '2sin²(x) -> 1 - cos(2x)',
           };
         }
-        if (isFunction(base) && base.operator === 'Cos' && base.op1) {
+        if (isFunction(base, 'Cos') && base.op1) {
           const cos2x = ce._fn('Cos', [base.op1.mul(2)]);
           return {
             value: ce.One.add(cos2x),
@@ -548,16 +519,16 @@ export function simplifyTrig(x: Expression): RuleStep | undefined {
         }
       }
       // Also check reversed order (Power first, then 2)
-      if (b.is(2) && isFunction(a) && a.operator === 'Power' && a.op2?.is(2)) {
+      if (b.is(2) && isFunction(a, 'Power') && a.op2?.is(2)) {
         const base = a.op1;
-        if (isFunction(base) && base.operator === 'Sin' && base.op1) {
+        if (isFunction(base, 'Sin') && base.op1) {
           const cos2x = ce._fn('Cos', [base.op1.mul(2)]);
           return {
             value: ce.One.sub(cos2x),
             because: '2sin²(x) -> 1 - cos(2x)',
           };
         }
-        if (isFunction(base) && base.operator === 'Cos' && base.op1) {
+        if (isFunction(base, 'Cos') && base.op1) {
           const cos2x = ce._fn('Cos', [base.op1.mul(2)]);
           return {
             value: ce.One.add(cos2x),
@@ -574,8 +545,7 @@ export function simplifyTrig(x: Expression): RuleStep | undefined {
 
     // sin²(x) + cos²(x) -> 1
     if (
-      isFunction(a) &&
-      a.operator === 'Power' &&
+      isFunction(a, 'Power') &&
       isFunction(b) &&
       b.operator === 'Power' &&
       a.op2?.is(2) &&
@@ -583,20 +553,16 @@ export function simplifyTrig(x: Expression): RuleStep | undefined {
     ) {
       const aBase = a.op1;
       const bBase = b.op1;
-      const sinArg =
-        isFunction(aBase) && aBase.operator === 'Sin' ? aBase.op1 : null;
-      const cosArg =
-        isFunction(bBase) && bBase.operator === 'Cos' ? bBase.op1 : null;
+      const sinArg = isFunction(aBase, 'Sin') ? aBase.op1 : null;
+      const cosArg = isFunction(bBase, 'Cos') ? bBase.op1 : null;
 
       if (sinArg && cosArg && sinArg.isSame(cosArg)) {
         return { value: ce.One, because: 'sin²(x) + cos²(x) -> 1' };
       }
 
       // Also check reversed order
-      const sinArg2 =
-        isFunction(bBase) && bBase.operator === 'Sin' ? bBase.op1 : null;
-      const cosArg2 =
-        isFunction(aBase) && aBase.operator === 'Cos' ? aBase.op1 : null;
+      const sinArg2 = isFunction(bBase, 'Sin') ? bBase.op1 : null;
+      const cosArg2 = isFunction(aBase, 'Cos') ? aBase.op1 : null;
 
       if (sinArg2 && cosArg2 && sinArg2.isSame(cosArg2)) {
         return { value: ce.One, because: 'cos²(x) + sin²(x) -> 1' };
@@ -605,16 +571,16 @@ export function simplifyTrig(x: Expression): RuleStep | undefined {
 
     // tan²(x) + 1 -> sec²(x) and 1 + tan²(x) -> sec²(x)
     // (one operand is Power, the other is 1)
-    if (isFunction(a) && a.operator === 'Power' && a.op2?.is(2) && b.is(1)) {
-      if (isFunction(a.op1) && a.op1.operator === 'Tan') {
+    if (isFunction(a, 'Power') && a.op2?.is(2) && b.is(1)) {
+      if (isFunction(a.op1, 'Tan')) {
         return {
           value: ce._fn('Sec', [a.op1.op1]).pow(2),
           because: 'tan²(x) + 1 -> sec²(x)',
         };
       }
     }
-    if (isFunction(b) && b.operator === 'Power' && b.op2?.is(2) && a.is(1)) {
-      if (isFunction(b.op1) && b.op1.operator === 'Tan') {
+    if (isFunction(b, 'Power') && b.op2?.is(2) && a.is(1)) {
+      if (isFunction(b.op1, 'Tan')) {
         return {
           value: ce._fn('Sec', [b.op1.op1]).pow(2),
           because: '1 + tan²(x) -> sec²(x)',
@@ -623,16 +589,16 @@ export function simplifyTrig(x: Expression): RuleStep | undefined {
     }
 
     // 1 + cot²(x) -> csc²(x) and cot²(x) + 1 -> csc²(x)
-    if (isFunction(a) && a.operator === 'Power' && a.op2?.is(2) && b.is(1)) {
-      if (isFunction(a.op1) && a.op1.operator === 'Cot') {
+    if (isFunction(a, 'Power') && a.op2?.is(2) && b.is(1)) {
+      if (isFunction(a.op1, 'Cot')) {
         return {
           value: ce._fn('Csc', [a.op1.op1]).pow(2),
           because: 'cot²(x) + 1 -> csc²(x)',
         };
       }
     }
-    if (isFunction(b) && b.operator === 'Power' && b.op2?.is(2) && a.is(1)) {
-      if (isFunction(b.op1) && b.op1.operator === 'Cot') {
+    if (isFunction(b, 'Power') && b.op2?.is(2) && a.is(1)) {
+      if (isFunction(b.op1, 'Cot')) {
         return {
           value: ce._fn('Csc', [b.op1.op1]).pow(2),
           because: '1 + cot²(x) -> csc²(x)',
@@ -642,8 +608,7 @@ export function simplifyTrig(x: Expression): RuleStep | undefined {
 
     // a*sin²(x) + a*cos²(x) -> a (with coefficient)
     if (
-      isFunction(a) &&
-      a.operator === 'Multiply' &&
+      isFunction(a, 'Multiply') &&
       isFunction(b) &&
       b.operator === 'Multiply'
     ) {
@@ -657,8 +622,7 @@ export function simplifyTrig(x: Expression): RuleStep | undefined {
           return null;
         const [c, p] = expr.ops;
         if (
-          isFunction(p) &&
-          p.operator === 'Power' &&
+          isFunction(p, 'Power') &&
           p.op2?.is(2) &&
           isFunction(p.op1) &&
           (p.op1.operator === 'Sin' || p.op1.operator === 'Cos')
@@ -667,8 +631,7 @@ export function simplifyTrig(x: Expression): RuleStep | undefined {
         }
         // Try reversed
         if (
-          isFunction(c) &&
-          c.operator === 'Power' &&
+          isFunction(c, 'Power') &&
           c.op2?.is(2) &&
           isFunction(c.op1) &&
           (c.op1.operator === 'Sin' || c.op1.operator === 'Cos')
@@ -709,10 +672,10 @@ export function simplifyTrig(x: Expression): RuleStep | undefined {
     let one: Expression | null = null;
     let negatedTrigSquared: Expression | null = null;
 
-    if (a.is(1) && isFunction(b) && b.operator === 'Negate') {
+    if (a.is(1) && isFunction(b, 'Negate')) {
       one = a;
       negatedTrigSquared = b.op1;
-    } else if (b.is(1) && isFunction(a) && a.operator === 'Negate') {
+    } else if (b.is(1) && isFunction(a, 'Negate')) {
       one = b;
       negatedTrigSquared = a.op1;
     }
@@ -720,20 +683,19 @@ export function simplifyTrig(x: Expression): RuleStep | undefined {
     if (one && negatedTrigSquared) {
       // Check if it's a squared trig function
       if (
-        isFunction(negatedTrigSquared) &&
-        negatedTrigSquared.operator === 'Power' &&
+        isFunction(negatedTrigSquared, 'Power') &&
         negatedTrigSquared.op2?.is(2)
       ) {
         const base = negatedTrigSquared.op1;
         // 1 - sin²(x) -> cos²(x)
-        if (isFunction(base) && base.operator === 'Sin') {
+        if (isFunction(base, 'Sin')) {
           return {
             value: ce._fn('Cos', [base.op1]).pow(2),
             because: '1 - sin²(x) -> cos²(x)',
           };
         }
         // 1 - cos²(x) -> sin²(x)
-        if (isFunction(base) && base.operator === 'Cos') {
+        if (isFunction(base, 'Cos')) {
           return {
             value: ce._fn('Sin', [base.op1]).pow(2),
             because: '1 - cos²(x) -> sin²(x)',
@@ -747,44 +709,39 @@ export function simplifyTrig(x: Expression): RuleStep | undefined {
     let negOne: Expression | null = null;
     let trigSquared: Expression | null = null;
 
-    if (a.is(-1) && isFunction(b) && b.operator === 'Power' && b.op2?.is(2)) {
+    if (a.is(-1) && isFunction(b, 'Power') && b.op2?.is(2)) {
       negOne = a;
       trigSquared = b;
-    } else if (
-      b.is(-1) &&
-      isFunction(a) &&
-      a.operator === 'Power' &&
-      a.op2?.is(2)
-    ) {
+    } else if (b.is(-1) && isFunction(a, 'Power') && a.op2?.is(2)) {
       negOne = b;
       trigSquared = a;
     }
 
-    if (negOne && trigSquared && isFunction(trigSquared)) {
+    if (negOne && isFunction(trigSquared)) {
       const base = trigSquared.op1;
       // sin²(x) - 1 -> -cos²(x)
-      if (isFunction(base) && base.operator === 'Sin') {
+      if (isFunction(base, 'Sin')) {
         return {
           value: ce._fn('Cos', [base.op1]).pow(2).neg(),
           because: 'sin²(x) - 1 -> -cos²(x)',
         };
       }
       // cos²(x) - 1 -> -sin²(x)
-      if (isFunction(base) && base.operator === 'Cos') {
+      if (isFunction(base, 'Cos')) {
         return {
           value: ce._fn('Sin', [base.op1]).pow(2).neg(),
           because: 'cos²(x) - 1 -> -sin²(x)',
         };
       }
       // sec²(x) - 1 -> tan²(x)
-      if (isFunction(base) && base.operator === 'Sec') {
+      if (isFunction(base, 'Sec')) {
         return {
           value: ce._fn('Tan', [base.op1]).pow(2),
           because: 'sec²(x) - 1 -> tan²(x)',
         };
       }
       // csc²(x) - 1 -> cot²(x)
-      if (isFunction(base) && base.operator === 'Csc') {
+      if (isFunction(base, 'Csc')) {
         return {
           value: ce._fn('Cot', [base.op1]).pow(2),
           because: 'csc²(x) - 1 -> cot²(x)',
@@ -798,8 +755,7 @@ export function simplifyTrig(x: Expression): RuleStep | undefined {
     let secOrCscSquared: Expression | null = null;
 
     if (
-      isFunction(a) &&
-      a.operator === 'Negate' &&
+      isFunction(a, 'Negate') &&
       a.op1?.is(1) &&
       isFunction(b) &&
       b.operator === 'Power' &&
@@ -808,8 +764,7 @@ export function simplifyTrig(x: Expression): RuleStep | undefined {
       negOneAlt = a;
       secOrCscSquared = b;
     } else if (
-      isFunction(b) &&
-      b.operator === 'Negate' &&
+      isFunction(b, 'Negate') &&
       b.op1?.is(1) &&
       isFunction(a) &&
       a.operator === 'Power' &&
@@ -819,17 +774,17 @@ export function simplifyTrig(x: Expression): RuleStep | undefined {
       secOrCscSquared = a;
     }
 
-    if (negOneAlt && secOrCscSquared && isFunction(secOrCscSquared)) {
+    if (negOneAlt && isFunction(secOrCscSquared)) {
       const base = secOrCscSquared.op1;
       // sec²(x) - 1 -> tan²(x)
-      if (isFunction(base) && base.operator === 'Sec') {
+      if (isFunction(base, 'Sec')) {
         return {
           value: ce._fn('Tan', [base.op1]).pow(2),
           because: 'sec²(x) - 1 -> tan²(x)',
         };
       }
       // csc²(x) - 1 -> cot²(x)
-      if (isFunction(base) && base.operator === 'Csc') {
+      if (isFunction(base, 'Csc')) {
         return {
           value: ce._fn('Cot', [base.op1]).pow(2),
           because: 'csc²(x) - 1 -> cot²(x)',
@@ -838,17 +793,11 @@ export function simplifyTrig(x: Expression): RuleStep | undefined {
     }
 
     // Check for "-sin²(x) + -cos²(x)" pattern -> -1
-    if (
-      isFunction(a) &&
-      a.operator === 'Negate' &&
-      isFunction(b) &&
-      b.operator === 'Negate'
-    ) {
+    if (isFunction(a, 'Negate') && isFunction(b) && b.operator === 'Negate') {
       const aInner = a.op1;
       const bInner = b.op1;
       if (
-        isFunction(aInner) &&
-        aInner.operator === 'Power' &&
+        isFunction(aInner, 'Power') &&
         aInner.op2?.is(2) &&
         isFunction(bInner) &&
         bInner.operator === 'Power' &&

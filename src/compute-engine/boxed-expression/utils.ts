@@ -17,7 +17,7 @@ import { NumericValue } from '../numeric-value/types';
 import { _BoxedOperatorDefinition } from './boxed-operator-definition';
 import { _BoxedValueDefinition } from './boxed-value-definition';
 import { _BoxedExpression } from './abstract-boxed-expression';
-import { isNumber, isFunction, isSymbol } from './type-guards';
+import { isNumber, isFunction, isSymbol, numericValue } from './type-guards';
 
 /**
  * Check if an expression contains symbolic transcendental functions of constants
@@ -200,7 +200,7 @@ export function canonicalAngle(
 
   const k2 = ce._numericValue(k.bignumRe ? k.bignumRe.mod(2) : k.re % 2);
   const piMulK2N = ce.Pi.mul(k2).N();
-  return ce.number(t.add(isNumber(piMulK2N) ? piMulK2N.numericValue : 0));
+  return ce.number(t.add(numericValue(piMulK2N) ?? 0));
 }
 
 /**
@@ -218,22 +218,21 @@ export function getImaginaryFactor(
 ): Expression | undefined {
   if (typeof expr === 'number') return undefined;
   const ce = expr.engine;
-  if (isSymbol(expr) && expr.symbol === 'ImaginaryUnit') return ce.One;
+  if (isSymbol(expr, 'ImaginaryUnit')) return ce.One;
 
   if (expr.re === 0) return ce.number(expr.im!);
 
-  if (isFunction(expr) && expr.operator === 'Negate')
-    return getImaginaryFactor(expr.op1)?.neg();
+  if (isFunction(expr, 'Negate')) return getImaginaryFactor(expr.op1)?.neg();
 
-  if (isFunction(expr) && expr.operator === 'Complex') {
+  if (isFunction(expr, 'Complex')) {
     if (expr.op1.is(0) && !isNaN(expr.op2.re)) return ce.number(expr.op2.re);
     return undefined;
   }
 
-  if (isFunction(expr) && expr.operator === 'Multiply' && expr.nops === 2) {
+  if (isFunction(expr, 'Multiply') && expr.nops === 2) {
     const [op1, op2] = expr.ops;
-    if (isSymbol(op1) && op1.symbol === 'ImaginaryUnit') return op2;
-    if (isSymbol(op2) && op2.symbol === 'ImaginaryUnit') return op1;
+    if (isSymbol(op1, 'ImaginaryUnit')) return op2;
+    if (isSymbol(op2, 'ImaginaryUnit')) return op1;
 
     // c * (bi)
     if (isNumber(op2) && op2.re === 0 && op2.im !== 0) return op1.mul(op2.im!);
@@ -242,7 +241,7 @@ export function getImaginaryFactor(
     if (isNumber(op1) && op1.re === 0 && op1.im !== 0) return op2.mul(op1.im!);
   }
 
-  if (isFunction(expr) && expr.operator === 'Divide') {
+  if (isFunction(expr, 'Divide')) {
     const denom = expr.op2;
     if (denom.is(0)) return undefined;
     return getImaginaryFactor(expr.op1)?.div(denom);
@@ -282,21 +281,20 @@ export function getPiTerm(
   expr: Expression
 ): [k: NumericValue, t: NumericValue] {
   const ce = expr.engine;
-  if (isSymbol(expr) && expr.symbol === 'Pi')
-    return [ce._numericValue(1), ce._numericValue(0)];
+  if (isSymbol(expr, 'Pi')) return [ce._numericValue(1), ce._numericValue(0)];
 
-  if (isFunction(expr) && expr.operator === 'Negate') {
+  if (isFunction(expr, 'Negate')) {
     const [k, t] = getPiTerm(expr.ops[0]);
     return [k.neg(), t.neg()];
   }
 
-  if (isFunction(expr) && expr.operator === 'Add' && expr.nops === 2) {
+  if (isFunction(expr, 'Add') && expr.nops === 2) {
     const [k1, t1] = getPiTerm(expr.op1);
     const [k2, t2] = getPiTerm(expr.op2);
     return [k1.add(k2), t1.add(t2)];
   }
 
-  if (isFunction(expr) && expr.operator === 'Multiply' && expr.nops === 2) {
+  if (isFunction(expr, 'Multiply') && expr.nops === 2) {
     if (isNumber(expr.op1)) {
       const [k, t] = getPiTerm(expr.op2);
       const n = expr.op1.numericValue;
@@ -309,7 +307,7 @@ export function getPiTerm(
     }
   }
 
-  if (isFunction(expr) && expr.operator === 'Divide') {
+  if (isFunction(expr, 'Divide')) {
     if (isNumber(expr.op2)) {
       const [k1, t1] = getPiTerm(expr.op1);
       const d = expr.op2.numericValue;
@@ -318,10 +316,7 @@ export function getPiTerm(
   }
 
   const nVal = expr.N();
-  return [
-    ce._numericValue(0),
-    ce._numericValue(isNumber(nVal) ? nVal.numericValue : 0),
-  ];
+  return [ce._numericValue(0), ce._numericValue(numericValue(nVal) ?? 0)];
 }
 
 export function isValidOperatorDef(

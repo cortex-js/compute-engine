@@ -115,7 +115,7 @@ const OPERATORS: Record<
       // we don't include a '+' in the result
       return (
         ops.reduce((acc: string, x) => {
-          if (isFunction(x) && x.operator === 'Negate') {
+          if (isFunction(x, 'Negate')) {
             const rhs = serialize(x.op1, 10);
             if (acc === '') return `-${rhs}`;
             if (rhs.startsWith('+')) return `${acc} - ${rhs.substring(1)}`;
@@ -313,7 +313,7 @@ const FUNCTIONS: Record<
     const expr = expr_ as FnExpr;
     const [fn, val] = expr.ops;
 
-    if (fn?.operator === 'Function' && isFunction(fn)) {
+    if (isFunction(fn, 'Function')) {
       const args = fn.ops.slice(2);
       const body = fn.op1 ?? fn;
       let arg: Expression | null = null;
@@ -321,7 +321,7 @@ const FUNCTIONS: Record<
       return arg
         ? `lim_(${serialize(arg)} -> ${serialize(val)}) ${serialize(body)}`
         : `lim_(${serialize(val)}) ${serialize(body)}`;
-    } else if (fn && isSymbol(fn)) {
+    } else if (isSymbol(fn)) {
       return `lim_(x -> ${serialize(val)}) ${serialize(fn)}(x)`;
     }
 
@@ -387,10 +387,10 @@ const FUNCTIONS: Record<
 
     const serializedArgs = () => args.map((x) => serialize(x)).join(', ');
 
-    if (expr.op1.operator === 'Block' && isFunction(expr.op1)) {
+    if (isFunction(expr.op1, 'Block')) {
       if (expr.op1.nops === 0) return `(${serializedArgs()}) |-> {}`;
       if (expr.op1.nops === 1) {
-        if (args.length === 1 && isSymbol(args[0]) && args[0].symbol === '_1') {
+        if (args.length === 1 && isSymbol(args[0], '_1')) {
           // If there is a single argument and it's _1, we can use _ instead
           return `(_) |-> ${serialize(expr.op1.op1.subs({ _1: '_' }))}`;
         }
@@ -433,10 +433,10 @@ function bigOp(
 
   let args: ReadonlyArray<Expression> = [];
 
-  if (fn?.operator === 'Function' && isFunction(fn)) {
+  if (isFunction(fn, 'Function')) {
     args = fn.ops.slice(1);
     const b = fn.op1 ?? fn;
-    if (b.operator === 'Block' && isFunction(b)) body = serialize(b.op1 ?? b);
+    if (isFunction(b, 'Block')) body = serialize(b.op1 ?? b);
     else body = serialize(b);
   } else if (fn) {
     // Handle symbols and general expressions (e.g., Multiply, Add)
@@ -459,30 +459,26 @@ function bigOp(
       if (isSymbol(limit.op1) && limit.op1.symbol) {
         // ["Integrate", ["Tuple", "x", 1]]
         if (limit.op1.symbol !== 'Nothing') indexes.push(limit.op1);
-        if (!(isSymbol(limit.op2) && limit.op2.symbol === 'Nothing')) {
+        if (!isSymbol(limit.op2, 'Nothing')) {
           if (op === 'int') result += `_${wrap(serialize(limit.op2))}`;
           else
             result += '_' + wrap(`${limit.op1.symbol}=${serialize(limit.op2)}`);
         }
       } else {
         // ["Integrate", ["Tuple", 1, 2]]
-        if (!(isSymbol(limit.op1) && limit.op1.symbol === 'Nothing'))
+        if (!isSymbol(limit.op1, 'Nothing'))
           result += `_${wrap(serialize(limit.op1))}`;
-        if (!(isSymbol(limit.op2) && limit.op2.symbol === 'Nothing'))
+        if (!isSymbol(limit.op2, 'Nothing'))
           result += `^${wrap(serialize(limit.op2))}`;
       }
     } else if (limit.nops === 3) {
       let index = '';
-      if (!(isSymbol(limit.op1) && limit.op1.symbol === 'Nothing')) {
+      if (!isSymbol(limit.op1, 'Nothing')) {
         indexes.push(limit.op1);
         index = isSymbol(limit.op1) ? limit.op1.symbol : '';
       }
-      const start = !(isSymbol(limit.op2) && limit.op2.symbol === 'Nothing')
-        ? limit.op2
-        : null;
-      const end = !(isSymbol(limit.op3) && limit.op3.symbol === 'Nothing')
-        ? limit.op3
-        : null;
+      const start = !isSymbol(limit.op2, 'Nothing') ? limit.op2 : null;
+      const end = !isSymbol(limit.op3, 'Nothing') ? limit.op3 : null;
 
       if (start) {
         if (op === 'int' || !index) result += `_${wrap(serialize(start))}`;
@@ -526,7 +522,7 @@ function delimiter(
   if (!expr) return `${open}${close}`;
 
   let items: ReadonlyArray<Expression> = [expr];
-  if (isFunction(expr) && expr.operator === 'Sequence') items = expr.ops;
+  if (isFunction(expr, 'Sequence')) items = expr.ops;
 
   return `${open}${items.map((x) => serialize(x)).join(separator)}${close}`;
 }
@@ -606,39 +602,37 @@ export function toAsciiMath(
   // Tensors like List also have operator but _kind = 'tensor'.
   //
   const fnExpr = isFunction(expr) ? expr : null;
-  if (expr.operator) {
-    const operators = options.operators
-      ? { ...OPERATORS, ...options.operators }
-      : OPERATORS;
-    const [operator, precedence_] = operators[expr.operator] ?? [];
-    if (operator && fnExpr) {
-      // Go over each operands and convert them to ascii math
-      let result = '';
-      if (typeof operator === 'function') {
-        result = operator(fnExpr, serialize);
-      } else {
-        if (fnExpr.nops === 1)
-          return `${operator}${serialize(fnExpr.op1, precedence_ + 1)}`;
+  const operators = options.operators
+    ? { ...OPERATORS, ...options.operators }
+    : OPERATORS;
+  const [operator, precedence_] = operators[expr.operator] ?? [];
+  if (operator && fnExpr) {
+    // Go over each operands and convert them to ascii math
+    let result = '';
+    if (typeof operator === 'function') {
+      result = operator(fnExpr, serialize);
+    } else {
+      if (fnExpr.nops === 1)
+        return `${operator}${serialize(fnExpr.op1, precedence_ + 1)}`;
 
-        result =
-          fnExpr.ops
-            .map((x) => serialize(x, precedence_ + 1))
-            .join(` ${operator} `) ?? '';
-      }
-      return wrap(result, precedence, precedence_);
+      result =
+        fnExpr.ops
+          .map((x) => serialize(x, precedence_ + 1))
+          .join(` ${operator} `) ?? '';
     }
-    const functions = options.functions
-      ? { ...FUNCTIONS, ...options.functions }
-      : FUNCTIONS;
-    const func = functions[expr.operator];
-    if (typeof func === 'function') return func(expr, serialize);
-    // For non-function expression types with operators (e.g., tensors like List),
-    // fall through to JSON serialization if no matching function/operator handler
-    if (fnExpr) {
-      if (typeof func === 'string')
-        return `${func}(${fnExpr.ops.map((x) => serialize(x)).join(', ') ?? ''})`;
-      return `${expr.operator}(${fnExpr.ops.map((x) => serialize(x)).join(', ') ?? ''})`;
-    }
+    return wrap(result, precedence, precedence_);
+  }
+  const functions = options.functions
+    ? { ...FUNCTIONS, ...options.functions }
+    : FUNCTIONS;
+  const func = functions[expr.operator];
+  if (typeof func === 'function') return func(expr, serialize);
+  // For non-function expression types with operators (e.g., tensors like List),
+  // fall through to JSON serialization if no matching function/operator handler
+  if (fnExpr) {
+    if (typeof func === 'string')
+      return `${func}(${fnExpr.ops.map((x) => serialize(x)).join(', ') ?? ''})`;
+    return `${expr.operator}(${fnExpr.ops.map((x) => serialize(x)).join(', ') ?? ''})`;
   }
 
   return JSON.stringify(expr.json);

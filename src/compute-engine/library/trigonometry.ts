@@ -259,7 +259,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       signature: '(number) -> real',
       type: () => 'finite_real',
       evaluate: ([x], { engine: ce }) => {
-        if (!x || !isNumber(x)) return undefined;
+        if (!isNumber(x)) return undefined;
         return ce.number(sinc(x.re));
       },
     },
@@ -271,7 +271,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       signature: '(number) -> real',
       type: () => 'finite_real',
       evaluate: ([x], { engine: ce }) => {
-        if (!x || !isNumber(x)) return undefined;
+        if (!isNumber(x)) return undefined;
         return ce.number(fresnelS(x.re));
       },
     },
@@ -283,7 +283,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       signature: '(number) -> real',
       type: () => 'finite_real',
       evaluate: ([x], { engine: ce }) => {
-        if (!x || !isNumber(x)) return undefined;
+        if (!isNumber(x)) return undefined;
         return ce.number(fresnelC(x.re));
       },
     },
@@ -327,7 +327,7 @@ const ANGULAR_UNITS = new Set([
  * (from `.re` on non-numeric expressions) and `Infinity`.
  */
 function angularQuantityToRadians(expr: Expression): Expression | null {
-  if (!isFunction(expr) || expr.operator !== 'Quantity') return null;
+  if (!isFunction(expr, 'Quantity')) return null;
 
   const unitArg = expr.op2;
   if (!isSymbol(unitArg)) return null;

@@ -1971,7 +1971,7 @@ function processMinMaxItem(
   const upper = mode === 'Max' || mode === 'Supremum';
 
   // An interval is continuous
-  if (item.operator === 'Interval' && isFunction(item)) {
+  if (isFunction(item, 'Interval')) {
     const b = upper ? item.op2 : item.op1;
 
     if (!b.isNumber || !isNumber(b)) return [undefined, [item]];
@@ -1989,7 +1989,7 @@ function processMinMaxItem(
     }
   }
 
-  if (item.operator === 'Linspace' && isFunction(item)) {
+  if (isFunction(item, 'Linspace')) {
     if (item.nops === 1) item = upper ? item.op1 : ce.One;
     else if (upper) item = item.op2;
     else item = item.op1;

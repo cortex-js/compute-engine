@@ -6,7 +6,7 @@ import type {
   IComputeEngine as ComputeEngine,
   Rule,
 } from '../global-types';
-import { isNumber, isFunction, isSymbol } from './type-guards';
+import { isNumber, isFunction, isSymbol, numericValue } from './type-guards';
 
 function numericApproximation(value: unknown): number | undefined {
   if (typeof value === 'number') return value;
@@ -446,7 +446,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
       const b = sub.__b;
       if (!a || a.is(0)) return false;
       const ratio = b.div(a).neg();
-      const val = isNumber(ratio) ? ratio.numericValue : undefined;
+      const val = numericValue(ratio);
       if (val === undefined) return true; // Allow symbolic ratios
       if (typeof val === 'number') return Math.abs(val) <= 1;
       return true;
@@ -468,7 +468,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
       const b = sub.__b;
       if (!a || a.is(0)) return false;
       const ratio = b.div(a).neg();
-      const val = isNumber(ratio) ? ratio.numericValue : undefined;
+      const val = numericValue(ratio);
       if (val === undefined) return true;
       if (typeof val === 'number') return Math.abs(val) <= 1;
       return true;
@@ -483,7 +483,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     condition: (sub) => {
       if (!filter(sub)) return false;
       const b = sub.__b;
-      const val = isNumber(b) ? b.numericValue : undefined;
+      const val = numericValue(b);
       if (val === undefined) return true;
       if (typeof val === 'number') return Math.abs(val) <= 1;
       return true;
@@ -498,7 +498,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     condition: (sub) => {
       if (!filter(sub)) return false;
       const b = sub.__b;
-      const val = isNumber(b) ? b.numericValue : undefined;
+      const val = numericValue(b);
       if (val === undefined) return true;
       if (typeof val === 'number') return Math.abs(val) <= 1;
       return true;
@@ -517,7 +517,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
       const b = sub.__b;
       if (!a || a.is(0)) return false;
       const ratio = b.div(a).neg();
-      const val = isNumber(ratio) ? ratio.numericValue : undefined;
+      const val = numericValue(ratio);
       if (val === undefined) return true;
       if (typeof val === 'number') return Math.abs(val) <= 1;
       return true;
@@ -535,7 +535,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
       const b = sub.__b;
       if (!a || a.is(0)) return false;
       const ratio = b.div(a).neg();
-      const val = isNumber(ratio) ? ratio.numericValue : undefined;
+      const val = numericValue(ratio);
       if (val === undefined) return true;
       if (typeof val === 'number') return Math.abs(val) <= 1;
       return true;
@@ -550,7 +550,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     condition: (sub) => {
       if (!filter(sub)) return false;
       const b = sub.__b;
-      const val = isNumber(b) ? b.numericValue : undefined;
+      const val = numericValue(b);
       if (val === undefined) return true;
       if (typeof val === 'number') return Math.abs(val) <= 1;
       return true;
@@ -565,7 +565,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     condition: (sub) => {
       if (!filter(sub)) return false;
       const b = sub.__b;
-      const val = isNumber(b) ? b.numericValue : undefined;
+      const val = numericValue(b);
       if (val === undefined) return true;
       if (typeof val === 'number') return Math.abs(val) <= 1;
       return true;
@@ -624,7 +624,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
  * becomes `a - bx` after multiplying by x).
  */
 function clearDenominators(expr: Expression, _variable?: string): Expression {
-  if (expr.operator !== 'Add' || !isFunction(expr)) return expr;
+  if (!isFunction(expr, 'Add')) return expr;
 
   const ops = expr.ops;
   if (ops.length === 0) return expr;
@@ -697,7 +697,7 @@ function transformSqrtLinearEquation(
   expr: Expression,
   variable: string
 ): Expression {
-  if (expr.operator !== 'Add' || !isFunction(expr)) return expr;
+  if (!isFunction(expr, 'Add')) return expr;
 
   const ce = expr.engine;
   const ops = expr.ops;
@@ -716,7 +716,7 @@ function transformSqrtLinearEquation(
       break;
     }
     // Check for coefficient * Sqrt(...) like 2*sqrt(x)
-    if (op.operator === 'Multiply' && isFunction(op)) {
+    if (isFunction(op, 'Multiply')) {
       for (const factor of op.ops) {
         if (factor.operator === 'Sqrt') {
           // This is a more complex case (a*√f(x) + g(x) = 0)
@@ -783,7 +783,7 @@ function solveTwoSqrtEquation(
   expr: Expression,
   variable: string
 ): Expression[] | null {
-  if (expr.operator !== 'Add' || !isFunction(expr)) return null;
+  if (!isFunction(expr, 'Add')) return null;
 
   const ce = expr.engine;
   const ops = expr.ops;
@@ -800,15 +800,14 @@ function solveTwoSqrtEquation(
     const op = ops[i];
 
     // Check for Sqrt(...)
-    if (op.operator === 'Sqrt' && isFunction(op) && op.op1) {
+    if (isFunction(op, 'Sqrt') && op.op1) {
       sqrtTerms.push({ term: op, arg: op.op1, index: i });
       continue;
     }
 
     // Check for Negate(Sqrt(...))
     if (
-      isFunction(op) &&
-      op.operator === 'Negate' &&
+      isFunction(op, 'Negate') &&
       isFunction(op.op1) &&
       op.op1.operator === 'Sqrt' &&
       isFunction(op.op1) &&
@@ -819,9 +818,9 @@ function solveTwoSqrtEquation(
     }
 
     // Check for coefficient * Sqrt(...)
-    if (op.operator === 'Multiply' && isFunction(op)) {
+    if (isFunction(op, 'Multiply')) {
       for (const factor of op.ops) {
-        if (factor.operator === 'Sqrt' && isFunction(factor) && factor.op1) {
+        if (isFunction(factor, 'Sqrt') && factor.op1) {
           sqrtTerms.push({ term: op, arg: factor.op1, index: i });
           break;
         }
@@ -865,10 +864,7 @@ function solveTwoSqrtEquation(
   let gSign = 1;
 
   if (sqrtTerms[0].term.operator === 'Negate') fSign = -1;
-  if (
-    sqrtTerms[0].term.operator === 'Multiply' &&
-    isFunction(sqrtTerms[0].term)
-  ) {
+  if (isFunction(sqrtTerms[0].term, 'Multiply')) {
     // Check if coefficient is negative
     const coef = sqrtTerms[0].term.ops.find((o) => o.operator !== 'Sqrt');
     if (coef?.isNegative) fSign = -1;
@@ -881,10 +877,7 @@ function solveTwoSqrtEquation(
   }
 
   if (sqrtTerms[1].term.operator === 'Negate') gSign = -1;
-  if (
-    sqrtTerms[1].term.operator === 'Multiply' &&
-    isFunction(sqrtTerms[1].term)
-  ) {
+  if (isFunction(sqrtTerms[1].term, 'Multiply')) {
     const coef = sqrtTerms[1].term.ops.find((o) => o.operator !== 'Sqrt');
     if (coef?.isNegative) gSign = -1;
     const absCoefExpr = coef?.abs().N();
@@ -973,7 +966,7 @@ function solveTwoSqrtEquationCore(
 
     // Check if lhs ≈ e
     const diff = lhs.sub(eVal).abs().N();
-    const diffNum = isNumber(diff) ? diff.numericValue : undefined;
+    const diffNum = numericValue(diff);
     const diffReal = numericApproximation(diffNum) ?? 0;
 
     if (diffReal < 1e-9) {
@@ -998,7 +991,7 @@ function solveNestedSqrtEquation(
   expr: Expression,
   variable: string
 ): Expression[] | null {
-  if (expr.operator !== 'Add' || !isFunction(expr)) return null;
+  if (!isFunction(expr, 'Add')) return null;
 
   const ce = expr.engine;
   const ops = expr.ops;
@@ -1028,40 +1021,27 @@ function solveNestedSqrtEquation(
   // implicitly by the replace+subs substitution below.
   let hasInnerSqrtX = false;
 
-  if (outerArg.operator === 'Add' && isFunction(outerArg)) {
+  if (isFunction(outerArg, 'Add')) {
     for (const term of outerArg.ops) {
       // Check for √x directly
-      if (
-        term.operator === 'Sqrt' &&
-        isFunction(term) &&
-        isSymbol(term.op1) &&
-        term.op1.symbol === variable
-      ) {
+      if (isFunction(term, 'Sqrt') && isSymbol(term.op1, variable)) {
         hasInnerSqrtX = true;
         break;
       }
       // Check for Negate(Sqrt(x))
       if (
-        term.operator === 'Negate' &&
-        isFunction(term) &&
-        isFunction(term.op1) &&
-        term.op1.operator === 'Sqrt' &&
-        isFunction(term.op1) &&
-        isSymbol(term.op1.op1) &&
-        term.op1.op1.symbol === variable
+        isFunction(term, 'Negate') &&
+        isFunction(term.op1, 'Sqrt') &&
+        isSymbol(term.op1.op1, variable)
       ) {
         hasInnerSqrtX = true;
         break;
       }
       // Check for coefficient * √x
-      if (term.operator === 'Multiply' && isFunction(term)) {
+      if (isFunction(term, 'Multiply')) {
         if (
           term.ops.some(
-            (f) =>
-              f.operator === 'Sqrt' &&
-              isFunction(f) &&
-              isSymbol(f.op1) &&
-              f.op1.symbol === variable
+            (f) => isFunction(f, 'Sqrt') && isSymbol(f.op1, variable)
           )
         ) {
           hasInnerSqrtX = true;
@@ -1142,7 +1122,7 @@ function solveNestedSqrtEquation(
     if (uNumeric.isNegative) continue; // Skip negative u values
 
     // Also check numericValue for cases where isNegative might not be set
-    const uNum = isNumber(uNumeric) ? uNumeric.numericValue : undefined;
+    const uNum = numericValue(uNumeric);
     if (uNum !== undefined) {
       const uReal = numericApproximation(uNum);
       if (uReal !== undefined && uReal < -1e-10) continue; // Skip negative u values
@@ -1168,7 +1148,7 @@ export function findUnivariateRoots(
 ): ReadonlyArray<Expression> {
   const ce = expr.engine;
 
-  if (expr.operator === 'Equal' && isFunction(expr)) {
+  if (isFunction(expr, 'Equal')) {
     const lhs = expand(expr.op1) ?? expr.op1;
     const rhs = expand(expr.op2) ?? expr.op2;
     expr = lhs.sub(rhs).simplify();

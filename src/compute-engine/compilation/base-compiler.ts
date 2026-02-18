@@ -212,7 +212,7 @@ export class BaseCompiler {
         const cond = args[i];
         const val = args[i + 1];
         // If condition is the symbol True, it's the default branch
-        if (isSymbol(cond) && cond.symbol === 'True') {
+        if (isSymbol(cond, 'True')) {
           return `(${BaseCompiler.compile(val, target)})`;
         }
         return `((${BaseCompiler.compile(cond, target)}) ? (${BaseCompiler.compile(val, target)}) : ${compilePair(i + 2)})`;
@@ -260,7 +260,7 @@ export class BaseCompiler {
     // Get all the Declare statements
     const locals: string[] = [];
     for (const arg of args) {
-      if (arg.operator === 'Declare' && isFunction(arg)) {
+      if (isFunction(arg, 'Declare')) {
         const firstOp = arg.ops[0];
         if (isSymbol(firstOp)) locals.push(firstOp.symbol);
       }
@@ -303,14 +303,14 @@ export class BaseCompiler {
     if (!args[1]) throw new Error('Loop: no indexing set');
 
     const indexing = args[1];
-    if (indexing.operator !== 'Element' || !isFunction(indexing))
+    if (!isFunction(indexing, 'Element'))
       throw new Error('Loop: expected Element(index, Range(lo, hi))');
 
     const indexExpr = indexing.ops[0];
     const rangeExpr = indexing.ops[1];
 
     if (!isSymbol(indexExpr)) throw new Error('Loop: index must be a symbol');
-    if (rangeExpr.operator !== 'Range' || !isFunction(rangeExpr))
+    if (!isFunction(rangeExpr, 'Range'))
       throw new Error('Loop: expected Range(lo, hi)');
 
     const index = indexExpr.symbol;
@@ -354,7 +354,7 @@ export class BaseCompiler {
     target: CompileTarget<Expression>
   ): string {
     // Nothing is a no-op in statement context
-    if (isSymbol(expr) && expr.symbol === 'Nothing') return '';
+    if (isSymbol(expr, 'Nothing')) return '';
     if (!isFunction(expr)) return BaseCompiler.compile(expr, target);
 
     const h = expr.operator;

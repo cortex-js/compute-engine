@@ -270,7 +270,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
 
         // Determine bins
         let binEdges: number[];
-        if (binsArg?.operator === 'List' && isFunction(binsArg)) {
+        if (isFunction(binsArg, 'List')) {
           binEdges = binsArg.ops.map((op) => op.re);
         } else {
           const binCount = toInteger(binsArg);

@@ -202,8 +202,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       BaseCompiler.isComplexValued(exp)
     ) {
       // Optimize: e^z → _gpu_cexp(z) when base is ExponentialE
-      if (isSymbol(base) && base.symbol === 'ExponentialE')
-        return `_gpu_cexp(${compile(exp)})`;
+      if (isSymbol(base, 'ExponentialE')) return `_gpu_cexp(${compile(exp)})`;
       // Promote real operands to vec2
       const v2 = gpuVec2(target);
       const bCode = BaseCompiler.isComplexValued(base)

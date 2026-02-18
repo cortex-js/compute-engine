@@ -71,7 +71,7 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
     }
 
     // root(sqrt(x), n) -> x^{1/(2n)} (nth root of square root)
-    if (arg.operator === 'Sqrt' && isFunction(arg) && arg.op1) {
+    if (isFunction(arg, 'Sqrt') && arg.op1) {
       const innerBase = arg.op1;
       // root(sqrt(x), n) = x^{1/(2n)}
       return {
@@ -81,7 +81,7 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
     }
 
     // root(root(x, m), n) -> x^{1/(m*n)} (nested roots)
-    if (arg.operator === 'Root' && isFunction(arg) && arg.op1 && arg.op2) {
+    if (isFunction(arg, 'Root') && arg.op1 && arg.op2) {
       const innerBase = arg.op1;
       const innerRootIndex = arg.op2;
       // root(root(x, m), n) = x^{1/(m*n)}
@@ -92,7 +92,7 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
     }
 
     // Root(x^n, n) -> |x| or x depending on n
-    if (arg.operator === 'Power' && isFunction(arg)) {
+    if (isFunction(arg, 'Power')) {
       const base = arg.op1;
       const exp = arg.op2;
 
@@ -166,7 +166,7 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
 
     // Root of Multiply: root(a*b*..., n) -> root(a,n) * root(b,n) * ...
     // Distribute root over product when some factors have perfect nth roots
-    if (arg.operator === 'Multiply' && isFunction(arg) && arg.ops.length >= 2) {
+    if (isFunction(arg, 'Multiply') && arg.ops.length >= 2) {
       const n = rootIndex.re;
       if (n !== undefined && Number.isInteger(n) && n >= 2) {
         const insideRoot: Expression[] = [];
@@ -259,7 +259,7 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
     }
 
     // sqrt(sqrt(x)) -> x^{1/4} (nested square roots)
-    if (arg.operator === 'Sqrt' && isFunction(arg) && arg.op1) {
+    if (isFunction(arg, 'Sqrt') && arg.op1) {
       return {
         value: arg.op1.pow(ce.number([1, 4])),
         because: 'sqrt(sqrt(x)) -> x^{1/4}',
@@ -267,7 +267,7 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
     }
 
     // sqrt(root(x, n)) -> x^{1/(2n)} (square root of nth root)
-    if (arg.operator === 'Root' && isFunction(arg) && arg.op1 && arg.op2) {
+    if (isFunction(arg, 'Root') && arg.op1 && arg.op2) {
       const innerBase = arg.op1;
       const rootIndex = arg.op2;
       // sqrt(root(x, n)) = x^{1/(2n)}
@@ -277,7 +277,7 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
       };
     }
 
-    if (arg.operator === 'Power' && isFunction(arg)) {
+    if (isFunction(arg, 'Power')) {
       const base = arg.op1;
       const exp = arg.op2;
 
@@ -324,17 +324,12 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
     // sqrt(a * b * ...) -> factor out perfect squares
     // sqrt(x^2 * y) -> |x| * sqrt(y)
     // sqrt(x^{2n} * y) -> |x|^n * sqrt(y)
-    if (arg.operator === 'Multiply' && isFunction(arg)) {
+    if (isFunction(arg, 'Multiply')) {
       const perfectSquares: Expression[] = [];
       const remaining: Expression[] = [];
 
       for (const factor of arg.ops) {
-        if (
-          factor.operator === 'Power' &&
-          isFunction(factor) &&
-          factor.op1 &&
-          factor.op2
-        ) {
+        if (isFunction(factor, 'Power') && factor.op1 && factor.op2) {
           const base = factor.op1;
           const exp = factor.op2;
           // x^2 -> |x| outside, nothing inside
@@ -430,7 +425,7 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
     // (negative * b * ...)^{p/q} -> -(positive * b * ...)^{p/q} when p,q odd
     // e.g., (-2x)^{3/5} -> -(2x)^{3/5}
     // This handles products like Multiply(-2, x) raised to a rational power
-    if (base.operator === 'Multiply' && isFunction(base)) {
+    if (isFunction(base, 'Multiply')) {
       const rat = asRational(exp);
       if (rat) {
         const [num, denom] = rat;
@@ -472,11 +467,7 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
 
     // (a * b * ...)^n -> a^n * b^n * ... when n is an integer
     // Distribute exponent over product
-    if (
-      base.operator === 'Multiply' &&
-      isFunction(base) &&
-      exp.isInteger === true
-    ) {
+    if (isFunction(base, 'Multiply') && exp.isInteger === true) {
       const newFactors = base.ops.map((factor) => factor.pow(exp));
       return {
         value: ce._fn('Multiply', newFactors),
@@ -485,7 +476,7 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
     }
 
     // (-x)^n -> x^n when n is even, (-x)^n -> -x^n when n is odd
-    if (base.operator === 'Negate' && isFunction(base)) {
+    if (isFunction(base, 'Negate')) {
       const innerBase = base.op1;
 
       // Handle integer exponents
@@ -542,7 +533,7 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
     }
 
     // (sqrt(x))^n -> x^{n/2}
-    if (base.operator === 'Sqrt' && isFunction(base)) {
+    if (isFunction(base, 'Sqrt')) {
       const innerBase = base.op1;
       // sqrt(x)^n = x^{n/2}
       // Safe when: n is even (result is integer power), or x is non-negative
@@ -563,7 +554,7 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
     }
 
     // (root(x, k))^n -> x^{n/k}
-    if (base.operator === 'Root' && isFunction(base)) {
+    if (isFunction(base, 'Root')) {
       const innerBase = base.op1;
       const rootIndex = base.op2;
       // root(x, k)^n = x^{n/k}
@@ -578,7 +569,7 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
     }
 
     // (x^n)^m -> x^{n*m} under certain conditions
-    if (base.operator === 'Power' && isFunction(base)) {
+    if (isFunction(base, 'Power')) {
       const innerBase = base.op1;
       const innerExp = base.op2;
 
@@ -602,15 +593,11 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
     }
 
     // (a/b)^{-n} -> (b/a)^n
-    if (
-      base.operator === 'Divide' &&
-      isFunction(base) &&
-      base.op2.is(0) === false
-    ) {
+    if (isFunction(base, 'Divide') && base.op2.is(0) === false) {
       const num = base.op1;
       const denom = base.op2;
 
-      if (exp.operator === 'Negate' && isFunction(exp)) {
+      if (isFunction(exp, 'Negate')) {
         return {
           value: denom.div(num).pow(exp.op1),
           because: '(a/b)^{-n} -> (b/a)^n',
@@ -642,8 +629,7 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
 
     // Same-base division: a^m / a^n -> a^{m-n}
     if (
-      num.operator === 'Power' &&
-      isFunction(num) &&
+      isFunction(num, 'Power') &&
       denom.operator === 'Power' &&
       isFunction(denom)
     ) {
@@ -664,7 +650,7 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
     }
 
     // a^m / a -> a^{m-1}
-    if (num.operator === 'Power' && isFunction(num) && num.op1.isSame(denom)) {
+    if (isFunction(num, 'Power') && num.op1.isSame(denom)) {
       const diffExp = ce.function('Add', [num.op2, ce.NegativeOne]);
       return {
         value: denom.pow(diffExp),
@@ -673,11 +659,7 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
     }
 
     // a / a^n -> a^{1-n}
-    if (
-      denom.operator === 'Power' &&
-      isFunction(denom) &&
-      denom.op1.isSame(num)
-    ) {
+    if (isFunction(denom, 'Power') && denom.op1.isSame(num)) {
       const diffExp = ce.function('Add', [ce.One, denom.op2.neg()]);
       return {
         value: num.pow(diffExp),
@@ -686,15 +668,11 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
     }
 
     // a / b^{-n} -> a * b^n
-    if (
-      denom.operator === 'Power' &&
-      isFunction(denom) &&
-      denom.op1.is(0) === false
-    ) {
+    if (isFunction(denom, 'Power') && denom.op1.is(0) === false) {
       const base = denom.op1;
       const exp = denom.op2;
 
-      if (exp.operator === 'Negate' && isFunction(exp)) {
+      if (isFunction(exp, 'Negate')) {
         return {
           value: num.mul(base.pow(exp.op1)),
           because: 'a / b^{-n} -> a * b^n',
@@ -703,12 +681,11 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
     }
 
     // a / (d * b^{-n}) -> (a/d) * b^n
-    if (denom.operator === 'Multiply' && isFunction(denom)) {
+    if (isFunction(denom, 'Multiply')) {
       for (let i = 0; i < denom.ops.length; i++) {
         const factor = denom.ops[i];
         if (
-          factor.operator === 'Power' &&
-          isFunction(factor) &&
+          isFunction(factor, 'Power') &&
           factor.op1.is(0) === false &&
           factor.op2.operator === 'Negate' &&
           isFunction(factor.op2)
@@ -730,8 +707,7 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
 
     // a / (b/c)^d -> a * (c/b)^d
     if (
-      denom.operator === 'Power' &&
-      isFunction(denom) &&
+      isFunction(denom, 'Power') &&
       denom.op1.operator === 'Divide' &&
       isFunction(denom.op1) &&
       denom.op1.op2.is(0) !== true
@@ -757,12 +733,7 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
       const [a, b] = x.ops;
 
       // Both are powers
-      if (
-        a.operator === 'Power' &&
-        isFunction(a) &&
-        b.operator === 'Power' &&
-        isFunction(b)
-      ) {
+      if (isFunction(a, 'Power') && b.operator === 'Power' && isFunction(b)) {
         const baseA = a.op1;
         const expA = a.op2;
         const baseB = b.op1;
@@ -785,7 +756,7 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
       }
 
       // x * x^n -> x^{n+1}
-      if (b.operator === 'Power' && isFunction(b) && a.isSame(b.op1)) {
+      if (isFunction(b, 'Power') && a.isSame(b.op1)) {
         const canCombine =
           a.isPositive === true || a.isNegative === true || isNumber(a);
 
@@ -798,7 +769,7 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
       }
 
       // x^n * x -> x^{n+1}
-      if (a.operator === 'Power' && isFunction(a) && b.isSame(a.op1)) {
+      if (isFunction(a, 'Power') && b.isSame(a.op1)) {
         const canCombine =
           b.isPositive === true || b.isNegative === true || isNumber(b);
 

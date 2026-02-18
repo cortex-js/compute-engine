@@ -480,9 +480,8 @@ export abstract class _BoxedExpression implements Expression {
 
     if (typeof other === 'boolean') {
       const val = this.value;
-      if (other === true) return isSymbol(val) ? val.symbol === 'True' : false;
-      if (other === false)
-        return isSymbol(val) ? val.symbol === 'False' : false;
+      if (other === true) return isSymbol(val, 'True');
+      if (other === false) return isSymbol(val, 'False');
       return false;
     }
 

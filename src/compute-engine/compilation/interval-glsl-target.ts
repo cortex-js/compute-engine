@@ -1275,10 +1275,10 @@ const INTERVAL_GLSL_FUNCTIONS: CompiledFunctions<Expression> = {
     const exp = args[1];
     if (base === null) throw new Error('Power: no argument');
     // Check if this is e^x (base is ExponentialE)
-    if (isSymbol(base) && base.symbol === 'ExponentialE') {
+    if (isSymbol(base, 'ExponentialE')) {
       return `ia_exp(${compile(exp)})`;
     }
-    if (exp && isNumber(exp) && exp.im === 0) {
+    if (isNumber(exp) && exp.im === 0) {
       const expVal = exp.re;
       if (expVal === 2) return `ia_square(${compile(base)})`;
       return `ia_pow(${compile(base)}, ${expVal})`;
@@ -1290,7 +1290,7 @@ const INTERVAL_GLSL_FUNCTIONS: CompiledFunctions<Expression> = {
     const [arg, exp] = args;
     if (arg === null) throw new Error('Root: no argument');
     if (exp === null || exp?.re === 2) return `ia_sqrt(${compile(arg)})`;
-    if (exp && isNumber(exp) && exp.im === 0) {
+    if (isNumber(exp) && exp.im === 0) {
       return `ia_pow(${compile(arg)}, ${1 / exp.re})`;
     }
     throw new Error('Interval GLSL does not support variable root indices');

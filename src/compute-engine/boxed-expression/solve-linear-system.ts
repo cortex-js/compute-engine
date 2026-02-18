@@ -5,7 +5,7 @@ import type {
 import { polynomialDegree } from './polynomials';
 import { findUnivariateRoots } from './solve';
 import { expand } from './expand';
-import { isNumber, isFunction, isSymbol } from './type-guards';
+import { isFunction, isSymbol, numericValue } from './type-guards';
 
 function numericRealPart(value: unknown): number | undefined {
   if (typeof value === 'number') return value;
@@ -36,7 +36,7 @@ function isLinearInVariables(expr: Expression, variables: string[]): boolean {
   const countVariables = (e: Expression): number => {
     let count = 0;
     for (const v of variables) {
-      if (isSymbol(e) && e.symbol === v) return 1;
+      if (isSymbol(e, v)) return 1;
       if (e.has(v)) count++;
     }
     return count;
@@ -52,7 +52,7 @@ function isLinearInVariables(expr: Expression, variables: string[]): boolean {
     if (isSymbol(term) && variables.includes(term.symbol)) return true;
 
     // Handle Multiply: each variable should appear in at most one factor
-    if (term.operator === 'Multiply' && isFunction(term)) {
+    if (isFunction(term, 'Multiply')) {
       let varFactorCount = 0;
       for (const factor of term.ops) {
         if (countVariables(factor) > 0) {
@@ -74,17 +74,17 @@ function isLinearInVariables(expr: Expression, variables: string[]): boolean {
     }
 
     // Handle Add: each term should be linear
-    if (term.operator === 'Add' && isFunction(term)) {
+    if (isFunction(term, 'Add')) {
       return term.ops.every((t) => checkTerm(t));
     }
 
     // Handle Negate
-    if (term.operator === 'Negate' && isFunction(term)) {
+    if (isFunction(term, 'Negate')) {
       return checkTerm(term.op1);
     }
 
     // Handle Subtract
-    if (term.operator === 'Subtract' && isFunction(term)) {
+    if (isFunction(term, 'Subtract')) {
       return checkTerm(term.op1) && checkTerm(term.op2);
     }
 
@@ -171,7 +171,7 @@ function extractLinearCoefficients(
 
   // Handle Equal(lhs, rhs) -> lhs - rhs = 0
   let expr: Expression;
-  if (equation.operator === 'Equal' && isFunction(equation)) {
+  if (isFunction(equation, 'Equal')) {
     const lhs = equation.op1;
     const rhs = equation.op2;
     expr = expand(lhs.sub(rhs)) ?? lhs.sub(rhs);
@@ -218,22 +218,22 @@ function extractCoefficient(
   if (!expr.has(variable)) return ce.Zero;
 
   // If it's just the variable, coefficient is 1
-  if (isSymbol(expr) && expr.symbol === variable) return ce.One;
+  if (isSymbol(expr, variable)) return ce.One;
 
   // Handle Negate
-  if (expr.operator === 'Negate' && isFunction(expr)) {
+  if (isFunction(expr, 'Negate')) {
     const inner = extractCoefficient(expr.op1, variable, ce);
     return inner?.neg() ?? null;
   }
 
   // Handle Multiply: look for variable * coefficient
-  if (expr.operator === 'Multiply' && isFunction(expr)) {
+  if (isFunction(expr, 'Multiply')) {
     const ops = expr.ops;
     let coef: Expression = ce.One;
     let foundVar = false;
 
     for (const op of ops) {
-      if (isSymbol(op) && op.symbol === variable) {
+      if (isSymbol(op, variable)) {
         if (foundVar) return null; // Variable appears twice (non-linear)
         foundVar = true;
       } else if (op.has(variable)) {
@@ -247,7 +247,7 @@ function extractCoefficient(
   }
 
   // Handle Add: sum the coefficients from each term
-  if (expr.operator === 'Add' && isFunction(expr)) {
+  if (isFunction(expr, 'Add')) {
     let totalCoef: Expression = ce.Zero;
     for (const term of expr.ops) {
       const termCoef = extractCoefficient(term, variable, ce);
@@ -258,7 +258,7 @@ function extractCoefficient(
   }
 
   // Handle Subtract
-  if (expr.operator === 'Subtract' && isFunction(expr)) {
+  if (isFunction(expr, 'Subtract')) {
     const leftCoef = extractCoefficient(expr.op1, variable, ce);
     const rightCoef = extractCoefficient(expr.op2, variable, ce);
     if (leftCoef === null || rightCoef === null) return null;
@@ -287,7 +287,7 @@ function extractConstantTerm(
   if (!hasAnyVar) return expr;
 
   // Handle Add: collect constant terms
-  if (expr.operator === 'Add' && isFunction(expr)) {
+  if (isFunction(expr, 'Add')) {
     let constant: Expression = ce.Zero;
     for (const term of expr.ops) {
       const termHasVar = variables.some((v) => term.has(v));
@@ -299,12 +299,12 @@ function extractConstantTerm(
   }
 
   // Handle Negate
-  if (expr.operator === 'Negate' && isFunction(expr)) {
+  if (isFunction(expr, 'Negate')) {
     return extractConstantTerm(expr.op1, variables, ce).neg();
   }
 
   // Handle Subtract
-  if (expr.operator === 'Subtract' && isFunction(expr)) {
+  if (isFunction(expr, 'Subtract')) {
     const leftConst = extractConstantTerm(expr.op1, variables, ce);
     const rightConst = extractConstantTerm(expr.op2, variables, ce);
     return leftConst.sub(rightConst);
@@ -564,7 +564,7 @@ function solveParametric(
   const result: Record<string, Expression> = {};
   for (let i = 0; i < n; i++) {
     const sol = solution[i];
-    if (isSymbol(sol) && sol.symbol === variables[i]) continue;
+    if (isSymbol(sol, variables[i])) continue;
     result[variables[i]] = sol;
   }
 
@@ -593,8 +593,8 @@ function compareAbsoluteValues(
 
   // Try symbolic comparison first
   // For purely numeric expressions, this should work exactly
-  const aNum = isNumber(absA) ? absA.numericValue : undefined;
-  const bNum = isNumber(absB) ? absB.numericValue : undefined;
+  const aNum = numericValue(absA);
+  const bNum = numericValue(absB);
 
   // If both are numeric values (not expressions), compare them exactly
   if (aNum !== undefined && bNum !== undefined) {
@@ -609,8 +609,8 @@ function compareAbsoluteValues(
   // Fallback: evaluate numerically
   const aN = absA.N();
   const bN = absB.N();
-  const aVal = isNumber(aN) ? aN.numericValue : undefined;
-  const bVal = isNumber(bN) ? bN.numericValue : undefined;
+  const aVal = numericValue(aN);
+  const bVal = numericValue(bN);
 
   if (aVal === undefined || bVal === undefined) return undefined;
 
@@ -640,7 +640,7 @@ function isEffectivelyZero(expr: Expression | undefined): boolean {
 
   // Fallback: check numeric value with small tolerance
   const exprN = expr.N();
-  const numVal = isNumber(exprN) ? exprN.numericValue : undefined;
+  const numVal = numericValue(exprN);
   if (numVal === undefined) return false;
 
   const re = numericRealPart(numVal);
@@ -678,7 +678,7 @@ export function solvePolynomialSystem(
 
   // Normalize equations to lhs - rhs = 0 form
   const normalized = equations.map((eq) => {
-    if (eq.operator === 'Equal' && isFunction(eq)) {
+    if (isFunction(eq, 'Equal')) {
       const diff = eq.op1.sub(eq.op2);
       return (expand(diff) ?? diff).simplify();
     }
@@ -813,7 +813,7 @@ function extractXYCoefficient(
   let constant: Expression = ce.Zero;
 
   // Handle Add
-  if (expr.operator === 'Add' && isFunction(expr)) {
+  if (isFunction(expr, 'Add')) {
     for (const term of expr.ops) {
       const termResult = extractXYCoefficientFromTerm(term, x, y, ce);
       if (termResult === null) return null;
@@ -852,16 +852,16 @@ function extractXYCoefficientFromTerm(
   }
 
   // Term has both x and y - should be c*x*y
-  if (term.operator === 'Multiply' && isFunction(term)) {
+  if (isFunction(term, 'Multiply')) {
     let coef: Expression = ce.One;
     let foundX = false;
     let foundY = false;
 
     for (const factor of term.ops) {
-      if (isSymbol(factor) && factor.symbol === x) {
+      if (isSymbol(factor, x)) {
         if (foundX) return null; // x appears twice
         foundX = true;
-      } else if (isSymbol(factor) && factor.symbol === y) {
+      } else if (isSymbol(factor, y)) {
         if (foundY) return null; // y appears twice
         foundY = true;
       } else if (factor.has(x) || factor.has(y)) {
@@ -1208,9 +1208,9 @@ function extractLinearConstraint(
   const coefXN = coefX.N();
   const coefYN = coefY.N();
   const constantN = constant.N();
-  const aVal = isNumber(coefXN) ? coefXN.numericValue : undefined;
-  const bVal = isNumber(coefYN) ? coefYN.numericValue : undefined;
-  const cVal = isNumber(constantN) ? constantN.numericValue : undefined;
+  const aVal = numericValue(coefXN);
+  const bVal = numericValue(coefYN);
+  const cVal = numericValue(constantN);
 
   // Extract real number from numericValue (may be number or object with 're' property)
   const toNumber = (val: unknown): number | null => {

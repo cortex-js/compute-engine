@@ -37,7 +37,7 @@ export function together(op: Expression): Expression {
     if (h === 'Add') {
       const [numer, denom] = op.ops.reduce(
         (acc, x) => {
-          if (isFunction(x) && x.operator === 'Divide') {
+          if (isFunction(x, 'Divide')) {
             acc[0].push(x.ops[0]);
             acc[1].push(x.ops[1]);
           } else acc[0].push(x);
@@ -69,7 +69,7 @@ export function factorPerfectSquare(expr: Expression): Expression | null {
   const ce = expr.engine;
 
   // Must be an Add expression
-  if (!isFunction(expr) || expr.operator !== 'Add') return null;
+  if (!isFunction(expr, 'Add')) return null;
 
   const terms = expr.ops;
 
@@ -148,17 +148,15 @@ function extractSquareRoot(
   // For expressions with Abs, extract the inner value since we're looking for
   // the algebraic base (we'll check signs separately)
   // e.g., 2|x| → 2x for matching purposes
-  if (isFunction(sqrt) && sqrt.operator === 'Abs') {
-    return sqrt.op1;
-  }
+  if (isFunction(sqrt, 'Abs')) return sqrt.op1;
 
   // Handle Multiply(coefficient, Abs(...))
-  if (isFunction(sqrt) && sqrt.operator === 'Multiply') {
+  if (isFunction(sqrt, 'Multiply')) {
     const absFactors = sqrt.ops.filter((op) => op.operator === 'Abs');
     if (absFactors.length > 0) {
       // Replace Abs with its inner value
       const newOps = sqrt.ops.map((op) =>
-        isFunction(op) && op.operator === 'Abs' ? op.op1 : op
+        isFunction(op, 'Abs') ? op.op1 : op
       );
       return ce.box(['Multiply', ...newOps.map((op) => op.json)]);
     }
@@ -179,7 +177,7 @@ export function factorDifferenceOfSquares(expr: Expression): Expression | null {
   const ce = expr.engine;
 
   // Must be an Add expression with exactly 2 terms (one positive, one negative)
-  if (!isFunction(expr) || expr.operator !== 'Add') return null;
+  if (!isFunction(expr, 'Add')) return null;
 
   const terms = expr.ops;
   if (terms.length !== 2) return null;
@@ -193,7 +191,7 @@ export function factorDifferenceOfSquares(expr: Expression): Expression | null {
 
   for (const term of terms) {
     // Check if term is negative
-    let isNeg = isFunction(term) && term.operator === 'Negate';
+    let isNeg = isFunction(term, 'Negate');
     let absTerm = isNeg && isFunction(term) ? term.op1 : term;
 
     // Also handle negative numeric literals
@@ -203,7 +201,7 @@ export function factorDifferenceOfSquares(expr: Expression): Expression | null {
     }
 
     // Also handle negative terms from Multiply with negative coefficient
-    if (!isNeg && isFunction(term) && term.operator === 'Multiply') {
+    if (!isNeg && isFunction(term, 'Multiply')) {
       const ops = term.ops;
       // Check if first operand is negative number
       if (isNumber(ops[0]) && ops[0].isNegative === true) {

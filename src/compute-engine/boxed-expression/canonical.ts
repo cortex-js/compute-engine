@@ -335,7 +335,7 @@ function symbolForm(expr: Expression): Expression {
  */
 function divideForm(expr: Expression) {
   // If this is a divide, canonicalize it
-  if (expr.operator === 'Divide' && isFunction(expr))
+  if (isFunction(expr, 'Divide'))
     return canonicalDivide(powerForm(expr.op1), powerForm(expr.op2));
 
   // Recursively visit all sub-expressions

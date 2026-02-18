@@ -9,9 +9,9 @@ function distribute2(
 ): Expression {
   const ce = lhs.engine;
 
-  if (lhs.operator === g && isFunction(lhs))
+  if (isFunction(lhs, g))
     return ce.box([f, ...lhs.ops.map((x) => distribute2(x, rhs, g, f))]);
-  if (rhs.operator === g && isFunction(rhs))
+  if (isFunction(rhs, g))
     return ce.box([f, ...rhs.ops.map((x) => distribute2(lhs, x, g, f))]);
 
   return ce.box([f, lhs, rhs]);

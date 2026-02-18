@@ -100,8 +100,8 @@ function assumeEquality(proposition: Expression): AssumeResult {
   const unknowns = proposition.unknowns;
   if (unknowns.length === 0) {
     const val = proposition.evaluate();
-    if (isSymbol(val) && val.symbol === 'True') return 'tautology';
-    if (isSymbol(val) && val.symbol === 'False') return 'contradiction';
+    if (isSymbol(val, 'True')) return 'tautology';
+    if (isSymbol(val, 'False')) return 'contradiction';
     console.log(proposition.canonical.evaluate());
     return 'not-a-predicate';
   }
@@ -254,8 +254,8 @@ function assumeInequality(proposition: Expression): AssumeResult {
   // Case 2
   const result = ce.box([op === '<' ? 'Less' : 'LessEqual', p, 0]).evaluate();
 
-  if (isSymbol(result) && result.symbol === 'True') return 'tautology';
-  if (isSymbol(result) && result.symbol === 'False') return 'contradiction';
+  if (isSymbol(result, 'True')) return 'tautology';
+  if (isSymbol(result, 'False')) return 'contradiction';
 
   const unknowns = result.unknowns;
   if (unknowns.length === 0) return 'not-a-predicate';
@@ -274,7 +274,7 @@ function assumeInequality(proposition: Expression): AssumeResult {
     const originalOp = proposition.operator;
     const propOp1 = proposition.op1;
     const propOp2 = proposition.op2;
-    const isSymbolOnLeft = isSymbol(propOp1) && propOp1.symbol === symbol;
+    const isSymbolOnLeft = isSymbol(propOp1, symbol);
     const otherSide = isSymbolOnLeft ? propOp2 : propOp1;
 
     // Only do bounds checking for simple comparisons like "x > k" where k is numeric
@@ -486,8 +486,8 @@ function assumeElement(proposition: Expression): AssumeResult {
 
   // Case 4
   const val = proposition.evaluate();
-  if (isSymbol(val) && val.symbol === 'True') return 'tautology';
-  if (isSymbol(val) && val.symbol === 'False') return 'contradiction';
+  if (isSymbol(val, 'True')) return 'tautology';
+  if (isSymbol(val, 'False')) return 'contradiction';
   return 'not-a-predicate';
 }
 
@@ -550,7 +550,7 @@ export function getSignFromAssumptions(
     // Case 1: Direct symbol comparison
     // x < 0 means x is negative
     // x <= 0 means x is non-positive
-    if (isSymbol(lhs) && lhs.symbol === symbol) {
+    if (isSymbol(lhs, symbol)) {
       if (op === 'Less') return 'negative';
       if (op === 'LessEqual') return 'non-positive';
     }
@@ -558,12 +558,7 @@ export function getSignFromAssumptions(
     // Case 2: Negated symbol comparison
     // -x < 0 means x > 0 (positive)
     // -x <= 0 means x >= 0 (non-negative)
-    if (
-      isFunction(lhs) &&
-      lhs.operator === 'Negate' &&
-      isSymbol(lhs.op1) &&
-      lhs.op1.symbol === symbol
-    ) {
+    if (isFunction(lhs, 'Negate') && isSymbol(lhs.op1, symbol)) {
       if (op === 'Less') return 'positive';
       if (op === 'LessEqual') return 'non-negative';
     }
@@ -571,15 +566,15 @@ export function getSignFromAssumptions(
     // Case 3: Symbol with subtraction from constant
     // a - x < 0 means x > a, so if a >= 0, x is positive
     // x - a < 0 means x < a, so if a <= 0, x is negative
-    if (isFunction(lhs) && lhs.operator === 'Subtract') {
+    if (isFunction(lhs, 'Subtract')) {
       const [a, b] = lhs.ops;
       if (a && b) {
         // a - x < 0 => x > a
-        if (isSymbol(b) && b.symbol === symbol && a.isNonNegative === true) {
+        if (isSymbol(b, symbol) && a.isNonNegative === true) {
           if (op === 'Less') return 'positive';
         }
         // x - a < 0 => x < a
-        if (isSymbol(a) && a.symbol === symbol && b.isNonPositive === true) {
+        if (isSymbol(a, symbol) && b.isNonPositive === true) {
           if (op === 'Less') return 'negative';
         }
       }
@@ -588,10 +583,10 @@ export function getSignFromAssumptions(
     // Case 4: Addition form (canonical form of subtraction)
     // x + (-a) < 0 means x < a, so if a <= 0, x is negative
     // -x + a < 0 means -x < -a means x > a, so if a >= 0, x is positive
-    if (isFunction(lhs) && lhs.operator === 'Add') {
+    if (isFunction(lhs, 'Add')) {
       for (const term of lhs.ops) {
         // Direct symbol in sum: check if other terms give us bounds
-        if (isSymbol(term) && term.symbol === symbol) {
+        if (isSymbol(term, symbol)) {
           // x + ... < 0, check if other terms are all non-negative
           // That would mean x < -(sum of others), so x < non-positive = negative
           const otherTerms = lhs.ops.filter((t) => t !== term);
@@ -604,12 +599,7 @@ export function getSignFromAssumptions(
           }
         }
         // Negated symbol in sum: -x + ... < 0
-        if (
-          isFunction(term) &&
-          term.operator === 'Negate' &&
-          isSymbol(term.op1) &&
-          term.op1.symbol === symbol
-        ) {
+        if (isFunction(term, 'Negate') && isSymbol(term.op1, symbol)) {
           // -x + ... < 0 means x > ...
           const otherTerms = lhs.ops.filter((t) => t !== term);
           if (

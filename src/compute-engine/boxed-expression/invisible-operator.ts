@@ -59,7 +59,7 @@ export function canonicalInvisibleOperator(
     // Note: lhs might be a Subscript (e.g., f_\text{a}) which canonicalizes
     // to a symbol (f_a). Canonicalize first to handle this case.
     const lhsCanon = lhs.canonical;
-    if (isSymbol(lhsCanon) && rhs.operator === 'Delimiter' && isFunction(rhs)) {
+    if (isSymbol(lhsCanon) && isFunction(rhs, 'Delimiter')) {
       // We have encountered something like `f(a+b)`, where `f` is not
       // defined. But it also could be `x(x+1)` where `x` is a number.
       // So, start with boxing the arguments and see if it makes sense.
@@ -91,10 +91,7 @@ export function canonicalInvisibleOperator(
 
       // Parse the arguments first, in case they reference lhsCanon.symbol
       // i.e. `x(x+1)`.
-      let args =
-        isFunction(rhs.op1) && rhs.op1.operator === 'Sequence'
-          ? rhs.op1.ops
-          : [rhs.op1];
+      let args = isFunction(rhs.op1, 'Sequence') ? rhs.op1.ops : [rhs.op1];
       args = flatten(args);
 
       const def = ce.lookupDefinition(lhsCanon.symbol);
@@ -128,10 +125,7 @@ export function canonicalInvisibleOperator(
       isString(rhs.op2) &&
       (rhs.op2.string === '[,]' || rhs.op2.string === '[;]')
     ) {
-      const args =
-        isFunction(rhs.op1) && rhs.op1.operator === 'Sequence'
-          ? rhs.op1.ops
-          : [rhs.op1];
+      const args = isFunction(rhs.op1, 'Sequence') ? rhs.op1.ops : [rhs.op1];
       return ce.function('At', [lhsCanon, ...args]);
     }
   }
@@ -156,10 +150,10 @@ export function canonicalInvisibleOperator(
     const significant = ops.filter((x) => x.operator !== 'HorizontalSpacing');
     if (significant.length === 2) {
       const [a, b] = significant;
-      if (isNumber(a) && isFunction(b) && b.operator === '__unit__') {
+      if (isNumber(a) && isFunction(b, '__unit__')) {
         return ce._fn('Quantity', [a.canonical, b.op1.canonical]);
       }
-      if (isNumber(b) && isFunction(a) && a.operator === '__unit__') {
+      if (isNumber(b) && isFunction(a, '__unit__')) {
         return ce._fn('Quantity', [b.canonical, a.op1.canonical]);
       }
     }
@@ -200,7 +194,7 @@ function flattenInvisibleOperator(
 ): Expression[] {
   const ys: Expression[] = [];
   for (const x of ops) {
-    if (x.operator === 'InvisibleOperator' && isFunction(x))
+    if (isFunction(x, 'InvisibleOperator'))
       ys.push(...flattenInvisibleOperator(x.ops));
     else ys.push(x);
   }
@@ -212,7 +206,7 @@ function asInteger(expr: Expression): number {
     const n = expr.re;
     if (Number.isInteger(n)) return n;
   }
-  if (expr.operator === 'Negate' && isFunction(expr)) {
+  if (isFunction(expr, 'Negate')) {
     const n = asInteger(expr.op1);
     if (!Number.isNaN(n)) return -n;
   }

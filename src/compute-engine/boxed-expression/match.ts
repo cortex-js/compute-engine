@@ -206,7 +206,7 @@ function matchOnce(
 
     // Special case: Match Root(x, n) against a Power pattern
     // This handles cases like x^(1/3) which is canonicalized as Root(x, 3)
-    if (operator === 'Power' && isFunction(expr) && expr.operator === 'Root') {
+    if (operator === 'Power' && isFunction(expr, 'Root')) {
       // Create a synthetic Power expression: Power(x, 1/n)
       const powerExpr = ce.function(
         'Power',
@@ -328,7 +328,7 @@ function matchVariations(
     if (result !== null) return result;
 
     // a-b -> a+(-b)
-    if (isFunction(expr) && expr.operator === 'Subtract')
+    if (isFunction(expr, 'Subtract'))
       result = matchVariation('Add', [expr.op1, ['Negate', expr.op2]]);
 
     if (result !== null) return result;
@@ -341,7 +341,7 @@ function matchVariations(
     if (result !== null) return result;
 
     // -a -> 0-a
-    if (isFunction(expr) && expr.operator === 'Negate')
+    if (isFunction(expr, 'Negate'))
       result = matchVariation('Subtract', [0, expr.op1]);
 
     if (result !== null) return result;
@@ -354,13 +354,13 @@ function matchVariations(
     if (result !== null) return result;
 
     // -x -> -1*x
-    if (isFunction(expr) && expr.operator === 'Negate') {
+    if (isFunction(expr, 'Negate')) {
       result = matchVariation('Multiply', [-1, expr.op1]);
       if (result !== null) return result;
     }
 
     // x/a -> (1/a)*x
-    if (isFunction(expr) && expr.operator === 'Divide') {
+    if (isFunction(expr, 'Divide')) {
       result = matchVariation('Multiply', [expr.op1, ['Divide', 1, expr.op2]]);
       if (result !== null) return result;
     }
@@ -391,7 +391,7 @@ function matchVariations(
       if (result !== null) return result;
     }
     // Exp(x) -> Power(E, x)
-    if (isSymbol(pattern.op1) && pattern.op1.symbol === 'ExponentialE') {
+    if (isSymbol(pattern.op1, 'ExponentialE')) {
       const result = matchVariation('Exp', [expr]);
       if (result !== null) return result;
     }

@@ -73,7 +73,7 @@ function expandPower(base: Expression, exp: number): Expression | null {
   }
   if (exp === 0) return ce.One;
   if (exp === 1) return expand(base);
-  if (isFunction(base) && base.operator === 'Negate') {
+  if (isFunction(base, 'Negate')) {
     if (Number.isInteger(exp)) {
       const sign = exp % 2 === 0 ? 1 : -1;
       const result = expandPower(base.op1, exp);
@@ -86,7 +86,7 @@ function expandPower(base: Expression, exp: number): Expression | null {
   console.assert(base.operator !== 'Subtract');
 
   // We can expand only if the expression is a power of a sum.
-  if (!isFunction(base) || base.operator !== 'Add') return null;
+  if (!isFunction(base, 'Add')) return null;
 
   // Apply the multinomial theorem
   // https://en.wikipedia.org/wiki/Multinomial_theorem
@@ -130,7 +130,7 @@ export function expandFunction(
   if (h === 'Divide') {
     const num = expand(ops[0]);
     if (num === null) return null;
-    if (isFunction(num) && num.operator === 'Add')
+    if (isFunction(num, 'Add'))
       return add(...num.ops.map((x) => x.div(ops[1])));
     return ce._fn('Divide', [num, ops[1]]);
   }
@@ -145,8 +145,7 @@ export function expandFunction(
     // losing Add structure (e.g., Add(x, sqrt(2)*x) -> x*(1+sqrt(2)))
     const expandedOps = ops.map((op) => {
       if (
-        isFunction(op) &&
-        op.operator === 'Power' &&
+        isFunction(op, 'Power') &&
         isFunction(op.op1) &&
         op.op1.operator === 'Add'
       ) {

@@ -310,7 +310,7 @@ export class BoxedFunction
       if (!def.associative) ys = xs;
       else {
         for (const x of xs) {
-          if (x.operator === this.operator && isFunction(x)) ys.push(...x.ops);
+          if (isFunction(x, this.operator)) ys.push(...x.ops);
           else ys.push(x);
         }
       }
@@ -363,7 +363,7 @@ export class BoxedFunction
     //
     // Negate
     //
-    if (expr.operator === 'Negate' && isFunction(expr)) {
+    if (isFunction(expr, 'Negate')) {
       const [coef, rest] = expr.op1.toNumericValue();
       return [coef.neg(), rest];
     }
@@ -371,7 +371,7 @@ export class BoxedFunction
     //
     // Multiply
     //
-    if (expr.operator === 'Multiply' && isFunction(expr)) {
+    if (isFunction(expr, 'Multiply')) {
       const rest: Expression[] = [];
       let coef = ce._numericValue(1);
       for (const arg of expr.ops) {
@@ -387,7 +387,7 @@ export class BoxedFunction
     //
     // Divide
     //
-    if (expr.operator === 'Divide' && isFunction(expr)) {
+    if (isFunction(expr, 'Divide')) {
       const [coef1, numer] = expr.op1.toNumericValue();
       const [coef2, denom] = expr.op2.toNumericValue();
       const coef = coef1.div(coef2);
@@ -398,7 +398,7 @@ export class BoxedFunction
     //
     // Power/Sqrt/Root
     //
-    if (expr.operator === 'Power' && isFunction(expr)) {
+    if (isFunction(expr, 'Power')) {
       // We can only extract a coef if the exponent is a literal
       if (!isNumber(expr.op2)) return [ce._numericValue(1), this];
 
@@ -415,7 +415,7 @@ export class BoxedFunction
       return [ce._numericValue(1), this];
     }
 
-    if (expr.operator === 'Sqrt' && isFunction(expr)) {
+    if (isFunction(expr, 'Sqrt')) {
       const [coef, rest] = expr.op1.toNumericValue();
       // @fastpasth
       if (rest.is(1) || rest.is(0)) {
@@ -425,7 +425,7 @@ export class BoxedFunction
       return [coef.sqrt(), ce.function('Sqrt', [rest])];
     }
 
-    if (expr.operator === 'Root' && isFunction(expr)) {
+    if (isFunction(expr, 'Root')) {
       const exp = expr.op2.re;
       if (isNaN(exp) || expr.op2.im !== 0) return [ce._numericValue(1), this];
 
@@ -437,7 +437,7 @@ export class BoxedFunction
     //
     // Abs
     //
-    if (expr.operator === 'Abs' && isFunction(expr)) {
+    if (isFunction(expr, 'Abs')) {
       const [coef, rest] = expr.op1.toNumericValue();
       return [coef.abs(), ce.function('Abs', [rest])];
     }
@@ -1345,7 +1345,7 @@ function satisfiesInequalities(
 ): boolean {
   return inequalities.every((ineq) => {
     const substituted = ineq.subs(solution, { canonical: true }).evaluate();
-    return isSymbol(substituted) && substituted.symbol === 'True';
+    return isSymbol(substituted, 'True');
   });
 }
 

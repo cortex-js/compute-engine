@@ -2024,7 +2024,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       if (!xs.isCollection) return undefined;
 
       // If the collection is a Record, use its ops directly
-      if (xs.operator === 'Record' && isFunction(xs))
+      if (isFunction(xs, 'Record'))
         return ce.function('Dictionary', [...xs.ops]);
 
       const entries: Expression[] = [];
@@ -2054,7 +2054,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       if (!xs.isCollection) return undefined;
 
       // If the collection is a Dictionary, use its ops directly
-      if (xs.operator === 'Dictionary' && isFunction(xs))
+      if (isFunction(xs, 'Dictionary'))
         return ce.function('Record', [...xs.ops]);
 
       const entries: Expression[] = [];
@@ -2173,7 +2173,7 @@ function canonicalList(ops: Expression[], { engine: ce }): Expression {
   // \left\lbrack \begin{array}...\end{array} \right\rbrack
 
   const op1 = ops[0];
-  if (ops.length === 1 && op1.operator === 'Matrix' && isFunction(op1)) {
+  if (ops.length === 1 && isFunction(op1, 'Matrix')) {
     // Adjust the matrix to have the correct delimiter
     const [body, delimiters, columns] = op1.ops;
 
@@ -2184,8 +2184,8 @@ function canonicalList(ops: Expression[], { engine: ce }): Expression {
   }
 
   ops = ops.map((op) => {
-    if (op.operator === 'Delimiter' && isFunction(op)) {
-      if (op.op1.operator === 'Sequence' && isFunction(op.op1))
+    if (isFunction(op, 'Delimiter')) {
+      if (isFunction(op.op1, 'Sequence'))
         return ce._fn('List', canonical(ce, op.op1.ops));
       return ce._fn('List', [op.op1?.canonical ?? ce.Nothing]);
     }
@@ -2327,7 +2327,7 @@ function enlist(xs: ReadonlyArray<Expression>): Expression[] {
     //   s = undefined;
     // }
 
-    if (x.operator === 'Sequence' && isFunction(x)) {
+    if (isFunction(x, 'Sequence')) {
       result.push(...enlist([...x.ops]));
     } else if (isString(x)) {
       // A string is a collection (of strings), but we don't want to iterate it recursively

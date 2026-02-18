@@ -159,11 +159,7 @@ function serializePrettyJsonFunction(
 
   if (name === 'Power') {
     // e^x -> Exp(x)
-    if (
-      !exclusions.includes('Exp') &&
-      isSymbol(args[0]) &&
-      args[0].symbol === 'ExponentialE'
-    )
+    if (!exclusions.includes('Exp') && isSymbol(args[0], 'ExponentialE'))
       return serializeJsonFunction(ce, 'Exp', [args[1]], options, metadata);
 
     if (isNumber(args[1])) {
@@ -256,7 +252,7 @@ function serializePrettyJsonFunction(
           metadata
         );
     }
-    if (args[1]?.operator === 'Negate' && isFunction(args[1])) {
+    if (isFunction(args[1], 'Negate')) {
       return serializeJsonFunction(
         ce,
         'Subtract',
@@ -277,7 +273,7 @@ function serializePrettyJsonFunction(
   }
 
   if (name === 'Function' && args.length > 0) {
-    if (args[0].operator === 'Block' && isFunction(args[0])) {
+    if (isFunction(args[0], 'Block')) {
       const block = args[0];
       if (block.nops === 1) {
         const params = args.slice(1);

@@ -1201,7 +1201,7 @@ function compileToTarget(
   target: CompileTarget<Expression>,
   realOnly?: boolean
 ): CompilationResult<'javascript'> {
-  if (expr.operator === 'Function' && isFunction(expr)) {
+  if (isFunction(expr, 'Function')) {
     const args = expr.ops;
     const params = args.slice(1).map((x) => (isSymbol(x) ? x.symbol : '_'));
     const body = BaseCompiler.compile(args[0].canonical, {

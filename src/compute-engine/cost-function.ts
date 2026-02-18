@@ -1,6 +1,11 @@
 import type { Expression } from './global-types';
 import type { NumericValue } from './numeric-value/types.js';
-import { isSymbol, isNumber, isFunction } from './boxed-expression/type-guards';
+import {
+  isSymbol,
+  isNumber,
+  isFunction,
+  numericValue,
+} from './boxed-expression/type-guards';
 
 /**
  * The Cost Function is used to select the simplest between two expressions:
@@ -79,30 +84,24 @@ export function costFunction(expr: Expression): number {
   // we generate (a 2-factor Multiply). It exists to prevent a readability
   // rewrite from being rejected purely by the default cost heuristic.
   const expLogSepCost = (() => {
-    if (
-      expr.operator !== 'Multiply' ||
-      !isFunction(expr) ||
-      expr.ops.length !== 2
-    )
-      return null;
+    if (!isFunction(expr, 'Multiply') || expr.ops.length !== 2) return null;
 
     const match = (
       xPow: Expression,
       ePow: Expression
     ): { xBase: Expression; eExp: Expression } | null => {
-      if (!isFunction(ePow) || ePow.operator !== 'Power') return null;
-      if (!isSymbol(ePow.op1) || ePow.op1.symbol !== 'ExponentialE')
-        return null;
+      if (!isFunction(ePow, 'Power')) return null;
+      if (!isSymbol(ePow.op1, 'ExponentialE')) return null;
 
-      if (!isFunction(xPow) || xPow.operator !== 'Power') return null;
+      if (!isFunction(xPow, 'Power')) return null;
 
       // Match exponent: 1/ln(10)
       const exponent = xPow.op2;
-      if (!isFunction(exponent) || exponent.operator !== 'Divide') return null;
+      if (!isFunction(exponent, 'Divide')) return null;
       if (exponent.op1?.is(1) !== true) return null;
 
       const denom = exponent.op2;
-      if (!isFunction(denom) || denom.operator !== 'Ln') return null;
+      if (!isFunction(denom, 'Ln')) return null;
       if (denom.op1?.is(10) !== true) return null;
 
       return { xBase: xPow.op1, eExp: ePow.op2 };
@@ -147,37 +146,28 @@ export function costFunction(expr: Expression): number {
     // because √(x²y) should simplify to |x|√y
     const fnExpr = isFunction(expr) ? expr : undefined;
     const arg = fnExpr?.ops[0];
-    if (isFunction(arg) && arg.operator === 'Multiply') {
+    if (isFunction(arg, 'Multiply')) {
       // Check if any factor is a perfect square (Power with even exponent)
       for (const factor of arg.ops) {
-        if (
-          isFunction(factor) &&
-          factor.operator === 'Power' &&
-          factor.op2?.isEven === true
-        ) {
+        if (isFunction(factor, 'Power') && factor.op2?.isEven === true) {
           // Add a penalty to encourage factoring out perfect squares
           return 5 + costFunction(arg) + 6;
         }
       }
     }
     // Also check if arg is directly a perfect square
-    if (
-      isFunction(arg) &&
-      arg.operator === 'Power' &&
-      arg.op2?.isEven === true
-    ) {
+    if (isFunction(arg, 'Power') && arg.op2?.isEven === true) {
       return 5 + costFunction(arg) + 6;
     }
     // Sqrt(x^{odd}) where odd > 1 can be factored: sqrt(x^5) -> |x|^2 * sqrt(x)
     if (
-      isFunction(arg) &&
-      arg.operator === 'Power' &&
+      isFunction(arg, 'Power') &&
       arg.op2?.isOdd === true &&
       arg.op2?.isInteger === true
     ) {
       const exp = arg.op2;
       // exp > 1 means (exp - 1) / 2 > 0, i.e., we can factor out something
-      const n = isNumber(exp) ? exp.numericValue : undefined;
+      const n = numericValue(exp);
       if (typeof n === 'number' && n > 1) {
         // Higher penalty (10) to ensure factored form |x|^n * sqrt(x) is preferred
         return 5 + costFunction(arg) + 10;
@@ -200,7 +190,7 @@ export function costFunction(expr: Expression): number {
         // Add cost for the negate so (-x)^n isn't artificially cheaper than -x^n
         return expCost + 4; // 4 is the Negate nameCost
       }
-      if (base.operator === 'Multiply' && isFunction(base)) {
+      if (isFunction(base, 'Multiply')) {
         // Check if there's a negative coefficient and a fractional exponent
         // (negative)^{p/q} where q is odd should factor out the sign for correct real evaluation
         const hasNegativeCoef = base.ops.some(

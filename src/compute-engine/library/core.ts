@@ -153,8 +153,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // This is necessary for `1(2+3)` to be correctly canonicalized to `2+3`.
         const y = canonicalInvisibleOperator(x, { engine });
         if (!y) return engine.Nothing;
-        if (y.operator === 'Multiply' && isFunction(y))
-          return canonicalMultiply(engine, y.ops);
+        if (isFunction(y, 'Multiply')) return canonicalMultiply(engine, y.ops);
         return y;
       },
     },
@@ -212,7 +211,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // the sequence, like `(a, b, c)`. The sequence is used to group
         // the arguments, so it needs to be preserved.
         // If there is a single element, unpack it.
-        if (body.operator === 'Sequence' && isFunction(body))
+        if (isFunction(body, 'Sequence'))
           return ce._fn('Tuple', canonical(ce, body.ops));
 
         body = body.canonical;
@@ -311,7 +310,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // When comparing hold expressions, consider them equal if their
       // arguments are structurally equal.
       eq: (a, b) => {
-        if (b.operator === 'Hold' && isFunction(b)) b = b.ops[0];
+        if (isFunction(b, 'Hold')) b = b.ops[0];
         if (!isFunction(a)) return false;
         return a.ops[0].isSame(b);
       },
@@ -322,12 +321,11 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       description: 'Release an expression held by `Hold`',
       lazy: true,
       signature: '(any) -> unknown',
-      type: ([x]) =>
-        x.operator === 'Hold' && isFunction(x) ? x.op1.type : x.type,
+      type: ([x]) => (isFunction(x, 'Hold') ? x.op1.type : x.type),
       // Note: the operator is lazy and doesn't have a canonical handler:
       // the argument is not canonicalized.
       evaluate: ([x], options) => {
-        if (x.operator === 'Hold' && isFunction(x)) x = x.op1;
+        if (isFunction(x, 'Hold')) x = x.op1;
         return x.canonical.evaluate(options);
       },
     },
@@ -410,8 +408,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // **IMPORTANT** Head should work on non-canonical expressions
         if (args.length !== 1) return null;
         const op1 = args[0];
-        if (op1.operator) return ce.box(op1.operator);
-        return ce._fn('Head', canonical(ce, args));
+        return ce.box(op1.operator);
       },
       evaluate: (ops, { engine: ce }) =>
         ce.symbol(ops[0]?.operator ?? 'Undefined'),
@@ -470,7 +467,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // needs the raw symbol names for sequence registration and
         // self-reference detection.
         const lhs = args[0];
-        if (lhs.operator === 'Subscript' && isFunction(lhs)) {
+        if (isFunction(lhs, 'Subscript')) {
           return ce._fn('Assign', [lhs, args[1]]);
         }
 
@@ -489,7 +486,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // e.g., Subscript(L, 0) := 1  OR  Subscript(a, n) := a_{n-1} + 1
         // Also handles multi-index: Subscript(P, Sequence(n, k)) := ...
         //
-        if (op1.operator === 'Subscript' && isFunction(op1) && sym(op1.op1)) {
+        if (isFunction(op1, 'Subscript') && sym(op1.op1)) {
           const seqName = sym(op1.op1)!;
           const subscript = op1.op2;
 
@@ -500,9 +497,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           //   Subscript(P, Delimiter(Sequence(n, k), ","))
           //
           let multiSub = subscript;
-          if (multiSub?.operator === 'Delimiter' && isFunction(multiSub))
-            multiSub = multiSub.op1;
-          if (multiSub?.operator === 'Sequence' && isFunction(multiSub)) {
+          if (isFunction(multiSub, 'Delimiter')) multiSub = multiSub.op1;
+          if (isFunction(multiSub, 'Sequence')) {
             const subscript = multiSub;
             const indices = subscript.ops;
 
@@ -707,7 +703,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           const result = apply(f, [lower]);
 
           // If we did get a number, return it
-          if (result && isNumber(result)) return result;
+          if (isNumber(result)) return result;
 
           // Fallback: return unevaluated symbolic form
           return ce._fn('EvaluateAt', [f, lower]);
@@ -918,7 +914,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
             asSmallInteger(op2)?.toString();
           if (sub) return 'symbol';
           // Check for InvisibleOperator of symbols/numbers (also becomes compound symbol)
-          if (op2.operator === 'InvisibleOperator' && isFunction(op2)) {
+          if (isFunction(op2, 'InvisibleOperator')) {
             const parts = op2.ops.map(
               (x) => sym(x) ?? asSmallInteger(x)?.toString()
             );
@@ -994,7 +990,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           // in a Delimiter), concatenate them to form a compound symbol name.
           // e.g., `A_{CD}` -> `A_CD`, `x_{ij}` -> `x_ij`, `T_{max}` -> `T_max`
           // Use parentheses for expressions: `A_{(CD)}` remains as subscript expression.
-          if (op2.operator === 'InvisibleOperator' && isFunction(op2)) {
+          if (isFunction(op2, 'InvisibleOperator')) {
             const parts = op2.ops.map(
               (x) => sym(x) ?? asSmallInteger(x)?.toString()
             );
@@ -1004,14 +1000,13 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           }
         }
 
-        if (op2.operator === 'Sequence' && isFunction(op2))
+        if (isFunction(op2, 'Sequence'))
           ce._fn('Subscript', [op1, ce._fn('List', op2.ops)]);
 
         // Unwrap Delimiter (parentheses) from the subscript expression
         // e.g., `A_{(n+1)}` -> `["Subscript", "A", ["Add", "n", 1]]`
         let sub = op2;
-        if (op2.operator === 'Delimiter' && isFunction(op2))
-          sub = op2.op1.canonical;
+        if (isFunction(op2, 'Delimiter')) sub = op2.op1.canonical;
 
         return ce._fn('Subscript', [op1, sub]);
       },

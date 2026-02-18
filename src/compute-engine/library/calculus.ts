@@ -169,7 +169,7 @@ volumes
         // For non-Function expressions (e.g., ['f', 'x']), do NOT call
         // .evaluate() before differentiating — that would prematurely
         // substitute variable values (e.g., x=5) and lose structural info.
-        if (f.operator === 'Function' && isFunction(f)) {
+        if (isFunction(f, 'Function')) {
           f = f.op1;
         }
 

@@ -454,18 +454,14 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         // kernel basis.  If the kernel was computed earlier and stored in a
         // symbol this branch won't fire, which is acceptable — the generic
         // finiteDimension path below will handle it.
-        if (isFunction(object) && object.operator === 'Kernel') {
+        if (isFunction(object, 'Kernel')) {
           const kernelDim = kernelBasisDimension(op);
           if (kernelDim !== undefined) return ce.number(kernelDim);
         }
 
         // dim(Hom(V, W)) = dim(V) * dim(W) for finite-dimensional objects.
         // Same structural matching caveat as Kernel above.
-        if (
-          isFunction(object) &&
-          object.operator === 'Hom' &&
-          object.ops.length >= 2
-        ) {
+        if (isFunction(object, 'Hom') && object.ops.length >= 2) {
           const domainDim = finiteDimension(object.ops[0].evaluate());
           const codomainDim = finiteDimension(object.ops[1].evaluate());
           if (domainDim !== undefined && codomainDim !== undefined)
@@ -2205,9 +2201,9 @@ function finiteDimension(value: Expression): number | undefined {
  * Infer the dimension of a kernel basis representation.
  */
 function kernelBasisDimension(value: Expression): number | undefined {
-  if (isFunction(value) && value.operator === 'List') {
+  if (isFunction(value, 'List')) {
     if (value.ops.length === 0) return 0;
-    if (value.ops.every((op) => isFunction(op) && op.operator === 'List')) {
+    if (value.ops.every((op) => isFunction(op, 'List'))) {
       return value.ops.length;
     }
   }

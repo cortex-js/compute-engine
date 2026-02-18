@@ -179,7 +179,7 @@ export function derivative(
     // We have, e.g. fn = 'Sin"
     fn = apply(ce.symbol(fn.symbol), [ce.symbol('_')]);
   }
-  if (fn.operator === 'Function' && isFunction(fn)) {
+  if (isFunction(fn, 'Function')) {
     // We have, e.g. fn = ['Function', ['Sin', 'x'], 'x']
     v = sym(fn.ops[1]) ?? '_';
     fn = fn.ops[0];

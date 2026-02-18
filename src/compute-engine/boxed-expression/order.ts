@@ -3,7 +3,13 @@ import type { Expression } from '../global-types';
 import { maxDegree, revlex, totalDegree } from './polynomial-degree';
 import { asRadical } from './arithmetic-power';
 import { isOperatorDef } from './utils';
-import { isNumber, isFunction, isSymbol, isString } from './type-guards';
+import {
+  isNumber,
+  isFunction,
+  isSymbol,
+  isString,
+  numericValue,
+} from './type-guards';
 
 export type Order = 'lex' | 'dexlex' | 'grevlex' | 'elim';
 
@@ -153,7 +159,7 @@ function rank(expr: Expression): Rank {
   }
 
   // Complex numbers
-  if (isSymbol(expr) && expr.symbol === 'ImaginaryUnit') return 'complex';
+  if (isSymbol(expr, 'ImaginaryUnit')) return 'complex';
 
   // Square root of a number
   if (asRadical(expr)) return 'radical';
@@ -179,7 +185,7 @@ function rank(expr: Expression): Rank {
 
   if (expr.operator === 'Complex') return expr.im !== 0 ? 'complex' : 'real';
 
-  if (isFunction(expr) && expr.operator === 'Sqrt') {
+  if (isFunction(expr, 'Sqrt')) {
     if (isNumber(expr.op1) && (expr.op1.isInteger || expr.op1.isRational))
       return 'radical';
     return 'power';
@@ -243,14 +249,12 @@ export function order(a: Expression, b: Expression): number {
   }
 
   if (rankA === 'integer' || rankA === 'rational' || rankA === 'real') {
-    let aN: number | import('../numeric-value/types').NumericValue | undefined =
-      isNumber(a) ? a.numericValue : undefined;
-    let bN: number | import('../numeric-value/types').NumericValue | undefined =
-      isNumber(b) ? b.numericValue : undefined;
+    let aN = numericValue(a);
+    let bN = numericValue(b);
 
-    if (aN === undefined && isFunction(a) && a.operator === 'Rational')
+    if (aN === undefined && isFunction(a, 'Rational'))
       aN = a.op1.re / a.op2.re!;
-    if (bN === undefined && isFunction(b) && b.operator === 'Rational')
+    if (bN === undefined && isFunction(b, 'Rational'))
       bN = b.op1.re / b.op2.re!;
 
     const af = typeof aN === 'number' ? aN : aN!.re;
@@ -468,13 +472,13 @@ function getLeafCount(expr: Expression): number {
 }
 
 function getComplex(a: Expression): [number, number] {
-  if (isSymbol(a) && a.symbol === 'ImaginaryUnit') return [0, 1];
+  if (isSymbol(a, 'ImaginaryUnit')) return [0, 1];
   if (isNumber(a)) {
     if (typeof a.numericValue === 'number') return [a.numericValue, 0];
     const v = a.numericValue;
     return [v.re, v.im];
   }
-  if (isFunction(a) && a.operator === 'Complex') {
+  if (isFunction(a, 'Complex')) {
     const aOp1 = a.op1;
     const aOp2 = a.op2;
     if (!isNumber(aOp1)) return [0, 0];

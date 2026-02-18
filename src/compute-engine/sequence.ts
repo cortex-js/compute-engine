@@ -335,15 +335,15 @@ export function createSequenceHandler(
     // Extract indices from subscript
     let indices: number[];
 
-    if (subscript.operator === 'Sequence' && isFunction(subscript)) {
+    if (isFunction(subscript, 'Sequence')) {
       // Multi-index: Subscript(P, Sequence(n, k))
       // Evaluate operands in case they contain unevaluated arithmetic (e.g., n-1)
       indices = subscript.ops.map((op) => op.evaluate().re);
-    } else if (subscript.operator === 'Tuple' && isFunction(subscript)) {
+    } else if (isFunction(subscript, 'Tuple')) {
       // Multi-index after canonicalization: Subscript(P, Tuple(n, k))
       // Evaluate operands in case they contain unevaluated arithmetic (e.g., n-1)
       indices = subscript.ops.map((op) => op.evaluate().re);
-    } else if (subscript.operator === 'Delimiter' && isFunction(subscript)) {
+    } else if (isFunction(subscript, 'Delimiter')) {
       // Alternative: Subscript(P, Delimiter(n, k))
       // Evaluate operands in case they contain unevaluated arithmetic (e.g., n-1)
       indices = subscript.ops.map((op) => op.evaluate().re);
@@ -656,7 +656,7 @@ export function containsSelfReference(
     // Check if this is a Subscript with the sequence name as base
     if (expr.operator === 'Subscript') {
       const op1 = expr.op1;
-      if (isSymbol(op1) && op1.symbol === seqName) return true;
+      if (isSymbol(op1, seqName)) return true;
     }
 
     // Recursively check operands

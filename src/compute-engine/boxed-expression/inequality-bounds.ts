@@ -57,12 +57,7 @@ export function getInequalityBoundsFromAssumptions(
 
     // Case 1: Negate(symbol) < 0 => -symbol < 0 => symbol > 0
     // This gives us a lower bound of 0
-    if (
-      isFunction(lhs) &&
-      lhs.operator === 'Negate' &&
-      isSymbol(lhs.op1) &&
-      lhs.op1.symbol === symbol
-    ) {
+    if (isFunction(lhs, 'Negate') && isSymbol(lhs.op1, symbol)) {
       const bound = ce.Zero;
       if (
         result.lowerBound === undefined ||
@@ -75,17 +70,12 @@ export function getInequalityBoundsFromAssumptions(
 
     // Case 2: Add(Negate(symbol), k) < 0 => k - symbol < 0 => symbol > k
     // This gives us a lower bound of k
-    if (isFunction(lhs) && lhs.operator === 'Add') {
+    if (isFunction(lhs, 'Add')) {
       let hasNegatedSymbol = false;
       let constantSum = 0;
 
       for (const term of lhs.ops) {
-        if (
-          isFunction(term) &&
-          term.operator === 'Negate' &&
-          isSymbol(term.op1) &&
-          term.op1.symbol === symbol
-        ) {
+        if (isFunction(term, 'Negate') && isSymbol(term.op1, symbol)) {
           hasNegatedSymbol = true;
         } else if (isNumber(term)) {
           const val =
@@ -112,7 +102,7 @@ export function getInequalityBoundsFromAssumptions(
     }
 
     // Case 3: symbol < 0 => symbol has upper bound 0
-    if (isSymbol(lhs) && lhs.symbol === symbol) {
+    if (isSymbol(lhs, symbol)) {
       const bound = ce.Zero;
       if (
         result.upperBound === undefined ||
@@ -125,12 +115,12 @@ export function getInequalityBoundsFromAssumptions(
 
     // Case 4: Add(symbol, k) < 0 => symbol + k < 0 => symbol < -k
     // This gives us an upper bound of -k
-    if (isFunction(lhs) && lhs.operator === 'Add') {
+    if (isFunction(lhs, 'Add')) {
       let hasSymbol = false;
       let constantSum = 0;
 
       for (const term of lhs.ops) {
-        if (isSymbol(term) && term.symbol === symbol) {
+        if (isSymbol(term, symbol)) {
           hasSymbol = true;
         } else if (isNumber(term)) {
           const val =

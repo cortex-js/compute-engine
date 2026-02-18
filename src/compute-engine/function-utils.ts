@@ -123,16 +123,16 @@ export function canonicalFunctionLiteral(
   //    This operator is just a "tag" indicating the nature of the
   //    symbol.
   //
-  if (expr.operator === 'BuiltinFunction' && isFunction(expr)) return expr.op1;
+  if (isFunction(expr, 'BuiltinFunction')) return expr.op1;
 
   //
   // 4/ Parenthesized expression, e.g. ["Delimiter", ["Sin", "_"], "'()'"]
   //
-  if (expr.operator === 'Delimiter' && isFunction(expr)) {
+  if (isFunction(expr, 'Delimiter')) {
     // If the expression is a sequence, we need to extract the first
     // element
     const exprOp1 = expr.op1;
-    if (isFunction(exprOp1) && exprOp1.operator === 'Sequence') {
+    if (isFunction(exprOp1, 'Sequence')) {
       if (exprOp1.nops === 1) {
         expr = exprOp1;
       } else {
@@ -150,49 +150,45 @@ export function canonicalFunctionLiteral(
   //
   // If this is a function literal, split the body and the parameters
   // For example, `["Function", ["Add", "x", 1], "x"]`
-  if (expr.operator === 'Function' && isFunction(expr))
+  if (isFunction(expr, 'Function'))
     return canonicalFunctionLiteralArguments(expr.engine, expr.ops);
 
   //
   // 6/ Shorthand function literal,
   // e.g. `["Add", "_", 1]` or `["Add", "x", 1]`
   //
-  if (expr.operator) {
-    console.assert(expr.operator !== 'Function');
+  console.assert(expr.operator !== 'Function');
 
-    const ce = expr.engine;
-    // Replace '_' with '_1'
-    let body = expr.subs({ _: '_1' });
+  const ce = expr.engine;
+  // Replace '_' with '_1'
+  let body = expr.subs({ _: '_1' });
 
-    // We need to extract the wildcards from the body. The wildcards can
-    // be `_`, `_1`, `_2`, etc.
-    let i = 1;
-    let params: Expression[] = [];
-    while (i < 10) {
-      if (body.has(`_${i}`))
-        params.push(body.engine.symbol(`_${i}`, { canonical: false }));
-      i++;
-    }
-
-    if (params.length === 0) {
-      // There are no wildcards
-
-      // Check if we have some unknowns
-      // We'll need the canonical form of the expression, so we'll create a block if necessary
-      if (body.operator !== 'Block') body = ce.function('Block', [body]);
-      else body = body.canonical;
-      const unknowns = body.unknowns;
-      if (unknowns.length > 0) {
-        params = unknowns.map((x) => ce.symbol(x, { canonical: false }));
-        // Note: we assume the order of parameters is the order in
-        // which they appear in the expression.
-      }
-    }
-
-    return canonicalFunctionLiteralArguments(ce, [body, ...params]);
+  // We need to extract the wildcards from the body. The wildcards can
+  // be `_`, `_1`, `_2`, etc.
+  let i = 1;
+  let params: Expression[] = [];
+  while (i < 10) {
+    if (body.has(`_${i}`))
+      params.push(body.engine.symbol(`_${i}`, { canonical: false }));
+    i++;
   }
 
-  return undefined;
+  if (params.length === 0) {
+    // There are no wildcards
+
+    // Check if we have some unknowns
+    // We'll need the canonical form of the expression, so we'll create a block if necessary
+    if (body.operator !== 'Block') body = ce.function('Block', [body]);
+    else body = body.canonical;
+    const unknowns = body.unknowns;
+    if (unknowns.length > 0) {
+      params = unknowns.map((x) => ce.symbol(x, { canonical: false }));
+      // Note: we assume the order of parameters is the order in
+      // which they appear in the expression.
+    }
+  }
+
+  return canonicalFunctionLiteralArguments(ce, [body, ...params]);
 }
 
 /** Assuming that ops has the following form:

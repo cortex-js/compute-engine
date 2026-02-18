@@ -83,9 +83,9 @@ describe('IS_ZERO', () => {
     expect(expression.isEqual(0)).toBeUndefined();
   });
 
-  it('should return undefined for non-constant expressions', () => {
+  it('should return false for non-constant expressions not identically zero', () => {
     const expression = engine.parse('x + 3');
-    expect(expression.isEqual(0)).toBeUndefined();
+    expect(expression.isEqual(0)).toBe(false);
   });
 
   it('should return false for constant expressions with function calls', () => {
@@ -140,9 +140,9 @@ describe('IS_NOT_ZERO', () => {
     expect(expression.isEqual(0)).toBeUndefined();
   });
 
-  it('should return false for non-constant expressions', () => {
+  it('should return false for non-constant expressions not identically zero', () => {
     const expression = engine.parse('x + 3');
-    expect(expression.isEqual(0)).toBeUndefined();
+    expect(expression.isEqual(0)).toBe(false);
   });
 
   it('should return true for constant expressions with function calls', () => {

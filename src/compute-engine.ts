@@ -69,6 +69,7 @@ export {
   isDictionary,
   isCollection,
   isIndexedCollection,
+  numericValue,
   isBoxedExpression,
   isBoxedNumber,
   isBoxedSymbol,

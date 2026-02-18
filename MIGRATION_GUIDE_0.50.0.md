@@ -74,11 +74,11 @@ base interface. They are now only accessible after narrowing with a type guard.
 
 | Property                | Access via                                          |
 | :---------------------- | :-------------------------------------------------- |
-| `.symbol`               | `isSymbol(expr)` then `expr.symbol`                 |
+| `.symbol`               | `isSymbol(expr)` or `isSymbol(expr, 'Pi')` then `expr.symbol` |
 | `.string`               | `isString(expr)` then `expr.string`                 |
-| `.ops`                  | `isFunction(expr)` then `expr.ops`                  |
-| `.nops`                 | `isFunction(expr)` then `expr.nops`                 |
-| `.op1`/`.op2`/`.op3`    | `isFunction(expr)` then `expr.op1` etc.             |
+| `.ops`                  | `isFunction(expr)` or `isFunction(expr, 'Add')` then `expr.ops`  |
+| `.nops`                 | `isFunction(expr)` or `isFunction(expr, 'Add')` then `expr.nops` |
+| `.op1`/`.op2`/`.op3`    | `isFunction(expr)` or `isFunction(expr, 'Add')` then `expr.op1` etc. |
 | `.isFunctionExpression` | `isFunction(expr)` then `expr.isFunctionExpression` |
 | `.numericValue`         | `isNumber(expr)` then `expr.numericValue`           |
 | `.isNumberLiteral`      | `isNumber(expr)` then `expr.isNumberLiteral`        |
@@ -99,7 +99,7 @@ if (expr.numericValue !== null) {
 ### After
 
 ```ts
-import { isSymbol, isNumber, sym } from '@cortex-js/compute-engine';
+import { isSymbol, isNumber, sym, numericValue } from '@cortex-js/compute-engine';
 
 if (isSymbol(expr)) {
   // expr.symbol is `string` — guaranteed non-undefined
@@ -111,10 +111,12 @@ if (isNumber(expr)) {
   console.log(expr.numericValue);
 }
 
-// Convenience helper for symbol checks
+// Convenience helpers
 if (sym(expr) === 'Pi') {
   console.log('This is Pi');
 }
+
+const val = numericValue(expr);  // number | NumericValue | undefined
 ```
 
 See Section 6 for the full list of type guards and role interfaces.
@@ -316,10 +318,21 @@ if (isSymbol(expr)) {
   console.log(expr.symbol);
 }
 
+// Pass a symbol name to narrow and check the name in one step:
+if (isSymbol(expr, 'Pi')) {
+  // expr is a symbol with name "Pi"
+}
+
 if (isFunction(expr)) {
   // expr.ops is `ReadonlyArray<Expression>` (not undefined)
   // expr.isFunctionExpression is `true`
   console.log(expr.ops, expr.nops, expr.op1);
+}
+
+// Pass an operator name to narrow and check the operator in one step:
+if (isFunction(expr, 'Add')) {
+  // expr is a function expression with operator "Add"
+  console.log(expr.op1, expr.op2);
 }
 
 if (isString(expr)) {
@@ -344,7 +357,7 @@ if (isIndexedCollection(expr)) {
 }
 ```
 
-### Convenience Helper: `sym()`
+### Convenience Helpers: `sym()` and `numericValue()`
 
 For quick symbol name checks, use the `sym()` helper:
 
@@ -361,13 +374,25 @@ if (sym(expr) === 'Pi') { /* ... */ }
 const name = sym(expr);  // string | undefined
 ```
 
+For safe numeric value extraction, use the `numericValue()` helper:
+
+```ts
+import { numericValue } from '@cortex-js/compute-engine';
+
+// Instead of:
+const val = isNumber(expr) ? expr.numericValue : undefined;
+
+// You can write:
+const val = numericValue(expr);  // number | NumericValue | undefined
+```
+
 ### Role Interfaces
 
 | Guard                 | Narrows to                                |
 | :-------------------- | :---------------------------------------- |
 | `isNumber`            | `Expression & NumberLiteralInterface`     |
-| `isSymbol`            | `Expression & SymbolInterface`            |
-| `isFunction`          | `Expression & FunctionInterface`          |
+| `isSymbol`            | `Expression & SymbolInterface` (optional second arg: symbol name) |
+| `isFunction`          | `Expression & FunctionInterface` (optional second arg: operator name) |
 | `isString`            | `Expression & StringInterface`            |
 | `isTensor`            | `Expression & TensorInterface`            |
 | `isDictionary`        | `Expression & DictionaryInterface`        |

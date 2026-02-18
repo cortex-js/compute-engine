@@ -473,8 +473,7 @@ function expressionAsTensor<T extends TensorDataType = 'expression'>(
 
     for (const item of t) {
       if (!isValid) return;
-      if (item.operator === operator && isFunction(item))
-        visit(item.ops, axis + 1);
+      if (isFunction(item, operator)) visit(item.ops, axis + 1);
       else {
         const v = cast(item, dtype);
         if (v === undefined) {

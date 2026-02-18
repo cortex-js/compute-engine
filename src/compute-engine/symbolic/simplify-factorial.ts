@@ -14,7 +14,7 @@ export function baseOffset(
 ): { base: Expression; offset: number } | null {
   if (isNumber(expr)) return null;
 
-  if (expr.operator === 'Add' && isFunction(expr) && expr.nops === 2) {
+  if (isFunction(expr, 'Add') && expr.nops === 2) {
     const [op1, op2] = [expr.op1, expr.op2];
     if (isNumber(op2) && Number.isInteger(op2.re) && !isNumber(op1))
       return { base: op1, offset: op2.re };
@@ -70,24 +70,22 @@ function extractFactorialTerm(
   term: Expression
 ): { coeff: number; factArg: Expression } | null {
   // Direct: Factorial(n)
-  if (term.operator === 'Factorial' && isFunction(term))
-    return { coeff: 1, factArg: term.op1 };
+  if (isFunction(term, 'Factorial')) return { coeff: 1, factArg: term.op1 };
 
   // Negate(Factorial(n))
   if (
-    term.operator === 'Negate' &&
-    isFunction(term) &&
+    isFunction(term, 'Negate') &&
     term.op1.operator === 'Factorial' &&
     isFunction(term.op1)
   )
     return { coeff: -1, factArg: term.op1.op1 };
 
   // Multiply with integer coefficient and Factorial
-  if (term.operator === 'Multiply' && isFunction(term)) {
+  if (isFunction(term, 'Multiply')) {
     const ops = term.ops;
     let factIdx = -1;
     for (let i = 0; i < ops.length; i++) {
-      if (ops[i].operator === 'Factorial' && isFunction(ops[i])) {
+      if (isFunction(ops[i], 'Factorial')) {
         if (factIdx >= 0) return null; // Multiple factorials
         factIdx = i;
       }
@@ -122,7 +120,7 @@ function extractFactorialTerm(
  * - (n+1)! + n! → n! * (n + 2)
  */
 export function simplifyFactorialAdd(x: Expression): RuleStep | undefined {
-  if (x.operator !== 'Add' || !isFunction(x)) return undefined;
+  if (!isFunction(x, 'Add')) return undefined;
 
   const ops = x.ops;
   if (ops.length < 2) return undefined;

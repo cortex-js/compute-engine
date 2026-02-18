@@ -103,7 +103,7 @@ export function canonicalAdd(
         if (isNumber(op)) {
           // Skip pure imaginary terms (already summed above)
           const facExpr = getImaginaryFactor(op);
-          if (facExpr !== undefined && isNumber(facExpr)) {
+          if (isNumber(facExpr)) {
             const f = facExpr.numericValue;
             const im = typeof f === 'number' ? f : f.re;
             if (im !== 0 && typeof im === 'number') continue;
@@ -292,7 +292,7 @@ export class Terms {
         this.terms = [{ term: ce.ComplexInfinity, coef: [] }];
         return;
       }
-      if (term.isNaN || (isSymbol(term) && term.symbol === 'Undefined')) {
+      if (term.isNaN || isSymbol(term, 'Undefined')) {
         this.terms = [{ term: ce.NaN, coef: [] }];
         return;
       }
@@ -337,7 +337,7 @@ export class Terms {
       return;
     }
 
-    if (isFunction(term) && term.operator === 'Add') {
+    if (isFunction(term, 'Add')) {
       for (const x of term.ops) {
         const [c, t] = x.toNumericValue();
         this._add(coef.mul(c), t);
@@ -345,7 +345,7 @@ export class Terms {
       return;
     }
 
-    if (isFunction(term) && term.operator === 'Negate') {
+    if (isFunction(term, 'Negate')) {
       this._add(coef.neg(), term.op1);
       return;
     }

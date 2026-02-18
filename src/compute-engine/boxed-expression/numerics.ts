@@ -151,7 +151,7 @@ export function asSmallInteger(
  *
  */
 export function toInteger(expr: Expression | undefined): number | null {
-  if (!expr || !isNumber(expr)) return null;
+  if (!isNumber(expr)) return null;
   const num = expr.numericValue;
 
   return Math.round(typeof num === 'number' ? num : num.re);

@@ -370,7 +370,7 @@ export class BoxedNumber
 
     if (base && this.isSame(base)) return this.engine.One;
     if (
-      (!base || (isSymbol(base) && base.symbol === 'ExponentialE')) &&
+      (!base || isSymbol(base, 'ExponentialE')) &&
       this.symbol === 'ExponentialE'
     )
       return this.engine.One;

@@ -162,15 +162,9 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   is(other: unknown): boolean {
     // Shortcuts
     if (other === true)
-      return (
-        this.symbol === 'True' ||
-        (isSymbol(this.value) && this.value.symbol === 'True')
-      );
+      return this.symbol === 'True' || isSymbol(this.value, 'True');
     if (other === false)
-      return (
-        this.symbol === 'False' ||
-        (isSymbol(this.value) && this.value.symbol === 'False')
-      );
+      return this.symbol === 'False' || isSymbol(this.value, 'False');
 
     if (other instanceof _BoxedExpression && isSymbol(other))
       return this.symbol === other.symbol;
@@ -282,8 +276,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     // ln(e) = 1 (natural log)
     // ln_c(e) = 1/ln(c) (for other bases)
     if (this.symbol === 'ExponentialE') {
-      if (!base || (isSymbol(base) && base.symbol === 'ExponentialE'))
-        return this.engine.One;
+      if (!base || isSymbol(base, 'ExponentialE')) return this.engine.One;
       return this.engine.One.div(base.ln()); // log_c(e) = 1/ln(c)
     }
 

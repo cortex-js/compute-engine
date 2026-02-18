@@ -9,6 +9,7 @@ import type {
   CollectionInterface,
   IndexedCollectionInterface,
 } from '../global-types';
+import type { NumericValue } from '../numeric-value/types';
 
 function isExpressionImpl(x: unknown): x is Expression {
   const boxed = x as { _kind?: unknown } | null | undefined;
@@ -33,9 +34,14 @@ export function isNumber(
 }
 
 export function isSymbol(
-  expr: Expression | null | undefined
+  expr: Expression | null | undefined,
+  name?: string
 ): expr is Expression & SymbolInterface {
-  return expr?._kind === 'symbol';
+  return (
+    expr?._kind === 'symbol' &&
+    (name === undefined ||
+      (expr as Expression & SymbolInterface).symbol === name)
+  );
 }
 
 export function isFunction(
@@ -74,9 +80,10 @@ export function isBoxedNumber(
 
 /** @deprecated Use `isSymbol()` instead. */
 export function isBoxedSymbol(
-  expr: Expression | null | undefined
+  expr: Expression | null | undefined,
+  name?: string
 ): expr is Expression & SymbolInterface {
-  return isSymbol(expr);
+  return isSymbol(expr, name);
 }
 
 /** @deprecated Use `isFunction()` instead. */
@@ -120,14 +127,25 @@ export function isIndexedCollection(
 }
 
 /**
+ * Return the numeric value if `expr` is a number literal, otherwise `undefined`.
+ *
+ * Convenience helper that combines `isNumber()` with `.numericValue` access.
+ */
+export function numericValue(
+  expr: Expression | null | undefined
+): number | NumericValue | undefined {
+  return isNumber(expr) ? expr.numericValue : undefined;
+}
+
+/**
  * Get the symbol name if `expr` is a symbol expression, otherwise `undefined`.
  *
  * Convenience helper that combines `isSymbol()` with `.symbol` access
- * so callers can write `sym(expr) === 'Pi'` instead of the more verbose
- * `isSymbol(expr) && expr.symbol === 'Pi'`.
+ * so callers can write `sym(expr) === 'Pi'` instead of
+ * `isSymbol(expr, 'Pi')`.
  */
 export function sym(expr: Expression | null | undefined): string | undefined {
-  return expr !== null && expr !== undefined && expr._kind === 'symbol'
+  return expr?._kind === 'symbol'
     ? (expr as Expression & SymbolInterface).symbol
     : undefined;
 }

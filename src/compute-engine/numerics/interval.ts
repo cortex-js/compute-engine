@@ -26,28 +26,32 @@ function isSymbol(
 }
 
 function isFunction(
-  expr: Expression | null | undefined
+  expr: Expression | null | undefined,
+  operator?: string
 ): expr is Expression & FunctionInterface {
-  return expr?._kind === 'function' || expr?._kind === 'tensor';
+  return (
+    (expr?._kind === 'function' || expr?._kind === 'tensor') &&
+    (operator === undefined || expr!.operator === operator)
+  );
 }
 
 export function interval(expr: Expression): Interval | undefined {
-  if (expr.operator === 'Interval' && isFunction(expr)) {
+  if (isFunction(expr, 'Interval')) {
     let op1: Expression = expr.op1;
     let op2: Expression = expr.op2;
     let openStart = false;
     let openEnd = false;
-    if (op1.operator === 'Open' && isFunction(op1)) {
+    if (isFunction(op1, 'Open')) {
       openStart = true;
       op1 = op1.op1;
-    } else if (op1.operator === 'Closed' && isFunction(op1)) {
+    } else if (isFunction(op1, 'Closed')) {
       op1 = op1.op1;
     }
 
-    if (op2.operator === 'Open' && isFunction(op2)) {
+    if (isFunction(op2, 'Open')) {
       openEnd = true;
       op2 = op2.op1;
-    } else if (op2.operator === 'Closed' && isFunction(op2)) {
+    } else if (isFunction(op2, 'Closed')) {
       op2 = op2.op1;
     }
 

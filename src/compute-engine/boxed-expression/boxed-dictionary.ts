@@ -280,7 +280,7 @@ function boxedExpressionToDictionaryValue(value: Expression): DictionaryValue {
 
   if (isNumber(value) && value.type.matches('real')) return value.re;
 
-  if (value.operator === 'List' && isFunction(value))
+  if (isFunction(value, 'List'))
     return value.ops.map(boxedExpressionToDictionaryValue);
 
   return value.toMathJson({ shorthands: [] });

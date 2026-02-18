@@ -26,9 +26,9 @@ export function boxedToUnitExpression(expr: Expression): UnitExpression | null {
   // Simple symbol unit
   if (isSymbol(expr)) return expr.symbol;
 
-  const op = expr.operator;
-  if (!op || !isFunction(expr)) return null;
+  if (!isFunction(expr)) return null;
 
+  const op = expr.operator;
   if (op === 'Multiply') {
     const parts: UnitExpression[] = [];
     for (const child of expr.ops) {
@@ -108,7 +108,7 @@ export const UNITS_LIBRARY: SymbolDefinitions = {
     signature: '(value) -> value',
     evaluate: (ops) => {
       const arg = ops[0];
-      if (arg?.operator === 'Quantity' && isFunction(arg)) return arg.op1;
+      if (isFunction(arg, 'Quantity')) return arg.op1;
       return undefined;
     },
   },
@@ -119,7 +119,7 @@ export const UNITS_LIBRARY: SymbolDefinitions = {
     signature: '(value) -> value',
     evaluate: (ops) => {
       const arg = ops[0];
-      if (arg?.operator === 'Quantity' && isFunction(arg)) return arg.op2;
+      if (isFunction(arg, 'Quantity')) return arg.op2;
       return undefined;
     },
   },
@@ -182,7 +182,7 @@ export const UNITS_LIBRARY: SymbolDefinitions = {
     signature: '(value) -> value',
     evaluate: (ops, { engine: ce }) => {
       const arg = ops[0]?.evaluate();
-      if (!arg || !isFunction(arg) || arg.operator !== 'Quantity') return arg;
+      if (!isFunction(arg, 'Quantity')) return arg;
 
       const mag = arg.op1.re;
       const unitExpr = arg.op2;

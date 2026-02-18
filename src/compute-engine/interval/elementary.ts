@@ -836,8 +836,10 @@ export function hypot(
   ];
   // Hypot can be smaller at interior points if intervals straddle zero
   let lo = Math.min(...vals);
-  if (xVal.lo <= 0 && xVal.hi >= 0) lo = Math.min(lo, Math.abs(yVal.lo), Math.abs(yVal.hi));
-  if (yVal.lo <= 0 && yVal.hi >= 0) lo = Math.min(lo, Math.abs(xVal.lo), Math.abs(xVal.hi));
+  if (xVal.lo <= 0 && xVal.hi >= 0)
+    lo = Math.min(lo, Math.abs(yVal.lo), Math.abs(yVal.hi));
+  if (yVal.lo <= 0 && yVal.hi >= 0)
+    lo = Math.min(lo, Math.abs(xVal.lo), Math.abs(xVal.hi));
   if (xVal.lo <= 0 && xVal.hi >= 0 && yVal.lo <= 0 && yVal.hi >= 0) lo = 0;
   return ok({ lo, hi: Math.max(...vals) });
 }

@@ -41,7 +41,7 @@ const ODD_HYPER = new Set([
 const EVEN_FUNCS = new Set(['Cos', 'Sec', 'Cosh', 'Sech']);
 
 export function simplifyAbs(x: Expression): RuleStep | undefined {
-  if (x.operator !== 'Abs' || !isFunction(x)) return undefined;
+  if (!isFunction(x, 'Abs')) return undefined;
 
   const op = x.op1;
   if (!op) return undefined;
@@ -232,13 +232,12 @@ export function simplifyAbs(x: Expression): RuleStep | undefined {
  * |x|^n -> x^n when n is even
  */
 export function simplifyAbsPower(x: Expression): RuleStep | undefined {
-  if (x.operator !== 'Power' || !isFunction(x)) return undefined;
+  if (!isFunction(x, 'Power')) return undefined;
 
   const base = x.op1;
   const exp = x.op2;
 
-  if (!base || !exp || base.operator !== 'Abs' || !isFunction(base))
-    return undefined;
+  if (!exp || !isFunction(base, 'Abs')) return undefined;
 
   const innerBase = base.op1;
   if (!innerBase) return undefined;
@@ -252,7 +251,7 @@ export function simplifyAbsPower(x: Expression): RuleStep | undefined {
   }
 
   // |x|^(n/m) -> x^(n/m) when n is even and m is odd
-  if (exp.operator === 'Divide' && isFunction(exp)) {
+  if (isFunction(exp, 'Divide')) {
     const n = exp.op1;
     const m = exp.op2;
     if (n && m && n.isEven === true && m.isOdd === true) {
@@ -286,7 +285,7 @@ export function simplifyEvenFunctionAbs(x: Expression): RuleStep | undefined {
   if (!EVEN_FUNCS.has(op) || !isFunction(x)) return undefined;
 
   const arg = x.op1;
-  if (!arg || arg.operator !== 'Abs' || !isFunction(arg)) return undefined;
+  if (!isFunction(arg, 'Abs')) return undefined;
 
   const innerArg = arg.op1;
   if (!innerArg) return undefined;

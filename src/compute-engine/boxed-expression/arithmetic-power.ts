@@ -7,7 +7,7 @@ import type { Rational } from '../numerics/types';
 import { asRational } from './numerics';
 import { canonicalAngle, getImaginaryFactor } from './utils';
 import { apply, apply2 } from './apply';
-import { isNumber, isFunction, isSymbol } from './type-guards';
+import { isNumber, isFunction, isSymbol, numericValue } from './type-guards';
 
 function isSqrt(expr: Expression): boolean {
   if (!isFunction(expr)) return false;
@@ -26,12 +26,7 @@ function isSqrt(expr: Expression): boolean {
 export function asRadical(expr: Expression): Rational | null {
   if (isSqrt(expr) && isFunction(expr)) return asRational(expr.op1) ?? null;
 
-  if (
-    isFunction(expr) &&
-    expr.operator === 'Divide' &&
-    expr.op1.is(1) &&
-    isSqrt(expr.op2)
-  ) {
+  if (isFunction(expr, 'Divide') && expr.op1.is(1) && isSqrt(expr.op2)) {
     const n = expr.op2.re;
     if (!Number.isInteger(n)) return null;
     return [1, n];
@@ -66,7 +61,7 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
   const unchanged = () =>
     ce._fn('Power', [a, b], { canonical: fullyCanonical });
 
-  if (isFunction(a) && a.operator === 'Power') {
+  if (isFunction(a, 'Power')) {
     const [base, aPow] = a.ops;
     // (a^n)^m -> a^{n*m} only when mathematically safe:
     // - base is non-negative (no sign info to lose)
@@ -90,7 +85,7 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
   // (a/b)^{-n} -> a^{-n} / b^{-n} = b^n / a^n
   // Only distribute when exponent is negative to normalize negative exponents on fractions
   // e.g., (a/b)^{-2} -> b^2 / a^2
-  if (isFunction(a) && a.operator === 'Divide' && b.isNegative === true) {
+  if (isFunction(a, 'Divide') && b.isNegative === true) {
     const num = a.op1;
     const denom = a.op2;
     // Only distribute when exponent is integer or both operands are non-negative
@@ -200,8 +195,7 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
       // (note: 0^∞ = 0, 1^∞ = NaN, covered prior)
 
       // e^∞ = ∞ (handle explicitly before general case)
-      if (isSymbol(a) && a.symbol === 'ExponentialE')
-        return ce.PositiveInfinity;
+      if (isSymbol(a, 'ExponentialE')) return ce.PositiveInfinity;
 
       // (-1)^∞ = NaN
       // Because of oscillations in the limit.
@@ -226,7 +220,7 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
     // x^-oo
     if (b.isNegative) {
       // e^(-∞) = 0 (handle explicitly before general case)
-      if (isSymbol(a) && a.symbol === 'ExponentialE') return ce.Zero;
+      if (isSymbol(a, 'ExponentialE')) return ce.Zero;
 
       if (a.is(-1)) return ce.NaN;
       //Same result for all infinity types...
@@ -426,9 +420,9 @@ export function pow(
   const e = typeof exp === 'number' ? exp : exp.im === 0 ? exp.re : undefined;
 
   // @todo: this should be canonicalized to a number, so it should never happen here
-  if (isSymbol(x) && x.symbol === 'ComplexInfinity') return ce.NaN;
+  if (isSymbol(x, 'ComplexInfinity')) return ce.NaN;
 
-  if (isSymbol(x) && x.symbol === 'ExponentialE') {
+  if (isSymbol(x, 'ExponentialE')) {
     // Is the argument an imaginary or complex number?
     let theta = getImaginaryFactor(exp);
     if (theta !== undefined) {
@@ -449,7 +443,7 @@ export function pow(
       }
     } else if (numericApproximation) {
       const eN = ce.E.N();
-      const eNv = isNumber(eN) ? eN.numericValue : undefined;
+      const eNv = numericValue(eN);
       if (eNv !== undefined) {
         if (typeof exp === 'number') {
           return ce.number(ce._numericValue(eNv).pow(exp));
@@ -461,7 +455,7 @@ export function pow(
   }
 
   // (a^b)^c -> a^(b*c) only when mathematically safe
-  if (isFunction(x) && x.operator === 'Power') {
+  if (isFunction(x, 'Power')) {
     const [base, power] = x.ops;
     const expExpr = typeof exp === 'number' ? ce.number(exp) : exp;
     const outerIsInteger =
@@ -476,7 +470,7 @@ export function pow(
 
   // (a/b)^c -> a^c / b^c
   // Only distribute when exponent is integer or both operands are non-negative
-  if (isFunction(x) && x.operator === 'Divide') {
+  if (isFunction(x, 'Divide')) {
     const [num, denom] = x.ops;
     const expIsInteger =
       typeof exp === 'number' ? Number.isInteger(exp) : exp.isInteger === true;
@@ -490,7 +484,7 @@ export function pow(
     }
   }
 
-  if (isFunction(x) && x.operator === 'Negate') {
+  if (isFunction(x, 'Negate')) {
     // (-x)^n = (-1)^n x^n — only valid when n is integer
     if (e !== undefined && Number.isInteger(e)) {
       if (e % 2 === 0) return pow(x.op1, exp, { numericApproximation });
@@ -499,7 +493,7 @@ export function pow(
   }
 
   // (√a)^b -> a^(b/2) or √(a^b)
-  if (isFunction(x) && x.operator === 'Sqrt') {
+  if (isFunction(x, 'Sqrt')) {
     // (√a)^2 -> a (integer outer exponent, always safe)
     if (e === 2) return x.op1;
     // (√a)^{2k} -> a^k (even integer outer exponent, always safe)
@@ -511,11 +505,11 @@ export function pow(
   }
 
   // exp(a)^b -> e^(a*b)
-  if (isFunction(x) && x.operator === 'Exp')
+  if (isFunction(x, 'Exp'))
     return pow(ce.E, x.op1.mul(exp), { numericApproximation });
 
   // (a*b)^c -> a^c * b^c — only valid when c is integer
-  if (isFunction(x) && x.operator === 'Multiply') {
+  if (isFunction(x, 'Multiply')) {
     const expIsInteger =
       typeof exp === 'number' ? Number.isInteger(exp) : exp.isInteger === true;
     if (expIsInteger) {
@@ -534,7 +528,7 @@ export function pow(
 
   // (a^(1/b))^c -> a^(c/b) — combines exponents, only safe when
   // base is non-negative or outer exponent c is integer
-  if (isFunction(x) && x.operator === 'Root') {
+  if (isFunction(x, 'Root')) {
     const [base, rootIdx] = x.ops;
     const expIsInteger =
       typeof exp === 'number' ? Number.isInteger(exp) : exp.isInteger === true;

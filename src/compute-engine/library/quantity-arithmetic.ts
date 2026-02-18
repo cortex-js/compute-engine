@@ -36,7 +36,7 @@ export type QuantityExpr = Expression & {
 
 /** Check if an expression is a Quantity and narrow the type. */
 export function isQuantity(expr: Expression): expr is QuantityExpr {
-  return expr.operator === 'Quantity' && isFunction(expr);
+  return isFunction(expr, 'Quantity');
 }
 
 // ---------------------------------------------------------------------------
@@ -282,7 +282,7 @@ export function quantityPower(
   // Simplify unit exponents: Power(Power(u, a), b) → Power(u, a*b)
   const unit = base.op2;
   let resultUnit: Expression;
-  if (isFunction(unit) && unit.operator === 'Power') {
+  if (isFunction(unit, 'Power')) {
     const innerExp = unit.op2?.re;
     if (innerExp !== undefined) {
       const combined = innerExp * n;

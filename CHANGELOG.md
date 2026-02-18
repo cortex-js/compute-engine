@@ -2,6 +2,21 @@
 
 ### Features
 
+- **`numericValue()` convenience helper**: New standalone function that combines
+  the `isNumber()` guard with `.numericValue` access. Returns the numeric value
+  if the expression is a number literal, or `undefined` otherwise. Useful for
+  safely extracting numeric values without verbose ternary patterns:
+
+  ```ts
+  import { numericValue } from '@cortex-js/compute-engine';
+
+  // Before
+  const val = isNumber(expr) ? expr.numericValue : undefined;
+
+  // After
+  const val = numericValue(expr);
+  ```
+
 - **Stochastic equality check for expressions with unknowns**: `expr.isEqual()`
   now uses a stochastic fallback when symbolic methods (expand + simplify) can't
   prove equality. Both expressions are evaluated at 50 sample points (9
@@ -414,9 +429,9 @@ now only accessible after narrowing with a type guard.
 
 | Removed from `Expression`             | Access via                                |
 | :------------------------------------ | :---------------------------------------- |
-| `.symbol`                             | `isSymbol(expr)` then `expr.symbol`       |
+| `.symbol`                             | `isSymbol(expr)` or `isSymbol(expr, 'Pi')` then `expr.symbol` |
 | `.string`                             | `isString(expr)` then `expr.string`       |
-| `.ops`, `.nops`, `.op1`/`.op2`/`.op3` | `isFunction(expr)` then `expr.ops` etc.   |
+| `.ops`, `.nops`, `.op1`/`.op2`/`.op3` | `isFunction(expr)` or `isFunction(expr, 'Add')` then `expr.ops` etc. |
 | `.numericValue`, `.isNumberLiteral`   | `isNumber(expr)` then `expr.numericValue` |
 | `.tensor`                             | `isTensor(expr)` then `expr.tensor`       |
 
@@ -428,8 +443,16 @@ if (expr.symbol !== null) console.log(expr.symbol);
 import { isSymbol, sym } from '@cortex-js/compute-engine';
 
 if (isSymbol(expr)) console.log(expr.symbol);
+// isSymbol() accepts an optional symbol name:
+if (isSymbol(expr, 'Pi')) { /* expr is the Pi symbol */ }
 // or use the convenience helper:
 if (sym(expr) === 'Pi') { /* ... */ }
+
+// isFunction() accepts an optional operator name:
+if (isFunction(expr, 'Add')) {
+  // expr is narrowed to a function AND has operator 'Add'
+  console.log(expr.ops);
+}
 ```
 
 Properties that remain on `Expression`: `.operator`, `.re`/`.im`, `.shape`, all

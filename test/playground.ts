@@ -7,11 +7,15 @@ import {
   parse,
   evaluate,
   declare,
+  assign,
 } from '../src/compute-engine';
 import { expand } from '../src/compute-engine/boxed-expression/expand';
 
 const ce = new ComputeEngine();
 const engine = ce;
+
+assign('v', 2);
+console.log(parse('1 + 4 / v').N().is(3));
 
 let entier = true;
 const domaine = [-10, 10];

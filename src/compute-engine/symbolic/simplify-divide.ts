@@ -20,7 +20,7 @@ import { baseOffset } from './simplify-factorial';
  */
 
 export function simplifyDivide(x: Expression): RuleStep | undefined {
-  if (x.operator !== 'Divide' || !isFunction(x)) return undefined;
+  if (!isFunction(x, 'Divide')) return undefined;
 
   const num = x.op1;
   const denom = x.op2;
@@ -62,7 +62,7 @@ export function simplifyDivide(x: Expression): RuleStep | undefined {
   }
 
   // Check if denominator is a Divide expression
-  if (denom.operator === 'Divide' && isFunction(denom)) {
+  if (isFunction(denom, 'Divide')) {
     const denomNum = denom.op1;
     const denomDenom = denom.op2;
 
@@ -97,14 +97,14 @@ export function simplifyDivide(x: Expression): RuleStep | undefined {
     let denomBase: Expression | undefined;
     let denomExp: Expression | undefined;
 
-    if (num.operator === 'Power' && isFunction(num)) {
+    if (isFunction(num, 'Power')) {
       numBase = num.op1;
       numExp = num.op2;
     } else {
       numBase = num;
       numExp = ce.One;
     }
-    if (denom.operator === 'Power' && isFunction(denom)) {
+    if (isFunction(denom, 'Power')) {
       denomBase = denom.op1;
       denomExp = denom.op2;
     } else {
@@ -196,18 +196,13 @@ export function simplifyDivide(x: Expression): RuleStep | undefined {
 
   // ── Binomial detection: n! / (k! * (n-k)!) → Binomial(n, k) ──
   if (
-    num.operator === 'Factorial' &&
-    isFunction(num) &&
+    isFunction(num, 'Factorial') &&
     denom.operator === 'Multiply' &&
     isFunction(denom)
   ) {
     const n = num.op1;
-    const factorialOps = denom.ops.filter(
-      (op) => op.operator === 'Factorial' && isFunction(op)
-    );
-    const otherOps = denom.ops.filter(
-      (op) => !(op.operator === 'Factorial' && isFunction(op))
-    );
+    const factorialOps = denom.ops.filter((op) => isFunction(op, 'Factorial'));
+    const otherOps = denom.ops.filter((op) => !isFunction(op, 'Factorial'));
 
     if (
       factorialOps.length === 2 &&

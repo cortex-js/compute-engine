@@ -35,7 +35,7 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         let conditions: string[] = [];
         if (isSymbol(conds)) {
           conditions = [conds.symbol];
-        } else if (conds.operator === 'And' && isFunction(conds)) {
+        } else if (isFunction(conds, 'And')) {
           conditions = conds.ops.map((op) => sym(op) ?? '');
         }
         if (checkConditions(value, conditions)) return engine.True;
@@ -186,7 +186,7 @@ function* runLoop(
 
     for (const x of collection.each()) {
       result = fn([x]) ?? ce.Nothing;
-      if (result.operator === 'Break' && isFunction(result)) return result.op1;
+      if (isFunction(result, 'Break')) return result.op1;
       if (result.operator === 'Return') return result;
       i += 1;
       if (i % 1000 === 0) yield result;
@@ -202,7 +202,7 @@ function* runLoop(
   let i = 0;
   while (true) {
     const result = body.evaluate();
-    if (result.operator === 'Break' && isFunction(result)) return result.op1;
+    if (isFunction(result, 'Break')) return result.op1;
     if (result.operator === 'Return') return result;
     i += 1;
     if (i % 1000 === 0) yield result;
