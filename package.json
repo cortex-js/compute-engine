@@ -99,6 +99,7 @@
   },
   "prettier": "@cortex-js/prettier-config",
   "dependencies": {
+    "@arnog/colors": "^0.2.1",
     "complex-esm": "^2.1.1-esm1",
     "decimal.js": "^10.6.0"
   }

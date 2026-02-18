@@ -11,11 +11,11 @@ import {
   hslToRgb,
   rgbToOklab,
   oklabToRgb,
-} from '../../color';
-import type { RgbColor } from '../../color';
-import { SEQUENTIAL_PALETTES } from '../../color/palettes/sequential';
-import { CATEGORICAL_PALETTES } from '../../color/palettes/categorical';
-import { DIVERGING_PALETTES } from '../../color/palettes/diverging';
+  SEQUENTIAL_PALETTES,
+  CATEGORICAL_PALETTES,
+  DIVERGING_PALETTES,
+} from '@arnog/colors';
+import type { RgbColor } from '@arnog/colors';
 import { isFunction, isString } from '../boxed-expression/type-guards';
 
 /** Convert a 0xRRGGBBAA packed integer to a Tuple of 0-1 sRGB components. */
