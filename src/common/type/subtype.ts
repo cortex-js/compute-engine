@@ -455,7 +455,6 @@ export function isSubtype(
   // Handle lists
   //
   if (rhs.kind === 'list' && lhs.kind === 'list') {
-    43;
     // Check that the element types match
     if (!isSubtype(lhs.elements, rhs.elements)) return false;
 
