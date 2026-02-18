@@ -19,6 +19,8 @@ const UNICODE_SUPERSCRIPT_MAP: Record<string, string> = {
   '\u2078': '8', // ⁸
   '\u2079': '9', // ⁹
   '\u207B': '-', // ⁻
+  '\u2071': 'i', // ⁱ
+  '\u207F': 'n', // ⁿ
 };
 
 const UNICODE_SUBSCRIPT_MAP: Record<string, string> = {
@@ -72,8 +74,8 @@ class Tokenizer {
     s = s.replace(/\u2212/g, '-');
 
     // Replace Unicode superscript sequences with ^{...}
-    // Handles: ⁰¹²³⁴⁵⁶⁷⁸⁹ and ⁻ (superscript minus)
-    s = s.replace(/[⁰¹²³⁴⁵⁶⁷⁸⁹⁻]+/g, (m) => {
+    // Handles: ⁰¹²³⁴⁵⁶⁷⁸⁹⁻ⁱⁿ
+    s = s.replace(/[⁰¹²³⁴⁵⁶⁷⁸⁹⁻ⁱⁿ]+/g, (m) => {
       const digits = Array.from(m)
         .map((c) => UNICODE_SUPERSCRIPT_MAP[c])
         .join('');

@@ -1578,6 +1578,34 @@ export class _Parser implements Parser {
 
     this.skipSpace();
 
+    // Check for optional subscript: log_2(x) or log_{10}(x)
+    let subscript: MathJsonExpression | null = null;
+    if (this.peek === '_') {
+      const underIndex = this.index;
+      this.index++; // skip '_'
+      subscript = this.parseGroup();
+      if (subscript === null) {
+        // Try bare digits/letters: _2, _10, _b
+        const subStart = this.index;
+        if (!this.atEnd && /^[a-zA-Z]$/.test(this.peek)) {
+          subscript = this.peek;
+          this.index++;
+        } else {
+          let digits = '';
+          while (!this.atEnd && /^[0-9]$/.test(this.peek)) {
+            digits += this.peek;
+            this.index++;
+          }
+          if (digits) subscript = parseInt(digits);
+        }
+        if (subscript === null) {
+          this.index = start;
+          return null;
+        }
+      }
+      this.skipSpace();
+    }
+
     // Check for optional exponent: sin^2(x) or sin^{10}(x)
     let exponent: MathJsonExpression | null = null;
     if (this.peek === '^') {
@@ -1699,7 +1727,17 @@ export class _Parser implements Parser {
       return exponent !== null ? ['Power', result, exponent] : result;
     }
 
-    const result: MathJsonExpression = [fnName, ...args];
+    // Special case: log with subscript base (matches \log_b behavior)
+    // log_2(x) -> ['Lb', x], log_10(x) -> ['Log', x], log_b(x) -> ['Log', x, b]
+    let result: MathJsonExpression;
+    if (name === 'log' && subscript !== null) {
+      if (subscript === 2) result = ['Lb', ...args];
+      else if (subscript === 10) result = ['Log', ...args];
+      else result = ['Log', args[0], subscript];
+    } else {
+      result = [fnName, ...args];
+    }
+
     return exponent !== null ? ['Power', result, exponent] : result;
   }
 

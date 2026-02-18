@@ -454,4 +454,125 @@ describe('NON-STRICT MODE (Math-ASCII/Typst-like syntax)', () => {
       `);
     });
   });
+
+  describe('Bare function exponents', () => {
+    test('sin^2(x)', () => {
+      expect(ce.parse('sin^2(x)', { strict: false })).toMatchInlineSnapshot(
+        `["Square", ["Sin", "x"]]`
+      );
+    });
+
+    test('cos^{10}(x)', () => {
+      expect(
+        ce.parse('cos^{10}(x)', { strict: false })
+      ).toMatchInlineSnapshot(`["Power", ["Cos", "x"], 10]`);
+    });
+
+    test('tan^-1(x)', () => {
+      expect(ce.parse('tan^-1(x)', { strict: false })).toMatchInlineSnapshot(
+        `["Divide", 1, ["Tan", "x"]]`
+      );
+    });
+
+    test('sin^2(x) + cos^2(x) identity', () => {
+      const a = ce.parse('sin^2(x) + cos^2(x)', { strict: false });
+      expect(a.isEqual(1)).toBe(true);
+    });
+  });
+
+  describe('Bare log with subscript', () => {
+    test('log_2(x) → base 2', () => {
+      expect(ce.parse('log_2(x)', { strict: false })).toMatchInlineSnapshot(
+        `["Log", "x", 2]`
+      );
+    });
+
+    test('log_{10}(x) → base 10 (default)', () => {
+      expect(
+        ce.parse('log_{10}(x)', { strict: false })
+      ).toMatchInlineSnapshot(`["Log", "x"]`);
+    });
+
+    test('log_3(x) → base 3', () => {
+      expect(ce.parse('log_3(x)', { strict: false })).toMatchInlineSnapshot(
+        `["Log", "x", 3]`
+      );
+    });
+
+    test('log_b(x) → variable base', () => {
+      expect(ce.parse('log_b(x)', { strict: false })).toMatchInlineSnapshot(
+        `["Log", "x", "b"]`
+      );
+    });
+  });
+
+  describe('Unicode superscripts', () => {
+    test('x² → Power', () => {
+      expect(ce.parse('x²')).toMatchInlineSnapshot(`["Square", "x"]`);
+    });
+
+    test('x²³ → multi-digit exponent', () => {
+      expect(ce.parse('x²³')).toMatchInlineSnapshot(
+        `["Power", "x", 23]`
+      );
+    });
+
+    test('x⁻² → negative exponent', () => {
+      expect(ce.parse('x⁻²')).toMatchInlineSnapshot(
+        `["Divide", 1, ["Square", "x"]]`
+      );
+    });
+
+    test('xⁿ → letter superscript', () => {
+      expect(ce.parse('xⁿ')).toMatchInlineSnapshot(
+        `["Power", "x", "n"]`
+      );
+    });
+
+    test('2ⁿ → numeric base with letter exponent', () => {
+      expect(ce.parse('2ⁿ')).toMatchInlineSnapshot(
+        `["Power", 2, "n"]`
+      );
+    });
+
+    test('\\sin²(x) → trig with Unicode exponent', () => {
+      expect(ce.parse('\\sin²(x)')).toMatchInlineSnapshot(
+        `["Square", ["Sin", "x"]]`
+      );
+    });
+
+    test('sin²(x) bare + Unicode', () => {
+      expect(ce.parse('sin²(x)', { strict: false })).toMatchInlineSnapshot(
+        `["Square", ["Sin", "x"]]`
+      );
+    });
+  });
+
+  describe('Unicode subscripts', () => {
+    test('x₁ → subscript', () => {
+      expect(ce.parse('x₁')).toMatchInlineSnapshot(`x_1`);
+    });
+
+    test('x₁₂ → multi-digit subscript', () => {
+      expect(ce.parse('x₁₂')).toMatchInlineSnapshot(`x_12`);
+    });
+
+    test('x₁² → subscript + superscript', () => {
+      expect(ce.parse('x₁²')).toMatchInlineSnapshot(
+        `["Square", "x_1"]`
+      );
+    });
+
+    test('log₂(x) → Unicode subscript on bare log', () => {
+      expect(ce.parse('log₂(x)', { strict: false })).toMatchInlineSnapshot(
+        `["Log", "x", 2]`
+      );
+    });
+
+    test('log₁₀(x) → Unicode subscript base 10', () => {
+      expect(
+        ce.parse('log₁₀(x)', { strict: false })
+      ).toMatchInlineSnapshot(`["Log", "x"]`);
+    });
+  });
 });
