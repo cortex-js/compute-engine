@@ -260,7 +260,7 @@ export function factorQuadratic(
   const a = coeffs[2];
 
   // Quick check: if a is zero, it's not really quadratic
-  if (a.is(0)) return null;
+  if (a.isSame(0)) return null;
 
   // Calculate discriminant: b² - 4ac
   const discriminant = b.pow(2).sub(ce.number(4).mul(a).mul(c));
@@ -309,7 +309,7 @@ export function factorQuadratic(
   const factor1 = x.sub(root1);
   const factor2 = x.sub(root2);
 
-  if (a.is(1)) {
+  if (a.isSame(1)) {
     return ce.box(['Multiply', factor1.json, factor2.json]);
   } else {
     return ce.box(['Multiply', a.json, factor1.json, factor2.json]);
@@ -369,7 +369,7 @@ export function factor(expr: Expression): Expression {
       rhs.div(coef);
     }
 
-    if (!common.is(1)) {
+    if (!common.isSame(1)) {
       // We have some symbolic factor in common ("x", etc...)
       if (common.isPositive) {
         lhs.div(common);

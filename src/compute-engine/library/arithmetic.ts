@@ -174,7 +174,7 @@ function lnSign(x: Expression): Sign | undefined {
   if (x.isGreaterEqual(1)) return 'non-negative';
   if (x.isLessEqual(1) && x.isGreaterEqual(0)) return 'non-positive';
   if (x.isLess(1) && x.isGreaterEqual(0)) return 'negative';
-  if (x.is(1)) return 'zero';
+  if (x.isSame(1)) return 'zero';
   if (x.isNegative || x.isReal === false) return 'unsigned';
   return undefined;
 }
@@ -193,7 +193,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
       type: ([x]) => x.type,
       sgn: ([x]) => {
-        if (x.is(0)) return 'zero';
+        if (x.isSame(0)) return 'zero';
         if (isNumber(x)) return 'positive';
         return 'non-negative'; //|x^2+1| fails
       },
@@ -217,7 +217,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
       sgn: (ops) => {
         if (ops.some((x) => x.isNaN)) return 'unsigned';
-        if (ops.every((x) => x.is(0))) return 'zero';
+        if (ops.every((x) => x.isSame(0))) return 'zero';
         if (ops.every((x) => x.isNonNegative))
           return ops.some((x) => x.isPositive) ? 'positive' : 'non-negative';
         if (ops.every((x) => x.isNonPositive))
@@ -300,7 +300,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // i.e. √2x/2 -> 0.707x, 2/√2x -> 1.4142x
       signature: '(number, number+) -> number',
       type: ([num, den]) => {
-        if (den.is(1)) return num.type;
+        if (den.isSame(1)) return num.type;
         if (den.isNaN || num.isNaN) return 'number';
         if (den.isFinite === false || num.isFinite === false)
           return 'non_finite_number';
@@ -311,11 +311,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
       sgn: (ops) => {
         const [n, d] = [ops[0], ops[1]];
-        if (d.is(0)) return 'unsigned';
+        if (d.isSame(0)) return 'unsigned';
         if (d.isPositive) return n.sgn;
         if (d.isNegative) return oppositeSgn(n.sgn);
         const s = d.sgn;
-        if ((n.is(0) && s === 'not-zero') || (n.isFinite && d.isInfinity))
+        if ((n.isSame(0) && s === 'not-zero') || (n.isFinite && d.isInfinity))
           return 'zero';
         if (n.sgn === 'not-zero' && s === 'not-zero') return 'not-zero';
         return undefined;
@@ -554,7 +554,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       signature: '(number) -> number',
       type: (ops) => numericTypeHandler(ops),
 
-      sgn: ([x]) => (x.isPositive ? 'positive' : x.is(0) ? 'zero' : undefined),
+      sgn: ([x]) => (x.isPositive ? 'positive' : x.isSame(0) ? 'zero' : undefined),
       evaluate: ([x], { numericApproximation, engine }) =>
         numericApproximation
           ? apply(
@@ -801,7 +801,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
       sgn: ([x, base]) => {
         if (!base) return lnSign(x);
-        if (base.is(1) || base.isReal == false) return 'unsigned';
+        if (base.isSame(1) || base.isReal == false) return 'unsigned';
         if (base.isGreater(1)) return lnSign(x);
         if (base.isLess(1)) return oppositeSgn(lnSign(x));
         return undefined;
@@ -891,7 +891,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       sgn: (ops) => {
         const n = ops[1]; //base of Mod
         if (n === undefined || n.isReal == false) return undefined;
-        if (n.is(0)) return 'unsigned';
+        if (n.isSame(0)) return 'unsigned';
         if (isNumber(ops[0]) && isNumber(n)) {
           const v = apply2(
             ops[0],
@@ -942,7 +942,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       sgn: (ops) => {
         if (ops.some((x) => x.sgn === undefined || x.isReal === false))
           return undefined;
-        if (ops.some((x) => x.is(0)))
+        if (ops.some((x) => x.isSame(0)))
           return ops.every((x) => x.isFinite)
             ? 'zero'
             : ops.some((x) => x.isFinite === false)
@@ -1065,14 +1065,14 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         )
           return undefined;
 
-        if (a.is(0))
+        if (a.isSame(0))
           return b.isNonPositive
             ? 'unsigned'
             : b.isPositive
               ? 'zero'
               : undefined;
 
-        if (a.is(0) && b.is(0)) return 'unsigned';
+        if (a.isSame(0) && b.isSame(0)) return 'unsigned';
 
         if (a.isNonNegative || (b.numerator.isOdd && b.denominator.isOdd))
           return a.sgn;
@@ -1085,7 +1085,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               : 'non-negative';
           }
           if (a.type.matches('complex')) return 'negative';
-          return !a.is(0) ? 'not-zero' : undefined; //already accounted for a.is(0)
+          return !a.isSame(0) ? 'not-zero' : undefined; //already accounted for a.is(0)
         }
 
         if (
@@ -1171,8 +1171,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (base.isNaN || exp.isNaN) return 'number';
         if (base.isFinite === false || exp.isFinite === false)
           return 'non_finite_number';
-        if (exp.is(0)) return 'finite_integer';
-        if (exp.is(1)) return base.type;
+        if (exp.isSame(0)) return 'finite_integer';
+        if (exp.isSame(1)) return base.type;
         if (base.isReal && exp.isReal) {
           if (base.isPositive === true) return 'finite_real';
           return 'finite_number';
@@ -1182,7 +1182,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       sgn: ([x, n]) => {
         // Note: we can't simplify this to a power, then get the sgn of that because this may cause an infinite loop
         if (x.isReal === false || n.isReal === false) return 'unsigned';
-        if (x.is(0)) {
+        if (x.isSame(0)) {
           if (n.isNonPositive) {
             return 'unsigned';
           }
@@ -1269,7 +1269,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       type: () => 'finite_real',
       sgn: () => 'non-negative',
       evaluate: ([x], { engine }) => {
-        if (x.is(0)) return engine.Half;
+        if (x.isSame(0)) return engine.Half;
         if (x.isPositive) return engine.One;
         if (x.isNegative) return engine.Zero;
         return undefined;
@@ -1283,7 +1283,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       type: () => 'finite_integer',
       sgn: ([x]) => x.sgn,
       evaluate: ([x], { engine }) => {
-        if (x.is(0)) return engine.Zero;
+        if (x.isSame(0)) return engine.Zero;
         if (x.isPositive) return engine.One;
         if (x.isNegative) return engine.NegativeOne;
         return undefined;
@@ -1353,7 +1353,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (!numericApproximation) return x.sqrt();
 
         const [c, rest] = x.toNumericValue();
-        if (rest.is(1)) return engine.number(c.sqrt().N());
+        if (rest.isSame(1)) return engine.number(c.sqrt().N());
         return engine.number(c.sqrt().N()).mul(rest);
       },
       // evalDomain: Square root of a prime is irrational
@@ -1366,7 +1366,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       signature: '(number) -> number',
       sgn: ([x]) => {
-        if (x.is(0)) return 'zero';
+        if (x.isSame(0)) return 'zero';
         if (x.isReal) {
           const s = x.sgn;
           return s === 'not-zero' || s === 'positive' || s === 'negative'
@@ -1789,10 +1789,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           return undefined;
         if (ops.some((x) => x.isPositive)) return 'positive';
         if (ops.every((x) => x.isNonPositive))
-          return ops.some((x) => x.is(0)) ? 'zero' : 'non-positive';
+          return ops.some((x) => x.isSame(0)) ? 'zero' : 'non-positive';
         if (ops.some((x) => x.isNonNegative)) return 'non-negative';
         if (ops.every((x) => x.isNegative)) return 'negative';
-        if (ops.some((x) => !x.is(0))) return 'not-zero';
+        if (ops.some((x) => !x.isSame(0))) return 'not-zero';
         return undefined;
       },
       evaluate: (xs, { engine }) => evaluateMinMax(engine, xs, 'Max'),
@@ -1810,7 +1810,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           return undefined;
         if (ops.some((x) => x.isNegative)) return 'negative';
         if (ops.every((x) => x.isNonNegative))
-          return ops.some((x) => x.is(0)) ? 'zero' : 'non-negative';
+          return ops.some((x) => x.isSame(0)) ? 'zero' : 'non-negative';
         if (ops.some((x) => x.isNonPositive)) return 'non-positive';
         if (ops.every((x) => x.isPositive)) return 'positive';
         return undefined;

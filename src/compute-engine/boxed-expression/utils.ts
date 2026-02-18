@@ -225,7 +225,7 @@ export function getImaginaryFactor(
   if (isFunction(expr, 'Negate')) return getImaginaryFactor(expr.op1)?.neg();
 
   if (isFunction(expr, 'Complex')) {
-    if (expr.op1.is(0) && !isNaN(expr.op2.re)) return ce.number(expr.op2.re);
+    if (expr.op1.isSame(0) && !isNaN(expr.op2.re)) return ce.number(expr.op2.re);
     return undefined;
   }
 
@@ -243,7 +243,7 @@ export function getImaginaryFactor(
 
   if (isFunction(expr, 'Divide')) {
     const denom = expr.op2;
-    if (denom.is(0)) return undefined;
+    if (denom.isSame(0)) return undefined;
     return getImaginaryFactor(expr.op1)?.div(denom);
   }
 

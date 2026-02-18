@@ -87,7 +87,7 @@ export function negateProduct(
   for (const arg of args) {
     if (!done && isFunction(arg, 'Negate')) {
       done = true;
-      if (!arg.op1.is(1)) result.push(arg.op1);
+      if (!arg.op1.isSame(1)) result.push(arg.op1);
     } else result.push(arg);
   }
 
@@ -98,7 +98,7 @@ export function negateProduct(
       if (done || (!isNumber(arg) && !arg.isInteger)) result.push(arg);
       else {
         done = true;
-        if (!arg.is(-1)) result.push(arg.neg());
+        if (!arg.isSame(-1)) result.push(arg.neg());
       }
     }
   }
@@ -111,7 +111,7 @@ export function negateProduct(
       if (done || !isNumber(arg) || !arg.isNumber) result.push(arg);
       else {
         done = true;
-        if (!arg.is(-1)) result.push(arg.neg());
+        if (!arg.isSame(-1)) result.push(arg.neg());
       }
     }
   }

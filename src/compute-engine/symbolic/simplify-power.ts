@@ -32,12 +32,12 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
     if (!arg || !rootIndex) return undefined;
 
     // Edge case: 0th root is undefined -> NaN
-    if (rootIndex.is(0)) {
+    if (rootIndex.isSame(0)) {
       return { value: ce.NaN, because: 'root(x, 0) -> NaN' };
     }
 
     // Edge case: root(0, n)
-    if (arg.is(0)) {
+    if (arg.isSame(0)) {
       if (rootIndex.isPositive === true) {
         return { value: ce.Zero, because: 'root(0, n) -> 0 when n > 0' };
       }
@@ -45,7 +45,7 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
     }
 
     // Edge case: root(1, n) = 1 for all nonzero n
-    if (arg.is(1)) {
+    if (arg.isSame(1)) {
       return { value: ce.One, because: 'root(1, n) -> 1' };
     }
 
@@ -283,12 +283,12 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
 
       if (base && exp) {
         // sqrt(x^2) -> x when x is non-negative
-        if (exp.is(2) && base.isNonNegative === true) {
+        if (exp.isSame(2) && base.isNonNegative === true) {
           return { value: base, because: 'sqrt(x^2) -> x when x >= 0' };
         }
 
         // sqrt(x^2) -> |x| (general case)
-        if (exp.is(2)) {
+        if (exp.isSame(2)) {
           return { value: ce._fn('Abs', [base]), because: 'sqrt(x^2) -> |x|' };
         }
 
@@ -333,7 +333,7 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
           const base = factor.op1;
           const exp = factor.op2;
           // x^2 -> |x| outside, nothing inside
-          if (exp.is(2)) {
+          if (exp.isSame(2)) {
             perfectSquares.push(ce._fn('Abs', [base]));
           }
           // x^{2n} -> |x|^n outside, nothing inside
@@ -394,19 +394,19 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
     if (!base || !exp) return undefined;
 
     // x^1 -> x
-    if (exp.is(1)) {
+    if (exp.isSame(1)) {
       return { value: base, because: 'x^1 -> x' };
     }
 
     // 0^x -> 0 when x is positive (including symbolic like π)
     // Note: 0^0 = NaN and 0^(-x) = ComplexInfinity are handled elsewhere
-    if (base.is(0) && exp.isPositive === true) {
+    if (base.isSame(0) && exp.isPositive === true) {
       return { value: ce.Zero, because: '0^x -> 0 when x > 0' };
     }
 
     // (-1)^{p/q} -> -1 when both p and q are odd (real odd root of -1)
     // This handles the literal -1 case (not Negate(1))
-    if (base.is(-1)) {
+    if (base.isSame(-1)) {
       const rat = asRational(exp);
       if (rat) {
         const [num, denom] = rat;
@@ -593,7 +593,7 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
     }
 
     // (a/b)^{-n} -> (b/a)^n
-    if (isFunction(base, 'Divide') && base.op2.is(0) === false) {
+    if (isFunction(base, 'Divide') && base.op2.isSame(0) === false) {
       const num = base.op1;
       const denom = base.op2;
 
@@ -605,7 +605,7 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
       }
 
       // (a/b)^{-1} -> b/a
-      if (exp.is(-1)) {
+      if (exp.isSame(-1)) {
         return { value: denom.div(num), because: '(a/b)^{-1} -> b/a' };
       }
 
@@ -668,7 +668,7 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
     }
 
     // a / b^{-n} -> a * b^n
-    if (isFunction(denom, 'Power') && denom.op1.is(0) === false) {
+    if (isFunction(denom, 'Power') && denom.op1.isSame(0) === false) {
       const base = denom.op1;
       const exp = denom.op2;
 
@@ -686,7 +686,7 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
         const factor = denom.ops[i];
         if (
           isFunction(factor, 'Power') &&
-          factor.op1.is(0) === false &&
+          factor.op1.isSame(0) === false &&
           factor.op2.operator === 'Negate' &&
           isFunction(factor.op2)
         ) {
@@ -710,7 +710,7 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
       isFunction(denom, 'Power') &&
       denom.op1.operator === 'Divide' &&
       isFunction(denom.op1) &&
-      denom.op1.op2.is(0) !== true
+      denom.op1.op2.isSame(0) !== true
     ) {
       const fracNum = denom.op1.op1;
       const fracDenom = denom.op1.op2;

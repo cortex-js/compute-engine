@@ -377,7 +377,7 @@ export class BoxedFunction
       for (const arg of expr.ops) {
         const [c, r] = arg.toNumericValue();
         coef = coef.mul(c);
-        if (!r.is(1)) rest.push(r);
+        if (!r.isSame(1)) rest.push(r);
       }
       if (rest.length === 0) return [coef, ce.One];
       if (rest.length === 1) return [coef, rest[0]];
@@ -391,7 +391,7 @@ export class BoxedFunction
       const [coef1, numer] = expr.op1.toNumericValue();
       const [coef2, denom] = expr.op2.toNumericValue();
       const coef = coef1.div(coef2);
-      if (denom.is(1)) return [coef, numer];
+      if (denom.isSame(1)) return [coef, numer];
       return [coef, ce.function('Divide', [numer, denom])];
     }
 
@@ -410,7 +410,7 @@ export class BoxedFunction
       if (exponent !== null)
         return [coef.pow(exponent), ce.function('Power', [base, expr.op2])];
 
-      if (expr.op2.is(0.5)) return [coef.sqrt(), ce.function('Sqrt', [base])];
+      if (expr.op2.isSame(0.5)) return [coef.sqrt(), ce.function('Sqrt', [base])];
 
       return [ce._numericValue(1), this];
     }
@@ -418,7 +418,7 @@ export class BoxedFunction
     if (isFunction(expr, 'Sqrt')) {
       const [coef, rest] = expr.op1.toNumericValue();
       // @fastpasth
-      if (rest.is(1) || rest.is(0)) {
+      if (rest.isSame(1) || rest.isSame(0)) {
         if (coef.isOne || coef.isZero) return [coef, rest];
         return [coef.sqrt(), rest];
       }
@@ -789,7 +789,7 @@ export class BoxedFunction
       throw new Error('Not canonical');
 
     // Mathematica returns `Log[0]` as `-∞`
-    if (this.is(0)) return this.engine.NegativeInfinity;
+    if (this.isSame(0)) return this.engine.NegativeInfinity;
 
     // ln(exp(x)) = x (for natural log)
     // ln_c(exp(x)) = x / ln(c) (for other bases)

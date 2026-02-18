@@ -162,11 +162,11 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
 
         // See https://en.wikipedia.org/wiki/Argument_(complex_analysis)#Realizations_of_the_function_in_computer_languages
         if (y.isFinite === false && x.isFinite === false) return ce.NaN;
-        if (y.is(0) && x.is(0)) return ce.Zero;
+        if (y.isSame(0) && x.isSame(0)) return ce.Zero;
         if (x.isFinite === false) return x.isPositive ? ce.Zero : ce.Pi;
         if (y.isFinite === false)
           return y.isPositive ? ce.Pi.div(2) : ce.Pi.div(-2);
-        if (y.is(0)) return x.isPositive ? ce.Zero : ce.Pi;
+        if (y.isSame(0)) return x.isPositive ? ce.Zero : ce.Pi;
         return ce.function('Arctan', [y.div(x)]).evaluate();
       },
     },

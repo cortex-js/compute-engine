@@ -22,6 +22,7 @@ import { simplify } from './simplify';
 import { _BoxedExpression } from './abstract-boxed-expression';
 import { hashCode } from './utils';
 import { match } from './match';
+import { same } from './compare';
 import { add } from './arithmetic-add';
 import { pow } from './arithmetic-power';
 import { isSubtype } from '../../common/type/subtype';
@@ -243,7 +244,7 @@ export class BoxedNumber
 
   add(rhs: number | Expression): Expression {
     const ce = this.engine;
-    if (this.is(0)) return ce.box(rhs);
+    if (this.isSame(0)) return ce.box(rhs);
     if (typeof rhs === 'number') {
       // @fastpath
       if (rhs === 0) return this;
@@ -265,15 +266,15 @@ export class BoxedNumber
   }
 
   mul(rhs: NumericValue | number | Expression): Expression {
-    if (this.is(1)) return this.engine.box(rhs);
-    if (this.is(-1)) return this.engine.box(rhs).neg();
+    if (this.isSame(1)) return this.engine.box(rhs);
+    if (this.isSame(-1)) return this.engine.box(rhs).neg();
 
     const ce = this.engine;
 
     // @fastpath
     if (typeof rhs === 'number') {
       if (rhs === 1) return this;
-      if (rhs === 0 || this.is(0)) return this.engine.Zero;
+      if (rhs === 0 || this.isSame(0)) return this.engine.Zero;
       if (rhs === -1) return this.neg();
       return ce.number(
         typeof this._value === 'number'
@@ -286,8 +287,8 @@ export class BoxedNumber
       return ce.number(this._value * rhs);
 
     if (rhs instanceof NumericValue) {
-      if (this.is(1)) return ce.number(rhs);
-      if (this.is(-1)) return ce.number(rhs.neg());
+      if (this.isSame(1)) return ce.number(rhs);
+      if (this.isSame(-1)) return ce.number(rhs.neg());
       return ce.number(rhs.mul(this._value));
     }
 
@@ -317,10 +318,10 @@ export class BoxedNumber
       }
     } else {
       exp = exp.canonical;
-      if (exp.is(0)) return this.engine.NaN;
-      if (exp.is(1)) return this;
-      if (exp.is(-1)) return this.inv();
-      if (exp.is(2)) return this.sqrt();
+      if (exp.isSame(0)) return this.engine.NaN;
+      if (exp.isSame(1)) return this;
+      if (exp.isSame(-1)) return this.inv();
+      if (exp.isSame(2)) return this.sqrt();
       if (this.isNegative) {
         if (exp.isOdd) return this.neg().root(exp).neg();
         if (exp.isEven) return this.neg().root(exp);
@@ -357,7 +358,7 @@ export class BoxedNumber
 
       return this.engine.number(this.engine._numericValue(this._value).sqrt());
     }
-    if (this.is(0) || this.is(1)) return this;
+    if (this.isSame(0) || this.isSame(1)) return this;
 
     return this.engine.number(this._value.sqrt());
   }
@@ -366,7 +367,7 @@ export class BoxedNumber
     const base = semiBase ? this.engine.box(semiBase) : undefined;
 
     // Mathematica returns `Log[0]` as `-∞`
-    if (this.is(0)) return this.engine.NegativeInfinity;
+    if (this.isSame(0)) return this.engine.NegativeInfinity;
 
     if (base && this.isSame(base)) return this.engine.One;
     if (
@@ -514,8 +515,8 @@ export class BoxedNumber
   }
 
   get isOdd(): boolean | undefined {
-    if (this.is(1) || this.is(-1)) return true;
-    if (this.is(0)) return false;
+    if (this.isSame(1) || this.isSame(-1)) return true;
+    if (this.isSame(0)) return false;
 
     if (!this.isFinite || !this.isInteger) return undefined;
 
@@ -579,22 +580,22 @@ export class BoxedNumber
     return isSubtype(this._value.type, 'real');
   }
 
-  is(other: Expression | number | bigint | boolean): boolean {
+  is(other: Expression | number | bigint | boolean | string): boolean {
+    return this.isSame(other);
+  }
+
+  isSame(other: Expression | number | bigint | boolean | string): boolean {
     if (typeof other === 'number') {
-      // We want to be able to compare NaN with NaN, so we have to use
-      // Object.is() instead of === (which return false for NaN === NaN)
       if (typeof this._value === 'number') return Object.is(this._value, other);
-
       if (this._value.isNaN) return Object.is(other, NaN);
-
       return this._value.eq(other);
     }
     if (typeof other === 'bigint') {
       if (typeof this._value === 'number') return bigint(this._value) === other;
       return this._value.eq(this.engine._numericValue(other));
     }
-    if (typeof other === 'boolean') return false;
-    return this.isSame(other);
+    if (typeof other === 'boolean' || typeof other === 'string') return false;
+    return same(this, other);
   }
 
   get canonical(): Expression {

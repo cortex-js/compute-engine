@@ -632,11 +632,11 @@ function isEffectivelyZero(expr: Expression | undefined): boolean {
   if (!expr) return true;
 
   // Try symbolic zero check first
-  if (expr.is(0)) return true;
+  if (expr.isSame(0)) return true;
 
   // Check if the expression simplifies to zero
   const simplified = expr.simplify();
-  if (simplified.is(0)) return true;
+  if (simplified.isSame(0)) return true;
 
   // Fallback: check numeric value with small tolerance
   const exprN = expr.N();
@@ -790,7 +790,7 @@ function extractProductEquation(
 
   // Extract the coefficient of xy term and the constant term
   const xyCoef = extractXYCoefficient(eq, x, y, ce);
-  if (!xyCoef || xyCoef.coef.is(0)) return null;
+  if (!xyCoef || xyCoef.coef.isSame(0)) return null;
 
   // The equation is: coef * xy + constant = 0
   // So: xy = -constant / coef
@@ -923,13 +923,13 @@ function extractSumEquation(
 
   // Check if coefficients are equal (or one is multiple of other)
   const ratio = coefX.div(coefY).simplify();
-  if (!ratio.is(1) && !ratio.is(-1)) {
+  if (!ratio.isSame(1) && !ratio.isSame(-1)) {
     // Coefficients are different - not a simple x + y = s form
     // Could still handle ax + by = s but let's start simple
     return null;
   }
 
-  if (ratio.is(1)) {
+  if (ratio.isSame(1)) {
     // coefX = coefY, so ax + ay = -c means x + y = -c/a
     const sum = constant.neg().div(coefX).simplify();
     return { sum };
@@ -1053,7 +1053,7 @@ function trySolveLinearFor(
   // solveFor = -rest / a
 
   const coef = extractCoefficient(eq, solveFor, ce);
-  if (coef === null || coef.is(0)) return null;
+  if (coef === null || coef.isSame(0)) return null;
 
   // rest = eq - coef * solveFor
   const rest = eq.sub(coef.mul(ce.symbol(solveFor))).simplify();

@@ -169,7 +169,7 @@ export const CONDITIONS = {
 
   numeric: (x: Expression) => {
     const [_c, term] = x.toNumericValue();
-    return term.is(1);
+    return term.isSame(1);
   },
   integer: (x: Expression) => x.isInteger,
   rational: (x: Expression) => x.isRational,
@@ -193,8 +193,8 @@ export const CONDITIONS = {
   prime: (x: Expression) => isPrime(x) === true,
   composite: (x: Expression) => isPrime(x) === false,
 
-  notzero: (x: Expression) => x.is(0) === false,
-  notone: (x: Expression) => x.is(1) === false,
+  notzero: (x: Expression) => x.isSame(0) === false,
+  notone: (x: Expression) => x.isSame(1) === false,
 
   finite: (x: Expression) => x.isFinite,
   infinite: (x: Expression) => x.isFinite === false,

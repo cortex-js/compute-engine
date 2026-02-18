@@ -206,7 +206,7 @@ function getNegatedArg(expr: Expression): Expression | undefined {
 
   // Check for Multiply with -1 factor
   if (isFunction(expr, 'Multiply')) {
-    const negOneIndex = expr.ops.findIndex((f) => f.is(-1));
+    const negOneIndex = expr.ops.findIndex((f) => f.isSame(-1));
     if (negOneIndex >= 0) {
       const remaining = expr.ops.filter((_, i) => i !== negOneIndex);
       if (remaining.length === 1) return remaining[0];
@@ -282,7 +282,7 @@ export function TR5(expr: Expression): Expression | undefined {
 
   if (!base || !exp) return undefined;
   if (base.operator !== 'Sin') return undefined;
-  if (!exp.is(2)) return undefined;
+  if (!exp.isSame(2)) return undefined;
 
   if (!isFunction(base)) return undefined;
   const arg = base.op1;
@@ -316,7 +316,7 @@ export function TR6(expr: Expression): Expression | undefined {
 
   if (!base || !exp) return undefined;
   if (base.operator !== 'Cos') return undefined;
-  if (!exp.is(2)) return undefined;
+  if (!exp.isSame(2)) return undefined;
 
   if (!isFunction(base)) return undefined;
   const arg = base.op1;
@@ -350,7 +350,7 @@ export function TR7(expr: Expression): Expression | undefined {
 
   if (!base || !exp) return undefined;
   if (base.operator !== 'Cos') return undefined;
-  if (!exp.is(2)) return undefined;
+  if (!exp.isSame(2)) return undefined;
 
   if (!isFunction(base)) return undefined;
   const arg = base.op1;
@@ -387,7 +387,7 @@ export function TR7i(expr: Expression): Expression | undefined {
     const num = expr.op1;
     const den = expr.op2;
 
-    if (!num || !den || !den.is(2)) return undefined;
+    if (!num || !den || !den.isSame(2)) return undefined;
 
     // Check numerator is Add(1, +/-cos(2x))
     if (isFunction(num, 'Add') && num.ops.length === 2) {
@@ -448,7 +448,7 @@ export function TR7i(expr: Expression): Expression | undefined {
       }
 
       // cos(2x)/2
-      if (isFunction(checkOp, 'Divide') && checkOp.op2?.is(2)) {
+      if (isFunction(checkOp, 'Divide') && checkOp.op2?.isSame(2)) {
         const num = checkOp.op1;
         if (num?.operator === 'Cos') {
           cosTerm = num;
@@ -492,7 +492,7 @@ export function TR7i(expr: Expression): Expression | undefined {
       let x: Expression | undefined;
 
       if (isFunction(cosArg, 'Multiply')) {
-        const twoIndex = cosArg.ops.findIndex((f) => f.is(2));
+        const twoIndex = cosArg.ops.findIndex((f) => f.isSame(2));
         if (twoIndex >= 0) {
           const remaining = cosArg.ops.filter((_, i) => i !== twoIndex);
           x =
@@ -529,7 +529,7 @@ function checkHalfAnglePattern(
   let isNegCos = false;
 
   for (let i = 0; i < ops.length; i++) {
-    if (ops[i].is(1)) {
+    if (ops[i].isSame(1)) {
       oneIndex = i;
     } else if (ops[i].operator === 'Cos') {
       cosIndex = i;
@@ -564,7 +564,7 @@ function checkHalfAnglePattern(
   let x: Expression | undefined;
 
   if (isFunction(cosArg, 'Multiply')) {
-    const twoIndex = cosArg.ops.findIndex((f) => f.is(2));
+    const twoIndex = cosArg.ops.findIndex((f) => f.isSame(2));
     if (twoIndex >= 0) {
       const remaining = cosArg.ops.filter((_, i) => i !== twoIndex);
       x = remaining.length === 1 ? remaining[0] : ce._fn('Multiply', remaining);
@@ -1134,7 +1134,7 @@ export function TR11(expr: Expression): Expression | undefined {
   // Check if argument is 2*x (Multiply with factor 2)
   if (isFunction(arg, 'Multiply')) {
     const factors = arg.ops;
-    const twoIndex = factors.findIndex((f) => f.is(2));
+    const twoIndex = factors.findIndex((f) => f.isSame(2));
 
     if (twoIndex >= 0) {
       const otherFactors = factors.filter((_, i) => i !== twoIndex);
@@ -1182,7 +1182,7 @@ export function TR11i(expr: Expression): Expression | undefined {
     const ops = expr.ops;
 
     // Look for 2, sin(x), cos(x) factors
-    const twoIndex = ops.findIndex((f) => f.is(2));
+    const twoIndex = ops.findIndex((f) => f.isSame(2));
     if (twoIndex >= 0) {
       const remaining = ops.filter((_, i) => i !== twoIndex);
 
@@ -1219,13 +1219,13 @@ export function TR11i(expr: Expression): Expression | undefined {
     if (
       isFunction(a, 'Power') &&
       a.op1?.operator === 'Cos' &&
-      a.op2?.is(2) &&
+      a.op2?.isSame(2) &&
       b.operator === 'Negate' &&
       isFunction(b) &&
       b.op1?.operator === 'Power' &&
       isFunction(b.op1) &&
       b.op1.op1?.operator === 'Sin' &&
-      b.op1.op2?.is(2)
+      b.op1.op2?.isSame(2)
     ) {
       const cosBase = a.op1;
       const sinPower = b.op1;
@@ -1245,7 +1245,7 @@ export function TR11i(expr: Expression): Expression | undefined {
     // Pattern: Add(Multiply(2, Power(Cos(x), 2)), -1) or Add(-1, Multiply(2, Power(Cos(x), 2)))
     const extractTwoCosSq = (term: Expression): Expression | undefined => {
       if (!isFunction(term, 'Multiply')) return undefined;
-      const twoIdx = term.ops.findIndex((f) => f.is(2));
+      const twoIdx = term.ops.findIndex((f) => f.isSame(2));
       if (twoIdx < 0) return undefined;
       const rest = term.ops.filter((_, i) => i !== twoIdx);
       if (rest.length !== 1) return undefined;
@@ -1253,7 +1253,7 @@ export function TR11i(expr: Expression): Expression | undefined {
       if (
         isFunction(powerTerm, 'Power') &&
         powerTerm.op1?.operator === 'Cos' &&
-        powerTerm.op2?.is(2)
+        powerTerm.op2?.isSame(2)
       ) {
         const cosBase = powerTerm.op1;
         if (isFunction(cosBase)) return cosBase.op1;
@@ -1263,11 +1263,11 @@ export function TR11i(expr: Expression): Expression | undefined {
 
     // Check: 2cos^2(x) + (-1) or (-1) + 2cos^2(x)
     let cosArg = extractTwoCosSq(a);
-    if (cosArg && (b.is(-1) || (isFunction(b, 'Negate') && b.op1?.is(1)))) {
+    if (cosArg && (b.isSame(-1) || (isFunction(b, 'Negate') && b.op1?.isSame(1)))) {
       return ce._fn('Cos', [cosArg.mul(2)]);
     }
     cosArg = extractTwoCosSq(b);
-    if (cosArg && (a.is(-1) || (isFunction(a, 'Negate') && a.op1?.is(1)))) {
+    if (cosArg && (a.isSame(-1) || (isFunction(a, 'Negate') && a.op1?.isSame(1)))) {
       return ce._fn('Cos', [cosArg.mul(2)]);
     }
 
@@ -1275,7 +1275,7 @@ export function TR11i(expr: Expression): Expression | undefined {
     // Pattern: Add(1, Negate(Multiply(2, Power(Sin(x), 2)))) or similar
     const extractTwoSinSq = (term: Expression): Expression | undefined => {
       if (!isFunction(term, 'Multiply')) return undefined;
-      const twoIdx = term.ops.findIndex((f) => f.is(2));
+      const twoIdx = term.ops.findIndex((f) => f.isSame(2));
       if (twoIdx < 0) return undefined;
       const rest = term.ops.filter((_, i) => i !== twoIdx);
       if (rest.length !== 1) return undefined;
@@ -1283,7 +1283,7 @@ export function TR11i(expr: Expression): Expression | undefined {
       if (
         isFunction(powerTerm, 'Power') &&
         powerTerm.op1?.operator === 'Sin' &&
-        powerTerm.op2?.is(2)
+        powerTerm.op2?.isSame(2)
       ) {
         const sinBase = powerTerm.op1;
         if (isFunction(sinBase)) return sinBase.op1;
@@ -1292,13 +1292,13 @@ export function TR11i(expr: Expression): Expression | undefined {
     };
 
     // Check: 1 + Negate(2sin^2(x))
-    if (a.is(1) && isFunction(b, 'Negate') && b.op1) {
+    if (a.isSame(1) && isFunction(b, 'Negate') && b.op1) {
       const sinArg = extractTwoSinSq(b.op1);
       if (sinArg) {
         return ce._fn('Cos', [sinArg.mul(2)]);
       }
     }
-    if (b.is(1) && isFunction(a, 'Negate') && a.op1) {
+    if (b.isSame(1) && isFunction(a, 'Negate') && a.op1) {
       const sinArg = extractTwoSinSq(a.op1);
       if (sinArg) {
         return ce._fn('Cos', [sinArg.mul(2)]);
@@ -1308,7 +1308,7 @@ export function TR11i(expr: Expression): Expression | undefined {
     // Also handle: 1 + (-2)sin^2(x) where -2 is a single number
     const extractNegTwoSinSq = (term: Expression): Expression | undefined => {
       if (!isFunction(term, 'Multiply')) return undefined;
-      const negTwoIdx = term.ops.findIndex((f) => f.is(-2));
+      const negTwoIdx = term.ops.findIndex((f) => f.isSame(-2));
       if (negTwoIdx < 0) return undefined;
       const rest = term.ops.filter((_, i) => i !== negTwoIdx);
       if (rest.length !== 1) return undefined;
@@ -1316,7 +1316,7 @@ export function TR11i(expr: Expression): Expression | undefined {
       if (
         isFunction(powerTerm, 'Power') &&
         powerTerm.op1?.operator === 'Sin' &&
-        powerTerm.op2?.is(2)
+        powerTerm.op2?.isSame(2)
       ) {
         const sinBase = powerTerm.op1;
         if (isFunction(sinBase)) return sinBase.op1;
@@ -1325,13 +1325,13 @@ export function TR11i(expr: Expression): Expression | undefined {
     };
 
     // Check: 1 + (-2)sin^2(x)
-    if (a.is(1)) {
+    if (a.isSame(1)) {
       const sinArg = extractNegTwoSinSq(b);
       if (sinArg) {
         return ce._fn('Cos', [sinArg.mul(2)]);
       }
     }
-    if (b.is(1)) {
+    if (b.isSame(1)) {
       const sinArg = extractNegTwoSinSq(a);
       if (sinArg) {
         return ce._fn('Cos', [sinArg.mul(2)]);
@@ -1725,7 +1725,7 @@ export function TR22(expr: Expression): Expression | undefined {
   const exp = expr.op2;
 
   if (!base || !exp) return undefined;
-  if (!exp.is(2)) return undefined;
+  if (!exp.isSame(2)) return undefined;
 
   if (!isFunction(base)) return undefined;
   const arg = base.op1;
@@ -1796,7 +1796,7 @@ export function TR22i(expr: Expression): Expression | undefined {
     }
 
     if (!isFunction(powerOp)) return null;
-    if (powerOp.operator !== 'Power' || !powerOp.op2?.is(2)) return null;
+    if (powerOp.operator !== 'Power' || !powerOp.op2?.isSame(2)) return null;
 
     const base = powerOp.op1;
     if (!isFunction(base) || !base.op1) return null;
@@ -1853,16 +1853,16 @@ export function TR22i(expr: Expression): Expression | undefined {
 
   for (let i = 0; i < ops.length; i++) {
     const op = ops[i];
-    if (op.is(1)) {
+    if (op.isSame(1)) {
       oneIndex = i;
       isNegOne = false;
-    } else if (op.is(-1)) {
+    } else if (op.isSame(-1)) {
       oneIndex = i;
       isNegOne = true;
-    } else if (isFunction(op, 'Negate') && op.op1?.is(1)) {
+    } else if (isFunction(op, 'Negate') && op.op1?.isSame(1)) {
       oneIndex = i;
       isNegOne = true;
-    } else if (isFunction(op, 'Power') && op.op2?.is(2)) {
+    } else if (isFunction(op, 'Power') && op.op2?.isSame(2)) {
       powerIndex = i;
     }
   }
@@ -2125,7 +2125,7 @@ function extractSquaredTrig(
   op: Expression
 ): { func: 'Sin' | 'Cos'; arg: Expression; coef: number } | null {
   // Direct Power(Sin/Cos, 2)
-  if (isFunction(op, 'Power') && op.op2?.is(2)) {
+  if (isFunction(op, 'Power') && op.op2?.isSame(2)) {
     const base = op.op1;
     if (isFunction(base, 'Sin') && base.op1) {
       return { func: 'Sin', arg: base.op1, coef: 1 };
@@ -2141,7 +2141,7 @@ function extractSquaredTrig(
     let trigPower: Expression | undefined;
 
     for (const factor of op.ops) {
-      if (isFunction(factor, 'Power') && factor.op2?.is(2)) {
+      if (isFunction(factor, 'Power') && factor.op2?.isSame(2)) {
         const base = factor.op1;
         if (base?.operator === 'Sin' || base?.operator === 'Cos') {
           trigPower = factor;

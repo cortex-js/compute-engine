@@ -90,8 +90,8 @@ export function simplifySum(x: Expression): RuleStep | undefined {
   if (
     isFunction(body, 'Power') &&
     sym(body.op1) === index &&
-    body.op2.is(2) &&
-    lower.is(1)
+    body.op2.isSame(2) &&
+    lower.isSame(1)
   ) {
     // Sum of squares formula: b(b+1)(2b+1)/6
     // Note: Don't simplify() here as the expanded form is more expensive
@@ -104,8 +104,8 @@ export function simplifySum(x: Expression): RuleStep | undefined {
   if (
     isFunction(body, 'Power') &&
     sym(body.op1) === index &&
-    body.op2.is(3) &&
-    lower.is(1)
+    body.op2.isSame(3) &&
+    lower.isSame(1)
   ) {
     // Sum of cubes formula: [b(b+1)/2]^2 = b^2(b+1)^2/4
     const b = upper;
@@ -121,9 +121,9 @@ export function simplifySum(x: Expression): RuleStep | undefined {
   // Alternating unit series: Sum((-1)^n, [n, 0, b]) → (1 + (-1)^b) / 2
   if (
     isFunction(body, 'Power') &&
-    body.op1.is(-1) &&
+    body.op1.isSame(-1) &&
     sym(body.op2) === index &&
-    lower.is(0)
+    lower.isSame(0)
   ) {
     const b = upper;
     // (1 + (-1)^b) / 2 = 1 if b even, 0 if b odd
@@ -132,12 +132,12 @@ export function simplifySum(x: Expression): RuleStep | undefined {
   }
 
   // Alternating linear series: Sum((-1)^n * n, [n, 0, b]) → (-1)^b * floor((b+1)/2)
-  if (isFunction(body, 'Multiply') && lower.is(0)) {
+  if (isFunction(body, 'Multiply') && lower.isSame(0)) {
     // Check for (-1)^n * n pattern
     let hasAlternating = false;
     let hasIndex = false;
     for (const op of body.ops) {
-      if (isFunction(op, 'Power') && op.op1.is(-1) && sym(op.op2) === index) {
+      if (isFunction(op, 'Power') && op.op1.isSame(-1) && sym(op.op2) === index) {
         hasAlternating = true;
       } else if (sym(op) === index) {
         hasIndex = true;
@@ -198,7 +198,7 @@ export function simplifySum(x: Expression): RuleStep | undefined {
       const m = lower;
       const b = upper;
 
-      if (lower.is(0)) {
+      if (lower.isSame(0)) {
         // Simpler case: Sum from n=0 to b of (a + d*n) = (b+1)*(a + d*b/2)
         const bPlus1 = ce.function('Add', [b, ce.One]);
         const inner = ce.function('Add', [
@@ -240,12 +240,12 @@ export function simplifySum(x: Expression): RuleStep | undefined {
     const r = body.op1;
     const b = upper;
 
-    if (lower.is(0)) {
+    if (lower.isSame(0)) {
       // Sum from n=0 to b of r^n = (1 - r^(b+1)) / (1 - r)
       const numerator = ce.One.sub(r.pow(b.add(ce.One)));
       const denominator = ce.One.sub(r);
       return { value: numerator.div(denominator), because: 'geometric series' };
-    } else if (lower.is(1)) {
+    } else if (lower.isSame(1)) {
       // Sum from n=1 to b of r^n = (r - r^(b+1)) / (1 - r)
       // Note: This form is more compact than r*(1-r^b)/(1-r)
       const numerator = r.sub(r.pow(b.add(ce.One)));
@@ -255,7 +255,7 @@ export function simplifySum(x: Expression): RuleStep | undefined {
   }
 
   // Sum of binomial coefficients: Sum(C(n,k), [k, 0, n]) → 2^n
-  if (isFunction(body, 'Binomial') && lower.is(0) && sym(body.op2) === index) {
+  if (isFunction(body, 'Binomial') && lower.isSame(0) && sym(body.op2) === index) {
     const n = body.op1;
     // Check if upper bound equals n (the first argument of Binomial)
     if (n && upper.isSame(n)) {
@@ -266,7 +266,7 @@ export function simplifySum(x: Expression): RuleStep | undefined {
 
   // Alternating binomial sum: Sum((-1)^k * C(n,k), [k, 0, n]) → 0 (for n > 0)
   // Pattern: Multiply with (-1)^k and Binomial(n, k)
-  if (isFunction(body, 'Multiply') && lower.is(0)) {
+  if (isFunction(body, 'Multiply') && lower.isSame(0)) {
     let hasBinomial = false;
     let hasAlternating = false;
     let binomialN: Expression | null = null;
@@ -277,7 +277,7 @@ export function simplifySum(x: Expression): RuleStep | undefined {
         binomialN = op.op1 ?? null;
       } else if (
         isFunction(op, 'Power') &&
-        op.op1.is(-1) &&
+        op.op1.isSame(-1) &&
         sym(op.op2) === index
       ) {
         hasAlternating = true;
@@ -326,7 +326,7 @@ export function simplifySum(x: Expression): RuleStep | undefined {
     hasBinomial = false;
 
     for (const op of body.ops) {
-      if (isFunction(op, 'Power') && sym(op.op1) === index && op.op2.is(2)) {
+      if (isFunction(op, 'Power') && sym(op.op1) === index && op.op2.isSame(2)) {
         hasIndexSquared = true;
       } else if (isFunction(op, 'Binomial') && sym(op.op2) === index) {
         hasBinomial = true;
@@ -357,7 +357,7 @@ export function simplifySum(x: Expression): RuleStep | undefined {
     hasBinomial = false;
 
     for (const op of body.ops) {
-      if (isFunction(op, 'Power') && sym(op.op1) === index && op.op2.is(3)) {
+      if (isFunction(op, 'Power') && sym(op.op1) === index && op.op2.isSame(3)) {
         hasIndexCubed = true;
       } else if (isFunction(op, 'Binomial') && sym(op.op2) === index) {
         hasBinomial = true;
@@ -389,7 +389,7 @@ export function simplifySum(x: Expression): RuleStep | undefined {
     hasBinomial = false;
 
     for (const op of body.ops) {
-      if (isFunction(op, 'Power') && op.op1.is(-1) && sym(op.op2) === index) {
+      if (isFunction(op, 'Power') && op.op1.isSame(-1) && sym(op.op2) === index) {
         hasAltTerm = true;
       } else if (sym(op) === index) {
         hasIndexTerm = true;
@@ -417,8 +417,8 @@ export function simplifySum(x: Expression): RuleStep | undefined {
     isFunction(body, 'Power') &&
     body.op1.operator === 'Binomial' &&
     isFunction(body.op1) &&
-    body.op2.is(2) &&
-    lower.is(0)
+    body.op2.isSame(2) &&
+    lower.isSame(0)
   ) {
     const binomial = body.op1;
     const n = binomial.op1;
@@ -434,7 +434,7 @@ export function simplifySum(x: Expression): RuleStep | undefined {
   }
 
   // Sum of k*(k+1): Sum(k*(k+1), [k, 1, n]) → n(n+1)(n+2)/3
-  if (isFunction(body, 'Multiply') && body.ops.length === 2 && lower.is(1)) {
+  if (isFunction(body, 'Multiply') && body.ops.length === 2 && lower.isSame(1)) {
     const [op1, op2] = body.ops;
     // Check for k * (k+1) pattern
     const isKTimesKPlus1 =
@@ -443,13 +443,13 @@ export function simplifySum(x: Expression): RuleStep | undefined {
         isFunction(op2) &&
         op2.ops.length === 2 &&
         op2.ops.some((o) => sym(o) === index) &&
-        op2.ops.some((o) => o.is(1))) ||
+        op2.ops.some((o) => o.isSame(1))) ||
       (sym(op2) === index &&
         op1.operator === 'Add' &&
         isFunction(op1) &&
         op1.ops.length === 2 &&
         op1.ops.some((o) => sym(o) === index) &&
-        op1.ops.some((o) => o.is(1)));
+        op1.ops.some((o) => o.isSame(1)));
 
     if (isKTimesKPlus1) {
       // n(n+1)(n+2)/3
@@ -470,7 +470,7 @@ export function simplifySum(x: Expression): RuleStep | undefined {
   // Pattern: Divide with 1 over Multiply(k, k+1) or k*(k-1)
   if (
     isFunction(body, 'Divide') &&
-    body.op1.is(1) &&
+    body.op1.isSame(1) &&
     body.op2.operator === 'Multiply' &&
     isFunction(body.op2)
   ) {
@@ -478,20 +478,20 @@ export function simplifySum(x: Expression): RuleStep | undefined {
     if (denom.ops.length === 2) {
       const [d1, d2] = denom.ops;
       // Check for k * (k+1) pattern with lower=1
-      if (lower.is(1)) {
+      if (lower.isSame(1)) {
         const isKTimesKPlus1 =
           (sym(d1) === index &&
             d2.operator === 'Add' &&
             isFunction(d2) &&
             d2.ops.length === 2 &&
             d2.ops.some((op) => sym(op) === index) &&
-            d2.ops.some((op) => op.is(1))) ||
+            d2.ops.some((op) => op.isSame(1))) ||
           (sym(d2) === index &&
             d1.operator === 'Add' &&
             isFunction(d1) &&
             d1.ops.length === 2 &&
             d1.ops.some((op) => sym(op) === index) &&
-            d1.ops.some((op) => op.is(1)));
+            d1.ops.some((op) => op.isSame(1)));
 
         if (isKTimesKPlus1) {
           // n / (n + 1)
@@ -502,20 +502,20 @@ export function simplifySum(x: Expression): RuleStep | undefined {
       }
 
       // Check for k * (k-1) pattern with lower=2: Sum(1/(k*(k-1)), [k, 2, n]) → (n-1)/n
-      if (lower.is(2)) {
+      if (lower.isSame(2)) {
         const isKTimesKMinus1 =
           (sym(d1) === index &&
             d2.operator === 'Add' &&
             isFunction(d2) &&
             d2.ops.length === 2 &&
             d2.ops.some((op) => sym(op) === index) &&
-            d2.ops.some((op) => op.is(-1))) ||
+            d2.ops.some((op) => op.isSame(-1))) ||
           (sym(d2) === index &&
             d1.operator === 'Add' &&
             isFunction(d1) &&
             d1.ops.length === 2 &&
             d1.ops.some((op) => sym(op) === index) &&
-            d1.ops.some((op) => op.is(-1)));
+            d1.ops.some((op) => op.isSame(-1)));
 
         if (isKTimesKMinus1) {
           // (n - 1) / n

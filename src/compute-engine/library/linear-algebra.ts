@@ -301,7 +301,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
 
         // Pseudoinverse of scalar is 1/scalar (or 0 if scalar is 0)
         if (op1.isNumber) {
-          if (op1.is(0)) return ce.Zero;
+          if (op1.isSame(0)) return ce.Zero;
           return ce.box(['Divide', 1, op1]).evaluate();
         }
 
@@ -415,7 +415,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
 
         // Kernel of scalar map x -> a*x over R
         if (op.isNumber) {
-          if (op.is(0)) return ce.box(['List', ['List', 1]]);
+          if (op.isSame(0)) return ce.box(['List', ['List', 1]]);
           return ce.box(['List']);
         }
 

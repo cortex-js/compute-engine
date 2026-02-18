@@ -27,7 +27,7 @@ export function simplifyLog(x: Expression): RuleStep | undefined {
     if (!arg) return undefined;
 
     // ln(0) -> NaN
-    if (arg.is(0)) {
+    if (arg.isSame(0)) {
       return { value: ce.NaN, because: 'ln(0) -> NaN' };
     }
 
@@ -166,12 +166,12 @@ export function simplifyLog(x: Expression): RuleStep | undefined {
     const logBase = !base || sym(base) === 'Nothing' ? ce.number(10) : base;
 
     // log_c(x) -> NaN when c is 0 or 1
-    if (logBase.is(0) || logBase.is(1)) {
+    if (logBase.isSame(0) || logBase.isSame(1)) {
       return { value: ce.NaN, because: 'log base 0 or 1 -> NaN' };
     }
 
     // log_c(0) -> -inf when c > 1, +inf when 0 < c < 1, NaN otherwise
-    if (arg.is(0)) {
+    if (arg.isSame(0)) {
       if (logBase.isGreater(1) === true) {
         return {
           value: ce.NegativeInfinity,
@@ -215,7 +215,7 @@ export function simplifyLog(x: Expression): RuleStep | undefined {
       logBase.isInfinity === true &&
       logBase.isPositive === true &&
       arg.isPositive === true &&
-      arg.is(1) === false &&
+      arg.isSame(1) === false &&
       arg.isFinite === true
     ) {
       return { value: ce.Zero, because: 'log_inf(x) -> 0' };
@@ -392,7 +392,7 @@ export function simplifyLog(x: Expression): RuleStep | undefined {
     }
 
     // Change of base: log_{1/c}(a) -> -log_c(a)
-    if (isFunction(logBase, 'Divide') && logBase.op1?.is(1)) {
+    if (isFunction(logBase, 'Divide') && logBase.op1?.isSame(1)) {
       return {
         value: ce._fn('Log', [arg, logBase.op2]).neg(),
         because: 'log_{1/c}(a) -> -log_c(a)',
@@ -437,7 +437,7 @@ export function simplifyLog(x: Expression): RuleStep | undefined {
       const logBase = exp.op2;
       // If no base specified (Nothing) or base is 10, use ln(10)
       const isDefaultOrBase10 =
-        !logBase || sym(logBase) === 'Nothing' || logBase.is(10);
+        !logBase || sym(logBase) === 'Nothing' || logBase.isSame(10);
       if (isDefaultOrBase10) {
         // e^log(x) = e^(ln(x)/ln(10)) = x^{1/ln(10)}
         return {
@@ -492,7 +492,7 @@ export function simplifyLog(x: Expression): RuleStep | undefined {
 
         const logBase = term.op2;
         const isDefaultOrBase10 =
-          !logBase || sym(logBase) === 'Nothing' || logBase.is(10);
+          !logBase || sym(logBase) === 'Nothing' || logBase.isSame(10);
 
         const expOfLog = isDefaultOrBase10
           ? term.op1.pow(ce.One.div(ce._fn('Ln', [ce.number(10)])))

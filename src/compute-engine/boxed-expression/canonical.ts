@@ -111,12 +111,17 @@ function flattenForm(expr: Expression) {
   }
 
   if (isAssociative)
-    return ce.function(
+    return ce._fn(
       expr.operator,
-      flatten(expr.ops.map(flattenForm), expr.operator, false)
+      flatten(expr.ops.map(flattenForm), expr.operator, false),
+      { canonical: false }
     );
 
-  return expr;
+  // For non-associative functions, still recurse into operands to
+  // unwrap any nested Delimiters
+  const newOps = expr.ops.map(flattenForm);
+  if (newOps.every((op, i) => op === expr.ops[i])) return expr;
+  return ce._fn(expr.operator, newOps, { canonical: false });
 }
 
 function invisibleOperatorForm(expr: Expression) {

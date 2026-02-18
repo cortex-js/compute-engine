@@ -98,11 +98,11 @@ export function costFunction(expr: Expression): number {
       // Match exponent: 1/ln(10)
       const exponent = xPow.op2;
       if (!isFunction(exponent, 'Divide')) return null;
-      if (exponent.op1?.is(1) !== true) return null;
+      if (exponent.op1?.isSame(1) !== true) return null;
 
       const denom = exponent.op2;
       if (!isFunction(denom, 'Ln')) return null;
-      if (denom.op1?.is(10) !== true) return null;
+      if (denom.op1?.isSame(10) !== true) return null;
 
       return { xBase: xPow.op1, eExp: ePow.op2 };
     };

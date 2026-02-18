@@ -114,8 +114,8 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
       // Handle special cases where expressions are zero (identity equations)
       const s1 = expr1.simplify();
       const s2 = expr2.simplify();
-      const expr1Zero = s1.is(0) || (isNumber(s1) && s1.re === 0);
-      const expr2Zero = s2.is(0) || (isNumber(s2) && s2.re === 0);
+      const expr1Zero = s1.isSame(0) || (isNumber(s1) && s1.re === 0);
+      const expr2Zero = s2.isSame(0) || (isNumber(s2) && s2.re === 0);
 
       // If both are identities (0 = 0), they're equivalent
       if (expr1Zero && expr2Zero) return true;

@@ -2,6 +2,29 @@
 
 ### Features
 
+- **Smart `.is()` / exact `.isSame()` separation**: The `.is()` and `.isSame()`
+  methods on expressions now have distinct roles:
+
+  - **`.isSame(v)`** — Fast exact structural check. No evaluation, no tolerance.
+    Now accepts primitives (`number`, `bigint`, `boolean`, `string`) in addition
+    to `Expression`. This is the method used internally throughout the engine.
+
+  - **`.is(v)`** — Smart check with numeric evaluation fallback. Tries
+    `.isSame()` first; if that fails and the expression is constant (no free
+    variables), evaluates numerically and compares within `engine.tolerance`.
+    For literal numbers, behaves identically to `.isSame()` — tolerance only
+    applies to expressions that require evaluation.
+
+  This resolves a common pain point where `ce.parse('\\cos(\\pi/2)').is(0)`
+  returned `false` because `.is()` was purely structural. Now it returns `true`:
+
+  ```ts
+  ce.parse('\\sin(\\pi)').is(0);            // true  (evaluates, within tolerance)
+  ce.parse('\\cos(\\frac{\\pi}{2})').is(0); // true
+  ce.number(1e-17).is(0);                   // false (literal number, no tolerance)
+  ce.parse('x + 1').is(1);                  // false (not constant, no fallback)
+  ```
+
 - **`numericValue()` convenience helper**: New standalone function that combines
   the `isNumber()` guard with `.numericValue` access. Returns the numeric value
   if the expression is a number literal, or `undefined` otherwise. Useful for
@@ -48,6 +71,29 @@
   target, matching existing GLSL implementations.
 
 ### Bug Fixes
+
+- **`parse()` with `form: 'structural'` ignored the structural flag**: The
+  `structural` option from `formToInternal()` was dropped in
+  `parseLatexEntrypoint()`, making `ce.parse(s, { form: 'structural' })`
+  behave identically to `{ form: 'raw' }` (unbound, unsorted). Now correctly
+  produces a bound, structural expression.
+
+- **Partial canonicalization with `'Flatten'` form folded numerics**: Using
+  `ce.parse(s, { form: ['Flatten', 'Order'] })` unexpectedly evaluated
+  numeric operands (e.g. `3×2+1` became `7`) because `flattenForm()` used
+  `ce.function()` which defaults to full canonical mode. Now uses `ce._fn()`
+  to preserve operand structure. This enables structural comparison of
+  expressions modulo commutativity and associativity without numeric
+  evaluation — useful for checking the *method* used to solve a problem rather
+  than just the numeric result:
+  ```ts
+  const a = ce.parse('3\\times2+1', { form: ['Flatten', 'Order'] });
+  const b = ce.parse('1+2\\times3', { form: ['Flatten', 'Order'] });
+  a.isSame(b);  // ➔ true  (same structure, different order)
+
+  const c = ce.parse('7', { form: ['Flatten', 'Order'] });
+  a.isSame(c);  // ➔ false (different structure)
+  ```
 
 - **Sum/Product with symbolic bounds compiled incorrectly**: Expressions like
   `\sum_{k=0}^{n} f(k, x)` where the upper bound is a variable produced loops

@@ -37,7 +37,7 @@ export function canonicalAdd(
   ops = flatten(ops, 'Add');
 
   // Remove literal 0
-  ops = ops.filter((x) => !isNumber(x) || !x.is(0));
+  ops = ops.filter((x) => !isNumber(x) || !x.isSame(0));
 
   if (ops.length === 0) return ce.Zero;
   if (ops.length === 1 && !ops[0].isIndexedCollection) return ops[0];
@@ -301,7 +301,7 @@ export class Terms {
       if (coef.isPositiveInfinity) posInfinityCount += 1;
       else if (coef.isNegativeInfinity) negInfinityCount += 1;
 
-      if (rest.is(1)) {
+      if (rest.isSame(1)) {
         if (!coef.isZero) numericValues.push(coef);
       } else this._add(coef, rest);
     }
@@ -328,8 +328,8 @@ export class Terms {
   }
 
   private _add(coef: NumericValue, term: Expression): void {
-    if (term.is(0) || coef.isZero) return;
-    if (term.is(1)) {
+    if (term.isSame(0) || coef.isZero) return;
+    if (term.isSame(1)) {
       // We have a numeric value. Keep it in the terms,
       // so that "1+sqrt(3)" remains exact.
       const ce = this.engine;
@@ -359,7 +359,7 @@ export class Terms {
     }
 
     // This is a new term: just add it
-    console.assert(!isNumber(term) || term.is(1));
+    console.assert(!isNumber(term) || term.isSame(1));
     this.terms.push({ coef: [coef], term });
   }
 
@@ -424,7 +424,7 @@ export class Terms {
             ce,
             coefs.map((x) => ce.box(x))
           );
-          if (term.is(1)) return coefSum;
+          if (term.isSame(1)) return coefSum;
           return ce._fn('Multiply', [coefSum, term].sort(order));
         }
         const sum = coefs[0];
@@ -432,7 +432,7 @@ export class Terms {
         if (sum.isZero) return ce.Zero;
         if (sum.eq(1)) return term;
         if (sum.eq(-1)) return term.neg();
-        if (term.is(1)) return ce.box(sum);
+        if (term.isSame(1)) return ce.box(sum);
 
         return term.mul(ce.box(sum));
       })

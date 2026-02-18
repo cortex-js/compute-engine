@@ -136,7 +136,7 @@ function matchOnce(
 
     // Special case: Match a BoxedNumber rational against a Divide pattern
     // This allows patterns like ['Divide', '_num', '_den'] to match rationals like 3/2
-    if (operator === 'Divide' && isNumber(expr) && !expr.denominator.is(1)) {
+    if (operator === 'Divide' && isNumber(expr) && !expr.denominator.isSame(1)) {
       // Create a synthetic Divide expression to match against
       const divideExpr = ce.function(
         'Divide',
@@ -158,7 +158,7 @@ function matchOnce(
         const op = ops[i];
 
         // Check if op is a rational number with numerator 1 (i.e., 1/n form)
-        if (isNumber(op) && op.numerator.is(1) && !op.denominator.is(1)) {
+        if (isNumber(op) && op.numerator.isSame(1) && !op.denominator.isSame(1)) {
           // Collect all other operands
           const others = ops.filter((_, j) => j !== i);
           const numerator =
@@ -189,7 +189,7 @@ function matchOnce(
       operator === 'Power' &&
       isFunction(expr) &&
       expr.operator === 'Divide' &&
-      expr.op1.is(1)
+      expr.op1.isSame(1)
     ) {
       // Create a synthetic Power expression: Power(x, -1)
       const powerExpr = ce.function('Power', [expr.op2, ce.number(-1)], {
@@ -318,7 +318,7 @@ function matchVariations(
 
   if (operator === 'Negate') {
     // 0 -> -x (if x=0)
-    if (expr.is(0) && isFunction(pattern))
+    if (expr.isSame(0) && isFunction(pattern))
       return matchOnce(ce.Zero, pattern.op1, substitution, varOptions);
   }
 

@@ -714,7 +714,7 @@ function makeNumericFunction(
   if (name === 'Ln' || name === 'Log') {
     if (ops.length > 0) {
       // Ln(1) -> 0, Log(1) -> 0
-      if (ops[0].is(1)) return ce.Zero;
+      if (ops[0].isSame(1)) return ce.Zero;
       // Ln(a) -> Ln(a), Log(a) -> Log(a)
       if (ops.length === 1)
         return new BoxedFunction(ce, name, ops, { metadata, canonical: true });

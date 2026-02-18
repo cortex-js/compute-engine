@@ -26,7 +26,7 @@ function isSqrt(expr: Expression): boolean {
 export function asRadical(expr: Expression): Rational | null {
   if (isSqrt(expr) && isFunction(expr)) return asRational(expr.op1) ?? null;
 
-  if (isFunction(expr, 'Divide') && expr.op1.is(1) && isSqrt(expr.op2)) {
+  if (isFunction(expr, 'Divide') && expr.op1.isSame(1) && isSqrt(expr.op2)) {
     const n = expr.op2.re;
     if (!Number.isInteger(n)) return null;
     return [1, n];
@@ -102,7 +102,7 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
 
   // Handle special base cases that only need sign/infinity info from the
   // exponent, before the numeric-exponent guard below.
-  if (isNumber(a) && a.is(0) && !b.is(0) && !b.isInfinity) {
+  if (isNumber(a) && a.isSame(0) && !b.isSame(0) && !b.isInfinity) {
     // 0^positive = 0, 0^negative = ComplexInfinity
     if (b.isPositive === true) return ce.Zero;
     if (b.isNegative === true) return ce.ComplexInfinity;
@@ -119,11 +119,11 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
     return unchanged();
 
   // Zero as base
-  if (isNumber(a) && a.is(0)) {
+  if (isNumber(a) && a.isSame(0)) {
     if (b.type.matches('imaginary' as NumericPrimitiveType) || b.isNaN)
       return ce.NaN;
 
-    if (b.is(0)) return ce.NaN;
+    if (b.isSame(0)) return ce.NaN;
 
     if (b.isInfinity) {
       // 0^∞ = 0 (because for all complex numbers z near 0, z^∞ -> 0).
@@ -150,7 +150,7 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
     (!isFunction(a) || a.operator === 'Negate');
 
   // Zero as exponent
-  if (b.is(0)) {
+  if (b.isSame(0)) {
     // If 'isFinite' is a boolean, then 'a' has a value.
     if (aIsNum && a.isFinite !== undefined) return a.isFinite ? ce.One : ce.NaN;
     return unchanged();
@@ -159,23 +159,23 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
   // One as base
   // (note: 1^∞ = NaN - Because there are various cases where lim(x(t),t)=1, lim(y(t),t)=∞ (or -∞),
   // but lim( x(t)^y(t), t) != 1.)
-  if (aIsNum && a.is(1)) return b.isFinite ? ce.One : ce.NaN;
+  if (aIsNum && a.isSame(1)) return b.isFinite ? ce.One : ce.NaN;
 
   // One as exponent
   // (Permit the base to be a FN-expr. here, too...)
-  if (b.is(1) && a.type.matches('number' as NumericPrimitiveType)) return a;
+  if (b.isSame(1) && a.type.matches('number' as NumericPrimitiveType)) return a;
 
   // -1 exponent
-  if (b.is(-1)) {
+  if (b.isSame(-1)) {
     if (aIsNum) {
       // (-∞)^-1 = 0, ∞^-1 = 0  (exclude ~oo)
       if (a.isInfinity && (a.isNegative || a.isPositive)) return ce.Zero;
 
       // (-1)^-1 = -1
-      if (a.is(-1)) return ce.NegativeOne;
+      if (a.isSame(-1)) return ce.NegativeOne;
 
       // 1^-1 = 1
-      if (a.is(1)) return ce.One;
+      if (a.isSame(1)) return ce.One;
     }
 
     // Matrix inverse: A^{-1} -> Inverse(A)
@@ -199,7 +199,7 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
 
       // (-1)^∞ = NaN
       // Because of oscillations in the limit.
-      if (a.is(-1)) return ce.NaN;
+      if (a.isSame(-1)) return ce.NaN;
 
       //↓note:the case for all infinites.
       if (a.isInfinity) return ce.ComplexInfinity;
@@ -222,7 +222,7 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
       // e^(-∞) = 0 (handle explicitly before general case)
       if (isSymbol(a, 'ExponentialE')) return ce.Zero;
 
-      if (a.is(-1)) return ce.NaN;
+      if (a.isSame(-1)) return ce.NaN;
       //Same result for all infinity types...
       if (a.isInfinity) return ce.Zero;
 
@@ -297,7 +297,7 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
 
   // Fractional exponents
   //---------------------
-  if (b.is(0.5))
+  if (b.isSame(0.5))
     return a.isCanonical || a.isStructural
       ? canonicalRoot(a, 2)
       : ce._fn('Sqrt', [a], { canonical: false });

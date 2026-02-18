@@ -160,7 +160,7 @@ export const SIMPLIFY_RULES: Rule[] = [
     const num = x.op1;
     const denom = x.op2;
     if (!num || !denom) return undefined;
-    if (num.isSame(denom) && num.is(0) === false && num.isInfinity !== true) {
+    if (num.isSame(denom) && num.isSame(0) === false && num.isInfinity !== true) {
       return { value: x.engine.One, because: 'a/a -> 1' };
     }
     return undefined;
@@ -279,10 +279,10 @@ export const SIMPLIFY_RULES: Rule[] = [
       // Check for coefficient * trig²(x) pattern (e.g., 2sin²(x) -> 1-cos(2x))
       const hasTrigSquared =
         (isFunction(a, 'Power') &&
-          a.op2.is(2) &&
+          a.op2.isSame(2) &&
           ['Sin', 'Cos'].includes(a.op1.operator || '')) ||
         (isFunction(b, 'Power') &&
-          b.op2.is(2) &&
+          b.op2.isSame(2) &&
           ['Sin', 'Cos'].includes(b.op1.operator || ''));
       const hasCoefficient = isNumber(a) || isNumber(b);
       if (hasTrigSquared && hasCoefficient) return undefined;
@@ -357,7 +357,7 @@ export const SIMPLIFY_RULES: Rule[] = [
       const num = x.op1;
       const denom = x.op2;
       if (!isNumber(denom) && denom.symbols.length === 0) {
-        if (num.is(0) || num.isSame(denom)) return undefined;
+        if (num.isSame(0) || num.isSame(denom)) return undefined;
       }
 
       // Skip Ln/Log divisions — let simplifyLog handle ln(a)/ln(b), etc.
@@ -486,10 +486,10 @@ export const SIMPLIFY_RULES: Rule[] = [
       // base 0 or 1 -> NaN, base infinity -> special handling
       const baseExpr =
         typeof logBase === 'number' ? x.engine.number(logBase) : logBase;
-      if (baseExpr.is(0) || baseExpr.is(1) || baseExpr.isInfinity === true)
+      if (baseExpr.isSame(0) || baseExpr.isSame(1) || baseExpr.isInfinity === true)
         return undefined;
       // Skip edge cases that simplifyLog handles correctly
-      if (x.op1.is(0)) return undefined;
+      if (x.op1.isSame(0)) return undefined;
       if (x.op1.isInfinity === true) return undefined;
       // Skip log_c(c^x) — simplifyLog returns x directly
       if (isFunction(x.op1, 'Power') && x.op1.op1?.isSame(baseExpr))
@@ -656,7 +656,7 @@ export const SIMPLIFY_RULES: Rule[] = [
     const ce = expr.engine;
     if (y.isFinite === false && x.isFinite === false)
       return { value: ce.NaN, because: 'arctan2' };
-    if (y.is(0) && x.is(0)) return { value: ce.Zero, because: 'arctan2' };
+    if (y.isSame(0) && x.isSame(0)) return { value: ce.Zero, because: 'arctan2' };
     if (x.isFinite === false)
       return { value: x.isPositive ? ce.Zero : ce.Pi, because: 'arctan2' };
     if (y.isFinite === false)
@@ -664,7 +664,7 @@ export const SIMPLIFY_RULES: Rule[] = [
         value: y.isPositive ? ce.Pi.div(2) : ce.Pi.div(-2),
         because: 'arctan2',
       };
-    if (y.is(0))
+    if (y.isSame(0))
       return { value: x.isPositive ? ce.Zero : ce.Pi, because: 'arctan2' };
     return {
       value: ce.function('Arctan', [y.div(x)]).simplify(),
@@ -952,9 +952,9 @@ export const SIMPLIFY_RULES: Rule[] = [
         const exponents = group.terms.map((t) => t.exp);
         const summedExp = exponents.reduce((a, b) => a.add(b));
 
-        if (summedExp.is(0)) {
+        if (summedExp.isSame(0)) {
           resultTerms.push(ce.One);
-        } else if (summedExp.is(1)) {
+        } else if (summedExp.isSame(1)) {
           resultTerms.push(group.base);
         } else {
           resultTerms.push(ce._fn('Power', [group.base, summedExp]));
@@ -1009,7 +1009,7 @@ function simplifyRelationalOperator(expr: Expression): RuleStep | undefined {
   console.assert(isRelationalOperator(expr.operator));
   if (isFunction(expr) && expr.nops === 2) {
     // Try f(x) < g(x) -> f(x) - g(x) < 0
-    if (!expr.op2.is(0)) {
+    if (!expr.op2.isSame(0)) {
       const alt = factor(
         ce._fn(expr.operator, [expr.op1.sub(expr.op2), ce.Zero])
       );

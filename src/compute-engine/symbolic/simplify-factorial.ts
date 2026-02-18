@@ -45,10 +45,10 @@ export function simplifyBinomial(x: Expression): RuleStep | undefined {
   const ce = x.engine;
 
   // C(n, 0) → 1
-  if (k.is(0)) return { value: ce.One, because: 'C(n,0) -> 1' };
+  if (k.isSame(0)) return { value: ce.One, because: 'C(n,0) -> 1' };
 
   // C(n, 1) → n
-  if (k.is(1)) return { value: n, because: 'C(n,1) -> n' };
+  if (k.isSame(1)) return { value: n, because: 'C(n,1) -> n' };
 
   // C(n, n) → 1
   if (k.isSame(n)) return { value: ce.One, because: 'C(n,n) -> 1' };

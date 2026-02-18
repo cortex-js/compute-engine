@@ -51,7 +51,7 @@ export function getInequalityBoundsFromAssumptions(
     const [lhs, rhs] = ops;
 
     // RHS should be 0 for normalized assumptions
-    if (!rhs.is(0)) continue;
+    if (!rhs.isSame(0)) continue;
 
     const isStrict = op === 'Less';
 

@@ -98,7 +98,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     ],
 
     useVariations: true,
-    condition: (sub) => filter(sub) && !sub._n.is(0),
+    condition: (sub) => filter(sub) && !sub._n.isSame(0),
   },
 
   {
@@ -110,7 +110,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
 
     useVariations: true,
     condition: (sub: { _n }) =>
-      filter(sub) && !sub._n.is(0) && (sub._n.isEven ?? false),
+      filter(sub) && !sub._n.isSame(0) && (sub._n.isEven ?? false),
   },
 
   //
@@ -215,7 +215,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     useVariations: true,
     condition: (sub) =>
       filter(sub) &&
-      ((!sub.__a.is(0) && sub.__c.div(sub.__a).isNegative) ?? false),
+      ((!sub.__a.isSame(0) && sub.__c.div(sub.__a).isNegative) ?? false),
   },
 
   // a * e^(x) + c = 0
@@ -225,7 +225,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     useVariations: true,
     condition: (sub) =>
       filter(sub) &&
-      ((!sub.__a.is(0) && sub.__c.div(sub.__a).isNegative) ?? false) &&
+      ((!sub.__a.isSame(0) && sub.__c.div(sub.__a).isNegative) ?? false) &&
       !sub.__a.has('_x') &&
       !sub.__c.has('_x'),
   },
@@ -252,7 +252,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     replace: ['Power', '__b', ['Negate', ['Divide', '__c', '__a']]],
     useVariations: true,
     condition: (sub) =>
-      (filter(sub) && !sub.__a.is(0) && sub.__b.isPositive) ?? false,
+      (filter(sub) && !sub.__a.isSame(0) && sub.__b.isPositive) ?? false,
   },
 
   // a * log_b(x) = 0
@@ -261,7 +261,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     replace: ['Power', '__b', ['Negate', ['Divide', '__c', '__a']]],
     useVariations: true,
     condition: (sub) =>
-      (filter(sub) && !sub.__a.is(0) && sub.__b.isPositive) ?? false,
+      (filter(sub) && !sub.__a.isSame(0) && sub.__b.isPositive) ?? false,
   },
 
   // |ax + b| + c = 0
@@ -444,7 +444,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
       // Check that -b/a is in [-1, 1] for real solutions
       const a = sub.__a;
       const b = sub.__b;
-      if (!a || a.is(0)) return false;
+      if (!a || a.isSame(0)) return false;
       const ratio = b.div(a).neg();
       const val = numericValue(ratio);
       if (val === undefined) return true; // Allow symbolic ratios
@@ -466,7 +466,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
       if (!filter(sub)) return false;
       const a = sub.__a;
       const b = sub.__b;
-      if (!a || a.is(0)) return false;
+      if (!a || a.isSame(0)) return false;
       const ratio = b.div(a).neg();
       const val = numericValue(ratio);
       if (val === undefined) return true;
@@ -515,7 +515,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
       if (!filter(sub)) return false;
       const a = sub.__a;
       const b = sub.__b;
-      if (!a || a.is(0)) return false;
+      if (!a || a.isSame(0)) return false;
       const ratio = b.div(a).neg();
       const val = numericValue(ratio);
       if (val === undefined) return true;
@@ -533,7 +533,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
       if (!filter(sub)) return false;
       const a = sub.__a;
       const b = sub.__b;
-      if (!a || a.is(0)) return false;
+      if (!a || a.isSame(0)) return false;
       const ratio = b.div(a).neg();
       const val = numericValue(ratio);
       if (val === undefined) return true;
@@ -580,7 +580,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     useVariations: true,
     condition: (sub) => {
       if (!filter(sub)) return false;
-      return !sub.__a.is(0);
+      return !sub.__a.isSame(0);
     },
   },
 
@@ -599,7 +599,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     useVariations: true,
     condition: (sub) => {
       if (!filter(sub)) return false;
-      return !sub.__a.is(0);
+      return !sub.__a.isSame(0);
     },
   },
 
@@ -630,7 +630,7 @@ function clearDenominators(expr: Expression, _variable?: string): Expression {
   if (ops.length === 0) return expr;
 
   // Collect all non-trivial denominators
-  const denominators = ops.map((op) => op.denominator).filter((d) => !d.is(1));
+  const denominators = ops.map((op) => op.denominator).filter((d) => !d.isSame(1));
 
   if (denominators.length === 0) return expr;
 
@@ -1286,7 +1286,7 @@ export const HARMONIZATION_RULES: Rule[] = [
     match: ['Multiply', '__a', ['Power', '_b', '_n']],
     replace: '_b',
     condition: ({ __a, _b, _n }) =>
-      !__a.has('_x') && _b.has('_x') && !_n.is(0) && !_n.has('_x'),
+      !__a.has('_x') && _b.has('_x') && !_n.isSame(0) && !_n.has('_x'),
   },
   // a√b(x)  -> a^2 b(x)
   {
@@ -1299,7 +1299,7 @@ export const HARMONIZATION_RULES: Rule[] = [
     match: ['Divide', '_a', '_b'],
     replace: '_a',
     // @todo: check _b after the substitution
-    condition: ({ _a, _b }) => _a.has('_x') && !_b.is(0),
+    condition: ({ _a, _b }) => _a.has('_x') && !_b.isSame(0),
   },
   // ab(x) -> b(x)
   // The solution for a product are the solutions for each term,

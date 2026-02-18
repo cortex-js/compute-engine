@@ -118,9 +118,9 @@ export class Product {
       // running terms
       const num = numericValue(term);
       if (num !== undefined) {
-        if (term.is(1)) return;
+        if (term.isSame(1)) return;
 
-        if (term.is(0)) {
+        if (term.isSame(0)) {
           // infinity * 0 -> NaN (indeterminate form)
           if (
             this.coefficient.isPositiveInfinity ||
@@ -133,7 +133,7 @@ export class Product {
           return;
         }
 
-        if (term.is(-1)) {
+        if (term.isSame(-1)) {
           if (isOne(exp)) this.coefficient = this.coefficient.neg();
           else {
             this.coefficient = this.coefficient.mul(
@@ -206,9 +206,9 @@ export class Product {
     }
 
     // Note: term should be positive, so no need to handle the -1 case
-    if (term.is(1) && (!exp || isOne(exp))) return;
-    if (term.is(0) === false && exp && isZero(exp)) return;
-    if (term.is(0)) {
+    if (term.isSame(1) && (!exp || isOne(exp))) return;
+    if (term.isSame(0) === false && exp && isZero(exp)) return;
+    if (term.isSame(0)) {
       if (exp && isZero(exp)) this.coefficient = this.engine._numericValue(NaN);
       else this.coefficient = this.engine._numericValue(0);
       return;
@@ -535,10 +535,10 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
   // expensive (e.g., Monte Carlo integration) and canonicalization must be fast.
   // Expressions like (1-1)/0 won't be detected as 0/0 here, but will be
   // handled during simplification.
-  if (op2.is(0)) return op1.is(0) ? ce.NaN : ce.ComplexInfinity;
+  if (op2.isSame(0)) return op1.isSame(0) ? ce.NaN : ce.ComplexInfinity;
 
   // 0/a = 0 (a≠0, a is finite)
-  if (op1.is(0) && op2.isFinite !== false) {
+  if (op1.isSame(0) && op2.isFinite !== false) {
     // Be conservative with constant (no-unknown) denominators that aren't
     // already a literal number. Avoid 0/(1-1) -> 0 during canonicalization.
     // Use structural mode so the expression is bound and can evaluate later.
@@ -553,7 +553,7 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
   if (op2.isInfinity) return op1.isInfinity ? ce.NaN : ce.Zero;
 
   // a/a = 1 (if a ≠ 0 and a is finite)
-  if (op2.is(0) === false && op2.isFinite !== false) {
+  if (op2.isSame(0) === false && op2.isFinite !== false) {
     if (
       isSymbol(op1) &&
       isSymbol(op2) &&
@@ -606,13 +606,13 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
     return canonicalDivide(canonicalMultiply(ce, [op1, op2.op2]), op2.op1);
 
   // a/1 = a
-  if (op2.is(1)) return op1;
+  if (op2.isSame(1)) return op1;
 
   // a/(-1) = -a
-  if (op2.is(-1)) return op1.neg();
+  if (op2.isSame(-1)) return op1.neg();
 
   // 1/a = a^-1
-  if (op1.is(1)) return op2.inv();
+  if (op1.isSame(1)) return op2.inv();
 
   // Note: (-1)/a ≠ -(a^-1). We distribute Negate over Divide.
 
@@ -689,16 +689,16 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
 
   const c = c1.div(c2);
 
-  if (c.isOne) return t2.is(1) ? t1 : ce._fn('Divide', [t1, t2]);
+  if (c.isOne) return t2.isSame(1) ? t1 : ce._fn('Divide', [t1, t2]);
 
   if (c.isNegativeOne)
-    return t2.is(1) ? t1.neg() : ce._fn('Divide', [t1.neg(), t2]);
+    return t2.isSame(1) ? t1.neg() : ce._fn('Divide', [t1.neg(), t2]);
 
   // If c is exact, use as a product: `c * (t1/t2)`
   // So, π/4 -> 1/4 * π (prefer multiplication over division)
   if (c.isExact) {
-    if (t1.is(1) && t2.is(1)) return ce.number(c);
-    if (t2.is(1)) return canonicalMultiply(ce, [ce.number(c), t1]);
+    if (t1.isSame(1) && t2.isSame(1)) return ce.number(c);
+    if (t2.isSame(1)) return canonicalMultiply(ce, [ce.number(c), t1]);
 
     return ce._fn('Divide', [
       canonicalMultiply(ce, [ce.number(c.numerator), t1]),
@@ -719,7 +719,7 @@ export function div(num: Expression, denom: number | Expression): Expression {
 
   if (typeof denom === 'number') {
     if (isNaN(denom)) return ce.NaN;
-    if (num.is(0)) {
+    if (num.isSame(0)) {
       // 0/0 = NaN, 0/±∞ = NaN
       if (denom === 0 || !isFinite(denom)) return ce.NaN;
       return num; // 0
@@ -743,19 +743,19 @@ export function div(num: Expression, denom: number | Expression): Expression {
     }
   } else {
     if (denom.isNaN) return ce.NaN;
-    if (num.is(0)) {
-      if (denom.is(0) || denom.isFinite === false) return ce.NaN;
+    if (num.isSame(0)) {
+      if (denom.isSame(0) || denom.isFinite === false) return ce.NaN;
       return ce.Zero;
     }
 
     // a/1 = a
-    if (denom.is(1)) return num;
+    if (denom.isSame(1)) return num;
 
     // a/(-1) = -a
-    if (denom.is(-1)) return num.neg();
+    if (denom.isSame(-1)) return num.neg();
 
     // a/0 = NaN (a≠0)
-    if (denom.is(0)) return ce.NaN;
+    if (denom.isSame(0)) return ce.NaN;
 
     if (isNumber(num) && isNumber(denom)) {
       const numV = num.numericValue;
@@ -830,7 +830,7 @@ export function canonicalMultiply(
   //
   // Filter out ones
   //
-  xs = xs.filter((x) => !x.is(1));
+  xs = xs.filter((x) => !x.isSame(1));
 
   //
   // Fold exact numeric operands (integers, rationals, radicals)

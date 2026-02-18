@@ -74,7 +74,7 @@ export function simplifyProduct(x: Expression): RuleStep | undefined {
   }
 
   // If body is just the index: Product(n, [n, 1, b]) → b!
-  if (sym(body) === index && lower.is(1)) {
+  if (sym(body) === index && lower.isSame(1)) {
     return {
       value: ce.function('Factorial', [upper]),
       because: 'factorial',
@@ -83,7 +83,7 @@ export function simplifyProduct(x: Expression): RuleStep | undefined {
 
   // Product with index shift: Product(n+c, [n, 1, b]) → (b+c)!/c!
   // Pattern: Add with index and constant
-  if (isFunction(body, 'Add') && body.ops.length === 2 && lower.is(1)) {
+  if (isFunction(body, 'Add') && body.ops.length === 2 && lower.isSame(1)) {
     const [op1, op2] = body.ops;
     let indexTerm: Expression | null = null;
     let constTerm: Expression | null = null;
@@ -109,7 +109,7 @@ export function simplifyProduct(x: Expression): RuleStep | undefined {
   }
 
   // Telescoping product: Product((k+1)/k, [k, 1, n]) → n+1
-  if (isFunction(body, 'Divide') && lower.is(1)) {
+  if (isFunction(body, 'Divide') && lower.isSame(1)) {
     const num = body.op1;
     const denom = body.op2;
     // Check for (k+1)/k pattern
@@ -119,7 +119,7 @@ export function simplifyProduct(x: Expression): RuleStep | undefined {
       isFunction(num) &&
       num.ops.length === 2 &&
       num.ops.some((o) => sym(o) === index) &&
-      num.ops.some((o) => o.is(1))
+      num.ops.some((o) => o.isSame(1))
     ) {
       // Result is n + 1
       return { value: upper.add(ce.One), because: 'telescoping product' };
@@ -128,33 +128,33 @@ export function simplifyProduct(x: Expression): RuleStep | undefined {
 
   // Product(1 - 1/k^2, [k, 2, n]) → (n+1)/(2n)
   // Canonical form is: Add(1, Negate(Power(k, -2))) = 1 + (-k^(-2))
-  if (isFunction(body, 'Add') && body.ops.length === 2 && lower.is(2)) {
+  if (isFunction(body, 'Add') && body.ops.length === 2 && lower.isSame(2)) {
     let hasOne = false;
     let hasNegInvSq = false;
 
     for (const op of body.ops) {
-      if (op.is(1)) {
+      if (op.isSame(1)) {
         hasOne = true;
       } else if (
         isFunction(op, 'Negate') &&
         op.op1.operator === 'Power' &&
         isFunction(op.op1) &&
         sym(op.op1.op1) === index &&
-        op.op1.op2.is(-2)
+        op.op1.op2.isSame(-2)
       ) {
         hasNegInvSq = true;
       } else if (
         isFunction(op, 'Power') &&
         sym(op.op1) === index &&
-        op.op2.is(-2)
+        op.op2.isSame(-2)
       ) {
         // Could also be -k^(-2) represented as Power with negative coefficient
         // Check if it's negated via Multiply
       } else if (
         isFunction(op, 'Multiply') &&
-        op.ops.some((o) => o.is(-1)) &&
+        op.ops.some((o) => o.isSame(-1)) &&
         op.ops.some(
-          (o) => isFunction(o, 'Power') && sym(o.op1) === index && o.op2.is(-2)
+          (o) => isFunction(o, 'Power') && sym(o.op1) === index && o.op2.isSame(-2)
         )
       ) {
         hasNegInvSq = true;
@@ -173,7 +173,7 @@ export function simplifyProduct(x: Expression): RuleStep | undefined {
   }
 
   // Double factorial (odd): Product(2n-1, [n, 1, b]) → (2b-1)!!
-  if (isFunction(body, 'Add') && body.ops.length === 2 && lower.is(1)) {
+  if (isFunction(body, 'Add') && body.ops.length === 2 && lower.isSame(1)) {
     let hasLinearTerm = false;
     let coefficient = 0;
     let constantTerm = 0;
@@ -218,12 +218,12 @@ export function simplifyProduct(x: Expression): RuleStep | undefined {
   }
 
   // Double factorial (even): Product(2n, [n, 1, b]) → 2^b * b!
-  if (isFunction(body, 'Multiply') && body.ops.length === 2 && lower.is(1)) {
+  if (isFunction(body, 'Multiply') && body.ops.length === 2 && lower.isSame(1)) {
     const [op1, op2] = body.ops;
     // Check for 2 * n or n * 2 pattern
     if (
-      (op1.is(2) && sym(op2) === index) ||
-      (op2.is(2) && sym(op1) === index)
+      (op1.isSame(2) && sym(op2) === index) ||
+      (op2.isSame(2) && sym(op1) === index)
     ) {
       const b = upper;
       const result = ce.function('Multiply', [
@@ -236,7 +236,7 @@ export function simplifyProduct(x: Expression): RuleStep | undefined {
 
   // Rising factorial (Pochhammer): Product(x+k, [k, 0, n-1]) → Pochhammer(x, n)
   // Pattern: body is Add with x (constant wrt index) and index
-  if (isFunction(body, 'Add') && body.ops.length === 2 && lower.is(0)) {
+  if (isFunction(body, 'Add') && body.ops.length === 2 && lower.isSame(0)) {
     let base: Expression | null = null;
     let hasIndex = false;
 
@@ -258,7 +258,7 @@ export function simplifyProduct(x: Expression): RuleStep | undefined {
 
   // Falling factorial: Product(x-k, [k, 0, n-1]) → x! / (x-n)!
   // Pattern: body is Subtract or Add with negative index
-  if (lower.is(0)) {
+  if (lower.isSame(0)) {
     let base: Expression | null = null;
     let hasNegIndex = false;
 

@@ -59,3 +59,86 @@ describe('is()', () => {
     }
   });
 });
+
+const isSameTests: [
+  Expression,
+  Expression | number | bigint | boolean | string,
+  boolean,
+][] = [
+  // Number primitives
+  [42, 42, true],
+  [42, 43, false],
+  [0, 0, true],
+  [1, 1n, true],
+  [NaN, NaN, true],
+
+  // Boolean primitives
+  ['True', true, true],
+  ['False', false, true],
+  ['True', false, false],
+  ['False', true, false],
+
+  // String primitives
+  [{ str: 'hello' }, 'hello', true],
+  [{ str: 'hello' }, 'world', false],
+
+  // Expression arguments (structural equality)
+  [1, 1, true],
+  [['Add', 'x', 1], ['Add', 'x', 1], true],
+
+  // Symbol with value binding
+  ['one', 1, true],
+  ['one', 2, false],
+  ['zero', 0, true],
+  ['nan', NaN, true],
+];
+
+describe('isSame()', () => {
+  test.each(isSameTests)('isSame(%p, %p)', (a, b, expected) => {
+    const expr = engine.box(a);
+    if (
+      typeof b === 'number' ||
+      typeof b === 'bigint' ||
+      typeof b === 'boolean' ||
+      typeof b === 'string'
+    ) {
+      expect(expr.isSame(b)).toBe(expected);
+    } else {
+      expect(expr.isSame(engine.box(b))).toBe(expected);
+    }
+  });
+});
+
+describe('smart is() with numeric evaluation fallback', () => {
+  test('sin(pi) is 0', () => {
+    expect(engine.parse('\\sin(\\pi)').is(0)).toBe(true);
+  });
+
+  test('cos(0) is 1', () => {
+    expect(engine.parse('\\cos(0)').is(1)).toBe(true);
+  });
+
+  test('sin(1) is not 0', () => {
+    expect(engine.parse('\\sin(1)').is(0)).toBe(false);
+  });
+
+  test('literal number 1e-17 is not 0 (no tolerance for literals)', () => {
+    expect(engine.number(1e-17).is(0)).toBe(false);
+  });
+
+  test('x + 1 is not 1 (not constant, no fallback)', () => {
+    expect(engine.parse('x + 1').is(1)).toBe(false);
+  });
+
+  test('cos(pi) is -1', () => {
+    expect(engine.parse('\\cos(\\pi)').is(-1)).toBe(true);
+  });
+
+  test('cos(pi/2) is 0', () => {
+    expect(engine.parse('\\cos(\\frac{\\pi}{2})').is(0)).toBe(true);
+  });
+
+  test('exp(0) is 1', () => {
+    expect(engine.parse('e^0').is(1)).toBe(true);
+  });
+});

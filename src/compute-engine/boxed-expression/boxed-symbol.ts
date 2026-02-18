@@ -159,8 +159,19 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     return this.engine.symbol(this._id);
   }
 
-  is(other: unknown): boolean {
-    // Shortcuts
+  is(other: Expression | number | bigint | boolean | string): boolean {
+    // Structural check (includes value following via isSame)
+    if (this.isSame(other)) return true;
+
+    // If value following didn't match but we have a bound value,
+    // try the smart check on the value (which may be a function expression)
+    const val = this.value;
+    if (val && val !== (this as unknown)) return val.is(other);
+
+    return false;
+  }
+
+  isSame(other: Expression | number | bigint | boolean | string): boolean {
     if (other === true)
       return this.symbol === 'True' || isSymbol(this.value, 'True');
     if (other === false)
@@ -169,7 +180,6 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     if (other instanceof _BoxedExpression && isSymbol(other))
       return this.symbol === other.symbol;
 
-    // Check if the _value_ of this symbol is equal to the value of other
     const rhs = other instanceof _BoxedExpression ? other.value : other;
     if (
       typeof rhs === 'string' ||
@@ -178,7 +188,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       typeof rhs === 'boolean' ||
       rhs instanceof _BoxedExpression
     ) {
-      return this.value?.is(rhs) ?? false;
+      return this.value?.isSame(rhs) ?? false;
     }
 
     return false;
@@ -260,9 +270,9 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   sqrt(): Expression {
     const ce = this.engine;
     if (this.symbol === 'ComplexInfinity') return ce.NaN;
-    if (this.is(0)) return this;
-    if (this.is(1)) return this.engine.One;
-    if (this.is(-1)) return ce.I;
+    if (this.isSame(0)) return this;
+    if (this.isSame(1)) return this.engine.One;
+    if (this.isSame(-1)) return ce.I;
 
     return ce._fn('Sqrt', [this]);
   }
@@ -271,7 +281,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     const base = semiBase ? this.engine.box(semiBase) : undefined;
 
     // Mathematica returns `Log[0]` as `-∞`
-    if (this.is(0)) return this.engine.NegativeInfinity;
+    if (this.isSame(0)) return this.engine.NegativeInfinity;
 
     // ln(e) = 1 (natural log)
     // ln_c(e) = 1/ln(c) (for other bases)

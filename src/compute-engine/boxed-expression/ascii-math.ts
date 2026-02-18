@@ -272,7 +272,7 @@ const FUNCTIONS: Record<
     const expr = expr_ as FnExpr;
     const x = expr.op1;
     const n = expr.op2;
-    if (n.is(2)) return `sqrt${wrap(serialize(x))}`;
+    if (n.isSame(2)) return `sqrt${wrap(serialize(x))}`;
     return `root${wrap(serialize(n))}${wrap(serialize(x))}`;
   },
   Square: (expr, serialize) => `${serialize((expr as FnExpr).op1, 12)}^2`,

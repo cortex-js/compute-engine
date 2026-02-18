@@ -49,7 +49,7 @@ import { toAsciiMath } from './ascii-math';
 // Dynamic import for serializeJson to avoid circular dependency
 import { cmp, eq, same } from './compare';
 import { CancellationError } from '../../common/interruptible';
-import { isSymbol, isString, isFunction } from './type-guards';
+import { isSymbol, isString, isNumber, isFunction } from './type-guards';
 
 // Lazy reference to break circular dependency:
 // serialize → numerics → utils → abstract-boxed-expression
@@ -472,28 +472,58 @@ export abstract class _BoxedExpression implements Expression {
   }
 
   is(other: Expression | number | bigint | boolean | string): boolean {
-    // If the other is a number, the result can only be true if this
-    // is a BoxedNumber (the BoxedNumber.is() method will handle it)
+    // Fast path: exact structural/value check
+    if (this.isSame(other)) return true;
+
+    // Numeric fallback only for constant expressions (no free variables)
+    if (!this.isConstant) return false;
+
+    // Only attempt numeric comparison for numeric arguments
+    if (typeof other === 'number' || typeof other === 'bigint') {
+      const n = this.N();
+      if (n === this) return false; // .N() returned self — can't evaluate
+      if (!isNumber(n)) return false;
+      const tol = this.engine.tolerance;
+      const nRe = n.re;
+      const nIm = n.im;
+      if (typeof other === 'number') {
+        if (Number.isNaN(other)) return Number.isNaN(nRe);
+        if (!Number.isFinite(other)) return nRe === other; // ±Infinity exact
+        return Math.abs(nRe - other) <= tol && Math.abs(nIm) <= tol;
+      }
+      // bigint
+      return Math.abs(nRe - Number(other)) <= tol && Math.abs(nIm) <= tol;
+    }
+
+    // Expression argument: evaluate both sides
+    if (other instanceof _BoxedExpression) {
+      if (!other.isConstant) return false;
+      const nThis = this.N();
+      const nOther = other.N();
+      if (!isNumber(nThis) || !isNumber(nOther)) return false;
+      const tol = this.engine.tolerance;
+      return (
+        Math.abs(nThis.re - nOther.re) <= tol &&
+        Math.abs(nThis.im - nOther.im) <= tol
+      );
+    }
+
+    return false;
+  }
+
+  isSame(other: Expression | number | bigint | boolean | string): boolean {
     if (typeof other === 'number' || typeof other === 'bigint') return false;
-
     if (other === null || other === undefined) return false;
-
     if (typeof other === 'boolean') {
       const val = this.value;
       if (other === true) return isSymbol(val, 'True');
       if (other === false) return isSymbol(val, 'False');
       return false;
     }
-
     if (typeof other === 'string') {
       const val = this.value;
       return isString(val) ? val.string === other : false;
     }
-
-    return same(this, this.engine.box(other));
-  }
-
-  isSame(other: Expression): boolean {
     return same(this, other);
   }
 

@@ -255,7 +255,7 @@ export function getPolynomialCoefficients(
       const innerCoeffs = getPolynomialCoefficients(term.op1, variable);
       if (!innerCoeffs) return false;
       for (let i = 0; i < innerCoeffs.length; i++) {
-        if (!innerCoeffs[i].is(0)) {
+        if (!innerCoeffs[i].isSame(0)) {
           addCoefficient(innerCoeffs[i].neg(), i);
         }
       }
@@ -341,16 +341,16 @@ export function fromCoefficients(
 
   for (let i = 0; i < coeffs.length; i++) {
     const coef = coeffs[i];
-    if (coef.is(0)) continue;
+    if (coef.isSame(0)) continue;
 
     if (i === 0) {
       // Constant term
       terms.push(coef);
     } else if (i === 1) {
       // Linear term
-      if (coef.is(1)) {
+      if (coef.isSame(1)) {
         terms.push(x);
-      } else if (coef.is(-1)) {
+      } else if (coef.isSame(-1)) {
         terms.push(x.neg());
       } else {
         terms.push(coef.mul(x));
@@ -358,9 +358,9 @@ export function fromCoefficients(
     } else {
       // Higher degree term
       const xPow = ce.box(['Power', variable, i]);
-      if (coef.is(1)) {
+      if (coef.isSame(1)) {
         terms.push(xPow);
-      } else if (coef.is(-1)) {
+      } else if (coef.isSame(-1)) {
         terms.push(xPow.neg());
       } else {
         terms.push(coef.mul(xPow));
@@ -396,12 +396,12 @@ export function polynomialDivide(
   if (!dividendCoeffs || !divisorCoeffs) return null;
 
   // Check for division by zero
-  if (divisorCoeffs.every((c) => c.is(0))) return null;
+  if (divisorCoeffs.every((c) => c.isSame(0))) return null;
 
   // Find the actual degree (ignore trailing zeros)
   const actualDegree = (coeffs: Expression[]): number => {
     for (let i = coeffs.length - 1; i >= 0; i--) {
-      if (!coeffs[i].is(0)) return i;
+      if (!coeffs[i].isSame(0)) return i;
     }
     return -1;
   };
@@ -430,7 +430,7 @@ export function polynomialDivide(
 
   // Polynomial long division algorithm
   for (let i = dividendDeg; i >= divisorDeg; i--) {
-    if (remainder[i].is(0)) continue;
+    if (remainder[i].isSame(0)) continue;
 
     // Compute the quotient term coefficient
     // IMPORTANT: Don't call .simplify() to avoid infinite recursion when called
@@ -479,10 +479,10 @@ export function polynomialGCD(
   const aCoeffs = getPolynomialCoefficients(a, variable);
   const bCoeffs = getPolynomialCoefficients(b, variable);
 
-  if (!aCoeffs || aCoeffs.every((c) => c.is(0))) {
+  if (!aCoeffs || aCoeffs.every((c) => c.isSame(0))) {
     return makeMonic(b, variable);
   }
-  if (!bCoeffs || bCoeffs.every((c) => c.is(0))) {
+  if (!bCoeffs || bCoeffs.every((c) => c.isSame(0))) {
     return makeMonic(a, variable);
   }
 
@@ -492,7 +492,7 @@ export function polynomialGCD(
 
   while (true) {
     const qCoeffs = getPolynomialCoefficients(q, variable);
-    if (!qCoeffs || qCoeffs.every((c) => c.is(0))) {
+    if (!qCoeffs || qCoeffs.every((c) => c.isSame(0))) {
       break;
     }
 
@@ -521,13 +521,13 @@ function makeMonic(poly: Expression, variable: string): Expression {
   // Find leading coefficient
   let leadingCoef: Expression | null = null;
   for (let i = coeffs.length - 1; i >= 0; i--) {
-    if (!coeffs[i].is(0)) {
+    if (!coeffs[i].isSame(0)) {
       leadingCoef = coeffs[i];
       break;
     }
   }
 
-  if (!leadingCoef || leadingCoef.is(1)) return poly;
+  if (!leadingCoef || leadingCoef.isSame(1)) return poly;
 
   // Divide all coefficients by leading coefficient
   // IMPORTANT: Don't call .simplify() to avoid infinite recursion when called
@@ -577,7 +577,7 @@ export function cancelCommonFactors(
 
   // Check if denominator became 1
   const denCoeffs = getPolynomialCoefficients(newDenominator, variable);
-  if (denCoeffs && denCoeffs.length === 1 && denCoeffs[0].is(1)) {
+  if (denCoeffs && denCoeffs.length === 1 && denCoeffs[0].isSame(1)) {
     return newNumerator;
   }
 

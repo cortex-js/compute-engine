@@ -30,7 +30,7 @@ export function simplifyDivide(x: Expression): RuleStep | undefined {
   const ce = x.engine;
 
   // 0/0 -> NaN
-  if (num.is(0) && denom.is(0)) {
+  if (num.isSame(0) && denom.isSame(0)) {
     return { value: ce.NaN, because: '0/0 -> NaN' };
   }
 
@@ -39,8 +39,8 @@ export function simplifyDivide(x: Expression): RuleStep | undefined {
   // may simplify/evaluate to 0 (e.g. 1-1) and we want to avoid 0/(1-1) -> 0.
   // Those cases can be handled by an explicit preliminary evaluation.
   if (
-    num.is(0) &&
-    denom.is(0) === false &&
+    num.isSame(0) &&
+    denom.isSame(0) === false &&
     (isNumber(denom) || denom.symbols.length !== 0)
   ) {
     return { value: ce.Zero, because: '0/a -> 0' };
@@ -49,7 +49,7 @@ export function simplifyDivide(x: Expression): RuleStep | undefined {
   // a/a -> 1 when a ≠ 0 and a is finite (∞/∞ is indeterminate)
   if (
     num.isSame(denom) &&
-    num.is(0) === false &&
+    num.isSame(0) === false &&
     num.isInfinity !== true &&
     (isNumber(num) || num.symbols.length !== 0)
   ) {
@@ -69,17 +69,17 @@ export function simplifyDivide(x: Expression): RuleStep | undefined {
     if (!denomNum || !denomDenom) return undefined;
 
     // 1/(1/a) -> a when a ≠ 0
-    if (num.is(1) && denomNum.is(1) && denomDenom.is(0) === false) {
+    if (num.isSame(1) && denomNum.isSame(1) && denomDenom.isSame(0) === false) {
       return { value: denomDenom, because: '1/(1/a) -> a' };
     }
 
     // a/(1/b) -> a*b when b ≠ 0
-    if (denomNum.is(1) && denomDenom.is(0) === false) {
+    if (denomNum.isSame(1) && denomDenom.isSame(0) === false) {
       return { value: num.mul(denomDenom), because: 'a/(1/b) -> a*b' };
     }
 
     // a/(b/c) -> a*c/b when c ≠ 0
-    if (denomDenom.is(0) === false) {
+    if (denomDenom.isSame(0) === false) {
       return {
         value: num.mul(denomDenom).div(denomNum),
         because: 'a/(b/c) -> a*c/b',
@@ -117,8 +117,8 @@ export function simplifyDivide(x: Expression): RuleStep | undefined {
       // Rational cases are already handled by canonicalization
       if (!asRational(numExp!) || !asRational(denomExp!)) {
         const diffExp = ce.function('Add', [numExp!, denomExp!.neg()]);
-        if (diffExp.is(0)) return { value: ce.One, because: 'x^a/x^a -> 1' };
-        if (diffExp.is(1))
+        if (diffExp.isSame(0)) return { value: ce.One, because: 'x^a/x^a -> 1' };
+        if (diffExp.isSame(1))
           return { value: numBase, because: 'x^a/x^b -> x when a-b=1' };
         return {
           value: ce._fn('Power', [numBase, diffExp]),

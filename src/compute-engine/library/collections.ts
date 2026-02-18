@@ -2279,7 +2279,7 @@ export function sortedIndices(
   const cmpFn = f
     ? (a: Expression, b: Expression) => {
         const r = f([a, b]);
-        return r?.isNegative ? -1 : r?.is(0) ? 0 : 1;
+        return r?.isNegative ? -1 : r?.isSame(0) ? 0 : 1;
       }
     : (a: Expression, b: Expression) => {
         if (a.isLess(b)) return -1;

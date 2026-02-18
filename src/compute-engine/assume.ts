@@ -545,7 +545,7 @@ export function getSignFromAssumptions(
     const [lhs, rhs] = ops;
 
     // Check if RHS is 0 (normalized form: expr < 0 or expr <= 0)
-    if (!rhs.is(0)) continue;
+    if (!rhs.isSame(0)) continue;
 
     // Case 1: Direct symbol comparison
     // x < 0 means x is negative

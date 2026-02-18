@@ -275,11 +275,11 @@ export class TensorFieldExpression implements TensorField<Expression> {
     return x;
   }
   isZero(x: Expression): boolean {
-    return x.is(0);
+    return x.isSame(0);
   }
 
   isOne(x: Expression): boolean {
-    return x.is(1);
+    return x.isSame(1);
   }
 
   equals(lhs: Expression, rhs: Expression): boolean {

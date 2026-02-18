@@ -82,6 +82,6 @@ export function parseLatexEntrypoint(
   );
   if (result === null) throw Error('Failed to parse LaTeX string');
 
-  const { canonical } = formToInternal(options?.form);
-  return box(engine, result, { canonical });
+  const { canonical, structural } = formToInternal(options?.form);
+  return box(engine, result, { canonical, structural });
 }

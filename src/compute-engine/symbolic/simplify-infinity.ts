@@ -31,18 +31,18 @@ export function simplifyInfinity(x: Expression): RuleStep | undefined {
     const bIsNegInf = bIsInf && b.isNegative === true;
 
     // 0 * infinity -> NaN (indeterminate form)
-    if (a.is(0) && bIsInf) {
+    if (a.isSame(0) && bIsInf) {
       return { value: ce.NaN, because: '0 * infinity -> NaN' };
     }
-    if (b.is(0) && aIsInf) {
+    if (b.isSame(0) && aIsInf) {
       return { value: ce.NaN, because: 'infinity * 0 -> NaN' };
     }
 
     // 0 * x -> 0 when x is finite
-    if (a.is(0) && b.isFinite === true) {
+    if (a.isSame(0) && b.isFinite === true) {
       return { value: ce.Zero, because: '0 * finite -> 0' };
     }
-    if (b.is(0) && a.isFinite === true) {
+    if (b.isSame(0) && a.isFinite === true) {
       return { value: ce.Zero, because: 'finite * 0 -> 0' };
     }
 
@@ -201,17 +201,17 @@ export function simplifyInfinity(x: Expression): RuleStep | undefined {
       }
 
       // 1^x -> 1 when x is finite
-      if (base.is(1) && exp.isFinite === true) {
+      if (base.isSame(1) && exp.isFinite === true) {
         return { value: ce.One, because: '1^finite -> 1' };
       }
 
       // a^0 -> NaN when a is infinity
-      if (exp.is(0) && baseIsInf) {
+      if (exp.isSame(0) && baseIsInf) {
         return { value: ce.NaN, because: 'inf^0 -> NaN' };
       }
 
       // x^0 -> 1 when x is not zero and finite
-      if (exp.is(0) && base.is(0) === false && base.isFinite === true) {
+      if (exp.isSame(0) && base.isSame(0) === false && base.isFinite === true) {
         return { value: ce.One, because: 'x^0 -> 1' };
       }
 
