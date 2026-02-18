@@ -771,10 +771,10 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
       }
 
       // Fallback for symbolic args
-      const args = [];
+      const args: string[] = [];
       for (const i of [1, 2, 3] as const) {
         const op = operand(expr, i);
-        if (op !== undefined) args.push(serializer.serialize(op));
+        if (op !== null) args.push(serializer.serialize(op));
       }
       return `\\operatorname{DMS}(${args.join(', ')})`;
     },

@@ -39,9 +39,13 @@ export function isSymbol(
 }
 
 export function isFunction(
-  expr: Expression | null | undefined
+  expr: Expression | null | undefined,
+  operator?: string
 ): expr is Expression & FunctionInterface {
-  return expr?._kind === 'function' || expr?._kind === 'tensor';
+  return (
+    (expr?._kind === 'function' || expr?._kind === 'tensor') &&
+    (operator === undefined || expr!.operator === operator)
+  );
 }
 
 export function isString(
@@ -77,9 +81,10 @@ export function isBoxedSymbol(
 
 /** @deprecated Use `isFunction()` instead. */
 export function isBoxedFunction(
-  expr: Expression | null | undefined
+  expr: Expression | null | undefined,
+  operator?: string
 ): expr is Expression & FunctionInterface {
-  return isFunction(expr);
+  return isFunction(expr, operator);
 }
 
 /** @deprecated Use `isString()` instead. */

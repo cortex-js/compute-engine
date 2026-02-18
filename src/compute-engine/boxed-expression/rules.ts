@@ -656,7 +656,7 @@ function boxRule(
     ce.pushScope();
   }
 
-  let matchExpr: Expression | null;
+  let matchExpr: Expression | undefined;
   let replaceExpr: Expression | RuleReplaceFunction | RuleFunction | undefined;
   try {
     // Match patterns should never be canonicalized - they need to preserve their

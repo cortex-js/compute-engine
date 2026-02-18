@@ -108,7 +108,7 @@ export const UNITS_LIBRARY: SymbolDefinitions = {
     signature: '(value) -> value',
     evaluate: (ops) => {
       const arg = ops[0];
-      if (arg?.operator === 'Quantity') return arg.op1;
+      if (arg?.operator === 'Quantity' && isFunction(arg)) return arg.op1;
       return undefined;
     },
   },
@@ -119,7 +119,7 @@ export const UNITS_LIBRARY: SymbolDefinitions = {
     signature: '(value) -> value',
     evaluate: (ops) => {
       const arg = ops[0];
-      if (arg?.operator === 'Quantity') return arg.op2;
+      if (arg?.operator === 'Quantity' && isFunction(arg)) return arg.op2;
       return undefined;
     },
   },
