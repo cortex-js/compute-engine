@@ -12,10 +12,10 @@ import { stochasticEqual } from './stochastic-equal';
 
 // Lazy reference to break circular dependency:
 // expand → arithmetic-add → boxed-tensor → abstract-boxed-expression → compare
-import type { expand as _ExpandFn } from './expand';
-let _expand: typeof _ExpandFn;
+type ExpandFn = (expr: Expression | undefined) => Expression | null;
+let _expand: ExpandFn;
 /** @internal */
-export function _setExpand(fn: typeof _ExpandFn) {
+export function _setExpand(fn: ExpandFn) {
   _expand = fn;
 }
 

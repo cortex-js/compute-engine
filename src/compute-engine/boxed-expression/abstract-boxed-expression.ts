@@ -53,10 +53,14 @@ import { isSymbol, isString, isFunction } from './type-guards';
 
 // Lazy reference to break circular dependency:
 // serialize → numerics → utils → abstract-boxed-expression
-import type { serializeJson as _SerializeJsonFn } from './serialize';
-let _serializeJson: typeof _SerializeJsonFn;
+type SerializeJsonFn = (
+  ce: ComputeEngine,
+  expr: Expression,
+  options: Readonly<JsonSerializationOptions>
+) => MathJsonExpression;
+let _serializeJson: SerializeJsonFn;
 /** @internal */
-export function _setSerializeJson(fn: typeof _SerializeJsonFn) {
+export function _setSerializeJson(fn: SerializeJsonFn) {
   _serializeJson = fn;
 }
 

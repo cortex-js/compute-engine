@@ -15,7 +15,6 @@ import type {
   TypeString,
 } from './types';
 import { parseType } from './parse';
-import { widen } from './utils';
 
 /** For each key, *all* the primitive subtypes of the type corresponding to that key */
 const PRIMITIVE_SUBTYPES: Record<PrimitiveType, PrimitiveType[]> = {
@@ -598,5 +597,129 @@ function isSymbol(type: Type): boolean {
   if (typeof type === 'string') return false;
   if (type.kind === 'symbol') return true;
   if (type.kind === 'expression') return type.operator === 'Symbol';
+  return false;
+}
+
+//
+// widen/narrow functions — moved here from utils.ts because they depend on
+// isSubtype (breaking the subtype ↔ utils cycle). Re-exported from utils.ts
+// for backward compatibility.
+//
+
+/** Given two types a and b, return the narrowest type common to a and b */
+function narrow2(a: Readonly<Type>, b: Readonly<Type>): Readonly<Type> {
+  if (a === b) return a;
+
+  if (a === 'nothing' || b === 'nothing') return 'nothing';
+
+  if (a === 'any') return b;
+  if (b === 'any') return a;
+
+  if (a === 'never') return b;
+  if (b === 'never') return a;
+
+  if (a === 'unknown') return b;
+  if (b === 'unknown') return a;
+
+  if (isSubtype(a, b)) return a;
+  if (isSubtype(b, a)) return b;
+
+  return superType(a, b);
+}
+
+/** Given two types, return the broadest  */
+function widen2(a: Readonly<Type>, b: Readonly<Type>): Readonly<Type> {
+  if (a === b) return a;
+  if (a === 'any' || b === 'any') return 'any';
+
+  if (a === 'never') return b;
+  if (b === 'never') return a;
+
+  if (a === 'unknown') return b;
+  if (b === 'unknown') return a;
+
+  if (a === 'nothing') return b;
+  if (b === 'nothing') return a;
+
+  if (isSubtype(a, b)) return b;
+  if (isSubtype(b, a)) return a;
+
+  return superType(a, b);
+}
+
+/** Convert two or more types into a more specific type that is a subtype of
+ *  all the input types. The resulting type is usually more constrained and
+ *  only encompasses values that belong to both input types.
+ */
+export function narrow(...types: Readonly<Type>[]): Type {
+  if (types.length === 0) return 'nothing';
+  if (types.length === 1) return types[0];
+
+  return types.reduce((a, b) => narrow2(a, b));
+}
+
+/** Convert two or more types into a broader, more general type that can
+ *  accommodate all the input types. The resulting type is usually a supertype
+ *  that encompasses the possible values of the input types.
+ */
+export function widen(...types: Readonly<Type>[]): Readonly<Type> {
+  if (types.length === 0) return 'nothing';
+  if (types.length === 1) return types[0];
+
+  return types.reduce((a, b) => widen2(a, b));
+}
+
+function superType(a: Readonly<Type>, b: Readonly<Type>): Type {
+  // Return the common super type of a and b
+  if (a === b) return a;
+  if (a === 'any' || b === 'any') return 'any';
+  if (a === 'never') return b;
+  if (b === 'never') return a;
+  if (a === 'unknown') return b;
+  if (b === 'unknown') return a;
+  if (a === 'nothing') return b;
+  if (b === 'nothing') return a;
+
+  // Check in order from most specific to most general
+  if (commonSupertype(a, b, 'non_finite_number')) return 'non_finite_number';
+
+  if (commonSupertype(a, b, 'finite_integer')) return 'finite_integer';
+  if (commonSupertype(a, b, 'integer')) return 'integer';
+  if (commonSupertype(a, b, 'finite_rational')) return 'finite_rational';
+  if (commonSupertype(a, b, 'rational')) return 'rational';
+  if (commonSupertype(a, b, 'finite_real')) return 'finite_real';
+  if (commonSupertype(a, b, 'real')) return 'real';
+
+  if (commonSupertype(a, b, 'imaginary')) return 'imaginary';
+
+  if (commonSupertype(a, b, 'finite_complex')) return 'finite_complex';
+  if (commonSupertype(a, b, 'complex')) return 'complex';
+
+  if (commonSupertype(a, b, 'finite_number')) return 'finite_number';
+  if (commonSupertype(a, b, 'number')) return 'number';
+
+  if (commonSupertype(a, b, 'list')) return 'list';
+  if (commonSupertype(a, b, 'record')) return 'record';
+  if (commonSupertype(a, b, 'dictionary')) return 'dictionary';
+  if (commonSupertype(a, b, 'set')) return 'set';
+  if (commonSupertype(a, b, 'tuple')) return 'tuple';
+  if (commonSupertype(a, b, 'indexed_collection')) return 'indexed_collection';
+  if (commonSupertype(a, b, 'collection')) return 'collection';
+
+  if (commonSupertype(a, b, 'scalar')) return 'scalar';
+  if (commonSupertype(a, b, 'value')) return 'value';
+  if (commonSupertype(a, b, 'function')) return 'function';
+
+  if (commonSupertype(a, b, 'expression')) return 'expression';
+
+  return 'any';
+}
+
+function commonSupertype(
+  a: Readonly<Type>,
+  b: Readonly<Type>,
+  ancestor: Readonly<Type>
+): boolean {
+  if (isSubtype(a, ancestor) && isSubtype(b, ancestor)) return true;
   return false;
 }

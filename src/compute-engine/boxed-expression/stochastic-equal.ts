@@ -1,6 +1,18 @@
 import type { Expression } from '../global-types';
-import { compile } from '../compilation/compile-expression';
-import type { ComplexResult } from '../compilation/types';
+
+// Lazy reference to break circular dependency:
+// compare → stochastic-equal → compile-expression → base-compiler → utils → ...
+// Inline the subset of `compile`'s return type we actually need, so we don't
+// import from compile-expression.ts at all (madge follows import type too).
+type ComplexResult = { re: number; im: number };
+type CompileFn = (expr: Expression) => {
+  run?: ((vars: Record<string, number>) => number | ComplexResult) | undefined;
+};
+let _compile: CompileFn;
+/** @internal */
+export function _setCompile(fn: CompileFn) {
+  _compile = fn;
+}
 
 const WELL_KNOWN_POINTS = [0, -1, 1, Math.PI, Math.E, -Math.PI, -Math.E, 0.5, -0.5];
 const NUM_RANDOM = 41;
@@ -29,13 +41,13 @@ export function stochasticEqual(
   let evalB: ((vars: Record<string, number>) => ComplexValue) | null = null;
 
   try {
-    const compiledA = compile(a);
+    const compiledA = _compile(a);
     if (compiledA.run)
       evalA = (vars) => toComplex(compiledA.run!(vars));
   } catch { /* fall back to subs */ }
 
   try {
-    const compiledB = compile(b);
+    const compiledB = _compile(b);
     if (compiledB.run)
       evalB = (vars) => toComplex(compiledB.run!(vars));
   } catch { /* fall back to subs */ }

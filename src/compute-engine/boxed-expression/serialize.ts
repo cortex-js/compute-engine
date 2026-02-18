@@ -35,11 +35,20 @@ import { isNumber, isSymbol, isString, isFunction } from './type-guards';
 import { matchesNumber, matchesSymbol } from '../../math-json/utils';
 
 // Lazy reference to break circular dependency:
-// product → arithmetic-mul-div → ... → abstract-boxed-expression → serialize
-import type { Product as _ProductClass } from './product';
-let _Product: typeof _ProductClass;
+// arithmetic-mul-div → ... → abstract-boxed-expression → serialize
+// Inline the subset of Product we need (constructor + asRationalExpression)
+// to avoid importing from arithmetic-mul-div.ts.
+interface ProductLike {
+  asRationalExpression(): Expression;
+}
+type ProductConstructor = new (
+  ce: ComputeEngine,
+  xs?: ReadonlyArray<Expression>,
+  options?: { canonical?: boolean }
+) => ProductLike;
+let _Product: ProductConstructor;
 /** @internal */
-export function _setProduct(fn: typeof _ProductClass) {
+export function _setProduct(fn: ProductConstructor) {
   _Product = fn;
 }
 
