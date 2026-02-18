@@ -15,7 +15,12 @@ const ce = new ComputeEngine();
 const engine = ce;
 
 assign('v', 2);
-console.log(parse('1 + 4 / v').N().is(3));
+console.log(parse('1 + 4 / v').is(3));
+
+console.log(
+  parse('\\sin^2(x) + \\cos^2(x)').isEqual(1),
+  parse('(x+y)^2').isEqual(parse('x^2+2xy+y^2'))
+);
 
 let entier = true;
 const domaine = [-10, 10];

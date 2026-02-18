@@ -156,7 +156,6 @@ export class _BoxedValueDefinition
     if (def.cmp) this.cmp = def.cmp;
 
     if (def.collection) {
-      if (name === 'Take') debugger;
       this.collection = defaultCollectionHandlers(def.collection);
     }
 

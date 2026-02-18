@@ -1196,12 +1196,20 @@ export interface Expression {
    * ```typescript
    * ce.parse('\\cos(\\frac{\\pi}{2})').is(0)  // true — evaluates, within tolerance
    * ce.number(1e-17).is(0)                     // false — literal, no tolerance
-   * ce.parse('x + 1').is(1)                    // false — not constant
+   * ce.parse('x + 1').is(1)                    // false — has free variables
+   * ce.parse('\\pi').is(3.14, 0.01)            // true — within custom tolerance
    * ```
+   *
+   * @param tolerance - If provided, overrides `engine.tolerance` for the
+   * numeric comparison. Has no effect when the comparison is structural
+   * (i.e., when `isSame()` succeeds or the expression has free variables).
    *
    * @category Primitive Methods
    */
-  is(other: Expression | number | bigint | boolean | string): boolean;
+  is(
+    other: Expression | number | bigint | boolean | string,
+    tolerance?: number
+  ): boolean;
 
   /**
    * If this expression matches `pattern`, return a substitution that makes

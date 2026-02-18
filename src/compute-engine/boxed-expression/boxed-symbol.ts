@@ -159,14 +159,17 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     return this.engine.symbol(this._id);
   }
 
-  is(other: Expression | number | bigint | boolean | string): boolean {
+  is(
+    other: Expression | number | bigint | boolean | string,
+    tolerance?: number
+  ): boolean {
     // Structural check (includes value following via isSame)
-    if (this.isSame(other)) return true;
+    if (tolerance === undefined && this.isSame(other)) return true;
 
     // If value following didn't match but we have a bound value,
     // try the smart check on the value (which may be a function expression)
     const val = this.value;
-    if (val && val !== (this as unknown)) return val.is(other);
+    if (val && val !== (this as unknown)) return val.is(other, tolerance);
 
     return false;
   }

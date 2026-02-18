@@ -143,6 +143,69 @@ describe('smart is() with numeric evaluation fallback', () => {
   });
 });
 
+describe('is() with assigned variables', () => {
+  test('expression with assigned variable evaluates', () => {
+    engine.assign('v', 2);
+    expect(engine.parse('1 + 4 / v').is(3)).toBe(true);
+    engine.forget('v');
+  });
+
+  test('expression with unassigned variable does not evaluate', () => {
+    expect(engine.parse('1 + 4 / w').is(3)).toBe(false);
+  });
+
+  test('assigned variable via symbol', () => {
+    engine.assign('v', 42);
+    expect(engine.symbol('v').is(42)).toBe(true);
+    engine.forget('v');
+  });
+
+  test('reassigned variable reflects new value', () => {
+    engine.assign('v', 2);
+    expect(engine.parse('v + 1').is(3)).toBe(true);
+    engine.assign('v', 10);
+    expect(engine.parse('v + 1').is(11)).toBe(true);
+    engine.forget('v');
+  });
+});
+
+describe('is() with explicit tolerance', () => {
+  test('literal number within custom tolerance', () => {
+    expect(engine.number(1e-17).is(0, 1e-16)).toBe(true);
+  });
+
+  test('literal number outside custom tolerance', () => {
+    expect(engine.number(1e-17).is(0, 1e-18)).toBe(false);
+  });
+
+  test('literal number without tolerance (exact)', () => {
+    expect(engine.number(1e-17).is(0)).toBe(false);
+  });
+
+  test('pi within custom tolerance', () => {
+    expect(engine.parse('\\pi').is(3.14, 0.01)).toBe(true);
+  });
+
+  test('pi outside custom tolerance', () => {
+    expect(engine.parse('\\pi').is(3.14, 0.0001)).toBe(false);
+  });
+
+  test('expression vs expression with tolerance', () => {
+    // sin(pi) ≈ 1.2e-16, compare to a small nonzero number
+    const expr = engine.parse('\\sin(\\pi)');
+    expect(expr.is(engine.number(1e-10), 1e-9)).toBe(true);
+    expect(expr.is(engine.number(1e-10), 1e-17)).toBe(false);
+  });
+
+  test('tolerance with assigned variable', () => {
+    engine.assign('v', 2);
+    // 4/v = 2, so 1 + 4/v = 3
+    expect(engine.parse('1 + 4 / v').is(3.001, 0.01)).toBe(true);
+    expect(engine.parse('1 + 4 / v').is(3.001, 0.0001)).toBe(false);
+    engine.forget('v');
+  });
+});
+
 describe('edge cases: infinity and NaN', () => {
   test('PositiveInfinity.isSame(Infinity)', () => {
     expect(engine.symbol('PositiveInfinity').isSame(Infinity)).toBe(true);

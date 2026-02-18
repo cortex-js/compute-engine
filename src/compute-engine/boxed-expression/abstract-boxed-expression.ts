@@ -471,19 +471,22 @@ export abstract class _BoxedExpression implements Expression {
     return [this, this.engine.One];
   }
 
-  is(other: Expression | number | bigint | boolean | string): boolean {
+  is(
+    other: Expression | number | bigint | boolean | string,
+    tolerance?: number
+  ): boolean {
     // Fast path: exact structural/value check
     if (this.isSame(other)) return true;
 
-    // Numeric fallback only for constant expressions (no free variables)
-    if (!this.isConstant) return false;
+    // Numeric fallback only when there are no free variables
+    if (this.freeVariables.length > 0) return false;
 
     // Only attempt numeric comparison for numeric arguments
     if (typeof other === 'number' || typeof other === 'bigint') {
       const n = this.N();
       if (n === this) return false; // .N() returned self — can't evaluate
       if (!isNumber(n)) return false;
-      const tol = this.engine.tolerance;
+      const tol = tolerance ?? this.engine.tolerance;
       const nRe = n.re;
       const nIm = n.im;
       if (typeof other === 'number') {
@@ -497,11 +500,11 @@ export abstract class _BoxedExpression implements Expression {
 
     // Expression argument: evaluate both sides
     if (other instanceof _BoxedExpression) {
-      if (!other.isConstant) return false;
+      if (other.freeVariables.length > 0) return false;
       const nThis = this.N();
       const nOther = other.N();
       if (!isNumber(nThis) || !isNumber(nOther)) return false;
-      const tol = this.engine.tolerance;
+      const tol = tolerance ?? this.engine.tolerance;
       return (
         Math.abs(nThis.re - nOther.re) <= tol &&
         Math.abs(nThis.im - nOther.im) <= tol

@@ -580,7 +580,25 @@ export class BoxedNumber
     return isSubtype(this._value.type, 'real');
   }
 
-  is(other: Expression | number | bigint | boolean | string): boolean {
+  is(
+    other: Expression | number | bigint | boolean | string,
+    tolerance?: number
+  ): boolean {
+    if (tolerance === undefined) return this.isSame(other);
+
+    // With explicit tolerance, compare numerically
+    if (typeof other === 'number') {
+      return Math.abs(this.re - other) <= tolerance && Math.abs(this.im) <= tolerance;
+    }
+    if (typeof other === 'bigint') {
+      return Math.abs(this.re - Number(other)) <= tolerance && Math.abs(this.im) <= tolerance;
+    }
+    if (other instanceof _BoxedExpression && isNumber(other)) {
+      return (
+        Math.abs(this.re - other.re) <= tolerance &&
+        Math.abs(this.im - other.im) <= tolerance
+      );
+    }
     return this.isSame(other);
   }
 

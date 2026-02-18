@@ -1578,6 +1578,38 @@ export class _Parser implements Parser {
 
     this.skipSpace();
 
+    // Check for optional exponent: sin^2(x) or sin^{10}(x)
+    let exponent: MathJsonExpression | null = null;
+    if (this.peek === '^') {
+      const caretIndex = this.index;
+      this.index++; // skip '^'
+      // Try braced group first: ^{expr}
+      exponent = this.parseGroup();
+      if (exponent === null) {
+        // In non-strict mode, try bare digits: ^2, ^-3
+        const digitStart = this.index;
+        let neg = false;
+        if ((this.peek as string) === '-') {
+          neg = true;
+          this.index++;
+        }
+        let digits = '';
+        while (!this.atEnd && /^[0-9]$/.test(this.peek))  {
+          digits += this.peek;
+          this.index++;
+        }
+        if (digits) {
+          const num = parseInt(digits);
+          exponent = neg ? -num : num;
+        } else {
+          // Not a valid exponent, backtrack entirely
+          this.index = start;
+          return null;
+        }
+      }
+      this.skipSpace();
+    }
+
     // Check if followed by opening parenthesis
     if (this.peek !== '(') {
       this.index = start;
@@ -1662,9 +1694,13 @@ export class _Parser implements Parser {
     }
 
     // Special case: cbrt(x) -> ['Root', x, 3]
-    if (name === 'cbrt') return ['Root', args[0] ?? 'Nothing', 3];
+    if (name === 'cbrt') {
+      const result: MathJsonExpression = ['Root', args[0] ?? 'Nothing', 3];
+      return exponent !== null ? ['Power', result, exponent] : result;
+    }
 
-    return [fnName, ...args];
+    const result: MathJsonExpression = [fnName, ...args];
+    return exponent !== null ? ['Power', result, exponent] : result;
   }
 
   private static readonly BARE_SYMBOL_MAP: Record<string, string> = {
