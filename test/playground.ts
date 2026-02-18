@@ -23,8 +23,8 @@ const goodAnswer = '3x + 1';
 const cleanInput = input;
 const cleanAnswer = goodAnswer;
 
-const inputFn = compile(cleanInput);
-const goodAnswerFn = compile(cleanAnswer);
+const inputFn = compile(cleanInput, { realOnly: true });
+const goodAnswerFn = compile(cleanAnswer, { realOnly: true });
 const [min, max] = domaine;
 const range = max - min;
 const valAlea = () => {

@@ -1,20 +1,21 @@
 import type { SymbolDefinitions } from '../global-types';
 import {
-  asOklch,
-  oklchToRgb,
-  oklabToRgb,
-  rgbToOklab,
-  rgbToOklch,
-  rgbToHsl,
-  hslToRgb,
   parseColor,
   apca,
   contrastingColor,
+  interpolateOklch,
+  lerpOklch,
+  rgbToOklch,
+  oklchToRgb,
+  rgbToHsl,
+  hslToRgb,
+  rgbToOklab,
+  oklabToRgb,
 } from '../../color';
 import type { RgbColor } from '../../color';
-import { SEQUENTIAL_PALETTES } from '../../color/sequential';
-import { CATEGORICAL_PALETTES } from '../../color/categorical';
-import { DIVERGING_PALETTES } from '../../color/diverging-palettes';
+import { SEQUENTIAL_PALETTES } from '../../color/palettes/sequential';
+import { CATEGORICAL_PALETTES } from '../../color/palettes/categorical';
+import { DIVERGING_PALETTES } from '../../color/palettes/diverging';
 import { isFunction, isString } from '../boxed-expression/type-guards';
 
 /** Convert a 0xRRGGBBAA packed integer to a Tuple of 0-1 sRGB components. */
@@ -35,15 +36,6 @@ const ALL_PALETTES: Record<string, readonly string[]> = {
   ...CATEGORICAL_PALETTES,
   ...DIVERGING_PALETTES,
 };
-
-/** Interpolate between two hex colors in OKLCh space at fraction f in [0,1]. */
-function interpolateOklch(
-  hex1: string,
-  hex2: string,
-  f: number
-): { r: number; g: number; b: number; alpha?: number } {
-  return oklchToRgb(lerpOklch(asOklch(hex1), asOklch(hex2), f));
-}
 
 /** Sample a palette at position t in [0,1], returning a 0-1 sRGB Tuple expression. */
 function samplePalette(ce: any, palette: readonly string[], t: number): any {
@@ -113,26 +105,6 @@ function rgbToHex(rgb: RgbColor): string {
     return hex + a.toString(16).padStart(2, '0');
   }
   return hex;
-}
-
-/** Interpolate two OKLCh colors at fraction f in [0,1], returning {L, C, H}. */
-function lerpOklch(
-  c1: { L: number; C: number; H: number },
-  c2: { L: number; C: number; H: number },
-  f: number
-): { L: number; C: number; H: number } {
-  const L = c1.L + (c2.L - c1.L) * f;
-  const C = c1.C + (c2.C - c1.C) * f;
-
-  // Shorter arc hue interpolation
-  let dh = c2.H - c1.H;
-  if (dh > 180) dh -= 360;
-  if (dh < -180) dh += 360;
-  let H = c1.H + dh * f;
-  if (H < 0) H += 360;
-  if (H >= 360) H -= 360;
-
-  return { L, C, H };
 }
 
 export const COLORS_LIBRARY: SymbolDefinitions = {

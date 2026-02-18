@@ -21,11 +21,12 @@ import {
   hslToRgb,
   apca,
   contrastingColor,
-  asRgb,
+  parseColorToRgb01,
+  HexColor,
 } from '../../color';
-import { SEQUENTIAL_PALETTES } from '../../color/sequential';
-import { CATEGORICAL_PALETTES } from '../../color/categorical';
-import { DIVERGING_PALETTES } from '../../color/diverging-palettes';
+import { SEQUENTIAL_PALETTES } from '../../color/palettes/sequential';
+import { CATEGORICAL_PALETTES } from '../../color/palettes/categorical';
+import { DIVERGING_PALETTES } from '../../color/palettes/diverging';
 import {
   gamma,
   gammaln,
@@ -819,14 +820,9 @@ const colorHelpers = {
     if (!palette) throw new Error(`Unknown palette: ${name}`);
 
     // Convert hex strings to [r, g, b] arrays (0-1)
-    const colors = (palette as readonly string[]).map((hex: string) => {
-      const rgb = asRgb(parseColor(hex));
-      return [rgb.r / 255, rgb.g / 255, rgb.b / 255] as [
-        number,
-        number,
-        number,
-      ];
-    });
+    const colors = (palette as readonly string[]).map((hex: HexColor) =>
+      parseColorToRgb01(hex)
+    );
 
     // No second arg → return full palette
     if (arg === undefined) return colors;
@@ -1269,7 +1265,11 @@ function extractLimits(limitsExpr: Expression): {
   upperNum: number | undefined;
 } {
   console.assert(limitsExpr.operator === 'Limits');
-  const fn = limitsExpr as Expression & { op1: Expression; op2: Expression; op3: Expression };
+  const fn = limitsExpr as Expression & {
+    op1: Expression;
+    op2: Expression;
+    op3: Expression;
+  };
   const index = isSymbol(fn.op1) ? fn.op1.symbol : '_';
   const lowerExpr = fn.op2;
   const upperExpr = fn.op3;
@@ -1279,8 +1279,14 @@ function extractLimits(limitsExpr: Expression): {
     index,
     lowerExpr,
     upperExpr,
-    lowerNum: !isNaN(lowerRe) && Number.isFinite(lowerRe) ? Math.floor(lowerRe) : undefined,
-    upperNum: !isNaN(upperRe) && Number.isFinite(upperRe) ? Math.floor(upperRe) : undefined,
+    lowerNum:
+      !isNaN(lowerRe) && Number.isFinite(lowerRe)
+        ? Math.floor(lowerRe)
+        : undefined,
+    upperNum:
+      !isNaN(upperRe) && Number.isFinite(upperRe)
+        ? Math.floor(upperRe)
+        : undefined,
   };
 }
 
@@ -1314,7 +1320,9 @@ function compileSumProduct(
   if (!args[0]) throw new Error(`${kind}: no body`);
   if (!args[1]) throw new Error(`${kind}: no indexing set`);
 
-  const { index, lowerExpr, upperExpr, lowerNum, upperNum } = extractLimits(args[1]);
+  const { index, lowerExpr, upperExpr, lowerNum, upperNum } = extractLimits(
+    args[1]
+  );
   const isSum = kind === 'Sum';
   const op = isSum ? '+' : '*';
   const identity = isSum ? '0' : '1';
@@ -1392,8 +1400,9 @@ function compileSumProduct(
  * Compile integration function
  */
 function compileIntegrate(args, _, target: CompileTarget<Expression>): string {
-  const { index, lowerExpr, upperExpr, lowerNum, upperNum } =
-    extractLimits(args[1]);
+  const { index, lowerExpr, upperExpr, lowerNum, upperNum } = extractLimits(
+    args[1]
+  );
   const f = BaseCompiler.compile(args[0], {
     ...target,
     var: (id) => (id === index ? id : target.var(id)),

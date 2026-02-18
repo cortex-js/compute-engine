@@ -15,9 +15,9 @@ export interface ColorScalePreset {
   name: string;
   theme: ColorScaleTheme;
   colors: {
-    mid?: ColorScaleStop;
-    darkest?: ColorScaleStop;
-    lightest?: ColorScaleStop;
+    mid?: ColorScaleStop | undefined;
+    darkest?: ColorScaleStop | undefined;
+    lightest?: ColorScaleStop | undefined;
   };
 }
 
@@ -30,8 +30,10 @@ function shiftHue(hue: number, shift: number) {
   return wrapped < 0 ? wrapped + 360 : wrapped;
 }
 
+// function toDarkStop(stop: undefined): undefined;
+// function toDarkStop(stop: ColorScaleStop): ColorScaleStop;
 function toDarkStop(
-  stop: ColorScaleStop | undefined
+  stop: ColorScaleStop | undefined,
 ): ColorScaleStop | undefined {
   if (!stop) return undefined;
   return {
@@ -191,7 +193,7 @@ export const COLOR_SCALE_PRESETS_DARK: readonly ColorScalePreset[] =
 export type NamedColor = (typeof COLOR_SCALE_PRESETS)[number]["id"];
 
 export function getColorScaleMode(
-  preset: Pick<ColorScalePreset, "colors">
+  preset: Pick<ColorScalePreset, "colors">,
 ): ColorScaleMode {
   const { colors } = preset;
   const hasLight = Boolean(colors.lightest);

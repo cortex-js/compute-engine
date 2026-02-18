@@ -1,82 +1,122 @@
-import { Color, OklchColor } from './types';
-import { asOklch } from './conversion';
+import { oklch, colorToHex } from "./conversion";
+import { shade } from "./interpolation";
+import {
+  COLOR_SCALE_PRESETS,
+  COLOR_SCALE_PRESETS_DARK,
+  type ColorScalePreset,
+  type NamedColor,
+  type ColorScaleStop,
+} from "./scale-presets";
 
-/**
- * Calculate a scale of colors from a base color.
- * The base color is the 500 color in the scale.
- * The other colors range from -25, -25, -100, -200 to -900.
- * 11 colors in total.
- */
-export function scale(color: Color): Color[] {
-  const oklch = asOklch(color);
-  delete oklch.alpha;
-  const light = { ...oklch, L: 1.0 };
-  const dark = { ...oklch };
+const SHADES = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900];
+type ShadeInput = Parameters<typeof shade>[0];
 
-  // Correct the hue for the Abney Effect
-  // See https://royalsocietypublishing.org/doi/pdf/10.1098/rspa.1909.0085
-  // (the human vision system perceives a hue shift as colors
-  // change in colorimetric purity: mix with black or mix
-  // with white)
-  // and the Bezold-Brücke effect (hue shift as intensity increases)
-  // See https://www.sciencedirect.com/science/article/pii/S0042698999000851
-
-  // h: c2.h >= 60 && c2.h <= 240 ? c2.h + 30 : c2.h - 30,
-
-  const hAngle = (oklch.H * Math.PI) / 180;
-  dark.H = oklch.H - 20 * Math.sin(2 * hAngle);
-  dark.C = oklch.C + 0.08 * Math.sin(hAngle);
-  if (oklch.H >= 180) dark.L = oklch.L - 0.35;
-  else dark.L = oklch.L - 0.3 + 0.1 * Math.sin(2 * hAngle);
-
-  return [
-    mix(light, oklch, 0.04), // color-25
-    mix(light, oklch, 0.08), // color-50
-    mix(light, oklch, 0.12), // color-100
-    mix(light, oklch, 0.3), // color-200
-    mix(light, oklch, 0.5), // color-300
-    mix(light, oklch, 0.7), // color-400
-    oklch, // color-500
-    mix(dark, oklch, 0.85), // color-600
-    mix(dark, oklch, 0.7), // color-700
-    mix(dark, oklch, 0.5), // color-800
-    mix(dark, oklch, 0.25), // color-900
-  ];
+function stopToNumber({ lightness, chroma, hue }: ColorScaleStop): number {
+  return oklch(lightness, chroma, hue);
 }
 
-function mix(c1: OklchColor, c2: OklchColor, t: number): OklchColor {
-  return {
-    L: c1.L * (1 - t) + c2.L * t,
-    C: c1.C * (1 - t) + c2.C * t,
-    H: c1.H * (1 - t) + c2.H * t,
-  };
+function presetToShadeInput(preset: ColorScalePreset): ShadeInput {
+  const { mid, lightest, darkest } = preset.colors;
+  if (lightest && darkest && mid) {
+    return {
+      lightest: stopToNumber(lightest),
+      mid: stopToNumber(mid),
+      darkest: stopToNumber(darkest),
+    };
+  }
+  if (lightest && darkest) {
+    return {
+      lightest: stopToNumber(lightest),
+      darkest: stopToNumber(darkest),
+    };
+  }
+  if (mid) return stopToNumber(mid);
+  throw new Error(
+    `Color scale preset "${preset.id}" is missing required anchors.`,
+  );
 }
 
-// Interesting article about designing color scales:
-// https://uxplanet.org/designing-systematic-colors-b5d2605b15c
+// --- Shade maps (light + dark) ---
 
-// const colors = {
-//   red: '#F21C0D', // hue 30 Vivid Red
-//   orange: '#FE9310', // hue 61 Yellow Orange
-//   brown: '#856A47', // hue 73 Raw Umber
-//   yellow: '#FFCF33', // hue 90 Peach Cobbler / Sunglow
-//   lime: '#63B215', // hue 130 Kelly Green
-//   green: '#17CF36', // hue 144 Vivid Malachite
-//   teal: '#17CFCF', // hue 195 Dark Turquoise
-//   cyan: '#13A7EC', // hue 238 Vivid Cerulean
-//   blue: '#0D80F2', // hue 255 Tropical Thread / Azure
-//   indigo: '#6633CC', // hue 291 Strong Violet / Iris
-//   purple: '#A219E6', // hue 309 Purple X11
-//   magenta: '#EB4799', // hue 354 Raspberry Pink
-// };
+type ShadeInputMap = Record<string, ShadeInput>;
 
-// const index = [25, 50, 100, 200, 300, 400, 500, 600, 700, 800, 900];
+let _lightShadeMap: ShadeInputMap | null = null;
+let _darkShadeMap: ShadeInputMap | null = null;
 
-// let result = '';
+export function getLightShadeMap(): ShadeInputMap {
+  if (!_lightShadeMap) {
+    _lightShadeMap = Object.create(null) as ShadeInputMap;
+    for (const preset of COLOR_SCALE_PRESETS) {
+      _lightShadeMap[preset.id] = presetToShadeInput(preset);
+    }
+  }
+  return _lightShadeMap;
+}
 
-// for (const [name, color] of Object.entries(colors)) {
-//   const s = scale(color);
-//   for (const [i, c] of s.entries())
-//     result += `--${name}-${index[i]}: ${asHexColor(c)};` + '\n';
-// }
-// console.info(result);
+export function getDarkShadeMap(): ShadeInputMap {
+  if (!_darkShadeMap) {
+    _darkShadeMap = Object.create(null) as ShadeInputMap;
+    for (let i = 0; i < COLOR_SCALE_PRESETS.length; i++) {
+      _darkShadeMap[COLOR_SCALE_PRESETS[i].id] = presetToShadeInput(
+        COLOR_SCALE_PRESETS_DARK[i],
+      );
+    }
+  }
+  return _darkShadeMap;
+}
+
+// --- Palette color helpers ---
+
+function paletteColor(id: NamedColor, n = 500): string {
+  return colorToHex(shade(getLightShadeMap()[id], n));
+}
+
+export function shades(fn: (n: number) => string) {
+  return Object.fromEntries(SHADES.map((n) => [n, fn(n)]));
+}
+
+export function yellow(n = 500) {
+  return paletteColor("yellow", n);
+}
+export function brown(n = 500) {
+  return paletteColor("brown", n);
+}
+
+export function red(n = 500) {
+  return paletteColor("red", n);
+}
+
+export function orange(n = 500) {
+  return paletteColor("orange", n);
+}
+
+export function lime(n = 500) {
+  return paletteColor("lime", n);
+}
+
+export function green(n = 500) {
+  return paletteColor("green", n);
+}
+
+export function pink(n = 500) {
+  return paletteColor("pink", n);
+}
+export function purple(n = 500) {
+  return paletteColor("purple", n);
+}
+
+export function indigo(n = 500) {
+  return paletteColor("indigo", n);
+}
+
+export function blue(n = 500) {
+  return paletteColor("blue", n);
+}
+
+export function teal(n = 500) {
+  return paletteColor("teal", n);
+}
+
+export function cyan(n = 500) {
+  return paletteColor("cyan", n);
+}

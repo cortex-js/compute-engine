@@ -1,5 +1,5 @@
-import type { Color } from './types';
-import { asColorNumber, asRgb } from './conversion';
+import type { Color } from "./types";
+import { asColorNumber, asRgb } from "./conversion";
 
 /**
  * APCA contrast calculation using Color objects.
@@ -88,10 +88,10 @@ export function contrastingColor(
     | number
 ): number {
   let bg: Color, fg1: Color, fg2: Color;
-  if (typeof arg !== 'object' || !('bg' in arg)) {
+  if (typeof arg !== "object" || !("bg" in arg)) {
     bg = asRgb(arg);
-    fg1 = '#ffffff';
-    fg2 = '#000000';
+    fg1 = "#ffffff";
+    fg2 = "#000000";
   } else {
     bg = arg.bg;
     fg1 = arg.fg1;

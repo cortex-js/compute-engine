@@ -1,35 +1,59 @@
 // Types
-export type { Color, RgbColor, OklchColor, OklabColor } from './types';
+export type {
+  HexColor,
+  Color,
+  RgbColor,
+  OklchColor,
+  OklabColor,
+} from "./types";
 
-// Color conversion utilities
-export {
-  asOklch,
-  asRgb,
-  clampByte,
-  oklchToOklab,
-  oklabToOklch,
-  oklabToRgb,
-  oklchToRgb,
-  rgbToOklab,
-  rgbToOklch,
-} from './conversion';
-
-// Contrast and accessibility utilities
-export { apca, contrastingColor } from './contrast';
-
-// Color manipulation utilities
+// Conversion (packed-int OKLCH)
 export {
   oklch,
   oklchFromRGB,
-  parseColor,
+  colorToHex,
+  inverseGammaCorrect,
   cMaxFor,
-  getOptimalHueRange,
+  rgbToOklch,
+  oklchToRgb,
+  rgbToHsl,
+  hslToRgb,
+  rgbToOklab,
+  oklabToRgb,
+} from "./conversion";
+
+// Parsing (string → color)
+export {
+  parseColor,
+  parseColorToHex,
+  parseColorToRgb,
+  parseColorToRgb01,
+  parseColorToRgba01,
+  parseColorWithAlpha,
+  isValidColor,
+  isNamedColor,
+} from "./parsing";
+
+// Shading
+export { shade, getOptimalHueRange } from "./interpolation";
+
+// Contrast and accessibility
+export { apca, contrastingColor } from "./contrast";
+
+// Manipulation
+export {
   gray,
   lighten,
   darken,
-  shade,
-  gammaCorrect,
-  inverseGammaCorrect,
-  hslToRgb,
-  rgbToHsl,
-} from './manipulation';
+  darkenHex,
+  isLightColor,
+  mixColors,
+  liftColor,
+  lerpOklch,
+  interpolateOklch,
+  colorToCss,
+} from "./utilities";
+
+// Color palette
+export * from "./scale-presets";
+export * from "./scale";

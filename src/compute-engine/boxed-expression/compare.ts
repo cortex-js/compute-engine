@@ -8,6 +8,7 @@ import {
   isString,
   isTensor,
 } from './type-guards';
+import { stochasticEqual } from './stochastic-equal';
 
 // Lazy reference to break circular dependency:
 // expand → arithmetic-add → boxed-tensor → abstract-boxed-expression → compare
@@ -133,13 +134,13 @@ export function eq(
       return false;
     }
 
-    // If the expression have some unknowns, we only try to prove equality
-    // if they have the same unknowns and are structurally equal after
-    // expansing and simplification
+    // Try structural equality after expand+simplify first
     a = (_expand(a) ?? a).simplify();
     b = (_expand(b) ?? b).simplify();
-    if (!sameUnknowns(a, b)) return undefined;
-    return same(a, b);
+    if (same(a, b)) return true;
+
+    // Fall back to stochastic evaluation at random sample points
+    return stochasticEqual(a, b);
   }
 
   //
