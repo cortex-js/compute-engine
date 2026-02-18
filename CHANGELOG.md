@@ -1,20 +1,17 @@
 ### [Unreleased]
 
-- **Stochastic equality check for expressions with unknowns**: `expr.isEqual()`
-  now uses a stochastic fallback when symbolic methods (expand + simplify) can't
-  prove equality. Both expressions are evaluated at 50 sample points (9
-  well-known values + 41 random) and compared with relative+absolute tolerance,
-  including both real and imaginary parts. This detects equivalences like
-  `sin²(x) + cos²(x) = 1`, `(x+y)² = x²+2xy+y²`, and `sin(2x) = 2sin(x)cos(x)`
-  that were previously returned as `undefined`. Singularities (NaN at a sample
-  point) are skipped rather than treated as disagreements. The check also works
-  when the two expressions have different unknowns (e.g. `x - x + y` vs `y`).
-
 - **Non-strict parser supports exponents on bare functions**: In non-strict mode
-  (`strict: false`), bare function names like `sin`, `cos`, `tan` can now include
-  an exponent before the argument list. For example, `sin^2(x)` and `cos^{10}(x)`
-  are now correctly parsed as `["Power", ["Sin", "x"], 2]`, matching the behavior
-  of their LaTeX counterparts `\sin^2(x)` and `\cos^{10}(x)`.
+  (`strict: false`), bare function names like `sin`, `cos`, `tan` can now
+  include an exponent before the argument list. For example, `sin^2(x)` and
+  `cos^{10}(x)` are now correctly parsed as `["Power", ["Sin", "x"], 2]`,
+  matching the behavior of their LaTeX counterparts `\sin^2(x)` and
+  `\cos^{10}(x)`.
+
+- **Unicode superscript and subscript digit support**: The LaTeX parser now
+  recognizes Unicode superscript digits (`⁰¹²³⁴⁵⁶⁷⁸⁹⁻`) and subscript digits
+  (`₀₁₂₃₄₅₆₇₈₉₋`), converting them to `^{...}` and `_{...}` respectively.
+  This works in all parsing modes. For example, `x²` parses as `x^{2}`,
+  `sin²(x)` as `\sin^{2}(x)`, `x⁻²` as `x^{-2}`, and `x₁₂` as `x_{12}`.
 
 - **`.is()` now works with assigned variables**: Previously, `.is()` only
   evaluated expressions made entirely of declared constants (like `Pi`). Now it

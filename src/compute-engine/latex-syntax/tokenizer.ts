@@ -7,6 +7,34 @@
 
 import { splitGraphemes } from '../../common/grapheme-splitter';
 
+const UNICODE_SUPERSCRIPT_MAP: Record<string, string> = {
+  '\u2070': '0', // ⁰
+  '\u00B9': '1', // ¹
+  '\u00B2': '2', // ²
+  '\u00B3': '3', // ³
+  '\u2074': '4', // ⁴
+  '\u2075': '5', // ⁵
+  '\u2076': '6', // ⁶
+  '\u2077': '7', // ⁷
+  '\u2078': '8', // ⁸
+  '\u2079': '9', // ⁹
+  '\u207B': '-', // ⁻
+};
+
+const UNICODE_SUBSCRIPT_MAP: Record<string, string> = {
+  '\u2080': '0', // ₀
+  '\u2081': '1', // ₁
+  '\u2082': '2', // ₂
+  '\u2083': '3', // ₃
+  '\u2084': '4', // ₄
+  '\u2085': '5', // ₅
+  '\u2086': '6', // ₆
+  '\u2087': '7', // ₇
+  '\u2088': '8', // ₈
+  '\u2089': '9', // ₉
+  '\u208B': '-', // ₋
+};
+
 // The 'special' tokens must be of length > 1 to distinguish
 // them from literals.
 // '<space>': whitespace
@@ -42,6 +70,24 @@ class Tokenizer {
 
     // Replace the Unicode minus sign (U+2212: MINUS SIGN) with a hyphen
     s = s.replace(/\u2212/g, '-');
+
+    // Replace Unicode superscript sequences with ^{...}
+    // Handles: ⁰¹²³⁴⁵⁶⁷⁸⁹ and ⁻ (superscript minus)
+    s = s.replace(/[⁰¹²³⁴⁵⁶⁷⁸⁹⁻]+/g, (m) => {
+      const digits = Array.from(m)
+        .map((c) => UNICODE_SUPERSCRIPT_MAP[c])
+        .join('');
+      return `^{${digits}}`;
+    });
+
+    // Replace Unicode subscript sequences with _{...}
+    // Handles: ₀₁₂₃₄₅₆₇₈₉ and ₋ (subscript minus)
+    s = s.replace(/[₀₁₂₃₄₅₆₇₈₉₋]+/g, (m) => {
+      const digits = Array.from(m)
+        .map((c) => UNICODE_SUBSCRIPT_MAP[c])
+        .join('');
+      return `_{${digits}}`;
+    });
 
     this.s = splitGraphemes(s);
     this.pos = 0;
