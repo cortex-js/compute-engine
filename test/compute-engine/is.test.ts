@@ -142,3 +142,60 @@ describe('smart is() with numeric evaluation fallback', () => {
     expect(engine.parse('e^0').is(1)).toBe(true);
   });
 });
+
+describe('edge cases: infinity and NaN', () => {
+  test('PositiveInfinity.isSame(Infinity)', () => {
+    expect(engine.symbol('PositiveInfinity').isSame(Infinity)).toBe(true);
+  });
+
+  test('NegativeInfinity.isSame(-Infinity)', () => {
+    expect(engine.symbol('NegativeInfinity').isSame(-Infinity)).toBe(true);
+  });
+
+  test('PositiveInfinity.is(Infinity)', () => {
+    expect(engine.symbol('PositiveInfinity').is(Infinity)).toBe(true);
+  });
+
+  test('NaN symbol.is(NaN)', () => {
+    expect(engine.symbol('NaN').is(NaN)).toBe(true);
+  });
+
+  test('ComplexInfinity.is(Infinity) should be false', () => {
+    // ComplexInfinity has no definite sign, should not equal +Infinity
+    expect(engine.symbol('ComplexInfinity').is(Infinity)).toBe(false);
+  });
+
+  test('expression vs expression: PositiveInfinity.is(PositiveInfinity)', () => {
+    const a = engine.symbol('PositiveInfinity');
+    const b = engine.symbol('PositiveInfinity');
+    expect(a.is(b)).toBe(true);
+  });
+
+  test('1/0 is ComplexInfinity, not +Infinity', () => {
+    // 1/0 canonicalizes to ComplexInfinity (unsigned infinity)
+    // ComplexInfinity should NOT equal +Infinity
+    const expr = engine.parse('\\frac{1}{0}');
+    expect(expr.is(Infinity)).toBe(false);
+  });
+
+  test('expression vs expression: both evaluate to infinity', () => {
+    // Two constant expressions that both diverge to +infinity
+    // should match via isSame on the symbols, not via numeric comparison
+    const a = engine.parse('\\frac{1}{0}');
+    const b = engine.parse('\\frac{2}{0}');
+    // Both are ComplexInfinity, so they are isSame
+    expect(a.is(b)).toBe(true);
+  });
+
+  test('number Infinity roundtrip', () => {
+    // ce.number(Infinity) creates a BoxedNumber with value Infinity
+    expect(engine.number(Infinity).is(Infinity)).toBe(true);
+    expect(engine.number(-Infinity).is(-Infinity)).toBe(true);
+    expect(engine.number(Infinity).is(-Infinity)).toBe(false);
+  });
+
+  test('NaN roundtrip', () => {
+    expect(engine.number(NaN).is(NaN)).toBe(true);
+    expect(engine.number(NaN).is(0)).toBe(false);
+  });
+});

@@ -82,17 +82,19 @@ describe('Partial canonicalization: form Flatten + Order', () => {
 describe('Flatten + Order: Negate and Subtract', () => {
   const opts = { form: ['Flatten', 'Order'] as const };
 
-  it('subtraction with commutative Multiply: 1-3*2 vs 1-2*3', () => {
-    const a = ce.parse('1-3\\times2', opts);
-    const b = ce.parse('1-2\\times3', opts);
+  it('subtraction normalizes to Add+Negate: 1-x vs -x+1', () => {
+    // Parser normalizes subtraction to Add(Negate(...), ...) even in raw mode,
+    // so both produce Add(1, Negate(x)) after sorting
+    const a = ce.parse('1-x', opts);
+    const b = ce.parse('-x+1', opts);
     expect(a.isSame(b)).toBe(true);
   });
 
-  it('subtraction is not same as negation+addition: 1-x vs -x+1', () => {
-    // Different written methods: Subtract vs Add(Negate)
-    const a = ce.parse('1-x', opts);
-    const b = ce.parse('-x+1', opts);
-    // These are structurally different (Subtract vs Add+Negate)
+  it('negation placement matters: 1-3*2 vs 1-2*3', () => {
+    // Parser produces Add(1, Multiply(Negate(3), 2)) vs Add(1, Multiply(Negate(2), 3))
+    // The negation is on different operands, so these are structurally different
+    const a = ce.parse('1-3\\times2', opts);
+    const b = ce.parse('1-2\\times3', opts);
     expect(a.isSame(b)).toBe(false);
   });
 
