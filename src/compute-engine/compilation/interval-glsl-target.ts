@@ -1416,7 +1416,7 @@ export class IntervalGLSLTarget implements LanguageTarget<Expression> {
   compile(
     expr: Expression,
     options: CompilationOptions<Expression> = {}
-  ): CompilationResult {
+  ): CompilationResult<'interval-glsl'> {
     const { functions, vars } = options;
 
     const target = this.createTarget({

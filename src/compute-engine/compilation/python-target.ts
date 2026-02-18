@@ -397,7 +397,7 @@ export class PythonTarget implements LanguageTarget<Expression> {
   compile(
     expr: Expression,
     options: CompilationOptions<Expression> = {}
-  ): CompilationResult {
+  ): CompilationResult<'python'> {
     const code = this.compileToSource(expr, options);
     return { target: 'python', success: true, code };
   }

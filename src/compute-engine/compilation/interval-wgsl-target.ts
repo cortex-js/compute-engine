@@ -1379,7 +1379,7 @@ export class IntervalWGSLTarget implements LanguageTarget<Expression> {
   compile(
     expr: Expression,
     options: CompilationOptions<Expression> = {}
-  ): CompilationResult {
+  ): CompilationResult<'interval-wgsl'> {
     const { functions, vars } = options;
 
     const target = this.createTarget({

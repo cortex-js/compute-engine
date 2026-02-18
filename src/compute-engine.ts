@@ -17,6 +17,11 @@ export type {
   CompiledFunctions,
   CompilationOptions,
   CompilationResult,
+  ExecutableTarget,
+  ComplexResult,
+  CompiledRunner,
+  ExpressionRunner,
+  LambdaRunner,
   LanguageTarget,
   TargetSource,
   CompiledFunction,
@@ -31,6 +36,12 @@ export { IntervalJavaScriptTarget } from './compute-engine/compilation/interval-
 export { IntervalGLSLTarget } from './compute-engine/compilation/interval-glsl-target';
 export { IntervalWGSLTarget } from './compute-engine/compilation/interval-wgsl-target';
 export { BaseCompiler } from './compute-engine/compilation/base-compiler';
+
+export type {
+  Interval,
+  IntervalResult,
+  BoolInterval,
+} from './compute-engine/interval/types';
 
 // Free functions backed by a lazily-instantiated global engine
 export {

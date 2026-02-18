@@ -14,6 +14,7 @@ import {
 } from './boxed-expression/expand';
 import { factor as factorExpr } from './boxed-expression/factor';
 import { compile as compileExpr } from './compilation/compile-expression';
+import type { CompilationResult } from './compilation/types';
 
 let _defaultEngine: IComputeEngine | null = null;
 let _ComputeEngineClass: (new () => IComputeEngine) | null = null;
@@ -114,9 +115,17 @@ export function factor(expr: LatexString | ExpressionInput): Expression {
   return factorExpr(toExpression(expr));
 }
 
-export function compile(
+export function compile<T extends string = 'javascript'>(
   expr: LatexString | ExpressionInput,
-  options?: Parameters<typeof compileExpr>[1]
-): ReturnType<typeof compileExpr> {
-  return compileExpr(toExpression(expr), options);
+  options: Parameters<typeof compileExpr>[1] & { to?: T; realOnly: true }
+): CompilationResult<T, number>;
+export function compile<T extends string = 'javascript'>(
+  expr: LatexString | ExpressionInput,
+  options?: Parameters<typeof compileExpr>[1] & { to?: T }
+): CompilationResult<T>;
+export function compile<T extends string = 'javascript'>(
+  expr: LatexString | ExpressionInput,
+  options?: Parameters<typeof compileExpr>[1] & { to?: T }
+): CompilationResult<T> {
+  return compileExpr(toExpression(expr), options) as CompilationResult<T>;
 }

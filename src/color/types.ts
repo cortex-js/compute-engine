@@ -1,3 +1,15 @@
+/**
+ * Color represented as a hex string.
+ *
+ * Supports both RGB and RGBA formats:
+ * - RGB: "#RRGGBB" (e.g., "#FF0000" for red)
+ * - RGBA: "#RRGGBBAA" (e.g., "#FF000080" for red at 50% opacity)
+ *
+ * The alpha channel (AA) is optional and represents opacity from
+ * 00 (fully transparent) to FF (fully opaque).
+ */
+export type HexColor = string;
+
 // RGB color in the sRGB color space
 export type RgbColor = {
   r: number; // 0..255
@@ -22,4 +34,4 @@ export type OklabColor = {
   alpha?: number; // 0..1
 };
 
-export type Color = string | RgbColor | OklchColor | OklabColor;
+export type Color = HexColor | RgbColor | OklchColor | OklabColor;

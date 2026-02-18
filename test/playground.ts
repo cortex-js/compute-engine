@@ -13,6 +13,50 @@ import { expand } from '../src/compute-engine/boxed-expression/expand';
 const ce = new ComputeEngine();
 const engine = ce;
 
+let entier = true;
+const domaine = [-10, 10];
+
+const variable = 'x';
+const input = '2x + x + 1';
+const goodAnswer = '3x + 1';
+
+const cleanInput = input;
+const cleanAnswer = goodAnswer;
+
+const inputFn = compile(cleanInput);
+const goodAnswerFn = compile(cleanAnswer);
+const [min, max] = domaine;
+const range = max - min;
+const valAlea = () => {
+  const v = min + range * Math.random();
+  return entier ? Math.round(v) : v;
+};
+
+if (!inputFn.run || !goodAnswerFn.run)
+  throw Error(
+    `functionCompare : La saisie ou la bonne réponse ne sont pas des fonctions (saisie : ${input} et réponse attendue : ${goodAnswer})`
+  );
+
+const varName = variable ?? 'x';
+let isEqual = false;
+for (let cpt = 0; cpt < 1000; cpt++) {
+  const points = [valAlea(), valAlea(), valAlea()].map((v) => ({
+    [varName]: v,
+  }));
+  // Skip test points where the expected answer produces NaN
+  if (points.some((p) => Number.isNaN(goodAnswerFn.run(p)))) continue;
+  if (
+    !points.every((p) => Math.abs(inputFn.run(p) - goodAnswerFn.run(p)) < 1e-10)
+  ) {
+    isEqual = false;
+    break;
+  }
+  isEqual = true;
+}
+console.log(`functionCompare : ${isEqual ? 'égales' : 'différentes'}`);
+
+console.log(parse('3 \\times').json);
+
 compile('sin(2x) + x').code;
 // -> "Math.sin(2*x) + x"
 

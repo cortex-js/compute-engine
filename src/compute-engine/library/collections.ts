@@ -758,7 +758,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       ) {
         // If we're dealing with real numbers, we can compile.
         const compiled = ce._compile(fn);
-        if (!compiled.run) return undefined;
+        if (compiled.calling !== 'lambda' || !compiled.run) return undefined;
 
         let accumulator = initial.re;
         let first = true;

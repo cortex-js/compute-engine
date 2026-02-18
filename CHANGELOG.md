@@ -2,6 +2,16 @@
 
 ### Features
 
+- **Stochastic equality check for expressions with unknowns**: `expr.isEqual()`
+  now uses a stochastic fallback when symbolic methods (expand + simplify) can't
+  prove equality. Both expressions are evaluated at 50 sample points (9
+  well-known values + 41 random) and compared with relative+absolute tolerance.
+  This detects equivalences like `sin²(x) + cos²(x) = 1`, `(x+y)² = x²+2xy+y²`,
+  and `sin(2x) = 2sin(x)cos(x)` that were previously returned as `undefined`.
+  Singularities (NaN at a sample point) are skipped rather than treated as
+  disagreements. The check also works when the two expressions have different
+  unknowns (e.g. `x - x + y` vs `y`).
+
 - **`expr.freeVariables` property**: New property on `BoxedExpression` that
   returns the free variables of an expression — symbols that are not constants,
   not operators, not bound to a value, and not locally scoped by constructs like

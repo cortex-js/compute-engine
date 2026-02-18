@@ -18,8 +18,10 @@ import type {
   LanguageTarget,
   CompilationOptions,
   CompilationResult,
+  CompiledRunner,
 } from './types';
 import { IntervalArithmetic } from '../interval';
+import type { Interval, IntervalResult } from '../interval/types';
 
 /**
  * Interval arithmetic operators mapped to _IA library calls.
@@ -518,7 +520,7 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
   compile(
     expr: Expression,
     options: CompilationOptions<Expression> = {}
-  ): CompilationResult {
+  ): CompilationResult<'interval-js', IntervalResult | Interval> {
     const { functions, vars, preamble } = options;
     const unknowns = expr.unknowns;
 
@@ -572,20 +574,25 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
 function compileToIntervalTarget(
   expr: Expression,
   target: CompileTarget<Expression>
-): CompilationResult {
+): CompilationResult<'interval-js', IntervalResult | Interval> {
   let js: string;
   try {
     js = BaseCompiler.compile(expr, target);
   } catch {
     // Expression contains operators/functions not supported by the interval
     // target. Report failure so the caller can fall back to another target.
-    return { target: 'interval-js', success: false, code: '' };
+    return {
+      target: 'interval-js',
+      success: false,
+      code: '',
+    } as CompilationResult<'interval-js', IntervalResult | Interval>;
   }
   const fn = new ComputeEngineIntervalFunction(js, target.preamble);
   return {
     target: 'interval-js',
     success: true,
     code: js,
-    run: fn as unknown as CompilationResult['run'],
+    calling: 'expression',
+    run: fn as unknown as CompiledRunner<IntervalResult | Interval>,
   };
 }

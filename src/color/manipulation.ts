@@ -1,7 +1,8 @@
 // Helper functions for color calculations
 
-import type { RgbColor } from './types';
+import type { HexColor, RgbColor } from './types';
 import { NAMED_COLORS } from './palette';
+import { apca } from './contrast';
 
 // sRGB gamma correction
 export function gammaCorrect(channel: number): number {
@@ -745,4 +746,171 @@ export function parseColorToRgb(s: string): RgbColor {
     b: (color >>> 8) & 0xff,
     alpha: (color & 0xff) / 255,
   };
+}
+
+export function parseColorToHex(s: string): HexColor {
+  const color = parseColor(s);
+  const clamp = (v: number) => Math.max(0, Math.min(255, Math.round(v)));
+  const rHex = clamp((color >>> 24) & 0xff)
+    .toString(16)
+    .padStart(2, '0');
+  const gHex = clamp((color >>> 16) & 0xff)
+    .toString(16)
+    .padStart(2, '0');
+  const bHex = clamp((color >>> 8) & 0xff)
+    .toString(16)
+    .padStart(2, '0');
+
+  const alpha = clamp(color & 0xff)
+    .toString(16)
+    .padStart(2, '0');
+  if (alpha === 'ff') return `#${rHex}${gHex}${bHex}`;
+  return `#${rHex}${gHex}${bHex}${alpha}`;
+}
+
+/**
+ * Convert 0-255 RGB components to a `#rrggbb` hex string.
+ */
+export function rgbToHex(r: number, g: number, b: number): HexColor {
+  const cl = (v: number) => Math.max(0, Math.min(255, Math.round(v)));
+  return `#${cl(r).toString(16).padStart(2, '0')}${cl(g).toString(16).padStart(2, '0')}${cl(b).toString(16).padStart(2, '0')}`;
+}
+
+/**
+ * Parse any color string to a `[0-1, 0-1, 0-1]` float tuple.
+ * Useful for WebGL uniforms that expect normalized RGB values.
+ */
+export function parseColorToRgb01(s: string): [number, number, number] {
+  const color = parseColor(s);
+  return [
+    ((color >>> 24) & 0xff) / 255,
+    ((color >>> 16) & 0xff) / 255,
+    ((color >>> 8) & 0xff) / 255,
+  ];
+}
+
+/**
+ * Parse any color string to a `[0-1, 0-1, 0-1, 0-1]` float tuple (RGBA).
+ * Useful for WebGL uniforms that need both color and alpha.
+ */
+export function parseColorToRgba01(
+  s: string
+): [number, number, number, number] {
+  const color = parseColor(s);
+  return [
+    ((color >>> 24) & 0xff) / 255,
+    ((color >>> 16) & 0xff) / 255,
+    ((color >>> 8) & 0xff) / 255,
+    (color & 0xff) / 255,
+  ];
+}
+
+/**
+ * Set the alpha channel of a color string.
+ *
+ * @returns `#rrggbbaa` hex string (or `#rrggbb` if alpha is 1.0)
+ */
+export function parseColorWithAlpha(color: string, alpha: number): string {
+  const parsed = parseColor(color);
+  const r = (parsed >>> 24) & 0xff;
+  const g = (parsed >>> 16) & 0xff;
+  const b = (parsed >>> 8) & 0xff;
+  const a = Math.round(Math.max(0, Math.min(1, alpha)) * 255);
+  if (a === 255) return rgbToHex(r, g, b);
+  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}${a.toString(16).padStart(2, '0')}`;
+}
+
+/**
+ * Darken a color by a factor in OKLCH space (perceptually uniform).
+ *
+ * @param color - Any parseable color string
+ * @param factor - Multiplier for lightness (0.6 = 60% of original lightness)
+ * @returns `#rrggbb` hex string
+ */
+export function darkenHex(color: HexColor, factor: number): HexColor {
+  const packed = parseColor(color);
+  const { l, c, h } = oklchFromRGB(packed);
+  const newColor = oklch(Math.max(0, l * factor), c, h);
+  const r = (newColor >>> 24) & 0xff;
+  const g = (newColor >>> 16) & 0xff;
+  const b = (newColor >>> 8) & 0xff;
+  return rgbToHex(r, g, b);
+}
+
+/**
+ * Determine whether a color is "light" (i.e., needs dark text on top).
+ *
+ * Uses APCA contrast: if a color has higher contrast with black text than
+ * white text, it's considered light.
+ */
+export function isLightColor(color: HexColor): boolean {
+  return Math.abs(apca(color, '#000000')) > Math.abs(apca(color, '#ffffff'));
+}
+
+/**
+ * Check if a string is a valid, parseable color.
+ *
+ * Returns true for hex, rgb/rgba, oklch, hsl, named colors, and "transparent".
+ */
+export function isValidColor(s: string): boolean {
+  const str = s.trim().toLowerCase();
+  if (str === 'transparent') return true;
+  if (str in NAMED_COLORS) return true;
+  if (str.startsWith('#')) {
+    const hex = str.substring(1);
+    return [3, 6, 8].includes(hex.length) && /^[0-9a-f]+$/.test(hex);
+  }
+  if (/^(rgba?|oklch|hsl)\s*\(/.test(str)) return true;
+  // Accept bare alphabetic strings as potential CSS named colors
+  if (/^[a-z]+$/.test(str)) return true;
+  return false;
+}
+
+/**
+ * Linearly interpolate between two `[0-1, 0-1, 0-1]` RGB tuples.
+ */
+export function mixColors(
+  a: [number, number, number],
+  b: [number, number, number],
+  t: number
+): [number, number, number] {
+  const f = Math.max(0, Math.min(1, t));
+  return [
+    a[0] * (1 - f) + b[0] * f,
+    a[1] * (1 - f) + b[1] * f,
+    a[2] * (1 - f) + b[2] * f,
+  ];
+}
+
+/**
+ * Mix a `[0-1, 0-1, 0-1]` RGB tuple toward white (positive lift) or
+ * black (negative lift).
+ *
+ * @param color - RGB tuple with values in 0-1 range
+ * @param lift - Amount to lift: positive = toward white, negative = toward black
+ */
+export function liftColor(
+  color: [number, number, number],
+  lift: number
+): [number, number, number] {
+  if (lift === 0) return color;
+  const target: [number, number, number] = lift > 0 ? [1, 1, 1] : [0, 0, 0];
+  return mixColors(color, target, Math.abs(lift));
+}
+
+/**
+ * Convert a hex color string to a CSS color string suitable for Canvas or SVG.
+ *
+ * - `#RRGGBB` is returned as-is.
+ * - `#RRGGBBAA` is converted to `rgba(r, g, b, a)`.
+ */
+export function colorToCss(color: string): string {
+  if (color.length === 9) {
+    const r = parseInt(color.slice(1, 3), 16);
+    const g = parseInt(color.slice(3, 5), 16);
+    const b = parseInt(color.slice(5, 7), 16);
+    const a = parseInt(color.slice(7, 9), 16) / 255;
+    return `rgba(${r}, ${g}, ${b}, ${a})`;
+  }
+  return color;
 }

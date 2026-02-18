@@ -81,7 +81,10 @@ export interface LanguageTarget<Expr = unknown> {
   createTarget(options?: Partial<CompileTarget<Expr>>): CompileTarget<Expr>;
 
   /** Compile an expression to this language */
-  compile(expr: Expr, options?: CompilationOptions<Expr>): CompilationResult;
+  compile(
+    expr: Expr,
+    options?: CompilationOptions<Expr>
+  ): CompilationResult<string, unknown>;
 }
 
 /**
@@ -179,11 +182,94 @@ export interface CompilationOptions<Expr = unknown> {
 }
 
 /**
- * Result of compiling an expression
+ * Built-in targets that produce an executable `run` function.
  */
-export interface CompilationResult {
+export type ExecutableTarget = 'javascript' | 'interval-js';
+
+/**
+ * Result of a complex number computation: `{ re, im }`.
+ */
+export type ComplexResult = { re: number; im: number };
+
+/**
+ * Runner for compiled expressions — called with a variables object.
+ *
+ * ```typescript
+ * result.run({ x: 0.5, y: 1.0 })
+ * ```
+ */
+export type ExpressionRunner<R = number | ComplexResult> = (
+  vars: Record<string, number>
+) => R;
+
+/**
+ * Runner for compiled lambda (`Function`) expressions — called with
+ * positional arguments.
+ *
+ * ```typescript
+ * result.run(0.5, 1.0)
+ * ```
+ */
+export type LambdaRunner<R = number | ComplexResult> = (
+  ...args: number[]
+) => R;
+
+/**
+ * Overloaded callable that accepts both calling conventions.
+ *
+ * Supports two calling styles:
+ * - **Expression**: `run({ x: 0.5 })` — pass a variables object
+ * - **Lambda**: `run(0.5, 1.0)` — pass positional arguments
+ *
+ * Check `calling` on the `CompilationResult` to know which convention
+ * the compiled expression actually uses.
+ */
+export interface CompiledRunner<R = number | ComplexResult> {
+  /** Call with a variables object (for compiled expressions) */
+  (vars: Record<string, number>): R;
+  /** Call with positional arguments (for compiled lambda expressions) */
+  (...args: number[]): R;
+}
+
+/**
+ * Result of compiling an expression.
+ *
+ * Two type parameters control the shape:
+ * - `T` — the target name. For executable targets (`'javascript'` |
+ *   `'interval-js'`), `run` and `calling` are guaranteed present.
+ * - `R` — the return type of `run`. Defaults to `number | ComplexResult`.
+ *   Pass `number` when `realOnly: true`.
+ *
+ * The `calling` field indicates which convention `run` uses:
+ * - `'expression'` — call with a vars object: `run({ x: 0.5 })`
+ * - `'lambda'` — call with positional args: `run(0.5, 1.0)`
+ *
+ * @example
+ * ```typescript
+ * // run is guaranteed, may return complex
+ * const js = compile(expr);
+ * js.run({ x: 0.5 });
+ *
+ * // run is guaranteed, returns number only
+ * const real = compile(expr, { realOnly: true });
+ * real.run({ x: 0.5 }); // number
+ *
+ * // check calling convention
+ * if (result.calling === 'lambda') {
+ *   result.run(0.5, 1.0);
+ * }
+ *
+ * // no run (source-only target)
+ * const py = compile(expr, { to: 'python' });
+ * py.code; // string
+ * ```
+ */
+export type CompilationResult<
+  T extends string = string,
+  R = number | ComplexResult,
+> = {
   /** Target language name */
-  target: string;
+  target: T;
 
   /** Whether compilation succeeded (vs falling back to interpretation) */
   success: boolean;
@@ -204,17 +290,14 @@ export interface CompilationResult {
   preamble?: string;
 
   /**
-   * Executable function (present for JS-executable targets only).
-   *
-   * For plain expressions, call with a vars object:
-   * ```typescript
-   * result.run({ x: 0.5 })
-   * ```
-   *
-   * For `Function` (lambda) expressions, call with positional arguments:
-   * ```typescript
-   * result.run(0.5)
-   * ```
+   * How `run` should be called (present only for executable targets).
+   * - `'expression'` — call with a vars object: `run({ x: 0.5 })`
+   * - `'lambda'` — call with positional args: `run(0.5, 1.0)`
    */
-  run?: (...args: unknown[]) => number | { re: number; im: number };
-}
+  calling?: 'expression' | 'lambda';
+
+  /** Executable function (present for JS-executable targets only). */
+  run?: CompiledRunner<R>;
+} & (T extends ExecutableTarget
+  ? { calling: 'expression' | 'lambda'; run: CompiledRunner<R> }
+  : {});

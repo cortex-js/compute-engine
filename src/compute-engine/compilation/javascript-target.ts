@@ -72,6 +72,7 @@ import type {
   LanguageTarget,
   CompilationOptions,
   CompilationResult,
+  CompiledRunner,
 } from './types';
 
 /**
@@ -1099,7 +1100,7 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
   compile(
     expr: Expression,
     options: CompilationOptions<Expression> = {}
-  ): CompilationResult {
+  ): CompilationResult<'javascript'> {
     const {
       operators,
       functions,
@@ -1181,25 +1182,29 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
 }
 
 /**
- * Compile expression to JavaScript executable
+ * Wrap a compiled result so complex values are flattened to real or NaN.
  */
-function wrapRealOnly(result: CompilationResult): CompilationResult {
-  if (!result.run) return result;
+function wrapRealOnly(
+  result: CompilationResult<'javascript'>
+): CompilationResult<'javascript', number> {
   const origRun = result.run;
-  result.run = ((...args: unknown[]) => {
-    const r = origRun(...args);
+  const realRun = ((...args: unknown[]) => {
+    const r = (origRun as Function)(...args);
     if (typeof r === 'object' && r !== null && 'im' in r)
       return r.im === 0 ? r.re : NaN;
     return r;
-  }) as CompilationResult['run'];
-  return result;
+  }) as unknown as CompiledRunner<number>;
+  return {
+    ...result,
+    run: realRun,
+  } as CompilationResult<'javascript', number>;
 }
 
 function compileToTarget(
   expr: Expression,
   target: CompileTarget<Expression>,
   realOnly?: boolean
-): CompilationResult {
+): CompilationResult<'javascript'> {
   if (expr.operator === 'Function' && isFunction(expr)) {
     const args = expr.ops;
     const params = args.slice(1).map((x) => (isSymbol(x) ? x.symbol : '_'));
@@ -1208,34 +1213,39 @@ function compileToTarget(
       var: (id) => (params.includes(id) ? id : target.var(id)),
     });
     const fn = new ComputeEngineFunctionLiteral(body, params);
-    return {
-      target: 'javascript',
+    const result = {
+      target: 'javascript' as const,
       success: true,
       code: `(${params.join(', ')}) => ${body}`,
-      run: fn as unknown as CompilationResult['run'],
+      calling: 'lambda' as const,
+      run: fn as unknown as CompiledRunner,
     };
+    return realOnly ? wrapRealOnly(result) : result;
   }
 
   if (isSymbol(expr)) {
     const op = target.operators?.(expr.symbol);
     if (op) {
       const fn = new ComputeEngineFunctionLiteral(`a ${op[0]} b`, ['a', 'b']);
-      return {
-        target: 'javascript',
+      const result = {
+        target: 'javascript' as const,
         success: true,
         code: `(a, b) => a ${op[0]} b`,
-        run: fn as unknown as CompilationResult['run'],
+        calling: 'lambda' as const,
+        run: fn as unknown as CompiledRunner,
       };
+      return realOnly ? wrapRealOnly(result) : result;
     }
   }
 
   const js = BaseCompiler.compile(expr, target);
   const fn = new ComputeEngineFunction(js, target.preamble);
-  const result: CompilationResult = {
-    target: 'javascript',
+  const result = {
+    target: 'javascript' as const,
     success: true,
     code: js,
-    run: fn as unknown as CompilationResult['run'],
+    calling: 'expression' as const,
+    run: fn as unknown as CompiledRunner,
   };
   return realOnly ? wrapRealOnly(result) : result;
 }

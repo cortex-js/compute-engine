@@ -1,12 +1,16 @@
 import type { MathJsonSymbol } from '../../math-json/types';
 import type { Expression, JSSource } from '../global-types';
-import type { CompileTarget, CompilationResult } from './types';
+import type {
+  CompileTarget,
+  CompilationResult,
+  CompiledRunner,
+} from './types';
 import { BaseCompiler } from './base-compiler';
 import { applicableN1 } from '../function-utils';
 import { assertCompilationOptionsContract } from '../engine-extension-contracts';
 
-type CompileExpressionOptions = {
-  to?: string;
+type CompileExpressionOptions<T extends string = string> = {
+  to?: T;
   target?: CompileTarget<Expression>;
   operators?:
     | Partial<Record<MathJsonSymbol, [op: string, prec: number]>>
@@ -19,6 +23,7 @@ type CompileExpressionOptions = {
   imports?: unknown[];
   preamble?: string;
   fallback?: boolean;
+  realOnly?: boolean;
 };
 
 /**
@@ -27,14 +32,24 @@ type CompileExpressionOptions = {
  * Returns a `CompilationResult` with the generated source code and,
  * for JS-executable targets, a `run` function.
  *
+ * When `realOnly` is true, the return type of `run` is narrowed to `number`.
+ *
  * If the expression cannot be compiled, falls back to interpretation
  * (success: false, run: applicableN1) unless `options.fallback` is false,
  * in which case it throws.
  */
-export function compile(
+export function compile<T extends string = 'javascript'>(
   expr: Expression,
-  options?: CompileExpressionOptions
-): CompilationResult {
+  options: CompileExpressionOptions<T> & { realOnly: true }
+): CompilationResult<T, number>;
+export function compile<T extends string = 'javascript'>(
+  expr: Expression,
+  options?: CompileExpressionOptions<T>
+): CompilationResult<T>;
+export function compile<T extends string = 'javascript'>(
+  expr: Expression,
+  options?: CompileExpressionOptions<T>
+): CompilationResult<T> {
   assertCompilationOptionsContract(options);
 
   try {
@@ -43,13 +58,13 @@ export function compile(
       // Direct target override - use BaseCompiler
       const code = BaseCompiler.compile(expr, options.target);
       return {
-        target: options.target.language ?? 'custom',
+        target: (options.target.language ?? 'custom') as T,
         success: true,
         code,
-      };
+      } as CompilationResult<T>;
     }
 
-    const targetName = options?.to ?? 'javascript';
+    const targetName = (options?.to ?? 'javascript') as T;
 
     // Look up the target in the registry
     const languageTarget = expr.engine.getCompilationTarget(targetName);
@@ -67,7 +82,8 @@ export function compile(
       vars: options?.vars,
       imports: options?.imports,
       preamble: options?.preamble,
-    });
+      realOnly: options?.realOnly,
+    }) as CompilationResult<T>;
   } catch (e) {
     // @fixme: the fallback needs to handle multiple arguments
     if (options?.fallback ?? true) {
@@ -75,11 +91,12 @@ export function compile(
         `Compilation fallback for "${expr.operator}": ${(e as Error).message}`
       );
       return {
-        target: options?.to ?? 'javascript',
+        target: (options?.to ?? 'javascript') as T,
         success: false,
         code: '',
-        run: applicableN1(expr) as CompilationResult['run'],
-      };
+        calling: 'expression',
+        run: applicableN1(expr) as unknown as CompiledRunner,
+      } as CompilationResult<T>;
     }
     throw e;
   }
