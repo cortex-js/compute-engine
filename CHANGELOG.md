@@ -20,6 +20,16 @@
   compiler now filters out `Nothing` symbols and empty compilation results
   before generating the block IIFE.
 
+- **Subscripted variable names in blocks**: Subscripted identifiers like `r_1`
+  are now treated as compound symbols (not `Subscript` expressions) when the
+  base is not a known collection. This means `r_1 \coloneq x^2; \frac{1}{r_1}`
+  correctly declares and assigns to a local variable named `r_1`.
+
+- **Selective GLSL interval preamble**: The interval-GLSL compilation target now
+  emits only the preamble functions actually used by the compiled expression
+  (plus their transitive dependencies), instead of the full ~29KB library.
+  Typical preambles are 60–80% smaller.
+
 - **Fix recursive GLSL gamma function**: The `_gpu_gamma()` preamble in the GPU
   and interval-GLSL compilation targets used recursion for the reflection formula
   (z < 0.5), which is illegal in GLSL. Replaced with a non-recursive

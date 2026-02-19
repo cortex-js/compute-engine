@@ -1180,6 +1180,205 @@ float ia_notEqual(IntervalResult a, IntervalResult b) {
 }
 `;
 
+// ---------------------------------------------------------------------------
+// Selective preamble builder
+//
+// Parses the monolithic GLSL_INTERVAL_LIBRARY into individual function blocks
+// with auto-detected dependencies. At compile time, only the functions
+// referenced by the compiled expression (plus their transitive dependencies)
+// are emitted.
+// ---------------------------------------------------------------------------
+
+interface GLSLFunctionBlock {
+  /** The function name (e.g. "ia_sin") */
+  name: string;
+  /** Full source text of the function (including preceding comment lines) */
+  source: string;
+  /** Names of other ia_ or _gpu_ functions called from this function's body */
+  deps: string[];
+}
+
+/** Header: constants, struct, epsilon — always emitted */
+let _preambleHeader = '';
+/** Mid-preamble constant blocks (e.g. IA_TRUE/FALSE/MAYBE) keyed by marker */
+const _preambleConstants: Map<string, string> = new Map();
+/** Individual function blocks keyed by function name */
+const _preambleFunctions: Map<string, GLSLFunctionBlock> = new Map();
+/** Set to true once parsing is done */
+let _preambleParsed = false;
+
+/** Regex matching function declarations in the GLSL preamble */
+const GLSL_FUNC_RE =
+  /^(IntervalResult|vec2|float|bool|void)\s+(ia_\w+|_gpu_\w+)\s*\(/;
+
+/** Regex to find calls to ia_ or _gpu_ functions within a body */
+const GLSL_CALL_RE = /\b(ia_\w+|_gpu_\w+)\s*\(/g;
+
+/** Regex for constant declarations like `const float IA_TRUE = 1.0;` */
+const GLSL_CONST_RE = /^const\s+float\s+(IA_\w+)\s*=/;
+
+function parsePreamble(): void {
+  if (_preambleParsed) return;
+  _preambleParsed = true;
+
+  const lines = GLSL_INTERVAL_LIBRARY.split('\n');
+  let headerDone = false;
+  const headerLines: string[] = [];
+  let currentBlock: string[] = [];
+  let currentName: string | null = null;
+  let braceDepth = 0;
+  let inFunction = false;
+  let pendingComments: string[] = [];
+  let pendingConstants: string[] = [];
+
+  for (const line of lines) {
+    // Check if this is a constant declaration outside a function
+    const constMatch = !inFunction && GLSL_CONST_RE.exec(line);
+    if (constMatch && headerDone) {
+      // Mid-preamble constant (e.g. IA_TRUE) — accumulate
+      pendingConstants.push(line);
+      continue;
+    }
+
+    const funcMatch = !inFunction && GLSL_FUNC_RE.exec(line);
+
+    if (funcMatch) {
+      if (!headerDone) {
+        _preambleHeader = headerLines.join('\n');
+        headerDone = true;
+      }
+
+      currentName = funcMatch[2];
+      currentBlock = [...pendingComments, ...pendingConstants, line];
+      pendingComments = [];
+      pendingConstants = [];
+      inFunction = true;
+      braceDepth = 0;
+
+      // Count braces on this line
+      for (const ch of line) {
+        if (ch === '{') braceDepth++;
+        if (ch === '}') braceDepth--;
+      }
+      if (braceDepth <= 0) {
+        // Single-line function
+        finishFunction(currentName, currentBlock.join('\n'));
+        inFunction = false;
+        currentName = null;
+      }
+    } else if (inFunction) {
+      currentBlock.push(line);
+      for (const ch of line) {
+        if (ch === '{') braceDepth++;
+        if (ch === '}') braceDepth--;
+      }
+      if (braceDepth <= 0) {
+        finishFunction(currentName!, currentBlock.join('\n'));
+        inFunction = false;
+        currentName = null;
+      }
+    } else if (!headerDone) {
+      headerLines.push(line);
+    } else {
+      // Between functions — could be comment or blank
+      const trimmed = line.trim();
+      if (trimmed.startsWith('//') || trimmed === '') {
+        pendingComments.push(line);
+      }
+    }
+  }
+
+  // Flush any remaining pending constants into the header
+  if (pendingConstants.length > 0) {
+    _preambleHeader += '\n' + pendingConstants.join('\n');
+  }
+}
+
+function finishFunction(name: string, source: string): void {
+  // Auto-detect dependencies by scanning the body for ia_*/​_gpu_* calls
+  const deps = new Set<string>();
+  let match: RegExpExecArray | null;
+  const callRe = new RegExp(GLSL_CALL_RE.source, 'g');
+  while ((match = callRe.exec(source)) !== null) {
+    const callee = match[1];
+    if (callee !== name) deps.add(callee);
+  }
+
+  // GLSL overloads: the IntervalResult overload of ia_sin calls ia_sin(vec2)
+  // Since they share a name, we don't add self-references as deps.
+  // But we do need to ensure all overloads of a function are emitted together.
+
+  const existing = _preambleFunctions.get(name);
+  if (existing) {
+    // Multiple overloads — merge source and deps
+    existing.source += '\n\n' + source;
+    for (const d of deps) existing.deps.push(d);
+  } else {
+    _preambleFunctions.set(name, {
+      name,
+      source,
+      deps: [...deps],
+    });
+  }
+}
+
+/**
+ * Build a minimal interval GLSL preamble containing only the functions
+ * that the compiled code actually uses (plus transitive dependencies).
+ */
+function buildIntervalPreamble(code: string): string {
+  parsePreamble();
+
+  // 1. Find all ia_*/​_gpu_* calls in the compiled expression code
+  const needed = new Set<string>();
+  let match: RegExpExecArray | null;
+  const callRe = new RegExp(GLSL_CALL_RE.source, 'g');
+  while ((match = callRe.exec(code)) !== null) {
+    needed.add(match[1]);
+  }
+
+  if (needed.size === 0) return _preambleHeader;
+
+  // 2. Resolve transitive dependencies
+  const resolved = new Set<string>();
+  function resolve(name: string): void {
+    if (resolved.has(name)) return;
+    const block = _preambleFunctions.get(name);
+    if (!block) return;
+    for (const dep of block.deps) resolve(dep);
+    resolved.add(name);
+  }
+  for (const name of needed) resolve(name);
+
+  // 3. Emit in dependency order (resolved set preserves insertion order,
+  //    and deps are resolved before dependents)
+  const parts: string[] = [_preambleHeader];
+
+  // Check if any comparison functions are needed — if so, include IA_TRUE/FALSE/MAYBE
+  const needsComparisonConstants = [...resolved].some(
+    (name) =>
+      name.startsWith('ia_less') ||
+      name.startsWith('ia_greater') ||
+      name.startsWith('ia_equal') ||
+      name.startsWith('ia_notEqual') ||
+      name === 'ia_and' ||
+      name === 'ia_or' ||
+      name === 'ia_not'
+  );
+  if (needsComparisonConstants) {
+    parts.push(
+      '\nconst float IA_TRUE = 1.0;\nconst float IA_FALSE = 0.0;\nconst float IA_MAYBE = 0.5;'
+    );
+  }
+
+  for (const name of resolved) {
+    const block = _preambleFunctions.get(name);
+    if (block) parts.push('\n' + block.source);
+  }
+
+  return parts.join('\n');
+}
+
 /**
  * GLSL interval operators - all become function calls
  */
@@ -1450,7 +1649,7 @@ export class IntervalGLSLTarget implements LanguageTarget<Expression> {
       target: 'interval-glsl',
       success: true,
       code: glslCode,
-      preamble: GLSL_INTERVAL_LIBRARY,
+      preamble: buildIntervalPreamble(glslCode),
     };
   }
 
@@ -1514,7 +1713,7 @@ export class IntervalGLSLTarget implements LanguageTarget<Expression> {
     return `#version ${version}
 precision highp float;
 
-${GLSL_INTERVAL_LIBRARY}
+${buildIntervalPreamble(body)}
 
 IntervalResult ${functionName}(${params}) {
   return ${body};

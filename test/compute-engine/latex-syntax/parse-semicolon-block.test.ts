@@ -59,6 +59,28 @@ describe('SEMICOLON BLOCKS - PARSING', () => {
     `);
   });
 
+  test('Subscripted variable names in blocks are treated as compound symbols', () => {
+    // Req #10: r_1 \coloneq expr should create a local variable named "r_1"
+    const expr = ce.parse('r_1 \\coloneq x^2 + y^2; \\frac{1}{r_1}');
+    expect(expr.isValid).toBe(true);
+    // r_1 should be a compound symbol, not a Subscript expression
+    const json = JSON.stringify(expr.json);
+    expect(json).toContain('"r_1"');
+    expect(json).not.toContain('"Subscript"');
+    expect(json).toContain('"Declare"');
+    expect(json).toContain('"Assign"');
+  });
+
+  test('Subscripted variable with where clause', () => {
+    const expr = ce.parse(
+      '\\frac{1}{r_1} \\text{ where } r_1 \\coloneq \\sqrt{x^2 + y^2}'
+    );
+    expect(expr.isValid).toBe(true);
+    // r_1 should appear as a compound symbol, not Subscript
+    expect(JSON.stringify(expr.json)).toContain('"r_1"');
+    expect(JSON.stringify(expr.json)).not.toContain('"Subscript"');
+  });
+
   test('Semicolon block with \\; produces valid expression', () => {
     const expr = ce.parse('a \\coloneq x^2;\\; (a+1)');
     expect(expr.isValid).toBe(true);

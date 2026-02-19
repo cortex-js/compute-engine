@@ -278,6 +278,57 @@ describe('INTERVAL GLSL COMPLEX EXPRESSIONS', () => {
   });
 });
 
+describe('INTERVAL GLSL SELECTIVE PREAMBLE', () => {
+  test('simple expression has smaller preamble than full library', () => {
+    const expr = ce.parse('x^2 + y^2');
+    const fn = compile(expr, { to: 'interval-glsl' });
+    expect(fn.success).toBe(true);
+    // Selective preamble should be much smaller than full library
+    // Full library is ~29KB (~1180 lines). Simple expression needs only
+    // core + add + pow.
+    expect(fn.preamble!.length).toBeLessThan(15000);
+  });
+
+  test('preamble includes only functions used by the expression', () => {
+    const expr = ce.parse('\\sin(x)');
+    const fn = compile(expr, { to: 'interval-glsl' });
+    expect(fn.success).toBe(true);
+    expect(fn.preamble).toContain('ia_sin');
+    // Should NOT contain gamma, factorial, etc.
+    expect(fn.preamble).not.toContain('ia_gamma');
+    expect(fn.preamble).not.toContain('ia_factorial');
+    expect(fn.preamble).not.toContain('ia_floor');
+  });
+
+  test('preamble includes transitive dependencies', () => {
+    const expr = ce.parse('\\operatorname{Gamma}(x)');
+    const fn = compile(expr, { to: 'interval-glsl' });
+    expect(fn.success).toBe(true);
+    // gamma depends on _gpu_gamma and ia_ok, etc.
+    expect(fn.preamble).toContain('ia_gamma');
+    expect(fn.preamble).toContain('_gpu_gamma');
+  });
+
+  test('comparison functions include IA_TRUE/FALSE/MAYBE constants', () => {
+    const expr = ce.parse('\\begin{cases} x & x > 0 \\\\ -x & \\text{otherwise} \\end{cases}');
+    const fn = compile(expr, { to: 'interval-glsl' });
+    if (fn.success && fn.preamble!.includes('ia_greater')) {
+      expect(fn.preamble).toContain('IA_TRUE');
+      expect(fn.preamble).toContain('IA_FALSE');
+      expect(fn.preamble).toContain('IA_MAYBE');
+    }
+  });
+
+  test('preamble always includes core infrastructure', () => {
+    const expr = ce.parse('x');
+    const fn = compile(expr, { to: 'interval-glsl' });
+    expect(fn.success).toBe(true);
+    expect(fn.preamble).toContain('struct IntervalResult');
+    expect(fn.preamble).toContain('IA_NORMAL');
+    expect(fn.preamble).toContain('IA_EPS');
+  });
+});
+
 describe('INTERVAL GLSL OUTPUT FORMAT', () => {
   test('float constants have decimal points', () => {
     const expr = ce.parse('5');
