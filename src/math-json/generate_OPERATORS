@@ -6,23 +6,23 @@ import { fileURLToPath } from 'node:url';
 import { getStandardLibrary } from '../compute-engine/library/library.ts';
 
 const CATEGORY = {
-  core: 'Core',
+  'core': 'Core',
   'control-structures': 'Control Structures',
-  logic: 'Logic',
-  collections: 'Collections',
-  colors: 'Colors',
-  relop: 'Relational Operators',
-  arithmetic: 'Arithmetic',
-  other: 'Other',
-  trigonometry: 'Trigonometry',
-  calculus: 'Calculus',
-  polynomials: 'Polynomials',
-  combinatorics: 'Combinatorics',
+  'logic': 'Logic',
+  'collections': 'Collections',
+  'colors': 'Colors',
+  'relop': 'Relational Operators',
+  'arithmetic': 'Arithmetic',
+  'other': 'Other',
+  'trigonometry': 'Trigonometry',
+  'calculus': 'Calculus',
+  'polynomials': 'Polynomials',
+  'combinatorics': 'Combinatorics',
   'number-theory': 'Number Theory',
   'linear-algebra': 'Linear Algebra',
-  statistics: 'Statistics',
-  units: 'Units',
-  physics: 'Physics',
+  'statistics': 'Statistics',
+  'units': 'Units',
+  'physics': 'Physics',
 };
 
 function isObj(x) {
@@ -170,7 +170,7 @@ function buildPayload() {
 const here = dirname(fileURLToPath(import.meta.url));
 const outputPath = process.argv[2]
   ? resolve(process.cwd(), process.argv[2])
-  : resolve(here, 'OPERATOR.json');
+  : resolve(here, 'OPERATORS.json');
 const payload = buildPayload();
 
 writeFileSync(outputPath, JSON.stringify(payload, null, 2) + '\n');
