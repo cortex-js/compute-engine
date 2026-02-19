@@ -88,6 +88,23 @@ function parseRoot(parser: Parser): MathJsonExpression | null {
   return ['Sqrt', base];
 }
 
+function negateNumberLiteral(
+  expr: number | string | { num: string }
+): MathJsonExpression {
+  if (typeof expr === 'number') return -expr;
+
+  if (typeof expr === 'string') {
+    if (expr.startsWith('-')) return expr.slice(1);
+    if (expr.startsWith('+')) return '-' + expr.slice(1);
+    return '-' + expr;
+  }
+
+  const num = expr.num;
+  if (num.startsWith('-')) return { num: num.slice(1) };
+  if (num.startsWith('+')) return { num: '-' + num.slice(1) };
+  return { num: '-' + num };
+}
+
 function serializeRoot(
   serializer: Serializer,
   style: 'radical' | 'quotient' | 'solidus',
@@ -886,6 +903,14 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
       // to give a chance to something else to continue the parsing
       // This is the case for |a+|b||.
       if (rhs === null) return null;
+
+      // Preserve explicit `+ -n` as a negative numeric literal in raw form
+      // (while subtraction `a-b` still keeps a `Negate` term).
+      if (operator(rhs) === 'Negate') {
+        const value = operand(rhs, 1);
+        if (isNumberExpression(value))
+          return foldAssociativeOperator('Add', lhs, negateNumberLiteral(value));
+      }
 
       return foldAssociativeOperator('Add', lhs, rhs);
     },

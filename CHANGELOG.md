@@ -1,16 +1,18 @@
 ### [Unreleased]
 
+- When using the `raw` canonical form, preserve negation, i.e. `x-1` will now
+  parse as `["Subtract", "x", "1"]` rather than `["Add", "x", -1]`.
 - **Fix `;\;` parsing in semicolon blocks**: Semicolons followed by LaTeX visual
   spacing commands (`\;`, `\,`, `\quad`, etc.) no longer produce spurious
-  `Nothing` nodes in the parse tree. Previously, `a \coloneq x^2;\; (a+1)`
-  would include a `Nothing` operand in the Block, making `isValid` return
-  `false` and causing compilation to fail. The parser now skips visual spacing
-  after semicolon separators.
+  `Nothing` nodes in the parse tree. Previously, `a \coloneq x^2;\; (a+1)` would
+  include a `Nothing` operand in the Block, making `isValid` return `false` and
+  causing compilation to fail. The parser now skips visual spacing after
+  semicolon separators.
 
-- **Fix `\text{if}` parsing with `\;` spacing**: The `\text{if}\; x \geq 0
-  \;\text{then}\; 1 \;\text{else}\; 0` pattern now parses correctly as an `If`
-  expression. Previously, `\;` before `\text{then}` or `\text{else}` prevented
-  keyword detection, producing a `Tuple` instead.
+- **Fix `\text{if}` parsing with `\;` spacing**: The
+  `\text{if}\; x \geq 0 \;\text{then}\; 1 \;\text{else}\; 0` pattern now parses
+  correctly as an `If` expression. Previously, `\;` before `\text{then}` or
+  `\text{else}` prevented keyword detection, producing a `Tuple` instead.
 
 - **Block serializer uses `; ` separator**: The Block serializer now emits `; `
   instead of `;\; ` between statements, preventing round-trip serialization from
@@ -35,8 +37,8 @@
   expression, matching the GLSL target optimization.
 
 - **Fix recursive GLSL gamma function**: The `_gpu_gamma()` preamble in the GPU
-  and interval-GLSL compilation targets used recursion for the reflection formula
-  (z < 0.5), which is illegal in GLSL. Replaced with a non-recursive
+  and interval-GLSL compilation targets used recursion for the reflection
+  formula (z < 0.5), which is illegal in GLSL. Replaced with a non-recursive
   implementation that inlines the Lanczos approximation for both branches.
 
 - **Non-strict parser supports exponents on bare functions**: In non-strict mode
@@ -48,9 +50,9 @@
 
 - **Unicode superscript and subscript digit support**: The LaTeX parser now
   recognizes Unicode superscript digits (`⁰¹²³⁴⁵⁶⁷⁸⁹⁻`) and subscript digits
-  (`₀₁₂₃₄₅₆₇₈₉₋`), converting them to `^{...}` and `_{...}` respectively.
-  This works in all parsing modes. For example, `x²` parses as `x^{2}`,
-  `sin²(x)` as `\sin^{2}(x)`, `x⁻²` as `x^{-2}`, and `x₁₂` as `x_{12}`.
+  (`₀₁₂₃₄₅₆₇₈₉₋`), converting them to `^{...}` and `_{...}` respectively. This
+  works in all parsing modes. For example, `x²` parses as `x^{2}`, `sin²(x)` as
+  `\sin^{2}(x)`, `x⁻²` as `x^{-2}`, and `x₁₂` as `x_{12}`.
 
 - **`.is()` now works with assigned variables**: Previously, `.is()` only
   evaluated expressions made entirely of declared constants (like `Pi`). Now it

@@ -245,6 +245,34 @@ describe('OPERATOR infix', () => {
       box       = ["Add", -2, ["InvisibleOperator", 3, "x"], -4]
       canonical = ["Subtract", ["Multiply", 3, "x"], 6]
     `));
+
+  test('3-1 // Subtract keeps Negate in raw JSON', () =>
+    expect(ce.parse('3-1', { form: 'raw' })?.toJSON()).toEqual([
+      'Add',
+      3,
+      ['Negate', 1],
+    ]));
+
+  test('(+3)-(+1) // Subtract keeps Negate in raw JSON', () =>
+    expect(ce.parse('(+3)-(+1)', { form: 'raw' })?.toJSON()).toEqual([
+      'Add',
+      ['Delimiter', 3],
+      ['Negate', ['Delimiter', 1]],
+    ]));
+
+  test('3-+1 // Subtract keeps Negate in raw JSON', () =>
+    expect(ce.parse('3-+1', { form: 'raw' })?.toJSON()).toEqual([
+      'Add',
+      3,
+      ['Negate', 1],
+    ]));
+
+  test('3+-1 // Explicit plus with negative literal keeps numeric RHS in raw JSON', () =>
+    expect(ce.parse('3+-1', { form: 'raw' })?.toJSON()).toEqual([
+      'Add',
+      3,
+      -1,
+    ]));
 });
 
 describe('OPERATOR multiply', () => {
