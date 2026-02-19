@@ -1826,6 +1826,10 @@ function parseAssign(
   lhs: MathJsonExpression,
   until?: Readonly<Terminator>
 ): MathJsonExpression | null {
+  // In local-binding contexts (`;` blocks and `where` bindings), keep
+  // simple subscripted names as compound symbols (e.g. `r_1`).
+  const isLocalBindingContext = (until?.minPrec ?? 0) >= 19;
+
   //
   // 0/ Compound symbols: "r_1" or "a_n"
   // If the base is a known indexed collection, decompose back to Subscript
@@ -1836,15 +1840,23 @@ function parseAssign(
   if (lhsSymbol && lhsSymbol.includes('_')) {
     const underscoreIndex = lhsSymbol.indexOf('_');
     const baseName = lhsSymbol.substring(0, underscoreIndex);
+    const subscriptStr = lhsSymbol.substring(underscoreIndex + 1);
+    const subscriptNum = parseInt(subscriptStr, 10);
+    const subscript: MathJsonExpression =
+      !isNaN(subscriptNum) && String(subscriptNum) === subscriptStr
+        ? subscriptNum
+        : subscriptStr;
 
-    if (parser.getSymbolType(baseName).matches('indexed_collection')) {
-      // Base is a collection → decompose for sequence/indexing definition
-      const subscriptStr = lhsSymbol.substring(underscoreIndex + 1);
-      const subscriptNum = parseInt(subscriptStr, 10);
-      const subscript: MathJsonExpression =
-        !isNaN(subscriptNum) && String(subscriptNum) === subscriptStr
-          ? subscriptNum
-          : subscriptStr;
+    const simpleSequenceLikeSubscript =
+      subscript !== '' &&
+      (typeof subscript === 'number' ||
+        (typeof subscript === 'string' && subscript.length === 1));
+
+    if (
+      parser.getSymbolType(baseName).matches('indexed_collection') ||
+      (!isLocalBindingContext && simpleSequenceLikeSubscript)
+    ) {
+      // Base is a collection, or this is a top-level sequence-like assignment
       lhs = ['Subscript', baseName, subscript];
     }
     // Otherwise keep lhs as the compound symbol (e.g. "r_1")
@@ -1879,14 +1891,14 @@ function parseAssign(
   if (operator(lhs) === 'Subscript' && symbol(operand(lhs, 1))) {
     const fn = symbol(operand(lhs, 1))!;
 
-    // If the base is NOT a known collection, treat the subscripted name
-    // as a compound symbol for simple assignment
+    // In local-binding contexts, if the base is NOT a known collection,
+    // treat simple subscripted names as compound symbols for assignment.
     if (!parser.getSymbolType(fn).matches('indexed_collection')) {
       const sub = operand(lhs, 2);
       const subStr =
         (sub !== null && typeof sub === 'string' ? sub : undefined) ??
         (sub !== null && typeof sub === 'number' ? String(sub) : undefined);
-      if (subStr) {
+      if (subStr && isLocalBindingContext) {
         // Convert to simple symbol assignment: r_1 := expr
         const rhs = parser.parseExpression({ ...(until ?? {}), minPrec: 20 });
         if (rhs === null) return null;
@@ -2081,6 +2093,9 @@ function parseIfExpression(
   parser: Parser,
   until?: Readonly<Terminator>
 ): MathJsonExpression | null {
+  // Ignore visual spacing between if/then/else keywords and branch expressions.
+  parser.skipVisualSpace();
+
   // Parse condition — stop at "then" keyword
   const condition = parser.parseExpression({
     minPrec: 0,
@@ -2091,6 +2106,8 @@ function parseIfExpression(
   // Consume "then"
   if (!matchKeyword(parser, 'then')) return null;
 
+  parser.skipVisualSpace();
+
   // Parse true branch — stop at "else" keyword
   const trueBranch = parser.parseExpression({
     minPrec: 0,
@@ -2100,6 +2117,8 @@ function parseIfExpression(
 
   // Consume "else"
   if (!matchKeyword(parser, 'else')) return null;
+
+  parser.skipVisualSpace();
 
   // Parse false branch — use outer terminator
   const falseBranch = parser.parseExpression(until) ?? 'Nothing';
@@ -2196,11 +2215,12 @@ function parseWhereExpression(
   // Build Block: Declare+Assign for each binding, body (lhs) last
   const block: MathJsonExpression[] = [];
   for (const b of bindings) {
-    if (operator(b) === 'Assign') {
-      block.push(['Declare', operand(b, 1)!]);
-      block.push(b);
+    const normalized = normalizeLocalAssign(b);
+    if (operator(normalized) === 'Assign') {
+      block.push(['Declare', operand(normalized, 1)!]);
+      block.push(normalized);
     } else {
-      block.push(b);
+      block.push(normalized);
     }
   }
   block.push(lhs); // body is last in Block
@@ -2214,12 +2234,33 @@ function parseWhereExpression(
 function buildBlockFromSequence(seq: MathJsonExpression[]): MathJsonExpression {
   const block: MathJsonExpression[] = [];
   for (const s of seq) {
-    if (operator(s) === 'Assign') {
-      block.push(['Declare', operand(s, 1)!]);
+    const normalized = normalizeLocalAssign(s);
+    if (operator(normalized) === 'Assign') {
+      block.push(['Declare', operand(normalized, 1)!]);
     }
-    block.push(s);
+    block.push(normalized);
   }
   return ['Block', ...block] as MathJsonExpression;
+}
+
+function normalizeLocalAssign(
+  expr: MathJsonExpression
+): MathJsonExpression {
+  if (operator(expr) !== 'Assign') return expr;
+
+  const lhs = operand(expr, 1);
+  if (operator(lhs) !== 'Subscript') return expr;
+
+  const base = symbol(operand(lhs, 1));
+  if (!base) return expr;
+
+  const sub = operand(lhs, 2);
+  const subStr =
+    (typeof sub === 'string' ? sub : undefined) ??
+    (typeof sub === 'number' ? String(sub) : undefined);
+  if (!subStr) return expr;
+
+  return ['Assign', `${base}_${subStr}`, operand(expr, 2) ?? 'Nothing'];
 }
 
 function parseAt(

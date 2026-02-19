@@ -8,13 +8,65 @@ import {
   evaluate,
   declare,
   assign,
+  isNumber,
+  numericValue,
 } from '../src/compute-engine';
 import { expand } from '../src/compute-engine/boxed-expression/expand';
 
 const ce = new ComputeEngine();
 const engine = ce;
 
-console.log(parse('3\\times2+1').isEqual(parse('5+2')));
+let num = ce.parse('1.3333');
+let n = numericValue(num);
+console.log(
+  (isNumber(num) && num.isInteger) ||
+    (n !== undefined && typeof n !== 'number' && n?.isExact)
+);
+// -> false
+
+num = ce.parse('1/3');
+n = numericValue(num);
+console.log(
+  (isNumber(num) && num.isInteger) ||
+    (n !== undefined && typeof n !== 'number' && n?.isExact)
+);
+// -> true
+
+// tomorrow:
+num = ce.parse('1/3');
+console.log(isNumber(num) && num.isExact);
+
+const expr22 = ce.parse(
+  '\\text{if}\\; x \\geq 0 \\;\\text{then}\\; x^2 \\;\\text{else}\\; -x'
+);
+console.log(expr22.json);
+
+console.log(ce.parse('3-x', { form: 'raw' }).json);
+// -> ["Subtract", 3, x]
+
+let A = engine.parse('\\cos(\\pi)', { form: 'raw' });
+let B = engine.parse('-1', { form: 'raw' });
+// ...
+// true
+
+console.log('');
+A = engine.parse('3\\times2', { form: 'raw' });
+B = engine.parse('6', { form: 'raw' });
+// true
+
+console.log('');
+A = engine.parse('\\frac{1}{3}', { form: 'raw' });
+B = engine.parse('0.33333333333333', { form: 'raw' });
+// false
+
+console.log('3-1', engine.parse('3-1', { form: 'raw' }).toJSON());
+// -> [ 'Add', 3, [ 'Negate', 1 ] ]
+console.log('(+3)-(+1)', engine.parse('3-1', { form: 'raw' }).toJSON());
+// -> [ 'Add', 3, [ 'Negate', 1 ] ]
+console.log('3-+1', engine.parse('3-+1', { form: 'raw' }).toJSON());
+// -> ["Negate", 3, 1]
+console.log('3+-1', engine.parse('3+-1', { form: 'raw' }).toJSON());
+// -> [ 'Add', 3, -1 ]
 
 assign('v', 2);
 console.log(parse('1 + 4 / v').is(3));

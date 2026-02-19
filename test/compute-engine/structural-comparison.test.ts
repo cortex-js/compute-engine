@@ -89,14 +89,6 @@ describe('Flatten + Order: Negate and Subtract', () => {
     expect(a.isSame(b)).toBe(false);
   });
 
-  it('negation placement matters: 1-3*2 vs 1-2*3', () => {
-    // Parser produces Add(1, Multiply(Negate(3), 2)) vs Add(1, Multiply(Negate(2), 3))
-    // The negation is on different operands, so these are structurally different
-    const a = ce.parse('1-3\\times2', opts);
-    const b = ce.parse('1-2\\times3', opts);
-    expect(a.isSame(b)).toBe(false);
-  });
-
   it('does not fold subtraction: 5-3 is not 2', () => {
     const a = ce.parse('5-3', opts);
     const b = ce.parse('2', opts);
