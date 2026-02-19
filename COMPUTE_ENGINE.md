@@ -687,7 +687,10 @@ s \coloneq a^2 + b^2;
 ```
 
 Both compile to scoped JS with no variable leakage. Use simple identifiers (`a`,
-`b`, `s`) — subscripted names like `r_1` don't work in blocks.
+`b`, `s`) — subscripted names like `r_1` also work in blocks. The parser
+treats subscripted identifiers as compound symbols (e.g., `r_1`) when the base
+is not a known collection, so `r_1 \coloneq x^2;\; \frac{1}{r_1}` compiles
+correctly.
 
 ### Parameterized families → template literals + inlined constants
 
@@ -901,7 +904,7 @@ plotting integration. Ordered by impact.
 
 10. **Subscripted variable names in blocks**: Allow `r_1 \coloneq expr` to
     define a variable named `r_1` rather than parsing as `Subscript(r, 1)`. This
-    is common in mathematical notation for intermediate values. **Open — design
-    decision needed.** This intersects with how CE handles subscripts
-    generally (indexing vs. variable naming). Use simple identifiers (`a`, `b`,
-    `s`) for now.
+    is common in mathematical notation for intermediate values. **FIXED.** The
+    parser now checks whether the subscript base is a known collection: if so,
+    the subscript is an index (for sequence definitions); otherwise, the
+    subscripted name is treated as a compound symbol (e.g., `r_1`).

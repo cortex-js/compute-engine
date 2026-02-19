@@ -1827,24 +1827,27 @@ function parseAssign(
   until?: Readonly<Terminator>
 ): MathJsonExpression | null {
   //
-  // 0/ Convert compound symbols back to Subscript form for sequence definitions
-  // e.g., "L_0" → ['Subscript', 'L', 0]
-  // e.g., "a_n" → ['Subscript', 'a', 'n']
+  // 0/ Compound symbols: "r_1" or "a_n"
+  // If the base is a known indexed collection, decompose back to Subscript
+  // for sequence definitions. Otherwise keep as a compound symbol for
+  // simple variable assignment (e.g. in semicolon blocks).
   //
   const lhsSymbol = symbol(lhs);
   if (lhsSymbol && lhsSymbol.includes('_')) {
     const underscoreIndex = lhsSymbol.indexOf('_');
     const baseName = lhsSymbol.substring(0, underscoreIndex);
-    const subscriptStr = lhsSymbol.substring(underscoreIndex + 1);
 
-    // Try to parse subscript as integer
-    const subscriptNum = parseInt(subscriptStr, 10);
-    const subscript: MathJsonExpression =
-      !isNaN(subscriptNum) && String(subscriptNum) === subscriptStr
-        ? subscriptNum
-        : subscriptStr; // Keep as symbol string
-
-    lhs = ['Subscript', baseName, subscript];
+    if (parser.getSymbolType(baseName).matches('indexed_collection')) {
+      // Base is a collection → decompose for sequence/indexing definition
+      const subscriptStr = lhsSymbol.substring(underscoreIndex + 1);
+      const subscriptNum = parseInt(subscriptStr, 10);
+      const subscript: MathJsonExpression =
+        !isNaN(subscriptNum) && String(subscriptNum) === subscriptStr
+          ? subscriptNum
+          : subscriptStr;
+      lhs = ['Subscript', baseName, subscript];
+    }
+    // Otherwise keep lhs as the compound symbol (e.g. "r_1")
   }
 
   //
@@ -1871,12 +1874,25 @@ function parseAssign(
   }
 
   //
-  // 2/ f_n := ...
+  // 2/ f_n := ... (Subscript form — base is a collection or sequence)
   //
   if (operator(lhs) === 'Subscript' && symbol(operand(lhs, 1))) {
-    // We have an assignment of the form `f_n := ...`
-    const fn = symbol(operand(lhs, 1));
-    if (!fn) return null;
+    const fn = symbol(operand(lhs, 1))!;
+
+    // If the base is NOT a known collection, treat the subscripted name
+    // as a compound symbol for simple assignment
+    if (!parser.getSymbolType(fn).matches('indexed_collection')) {
+      const sub = operand(lhs, 2);
+      const subStr =
+        (sub !== null && typeof sub === 'string' ? sub : undefined) ??
+        (sub !== null && typeof sub === 'number' ? String(sub) : undefined);
+      if (subStr) {
+        // Convert to simple symbol assignment: r_1 := expr
+        const rhs = parser.parseExpression({ ...(until ?? {}), minPrec: 20 });
+        if (rhs === null) return null;
+        return ['Assign', fn + '_' + subStr, rhs];
+      }
+    }
 
     const rhs = parser.parseExpression({ ...(until ?? {}), minPrec: 20 });
     if (rhs === null) return null;
