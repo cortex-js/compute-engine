@@ -580,6 +580,13 @@ export class BoxedNumber
     return isSubtype(this._value.type, 'real');
   }
 
+  get isExact(): boolean {
+    const n = this._value;
+    if (typeof n === 'number')
+      return !Number.isFinite(n) || Number.isInteger(n);
+    return n.isExact;
+  }
+
   is(
     other: Expression | number | bigint | boolean | string,
     tolerance?: number

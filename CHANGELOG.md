@@ -1,7 +1,11 @@
 ### [Unreleased]
 
+- To check if a value is an exact number literal, you can now use
+  `isNumber(expr) && expr.isExact`.
+
 - When using the `raw` canonical form, preserve negation, i.e. `x-1` will now
   parse as `["Subtract", "x", "1"]` rather than `["Add", "x", -1]`.
+
 - **Fix `;\;` parsing in semicolon blocks**: Semicolons followed by LaTeX visual
   spacing commands (`\;`, `\,`, `\quad`, etc.) no longer produce spurious
   `Nothing` nodes in the parse tree. Previously, `a \coloneq x^2;\; (a+1)` would

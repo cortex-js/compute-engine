@@ -1829,6 +1829,7 @@ export interface Expression {
  */
 export interface NumberLiteralInterface {
   readonly numericValue: number | NumericValue;
+  readonly isExact: boolean;
   readonly isNumberLiteral: true;
 }
 
