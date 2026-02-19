@@ -1,4 +1,4 @@
-### [Unreleased]
+### 0.52.1 _2026-02-19_
 
 - To check if a value is an exact number literal, you can now use
   `isNumber(expr) && expr.isExact`.
