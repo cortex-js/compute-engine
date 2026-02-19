@@ -16,48 +16,22 @@ import { expand } from '../src/compute-engine/boxed-expression/expand';
 const ce = new ComputeEngine();
 const engine = ce;
 
-let num = ce.parse('1.3333');
-let n = numericValue(num);
-console.log(
-  (isNumber(num) && num.isInteger) ||
-    (n !== undefined && typeof n !== 'number' && n?.isExact)
-);
-// -> false
-
-num = ce.parse('1/3');
-n = numericValue(num);
-console.log(
-  (isNumber(num) && num.isInteger) ||
-    (n !== undefined && typeof n !== 'number' && n?.isExact)
-);
-// -> true
-
-// tomorrow:
-num = ce.parse('1/3');
-console.log(isNumber(num) && num.isExact);
-
-const expr22 = ce.parse(
-  '\\text{if}\\; x \\geq 0 \\;\\text{then}\\; x^2 \\;\\text{else}\\; -x'
-);
-console.log(expr22.json);
-
-console.log(ce.parse('3-x', { form: 'raw' }).json);
-// -> ["Subtract", 3, x]
-
-let A = engine.parse('\\cos(\\pi)', { form: 'raw' });
-let B = engine.parse('-1', { form: 'raw' });
-// ...
-// true
+let A = '\\cos(\\pi)';
+let B = '-1';
+console.log(`${A} = ${B}`, parse(A).isEqual(parse(B)));
 
 console.log('');
-A = engine.parse('3\\times2', { form: 'raw' });
-B = engine.parse('6', { form: 'raw' });
-// true
+A = '3\\times2';
+B = '6';
+console.log(`${A} = ${B}`, parse(A).isEqual(parse(B)));
 
-console.log('');
-A = engine.parse('\\frac{1}{3}', { form: 'raw' });
-B = engine.parse('0.33333333333333', { form: 'raw' });
-// false
+A = '\\frac{1}{3}';
+B = '0.33333333333333';
+const exprB = parse(B);
+console.log(
+  `${A} = ${B}`,
+  parse(A).isEqual(exprB) && isNumber(exprB) && exprB.isExact
+);
 
 console.log('3-1', engine.parse('3-1', { form: 'raw' }).toJSON());
 // -> [ 'Add', 3, [ 'Negate', 1 ] ]
