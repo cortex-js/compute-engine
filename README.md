@@ -140,8 +140,8 @@ console.log(solution.y.json);  // 2
 
 **💡 Best Practices:**
 
-- Always use type guards (`isNumber`, `isSymbol`, `isFunction`)
-  before accessing specialized properties
+- Always use type guards (`isNumber`, `isSymbol`, `isFunction`) before accessing
+  specialized properties
 - Use the `sym()` helper for quick symbol name checks
 
 **📚 Learn More:**
@@ -160,8 +160,6 @@ console.log(solution.y.json);  // 2
   <dd>A lightweight mathematical notation interchange format</dd>  
   <dt><a href="https://cortexjs.io/mathlive">MathLive</a> (on <a href="https://github.com/arnog/mathlive">GitHub</a>)</dt>
   <dd>A Web Component for math input.</dd>  
-  <dt><a href="https://cortexjs.io/cortex">Cortex</a> (on <a href="https://github.com/cortex-js/compute-engine/tree/master/src/cortex">GitHub</a>)</dt>
-  <dd>A programming language for scientific computing</dd>  
 </dl>
 
 ## Support the Project

@@ -44,6 +44,4 @@ console.log(ce.serialize(["Apply", ["InverseFunction", "Sin"], "x"]));
   <dd>A Web Component for math input.</dd>  
   <dt><a href="https://cortexjs.io/compute-engine">Compute Engine</a> (on <a href="https://github.com/cortex-js/compute-engine/tree/master/src/compute-engine">GitHub</a>)</dt>
   <dd>The CortexJS Compute Engine performs calculations on MathJSON expressions</dd>  
-  <dt><a href="https://cortexjs.io/cortex">Cortex</a> (on <a href="https://github.com/cortex-js/compute-engine/tree/master/src/cortex">GitHub</a>)</dt>
-  <dd>A programming language for scientific computing</dd>  
 </dl>
