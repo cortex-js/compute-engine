@@ -267,6 +267,70 @@ describe('INTERVAL WGSL COMPLEX EXPRESSIONS', () => {
   });
 });
 
+describe('INTERVAL WGSL SELECTIVE PREAMBLE', () => {
+  test('simple expression has smaller preamble than full library', () => {
+    const target = new IntervalWGSLTarget();
+    const fullLibrary = target.getLibrary();
+    const expr = ce.parse('x^2 + y^2');
+    const fn = compile(expr, { to: 'interval-wgsl' });
+    expect(fn.success).toBe(true);
+    // Selective preamble should be much smaller than full library
+    expect(fn.preamble!.length).toBeLessThan(fullLibrary.length * 0.6);
+  });
+
+  test('preamble includes only functions used by the expression', () => {
+    const expr = ce.parse('\\sin(x)');
+    const fn = compile(expr, { to: 'interval-wgsl' });
+    expect(fn.success).toBe(true);
+    expect(fn.preamble).toContain('ia_sin');
+    // Should NOT contain gamma, factorial, etc.
+    expect(fn.preamble).not.toContain('ia_gamma');
+    expect(fn.preamble).not.toContain('ia_factorial');
+    expect(fn.preamble).not.toContain('ia_floor');
+  });
+
+  test('preamble includes transitive dependencies', () => {
+    const expr = ce.parse('\\operatorname{Gamma}(x)');
+    const fn = compile(expr, { to: 'interval-wgsl' });
+    expect(fn.success).toBe(true);
+    // gamma depends on _gpu_gamma
+    expect(fn.preamble).toContain('ia_gamma');
+    expect(fn.preamble).toContain('_gpu_gamma');
+  });
+
+  test('comparison functions include IA_TRUE/FALSE/MAYBE constants', () => {
+    const expr = ce.parse(
+      '\\begin{cases} x & x > 0 \\\\ -x & \\text{otherwise} \\end{cases}'
+    );
+    const fn = compile(expr, { to: 'interval-wgsl' });
+    if (fn.success && fn.preamble!.includes('ia_greater')) {
+      expect(fn.preamble).toContain('IA_TRUE');
+      expect(fn.preamble).toContain('IA_FALSE');
+      expect(fn.preamble).toContain('IA_MAYBE');
+    }
+  });
+
+  test('preamble always includes core infrastructure', () => {
+    const expr = ce.parse('x');
+    const fn = compile(expr, { to: 'interval-wgsl' });
+    expect(fn.success).toBe(true);
+    expect(fn.preamble).toContain('struct IntervalResult');
+    expect(fn.preamble).toContain('IA_NORMAL');
+    expect(fn.preamble).toContain('IA_EPS');
+  });
+
+  test('compileShaderFunction uses selective preamble', () => {
+    const target = new IntervalWGSLTarget();
+    const fullLibrary = target.getLibrary();
+    const expr = ce.parse('\\sin(x)');
+    const shader = target.compileShaderFunction(expr);
+    // Shader should be smaller than full library + function
+    expect(shader.length).toBeLessThan(fullLibrary.length);
+    expect(shader).toContain('ia_sin');
+    expect(shader).toContain('fn evaluateInterval');
+  });
+});
+
 describe('INTERVAL WGSL OUTPUT FORMAT', () => {
   test('float constants have decimal points', () => {
     const expr = ce.parse('5');

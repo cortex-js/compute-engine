@@ -1141,6 +1141,196 @@ fn ia_notEqual(a: IntervalResult, b: IntervalResult) -> f32 {
 }
 `;
 
+// ---------------------------------------------------------------------------
+// Selective preamble builder
+//
+// Parses the monolithic WGSL_INTERVAL_LIBRARY into individual function blocks
+// with auto-detected dependencies. At compile time, only the functions
+// referenced by the compiled expression (plus their transitive dependencies)
+// are emitted.
+// ---------------------------------------------------------------------------
+
+interface WGSLFunctionBlock {
+  /** The function name (e.g. "ia_sin_v") */
+  name: string;
+  /** Full source text of the function (including preceding comment lines) */
+  source: string;
+  /** Names of other ia_ or _gpu_ functions called from this function's body */
+  deps: string[];
+}
+
+/** Header: constants, struct, epsilon — always emitted */
+let _wgslPreambleHeader = '';
+/** Mid-preamble constant blocks (e.g. IA_TRUE/FALSE/MAYBE) keyed by marker */
+const _wgslPreambleConstants: Map<string, string> = new Map();
+/** Individual function blocks keyed by function name */
+const _wgslPreambleFunctions: Map<string, WGSLFunctionBlock> = new Map();
+/** Set to true once parsing is done */
+let _wgslPreambleParsed = false;
+
+/** Regex matching function declarations in the WGSL preamble: `fn ia_xxx(` */
+const WGSL_FUNC_RE = /^fn\s+(ia_\w+|_gpu_\w+)\s*\(/;
+
+/** Regex to find calls to ia_ or _gpu_ functions within a body */
+const WGSL_CALL_RE = /\b(ia_\w+|_gpu_\w+)\s*\(/g;
+
+/** Regex for constant declarations like `const IA_TRUE: f32 = 1.0;` */
+const WGSL_CONST_RE = /^const\s+(IA_\w+)\s*:/;
+
+function parseWGSLPreamble(): void {
+  if (_wgslPreambleParsed) return;
+  _wgslPreambleParsed = true;
+
+  const lines = WGSL_INTERVAL_LIBRARY.split('\n');
+  let headerDone = false;
+  const headerLines: string[] = [];
+  let currentBlock: string[] = [];
+  let currentName: string | null = null;
+  let braceDepth = 0;
+  let inFunction = false;
+  let pendingComments: string[] = [];
+  let pendingConstants: string[] = [];
+
+  for (const line of lines) {
+    // Check if this is a constant declaration outside a function
+    const constMatch = !inFunction && WGSL_CONST_RE.exec(line);
+    if (constMatch && headerDone) {
+      // Mid-preamble constant (e.g. IA_TRUE) — accumulate
+      pendingConstants.push(line);
+      continue;
+    }
+
+    const funcMatch = !inFunction && WGSL_FUNC_RE.exec(line);
+
+    if (funcMatch) {
+      if (!headerDone) {
+        _wgslPreambleHeader = headerLines.join('\n');
+        headerDone = true;
+      }
+
+      currentName = funcMatch[1];
+      currentBlock = [...pendingComments, ...pendingConstants, line];
+      pendingComments = [];
+      pendingConstants = [];
+      inFunction = true;
+      braceDepth = 0;
+
+      // Count braces on this line
+      for (const ch of line) {
+        if (ch === '{') braceDepth++;
+        if (ch === '}') braceDepth--;
+      }
+      if (braceDepth <= 0) {
+        // Single-line function
+        finishWGSLFunction(currentName, currentBlock.join('\n'));
+        inFunction = false;
+        currentName = null;
+      }
+    } else if (inFunction) {
+      currentBlock.push(line);
+      for (const ch of line) {
+        if (ch === '{') braceDepth++;
+        if (ch === '}') braceDepth--;
+      }
+      if (braceDepth <= 0) {
+        finishWGSLFunction(currentName!, currentBlock.join('\n'));
+        inFunction = false;
+        currentName = null;
+      }
+    } else if (!headerDone) {
+      headerLines.push(line);
+    } else {
+      // Between functions — could be comment or blank
+      const trimmed = line.trim();
+      if (trimmed.startsWith('//') || trimmed === '') {
+        pendingComments.push(line);
+      }
+    }
+  }
+
+  // Flush any remaining pending constants into the header
+  if (pendingConstants.length > 0) {
+    _wgslPreambleHeader += '\n' + pendingConstants.join('\n');
+  }
+}
+
+function finishWGSLFunction(name: string, source: string): void {
+  // Auto-detect dependencies by scanning the body for ia_ or _gpu_ calls
+  const deps = new Set<string>();
+  let match: RegExpExecArray | null;
+  const callRe = new RegExp(WGSL_CALL_RE.source, 'g');
+  while ((match = callRe.exec(source)) !== null) {
+    const callee = match[1];
+    if (callee !== name) deps.add(callee);
+  }
+
+  // WGSL uses _v/_rv/_vr suffixes instead of overloading, so each function
+  // has a unique name and we don't need to merge overloads.
+
+  _wgslPreambleFunctions.set(name, {
+    name,
+    source,
+    deps: [...deps],
+  });
+}
+
+/**
+ * Build a minimal interval WGSL preamble containing only the functions
+ * that the compiled code actually uses (plus transitive dependencies).
+ */
+function buildIntervalWGSLPreamble(code: string): string {
+  parseWGSLPreamble();
+
+  // 1. Find all ia_ or _gpu_ calls in the compiled expression code
+  const needed = new Set<string>();
+  let match: RegExpExecArray | null;
+  const callRe = new RegExp(WGSL_CALL_RE.source, 'g');
+  while ((match = callRe.exec(code)) !== null) {
+    needed.add(match[1]);
+  }
+
+  if (needed.size === 0) return _wgslPreambleHeader;
+
+  // 2. Resolve transitive dependencies
+  const resolved = new Set<string>();
+  function resolve(name: string): void {
+    if (resolved.has(name)) return;
+    const block = _wgslPreambleFunctions.get(name);
+    if (!block) return;
+    for (const dep of block.deps) resolve(dep);
+    resolved.add(name);
+  }
+  for (const name of needed) resolve(name);
+
+  // 3. Emit in dependency order (resolved set preserves insertion order,
+  //    and deps are resolved before dependents)
+  const parts: string[] = [_wgslPreambleHeader];
+
+  // Check if any comparison functions are needed — if so, include IA_TRUE/FALSE/MAYBE
+  const needsComparisonConstants = [...resolved].some(
+    (name) =>
+      name.startsWith('ia_less') ||
+      name.startsWith('ia_greater') ||
+      name.startsWith('ia_equal') ||
+      name.startsWith('ia_notEqual') ||
+      name === 'ia_and' ||
+      name === 'ia_or' ||
+      name === 'ia_not'
+  );
+  if (needsComparisonConstants) {
+    parts.push(
+      '\nconst IA_TRUE: f32 = 1.0;\nconst IA_FALSE: f32 = 0.0;\nconst IA_MAYBE: f32 = 0.5;'
+    );
+  }
+
+  for (const name of resolved) {
+    const block = _wgslPreambleFunctions.get(name);
+    if (block) parts.push('\n' + block.source);
+  }
+
+  return parts.join('\n');
+}
+
 /**
  * WGSL interval operators - all become function calls
  */
@@ -1411,7 +1601,7 @@ export class IntervalWGSLTarget implements LanguageTarget<Expression> {
       target: 'interval-wgsl',
       success: true,
       code: wgslCode,
-      preamble: WGSL_INTERVAL_LIBRARY,
+      preamble: buildIntervalWGSLPreamble(wgslCode),
     };
   }
 
@@ -1467,7 +1657,9 @@ export class IntervalWGSLTarget implements LanguageTarget<Expression> {
     const body = BaseCompiler.compile(expr, target);
     const params = parameters.map((name) => `${name}: vec2f`).join(', ');
 
-    return `${WGSL_INTERVAL_LIBRARY}
+    const preamble = buildIntervalWGSLPreamble(body);
+
+    return `${preamble}
 
 fn ${functionName}(${params}) -> IntervalResult {
   return ${body};

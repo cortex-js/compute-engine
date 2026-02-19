@@ -14,6 +14,8 @@ import { expand } from '../src/compute-engine/boxed-expression/expand';
 const ce = new ComputeEngine();
 const engine = ce;
 
+console.log(parse('3\\times2+1').isEqual(parse('5+2')));
+
 assign('v', 2);
 console.log(parse('1 + 4 / v').is(3));
 

@@ -30,6 +30,10 @@
   (plus their transitive dependencies), instead of the full ~29KB library.
   Typical preambles are 60–80% smaller.
 
+- **Selective WGSL interval preamble**: The interval-WGSL compilation target now
+  also emits only the preamble functions actually used by the compiled
+  expression, matching the GLSL target optimization.
+
 - **Fix recursive GLSL gamma function**: The `_gpu_gamma()` preamble in the GPU
   and interval-GLSL compilation targets used recursion for the reflection formula
   (z < 0.5), which is illegal in GLSL. Replaced with a non-recursive
