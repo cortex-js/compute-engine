@@ -53,9 +53,7 @@ describe('IF - PARSING', () => {
 
   test('Mixed \\text and \\operatorname keywords', () => {
     expect(
-      ce.parse(
-        '\\text{if } x > 0 \\operatorname{then} x^2 \\text{ else } -x'
-      )
+      ce.parse('\\text{if } x > 0 \\operatorname{then} x^2 \\text{ else } -x')
     ).toMatchInlineSnapshot(
       `["If", ["Less", 0, "x"], ["Square", "x"], ["Negate", "x"]]`
     );
@@ -67,16 +65,12 @@ describe('IF - PARSING', () => {
       ce.parse(
         '\\text{if}\\; x \\geq 0 \\;\\text{then}\\; 1 \\;\\text{else}\\; 0'
       )
-    ).toMatchInlineSnapshot(
-      `["If", ["LessEqual", 0, "x"], 1, 0]`
-    );
+    ).toMatchInlineSnapshot(`["If", ["LessEqual", 0, "x"], 1, 0]`);
   });
 
   test('\\text{if}\\; with mixed spacing styles', () => {
     expect(
-      ce.parse(
-        '\\text{if}\\; x > 0 \\text{ then } x^2 \\;\\text{else}\\; -x'
-      )
+      ce.parse('\\text{if}\\; x > 0 \\text{ then } x^2 \\;\\text{else}\\; -x')
     ).toMatchInlineSnapshot(
       `["If", ["Less", 0, "x"], ["Square", "x"], ["Negate", "x"]]`
     );

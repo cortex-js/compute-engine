@@ -82,12 +82,11 @@ describe('Partial canonicalization: form Flatten + Order', () => {
 describe('Flatten + Order: Negate and Subtract', () => {
   const opts = { form: ['Flatten', 'Order'] as const };
 
-  it('subtraction normalizes to Add+Negate: 1-x vs -x+1', () => {
-    // Parser normalizes subtraction to Add(Negate(...), ...) even in raw mode,
-    // so both produce Add(1, Negate(x)) after sorting
+  it('subtraction is preserved: 1-x vs -x+1', () => {
+    // Parser preserves substract in raw mode
     const a = ce.parse('1-x', opts);
     const b = ce.parse('-x+1', opts);
-    expect(a.isSame(b)).toBe(true);
+    expect(a.isSame(b)).toBe(false);
   });
 
   it('negation placement matters: 1-3*2 vs 1-2*3', () => {

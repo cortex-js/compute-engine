@@ -181,9 +181,9 @@ describe('Nth PRIME NUMBER', () =>
                                 [
                                   "Abs",
                                   [
-                                    "Subtract",
-                                    ["Floor", ["Divide", "v_2", "v_3"]],
-                                    ["Divide", "v_2", "v_3"]
+                                    "Add",
+                                    ["Divide", ["Negate", "v_2"], "v_3"],
+                                    ["Floor", ["Divide", "v_2", "v_3"]]
                                   ]
                                 ]
                               ]
@@ -224,8 +224,11 @@ describe('Euler Prime Generating Polynomial', () => {
     expect(check('8x^2 - 488 x + 7243')).toMatchInlineSnapshot(`
       box       = [
         "Add",
-        ["InvisibleOperator", 8, ["Square", "x"]],
-        ["InvisibleOperator", -488, "x"],
+        [
+          "Subtract",
+          ["InvisibleOperator", 8, ["Square", "x"]],
+          ["InvisibleOperator", 488, "x"]
+        ],
         7243
       ]
       canonical = [
@@ -239,8 +242,11 @@ describe('Euler Prime Generating Polynomial', () => {
     expect(check('43 x^2 - 537x + 2971')).toMatchInlineSnapshot(`
       box       = [
         "Add",
-        ["InvisibleOperator", 43, ["Square", "x"]],
-        ["InvisibleOperator", -537, "x"],
+        [
+          "Subtract",
+          ["InvisibleOperator", 43, ["Square", "x"]],
+          ["InvisibleOperator", 537, "x"]
+        ],
         2971
       ]
       canonical = [
@@ -254,8 +260,11 @@ describe('Euler Prime Generating Polynomial', () => {
     expect(check('36 x^2 - 810 x + 2763')).toMatchInlineSnapshot(`
       box       = [
         "Add",
-        ["InvisibleOperator", 36, ["Square", "x"]],
-        ["InvisibleOperator", -810, "x"],
+        [
+          "Subtract",
+          ["InvisibleOperator", 36, ["Square", "x"]],
+          ["InvisibleOperator", 810, "x"]
+        ],
         2763
       ]
       canonical = [
@@ -267,7 +276,11 @@ describe('Euler Prime Generating Polynomial', () => {
     `));
   test('x in', () =>
     expect(check('x^2 - 79x + 1601')).toMatchInlineSnapshot(`
-      box       = ["Add", ["Square", "x"], ["InvisibleOperator", -79, "x"], 1601]
+      box       = [
+        "Add",
+        ["Subtract", ["Square", "x"], ["InvisibleOperator", 79, "x"]],
+        1601
+      ]
       canonical = ["Add", ["Square", "x"], ["Multiply", -79, "x"], 1601]
     `));
   test('x in 0..10', () =>

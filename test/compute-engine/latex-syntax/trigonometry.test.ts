@@ -6,10 +6,9 @@ describe('TRIGONOMETRIC FUNCTIONS implicit arguments', () => {
       `["Add", ["Cos", "x"], 1]`
     ));
   test(`\\cos x - \\sin x`, () =>
-    expect(check('\\cos x - \\sin x')).toMatchInlineSnapshot(`
-      box       = ["Add", ["Cos", "x"], ["Negate", ["Sin", "x"]]]
-      canonical = ["Subtract", ["Cos", "x"], ["Sin", "x"]]
-    `));
+    expect(check('\\cos x - \\sin x')).toMatchInlineSnapshot(
+      `["Subtract", ["Cos", "x"], ["Sin", "x"]]`
+    ));
   test(`\\cos \\frac{x}{2}^2`, () =>
     expect(check('\\cos \\frac{x}{2}^2')).toMatchInlineSnapshot(`
       box       = ["Cos", ["Square", ["Divide", "x", 2]]]

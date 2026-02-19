@@ -71,13 +71,13 @@ describe('OPERATOR add/subtract', () => {
 
   test('1-2', () =>
     expect(check('1-2')).toMatchInlineSnapshot(`
-      box       = ["Add", 1, -2]
+      box       = ["Subtract", 1, 2]
       canonical = -1
     `));
 
   test('-1-2', () =>
     expect(check('-1-2')).toMatchInlineSnapshot(`
-      box       = ["Add", -1, -2]
+      box       = ["Subtract", -1, 2]
       canonical = -3
     `));
 
@@ -167,7 +167,7 @@ describe('OPERATOR prefix', () => {
     expect(check('-x')).toMatchInlineSnapshot(`["Negate", "x"]`));
   test('-x-1 // Negate', () =>
     expect(check('-x-1')).toMatchInlineSnapshot(`
-      box       = ["Add", ["Negate", "x"], -1]
+      box       = ["Subtract", ["Negate", "x"], 1]
       canonical = ["Subtract", -1, "x"]
     `));
   test('-x+1 // Negate', () =>
@@ -232,39 +232,40 @@ describe('OPERATOR infix', () => {
 
   test('-1+2+3-4 // Add', () =>
     expect(check('-1+2+3-4')).toMatchInlineSnapshot(`
-      box       = ["Add", -1, 2, 3, -4]
+      box       = ["Add", -1, 2, ["Subtract", 3, 4]]
       canonical = 0
     `));
   test('a-b+c+d // Add', () =>
-    expect(check('a-b+c+d')).toMatchInlineSnapshot(
-      `["Add", "a", ["Negate", "b"], "c", "d"]`
-    ));
+    expect(check('a-b+c+d')).toMatchInlineSnapshot(`
+      box       = ["Add", ["Subtract", "a", "b"], "c", "d"]
+      canonical = ["Add", "a", ["Negate", "b"], "c", "d"]
+    `));
 
   test('-2+3x-4', () =>
     expect(check('-2+3x-4')).toMatchInlineSnapshot(`
-      box       = ["Add", -2, ["InvisibleOperator", 3, "x"], -4]
+      box       = ["Add", -2, ["Subtract", ["InvisibleOperator", 3, "x"], 4]]
       canonical = ["Subtract", ["Multiply", 3, "x"], 6]
     `));
 
-  test('3-1 // Subtract keeps Negate in raw JSON', () =>
+  test('3-1 // Subtract stays Subtract in raw JSON', () =>
     expect(ce.parse('3-1', { form: 'raw' })?.toJSON()).toEqual([
-      'Add',
+      'Subtract',
       3,
-      ['Negate', 1],
+      1,
     ]));
 
-  test('(+3)-(+1) // Subtract keeps Negate in raw JSON', () =>
+  test('(+3)-(+1) // Subtract stays Subtract in raw JSON', () =>
     expect(ce.parse('(+3)-(+1)', { form: 'raw' })?.toJSON()).toEqual([
-      'Add',
+      'Subtract',
       ['Delimiter', 3],
-      ['Negate', ['Delimiter', 1]],
+      ['Delimiter', 1],
     ]));
 
-  test('3-+1 // Subtract keeps Negate in raw JSON', () =>
+  test('3-+1 // Subtract stays Subtract in raw JSON', () =>
     expect(ce.parse('3-+1', { form: 'raw' })?.toJSON()).toEqual([
-      'Add',
+      'Subtract',
       3,
-      ['Negate', 1],
+      1,
     ]));
 
   test('3+-1 // Explicit plus with negative literal keeps numeric RHS in raw JSON', () =>
@@ -418,7 +419,7 @@ describe('OPERATOR precedence', () => {
     `));
   test('-2\\times-3-4 // Precedence', () =>
     expect(check('-2\\times-3-4')).toMatchInlineSnapshot(`
-      box       = ["Add", ["Multiply", -2, -3], -4]
+      box       = ["Subtract", ["Multiply", -2, -3], 4]
       canonical = 2
     `));
 
@@ -436,7 +437,7 @@ describe('OPERATOR postfix', () => {
     `));
   test('-5!-2 // Precedence', () =>
     expect(check('-2-5!')).toMatchInlineSnapshot(`
-      box       = ["Add", -2, ["Negate", ["Factorial", 5]]]
+      box       = ["Subtract", -2, ["Factorial", 5]]
       canonical = ["Subtract", ["Negate", ["Factorial", 5]], 2]
       simplify  = -122
     `));

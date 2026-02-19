@@ -150,9 +150,9 @@ describe('PARSING numbers', () => {
                                 [
                                   "Abs",
                                   [
-                                    "Subtract",
-                                    ["Floor", ["Divide", "v_2", "v_3"]],
-                                    ["Divide", "v_2", "v_3"]
+                                    "Add",
+                                    ["Divide", ["Negate", "v_2"], "v_3"],
+                                    ["Floor", ["Divide", "v_2", "v_3"]]
                                   ]
                                 ]
                               ]
@@ -253,8 +253,7 @@ describe('CANONICALIZATION negate', () => {
   });
 });
 describe('CANONICALIZATION Add', () => {
-  test('7 + 2 + 5', () =>
-    expect(canonicalToJson('7 + 2 + 5')).toEqual(14));
+  test('7 + 2 + 5', () => expect(canonicalToJson('7 + 2 + 5')).toEqual(14));
 
   test(`7 + \\frac12`, () =>
     expect(canonicalToJson('7 + \\frac12')).toMatchInlineSnapshot(`

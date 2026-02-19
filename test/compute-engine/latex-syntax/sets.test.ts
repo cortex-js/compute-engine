@@ -314,12 +314,9 @@ describe('PARSING INTERVALS', () => {
           ],
         ],
         [
-          Add,
+          Subtract,
           c,
-          [
-            Negate,
-            d,
-          ],
+          d,
         ],
       ]
     `);
@@ -490,7 +487,8 @@ describe('SET OPERATOR PRECEDENCE WITH LOGIC', () => {
 
   it('should parse subset with Or', () => {
     // P ⊂ Q ∨ R ⊂ S → (P ⊂ Q) ∨ (R ⊂ S)
-    expect(parse('P \\subset Q \\lor R \\subset S').json).toMatchInlineSnapshot(`
+    expect(parse('P \\subset Q \\lor R \\subset S').json)
+      .toMatchInlineSnapshot(`
       [
         Or,
         [
@@ -509,7 +507,8 @@ describe('SET OPERATOR PRECEDENCE WITH LOGIC', () => {
 
   it('should parse subset with And', () => {
     // P ⊂ Q ∧ R ⊂ S → (P ⊂ Q) ∧ (R ⊂ S)
-    expect(parse('P \\subset Q \\land R \\subset S').json).toMatchInlineSnapshot(`
+    expect(parse('P \\subset Q \\land R \\subset S').json)
+      .toMatchInlineSnapshot(`
       [
         And,
         [

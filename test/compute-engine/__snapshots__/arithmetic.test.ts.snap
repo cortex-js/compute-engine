@@ -187,8 +187,7 @@ N-mach    = 14.147869708026379
 exports[`EXACT EVALUATION Canceled inexact values are ignored 1`] = `
 box       = [
   "Add",
-  2.12,
-  ["Negate", 2.12],
+  ["Subtract", 2.12, 2.12],
   ["Divide", 1, 4],
   ["Divide", 1, 4],
   ["Sqrt", 5],

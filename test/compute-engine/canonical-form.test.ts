@@ -28,14 +28,14 @@ describe('CANONICAL FORMS', () => {
   // Addition/substraction of 0 gets simplified in canonical  form
   test('a-0', () => {
     expect(check('a-0')).toMatchInlineSnapshot(`
-      box       = ["Add", "a", 0]
+      box       = ["Subtract", "a", 0]
       canonical = a
     `);
   });
 
   test('0-a', () => {
     expect(check('0-a')).toMatchInlineSnapshot(`
-      box       = ["Add", 0, ["Negate", "a"]]
+      box       = ["Subtract", 0, "a"]
       canonical = ["Negate", "a"]
     `);
   });
@@ -636,7 +636,7 @@ describe('CANONICAL FORMS', () => {
         box        = [
           "Power",
           "PositiveInfinity",
-          ["Subtract", ["InvisibleOperator", -3, "i"], 1]
+          ["Subtract", -1, ["InvisibleOperator", 3, "i"]]
         ]
         canonForms = 0
         canonical  = 0

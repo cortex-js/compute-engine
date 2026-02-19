@@ -124,9 +124,9 @@ describe('DMS Arithmetic', () => {
     const ce = new ComputeEngine();
     const expr = ce.parse("10°30' - 1°15'", { form: 'raw' });
     expect(expr.json).toEqual([
-      'Add',
+      'Subtract',
       ['Degrees', 10.5],
-      ['Negate', ['Degrees', 1.25]],
+      ['Degrees', 1.25],
     ]);
   });
 });
