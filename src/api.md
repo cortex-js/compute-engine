@@ -3452,7 +3452,7 @@ Note that lazy collections are *not* eagerly evaluated.
 ##### Expression.is()
 
 ```ts
-is(other): boolean
+is(other, tolerance?): boolean
 ```
 
 Smart equality check: structural first, then numeric evaluation fallback.
@@ -3468,12 +3468,21 @@ require evaluation (e.g., `\\sin(\\pi)`).
 ```typescript
 ce.parse('\\cos(\\frac{\\pi}{2})').is(0)  // true — evaluates, within tolerance
 ce.number(1e-17).is(0)                     // false — literal, no tolerance
-ce.parse('x + 1').is(1)                    // false — not constant
+ce.parse('x + 1').is(1)                    // false — has free variables
+ce.parse('\\pi').is(3.14, 0.01)            // true — within custom tolerance
 ```
 
 ####### other
 
 `string` | `number` | `bigint` | `boolean` | [`Expression`](#expression-4)
+
+####### tolerance?
+
+`number`
+
+If provided, overrides `engine.tolerance` for the
+numeric comparison. Has no effect when the comparison is structural
+(i.e., when `isSame()` succeeds or the expression has free variables).
 
 </MemberCard>
 

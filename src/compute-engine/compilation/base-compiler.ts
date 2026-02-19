@@ -270,15 +270,20 @@ export class BaseCompiler {
       return BaseCompiler.compile(args[0], target);
     }
 
-    const result = args.map((arg) =>
-      BaseCompiler.compile(arg, {
-        ...target,
-        var: (id) => {
-          if (locals.includes(id)) return id;
-          return target.var(id);
-        },
-      })
-    );
+    const result = args
+      .filter((a) => !isSymbol(a, 'Nothing'))
+      .map((arg) =>
+        BaseCompiler.compile(arg, {
+          ...target,
+          var: (id) => {
+            if (locals.includes(id)) return id;
+            return target.var(id);
+          },
+        })
+      )
+      .filter((s) => s !== '');
+
+    if (result.length === 0) return '';
 
     // Add a return statement to the last expression
     result[result.length - 1] = `return ${result[result.length - 1]}`;

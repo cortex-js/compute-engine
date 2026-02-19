@@ -1,5 +1,25 @@
 ### [Unreleased]
 
+- **Fix `;\;` parsing in semicolon blocks**: Semicolons followed by LaTeX visual
+  spacing commands (`\;`, `\,`, `\quad`, etc.) no longer produce spurious
+  `Nothing` nodes in the parse tree. Previously, `a \coloneq x^2;\; (a+1)`
+  would include a `Nothing` operand in the Block, making `isValid` return
+  `false` and causing compilation to fail. The parser now skips visual spacing
+  after semicolon separators.
+
+- **Fix `\text{if}` parsing with `\;` spacing**: The `\text{if}\; x \geq 0
+  \;\text{then}\; 1 \;\text{else}\; 0` pattern now parses correctly as an `If`
+  expression. Previously, `\;` before `\text{then}` or `\text{else}` prevented
+  keyword detection, producing a `Tuple` instead.
+
+- **Block serializer uses `; ` separator**: The Block serializer now emits `; `
+  instead of `;\; ` between statements, preventing round-trip serialization from
+  reintroducing the `\;` parsing issue.
+
+- **Block compiler filters `Nothing` operands**: As defense-in-depth, the Block
+  compiler now filters out `Nothing` symbols and empty compilation results
+  before generating the block IIFE.
+
 - **Fix recursive GLSL gamma function**: The `_gpu_gamma()` preamble in the GPU
   and interval-GLSL compilation targets used recursion for the reflection formula
   (z < 0.5), which is illegal in GLSL. Replaced with a non-recursive

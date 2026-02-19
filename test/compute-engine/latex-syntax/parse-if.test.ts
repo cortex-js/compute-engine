@@ -60,4 +60,25 @@ describe('IF - PARSING', () => {
       `["If", ["Less", 0, "x"], ["Square", "x"], ["Negate", "x"]]`
     );
   });
+
+  // Gap #5 sub-issue B: \; before keywords should not break if/then/else
+  test('\\text{if}\\; with thin space before keywords', () => {
+    expect(
+      ce.parse(
+        '\\text{if}\\; x \\geq 0 \\;\\text{then}\\; 1 \\;\\text{else}\\; 0'
+      )
+    ).toMatchInlineSnapshot(
+      `["If", ["LessEqual", 0, "x"], 1, 0]`
+    );
+  });
+
+  test('\\text{if}\\; with mixed spacing styles', () => {
+    expect(
+      ce.parse(
+        '\\text{if}\\; x > 0 \\text{ then } x^2 \\;\\text{else}\\; -x'
+      )
+    ).toMatchInlineSnapshot(
+      `["If", ["Less", 0, "x"], ["Square", "x"], ["Negate", "x"]]`
+    );
+  });
 });

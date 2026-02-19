@@ -31,4 +31,39 @@ describe('SEMICOLON BLOCKS - PARSING', () => {
       `["Block", ["Declare", "x"], ["Assign", "x", 10], ["Square", "x"]]`
     );
   });
+
+  test('Semicolon + \\; (thin space) is treated same as plain semicolon', () => {
+    // Gap #5 sub-issue A: ;\; should not produce Nothing in the parse tree
+    expect(ce.parse('a \\coloneq x^2;\\; (a+1)')).toMatchInlineSnapshot(`
+      [
+        "Block",
+        ["Declare", "a"],
+        ["Assign", "a", ["Square", "x"]],
+        ["Add", "a", 1]
+      ]
+    `);
+  });
+
+  test('Multiple semicolons with \\; spacing', () => {
+    expect(
+      ce.parse('a \\coloneq 1;\\; b \\coloneq 2;\\; a + b')
+    ).toMatchInlineSnapshot(`
+      [
+        "Block",
+        ["Declare", "a"],
+        ["Assign", "a", 1],
+        ["Declare", "b"],
+        ["Assign", "b", 2],
+        ["Add", "a", "b"]
+      ]
+    `);
+  });
+
+  test('Semicolon block with \\; produces valid expression', () => {
+    const expr = ce.parse('a \\coloneq x^2;\\; (a+1)');
+    expect(expr.isValid).toBe(true);
+    // Should not contain Nothing or InvisibleOperator
+    expect(JSON.stringify(expr.json)).not.toContain('Nothing');
+    expect(JSON.stringify(expr.json)).not.toContain('InvisibleOperator');
+  });
 });

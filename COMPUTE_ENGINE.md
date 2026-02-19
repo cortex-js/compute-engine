@@ -513,6 +513,12 @@ separator.
 restriction. The current behavior is a parsing pitfall since `;\;` looks natural
 in LaTeX.
 
+**Fixed in next version of Compute Engine.** The parser now skips visual spacing
+(`\;`, `\,`, `\quad`, etc.) after semicolon separators and before
+`\text{then}`/`\text{else}` keywords. The Block serializer no longer emits
+`;\;`, using `; ` instead, so round-tripping is also safe. As defense-in-depth,
+the Block compiler filters out any residual `Nothing` operands.
+
 ### 6. CE features exercised and test results
 
 The conversion now exercises the following CE features:
@@ -556,13 +562,10 @@ intermediate variable bindings — no variable leakage. All four semicolon block
 expressions (Joukowski, Seashell, Gravitational Potential, Electric Dipole)
 compile and render correctly.
 
-> **Warning**: Use plain `;` (optionally followed by a regular space) as the
-> statement separator. Do NOT use `;\;` (semicolon + thin space `\;`) — the `\;`
-> after a semicolon creates an `InvisibleOperator` node in the CE parse tree,
-> which makes the expression `isValid: false` and causes compilation to fail
-> silently (falling back to the slower expression interpreter). Note that `\;`
-> _inside_ tuple components (e.g., `(a,\; b)`) is fine — it only causes problems
-> immediately after a semicolon statement separator.
+> **Note**: Both `; ` and `;\;` now work as statement separators. The parser
+> skips visual spacing (`\;`, `\,`, `\quad`, etc.) after semicolons. Earlier
+> versions of CE did not handle `;\;` correctly — if you need to support older
+> CE versions, use plain `;` followed by a regular space.
 
 #### `\text{if}…\text{then}…\text{else}` syntax
 
@@ -624,6 +627,11 @@ both the `z >= 0.5` and `z < 0.5` branches inline without recursion.
 implementations. Either replace the recursive gamma with a Lanczos/Stirling
 approximation, or emit the preamble selectively (only include functions that the
 compiled expression actually references).
+
+**Fixed in current version of Compute Engine.** The `_gpu_gamma` function in
+the `interval-glsl` preamble now uses a non-recursive Lanczos approximation.
+The `sanitizeIntervalPreamble()` workaround is no longer needed but can be
+kept as defense-in-depth.
 
 ## Conversion Patterns
 
@@ -795,8 +803,9 @@ canonical variable names (x, y, t, etc.) to the expression's actual names.
 ### 4. Interval arithmetic has coverage gaps
 
 Not all functions that compile to `javascript` also compile to `interval-js`.
-Notable gaps: `(-1)^k` in sums (gap #2), and various special functions. The
-fallback from `interval-js` → `js` is graceful but loses break detection.
+The `(-1)^k` pattern in sums (formerly gap #2) is now supported. Remaining gaps
+are primarily special functions. The fallback from `interval-js` → `js` is
+graceful but loses break detection.
 
 **Best practice:** Always attempt interval compilation first, fall back to
 scalar JS. Use `isIntervalDegenerate1D/2D()` to detect degenerate interval
@@ -812,10 +821,10 @@ function application, not an assignment target.
 block bindings. For clarity, `\text{ where }` syntax with single bindings is
 often more readable.
 
-### 6. `\;` placement matters in LaTeX
+### 6. `\;` placement in LaTeX
 
 - `\;` between tuple components (`(a,\; b)`) — fine, just spacing
-- `\;` after semicolons (`;\;`) — breaks parsing (gap #5)
+- `\;` after semicolons (`;\;`) — now handled correctly (was gap #5)
 - `\;` inside `\text{if}` syntax (`\text{if}\; x \geq 0`) — fine
 
 **Best practice:** Never use `\;` immediately after a semicolon statement
@@ -852,49 +861,47 @@ plotting integration. Ordered by impact.
 
 ### High Priority
 
-1. **Fix `;\;` parsing (gap #5)**: Semicolon followed by `\;` creates an
-   `InvisibleOperator` that makes `isValid: false`. CE should either ignore
-   spacing commands after semicolons or document this restriction clearly. `;\;`
-   is natural LaTeX and a common pitfall.
+1. ~~**Fix `;\;` parsing (gap #5)**~~: **FIXED.** The parser now skips visual
+   spacing after semicolons and before `\text{then}`/`\text{else}` keywords.
+   The Block serializer uses `; ` instead of `;\; `. The Block compiler also
+   filters out residual `Nothing` operands as defense-in-depth.
 
-2. **Fix `expr.unknowns` for bound variables (gap #1)**: Summation/product
-   indices should not appear in `unknowns`. Either filter them out or provide a
-   separate `expr.freeVariables` property. **Confirmed fixed in next release.**
+2. ~~**Fix `expr.unknowns` for bound variables (gap #1)**~~: **FIXED.**
+   `getUnknowns()` excludes Sum/Product/Integrate/Block bound variables.
+   `freeVariables` property added as an alias for `unknowns`.
 
-3. **Fix interval-js constant branch wrapping (gap #4)**: Constant branches in
-   `\text{if}` return raw `{lo, hi}` instead of
-   `{kind: "interval", value: {lo, hi}}`. All return values should be properly
-   typed `IntervalResult`. **Confirmed fixed in next release.**
+3. ~~**Fix interval-js constant branch wrapping (gap #4)**~~: **FIXED.**
+   `_IA.piecewise()` returns properly typed `IntervalResult` for all branches
+   including constants.
 
-4. **Support `(-1)^k` in interval-js (gap #2)**: Alternating sign patterns fail
-   interval compilation. At minimum, recognize `(-1)^n` as returning
-   `{lo: -1, hi: 1}`. **Confirmed fixed in next release.**
+4. ~~**Support `(-1)^k` in interval-js (gap #2)**~~: **FIXED.**
+   `powInterval()` handles variable exponents correctly.
 
 ### Medium Priority
 
-5. **Fix recursive `_gpu_gamma` in `interval-glsl` preamble (gap #8)**: The
-   preamble uses `Gamma(z) = pi / (sin(pi*z) * Gamma(1-z))` — a recursive call
-   that GLSL forbids. Replace with a non-recursive Lanczos/Stirling
-   approximation. Ideally, also emit the preamble selectively (only include
-   functions the expression actually uses) to reduce shader size.
+5. ~~**Fix recursive `_gpu_gamma` in `interval-glsl` preamble (gap #8)**~~:
+   **FIXED.** The preamble now uses a non-recursive Lanczos approximation.
 
-6. **Warn on `success: false` fallback**: When compilation fails but `run` is
-   still set (interpreter fallback), emit a console warning. The current silent
-   behavior makes it very hard to detect compilation failures.
+6. ~~**Warn on `success: false` fallback**~~: **DONE.** `console.warn()`
+   emitted at `compile-expression.ts:86` when compilation falls back to
+   interpretation.
 
 7. **Add `SphericalHarmonic(l, m, theta, phi)` and
-   `AssociatedLegendreP(n, m, x)`**: Would allow general spherical harmonics
-   without manual expansion for each (l, m) pair.
+   `AssociatedLegendreP(n, m, x)`**: Not currently planned. Low priority per
+   your doc — specific (l, m) values can be expanded to closed-form trig
+   expressions.
 
-8. **Support `\prod` in interval-js**: Currently only `\sum` compiles to
-   interval-js. Product accumulation with `_IA.mul` would be analogous.
+8. ~~**Support `\prod` in interval-js**~~: **FIXED.** Compiles via
+   `compileIntervalSumProduct`.
 
 ### Low Priority (Nice to Have)
 
-9. **GLSL compilation for Bessel, Airy, Zeta, LambertW**: These are JS-only
-   today. GLSL preamble-based implementations would enable GPU-accelerated
-   rendering of plots using these functions.
+9. **GLSL compilation for Bessel, Airy, Zeta, LambertW**: Not currently
+   planned. Significant implementation effort for GPU-based special functions.
 
 10. **Subscripted variable names in blocks**: Allow `r_1 \coloneq expr` to
     define a variable named `r_1` rather than parsing as `Subscript(r, 1)`. This
-    is common in mathematical notation for intermediate values.
+    is common in mathematical notation for intermediate values. **Open — design
+    decision needed.** This intersects with how CE handles subscripts
+    generally (indexing vs. variable naming). Use simple identifiers (`a`, `b`,
+    `s`) for now.

@@ -4,7 +4,7 @@ describe('BLOCK - SERIALIZATION', () => {
   test('Block with Declare, Assign, and body', () => {
     expect(
       latex(['Block', ['Declare', 'x'], ['Assign', 'x', 5], ['Add', 'x', 1]])
-    ).toMatchInlineSnapshot(`x\\coloneq5;\\; x+1`);
+    ).toMatchInlineSnapshot(`x\\coloneq5; x+1`);
   });
 
   test('Block with multiple assignments', () => {
@@ -17,12 +17,20 @@ describe('BLOCK - SERIALIZATION', () => {
         ['Assign', 'b', 2],
         ['Add', 'a', 'b'],
       ])
-    ).toMatchInlineSnapshot(`a\\coloneq1;\\; b\\coloneq2;\\; a+b`);
+    ).toMatchInlineSnapshot(`a\\coloneq1; b\\coloneq2; a+b`);
   });
 
   test('Block round-trip via semicolons', () => {
     const input = 'x \\coloneq 5; x + 1';
     const parsed = ce.parse(input);
-    expect(parsed.latex).toMatchInlineSnapshot(`x\\coloneq5;\\; x+1`);
+    expect(parsed.latex).toMatchInlineSnapshot(`x\\coloneq5; x+1`);
+  });
+
+  test('Block round-trip: serialize → re-parse produces same expression', () => {
+    const input = 'a \\coloneq x^2; a + 1';
+    const parsed = ce.parse(input);
+    const serialized = parsed.latex;
+    const reparsed = ce.parse(serialized);
+    expect(reparsed.json).toEqual(parsed.json);
   });
 });

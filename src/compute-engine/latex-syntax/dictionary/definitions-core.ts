@@ -63,6 +63,7 @@ function parseSequence(
       result.push('Nothing');
       parser.skipSpace();
     }
+    parser.skipVisualSpace();
 
     if (parser.atTerminator(terminator)) {
       result.push('Nothing');
@@ -74,6 +75,7 @@ function parseSequence(
     if (!done) {
       parser.skipSpace();
       done = !parser.match(sep);
+      if (!done) parser.skipVisualSpace();
     }
   }
 
@@ -806,7 +808,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       const parts = args
         .filter((a) => operator(a) !== 'Declare')
         .map((a) => serializer.serialize(a));
-      return parts.join(';\\; ');
+      return parts.join('; ');
     },
   },
   // Serializer for If expressions (separate from the parser entry
@@ -2026,6 +2028,7 @@ function matchTextKeyword(parser: Parser, keyword: string): boolean {
  */
 function matchKeyword(parser: Parser, keyword: string): boolean {
   const start = parser.index;
+  parser.skipVisualSpace();
 
   // Try \text{keyword} — need to check for \text trigger first
   if (parser.match('\\text')) {

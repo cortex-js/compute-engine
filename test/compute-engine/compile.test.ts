@@ -78,6 +78,30 @@ describe('COMPILE', () => {
         })()
       `);
     });
+
+    it('should compile a block with Nothing operands (defense-in-depth)', () => {
+      const expr = ce.box([
+        'Block',
+        ['Declare', 'a', 'Numbers'],
+        ['Assign', 'a', ['Square', 'x']],
+        'Nothing',
+        ['Add', 'a', 1],
+      ]);
+      expect(compile(expr)?.code ?? '').toMatchInlineSnapshot(`
+        (() => {
+        let a;
+        a = Math.pow(_.x, 2);
+        return a + 1
+        })()
+      `);
+    });
+
+    it('should compile a semicolon block parsed from LaTeX with \\;', () => {
+      const expr = ce.parse('a \\coloneq x^2;\\; (a+1)');
+      const result = compile(expr);
+      expect(result?.success).toBe(true);
+      expect(result?.code).toBeTruthy();
+    });
   });
 
   describe('Imported Functions', () => {
