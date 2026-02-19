@@ -185,6 +185,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     // Functions
     //
     Abs: {
+      description: 'Absolute value (magnitude) of a number.',
       wikidata: 'Q3317982', // magnitude 'Q120812 (for reals)
       broadcastable: true,
       idempotent: true,
@@ -201,6 +202,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
 
     Add: {
+      description: 'Sum of two or more values.',
       wikidata: 'Q32043',
       associative: true,
       commutative: true,
@@ -266,6 +268,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
 
     Chop: {
+      description: 'Replace tiny numeric values with zero.',
       associative: true,
       broadcastable: true,
       idempotent: true,
@@ -292,6 +295,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     // },
 
     Divide: {
+      description: 'Quotient of a numerator and one or more denominators.',
       wikidata: 'Q1226939',
       complexity: 2500,
       broadcastable: true,
@@ -350,6 +354,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
 
     Exp: {
+      description: 'Natural exponential function: e^x.',
       wikidata: 'Q168698',
       broadcastable: true,
       complexity: 3500,
@@ -504,6 +509,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
 
     Floor: {
+      description: 'Rounds a number down to the nearest integer.',
       wikidata: 'Q56860783',
       complexity: 1250,
       broadcastable: true,
@@ -548,6 +554,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
 
     Gamma: {
+      description: 'Gamma function, extending factorial to complex numbers.',
       wikidata: 'Q190573',
       complexity: 8000,
       broadcastable: true,
@@ -568,6 +575,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
 
     GammaLn: {
+      description: 'Natural logarithm of the gamma function.',
       complexity: 8000,
       broadcastable: true,
       signature: '(number) -> number',
@@ -918,6 +926,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
 
     Multiply: {
+      description: 'Product of two or more values.',
       wikidata: 'Q40276',
       associative: true,
       commutative: true,
@@ -1033,6 +1042,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
 
     Power: {
+      description: 'Exponentiation: raise a base to a power.',
       wikidata: 'Q33456',
       broadcastable: true,
       complexity: 3500,
@@ -1116,6 +1126,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
 
     Rational: {
+      description: 'Construct a rational number from a numerator and denominator.',
       complexity: 2400,
 
       signature: '(number, integer?) -> rational',
@@ -1164,6 +1175,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
 
     Root: {
+      description: 'n-th root of a value.',
       complexity: 3200,
       broadcastable: true,
 
@@ -1231,6 +1243,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
 
     Round: {
+      description: 'Rounds a number to the nearest integer.',
       complexity: 1250,
       broadcastable: true,
       signature: '(number) -> integer',
@@ -1264,6 +1277,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
     /** Heaviside step function: H(x) = 0 for x < 0, 1/2 for x = 0, 1 for x > 0 */
     Heaviside: {
+      description: 'Heaviside step function.',
       complexity: 1200,
       broadcastable: true,
       signature: '(number) -> real',
@@ -1278,6 +1292,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
 
     Sign: {
+      description: 'Sign of a number: -1, 0, or 1.',
       complexity: 1200,
       broadcastable: true,
       signature: '(number) -> integer',
@@ -1362,6 +1377,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
 
     Square: {
+      description: 'Square of a number: x^2.',
       wikidata: 'Q3075175',
       complexity: 3100,
       broadcastable: true,
@@ -1387,6 +1403,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
 
     Subtract: {
+      description: 'Difference between two or more values.',
       wikidata: 'Q40754',
       complexity: 1350,
       broadcastable: true,
@@ -1575,9 +1592,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
   {
     PreIncrement: {
+      description: 'Increment a number by one.',
       signature: '(number) -> number',
     },
     PreDecrement: {
+      description: 'Decrement a number by one.',
       signature: '(number) -> number',
     },
   },

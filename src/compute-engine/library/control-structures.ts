@@ -15,6 +15,7 @@ import { isFunction, isSymbol, sym } from '../boxed-expression/type-guards';
 export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
   {
     Block: {
+      description: 'Evaluate a sequence of expressions in a local scope.',
       lazy: true,
       scoped: true,
       signature: '(unknown*) -> unknown',
@@ -29,6 +30,7 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
     // A condition expression tests for one or more conditions of an expression
     // ['Condition', value, "positive"]
     Condition: {
+      description: 'Test whether a value satisfies one or more conditions.',
       lazy: true,
       signature: '(value, symbol) -> boolean',
       evaluate: ([value, conds], { engine }) => {
@@ -44,6 +46,7 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
     },
 
     If: {
+      description: 'Conditional branch: evaluate one of two expressions.',
       lazy: true,
       signature: '(expression, expression, expression) -> any',
       type: ([_cond, ifTrue, ifFalse]) =>
@@ -63,6 +66,7 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
     },
 
     Loop: {
+      description: 'Evaluate a body expression over elements of a collection.',
       lazy: true,
       signature: '(body:expression, collection:expression) -> any',
       type: ([body]) => body.type,
@@ -73,6 +77,7 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
     },
 
     Which: {
+      description: 'Return the value for the first condition that is true.',
       lazy: true,
       signature: '(expression+) -> unknown',
       type: (args) => {
@@ -91,7 +96,11 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
       evaluate: (ops, options) => evaluateWhich(ops, options),
     },
 
-    FixedPoint: { lazy: true, signature: '(any) -> unknown' },
+    FixedPoint: {
+      description: 'Iterate a function until a fixed point is reached.',
+      lazy: true,
+      signature: '(any) -> unknown',
+    },
   },
 ];
 

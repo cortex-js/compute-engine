@@ -141,6 +141,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
      *
      */
     InvisibleOperator: {
+      description:
+        'Implicit operator used for juxtapositions such as function application or multiplication.',
       complexity: 9000,
       lazy: true,
       signature: 'function',
@@ -160,6 +162,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
 
     /** See above for a theory of operations */
     Sequence: {
+      description: 'Ordered sequence of expressions.',
       lazy: true,
       signature: 'function',
       type: (args) => {
@@ -177,6 +180,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
 
     /** See above for a theory of operations */
     Delimiter: {
+      description: 'Group expressions with explicit delimiters.',
       // Use to represent groups of expressions.
       // Named after https://en.wikipedia.org/wiki/Delimiter
       complexity: 9000,
@@ -254,6 +258,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     },
 
     Error: {
+      description: 'Represent an error expression.',
       /**
        * - The first argument is either a string or an `["ErrorCode"]`
        * expression indicating the nature of the error.
@@ -269,6 +274,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     },
 
     ErrorCode: {
+      description: 'Structured error code with optional arguments.',
       complexity: 500,
       lazy: true,
       signature: '(string, any*) -> error',
@@ -331,6 +337,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     },
 
     HorizontalSpacing: {
+      description: 'Horizontal spacing annotation.',
       signature: '(number) -> nothing',
       canonical: (args, { engine: ce }) => {
         if (args.length === 2) return args[0].canonical;
@@ -340,6 +347,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     },
 
     Annotated: {
+      description: 'Attach metadata or style annotations to an expression.',
       signature: '(expression, dictionary) -> expression',
       type: ([x]) => x.type,
       complexity: 9000,
@@ -624,6 +632,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     },
 
     Declare: {
+      description: 'Declare a symbol and optionally assign a type.',
       lazy: true,
       pure: false,
       signature: '(symbol, type: string | symbol) -> nothing',
@@ -664,6 +673,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
 
     /** Return the type of an expression */
     Type: {
+      description: 'Return the type of an expression as a string.',
       lazy: true,
       signature: '(any) -> string',
       evaluate: ([x], { engine: ce }) =>
@@ -671,6 +681,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     },
 
     Evaluate: {
+      description: 'Evaluate an expression.',
       lazy: true,
       signature: '(any) -> unknown',
       type: ([x]) => x.type,
@@ -682,6 +693,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     // Evaluate an expression at a specific point, potentially symbolically
     // i.e. it's the `f|_{a}` notation
     EvaluateAt: {
+      description: 'Evaluate a function at one point or between two bounds.',
       lazy: true,
       signature: '(function, lower:number, upper:number) -> number',
       type: ([x]) => functionResult(x.type.type) ?? 'number',
@@ -724,6 +736,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     },
 
     BuiltinFunction: {
+      description: 'Return a built-in function symbol by name.',
       complexity: 9876,
       lazy: true,
       signature: '(symbol | string) -> symbol',
@@ -756,6 +769,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     },
 
     Rule: {
+      description: 'Pattern replacement rule.',
       lazy: true,
       signature:
         '(match: expression, replace: expression, predicate: function?) -> expression',
@@ -765,6 +779,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     },
 
     Simplify: {
+      description: 'Simplify an expression.',
       lazy: true,
       signature: '(any) -> expression',
 
@@ -851,6 +866,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
 
     // @todo: need review
     Signature: {
+      description: 'Return the signature string of an operator.',
       lazy: true,
       signature: '(symbol) -> string | nothing',
       evaluate: ([x], { engine: ce }) => {
@@ -861,6 +877,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     },
 
     Subscript: {
+      description: 'Subscript notation for indexing or compound symbols.',
       /**
        * The `Subscript` function can take several forms:
        *
@@ -1134,6 +1151,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
   //
   {
     Wildcard: {
+      description: 'Single-expression pattern wildcard.',
       signature: '(symbol) -> symbol',
       canonical: (args, { engine: ce }) => {
         if (args.length !== 1) return ce.symbol('_');
@@ -1141,6 +1159,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       },
     },
     WildcardSequence: {
+      description: 'Pattern wildcard matching one or more expressions.',
       signature: '(symbol) -> symbol',
       canonical: (args, { engine: ce }) => {
         if (args.length !== 1) return ce.symbol('__');
@@ -1148,6 +1167,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       },
     },
     WildcardOptionalSequence: {
+      description: 'Pattern wildcard matching zero or more expressions.',
       signature: '(symbol) -> symbol',
       canonical: (args, { engine: ce }) => {
         if (args.length !== 1) return ce.symbol('___');
@@ -1411,6 +1431,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
   },
   {
     RandomExpression: {
+      description: 'Generate a random expression.',
       signature: '() -> expression',
       evaluate: (_ops, { engine }) => engine.box(randomExpression()),
     },

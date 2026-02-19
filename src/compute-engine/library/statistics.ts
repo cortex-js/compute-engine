@@ -30,6 +30,7 @@ import { isFunction } from '../boxed-expression/type-guards';
 export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
   {
     Erf: {
+      description: 'Gauss error function',
       complexity: 7500,
       signature: '(number) -> number',
       type: () => 'finite_real',
@@ -41,6 +42,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
     },
 
     Erfc: {
+      description: 'Complementary error function: 1 - Erf(x)',
       complexity: 7500,
       signature: '(number) -> number',
       type: () => 'finite_real',
@@ -52,6 +54,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
     },
 
     ErfInv: {
+      description: 'Inverse of the error function',
       complexity: 7500,
       signature: '(number) -> number',
       type: () => 'finite_real',
@@ -71,7 +74,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       broadcastable: false,
       signature: '((collection|number)+) -> number',
       type: () => 'finite_real',
-      description: 'The most frequently occurring value in the collection.',
+      description: 'Arithmetic mean of a collection of numbers.',
       evaluate: (ops, { engine, numericApproximation }) => {
         const xs = ops.map((x) => x.evaluate({ numericApproximation }));
         return engine.number(
@@ -87,7 +90,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       broadcastable: false,
       signature: '((collection|number)+) -> number',
       type: () => 'finite_real',
-      description: 'The most frequently occurring value in the collection.',
+      description: 'Median of a collection of numbers.',
       examples: ['Mode([1, 2, 2, 3])  // Returns 2'],
       evaluate: (ops, { engine, numericApproximation }) => {
         const xs = ops.map((x) => x.evaluate({ numericApproximation }));
@@ -100,6 +103,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
     },
 
     Variance: {
+      description: 'Sample variance of a collection of numbers.',
       complexity: 1200,
       broadcastable: false,
       signature: '((collection|number)+) -> number',
@@ -115,6 +119,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
     },
 
     PopulationVariance: {
+      description: 'Population variance of a collection of numbers.',
       complexity: 1200,
       broadcastable: false,
       signature: '((collection|number)+) -> number',
@@ -171,6 +176,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
     },
 
     Kurtosis: {
+      description: 'Kurtosis of a collection of numbers.',
       complexity: 1200,
       broadcastable: false,
       signature: '((collection|number)+) -> number',
@@ -186,6 +192,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
     },
 
     Skewness: {
+      description: 'Skewness of a collection of numbers.',
       complexity: 1200,
       broadcastable: false,
       signature: '((collection|number)+) -> number',
@@ -201,6 +208,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
     },
 
     Mode: {
+      description: 'Most frequently occurring value in a collection.',
       complexity: 1200,
       broadcastable: false,
       signature: '((collection|number)+) -> number',
@@ -216,6 +224,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
     },
 
     Quartiles: {
+      description: 'Lower quartile, median, and upper quartile of a collection.',
       complexity: 1200,
       broadcastable: false,
       signature:
@@ -233,6 +242,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
     },
 
     InterquartileRange: {
+      description: 'Interquartile range (Q3 - Q1) of a collection.',
       complexity: 1200,
       broadcastable: false,
       signature: '((collection|number)+) -> number',

@@ -56,6 +56,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
   },
   {
     Degrees: {
+      description: 'Convert an angle in degrees.',
       /* = Pi / 180 */
       signature: '(real) -> real',
       type: () => 'finite_real',
@@ -92,6 +93,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
 
     // DMS(degrees, minutes?, seconds?) — programmatic angle construction
     DMS: {
+      description: 'Construct an angle from degrees, minutes, and seconds.',
       signature: '(real, real?, real?) -> real',
       type: () => 'finite_real',
       canonical: (ops, { engine: ce }) => {
@@ -120,6 +122,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
 
     // Hypot: sqrt(x*x + y*y)
     Hypot: {
+      description: 'Hypotenuse length: sqrt(x^2 + y^2).',
       broadcastable: true,
       signature: '(real, real) -> real',
       type: () => 'finite_real',
@@ -138,6 +141,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
     // (may be used in the definition of other functions below)
     //
     Arctan: {
+      description: 'Inverse tangent.',
       wikidata: 'Q2257242',
       complexity: 5200,
       broadcastable: true,
@@ -151,6 +155,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
     },
 
     Arctan2: {
+      description: 'Two-argument arctangent giving the angle of a vector.',
       wikidata: 'Q776598',
       complexity: 5200,
       broadcastable: true,
@@ -210,6 +215,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
 
     /** = sin(z/2)^2 = (1 - cos z) / 2*/
     Haversine: {
+      description: 'Haversine function.',
       wikidata: 'Q2528380',
       broadcastable: true,
       signature: '(real) -> number',
@@ -220,6 +226,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
 
     /** = 2 * Arcsin(Sqrt(z)) */
     InverseHaversine: {
+      description: 'Inverse haversine function.',
       //  Range ['Interval', [['Negate', 'Pi'], 'Pi'],
       broadcastable: true,
       signature: '(real) -> real',
@@ -254,6 +261,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
 
     /** sinc(x) = sin(x)/x with sinc(0) = 1 (unnormalized cardinal sine) */
     Sinc: {
+      description: 'Unnormalized sinc function: sin(x)/x with sinc(0)=1.',
       complexity: 5100,
       broadcastable: true,
       signature: '(number) -> real',
@@ -266,6 +274,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
 
     /** FresnelS(x) = ∫₀ˣ sin(πt²/2) dt — odd function, S(∞) = 1/2 */
     FresnelS: {
+      description: 'Fresnel sine integral.',
       complexity: 5200,
       broadcastable: true,
       signature: '(number) -> real',
@@ -278,6 +287,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
 
     /** FresnelC(x) = ∫₀ˣ cos(πt²/2) dt — odd function, C(∞) = 1/2 */
     FresnelC: {
+      description: 'Fresnel cosine integral.',
       complexity: 5200,
       broadcastable: true,
       signature: '(number) -> real',
@@ -294,6 +304,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
     //   outputDomain: ['TupleOf', 'RealNumbers', 'RealNumbers'],
     // },
     InverseFunction: {
+      description: 'Inverse of a function.',
       lazy: true,
       signature: '(function) -> function',
       canonical: (ops, { engine }) => {

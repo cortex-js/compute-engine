@@ -6,6 +6,8 @@ import { isFunction } from '../boxed-expression/type-guards';
 export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
   {
     Choose: {
+      description:
+        'Binomial coefficient: number of ways to choose k items from n.',
       complexity: 1200,
       signature: '(n:number, m:number) -> number',
       type: () => 'finite_integer',

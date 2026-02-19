@@ -103,6 +103,7 @@ volumes
     // with values of the order that can be either fractional or negative
     //
     Derivative: {
+      description: 'Derivative operator that returns a derivative function.',
       broadcastable: false,
 
       lazy: true,
@@ -133,6 +134,8 @@ volumes
     // This is equivalent to `["Apply", ["Derivative", "Sin"], "x"]`
 
     D: {
+      description:
+        'Symbolic partial derivative with respect to one or more variables.',
       broadcastable: false,
 
       scoped: true,
@@ -204,6 +207,7 @@ volumes
 
     // Evaluate a numerical approximation of a derivative at point x
     ND: {
+      description: 'Numerical derivative evaluated at a point.',
       broadcastable: false,
       lazy: true,
       signature: '(function, at:number) -> number',
@@ -225,6 +229,7 @@ volumes
     },
 
     Integrate: {
+      description: 'Symbolic integral with optional bounds.',
       wikidata: 'Q80091',
       broadcastable: false,
 
@@ -336,6 +341,7 @@ volumes
     },
 
     NIntegrate: {
+      description: 'Numerical approximation of a definite integral.',
       broadcastable: false,
       lazy: true,
       signature: '(function, limits:(tuple|symbol)?) -> number',

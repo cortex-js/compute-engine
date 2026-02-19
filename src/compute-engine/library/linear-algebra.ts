@@ -20,6 +20,7 @@ import {
 export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
   {
     Matrix: {
+      description: 'Matrix constructor and canonicalizer.',
       complexity: 9000,
       lazy: true,
       signature: '(matrix, string?, string?) -> matrix',
@@ -30,6 +31,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     // Vector is a specialized collection to represent a column vector.
     // ["Vector", a, b, c] is a shorthand for ["List", ["List", a], ["List", b], ["List", c]]
     Vector: {
+      description: 'Construct a column vector.',
       complexity: 9000,
       lazy: true,
       signature: '(number+) -> vector',
@@ -52,6 +54,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
   {
     // Corresponds to monadic Shape `⍴` in APL
     Shape: {
+      description: 'Return the shape tuple of an expression.',
       complexity: 8200,
       signature: '(value) -> tuple',
       evaluate: ([xs], { engine: ce }) => ce.tuple(...xs.shape),
@@ -69,6 +72,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     // Corresponds to ArrayReshape in Mathematica
     // and dyadic Shape `⍴` in APL
     Reshape: {
+      description: 'Reshape a tensor or collection to a target shape.',
       complexity: 8200,
       signature: '(value, tuple) -> value',
       type: ([value, shape]) => {
@@ -131,6 +135,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     // Corresponds to Ravel `,` in APL
     // Also Enlist `∊``⍋` in APL
     Flatten: {
+      description: 'Flatten a tensor or collection into a list.',
       complexity: 8200,
       signature: '(value) -> list',
       evaluate: (ops, { engine: ce }) => {
@@ -156,6 +161,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     // Ex: Transpose([[a, b, c], [1, 2, 3]]) = [[a, 1], [b, 2], [c, 3]]
     // For rank > 2: Default swaps last two axes, or specify explicit axes
     Transpose: {
+      description: 'Transpose a matrix or swap two tensor axes.',
       complexity: 8200,
       signature: '(value, axis1: integer?, axis2: integer?) -> value',
       evaluate: (ops, { engine: ce }) => {
@@ -196,6 +202,8 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     // Conjugate transpose (Hermitian adjoint): transpose + complex conjugate
     // For rank > 2: Default swaps last two axes, or specify explicit axes
     ConjugateTranspose: {
+      description:
+        'Conjugate transpose (Hermitian adjoint) of a matrix or tensor.',
       complexity: 8200,
       signature: '(value, axis1: integer?, axis2: integer?) -> value',
       evaluate: (ops, { engine: ce }) => {
@@ -237,6 +245,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     },
 
     Determinant: {
+      description: 'Determinant of a square matrix.',
       complexity: 8200,
       signature: '(matrix) -> number',
       evaluate: (ops, { engine: ce }) => {
@@ -265,6 +274,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     },
 
     Inverse: {
+      description: 'Multiplicative inverse of a square matrix.',
       complexity: 8200,
       signature: '(matrix) -> matrix',
       type: ([matrix]) => matrix.type,
@@ -294,6 +304,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     },
 
     PseudoInverse: {
+      description: 'Moore-Penrose pseudoinverse of a matrix.',
       complexity: 8200,
       signature: '(matrix) -> matrix',
       evaluate: ([matrix], { engine: ce }) => {
@@ -325,6 +336,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     // },
 
     AdjugateMatrix: {
+      description: 'Adjugate (classical adjoint) of a square matrix.',
       complexity: 8200,
       signature: '(matrix) -> matrix',
       evaluate: (ops) => {
@@ -353,6 +365,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     // For rank > 2 tensors: returns tensor of traces over last two axes (batch trace)
     // Optional axis1, axis2 to specify which axes to trace over (default: last two)
     Trace: {
+      description: 'Trace of a matrix or pair of tensor axes.',
       complexity: 8200,
       signature: '(value, axis1: integer?, axis2: integer?) -> value',
       evaluate: (ops, { engine: ce }) => {
@@ -511,6 +524,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     // Matrix multiplication: A (m×n) × B (n×p) → result (m×p)
     // Handles matrix × matrix, matrix × vector, vector × matrix
     MatrixMultiply: {
+      description: 'Matrix and vector multiplication.',
       complexity: 8300,
       signature: '(matrix|vector, matrix|vector) -> matrix|vector',
       evaluate: (ops, { engine: ce }): Expression | undefined => {
@@ -616,6 +630,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     // 2. Extract the diagonal from a matrix as a vector
     // 3. For a scalar, return the scalar (or could create 1x1 matrix)
     Diagonal: {
+      description: 'Extract a matrix diagonal or build a diagonal matrix.',
       complexity: 8200,
       signature: '(value) -> value',
       evaluate: (ops, { engine: ce }) => {
@@ -663,6 +678,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
 
     // Creates an n×n identity matrix
     IdentityMatrix: {
+      description: 'n-by-n identity matrix.',
       complexity: 8100,
       signature: '(integer) -> matrix',
       evaluate: (ops, { engine: ce }): Expression | undefined => {
@@ -686,6 +702,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
 
     // Creates an m×n matrix of zeros
     ZeroMatrix: {
+      description: 'Matrix filled with zeros.',
       complexity: 8100,
       signature: '(integer, integer?) -> matrix',
       evaluate: (ops, { engine: ce }): Expression | undefined => {
@@ -718,6 +735,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
 
     // Creates an m×n matrix of ones
     OnesMatrix: {
+      description: 'Matrix filled with ones.',
       complexity: 8100,
       signature: '(integer, integer?) -> matrix',
       evaluate: (ops, { engine: ce }): Expression | undefined => {
@@ -757,6 +775,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     // For matrices:
     //   - Frobenius (default): √(ΣΣ|aij|²)
     Norm: {
+      description: 'Vector or matrix norm.',
       complexity: 8200,
       signature: '(value, number|string?) -> number',
       evaluate: (ops, { engine: ce }): Expression | undefined => {
@@ -918,6 +937,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     // For 2×2 matrices: uses characteristic polynomial (symbolic)
     // For larger matrices: uses QR algorithm (numeric)
     Eigenvalues: {
+      description: 'Eigenvalues of a square matrix.',
       complexity: 8500,
       signature: '(matrix) -> list',
       evaluate: (ops, { engine: ce }): Expression | undefined => {
@@ -985,6 +1005,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     // Compute the eigenvectors of a square matrix
     // Returns a list of eigenvectors (as column vectors)
     Eigenvectors: {
+      description: 'Eigenvectors of a square matrix.',
       complexity: 8600,
       signature: '(matrix) -> list',
       evaluate: (ops, { engine: ce }): Expression | undefined => {
@@ -1031,6 +1052,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     // Compute both eigenvalues and eigenvectors
     // Returns a tuple: [eigenvalues, eigenvectors]
     Eigen: {
+      description: 'Eigenvalue-eigenvector decomposition of a square matrix.',
       complexity: 8700,
       signature: '(matrix) -> tuple',
       evaluate: (ops, { engine: ce }): Expression | undefined => {
@@ -1057,6 +1079,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     // LU Decomposition: A = LU (or PA = LU with pivoting)
     // Returns [L, U] for no pivoting or [P, L, U] with pivoting
     LUDecomposition: {
+      description: 'LU decomposition of a square matrix.',
       complexity: 8600,
       signature: '(matrix) -> tuple',
       evaluate: (ops, { engine: ce }): Expression | undefined => {
@@ -1082,6 +1105,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     // QR Decomposition: A = QR
     // Returns [Q, R] where Q is orthogonal and R is upper triangular
     QRDecomposition: {
+      description: 'QR decomposition of a matrix.',
       complexity: 8600,
       signature: '(matrix) -> tuple',
       evaluate: (ops, { engine: ce }): Expression | undefined => {
@@ -1107,6 +1131,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     // Cholesky Decomposition: A = LL^T (for positive definite matrices)
     // Returns L (lower triangular matrix)
     CholeskyDecomposition: {
+      description: 'Cholesky decomposition of a positive-definite matrix.',
       complexity: 8600,
       signature: '(matrix) -> matrix',
       evaluate: (ops, { engine: ce }): Expression | undefined => {
@@ -1128,6 +1153,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     // Singular Value Decomposition: A = UΣV^T
     // Returns [U, Σ, V] where U and V are orthogonal, Σ is diagonal
     SVD: {
+      description: 'Singular value decomposition of a matrix.',
       complexity: 8700,
       signature: '(matrix) -> tuple',
       evaluate: (ops, { engine: ce }): Expression | undefined => {

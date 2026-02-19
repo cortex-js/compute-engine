@@ -7,6 +7,7 @@ import { isNumber } from '../boxed-expression/type-guards';
 export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
   {
     Real: {
+      description: 'Real part of a complex number.',
       // @todo: could be extended to return an expression, i.e. ["Real", ["Add", "x", ["Complex", 0, 5]]] -> "x". Not for any operator, but at least for Add, Multiply, Negate, etc.
       broadcastable: true,
       complexity: 1200,
@@ -26,6 +27,7 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
       },
     },
     Imaginary: {
+      description: 'Imaginary part of a complex number.',
       broadcastable: true,
       complexity: 1200,
       signature: '(number) -> real',
@@ -44,6 +46,7 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
       },
     },
     Argument: {
+      description: 'Complex argument (phase angle) of a number.',
       broadcastable: true,
       complexity: 1200,
       signature: '(number) -> real',
@@ -60,6 +63,7 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
     // For Abs (magnitude) see src/compute-engine/library/processAbs
 
     AbsArg: {
+      description: 'Tuple of magnitude and argument of a complex number.',
       broadcastable: true,
       complexity: 1200,
       signature: '(number) -> tuple<real, real>',
@@ -73,6 +77,7 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
     },
 
     Conjugate: {
+      description: 'Complex conjugate of a number.',
       broadcastable: true,
       complexity: 1200,
       signature: '(number) -> number',
@@ -87,6 +92,7 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
     },
 
     ComplexRoots: {
+      description: 'All n-th complex roots of a number.',
       broadcastable: true,
       complexity: 1200,
       signature: '(number, number) -> list<number>',
