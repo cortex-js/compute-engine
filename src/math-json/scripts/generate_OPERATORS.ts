@@ -3,7 +3,7 @@
 import { writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { getStandardLibrary } from '../compute-engine/library/library.ts';
+import { getStandardLibrary } from '../../compute-engine/library/library.js';
 
 const CATEGORY = {
   'core': 'Core',
@@ -23,6 +23,26 @@ const CATEGORY = {
   'statistics': 'Statistics',
   'units': 'Units',
   'physics': 'Physics',
+};
+
+const CATEGORY_DESCRIPTION = {
+  'Core': 'Foundational language and expression constructs.',
+  'Control Structures': 'Conditionals and structural evaluation forms.',
+  'Logic': 'Boolean logic and logical predicates.',
+  'Collections': 'Collection constructors and collection transforms.',
+  'Colors': 'Color models and color operations.',
+  'Relational Operators': 'Comparisons and relational predicates.',
+  'Arithmetic': 'Numeric arithmetic and elementary operations.',
+  'Other': 'Operators that do not belong to a standard category.',
+  'Trigonometry': 'Trigonometric and inverse trigonometric functions.',
+  'Calculus': 'Calculus operators such as differentiation and integration.',
+  'Polynomials': 'Polynomial algebra and polynomial analysis.',
+  'Combinatorics': 'Counting and combinatorial functions.',
+  'Number Theory': 'Integer arithmetic and number theoretic functions.',
+  'Linear Algebra': 'Vector, matrix, and tensor operations.',
+  'Statistics': 'Statistical functions and probability distributions.',
+  'Units': 'Unit and dimension-related operations.',
+  'Physics': 'Physical constants and physics-specific functions.',
 };
 
 function isObj(x) {
@@ -167,13 +187,50 @@ function buildPayload() {
   return { operators, constants };
 }
 
+function buildCategories(payload) {
+  const allCategories = new Set([
+    ...Object.values(CATEGORY),
+    ...payload.operators.map((x) => x.category),
+    ...payload.constants.map((x) => x.category),
+  ]);
+  const categoryNames = Array.from(allCategories).sort((a, b) =>
+    a.localeCompare(b)
+  );
+
+  const categories = {};
+  for (const category of categoryNames) {
+    categories[category] = {
+      description: CATEGORY_DESCRIPTION[category] ?? '',
+      operators: payload.operators
+        .filter((x) => x.category === category)
+        .map((x) => x.name)
+        .sort((a, b) => a.localeCompare(b)),
+      constants: payload.constants
+        .filter((x) => x.category === category)
+        .map((x) => x.name)
+        .sort((a, b) => a.localeCompare(b)),
+    };
+  }
+
+  return categories;
+}
+
 const here = dirname(fileURLToPath(import.meta.url));
 const outputPath = process.argv[2]
   ? resolve(process.cwd(), process.argv[2])
   : resolve(here, 'OPERATORS.json');
+const categoriesOutputPath = resolve(dirname(outputPath), 'CATEGORIES.json');
 const payload = buildPayload();
+const categoriesPayload = buildCategories(payload);
 
 writeFileSync(outputPath, JSON.stringify(payload, null, 2) + '\n');
+writeFileSync(
+  categoriesOutputPath,
+  JSON.stringify(categoriesPayload, null, 2) + '\n'
+);
 console.log(
   `Wrote ${outputPath} with ${payload.operators.length} operators and ${payload.constants.length} constants.`
+);
+console.log(
+  `Wrote ${categoriesOutputPath} with ${Object.keys(categoriesPayload).length} categories.`
 );

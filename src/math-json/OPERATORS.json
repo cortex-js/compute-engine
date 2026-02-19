@@ -452,8 +452,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "examples": ["BinCounts([1, 2, 2, 3], 3)  // Returns [1, 2, 1]"],
-      "description": "Count the number of elements falling into each bin."
+      "description": "Count the number of elements falling into each bin.",
+      "examples": [
+        "BinCounts([1, 2, 2, 3], 3)  // Returns [1, 2, 1]"
+      ]
     },
     {
       "name": "Binomial",
@@ -1678,10 +1680,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
+      "description": "Compute a histogram of the values in a collection. Returns a list of (bin start, count) tuples.",
       "examples": [
         "Histogram([1, 2, 2, 3], 3)  // Returns [(1,1), (1.6667,2), (2.3333,1)]"
-      ],
-      "description": "Compute a histogram of the values in a collection. Returns a list of (bin start, count) tuples."
+      ]
     },
     {
       "name": "Hold",
@@ -2514,8 +2516,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "examples": ["Mode([1, 2, 2, 3])  // Returns 2"],
-      "description": "Median of a collection of numbers."
+      "description": "Median of a collection of numbers.",
+      "examples": [
+        "Mode([1, 2, 2, 3])  // Returns 2"
+      ]
     },
     {
       "name": "Min",
@@ -3341,8 +3345,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "examples": ["Quartiles([1, 2, 3, 4, 5])  // Returns (3, 2, 4)"],
-      "description": "Lower quartile, median, and upper quartile of a collection."
+      "description": "Lower quartile, median, and upper quartile of a collection.",
+      "examples": [
+        "Quartiles([1, 2, 3, 4, 5])  // Returns (3, 2, 4)"
+      ]
     },
     {
       "name": "Random",
@@ -3840,10 +3846,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
+      "description": "Return overlapping sliding windows of fixed size over the collection.",
       "examples": [
         "SlidingWindow([1, 2, 3, 4], 2)  // Returns [[1,2], [2,3], [3,4]]"
-      ],
-      "description": "Return overlapping sliding windows of fixed size over the collection."
+      ]
     },
     {
       "name": "Sort",
