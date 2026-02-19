@@ -1,5 +1,10 @@
 ### [Unreleased]
 
+- **Fix recursive GLSL gamma function**: The `_gpu_gamma()` preamble in the GPU
+  and interval-GLSL compilation targets used recursion for the reflection formula
+  (z < 0.5), which is illegal in GLSL. Replaced with a non-recursive
+  implementation that inlines the Lanczos approximation for both branches.
+
 - **Non-strict parser supports exponents on bare functions**: In non-strict mode
   (`strict: false`), bare function names like `sin`, `cos`, `tan` can now
   include an exponent before the argument list. For example, `sin^2(x)` and
