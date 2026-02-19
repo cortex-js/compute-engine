@@ -665,12 +665,14 @@ compiled expression actually references).
 > but the function is now GLSL-legal. Your `sanitizeIntervalPreamble()` workaround
 > should no longer be necessary, though keeping it as a safety net is fine.
 >
-> Regarding selective preamble emission: the `glsl` target already does this for
-> complex-number helpers (via `buildComplexPreamble()` which scans the compiled
-> code for `_gpu_c*` calls and resolves transitive dependencies). The
-> `interval-glsl` target still emits the full library monolithically. Making it
-> selective is on our radar but is a larger refactoring effort — the full library
-> approach ensures correctness while we work toward that.
+> **Update:** Selective preamble emission is now implemented for `interval-glsl`.
+> The monolithic ~29KB `GLSL_INTERVAL_LIBRARY` string has been replaced with a
+> per-function registry (`GLSL_IA_FUNCTIONS`) where each entry declares its GLSL
+> source and dependency list. The new `buildIntervalPreamble(code)` function scans
+> compiled GLSL code for referenced `ia_*` functions, resolves transitive
+> dependencies, and emits only needed functions in topological order. A lightweight
+> foundation (~100 lines: struct, constants, constructors) is always included.
+> For a simple expression like `x + 1`, the preamble drops from ~29KB to ~1KB.
 
 ## Conversion Patterns
 
@@ -945,8 +947,8 @@ plotting integration. Ordered by impact.
 
    > **CE Response: Fixed.** `_gpu_gamma()` in both the GLSL and interval-GLSL
    > preambles now uses a non-recursive Lanczos implementation that inlines the
-   > reflection formula. Selective preamble emission for interval-GLSL is on our
-   > radar but deferred. See gap #8 for details.
+   > reflection formula. Selective preamble emission for interval-GLSL is now
+   > also implemented. See gap #8 for details.
 
 6. **Warn on `success: false` fallback**: When compilation fails but `run` is
    still set (interpreter fallback), emit a console warning. The current silent

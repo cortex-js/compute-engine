@@ -43,6 +43,15 @@
   is illegal in GLSL. Replaced with a non-recursive Lanczos implementation that
   inlines the computation for both `z >= 0.5` and `z < 0.5` branches.
 
+- **Selective preamble emission for `interval-glsl` target**: The monolithic
+  ~29KB `GLSL_INTERVAL_LIBRARY` string has been replaced with a per-function
+  registry (`GLSL_IA_FUNCTIONS`). Each entry declares its GLSL source and
+  dependency list. The new `buildIntervalPreamble()` function scans compiled code
+  for referenced `ia_*` functions, resolves transitive dependencies, and emits
+  only needed functions in topological (dependency-first) order. A lightweight
+  foundation (~100 lines) is always included. This matches the pattern already
+  used for complex-number helpers via `buildComplexPreamble()`.
+
 - **Sum/Product with symbolic bounds compiled incorrectly**: Expressions like
   `\sum_{k=0}^{n} f(k, x)` where the upper bound is a variable produced loops
   that iterated 10001 times instead of using the variable `n`. The compilation
