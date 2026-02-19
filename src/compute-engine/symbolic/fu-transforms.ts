@@ -1263,11 +1263,17 @@ export function TR11i(expr: Expression): Expression | undefined {
 
     // Check: 2cos^2(x) + (-1) or (-1) + 2cos^2(x)
     let cosArg = extractTwoCosSq(a);
-    if (cosArg && (b.isSame(-1) || (isFunction(b, 'Negate') && b.op1?.isSame(1)))) {
+    if (
+      cosArg &&
+      (b.isSame(-1) || (isFunction(b, 'Negate') && b.op1?.isSame(1)))
+    ) {
       return ce._fn('Cos', [cosArg.mul(2)]);
     }
     cosArg = extractTwoCosSq(b);
-    if (cosArg && (a.isSame(-1) || (isFunction(a, 'Negate') && a.op1?.isSame(1)))) {
+    if (
+      cosArg &&
+      (a.isSame(-1) || (isFunction(a, 'Negate') && a.op1?.isSame(1)))
+    ) {
       return ce._fn('Cos', [cosArg.mul(2)]);
     }
 

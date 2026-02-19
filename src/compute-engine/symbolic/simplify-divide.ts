@@ -117,7 +117,8 @@ export function simplifyDivide(x: Expression): RuleStep | undefined {
       // Rational cases are already handled by canonicalization
       if (!asRational(numExp!) || !asRational(denomExp!)) {
         const diffExp = ce.function('Add', [numExp!, denomExp!.neg()]);
-        if (diffExp.isSame(0)) return { value: ce.One, because: 'x^a/x^a -> 1' };
+        if (diffExp.isSame(0))
+          return { value: ce.One, because: 'x^a/x^a -> 1' };
         if (diffExp.isSame(1))
           return { value: numBase, because: 'x^a/x^b -> x when a-b=1' };
         return {

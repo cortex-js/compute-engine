@@ -554,7 +554,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       signature: '(number) -> number',
       type: (ops) => numericTypeHandler(ops),
 
-      sgn: ([x]) => (x.isPositive ? 'positive' : x.isSame(0) ? 'zero' : undefined),
+      sgn: ([x]) =>
+        x.isPositive ? 'positive' : x.isSame(0) ? 'zero' : undefined,
       evaluate: ([x], { numericApproximation, engine }) =>
         numericApproximation
           ? apply(

@@ -137,7 +137,11 @@ export function simplifySum(x: Expression): RuleStep | undefined {
     let hasAlternating = false;
     let hasIndex = false;
     for (const op of body.ops) {
-      if (isFunction(op, 'Power') && op.op1.isSame(-1) && sym(op.op2) === index) {
+      if (
+        isFunction(op, 'Power') &&
+        op.op1.isSame(-1) &&
+        sym(op.op2) === index
+      ) {
         hasAlternating = true;
       } else if (sym(op) === index) {
         hasIndex = true;
@@ -255,7 +259,11 @@ export function simplifySum(x: Expression): RuleStep | undefined {
   }
 
   // Sum of binomial coefficients: Sum(C(n,k), [k, 0, n]) → 2^n
-  if (isFunction(body, 'Binomial') && lower.isSame(0) && sym(body.op2) === index) {
+  if (
+    isFunction(body, 'Binomial') &&
+    lower.isSame(0) &&
+    sym(body.op2) === index
+  ) {
     const n = body.op1;
     // Check if upper bound equals n (the first argument of Binomial)
     if (n && upper.isSame(n)) {
@@ -326,7 +334,11 @@ export function simplifySum(x: Expression): RuleStep | undefined {
     hasBinomial = false;
 
     for (const op of body.ops) {
-      if (isFunction(op, 'Power') && sym(op.op1) === index && op.op2.isSame(2)) {
+      if (
+        isFunction(op, 'Power') &&
+        sym(op.op1) === index &&
+        op.op2.isSame(2)
+      ) {
         hasIndexSquared = true;
       } else if (isFunction(op, 'Binomial') && sym(op.op2) === index) {
         hasBinomial = true;
@@ -357,7 +369,11 @@ export function simplifySum(x: Expression): RuleStep | undefined {
     hasBinomial = false;
 
     for (const op of body.ops) {
-      if (isFunction(op, 'Power') && sym(op.op1) === index && op.op2.isSame(3)) {
+      if (
+        isFunction(op, 'Power') &&
+        sym(op.op1) === index &&
+        op.op2.isSame(3)
+      ) {
         hasIndexCubed = true;
       } else if (isFunction(op, 'Binomial') && sym(op.op2) === index) {
         hasBinomial = true;
@@ -389,7 +405,11 @@ export function simplifySum(x: Expression): RuleStep | undefined {
     hasBinomial = false;
 
     for (const op of body.ops) {
-      if (isFunction(op, 'Power') && op.op1.isSame(-1) && sym(op.op2) === index) {
+      if (
+        isFunction(op, 'Power') &&
+        op.op1.isSame(-1) &&
+        sym(op.op2) === index
+      ) {
         hasAltTerm = true;
       } else if (sym(op) === index) {
         hasIndexTerm = true;
@@ -434,7 +454,11 @@ export function simplifySum(x: Expression): RuleStep | undefined {
   }
 
   // Sum of k*(k+1): Sum(k*(k+1), [k, 1, n]) → n(n+1)(n+2)/3
-  if (isFunction(body, 'Multiply') && body.ops.length === 2 && lower.isSame(1)) {
+  if (
+    isFunction(body, 'Multiply') &&
+    body.ops.length === 2 &&
+    lower.isSame(1)
+  ) {
     const [op1, op2] = body.ops;
     // Check for k * (k+1) pattern
     const isKTimesKPlus1 =

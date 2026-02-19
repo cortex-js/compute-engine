@@ -154,7 +154,8 @@ export function simplifyProduct(x: Expression): RuleStep | undefined {
         isFunction(op, 'Multiply') &&
         op.ops.some((o) => o.isSame(-1)) &&
         op.ops.some(
-          (o) => isFunction(o, 'Power') && sym(o.op1) === index && o.op2.isSame(-2)
+          (o) =>
+            isFunction(o, 'Power') && sym(o.op1) === index && o.op2.isSame(-2)
         )
       ) {
         hasNegInvSq = true;
@@ -218,7 +219,11 @@ export function simplifyProduct(x: Expression): RuleStep | undefined {
   }
 
   // Double factorial (even): Product(2n, [n, 1, b]) → 2^b * b!
-  if (isFunction(body, 'Multiply') && body.ops.length === 2 && lower.isSame(1)) {
+  if (
+    isFunction(body, 'Multiply') &&
+    body.ops.length === 2 &&
+    lower.isSame(1)
+  ) {
     const [op1, op2] = body.ops;
     // Check for 2 * n or n * 2 pattern
     if (

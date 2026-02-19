@@ -588,10 +588,15 @@ export class BoxedNumber
 
     // With explicit tolerance, compare numerically
     if (typeof other === 'number') {
-      return Math.abs(this.re - other) <= tolerance && Math.abs(this.im) <= tolerance;
+      return (
+        Math.abs(this.re - other) <= tolerance && Math.abs(this.im) <= tolerance
+      );
     }
     if (typeof other === 'bigint') {
-      return Math.abs(this.re - Number(other)) <= tolerance && Math.abs(this.im) <= tolerance;
+      return (
+        Math.abs(this.re - Number(other)) <= tolerance &&
+        Math.abs(this.im) <= tolerance
+      );
     }
     if (other instanceof _BoxedExpression && isNumber(other)) {
       return (

@@ -630,7 +630,9 @@ function clearDenominators(expr: Expression, _variable?: string): Expression {
   if (ops.length === 0) return expr;
 
   // Collect all non-trivial denominators
-  const denominators = ops.map((op) => op.denominator).filter((d) => !d.isSame(1));
+  const denominators = ops
+    .map((op) => op.denominator)
+    .filter((d) => !d.isSame(1));
 
   if (denominators.length === 0) return expr;
 

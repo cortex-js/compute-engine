@@ -1622,7 +1622,7 @@ export class _Parser implements Parser {
           this.index++;
         }
         let digits = '';
-        while (!this.atEnd && /^[0-9]$/.test(this.peek))  {
+        while (!this.atEnd && /^[0-9]$/.test(this.peek)) {
           digits += this.peek;
           this.index++;
         }

@@ -225,7 +225,8 @@ export function getImaginaryFactor(
   if (isFunction(expr, 'Negate')) return getImaginaryFactor(expr.op1)?.neg();
 
   if (isFunction(expr, 'Complex')) {
-    if (expr.op1.isSame(0) && !isNaN(expr.op2.re)) return ce.number(expr.op2.re);
+    if (expr.op1.isSame(0) && !isNaN(expr.op2.re))
+      return ce.number(expr.op2.re);
     return undefined;
   }
 

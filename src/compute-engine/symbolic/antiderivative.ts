@@ -1729,7 +1729,8 @@ export function antiderivative(fn: Expression, index: string): Expression {
       const addOps = fn.op2.ops;
       // Check for x² + 1 form
       const powerTerm = addOps.find(
-        (op) => isFunction(op, 'Power') && sym(op.op1) === index && op.op2.isSame(2)
+        (op) =>
+          isFunction(op, 'Power') && sym(op.op1) === index && op.op2.isSame(2)
       );
       const oneTerm = addOps.find((op) => op.isSame(1));
       if (powerTerm && oneTerm) {
@@ -1759,7 +1760,9 @@ export function antiderivative(fn: Expression, index: string): Expression {
           const innerOps = sqrtInner.ops;
           const powerTerm = innerOps.find(
             (op) =>
-              isFunction(op, 'Power') && sym(op.op1) === index && op.op2.isSame(2)
+              isFunction(op, 'Power') &&
+              sym(op.op1) === index &&
+              op.op2.isSame(2)
           );
           const negOneTerm = innerOps.find((op) => op.isSame(-1));
           if (powerTerm && negOneTerm) {
@@ -2245,7 +2248,8 @@ export function antiderivative(fn: Expression, index: string): Expression {
 
       // Find x² term
       const x2Term = addOps.find(
-        (op) => isFunction(op, 'Power') && sym(op.op1) === index && op.op2.isSame(2)
+        (op) =>
+          isFunction(op, 'Power') && sym(op.op1) === index && op.op2.isSame(2)
       );
       // Find -x² term (for a² - x² patterns)
       const negX2Term = addOps.find(

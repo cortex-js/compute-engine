@@ -160,7 +160,11 @@ export const SIMPLIFY_RULES: Rule[] = [
     const num = x.op1;
     const denom = x.op2;
     if (!num || !denom) return undefined;
-    if (num.isSame(denom) && num.isSame(0) === false && num.isInfinity !== true) {
+    if (
+      num.isSame(denom) &&
+      num.isSame(0) === false &&
+      num.isInfinity !== true
+    ) {
       return { value: x.engine.One, because: 'a/a -> 1' };
     }
     return undefined;
@@ -486,7 +490,11 @@ export const SIMPLIFY_RULES: Rule[] = [
       // base 0 or 1 -> NaN, base infinity -> special handling
       const baseExpr =
         typeof logBase === 'number' ? x.engine.number(logBase) : logBase;
-      if (baseExpr.isSame(0) || baseExpr.isSame(1) || baseExpr.isInfinity === true)
+      if (
+        baseExpr.isSame(0) ||
+        baseExpr.isSame(1) ||
+        baseExpr.isInfinity === true
+      )
         return undefined;
       // Skip edge cases that simplifyLog handles correctly
       if (x.op1.isSame(0)) return undefined;
@@ -656,7 +664,8 @@ export const SIMPLIFY_RULES: Rule[] = [
     const ce = expr.engine;
     if (y.isFinite === false && x.isFinite === false)
       return { value: ce.NaN, because: 'arctan2' };
-    if (y.isSame(0) && x.isSame(0)) return { value: ce.Zero, because: 'arctan2' };
+    if (y.isSame(0) && x.isSame(0))
+      return { value: ce.Zero, because: 'arctan2' };
     if (x.isFinite === false)
       return { value: x.isPositive ? ce.Zero : ce.Pi, because: 'arctan2' };
     if (y.isFinite === false)

@@ -410,7 +410,8 @@ export class BoxedFunction
       if (exponent !== null)
         return [coef.pow(exponent), ce.function('Power', [base, expr.op2])];
 
-      if (expr.op2.isSame(0.5)) return [coef.sqrt(), ce.function('Sqrt', [base])];
+      if (expr.op2.isSame(0.5))
+        return [coef.sqrt(), ce.function('Sqrt', [base])];
 
       return [ce._numericValue(1), this];
     }
