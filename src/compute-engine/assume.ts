@@ -102,7 +102,6 @@ function assumeEquality(proposition: Expression): AssumeResult {
     const val = proposition.evaluate();
     if (isSymbol(val, 'True')) return 'tautology';
     if (isSymbol(val, 'False')) return 'contradiction';
-    console.log(proposition.canonical.evaluate());
     return 'not-a-predicate';
   }
 

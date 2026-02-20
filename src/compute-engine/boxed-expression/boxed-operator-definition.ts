@@ -253,7 +253,6 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
           ? def.signature
           : this.engine.type(def.signature);
       if (oldSig && !newSig.matches(this.engine.type(oldSig))) {
-        console.log(newSig.matches(this.engine.type(oldSig)));
         throw new Error(
           `Operator Definition "${this.name}": signature "${newSig}" does not match "${oldSig}"`
         );
