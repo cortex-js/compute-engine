@@ -1,5 +1,28 @@
 ### [Unreleased]
 
+- **New `Mandelbrot` and `Julia` functions**: Two new built-in operators for
+  escape-time fractal computation.
+
+  `Mandelbrot(c, maxIter)` computes the Mandelbrot set membership for a complex
+  point `c`, iterating `z → z² + c` from `z₀ = 0`. `Julia(z, c, maxIter)`
+  does the same with a user-supplied starting point `z` and parameter `c`.
+
+  Both return a smooth-colored normalized value in `[0, 1]`: `1.0` for points
+  inside the set, and a fractional value for escaping points (using the
+  `log₂(log₂(|z|²))` formula to produce continuous gradients rather than
+  banded integer counts). The caller is responsible for mapping the scalar to a
+  color.
+
+  Both functions evaluate in JavaScript and compile to GLSL and WGSL shaders.
+  In a fragment shader, the typical usage is:
+
+  ```glsl
+  // uniforms: vec2 pan, float zoom, int maxIter
+  vec2 c = (fragCoord / resolution - 0.5) * zoom + pan;
+  float t = _fractal_mandelbrot(c, maxIter);
+  // map t to a color
+  ```
+
 - **Parse `\mleft`/`\mright` delimiters**: These alternative delimiters from the
   `mleftright` LaTeX package are now recognized and behave identically to
   `\left`/`\right`.
