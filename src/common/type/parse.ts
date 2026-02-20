@@ -164,7 +164,11 @@ class TypeParser {
 
   error(...messages: (string | undefined)[]): never {
     throw new Error(
-      `\nInvalid type\n|   ${this.buffer}\n|   ${' '.repeat(this.pos)}^\n|   \n|   ${messages.filter((x) => x !== undefined).join('\n|   ')}\n`
+      `\nInvalid type\n|   ${this.buffer}\n|   ${' '.repeat(
+        this.pos
+      )}^\n|   \n|   ${messages
+        .filter((x) => x !== undefined)
+        .join('\n|   ')}\n`
     );
   }
 
@@ -261,7 +265,7 @@ class TypeParser {
     required: NamedElement[],
     optional: NamedElement[],
     variadic: NamedElement | undefined,
-    variadicMin: 0 | 1 | undefined,
+    variadicMin: 0 | 1 | undefined
   ] {
     const reqArgs: NamedElement[] = [];
     const optArgs: NamedElement[] = [];
@@ -841,7 +845,7 @@ class TypeParser {
           'Expected a name for the key.',
           'For example `record<key: string>`.',
           'Use backticks for special characters.',
-          'For example `record<\`duración\`: number>`'
+          'For example `record<`duración`: number>`'
         );
 
       this.skipWhitespace();
@@ -850,7 +854,7 @@ class TypeParser {
           'Expected a type separated by a `:` after the key.',
           `For example \`record<${formatKey(key)}: string>\``,
           'Use backticks for special characters.',
-          'For example `record<\`duración\`: string>`'
+          'For example `record<`duración`: string>`'
         );
       }
 
@@ -896,7 +900,9 @@ class TypeParser {
         if (this.match('?'))
           this.error(
             'Unexpected token "?".',
-            `To indicate an optional key, use a specific type, for example \`record<${formatKey(lastEntry[0])}: ${lastEntry[1]} | nothing>\``
+            `To indicate an optional key, use a specific type, for example \`record<${formatKey(
+              lastEntry[0]
+            )}: ${lastEntry[1]} | nothing>\``
           );
 
         this.error(
@@ -991,7 +997,7 @@ class TypeParser {
         'Expected the name of the operator for the expression.',
         'For example `expression<Multiply>`.',
         'Use backticks for special characters.',
-        'For example `expression<\`半径\`>`'
+        'For example `expression<`半径`>`'
       );
 
     this.expectClosingBracket();
@@ -1009,7 +1015,7 @@ class TypeParser {
         'Expected a name for the symbol.',
         'For example `symbol<True>`.',
         'Use backticks for special characters.',
-        'For example `symbol<\`半径\`>`'
+        'For example `symbol<`半径`>`'
       );
 
     this.expectClosingBracket();
@@ -1408,7 +1414,9 @@ export function parseType(
     return type;
   } catch (error) {
     throw new Error(
-      `Failed to parse type "${s}": ${error instanceof Error ? error.message : String(error)}`
+      `Failed to parse type "${s}": ${
+        error instanceof Error ? error.message : String(error)
+      }`
     );
   }
 }

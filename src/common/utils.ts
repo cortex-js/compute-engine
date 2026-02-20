@@ -39,7 +39,9 @@ export function permutations<T /* , Y extends any = any */>(
     console.assert(
       false,
       `permutations(): input has ${xs.length} elements, which exceeds the limit of ${MAX_PERMUTATION_ELEMENTS}. ` +
-        `This would generate ${factorial(xs.length)} permutations. Returning empty array to prevent memory exhaustion.`
+        `This would generate ${factorial(
+          xs.length
+        )} permutations. Returning empty array to prevent memory exhaustion.`
     );
     return [];
   }

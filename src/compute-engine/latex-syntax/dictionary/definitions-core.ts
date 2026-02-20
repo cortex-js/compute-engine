@@ -296,7 +296,9 @@ export const DEFINITIONS_CORE: LatexDictionary = [
         if (operator(body) === 'Block' && nops(body) === 1)
           body = operand(body, 1);
         if (parameters.length > 0) {
-          return `\\left.\\left(${serializer.serialize(body)}\\right)\\right|_{${parameters
+          return `\\left.\\left(${serializer.serialize(
+            body
+          )}\\right)\\right|_{${parameters
             .map(
               (x, i) =>
                 `${serializer.serialize(x)}=${serializer.serialize(args[i])}`
@@ -305,7 +307,9 @@ export const DEFINITIONS_CORE: LatexDictionary = [
         }
       }
 
-      return `\\left.\\left(${serializer.serialize(fn)}\\right)\\right|_{${args.map((x) => serializer.serialize(x)).join(', ')}}`;
+      return `\\left.\\left(${serializer.serialize(fn)}\\right)\\right|_{${args
+        .map((x) => serializer.serialize(x))
+        .join(', ')}}`;
     },
   },
 
@@ -1587,7 +1591,7 @@ function sanitizeLatex(s: string | null): string {
         ']': '\\rbrack ',
         ':': '\\colon ',
         '\\': '\\backslash ',
-      })[c] ?? '\\' + c
+      }[c] ?? '\\' + c)
   );
 }
 
@@ -2019,7 +2023,7 @@ function parseCasesEnvironment(parser: Parser): MathJsonExpression | null {
     } else if (row.length === 2) {
       const s = stringValue(row[1]);
       // If a string, probably 'else' or 'otherwise'
-      result.push(s ? 'True' : (stripText(row[1]) ?? 'True'));
+      result.push(s ? 'True' : stripText(row[1]) ?? 'True');
       result.push(row[0]);
     }
   }
@@ -2267,9 +2271,7 @@ function buildBlockFromSequence(seq: MathJsonExpression[]): MathJsonExpression {
   return ['Block', ...block] as MathJsonExpression;
 }
 
-function normalizeLocalAssign(
-  expr: MathJsonExpression
-): MathJsonExpression {
+function normalizeLocalAssign(expr: MathJsonExpression): MathJsonExpression {
   if (operator(expr) !== 'Assign') return expr;
 
   const lhs = operand(expr, 1);

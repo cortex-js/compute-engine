@@ -6,10 +6,14 @@ import { expand } from './expand';
 import { _setExpand } from './compare';
 
 import { serializeJson, _setProduct } from './serialize';
-import { _setSerializeJson, _setExpandForIs } from './abstract-boxed-expression';
+import {
+  _setSerializeJson,
+  _setExpandForIs,
+} from './abstract-boxed-expression';
 
 import { Product } from './arithmetic-mul-div';
 
+// eslint-disable-next-line import/no-restricted-paths
 import { compile } from '../compilation/compile-expression';
 import { _setCompile } from './stochastic-equal';
 

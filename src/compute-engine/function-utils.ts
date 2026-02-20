@@ -280,7 +280,7 @@ function makeLambda(
   console.assert(isFunction(expr));
   if (!isFunction(expr)) throw new Error('Invalid function literal');
   if (expr.ops.length === 1) {
-    console.assert(expr.ops[0]);
+    console.assert(expr.ops[0] !== undefined);
     return () => expr.ops[0].evaluate();
   }
 
@@ -294,7 +294,9 @@ function makeLambda(
     //
     if (args.length > params.length) {
       throw new Error(
-        `Too many arguments for function "${expr.toString()}": expected ${params.length}, got ${args.length}`
+        `Too many arguments for function "${expr.toString()}": expected ${
+          params.length
+        }, got ${args.length}`
       );
     }
 

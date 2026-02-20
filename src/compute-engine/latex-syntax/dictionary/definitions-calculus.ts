@@ -348,7 +348,9 @@ function serializeIntegral(command: string) {
           if (symbol(upper) === 'Nothing') upper = null;
 
           if (lower !== null && upper !== null)
-            return `_{${serializer.serialize(lower)}}^{${serializer.serialize(upper)}}`;
+            return `_{${serializer.serialize(lower)}}^{${serializer.serialize(
+              upper
+            )}}`;
           if (lower !== null) return `_{${serializer.serialize(lower)}}`;
           if (upper !== null) return `^{${serializer.serialize(upper)}}`;
           return '';
@@ -372,7 +374,9 @@ function serializeIntegral(command: string) {
         if (symbol(upper) === 'Nothing') upper = null;
 
         if (lower !== null && upper !== null)
-          return `_{${serializer.serialize(lower)}}^{${serializer.serialize(upper)}}`;
+          return `_{${serializer.serialize(lower)}}^{${serializer.serialize(
+            upper
+          )}}`;
         if (lower !== null) return `_{${serializer.serialize(lower)}}`;
         if (upper !== null) return `^{${serializer.serialize(upper)}}`;
       } else {

@@ -95,7 +95,9 @@ export function typeToString(type: Type, precedence = 0): string {
             if (type.dimensions[0] < 0)
               result = `vector<${typeToString(type.elements)}>`;
             else
-              result = `vector<${typeToString(type.elements)}^${type.dimensions[0]}>`;
+              result = `vector<${typeToString(type.elements)}^${
+                type.dimensions[0]
+              }>`;
           }
         } else if (type.dimensions.length === 2) {
           //
@@ -110,7 +112,9 @@ export function typeToString(type: Type, precedence = 0): string {
             if (dims[0] < 0 && dims[1] < 0)
               result = `matrix<${typeToString(type.elements)}>`;
             else
-              result = `matrix<${typeToString(type.elements)}^(${dims[0]}x${dims[1]})>`;
+              result = `matrix<${typeToString(type.elements)}^(${dims[0]}x${
+                dims[1]
+              })>`;
           }
         }
       }

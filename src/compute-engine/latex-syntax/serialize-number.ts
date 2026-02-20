@@ -276,7 +276,7 @@ function serializeScientificNotationNumber(
     }
     m = valString.match(/^(.*)[e|E]([-+]?[0-9]+)$/);
   }
-  console.assert(m);
+  console.assert(m !== null);
   if (!m) return serializeAutoNotationNumber(valString, options);
 
   let exponent = parseInt(m[2]);

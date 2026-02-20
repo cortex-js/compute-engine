@@ -100,9 +100,11 @@ export class Origin {
           const markerSpacing = this.lines[index]
             .slice(0, Math.max(column - 1, 0))
             .replace(/[^\t]/g, ' ');
-          ((markerLine = '\n ' + this.chalkGutter(gutter.replace(/\d/g, ' '))),
-            markerSpacing,
-            this.chalkMarker('^'));
+          markerLine =
+            '\n ' +
+            this.chalkGutter(gutter.replace(/\d/g, ' ')) +
+            markerSpacing +
+            this.chalkMarker('^');
 
           if (message) {
             markerLine += ' ' + this.chalkMessage(message);

@@ -4,8 +4,8 @@ import { Decimal } from 'decimal.js';
 type IsInteger<N extends number> = `${N}` extends `${string}.${string}`
   ? never
   : `${N}` extends `-${string}.${string}`
-    ? never
-    : number;
+  ? never
+  : number;
 
 /** A `SmallInteger` is an integer < 1e6
  * @category Numerics

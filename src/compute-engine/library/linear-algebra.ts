@@ -1199,8 +1199,8 @@ function computeLU(
         typeof val === 'number'
           ? val
           : typeof val === 'object' && 're' in val
-            ? (val.re ?? 0)
-            : 0;
+          ? val.re ?? 0
+          : 0;
       if (isNaN(num)) return undefined;
       A[i][j] = num;
     }
@@ -1300,8 +1300,8 @@ function computeQR(
         typeof val === 'number'
           ? val
           : typeof val === 'object' && 're' in val
-            ? (val.re ?? 0)
-            : 0;
+          ? val.re ?? 0
+          : 0;
       if (isNaN(num)) return undefined;
       A[i][j] = num;
     }
@@ -1410,8 +1410,8 @@ function computeCholesky(
         typeof val === 'number'
           ? val
           : typeof val === 'object' && 're' in val
-            ? (val.re ?? 0)
-            : 0;
+          ? val.re ?? 0
+          : 0;
       if (isNaN(num)) return undefined;
       A[i][j] = num;
     }
@@ -1479,8 +1479,8 @@ function computeSVD(
         typeof val === 'number'
           ? val
           : typeof val === 'object' && 're' in val
-            ? (val.re ?? 0)
-            : 0;
+          ? val.re ?? 0
+          : 0;
       if (isNaN(num)) return undefined;
       A[i][j] = num;
     }
@@ -1807,8 +1807,8 @@ function computeEigenvaluesQR(
         typeof val === 'number'
           ? val
           : typeof val === 'object' && 're' in val
-            ? (val.re ?? 0)
-            : 0;
+          ? val.re ?? 0
+          : 0;
       if (isNaN(num)) return undefined; // Can't compute numerically
       A[i][j] = num;
     }
@@ -2060,7 +2060,7 @@ function asNumber(value: unknown): number | undefined {
 function asRealNumber(value: unknown): number | undefined {
   if (typeof value === 'object' && value !== null && 're' in value) {
     const re = asNumber(value.re);
-    const im = 'im' in value ? (asNumber(value.im) ?? 0) : 0;
+    const im = 'im' in value ? asNumber(value.im) ?? 0 : 0;
     if (im !== 0) return undefined;
     return re;
   }

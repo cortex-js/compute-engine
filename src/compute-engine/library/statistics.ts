@@ -224,7 +224,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
     },
 
     Quartiles: {
-      description: 'Lower quartile, median, and upper quartile of a collection.',
+      description:
+        'Lower quartile, median, and upper quartile of a collection.',
       complexity: 1200,
       broadcastable: false,
       signature:

@@ -3,6 +3,7 @@
 import { writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+// eslint-disable-next-line import/no-unresolved
 import { getStandardLibrary } from '../../compute-engine/library/library.js';
 
 const CATEGORY = {
@@ -127,7 +128,20 @@ function buildPayload() {
   const operators = definitions
     .filter((x) => x.name !== '__unit__' && isOperatorDef(x.def))
     .map(({ library, name, def }) => {
-      const entry = {
+      const entry: {
+        name: string;
+        category: string;
+        arity: string;
+        signature: string;
+        associative: boolean;
+        commutative: boolean;
+        idempotent: boolean;
+        lazy: boolean;
+        broadcastable: boolean;
+        description?: string;
+        wikidata?: string;
+        examples?: string[];
+      } = {
         name,
         category: CATEGORY[library] ?? library,
         arity: arityFromSignature(def.signature),
@@ -135,8 +149,8 @@ function buildPayload() {
           typeof def.signature === 'string'
             ? def.signature
             : def.signature
-              ? String(def.signature)
-              : '(any*) -> unknown',
+            ? String(def.signature)
+            : '(any*) -> unknown',
         associative: Boolean(def.associative),
         commutative: Boolean(def.commutative),
         idempotent: Boolean(def.idempotent),
@@ -159,15 +173,22 @@ function buildPayload() {
   const constants = definitions
     .filter((x) => isValueDef(x.def) && x.def.isConstant === true)
     .map(({ library, name, def }) => {
-      const entry = {
+      const entry: {
+        name: string;
+        category: string;
+        type: string;
+        description?: string;
+        wikidata?: string;
+        value?: string;
+      } = {
         name,
         category: CATEGORY[library] ?? library,
         type:
           typeof def.type === 'string'
             ? def.type
             : def.type
-              ? String(def.type)
-              : 'unknown',
+            ? String(def.type)
+            : 'unknown',
       };
 
       const description = asDescription(def);
@@ -232,5 +253,7 @@ console.log(
   `Wrote ${outputPath} with ${payload.operators.length} operators and ${payload.constants.length} constants.`
 );
 console.log(
-  `Wrote ${categoriesOutputPath} with ${Object.keys(categoriesPayload).length} categories.`
+  `Wrote ${categoriesOutputPath} with ${
+    Object.keys(categoriesPayload).length
+  } categories.`
 );

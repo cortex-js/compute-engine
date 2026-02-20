@@ -626,7 +626,11 @@ function serializePower(
     const baseBodyLatex = wrapNegativeBase(serializer.wrapShort(baseBody));
     const baseExponentLatex = serializer.wrapShort(baseExponent);
     return `
-      ${baseBodyLatex}^{${supsub('^', baseExponentLatex, serializer.serialize(exp))}}`;
+      ${baseBodyLatex}^{${supsub(
+      '^',
+      baseExponentLatex,
+      serializer.serialize(exp)
+    )}}`;
   }
 
   return supsub(
@@ -913,7 +917,11 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
       if (operator(rhs) === 'Negate') {
         const value = operand(rhs, 1);
         if (isNumberExpression(value))
-          return foldAssociativeOperator('Add', lhs, negateNumberLiteral(value));
+          return foldAssociativeOperator(
+            'Add',
+            lhs,
+            negateNumberLiteral(value)
+          );
       }
 
       return foldAssociativeOperator('Add', lhs, rhs);
@@ -962,11 +970,8 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
         im === 1
           ? '\\imaginaryI'
           : im === -1
-            ? '-\\imaginaryI'
-            : joinLatex([
-                serializer.serialize(operand(expr, 2)),
-                '\\imaginaryI',
-              ]);
+          ? '-\\imaginaryI'
+          : joinLatex([serializer.serialize(operand(expr, 2)), '\\imaginaryI']);
 
       const re = machineValue(operand(expr, 1));
       if (re === 0) return imPart;
@@ -1580,7 +1585,9 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
       }
 
       // This is a reduce over a collection -> \operatorname{Reduce}
-      return `\\operatorname{Reduce}\\left(${serializer.serialize(collection)}, ${serializer.serialize(operand(expr, 2))}\\right)`;
+      return `\\operatorname{Reduce}\\left(${serializer.serialize(
+        collection
+      )}, ${serializer.serialize(operand(expr, 2))}\\right)`;
     },
   },
   {

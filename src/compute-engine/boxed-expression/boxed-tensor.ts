@@ -226,7 +226,7 @@ export class BoxedTensor<T extends TensorDataType>
   get rank(): number {
     try {
       return this.tensor.rank;
-    } catch (e) {}
+    } catch {}
     return 0;
   }
 

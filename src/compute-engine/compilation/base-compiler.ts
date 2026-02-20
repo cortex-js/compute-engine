@@ -86,7 +86,9 @@ export class BaseCompiler {
 
     if (h === 'Sequence') {
       if (args.length === 0) return '';
-      return `(${args.map((arg) => BaseCompiler.compile(arg, target, prec)).join(', ')})`;
+      return `(${args
+        .map((arg) => BaseCompiler.compile(arg, target, prec))
+        .join(', ')})`;
     }
 
     if (h === 'Sum' || h === 'Product') {
@@ -101,7 +103,9 @@ export class BaseCompiler {
         );
       }
       if (typeof sumProdFn === 'string') {
-        return `${sumProdFn}(${args.map((x) => BaseCompiler.compile(x, target)).join(', ')})`;
+        return `${sumProdFn}(${args
+          .map((x) => BaseCompiler.compile(x, target))
+          .join(', ')})`;
       }
       return BaseCompiler.compileLoop(h, args, target);
     }
@@ -119,7 +123,9 @@ export class BaseCompiler {
 
         if (isFunction) {
           // Compile as a function call (works for both scalar and collection arguments)
-          return `${op[0]}(${args.map((arg) => BaseCompiler.compile(arg, target)).join(', ')})`;
+          return `${op[0]}(${args
+            .map((arg) => BaseCompiler.compile(arg, target))
+            .join(', ')})`;
         } else {
           // Compile as an operator (only for non-collection arguments)
           if (args.every((x) => !x.isCollection)) {
@@ -143,7 +149,11 @@ export class BaseCompiler {
             let resultStr: string;
             if (args.length === 1) {
               // Unary operator, assume prefix
-              resultStr = `${op[0]}${BaseCompiler.compile(args[0], target, op[1])}`;
+              resultStr = `${op[0]}${BaseCompiler.compile(
+                args[0],
+                target,
+                op[1]
+              )}`;
             } else {
               resultStr = args
                 .map((arg) => BaseCompiler.compile(arg, target, op[1]))
@@ -171,7 +181,9 @@ export class BaseCompiler {
     if (h === 'Declare')
       return `let ${isSymbol(args[0]) ? args[0].symbol : '_'}`;
     if (h === 'Assign')
-      return `${isSymbol(args[0]) ? args[0].symbol : '_'} = ${BaseCompiler.compile(args[1], target)}`;
+      return `${
+        isSymbol(args[0]) ? args[0].symbol : '_'
+      } = ${BaseCompiler.compile(args[1], target)}`;
     if (h === 'Return')
       return `return ${BaseCompiler.compile(args[0], target)}`;
     if (h === 'Break') return 'break';
@@ -186,9 +198,14 @@ export class BaseCompiler {
         if (typeof fn === 'function') {
           return fn(args, (expr) => BaseCompiler.compile(expr, target), target);
         }
-        return `${fn}(${args.map((x) => BaseCompiler.compile(x, target)).join(', ')})`;
+        return `${fn}(${args
+          .map((x) => BaseCompiler.compile(x, target))
+          .join(', ')})`;
       }
-      return `((${BaseCompiler.compile(args[0], target)}) ? (${BaseCompiler.compile(
+      return `((${BaseCompiler.compile(
+        args[0],
+        target
+      )}) ? (${BaseCompiler.compile(
         args[1],
         target
       )}) : (${BaseCompiler.compile(args[2], target)}))`;
@@ -204,7 +221,9 @@ export class BaseCompiler {
         if (typeof fn === 'function') {
           return fn(args, (expr) => BaseCompiler.compile(expr, target), target);
         }
-        return `${fn}(${args.map((x) => BaseCompiler.compile(x, target)).join(', ')})`;
+        return `${fn}(${args
+          .map((x) => BaseCompiler.compile(x, target))
+          .join(', ')})`;
       }
       // Compile to chained ternaries
       const compilePair = (i: number): string => {
@@ -215,7 +234,10 @@ export class BaseCompiler {
         if (isSymbol(cond, 'True')) {
           return `(${BaseCompiler.compile(val, target)})`;
         }
-        return `((${BaseCompiler.compile(cond, target)}) ? (${BaseCompiler.compile(val, target)}) : ${compilePair(i + 2)})`;
+        return `((${BaseCompiler.compile(
+          cond,
+          target
+        )}) ? (${BaseCompiler.compile(val, target)}) : ${compilePair(i + 2)})`;
       };
       return compilePair(0);
     }
@@ -247,7 +269,9 @@ export class BaseCompiler {
       return fn(args, (expr) => BaseCompiler.compile(expr, target), target);
     }
 
-    return `${fn}(${args.map((x) => BaseCompiler.compile(x, target)).join(', ')})`;
+    return `${fn}(${args
+      .map((x) => BaseCompiler.compile(x, target))
+      .join(', ')})`;
   }
 
   /**
@@ -346,7 +370,11 @@ export class BaseCompiler {
 
     const bodyStmts = BaseCompiler.compileLoopBody(args[0], bodyTarget);
 
-    return `(() => {${target.ws('\n')}for (let ${index} = ${lower}; ${index} <= ${upper}; ${index}++) {${target.ws('\n')}${bodyStmts}${target.ws('\n')}}${target.ws('\n')}})()`;
+    return `(() => {${target.ws(
+      '\n'
+    )}for (let ${index} = ${lower}; ${index} <= ${upper}; ${index}++) {${target.ws(
+      '\n'
+    )}${bodyStmts}${target.ws('\n')}}${target.ws('\n')}})()`;
   }
 
   /**
@@ -584,7 +612,10 @@ export class BaseCompiler {
       const t = BaseCompiler.tempVar();
       return new Function(
         'x',
-        `return \`(() => { const ${t} = \${x}; return ${body.replace(/\\\${x}/g, t)}; })()\`;`
+        `return \`(() => { const ${t} = \${x}; return ${body.replace(
+          /\\\${x}/g,
+          t
+        )}; })()\`;`
       )(x);
     }
   }

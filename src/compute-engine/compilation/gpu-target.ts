@@ -66,7 +66,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       })
       .join(' + ');
   },
-  Multiply: (args, compile, target) => {
+  Multiply: (args, compile, _target) => {
     if (args.length === 0) return '1.0';
     if (args.length === 1) return compile(args[0]);
     const anyComplex = args.some((a) => BaseCompiler.isComplexValued(a));
@@ -265,7 +265,9 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   Remainder: ([a, b], compile) => {
     if (a === null || b === null)
       throw new Error('Remainder: missing argument');
-    return `(${compile(a)} - ${compile(b)} * round(${compile(a)} / ${compile(b)}))`;
+    return `(${compile(a)} - ${compile(b)} * round(${compile(a)} / ${compile(
+      b
+    )}))`;
   },
 
   // Reciprocal trigonometric functions (no GPU built-ins)

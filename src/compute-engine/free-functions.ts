@@ -105,9 +105,7 @@ export function solve(
   return toExpression(expr).solve(vars);
 }
 
-export function expandAll(
-  expr: LatexString | ExpressionInput
-): Expression {
+export function expandAll(expr: LatexString | ExpressionInput): Expression {
   return expandAllExpr(toExpression(expr));
 }
 

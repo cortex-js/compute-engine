@@ -144,7 +144,9 @@ export class _BoxedValueDefinition
           throw new Error(
             [
               `Symbol "${this.name}"`,
-              `The value "${this._value.toString()}" of type "${this._value.type}" is not compatible with the type "${this._type}"`,
+              `The value "${this._value.toString()}" of type "${
+                this._value.type
+              }" is not compatible with the type "${this._type}"`,
             ].join('\n|   ')
           );
         }

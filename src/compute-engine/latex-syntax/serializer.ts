@@ -282,7 +282,7 @@ export class Serializer {
       })();
       this.level -= 1;
       return result ?? '';
-    } catch (e) {}
+    } catch {}
 
     this.level -= 1;
     return '';

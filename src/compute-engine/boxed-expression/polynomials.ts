@@ -108,7 +108,7 @@ function _getDegree(expr: Expression | undefined): number {
   if (expr === undefined) return 0;
 
   if (isSymbol(expr)) {
-    return (expr.valueDefinition?.isConstant ?? false) ? 0 : 1;
+    return expr.valueDefinition?.isConstant ?? false ? 0 : 1;
   }
 
   if (isFunction(expr)) {

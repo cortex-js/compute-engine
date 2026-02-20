@@ -33,8 +33,8 @@ export class MachineNumericValue extends NumericValue {
         value.re === undefined
           ? 0
           : value.re instanceof Decimal
-            ? value.re.toNumber()
-            : value.re;
+          ? value.re.toNumber()
+          : value.re;
 
       this.decimal = decimal;
       this.im = value.im ?? 0;
@@ -552,25 +552,25 @@ export class MachineNumericValue extends NumericValue {
   }
 
   lt(other: number | NumericValue): boolean | undefined {
-    if (this.im !== 0) undefined;
+    if (this.im !== 0) return undefined;
     if (typeof other === 'number') return this.decimal < other;
     return this.decimal < other.re;
   }
 
   lte(other: number | NumericValue): boolean | undefined {
-    if (this.im !== 0) undefined;
+    if (this.im !== 0) return undefined;
     if (typeof other === 'number') return this.decimal <= other;
     return this.decimal <= other.re;
   }
 
   gt(other: number | NumericValue): boolean | undefined {
-    if (this.im !== 0) undefined;
+    if (this.im !== 0) return undefined;
     if (typeof other === 'number') return this.decimal > other;
     return this.decimal > other.re;
   }
 
   gte(other: number | NumericValue): boolean | undefined {
-    if (this.im !== 0) undefined;
+    if (this.im !== 0) return undefined;
     if (typeof other === 'number') return this.decimal >= other;
     return this.decimal >= other.re;
   }

@@ -94,8 +94,8 @@ export class GLSLTarget extends GPUShaderTarget {
       version.startsWith('300') || version.startsWith('3')
         ? 'in'
         : type === 'vertex'
-          ? 'attribute'
-          : 'varying';
+        ? 'attribute'
+        : 'varying';
     for (const input of inputs) {
       code += `${inputKeyword} ${input.type} ${input.name};\n`;
     }

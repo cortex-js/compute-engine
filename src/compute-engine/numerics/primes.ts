@@ -150,7 +150,7 @@ export function isPrime(n: number): boolean | undefined {
     if (n % smallPrime === 0) return false;
   }
 
-  if (n < LARGE_PRIME) n === leastFactor(n);
+  if (n < LARGE_PRIME) return n === leastFactor(n) || undefined;
 
   return probablyPrime(n, 30) ? undefined : false;
 }

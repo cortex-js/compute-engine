@@ -316,7 +316,9 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     if (args.length === 2)
       return `np.arange(${compile(args[0])}, ${compile(args[1])})`;
     if (args.length === 3)
-      return `np.arange(${compile(args[0])}, ${compile(args[1])}, ${compile(args[2])})`;
+      return `np.arange(${compile(args[0])}, ${compile(args[1])}, ${compile(
+        args[2]
+      )})`;
     return 'np.arange';
   },
 };

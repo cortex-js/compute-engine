@@ -356,7 +356,9 @@ export class _Parser implements Parser {
       }
 
       throw new Error(
-        `ce.parse(): getSymbolType("${id}") must return a BoxedType or a type string, received ${describeTypeCallbackResult(type)}`
+        `ce.parse(): getSymbolType("${id}") must return a BoxedType or a type string, received ${describeTypeCallbackResult(
+          type
+        )}`
       );
     }
 
@@ -1583,12 +1585,10 @@ export class _Parser implements Parser {
     // Check for optional subscript: log_2(x) or log_{10}(x)
     let subscript: MathJsonExpression | null = null;
     if (this.peek === '_') {
-      const underIndex = this.index;
       this.index++; // skip '_'
       subscript = this.parseGroup();
       if (subscript === null) {
         // Try bare digits/letters: _2, _10, _b
-        const subStart = this.index;
         if (!this.atEnd && /^[a-zA-Z]$/.test(this.peek)) {
           subscript = this.peek;
           this.index++;
@@ -1611,13 +1611,11 @@ export class _Parser implements Parser {
     // Check for optional exponent: sin^2(x) or sin^{10}(x)
     let exponent: MathJsonExpression | null = null;
     if (this.peek === '^') {
-      const caretIndex = this.index;
       this.index++; // skip '^'
       // Try braced group first: ^{expr}
       exponent = this.parseGroup();
       if (exponent === null) {
         // In non-strict mode, try bare digits: ^2, ^-3
-        const digitStart = this.index;
         let neg = false;
         if ((this.peek as string) === '-') {
           neg = true;

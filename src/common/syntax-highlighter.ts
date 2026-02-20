@@ -221,7 +221,7 @@ const defaultGrammar: SyntaxGrammar = {
 
     // Exponent
     if (buf.match('e') || buf.match('E')) {
-      buf.match('+') || buf.match('-');
+      void (buf.match('+') || buf.match('-'));
       while (!buf.atEnd() && /[0-9]/.test(buf.peek())) buf.consume();
     }
 

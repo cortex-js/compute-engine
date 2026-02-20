@@ -99,7 +99,9 @@ function rgbToHex(rgb: RgbColor): string {
   const r = Math.round(Math.max(0, Math.min(255, rgb.r)));
   const g = Math.round(Math.max(0, Math.min(255, rgb.g)));
   const b = Math.round(Math.max(0, Math.min(255, rgb.b)));
-  const hex = `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+  const hex = `#${r.toString(16).padStart(2, '0')}${g
+    .toString(16)
+    .padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
   if (rgb.alpha !== undefined && Math.abs(rgb.alpha - 1) > 1e-4) {
     const a = Math.round(Math.max(0, Math.min(255, rgb.alpha * 255)));
     return hex + a.toString(16).padStart(2, '0');

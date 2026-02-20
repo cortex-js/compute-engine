@@ -1,9 +1,9 @@
 // From https://github.com/typed-rocks/typescript/blob/main/one_of.ts
 
-// eslint-disable-next-line @typescript-eslint/ban-types
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
 type MergeTypes<TypesArray extends any[], Res = {}> = TypesArray extends [
   infer Head,
-  ...infer Rem,
+  ...infer Rem
 ]
   ? MergeTypes<Rem, Res & Head>
   : Res;
@@ -12,7 +12,7 @@ type MergeTypes<TypesArray extends any[], Res = {}> = TypesArray extends [
 export type OneOf<
   TypesArray extends any[],
   Res = never,
-  AllProperties = MergeTypes<TypesArray>,
+  AllProperties = MergeTypes<TypesArray>
 > = TypesArray extends [infer Head, ...infer Rem]
   ? OneOf<Rem, Res | OnlyFirst<Head, AllProperties>, AllProperties>
   : Res;

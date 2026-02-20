@@ -543,7 +543,7 @@ export type LatexDictionaryEntry = OneOf<
     | SymbolEntry
     | FunctionEntry
     | EnvironmentEntry
-    | DefaultEntry,
+    | DefaultEntry
   ]
 >;
 

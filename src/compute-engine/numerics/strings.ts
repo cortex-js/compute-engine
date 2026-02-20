@@ -53,7 +53,7 @@ export function fromDigits(
   } else if (baseInput === 'base64' || baseInput === 'base-64') {
     try {
       return [parseInt(btoa(s)), ''];
-    } catch (e) {
+    } catch {
       return [NaN, ''];
     }
   } else if (typeof baseInput === 'number') {

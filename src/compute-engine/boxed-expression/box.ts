@@ -170,7 +170,9 @@ export function boxFunction(
 
   if (!isValidSymbol(name)) {
     throw new Error(
-      `Unexpected operator: "${name}" is not a valid symbol: ${validateSymbol(name)}`
+      `Unexpected operator: "${name}" is not a valid symbol: ${validateSymbol(
+        name
+      )}`
     );
   }
 
@@ -373,7 +375,11 @@ export function box(
   if (Array.isArray(expr)) {
     if (typeof expr[0] !== 'string')
       throw new Error(
-        `The first element of an array should be a string (the function name): ${JSON.stringify(expr, undefined, 4)}`
+        `The first element of an array should be a string (the function name): ${JSON.stringify(
+          expr,
+          undefined,
+          4
+        )}`
       );
 
     return canonicalForm(
@@ -557,13 +563,13 @@ function makeCanonicalFunction(
       name,
       opDef.inferredSignature
         ? xs
-        : (validateArguments(
+        : validateArguments(
             ce,
             xs,
             opDef.signature.type,
             opDef.lazy,
             opDef.broadcastable
-          ) ?? xs),
+          ) ?? xs,
       { metadata, canonical: true, scope }
     );
     return result;

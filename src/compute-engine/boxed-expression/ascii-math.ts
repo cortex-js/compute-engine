@@ -92,7 +92,7 @@ const OPERATORS: Record<
   string,
   [
     string | ((x: Expression, AsciiMathSerializer) => string),
-    precedence: number,
+    precedence: number
   ]
 > = {
   Add: [
@@ -377,7 +377,9 @@ const FUNCTIONS: Record<
     if (args.length === 0) return serialize(f);
     if (args.length === 1) return `(${serialize(f)})|_(${serialize(args[0])})`;
     if (args.length === 2)
-      return `(${serialize(f)})|_(${serialize(args[0])})^(${serialize(args[1])})`;
+      return `(${serialize(f)})|_(${serialize(args[0])})^(${serialize(
+        args[1]
+      )})`;
     return `(${serialize(f)})|_(${args.map((x) => serialize(x)).join(', ')})`;
   },
 
@@ -632,7 +634,9 @@ export function toAsciiMath(
   if (fnExpr) {
     if (typeof func === 'string')
       return `${func}(${fnExpr.ops.map((x) => serialize(x)).join(', ') ?? ''})`;
-    return `${expr.operator}(${fnExpr.ops.map((x) => serialize(x)).join(', ') ?? ''})`;
+    return `${expr.operator}(${
+      fnExpr.ops.map((x) => serialize(x)).join(', ') ?? ''
+    })`;
   }
 
   return JSON.stringify(expr.json);

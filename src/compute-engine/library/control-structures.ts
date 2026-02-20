@@ -60,7 +60,9 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         if (evaluatedCond === 'False')
           return ifFalse?.evaluate() ?? engine.Nothing;
         throw new Error(
-          `Condition must evaluate to "True" or "False". ${spellCheckMessage(cond)}`
+          `Condition must evaluate to "True" or "False". ${spellCheckMessage(
+            cond
+          )}`
         );
       },
     },
@@ -116,7 +118,9 @@ function evaluateWhich(
       return args[i + 1].evaluate(options);
     } else if (cond !== 'False') {
       throw new Error(
-        `Condition must evaluate to "True" or "False". ${spellCheckMessage(args[i])}`
+        `Condition must evaluate to "True" or "False". ${spellCheckMessage(
+          args[i]
+        )}`
       );
     }
     i += 2;

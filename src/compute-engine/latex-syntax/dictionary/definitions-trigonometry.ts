@@ -106,8 +106,8 @@ function parseTrig(op: string): ExpressionParseHandler {
       args === null
         ? fn
         : typeof fn === 'string'
-          ? [fn, ...args]
-          : ['Apply', fn, ...args];
+        ? [fn, ...args]
+        : ['Apply', fn, ...args];
 
     return sup === null ? appliedFn : ['Power', appliedFn, sup];
   };

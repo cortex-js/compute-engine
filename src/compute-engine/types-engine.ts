@@ -565,9 +565,11 @@ export interface IComputeEngine extends IBigNum {
 }
 
 declare module './types-expression' {
+  // eslint-disable-next-line @typescript-eslint/no-empty-object-type
   interface ExpressionComputeEngine extends IComputeEngine {}
 }
 
 declare module './types-definitions' {
+  // eslint-disable-next-line @typescript-eslint/no-empty-object-type
   interface ComputeEngine extends IComputeEngine {}
 }

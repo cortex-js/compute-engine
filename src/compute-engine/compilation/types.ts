@@ -156,7 +156,7 @@ export interface CompilationOptions<Expr = unknown> {
     | ((op: MathJsonSymbol) => [op: string, prec: number] | undefined);
 
   /** Custom function implementations */
-  // eslint-disable-next-line @typescript-eslint/ban-types
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
   functions?: Record<MathJsonSymbol, TargetSource | Function>;
 
   /** Variable bindings */
@@ -262,7 +262,7 @@ export interface CompiledRunner<R = number | ComplexResult> {
  */
 export type CompilationResult<
   T extends string = string,
-  R = number | ComplexResult,
+  R = number | ComplexResult
 > = {
   /** Target language name */
   target: T;
@@ -292,4 +292,5 @@ export type CompilationResult<
   run?: CompiledRunner<R>;
 } & (T extends ExecutableTarget
   ? { calling: 'expression' | 'lambda'; run: CompiledRunner<R> }
-  : {});
+  : // eslint-disable-next-line @typescript-eslint/no-empty-object-type
+    {});

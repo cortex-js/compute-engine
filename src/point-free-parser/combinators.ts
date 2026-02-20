@@ -160,7 +160,7 @@ export type OpRecord<U> = [
   data: U,
   op: string,
   prec: number,
-  assoc?: 'prefix' | 'suffix' | 'left' | 'right',
+  assoc?: 'prefix' | 'suffix' | 'left' | 'right'
 ];
 
 export type OpsTable<U> = OpRecord<U>[];

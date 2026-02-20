@@ -17,7 +17,9 @@ function compileWGSLList(args, compile) {
     return `vec3f(${args.map((x) => compile(x)).join(', ')})`;
   if (args.length === 4)
     return `vec4f(${args.map((x) => compile(x)).join(', ')})`;
-  return `array<f32, ${args.length}>(${args.map((x) => compile(x)).join(', ')})`;
+  return `array<f32, ${args.length}>(${args
+    .map((x) => compile(x))
+    .join(', ')})`;
 }
 
 const WGSL_FUNCTIONS: CompiledFunctions<Expression> = {
@@ -160,7 +162,9 @@ export class WGSLTarget extends GPUShaderTarget {
     for (const uniform of uniforms) {
       const group = uniform.group ?? 0;
       const binding = uniform.binding ?? 0;
-      code += `@group(${group}) @binding(${binding}) var<uniform> ${uniform.name}: ${toWGSLType(uniform.type)};\n`;
+      code += `@group(${group}) @binding(${binding}) var<uniform> ${
+        uniform.name
+      }: ${toWGSLType(uniform.type)};\n`;
     }
     if (uniforms.length > 0) code += '\n';
 

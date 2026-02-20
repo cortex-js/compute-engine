@@ -263,18 +263,24 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     if (args.length === 0) return 'NaN';
     if (args.length === 1)
       return `_SYS.populationVariance(${compile(args[0])})`;
-    return `_SYS.populationVariance([${args.map((x) => compile(x)).join(', ')}])`;
+    return `_SYS.populationVariance([${args
+      .map((x) => compile(x))
+      .join(', ')}])`;
   },
   StandardDeviation: (args, compile) => {
     if (args.length === 0) return 'NaN';
     if (args.length === 1) return `_SYS.standardDeviation(${compile(args[0])})`;
-    return `_SYS.standardDeviation([${args.map((x) => compile(x)).join(', ')}])`;
+    return `_SYS.standardDeviation([${args
+      .map((x) => compile(x))
+      .join(', ')}])`;
   },
   PopulationStandardDeviation: (args, compile) => {
     if (args.length === 0) return 'NaN';
     if (args.length === 1)
       return `_SYS.populationStandardDeviation(${compile(args[0])})`;
-    return `_SYS.populationStandardDeviation([${args.map((x) => compile(x)).join(', ')}])`;
+    return `_SYS.populationStandardDeviation([${args
+      .map((x) => compile(x))
+      .join(', ')}])`;
   },
   Kurtosis: (args, compile) => {
     if (args.length === 0) return 'NaN';
@@ -300,7 +306,9 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     if (args.length === 0) return 'NaN';
     if (args.length === 1)
       return `_SYS.interquartileRange(${compile(args[0])})`;
-    return `_SYS.interquartileRange([${args.map((x) => compile(x)).join(', ')}])`;
+    return `_SYS.interquartileRange([${args
+      .map((x) => compile(x))
+      .join(', ')}])`;
   },
   Min: 'Math.min',
   Power: (args, compile) => {
@@ -422,7 +430,9 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Remainder: ([a, b], compile) => {
     if (a === null || b === null)
       throw new Error('Remainder: missing argument');
-    return `(${compile(a)} - ${compile(b)} * Math.round(${compile(a)} / ${compile(b)}))`;
+    return `(${compile(a)} - ${compile(b)} * Math.round(${compile(
+      a
+    )} / ${compile(b)}))`;
   },
 
   // Arithmetic operators handled as functions for completeness
@@ -447,12 +457,18 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     if (!ac && !bc) return `(${compile(a)} / ${compile(b)})`;
 
     if (ac && bc) {
-      return `(() => { const _a = ${compile(a)}, _b = ${compile(b)}, _d = _b.re * _b.re + _b.im * _b.im; return { re: (_a.re * _b.re + _a.im * _b.im) / _d, im: (_a.im * _b.re - _a.re * _b.im) / _d }; })()`;
+      return `(() => { const _a = ${compile(a)}, _b = ${compile(
+        b
+      )}, _d = _b.re * _b.re + _b.im * _b.im; return { re: (_a.re * _b.re + _a.im * _b.im) / _d, im: (_a.im * _b.re - _a.re * _b.im) / _d }; })()`;
     }
     if (ac && !bc) {
-      return `(() => { const _a = ${compile(a)}, _r = ${compile(b)}; return { re: _a.re / _r, im: _a.im / _r }; })()`;
+      return `(() => { const _a = ${compile(a)}, _r = ${compile(
+        b
+      )}; return { re: _a.re / _r, im: _a.im / _r }; })()`;
     }
-    return `(() => { const _r = ${compile(a)}, _b = ${compile(b)}, _d = _b.re * _b.re + _b.im * _b.im; return { re: _r * _b.re / _d, im: -_r * _b.im / _d }; })()`;
+    return `(() => { const _r = ${compile(a)}, _b = ${compile(
+      b
+    )}, _d = _b.re * _b.re + _b.im * _b.im; return { re: _r * _b.re / _d, im: -_r * _b.im / _d }; })()`;
   },
   Negate: ([x], compile) => {
     if (x === null) throw new Error('Negate: no argument');
@@ -610,7 +626,9 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   ColorMix: (args, compile) => {
     if (args.length < 2) throw new Error('ColorMix: need two colors');
     if (args.length >= 3)
-      return `_SYS.colorMix(${compile(args[0])}, ${compile(args[1])}, ${compile(args[2])})`;
+      return `_SYS.colorMix(${compile(args[0])}, ${compile(args[1])}, ${compile(
+        args[2]
+      )})`;
     return `_SYS.colorMix(${compile(args[0])}, ${compile(args[1])})`;
   },
   ColorContrast: ([bg, fg], compile) => {
@@ -621,7 +639,9 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   ContrastingColor: (args, compile) => {
     if (args.length === 0) throw new Error('ContrastingColor: no argument');
     if (args.length >= 3)
-      return `_SYS.contrastingColor(${compile(args[0])}, ${compile(args[1])}, ${compile(args[2])})`;
+      return `_SYS.contrastingColor(${compile(args[0])}, ${compile(
+        args[1]
+      )}, ${compile(args[2])})`;
     return `_SYS.contrastingColor(${compile(args[0])})`;
   },
   ColorToColorspace: ([color, space], compile) => {
@@ -632,7 +652,9 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   ColorFromColorspace: ([components, space], compile) => {
     if (components === null || space === null)
       throw new Error('ColorFromColorspace: need components and space');
-    return `_SYS.colorFromColorspace(${compile(components)}, ${compile(space)})`;
+    return `_SYS.colorFromColorspace(${compile(components)}, ${compile(
+      space
+    )})`;
   },
   Colormap: (args, compile) => {
     if (args.length === 0) throw new Error('Colormap: no argument');
@@ -697,7 +719,9 @@ const colorHelpers = {
         const r = Math.round(Math.max(0, Math.min(255, rgb.r)));
         const g = Math.round(Math.max(0, Math.min(255, rgb.g)));
         const b = Math.round(Math.max(0, Math.min(255, rgb.b)));
-        let hex = `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+        let hex = `#${r.toString(16).padStart(2, '0')}${g
+          .toString(16)
+          .padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
         if (rgb.alpha !== undefined && Math.abs(rgb.alpha - 1) > 1e-4) {
           const a = Math.round(Math.max(0, Math.min(255, rgb.alpha * 255)));
           hex += a.toString(16).padStart(2, '0');
@@ -1185,6 +1209,7 @@ function wrapRealOnly(
 ): CompilationResult<'javascript', number> {
   const origRun = result.run;
   const realRun = ((...args: unknown[]) => {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
     const r = (origRun as Function)(...args);
     if (typeof r === 'object' && r !== null && 'im' in r)
       return r.im === 0 ? r.re : NaN;
@@ -1423,7 +1448,7 @@ function compileIntegrate(args, _, target: CompileTarget<Expression>): string {
 /**
  * Check if function has a true name (not anonymous)
  */
-// eslint-disable-next-line @typescript-eslint/ban-types
+// eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
 function isTrulyNamed(func: Function): boolean {
   const source = func.toString();
   if (source.includes('=>')) return false;

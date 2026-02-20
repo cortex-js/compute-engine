@@ -82,7 +82,7 @@ export function normalizeIndexingSet(indexingSet: Expression): IndexingSet {
     import('../global-types').FunctionInterface;
   const op1 = fn.op1;
   index = isSymbol(op1) ? op1.symbol : undefined;
-  console.assert(index, 'Indexing set must have an index');
+  console.assert(index !== undefined, 'Indexing set must have an index');
   lower = Math.floor(fn.op2.re);
   if (isNaN(lower)) lower = 1;
 

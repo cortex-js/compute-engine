@@ -86,7 +86,7 @@ export function zip(items: ReadonlyArray<Expression>): Iterator<Expression[]> {
 
   // Get the length of the shortest collection
   const shortest = Math.min(
-    ...items.map((x) => (x.isCollection ? (x.count ?? 1) : Infinity))
+    ...items.map((x) => (x.isCollection ? x.count ?? 1 : Infinity))
   );
 
   // If the shortest collection is empty, return an empty iterator

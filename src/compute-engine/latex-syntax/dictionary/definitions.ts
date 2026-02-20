@@ -813,7 +813,7 @@ function isValidEntry(
   if (!subject) {
     try {
       subject = JSON.stringify(entry);
-    } catch (e) {
+    } catch {
       subject = '???';
     }
   }

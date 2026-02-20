@@ -18,7 +18,7 @@ import { isNumber, isSymbol, isFunction } from './type-guards';
 
 type ConstructibleTrigValues = [
   [numerator: number, denominator: number],
-  { [operator: string]: Expression },
+  { [operator: string]: Expression }
 ][];
 
 // For each trig function, by quadrant (0..π/2, π/2..π, π..3π/2, 3π/2..2π),
@@ -73,7 +73,7 @@ const S6: MathJsonExpression = ['Sqrt', 6];
 // The key is the argument in radian, as (num * π / den)
 const CONSTRUCTIBLE_VALUES: [
   key: [numerator: number, denominator: number],
-  values: { [name: string]: MathJsonExpression | LatexString },
+  values: { [name: string]: MathJsonExpression | LatexString }
 ][] = [
   [
     [0, 1],
@@ -552,7 +552,7 @@ function constructibleValuesInverse(
   //
   type ConstructibleTrigValuesInverse = [
     [match_arg: Expression, match_arg_N: number],
-    angle: [numerator: number, denominator: number],
+    angle: [numerator: number, denominator: number]
   ][];
   const specialInverseValues = ce._cache<ConstructibleTrigValuesInverse>(
     'constructible-inverse-trigonometric-values-' + operator,

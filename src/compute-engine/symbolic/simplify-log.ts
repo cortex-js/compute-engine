@@ -468,8 +468,8 @@ export function simplifyLog(x: Expression): RuleStep | undefined {
             otherTerms.length === 0
               ? ce.Zero
               : otherTerms.length === 1
-                ? otherTerms[0]
-                : ce._fn('Add', [...otherTerms]);
+              ? otherTerms[0]
+              : ce._fn('Add', [...otherTerms]);
           return {
             value: term.op1.mul(ce._fn('Exp', [remaining])),
             because: 'e^(ln(x) + y) -> x * e^y',
@@ -487,8 +487,8 @@ export function simplifyLog(x: Expression): RuleStep | undefined {
           otherTerms.length === 0
             ? ce.Zero
             : otherTerms.length === 1
-              ? otherTerms[0]
-              : ce._fn('Add', [...otherTerms]);
+            ? otherTerms[0]
+            : ce._fn('Add', [...otherTerms]);
 
         const logBase = term.op2;
         const isDefaultOrBase10 =
@@ -497,8 +497,8 @@ export function simplifyLog(x: Expression): RuleStep | undefined {
         const expOfLog = isDefaultOrBase10
           ? term.op1.pow(ce.One.div(ce._fn('Ln', [ce.number(10)])))
           : sym(logBase) === 'ExponentialE'
-            ? term.op1
-            : term.op1.pow(ce.One.div(ce._fn('Ln', [logBase])));
+          ? term.op1
+          : term.op1.pow(ce.One.div(ce._fn('Ln', [logBase])));
 
         return {
           value: expOfLog.mul(base.pow(remaining)),
@@ -558,8 +558,8 @@ export function simplifyLog(x: Expression): RuleStep | undefined {
             otherTerms.length === 0
               ? ce.Zero
               : otherTerms.length === 1
-                ? otherTerms[0]
-                : ce._fn('Add', [...otherTerms]);
+              ? otherTerms[0]
+              : ce._fn('Add', [...otherTerms]);
           return {
             value: term.op1.mul(base.pow(remaining)),
             because: 'c^(log_c(x) + y) -> x * c^y',

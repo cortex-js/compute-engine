@@ -524,7 +524,9 @@ function parseRule(
 
     if (!expr.isValid || expr.operator !== 'Rule') {
       throw new Error(
-        `Invalid rule "${rule}"\n|   ${dewildcard(expr).toString()}\n|   A rule should be of the form:\n|   <match> -> <replace>; <condition>`
+        `Invalid rule "${rule}"\n|   ${dewildcard(
+          expr
+        ).toString()}\n|   A rule should be of the form:\n|   <match> -> <replace>; <condition>`
       );
     }
 
@@ -610,7 +612,9 @@ function boxRule(
 
   if (replace === undefined)
     throw new Error(
-      `Invalid rule "${id ?? JSON.stringify(rule, undefined, 4)}"\n|   A rule must include at least a replace property`
+      `Invalid rule "${
+        id ?? JSON.stringify(rule, undefined, 4)
+      }"\n|   A rule must include at least a replace property`
     );
 
   // Normalize the condition to a function
@@ -634,14 +638,18 @@ function boxRule(
   } else {
     if (condition !== undefined && typeof condition !== 'function')
       throw new Error(
-        `Invalid rule ${id ?? JSON.stringify(rule, undefined, 4)}\n|   condition is not a valid function`
+        `Invalid rule ${
+          id ?? JSON.stringify(rule, undefined, 4)
+        }\n|   condition is not a valid function`
       );
     condFn = condition;
   }
 
   if (typeof match === 'function') {
     throw new Error(
-      `Invalid rule ${id ?? JSON.stringify(rule, undefined, 4)}\n|   match is not a valid expression.\n|   Use a replace function instead to validate and replace the expression`
+      `Invalid rule ${
+        id ?? JSON.stringify(rule, undefined, 4)
+      }\n|   match is not a valid expression.\n|   Use a replace function instead to validate and replace the expression`
     );
   }
 
@@ -705,13 +713,17 @@ function boxRule(
     !replaceExpr.isValid
   ) {
     throw new Error(
-      `Invalid rule ${id ?? JSON.stringify(rule, undefined, 4)}\n|   The replace expression is not valid: ${replaceExpr?.toString()}`
+      `Invalid rule ${
+        id ?? JSON.stringify(rule, undefined, 4)
+      }\n|   The replace expression is not valid: ${replaceExpr?.toString()}`
     );
   }
 
   if (!replaceExpr && typeof replace !== 'function')
     throw new Error(
-      `Invalid rule ${id ?? JSON.stringify(rule, undefined, 4)}\n|   The replace expression could not be parsed`
+      `Invalid rule ${
+        id ?? JSON.stringify(rule, undefined, 4)
+      }\n|   The replace expression could not be parsed`
     );
 
   return {
@@ -747,7 +759,11 @@ export function boxRules(
     } catch (e) {
       // There was a problem with a rule, skip it and continue
       throw new Error(
-        `\n${e.message}\n|   Skipping rule ${JSON.stringify(rule, undefined, 4)}\n\n`
+        `\n${e.message}\n|   Skipping rule ${JSON.stringify(
+          rule,
+          undefined,
+          4
+        )}\n\n`
       );
     }
   }
@@ -946,7 +962,7 @@ export function replace(
           done = false;
           expr = result.value;
         }
-      } catch (_e) {
+      } catch {
         return steps;
       }
     }

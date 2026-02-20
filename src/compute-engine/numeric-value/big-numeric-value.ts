@@ -593,25 +593,25 @@ export class BigNumericValue extends NumericValue {
   }
 
   lt(other: number | NumericValue): boolean | undefined {
-    if (this.im !== 0) undefined;
+    if (this.im !== 0) return undefined;
     if (typeof other === 'number') return this.decimal.lt(other);
     return this.decimal.lt(other.bignumRe ?? other.re);
   }
 
   lte(other: number | NumericValue): boolean | undefined {
-    if (this.im !== 0) undefined;
+    if (this.im !== 0) return undefined;
     if (typeof other === 'number') return this.decimal.lte(other);
     return this.decimal.lte(other.bignumRe ?? other.re);
   }
 
   gt(other: number | NumericValue): boolean | undefined {
-    if (this.im !== 0) undefined;
+    if (this.im !== 0) return undefined;
     if (typeof other === 'number') return this.decimal.gt(other);
     return this.decimal.gt(other.bignumRe ?? other.re);
   }
 
   gte(other: number | NumericValue): boolean | undefined {
-    if (this.im !== 0) undefined;
+    if (this.im !== 0) return undefined;
     if (typeof other === 'number') return this.decimal.gte(other);
     return this.decimal.gte(other.bignumRe ?? other.re);
   }

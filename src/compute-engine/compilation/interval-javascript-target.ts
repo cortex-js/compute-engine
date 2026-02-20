@@ -152,7 +152,9 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     if (isNumber(exp) && exp.im === 0) {
       return `_IA.pow(${compile(arg)}, ${1 / exp.re})`;
     }
-    return `_IA.powInterval(${compile(arg)}, _IA.div(_IA.point(1), ${compile(exp)}))`;
+    return `_IA.powInterval(${compile(arg)}, _IA.div(_IA.point(1), ${compile(
+      exp
+    )}))`;
   },
   Round: (args, compile) => `_IA.round(${compile(args[0])})`,
   Heaviside: (args, compile) => `_IA.heaviside(${compile(args[0])})`,

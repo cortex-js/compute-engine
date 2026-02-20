@@ -665,7 +665,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
               if (sym(pred) === 'True') return { value, done: false };
               if (sym(pred) !== 'False') {
                 throw new Error(
-                  `Filter predicate must return "True" or "False". ${spellCheckMessage(expr.op2)}`
+                  `Filter predicate must return "True" or "False". ${spellCheckMessage(
+                    expr.op2
+                  )}`
                 );
               }
             }
@@ -720,7 +722,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
             if (count === index) return item;
           } else if (pred !== 'False') {
             throw new Error(
-              `Filter predicate must return "True" or "False". ${spellCheckMessage(expr.op2)}`
+              `Filter predicate must return "True" or "False". ${spellCheckMessage(
+                expr.op2
+              )}`
             );
           }
         }
@@ -1371,7 +1375,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           if (pred === 'True') return true;
           if (pred === 'False') return false;
           throw new Error(
-            `Filter predicate must return "True" or "False". ${spellCheckMessage(fn)}`
+            `Filter predicate must return "True" or "False". ${spellCheckMessage(
+              fn
+            )}`
           );
         }) ?? undefined;
       return ce.number(index ?? 0);
@@ -1392,7 +1398,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (pred === 'False') continue;
         if (pred === 'True') return item;
         throw new Error(
-          `Filter predicate must return "True" or "False". ${spellCheckMessage(fn)}`
+          `Filter predicate must return "True" or "False". ${spellCheckMessage(
+            fn
+          )}`
         );
       }
       return ce.Nothing;
@@ -1414,7 +1422,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (pred === 'True') count++;
         else
           throw new Error(
-            `Filter predicate must return "True" or "False". ${spellCheckMessage(fn)}`
+            `Filter predicate must return "True" or "False". ${spellCheckMessage(
+              fn
+            )}`
           );
       }
       return ce.number(count);
@@ -1437,7 +1447,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (pred === 'True') indices.push(ce.number(index));
         if (pred !== 'False')
           throw new Error(
-            `Filter predicate must return "True" or "False". ${spellCheckMessage(fn)}`
+            `Filter predicate must return "True" or "False". ${spellCheckMessage(
+              fn
+            )}`
           );
         index++;
       }
@@ -1637,7 +1649,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         else if (pred === 'False') falseGroup.push(item);
         else
           throw new Error(
-            `Partition predicate must return "True" or "False". ${spellCheckMessage(arg)}`
+            `Partition predicate must return "True" or "False". ${spellCheckMessage(
+              arg
+            )}`
           );
       }
 

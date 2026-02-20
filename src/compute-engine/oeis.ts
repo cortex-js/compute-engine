@@ -165,7 +165,9 @@ export async function lookupOEISByTerms(
 
   // Build the query URL
   const query = terms.join(',');
-  const url = `${OEIS_BASE_URL}/search?fmt=json&q=${encodeURIComponent(query)}&start=0&count=${maxResults}`;
+  const url = `${OEIS_BASE_URL}/search?fmt=json&q=${encodeURIComponent(
+    query
+  )}&start=0&count=${maxResults}`;
 
   try {
     const controller = new AbortController();

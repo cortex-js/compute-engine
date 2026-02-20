@@ -369,10 +369,14 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
       // If only symbol arguments, just concatenate them
       // ['KroneckerDelta', 'n', 'm'] -> \delta_{nm}
       if (args.every((x) => symbol(x)))
-        return `\\delta_{${args.map((arg) => serializer.serialize(arg)).join('')}}`;
+        return `\\delta_{${args
+          .map((arg) => serializer.serialize(arg))
+          .join('')}}`;
 
       // Otherwise, use commas
-      return `\\delta_{${args.map((arg) => serializer.serialize(arg)).join(', ')}}`;
+      return `\\delta_{${args
+        .map((arg) => serializer.serialize(arg))
+        .join(', ')}}`;
     },
     parse: (parser) => {
       const group = parser.parseGroup();

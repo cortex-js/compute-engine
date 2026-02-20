@@ -67,7 +67,9 @@ export function compile<T extends string = 'javascript'>(
 
     if (!languageTarget) {
       throw new Error(
-        `Compilation target "${targetName}" is not registered. Available targets: ${expr.engine.listCompilationTargets().join(', ')}`
+        `Compilation target "${targetName}" is not registered. Available targets: ${expr.engine
+          .listCompilationTargets()
+          .join(', ')}`
       );
     }
 

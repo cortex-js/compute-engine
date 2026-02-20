@@ -77,7 +77,9 @@ export abstract class Parser<T = unknown> {
     // message = message.replace(/\s+/g, ' '); // Normalize whitespace
     // message = message.trim();
     // if (message.endsWith('.')) message = message.slice(0, -1); // Remove trailing period
-    message = `|${this.getLine(line)}\n|${' '.repeat(col - 1)}^\n| ${line}:${col}: ${message}`;
+    message = `|${this.getLine(line)}\n|${' '.repeat(
+      col - 1
+    )}^\n| ${line}:${col}: ${message}`;
 
     throw new Error(message);
   }

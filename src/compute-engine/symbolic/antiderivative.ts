@@ -1518,8 +1518,8 @@ function getQuadraticCoefficients(
           constFactors.length === 0
             ? ce.One
             : constFactors.length === 1
-              ? constFactors[0]
-              : ce.box(['Multiply', ...constFactors]);
+            ? constFactors[0]
+            : ce.box(['Multiply', ...constFactors]);
         if (!coeff.has(index)) {
           return { a: coeff, b: ce.Zero, c: ce.Zero };
         }
@@ -1561,8 +1561,8 @@ function getQuadraticCoefficients(
             constFactors.length === 0
               ? ce.One
               : constFactors.length === 1
-                ? constFactors[0]
-                : ce.box(['Multiply', ...constFactors]);
+              ? constFactors[0]
+              : ce.box(['Multiply', ...constFactors]);
           a = a.add(coeff);
           continue;
         }
@@ -1576,8 +1576,8 @@ function getQuadraticCoefficients(
             constFactors.length === 0
               ? ce.One
               : constFactors.length === 1
-                ? constFactors[0]
-                : ce.box(['Multiply', ...constFactors]);
+              ? constFactors[0]
+              : ce.box(['Multiply', ...constFactors]);
           b = b.add(coeff);
           continue;
         }
@@ -2429,10 +2429,7 @@ export function antiderivative(fn: Expression, index: string): Expression {
 
   // Apply a pattern matching rule...
   const rules = ce.rules(INTEGRATION_RULES);
-  const xfn = expandAll(fn).subs(
-    { [index]: '_x' },
-    { canonical: true }
-  );
+  const xfn = expandAll(fn).subs({ [index]: '_x' }, { canonical: true });
   const result = matchAnyRules(
     xfn,
     rules,
