@@ -213,7 +213,6 @@ export { JavaScriptTarget } from './compilation/javascript-target';
 export { GLSLTarget } from './compilation/glsl-target';
 export { PythonTarget } from './compilation/python-target';
 export { IntervalJavaScriptTarget } from './compilation/interval-javascript-target';
-export { IntervalGLSLTarget } from './compilation/interval-glsl-target';
 export { BaseCompiler } from './compilation/base-compiler';
 
 // Import for internal use
@@ -696,7 +695,7 @@ export class ComputeEngine implements IComputeEngine {
    * ```typescript
    * const ce = new ComputeEngine();
    * console.log(ce.listCompilationTargets());
-   * // → ['javascript', 'glsl', 'interval-js', 'interval-glsl']
+   * // → ['javascript', 'glsl', 'wgsl', 'interval-js']
    * ```
    */
   listCompilationTargets(): string[] {

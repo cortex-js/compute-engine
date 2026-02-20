@@ -7,8 +7,6 @@ export * from './glsl-target';
 export * from './wgsl-target';
 export * from './python-target';
 export * from './interval-javascript-target';
-export * from './interval-glsl-target';
-export * from './interval-wgsl-target';
 
 // Legacy exports for backward compatibility
 export { BaseCompiler as compile } from './base-compiler';

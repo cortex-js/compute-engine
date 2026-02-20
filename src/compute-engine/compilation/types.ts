@@ -99,8 +99,6 @@ export interface CompilationOptions<Expr = unknown> {
    * - `'glsl'` - Compile to GLSL (OpenGL Shading Language)
    * - `'wgsl'` - Compile to WGSL (WebGPU Shading Language)
    * - `'interval-js'` - Compile to JavaScript with interval arithmetic
-   * - `'interval-glsl'` - Compile to GLSL with interval arithmetic
-   * - `'interval-wgsl'` - Compile to WGSL with interval arithmetic
    *
    * Custom targets can be registered using `ce.registerCompilationTarget()`.
    *
@@ -278,12 +276,8 @@ export type CompilationResult<
   /**
    * Library/helper code that must be included before the compiled `code`.
    *
-   * For shader targets (e.g. `interval-wgsl`, `interval-glsl`), this contains
-   * the interval arithmetic library (struct definitions, helper functions, etc.)
-   * that the compiled expression references.
-   *
-   * To produce a complete shader, concatenate `preamble + code` or use the
-   * target's `compileShaderFunction()` method directly.
+   * For targets like `interval-js`, this contains the interval arithmetic
+   * library (helper functions, etc.) that the compiled expression references.
    */
   preamble?: string;
 

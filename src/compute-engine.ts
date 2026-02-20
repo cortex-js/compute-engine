@@ -33,8 +33,6 @@ export { GLSLTarget } from './compute-engine/compilation/glsl-target';
 export { WGSLTarget } from './compute-engine/compilation/wgsl-target';
 export { PythonTarget } from './compute-engine/compilation/python-target';
 export { IntervalJavaScriptTarget } from './compute-engine/compilation/interval-javascript-target';
-export { IntervalGLSLTarget } from './compute-engine/compilation/interval-glsl-target';
-export { IntervalWGSLTarget } from './compute-engine/compilation/interval-wgsl-target';
 export { BaseCompiler } from './compute-engine/compilation/base-compiler';
 
 export type {

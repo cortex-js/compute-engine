@@ -129,8 +129,6 @@ describe('COMPILATION PLUGIN ARCHITECTURE', () => {
       const intervalJSTarget = ce.getCompilationTarget('interval-js');
       expect(intervalJSTarget).toBeDefined();
 
-      const intervalGLSLTarget = ce.getCompilationTarget('interval-glsl');
-      expect(intervalGLSLTarget).toBeDefined();
     });
 
     it('should list all default targets', () => {
@@ -138,7 +136,6 @@ describe('COMPILATION PLUGIN ARCHITECTURE', () => {
       expect(targets).toContain('javascript');
       expect(targets).toContain('glsl');
       expect(targets).toContain('interval-js');
-      expect(targets).toContain('interval-glsl');
     });
 
     it('should allow registering custom targets', () => {

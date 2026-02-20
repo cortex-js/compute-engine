@@ -3,8 +3,6 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 import { JavaScriptTarget } from '../../src/compute-engine/compilation/javascript-target';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
 import { IntervalJavaScriptTarget } from '../../src/compute-engine/compilation/interval-javascript-target';
-import { IntervalGLSLTarget } from '../../src/compute-engine/compilation/interval-glsl-target';
-import { IntervalWGSLTarget } from '../../src/compute-engine/compilation/interval-wgsl-target';
 import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 
@@ -529,8 +527,6 @@ describe('COMPILE', () => {
         'Conjugate',
       ]),
       'interval-javascript': new Set(['If']),
-      'interval-glsl': new Set([]),
-      'interval-wgsl': new Set([]),
       'python': new Set([
         'Arctan2',
         'Real',
@@ -559,8 +555,6 @@ describe('COMPILE', () => {
       ['glsl', new GLSLTarget()],
       ['wgsl', new WGSLTarget()],
       ['interval-javascript', new IntervalJavaScriptTarget()],
-      ['interval-glsl', new IntervalGLSLTarget()],
-      ['interval-wgsl', new IntervalWGSLTarget()],
       ['python', new PythonTarget()],
     ];
 
@@ -667,8 +661,6 @@ describe('COMPILE', () => {
       ['glsl', new GLSLTarget()],
       ['wgsl', new WGSLTarget()],
       ['interval-javascript', new IntervalJavaScriptTarget()],
-      ['interval-glsl', new IntervalGLSLTarget()],
-      ['interval-wgsl', new IntervalWGSLTarget()],
       ['python', new PythonTarget()],
     ];
 
@@ -691,8 +683,6 @@ describe('COMPILE', () => {
           'glsl': [],
           'wgsl': [],
           'interval-javascript': [],
-          'interval-glsl': [],
-          'interval-wgsl': [],
           'python': [],
         };
 
