@@ -1,5 +1,6 @@
 import { engine as ce } from '../utils';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
+import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 
 describe('FRACTAL FUNCTIONS', () => {
   describe('Mandelbrot JS evaluate', () => {
@@ -101,5 +102,32 @@ describe('FRACTAL GLSL COMPILATION', () => {
     const result = glsl.compile(expr);
     expect(result.preamble).toContain('_fractal_mandelbrot');
     expect(result.preamble).toContain('_fractal_julia');
+  });
+});
+
+const wgsl = new WGSLTarget();
+
+describe('FRACTAL WGSL COMPILATION', () => {
+  it('compiles Mandelbrot call site', () => {
+    const expr = ce.box(['Mandelbrot', 'c', 100]);
+    const result = wgsl.compile(expr);
+    expect(result.code).toMatchInlineSnapshot(
+      `_fractal_mandelbrot(c, i32(100.0))`
+    );
+  });
+
+  it('injects Mandelbrot preamble with WGSL syntax', () => {
+    const expr = ce.box(['Mandelbrot', 'c', 100]);
+    const result = wgsl.compile(expr);
+    expect(result.preamble).toContain('fn _fractal_mandelbrot');
+    expect(result.preamble).toContain('vec2f');
+  });
+
+  it('compiles Julia call site', () => {
+    const expr = ce.box(['Julia', 'z', 'c', 100]);
+    const result = wgsl.compile(expr);
+    expect(result.code).toMatchInlineSnapshot(
+      `_fractal_julia(z, c, i32(100.0))`
+    );
   });
 });
