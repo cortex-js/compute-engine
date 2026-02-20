@@ -64,6 +64,27 @@ export function _setSerializeJson(fn: SerializeJsonFn) {
   _serializeJson = fn;
 }
 
+type ExpandFn = (expr: Expression) => Expression;
+let _expandForIs: ExpandFn;
+/** @internal */
+export function _setExpandForIs(fn: ExpandFn) {
+  _expandForIs = fn;
+}
+
+const EXPANDABLE_OPS = new Set(['Multiply', 'Power', 'Negate', 'Divide']);
+
+/** Return true if at least one side has an operator where expansion could
+ *  produce a structurally different result. */
+function _couldBenefitFromExpand(
+  a: _BoxedExpression,
+  b: Expression | number | bigint | boolean | string
+): boolean {
+  if (EXPANDABLE_OPS.has(a.operator)) return true;
+  if (typeof b === 'object' && b !== null && 'operator' in b)
+    return EXPANDABLE_OPS.has(b.operator);
+  return false;
+}
+
 /**
  * _BoxedExpression
  *
@@ -471,12 +492,37 @@ export abstract class _BoxedExpression implements Expression {
     return [this, this.engine.One];
   }
 
+  toRational(): [number, number] | null {
+    return null;
+  }
+
+  factors(): ReadonlyArray<Expression> {
+    return [this];
+  }
+
   is(
     other: Expression | number | bigint | boolean | string,
     tolerance?: number
   ): boolean {
     // Fast path: exact structural/value check
     if (this.isSame(other)) return true;
+
+    // Try expansion — catches equivalences like (x+1)^2 vs x^2+2x+1
+    // even when the expression has free variables (where the numeric
+    // fallback below would bail out).
+    //
+    // Only expand when at least one side contains Multiply, Power, or
+    // Negate — those are the only operators where expansion can produce
+    // a structurally different result. This avoids needlessly
+    // reconstructing Add trees (expand recurses into Add operands).
+    if (_expandForIs && _couldBenefitFromExpand(this, other)) {
+      const expandedThis = _expandForIs(this);
+      if (expandedThis !== this && expandedThis.isSame(other)) return true;
+      if (other instanceof _BoxedExpression) {
+        const expandedOther = _expandForIs(other);
+        if (expandedThis.isSame(expandedOther)) return true;
+      }
+    }
 
     // Numeric fallback only when there are no free variables
     if (this.freeVariables.length > 0) return false;

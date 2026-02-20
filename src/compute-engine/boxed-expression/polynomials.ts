@@ -221,7 +221,7 @@ export function getPolynomialCoefficients(
   const coeffs: Expression[] = new Array(degree + 1).fill(ce.Zero);
 
   // Expand the expression to get standard form
-  const expanded = expand(expr) ?? expr;
+  const expanded = expand(expr);
 
   // Helper to add a term's coefficient at a specific degree
   const addCoefficient = (coef: Expression, deg: number): boolean => {

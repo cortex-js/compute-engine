@@ -12,7 +12,7 @@ import { stochasticEqual } from './stochastic-equal';
 
 // Lazy reference to break circular dependency:
 // expand → arithmetic-add → boxed-tensor → abstract-boxed-expression → compare
-type ExpandFn = (expr: Expression | undefined) => Expression | null;
+type ExpandFn = (expr: Expression) => Expression;
 let _expand: ExpandFn;
 /** @internal */
 export function _setExpand(fn: ExpandFn) {
@@ -135,8 +135,8 @@ export function eq(
     }
 
     // Try structural equality after expand+simplify first
-    a = (_expand(a) ?? a).simplify();
-    b = (_expand(b) ?? b).simplify();
+    a = _expand(a).simplify();
+    b = _expand(b).simplify();
     if (same(a, b)) return true;
 
     // Fall back to stochastic evaluation at random sample points

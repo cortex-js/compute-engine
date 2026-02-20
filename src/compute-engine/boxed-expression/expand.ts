@@ -129,7 +129,6 @@ export function expandFunction(
   //
   if (h === 'Divide') {
     const num = expand(ops[0]);
-    if (num === null) return null;
     if (isFunction(num, 'Add'))
       return add(...num.ops.map((x) => x.div(ops[1])));
     return ce._fn('Divide', [num, ops[1]]);
@@ -160,14 +159,14 @@ export function expandFunction(
   //
   // Negate
   //
-  if (h === 'Negate') return expand(ops[0])?.neg() ?? null;
+  if (h === 'Negate') return expand(ops[0]).neg();
 
   //
   //
   // Add
   //
 
-  if (h === 'Add') return add(...ops.map((x) => expand(x) ?? x));
+  if (h === 'Add') return add(...ops.map((x) => expand(x)));
 
   //
   // Power
@@ -188,11 +187,11 @@ export function expandFunction(
  * If the exression is a relational operator, expand the operands.
  * Return null if the expression cannot be expanded.
  */
-export function expand(expr: Expression | undefined): Expression | null {
+export function expand(expr: Expression): Expression {
   // To expand an expression, we need to use its canonical form
-  expr = expr?.canonical;
+  expr = expr.canonical;
 
-  if (!expr || typeof expr.operator !== 'string') return null;
+  if (typeof expr.operator !== 'string') return expr;
 
   //
   // Expand relational operators
@@ -201,14 +200,16 @@ export function expand(expr: Expression | undefined): Expression | null {
     const ops = isFunction(expr) ? expr.ops : [];
     return expr.engine._fn(
       expr.operator,
-      ops.map((x) => expand(x) ?? x)
+      ops.map((x) => expand(x))
     );
   }
 
-  return expandFunction(
-    expr.engine,
-    expr.operator,
-    isFunction(expr) ? expr.ops : []
+  return (
+    expandFunction(
+      expr.engine,
+      expr.operator,
+      isFunction(expr) ? expr.ops : []
+    ) ?? expr
   );
 }
 
@@ -217,11 +218,11 @@ export function expand(expr: Expression | undefined): Expression | null {
  *
  * `expand()` only expands the top level of the expression.
  */
-export function expandAll(expr: Expression): Expression | null {
-  if (!expr.operator || !isFunction(expr)) return null;
+export function expandAll(expr: Expression): Expression {
+  if (!expr.operator || !isFunction(expr)) return expr;
 
-  const ops = expr.ops.map((x) => expandAll(x) ?? x);
+  const ops = expr.ops.map((x) => expandAll(x));
 
   const result = expr.engine.function(expr.operator, ops);
-  return expand(result) ?? result;
+  return expand(result);
 }

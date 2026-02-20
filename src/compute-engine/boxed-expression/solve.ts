@@ -1151,10 +1151,10 @@ export function findUnivariateRoots(
   const ce = expr.engine;
 
   if (isFunction(expr, 'Equal')) {
-    const lhs = expand(expr.op1) ?? expr.op1;
-    const rhs = expand(expr.op2) ?? expr.op2;
+    const lhs = expand(expr.op1);
+    const rhs = expand(expr.op2);
     expr = lhs.sub(rhs).simplify();
-  } else expr = (expand(expr) ?? expr).simplify();
+  } else expr = expand(expr).simplify();
 
   // Save the expression BEFORE clearing denominators and other transformations.
   // This is crucial for validating roots: clearing denominators and harmonization

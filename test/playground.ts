@@ -549,7 +549,7 @@ const xp = ce.parse('a\\times(c+d)');
 console.info(xp.json);
 console.info(xp.latex);
 console.info(xp.simplify().toString()); // Returns a*(c+d)
-console.info((expand(xp) ?? xp).toString()); // Returns ac + ad
+console.info(expand(xp).toString()); // Returns ac + ad
 
 // console.info(ce.parse('\\frac{\\sqrt{15}}{\\sqrt{3}}').simplify().toString());
 

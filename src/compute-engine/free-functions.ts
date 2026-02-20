@@ -90,7 +90,7 @@ export function assign(
   getDefaultEngine().assign(arg1 as any, arg2 as any);
 }
 
-export function expand(expr: LatexString | ExpressionInput): Expression | null {
+export function expand(expr: LatexString | ExpressionInput): Expression {
   return expandExpr(toExpression(expr));
 }
 
@@ -107,7 +107,7 @@ export function solve(
 
 export function expandAll(
   expr: LatexString | ExpressionInput
-): Expression | null {
+): Expression {
   return expandAllExpr(toExpression(expr));
 }
 

@@ -174,10 +174,10 @@ function extractLinearCoefficients(
   if (isFunction(equation, 'Equal')) {
     const lhs = equation.op1;
     const rhs = equation.op2;
-    expr = expand(lhs.sub(rhs)) ?? lhs.sub(rhs);
+    expr = expand(lhs.sub(rhs));
   } else {
     // Assume equation = 0
-    expr = expand(equation) ?? equation;
+    expr = expand(equation);
   }
 
   // Check that all variables appear with degree at most 1 (linear)
@@ -680,9 +680,9 @@ export function solvePolynomialSystem(
   const normalized = equations.map((eq) => {
     if (isFunction(eq, 'Equal')) {
       const diff = eq.op1.sub(eq.op2);
-      return (expand(diff) ?? diff).simplify();
+      return expand(diff).simplify();
     }
-    return (expand(eq) ?? eq).simplify();
+    return expand(eq).simplify();
   });
 
   // Try product + sum pattern first
@@ -1182,12 +1182,12 @@ function extractLinearConstraint(
 
   if (op === 'Less' || op === 'LessEqual') {
     const diff1 = lhs.sub(rhs);
-    expr = (expand(diff1) ?? diff1).simplify();
+    expr = expand(diff1).simplify();
     strict = op === 'Less';
   } else {
     // Greater or GreaterEqual: flip to Less form
     const diff2 = rhs.sub(lhs);
-    expr = (expand(diff2) ?? diff2).simplify();
+    expr = expand(diff2).simplify();
     strict = op === 'Greater';
   }
 

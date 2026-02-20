@@ -455,6 +455,25 @@ export class BoxedNumber
     ];
   }
 
+  toRational(): [number, number] | null {
+    if (typeof this._value === 'number') {
+      if (!Number.isFinite(this._value)) return null;
+      if (Number.isInteger(this._value)) return [this._value, 1];
+      return null;
+    }
+    // NumericValue — check it's a pure rational (no radical, no imaginary)
+    if (this._value.im !== 0) return null;
+    const exact = this._value.asExact;
+    if (!exact) return null;
+    const ev = exact as ExactNumericValue;
+    if (ev.radical !== 1) return null;
+    const r = ev.rational;
+    const num = Number(r[0]);
+    const den = Number(r[1]);
+    if (!Number.isFinite(num) || !Number.isFinite(den)) return null;
+    return [num, den];
+  }
+
   subs(
     sub: Substitution,
     options?: { canonical?: CanonicalOptions }

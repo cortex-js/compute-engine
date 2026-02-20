@@ -2429,7 +2429,7 @@ export function antiderivative(fn: Expression, index: string): Expression {
 
   // Apply a pattern matching rule...
   const rules = ce.rules(INTEGRATION_RULES);
-  const xfn = (expandAll(fn) ?? fn).subs(
+  const xfn = expandAll(fn).subs(
     { [index]: '_x' },
     { canonical: true }
   );

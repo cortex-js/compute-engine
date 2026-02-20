@@ -52,6 +52,7 @@ import { canonicalMultiply, mul, div, Product } from './arithmetic-mul-div';
 import { add } from './arithmetic-add';
 import { pow } from './arithmetic-power';
 import { asSmallInteger } from './numerics';
+import { gcd } from '../numerics/numeric';
 import { _BoxedExpression } from './abstract-boxed-expression';
 import { DEFAULT_COMPLEXITY, sortOperands } from './order';
 import {
@@ -627,6 +628,42 @@ export class BoxedFunction
     }
 
     return [this, this.engine.One];
+  }
+
+  factors(): ReadonlyArray<Expression> {
+    const op = this.operator;
+    if (op === 'Multiply') {
+      const result: Expression[] = [];
+      for (const arg of this.ops) result.push(...arg.factors());
+      return result;
+    }
+    if (op === 'Negate') {
+      return [this.engine.number(-1), ...this.op1.factors()];
+    }
+    return [this];
+  }
+
+  toRational(): [number, number] | null {
+    const op = this.operator;
+    if (op === 'Divide' || op === 'Rational') {
+      const num = this.op1.re;
+      const den = this.op2.re;
+      if (
+        Number.isInteger(num) &&
+        Number.isInteger(den) &&
+        den !== 0
+      ) {
+        const g = gcd(Math.abs(num), Math.abs(den));
+        const sign = den < 0 ? -1 : 1;
+        return [(sign * num) / g, (sign * den) / g];
+      }
+      return null;
+    }
+    if (op === 'Negate') {
+      const r = this.op1.toRational();
+      return r ? [-r[0], r[1]] : null;
+    }
+    return null;
   }
 
   //

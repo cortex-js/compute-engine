@@ -17,7 +17,7 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
       description: 'Expand out products and positive integer powers',
       lazy: true,
       signature: '(value)-> value',
-      evaluate: ([x]) => expand(x.canonical) ?? x.canonical,
+      evaluate: ([x]) => expand(x.canonical),
     },
 
     ExpandAll: {
@@ -25,7 +25,7 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
         'Recursively expand out products and positive integer powers',
       lazy: true,
       signature: '(value)-> value',
-      evaluate: ([x]) => expandAll(x.canonical) ?? x.canonical,
+      evaluate: ([x]) => expandAll(x.canonical),
     },
 
     Factor: {

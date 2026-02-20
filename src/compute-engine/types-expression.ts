@@ -1041,6 +1041,46 @@ export interface Expression {
   get numeratorDenominator(): [Expression, Expression];
 
   /**
+   * Return the value of this expression as a pair of integer numerator and
+   * denominator, or `null` if the expression is not a rational number.
+   *
+   * - For a `BoxedNumber` with an exact rational value, extracts from the
+   *   numeric representation.
+   * - For an integer, returns `[n, 1]`.
+   * - For a `Divide` or `Rational` function with integer operands, returns
+   *   `[num, den]`.
+   * - For everything else, returns `null`.
+   *
+   * The returned rational is always in lowest terms.
+   *
+   * ```typescript
+   * ce.parse('\\frac{6}{4}').toRational()  // [3, 2]
+   * ce.parse('7').toRational()              // [7, 1]
+   * ce.parse('x + 1').toRational()          // null
+   * ce.number(1.5).toRational()             // null (machine float)
+   * ```
+   */
+  toRational(): [number, number] | null;
+
+  /**
+   * Return the multiplicative factors of this expression as a flat array.
+   *
+   * This is a structural decomposition — it does not perform algebraic
+   * factoring (use `ce.function('Factor', [expr])` for that).
+   *
+   * - `Multiply(a, b, c)` returns `[a, b, c]`
+   * - `Negate(x)` returns `[-1, ...x.factors()]`
+   * - Anything else returns `[expr]`
+   *
+   * ```typescript
+   * ce.parse('2xyz').factors()     // [2, x, y, z]
+   * ce.parse('-3x').factors()      // [-1, 3, x]
+   * ce.parse('x + 1').factors()    // [x + 1]
+   * ```
+   */
+  factors(): ReadonlyArray<Expression>;
+
+  /**
    * The name of the operator of the expression.
    *
    * For example, the name of the operator of `["Add", 2, 3]` is `"Add"`.
@@ -1199,6 +1239,11 @@ export interface Expression {
    * ce.parse('x + 1').is(1)                    // false — has free variables
    * ce.parse('\\pi').is(3.14, 0.01)            // true — within custom tolerance
    * ```
+   *
+   * After the structural check, attempts to expand both sides (distributing
+   * products, applying the multinomial theorem, etc.) and re-checks
+   * structural equality. This catches equivalences like `(x+1)^2` vs
+   * `x^2+2x+1` even when the expression has free variables.
    *
    * @param tolerance - If provided, overrides `engine.tolerance` for the
    * numeric comparison. Has no effect when the comparison is structural
