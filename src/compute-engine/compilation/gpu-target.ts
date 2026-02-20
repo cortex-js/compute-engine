@@ -652,7 +652,7 @@ float _fractal_mandelbrot(vec2 c, int maxIter) {
   for (int i = 0; i < maxIter; i++) {
     z = vec2(z.x*z.x - z.y*z.y + c.x, 2.0*z.x*z.y + c.y);
     if (dot(z, z) > 4.0)
-      return (float(i) - log2(log2(dot(z, z))) + 4.0) / float(maxIter);
+      return clamp((float(i) - log2(log2(dot(z, z))) + 4.0) / float(maxIter), 0.0, 1.0);
   }
   return 1.0;
 }
@@ -661,7 +661,7 @@ float _fractal_julia(vec2 z, vec2 c, int maxIter) {
   for (int i = 0; i < maxIter; i++) {
     z = vec2(z.x*z.x - z.y*z.y + c.x, 2.0*z.x*z.y + c.y);
     if (dot(z, z) > 4.0)
-      return (float(i) - log2(log2(dot(z, z))) + 4.0) / float(maxIter);
+      return clamp((float(i) - log2(log2(dot(z, z))) + 4.0) / float(maxIter), 0.0, 1.0);
   }
   return 1.0;
 }
@@ -676,7 +676,7 @@ fn _fractal_mandelbrot(c: vec2f, maxIter: i32) -> f32 {
   for (var i: i32 = 0; i < maxIter; i++) {
     z = vec2f(z.x*z.x - z.y*z.y + c.x, 2.0*z.x*z.y + c.y);
     if (dot(z, z) > 4.0) {
-      return (f32(i) - log2(log2(dot(z, z))) + 4.0) / f32(maxIter);
+      return clamp((f32(i) - log2(log2(dot(z, z))) + 4.0) / f32(maxIter), 0.0, 1.0);
     }
   }
   return 1.0;
@@ -687,7 +687,7 @@ fn _fractal_julia(z_in: vec2f, c: vec2f, maxIter: i32) -> f32 {
   for (var i: i32 = 0; i < maxIter; i++) {
     z = vec2f(z.x*z.x - z.y*z.y + c.x, 2.0*z.x*z.y + c.y);
     if (dot(z, z) > 4.0) {
-      return (f32(i) - log2(log2(dot(z, z))) + 4.0) / f32(maxIter);
+      return clamp((f32(i) - log2(log2(dot(z, z))) + 4.0) / f32(maxIter), 0.0, 1.0);
     }
   }
   return 1.0;

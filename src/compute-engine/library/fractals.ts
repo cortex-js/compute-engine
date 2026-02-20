@@ -1,9 +1,5 @@
-import type { SymbolDefinitions } from '../global-types';
-
-/** Smooth escape-time value for the Mandelbrot set (z0 = 0) in [0, 1]. */
-function mandelbrotEscape(cx: number, cy: number, maxN: number): number {
-  return juliaEscape(0, 0, cx, cy, maxN);
-}
+import type { SymbolDefinitions, Expression } from '../global-types';
+import { isNumber } from '../boxed-expression/type-guards';
 
 /** Smooth escape-time value for any z0 → z^2 + c iteration in [0, 1]. */
 function juliaEscape(
@@ -26,23 +22,21 @@ function juliaEscape(
   return 1.0;
 }
 
-/** Extract real and imaginary parts from a boxed numeric value. */
+/** Extract finite real and imaginary parts from a boxed numeric value. */
 function getComplexParts(
-  op: any
+  op: Expression
 ): { cx: number; cy: number } | undefined {
-  const n = op.numericValue;
-  if (n === null || n === undefined) return undefined;
-  const cx = typeof n === 'number' ? n : n.re;
-  const cy = typeof n === 'number' ? 0 : n.im;
+  if (!isNumber(op)) return undefined;
+  const cx = op.re;
+  const cy = op.im;
   if (!isFinite(cx) || !isFinite(cy)) return undefined;
   return { cx, cy };
 }
 
 /** Extract a finite positive integer from a boxed numeric value. */
-function getMaxIter(op: any): number | undefined {
-  const n = op.numericValue;
-  if (n === null || n === undefined) return undefined;
-  const v = typeof n === 'number' ? n : n.re;
+function getMaxIter(op: Expression): number | undefined {
+  if (!isNumber(op)) return undefined;
+  const v = op.re;
   if (!isFinite(v) || v <= 0) return undefined;
   return Math.round(v);
 }
@@ -58,7 +52,7 @@ export const FRACTALS_LIBRARY: SymbolDefinitions[] = [
         const cp = getComplexParts(c);
         const n = getMaxIter(maxIter);
         if (cp === undefined || n === undefined) return undefined;
-        return ce.number(mandelbrotEscape(cp.cx, cp.cy, n));
+        return ce.number(juliaEscape(0, 0, cp.cx, cp.cy, n));
       },
     },
 
