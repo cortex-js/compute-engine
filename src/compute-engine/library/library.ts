@@ -15,6 +15,7 @@ import { SETS_LIBRARY } from './sets';
 import { STATISTICS_LIBRARY } from './statistics';
 import { TRIGONOMETRY_LIBRARY } from './trigonometry';
 import { UNITS_LIBRARY } from './units';
+import { FRACTALS_LIBRARY } from './fractals';
 
 import { DEFINITIONS_ALGEBRA } from '../latex-syntax/dictionary/definitions-algebra';
 import { DEFINITIONS_UNITS } from '../latex-syntax/dictionary/definitions-units';
@@ -82,6 +83,11 @@ export const STANDARD_LIBRARIES: LibraryDefinition[] = [
     name: 'colors',
     requires: ['core'],
     definitions: COLORS_LIBRARY,
+  },
+  {
+    name: 'fractals',
+    requires: ['arithmetic'],
+    definitions: FRACTALS_LIBRARY,
   },
   {
     name: 'relop',
