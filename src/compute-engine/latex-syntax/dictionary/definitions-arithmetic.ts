@@ -801,6 +801,10 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     parse: 'PositiveInfinity',
   },
   {
+    latexTrigger: ['\\infin'],
+    parse: 'PositiveInfinity',
+  },
+  {
     name: 'PositiveInfinity',
     serialize: (serializer) => serializer.options.positiveInfinity,
   },

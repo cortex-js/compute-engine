@@ -194,11 +194,7 @@ describe('STEFNOTCH #13', () => {
         ["ForAll", "n", ["LessEqual", "a_n", "c_n", "b_n"]],
         [
           "Equal",
-          [
-            "Limit",
-            ["Function", "c_n", "n"],
-            ["Error", "unexpected-command", ["LatexString", "\\infin"]]
-          ],
+          ["Limit", ["Function", "c_n", "n"], "PositiveInfinity"],
           "a"
         ]
       ]
