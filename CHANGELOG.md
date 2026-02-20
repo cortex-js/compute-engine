@@ -1,5 +1,19 @@
 ### [Unreleased]
 
+- **Parse `\mleft`/`\mright` delimiters**: These alternative delimiters from the
+  `mleftright` LaTeX package are now recognized and behave identically to
+  `\left`/`\right`.
+
+- **Parse `\color` in math mode**: The `\color{...}` command is now recognized
+  in math mode. The color argument is consumed and discarded, allowing the
+  subsequent expression to parse normally. Previously, `\color{red}3` produced
+  an `unexpected-command` error.
+
+- **Parse `:` and `\colon` as infix operators**: A bare `:` or `\colon` outside
+  of quantifier contexts now parses as a `Colon` infix operator, useful for type
+  annotations and mapping notation (e.g., `f:[a,b]\to\R`). The `:=` assignment
+  operator and quantifier colon syntax are unaffected.
+
 - **`expand()` now returns the input expression instead of `null`**: The
   `expand()` free function and the internal `expand()` / `expandAll()` functions
   now return the original expression when no expansion is possible, instead of

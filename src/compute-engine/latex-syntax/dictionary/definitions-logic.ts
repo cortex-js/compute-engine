@@ -552,7 +552,15 @@ function parseQuantifier(
     // 2. If we didn't find a standalone symbol, we look for a condition
     //
     parser.index = index;
-    const condition = parser.parseExpression(terminator);
+    // Stop at colon separators so the quantifier can consume them
+    const condTerminator = {
+      ...terminator,
+      condition: (p: Parser) =>
+        p.peek === ':' ||
+        p.peek === '\\colon' ||
+        (terminator.condition?.(p) ?? false),
+    };
+    const condition = parser.parseExpression(condTerminator);
     if (condition === null) return null;
 
     // Either a separator or a parenthesis

@@ -46,25 +46,28 @@ describe('STEFNOTCH #10', () => {
   });
 
   test('4/ \\color{red}3', () => {
-    expect(parse('\\color{red}3')).toMatchInlineSnapshot(`
-      [
-        "Tuple",
-        ["Error", "unexpected-command", ["LatexString", "\\color"]],
-        "r",
-        "ExponentialE",
-        "d",
-        3
-      ]
-    `);
+    expect(parse('\\color{red}3')).toMatchInlineSnapshot(`3`);
+  });
+
+  test('4b/ \\color{blue}{x+y}', () => {
+    expect(parse('\\color{blue}{x+y}')).toMatchInlineSnapshot(
+      `["Add", "x", "y"]`
+    );
   });
 
   test('5/ \\ln(3)', () => {
     expect(parse('\\ln(3)')).toMatchInlineSnapshot(`["Ln", 3]`);
   });
 
-  test('6/ f:[a,b]\\to R', () => {
-    expect(parse('f:[a,b]\\to R ')).toMatchInlineSnapshot(
-      `["Sequence", "f", ["Error", ["ErrorCode", "unexpected-token", ":"]]]`
+  test('6/ f:[a,b]\\to\\R', () => {
+    expect(parse('f:[a,b]\\to\\R')).toMatchInlineSnapshot(
+      `["Colon", "f", ["To", ["List", "a", "b"], "RealNumbers"]]`
+    );
+  });
+
+  test('6b/ x:\\R', () => {
+    expect(parse('x:\\R')).toMatchInlineSnapshot(
+      `["Colon", "x", "RealNumbers"]`
     );
   });
 
@@ -72,6 +75,10 @@ describe('STEFNOTCH #10', () => {
     expect(parse('\\lim_{n\\to\\infty}3')).toMatchInlineSnapshot(
       `["Limit", ["Function", 3, "n"], "PositiveInfinity"]`
     );
+  });
+
+  test('8a/ \\mleft(x\\mright) parses like \\left(x\\right)', () => {
+    expect(parse('\\mleft(x\\mright)')).toMatchInlineSnapshot(`x`);
   });
 
   test('8/ \\begin{cases} 3 & x < 5 \\\\ 7 & \\text{else} \\end{cases}', () => {

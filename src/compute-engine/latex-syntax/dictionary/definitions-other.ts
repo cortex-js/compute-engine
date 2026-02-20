@@ -278,6 +278,14 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
     latexTrigger: ['\\scriptscriptstyle'],
     parse: () => 'Nothing', // @todo: parse as ['Annotated'...]
   },
+  {
+    latexTrigger: ['\\color'],
+    parse: (parser: Parser) => {
+      // Consume the {color} argument and discard it
+      parser.parseGroup();
+      return 'Nothing';
+    },
+  },
 
   {
     latexTrigger: ['\\tiny'],

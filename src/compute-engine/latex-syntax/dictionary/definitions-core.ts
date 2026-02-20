@@ -366,6 +366,30 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     parse: parseAssign,
   },
 
+  // General colon operator (type annotation, mapping notation)
+  // Precedence below assignment (260) so `:=` takes priority,
+  // and below arrows (270) so `f: A \to B` parses as `Colon(f, To(A, B))`
+  {
+    name: 'Colon',
+    latexTrigger: ':',
+    kind: 'infix',
+    associativity: 'right',
+    precedence: 250,
+    serialize: (serializer: Serializer, expr: MathJsonExpression): string =>
+      joinLatex([
+        serializer.serialize(operand(expr, 1)),
+        '\\colon',
+        serializer.serialize(operand(expr, 2)),
+      ]),
+  },
+  {
+    latexTrigger: '\\colon',
+    kind: 'infix',
+    associativity: 'right',
+    precedence: 250,
+    parse: 'Colon',
+  },
+
   {
     name: 'BaseForm',
     serialize: (serializer, expr) => {

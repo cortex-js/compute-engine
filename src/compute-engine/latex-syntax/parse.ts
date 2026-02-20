@@ -99,6 +99,7 @@ const OPEN_DELIMITER_PREFIX = {
   '\\bigg': '\\bigg',
   '\\Bigg': '\\Bigg',
   '\\mathopen': '\\mathclose',
+  '\\mleft': '\\mright',
 };
 
 /** Commands that can be used with a middle delimiter */
@@ -1032,6 +1033,7 @@ export class _Parser implements Parser {
       ...'!"#$%&(),/;:?@[]\\`|~'.split(''),
       '\\left',
       '\\bigl',
+      '\\mleft',
     ];
     if (excluding.includes(this.peek)) return null;
 
