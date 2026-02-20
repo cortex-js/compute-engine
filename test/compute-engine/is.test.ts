@@ -206,6 +206,39 @@ describe('is() with explicit tolerance', () => {
   });
 });
 
+describe('is() with expansion', () => {
+  test('(x+1)^2 is x^2+2x+1', () => {
+    const a = engine.parse('(x+1)^2');
+    const b = engine.parse('x^2+2x+1');
+    expect(a.is(b)).toBe(true);
+  });
+
+  test('(a+b)(a-b) is a^2-b^2', () => {
+    const a = engine.parse('(a+b)(a-b)');
+    const b = engine.parse('a^2-b^2');
+    expect(a.is(b)).toBe(true);
+  });
+
+  test('2(x+1) is 2x+2', () => {
+    const a = engine.parse('2(x+1)');
+    const b = engine.parse('2x+2');
+    expect(a.is(b)).toBe(true);
+  });
+
+  test('expansion does not fire for simple Add', () => {
+    // This should still work via isSame, not expansion
+    const a = engine.parse('x+1');
+    const b = engine.parse('x+1');
+    expect(a.is(b)).toBe(true);
+  });
+
+  test('non-equivalent expressions are not equal', () => {
+    const a = engine.parse('(x+1)^2');
+    const b = engine.parse('x^2+1');
+    expect(a.is(b)).toBe(false);
+  });
+});
+
 describe('edge cases: infinity and NaN', () => {
   test('PositiveInfinity.isSame(Infinity)', () => {
     expect(engine.symbol('PositiveInfinity').isSame(Infinity)).toBe(true);

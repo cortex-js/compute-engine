@@ -71,17 +71,19 @@ export function _setExpandForIs(fn: ExpandFn) {
   _expandForIs = fn;
 }
 
-const EXPANDABLE_OPS = new Set(['Multiply', 'Power', 'Negate', 'Divide']);
+const EXPANDABLE_OPS = ['Multiply', 'Power', 'Negate', 'Divide'];
 
-/** Return true if at least one side has an operator where expansion could
- *  produce a structurally different result. */
+/** Return true if at least one side contains an operator where expansion could
+ *  produce a structurally different result.  Uses `.has()` which recursively
+ *  walks the expression tree, so nested cases like `Add(Multiply(a, Add(b,c)), 1)`
+ *  are detected. */
 function _couldBenefitFromExpand(
   a: _BoxedExpression,
   b: Expression | number | bigint | boolean | string
 ): boolean {
-  if (EXPANDABLE_OPS.has(a.operator)) return true;
-  if (typeof b === 'object' && b !== null && 'operator' in b)
-    return EXPANDABLE_OPS.has(b.operator);
+  if (a.has(EXPANDABLE_OPS)) return true;
+  if (typeof b === 'object' && b !== null && 'has' in b)
+    return (b as _BoxedExpression).has(EXPANDABLE_OPS);
   return false;
 }
 
