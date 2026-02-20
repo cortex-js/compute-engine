@@ -1,3 +1,26 @@
+### [Unreleased]
+
+- **`expand()` now returns the input expression instead of `null`**: The
+  `expand()` free function and the internal `expand()` / `expandAll()` functions
+  now return the original expression when no expansion is possible, instead of
+  `null`. This eliminates the `expand(x) ?? x` pattern at every call site.
+
+- **New `.toRational()` method**: Returns `[numerator, denominator]` as plain
+  integers for rational expressions, or `null` otherwise. Works on number
+  literals, `Divide`/`Rational` function expressions, and integers.
+
+- **New `.factors()` method**: Returns the multiplicative factors of an
+  expression as a flat array. Decomposes `Multiply` and `Negate` structurally.
+
+- **`.is()` now tries expansion**: After the fast structural check, `.is()`
+  expands both sides (distributing products, multinomial theorem, etc.) before
+  falling back to numeric evaluation. This catches equivalences like
+  `(x+1)^2` vs `x^2+2x+1` even with free variables.
+
+- **Parse `\dfrac`, `\tfrac`, and `\cfrac` as fractions**: These LaTeX fraction
+  variants are now recognized by the parser and produce the same MathJSON as
+  `\frac`. Previously, only `\frac` was handled.
+
 ### 0.52.1 _2026-02-19_
 
 - To check if a value is an exact number literal, you can now use
