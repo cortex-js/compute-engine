@@ -1,4 +1,5 @@
 import { engine as ce } from '../utils';
+import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
 
 describe('FRACTAL FUNCTIONS', () => {
   describe('Mandelbrot JS evaluate', () => {
@@ -56,5 +57,49 @@ describe('FRACTAL FUNCTIONS', () => {
       expect(result.re).toBeGreaterThanOrEqual(0);
       expect(result.re).toBeLessThanOrEqual(1);
     });
+  });
+});
+
+const glsl = new GLSLTarget();
+
+describe('FRACTAL GLSL COMPILATION', () => {
+  it('compiles Mandelbrot call site', () => {
+    const expr = ce.box(['Mandelbrot', 'c', 100]);
+    const result = glsl.compile(expr);
+    expect(result.code).toMatchInlineSnapshot(
+      `_fractal_mandelbrot(c, int(100.0))`
+    );
+  });
+
+  it('injects Mandelbrot preamble', () => {
+    const expr = ce.box(['Mandelbrot', 'c', 100]);
+    const result = glsl.compile(expr);
+    expect(result.preamble).toContain('_fractal_mandelbrot');
+    expect(result.preamble).toContain('log2(log2(dot(z, z)))');
+  });
+
+  it('compiles Julia call site', () => {
+    const expr = ce.box(['Julia', 'z', 'c', 100]);
+    const result = glsl.compile(expr);
+    expect(result.code).toMatchInlineSnapshot(
+      `_fractal_julia(z, c, int(100.0))`
+    );
+  });
+
+  it('injects Julia preamble', () => {
+    const expr = ce.box(['Julia', 'z', 'c', 100]);
+    const result = glsl.compile(expr);
+    expect(result.preamble).toContain('_fractal_julia');
+  });
+
+  it('preamble contains both functions when both are used', () => {
+    const expr = ce.box([
+      'Add',
+      ['Mandelbrot', 'c', 50],
+      ['Julia', 'z', 'c', 50],
+    ]);
+    const result = glsl.compile(expr);
+    expect(result.preamble).toContain('_fractal_mandelbrot');
+    expect(result.preamble).toContain('_fractal_julia');
   });
 });

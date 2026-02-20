@@ -494,6 +494,19 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       throw new Error('ColorFromColorspace: need components and space');
     return `_gpu_oklab_to_srgb(${compile(components)})`;
   },
+  // Fractal functions
+  Mandelbrot: ([c, maxIter], compile, target) => {
+    if (c === null || maxIter === null)
+      throw new Error('Mandelbrot: missing arguments');
+    const intCast = target?.language === 'wgsl' ? 'i32' : 'int';
+    return `_fractal_mandelbrot(${compile(c)}, ${intCast}(${compile(maxIter)}))`;
+  },
+  Julia: ([z, c, maxIter], compile, target) => {
+    if (z === null || c === null || maxIter === null)
+      throw new Error('Julia: missing arguments');
+    const intCast = target?.language === 'wgsl' ? 'i32' : 'int';
+    return `_fractal_julia(${compile(z)}, ${compile(c)}, ${intCast}(${compile(maxIter)}))`;
+  },
 
   // Vector/Matrix operations
   Cross: 'cross',
@@ -625,6 +638,62 @@ float _gpu_erfinv(float x) {
   return sqrt(pi) * 0.5 * (x + (pi / 12.0) * x3 + (7.0 * pi * pi / 480.0) * x5 + (127.0 * pi * pi * pi / 40320.0) * x7 + (4369.0 * pi * pi * pi * pi / 5806080.0) * x9);
 }
 `;
+
+/**
+ * Fractal preamble (GLSL syntax).
+ *
+ * Smooth escape-time iteration for Mandelbrot and Julia sets.
+ * Both functions return a normalized float in [0, 1] with smooth coloring
+ * (log2(log2(|z|²)) formula) to avoid banding.
+ */
+export const GPU_FRACTAL_PREAMBLE_GLSL = `
+float _fractal_mandelbrot(vec2 c, int maxIter) {
+  vec2 z = vec2(0.0, 0.0);
+  for (int i = 0; i < maxIter; i++) {
+    z = vec2(z.x*z.x - z.y*z.y + c.x, 2.0*z.x*z.y + c.y);
+    if (dot(z, z) > 4.0)
+      return (float(i) - log2(log2(dot(z, z))) + 4.0) / float(maxIter);
+  }
+  return 1.0;
+}
+
+float _fractal_julia(vec2 z, vec2 c, int maxIter) {
+  for (int i = 0; i < maxIter; i++) {
+    z = vec2(z.x*z.x - z.y*z.y + c.x, 2.0*z.x*z.y + c.y);
+    if (dot(z, z) > 4.0)
+      return (float(i) - log2(log2(dot(z, z))) + 4.0) / float(maxIter);
+  }
+  return 1.0;
+}
+`;
+
+/**
+ * Fractal preamble (WGSL syntax).
+ */
+export const GPU_FRACTAL_PREAMBLE_WGSL = `
+fn _fractal_mandelbrot(c: vec2f, maxIter: i32) -> f32 {
+  var z = vec2f(0.0, 0.0);
+  for (var i: i32 = 0; i < maxIter; i++) {
+    z = vec2f(z.x*z.x - z.y*z.y + c.x, 2.0*z.x*z.y + c.y);
+    if (dot(z, z) > 4.0) {
+      return (f32(i) - log2(log2(dot(z, z))) + 4.0) / f32(maxIter);
+    }
+  }
+  return 1.0;
+}
+
+fn _fractal_julia(z_in: vec2f, c: vec2f, maxIter: i32) -> f32 {
+  var z = z_in;
+  for (var i: i32 = 0; i < maxIter; i++) {
+    z = vec2f(z.x*z.x - z.y*z.y + c.x, 2.0*z.x*z.y + c.y);
+    if (dot(z, z) > 4.0) {
+      return (f32(i) - log2(log2(dot(z, z))) + 4.0) / f32(maxIter);
+    }
+  }
+  return 1.0;
+}
+`;
+
 
 /**
  * GPU color space conversion preamble (GLSL syntax).
@@ -1175,6 +1244,12 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     preamble += buildComplexPreamble(code, this.languageId);
     if (code.includes('_gpu_gamma')) preamble += GPU_GAMMA_PREAMBLE;
     if (code.includes('_gpu_erf')) preamble += GPU_ERF_PREAMBLE;
+    if (code.includes('_fractal_')) {
+      preamble +=
+        this.languageId === 'wgsl'
+          ? GPU_FRACTAL_PREAMBLE_WGSL
+          : GPU_FRACTAL_PREAMBLE_GLSL;
+    }
     if (
       code.includes('_gpu_srgb_to') ||
       code.includes('_gpu_oklab') ||
