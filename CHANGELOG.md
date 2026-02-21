@@ -1,4 +1,4 @@
-### [Unreleased]
+### 0.53.0 _2026-02-21_
 
 #### Runtime and Scoping
 
