@@ -1,174 +1,122 @@
 ### [Unreleased]
 
+#### Runtime and Scoping
+
 - **True lexical scoping for `Function` expressions**: Functions now capture
-  their defining scope at canonicalization time and create a fresh scope per
-  call, with the defining scope as parent. Free variables resolve through the
-  scope chain where the function was defined, not where it is called. This
-  matches JavaScript/Python closure semantics. Previously, the engine used
-  dynamic scoping where the calling scope could shadow defining-scope variables.
+  their defining scope and resolve free variables from that scope chain (not
+  the call site), with a fresh child scope on each call.
 
-- **BigOp scope pollution fixed**: `Sum`, `Product`, and other big operators no
-  longer leak free variables (e.g., `M`, `x`) into their local scope. Only the
-  index variable is declared in the BigOp scope; other variables are
-  auto-declared in the enclosing scope via the new `noAutoDeclare` mechanism.
+- **BigOp scope pollution fixed**: `Sum`, `Product`, and other big operators now
+  only declare their index variable locally. Other names are declared in the
+  enclosing scope via `noAutoDeclare`.
 
-- **Closure capture for nested functions**: When a function returns another
-  function, the inner function correctly captures outer parameter values.
-  Multi-level nesting (f returning g returning h) works correctly.
+- **Closure capture for nested functions**: Returned functions now correctly
+  capture outer parameters across multiple nesting levels.
 
-- **`EvalContext.values` removed**: Symbol values now live exclusively in
-  `BoxedValueDefinition.value`. The per-frame shadow map that was the root
-  cause of dynamic scoping has been eliminated. The `withArguments` evaluation
-  option has also been removed.
+- **`EvalContext.values` removed**: Symbol values now live only in
+  `BoxedValueDefinition.value`. The per-frame shadow map and `withArguments`
+  option were removed.
 
-- **`forget()` now resets values set by `assume()`**: When `assume('x = 5')`
-  auto-declares `x` with a value, `forget('x')` now correctly resets `x`'s
-  value to `undefined` (in addition to clearing assumptions).
+- **`forget()` now resets values set by `assume()`**: `forget('x')` now clears
+  values introduced by `assume('x = ...')` (value reset to `undefined`), in
+  addition to clearing assumptions.
 
-- **New `Mandelbrot` and `Julia` functions**: Two new built-in operators for
-  escape-time fractal computation.
+#### Expressions and Equality
 
-  `Mandelbrot(c, maxIter)` computes the Mandelbrot set membership for a complex
-  point `c`, iterating `z → z² + c` from `z₀ = 0`. `Julia(z, c, maxIter)`
-  does the same with a user-supplied starting point `z` and parameter `c`.
+- **`expand()` now returns the input expression instead of `null`**: Both the
+  free function and internal `expand()`/`expandAll()` now return the original
+  expression when no expansion is possible.
 
-  Both return a smooth-colored normalized value in `[0, 1]`: `1.0` for points
-  inside the set, and a fractional value for escaping points (using the
-  `log₂(log₂(|z|²))` formula to produce continuous gradients rather than
-  banded integer counts). The caller is responsible for mapping the scalar to a
-  color.
+- **New `.toRational()` method**: Returns `[numerator, denominator]` integers
+  for rational expressions, or `null` otherwise.
 
-  Both functions evaluate in JavaScript and compile to GLSL and WGSL shaders.
-  In a fragment shader, the typical usage is:
+- **New `.factors()` method**: Returns multiplicative factors as a flat array by
+  decomposing `Multiply` and `Negate` structurally.
 
-  ```glsl
-  // uniforms: vec2 pan, float zoom, int maxIter
-  vec2 c = (fragCoord / resolution - 0.5) * zoom + pan;
-  float t = _fractal_mandelbrot(c, maxIter);
-  // map t to a color
-  ```
+- **`.is()` now tries expansion**: After structural comparison, `.is()` expands
+  both sides before numeric fallback, catching forms like `(x+1)^2` and
+  `x^2+2x+1`.
 
-- **Parse `\mleft`/`\mright` delimiters**: These alternative delimiters from the
-  `mleftright` LaTeX package are now recognized and behave identically to
-  `\left`/`\right`.
+- **`.is()` is now symmetric**: `a.is(b) === b.is(a)` now holds across all
+  expression types.
 
-- **Parse `\color` in math mode**: The `\color{...}` command is now recognized
-  in math mode. The color argument is consumed and discarded, allowing the
-  subsequent expression to parse normally. Previously, `\color{red}3` produced
-  an `unexpected-command` error.
+#### LaTeX Parsing
 
-- **Parse `:` and `\colon` as infix operators**: A bare `:` or `\colon` outside
-  of quantifier contexts now parses as a `Colon` infix operator, useful for type
-  annotations and mapping notation (e.g., `f:[a,b]\to\R`). The `:=` assignment
-  operator and quantifier colon syntax are unaffected.
+- **Parse `\mleft`/`\mright` delimiters**: Alternative delimiters from the
+  `mleftright` package are now treated like `\left`/`\right`.
 
-- **`expand()` now returns the input expression instead of `null`**: The
-  `expand()` free function and the internal `expand()` / `expandAll()` functions
-  now return the original expression when no expansion is possible, instead of
-  `null`. This eliminates the `expand(x) ?? x` pattern at every call site.
+- **Parse `\color` in math mode**: `\color{...}` is now recognized in math mode;
+  the color argument is consumed so the following math parses normally.
 
-- **New `.toRational()` method**: Returns `[numerator, denominator]` as plain
-  integers for rational expressions, or `null` otherwise. Works on number
-  literals, `Divide`/`Rational` function expressions, and integers.
+- **Parse `:` and `\colon` as infix operators**: Outside quantifier contexts, a
+  bare `:`/`\colon` now parses as `Colon` (e.g. `f:[a,b]\to\R`), without
+  affecting `:=` assignment or quantifier syntax.
 
-- **New `.factors()` method**: Returns the multiplicative factors of an
-  expression as a flat array. Decomposes `Multiply` and `Negate` structurally.
+- **Parse `\dfrac`, `\tfrac`, and `\cfrac` as fractions**: These variants now
+  parse the same as `\frac`.
 
-- **`.is()` now tries expansion**: After the fast structural check, `.is()`
-  expands both sides (distributing products, multinomial theorem, etc.) before
-  falling back to numeric evaluation. This catches equivalences like
-  `(x+1)^2` vs `x^2+2x+1` even with free variables.
+#### Fractals
 
-- **`.is()` is now symmetric**: Previously, `expr.is(num)` and `num.is(expr)`
-  could return different results because `BoxedNumber.is()` only performed
-  structural comparison without numeric evaluation fallback. Now
-  `a.is(b) === b.is(a)` for all expression types.
-
-- **Parse `\dfrac`, `\tfrac`, and `\cfrac` as fractions**: These LaTeX fraction
-  variants are now recognized by the parser and produce the same MathJSON as
-  `\frac`. Previously, only `\frac` was handled.
+- **New `Mandelbrot` and `Julia` functions**: Added built-in escape-time fractal
+  operators.
+  `Mandelbrot(c, maxIter)` and `Julia(z, c, maxIter)` return a smooth,
+  normalized value in `[0, 1]` (`1` for interior points, fractional for
+  escaping points via `log₂(log₂(|z|²))` smoothing).
+  Both evaluate in JavaScript and compile to GLSL/WGSL.
 
 ### 0.52.1 _2026-02-19_
 
-- To check if a value is an exact number literal, you can now use
-  `isNumber(expr) && expr.isExact`.
+#### Expressions
 
-- When using the `raw` canonical form, preserve negation, i.e. `x-1` will now
-  parse as `["Subtract", "x", "1"]` rather than `["Add", "x", -1]`.
+- **Exact number literal check**: Use `isNumber(expr) && expr.isExact` to test
+  for exact numeric literals.
 
-- **Fix `;\;` parsing in semicolon blocks**: Semicolons followed by LaTeX visual
-  spacing commands (`\;`, `\,`, `\quad`, etc.) no longer produce spurious
-  `Nothing` nodes in the parse tree. Previously, `a \coloneq x^2;\; (a+1)` would
-  include a `Nothing` operand in the Block, making `isValid` return `false` and
-  causing compilation to fail. The parser now skips visual spacing after
-  semicolon separators.
+- **`raw` form preserves subtraction**: `x-1` now parses as
+  `["Subtract", "x", "1"]` (instead of `["Add", "x", -1]`) when using raw form.
 
-- **Fix `\text{if}` parsing with `\;` spacing**: The
-  `\text{if}\; x \geq 0 \;\text{then}\; 1 \;\text{else}\; 0` pattern now parses
-  correctly as an `If` expression. Previously, `\;` before `\text{then}` or
-  `\text{else}` prevented keyword detection, producing a `Tuple` instead.
+#### Parsing and Blocks
 
-- **Block serializer uses `; ` separator**: The Block serializer now emits `; `
-  instead of `;\; ` between statements, preventing round-trip serialization from
-  reintroducing the `\;` parsing issue.
+- **Fix `;\;` parsing in semicolon blocks**: Spacing commands after semicolons
+  (`\;`, `\,`, `\quad`, etc.) no longer create spurious `Nothing` operands.
 
-- **Block compiler filters `Nothing` operands**: As defense-in-depth, the Block
-  compiler now filters out `Nothing` symbols and empty compilation results
-  before generating the block IIFE.
+- **Fix `\text{if}` parsing with `\;` spacing**:
+  `\text{if}\;...\;\text{then}\;...\;\text{else}\;...` now parses correctly as
+  `If`.
 
-- **Subscripted variable names in blocks**: Subscripted identifiers like `r_1`
-  are now treated as compound symbols (not `Subscript` expressions) when the
-  base is not a known collection. This means `r_1 \coloneq x^2; \frac{1}{r_1}`
-  correctly declares and assigns to a local variable named `r_1`.
+- **Block serializer now uses `; `**: Serialization emits `; ` (not `;\; `) to
+  avoid reintroducing spacing-related parse issues on round-trip.
 
-- **Selective GLSL interval preamble**: The interval-GLSL compilation target now
-  emits only the preamble functions actually used by the compiled expression
-  (plus their transitive dependencies), instead of the full ~29KB library.
-  Typical preambles are 60–80% smaller.
+- **Block compiler filters `Nothing` operands**: The Block compiler now removes
+  `Nothing` symbols and empty compile results before generating code.
 
-- **Selective WGSL interval preamble**: The interval-WGSL compilation target now
-  also emits only the preamble functions actually used by the compiled
-  expression, matching the GLSL target optimization.
+- **Subscripted variable names in blocks**: Names like `r_1` are treated as
+  compound symbols (not `Subscript`) when the base is not a known collection.
 
-- **Fix recursive GLSL gamma function**: The `_gpu_gamma()` preamble in the GPU
-  and interval-GLSL compilation targets used recursion for the reflection
-  formula (z < 0.5), which is illegal in GLSL. Replaced with a non-recursive
-  implementation that inlines the Lanczos approximation for both branches.
+- **Non-strict parser supports exponents on bare functions**: In `strict: false`
+  mode, forms like `sin^2(x)` and `cos^{10}(x)` now parse correctly as powers.
 
-- **Non-strict parser supports exponents on bare functions**: In non-strict mode
-  (`strict: false`), bare function names like `sin`, `cos`, `tan` can now
-  include an exponent before the argument list. For example, `sin^2(x)` and
-  `cos^{10}(x)` are now correctly parsed as `["Power", ["Sin", "x"], 2]`,
-  matching the behavior of their LaTeX counterparts `\sin^2(x)` and
-  `\cos^{10}(x)`.
+- **Unicode superscript/subscript digits supported**: Superscript and subscript
+  Unicode digits now normalize to `^{...}` / `_{...}` in parsing.
 
-- **Unicode superscript and subscript digit support**: The LaTeX parser now
-  recognizes Unicode superscript digits (`⁰¹²³⁴⁵⁶⁷⁸⁹⁻`) and subscript digits
-  (`₀₁₂₃₄₅₆₇₈₉₋`), converting them to `^{...}` and `_{...}` respectively. This
-  works in all parsing modes. For example, `x²` parses as `x^{2}`, `sin²(x)` as
-  `\sin^{2}(x)`, `x⁻²` as `x^{-2}`, and `x₁₂` as `x_{12}`.
+#### Compilation
 
-- **`.is()` now works with assigned variables**: Previously, `.is()` only
-  evaluated expressions made entirely of declared constants (like `Pi`). Now it
-  correctly evaluates any expression with no free variables, including those
-  containing variables with assigned values:
+- **Selective GLSL interval preamble**: `interval-glsl` now emits only used
+  helper functions (plus dependencies), typically reducing preamble size by
+  60-80%.
 
-  ```ts
-  ce.assign('v', 2);
-  ce.parse('1 + 4 / v').is(3);  // true (was false before)
-  ce.parse('1 + 4 / x').is(3);  // false (x is free)
-  ```
+- **Selective WGSL interval preamble**: `interval-wgsl` now applies the same
+  used-only preamble strategy.
 
-- **`.is()` accepts an optional `tolerance` parameter**: When provided, it
-  overrides `engine.tolerance` for the numeric comparison. This applies to both
-  evaluated expressions and literal numbers:
+- **Fix recursive GLSL gamma helper**: Replaced recursive `_gpu_gamma()`
+  reflection logic (illegal in GLSL) with a non-recursive implementation.
 
-  ```ts
-  ce.parse('\\pi').is(3.14, 0.01);   // true  (within custom tolerance)
-  ce.parse('\\pi').is(3.14);          // false (not within engine.tolerance)
-  ce.number(1e-17).is(0, 1e-16);     // true  (explicit tolerance on literal)
-  ce.number(1e-17).is(0);            // false (no tolerance for literals)
-  ```
+#### Equality
+
+- **`.is()` now works with assigned variables**: Numeric fallback now applies to
+  expressions with no free variables, including variables with assigned values.
+
+- **`.is()` now accepts an optional `tolerance`**: A per-call tolerance can
+  override `engine.tolerance` for numeric comparison.
 
 ### 0.52.0 _2026-02-18_
 
@@ -978,7 +926,7 @@ ce.simplificationRules.push({
   - `Hom` now evaluates/simplifies its arguments while preserving the symbolic
     `Hom(...)` form.
 
-### LaTeX Parsing
+#### LaTeX Parsing
 
 - **`arguments: 'implicit'` option for function dictionary entries**: Function
   entries in the LaTeX dictionary can now set `arguments: 'implicit'` to accept
