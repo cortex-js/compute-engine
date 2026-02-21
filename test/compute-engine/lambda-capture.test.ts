@@ -317,8 +317,8 @@ describe('MUTABLE CLOSURE', () => {
     // BUG candidate: with lexical scoping outerAfter should be 1 and fromInner should be 1.
     // With dynamic scoping fromInner mutates the inner lc_counter → fromInner = 101,
     // outerAfter = 0.
-    expect(fromInner).toMatchInlineSnapshot(`101`); // BUG candidate: should be 1
-    expect(outerAfter).toMatchInlineSnapshot(`0`); // BUG candidate: should be 1
+    expect(fromInner).toMatchInlineSnapshot(`101`); // BUG: dynamic scoping mutates inner lc_counter; should be 1
+    expect(outerAfter).toMatchInlineSnapshot(`0`);  // BUG: outer lc_counter unchanged; should be 1
   });
 });
 
@@ -355,7 +355,7 @@ describe('CURRYING', () => {
       .function('Apply', [curried, ce.number(4)])
       .evaluate()
       .valueOf();
-    expect(result).toMatchInlineSnapshot(`7`); // ideally 7
+    expect(result).toMatchInlineSnapshot(`7`); // correct: 3 + 4 = 7
   });
 
   test('free variable survives partial application', () => {
@@ -373,9 +373,8 @@ describe('CURRYING', () => {
       .function('Apply', [curried, ce.number(4)])
       .evaluate()
       .valueOf();
-    // BUG candidate: if lc_c6 was auto-declared in the function's scope
-    // instead of resolved from outer scope, this will not return 17.
-    expect(result).toMatchInlineSnapshot(`17`); // BUG candidate: should be 17
+    // lc_c6 is correctly resolved from the defining scope — no scope pollution here.
+    expect(result).toMatchInlineSnapshot(`17`); // correct: 3 + 4 + 10 = 17
   });
 
   test('free variable in curried function is not affected by re-declaration in calling scope', () => {
@@ -399,6 +398,6 @@ describe('CURRYING', () => {
     }
     // With lexical scoping: lc_c6 should be 10 (defining scope) → 17
     // With dynamic scoping: lc_c6 = 99 → 106
-    expect(result).toMatchInlineSnapshot(`106`); // BUG candidate: should be 17
+    expect(result).toMatchInlineSnapshot(`106`); // BUG: dynamic scoping picks up calling scope's lc_c6=99; should be 17
   });
 });
