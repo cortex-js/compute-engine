@@ -318,7 +318,7 @@ describe('MUTABLE CLOSURE', () => {
 
     const outerAfter = ce.box('lc_counter').evaluate().valueOf();
 
-    // BUG candidate: with lexical scoping outerAfter should be 1 and fromInner should be 1.
+    // BUG: with lexical scoping outerAfter should be 1 and fromInner should be 1.
     // With dynamic scoping fromInner mutates the inner lc_counter → fromInner = 101,
     // outerAfter = 0.
     expect(fromInner).toMatchInlineSnapshot(`101`); // BUG: dynamic scoping mutates inner lc_counter; should be 1
