@@ -140,6 +140,8 @@ describe('PARAMETER SHADOWING', () => {
 describe('NESTED LAMBDAS', () => {
   beforeAll(() => {
     ce.pushScope();
+    // lc_outer is a shared shell overwritten by each test independently.
+    // Tests are NOT independent — each assigns a different function body to lc_outer.
     ce.declare('lc_outer', 'function');
     ce.declare('lc_c3', { value: 10 });
   });
@@ -166,7 +168,7 @@ describe('NESTED LAMBDAS', () => {
       .valueOf();
     // Whether this works depends on whether lc_y3 = 4 survives after the outer
     // function returns (its eval context is popped).
-    expect(result).toMatchInlineSnapshot(`"lc_y3" + 3`); // ideally 7
+    expect(result).toMatchInlineSnapshot(`"lc_y3" + 3`); // BUG: lc_y3 binding is lost when outer eval context is popped; should be 7
   });
 
   test('inner lambda captures global free variable through nesting', () => {
@@ -189,7 +191,7 @@ describe('NESTED LAMBDAS', () => {
       .function('Apply', [inner, ce.number(3)])
       .evaluate()
       .valueOf();
-    expect(result).toMatchInlineSnapshot(`13`); // ideally 13
+    expect(result).toMatchInlineSnapshot(`13`); // correct: 3 + 10 = 13
   });
 });
 
@@ -218,7 +220,7 @@ describe('LAMBDAS INSIDE BigOps', () => {
       .box(['Sum', ['Add', 'lc_k4', 'lc_c4'], ['Limits', 'lc_k4', 1, 3]])
       .evaluate()
       .valueOf();
-    expect(result).toMatchInlineSnapshot(`36`); // ideally 36
+    expect(result).toMatchInlineSnapshot(`36`); // correct: (1+10) + (2+10) + (3+10) = 36
   });
 
   test('index variable does not leak into outer scope after Sum', () => {
@@ -240,13 +242,17 @@ describe('LAMBDAS INSIDE BigOps', () => {
     // If lc_c4 gets auto-declared in Sum's scope with type 'unknown',
     // Sum might not see the outer lc_c4 = 10.
     // BUG candidate: the result may be wrong due to scope pollution.
-    ce.pushScope();
-    ce.declare('lc_c4', { value: 20 }); // shadow in calling scope
-    const result = ce
-      .box(['Sum', ['Add', 'lc_k4c', 'lc_c4'], ['Limits', 'lc_k4c', 1, 3]])
-      .evaluate()
-      .valueOf();
-    ce.popScope();
+    let result: unknown;
+    try {
+      ce.pushScope();
+      ce.declare('lc_c4', { value: 20 }); // shadow in calling scope
+      result = ce
+        .box(['Sum', ['Add', 'lc_k4c', 'lc_c4'], ['Limits', 'lc_k4c', 1, 3]])
+        .evaluate()
+        .valueOf();
+    } finally {
+      ce.popScope();
+    }
     // With true lexical scoping: Sum was canonicalized in outer scope → c4 = 10 → 36
     // With dynamic scoping: Sum sees calling scope's c4 = 20 → (1+20)+(2+20)+(3+20) = 66
     // With scope pollution: c4 was auto-declared in Sum's scope → NaN or 'unknown'
