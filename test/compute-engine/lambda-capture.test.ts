@@ -259,3 +259,146 @@ describe('LAMBDAS INSIDE BigOps', () => {
     expect(result).toMatchInlineSnapshot(`66`); // BUG candidate
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION 5 — MUTABLE CLOSURE
+//
+// A function that mutates a free variable via Assign. Tests that mutations
+// accumulate correctly and that mutations from one calling scope don't
+// bleed through to another.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('MUTABLE CLOSURE', () => {
+  beforeAll(() => {
+    ce.pushScope();
+    ce.declare('lc_counter', { type: 'integer', value: 0 });
+    ce.declare('lc_increment', 'function');
+    // lc_increment(): increments lc_counter by 1 and returns new value
+    ce.assign(
+      'lc_increment',
+      ce.box([
+        'Function',
+        [
+          'Block',
+          ['Assign', 'lc_counter', ['Add', 'lc_counter', 1]],
+          'lc_counter',
+        ],
+      ])
+    );
+  });
+  afterAll(() => ce.popScope());
+
+  test('counter increments on each call', () => {
+    ce.assign('lc_counter', 0); // reset
+    ce.box(['lc_increment']).evaluate();
+    ce.box(['lc_increment']).evaluate();
+    const result = ce.box(['lc_increment']).evaluate().valueOf();
+    expect(result).toEqual(3);
+    expect(ce.box('lc_counter').evaluate().valueOf()).toEqual(3);
+  });
+
+  test('same function called from two different calling scopes', () => {
+    // Call lc_increment from two nested scopes that each re-declare lc_counter.
+    // With lexical scoping the function should always mutate the outer lc_counter.
+    // With dynamic scoping it mutates whichever lc_counter is on top of the stack.
+    ce.assign('lc_counter', 0); // reset outer
+
+    let fromInner: unknown;
+    try {
+      ce.pushScope();
+      ce.declare('lc_counter', { type: 'integer', value: 100 });
+      fromInner = ce.box(['lc_increment']).evaluate().valueOf();
+    } finally {
+      ce.popScope();
+    }
+
+    const outerAfter = ce.box('lc_counter').evaluate().valueOf();
+
+    // BUG candidate: with lexical scoping outerAfter should be 1 and fromInner should be 1.
+    // With dynamic scoping fromInner mutates the inner lc_counter → fromInner = 101,
+    // outerAfter = 0.
+    expect(fromInner).toMatchInlineSnapshot(`101`); // BUG candidate: should be 1
+    expect(outerAfter).toMatchInlineSnapshot(`0`); // BUG candidate: should be 1
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION 6 — CURRYING
+//
+// Partial application: applying a multi-param function to fewer args than
+// expected returns a curried function for the remaining args.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('CURRYING', () => {
+  beforeAll(() => {
+    ce.pushScope();
+    ce.declare('lc_c6', { value: 10 });
+  });
+  afterAll(() => ce.popScope());
+
+  test('full application of two-param function', () => {
+    const f = ce.box(['Function', ['Add', 'lc_p6', 'lc_q6'], 'lc_p6', 'lc_q6']);
+    expect(
+      ce
+        .function('Apply', [f, ce.number(3), ce.number(4)])
+        .evaluate()
+        .valueOf()
+    ).toEqual(7);
+  });
+
+  test('partial application produces curried function', () => {
+    const f = ce.box(['Function', ['Add', 'lc_p6', 'lc_q6'], 'lc_p6', 'lc_q6']);
+    // Apply to one arg → curried function expecting one more arg
+    const curried = ce.function('Apply', [f, ce.number(3)]).evaluate();
+    // Apply curried to second arg → 3 + 4 = 7
+    const result = ce
+      .function('Apply', [curried, ce.number(4)])
+      .evaluate()
+      .valueOf();
+    expect(result).toMatchInlineSnapshot(`7`); // ideally 7
+  });
+
+  test('free variable survives partial application', () => {
+    // Function(lc_p6 + lc_q6 + lc_c6, lc_p6, lc_q6) — lc_c6 = 10 is free
+    const f = ce.box([
+      'Function',
+      ['Add', 'lc_p6', 'lc_q6', 'lc_c6'],
+      'lc_p6',
+      'lc_q6',
+    ]);
+    // Partially apply to 3 → Function(3 + lc_q6 + lc_c6, lc_q6)
+    const curried = ce.function('Apply', [f, ce.number(3)]).evaluate();
+    // Apply to 4 → 3 + 4 + 10 = 17
+    const result = ce
+      .function('Apply', [curried, ce.number(4)])
+      .evaluate()
+      .valueOf();
+    // BUG candidate: if lc_c6 was auto-declared in the function's scope
+    // instead of resolved from outer scope, this will not return 17.
+    expect(result).toMatchInlineSnapshot(`17`); // BUG candidate: should be 17
+  });
+
+  test('free variable in curried function is not affected by re-declaration in calling scope', () => {
+    const f = ce.box([
+      'Function',
+      ['Add', 'lc_p6', 'lc_q6', 'lc_c6'],
+      'lc_p6',
+      'lc_q6',
+    ]);
+    let result: unknown;
+    try {
+      ce.pushScope();
+      ce.declare('lc_c6', { value: 99 });
+      const curried = ce.function('Apply', [f, ce.number(3)]).evaluate();
+      result = ce
+        .function('Apply', [curried, ce.number(4)])
+        .evaluate()
+        .valueOf();
+    } finally {
+      ce.popScope();
+    }
+    // With lexical scoping: lc_c6 should be 10 (defining scope) → 17
+    // With dynamic scoping: lc_c6 = 99 → 106
+    expect(result).toMatchInlineSnapshot(`106`); // BUG candidate: should be 17
+  });
+});
