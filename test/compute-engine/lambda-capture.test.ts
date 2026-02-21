@@ -46,21 +46,28 @@ describe('FREE VARIABLE CAPTURE', () => {
   test('free var sees mutation in defining scope (by-reference capture)', () => {
     // Assigning to lc_c in the *same* scope mutates the definition object.
     // This is expected by-reference behaviour, not a bug.
-    ce.assign('lc_c', 99);
-    expect(ce.box(['lc_f0']).evaluate().valueOf()).toEqual(99);
-    ce.assign('lc_c', 5); // restore for subsequent tests
+    try {
+      ce.assign('lc_c', 99);
+      expect(ce.box(['lc_f0']).evaluate().valueOf()).toEqual(99);
+    } finally {
+      ce.assign('lc_c', 5); // restore for subsequent tests
+    }
   });
 
   test('free var when outer var is assigned (not re-declared) from inner scope', () => {
     // ce.assign from inner scope without a local declaration walks the scope
     // chain and mutates the outer definition's value. The function then sees
     // the mutated value — this is by-reference, not a scoping bug.
-    ce.pushScope();
-    ce.assign('lc_c', 10);
-    const result = ce.box(['lc_f0']).evaluate().valueOf();
-    ce.popScope();
-    // Restore: the assign mutated the outer definition, so fix it
-    ce.assign('lc_c', 5);
+    let result: unknown;
+    try {
+      ce.pushScope();
+      ce.assign('lc_c', 10);
+      result = ce.box(['lc_f0']).evaluate().valueOf();
+    } finally {
+      ce.popScope();
+      // Restore: the assign mutated the outer definition, so fix it
+      ce.assign('lc_c', 5);
+    }
     expect(result).toMatchInlineSnapshot(`10`); // expected: 10 (by-reference, not a bug)
   });
 });
