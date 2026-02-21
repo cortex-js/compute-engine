@@ -36,10 +36,14 @@ describe('FREE VARIABLE CAPTURE', () => {
     // With TRUE lexical scoping lc_f0() should still return 5 (defining scope).
     // BUG: currently returns 10 because the calling scope's eval context is
     //      still on the stack and is found before the defining scope's value.
-    ce.pushScope();
-    ce.declare('lc_c', { value: 10 });
-    const result = ce.box(['lc_f0']).evaluate().valueOf();
-    ce.popScope();
+    let result: unknown;
+    try {
+      ce.pushScope();
+      ce.declare('lc_c', { value: 10 });
+      result = ce.box(['lc_f0']).evaluate().valueOf();
+    } finally {
+      ce.popScope();
+    }
     expect(result).toMatchInlineSnapshot(`10`); // BUG: should be 5, not 10
   });
 
@@ -88,7 +92,7 @@ describe('PARAMETER SHADOWING', () => {
   afterAll(() => ce.popScope());
 
   test('one param + one free var: param bound, free var from outer scope', () => {
-    // Function(lc_x + lc_c2, lc_x): lc_x is the param, lc_c2 is free (= 5)
+    // Function(lc_x2p + lc_c2, lc_x2p): lc_x2p is the param, lc_c2 is free (= 5)
     // Apply to 3 → 3 + 5 = 8
     const f = ce.box(['Function', ['Add', 'lc_x2p', 'lc_c2'], 'lc_x2p']);
     expect(
@@ -235,13 +239,13 @@ describe('LAMBDAS INSIDE BigOps', () => {
     // lc_k4b should still be an 'unknown' symbol (no assigned value) after Sum
     expect(ce.box('lc_k4b').value?.toString()).toMatchInlineSnapshot(
       `undefined`
-    );
+    ); // correct: index var leaves no stale value in outer scope after Sum
   });
 
   test('Sum with free var in calling scope (scope pollution interaction)', () => {
     // If lc_c4 gets auto-declared in Sum's scope with type 'unknown',
     // Sum might not see the outer lc_c4 = 10.
-    // BUG candidate: the result may be wrong due to scope pollution.
+    // BUG: the result is wrong due to dynamic scoping (not scope pollution).
     let result: unknown;
     try {
       ce.pushScope();
