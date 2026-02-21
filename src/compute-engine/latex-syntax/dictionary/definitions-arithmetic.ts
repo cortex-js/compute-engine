@@ -991,6 +991,21 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     serialize: serializeFraction,
   },
   {
+    latexTrigger: '\\dfrac',
+    precedence: DIVISION_PRECEDENCE,
+    parse: parseFraction,
+  },
+  {
+    latexTrigger: '\\tfrac',
+    precedence: DIVISION_PRECEDENCE,
+    parse: parseFraction,
+  },
+  {
+    latexTrigger: '\\cfrac',
+    precedence: DIVISION_PRECEDENCE,
+    parse: parseFraction,
+  },
+  {
     kind: 'infix',
     latexTrigger: '\\over',
     associativity: 'none', // In LaTeX, the \over command is not associative
