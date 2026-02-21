@@ -256,7 +256,7 @@ describe('LAMBDAS INSIDE BigOps', () => {
     // With true lexical scoping: Sum was canonicalized in outer scope → c4 = 10 → 36
     // With dynamic scoping: Sum sees calling scope's c4 = 20 → (1+20)+(2+20)+(3+20) = 66
     // With scope pollution: c4 was auto-declared in Sum's scope → NaN or 'unknown'
-    expect(result).toMatchInlineSnapshot(`66`); // BUG candidate
+    expect(result).toMatchInlineSnapshot(`66`); // BUG: dynamic scoping — Sum sees calling scope's lc_c4=20; should be 36 (defining scope)
   });
 });
 
