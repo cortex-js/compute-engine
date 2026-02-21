@@ -9,6 +9,7 @@ import type { MathJsonSymbol } from '../math-json/types';
 
 import { isWildcard, wildcardName } from './boxed-expression/pattern-utils';
 import { isSymbol, isFunction } from './boxed-expression/type-guards';
+import { isValueDef } from './boxed-expression/utils';
 
 import {
   assume as assumeImpl,
@@ -311,12 +312,13 @@ export function forget(
       if (assumption.has(symbol)) ce.context.assumptions.delete(assumption);
     }
 
-    // Also clear any values that were set for this symbol in the evaluation context.
-    // Values can be stored in any frame of the context stack, so we need to check all of them.
-    for (const ctx of ce._evalContextStack) {
-      if (symbol in ctx.values) {
-        delete ctx.values[symbol];
-      }
+    // Also reset the symbol's value in the current scope's bindings.
+    // When ce.assume('x = 5') is called, it may declare x in the current
+    // scope via ce.declare(). forget() must undo that value so that
+    // subsequent lookups return no value (evaluating x returns x, not 5).
+    const scopeBinding = ce.context.lexicalScope.bindings.get(symbol);
+    if (scopeBinding && isValueDef(scopeBinding) && !scopeBinding.value.isConstant) {
+      scopeBinding.value.value = undefined;
     }
   }
   // The removed assumptions could affect existing expressions

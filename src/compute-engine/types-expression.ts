@@ -100,7 +100,7 @@ interface BoxedBaseDefinition extends Partial<BaseDefinition> {
 
 interface BoxedValueDefinition extends BoxedBaseDefinition {
   holdUntil: 'never' | 'evaluate' | 'N';
-  readonly value: Expression | undefined;
+  value: Expression | undefined;
   eq?: (a: Expression) => boolean | undefined;
   neq?: (a: Expression) => boolean | undefined;
   cmp?: (a: Expression) => '=' | '>' | '<' | undefined;
@@ -1226,14 +1226,15 @@ export interface Expression {
 
   /**
    * Smart equality check: structural first, then numeric evaluation fallback.
+   * Symmetric: `a.is(b)` always equals `b.is(a)`.
    *
    * First tries an exact structural check (same as `isSame()`). If that fails
    * and the expression is constant (no free variables), evaluates numerically
    * and compares within `engine.tolerance`.
    *
-   * For literal numbers (`BoxedNumber`), behaves identically to `isSame()` —
-   * no tolerance is applied. Tolerance only applies to expressions that
-   * require evaluation (e.g., `\\sin(\\pi)`).
+   * For literal numbers compared to primitives (`number`, `bigint`), behaves
+   * identically to `isSame()` — no tolerance is applied. Tolerance only
+   * applies to expressions that require evaluation (e.g., `\\sin(\\pi)`).
    *
    * ```typescript
    * ce.parse('\\cos(\\frac{\\pi}{2})').is(0)  // true — evaluates, within tolerance

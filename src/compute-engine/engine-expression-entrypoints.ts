@@ -29,7 +29,8 @@ type SymbolHost = ComputeEngine & {
   lookupDefinition(id: MathJsonSymbol): undefined | BoxedDefinition;
   _declareSymbolValue(
     name: MathJsonSymbol,
-    def: Partial<ValueDefinition>
+    def: Partial<ValueDefinition>,
+    scope?: import('./global-types').Scope
   ): BoxedDefinition;
   error(message: string | string[], where?: string): Expression;
 };
@@ -100,7 +101,11 @@ export function createSymbolExpression(
 
   if (def) return new BoxedSymbol(engine, name, { metadata, def });
 
-  def = engine._declareSymbolValue(name, { type: 'unknown', inferred: true });
+  // Auto-declare: if current scope has noAutoDeclare, redirect to parent scope
+  // so free variables in BigOp bodies land in the enclosing scope, not the BigOp scope.
+  let autoScope = engine.context.lexicalScope;
+  while (autoScope.noAutoDeclare && autoScope.parent) autoScope = autoScope.parent;
+  def = engine._declareSymbolValue(name, { type: 'unknown', inferred: true }, autoScope);
   return new BoxedSymbol(engine, name, { metadata, def });
 }
 

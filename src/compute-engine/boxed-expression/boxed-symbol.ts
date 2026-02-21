@@ -75,17 +75,16 @@ import { isSymbol } from './type-guards';
  * some properties and methods will return `undefined`, for example
  * `isInteger`, `isRational`, `isReal`, etc...
  *
- * There is a single value definition for each symbol but the value of a
- * symbol can be different in different evaluation contexts, for example
- * a local variable during a recursion.
+ * There is a single value definition for each symbol in each scope.
+ * During recursion, fresh scopes are created per call so each
+ * invocation has its own bindings (see `makeLambda` in function-utils.ts).
  *
- * The value of a symbol is tracked in the evaluation context and
- * not in the value definition.
+ * The value of a symbol is stored in its `BoxedValueDefinition` — there
+ * is no separate evaluation-context values map.
  *
- * The `value` property of a boxed symbol is the value of the symbol
- * in the current evaluation context. It is `undefined` if the symbol
- * is not bound to a definition or if the value is not known (a bound
- * symbol may have no value).
+ * The `value` property of a boxed symbol is the value found by walking
+ * the scope chain from the current lexical scope. It is `undefined` if
+ * the symbol is not bound to a definition or if the value is not known.
  *
  */
 export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
@@ -407,12 +406,11 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     // If the symbol is a constant, the definition has the value
     if (this._def.value.isConstant) return this._def.value.value;
 
-    // Lookup the value in the current evaluation context
+    // Lookup the value by walking the scope chain
     const result = this.engine._getSymbolValue(this._id);
 
-    // Guard: when a function parameter is bound to an argument with the same
-    // name (e.g., f(x) called with argument x), the eval context maps x → x,
-    // creating an infinite loop. Return undefined to treat as a free variable.
+    // Guard: if the value is the symbol itself (degenerate self-assignment),
+    // return undefined to avoid infinite loops.
     if (
       result !== undefined &&
       'symbol' in result &&
@@ -707,7 +705,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   N(): Expression {
     const def = this.valueDefinition;
     if (def && def.holdUntil === 'never') return this;
-    // For non-constants, check the evaluation context value first
+    // For non-constants, check the scope-chain value first
     if (def && !def.isConstant) {
       const contextValue = this.engine._getSymbolValue(this._id);
       if (contextValue) return contextValue.N();

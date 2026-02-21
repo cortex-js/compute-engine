@@ -16,7 +16,6 @@ import type {
   Sign,
   Substitution,
   BoxedDefinition,
-  EvalContext,
   Scope,
   BoxedValueDefinition,
   FunctionInterface,
@@ -107,10 +106,6 @@ export class BoxedFunction
   // If `null`, the expression is not bound, if `undefined`, the expression
   // is bound but no definition was found.
   private _def: BoxedDefinition | undefined | null;
-
-  /** @todo: wrong. If the function is scoped (has its own lexical scope), the captured eval context. This includes the lexical scope for this expression
-   */
-  private _capturedContext: ReadonlyArray<EvalContext> | undefined;
 
   /** If the operator is scoped, the local scope associated with
    * the function expression
@@ -1154,20 +1149,10 @@ export class BoxedFunction
       //
       // 5/ Create a scope if needed
       //
-      const isScoped = this._localScope !== undefined || options?.withArguments;
+      const isScoped = this._localScope !== undefined;
 
       if (isScoped) {
-        this.engine._pushEvalContext(
-          this._localScope ?? {
-            parent: this.engine.context?.lexicalScope,
-            bindings: new Map(),
-          }
-        );
-        // Set the named arguments as local variables
-        if (options?.withArguments) {
-          for (const [k, v] of Object.entries(options.withArguments))
-            this.engine.context.values[k] = v;
-        }
+        this.engine._pushEvalContext(this._localScope!);
       }
 
       //
@@ -1252,20 +1237,10 @@ export class BoxedFunction
 
       // 4/ Create a scope if needed
       //
-      const isScoped = this._localScope !== undefined || options?.withArguments;
+      const isScoped = this._localScope !== undefined;
 
       if (isScoped) {
-        this.engine._pushEvalContext(
-          this._localScope ?? {
-            parent: this.engine.context?.lexicalScope,
-            bindings: new Map(),
-          }
-        );
-        // Set the named arguments as local variables
-        if (options?.withArguments) {
-          for (const [k, v] of Object.entries(options.withArguments))
-            this.engine.context.values[k] = v;
-        }
+        this.engine._pushEvalContext(this._localScope!);
       }
 
       //
@@ -1273,16 +1248,19 @@ export class BoxedFunction
       //
       const engine = this.engine;
 
-      const opts = {
-        numericApproximation,
-        engine,
-        signal: options?.signal,
-        eager: options?.materialization,
-      };
-      const evaluateFn =
-        def.evaluateAsync?.(tail, opts) ?? def.evaluate?.(tail, opts);
-
-      if (isScoped) this.engine._popEvalContext();
+      let evaluateFn: Expression | Promise<Expression> | undefined;
+      try {
+        const opts = {
+          numericApproximation,
+          engine,
+          signal: options?.signal,
+          materialization: options?.materialization,
+        };
+        evaluateFn =
+          def.evaluateAsync?.(tail, opts) ?? def.evaluate?.(tail, opts);
+      } finally {
+        if (isScoped) this.engine._popEvalContext();
+      }
 
       return Promise.resolve(evaluateFn).then(
         (result) => result ?? engine.function(this._operator, tail)

@@ -54,17 +54,6 @@ export function declareSymbolValue(
   const boxedDef = scope.bindings.get(name)!;
   updateDef(ce, name, boxedDef, def);
 
-  // If we are modifying the current scope, and we have a value,
-  // set the value in the evaluation context
-  if (
-    scope === ce.context.lexicalScope &&
-    isValueDef(boxedDef) &&
-    boxedDef.value.value &&
-    !boxedDef.value.isConstant
-  ) {
-    ce.context.values[name] = boxedDef.value.value;
-  }
-
   ce._generation += 1;
 
   return boxedDef;
@@ -95,15 +84,9 @@ export function getSymbolValue(
   ce: IComputeEngine,
   id: MathJsonSymbol
 ): Expression | undefined {
-  // Iterate over all the frames, starting with the most recent
-  // and going back to the root frame
-  const l = ce._evalContextStack.length - 1;
-  if (l < 0) return undefined;
-  for (let j = l; j >= 0; j--) {
-    const frame = ce._evalContextStack[j].values;
-    if (id in frame) return frame[id];
-  }
-  return undefined;
+  const def = lookup(id, ce.context.lexicalScope);
+  if (!def || !isValueDef(def)) return undefined;
+  return def.value.value;
 }
 
 export function setSymbolValue(
@@ -111,48 +94,22 @@ export function setSymbolValue(
   id: MathJsonSymbol,
   value: Expression | boolean | number | undefined
 ): void {
-  // Iterate over all the frames, starting with the most recent
-  // and going back to the root frame
-  const l = ce._evalContextStack.length - 1;
-  if (l < 0) throw new Error(`Unknown symbol "${id}"`);
-
   if (typeof value === 'number') value = ce.number(value);
   else if (typeof value === 'boolean') value = value ? ce.True : ce.False;
 
-  for (let j = l; j >= 0; j--) {
-    const values = ce._evalContextStack[j].values;
-    if (id in values) {
-      values[id] = value;
-      ce._generation += 1;
-      return;
-    }
+  const def = lookup(id, ce.context.lexicalScope);
+  if (!def) throw new Error(`Unknown symbol "${id}"`);
+
+  if (isValueDef(def)) {
+    def.value.value = value;
+    ce._generation += 1;
+    return;
   }
 
-  // If we reach here, the symbol is not defined in any frame
-  // Add it to the frame that has the declaration for it.
-  // Note: this code path can happen if we have a symbol declared as a
-  // function/operator, and we are assigning a value to it: ordinarily
-  // there would be an entry in the `values` map if it it had been declared
-  // as a value, but it is not the case here.
-  const ctx = ce.lookupContext(id);
-  if (!ctx) throw new Error(`Unknown symbol "${id}"`);
-  ctx.values[id] = value;
+  // Operator definition: cannot set a plain value on an operator symbol
+  throw new Error(`Cannot assign a value to operator symbol "${id}"`);
 }
 
-export function setCurrentContextValue(
-  ce: IComputeEngine,
-  id: MathJsonSymbol,
-  value: Expression | boolean | number | undefined
-): void {
-  const l = ce._evalContextStack.length - 1;
-  if (l < 0) throw new Error(`No evaluation context`);
-
-  if (typeof value === 'number') value = ce.number(value);
-  else if (typeof value === 'boolean') value = value ? ce.True : ce.False;
-
-  ce._evalContextStack[l].values[id] = value;
-  ce._generation += 1;
-}
 
 export function declareType(
   ce: IComputeEngine,
@@ -345,10 +302,9 @@ export function assignFn(
     // If we get here, the previous definition was a value definition.
     // We can update it to an operator definition.
     console.assert(isValueDef(def));
+    // updateDef removes def.value and sets def.operator — no separate
+    // _setSymbolValue call needed to clear the old value.
     updateDef(ce, id, def, fnDef);
-
-    // Remove the value associated with the previous definition
-    ce._setSymbolValue(id, undefined);
   } else {
     // No previous definition: create a new one
     ce.declare(id, fnDef);

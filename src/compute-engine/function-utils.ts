@@ -3,6 +3,7 @@ import { cmp } from './boxed-expression/compare';
 import type {
   BoxedDefinition,
   Expression,
+  FunctionInterface,
   IComputeEngine as ComputeEngine,
   Scope,
 } from './global-types';
@@ -19,27 +20,33 @@ import { isSymbol, isFunction } from './boxed-expression/type-guards';
  * (e.g. `["Function", ["Block", ["Add", "_", 1]], "_"]`).
  *
  *
- * #### DURING BOXING (in makeLambda())
- *
- * During the boxing/canonicalization phase of a function
- * (`["Function"]` expression or operator of expression):
+ * #### DURING CANONICALIZATION (in canonicalFunctionLiteralArguments())
  *
  * 1/ If not a `["Function"]` expression, the expression is rewritten
  *    to a `["Function"]` expression with anonymous parameters
- * 2/ A new scope is created
- * 3/ The function parameters are declared in the scope
- * 4/ The function body is boxed in the context of the scope and the scope
- *    is associated with the function
+ * 2/ A `Block` scope is created
+ * 3/ The function parameters are declared in the Block's scope
+ * 4/ The function body is canonicalized in the context of the scope.
+ *    The Block's localScope captures the defining scope as its parent.
  *
  *
  * #### DURING EVALUATION (executing the result of makeLambda())
  *
- * 1/ The arguments are evaluated in the current scope
- * 2/ The context is swapped to the function scope
- * 3/ The function parameters are set to the value of the arguments
- * 4/ The function body is evaluated in the context of the function scope
- * 5/ The context is swapped back to the current scope
- * 6/ The result of the function body is returned
+ * 1/ The arguments are evaluated in the **calling** scope
+ * 2/ A fresh scope is created per call, with parent = the **defining**
+ *    scope (body.localScope.parent), giving true lexical scoping
+ * 3/ The function parameters are declared in the fresh scope
+ * 4/ body.localScope is temporarily re-parented to chain through the
+ *    fresh scope: bigOpScope → bodyScope → freshScope → capturedScope.
+ *    Param bindings in bodyScope (stale, from canonicalization) are
+ *    temporarily hidden so they don't shadow freshScope's values.
+ *    This lets nested scoped expressions (Sum, Product) find params
+ *    by walking up their static scope chain.
+ * 5/ The function body is evaluated in the context of the fresh scope
+ * 6/ If the result contains Function literals, they are rebound to
+ *    close over the fresh scope (closure capture)
+ * 7/ The fresh scope is discarded; body.localScope.parent is restored
+ * 8/ The result is returned
  *
  */
 
@@ -251,6 +258,132 @@ export function apply(
 }
 
 /**
+ * Evaluate a sequence of statements, handling Return/Break/Continue.
+ *
+ * Used by both:
+ * - `evaluateBlock` in control-structures.ts (Block evaluation handler)
+ * - `makeLambda` below (iterates body.ops directly instead of calling
+ *   body.evaluate(), because body is a Block whose _localScope has param
+ *   bindings from canonicalization — declared with type 'unknown' but no
+ *   value. If body.evaluate() were called, Block would push its _localScope
+ *   as the eval context, and lookup() would find those stale bindings
+ *   before reaching the freshScope where actual param values live.)
+ */
+export function evaluateStatements(
+  ce: ComputeEngine,
+  ops: Iterable<Expression>
+): Expression {
+  let result: Expression = ce.Nothing;
+  for (const op of ops) {
+    const h = op.operator;
+    if (h === 'Return' && isFunction(op)) {
+      result = op.op1.evaluate();
+      break;
+    }
+    if ((h === 'Break' || h === 'Continue') && isFunction(op)) {
+      result = ce.box([h, op.op1.evaluate()]);
+      break;
+    }
+    result = op.evaluate();
+  }
+  return result;
+}
+
+/**
+ * Temporarily remove param bindings from bodyScope so they don't shadow
+ * the freshScope values during scope chain lookup. Returns the removed
+ * entries for restoration.
+ */
+function hideBodyScopeParams(
+  bodyScope: Scope,
+  paramNames: string[]
+): Array<[string, BoxedDefinition]> {
+  const hidden: Array<[string, BoxedDefinition]> = [];
+  for (const name of paramNames) {
+    if (!name) continue;
+    const binding = bodyScope.bindings.get(name);
+    if (binding) {
+      hidden.push([name, binding]);
+      bodyScope.bindings.delete(name);
+    }
+  }
+  return hidden;
+}
+
+/** Restore param bindings removed by hideBodyScopeParams. */
+function restoreBodyScopeParams(
+  bodyScope: Scope,
+  hidden: Array<[string, BoxedDefinition]>
+): void {
+  for (const [name, binding] of hidden) bodyScope.bindings.set(name, binding);
+}
+
+/**
+ * Recursively walk `expr` and rebind any Function literals so their body
+ * scopes close over `closureParent`. This handles Functions nested inside
+ * List, Tuple, Pair, or any other compound expression.
+ *
+ * Example: given `List(Function(x+n), Function(x+2*n))` where n=5 lives
+ * in `closureParent` (the outer call's fresh scope), both inner Functions
+ * are rebound so their Block scopes have `parent = closureParent`, ensuring
+ * they see n=5 even after the outer fresh scope is popped.
+ *
+ * Multi-level nesting (f returning g returning h) still works because each
+ * evaluation of a Function triggers its own closure capture at that level.
+ */
+function captureClosures(
+  ce: ComputeEngine,
+  expr: Expression,
+  closureParent: Scope
+): Expression {
+  if (expr.operator === 'Function' && isFunction(expr)) {
+    const innerBlock = expr.op1;
+    if (innerBlock && isFunction(innerBlock) && innerBlock.localScope) {
+      // Only copy bindings for the inner function's own parameters.
+      // Other entries (auto-declared free variables, local declarations)
+      // must NOT be copied — they would shadow the closureParent chain
+      // where the outer call's parameter values live.
+      //
+      // Local variables from Declare statements are safe to drop here
+      // because they are re-created at evaluation time when the Declare
+      // op is processed by evaluateStatements.
+      const innerParamNames = new Set(
+        expr.ops
+          .slice(1)
+          .map((op) => (isSymbol(op) ? op.symbol : ''))
+          .filter((s) => s)
+      );
+      const closureBindings: Map<string, BoxedDefinition> = new Map();
+      for (const [key, val] of innerBlock.localScope.bindings) {
+        if (innerParamNames.has(key)) closureBindings.set(key, val);
+      }
+      const closureScope: Scope = {
+        parent: closureParent,
+        bindings: closureBindings,
+      };
+      const closedBlock = ce._fn('Block', innerBlock.ops, {
+        scope: closureScope,
+      });
+      return ce._fn('Function', [closedBlock, ...expr.ops.slice(1)]);
+    }
+    return expr;
+  }
+
+  // Recurse into compound expressions (List, Tuple, Pair, etc.)
+  if (isFunction(expr) && expr.ops.length > 0) {
+    let changed = false;
+    const newOps = expr.ops.map((op) => {
+      const captured = captureClosures(ce, op, closureParent);
+      if (captured !== op) changed = true;
+      return captured;
+    });
+    if (changed) return ce._fn(expr.operator!, newOps);
+  }
+
+  return expr;
+}
+
+/**
  * If `expr is a function literal (`["Function"]` expression), return a
  * JavaScript function that can be called with arguments.
  */
@@ -274,19 +407,25 @@ function makeLambda(
   console.assert(expr.operator === 'Function');
   console.assert(expr.isCanonical);
 
+  // expr is a canonical Function expression — it satisfies FunctionInterface
+  const fnExpr = expr as Expression & FunctionInterface;
+
   //
   // No arguments, we just need to evaluate the body
   //
-  console.assert(isFunction(expr));
-  if (!isFunction(expr)) throw new Error('Invalid function literal');
-  if (expr.ops.length === 1) {
-    console.assert(expr.ops[0] !== undefined);
-    return () => expr.ops[0].evaluate();
+  if (fnExpr.ops.length === 1) {
+    console.assert(fnExpr.ops[0] !== undefined);
+    return () => fnExpr.ops[0].evaluate();
   }
 
-  const [body, ...params] = expr.ops;
+  const [body, ...params] = fnExpr.ops;
 
   console.assert(body.isScoped);
+  if (!body.localScope)
+    throw new Error('Function body must be a scoped Block expression');
+
+  // body is a Block (scoped) — safe to access .ops and .localScope
+  const bodyFn = body as Expression & FunctionInterface;
 
   return (args) => {
     //
@@ -309,7 +448,7 @@ function makeLambda(
     // 3/ If there are fewer arguments than expected, curry the function
     //
     if (args.length < params.length) {
-      // Generate unique parameter names to avoid collisions
+      // Generate unique parameter names for the remaining (unapplied) params
       const allSymbols = new Set([
         ...body.symbols,
         ...params.map((p) => (isSymbol(p) ? p.symbol : '')),
@@ -317,49 +456,113 @@ function makeLambda(
       const extras = params.slice(args.length).map((_, i) => {
         let name = `_${i + 1}`;
         let counter = 0;
-        while (allSymbols.has(name)) {
-          name = `_${i + 1}_${counter++}`;
-        }
+        while (allSymbols.has(name)) name = `_${i + 1}_${counter++}`;
         allSymbols.add(name);
         return ce.symbol(name, { canonical: false });
       });
 
-      // Create substitution map for remaining parameters
+      // Rename remaining params to fresh names in the body
       const substitutions = Object.fromEntries(
         params
           .slice(args.length)
           .map((param, i) => [isSymbol(param) ? param.symbol : '', extras[i]])
       );
 
-      // Apply known arguments and substitute remaining parameters
-      const newBody = body
-        .evaluate({
-          withArguments: Object.fromEntries(
-            params
-              .slice(0, args.length)
-              .map((key, i) => [isSymbol(key) ? key.symbol : '', args[i]])
-          ),
-        })
-        .subs(substitutions);
+      // Evaluate body with known args in a fresh scope
+      const evaluatedKnownArgs = args.map((a) => a.evaluate());
+      const capturedScope = bodyFn.localScope!.parent ?? ce.context.lexicalScope;
+      const freshScope: Scope = {
+        parent: capturedScope,
+        bindings: new Map(),
+      };
+      for (let i = 0; i < args.length; i++) {
+        const p = params[i];
+        const name = isSymbol(p) ? p.symbol : '';
+        if (name)
+          ce.declare(name, { value: evaluatedKnownArgs[i], inferred: true }, freshScope);
+      }
 
-      return ce.function('Function', [newBody, ...extras]);
+      // Re-parent body scope to chain through freshScope, so nested
+      // scoped expressions (Sum, Product) can find params by walking up:
+      //   bigOpScope → bodyScope → freshScope(params) → capturedScope
+      // Also temporarily remove param bindings from bodyScope so they
+      // don't shadow the freshScope values during lookup.
+      const bodyScope = bodyFn.localScope!;
+      const savedParent = bodyScope.parent;
+      bodyScope.parent = freshScope;
+      const curryParamNames = params.slice(0, args.length).map((p) =>
+        isSymbol(p) ? p.symbol : ''
+      );
+      const hiddenBindings = hideBodyScopeParams(bodyScope, curryParamNames);
+
+      ce.pushScope(freshScope);
+      let newBody: Expression;
+      try {
+        newBody = evaluateStatements(ce, bodyFn.ops);
+      } finally {
+        ce.popScope();
+        bodyScope.parent = savedParent;
+        restoreBodyScopeParams(bodyScope, hiddenBindings);
+      }
+
+      return ce.function('Function', [newBody.subs(substitutions), ...extras]);
     }
 
     //
-    // 4/ Evaluate the arguments, in the current scope
-    // (we don't want the arguments to be bound to the function scope)
-    // and pass them to evaluate()
+    // 4/ Evaluate arguments in the calling scope before switching context
     //
+    const evaluatedArgs = args.map((a) => a.evaluate());
 
-    // Note: evaluate will switch to the function scope
-    const result = body.evaluate({
-      withArguments: Object.fromEntries(
-        params.map((key, i) => [
-          isSymbol(key) ? key.symbol : '',
-          args[i].evaluate(),
-        ])
-      ),
-    });
+    //
+    // 5/ Create a fresh scope per call with parent = the defining scope.
+    //    bodyFn.localScope.parent is the scope where the Function was defined.
+    //    This gives true lexical scoping: the fresh scope chain is
+    //    [fresh scope (params)] -> [defining scope] -> ...
+    //    The calling scope is never in the chain.
+    //
+    const capturedScope = bodyFn.localScope!.parent ?? ce.context.lexicalScope;
+    const freshScope: Scope = {
+      parent: capturedScope,
+      bindings: new Map(),
+    };
+
+    // Declare parameters in the fresh scope
+    const paramNames = params.map((p) => (isSymbol(p) ? p.symbol : ''));
+    for (let i = 0; i < params.length; i++) {
+      if (paramNames[i])
+        ce.declare(paramNames[i], { value: evaluatedArgs[i], inferred: true }, freshScope);
+    }
+
+    // Re-parent body scope to chain through freshScope, so nested
+    // scoped expressions (Sum, Product) can find params by walking up:
+    //   bigOpScope → bodyScope → freshScope(params) → capturedScope
+    // Also temporarily remove param bindings from bodyScope so they
+    // don't shadow the freshScope values during lookup.
+    const bodyScope = bodyFn.localScope!;
+    const savedParent = bodyScope.parent;
+    bodyScope.parent = freshScope;
+    const hiddenBindings = hideBodyScopeParams(bodyScope, paramNames);
+
+    // Push fresh scope and evaluate block contents directly.
+    // We evaluate bodyFn.ops (the Block's children) rather than calling
+    // body.evaluate() — see evaluateStatements JSDoc for why.
+    ce.pushScope(freshScope);
+    let result: Expression;
+    try {
+      result = evaluateStatements(ce, bodyFn.ops);
+
+      // Closure capture: walk the result tree and rebind any Function literals
+      // so their body scopes close over the current freshScope.
+      //
+      // Without this, inner functions' Block._localScope.parent points to
+      // the static defining scope, so outer-call parameters are lost once
+      // freshScope is popped.
+      result = captureClosures(ce, result, freshScope);
+    } finally {
+      ce.popScope();
+      bodyScope.parent = savedParent;
+      restoreBodyScopeParams(bodyScope, hiddenBindings);
+    }
 
     return result.isValid ? result : undefined;
   };

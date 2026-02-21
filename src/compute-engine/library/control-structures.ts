@@ -1,4 +1,4 @@
-import { applicable } from '../function-utils';
+import { applicable, evaluateStatements } from '../function-utils';
 import { checkConditions } from '../boxed-expression/rules';
 import { widen } from '../../common/type/utils';
 import { CancellationError, run, runAsync } from '../../common/interruptible';
@@ -129,29 +129,13 @@ function evaluateWhich(
   return options.engine.symbol('Undefined');
 }
 
-/** Evaluate a Block expression */
+/** Evaluate a Block expression. */
 function evaluateBlock(
   ops: ReadonlyArray<Expression>,
   { engine: ce }
 ): Expression {
-  // Empty block?
   if (ops.length === 0) return ce.Nothing;
-
-  let result: Expression | undefined = undefined;
-  for (const op of ops) {
-    const h = op.operator;
-    if (h === 'Return' && isFunction(op)) {
-      result = op.op1.evaluate();
-      break;
-    }
-    if ((h === 'Break' || h === 'Continue') && isFunction(op)) {
-      result = ce.box([h, op.op1.evaluate()]);
-      break;
-    }
-    result = op.evaluate();
-  }
-
-  return result ?? ce.Nothing;
+  return evaluateStatements(ce, ops);
 }
 
 /**

@@ -239,6 +239,47 @@ describe('is() with expansion', () => {
   });
 });
 
+describe('is() symmetry', () => {
+  test('number.is(expression) equals expression.is(number)', () => {
+    const num = engine.number(1.4142135623730951);
+    const expr = engine.parse('\\sqrt{2}');
+    expect(expr.is(num)).toBe(true);
+    expect(num.is(expr)).toBe(true);
+  });
+
+  test('number.is(trig expression) equals trig expression.is(number)', () => {
+    const zero = engine.number(0);
+    const sinPi = engine.parse('\\sin(\\pi)');
+    expect(sinPi.is(zero)).toBe(true);
+    expect(zero.is(sinPi)).toBe(true);
+  });
+
+  test('symmetry with explicit tolerance', () => {
+    const num = engine.number(3.14);
+    const pi = engine.parse('\\pi');
+    expect(pi.is(num, 0.01)).toBe(true);
+    expect(num.is(pi, 0.01)).toBe(true);
+    expect(pi.is(num, 0.0001)).toBe(false);
+    expect(num.is(pi, 0.0001)).toBe(false);
+  });
+
+  test('symmetry with assigned variable', () => {
+    engine.assign('v', 2);
+    const num = engine.number(3);
+    const expr = engine.parse('1 + 4 / v');
+    expect(expr.is(num)).toBe(true);
+    expect(num.is(expr)).toBe(true);
+    engine.forget('v');
+  });
+
+  test('symmetry: both false when free variables present', () => {
+    const num = engine.number(5);
+    const expr = engine.parse('x + 1');
+    expect(expr.is(num)).toBe(false);
+    expect(num.is(expr)).toBe(false);
+  });
+});
+
 describe('edge cases: infinity and NaN', () => {
   test('PositiveInfinity.isSame(Infinity)', () => {
     expect(engine.symbol('PositiveInfinity').isSame(Infinity)).toBe(true);

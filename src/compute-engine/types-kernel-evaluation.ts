@@ -86,10 +86,6 @@ export type EvaluateOptions<Expr = unknown> = {
   /** Cancellation signal for long-running evaluations. */
   signal: AbortSignal;
 
-  /**
-   * Temporary named argument bindings used while evaluating this expression.
-   */
-  withArguments: Record<MathJsonSymbol, Expr>;
 };
 
 /**
@@ -215,12 +211,13 @@ export type Scope<Binding = unknown> = {
   parent: Scope<Binding> | null;
   bindings: Map<string, Binding>;
   types?: Record<string, TypeReference>;
+  /** When true, auto-declarations during canonicalization are promoted to parent scope. */
+  noAutoDeclare?: boolean;
 };
 
 /** @category Compute Engine */
 export type EvalContext<Expr = unknown, Binding = unknown> = {
   lexicalScope: Scope<Binding>;
   assumptions: ExpressionMapInterface<boolean, Expr>;
-  values: Record<string, Expr | undefined>;
   name: undefined | string;
 };

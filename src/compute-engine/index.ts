@@ -103,7 +103,6 @@ import {
   declareSymbolOperator as declareSymbolOperatorImpl,
   getSymbolValue as getSymbolValueImpl,
   setSymbolValue as setSymbolValueImpl,
-  setCurrentContextValue as setCurrentContextValueImpl,
   declareType as declareTypeImpl,
   declareFn as declareFnImpl,
   assignFn as assignFnImpl,
@@ -116,8 +115,6 @@ import {
   popEvalContext as popEvalContextImpl,
   inScope as inScopeImpl,
   printStack as printStackImpl,
-  lookupContext as lookupContextImpl,
-  swapContext as swapContextImpl,
 } from './engine-scope';
 
 import {
@@ -349,9 +346,8 @@ export class ComputeEngine implements IComputeEngine {
   /**
    * The stack of evaluation contexts.
    *
-   * An **evaluation context** contains bindings of symbols to their
-   * values, assumptions, and the matching scope.
-   *
+   * An **evaluation context** tracks the current lexical scope and
+   * assumptions. Symbol values are stored in their definitions, not here.
    */
   _evalContextStack: EvalContext[] = [];
 
@@ -1206,10 +1202,7 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   /**
-   *
-   * Create a new lexical scope and matching evaluation context and add it
-   * to the evaluation context stack.
-   *
+   * Push a new lexical scope (and its evaluation context) onto the stack.
    */
   pushScope(scope?: Scope, name?: string): void {
     pushScopeImpl(this, scope, name);
@@ -1258,19 +1251,6 @@ export class ComputeEngine implements IComputeEngine {
     value: Expression | boolean | number | undefined
   ): void {
     setSymbolValueImpl(this, id, value);
-  }
-
-  /**
-   * Set a value directly in the current context's values map.
-   * This is used for assumptions so that the value is scoped to the current
-   * evaluation context and is automatically removed when the scope is popped.
-   * @internal
-   */
-  _setCurrentContextValue(
-    id: MathJsonSymbol,
-    value: Expression | boolean | number | undefined
-  ): void {
-    setCurrentContextValueImpl(this, id, value);
   }
 
   /**
@@ -1445,21 +1425,6 @@ export class ComputeEngine implements IComputeEngine {
     options?: OEISOptions
   ): Promise<{ matches: OEISSequenceInfo[]; terms: number[] }> {
     return checkSequenceOEISImpl(this, name, count, options);
-  }
-
-  /**
-   * Return an evaluation context in which the symbol is defined.
-   */
-  lookupContext(id: MathJsonSymbol): EvalContext | undefined {
-    return lookupContextImpl(this, id);
-  }
-
-  /**  Find the context in the stack frame, and set the stack frame to
-   * it. This is used to evaluate expressions in the context of
-   * a different scope.
-   */
-  _swapContext(context: EvalContext): void {
-    swapContextImpl(this, context);
   }
 
   /**

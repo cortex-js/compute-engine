@@ -34,8 +34,8 @@ describe('FREE VARIABLE CAPTURE', () => {
   test('free var when called from inner scope with re-declared variable', () => {
     // Inner scope declares its own lc_c = 10, shadowing the outer one.
     // With TRUE lexical scoping lc_f0() should still return 5 (defining scope).
-    // BUG: currently returns 10 because the calling scope's eval context is
-    //      still on the stack and is found before the defining scope's value.
+    // Fixed: previously returned 10 because the calling scope's eval context was
+    //        on the stack and found before the defining scope's value.
     let result: unknown;
     try {
       ce.pushScope();
@@ -44,7 +44,7 @@ describe('FREE VARIABLE CAPTURE', () => {
     } finally {
       ce.popScope();
     }
-    expect(result).toMatchInlineSnapshot(`10`); // BUG: should be 5, not 10
+    expect(result).toMatchInlineSnapshot(`5`); // correct: lexical scoping — f sees defining scope's lc_c = 5
   });
 
   test('free var sees mutation in defining scope (by-reference capture)', () => {
@@ -170,9 +170,7 @@ describe('NESTED LAMBDAS', () => {
       .function('Apply', [inner, ce.number(3)])
       .evaluate()
       .valueOf();
-    // Whether this works depends on whether lc_y3 = 4 survives after the outer
-    // function returns (its eval context is popped).
-    expect(result).toMatchInlineSnapshot(`"lc_y3" + 3`); // BUG: lc_y3 binding is lost when outer eval context is popped; should be 7
+    expect(result).toMatchInlineSnapshot(`7`);
   });
 
   test('inner lambda captures global free variable through nesting', () => {
@@ -196,6 +194,32 @@ describe('NESTED LAMBDAS', () => {
       .evaluate()
       .valueOf();
     expect(result).toMatchInlineSnapshot(`13`); // correct: 3 + 10 = 13
+  });
+
+  test('three-level nested closure: innermost captures both outer params', () => {
+    // outermost(a)(b)(x) = x + a + b
+    // lc3_f(a) = lc3_g(b) = Function(x + a + b, x)
+    // Apply(lc3_f, 1)(2)(3) = 3 + 1 + 2 = 6
+    ce.pushScope();
+    try {
+      ce.declare('lc3_f', 'function');
+      ce.assign(
+        'lc3_f',
+        ce.box([
+          'Function',
+          ['Function',
+            ['Function', ['Add', 'lc3_x', 'lc3_a', 'lc3_b'], 'lc3_x'],
+            'lc3_b'],
+          'lc3_a',
+        ])
+      );
+      const g = ce.function('Apply', [ce.box('lc3_f'), ce.number(1)]).evaluate();
+      const h = ce.function('Apply', [g, ce.number(2)]).evaluate();
+      const result = ce.function('Apply', [h, ce.number(3)]).evaluate().valueOf();
+      expect(result).toEqual(6); // 3 + 1 + 2 = 6
+    } finally {
+      ce.popScope();
+    }
   });
 });
 
@@ -242,10 +266,10 @@ describe('LAMBDAS INSIDE BigOps', () => {
     ); // correct: index var leaves no stale value in outer scope after Sum
   });
 
-  test('Sum with free var in calling scope (scope pollution interaction)', () => {
-    // If lc_c4 gets auto-declared in Sum's scope with type 'unknown',
-    // Sum might not see the outer lc_c4 = 10.
-    // BUG: the result is wrong due to dynamic scoping (not scope pollution).
+  test('Sum canonicalized inside calling scope sees that scope', () => {
+    // Sum is boxed INSIDE the scope where lc_c4=20. The defining scope is
+    // the calling scope, so lc_c4=20 is the lexically correct value.
+    // (1+20) + (2+20) + (3+20) = 66
     let result: unknown;
     try {
       ce.pushScope();
@@ -257,10 +281,27 @@ describe('LAMBDAS INSIDE BigOps', () => {
     } finally {
       ce.popScope();
     }
-    // With true lexical scoping: Sum was canonicalized in outer scope → c4 = 10 → 36
-    // With dynamic scoping: Sum sees calling scope's c4 = 20 → (1+20)+(2+20)+(3+20) = 66
-    // With scope pollution: c4 was auto-declared in Sum's scope → NaN or 'unknown'
-    expect(result).toMatchInlineSnapshot(`66`); // BUG: dynamic scoping — Sum sees calling scope's lc_c4=20; should be 36 (defining scope)
+    expect(result).toMatchInlineSnapshot(`66`); // correct: Sum was defined in scope where lc_c4=20
+  });
+
+  test('Sum canonicalized before scope change uses defining scope', () => {
+    // Sum is boxed in the OUTER scope (lc_c4=10), then evaluated inside a
+    // scope that shadows lc_c4=20. Lexical scoping gives 36 (the defining scope).
+    // (1+10) + (2+10) + (3+10) = 36
+    const sumExpr = ce.box([
+      'Sum',
+      ['Add', 'lc_k4d', 'lc_c4'],
+      ['Limits', 'lc_k4d', 1, 3],
+    ]); // boxed outside calling scope (lc_c4=10)
+    let result: unknown;
+    try {
+      ce.pushScope();
+      ce.declare('lc_c4', { value: 20 }); // shadow in calling scope
+      result = sumExpr.evaluate().valueOf();
+    } finally {
+      ce.popScope();
+    }
+    expect(result).toMatchInlineSnapshot(`36`); // correct: lexical scoping uses defining scope's lc_c4=10
   });
 });
 
@@ -318,11 +359,11 @@ describe('MUTABLE CLOSURE', () => {
 
     const outerAfter = ce.box('lc_counter').evaluate().valueOf();
 
-    // BUG: with lexical scoping outerAfter should be 1 and fromInner should be 1.
-    // With dynamic scoping fromInner mutates the inner lc_counter → fromInner = 101,
+    // Fixed: with lexical scoping outerAfter is 1 and fromInner is 1.
+    // Previously (dynamic scoping) fromInner mutated the inner lc_counter → fromInner = 101,
     // outerAfter = 0.
-    expect(fromInner).toMatchInlineSnapshot(`101`); // BUG: dynamic scoping mutates inner lc_counter; should be 1
-    expect(outerAfter).toMatchInlineSnapshot(`0`);  // BUG: outer lc_counter unchanged; should be 1
+    expect(fromInner).toMatchInlineSnapshot(`1`); // correct: lexical scoping mutates outer lc_counter
+    expect(outerAfter).toMatchInlineSnapshot(`1`);  // correct: outer lc_counter was mutated
   });
 });
 
@@ -402,6 +443,180 @@ describe('CURRYING', () => {
     }
     // With lexical scoping: lc_c6 should be 10 (defining scope) → 17
     // With dynamic scoping: lc_c6 = 99 → 106
-    expect(result).toMatchInlineSnapshot(`106`); // BUG: dynamic scoping picks up calling scope's lc_c6=99; should be 17
+    expect(result).toMatchInlineSnapshot(`17`); // correct: lexical scoping — lc_c6 = 10 from defining scope
+  });
+
+  test('partial application stops at Return (no over-evaluation)', () => {
+    // f(p, q) = Block(t = p + q, Return(t), Assign(sideEffect, 99))
+    // Partially apply p=3 → curried function for q.
+    // The Return must stop the body loop — the subsequent Assign must not run.
+    ce.pushScope();
+    try {
+      ce.declare('lc_sideEffect6', { type: 'integer', value: 0 });
+      const f = ce.box([
+        'Function',
+        [
+          'Block',
+          ['Declare', 'lc_t6', 'number'],
+          ['Assign', 'lc_t6', ['Add', 'lc_p6b', 'lc_q6b']],
+          // Return exits here — the Assign below must NOT execute during currying
+          ['Return', 'lc_t6'],
+          ['Assign', 'lc_sideEffect6', 99],
+        ],
+        'lc_p6b',
+        'lc_q6b',
+      ]);
+      const curried = ce.function('Apply', [f, ce.number(3)]).evaluate();
+      // Side effect must not have fired during partial application
+      expect(ce.box('lc_sideEffect6').evaluate().valueOf()).toEqual(0);
+      // Full application should give 3 + 4 = 7
+      const result = ce
+        .function('Apply', [curried, ce.number(4)])
+        .evaluate()
+        .valueOf();
+      expect(result).toEqual(7);
+    } finally {
+      ce.popScope();
+    }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION 7 — RECURSIVE CLOSURE CAPTURE
+//
+// When a function returns a compound expression (List, Tuple, etc.) containing
+// Function literals, those inner functions must also close over the outer
+// call's parameters.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('RECURSIVE CLOSURE CAPTURE', () => {
+  test('function returning List of closures', () => {
+    // makePair(x) = List(Function(Add(x, 1)), Function(Add(x, 10)))
+    // Each closure should capture x from the call.
+    ce.pushScope();
+    try {
+      const makePair = ce.box([
+        'Function',
+        [
+          'Block',
+          [
+            'List',
+            ['Function', ['Block', ['Add', 'rc_x', 1]]],
+            ['Function', ['Block', ['Add', 'rc_x', 10]]],
+          ],
+        ],
+        'rc_x',
+      ]);
+
+      const pair = ce.function('Apply', [makePair, ce.number(5)]).evaluate();
+      // pair should be List(closure1, closure2)
+      expect(pair.operator).toBe('List');
+
+      // Apply closure1() => 5 + 1 = 6
+      const r1 = ce.function('Apply', [pair.op1]).evaluate().valueOf();
+      expect(r1).toEqual(6);
+
+      // Apply closure2() => 5 + 10 = 15
+      const r2 = ce.function('Apply', [pair.op2]).evaluate().valueOf();
+      expect(r2).toEqual(15);
+    } finally {
+      ce.popScope();
+    }
+  });
+
+  test('function returning nested structure with closure', () => {
+    // wrap(x) = Tuple(x, Function(Multiply(x, 2)))
+    // The Function inside Tuple should capture x.
+    ce.pushScope();
+    try {
+      const wrap = ce.box([
+        'Function',
+        [
+          'Block',
+          [
+            'Tuple',
+            'rc_y',
+            ['Function', ['Block', ['Multiply', 'rc_y', 2]]],
+          ],
+        ],
+        'rc_y',
+      ]);
+
+      const result = ce.function('Apply', [wrap, ce.number(7)]).evaluate();
+      expect(result.operator).toBe('Tuple');
+
+      // First element is the value itself
+      expect(result.op1.valueOf()).toEqual(7);
+
+      // Second element is the closure: () => 7 * 2 = 14
+      const fn = result.op2;
+      const r = ce.function('Apply', [fn]).evaluate().valueOf();
+      expect(r).toEqual(14);
+    } finally {
+      ce.popScope();
+    }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION 8 — CURRYING WITH SCOPED BODIES
+//
+// Partially applied functions whose bodies contain nested scoped expressions
+// (Sum, Product) must correctly resolve the known args during partial
+// evaluation and the remaining args on full application.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('CURRYING WITH SCOPED BODIES', () => {
+  test('curried function with Sum in body', () => {
+    // f(x, y) = Sum(k, 1, x) + y
+    // g = f(3) => curried, g(10) => (1+2+3) + 10 = 16
+    ce.pushScope();
+    try {
+      const f = ce.box([
+        'Function',
+        [
+          'Block',
+          [
+            'Add',
+            ['Sum', 'cur_k', ['Tuple', 'cur_k', 1, 'cur_x']],
+            'cur_y',
+          ],
+        ],
+        'cur_x',
+        'cur_y',
+      ]);
+
+      // Partially apply x=3
+      const g = ce.function('Apply', [f, ce.number(3)]).evaluate();
+
+      // Full application: g(10) => Sum(k,1,3) + 10 = 6 + 10 = 16
+      const result = ce.function('Apply', [g, ce.number(10)]).evaluate();
+      expect(result.valueOf()).toEqual(16);
+    } finally {
+      ce.popScope();
+    }
+  });
+
+  test('curried function with simple body', () => {
+    // add(a, b) = a + b
+    // inc = add(1), inc(5) => 6
+    ce.pushScope();
+    try {
+      const add = ce.box([
+        'Function',
+        ['Block', ['Add', 'cur_a', 'cur_b']],
+        'cur_a',
+        'cur_b',
+      ]);
+
+      const inc = ce.function('Apply', [add, ce.number(1)]).evaluate();
+      const result = ce
+        .function('Apply', [inc, ce.number(5)])
+        .evaluate()
+        .valueOf();
+      expect(result).toEqual(6);
+    } finally {
+      ce.popScope();
+    }
   });
 });

@@ -307,6 +307,15 @@ export function canonicalIndexingSet(expr: Expression): Expression | undefined {
   // canonicalizing its operands) so re-canonicalization paths (like `subs`)
   // preserve the bounds.
   if (isFunction(expr, 'Limits')) {
+    // Explicitly declare the index BEFORE canonicalizing the bounds.
+    // This ensures the index lands in the current (BigOp) scope even when
+    // noAutoDeclare is set, so bounds like 'M' (which are free variables)
+    // are correctly promoted to the parent scope via noAutoDeclare.
+    const rawIndex = expr.op1;
+    if (isSymbol(rawIndex) && rawIndex.symbol !== 'Nothing') {
+      if (!ce.context.lexicalScope.bindings.has(rawIndex.symbol))
+        ce.declare(rawIndex.symbol, 'integer');
+    }
     const canonicalIndex = expr.op1.canonical;
     const canonicalLower = expr.op2?.canonical ?? ce.Nothing;
     const canonicalUpper = expr.op3?.canonical ?? ce.Nothing;
@@ -337,7 +346,8 @@ export function canonicalIndexingSet(expr: Expression): Expression | undefined {
 
   if (!isSymbol(index)) return undefined;
 
-  if (index.symbol !== 'Nothing') ce.declare(index.symbol, 'integer');
+  if (index.symbol !== 'Nothing' && !ce.context.lexicalScope.bindings.has(index.symbol))
+    ce.declare(index.symbol, 'integer');
 
   if (upper && lower) return ce.function('Limits', [index, lower, upper]);
   if (upper) return ce.function('Limits', [index, ce.One, upper]);
@@ -353,20 +363,39 @@ export function canonicalBigop(
 ): Expression | null {
   const ce = body.engine;
 
-  // Sum is a scoped function (to declare the indexes)
-  ce.pushScope(scope);
+  // Always ensure we have a concrete scope object so we can set noAutoDeclare
+  // and pass it to ce._fn at the end (for localScope tracking).
+  const bigOpScope: Scope =
+    scope ?? { parent: ce.context.lexicalScope, bindings: new Map() };
 
+  // Set noAutoDeclare so auto-declarations of free variables (M, x) in the
+  // bounds and body are promoted to the enclosing scope instead of the BigOp
+  // scope. Explicit ce.declare() calls (used for index variable declaration)
+  // are not affected by noAutoDeclare — they always go to the target scope
+  // passed in. canonicalIndexingSet now calls ce.declare(index, 'integer')
+  // before canonicalizing bounds, so the index lands in BigOpScope correctly.
+  bigOpScope.noAutoDeclare = true;
+
+  // Push BigOp scope for both index and body canonicalization.
+  // canonicalIndexingSet explicitly declares the index variable (k) in the
+  // current (BigOp) scope before canonicalizing bounds, so k correctly lands
+  // in BigOpScope even though noAutoDeclare is set.
+  // Free variables in the bounds and body (M, x) are promoted to the enclosing
+  // scope via noAutoDeclare. noAutoDeclare is always cleared in the finally
+  // block so the scope behaves normally during evaluation (where ce.assign
+  // needs to work).
+  ce.pushScope(bigOpScope);
   let indexes: Expression[];
   try {
-    // Note: we need to canonicalize the indexes before canonicalizing the body
-    // since we need the indexes to be declared before we can bind them
+    // Canonicalize indexes first to declare the index variable before
+    // canonicalizing the body (the body may reference the index).
     indexes = indexingSets.map(
       (x) => canonicalIndexingSet(x) ?? ce.error('missing')
     );
-
     body = body?.canonical ?? ce.error('missing');
   } finally {
     ce.popScope();
+    bigOpScope.noAutoDeclare = false;
   }
 
   if (body.isCollection) {
@@ -375,7 +404,7 @@ export function canonicalBigop(
     return ce.box(['Reduce', body, 'Multiply', 1]);
   }
 
-  return ce._fn(bigOp, [body, ...indexes], { scope });
+  return ce._fn(bigOp, [body, ...indexes], { scope: bigOpScope });
 }
 
 /**

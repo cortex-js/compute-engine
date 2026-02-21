@@ -845,12 +845,11 @@ export interface BoxedValueDefinition extends BoxedBaseDefinition {
     */
   holdUntil: 'never' | 'evaluate' | 'N';
 
-  /** This is either the initial value of the symbol (i.e. when a new
-   *  evaluation context is created), or its constant value, if a constant.
-   *  Otherwise, the current value is tracked in the evaluation context.
-   *
+  /** The current value of the symbol. For constants, this is immutable.
+   *  The definition object is the single source of truth — there is no
+   *  separate evaluation-context values map.
    */
-  readonly value: Expression | undefined;
+  value: Expression | undefined;
 
   eq?: (a: Expression) => boolean | undefined;
   neq?: (a: Expression) => boolean | undefined;

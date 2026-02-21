@@ -3,20 +3,13 @@ import {
   BOLD,
   CYAN,
   GREY,
-  INVERSE_RED,
   RESET,
-  YELLOW,
 } from '../common/ansi-codes';
 
-import { isValidSymbol, validateSymbol } from '../math-json/symbols';
-import type { MathJsonSymbol } from '../math-json/types';
-
 import type {
-  Expression,
   BoxedDefinition,
   IComputeEngine,
   Scope,
-  EvalContext,
 } from './global-types';
 
 import { ExpressionMap } from './boxed-expression/expression-map';
@@ -53,20 +46,10 @@ export function pushEvalContext(
     name ??= `anonymous_${l - 1}`;
   }
 
-  //
-  // The values in the evaluation context are all the non-constant symbols
-  // in the scope.
-  //
-  const values: { [id: string]: Expression | undefined } = {};
-  for (const [id, def] of scope.bindings.entries()) {
-    if (isValueDef(def) && !def.value.isConstant) values[id] = def.value.value;
-  }
-
   ce._evalContextStack.push({
     lexicalScope: scope,
     name,
     assumptions: new ExpressionMap(ce.context?.assumptions ?? []),
-    values,
   });
 }
 
@@ -81,12 +64,11 @@ export function inScope<T>(
 ): T {
   if (!scope) return f();
 
-  // Push a dummy context (@todo: we could just have a lexical scope chain instead)
+  // Push a temporary eval context to switch to the given scope
   ce._evalContextStack.push({
     lexicalScope: scope,
     name: '',
-    assumptions: new ExpressionMap([]),
-    values: {},
+    assumptions: new ExpressionMap(ce.context?.assumptions ?? []),
   });
 
   try {
@@ -140,32 +122,17 @@ export function printStack(
     }
 
     //
-    // Display values
+    // Display bindings
     //
 
-    const bindings = Object.entries(context.values);
-
-    if (bindings.length + context.lexicalScope.bindings.size === 0) {
+    if (context.lexicalScope.bindings.size === 0) {
       console.groupEnd();
       depth += 1;
       continue;
     }
 
-    for (const [k, b] of bindings) {
-      if (context.lexicalScope.bindings.has(k)) {
-        console.info(defToString(k, context.lexicalScope.bindings.get(k)!, b));
-      } else if (b === undefined) {
-        console.info(`${CYAN}${k}${RESET}: ${GREY}undefined${RESET}`);
-      } else {
-        console.info(`${CYAN}${k}${RESET}: ${GREY}${b.toString()}${RESET}`);
-      }
-    }
-
-    //
-    // Display the lexical scope entries without a matching value
-    //
     for (const [k, def] of context.lexicalScope.bindings)
-      if (!(k in context.values)) console.info(defToString(k, def));
+      console.info(defToString(k, def));
 
     console.groupEnd();
 
@@ -174,41 +141,8 @@ export function printStack(
   }
 }
 
-export function lookupContext(
-  ce: IComputeEngine,
-  id: MathJsonSymbol
-): EvalContext | undefined {
-  if (id.length === 0 || !isValidSymbol(id))
-    throw Error(`Invalid symbol "${id}": ${validateSymbol(id)}}`);
 
-  // Iterate over all the frames, starting with the most recent
-  // and going back to the root frame
-  const l = ce._evalContextStack.length - 1;
-  if (l < 0) return undefined;
-  for (let j = l; j >= 0; j--) {
-    const context = ce._evalContextStack[j];
-    if (context.lexicalScope.bindings.has(id)) return context;
-  }
-
-  return undefined;
-}
-
-export function swapContext(ce: IComputeEngine, context: EvalContext): void {
-  while (
-    ce._evalContextStack.length > 0 &&
-    ce._evalContextStack[ce._evalContextStack.length - 1] !== context
-  )
-    ce._evalContextStack.pop();
-
-  // This is unlikely to happen, but just in case...
-  if (ce._evalContextStack.length === 0) ce._evalContextStack = [context];
-}
-
-function defToString(
-  name: string,
-  def: BoxedDefinition,
-  v?: Expression
-): string {
+function defToString(name: string, def: BoxedDefinition): string {
   let result = '';
   if (isValueDef(def)) {
     const tags: string[] = [];
@@ -225,7 +159,6 @@ function defToString(
       result += ` const ${def.value.type.toString()}`;
       if (def.value.value !== undefined)
         result += ` = ${def.value.value?.toString()}`;
-      console.assert(v === undefined);
     } else result += ` ${def.value.type.toString()}`;
   } else if (isOperatorDef(def)) {
     const tags: string[] = [];
@@ -249,16 +182,6 @@ function defToString(
     const allDetails = details.map((x) => `${GREY}${x}${RESET}`).join(' ');
     if (allDetails.length > 0) result += `\n   \u2514 ${allDetails}`;
   } else result = 'unknown';
-
-  if (v) {
-    if (!v.isValid) {
-      result += ` = ${INVERSE_RED}${v.toString()}${RESET} (not valid)`;
-    } else if (!v.isCanonical) {
-      result += ` = ${YELLOW}${v.toString()}${RESET} (not canonical)`;
-    } else {
-      result += ` = ${GREY}${v.toString()}${RESET}`;
-    }
-  }
 
   return result;
 }

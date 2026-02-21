@@ -373,22 +373,8 @@ export interface IComputeEngine extends IBigNum {
     value: Expression | boolean | number | undefined
   ): void;
 
-  /**
-   * Set a value directly in the current context's values map.
-   * Used for assumptions so values are properly scoped.
-   * @internal */
-  _setCurrentContextValue(
-    id: MathJsonSymbol,
-    value: Expression | boolean | number | undefined
-  ): void;
-
   /** A list of the function calls to the current evaluation context */
   trace: ReadonlyArray<string>;
-
-  lookupContext(id: MathJsonSymbol): undefined | EvalContext;
-
-  /** @internal */
-  _swapContext(context: EvalContext): void;
 
   lookupDefinition(id: MathJsonSymbol): undefined | BoxedDefinition;
 

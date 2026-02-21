@@ -22,9 +22,12 @@ import { ConfigurationChangeListener } from '../../common/configuration-change';
 /**
  * ### THEORY OF OPERATIONS
  *
- * - The value in the definition is the initial value of the symbol when
- *   entering an evaluation context. Unless it is a constant, it is not the
- *   value of the symbol itself, which is stored in the evaluation context.
+ * - The `_value` field IS the current value of the symbol. There is no
+ *   separate "evaluation context" values map — the definition object is the
+ *   single source of truth.
+ *
+ * - The `set value()` setter increments `ce._generation` so that cached
+ *   results depending on this symbol are invalidated.
  *
  * - The value or type of a constant cannot be changed.
  *
@@ -197,6 +200,13 @@ export class _BoxedValueDefinition
     if (this._value === null)
       this._value = dynamicValue(this._engine, this._defValue);
     return this._value;
+  }
+
+  set value(v: Expression | undefined) {
+    if (this._isConstant)
+      throw new Error(`Cannot set value of constant "${this.name}"`);
+    this._value = v;
+    this._engine._generation += 1;
   }
 
   get type(): BoxedType {

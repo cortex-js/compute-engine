@@ -127,13 +127,16 @@ function assumeEquality(proposition: Expression): AssumeResult {
     if (def.value.type && !val.type.matches(def.value.type))
       if (!def.value.inferredType) return 'contradiction';
 
-    // Set the value for the symbol with an existing definition.
-    // Use _setCurrentContextValue so the value is scoped to the current context
-    // and will be automatically removed when the scope is popped.
-    ce._setCurrentContextValue(lhs, val);
-    // If the type was inferred, update it based on the value.
-    // Use inferTypeFromValue to promote specific types (e.g., finite_integer -> integer)
-    if (def.value.inferredType) def.value.type = inferTypeFromValue(ce, val);
+    // Set the value for the symbol, scoped to the current context so the
+    // assumed value is automatically reverted when this scope is popped.
+    // If lhs is declared in a parent scope, shadow it in the current scope
+    // so we don't permanently mutate the parent definition.
+    if (!ce.context.lexicalScope.bindings.has(lhs)) {
+      ce.declare(lhs, { value: val });
+    } else {
+      ce._setSymbolValue(lhs, val);
+      if (def.value.inferredType) def.value.type = inferTypeFromValue(ce, val);
+    }
     return 'ok';
   }
 
@@ -159,13 +162,14 @@ function assumeEquality(proposition: Expression): AssumeResult {
       !sols.every((sol) => !sol.type || val.type.matches(sol.type))
     )
       return 'contradiction';
-    // Set the value for the symbol with an existing definition.
-    // Use _setCurrentContextValue so the value is scoped to the current context
-    // and will be automatically removed when the scope is popped.
-    ce._setCurrentContextValue(lhs, val);
-    // If the type was inferred, update it based on the value.
-    // Use inferTypeFromValue to promote specific types (e.g., finite_integer -> integer)
-    if (def.value.inferredType) def.value.type = inferTypeFromValue(ce, val);
+    // Set the value for the symbol, scoped to the current context so the
+    // assumed value is automatically reverted when this scope is popped.
+    if (!ce.context.lexicalScope.bindings.has(lhs)) {
+      ce.declare(lhs, { value: val });
+    } else {
+      ce._setSymbolValue(lhs, val);
+      if (def.value.inferredType) def.value.type = inferTypeFromValue(ce, val);
+    }
     return 'ok';
   }
 

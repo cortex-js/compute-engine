@@ -1,5 +1,30 @@
 ### [Unreleased]
 
+- **True lexical scoping for `Function` expressions**: Functions now capture
+  their defining scope at canonicalization time and create a fresh scope per
+  call, with the defining scope as parent. Free variables resolve through the
+  scope chain where the function was defined, not where it is called. This
+  matches JavaScript/Python closure semantics. Previously, the engine used
+  dynamic scoping where the calling scope could shadow defining-scope variables.
+
+- **BigOp scope pollution fixed**: `Sum`, `Product`, and other big operators no
+  longer leak free variables (e.g., `M`, `x`) into their local scope. Only the
+  index variable is declared in the BigOp scope; other variables are
+  auto-declared in the enclosing scope via the new `noAutoDeclare` mechanism.
+
+- **Closure capture for nested functions**: When a function returns another
+  function, the inner function correctly captures outer parameter values.
+  Multi-level nesting (f returning g returning h) works correctly.
+
+- **`EvalContext.values` removed**: Symbol values now live exclusively in
+  `BoxedValueDefinition.value`. The per-frame shadow map that was the root
+  cause of dynamic scoping has been eliminated. The `withArguments` evaluation
+  option has also been removed.
+
+- **`forget()` now resets values set by `assume()`**: When `assume('x = 5')`
+  auto-declares `x` with a value, `forget('x')` now correctly resets `x`'s
+  value to `undefined` (in addition to clearing assumptions).
+
 - **New `Mandelbrot` and `Julia` functions**: Two new built-in operators for
   escape-time fractal computation.
 
@@ -53,6 +78,11 @@
   expands both sides (distributing products, multinomial theorem, etc.) before
   falling back to numeric evaluation. This catches equivalences like
   `(x+1)^2` vs `x^2+2x+1` even with free variables.
+
+- **`.is()` is now symmetric**: Previously, `expr.is(num)` and `num.is(expr)`
+  could return different results because `BoxedNumber.is()` only performed
+  structural comparison without numeric evaluation fallback. Now
+  `a.is(b) === b.is(a)` for all expression types.
 
 - **Parse `\dfrac`, `\tfrac`, and `\cfrac` as fractions**: These LaTeX fraction
   variants are now recognized by the parser and produce the same MathJSON as
