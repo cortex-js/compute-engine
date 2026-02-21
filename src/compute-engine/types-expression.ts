@@ -128,8 +128,7 @@ type OperatorDefinitionFlags = {
 };
 
 interface BoxedOperatorDefinition
-  extends BoxedBaseDefinition,
-    OperatorDefinitionFlags {
+  extends BoxedBaseDefinition, OperatorDefinitionFlags {
   complexity: number;
   inferredSignature: boolean;
   signature: BoxedType;
@@ -168,7 +167,7 @@ type BoxedDefinition =
   | { operator: BoxedOperatorDefinition };
 
 type Scope = KernelScope<BoxedDefinition>;
-type EvaluateOptions = KernelEvaluateOptions<Expression>;
+type EvaluateOptions = KernelEvaluateOptions;
 type Rule = KernelRule<Expression, ExpressionInput, ExpressionComputeEngine>;
 type BoxedRule = KernelBoxedRule<Expression, ExpressionComputeEngine>;
 type BoxedRuleSet = KernelBoxedRuleSet<Expression, ExpressionComputeEngine>;
@@ -232,7 +231,7 @@ export interface TensorData<DT extends TensorDataType> {
 
 /** @category Tensors */
 export interface TensorField<
-  T extends number | Complex | Expression | boolean | string = number
+  T extends number | Complex | Expression | boolean | string = number,
 > {
   readonly one: T;
   readonly zero: T;
@@ -1619,7 +1618,7 @@ export interface Expression {
           [
             { re: number; im: number },
             { num: number; denom: number },
-            Expression
+            Expression,
           ]
         >
       | number[]

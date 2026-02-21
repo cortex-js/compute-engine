@@ -26,7 +26,7 @@ import type {
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface ComputeEngine {}
 
-type EvaluateOptions = KernelEvaluateOptions<Expression>;
+type EvaluateOptions = KernelEvaluateOptions;
 type Rule = KernelRule<Expression, ExpressionInput, ComputeEngine>;
 type BoxedRule = KernelBoxedRule<Expression, ComputeEngine>;
 type BoxedRuleSet = KernelBoxedRuleSet<Expression, ComputeEngine>;
@@ -987,8 +987,7 @@ export type OperatorDefinitionFlags = {
  *
  */
 export interface BoxedOperatorDefinition
-  extends BoxedBaseDefinition,
-    OperatorDefinitionFlags {
+  extends BoxedBaseDefinition, OperatorDefinitionFlags {
   complexity: number;
 
   /** If true, the signature was inferred from usage and may be modified

@@ -28,7 +28,7 @@ export type { AssumeResult };
  *
  * @category Boxed Expression
  */
-export type EvaluateOptions = KernelEvaluateOptions<Expression>;
+export type EvaluateOptions = KernelEvaluateOptions;
 
 /**
  * Map-like interface keyed by boxed expressions.

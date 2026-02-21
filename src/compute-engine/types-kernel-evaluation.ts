@@ -201,7 +201,7 @@ export type AssignValue<Expr = unknown, SemiExpr = unknown, CE = unknown> =
   | SemiExpr
   | ((
       args: ReadonlyArray<Expr>,
-      options: EvaluateOptions<Expr> & { engine: CE }
+      options: EvaluateOptions & { engine: CE }
     ) => Expr)
   | undefined;
 
