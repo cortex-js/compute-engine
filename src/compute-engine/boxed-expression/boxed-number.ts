@@ -610,27 +610,36 @@ export class BoxedNumber
     other: Expression | number | bigint | boolean | string,
     tolerance?: number
   ): boolean {
-    if (tolerance === undefined) return this.isSame(other);
+    if (this.isSame(other)) return true;
 
-    // With explicit tolerance, compare numerically
-    if (typeof other === 'number') {
-      return (
-        Math.abs(this.re - other) <= tolerance && Math.abs(this.im) <= tolerance
-      );
+    // Primitive with explicit tolerance: direct numeric comparison
+    if (tolerance !== undefined) {
+      if (typeof other === 'number') {
+        return (
+          Math.abs(this.re - other) <= tolerance &&
+          Math.abs(this.im) <= tolerance
+        );
+      }
+      if (typeof other === 'bigint') {
+        return (
+          Math.abs(this.re - Number(other)) <= tolerance &&
+          Math.abs(this.im) <= tolerance
+        );
+      }
     }
-    if (typeof other === 'bigint') {
-      return (
-        Math.abs(this.re - Number(other)) <= tolerance &&
-        Math.abs(this.im) <= tolerance
-      );
-    }
-    if (other instanceof _BoxedExpression && isNumber(other)) {
-      return (
-        Math.abs(this.re - other.re) <= tolerance &&
-        Math.abs(this.im - other.im) <= tolerance
-      );
-    }
-    return this.isSame(other);
+
+    // For primitive arguments without explicit tolerance, isSame is definitive
+    if (!(other instanceof _BoxedExpression)) return false;
+
+    // BoxedExpression: evaluate other side and compare numerically
+    if (other.freeVariables.length > 0) return false;
+    const nOther = other.N();
+    if (!isNumber(nOther)) return false;
+    const tol = tolerance ?? this.engine.tolerance;
+    return (
+      Math.abs(this.re - nOther.re) <= tol &&
+      Math.abs(this.im - nOther.im) <= tol
+    );
   }
 
   isSame(other: Expression | number | bigint | boolean | string): boolean {
