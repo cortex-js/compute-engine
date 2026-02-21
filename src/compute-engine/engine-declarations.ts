@@ -110,7 +110,6 @@ export function setSymbolValue(
   throw new Error(`Cannot assign a value to operator symbol "${id}"`);
 }
 
-
 export function declareType(
   ce: IComputeEngine,
   name: string,

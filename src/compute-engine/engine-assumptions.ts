@@ -317,7 +317,11 @@ export function forget(
     // scope via ce.declare(). forget() must undo that value so that
     // subsequent lookups return no value (evaluating x returns x, not 5).
     const scopeBinding = ce.context.lexicalScope.bindings.get(symbol);
-    if (scopeBinding && isValueDef(scopeBinding) && !scopeBinding.value.isConstant) {
+    if (
+      scopeBinding &&
+      isValueDef(scopeBinding) &&
+      !scopeBinding.value.isConstant
+    ) {
       scopeBinding.value.value = undefined;
     }
   }

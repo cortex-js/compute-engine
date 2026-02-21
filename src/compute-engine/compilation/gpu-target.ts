@@ -499,13 +499,17 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     if (c === null || maxIter === null)
       throw new Error('Mandelbrot: missing arguments');
     const intCast = target?.language === 'wgsl' ? 'i32' : 'int';
-    return `_fractal_mandelbrot(${compile(c)}, ${intCast}(${compile(maxIter)}))`;
+    return `_fractal_mandelbrot(${compile(c)}, ${intCast}(${compile(
+      maxIter
+    )}))`;
   },
   Julia: ([z, c, maxIter], compile, target) => {
     if (z === null || c === null || maxIter === null)
       throw new Error('Julia: missing arguments');
     const intCast = target?.language === 'wgsl' ? 'i32' : 'int';
-    return `_fractal_julia(${compile(z)}, ${compile(c)}, ${intCast}(${compile(maxIter)}))`;
+    return `_fractal_julia(${compile(z)}, ${compile(c)}, ${intCast}(${compile(
+      maxIter
+    )}))`;
   },
 
   // Vector/Matrix operations
@@ -693,7 +697,6 @@ fn _fractal_julia(z_in: vec2f, c: vec2f, maxIter: i32) -> f32 {
   return 1.0;
 }
 `;
-
 
 /**
  * GPU color space conversion preamble (GLSL syntax).

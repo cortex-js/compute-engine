@@ -346,7 +346,10 @@ export function canonicalIndexingSet(expr: Expression): Expression | undefined {
 
   if (!isSymbol(index)) return undefined;
 
-  if (index.symbol !== 'Nothing' && !ce.context.lexicalScope.bindings.has(index.symbol))
+  if (
+    index.symbol !== 'Nothing' &&
+    !ce.context.lexicalScope.bindings.has(index.symbol)
+  )
     ce.declare(index.symbol, 'integer');
 
   if (upper && lower) return ce.function('Limits', [index, lower, upper]);
@@ -365,8 +368,10 @@ export function canonicalBigop(
 
   // Always ensure we have a concrete scope object so we can set noAutoDeclare
   // and pass it to ce._fn at the end (for localScope tracking).
-  const bigOpScope: Scope =
-    scope ?? { parent: ce.context.lexicalScope, bindings: new Map() };
+  const bigOpScope: Scope = scope ?? {
+    parent: ce.context.lexicalScope,
+    bindings: new Map(),
+  };
 
   // Set noAutoDeclare so auto-declarations of free variables (M, x) in the
   // bounds and body are promoted to the enclosing scope instead of the BigOp

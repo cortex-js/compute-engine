@@ -57,7 +57,7 @@ export type AssumeResult =
  *
  * @category Boxed Expression
  */
-export type EvaluateOptions<Expr = unknown> = {
+export type EvaluateOptions = {
   /**
    * If `true`, the evaluation returns a numeric approximation of the expression,
    * when possible.
@@ -85,7 +85,6 @@ export type EvaluateOptions<Expr = unknown> = {
 
   /** Cancellation signal for long-running evaluations. */
   signal: AbortSignal;
-
 };
 
 /**

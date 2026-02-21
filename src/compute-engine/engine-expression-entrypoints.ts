@@ -104,8 +104,13 @@ export function createSymbolExpression(
   // Auto-declare: if current scope has noAutoDeclare, redirect to parent scope
   // so free variables in BigOp bodies land in the enclosing scope, not the BigOp scope.
   let autoScope = engine.context.lexicalScope;
-  while (autoScope.noAutoDeclare && autoScope.parent) autoScope = autoScope.parent;
-  def = engine._declareSymbolValue(name, { type: 'unknown', inferred: true }, autoScope);
+  while (autoScope.noAutoDeclare && autoScope.parent)
+    autoScope = autoScope.parent;
+  def = engine._declareSymbolValue(
+    name,
+    { type: 'unknown', inferred: true },
+    autoScope
+  );
   return new BoxedSymbol(engine, name, { metadata, def });
 }
 

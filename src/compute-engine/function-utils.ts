@@ -470,7 +470,8 @@ function makeLambda(
 
       // Evaluate body with known args in a fresh scope
       const evaluatedKnownArgs = args.map((a) => a.evaluate());
-      const capturedScope = bodyFn.localScope!.parent ?? ce.context.lexicalScope;
+      const capturedScope =
+        bodyFn.localScope!.parent ?? ce.context.lexicalScope;
       const freshScope: Scope = {
         parent: capturedScope,
         bindings: new Map(),
@@ -479,7 +480,11 @@ function makeLambda(
         const p = params[i];
         const name = isSymbol(p) ? p.symbol : '';
         if (name)
-          ce.declare(name, { value: evaluatedKnownArgs[i], inferred: true }, freshScope);
+          ce.declare(
+            name,
+            { value: evaluatedKnownArgs[i], inferred: true },
+            freshScope
+          );
       }
 
       // Re-parent body scope to chain through freshScope, so nested
@@ -490,9 +495,9 @@ function makeLambda(
       const bodyScope = bodyFn.localScope!;
       const savedParent = bodyScope.parent;
       bodyScope.parent = freshScope;
-      const curryParamNames = params.slice(0, args.length).map((p) =>
-        isSymbol(p) ? p.symbol : ''
-      );
+      const curryParamNames = params
+        .slice(0, args.length)
+        .map((p) => (isSymbol(p) ? p.symbol : ''));
       const hiddenBindings = hideBodyScopeParams(bodyScope, curryParamNames);
 
       ce.pushScope(freshScope);
@@ -530,7 +535,11 @@ function makeLambda(
     const paramNames = params.map((p) => (isSymbol(p) ? p.symbol : ''));
     for (let i = 0; i < params.length; i++) {
       if (paramNames[i])
-        ce.declare(paramNames[i], { value: evaluatedArgs[i], inferred: true }, freshScope);
+        ce.declare(
+          paramNames[i],
+          { value: evaluatedArgs[i], inferred: true },
+          freshScope
+        );
     }
 
     // Re-parent body scope to chain through freshScope, so nested

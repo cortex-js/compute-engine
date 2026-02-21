@@ -1,16 +1,6 @@
-import {
-  BLUE,
-  BOLD,
-  CYAN,
-  GREY,
-  RESET,
-} from '../common/ansi-codes';
+import { BLUE, BOLD, CYAN, GREY, RESET } from '../common/ansi-codes';
 
-import type {
-  BoxedDefinition,
-  IComputeEngine,
-  Scope,
-} from './global-types';
+import type { BoxedDefinition, IComputeEngine, Scope } from './global-types';
 
 import { ExpressionMap } from './boxed-expression/expression-map';
 import { isValueDef, isOperatorDef } from './boxed-expression/utils';
@@ -140,7 +130,6 @@ export function printStack(
     depth += 1;
   }
 }
-
 
 function defToString(name: string, def: BoxedDefinition): string {
   let result = '';
