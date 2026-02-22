@@ -62,6 +62,14 @@ export class GLSLTarget extends GPUShaderTarget {
       .map(([name, type]) => `${type} ${name}`)
       .join(', ');
 
+    if (body.includes('\n')) {
+      // Block — body already has `return` on the last line
+      const indented = body
+        .split('\n')
+        .map((l) => `  ${l}`)
+        .join('\n');
+      return `${returnType} ${functionName}(${params}) {\n${indented};\n}`;
+    }
     return `${returnType} ${functionName}(${params}) {
   return ${body};
 }`;

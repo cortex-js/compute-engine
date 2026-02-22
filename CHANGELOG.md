@@ -1,10 +1,24 @@
+### [Unreleased]
+
+- **Fixed GLSL/WGSL block expression compilation**: Block expressions (produced
+  by `\coloneq` / semicolon blocks) now emit valid GPU shader code instead of
+  JavaScript syntax. Variable declarations use `float x` (GLSL) or `var x: f32`
+  (WGSL) instead of `let x`, and blocks are emitted as plain statements instead
+  of JavaScript IIFEs. `compileFunction` correctly formats multi-statement
+  bodies.
+
+- **Fixed `\;` in `\text{where}` clauses**: Visual spacing commands like `\;`,
+  `\,`, `\quad`, etc. between comma-separated bindings in where-clauses are now
+  correctly skipped instead of being parsed as `HorizontalSpacing` expressions
+  wrapped in `InvisibleOperator`.
+
 ### 0.53.0 _2026-02-21_
 
 #### Runtime and Scoping
 
 - **True lexical scoping for `Function` expressions**: Functions now capture
-  their defining scope and resolve free variables from that scope chain (not
-  the call site), with a fresh child scope on each call.
+  their defining scope and resolve free variables from that scope chain (not the
+  call site), with a fresh child scope on each call.
 
 - **BigOp scope pollution fixed**: `Sum`, `Product`, and other big operators now
   only declare their index variable locally. Other names are declared in the
@@ -58,11 +72,10 @@
 #### Fractals
 
 - **New `Mandelbrot` and `Julia` functions**: Added built-in escape-time fractal
-  operators.
-  `Mandelbrot(c, maxIter)` and `Julia(z, c, maxIter)` return a smooth,
-  normalized value in `[0, 1]` (`1` for interior points, fractional for
-  escaping points via `log₂(log₂(|z|²))` smoothing).
-  Both evaluate in JavaScript and compile to GLSL/WGSL.
+  operators. `Mandelbrot(c, maxIter)` and `Julia(z, c, maxIter)` return a
+  smooth, normalized value in `[0, 1]` (`1` for interior points, fractional for
+  escaping points via `log₂(log₂(|z|²))` smoothing). Both evaluate in JavaScript
+  and compile to GLSL/WGSL.
 
 ### 0.52.1 _2026-02-19_
 

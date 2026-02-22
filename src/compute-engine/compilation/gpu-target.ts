@@ -1207,6 +1207,14 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       indent: 0,
       ws: (s?: string) => s ?? '',
       preamble: '',
+      declare: (name) =>
+        this.languageId === 'wgsl' ? `var ${name}: f32` : `float ${name}`,
+      block: (stmts) => {
+        if (stmts.length === 0) return '';
+        const last = stmts.length - 1;
+        stmts[last] = `return ${stmts[last]}`;
+        return stmts.join(';\n');
+      },
       ...options,
     };
   }

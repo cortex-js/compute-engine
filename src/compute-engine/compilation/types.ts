@@ -63,6 +63,14 @@ export interface CompileTarget<Expr = unknown> {
   /** Current indentation level */
   indent: number;
 
+  /** Format a variable declaration. Default: `let ${name}` */
+  declare?: (name: string) => string;
+
+  /** Format a block expression. Receives compiled statements; the last
+   *  element is the block's return value (without `return` prefix).
+   *  Default: JavaScript IIFE. */
+  block?: (statements: string[]) => string;
+
   /** Target language identifier (for debugging/logging) */
   language?: string;
 }

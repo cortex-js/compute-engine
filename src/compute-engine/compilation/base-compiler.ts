@@ -178,8 +178,10 @@ export class BaseCompiler {
       )})`;
     }
 
-    if (h === 'Declare')
-      return `let ${isSymbol(args[0]) ? args[0].symbol : '_'}`;
+    if (h === 'Declare') {
+      const name = isSymbol(args[0]) ? args[0].symbol : '_';
+      return target.declare ? target.declare(name) : `let ${name}`;
+    }
     if (h === 'Assign')
       return `${
         isSymbol(args[0]) ? args[0].symbol : '_'
@@ -309,7 +311,9 @@ export class BaseCompiler {
 
     if (result.length === 0) return '';
 
-    // Add a return statement to the last expression
+    if (target.block) return target.block(result);
+
+    // Default: JavaScript IIFE
     result[result.length - 1] = `return ${result[result.length - 1]}`;
     return `(() => {${target.ws('\n')}${result.join(
       `;${target.ws('\n')}`

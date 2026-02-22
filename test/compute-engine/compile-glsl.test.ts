@@ -257,6 +257,75 @@ describe('GLSL COMPILATION', () => {
     });
   });
 
+  describe('Block Expressions', () => {
+    it('should compile a simple block with local variable', () => {
+      const expr = ce.box([
+        'Block',
+        ['Declare', 'a'],
+        ['Assign', 'a', ['Cos', 't']],
+        ['Add', 'a', 1],
+      ]);
+      const code = glsl.compile(expr).code;
+      expect(code).toMatchInlineSnapshot(`
+        float a;
+        a = cos(t);
+        return a + 1.0
+      `);
+    });
+
+    it('should compile a block with multiple locals', () => {
+      const expr = ce.box([
+        'Block',
+        ['Declare', 'a'],
+        ['Declare', 'b'],
+        ['Assign', 'a', ['Sin', 'x']],
+        ['Assign', 'b', ['Cos', 'x']],
+        ['Add', 'a', 'b'],
+      ]);
+      const code = glsl.compile(expr).code;
+      expect(code).toMatchInlineSnapshot(`
+        float a;
+        float b;
+        a = sin(x);
+        b = cos(x);
+        return a + b
+      `);
+    });
+
+    it('should compile a block function with valid GLSL body', () => {
+      const expr = ce.box([
+        'Block',
+        ['Declare', 'a'],
+        ['Assign', 'a', ['Cos', 't']],
+        ['Add', 'a', 1],
+      ]);
+      const code = glsl.compileFunction(expr, 'compute', 'float', [
+        ['t', 'float'],
+      ]);
+      expect(code).toMatchInlineSnapshot(`
+        float compute(float t) {
+          float a;
+          a = cos(t);
+          return a + 1.0;
+        }
+      `);
+    });
+
+    it('should not use IIFE or let in GLSL blocks', () => {
+      const expr = ce.box([
+        'Block',
+        ['Declare', 'tmp'],
+        ['Assign', 'tmp', 'x'],
+        ['Multiply', 'tmp', 'tmp'],
+      ]);
+      const code = glsl.compile(expr).code;
+      expect(code).not.toContain('let ');
+      expect(code).not.toContain('(() =>');
+      expect(code).not.toContain('})()');
+      expect(code).toContain('float tmp');
+    });
+  });
+
   describe('Relational and Logical Operators', () => {
     it('should compile comparisons', () => {
       const expr = ce.parse('x > 0.5');

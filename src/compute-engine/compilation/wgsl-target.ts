@@ -94,6 +94,14 @@ export class WGSLTarget extends GPUShaderTarget {
       .map(([name, type]) => `${name}: ${toWGSLType(type)}`)
       .join(', ');
 
+    if (body.includes('\n')) {
+      // Block — body already has `return` on the last line
+      const indented = body
+        .split('\n')
+        .map((l) => `  ${l}`)
+        .join('\n');
+      return `fn ${functionName}(${params}) -> ${toWGSLType(returnType)} {\n${indented};\n}`;
+    }
     return `fn ${functionName}(${params}) -> ${toWGSLType(returnType)} {
   return ${body};
 }`;

@@ -47,6 +47,21 @@ describe('WHERE - PARSING', () => {
     );
   });
 
+  test('Visual spacing (\\;) between comma-separated bindings', () => {
+    expect(
+      ce.parse('x + y \\text{ where } a \\coloneq 1,\\; b \\coloneq 2')
+    ).toMatchInlineSnapshot(`
+      [
+        "Block",
+        ["Declare", "a"],
+        ["Assign", "a", 1],
+        ["Declare", "b"],
+        ["Assign", "b", 2],
+        ["Add", "x", "y"]
+      ]
+    `);
+  });
+
   test('Where with complex body', () => {
     expect(
       ce.parse('x^2 + y^2 \\text{ where } x \\coloneq 3, y \\coloneq 4')

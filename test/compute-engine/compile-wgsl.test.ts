@@ -313,6 +313,75 @@ describe('WGSL COMPILATION', () => {
     });
   });
 
+  describe('Block Expressions', () => {
+    it('should compile a simple block with local variable', () => {
+      const expr = ce.box([
+        'Block',
+        ['Declare', 'a'],
+        ['Assign', 'a', ['Cos', 't']],
+        ['Add', 'a', 1],
+      ]);
+      const code = wgsl.compile(expr).code;
+      expect(code).toMatchInlineSnapshot(`
+        var a: f32;
+        a = cos(t);
+        return a + 1.0
+      `);
+    });
+
+    it('should compile a block with multiple locals', () => {
+      const expr = ce.box([
+        'Block',
+        ['Declare', 'a'],
+        ['Declare', 'b'],
+        ['Assign', 'a', ['Sin', 'x']],
+        ['Assign', 'b', ['Cos', 'x']],
+        ['Add', 'a', 'b'],
+      ]);
+      const code = wgsl.compile(expr).code;
+      expect(code).toMatchInlineSnapshot(`
+        var a: f32;
+        var b: f32;
+        a = sin(x);
+        b = cos(x);
+        return a + b
+      `);
+    });
+
+    it('should compile a block function with valid WGSL body', () => {
+      const expr = ce.box([
+        'Block',
+        ['Declare', 'a'],
+        ['Assign', 'a', ['Cos', 't']],
+        ['Add', 'a', 1],
+      ]);
+      const code = wgsl.compileFunction(expr, 'compute', 'float', [
+        ['t', 'float'],
+      ]);
+      expect(code).toMatchInlineSnapshot(`
+        fn compute(t: f32) -> f32 {
+          var a: f32;
+          a = cos(t);
+          return a + 1.0;
+        }
+      `);
+    });
+
+    it('should not use IIFE or let in WGSL blocks', () => {
+      const expr = ce.box([
+        'Block',
+        ['Declare', 'tmp'],
+        ['Assign', 'tmp', 'x'],
+        ['Multiply', 'tmp', 'tmp'],
+      ]);
+      const code = wgsl.compile(expr).code;
+      expect(code).not.toContain('let ');
+      expect(code).not.toContain('(() =>');
+      expect(code).not.toContain('})()');
+      expect(code).toContain('var tmp: f32');
+    });
+  });
+
   describe('Relational and Logical Operators', () => {
     it('should compile comparisons', () => {
       const expr = ce.parse('x > 0.5');

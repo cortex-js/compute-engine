@@ -2220,9 +2220,9 @@ function parseWhereExpression(
     condition: (p) => {
       // Check if the outer terminator says to stop
       if (until?.condition?.(p)) return true;
-      // Check for comma (skip spaces first)
+      // Check for comma (skip visual spaces like \; first)
       const saved = p.index;
-      p.skipSpace();
+      p.skipVisualSpace();
       const isComma = p.peek === ',';
       p.index = saved;
       return isComma;
@@ -2231,11 +2231,11 @@ function parseWhereExpression(
 
   const bindings: MathJsonExpression[] = [];
   do {
-    parser.skipSpace();
+    parser.skipVisualSpace();
     const binding = parser.parseExpression(bindingTerminator);
     if (!binding) break;
     bindings.push(binding);
-    parser.skipSpace();
+    parser.skipVisualSpace();
   } while (parser.match(','));
 
   if (bindings.length === 0) return null;
