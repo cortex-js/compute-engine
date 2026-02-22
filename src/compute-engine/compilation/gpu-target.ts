@@ -39,6 +39,114 @@ function gpuVec2(target?: CompileTarget<Expression>): string {
   return target?.language === 'wgsl' ? 'vec2f' : 'vec2';
 }
 
+/** Maximum range for inline unrolling of Sum/Product loops in GPU targets. */
+const GPU_UNROLL_LIMIT = 100;
+
+/**
+ * Compile a Sum or Product expression for GPU targets.
+ *
+ * Two compilation strategies:
+ * - **Unrolled** (constant bounds, range ≤ GPU_UNROLL_LIMIT): pure inline
+ *   expression with no statements, usable as a subexpression.
+ * - **For-loop** (large or symbolic bounds): multi-line statement block
+ *   ending with `return <acc>`, suitable for `compileFunction`.
+ *
+ * Complex-valued bodies are not supported (would require vec2 accumulation
+ * with complex preamble helpers) and throw at compile time.
+ */
+function compileGPUSumProduct(
+  kind: 'Sum' | 'Product',
+  args: ReadonlyArray<Expression>,
+  _compile: (expr: Expression) => string,
+  target: CompileTarget<Expression>
+): string {
+  if (!args[0]) throw new Error(`${kind}: no body`);
+  if (!args[1]) throw new Error(`${kind}: no indexing set`);
+
+  if (BaseCompiler.isComplexValued(args[0]))
+    throw new Error(
+      `${kind}: complex-valued body not supported in GPU targets`
+    );
+
+  const limitsExpr = args[1];
+  if (!isFunction(limitsExpr, 'Limits'))
+    throw new Error(`${kind}: expected Limits indexing set`);
+
+  const limitsOps = limitsExpr.ops;
+  const index = isSymbol(limitsOps[0]) ? limitsOps[0].symbol : '_';
+  const lowerRe = limitsOps[1].re;
+  const upperRe = limitsOps[2].re;
+  const lowerNum =
+    !isNaN(lowerRe) && Number.isFinite(lowerRe)
+      ? Math.floor(lowerRe)
+      : undefined;
+  const upperNum =
+    !isNaN(upperRe) && Number.isFinite(upperRe)
+      ? Math.floor(upperRe)
+      : undefined;
+
+  const isSum = kind === 'Sum';
+  const op = isSum ? '+' : '*';
+  const identity = isSum ? '0.0' : '1.0';
+  const isWGSL = target.language === 'wgsl';
+  const bothConstant = lowerNum !== undefined && upperNum !== undefined;
+
+  if (bothConstant && lowerNum > upperNum) return identity;
+
+  // Unroll small constant ranges — pure inline expression
+  if (bothConstant && upperNum - lowerNum + 1 <= GPU_UNROLL_LIMIT) {
+    const terms: string[] = [];
+    for (let k = lowerNum; k <= upperNum; k++) {
+      const kStr = formatGPUNumber(k);
+      const innerTarget: CompileTarget<Expression> = {
+        ...target,
+        var: (id) => (id === index ? kStr : target.var(id)),
+      };
+      terms.push(`(${BaseCompiler.compile(args[0], innerTarget)})`);
+    }
+    return `(${terms.join(` ${op} `)})`;
+  }
+
+  // For-loop block (multi-line) — usable as compileFunction body
+  const acc = BaseCompiler.tempVar();
+  const floatType = isWGSL ? 'f32' : 'float';
+  const intType = isWGSL ? 'i32' : 'int';
+
+  const bodyTarget: CompileTarget<Expression> = {
+    ...target,
+    var: (id) =>
+      id === index
+        ? isWGSL
+          ? `f32(${index})`
+          : `float(${index})`
+        : target.var(id),
+  };
+  const body = BaseCompiler.compile(args[0], bodyTarget);
+
+  const lowerStr =
+    lowerNum !== undefined
+      ? String(lowerNum)
+      : BaseCompiler.compile(limitsOps[1], target);
+  const upperStr =
+    upperNum !== undefined
+      ? String(upperNum)
+      : BaseCompiler.compile(limitsOps[2], target);
+
+  const accDecl = isWGSL ? `var ${acc}: ${floatType}` : `${floatType} ${acc}`;
+  const indexDecl = isWGSL
+    ? `var ${index}: ${intType}`
+    : `${intType} ${index}`;
+
+  const lines = [
+    `${accDecl} = ${identity};`,
+    `for (${indexDecl} = ${lowerStr}; ${index} <= ${upperStr}; ${index}++) {`,
+    `  ${acc} ${op}= ${body};`,
+    `}`,
+    `return ${acc}`,
+  ];
+  return lines.join('\n');
+}
+
 /**
  * GPU shader functions shared by GLSL and WGSL.
  *
@@ -443,6 +551,10 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     if (x === null) throw new Error('FresnelC: no argument');
     return `_gpu_fresnelC(${compile(x)})`;
   },
+  FresnelS: ([x], compile) => {
+    if (x === null) throw new Error('FresnelS: no argument');
+    return `_gpu_fresnelS(${compile(x)})`;
+  },
   BesselJ: ([n, x], compile, target) => {
     if (n === null || x === null) throw new Error('BesselJ: need two arguments');
     const intCast = target?.language === 'wgsl' ? 'i32' : 'int';
@@ -537,6 +649,57 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   Normalize: 'normalize',
   Reflect: 'reflect',
   Refract: 'refract',
+
+  // Sum/Product — unrolled or for-loop
+  Sum: (args, compile, target) =>
+    compileGPUSumProduct('Sum', args, compile, target),
+  Product: (args, compile, target) =>
+    compileGPUSumProduct('Product', args, compile, target),
+
+  // Loop — GPU for-loop (no IIFE, no let)
+  Loop: (args, _compile, target) => {
+    if (!args[0]) throw new Error('Loop: no body');
+    if (!args[1]) throw new Error('Loop: no indexing set');
+
+    const indexing = args[1];
+    if (!isFunction(indexing, 'Element'))
+      throw new Error('Loop: expected Element(index, Range(lo, hi))');
+
+    const indexExpr = indexing.ops[0];
+    const rangeExpr = indexing.ops[1];
+
+    if (!isSymbol(indexExpr))
+      throw new Error('Loop: index must be a symbol');
+    if (!isFunction(rangeExpr, 'Range'))
+      throw new Error('Loop: expected Range(lo, hi)');
+
+    const index = indexExpr.symbol;
+    const lower = Math.floor(rangeExpr.ops[0].re);
+    const upper = Math.floor(rangeExpr.ops[1].re);
+
+    if (!Number.isFinite(lower) || !Number.isFinite(upper))
+      throw new Error('Loop: bounds must be finite numbers');
+
+    const isWGSL = target.language === 'wgsl';
+    const intType = isWGSL ? 'i32' : 'int';
+
+    const bodyCode = BaseCompiler.compile(args[0], {
+      ...target,
+      var: (id) => (id === index ? index : target.var(id)),
+    });
+
+    const indexDecl = isWGSL
+      ? `var ${index}: ${intType}`
+      : `${intType} ${index}`;
+    return `for (${indexDecl} = ${lower}; ${index} <= ${upper}; ${index}++) {\n  ${bodyCode};\n}`;
+  },
+
+  // Function (lambda) — not supported in GPU
+  Function: () => {
+    throw new Error(
+      'Anonymous functions (Function) are not supported in GPU targets'
+    );
+  },
 };
 
 /**
@@ -705,19 +868,37 @@ fn _gpu_sinc(x: f32) -> f32 {
 `;
 
 /**
- * GPU Fresnel cosine integral preamble (GLSL syntax).
- *
- * C(x) = integral from 0 to x of cos(pi*t^2/2) dt.
- * Uses rational Chebyshev approximation (Cephes/scipy) with three regions:
- * |x|<1.6, 1.6<=|x|<36, |x|>=36.
+ * GPU Horner polynomial evaluation helper (GLSL syntax).
+ * Shared by FresnelC and FresnelS preambles.
  */
-export const GPU_FRESNELC_PREAMBLE_GLSL = `
+export const GPU_POLEVL_PREAMBLE_GLSL = `
 float _gpu_polevl(float x, float c[12], int n) {
   float ans = c[0];
   for (int i = 1; i < n; i++) ans = ans * x + c[i];
   return ans;
 }
+`;
 
+/**
+ * GPU Horner polynomial evaluation helper (WGSL syntax).
+ */
+export const GPU_POLEVL_PREAMBLE_WGSL = `
+fn _gpu_polevl(x: f32, c: array<f32, 12>, n: i32) -> f32 {
+  var ans = c[0];
+  for (var i: i32 = 1; i < n; i++) { ans = ans * x + c[i]; }
+  return ans;
+}
+`;
+
+/**
+ * GPU Fresnel cosine integral preamble (GLSL syntax).
+ *
+ * C(x) = integral from 0 to x of cos(pi*t^2/2) dt.
+ * Uses rational Chebyshev approximation (Cephes/scipy) with three regions:
+ * |x|<1.6, 1.6<=|x|<36, |x|>=36.
+ * Requires _gpu_polevl preamble.
+ */
+export const GPU_FRESNELC_PREAMBLE_GLSL = `
 float _gpu_fresnelC(float x_in) {
   float sgn = x_in < 0.0 ? -1.0 : 1.0;
   float x = abs(x_in);
@@ -787,14 +968,9 @@ float _gpu_fresnelC(float x_in) {
 
 /**
  * GPU Fresnel cosine integral preamble (WGSL syntax).
+ * Requires _gpu_polevl preamble.
  */
 export const GPU_FRESNELC_PREAMBLE_WGSL = `
-fn _gpu_polevl(x: f32, c: array<f32, 12>, n: i32) -> f32 {
-  var ans = c[0];
-  for (var i: i32 = 1; i < n; i++) { ans = ans * x + c[i]; }
-  return ans;
-}
-
 fn _gpu_fresnelC(x_in: f32) -> f32 {
   let sgn: f32 = select(1.0, -1.0, x_in < 0.0);
   let x = abs(x_in);
@@ -859,6 +1035,156 @@ fn _gpu_fresnelC(x_in: f32) -> f32 {
     let c = cos(z);
     let s = sin(z);
     return sgn * (0.5 + (f * s - g * c) / (3.14159265358979 * x));
+  }
+
+  return sgn * 0.5;
+}
+`;
+
+/**
+ * GPU Fresnel sine integral preamble (GLSL syntax).
+ *
+ * S(x) = integral from 0 to x of sin(pi*t^2/2) dt.
+ * Uses rational Chebyshev approximation (Cephes/scipy) with three regions.
+ * Requires _gpu_polevl preamble.
+ */
+export const GPU_FRESNELS_PREAMBLE_GLSL = `
+float _gpu_fresnelS(float x_in) {
+  float sgn = x_in < 0.0 ? -1.0 : 1.0;
+  float x = abs(x_in);
+
+  if (x < 1.6) {
+    float x2 = x * x;
+    float t = x2 * x2;
+    float sn[6] = float[6](
+      -2.99181919401019853726e3, 7.08840045257738576863e5,
+      -6.29741486205862506537e7, 2.54890880573376359104e9,
+      -4.42979518059697779103e10, 3.18016297876567817986e11
+    );
+    float sd[7] = float[7](
+      1.0, 2.81376268889994315696e2, 4.55847810806532581675e4,
+      5.1734388877009640073e6, 4.19320245898111231129e8, 2.2441179564534092094e10,
+      6.07366389490084914091e11
+    );
+    return sgn * x * x2 * _gpu_polevl(t, sn, 6) / _gpu_polevl(t, sd, 7);
+  }
+
+  if (x < 36.0) {
+    float x2 = x * x;
+    float t = 3.14159265358979 * x2;
+    float u = 1.0 / (t * t);
+    float fn[10] = float[10](
+      4.21543555043677546506e-1, 1.43407919780758885261e-1,
+      1.15220955073585758835e-2, 3.450179397825740279e-4,
+      4.63613749287867322088e-6, 3.05568983790257605827e-8,
+      1.02304514164907233465e-10, 1.72010743268161828879e-13,
+      1.34283276233062758925e-16, 3.76329711269987889006e-20
+    );
+    float fd[11] = float[11](
+      1.0, 7.51586398353378947175e-1,
+      1.16888925859191382142e-1, 6.44051526508858611005e-3,
+      1.55934409164153020873e-4, 1.8462756734893054587e-6,
+      1.12699224763999035261e-8, 3.60140029589371370404e-11,
+      5.8875453362157841001e-14, 4.52001434074129701496e-17,
+      1.25443237090011264384e-20
+    );
+    float gn[11] = float[11](
+      5.04442073643383265887e-1, 1.97102833525523411709e-1,
+      1.87648584092575249293e-2, 6.84079380915393090172e-4,
+      1.15138826111884280931e-5, 9.82852443688422223854e-8,
+      4.45344415861750144738e-10, 1.08268041139020870318e-12,
+      1.37555460633261799868e-15, 8.36354435630677421531e-19,
+      1.86958710162783235106e-22
+    );
+    float gd[12] = float[12](
+      1.0, 1.47495759925128324529,
+      3.37748989120019970451e-1, 2.53603741420338795122e-2,
+      8.14679107184306179049e-4, 1.27545075667729118702e-5,
+      1.04314589657571990585e-7, 4.60680728515232032307e-10,
+      1.10273215066240270757e-12, 1.38796531259578871258e-15,
+      8.39158816283118707363e-19, 1.86958710162783236342e-22
+    );
+    float f = 1.0 - u * _gpu_polevl(u, fn, 10) / _gpu_polevl(u, fd, 11);
+    float g = (1.0 / t) * _gpu_polevl(u, gn, 11) / _gpu_polevl(u, gd, 12);
+    float z = 1.5707963267948966 * x2;
+    float c = cos(z);
+    float s = sin(z);
+    return sgn * (0.5 - (f * c + g * s) / (3.14159265358979 * x));
+  }
+
+  return sgn * 0.5;
+}
+`;
+
+/**
+ * GPU Fresnel sine integral preamble (WGSL syntax).
+ * Requires _gpu_polevl preamble.
+ */
+export const GPU_FRESNELS_PREAMBLE_WGSL = `
+fn _gpu_fresnelS(x_in: f32) -> f32 {
+  let sgn: f32 = select(1.0, -1.0, x_in < 0.0);
+  let x = abs(x_in);
+
+  if (x < 1.6) {
+    let x2 = x * x;
+    let t = x2 * x2;
+    var sn = array<f32, 12>(
+      -2.99181919401019853726e3, 7.08840045257738576863e5,
+      -6.29741486205862506537e7, 2.54890880573376359104e9,
+      -4.42979518059697779103e10, 3.18016297876567817986e11,
+      0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+    );
+    var sd = array<f32, 12>(
+      1.0, 2.81376268889994315696e2, 4.55847810806532581675e4,
+      5.1734388877009640073e6, 4.19320245898111231129e8, 2.2441179564534092094e10,
+      6.07366389490084914091e11,
+      0.0, 0.0, 0.0, 0.0, 0.0
+    );
+    return sgn * x * x2 * _gpu_polevl(t, sn, 6) / _gpu_polevl(t, sd, 7);
+  }
+
+  if (x < 36.0) {
+    let x2 = x * x;
+    let t = 3.14159265358979 * x2;
+    let u = 1.0 / (t * t);
+    var fn = array<f32, 12>(
+      4.21543555043677546506e-1, 1.43407919780758885261e-1,
+      1.15220955073585758835e-2, 3.450179397825740279e-4,
+      4.63613749287867322088e-6, 3.05568983790257605827e-8,
+      1.02304514164907233465e-10, 1.72010743268161828879e-13,
+      1.34283276233062758925e-16, 3.76329711269987889006e-20,
+      0.0, 0.0
+    );
+    var fd = array<f32, 12>(
+      1.0, 7.51586398353378947175e-1,
+      1.16888925859191382142e-1, 6.44051526508858611005e-3,
+      1.55934409164153020873e-4, 1.8462756734893054587e-6,
+      1.12699224763999035261e-8, 3.60140029589371370404e-11,
+      5.8875453362157841001e-14, 4.52001434074129701496e-17,
+      1.25443237090011264384e-20, 0.0
+    );
+    var gn = array<f32, 12>(
+      5.04442073643383265887e-1, 1.97102833525523411709e-1,
+      1.87648584092575249293e-2, 6.84079380915393090172e-4,
+      1.15138826111884280931e-5, 9.82852443688422223854e-8,
+      4.45344415861750144738e-10, 1.08268041139020870318e-12,
+      1.37555460633261799868e-15, 8.36354435630677421531e-19,
+      1.86958710162783235106e-22, 0.0
+    );
+    var gd = array<f32, 12>(
+      1.0, 1.47495759925128324529,
+      3.37748989120019970451e-1, 2.53603741420338795122e-2,
+      8.14679107184306179049e-4, 1.27545075667729118702e-5,
+      1.04314589657571990585e-7, 4.60680728515232032307e-10,
+      1.10273215066240270757e-12, 1.38796531259578871258e-15,
+      8.39158816283118707363e-19, 1.86958710162783236342e-22
+    );
+    let f = 1.0 - u * _gpu_polevl(u, fn, 10) / _gpu_polevl(u, fd, 11);
+    let g = (1.0 / t) * _gpu_polevl(u, gn, 11) / _gpu_polevl(u, gd, 12);
+    let z = 1.5707963267948966 * x2;
+    let c = cos(z);
+    let s = sin(z);
+    return sgn * (0.5 - (f * c + g * s) / (3.14159265358979 * x));
   }
 
   return sgn * 0.5;
@@ -1598,8 +1924,13 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       indent: 0,
       ws: (s?: string) => s ?? '',
       preamble: '',
-      declare: (name) =>
-        this.languageId === 'wgsl' ? `var ${name}: f32` : `float ${name}`,
+      declare: (name, typeHint) => {
+        const type =
+          typeHint ?? (this.languageId === 'wgsl' ? 'f32' : 'float');
+        return this.languageId === 'wgsl'
+          ? `var ${name}: ${type}`
+          : `${type} ${name}`;
+      },
       block: (stmts) => {
         if (stmts.length === 0) return '';
         const last = stmts.length - 1;
@@ -1656,11 +1987,21 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
         this.languageId === 'wgsl'
           ? GPU_SINC_PREAMBLE_WGSL
           : GPU_SINC_PREAMBLE_GLSL;
+    if (code.includes('_gpu_fresnel'))
+      preamble +=
+        this.languageId === 'wgsl'
+          ? GPU_POLEVL_PREAMBLE_WGSL
+          : GPU_POLEVL_PREAMBLE_GLSL;
     if (code.includes('_gpu_fresnelC'))
       preamble +=
         this.languageId === 'wgsl'
           ? GPU_FRESNELC_PREAMBLE_WGSL
           : GPU_FRESNELC_PREAMBLE_GLSL;
+    if (code.includes('_gpu_fresnelS'))
+      preamble +=
+        this.languageId === 'wgsl'
+          ? GPU_FRESNELS_PREAMBLE_WGSL
+          : GPU_FRESNELS_PREAMBLE_GLSL;
     if (code.includes('_gpu_besselJ'))
       preamble +=
         this.languageId === 'wgsl'

@@ -551,6 +551,13 @@ describe('GLSL COMPILATION', () => {
       expect(result.preamble).toContain('_gpu_fresnelC');
     });
 
+    it('should compile FresnelS', () => {
+      const result = glsl.compile(ce.box(['FresnelS', 'x']));
+      expect(result.code).toMatchInlineSnapshot(`_gpu_fresnelS(x)`);
+      expect(result.preamble).toContain('_gpu_polevl');
+      expect(result.preamble).toContain('_gpu_fresnelS');
+    });
+
     it('should compile BesselJ', () => {
       const result = glsl.compile(ce.box(['BesselJ', 0, 'x']));
       expect(result.code).toMatchInlineSnapshot(
@@ -558,6 +565,94 @@ describe('GLSL COMPILATION', () => {
       );
       expect(result.preamble).toContain('_gpu_factorial');
       expect(result.preamble).toContain('_gpu_besselJ');
+    });
+  });
+
+  describe('Sum and Product', () => {
+    it('should unroll Sum with small constant bounds', () => {
+      const expr = ce.box(['Sum', ['Sin', 'i'], ['Limits', 'i', 1, 3]]);
+      const code = glsl.compile(expr).code;
+      expect(code).toBe('((sin(1.0)) + (sin(2.0)) + (sin(3.0)))');
+    });
+
+    it('should unroll Product with small constant bounds', () => {
+      const expr = ce.box(['Product', 'i', ['Limits', 'i', 1, 4]]);
+      const code = glsl.compile(expr).code;
+      expect(code).toBe('((1.0) * (2.0) * (3.0) * (4.0))');
+    });
+
+    it('should return identity for empty Sum range', () => {
+      const expr = ce.box(['Sum', 'i', ['Limits', 'i', 5, 3]]);
+      const code = glsl.compile(expr).code;
+      expect(code).toBe('0.0');
+    });
+
+    it('should return identity for empty Product range', () => {
+      const expr = ce.box(['Product', 'i', ['Limits', 'i', 5, 3]]);
+      const code = glsl.compile(expr).code;
+      expect(code).toBe('1.0');
+    });
+
+    it('should emit for-loop for large Sum range inside compileFunction', () => {
+      const expr = ce.box([
+        'Sum',
+        ['Sin', 'i'],
+        ['Limits', 'i', 1, 1000],
+      ]);
+      const fn = glsl.compileFunction(expr, 'sumSin', 'float', []);
+      expect(fn).toContain('float sumSin()');
+      expect(fn).toContain('for (int i = 1; i <= 1000; i++)');
+      expect(fn).toContain('+= sin(float(i))');
+      expect(fn).toContain('return ');
+      expect(fn).not.toContain('let ');
+      expect(fn).not.toContain('while');
+      expect(fn).not.toContain('() =>');
+    });
+
+    it('should not contain JS constructs in Sum output', () => {
+      const expr = ce.box(['Sum', ['Sin', 'i'], ['Limits', 'i', 1, 3]]);
+      const code = glsl.compile(expr).code;
+      expect(code).not.toContain('let ');
+      expect(code).not.toContain('const ');
+      expect(code).not.toContain('() =>');
+      expect(code).not.toContain('{ re');
+    });
+  });
+
+  describe('Loop', () => {
+    it('should compile Loop as for-loop without IIFE', () => {
+      const expr = ce.box([
+        'Loop',
+        ['Assign', 'acc', ['Add', 'acc', 'i']],
+        ['Element', 'i', ['Range', 1, 5]],
+      ]);
+      const code = glsl.compile(expr).code;
+      expect(code).toContain('for (int i = 1; i <= 5; i++)');
+      expect(code).toContain('acc = acc + i');
+      expect(code).not.toContain('let ');
+      expect(code).not.toContain('() =>');
+      expect(code).not.toContain('})()');
+    });
+  });
+
+  describe('Function (Lambda)', () => {
+    it('should throw for anonymous functions in GLSL', () => {
+      expect(() =>
+        glsl.compile(ce.box(['Function', ['Add', 'x', 1], 'x']))
+      ).toThrow('Anonymous functions (Function) are not supported in GPU');
+    });
+  });
+
+  describe('Type-Aware Declarations', () => {
+    it('should declare complex-typed variable as vec2', () => {
+      const expr = ce.box([
+        'Block',
+        ['Declare', 'v'],
+        ['Assign', 'v', ['Complex', 1, 2]],
+        'v',
+      ]);
+      const code = glsl.compile(expr).code;
+      expect(code).toContain('vec2 v');
     });
   });
 });

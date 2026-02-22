@@ -1,11 +1,21 @@
 ### [Unreleased]
 
+- **Fixed GPU compilation of `Sum`, `Product`, `Loop`, and `Function`**:
+  These constructs no longer leak JavaScript-specific syntax (IIFEs, `let`,
+  `while`, arrow functions, `{ re, im }` objects) into GLSL/WGSL output.
+  `Sum`/`Product` with small constant bounds are unrolled inline; larger ranges
+  emit native `for` loops. `Loop` emits a GPU `for` loop with `int`/`i32`
+  index. `Function` (lambda) now throws a clear error for GPU targets.
+  Block-level `Declare` statements infer `vec2`/`vec2f` type from subsequent
+  complex-valued assignments.
+
 - **Added GLSL/WGSL compilation for `Heaviside`, `Sinc`, `FresnelC`,
-  `BesselJ`**: These four special functions now compile to GPU shader targets.
-  `FresnelC` uses a three-region rational Chebyshev approximation (ported from
-  Cephes/scipy). `BesselJ` uses power series, Hankel asymptotic, and Miller's
-  backward recurrence depending on the argument range. Both GLSL and WGSL
-  preambles are emitted on demand.
+  `FresnelS`, `BesselJ`**: These five special functions now compile to GPU
+  shader targets. `FresnelC`/`FresnelS` use a three-region rational Chebyshev
+  approximation (ported from Cephes/scipy) with a shared `_gpu_polevl` helper.
+  `BesselJ` uses power series, Hankel asymptotic, and Miller's backward
+  recurrence depending on the argument range. Both GLSL and WGSL preambles are
+  emitted on demand.
 
 - **Fixed GLSL/WGSL block expression compilation**: Block expressions (produced
   by `\coloneq` / semicolon blocks) now emit valid GPU shader code instead of

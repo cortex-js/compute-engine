@@ -167,7 +167,15 @@ export class BaseCompiler {
 
     // Handle special constructs
     if (h === 'Function') {
-      // Anonymous function
+      // Dispatch to target-specific handler if available (e.g. GPU throws)
+      const fnFn = target.functions?.(h);
+      if (typeof fnFn === 'function')
+        return fnFn(
+          args,
+          (expr) => BaseCompiler.compile(expr, target),
+          target
+        );
+      // Default: JavaScript arrow function
       const params = args.slice(1).map((x) => (isSymbol(x) ? x.symbol : '_'));
       return `((${params.join(', ')}) => ${BaseCompiler.compile(
         args[0].canonical,
@@ -191,7 +199,16 @@ export class BaseCompiler {
     if (h === 'Break') return 'break';
     if (h === 'Continue') return 'continue';
 
-    if (h === 'Loop') return BaseCompiler.compileForLoop(args, target);
+    if (h === 'Loop') {
+      const loopFn = target.functions?.(h);
+      if (typeof loopFn === 'function')
+        return loopFn(
+          args,
+          (expr) => BaseCompiler.compile(expr, target),
+          target
+        );
+      return BaseCompiler.compileForLoop(args, target);
+    }
 
     if (h === 'If') {
       if (args.length !== 3) throw new Error('If: wrong number of arguments');
@@ -296,17 +313,43 @@ export class BaseCompiler {
       return BaseCompiler.compile(args[0], target);
     }
 
+    // Infer GPU type hints for Declare+Assign pairs (complex → vec2/vec2f)
+    const typeHints: Record<string, string | undefined> = {};
+    if (target.declare && target.language) {
+      const isWGSL = target.language === 'wgsl';
+      for (const local of locals) {
+        for (const arg of args) {
+          if (isFunction(arg, 'Assign') && isSymbol(arg.ops[0], local)) {
+            if (BaseCompiler.isComplexValued(arg.ops[1])) {
+              typeHints[local] = isWGSL ? 'vec2f' : 'vec2';
+            }
+            break;
+          }
+        }
+      }
+    }
+
+    const localTarget: CompileTarget<Expression> = {
+      ...target,
+      var: (id) => {
+        if (locals.includes(id)) return id;
+        return target.var(id);
+      },
+    };
+
     const result = args
       .filter((a) => !isSymbol(a, 'Nothing'))
-      .map((arg) =>
-        BaseCompiler.compile(arg, {
-          ...target,
-          var: (id) => {
-            if (locals.includes(id)) return id;
-            return target.var(id);
-          },
-        })
-      )
+      .map((arg) => {
+        // For Declare, pass inferred type hint to the target hook
+        if (
+          isFunction(arg, 'Declare') &&
+          isSymbol(arg.ops[0]) &&
+          target.declare
+        ) {
+          return target.declare(arg.ops[0].symbol, typeHints[arg.ops[0].symbol]);
+        }
+        return BaseCompiler.compile(arg, localTarget);
+      })
       .filter((s) => s !== '');
 
     if (result.length === 0) return '';
