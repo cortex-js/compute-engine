@@ -431,6 +431,23 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     if (x === null) throw new Error('ErfInv: no argument');
     return `_gpu_erfinv(${compile(x)})`;
   },
+  Heaviside: ([x], compile) => {
+    if (x === null) throw new Error('Heaviside: no argument');
+    return `_gpu_heaviside(${compile(x)})`;
+  },
+  Sinc: ([x], compile) => {
+    if (x === null) throw new Error('Sinc: no argument');
+    return `_gpu_sinc(${compile(x)})`;
+  },
+  FresnelC: ([x], compile) => {
+    if (x === null) throw new Error('FresnelC: no argument');
+    return `_gpu_fresnelC(${compile(x)})`;
+  },
+  BesselJ: ([n, x], compile, target) => {
+    if (n === null || x === null) throw new Error('BesselJ: need two arguments');
+    const intCast = target?.language === 'wgsl' ? 'i32' : 'int';
+    return `_gpu_besselJ(${intCast}(${compile(n)}), ${compile(x)})`;
+  },
 
   // Additional math functions
   Lb: 'log2',
@@ -640,6 +657,380 @@ float _gpu_erfinv(float x) {
   float x7 = x5 * x2;
   float x9 = x7 * x2;
   return sqrt(pi) * 0.5 * (x + (pi / 12.0) * x3 + (7.0 * pi * pi / 480.0) * x5 + (127.0 * pi * pi * pi / 40320.0) * x7 + (4369.0 * pi * pi * pi * pi / 5806080.0) * x9);
+}
+`;
+
+/**
+ * GPU Heaviside step function preamble (GLSL syntax).
+ * Returns 0 for x<0, 0.5 at x=0, 1 for x>0.
+ */
+export const GPU_HEAVISIDE_PREAMBLE_GLSL = `
+float _gpu_heaviside(float x) {
+  if (x < 0.0) return 0.0;
+  if (x > 0.0) return 1.0;
+  return 0.5;
+}
+`;
+
+/**
+ * GPU Heaviside step function preamble (WGSL syntax).
+ */
+export const GPU_HEAVISIDE_PREAMBLE_WGSL = `
+fn _gpu_heaviside(x: f32) -> f32 {
+  if (x < 0.0) { return 0.0; }
+  if (x > 0.0) { return 1.0; }
+  return 0.5;
+}
+`;
+
+/**
+ * GPU sinc function preamble (GLSL syntax).
+ * sinc(x) = sin(x)/x, sinc(0) = 1.
+ */
+export const GPU_SINC_PREAMBLE_GLSL = `
+float _gpu_sinc(float x) {
+  if (abs(x) < 1e-10) return 1.0;
+  return sin(x) / x;
+}
+`;
+
+/**
+ * GPU sinc function preamble (WGSL syntax).
+ */
+export const GPU_SINC_PREAMBLE_WGSL = `
+fn _gpu_sinc(x: f32) -> f32 {
+  if (abs(x) < 1e-10) { return 1.0; }
+  return sin(x) / x;
+}
+`;
+
+/**
+ * GPU Fresnel cosine integral preamble (GLSL syntax).
+ *
+ * C(x) = integral from 0 to x of cos(pi*t^2/2) dt.
+ * Uses rational Chebyshev approximation (Cephes/scipy) with three regions:
+ * |x|<1.6, 1.6<=|x|<36, |x|>=36.
+ */
+export const GPU_FRESNELC_PREAMBLE_GLSL = `
+float _gpu_polevl(float x, float c[12], int n) {
+  float ans = c[0];
+  for (int i = 1; i < n; i++) ans = ans * x + c[i];
+  return ans;
+}
+
+float _gpu_fresnelC(float x_in) {
+  float sgn = x_in < 0.0 ? -1.0 : 1.0;
+  float x = abs(x_in);
+
+  if (x < 1.6) {
+    float x2 = x * x;
+    float t = x2 * x2;
+    float cn[6] = float[6](
+      -4.98843114573573548651e-8, 9.50428062829859605134e-6,
+      -6.45191435683965050962e-4, 1.88843319396703850064e-2,
+      -2.05525900955013891793e-1, 9.99999999999999998822e-1
+    );
+    float cd[7] = float[7](
+      3.99982968972495980367e-12, 9.15439215774657478799e-10,
+      1.25001862479598821474e-7, 1.22262789024179030997e-5,
+      8.68029542941784300606e-4, 4.12142090722199792936e-2, 1.0
+    );
+    return sgn * x * _gpu_polevl(t, cn, 6) / _gpu_polevl(t, cd, 7);
+  }
+
+  if (x < 36.0) {
+    float x2 = x * x;
+    float t = 3.14159265358979 * x2;
+    float u = 1.0 / (t * t);
+    float fn[10] = float[10](
+      4.21543555043677546506e-1, 1.43407919780758885261e-1,
+      1.15220955073585758835e-2, 3.450179397825740279e-4,
+      4.63613749287867322088e-6, 3.05568983790257605827e-8,
+      1.02304514164907233465e-10, 1.72010743268161828879e-13,
+      1.34283276233062758925e-16, 3.76329711269987889006e-20
+    );
+    float fd[11] = float[11](
+      1.0, 7.51586398353378947175e-1,
+      1.16888925859191382142e-1, 6.44051526508858611005e-3,
+      1.55934409164153020873e-4, 1.8462756734893054587e-6,
+      1.12699224763999035261e-8, 3.60140029589371370404e-11,
+      5.8875453362157841001e-14, 4.52001434074129701496e-17,
+      1.25443237090011264384e-20
+    );
+    float gn[11] = float[11](
+      5.04442073643383265887e-1, 1.97102833525523411709e-1,
+      1.87648584092575249293e-2, 6.84079380915393090172e-4,
+      1.15138826111884280931e-5, 9.82852443688422223854e-8,
+      4.45344415861750144738e-10, 1.08268041139020870318e-12,
+      1.37555460633261799868e-15, 8.36354435630677421531e-19,
+      1.86958710162783235106e-22
+    );
+    float gd[12] = float[12](
+      1.0, 1.47495759925128324529,
+      3.37748989120019970451e-1, 2.53603741420338795122e-2,
+      8.14679107184306179049e-4, 1.27545075667729118702e-5,
+      1.04314589657571990585e-7, 4.60680728515232032307e-10,
+      1.10273215066240270757e-12, 1.38796531259578871258e-15,
+      8.39158816283118707363e-19, 1.86958710162783236342e-22
+    );
+    float f = 1.0 - u * _gpu_polevl(u, fn, 10) / _gpu_polevl(u, fd, 11);
+    float g = (1.0 / t) * _gpu_polevl(u, gn, 11) / _gpu_polevl(u, gd, 12);
+    float z = 1.5707963267948966 * x2;
+    float c = cos(z);
+    float s = sin(z);
+    return sgn * (0.5 + (f * s - g * c) / (3.14159265358979 * x));
+  }
+
+  return sgn * 0.5;
+}
+`;
+
+/**
+ * GPU Fresnel cosine integral preamble (WGSL syntax).
+ */
+export const GPU_FRESNELC_PREAMBLE_WGSL = `
+fn _gpu_polevl(x: f32, c: array<f32, 12>, n: i32) -> f32 {
+  var ans = c[0];
+  for (var i: i32 = 1; i < n; i++) { ans = ans * x + c[i]; }
+  return ans;
+}
+
+fn _gpu_fresnelC(x_in: f32) -> f32 {
+  let sgn: f32 = select(1.0, -1.0, x_in < 0.0);
+  let x = abs(x_in);
+
+  if (x < 1.6) {
+    let x2 = x * x;
+    let t = x2 * x2;
+    var cn = array<f32, 12>(
+      -4.98843114573573548651e-8, 9.50428062829859605134e-6,
+      -6.45191435683965050962e-4, 1.88843319396703850064e-2,
+      -2.05525900955013891793e-1, 9.99999999999999998822e-1,
+      0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+    );
+    var cd = array<f32, 12>(
+      3.99982968972495980367e-12, 9.15439215774657478799e-10,
+      1.25001862479598821474e-7, 1.22262789024179030997e-5,
+      8.68029542941784300606e-4, 4.12142090722199792936e-2, 1.0,
+      0.0, 0.0, 0.0, 0.0, 0.0
+    );
+    return sgn * x * _gpu_polevl(t, cn, 6) / _gpu_polevl(t, cd, 7);
+  }
+
+  if (x < 36.0) {
+    let x2 = x * x;
+    let t = 3.14159265358979 * x2;
+    let u = 1.0 / (t * t);
+    var fn = array<f32, 12>(
+      4.21543555043677546506e-1, 1.43407919780758885261e-1,
+      1.15220955073585758835e-2, 3.450179397825740279e-4,
+      4.63613749287867322088e-6, 3.05568983790257605827e-8,
+      1.02304514164907233465e-10, 1.72010743268161828879e-13,
+      1.34283276233062758925e-16, 3.76329711269987889006e-20,
+      0.0, 0.0
+    );
+    var fd = array<f32, 12>(
+      1.0, 7.51586398353378947175e-1,
+      1.16888925859191382142e-1, 6.44051526508858611005e-3,
+      1.55934409164153020873e-4, 1.8462756734893054587e-6,
+      1.12699224763999035261e-8, 3.60140029589371370404e-11,
+      5.8875453362157841001e-14, 4.52001434074129701496e-17,
+      1.25443237090011264384e-20, 0.0
+    );
+    var gn = array<f32, 12>(
+      5.04442073643383265887e-1, 1.97102833525523411709e-1,
+      1.87648584092575249293e-2, 6.84079380915393090172e-4,
+      1.15138826111884280931e-5, 9.82852443688422223854e-8,
+      4.45344415861750144738e-10, 1.08268041139020870318e-12,
+      1.37555460633261799868e-15, 8.36354435630677421531e-19,
+      1.86958710162783235106e-22, 0.0
+    );
+    var gd = array<f32, 12>(
+      1.0, 1.47495759925128324529,
+      3.37748989120019970451e-1, 2.53603741420338795122e-2,
+      8.14679107184306179049e-4, 1.27545075667729118702e-5,
+      1.04314589657571990585e-7, 4.60680728515232032307e-10,
+      1.10273215066240270757e-12, 1.38796531259578871258e-15,
+      8.39158816283118707363e-19, 1.86958710162783236342e-22
+    );
+    let f = 1.0 - u * _gpu_polevl(u, fn, 10) / _gpu_polevl(u, fd, 11);
+    let g = (1.0 / t) * _gpu_polevl(u, gn, 11) / _gpu_polevl(u, gd, 12);
+    let z = 1.5707963267948966 * x2;
+    let c = cos(z);
+    let s = sin(z);
+    return sgn * (0.5 + (f * s - g * c) / (3.14159265358979 * x));
+  }
+
+  return sgn * 0.5;
+}
+`;
+
+/**
+ * GPU Bessel J function preamble (GLSL syntax).
+ *
+ * J_n(x) for integer order n. Uses three algorithms:
+ * - Power series for small x (x < 5+n)
+ * - Hankel asymptotic for large x (x > 25+n^2/2)
+ * - Miller's backward recurrence for intermediate x
+ */
+export const GPU_BESSELJ_PREAMBLE_GLSL = `
+float _gpu_factorial(int n) {
+  float f = 1.0;
+  for (int i = 2; i <= n; i++) f *= float(i);
+  return f;
+}
+
+float _gpu_besselJ_series(int n, float x) {
+  float halfX = x / 2.0;
+  float negQ = -(x * x) / 4.0;
+  float term = 1.0;
+  for (int i = 1; i <= n; i++) term /= float(i);
+  float s = term;
+  for (int k = 1; k <= 60; k++) {
+    term *= negQ / (float(k) * float(n + k));
+    s += term;
+    if (abs(term) < abs(s) * 1e-7) break;
+  }
+  return s * pow(halfX, float(n));
+}
+
+float _gpu_besselJ_asymptotic(int n, float x) {
+  float mu = 4.0 * float(n) * float(n);
+  float P = 1.0;
+  float Q = 0.0;
+  float ak = 1.0;
+  float e8x = 8.0 * x;
+  for (int k = 1; k <= 12; k++) {
+    float twokm1 = float(2 * k - 1);
+    ak *= mu - twokm1 * twokm1;
+    float denom = _gpu_factorial(k) * pow(e8x, float(k));
+    float contrib = ak / denom;
+    if (k == 1 || k == 3 || k == 5 || k == 7 || k == 9 || k == 11) {
+      // odd k: contributes to Q
+      if (((k - 1) / 2) % 2 == 0) Q += contrib;
+      else Q -= contrib;
+    } else {
+      // even k: contributes to P
+      if ((k / 2) % 2 == 1) P -= contrib;
+      else P += contrib;
+    }
+    if (abs(contrib) < 1e-7) break;
+  }
+  float chi = x - (float(n) / 2.0 + 0.25) * 3.14159265358979;
+  return sqrt(2.0 / (3.14159265358979 * x)) * (P * cos(chi) - Q * sin(chi));
+}
+
+float _gpu_besselJ(int n, float x) {
+  if (x == 0.0) return n == 0 ? 1.0 : 0.0;
+  float sgn = 1.0;
+  if (n < 0) {
+    n = -n;
+    if (n % 2 != 0) sgn = -1.0;
+  }
+  if (x < 0.0) {
+    x = -x;
+    if (n % 2 != 0) sgn *= -1.0;
+  }
+  if (x > 25.0 + float(n * n) / 2.0) return sgn * _gpu_besselJ_asymptotic(n, x);
+  if (x < 5.0 + float(n)) return sgn * _gpu_besselJ_series(n, x);
+  // Miller's backward recurrence
+  int M = max(n + 20, int(ceil(x)) + 30);
+  if (M > 200) return sgn * _gpu_besselJ_series(n, x);
+  float vals[201];
+  float jp1 = 0.0;
+  float jk = 1.0;
+  vals[M] = jk;
+  for (int k = M; k >= 1; k--) {
+    float jm1 = (2.0 * float(k) / x) * jk - jp1;
+    jp1 = jk;
+    jk = jm1;
+    vals[k - 1] = jk;
+  }
+  float norm = vals[0];
+  for (int k = 2; k <= M; k += 2) norm += 2.0 * vals[k];
+  return sgn * vals[n] / norm;
+}
+`;
+
+/**
+ * GPU Bessel J function preamble (WGSL syntax).
+ */
+export const GPU_BESSELJ_PREAMBLE_WGSL = `
+fn _gpu_factorial(n: i32) -> f32 {
+  var f: f32 = 1.0;
+  for (var i: i32 = 2; i <= n; i++) { f *= f32(i); }
+  return f;
+}
+
+fn _gpu_besselJ_series(n_in: i32, x: f32) -> f32 {
+  let halfX = x / 2.0;
+  let negQ = -(x * x) / 4.0;
+  var term: f32 = 1.0;
+  for (var i: i32 = 1; i <= n_in; i++) { term /= f32(i); }
+  var s = term;
+  for (var k: i32 = 1; k <= 60; k++) {
+    term *= negQ / (f32(k) * f32(n_in + k));
+    s += term;
+    if (abs(term) < abs(s) * 1e-7) { break; }
+  }
+  return s * pow(halfX, f32(n_in));
+}
+
+fn _gpu_besselJ_asymptotic(n_in: i32, x: f32) -> f32 {
+  let mu = 4.0 * f32(n_in) * f32(n_in);
+  var P: f32 = 1.0;
+  var Q: f32 = 0.0;
+  var ak: f32 = 1.0;
+  let e8x = 8.0 * x;
+  for (var k: i32 = 1; k <= 12; k++) {
+    let twokm1 = f32(2 * k - 1);
+    ak *= mu - twokm1 * twokm1;
+    let denom = _gpu_factorial(k) * pow(e8x, f32(k));
+    let contrib = ak / denom;
+    if (k == 1 || k == 3 || k == 5 || k == 7 || k == 9 || k == 11) {
+      if (((k - 1) / 2) % 2 == 0) { Q += contrib; }
+      else { Q -= contrib; }
+    } else {
+      if ((k / 2) % 2 == 1) { P -= contrib; }
+      else { P += contrib; }
+    }
+    if (abs(contrib) < 1e-7) { break; }
+  }
+  let chi = x - (f32(n_in) / 2.0 + 0.25) * 3.14159265358979;
+  return sqrt(2.0 / (3.14159265358979 * x)) * (P * cos(chi) - Q * sin(chi));
+}
+
+fn _gpu_besselJ(n_in: i32, x_in: f32) -> f32 {
+  var n = n_in;
+  var x = x_in;
+  if (x == 0.0) { return select(0.0, 1.0, n == 0); }
+  var sgn: f32 = 1.0;
+  if (n < 0) {
+    n = -n;
+    if (n % 2 != 0) { sgn = -1.0; }
+  }
+  if (x < 0.0) {
+    x = -x;
+    if (n % 2 != 0) { sgn *= -1.0; }
+  }
+  if (x > 25.0 + f32(n * n) / 2.0) { return sgn * _gpu_besselJ_asymptotic(n, x); }
+  if (x < 5.0 + f32(n)) { return sgn * _gpu_besselJ_series(n, x); }
+  // Miller's backward recurrence
+  var M = max(n + 20, i32(ceil(x)) + 30);
+  if (M > 200) { return sgn * _gpu_besselJ_series(n, x); }
+  var vals: array<f32, 201>;
+  var jp1: f32 = 0.0;
+  var jk: f32 = 1.0;
+  vals[M] = jk;
+  for (var k: i32 = M; k >= 1; k--) {
+    let jm1 = (2.0 * f32(k) / x) * jk - jp1;
+    jp1 = jk;
+    jk = jm1;
+    vals[k - 1] = jk;
+  }
+  var norm = vals[0];
+  for (var k2: i32 = 2; k2 <= M; k2 += 2) { norm += 2.0 * vals[k2]; }
+  return sgn * vals[n] / norm;
 }
 `;
 
@@ -1255,6 +1646,26 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     preamble += buildComplexPreamble(code, this.languageId);
     if (code.includes('_gpu_gamma')) preamble += GPU_GAMMA_PREAMBLE;
     if (code.includes('_gpu_erf')) preamble += GPU_ERF_PREAMBLE;
+    if (code.includes('_gpu_heaviside'))
+      preamble +=
+        this.languageId === 'wgsl'
+          ? GPU_HEAVISIDE_PREAMBLE_WGSL
+          : GPU_HEAVISIDE_PREAMBLE_GLSL;
+    if (code.includes('_gpu_sinc'))
+      preamble +=
+        this.languageId === 'wgsl'
+          ? GPU_SINC_PREAMBLE_WGSL
+          : GPU_SINC_PREAMBLE_GLSL;
+    if (code.includes('_gpu_fresnelC'))
+      preamble +=
+        this.languageId === 'wgsl'
+          ? GPU_FRESNELC_PREAMBLE_WGSL
+          : GPU_FRESNELC_PREAMBLE_GLSL;
+    if (code.includes('_gpu_besselJ'))
+      preamble +=
+        this.languageId === 'wgsl'
+          ? GPU_BESSELJ_PREAMBLE_WGSL
+          : GPU_BESSELJ_PREAMBLE_GLSL;
     if (code.includes('_fractal_')) {
       preamble +=
         this.languageId === 'wgsl'

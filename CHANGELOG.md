@@ -1,5 +1,12 @@
 ### [Unreleased]
 
+- **Added GLSL/WGSL compilation for `Heaviside`, `Sinc`, `FresnelC`,
+  `BesselJ`**: These four special functions now compile to GPU shader targets.
+  `FresnelC` uses a three-region rational Chebyshev approximation (ported from
+  Cephes/scipy). `BesselJ` uses power series, Hankel asymptotic, and Miller's
+  backward recurrence depending on the argument range. Both GLSL and WGSL
+  preambles are emitted on demand.
+
 - **Fixed GLSL/WGSL block expression compilation**: Block expressions (produced
   by `\coloneq` / semicolon blocks) now emit valid GPU shader code instead of
   JavaScript syntax. Variable declarations use `float x` (GLSL) or `var x: f32`

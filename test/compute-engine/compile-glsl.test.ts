@@ -530,4 +530,34 @@ describe('GLSL COMPILATION', () => {
       expect(code).toMatchInlineSnapshot(`sin(x) + cos(y)`);
     });
   });
+
+  describe('Special Functions', () => {
+    it('should compile Heaviside', () => {
+      const result = glsl.compile(ce.box(['Heaviside', 'x']));
+      expect(result.code).toMatchInlineSnapshot(`_gpu_heaviside(x)`);
+      expect(result.preamble).toContain('_gpu_heaviside');
+    });
+
+    it('should compile Sinc', () => {
+      const result = glsl.compile(ce.box(['Sinc', 'x']));
+      expect(result.code).toMatchInlineSnapshot(`_gpu_sinc(x)`);
+      expect(result.preamble).toContain('_gpu_sinc');
+    });
+
+    it('should compile FresnelC', () => {
+      const result = glsl.compile(ce.box(['FresnelC', 'x']));
+      expect(result.code).toMatchInlineSnapshot(`_gpu_fresnelC(x)`);
+      expect(result.preamble).toContain('_gpu_polevl');
+      expect(result.preamble).toContain('_gpu_fresnelC');
+    });
+
+    it('should compile BesselJ', () => {
+      const result = glsl.compile(ce.box(['BesselJ', 0, 'x']));
+      expect(result.code).toMatchInlineSnapshot(
+        `_gpu_besselJ(int(0.0), x)`
+      );
+      expect(result.preamble).toContain('_gpu_factorial');
+      expect(result.preamble).toContain('_gpu_besselJ');
+    });
+  });
 });
