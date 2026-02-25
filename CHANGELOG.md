@@ -1,4 +1,4 @@
-### [Unreleased]
+### 0.53.1 _2026-02-25_
 
 - **`timeLimit` now reliably interrupts long-running evaluations**: `Factorial`,
   `Sum`, `Product`, `Loop`, and `Reduce` all respect the `timeLimit` property
