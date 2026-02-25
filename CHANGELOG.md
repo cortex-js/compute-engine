@@ -38,6 +38,11 @@
   correctly skipped instead of being parsed as `HorizontalSpacing` expressions
   wrapped in `InvisibleOperator`.
 
+- **Fixed `require()` returning empty exports on Node 22+** (#292): Because the
+  package sets `"type": "module"`, Node treated the UMD `.js` files as ESM,
+  breaking the UMD factory pattern. The UMD builds now use a `.cjs` extension so
+  Node always treats them as CommonJS.
+
 ### 0.53.0 _2026-02-21_
 
 #### Runtime and Scoping
