@@ -1,5 +1,6 @@
 import type {
   BoxedSubstitution,
+  ExpressionInput,
   PatternMatchOptions,
   Expression,
 } from '../global-types';
@@ -9,6 +10,11 @@ import { permutations } from '../../common/utils';
 import { isWildcard, wildcardName, wildcardType } from './pattern-utils';
 import { isOperatorDef } from './utils';
 import { isNumber, isFunction, isSymbol, isString } from './type-guards';
+
+/** Internal options extending the public PatternMatchOptions */
+type MatchOptions = PatternMatchOptions & {
+  acceptVariants?: boolean;
+};
 
 function hasWildcards(expr: string | Expression): boolean {
   if (typeof expr === 'string') return expr.startsWith('_');
@@ -73,9 +79,7 @@ function matchOnce(
   expr: Expression,
   pattern: Expression,
   substitution: BoxedSubstitution,
-  options: PatternMatchOptions & {
-    acceptVariants?: boolean;
-  }
+  options: MatchOptions
 ): BoxedSubstitution | null {
   //
   // Match a wildcard
@@ -247,6 +251,26 @@ function matchOnce(
         pattern.operatorDefinition!.commutative && matchPerms
           ? matchPermutation(expr, pattern, substitution, options)
           : matchArguments(expr, pattern.ops, substitution, options);
+
+      // When matchMissingTerms is enabled and the expression has fewer
+      // operands than the pattern (e.g. `3x^2+5` vs pattern `ax^2+bx+c`),
+      // try designating some pattern ops as identity terms (0 for Add, 1 for
+      // Multiply) and match the rest normally.
+      if (
+        result === null &&
+        options.matchMissingTerms &&
+        isFunction(expr) &&
+        isFunction(pattern) &&
+        expr.nops < pattern.nops
+      ) {
+        result = matchWithMissingTerms(
+          expr,
+          pattern,
+          substitution,
+          options,
+          ce
+        );
+      }
     }
 
     if (result === null && useVariations) {
@@ -280,9 +304,7 @@ function matchRecursive(
   expr: Expression,
   pattern: Expression,
   substitution: BoxedSubstitution,
-  options: PatternMatchOptions & {
-    acceptVariants?: boolean;
-  }
+  options: MatchOptions
 ): BoxedSubstitution | null {
   console.assert(isFunction(expr));
   if (!isFunction(expr)) return null;
@@ -1133,6 +1155,133 @@ function matchArguments(
 }
 
 /**
+ * When useVariations is enabled and a commutative operator (Add/Multiply) has
+ * fewer expression operands than pattern operands, try all ways to pick which
+ * pattern ops are "missing" (identity terms), match the rest normally, then
+ * resolve the missing ones.
+ *
+ * For Add: missing terms are 0 — a free wildcard inside a Multiply is set to 0
+ * (since 0 * anything = 0).
+ * For Multiply: missing terms are 1 — a free wildcard inside a Power is set to 0
+ * (since anything^0 = 1).
+ */
+function matchWithMissingTerms(
+  expr: Expression,
+  pattern: Expression,
+  substitution: BoxedSubstitution,
+  options: PatternMatchOptions & { acceptVariants?: boolean },
+  ce: Expression['engine']
+): BoxedSubstitution | null {
+  if (!isFunction(expr) || !isFunction(pattern)) return null;
+
+  const operator = expr.operator;
+  const identity = operator === 'Add' ? ce.Zero : operator === 'Multiply' ? ce.One : null;
+  if (!identity) return null;
+
+  const patOps = pattern.ops;
+  const missing = patOps.length - expr.nops;
+  if (missing <= 0) return null;
+
+  // Try all combinations of which pattern ops are identity terms.
+  // Sort so combinations with simpler identity terms are tried first
+  // (a bare wildcard `_c` is a better identity candidate than a complex
+  // pattern like `Multiply(_a, Power(_x, 2))`).
+  const combos = combinations(patOps.length, missing);
+  combos.sort((a, b) => {
+    const scoreA = a.reduce((s, i) => s + patternComplexity(patOps[i]), 0);
+    const scoreB = b.reduce((s, i) => s + patternComplexity(patOps[i]), 0);
+    return scoreA - scoreB;
+  });
+
+  for (const identityIndices of combos) {
+    const activePatOps = patOps.filter((_, i) => !identityIndices.includes(i));
+    const identityPatOps = identityIndices.map((i) => patOps[i]);
+
+    // Create a sub-pattern with only the active ops and try matching
+    const subPattern = ce.function(operator, activePatOps, { form: 'raw' });
+    let sub = matchPermutation(expr, subPattern, substitution, options);
+    if (sub === null) continue;
+
+    // For each identity pattern op, try to match it against the identity value
+    let failed = false;
+    for (const patOp of identityPatOps) {
+      const result = matchIdentityTerm(patOp, identity, sub, options, ce);
+      if (result === null) { failed = true; break; }
+      sub = result;
+    }
+    if (!failed) return sub;
+  }
+
+  return null;
+}
+
+/** Try to match a pattern operand against the identity value (0 for Add, 1
+ * for Multiply). If direct matching fails and the pattern is a product with
+ * a free wildcard, set that wildcard to 0 (since 0 * anything = 0). */
+function matchIdentityTerm(
+  patOp: Expression,
+  identity: Expression,
+  sub: BoxedSubstitution,
+  options: PatternMatchOptions & { acceptVariants?: boolean },
+  ce: Expression['engine']
+): BoxedSubstitution | null {
+  // Try direct match first (handles simple wildcards like _c → 0)
+  const result = matchOnce(identity, patOp, sub, options);
+  if (result !== null) return result;
+
+  // For Add identity (0): if the pattern op is a Multiply, setting any
+  // free wildcard to 0 makes the whole product 0
+  if (identity.isSame(0) && isFunction(patOp, 'Multiply')) {
+    for (const op of patOp.ops) {
+      const wn = wildcardName(op);
+      if (wn && !(wn in sub)) {
+        return captureWildcard(wn, identity, sub);
+      }
+    }
+  }
+
+  // For Multiply identity (1): if the pattern op is a Power, setting the
+  // exponent wildcard to 0 makes it anything^0 = 1
+  if (identity.isSame(1) && isFunction(patOp, 'Power')) {
+    const expOp = patOp.ops[1];
+    if (expOp) {
+      const wn = wildcardName(expOp);
+      if (wn && !(wn in sub)) {
+        return captureWildcard(wn, ce.Zero, sub);
+      }
+    }
+  }
+
+  return null;
+}
+
+/** Compute a complexity score for a pattern operand. Simpler patterns (bare
+ * wildcards) get lower scores and are preferred as identity terms. */
+function patternComplexity(expr: Expression): number {
+  if (isWildcard(expr)) return 0;
+  if (isNumber(expr) || isSymbol(expr) || isString(expr)) return 1;
+  if (isFunction(expr))
+    return 1 + expr.ops.reduce((s, op) => s + patternComplexity(op), 0);
+  return 1;
+}
+
+/** Generate all combinations of `k` indices from `0..n-1` */
+function combinations(n: number, k: number): number[][] {
+  const result: number[][] = [];
+  const combo: number[] = [];
+  function backtrack(start: number) {
+    if (combo.length === k) { result.push([...combo]); return; }
+    for (let i = start; i < n; i++) {
+      combo.push(i);
+      backtrack(i + 1);
+      combo.pop();
+    }
+  }
+  backtrack(0);
+  return result;
+}
+
+/**
  * The function attempts to match a subject expression to a
  * [pattern](/compute-engine/guides/patterns-and-rules/).
  *
@@ -1173,27 +1322,90 @@ function matchArguments(
  */
 export function match(
   subject: Expression,
-  pattern: Expression,
+  pattern: string | ExpressionInput,
   options?: PatternMatchOptions
 ): BoxedSubstitution | null {
-  pattern = pattern.structural;
+  const ce = subject.engine;
+  let autoWildcard = false;
+  let boxedPattern: Expression;
+
+  if (typeof pattern === 'string') {
+    // String pattern: parse as LaTeX, auto-wildcard single-char symbols
+    autoWildcard = true;
+    boxedPattern = ce.parse(pattern).map(
+      (x) =>
+        isSymbol(x) && x.symbol.length === 1 ? ce.symbol('_' + x.symbol) : x,
+      { canonical: false }
+    );
+  } else if ('engine' in (pattern as object)) {
+    // Already a BoxedExpression
+    boxedPattern = pattern as Expression;
+  } else {
+    // Raw MathJSON — box it
+    boxedPattern = ce.box(pattern as ExpressionInput);
+  }
+
+  boxedPattern = boxedPattern.structural;
 
   // Note: Pattern validation is available via validatePattern() for explicit checks,
   // but not called here because canonicalization may reorder operands, making valid
   // patterns appear invalid. The permutation filter handles ambiguous cases during matching.
 
-  // Default options
-  const useVariations = options?.useVariations ?? false;
-  const opts = {
+  // Default options. When a string pattern is used, default to flexible
+  // matching (useVariations + matchMissingTerms) since the string convenience
+  // implies "match flexibly".
+  const useVariations = options?.useVariations ?? autoWildcard;
+  const opts: MatchOptions = {
     recursive: options?.recursive ?? false,
     useVariations,
     acceptVariants: useVariations,
     matchPermutations: options?.matchPermutations ?? true,
+    matchMissingTerms: options?.matchMissingTerms ?? autoWildcard,
   };
-  const substitution = options?.substitution ?? {};
+
+  // For string patterns, accept unprefixed keys in substitution
+  // (e.g., { x: ce.box('x') } becomes { _x: ce.box('x') })
+  let substitution = options?.substitution ?? {};
+  if (autoWildcard && Object.keys(substitution).length > 0) {
+    const prefixed: BoxedSubstitution = {};
+    for (const [k, v] of Object.entries(substitution)) {
+      if (k.startsWith('_')) {
+        prefixed[k] = v;
+      } else {
+        // Only add the prefixed version if not already present
+        if (!(`_${k}` in substitution)) prefixed[`_${k}`] = v;
+        // Keep the original too (it might be a multi-char symbol)
+        prefixed[k] = v;
+      }
+    }
+    substitution = prefixed;
+  }
 
   // Use 'structural' form, because we want to be able to
   // match the numerator/denominator of a fraction, for example.
 
-  return matchOnce(subject.structural, pattern.structural, substitution, opts);
+  const result = matchOnce(
+    subject.structural,
+    boxedPattern.structural,
+    substitution,
+    opts
+  );
+
+  if (!result) return null;
+
+  // For string patterns: return only unprefixed keys, filtering out
+  // self-matches (e.g., _x captured symbol x)
+  if (autoWildcard) {
+    const clean: BoxedSubstitution = {};
+    for (const [k, v] of Object.entries(result)) {
+      if (!k.startsWith('_')) continue;
+      const name = k.slice(1);
+      // Skip self-matches: wildcard _x captured symbol x
+      if (isSymbol(v) && v.symbol === name) continue;
+      clean[name] = v;
+    }
+    return clean;
+  }
+
+  return result;
 }

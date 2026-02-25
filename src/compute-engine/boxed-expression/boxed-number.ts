@@ -47,6 +47,7 @@ import type {
   PatternMatchOptions,
   ReplaceOptions,
   SimplifyOptions,
+  ExpressionInput,
   NumberLiteralInterface,
 } from '../global-types';
 import { isNumber, isSymbol } from './type-guards';
@@ -495,7 +496,7 @@ export class BoxedNumber
     return replace(this.structural, rules, options).at(-1)?.value ?? null;
   }
   match(
-    pattern: Expression,
+    pattern: string | ExpressionInput,
     options?: PatternMatchOptions
   ): BoxedSubstitution | null {
     return match(this.structural, pattern, options);

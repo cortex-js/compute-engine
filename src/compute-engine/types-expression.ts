@@ -1269,6 +1269,15 @@ export interface Expression {
    * If this expression matches `pattern` but there are no named wildcards,
    * return the empty substitution, `{}`.
    *
+   * `pattern` can be:
+   * - A **string** (LaTeX): single-character symbols are auto-converted to
+   *   wildcards (e.g., `'ax^2+bx+c'` treats `a`, `b`, `c` as wildcards).
+   *   Results use unprefixed keys (`{a: 3}` not `{_a: 3}`) and self-matches
+   *   are filtered out. `useVariations` and `matchMissingTerms` default to
+   *   `true`. Unprefixed keys are accepted in `substitution`.
+   * - A **MathJSON array** (e.g., `['Add', '_a', '_b']`): boxed automatically.
+   * - A **BoxedExpression**: used directly.
+   *
    * Read more about [**patterns and rules**](/compute-engine/guides/patterns-and-rules/).
    *
    * :::info[Note]
@@ -1277,7 +1286,7 @@ export interface Expression {
    *
    */
   match(
-    pattern: Expression,
+    pattern: string | ExpressionInput,
     options?: PatternMatchOptions<Expression>
   ): BoxedSubstitution<Expression> | null;
 

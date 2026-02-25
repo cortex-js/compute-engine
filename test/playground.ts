@@ -16,13 +16,11 @@ import { expand } from '../src/compute-engine/boxed-expression/expand';
 const ce = new ComputeEngine();
 const engine = ce;
 
-ce.timeLimit = 5000;
-try {
-  const fact = ce.parse('(700!)!');
-  (await fact.evaluateAsync()).print();
-} catch (e) {
-  console.error(e);
-}
+const res = parse('3+2+3x^2').match('ax^2 + bx + c');
+console.log(res?.a?.re, res?.b?.re, res?.c?.re);
+// -> 3 0 5
+
+console.log(isNumber(res?.a) && isNumber(res?.b) && isNumber(res?.c));
 
 let A = engine.parse('\\frac{1}{3}', { parseNumbers: 'rational' });
 let B = engine.parse('0.3333333333', { parseNumbers: 'rational' });

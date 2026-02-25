@@ -1,30 +1,46 @@
+### [Unreleased]
+
+- **`expr.match()` now accepts string patterns with auto-wildcarding**: Pass a
+  LaTeX string like `'ax^2+bx+c'` and single-character symbols are automatically
+  treated as wildcards. Results use clean unprefixed keys (`{a: 3, b: 2, c: 5}`)
+  with self-matches filtered out. `useVariations` and `matchMissingTerms` default
+  to `true` for string patterns.
+
+- **`expr.match()` now accepts MathJSON arrays directly**: Pass a raw MathJSON
+  pattern like `['Add', '_a', '_b']` without calling `ce.box()` first.
+
+- **New `matchMissingTerms` option for `match()`**: When enabled, expressions
+  with fewer operands than the pattern can still match by treating missing terms
+  as identity elements (0 for `Add`, 1 for `Multiply`). For example,
+  `3x^2+5` matches the pattern `ax^2+bx+c` with `b = 0`. Enabled by default
+  for string patterns.
+
 ### 0.53.1 _2026-02-25_
 
 - **`timeLimit` now reliably interrupts long-running evaluations**: `Factorial`,
   `Sum`, `Product`, `Loop`, and `Reduce` all respect the `timeLimit` property
   and throw `CancellationError` when the deadline is exceeded. Previously,
   generators yielded too infrequently (every 1,000–50,000 iterations), allowing
-  a single `gen.next()` call to block for longer than the timeout. All generators
-  now yield every iteration. The `Factorial` handler no longer silently swallows
-  `CancellationError`, and `withDeadline`/`withDeadlineAsync` now use
-  `try/finally` to always reset the engine deadline.
+  a single `gen.next()` call to block for longer than the timeout. All
+  generators now yield every iteration. The `Factorial` handler no longer
+  silently swallows `CancellationError`, and `withDeadline`/`withDeadlineAsync`
+  now use `try/finally` to always reset the engine deadline.
 
-- **Fixed GPU compilation of `Sum`, `Product`, `Loop`, and `Function`**:
-  These constructs no longer leak JavaScript-specific syntax (IIFEs, `let`,
-  `while`, arrow functions, `{ re, im }` objects) into GLSL/WGSL output.
-  `Sum`/`Product` with small constant bounds are unrolled inline; larger ranges
-  emit native `for` loops. `Loop` emits a GPU `for` loop with `int`/`i32`
-  index. `Function` (lambda) now throws a clear error for GPU targets.
-  Block-level `Declare` statements infer `vec2`/`vec2f` type from subsequent
-  complex-valued assignments.
+- **Fixed GPU compilation of `Sum`, `Product`, `Loop`, and `Function`**: These
+  constructs no longer leak JavaScript-specific syntax (IIFEs, `let`, `while`,
+  arrow functions, `{ re, im }` objects) into GLSL/WGSL output. `Sum`/`Product`
+  with small constant bounds are unrolled inline; larger ranges emit native
+  `for` loops. `Loop` emits a GPU `for` loop with `int`/`i32` index. `Function`
+  (lambda) now throws a clear error for GPU targets. Block-level `Declare`
+  statements infer `vec2`/`vec2f` type from subsequent complex-valued
+  assignments.
 
-- **Added GLSL/WGSL compilation for `Heaviside`, `Sinc`, `FresnelC`,
-  `FresnelS`, `BesselJ`**: These five special functions now compile to GPU
-  shader targets. `FresnelC`/`FresnelS` use a three-region rational Chebyshev
-  approximation (ported from Cephes/scipy) with a shared `_gpu_polevl` helper.
-  `BesselJ` uses power series, Hankel asymptotic, and Miller's backward
-  recurrence depending on the argument range. Both GLSL and WGSL preambles are
-  emitted on demand.
+- **Added GLSL/WGSL compilation for `Heaviside`, `Sinc`, `FresnelC`, `FresnelS`,
+  `BesselJ`**: These five special functions now compile to GPU shader targets.
+  `FresnelC`/`FresnelS` use a three-region rational Chebyshev approximation
+  (ported from Cephes/scipy) with a shared `_gpu_polevl` helper. `BesselJ` uses
+  power series, Hankel asymptotic, and Miller's backward recurrence depending on
+  the argument range. Both GLSL and WGSL preambles are emitted on demand.
 
 - **Fixed GLSL/WGSL block expression compilation**: Block expressions (produced
   by `\coloneq` / semicolon blocks) now emit valid GPU shader code instead of

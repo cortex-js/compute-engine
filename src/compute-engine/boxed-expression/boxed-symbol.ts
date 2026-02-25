@@ -30,6 +30,7 @@ import type {
   Sign,
   BoxedDefinition,
   CollectionHandlers,
+  ExpressionInput,
   SymbolInterface,
 } from '../global-types';
 
@@ -561,7 +562,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   }
 
   match(
-    pattern: Expression,
+    pattern: string | ExpressionInput,
     options?: PatternMatchOptions
   ): BoxedSubstitution | null {
     return match(this, pattern, options);

@@ -19,6 +19,7 @@ import type {
   BoxedValueDefinition,
   BoxedOperatorDefinition,
   EvaluateOptions,
+  ExpressionInput,
   Sign,
   Expression,
   JsonSerializationOptions,
@@ -101,7 +102,7 @@ export abstract class _BoxedExpression implements Expression {
   abstract isCanonical: boolean;
 
   abstract match(
-    pattern: Expression,
+    pattern: string | ExpressionInput,
     options?: PatternMatchOptions
   ): BoxedSubstitution | null;
 

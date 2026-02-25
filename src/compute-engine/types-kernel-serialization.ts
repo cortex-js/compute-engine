@@ -91,6 +91,18 @@ export type PatternMatchOptions<T = unknown> = {
    * If false, operand order must match exactly.
    */
   matchPermutations?: boolean;
+
+  /**
+   * If true, allow matching when the expression has fewer operands than the
+   * pattern by treating missing terms as identity elements (0 for `Add`,
+   * 1 for `Multiply`). A free wildcard in a missing product term is set to 0
+   * (since 0 × anything = 0).
+   *
+   * For example, `3x²+5` matches `_a·x²+_b·x+_c` with `_b = 0`.
+   *
+   * **Default**: `true` when the pattern is a string, `false` otherwise.
+   */
+  matchMissingTerms?: boolean;
 };
 
 /**

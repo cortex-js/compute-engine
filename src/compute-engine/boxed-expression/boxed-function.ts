@@ -18,6 +18,7 @@ import type {
   BoxedDefinition,
   Scope,
   BoxedValueDefinition,
+  ExpressionInput,
   FunctionInterface,
 } from '../global-types';
 
@@ -493,7 +494,7 @@ export class BoxedFunction
   }
 
   match(
-    pattern: Expression,
+    pattern: string | ExpressionInput,
     options?: PatternMatchOptions
   ): BoxedSubstitution | null {
     return match(this, pattern, options);
