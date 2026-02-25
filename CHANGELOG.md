@@ -1,5 +1,14 @@
 ### [Unreleased]
 
+- **`timeLimit` now reliably interrupts long-running evaluations**: `Factorial`,
+  `Sum`, `Product`, `Loop`, and `Reduce` all respect the `timeLimit` property
+  and throw `CancellationError` when the deadline is exceeded. Previously,
+  generators yielded too infrequently (every 1,000–50,000 iterations), allowing
+  a single `gen.next()` call to block for longer than the timeout. All generators
+  now yield every iteration. The `Factorial` handler no longer silently swallows
+  `CancellationError`, and `withDeadline`/`withDeadlineAsync` now use
+  `try/finally` to always reset the engine deadline.
+
 - **Fixed GPU compilation of `Sum`, `Product`, `Loop`, and `Function`**:
   These constructs no longer leak JavaScript-specific syntax (IIFEs, `let`,
   `while`, arrow functions, `{ re, im }` objects) into GLSL/WGSL output.

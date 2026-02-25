@@ -16,6 +16,14 @@ import { expand } from '../src/compute-engine/boxed-expression/expand';
 const ce = new ComputeEngine();
 const engine = ce;
 
+ce.timeLimit = 5000;
+try {
+  const fact = ce.parse('(700!)!');
+  (await fact.evaluateAsync()).print();
+} catch (e) {
+  console.error(e);
+}
+
 let A = engine.parse('\\frac{1}{3}', { parseNumbers: 'rational' });
 let B = engine.parse('0.3333333333', { parseNumbers: 'rational' });
 console.log(`${A.latex}=${B.latex}`, A.isEqual(B) && isNumber(B));

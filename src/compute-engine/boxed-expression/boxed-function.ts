@@ -1521,11 +1521,11 @@ function withDeadline<T>(engine: ComputeEngine, fn: () => T): () => T {
     if (engine._deadline === undefined) {
       engine._deadline = Date.now() + engine.timeLimit;
 
-      const result: T = fn();
-
-      engine._deadline = undefined;
-
-      return result;
+      try {
+        return fn();
+      } finally {
+        engine._deadline = undefined;
+      }
     }
 
     return fn();
@@ -1540,11 +1540,11 @@ function withDeadlineAsync<T>(
     if (engine._deadline === undefined) {
       engine._deadline = Date.now() + engine.timeLimit;
 
-      const result: T = await fn();
-
-      engine._deadline = undefined;
-
-      return result;
+      try {
+        return await fn();
+      } finally {
+        engine._deadline = undefined;
+      }
     }
 
     return fn();

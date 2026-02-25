@@ -18,7 +18,7 @@ import {
   widen,
 } from '../../common/type/utils';
 import { interval } from '../numerics/interval';
-import { CancellationError } from '../../common/interruptible';
+import { CancellationError, run } from '../../common/interruptible';
 import type {
   Expression,
   OperatorDefinition,
@@ -764,27 +764,32 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         const compiled = ce._compile(fn);
         if (compiled.calling !== 'lambda' || !compiled.run) return undefined;
 
-        let accumulator = initial.re;
-        let first = true;
-        for (const item of collection.each()) {
-          if (first) accumulator = item.re;
-          else accumulator = compiled.run(accumulator, item.re) as number;
-          first = false;
-        }
-
-        return ce.box(accumulator);
+        return run(
+          (function* () {
+            let accumulator = initial.re;
+            let first = true;
+            for (const item of collection.each()) {
+              if (first) accumulator = item.re;
+              else accumulator = compiled.run!(accumulator, item.re) as number;
+              first = false;
+              yield;
+            }
+            return ce.box(accumulator);
+          })(),
+          ce._timeRemaining
+        );
       }
       // We don't have a compiled function, so we need to use the
       // interpreted version.
       const f = applicable(fn);
-      let accumulator = initial;
-      let first = true;
-      for (const item of collection.each()) {
-        if (first) accumulator = item;
-        else accumulator = f([accumulator, item]) ?? ce.Nothing;
-        first = false;
-      }
-      return accumulator;
+      return run(
+        reduceCollection<Expression>(
+          collection,
+          (acc, x) => f([acc, x]) ?? ce.Nothing,
+          initial
+        ) as Generator<Expression | undefined, Expression | undefined>,
+        ce._timeRemaining
+      );
     },
   },
 
@@ -2253,12 +2258,10 @@ export function* reduceCollection<T>(
   initial: T
 ): Generator<T | undefined> {
   let acc = initial;
-  let counter = 0;
   for (const x of collection.each()) {
     const result = fn(acc, x);
     if (result === null) return undefined;
-    counter += 1;
-    if (counter % 1000 === 0) yield acc;
+    yield acc;
     acc = result;
   }
   return acc;

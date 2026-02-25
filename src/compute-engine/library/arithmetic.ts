@@ -85,7 +85,7 @@ import {
   quantityPower,
 } from './quantity-arithmetic';
 import { range, rangeLast } from './collections';
-import { run, runAsync } from '../../common/interruptible';
+import { run, runAsync, CancellationError } from '../../common/interruptible';
 import type {
   Expression,
   IComputeEngine as ComputeEngine,
@@ -443,7 +443,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               ce._timeRemaining
             )
           );
-        } catch {
+        } catch (e) {
+          if (e instanceof CancellationError) throw e;
           // We can get here if the factorial is too large
           return undefined;
         }
@@ -472,7 +473,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               signal
             )
           );
-        } catch {
+        } catch (e) {
+          if (e instanceof CancellationError) throw e;
           // We can get here if the factorial is too large
           return undefined;
         }
@@ -502,7 +504,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (n === null) return undefined;
         const ce = x.engine;
         if (bignumPreferred(ce))
-          return ce.number(bigFactorial2(ce, ce.bignum(n)));
+          return ce.number(run(bigFactorial2(ce, ce.bignum(n)), ce._timeRemaining));
 
         return ce.number(factorial2(n));
       },

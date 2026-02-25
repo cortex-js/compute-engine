@@ -186,7 +186,7 @@ function* runLoop(
       if (isFunction(result, 'Break')) return result.op1;
       if (result.operator === 'Return') return result;
       i += 1;
-      if (i % 1000 === 0) yield result;
+      yield result;
       if (i > ce.iterationLimit)
         throw new CancellationError({ cause: 'iteration-limit-exceeded' });
     }
@@ -202,7 +202,7 @@ function* runLoop(
     if (isFunction(result, 'Break')) return result.op1;
     if (result.operator === 'Return') return result;
     i += 1;
-    if (i % 1000 === 0) yield result;
+    yield result;
     if (i > ce.iterationLimit)
       throw new CancellationError({ cause: 'iteration-limit-exceeded' });
   }

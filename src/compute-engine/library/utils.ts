@@ -516,12 +516,10 @@ export function* reduceBigOp<T>(
   // Iterate over the cartesian product and evaluate the body
   //
   let result: T | undefined = initial;
-  let counter = 0;
   for (const element of cartesianArray) {
     indexingSets.forEach((x, i) => ce.assign(x.index!, element[i]));
     result = fn(result, body) ?? undefined;
-    counter += 1;
-    if (counter % 1000 === 0) yield result;
+    yield result;
     if (result === undefined) break;
   }
 
@@ -640,7 +638,6 @@ function* reduceElementIndexingSets<T>(
   }
 
   let result: T | undefined = initial;
-  let counter = 0;
 
   while (true) {
     // Apply current combination of assignments
@@ -653,8 +650,7 @@ function* reduceElementIndexingSets<T>(
 
     // Evaluate and accumulate
     result = fn(result, body) ?? undefined;
-    counter++;
-    if (counter % 1000 === 0) yield result;
+    yield result;
     if (result === undefined) break;
 
     // Move to next combination

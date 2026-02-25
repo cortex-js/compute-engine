@@ -60,17 +60,13 @@ export function* factorial(n: bigint): Generator<bigint, bigint> {
   let loop = n;
   let sum = n;
   let val = n;
-  let counter = 0;
 
   while (loop > 2) {
     loop -= BigInt(2); // Process even numbers only
     sum += loop; // Accumulate the sum of current and previous values
     val *= sum; // Update the factorial product
 
-    // Yield periodically for interruptibility
-    counter += 1;
-    if (counter % 50000 === 0 || (counter > 10000 && counter % 500 === 0))
-      yield val;
+    yield val;
   }
 
   return val; // Final factorial result
