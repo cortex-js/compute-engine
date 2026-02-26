@@ -1,4 +1,4 @@
-### [Unreleased]
+### 0.54.0 _2026-02-26_
 
 - **New `expr.polynomialCoefficients()` method**: Returns the coefficients of a
   polynomial expression in descending order of degree, or `undefined` if the
