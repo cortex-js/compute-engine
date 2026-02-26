@@ -476,6 +476,20 @@ describe('NON-STRICT MODE (Math-ASCII/Typst-like syntax)', () => {
     });
   });
 
+  describe('End-to-end: copy-paste from web pages', () => {
+    test('x2 + y2 = sin(5x)cos(y)', () => {
+      expect(
+        ce.parse('x2 + y2 = sin(5x)cos(y)', { strict: false })
+      ).toMatchInlineSnapshot(`
+        [
+          "Equal",
+          ["Add", ["Square", "x"], ["Square", "y"]],
+          ["Multiply", ["Sin", ["Multiply", 5, "x"]], ["Cos", "y"]]
+        ]
+      `);
+    });
+  });
+
   describe('Extended bare functions', () => {
     test('cbrt(x)', () => {
       expect(ce.parse('cbrt(x)', { strict: false })).toMatchInlineSnapshot(
