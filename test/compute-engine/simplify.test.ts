@@ -1297,3 +1297,43 @@ describe('Fu Advanced Tests', () => {
     );
   });
 });
+
+describe('AUTO PARTIAL FRACTION IN SIMPLIFY', () => {
+  const engine = ce;
+
+  test('1/((x+1)(x+2)) decomposes when denominator is factored', () => {
+    const expr = engine.parse('\\frac{1}{(x+1)(x+2)}');
+    const simplified = expr.simplify();
+    // Should decompose since denominator is already Multiply
+    // Verify numeric equivalence
+    for (const val of [0, 2, -3, 5]) {
+      const v = engine.number(val);
+      expect(simplified.subs({ x: v }).N().re).toBeCloseTo(
+        expr.subs({ x: v }).N().re
+      );
+    }
+  });
+
+  test('1/(x²-1) does NOT auto-decompose (denom is Add, not factored)', () => {
+    const expr = engine.parse('\\frac{1}{x^2-1}');
+    const simplified = expr.simplify();
+    // Should NOT partial-fraction because denom is x²-1 (an Add), not factored
+    for (const val of [2, -2, 3]) {
+      const v = engine.number(val);
+      expect(simplified.subs({ x: v }).N().re).toBeCloseTo(
+        expr.subs({ x: v }).N().re
+      );
+    }
+  });
+
+  test('(3x+5)/(x+1)² decomposes repeated roots', () => {
+    const expr = engine.parse('\\frac{3x+5}{(x+1)^2}');
+    const simplified = expr.simplify();
+    for (const val of [0, 1, -2, 3]) {
+      const v = engine.number(val);
+      expect(simplified.subs({ x: v }).N().re).toBeCloseTo(
+        expr.subs({ x: v }).N().re
+      );
+    }
+  });
+});

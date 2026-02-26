@@ -14,7 +14,7 @@ import {
   sym,
 } from '../boxed-expression/type-guards';
 import { expand } from '../boxed-expression/expand';
-import { factor } from '../boxed-expression/factor';
+import { factor, partialFraction } from '../boxed-expression/factor';
 import { add } from '../boxed-expression/arithmetic-add';
 import { SMALL_INTEGER, gcd } from '../numerics/numeric';
 import { primeFactors } from '../numerics/primes';
@@ -151,6 +151,39 @@ export const SIMPLIFY_RULES: Rule[] = [
     if (result.isSame(x)) return undefined;
 
     return { value: result, because: 'cancel common polynomial factors' };
+  },
+
+  //
+  // Auto partial fraction decomposition for Divide with factored denominator
+  // e.g., 1/((x+1)(x+2)) → 1/(x+1) - 1/(x+2)
+  // Only triggers when denominator is already in factored form (Multiply or Power)
+  //
+  // IMPORTANT: partialFraction must not call .simplify() on its result
+  //
+  (x): RuleStep | undefined => {
+    if (!isFunction(x, 'Divide')) return undefined;
+
+    const denom = x.op2;
+
+    // Only decompose when denominator is already in factored form
+    const denomOp = denom.operator;
+    if (denomOp !== 'Multiply' && denomOp !== 'Power') return undefined;
+
+    // Only handle univariate case
+    const unknowns = x.unknowns;
+    if (unknowns.length !== 1) return undefined;
+
+    const variable = unknowns[0];
+    const result = partialFraction(x, variable);
+
+    // Only return if decomposition actually changed something
+    if (result.isSame(x)) return undefined;
+
+    // Only return if result is simpler
+    const ce = x.engine;
+    if (ce.costFunction(result) >= ce.costFunction(x)) return undefined;
+
+    return { value: result, because: 'partial fraction decomposition' };
   },
 
   // Quick a/a -> 1 check for identical numerator/denominator

@@ -180,6 +180,131 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
       },
     },
 
+    Apart: {
+      description:
+        'Alias for PartialFraction. Decompose a rational expression into partial fractions.',
+      lazy: true,
+      signature: '(value, symbol) -> value',
+      evaluate: ([expr, varExpr]) => {
+        if (!expr || !varExpr) return undefined;
+        const variable = sym(varExpr.canonical);
+        if (!variable) return undefined;
+        return partialFraction(expr.canonical, variable);
+      },
+    },
+
+    PolynomialRoots: {
+      description:
+        'Return the roots of a polynomial expression. ' +
+        'Example: PolynomialRoots(x² - 5x + 6, x) → {2, 3}',
+      lazy: true,
+      signature: '(value, symbol) -> set<value>',
+      evaluate: ([poly, varExpr]) => {
+        if (!poly || !varExpr) return undefined;
+        const variable = sym(varExpr.canonical);
+        if (!variable) return undefined;
+        const roots = poly.canonical.polynomialRoots(variable);
+        if (!roots || roots.length === 0) return undefined;
+        return poly.engine.box(['Set', ...roots.map((r) => r.json)]);
+      },
+    },
+
+    Discriminant: {
+      description:
+        'Return the discriminant of a polynomial. ' +
+        'Example: Discriminant(x² - 5x + 6, x) → 1',
+      lazy: true,
+      signature: '(value, symbol) -> value',
+      evaluate: ([poly, varExpr]) => {
+        if (!poly || !varExpr) return undefined;
+        const variable = sym(varExpr.canonical);
+        if (!variable) return undefined;
+
+        const coeffsAsc = getPolynomialCoefficients(poly.canonical, variable);
+        if (!coeffsAsc) return undefined;
+
+        const coeffs = [...coeffsAsc].reverse();
+        const degree = coeffs.length - 1;
+        const ce = poly.engine;
+
+        if (degree === 2) {
+          const [a, b, c] = coeffs;
+          // b² - 4ac
+          return b.mul(b).sub(ce.number(4).mul(a).mul(c));
+        }
+
+        if (degree === 3) {
+          const [a, b, c, d] = coeffs;
+          // b²c² - 4ac³ - 4b³d + 18abcd - 27a²d²
+          return b
+            .mul(b)
+            .mul(c)
+            .mul(c)
+            .sub(ce.number(4).mul(a).mul(c).mul(c).mul(c))
+            .sub(ce.number(4).mul(b).mul(b).mul(b).mul(d))
+            .add(ce.number(18).mul(a).mul(b).mul(c).mul(d))
+            .sub(ce.number(27).mul(a).mul(a).mul(d).mul(d));
+        }
+
+        if (degree === 4) {
+          const [a, b, c, d, e] = coeffs;
+          return ce
+            .number(256)
+            .mul(a)
+            .mul(a)
+            .mul(a)
+            .mul(e)
+            .mul(e)
+            .mul(e)
+            .sub(
+              ce.number(192).mul(a).mul(a).mul(b).mul(d).mul(e).mul(e)
+            )
+            .sub(
+              ce.number(128).mul(a).mul(a).mul(c).mul(c).mul(e).mul(e)
+            )
+            .add(
+              ce.number(144).mul(a).mul(a).mul(c).mul(d).mul(d).mul(e)
+            )
+            .sub(
+              ce.number(27).mul(a).mul(a).mul(d).mul(d).mul(d).mul(d)
+            )
+            .add(
+              ce.number(144).mul(a).mul(b).mul(b).mul(c).mul(e).mul(e)
+            )
+            .sub(
+              ce.number(6).mul(a).mul(b).mul(b).mul(d).mul(d).mul(e)
+            )
+            .sub(
+              ce.number(80).mul(a).mul(b).mul(c).mul(c).mul(d).mul(e)
+            )
+            .add(
+              ce.number(18).mul(a).mul(b).mul(c).mul(d).mul(d).mul(d)
+            )
+            .add(
+              ce.number(16).mul(a).mul(c).mul(c).mul(c).mul(c).mul(e)
+            )
+            .sub(
+              ce.number(4).mul(a).mul(c).mul(c).mul(c).mul(d).mul(d)
+            )
+            .sub(
+              ce.number(27).mul(b).mul(b).mul(b).mul(b).mul(e).mul(e)
+            )
+            .add(
+              ce.number(18).mul(b).mul(b).mul(b).mul(c).mul(d).mul(e)
+            )
+            .sub(
+              ce.number(4).mul(b).mul(b).mul(b).mul(d).mul(d).mul(d)
+            )
+            .sub(
+              ce.number(4).mul(b).mul(b).mul(c).mul(c).mul(c).mul(e)
+            )
+            .add(b.mul(b).mul(c).mul(c).mul(d).mul(d));
+        }
+
+        return undefined;
+      },
+    },
+
     Polynomial: {
       description:
         'Construct a polynomial from a list of coefficients (highest to lowest degree) and a variable. ' +

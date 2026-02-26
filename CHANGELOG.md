@@ -31,6 +31,20 @@
   quadratic factors, and improper fractions (polynomial division performed
   first). Example: `PartialFraction(1/((x+1)(x+2)), x)` → `1/(x+1) - 1/(x+2)`.
 
+- **New `Apart` CAS function**: Alias for `PartialFraction`.
+
+- **New `PolynomialRoots` CAS function**: Returns the roots of a polynomial as a
+  set. Example: `PolynomialRoots(x² - 5x + 6, x)` → `{2, 3}`.
+
+- **New `Discriminant` CAS function**: Returns the discriminant of a polynomial
+  of degree 2, 3, or 4. Supports symbolic coefficients. Example:
+  `Discriminant(x² - 5x + 6, x)` → `1`.
+
+- **`simplify()` auto-decomposes partial fractions**: When a `Divide` expression
+  has a denominator already in factored form (product or power) and the
+  decomposition is simpler, `simplify()` automatically applies partial fraction
+  decomposition.
+
 - **Breaking: `CoefficientList` now returns descending order**: The CAS
   function `CoefficientList` now returns coefficients from highest to lowest
   degree (e.g., `[1, 0, 2, 1]` for `x^3 + 2x + 1`), matching the new

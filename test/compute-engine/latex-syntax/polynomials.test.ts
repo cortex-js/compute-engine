@@ -141,3 +141,45 @@ describe('POLYNOMIAL CONSTRUCTOR', () => {
     expect(reconstructed.isSame(expr)).toBe(true);
   });
 });
+
+describe('DISCRIMINANT', () => {
+  test('quadratic x² + 2x + 1 (perfect square)', () =>
+    expect(
+      evaluate('\\operatorname{Discriminant}(x^2 + 2x + 1, x)')
+    ).toMatchInlineSnapshot(`0`));
+
+  test('quadratic x² - 5x + 6 (two roots)', () =>
+    expect(
+      evaluate('\\operatorname{Discriminant}(x^2 - 5x + 6, x)')
+    ).toMatchInlineSnapshot(`1`));
+
+  test('quadratic x² + 1 (no real roots)', () =>
+    expect(
+      evaluate('\\operatorname{Discriminant}(x^2 + 1, x)')
+    ).toMatchInlineSnapshot(`-4`));
+
+  test('quadratic 2x² + 3x - 2', () =>
+    expect(
+      evaluate('\\operatorname{Discriminant}(2x^2 + 3x - 2, x)')
+    ).toMatchInlineSnapshot(`25`));
+
+  test('cubic x³ - 6x² + 11x - 6 (three distinct roots)', () => {
+    // (x-1)(x-2)(x-3), discriminant = 4
+    const result = engine.parse(
+      '\\operatorname{Discriminant}(x^3 - 6x^2 + 11x - 6, x)'
+    ).evaluate();
+    expect(result.re).toBe(4);
+  });
+
+  test('cubic x³ - 3x + 2 (repeated root)', () =>
+    expect(
+      evaluate('\\operatorname{Discriminant}(x^3 - 3x + 2, x)')
+    ).toMatchInlineSnapshot(`0`));
+
+  test('linear returns undefined', () => {
+    const result = engine.parse(
+      '\\operatorname{Discriminant}(2x + 1, x)'
+    ).evaluate();
+    expect(result.toString()).toContain('Discriminant');
+  });
+});
