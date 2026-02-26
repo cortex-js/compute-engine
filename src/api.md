@@ -2653,6 +2653,80 @@ ce.parse('x + 1').factors()    // [x + 1]
 
 <MemberCard>
 
+##### Expression.polynomialCoefficients()
+
+```ts
+polynomialCoefficients(variable?): readonly Expression[]
+```
+
+Return the coefficients of this expression as a polynomial in `variable`,
+in descending order of degree. Returns `undefined` if the expression is
+not a polynomial in the given variable.
+
+If `variable` is omitted, auto-detects when the expression has exactly
+one unknown. Returns `undefined` if there are zero or multiple unknowns.
+
+```typescript
+ce.parse('x^2 + 2x + 1').polynomialCoefficients('x')  // [1, 2, 1]
+ce.parse('x^3 + 2x + 1').polynomialCoefficients('x')  // [1, 0, 2, 1]
+ce.parse('sin(x)').polynomialCoefficients('x')          // undefined
+ce.parse('x^2 + 5').polynomialCoefficients()            // [1, 0, 5]
+```
+
+Subsumes `isPolynomial`:
+```typescript
+const isPolynomial = expr.polynomialCoefficients('x') !== undefined;
+```
+
+Subsumes `polynomialDegree`:
+```typescript
+const degree = expr.polynomialCoefficients('x')?.length - 1;
+```
+
+When `variable` is an array, the expression must be polynomial in ALL
+listed variables. Coefficients are decomposed by the first variable;
+remaining variables appear as symbolic coefficients.
+
+```typescript
+ce.parse('x^2*y + 3x + y^2').polynomialCoefficients(['x', 'y'])
+// → [y, 3, y²]  (coefficients of x², x¹, x⁰)
+```
+
+####### variable?
+
+`string` | `string`[]
+
+</MemberCard>
+
+<MemberCard>
+
+##### Expression.polynomialRoots()
+
+```ts
+polynomialRoots(variable?): readonly Expression[]
+```
+
+Return the roots of this expression treated as a polynomial in `variable`.
+Returns `undefined` if the expression is not a polynomial in the given
+variable. Returns an empty array if no roots can be found.
+
+If `variable` is omitted, auto-detects when the expression has exactly
+one unknown.
+
+```typescript
+ce.parse('x^2 - 5x + 6').polynomialRoots('x')  // [2, 3]
+ce.parse('x^2 + 1').polynomialRoots('x')         // [] (no real roots)
+ce.parse('sin(x)').polynomialRoots('x')           // undefined
+```
+
+####### variable?
+
+`string`
+
+</MemberCard>
+
+<MemberCard>
+
 ##### Expression.isScoped
 
 ```ts
@@ -2838,6 +2912,15 @@ wildcard.
 If this expression matches `pattern` but there are no named wildcards,
 return the empty substitution, `{}`.
 
+`pattern` can be:
+- A **string** (LaTeX): single-character symbols are auto-converted to
+  wildcards (e.g., `'ax^2+bx+c'` treats `a`, `b`, `c` as wildcards).
+  Results use unprefixed keys (`{a: 3}` not `{_a: 3}`) and self-matches
+  are filtered out. `useVariations` and `matchMissingTerms` default to
+  `true`. Unprefixed keys are accepted in `substitution`.
+- A **MathJSON array** (e.g., `['Add', '_a', '_b']`): boxed automatically.
+- A **BoxedExpression**: used directly.
+
 Read more about [**patterns and rules**](/compute-engine/guides/patterns-and-rules/).
 
 :::info[Note]
@@ -2846,7 +2929,7 @@ Applicable to canonical and non-canonical expressions.
 
 ####### pattern
 
-[`Expression`](#expression-3)
+[`ExpressionInput`](#expressioninput)
 
 ####### options?
 

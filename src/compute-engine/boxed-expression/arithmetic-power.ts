@@ -24,11 +24,16 @@ function isSqrt(expr: Expression): boolean {
 // : 1/sqrt(n), return 1/n
 // : (could do): sqrt(n)/m, return n/m^2
 export function asRadical(expr: Expression): Rational | null {
-  if (isSqrt(expr) && isFunction(expr)) return asRational(expr.op1) ?? null;
+  if (isSqrt(expr) && isFunction(expr)) {
+    const r = asRational(expr.op1);
+    // Reject negative radicands (imaginary results, not real radicals)
+    if (r === undefined || r[0] < 0 || r[1] < 0) return null;
+    return r;
+  }
 
   if (isFunction(expr, 'Divide') && expr.op1.isSame(1) && isSqrt(expr.op2)) {
     const n = expr.op2.re;
-    if (!Number.isInteger(n)) return null;
+    if (!Number.isInteger(n) || n <= 0) return null;
     return [1, n];
   }
 
