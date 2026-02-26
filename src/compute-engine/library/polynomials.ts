@@ -7,9 +7,10 @@ import {
   polynomialDivide,
   polynomialGCD,
   cancelCommonFactors,
+  fromCoefficients,
 } from '../boxed-expression/polynomials';
 import type { SymbolDefinitions } from '../global-types';
-import { sym } from '../boxed-expression/type-guards';
+import { isFunction, sym } from '../boxed-expression/type-guards';
 
 export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
   {
@@ -160,13 +161,28 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
         return cancelCommonFactors(expr.canonical, variable);
       },
     },
+
+    Polynomial: {
+      description:
+        'Construct a polynomial from a list of coefficients (highest to lowest degree) and a variable. ' +
+        'Example: Polynomial([1, 0, 2, 1], x) → x³ + 2x + 1',
+      lazy: true,
+      signature: '(list<value>, symbol) -> value',
+      evaluate: ([coeffList, varExpr]) => {
+        if (!coeffList || !varExpr) return undefined;
+        const variable = sym(varExpr.canonical);
+        if (!variable) return undefined;
+
+        const canonical = coeffList.canonical;
+        if (!isFunction(canonical, 'List')) return undefined;
+
+        const coeffs = canonical.ops;
+        if (coeffs.length === 0) return undefined;
+
+        // Input is descending order, fromCoefficients expects ascending
+        const ascending = [...coeffs].reverse();
+        return fromCoefficients(ascending, variable);
+      },
+    },
   },
 ];
-
-//@todo
-// Polynomial([0, 2, 0, 4]:list, x:symbol) -> 2x + 4x^3
-//  -> Dot([0, 2, 0, 4], x^Range(0, 3)) -> 2x + 4x^3
-// CoefficientList(2x + 4x^3, 'x') -> [0, 2, 0, 4]
-// Degree(x) = Length(Coefficients(x)) - 1
-//   Factors
-//   Roots

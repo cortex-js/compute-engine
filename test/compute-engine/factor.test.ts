@@ -4,6 +4,7 @@ import {
   factorDifferenceOfSquares,
   factorQuadratic,
   factorPolynomial,
+  factorByRationalRoots,
 } from '../../src/compute-engine/boxed-expression/factor';
 
 const ce = new ComputeEngine();
@@ -266,6 +267,71 @@ describe('Integration with sqrt simplification', () => {
     const simplified = expr.simplify();
     expect(simplified.operator).toBe('Abs');
     expect(simplified.op1?.latex).toBe('x+1');
+  });
+});
+
+describe('Rational Root Factoring (degree 3+)', () => {
+  test('x³ - 6x² + 11x - 6 factors completely', () => {
+    const expr = parse('x^3 - 6x^2 + 11x - 6');
+    const factored = factorPolynomial(expr, 'x');
+    // Should be a product (factored form)
+    expect(factored.operator).toBe('Multiply');
+    // Verify equivalence at several points using subs
+    for (const val of [0, 1, 2, 3, -1, 5]) {
+      const v = ce.number(val);
+      expect(factored.subs({ x: v }).N().re).toBeCloseTo(
+        expr.subs({ x: v }).N().re
+      );
+    }
+  });
+
+  test('x³ + 1 factors as (x+1)(x²-x+1)', () => {
+    const expr = parse('x^3 + 1');
+    const factored = factorPolynomial(expr, 'x');
+    expect(factored.operator).toBe('Multiply');
+    for (const val of [0, 1, -1, 2, -2]) {
+      const v = ce.number(val);
+      expect(factored.subs({ x: v }).N().re).toBeCloseTo(
+        expr.subs({ x: v }).N().re
+      );
+    }
+  });
+
+  test('x⁴ - 5x² + 4 factors completely', () => {
+    const expr = parse('x^4 - 5x^2 + 4');
+    const factored = factorPolynomial(expr, 'x');
+    expect(factored.operator).toBe('Multiply');
+    for (const val of [0, 1, -1, 2, -2, 3]) {
+      const v = ce.number(val);
+      expect(factored.subs({ x: v }).N().re).toBeCloseTo(
+        expr.subs({ x: v }).N().re
+      );
+    }
+  });
+
+  test('2x³ - 3x² - 3x + 2 has rational roots', () => {
+    const expr = parse('2x^3 - 3x^2 - 3x + 2');
+    const factored = factorPolynomial(expr, 'x');
+    expect(factored.operator).toBe('Multiply');
+    for (const val of [0, 1, -1, 2, 0.5]) {
+      const v = ce.number(val);
+      expect(factored.subs({ x: v }).N().re).toBeCloseTo(
+        expr.subs({ x: v }).N().re
+      );
+    }
+  });
+
+  test('irreducible cubic returns equivalent expression', () => {
+    // x³ + x + 1 has no rational roots
+    const expr = parse('x^3 + x + 1');
+    const factored = factorPolynomial(expr, 'x');
+    // Should not crash, should return something equivalent
+    for (const val of [0, 1, -1, 2]) {
+      const v = ce.number(val);
+      expect(factored.subs({ x: v }).N().re).toBeCloseTo(
+        expr.subs({ x: v }).N().re
+      );
+    }
   });
 });
 

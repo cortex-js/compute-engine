@@ -110,3 +110,34 @@ describe('CANCEL COMMON FACTORS', () => {
       evaluate('\\operatorname{Cancel}(\\frac{x^3 - x}{x^2 - 1}, x)')
     ).toMatchInlineSnapshot(`x`));
 });
+
+describe('POLYNOMIAL CONSTRUCTOR', () => {
+  test('cubic from coefficients', () =>
+    expect(
+      evaluate('\\operatorname{Polynomial}([1, 0, 2, 1], x)')
+    ).toMatchInlineSnapshot(`x^3 + 2x + 1`));
+
+  test('quadratic from coefficients', () =>
+    expect(
+      evaluate('\\operatorname{Polynomial}([3, -1, 5], x)')
+    ).toMatchInlineSnapshot(`3x^2 - x + 5`));
+
+  test('constant polynomial', () =>
+    expect(
+      evaluate('\\operatorname{Polynomial}([7], x)')
+    ).toMatchInlineSnapshot(`7`));
+
+  test('linear polynomial', () =>
+    expect(
+      evaluate('\\operatorname{Polynomial}([2, 3], x)')
+    ).toMatchInlineSnapshot(`2x + 3`));
+
+  test('round-trip with CoefficientList', () => {
+    const expr = engine.parse('x^3 + 2x + 1');
+    const coeffs = expr.polynomialCoefficients('x');
+    const reconstructed = engine
+      .box(['Polynomial', ['List', ...coeffs!.map((c) => c.json)], 'x'])
+      .evaluate();
+    expect(reconstructed.isSame(expr)).toBe(true);
+  });
+});

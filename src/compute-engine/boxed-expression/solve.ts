@@ -7,6 +7,8 @@ import type {
   Rule,
 } from '../global-types';
 import { isNumber, isFunction, isSymbol, numericValue } from './type-guards';
+import { polynomialDegree, getPolynomialCoefficients } from './polynomials';
+import { asSmallInteger } from './numerics';
 
 function numericApproximation(value: unknown): number | undefined {
   if (typeof value === 'number') return value;
@@ -1249,6 +1251,15 @@ export function findUnivariateRoots(
         )
       );
     }
+
+    // Fallback: try rational root theorem for degree 3+ polynomials
+    if (result.length === 0) {
+      const deg = polynomialDegree(originalExpr, x);
+      if (deg >= 3) {
+        const rationalRoots = findRationalRoots(originalExpr, x, ce);
+        if (rationalRoots.length > 0) result = rationalRoots;
+      }
+    }
   } finally {
     ce.popScope();
   }
@@ -1422,4 +1433,69 @@ function filterRootsByType(
       return val.isReal === true;
     return true;
   });
+}
+
+/**
+ * Use the rational root theorem to find rational roots of a polynomial.
+ *
+ * Given polynomial a_n*x^n + ... + a_1*x + a_0, the possible rational roots
+ * are +/- (divisors of a_0) / (divisors of a_n).
+ *
+ * Each candidate is validated by substitution into the original expression.
+ */
+function findRationalRoots(
+  expr: Expression,
+  variable: string,
+  ce: ComputeEngine
+): Expression[] {
+  const coeffs = getPolynomialCoefficients(expr, variable);
+  if (!coeffs) return [];
+
+  const degree = coeffs.length - 1;
+  if (degree < 1) return [];
+
+  // coeffs are in ascending order: [a_0, a_1, ..., a_n]
+  const constantInt = asSmallInteger(coeffs[0]);
+  const leadingInt = asSmallInteger(coeffs[degree]);
+  if (leadingInt === null || constantInt === null) return [];
+  if (leadingInt === 0 || constantInt === 0) return [];
+
+  const divisors = (n: number): number[] => {
+    n = Math.abs(n);
+    const result: number[] = [];
+    for (let i = 1; i * i <= n; i++) {
+      if (n % i === 0) {
+        result.push(i);
+        if (i !== n / i) result.push(n / i);
+      }
+    }
+    return result;
+  };
+
+  const pDivisors = divisors(constantInt);
+  const qDivisors = divisors(leadingInt);
+  const candidates: number[] = [];
+  const seen = new Set<number>();
+  for (const p of pDivisors) {
+    for (const q of qDivisors) {
+      for (const sign of [1, -1]) {
+        const val = (sign * p) / q;
+        if (!seen.has(val)) {
+          seen.add(val);
+          candidates.push(val);
+        }
+      }
+    }
+  }
+
+  // Safety limit: don't test too many candidates
+  if (candidates.length > 100) return [];
+
+  const roots: Expression[] = [];
+  for (const candidate of candidates) {
+    const root = ce.number(candidate);
+    const value = expr.subs({ [variable]: root }).N();
+    if (value.isSame(0)) roots.push(root);
+  }
+  return roots;
 }

@@ -1837,6 +1837,23 @@ export class _Parser implements Parser {
     console.assert(lhs !== null);
 
     const index = this.index;
+
+    // In non-strict mode, a single letter immediately followed by a
+    // digit 2-9 is treated as an implicit superscript: x2 → x^2
+    // This handles common copy-paste from web pages.
+    // Check before skipSpace() to require true adjacency.
+    if (
+      this.options.strict === false &&
+      typeof lhs === 'string' &&
+      lhs.length === 1 &&
+      /^[a-zA-Z]$/.test(lhs) &&
+      /^[2-9]$/.test(this.peek)
+    ) {
+      const digit = parseInt(this.peek);
+      this.index++;
+      return this.parseSupsub(['Power', lhs, digit]);
+    }
+
     this.skipSpace();
 
     //

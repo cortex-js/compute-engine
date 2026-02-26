@@ -6,6 +6,22 @@
   has exactly one unknown. Subsumes `isPolynomial` (check `!== undefined`) and
   degree computation (`length - 1`).
 
+- **`polynomialCoefficients()` now accepts an array of variables**: Pass
+  `['x', 'y']` to verify the expression is polynomial in all listed variables.
+  Coefficients are decomposed by the first variable.
+
+- **New `expr.polynomialRoots()` method**: Returns the roots of a polynomial
+  expression, or `undefined` if not a polynomial. Handles degree 3+ polynomials
+  with rational roots via the Rational Root Theorem.
+
+- **New `Polynomial` CAS function**: Constructs a polynomial from a coefficient
+  list (descending order) and a variable. Inverse of `CoefficientList`:
+  `Polynomial([1, 0, 2, 1], x)` evaluates to `x³ + 2x + 1`.
+
+- **Improved `Factor` for degree 3+ polynomials**: `Factor` now uses the
+  Rational Root Theorem to factor polynomials with integer coefficients and
+  rational roots. Previously only handled degree ≤ 2.
+
 - **Breaking: `CoefficientList` now returns descending order**: The CAS
   function `CoefficientList` now returns coefficients from highest to lowest
   degree (e.g., `[1, 0, 2, 1]` for `x^3 + 2x + 1`), matching the new

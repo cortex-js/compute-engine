@@ -9,7 +9,12 @@ import { NumericValue } from '../numeric-value/types';
 
 import { Product, commonTerms, mul } from './arithmetic-mul-div';
 import { add } from './arithmetic-add';
-import { polynomialDegree, getPolynomialCoefficients } from './polynomials';
+import {
+  polynomialDegree,
+  getPolynomialCoefficients,
+  polynomialDivide,
+} from './polynomials';
+import { asSmallInteger } from './numerics';
 
 function hasNonTrivialRadical(value: unknown): boolean {
   return (
@@ -317,11 +322,117 @@ export function factorQuadratic(
 }
 
 /**
+ * Factor a polynomial using the Rational Root Theorem.
+ *
+ * For a polynomial with integer coefficients, any rational root p/q must have
+ * p dividing the constant term and q dividing the leading coefficient.
+ *
+ * Strategy: enumerate candidates, test, divide out roots, recurse.
+ * Caps at 100 candidates to avoid pathological cases.
+ *
+ * IMPORTANT: Does not call .simplify() to avoid infinite recursion.
+ */
+export function factorByRationalRoots(
+  expr: Expression,
+  variable: string
+): Expression | null {
+  const ce = expr.engine;
+  const coeffs = getPolynomialCoefficients(expr, variable);
+  if (!coeffs) return null;
+
+  const degree = coeffs.length - 1;
+  if (degree < 2) return null;
+
+  // Extract integer values for leading and constant coefficients
+  const leadingInt = asSmallInteger(coeffs[degree]);
+  const constantInt = asSmallInteger(coeffs[0]);
+  if (leadingInt === null || constantInt === null) return null;
+  if (leadingInt === 0 || constantInt === 0) return null;
+
+  // Get divisors of a positive integer
+  const divisors = (n: number): number[] => {
+    n = Math.abs(n);
+    const result: number[] = [];
+    for (let i = 1; i * i <= n; i++) {
+      if (n % i === 0) {
+        result.push(i);
+        if (i !== n / i) result.push(n / i);
+      }
+    }
+    return result;
+  };
+
+  // Enumerate candidate rational roots ±p/q
+  const pDivisors = divisors(constantInt);
+  const qDivisors = divisors(leadingInt);
+  const candidates: [number, number][] = [];
+  const seen = new Set<number>();
+  for (const p of pDivisors) {
+    for (const q of qDivisors) {
+      const pos = p / q;
+      const neg = -p / q;
+      if (!seen.has(pos)) {
+        seen.add(pos);
+        candidates.push([p, q]);
+      }
+      if (!seen.has(neg)) {
+        seen.add(neg);
+        candidates.push([-p, q]);
+      }
+    }
+  }
+
+  if (candidates.length > 100) return null;
+
+  const x = ce.symbol(variable);
+  const factors: Expression[] = [];
+  let remaining = expr;
+
+  for (const [p, q] of candidates) {
+    // Check remaining degree
+    const remDeg = polynomialDegree(remaining, variable);
+    if (remDeg <= 0) break;
+
+    const root = q === 1 ? ce.number(p) : ce.number(p).div(ce.number(q));
+    // Evaluate the remaining polynomial at the candidate root
+    const value = remaining.subs({ [variable]: root }).N();
+    if (!value.isSame(0)) continue;
+
+    // Root found — divide out (x - root)
+    const linearFactor =
+      q === 1
+        ? x.sub(ce.number(p))
+        : ce.number(q).mul(x).sub(ce.number(p));
+
+    const divResult = polynomialDivide(remaining, linearFactor, variable);
+    if (!divResult) continue;
+
+    factors.push(linearFactor);
+    remaining = divResult[0];
+  }
+
+  if (factors.length === 0) return null;
+
+  // Try quadratic factoring on any remaining degree-2 polynomial
+  const remDeg = polynomialDegree(remaining, variable);
+  if (remDeg === 2) {
+    const quadFactored = factorQuadratic(remaining, variable);
+    if (quadFactored !== null) remaining = quadFactored;
+  }
+
+  factors.push(remaining);
+
+  if (factors.length === 1) return factors[0];
+  return ce.box(['Multiply', ...factors.map((f) => f.json)]);
+}
+
+/**
  * Factor a polynomial expression.
  * Attempts various factoring strategies:
  * 1. Perfect square trinomials
  * 2. Difference of squares
  * 3. Quadratic factoring (for rational roots)
+ * 4. Rational root factoring (degree 3+)
  *
  * Falls back to the existing factor() function if polynomial factoring doesn't apply.
  *
@@ -339,10 +450,14 @@ export function factorPolynomial(
   const diffSquares = factorDifferenceOfSquares(expr);
   if (diffSquares !== null) return diffSquares;
 
-  // Try quadratic factoring if variable is specified
   if (variable !== undefined) {
+    // Try quadratic factoring
     const quadratic = factorQuadratic(expr, variable);
     if (quadratic !== null) return quadratic;
+
+    // Try rational root factoring (degree 3+)
+    const rationalRoot = factorByRationalRoots(expr, variable);
+    if (rationalRoot !== null) return rationalRoot;
   }
 
   // Fall back to existing factor function (GCD-based)

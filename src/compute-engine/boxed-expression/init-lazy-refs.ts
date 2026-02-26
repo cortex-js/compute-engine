@@ -10,10 +10,17 @@ import {
   _setSerializeJson,
   _setExpandForIs,
   _setGetPolynomialCoefficients,
+  _setGetPolynomialDegree,
+  _setFindUnivariateRoots,
 } from './abstract-boxed-expression';
 
 import { Product } from './arithmetic-mul-div';
-import { getPolynomialCoefficients } from './polynomials';
+import {
+  getPolynomialCoefficients,
+  polynomialDegree,
+} from './polynomials';
+
+import { findUnivariateRoots } from './solve';
 
 // eslint-disable-next-line import/no-restricted-paths
 import { compile } from '../compilation/compile-expression';
@@ -25,3 +32,5 @@ _setSerializeJson(serializeJson);
 _setProduct(Product);
 _setCompile(compile);
 _setGetPolynomialCoefficients(getPolynomialCoefficients);
+_setGetPolynomialDegree(polynomialDegree);
+_setFindUnivariateRoots(findUnivariateRoots);

@@ -86,6 +86,25 @@ export function _setGetPolynomialCoefficients(
   _getPolynomialCoefficients = fn;
 }
 
+// Lazy reference to break circular dependency for polynomialDegree
+type GetPolynomialDegreeFn = (expr: Expression, variable: string) => number;
+let _getPolynomialDegree: GetPolynomialDegreeFn;
+/** @internal */
+export function _setGetPolynomialDegree(fn: GetPolynomialDegreeFn) {
+  _getPolynomialDegree = fn;
+}
+
+// Lazy reference to break circular dependency for findUnivariateRoots
+type FindUnivariateRootsFn = (
+  expr: Expression,
+  variable: string
+) => ReadonlyArray<Expression>;
+let _findUnivariateRoots: FindUnivariateRootsFn;
+/** @internal */
+export function _setFindUnivariateRoots(fn: FindUnivariateRootsFn) {
+  _findUnivariateRoots = fn;
+}
+
 const EXPANDABLE_OPS = ['Multiply', 'Power', 'Negate', 'Divide'];
 
 /** Return true if at least one side contains an operator where expansion could
@@ -518,6 +537,33 @@ export abstract class _BoxedExpression implements Expression {
   }
 
   polynomialCoefficients(
+    variable?: string | string[]
+  ): ReadonlyArray<Expression> | undefined {
+    let vars: string[];
+
+    if (variable === undefined) {
+      const unknowns = this.unknowns;
+      if (unknowns.length !== 1) return undefined;
+      vars = [unknowns[0]];
+    } else if (typeof variable === 'string') {
+      vars = [variable];
+    } else {
+      if (variable.length === 0) return undefined;
+      vars = variable;
+    }
+
+    // Validate polynomial in all variables
+    for (const v of vars) {
+      if (_getPolynomialDegree(this, v) < 0) return undefined;
+    }
+
+    // Decompose by the first variable
+    const coeffs = _getPolynomialCoefficients(this, vars[0]);
+    if (coeffs === null) return undefined;
+    return coeffs.reverse();
+  }
+
+  polynomialRoots(
     variable?: string
   ): ReadonlyArray<Expression> | undefined {
     if (variable === undefined) {
@@ -526,9 +572,10 @@ export abstract class _BoxedExpression implements Expression {
       variable = unknowns[0];
     }
 
-    const coeffs = _getPolynomialCoefficients(this, variable);
-    if (coeffs === null) return undefined;
-    return coeffs.reverse();
+    // Check it's a polynomial first
+    if (_getPolynomialDegree(this, variable) < 0) return undefined;
+
+    return _findUnivariateRoots(this, variable);
   }
 
   is(
