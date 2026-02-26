@@ -43,6 +43,11 @@
   `3x^2+5` matches the pattern `ax^2+bx+c` with `b = 0`. Enabled by default
   for string patterns.
 
+- **Non-strict parsing: implicit superscript for letter+digit**: In non-strict
+  mode, a single letter immediately followed by a digit 2–9 is parsed as an
+  exponent: `x2 + y2` → `x^2 + y^2`. Handles common copy-paste from web pages.
+  Only digits 2–9, only single ASCII letters, and only when adjacent (no space).
+
 ### 0.53.1 _2026-02-25_
 
 - **`timeLimit` now reliably interrupts long-running evaluations**: `Factorial`,

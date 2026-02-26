@@ -1105,8 +1105,35 @@ export interface Expression {
    * ```typescript
    * const degree = expr.polynomialCoefficients('x')?.length - 1;
    * ```
+   *
+   * When `variable` is an array, the expression must be polynomial in ALL
+   * listed variables. Coefficients are decomposed by the first variable;
+   * remaining variables appear as symbolic coefficients.
+   *
+   * ```typescript
+   * ce.parse('x^2*y + 3x + y^2').polynomialCoefficients(['x', 'y'])
+   * // → [y, 3, y²]  (coefficients of x², x¹, x⁰)
+   * ```
    */
   polynomialCoefficients(
+    variable?: string | string[]
+  ): ReadonlyArray<Expression> | undefined;
+
+  /**
+   * Return the roots of this expression treated as a polynomial in `variable`.
+   * Returns `undefined` if the expression is not a polynomial in the given
+   * variable. Returns an empty array if no roots can be found.
+   *
+   * If `variable` is omitted, auto-detects when the expression has exactly
+   * one unknown.
+   *
+   * ```typescript
+   * ce.parse('x^2 - 5x + 6').polynomialRoots('x')  // [2, 3]
+   * ce.parse('x^2 + 1').polynomialRoots('x')         // [] (no real roots)
+   * ce.parse('sin(x)').polynomialRoots('x')           // undefined
+   * ```
+   */
+  polynomialRoots(
     variable?: string
   ): ReadonlyArray<Expression> | undefined;
 

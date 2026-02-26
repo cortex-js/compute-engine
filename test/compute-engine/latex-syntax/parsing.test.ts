@@ -247,9 +247,7 @@ describe('NON-STRICT MODE (Math-ASCII/Typst-like syntax)', () => {
       expect(ce.parse('alpha', { strict: false })).toMatchInlineSnapshot(
         `alpha`
       );
-      expect(ce.parse('beta', { strict: false })).toMatchInlineSnapshot(
-        `beta`
-      );
+      expect(ce.parse('beta', { strict: false })).toMatchInlineSnapshot(`beta`);
       expect(ce.parse('omega', { strict: false })).toMatchInlineSnapshot(
         `omega`
       );
@@ -395,16 +393,85 @@ describe('NON-STRICT MODE (Math-ASCII/Typst-like syntax)', () => {
 
     test('x_12', () => {
       // Absorbed into compound symbol x_12
-      expect(ce.parse('x_12', { strict: false })).toMatchInlineSnapshot(
-        `x_12`
-      );
+      expect(ce.parse('x_12', { strict: false })).toMatchInlineSnapshot(`x_12`);
     });
 
     test('x^2+y^3 expression', () => {
-      expect(
-        ce.parse('x^2+y^3', { strict: false })
-      ).toMatchInlineSnapshot(
+      expect(ce.parse('x^2+y^3', { strict: false })).toMatchInlineSnapshot(
         `["Add", ["Power", "y", 3], ["Square", "x"]]`
+      );
+    });
+  });
+
+  describe('Implicit superscript (non-strict)', () => {
+    // Single-letter variable followed by a single digit 2-9 should be
+    // interpreted as an implicit exponent in non-strict mode.
+
+    test('x2 → Square', () => {
+      expect(ce.parse('x2', { strict: false })).toMatchInlineSnapshot(
+        `["Square", "x"]`
+      );
+    });
+
+    test('y3 → Power(y, 3)', () => {
+      expect(ce.parse('y3', { strict: false })).toMatchInlineSnapshot(
+        `["Power", "y", 3]`
+      );
+    });
+
+    test('x2 + y2 full expression', () => {
+      expect(ce.parse('x2 + y2', { strict: false })).toMatchInlineSnapshot(
+        `["Add", ["Square", "x"], ["Square", "y"]]`
+      );
+    });
+
+    test('a3b2 implicit multiply', () => {
+      expect(ce.parse('a3b2', { strict: false })).toMatchInlineSnapshot(
+        `["Multiply", ["Power", "a", 3], ["Square", "b"]]`
+      );
+    });
+
+    test('r2 = 1 equation', () => {
+      expect(ce.parse('r2 = 1', { strict: false })).toMatchInlineSnapshot(
+        `["Equal", ["Square", "r"], 1]`
+      );
+    });
+
+    // Negative tests: these should NOT trigger implicit superscript
+
+    test('strict mode: x2 should NOT be implicit superscript', () => {
+      expect(parse('x2')).toMatchInlineSnapshot(`["Multiply", 2, "x"]`);
+    });
+
+    test('x0 should NOT become x^0', () => {
+      expect(ce.parse('x0', { strict: false })).toMatchInlineSnapshot(
+        `["Multiply", 0, "x"]`
+      );
+    });
+
+    test('x1 should NOT become x^1', () => {
+      expect(ce.parse('x1', { strict: false })).toMatchInlineSnapshot(`x`);
+    });
+
+    test('x12 multi-digit should NOT become implicit superscript', () => {
+      expect(ce.parse('x12', { strict: false })).toMatchInlineSnapshot(
+        `["Multiply", 12, "x"]`
+      );
+    });
+
+    test('22 non-letter lhs should not be affected', () => {
+      expect(ce.parse('22', { strict: false })).toMatchInlineSnapshot(`22`);
+    });
+
+    test('x 2 with space should NOT be implicit superscript', () => {
+      expect(ce.parse('x 2', { strict: false })).toMatchInlineSnapshot(
+        `["Multiply", 2, "x"]`
+      );
+    });
+
+    test('x22 should become x^2 * 2', () => {
+      expect(ce.parse('x22', { strict: false })).toMatchInlineSnapshot(
+        `["Multiply", 2, ["Square", "x"]]`
       );
     });
   });
@@ -463,9 +530,9 @@ describe('NON-STRICT MODE (Math-ASCII/Typst-like syntax)', () => {
     });
 
     test('cos^{10}(x)', () => {
-      expect(
-        ce.parse('cos^{10}(x)', { strict: false })
-      ).toMatchInlineSnapshot(`["Power", ["Cos", "x"], 10]`);
+      expect(ce.parse('cos^{10}(x)', { strict: false })).toMatchInlineSnapshot(
+        `["Power", ["Cos", "x"], 10]`
+      );
     });
 
     test('tan^-1(x)', () => {
@@ -488,9 +555,9 @@ describe('NON-STRICT MODE (Math-ASCII/Typst-like syntax)', () => {
     });
 
     test('log_{10}(x) → base 10 (default)', () => {
-      expect(
-        ce.parse('log_{10}(x)', { strict: false })
-      ).toMatchInlineSnapshot(`["Log", "x"]`);
+      expect(ce.parse('log_{10}(x)', { strict: false })).toMatchInlineSnapshot(
+        `["Log", "x"]`
+      );
     });
 
     test('log_3(x) → base 3', () => {
@@ -512,9 +579,7 @@ describe('NON-STRICT MODE (Math-ASCII/Typst-like syntax)', () => {
     });
 
     test('x²³ → multi-digit exponent', () => {
-      expect(ce.parse('x²³')).toMatchInlineSnapshot(
-        `["Power", "x", 23]`
-      );
+      expect(ce.parse('x²³')).toMatchInlineSnapshot(`["Power", "x", 23]`);
     });
 
     test('x⁻² → negative exponent', () => {
@@ -524,15 +589,11 @@ describe('NON-STRICT MODE (Math-ASCII/Typst-like syntax)', () => {
     });
 
     test('xⁿ → letter superscript', () => {
-      expect(ce.parse('xⁿ')).toMatchInlineSnapshot(
-        `["Power", "x", "n"]`
-      );
+      expect(ce.parse('xⁿ')).toMatchInlineSnapshot(`["Power", "x", "n"]`);
     });
 
     test('2ⁿ → numeric base with letter exponent', () => {
-      expect(ce.parse('2ⁿ')).toMatchInlineSnapshot(
-        `["Power", 2, "n"]`
-      );
+      expect(ce.parse('2ⁿ')).toMatchInlineSnapshot(`["Power", 2, "n"]`);
     });
 
     test('\\sin²(x) → trig with Unicode exponent', () => {
@@ -558,9 +619,7 @@ describe('NON-STRICT MODE (Math-ASCII/Typst-like syntax)', () => {
     });
 
     test('x₁² → subscript + superscript', () => {
-      expect(ce.parse('x₁²')).toMatchInlineSnapshot(
-        `["Square", "x_1"]`
-      );
+      expect(ce.parse('x₁²')).toMatchInlineSnapshot(`["Square", "x_1"]`);
     });
 
     test('log₂(x) → Unicode subscript on bare log', () => {
@@ -570,9 +629,9 @@ describe('NON-STRICT MODE (Math-ASCII/Typst-like syntax)', () => {
     });
 
     test('log₁₀(x) → Unicode subscript base 10', () => {
-      expect(
-        ce.parse('log₁₀(x)', { strict: false })
-      ).toMatchInlineSnapshot(`["Log", "x"]`);
+      expect(ce.parse('log₁₀(x)', { strict: false })).toMatchInlineSnapshot(
+        `["Log", "x"]`
+      );
     });
   });
 });
