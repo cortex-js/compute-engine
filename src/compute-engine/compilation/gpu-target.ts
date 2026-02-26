@@ -133,9 +133,7 @@ function compileGPUSumProduct(
       : BaseCompiler.compile(limitsOps[2], target);
 
   const accDecl = isWGSL ? `var ${acc}: ${floatType}` : `${floatType} ${acc}`;
-  const indexDecl = isWGSL
-    ? `var ${index}: ${intType}`
-    : `${intType} ${index}`;
+  const indexDecl = isWGSL ? `var ${index}: ${intType}` : `${intType} ${index}`;
 
   const lines = [
     `${accDecl} = ${identity};`,
@@ -556,7 +554,8 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     return `_gpu_fresnelS(${compile(x)})`;
   },
   BesselJ: ([n, x], compile, target) => {
-    if (n === null || x === null) throw new Error('BesselJ: need two arguments');
+    if (n === null || x === null)
+      throw new Error('BesselJ: need two arguments');
     const intCast = target?.language === 'wgsl' ? 'i32' : 'int';
     return `_gpu_besselJ(${intCast}(${compile(n)}), ${compile(x)})`;
   },
@@ -668,8 +667,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     const indexExpr = indexing.ops[0];
     const rangeExpr = indexing.ops[1];
 
-    if (!isSymbol(indexExpr))
-      throw new Error('Loop: index must be a symbol');
+    if (!isSymbol(indexExpr)) throw new Error('Loop: index must be a symbol');
     if (!isFunction(rangeExpr, 'Range'))
       throw new Error('Loop: expected Range(lo, hi)');
 
@@ -1925,8 +1923,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       ws: (s?: string) => s ?? '',
       preamble: '',
       declare: (name, typeHint) => {
-        const type =
-          typeHint ?? (this.languageId === 'wgsl' ? 'f32' : 'float');
+        const type = typeHint ?? (this.languageId === 'wgsl' ? 'f32' : 'float');
         return this.languageId === 'wgsl'
           ? `var ${name}: ${type}`
           : `${type} ${name}`;

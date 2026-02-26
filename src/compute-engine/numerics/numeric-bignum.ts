@@ -11,10 +11,7 @@ export function lcm(a: BigNum, b: BigNum): BigNum {
   return a.mul(b).div(gcd(a, b));
 }
 
-export function* factorial2(
-  ce: IBigNum,
-  n: BigNum
-): Generator<BigNum, BigNum> {
+export function* factorial2(ce: IBigNum, n: BigNum): Generator<BigNum, BigNum> {
   if (!n.isInteger() || n.isNegative()) return ce._BIGNUM_NAN;
   if (n.lessThan(1)) return ce._BIGNUM_ONE;
 

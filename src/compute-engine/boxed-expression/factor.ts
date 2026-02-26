@@ -402,9 +402,7 @@ export function factorByRationalRoots(
 
     // Root found — divide out (x - root)
     const linearFactor =
-      q === 1
-        ? x.sub(ce.number(p))
-        : ce.number(q).mul(x).sub(ce.number(p));
+      q === 1 ? x.sub(ce.number(p)) : ce.number(q).mul(x).sub(ce.number(p));
 
     const divResult = polynomialDivide(remaining, linearFactor, variable);
     if (!divResult) continue;
@@ -435,10 +433,7 @@ export function factorByRationalRoots(
  *
  * IMPORTANT: Does not call .simplify() to avoid infinite recursion.
  */
-function extractContent(
-  expr: Expression,
-  variable: string
-): Expression | null {
+function extractContent(expr: Expression, variable: string): Expression | null {
   const ce = expr.engine;
   const coeffs = getPolynomialCoefficients(expr, variable);
   if (!coeffs) return null;
@@ -605,10 +600,7 @@ interface FactorInfo {
  * Numeric constants are ignored since they don't contribute variable-containing factors.
  * Identical factors (by .isSame()) are merged with accumulated multiplicities.
  */
-function collectFactors(
-  expr: Expression,
-  variable: string
-): FactorInfo[] {
+function collectFactors(expr: Expression, variable: string): FactorInfo[] {
   const rawFactors: FactorInfo[] = [];
   collectFactorsRaw(expr, variable, rawFactors);
 
@@ -989,7 +981,8 @@ export function partialFraction(
     if (t.isLinear) {
       const [num, den] = solution[t.unknownIndex];
       if (num === 0) continue; // Skip zero terms
-      termNumer = den === 1 ? ce.number(num) : ce.number(num).div(ce.number(den));
+      termNumer =
+        den === 1 ? ce.number(num) : ce.number(num).div(ce.number(den));
     } else {
       // Quadratic: A*x + B
       const [aNum, aDen] = solution[t.unknownIndex];

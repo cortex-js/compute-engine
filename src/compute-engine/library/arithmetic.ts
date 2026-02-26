@@ -504,7 +504,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (n === null) return undefined;
         const ce = x.engine;
         if (bignumPreferred(ce))
-          return ce.number(run(bigFactorial2(ce, ce.bignum(n)), ce._timeRemaining));
+          return ce.number(
+            run(bigFactorial2(ce, ce.bignum(n)), ce._timeRemaining)
+          );
 
         return ce.number(factorial2(n));
       },

@@ -80,9 +80,7 @@ type GetPolynomialCoefficientsFn = (
 ) => Expression[] | null;
 let _getPolynomialCoefficients: GetPolynomialCoefficientsFn;
 /** @internal */
-export function _setGetPolynomialCoefficients(
-  fn: GetPolynomialCoefficientsFn
-) {
+export function _setGetPolynomialCoefficients(fn: GetPolynomialCoefficientsFn) {
   _getPolynomialCoefficients = fn;
 }
 
@@ -563,9 +561,7 @@ export abstract class _BoxedExpression implements Expression {
     return coeffs.reverse();
   }
 
-  polynomialRoots(
-    variable?: string
-  ): ReadonlyArray<Expression> | undefined {
+  polynomialRoots(variable?: string): ReadonlyArray<Expression> | undefined {
     if (variable === undefined) {
       const unknowns = this.unknowns;
       if (unknowns.length !== 1) return undefined;

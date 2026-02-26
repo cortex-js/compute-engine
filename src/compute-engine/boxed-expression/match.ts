@@ -1175,7 +1175,8 @@ function matchWithMissingTerms(
   if (!isFunction(expr) || !isFunction(pattern)) return null;
 
   const operator = expr.operator;
-  const identity = operator === 'Add' ? ce.Zero : operator === 'Multiply' ? ce.One : null;
+  const identity =
+    operator === 'Add' ? ce.Zero : operator === 'Multiply' ? ce.One : null;
   if (!identity) return null;
 
   const patOps = pattern.ops;
@@ -1206,7 +1207,10 @@ function matchWithMissingTerms(
     let failed = false;
     for (const patOp of identityPatOps) {
       const result = matchIdentityTerm(patOp, identity, sub, options, ce);
-      if (result === null) { failed = true; break; }
+      if (result === null) {
+        failed = true;
+        break;
+      }
       sub = result;
     }
     if (!failed) return sub;
@@ -1270,7 +1274,10 @@ function combinations(n: number, k: number): number[][] {
   const result: number[][] = [];
   const combo: number[] = [];
   function backtrack(start: number) {
-    if (combo.length === k) { result.push([...combo]); return; }
+    if (combo.length === k) {
+      result.push([...combo]);
+      return;
+    }
     for (let i = start; i < n; i++) {
       combo.push(i);
       backtrack(i + 1);
@@ -1332,11 +1339,13 @@ export function match(
   if (typeof pattern === 'string') {
     // String pattern: parse as LaTeX, auto-wildcard single-char symbols
     autoWildcard = true;
-    boxedPattern = ce.parse(pattern).map(
-      (x) =>
-        isSymbol(x) && x.symbol.length === 1 ? ce.symbol('_' + x.symbol) : x,
-      { canonical: false }
-    );
+    boxedPattern = ce
+      .parse(pattern)
+      .map(
+        (x) =>
+          isSymbol(x) && x.symbol.length === 1 ? ce.symbol('_' + x.symbol) : x,
+        { canonical: false }
+      );
   } else if ('engine' in (pattern as object)) {
     // Already a BoxedExpression
     boxedPattern = pattern as Expression;

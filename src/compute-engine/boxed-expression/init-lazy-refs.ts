@@ -15,10 +15,7 @@ import {
 } from './abstract-boxed-expression';
 
 import { Product } from './arithmetic-mul-div';
-import {
-  getPolynomialCoefficients,
-  polynomialDegree,
-} from './polynomials';
+import { getPolynomialCoefficients, polynomialDegree } from './polynomials';
 
 import { findUnivariateRoots } from './solve';
 

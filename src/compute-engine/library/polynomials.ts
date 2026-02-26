@@ -256,48 +256,20 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
             .mul(e)
             .mul(e)
             .mul(e)
-            .sub(
-              ce.number(192).mul(a).mul(a).mul(b).mul(d).mul(e).mul(e)
-            )
-            .sub(
-              ce.number(128).mul(a).mul(a).mul(c).mul(c).mul(e).mul(e)
-            )
-            .add(
-              ce.number(144).mul(a).mul(a).mul(c).mul(d).mul(d).mul(e)
-            )
-            .sub(
-              ce.number(27).mul(a).mul(a).mul(d).mul(d).mul(d).mul(d)
-            )
-            .add(
-              ce.number(144).mul(a).mul(b).mul(b).mul(c).mul(e).mul(e)
-            )
-            .sub(
-              ce.number(6).mul(a).mul(b).mul(b).mul(d).mul(d).mul(e)
-            )
-            .sub(
-              ce.number(80).mul(a).mul(b).mul(c).mul(c).mul(d).mul(e)
-            )
-            .add(
-              ce.number(18).mul(a).mul(b).mul(c).mul(d).mul(d).mul(d)
-            )
-            .add(
-              ce.number(16).mul(a).mul(c).mul(c).mul(c).mul(c).mul(e)
-            )
-            .sub(
-              ce.number(4).mul(a).mul(c).mul(c).mul(c).mul(d).mul(d)
-            )
-            .sub(
-              ce.number(27).mul(b).mul(b).mul(b).mul(b).mul(e).mul(e)
-            )
-            .add(
-              ce.number(18).mul(b).mul(b).mul(b).mul(c).mul(d).mul(e)
-            )
-            .sub(
-              ce.number(4).mul(b).mul(b).mul(b).mul(d).mul(d).mul(d)
-            )
-            .sub(
-              ce.number(4).mul(b).mul(b).mul(c).mul(c).mul(c).mul(e)
-            )
+            .sub(ce.number(192).mul(a).mul(a).mul(b).mul(d).mul(e).mul(e))
+            .sub(ce.number(128).mul(a).mul(a).mul(c).mul(c).mul(e).mul(e))
+            .add(ce.number(144).mul(a).mul(a).mul(c).mul(d).mul(d).mul(e))
+            .sub(ce.number(27).mul(a).mul(a).mul(d).mul(d).mul(d).mul(d))
+            .add(ce.number(144).mul(a).mul(b).mul(b).mul(c).mul(e).mul(e))
+            .sub(ce.number(6).mul(a).mul(b).mul(b).mul(d).mul(d).mul(e))
+            .sub(ce.number(80).mul(a).mul(b).mul(c).mul(c).mul(d).mul(e))
+            .add(ce.number(18).mul(a).mul(b).mul(c).mul(d).mul(d).mul(d))
+            .add(ce.number(16).mul(a).mul(c).mul(c).mul(c).mul(c).mul(e))
+            .sub(ce.number(4).mul(a).mul(c).mul(c).mul(c).mul(d).mul(d))
+            .sub(ce.number(27).mul(b).mul(b).mul(b).mul(b).mul(e).mul(e))
+            .add(ce.number(18).mul(b).mul(b).mul(b).mul(c).mul(d).mul(e))
+            .sub(ce.number(4).mul(b).mul(b).mul(b).mul(d).mul(d).mul(d))
+            .sub(ce.number(4).mul(b).mul(b).mul(c).mul(c).mul(c).mul(e))
             .add(b.mul(b).mul(c).mul(c).mul(d).mul(d));
         }
 
