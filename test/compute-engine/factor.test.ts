@@ -359,3 +359,49 @@ describe('Issue #180 regression tests', () => {
     expect(simplified.latex).toBe('x+1');
   });
 });
+
+describe('CONTENT EXTRACTION (coefficient GCD)', () => {
+  test('6x² + 12x + 6 factors as 6(x+1)²', () => {
+    const expr = parse('6x^2 + 12x + 6');
+    const factored = factorPolynomial(expr, 'x');
+    for (const val of [0, 1, -1, 2, -2]) {
+      const v = ce.number(val);
+      expect(factored.subs({ x: v }).N().re).toBeCloseTo(
+        expr.subs({ x: v }).N().re
+      );
+    }
+  });
+
+  test('2x² - 8 factors as 2(x-2)(x+2)', () => {
+    const expr = parse('2x^2 - 8');
+    const factored = factorPolynomial(expr, 'x');
+    for (const val of [0, 1, -1, 2, -2, 3]) {
+      const v = ce.number(val);
+      expect(factored.subs({ x: v }).N().re).toBeCloseTo(
+        expr.subs({ x: v }).N().re
+      );
+    }
+  });
+
+  test('3x³ - 18x² + 33x - 18 factors as 3(x-1)(x-2)(x-3)', () => {
+    const expr = parse('3x^3 - 18x^2 + 33x - 18');
+    const factored = factorPolynomial(expr, 'x');
+    for (const val of [0, 1, 2, 3, -1]) {
+      const v = ce.number(val);
+      expect(factored.subs({ x: v }).N().re).toBeCloseTo(
+        expr.subs({ x: v }).N().re
+      );
+    }
+  });
+
+  test('no extraction when content is 1', () => {
+    const expr = parse('x^2 + 2x + 1');
+    const factored = factorPolynomial(expr, 'x');
+    for (const val of [0, 1, -1, 2]) {
+      const v = ce.number(val);
+      expect(factored.subs({ x: v }).N().re).toBeCloseTo(
+        expr.subs({ x: v }).N().re
+      );
+    }
+  });
+});

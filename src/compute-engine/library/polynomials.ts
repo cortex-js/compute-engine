@@ -1,4 +1,8 @@
-import { factorPolynomial, together } from '../boxed-expression/factor';
+import {
+  factorPolynomial,
+  together,
+  partialFraction,
+} from '../boxed-expression/factor';
 import { distribute } from '../symbolic/distribute';
 import { expand, expandAll } from '../boxed-expression/expand';
 import {
@@ -159,6 +163,20 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
         const variable = sym(varExpr.canonical);
         if (!variable) return undefined;
         return cancelCommonFactors(expr.canonical, variable);
+      },
+    },
+
+    PartialFraction: {
+      description:
+        'Decompose a rational expression into partial fractions. ' +
+        'Example: PartialFraction(1/((x+1)(x+2)), x) → 1/(x+1) - 1/(x+2)',
+      lazy: true,
+      signature: '(value, symbol) -> value',
+      evaluate: ([expr, varExpr]) => {
+        if (!expr || !varExpr) return undefined;
+        const variable = sym(varExpr.canonical);
+        if (!variable) return undefined;
+        return partialFraction(expr.canonical, variable);
       },
     },
 

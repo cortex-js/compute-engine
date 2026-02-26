@@ -22,6 +22,15 @@
   Rational Root Theorem to factor polynomials with integer coefficients and
   rational roots. Previously only handled degree ≤ 2.
 
+- **Improved `Factor` with content extraction**: `Factor` now extracts the GCD
+  of integer coefficients before applying other strategies. For example,
+  `Factor(6x² + 12x + 6, x)` now produces `6(x+1)²`.
+
+- **New `PartialFraction` CAS function**: Decomposes rational expressions into
+  partial fractions. Supports distinct and repeated linear factors, irreducible
+  quadratic factors, and improper fractions (polynomial division performed
+  first). Example: `PartialFraction(1/((x+1)(x+2)), x)` → `1/(x+1) - 1/(x+2)`.
+
 - **Breaking: `CoefficientList` now returns descending order**: The CAS
   function `CoefficientList` now returns coefficients from highest to lowest
   degree (e.g., `[1, 0, 2, 1]` for `x^3 + 2x + 1`), matching the new

@@ -4,7 +4,7 @@ import type {
 } from '../global-types';
 
 import { isRelationalOperator } from '../latex-syntax/utils';
-import { isNumber, isFunction } from './type-guards';
+import { isNumber, isFunction, isSymbol } from './type-guards';
 import { NumericValue } from '../numeric-value/types';
 
 import { Product, commonTerms, mul } from './arithmetic-mul-div';
@@ -13,8 +13,10 @@ import {
   polynomialDegree,
   getPolynomialCoefficients,
   polynomialDivide,
+  fromCoefficients,
 } from './polynomials';
 import { asSmallInteger } from './numerics';
+import { expand } from './expand';
 
 function hasNonTrivialRadical(value: unknown): boolean {
   return (
@@ -427,12 +429,68 @@ export function factorByRationalRoots(
 }
 
 /**
+ * Extract the integer content (GCD of all integer coefficients) from a
+ * polynomial, then recursively factor the primitive part.
+ * Returns null if content is 1 or coefficients are not all integers.
+ *
+ * IMPORTANT: Does not call .simplify() to avoid infinite recursion.
+ */
+function extractContent(
+  expr: Expression,
+  variable: string
+): Expression | null {
+  const ce = expr.engine;
+  const coeffs = getPolynomialCoefficients(expr, variable);
+  if (!coeffs) return null;
+
+  // Extract integer values from all coefficients
+  const intCoeffs: number[] = [];
+  for (const c of coeffs) {
+    const n = asSmallInteger(c);
+    if (n === null) return null;
+    intCoeffs.push(n);
+  }
+
+  // Compute GCD of all non-zero coefficients
+  const gcd = (a: number, b: number): number => {
+    a = Math.abs(a);
+    b = Math.abs(b);
+    while (b) {
+      [a, b] = [b, a % b];
+    }
+    return a;
+  };
+
+  let content = 0;
+  for (const c of intCoeffs) {
+    if (c !== 0) content = gcd(content, c);
+  }
+
+  if (content <= 1) return null;
+
+  // Divide all coefficients by the content to get the primitive part
+  const primitiveCoeffs = coeffs.map((c) => {
+    const n = asSmallInteger(c)!;
+    return ce.number(n / content);
+  });
+
+  // Reconstruct the primitive polynomial
+  const primitive = fromCoefficients(primitiveCoeffs, variable);
+
+  // Recursively factor the primitive part
+  const factoredPrimitive = factorPolynomial(primitive, variable);
+
+  return ce.number(content).mul(factoredPrimitive);
+}
+
+/**
  * Factor a polynomial expression.
  * Attempts various factoring strategies:
- * 1. Perfect square trinomials
- * 2. Difference of squares
- * 3. Quadratic factoring (for rational roots)
- * 4. Rational root factoring (degree 3+)
+ * 1. Content extraction (GCD of integer coefficients)
+ * 2. Perfect square trinomials
+ * 3. Difference of squares
+ * 4. Quadratic factoring (for rational roots)
+ * 5. Rational root factoring (degree 3+)
  *
  * Falls back to the existing factor() function if polynomial factoring doesn't apply.
  *
@@ -442,6 +500,12 @@ export function factorPolynomial(
   expr: Expression,
   variable?: string
 ): Expression {
+  // Try content extraction first (requires variable)
+  if (variable !== undefined) {
+    const contentFactored = extractContent(expr, variable);
+    if (contentFactored !== null) return contentFactored;
+  }
+
   // Try perfect square trinomial
   const perfectSquare = factorPerfectSquare(expr);
   if (perfectSquare !== null) return perfectSquare;
@@ -525,4 +589,432 @@ export function factor(expr: Expression): Expression {
   }
 
   return Product.from(together(expr)).asExpression();
+}
+
+// ==================== PARTIAL FRACTION DECOMPOSITION ====================
+
+/** Information about a factor of the denominator */
+interface FactorInfo {
+  factor: Expression;
+  multiplicity: number;
+  degree: number;
+}
+
+/**
+ * Walk a Multiply/Power tree and collect factors that contain the variable.
+ * Numeric constants are ignored since they don't contribute variable-containing factors.
+ * Identical factors (by .isSame()) are merged with accumulated multiplicities.
+ */
+function collectFactors(
+  expr: Expression,
+  variable: string
+): FactorInfo[] {
+  const rawFactors: FactorInfo[] = [];
+  collectFactorsRaw(expr, variable, rawFactors);
+
+  // Merge identical factors
+  const merged: FactorInfo[] = [];
+  for (const f of rawFactors) {
+    let found = false;
+    for (const m of merged) {
+      if (m.factor.isSame(f.factor)) {
+        m.multiplicity += f.multiplicity;
+        found = true;
+        break;
+      }
+    }
+    if (!found) merged.push({ ...f });
+  }
+
+  return merged;
+}
+
+/** Recursively collect raw factors without merging */
+function collectFactorsRaw(
+  expr: Expression,
+  variable: string,
+  result: FactorInfo[]
+): void {
+  if (isFunction(expr, 'Multiply')) {
+    for (const op of expr.ops) {
+      collectFactorsRaw(op, variable, result);
+    }
+    return;
+  }
+
+  if (isFunction(expr, 'Power')) {
+    const base = expr.op1;
+    const exp = asSmallInteger(expr.op2);
+    if (exp !== null && exp > 0 && base.has(variable)) {
+      const deg = polynomialDegree(base, variable);
+      result.push({ factor: base, multiplicity: exp, degree: deg });
+      return;
+    }
+    // If the base doesn't contain the variable or exponent is not a positive integer,
+    // treat as a numeric constant
+    if (!expr.has(variable)) return;
+    // Non-integer exponent with variable — shouldn't happen for polynomials
+    const deg = polynomialDegree(expr, variable);
+    result.push({ factor: expr, multiplicity: 1, degree: deg });
+    return;
+  }
+
+  // Plain expression
+  if (!expr.has(variable)) return; // Numeric constant
+  if (isNumber(expr)) return;
+
+  const deg = polynomialDegree(expr, variable);
+  result.push({ factor: expr, multiplicity: 1, degree: deg });
+}
+
+/**
+ * Solve a linear system using Gaussian elimination with integer arithmetic.
+ * The matrix is an augmented matrix [A|b] with dimensions rows x (numVars+1).
+ * Returns [numerator, denominator] pairs for each unknown, or null if inconsistent.
+ *
+ * IMPORTANT: Uses integer arithmetic throughout to avoid floating point issues.
+ */
+function solveLinearSystem(
+  matrix: number[][],
+  numVars: number
+): [number, number][] | null {
+  const rows = matrix.length;
+  const cols = numVars + 1; // augmented
+
+  // Clone the matrix to avoid mutation
+  const m = matrix.map((row) => [...row]);
+
+  const pivotRow: number[] = new Array(numVars).fill(-1);
+
+  // Forward elimination
+  let currentRow = 0;
+  for (let col = 0; col < numVars && currentRow < rows; col++) {
+    // Find pivot: largest absolute value in this column
+    let maxVal = 0;
+    let maxRow = -1;
+    for (let row = currentRow; row < rows; row++) {
+      const absVal = Math.abs(m[row][col]);
+      if (absVal > maxVal) {
+        maxVal = absVal;
+        maxRow = row;
+      }
+    }
+
+    if (maxVal === 0) continue; // Skip zero column
+
+    // Swap rows
+    if (maxRow !== currentRow) {
+      [m[currentRow], m[maxRow]] = [m[maxRow], m[currentRow]];
+    }
+
+    pivotRow[col] = currentRow;
+
+    // Eliminate below
+    for (let row = 0; row < rows; row++) {
+      if (row === currentRow) continue;
+      if (m[row][col] === 0) continue;
+
+      const factor = m[row][col];
+      const pivotVal = m[currentRow][col];
+
+      for (let j = 0; j < cols; j++) {
+        m[row][j] = m[row][j] * pivotVal - factor * m[currentRow][j];
+      }
+    }
+
+    currentRow++;
+  }
+
+  // Back substitution: extract solutions as [numerator, denominator]
+  const solution: [number, number][] = new Array(numVars);
+  for (let col = 0; col < numVars; col++) {
+    const pr = pivotRow[col];
+    if (pr === -1) {
+      // Free variable — set to 0
+      solution[col] = [0, 1];
+      continue;
+    }
+
+    const num = m[pr][cols - 1];
+    const den = m[pr][col];
+    if (den === 0) return null; // Inconsistent
+
+    // Reduce the fraction
+    const g = gcd(Math.abs(num), Math.abs(den));
+    const sign = den < 0 ? -1 : 1;
+    solution[col] = [(sign * num) / g, (sign * den) / g];
+  }
+
+  return solution;
+}
+
+/** GCD of two non-negative integers */
+function gcd(a: number, b: number): number {
+  a = Math.abs(a);
+  b = Math.abs(b);
+  while (b) {
+    [a, b] = [b, a % b];
+  }
+  return a || 1; // Avoid division by zero
+}
+
+/**
+ * Decompose a rational expression into partial fractions.
+ *
+ * Given P(x)/Q(x), produces a sum of simpler fractions:
+ *   polynomial_part + A₁/(factor₁) + A₂/(factor₁²) + ... + (Bx+C)/(quadratic) + ...
+ *
+ * Algorithm:
+ * 1. If not a Divide or not polynomial, return unchanged.
+ * 2. If improper (deg(numer) >= deg(denom)), perform polynomial division.
+ * 3. Factor the denominator.
+ * 4. Collect factors with multiplicities.
+ * 5. Set up a linear system for the unknown coefficients.
+ * 6. Solve via Gaussian elimination with integer arithmetic.
+ * 7. Reconstruct the partial fraction sum.
+ *
+ * IMPORTANT: Does not call .simplify() to avoid infinite recursion
+ * when called from the simplification pipeline.
+ */
+export function partialFraction(
+  expr: Expression,
+  variable: string
+): Expression {
+  const ce = expr.engine;
+
+  // Step 1: Must be a Divide expression
+  if (!isFunction(expr, 'Divide')) return expr;
+
+  const numer = expr.op1;
+  const denom = expr.op2;
+
+  // Both must be polynomials in the variable
+  const numerDeg = polynomialDegree(numer, variable);
+  const denomDeg = polynomialDegree(denom, variable);
+  if (numerDeg < 0 || denomDeg < 0) return expr;
+  if (denomDeg === 0) return expr; // Denominator is a constant
+
+  // Step 2: If improper fraction, do polynomial division
+  let quotient: Expression | null = null;
+  let remainder: Expression;
+
+  if (numerDeg >= denomDeg) {
+    const divResult = polynomialDivide(numer, denom, variable);
+    if (!divResult) return expr;
+    quotient = divResult[0];
+    remainder = divResult[1];
+
+    // Step 3: If remainder is zero, just return the quotient
+    const remCoeffs = getPolynomialCoefficients(remainder, variable);
+    if (remCoeffs && remCoeffs.every((c) => c.isSame(0))) {
+      return quotient;
+    }
+  } else {
+    remainder = numer;
+  }
+
+  // Step 4: Factor the denominator
+  const factoredDenom = factorPolynomial(denom, variable);
+
+  // Step 5: Collect factors with multiplicities
+  const factors = collectFactors(factoredDenom, variable);
+
+  // If no variable-containing factors found, return unchanged
+  if (factors.length === 0) return expr;
+
+  // If there's only one factor with multiplicity 1, it's already irreducible
+  if (factors.length === 1 && factors[0].multiplicity === 1) {
+    // Already irreducible — can't decompose further
+    if (quotient) return quotient.add(remainder.div(denom));
+    return expr;
+  }
+
+  // Check that all factor degrees are <= 2
+  for (const f of factors) {
+    if (f.degree > 2 || f.degree < 0) return expr;
+  }
+
+  // Verify that the sum of degree*multiplicity equals denomDeg
+  let totalFactorDeg = 0;
+  for (const f of factors) {
+    totalFactorDeg += f.degree * f.multiplicity;
+  }
+  if (totalFactorDeg !== denomDeg) return expr;
+
+  // Step 6: Set up template terms and the linear system
+  // For each factor with multiplicity m:
+  //   Linear (degree 1): A_k / factor^k for k=1..m
+  //   Quadratic (degree 2): (A_k*x + B_k) / factor^k for k=1..m
+  interface TemplateTerm {
+    isLinear: boolean; // true if factor is linear (degree 1)
+    factor: Expression;
+    power: number; // k in factor^k
+    unknownIndex: number; // index of A (and B for quadratic is unknownIndex+1)
+  }
+
+  const templateTerms: TemplateTerm[] = [];
+  let unknownCount = 0;
+
+  for (const f of factors) {
+    for (let k = 1; k <= f.multiplicity; k++) {
+      if (f.degree === 1) {
+        templateTerms.push({
+          isLinear: true,
+          factor: f.factor,
+          power: k,
+          unknownIndex: unknownCount,
+        });
+        unknownCount++;
+      } else {
+        // degree === 2
+        templateTerms.push({
+          isLinear: false,
+          factor: f.factor,
+          power: k,
+          unknownIndex: unknownCount,
+        });
+        unknownCount += 2; // A and B for (Ax+B)
+      }
+    }
+  }
+
+  // The number of unknowns must equal denomDeg
+  if (unknownCount !== denomDeg) return expr;
+
+  // Step 7: Build the coefficient matrix
+  // For each template term, compute cofactor = expandedDenom / (factor^power)
+  // Then multiply by the unknown pattern and collect coefficients
+
+  // Get expanded denominator coefficients
+  const expandedDenom = expand(denom);
+  const denomCoeffs = getPolynomialCoefficients(expandedDenom, variable);
+  if (!denomCoeffs) return expr;
+
+  // Get remainder coefficients
+  const expandedRemainder = expand(remainder);
+  const remCoeffs = getPolynomialCoefficients(expandedRemainder, variable);
+  if (!remCoeffs) return expr;
+
+  // Build the augmented matrix: rows = denomDeg, cols = unknownCount + 1
+  const systemRows = denomDeg;
+  const augMatrix: number[][] = [];
+  for (let i = 0; i < systemRows; i++) {
+    augMatrix.push(new Array(unknownCount + 1).fill(0));
+  }
+
+  // Fill RHS with remainder coefficients (ascending order: [const, x, x², ...])
+  for (let i = 0; i < systemRows; i++) {
+    const coeff = i < remCoeffs.length ? asSmallInteger(remCoeffs[i]) : 0;
+    if (coeff === null) return expr; // Non-integer coefficient — bail
+    augMatrix[i][unknownCount] = coeff;
+  }
+
+  // For each template term, compute cofactor and fill columns
+  for (const t of templateTerms) {
+    // Compute the denominator of this template term: factor^power
+    let termDenom: Expression;
+    if (t.power === 1) {
+      termDenom = t.factor;
+    } else {
+      termDenom = ce.box(['Power', t.factor.json, t.power]);
+    }
+
+    // Cofactor = expandedDenom / termDenom
+    const cofactorResult = polynomialDivide(expandedDenom, termDenom, variable);
+    if (!cofactorResult) return expr;
+
+    const cofactor = cofactorResult[0];
+    // Check remainder is zero
+    const cofRem = cofactorResult[1];
+    const cofRemCoeffs = getPolynomialCoefficients(cofRem, variable);
+    if (!cofRemCoeffs || !cofRemCoeffs.every((c) => c.isSame(0))) return expr;
+
+    // Get cofactor coefficients
+    const expandedCofactor = expand(cofactor);
+    const cofCoeffs = getPolynomialCoefficients(expandedCofactor, variable);
+    if (!cofCoeffs) return expr;
+
+    // Convert cofactor coefficients to integers
+    const intCofCoeffs: number[] = [];
+    for (let i = 0; i < systemRows; i++) {
+      const c = i < cofCoeffs.length ? asSmallInteger(cofCoeffs[i]) : 0;
+      if (c === null) return expr; // Non-integer — bail
+      intCofCoeffs.push(c);
+    }
+
+    if (t.isLinear) {
+      // Linear: A * cofactor
+      // The coefficient of x^i from A*cofactor is A * cofCoeffs[i]
+      for (let i = 0; i < systemRows; i++) {
+        augMatrix[i][t.unknownIndex] += intCofCoeffs[i];
+      }
+    } else {
+      // Quadratic: (A*x + B) * cofactor
+      // B * cofactor contributes B * cofCoeffs[i] to row i
+      // A * x * cofactor contributes A * cofCoeffs[i-1] to row i (shifted by 1)
+      const aIdx = t.unknownIndex;
+      const bIdx = t.unknownIndex + 1;
+      for (let i = 0; i < systemRows; i++) {
+        // B * cofactor[i]
+        augMatrix[i][bIdx] += intCofCoeffs[i];
+        // A * x * cofactor: coefficient of x^i is cofCoeffs[i-1]
+        if (i > 0) {
+          augMatrix[i][aIdx] += intCofCoeffs[i - 1];
+        }
+      }
+    }
+  }
+
+  // Step 8: Solve the linear system
+  const solution = solveLinearSystem(augMatrix, unknownCount);
+  if (!solution) return expr;
+
+  // Step 9: Reconstruct the partial fractions
+  const x = ce.symbol(variable);
+  const partialTerms: Expression[] = [];
+
+  if (quotient) partialTerms.push(quotient);
+
+  for (const t of templateTerms) {
+    // Build the denominator of this term: factor^power
+    let termDenom: Expression;
+    if (t.power === 1) {
+      termDenom = t.factor;
+    } else {
+      termDenom = ce.box(['Power', t.factor.json, t.power]);
+    }
+
+    // Build the numerator
+    let termNumer: Expression;
+    if (t.isLinear) {
+      const [num, den] = solution[t.unknownIndex];
+      if (num === 0) continue; // Skip zero terms
+      termNumer = den === 1 ? ce.number(num) : ce.number(num).div(ce.number(den));
+    } else {
+      // Quadratic: A*x + B
+      const [aNum, aDen] = solution[t.unknownIndex];
+      const [bNum, bDen] = solution[t.unknownIndex + 1];
+      if (aNum === 0 && bNum === 0) continue; // Skip zero terms
+
+      const terms: Expression[] = [];
+      if (aNum !== 0) {
+        const aCoeff =
+          aDen === 1 ? ce.number(aNum) : ce.number(aNum).div(ce.number(aDen));
+        terms.push(aCoeff.mul(x));
+      }
+      if (bNum !== 0) {
+        const bCoeff =
+          bDen === 1 ? ce.number(bNum) : ce.number(bNum).div(ce.number(bDen));
+        terms.push(bCoeff);
+      }
+
+      termNumer = terms.length === 1 ? terms[0] : add(...terms);
+    }
+
+    partialTerms.push(termNumer.div(termDenom));
+  }
+
+  if (partialTerms.length === 0) return ce.Zero;
+  if (partialTerms.length === 1) return partialTerms[0];
+  return add(...partialTerms);
 }
