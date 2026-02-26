@@ -58,8 +58,8 @@
   },
   "main": "./dist/compute-engine.min.esm.js",
   "module": "./dist/compute-engine.min.esm.js",
-  "browser": "./dist/compute-engine.min.umd.js",
-  "unpkg": "./dist/compute-engine.min.umd.js",
+  "browser": "./dist/compute-engine.min.umd.cjs",
+  "unpkg": "./dist/compute-engine.min.umd.cjs",
   "types": "./dist/types/compute-engine.d.ts",
   "engines": {
     "npm": ">=10.5.0",
