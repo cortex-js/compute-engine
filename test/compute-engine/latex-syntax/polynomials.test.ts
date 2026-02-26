@@ -42,7 +42,7 @@ describe('COEFFICIENT LIST', () => {
   test('linear', () =>
     expect(
       evaluate('\\operatorname{CoefficientList}(3x + 1, x)')
-    ).toMatchInlineSnapshot(`[1,3]`));
+    ).toMatchInlineSnapshot(`[3,1]`));
 
   test('quadratic', () =>
     expect(
@@ -52,7 +52,7 @@ describe('COEFFICIENT LIST', () => {
   test('cubic with missing term', () =>
     expect(
       evaluate('\\operatorname{CoefficientList}(x^3 + 2x + 1, x)')
-    ).toMatchInlineSnapshot(`[1,2,0,1]`));
+    ).toMatchInlineSnapshot(`[1,0,2,1]`));
 });
 
 describe('POLYNOMIAL DIVISION', () => {

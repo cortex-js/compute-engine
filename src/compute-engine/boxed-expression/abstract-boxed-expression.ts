@@ -72,6 +72,20 @@ export function _setExpandForIs(fn: ExpandFn) {
   _expandForIs = fn;
 }
 
+// Lazy reference to break circular dependency:
+// abstract-boxed-expression → polynomials → arithmetic-add → boxed-tensor → abstract-boxed-expression
+type GetPolynomialCoefficientsFn = (
+  expr: Expression,
+  variable: string
+) => Expression[] | null;
+let _getPolynomialCoefficients: GetPolynomialCoefficientsFn;
+/** @internal */
+export function _setGetPolynomialCoefficients(
+  fn: GetPolynomialCoefficientsFn
+) {
+  _getPolynomialCoefficients = fn;
+}
+
 const EXPANDABLE_OPS = ['Multiply', 'Power', 'Negate', 'Divide'];
 
 /** Return true if at least one side contains an operator where expansion could
@@ -501,6 +515,20 @@ export abstract class _BoxedExpression implements Expression {
 
   factors(): ReadonlyArray<Expression> {
     return [this];
+  }
+
+  polynomialCoefficients(
+    variable?: string
+  ): ReadonlyArray<Expression> | undefined {
+    if (variable === undefined) {
+      const unknowns = this.unknowns;
+      if (unknowns.length !== 1) return undefined;
+      variable = unknowns[0];
+    }
+
+    const coeffs = _getPolynomialCoefficients(this, variable);
+    if (coeffs === null) return undefined;
+    return coeffs.reverse();
   }
 
   is(

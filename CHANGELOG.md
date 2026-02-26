@@ -1,5 +1,17 @@
 ### [Unreleased]
 
+- **New `expr.polynomialCoefficients()` method**: Returns the coefficients of a
+  polynomial expression in descending order of degree, or `undefined` if the
+  expression is not a polynomial. Auto-detects the variable when the expression
+  has exactly one unknown. Subsumes `isPolynomial` (check `!== undefined`) and
+  degree computation (`length - 1`).
+
+- **Breaking: `CoefficientList` now returns descending order**: The CAS
+  function `CoefficientList` now returns coefficients from highest to lowest
+  degree (e.g., `[1, 0, 2, 1]` for `x^3 + 2x + 1`), matching the new
+  `polynomialCoefficients()` method and common external conventions. Previously
+  it returned ascending order.
+
 - **`expr.match()` now accepts string patterns with auto-wildcarding**: Pass a
   LaTeX string like `'ax^2+bx+c'` and single-character symbols are automatically
   treated as wildcards. Results use clean unprefixed keys (`{a: 3, b: 2, c: 5}`)

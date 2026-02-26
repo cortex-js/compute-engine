@@ -9,9 +9,11 @@ import { serializeJson, _setProduct } from './serialize';
 import {
   _setSerializeJson,
   _setExpandForIs,
+  _setGetPolynomialCoefficients,
 } from './abstract-boxed-expression';
 
 import { Product } from './arithmetic-mul-div';
+import { getPolynomialCoefficients } from './polynomials';
 
 // eslint-disable-next-line import/no-restricted-paths
 import { compile } from '../compilation/compile-expression';
@@ -22,3 +24,4 @@ _setExpandForIs(expand);
 _setSerializeJson(serializeJson);
 _setProduct(Product);
 _setCompile(compile);
+_setGetPolynomialCoefficients(getPolynomialCoefficients);

@@ -1082,6 +1082,35 @@ export interface Expression {
   factors(): ReadonlyArray<Expression>;
 
   /**
+   * Return the coefficients of this expression as a polynomial in `variable`,
+   * in descending order of degree. Returns `undefined` if the expression is
+   * not a polynomial in the given variable.
+   *
+   * If `variable` is omitted, auto-detects when the expression has exactly
+   * one unknown. Returns `undefined` if there are zero or multiple unknowns.
+   *
+   * ```typescript
+   * ce.parse('x^2 + 2x + 1').polynomialCoefficients('x')  // [1, 2, 1]
+   * ce.parse('x^3 + 2x + 1').polynomialCoefficients('x')  // [1, 0, 2, 1]
+   * ce.parse('sin(x)').polynomialCoefficients('x')          // undefined
+   * ce.parse('x^2 + 5').polynomialCoefficients()            // [1, 0, 5]
+   * ```
+   *
+   * Subsumes `isPolynomial`:
+   * ```typescript
+   * const isPolynomial = expr.polynomialCoefficients('x') !== undefined;
+   * ```
+   *
+   * Subsumes `polynomialDegree`:
+   * ```typescript
+   * const degree = expr.polynomialCoefficients('x')?.length - 1;
+   * ```
+   */
+  polynomialCoefficients(
+    variable?: string
+  ): ReadonlyArray<Expression> | undefined;
+
+  /**
    * The name of the operator of the expression.
    *
    * For example, the name of the operator of `["Add", 2, 3]` is `"Add"`.

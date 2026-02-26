@@ -16,9 +16,9 @@ import { expand } from '../src/compute-engine/boxed-expression/expand';
 const ce = new ComputeEngine();
 const engine = ce;
 
-const res = parse('3+2+3x^2').match('ax^2 + bx + c');
+const res = parse('2x+3+4x').match('ax^2 + bx + c');
 console.log(res?.a?.re, res?.b?.re, res?.c?.re);
-// -> 3 0 5
+// -> 0 6 3
 
 console.log(isNumber(res?.a) && isNumber(res?.b) && isNumber(res?.c));
 

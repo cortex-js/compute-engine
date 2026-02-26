@@ -81,8 +81,8 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
 
     CoefficientList: {
       description:
-        'Return the list of coefficients of a polynomial, from lowest to highest degree. ' +
-        'Example: CoefficientList(x³ + 2x + 1, x) → [1, 2, 0, 1]',
+        'Return the list of coefficients of a polynomial, from highest to lowest degree. ' +
+        'Example: CoefficientList(x³ + 2x + 1, x) → [1, 0, 2, 1]',
       lazy: true,
       signature: '(value, symbol) -> list<value>',
       evaluate: ([poly, varExpr]) => {
@@ -91,7 +91,7 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
         if (!variable) return undefined;
         const coeffs = getPolynomialCoefficients(poly.canonical, variable);
         if (!coeffs) return undefined;
-        return poly.engine.box(['List', ...coeffs]);
+        return poly.engine.box(['List', ...coeffs.reverse()]);
       },
     },
 
