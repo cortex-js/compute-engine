@@ -122,6 +122,8 @@ Benchmarked at precisions 50, 100, and 500. Representative speedups:
 
 | Operation  | p=50   | p=100   | p=500    |
 | ---------- | ------ | ------- | -------- |
+| add        | ~1x    | ~1x     | ~1x      |
+| sub        | 3.5x   | 4.0x    | 1.6x     |
 | mul        | 7.6x   | 3.2x    | 6.5x     |
 | div        | 1.9x   | 1.6x    | 3.2x     |
 | eq         | 5.0x   | 3.5x    | 7.3x     |
@@ -160,10 +162,6 @@ every tested precision (verified via cross-validation tests).
   time, each requiring a full-precision division. Binary splitting computes the
   series as a rational `P/Q` via a divide-and-conquer tree, deferring the single
   final division. This is asymptotically faster for high precision.
-
-- **Increase guard digits for small precisions**: At precision 50, `exp(1)`
-  delivers 46/50 correct digits (3 guard digits lost). Bumping guard digits from
-  15 to 20 for p < 100 would close the gap with minimal performance cost.
 
 - **Lazy normalization**: `add` and `sub` normalize on every call (strip trailing
   zeros). Deferring normalization to "observation points" (toString, comparisons)
