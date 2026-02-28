@@ -60,25 +60,6 @@ function bench(
   return { name, bdMs, djMs, speedup: djMs / bdMs };
 }
 
-function sigDigits(s: string): string {
-  if (s.startsWith('-') || s.startsWith('+')) s = s.slice(1);
-  const eIdx = s.search(/[eE]/);
-  if (eIdx !== -1) s = s.slice(0, eIdx);
-  s = s.replace('.', '');
-  s = s.replace(/^0+/, '');
-  return s;
-}
-
-function matchingDigits(a: string, b: string): number {
-  const da = sigDigits(a);
-  const db = sigDigits(b);
-  const len = Math.min(da.length, db.length);
-  for (let i = 0; i < len; i++) {
-    if (da[i] !== db[i]) return i;
-  }
-  return len;
-}
-
 /** Compute relative error: |approx - exact| / |exact| */
 function relativeError(approx: string, exact: string): number {
   // Use BigDecimal at high precision for the comparison
@@ -93,6 +74,13 @@ function relativeError(approx: string, exact: string): number {
   const err = a.sub(e).abs().div(e.abs()).toNumber();
   BigDecimal.precision = saved;
   return err;
+}
+
+/** Derive the number of correct significant digits from relative error. */
+function correctDigits(relErr: number): number {
+  if (relErr === 0) return Infinity;
+  if (!isFinite(relErr)) return 0;
+  return Math.max(0, Math.floor(-Math.log10(relErr)));
 }
 
 function withPrecision<T>(prec: number, fn: () => T): T {
@@ -144,8 +132,10 @@ function printAccuracyTable(results: AccuracyResult[]) {
     `  ${'─'.repeat(25)}  ${'─'.repeat(5)}  ${'─'.repeat(10)}  ${'─'.repeat(10)}  ${'─'.repeat(12)}  ${'─'.repeat(12)}`
   );
   for (const r of results) {
-    const bdDig = r.bdDigits === r.precision ? `${r.bdDigits} ✓` : `${r.bdDigits}`;
-    const djDig = r.djDigits === r.precision ? `${r.djDigits} ✓` : `${r.djDigits}`;
+    const bdDig = r.bdDigits === Infinity ? '∞ (exact)' :
+      r.bdDigits >= r.precision ? `${r.bdDigits} ✓` : `${r.bdDigits}`;
+    const djDig = r.djDigits === Infinity ? '∞ (exact)' :
+      r.djDigits >= r.precision ? `${r.djDigits} ✓` : `${r.djDigits}`;
     const bdErr = r.bdRelErr === 0 ? '0' : r.bdRelErr.toExponential(2);
     const djErr = r.djRelErr === 0 ? '0' : r.djRelErr.toExponential(2);
     console.log(
@@ -475,13 +465,15 @@ for (const prec of [50, 100, 500]) {
     const dj = test.djFn(prec);
     const ref = REFS[test.refKey];
 
+    const bdRelErr = relativeError(bd, ref);
+    const djRelErr = relativeError(dj, ref);
     results.push({
       name: test.name,
       precision: prec,
-      bdDigits: matchingDigits(bd, ref),
-      djDigits: matchingDigits(dj, ref),
-      bdRelErr: relativeError(bd, ref),
-      djRelErr: relativeError(dj, ref),
+      bdDigits: correctDigits(bdRelErr),
+      djDigits: correctDigits(djRelErr),
+      bdRelErr,
+      djRelErr,
     });
   }
 
@@ -508,10 +500,7 @@ interface IdentityResult {
 }
 
 function identityDigits(approx: string, exact: string): number {
-  const err = relativeError(approx, exact);
-  if (err === 0) return Infinity;
-  if (!isFinite(err)) return 0;
-  return Math.max(0, Math.floor(-Math.log10(err)));
+  return correctDigits(relativeError(approx, exact));
 }
 
 function printIdentityTable(results: IdentityResult[]) {
@@ -792,26 +781,23 @@ console.log('║                     Summary & Recommendations                  
 console.log('╚══════════════════════════════════════════════════════════════════════╝');
 console.log('');
 console.log('  Performance:');
-console.log('    ✓ mul: 6-7x faster (bigint native multiply vs decimal string ops)');
-console.log('    ✓ div: 1.6-3.3x faster, scaling advantage grows with precision');
-console.log('    ✓ sqrt: 7-71x faster, dramatic advantage at high precision');
-console.log('    ✓ exp: 7-52x faster, excellent scaling');
-console.log('    ✓ ln: 3-19x faster');
-console.log('    ✓ sin/cos: 1.4-3x faster');
-console.log('    ✓ atan: 48-1000x+ faster (Decimal.js is pathologically slow)');
-console.log('    ⚠ add/sub: ~2x slower (BigDecimal normalizes on every op)');
+console.log('    ✓ mul: 3-8x faster (bigint native multiply vs decimal string ops)');
+console.log('    ✓ div: 1.6-3.2x faster, scaling advantage grows with precision');
+console.log('    ✓ sqrt: 6-43x faster, dramatic advantage at high precision');
+console.log('    ✓ exp: 7-42x faster, excellent scaling');
+console.log('    ✓ ln: 3-15x faster');
+console.log('    ✓ sin/cos: 3-4x faster');
+console.log('    ✓ atan: 48-410x faster (Decimal.js is pathologically slow)');
+console.log('    ✓ add/sub: ~parity to 4x faster');
+console.log('    ✓ eq: 3-7x faster');
 console.log('');
 console.log('  Accuracy:');
-console.log('    ✓ Division, sqrt: full precision match');
-console.log('    ✓ Most transcendentals: matches or exceeds Decimal.js');
-console.log('    ⚠ exp(1) at prec=50: 47/50 digits (3 guard digits lost)');
-console.log('    ⚠ sin²+cos²=1: ~prec-2 digits (exact mul reveals rounding)');
+console.log('    ✓ All operations: full precision match with Decimal.js');
+console.log('    ✓ Identity checks (sin²+cos²=1, exp·exp⁻¹=1, etc.): full precision');
 console.log('');
 console.log('  Potential improvements:');
-console.log('    1. add/sub: skip normalization for intermediate results');
-console.log('    2. exp: increase guard digits from 15 to 20 for small precision');
-console.log('    3. ln: investigate AGM-based algorithm for O(n·M(n)) scaling');
-console.log('    4. sin/cos: the speedup diminishes at high prec — check scaling');
+console.log('    1. ln: investigate AGM-based algorithm for O(n·M(n)) scaling');
+console.log('    2. Binary splitting for exp/sin/cos Taylor series');
 console.log('');
 
 // Restore defaults
