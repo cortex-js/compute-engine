@@ -122,19 +122,19 @@ Benchmarked at precisions 50, 100, and 500. Representative speedups:
 
 | Operation  | p=50   | p=100   | p=500    |
 | ---------- | ------ | ------- | -------- |
-| add        | ~1x    | ~1x     | ~1x      |
-| sub        | 3.5x   | 4.0x    | 1.6x     |
-| mul        | 7.6x   | 3.2x    | 6.5x     |
-| div        | 1.9x   | 1.6x    | 3.2x     |
-| eq         | 5.0x   | 3.5x    | 7.3x     |
-| sqrt       | 6.3x   | 8.6x    | 43x      |
-| cbrt       | 12x    | 24x     | 166x     |
-| exp        | 7.7x   | 13x     | 42x      |
-| ln         | 2.7x   | 6.6x    | 15x      |
-| sin        | 3.6x   | 4.0x    | 3.8x     |
-| cos        | 3.3x   | 3.7x    | 4.2x     |
-| atan       | 48x    | 112x    | 410x     |
-| asin       | 55x    | 90x     | 381x     |
+| add        | 1.9x   | ~1x     | ~1x      |
+| sub        | 2.8x   | 4.0x    | 1.6x     |
+| mul        | 8.3x   | 4.2x    | 6.6x     |
+| div        | 2.4x   | 1.4x    | 3.4x     |
+| eq         | 5.3x   | 8.5x    | 8.8x     |
+| sqrt       | 7.0x   | 7.8x    | 40x      |
+| cbrt       | 13x    | 20x     | 153x     |
+| exp        | 9.0x   | 13x     | 44x      |
+| ln         | 2.7x   | 7.3x    | 11x      |
+| sin        | 3.5x   | 3.7x    | 3.8x     |
+| cos        | 3.5x   | 3.5x    | 4.4x     |
+| atan       | 72x    | 120x    | 599x     |
+| asin       | 35x    | 87x     | 208x     |
 
 Accuracy is identical: both libraries produce the same significant digits at
 every tested precision (verified via cross-validation tests).

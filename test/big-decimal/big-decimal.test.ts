@@ -846,10 +846,10 @@ describe('cmp()', () => {
     expect(new BigDecimal('0.15').cmp(new BigDecimal('0.0015'))).toBe(1);
   });
 
-  test('NaN compared to anything returns 0', () => {
-    expect(new BigDecimal(NaN).cmp(new BigDecimal('5'))).toBe(0);
-    expect(new BigDecimal('5').cmp(new BigDecimal(NaN))).toBe(0);
-    expect(new BigDecimal(NaN).cmp(new BigDecimal(NaN))).toBe(0);
+  test('NaN compared to anything returns NaN', () => {
+    expect(new BigDecimal(NaN).cmp(new BigDecimal('5'))).toBeNaN();
+    expect(new BigDecimal('5').cmp(new BigDecimal(NaN))).toBeNaN();
+    expect(new BigDecimal(NaN).cmp(new BigDecimal(NaN))).toBeNaN();
   });
 
   test('infinity comparisons', () => {
