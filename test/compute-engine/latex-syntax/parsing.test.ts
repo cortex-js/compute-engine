@@ -568,7 +568,7 @@ describe('NON-STRICT MODE (Math-ASCII/Typst-like syntax)', () => {
     });
 
     test('sin^2(x) + cos^2(x) identity', () => {
-      const a = ce.parse('sin^2(x) + cos^2(x)', { strict: false });
+      const a = ce.parse('sin^2(x) + cos^2(x)', { strict: false })!;
       expect(a.isEqual(1)).toBe(true);
     });
   });

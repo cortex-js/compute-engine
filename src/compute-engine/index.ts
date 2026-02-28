@@ -1381,6 +1381,14 @@ export class ComputeEngine implements IComputeEngine {
    * (e.g., recognizing `f` as a function).
    */
   parse(
+    latex: string,
+    options?: Partial<ParseLatexOptions> & { form?: FormOption }
+  ): Expression;
+  parse(
+    latex: string | null,
+    options?: Partial<ParseLatexOptions> & { form?: FormOption }
+  ): Expression | null;
+  parse(
     latex: string | null,
     options?: Partial<ParseLatexOptions> & { form?: FormOption }
   ): Expression | null {

@@ -186,6 +186,10 @@ export interface IComputeEngine {
    * but uses the engine's symbol definitions for better parsing accuracy.
    */
   parse(
+    latex: string,
+    options?: Partial<ParseLatexOptions> & { form?: FormOption }
+  ): Expression;
+  parse(
     latex: string | null,
     options?: Partial<ParseLatexOptions> & { form?: FormOption }
   ): Expression | null;
