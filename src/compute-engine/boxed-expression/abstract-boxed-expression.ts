@@ -35,10 +35,6 @@ import type { NumericValue } from '../numeric-value/types';
 import type { SmallInteger } from '../numerics/types';
 
 import { toAsciiMath } from './ascii-math';
-import {
-  serialize as serializeToLatex,
-  LatexSyntax,
-} from '../latex-syntax/latex-syntax';
 // Dynamic import for serializeJson to avoid circular dependency
 import { cmp, eq, same } from './compare';
 import { CancellationError } from '../../common/interruptible';
@@ -232,7 +228,8 @@ export abstract class _BoxedExpression implements Expression {
       const materialized = this.evaluate({ materialization: true });
       if (!materialized.isLazyCollection) return materialized.latex;
     }
-    return serializeToLatex(
+    const syntax = this.engine._requireLatexSyntax();
+    return syntax.serialize(
       this.toMathJson({ prettify: true, fractionalDigits: 'auto' })
     );
   }
@@ -261,10 +258,10 @@ export abstract class _BoxedExpression implements Expression {
       fractionalDigits: 'auto',
     });
 
-    if (!options || Object.keys(options).length === 0) {
-      return serializeToLatex(json);
-    }
-    const syntax = new LatexSyntax(options);
+    const syntax = this.engine._requireLatexSyntax();
+    if (!options || Object.keys(options).length === 0)
+      return syntax.serialize(json);
+
     return syntax.serialize(json, options);
   }
 

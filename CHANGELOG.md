@@ -7,6 +7,39 @@
   treatment. Non-numeric arguments (e.g., tuples, triples) still trigger
   function-call behavior.
 
+- **LatexSyntax is now an injectable dependency**. The `ComputeEngine`
+  constructor accepts an optional `latexSyntax` option to inject a `LatexSyntax`
+  instance. When importing the full package (`@cortex-js/compute-engine`), a
+  `LatexSyntax` is created automatically — existing code works unchanged. When
+  importing only `@cortex-js/compute-engine/core`, no `LatexSyntax` is bundled;
+  `ce.parse()`, `.latex`, and `.toLatex()` will throw unless a `LatexSyntax` is
+  explicitly provided. MathJSON serialization (`.json`, `.toMathJson()`)
+  gracefully omits the optional `latex` metadata field when no `LatexSyntax` is
+  available.
+
+  ```ts
+  // Full package — works as before, LatexSyntax auto-created:
+  import { ComputeEngine } from '@cortex-js/compute-engine';
+  const ce = new ComputeEngine();
+  ce.parse('x^2');  // works
+
+  // Core-only — explicit injection for LaTeX support:
+  import { ComputeEngine } from '@cortex-js/compute-engine/core';
+  import { LatexSyntax } from '@cortex-js/compute-engine/latex-syntax';
+  const ce = new ComputeEngine({ latexSyntax: new LatexSyntax() });
+  ce.parse('x^2');  // works
+
+  // Core-only — no LaTeX needed:
+  import { ComputeEngine } from '@cortex-js/compute-engine/core';
+  const ce = new ComputeEngine();
+  ce.expr(['Add', 'x', 1]).simplify();  // works
+  ce.parse('x + 1');                     // throws: LatexSyntax not available
+  ```
+
+- **New `ILatexSyntax` interface**: A structural interface for LaTeX
+  parser/serializers, exposed on `IComputeEngine.latexSyntax`. Allows custom
+  implementations without depending on the `LatexSyntax` class.
+
 **Package modularization**: The monolithic `@cortex-js/compute-engine` package
 can now be imported as seven independently usable sub-paths, enabling smaller
 bundles for consumers who only need a subset of functionality.

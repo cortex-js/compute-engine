@@ -12,8 +12,8 @@ work** — with a few breaking API changes listed below.
 | 0.54.x | 0.55.0 |
 | --- | --- |
 | `ce.box(input)` | `ce.expr(input)` |
-| `ce.latexDictionary` | `new LatexSyntax({ dictionary })` |
-| `ce.latexDictionary = [...]` | `new LatexSyntax({ dictionary: [...] })` |
+| `ce.latexDictionary` | `new LatexSyntax({ dictionary })` passed to constructor |
+| `ce.latexDictionary = [...]` | `new ComputeEngine({ latexSyntax: new LatexSyntax({ dictionary: [...] }) })` |
 | `ComputeEngine.getLatexDictionary()` | `import { LATEX_DICTIONARY }` |
 | `isBoxedExpression(x)` | `isExpression(x)` |
 | `isBoxedNumber(x)` | `isNumber(x)` |
@@ -49,10 +49,11 @@ import { expr } from '@cortex-js/compute-engine';
 const e = expr(['Add', 'x', 1]);
 ```
 
-### 2. `ce.latexDictionary` removed
+### 2. `ce.latexDictionary` removed — use `LatexSyntax` constructor injection
 
 The `latexDictionary` getter and setter on `ComputeEngine` are removed. LaTeX
-dictionaries are now managed by the standalone `LatexSyntax` class.
+dictionaries are now managed by the `LatexSyntax` class, which is injected into
+`ComputeEngine` via the `latexSyntax` constructor option.
 
 ```ts
 // Before
@@ -68,8 +69,7 @@ ce.latexDictionary = [
 ];
 
 // After
-import { LatexSyntax, LATEX_DICTIONARY } from '@cortex-js/compute-engine';
-// Or: import { LatexSyntax, LATEX_DICTIONARY } from '@cortex-js/compute-engine/latex-syntax';
+import { ComputeEngine, LatexSyntax, LATEX_DICTIONARY } from '@cortex-js/compute-engine';
 
 const syntax = new LatexSyntax({
   dictionary: [
@@ -84,6 +84,11 @@ const syntax = new LatexSyntax({
   ],
 });
 
+// Inject into the engine so ce.parse(), .latex, .toLatex() use it:
+const ce = new ComputeEngine({ latexSyntax: syntax });
+ce.parse('\\placeholder{x}');
+
+// Or use the LatexSyntax instance directly (no engine needed):
 const mathJson = syntax.parse('\\placeholder{x}');
 ```
 
@@ -127,7 +132,7 @@ import { isExpression, isNumber } from '@cortex-js/compute-engine';
 
 If you were passing custom library definitions with `latexDictionary` entries
 to the `ComputeEngine` constructor, that field is no longer recognized. Define
-your LaTeX entries via a `LatexSyntax` instance instead.
+your LaTeX entries via a `LatexSyntax` instance and inject it.
 
 ```ts
 // Before
@@ -140,20 +145,21 @@ const ce = new ComputeEngine({
 });
 
 // After
-import { LatexSyntax, LATEX_DICTIONARY } from '@cortex-js/compute-engine';
-
-const ce = new ComputeEngine({
-  libraries: [{
-    name: 'mylib',
-    operators: { MyOp: { ... } },
-  }],
-});
+import { ComputeEngine, LatexSyntax, LATEX_DICTIONARY } from '@cortex-js/compute-engine';
 
 const syntax = new LatexSyntax({
   dictionary: [
     ...LATEX_DICTIONARY,
     { latexTrigger: '\\myop', parse: 'MyOp' },
   ],
+});
+
+const ce = new ComputeEngine({
+  latexSyntax: syntax,
+  libraries: [{
+    name: 'mylib',
+    operators: { MyOp: { ... } },
+  }],
 });
 ```
 
@@ -220,6 +226,19 @@ const e = ce.expr(['Add', ['Power', 'x', 2], 1]);
 e.simplify();
 ```
 
+To add LaTeX support to a core-only engine, inject a `LatexSyntax`:
+
+```ts
+import { ComputeEngine } from '@cortex-js/compute-engine/core';
+import { LatexSyntax } from '@cortex-js/compute-engine/latex-syntax';
+
+const ce = new ComputeEngine({ latexSyntax: new LatexSyntax() });
+ce.parse('x^2 + 1'); // works
+```
+
+Without injection, `ce.parse()`, `.latex`, and `.toLatex()` throw an error.
+MathJSON operations (`ce.expr()`, `.json`, `.evaluate()`, etc.) work without it.
+
 ### Compilation targets only
 
 ```ts
@@ -243,10 +262,19 @@ The following convenience methods were **kept** on `ComputeEngine` and
 
 | Method | Still works? | Standalone alternative |
 | --- | --- | --- |
-| `ce.parse(latex)` | Yes | `parse(latex)` from `latex-syntax` + `ce.expr()` |
-| `expr.latex` | Yes | `serialize(expr.json)` from `latex-syntax` |
-| `expr.toLatex()` | Yes | `serialize(expr.json)` from `latex-syntax` |
+| `ce.parse(latex)` | Yes (requires `LatexSyntax`) | `parse(latex)` from `latex-syntax` + `ce.expr()` |
+| `expr.latex` | Yes (requires `LatexSyntax`) | `serialize(expr.json)` from `latex-syntax` |
+| `expr.toLatex()` | Yes (requires `LatexSyntax`) | `serialize(expr.json)` from `latex-syntax` |
 | `ce.box(input)` | Yes (deprecated) | `ce.expr(input)` |
 
-These convenience methods use the standalone `LatexSyntax` internally and
-will continue to work for the foreseeable future.
+These convenience methods delegate to the engine's injected `LatexSyntax`
+instance. When using the full package (`@cortex-js/compute-engine`), a
+`LatexSyntax` is automatically created — existing code works unchanged. When
+using only the core sub-path, pass a `LatexSyntax` via the constructor:
+
+```ts
+const ce = new ComputeEngine({ latexSyntax: new LatexSyntax() });
+```
+
+The `LatexSyntax` instance is accessible via `ce.latexSyntax` (returns
+`undefined` if none is available).

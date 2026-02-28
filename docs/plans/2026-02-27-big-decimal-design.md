@@ -41,6 +41,9 @@ BigDecimal.precision = 50; // set by engine's setPrecision()
 - **Guard digits**: transcendental implementations use `precision + 10`
   internally, round result to `precision`.
 
+See `docs/NUMERIC-SERIALIZATION.md` for how precision affects the three output
+paths (`.json`, `.latex`, `.toString()`).
+
 ## API Surface
 
 ### Construction

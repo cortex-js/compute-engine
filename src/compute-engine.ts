@@ -10,11 +10,21 @@ export { ComputeEngine } from './compute-engine/index';
 export type * from './compute-engine/types';
 
 // ── LaTeX syntax ────────────────────────────────────────────────────
+import { LatexSyntax } from './compute-engine/latex-syntax/latex-syntax';
 export {
   LatexSyntax,
   parse as parseLatex,
   serialize as serializeLatex,
 } from './compute-engine/latex-syntax/latex-syntax';
+
+// ── Wire up LatexSyntax so all ComputeEngine instances can lazily create one ──
+ComputeEngine._latexSyntaxFactory = () => new LatexSyntax();
+
+// ── Wire up the default engine factory with LatexSyntax ─────────────
+import { _setDefaultEngineFactory } from './compute-engine/free-functions';
+_setDefaultEngineFactory(
+  () => new ComputeEngine({ latexSyntax: new LatexSyntax() })
+);
 
 export {
   LATEX_DICTIONARY,

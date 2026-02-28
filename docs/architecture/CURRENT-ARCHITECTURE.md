@@ -79,7 +79,6 @@ This document captures the implemented architecture after the recent modularizat
 | `engine-runtime-state.ts` | Execution limits (time, iteration, recursion) and verification state |
 | `engine-configuration-lifecycle.ts` | Configuration change propagation and reset fan-out |
 | `engine-cache.ts` | Expression and rule-set caching with generation-based invalidation |
-| `engine-latex-dictionary-state.ts` | LaTeX dictionary indexing and rebuild |
 
 ### Scoping & Declarations
 | File | Responsibility |
@@ -101,6 +100,38 @@ This document captures the implemented architecture after the recent modularizat
 | `engine-compilation-targets.ts` | Registry for named compilation targets (JavaScript, GLSL, etc.) |
 | `engine-type-resolver.ts` | Type resolution callback for parser integration |
 
+## LatexSyntax as Injectable Dependency
+
+`LatexSyntax` is an optional dependency of `ComputeEngine`. The engine does not
+statically import the `LatexSyntax` class — it only uses the structural
+`ILatexSyntax` interface from `types-engine.ts`.
+
+**Injection mechanism:**
+
+1. **Explicit constructor option**: `new ComputeEngine({ latexSyntax: new LatexSyntax() })`.
+2. **Static factory** (`ComputeEngine._latexSyntaxFactory`): Registered by the
+   full entry point (`compute-engine.ts`). Enables lazy creation so `new ComputeEngine()` still works with LaTeX when imported from the full package.
+3. **No LatexSyntax**: When imported from the core sub-path without injection,
+   `ce.parse()`, `.latex`, and `.toLatex()` throw a clear error. MathJSON
+   serialization gracefully omits the optional `latex` metadata field.
+
+**Key types:**
+
+- `ILatexSyntax` (in `types-engine.ts`) — structural interface with `parse()` and `serialize()` methods.
+- `IComputeEngine.latexSyntax` — getter returning the instance (lazily created via factory if available) or `undefined`.
+- `IComputeEngine._requireLatexSyntax()` — returns the instance or throws.
+
+**Files involved:**
+
+| File | Role |
+|------|------|
+| `types-engine.ts` | Defines `ILatexSyntax` interface, declares `latexSyntax` / `_requireLatexSyntax()` on `IComputeEngine` |
+| `index.ts` | Stores instance, exposes getter/helper, accepts constructor option, holds static factory |
+| `compute-engine.ts` | Registers the factory: `ComputeEngine._latexSyntaxFactory = () => new LatexSyntax()` |
+| `abstract-boxed-expression.ts` | `.latex` / `.toLatex()` route through `engine._requireLatexSyntax()` |
+| `serialize.ts` | Latex metadata conditional on `ce.latexSyntax` availability |
+| `rules.ts` | Rule parsing constructs LatexSyntax via `ce._requireLatexSyntax().constructor` |
+
 ## Free Functions & Lazy Global Engine
 
 Top-level free functions (`parse`, `simplify`, `evaluate`, `N`, `assign`) are exported from `index.ts` via `free-functions.ts`. They are backed by a lazily-instantiated global `ComputeEngine` accessible via `getDefaultEngine()`.
@@ -112,7 +143,10 @@ Top-level free functions (`parse`, `simplify`, `evaluate`, `N`, `assign`) are ex
 - `assign(id, value)` / `assign({...})` — assign values in the global engine
 - `getDefaultEngine()` — access the shared engine instance for configuration
 
-The global engine is created on first call to any free function, using a dynamic `require('./index')` inside `getDefaultEngine()` to avoid circular dependency (since `index.ts` re-exports `free-functions.ts`).
+The global engine is created on first call to any free function via a factory
+registered by the entry point. The full entry point (`compute-engine.ts`)
+registers a factory that includes `LatexSyntax`; the core entry point
+(`index.ts`) registers a factory without it.
 
 ## Extension Contracts (Runtime Guards)
 
@@ -130,7 +164,7 @@ Custom libraries (`new ComputeEngine({ libraries: [...] })`):
 - `requires` must be an array of library names
 - duplicate dependencies in `requires` are rejected
 - `definitions` must be object or array of objects
-- `latexDictionary` must be an array
+- `latexDictionary` must be an array (if present; removed from standard libraries)
 
 Compile option payloads (`compile(expr, options)`):
 - validates `to`, `target`, `operators`, `functions`, `vars`, `imports`, `preamble`, `fallback`

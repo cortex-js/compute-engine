@@ -37,6 +37,7 @@ import type {
   EvalContext,
   ExpressionInput,
   IComputeEngine,
+  ILatexSyntax,
   BoxedDefinition,
   SymbolDefinition,
   SequenceDefinition,
@@ -48,7 +49,6 @@ import type {
 } from './global-types';
 
 import type { LibraryCategory, ParseLatexOptions } from './latex-syntax/types';
-import { LatexSyntax } from './latex-syntax/latex-syntax';
 import { isOperatorDef, isValueDef } from './boxed-expression/utils';
 
 import { getStandardLibrary } from './library/library';
@@ -172,7 +172,7 @@ export {
   compile,
   getDefaultEngine,
 } from './free-functions';
-import { _setComputeEngineClass } from './free-functions';
+import { _setDefaultEngineFactory } from './free-functions';
 
 export { validatePattern };
 
@@ -240,6 +240,11 @@ import { fu as _fu } from './symbolic/fu';
  *
  */
 export class ComputeEngine implements IComputeEngine {
+  /** @internal Factory for creating LatexSyntax instances. Registered by the
+   *  full entry point (compute-engine.ts). When set, `new ComputeEngine()`
+   *  lazily creates a LatexSyntax if none was provided in options. */
+  static _latexSyntaxFactory: (() => ILatexSyntax) | null = null;
+
   // Common symbols
   readonly True: Expression;
   readonly False: Expression;
@@ -431,6 +436,7 @@ export class ComputeEngine implements IComputeEngine {
     libraries?: readonly (string | LibraryDefinition)[];
     precision?: number | 'machine';
     tolerance?: number | 'auto';
+    latexSyntax?: ILatexSyntax;
   }) {
     if (options !== undefined && typeof options !== 'object')
       throw Error('Unexpected argument');
@@ -483,6 +489,9 @@ export class ComputeEngine implements IComputeEngine {
 
     // Register default compilation targets
     this._compilationTargets.registerDefaults();
+
+    // Store the injected LatexSyntax instance (if any)
+    if (options?.latexSyntax) this._latexSyntax = options.latexSyntax;
 
     hidePrivateProperties(this);
   }
@@ -1342,8 +1351,28 @@ export class ComputeEngine implements IComputeEngine {
     return this.expr(expr, options);
   }
 
-  /** @internal Lazily-created LatexSyntax instance for parse() */
-  private _latexSyntax?: LatexSyntax;
+  /** @internal LatexSyntax instance for parse/serialize. */
+  private _latexSyntax?: ILatexSyntax;
+
+  /** The LatexSyntax instance, lazily created if a factory is registered.
+   *  `undefined` only when no LatexSyntax was provided and no factory exists. */
+  get latexSyntax(): ILatexSyntax | undefined {
+    if (!this._latexSyntax && ComputeEngine._latexSyntaxFactory)
+      this._latexSyntax = ComputeEngine._latexSyntaxFactory();
+    return this._latexSyntax;
+  }
+
+  /** @internal Returns the LatexSyntax instance, lazily creating one
+   *  if a factory is registered. Throws if no LatexSyntax is available. */
+  _requireLatexSyntax(): ILatexSyntax {
+    if (!this._latexSyntax && ComputeEngine._latexSyntaxFactory)
+      this._latexSyntax = ComputeEngine._latexSyntaxFactory();
+    if (!this._latexSyntax)
+      throw new Error(
+        'LatexSyntax not available. Pass a LatexSyntax instance to the ComputeEngine constructor.'
+      );
+    return this._latexSyntax;
+  }
 
   /**
    * Parse a LaTeX string and return a boxed expression.
@@ -1359,11 +1388,11 @@ export class ComputeEngine implements IComputeEngine {
     if (typeof latex !== 'string')
       throw Error('ce.parse(): expected a LaTeX string');
 
-    this._latexSyntax ??= new LatexSyntax();
+    const syntax = this._requireLatexSyntax();
 
     const { form, ...parseOpts } = options ?? {};
 
-    const result = this._latexSyntax.parse(latex, {
+    const result = syntax.parse(latex, {
       decimalSeparator: '.',
       getSymbolType: (id) => {
         const def = this.lookupDefinition(id);
@@ -1604,6 +1633,8 @@ export class ComputeEngine implements IComputeEngine {
   }
 }
 
-// Register the class with the free-functions module so it can lazily
+// Register a factory with the free-functions module so it can lazily
 // instantiate a default engine without importing back from this file.
-_setComputeEngineClass(ComputeEngine);
+// Note: this factory does NOT inject LatexSyntax. The full entry point
+// (compute-engine.ts) registers a factory that includes LatexSyntax.
+_setDefaultEngineFactory(() => new ComputeEngine());

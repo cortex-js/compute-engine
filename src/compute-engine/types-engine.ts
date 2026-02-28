@@ -55,8 +55,29 @@ type AssignValue = KernelAssignValue<
 type Scope = KernelScope<BoxedDefinition>;
 type EvalContext = KernelEvalContext<Expression, BoxedDefinition>;
 
+/** Minimal interface for a LaTeX parser/serializer.
+ *  Structurally compatible with `LatexSyntax` without importing it. */
+export interface ILatexSyntax {
+  parse(
+    latex: string,
+    options?: Partial<ParseLatexOptions>
+  ): import('../math-json/types').MathJsonExpression | null;
+  serialize(
+    expr: import('../math-json/types').MathJsonExpression,
+    options?: Record<string, unknown>
+  ): string;
+}
+
 /** @internal */
 export interface IComputeEngine {
+  /** The LatexSyntax instance used for LaTeX parsing/serialization.
+   *  `undefined` when no LatexSyntax was provided to the constructor.
+   */
+  readonly latexSyntax: ILatexSyntax | undefined;
+
+  /** @internal Returns the LatexSyntax instance or throws if unavailable. */
+  _requireLatexSyntax(): ILatexSyntax;
+
   // Common symbols
   readonly True: Expression;
   readonly False: Expression;

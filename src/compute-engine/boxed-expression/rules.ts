@@ -23,11 +23,7 @@ import {
   isRelationalOperator,
 } from '../latex-syntax/utils';
 
-import { Parser } from '../latex-syntax/types';
-import {
-  parse as parseLatex,
-  LatexSyntax,
-} from '../latex-syntax/latex-syntax';
+import type { Parser } from '../latex-syntax/types';
 import { LATEX_DICTIONARY } from '../latex-syntax/dictionary/default-dictionary';
 
 import { isPrime } from './predicates';
@@ -355,9 +351,9 @@ function parseRulePart(
 ): Expression | undefined {
   if (rule === undefined || typeof rule === 'function') return undefined;
   if (typeof rule === 'string') {
-    let expr = ce.expr(parseLatex(rule) ?? 'Nothing', {
+    let expr = ce.parse(rule, {
       form: options?.canonical ? 'canonical' : 'raw',
-    });
+    }) ?? ce.expr('Nothing');
     // Only auto-wildcard when explicitly requested (e.g., when parsing
     // rule strings like "a*x -> 2*x"). For object rules, keep symbols literal.
     if (options?.autoWildcard) {
@@ -511,8 +507,12 @@ function parseRule(
   ];
   const canonical = options?.canonical ?? false;
 
-  // Use a standalone LatexSyntax instance with the custom dictionary
-  const ruleSyntax = new LatexSyntax({
+  // Use a standalone LatexSyntax instance with the custom dictionary.
+  // Construct via the injected LatexSyntax class (avoids static import).
+  const LatexSyntaxClass = ce._requireLatexSyntax().constructor as new (
+    options?: Record<string, unknown>
+  ) => InstanceType<typeof import('../latex-syntax/latex-syntax').LatexSyntax>;
+  const ruleSyntax = new LatexSyntaxClass({
     dictionary: ruleDict as ReadonlyArray<Partial<import('../latex-syntax/types').LatexDictionaryEntry>>,
   });
 
@@ -631,9 +631,9 @@ function boxRule(
     if (latex) {
       // If the condition is a LaTeX string, it should be a predicate
       // (an expression with a Boolean value).
-      const condPattern = ce.expr(parseLatex(latex) ?? 'Nothing', {
+      const condPattern = ce.parse(latex, {
         form: options?.canonical ? 'canonical' : 'raw',
-      });
+      }) ?? ce.expr('Nothing');
 
       // Substitute any unbound vars in the condition to a wildcard,
       // then evaluate the condition

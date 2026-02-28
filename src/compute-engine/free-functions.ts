@@ -7,7 +7,6 @@ import type {
 } from './global-types';
 import type { Type, TypeString } from '../common/type/types';
 import type { LatexString } from './latex-syntax/types';
-import { parse as parseLatex } from './latex-syntax/latex-syntax';
 import { isExpression } from './boxed-expression/type-guards';
 import {
   expand as expandExpr,
@@ -17,21 +16,23 @@ import { factor as factorExpr } from './boxed-expression/factor';
 import { compile as compileExpr } from './compilation/compile-expression';
 
 let _defaultEngine: IComputeEngine | null = null;
-let _ComputeEngineClass: (new () => IComputeEngine) | null = null;
+let _defaultEngineFactory: (() => IComputeEngine) | null = null;
 
-/** @internal Called by index.ts to register the ComputeEngine class,
- *  avoiding a circular dependency (index.ts re-exports this file). */
-export function _setComputeEngineClass(cls: new () => IComputeEngine): void {
-  _ComputeEngineClass = cls;
+/** @internal Called by the entry point to register a factory that creates
+ *  the default engine with LatexSyntax pre-configured. */
+export function _setDefaultEngineFactory(
+  factory: () => IComputeEngine
+): void {
+  _defaultEngineFactory = factory;
 }
 
 export function getDefaultEngine(): IComputeEngine {
   if (!_defaultEngine) {
-    if (!_ComputeEngineClass)
+    if (!_defaultEngineFactory)
       throw new Error(
-        'ComputeEngine class not registered. Import from the main module.'
+        'ComputeEngine factory not registered. Import from the main module.'
       );
-    _defaultEngine = new _ComputeEngineClass();
+    _defaultEngine = _defaultEngineFactory();
   }
   return _defaultEngine!;
 }
@@ -39,14 +40,17 @@ export function getDefaultEngine(): IComputeEngine {
 /** Convert a LatexString, Expression, or ExpressionInput to a boxed Expression.
  *  Strings are treated as LaTeX and parsed. */
 function toExpression(input: LatexString | ExpressionInput): Expression {
-  if (typeof input === 'string')
-    return getDefaultEngine().expr(parseLatex(input) ?? 'Nothing');
+  if (typeof input === 'string') {
+    const ce = getDefaultEngine();
+    return ce.parse(input) ?? ce.expr('Nothing');
+  }
   if (isExpression(input)) return input;
   return getDefaultEngine().expr(input);
 }
 
 export function parse(latex: LatexString): Expression {
-  return getDefaultEngine().expr(parseLatex(latex) ?? 'Nothing');
+  const ce = getDefaultEngine();
+  return ce.parse(latex) ?? ce.expr('Nothing');
 }
 
 export function expr(expr: ExpressionInput): Expression {

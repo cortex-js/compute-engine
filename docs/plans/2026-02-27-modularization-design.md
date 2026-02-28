@@ -146,9 +146,18 @@ e.json;         // → MathJsonExpression
 e.toString();   // → ASCII math
 ```
 
+**`LatexSyntax` is an injectable dependency** (implemented):
+
+`ComputeEngine` accepts an optional `latexSyntax` constructor option. When
+importing the full package, a `LatexSyntax` is auto-created via a static
+factory. When importing only from `/core`, no `LatexSyntax` is bundled.
+
+- `ce.parse()` — available when `LatexSyntax` is injected, throws otherwise
+- `ce.latexSyntax` — getter returning the `ILatexSyntax` instance or `undefined`
+- `ce._requireLatexSyntax()` — returns instance or throws with clear message
+
 **Removed from `ComputeEngine`**:
 
-- `ce.parse()` — use `parse()` from latex-syntax + `ce.expr()`
 - `ce.latexDictionary` (get/set) — owned by `LatexSyntax`
 - `ce.decimalSeparator` — moves to `LatexSyntax` options
 - `static getLatexDictionary()` — moves to latex-syntax exports
@@ -156,9 +165,9 @@ e.toString();   // → ASCII math
   `listCompilationTargets()`, `unregisterCompilationTarget()` — registry removed
 - `_compile()` — replaced by free `compile()` in compile module
 
-**Removed from `BoxedExpression`**:
+**Still on `BoxedExpression`** (require injected LatexSyntax):
 
-- `.toLatex()` / `.latex` — use `serialize(expr.json)` from latex-syntax
+- `.toLatex()` / `.latex` — available when `LatexSyntax` is injected; alternatively use `serialize(expr.json)` from latex-syntax directly
 - `.compile()` — use `compile(expr)` from compile module
 
 **Renamed**:
@@ -243,10 +252,10 @@ simplify(expr(parse('x^2 + 2x + 1')));
 
 ## Breaking Changes Summary
 
-| Removed | Replacement |
+| Changed | Replacement |
 | --- | --- |
-| `ce.parse(latex)` | `ce.expr(parse(latex))` |
-| `expr.toLatex()` / `expr.latex` | `serialize(expr.json)` |
+| `ce.parse(latex)` | Still available when `LatexSyntax` is injected; or `ce.expr(parse(latex))` |
+| `expr.toLatex()` / `expr.latex` | Still available when `LatexSyntax` is injected; or `serialize(expr.json)` |
 | `expr.compile(options)` | `compile(expr, options)` |
 | `ce.box(input)` | `ce.expr(input)` |
 | `ce.latexDictionary` | `new LatexSyntax({ dictionary })` |
