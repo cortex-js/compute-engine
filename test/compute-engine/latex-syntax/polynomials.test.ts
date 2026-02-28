@@ -136,7 +136,7 @@ describe('POLYNOMIAL CONSTRUCTOR', () => {
     const expr = engine.parse('x^3 + 2x + 1');
     const coeffs = expr.polynomialCoefficients('x');
     const reconstructed = engine
-      .box(['Polynomial', ['List', ...coeffs!.map((c) => c.json)], 'x'])
+      .expr(['Polynomial', ['List', ...coeffs!.map((c) => c.json)], 'x'])
       .evaluate();
     expect(reconstructed.isSame(expr)).toBe(true);
   });

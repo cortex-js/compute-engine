@@ -98,7 +98,7 @@ describe('Parsing vectors', () => {
 
 describe('Serializing matrix with delimiters', () => {
   it('should serialize a matrix with default delimiter', () => {
-    const result = ce.box(['Matrix', m4]);
+    const result = ce.expr(['Matrix', m4]);
     expect(result.latex).toMatchInlineSnapshot(`
       \\begin{pmatrix}1 & 2\\\\
       3 & 4\\end{pmatrix}
@@ -106,7 +106,7 @@ describe('Serializing matrix with delimiters', () => {
   });
 
   it('should serialize a matrix with () delimiters', () => {
-    const result = ce.box(['Matrix', m4, { str: '()' }]);
+    const result = ce.expr(['Matrix', m4, { str: '()' }]);
     expect(result.latex).toMatchInlineSnapshot(`
       \\begin{pmatrix}1 & 2\\\\
       3 & 4\\end{pmatrix}
@@ -114,7 +114,7 @@ describe('Serializing matrix with delimiters', () => {
   });
 
   it('should serialize a matrix with [] delimiters', () => {
-    const result = ce.box(['Matrix', m4, { str: '[]' }]);
+    const result = ce.expr(['Matrix', m4, { str: '[]' }]);
     expect(result.latex).toMatchInlineSnapshot(`
       \\begin{bmatrix}1 & 2\\\\
       3 & 4\\end{bmatrix}
@@ -122,49 +122,49 @@ describe('Serializing matrix with delimiters', () => {
   });
 
   it('should serialize a matrix with {} delimiters', () => {
-    const result = ce.box(['Matrix', m4, { str: '{}' }]);
+    const result = ce.expr(['Matrix', m4, { str: '{}' }]);
     expect(result.latex).toMatchInlineSnapshot(`
       \\begin{Bmatrix}1 & 2\\\\
       3 & 4\\end{Bmatrix}
     `);
   });
   it('should serialize a matrix with || delimiters', () => {
-    const result = ce.box(['Matrix', m4, { str: '||' }]);
+    const result = ce.expr(['Matrix', m4, { str: '||' }]);
     expect(result.latex).toMatchInlineSnapshot(`
       \\begin{vmatrix}1 & 2\\\\
       3 & 4\\end{vmatrix}
     `);
   });
   it('should serialize a matrix with ‖‖ delimiters', () => {
-    const result = ce.box(['Matrix', m4, { str: '‖‖' }]);
+    const result = ce.expr(['Matrix', m4, { str: '‖‖' }]);
     expect(result.latex).toMatchInlineSnapshot(`
       \\begin{Vmatrix}1 & 2\\\\
       3 & 4\\end{Vmatrix}
     `);
   });
   it('should parse a matrix with {. delimiters', () => {
-    const result = ce.box(['Matrix', m4, { str: '{.' }]);
+    const result = ce.expr(['Matrix', m4, { str: '{.' }]);
     expect(result.latex).toMatchInlineSnapshot(`
       \\begin{dcases}1 & 2\\\\
       3 & 4\\end{dcases}
     `);
   });
   it('should serialize a matrix with .} delimiters', () => {
-    const result = ce.box(['Matrix', m4, { str: '.}' }]);
+    const result = ce.expr(['Matrix', m4, { str: '.}' }]);
     expect(result.latex).toMatchInlineSnapshot(`
       \\begin{rcases}1 & 2\\\\
       3 & 4\\end{rcases}
     `);
   });
   it('should serialize a matrix with no delimiters', () => {
-    const result = ce.box(['Matrix', m4, { str: '..' }]);
+    const result = ce.expr(['Matrix', m4, { str: '..' }]);
     expect(result.latex).toMatchInlineSnapshot(`
       \\begin{matrix}1 & 2\\\\
       3 & 4\\end{matrix}
     `);
   });
   it('should serialize a matrix with <> delimiters', () => {
-    const result = ce.box(['Matrix', m4, { str: '<>' }]);
+    const result = ce.expr(['Matrix', m4, { str: '<>' }]);
     expect(result.latex).toMatchInlineSnapshot(`
       \\left\\langle\\begin{array}{}1 & 2\\\\
       3 & 4\\end{array}\\right\\rangle
@@ -174,28 +174,28 @@ describe('Serializing matrix with delimiters', () => {
 
 describe('Serializing matrix with column format', () => {
   it('should parse a matrix left aligned cells', () => {
-    const result = ce.box(['Matrix', m4, { str: '[]' }, { str: '<<<<' }]);
+    const result = ce.expr(['Matrix', m4, { str: '[]' }, { str: '<<<<' }]);
     expect(result.latex).toMatchInlineSnapshot(`
       \\begin{bmatrix}[llll]1 & 2\\\\
       3 & 4\\end{bmatrix}
     `);
   });
   it('should parse a matrix centered aligned cells', () => {
-    const result = ce.box(['Matrix', m4, { str: '[]' }, { str: '====' }]);
+    const result = ce.expr(['Matrix', m4, { str: '[]' }, { str: '====' }]);
     expect(result.latex).toMatchInlineSnapshot(`
       \\begin{bmatrix}[cccc]1 & 2\\\\
       3 & 4\\end{bmatrix}
     `);
   });
   it('should parse a matrix right aligned cells', () => {
-    const result = ce.box(['Matrix', m4, { str: '[]' }, { str: '>>>>' }]);
+    const result = ce.expr(['Matrix', m4, { str: '[]' }, { str: '>>>>' }]);
     expect(result.latex).toMatchInlineSnapshot(`
       \\begin{bmatrix}[rrrr]1 & 2\\\\
       3 & 4\\end{bmatrix}
     `);
   });
   it('should parse a matrix with mixed aligned cells', () => {
-    const result = ce.box(['Matrix', m4, { str: '[]' }, { str: '>=<' }]);
+    const result = ce.expr(['Matrix', m4, { str: '[]' }, { str: '>=<' }]);
     expect(result.latex).toMatchInlineSnapshot(`
       \\begin{bmatrix}[rcl]1 & 2\\\\
       3 & 4\\end{bmatrix}
@@ -205,7 +205,7 @@ describe('Serializing matrix with column format', () => {
 
 describe('Serializing vectors', () => {
   it('should serialize a default vector', () => {
-    const result = ce.box(['Vector', 5, 7, 0, -1]);
+    const result = ce.expr(['Vector', 5, 7, 0, -1]);
     expect(result.latex).toMatchInlineSnapshot(`
       \\begin{pmatrix}5\\\\
       7\\\\
@@ -215,7 +215,7 @@ describe('Serializing vectors', () => {
   });
 
   it('should serialize a default vector with delimiters', () => {
-    const result = ce.box(['Matrix', ['Vector', 5, 7, 0, -1], { str: '[]' }]);
+    const result = ce.expr(['Matrix', ['Vector', 5, 7, 0, -1], { str: '[]' }]);
     expect(result.latex).toMatchInlineSnapshot(`
       \\begin{bmatrix}5\\\\
       7\\\\
@@ -229,7 +229,7 @@ describe('MatrixMultiply LaTeX', () => {
   it('should serialize matrix multiplication', () => {
     // Use Matrix wrapper for proper LaTeX serialization
     const matrix = ['Matrix', m4];
-    const result = ce.box(['MatrixMultiply', matrix, matrix]);
+    const result = ce.expr(['MatrixMultiply', matrix, matrix]);
     expect(result.latex).toMatchInlineSnapshot(`
       \\begin{pmatrix}1 & 2\\\\
       3 & 4\\end{pmatrix} \\cdot \\begin{pmatrix}1 & 2\\\\
@@ -239,7 +239,7 @@ describe('MatrixMultiply LaTeX', () => {
 
   it('should serialize matrix × raw list multiplication', () => {
     // Raw lists serialize differently than Matrix-wrapped lists
-    const result = ce.box(['MatrixMultiply', m4, m4]);
+    const result = ce.expr(['MatrixMultiply', m4, m4]);
     expect(result.latex).toMatchInlineSnapshot(
       `\\bigl\\lbrack\\bigl\\lbrack1, 2\\bigr\\rbrack, \\bigl\\lbrack3, 4\\bigr\\rbrack\\bigr\\rbrack \\cdot \\bigl\\lbrack\\bigl\\lbrack1, 2\\bigr\\rbrack, \\bigl\\lbrack3, 4\\bigr\\rbrack\\bigr\\rbrack`
     );
@@ -248,17 +248,17 @@ describe('MatrixMultiply LaTeX', () => {
 
 describe('Trace LaTeX', () => {
   it('should serialize simple symbol argument without parentheses', () => {
-    const result = ce.box(['Trace', 'A']);
+    const result = ce.expr(['Trace', 'A']);
     expect(result.latex).toBe('\\tr A');
   });
 
   it('should serialize simple numeric argument without parentheses', () => {
-    const result = ce.box(['Trace', 2]);
+    const result = ce.expr(['Trace', 2]);
     expect(result.latex).toBe('\\tr 2');
   });
 
   it('should serialize complex argument with parentheses', () => {
-    const result = ce.box(['Trace', ['Add', 'A', 'B']]);
+    const result = ce.expr(['Trace', ['Add', 'A', 'B']]);
     expect(result.latex).toBe('\\tr\\left(A+B\\right)');
   });
 });
@@ -283,22 +283,22 @@ describe('Standard operator commands', () => {
 
 describe('Kernel/Dimension/Degree/Hom LaTeX', () => {
   it('should serialize simple kernel argument without parentheses', () => {
-    const result = ce.box(['Kernel', 'V']);
+    const result = ce.expr(['Kernel', 'V']);
     expect(result.latex).toBe('\\ker V');
   });
 
   it('should serialize complex dimension argument with parentheses', () => {
-    const result = ce.box(['Dimension', ['Add', 'V', 'W']]);
+    const result = ce.expr(['Dimension', ['Add', 'V', 'W']]);
     expect(result.latex).toBe('\\dim\\left(V+W\\right)');
   });
 
   it('should serialize simple degree argument without parentheses', () => {
-    const result = ce.box(['Degree', 'p']);
+    const result = ce.expr(['Degree', 'p']);
     expect(result.latex).toBe('\\deg p');
   });
 
   it('should serialize multiple hom arguments without dropping any', () => {
-    const result = ce.box(['Hom', 'V', 'W']);
+    const result = ce.expr(['Hom', 'V', 'W']);
     expect(result.latex).toMatchInlineSnapshot(`\\hom(V, W)`);
   });
 });

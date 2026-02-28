@@ -20,33 +20,33 @@ describe('CONSTANTS', () => {
 
 describe('RELATIONAL OPERATOR', () => {
   test(`Equal`, () =>
-    expect(ce.box(['Equal', 5, 5]).evaluate()).toMatchSnapshot());
+    expect(ce.expr(['Equal', 5, 5]).evaluate()).toMatchSnapshot());
   test(`Equal`, () =>
-    expect(ce.box(['Equal', 11, 7]).evaluate()).toMatchSnapshot());
+    expect(ce.expr(['Equal', 11, 7]).evaluate()).toMatchSnapshot());
   test(`NotEqual`, () =>
-    expect(ce.box(['NotEqual', 5, 5]).evaluate()).toMatchSnapshot());
+    expect(ce.expr(['NotEqual', 5, 5]).evaluate()).toMatchSnapshot());
   test(`NotEqual`, () =>
-    expect(ce.box(['NotEqual', 11, 7]).evaluate()).toMatchSnapshot());
+    expect(ce.expr(['NotEqual', 11, 7]).evaluate()).toMatchSnapshot());
   test(`Greater`, () =>
-    expect(ce.box(['Greater', 3, 19]).evaluate()).toMatchSnapshot());
+    expect(ce.expr(['Greater', 3, 19]).evaluate()).toMatchSnapshot());
   test(`Greater`, () =>
-    expect(ce.box(['Greater', 2.5, 1.1]).evaluate()).toMatchSnapshot());
+    expect(ce.expr(['Greater', 2.5, 1.1]).evaluate()).toMatchSnapshot());
   test(`Less`, () =>
-    expect(ce.box(['Less', 3, 19]).evaluate()).toMatchSnapshot());
+    expect(ce.expr(['Less', 3, 19]).evaluate()).toMatchSnapshot());
   test(`Less`, () =>
-    expect(ce.box(['Less', 2.5, 1.1]).evaluate()).toMatchSnapshot());
+    expect(ce.expr(['Less', 2.5, 1.1]).evaluate()).toMatchSnapshot());
   test(`GreaterEqual`, () =>
-    expect(ce.box(['GreaterEqual', 3, 3]).evaluate()).toMatchSnapshot());
+    expect(ce.expr(['GreaterEqual', 3, 3]).evaluate()).toMatchSnapshot());
   test(`GreaterEqual`, () =>
-    expect(ce.box(['GreaterEqual', 3, 19]).evaluate()).toMatchSnapshot());
+    expect(ce.expr(['GreaterEqual', 3, 19]).evaluate()).toMatchSnapshot());
   test(`GreaterEqual`, () =>
-    expect(ce.box(['GreaterEqual', 2.5, 1.1]).evaluate()).toMatchSnapshot());
+    expect(ce.expr(['GreaterEqual', 2.5, 1.1]).evaluate()).toMatchSnapshot());
   test(`LessEqual`, () =>
-    expect(ce.box(['LessEqual', 3, 3]).evaluate()).toMatchSnapshot());
+    expect(ce.expr(['LessEqual', 3, 3]).evaluate()).toMatchSnapshot());
   test(`LessEqual`, () =>
-    expect(ce.box(['LessEqual', 3, 19]).evaluate()).toMatchSnapshot());
+    expect(ce.expr(['LessEqual', 3, 19]).evaluate()).toMatchSnapshot());
   test(`LessEqual`, () =>
-    expect(ce.box(['LessEqual', 2.5, 1.1]).evaluate()).toMatchSnapshot());
+    expect(ce.expr(['LessEqual', 2.5, 1.1]).evaluate()).toMatchSnapshot());
 });
 
 //
@@ -116,16 +116,16 @@ describe('EXACT EVALUATION', () => {
 
 describe('ADD', () => {
   test(`Add ['Add']`, () =>
-    expect(ce.box(['Add']).evaluate()).toMatchSnapshot());
+    expect(ce.expr(['Add']).evaluate()).toMatchSnapshot());
 
   test(`Add ['Add', 2.5]`, () =>
-    expect(ce.box(['Add', 2.5]).evaluate()).toMatchSnapshot());
+    expect(ce.expr(['Add', 2.5]).evaluate()).toMatchSnapshot());
 
   test(`Add ['Add', 2.5, -1.1]`, () =>
-    expect(ce.box(['Add', 2.5, -1.1]).evaluate()).toMatchSnapshot());
+    expect(ce.expr(['Add', 2.5, -1.1]).evaluate()).toMatchSnapshot());
 
   test(`Add ['Add', 4, -1.1]`, () =>
-    expect(ce.box(['Add', 4, -1.1]).evaluate()).toMatchSnapshot());
+    expect(ce.expr(['Add', 4, -1.1]).evaluate()).toMatchSnapshot());
 
   test(`Add \\sqrt{3}+2\\sqrt{3}`, () =>
     expect(ce.parse('\\sqrt{3}+2\\sqrt{3}').evaluate()).toMatchSnapshot());
@@ -137,7 +137,7 @@ describe('ADD', () => {
     expect(ce.parse('8.1+\\sqrt{3}').evaluate()).toMatchSnapshot());
 
   test(`Add ['Add', 2.5, -1.1, 18.4]`, () =>
-    expect(ce.box(['Add', 2.5, -1.1, 18.4]).evaluate()).toMatchSnapshot());
+    expect(ce.expr(['Add', 2.5, -1.1, 18.4]).evaluate()).toMatchSnapshot());
 
   test(`Add \\frac{2}{-3222233}+\\frac{1}{3}`, () =>
     expect(check('\\frac{2}{-3222233}+\\frac{1}{3}')).toMatchSnapshot());
@@ -183,18 +183,18 @@ describe('SUBTRACT', () => {
   test(`Subtract rational and float`, () =>
     expect(
       ce
-        .box(['Subtract', ['Multiply', 0.5, 'x'], ['Divide', 'x', 2]])
+        .expr(['Subtract', ['Multiply', 0.5, 'x'], ['Divide', 'x', 2]])
         .evaluate()
     ).toMatchInlineSnapshot(`0`));
 
   test(`Subtract`, () =>
-    expect(ce.box(['Subtract', 2.5]).evaluate()).toMatchSnapshot());
+    expect(ce.expr(['Subtract', 2.5]).evaluate()).toMatchSnapshot());
   test(`Subtract`, () =>
-    expect(ce.box(['Subtract', 2.5, 1.1]).evaluate()).toMatchSnapshot());
+    expect(ce.expr(['Subtract', 2.5, 1.1]).evaluate()).toMatchSnapshot());
   test(`Subtract with single argument`, () =>
-    expect(ce.box(['Subtract', 2.5]).evaluate()).toMatchSnapshot());
+    expect(ce.expr(['Subtract', 2.5]).evaluate()).toMatchSnapshot());
   test(`Subtract with multiple arguments`, () =>
-    expect(ce.box(['Subtract', 2.5, -1.1, 18.4]).evaluate()).toMatchSnapshot());
+    expect(ce.expr(['Subtract', 2.5, -1.1, 18.4]).evaluate()).toMatchSnapshot());
 });
 
 describe('NEGATE', () => {
@@ -248,9 +248,9 @@ describe('NEGATE', () => {
 
 describe('INVALID NEGATE', () => {
   test(`INVALID Negate`, () =>
-    expect(ce.box(['Negate', 2.5, 1.1]).evaluate()).toMatchSnapshot());
+    expect(ce.expr(['Negate', 2.5, 1.1]).evaluate()).toMatchSnapshot());
   test(`INVALID Negate`, () =>
-    expect(ce.box(['Negate', 2.5, -1.1, 18.4]).evaluate()).toMatchSnapshot());
+    expect(ce.expr(['Negate', 2.5, -1.1, 18.4]).evaluate()).toMatchSnapshot());
 });
 
 describe('MULTIPLY', () => {
@@ -379,63 +379,63 @@ describe('MULTIPLY', () => {
 describe('DIVIDE', () => {
   test(`Divide (1/5)/7`, () =>
     expect(
-      ce.box(['Divide', ['Divide', 1, 5], 7]).evaluate()
+      ce.expr(['Divide', ['Divide', 1, 5], 7]).evaluate()
     ).toMatchSnapshot());
   test(`Divide 6/3`, () =>
-    expect(ce.box(['Divide', 6, 3]).evaluate()).toMatchSnapshot());
+    expect(ce.expr(['Divide', 6, 3]).evaluate()).toMatchSnapshot());
   test(`Divide 2.5/1.1`, () =>
-    expect(ce.box(['Divide', 2.5, 1.1]).evaluate()).toMatchSnapshot());
+    expect(ce.expr(['Divide', 2.5, 1.1]).evaluate()).toMatchSnapshot());
   test(`Divide with single argument`, () =>
-    expect(ce.box(['Divide', 2.5]).evaluate()).toMatchSnapshot());
+    expect(ce.expr(['Divide', 2.5]).evaluate()).toMatchSnapshot());
   test(`Divide with many arguments`, () =>
-    expect(ce.box(['Divide', 2.5, -1.1, 18.4]).evaluate()).toMatchSnapshot());
+    expect(ce.expr(['Divide', 2.5, -1.1, 18.4]).evaluate()).toMatchSnapshot());
 });
 
 describe('POWER', () => {
   test(`Power with positive real exponent`, () =>
-    expect(ce.box(['Power', 2.5, 1.1]).evaluate()).toMatchSnapshot());
+    expect(ce.expr(['Power', 2.5, 1.1]).evaluate()).toMatchSnapshot());
   test(`Power with negative exponent`, () =>
-    expect(ce.box(['Power', 2.5, -3]).evaluate()).toMatchSnapshot());
+    expect(ce.expr(['Power', 2.5, -3]).evaluate()).toMatchSnapshot());
   test(`Power with negative real exponent`, () =>
-    expect(ce.box(['Power', 2.5, -3.2]).evaluate()).toMatchSnapshot());
+    expect(ce.expr(['Power', 2.5, -3.2]).evaluate()).toMatchSnapshot());
 
   test(`INVALID Power`, () =>
-    expect(ce.box(['Power', 2.5]).evaluate()).toMatchSnapshot());
+    expect(ce.expr(['Power', 2.5]).evaluate()).toMatchSnapshot());
   test(`INVALID Power`, () =>
-    expect(ce.box(['Power', 2.5, -1.1, 18.4]).evaluate()).toMatchSnapshot());
+    expect(ce.expr(['Power', 2.5, -1.1, 18.4]).evaluate()).toMatchSnapshot());
 });
 
 describe('ROOT', () => {
   test(`Root 2.5`, () =>
-    expect(ce.box(['Root', 2.5, 3]).evaluate()).toMatchSnapshot());
+    expect(ce.expr(['Root', 2.5, 3]).evaluate()).toMatchSnapshot());
 
   test(`Root 5/7`, () =>
     expect(
-      ce.box(['Root', ['Rational', 5, 7], 3]).evaluate()
+      ce.expr(['Root', ['Rational', 5, 7], 3]).evaluate()
     ).toMatchSnapshot());
 
   test(`Root 1234567890987654321`, () =>
     expect(
-      ce.box(['Root', { num: '1234567890987654321' }, 3]).evaluate()
+      ce.expr(['Root', { num: '1234567890987654321' }, 3]).evaluate()
     ).toMatchSnapshot());
 
   test(`Root 1234567890987654321.123456789`, () =>
     expect(
-      ce.box(['Root', { num: '1234567890987654321.123456789' }, 3]).evaluate()
+      ce.expr(['Root', { num: '1234567890987654321.123456789' }, 3]).evaluate()
     ).toMatchSnapshot());
 
   test(`Root of negative number with even exponent`, () =>
-    expect(ce.box(['Root', -2, 2]).N()).toMatchSnapshot());
+    expect(ce.expr(['Root', -2, 2]).N()).toMatchSnapshot());
 
   test(`Root of negative number with odd exponent`, () =>
-    expect(ce.box(['Root', -2, 3]).N()).toMatchSnapshot());
+    expect(ce.expr(['Root', -2, 3]).N()).toMatchSnapshot());
 });
 
 describe('INVALID ROOT', () => {
   test(`Too few args`, () =>
-    expect(ce.box(['Root', 2.5]).evaluate()).toMatchSnapshot());
+    expect(ce.expr(['Root', 2.5]).evaluate()).toMatchSnapshot());
   test(`Too many args`, () =>
-    expect(ce.box(['Root', 2.5, -1.1, 18.4]).evaluate()).toMatchSnapshot());
+    expect(ce.expr(['Root', 2.5, -1.1, 18.4]).evaluate()).toMatchSnapshot());
 });
 
 describe('SQRT', () => {
@@ -501,7 +501,7 @@ describe('SQRT', () => {
   test('√ of list', () => {
     expect(
       ce
-        .box(['Sqrt', ['List', 4, 1, 56, 18]])
+        .expr(['Sqrt', ['List', 4, 1, 56, 18]])
         .N()
         .toString()
     ).toMatchSnapshot();
@@ -531,30 +531,30 @@ describe('Min/Max', () => {
   expect(checkJson(['Max', 2.5, -1.1, 'foo', 18.4])).toMatchSnapshot();
   expect(checkJson(['Max', 'foo', 'bar'])).toMatchSnapshot();
 
-  expect(ce.box(['Max', ['Range', 1, 10]]).N().value).toMatchInlineSnapshot(
+  expect(ce.expr(['Max', ['Range', 1, 10]]).N().value).toMatchInlineSnapshot(
     `10`
   );
 
-  expect(ce.box(['Max', ['Range', 1.2, 4.5]]).N().value).toMatchInlineSnapshot(
+  expect(ce.expr(['Max', ['Range', 1.2, 4.5]]).N().value).toMatchInlineSnapshot(
     `5`
   );
 
-  expect(ce.box(['Max', ['Range', 1, 10, 7]]).N().value).toMatchInlineSnapshot(
+  expect(ce.expr(['Max', ['Range', 1, 10, 7]]).N().value).toMatchInlineSnapshot(
     `8`
   );
   expect(
-    ce.box(['Max', ['Interval', 1.1, 7.8]]).N().value
+    ce.expr(['Max', ['Interval', 1.1, 7.8]]).N().value
   ).toMatchInlineSnapshot(`7.8`);
   expect(
-    ce.box(['Max', ['List', 4, 1, 56, 18]]).N().value
+    ce.expr(['Max', ['List', 4, 1, 56, 18]]).N().value
   ).toMatchInlineSnapshot(`56`);
   expect(
-    ce.box(['Max', ['Set', 4, 1, 56, 18]]).N().value
+    ce.expr(['Max', ['Set', 4, 1, 56, 18]]).N().value
   ).toMatchInlineSnapshot(`56`);
 
   expect(
     ce
-      .box(['Max', ['List', 4, 1, 'bar', 56, 'foo', 18]])
+      .expr(['Max', ['List', 4, 1, 'bar', 56, 'foo', 18]])
       .N()
       .toString()
   ).toMatchInlineSnapshot(`max(56, "bar", "foo")`);
@@ -583,18 +583,18 @@ describe('Min/Max', () => {
     `["Min", "foo", "bar"]`
   );
 
-  expect(ce.box(['Min', ['Range', 1, 10]]).N().value).toMatchInlineSnapshot(
+  expect(ce.expr(['Min', ['Range', 1, 10]]).N().value).toMatchInlineSnapshot(
     `1`
   );
 
-  expect(ce.box(['Min', ['Range', 1.2, 4.5]]).N().value).toMatchInlineSnapshot(
+  expect(ce.expr(['Min', ['Range', 1.2, 4.5]]).N().value).toMatchInlineSnapshot(
     `1`
   );
-  expect(ce.box(['Min', ['Range', 1, 10, 7]]).N().value).toMatchInlineSnapshot(
+  expect(ce.expr(['Min', ['Range', 1, 10, 7]]).N().value).toMatchInlineSnapshot(
     `1`
   );
   expect(
-    ce.box(['Min', ['Interval', 1.1, 7.8]]).N().value
+    ce.expr(['Min', ['Interval', 1.1, 7.8]]).N().value
   ).toMatchInlineSnapshot(`1.1`);
 });
 
@@ -702,7 +702,7 @@ describe('SUM', () => {
   it('should compute the sum of a function over a closed interval', () =>
     expect(
       ce
-        .box(['Sum', ['Divide', 1, 'x'], ['Tuple', 'x', 1, 10]])
+        .expr(['Sum', ['Divide', 1, 'x'], ['Tuple', 'x', 1, 10]])
         .evaluate()
         .toString()
     ).toMatchInlineSnapshot(`7381/2520`));
@@ -710,7 +710,7 @@ describe('SUM', () => {
   it('should compute the sum of a function over an open interval', () =>
     expect(
       ce
-        .box(['Sum', ['Divide', 1, 'x'], ['Tuple', 'x', 1, 100]])
+        .expr(['Sum', ['Divide', 1, 'x'], ['Tuple', 'x', 1, 100]])
         .evaluate()
         .toString()
     ).toMatchInlineSnapshot(
@@ -718,14 +718,14 @@ describe('SUM', () => {
     ));
 
   it('should compute the sum of a function over an open interval numerically', () => {
-    const result = ce.box(['Sum', ['Divide', 1, 'x'], 'x']).N();
+    const result = ce.expr(['Sum', ['Divide', 1, 'x'], 'x']).N();
     expect(result.re).toBeCloseTo(9.787606036044382);
   });
 
   it('should compute the sum of a collection', () =>
     expect(
       ce
-        .box(['Sum', ['Range', 1, 10]])
+        .expr(['Sum', ['Range', 1, 10]])
         .evaluate()
         .toString()
     ).toMatchInlineSnapshot(`55`));
@@ -733,7 +733,7 @@ describe('SUM', () => {
   it('should compute the sum of a function over two indices (with optional Hold)', () =>
     expect(
       ce
-        .box([
+        .expr([
           'Sum',
           ['Multiply', 'i', 'j'],
           ['Tuple', ['Hold', 'i'], 1, 10],
@@ -895,7 +895,7 @@ describe('SUM', () => {
   // Regression test for #287: product of Choose values losing precision
   it('should compute product of large Choose values exactly', () => {
     // Choose(35,7)*Choose(28,7)*Choose(21,7)*Choose(14,7)*Choose(7,7) = 35!/(7!)^5
-    const expr1 = ce.box([
+    const expr1 = ce.expr([
       'Multiply',
       ['Binomial', 35, 7],
       ['Binomial', 28, 7],
@@ -903,7 +903,7 @@ describe('SUM', () => {
       ['Binomial', 14, 7],
       ['Binomial', 7, 7],
     ]);
-    const expr2 = ce.box([
+    const expr2 = ce.expr([
       'Divide',
       ['Factorial', 35],
       ['Power', ['Factorial', 7], 5],
@@ -917,7 +917,7 @@ describe('SUM', () => {
   it('should simplify sum of binomial coefficients', () => {
     expect(
       ce
-        .box(['Sum', ['Binomial', 'b', 'k'], ['Limits', 'k', 0, 'b']])
+        .expr(['Sum', ['Binomial', 'b', 'k'], ['Limits', 'k', 0, 'b']])
         .simplify()
         .toString()
     ).toMatchInlineSnapshot(`2^b`);
@@ -927,7 +927,7 @@ describe('SUM', () => {
     // C(5,0) + C(5,1) + ... + C(5,5) = 32
     expect(
       ce
-        .box(['Sum', ['Binomial', 5, 'k'], ['Limits', 'k', 0, 5]])
+        .expr(['Sum', ['Binomial', 5, 'k'], ['Limits', 'k', 0, 5]])
         .evaluate()
         ?.toString()
     ).toMatchInlineSnapshot(`32`);
@@ -945,7 +945,7 @@ describe('SUM', () => {
   it('should simplify alternating binomial sum to 0', () => {
     expect(
       ce
-        .box([
+        .expr([
           'Sum',
           ['Multiply', ['Power', -1, 'k'], ['Binomial', 'b', 'k']],
           ['Tuple', 'k', 0, 'b'],
@@ -959,7 +959,7 @@ describe('SUM', () => {
     // (-1)^0 * C(4,0) + (-1)^1 * C(4,1) + ... + (-1)^4 * C(4,4) = 1 - 4 + 6 - 4 + 1 = 0
     expect(
       ce
-        .box([
+        .expr([
           'Sum',
           ['Multiply', ['Power', -1, 'k'], ['Binomial', 4, 'k']],
           ['Tuple', 'k', 0, 4],
@@ -973,7 +973,7 @@ describe('SUM', () => {
   it('should simplify weighted binomial sum', () => {
     expect(
       ce
-        .box([
+        .expr([
           'Sum',
           ['Multiply', 'k', ['Binomial', 'b', 'k']],
           ['Tuple', 'k', 0, 'b'],
@@ -987,7 +987,7 @@ describe('SUM', () => {
     // 0*C(4,0) + 1*C(4,1) + 2*C(4,2) + 3*C(4,3) + 4*C(4,4) = 0 + 4 + 12 + 12 + 4 = 32 = 4 * 2^3
     expect(
       ce
-        .box([
+        .expr([
           'Sum',
           ['Multiply', 'k', ['Binomial', 4, 'k']],
           ['Tuple', 'k', 0, 4],
@@ -1001,7 +1001,7 @@ describe('SUM', () => {
   it('should simplify partial fractions (telescoping sum)', () => {
     expect(
       ce
-        .box([
+        .expr([
           'Sum',
           ['Divide', 1, ['Multiply', 'k', ['Add', 'k', 1]]],
           ['Tuple', 'k', 1, 'b'],
@@ -1015,7 +1015,7 @@ describe('SUM', () => {
     // 1/(1*2) + 1/(2*3) + 1/(3*4) + 1/(4*5) = 1/2 + 1/6 + 1/12 + 1/20 = 4/5
     expect(
       ce
-        .box([
+        .expr([
           'Sum',
           ['Divide', 1, ['Multiply', 'k', ['Add', 'k', 1]]],
           ['Tuple', 'k', 1, 4],
@@ -1029,7 +1029,7 @@ describe('SUM', () => {
   it('should simplify partial fractions 1/(k*(k-1))', () => {
     expect(
       ce
-        .box([
+        .expr([
           'Sum',
           ['Divide', 1, ['Multiply', 'k', ['Add', 'k', -1]]],
           ['Tuple', 'k', 2, 'b'],
@@ -1043,7 +1043,7 @@ describe('SUM', () => {
     // 1/(2*1) + 1/(3*2) + 1/(4*3) + 1/(5*4) = 1/2 + 1/6 + 1/12 + 1/20 = 4/5
     expect(
       ce
-        .box([
+        .expr([
           'Sum',
           ['Divide', 1, ['Multiply', 'k', ['Add', 'k', -1]]],
           ['Tuple', 'k', 2, 5],
@@ -1074,7 +1074,7 @@ describe('SUM', () => {
   it('should simplify weighted squared binomial sum', () => {
     expect(
       ce
-        .box([
+        .expr([
           'Sum',
           ['Multiply', ['Power', 'k', 2], ['Binomial', 'b', 'k']],
           ['Tuple', 'k', 0, 'b'],
@@ -1088,7 +1088,7 @@ describe('SUM', () => {
     // 0^2*C(4,0) + 1^2*C(4,1) + 2^2*C(4,2) + 3^2*C(4,3) + 4^2*C(4,4) = 0 + 4 + 24 + 36 + 16 = 80 = 4*5*2^2
     expect(
       ce
-        .box([
+        .expr([
           'Sum',
           ['Multiply', ['Power', 'k', 2], ['Binomial', 4, 'k']],
           ['Tuple', 'k', 0, 4],
@@ -1102,7 +1102,7 @@ describe('SUM', () => {
   it('should simplify weighted cubed binomial sum', () => {
     expect(
       ce
-        .box([
+        .expr([
           'Sum',
           ['Multiply', ['Power', 'k', 3], ['Binomial', 'b', 'k']],
           ['Tuple', 'k', 0, 'b'],
@@ -1116,7 +1116,7 @@ describe('SUM', () => {
     // 0 + 1*4 + 8*6 + 27*4 + 64*1 = 0 + 4 + 48 + 108 + 64 = 224 = 16*7*2
     expect(
       ce
-        .box([
+        .expr([
           'Sum',
           ['Multiply', ['Power', 'k', 3], ['Binomial', 4, 'k']],
           ['Tuple', 'k', 0, 4],
@@ -1145,7 +1145,7 @@ describe('SUM', () => {
   it('should simplify alternating weighted binomial sum to 0', () => {
     expect(
       ce
-        .box([
+        .expr([
           'Sum',
           ['Multiply', ['Power', -1, 'k'], 'k', ['Binomial', 'b', 'k']],
           ['Tuple', 'k', 0, 'b'],
@@ -1158,7 +1158,7 @@ describe('SUM', () => {
   it('should evaluate alternating weighted binomial sum', () => {
     expect(
       ce
-        .box([
+        .expr([
           'Sum',
           ['Multiply', ['Power', -1, 'k'], 'k', ['Binomial', 4, 'k']],
           ['Tuple', 'k', 0, 4],
@@ -1172,7 +1172,7 @@ describe('SUM', () => {
   it('should simplify sum of binomial squares', () => {
     expect(
       ce
-        .box([
+        .expr([
           'Sum',
           ['Power', ['Binomial', 'b', 'k'], 2],
           ['Tuple', 'k', 0, 'b'],
@@ -1186,7 +1186,7 @@ describe('SUM', () => {
     // C(8,4) = 70
     expect(
       ce
-        .box(['Sum', ['Power', ['Binomial', 4, 'k'], 2], ['Tuple', 'k', 0, 4]])
+        .expr(['Sum', ['Power', ['Binomial', 4, 'k'], 2], ['Tuple', 'k', 0, 4]])
         .evaluate()
         ?.toString()
     ).toMatchInlineSnapshot(`70`);
@@ -1196,7 +1196,7 @@ describe('SUM', () => {
   it('should simplify sum of k*(k+1)', () => {
     expect(
       ce
-        .box([
+        .expr([
           'Sum',
           ['Multiply', 'k', ['Add', 'k', 1]],
           ['Tuple', 'k', 1, 'b'],
@@ -1210,7 +1210,7 @@ describe('SUM', () => {
     // 4*5*6/3 = 40
     expect(
       ce
-        .box(['Sum', ['Multiply', 'k', ['Add', 'k', 1]], ['Tuple', 'k', 1, 4]])
+        .expr(['Sum', ['Multiply', 'k', ['Add', 'k', 1]], ['Tuple', 'k', 1, 4]])
         .evaluate()
         ?.toString()
     ).toMatchInlineSnapshot(`40`);
@@ -1221,7 +1221,7 @@ describe('PRODUCT', () => {
   it('should compute the product of a collection', () =>
     expect(
       ce
-        .box(['Product', ['Range', 1, 5]])
+        .expr(['Product', ['Range', 1, 5]])
         .evaluate()
         .toString()
     ).toMatchInlineSnapshot(`120`));
@@ -1229,7 +1229,7 @@ describe('PRODUCT', () => {
   it('should compute the product of a function over an interval', () =>
     expect(
       ce
-        .box(['Product', 'n', ['Tuple', 'n', 1, 5]])
+        .expr(['Product', 'n', ['Tuple', 'n', 1, 5]])
         .evaluate()
         .toString()
     ).toMatchInlineSnapshot(`120`));
@@ -1328,7 +1328,7 @@ describe('PRODUCT', () => {
   it('should simplify rising factorial to Pochhammer', () => {
     expect(
       ce
-        .box([
+        .expr([
           'Product',
           ['Add', 'x', 'k'],
           ['Limits', 'k', 0, ['Subtract', 'b', 1]],
@@ -1342,7 +1342,7 @@ describe('PRODUCT', () => {
     // (3)_4 = 3*4*5*6 = 360
     expect(
       ce
-        .box(['Product', ['Add', 3, 'k'], ['Limits', 'k', 0, 3]])
+        .expr(['Product', ['Add', 3, 'k'], ['Limits', 'k', 0, 3]])
         .evaluate()
         ?.toString()
     ).toMatchInlineSnapshot(`360`);
@@ -1352,7 +1352,7 @@ describe('PRODUCT', () => {
   it('should simplify falling factorial', () => {
     expect(
       ce
-        .box([
+        .expr([
           'Product',
           ['Subtract', 'x', 'k'],
           ['Limits', 'k', 0, ['Subtract', 'b', 1]],
@@ -1366,7 +1366,7 @@ describe('PRODUCT', () => {
     // 5 falling 3 = 5*4*3 = 60
     expect(
       ce
-        .box(['Product', ['Subtract', 5, 'k'], ['Limits', 'k', 0, 2]])
+        .expr(['Product', ['Subtract', 5, 'k'], ['Limits', 'k', 0, 2]])
         .evaluate()
         ?.toString()
     ).toMatchInlineSnapshot(`60`);
@@ -1416,76 +1416,76 @@ describe('PRODUCT', () => {
 
 describe('GCD/LCM', () => {
   it('should compute the GCD of two integers', () => {
-    expect(ce.box(['GCD', 60, 12]).evaluate().toString()).toMatchInlineSnapshot(
+    expect(ce.expr(['GCD', 60, 12]).evaluate().toString()).toMatchInlineSnapshot(
       `12`
     );
 
-    expect(ce.box(['GCD', 10, 15]).evaluate().toString()).toMatchInlineSnapshot(
+    expect(ce.expr(['GCD', 10, 15]).evaluate().toString()).toMatchInlineSnapshot(
       `5`
     );
   });
 
   it('should compute the LCM of two integers', () => {
-    expect(ce.box(['LCM', 60, 12]).evaluate().toString()).toMatchInlineSnapshot(
+    expect(ce.expr(['LCM', 60, 12]).evaluate().toString()).toMatchInlineSnapshot(
       `60`
     );
-    expect(ce.box(['LCM', 10, 15]).evaluate().toString()).toMatchInlineSnapshot(
+    expect(ce.expr(['LCM', 10, 15]).evaluate().toString()).toMatchInlineSnapshot(
       `30`
     );
   });
 
   it('should compute the GCD of some integers and other stuff', () =>
     expect(
-      ce.box(['GCD', 60, 'foo', 12]).evaluate().toString()
+      ce.expr(['GCD', 60, 'foo', 12]).evaluate().toString()
     ).toMatchInlineSnapshot(`gcd(12, "foo")`));
 
   it('should compute the GCD of only stuff', () =>
     expect(
-      ce.box(['GCD', 'foo', 'bar']).evaluate().toString()
+      ce.expr(['GCD', 'foo', 'bar']).evaluate().toString()
     ).toMatchInlineSnapshot(`gcd("foo", "bar")`));
 
   it('should compute the GCD of a single number', () =>
-    expect(ce.box(['GCD', 42]).evaluate().toString()).toMatchInlineSnapshot(
+    expect(ce.expr(['GCD', 42]).evaluate().toString()).toMatchInlineSnapshot(
       `42`
     ));
 
   it('should compute the GCD of some numbers', () =>
     expect(
-      ce.box(['GCD', 60, 12, 3.1415]).evaluate().toString()
+      ce.expr(['GCD', 60, 12, 3.1415]).evaluate().toString()
     ).toMatchInlineSnapshot(`gcd(12, 3.1415)`));
 
   it('should compute the GCD of a list', () =>
     expect(
       ce
-        .box(['GCD', ['List', 60, 12, 3.1415]])
+        .expr(['GCD', ['List', 60, 12, 3.1415]])
         .evaluate()
         .toString()
     ).toMatchInlineSnapshot(`gcd([60,12,3.1415])`));
 
   it('should compute the LCM of some integers and other stuff', () =>
     expect(
-      ce.box(['LCM', 60, 'foo', 12]).evaluate().toString()
+      ce.expr(['LCM', 60, 'foo', 12]).evaluate().toString()
     ).toMatchInlineSnapshot(`lcm(60, "foo")`));
 
   it('should compute the LCM of only stuff', () =>
     expect(
-      ce.box(['LCM', 'foo', 'bar']).evaluate().toString()
+      ce.expr(['LCM', 'foo', 'bar']).evaluate().toString()
     ).toMatchInlineSnapshot(`lcm("foo", "bar")`));
 
   it('should compute the LCM of a single number', () =>
-    expect(ce.box(['LCM', 42]).evaluate().toString()).toMatchInlineSnapshot(
+    expect(ce.expr(['LCM', 42]).evaluate().toString()).toMatchInlineSnapshot(
       `42`
     ));
 
   it('should compute the LCM of some numbers', () =>
     expect(
-      ce.box(['LCM', 60, 12, 3.1415]).evaluate().toString()
+      ce.expr(['LCM', 60, 12, 3.1415]).evaluate().toString()
     ).toMatchInlineSnapshot(`lcm(60, 3.1415)`));
 
   it('should compute the LCM of a list', () =>
     expect(
       ce
-        .box(['LCM', ['List', 60, 12, 3.1415]])
+        .expr(['LCM', ['List', 60, 12, 3.1415]])
         .evaluate()
         .toString()
     ).toMatchInlineSnapshot(`lcm([60,12,3.1415])`));
@@ -1495,7 +1495,7 @@ describe('FACTOR', () => {
   it('should factor a relational operator with fractional roots', () =>
     expect(
       ce
-        .box(['Factor', ce.parse('\\sqrt{7}\\sqrt{35}x^2 \\lt \\sqrt{5}x')])
+        .expr(['Factor', ce.parse('\\sqrt{7}\\sqrt{35}x^2 \\lt \\sqrt{5}x')])
         .evaluate()
         .toString()
     ).toMatchInlineSnapshot(`7x^2 < x`));
@@ -1503,7 +1503,7 @@ describe('FACTOR', () => {
   it('should factor integers', () =>
     expect(
       ce
-        .box(['Factor', ce.parse('2a \\lt 4b')])
+        .expr(['Factor', ce.parse('2a \\lt 4b')])
         .evaluate()
         .toString()
     ).toMatchInlineSnapshot(`a < 2b`));
@@ -1511,7 +1511,7 @@ describe('FACTOR', () => {
   it('should factor additions', () =>
     expect(
       ce
-        .box(['Factor', ce.parse('\\sqrt{3}x+2\\sqrt{3}x')])
+        .expr(['Factor', ce.parse('\\sqrt{3}x+2\\sqrt{3}x')])
         .evaluate()
         .toString()
     ).toMatchInlineSnapshot(`3sqrt(3) * x`));
@@ -1523,90 +1523,90 @@ describe('FACTOR', () => {
 describe('SPECIAL FUNCTIONS TYPE SIGNATURES', () => {
   // Single-argument special functions
   test('Zeta function can be used in expressions', () => {
-    const expr = ce.box(['Add', 1, ['Zeta', 'x']]);
+    const expr = ce.expr(['Add', 1, ['Zeta', 'x']]);
     expect(expr.isValid).toBe(true);
     expect(expr.toString()).toMatchInlineSnapshot(`Zeta(x) + 1`);
   });
 
   test('LambertW function can be used in expressions', () => {
-    const expr = ce.box(['Add', 1, ['LambertW', 'x']]);
+    const expr = ce.expr(['Add', 1, ['LambertW', 'x']]);
     expect(expr.isValid).toBe(true);
     expect(expr.toString()).toMatchInlineSnapshot(`LambertW(x) + 1`);
   });
 
   test('AiryAi function can be used in expressions', () => {
-    const expr = ce.box(['Add', 1, ['AiryAi', 'x']]);
+    const expr = ce.expr(['Add', 1, ['AiryAi', 'x']]);
     expect(expr.isValid).toBe(true);
     expect(expr.toString()).toMatchInlineSnapshot(`AiryAi(x) + 1`);
   });
 
   test('AiryBi function can be used in expressions', () => {
-    const expr = ce.box(['Add', 1, ['AiryBi', 'x']]);
+    const expr = ce.expr(['Add', 1, ['AiryBi', 'x']]);
     expect(expr.isValid).toBe(true);
     expect(expr.toString()).toMatchInlineSnapshot(`AiryBi(x) + 1`);
   });
 
   // Two-argument special functions
   test('Beta function can be used in expressions', () => {
-    const expr = ce.box(['Add', 1, ['Beta', 'a', 'b']]);
+    const expr = ce.expr(['Add', 1, ['Beta', 'a', 'b']]);
     expect(expr.isValid).toBe(true);
     expect(expr.toString()).toMatchInlineSnapshot(`Beta(a, b) + 1`);
   });
 
   // Bessel functions (order, value)
   test('BesselJ function can be used in expressions', () => {
-    const expr = ce.box(['Add', 1, ['BesselJ', 0, 'x']]);
+    const expr = ce.expr(['Add', 1, ['BesselJ', 0, 'x']]);
     expect(expr.isValid).toBe(true);
     expect(expr.toString()).toMatchInlineSnapshot(`BesselJ(0, x) + 1`);
   });
 
   test('BesselY function can be used in expressions', () => {
-    const expr = ce.box(['Add', 1, ['BesselY', 1, 'x']]);
+    const expr = ce.expr(['Add', 1, ['BesselY', 1, 'x']]);
     expect(expr.isValid).toBe(true);
     expect(expr.toString()).toMatchInlineSnapshot(`BesselY(1, x) + 1`);
   });
 
   test('BesselI function can be used in expressions', () => {
-    const expr = ce.box(['Add', 1, ['BesselI', 2, 'x']]);
+    const expr = ce.expr(['Add', 1, ['BesselI', 2, 'x']]);
     expect(expr.isValid).toBe(true);
     expect(expr.toString()).toMatchInlineSnapshot(`BesselI(2, x) + 1`);
   });
 
   test('BesselK function can be used in expressions', () => {
-    const expr = ce.box(['Add', 1, ['BesselK', 0, 'x']]);
+    const expr = ce.expr(['Add', 1, ['BesselK', 0, 'x']]);
     expect(expr.isValid).toBe(true);
     expect(expr.toString()).toMatchInlineSnapshot(`BesselK(0, x) + 1`);
   });
 
   // Test that these functions work with symbolic order for Bessel
   test('BesselJ with symbolic order', () => {
-    const expr = ce.box(['BesselJ', 'n', 'x']);
+    const expr = ce.expr(['BesselJ', 'n', 'x']);
     expect(expr.isValid).toBe(true);
     expect(expr.toString()).toMatchInlineSnapshot(`BesselJ(n, x)`);
   });
 
   // Test composition with other functions
   test('Special functions can be composed', () => {
-    const expr = ce.box(['Multiply', ['Zeta', 2], ['LambertW', 'x']]);
+    const expr = ce.expr(['Multiply', ['Zeta', 2], ['LambertW', 'x']]);
     expect(expr.isValid).toBe(true);
     expect(expr.toString()).toMatchInlineSnapshot(`LambertW(x) * Zeta(2)`);
   });
 
   // Test that existing special functions still work
   test('Digamma function still works', () => {
-    const expr = ce.box(['Add', 1, ['Digamma', 'x']]);
+    const expr = ce.expr(['Add', 1, ['Digamma', 'x']]);
     expect(expr.isValid).toBe(true);
     expect(expr.toString()).toMatchInlineSnapshot(`Digamma(x) + 1`);
   });
 
   test('Trigamma function still works', () => {
-    const expr = ce.box(['Add', 1, ['Trigamma', 'x']]);
+    const expr = ce.expr(['Add', 1, ['Trigamma', 'x']]);
     expect(expr.isValid).toBe(true);
     expect(expr.toString()).toMatchInlineSnapshot(`Trigamma(x) + 1`);
   });
 
   test('PolyGamma function still works', () => {
-    const expr = ce.box(['Add', 1, ['PolyGamma', 2, 'x']]);
+    const expr = ce.expr(['Add', 1, ['PolyGamma', 2, 'x']]);
     expect(expr.isValid).toBe(true);
     expect(expr.toString()).toMatchInlineSnapshot(`PolyGamma(2, x) + 1`);
   });
@@ -1617,7 +1617,7 @@ describe('Factorial simplification', () => {
   it('10!/7! should simplify to 720', () => {
     expect(
       ce
-        .box(['Divide', ['Factorial', 10], ['Factorial', 7]])
+        .expr(['Divide', ['Factorial', 10], ['Factorial', 7]])
         .simplify()
         .toString()
     ).toMatchInlineSnapshot(`720`);
@@ -1626,7 +1626,7 @@ describe('Factorial simplification', () => {
   it('5!/10! should simplify to 1/30240', () => {
     expect(
       ce
-        .box(['Divide', ['Factorial', 5], ['Factorial', 10]])
+        .expr(['Divide', ['Factorial', 5], ['Factorial', 10]])
         .simplify()
         .toString()
     ).toMatchInlineSnapshot(`1/30240`);
@@ -1635,7 +1635,7 @@ describe('Factorial simplification', () => {
   it('7!/7! should simplify to 1', () => {
     expect(
       ce
-        .box(['Divide', ['Factorial', 7], ['Factorial', 7]])
+        .expr(['Divide', ['Factorial', 7], ['Factorial', 7]])
         .simplify()
         .toString()
     ).toMatchInlineSnapshot(`1`);
@@ -1645,7 +1645,7 @@ describe('Factorial simplification', () => {
   it('(b+1)!/b! should simplify to b + 1', () => {
     expect(
       ce
-        .box(['Divide', ['Factorial', ['Add', 'b', 1]], ['Factorial', 'b']])
+        .expr(['Divide', ['Factorial', ['Add', 'b', 1]], ['Factorial', 'b']])
         .simplify()
         .toString()
     ).toMatchInlineSnapshot(`b + 1`);
@@ -1654,7 +1654,7 @@ describe('Factorial simplification', () => {
   it('b!/(b-1)! should simplify to b', () => {
     expect(
       ce
-        .box(['Divide', ['Factorial', 'b'], ['Factorial', ['Add', 'b', -1]]])
+        .expr(['Divide', ['Factorial', 'b'], ['Factorial', ['Add', 'b', -1]]])
         .simplify()
         .toString()
     ).toMatchInlineSnapshot(`b`);
@@ -1664,7 +1664,7 @@ describe('Factorial simplification', () => {
   it('10!/(3!*7!) should simplify to 120', () => {
     expect(
       ce
-        .box([
+        .expr([
           'Divide',
           ['Factorial', 10],
           ['Multiply', ['Factorial', 3], ['Factorial', 7]],
@@ -1678,7 +1678,7 @@ describe('Factorial simplification', () => {
   it('(b+1)! - b! should simplify to b * b!', () => {
     expect(
       ce
-        .box(['Subtract', ['Factorial', ['Add', 'b', 1]], ['Factorial', 'b']])
+        .expr(['Subtract', ['Factorial', ['Add', 'b', 1]], ['Factorial', 'b']])
         .simplify()
         .toString()
     ).toMatchInlineSnapshot(`b * b!`);
@@ -1687,7 +1687,7 @@ describe('Factorial simplification', () => {
   it('(b+1)! + b! should simplify to (b + 2) * b!', () => {
     expect(
       ce
-        .box(['Add', ['Factorial', ['Add', 'b', 1]], ['Factorial', 'b']])
+        .expr(['Add', ['Factorial', ['Add', 'b', 1]], ['Factorial', 'b']])
         .simplify()
         .toString()
     ).toMatchInlineSnapshot(`(b + 2) * b!`);
@@ -1696,7 +1696,7 @@ describe('Factorial simplification', () => {
   it('b! - (b-1)! should simplify to (b - 1) * (b - 1)!', () => {
     expect(
       ce
-        .box(['Subtract', ['Factorial', 'b'], ['Factorial', ['Add', 'b', -1]]])
+        .expr(['Subtract', ['Factorial', 'b'], ['Factorial', ['Add', 'b', -1]]])
         .simplify()
         .toString()
     ).toMatchInlineSnapshot(`(b - 1) * (b - 1)!`);
@@ -1705,7 +1705,7 @@ describe('Factorial simplification', () => {
   it('2*b! + (b+1)! should simplify to (b + 3) * b!', () => {
     expect(
       ce
-        .box([
+        .expr([
           'Add',
           ['Multiply', 2, ['Factorial', 'b']],
           ['Factorial', ['Add', 'b', 1]],
@@ -1719,25 +1719,25 @@ describe('Factorial simplification', () => {
 describe('Binomial/Choose simplification', () => {
   it('Binomial(b, 0) should simplify to 1', () => {
     expect(
-      ce.box(['Binomial', 'b', 0]).simplify().toString()
+      ce.expr(['Binomial', 'b', 0]).simplify().toString()
     ).toMatchInlineSnapshot(`1`);
   });
 
   it('Binomial(b, 1) should simplify to b', () => {
     expect(
-      ce.box(['Binomial', 'b', 1]).simplify().toString()
+      ce.expr(['Binomial', 'b', 1]).simplify().toString()
     ).toMatchInlineSnapshot(`b`);
   });
 
   it('Binomial(b, b) should simplify to 1', () => {
     expect(
-      ce.box(['Binomial', 'b', 'b']).simplify().toString()
+      ce.expr(['Binomial', 'b', 'b']).simplify().toString()
     ).toMatchInlineSnapshot(`1`);
   });
 
   it('Binomial(5, 2) should evaluate to 10', () => {
     expect(
-      ce.box(['Binomial', 5, 2]).evaluate().toString()
+      ce.expr(['Binomial', 5, 2]).evaluate().toString()
     ).toMatchInlineSnapshot(`10`);
   });
 });

@@ -39,13 +39,13 @@ function NToJson(latex: string): Expression {
 function customCanonical(expr) {
   if (typeof expr.value === 'number') {
     if (expr.head === 'Divide' || expr.head === 'Rational') {
-      if (expr.engine.box(['GCD', expr.op1, expr.op2]).value !== 1) return expr;
+      if (expr.engine.expr(['GCD', expr.op1, expr.op2]).value !== 1) return expr;
     }
     return expr.engine.number(expr.value);
   }
 
   if (expr.ops)
-    return expr.engine.box([expr.head, ...expr.ops.map(customCanonical)], {
+    return expr.engine.expr([expr.head, ...expr.ops.map(customCanonical)], {
       form: ['InvisibleOperator', 'Order', 'Flatten'],
     });
 
@@ -60,7 +60,7 @@ describe('PARSING numbers', () => {
   test(`{ num: '-12n' }`, () => {
     // The `n` prefix is not necessary, but is supported for legacy reasons
     // (an earlier version of the MathJSON spec included it)
-    expect(ce.box({ num: '-12n' }).numericValue).toEqual(-12);
+    expect(ce.expr({ num: '-12n' }).numericValue).toEqual(-12);
   });
   test(`-2+3-4`, () => {
     expect(ce.parse('-2+3-4')).toMatchInlineSnapshot(`-3`);
@@ -205,16 +205,16 @@ describe('PARSING functions', () => {
 describe('SERIALIZING Incomplete expressions', () => {
   test(`['Multiply', 2, ['Rational', 1, 3]]`, () => {
     expect(
-      engine.box(['Multiply', 2, ['Rational', 1, 3]]).latex
+      engine.expr(['Multiply', 2, ['Rational', 1, 3]]).latex
     ).toMatchInlineSnapshot(`\\frac{2}{3}`);
   });
   test(`['Divide']`, () =>
-    expect(ce.box(['Divide'], { form: 'raw' })).toMatchInlineSnapshot(
+    expect(ce.expr(['Divide'], { form: 'raw' })).toMatchInlineSnapshot(
       `["Divide"]`
     ));
   test(`['Power', undefined]`, () =>
     expect(
-      ce.box(['Power', undefined as unknown as Expression], {
+      ce.expr(['Power', undefined as unknown as Expression], {
         form: 'raw',
       })
     ).toMatchInlineSnapshot(`["Power", ["Error", "'missing'"]]`));
@@ -644,7 +644,7 @@ describe('SIMPLIFICATION power', () => {
 
 describe('EXPAND', () => {
   test(`Expand('(a+b)^6')`, () =>
-    expect(ce.box(['Expand', ce.parse('(a+b)^6')]).evaluate())
+    expect(ce.expr(['Expand', ce.parse('(a+b)^6')]).evaluate())
       .toMatchInlineSnapshot(`
       [
         "Add",

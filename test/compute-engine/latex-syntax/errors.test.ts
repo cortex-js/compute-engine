@@ -455,13 +455,13 @@ check('Syntax error', () =>
 );
 
 check('Missing argument', () =>
-  expect(engine.box(['Sqrt'])).toMatchInlineSnapshot(
+  expect(engine.expr(['Sqrt'])).toMatchInlineSnapshot(
     `["Sqrt", ["Error", "'missing'"]]`
   )
 );
 
 check('Unexpected argument', () =>
-  expect(engine.box(['Sqrt', 12, 29, 74])).toMatchInlineSnapshot(`
+  expect(engine.expr(['Sqrt', 12, 29, 74])).toMatchInlineSnapshot(`
     [
       "Sqrt",
       12,
@@ -472,7 +472,7 @@ check('Unexpected argument', () =>
 );
 
 check('Mismatched type', () => {
-  expect(engine.box(['Sqrt', 'True'])).toMatchInlineSnapshot(`
+  expect(engine.expr(['Sqrt', 'True'])).toMatchInlineSnapshot(`
     [
       "Sqrt",
       [

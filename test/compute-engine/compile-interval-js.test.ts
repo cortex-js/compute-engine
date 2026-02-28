@@ -119,7 +119,7 @@ describe('INTERVAL JS COMPILATION - FUNCTIONS', () => {
   });
 
   test('compiles if to piecewise', () => {
-    const expr = ce.box(['If', ['Greater', 'x', 0], 'x', ['Negate', 'x']]);
+    const expr = ce.expr(['If', ['Greater', 'x', 0], 'x', ['Negate', 'x']]);
     const fn = compile(expr, { to: 'interval-js' });
     expect(fn.code).toContain('_IA.piecewise');
   });
@@ -132,7 +132,7 @@ describe('INTERVAL JS COMPILATION - FUNCTIONS', () => {
   });
 
   test('compiles GammaLn', () => {
-    const expr = ce.box(['GammaLn', 'x']);
+    const expr = ce.expr(['GammaLn', 'x']);
     const fn = compile(expr, { to: 'interval-js' });
     expect(fn.success).toBe(true);
     expect(fn.code).toContain('_IA.gammaln');
@@ -271,7 +271,7 @@ describe('INTERVAL JS EXECUTION', () => {
   });
 
   test('comparison with compound argument', () => {
-    const expr = ce.box(['Less', 'x', ['Add', 'x', 2]]);
+    const expr = ce.expr(['Less', 'x', ['Add', 'x', 2]]);
     const fn = compile(expr, { to: 'interval-js' });
     const result = fn.run!({ x: { lo: 1, hi: 2 } });
 
@@ -279,7 +279,7 @@ describe('INTERVAL JS EXECUTION', () => {
   });
 
   test('comparison with compound argument is indeterminate', () => {
-    const expr = ce.box(['Less', 'x', ['Add', 'x', 1]]);
+    const expr = ce.expr(['Less', 'x', ['Add', 'x', 1]]);
     const fn = compile(expr, { to: 'interval-js' });
     const result = fn.run!({ x: { lo: 0, hi: 2 } });
 
@@ -287,7 +287,7 @@ describe('INTERVAL JS EXECUTION', () => {
   });
 
   test('comparison with compound argument is false', () => {
-    const expr = ce.box(['Greater', 'x', ['Add', 'x', 3]]);
+    const expr = ce.expr(['Greater', 'x', ['Add', 'x', 3]]);
     const fn = compile(expr, { to: 'interval-js' });
     const result = fn.run!({ x: { lo: 0, hi: 2 } });
 
@@ -295,7 +295,7 @@ describe('INTERVAL JS EXECUTION', () => {
   });
 
   test('piecewise with compound argument', () => {
-    const expr = ce.box([
+    const expr = ce.expr([
       'If',
       ['Greater', ['Add', 'x', 'x'], 0],
       ['Add', 'x', 1],
@@ -310,7 +310,7 @@ describe('INTERVAL JS EXECUTION', () => {
   });
 
   test('piecewise union on indeterminate condition', () => {
-    const expr = ce.box([
+    const expr = ce.expr([
       'If',
       ['Greater', ['Add', 'x', 'x'], 0],
       ['Add', 'x', 1],
@@ -325,7 +325,7 @@ describe('INTERVAL JS EXECUTION', () => {
   });
 
   test('piecewise with constant branches (Heaviside)', () => {
-    const expr = ce.box(['If', ['GreaterEqual', 'x', 0], 1, 0]);
+    const expr = ce.expr(['If', ['GreaterEqual', 'x', 0], 1, 0]);
     const fn = compile(expr, { to: 'interval-js' });
 
     // x definitely >= 0 → 1
@@ -497,7 +497,7 @@ describe('INTERVAL JS COMPLEX EXPRESSIONS', () => {
   });
 
   test('GammaLn function', () => {
-    const expr = ce.box(['GammaLn', 'x']);
+    const expr = ce.expr(['GammaLn', 'x']);
     const fn = compile(expr, { to: 'interval-js' });
 
     // GammaLn(2.5) ≈ ln(1.329) ≈ 0.284
@@ -511,7 +511,7 @@ describe('INTERVAL JS COMPLEX EXPRESSIONS', () => {
 describe('INTERVAL JS - NEGATIVE BASE POWER', () => {
   test('(-1)^k with point integer exponent', () => {
     // (-1)^k where k is a variable — powInterval path
-    const expr = ce.box(['Power', -1, 'k']);
+    const expr = ce.expr(['Power', -1, 'k']);
     const fn = compile(expr, { to: 'interval-js' });
     expect(fn.success).toBe(true);
 
@@ -535,7 +535,7 @@ describe('INTERVAL JS - NEGATIVE BASE POWER', () => {
   });
 
   test('(-2)^k with point integer exponent', () => {
-    const expr = ce.box(['Power', -2, 'k']);
+    const expr = ce.expr(['Power', -2, 'k']);
     const fn = compile(expr, { to: 'interval-js' });
     expect(fn.success).toBe(true);
 
@@ -553,7 +553,7 @@ describe('INTERVAL JS - NEGATIVE BASE POWER', () => {
   });
 
   test('(-1)^k with interval exponent spanning integers', () => {
-    const expr = ce.box(['Power', -1, 'k']);
+    const expr = ce.expr(['Power', -1, 'k']);
     const fn = compile(expr, { to: 'interval-js' });
 
     // Exponent spans both even and odd → [-1, 1]
@@ -564,7 +564,7 @@ describe('INTERVAL JS - NEGATIVE BASE POWER', () => {
   });
 
   test('Factorial compiles and executes', () => {
-    const expr = ce.box(['Factorial', 'n']);
+    const expr = ce.expr(['Factorial', 'n']);
     const fn = compile(expr, { to: 'interval-js' });
     expect(fn.success).toBe(true);
 
@@ -583,7 +583,7 @@ describe('INTERVAL JS - NEGATIVE BASE POWER', () => {
 
   test('alternating sign summation: sum of (-1)^k', () => {
     // Sum((-1)^k, k=0..5) = 1-1+1-1+1-1 = 0
-    const expr = ce.box([
+    const expr = ce.expr([
       'Sum',
       ['Power', -1, 'k'],
       ['Limits', 'k', 0, 5],
@@ -600,7 +600,7 @@ describe('INTERVAL JS - NEGATIVE BASE POWER', () => {
   test('Taylor-like: sum of (-1)^k * x^(2k+1) / (2k+1)!', () => {
     // First 4 terms of arctan(x) Taylor series: x - x^3/3! + x^5/5! - x^7/7!
     // But with factorial denominators approximating arctan
-    const expr = ce.box([
+    const expr = ce.expr([
       'Sum',
       [
         'Divide',
@@ -635,7 +635,7 @@ function unwrapInterval(val: unknown): { lo: number; hi: number } {
 
 describe('INTERVAL JS - ADDITIONAL FUNCTIONS', () => {
   test('Binomial(5, 2) = 10', () => {
-    const expr = ce.box(['Binomial', 5, 2]);
+    const expr = ce.expr(['Binomial', 5, 2]);
     const fn = compile(expr, { to: 'interval-js' });
     expect(fn.success).toBe(true);
     const val = unwrapInterval(fn.run!());
@@ -644,7 +644,7 @@ describe('INTERVAL JS - ADDITIONAL FUNCTIONS', () => {
   });
 
   test('GCD(12, 8) = 4', () => {
-    const expr = ce.box(['GCD', 12, 8]);
+    const expr = ce.expr(['GCD', 12, 8]);
     const fn = compile(expr, { to: 'interval-js' });
     expect(fn.success).toBe(true);
     const val = unwrapInterval(fn.run!());
@@ -653,7 +653,7 @@ describe('INTERVAL JS - ADDITIONAL FUNCTIONS', () => {
   });
 
   test('LCM(12, 8) = 24', () => {
-    const expr = ce.box(['LCM', 12, 8]);
+    const expr = ce.expr(['LCM', 12, 8]);
     const fn = compile(expr, { to: 'interval-js' });
     expect(fn.success).toBe(true);
     const val = unwrapInterval(fn.run!());
@@ -662,7 +662,7 @@ describe('INTERVAL JS - ADDITIONAL FUNCTIONS', () => {
   });
 
   test('Chop(5) = 5', () => {
-    const expr = ce.box(['Chop', 5]);
+    const expr = ce.expr(['Chop', 5]);
     const fn = compile(expr, { to: 'interval-js' });
     expect(fn.success).toBe(true);
     const val = unwrapInterval(fn.run!());
@@ -671,7 +671,7 @@ describe('INTERVAL JS - ADDITIONAL FUNCTIONS', () => {
   });
 
   test('Erf(1) ≈ 0.8427', () => {
-    const expr = ce.box(['Erf', 1]);
+    const expr = ce.expr(['Erf', 1]);
     const fn = compile(expr, { to: 'interval-js' });
     expect(fn.success).toBe(true);
     const val = unwrapInterval(fn.run!());
@@ -680,7 +680,7 @@ describe('INTERVAL JS - ADDITIONAL FUNCTIONS', () => {
   });
 
   test('Erfc(0) ≈ 1', () => {
-    const expr = ce.box(['Erfc', 0]);
+    const expr = ce.expr(['Erfc', 0]);
     const fn = compile(expr, { to: 'interval-js' });
     expect(fn.success).toBe(true);
     const val = unwrapInterval(fn.run!());
@@ -689,7 +689,7 @@ describe('INTERVAL JS - ADDITIONAL FUNCTIONS', () => {
   });
 
   test('Exp2(3) = 8', () => {
-    const expr = ce.box(['Exp2', 3]);
+    const expr = ce.expr(['Exp2', 3]);
     const fn = compile(expr, { to: 'interval-js' });
     expect(fn.success).toBe(true);
     const val = unwrapInterval(fn.run!());
@@ -698,7 +698,7 @@ describe('INTERVAL JS - ADDITIONAL FUNCTIONS', () => {
   });
 
   test('Arctan2(1, 1) ≈ π/4', () => {
-    const expr = ce.box(['Arctan2', 1, 1]);
+    const expr = ce.expr(['Arctan2', 1, 1]);
     const fn = compile(expr, { to: 'interval-js' });
     expect(fn.success).toBe(true);
     const val = unwrapInterval(fn.run!());
@@ -707,7 +707,7 @@ describe('INTERVAL JS - ADDITIONAL FUNCTIONS', () => {
   });
 
   test('Hypot(3, 4) = 5', () => {
-    const expr = ce.box(['Hypot', 3, 4]);
+    const expr = ce.expr(['Hypot', 3, 4]);
     const fn = compile(expr, { to: 'interval-js' });
     expect(fn.success).toBe(true);
     const val = unwrapInterval(fn.run!());

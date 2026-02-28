@@ -42,12 +42,12 @@ describe('IS_CONSTANT', () => {
   });
 
   it('should return false for non-constant expressions with non-pure function calls', () => {
-    const expression = engine.box(['Hold', ['Random', 1, 10]]);
+    const expression = engine.expr(['Hold', ['Random', 1, 10]]);
     expect(expression.isConstant).toBe(false);
   });
 
   it('should return false for non-constant expressions with non-pure  function calls', () => {
-    const expression = engine.box(['Hold', ['Add', ['Random', 1, 10], 1]]);
+    const expression = engine.expr(['Hold', ['Add', ['Random', 1, 10], 1]]);
     expect(expression.isConstant).toBe(false);
   });
 });
@@ -99,13 +99,13 @@ describe('IS_ZERO', () => {
   });
 
   it('should return false for held expressions that are not structurally equal', () => {
-    const expression = engine.box(['Hold', ['Add', 2, 3]]);
+    const expression = engine.expr(['Hold', ['Add', 2, 3]]);
     expect(expression.isEqual(5)).toBe(false);
   });
 
   it('should return true for held expressions that are structurally equal', () => {
-    const expression = engine.box(['Hold', ['Add', 2, 3]]);
-    expect(expression.isEqual(engine.box(['Hold', ['Add', 2, 3]]))).toBe(true);
+    const expression = engine.expr(['Hold', ['Add', 2, 3]]);
+    expect(expression.isEqual(engine.expr(['Hold', ['Add', 2, 3]]))).toBe(true);
   });
 });
 
@@ -198,12 +198,12 @@ describe('IS_POSITIVE', () => {
   });
 
   it('should return undefined for non-constant expressions with non-pure function calls', () => {
-    const expression = engine.box(['Hold', ['Random', 1, 10]]);
+    const expression = engine.expr(['Hold', ['Random', 1, 10]]);
     expect(expression.isPositive).toBeUndefined();
   });
 
   it('should return undefined for non-constant expressions with non-pure function calls that only returns positive values', () => {
-    const expression = engine.box(['Hold', ['Add', ['Random', 1, 10], 1]]);
+    const expression = engine.expr(['Hold', ['Add', ['Random', 1, 10], 1]]);
     expect(expression.isPositive).toBeUndefined();
   });
 });
@@ -289,27 +289,27 @@ describe('FREE_VARIABLES', () => {
 describe('SCOPED_UNKNOWNS', () => {
   it('Block: should exclude locally assigned variables', () => {
     // x is free, y is locally assigned
-    const block = engine.box(['Block', ['Assign', 'y', 5], ['Add', 'x', 'y']]);
+    const block = engine.expr(['Block', ['Assign', 'y', 5], ['Add', 'x', 'y']]);
     expect(block.unknowns).toContain('x');
     expect(block.unknowns).not.toContain('y');
   });
 
   it('Block: should exclude locally declared variables', () => {
-    const block = engine.box(['Block', ['Declare', 'z', 'integer'], ['Add', 'x', 'z']]);
+    const block = engine.expr(['Block', ['Declare', 'z', 'integer'], ['Add', 'x', 'z']]);
     expect(block.unknowns).toContain('x');
     expect(block.unknowns).not.toContain('z');
   });
 
   it('D: differentiation variable remains free', () => {
     // In D(x^2 + a, x), both x and a are free — x is still in the result
-    const d = engine.box(['D', ['Add', ['Power', 'x', 2], 'a'], 'x']);
+    const d = engine.expr(['D', ['Add', ['Power', 'x', 2], 'a'], 'x']);
     expect(d.unknowns).toContain('a');
     expect(d.unknowns).toContain('x');
   });
 
   it('ForAll: should exclude quantified variable', () => {
     // n is free, k is bound by the quantifier
-    const forall = engine.box(['ForAll', ['Element', 'k', ['Range', 1, 'n']], ['Greater', 'k', 0]]);
+    const forall = engine.expr(['ForAll', ['Element', 'k', ['Range', 1, 'n']], ['Greater', 'k', 0]]);
     expect(forall.unknowns).toContain('n');
     expect(forall.unknowns).not.toContain('k');
   });

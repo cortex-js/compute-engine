@@ -2,7 +2,7 @@ import { MathJsonExpression as Expression } from '../../src/math-json/types';
 import { engine, exprToString } from '../utils';
 
 function evaluate(expr: Expression) {
-  return exprToString(engine.box(expr)?.evaluate());
+  return exprToString(engine.expr(expr)?.evaluate());
 }
 
 beforeAll(() => {
@@ -35,10 +35,10 @@ beforeAll(() => {
   engine.declare('fn1', 'function');
   engine.declare('fn2', 'function');
   // Inferring the return type of a function
-  engine.box(['Add', ['fn2', 10], 1]).evaluate();
+  engine.expr(['Add', ['fn2', 10], 1]).evaluate();
   engine.declare('fn3', 'function');
   // Inferring the arguments of a function
-  engine.box(['fn3', 10]).evaluate();
+  engine.expr(['fn3', 10]).evaluate();
 
   engine.assign('fn4', ['Function', ['Add', 'x', 1], 'x']);
   engine.declare('fn5', {
@@ -52,27 +52,27 @@ afterAll(() => {
 
 describe('Infer function signature', () => {
   test('declared function signature', () =>
-    expect(engine.box('fn1').type.toString()).toMatchInlineSnapshot(
+    expect(engine.expr('fn1').type.toString()).toMatchInlineSnapshot(
       `function`
     ));
 
   test('inferred function signature (result)', () =>
-    expect(engine.box('fn2').type.toString()).toMatchInlineSnapshot(
+    expect(engine.expr('fn2').type.toString()).toMatchInlineSnapshot(
       `function`
     ));
 
   test('inferred function signature (arguments)', () =>
-    expect(engine.box('fn3').type.toString()).toMatchInlineSnapshot(
+    expect(engine.expr('fn3').type.toString()).toMatchInlineSnapshot(
       `function`
     ));
 
   test('declared function signature with expression body', () =>
-    expect(engine.box('fn4').type.toString()).toMatchInlineSnapshot(
+    expect(engine.expr('fn4').type.toString()).toMatchInlineSnapshot(
       `(unknown) -> number`
     ));
 
   test('declared function signature with JS body', () =>
-    expect(engine.box('fn5').type.toString()).toMatchInlineSnapshot(
+    expect(engine.expr('fn5').type.toString()).toMatchInlineSnapshot(
       `(any*) -> unknown`
     ));
 });
@@ -215,7 +215,7 @@ describe('Changing type from function to non-function', () => {
     engine.assign('f20', 42);
     engine.assign('f20', ['Function', ['Multiply', 'x', 2], 'x']);
 
-    expect(engine.box(['f20', 42]).evaluate().re).toEqual(84);
+    expect(engine.expr(['f20', 42]).evaluate().re).toEqual(84);
     engine.popScope();
   });
 
@@ -223,11 +223,11 @@ describe('Changing type from function to non-function', () => {
     engine.pushScope();
     engine.declare('f20', 'any');
     engine.assign('f20', ['Function', ['Multiply', 'x', 2], 'x']);
-    expect(engine.box(['f20', 3]).evaluate().re).toEqual(6);
+    expect(engine.expr(['f20', 3]).evaluate().re).toEqual(6);
 
     // Reassigning from operator to value is allowed (#288)
     engine.assign('f20', 42);
-    expect(engine.box('f20').evaluate().re).toEqual(42);
+    expect(engine.expr('f20').evaluate().re).toEqual(42);
 
     engine.popScope();
   });

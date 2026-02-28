@@ -13,7 +13,7 @@ describe('CANONICAL FOLDING', () => {
     });
 
     test('radical grouping: √2 + √2 → 2√2', () => {
-      expect(ce.box(['Add', ['Sqrt', 2], ['Sqrt', 2]]).json).toEqual([
+      expect(ce.expr(['Add', ['Sqrt', 2], ['Sqrt', 2]]).json).toEqual([
         'Multiply',
         2,
         ['Sqrt', 2],
@@ -21,7 +21,7 @@ describe('CANONICAL FOLDING', () => {
     });
 
     test('different radicals preserved: √2 + √3 → Add(√2, √3)', () => {
-      const result = ce.box(['Add', ['Sqrt', 2], ['Sqrt', 3]]);
+      const result = ce.expr(['Add', ['Sqrt', 2], ['Sqrt', 3]]);
       expect(result.operator).toBe('Add');
     });
 
@@ -30,7 +30,7 @@ describe('CANONICAL FOLDING', () => {
     });
 
     test('floats NOT folded: 1.5 + x + 0.5', () => {
-      const result = ce.box(['Add', 1.5, 'x', 0.5]);
+      const result = ce.expr(['Add', 1.5, 'x', 0.5]);
       // Floats are not folded — should remain separate operands
       expect(result.operator).toBe('Add');
       const json = result.json;
@@ -53,13 +53,13 @@ describe('CANONICAL FOLDING', () => {
     });
 
     test('product = 1, identity: 1/2 * 2 * x → x', () => {
-      expect(ce.box(['Multiply', ['Rational', 1, 2], 2, 'x']).json).toEqual(
+      expect(ce.expr(['Multiply', ['Rational', 1, 2], 2, 'x']).json).toEqual(
         'x'
       );
     });
 
     test('fold integers with symbolic: 2 * x * 5 → Multiply(10, x)', () => {
-      expect(ce.box(['Multiply', 2, 'x', 5]).json).toEqual([
+      expect(ce.expr(['Multiply', 2, 'x', 5]).json).toEqual([
         'Multiply',
         10,
         'x',
@@ -67,7 +67,7 @@ describe('CANONICAL FOLDING', () => {
     });
 
     test('float NOT folded: 1.5 * x * 2', () => {
-      const result = ce.box(['Multiply', 1.5, 'x', 2]);
+      const result = ce.expr(['Multiply', 1.5, 'x', 2]);
       const json = result.json;
       expect(Array.isArray(json)).toBe(true);
       if (Array.isArray(json)) {
@@ -79,26 +79,26 @@ describe('CANONICAL FOLDING', () => {
 
     test('0 * x stays as Multiply(0, x)', () => {
       // Note: 0 * x is not folded to 0 at canonicalization — requires simplification
-      expect(ce.box(['Multiply', 0, 'x']).json).toEqual(['Multiply', 0, 'x']);
+      expect(ce.expr(['Multiply', 0, 'x']).json).toEqual(['Multiply', 0, 'x']);
     });
 
     test('1 * x → x', () => {
-      expect(ce.box(['Multiply', 1, 'x']).json).toEqual('x');
+      expect(ce.expr(['Multiply', 1, 'x']).json).toEqual('x');
     });
   });
 
   // ─── Power folding ─────────────────────────────────────────────
   describe('Power folding', () => {
     test('Power(2, 3) → 8', () => {
-      expect(ce.box(['Power', 2, 3]).json).toEqual(8);
+      expect(ce.expr(['Power', 2, 3]).json).toEqual(8);
     });
 
     test('Power(3, 2) → 9', () => {
-      expect(ce.box(['Power', 3, 2]).json).toEqual(9);
+      expect(ce.expr(['Power', 3, 2]).json).toEqual(9);
     });
 
     test('Power(1/2, 2) → 1/4 (rational base)', () => {
-      expect(ce.box(['Power', ['Rational', 1, 2], 2]).json).toEqual([
+      expect(ce.expr(['Power', ['Rational', 1, 2], 2]).json).toEqual([
         'Rational',
         1,
         4,
@@ -106,29 +106,29 @@ describe('CANONICAL FOLDING', () => {
     });
 
     test('Power(2, -1) → 1/2 (negative exponent)', () => {
-      expect(ce.box(['Power', 2, -1]).json).toEqual(['Rational', 1, 2]);
+      expect(ce.expr(['Power', 2, -1]).json).toEqual(['Rational', 1, 2]);
     });
 
     test('Power(x, 2) stays as Power (non-numeric base, no fold)', () => {
-      const result = ce.box(['Power', 'x', 2]);
+      const result = ce.expr(['Power', 'x', 2]);
       expect(result.operator).toBe('Power');
     });
 
     test('Power(2, 100) stays as Power (exceeds exponent limit of 64)', () => {
-      const result = ce.box(['Power', 2, 100]);
+      const result = ce.expr(['Power', 2, 100]);
       expect(result.operator).toBe('Power');
     });
 
     test('Power(-2, 2) → 4 (negative base, even exponent)', () => {
-      expect(ce.box(['Power', -2, 2]).json).toEqual(4);
+      expect(ce.expr(['Power', -2, 2]).json).toEqual(4);
     });
 
     test('Power(-2, 3) → -8 (negative base, odd exponent)', () => {
-      expect(ce.box(['Power', -2, 3]).json).toEqual(-8);
+      expect(ce.expr(['Power', -2, 3]).json).toEqual(-8);
     });
 
     test('Power(10, 10) → 10000000000 (large but safe integer)', () => {
-      expect(ce.box(['Power', 10, 10]).json).toEqual(10000000000);
+      expect(ce.expr(['Power', 10, 10]).json).toEqual(10000000000);
     });
   });
 
@@ -148,7 +148,7 @@ describe('CANONICAL FOLDING', () => {
 
     test('non-adjacent real+imaginary: first real pairs with imaginary', () => {
       // x + 1 + 2i → Add(x, Complex(1, 2))
-      const result = ce.box(['Add', 'x', 1, ce.box(['Complex', 0, 2])]);
+      const result = ce.expr(['Add', 'x', 1, ce.expr(['Complex', 0, 2])]);
       const json = result.json;
       expect(Array.isArray(json)).toBe(true);
       if (Array.isArray(json)) {

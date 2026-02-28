@@ -235,49 +235,49 @@ describe('PYTHON TARGET', () => {
 
   describe('Complex Numbers', () => {
     it('should compile complex literal', () => {
-      const expr = ce.box(['Complex', 3, 2]);
+      const expr = ce.expr(['Complex', 3, 2]);
       expect(python.compile(expr).code).toBe('complex(3, 2)');
     });
 
     it('should compile pure imaginary literal', () => {
-      const expr = ce.box(['Complex', 0, 1]);
+      const expr = ce.expr(['Complex', 0, 1]);
       expect(python.compile(expr).code).toBe('complex(0, 1)');
     });
 
     it('should compile ImaginaryUnit', () => {
-      const expr = ce.box('ImaginaryUnit');
+      const expr = ce.expr('ImaginaryUnit');
       expect(python.compile(expr).code).toBe('1j');
     });
 
     it('should use cmath.sin for complex sin', () => {
-      const expr = ce.box(['Sin', ['Complex', 0, 1]]);
+      const expr = ce.expr(['Sin', ['Complex', 0, 1]]);
       expect(python.compile(expr).code).toBe('cmath.sin(complex(0, 1))');
     });
 
     it('should use np.sin for real sin', () => {
-      const expr = ce.box(['Sin', 'x']);
+      const expr = ce.expr(['Sin', 'x']);
       expect(python.compile(expr).code).toBe('np.sin(x)');
     });
 
     it('should use cmath.cos for complex cos', () => {
-      const expr = ce.box(['Cos', ['Complex', 1, 2]]);
+      const expr = ce.expr(['Cos', ['Complex', 1, 2]]);
       expect(python.compile(expr).code).toBe('cmath.cos(complex(1, 2))');
     });
 
     it('should use np.cos for real cos', () => {
-      const expr = ce.box(['Cos', 'x']);
+      const expr = ce.expr(['Cos', 'x']);
       expect(python.compile(expr).code).toBe('np.cos(x)');
     });
 
     it('should use cmath.tan for complex tan', () => {
-      const expr = ce.box(['Tan', ['Complex', 1, 1]]);
+      const expr = ce.expr(['Tan', ['Complex', 1, 1]]);
       expect(python.compile(expr).code).toBe('cmath.tan(complex(1, 1))');
     });
 
     it('should compile complex exp (canonicalized to Power)', () => {
       // Exp is canonicalized to Power(ExponentialE, x), so complex exp
       // goes through the Power path with ** operator
-      const expr = ce.box(['Exp', ['Complex', 0, Math.PI]]);
+      const expr = ce.expr(['Exp', ['Complex', 0, Math.PI]]);
       const code = python.compile(expr).code;
       expect(code).toContain('np.e');
       expect(code).toContain('**');
@@ -286,17 +286,17 @@ describe('PYTHON TARGET', () => {
 
     it('should compile real exp (canonicalized to Power)', () => {
       // Exp is canonicalized to Power(ExponentialE, x)
-      const expr = ce.box(['Exp', 'x']);
+      const expr = ce.expr(['Exp', 'x']);
       expect(python.compile(expr).code).toBe('np.e ** x');
     });
 
     it('should use cmath.log for complex ln', () => {
-      const expr = ce.box(['Ln', ['Complex', 0, 1]]);
+      const expr = ce.expr(['Ln', ['Complex', 0, 1]]);
       expect(python.compile(expr).code).toBe('cmath.log(complex(0, 1))');
     });
 
     it('should use cmath.sqrt for complex sqrt', () => {
-      const expr = ce.box(['Sqrt', ['Complex', 0, 1]]);
+      const expr = ce.expr(['Sqrt', ['Complex', 0, 1]]);
       expect(python.compile(expr).code).toBe('cmath.sqrt(complex(0, 1))');
     });
 
@@ -306,7 +306,7 @@ describe('PYTHON TARGET', () => {
     });
 
     it('should use ** for complex power', () => {
-      const expr = ce.box(['Power', ['Complex', 1, 1], 2]);
+      const expr = ce.expr(['Power', ['Complex', 1, 1], 2]);
       const code = python.compile(expr).code;
       expect(code).toContain('complex(1, 1)');
       expect(code).toContain('**');
@@ -314,12 +314,12 @@ describe('PYTHON TARGET', () => {
 
     it('should use ** for real power (via operator table)', () => {
       // Real Power goes through the operator table (** with prec 15)
-      const expr = ce.box(['Power', 'x', 3]);
+      const expr = ce.expr(['Power', 'x', 3]);
       expect(python.compile(expr).code).toBe('x ** 3');
     });
 
     it('should use abs() for complex abs', () => {
-      const expr = ce.box(['Abs', ['Complex', 3, 4]]);
+      const expr = ce.expr(['Abs', ['Complex', 3, 4]]);
       expect(python.compile(expr).code).toBe('abs(complex(3, 4))');
     });
 
@@ -329,7 +329,7 @@ describe('PYTHON TARGET', () => {
     });
 
     it('should compile complex addition (native operators)', () => {
-      const expr = ce.box(['Add', ['Complex', 1, 2], ['Complex', 3, 4]]);
+      const expr = ce.expr(['Add', ['Complex', 1, 2], ['Complex', 3, 4]]);
       const code = python.compile(expr).code;
       expect(code).toContain('complex(1, 2)');
       expect(code).toContain('+');
@@ -337,38 +337,38 @@ describe('PYTHON TARGET', () => {
     });
 
     it('should use cmath.asin for complex arcsin', () => {
-      const expr = ce.box(['Arcsin', ['Complex', 1, 1]]);
+      const expr = ce.expr(['Arcsin', ['Complex', 1, 1]]);
       expect(python.compile(expr).code).toBe('cmath.asin(complex(1, 1))');
     });
 
     it('should use cmath.acos for complex arccos', () => {
-      const expr = ce.box(['Arccos', ['Complex', 1, 1]]);
+      const expr = ce.expr(['Arccos', ['Complex', 1, 1]]);
       expect(python.compile(expr).code).toBe('cmath.acos(complex(1, 1))');
     });
 
     it('should use cmath.atan for complex arctan', () => {
-      const expr = ce.box(['Arctan', ['Complex', 1, 1]]);
+      const expr = ce.expr(['Arctan', ['Complex', 1, 1]]);
       expect(python.compile(expr).code).toBe('cmath.atan(complex(1, 1))');
     });
 
     it('should use cmath.sinh for complex sinh', () => {
-      const expr = ce.box(['Sinh', ['Complex', 1, 1]]);
+      const expr = ce.expr(['Sinh', ['Complex', 1, 1]]);
       expect(python.compile(expr).code).toBe('cmath.sinh(complex(1, 1))');
     });
 
     it('should use cmath.cosh for complex cosh', () => {
-      const expr = ce.box(['Cosh', ['Complex', 1, 1]]);
+      const expr = ce.expr(['Cosh', ['Complex', 1, 1]]);
       expect(python.compile(expr).code).toBe('cmath.cosh(complex(1, 1))');
     });
 
     it('should use cmath.tanh for complex tanh', () => {
-      const expr = ce.box(['Tanh', ['Complex', 1, 1]]);
+      const expr = ce.expr(['Tanh', ['Complex', 1, 1]]);
       expect(python.compile(expr).code).toBe('cmath.tanh(complex(1, 1))');
     });
 
     it('should include cmath import when imports are enabled', () => {
       const pythonImports = new PythonTarget({ includeImports: true });
-      const expr = ce.box(['Sin', ['Complex', 0, 1]]);
+      const expr = ce.expr(['Sin', ['Complex', 0, 1]]);
       const code = pythonImports.compile(expr).code;
       expect(code).toContain('import cmath');
       expect(code).toContain('cmath.sin(complex(0, 1))');

@@ -31,32 +31,32 @@ describe('DMS Serialization Integration', () => {
   const ce = new ComputeEngine();
 
   test('serialize Quantity with dmsFormat', () => {
-    const expr = ce.box(['Quantity', 9.5, 'deg']);
+    const expr = ce.expr(['Quantity', 9.5, 'deg']);
     const latex = expr.toLatex({ dmsFormat: true });
     expect(latex).toBe("9°30'");
   });
 
   test('serialize full DMS', () => {
-    const expr = ce.box(['Quantity', 9.504166666666666, 'deg']);
+    const expr = ce.expr(['Quantity', 9.504166666666666, 'deg']);
     const latex = expr.toLatex({ dmsFormat: true });
     expect(latex).toBe('9°30\'15"');
   });
 
   test('serialize without dmsFormat uses decimal', () => {
-    const expr = ce.box(['Quantity', 9.5, 'deg']);
+    const expr = ce.expr(['Quantity', 9.5, 'deg']);
     const latex = expr.toLatex({ dmsFormat: false });
     // Without dmsFormat, uses default unit serialization
     expect(latex).toBe('9.5\\,\\mathrm{deg}');
   });
 
   test('serialize with angle normalization', () => {
-    const expr = ce.box(['Quantity', 370, 'deg']);
+    const expr = ce.expr(['Quantity', 370, 'deg']);
     const latex = expr.toLatex({ angleNormalization: '0...360' });
     expect(latex).toBe('10°');
   });
 
   test('combine DMS format with normalization', () => {
-    const expr = ce.box(['Quantity', 370, 'deg']);
+    const expr = ce.expr(['Quantity', 370, 'deg']);
     const latex = expr.toLatex({
       dmsFormat: true,
       angleNormalization: '0...360',
@@ -149,14 +149,14 @@ describe('Round-Trip Parsing and Serialization', () => {
   });
 
   test('parse decimal degrees, serialize as DMS', () => {
-    const expr = ce.box(['Quantity', 9.5, 'deg']);
+    const expr = ce.expr(['Quantity', 9.5, 'deg']);
     const latex = expr.toLatex({ dmsFormat: true });
     expect(latex).toBe("9°30'");
   });
 
   test('parse DMS, serialize as decimal', () => {
     // Use Quantity to preserve the degree unit for decimal serialization
-    const expr = ce.box(['Quantity', 9.5, 'deg']);
+    const expr = ce.expr(['Quantity', 9.5, 'deg']);
     const latex = expr.toLatex({ dmsFormat: false });
 
     // Without dmsFormat, uses default unit serialization
@@ -164,7 +164,7 @@ describe('Round-Trip Parsing and Serialization', () => {
   });
 
   test('normalization preserves mathematical value modulo period', () => {
-    const expr = ce.box(['Quantity', 370, 'deg']);
+    const expr = ce.expr(['Quantity', 370, 'deg']);
     const normalized = expr.toLatex({ angleNormalization: '0...360' });
     expect(normalized).toBe('10°');
 

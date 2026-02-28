@@ -10,7 +10,7 @@ describe('CANONICAL FORM RESTRICTIONS', () => {
   // Some operations are not allowed in non-canonical form
   test("Can't set value of non-canonical", () => {
     expect(() => {
-      TEST_ENGINE.box('m', { form: 'raw' }).value = 1;
+      TEST_ENGINE.expr('m', { form: 'raw' }).value = 1;
     }).toThrow();
   });
   test('Non-canonical expressions evaluate to themselves', () => {
@@ -699,13 +699,13 @@ describe('CANONICAL FORMS', () => {
     const nonCanon = (input: string | ExpressionInput) =>
       typeof input === 'string'
         ? ce.parse(input, { form: 'raw' })
-        : ce.box(input, { form: 'raw' });
+        : ce.expr(input, { form: 'raw' });
     const checkNumber = (input: string | ExpressionInput) =>
       checkForms(input, ['Number'], ce);
     const canonNumber = (input: string | ExpressionInput) =>
       typeof input === 'string'
         ? ce.parse(input, { form: 'Number' })
-        : ce.box(input, { form: 'Number' });
+        : ce.expr(input, { form: 'Number' });
 
     //*note*: BoxedNumbers may get JSON serialized as ['Rational',...] ('check' outputs JSON): so
     //need to additionally test for the result 'operator' as 'Number' for desired result.
@@ -1188,7 +1188,7 @@ function checkForms(
     const boxed =
       typeof inExpr === 'string'
         ? engine.parse(inExpr, { form: 'raw' })
-        : engine.box(inExpr, { form: 'raw' });
+        : engine.expr(inExpr, { form: 'raw' });
 
     const boxedStr = exprToString(boxed);
 
@@ -1196,10 +1196,10 @@ function checkForms(
       return `invalid   =${exprToString(boxed)}`;
     }
 
-    const partialCanon = engine.box(boxed, { form: forms });
+    const partialCanon = engine.expr(boxed, { form: forms });
     const partialCanonStr = exprToString(partialCanon);
 
-    const canonical = engine.box(boxed);
+    const canonical = engine.expr(boxed);
     const canonicalStr = exprToString(canonical);
 
     // boxed/non-canonical

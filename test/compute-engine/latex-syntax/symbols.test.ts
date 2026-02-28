@@ -615,7 +615,7 @@ describe('SYMBOLS', () => {
       const input = '\\operatorname{speed\\unicode{"2012}of\\unicode{"2012}sound}';
       const parsed = ce.parse(input);
       // Use .latex property to serialize back
-      const serialized = ce.box(parsed).latex;
+      const serialized = ce.expr(parsed).latex;
       const reparsed = ce.parse(serialized);
       expect(JSON.stringify(reparsed)).toEqual(JSON.stringify(parsed));
     });

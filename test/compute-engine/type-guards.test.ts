@@ -15,8 +15,8 @@ const ce = engine;
 
 describe('isExpression', () => {
   test('returns true for any boxed expression', () => {
-    expect(isExpression(ce.box(42))).toBe(true);
-    expect(isExpression(ce.box('x'))).toBe(true);
+    expect(isExpression(ce.expr(42))).toBe(true);
+    expect(isExpression(ce.expr('x'))).toBe(true);
     expect(isExpression(ce.parse('x + 1'))).toBe(true);
   });
 
@@ -31,20 +31,20 @@ describe('isExpression', () => {
 
 describe('isNumber', () => {
   test('returns true for numbers', () => {
-    expect(isNumber(ce.box(42))).toBe(true);
-    expect(isNumber(ce.box(3.14))).toBe(true);
-    expect(isNumber(ce.box(['Complex', 1, 2]))).toBe(true);
+    expect(isNumber(ce.expr(42))).toBe(true);
+    expect(isNumber(ce.expr(3.14))).toBe(true);
+    expect(isNumber(ce.expr(['Complex', 1, 2]))).toBe(true);
   });
 
   test('returns false for non-numbers', () => {
-    expect(isNumber(ce.box('x'))).toBe(false);
+    expect(isNumber(ce.expr('x'))).toBe(false);
     expect(isNumber(ce.parse('x + 1'))).toBe(false);
     expect(isNumber(null)).toBe(false);
     expect(isNumber(undefined)).toBe(false);
   });
 
   test('narrows type to NumberLiteralInterface', () => {
-    const expr = ce.box(42);
+    const expr = ce.expr(42);
     if (isNumber(expr)) {
       // After guard, numericValue is number | NumericValue (no undefined)
       expect(expr.numericValue).not.toBeUndefined();
@@ -55,19 +55,19 @@ describe('isNumber', () => {
 
 describe('isSymbol', () => {
   test('returns true for symbols', () => {
-    expect(isSymbol(ce.box('x'))).toBe(true);
-    expect(isSymbol(ce.box('Pi'))).toBe(true);
+    expect(isSymbol(ce.expr('x'))).toBe(true);
+    expect(isSymbol(ce.expr('Pi'))).toBe(true);
   });
 
   test('returns false for non-symbols', () => {
-    expect(isSymbol(ce.box(42))).toBe(false);
+    expect(isSymbol(ce.expr(42))).toBe(false);
     expect(isSymbol(ce.parse('x + 1'))).toBe(false);
     expect(isSymbol(null)).toBe(false);
     expect(isSymbol(undefined)).toBe(false);
   });
 
   test('narrows type to SymbolInterface', () => {
-    const expr = ce.box('x');
+    const expr = ce.expr('x');
     if (isSymbol(expr)) {
       // After guard, symbol is string (no undefined)
       const name: string = expr.symbol;
@@ -83,8 +83,8 @@ describe('isFunction', () => {
   });
 
   test('returns false for non-functions', () => {
-    expect(isFunction(ce.box(42))).toBe(false);
-    expect(isFunction(ce.box('x'))).toBe(false);
+    expect(isFunction(ce.expr(42))).toBe(false);
+    expect(isFunction(ce.expr('x'))).toBe(false);
     expect(isFunction(null)).toBe(false);
     expect(isFunction(undefined)).toBe(false);
   });
@@ -103,18 +103,18 @@ describe('isFunction', () => {
 
 describe('isString', () => {
   test('returns true for strings', () => {
-    expect(isString(ce.box({ str: 'hello' }))).toBe(true);
+    expect(isString(ce.expr({ str: 'hello' }))).toBe(true);
   });
 
   test('returns false for non-strings', () => {
-    expect(isString(ce.box(42))).toBe(false);
-    expect(isString(ce.box('x'))).toBe(false);
+    expect(isString(ce.expr(42))).toBe(false);
+    expect(isString(ce.expr('x'))).toBe(false);
     expect(isString(null)).toBe(false);
     expect(isString(undefined)).toBe(false);
   });
 
   test('narrows type to StringInterface', () => {
-    const expr = ce.box({ str: 'hello' });
+    const expr = ce.expr({ str: 'hello' });
     if (isString(expr)) {
       // After guard, string is string (no undefined)
       const val: string = expr.string;
@@ -125,18 +125,18 @@ describe('isString', () => {
 
 describe('isTensor', () => {
   test('returns true for tensors', () => {
-    expect(isTensor(ce.box(['List', 1, 2, 3]))).toBe(true);
+    expect(isTensor(ce.expr(['List', 1, 2, 3]))).toBe(true);
   });
 
   test('returns false for non-tensors', () => {
-    expect(isTensor(ce.box(42))).toBe(false);
-    expect(isTensor(ce.box('x'))).toBe(false);
+    expect(isTensor(ce.expr(42))).toBe(false);
+    expect(isTensor(ce.expr('x'))).toBe(false);
     expect(isTensor(null)).toBe(false);
     expect(isTensor(undefined)).toBe(false);
   });
 
   test('narrows type to TensorInterface', () => {
-    const expr = ce.box(['List', 1, 2, 3]);
+    const expr = ce.expr(['List', 1, 2, 3]);
     if (isTensor(expr)) {
       // After guard, tensor is Tensor<any> (no undefined)
       expect(expr.tensor).toBeDefined();
@@ -148,7 +148,7 @@ describe('isTensor', () => {
 
 describe('isDictionary', () => {
   test('returns true for dictionaries', () => {
-    const expr = ce.box([
+    const expr = ce.expr([
       'Dictionary',
       ['Tuple', { str: 'a' }, 1],
     ]);
@@ -156,14 +156,14 @@ describe('isDictionary', () => {
   });
 
   test('returns false for non-dictionaries', () => {
-    expect(isDictionary(ce.box(42))).toBe(false);
-    expect(isDictionary(ce.box('x'))).toBe(false);
+    expect(isDictionary(ce.expr(42))).toBe(false);
+    expect(isDictionary(ce.expr('x'))).toBe(false);
     expect(isDictionary(null)).toBe(false);
     expect(isDictionary(undefined)).toBe(false);
   });
 
   test('narrows type to include DictionaryInterface', () => {
-    const expr = ce.box([
+    const expr = ce.expr([
       'Dictionary',
       ['Tuple', { str: 'a' }, 1],
     ]);
@@ -176,24 +176,24 @@ describe('isDictionary', () => {
 
 describe('isCollection', () => {
   test('returns true for collections (lists)', () => {
-    const list = ce.box(['List', 1, 2, 3]);
+    const list = ce.expr(['List', 1, 2, 3]);
     expect(isCollection(list)).toBe(true);
   });
 
   test('returns true for Range (lazy collection)', () => {
-    const range = ce.box(['Range', 1, 10]);
+    const range = ce.expr(['Range', 1, 10]);
     expect(isCollection(range)).toBe(true);
   });
 
   test('returns false for non-collections', () => {
-    expect(isCollection(ce.box(42))).toBe(false);
-    expect(isCollection(ce.box('x'))).toBe(false);
+    expect(isCollection(ce.expr(42))).toBe(false);
+    expect(isCollection(ce.expr('x'))).toBe(false);
     expect(isCollection(null)).toBe(false);
     expect(isCollection(undefined)).toBe(false);
   });
 
   test('narrows type to CollectionInterface', () => {
-    const list = ce.box(['List', 1, 2, 3]);
+    const list = ce.expr(['List', 1, 2, 3]);
     if (isCollection(list)) {
       expect(list.isCollection).toBe(true);
       // each() returns a generator
@@ -205,19 +205,19 @@ describe('isCollection', () => {
 
 describe('isIndexedCollection', () => {
   test('returns true for indexed collections (lists)', () => {
-    const list = ce.box(['List', 1, 2, 3]);
+    const list = ce.expr(['List', 1, 2, 3]);
     expect(isIndexedCollection(list)).toBe(true);
   });
 
   test('returns false for non-indexed collections', () => {
-    expect(isIndexedCollection(ce.box(42))).toBe(false);
-    expect(isIndexedCollection(ce.box('x'))).toBe(false);
+    expect(isIndexedCollection(ce.expr(42))).toBe(false);
+    expect(isIndexedCollection(ce.expr('x'))).toBe(false);
     expect(isIndexedCollection(null)).toBe(false);
     expect(isIndexedCollection(undefined)).toBe(false);
   });
 
   test('narrows type to IndexedCollectionInterface', () => {
-    const list = ce.box(['List', 1, 2, 3]);
+    const list = ce.expr(['List', 1, 2, 3]);
     if (isIndexedCollection(list)) {
       expect(list.isIndexedCollection).toBe(true);
       // at() is available

@@ -239,7 +239,7 @@ describe('SUM with Element indexing set', () => {
 
   test('sum over Range via box', () => {
     // Use box() to create a proper Range-based Sum
-    const expr = ce.box(['Sum', 'n', ['Element', 'n', ['Range', 1, 5]]]);
+    const expr = ce.expr(['Sum', 'n', ['Element', 'n', ['Range', 1, 5]]]);
     expect(expr.evaluate().json).toBe(15);
   });
 
@@ -250,14 +250,14 @@ describe('SUM with Element indexing set', () => {
   });
 
   test('serialization of Sum with Element', () => {
-    const expr = ce.box(['Sum', 'n', ['Element', 'n', ['Set', 1, 2, 3]]]);
+    const expr = ce.expr(['Sum', 'n', ['Element', 'n', ['Set', 1, 2, 3]]]);
     expect(expr.latex).toMatchInlineSnapshot(
       `\\sum_{n\\in \\lbrace1, 2, 3\\rbrace}n`
     );
   });
 
   test('serialization of Product with Element', () => {
-    const expr = ce.box([
+    const expr = ce.expr([
       'Product',
       'k',
       ['Element', 'k', ['Set', 1, 2, 3, 4]],
@@ -280,13 +280,13 @@ describe('SUM with Element indexing set', () => {
   // EL-6: Interval support with Open/Closed boundaries
   test('sum over closed Interval via box', () => {
     // Closed interval [1, 5] → iterates 1, 2, 3, 4, 5
-    const expr = ce.box(['Sum', 'n', ['Element', 'n', ['Interval', 1, 5]]]);
+    const expr = ce.expr(['Sum', 'n', ['Element', 'n', ['Interval', 1, 5]]]);
     expect(expr.evaluate().json).toBe(15);
   });
 
   test('sum over half-open Interval (open start) via box', () => {
     // Interval (0, 5] → iterates 1, 2, 3, 4, 5
-    const expr = ce.box([
+    const expr = ce.expr([
       'Sum',
       'n',
       ['Element', 'n', ['Interval', ['Open', 0], 5]],
@@ -296,7 +296,7 @@ describe('SUM with Element indexing set', () => {
 
   test('sum over half-open Interval (open end) via box', () => {
     // Interval [1, 6) → iterates 1, 2, 3, 4, 5
-    const expr = ce.box([
+    const expr = ce.expr([
       'Sum',
       'n',
       ['Element', 'n', ['Interval', 1, ['Open', 6]]],
@@ -306,7 +306,7 @@ describe('SUM with Element indexing set', () => {
 
   test('sum over open Interval via box', () => {
     // Interval (0, 6) → iterates 1, 2, 3, 4, 5
-    const expr = ce.box([
+    const expr = ce.expr([
       'Sum',
       'n',
       ['Element', 'n', ['Interval', ['Open', 0], ['Open', 6]]],
@@ -316,7 +316,7 @@ describe('SUM with Element indexing set', () => {
 
   test('product over Interval via box', () => {
     // Interval [1, 4] → iterates 1, 2, 3, 4
-    const expr = ce.box([
+    const expr = ce.expr([
       'Product',
       'k',
       ['Element', 'k', ['Interval', 1, 4]],
@@ -342,7 +342,7 @@ describe('EL-2: Multiple Element indexing sets', () => {
   test('evaluating sum with two Element indexing sets', () => {
     // Sum of (n+m) for n in {1,2} and m in {3,4}
     // = (1+3) + (1+4) + (2+3) + (2+4) = 4 + 5 + 5 + 6 = 20
-    const expr = ce.box([
+    const expr = ce.expr([
       'Sum',
       ['Add', 'n', 'm'],
       ['Element', 'n', ['Set', 1, 2]],
@@ -354,7 +354,7 @@ describe('EL-2: Multiple Element indexing sets', () => {
   test('evaluating product with two Element indexing sets', () => {
     // Product of (n*m) for n in {1,2} and m in {3,4}
     // = (1*3) * (1*4) * (2*3) * (2*4) = 3 * 4 * 6 * 8 = 576
-    const expr = ce.box([
+    const expr = ce.expr([
       'Product',
       ['Multiply', 'n', 'm'],
       ['Element', 'n', ['Set', 1, 2]],
@@ -366,7 +366,7 @@ describe('EL-2: Multiple Element indexing sets', () => {
   test('mixing Element and Range indexing sets', () => {
     // Sum for n in {1,2} and m from 1 to 2
     // = (1+1) + (1+2) + (2+1) + (2+2) = 2 + 3 + 3 + 4 = 12
-    const expr = ce.box([
+    const expr = ce.expr([
       'Sum',
       ['Add', 'n', 'm'],
       ['Element', 'n', ['Set', 1, 2]],
@@ -376,7 +376,7 @@ describe('EL-2: Multiple Element indexing sets', () => {
   });
 
   test('serialization of multiple Element indexing sets', () => {
-    const expr = ce.box([
+    const expr = ce.expr([
       'Sum',
       ['Add', 'n', 'm'],
       ['Element', 'n', 'S'],
@@ -426,7 +426,7 @@ describe('EL-3: Condition/Filter Support in Element Expressions', () => {
 
   test('sum with condition n > 0 filters positive values', () => {
     const ce2 = new ComputeEngine();
-    ce2.assign('S', ce2.box(['Set', 1, 2, 3, -1, -2]));
+    ce2.assign('S', ce2.expr(['Set', 1, 2, 3, -1, -2]));
     const expr = ce2.parse('\\sum_{n \\in S, n > 0} n');
     // Should sum only 1+2+3 = 6
     expect(expr.evaluate().json).toBe(6);
@@ -434,7 +434,7 @@ describe('EL-3: Condition/Filter Support in Element Expressions', () => {
 
   test('sum with condition n >= 2 filters values >= 2', () => {
     const ce2 = new ComputeEngine();
-    ce2.assign('S', ce2.box(['Set', 1, 2, 3, 4, 5, -1, -2]));
+    ce2.assign('S', ce2.expr(['Set', 1, 2, 3, 4, 5, -1, -2]));
     const expr = ce2.parse('\\sum_{n \\in S, n \\ge 2} n');
     // Should sum only 2+3+4+5 = 14
     expect(expr.evaluate().json).toBe(14);
@@ -442,7 +442,7 @@ describe('EL-3: Condition/Filter Support in Element Expressions', () => {
 
   test('sum with condition n < 0 filters negative values', () => {
     const ce2 = new ComputeEngine();
-    ce2.assign('S', ce2.box(['Set', 1, 2, 3, -1, -2, -3]));
+    ce2.assign('S', ce2.expr(['Set', 1, 2, 3, -1, -2, -3]));
     const expr = ce2.parse('\\sum_{n \\in S, n < 0} n');
     // Should sum only -1-2-3 = -6
     expect(expr.evaluate().json).toBe(-6);
@@ -450,7 +450,7 @@ describe('EL-3: Condition/Filter Support in Element Expressions', () => {
 
   test('product with condition n > 0', () => {
     const ce2 = new ComputeEngine();
-    ce2.assign('S', ce2.box(['Set', 1, 2, 3, 4, -1, -2]));
+    ce2.assign('S', ce2.expr(['Set', 1, 2, 3, 4, -1, -2]));
     const expr = ce2.parse('\\prod_{n \\in S, n > 0} n');
     // Should multiply only 1*2*3*4 = 24
     expect(expr.evaluate().json).toBe(24);
@@ -458,7 +458,7 @@ describe('EL-3: Condition/Filter Support in Element Expressions', () => {
 
   test('condition with explicit inline set', () => {
     const ce2 = new ComputeEngine();
-    const expr = ce2.box([
+    const expr = ce2.expr([
       'Sum',
       'n',
       ['Element', 'n', ['Set', 1, 2, 3, -1, -2], ['Greater', 'n', 0]],
@@ -474,7 +474,7 @@ describe('EL-5: Non-enumerable domains stay symbolic', () => {
 
   test('sum over unknown symbol stays symbolic', () => {
     // S is an unknown symbol, could be a finite set but we can't determine
-    const expr = ce.box(['Sum', 'n', ['Element', 'n', 'S']]);
+    const expr = ce.expr(['Sum', 'n', ['Element', 'n', 'S']]);
     const result = expr.evaluate();
     // Should stay symbolic, not become NaN
     expect(result.operator).toBe('Sum');
@@ -482,7 +482,7 @@ describe('EL-5: Non-enumerable domains stay symbolic', () => {
   });
 
   test('product over unknown symbol stays symbolic', () => {
-    const expr = ce.box(['Product', 'k', ['Element', 'k', 'T']]);
+    const expr = ce.expr(['Product', 'k', ['Element', 'k', 'T']]);
     const result = expr.evaluate();
     expect(result.operator).toBe('Product');
     expect(result.isNaN).not.toBe(true);
@@ -494,7 +494,7 @@ describe('EL-5: Non-enumerable domains stay symbolic', () => {
 
   test('sum over Integers (infinite set) stays symbolic', () => {
     // Integers is bidirectional, cannot be converted to forward iteration
-    const expr = ce.box(['Sum', 'n', ['Element', 'n', 'Integers']]);
+    const expr = ce.expr(['Sum', 'n', ['Element', 'n', 'Integers']]);
     const result = expr.evaluate();
     expect(result.operator).toBe('Sum');
     expect(result.isNaN).not.toBe(true);
@@ -502,7 +502,7 @@ describe('EL-5: Non-enumerable domains stay symbolic', () => {
 
   test('sum over Reals (infinite set) stays symbolic', () => {
     // Reals is non-countable, cannot be iterated
-    const expr = ce.box(['Sum', 'x', ['Element', 'x', 'Reals']]);
+    const expr = ce.expr(['Sum', 'x', ['Element', 'x', 'Reals']]);
     const result = expr.evaluate();
     expect(result.operator).toBe('Sum');
     expect(result.isNaN).not.toBe(true);
@@ -510,7 +510,7 @@ describe('EL-5: Non-enumerable domains stay symbolic', () => {
 
   test('sum over NegativeIntegers (infinite set) stays symbolic', () => {
     // NegativeIntegers goes in the negative direction, can't be forward iterated
-    const expr = ce.box(['Sum', 'n', ['Element', 'n', 'NegativeIntegers']]);
+    const expr = ce.expr(['Sum', 'n', ['Element', 'n', 'NegativeIntegers']]);
     const result = expr.evaluate();
     expect(result.operator).toBe('Sum');
     expect(result.isNaN).not.toBe(true);
@@ -518,7 +518,7 @@ describe('EL-5: Non-enumerable domains stay symbolic', () => {
 
   test('sum over symbolic Range stays symbolic', () => {
     // Range with symbolic bounds cannot be enumerated
-    const expr = ce.box(['Sum', 'n', ['Element', 'n', ['Range', 1, 'a']]]);
+    const expr = ce.expr(['Sum', 'n', ['Element', 'n', ['Range', 1, 'a']]]);
     const result = expr.evaluate();
     expect(result.operator).toBe('Sum');
     expect(result.isNaN).not.toBe(true);
@@ -526,7 +526,7 @@ describe('EL-5: Non-enumerable domains stay symbolic', () => {
 
   test('sum over symbolic Interval stays symbolic', () => {
     // Interval with symbolic bounds cannot be enumerated
-    const expr = ce.box(['Sum', 'n', ['Element', 'n', ['Interval', 0, 'b']]]);
+    const expr = ce.expr(['Sum', 'n', ['Element', 'n', ['Interval', 0, 'b']]]);
     const result = expr.evaluate();
     expect(result.operator).toBe('Sum');
     expect(result.isNaN).not.toBe(true);
@@ -540,7 +540,7 @@ describe('EL-4: Infinite series with Element notation', () => {
   test('sum over NonNegativeIntegers evaluates (converges to partial sum)', () => {
     // Sum n from 0 to MAX_ITERATION - should give a numeric result (triangular number approximation)
     // Note: This test verifies the behavior change, not the exact value
-    const expr = ce.box(['Sum', 'n', ['Element', 'n', 'NonNegativeIntegers']]);
+    const expr = ce.expr(['Sum', 'n', ['Element', 'n', 'NonNegativeIntegers']]);
     const result = expr.evaluate();
     // Should be a Number, not remain as Sum
     expect(result.isNumber).toBe(true);
@@ -550,7 +550,7 @@ describe('EL-4: Infinite series with Element notation', () => {
 
   test('product over PositiveIntegers evaluates (converges to partial product)', () => {
     // Product k from 1 to MAX_ITERATION - should give a numeric result
-    const expr = ce.box([
+    const expr = ce.expr([
       'Product',
       'k',
       ['Element', 'k', 'PositiveIntegers'],
@@ -565,7 +565,7 @@ describe('EL-4: Infinite series with Element notation', () => {
   test('convergent series over NonNegativeIntegers gives reasonable approximation', () => {
     // Sum 1/n^2 from 1 to infinity approaches π²/6 ≈ 1.6449
     // Using PositiveIntegers to avoid division by zero
-    const expr = ce.box([
+    const expr = ce.expr([
       'Sum',
       ['Power', 'n', -2],
       ['Element', 'n', 'PositiveIntegers'],

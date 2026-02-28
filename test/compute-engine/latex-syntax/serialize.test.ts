@@ -9,7 +9,7 @@ describe('LATEX SERIALIZING', () => {
     expect(latex(-1234567.89e-123)).toMatchInlineSnapshot(
       `-123\\,456\\,789\\cdot10^{-125}`
     );
-    expect(ce.box({ num: '-1234567.890e-123' })).toMatchInlineSnapshot(
+    expect(ce.expr({ num: '-1234567.890e-123' })).toMatchInlineSnapshot(
       `-1.23456789e-117`
     );
 
@@ -184,27 +184,27 @@ describe('CUSTOM LATEX SERIALIZING', () => {
   });
 
   test('Custom Multiply', () => {
-    const expr = ce.box(3.123e-200);
+    const expr = ce.expr(3.123e-200);
     expect(expr.toLatex({ exponentProduct: `\\otimes` })).toMatchInlineSnapshot(
       `3\\,123\\otimes10^{-203}`
     );
 
     // Multiply of two numbers
     expect(
-      ce.box(['Multiply', 5, 7]).toLatex({ multiply: `\\otimes` })
+      ce.expr(['Multiply', 5, 7]).toLatex({ multiply: `\\otimes` })
     ).toMatchInlineSnapshot(`35`);
 
     // Multiply of a number and a rational
     expect(
       ce
-        .box(['Multiply', 5, ['Rational', 3, 4]])
+        .expr(['Multiply', 5, ['Rational', 3, 4]])
         .toLatex({ multiply: `\\otimes` })
     ).toMatchInlineSnapshot(`\\frac{15}{4}`);
   });
 
   test('Numbers', () => {
     expect(
-      ce.box(1.2345678912345).toLatex({ fractionalDigits: 6 })
+      ce.expr(1.2345678912345).toLatex({ fractionalDigits: 6 })
     ).toMatchInlineSnapshot(`1.234\\,567\\ldots`);
   });
 });
@@ -212,12 +212,12 @@ describe('CUSTOM LATEX SERIALIZING', () => {
 describe('LATEX', () => {
   test('Valid LatexString', () => {
     expect(
-      ce.box(['LatexString', "'\\sqrt{x}'"]).evaluate().json
+      ce.expr(['LatexString', "'\\sqrt{x}'"]).evaluate().json
     ).toMatchInlineSnapshot(`'\\sqrt{x}'`);
   });
 
   test('INVALID LatexString', () => {
-    expect(ce.box(['LatexString']).evaluate().json).toMatchInlineSnapshot(`
+    expect(ce.expr(['LatexString']).evaluate().json).toMatchInlineSnapshot(`
       [
         LatexString,
         [
@@ -226,7 +226,7 @@ describe('LATEX', () => {
         ],
       ]
     `);
-    expect(ce.box(['LatexString', 22]).evaluate().json).toMatchInlineSnapshot(`
+    expect(ce.expr(['LatexString', 22]).evaluate().json).toMatchInlineSnapshot(`
       [
         LatexString,
         [
@@ -240,7 +240,7 @@ describe('LATEX', () => {
         ],
       ]
     `);
-    expect(ce.box(['LatexString', "'\\sqrt{x}'", "'+1'"]).evaluate().json)
+    expect(ce.expr(['LatexString', "'\\sqrt{x}'", "'+1'"]).evaluate().json)
       .toMatchInlineSnapshot(`
       [
         LatexString,
@@ -255,7 +255,7 @@ describe('LATEX', () => {
   });
 
   test('Valid ParseLatex', () => {
-    expect(ce.box(['Parse']).evaluate().json).toMatchInlineSnapshot(`
+    expect(ce.expr(['Parse']).evaluate().json).toMatchInlineSnapshot(`
       [
         Parse,
         [
@@ -264,7 +264,7 @@ describe('LATEX', () => {
         ],
       ]
     `);
-    expect(ce.box(['Parse', "'\\frac{2}{\\cos x}'"]).evaluate().json)
+    expect(ce.expr(['Parse', "'\\frac{2}{\\cos x}'"]).evaluate().json)
       .toMatchInlineSnapshot(`
       [
         Divide,
@@ -278,7 +278,7 @@ describe('LATEX', () => {
   });
 
   test('Invalid ParseLatex', () => {
-    expect(ce.box(['Parse', ['Add', 2, 'Pi']]).evaluate().json)
+    expect(ce.expr(['Parse', ['Add', 2, 'Pi']]).evaluate().json)
       .toMatchInlineSnapshot(`
       [
         Parse,
@@ -372,7 +372,7 @@ describe('PREFIX/POSTFIX OPERATOR SERIALIZATION', () => {
     ];
 
     for (const expr of testCases) {
-      const boxed = ce.box(expr as any);
+      const boxed = ce.expr(expr as any);
       const serialized = boxed.latex;
       const reparsed = ce.parse(serialized);
       expect(boxed.isEqual(reparsed)).toBe(true);

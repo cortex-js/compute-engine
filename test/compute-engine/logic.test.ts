@@ -1,7 +1,7 @@
 import { engine as ce } from '../utils';
 
 function box(expr: any) {
-  return ce.box(expr).evaluate().toString();
+  return ce.expr(expr).evaluate().toString();
 }
 
 describe('Logic', () => {
@@ -457,7 +457,7 @@ describe('Satisfiability and Tautology', () => {
 
 describe('Logic Simplification Rules', () => {
   function simplify(expr: any) {
-    return ce.box(expr).simplify().toString();
+    return ce.expr(expr).simplify().toString();
   }
 
   describe('Absorption', () => {
@@ -561,35 +561,35 @@ describe('Logic Simplification Rules', () => {
 
 describe('Truth Table Generation', () => {
   it('should generate truth table for simple expressions', () => {
-    const result = ce.box(['TruthTable', 'A']).evaluate();
+    const result = ce.expr(['TruthTable', 'A']).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
       `[["A","Result"],["False","False"],["True","True"]]`
     );
   });
 
   it('should generate truth table for And', () => {
-    const result = ce.box(['TruthTable', ['And', 'A', 'B']]).evaluate();
+    const result = ce.expr(['TruthTable', ['And', 'A', 'B']]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
       `[["A","B","Result"],["False","False","False"],["False","True","False"],["True","False","False"],["True","True","True"]]`
     );
   });
 
   it('should generate truth table for Or', () => {
-    const result = ce.box(['TruthTable', ['Or', 'A', 'B']]).evaluate();
+    const result = ce.expr(['TruthTable', ['Or', 'A', 'B']]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
       `[["A","B","Result"],["False","False","False"],["False","True","True"],["True","False","True"],["True","True","True"]]`
     );
   });
 
   it('should generate truth table for Xor', () => {
-    const result = ce.box(['TruthTable', ['Xor', 'A', 'B']]).evaluate();
+    const result = ce.expr(['TruthTable', ['Xor', 'A', 'B']]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
       `[["A","B","Result"],["False","False","False"],["False","True","True"],["True","False","True"],["True","True","False"]]`
     );
   });
 
   it('should generate truth table for Implies', () => {
-    const result = ce.box(['TruthTable', ['Implies', 'A', 'B']]).evaluate();
+    const result = ce.expr(['TruthTable', ['Implies', 'A', 'B']]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
       `[["A","B","Result"],["False","False","True"],["False","True","True"],["True","False","False"],["True","True","True"]]`
     );
@@ -599,20 +599,20 @@ describe('Truth Table Generation', () => {
 describe('Prime Implicants and Minimal Forms', () => {
   it('should find prime implicants for simple expressions', () => {
     // A AND B has one prime implicant: A ∧ B
-    const result = ce.box(['PrimeImplicants', ['And', 'A', 'B']]).evaluate();
+    const result = ce.expr(['PrimeImplicants', ['And', 'A', 'B']]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(`[A && B]`);
   });
 
   it('should find prime implicants for OR', () => {
     // A OR B has two prime implicants: A and B
-    const result = ce.box(['PrimeImplicants', ['Or', 'A', 'B']]).evaluate();
+    const result = ce.expr(['PrimeImplicants', ['Or', 'A', 'B']]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(`[B,A]`);
   });
 
   it('should find prime implicants that simplify', () => {
     // AB ∨ A¬B = A (combining two minterms into one prime implicant)
     const result = ce
-      .box([
+      .expr([
         'PrimeImplicants',
         ['Or', ['And', 'A', 'B'], ['And', 'A', ['Not', 'B']]],
       ])
@@ -623,7 +623,7 @@ describe('Prime Implicants and Minimal Forms', () => {
   it('should find prime implicants for tautology', () => {
     // A ∨ ¬A is True, so the only prime implicant is True
     const result = ce
-      .box(['PrimeImplicants', ['Or', 'A', ['Not', 'A']]])
+      .expr(['PrimeImplicants', ['Or', 'A', ['Not', 'A']]])
       .evaluate();
     expect(result.toString()).toMatchInlineSnapshot(`["True"]`);
   });
@@ -631,20 +631,20 @@ describe('Prime Implicants and Minimal Forms', () => {
   it('should find prime implicants for contradiction', () => {
     // A ∧ ¬A is False, so there are no prime implicants
     const result = ce
-      .box(['PrimeImplicants', ['And', 'A', ['Not', 'A']]])
+      .expr(['PrimeImplicants', ['And', 'A', ['Not', 'A']]])
       .evaluate();
     expect(result.toString()).toMatchInlineSnapshot(`[]`);
   });
 
   it('should find prime implicates for simple expressions', () => {
     // A AND B: the prime implicates are A and B (clauses that must be true)
-    const result = ce.box(['PrimeImplicates', ['And', 'A', 'B']]).evaluate();
+    const result = ce.expr(['PrimeImplicates', ['And', 'A', 'B']]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(`[A,B]`);
   });
 
   it('should find prime implicates for OR', () => {
     // A OR B has one prime implicate: A ∨ B
-    const result = ce.box(['PrimeImplicates', ['Or', 'A', 'B']]).evaluate();
+    const result = ce.expr(['PrimeImplicates', ['Or', 'A', 'B']]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(`[A || B]`);
   });
 
@@ -652,7 +652,7 @@ describe('Prime Implicants and Minimal Forms', () => {
     // AB ∨ A¬B ∨ ¬AB simplifies to A ∨ B
     // (covers minterms 01, 10, 11 = A∨B)
     const result = ce
-      .box([
+      .expr([
         'MinimalDNF',
         [
           'Or',
@@ -667,20 +667,20 @@ describe('Prime Implicants and Minimal Forms', () => {
 
   it('should compute minimal DNF for simple AND', () => {
     // A ∧ B is already minimal
-    const result = ce.box(['MinimalDNF', ['And', 'A', 'B']]).evaluate();
+    const result = ce.expr(['MinimalDNF', ['And', 'A', 'B']]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(`A && B`);
   });
 
   it('should compute minimal DNF for tautology', () => {
     const result = ce
-      .box(['MinimalDNF', ['Or', 'A', ['Not', 'A']]])
+      .expr(['MinimalDNF', ['Or', 'A', ['Not', 'A']]])
       .evaluate();
     expect(result.toString()).toMatchInlineSnapshot(`"True"`);
   });
 
   it('should compute minimal DNF for contradiction', () => {
     const result = ce
-      .box(['MinimalDNF', ['And', 'A', ['Not', 'A']]])
+      .expr(['MinimalDNF', ['And', 'A', ['Not', 'A']]])
       .evaluate();
     expect(result.toString()).toMatchInlineSnapshot(`"False"`);
   });
@@ -688,7 +688,7 @@ describe('Prime Implicants and Minimal Forms', () => {
   it('should compute minimal CNF', () => {
     // (A ∨ B) ∧ (A ∨ ¬B) simplifies to A
     const result = ce
-      .box([
+      .expr([
         'MinimalCNF',
         ['And', ['Or', 'A', 'B'], ['Or', 'A', ['Not', 'B']]],
       ])
@@ -698,20 +698,20 @@ describe('Prime Implicants and Minimal Forms', () => {
 
   it('should compute minimal CNF for simple OR', () => {
     // A ∨ B is already a single clause
-    const result = ce.box(['MinimalCNF', ['Or', 'A', 'B']]).evaluate();
+    const result = ce.expr(['MinimalCNF', ['Or', 'A', 'B']]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(`A || B`);
   });
 
   it('should compute minimal CNF for tautology', () => {
     const result = ce
-      .box(['MinimalCNF', ['Or', 'A', ['Not', 'A']]])
+      .expr(['MinimalCNF', ['Or', 'A', ['Not', 'A']]])
       .evaluate();
     expect(result.toString()).toMatchInlineSnapshot(`"True"`);
   });
 
   it('should compute minimal CNF for contradiction', () => {
     const result = ce
-      .box(['MinimalCNF', ['And', 'A', ['Not', 'A']]])
+      .expr(['MinimalCNF', ['And', 'A', ['Not', 'A']]])
       .evaluate();
     expect(result.toString()).toMatchInlineSnapshot(`"False"`);
   });
@@ -719,7 +719,7 @@ describe('Prime Implicants and Minimal Forms', () => {
   it('should handle three variables', () => {
     // (A ∧ B ∧ C) ∨ (A ∧ B ∧ ¬C) = A ∧ B
     const result = ce
-      .box([
+      .expr([
         'MinimalDNF',
         [
           'Or',
@@ -733,7 +733,7 @@ describe('Prime Implicants and Minimal Forms', () => {
 
   it('should find prime implicants for XOR', () => {
     // A XOR B = (A ∧ ¬B) ∨ (¬A ∧ B) - two prime implicants
-    const result = ce.box(['PrimeImplicants', ['Xor', 'A', 'B']]).evaluate();
+    const result = ce.expr(['PrimeImplicants', ['Xor', 'A', 'B']]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(`[!A && B,A && !B]`);
   });
 });

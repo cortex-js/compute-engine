@@ -49,8 +49,8 @@ function ceBaseline(numRandos: number[]): number {
     if (i % 2 === 0) return n.mul(4).pow(2).div(3).add(n.mul(3).div(2)).add(2);
     // Trigonometry, log, exp
     return ce
-      .box(['Tan', n])
-      .add(ce.box(['Log', ['Abs', n]]).add(ce.box(['Exp', n])));
+      .expr(['Tan', n])
+      .add(ce.expr(['Log', ['Abs', n]]).add(ce.expr(['Exp', n])));
   });
 
   return globalThis.performance.now() - start;
@@ -69,7 +69,7 @@ function ceBaselineN(numRandos: number[]): number {
       return n.mul(4).pow(2).div(3).add(n.mul(3).div(2)).add(2).N();
 
     // Trigonometry, log, exp
-    return ce.box(['Add', ['Tan', n], ['Log', ['Abs', n]], ['Exp', n]]).N();
+    return ce.expr(['Add', ['Tan', n], ['Log', ['Abs', n]], ['Exp', n]]).N();
   });
 
   return globalThis.performance.now() - start;

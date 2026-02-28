@@ -72,10 +72,10 @@ describe('PARSING OF NUMBER', () => {
   test('Parsing numbers with repeating pattern', () => {
     expect(parse('1.(3)')).toMatchInlineSnapshot(`1.(3)`);
     expect(parse('0.(142857)')).toMatchInlineSnapshot(`0.(142857)`);
-    expect(exprToString(ce.box({ num: '1.(3)' }))).toMatchInlineSnapshot(
+    expect(exprToString(ce.expr({ num: '1.(3)' }))).toMatchInlineSnapshot(
       `1.(3)`
     );
-    expect(exprToString(ce.box({ num: '0.(142857)' }))).toMatchInlineSnapshot(
+    expect(exprToString(ce.expr({ num: '0.(142857)' }))).toMatchInlineSnapshot(
       `0.(142857)`
     );
     expect(parse('x=.123')).toMatchInlineSnapshot(`["Equal", "x", 0.123]`);
@@ -398,7 +398,7 @@ describe('SERIALIZATION OF NUMBERS', () => {
 
   test('Number with lakh digit grouping', () => {
     const format = (num: string) =>
-      ce.box({ num }).toLatex({ digitGroup: 'lakh' });
+      ce.expr({ num }).toLatex({ digitGroup: 'lakh' });
 
     expect(format('12345678')).toMatchInlineSnapshot(`12345\\,678`);
     expect(format('12345678.12345678')).toMatchInlineSnapshot(
@@ -407,7 +407,7 @@ describe('SERIALIZATION OF NUMBERS', () => {
   });
 
   test('scientific notation within avoidExponentsInRange', () => {
-    const result = ce.box(1 / 7000000).toLatex({
+    const result = ce.expr(1 / 7000000).toLatex({
       notation: 'scientific',
     });
     expect(result).toMatchInlineSnapshot(
@@ -416,7 +416,7 @@ describe('SERIALIZATION OF NUMBERS', () => {
   });
 
   test('scientific notation outside avoidExponentsInRange', () => {
-    const result = ce.box(1 / 70000000).toLatex({
+    const result = ce.expr(1 / 70000000).toLatex({
       notation: 'scientific',
     });
     expect(result).toMatchInlineSnapshot(
@@ -425,7 +425,7 @@ describe('SERIALIZATION OF NUMBERS', () => {
   });
 
   test('auto notation within avoidExponentsInRange', () => {
-    const result = ce.box(1 / 7000000).toLatex({
+    const result = ce.expr(1 / 7000000).toLatex({
       notation: 'auto',
     });
     expect(result).toMatchInlineSnapshot(
@@ -434,7 +434,7 @@ describe('SERIALIZATION OF NUMBERS', () => {
   });
 
   test('auto notation outside avoidExponentsInRange', () => {
-    const result = ce.box(1 / 70000000).toLatex({
+    const result = ce.expr(1 / 70000000).toLatex({
       notation: 'auto',
     });
     expect(result).toMatchInlineSnapshot(
@@ -443,7 +443,7 @@ describe('SERIALIZATION OF NUMBERS', () => {
   });
 
   test('adaptiveScientific notation within avoidExponentsInRange', () => {
-    const result = ce.box(1 / 7000000).toLatex({
+    const result = ce.expr(1 / 7000000).toLatex({
       notation: 'adaptiveScientific',
     });
     expect(result).toMatchInlineSnapshot(
@@ -452,7 +452,7 @@ describe('SERIALIZATION OF NUMBERS', () => {
   });
 
   test('adaptiveScientific notation outside avoidExponentsInRange', () => {
-    const result = ce.box(1 / 70000000).toLatex({
+    const result = ce.expr(1 / 70000000).toLatex({
       notation: 'adaptiveScientific',
     });
     expect(result).toMatchInlineSnapshot(
@@ -548,7 +548,7 @@ describe('SERIALIZATION OF NUMBERS', () => {
 
   test('Number with repeating pattern', () => {
     const format = (num: string, p: string) =>
-      ce.box({ num }).toLatex({
+      ce.expr({ num }).toLatex({
         repeatingDecimal: p as any,
       });
     expect(format('0.(142857)', 'vinculum')).toMatchInlineSnapshot(

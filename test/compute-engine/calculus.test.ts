@@ -442,30 +442,30 @@ describe('NUMERICAL INTEGRATION', () => {
 describe('LIMIT', () => {
   expect(
     engine
-      .box(['Limit', ['Function', ['Divide', ['Sin', 'x'], 'x'], 'x'], 0])
+      .expr(['Limit', ['Function', ['Divide', ['Sin', 'x'], 'x'], 'x'], 0])
       .N().re
   ).toMatchInlineSnapshot(`1`);
 
   expect(
     engine
-      .box(['Limit', ['Function', ['Divide', ['Sin', 'x'], 'x'], 'x'], 0])
+      .expr(['Limit', ['Function', ['Divide', ['Sin', 'x'], 'x'], 'x'], 0])
       .N().re
   ).toMatchInlineSnapshot(`1`);
 
   expect(
     engine
-      .box(['NLimit', ['Function', ['Divide', ['Sin', 'x'], 'x'], 'x'], 0])
+      .expr(['NLimit', ['Function', ['Divide', ['Sin', 'x'], 'x'], 'x'], 0])
       .evaluate().re
   ).toMatchInlineSnapshot(`1`);
 
   expect(
-    engine.box(['NLimit', ['Divide', ['Sin', '_'], '_'], 0]).evaluate().re
+    engine.expr(['NLimit', ['Divide', ['Sin', '_'], '_'], 0]).evaluate().re
   ).toMatchInlineSnapshot(`1`);
 
   // Should be "1"
   expect(
     engine
-      .box([
+      .expr([
         'NLimit',
         ['Function', ['Cos', ['Divide', 1, 'x']], 'x'],
         'Infinity',

@@ -13,14 +13,14 @@ export const ce = new ComputeEngine();
 
 describe.skip('Wester CAS Test Suite', () => {
   test(`Wester 1`, () => {
-    expect(ce.box(['Factorial', 50]).evaluate()).toMatchInlineSnapshot(
+    expect(ce.expr(['Factorial', 50]).evaluate()).toMatchInlineSnapshot(
       `"[\\"Factorial\\",50]"`
     );
   });
 
   test(`Wester 2`, () => {
     expect(
-      ce.box(['Factors', ['Factorial', 50]]).evaluate()
+      ce.expr(['Factors', ['Factorial', 50]]).evaluate()
     ).toMatchInlineSnapshot(
       `"[\\"Pattern\\",[[\\"Pattern\\",\\"Factors\\"],[\\"Pattern\\",\\"Factorial\\"],[\\"Pattern\\",50]]]"`
     );
@@ -43,7 +43,7 @@ describe.skip('Wester CAS Test Suite', () => {
   // test(`Wester 3`, () => {
   //   //['Divide', 4861 2520]
   //   expect(
-  //     ce.box(['Sum', ['Divide', 1, '_'], ['Range', 2, 10]]).evaluate()
+  //     ce.expr(['Sum', ['Divide', 1, '_'], ['Range', 2, 10]]).evaluate()
   //   ).toMatchInlineSnapshot();
   // });
 
@@ -51,7 +51,7 @@ describe.skip('Wester CAS Test Suite', () => {
     // 262537412640768743
     // @todo: precision 50
     expect(
-      ce.box(['Exp', ['Multiply', 'Pi', ['Sqrt', 163]]]).N()
+      ce.expr(['Exp', ['Multiply', 'Pi', ['Sqrt', 163]]]).N()
     ).toMatchInlineSnapshot(
       `"{\\"num\\":\\"262537412640768743.9999999999992500725971981856888793538563373369908627075374103782106479101186073091\\"}"`
     );
@@ -62,7 +62,7 @@ describe.skip('Wester CAS Test Suite', () => {
   test(`Wester 6`, () => {
     expect(
       // 0.142857
-      ce.box(['Divide', 1, 7]).N()
+      ce.expr(['Divide', 1, 7]).N()
     ).toMatchInlineSnapshot(
       `"{\\"num\\":\\"0.1428571428571428571428571428571428571428571428571428571428571428571428571428571428571428571428571429\\"}"`
     );
@@ -74,7 +74,7 @@ describe.skip('Wester CAS Test Suite', () => {
     expect(
       // √(2√3+4) -> 1 + √3
       ce.parse('\\sqrt{2\\sqrt{3}+4}').evaluate()
-      // ce.box(['Sqrt', ['Add', ['Multiply', 2, ['Sqrt', 3]], 4]]).evaluate()
+      // ce.expr(['Sqrt', ['Add', ['Multiply', 2, ['Sqrt', 3]], 4]]).evaluate()
     ).toMatchInlineSnapshot(
       `"[\\"Sqrt\\",[\\"Add\\",4,[\\"Multiply\\",2,[\\"Sqrt\\",3]]]]"`
     );
@@ -173,14 +173,14 @@ describe.skip('Wester CAS Test Suite', () => {
 
   test(`Wester 121`, () => {
     // Expect False
-    expect(ce.box(['And', 'True', 'False']).evaluate()).toMatchInlineSnapshot(
+    expect(ce.expr(['And', 'True', 'False']).evaluate()).toMatchInlineSnapshot(
       `"\\"False\\""`
     );
   });
 
   test(`Wester 122`, () => {
     // Expect true
-    expect(ce.box(['Or', 'x', ['Not', 'x']]).evaluate()).toMatchInlineSnapshot(
+    expect(ce.expr(['Or', 'x', ['Not', 'x']]).evaluate()).toMatchInlineSnapshot(
       `"\\"True\\""`
     );
   });
@@ -188,7 +188,7 @@ describe.skip('Wester CAS Test Suite', () => {
   test(`Wester 123`, () => {
     // Expect x or y
     expect(
-      ce.box(['Or', 'x', 'y', ['And', 'x', 'y']]).evaluate()
+      ce.expr(['Or', 'x', 'y', ['And', 'x', 'y']]).evaluate()
     ).toMatchInlineSnapshot(
       `"[\\"Or\\",\\"x\\",\\"y\\",[\\"And\\",\\"x\\",\\"y\\"]]"`
     );

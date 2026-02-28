@@ -297,7 +297,7 @@ describe('COMPILATION PLUGIN ARCHITECTURE', () => {
     });
 
     it('should compile GLSL vectors', () => {
-      const expr = ce.box(['List', 1, 2, 3]);
+      const expr = ce.expr(['List', 1, 2, 3]);
       const compiled = compile(expr, { to: 'glsl' });
       expect(compiled.code).toMatchInlineSnapshot(`vec3(1.0, 2.0, 3.0)`);
     });

@@ -25,7 +25,7 @@ describe('toRational()', () => {
 
   test('fraction with negative denominator normalizes sign', () => {
     // Parse raw Divide with negative denominator
-    const expr = ce.box(['Divide', 3, -4]);
+    const expr = ce.expr(['Divide', 3, -4]);
     expect(expr.toRational()).toEqual([-3, 4]);
   });
 
@@ -46,7 +46,7 @@ describe('toRational()', () => {
   });
 
   test('Negate of fraction', () => {
-    const expr = ce.box(['Negate', ['Divide', 3, 4]]);
+    const expr = ce.expr(['Negate', ['Divide', 3, 4]]);
     // Negate is non-canonical, so it becomes -3/4 after canonicalization
     const r = expr.toRational();
     expect(r).not.toBeNull();

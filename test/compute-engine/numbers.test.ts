@@ -6,32 +6,32 @@ describe('BOXING OF NUMBER', () => {
   test('Boxing numbers including whitespace', () => {
     expect(
       ce
-        .box({ num: '\u00091\u000a2\u000b3\u000c4\u000d5 6\u00a07.2' })
+        .expr({ num: '\u00091\u000a2\u000b3\u000c4\u000d5 6\u00a07.2' })
         .numericValue?.toString()
     ).toEqual('1234567.2');
   });
 
   test('Lenient num argument', () => {
     // num with a numeric value is accepted, although it's technically invalid
-    expect(ce.box({ num: 4 } as any as Expression).numericValue).toEqual(4);
+    expect(ce.expr({ num: 4 } as any as Expression).numericValue).toEqual(4);
   });
 
   test('Not numbers', () => {
-    expect(ce.box(NaN).numericValue).toEqual(NaN);
-    expect(ce.box(Infinity).numericValue).toEqual(Infinity);
+    expect(ce.expr(NaN).numericValue).toEqual(NaN);
+    expect(ce.expr(Infinity).numericValue).toEqual(Infinity);
     // Invalid box
-    expect(ce.box({ num: Infinity } as any as Expression).numericValue).toEqual(
+    expect(ce.expr({ num: Infinity } as any as Expression).numericValue).toEqual(
       Infinity
     );
-    expect(ce.box({ num: 'infinity' }).numericValue).toEqual(Infinity);
+    expect(ce.expr({ num: 'infinity' }).numericValue).toEqual(Infinity);
   });
 
   test('Bigints', () => {
     // expect(latex({ num: 12n })).toMatchInlineSnapshot();
-    expect(ce.box({ num: '12n' }).numericValue).toEqual(12);
+    expect(ce.expr({ num: '12n' }).numericValue).toEqual(12);
     // 1.873 461 923 786 192 834 612 398 761 298 192 306 423 768 912 387 649 238 476 9... × 10^196
     expect(
-      ce.box({
+      ce.expr({
         num: '187346192378619283461239876129819230642376891238764923847000000000000000000000',
       })
     ).toMatchInlineSnapshot(
@@ -39,7 +39,7 @@ describe('BOXING OF NUMBER', () => {
     );
 
     expect(
-      ce.box({
+      ce.expr({
         num: '18734619237861928346123987612981923064237689123876492384769123786412837040123612308964123876412307864012346012837491237864192837641923876419238764123987642198764987162398716239871236912347619238764n',
       })
     ).toMatchInlineSnapshot(`
@@ -75,7 +75,7 @@ function checkProps(x: Expression): string {
 
 describe('PROPERTIES OF NUMBERS', () => {
   test('ComplexInfinity is a non-finite-number', () => {
-    expect(checkProps(ce.box('ComplexInfinity'))).toMatchInlineSnapshot(`
+    expect(checkProps(ce.expr('ComplexInfinity'))).toMatchInlineSnapshot(`
       number literal: true
       type: complex
       real: false
@@ -97,7 +97,7 @@ describe('PROPERTIES OF NUMBERS', () => {
   });
 
   test('PositiveInfinity is a non-finite-number', () => {
-    expect(checkProps(ce.box('PositiveInfinity'))).toMatchInlineSnapshot(`
+    expect(checkProps(ce.expr('PositiveInfinity'))).toMatchInlineSnapshot(`
       number literal: true
       type: non_finite_number
       real: true
@@ -119,7 +119,7 @@ describe('PROPERTIES OF NUMBERS', () => {
   });
 
   test('NegativeInfinity is a non-finite-number', () => {
-    expect(checkProps(ce.box('NegativeInfinity'))).toMatchInlineSnapshot(`
+    expect(checkProps(ce.expr('NegativeInfinity'))).toMatchInlineSnapshot(`
       number literal: true
       type: non_finite_number
       real: true
@@ -141,7 +141,7 @@ describe('PROPERTIES OF NUMBERS', () => {
   });
 
   test('NaN is a non-finite-number', () => {
-    expect(checkProps(ce.box('NaN'))).toMatchInlineSnapshot(`
+    expect(checkProps(ce.expr('NaN'))).toMatchInlineSnapshot(`
       number literal: true
       type: number
       real: true
@@ -163,7 +163,7 @@ describe('PROPERTIES OF NUMBERS', () => {
   });
 
   test('i is a complex number', () => {
-    expect(checkProps(ce.box('i'))).toMatchInlineSnapshot(`
+    expect(checkProps(ce.expr('i'))).toMatchInlineSnapshot(`
       number literal: true
       type: imaginary
       real: false
@@ -185,7 +185,7 @@ describe('PROPERTIES OF NUMBERS', () => {
   });
 
   test('ImaginaryUnit is a complex number', () => {
-    expect(checkProps(ce.box('ImaginaryUnit'))).toMatchInlineSnapshot(`
+    expect(checkProps(ce.expr('ImaginaryUnit'))).toMatchInlineSnapshot(`
       number literal: false
       type: imaginary
       real: false
@@ -207,7 +207,7 @@ describe('PROPERTIES OF NUMBERS', () => {
   });
 
   test('Complex(0,1) is a complex number', () => {
-    expect(checkProps(ce.box(['Complex', 0, 1]))).toMatchInlineSnapshot(`
+    expect(checkProps(ce.expr(['Complex', 0, 1]))).toMatchInlineSnapshot(`
       number literal: true
       type: imaginary
       real: false
@@ -251,7 +251,7 @@ describe('PROPERTIES OF NUMBERS', () => {
   });
 
   test('Half is a rational', () => {
-    expect(checkProps(ce.box('Half'))).toMatchInlineSnapshot(`
+    expect(checkProps(ce.expr('Half'))).toMatchInlineSnapshot(`
       number literal: true
       type: finite_rational
       real: true
@@ -273,7 +273,7 @@ describe('PROPERTIES OF NUMBERS', () => {
   });
 
   test('1/2 is a rational', () => {
-    expect(checkProps(ce.box(['Rational', 1, 2]))).toMatchInlineSnapshot(`
+    expect(checkProps(ce.expr(['Rational', 1, 2]))).toMatchInlineSnapshot(`
       number literal: true
       type: finite_rational
       real: true
@@ -441,37 +441,37 @@ describe('PARSING LARGE INTEGERS WITH parseNumbers: rational', () => {
 
 describe('OPERATOR PROPERTY RETURNS SPECIFIC NUMERIC TYPE', () => {
   test('Integer literals return "Integer"', () => {
-    expect(ce.box(42).operator).toBe('Integer');
-    expect(ce.box(-5).operator).toBe('Integer');
-    expect(ce.box(0).operator).toBe('Integer');
+    expect(ce.expr(42).operator).toBe('Integer');
+    expect(ce.expr(-5).operator).toBe('Integer');
+    expect(ce.expr(0).operator).toBe('Integer');
     expect(ce.number(1000).operator).toBe('Integer');
   });
 
   test('Floating point numbers return "Real"', () => {
-    expect(ce.box(3.14).operator).toBe('Real');
-    expect(ce.box(-2.5).operator).toBe('Real');
+    expect(ce.expr(3.14).operator).toBe('Real');
+    expect(ce.expr(-2.5).operator).toBe('Real');
     expect(ce.number(0.5).operator).toBe('Real');
   });
 
   test('Rational numbers return "Rational"', () => {
-    expect(ce.box(['Rational', 1, 2]).operator).toBe('Rational');
-    expect(ce.box(['Rational', 3, 4]).operator).toBe('Rational');
-    expect(ce.box('Half').operator).toBe('Rational');
+    expect(ce.expr(['Rational', 1, 2]).operator).toBe('Rational');
+    expect(ce.expr(['Rational', 3, 4]).operator).toBe('Rational');
+    expect(ce.expr('Half').operator).toBe('Rational');
   });
 
   test('Complex numbers return "Complex"', () => {
-    expect(ce.box(['Complex', 1, 2]).operator).toBe('Complex');
-    expect(ce.box(['Complex', 0, 1]).operator).toBe('Complex');
-    expect(ce.box('i').operator).toBe('Complex');
+    expect(ce.expr(['Complex', 1, 2]).operator).toBe('Complex');
+    expect(ce.expr(['Complex', 0, 1]).operator).toBe('Complex');
+    expect(ce.expr('i').operator).toBe('Complex');
   });
 
   test('Special numeric values return specific operators', () => {
-    expect(ce.box(NaN).operator).toBe('NaN');
-    expect(ce.box(Infinity).operator).toBe('PositiveInfinity');
-    expect(ce.box(-Infinity).operator).toBe('NegativeInfinity');
-    expect(ce.box('NaN').operator).toBe('NaN');
-    expect(ce.box('PositiveInfinity').operator).toBe('PositiveInfinity');
-    expect(ce.box('NegativeInfinity').operator).toBe('NegativeInfinity');
+    expect(ce.expr(NaN).operator).toBe('NaN');
+    expect(ce.expr(Infinity).operator).toBe('PositiveInfinity');
+    expect(ce.expr(-Infinity).operator).toBe('NegativeInfinity');
+    expect(ce.expr('NaN').operator).toBe('NaN');
+    expect(ce.expr('PositiveInfinity').operator).toBe('PositiveInfinity');
+    expect(ce.expr('NegativeInfinity').operator).toBe('NegativeInfinity');
   });
 
   test('Real constants return "Real"', () => {

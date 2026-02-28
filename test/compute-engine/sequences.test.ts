@@ -949,24 +949,24 @@ describe('SEQUENCE TYPE INFERENCE', () => {
   const ce = new ComputeEngine();
 
   test('Empty Sequence has type nothing', () => {
-    const seq = ce.box(['Sequence']);
+    const seq = ce.expr(['Sequence']);
     expect(seq.type.toString()).toBe('nothing');
   });
 
   test('Single-argument Sequence inherits argument type', () => {
-    const seq = ce.box(['Sequence', 1]);
+    const seq = ce.expr(['Sequence', 1]);
     expect(seq.type.toString()).toMatch(/integer/);
   });
 
   test('Multi-argument homogeneous Sequence returns tuple type', () => {
-    const seq = ce.box(['Sequence', 1, 2, 3]);
+    const seq = ce.expr(['Sequence', 1, 2, 3]);
     const t = seq.type.toString();
     expect(t).toContain('tuple');
     expect(t).toContain('integer');
   });
 
   test('Multi-argument heterogeneous Sequence preserves element types', () => {
-    const seq = ce.box(['Sequence', 1, { str: 'hello' }]);
+    const seq = ce.expr(['Sequence', 1, { str: 'hello' }]);
     const t = seq.type.toString();
     expect(t).toContain('tuple');
     expect(t).toContain('integer');
@@ -974,7 +974,7 @@ describe('SEQUENCE TYPE INFERENCE', () => {
   });
 
   test('Sequence type is not "any" for multiple arguments', () => {
-    const seq = ce.box(['Sequence', 1, 2]);
+    const seq = ce.expr(['Sequence', 1, 2]);
     expect(seq.type.toString()).not.toBe('any');
   });
 });

@@ -19,13 +19,13 @@ describe('TOO FEW ARGUMENTS (currying)', () => {
     ce.pushScope();
     try {
       ce.declare('cur_f', 'function');
-      ce.assign('cur_f', ce.box(['Function', ['Add', 'cur_x', 'cur_y'], 'cur_x', 'cur_y']));
-      const g = ce.box(['cur_f', 3]).evaluate();
+      ce.assign('cur_f', ce.expr(['Function', ['Add', 'cur_x', 'cur_y'], 'cur_x', 'cur_y']));
+      const g = ce.expr(['cur_f', 3]).evaluate();
       expect(g.operator).toEqual('Function');
       // Apply the curried result: g(7) = 3 + 7 = 10
       ce.declare('cur_g', 'function');
       ce.assign('cur_g', g);
-      expect(ce.box(['cur_g', 7]).evaluate().valueOf()).toEqual(10);
+      expect(ce.expr(['cur_g', 7]).evaluate().valueOf()).toEqual(10);
     } finally {
       ce.popScope();
     }
@@ -38,7 +38,7 @@ describe('TOO FEW ARGUMENTS (currying)', () => {
       ce.declare('cur3_f', 'function');
       ce.assign(
         'cur3_f',
-        ce.box([
+        ce.expr([
           'Function',
           ['Add', ['Multiply', 'cur3_a', 'cur3_b'], 'cur3_c'],
           'cur3_a',
@@ -46,12 +46,12 @@ describe('TOO FEW ARGUMENTS (currying)', () => {
           'cur3_c',
         ])
       );
-      const g = ce.box(['cur3_f', 2]).evaluate();
+      const g = ce.expr(['cur3_f', 2]).evaluate();
       expect(g.operator).toEqual('Function');
       ce.declare('cur3_g', 'function');
       ce.assign('cur3_g', g);
       // g(3, 4) = 2*3 + 4 = 10
-      expect(ce.box(['cur3_g', 3, 4]).evaluate().valueOf()).toEqual(10);
+      expect(ce.expr(['cur3_g', 3, 4]).evaluate().valueOf()).toEqual(10);
     } finally {
       ce.popScope();
     }
@@ -64,7 +64,7 @@ describe('TOO FEW ARGUMENTS (currying)', () => {
       ce.declare('cur3b_f', 'function');
       ce.assign(
         'cur3b_f',
-        ce.box([
+        ce.expr([
           'Function',
           ['Add', ['Multiply', 'cur3b_a', 'cur3b_b'], 'cur3b_c'],
           'cur3b_a',
@@ -72,12 +72,12 @@ describe('TOO FEW ARGUMENTS (currying)', () => {
           'cur3b_c',
         ])
       );
-      const h = ce.box(['cur3b_f', 2, 3]).evaluate();
+      const h = ce.expr(['cur3b_f', 2, 3]).evaluate();
       expect(h.operator).toEqual('Function');
       ce.declare('cur3b_h', 'function');
       ce.assign('cur3b_h', h);
       // h(4) = 2*3 + 4 = 10
-      expect(ce.box(['cur3b_h', 4]).evaluate().valueOf()).toEqual(10);
+      expect(ce.expr(['cur3b_h', 4]).evaluate().valueOf()).toEqual(10);
     } finally {
       ce.popScope();
     }
@@ -88,8 +88,8 @@ describe('TOO FEW ARGUMENTS (currying)', () => {
     ce.pushScope();
     try {
       ce.declare('noarg_f', 'function');
-      ce.assign('noarg_f', ce.box(['Function', 42]));
-      expect(ce.box(['noarg_f']).evaluate().valueOf()).toEqual(42);
+      ce.assign('noarg_f', ce.expr(['Function', 42]));
+      expect(ce.expr(['noarg_f']).evaluate().valueOf()).toEqual(42);
     } finally {
       ce.popScope();
     }
@@ -109,7 +109,7 @@ describe('MUTUAL RECURSION', () => {
       ce.declare('mr_isOdd', 'function');
       ce.assign(
         'mr_isEven',
-        ce.box([
+        ce.expr([
           'Function',
           [
             'Block',
@@ -120,7 +120,7 @@ describe('MUTUAL RECURSION', () => {
       );
       ce.assign(
         'mr_isOdd',
-        ce.box([
+        ce.expr([
           'Function',
           [
             'Block',
@@ -130,13 +130,13 @@ describe('MUTUAL RECURSION', () => {
         ])
       );
       // isEven(4) → isOdd(3) → isEven(2) → isOdd(1) → isEven(0) → True
-      expect(ce.box(['mr_isEven', 4]).evaluate().symbol).toEqual('True');
+      expect(ce.expr(['mr_isEven', 4]).evaluate().symbol).toEqual('True');
       // isEven(3) → isOdd(2) → isEven(1) → isOdd(0) → False
-      expect(ce.box(['mr_isEven', 3]).evaluate().symbol).toEqual('False');
+      expect(ce.expr(['mr_isEven', 3]).evaluate().symbol).toEqual('False');
       // isOdd(5) → isEven(4) → True
-      expect(ce.box(['mr_isOdd', 5]).evaluate().symbol).toEqual('True');
+      expect(ce.expr(['mr_isOdd', 5]).evaluate().symbol).toEqual('True');
       // isOdd(4) → isEven(3) → False
-      expect(ce.box(['mr_isOdd', 4]).evaluate().symbol).toEqual('False');
+      expect(ce.expr(['mr_isOdd', 4]).evaluate().symbol).toEqual('False');
     } finally {
       ce.popScope();
     }
@@ -154,12 +154,12 @@ describe('HIGHER-ORDER FUNCTIONS', () => {
     ce.pushScope();
     try {
       ce.declare('ho_double', 'function');
-      ce.assign('ho_double', ce.box(['Function', ['Multiply', 'ho_dx', 2], 'ho_dx']));
+      ce.assign('ho_double', ce.expr(['Function', ['Multiply', 'ho_dx', 2], 'ho_dx']));
 
       ce.declare('ho_applyTwice', 'function');
       ce.assign(
         'ho_applyTwice',
-        ce.box([
+        ce.expr([
           'Function',
           ['Block', ['ho_af', ['ho_af', 'ho_ax']]],
           'ho_af',
@@ -168,7 +168,7 @@ describe('HIGHER-ORDER FUNCTIONS', () => {
       );
 
       expect(
-        ce.box(['ho_applyTwice', 'ho_double', 3]).evaluate().valueOf()
+        ce.expr(['ho_applyTwice', 'ho_double', 3]).evaluate().valueOf()
       ).toEqual(12);
     } finally {
       ce.popScope();
@@ -184,25 +184,25 @@ describe('HIGHER-ORDER FUNCTIONS', () => {
       ce.declare('mm_make', 'function');
       ce.assign(
         'mm_make',
-        ce.box([
+        ce.expr([
           'Function',
           ['Block', ['Function', ['Block', ['Multiply', 'mm_x', 'mm_n']], 'mm_x']],
           'mm_n',
         ])
       );
-      const triple = ce.box(['mm_make', 3]).evaluate();
+      const triple = ce.expr(['mm_make', 3]).evaluate();
       ce.declare('mm_triple', 'function');
       ce.assign('mm_triple', triple);
-      expect(ce.box(['mm_triple', 5]).evaluate().valueOf()).toEqual(15);
+      expect(ce.expr(['mm_triple', 5]).evaluate().valueOf()).toEqual(15);
 
       // Different multiplier: quintuple
-      const quintuple = ce.box(['mm_make', 5]).evaluate();
+      const quintuple = ce.expr(['mm_make', 5]).evaluate();
       ce.declare('mm_quint', 'function');
       ce.assign('mm_quint', quintuple);
-      expect(ce.box(['mm_quint', 4]).evaluate().valueOf()).toEqual(20);
+      expect(ce.expr(['mm_quint', 4]).evaluate().valueOf()).toEqual(20);
 
       // triple is unaffected by creating quintuple
-      expect(ce.box(['mm_triple', 5]).evaluate().valueOf()).toEqual(15);
+      expect(ce.expr(['mm_triple', 5]).evaluate().valueOf()).toEqual(15);
     } finally {
       ce.popScope();
     }
@@ -214,9 +214,9 @@ describe('HIGHER-ORDER FUNCTIONS', () => {
     ce.pushScope();
     try {
       ce.declare('map_sq', 'function');
-      ce.assign('map_sq', ce.box(['Function', ['Power', 'map_sx', 2], 'map_sx']));
+      ce.assign('map_sq', ce.expr(['Function', ['Power', 'map_sx', 2], 'map_sx']));
       const result = ce
-        .box(['Sum', ['map_sq', 'map_k'], ['Limits', 'map_k', 1, 4]])
+        .expr(['Sum', ['map_sq', 'map_k'], ['Limits', 'map_k', 1, 4]])
         .evaluate()
         .valueOf();
       expect(result).toEqual(30);
@@ -234,10 +234,10 @@ describe('FORGET edge cases', () => {
     ce.pushScope();
     try {
       ce.declare('fgc_c', { type: 'number', value: 42, isConstant: true });
-      expect(ce.box('fgc_c').valueOf()).toEqual(42);
+      expect(ce.expr('fgc_c').valueOf()).toEqual(42);
       // forget on a constant should silently not clear the value
       ce.forget('fgc_c');
-      expect(ce.box('fgc_c').valueOf()).toEqual(42);
+      expect(ce.expr('fgc_c').valueOf()).toEqual(42);
     } finally {
       ce.popScope();
     }
@@ -257,10 +257,10 @@ describe('FORGET edge cases', () => {
     ce.pushScope();
     try {
       ce.declare('fgv_x', { type: 'number', value: 10 });
-      expect(ce.box('fgv_x').evaluate().valueOf()).toEqual(10);
+      expect(ce.expr('fgv_x').evaluate().valueOf()).toEqual(10);
       ce.forget('fgv_x');
       // After forget, x should evaluate to itself (symbolic)
-      expect(ce.box('fgv_x').evaluate().json).toEqual('fgv_x');
+      expect(ce.expr('fgv_x').evaluate().json).toEqual('fgv_x');
     } finally {
       ce.popScope();
     }
@@ -272,7 +272,7 @@ describe('FORGET edge cases', () => {
       ce.declare('fgt_c', { type: 'number', value: 7, isConstant: true });
       ce.forget('fgt_c');
       // The type should still be number
-      expect(ce.box('fgt_c').type.toString()).toEqual('number');
+      expect(ce.expr('fgt_c').type.toString()).toEqual('number');
     } finally {
       ce.popScope();
     }
@@ -284,8 +284,8 @@ describe('FORGET edge cases', () => {
       ce.declare('fgm_a', { type: 'number', value: 1 });
       ce.declare('fgm_b', { type: 'number', value: 2 });
       ce.forget(['fgm_a', 'fgm_b']);
-      expect(ce.box('fgm_a').evaluate().json).toEqual('fgm_a');
-      expect(ce.box('fgm_b').evaluate().json).toEqual('fgm_b');
+      expect(ce.expr('fgm_a').evaluate().json).toEqual('fgm_a');
+      expect(ce.expr('fgm_b').evaluate().json).toEqual('fgm_b');
     } finally {
       ce.popScope();
     }
@@ -297,13 +297,13 @@ describe('FORGET edge cases', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 describe('ISEQUAL with scoping', () => {
   test('isEqual on two identical constant expressions', () => {
-    const a = ce.box(['Add', 2, 3]);
-    const b = ce.box(['Add', 2, 3]);
+    const a = ce.expr(['Add', 2, 3]);
+    const b = ce.expr(['Add', 2, 3]);
     expect(a.isEqual(b)).toBe(true);
   });
 
   test('isEqual on numerically equal expressions', () => {
-    const a = ce.box(['Add', 2, 3]);
+    const a = ce.expr(['Add', 2, 3]);
     const b = ce.number(5);
     expect(a.isEqual(b)).toBe(true);
   });
@@ -312,7 +312,7 @@ describe('ISEQUAL with scoping', () => {
     ce.pushScope();
     try {
       ce.declare('ieq_x', { type: 'number', value: 3 });
-      const a = ce.box(['Add', 'ieq_x', 2]);
+      const a = ce.expr(['Add', 'ieq_x', 2]);
       const b = ce.number(5);
       expect(a.isEqual(b)).toBe(true);
     } finally {
@@ -325,8 +325,8 @@ describe('ISEQUAL with scoping', () => {
     ce.pushScope();
     try {
       ce.declare('ieq_v', 'real');
-      const a = ce.box(['Add', 'ieq_v', 1]);
-      const b = ce.box(['Add', 'ieq_v', 1]);
+      const a = ce.expr(['Add', 'ieq_v', 1]);
+      const b = ce.expr(['Add', 'ieq_v', 1]);
       expect(a.isEqual(b)).toBe(true);
     } finally {
       ce.popScope();
@@ -334,7 +334,7 @@ describe('ISEQUAL with scoping', () => {
   });
 
   test('isEqual detects inequality', () => {
-    const a = ce.box(['Add', 2, 3]);
+    const a = ce.expr(['Add', 2, 3]);
     const b = ce.number(6);
     expect(a.isEqual(b)).toBe(false);
   });
@@ -344,7 +344,7 @@ describe('ISEQUAL with scoping', () => {
     try {
       ce.declare('ieq_a', { type: 'number', value: 4 });
       // 2 * ieq_a = 8
-      const expr = ce.box(['Multiply', 2, 'ieq_a']);
+      const expr = ce.expr(['Multiply', 2, 'ieq_a']);
       expect(expr.isEqual(8)).toBe(true);
       expect(expr.isEqual(9)).toBe(false);
     } finally {
@@ -357,7 +357,7 @@ describe('ISEQUAL with scoping', () => {
     try {
       ce.declare('ieq_u', 'real');
       // u + 1 vs 5 — u is free, cannot determine
-      const a = ce.box(['Add', 'ieq_u', 1]);
+      const a = ce.expr(['Add', 'ieq_u', 1]);
       const result = a.isEqual(5);
       // Should be either false or undefined (not true)
       expect(result).not.toBe(true);
@@ -373,7 +373,7 @@ describe('ISEQUAL with scoping', () => {
 describe('COMPILE: BigOp and Block', () => {
   test('Sum compilation produces correct code', () => {
     // f(n) = Sum(k, Limits(k, 1, n))
-    const f = ce.box([
+    const f = ce.expr([
       'Function',
       ['Sum', 'cs_k', ['Limits', 'cs_k', 1, 'cs_n']],
       'cs_n',
@@ -387,7 +387,7 @@ describe('COMPILE: BigOp and Block', () => {
   });
 
   test('Sum compilation matches CE evaluation', () => {
-    const f = ce.box([
+    const f = ce.expr([
       'Function',
       ['Sum', 'csm_k', ['Limits', 'csm_k', 1, 'csm_n']],
       'csm_n',
@@ -396,7 +396,7 @@ describe('COMPILE: BigOp and Block', () => {
     try {
       ce.declare('csm_f', 'function');
       ce.assign('csm_f', f);
-      const ceResult = ce.box(['csm_f', 6]).evaluate().valueOf();
+      const ceResult = ce.expr(['csm_f', 6]).evaluate().valueOf();
       expect(compile(f)?.run!(6)).toBe(ceResult);
     } finally {
       ce.popScope();
@@ -405,7 +405,7 @@ describe('COMPILE: BigOp and Block', () => {
 
   test('Product compilation produces correct code', () => {
     // f(n) = Product(k, Limits(k, 1, n)) — factorial
-    const f = ce.box([
+    const f = ce.expr([
       'Function',
       ['Product', 'cp_k', ['Limits', 'cp_k', 1, 'cp_n']],
       'cp_n',
@@ -419,7 +419,7 @@ describe('COMPILE: BigOp and Block', () => {
   });
 
   test('Product compilation matches CE evaluation', () => {
-    const f = ce.box([
+    const f = ce.expr([
       'Function',
       ['Product', 'cpm_k', ['Limits', 'cpm_k', 1, 'cpm_n']],
       'cpm_n',
@@ -428,7 +428,7 @@ describe('COMPILE: BigOp and Block', () => {
     try {
       ce.declare('cpm_f', 'function');
       ce.assign('cpm_f', f);
-      const ceResult = ce.box(['cpm_f', 4]).evaluate().valueOf();
+      const ceResult = ce.expr(['cpm_f', 4]).evaluate().valueOf();
       expect(compile(f)?.run!(4)).toBe(ceResult);
     } finally {
       ce.popScope();
@@ -437,7 +437,7 @@ describe('COMPILE: BigOp and Block', () => {
 
   test('Sum with expression body compiles correctly', () => {
     // f(n) = Sum(k^2, Limits(k, 1, n))
-    const f = ce.box([
+    const f = ce.expr([
       'Function',
       ['Sum', ['Power', 'csb_k', 2], ['Limits', 'csb_k', 1, 'csb_n']],
       'csb_n',
@@ -450,7 +450,7 @@ describe('COMPILE: BigOp and Block', () => {
   test('Block with local variable compiles correctly', () => {
     // f(x) = Block(Declare(t, number), Assign(t, x+1), Multiply(t, 2))
     // f(4) = (4+1)*2 = 10
-    const f = ce.box([
+    const f = ce.expr([
       'Function',
       [
         'Block',
@@ -466,7 +466,7 @@ describe('COMPILE: BigOp and Block', () => {
   });
 
   test('Block compilation matches CE evaluation', () => {
-    const f = ce.box([
+    const f = ce.expr([
       'Function',
       [
         'Block',
@@ -480,7 +480,7 @@ describe('COMPILE: BigOp and Block', () => {
     try {
       ce.declare('cblm_f', 'function');
       ce.assign('cblm_f', f);
-      const ceResult = ce.box(['cblm_f', 7]).evaluate().valueOf();
+      const ceResult = ce.expr(['cblm_f', 7]).evaluate().valueOf();
       expect(compile(f)?.run!(7)).toBe(ceResult);
     } finally {
       ce.popScope();
@@ -488,7 +488,7 @@ describe('COMPILE: BigOp and Block', () => {
   });
 
   test('compiled Sum generates loop code (IIFE)', () => {
-    const f = ce.box([
+    const f = ce.expr([
       'Function',
       ['Sum', 'csc_k', ['Limits', 'csc_k', 1, 'csc_n']],
       'csc_n',
@@ -500,7 +500,7 @@ describe('COMPILE: BigOp and Block', () => {
   });
 
   test('compiled Product generates loop code (IIFE)', () => {
-    const f = ce.box([
+    const f = ce.expr([
       'Function',
       ['Product', 'cpc_k', ['Limits', 'cpc_k', 1, 'cpc_n']],
       'cpc_n',
@@ -567,9 +567,9 @@ describe('SCOPE WITH ce.parse()', () => {
     ce.pushScope();
     try {
       ce.declare('g', 'function');
-      ce.assign('g', ce.box(['Function', ['Multiply', 'v', 2], 'v']));
+      ce.assign('g', ce.expr(['Function', ['Multiply', 'v', 2], 'v']));
       // Call g(5) via box
-      expect(ce.box(['g', 5]).evaluate().valueOf()).toEqual(10);
+      expect(ce.expr(['g', 5]).evaluate().valueOf()).toEqual(10);
     } finally {
       ce.popScope();
     }
@@ -579,8 +579,8 @@ describe('SCOPE WITH ce.parse()', () => {
     ce.pushScope();
     try {
       ce.declare('s', 'real');
-      ce.assume(ce.box(['Greater', 's', 0]));
-      const expr = ce.box('s');
+      ce.assume(ce.expr(['Greater', 's', 0]));
+      const expr = ce.expr('s');
       expect(expr.evaluate().sgn).toBe('positive');
     } finally {
       ce.popScope();

@@ -88,25 +88,25 @@ describe('GLSL COMPILATION', () => {
     });
 
     it('should compile inverse hyperbolic functions', () => {
-      expect(glsl.compile(ce.box(['Arcosh', 'x'])).code).toMatchInlineSnapshot(
+      expect(glsl.compile(ce.expr(['Arcosh', 'x'])).code).toMatchInlineSnapshot(
         `acosh(x)`
       );
-      expect(glsl.compile(ce.box(['Arsinh', 'x'])).code).toMatchInlineSnapshot(
+      expect(glsl.compile(ce.expr(['Arsinh', 'x'])).code).toMatchInlineSnapshot(
         `asinh(x)`
       );
-      expect(glsl.compile(ce.box(['Artanh', 'x'])).code).toMatchInlineSnapshot(
+      expect(glsl.compile(ce.expr(['Artanh', 'x'])).code).toMatchInlineSnapshot(
         `atanh(x)`
       );
     });
 
     it('should compile reciprocal hyperbolic functions', () => {
-      expect(glsl.compile(ce.box(['Coth', 'x'])).code).toMatchInlineSnapshot(
+      expect(glsl.compile(ce.expr(['Coth', 'x'])).code).toMatchInlineSnapshot(
         `(cosh(x) / sinh(x))`
       );
-      expect(glsl.compile(ce.box(['Csch', 'x'])).code).toMatchInlineSnapshot(
+      expect(glsl.compile(ce.expr(['Csch', 'x'])).code).toMatchInlineSnapshot(
         `(1.0 / sinh(x))`
       );
-      expect(glsl.compile(ce.box(['Sech', 'x'])).code).toMatchInlineSnapshot(
+      expect(glsl.compile(ce.expr(['Sech', 'x'])).code).toMatchInlineSnapshot(
         `(1.0 / cosh(x))`
       );
     });
@@ -150,32 +150,32 @@ describe('GLSL COMPILATION', () => {
 
   describe('Vectors', () => {
     it('should compile vec2', () => {
-      const expr = ce.box(['List', 1, 2]);
+      const expr = ce.expr(['List', 1, 2]);
       const code = glsl.compile(expr).code;
       expect(code).toMatchInlineSnapshot(`vec2(1.0, 2.0)`);
     });
 
     it('should compile vec3', () => {
-      const expr = ce.box(['List', 1, 2, 3]);
+      const expr = ce.expr(['List', 1, 2, 3]);
       const code = glsl.compile(expr).code;
       expect(code).toMatchInlineSnapshot(`vec3(1.0, 2.0, 3.0)`);
     });
 
     it('should compile vec4', () => {
-      const expr = ce.box(['List', 1, 2, 3, 4]);
+      const expr = ce.expr(['List', 1, 2, 3, 4]);
       const code = glsl.compile(expr).code;
       expect(code).toMatchInlineSnapshot(`vec4(1.0, 2.0, 3.0, 4.0)`);
     });
 
     it('should compile vector addition', () => {
-      const expr = ce.box(['Add', ['List', 1, 2, 3], ['List', 4, 5, 6]]);
+      const expr = ce.expr(['Add', ['List', 1, 2, 3], ['List', 4, 5, 6]]);
       const code = glsl.compile(expr).code;
       // GLSL supports vector operators natively; canonical form reorders
       expect(code).toMatchInlineSnapshot(`vec3(1.0, 2.0, 3.0) + vec3(4.0, 5.0, 6.0)`);
     });
 
     it('should compile vector multiplication', () => {
-      const expr = ce.box(['Multiply', ['List', 'x', 'y', 'z'], 2]);
+      const expr = ce.expr(['Multiply', ['List', 'x', 'y', 'z'], 2]);
       const code = glsl.compile(expr).code;
       // Note: canonical form reorders operands
       expect(code).toMatchInlineSnapshot(`2.0 * vec3(x, y, z)`);
@@ -218,7 +218,7 @@ describe('GLSL COMPILATION', () => {
 
   describe('Shader Generation', () => {
     it('should generate a simple fragment shader', () => {
-      const colorExpr = ce.box(['List', 1, 0, 0, 1]); // Red color
+      const colorExpr = ce.expr(['List', 1, 0, 0, 1]); // Red color
 
       const shader = glsl.compileShader({
         type: 'fragment',
@@ -243,7 +243,7 @@ describe('GLSL COMPILATION', () => {
         body: [
           {
             variable: 'vColor',
-            expression: ce.box(['List', 1, 0, 0]),
+            expression: ce.expr(['List', 1, 0, 0]),
           },
         ],
       });
@@ -259,7 +259,7 @@ describe('GLSL COMPILATION', () => {
 
   describe('Block Expressions', () => {
     it('should compile a simple block with local variable', () => {
-      const expr = ce.box([
+      const expr = ce.expr([
         'Block',
         ['Declare', 'a'],
         ['Assign', 'a', ['Cos', 't']],
@@ -274,7 +274,7 @@ describe('GLSL COMPILATION', () => {
     });
 
     it('should compile a block with multiple locals', () => {
-      const expr = ce.box([
+      const expr = ce.expr([
         'Block',
         ['Declare', 'a'],
         ['Declare', 'b'],
@@ -293,7 +293,7 @@ describe('GLSL COMPILATION', () => {
     });
 
     it('should compile a block function with valid GLSL body', () => {
-      const expr = ce.box([
+      const expr = ce.expr([
         'Block',
         ['Declare', 'a'],
         ['Assign', 'a', ['Cos', 't']],
@@ -312,7 +312,7 @@ describe('GLSL COMPILATION', () => {
     });
 
     it('should not use IIFE or let in GLSL blocks', () => {
-      const expr = ce.box([
+      const expr = ce.expr([
         'Block',
         ['Declare', 'tmp'],
         ['Assign', 'tmp', 'x'],
@@ -352,17 +352,17 @@ describe('GLSL COMPILATION', () => {
     });
 
     it('should compile complex literal as vec2', () => {
-      const code = glsl.compile(ce.box(['Complex', 3, 4])).code;
+      const code = glsl.compile(ce.expr(['Complex', 3, 4])).code;
       expect(code).toMatchInlineSnapshot(`vec2(3.0, 4.0)`);
     });
 
     it('should compile ImaginaryUnit as vec2(0, 1)', () => {
-      const code = glsl.compile(ce.box('ImaginaryUnit')).code;
+      const code = glsl.compile(ce.expr('ImaginaryUnit')).code;
       expect(code).toMatchInlineSnapshot(`vec2(0.0, 1.0)`);
     });
 
     it('should compile complex power z^2', () => {
-      const expr = ce.box(['Power', 'z', 2]);
+      const expr = ce.expr(['Power', 'z', 2]);
       const code = glsl.compile(expr).code;
       expect(code).toMatchInlineSnapshot(`_gpu_cpow(z, vec2(2.0, 0.0))`);
     });
@@ -376,123 +376,123 @@ describe('GLSL COMPILATION', () => {
     });
 
     it('should compile complex multiply z*w', () => {
-      const code = glsl.compile(ce.box(['Multiply', 'z', 'w'])).code;
+      const code = glsl.compile(ce.expr(['Multiply', 'z', 'w'])).code;
       expect(code).toMatchInlineSnapshot(`_gpu_cmul(w, z)`);
     });
 
     it('should compile scalar * complex (native)', () => {
-      const code = glsl.compile(ce.box(['Multiply', 2, 'z'])).code;
+      const code = glsl.compile(ce.expr(['Multiply', 2, 'z'])).code;
       expect(code).toMatchInlineSnapshot(`(2.0 * z)`);
     });
 
     it('should compile complex divide', () => {
       const code = glsl.compile(
-        ce.box(['Divide', 'z', ['Complex', 1, 2]])
+        ce.expr(['Divide', 'z', ['Complex', 1, 2]])
       ).code;
       expect(code).toMatchInlineSnapshot(`_gpu_cdiv(z, vec2(1.0, 2.0))`);
     });
 
     it('should compile complex / real (native)', () => {
-      const code = glsl.compile(ce.box(['Divide', 'z', 3])).code;
+      const code = glsl.compile(ce.expr(['Divide', 'z', 3])).code;
       expect(code).toMatchInlineSnapshot(`(0.3333333333333333 * z)`);
     });
 
     it('should compile real / complex', () => {
-      const code = glsl.compile(ce.box(['Divide', 5, 'z'])).code;
+      const code = glsl.compile(ce.expr(['Divide', 5, 'z'])).code;
       expect(code).toMatchInlineSnapshot(`_gpu_cdiv(vec2(5.0, 0.0), z)`);
     });
 
     it('should compile complex addition with real promotion', () => {
-      const code = glsl.compile(ce.box(['Add', 'z', 5])).code;
+      const code = glsl.compile(ce.expr(['Add', 'z', 5])).code;
       expect(code).toMatchInlineSnapshot(`z + vec2(5.0, 0.0)`);
     });
 
     it('should compile sin of complex variable', () => {
-      const code = glsl.compile(ce.box(['Sin', 'z'])).code;
+      const code = glsl.compile(ce.expr(['Sin', 'z'])).code;
       expect(code).toMatchInlineSnapshot(`_gpu_csin(z)`);
     });
 
     it('should compile cos of complex variable', () => {
-      const code = glsl.compile(ce.box(['Cos', 'z'])).code;
+      const code = glsl.compile(ce.expr(['Cos', 'z'])).code;
       expect(code).toMatchInlineSnapshot(`_gpu_ccos(z)`);
     });
 
     it('should compile tan of complex variable', () => {
-      const code = glsl.compile(ce.box(['Tan', 'z'])).code;
+      const code = glsl.compile(ce.expr(['Tan', 'z'])).code;
       expect(code).toMatchInlineSnapshot(`_gpu_ctan(z)`);
     });
 
     it('should compile exp(z) via Power(E, z) as _gpu_cexp', () => {
-      const expr = ce.box(['Exp', 'z']);
+      const expr = ce.expr(['Exp', 'z']);
       const code = glsl.compile(expr).code;
       expect(code).toMatchInlineSnapshot(`_gpu_cexp(z)`);
     });
 
     it('should compile ln of complex variable', () => {
       // Ln is canonicalized, check the operator
-      const expr = ce.box(['Ln', 'z']);
+      const expr = ce.expr(['Ln', 'z']);
       const code = glsl.compile(expr).code;
       expect(code).toMatchInlineSnapshot(`_gpu_cln(z)`);
     });
 
     it('should compile sqrt of complex variable', () => {
-      const code = glsl.compile(ce.box(['Sqrt', 'z'])).code;
+      const code = glsl.compile(ce.expr(['Sqrt', 'z'])).code;
       expect(code).toMatchInlineSnapshot(`_gpu_csqrt(z)`);
     });
 
     it('should compile abs of complex as length', () => {
-      const code = glsl.compile(ce.box(['Abs', 'z'])).code;
+      const code = glsl.compile(ce.expr(['Abs', 'z'])).code;
       expect(code).toMatchInlineSnapshot(`length(z)`);
     });
 
     it('should compile Re and Im of complex', () => {
-      expect(glsl.compile(ce.box(['Re', 'z'])).code).toMatchInlineSnapshot(
+      expect(glsl.compile(ce.expr(['Re', 'z'])).code).toMatchInlineSnapshot(
         `(z).x`
       );
-      expect(glsl.compile(ce.box(['Im', 'z'])).code).toMatchInlineSnapshot(
+      expect(glsl.compile(ce.expr(['Im', 'z'])).code).toMatchInlineSnapshot(
         `(z).y`
       );
     });
 
     it('should compile Conjugate of complex', () => {
-      const code = glsl.compile(ce.box(['Conjugate', 'z'])).code;
+      const code = glsl.compile(ce.expr(['Conjugate', 'z'])).code;
       expect(code).toMatchInlineSnapshot(`vec2(z.x, -z.y)`);
     });
 
     it('should compile Arg of complex', () => {
-      const code = glsl.compile(ce.box(['Arg', 'z'])).code;
+      const code = glsl.compile(ce.expr(['Arg', 'z'])).code;
       expect(code).toMatchInlineSnapshot(`atan(z.y, z.x)`);
     });
 
     it('should compile sinh/cosh/tanh of complex', () => {
-      expect(glsl.compile(ce.box(['Sinh', 'z'])).code).toMatchInlineSnapshot(
+      expect(glsl.compile(ce.expr(['Sinh', 'z'])).code).toMatchInlineSnapshot(
         `_gpu_csinh(z)`
       );
-      expect(glsl.compile(ce.box(['Cosh', 'z'])).code).toMatchInlineSnapshot(
+      expect(glsl.compile(ce.expr(['Cosh', 'z'])).code).toMatchInlineSnapshot(
         `_gpu_ccosh(z)`
       );
-      expect(glsl.compile(ce.box(['Tanh', 'z'])).code).toMatchInlineSnapshot(
+      expect(glsl.compile(ce.expr(['Tanh', 'z'])).code).toMatchInlineSnapshot(
         `_gpu_ctanh(z)`
       );
     });
 
     it('should compile arcsinh of complex variable', () => {
-      const code = glsl.compile(ce.box(['Arsinh', 'z'])).code;
+      const code = glsl.compile(ce.expr(['Arsinh', 'z'])).code;
       expect(code).toMatchInlineSnapshot(`_gpu_casinh(z)`);
     });
 
     it('should compile arccosh of complex variable', () => {
-      const code = glsl.compile(ce.box(['Arcosh', 'z'])).code;
+      const code = glsl.compile(ce.expr(['Arcosh', 'z'])).code;
       expect(code).toMatchInlineSnapshot(`_gpu_cacosh(z)`);
     });
 
     it('should compile arctanh of complex variable', () => {
-      const code = glsl.compile(ce.box(['Artanh', 'z'])).code;
+      const code = glsl.compile(ce.expr(['Artanh', 'z'])).code;
       expect(code).toMatchInlineSnapshot(`_gpu_catanh(z)`);
     });
 
     it('should include only cmul in preamble for z*w', () => {
-      const result = glsl.compile(ce.box(['Multiply', 'z', 'w']));
+      const result = glsl.compile(ce.expr(['Multiply', 'z', 'w']));
       expect(result.preamble).toContain('_gpu_cmul');
       // Should NOT include unrelated functions
       expect(result.preamble).not.toContain('_gpu_csin');
@@ -500,7 +500,7 @@ describe('GLSL COMPILATION', () => {
     });
 
     it('should include cpow deps (cexp, cmul, cln) for z^2', () => {
-      const result = glsl.compile(ce.box(['Power', 'z', 2]));
+      const result = glsl.compile(ce.expr(['Power', 'z', 2]));
       expect(result.preamble).toContain('_gpu_cpow');
       expect(result.preamble).toContain('_gpu_cexp');
       expect(result.preamble).toContain('_gpu_cmul');
@@ -510,7 +510,7 @@ describe('GLSL COMPILATION', () => {
     });
 
     it('should include ctan deps (cdiv, csin, ccos) for tan(z)', () => {
-      const result = glsl.compile(ce.box(['Tan', 'z']));
+      const result = glsl.compile(ce.expr(['Tan', 'z']));
       expect(result.preamble).toContain('_gpu_ctan');
       expect(result.preamble).toContain('_gpu_cdiv');
       expect(result.preamble).toContain('_gpu_csin');
@@ -533,33 +533,33 @@ describe('GLSL COMPILATION', () => {
 
   describe('Special Functions', () => {
     it('should compile Heaviside', () => {
-      const result = glsl.compile(ce.box(['Heaviside', 'x']));
+      const result = glsl.compile(ce.expr(['Heaviside', 'x']));
       expect(result.code).toMatchInlineSnapshot(`_gpu_heaviside(x)`);
       expect(result.preamble).toContain('_gpu_heaviside');
     });
 
     it('should compile Sinc', () => {
-      const result = glsl.compile(ce.box(['Sinc', 'x']));
+      const result = glsl.compile(ce.expr(['Sinc', 'x']));
       expect(result.code).toMatchInlineSnapshot(`_gpu_sinc(x)`);
       expect(result.preamble).toContain('_gpu_sinc');
     });
 
     it('should compile FresnelC', () => {
-      const result = glsl.compile(ce.box(['FresnelC', 'x']));
+      const result = glsl.compile(ce.expr(['FresnelC', 'x']));
       expect(result.code).toMatchInlineSnapshot(`_gpu_fresnelC(x)`);
       expect(result.preamble).toContain('_gpu_polevl');
       expect(result.preamble).toContain('_gpu_fresnelC');
     });
 
     it('should compile FresnelS', () => {
-      const result = glsl.compile(ce.box(['FresnelS', 'x']));
+      const result = glsl.compile(ce.expr(['FresnelS', 'x']));
       expect(result.code).toMatchInlineSnapshot(`_gpu_fresnelS(x)`);
       expect(result.preamble).toContain('_gpu_polevl');
       expect(result.preamble).toContain('_gpu_fresnelS');
     });
 
     it('should compile BesselJ', () => {
-      const result = glsl.compile(ce.box(['BesselJ', 0, 'x']));
+      const result = glsl.compile(ce.expr(['BesselJ', 0, 'x']));
       expect(result.code).toMatchInlineSnapshot(
         `_gpu_besselJ(int(0.0), x)`
       );
@@ -570,31 +570,31 @@ describe('GLSL COMPILATION', () => {
 
   describe('Sum and Product', () => {
     it('should unroll Sum with small constant bounds', () => {
-      const expr = ce.box(['Sum', ['Sin', 'i'], ['Limits', 'i', 1, 3]]);
+      const expr = ce.expr(['Sum', ['Sin', 'i'], ['Limits', 'i', 1, 3]]);
       const code = glsl.compile(expr).code;
       expect(code).toBe('((sin(1.0)) + (sin(2.0)) + (sin(3.0)))');
     });
 
     it('should unroll Product with small constant bounds', () => {
-      const expr = ce.box(['Product', 'i', ['Limits', 'i', 1, 4]]);
+      const expr = ce.expr(['Product', 'i', ['Limits', 'i', 1, 4]]);
       const code = glsl.compile(expr).code;
       expect(code).toBe('((1.0) * (2.0) * (3.0) * (4.0))');
     });
 
     it('should return identity for empty Sum range', () => {
-      const expr = ce.box(['Sum', 'i', ['Limits', 'i', 5, 3]]);
+      const expr = ce.expr(['Sum', 'i', ['Limits', 'i', 5, 3]]);
       const code = glsl.compile(expr).code;
       expect(code).toBe('0.0');
     });
 
     it('should return identity for empty Product range', () => {
-      const expr = ce.box(['Product', 'i', ['Limits', 'i', 5, 3]]);
+      const expr = ce.expr(['Product', 'i', ['Limits', 'i', 5, 3]]);
       const code = glsl.compile(expr).code;
       expect(code).toBe('1.0');
     });
 
     it('should emit for-loop for large Sum range inside compileFunction', () => {
-      const expr = ce.box([
+      const expr = ce.expr([
         'Sum',
         ['Sin', 'i'],
         ['Limits', 'i', 1, 1000],
@@ -610,7 +610,7 @@ describe('GLSL COMPILATION', () => {
     });
 
     it('should not contain JS constructs in Sum output', () => {
-      const expr = ce.box(['Sum', ['Sin', 'i'], ['Limits', 'i', 1, 3]]);
+      const expr = ce.expr(['Sum', ['Sin', 'i'], ['Limits', 'i', 1, 3]]);
       const code = glsl.compile(expr).code;
       expect(code).not.toContain('let ');
       expect(code).not.toContain('const ');
@@ -621,7 +621,7 @@ describe('GLSL COMPILATION', () => {
 
   describe('Loop', () => {
     it('should compile Loop as for-loop without IIFE', () => {
-      const expr = ce.box([
+      const expr = ce.expr([
         'Loop',
         ['Assign', 'acc', ['Add', 'acc', 'i']],
         ['Element', 'i', ['Range', 1, 5]],
@@ -638,14 +638,14 @@ describe('GLSL COMPILATION', () => {
   describe('Function (Lambda)', () => {
     it('should throw for anonymous functions in GLSL', () => {
       expect(() =>
-        glsl.compile(ce.box(['Function', ['Add', 'x', 1], 'x']))
+        glsl.compile(ce.expr(['Function', ['Add', 'x', 1], 'x']))
       ).toThrow('Anonymous functions (Function) are not supported in GPU');
     });
   });
 
   describe('Type-Aware Declarations', () => {
     it('should declare complex-typed variable as vec2', () => {
-      const expr = ce.box([
+      const expr = ce.expr([
         'Block',
         ['Declare', 'v'],
         ['Assign', 'v', ['Complex', 1, 2]],

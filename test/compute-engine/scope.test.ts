@@ -13,19 +13,19 @@ describe('DECLARING', () => {
   });
   test('Declare a variable with a type', () => {
     ce.declare('a', { type: 'number' });
-    expect(ce.box('a').type.toString()).toEqual('number');
+    expect(ce.expr('a').type.toString()).toEqual('number');
   });
 
   test('Declare a variable with value', () => {
     ce.declare('b', { value: 5 });
-    expect(ce.box('b').type.toString()).toEqual('integer');
-    expect(ce.box('b').valueOf()).toEqual(5);
+    expect(ce.expr('b').type.toString()).toEqual('integer');
+    expect(ce.expr('b').valueOf()).toEqual(5);
   });
 
   test('Declare a variable with value and type', () => {
     ce.declare('c', { type: 'number', value: 5 });
-    expect(ce.box('c').type.toString()).toEqual('number');
-    expect(ce.box('c').valueOf()).toEqual(5);
+    expect(ce.expr('c').type.toString()).toEqual('number');
+    expect(ce.expr('c').valueOf()).toEqual(5);
   });
 
   test("Can't declare twice in same scope", () => {
@@ -38,14 +38,14 @@ describe('DECLARING', () => {
 
   test('Declare a variable and widen type', () => {
     ce.declare('g', { value: 5 }); // Inferred as finite_integer
-    expect(ce.box('g').type.toString()).toEqual('integer');
+    expect(ce.expr('g').type.toString()).toEqual('integer');
     ce.assign('g', 5.5);
-    expect(ce.box('g').type.toString()).toEqual('real');
+    expect(ce.expr('g').type.toString()).toEqual('real');
   });
 
   // test('Default value of declared variables', () => {
   //   ce.declare('d', { value: 42 });
-  //   expect(ce.box('d').value).toEqual(42);
+  //   expect(ce.expr('d').value).toEqual(42);
   // });
 });
 
@@ -59,21 +59,21 @@ describe('CONSTANTS', () => {
     ce.popScope();
   });
   test('Access constant', () => {
-    expect(ce.box('c').valueOf()).toEqual(5);
+    expect(ce.expr('c').valueOf()).toEqual(5);
   });
   test('Access constant without value', () => {
-    expect(ce.box('d').value?.toString()).toBeUndefined();
-    expect(ce.box('d').type.toString()).toEqual('number');
+    expect(ce.expr('d').value?.toString()).toBeUndefined();
+    expect(ce.expr('d').type.toString()).toEqual('number');
   });
   test("Constants can't be changed", () => {
-    expect(() => (ce.box('c').value = 0)).toThrow(
+    expect(() => (ce.expr('c').value = 0)).toThrow(
       `The value of the constant "c" cannot be changed`
     );
   });
   test('Access value-less constants', () => {
     // The value of a value-less constant is undefined
-    expect(ce.box('True').value).toBeUndefined();
-    expect(ce.box('q').value).toBeUndefined();
+    expect(ce.expr('True').value).toBeUndefined();
+    expect(ce.expr('q').value).toBeUndefined();
   });
 });
 
@@ -89,15 +89,15 @@ describe('VARIABLES IN NESTED SCOPES', () => {
   test('Access global from inner scope', () => {
     ce.pushScope();
     ce.declare('var1', { type: 'number', value: 10 });
-    expect(ce.box('var1').valueOf()).toEqual(10);
+    expect(ce.expr('var1').valueOf()).toEqual(10);
     ce.popScope();
   });
 
   test('Change local in inner scope', () => {
     ce.pushScope();
     ce.declare('var1', { type: 'number', value: 10 });
-    ce.box('var1').value = 20;
-    expect(ce.box('var1').valueOf()).toEqual(20);
+    ce.expr('var1').value = 20;
+    expect(ce.expr('var1').valueOf()).toEqual(20);
     ce.popScope();
   });
 });
@@ -148,14 +148,14 @@ describe('FUNCTIONS WITH ARGUMENTS AND LOCAL VARIABLES', () => {
     ce.pushScope();
     ce.declare('f', { type: '(number) -> number' });
     ce.declare('x', { type: 'number', value: 5 });
-    ce.assign('f', ce.box(['Function', ['Multiply', 'x', 2], 'x']));
+    ce.assign('f', ce.expr(['Function', ['Multiply', 'x', 2], 'x']));
   });
   afterAll(() => {
     ce.popScope();
   });
   test('Calling function with arguments', () => {
-    expect(ce.box(['f', 15]).evaluate().valueOf()).toEqual(30);
-    expect(ce.box('x').evaluate().valueOf()).toEqual(5);
+    expect(ce.expr(['f', 15]).evaluate().valueOf()).toEqual(30);
+    expect(ce.expr('x').evaluate().valueOf()).toEqual(5);
   });
 });
 
@@ -166,7 +166,7 @@ describe('FUNCTIONS WITH RETURN STATEMENT', () => {
   test('Return at top level of Block is the function result', () => {
     // f(n) = Block(t = n * 2, Return(t))
     // Return at the top level of Block correctly short-circuits.
-    const f = ce.box([
+    const f = ce.expr([
       'Function',
       [
         'Block',
@@ -181,8 +181,8 @@ describe('FUNCTIONS WITH RETURN STATEMENT', () => {
     ce.pushScope();
     ce.declare('ret_f', 'function');
     ce.assign('ret_f', f);
-    expect(ce.box(['ret_f', 3]).evaluate().valueOf()).toEqual(6);
-    expect(ce.box(['ret_f', 5]).evaluate().valueOf()).toEqual(10);
+    expect(ce.expr(['ret_f', 3]).evaluate().valueOf()).toEqual(6);
+    expect(ce.expr(['ret_f', 5]).evaluate().valueOf()).toEqual(10);
     ce.popScope();
   });
 });
@@ -194,7 +194,7 @@ describe('FUNCTIONS WITH CONFLICTING ARGUMENTS AND LOCAL VARIABLES', () => {
     ce.declare('x', { type: 'number', value: 5 });
     ce.assign(
       'f',
-      ce.box([
+      ce.expr([
         'Function',
         ['Block', ['Declare', 'x'], ['Multiply', 'x', 2]],
         'x',
@@ -206,7 +206,7 @@ describe('FUNCTIONS WITH CONFLICTING ARGUMENTS AND LOCAL VARIABLES', () => {
   });
   test('Calling function with conflicting arguments', () => {
     expect(() =>
-      ce.box(['f', 15]).evaluate()
+      ce.expr(['f', 15]).evaluate()
     ).toThrowErrorMatchingInlineSnapshot(
       `The symbol "x" is already declared in this scope`
     );
@@ -220,7 +220,7 @@ describe('RECURSIVE FUNCTION WITH OUTER VARIABLE', () => {
     ce.declare('counter', { type: 'number', value: 0 });
     ce.assign(
       'fib',
-      ce.box([
+      ce.expr([
         'Function',
         [
           'Block',
@@ -241,8 +241,8 @@ describe('RECURSIVE FUNCTION WITH OUTER VARIABLE', () => {
   });
 
   test('Calling recursive function', () => {
-    expect(ce.box(['fib', 8]).evaluate().valueOf()).toEqual(21);
-    expect(ce.box('counter').evaluate().valueOf()).toEqual(67);
+    expect(ce.expr(['fib', 8]).evaluate().valueOf()).toEqual(21);
+    expect(ce.expr('counter').evaluate().valueOf()).toEqual(67);
   });
 });
 
@@ -255,7 +255,7 @@ describe('REGRESSION: Lexical scoping', () => {
     ce.pushScope();
     ce.declare('lc_reg_c', { value: 5 });
     ce.declare('lc_reg_f', 'function');
-    ce.assign('lc_reg_f', ce.box(['Function', ['Block', 'lc_reg_c']]));
+    ce.assign('lc_reg_f', ce.expr(['Function', ['Block', 'lc_reg_c']]));
   });
   afterAll(() => ce.popScope());
 
@@ -266,7 +266,7 @@ describe('REGRESSION: Lexical scoping', () => {
     try {
       ce.pushScope();
       ce.declare('lc_reg_c', { value: 10 });
-      result = ce.box(['lc_reg_f']).evaluate().valueOf();
+      result = ce.expr(['lc_reg_f']).evaluate().valueOf();
     } finally {
       ce.popScope();
     }
@@ -282,7 +282,7 @@ describe('REGRESSION: Lexical scoping', () => {
       ce.declare('reclc_f', 'function');
       ce.assign(
         'reclc_f',
-        ce.box([
+        ce.expr([
           'Function',
           ['Block',
             ['If', ['LessEqual', 'reclc_n', 0], 0,
@@ -291,7 +291,7 @@ describe('REGRESSION: Lexical scoping', () => {
           'reclc_n',
         ])
       );
-      expect(ce.box(['reclc_f', 3]).evaluate().valueOf()).toEqual(6);
+      expect(ce.expr(['reclc_f', 3]).evaluate().valueOf()).toEqual(6);
     } finally {
       ce.popScope();
     }
@@ -309,7 +309,7 @@ describe('REGRESSION: BigOp scope isolation', () => {
   test('Sum localScope.bindings contains only the index variable', () => {
     // Sum(k*x, Limits(k, 0, M)) — only k should be in the BigOp local scope.
     // Before the fix, x and M are also auto-declared there (scope pollution).
-    const sum = ce.box(['Sum', ['Multiply', 'k', 'x'], ['Limits', 'k', 0, 'M']]);
+    const sum = ce.expr(['Sum', ['Multiply', 'k', 'x'], ['Limits', 'k', 0, 'M']]);
     const keys = [...(sum.localScope?.bindings.keys() ?? [])];
     expect(keys).toEqual(['k']);
   });
@@ -318,7 +318,7 @@ describe('REGRESSION: BigOp scope isolation', () => {
     // Evaluating Sum(j, Limits(j, 1, 4)) twice must give 10 both times.
     // If stale j=4 from the first evaluation bleeds into the second run,
     // re-evaluation could produce incorrect results.
-    const sum = ce.box(['Sum', 'j', ['Limits', 'j', 1, 4]]);
+    const sum = ce.expr(['Sum', 'j', ['Limits', 'j', 1, 4]]);
     expect(sum.evaluate().valueOf()).toEqual(10);
     expect(sum.evaluate().valueOf()).toEqual(10);
   });
@@ -326,8 +326,8 @@ describe('REGRESSION: BigOp scope isolation', () => {
   test('Product scope isolation — index not visible after evaluation', () => {
     // After evaluating Product(m, Limits(m, 1, 5)) = 120,
     // m should not be visible in the outer scope.
-    ce.box(['Product', 'm', ['Limits', 'm', 1, 5]]).evaluate();
-    expect(ce.box('m').value?.toString()).toBeUndefined();
+    ce.expr(['Product', 'm', ['Limits', 'm', 1, 5]]).evaluate();
+    expect(ce.expr('m').value?.toString()).toBeUndefined();
   });
 });
 
@@ -340,9 +340,9 @@ describe('FUNCTIONS: edge cases', () => {
     ce.pushScope();
     try {
       ce.declare('edge_f', 'function');
-      ce.assign('edge_f', ce.box(['Function', ['Multiply', 'edge_x', 2], 'edge_x']));
+      ce.assign('edge_f', ce.expr(['Function', ['Multiply', 'edge_x', 2], 'edge_x']));
       // Calling with two arguments should throw "Too many arguments"
-      expect(() => ce.box(['edge_f', 3, 4]).evaluate()).toThrow('Too many arguments');
+      expect(() => ce.expr(['edge_f', 3, 4]).evaluate()).toThrow('Too many arguments');
     } finally {
       ce.popScope();
     }
@@ -354,10 +354,10 @@ describe('FUNCTIONS: edge cases', () => {
     // now inherits parent assumptions.
     ce.pushScope();
     try {
-      ce.assume(ce.box(['Greater', 'isc_a', 0]));
+      ce.assume(ce.expr(['Greater', 'isc_a', 0]));
       // Evaluate a Block that references isc_a — the sign should reflect the assumption
       const sign = ce
-        .box(['Block', 'isc_a'])
+        .expr(['Block', 'isc_a'])
         .evaluate()
         .sgn;
       expect(sign).toBe('positive');
@@ -371,7 +371,7 @@ describe('FUNCTIONS: edge cases', () => {
     // false so that ce.assign works correctly during evaluation.
     ce.pushScope();
     try {
-      const sum = ce.box(['Sum', 'bigop_k', ['Limits', 'bigop_k', 1, 3]]);
+      const sum = ce.expr(['Sum', 'bigop_k', ['Limits', 'bigop_k', 1, 3]]);
       // If noAutoDeclare were stuck at true, assigning to bigop_k during evaluation
       // would fail to find the symbol and the result would be wrong.
       expect(sum.evaluate().valueOf()).toEqual(6);
@@ -394,14 +394,14 @@ describe('BigOp + Function interaction', () => {
       ce.declare('sumfn_f', 'function');
       ce.assign(
         'sumfn_f',
-        ce.box([
+        ce.expr([
           'Function',
           ['Block', ['Sum', 'sumfn_k', ['Limits', 'sumfn_k', 1, 'sumfn_n']]],
           'sumfn_n',
         ])
       );
-      expect(ce.box(['sumfn_f', 5]).evaluate().valueOf()).toEqual(15);
-      expect(ce.box(['sumfn_f', 3]).evaluate().valueOf()).toEqual(6);
+      expect(ce.expr(['sumfn_f', 5]).evaluate().valueOf()).toEqual(15);
+      expect(ce.expr(['sumfn_f', 3]).evaluate().valueOf()).toEqual(6);
     } finally {
       ce.popScope();
     }
@@ -414,10 +414,10 @@ describe('BigOp + Function interaction', () => {
       ce.declare('sumcall_g', 'function');
       ce.assign(
         'sumcall_g',
-        ce.box(['Function', ['Power', 'sumcall_x', 2], 'sumcall_x'])
+        ce.expr(['Function', ['Power', 'sumcall_x', 2], 'sumcall_x'])
       );
       const result = ce
-        .box([
+        .expr([
           'Sum',
           ['sumcall_g', 'sumcall_k'],
           ['Limits', 'sumcall_k', 1, 4],
@@ -438,7 +438,7 @@ describe('BigOp + Function interaction', () => {
     ce.pushScope();
     try {
       const result = ce
-        .box([
+        .expr([
           'Sum',
           [
             'Sum',
@@ -462,14 +462,14 @@ describe('BigOp + Function interaction', () => {
       ce.declare('prodfn_f', 'function');
       ce.assign(
         'prodfn_f',
-        ce.box([
+        ce.expr([
           'Function',
           ['Block', ['Product', 'prodfn_k', ['Limits', 'prodfn_k', 1, 'prodfn_n']]],
           'prodfn_n',
         ])
       );
-      expect(ce.box(['prodfn_f', 5]).evaluate().valueOf()).toEqual(120);
-      expect(ce.box(['prodfn_f', 3]).evaluate().valueOf()).toEqual(6);
+      expect(ce.expr(['prodfn_f', 5]).evaluate().valueOf()).toEqual(120);
+      expect(ce.expr(['prodfn_f', 3]).evaluate().valueOf()).toEqual(6);
     } finally {
       ce.popScope();
     }
@@ -483,7 +483,7 @@ describe('BigOp + Function interaction', () => {
       ce.declare('clbigop_f', 'function');
       ce.assign(
         'clbigop_f',
-        ce.box([
+        ce.expr([
           'Function',
           [
             'Block',
@@ -495,14 +495,14 @@ describe('BigOp + Function interaction', () => {
         ])
       );
       // f(3) → g where g(y) = 6 + y (since Sum(k, 1..3) = 6)
-      const g = ce.box(['clbigop_f', 3]).evaluate();
+      const g = ce.expr(['clbigop_f', 3]).evaluate();
       expect(g.operator).toEqual('Function');
       // g(10) = 6 + 10 = 16
       ce.declare('clbigop_g', 'function');
       ce.assign('clbigop_g', g);
-      expect(ce.box(['clbigop_g', 10]).evaluate().valueOf()).toEqual(16);
+      expect(ce.expr(['clbigop_g', 10]).evaluate().valueOf()).toEqual(16);
       // g(0) = 6 + 0 = 6
-      expect(ce.box(['clbigop_g', 0]).evaluate().valueOf()).toEqual(6);
+      expect(ce.expr(['clbigop_g', 0]).evaluate().valueOf()).toEqual(6);
     } finally {
       ce.popScope();
     }
@@ -515,15 +515,15 @@ describe('BigOp + Function interaction', () => {
       ce.declare('repsum_f', 'function');
       ce.assign(
         'repsum_f',
-        ce.box([
+        ce.expr([
           'Function',
           ['Block', ['Sum', 'repsum_k', ['Limits', 'repsum_k', 1, 'repsum_n']]],
           'repsum_n',
         ])
       );
-      expect(ce.box(['repsum_f', 4]).evaluate().valueOf()).toEqual(10);
-      expect(ce.box(['repsum_f', 4]).evaluate().valueOf()).toEqual(10);
-      expect(ce.box(['repsum_f', 2]).evaluate().valueOf()).toEqual(3);
+      expect(ce.expr(['repsum_f', 4]).evaluate().valueOf()).toEqual(10);
+      expect(ce.expr(['repsum_f', 4]).evaluate().valueOf()).toEqual(10);
+      expect(ce.expr(['repsum_f', 2]).evaluate().valueOf()).toEqual(3);
     } finally {
       ce.popScope();
     }
@@ -538,10 +538,10 @@ describe('REGRESSION: forget() clears assume() values', () => {
     // After ce.assume('x = 5'), ce.forget('x') must revert x to unknown.
     ce.pushScope();
     try {
-      ce.assume(ce.box(['Equal', 'fgt_x', 5]));
-      expect(ce.box('fgt_x').evaluate().valueOf()).toEqual(5);
+      ce.assume(ce.expr(['Equal', 'fgt_x', 5]));
+      expect(ce.expr('fgt_x').evaluate().valueOf()).toEqual(5);
       ce.forget('fgt_x');
-      expect(ce.box('fgt_x').evaluate().json).toEqual('fgt_x');
+      expect(ce.expr('fgt_x').evaluate().json).toEqual('fgt_x');
     } finally {
       ce.popScope();
     }
@@ -550,11 +550,11 @@ describe('REGRESSION: forget() clears assume() values', () => {
   test('popScope() clears values set by assume() in an inner scope', () => {
     // This tests that scoped assumptions are properly contained.
     ce.pushScope();
-    ce.assume(ce.box(['Equal', 'fgt_y', 10]));
-    expect(ce.box('fgt_y').evaluate().valueOf()).toEqual(10);
+    ce.assume(ce.expr(['Equal', 'fgt_y', 10]));
+    expect(ce.expr('fgt_y').evaluate().valueOf()).toEqual(10);
     ce.popScope();
     // fgt_y was never declared outside this scope, so evaluates to itself
-    expect(ce.box('fgt_y').evaluate().json).toEqual('fgt_y');
+    expect(ce.expr('fgt_y').evaluate().json).toEqual('fgt_y');
   });
 });
 
@@ -573,17 +573,17 @@ describe('DEEP NESTING AND SHADOWING', () => {
         ce.pushScope();
         try {
           ce.declare('deep_x', { value: 3 });
-          expect(ce.box('deep_x').evaluate().valueOf()).toEqual(3);
+          expect(ce.expr('deep_x').evaluate().valueOf()).toEqual(3);
         } finally {
           ce.popScope();
         }
         // Middle scope: x=2
-        expect(ce.box('deep_x').evaluate().valueOf()).toEqual(2);
+        expect(ce.expr('deep_x').evaluate().valueOf()).toEqual(2);
       } finally {
         ce.popScope();
       }
       // Outer scope: x=1
-      expect(ce.box('deep_x').evaluate().valueOf()).toEqual(1);
+      expect(ce.expr('deep_x').evaluate().valueOf()).toEqual(1);
     } finally {
       ce.popScope();
     }
@@ -601,8 +601,8 @@ describe('DEEP NESTING AND SHADOWING', () => {
         ce.pushScope();
         try {
           // Inner scope: reads x (skips middle, finds outer)
-          expect(ce.box('ps_x').evaluate().valueOf()).toEqual(10);
-          expect(ce.box('ps_y').evaluate().valueOf()).toEqual(20);
+          expect(ce.expr('ps_x').evaluate().valueOf()).toEqual(10);
+          expect(ce.expr('ps_y').evaluate().valueOf()).toEqual(20);
         } finally {
           ce.popScope();
         }
@@ -623,7 +623,7 @@ describe('FUNCTION INSIDE BIGOP', () => {
     ce.pushScope();
     try {
       const result = ce
-        .box([
+        .expr([
           'Sum',
           [
             'Apply',
@@ -646,10 +646,10 @@ describe('FUNCTION INSIDE BIGOP', () => {
     ce.pushScope();
     try {
       ce.declare('bfv_acc', { value: 100 });
-      const sum = ce.box(['Sum', 'bfv_k', ['Limits', 'bfv_k', 1, 4]]);
+      const sum = ce.expr(['Sum', 'bfv_k', ['Limits', 'bfv_k', 1, 4]]);
       expect(sum.evaluate().valueOf()).toEqual(10);
       // acc should still be 100 — Sum evaluation doesn't pollute outer scope
-      expect(ce.box('bfv_acc').evaluate().valueOf()).toEqual(100);
+      expect(ce.expr('bfv_acc').evaluate().valueOf()).toEqual(100);
     } finally {
       ce.popScope();
     }
@@ -663,10 +663,10 @@ describe('SCOPE CHAIN INTEGRITY', () => {
     try {
       ce.declare('mut_x', { value: 5 });
       ce.declare('mut_f', 'function');
-      ce.assign('mut_f', ce.box(['Function', ['Block', 'mut_x']]));
-      expect(ce.box(['mut_f']).evaluate().valueOf()).toEqual(5);
+      ce.assign('mut_f', ce.expr(['Function', ['Block', 'mut_x']]));
+      expect(ce.expr(['mut_f']).evaluate().valueOf()).toEqual(5);
       ce.assign('mut_x', 99);
-      expect(ce.box(['mut_f']).evaluate().valueOf()).toEqual(99);
+      expect(ce.expr(['mut_f']).evaluate().valueOf()).toEqual(99);
     } finally {
       ce.popScope();
     }
@@ -679,11 +679,11 @@ describe('SCOPE CHAIN INTEGRITY', () => {
     try {
       ce.declare('inv_x', { value: 5 });
       ce.declare('inv_f', 'function');
-      ce.assign('inv_f', ce.box(['Function', ['Block', 'inv_x']]));
+      ce.assign('inv_f', ce.expr(['Function', ['Block', 'inv_x']]));
       ce.pushScope();
       try {
         ce.declare('inv_x', { value: 42 });
-        expect(ce.box(['inv_f']).evaluate().valueOf()).toEqual(5);
+        expect(ce.expr(['inv_f']).evaluate().valueOf()).toEqual(5);
       } finally {
         ce.popScope();
       }
@@ -705,7 +705,7 @@ describe('NESTED BIGOPS WITH SAME INDEX NAME', () => {
     ce.pushScope();
     try {
       const result = ce
-        .box([
+        .expr([
           'Sum',
           ['Sum', 'sameIdx_k', ['Limits', 'sameIdx_k', 1, 3]],
           ['Limits', 'sameIdx_k', 1, 2],
@@ -735,16 +735,16 @@ describe('MULTIPLE CLOSURES OVER SAME VARIABLE', () => {
       ce.declare('mcv_get', 'function');
       ce.assign(
         'mcv_inc',
-        ce.box([
+        ce.expr([
           'Function',
           ['Block', ['Assign', 'mcv_x', ['Add', 'mcv_x', 1]], 'mcv_x'],
         ])
       );
-      ce.assign('mcv_get', ce.box(['Function', ['Block', 'mcv_x']]));
-      expect(ce.box(['mcv_inc']).evaluate().valueOf()).toEqual(1);
-      expect(ce.box(['mcv_get']).evaluate().valueOf()).toEqual(1);
-      expect(ce.box(['mcv_inc']).evaluate().valueOf()).toEqual(2);
-      expect(ce.box(['mcv_get']).evaluate().valueOf()).toEqual(2);
+      ce.assign('mcv_get', ce.expr(['Function', ['Block', 'mcv_x']]));
+      expect(ce.expr(['mcv_inc']).evaluate().valueOf()).toEqual(1);
+      expect(ce.expr(['mcv_get']).evaluate().valueOf()).toEqual(1);
+      expect(ce.expr(['mcv_inc']).evaluate().valueOf()).toEqual(2);
+      expect(ce.expr(['mcv_get']).evaluate().valueOf()).toEqual(2);
     } finally {
       ce.popScope();
     }
@@ -756,12 +756,12 @@ describe('MULTIPLE CLOSURES OVER SAME VARIABLE', () => {
 // ─────────────────────────────────────────────────────────────────────────
 describe('BLOCK EVALUATION', () => {
   test('Block with single expression returns that expression', () => {
-    const result = ce.box(['Block', 42]).evaluate();
+    const result = ce.expr(['Block', 42]).evaluate();
     expect(result.valueOf()).toEqual(42);
   });
 
   test('Block returns the last evaluated expression', () => {
-    const result = ce.box(['Block', 1, 2, 3]).evaluate();
+    const result = ce.expr(['Block', 1, 2, 3]).evaluate();
     expect(result.valueOf()).toEqual(3);
   });
 });
@@ -774,7 +774,7 @@ describe('BIGOP WITH SYMBOLIC LIMITS', () => {
     // Sum(k, Limits(k, 1, n)) where n is not assigned — should stay symbolic
     ce.pushScope();
     try {
-      const sum = ce.box(['Sum', 'sym_k', ['Limits', 'sym_k', 1, 'sym_n']]);
+      const sum = ce.expr(['Sum', 'sym_k', ['Limits', 'sym_k', 1, 'sym_n']]);
       const result = sum.evaluate();
       // Should not evaluate to a number — either stays as Sum or returns NaN
       // The important thing is it doesn't crash
@@ -802,7 +802,7 @@ describe('RECURSIVE CLOSURE CAPTURE', () => {
       ce.declare('rcc_makeAdder', 'function');
       ce.assign(
         'rcc_makeAdder',
-        ce.box([
+        ce.expr([
           'Function',
           [
             'Block',
@@ -818,19 +818,19 @@ describe('RECURSIVE CLOSURE CAPTURE', () => {
       );
 
       // makeAdder(3) → g where g(x) = x + 3
-      const g = ce.box(['rcc_makeAdder', 3]).evaluate();
+      const g = ce.expr(['rcc_makeAdder', 3]).evaluate();
       ce.declare('rcc_g', 'function');
       ce.assign('rcc_g', g);
-      expect(ce.box(['rcc_g', 10]).evaluate().valueOf()).toEqual(13);
+      expect(ce.expr(['rcc_g', 10]).evaluate().valueOf()).toEqual(13);
 
       // makeAdder(7) → h where h(x) = x + 7 — different closure, different n
-      const h = ce.box(['rcc_makeAdder', 7]).evaluate();
+      const h = ce.expr(['rcc_makeAdder', 7]).evaluate();
       ce.declare('rcc_h', 'function');
       ce.assign('rcc_h', h);
-      expect(ce.box(['rcc_h', 10]).evaluate().valueOf()).toEqual(17);
+      expect(ce.expr(['rcc_h', 10]).evaluate().valueOf()).toEqual(17);
 
       // g and h are independent closures — calling h doesn't affect g
-      expect(ce.box(['rcc_g', 10]).evaluate().valueOf()).toEqual(13);
+      expect(ce.expr(['rcc_g', 10]).evaluate().valueOf()).toEqual(13);
     } finally {
       ce.popScope();
     }
@@ -849,7 +849,7 @@ describe('SCOPE EDGE CASES', () => {
     ce.pushScope();
     try {
       const result = ce
-        .box([
+        .expr([
           'Sum',
           ['Sum', 'shad_k', ['Limits', 'shad_k', 1, 3]],
           ['Limits', 'shad_k', 1, 2],
@@ -866,13 +866,13 @@ describe('SCOPE EDGE CASES', () => {
     ce.pushScope();
     try {
       ce.declare('redecl_x', { type: 'integer', value: 5 });
-      expect(ce.box('redecl_x').evaluate().valueOf()).toEqual(5);
+      expect(ce.expr('redecl_x').evaluate().valueOf()).toEqual(5);
 
       ce.forget('redecl_x');
       // After forget, value is cleared but symbol still declared in this scope
       // Assigning a new value should work
       ce.assign('redecl_x', 42);
-      expect(ce.box('redecl_x').evaluate().valueOf()).toEqual(42);
+      expect(ce.expr('redecl_x').evaluate().valueOf()).toEqual(42);
     } finally {
       ce.popScope();
     }
@@ -888,10 +888,10 @@ describe('SCOPE EDGE CASES', () => {
       ce.assign('err_f', ['Function', ['Block', ['Add', 'err_x', 1]], 'err_x']);
 
       // Normal call should work
-      expect(ce.box(['err_f', 5]).evaluate().valueOf()).toEqual(6);
+      expect(ce.expr(['err_f', 5]).evaluate().valueOf()).toEqual(6);
 
       // Too many arguments should throw but not leak scope frames
-      expect(() => ce.box(['err_f', 1, 2]).evaluate()).toThrow();
+      expect(() => ce.expr(['err_f', 1, 2]).evaluate()).toThrow();
     } finally {
       ce.popScope();
     }
@@ -907,13 +907,13 @@ describe('SCOPE EDGE CASES', () => {
       ce.assign('mut_f', ['Function', ['Block', ['Add', 'mut_x', 'mut_c']], 'mut_x']);
 
       // f(1) = 1 + 10 = 11
-      expect(ce.box(['mut_f', 1]).evaluate().valueOf()).toEqual(11);
+      expect(ce.expr(['mut_f', 1]).evaluate().valueOf()).toEqual(11);
 
       // Mutate c after defining f
       ce.assign('mut_c', 99);
 
       // f(1) should see the new c = 99 → 1 + 99 = 100
-      expect(ce.box(['mut_f', 1]).evaluate().valueOf()).toEqual(100);
+      expect(ce.expr(['mut_f', 1]).evaluate().valueOf()).toEqual(100);
     } finally {
       ce.popScope();
     }

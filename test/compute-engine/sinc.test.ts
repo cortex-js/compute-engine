@@ -11,7 +11,7 @@ const ce = new ComputeEngine();
 
 describe('SINC - Evaluation', () => {
   test('sinc(0) = 1', () => {
-    const expr = ce.box(['Sinc', 0]);
+    const expr = ce.expr(['Sinc', 0]);
     const result = expr.evaluate();
     expect(result.re).toBe(1);
   });
@@ -24,21 +24,21 @@ describe('SINC - Evaluation', () => {
   });
 
   test('sinc(pi) is approximately 0', () => {
-    const expr = ce.box(['Sinc', 'Pi']);
+    const expr = ce.expr(['Sinc', 'Pi']);
     const result = expr.N();
     // sin(pi)/pi should be very close to 0
     expect(Math.abs(result.re)).toBeLessThan(1e-10);
   });
 
   test('sinc(1) is approximately sin(1)', () => {
-    const expr = ce.box(['Sinc', 1]);
+    const expr = ce.expr(['Sinc', 1]);
     const result = expr.N();
     // sinc(1) = sin(1)/1 = sin(1)
     expect(result.re).toBeCloseTo(Math.sin(1), 10);
   });
 
   test('sinc(2) is approximately sin(2)/2', () => {
-    const expr = ce.box(['Sinc', 2]);
+    const expr = ce.expr(['Sinc', 2]);
     const result = expr.N();
     expect(result.re).toBeCloseTo(Math.sin(2) / 2, 10);
   });
@@ -61,14 +61,14 @@ describe('SINC - LaTeX parsing and serialization', () => {
 
 describe('SINC - JavaScript compilation', () => {
   test('compiles Sinc to _SYS.sinc', () => {
-    const expr = ce.box(['Sinc', 'x']);
+    const expr = ce.expr(['Sinc', 'x']);
     const result = compile(expr);
     expect(result.success).toBe(true);
     expect(result.code).toContain('_SYS.sinc');
   });
 
   test('compiled sinc(0) returns 1', () => {
-    const expr = ce.box(['Sinc', 'x']);
+    const expr = ce.expr(['Sinc', 'x']);
     const result = compile(expr);
     expect(result.success).toBe(true);
     const fn = result.run!;
@@ -76,7 +76,7 @@ describe('SINC - JavaScript compilation', () => {
   });
 
   test('compiled sinc(1) returns sin(1)/1', () => {
-    const expr = ce.box(['Sinc', 'x']);
+    const expr = ce.expr(['Sinc', 'x']);
     const result = compile(expr);
     expect(result.success).toBe(true);
     const fn = result.run!;
@@ -84,7 +84,7 @@ describe('SINC - JavaScript compilation', () => {
   });
 
   test('compiled sinc(pi) is approximately 0', () => {
-    const expr = ce.box(['Sinc', 'x']);
+    const expr = ce.expr(['Sinc', 'x']);
     const result = compile(expr);
     expect(result.success).toBe(true);
     const fn = result.run!;
@@ -94,14 +94,14 @@ describe('SINC - JavaScript compilation', () => {
 
 describe('SINC - Interval JS compilation', () => {
   test('compiles Sinc to _IA.sinc', () => {
-    const expr = ce.box(['Sinc', 'x']);
+    const expr = ce.expr(['Sinc', 'x']);
     const result = compile(expr, { to: 'interval-js' });
     expect(result.success).toBe(true);
     expect(result.code).toContain('_IA.sinc');
   });
 
   test('interval containing 0 includes 1 in result', () => {
-    const expr = ce.box(['Sinc', 'x']);
+    const expr = ce.expr(['Sinc', 'x']);
     const result = compile(expr, { to: 'interval-js' });
     expect(result.success).toBe(true);
     const fn = result.run!;
@@ -115,7 +115,7 @@ describe('SINC - Interval JS compilation', () => {
   });
 
   test('interval not containing 0', () => {
-    const expr = ce.box(['Sinc', 'x']);
+    const expr = ce.expr(['Sinc', 'x']);
     const result = compile(expr, { to: 'interval-js' });
     expect(result.success).toBe(true);
     const fn = result.run!;

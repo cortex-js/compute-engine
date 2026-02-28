@@ -47,7 +47,7 @@ describe('is()', () => {
 
   // https://jestjs.io/docs/next/api#testeachtablename-fn-timeout
   test.each(tests)('is("%p")', (a, b, expected) => {
-    const expr = engine.box(a);
+    const expr = engine.expr(a);
     if (
       typeof b === 'number' ||
       typeof b === 'bigint' ||
@@ -55,7 +55,7 @@ describe('is()', () => {
     ) {
       expect(expr.is(b)).toBe(expected);
     } else {
-      expect(expr.is(engine.box(b))).toBe(expected);
+      expect(expr.is(engine.expr(b))).toBe(expected);
     }
   });
 });
@@ -95,7 +95,7 @@ const isSameTests: [
 
 describe('isSame()', () => {
   test.each(isSameTests)('isSame(%p, %p)', (a, b, expected) => {
-    const expr = engine.box(a);
+    const expr = engine.expr(a);
     if (
       typeof b === 'number' ||
       typeof b === 'bigint' ||
@@ -104,7 +104,7 @@ describe('isSame()', () => {
     ) {
       expect(expr.isSame(b)).toBe(expected);
     } else {
-      expect(expr.isSame(engine.box(b))).toBe(expected);
+      expect(expr.isSame(engine.expr(b))).toBe(expected);
     }
   });
 });

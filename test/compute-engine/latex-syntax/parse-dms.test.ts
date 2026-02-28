@@ -98,7 +98,7 @@ describe('Negative Angles', () => {
 
   test('Negate(Quantity) evaluates correctly', () => {
     const ce = new ComputeEngine();
-    const expr = ce.box(['Negate', ['Quantity', 9.5, 'deg']]);
+    const expr = ce.expr(['Negate', ['Quantity', 9.5, 'deg']]);
     const result = expr.evaluate();
     // Result is Quantity(-9.5, deg) — check the magnitude
     expect(result.op1.re).toBeCloseTo(-9.5, 10);
@@ -171,21 +171,21 @@ describe('Edge Cases', () => {
 describe('DMS Function', () => {
   test('DMS(45) is equivalent to Degrees(45)', () => {
     const ce = new ComputeEngine();
-    const dms = ce.box(['DMS', 45]);
-    const deg = ce.box(['Degrees', 45]);
+    const dms = ce.expr(['DMS', 45]);
+    const deg = ce.expr(['Degrees', 45]);
     expect(dms.N().re).toBeCloseTo(deg.N().re!, 10);
   });
 
   test('DMS(9, 30) produces 9.5 degrees in radians', () => {
     const ce = new ComputeEngine();
-    const expr = ce.box(['DMS', 9, 30]);
+    const expr = ce.expr(['DMS', 9, 30]);
     // 9.5° = 0.165806... radians
     expect(expr.N().re).toBeCloseTo(9.5 * Math.PI / 180, 10);
   });
 
   test('DMS(9, 30, 15) produces correct radians', () => {
     const ce = new ComputeEngine();
-    const expr = ce.box(['DMS', 9, 30, 15]);
+    const expr = ce.expr(['DMS', 9, 30, 15]);
     // 9 + 30/60 + 15/3600 = 9.504166... degrees
     const expectedRad = (9 + 30 / 60 + 15 / 3600) * Math.PI / 180;
     expect(expr.N().re).toBeCloseTo(expectedRad, 10);
@@ -194,14 +194,14 @@ describe('DMS Function', () => {
   test('DMS with angularUnit=deg', () => {
     const ce = new ComputeEngine();
     ce.angularUnit = 'deg';
-    const expr = ce.box(['DMS', 9, 30, 15]);
+    const expr = ce.expr(['DMS', 9, 30, 15]);
     // In degree mode, should return decimal degrees directly
     expect(expr.N().re).toBeCloseTo(9 + 30 / 60 + 15 / 3600, 10);
   });
 
   test('Negate(DMS(9, 30, 15)) works', () => {
     const ce = new ComputeEngine();
-    const expr = ce.box(['Negate', ['DMS', 9, 30, 15]]);
+    const expr = ce.expr(['Negate', ['DMS', 9, 30, 15]]);
     const expectedRad = -(9 + 30 / 60 + 15 / 3600) * Math.PI / 180;
     expect(expr.N().re).toBeCloseTo(expectedRad, 10);
   });

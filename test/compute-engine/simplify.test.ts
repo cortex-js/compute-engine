@@ -12,13 +12,13 @@ function checkSimplify(
   input: string | Expression,
   expected: string | number | Expression
 ) {
-  const a = typeof input === 'string' ? ce.parse(input) : ce.box(input);
+  const a = typeof input === 'string' ? ce.parse(input) : ce.expr(input);
   const b =
     typeof expected === 'number'
-      ? ce.box(expected)
+      ? ce.expr(expected)
       : typeof expected === 'string'
         ? ce.parse(expected)
-        : ce.box(expected);
+        : ce.expr(expected);
 
   const result = a.simplify();
   if (!result.isSame(b)) {

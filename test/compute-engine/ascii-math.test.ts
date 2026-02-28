@@ -5,7 +5,7 @@ const ce = engine;
 
 function check(s: string | Expression): string {
   if (typeof s === 'string') return ce.parse(s).toString();
-  return ce.box(s).toString();
+  return ce.expr(s).toString();
 }
 
 // Check serialization of ASCII math using toString()

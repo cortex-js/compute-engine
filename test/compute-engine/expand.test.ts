@@ -1,7 +1,7 @@
 import { checkJson, engine } from '../utils';
 
 function checkExpand(s: string): string {
-  return checkJson(engine.box(['Expand', engine.parse(s)]));
+  return checkJson(engine.expr(['Expand', engine.parse(s)]));
 }
 
 describe('EXPAND POWER', () => {

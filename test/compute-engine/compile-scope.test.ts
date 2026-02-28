@@ -12,7 +12,7 @@ describe('COMPILE: Scoping and Closure', () => {
   // ── 1. Basic single-param function ─────────────────────────────────
   describe('Single-param function literal', () => {
     // f(x) = x * 2
-    const f = ce.box(['Function', ['Multiply', 'x', 2], 'x']);
+    const f = ce.expr(['Function', ['Multiply', 'x', 2], 'x']);
 
     it('calling is "lambda"', () => {
       expect(compile(f)?.calling).toBe('lambda');
@@ -30,7 +30,7 @@ describe('COMPILE: Scoping and Closure', () => {
       ce.pushScope();
       ce.declare('cs1_f', 'function');
       ce.assign('cs1_f', f);
-      const ceResult = ce.box(['cs1_f', 5]).evaluate().valueOf();
+      const ceResult = ce.expr(['cs1_f', 5]).evaluate().valueOf();
       ce.popScope();
       expect(compile(f)?.run!(5)).toBe(ceResult);
     });
@@ -43,7 +43,7 @@ describe('COMPILE: Scoping and Closure', () => {
   // ── 2. Binary function ──────────────────────────────────────────────
   describe('Binary function (two params)', () => {
     // f(x, y) = x + y
-    const f = ce.box(['Function', ['Add', 'x', 'y'], 'x', 'y']);
+    const f = ce.expr(['Function', ['Add', 'x', 'y'], 'x', 'y']);
 
     it('run(2, 3) === 5', () => {
       expect(compile(f)?.run!(2, 3)).toBe(5);
@@ -57,7 +57,7 @@ describe('COMPILE: Scoping and Closure', () => {
       ce.pushScope();
       ce.declare('cs2_f', 'function');
       ce.assign('cs2_f', f);
-      const ceResult = ce.box(['cs2_f', 7, 3]).evaluate().valueOf();
+      const ceResult = ce.expr(['cs2_f', 7, 3]).evaluate().valueOf();
       ce.popScope();
       expect(compile(f)?.run!(7, 3)).toBe(ceResult);
     });
@@ -67,7 +67,7 @@ describe('COMPILE: Scoping and Closure', () => {
   describe('Nested function — closure over outer param', () => {
     // outer: f(y) = λx. x + y    (curried addition)
     // outer param 'y' must remain visible inside the inner function's JS closure
-    const outer = ce.box([
+    const outer = ce.expr([
       'Function',
       ['Function', ['Add', 'x', 'y'], 'x'],
       'y',
@@ -97,10 +97,10 @@ describe('COMPILE: Scoping and Closure', () => {
       try {
         ce.declare('cs3_outer', 'function');
         ce.assign('cs3_outer', outer);
-        const innerFn = ce.box(['cs3_outer', 4]).evaluate();
+        const innerFn = ce.expr(['cs3_outer', 4]).evaluate();
         ce.declare('cs3_inner', 'function');
         ce.assign('cs3_inner', innerFn);
-        const ceResult = ce.box(['cs3_inner', 3]).evaluate().valueOf();
+        const ceResult = ce.expr(['cs3_inner', 3]).evaluate().valueOf();
         const jsInner = compile(outer)?.run!(4) as (x: number) => number;
         expect(jsInner(3)).toBe(ceResult);
       } finally {
@@ -112,7 +112,7 @@ describe('COMPILE: Scoping and Closure', () => {
   // ── 4. Function with Block body (local variable) ────────────────────
   describe('Function with Block body and local variable', () => {
     // f(x) = { let t = x²; return t + 1 }
-    const f = ce.box([
+    const f = ce.expr([
       'Function',
       [
         'Block',
@@ -143,7 +143,7 @@ describe('COMPILE: Scoping and Closure', () => {
       ce.pushScope();
       ce.declare('cs4_f', 'function');
       ce.assign('cs4_f', f);
-      const ceResult = ce.box(['cs4_f', 5]).evaluate().valueOf();
+      const ceResult = ce.expr(['cs4_f', 5]).evaluate().valueOf();
       ce.popScope();
       expect(compile(f)?.run!(5)).toBe(ceResult);
     });
@@ -152,7 +152,7 @@ describe('COMPILE: Scoping and Closure', () => {
   // ── 5. Conditional body (absolute value) ───────────────────────────
   describe('Conditional body (absolute value)', () => {
     // f(x) = if x > 0 then x else -x
-    const f = ce.box([
+    const f = ce.expr([
       'Function',
       ['If', ['Greater', 'x', 0], 'x', ['Negate', 'x']],
       'x',
@@ -174,7 +174,7 @@ describe('COMPILE: Scoping and Closure', () => {
       ce.pushScope();
       ce.declare('cs5_f', 'function');
       ce.assign('cs5_f', f);
-      const ceResult = ce.box(['cs5_f', -7]).evaluate().valueOf();
+      const ceResult = ce.expr(['cs5_f', -7]).evaluate().valueOf();
       ce.popScope();
       expect(compile(f)?.run!(-7)).toBe(ceResult);
     });
@@ -183,7 +183,7 @@ describe('COMPILE: Scoping and Closure', () => {
   // ── 6. Binary function with two captured params (Pythagorean) ──────
   describe('Binary function — two-param parity', () => {
     // f(x, y) = x² + y²
-    const f = ce.box([
+    const f = ce.expr([
       'Function',
       ['Add', ['Square', 'x'], ['Square', 'y']],
       'x',
@@ -202,7 +202,7 @@ describe('COMPILE: Scoping and Closure', () => {
       ce.pushScope();
       ce.declare('cs6_f', 'function');
       ce.assign('cs6_f', f);
-      const ceResult = ce.box(['cs6_f', 3, 4]).evaluate().valueOf();
+      const ceResult = ce.expr(['cs6_f', 3, 4]).evaluate().valueOf();
       ce.popScope();
       expect(compile(f)?.run!(3, 4)).toBe(ceResult);
     });
@@ -215,15 +215,15 @@ describe('COMPILE: Scoping and Closure', () => {
     it('function param does not mutate outer scope variable', () => {
       ce.pushScope();
       ce.declare('cs7_x', { type: 'number', value: 5 });
-      const f = ce.box(['Function', ['Multiply', 'cs7_x', 2], 'cs7_x']);
+      const f = ce.expr(['Function', ['Multiply', 'cs7_x', 2], 'cs7_x']);
 
       // CE: call f(10) — the param cs7_x=10 is in fresh scope
       ce.pushScope();
       ce.declare('cs7_f', 'function');
       ce.assign('cs7_f', f);
-      const ceResult = ce.box(['cs7_f', 10]).evaluate().valueOf();
+      const ceResult = ce.expr(['cs7_f', 10]).evaluate().valueOf();
       // outer cs7_x must remain 5
-      const outerX = ce.box('cs7_x').evaluate().valueOf();
+      const outerX = ce.expr('cs7_x').evaluate().valueOf();
       ce.popScope();
       ce.popScope();
 

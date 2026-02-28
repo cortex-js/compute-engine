@@ -56,7 +56,7 @@ describe('OBJECT RULES LITERAL MATCHING', () => {
   it('should match literal symbol in object rule, not wildcard', () => {
     // {match: 'a', replace: 2} should replace literal 'a' with 2
     // NOT treat 'a' as a wildcard matching any expression
-    const expr = ce.box(['Add', ['Multiply', 'a', 'x'], 'b']);
+    const expr = ce.expr(['Add', ['Multiply', 'a', 'x'], 'b']);
     const result = expr.replace(
       { match: 'a', replace: 2 },
       { recursive: true }
@@ -66,7 +66,7 @@ describe('OBJECT RULES LITERAL MATCHING', () => {
   });
 
   it('should match literal symbol not present in expression', () => {
-    const expr = ce.box(['Add', ['Multiply', 'x', 'y'], 'z']);
+    const expr = ce.expr(['Add', ['Multiply', 'x', 'y'], 'z']);
     // 'a' is not in the expression, so no match
     const result = expr.replace(
       { match: 'a', replace: 2 },
@@ -76,7 +76,7 @@ describe('OBJECT RULES LITERAL MATCHING', () => {
   });
 
   it('should still allow explicit wildcards in object rules', () => {
-    const expr = ce.box(['Add', ['Multiply', 3, 'x'], 5]);
+    const expr = ce.expr(['Add', ['Multiply', 3, 'x'], 5]);
     const result = expr.replace(
       { match: ['Multiply', '_a', 'x'], replace: ['Multiply', 10, 'x'] },
       { recursive: true }
@@ -85,13 +85,13 @@ describe('OBJECT RULES LITERAL MATCHING', () => {
   });
 
   it('string rules should still auto-wildcard', () => {
-    const expr = ce.box(['Add', ['Multiply', 2, 'x'], 3]);
+    const expr = ce.expr(['Add', ['Multiply', 2, 'x'], 3]);
     const result = expr.replace('a*x -> 5*x', { recursive: true });
     expect(result?.toString()).toBe('5x + 3');
   });
 
   it('subs() should work the same as literal replace', () => {
-    const expr = ce.box(['Add', ['Multiply', 'a', 'x'], 'b']);
+    const expr = ce.expr(['Add', ['Multiply', 'a', 'x'], 'b']);
     const subsResult = expr.subs({ a: 2 });
     const replaceResult = expr.replace(
       { match: 'a', replace: 2 },
@@ -149,14 +149,14 @@ describe('INVALID RULES', () => {
 describe('matchPermutations option', () => {
   it('default behavior tries permutations for commutative operators', () => {
     // Use non-canonical expression to test permutation matching
-    const expr = ce.box(['Add', 'x', 1], { form: 'raw' });
+    const expr = ce.expr(['Add', 'x', 1], { form: 'raw' });
     const rule = { match: ['Add', 1, '_a'], replace: ['Multiply', 2, '_a'] };
     // Should match via permutation: pattern [1, _a] matches expr [x, 1]
     expect(expr.replace(rule)).toMatchInlineSnapshot(`["Multiply", 2, "x"]`);
   });
 
   it('matchPermutations: true explicitly allows permutation matching', () => {
-    const expr = ce.box(['Add', 'x', 1], { form: 'raw' });
+    const expr = ce.expr(['Add', 'x', 1], { form: 'raw' });
     const rule = { match: ['Add', 1, '_a'], replace: ['Multiply', 2, '_a'] };
     expect(
       expr.replace(rule, { matchPermutations: true })
@@ -164,14 +164,14 @@ describe('matchPermutations option', () => {
   });
 
   it('matchPermutations: false disables permutation matching', () => {
-    const expr = ce.box(['Add', 'x', 1], { form: 'raw' });
+    const expr = ce.expr(['Add', 'x', 1], { form: 'raw' });
     const rule = { match: ['Add', 1, '_a'], replace: ['Multiply', 2, '_a'] };
     // Without permutations, [1, _a] won't match [x, 1] since positions differ
     expect(expr.replace(rule, { matchPermutations: false })).toBeNull();
   });
 
   it('matchPermutations: false still matches exact order', () => {
-    const expr = ce.box(['Add', 1, 'x'], { form: 'raw' });
+    const expr = ce.expr(['Add', 1, 'x'], { form: 'raw' });
     const rule = { match: ['Add', 1, '_a'], replace: ['Multiply', 2, '_a'] };
     // Exact order matches even without permutations
     expect(

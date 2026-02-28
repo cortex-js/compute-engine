@@ -100,7 +100,7 @@ describe('BROADCASTABLE FUNCTIONS WITH UNION TYPES', () => {
     const ce = new ComputeEngine();
     ce.declare('a', 'number | list');
     ce.declare('b', 'number | list');
-    const expr = ce.box(['Multiply', 'a', 'b']);
+    const expr = ce.expr(['Multiply', 'a', 'b']);
     expect(expr.json).toEqual(['Multiply', 'a', 'b']);
   });
 
@@ -108,7 +108,7 @@ describe('BROADCASTABLE FUNCTIONS WITH UNION TYPES', () => {
     const ce = new ComputeEngine();
     ce.declare('a', 'number | list');
     ce.declare('b', 'number | list');
-    const expr = ce.box(['Add', 'a', 'b']);
+    const expr = ce.expr(['Add', 'a', 'b']);
     expect(expr.json).toEqual(['Add', 'a', 'b']);
   });
 
@@ -116,7 +116,7 @@ describe('BROADCASTABLE FUNCTIONS WITH UNION TYPES', () => {
     const ce = new ComputeEngine();
     ce.declare('a', 'any');
     ce.declare('b', 'any');
-    const expr = ce.box(['Multiply', 'a', 'b']);
+    const expr = ce.expr(['Multiply', 'a', 'b']);
     expect(expr.json).toEqual(['Multiply', 'a', 'b']);
   });
 
@@ -124,7 +124,7 @@ describe('BROADCASTABLE FUNCTIONS WITH UNION TYPES', () => {
     const ce = new ComputeEngine();
     ce.declare('a', 'unknown');
     ce.declare('b', 'unknown');
-    const expr = ce.box(['Multiply', 'a', 'b']);
+    const expr = ce.expr(['Multiply', 'a', 'b']);
     expect(expr.json).toEqual(['Multiply', 'a', 'b']);
   });
 
@@ -134,7 +134,7 @@ describe('BROADCASTABLE FUNCTIONS WITH UNION TYPES', () => {
     ce.declare('b', 'number | list');
     ce.assign('a', ['List', 1, 2, 3]);
     ce.assign('b', ['List', 4, 5, 6]);
-    const expr = ce.box(['Multiply', 'a', 'b']);
+    const expr = ce.expr(['Multiply', 'a', 'b']);
     expect(expr.evaluate().json).toEqual(['List', 4, 10, 18]);
   });
 });

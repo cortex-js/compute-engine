@@ -2,7 +2,7 @@ import { Expression } from '../../src/math-json/types.ts';
 import { engine, exprToString } from '../utils';
 
 function evaluate(expr: Expression): string {
-  return exprToString(engine.box(expr)?.evaluate({ materialization: true }));
+  return exprToString(engine.expr(expr)?.evaluate({ materialization: true }));
 }
 
 const emptyList: Expression = ['List'];
@@ -623,7 +623,7 @@ describe('CONTINUATION PLACEHOLDER', () => {
 
   // Check various eager evaluation
   test('empty list', () => {
-    const empty_list = engine.box(['Map', ['List'], ['Square', '_']]);
+    const empty_list = engine.expr(['Map', ['List'], ['Square', '_']]);
     expect(
       empty_list.evaluate({ materialization: false })
     ).toMatchInlineSnapshot(
@@ -641,7 +641,7 @@ describe('CONTINUATION PLACEHOLDER', () => {
   });
 
   test('empty set', () => {
-    const empty_set = engine.box(['Map', ['Set'], ['Square', '_']]);
+    const empty_set = engine.expr(['Map', ['Set'], ['Square', '_']]);
     expect(
       empty_set.evaluate({ materialization: false })
     ).toMatchInlineSnapshot(`["Map", ["Set"], ["Function", ["Square", "_1"]]]`);
@@ -657,7 +657,7 @@ describe('CONTINUATION PLACEHOLDER', () => {
   });
 
   test('finite list', () => {
-    const finite_list = engine.box([
+    const finite_list = engine.expr([
       'Map',
       ['List', 1, 1, 2, 2, 3, 4, 7, 8, 9, 10, 11, 12, 14],
       ['Square', '_'],
@@ -706,7 +706,7 @@ describe('CONTINUATION PLACEHOLDER', () => {
   });
 
   test('finite set', () => {
-    const finite_set = engine.box([
+    const finite_set = engine.expr([
       'Map',
       ['Set', 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
       ['Square', '_'],
@@ -741,7 +741,7 @@ describe('CONTINUATION PLACEHOLDER', () => {
   });
 
   test('infinite set', () => {
-    const infinite_set = engine.box(['Map', 'Integers', ['Square', '_']]);
+    const infinite_set = engine.expr(['Map', 'Integers', ['Square', '_']]);
     expect(
       infinite_set.evaluate({ materialization: false })
     ).toMatchInlineSnapshot(

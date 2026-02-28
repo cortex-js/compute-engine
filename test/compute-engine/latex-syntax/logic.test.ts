@@ -857,31 +857,31 @@ describe('Logic', () => {
 
   // Serialization tests
   it('should serialize ForAll', () => {
-    expect(ce.box(['ForAll', 'x', ['Greater', 'x', 0]]).latex).toBe(
+    expect(ce.expr(['ForAll', 'x', ['Greater', 'x', 0]]).latex).toBe(
       '\\forall x, x\\gt0'
     );
   });
 
   it('should serialize Exists', () => {
-    expect(ce.box(['Exists', 'x', ['Greater', 'x', 0]]).latex).toBe(
+    expect(ce.expr(['Exists', 'x', ['Greater', 'x', 0]]).latex).toBe(
       '\\exists x, x\\gt0'
     );
   });
 
   it('should serialize ExistsUnique', () => {
-    expect(ce.box(['ExistsUnique', 'x', ['Equal', 'x', 0]]).latex).toBe(
+    expect(ce.expr(['ExistsUnique', 'x', ['Equal', 'x', 0]]).latex).toBe(
       '\\exists! x, x=0'
     );
   });
 
   it('should serialize NotForAll', () => {
-    expect(ce.box(['NotForAll', 'x', ['Greater', 'x', 0]]).latex).toBe(
+    expect(ce.expr(['NotForAll', 'x', ['Greater', 'x', 0]]).latex).toBe(
       '\\lnot\\forall x, x\\gt0'
     );
   });
 
   it('should serialize NotExists', () => {
-    expect(ce.box(['NotExists', 'x', ['Greater', 'x', 0]]).latex).toBe(
+    expect(ce.expr(['NotExists', 'x', ['Greater', 'x', 0]]).latex).toBe(
       '\\lnot\\exists x, x\\gt0'
     );
   });
@@ -1007,12 +1007,12 @@ describe('Iverson Bracket', () => {
 describe('Predicate', () => {
   // Serialization tests
   it('should serialize Predicate with one argument', () => {
-    expect(ce.box(['Predicate', 'P', 'x']).latex).toBe('P(x)');
+    expect(ce.expr(['Predicate', 'P', 'x']).latex).toBe('P(x)');
   });
 
   it('should serialize Predicate with multiple arguments', () => {
-    expect(ce.box(['Predicate', 'Q', 'a', 'b']).latex).toBe('Q(a, b)');
-    expect(ce.box(['Predicate', 'R', 'x', 'y', 'z']).latex).toBe('R(x, y, z)');
+    expect(ce.expr(['Predicate', 'Q', 'a', 'b']).latex).toBe('Q(a, b)');
+    expect(ce.expr(['Predicate', 'R', 'x', 'y', 'z']).latex).toBe('R(x, y, z)');
   });
 
   // Round-trip tests: parse -> serialize -> parse should give same result
@@ -1078,19 +1078,19 @@ describe('Predicate', () => {
 
   // Type inference tests
   it('should infer boolean type for Predicate', () => {
-    const pred = ce.box(['Predicate', 'P', 'x']);
+    const pred = ce.expr(['Predicate', 'P', 'x']);
     expect(pred.type.toString()).toBe('boolean');
   });
 
   it('should allow Predicate in boolean contexts', () => {
     // Predicate should work as argument to And, Or, Not, etc.
-    const expr1 = ce.box(['And', ['Predicate', 'P', 'x'], ['Predicate', 'Q', 'x']]);
+    const expr1 = ce.expr(['And', ['Predicate', 'P', 'x'], ['Predicate', 'Q', 'x']]);
     expect(expr1.type.toString()).toBe('boolean');
 
-    const expr2 = ce.box(['Not', ['Predicate', 'P', 'x']]);
+    const expr2 = ce.expr(['Not', ['Predicate', 'P', 'x']]);
     expect(expr2.type.toString()).toBe('boolean');
 
-    const expr3 = ce.box(['Implies', ['Predicate', 'P', 'x'], ['Predicate', 'Q', 'x']]);
+    const expr3 = ce.expr(['Implies', ['Predicate', 'P', 'x'], ['Predicate', 'Q', 'x']]);
     expect(expr3.type.toString()).toBe('boolean');
   });
 
@@ -1158,12 +1158,12 @@ describe('Single-letter library functions', () => {
 
   it('should allow N function via MathJSON', () => {
     // N function can be constructed directly in MathJSON
-    const expr = ce.box(['N', 'Pi']);
+    const expr = ce.expr(['N', 'Pi']);
     expect(expr.operator).toBe('N');
     expect(expr.op1?.symbol).toBe('Pi');
 
     // Direct .N() on Pi gives numeric value (preferred way to get numeric values)
-    const piNumeric = ce.box('Pi').N();
+    const piNumeric = ce.expr('Pi').N();
     expect(piNumeric.numericValue).not.toBeNull();
   });
 

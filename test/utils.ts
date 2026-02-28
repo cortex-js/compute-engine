@@ -40,7 +40,7 @@ function exprToStringRecursive(expr: ExpressionInput, start: number): string {
   if (expr instanceof _BoxedExpression) {
     const ce = expr.engine;
     return exprToStringRecursive(
-      ce.box(expr, { form: 'raw' }).toMathJson({ prettify: true }), // The default is 'prettify: true'
+      ce.expr(expr, { form: 'raw' }).toMathJson({ prettify: true }), // The default is 'prettify: true'
       start
     );
   }
@@ -161,9 +161,9 @@ export function checkJson(
       'N-auto',
     ];
 
-    const boxed = exprToString(ce.box(inExpr, { form: 'raw' }));
+    const boxed = exprToString(ce.expr(inExpr, { form: 'raw' }));
 
-    const expr = ce.box(inExpr);
+    const expr = ce.expr(inExpr);
 
     if (!expr.isValid) return `invalid   =${exprToString(expr)}`;
 
@@ -177,7 +177,7 @@ export function checkJson(
     ce.precision = 'machine';
     // Re-box at machine precision so internal NumericValue representations
     // use MachineNumericValue, not BigNumericValue from the higher-precision parse
-    const machExpr = ce.box(expr.json);
+    const machExpr = ce.expr(expr.json);
     const evalMachine = machExpr.evaluate().toString();
     const numEvalMachine = machExpr.N().toString();
 
@@ -237,7 +237,7 @@ export function latex(expr: Expression | undefined | null): string {
   errors = [];
   let result = '';
   try {
-    result = engine.box(expr)?.latex ?? 'NULL';
+    result = engine.expr(expr)?.latex ?? 'NULL';
   } catch (e) {
     errors.push(e.toString());
   }

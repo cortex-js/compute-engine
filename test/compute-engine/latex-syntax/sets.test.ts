@@ -607,7 +607,7 @@ describe('RANGE AND INTERVAL SERIALIZATION', () => {
   it('should serialize Range with a..b notation', () => {
     // Range with symbolic bounds serializes as a..b
     // Note: must use materialization:false to prevent lazy evaluation to List
-    const range = ce.box(['Range', 'a', 'b']);
+    const range = ce.expr(['Range', 'a', 'b']);
     expect(range.toLatex({ materialization: false })).toBe('a..b');
   });
 
@@ -632,7 +632,7 @@ describe('RANGE AND INTERVAL SERIALIZATION', () => {
 
   it('should round-trip Interval expressions', () => {
     // Closed interval [a, b]
-    const closed = ce.box(['Interval', 3, 4]);
+    const closed = ce.expr(['Interval', 3, 4]);
     const closedLatex = closed.latex;
     const closedReparsed = ce.parse(closedLatex);
     // Note: [3, 4] parses as List due to backward compatibility
@@ -645,7 +645,7 @@ describe('RANGE AND INTERVAL SERIALIZATION', () => {
     `);
 
     // Half-open interval [a, b)
-    const halfOpen = ce.box(['Interval', 3, ['Open', 4]]);
+    const halfOpen = ce.expr(['Interval', 3, ['Open', 4]]);
     const halfOpenLatex = halfOpen.latex;
     expect(halfOpenLatex).toMatchInlineSnapshot(`\\lbrack3, 4\\rparen`);
     const halfOpenReparsed = ce.parse(halfOpenLatex);
@@ -661,7 +661,7 @@ describe('RANGE AND INTERVAL SERIALIZATION', () => {
     `);
 
     // Open-closed interval (a, b]
-    const openClosed = ce.box(['Interval', ['Open', 3], 4]);
+    const openClosed = ce.expr(['Interval', ['Open', 3], 4]);
     const openClosedLatex = openClosed.latex;
     expect(openClosedLatex).toMatchInlineSnapshot(`\\lparen3, 4\\rbrack`);
     const openClosedReparsed = ce.parse(openClosedLatex);

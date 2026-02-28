@@ -9,7 +9,7 @@ const ce = new ComputeEngine();
 
 describe('COMPILE Loop', () => {
   test('simple loop: accumulate sum 1..10 = 55', () => {
-    const expr = ce.box([
+    const expr = ce.expr([
       'Block',
       ['Declare', 's'],
       ['Assign', 's', 0],
@@ -25,7 +25,7 @@ describe('COMPILE Loop', () => {
   });
 
   test('loop with break: sum until i > 5', () => {
-    const expr = ce.box([
+    const expr = ce.expr([
       'Block',
       ['Declare', 's'],
       ['Assign', 's', 0],
@@ -45,7 +45,7 @@ describe('COMPILE Loop', () => {
   });
 
   test('loop with continue: sum only even numbers 1..10', () => {
-    const expr = ce.box([
+    const expr = ce.expr([
       'Block',
       ['Declare', 's'],
       ['Assign', 's', 0],
@@ -66,7 +66,7 @@ describe('COMPILE Loop', () => {
 
   test('loop with nested if + break', () => {
     // Find first i where i^2 > 50
-    const expr = ce.box([
+    const expr = ce.expr([
       'Block',
       ['Declare', 'result'],
       ['Assign', 'result', -1],
@@ -87,7 +87,7 @@ describe('COMPILE Loop', () => {
   });
 
   test('code generation: simple loop', () => {
-    const expr = ce.box([
+    const expr = ce.expr([
       'Loop',
       ['Square', 'i'],
       ['Element', 'i', ['Range', 0, 9]],
@@ -100,7 +100,7 @@ describe('COMPILE Loop', () => {
 
 describe('COMPILE Break / Continue', () => {
   test('Break appears in loop code', () => {
-    const expr = ce.box([
+    const expr = ce.expr([
       'Loop',
       ['If', ['Greater', 'i', 3], ['Break'], 'Nothing'],
       ['Element', 'i', ['Range', 1, 10]],
@@ -111,7 +111,7 @@ describe('COMPILE Break / Continue', () => {
   });
 
   test('Continue appears in loop code', () => {
-    const expr = ce.box([
+    const expr = ce.expr([
       'Loop',
       ['If', ['Greater', 'i', 3], ['Continue'], 'Nothing'],
       ['Element', 'i', ['Range', 1, 10]],
@@ -124,7 +124,7 @@ describe('COMPILE Break / Continue', () => {
 
 describe('COMPILE Loop (interval-js)', () => {
   test('simple accumulation loop', () => {
-    const expr = ce.box([
+    const expr = ce.expr([
       'Block',
       ['Declare', 's'],
       ['Assign', 's', 0],
@@ -148,7 +148,7 @@ describe('COMPILE Loop (interval-js)', () => {
   });
 
   test('loop with break', () => {
-    const expr = ce.box([
+    const expr = ce.expr([
       'Block',
       ['Declare', 's'],
       ['Assign', 's', 0],
@@ -172,7 +172,7 @@ describe('COMPILE Loop (interval-js)', () => {
 
   test('loop with trig in body', () => {
     // sum of sin(i) for i = 1..3
-    const expr = ce.box([
+    const expr = ce.expr([
       'Block',
       ['Declare', 's'],
       ['Assign', 's', 0],

@@ -4,12 +4,12 @@ import { isDictionary } from '../../src/compute-engine/boxed-expression/utils';
 
 function evaluate(expr: Expression) {
   return exprToString(
-    engine.box(expr)?.evaluate().toMathJson({ shorthands: [] })
+    engine.expr(expr)?.evaluate().toMathJson({ shorthands: [] })
   );
 }
 
 function box(expr: Expression) {
-  return engine.box(expr);
+  return engine.expr(expr);
 }
 
 describe('Dictionary', () => {

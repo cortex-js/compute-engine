@@ -27,13 +27,13 @@ describe('WGSL COMPILATION', () => {
 
   describe('WGSL-Specific Functions', () => {
     it('should compile inverseSqrt (camelCase)', () => {
-      const expr = ce.box(['Inversesqrt', 'x']);
+      const expr = ce.expr(['Inversesqrt', 'x']);
       const code = wgsl.compile(expr).code;
       expect(code).toMatchInlineSnapshot(`inverseSqrt(x)`);
     });
 
     it('should compile mod using % operator', () => {
-      const expr = ce.box(['Mod', 'x', 'y']);
+      const expr = ce.expr(['Mod', 'x', 'y']);
       const code = wgsl.compile(expr).code;
       expect(code).toMatchInlineSnapshot(`(x % y)`);
     });
@@ -101,25 +101,25 @@ describe('WGSL COMPILATION', () => {
     });
 
     it('should compile inverse hyperbolic functions', () => {
-      expect(wgsl.compile(ce.box(['Arcosh', 'x'])).code).toMatchInlineSnapshot(
+      expect(wgsl.compile(ce.expr(['Arcosh', 'x'])).code).toMatchInlineSnapshot(
         `acosh(x)`
       );
-      expect(wgsl.compile(ce.box(['Arsinh', 'x'])).code).toMatchInlineSnapshot(
+      expect(wgsl.compile(ce.expr(['Arsinh', 'x'])).code).toMatchInlineSnapshot(
         `asinh(x)`
       );
-      expect(wgsl.compile(ce.box(['Artanh', 'x'])).code).toMatchInlineSnapshot(
+      expect(wgsl.compile(ce.expr(['Artanh', 'x'])).code).toMatchInlineSnapshot(
         `atanh(x)`
       );
     });
 
     it('should compile reciprocal hyperbolic functions', () => {
-      expect(wgsl.compile(ce.box(['Coth', 'x'])).code).toMatchInlineSnapshot(
+      expect(wgsl.compile(ce.expr(['Coth', 'x'])).code).toMatchInlineSnapshot(
         `(cosh(x) / sinh(x))`
       );
-      expect(wgsl.compile(ce.box(['Csch', 'x'])).code).toMatchInlineSnapshot(
+      expect(wgsl.compile(ce.expr(['Csch', 'x'])).code).toMatchInlineSnapshot(
         `(1.0 / sinh(x))`
       );
-      expect(wgsl.compile(ce.box(['Sech', 'x'])).code).toMatchInlineSnapshot(
+      expect(wgsl.compile(ce.expr(['Sech', 'x'])).code).toMatchInlineSnapshot(
         `(1.0 / cosh(x))`
       );
     });
@@ -161,25 +161,25 @@ describe('WGSL COMPILATION', () => {
 
   describe('Vectors (WGSL syntax)', () => {
     it('should compile vec2f', () => {
-      const expr = ce.box(['List', 1, 2]);
+      const expr = ce.expr(['List', 1, 2]);
       const code = wgsl.compile(expr).code;
       expect(code).toMatchInlineSnapshot(`vec2f(1.0, 2.0)`);
     });
 
     it('should compile vec3f', () => {
-      const expr = ce.box(['List', 1, 2, 3]);
+      const expr = ce.expr(['List', 1, 2, 3]);
       const code = wgsl.compile(expr).code;
       expect(code).toMatchInlineSnapshot(`vec3f(1.0, 2.0, 3.0)`);
     });
 
     it('should compile vec4f', () => {
-      const expr = ce.box(['List', 1, 2, 3, 4]);
+      const expr = ce.expr(['List', 1, 2, 3, 4]);
       const code = wgsl.compile(expr).code;
       expect(code).toMatchInlineSnapshot(`vec4f(1.0, 2.0, 3.0, 4.0)`);
     });
 
     it('should compile array for 5+ elements', () => {
-      const expr = ce.box(['List', 1, 2, 3, 4, 5]);
+      const expr = ce.expr(['List', 1, 2, 3, 4, 5]);
       const code = wgsl.compile(expr).code;
       expect(code).toMatchInlineSnapshot(
         `array<f32, 5>(1.0, 2.0, 3.0, 4.0, 5.0)`
@@ -187,7 +187,7 @@ describe('WGSL COMPILATION', () => {
     });
 
     it('should compile vector addition', () => {
-      const expr = ce.box(['Add', ['List', 1, 2, 3], ['List', 4, 5, 6]]);
+      const expr = ce.expr(['Add', ['List', 1, 2, 3], ['List', 4, 5, 6]]);
       const code = wgsl.compile(expr).code;
       expect(code).toMatchInlineSnapshot(
         `vec3f(1.0, 2.0, 3.0) + vec3f(4.0, 5.0, 6.0)`
@@ -195,7 +195,7 @@ describe('WGSL COMPILATION', () => {
     });
 
     it('should compile vector multiplication', () => {
-      const expr = ce.box(['Multiply', ['List', 'x', 'y', 'z'], 2]);
+      const expr = ce.expr(['Multiply', ['List', 'x', 'y', 'z'], 2]);
       const code = wgsl.compile(expr).code;
       expect(code).toMatchInlineSnapshot(`2.0 * vec3f(x, y, z)`);
     });
@@ -230,7 +230,7 @@ describe('WGSL COMPILATION', () => {
     });
 
     it('should map GLSL types to WGSL types', () => {
-      const expr = ce.box(['Add', 'x', 'y']);
+      const expr = ce.expr(['Add', 'x', 'y']);
       const code = wgsl.compileFunction(expr, 'addVec', 'vec3', [
         ['x', 'vec3'],
         ['y', 'vec3'],
@@ -241,7 +241,7 @@ describe('WGSL COMPILATION', () => {
 
   describe('Shader Generation', () => {
     it('should generate a fragment shader', () => {
-      const colorExpr = ce.box(['List', 1, 0, 0, 1]);
+      const colorExpr = ce.expr(['List', 1, 0, 0, 1]);
 
       const shader = wgsl.compileShader({
         type: 'fragment',
@@ -271,7 +271,7 @@ describe('WGSL COMPILATION', () => {
         body: [
           {
             variable: 'output.color',
-            expression: ce.box(['List', 1, 0, 0]),
+            expression: ce.expr(['List', 1, 0, 0]),
           },
         ],
       });
@@ -315,7 +315,7 @@ describe('WGSL COMPILATION', () => {
 
   describe('Block Expressions', () => {
     it('should compile a simple block with local variable', () => {
-      const expr = ce.box([
+      const expr = ce.expr([
         'Block',
         ['Declare', 'a'],
         ['Assign', 'a', ['Cos', 't']],
@@ -330,7 +330,7 @@ describe('WGSL COMPILATION', () => {
     });
 
     it('should compile a block with multiple locals', () => {
-      const expr = ce.box([
+      const expr = ce.expr([
         'Block',
         ['Declare', 'a'],
         ['Declare', 'b'],
@@ -349,7 +349,7 @@ describe('WGSL COMPILATION', () => {
     });
 
     it('should compile a block function with valid WGSL body', () => {
-      const expr = ce.box([
+      const expr = ce.expr([
         'Block',
         ['Declare', 'a'],
         ['Assign', 'a', ['Cos', 't']],
@@ -368,7 +368,7 @@ describe('WGSL COMPILATION', () => {
     });
 
     it('should not use IIFE or let in WGSL blocks', () => {
-      const expr = ce.box([
+      const expr = ce.expr([
         'Block',
         ['Declare', 'tmp'],
         ['Assign', 'tmp', 'x'],
@@ -398,25 +398,25 @@ describe('WGSL COMPILATION', () => {
 
   describe('Sum and Product', () => {
     it('should unroll Sum with small constant bounds', () => {
-      const expr = ce.box(['Sum', ['Sin', 'i'], ['Limits', 'i', 1, 3]]);
+      const expr = ce.expr(['Sum', ['Sin', 'i'], ['Limits', 'i', 1, 3]]);
       const code = wgsl.compile(expr).code;
       expect(code).toBe('((sin(1.0)) + (sin(2.0)) + (sin(3.0)))');
     });
 
     it('should unroll Product with small constant bounds', () => {
-      const expr = ce.box(['Product', 'i', ['Limits', 'i', 1, 4]]);
+      const expr = ce.expr(['Product', 'i', ['Limits', 'i', 1, 4]]);
       const code = wgsl.compile(expr).code;
       expect(code).toBe('((1.0) * (2.0) * (3.0) * (4.0))');
     });
 
     it('should return identity for empty Sum range', () => {
-      const expr = ce.box(['Sum', 'i', ['Limits', 'i', 5, 3]]);
+      const expr = ce.expr(['Sum', 'i', ['Limits', 'i', 5, 3]]);
       const code = wgsl.compile(expr).code;
       expect(code).toBe('0.0');
     });
 
     it('should emit for-loop for large Sum range inside compileFunction', () => {
-      const expr = ce.box([
+      const expr = ce.expr([
         'Sum',
         ['Sin', 'i'],
         ['Limits', 'i', 1, 1000],
@@ -432,7 +432,7 @@ describe('WGSL COMPILATION', () => {
     });
 
     it('should not contain JS constructs in Sum output', () => {
-      const expr = ce.box(['Sum', ['Sin', 'i'], ['Limits', 'i', 1, 3]]);
+      const expr = ce.expr(['Sum', ['Sin', 'i'], ['Limits', 'i', 1, 3]]);
       const code = wgsl.compile(expr).code;
       expect(code).not.toContain('let ');
       expect(code).not.toContain('const ');
@@ -443,7 +443,7 @@ describe('WGSL COMPILATION', () => {
 
   describe('Loop', () => {
     it('should compile Loop as for-loop without IIFE', () => {
-      const expr = ce.box([
+      const expr = ce.expr([
         'Loop',
         ['Assign', 'acc', ['Add', 'acc', 'i']],
         ['Element', 'i', ['Range', 1, 5]],
@@ -460,14 +460,14 @@ describe('WGSL COMPILATION', () => {
   describe('Function (Lambda)', () => {
     it('should throw for anonymous functions in WGSL', () => {
       expect(() =>
-        wgsl.compile(ce.box(['Function', ['Add', 'x', 1], 'x']))
+        wgsl.compile(ce.expr(['Function', ['Add', 'x', 1], 'x']))
       ).toThrow('Anonymous functions (Function) are not supported in GPU');
     });
   });
 
   describe('Type-Aware Declarations', () => {
     it('should declare complex-typed variable as vec2f', () => {
-      const expr = ce.box([
+      const expr = ce.expr([
         'Block',
         ['Declare', 'v'],
         ['Assign', 'v', ['Complex', 1, 2]],

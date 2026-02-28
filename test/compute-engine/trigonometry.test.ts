@@ -34,14 +34,14 @@ describe('TRIGONOMETRY constructible values', () => {
             : NaN;
 
         // const arg = engine
-        //   .box([
+        //   .expr([
         //     'Add',
         //     ['Multiply', p, 'Half', 'Pi'],
         //     ['Multiply', 'Pi', ['Rational', n, d]],
         //   ])
         //   .simplify();
         const arg = engine
-          .box([
+          .expr([
             'Multiply',
             'Pi',
             ['Add', ['Rational', p, 2], ['Rational', n, d]],
@@ -50,7 +50,7 @@ describe('TRIGONOMETRY constructible values', () => {
 
         // Use evaluate to get the exact value (using N() directly could bypass
         // the constructible value logic)
-        const fExact = engine.box([h, arg]).evaluate();
+        const fExact = engine.expr([h, arg]).evaluate();
 
         // Reduce the exact value to a number
         const fNumeric = fExact.N();
@@ -75,7 +75,7 @@ describe('TRIGONOMETRY constructible values', () => {
 
           test(`${h}(${arg.toString()})`, () => {
             if (!Number.isFinite(Math.abs(f - jsValue))) {
-              let expr = engine.box([h, arg]);
+              let expr = engine.expr([h, arg]);
               expr = expr.evaluate();
               const again = fExact.N();
               console.error('Invalid trig result', fNumeric.toString());

@@ -37,7 +37,7 @@ const exprs: [Expression, Expression, number | undefined][] = [
 describe.skip('EQUAL', () => {
   for (const expr of exprs) {
     test(`equal(${latex(expr[0])}, ${latex(expr[1])})`, () => {
-      expect(engine.box(expr[0]).isEqual(engine.box(expr[1]))).toEqual(
+      expect(engine.expr(expr[0]).isEqual(engine.expr(expr[1]))).toEqual(
         expr[2] === undefined ? undefined : expr[2] === 0 ? true : false
       );
     });
@@ -47,7 +47,7 @@ describe.skip('EQUAL', () => {
 describe.skip('LESS THAN', () => {
   for (const expr of exprs) {
     test(`less(${latex(expr[0])}, ${latex(expr[1])})`, () => {
-      expect(engine.box(expr[0]).isLess(engine.box(expr[1]))).toEqual(
+      expect(engine.expr(expr[0]).isLess(engine.expr(expr[1]))).toEqual(
         expr[2] === undefined ? undefined : expr[2] < 0 ? true : false
       );
     });
@@ -57,7 +57,7 @@ describe.skip('LESS THAN', () => {
 describe.skip('LESS EQUAL', () => {
   for (const expr of exprs) {
     test(`lessEqual(${latex(expr[0])}, ${latex(expr[1])})`, () => {
-      expect(engine.box(expr[0]).isLessEqual(engine.box(expr[1]))).toEqual(
+      expect(engine.expr(expr[0]).isLessEqual(engine.expr(expr[1]))).toEqual(
         expr[2] === undefined ? undefined : expr[2] <= 0 ? true : false
       );
     });
@@ -67,7 +67,7 @@ describe.skip('LESS EQUAL', () => {
 describe.skip('GREATER', () => {
   for (const expr of exprs) {
     test(`greater(${latex(expr[0])}, ${latex(expr[1])})`, () => {
-      expect(engine.box(expr[0]).isGreater(engine.box(expr[1]))).toEqual(
+      expect(engine.expr(expr[0]).isGreater(engine.expr(expr[1]))).toEqual(
         expr[2] === undefined ? undefined : expr[2] > 0 ? true : false
       );
     });
@@ -77,7 +77,7 @@ describe.skip('GREATER', () => {
 describe.skip('GREATER EQUAL', () => {
   for (const expr of exprs) {
     test(`greaterEqual(${latex(expr[0])}, ${latex(expr[1])})`, () => {
-      expect(engine.box(expr[0]).isGreaterEqual(engine.box(expr[1]))).toEqual(
+      expect(engine.expr(expr[0]).isGreaterEqual(engine.expr(expr[1]))).toEqual(
         expr[2] === undefined ? undefined : expr[2] >= 0 ? true : false
       );
     });

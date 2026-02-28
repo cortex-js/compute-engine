@@ -10,13 +10,13 @@ import { engine as ce } from '../utils';
 describe('JSON PROPERTY', () => {
   // Nan, +Infinity, -Infinity are represented as symbols
   test(`Numeric symbols: Nan`, () =>
-    expect(ce.box({ num: 'NaN' }).json).toMatchInlineSnapshot(`NaN`));
+    expect(ce.expr({ num: 'NaN' }).json).toMatchInlineSnapshot(`NaN`));
   test(`Numeric symbols: +Infinity`, () =>
-    expect(ce.box({ num: '+infinity' }).json).toMatchInlineSnapshot(
+    expect(ce.expr({ num: '+infinity' }).json).toMatchInlineSnapshot(
       `PositiveInfinity`
     ));
   test(`Numeric symbols: -Infinity`, () =>
-    expect(ce.box({ num: '-infinity' }).json).toMatchInlineSnapshot(
+    expect(ce.expr({ num: '-infinity' }).json).toMatchInlineSnapshot(
       `NegativeInfinity`
     ));
 
@@ -71,13 +71,13 @@ describe('JSON PROPERTY', () => {
 describe('DEFAULT JSON SERIALIZATION', () => {
   // Nan, +Infinity, -Infinity are represented as symbols
   test(`Numeric symbols: Nan`, () =>
-    expect(ce.box({ num: 'NaN' }).toMathJson({})).toMatchInlineSnapshot(`NaN`));
+    expect(ce.expr({ num: 'NaN' }).toMathJson({})).toMatchInlineSnapshot(`NaN`));
   test(`Numeric symbols: +Infinity`, () =>
-    expect(ce.box({ num: '+infinity' }).toMathJson({})).toMatchInlineSnapshot(
+    expect(ce.expr({ num: '+infinity' }).toMathJson({})).toMatchInlineSnapshot(
       `PositiveInfinity`
     ));
   test(`Numeric symbols: -Infinity`, () =>
-    expect(ce.box({ num: '-infinity' }).toMathJson({})).toMatchInlineSnapshot(
+    expect(ce.expr({ num: '-infinity' }).toMathJson({})).toMatchInlineSnapshot(
       `NegativeInfinity`
     ));
 
@@ -129,13 +129,13 @@ describe('DEFAULT JSON SERIALIZATION', () => {
 describe('CUSTOM JSON SERIALIZATION', () => {
   // Nan, +Infinity, -Infinity are represented as symbols
   test(`Numeric symbols: Nan`, () =>
-    expect(ce.box({ num: 'NaN' }).toMathJson({})).toMatchInlineSnapshot(`NaN`));
+    expect(ce.expr({ num: 'NaN' }).toMathJson({})).toMatchInlineSnapshot(`NaN`));
   test(`Numeric symbols: +Infinity`, () =>
-    expect(ce.box({ num: '+infinity' }).toMathJson({})).toMatchInlineSnapshot(
+    expect(ce.expr({ num: '+infinity' }).toMathJson({})).toMatchInlineSnapshot(
       `PositiveInfinity`
     ));
   test(`Numeric symbols: -Infinity`, () =>
-    expect(ce.box({ num: '-infinity' }).toMathJson({})).toMatchInlineSnapshot(
+    expect(ce.expr({ num: '-infinity' }).toMathJson({})).toMatchInlineSnapshot(
       `NegativeInfinity`
     ));
 

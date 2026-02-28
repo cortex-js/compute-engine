@@ -6,7 +6,7 @@ import { benchmark, engine } from '../../utils';
 //
 
 function expand(e: Expression): Expression {
-  return engine.box(['Expand', e]).evaluate();
+  return engine.expr(['Expand', e]).evaluate();
 }
 
 const p = engine.parse(`3x^2yz^7 + 7xyz^2 + 4x + xy^4`);
@@ -43,7 +43,7 @@ describe('SymPy Benchmarks', () => {
 
   test.skip(`Expand((2 + 3i)^1000)`, () => {
     expect(
-      benchmark(() => expand(engine.box(['Power', ['Complex', 2, 3], 1000])), {
+      benchmark(() => expand(engine.expr(['Power', ['Complex', 2, 3], 1000])), {
         mem: 3256,
         time: 0.09,
         exprs: 6,
@@ -56,7 +56,7 @@ describe('SymPy Benchmarks', () => {
       benchmark(
         () =>
           expand(
-            engine.box(['Power', ['Complex', 2, ['Rational', 3, 4]], 1000])
+            engine.expr(['Power', ['Complex', 2, ['Rational', 3, 4]], 1000])
           ),
         {
           mem: 5200,

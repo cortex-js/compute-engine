@@ -29,23 +29,23 @@ describe('UNITS LIBRARY', () => {
   });
 
   test('Quantity expression is valid', () => {
-    const expr = engine.box(['Quantity', 5, 'm']);
+    const expr = engine.expr(['Quantity', 5, 'm']);
     expect(expr.isValid).toBe(true);
     expect(expr.operator).toBe('Quantity');
   });
 
   test('QuantityMagnitude expression is valid', () => {
-    const expr = engine.box(['QuantityMagnitude', ['Quantity', 5, 'm']]);
+    const expr = engine.expr(['QuantityMagnitude', ['Quantity', 5, 'm']]);
     expect(expr.isValid).toBe(true);
   });
 
   test('QuantityUnit expression is valid', () => {
-    const expr = engine.box(['QuantityUnit', ['Quantity', 5, 'm']]);
+    const expr = engine.expr(['QuantityUnit', ['Quantity', 5, 'm']]);
     expect(expr.isValid).toBe(true);
   });
 
   test('QuantityMagnitude evaluates to the numeric part', () => {
-    const expr = engine.box([
+    const expr = engine.expr([
       'QuantityMagnitude',
       ['Quantity', 5, 'm'],
     ]);
@@ -54,7 +54,7 @@ describe('UNITS LIBRARY', () => {
   });
 
   test('QuantityUnit evaluates to the unit part', () => {
-    const expr = engine.box(['QuantityUnit', ['Quantity', 5, 'm']]);
+    const expr = engine.expr(['QuantityUnit', ['Quantity', 5, 'm']]);
     const result = expr.evaluate();
     expect(result.symbol).toBe('m');
   });
@@ -129,7 +129,7 @@ describe('UNIT REGISTRY', () => {
 describe('QUANTITY ARITHMETIC', () => {
   test('Scalar multiplication', () => {
     const expr = engine
-      .box(['Multiply', 2, ['Quantity', 5, 'kg']])
+      .expr(['Multiply', 2, ['Quantity', 5, 'kg']])
       .evaluate();
     expect(expr.operator).toBe('Quantity');
     expect(expr.op1.re).toBe(10);
@@ -138,7 +138,7 @@ describe('QUANTITY ARITHMETIC', () => {
 
   test('Addition - same unit', () => {
     const expr = engine
-      .box(['Add', ['Quantity', 3, 'm'], ['Quantity', 7, 'm']])
+      .expr(['Add', ['Quantity', 3, 'm'], ['Quantity', 7, 'm']])
       .evaluate();
     expect(expr.operator).toBe('Quantity');
     expect(expr.op1.re).toBe(10);
@@ -148,7 +148,7 @@ describe('QUANTITY ARITHMETIC', () => {
   test('Addition - compatible units, largest-scale-unit wins', () => {
     // m (scale=1) > cm (scale=0.01), so result is in meters
     const expr = engine
-      .box(['Add', ['Quantity', 12, 'cm'], ['Quantity', 1, 'm']])
+      .expr(['Add', ['Quantity', 12, 'cm'], ['Quantity', 1, 'm']])
       .evaluate();
     expect(expr.operator).toBe('Quantity');
     expect(expr.op1.re).toBeCloseTo(1.12);
@@ -158,7 +158,7 @@ describe('QUANTITY ARITHMETIC', () => {
   test('Addition - compatible units, reversed order same result', () => {
     // Regardless of operand order, largest-scale-unit (m) wins
     const expr = engine
-      .box(['Add', ['Quantity', 1, 'm'], ['Quantity', 12, 'cm']])
+      .expr(['Add', ['Quantity', 1, 'm'], ['Quantity', 12, 'cm']])
       .evaluate();
     expect(expr.operator).toBe('Quantity');
     expect(expr.op1.re).toBeCloseTo(1.12);
@@ -167,7 +167,7 @@ describe('QUANTITY ARITHMETIC', () => {
 
   test('Multiplication of quantities', () => {
     const expr = engine
-      .box(['Multiply', ['Quantity', 5, 'm'], ['Quantity', 3, 's']])
+      .expr(['Multiply', ['Quantity', 5, 'm'], ['Quantity', 3, 's']])
       .evaluate();
     expect(expr.operator).toBe('Quantity');
     expect(expr.op1.re).toBe(15);
@@ -175,7 +175,7 @@ describe('QUANTITY ARITHMETIC', () => {
 
   test('Division of quantities', () => {
     const expr = engine
-      .box(['Divide', ['Quantity', 100, 'm'], ['Quantity', 10, 's']])
+      .expr(['Divide', ['Quantity', 100, 'm'], ['Quantity', 10, 's']])
       .evaluate();
     expect(expr.operator).toBe('Quantity');
     expect(expr.op1.re).toBe(10);
@@ -183,7 +183,7 @@ describe('QUANTITY ARITHMETIC', () => {
 
   test('Power of quantity', () => {
     const expr = engine
-      .box(['Power', ['Quantity', 3, 'm'], 2])
+      .expr(['Power', ['Quantity', 3, 'm'], 2])
       .evaluate();
     expect(expr.operator).toBe('Quantity');
     expect(expr.op1.re).toBe(9);
@@ -198,7 +198,7 @@ describe('UNIT CONVERT', () => {
 
   test('Convert m to km', () => {
     const expr = engine
-      .box(['UnitConvert', ['Quantity', 1500, 'm'], 'km'])
+      .expr(['UnitConvert', ['Quantity', 1500, 'm'], 'km'])
       .evaluate();
     expect(expr.operator).toBe('Quantity');
     expect(expr.op1.re).toBe(1.5);
@@ -207,7 +207,7 @@ describe('UNIT CONVERT', () => {
 
   test('Convert km to m', () => {
     const expr = engine
-      .box(['UnitConvert', ['Quantity', 2.5, 'km'], 'm'])
+      .expr(['UnitConvert', ['Quantity', 2.5, 'km'], 'm'])
       .evaluate();
     expect(expr.operator).toBe('Quantity');
     expect(expr.op1.re).toBe(2500);
@@ -216,7 +216,7 @@ describe('UNIT CONVERT', () => {
 
   test('Convert min to s', () => {
     const expr = engine
-      .box(['UnitConvert', ['Quantity', 5, 'min'], 's'])
+      .expr(['UnitConvert', ['Quantity', 5, 'min'], 's'])
       .evaluate();
     expect(expr.operator).toBe('Quantity');
     expect(expr.op1.re).toBe(300);
@@ -254,12 +254,12 @@ describe('COMPOUND UNITS', () => {
   });
 
   test('Compound unit Quantity is valid', () => {
-    const expr = engine.box(['Quantity', 10, ['Divide', 'm', 's']]);
+    const expr = engine.expr(['Quantity', 10, ['Divide', 'm', 's']]);
     expect(expr.isValid).toBe(true);
   });
 
   test('Compound unit Quantity with Power', () => {
-    const expr = engine.box([
+    const expr = engine.expr([
       'Quantity',
       1,
       ['Multiply', 'kg', 'm', ['Power', 's', -2]],
@@ -297,13 +297,13 @@ describe('DSL STRING PARSING', () => {
   });
 
   test('DSL in Quantity canonical form', () => {
-    const expr = engine.box(['Quantity', 9.8, 'm/s^2']);
+    const expr = engine.expr(['Quantity', 9.8, 'm/s^2']);
     expect(expr.isValid).toBe(true);
     expect(expr.op2.operator).toBe('Divide');
   });
 
   test('DSL: kg*m/s^2', () => {
-    const expr = engine.box(['Quantity', 1, 'kg*m/s^2']);
+    const expr = engine.expr(['Quantity', 1, 'kg*m/s^2']);
     expect(expr.isValid).toBe(true);
   });
 });
@@ -311,7 +311,7 @@ describe('DSL STRING PARSING', () => {
 describe('COMPOUND UNIT CONVERT', () => {
   test('Convert km/h to m/s', () => {
     const expr = engine
-      .box([
+      .expr([
         'UnitConvert',
         ['Quantity', 36, ['Divide', 'km', 'h']],
         ['Divide', 'm', 's'],
@@ -382,17 +382,17 @@ describe('LATEX PARSING', () => {
 
 describe('LATEX SERIALIZATION', () => {
   test('Simple quantity', () => {
-    const expr = engine.box(['Quantity', 5, 'm']);
+    const expr = engine.expr(['Quantity', 5, 'm']);
     expect(expr.latex).toBe('5\\,\\mathrm{m}');
   });
 
   test('Prefixed unit', () => {
-    const expr = engine.box(['Quantity', 12, 'cm']);
+    const expr = engine.expr(['Quantity', 12, 'cm']);
     expect(expr.latex).toBe('12\\,\\mathrm{cm}');
   });
 
   test('Compound unit', () => {
-    const expr = engine.box([
+    const expr = engine.expr([
       'Quantity', 9.8,
       ['Divide', 'm', ['Power', 's', 2]],
     ]);
@@ -439,7 +439,7 @@ describe('SIUNITX PARSING', () => {
 
 describe('UNIT SIMPLIFY', () => {
   test('kg⋅m⋅s⁻² simplifies to N', () => {
-    const expr = engine.box([
+    const expr = engine.expr([
       'UnitSimplify',
       ['Quantity', 100, ['Multiply', 'kg', 'm', ['Power', 's', -2]]],
     ]).evaluate();
@@ -449,7 +449,7 @@ describe('UNIT SIMPLIFY', () => {
   });
 
   test('No simpler form returns unchanged', () => {
-    const expr = engine.box([
+    const expr = engine.expr([
       'UnitSimplify',
       ['Quantity', 5, ['Divide', 'kg', 'L']],
     ]).evaluate();
@@ -463,19 +463,19 @@ describe('UNIT SIMPLIFY', () => {
 
 describe('COMPATIBLE UNIT Q', () => {
   test('m and km are compatible', () => {
-    const expr = engine.box(['IsCompatibleUnit', 'm', 'km']).evaluate();
+    const expr = engine.expr(['IsCompatibleUnit', 'm', 'km']).evaluate();
     expect(expr.symbol).toBe('True');
   });
 
   test('m and s are not compatible', () => {
-    const expr = engine.box(['IsCompatibleUnit', 'm', 's']).evaluate();
+    const expr = engine.expr(['IsCompatibleUnit', 'm', 's']).evaluate();
     expect(expr.symbol).toBe('False');
   });
 });
 
 describe('UNIT DIMENSION', () => {
   test('Dimension of meter', () => {
-    const expr = engine.box(['UnitDimension', 'm']).evaluate();
+    const expr = engine.expr(['UnitDimension', 'm']).evaluate();
     expect(expr.operator).toBe('List');
   });
 });
@@ -483,28 +483,28 @@ describe('UNIT DIMENSION', () => {
 describe('ANGULAR UNITS', () => {
   test('Sin of Quantity in degrees', () => {
     const expr = engine
-      .box(['Sin', ['Quantity', 90, 'deg']])
+      .expr(['Sin', ['Quantity', 90, 'deg']])
       .evaluate();
     expect(expr.re).toBe(1);
   });
 
   test('Sin of Quantity in radians', () => {
     const expr = engine
-      .box(['Sin', ['Quantity', Math.PI / 2, 'rad']])
+      .expr(['Sin', ['Quantity', Math.PI / 2, 'rad']])
       .N();
     expect(expr.re).toBeCloseTo(1);
   });
 
   test('Convert degrees to radians', () => {
     const expr = engine
-      .box(['UnitConvert', ['Quantity', 180, 'deg'], 'rad'])
+      .expr(['UnitConvert', ['Quantity', 180, 'deg'], 'rad'])
       .evaluate();
     expect(expr.op1.re).toBeCloseTo(Math.PI);
   });
 
   test('Convert grad to deg', () => {
     const expr = engine
-      .box(['UnitConvert', ['Quantity', 100, 'grad'], 'deg'])
+      .expr(['UnitConvert', ['Quantity', 100, 'grad'], 'deg'])
       .evaluate();
     expect(expr.op1.re).toBeCloseTo(90);
   });
@@ -512,23 +512,23 @@ describe('ANGULAR UNITS', () => {
 
 describe('PHYSICS CONSTANTS', () => {
   test('Speed of light is a Quantity', () => {
-    const expr = engine.box('SpeedOfLight').evaluate();
+    const expr = engine.expr('SpeedOfLight').evaluate();
     expect(expr.operator).toBe('Quantity');
     expect(expr.op1.re).toBe(299792458);
   });
 
   test('Planck constant is a Quantity', () => {
-    const expr = engine.box('PlanckConstant').evaluate();
+    const expr = engine.expr('PlanckConstant').evaluate();
     expect(expr.operator).toBe('Quantity');
   });
 
   test('Mu0 is a Quantity (updated)', () => {
-    const expr = engine.box('Mu0').evaluate();
+    const expr = engine.expr('Mu0').evaluate();
     expect(expr.operator).toBe('Quantity');
   });
 
   test('Standard gravity', () => {
-    const expr = engine.box('StandardGravity').evaluate();
+    const expr = engine.expr('StandardGravity').evaluate();
     expect(expr.operator).toBe('Quantity');
     expect(expr.op1.re).toBeCloseTo(9.80665);
   });
@@ -563,7 +563,7 @@ describe('DSL PARENTHESES', () => {
   });
 
   test('Parenthesized Quantity DSL', () => {
-    const expr = engine.box(['Quantity', 1, 'kg/(m*s^2)']);
+    const expr = engine.expr(['Quantity', 1, 'kg/(m*s^2)']);
     expect(expr.isValid).toBe(true);
     expect(expr.op2.operator).toBe('Divide');
   });
@@ -572,7 +572,7 @@ describe('DSL PARENTHESES', () => {
 describe('TEMPERATURE CONVERSION', () => {
   test('degC to K', () => {
     const expr = engine
-      .box(['UnitConvert', ['Quantity', 100, 'degC'], 'K'])
+      .expr(['UnitConvert', ['Quantity', 100, 'degC'], 'K'])
       .evaluate();
     expect(expr.operator).toBe('Quantity');
     expect(expr.op1.re).toBeCloseTo(373.15);
@@ -581,7 +581,7 @@ describe('TEMPERATURE CONVERSION', () => {
 
   test('degF to K', () => {
     const expr = engine
-      .box(['UnitConvert', ['Quantity', 212, 'degF'], 'K'])
+      .expr(['UnitConvert', ['Quantity', 212, 'degF'], 'K'])
       .evaluate();
     expect(expr.operator).toBe('Quantity');
     expect(expr.op1.re).toBeCloseTo(373.15);
@@ -589,7 +589,7 @@ describe('TEMPERATURE CONVERSION', () => {
 
   test('degC to degF', () => {
     const expr = engine
-      .box(['UnitConvert', ['Quantity', 100, 'degC'], 'degF'])
+      .expr(['UnitConvert', ['Quantity', 100, 'degC'], 'degF'])
       .evaluate();
     expect(expr.operator).toBe('Quantity');
     expect(expr.op1.re).toBeCloseTo(212);
@@ -597,7 +597,7 @@ describe('TEMPERATURE CONVERSION', () => {
 
   test('degF to degC', () => {
     const expr = engine
-      .box(['UnitConvert', ['Quantity', 32, 'degF'], 'degC'])
+      .expr(['UnitConvert', ['Quantity', 32, 'degF'], 'degC'])
       .evaluate();
     expect(expr.operator).toBe('Quantity');
     expect(expr.op1.re).toBeCloseTo(0);
@@ -605,7 +605,7 @@ describe('TEMPERATURE CONVERSION', () => {
 
   test('0 K to degC', () => {
     const expr = engine
-      .box(['UnitConvert', ['Quantity', 0, 'K'], 'degC'])
+      .expr(['UnitConvert', ['Quantity', 0, 'K'], 'degC'])
       .evaluate();
     expect(expr.operator).toBe('Quantity');
     expect(expr.op1.re).toBeCloseTo(-273.15);
@@ -615,14 +615,14 @@ describe('TEMPERATURE CONVERSION', () => {
 describe('INCOMPATIBLE UNIT CONVERT', () => {
   test('Converting m to s returns error', () => {
     const expr = engine
-      .box(['UnitConvert', ['Quantity', 5, 'm'], 's'])
+      .expr(['UnitConvert', ['Quantity', 5, 'm'], 's'])
       .evaluate();
     expect(expr.operator).toBe('Error');
   });
 
   test('Converting kg to A returns error', () => {
     const expr = engine
-      .box(['UnitConvert', ['Quantity', 1, 'kg'], 'A'])
+      .expr(['UnitConvert', ['Quantity', 1, 'kg'], 'A'])
       .evaluate();
     expect(expr.operator).toBe('Error');
   });
@@ -630,7 +630,7 @@ describe('INCOMPATIBLE UNIT CONVERT', () => {
 
 describe('COMPOUND UNIT QUERIES', () => {
   test('IsCompatibleUnit with compound units: m/s vs km/h', () => {
-    const expr = engine.box([
+    const expr = engine.expr([
       'IsCompatibleUnit',
       ['Divide', 'm', 's'],
       ['Divide', 'km', 'h'],
@@ -639,7 +639,7 @@ describe('COMPOUND UNIT QUERIES', () => {
   });
 
   test('IsCompatibleUnit compound vs simple: J vs kg*m^2/s^2', () => {
-    const expr = engine.box([
+    const expr = engine.expr([
       'IsCompatibleUnit',
       'J',
       ['Divide', ['Multiply', 'kg', ['Power', 'm', 2]], ['Power', 's', 2]],
@@ -648,7 +648,7 @@ describe('COMPOUND UNIT QUERIES', () => {
   });
 
   test('IsCompatibleUnit incompatible compounds: m/s vs kg*m', () => {
-    const expr = engine.box([
+    const expr = engine.expr([
       'IsCompatibleUnit',
       ['Divide', 'm', 's'],
       ['Multiply', 'kg', 'm'],
@@ -657,7 +657,7 @@ describe('COMPOUND UNIT QUERIES', () => {
   });
 
   test('UnitDimension of compound unit m/s^2', () => {
-    const expr = engine.box([
+    const expr = engine.expr([
       'UnitDimension',
       ['Divide', 'm', ['Power', 's', 2]],
     ]).evaluate();
@@ -669,41 +669,41 @@ describe('COMPOUND UNIT QUERIES', () => {
 
 describe('ADDITIONAL PHYSICS CONSTANTS', () => {
   test('Elementary charge', () => {
-    const expr = engine.box('ElementaryCharge').evaluate();
+    const expr = engine.expr('ElementaryCharge').evaluate();
     expect(expr.operator).toBe('Quantity');
     expect(expr.op1.re).toBeCloseTo(1.602176634e-19);
   });
 
   test('Boltzmann constant', () => {
-    const expr = engine.box('BoltzmannConstant').evaluate();
+    const expr = engine.expr('BoltzmannConstant').evaluate();
     expect(expr.operator).toBe('Quantity');
     expect(expr.op1.re).toBeCloseTo(1.380649e-23);
   });
 
   test('Avogadro constant', () => {
-    const expr = engine.box('AvogadroConstant').evaluate();
+    const expr = engine.expr('AvogadroConstant').evaluate();
     expect(expr.operator).toBe('Quantity');
     expect(expr.op1.re).toBeCloseTo(6.02214076e23);
   });
 
   test('Vacuum permittivity', () => {
-    const expr = engine.box('VacuumPermittivity').evaluate();
+    const expr = engine.expr('VacuumPermittivity').evaluate();
     expect(expr.operator).toBe('Quantity');
   });
 
   test('Gravitational constant', () => {
-    const expr = engine.box('GravitationalConstant').evaluate();
+    const expr = engine.expr('GravitationalConstant').evaluate();
     expect(expr.operator).toBe('Quantity');
     expect(expr.op1.re).toBeCloseTo(6.67430e-11);
   });
 
   test('Stefan-Boltzmann constant', () => {
-    const expr = engine.box('StefanBoltzmannConstant').evaluate();
+    const expr = engine.expr('StefanBoltzmannConstant').evaluate();
     expect(expr.operator).toBe('Quantity');
   });
 
   test('Gas constant', () => {
-    const expr = engine.box('GasConstant').evaluate();
+    const expr = engine.expr('GasConstant').evaluate();
     expect(expr.operator).toBe('Quantity');
     expect(expr.op1.re).toBeCloseTo(8.314462618);
   });
@@ -734,13 +734,13 @@ describe('INTEGRATION', () => {
   test('Incompatible add remains unevaluated', () => {
     // Adding m + s cannot be combined; the engine returns an unevaluated Add
     const expr = engine
-      .box(['Add', ['Quantity', 5, 'm'], ['Quantity', 3, 's']])
+      .expr(['Add', ['Quantity', 5, 'm'], ['Quantity', 3, 's']])
       .evaluate();
     expect(expr.operator).toBe('Add');
   });
 
   test('Logarithmic unit parse', () => {
-    const expr = engine.box(['Quantity', 30, 'dB']);
+    const expr = engine.expr(['Quantity', 30, 'dB']);
     expect(expr.isValid).toBe(true);
   });
 });
@@ -748,7 +748,7 @@ describe('INTEGRATION', () => {
 describe('NEGATE QUANTITIES', () => {
   test('Negate a simple quantity', () => {
     const expr = engine
-      .box(['Negate', ['Quantity', 5, 'm']])
+      .expr(['Negate', ['Quantity', 5, 'm']])
       .evaluate();
     expect(expr.operator).toBe('Quantity');
     expect(expr.op1.re).toBe(-5);
@@ -757,7 +757,7 @@ describe('NEGATE QUANTITIES', () => {
 
   test('Negate a quantity with compound unit', () => {
     const expr = engine
-      .box(['Negate', ['Quantity', 10, ['Divide', 'm', 's']]])
+      .expr(['Negate', ['Quantity', 10, ['Divide', 'm', 's']]])
       .evaluate();
     expect(expr.operator).toBe('Quantity');
     expect(expr.op1.re).toBe(-10);
@@ -766,7 +766,7 @@ describe('NEGATE QUANTITIES', () => {
   test('Negate via Subtract produces correct result', () => {
     // Subtract canonicalizes to Add + Negate, testing the indirect path
     const expr = engine
-      .box(['Subtract', ['Quantity', 0, 'kg'], ['Quantity', 3, 'kg']])
+      .expr(['Subtract', ['Quantity', 0, 'kg'], ['Quantity', 3, 'kg']])
       .evaluate();
     expect(expr.operator).toBe('Quantity');
     expect(expr.op1.re).toBe(-3);
@@ -777,7 +777,7 @@ describe('NEGATE QUANTITIES', () => {
 describe('SUBTRACT QUANTITIES', () => {
   test('Subtract same units', () => {
     const expr = engine
-      .box(['Subtract', ['Quantity', 5, 'm'], ['Quantity', 2, 'm']])
+      .expr(['Subtract', ['Quantity', 5, 'm'], ['Quantity', 2, 'm']])
       .evaluate();
     expect(expr.operator).toBe('Quantity');
     expect(expr.op1.re).toBe(3);
@@ -786,7 +786,7 @@ describe('SUBTRACT QUANTITIES', () => {
 
   test('Subtract compatible units (different scales)', () => {
     const expr = engine
-      .box(['Subtract', ['Quantity', 1, 'm'], ['Quantity', 20, 'cm']])
+      .expr(['Subtract', ['Quantity', 1, 'm'], ['Quantity', 20, 'cm']])
       .evaluate();
     expect(expr.operator).toBe('Quantity');
     expect(expr.op1.re).toBeCloseTo(0.8);
@@ -795,7 +795,7 @@ describe('SUBTRACT QUANTITIES', () => {
 
   test('Subtract to zero', () => {
     const expr = engine
-      .box(['Subtract', ['Quantity', 5, 'kg'], ['Quantity', 5, 'kg']])
+      .expr(['Subtract', ['Quantity', 5, 'kg'], ['Quantity', 5, 'kg']])
       .evaluate();
     expect(expr.operator).toBe('Quantity');
     expect(expr.op1.re).toBe(0);
@@ -805,7 +805,7 @@ describe('SUBTRACT QUANTITIES', () => {
 describe('FRACTIONAL POWERS ON QUANTITIES', () => {
   test('Sqrt of m^2 quantity', () => {
     const expr = engine
-      .box(['Sqrt', ['Quantity', 9, ['Power', 'm', 2]]])
+      .expr(['Sqrt', ['Quantity', 9, ['Power', 'm', 2]]])
       .evaluate();
     expect(expr.operator).toBe('Quantity');
     expect(expr.op1.re).toBe(3);
@@ -814,7 +814,7 @@ describe('FRACTIONAL POWERS ON QUANTITIES', () => {
 
   test('Cube root of m^3 quantity', () => {
     const expr = engine
-      .box(['Power', ['Quantity', 8, ['Power', 'm', 3]], ['Rational', 1, 3]])
+      .expr(['Power', ['Quantity', 8, ['Power', 'm', 3]], ['Rational', 1, 3]])
       .evaluate();
     expect(expr.operator).toBe('Quantity');
     expect(expr.op1.re).toBe(2);
@@ -823,7 +823,7 @@ describe('FRACTIONAL POWERS ON QUANTITIES', () => {
 
   test('Sqrt of non-power unit gives fractional exponent', () => {
     const expr = engine
-      .box(['Sqrt', ['Quantity', 4, 'm']])
+      .expr(['Sqrt', ['Quantity', 4, 'm']])
       .evaluate();
     expect(expr.operator).toBe('Quantity');
     expect(expr.op1.re).toBe(2);
@@ -833,7 +833,7 @@ describe('FRACTIONAL POWERS ON QUANTITIES', () => {
 
   test('Power(quantity, 2) squares the unit', () => {
     const expr = engine
-      .box(['Power', ['Quantity', 3, 'm'], 2])
+      .expr(['Power', ['Quantity', 3, 'm'], 2])
       .evaluate();
     expect(expr.operator).toBe('Quantity');
     expect(expr.op1.re).toBe(9);
@@ -844,7 +844,7 @@ describe('FRACTIONAL POWERS ON QUANTITIES', () => {
 describe('MULTIPLY QUANTITY ORDERINGS', () => {
   test('scalar * quantity', () => {
     const expr = engine
-      .box(['Multiply', 2, ['Quantity', 5, 'm']])
+      .expr(['Multiply', 2, ['Quantity', 5, 'm']])
       .evaluate();
     expect(expr.operator).toBe('Quantity');
     expect(expr.op1.re).toBe(10);
@@ -853,7 +853,7 @@ describe('MULTIPLY QUANTITY ORDERINGS', () => {
 
   test('quantity * scalar', () => {
     const expr = engine
-      .box(['Multiply', ['Quantity', 5, 'm'], 2])
+      .expr(['Multiply', ['Quantity', 5, 'm'], 2])
       .evaluate();
     expect(expr.operator).toBe('Quantity');
     expect(expr.op1.re).toBe(10);
@@ -862,7 +862,7 @@ describe('MULTIPLY QUANTITY ORDERINGS', () => {
 
   test('multiple scalars * quantity', () => {
     const expr = engine
-      .box(['Multiply', 2, 3, ['Quantity', 5, 'm']])
+      .expr(['Multiply', 2, 3, ['Quantity', 5, 'm']])
       .evaluate();
     expect(expr.operator).toBe('Quantity');
     expect(expr.op1.re).toBe(30);
@@ -871,7 +871,7 @@ describe('MULTIPLY QUANTITY ORDERINGS', () => {
 
   test('quantity * quantity produces combined unit', () => {
     const expr = engine
-      .box(['Multiply', ['Quantity', 2, 'm'], ['Quantity', 3, 's']])
+      .expr(['Multiply', ['Quantity', 2, 'm'], ['Quantity', 3, 's']])
       .evaluate();
     expect(expr.operator).toBe('Quantity');
     expect(expr.op1.re).toBe(6);
@@ -881,27 +881,27 @@ describe('MULTIPLY QUANTITY ORDERINGS', () => {
 
 describe('N SYMBOL AS NEWTON', () => {
   test('Quantity(5, N) is valid', () => {
-    const expr = engine.box(['Quantity', 5, 'N']);
+    const expr = engine.expr(['Quantity', 5, 'N']);
     expect(expr.isValid).toBe(true);
     expect(expr.operator).toBe('Quantity');
     expect(expr.op1.re).toBe(5);
   });
 
   test('UnitDimension(N) returns force dimension', () => {
-    const expr = engine.box(['UnitDimension', 'N']).evaluate();
+    const expr = engine.expr(['UnitDimension', 'N']).evaluate();
     expect(expr.operator).toBe('List');
     // Force: [1, 1, -2, 0, 0, 0, 0]
     expect(expr.op1.re).toBe(1); // length
   });
 
   test('IsCompatibleUnit(N, N) is True', () => {
-    const expr = engine.box(['IsCompatibleUnit', 'N', 'N']).evaluate();
+    const expr = engine.expr(['IsCompatibleUnit', 'N', 'N']).evaluate();
     expect(expr.symbol).toBe('True');
   });
 
   test('UnitConvert(1000 N, kN) works', () => {
     const expr = engine
-      .box(['UnitConvert', ['Quantity', 1000, 'N'], 'kN'])
+      .expr(['UnitConvert', ['Quantity', 1000, 'N'], 'kN'])
       .evaluate();
     expect(expr.operator).toBe('Quantity');
     expect(expr.op1.re).toBe(1);
@@ -916,19 +916,19 @@ describe('N SYMBOL AS NEWTON', () => {
   });
 
   test('LaTeX round-trip for Newton', () => {
-    const expr = engine.box(['Quantity', 5, 'N']);
+    const expr = engine.expr(['Quantity', 5, 'N']);
     expect(expr.latex).toBe('5\\,\\mathrm{N}');
   });
 });
 
 describe('LATEX ROUND-TRIP COMPOUND UNITS', () => {
   test('m/s serializes correctly', () => {
-    const expr = engine.box(['Quantity', 10, ['Divide', 'm', 's']]);
+    const expr = engine.expr(['Quantity', 10, ['Divide', 'm', 's']]);
     expect(expr.latex).toBe('10\\,\\mathrm{m/s}');
   });
 
   test('m/s^2 serializes correctly', () => {
-    const expr = engine.box([
+    const expr = engine.expr([
       'Quantity', 9.8,
       ['Divide', 'm', ['Power', 's', 2]],
     ]);
@@ -936,7 +936,7 @@ describe('LATEX ROUND-TRIP COMPOUND UNITS', () => {
   });
 
   test('kg*m*s^-2 serializes with cdot', () => {
-    const expr = engine.box([
+    const expr = engine.expr([
       'Quantity', 100,
       ['Multiply', 'kg', 'm', ['Power', 's', -2]],
     ]);
@@ -954,7 +954,7 @@ describe('LATEX ROUND-TRIP COMPOUND UNITS', () => {
 describe('UNIT CANCELLATION', () => {
   test('Same unit division gives scalar', () => {
     const expr = engine
-      .box(['Divide', ['Quantity', 10, 'm'], ['Quantity', 2, 'm']])
+      .expr(['Divide', ['Quantity', 10, 'm'], ['Quantity', 2, 'm']])
       .evaluate();
     expect(expr.re).toBe(5);
     expect(expr.operator).not.toBe('Quantity');
@@ -962,14 +962,14 @@ describe('UNIT CANCELLATION', () => {
 
   test('Compatible unit division gives scalar with scale', () => {
     const expr = engine
-      .box(['Divide', ['Quantity', 1, 'km'], ['Quantity', 500, 'm']])
+      .expr(['Divide', ['Quantity', 1, 'km'], ['Quantity', 500, 'm']])
       .evaluate();
     expect(expr.re).toBe(2);
   });
 
   test('Different dimension division gives compound unit', () => {
     const expr = engine
-      .box(['Divide', ['Quantity', 100, 'm'], ['Quantity', 10, 's']])
+      .expr(['Divide', ['Quantity', 100, 'm'], ['Quantity', 10, 's']])
       .evaluate();
     expect(expr.operator).toBe('Quantity');
     expect(expr.op1.re).toBe(10);
@@ -979,7 +979,7 @@ describe('UNIT CANCELLATION', () => {
 describe('AUTO-SIMPLIFY COMPOUND UNITS', () => {
   test('N * m simplifies to J', () => {
     const expr = engine
-      .box(['Multiply', ['Quantity', 5, 'N'], ['Quantity', 2, 'm']])
+      .expr(['Multiply', ['Quantity', 5, 'N'], ['Quantity', 2, 'm']])
       .evaluate();
     expect(expr.operator).toBe('Quantity');
     expect(expr.op1.re).toBe(10);
@@ -988,7 +988,7 @@ describe('AUTO-SIMPLIFY COMPOUND UNITS', () => {
 
   test('J / m simplifies to N', () => {
     const expr = engine
-      .box(['Divide', ['Quantity', 100, 'J'], ['Quantity', 10, 'm']])
+      .expr(['Divide', ['Quantity', 100, 'J'], ['Quantity', 10, 'm']])
       .evaluate();
     expect(expr.operator).toBe('Quantity');
     expect(expr.op1.re).toBe(10);
@@ -997,7 +997,7 @@ describe('AUTO-SIMPLIFY COMPOUND UNITS', () => {
 
   test('J / s simplifies to W', () => {
     const expr = engine
-      .box(['Divide', ['Quantity', 60, 'J'], ['Quantity', 2, 's']])
+      .expr(['Divide', ['Quantity', 60, 'J'], ['Quantity', 2, 's']])
       .evaluate();
     expect(expr.operator).toBe('Quantity');
     expect(expr.op1.re).toBe(30);
@@ -1008,49 +1008,49 @@ describe('AUTO-SIMPLIFY COMPOUND UNITS', () => {
 describe('QUANTITY COMPARISON', () => {
   test('Less: 500m < 1km', () => {
     const expr = engine
-      .box(['Less', ['Quantity', 500, 'm'], ['Quantity', 1, 'km']])
+      .expr(['Less', ['Quantity', 500, 'm'], ['Quantity', 1, 'km']])
       .evaluate();
     expect(expr.symbol).toBe('True');
   });
 
   test('Less: 1km < 500m is False', () => {
     const expr = engine
-      .box(['Less', ['Quantity', 1, 'km'], ['Quantity', 500, 'm']])
+      .expr(['Less', ['Quantity', 1, 'km'], ['Quantity', 500, 'm']])
       .evaluate();
     expect(expr.symbol).toBe('False');
   });
 
   test('Greater: 1km > 500m', () => {
     const expr = engine
-      .box(['Greater', ['Quantity', 1, 'km'], ['Quantity', 500, 'm']])
+      .expr(['Greater', ['Quantity', 1, 'km'], ['Quantity', 500, 'm']])
       .evaluate();
     expect(expr.symbol).toBe('True');
   });
 
   test('Equal: 100cm == 1m', () => {
     const expr = engine
-      .box(['Equal', ['Quantity', 100, 'cm'], ['Quantity', 1, 'm']])
+      .expr(['Equal', ['Quantity', 100, 'cm'], ['Quantity', 1, 'm']])
       .evaluate();
     expect(expr.symbol).toBe('True');
   });
 
   test('Equal: 1km == 1000m', () => {
     const expr = engine
-      .box(['Equal', ['Quantity', 1, 'km'], ['Quantity', 1000, 'm']])
+      .expr(['Equal', ['Quantity', 1, 'km'], ['Quantity', 1000, 'm']])
       .evaluate();
     expect(expr.symbol).toBe('True');
   });
 
   test('LessEqual: 1km <= 1000m', () => {
     const expr = engine
-      .box(['LessEqual', ['Quantity', 1, 'km'], ['Quantity', 1000, 'm']])
+      .expr(['LessEqual', ['Quantity', 1, 'km'], ['Quantity', 1000, 'm']])
       .evaluate();
     expect(expr.symbol).toBe('True');
   });
 
   test('Incompatible units stay unevaluated', () => {
     const expr = engine
-      .box(['Less', ['Quantity', 5, 'm'], ['Quantity', 3, 's']])
+      .expr(['Less', ['Quantity', 5, 'm'], ['Quantity', 3, 's']])
       .evaluate();
     expect(expr.operator).toBe('Less');
   });
@@ -1076,41 +1076,41 @@ describe('DIMENSIONS EQUAL / IS DIMENSIONLESS', () => {
 
 describe('BOXED TO UNIT EXPRESSION', () => {
   test('Simple symbol unit', () => {
-    const expr = engine.box('m');
+    const expr = engine.expr('m');
     expect(boxedToUnitExpression(expr)).toBe('m');
   });
 
   test('Divide expression', () => {
-    const expr = engine.box(['Divide', 'm', 's']);
+    const expr = engine.expr(['Divide', 'm', 's']);
     const ue = boxedToUnitExpression(expr);
     expect(ue).toEqual(['Divide', 'm', 's']);
   });
 
   test('Multiply expression', () => {
-    const expr = engine.box(['Multiply', 'kg', 'm']);
+    const expr = engine.expr(['Multiply', 'kg', 'm']);
     const ue = boxedToUnitExpression(expr);
     expect(ue).toEqual(['Multiply', 'kg', 'm']);
   });
 
   test('Power expression', () => {
-    const expr = engine.box(['Power', 's', 2]);
+    const expr = engine.expr(['Power', 's', 2]);
     const ue = boxedToUnitExpression(expr);
     expect(ue).toEqual(['Power', 's', 2]);
   });
 
   test('Nested compound expression', () => {
-    const expr = engine.box(['Divide', ['Multiply', 'kg', 'm'], ['Power', 's', 2]]);
+    const expr = engine.expr(['Divide', ['Multiply', 'kg', 'm'], ['Power', 's', 2]]);
     const ue = boxedToUnitExpression(expr);
     expect(ue).toEqual(['Divide', ['Multiply', 'kg', 'm'], ['Power', 's', 2]]);
   });
 
   test('Non-unit expression returns null', () => {
-    const expr = engine.box(['Add', 1, 2]);
+    const expr = engine.expr(['Add', 1, 2]);
     expect(boxedToUnitExpression(expr)).toBeNull();
   });
 
   test('Number expression returns null', () => {
-    const expr = engine.box(42);
+    const expr = engine.expr(42);
     expect(boxedToUnitExpression(expr)).toBeNull();
   });
 });
@@ -1184,7 +1184,7 @@ describe('TEMPERATURE ARITHMETIC EDGE CASES', () => {
     // for both, so no conversion needed — just sums the magnitudes.
     // This is a "temperature difference" interpretation.
     const expr = engine
-      .box(['Add', ['Quantity', 20, 'degC'], ['Quantity', 10, 'degC']])
+      .expr(['Add', ['Quantity', 20, 'degC'], ['Quantity', 10, 'degC']])
       .evaluate();
     expect(expr.operator).toBe('Quantity');
     expect(expr.op1.re).toBe(30);

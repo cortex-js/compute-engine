@@ -7,7 +7,7 @@ describe('COMPILE Which', () => {
   describe('JavaScript target', () => {
     it('should compile a 2-branch Which with default (True)', () => {
       // Which: if x > 0 then 1, else -1
-      const expr = ce.box([
+      const expr = ce.expr([
         'Which',
         ['Greater', 'x', 0],
         1,
@@ -22,7 +22,7 @@ describe('COMPILE Which', () => {
 
     it('should compile a 3-branch Which with default', () => {
       // Which: if x < 0 then -1, if x == 0 then 0, else 1
-      const expr = ce.box([
+      const expr = ce.expr([
         'Which',
         ['Less', 'x', 0],
         -1,
@@ -41,7 +41,7 @@ describe('COMPILE Which', () => {
     it('should return NaN when no branch matches and no default', () => {
       // Which: if x > 0 then 1, if x < 0 then -1
       // (no default, so x=0 should give NaN)
-      const expr = ce.box([
+      const expr = ce.expr([
         'Which',
         ['Greater', 'x', 0],
         1,
@@ -57,7 +57,7 @@ describe('COMPILE Which', () => {
 
     it('should compile Which nested in an expression', () => {
       // abs(x) + 1 = Which(x > 0, x, True, -x) + 1
-      const expr = ce.box([
+      const expr = ce.expr([
         'Add',
         ['Which', ['Greater', 'x', 0], 'x', 'True', ['Negate', 'x']],
         1,
@@ -82,7 +82,7 @@ describe('COMPILE Which', () => {
     });
 
     it('should generate chained ternary code', () => {
-      const expr = ce.box([
+      const expr = ce.expr([
         'Which',
         ['Greater', 'x', 0],
         1,
@@ -97,7 +97,7 @@ describe('COMPILE Which', () => {
 
   describe('Interval JavaScript target', () => {
     it('should compile Which to interval-js with piecewise', () => {
-      const expr = ce.box([
+      const expr = ce.expr([
         'Which',
         ['Greater', 'x', 0],
         1,
@@ -122,7 +122,7 @@ describe('COMPILE Which', () => {
     });
 
     it('should compile multi-branch Which to nested piecewise', () => {
-      const expr = ce.box([
+      const expr = ce.expr([
         'Which',
         ['Less', 'x', 0],
         -1,
@@ -141,7 +141,7 @@ describe('COMPILE Which', () => {
 
     it('should compile Which nested inside Add', () => {
       // Which(x > 0, x, True, -x) + 1
-      const expr = ce.box([
+      const expr = ce.expr([
         'Add',
         ['Which', ['Greater', 'x', 0], 'x', 'True', ['Negate', 'x']],
         1,

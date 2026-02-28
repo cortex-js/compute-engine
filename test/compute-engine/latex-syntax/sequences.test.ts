@@ -5,7 +5,7 @@ function check(arg: string | Expression): string {
   const boxed =
     typeof arg === 'string'
       ? engine.parse(arg, { form: 'raw' })
-      : engine.box(arg, { form: 'raw' });
+      : engine.expr(arg, { form: 'raw' });
   const canonical = boxed.canonical;
   // const evaluated = canonical.evaluate();
 

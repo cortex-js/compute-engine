@@ -29,12 +29,12 @@ describe('COMPILE', () => {
 
   describe('Blocks', () => {
     it('should compile a simple block', () => {
-      const expr = ce.box(['Block', ['Multiply', 10, 2]]);
+      const expr = ce.expr(['Block', ['Multiply', 10, 2]]);
       expect(compile(expr)?.code ?? '').toMatchInlineSnapshot(`20`);
     });
 
     it('should compile a block with two statements', () => {
-      const expr = ce.box(['Block', ['Add', 13, 15], ['Multiply', 10, 2]]);
+      const expr = ce.expr(['Block', ['Add', 13, 15], ['Multiply', 10, 2]]);
       expect(compile(expr)?.code ?? '').toMatchInlineSnapshot(`
         (() => {
         28;
@@ -44,7 +44,7 @@ describe('COMPILE', () => {
     });
 
     it('should compile a block with a declaration', () => {
-      const expr = ce.box([
+      const expr = ce.expr([
         'Block',
         ['Declare', 'x', 'Numbers'],
         ['Assign', 'x', 4.1],
@@ -60,7 +60,7 @@ describe('COMPILE', () => {
     });
 
     it('should compile a block with a return statement', () => {
-      const expr = ce.box([
+      const expr = ce.expr([
         'Block',
         ['Declare', 'x', 'Numbers'],
         ['Assign', 'x', 4.1],
@@ -78,7 +78,7 @@ describe('COMPILE', () => {
     });
 
     it('should compile a block with Nothing operands (defense-in-depth)', () => {
-      const expr = ce.box([
+      const expr = ce.expr([
         'Block',
         ['Declare', 'a', 'Numbers'],
         ['Assign', 'a', ['Square', 'x']],
@@ -105,11 +105,11 @@ describe('COMPILE', () => {
   describe('Imported Functions', () => {
     ce.declare('Foo', {
       signature: '(number) -> number',
-      evaluate: ([x]) => ce.box(['Add', x, 1]),
+      evaluate: ([x]) => ce.expr(['Add', x, 1]),
     });
 
     it('should compile a function imported inline', () => {
-      const result = compile(ce.box(['Foo', 3]), {
+      const result = compile(ce.expr(['Foo', 3]), {
         functions: { Foo: (x) => x + 1 },
       })!;
       expect(result.run!()).toBe(4);
@@ -119,7 +119,7 @@ describe('COMPILE', () => {
       function foo(x) {
         return x + 1;
       }
-      const result = compile(ce.box(['Foo', 3]), {
+      const result = compile(ce.expr(['Foo', 3]), {
         functions: { Foo: foo },
       })!;
       expect(result.run!()).toBe(4);
@@ -129,7 +129,7 @@ describe('COMPILE', () => {
       function foo(x) {
         return x + 1;
       }
-      const result = compile(ce.box(['Foo', 3]), {
+      const result = compile(ce.expr(['Foo', 3]), {
         functions: { Foo: 'foo' },
         imports: [foo],
       })!;
@@ -139,14 +139,14 @@ describe('COMPILE', () => {
 
   describe('Conditionals / Ifs', () => {
     it('should compile an if statement', () => {
-      const expr = ce.box(['If', ['Greater', 'x', 0], 'x', ['Negate', 'x']]);
+      const expr = ce.expr(['If', ['Greater', 'x', 0], 'x', ['Negate', 'x']]);
       expect(compile(expr)?.code ?? '').toMatchInlineSnapshot(
         `((0 < _.x) ? (_.x) : (-_.x))`
       );
     });
 
     it('should compile an if statement with blocks', () => {
-      const expr = ce.box([
+      const expr = ce.expr([
         'If',
         ['Greater', 'x', 0],
         ['Block', 'x'],
@@ -248,7 +248,7 @@ describe('COMPILE', () => {
     describe('Vector/matrix operations use case', () => {
       it('should compile vector addition to function call', () => {
         // Use case from Issue #240
-        const expr = ce.box(['Add', ['List', 1, 1, 1], ['List', 1, 1, 1]]);
+        const expr = ce.expr(['Add', ['List', 1, 1, 1], ['List', 1, 1, 1]]);
         const compiled = compile(expr, {
           operators: { Add: ['add', 11] },
         });
@@ -265,7 +265,7 @@ describe('COMPILE', () => {
           return a.map((v, i) => v * b[i]);
         }
 
-        const expr = ce.box([
+        const expr = ce.expr([
           'Add',
           ['List', 1, 2, 3],
           ['Multiply', ['List', 2, 3, 4], ['List', 1, 1, 1]],
@@ -360,18 +360,18 @@ describe('COMPILE', () => {
       });
 
       it('should compile a tuple from box', () => {
-        const expr = ce.box(['Tuple', 1, 2, 3]);
+        const expr = ce.expr(['Tuple', 1, 2, 3]);
         expect(compile(expr)?.code).toMatchInlineSnapshot(`[1, 2, 3]`);
       });
 
       it('should compile a tuple and execute it', () => {
-        const expr = ce.box(['Tuple', ['Sin', 'x'], ['Cos', 'x']]);
+        const expr = ce.expr(['Tuple', ['Sin', 'x'], ['Cos', 'x']]);
         const result = compile(expr)?.run?.({ x: 0 });
         expect(result).toEqual([0, 1]);
       });
 
       it('should compile a tuple to GLSL', () => {
-        const expr = ce.box(['Tuple', ['Sin', 't'], ['Cos', 't']]);
+        const expr = ce.expr(['Tuple', ['Sin', 't'], ['Cos', 't']]);
         const compiled = compile(expr, { to: 'glsl' });
         expect(compiled?.code).toMatchInlineSnapshot(
           `vec2(sin(t), cos(t))`
@@ -379,7 +379,7 @@ describe('COMPILE', () => {
       });
 
       it('should compile a tuple to WGSL', () => {
-        const expr = ce.box(['Tuple', ['Sin', 't'], ['Cos', 't']]);
+        const expr = ce.expr(['Tuple', ['Sin', 't'], ['Cos', 't']]);
         const compiled = compile(expr, { to: 'wgsl' });
         expect(compiled?.code).toMatchInlineSnapshot(
           `vec2f(sin(t), cos(t))`
@@ -399,7 +399,7 @@ describe('COMPILE', () => {
       });
 
       it('should compile a 2x2 matrix from box', () => {
-        const expr = ce.box([
+        const expr = ce.expr([
           'Matrix',
           ['List', ['List', 1, 2], ['List', 3, 4]],
         ]);
@@ -407,7 +407,7 @@ describe('COMPILE', () => {
       });
 
       it('should compile a matrix and execute it', () => {
-        const expr = ce.box([
+        const expr = ce.expr([
           'Matrix',
           ['List', ['List', 1, 0], ['List', 0, 1]],
         ]);
@@ -433,7 +433,7 @@ describe('COMPILE', () => {
       });
 
       it('should compile a 2x2 matrix to GLSL with native mat2', () => {
-        const expr = ce.box([
+        const expr = ce.expr([
           'Matrix',
           ['List', ['List', 1, 2], ['List', 3, 4]],
         ]);
@@ -445,7 +445,7 @@ describe('COMPILE', () => {
       });
 
       it('should compile a 2x2 matrix to WGSL with native mat2x2f', () => {
-        const expr = ce.box([
+        const expr = ce.expr([
           'Matrix',
           ['List', ['List', 1, 2], ['List', 3, 4]],
         ]);
@@ -457,7 +457,7 @@ describe('COMPILE', () => {
       });
 
       it('should compile a 3x3 matrix to GLSL', () => {
-        const expr = ce.box([
+        const expr = ce.expr([
           'Matrix',
           [
             'List',

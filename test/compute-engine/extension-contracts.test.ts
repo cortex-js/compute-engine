@@ -253,7 +253,7 @@ describe('Extension Contracts', () => {
       ]);
       ce.declare('x', { type: 'integer' });
       ce.assign('x', 1);
-      expect(ce.box('x').replace(ruleSet)).toBeNull();
+      expect(ce.expr('x').replace(ruleSet)).toBeNull();
     });
   });
 });

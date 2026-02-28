@@ -28,7 +28,7 @@ describe('SOLVING A QUADRATIC EQUATION', () => {
   });
 
   it('should solve bx', () => {
-    const eqn = ce.box(['Multiply', 5, 'x']);
+    const eqn = ce.expr(['Multiply', 5, 'x']);
     const result = eqn.solve('x')?.map((x) => x.json);
     expect(result).toMatchInlineSnapshot(`
       [
@@ -38,7 +38,7 @@ describe('SOLVING A QUADRATIC EQUATION', () => {
   });
 
   it('should solve bx + c', () => {
-    const eqn = ce.box(['Add', ['Multiply', 5, 'x'], -10]);
+    const eqn = ce.expr(['Add', ['Multiply', 5, 'x'], -10]);
     const result = eqn.solve('x')?.map((x) => x.json);
     expect(result).toMatchInlineSnapshot(`
       [
@@ -48,7 +48,7 @@ describe('SOLVING A QUADRATIC EQUATION', () => {
   });
 
   it('should solve ax^2', () => {
-    const eqn = ce.box(['Multiply', 16, ['Square', 'x']]);
+    const eqn = ce.expr(['Multiply', 16, ['Square', 'x']]);
     expect(eqn.solve('x')).toMatchInlineSnapshot(`
       [
         0,
@@ -57,7 +57,7 @@ describe('SOLVING A QUADRATIC EQUATION', () => {
   });
 
   it('should solve ax^2 + c', () => {
-    const eqn = ce.box(['Add', ['Multiply', 2, ['Square', 'x']], -16]);
+    const eqn = ce.expr(['Add', ['Multiply', 2, ['Square', 'x']], -16]);
     expect(eqn.solve('x')).toMatchInlineSnapshot(`
       [
         ["Sqrt", 8],
@@ -67,7 +67,7 @@ describe('SOLVING A QUADRATIC EQUATION', () => {
   });
 
   it('should solve ax^2 + bx + c', () => {
-    const eqn = ce.box([
+    const eqn = ce.expr([
       'Add',
       ['Multiply', 2, ['Square', 'x']],
       ['Multiply', 6, 'x'],
@@ -1085,7 +1085,7 @@ describe('SOLVING LINEAR INEQUALITY SYSTEMS', () => {
 
   // Mixed equality and inequality systems
   test('should solve mixed system: x+y=5, x-y=1, x>=0, y>=0', () => {
-    const e = engine.box([
+    const e = engine.expr([
       'And',
       ['Equal', ['Add', 'x', 'y'], 5],
       ['Equal', ['Subtract', 'x', 'y'], 1],
@@ -1099,7 +1099,7 @@ describe('SOLVING LINEAR INEQUALITY SYSTEMS', () => {
   });
 
   test('should return null for mixed system where inequality is violated', () => {
-    const e = engine.box([
+    const e = engine.expr([
       'And',
       ['Equal', ['Add', 'x', 'y'], 5],
       ['Equal', ['Subtract', 'x', 'y'], 1],
@@ -1113,7 +1113,7 @@ describe('SOLVING LINEAR INEQUALITY SYSTEMS', () => {
   test('should filter polynomial solutions by inequalities', () => {
     // x*y = 6, x+y = 5, x>0, y>0
     // Solutions: (2,3) and (3,2) — both satisfy x>0, y>0
-    const e = engine.box([
+    const e = engine.expr([
       'And',
       ['Equal', ['Multiply', 'x', 'y'], 6],
       ['Equal', ['Add', 'x', 'y'], 5],
@@ -1140,7 +1140,7 @@ describe('SOLVING LINEAR INEQUALITY SYSTEMS', () => {
 
 describe('SOLVING WITH Or', () => {
   test('Or(x=1, x=2) should return [1, 2]', () => {
-    const e = engine.box(['Or', ['Equal', 'x', 1], ['Equal', 'x', 2]]);
+    const e = engine.expr(['Or', ['Equal', 'x', 1], ['Equal', 'x', 2]]);
     const result = e.solve(['x']) as any[];
     expect(result).not.toBeNull();
     const vals = result.map((r) => r.json);
@@ -1150,7 +1150,7 @@ describe('SOLVING WITH Or', () => {
   });
 
   test('Or(x=1, x=1) should deduplicate to [1]', () => {
-    const e = engine.box(['Or', ['Equal', 'x', 1], ['Equal', 'x', 1]]);
+    const e = engine.expr(['Or', ['Equal', 'x', 1], ['Equal', 'x', 1]]);
     const result = e.solve(['x']) as any[];
     expect(result).not.toBeNull();
     expect(result.length).toBe(1);
@@ -1158,7 +1158,7 @@ describe('SOLVING WITH Or', () => {
   });
 
   test('Or(x^2=4, x=3) should return [-2, 2, 3]', () => {
-    const e = engine.box([
+    const e = engine.expr([
       'Or',
       ['Equal', ['Power', 'x', 2], 4],
       ['Equal', 'x', 3],
@@ -1229,7 +1229,7 @@ describe('DOMAIN-CONSTRAINED SOLVE', () => {
 describe('SOLVING SYSTEMS VIA And OPERATOR', () => {
   test('should solve And(x+y=70, 2x-4y=80)', () => {
     const ce = engine;
-    const e = ce.box([
+    const e = ce.expr([
       'And',
       ['Equal', ['Add', 'x', 'y'], 70],
       ['Equal', ['Add', ['Multiply', 2, 'x'], ['Multiply', -4, 'y']], 80],
@@ -1242,7 +1242,7 @@ describe('SOLVING SYSTEMS VIA And OPERATOR', () => {
 
   test('should solve And with 3 equations', () => {
     const ce = engine;
-    const e = ce.box([
+    const e = ce.expr([
       'And',
       ['Equal', ['Add', 'x', 'y', 'z'], 6],
       ['Equal', ['Add', ['Multiply', 2, 'x'], 'y', ['Negate', 'z']], 1],
@@ -1257,7 +1257,7 @@ describe('SOLVING SYSTEMS VIA And OPERATOR', () => {
 
   test('should return null for inconsistent And system', () => {
     const ce = engine;
-    const e = ce.box([
+    const e = ce.expr([
       'And',
       ['Equal', ['Add', 'x', 'y'], 1],
       ['Equal', ['Add', 'x', 'y'], 2],
@@ -1274,7 +1274,7 @@ describe('PARAMETRIC SOLUTION TYPE FILTERING', () => {
     ce.declare('x', { type: 'integer' });
     ce.declare('y', { type: 'integer' });
     // x + y = 5 with 2 unknowns → underdetermined, parametric solution
-    const e = ce.box(['List', ['Equal', ['Add', 'x', 'y'], 5]]);
+    const e = ce.expr(['List', ['Equal', ['Add', 'x', 'y'], 5]]);
     const result = e.solve(['x', 'y']);
     // Should not return null — parametric solutions should pass through
     // (isInteger returns undefined for symbolic expressions, not false)

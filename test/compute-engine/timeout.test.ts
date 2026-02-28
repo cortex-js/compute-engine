@@ -43,7 +43,7 @@ describe('TIMEOUT', () => {
   describe('Sum', () => {
     it('small sum completes within timeout', () => {
       const result = ce
-        .box(['Sum', 'k', ['Tuple', 'k', 1, 100]])
+        .expr(['Sum', 'k', ['Tuple', 'k', 1, 100]])
         .evaluate();
       expect(result.re).toBe(5050);
     });
@@ -53,7 +53,7 @@ describe('TIMEOUT', () => {
       // expensive, and there are 100K of them
       expect(() =>
         ce
-          .box([
+          .expr([
             'Sum',
             ['Power', 'k', 'k'],
             ['Tuple', 'k', 1, 100_000],
@@ -66,7 +66,7 @@ describe('TIMEOUT', () => {
   describe('Product', () => {
     it('small product completes within timeout', () => {
       const result = ce
-        .box(['Product', 'k', ['Tuple', 'k', 1, 10]])
+        .expr(['Product', 'k', ['Tuple', 'k', 1, 10]])
         .evaluate();
       // 10! = 3628800
       expect(result.re).toBe(3628800);
@@ -75,7 +75,7 @@ describe('TIMEOUT', () => {
     it('large product throws CancellationError', () => {
       expect(() =>
         ce
-          .box([
+          .expr([
             'Product',
             ['Power', 'k', 2],
             ['Tuple', 'k', 1, 100_000],
@@ -93,7 +93,7 @@ describe('TIMEOUT', () => {
       );
       // Loop applies body (a lambda) to each element, returns the last result
       const result = ce
-        .box(['Loop', ['Function', ['Multiply', 'x', 2], 'x'], list])
+        .expr(['Loop', ['Function', ['Multiply', 'x', 2], 'x'], list])
         .evaluate();
       expect(result.re).toBe(10); // last element 5 * 2 = 10
     });
@@ -106,7 +106,7 @@ describe('TIMEOUT', () => {
       // Body does expensive work per element
       expect(() =>
         ce
-          .box([
+          .expr([
             'Loop',
             ['Function', ['Power', 'x', 'x'], 'x'],
             list,

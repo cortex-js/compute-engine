@@ -18,11 +18,11 @@ function match(
 ): Substitution | null {
   // Avoid re-boxing both expr & pattern so as to preserve canonical-status
   expr =
-    expr instanceof _BoxedExpression ? (expr as Expression) : ce.box(expr);
+    expr instanceof _BoxedExpression ? (expr as Expression) : ce.expr(expr);
   pattern =
     pattern instanceof _BoxedExpression
       ? (pattern as Expression)
-      : ce.box(pattern);
+      : ce.expr(pattern);
 
   const result = expr.match(pattern, {
     useVariations: true,
@@ -37,10 +37,10 @@ function match(
 describe('Examples from Patterns and Rules guide', () => {
   const pattern: MathJsonExpression = ['Add', '_', 'x'];
 
-  // console.log("x+42", ce.box(["Add", "x", 42]).match(pattern));
+  // console.log("x+42", ce.expr(["Add", "x", 42]).match(pattern));
   // ➔ { } : the expression matches the pattern by commutativity
 
-  // console.log("5*x", ce.box(["Multiply", 5, "x"]).match(pattern));
+  // console.log("5*x", ce.expr(["Multiply", 5, "x"]).match(pattern));
   test('1+x', () =>
     expect(match(pattern, ['Add', 1, 'x'])).toMatchInlineSnapshot(`{}`));
   test('x+42', () =>
@@ -350,8 +350,8 @@ describe('PATTERNS  MATCH - Sequence wildcards', () => {
         //(?Prettified MathJSON results in ["Square", "z"] here... ?)
         expect(
           match(
-            ce.box(pattern, { form: 'raw' }),
-            ce.box(['Subtract', 'x', 'y', ['Power', 'z', 2]], {
+            ce.expr(pattern, { form: 'raw' }),
+            ce.expr(['Subtract', 'x', 'y', ['Power', 'z', 2]], {
               form: 'raw',
             })
           )
@@ -367,8 +367,8 @@ describe('PATTERNS  MATCH - Sequence wildcards', () => {
         // Too many operands RHS (right of 'y')
         expect(
           match(
-            ce.box(ce.box(pattern, { form: 'raw' }), { form: 'raw' }),
-            ce.box(['Subtract', 'x', 'y', ['Power', 'z', 2], 'w'], {
+            ce.expr(ce.expr(pattern, { form: 'raw' }), { form: 'raw' }),
+            ce.expr(['Subtract', 'x', 'y', ['Power', 'z', 2], 'w'], {
               form: 'raw',
             })
           )
@@ -376,7 +376,7 @@ describe('PATTERNS  MATCH - Sequence wildcards', () => {
 
         // Missing capture of '__a'
         expect(
-          match(ce.box(pattern, { form: 'raw' }), [
+          match(ce.expr(pattern, { form: 'raw' }), [
             'Subtract',
             'y',
             ['Power', 'z', 2],
@@ -433,8 +433,8 @@ describe('PATTERNS  MATCH - Sequence wildcards', () => {
 
         expect(
           match(
-            ce.box(pattern, { form: 'raw' }),
-            ce.box(['Subtract', 'x', 'y', ['Power', 'z', 2]], {
+            ce.expr(pattern, { form: 'raw' }),
+            ce.expr(['Subtract', 'x', 'y', ['Power', 'z', 2]], {
               form: 'raw',
             })
           )
@@ -528,8 +528,8 @@ describe('PATTERNS  MATCH - Sequence wildcards', () => {
       expect(
         match(
           //@note: non-canonical for both, because do not want Subtract to become 'Add'
-          ce.box(['Subtract', '__s', 5], { form: 'raw' }),
-          ce.box(['Subtract', 8, 7, 6, 5], { form: 'raw' })
+          ce.expr(['Subtract', '__s', 5], { form: 'raw' }),
+          ce.expr(['Subtract', 8, 7, 6, 5], { form: 'raw' })
         )
       ).toMatchInlineSnapshot(`
         {
@@ -778,8 +778,8 @@ const notSameExprs: [Expression, Expression][] = [
 
 describe('MATCH', () => {
   for (const expr of sameExprs) {
-    const lhs = ce.box(expr[0]).canonical;
-    const rhs = ce.box(expr[1]).canonical;
+    const lhs = ce.expr(expr[0]).canonical;
+    const rhs = ce.expr(expr[1]).canonical;
     test(`match(${lhs.latex}, ${rhs.latex})`, () => {
       expect(match(lhs, rhs) !== null).toBeTruthy();
     });
@@ -790,14 +790,14 @@ describe('NOT SAME', () => {
   for (const expr of notSameExprs) {
     test(`match(${latex(expr[0])}, ${latex(expr[1])})`, () =>
       expect(
-        engine.box(expr[0]).canonical.isSame(engine.box(expr[1]).canonical)
+        engine.expr(expr[0]).canonical.isSame(engine.expr(expr[1]).canonical)
       ).toBeFalsy());
   }
 });
 
 describe('WILDCARDS', () => {
   it('number should match a wildcard', () => {
-    const result = match('_x', ce.box(1));
+    const result = match('_x', ce.expr(1));
     expect(result).toMatchInlineSnapshot(`
       {
         _x: 1,
@@ -806,7 +806,7 @@ describe('WILDCARDS', () => {
   });
 
   it('symbol should match a wildcard', () => {
-    const result = match('_x', ce.box('a'));
+    const result = match('_x', ce.expr('a'));
     expect(result).toMatchInlineSnapshot(`
       {
         _x: a,
@@ -815,7 +815,7 @@ describe('WILDCARDS', () => {
   });
 
   it('function should match a wildcard', () => {
-    const result = match('_x', ce.box(['Add', 1, 'a']));
+    const result = match('_x', ce.expr(['Add', 1, 'a']));
     expect(result).toMatchInlineSnapshot(`
       {
         _x: ["Add", "a", 1],
@@ -824,7 +824,7 @@ describe('WILDCARDS', () => {
   });
 
   it('wildcard matched as an argument of a commutative function', () => {
-    const result = match(['Add', '_x', 1], ce.box(['Add', 1, 'a']));
+    const result = match(['Add', '_x', 1], ce.expr(['Add', 1, 'a']));
     expect(result).toMatchInlineSnapshot(`
       {
         _x: a,
@@ -833,12 +833,12 @@ describe('WILDCARDS', () => {
   });
 
   it('should **NOT** match a wildcard of a commutative function with more arguments', () => {
-    const result = match(['Add', '_x', 1], ce.box(['Add', 'x', 1, 'a']));
+    const result = match(['Add', '_x', 1], ce.expr(['Add', 'x', 1, 'a']));
     expect(result).toMatchInlineSnapshot(`null`);
   });
 
   it('should match a sequence wildcard of a commutative function with more argument', () => {
-    const result = match(['Add', '__x', 1], ce.box(['Add', 'x', 1, 'a']));
+    const result = match(['Add', '__x', 1], ce.expr(['Add', 'x', 1, 'a']));
     expect(result).toMatchInlineSnapshot(`
       {
         __x: ["Add", "a", "x"],
@@ -866,7 +866,7 @@ describe('WILDCARDS', () => {
 // For example, "ax+b" can match "ax" or "x+b".
 describe('NON EXACT WILDCARDS', () => {
   const match2 = (pattern, x) =>
-    match(pattern, x, { substitution: { _x: ce.box('_x') } });
+    match(pattern, x, { substitution: { _x: ce.expr('_x') } });
 
   it('should match x for a + x', () => {
     const result = match2(['Add', '_a', '_x'], '_x');
@@ -1103,7 +1103,7 @@ describe('PATTERN VALIDATION', () => {
   // Test validatePattern directly with non-canonical patterns
   // (canonical forms may reorder operands for commutative operators)
   const validate = (pattern: Expression) => {
-    const boxedPattern = ce.box(pattern, { form: 'raw' });
+    const boxedPattern = ce.expr(pattern, { form: 'raw' });
     validatePattern(boxedPattern);
   };
 
@@ -1170,8 +1170,8 @@ describe('matchPermutations option', () => {
     expr: Expression,
     options?: PatternMatchOptions
   ) => {
-    const boxedPattern = ce.box(pattern, { form: 'raw' });
-    const boxedExpr = ce.box(expr, { form: 'raw' });
+    const boxedPattern = ce.expr(pattern, { form: 'raw' });
+    const boxedExpr = ce.expr(expr, { form: 'raw' });
     return boxedExpr.match(boxedPattern, { useVariations: true, ...options });
   };
 
@@ -1476,8 +1476,8 @@ describe('Permutation Matching Optimization', () => {
 describe('Repeated Wildcards in Nested Contexts', () => {
   // Non-canonical matching helper
   const matchNonCanonical = (pattern, expr) => {
-    const boxedPattern = ce.box(pattern, { form: 'raw' });
-    const boxedExpr = ce.box(expr, { form: 'raw' });
+    const boxedPattern = ce.expr(pattern, { form: 'raw' });
+    const boxedExpr = ce.expr(expr, { form: 'raw' });
     return boxedExpr.match(boxedPattern);
   };
 
@@ -1593,7 +1593,7 @@ describe('Repeated Wildcards in Nested Contexts', () => {
   describe('Repeated wildcards with CANONICAL expressions', () => {
     test('1/(x*ln(x)) with canonical expression', () => {
       // Pattern is non-canonical (structural)
-      const pattern = ce.box(['Divide', 1, ['Multiply', '_x', ['Ln', '_x']]], {
+      const pattern = ce.expr(['Divide', 1, ['Multiply', '_x', ['Ln', '_x']]], {
         form: 'raw',
       });
       // Expression is canonical (what you get from parsing)
@@ -1607,7 +1607,7 @@ describe('Repeated Wildcards in Nested Contexts', () => {
     test('exp(x)*sin(x) canonical expression', () => {
       // e^x becomes Power(ExponentialE, x), which doesn't match Exp(_x)
       // So this pattern needs to account for the canonical form
-      const pattern = ce.box(
+      const pattern = ce.expr(
         ['Multiply', ['Power', 'ExponentialE', '_x'], ['Sin', '_x']],
         { form: 'raw' }
       );
@@ -1621,7 +1621,7 @@ describe('Repeated Wildcards in Nested Contexts', () => {
     test('Repeated wildcard fails when canonical order differs', () => {
       // Multiply may reorder operands, so [x, ln(x)] might become [ln(x), x]
       // The pattern matching should still work due to commutativity handling
-      const pattern = ce.box(['Multiply', '_x', ['Ln', '_x']], {
+      const pattern = ce.expr(['Multiply', '_x', ['Ln', '_x']], {
         form: 'raw',
       });
       const expr = ce.parse('x \\ln x');

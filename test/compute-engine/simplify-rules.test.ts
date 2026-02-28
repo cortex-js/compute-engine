@@ -26,7 +26,7 @@ describe('simplificationRules', () => {
       match: ['Floor', ['Floor', '_x']],
       replace: ['Floor', '_x'],
     });
-    const expr = ce.box(['Floor', ['Floor', 'x']]);
+    const expr = ce.expr(['Floor', ['Floor', 'x']]);
     const result = expr.simplify();
     expect(result.json).toEqual(['Floor', 'x']);
   });
@@ -42,7 +42,7 @@ describe('simplificationRules', () => {
         replace: ['Floor', '_x'],
       },
     ];
-    const expr = ce.box(['Floor', ['Floor', 'x']]);
+    const expr = ce.expr(['Floor', ['Floor', 'x']]);
     const result = expr.simplify();
     expect(result.json).toEqual(['Floor', 'x']);
   });
@@ -52,7 +52,7 @@ describe('simplificationRules', () => {
   //
   it('per-call rules override still works', () => {
     const ce = new ComputeEngine();
-    const expr = ce.box(['Floor', ['Floor', 'x']]);
+    const expr = ce.expr(['Floor', ['Floor', 'x']]);
     const result = expr.simplify({
       rules: [
         {
@@ -75,11 +75,11 @@ describe('simplificationRules', () => {
       condition: ({ _x }) => _x.symbol === 'a',
     });
     // Should NOT match — _x is 'x', not 'a'
-    const result1 = ce.box(['Floor', ['Floor', 'x']]).simplify();
+    const result1 = ce.expr(['Floor', ['Floor', 'x']]).simplify();
     expect(result1.json).toEqual(['Floor', ['Floor', 'x']]);
 
     // Should match — _x is 'a'
-    const result2 = ce.box(['Floor', ['Floor', 'a']]).simplify();
+    const result2 = ce.expr(['Floor', ['Floor', 'a']]).simplify();
     expect(result2.json).toEqual(['Floor', 'a']);
   });
 
@@ -94,7 +94,7 @@ describe('simplificationRules', () => {
       id: 'idempotent-floor',
     };
     ce.simplificationRules.push(rule);
-    const expr = ce.box(['Floor', ['Floor', 'x']]);
+    const expr = ce.expr(['Floor', ['Floor', 'x']]);
     const result = expr.simplify();
     expect(result.json).toEqual(['Floor', 'x']);
   });
@@ -113,7 +113,7 @@ describe('simplificationRules', () => {
       }
       return undefined;
     });
-    const expr = ce.box(['Floor', ['Floor', 'x']]);
+    const expr = ce.expr(['Floor', ['Floor', 'x']]);
     const result = expr.simplify();
     expect(result.json).toEqual(['Floor', 'x']);
   });
@@ -128,7 +128,7 @@ describe('simplificationRules', () => {
     // sin(pi) -> 0 is already built-in, so let's use a different one
     // Let's add a rule that Ln(Exp(x)) -> x (this may already exist, but it verifies LaTeX string rule format works)
     ce.simplificationRules.push('\\lfloor\\lfloor x \\rfloor\\rfloor -> \\lfloor x \\rfloor');
-    const expr = ce.box(['Floor', ['Floor', 'x']]);
+    const expr = ce.expr(['Floor', ['Floor', 'x']]);
     const result = expr.simplify();
     expect(result.json).toEqual(['Floor', 'x']);
   });
@@ -149,7 +149,7 @@ describe('simplificationRules', () => {
     expect(len1).toBe(len2 + 1);
 
     // Verify ce2 doesn't simplify with the custom rule
-    const expr = ce2.box(['Floor', ['Floor', 'x']]);
+    const expr = ce2.expr(['Floor', ['Floor', 'x']]);
     const result = expr.simplify();
     expect(result.json).toEqual(['Floor', ['Floor', 'x']]);
   });
@@ -169,7 +169,7 @@ describe('simplificationRules', () => {
     });
 
     // The new rule should be picked up
-    const expr = ce.box(['Floor', ['Floor', 'x']]);
+    const expr = ce.expr(['Floor', ['Floor', 'x']]);
     const result = expr.simplify();
     expect(result.json).toEqual(['Floor', 'x']);
   });
@@ -187,7 +187,7 @@ describe('simplificationRules', () => {
       { match: ['Floor', ['Floor', '_x']], replace: ['Floor', '_x'] },
     ];
 
-    const expr = ce.box(['Floor', ['Floor', 'x']]);
+    const expr = ce.expr(['Floor', ['Floor', 'x']]);
     const result = expr.simplify();
     expect(result.json).toEqual(['Floor', 'x']);
   });

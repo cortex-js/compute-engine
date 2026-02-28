@@ -40,7 +40,7 @@ describe('value and valueOf()', () => {
 
   // https://jestjs.io/docs/next/api#testeachtablename-fn-timeout
   test.each(tests)('is("%p")', (a, v, vOf) => {
-    const expr = engine.box(a);
+    const expr = engine.expr(a);
     expect(expr.value?.toString()).toEqual(v);
     expect(expr.valueOf()).toEqual(vOf);
   });

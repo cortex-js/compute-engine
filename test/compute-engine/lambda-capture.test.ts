@@ -22,13 +22,13 @@ describe('FREE VARIABLE CAPTURE', () => {
     ce.declare('lc_c', { value: 5 });
     ce.declare('lc_f0', 'function');
     // Zero-param function whose body is just the free variable lc_c
-    ce.assign('lc_f0', ce.box(['Function', ['Block', 'lc_c']]));
+    ce.assign('lc_f0', ce.expr(['Function', ['Block', 'lc_c']]));
   });
   afterAll(() => ce.popScope());
 
   test('baseline: free var resolves from defining scope when called in same scope', () => {
     // No inner scope — lc_c is 5 in the current scope
-    expect(ce.box(['lc_f0']).evaluate().valueOf()).toEqual(5);
+    expect(ce.expr(['lc_f0']).evaluate().valueOf()).toEqual(5);
   });
 
   test('free var when called from inner scope with re-declared variable', () => {
@@ -40,7 +40,7 @@ describe('FREE VARIABLE CAPTURE', () => {
     try {
       ce.pushScope();
       ce.declare('lc_c', { value: 10 });
-      result = ce.box(['lc_f0']).evaluate().valueOf();
+      result = ce.expr(['lc_f0']).evaluate().valueOf();
     } finally {
       ce.popScope();
     }
@@ -52,7 +52,7 @@ describe('FREE VARIABLE CAPTURE', () => {
     // This is expected by-reference behaviour, not a bug.
     try {
       ce.assign('lc_c', 99);
-      expect(ce.box(['lc_f0']).evaluate().valueOf()).toEqual(99);
+      expect(ce.expr(['lc_f0']).evaluate().valueOf()).toEqual(99);
     } finally {
       ce.assign('lc_c', 5); // restore for subsequent tests
     }
@@ -66,7 +66,7 @@ describe('FREE VARIABLE CAPTURE', () => {
     try {
       ce.pushScope();
       ce.assign('lc_c', 10);
-      result = ce.box(['lc_f0']).evaluate().valueOf();
+      result = ce.expr(['lc_f0']).evaluate().valueOf();
     } finally {
       ce.popScope();
       // Restore: the assign mutated the outer definition, so fix it
@@ -94,7 +94,7 @@ describe('PARAMETER SHADOWING', () => {
   test('one param + one free var: param bound, free var from outer scope', () => {
     // Function(lc_x2p + lc_c2, lc_x2p): lc_x2p is the param, lc_c2 is free (= 5)
     // Apply to 3 → 3 + 5 = 8
-    const f = ce.box(['Function', ['Add', 'lc_x2p', 'lc_c2'], 'lc_x2p']);
+    const f = ce.expr(['Function', ['Add', 'lc_x2p', 'lc_c2'], 'lc_x2p']);
     expect(
       ce
         .function('Apply', [f, ce.number(3)])
@@ -107,7 +107,7 @@ describe('PARAMETER SHADOWING', () => {
     // Outer scope has lc_x2 = 100.
     // Function(lc_x2 * 2, lc_x2): lc_x2 is the param.
     // Apply to 7 → 7 * 2 = 14 (the outer lc_x2 = 100 must be shadowed).
-    const f = ce.box(['Function', ['Multiply', 'lc_x2', 2], 'lc_x2']);
+    const f = ce.expr(['Function', ['Multiply', 'lc_x2', 2], 'lc_x2']);
     expect(
       ce
         .function('Apply', [f, ce.number(7)])
@@ -117,7 +117,7 @@ describe('PARAMETER SHADOWING', () => {
   });
 
   test('two params, no free vars', () => {
-    const f = ce.box(['Function', ['Add', 'lc_p', 'lc_q'], 'lc_p', 'lc_q']);
+    const f = ce.expr(['Function', ['Add', 'lc_p', 'lc_q'], 'lc_p', 'lc_q']);
     expect(
       ce
         .function('Apply', [f, ce.number(3), ce.number(4)])
@@ -128,9 +128,9 @@ describe('PARAMETER SHADOWING', () => {
 
   test('after calling a function, outer variable is unchanged', () => {
     // Calling a function that shadows lc_x2 must not affect the outer binding
-    const f = ce.box(['Function', ['Multiply', 'lc_x2', 2], 'lc_x2']);
+    const f = ce.expr(['Function', ['Multiply', 'lc_x2', 2], 'lc_x2']);
     ce.function('Apply', [f, ce.number(7)]).evaluate();
-    expect(ce.box('lc_x2').evaluate().valueOf()).toEqual(100);
+    expect(ce.expr('lc_x2').evaluate().valueOf()).toEqual(100);
   });
 });
 
@@ -157,14 +157,14 @@ describe('NESTED LAMBDAS', () => {
     // Apply that to 3 → 3 + 4 = 7
     ce.assign(
       'lc_outer',
-      ce.box([
+      ce.expr([
         'Function',
         ['Function', ['Add', 'lc_x3', 'lc_y3'], 'lc_x3'],
         'lc_y3',
       ])
     );
     const inner = ce
-      .function('Apply', [ce.box('lc_outer'), ce.number(4)])
+      .function('Apply', [ce.expr('lc_outer'), ce.number(4)])
       .evaluate();
     const result = ce
       .function('Apply', [inner, ce.number(3)])
@@ -180,14 +180,14 @@ describe('NESTED LAMBDAS', () => {
     // Apply inner to 3 → 13
     ce.assign(
       'lc_outer',
-      ce.box([
+      ce.expr([
         'Function',
         ['Function', ['Add', 'lc_x3', 'lc_c3'], 'lc_x3'],
         'lc_y3',
       ])
     );
     const inner = ce
-      .function('Apply', [ce.box('lc_outer'), ce.number(99)])
+      .function('Apply', [ce.expr('lc_outer'), ce.number(99)])
       .evaluate();
     const result = ce
       .function('Apply', [inner, ce.number(3)])
@@ -205,7 +205,7 @@ describe('NESTED LAMBDAS', () => {
       ce.declare('lc3_f', 'function');
       ce.assign(
         'lc3_f',
-        ce.box([
+        ce.expr([
           'Function',
           ['Function',
             ['Function', ['Add', 'lc3_x', 'lc3_a', 'lc3_b'], 'lc3_x'],
@@ -213,7 +213,7 @@ describe('NESTED LAMBDAS', () => {
           'lc3_a',
         ])
       );
-      const g = ce.function('Apply', [ce.box('lc3_f'), ce.number(1)]).evaluate();
+      const g = ce.function('Apply', [ce.expr('lc3_f'), ce.number(1)]).evaluate();
       const h = ce.function('Apply', [g, ce.number(2)]).evaluate();
       const result = ce.function('Apply', [h, ce.number(3)]).evaluate().valueOf();
       expect(result).toEqual(6); // 3 + 1 + 2 = 6
@@ -245,7 +245,7 @@ describe('LAMBDAS INSIDE BigOps', () => {
     // The question is whether lc_c4 resolves to 10 or gets polluted into
     // Sum's scope with value 'unknown'.
     const result = ce
-      .box(['Sum', ['Add', 'lc_k4', 'lc_c4'], ['Limits', 'lc_k4', 1, 3]])
+      .expr(['Sum', ['Add', 'lc_k4', 'lc_c4'], ['Limits', 'lc_k4', 1, 3]])
       .evaluate()
       .valueOf();
     expect(result).toMatchInlineSnapshot(`36`); // correct: (1+10) + (2+10) + (3+10) = 36
@@ -255,13 +255,13 @@ describe('LAMBDAS INSIDE BigOps', () => {
     // After Sum(lc_k4b^2, Limits(lc_k4b, 1, 5)), lc_k4b should be an unknown
     // in the outer scope — not a variable with a stale value.
     // This documents the scope pollution described in SCOPE_POLLUTION.md.
-    ce.box([
+    ce.expr([
       'Sum',
       ['Power', 'lc_k4b', 2],
       ['Limits', 'lc_k4b', 1, 5],
     ]).evaluate();
     // lc_k4b should still be an 'unknown' symbol (no assigned value) after Sum
-    expect(ce.box('lc_k4b').value?.toString()).toMatchInlineSnapshot(
+    expect(ce.expr('lc_k4b').value?.toString()).toMatchInlineSnapshot(
       `undefined`
     ); // correct: index var leaves no stale value in outer scope after Sum
   });
@@ -275,7 +275,7 @@ describe('LAMBDAS INSIDE BigOps', () => {
       ce.pushScope();
       ce.declare('lc_c4', { value: 20 }); // shadow in calling scope
       result = ce
-        .box(['Sum', ['Add', 'lc_k4c', 'lc_c4'], ['Limits', 'lc_k4c', 1, 3]])
+        .expr(['Sum', ['Add', 'lc_k4c', 'lc_c4'], ['Limits', 'lc_k4c', 1, 3]])
         .evaluate()
         .valueOf();
     } finally {
@@ -288,7 +288,7 @@ describe('LAMBDAS INSIDE BigOps', () => {
     // Sum is boxed in the OUTER scope (lc_c4=10), then evaluated inside a
     // scope that shadows lc_c4=20. Lexical scoping gives 36 (the defining scope).
     // (1+10) + (2+10) + (3+10) = 36
-    const sumExpr = ce.box([
+    const sumExpr = ce.expr([
       'Sum',
       ['Add', 'lc_k4d', 'lc_c4'],
       ['Limits', 'lc_k4d', 1, 3],
@@ -321,7 +321,7 @@ describe('MUTABLE CLOSURE', () => {
     // lc_increment(): increments lc_counter by 1 and returns new value
     ce.assign(
       'lc_increment',
-      ce.box([
+      ce.expr([
         'Function',
         [
           'Block',
@@ -335,11 +335,11 @@ describe('MUTABLE CLOSURE', () => {
 
   test('counter increments on each call', () => {
     ce.assign('lc_counter', 0); // reset
-    ce.box(['lc_increment']).evaluate();
-    ce.box(['lc_increment']).evaluate();
-    const result = ce.box(['lc_increment']).evaluate().valueOf();
+    ce.expr(['lc_increment']).evaluate();
+    ce.expr(['lc_increment']).evaluate();
+    const result = ce.expr(['lc_increment']).evaluate().valueOf();
     expect(result).toEqual(3);
-    expect(ce.box('lc_counter').evaluate().valueOf()).toEqual(3);
+    expect(ce.expr('lc_counter').evaluate().valueOf()).toEqual(3);
   });
 
   test('same function called from two different calling scopes', () => {
@@ -352,12 +352,12 @@ describe('MUTABLE CLOSURE', () => {
     try {
       ce.pushScope();
       ce.declare('lc_counter', { type: 'integer', value: 100 });
-      fromInner = ce.box(['lc_increment']).evaluate().valueOf();
+      fromInner = ce.expr(['lc_increment']).evaluate().valueOf();
     } finally {
       ce.popScope();
     }
 
-    const outerAfter = ce.box('lc_counter').evaluate().valueOf();
+    const outerAfter = ce.expr('lc_counter').evaluate().valueOf();
 
     // Fixed: with lexical scoping outerAfter is 1 and fromInner is 1.
     // Previously (dynamic scoping) fromInner mutated the inner lc_counter → fromInner = 101,
@@ -382,7 +382,7 @@ describe('CURRYING', () => {
   afterAll(() => ce.popScope());
 
   test('full application of two-param function', () => {
-    const f = ce.box(['Function', ['Add', 'lc_p6', 'lc_q6'], 'lc_p6', 'lc_q6']);
+    const f = ce.expr(['Function', ['Add', 'lc_p6', 'lc_q6'], 'lc_p6', 'lc_q6']);
     expect(
       ce
         .function('Apply', [f, ce.number(3), ce.number(4)])
@@ -392,7 +392,7 @@ describe('CURRYING', () => {
   });
 
   test('partial application produces curried function', () => {
-    const f = ce.box(['Function', ['Add', 'lc_p6', 'lc_q6'], 'lc_p6', 'lc_q6']);
+    const f = ce.expr(['Function', ['Add', 'lc_p6', 'lc_q6'], 'lc_p6', 'lc_q6']);
     // Apply to one arg → curried function expecting one more arg
     const curried = ce.function('Apply', [f, ce.number(3)]).evaluate();
     // Apply curried to second arg → 3 + 4 = 7
@@ -405,7 +405,7 @@ describe('CURRYING', () => {
 
   test('free variable survives partial application', () => {
     // Function(lc_p6 + lc_q6 + lc_c6, lc_p6, lc_q6) — lc_c6 = 10 is free
-    const f = ce.box([
+    const f = ce.expr([
       'Function',
       ['Add', 'lc_p6', 'lc_q6', 'lc_c6'],
       'lc_p6',
@@ -423,7 +423,7 @@ describe('CURRYING', () => {
   });
 
   test('free variable in curried function is not affected by re-declaration in calling scope', () => {
-    const f = ce.box([
+    const f = ce.expr([
       'Function',
       ['Add', 'lc_p6', 'lc_q6', 'lc_c6'],
       'lc_p6',
@@ -453,7 +453,7 @@ describe('CURRYING', () => {
     ce.pushScope();
     try {
       ce.declare('lc_sideEffect6', { type: 'integer', value: 0 });
-      const f = ce.box([
+      const f = ce.expr([
         'Function',
         [
           'Block',
@@ -468,7 +468,7 @@ describe('CURRYING', () => {
       ]);
       const curried = ce.function('Apply', [f, ce.number(3)]).evaluate();
       // Side effect must not have fired during partial application
-      expect(ce.box('lc_sideEffect6').evaluate().valueOf()).toEqual(0);
+      expect(ce.expr('lc_sideEffect6').evaluate().valueOf()).toEqual(0);
       // Full application should give 3 + 4 = 7
       const result = ce
         .function('Apply', [curried, ce.number(4)])
@@ -495,7 +495,7 @@ describe('RECURSIVE CLOSURE CAPTURE', () => {
     // Each closure should capture x from the call.
     ce.pushScope();
     try {
-      const makePair = ce.box([
+      const makePair = ce.expr([
         'Function',
         [
           'Block',
@@ -529,7 +529,7 @@ describe('RECURSIVE CLOSURE CAPTURE', () => {
     // The Function inside Tuple should capture x.
     ce.pushScope();
     try {
-      const wrap = ce.box([
+      const wrap = ce.expr([
         'Function',
         [
           'Block',
@@ -572,7 +572,7 @@ describe('CURRYING WITH SCOPED BODIES', () => {
     // g = f(3) => curried, g(10) => (1+2+3) + 10 = 16
     ce.pushScope();
     try {
-      const f = ce.box([
+      const f = ce.expr([
         'Function',
         [
           'Block',
@@ -602,7 +602,7 @@ describe('CURRYING WITH SCOPED BODIES', () => {
     // inc = add(1), inc(5) => 6
     ce.pushScope();
     try {
-      const add = ce.box([
+      const add = ce.expr([
         'Function',
         ['Block', ['Add', 'cur_a', 'cur_b']],
         'cur_a',

@@ -120,22 +120,22 @@ describe('FRESNEL - Numeric fresnelC', () => {
 
 describe('FRESNEL - Engine evaluation', () => {
   test('FresnelS(0) = 0', () => {
-    const result = ce.box(['FresnelS', 0]).evaluate();
+    const result = ce.expr(['FresnelS', 0]).evaluate();
     expect(result.re).toBe(0);
   });
 
   test('FresnelC(0) = 0', () => {
-    const result = ce.box(['FresnelC', 0]).evaluate();
+    const result = ce.expr(['FresnelC', 0]).evaluate();
     expect(result.re).toBe(0);
   });
 
   test('FresnelS(1) matches reference', () => {
-    const result = ce.box(['FresnelS', 1]).N();
+    const result = ce.expr(['FresnelS', 1]).N();
     expect(result.re).toBeCloseTo(0.438259147390355, 12);
   });
 
   test('FresnelC(1) matches reference', () => {
-    const result = ce.box(['FresnelC', 1]).N();
+    const result = ce.expr(['FresnelC', 1]).N();
     expect(result.re).toBeCloseTo(0.779893400376823, 12);
   });
 });
@@ -166,42 +166,42 @@ describe('FRESNEL - LaTeX parsing', () => {
 
 describe('FRESNEL - JavaScript compilation', () => {
   test('compiles FresnelS to _SYS.fresnelS', () => {
-    const expr = ce.box(['FresnelS', 'x']);
+    const expr = ce.expr(['FresnelS', 'x']);
     const result = compile(expr);
     expect(result.success).toBe(true);
     expect(result.code).toContain('_SYS.fresnelS');
   });
 
   test('compiles FresnelC to _SYS.fresnelC', () => {
-    const expr = ce.box(['FresnelC', 'x']);
+    const expr = ce.expr(['FresnelC', 'x']);
     const result = compile(expr);
     expect(result.success).toBe(true);
     expect(result.code).toContain('_SYS.fresnelC');
   });
 
   test('compiled FresnelS(0) returns 0', () => {
-    const expr = ce.box(['FresnelS', 'x']);
+    const expr = ce.expr(['FresnelS', 'x']);
     const result = compile(expr);
     expect(result.success).toBe(true);
     expect(result.run!({ x: 0 })).toBe(0);
   });
 
   test('compiled FresnelC(0) returns 0', () => {
-    const expr = ce.box(['FresnelC', 'x']);
+    const expr = ce.expr(['FresnelC', 'x']);
     const result = compile(expr);
     expect(result.success).toBe(true);
     expect(result.run!({ x: 0 })).toBe(0);
   });
 
   test('compiled FresnelS(1) matches direct evaluation', () => {
-    const expr = ce.box(['FresnelS', 'x']);
+    const expr = ce.expr(['FresnelS', 'x']);
     const result = compile(expr);
     expect(result.success).toBe(true);
     expect(result.run!({ x: 1 })).toBeCloseTo(fresnelS(1), 14);
   });
 
   test('compiled FresnelC(1) matches direct evaluation', () => {
-    const expr = ce.box(['FresnelC', 'x']);
+    const expr = ce.expr(['FresnelC', 'x']);
     const result = compile(expr);
     expect(result.success).toBe(true);
     expect(result.run!({ x: 1 })).toBeCloseTo(fresnelC(1), 14);
@@ -210,21 +210,21 @@ describe('FRESNEL - JavaScript compilation', () => {
 
 describe('FRESNEL - Interval JS compilation', () => {
   test('compiles FresnelS to _IA.fresnelS', () => {
-    const expr = ce.box(['FresnelS', 'x']);
+    const expr = ce.expr(['FresnelS', 'x']);
     const result = compile(expr, { to: 'interval-js' });
     expect(result.success).toBe(true);
     expect(result.code).toContain('_IA.fresnelS');
   });
 
   test('compiles FresnelC to _IA.fresnelC', () => {
-    const expr = ce.box(['FresnelC', 'x']);
+    const expr = ce.expr(['FresnelC', 'x']);
     const result = compile(expr, { to: 'interval-js' });
     expect(result.success).toBe(true);
     expect(result.code).toContain('_IA.fresnelC');
   });
 
   test('interval FresnelS containing 0', () => {
-    const expr = ce.box(['FresnelS', 'x']);
+    const expr = ce.expr(['FresnelS', 'x']);
     const result = compile(expr, { to: 'interval-js' });
     expect(result.success).toBe(true);
     const interval = result.run!({ x: { lo: -1, hi: 1 } });
@@ -237,7 +237,7 @@ describe('FRESNEL - Interval JS compilation', () => {
   });
 
   test('interval FresnelC point evaluation', () => {
-    const expr = ce.box(['FresnelC', 'x']);
+    const expr = ce.expr(['FresnelC', 'x']);
     const result = compile(expr, { to: 'interval-js' });
     expect(result.success).toBe(true);
     const interval = result.run!({ x: { lo: 1, hi: 1 } });

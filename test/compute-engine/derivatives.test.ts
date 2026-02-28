@@ -9,7 +9,7 @@ function parse(expr: string): Expression {
 // Note: D(f, x) in LaTeX now parses as Predicate, not the derivative function.
 // Use this helper or Leibniz notation (\frac{d}{dx}) for derivatives.
 function D(expr: string, ...vars: string[]): Expression {
-  return engine.box(['D', engine.parse(expr), ...vars]);
+  return engine.expr(['D', engine.parse(expr), ...vars]);
 }
 
 describe('D', () => {
@@ -26,7 +26,7 @@ describe('D', () => {
   });
 
   it('should compute higher order partial derivatives', () => {
-    const expr = engine.box(['D', ['D', engine.parse('x^2 + y^2'), 'x'], 'x']);
+    const expr = engine.expr(['D', ['D', engine.parse('x^2 + y^2'), 'x'], 'x']);
     const result = expr.evaluate();
     expect(result.latex).toMatchInlineSnapshot(`2`);
   });
@@ -61,13 +61,13 @@ describe('D', () => {
 
 describe('Derivative', () => {
   it('should compute the derivative of a function', () => {
-    const expr = engine.box(['Derivative', 'Sin']);
+    const expr = engine.expr(['Derivative', 'Sin']);
     const result = expr.evaluate();
     expect(result.latex).toMatchInlineSnapshot(`\\cos(\\operatorname{\\_})`);
   });
 
   it('should compute higher order derivatives', () => {
-    const expr = engine.box([
+    const expr = engine.expr([
       'Derivative',
       ['Function', ['Square', 'x'], 'x'],
       2,
@@ -314,20 +314,20 @@ describe('Special function derivatives', () => {
   });
 
   it('d/dx Digamma(x) = Trigamma(x)', () => {
-    const expr = engine.box(['D', ['Digamma', 'x'], 'x']);
+    const expr = engine.expr(['D', ['Digamma', 'x'], 'x']);
     const result = expr.evaluate();
     expect(result.toString()).toMatchInlineSnapshot(`Trigamma(x)`);
   });
 
   it('d/dx Erf(x) = 2/sqrt(pi) * e^(-x^2)', () => {
     // Use MathJSON directly since \mathrm{erf} parses differently
-    const expr = engine.box(['D', ['Erf', 'x'], 'x']);
+    const expr = engine.expr(['D', ['Erf', 'x'], 'x']);
     const result = expr.evaluate();
     expect(result.toString()).toMatchInlineSnapshot(`(2e^(-(x^2))) / sqrt(pi)`);
   });
 
   it('d/dx Erfc(x) = -2/sqrt(pi) * e^(-x^2)', () => {
-    const expr = engine.box(['D', ['Erfc', 'x'], 'x']);
+    const expr = engine.expr(['D', ['Erfc', 'x'], 'x']);
     const result = expr.evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
       `(-2e^(-(x^2))) / sqrt(pi)`
@@ -335,25 +335,25 @@ describe('Special function derivatives', () => {
   });
 
   it('d/dx GammaLn(x) = Digamma(x)', () => {
-    const expr = engine.box(['D', ['GammaLn', 'x'], 'x']);
+    const expr = engine.expr(['D', ['GammaLn', 'x'], 'x']);
     const result = expr.evaluate();
     expect(result.toString()).toMatchInlineSnapshot(`Digamma(x)`);
   });
 
   it('d/dx FresnelS(x) = sin(pi*x^2/2)', () => {
-    const expr = engine.box(['D', ['FresnelS', 'x'], 'x']);
+    const expr = engine.expr(['D', ['FresnelS', 'x'], 'x']);
     const result = expr.evaluate();
     expect(result.toString()).toMatchInlineSnapshot(`sin(1/2 * pi * x^2)`);
   });
 
   it('d/dx FresnelC(x) = cos(pi*x^2/2)', () => {
-    const expr = engine.box(['D', ['FresnelC', 'x'], 'x']);
+    const expr = engine.expr(['D', ['FresnelC', 'x'], 'x']);
     const result = expr.evaluate();
     expect(result.toString()).toMatchInlineSnapshot(`cos(1/2 * pi * x^2)`);
   });
 
   it('d/dx LambertW(x) = LambertW(x)/(x*(1+LambertW(x)))', () => {
-    const expr = engine.box(['D', ['LambertW', 'x'], 'x']);
+    const expr = engine.expr(['D', ['LambertW', 'x'], 'x']);
     const result = expr.evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
       `LambertW(x) / (x + x * LambertW(x))`
@@ -363,7 +363,7 @@ describe('Special function derivatives', () => {
 
 describe('Symbolic derivatives for unknown functions', () => {
   it('d/dx f(x) returns symbolic derivative for unknown function', () => {
-    const expr = engine.box(['D', ['f', 'x'], 'x']);
+    const expr = engine.expr(['D', ['f', 'x'], 'x']);
     const result = expr.evaluate();
     // Returns Apply(Derivative(f, 1), x) which represents f'(x)
     expect(result.toString()).toMatchInlineSnapshot(
@@ -375,14 +375,14 @@ describe('Symbolic derivatives for unknown functions', () => {
   // unknown function symbols fail the isValid check in derivative.ts.
   // This is a known limitation that could be improved in the future.
   it('d/dx f(x^2) - chain rule with unknown function (current limitation)', () => {
-    const expr = engine.box(['D', ['f', ['Square', 'x']], 'x']);
+    const expr = engine.expr(['D', ['f', ['Square', 'x']], 'x']);
     const result = expr.evaluate();
     // Ideally would return 2x * f'(x^2), currently returns 0
     expect(result.toString()).toMatchInlineSnapshot(`0`);
   });
 
   it('d/dx g(sin(x)) - chain rule with unknown function (current limitation)', () => {
-    const expr = engine.box(['D', ['g', ['Sin', 'x']], 'x']);
+    const expr = engine.expr(['D', ['g', ['Sin', 'x']], 'x']);
     const result = expr.evaluate();
     // Ideally would return cos(x) * g'(sin(x)), currently returns 0
     expect(result.toString()).toMatchInlineSnapshot(`0`);
@@ -392,7 +392,7 @@ describe('Symbolic derivatives for unknown functions', () => {
 describe('Bessel function derivatives', () => {
   describe('BesselJ (first kind)', () => {
     it('d/dx J_n(x) = (J_{n-1}(x) - J_{n+1}(x))/2', () => {
-      const expr = engine.box(['D', ['BesselJ', 'n', 'x'], 'x']);
+      const expr = engine.expr(['D', ['BesselJ', 'n', 'x'], 'x']);
       const result = expr.evaluate();
       expect(result.toString()).toMatchInlineSnapshot(
         `-1/2 * BesselJ(n + 1, x) + 1/2 * BesselJ(n - 1, x)`
@@ -400,7 +400,7 @@ describe('Bessel function derivatives', () => {
     });
 
     it('d/dx J_2(x) with numeric order', () => {
-      const expr = engine.box(['D', ['BesselJ', 2, 'x'], 'x']);
+      const expr = engine.expr(['D', ['BesselJ', 2, 'x'], 'x']);
       const result = expr.evaluate();
       expect(result.toString()).toMatchInlineSnapshot(
         `-1/2 * BesselJ(3, x) + 1/2 * BesselJ(1, x)`
@@ -409,7 +409,7 @@ describe('Bessel function derivatives', () => {
 
     it('d/dx J_0(x) = -J_1(x) (special case)', () => {
       // J_{-1}(x) = -J_1(x), so (J_{-1}(x) - J_1(x))/2 = -J_1(x)
-      const expr = engine.box(['D', ['BesselJ', 0, 'x'], 'x']);
+      const expr = engine.expr(['D', ['BesselJ', 0, 'x'], 'x']);
       const result = expr.evaluate();
       expect(result.toString()).toMatchInlineSnapshot(
         `-1/2 * BesselJ(1, x) + 1/2 * BesselJ(-1, x)`
@@ -419,7 +419,7 @@ describe('Bessel function derivatives', () => {
 
   describe('BesselY (second kind)', () => {
     it('d/dx Y_n(x) = (Y_{n-1}(x) - Y_{n+1}(x))/2', () => {
-      const expr = engine.box(['D', ['BesselY', 'n', 'x'], 'x']);
+      const expr = engine.expr(['D', ['BesselY', 'n', 'x'], 'x']);
       const result = expr.evaluate();
       expect(result.toString()).toMatchInlineSnapshot(
         `-1/2 * BesselY(n + 1, x) + 1/2 * BesselY(n - 1, x)`
@@ -429,7 +429,7 @@ describe('Bessel function derivatives', () => {
 
   describe('BesselI (modified first kind)', () => {
     it('d/dx I_n(x) = (I_{n-1}(x) + I_{n+1}(x))/2', () => {
-      const expr = engine.box(['D', ['BesselI', 'n', 'x'], 'x']);
+      const expr = engine.expr(['D', ['BesselI', 'n', 'x'], 'x']);
       const result = expr.evaluate();
       expect(result.toString()).toMatchInlineSnapshot(
         `1/2 * BesselI(n - 1, x) + 1/2 * BesselI(n + 1, x)`
@@ -439,7 +439,7 @@ describe('Bessel function derivatives', () => {
 
   describe('BesselK (modified second kind)', () => {
     it('d/dx K_n(x) = -(K_{n-1}(x) + K_{n+1}(x))/2', () => {
-      const expr = engine.box(['D', ['BesselK', 'n', 'x'], 'x']);
+      const expr = engine.expr(['D', ['BesselK', 'n', 'x'], 'x']);
       const result = expr.evaluate();
       expect(result.toString()).toMatchInlineSnapshot(
         `-1/2 * BesselK(n - 1, x) - 1/2 * BesselK(n + 1, x)`
@@ -449,7 +449,7 @@ describe('Bessel function derivatives', () => {
 
   describe('Chain rule with Bessel functions', () => {
     it('d/dx J_2(x^2) applies chain rule', () => {
-      const expr = engine.box(['D', ['BesselJ', 2, ['Square', 'x']], 'x']);
+      const expr = engine.expr(['D', ['BesselJ', 2, ['Square', 'x']], 'x']);
       const result = expr.evaluate();
       expect(result.toString()).toMatchInlineSnapshot(
         `x * BesselJ(1, x^2) - x * BesselJ(3, x^2)`
@@ -459,7 +459,7 @@ describe('Bessel function derivatives', () => {
 
   describe('Constant Bessel functions', () => {
     it('d/dx J_2(5) = 0 (no variable)', () => {
-      const expr = engine.box(['D', ['BesselJ', 2, 5], 'x']);
+      const expr = engine.expr(['D', ['BesselJ', 2, 5], 'x']);
       const result = expr.evaluate();
       expect(result.toString()).toMatchInlineSnapshot(`0`);
     });
@@ -469,38 +469,38 @@ describe('Bessel function derivatives', () => {
 describe('Multi-argument function derivatives', () => {
   describe('Log with custom base', () => {
     it('d/dx log_2(x) = 1/(x*ln(2))', () => {
-      const expr = engine.box(['D', ['Log', 'x', 2], 'x']);
+      const expr = engine.expr(['D', ['Log', 'x', 2], 'x']);
       const result = expr.evaluate();
       expect(result.toString()).toMatchInlineSnapshot(`1 / (x * ln(2))`);
     });
 
     it('d/dx log_e(x) = 1/x (natural log)', () => {
-      const expr = engine.box(['D', ['Log', 'x', 'ExponentialE'], 'x']);
+      const expr = engine.expr(['D', ['Log', 'x', 'ExponentialE'], 'x']);
       const result = expr.evaluate();
       expect(result.toString()).toMatchInlineSnapshot(`1 / x`);
     });
 
     it('d/dx log_a(x) = 1/(x*ln(a)) with symbolic base', () => {
-      const expr = engine.box(['D', ['Log', 'x', 'a'], 'x']);
+      const expr = engine.expr(['D', ['Log', 'x', 'a'], 'x']);
       const result = expr.evaluate();
       expect(result.toString()).toMatchInlineSnapshot(`1 / (x * ln(a))`);
     });
 
     it('d/dx log_2(x^2) = 2/(x*ln(2)) via chain rule', () => {
-      const expr = engine.box(['D', ['Log', ['Square', 'x'], 2], 'x']);
+      const expr = engine.expr(['D', ['Log', ['Square', 'x'], 2], 'x']);
       const result = expr.evaluate();
       expect(result.toString()).toMatchInlineSnapshot(`2 / (x * ln(2))`);
     });
 
     it('d/dx log_2(constant) = 0', () => {
-      const expr = engine.box(['D', ['Log', 5, 2], 'x']);
+      const expr = engine.expr(['D', ['Log', 5, 2], 'x']);
       const result = expr.evaluate();
       expect(result.toString()).toMatchInlineSnapshot(`0`);
     });
 
     it('d/dx log_x(a) when base depends on x', () => {
       // log_x(a) = ln(a)/ln(x), so d/dx = -ln(a)/(x*ln(x)^2)
-      const expr = engine.box(['D', ['Log', 'a', 'x'], 'x']);
+      const expr = engine.expr(['D', ['Log', 'a', 'x'], 'x']);
       const result = expr.evaluate();
       // Should use quotient rule on ln(a)/ln(x)
       expect(result.toString()).toMatchInlineSnapshot(`-ln(a) / (x * ln(x)^2)`);
@@ -508,7 +508,7 @@ describe('Multi-argument function derivatives', () => {
 
     it('d/dx log_x(x) when both depend on x', () => {
       // log_x(x) = ln(x)/ln(x) = 1, so d/dx = 0
-      const expr = engine.box(['D', ['Log', 'x', 'x'], 'x']);
+      const expr = engine.expr(['D', ['Log', 'x', 'x'], 'x']);
       const result = expr.evaluate();
       expect(result.toString()).toMatchInlineSnapshot(`0`);
     });
@@ -516,25 +516,25 @@ describe('Multi-argument function derivatives', () => {
 
   describe('Discrete functions (step functions)', () => {
     it('d/dx mod(x, 5) = 0', () => {
-      const expr = engine.box(['D', ['Mod', 'x', 5], 'x']);
+      const expr = engine.expr(['D', ['Mod', 'x', 5], 'x']);
       const result = expr.evaluate();
       expect(result.toString()).toMatchInlineSnapshot(`0`);
     });
 
     it('d/dx mod(x^2, y) = 0', () => {
-      const expr = engine.box(['D', ['Mod', ['Square', 'x'], 'y'], 'x']);
+      const expr = engine.expr(['D', ['Mod', ['Square', 'x'], 'y'], 'x']);
       const result = expr.evaluate();
       expect(result.toString()).toMatchInlineSnapshot(`0`);
     });
 
     it('d/dx gcd(x, 6) = 0', () => {
-      const expr = engine.box(['D', ['GCD', 'x', 6], 'x']);
+      const expr = engine.expr(['D', ['GCD', 'x', 6], 'x']);
       const result = expr.evaluate();
       expect(result.toString()).toMatchInlineSnapshot(`0`);
     });
 
     it('d/dx lcm(x, y) = 0', () => {
-      const expr = engine.box(['D', ['LCM', 'x', 'y'], 'x']);
+      const expr = engine.expr(['D', ['LCM', 'x', 'y'], 'x']);
       const result = expr.evaluate();
       expect(result.toString()).toMatchInlineSnapshot(`0`);
     });
@@ -557,7 +557,7 @@ describe('User-defined function derivatives', () => {
   });
 
   it('d/dx f(x) where f(x) := 2x should be 2', () => {
-    const expr = ce.box(['D', ['f', 'x'], 'x']);
+    const expr = ce.expr(['D', ['f', 'x'], 'x']);
     const result = expr.evaluate();
     expect(result.toString()).toMatchInlineSnapshot(`2`);
   });
@@ -570,7 +570,7 @@ describe('User-defined function derivatives', () => {
   });
 
   it('d/dx f(x^2) where f(x) := 2x should be 4x', () => {
-    const expr = ce.box(['D', ['f', ['Square', 'x']], 'x']);
+    const expr = ce.expr(['D', ['f', ['Square', 'x']], 'x']);
     const result = expr.evaluate();
     expect(result.toString()).toMatchInlineSnapshot(`4x`);
   });

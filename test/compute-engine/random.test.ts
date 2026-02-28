@@ -2,7 +2,7 @@ import { engine } from '../utils';
 
 function checkLatexRoundtrip(): string | undefined {
   engine.forget('x');
-  const expr = engine.box(['RandomExpression']).evaluate();
+  const expr = engine.expr(['RandomExpression']).evaluate();
   if (!expr.isValid) {
     console.info(expr.toString());
     return expr.toString();
@@ -18,7 +18,7 @@ function checkLatexRoundtrip(): string | undefined {
 
 function checkSimplification(): string | undefined {
   engine.forget('x');
-  const expr = engine.box(['RandomExpression']).evaluate();
+  const expr = engine.expr(['RandomExpression']).evaluate();
   const simp = expr.simplify();
 
   for (let i = 0; i <= 100; i++) {
