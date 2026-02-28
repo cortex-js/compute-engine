@@ -17,6 +17,7 @@ import type { LatexString } from '../latex-syntax/types';
 
 import { _BoxedExpression } from './abstract-boxed-expression';
 import { isLatexString } from '../latex-syntax/utils';
+import { parse as parseLatex } from '../latex-syntax/latex-syntax';
 import { ConfigurationChangeListener } from '../../common/configuration-change';
 
 /**
@@ -245,13 +246,14 @@ function dynamicValue(
 ) {
   if (value === undefined) return undefined;
 
-  if (isLatexString(value)) return ce.parse(value) ?? ce.symbol('Undefined');
+  if (isLatexString(value))
+    return ce.expr(parseLatex(value as string) ?? 'Undefined');
 
-  if (typeof value === 'function') return ce.box(value(ce) ?? 'Undefined');
+  if (typeof value === 'function') return ce.expr(value(ce) ?? 'Undefined');
 
   if (value instanceof _BoxedExpression) return value;
 
-  return ce.box(value);
+  return ce.expr(value);
 }
 
 function inferTypeFromValue(

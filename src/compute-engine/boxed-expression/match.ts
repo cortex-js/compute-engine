@@ -10,6 +10,7 @@ import { permutations } from '../../common/utils';
 import { isWildcard, wildcardName, wildcardType } from './pattern-utils';
 import { isOperatorDef } from './utils';
 import { isNumber, isFunction, isSymbol, isString } from './type-guards';
+import { parse as parseLatex } from '../latex-syntax/latex-syntax';
 
 /** Internal options extending the public PatternMatchOptions */
 type MatchOptions = PatternMatchOptions & {
@@ -222,7 +223,7 @@ function matchOnce(
       // Create a synthetic Power expression: Power(x, 1/n)
       const powerExpr = ce.function(
         'Power',
-        [expr.op1, ce.box(['Divide', 1, expr.op2], { form: 'raw' })],
+        [expr.op1, ce.expr(['Divide', 1, expr.op2], { form: 'raw' })],
         { form: 'structural' }
       );
       const result = matchArguments(
@@ -238,7 +239,7 @@ function matchOnce(
       //
       // 1. The pattern operator is a wildcard
       //
-      result = captureWildcard(operator, ce.box(expr.operator), substitution);
+      result = captureWildcard(operator, ce.expr(expr.operator), substitution);
       if (result !== null)
         result = matchArguments(expr, pattern.ops, result, options);
     } else if (operator === expr.operator) {
@@ -1340,7 +1341,7 @@ export function match(
     // String pattern: parse as LaTeX, auto-wildcard single-char symbols
     autoWildcard = true;
     boxedPattern = ce
-      .parse(pattern)
+      .expr(parseLatex(pattern) ?? 'Nothing')
       .map(
         (x) =>
           isSymbol(x) && x.symbol.length === 1 ? ce.symbol('_' + x.symbol) : x,
@@ -1351,7 +1352,7 @@ export function match(
     boxedPattern = pattern as Expression;
   } else {
     // Raw MathJSON — box it
-    boxedPattern = ce.box(pattern as ExpressionInput);
+    boxedPattern = ce.expr(pattern as ExpressionInput);
   }
 
   boxedPattern = boxedPattern.structural;
@@ -1373,7 +1374,7 @@ export function match(
   };
 
   // For string patterns, accept unprefixed keys in substitution
-  // (e.g., { x: ce.box('x') } becomes { _x: ce.box('x') })
+  // (e.g., { x: ce.expr('x') } becomes { _x: ce.expr('x') })
   let substitution = options?.substitution ?? {};
   if (autoWildcard && Object.keys(substitution).length > 0) {
     const prefixed: BoxedSubstitution = {};

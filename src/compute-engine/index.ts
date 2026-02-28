@@ -48,12 +48,9 @@ import type {
   LibraryDefinition,
 } from './global-types';
 
-import type {
-  LatexDictionaryEntry,
-  LatexString,
-  LibraryCategory,
-} from './latex-syntax/types';
-import { type IndexedLatexDictionary } from './latex-syntax/dictionary/definitions';
+import type { LibraryCategory, ParseLatexOptions } from './latex-syntax/types';
+import { LatexSyntax } from './latex-syntax/latex-syntax';
+import { isOperatorDef, isValueDef } from './boxed-expression/utils';
 
 import { getStandardLibrary } from './library/library';
 
@@ -148,14 +145,8 @@ import {
   createNumberExpression,
   createSymbolExpression,
 } from './engine-expression-entrypoints';
-import { getLatexDictionaryForDomain } from './engine-library-bootstrap';
-import { EngineLatexDictionaryState } from './engine-latex-dictionary-state';
 import { SimplificationRuleStore } from './engine-simplification-rules';
 import { EngineNumericConfiguration } from './engine-numeric-configuration';
-import {
-  parseLatexEntrypoint,
-  type ParseEntrypointOptions,
-} from './engine-parse-entrypoint';
 import { EngineRuntimeState } from './engine-runtime-state';
 import { EngineStartupCoordinator } from './engine-startup-coordinator';
 import { createTypeResolver } from './engine-type-resolver';
@@ -169,7 +160,7 @@ export type * from './global-types';
 // Free functions backed by a lazily-instantiated global engine
 export {
   parse,
-  box,
+  expr,
   simplify,
   evaluate,
   N,
@@ -232,18 +223,18 @@ import { fu as _fu } from './symbolic/fu';
  * ce = MathfieldElement.computeEngine
  * ```
  *
- * Use the instance to create boxed expressions with `ce.parse()` and `ce.box()`.
+ * Use the instance to create boxed expressions with `ce.expr()`.
  *
  * ```js
  * const ce = new ComputeEngine();
  *
- * let expr = ce.parse("e^{i\\pi}");
- * console.log(expr.N().latex);
+ * let expr = ce.expr(["Power", "ExponentialE", ["Multiply", "ImaginaryUnit", "Pi"]]);
+ * console.log(expr.N().toString());
  * // ➔ "-1"
  *
- * expr = ce.box(["Expand", ["Power", ["Add", "a", "b"], 2]]);
- * console.log(expr.evaluate().latex);
- * // ➔ "a^2 +  2ab + b^2"
+ * expr = ce.expr(["Expand", ["Power", ["Add", "a", "b"], 2]]);
+ * console.log(expr.evaluate().toString());
+ * // ➔ "a^2 + 2ab + b^2"
  * ```
  *
  * @category Compute Engine
@@ -268,18 +259,6 @@ export class ComputeEngine implements IComputeEngine {
   readonly PositiveInfinity: Expression;
   readonly NegativeInfinity: Expression;
   readonly ComplexInfinity: Expression;
-
-  /** The symbol separating the whole part of a number from its fractional
-   *  part in a LaTeX string.
-   *
-   * Commonly a period (`.`) in English, but a comma (`,`) in many European
-   * languages. For the comma, use `"{,}"` so that the spacing is correct.
-   *
-   * Note that this is a LaTeX string and is used when parsing or serializing
-   * LaTeX. MathJSON always uses a period.
-   *
-   * */
-  decimalSeparator: LatexString = '.';
 
   /** @internal */
   private _numericConfiguration: EngineNumericConfiguration;
@@ -461,11 +440,6 @@ export class ComputeEngine implements IComputeEngine {
    *
    */
 
-  /** @internal */
-  private _latexDictionaryState = new EngineLatexDictionaryState(() =>
-    ComputeEngine.getLatexDictionary()
-  );
-
   static getStandardLibrary(
     categories?: LibraryCategory[] | LibraryCategory | 'all'
   ): readonly LibraryDefinition[] {
@@ -473,56 +447,10 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   /**
-   * Return a LaTeX dictionary suitable for the specified category, or `"all"`
-   * for all categories (`"arithmetic"`, `"algebra"`, etc...).
-   *
-   * A LaTeX dictionary is needed to translate between LaTeX and MathJSON.
-   *
-   * Each entry in the dictionary indicate how a LaTeX token (or string of
-   * tokens) should be parsed into a MathJSON expression.
-   *
-   * For example an entry can define that the `\pi` LaTeX token should map to the
-   * symbol `"Pi"`, or that the token `-` should map to the function
-   * `["Negate",...]` when in a prefix position and to the function
-   * `["Subtract", ...]` when in an infix position.
-   *
-   * Furthermore, the information in each dictionary entry is used to serialize
-   * the LaTeX string corresponding to a MathJSON expression.
-   *
-   * Use with `ce.latexDictionary` to set the dictionary. You can complement
-   * it with your own definitions, for example with:
-   *
-   * ```ts
-   * ce.latexDictionary = [
-   *  ...ce.getLatexDictionary("all"),
-   *  {
-   *    kind: "function",
-   *    symbolTrigger: "concat",
-   *    parse: "Concatenate"
-   *  }
-   * ];
-   * ```
-   */
-
-  static getLatexDictionary(
-    domain?: LibraryCategory | 'all'
-  ): readonly Readonly<LatexDictionaryEntry>[] {
-    return getLatexDictionaryForDomain(domain);
-  }
-
-  /**
    * Construct a new `ComputeEngine` instance.
    *
    * Symbols tables define functions, constants and variables (in `options.ids`).
    * If no table is provided the MathJSON Standard Library is used (`ComputeEngine.getStandardLibrary()`)
-   *
-   * The LaTeX syntax dictionary is defined in `options.latexDictionary`.
-   *
-   * The order of the dictionaries matter: the definitions from the later ones
-   * override the definitions from earlier ones. The first dictionary should
-   * be the `'core'` dictionary which include basic definitions that are used
-   * by later dictionaries.
-   *
    *
    * @param options.precision Specific how many digits of precision
    * for the numeric calculations. Default is 300.
@@ -601,18 +529,6 @@ export class ComputeEngine implements IComputeEngine {
 
   [Symbol.toStringTag]: string = 'ComputeEngine';
 
-  get latexDictionary(): Readonly<LatexDictionaryEntry[]> {
-    return this._latexDictionaryState.dictionary;
-  }
-
-  set latexDictionary(dic: Readonly<LatexDictionaryEntry[]>) {
-    this._latexDictionaryState.dictionary = dic;
-  }
-
-  get _indexedLatexDictionary(): IndexedLatexDictionary {
-    return this._latexDictionaryState.indexedDictionary;
-  }
-
   /** After the configuration of the engine has changed, clear the caches
    * so that new values can be recalculated.
    *
@@ -636,37 +552,25 @@ export class ComputeEngine implements IComputeEngine {
     return this._configurationLifecycle.listen(tracker);
   }
 
-  /**
-   * Register a custom compilation target.
-   *
-   * This allows you to compile mathematical expressions to different target
-   * languages beyond the built-in JavaScript and GLSL targets.
-   *
-   * @param name - The name of the target (e.g., 'python', 'wgsl', 'matlab')
-   * @param target - The LanguageTarget implementation
-   *
-   * @example
-   * ```typescript
-   * import { ComputeEngine, GLSLTarget } from '@cortex-js/compute-engine';
-   *
-   * const ce = new ComputeEngine();
-   *
-   * // Register a custom target
-   * class PythonTarget implements LanguageTarget {
-   *   // Implementation...
-   * }
-   *
-   * ce.registerCompilationTarget('python', new PythonTarget());
-   *
-   * // Use the custom target
-   * const expr = ce.parse('x^2 + y^2');
-   * const code = compile(expr, { to: 'python' });
-   * ```
-   *
-   * Throws if:
-   * - `name` is empty or contains whitespace
-   * - `target` does not implement the required `LanguageTarget` methods
-   */
+  /** @internal Compile a boxed expression. */
+  _compile(
+    expr: Expression,
+    options?: Parameters<typeof _compile>[1]
+  ): ReturnType<typeof _compile> {
+    return _compile(expr, options);
+  }
+
+  /** @internal Get a registered compilation target by name. */
+  getCompilationTarget(name: string): LanguageTarget<Expression> | undefined {
+    return this._compilationTargets.get(name);
+  }
+
+  /** @internal Return the names of all registered compilation targets. */
+  listCompilationTargets(): string[] {
+    return this._compilationTargets.list();
+  }
+
+  /** @internal Register a compilation target. */
   registerCompilationTarget(
     name: string,
     target: LanguageTarget<Expression>
@@ -674,45 +578,9 @@ export class ComputeEngine implements IComputeEngine {
     this._compilationTargets.register(name, target);
   }
 
-  /**
-   * Get a registered compilation target by name.
-   *
-   * @param name - The name of the target (e.g., 'javascript', 'glsl', 'python')
-   * @returns The LanguageTarget implementation, or undefined if not found
-   */
-  getCompilationTarget(name: string): LanguageTarget<Expression> | undefined {
-    return this._compilationTargets.get(name);
-  }
-
-  /**
-   * Return the names of all registered compilation targets.
-   *
-   * @example
-   * ```typescript
-   * const ce = new ComputeEngine();
-   * console.log(ce.listCompilationTargets());
-   * // → ['javascript', 'glsl', 'wgsl', 'interval-js']
-   * ```
-   */
-  listCompilationTargets(): string[] {
-    return this._compilationTargets.list();
-  }
-
-  /**
-   * Remove a registered compilation target.
-   *
-   * @param name - The name of the target to remove
-   */
+  /** @internal Remove a registered compilation target. */
   unregisterCompilationTarget(name: string): void {
     this._compilationTargets.unregister(name);
-  }
-
-  /** @internal Compile a boxed expression. */
-  _compile(
-    expr: Expression,
-    options?: Parameters<typeof _compile>[1]
-  ): ReturnType<typeof _compile> {
-    return _compile(expr, options);
   }
 
   get precision(): number {
@@ -1236,7 +1104,7 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   /**
-   * Use `ce.box(name)` instead
+   * Use `ce.expr(name)` instead
    * @internal */
   _getSymbolValue(id: MathJsonSymbol): Expression | undefined {
     return getSymbolValueImpl(this, id);
@@ -1491,7 +1359,7 @@ export class ComputeEngine implements IComputeEngine {
   /** Return a boxed expression from a number, string or expression input.
    * Calls `ce.function()`, `ce.number()` or `ce.symbol()` as appropriate.
    */
-  box(
+  expr(
     expr: NumericValue | ExpressionInput,
     options?: {
       form?: FormOption;
@@ -1500,6 +1368,60 @@ export class ComputeEngine implements IComputeEngine {
   ): Expression {
     const { canonical, structural } = formToInternal(options?.form);
     return box(this, expr, { canonical, structural, scope: options?.scope });
+  }
+
+  /** @deprecated Use `expr()` instead. */
+  box(
+    expr: NumericValue | ExpressionInput,
+    options?: {
+      form?: FormOption;
+      scope?: Scope | undefined;
+    }
+  ): Expression {
+    return this.expr(expr, options);
+  }
+
+  /** @internal Lazily-created LatexSyntax instance for parse() */
+  private _latexSyntax?: LatexSyntax;
+
+  /**
+   * Parse a LaTeX string and return a boxed expression.
+   *
+   * Uses the engine's symbol definitions for accurate parsing
+   * (e.g., recognizing `f` as a function).
+   */
+  parse(
+    latex: string | null,
+    options?: Partial<ParseLatexOptions> & { form?: FormOption }
+  ): Expression | null {
+    if (latex === null || latex === undefined) return null;
+    if (typeof latex !== 'string')
+      throw Error('ce.parse(): expected a LaTeX string');
+
+    this._latexSyntax ??= new LatexSyntax();
+
+    const { form, ...parseOpts } = options ?? {};
+
+    const result = this._latexSyntax.parse(latex, {
+      decimalSeparator: '.',
+      getSymbolType: (id) => {
+        const def = this.lookupDefinition(id);
+        if (!def) return BoxedType.unknown;
+        if (isOperatorDef(def)) return def.operator.signature;
+        if (isValueDef(def)) return def.value.type;
+        return BoxedType.unknown;
+      },
+      hasSubscriptEvaluate: (id) => {
+        const def = this.lookupDefinition(id);
+        return !!(isValueDef(def) && def.value.subscriptEvaluate);
+      },
+      ...parseOpts,
+    });
+
+    if (result === null) return null;
+
+    const { canonical, structural } = formToInternal(form);
+    return box(this, result, { canonical, structural });
   }
 
   function(
@@ -1522,7 +1444,7 @@ export class ComputeEngine implements IComputeEngine {
 
   /**
    *
-   * Shortcut for `this.box(["Error",...])`.
+   * Shortcut for `this.expr(["Error",...])`.
    *
    * The result is canonical.
    */
@@ -1542,10 +1464,10 @@ export class ComputeEngine implements IComputeEngine {
    * Add a `["Hold"]` wrapper to `expr`.
    */
   hold(expr: ExpressionInput): Expression {
-    return this._fn('Hold', [this.box(expr, { form: 'raw' })]);
+    return this._fn('Hold', [this.expr(expr, { form: 'raw' })]);
   }
 
-  /** Shortcut for `this.box(["Tuple", ...])`
+  /** Shortcut for `this.expr(["Tuple", ...])`
    *
    * The result is canonical.
    */
@@ -1666,22 +1588,6 @@ export class ComputeEngine implements IComputeEngine {
     const canonical = options?.canonical ?? true;
 
     return new BoxedFunction(this, name, ops, { ...options, canonical });
-  }
-
-  /**
-   * Parse a string of LaTeX and return a corresponding `Expression`.
-   *
-   * If the `form` option is set to `'canonical'` (the default), the result
-   * will be canonical.
-   *
-   */
-  parse(latex: null, options?: ParseEntrypointOptions): null;
-  parse(latex: LatexString, options?: ParseEntrypointOptions): Expression;
-  parse(
-    latex: LatexString | null,
-    options?: ParseEntrypointOptions
-  ): Expression | null {
-    return parseLatexEntrypoint(this, latex, options);
   }
 
   /**

@@ -245,7 +245,7 @@ export class BoxedNumber
 
   add(rhs: number | Expression): Expression {
     const ce = this.engine;
-    if (this.isSame(0)) return ce.box(rhs);
+    if (this.isSame(0)) return ce.expr(rhs);
     if (typeof rhs === 'number') {
       // @fastpath
       if (rhs === 0) return this;
@@ -267,8 +267,8 @@ export class BoxedNumber
   }
 
   mul(rhs: NumericValue | number | Expression): Expression {
-    if (this.isSame(1)) return this.engine.box(rhs);
-    if (this.isSame(-1)) return this.engine.box(rhs).neg();
+    if (this.isSame(1)) return this.engine.expr(rhs);
+    if (this.isSame(-1)) return this.engine.expr(rhs).neg();
 
     const ce = this.engine;
 
@@ -339,7 +339,7 @@ export class BoxedNumber
         if (isSubtype(r.type, 'integer')) return this.engine.number(r);
       }
     }
-    return this.engine._fn('Root', [this, this.engine.box(exp)]);
+    return this.engine._fn('Root', [this, this.engine.expr(exp)]);
   }
 
   sqrt(): Expression {
@@ -365,7 +365,7 @@ export class BoxedNumber
   }
 
   ln(semiBase?: number | Expression): Expression {
-    const base = semiBase ? this.engine.box(semiBase) : undefined;
+    const base = semiBase ? this.engine.expr(semiBase) : undefined;
 
     // Mathematica returns `Log[0]` as `-∞`
     if (this.isSame(0)) return this.engine.NegativeInfinity;
@@ -670,7 +670,7 @@ export class BoxedNumber
 
   get structural(): Expression {
     if (this.isStructural) return this;
-    return this.engine.box(this.json, { form: 'structural' });
+    return this.engine.expr(this.json, { form: 'structural' });
   }
 
   toNumericValue(): [NumericValue, Expression] {

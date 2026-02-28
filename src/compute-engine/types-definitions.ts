@@ -1,7 +1,7 @@
 import type { OneOf } from '../common/one-of';
 import type { Type, TypeString } from '../common/type/types';
 import type { BoxedType } from '../common/type/boxed-type';
-import type { LatexString, LatexDictionaryEntry } from './latex-syntax/types';
+import type { LatexString } from './latex-syntax/types';
 import type {
   Expression,
   ExpressionInput,
@@ -603,8 +603,6 @@ export interface LibraryDefinition {
   requires?: string[];
   /** Symbol and operator definitions */
   definitions?: SymbolDefinitions | SymbolDefinitions[];
-  /** LaTeX dictionary entries for parsing/serialization */
-  latexDictionary?: Readonly<Partial<LatexDictionaryEntry>[]>;
 }
 
 /**

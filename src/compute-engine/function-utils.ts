@@ -281,7 +281,7 @@ export function evaluateStatements(
       break;
     }
     if ((h === 'Break' || h === 'Continue') && isFunction(op)) {
-      result = ce.box([h, op.op1.evaluate()]);
+      result = ce.expr([h, op.op1.evaluate()]);
       break;
     }
     result = op.evaluate();

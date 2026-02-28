@@ -44,8 +44,8 @@ export function repeat(
  *
  * Example:
  * ```typescript
- * const a = ce.box(['List', 1, 2, 3]);
- * const b = ce.box(['List', 4, 5, 6]);
+ * const a = ce.expr(['List', 1, 2, 3]);
+ * const b = ce.expr(['List', 4, 5, 6]);
  * const zipped = zip([a, b]);
  * for (const [x, y] of zipped) {
  *   console.log(x, y); // 1 4, 2 5, 3 6

@@ -14,6 +14,7 @@ import type {
   Sign,
 } from '../global-types';
 import { asLatexString } from '../latex-syntax/utils';
+import { parse as parseLatex } from '../latex-syntax/latex-syntax';
 import { isNumber, isSymbol, isFunction } from './type-guards';
 
 type ConstructibleTrigValues = [
@@ -652,7 +653,10 @@ export function constructibleValues(
         Object.fromEntries(
           Object.entries(results).map(([op, r]) => [
             op,
-            (ce.parse(asLatexString(r)) ?? ce.box(r)).simplify(),
+            (asLatexString(r)
+              ? ce.expr(parseLatex(asLatexString(r)!) ?? r)
+              : ce.expr(r)
+            ).simplify(),
           ])
         ),
       ]);

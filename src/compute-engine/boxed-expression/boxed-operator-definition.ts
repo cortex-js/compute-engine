@@ -311,7 +311,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
             bindings: new Map(),
           }
         : undefined;
-      const boxedFn = this.engine.box(def.evaluate, {
+      const boxedFn = this.engine.expr(def.evaluate, {
         form: 'raw',
         scope,
       });

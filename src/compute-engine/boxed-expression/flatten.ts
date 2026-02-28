@@ -82,7 +82,7 @@ export function flattenSequence(
       if (x.op1.operator === 'Sequence') {
         const seq = isFunction(x.op1) ? x.op1.ops : [];
         // If this is an empty delimiter, i.e. `()`, preserve it as a tuple, don't flatten it.
-        if (seq.length === 0) ys.push(x.engine.box(['Tuple']));
+        if (seq.length === 0) ys.push(x.engine.expr(['Tuple']));
         else ys.push(...flattenSequence(seq));
       } else ys.push(x.op1);
     } else if (isFunction(x, 'Sequence')) {

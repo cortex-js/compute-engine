@@ -7,6 +7,7 @@ import type {
 } from './global-types';
 import type { Type, TypeString } from '../common/type/types';
 import type { LatexString } from './latex-syntax/types';
+import { parse as parseLatex } from './latex-syntax/latex-syntax';
 import { isExpression } from './boxed-expression/type-guards';
 import {
   expand as expandExpr,
@@ -14,7 +15,6 @@ import {
 } from './boxed-expression/expand';
 import { factor as factorExpr } from './boxed-expression/factor';
 import { compile as compileExpr } from './compilation/compile-expression';
-import type { CompilationResult } from './compilation/types';
 
 let _defaultEngine: IComputeEngine | null = null;
 let _ComputeEngineClass: (new () => IComputeEngine) | null = null;
@@ -40,17 +40,17 @@ export function getDefaultEngine(): IComputeEngine {
  *  Strings are treated as LaTeX and parsed. */
 function toExpression(input: LatexString | ExpressionInput): Expression {
   if (typeof input === 'string')
-    return getDefaultEngine().parse(input, { strict: false });
+    return getDefaultEngine().expr(parseLatex(input) ?? 'Nothing');
   if (isExpression(input)) return input;
-  return getDefaultEngine().box(input);
+  return getDefaultEngine().expr(input);
 }
 
 export function parse(latex: LatexString): Expression {
-  return getDefaultEngine().parse(latex, { strict: false });
+  return getDefaultEngine().expr(parseLatex(latex) ?? 'Nothing');
 }
 
-export function box(expr: ExpressionInput): Expression {
-  return getDefaultEngine().box(expr);
+export function expr(expr: ExpressionInput): Expression {
+  return getDefaultEngine().expr(expr);
 }
 
 export function simplify(expr: LatexString | ExpressionInput): Expression {
@@ -115,15 +115,8 @@ export function factor(expr: LatexString | ExpressionInput): Expression {
 
 export function compile<T extends string = 'javascript'>(
   expr: LatexString | ExpressionInput,
-  options: Parameters<typeof compileExpr>[1] & { to?: T; realOnly: true }
-): CompilationResult<T, number>;
-export function compile<T extends string = 'javascript'>(
-  expr: LatexString | ExpressionInput,
   options?: Parameters<typeof compileExpr>[1] & { to?: T }
-): CompilationResult<T>;
-export function compile<T extends string = 'javascript'>(
-  expr: LatexString | ExpressionInput,
-  options?: Parameters<typeof compileExpr>[1] & { to?: T }
-): CompilationResult<T> {
-  return compileExpr(toExpression(expr), options) as CompilationResult<T>;
+): ReturnType<typeof compileExpr> {
+  return compileExpr(toExpression(expr), options);
 }
+

@@ -90,7 +90,7 @@ export function getInequalityBoundsFromAssumptions(
 
       if (hasNegatedSymbol && constantSum !== 0) {
         // k - symbol < 0 => symbol > k
-        const bound = ce.box(constantSum);
+        const bound = ce.expr(constantSum);
         if (
           result.lowerBound === undefined ||
           bound.isGreater(result.lowerBound) === true
@@ -135,7 +135,7 @@ export function getInequalityBoundsFromAssumptions(
 
       if (hasSymbol && constantSum !== 0) {
         // symbol + k < 0 => symbol < -k
-        const bound = ce.box(-constantSum);
+        const bound = ce.expr(-constantSum);
         if (
           result.upperBound === undefined ||
           bound.isLess(result.upperBound) === true

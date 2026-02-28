@@ -4,7 +4,6 @@ import {
   initializeCommonSymbols,
 } from './engine-common-symbols';
 import {
-  collectLibraryLatexEntries,
   loadLibraryDefinitions,
   resolveBootstrapLibraries,
 } from './engine-library-bootstrap';
@@ -70,9 +69,6 @@ export class EngineStartupCoordinator {
   ): void {
     const resolved = resolveBootstrapLibraries(libraries);
     loadLibraryDefinitions(this.engine, resolved);
-
-    const latexEntries = collectLibraryLatexEntries(resolved);
-    if (latexEntries.length > 0) this.engine.latexDictionary = latexEntries;
   }
 
   initializeCommonSymbolBindings(

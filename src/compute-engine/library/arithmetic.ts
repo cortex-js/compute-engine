@@ -1629,7 +1629,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 1200,
       broadcastable: true,
       signature: '(number) -> boolean',
-      canonical: (ops, { engine }) => engine.box(['Not', ['IsPrime', ...ops]]),
+      canonical: (ops, { engine }) => engine.expr(['Not', ['IsPrime', ...ops]]),
     },
 
     IsOdd: {
@@ -1660,7 +1660,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 1200,
       broadcastable: true,
       signature: '(number) -> boolean',
-      canonical: (ops, { engine }) => engine.box(['Not', ['IsOdd', ...ops]]),
+      canonical: (ops, { engine }) => engine.expr(['Not', ['IsOdd', ...ops]]),
     },
     // @todo: Divisor:
   },
@@ -2073,7 +2073,7 @@ function evaluateMinMax(
   }
 
   if (rest.length > 0)
-    return ce.box(result ? [mode, result, ...rest] : [mode, ...rest]);
+    return ce.expr(result ? [mode, result, ...rest] : [mode, ...rest]);
   return result ?? (upper ? ce.NegativeInfinity : ce.PositiveInfinity);
 }
 

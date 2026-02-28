@@ -357,7 +357,7 @@ export function fromCoefficients(
       }
     } else {
       // Higher degree term
-      const xPow = ce.box(['Power', variable, i]);
+      const xPow = ce.expr(['Power', variable, i]);
       if (coef.isSame(1)) {
         terms.push(xPow);
       } else if (coef.isSame(-1)) {

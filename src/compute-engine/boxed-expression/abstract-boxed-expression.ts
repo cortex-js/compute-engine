@@ -34,19 +34,11 @@ import type {
 import type { NumericValue } from '../numeric-value/types';
 import type { SmallInteger } from '../numerics/types';
 
-import {
-  getApplyFunctionStyle,
-  getFractionStyle,
-  getGroupStyle,
-  getLogicStyle,
-  getNumericSetStyle,
-  getPowerStyle,
-  getRootStyle,
-} from '../latex-syntax/serializer-style';
-import { serializeLatex } from '../latex-syntax/serializer';
-import type { LatexString, SerializeLatexOptions } from '../latex-syntax/types';
-
 import { toAsciiMath } from './ascii-math';
+import {
+  serialize as serializeToLatex,
+  LatexSyntax,
+} from '../latex-syntax/latex-syntax';
 // Dynamic import for serializeJson to avoid circular dependency
 import { cmp, eq, same } from './compare';
 import { CancellationError } from '../../common/interruptible';
@@ -220,8 +212,34 @@ export abstract class _BoxedExpression implements Expression {
     }
   }
 
-  toLatex(options?: Partial<SerializeLatexOptions>): LatexString {
-    // If this is a finite lazy collection, we force evaluation
+  /**
+   * Return a LaTeX representation of this expression.
+   *
+   * This is a convenience getter that delegates to the standalone
+   * `serialize()` function from the `latex-syntax` module.
+   *
+   * Uses `toMathJson()` (not `.json`) so that the serialized form
+   * reflects the canonical/simplified structure, matching the behavior
+   * of the engine-based serializer.
+   */
+  get latex(): string {
+    // Materialize lazy collections before serializing
+    if (this.isLazyCollection) {
+      const materialized = this.evaluate({ materialization: true });
+      if (!materialized.isLazyCollection) return materialized.latex;
+    }
+    return serializeToLatex(this.toMathJson({ prettify: true }));
+  }
+
+  /**
+   * Return a LaTeX representation of this expression with custom
+   * serialization options.
+   *
+   * This delegates to `LatexSyntax.serialize()` with the provided options.
+   * Uses `toMathJson()` to get the canonical/simplified form.
+   */
+  toLatex(options?: Record<string, any>): string {
+    // Materialize lazy collections before serializing
     if (this.isLazyCollection) {
       const materialized = this.evaluate({
         materialization: options?.materialization ?? true,
@@ -229,92 +247,13 @@ export abstract class _BoxedExpression implements Expression {
       if (!materialized.isLazyCollection) return materialized.toLatex(options);
     }
 
-    // We want to use toMathJson(), not .json, so that we have all
-    // the digits for numbers, repeated decimals
     const json = this.toMathJson({ prettify: options?.prettify ?? true });
 
-    let effectiveOptions: SerializeLatexOptions = {
-      imaginaryUnit: '\\imaginaryI',
-
-      positiveInfinity: '\\infty',
-      negativeInfinity: '-\\infty',
-      notANumber: '\\operatorname{NaN}',
-
-      decimalSeparator: this.engine.decimalSeparator,
-      digitGroupSeparator: '\\,', // for thousands, etc...
-      exponentProduct: '\\cdot',
-      beginExponentMarker: '10^{', // could be 'e'
-      endExponentMarker: '}',
-
-      digitGroup: 3,
-
-      truncationMarker: '\\ldots',
-
-      repeatingDecimal: 'vinculum',
-
-      fractionalDigits: 'max',
-      notation: 'auto',
-      avoidExponentsInRange: [-7, 20],
-
-      prettify: true, // (overridden subseq. by options)
-      materialization: false,
-
-      invisibleMultiply: '', // '\\cdot',
-      invisiblePlus: '', // '+',
-      // invisibleApply: '',
-
-      multiply: '\\times',
-
-      missingSymbol: '\\blacksquare',
-
-      dmsFormat: false,
-      angleNormalization: 'none' as const,
-
-      // openGroup: '(',
-      // closeGroup: ')',
-      // divide: '\\frac{#1}{#2}',
-      // subtract: '#1-#2',
-      // add: '#1+#2',
-      // negate: '-#1',
-      // squareRoot: '\\sqrt{#1}',
-      // nthRoot: '\\sqrt[#2]{#1}',
-      applyFunctionStyle: getApplyFunctionStyle,
-      groupStyle: getGroupStyle,
-      rootStyle: getRootStyle,
-      fractionStyle: getFractionStyle,
-      logicStyle: getLogicStyle,
-      powerStyle: getPowerStyle,
-      numericSetStyle: getNumericSetStyle,
-    };
-
-    if (options?.fractionalDigits === 'auto')
-      effectiveOptions.fractionalDigits = -this.engine.precision;
-    else effectiveOptions.fractionalDigits = options?.fractionalDigits ?? 'max';
-
-    if (
-      typeof effectiveOptions.fractionalDigits === 'number' &&
-      effectiveOptions.fractionalDigits > this.engine.precision
-    )
-      effectiveOptions.fractionalDigits = this.engine.precision;
-
-    effectiveOptions = {
-      ...effectiveOptions,
-      ...(options ?? {}),
-      fractionalDigits: effectiveOptions.fractionalDigits,
-    };
-
-    if (!effectiveOptions.prettify && this.verbatimLatex)
-      return this.verbatimLatex;
-
-    return serializeLatex(
-      json,
-      this.engine._indexedLatexDictionary,
-      effectiveOptions
-    );
-  }
-
-  get latex(): LatexString {
-    return this.toLatex();
+    if (!options || Object.keys(options).length === 0) {
+      return serializeToLatex(json);
+    }
+    const syntax = new LatexSyntax(options);
+    return syntax.serialize(json, options);
   }
 
   /** Called by `JSON.stringify()` when serializing to json.

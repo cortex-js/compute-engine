@@ -47,7 +47,7 @@ fi
 export BUILD="${1-production}"
 
 # export TARGETS="math-json cortex compute-engine"
-export TARGETS="math-json compute-engine"
+export TARGETS="math-json latex-syntax interval numerics core compile compute-engine"
 
 # export GIT_VERSION=`git describe --long --dirty`
 
@@ -85,7 +85,27 @@ if [[ "$TARGETS" == *compute-engine* ]]; then
 fi
 if [[ "$TARGETS" == *cortex* ]]; then
   npx tsc --target "es2022" -d --moduleResolution "node" --allowImportingTsExtensions "true" \
-    --emitDeclarationOnly --outDir ./dist/types ./src/cortex.ts 
+    --emitDeclarationOnly --outDir ./dist/types ./src/cortex.ts
+fi
+if [[ "$TARGETS" == *latex-syntax* ]]; then
+  npx tsc --target "es2022" -d --moduleResolution "node" --allowImportingTsExtensions "true" \
+    --emitDeclarationOnly --outDir ./dist/types ./src/latex-syntax.ts
+fi
+if [[ "$TARGETS" == *interval* ]]; then
+  npx tsc --target "es2022" -d --moduleResolution "node" --allowImportingTsExtensions "true" \
+    --emitDeclarationOnly --outDir ./dist/types ./src/interval.ts
+fi
+if [[ "$TARGETS" == *numerics* ]]; then
+  npx tsc --target "es2022" -d --moduleResolution "node" --allowImportingTsExtensions "true" \
+    --emitDeclarationOnly --outDir ./dist/types ./src/numerics.ts
+fi
+if [[ "$TARGETS" == *core* ]]; then
+  npx tsc --target "es2022" -d --moduleResolution "node" --allowImportingTsExtensions "true" \
+    --emitDeclarationOnly --outDir ./dist/types ./src/core.ts
+fi
+if [[ "$TARGETS" == *compile* ]]; then
+  npx tsc --target "es2022" -d --moduleResolution "node" --allowImportingTsExtensions "true" \
+    --emitDeclarationOnly --outDir ./dist/types ./src/compile.ts
 fi
 echo -e $LINECLEAR$BASENAME$CHECK$DIM" Building TypeScript declaration files$RESET"
 

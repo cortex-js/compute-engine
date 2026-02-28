@@ -774,7 +774,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
               first = false;
               yield;
             }
-            return ce.box(accumulator);
+            return ce.expr(accumulator);
           })(),
           ce._timeRemaining
         );
@@ -1576,7 +1576,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         return arr;
       };
 
-      return ce.box(fillArray(dims as number[], Array(dims.length).fill(0)));
+      return ce.expr(fillArray(dims as number[], Array(dims.length).fill(0)));
     },
   },
 

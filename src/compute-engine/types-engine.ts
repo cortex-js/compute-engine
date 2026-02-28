@@ -4,18 +4,13 @@ import type { MathJsonSymbol, MathJsonNumberObject } from '../math-json';
 import type { Type, TypeString, TypeResolver } from '../common/type/types';
 import type { BoxedType } from '../common/type/boxed-type';
 import type { ConfigurationChangeListener } from '../common/configuration-change';
+import type { ParseLatexOptions } from './latex-syntax/types';
 import type {
   ExactNumericValueData,
   NumericValue,
   NumericValueData,
 } from './numeric-value/types';
 import type { BigNum, IBigNum, Rational } from './numerics/types';
-import type {
-  LatexDictionaryEntry,
-  LatexString,
-  ParseLatexOptions,
-} from './latex-syntax/types';
-import type { IndexedLatexDictionary } from './latex-syntax/dictionary/definitions';
 
 import type { Expression, ExpressionInput } from './types-expression';
 import type {
@@ -62,13 +57,6 @@ type EvalContext = KernelEvalContext<Expression, BoxedDefinition>;
 
 /** @internal */
 export interface IComputeEngine extends IBigNum {
-  latexDictionary: readonly LatexDictionaryEntry[];
-
-  /** @private */
-  _indexedLatexDictionary: IndexedLatexDictionary;
-
-  decimalSeparator: LatexString;
-
   // Common symbols
   readonly True: Expression;
   readonly False: Expression;
@@ -168,6 +156,15 @@ export interface IComputeEngine extends IBigNum {
 
   strict: boolean;
 
+  expr(
+    expr: NumericValue | ExpressionInput,
+    options?: {
+      form?: FormOption;
+      scope?: Scope;
+    }
+  ): Expression;
+
+  /** @deprecated Use `expr()` instead. */
   box(
     expr: NumericValue | ExpressionInput,
     options?: {
@@ -175,6 +172,17 @@ export interface IComputeEngine extends IBigNum {
       scope?: Scope;
     }
   ): Expression;
+
+  /**
+   * Parse a LaTeX string and return a boxed expression.
+   *
+   * This is a convenience method equivalent to `ce.expr(parse(latex))`,
+   * but uses the engine's symbol definitions for better parsing accuracy.
+   */
+  parse(
+    latex: string | null,
+    options?: Partial<ParseLatexOptions> & { form?: FormOption }
+  ): Expression | null;
 
   function(
     name: string,
@@ -189,7 +197,7 @@ export interface IComputeEngine extends IBigNum {
   /**
    * This is a primitive to create a boxed function.
    *
-   * In general, consider using `ce.box()` or `ce.function()` or
+   * In general, consider using `ce.expr()` or `ce.function()` or
    * `canonicalXXX()` instead.
    *
    * The caller must ensure that the arguments are in canonical form:
@@ -215,19 +223,19 @@ export interface IComputeEngine extends IBigNum {
     options?: Record<string, unknown>
   ): CompilationResult;
 
-  /** Register a custom compilation target. */
+  /** @internal Get a registered compilation target by name. */
+  getCompilationTarget(name: string): LanguageTarget<Expression> | undefined;
+
+  /** @internal Return the names of all registered compilation targets. */
+  listCompilationTargets(): string[];
+
+  /** @internal Register a compilation target. */
   registerCompilationTarget(
     name: string,
     target: LanguageTarget<Expression>
   ): void;
 
-  /** Get a registered compilation target by name. */
-  getCompilationTarget(name: string): LanguageTarget<Expression> | undefined;
-
-  /** Return the names of all registered compilation targets. */
-  listCompilationTargets(): string[];
-
-  /** Remove a registered compilation target. */
+  /** @internal Remove a registered compilation target. */
   unregisterCompilationTarget(name: string): void;
 
   /** @internal Fu trigonometric simplification algorithm */
@@ -284,19 +292,6 @@ export interface IComputeEngine extends IBigNum {
   getRuleSet(
     id?: 'harmonization' | 'solve-univariate' | 'standard-simplification'
   ): BoxedRuleSet | undefined;
-
-  parse(
-    latex: null,
-    options?: Partial<ParseLatexOptions> & { form?: FormOption }
-  ): null;
-  parse(
-    latex: LatexString,
-    options?: Partial<ParseLatexOptions> & { form?: FormOption }
-  ): Expression;
-  parse(
-    latex: LatexString | null,
-    options?: Partial<ParseLatexOptions> & { form?: FormOption }
-  ): Expression | null;
 
   pushScope(scope?: Scope, name?: string): void;
   popScope(): void;
@@ -362,7 +357,7 @@ export interface IComputeEngine extends IBigNum {
   ): BoxedDefinition;
 
   /**
-   * Use `ce.box(id)` instead
+   * Use `ce.expr(id)` instead
    * @internal */
   _getSymbolValue(id: MathJsonSymbol): Expression | undefined;
   /**

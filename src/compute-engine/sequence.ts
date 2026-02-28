@@ -14,6 +14,7 @@ import type {
 } from './global-types';
 import { isValueDef, updateDef } from './boxed-expression/utils';
 import { isSymbol, isNumber, isFunction } from './boxed-expression/type-guards';
+import { serialize as serializeLatex } from './latex-syntax/latex-syntax';
 
 // ============================================================================
 // Sequence Registry (SUB-7: Introspection support)
@@ -295,7 +296,7 @@ export function createSequenceHandler(
   if (def.constraints) {
     constraintsExpr =
       typeof def.constraints === 'string'
-        ? ce.parse(def.constraints)
+        ? ce.parse(def.constraints)!
         : def.constraints;
   }
 
@@ -328,7 +329,7 @@ export function createSequenceHandler(
     if (recurrence === null) {
       recurrence =
         typeof recurrenceSource === 'string'
-          ? engine.parse(recurrenceSource)
+          ? engine.parse(recurrenceSource)!
           : recurrenceSource;
     }
 
@@ -453,7 +454,7 @@ export function validateSequenceDefinition(
   // Parse recurrence to check validity
   const recurrence =
     typeof def.recurrence === 'string'
-      ? ce.parse(def.recurrence)
+      ? ce.parse(def.recurrence)!
       : def.recurrence;
 
   if (!recurrence.isValid) {
@@ -562,7 +563,7 @@ export function addSequenceRecurrence(
 ): void {
   const pending = getOrCreatePending(ce, name);
   // Convert to LaTeX for deferred parsing
-  pending.recurrence = { variable, latex: expr.latex };
+  pending.recurrence = { variable, latex: serializeLatex(expr.json) };
   tryFinalizeSequence(ce, name);
 }
 
@@ -579,7 +580,7 @@ export function addMultiIndexRecurrence(
   expr: Expression
 ): void {
   const pending = getOrCreatePending(ce, name);
-  pending.recurrence = { variables, latex: expr.latex };
+  pending.recurrence = { variables, latex: serializeLatex(expr.json) };
   pending.isMultiIndex = true;
   tryFinalizeSequence(ce, name);
 }
@@ -907,7 +908,7 @@ export function generateSequenceTerms(
 
   // Generate terms by evaluating subscripted expressions
   for (let n = start; step > 0 ? n <= end : n >= end; n += step) {
-    const expr = ce.parse(`${name}_{${n}}`);
+    const expr = ce.parse(`${name}_{${n}}`)!;
     const value = expr.evaluate();
 
     // Only include if we got a valid numeric result

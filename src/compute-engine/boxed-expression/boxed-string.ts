@@ -87,7 +87,7 @@ export class BoxedString extends _BoxedExpression implements StringInterface {
     _options?: PatternMatchOptions
   ): BoxedSubstitution | null {
     if (!isExpression(pattern))
-      pattern = this.engine.box(pattern, { form: 'raw' });
+      pattern = this.engine.expr(pattern, { form: 'raw' });
 
     if (isWildcard(pattern)) return { [wildcardName(pattern)!]: this };
 

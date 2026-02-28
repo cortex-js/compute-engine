@@ -234,7 +234,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
 
   add(rhs: number | Expression): Expression {
     if (rhs === 0) return this;
-    return add(this, this.engine.box(rhs));
+    return add(this, this.engine.expr(rhs));
   }
 
   mul(rhs: NumericValue | number | Expression): Expression {
@@ -246,7 +246,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       if (rhs.isNegativeOne) return this.neg();
       if (rhs.isZero && !this.isNaN) return this.engine.Zero;
     }
-    return mul(this, this.engine.box(rhs));
+    return mul(this, this.engine.expr(rhs));
   }
 
   div(rhs: number | Expression): Expression {
@@ -267,7 +267,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     if (e === 2) return this.sqrt();
     if (e === -1) return this.inv();
 
-    return ce._fn('Root', [this, ce.box(n)]);
+    return ce._fn('Root', [this, ce.expr(n)]);
   }
 
   sqrt(): Expression {
@@ -281,7 +281,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   }
 
   ln(semiBase?: number | Expression): Expression {
-    const base = semiBase ? this.engine.box(semiBase) : undefined;
+    const base = semiBase ? this.engine.expr(semiBase) : undefined;
 
     // Mathematica returns `Log[0]` as `-∞`
     if (this.isSame(0)) return this.engine.NegativeInfinity;
@@ -471,13 +471,13 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       else if (Array.isArray(value))
         value = ce._fn(
           'List',
-          value.map((x) => ce.box(x))
+          value.map((x) => ce.expr(x))
         );
       else throw new Error(`Invalid value for symbol ${this._id}: ${value}`);
     }
 
     if (value !== undefined) {
-      const boxedValue = ce.box(value as Expression);
+      const boxedValue = ce.expr(value as Expression);
       v = boxedValue.evaluate();
     }
 
@@ -734,7 +734,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         : canonical === false
         ? 'raw'
         : canonical;
-    return this.engine.box(sub[this._id], { form });
+    return this.engine.expr(sub[this._id], { form });
   }
 
   get _asCollection(): CollectionHandlers | undefined {

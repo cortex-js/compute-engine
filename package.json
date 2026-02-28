@@ -54,6 +54,36 @@
       "import": "./dist/math-json.min.esm.js",
       "require": "./dist/math-json.min.umd.cjs",
       "default": "./dist/math-json.min.esm.js"
+    },
+    "./latex-syntax": {
+      "types": "./dist/types/latex-syntax.d.ts",
+      "import": "./dist/latex-syntax.min.esm.js",
+      "require": "./dist/latex-syntax.min.umd.cjs",
+      "default": "./dist/latex-syntax.min.esm.js"
+    },
+    "./interval": {
+      "types": "./dist/types/interval.d.ts",
+      "import": "./dist/interval.min.esm.js",
+      "require": "./dist/interval.min.umd.cjs",
+      "default": "./dist/interval.min.esm.js"
+    },
+    "./numerics": {
+      "types": "./dist/types/numerics.d.ts",
+      "import": "./dist/numerics.min.esm.js",
+      "require": "./dist/numerics.min.umd.cjs",
+      "default": "./dist/numerics.min.esm.js"
+    },
+    "./core": {
+      "types": "./dist/types/core.d.ts",
+      "import": "./dist/core.min.esm.js",
+      "require": "./dist/core.min.umd.cjs",
+      "default": "./dist/core.min.esm.js"
+    },
+    "./compile": {
+      "types": "./dist/types/compile.d.ts",
+      "import": "./dist/compile.min.esm.js",
+      "require": "./dist/compile.min.umd.cjs",
+      "default": "./dist/compile.min.esm.js"
     }
   },
   "main": "./dist/compute-engine.min.esm.js",

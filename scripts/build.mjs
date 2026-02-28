@@ -33,6 +33,66 @@ const MATH_JSON_UMD_OPTIONS = {
   },
 };
 
+const LATEX_SYNTAX_UMD_OPTIONS = {
+  banner: {
+    js: `/** LatexSyntax ${SDK_VERSION} ${
+      process.env.GIT_VERSION ? ' -- ' + process.env.GIT_VERSION : ''
+    }*/
+    (function(global,factory){typeof exports === 'object' && typeof module !== 'undefined' ? factory(exports) : typeof define === 'function' && define.amd ? define(['exports'],factory):(global = typeof globalThis !== 'undefined' ? globalThis : global || self, factory(global.LatexSyntax = {}));})(this, (function (exports) { 'use strict';`,
+  },
+  footer: {
+    js: `Object.assign(exports, LatexSyntax); Object.defineProperty(exports, '__esModule', { value: true });}));`,
+  },
+};
+
+const INTERVAL_UMD_OPTIONS = {
+  banner: {
+    js: `/** Interval ${SDK_VERSION} ${
+      process.env.GIT_VERSION ? ' -- ' + process.env.GIT_VERSION : ''
+    }*/
+    (function(global,factory){typeof exports === 'object' && typeof module !== 'undefined' ? factory(exports) : typeof define === 'function' && define.amd ? define(['exports'],factory):(global = typeof globalThis !== 'undefined' ? globalThis : global || self, factory(global.Interval = {}));})(this, (function (exports) { 'use strict';`,
+  },
+  footer: {
+    js: `Object.assign(exports, Interval); Object.defineProperty(exports, '__esModule', { value: true });}));`,
+  },
+};
+
+const NUMERICS_UMD_OPTIONS = {
+  banner: {
+    js: `/** Numerics ${SDK_VERSION} ${
+      process.env.GIT_VERSION ? ' -- ' + process.env.GIT_VERSION : ''
+    }*/
+    (function(global,factory){typeof exports === 'object' && typeof module !== 'undefined' ? factory(exports) : typeof define === 'function' && define.amd ? define(['exports'],factory):(global = typeof globalThis !== 'undefined' ? globalThis : global || self, factory(global.Numerics = {}));})(this, (function (exports) { 'use strict';`,
+  },
+  footer: {
+    js: `Object.assign(exports, Numerics); Object.defineProperty(exports, '__esModule', { value: true });}));`,
+  },
+};
+
+const CORE_UMD_OPTIONS = {
+  banner: {
+    js: `/** ComputeEngineCore ${SDK_VERSION} ${
+      process.env.GIT_VERSION ? ' -- ' + process.env.GIT_VERSION : ''
+    }*/
+    (function(global,factory){typeof exports === 'object' && typeof module !== 'undefined' ? factory(exports) : typeof define === 'function' && define.amd ? define(['exports'],factory):(global = typeof globalThis !== 'undefined' ? globalThis : global || self, factory(global.ComputeEngineCore = {}));})(this, (function (exports) { 'use strict';`,
+  },
+  footer: {
+    js: `Object.assign(exports, ComputeEngineCore); Object.defineProperty(exports, '__esModule', { value: true });}));`,
+  },
+};
+
+const COMPILE_UMD_OPTIONS = {
+  banner: {
+    js: `/** Compile ${SDK_VERSION} ${
+      process.env.GIT_VERSION ? ' -- ' + process.env.GIT_VERSION : ''
+    }*/
+    (function(global,factory){typeof exports === 'object' && typeof module !== 'undefined' ? factory(exports) : typeof define === 'function' && define.amd ? define(['exports'],factory):(global = typeof globalThis !== 'undefined' ? globalThis : global || self, factory(global.Compile = {}));})(this, (function (exports) { 'use strict';`,
+  },
+  footer: {
+    js: `Object.assign(exports, Compile); Object.defineProperty(exports, '__esModule', { value: true });}));`,
+  },
+};
+
 const BUILD_OPTIONS = {
   banner: {
     js: `/** Compute Engine ${SDK_VERSION} ${
@@ -133,5 +193,205 @@ await Promise.all([
     format: 'iife',
     ...MATH_JSON_UMD_OPTIONS,
     globalName: 'MathJson',
+  }),
+
+  // latex-syntax (non-minified)
+  esbuild.build({
+    ...BUILD_OPTIONS,
+    entryPoints: ['./src/latex-syntax.ts'],
+    outfile: './dist/latex-syntax.esm.js',
+    format: 'esm',
+  }),
+
+  esbuild.build({
+    ...BUILD_OPTIONS,
+    entryPoints: ['./src/latex-syntax.ts'],
+    outfile: './dist/latex-syntax.umd.cjs',
+    format: 'iife',
+    ...LATEX_SYNTAX_UMD_OPTIONS,
+    globalName: 'LatexSyntax',
+  }),
+
+  // latex-syntax (minified)
+  esbuild.build({
+    ...BUILD_OPTIONS,
+    drop: ['debugger'],
+    pure: ['console.assert', 'console.log'],
+    minify: true,
+    entryPoints: ['./src/latex-syntax.ts'],
+    outfile: './dist/latex-syntax.min.esm.js',
+    format: 'esm',
+  }),
+
+  esbuild.build({
+    ...BUILD_OPTIONS,
+    drop: ['debugger'],
+    pure: ['console.assert', 'console.log'],
+    minify: true,
+    entryPoints: ['./src/latex-syntax.ts'],
+    outfile: './dist/latex-syntax.min.umd.cjs',
+    format: 'iife',
+    ...LATEX_SYNTAX_UMD_OPTIONS,
+    globalName: 'LatexSyntax',
+  }),
+
+  // interval (non-minified)
+  esbuild.build({
+    ...BUILD_OPTIONS,
+    entryPoints: ['./src/interval.ts'],
+    outfile: './dist/interval.esm.js',
+    format: 'esm',
+  }),
+
+  esbuild.build({
+    ...BUILD_OPTIONS,
+    entryPoints: ['./src/interval.ts'],
+    outfile: './dist/interval.umd.cjs',
+    format: 'iife',
+    ...INTERVAL_UMD_OPTIONS,
+    globalName: 'Interval',
+  }),
+
+  // interval (minified)
+  esbuild.build({
+    ...BUILD_OPTIONS,
+    drop: ['debugger'],
+    pure: ['console.assert', 'console.log'],
+    minify: true,
+    entryPoints: ['./src/interval.ts'],
+    outfile: './dist/interval.min.esm.js',
+    format: 'esm',
+  }),
+
+  esbuild.build({
+    ...BUILD_OPTIONS,
+    drop: ['debugger'],
+    pure: ['console.assert', 'console.log'],
+    minify: true,
+    entryPoints: ['./src/interval.ts'],
+    outfile: './dist/interval.min.umd.cjs',
+    format: 'iife',
+    ...INTERVAL_UMD_OPTIONS,
+    globalName: 'Interval',
+  }),
+
+  // numerics (non-minified)
+  esbuild.build({
+    ...BUILD_OPTIONS,
+    entryPoints: ['./src/numerics.ts'],
+    outfile: './dist/numerics.esm.js',
+    format: 'esm',
+  }),
+
+  esbuild.build({
+    ...BUILD_OPTIONS,
+    entryPoints: ['./src/numerics.ts'],
+    outfile: './dist/numerics.umd.cjs',
+    format: 'iife',
+    ...NUMERICS_UMD_OPTIONS,
+    globalName: 'Numerics',
+  }),
+
+  // numerics (minified)
+  esbuild.build({
+    ...BUILD_OPTIONS,
+    drop: ['debugger'],
+    pure: ['console.assert', 'console.log'],
+    minify: true,
+    entryPoints: ['./src/numerics.ts'],
+    outfile: './dist/numerics.min.esm.js',
+    format: 'esm',
+  }),
+
+  esbuild.build({
+    ...BUILD_OPTIONS,
+    drop: ['debugger'],
+    pure: ['console.assert', 'console.log'],
+    minify: true,
+    entryPoints: ['./src/numerics.ts'],
+    outfile: './dist/numerics.min.umd.cjs',
+    format: 'iife',
+    ...NUMERICS_UMD_OPTIONS,
+    globalName: 'Numerics',
+  }),
+
+  // core (non-minified)
+  esbuild.build({
+    ...BUILD_OPTIONS,
+    entryPoints: ['./src/core.ts'],
+    outfile: './dist/core.esm.js',
+    format: 'esm',
+  }),
+
+  esbuild.build({
+    ...BUILD_OPTIONS,
+    entryPoints: ['./src/core.ts'],
+    outfile: './dist/core.umd.cjs',
+    format: 'iife',
+    ...CORE_UMD_OPTIONS,
+    globalName: 'ComputeEngineCore',
+  }),
+
+  // core (minified)
+  esbuild.build({
+    ...BUILD_OPTIONS,
+    drop: ['debugger'],
+    pure: ['console.assert', 'console.log'],
+    minify: true,
+    entryPoints: ['./src/core.ts'],
+    outfile: './dist/core.min.esm.js',
+    format: 'esm',
+  }),
+
+  esbuild.build({
+    ...BUILD_OPTIONS,
+    drop: ['debugger'],
+    pure: ['console.assert', 'console.log'],
+    minify: true,
+    entryPoints: ['./src/core.ts'],
+    outfile: './dist/core.min.umd.cjs',
+    format: 'iife',
+    ...CORE_UMD_OPTIONS,
+    globalName: 'ComputeEngineCore',
+  }),
+
+  // compile (non-minified)
+  esbuild.build({
+    ...BUILD_OPTIONS,
+    entryPoints: ['./src/compile.ts'],
+    outfile: './dist/compile.esm.js',
+    format: 'esm',
+  }),
+
+  esbuild.build({
+    ...BUILD_OPTIONS,
+    entryPoints: ['./src/compile.ts'],
+    outfile: './dist/compile.umd.cjs',
+    format: 'iife',
+    ...COMPILE_UMD_OPTIONS,
+    globalName: 'Compile',
+  }),
+
+  // compile (minified)
+  esbuild.build({
+    ...BUILD_OPTIONS,
+    drop: ['debugger'],
+    pure: ['console.assert', 'console.log'],
+    minify: true,
+    entryPoints: ['./src/compile.ts'],
+    outfile: './dist/compile.min.esm.js',
+    format: 'esm',
+  }),
+
+  esbuild.build({
+    ...BUILD_OPTIONS,
+    drop: ['debugger'],
+    pure: ['console.assert', 'console.log'],
+    minify: true,
+    entryPoints: ['./src/compile.ts'],
+    outfile: './dist/compile.min.umd.cjs',
+    format: 'iife',
+    ...COMPILE_UMD_OPTIONS,
+    globalName: 'Compile',
   }),
 ]);

@@ -455,7 +455,7 @@ export const SIMPLIFY_RULES: Rule[] = [
       if (x.op1.isNegative)
         return {
           value: x.engine
-            .box(['Multiply', ['Sqrt', x.op1.neg()], 'ImaginaryUnit'])
+            .expr(['Multiply', ['Sqrt', x.op1.neg()], 'ImaginaryUnit'])
             .simplify(),
           because: 'sqrt',
         };
@@ -637,7 +637,7 @@ export const SIMPLIFY_RULES: Rule[] = [
     const ce = x.engine;
     return {
       value: ce
-        .box(['Sqrt', ['Add', ['Square', x.op1], ['Square', x.op2]]])
+        .expr(['Sqrt', ['Add', ['Square', x.op1], ['Square', x.op2]]])
         .simplify(),
       because: 'hypot(x,y) -> sqrt(x^2+y^2)',
     };

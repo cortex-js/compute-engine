@@ -24,6 +24,11 @@ import {
 } from '../latex-syntax/utils';
 
 import { Parser } from '../latex-syntax/types';
+import {
+  parse as parseLatex,
+  LatexSyntax,
+} from '../latex-syntax/latex-syntax';
+import { LATEX_DICTIONARY } from '../latex-syntax/dictionary/default-dictionary';
 
 import { isPrime } from './predicates';
 import { isString, isNumber, isSymbol, isFunction } from './type-guards';
@@ -350,7 +355,7 @@ function parseRulePart(
 ): Expression | undefined {
   if (rule === undefined || typeof rule === 'function') return undefined;
   if (typeof rule === 'string') {
-    let expr = ce.parse(rule, {
+    let expr = ce.expr(parseLatex(rule) ?? 'Nothing', {
       form: options?.canonical ? 'canonical' : 'raw',
     });
     // Only auto-wildcard when explicitly requested (e.g., when parsing
@@ -371,7 +376,7 @@ function parseRulePart(
   const canonical =
     options?.canonical ??
     (rule instanceof _BoxedExpression ? rule.isCanonical : false);
-  return ce.box(rule, { form: canonical ? 'canonical' : 'raw' });
+  return ce.expr(rule, { form: canonical ? 'canonical' : 'raw' });
 }
 
 /** A rule can be expressed as a string of the form
@@ -404,7 +409,6 @@ function parseRule(
 
   // Setup custom dictionary entries for ...x, ...x?
   // mapping to wildcard sequence, wildcard optional sequence
-  const previousDictionary = ce.latexDictionary;
 
   // A mapping from a symbol to a wildcard
   const wildcards: Record<string, string> = {};
@@ -414,8 +418,8 @@ function parseRule(
 
   // Add wildcard entries for all lowercase letters, except
   // for e (natural number), d (differential) and i (imaginary unit)
-  ce.latexDictionary = [
-    ...previousDictionary,
+  const ruleDict = [
+    ...LATEX_DICTIONARY,
     {
       kind: 'prefix',
       precedence: 100,
@@ -507,6 +511,11 @@ function parseRule(
   ];
   const canonical = options?.canonical ?? false;
 
+  // Use a standalone LatexSyntax instance with the custom dictionary
+  const ruleSyntax = new LatexSyntax({
+    dictionary: ruleDict as ReadonlyArray<Partial<import('../latex-syntax/types').LatexDictionaryEntry>>,
+  });
+
   // Push a clean scope that only inherits from the system scope (index 0),
   // not from the global scope or user-defined scopes. This prevents user-defined
   // symbols (like `x` used as a function name in `x(y+z)`) from interfering with
@@ -518,9 +527,7 @@ function parseRule(
 
   let expr: Expression;
   try {
-    expr = ce.parse(rule);
-
-    ce.latexDictionary = previousDictionary;
+    expr = ce.expr(ruleSyntax.parse(rule) ?? 'Nothing');
 
     if (!expr.isValid || expr.operator !== 'Rule') {
       throw new Error(
@@ -624,7 +631,7 @@ function boxRule(
     if (latex) {
       // If the condition is a LaTeX string, it should be a predicate
       // (an expression with a Boolean value).
-      const condPattern = ce.parse(latex, {
+      const condPattern = ce.expr(parseLatex(latex) ?? 'Nothing', {
         form: options?.canonical ? 'canonical' : 'raw',
       });
 

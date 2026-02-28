@@ -49,44 +49,6 @@ This interface is augmented by `types-engine.ts` with the concrete
 
 <MemberCard>
 
-##### ExpressionComputeEngine.latexDictionary
-
-```ts
-latexDictionary: readonly OnlyFirst<
-  | DefaultEntry
-  | ExpressionEntry
-  | MatchfixEntry
-  | InfixEntry
-  | PostfixEntry
-  | PrefixEntry
-  | EnvironmentEntry
-  | SymbolEntry
-  | FunctionEntry, {} & 
-  | DefaultEntry
-  | ExpressionEntry
-  | MatchfixEntry
-  | InfixEntry
-  | PostfixEntry
-  | PrefixEntry
-  | EnvironmentEntry
-  | SymbolEntry
-  | FunctionEntry>[];
-```
-
-</MemberCard>
-
-<MemberCard>
-
-##### ExpressionComputeEngine.decimalSeparator
-
-```ts
-decimalSeparator: string;
-```
-
-</MemberCard>
-
-<MemberCard>
-
 ##### ExpressionComputeEngine.True
 
 ```ts
@@ -412,7 +374,31 @@ chop(n): number | Decimal
 
 <MemberCard>
 
-##### ExpressionComputeEngine.box()
+##### ExpressionComputeEngine.expr()
+
+```ts
+expr(expr, options?): Expression
+```
+
+####### expr
+
+[`NumericValue`](#abstract-numericvalue) | [`ExpressionInput`](#expressioninput)
+
+####### options?
+
+####### form?
+
+[`FormOption`](#formoption)
+
+####### scope?
+
+`Scope`
+
+</MemberCard>
+
+<MemberCard>
+
+##### ExpressionComputeEngine.~~box()~~
 
 ```ts
 box(expr, options?): Expression
@@ -431,6 +417,35 @@ box(expr, options?): Expression
 ####### scope?
 
 `Scope`
+
+###### Deprecated
+
+Use `expr()` instead.
+
+</MemberCard>
+
+<MemberCard>
+
+##### ExpressionComputeEngine.parse()
+
+```ts
+parse(latex, options?): Expression
+```
+
+Parse a LaTeX string and return a boxed expression.
+
+This is a convenience method equivalent to `ce.expr(parse(latex))`,
+but uses the engine's symbol definitions for better parsing accuracy.
+
+####### latex
+
+`string`
+
+####### options?
+
+`Partial`\<[`ParseLatexOptions`](#parselatexoptions)\> & \{
+  `form`: [`FormOption`](#formoption);
+ \}
 
 </MemberCard>
 
@@ -463,70 +478,6 @@ readonly [`ExpressionInput`](#expressioninput)[]
 ####### scope?
 
 `Scope`
-
-</MemberCard>
-
-<MemberCard>
-
-##### ExpressionComputeEngine.registerCompilationTarget()
-
-```ts
-registerCompilationTarget(name, target): void
-```
-
-Register a custom compilation target.
-
-####### name
-
-`string`
-
-####### target
-
-`LanguageTarget`\<[`Expression`](#expression-3)\>
-
-</MemberCard>
-
-<MemberCard>
-
-##### ExpressionComputeEngine.getCompilationTarget()
-
-```ts
-getCompilationTarget(name): LanguageTarget<Expression>
-```
-
-Get a registered compilation target by name.
-
-####### name
-
-`string`
-
-</MemberCard>
-
-<MemberCard>
-
-##### ExpressionComputeEngine.listCompilationTargets()
-
-```ts
-listCompilationTargets(): string[]
-```
-
-Return the names of all registered compilation targets.
-
-</MemberCard>
-
-<MemberCard>
-
-##### ExpressionComputeEngine.unregisterCompilationTarget()
-
-```ts
-unregisterCompilationTarget(name): void
-```
-
-Remove a registered compilation target.
-
-####### name
-
-`string`
 
 </MemberCard>
 
@@ -721,60 +672,6 @@ getRuleSet(id?): BoxedRuleSet
 ####### id?
 
 `"harmonization"` | `"solve-univariate"` | `"standard-simplification"`
-
-</MemberCard>
-
-<MemberCard>
-
-##### ExpressionComputeEngine.parse()
-
-###### parse(latex, options)
-
-```ts
-parse(latex, options?): null
-```
-
-####### latex
-
-`null`
-
-####### options?
-
-`Partial`\<[`ParseLatexOptions`](#parselatexoptions)\> & \{
-  `form`: [`FormOption`](#formoption);
- \}
-
-###### parse(latex, options)
-
-```ts
-parse(latex, options?): Expression
-```
-
-####### latex
-
-`string`
-
-####### options?
-
-`Partial`\<[`ParseLatexOptions`](#parselatexoptions)\> & \{
-  `form`: [`FormOption`](#formoption);
- \}
-
-###### parse(latex, options)
-
-```ts
-parse(latex, options?): Expression
-```
-
-####### latex
-
-`string`
-
-####### options?
-
-`Partial`\<[`ParseLatexOptions`](#parselatexoptions)\> & \{
-  `form`: [`FormOption`](#formoption);
- \}
 
 </MemberCard>
 
@@ -1655,12 +1552,12 @@ The following properties are applicable to expressions with a value:
 
 To create a boxed expression:
 
-#### `ce.box()` and `ce.parse()`
+#### `ce.expr()` and `ce.parse()`
 
-Use `ce.box()` or `ce.parse()`.
+Use `ce.expr()` or `ce.parse()`.
 
 Use `ce.parse()` to get a boxed expression from a LaTeX string.
-Use `ce.box()` to get a boxed expression from a MathJSON expression.
+Use `ce.expr()` to get a boxed expression from a MathJSON expression.
 
 By default, the result of these methods is a canonical expression. For
 example, if it is a rational literal, it is reduced to its canonical form.
@@ -1679,7 +1576,7 @@ If it is a function expression:
 
 #### `ce.function()`
 
-This is a specialized version of `ce.box()` for creating a new function
+This is a specialized version of `ce.expr()` for creating a new function
 expression.
 
 The canonical handler of the operator is called.
@@ -2010,45 +1907,6 @@ and functions.
 
 <MemberCard>
 
-##### Expression.toLatex()
-
-```ts
-toLatex(options?): string
-```
-
-Serialize to a LaTeX string.
-
-Note that lazy collections are eagerly evaluated.
-
-Will ignore any LaTeX metadata.
-
-####### options?
-
-`Partial`\<[`SerializeLatexOptions`](#serializelatexoptions)\>
-
-</MemberCard>
-
-<MemberCard>
-
-##### Expression.latex
-
-LaTeX representation of this expression.
-
-If the expression was parsed from LaTeX, the LaTeX representation is
-the same as the input LaTeX.
-
-To customize the serialization, use `expr.toLatex()`.
-
-Note that lazy collections are eagerly evaluated.
-
-:::info[Note]
-Applicable to canonical and non-canonical expressions.
-:::
-
-</MemberCard>
-
-<MemberCard>
-
 ##### Expression.toMathJson()
 
 ```ts
@@ -2088,6 +1946,38 @@ Note that lazy collections are *not* eagerly evaluated.
 :::info[Note]
 Applicable to canonical and non-canonical expressions.
 :::
+
+</MemberCard>
+
+<MemberCard>
+
+##### Expression.latex
+
+```ts
+readonly latex: string;
+```
+
+Return a LaTeX representation of this expression.
+
+This is a convenience getter that delegates to the standalone
+`serialize()` function from the `latex-syntax` module.
+
+</MemberCard>
+
+<MemberCard>
+
+##### Expression.toLatex()
+
+```ts
+toLatex(options?): string
+```
+
+Return a LaTeX representation of this expression with custom
+serialization options.
+
+####### options?
+
+`Record`\<`string`, `any`\>
 
 </MemberCard>
 
@@ -2860,7 +2750,7 @@ canonical status. (Canonicalization is opportunistic here, in other words).
 Applicable to canonical and non-canonical expressions.
 
 To match a specific symbol (not a wildcard pattern), the `match` must be
-a `Expression` (e.g., `{ match: ce.box('x'), replace: ... }`).
+a `Expression` (e.g., `{ match: ce.expr('x'), replace: ... }`).
 For simple symbol substitution, consider using `subs()` instead.
 :::
 
@@ -5357,36 +5247,6 @@ Symbol and operator definitions
 
 </MemberCard>
 
-<MemberCard>
-
-##### LibraryDefinition.latexDictionary?
-
-```ts
-optional latexDictionary: readonly Partial<OnlyFirst<
-  | DefaultEntry
-  | ExpressionEntry
-  | MatchfixEntry
-  | InfixEntry
-  | PostfixEntry
-  | PrefixEntry
-  | EnvironmentEntry
-  | SymbolEntry
-  | FunctionEntry, {} & 
-  | DefaultEntry
-  | ExpressionEntry
-  | MatchfixEntry
-  | InfixEntry
-  | PostfixEntry
-  | PrefixEntry
-  | EnvironmentEntry
-  | SymbolEntry
-  | FunctionEntry>>[];
-```
-
-LaTeX dictionary entries for parsing/serialization
-
-</MemberCard>
-
 ### BaseCollectionHandlers
 
 These handlers are the primitive operations that can be performed on
@@ -7529,7 +7389,7 @@ false
 
 ```typescript
 const ce = new ComputeEngine();
-const angle = ce.box(['Quantity', 9.5, 'deg']);
+const angle = ce.expr(['Quantity', 9.5, 'deg']);
 
 // DMS format
 angle.latex({ dmsFormat: true });  // "9°30'"
@@ -7538,7 +7398,7 @@ angle.latex({ dmsFormat: true });  // "9°30'"
 angle.latex({ dmsFormat: false }); // "9.5°"
 
 // Full DMS notation
-ce.box(['Quantity', 9.504166, 'deg'])
+ce.expr(['Quantity', 9.504166, 'deg'])
   .latex({ dmsFormat: true });     // "9°30'15\""
 ```
 
@@ -7563,22 +7423,22 @@ Useful for geographic coordinates and rotations.
 const ce = new ComputeEngine();
 
 // No normalization (show exact value)
-ce.box(['Degrees', 370])
+ce.expr(['Degrees', 370])
   .latex({ angleNormalization: 'none' });  // "370°"
 
 // Normalize to [0, 360) - useful for bearings
-ce.box(['Degrees', 370])
+ce.expr(['Degrees', 370])
   .latex({ angleNormalization: '0...360' }); // "10°"
 
-ce.box(['Degrees', -45])
+ce.expr(['Degrees', -45])
   .latex({ angleNormalization: '0...360' }); // "315°"
 
 // Normalize to [-180, 180] - useful for longitude
-ce.box(['Degrees', 190])
+ce.expr(['Degrees', 190])
   .latex({ angleNormalization: '-180...180' }); // "-170°"
 
 // Combine with DMS format
-ce.box(['Degrees', 370])
+ce.expr(['Degrees', 370])
   .latex({
     dmsFormat: true,
     angleNormalization: '0...360'

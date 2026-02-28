@@ -506,6 +506,6 @@ export function differentiate(
   // Substitute the argument into the derivative formula
   // We use subs() instead of apply() to avoid evaluating the expression,
   // which would convert symbolic transcendentals like ln(10) to numeric values.
-  const derivFormula = ce.box(h).subs({ _: g });
+  const derivFormula = ce.expr(h).subs({ _: g });
   return simplifyDerivative(derivFormula.mul(gPrime));
 }

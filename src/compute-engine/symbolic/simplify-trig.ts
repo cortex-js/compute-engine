@@ -165,7 +165,7 @@ function reduceTrigPeriodicity(
     if (reduced === 1) {
       remainingTerms.push(ce.Pi);
     } else {
-      remainingTerms.push(ce.box(['Multiply', reduced, 'Pi']));
+      remainingTerms.push(ce.expr(['Multiply', reduced, 'Pi']));
     }
   }
 
@@ -190,7 +190,7 @@ function reduceTrigPeriodicity(
   // For period 1 functions (tan, cot):
   // - Any integer multiple of π is removed, no sign change needed
 
-  return ce.box([fn, newArg]);
+  return ce.expr([fn, newArg]);
 }
 
 export function simplifyTrig(x: Expression): RuleStep | undefined {

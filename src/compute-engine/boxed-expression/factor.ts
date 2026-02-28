@@ -107,10 +107,10 @@ export function factorPerfectSquare(expr: Expression): Expression | null {
 
       if (crossTerm.isSame(positiveCross)) {
         // Pattern: sqrt1² + 2*sqrt1*sqrt2 + sqrt2² = (sqrt1+sqrt2)²
-        return ce.box(['Square', sqrt1.add(sqrt2).json]);
+        return ce.expr(['Square', sqrt1.add(sqrt2).json]);
       } else if (crossTerm.isSame(negativeCross)) {
         // Pattern: sqrt1² - 2*sqrt1*sqrt2 + sqrt2² = (sqrt1-sqrt2)²
-        return ce.box(['Square', sqrt1.sub(sqrt2).json]);
+        return ce.expr(['Square', sqrt1.sub(sqrt2).json]);
       }
     }
   }
@@ -165,7 +165,7 @@ function extractSquareRoot(
       const newOps = sqrt.ops.map((op) =>
         isFunction(op, 'Abs') ? op.op1 : op
       );
-      return ce.box(['Multiply', ...newOps.map((op) => op.json)]);
+      return ce.expr(['Multiply', ...newOps.map((op) => op.json)]);
     }
   }
 
@@ -215,7 +215,7 @@ export function factorDifferenceOfSquares(expr: Expression): Expression | null {
         isNeg = true;
         // Create positive version by negating the coefficient
         const newOps = [ops[0].neg(), ...ops.slice(1)];
-        absTerm = ce.box(['Multiply', ...newOps.map((op) => op.json)]);
+        absTerm = ce.expr(['Multiply', ...newOps.map((op) => op.json)]);
       }
     }
 
@@ -235,7 +235,7 @@ export function factorDifferenceOfSquares(expr: Expression): Expression | null {
   const b = negSquares[0].sqrt;
 
   // Pattern: a² - b² = (a-b)(a+b)
-  return ce.box(['Multiply', a.sub(b).json, a.add(b).json]);
+  return ce.expr(['Multiply', a.sub(b).json, a.add(b).json]);
 }
 
 /**
@@ -317,9 +317,9 @@ export function factorQuadratic(
   const factor2 = x.sub(root2);
 
   if (a.isSame(1)) {
-    return ce.box(['Multiply', factor1.json, factor2.json]);
+    return ce.expr(['Multiply', factor1.json, factor2.json]);
   } else {
-    return ce.box(['Multiply', a.json, factor1.json, factor2.json]);
+    return ce.expr(['Multiply', a.json, factor1.json, factor2.json]);
   }
 }
 
@@ -423,7 +423,7 @@ export function factorByRationalRoots(
   factors.push(remaining);
 
   if (factors.length === 1) return factors[0];
-  return ce.box(['Multiply', ...factors.map((f) => f.json)]);
+  return ce.expr(['Multiply', ...factors.map((f) => f.json)]);
 }
 
 /**
@@ -577,7 +577,7 @@ export function factor(expr: Expression): Expression {
     if (!common || common.isOne) return expr;
 
     const newTerms = terms.map(({ coeff, term }) =>
-      mul(term, ce.box(coeff.div(common)))
+      mul(term, ce.expr(coeff.div(common)))
     );
 
     return mul(ce.number(common), add(...newTerms));
@@ -908,7 +908,7 @@ export function partialFraction(
     if (t.power === 1) {
       termDenom = t.factor;
     } else {
-      termDenom = ce.box(['Power', t.factor.json, t.power]);
+      termDenom = ce.expr(['Power', t.factor.json, t.power]);
     }
 
     // Cofactor = expandedDenom / termDenom
@@ -973,7 +973,7 @@ export function partialFraction(
     if (t.power === 1) {
       termDenom = t.factor;
     } else {
-      termDenom = ce.box(['Power', t.factor.json, t.power]);
+      termDenom = ce.expr(['Power', t.factor.json, t.power]);
     }
 
     // Build the numerator

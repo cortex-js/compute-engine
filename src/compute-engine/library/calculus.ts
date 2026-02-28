@@ -262,7 +262,7 @@ volumes
           // Otherwise wrap it in a Function to compile correctly for numerical eval.
           // This converts e.g. 'x' to ['Function', 'x', 'x'] -> (x) => x
           const fnExpr =
-            f.operator === 'Function' ? f : ce.box(['Function', f, variable]);
+            f.operator === 'Function' ? f : ce.expr(['Function', f, variable]);
           const compiled = ce._compile(fnExpr);
           const jsf =
             (compiled.run as (x: number) => number) ?? applicableN1(fnExpr);
@@ -273,7 +273,7 @@ volumes
             upper,
             compiled.success ? 1e7 : 1e4
           );
-          return ce.box([
+          return ce.expr([
             'PlusMinus',
             ce.number(mce.estimate),
             ce.number(mce.error),
@@ -308,21 +308,21 @@ volumes
           const antideriv = antiderivative(expr, variable);
 
           if (antideriv.operator !== 'Integrate') {
-            const fAntideriv = antideriv; // ce.box(['Function', antideriv.op1, variable]);
+            const fAntideriv = antideriv; // ce.expr(['Function', antideriv.op1, variable]);
             if (sym(lower) === 'Nothing' && sym(upper) === 'Nothing') {
               expr = fAntideriv;
             } else {
               isIndefinite = false;
-              const F = ce.box(['Function', antideriv, variable]);
-              expr = ce.box(['EvaluateAt', F, lower, upper]);
+              const F = ce.expr(['Function', antideriv, variable]);
+              expr = ce.expr(['EvaluateAt', F, lower, upper]);
             }
           } else {
             if (sym(lower) === 'Nothing' && sym(upper) === 'Nothing') {
               expr = antideriv;
             } else {
               isIndefinite = false;
-              const F = ce.box(['Function', antideriv, variable]);
-              expr = ce.box(['EvaluateAt', F, lower, upper]);
+              const F = ce.expr(['Function', antideriv, variable]);
+              expr = ce.expr(['EvaluateAt', F, lower, upper]);
             }
           }
         }

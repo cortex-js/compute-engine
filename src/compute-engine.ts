@@ -1,16 +1,49 @@
-// This file is the root of the `compute-engine` package
-// (i.e. the `compute-engine.js` and `compute-engine.esm.js` files).
-// It exports the implementations of the `ComputeEngine` class.
-// The necessary types are exported from `/compute-engine/types.ts`.
+// Full package entry point — re-exports all sub-paths + convenience free functions
+// `@cortex-js/compute-engine`
 
 export const version = '{{SDK_VERSION}}';
 
+// ── Core engine ─────────────────────────────────────────────────────
 import { ComputeEngine } from './compute-engine/index';
 export { ComputeEngine } from './compute-engine/index';
 
 export type * from './compute-engine/types';
 
-// Export compilation types and classes for advanced users
+// ── LaTeX syntax ────────────────────────────────────────────────────
+export {
+  LatexSyntax,
+  parse as parseLatex,
+  serialize as serializeLatex,
+} from './compute-engine/latex-syntax/latex-syntax';
+
+export {
+  LATEX_DICTIONARY,
+  CORE_DICTIONARY,
+  SYMBOLS_DICTIONARY,
+  ALGEBRA_DICTIONARY,
+  ARITHMETIC_DICTIONARY,
+  COMPLEX_DICTIONARY,
+  TRIGONOMETRY_DICTIONARY,
+  CALCULUS_DICTIONARY,
+  LINEAR_ALGEBRA_DICTIONARY,
+  STATISTICS_DICTIONARY,
+  LOGIC_DICTIONARY,
+  SETS_DICTIONARY,
+  INEQUALITIES_DICTIONARY,
+  UNITS_DICTIONARY,
+  OTHERS_DICTIONARY,
+  PHYSICS_DICTIONARY,
+} from './compute-engine/latex-syntax/dictionary/default-dictionary';
+
+export type {
+  LatexDictionaryEntry,
+  SerializeLatexOptions,
+  ParseLatexOptions,
+  LatexString,
+  Parser,
+} from './compute-engine/latex-syntax/types';
+
+// ── Compilation targets ─────────────────────────────────────────────
 export type {
   CompileTarget,
   CompiledOperators,
@@ -35,15 +68,17 @@ export { PythonTarget } from './compute-engine/compilation/python-target';
 export { IntervalJavaScriptTarget } from './compute-engine/compilation/interval-javascript-target';
 export { BaseCompiler } from './compute-engine/compilation/base-compiler';
 
+// ── Interval types ──────────────────────────────────────────────────
 export type {
   Interval,
   IntervalResult,
   BoolInterval,
 } from './compute-engine/interval/types';
 
-// Free functions backed by a lazily-instantiated global engine
+// ── Free functions (accept string | MathJSON | BoxedExpression) ─────
 export {
   parse,
+  expr,
   simplify,
   evaluate,
   N,
@@ -57,6 +92,7 @@ export {
   getDefaultEngine,
 } from './compute-engine/free-functions';
 
+// ── Type guards ─────────────────────────────────────────────────────
 export {
   isExpression,
   isNumber,
@@ -68,20 +104,16 @@ export {
   isCollection,
   isIndexedCollection,
   numericValue,
-  isBoxedExpression,
-  isBoxedNumber,
-  isBoxedSymbol,
-  isBoxedFunction,
-  isBoxedString,
-  isBoxedTensor,
 } from './compute-engine/boxed-expression/type-guards';
 
+// ── Boxed expression types ──────────────────────────────────────────
 export type { BoxedNumber } from './compute-engine/boxed-expression/boxed-number';
 export type { BoxedSymbol } from './compute-engine/boxed-expression/boxed-symbol';
 export type { BoxedFunction } from './compute-engine/boxed-expression/boxed-function';
 export type { BoxedString } from './compute-engine/boxed-expression/boxed-string';
 export type { BoxedTensor } from './compute-engine/boxed-expression/boxed-tensor';
 
+// ── Global registration ─────────────────────────────────────────────
 globalThis[Symbol.for('io.cortexjs.compute-engine')] = {
   ComputeEngine: ComputeEngine.prototype.constructor,
   version: '{{SDK_VERSION}}',

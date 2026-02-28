@@ -8,7 +8,10 @@ import type {
   CompilationResult,
   LanguageTarget,
 } from '../../src/compute-engine/compilation/types';
-import type { Expression, LibraryDefinition } from '../../src/compute-engine/global-types';
+import type {
+  Expression,
+  LibraryDefinition,
+} from '../../src/compute-engine/global-types';
 
 class ContractTarget implements LanguageTarget<Expression> {
   getOperators(): CompiledOperators {
@@ -39,7 +42,9 @@ class ContractTarget implements LanguageTarget<Expression> {
   }
 
   compile(expr: Expression): CompilationResult {
-    const { BaseCompiler } = require('../../src/compute-engine/compilation/base-compiler');
+    const {
+      BaseCompiler,
+    } = require('../../src/compute-engine/compilation/base-compiler');
     return {
       target: 'contract',
       success: true,
@@ -107,7 +112,9 @@ describe('Extension Contracts', () => {
         indent: 0,
       } as unknown as CompileTarget<Expression>;
 
-      expect(() => compile(expr, { target: invalidTarget })).toThrow(/"ws\(\)"/);
+      expect(() => compile(expr, { target: invalidTarget })).toThrow(
+        /"ws\(\)"/
+      );
     });
 
     test('accepts well-formed compilation options', () => {
@@ -134,9 +141,9 @@ describe('Extension Contracts', () => {
       expect(() => ce.registerCompilationTarget(' python', target)).toThrow(
         /leading or trailing whitespace/
       );
-      expect(() => ce.registerCompilationTarget('python plugin', target)).toThrow(
-        /must not include whitespace/
-      );
+      expect(() =>
+        ce.registerCompilationTarget('python plugin', target)
+      ).toThrow(/must not include whitespace/);
     });
 
     test('rejects target objects that do not implement LanguageTarget', () => {
@@ -163,9 +170,9 @@ describe('Extension Contracts', () => {
   describe('Library Definitions', () => {
     test('rejects non-object custom libraries', () => {
       const invalid = 42 as unknown as LibraryDefinition;
-      expect(
-        () => new ComputeEngine({ libraries: ['core', invalid] })
-      ).toThrow(/Invalid library definition/);
+      expect(() => new ComputeEngine({ libraries: ['core', invalid] })).toThrow(
+        /Invalid library definition/
+      );
     });
 
     test('rejects malformed custom library fields', () => {
@@ -192,21 +199,12 @@ describe('Extension Contracts', () => {
         () => new ComputeEngine({ libraries: ['core', invalidDefinitions] })
       ).toThrow(/"definitions" must be an object or an array of objects/);
 
-      const invalidLatexDictionary = {
-        name: 'custom-invalid-latex',
-        latexDictionary: 'not-an-array',
-      } as unknown as LibraryDefinition;
-      expect(
-        () => new ComputeEngine({ libraries: ['core', invalidLatexDictionary] })
-      ).toThrow(/"latexDictionary" must be an array/);
-
       const invalidDependencyName = {
         name: 'custom-invalid-dependency-name',
         requires: [' core'],
       } as unknown as LibraryDefinition;
       expect(
-        () =>
-          new ComputeEngine({ libraries: ['core', invalidDependencyName] })
+        () => new ComputeEngine({ libraries: ['core', invalidDependencyName] })
       ).toThrow(/leading or trailing whitespace/);
 
       const duplicateDependency = {

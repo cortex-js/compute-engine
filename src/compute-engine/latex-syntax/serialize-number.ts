@@ -179,7 +179,10 @@ export function serializeNumber(
   if (options.notation === 'engineering') {
     result = serializeScientificNotationNumber(num, options, 3);
   } else if (options.notation === 'scientific') {
-    result = serializeScientificNotationNumber(num, options);
+    result = serializeScientificNotationNumber(num, {
+      ...options,
+      avoidExponentsInRange: null, // Scientific notation should always use exponents
+    });
   } else if (options.notation === 'adaptiveScientific') {
     result = serializeScientificNotationNumber(num, options);
   }

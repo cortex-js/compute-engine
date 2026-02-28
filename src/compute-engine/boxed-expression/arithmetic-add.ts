@@ -238,11 +238,11 @@ function addTensors(
       for (const tensor of tensors) {
         // tensor.tensor.at() uses 1-based indexing for vectors
         const val = tensor.tensor.at(i + 1) ?? ce.Zero;
-        sum = sum.add(ce.box(val));
+        sum = sum.add(ce.expr(val));
       }
       result.push(sum.evaluate());
     }
-    return ce.box(['List', ...result]);
+    return ce.expr(['List', ...result]);
   }
 
   // For matrices (rank 2)
@@ -256,13 +256,13 @@ function addTensors(
         for (const tensor of tensors) {
           // tensor.tensor.at(row, col) uses 1-based indexing
           const val = tensor.tensor.at(i + 1, j + 1) ?? ce.Zero;
-          sum = sum.add(ce.box(val));
+          sum = sum.add(ce.expr(val));
         }
         row.push(sum.evaluate());
       }
-      rows.push(ce.box(['List', ...row]));
+      rows.push(ce.expr(['List', ...row]));
     }
-    return ce.box(['List', ...rows]);
+    return ce.expr(['List', ...rows]);
   }
 
   // For higher-rank tensors, return unevaluated for now
@@ -392,14 +392,14 @@ export class Terms {
 
         if (sum.eq(1)) rest.push(term.N());
         else if (sum.eq(-1)) rest.push(term.N().neg());
-        else rest.push(term.N().mul(ce.box(sum)));
+        else rest.push(term.N().mul(ce.expr(sum)));
       }
     }
 
     const sum = nvSumN(ce, numericValues);
     if (!sum.isZero) {
-      if (rest.length === 0) return ce.box(sum);
-      rest.push(ce.box(sum));
+      if (rest.length === 0) return ce.expr(sum);
+      rest.push(ce.expr(sum));
     }
     return canonicalAdd(ce, rest);
   }
@@ -422,7 +422,7 @@ export class Terms {
         if (coefs.length > 1) {
           const coefSum = canonicalAdd(
             ce,
-            coefs.map((x) => ce.box(x))
+            coefs.map((x) => ce.expr(x))
           );
           if (term.isSame(1)) return coefSum;
           return ce._fn('Multiply', [coefSum, term].sort(order));
@@ -432,9 +432,9 @@ export class Terms {
         if (sum.isZero) return ce.Zero;
         if (sum.eq(1)) return term;
         if (sum.eq(-1)) return term.neg();
-        if (term.isSame(1)) return ce.box(sum);
+        if (term.isSame(1)) return ce.expr(sum);
 
-        return term.mul(ce.box(sum));
+        return term.mul(ce.expr(sum));
       })
     );
   }

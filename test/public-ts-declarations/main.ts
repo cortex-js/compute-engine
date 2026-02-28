@@ -1,21 +1,29 @@
-import { ComputeEngine, version } from 'compute-engine';
+import {
+  ComputeEngine,
+  LatexSyntax,
+  LATEX_DICTIONARY,
+  version,
+} from 'compute-engine';
 import type { Parser } from 'compute-engine';
 
 console.log(version);
 const ce = new ComputeEngine();
 
-ce.latexDictionary = [
-  ...ce.latexDictionary,
-  {
-    latexTrigger: '\\placeholder',
-    parse: (parser: Parser) => {
-      parser.parseOptionalGroup();
-      return parser.parseGroup() ?? ['Error', "'missing'"];
+// Verify custom LatexSyntax with extended dictionary
+const syntax = new LatexSyntax({
+  dictionary: [
+    ...LATEX_DICTIONARY,
+    {
+      latexTrigger: '\\placeholder',
+      parse: (parser: Parser) => {
+        parser.parseOptionalGroup();
+        return parser.parseGroup() ?? ['Error', "'missing'"];
+      },
     },
-  },
-];
+  ],
+});
 
-const originalDef = ce.box('Ln').operatorDefinition!;
+const originalDef = ce.expr('Ln').operatorDefinition!;
 ce.declare('Ln', {
   ...originalDef,
   evaluate: ([x], options) => {

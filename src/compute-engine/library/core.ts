@@ -1,4 +1,8 @@
 import { joinLatex } from '../latex-syntax/tokenizer';
+import {
+  parse as parseLatex,
+  serialize as serializeLatex,
+} from '../latex-syntax/latex-syntax';
 
 import { checkType, checkArity } from '../boxed-expression/validate';
 import { canonicalForm } from '../boxed-expression/canonical';
@@ -416,7 +420,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // **IMPORTANT** Head should work on non-canonical expressions
         if (args.length !== 1) return null;
         const op1 = args[0];
-        return ce.box(op1.operator);
+        return ce.expr(op1.operator);
       },
       evaluate: (ops, { engine: ce }) =>
         ce.symbol(ops[0]?.operator ?? 'Undefined'),
@@ -1191,7 +1195,12 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       description: 'Serialize an expression to LaTeX',
       signature: '(any+) -> string',
       evaluate: (ops, { engine: ce }) =>
-        ce.box(['LatexString', ce.string(joinLatex(ops.map((x) => x.latex)))]),
+        ce.expr([
+          'LatexString',
+          ce.string(
+            joinLatex(ops.map((x) => serializeLatex(x.json)))
+          ),
+        ]),
     },
 
     Parse: {
@@ -1199,7 +1208,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         'Parse a LaTeX string and evaluate to a corresponding expression',
       signature: '(string) -> any',
       evaluate: ([s], { engine: ce }) =>
-        ce.parse(isString(s) ? s.string : '') ?? ce.Nothing,
+        ce.expr(parseLatex(isString(s) ? s.string : '') ?? 'Nothing'),
     },
   },
 
@@ -1433,7 +1442,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     RandomExpression: {
       description: 'Generate a random expression.',
       signature: '() -> expression',
-      evaluate: (_ops, { engine }) => engine.box(randomExpression()),
+      evaluate: (_ops, { engine }) => engine.expr(randomExpression()),
     },
   },
 ];

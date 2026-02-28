@@ -10,11 +10,11 @@ function distribute2(
   const ce = lhs.engine;
 
   if (isFunction(lhs, g))
-    return ce.box([f, ...lhs.ops.map((x) => distribute2(x, rhs, g, f))]);
+    return ce.expr([f, ...lhs.ops.map((x) => distribute2(x, rhs, g, f))]);
   if (isFunction(rhs, g))
-    return ce.box([f, ...rhs.ops.map((x) => distribute2(lhs, x, g, f))]);
+    return ce.expr([f, ...rhs.ops.map((x) => distribute2(lhs, x, g, f))]);
 
-  return ce.box([f, lhs, rhs]);
+  return ce.expr([f, lhs, rhs]);
 }
 
 /**
@@ -30,7 +30,7 @@ export function distribute(
   const ops = expr.ops;
   if (ops.length < 2) return expr;
 
-  return expr.engine.box([
+  return expr.engine.expr([
     g,
     ops.slice(1).reduce((acc, v) => distribute2(acc, v, g, f), ops[0]),
   ]);

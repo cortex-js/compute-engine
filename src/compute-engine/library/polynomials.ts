@@ -96,7 +96,7 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
         if (!variable) return undefined;
         const coeffs = getPolynomialCoefficients(poly.canonical, variable);
         if (!coeffs) return undefined;
-        return poly.engine.box(['List', ...coeffs.reverse()]);
+        return poly.engine.expr(['List', ...coeffs.reverse()]);
       },
     },
 
@@ -205,7 +205,7 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
         if (!variable) return undefined;
         const roots = poly.canonical.polynomialRoots(variable);
         if (!roots || roots.length === 0) return undefined;
-        return poly.engine.box(['Set', ...roots.map((r) => r.json)]);
+        return poly.engine.expr(['Set', ...roots.map((r) => r.json)]);
       },
     },
 

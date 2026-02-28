@@ -736,7 +736,7 @@ function tryProductSumPattern(
   // Construct the quadratic: t² - sum*t + product = 0
   const t = '_t';
   const quadratic = ce
-    .box(['Add', ['Square', t], ['Negate', ['Multiply', sum, t]], product])
+    .expr(['Add', ['Square', t], ['Negate', ['Multiply', sum, t]], product])
     .simplify();
 
   const roots = findUnivariateRoots(quadratic, t);

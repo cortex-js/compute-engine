@@ -255,7 +255,7 @@ function assumeInequality(proposition: Expression): AssumeResult {
   const p = lhs!.sub(rhs!);
 
   // Case 2
-  const result = ce.box([op === '<' ? 'Less' : 'LessEqual', p, 0]).evaluate();
+  const result = ce.expr([op === '<' ? 'Less' : 'LessEqual', p, 0]).evaluate();
 
   if (isSymbol(result, 'True')) return 'tautology';
   if (isSymbol(result, 'False')) return 'contradiction';

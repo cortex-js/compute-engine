@@ -1,3 +1,78 @@
+### 0.55.0 _2026-02-27_
+
+**Package modularization**: The monolithic `@cortex-js/compute-engine` package
+can now be imported as seven independently usable sub-paths, enabling smaller
+bundles for consumers who only need a subset of functionality.
+
+- **New sub-path `@cortex-js/compute-engine/latex-syntax`**: Standalone LaTeX
+  to MathJSON parsing and serialization. No `ComputeEngine` instance needed.
+  Use the `LatexSyntax` class for custom configurations or the free functions
+  `parse()` and `serialize()` with a lazy default instance.
+
+- **New sub-path `@cortex-js/compute-engine/interval`**: Standalone interval
+  arithmetic library for reliable function evaluation with guaranteed enclosures.
+
+- **New sub-path `@cortex-js/compute-engine/numerics`**: Standalone numeric
+  functions — rationals, big integers, arbitrary-precision decimals, complex
+  numbers, special functions (gamma, erf, Bessel, Fresnel, ...), statistics,
+  primes.
+
+- **New sub-path `@cortex-js/compute-engine/core`**: The `ComputeEngine` class,
+  `expr()`, type guards, and computation free functions (`simplify`, `evaluate`,
+  `N`, `expand`, `factor`, `solve`). No LaTeX or compilation dependencies.
+
+- **New sub-path `@cortex-js/compute-engine/compile`**: Compilation targets
+  (`JavaScriptTarget`, `GLSLTarget`, `WGSLTarget`, `PythonTarget`,
+  `IntervalJavaScriptTarget`) and the `compile()` function. The existing
+  `@cortex-js/compute-engine/math-json` sub-path is unchanged.
+
+- **New `LatexSyntax` class**: Standalone replacement for the engine's LaTeX
+  parsing/serialization. Accepts a `dictionary` option for custom LaTeX
+  dictionaries and options for number formatting, parse behavior, and
+  serialization style.
+
+- **LaTeX dictionary constants**: All 16 domain dictionaries are now individually
+  importable: `CORE_DICTIONARY`, `SYMBOLS_DICTIONARY`, `ALGEBRA_DICTIONARY`,
+  `ARITHMETIC_DICTIONARY`, `COMPLEX_DICTIONARY`, `TRIGONOMETRY_DICTIONARY`,
+  `CALCULUS_DICTIONARY`, `LINEAR_ALGEBRA_DICTIONARY`, `STATISTICS_DICTIONARY`,
+  `LOGIC_DICTIONARY`, `SETS_DICTIONARY`, `INEQUALITIES_DICTIONARY`,
+  `UNITS_DICTIONARY`, `OTHERS_DICTIONARY`, `PHYSICS_DICTIONARY`, and the
+  combined `LATEX_DICTIONARY`.
+
+- **Breaking: `ce.box()` renamed to `ce.expr()`**. The free function `box()` is
+  also renamed to `expr()`. The old `box()` method remains as a deprecated
+  wrapper.
+
+- **Breaking: `ce.latexDictionary` getter/setter removed**. Use
+  `new LatexSyntax({ dictionary: [...LATEX_DICTIONARY, ...customEntries] })`
+  to customize LaTeX dictionaries.
+
+- **Breaking: `static ComputeEngine.getLatexDictionary()` removed**. Import
+  dictionary constants directly from the `latex-syntax` sub-path or the main
+  package.
+
+- **Breaking: Deprecated type guard aliases removed**: `isBoxedExpression`,
+  `isBoxedNumber`, `isBoxedSymbol`, `isBoxedFunction`, `isBoxedString`,
+  `isBoxedTensor`. Use `isExpression`, `isNumber`, `isSymbol`, `isFunction`,
+  `isString`, `isTensor` instead.
+
+- **Breaking: LaTeX dictionaries decoupled from library definitions**. The
+  `latexDictionary` field on `LibraryDefinition` is removed. LaTeX dictionaries
+  are now owned entirely by the `latex-syntax` module.
+
+- **Compilation registry methods now `@internal`**:
+  `registerCompilationTarget()`, `getCompilationTarget()`,
+  `listCompilationTargets()`, `unregisterCompilationTarget()` are still
+  available but marked as internal API. Use the `compile()` free function
+  with a target instance or built-in name instead.
+
+- **New `Parser` type export**: The `Parser` type is now exported from the main
+  package, enabling typed custom `LatexDictionaryEntry` parse handlers.
+
+- **Dead code removal**: Removed unused files from `src/common/` (buffer, json5,
+  markdown, parser, result, sigil, styled-text, syntax-highlighter, terminal)
+  and `src/common/type/` (error-handler, resolve).
+
 ### 0.54.0 _2026-02-26_
 
 - **New `expr.polynomialCoefficients()` method**: Returns the coefficients of a

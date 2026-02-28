@@ -404,9 +404,9 @@ export function canonicalBigop(
   }
 
   if (body.isCollection) {
-    if (bigOp === 'Sum') return ce.box(['Reduce', body, 'Add', 0]);
+    if (bigOp === 'Sum') return ce.expr(['Reduce', body, 'Add', 0]);
 
-    return ce.box(['Reduce', body, 'Multiply', 1]);
+    return ce.expr(['Reduce', body, 'Multiply', 1]);
   }
 
   return ce._fn(bigOp, [body, ...indexes], { scope: bigOpScope });

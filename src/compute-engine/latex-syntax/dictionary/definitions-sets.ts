@@ -198,12 +198,12 @@ export const DEFINITIONS_SETS: LatexDictionary = [
   //     // accept arguments that are `Set`
   //     const ce = parser.computeEngine!;
 
-  //     if (!ce || !ce.box(lhs).domain?.isCompatible('Sets')) return null;
+  //     if (!ce || !ce.expr(lhs).domain?.isCompatible('Sets')) return null;
 
   //     const index = parser.index;
   //     const rhs = parser.parseExpression({ ...until, minPrec: 390 });
   //     // If the rhs argument is not a set, bail
-  //     if (rhs === null || ce.box(lhs).domain?.isCompatible('Sets') !== true) {
+  //     if (rhs === null || ce.expr(lhs).domain?.isCompatible('Sets') !== true) {
   //       parser.index = index;
   //       return null;
   //     }

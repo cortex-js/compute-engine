@@ -475,7 +475,7 @@
         // Do some arithmetic calculations
         if (i % 2 === 0)
           return ce
-            .box([
+            .expr([
               'Add',
               [
                 'Multiply',
@@ -488,7 +488,7 @@
             .N();
 
         // Trigonometry, log, exp
-        return ce.box(['Add', ['Tan', n], ['Log', ['Abs', n], ['Exp', n]]]).N();
+        return ce.expr(['Add', ['Tan', n], ['Log', ['Abs', n], ['Exp', n]]]).N();
       });
 
       return globalThis.performance.now() - start;
@@ -513,7 +513,7 @@
     const MAX_LINE_LENGTH = 64;
 
     document.getElementById("random").addEventListener("click", (ev) => {
-      const expr = ce.box(["RandomExpression"]);
+      const expr = ce.expr(["RandomExpression"]);
       const evalExpr = expr.evaluate();
       const mf = document.getElementById("mf");
       mf.value = evalExpr.latex;
@@ -570,12 +570,12 @@
     function customCanonical(expr) {
       if (typeof expr.value === 'number') {
         if (expr.op === 'Divide' || expr.op === 'Rational') {
-          if (expr.engine.box(["GCD", expr.op1, expr.op2]).value !== 1) return expr;
+          if (expr.engine.expr(["GCD", expr.op1, expr.op2]).value !== 1) return expr;
         }
         return expr.engine.number(expr.value);
       }
 
-      if (expr.ops) return expr.engine.box([expr.op, ...expr.ops.map(customCanonical)], { canonical: ['InvisibleOperator', 'Order'] });
+      if (expr.ops) return expr.engine.expr([expr.op, ...expr.ops.map(customCanonical)], { canonical: ['InvisibleOperator', 'Order'] });
 
       return expr.canonical;
     }
@@ -612,18 +612,18 @@
     // console.log(expr1.isSame(expr2));
 
     const arbre = ce.parse('(5x+3)-(2x^2-3x+4)+(4x+7-3x^3)', { canonical: false })
-    console.log(ce.box(['CanonicalForm', arbre, 'Flatten']).latex)
+    console.log(ce.expr(['CanonicalForm', arbre, 'Flatten']).latex)
 
 
     const exp = ce.parse('(5x+3)-(2x^2-3x+4)+(4x+7-3x^3)', { canonical: false })
-    const noPar = ce.box(['CanonicalForm', exp, 'Flatten']).latex;
+    const noPar = ce.expr(['CanonicalForm', exp, 'Flatten']).latex;
     console.log(noPar);
 
 
     const term = ce.parse('-\\frac{z}{3}')
-    const sqTerm1 = ce.box(["ExpandAll", ['Square', term]]).evaluate().latex // (-\\frac{z}{3})^2
+    const sqTerm1 = ce.expr(["ExpandAll", ['Square', term]]).evaluate().latex // (-\\frac{z}{3})^2
     console.log(sqTerm1);
-    const sqTerm2 = ce.box(['Multiply', term, term]).evaluate().latex // \\frac{z^2}{9} that's what I want !
+    const sqTerm2 = ce.expr(['Multiply', term, term]).evaluate().latex // \\frac{z^2}{9} that's what I want !
     console.log(sqTerm2);
 
 
@@ -670,14 +670,14 @@
     //   ce.parse("\\operatorname{f} := x \\mapsto 2x").evaluate().toString()
     // );
     // console.info(ce.parse("f(x) := 2x").evaluate().toString());
-    // console.info(ce.box(["f", 3]).value);
+    // console.info(ce.expr(["f", 3]).value);
     // console.info(ce.parse("f(3)").value);
 
     // ce.numericMode = "machine";
     // ce.latexOptions.parseNumbers = "rational";
     // ce.jsonSerializationOptions.metadata = ["latex"];
 
-    // const seq = ce.box(['Sequence', 1, 2, ['Sequence', 8, 9], 4, 5]);
+    // const seq = ce.expr(['Sequence', 1, 2, ['Sequence', 8, 9], 4, 5]);
     // console.log(seq.toString());
     // console.log(seq.latex);
     // console.log(seq.evaluate().toString());
@@ -707,7 +707,7 @@
 
     // console.log(
     //   ce
-    //     .box(['Add', 1, ['Sqrt', 5]])
+    //     .expr(['Add', 1, ['Sqrt', 5]])
     //     .evaluate()
     //     .toString()
     // );
@@ -748,7 +748,7 @@
             if (args.length !== 1) return null;
             const arg1 = args[0];
             if (typeof arg1.numericValue !== "number") return null;
-            return ce.box(Math.pow(arg1.numericValue, 2));
+            return ce.expr(Math.pow(arg1.numericValue, 2));
           },
         },
       },
@@ -756,7 +756,7 @@
     ce.defineFunction("suma", {
 
       evaluate: (ce, args) => {
-        return ce.box(args[0].N().numericValue + args[1].N().numericValue);
+        return ce.expr(args[0].N().numericValue + args[1].N().numericValue);
       },
 
     });
@@ -765,7 +765,7 @@
 
     updateAssumptions();
 
-    // const randomExpr = ce.box(['RandomExpression']).evaluate();
+    // const randomExpr = ce.expr(['RandomExpression']).evaluate();
     // console.log(randomExpr.json);
     // mf.value = randomExpr.latex;
 
@@ -881,11 +881,11 @@
       document.getElementById("json-input").value
     ).map((x) => JSON.parse(x));
 
-    for (const line of jsonLines) ce.box(line).evaluate();
+    for (const line of jsonLines) ce.expr(line).evaluate();
 
     if (!mf.value) {
       try {
-        mf.value = ce.box(jsonLines[jsonLines.length - 1], {
+        mf.value = ce.expr(jsonLines[jsonLines.length - 1], {
           canonical: false,
         }).latex;
       } catch (e) {
@@ -911,7 +911,7 @@
       try {
         const json = splitJSON(jsonText).map((x) => JSON.parse(x));
 
-        mf.value = ce.box(json[json.length - 1]).latex;
+        mf.value = ce.expr(json[json.length - 1]).latex;
         updateContent(json);
       } catch (e) {
         document.getElementById("json-input-error").innerHTML = e.toString();
@@ -926,12 +926,12 @@
       ce.pushScope();
 
       for (let i = 0; i < jsonLines.length; i++) {
-        ce.box(jsonLines[i]).evaluate();
+        ce.expr(jsonLines[i]).evaluate();
       }
 
       const json = jsonLines[jsonLines.length - 1];
 
-      let expr = ce.box(json, { canonical: false });
+      let expr = ce.expr(json, { canonical: false });
 
       updateLatex("", "symbols");
       updateLatex("", "solve");
@@ -945,7 +945,7 @@
 
       try {
         updateLatex(
-          expr.symbols.map((x) => ce.box(x).latex).join(",\\:"),
+          expr.symbols.map((x) => ce.expr(x).latex).join(",\\:"),
           "symbols"
         );
       } catch (e) {
@@ -1035,7 +1035,7 @@
           let fn;
 
           if (jsonLines.length > 1) {
-            fn = compile(ce.box(["Block", ...jsonLines]), {
+            fn = compile(ce.expr(["Block", ...jsonLines]), {
               to: "javascript",
             });
           } else {
@@ -1088,7 +1088,7 @@
         }
 
         try {
-          const e = ce.box(["Expand", canonicalExpr]).evaluate();
+          const e = ce.expr(["Expand", canonicalExpr]).evaluate();
           updateExpr(e.isSame(evaluateExpr) ? null : e, "expand");
         } catch (e) {
           console.error(

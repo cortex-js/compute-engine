@@ -12,7 +12,7 @@ type ValidationHost = {
     ops: ReadonlyArray<ExpressionInput>,
     options?: { metadata?: Metadata }
   ): Expression;
-  box(expr: ExpressionInput): Expression;
+  expr(expr: ExpressionInput): Expression;
 };
 
 export function createErrorExpression(
@@ -37,7 +37,7 @@ export function createErrorExpression(
     whereExpr = engine.string(where);
   }
 
-  const ops: Expression[] = [engine.box(msg)];
+  const ops: Expression[] = [engine.expr(msg)];
   if (whereExpr) ops.push(whereExpr);
 
   return engine.function('Error', ops);

@@ -1,5 +1,5 @@
 import { engine as ce } from '../utils';
-import { compile } from '../../src/compute-engine/free-functions';
+import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 
 const wgsl = new WGSLTarget();

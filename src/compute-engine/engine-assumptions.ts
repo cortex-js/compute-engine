@@ -17,12 +17,13 @@ import {
 } from './assume';
 
 import { isLatexString } from './latex-syntax/utils';
+import { parse as parseLatex } from './latex-syntax/latex-syntax';
 
 export function ask(
   ce: IComputeEngine,
   pattern: Expression
 ): BoxedSubstitution[] {
-  const pat = ce.box(pattern, { form: 'raw' });
+  const pat = ce.expr(pattern, { form: 'raw' });
   const result: BoxedSubstitution[] = [];
 
   const patternHasWildcards = (expr: Expression): boolean => {
@@ -86,7 +87,7 @@ export function ask(
     // Normalize to Less/LessEqual with RHS = 0, matching how assumptions are stored:
     //   Greater(a, b) -> Less(b - a, 0)
     //   Less(a, b)    -> Less(a - b, 0)
-    const diff = ce.box(['Add', lhs, ['Negate', rhs]], {
+    const diff = ce.expr(['Add', lhs, ['Negate', rhs]], {
       form: 'raw',
     });
     return [
@@ -95,7 +96,7 @@ export function ask(
       // subexpressions (notably Add), allowing permutations can lead to
       // ambiguous wildcard bindings and duplicate, surprising matches.
       {
-        pattern: ce.box([normalizedOp, diff, 0], { form: 'raw' }),
+        pattern: ce.expr([normalizedOp, diff, 0], { form: 'raw' }),
         matchPermutations: false,
       },
     ];
@@ -108,10 +109,10 @@ export function ask(
     if (isSymbol(patOp1) && isWildcard(patOp2)) {
       const typeWildcard = wildcardName(patOp2);
       if (typeWildcard && !typeWildcard.startsWith('__')) {
-        const symbolType = ce.box(patOp1.symbol).type;
+        const symbolType = ce.expr(patOp1.symbol).type;
         if (!symbolType.isUnknown) {
           pushResult({
-            [typeWildcard]: ce.box(symbolType.toString(), {
+            [typeWildcard]: ce.expr(symbolType.toString(), {
               form: 'raw',
             }),
           });
@@ -156,7 +157,7 @@ export function ask(
             if (bound === undefined || (isStrict && strictOk !== true))
               continue;
             pushResult({
-              [symbolWildcard]: ce.box(s, { form: 'canonical' }),
+              [symbolWildcard]: ce.expr(s, { form: 'canonical' }),
               [boundWildcard]: bound,
             });
           }
@@ -188,7 +189,7 @@ export function ask(
   if (result.length === 0 && !patternHasWildcards(pat) && !ce._isVerifying) {
     // Use the canonical form so symbol declarations/definitions are visible
     // to the evaluator.
-    const verified = verify(ce, ce.box(pattern, { form: 'canonical' }));
+    const verified = verify(ce, ce.expr(pattern, { form: 'canonical' }));
     if (verified === true) pushResult({});
   }
 
@@ -204,9 +205,10 @@ export function verify(
 
   ce._isVerifying = true;
   try {
-    const boxed = isLatexString(query)
-      ? ce.parse(query, { form: 'raw' })
-      : ce.box(query, { form: 'raw' });
+    const parsed = isLatexString(query)
+      ? parseLatex(query as string)
+      : null;
+    const boxed = ce.expr(parsed ?? query, { form: 'raw' });
 
     const expr = boxed.evaluate();
     if (isSymbol(expr)) {
@@ -261,9 +263,10 @@ export function assumeFn(
   predicate: Expression
 ): AssumeResult {
   try {
-    const pred = isLatexString(predicate)
-      ? ce.parse(predicate, { form: 'raw' })
-      : ce.box(predicate, { form: 'raw' });
+    const parsedPred = isLatexString(predicate)
+      ? parseLatex(predicate as string)
+      : null;
+    const pred = ce.expr(parsedPred ?? predicate, { form: 'raw' });
 
     // The new assumption could affect existing expressions
     ce._generation += 1;

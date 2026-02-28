@@ -17,21 +17,6 @@ import { TRIGONOMETRY_LIBRARY } from './trigonometry';
 import { UNITS_LIBRARY } from './units';
 import { FRACTALS_LIBRARY } from './fractals';
 
-import { DEFINITIONS_ALGEBRA } from '../latex-syntax/dictionary/definitions-algebra';
-import { DEFINITIONS_UNITS } from '../latex-syntax/dictionary/definitions-units';
-import { DEFINITIONS_ARITHMETIC } from '../latex-syntax/dictionary/definitions-arithmetic';
-import { DEFINITIONS_CALCULUS } from '../latex-syntax/dictionary/definitions-calculus';
-import { DEFINITIONS_COMPLEX } from '../latex-syntax/dictionary/definitions-complex';
-import { DEFINITIONS_CORE } from '../latex-syntax/dictionary/definitions-core';
-import { DEFINITIONS_INEQUALITIES } from '../latex-syntax/dictionary/definitions-relational-operators';
-import { DEFINITIONS_LINEAR_ALGEBRA } from '../latex-syntax/dictionary/definitions-linear-algebra';
-import { DEFINITIONS_LOGIC } from '../latex-syntax/dictionary/definitions-logic';
-import { DEFINITIONS_OTHERS } from '../latex-syntax/dictionary/definitions-other';
-import { DEFINITIONS_SETS } from '../latex-syntax/dictionary/definitions-sets';
-import { DEFINITIONS_STATISTICS } from '../latex-syntax/dictionary/definitions-statistics';
-import { DEFINITIONS_SYMBOLS } from '../latex-syntax/dictionary/definitions-symbols';
-import { DEFINITIONS_TRIGONOMETRY } from '../latex-syntax/dictionary/definitions-trigonometry';
-
 import type { LibraryCategory } from '../latex-syntax/types';
 
 import { _BoxedValueDefinition } from '../boxed-expression/boxed-value-definition';
@@ -49,18 +34,13 @@ import { _BoxedOperatorDefinition } from '../boxed-expression/boxed-operator-def
 /**
  * The standard libraries bundled with the Compute Engine.
  *
- * Each entry bundles symbol/operator definitions with their LaTeX dictionary
- * entries and declares dependencies on other libraries.
+ * Each entry bundles symbol/operator definitions and declares dependencies
+ * on other libraries.
  */
 export const STANDARD_LIBRARIES: LibraryDefinition[] = [
   {
     name: 'core',
     definitions: CORE_LIBRARY,
-    latexDictionary: [
-      ...DEFINITIONS_CORE,
-      ...DEFINITIONS_SYMBOLS,
-      ...DEFINITIONS_ALGEBRA,
-    ],
   },
   {
     name: 'control-structures',
@@ -71,13 +51,11 @@ export const STANDARD_LIBRARIES: LibraryDefinition[] = [
     name: 'logic',
     requires: ['core'],
     definitions: [LOGIC_LIBRARY, LOGIC_FUNCTION_LIBRARY],
-    latexDictionary: DEFINITIONS_LOGIC,
   },
   {
     name: 'collections',
     requires: ['core'],
     definitions: [SETS_LIBRARY, COLLECTIONS_LIBRARY],
-    latexDictionary: DEFINITIONS_SETS,
   },
   {
     name: 'colors',
@@ -93,25 +71,21 @@ export const STANDARD_LIBRARIES: LibraryDefinition[] = [
     name: 'relop',
     requires: ['core'],
     definitions: RELOP_LIBRARY,
-    latexDictionary: DEFINITIONS_INEQUALITIES,
   },
   {
     name: 'arithmetic',
     requires: ['core'],
     definitions: [...ARITHMETIC_LIBRARY, ...COMPLEX_LIBRARY],
-    latexDictionary: [...DEFINITIONS_ARITHMETIC, ...DEFINITIONS_COMPLEX],
   },
   {
     name: 'trigonometry',
     requires: ['arithmetic'],
     definitions: TRIGONOMETRY_LIBRARY,
-    latexDictionary: DEFINITIONS_TRIGONOMETRY,
   },
   {
     name: 'calculus',
     requires: ['arithmetic'],
     definitions: CALCULUS_LIBRARY,
-    latexDictionary: DEFINITIONS_CALCULUS,
   },
   {
     name: 'polynomials',
@@ -132,19 +106,16 @@ export const STANDARD_LIBRARIES: LibraryDefinition[] = [
     name: 'linear-algebra',
     requires: ['arithmetic'],
     definitions: LINEAR_ALGEBRA_LIBRARY,
-    latexDictionary: DEFINITIONS_LINEAR_ALGEBRA,
   },
   {
     name: 'statistics',
     requires: ['arithmetic'],
     definitions: STATISTICS_LIBRARY,
-    latexDictionary: DEFINITIONS_STATISTICS,
   },
   {
     name: 'units',
     requires: ['arithmetic'],
     definitions: UNITS_LIBRARY,
-    latexDictionary: DEFINITIONS_UNITS,
   },
   {
     name: 'physics',
@@ -290,23 +261,6 @@ export const STANDARD_LIBRARIES: LibraryDefinition[] = [
           ]),
       },
     },
-    latexDictionary: [
-      {
-        name: 'Mu0',
-        kind: 'symbol',
-        latexTrigger: '\\mu_0',
-      },
-      {
-        name: 'VacuumPermittivity',
-        kind: 'symbol',
-        latexTrigger: '\\varepsilon_0',
-      },
-    ],
-  },
-  {
-    name: 'other',
-    requires: ['core'],
-    latexDictionary: DEFINITIONS_OTHERS,
   },
 ];
 
@@ -468,7 +422,7 @@ export function setSymbolDefinitions(
         }
       } else {
         const def = new _BoxedValueDefinition(engine, name, {
-          value: engine.box(entry as unknown as ExpressionInput),
+          value: engine.expr(entry as unknown as ExpressionInput),
         });
         bindings.set(name, { value: def });
       }

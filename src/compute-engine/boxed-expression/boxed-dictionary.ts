@@ -309,7 +309,7 @@ function dictionaryValueToBoxedExpression(
     if ('num' in value) return ce.number(value.num, options);
     if ('str' in value) return ce.string(value.str);
     if ('sym' in value) return ce.symbol(value.sym, options);
-    if ('fn' in value) return ce.box(value, { form });
+    if ('fn' in value) return ce.expr(value, { form });
     if ('dict' in value) return new BoxedDictionary(ce, value.dict, options);
   }
   return ce.Nothing;

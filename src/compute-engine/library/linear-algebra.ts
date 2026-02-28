@@ -102,7 +102,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           if (isTensor(op1)) {
             // Return first element as scalar
             const flatData = op1.tensor.flatten();
-            return flatData.length > 0 ? ce.box(flatData[0]) : ce.Zero;
+            return flatData.length > 0 ? ce.expr(flatData[0]) : ce.Zero;
           }
           return undefined;
         }
@@ -124,7 +124,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           // Flatten tensor data and reshape with cycling
           // Use tensor.flatten() to get all scalar elements
           const flatData = op1.tensor.flatten();
-          const flatElements = flatData.map((x) => ce.box(x));
+          const flatElements = flatData.map((x) => ce.expr(x));
           return reshapeWithCycling(ce, flatElements, targetShape);
         }
 
@@ -142,12 +142,12 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         const op1 = ops[0].evaluate();
 
         // Handle scalar - return single-element list
-        if (op1.isNumber) return ce.box(['List', op1]);
+        if (op1.isNumber) return ce.expr(['List', op1]);
 
         if (isTensor(op1))
-          return ce.box([
+          return ce.expr([
             'List',
-            ...op1.tensor.flatten().map((x) => ce.box(x)),
+            ...op1.tensor.flatten().map((x) => ce.expr(x)),
           ]);
 
         if (isFiniteIndexedCollection(op1))
@@ -210,7 +210,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         const op1 = ops[0].evaluate();
 
         // Conjugate transpose of scalar is its conjugate
-        if (op1.isNumber) return ce.box(['Conjugate', op1]).evaluate();
+        if (op1.isNumber) return ce.expr(['Conjugate', op1]).evaluate();
 
         if (isTensor(op1)) {
           const rank = op1.shape.length;
@@ -218,9 +218,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           // For rank 1 (vectors), conjugate transpose is just element-wise conjugate
           if (rank === 1) {
             const elements = [...op1.each()].map((el) =>
-              ce.box(['Conjugate', el]).evaluate()
+              ce.expr(['Conjugate', el]).evaluate()
             );
-            return ce.box(['List', ...elements]);
+            return ce.expr(['List', ...elements]);
           }
 
           // Default: swap last two axes
@@ -282,7 +282,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         const op1 = matrix.evaluate();
 
         // Inverse of scalar is 1/scalar
-        if (op1.isNumber) return ce.box(['Divide', 1, op1]).evaluate();
+        if (op1.isNumber) return ce.expr(['Divide', 1, op1]).evaluate();
 
         if (isTensor(op1)) {
           const shape = op1.shape;
@@ -313,7 +313,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         // Pseudoinverse of scalar is 1/scalar (or 0 if scalar is 0)
         if (op1.isNumber) {
           if (op1.isSame(0)) return ce.Zero;
-          return ce.box(['Divide', 1, op1]).evaluate();
+          return ce.expr(['Divide', 1, op1]).evaluate();
         }
 
         if (isTensor(op1)) return op1.tensor.pseudoInverse()?.expression;
@@ -405,11 +405,11 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           if (result === undefined) return undefined;
 
           // For scalar result (rank 2), box the value
-          if (typeof result === 'number') return ce.box(result);
+          if (typeof result === 'number') return ce.expr(result);
           if (typeof result === 'boolean') return result ? ce.True : ce.False;
 
           // Check if it's a primitive value that needs boxing
-          if (!('expression' in result)) return ce.box(result);
+          if (!('expression' in result)) return ce.expr(result);
 
           // For tensor result (rank > 2), return the expression
           return result.expression;
@@ -428,8 +428,8 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
 
         // Kernel of scalar map x -> a*x over R
         if (op.isNumber) {
-          if (op.isSame(0)) return ce.box(['List', ['List', 1]]);
-          return ce.box(['List']);
+          if (op.isSame(0)) return ce.expr(['List', ['List', 1]]);
+          return ce.expr(['List']);
         }
 
         if (!isTensor(op)) return undefined;
@@ -444,10 +444,10 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         if (!matrix) return undefined;
 
         const basis = computeNullSpaceBasis(matrix);
-        return ce.box([
+        return ce.expr([
           'List',
           ...basis.map((vector) =>
-            ce.box(['List', ...vector.map((x) => ce.number(ce.chop(x)))])
+            ce.expr(['List', ...vector.map((x) => ce.number(ce.chop(x)))])
           ),
         ]);
       },
@@ -551,7 +551,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           for (let i = 0; i < n; i++) {
             const aVal = A.tensor.at(i + 1) ?? ce.Zero;
             const bVal = B.tensor.at(i + 1) ?? ce.Zero;
-            sum = sum.add(ce.box(aVal).mul(ce.box(bVal)));
+            sum = sum.add(ce.expr(aVal).mul(ce.expr(bVal)));
           }
           return sum.evaluate();
         }
@@ -568,11 +568,11 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
             for (let k = 0; k < n; k++) {
               const aVal = A.tensor.at(i + 1, k + 1) ?? ce.Zero;
               const bVal = B.tensor.at(k + 1) ?? ce.Zero;
-              sum = sum.add(ce.box(aVal).mul(ce.box(bVal)));
+              sum = sum.add(ce.expr(aVal).mul(ce.expr(bVal)));
             }
             result.push(sum.evaluate());
           }
-          return ce.box(['List', ...result]);
+          return ce.expr(['List', ...result]);
         }
 
         // Handle vector × matrix: v (m) × B (m×n) → result (n)
@@ -588,11 +588,11 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
             for (let k = 0; k < m; k++) {
               const aVal = A.tensor.at(k + 1) ?? ce.Zero;
               const bVal = B.tensor.at(k + 1, j + 1) ?? ce.Zero;
-              sum = sum.add(ce.box(aVal).mul(ce.box(bVal)));
+              sum = sum.add(ce.expr(aVal).mul(ce.expr(bVal)));
             }
             result.push(sum.evaluate());
           }
-          return ce.box(['List', ...result]);
+          return ce.expr(['List', ...result]);
         }
 
         // Handle matrix × matrix: A (m×n) × B (n×p) → result (m×p)
@@ -611,13 +611,13 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
               for (let k = 0; k < n; k++) {
                 const aVal = A.tensor.at(i + 1, k + 1) ?? ce.Zero;
                 const bVal = B.tensor.at(k + 1, j + 1) ?? ce.Zero;
-                sum = sum.add(ce.box(aVal).mul(ce.box(bVal)));
+                sum = sum.add(ce.expr(aVal).mul(ce.expr(bVal)));
               }
               row.push(sum.evaluate());
             }
-            rows.push(ce.box(['List', ...row]));
+            rows.push(ce.expr(['List', ...row]));
           }
-          return ce.box(['List', ...rows]);
+          return ce.expr(['List', ...rows]);
         }
 
         // Unsupported tensor ranks
@@ -652,9 +652,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
               for (let j = 0; j < n; j++) {
                 row.push(i === j ? elements[i] : ce.Zero);
               }
-              rows.push(ce.box(['List', ...row]));
+              rows.push(ce.expr(['List', ...row]));
             }
-            return ce.box(['List', ...rows]);
+            return ce.expr(['List', ...rows]);
           }
 
           // Matrix → extract diagonal as vector
@@ -665,7 +665,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
             for (let i = 0; i < minDim; i++) {
               diagonal.push(op1.tensor.at(i + 1, i + 1) ?? ce.Zero);
             }
-            return ce.box(['List', ...diagonal]);
+            return ce.expr(['List', ...diagonal]);
           }
 
           // Tensor (rank > 2): not supported
@@ -694,9 +694,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           for (let j = 0; j < n; j++) {
             row.push(i === j ? ce.One : ce.Zero);
           }
-          rows.push(ce.box(['List', ...row]));
+          rows.push(ce.expr(['List', ...row]));
         }
-        return ce.box(['List', ...rows]);
+        return ce.expr(['List', ...rows]);
       },
     },
 
@@ -727,9 +727,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           for (let j = 0; j < n; j++) {
             row.push(ce.Zero);
           }
-          rows.push(ce.box(['List', ...row]));
+          rows.push(ce.expr(['List', ...row]));
         }
-        return ce.box(['List', ...rows]);
+        return ce.expr(['List', ...rows]);
       },
     },
 
@@ -760,9 +760,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           for (let j = 0; j < n; j++) {
             row.push(ce.One);
           }
-          rows.push(ce.box(['List', ...row]));
+          rows.push(ce.expr(['List', ...row]));
         }
-        return ce.box(['List', ...rows]);
+        return ce.expr(['List', ...rows]);
       },
     },
 
@@ -784,7 +784,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
 
         // Scalar: |x| (absolute value)
         if (x.isNumber) {
-          return ce.box(['Abs', x]).evaluate();
+          return ce.expr(['Abs', x]).evaluate();
         }
 
         if (!isTensor(x)) return undefined;
@@ -819,14 +819,14 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           const n = shape[0];
           for (let i = 0; i < n; i++) {
             const val = x.tensor.at(i + 1);
-            elements.push(val !== undefined ? ce.box(val) : ce.Zero);
+            elements.push(val !== undefined ? ce.expr(val) : ce.Zero);
           }
 
           if (normType === 1) {
             // L1 norm: sum of absolute values
             let sum: Expression = ce.Zero;
             for (const el of elements) {
-              sum = sum.add(ce.box(['Abs', el]).evaluate());
+              sum = sum.add(ce.expr(['Abs', el]).evaluate());
             }
             return sum.evaluate();
           }
@@ -835,17 +835,17 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
             // L2 norm: sqrt of sum of squares
             let sumSq: Expression = ce.Zero;
             for (const el of elements) {
-              const absEl = ce.box(['Abs', el]).evaluate();
+              const absEl = ce.expr(['Abs', el]).evaluate();
               sumSq = sumSq.add(absEl.mul(absEl));
             }
-            return ce.box(['Sqrt', sumSq]).evaluate();
+            return ce.expr(['Sqrt', sumSq]).evaluate();
           }
 
           if (normType === 'infinity') {
             // L∞ norm: max absolute value
             let maxVal: Expression = ce.Zero;
             for (const el of elements) {
-              const absEl = ce.box(['Abs', el]).evaluate();
+              const absEl = ce.expr(['Abs', el]).evaluate();
               // Compare: use numeric comparison
               const absNum = absEl.re ?? 0;
               const maxNum = maxVal.re ?? 0;
@@ -861,15 +861,15 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
             const p = normType;
             let sumPow: Expression = ce.Zero;
             for (const el of elements) {
-              const absEl = ce.box(['Abs', el]).evaluate();
-              sumPow = sumPow.add(ce.box(['Power', absEl, p]).evaluate());
+              const absEl = ce.expr(['Abs', el]).evaluate();
+              sumPow = sumPow.add(ce.expr(['Power', absEl, p]).evaluate());
             }
             // Use Root for integer p values, Power for non-integer
             // Use .N() to get numeric result for non-perfect roots
             if (Number.isInteger(p)) {
-              return ce.box(['Root', sumPow, p]).N();
+              return ce.expr(['Root', sumPow, p]).N();
             }
-            return ce.box(['Power', sumPow, ce.box(['Divide', 1, p])]).N();
+            return ce.expr(['Power', sumPow, ce.expr(['Divide', 1, p])]).N();
           }
 
           return undefined;
@@ -885,12 +885,12 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
             for (let i = 0; i < m; i++) {
               for (let j = 0; j < n; j++) {
                 const val = x.tensor.at(i + 1, j + 1);
-                const el = val !== undefined ? ce.box(val) : ce.Zero;
-                const absEl = ce.box(['Abs', el]).evaluate();
+                const el = val !== undefined ? ce.expr(val) : ce.Zero;
+                const absEl = ce.expr(['Abs', el]).evaluate();
                 sumSq = sumSq.add(absEl.mul(absEl));
               }
             }
-            return ce.box(['Sqrt', sumSq]).evaluate();
+            return ce.expr(['Sqrt', sumSq]).evaluate();
           }
 
           // L1 (max column sum of absolute values)
@@ -900,8 +900,8 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
               let colSum = 0;
               for (let i = 0; i < m; i++) {
                 const val = x.tensor.at(i + 1, j + 1);
-                const el = val !== undefined ? ce.box(val) : ce.Zero;
-                const absEl = ce.box(['Abs', el]).evaluate();
+                const el = val !== undefined ? ce.expr(val) : ce.Zero;
+                const absEl = ce.expr(['Abs', el]).evaluate();
                 colSum += absEl.re ?? 0;
               }
               if (colSum > maxColSum) maxColSum = colSum;
@@ -916,8 +916,8 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
               let rowSum = 0;
               for (let j = 0; j < n; j++) {
                 const val = x.tensor.at(i + 1, j + 1);
-                const el = val !== undefined ? ce.box(val) : ce.Zero;
-                const absEl = ce.box(['Abs', el]).evaluate();
+                const el = val !== undefined ? ce.expr(val) : ce.Zero;
+                const absEl = ce.expr(['Abs', el]).evaluate();
                 rowSum += absEl.re ?? 0;
               }
               if (rowSum > maxRowSum) maxRowSum = rowSum;
@@ -956,7 +956,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         // Special case: 1×1 matrix
         if (n === 1) {
           const val = M.tensor.at(1, 1);
-          return ce.box(['List', val !== undefined ? ce.box(val) : ce.Zero]);
+          return ce.expr(['List', val !== undefined ? ce.expr(val) : ce.Zero]);
         }
 
         // Check if matrix is diagonal or triangular (eigenvalues are diagonal elements)
@@ -965,9 +965,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           const eigenvalues: Expression[] = [];
           for (let i = 0; i < n; i++) {
             const val = M.tensor.at(i + 1, i + 1);
-            eigenvalues.push(val !== undefined ? ce.box(val) : ce.Zero);
+            eigenvalues.push(val !== undefined ? ce.expr(val) : ce.Zero);
           }
-          return ce.box(['List', ...eigenvalues]);
+          return ce.expr(['List', ...eigenvalues]);
         }
 
         // 2×2 case: solve characteristic polynomial analytically
@@ -985,11 +985,11 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           const disc = trace.mul(trace).sub(det.mul(ce.number(4)));
 
           // λ = (trace ± √disc) / 2
-          const sqrtDisc = ce.box(['Sqrt', disc]).evaluate();
+          const sqrtDisc = ce.expr(['Sqrt', disc]).evaluate();
           const lambda1 = trace.add(sqrtDisc).div(ce.number(2)).evaluate();
           const lambda2 = trace.sub(sqrtDisc).div(ce.number(2)).evaluate();
 
-          return ce.box(['List', lambda1, lambda2]);
+          return ce.expr(['List', lambda1, lambda2]);
         }
 
         // 3×3 case: solve cubic characteristic polynomial
@@ -1022,7 +1022,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         const n = shape[0];
 
         // First compute eigenvalues
-        const eigenvaluesExpr = ce.box(['Eigenvalues', M]).evaluate();
+        const eigenvaluesExpr = ce.expr(['Eigenvalues', M]).evaluate();
         if (
           eigenvaluesExpr.operator !== 'List' ||
           !isFunction(eigenvaluesExpr) ||
@@ -1045,7 +1045,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           }
         }
 
-        return ce.box(['List', ...eigenvectors]);
+        return ce.expr(['List', ...eigenvectors]);
       },
     },
 
@@ -1066,13 +1066,13 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           return ce.error('expected-square-matrix', M.toString());
         }
 
-        const eigenvalues = ce.box(['Eigenvalues', M]).evaluate();
-        const eigenvectors = ce.box(['Eigenvectors', M]).evaluate();
+        const eigenvalues = ce.expr(['Eigenvalues', M]).evaluate();
+        const eigenvectors = ce.expr(['Eigenvectors', M]).evaluate();
 
         if (eigenvalues.operator === 'Error') return eigenvalues;
         if (eigenvectors.operator === 'Error') return eigenvectors;
 
-        return ce.box(['Tuple', eigenvalues, eigenvectors]);
+        return ce.expr(['Tuple', eigenvalues, eigenvectors]);
       },
     },
 
@@ -1098,7 +1098,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         if (!result) return undefined;
 
         const { P, L, U } = result;
-        return ce.box(['Tuple', P, L, U]);
+        return ce.expr(['Tuple', P, L, U]);
       },
     },
 
@@ -1124,7 +1124,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         if (!result) return undefined;
 
         const { Q, R } = result;
-        return ce.box(['Tuple', Q, R]);
+        return ce.expr(['Tuple', Q, R]);
       },
     },
 
@@ -1172,7 +1172,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         if (!result) return undefined;
 
         const { U, S, V } = result;
-        return ce.box(['Tuple', U, S, V]);
+        return ce.expr(['Tuple', U, S, V]);
       },
     },
   },
@@ -1265,14 +1265,14 @@ function computeLU(
   }
 
   // Build result matrices
-  const PExpr = ce.box(['List', ...P.map((row) => ce.box(['List', ...row]))]);
-  const LExpr = ce.box([
+  const PExpr = ce.expr(['List', ...P.map((row) => ce.expr(['List', ...row]))]);
+  const LExpr = ce.expr([
     'List',
-    ...L.map((row) => ce.box(['List', ...row.map((x) => ce.number(x))])),
+    ...L.map((row) => ce.expr(['List', ...row.map((x) => ce.number(x))])),
   ]);
-  const UExpr = ce.box([
+  const UExpr = ce.expr([
     'List',
-    ...U.map((row) => ce.box(['List', ...row.map((x) => ce.number(x))])),
+    ...U.map((row) => ce.expr(['List', ...row.map((x) => ce.number(x))])),
   ]);
 
   return { P: PExpr, L: LExpr, U: UExpr };
@@ -1377,13 +1377,13 @@ function computeQR(
   }
 
   // Build result matrices
-  const QExpr = ce.box([
+  const QExpr = ce.expr([
     'List',
-    ...Q.map((row) => ce.box(['List', ...row.map((x) => ce.number(x))])),
+    ...Q.map((row) => ce.expr(['List', ...row.map((x) => ce.number(x))])),
   ]);
-  const RExpr = ce.box([
+  const RExpr = ce.expr([
     'List',
-    ...R.map((row) => ce.box(['List', ...row.map((x) => ce.number(x))])),
+    ...R.map((row) => ce.expr(['List', ...row.map((x) => ce.number(x))])),
   ]);
 
   return { Q: QExpr, R: RExpr };
@@ -1451,9 +1451,9 @@ function computeCholesky(
   }
 
   // Build result matrix
-  return ce.box([
+  return ce.expr([
     'List',
-    ...L.map((row) => ce.box(['List', ...row.map((x) => ce.number(x))])),
+    ...L.map((row) => ce.expr(['List', ...row.map((x) => ce.number(x))])),
   ]);
 }
 
@@ -1632,17 +1632,17 @@ function computeSVD(
   }
 
   // Build result matrices
-  const UExpr = ce.box([
+  const UExpr = ce.expr([
     'List',
-    ...U.map((row) => ce.box(['List', ...row.map((x) => ce.number(x))])),
+    ...U.map((row) => ce.expr(['List', ...row.map((x) => ce.number(x))])),
   ]);
-  const SExpr = ce.box([
+  const SExpr = ce.expr([
     'List',
-    ...S.map((row) => ce.box(['List', ...row.map((x) => ce.number(x))])),
+    ...S.map((row) => ce.expr(['List', ...row.map((x) => ce.number(x))])),
   ]);
-  const VExpr = ce.box([
+  const VExpr = ce.expr([
     'List',
-    ...V.map((row) => ce.box(['List', ...row.map((x) => ce.number(x))])),
+    ...V.map((row) => ce.expr(['List', ...row.map((x) => ce.number(x))])),
   ]);
 
   return { U: UExpr, S: SExpr, V: VExpr };
@@ -1659,7 +1659,7 @@ function getElement(
 ): Expression {
   if (!isTensor(M)) return ce.Zero;
   const val = M.tensor.at(i, j);
-  return val !== undefined ? ce.box(val) : ce.Zero;
+  return val !== undefined ? ce.expr(val) : ce.Zero;
 }
 
 /**
@@ -1739,7 +1739,7 @@ function computeEigenvalues3x3(
   // Solve using Cardano's formula or trigonometric method
   const eigenvalues = solveCubic(p, q, trace / 3);
 
-  return ce.box([
+  return ce.expr([
     'List',
     ce.number(eigenvalues[0]),
     ce.number(eigenvalues[1]),
@@ -1848,7 +1848,7 @@ function computeEigenvaluesQR(
     eigenvalues.push(ce.number(A[i][i]));
   }
 
-  return ce.box(['List', ...eigenvalues]);
+  return ce.expr(['List', ...eigenvalues]);
 }
 
 /**
@@ -1949,7 +1949,7 @@ function computeEigenvector(
   const eigenvector = solveNullSpace(AminusLambdaI, n);
   if (!eigenvector) return undefined;
 
-  return ce.box(['List', ...eigenvector.map((x) => ce.number(x))]);
+  return ce.expr(['List', ...eigenvector.map((x) => ce.number(x))]);
 }
 
 /**
@@ -1976,7 +1976,7 @@ function computeEigenvector2x2Symbolic(
   if (bVal !== undefined && Math.abs(bVal) > 1e-10) {
     // v = [b, λ - a]
     const v2 = lambda.sub(a).evaluate();
-    return ce.box(['List', b, v2]);
+    return ce.expr(['List', b, v2]);
   }
 
   const cVal = c.re;
@@ -1984,7 +1984,7 @@ function computeEigenvector2x2Symbolic(
     // v = [λ - d, c]
     const d = getElement(M, 2, 2, ce);
     const v1 = lambda.sub(d).evaluate();
-    return ce.box(['List', v1, c]);
+    return ce.expr(['List', v1, c]);
   }
 
   // Diagonal matrix case
@@ -1992,9 +1992,9 @@ function computeEigenvector2x2Symbolic(
   const lambdaVal = lambda.re;
   if (aVal !== undefined && lambdaVal !== undefined) {
     if (Math.abs(aVal - lambdaVal) < 1e-10) {
-      return ce.box(['List', ce.One, ce.Zero]);
+      return ce.expr(['List', ce.One, ce.Zero]);
     } else {
-      return ce.box(['List', ce.Zero, ce.One]);
+      return ce.expr(['List', ce.Zero, ce.One]);
     }
   }
 
@@ -2308,7 +2308,7 @@ function buildNestedList(
 ): Expression {
   if (shape.length === 1) {
     // Base case: return a single list
-    return ce.box(['List', ...data.slice(offset, offset + shape[0])]);
+    return ce.expr(['List', ...data.slice(offset, offset + shape[0])]);
   }
 
   // Recursive case: build lists of lists
@@ -2321,7 +2321,7 @@ function buildNestedList(
     rows.push(buildNestedList(ce, data, innerShape, offset + i * innerSize));
   }
 
-  return ce.box(['List', ...rows]);
+  return ce.expr(['List', ...rows]);
 }
 
 function canonicalMatrix(

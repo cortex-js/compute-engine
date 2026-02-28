@@ -13,7 +13,6 @@ import type { Type, TypeString } from '../common/type/types';
 import type { BoxedType } from '../common/type/boxed-type';
 import type { NumericValue } from './numeric-value/types';
 import type { BigNum } from './numerics/types';
-import type { LatexString, SerializeLatexOptions } from './latex-syntax/types';
 
 import type {
   JsonSerializationOptions,
@@ -422,12 +421,12 @@ export interface Tensor<DT extends TensorDataType> extends TensorData<DT> {
  *
  * To create a boxed expression:
  *
- * ### `ce.box()` and `ce.parse()`
+ * ### `ce.expr()` and `ce.parse()`
  *
- * Use `ce.box()` or `ce.parse()`.
+ * Use `ce.expr()` or `ce.parse()`.
  *
  * Use `ce.parse()` to get a boxed expression from a LaTeX string.
- * Use `ce.box()` to get a boxed expression from a MathJSON expression.
+ * Use `ce.expr()` to get a boxed expression from a MathJSON expression.
  *
  * By default, the result of these methods is a canonical expression. For
  * example, if it is a rational literal, it is reduced to its canonical form.
@@ -446,7 +445,7 @@ export interface Tensor<DT extends TensorDataType> extends TensorData<DT> {
  *
  * ### `ce.function()`
  *
- * This is a specialized version of `ce.box()` for creating a new function
+ * This is a specialized version of `ce.expr()` for creating a new function
  * expression.
  *
  * The canonical handler of the operator is called.
@@ -597,30 +596,6 @@ export interface Expression {
    */
   toString(): string;
 
-  /** Serialize to a LaTeX string.
-   *
-   * Note that lazy collections are eagerly evaluated.
-   *
-   * Will ignore any LaTeX metadata.
-   */
-  toLatex(options?: Partial<SerializeLatexOptions>): LatexString;
-
-  /** LaTeX representation of this expression.
-   *
-   * If the expression was parsed from LaTeX, the LaTeX representation is
-   * the same as the input LaTeX.
-   *
-   * To customize the serialization, use `expr.toLatex()`.
-   *
-   * Note that lazy collections are eagerly evaluated.
-   *
-   * :::info[Note]
-   * Applicable to canonical and non-canonical expressions.
-   * :::
-   *
-   */
-  get latex(): LatexString;
-
   /** Used by `JSON.stringify()` to serialize this object to JSON.
    *
    * Method version of `expr.json`.
@@ -658,6 +633,20 @@ export interface Expression {
    *
    */
   readonly json: MathJsonExpression;
+
+  /**
+   * Return a LaTeX representation of this expression.
+   *
+   * This is a convenience getter that delegates to the standalone
+   * `serialize()` function from the `latex-syntax` module.
+   */
+  readonly latex: string;
+
+  /**
+   * Return a LaTeX representation of this expression with custom
+   * serialization options.
+   */
+  toLatex(options?: Record<string, any>): string;
 
   /**
    * Output to the console a string representation of the expression.
@@ -1237,7 +1226,7 @@ export interface Expression {
    * Applicable to canonical and non-canonical expressions.
    *
    * To match a specific symbol (not a wildcard pattern), the `match` must be
-   * a `Expression` (e.g., `{ match: ce.box('x'), replace: ... }`).
+   * a `Expression` (e.g., `{ match: ce.expr('x'), replace: ... }`).
    * For simple symbol substitution, consider using `subs()` instead.
    * :::
    */

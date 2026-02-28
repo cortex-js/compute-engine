@@ -95,7 +95,7 @@ export function eq(
 ): boolean | undefined {
   // We want to give a chance to the eq handler of the functions first
   if (a.operatorDefinition?.eq) {
-    const cmp = a.operatorDefinition.eq(a, a.engine.box(inputB));
+    const cmp = a.operatorDefinition.eq(a, a.engine.expr(inputB));
     if (cmp !== undefined) return cmp;
   }
   if (typeof inputB !== 'number' && inputB.operatorDefinition?.eq) {
@@ -107,7 +107,7 @@ export function eq(
   // We want to compare the **value** of the boxed expressions.
   //
   a = a.N();
-  let b = typeof inputB !== 'number' ? inputB.N() : a.engine.box(inputB);
+  let b = typeof inputB !== 'number' ? inputB.N() : a.engine.expr(inputB);
 
   //
   // Do we have at least one function expression?
@@ -172,8 +172,8 @@ export function eq(
   //
   // If we didn't come to a resolution yet, check the assumptions DB
   //
-  if (ce.ask(ce.box(['Equal', a, b])).length > 0) return true;
-  if (ce.ask(ce.box(['NotEqual', a, b])).length > 0) return false;
+  if (ce.ask(ce.expr(['Equal', a, b])).length > 0) return true;
+  if (ce.ask(ce.expr(['NotEqual', a, b])).length > 0) return false;
 
   // If a or b have some unknowns, we can't prove equality
   if (a.unknowns.length > 0 || b.unknowns.length > 0) return undefined;

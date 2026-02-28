@@ -108,19 +108,6 @@ function assertLibraryDefinitions(value: unknown, libraryName: string): void {
   }
 }
 
-function assertLibraryLatexDictionary(
-  value: unknown,
-  libraryName: string
-): void {
-  if (value === undefined) return;
-
-  if (!Array.isArray(value)) {
-    throw new Error(
-      `Invalid library "${libraryName}": "latexDictionary" must be an array`
-    );
-  }
-}
-
 export function assertLibraryDefinitionContract(
   library: unknown
 ): asserts library is LibraryDefinition {
@@ -133,7 +120,6 @@ export function assertLibraryDefinitionContract(
 
   assertLibraryRequires(library.requires, name);
   assertLibraryDefinitions(library.definitions, name);
-  assertLibraryLatexDictionary(library.latexDictionary, name);
 }
 
 function assertCompileTargetContract(

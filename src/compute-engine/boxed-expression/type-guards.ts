@@ -66,48 +66,6 @@ export function isTensor(
   return expr?._kind === 'tensor';
 }
 
-/** @deprecated Use `isExpression()` instead. */
-export function isBoxedExpression(x: unknown): x is Expression {
-  return isExpressionImpl(x);
-}
-
-/** @deprecated Use `isNumber()` instead. */
-export function isBoxedNumber(
-  expr: Expression | null | undefined
-): expr is Expression & NumberLiteralInterface {
-  return isNumber(expr);
-}
-
-/** @deprecated Use `isSymbol()` instead. */
-export function isBoxedSymbol(
-  expr: Expression | null | undefined,
-  name?: string
-): expr is Expression & SymbolInterface {
-  return isSymbol(expr, name);
-}
-
-/** @deprecated Use `isFunction()` instead. */
-export function isBoxedFunction(
-  expr: Expression | null | undefined,
-  operator?: string
-): expr is Expression & FunctionInterface {
-  return isFunction(expr, operator);
-}
-
-/** @deprecated Use `isString()` instead. */
-export function isBoxedString(
-  expr: Expression | null | undefined
-): expr is Expression & StringInterface {
-  return isString(expr);
-}
-
-/** @deprecated Use `isTensor()` instead. */
-export function isBoxedTensor(
-  expr: Expression | null | undefined
-): expr is Expression & TensorInterface {
-  return isTensor(expr);
-}
-
 export function isDictionary(
   expr: Expression | null | undefined
 ): expr is Expression & DictionaryInterface {

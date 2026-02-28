@@ -361,7 +361,7 @@ export function fu(
   // We use canonical form evaluation which handles basic arithmetic
   if (bestResult.operator === 'Add' || bestResult.operator === 'Multiply') {
     // Re-canonicalize to combine like terms
-    const simplified = expr.engine.box(bestResult.json);
+    const simplified = expr.engine.expr(bestResult.json);
     updateBest(simplified);
   }
 

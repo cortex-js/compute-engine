@@ -707,7 +707,7 @@ export class BoxedFunction
     if (rhs === 0) return this;
     if (!(this.isCanonical || this.isStructural))
       throw new Error('Not canonical');
-    return add(this, this.engine.box(rhs));
+    return add(this, this.engine.expr(rhs));
   }
 
   mul(rhs: NumericValue | number | Expression): Expression {
@@ -723,7 +723,7 @@ export class BoxedFunction
       if (rhs.isNegativeOne) return this.neg();
     }
 
-    return mul(this, this.engine.box(rhs));
+    return mul(this, this.engine.expr(rhs));
   }
 
   div(rhs: number | Expression): Expression {
@@ -806,7 +806,7 @@ export class BoxedFunction
       }
     }
 
-    return this.engine._fn('Root', [this, this.engine.box(exp)]);
+    return this.engine._fn('Root', [this, this.engine.expr(exp)]);
   }
 
   sqrt(): Expression {
@@ -814,7 +814,7 @@ export class BoxedFunction
   }
 
   ln(semiBase?: number | Expression): Expression {
-    const base = semiBase ? this.engine.box(semiBase) : undefined;
+    const base = semiBase ? this.engine.expr(semiBase) : undefined;
     if (!(this.isCanonical || this.isStructural))
       throw new Error('Not canonical');
 

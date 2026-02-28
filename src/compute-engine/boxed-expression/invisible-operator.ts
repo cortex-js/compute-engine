@@ -71,22 +71,22 @@ export function canonicalInvisibleOperator(
           if (isOperatorDef(def)) {
             // It's a known operator, all good (the canonicalization
             // will check the arity)
-            return ce.box([lhsCanon.symbol]);
+            return ce.expr([lhsCanon.symbol]);
           }
 
           if (def.value.type.isUnknown) {
             lhsCanon.infer('function');
-            return ce.box([lhsCanon.symbol]);
+            return ce.expr([lhsCanon.symbol]);
           }
 
           if (def.value.type.matches('function'))
-            return ce.box([lhsCanon.symbol]);
+            return ce.expr([lhsCanon.symbol]);
 
           // Uh. Oh. It's a symbol with a value that is not a function.
           return ce.typeError('function', def.value.type, lhsCanon);
         }
         ce.declare(lhsCanon.symbol, 'function');
-        return ce.box([lhsCanon.symbol]);
+        return ce.expr([lhsCanon.symbol]);
       }
 
       // Parse the arguments first, in case they reference lhsCanon.symbol

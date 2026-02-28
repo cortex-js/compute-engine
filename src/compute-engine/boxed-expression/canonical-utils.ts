@@ -15,5 +15,5 @@ export function canonical(
   // Avoid memory allocation if possible
   if (xs.every((x) => x.isCanonical)) return xs;
 
-  return xs.map((x) => ce.box(x, { scope }));
+  return xs.map((x) => ce.expr(x, { scope }));
 }

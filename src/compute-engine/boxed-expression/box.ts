@@ -197,7 +197,7 @@ export function boxFunction(
     return new BoxedFunction(
       ce,
       name,
-      ops.map((x) => ce.box(x, { form: 'raw' })),
+      ops.map((x) => ce.expr(x, { form: 'raw' })),
       { metadata: options?.metadata, canonical: true }
     );
   }
@@ -246,7 +246,7 @@ export function boxFunction(
         if (im !== null && im !== 0)
           return ce.number(ce.complex(0, im), options);
 
-        return ce.box(op1).mul(ce.I);
+        return ce.expr(op1).mul(ce.I);
       }
       if (ops.length === 2) {
         const re =
@@ -276,7 +276,7 @@ export function boxFunction(
       const op1 = ops[0];
       if (typeof op1 === 'number') return ce.number(-op1, options);
       if (op1 instanceof Decimal) return ce.number(op1.neg(), options);
-      const boxedop1 = ce.box(op1, options);
+      const boxedop1 = ce.expr(op1, options);
       if (isNumber(boxedop1)) {
         const num = boxedop1.numericValue;
         return ce.number(typeof num === 'number' ? -num : num.neg(), options);
@@ -339,7 +339,7 @@ export function boxFunction(
  *     Note that `Negate` is only distributed over addition. In practice, having
  * `Negate` factored on multiply/divide is more useful to detect patterns.
  *
- * Note that this function should only be called from `ce.box()`
+ * Note that this function should only be called from `ce.expr()`
  *
  */
 
@@ -478,7 +478,7 @@ function makeCanonicalFunction(
   //
   if (name === 'List') {
     // We don't canonicalize it, in case it's a List (we want to detect lists of lists)
-    const boxedOps = ops.map((x) => ce.box(x, { form: 'raw' }));
+    const boxedOps = ops.map((x) => ce.expr(x, { form: 'raw' }));
     const tensorInfo = expressionTensorInfo('List', boxedOps);
 
     if (tensorInfo && tensorInfo.dtype) {
@@ -499,7 +499,7 @@ function makeCanonicalFunction(
   }
 
   if (name === 'Dictionary') {
-    const boxedOps = ops.map((x) => ce.box(x, { form: 'raw' }));
+    const boxedOps = ops.map((x) => ce.expr(x, { form: 'raw' }));
     return new BoxedDictionary(ce, ce._fn('Dictionary', boxedOps), {
       canonical: true,
     });
@@ -542,7 +542,7 @@ function makeCanonicalFunction(
 
   if (opDef.lazy) {
     // If we have a lazy function, we don't canonicalize the arguments
-    const xs = ops.map((x) => ce.box(x, { form: 'raw' }));
+    const xs = ops.map((x) => ce.expr(x, { form: 'raw' }));
     if (opDef.canonical) {
       try {
         result = opDef.canonical(xs, { engine: ce, scope });
@@ -575,7 +575,7 @@ function makeCanonicalFunction(
     return result;
   }
 
-  const xs = ops.map((x) => ce.box(x));
+  const xs = ops.map((x) => ce.expr(x));
 
   //
   // 3/ Apply `canonical` handler
@@ -818,5 +818,5 @@ export function semiCanonical(
   if (xs.every((x) => x instanceof _BoxedExpression && x.isCanonical))
     return xs as ReadonlyArray<Expression>;
 
-  return xs.map((x) => ce.box(x, { scope }));
+  return xs.map((x) => ce.expr(x, { scope }));
 }

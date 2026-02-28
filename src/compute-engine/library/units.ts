@@ -89,7 +89,7 @@ export const UNITS_LIBRARY: SymbolDefinitions = {
       if (isString(unitArg) && /[/*^()]/.test(unitArg.string)) {
         const parsed = parseUnitDSL(unitArg.string);
         if (parsed !== null && typeof parsed !== 'string') {
-          const boxed = ce.box(parsed as any);
+          const boxed = ce.expr(parsed as any);
           return ce._fn('Quantity', [mag, boxed]);
         }
       }

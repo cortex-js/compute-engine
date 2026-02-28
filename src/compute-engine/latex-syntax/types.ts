@@ -1196,7 +1196,7 @@ export type SerializeLatexOptions = NumberSerializationFormat & {
    * @example
    * ```typescript
    * const ce = new ComputeEngine();
-   * const angle = ce.box(['Quantity', 9.5, 'deg']);
+   * const angle = ce.expr(['Quantity', 9.5, 'deg']);
    *
    * // DMS format
    * angle.latex({ dmsFormat: true });  // "9°30'"
@@ -1205,7 +1205,7 @@ export type SerializeLatexOptions = NumberSerializationFormat & {
    * angle.latex({ dmsFormat: false }); // "9.5°"
    *
    * // Full DMS notation
-   * ce.box(['Quantity', 9.504166, 'deg'])
+   * ce.expr(['Quantity', 9.504166, 'deg'])
    *   .latex({ dmsFormat: true });     // "9°30'15\""
    * ```
    */
@@ -1222,22 +1222,22 @@ export type SerializeLatexOptions = NumberSerializationFormat & {
    * const ce = new ComputeEngine();
    *
    * // No normalization (show exact value)
-   * ce.box(['Degrees', 370])
+   * ce.expr(['Degrees', 370])
    *   .latex({ angleNormalization: 'none' });  // "370°"
    *
    * // Normalize to [0, 360) - useful for bearings
-   * ce.box(['Degrees', 370])
+   * ce.expr(['Degrees', 370])
    *   .latex({ angleNormalization: '0...360' }); // "10°"
    *
-   * ce.box(['Degrees', -45])
+   * ce.expr(['Degrees', -45])
    *   .latex({ angleNormalization: '0...360' }); // "315°"
    *
    * // Normalize to [-180, 180] - useful for longitude
-   * ce.box(['Degrees', 190])
+   * ce.expr(['Degrees', 190])
    *   .latex({ angleNormalization: '-180...180' }); // "-170°"
    *
    * // Combine with DMS format
-   * ce.box(['Degrees', 370])
+   * ce.expr(['Degrees', 370])
    *   .latex({
    *     dmsFormat: true,
    *     angleNormalization: '0...360'

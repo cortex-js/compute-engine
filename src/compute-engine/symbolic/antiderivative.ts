@@ -140,17 +140,17 @@ function antiderivativeSimple(
 
   // Is it the index?
   if (sym(fn) === index)
-    return ce.box(['Divide', ['Power', fn, 2], 2]).simplify();
+    return ce.expr(['Divide', ['Power', fn, 2], 2]).simplify();
 
   // Is it a constant?
   if (!fn.has(index))
-    return ce.box(['Multiply', fn, ce.symbol(index)]).simplify();
+    return ce.expr(['Multiply', fn, ce.symbol(index)]).simplify();
 
   // Basic trig
   if (isFunction(fn, 'Sin') && sym(fn.op1) === index)
-    return ce.box(['Negate', ['Cos', index]]);
+    return ce.expr(['Negate', ['Cos', index]]);
   if (isFunction(fn, 'Cos') && sym(fn.op1) === index)
-    return ce.box(['Sin', index]);
+    return ce.expr(['Sin', index]);
 
   // Exponential
   if (isFunction(fn, 'Exp') && sym(fn.op1) === index) return fn;
@@ -166,7 +166,7 @@ function antiderivativeSimple(
     const exponent = fn.op2;
     if (!exponent.has(index) && !exponent.isSame(-1)) {
       return ce
-        .box([
+        .expr([
           'Divide',
           ['Power', index, ['Add', exponent, 1]],
           ['Add', exponent, 1],
@@ -324,9 +324,9 @@ function applyOuter(
 ): Expression {
   // Exp is represented as ['Power', 'ExponentialE', arg] in canonical form
   if (outer === 'Exp') {
-    return ce.box(['Power', 'ExponentialE', arg]);
+    return ce.expr(['Power', 'ExponentialE', arg]);
   }
-  return ce.box([outer, arg]);
+  return ce.expr([outer, arg]);
 }
 
 /**
@@ -357,7 +357,7 @@ function tryLinearSubstitution(
         coefficient =
           constFactors.length === 1
             ? constFactors[0]
-            : ce.box(['Multiply', ...constFactors]);
+            : ce.expr(['Multiply', ...constFactors]);
       }
     }
   } else if (isFunction(inner, 'Add')) {
@@ -380,7 +380,7 @@ function tryLinearSubstitution(
             linearTerm =
               constFactors.length === 1
                 ? constFactors[0]
-                : ce.box(['Multiply', ...constFactors]);
+                : ce.expr(['Multiply', ...constFactors]);
           }
         }
       } else {
@@ -479,7 +479,7 @@ function tryCyclicExpTrigIntegral(
     if (trigOp === 'Sin') {
       // ∫ e^x * sin(x) dx = (e^x/2) * (sin(x) - cos(x))
       return ce
-        .box([
+        .expr([
           'Multiply',
           ['Rational', 1, 2],
           ['Exp', index],
@@ -489,7 +489,7 @@ function tryCyclicExpTrigIntegral(
     } else {
       // ∫ e^x * cos(x) dx = (e^x/2) * (sin(x) + cos(x))
       return ce
-        .box([
+        .expr([
           'Multiply',
           ['Rational', 1, 2],
           ['Exp', index],
@@ -516,19 +516,19 @@ function tryCyclicExpTrigIntegral(
     if (hasIndex && coefficient) {
       const a = coefficient;
       // Coefficient: e^x / (a² + 1)
-      const expX = ce.box(['Exp', index]);
-      const denominator = ce.box(['Add', ['Power', a.json, 2], 1]);
+      const expX = ce.expr(['Exp', index]);
+      const denominator = ce.expr(['Add', ['Power', a.json, 2], 1]);
       const coeff = expX.div(denominator);
 
       if (trigOp === 'Sin') {
         // ∫ e^x * sin(ax) dx = (e^x/(a²+1)) * (sin(ax) - a*cos(ax))
         const sinPart = trigFactor;
-        const cosPart = ce.box(['Cos', trigArg.json]);
+        const cosPart = ce.expr(['Cos', trigArg.json]);
         const result = coeff.mul(sinPart.sub(a.mul(cosPart)));
         return result.simplify();
       } else {
         // ∫ e^x * cos(ax) dx = (e^x/(a²+1)) * (a*sin(ax) + cos(ax))
-        const sinPart = ce.box(['Sin', trigArg.json]);
+        const sinPart = ce.expr(['Sin', trigArg.json]);
         const cosPart = trigFactor;
         const result = coeff.mul(a.mul(sinPart).add(cosPart));
         return result.simplify();
@@ -541,19 +541,19 @@ function tryCyclicExpTrigIntegral(
   if (linearCoeffs) {
     const { a } = linearCoeffs;
     // Coefficient: e^x / (a² + 1)
-    const expX = ce.box(['Exp', index]);
-    const denominator = ce.box(['Add', ['Power', a.json, 2], 1]);
+    const expX = ce.expr(['Exp', index]);
+    const denominator = ce.expr(['Add', ['Power', a.json, 2], 1]);
     const coeff = expX.div(denominator);
 
     if (trigOp === 'Sin') {
       // ∫ e^x * sin(ax+b) dx = (e^x/(a²+1)) * (sin(ax+b) - a*cos(ax+b))
       const sinPart = trigFactor;
-      const cosPart = ce.box(['Cos', trigArg.json]);
+      const cosPart = ce.expr(['Cos', trigArg.json]);
       const result = coeff.mul(sinPart.sub(a.mul(cosPart)));
       return result.simplify();
     } else {
       // ∫ e^x * cos(ax+b) dx = (e^x/(a²+1)) * (a*sin(ax+b) + cos(ax+b))
-      const sinPart = ce.box(['Sin', trigArg.json]);
+      const sinPart = ce.expr(['Sin', trigArg.json]);
       const cosPart = trigFactor;
       const result = coeff.mul(a.mul(sinPart).add(cosPart));
       return result.simplify();
@@ -1519,7 +1519,7 @@ function getQuadraticCoefficients(
             ? ce.One
             : constFactors.length === 1
             ? constFactors[0]
-            : ce.box(['Multiply', ...constFactors]);
+            : ce.expr(['Multiply', ...constFactors]);
         if (!coeff.has(index)) {
           return { a: coeff, b: ce.Zero, c: ce.Zero };
         }
@@ -1562,7 +1562,7 @@ function getQuadraticCoefficients(
               ? ce.One
               : constFactors.length === 1
               ? constFactors[0]
-              : ce.box(['Multiply', ...constFactors]);
+              : ce.expr(['Multiply', ...constFactors]);
           a = a.add(coeff);
           continue;
         }
@@ -1577,7 +1577,7 @@ function getQuadraticCoefficients(
               ? ce.One
               : constFactors.length === 1
               ? constFactors[0]
-              : ce.box(['Multiply', ...constFactors]);
+              : ce.expr(['Multiply', ...constFactors]);
           b = b.add(coeff);
           continue;
         }
@@ -1605,10 +1605,10 @@ export function antiderivative(fn: Expression, index: string): Expression {
   const ce = fn.engine;
 
   // Is it the index?
-  if (sym(fn) === index) return ce.box(['Divide', ['Power', fn, 2], 2]);
+  if (sym(fn) === index) return ce.expr(['Divide', ['Power', fn, 2], 2]);
 
   // Is it a constant?
-  if (!fn.has(index)) return ce.box(['Multiply', fn, ce.symbol(index)]);
+  if (!fn.has(index)) return ce.expr(['Multiply', fn, ce.symbol(index)]);
 
   // Apply the chain rule
   if (isFunction(fn, 'Add')) {
@@ -1708,15 +1708,15 @@ export function antiderivative(fn: Expression, index: string): Expression {
     if (!fn.op2.has(index)) {
       // ∫ f(x)/c dx = (1/c) * ∫f(x) dx
       const antideriv = antiderivative(fn.op1, index);
-      return fn.engine.box(['Divide', antideriv, fn.op2]);
+      return fn.engine.expr(['Divide', antideriv, fn.op2]);
     }
     // Handle ∫ 1/x dx = ln|x|
     if (fn.op1.isSame(1) && sym(fn.op2) === index) {
-      return ce.box(['Ln', ['Abs', index]]);
+      return ce.expr(['Ln', ['Abs', index]]);
     }
     // Handle ∫ c/x dx = c * ln|x|
     if (!fn.op1.has(index) && sym(fn.op2) === index) {
-      return ce.box(['Multiply', fn.op1, ['Ln', ['Abs', index]]]);
+      return ce.expr(['Multiply', fn.op1, ['Ln', ['Abs', index]]]);
     }
     // Handle ∫ c/(1+x²) dx = c * arctan(x)
     // Canonical form: ['Divide', c, ['Add', ['Power', 'x', 2], 1]]
@@ -1734,7 +1734,7 @@ export function antiderivative(fn: Expression, index: string): Expression {
       );
       const oneTerm = addOps.find((op) => op.isSame(1));
       if (powerTerm && oneTerm) {
-        const arctan = ce.box(['Arctan', index]);
+        const arctan = ce.expr(['Arctan', index]);
         if (fn.op1.isSame(1)) {
           return arctan;
         }
@@ -1766,7 +1766,7 @@ export function antiderivative(fn: Expression, index: string): Expression {
           );
           const negOneTerm = innerOps.find((op) => op.isSame(-1));
           if (powerTerm && negOneTerm) {
-            return ce.box(['Arcsec', index]);
+            return ce.expr(['Arcsec', index]);
           }
         }
       }
@@ -1782,7 +1782,7 @@ export function antiderivative(fn: Expression, index: string): Expression {
         const ratio = fn.op1.div(denomDeriv).simplify();
         if (!ratio.has(index)) {
           // ∫ c*f'(x)/f(x) dx = c*ln|f(x)|
-          const lnExpr = ce.box(['Ln', ['Abs', fn.op2]]);
+          const lnExpr = ce.expr(['Ln', ['Abs', fn.op2]]);
           if (ratio.isSame(1)) {
             return lnExpr;
           }
@@ -1816,7 +1816,7 @@ export function antiderivative(fn: Expression, index: string): Expression {
         const ratio = fn.op1.div(otherProduct.mul(fDeriv)).simplify();
         if (!ratio.has(index)) {
           // ∫ 1/(g·h) dx where g = c·h' gives c·ln|h|
-          const lnExpr = ce.box(['Ln', ['Abs', f]]);
+          const lnExpr = ce.expr(['Ln', ['Abs', f]]);
           if (ratio.isSame(1)) {
             return lnExpr;
           }
@@ -1832,7 +1832,7 @@ export function antiderivative(fn: Expression, index: string): Expression {
       if (linearCoeffs) {
         const { a, b: _b } = linearCoeffs;
         // ∫ 1/(ax+b) dx = (1/a) * ln|ax+b|
-        const lnExpr = ce.box(['Ln', ['Abs', fn.op2]]);
+        const lnExpr = ce.expr(['Ln', ['Abs', fn.op2]]);
         if (a.isSame(1)) {
           // If numerator is not 1, multiply
           if (!fn.op1.isSame(1)) {
@@ -1866,7 +1866,7 @@ export function antiderivative(fn: Expression, index: string): Expression {
             // = -1/(a(n-1)) * (ax+b)^(-(n-1))
             const newExp = ce.number(-(n - 1));
             const coeff = ce.One.div(a.mul(ce.number(n - 1))).neg();
-            let result = coeff.mul(ce.box(['Power', base, newExp]));
+            let result = coeff.mul(ce.expr(['Power', base, newExp]));
             // If numerator is not 1, multiply
             if (!fn.op1.isSame(1)) {
               result = fn.op1.mul(result);
@@ -1901,7 +1901,7 @@ export function antiderivative(fn: Expression, index: string): Expression {
             .sub(b.mul(b))
             .simplify();
           // √(4ac - b²)
-          const sqrtDisc = ce.box(['Sqrt', fourAcMinusB2]).simplify();
+          const sqrtDisc = ce.expr(['Sqrt', fourAcMinusB2]).simplify();
           // 2ax + b
           const innerExpr = ce
             .number(2)
@@ -1911,7 +1911,7 @@ export function antiderivative(fn: Expression, index: string): Expression {
             .simplify();
           // arctan((2ax+b)/√(4ac-b²))
           const arctanArg = innerExpr.div(sqrtDisc).simplify();
-          const arctanExpr = ce.box(['Arctan', arctanArg]);
+          const arctanExpr = ce.expr(['Arctan', arctanArg]);
           // (2/√(4ac-b²)) * arctan(...)
           let result = ce.number(2).div(sqrtDisc).mul(arctanExpr).simplify();
 
@@ -1941,7 +1941,7 @@ export function antiderivative(fn: Expression, index: string): Expression {
             const x = ce.symbol(index);
 
             // First term: x / (2a²(n-1)(x²+a²)^(n-1))
-            const newPower = ce.box(['Power', base, ce.number(n - 1)]);
+            const newPower = ce.expr(['Power', base, ce.number(n - 1)]);
             const coeff1 = ce.One.div(
               ce
                 .number(2)
@@ -1962,7 +1962,7 @@ export function antiderivative(fn: Expression, index: string): Expression {
             const lowerPowerExpr =
               n === 2
                 ? ce.One.div(base)
-                : ce.One.div(ce.box(['Power', base, ce.number(n - 1)]));
+                : ce.One.div(ce.expr(['Power', base, ce.number(n - 1)]));
             const recursiveIntegral = antiderivative(lowerPowerExpr, index);
 
             let result = add(term1, coeff2.mul(recursiveIntegral)).simplify();
@@ -2029,19 +2029,19 @@ export function antiderivative(fn: Expression, index: string): Expression {
 
           // Integral terms:
           // 1. A * ln|x-r|
-          const term1 = A.mul(ce.box(['Ln', ['Abs', linearFactor]]));
+          const term1 = A.mul(ce.expr(['Ln', ['Abs', linearFactor]]));
 
           // 2. (Bx+C)/(x²+bx+c) splits into:
           //    B/2 * (2x+b)/(x²+bx+c) + (C - Bb/2)/(x²+bx+c)
           // First part: derivative pattern → B/2 * ln|x²+bx+c|
           const BHalf = B.div(ce.number(2));
-          const term2 = BHalf.mul(ce.box(['Ln', ['Abs', quadFactor]]));
+          const term2 = BHalf.mul(ce.expr(['Ln', ['Abs', quadFactor]]));
 
           // Second part: (C - Bb/2)/(x²+bx+c) → completing the square
           const CMinusBbHalf = C.sub(B.mul(qb).div(ce.number(2))).simplify();
           // ∫ k/(x²+bx+c) dx = k * (2/√(4c-b²)) * arctan((2x+b)/√(4c-b²))
           const fourCMinusB2 = ce.number(4).mul(qc).sub(qb.mul(qb)).simplify();
-          const sqrtDisc = ce.box(['Sqrt', fourCMinusB2]).simplify();
+          const sqrtDisc = ce.expr(['Sqrt', fourCMinusB2]).simplify();
           const innerExpr = ce
             .number(2)
             .mul(ce.symbol(index))
@@ -2050,7 +2050,7 @@ export function antiderivative(fn: Expression, index: string): Expression {
           const arctanArg = innerExpr.div(sqrtDisc).simplify();
           const arctanCoeff = ce.number(2).div(sqrtDisc).simplify();
           const term3 = CMinusBbHalf.mul(arctanCoeff).mul(
-            ce.box(['Arctan', arctanArg])
+            ce.expr(['Arctan', arctanArg])
           );
 
           let result = add(term1, term2, term3).simplify();
@@ -2095,7 +2095,7 @@ export function antiderivative(fn: Expression, index: string): Expression {
             const coefficient = ce.One.div(productOfDiffs);
 
             // The partial fraction term integrates to coefficient * ln|x - ri|
-            const lnTerm = ce.box([
+            const lnTerm = ce.expr([
               'Ln',
               ['Abs', ['Add', ce.symbol(index), roots[i].neg()]],
             ]);
@@ -2152,13 +2152,13 @@ export function antiderivative(fn: Expression, index: string): Expression {
 
                 // Integral terms:
                 // 1. A * ln|x-r|
-                const term1 = A.mul(ce.box(['Ln', ['Abs', linearFactor]]));
+                const term1 = A.mul(ce.expr(['Ln', ['Abs', linearFactor]]));
 
                 // 2. (Bx+C)/(x²+bx+c) splits into:
                 //    B/2 * (2x+b)/(x²+bx+c) + (C - Bb/2)/(x²+bx+c)
                 // First part: derivative pattern → B/2 * ln|x²+bx+c|
                 const BHalf = B.div(ce.number(2));
-                const term2 = BHalf.mul(ce.box(['Ln', ['Abs', quad]]));
+                const term2 = BHalf.mul(ce.expr(['Ln', ['Abs', quad]]));
 
                 // Second part: (C - Bb/2)/(x²+bx+c) → completing the square
                 const CMinusBbHalf = C.sub(
@@ -2170,7 +2170,7 @@ export function antiderivative(fn: Expression, index: string): Expression {
                   .mul(qc)
                   .sub(qb.mul(qb))
                   .simplify();
-                const sqrtDisc = ce.box(['Sqrt', fourCMinusB2]).simplify();
+                const sqrtDisc = ce.expr(['Sqrt', fourCMinusB2]).simplify();
                 const innerExpr = ce
                   .number(2)
                   .mul(ce.symbol(index))
@@ -2179,7 +2179,7 @@ export function antiderivative(fn: Expression, index: string): Expression {
                 const arctanArg = innerExpr.div(sqrtDisc).simplify();
                 const arctanCoeff = ce.number(2).div(sqrtDisc).simplify();
                 const term3 = CMinusBbHalf.mul(arctanCoeff).mul(
-                  ce.box(['Arctan', arctanArg])
+                  ce.expr(['Arctan', arctanArg])
                 );
 
                 let result = add(term1, term2, term3).simplify();
@@ -2219,7 +2219,7 @@ export function antiderivative(fn: Expression, index: string): Expression {
             op.op1.op2.isSame(2)
         );
         if (oneTerm && negPowerTerm) {
-          return ce.box(['Arcsin', index]);
+          return ce.expr(['Arcsin', index]);
         }
 
         // Check for x²+1 form: ['Add', ['Power', 'x', 2], 1]
@@ -2229,14 +2229,14 @@ export function antiderivative(fn: Expression, index: string): Expression {
             isFunction(op, 'Power') && sym(op.op1) === index && op.op2.isSame(2)
         );
         if (oneTerm && powerTerm) {
-          return ce.box(['Arsinh', index]);
+          return ce.expr(['Arsinh', index]);
         }
 
         // Check for x²-1 form: ['Add', ['Power', 'x', 2], -1]
         // ∫ 1/√(x²-1) dx = arccosh(x)  (for x > 1)
         const negOneTerm = addOps.find((op) => op.isSame(-1));
         if (negOneTerm && powerTerm) {
-          return ce.box(['Arcosh', index]);
+          return ce.expr(['Arcosh', index]);
         }
       }
     }
@@ -2274,15 +2274,15 @@ export function antiderivative(fn: Expression, index: string): Expression {
             // ∫√(a² - x²) dx = (1/2)(x√(a²-x²) + a²·arcsin(x/a))
             // For a = 1: (1/2)(x√(1-x²) + arcsin(x))
             const a2 = constTerm;
-            const a = ce.box(['Sqrt', a2]).simplify();
+            const a = ce.expr(['Sqrt', a2]).simplify();
             const sqrtExpr = fn; // √(a² - x²)
             // Result: (1/2) * (x * sqrt + a² * arcsin(x/a))
-            const xTimesRoot = ce.box(['Multiply', index, sqrtExpr]);
+            const xTimesRoot = ce.expr(['Multiply', index, sqrtExpr]);
             const arcsinPart = a.isSame(1)
-              ? ce.box(['Arcsin', index])
-              : ce.box(['Arcsin', ['Divide', index, a]]);
+              ? ce.expr(['Arcsin', index])
+              : ce.expr(['Arcsin', ['Divide', index, a]]);
             const a2ArcsinPart = a2.mul(arcsinPart);
-            return ce.box([
+            return ce.expr([
               'Multiply',
               ['Rational', 1, 2],
               ['Add', xTimesRoot, a2ArcsinPart],
@@ -2292,14 +2292,14 @@ export function antiderivative(fn: Expression, index: string): Expression {
             // ∫√(x² + a²) dx = (1/2)(x√(x²+a²) + a²·arcsinh(x/a))
             // For a = 1: (1/2)(x√(1+x²) + arcsinh(x))
             const a2 = constTerm;
-            const a = ce.box(['Sqrt', a2]).simplify();
+            const a = ce.expr(['Sqrt', a2]).simplify();
             const sqrtExpr = fn; // √(x² + a²)
-            const xTimesRoot = ce.box(['Multiply', index, sqrtExpr]);
+            const xTimesRoot = ce.expr(['Multiply', index, sqrtExpr]);
             const arcsinhPart = a.isSame(1)
-              ? ce.box(['Arsinh', index])
-              : ce.box(['Arsinh', ['Divide', index, a]]);
+              ? ce.expr(['Arsinh', index])
+              : ce.expr(['Arsinh', ['Divide', index, a]]);
             const a2ArcsinhPart = a2.mul(arcsinhPart);
-            return ce.box([
+            return ce.expr([
               'Multiply',
               ['Rational', 1, 2],
               ['Add', xTimesRoot, a2ArcsinhPart],
@@ -2309,14 +2309,14 @@ export function antiderivative(fn: Expression, index: string): Expression {
             // ∫√(x² - a²) dx = (1/2)(x√(x²-a²) - a²·arccosh(x/a))
             // For a = 1: (1/2)(x√(x²-1) - arccosh(x))
             const a2 = constTerm.neg(); // Convert -a² to a²
-            const a = ce.box(['Sqrt', a2]).simplify();
+            const a = ce.expr(['Sqrt', a2]).simplify();
             const sqrtExpr = fn; // √(x² - a²)
-            const xTimesRoot = ce.box(['Multiply', index, sqrtExpr]);
+            const xTimesRoot = ce.expr(['Multiply', index, sqrtExpr]);
             const arccoshPart = a.isSame(1)
-              ? ce.box(['Arcosh', index])
-              : ce.box(['Arcosh', ['Divide', index, a]]);
+              ? ce.expr(['Arcosh', index])
+              : ce.expr(['Arcosh', ['Divide', index, a]]);
             const a2ArccoshPart = a2.mul(arccoshPart);
-            return ce.box([
+            return ce.expr([
               'Multiply',
               ['Rational', 1, 2],
               ['Subtract', xTimesRoot, a2ArccoshPart],
@@ -2335,17 +2335,17 @@ export function antiderivative(fn: Expression, index: string): Expression {
 
   if (isFunction(fn, 'Sin') && sym(fn.op1) === index) {
     // ∫sin(x) dx = -cos(x)
-    return ce.box(['Negate', ['Cos', index]]);
+    return ce.expr(['Negate', ['Cos', index]]);
   }
 
   if (isFunction(fn, 'Cos') && sym(fn.op1) === index) {
     // ∫cos(x) dx = sin(x)
-    return ce.box(['Sin', index]);
+    return ce.expr(['Sin', index]);
   }
 
   if (isFunction(fn, 'Ln') && sym(fn.op1) === index) {
     // ∫ln(x) dx = x*ln(x) - x
-    return ce.box(['Subtract', ['Multiply', index, ['Ln', index]], index]);
+    return ce.expr(['Subtract', ['Multiply', index, ['Ln', index]], index]);
   }
 
   if (isFunction(fn, 'Power')) {
@@ -2360,10 +2360,10 @@ export function antiderivative(fn: Expression, index: string): Expression {
       if (isNumber(exponent)) {
         if (exponent.isSame(-1)) {
           // ∫1/x dx = ln|x|
-          return ce.box(['Ln', ['Abs', index]]);
+          return ce.expr(['Ln', ['Abs', index]]);
         }
         // ∫x^n dx = x^(n+1)/(n+1)
-        return ce.box([
+        return ce.expr([
           'Divide',
           ['Power', index, ['Add', exponent, 1]],
           ['Add', exponent, 1],
@@ -2383,7 +2383,7 @@ export function antiderivative(fn: Expression, index: string): Expression {
         // New exponent is n+1 (which is negative but closer to 0)
         const newExp = ce.number(n + 1);
         const coeff = ce.One.div(a.mul(newExp));
-        const result = coeff.mul(ce.box(['Power', base, newExp]));
+        const result = coeff.mul(ce.expr(['Power', base, newExp]));
         return result.simplify();
       }
 
@@ -2396,7 +2396,7 @@ export function antiderivative(fn: Expression, index: string): Expression {
         const x = ce.symbol(index);
 
         // First term: x / (2a²(n-1)(x²+a²)^(n-1))
-        const newPower = ce.box(['Power', base, ce.number(n + 1)]); // (x²+a²)^(-(n-1))
+        const newPower = ce.expr(['Power', base, ce.number(n + 1)]); // (x²+a²)^(-(n-1))
         const coeff1 = ce.One.div(
           ce
             .number(2)
@@ -2414,7 +2414,7 @@ export function antiderivative(fn: Expression, index: string): Expression {
         );
 
         // Recursive integral: ∫ (x²+a²)^(-(n-1)) dx
-        const lowerPowerExpr = ce.box(['Power', base, ce.number(n + 1)]);
+        const lowerPowerExpr = ce.expr(['Power', base, ce.number(n + 1)]);
         const recursiveIntegral = antiderivative(lowerPowerExpr, index);
 
         const result = add(term1, coeff2.mul(recursiveIntegral)).simplify();

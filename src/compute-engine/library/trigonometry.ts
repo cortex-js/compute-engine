@@ -128,7 +128,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       type: () => 'finite_real',
       sgn: () => 'non-negative',
       evaluate: ([x, y], { engine }) =>
-        engine.box(['Sqrt', ['Add', ['Square', x], ['Square', y]]]),
+        engine.expr(['Sqrt', ['Add', ['Square', x], ['Square', y]]]),
     },
 
     // The definition of other trig functions may rely on Sin, so it is defined
@@ -221,7 +221,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       signature: '(real) -> number',
       type: () => 'finite_real',
       evaluate: ([z], { engine }) =>
-        engine.box(['Divide', ['Subtract', 1, ['Cos', z]], 2]),
+        engine.expr(['Divide', ['Subtract', 1, ['Cos', z]], 2]),
     },
 
     /** = 2 * Arcsin(Sqrt(z)) */
@@ -232,7 +232,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       signature: '(real) -> real',
       type: () => 'finite_real',
       evaluate: ([x], { engine }) =>
-        engine.box(['Multiply', 2, ['Arcsin', ['Sqrt', x]]]),
+        engine.expr(['Multiply', 2, ['Arcsin', ['Sqrt', x]]]),
     },
   },
   {

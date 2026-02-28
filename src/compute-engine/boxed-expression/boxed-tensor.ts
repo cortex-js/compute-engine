@@ -148,7 +148,7 @@ export class BoxedTensor<T extends TensorDataType>
     if (this._tensor) {
       const data = this._tensor.data;
       if (data.length === 0) return this.engine.Nothing;
-      return this.engine.box(data[0]);
+      return this.engine.expr(data[0]);
     }
     const s = this.structural;
     return isFunction(s) ? s.op1 : this.engine.Nothing;
@@ -158,7 +158,7 @@ export class BoxedTensor<T extends TensorDataType>
     if (this._tensor) {
       const data = this._tensor.data;
       if (data.length < 2) return this.engine.Nothing;
-      return this.engine.box(data[1]);
+      return this.engine.expr(data[1]);
     }
     const s = this.structural;
     return isFunction(s) ? s.op2 : this.engine.Nothing;
@@ -168,7 +168,7 @@ export class BoxedTensor<T extends TensorDataType>
     if (this._tensor) {
       const data = this._tensor.data;
       if (data.length < 3) return this.engine.Nothing;
-      return this.engine.box(data[2]);
+      return this.engine.expr(data[2]);
     }
     const s = this.structural;
     return isFunction(s) ? s.op3 : this.engine.Nothing;
@@ -304,7 +304,7 @@ export class BoxedTensor<T extends TensorDataType>
           const data = self.tensor.data;
           const idx = i - 1;
           if (idx >= 0 && idx < data.length) {
-            yield self.engine.box(data[idx]);
+            yield self.engine.expr(data[idx]);
           }
         }
       })(this);
@@ -331,10 +331,10 @@ export class BoxedTensor<T extends TensorDataType>
     const row = this.tensor.slice(index);
     if (row.rank === 0) {
       // Scalar tensor: return itself
-      return this.engine.box(row.data[0]);
+      return this.engine.expr(row.data[0]);
     } else if (row.rank === 1) {
       // 1D tensor: return the boxed expression of the element
-      return this.engine.box(row.data[0]);
+      return this.engine.expr(row.data[0]);
     } else if (row.rank > 1) {
       // Higher rank tensor: return a new boxed tensor
       const rowExpr = row.expression;
@@ -353,7 +353,7 @@ export class BoxedTensor<T extends TensorDataType>
     options?: PatternMatchOptions
   ): BoxedSubstitution | null {
     if (!isExpression(pattern))
-      pattern = this.engine.box(pattern, { form: 'raw' });
+      pattern = this.engine.expr(pattern, { form: 'raw' });
     if (isWildcard(pattern)) return { [wildcardName(pattern)!]: this };
     return this.structural.match(pattern, options);
   }

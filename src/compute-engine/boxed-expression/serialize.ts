@@ -33,6 +33,7 @@ import type {
 import { isOperatorDef } from './utils';
 import { isNumber, isSymbol, isString, isFunction } from './type-guards';
 import { matchesNumber, matchesSymbol } from '../../math-json/utils';
+import { serialize as serializeToLatex } from '../latex-syntax/latex-syntax';
 
 // Lazy reference to break circular dependency:
 // arithmetic-mul-div → ... → abstract-boxed-expression → serialize
@@ -453,7 +454,7 @@ function serializeJsonFunction(
   // Determine if we need some LaTeX metadata
   if (options.metadata.includes('latex')) {
     md.latex = _escapeJsonString(
-      md.latex ?? ce.box({ fn } as MathJsonExpression).latex
+      md.latex ?? serializeToLatex(fn)
     );
   } else md.latex = '';
 
@@ -497,7 +498,7 @@ function serializeJsonSymbol(
 
   metadata = { ...metadata };
   if (options.metadata.includes('latex')) {
-    metadata.latex = metadata.latex ?? ce.box({ sym }).latex;
+    metadata.latex = metadata.latex ?? serializeToLatex(sym);
 
     if (metadata.latex !== undefined)
       metadata.latex = _escapeJsonString(metadata.latex);
@@ -739,7 +740,9 @@ function serializeJsonNumber(
     }
 
     if (options.metadata.includes('latex'))
-      metadata.latex = metadata.latex ?? ce.box(result ?? { num }).latex;
+      metadata.latex =
+        metadata.latex ??
+        serializeToLatex(result ?? ({ num } as MathJsonExpression));
 
     if (result) {
       if (metadata.latex !== undefined)
@@ -761,7 +764,8 @@ function serializeJsonNumber(
     if (value.isNaN()) {
       num = 'NaN';
       if (options.metadata.includes('latex'))
-        metadata.latex = metadata.latex ?? ce.box({ num }).latex;
+        metadata.latex =
+          metadata.latex ?? serializeToLatex({ num } as MathJsonExpression);
 
       return metadata.latex !== undefined
         ? { num, latex: metadata.latex }
@@ -813,7 +817,10 @@ function serializeJsonNumber(
     } else {
       if (options.metadata.includes('latex'))
         metadata.latex =
-          metadata.latex ?? ce.box({ num: value.toString() }).latex;
+          metadata.latex ??
+          serializeToLatex({
+            num: value.toString(),
+          } as MathJsonExpression);
 
       if (metadata.latex !== undefined)
         return { num: value.toString(), latex: metadata.latex };
@@ -833,7 +840,8 @@ function serializeJsonNumber(
   else num = serializeRepeatingDecimals(value.toString(), options);
 
   if (options.metadata.includes('latex'))
-    metadata.latex = metadata.latex ?? ce.box({ num }).latex;
+    metadata.latex =
+      metadata.latex ?? serializeToLatex({ num } as MathJsonExpression);
 
   if (result) {
     if (metadata.latex !== undefined)

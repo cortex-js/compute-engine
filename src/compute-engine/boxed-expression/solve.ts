@@ -1089,7 +1089,7 @@ function solveNestedSqrtEquation(
     { recursive: true }
   );
   const substitutedArg = step1?.subs({
-    [variable]: ce.box(['Power', uSymbolName, 2]),
+    [variable]: ce.expr(['Power', uSymbolName, 2]),
   });
 
   if (!substitutedArg) return null;

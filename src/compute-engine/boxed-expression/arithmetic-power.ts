@@ -79,7 +79,7 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
     if (baseNonNeg || outerIsInteger || innerIsOddInteger) {
       return ce._fn('Power', [
         base,
-        ce.box(['Multiply', aPow, b], {
+        ce.expr(['Multiply', aPow, b], {
           form: fullyCanonical ? 'canonical' : 'Power',
         }),
       ]);
@@ -382,7 +382,7 @@ export function pow(
     !(x.isCanonical || x.isStructural) ||
     (typeof exp !== 'number' && !(exp.isCanonical || exp.isStructural))
   )
-    return x.engine._fn('Power', [x, x.engine.box(exp)], { canonical: false });
+    return x.engine._fn('Power', [x, x.engine.expr(exp)], { canonical: false });
 
   //
   // If a numeric approximation is requested, we try to evaluate the expression
@@ -419,7 +419,7 @@ export function pow(
   // If the result is not 'Power', can assume an op. has occurred
   // In some cases, an op. may apply, but a 'Power' expr. is still the result ('(a^b)^c -> a^(b*c)'
   // for instance). For these cases, proceed.
-  const canonicalResult = canonicalPower(x, ce.box(exp));
+  const canonicalResult = canonicalPower(x, ce.expr(exp));
   if (canonicalResult.operator !== 'Power') return canonicalResult;
 
   const e = typeof exp === 'number' ? exp : exp.im === 0 ? exp.re : undefined;
@@ -538,7 +538,7 @@ export function pow(
     const expIsInteger =
       typeof exp === 'number' ? Number.isInteger(exp) : exp.isInteger === true;
     if (base.isNonNegative === true || expIsInteger)
-      return pow(base, ce.box(exp).div(rootIdx), { numericApproximation });
+      return pow(base, ce.expr(exp).div(rootIdx), { numericApproximation });
   }
 
   //
@@ -556,14 +556,14 @@ export function pow(
           (x) => Math.pow(x, e as number),
           (x) => x.pow(e as number),
           (x) => x.pow(e as number)
-        ) ?? ce._fn('Power', [x, ce.box(exp)])
+        ) ?? ce._fn('Power', [x, ce.expr(exp)])
       );
     } else {
       return ce.number(n!.pow(e!));
     }
   }
 
-  return ce._fn('Power', [x, ce.box(exp)]);
+  return ce._fn('Power', [x, ce.expr(exp)]);
 }
 
 export function root(

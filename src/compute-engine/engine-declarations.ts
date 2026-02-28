@@ -322,7 +322,7 @@ function assignValueAsValue(
   if (typeof value === 'boolean') return value ? ce.True : ce.False;
   if (typeof value === 'number' || typeof value === 'bigint')
     return ce.number(value);
-  const expr = ce.box(value);
+  const expr = ce.expr(value);
   // Explicit function expressions should always be treated as operator definitions
   if (expr.operator === 'Function') return undefined;
   if (expr.unknowns.some((s) => s.startsWith('_'))) {
@@ -344,7 +344,7 @@ function assignValueAsOperatorDef(
   if (value === undefined || value === null) return undefined;
   if (typeof value === 'boolean') return undefined;
 
-  const body = canonicalFunctionLiteral(ce.box(value));
+  const body = canonicalFunctionLiteral(ce.expr(value));
   if (body === undefined) return undefined;
 
   // Don't set an explicit signature - let it be inferred from the body.

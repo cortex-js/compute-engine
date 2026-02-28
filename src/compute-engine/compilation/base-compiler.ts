@@ -276,7 +276,7 @@ export class BaseCompiler {
       ) {
         const v = BaseCompiler.tempVar();
         return `(${BaseCompiler.compile(args[0], target)}).map((${v}) => ${fn(
-          [args[0].engine.box(v)],
+          [args[0].engine.expr(v)],
           (expr) => BaseCompiler.compile(expr, target),
           target
         )})`;
