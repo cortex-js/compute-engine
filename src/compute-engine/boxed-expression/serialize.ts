@@ -452,9 +452,7 @@ function serializeJsonFunction(
 
   // Determine if we need some LaTeX metadata
   if (options.metadata.includes('latex') && ce.latexSyntax) {
-    md.latex = _escapeJsonString(
-      md.latex ?? ce.latexSyntax.serialize(fn)
-    );
+    md.latex = _escapeJsonString(md.latex ?? ce.latexSyntax.serialize(fn));
   } else md.latex = '';
 
   // Determine if we have some wikidata metadata
@@ -589,7 +587,10 @@ function serializeRepeatingDecimals(
   while (fractionalPart.endsWith('0'))
     fractionalPart = fractionalPart.slice(0, -1);
 
-  if (typeof options.fractionalDigits === 'number' && options.fractionalDigits > 0) {
+  if (
+    typeof options.fractionalDigits === 'number' &&
+    options.fractionalDigits > 0
+  ) {
     fractionalPart = fractionalPart.slice(0, options.fractionalDigits);
   }
 
@@ -720,14 +721,17 @@ function serializeJsonNumber(
       // Use toFixed for small integers, toString (scientific notation) for large
       if (value.isInteger()) {
         // For very large/small integers, use toString which gives scientific notation
-        const absStr = (value.significand < 0n ? -value.significand : value.significand).toString();
+        const absStr = (
+          value.significand < 0n ? -value.significand : value.significand
+        ).toString();
         const adjustedExp = absStr.length + value.exponent - 1;
         num = adjustedExp > 20 ? value.toString() : value.toFixed(0);
       } else {
         const precision = options.fractionalDigits;
         let s: string;
         if (precision === 'max') s = value.toString();
-        else if (precision === 'auto') s = value.toPrecision(ce.precision).toString();
+        else if (precision === 'auto')
+          s = value.toPrecision(ce.precision).toString();
         else if (typeof precision === 'number' && precision < 0)
           s = value.toPrecision(-precision).toString();
         else s = value.toFixed(precision);
@@ -768,7 +772,8 @@ function serializeJsonNumber(
       num = 'NaN';
       if (options.metadata.includes('latex') && ce.latexSyntax)
         metadata.latex =
-          metadata.latex ?? ce.latexSyntax.serialize({ num } as MathJsonExpression);
+          metadata.latex ??
+          ce.latexSyntax.serialize({ num } as MathJsonExpression);
 
       return metadata.latex !== undefined
         ? { num, latex: metadata.latex }

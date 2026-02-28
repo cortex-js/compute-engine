@@ -563,13 +563,13 @@ function makeCanonicalFunction(
       name,
       opDef.inferredSignature
         ? xs
-        : validateArguments(
+        : (validateArguments(
             ce,
             xs,
             opDef.signature.type,
             opDef.lazy,
             opDef.broadcastable
-          ) ?? xs,
+          ) ?? xs),
       { metadata, canonical: true, scope }
     );
     return result;

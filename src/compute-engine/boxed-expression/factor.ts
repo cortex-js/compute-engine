@@ -4,7 +4,7 @@ import type {
 } from '../global-types';
 
 import { isRelationalOperator } from '../latex-syntax/utils';
-import { isNumber, isFunction, isSymbol } from './type-guards';
+import { isNumber, isFunction } from './type-guards';
 import { NumericValue } from '../numeric-value/types';
 
 import { Product, commonTerms, mul } from './arithmetic-mul-div';

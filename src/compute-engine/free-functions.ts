@@ -4,9 +4,12 @@ import type {
   AssignValue,
   SymbolDefinition,
   IComputeEngine,
+  FormOption,
+  Scope,
+  SimplifyOptions,
 } from './global-types';
 import type { Type, TypeString } from '../common/type/types';
-import type { LatexString } from './latex-syntax/types';
+import type { LatexString, ParseLatexOptions } from './latex-syntax/types';
 import { isExpression } from './boxed-expression/type-guards';
 import {
   expand as expandExpr,
@@ -20,9 +23,7 @@ let _defaultEngineFactory: (() => IComputeEngine) | null = null;
 
 /** @internal Called by the entry point to register a factory that creates
  *  the default engine with LatexSyntax pre-configured. */
-export function _setDefaultEngineFactory(
-  factory: () => IComputeEngine
-): void {
+export function _setDefaultEngineFactory(factory: () => IComputeEngine): void {
   _defaultEngineFactory = factory;
 }
 
@@ -48,17 +49,28 @@ function toExpression(input: LatexString | ExpressionInput): Expression {
   return getDefaultEngine().expr(input);
 }
 
-export function parse(latex: LatexString): Expression {
-  const ce = getDefaultEngine();
-  return ce.parse(latex) ?? ce.expr('Nothing');
+export function parse(
+  latex: LatexString,
+  options?: Partial<ParseLatexOptions> & { form?: FormOption }
+): Expression {
+  return getDefaultEngine().parse(latex, options);
 }
 
-export function expr(expr: ExpressionInput): Expression {
-  return getDefaultEngine().expr(expr);
+export function expr(
+  expr: ExpressionInput,
+  options?: {
+    form?: FormOption;
+    scope?: Scope;
+  }
+): Expression {
+  return getDefaultEngine().expr(expr, options);
 }
 
-export function simplify(expr: LatexString | ExpressionInput): Expression {
-  return toExpression(expr).simplify();
+export function simplify(
+  expr: LatexString | ExpressionInput,
+  options?: Partial<SimplifyOptions>
+): Expression {
+  return toExpression(expr).simplify(options);
 }
 
 export function evaluate(expr: LatexString | ExpressionInput): Expression {
@@ -123,4 +135,3 @@ export function compile<T extends string = 'javascript'>(
 ): ReturnType<typeof compileExpr> {
   return compileExpr(toExpression(expr), options);
 }
-

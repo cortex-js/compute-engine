@@ -412,8 +412,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         x.isNonNegative
           ? 'positive'
           : x.isNegative || x.isReal === false
-          ? 'unsigned'
-          : undefined,
+            ? 'unsigned'
+            : undefined,
       canonical: (args, { engine }) => {
         const x = args[0];
         // We assume that -3! is -(3!) = -6
@@ -494,8 +494,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         x.isNonNegative
           ? 'positive'
           : x.isNegative || x.isReal === false
-          ? 'unsigned'
-          : undefined,
+            ? 'unsigned'
+            : undefined,
       evaluate: (ops) => {
         // 2^{\frac{n}{2}+\frac{1}{4}(1-\cos(\pi n))}\pi^{\frac{1}{4}(\cos(\pi n)-1)}\Gamma\left(\frac{n}{2}+1\right)
 
@@ -504,9 +504,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (n === null) return undefined;
         const ce = x.engine;
         if (bignumPreferred(ce))
-          return ce.number(
-            run(bigFactorial2(ce.bignum(n)), ce._timeRemaining)
-          );
+          return ce.number(run(bigFactorial2(ce.bignum(n)), ce._timeRemaining));
 
         return ce.number(factorial2(n));
       },
@@ -790,14 +788,14 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             x === 0
               ? -Infinity
               : x >= 0
-              ? Math.log(x)
-              : engine.complex(x).log(),
+                ? Math.log(x)
+                : engine.complex(x).log(),
           (x) =>
             x.isZero()
               ? -Infinity
               : !x.isNegative()
-              ? x.ln()
-              : engine.complex(x.toNumber()).log(),
+                ? x.ln()
+                : engine.complex(x.toNumber()).log(),
           (z) => (z.isZero() ? NaN : z.log())
         );
       },
@@ -834,14 +832,14 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               x === 0
                 ? -Infinity
                 : x >= 0
-                ? Math.log10(x)
-                : ce.complex(x).log().div(Math.LN10),
+                  ? Math.log10(x)
+                  : ce.complex(x).log().div(Math.LN10),
             (x) =>
               x.isZero()
                 ? -Infinity
                 : !x.isNegative()
-                ? BigDecimal.log10(x)
-                : ce.complex(x.toNumber()).log().div(Math.LN10),
+                  ? BigDecimal.log10(x)
+                  : ce.complex(x.toNumber()).log().div(Math.LN10),
             (z) => (z.isZero() ? NaN : z.log().div(Math.LN10))
           );
         return apply2(
@@ -960,8 +958,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           return ops.every((x) => x.isFinite)
             ? 'zero'
             : ops.some((x) => x.isFinite === false)
-            ? 'unsigned'
-            : undefined;
+              ? 'unsigned'
+              : undefined;
         if (
           ops.some((x) => x.isFinite === false || x.isFinite === undefined) &&
           ops.some((x) => {
@@ -1084,8 +1082,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           return b.isNonPositive
             ? 'unsigned'
             : b.isPositive
-            ? 'zero'
-            : undefined;
+              ? 'zero'
+              : undefined;
 
         if (a.isSame(0) && b.isSame(0)) return 'unsigned';
 

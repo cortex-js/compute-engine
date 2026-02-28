@@ -98,8 +98,8 @@ export class TensorFieldNumber implements TensorField<number> {
         return Array.isArray(x)
           ? x.map((x) => (x === 0 ? false : true))
           : x === 0
-          ? false
-          : true;
+            ? false
+            : true;
       // case 'string':
       //   return Array.isArray(x)
       //     ? x.map((x) => Number(x).toString())

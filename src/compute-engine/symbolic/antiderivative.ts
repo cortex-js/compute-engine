@@ -1518,8 +1518,8 @@ function getQuadraticCoefficients(
           constFactors.length === 0
             ? ce.One
             : constFactors.length === 1
-            ? constFactors[0]
-            : ce.expr(['Multiply', ...constFactors]);
+              ? constFactors[0]
+              : ce.expr(['Multiply', ...constFactors]);
         if (!coeff.has(index)) {
           return { a: coeff, b: ce.Zero, c: ce.Zero };
         }
@@ -1561,8 +1561,8 @@ function getQuadraticCoefficients(
             constFactors.length === 0
               ? ce.One
               : constFactors.length === 1
-              ? constFactors[0]
-              : ce.expr(['Multiply', ...constFactors]);
+                ? constFactors[0]
+                : ce.expr(['Multiply', ...constFactors]);
           a = a.add(coeff);
           continue;
         }
@@ -1576,8 +1576,8 @@ function getQuadraticCoefficients(
             constFactors.length === 0
               ? ce.One
               : constFactors.length === 1
-              ? constFactors[0]
-              : ce.expr(['Multiply', ...constFactors]);
+                ? constFactors[0]
+                : ce.expr(['Multiply', ...constFactors]);
           b = b.add(coeff);
           continue;
         }

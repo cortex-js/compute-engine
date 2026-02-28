@@ -115,8 +115,7 @@ export function canonicalInvisibleOperator(
       // Note: we exclude indexed collections (vectors, matrices, tuples)
       // since those as parenthesized args are more likely function arguments.
       const allArgsNumeric = args.every(
-        (x) =>
-          x.isValid && (x.type.isUnknown || x.type.matches('number'))
+        (x) => x.isValid && (x.type.isUnknown || x.type.matches('number'))
       );
 
       if (allArgsNumeric) {

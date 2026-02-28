@@ -28,7 +28,7 @@ export type DimensionVector = [
   number,
   number,
   number,
-  number
+  number,
 ];
 
 interface UnitEntry {

@@ -149,8 +149,8 @@ function buildPayload() {
           typeof def.signature === 'string'
             ? def.signature
             : def.signature
-            ? String(def.signature)
-            : '(any*) -> unknown',
+              ? String(def.signature)
+              : '(any*) -> unknown',
         associative: Boolean(def.associative),
         commutative: Boolean(def.commutative),
         idempotent: Boolean(def.idempotent),
@@ -187,8 +187,8 @@ function buildPayload() {
           typeof def.type === 'string'
             ? def.type
             : def.type
-            ? String(def.type)
-            : 'unknown',
+              ? String(def.type)
+              : 'unknown',
       };
 
       const description = asDescription(def);

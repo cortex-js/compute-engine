@@ -272,7 +272,7 @@ export interface CompiledRunner<R = number | ComplexResult> {
  */
 export type CompilationResult<
   T extends string = string,
-  R = number | ComplexResult
+  R = number | ComplexResult,
 > = {
   /** Target language name */
   target: T;

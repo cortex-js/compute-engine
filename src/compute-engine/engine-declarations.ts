@@ -135,8 +135,8 @@ export function declareType(
     type instanceof BoxedType
       ? type.type
       : typeof type === 'string'
-      ? parseType(type, ce._typeResolver)
-      : type;
+        ? parseType(type, ce._typeResolver)
+        : type;
 
   // Adjust the definition (the type references in the type will point to
   // the placeholder record)

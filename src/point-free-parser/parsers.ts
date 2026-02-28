@@ -72,7 +72,7 @@ export interface Rules {
 
 export type Combinator<T = any> = [
   label: string,
-  parser: (parser: Parser) => Result<T>
+  parser: (parser: Parser) => Result<T>,
 ];
 
 /**
@@ -132,8 +132,8 @@ export class Parser {
       typeof rule === 'string'
         ? rule
         : typeof rule === 'function'
-        ? '???'
-        : rule[0],
+          ? '???'
+          : rule[0],
     ];
   }
 
@@ -156,8 +156,8 @@ export class Parser {
       typeof rule === 'string'
         ? rule
         : typeof rule === 'function'
-        ? '???'
-        : rule[0]
+          ? '???'
+          : rule[0]
     );
 
     if (fromOffset !== undefined) this.skipTo(fromOffset);

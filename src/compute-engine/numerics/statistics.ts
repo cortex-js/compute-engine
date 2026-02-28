@@ -11,9 +11,7 @@ export function mean(values: Iterable<number>): number {
   return sum / count;
 }
 
-export function bigMean(
-  values: Iterable<BigDecimal>
-): BigDecimal {
+export function bigMean(values: Iterable<BigDecimal>): BigDecimal {
   let sum = BigDecimal.ZERO;
   let count = 0;
   for (const op of values) {
@@ -36,7 +34,8 @@ export function bigMedian(values: Iterable<BigDecimal>): BigDecimal {
   const sorted = [...values].sort((a, b) => a.cmp(b));
   const mid = Math.floor(sorted.length / 2);
 
-  if (sorted.length % 2 === 0) return sorted[mid - 1].add(sorted[mid]).div(BigDecimal.TWO);
+  if (sorted.length % 2 === 0)
+    return sorted[mid - 1].add(sorted[mid]).div(BigDecimal.TWO);
   return sorted[mid];
 }
 
@@ -53,9 +52,7 @@ export function variance(values: Iterable<number>): number {
   return (sum2 - (sum * sum) / count) / (count - 1);
 }
 
-export function bigVariance(
-  values: Iterable<BigDecimal>
-): BigDecimal {
+export function bigVariance(values: Iterable<BigDecimal>): BigDecimal {
   let sum = BigDecimal.ZERO;
   let sum2 = BigDecimal.ZERO;
   let count = 0;
@@ -65,7 +62,9 @@ export function bigVariance(
     count++;
   }
   if (count === 0) return BigDecimal.NAN;
-  return sum2.sub(sum.mul(sum).div(new BigDecimal(count))).div(new BigDecimal(count - 1));
+  return sum2
+    .sub(sum.mul(sum).div(new BigDecimal(count)))
+    .div(new BigDecimal(count - 1));
 }
 
 export function populationVariance(values: Iterable<number>): number {
@@ -93,16 +92,16 @@ export function bigPopulationVariance(
     count++;
   }
   if (count === 0) return BigDecimal.NAN;
-  return sum2.sub(sum.mul(sum).div(new BigDecimal(count))).div(new BigDecimal(count));
+  return sum2
+    .sub(sum.mul(sum).div(new BigDecimal(count)))
+    .div(new BigDecimal(count));
 }
 
 export function standardDeviation(values: Iterable<number>): number {
   return Math.sqrt(variance(values));
 }
 
-export function bigStandardDeviation(
-  values: Iterable<BigDecimal>
-): BigDecimal {
+export function bigStandardDeviation(values: Iterable<BigDecimal>): BigDecimal {
   return bigVariance(values).sqrt();
 }
 
@@ -140,9 +139,7 @@ export function kurtosis(values: Iterable<number>): number {
   );
 }
 
-export function bigKurtosis(
-  values: Iterable<BigDecimal>
-): BigDecimal {
+export function bigKurtosis(values: Iterable<BigDecimal>): BigDecimal {
   let sum = BigDecimal.ZERO;
   let sum2 = BigDecimal.ZERO;
   let sum4 = BigDecimal.ZERO;
@@ -161,7 +158,16 @@ export function bigKurtosis(
   return sum4
     .sub(sum.mul(sum2).mul(new BigDecimal(4)).div(bdCount))
     .add(sum.mul(sum).mul(sum).mul(new BigDecimal(6)).div(bdCount).div(bdCount))
-    .sub(sum.mul(sum).mul(sum).mul(sum).mul(new BigDecimal(3)).div(bdCount).div(bdCount).div(bdCount))
+    .sub(
+      sum
+        .mul(sum)
+        .mul(sum)
+        .mul(sum)
+        .mul(new BigDecimal(3))
+        .div(bdCount)
+        .div(bdCount)
+        .div(bdCount)
+    )
     .div(s2.mul(s2));
 }
 
@@ -184,9 +190,7 @@ export function skewness(values: Iterable<number>): number {
   return (s3 / Math.pow(s2, 3 / 2)) * Math.sqrt(count * 1);
 }
 
-export function bigSkewness(
-  values: Iterable<BigDecimal>
-): BigDecimal {
+export function bigSkewness(values: Iterable<BigDecimal>): BigDecimal {
   let sum = BigDecimal.ZERO;
   let sum2 = BigDecimal.ZERO;
   let sum3 = BigDecimal.ZERO;
@@ -202,10 +206,10 @@ export function bigSkewness(
   if (count === 0) return BigDecimal.NAN;
   const bdCount = new BigDecimal(count);
   const s2 = sum2.sub(sum.mul(sum).div(bdCount)).div(new BigDecimal(count - 1));
-  const s3 = sum3.sub(sum2.mul(sum).div(bdCount)).div(new BigDecimal(count - 1));
-  return s3
-    .div(s2.pow(new BigDecimal(1.5)))
-    .mul(bdCount.sqrt());
+  const s3 = sum3
+    .sub(sum2.mul(sum).div(bdCount))
+    .div(new BigDecimal(count - 1));
+  return s3.div(s2.pow(new BigDecimal(1.5))).mul(bdCount.sqrt());
 }
 
 export function mode(values: Iterable<number>): number {
@@ -225,9 +229,7 @@ export function mode(values: Iterable<number>): number {
   return mode;
 }
 
-export function bigMode(
-  values: Iterable<BigDecimal>
-): BigDecimal {
+export function bigMode(values: Iterable<BigDecimal>): BigDecimal {
   const counts: Record<string, number> = {};
   for (const v of values) {
     counts[v.toString()] = (counts[v.toString()] ?? 0) + 1;
@@ -278,7 +280,9 @@ export function interquartileRange(values: Iterable<number>): number {
   return median(upper) - median(lower);
 }
 
-export function bigInterquartileRange(values: Iterable<BigDecimal>): BigDecimal {
+export function bigInterquartileRange(
+  values: Iterable<BigDecimal>
+): BigDecimal {
   const sorted = [...values].sort((a, b) => a.cmp(b));
   const mid = Math.floor(sorted.length / 2);
 

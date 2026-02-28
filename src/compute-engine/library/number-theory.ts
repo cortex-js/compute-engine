@@ -1,7 +1,6 @@
 import type { SymbolDefinitions } from '../global-types';
 import { toBigint } from '../boxed-expression/numerics';
 import { gcd } from '../numerics/numeric-bigint';
-import { BigDecimal } from '../../big-decimal';
 
 export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
   {

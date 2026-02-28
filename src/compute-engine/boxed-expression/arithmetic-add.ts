@@ -444,7 +444,6 @@ function nvSum(
   ce: ComputeEngine,
   numericValues: NumericValue[]
 ): NumericValue[] {
-  const makeExact = (x) => new ExactNumericValue(x, factory);
   const factory =
     ce.precision > MACHINE_PRECISION
       ? (x) => new BigNumericValue(x)

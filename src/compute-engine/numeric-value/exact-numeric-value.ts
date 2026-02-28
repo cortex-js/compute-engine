@@ -219,8 +219,7 @@ export class ExactNumericValue extends NumericValue {
     let result: BigDecimal;
     const r = this.rational;
     if (isMachineRational(r)) result = new BigDecimal(r[0]).div(r[1]);
-    else
-      result = new BigDecimal(r[0]).div(new BigDecimal(r[1]));
+    else result = new BigDecimal(r[0]).div(new BigDecimal(r[1]));
     if (this.radical === 1) return result;
     return result.mul(new BigDecimal(this.radical).sqrt());
   }
@@ -796,8 +795,7 @@ export class ExactNumericValue extends NumericValue {
     const radicals: { multiple: Rational; radical: number }[] = [];
 
     for (const value of values) {
-      if (value.isNaN)
-        return [new ExactNumericValue(NaN, factory)];
+      if (value.isNaN) return [new ExactNumericValue(NaN, factory)];
       if (value.isZero) continue;
 
       imSum += value.im;
@@ -828,8 +826,7 @@ export class ExactNumericValue extends NumericValue {
 
     // If we add no additional rational or radical,
     if (isZero(rationalSum) && radicals.length === 0) {
-      if (imSum === 0)
-        return [new ExactNumericValue(0, factory)];
+      if (imSum === 0) return [new ExactNumericValue(0, factory)];
       return [factory({ im: imSum })];
     }
 
@@ -837,9 +834,7 @@ export class ExactNumericValue extends NumericValue {
     if (imSum !== 0) result.push(factory({ im: imSum }));
 
     if (radicals.length === 0)
-      result.push(
-        new ExactNumericValue({ rational: rationalSum }, factory)
-      );
+      result.push(new ExactNumericValue({ rational: rationalSum }, factory));
     else {
       // If we have a rational, merge it with the radicals
       radicals.push({ multiple: rationalSum, radical: 1 });

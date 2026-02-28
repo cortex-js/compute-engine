@@ -351,9 +351,10 @@ function parseRulePart(
 ): Expression | undefined {
   if (rule === undefined || typeof rule === 'function') return undefined;
   if (typeof rule === 'string') {
-    let expr = ce.parse(rule, {
-      form: options?.canonical ? 'canonical' : 'raw',
-    }) ?? ce.expr('Nothing');
+    let expr =
+      ce.parse(rule, {
+        form: options?.canonical ? 'canonical' : 'raw',
+      }) ?? ce.expr('Nothing');
     // Only auto-wildcard when explicitly requested (e.g., when parsing
     // rule strings like "a*x -> 2*x"). For object rules, keep symbols literal.
     if (options?.autoWildcard) {
@@ -513,7 +514,9 @@ function parseRule(
     options?: Record<string, unknown>
   ) => InstanceType<typeof import('../latex-syntax/latex-syntax').LatexSyntax>;
   const ruleSyntax = new LatexSyntaxClass({
-    dictionary: ruleDict as ReadonlyArray<Partial<import('../latex-syntax/types').LatexDictionaryEntry>>,
+    dictionary: ruleDict as ReadonlyArray<
+      Partial<import('../latex-syntax/types').LatexDictionaryEntry>
+    >,
   });
 
   // Push a clean scope that only inherits from the system scope (index 0),
@@ -631,9 +634,10 @@ function boxRule(
     if (latex) {
       // If the condition is a LaTeX string, it should be a predicate
       // (an expression with a Boolean value).
-      const condPattern = ce.parse(latex, {
-        form: options?.canonical ? 'canonical' : 'raw',
-      }) ?? ce.expr('Nothing');
+      const condPattern =
+        ce.parse(latex, {
+          form: options?.canonical ? 'canonical' : 'raw',
+        }) ?? ce.expr('Nothing');
 
       // Substitute any unbound vars in the condition to a wildcard,
       // then evaluate the condition

@@ -627,10 +627,10 @@ function serializePower(
     const baseExponentLatex = serializer.wrapShort(baseExponent);
     return `
       ${baseBodyLatex}^{${supsub(
-      '^',
-      baseExponentLatex,
-      serializer.serialize(exp)
-    )}}`;
+        '^',
+        baseExponentLatex,
+        serializer.serialize(exp)
+      )}}`;
   }
 
   return supsub(
@@ -970,8 +970,11 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
         im === 1
           ? '\\imaginaryI'
           : im === -1
-          ? '-\\imaginaryI'
-          : joinLatex([serializer.serialize(operand(expr, 2)), '\\imaginaryI']);
+            ? '-\\imaginaryI'
+            : joinLatex([
+                serializer.serialize(operand(expr, 2)),
+                '\\imaginaryI',
+              ]);
 
       const re = machineValue(operand(expr, 1));
       if (re === 0) return imPart;

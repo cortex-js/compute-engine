@@ -205,9 +205,7 @@ export function verify(
 
   ce._isVerifying = true;
   try {
-    const parsed = isLatexString(query)
-      ? parseLatex(query as string)
-      : null;
+    const parsed = isLatexString(query) ? parseLatex(query as string) : null;
     const boxed = ce.expr(parsed ?? query, { form: 'raw' });
 
     const expr = boxed.evaluate();

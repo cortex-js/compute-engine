@@ -49,6 +49,19 @@ This interface is augmented by `types-engine.ts` with the concrete
 
 <MemberCard>
 
+##### ExpressionComputeEngine.latexSyntax
+
+```ts
+readonly latexSyntax: ILatexSyntax;
+```
+
+The LatexSyntax instance used for LaTeX parsing/serialization.
+ `undefined` when no LatexSyntax was provided to the constructor.
+
+</MemberCard>
+
+<MemberCard>
+
 ##### ExpressionComputeEngine.True
 
 ```ts
@@ -1913,7 +1926,11 @@ and functions.
 toMathJson(options?): MathJsonExpression
 ```
 
-Serialize to a MathJSON expression with specified options
+Serialize to a MathJSON expression with specified options.
+
+Use `{ fractionalDigits: 'auto' }` to round arbitrary-precision
+numbers to `ce.precision` significant digits. The default
+(`'max'`) emits all available digits with no rounding.
 
 ####### options?
 
@@ -1943,6 +1960,12 @@ For more control over the serialization, use `expr.toMathJson()`.
 
 Note that lazy collections are *not* eagerly evaluated.
 
+For arbitrary-precision numbers, the full raw `BigDecimal` value is
+emitted with no rounding (same as `toJSON()`). This preserves data
+fidelity for round-tripping but may include trailing digits beyond
+`ce.precision` that are not meaningful. Use
+`toMathJson({ fractionalDigits: 'auto' })` for rounded output.
+
 :::info[Note]
 Applicable to canonical and non-canonical expressions.
 :::
@@ -1962,6 +1985,10 @@ Return a LaTeX representation of this expression.
 This is a convenience getter that delegates to the standalone
 `serialize()` function from the `latex-syntax` module.
 
+Numeric values are rounded to `ce.precision` significant digits.
+Noise digits from precision-bounded operations (division,
+transcendentals) are not displayed.
+
 </MemberCard>
 
 <MemberCard>
@@ -1974,6 +2001,8 @@ toLatex(options?): string
 
 Return a LaTeX representation of this expression with custom
 serialization options.
+
+Numeric values are rounded to `ce.precision` significant digits.
 
 ####### options?
 
@@ -3440,6 +3469,12 @@ Note that lazy collections are eagerly evaluated.
 
 Used when coercing a `Expression` to a `String`.
 
+For arbitrary-precision numbers (`BigNumericValue`), the output is
+rounded to `BigDecimal.precision` significant digits. Digits beyond the
+working precision are noise from precision-bounded operations (division,
+transcendentals) and are not displayed. Machine-precision numbers use
+their native `Number.toString()`.
+
 </MemberCard>
 
 <MemberCard>
@@ -3457,6 +3492,12 @@ Method version of `expr.json`.
 Based on `Object.toJSON()`.
 
 Note that lazy collections are *not* eagerly evaluated.
+
+The output preserves the full raw `BigDecimal` value with no rounding,
+ensuring lossless round-tripping via `ce.box(expr.json)`. Digits beyond
+`ce.precision` may be present but are not guaranteed to be accurate.
+Use `toMathJson({ fractionalDigits: 'auto' })` for precision-rounded
+MathJSON output.
 
 </MemberCard>
 
@@ -8401,6 +8442,47 @@ type SymbolTable = {
   ids: {};
 };
 ```
+
+</MemberCard>
+
+### ILatexSyntax
+
+Minimal interface for a LaTeX parser/serializer.
+ Structurally compatible with `LatexSyntax` without importing it.
+
+<MemberCard>
+
+##### ILatexSyntax.parse()
+
+```ts
+parse(latex, options?): MathJsonExpression
+```
+
+####### latex
+
+`string`
+
+####### options?
+
+`Partial`\<[`ParseLatexOptions`](#parselatexoptions)\>
+
+</MemberCard>
+
+<MemberCard>
+
+##### ILatexSyntax.serialize()
+
+```ts
+serialize(expr, options?): string
+```
+
+####### expr
+
+[`MathJsonExpression`](#mathjsonexpression)
+
+####### options?
+
+`Record`\<`string`, `unknown`\>
 
 </MemberCard>
 

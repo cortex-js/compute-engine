@@ -151,7 +151,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       evaluate: ([x], { numericApproximation }) =>
         numericApproximation
           ? evalTrig('Arctan', x)
-          : constructibleValues('Arctan', x) ?? evalTrig('Arctan', x),
+          : (constructibleValues('Arctan', x) ?? evalTrig('Arctan', x)),
     },
 
     Arctan2: {

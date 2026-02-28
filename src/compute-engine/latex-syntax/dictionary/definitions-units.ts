@@ -272,7 +272,7 @@ function unitToMathrm(expr: MathJsonExpression): string {
     const base = operand(expr, 1);
     const exp = operand(expr, 2);
     const expStr =
-      typeof exp === 'number' ? String(exp) : symbol(exp) ?? String(exp);
+      typeof exp === 'number' ? String(exp) : (symbol(exp) ?? String(exp));
     return `${unitToMathrm(base!)}^{${expStr}}`;
   }
 

@@ -27,8 +27,8 @@ export class MachineNumericValue extends NumericValue {
         value.re === undefined
           ? 0
           : value.re instanceof BigDecimal
-          ? value.re.toNumber()
-          : value.re;
+            ? value.re.toNumber()
+            : value.re;
 
       this.decimal = decimal;
       this.im = value.im ?? 0;
@@ -144,7 +144,8 @@ export class MachineNumericValue extends NumericValue {
 
   isZeroWithTolerance(tolerance: number | BigDecimal): boolean {
     if (this.im !== 0) return false;
-    const tol = tolerance instanceof BigDecimal ? tolerance.toNumber() : tolerance;
+    const tol =
+      tolerance instanceof BigDecimal ? tolerance.toNumber() : tolerance;
     return Math.abs(this.decimal) < tol;
   }
 

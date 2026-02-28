@@ -985,8 +985,7 @@ export type OperatorDefinitionFlags = {
  *
  */
 export interface BoxedOperatorDefinition
-  extends BoxedBaseDefinition,
-    OperatorDefinitionFlags {
+  extends BoxedBaseDefinition, OperatorDefinitionFlags {
   complexity: number;
 
   /** If true, the signature was inferred from usage and may be modified

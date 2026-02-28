@@ -92,7 +92,7 @@ const OPERATORS: Record<
   string,
   [
     string | ((x: Expression, AsciiMathSerializer) => string),
-    precedence: number
+    precedence: number,
   ]
 > = {
   Add: [

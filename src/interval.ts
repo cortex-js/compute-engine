@@ -34,7 +34,14 @@ export {
 } from './compute-engine/interval/util';
 
 // Arithmetic operations
-export { add, sub, mul, div, negate, _mul } from './compute-engine/interval/arithmetic';
+export {
+  add,
+  sub,
+  mul,
+  div,
+  negate,
+  _mul,
+} from './compute-engine/interval/arithmetic';
 
 // Elementary functions
 export {

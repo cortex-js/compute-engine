@@ -1197,9 +1197,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       evaluate: (ops, { engine: ce }) =>
         ce.expr([
           'LatexString',
-          ce.string(
-            joinLatex(ops.map((x) => serializeLatex(x.json)))
-          ),
+          ce.string(joinLatex(ops.map((x) => serializeLatex(x.json)))),
         ]),
     },
 

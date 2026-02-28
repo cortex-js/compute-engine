@@ -15,10 +15,7 @@ import type {
   MathJsonNumberObject,
 } from '../math-json/types';
 
-import {
-  MACHINE_PRECISION,
-  SMALL_INTEGER,
-} from './numerics/numeric';
+import { MACHINE_PRECISION, SMALL_INTEGER } from './numerics/numeric';
 
 import type {
   ValueDefinition,
@@ -887,16 +884,12 @@ export class ComputeEngine implements IComputeEngine {
       return new ExactNumericValue(value, makeNumericValue);
 
     if (isRational(value))
-      return new ExactNumericValue(
-        { rational: value },
-        makeNumericValue
-      );
+      return new ExactNumericValue({ rational: value }, makeNumericValue);
 
     if (value instanceof BigDecimal) {
       if (value.isInteger()) {
         const n = bigint(value.toString());
-        if (n !== null)
-          return new ExactNumericValue(n, makeNumericValue);
+        if (n !== null) return new ExactNumericValue(n, makeNumericValue);
       }
       return makeNumericValue(value);
     }

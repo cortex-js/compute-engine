@@ -818,8 +818,8 @@ function matchCommutativeWithAnchors(
           expr.operator === 'Add'
             ? ce.Zero
             : expr.operator === 'Multiply'
-            ? ce.One
-            : ce.Nothing;
+              ? ce.One
+              : ce.Nothing;
         const newSub = captureWildcard(wcName, identity, sub);
         if (newSub !== null) {
           const result = tryAssignWildcards(restWildcards, remaining, newSub);

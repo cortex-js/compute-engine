@@ -6,7 +6,18 @@
  */
 
 import { BigDecimal, fromRaw } from './big-decimal';
-import { bigintAbs, fpmul, fpdiv, fpsqrt, fpexp, fpln, fpsincos, fpatan, bigintDigits, pow10 } from './utils';
+import {
+  bigintAbs,
+  fpmul,
+  fpdiv,
+  fpsqrt,
+  fpexp,
+  fpln,
+  fpsincos,
+  fpatan,
+  bigintDigits,
+  pow10,
+} from './utils';
 
 // ---------- Declaration merging ----------
 
@@ -71,10 +82,7 @@ declare module './big-decimal' {
  * `precision` is the number of significant decimal digits in the
  * fixed-point representation.
  */
-function toFixedPoint(
-  x: BigDecimal,
-  precision: number
-): [bigint, bigint] {
+function toFixedPoint(x: BigDecimal, precision: number): [bigint, bigint] {
   const scale = pow10(precision);
   // value = significand * 10^exponent
   // fixed-point = value * scale = significand * 10^(exponent + precision)
@@ -339,10 +347,11 @@ BigDecimal.prototype.log = function (base: BigDecimal | number): BigDecimal {
     return x.exp();
   };
 
-(BigDecimal as unknown as { ln: (x: BigDecimal) => BigDecimal }).ln =
-  function (x: BigDecimal): BigDecimal {
-    return x.ln();
-  };
+(BigDecimal as unknown as { ln: (x: BigDecimal) => BigDecimal }).ln = function (
+  x: BigDecimal
+): BigDecimal {
+  return x.ln();
+};
 
 (BigDecimal as unknown as { log10: (x: BigDecimal) => BigDecimal }).log10 =
   function (x: BigDecimal): BigDecimal {
@@ -398,7 +407,9 @@ BigDecimal.prototype.tan = function (): BigDecimal {
   // tan = sin / cos
   if (cosFp === 0n) {
     // cos = 0 means we're at π/2 + nπ → tan is ±Infinity
-    return sinFp > 0n ? BigDecimal.POSITIVE_INFINITY : BigDecimal.NEGATIVE_INFINITY;
+    return sinFp > 0n
+      ? BigDecimal.POSITIVE_INFINITY
+      : BigDecimal.NEGATIVE_INFINITY;
   }
 
   // Fixed-point division: (sinFp * scale) / cosFp

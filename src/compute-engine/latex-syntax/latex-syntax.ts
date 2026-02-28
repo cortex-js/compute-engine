@@ -14,7 +14,6 @@ import type {
   LatexString,
   ParseLatexOptions,
   SerializeLatexOptions,
-  DelimiterScale,
 } from './types';
 import { LATEX_DICTIONARY } from './dictionary/default-dictionary';
 import { indexLatexDictionary } from './dictionary/definitions';
@@ -103,9 +102,7 @@ export interface LatexSyntaxOptions {
 //  Default option builders (mirrors engine defaults but without the engine)
 // ---------------------------------------------------------------------------
 
-function defaultParseOptions(
-  opts: LatexSyntaxOptions
-): ParseLatexOptions {
+function defaultParseOptions(opts: LatexSyntaxOptions): ParseLatexOptions {
   return {
     // NumberFormat fields
     imaginaryUnit: '\\imaginaryI',

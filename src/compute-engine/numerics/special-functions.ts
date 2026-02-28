@@ -152,7 +152,10 @@ export function bigGammaln(ce: ComputeEngine, z: BigNum): BigNum {
     const pi = BigDecimal.PI;
     const sinPiZ = pi.mul(z).sin().abs();
     if (sinPiZ.isZero()) return BigDecimal.NAN;
-    return pi.ln().sub(sinPiZ.ln()).sub(bigGammaln(ce, BigDecimal.ONE.sub(z)));
+    return pi
+      .ln()
+      .sub(sinPiZ.ln())
+      .sub(bigGammaln(ce, BigDecimal.ONE.sub(z)));
   }
 
   // Exact: positive integer z -> ln((z-1)!)
@@ -281,8 +284,8 @@ function absBigint(x: bigint): bigint {
 export function computeBernoulliEven(n: number): [bigint, bigint][] {
   // Store all Bernoulli numbers B_0..B_{2n} as [num, den] rationals
   const all: [bigint, bigint][] = [
-    [1n, 1n],   // B_0 = 1
-    [-1n, 2n],  // B_1 = -1/2
+    [1n, 1n], // B_0 = 1
+    [-1n, 2n], // B_1 = -1/2
   ];
 
   for (let m = 2; m <= 2 * n; m++) {
@@ -301,7 +304,7 @@ export function computeBernoulliEven(n: number): [bigint, bigint][] {
     for (let k = 0; k < m; k++) {
       if (k > 0) {
         // C(m+1, k) = C(m+1, k-1) * (m+1 - k + 1) / k = C(m+1, k-1) * (m+2-k) / k
-        binom = binom * (mp1 - BigInt(k) + 1n) / BigInt(k);
+        binom = (binom * (mp1 - BigInt(k) + 1n)) / BigInt(k);
       }
       const [bkNum, bkDen] = all[k];
       if (bkNum === 0n) continue; // skip zero Bernoulli numbers
@@ -322,7 +325,10 @@ export function computeBernoulliEven(n: number): [bigint, bigint][] {
     const g = gcdBigint(absBigint(num), absBigint(den));
     num /= g;
     den /= g;
-    if (den < 0n) { num = -num; den = -den; }
+    if (den < 0n) {
+      num = -num;
+      den = -den;
+    }
     all.push([num, den]);
   }
 
@@ -347,7 +353,6 @@ function getBernoulliRationals(
     }
   );
 }
-
 
 /**
  * Bignum Digamma function ψ(z) = d/dz ln(Γ(z))
@@ -491,9 +496,7 @@ export function bigPolygamma(ce: ComputeEngine, n: BigNum, z: BigNum): BigNum {
     const negSign = nNum % 2 === 0 ? 1 : -1;
     while (w.lt(1)) {
       result = result.add(
-        new BigDecimal(negSign)
-          .mul(bigFactorial(nNum))
-          .div(w.pow(nNum + 1))
+        new BigDecimal(negSign).mul(bigFactorial(nNum)).div(w.pow(nNum + 1))
       );
       w = w.add(BigDecimal.ONE);
     }
@@ -502,9 +505,7 @@ export function bigPolygamma(ce: ComputeEngine, n: BigNum, z: BigNum): BigNum {
   // Recurrence: ψₙ(z+1) = ψₙ(z) + (-1)^n n! / z^{n+1}
   while (w.lt(shift)) {
     result = result.add(
-      new BigDecimal(sign)
-        .mul(bigFactorial(nNum))
-        .div(w.pow(nNum + 1))
+      new BigDecimal(sign).mul(bigFactorial(nNum)).div(w.pow(nNum + 1))
     );
     w = w.add(BigDecimal.ONE);
   }
@@ -515,14 +516,10 @@ export function bigPolygamma(ce: ComputeEngine, n: BigNum, z: BigNum): BigNum {
   // Asymptotic: ψₙ(w) ~ (-1)^{n+1} [(n-1)!/w^n + n!/(2w^{n+1}) + Σ ...]
   const signA = nNum % 2 === 0 ? -1 : 1;
   result = result.add(
-    new BigDecimal(signA)
-      .mul(bigFactorial(nNum - 1))
-      .div(w.pow(nNum))
+    new BigDecimal(signA).mul(bigFactorial(nNum - 1)).div(w.pow(nNum))
   );
   result = result.add(
-    new BigDecimal(signA)
-      .mul(bigFactorial(nNum))
-      .div(w.pow(nNum + 1).mul(2))
+    new BigDecimal(signA).mul(bigFactorial(nNum)).div(w.pow(nNum + 1).mul(2))
   );
 
   // Higher-order terms using Bernoulli numbers
@@ -611,9 +608,7 @@ export function bigZeta(ce: ComputeEngine, s: BigNum): BigNum {
   for (let k = 0; k <= n; k++) {
     const sign = k % 2 === 0 ? 1 : -1;
     sum = sum.add(
-      new BigDecimal(sign)
-        .mul(d[k].sub(dn))
-        .div(new BigDecimal(k + 1).pow(s))
+      new BigDecimal(sign).mul(d[k].sub(dn)).div(new BigDecimal(k + 1).pow(s))
     );
   }
   const eta = BigDecimal.ONE.sub(new BigDecimal(2).pow(BigDecimal.ONE.sub(s)));

@@ -16,7 +16,10 @@ const _pow10Cache: Map<number, bigint> = new Map();
 export function pow10(n: number): bigint {
   if (n <= 100) {
     let v = _pow10Cache.get(n);
-    if (v === undefined) { v = 10n ** BigInt(n); _pow10Cache.set(n, v); }
+    if (v === undefined) {
+      v = 10n ** BigInt(n);
+      _pow10Cache.set(n, v);
+    }
     return v;
   }
   return 10n ** BigInt(n);
@@ -152,7 +155,10 @@ export function bigintDigits(n: bigint): number {
   while (tmp >> BigInt(high) > 0n) high *= 2;
   // Binary search within [0, high]
   for (let shift = high >> 1; shift >= 1; shift >>= 1) {
-    if (tmp >> BigInt(shift) > 0n) { bits += shift; tmp >>= BigInt(shift); }
+    if (tmp >> BigInt(shift) > 0n) {
+      bits += shift;
+      tmp >>= BigInt(shift);
+    }
   }
   bits += 1;
   const approx = Math.ceil(bits * 0.30102999566398);
@@ -193,14 +199,14 @@ export function fpexp(x: bigint, scale: bigint): bigint {
   sum += term;
 
   for (let n = 2; ; n++) {
-    term = term * r / (BigInt(n) * scale);
+    term = (term * r) / (BigInt(n) * scale);
     if (bigintAbs(term) === 0n) break;
     sum += term;
   }
 
   // Squaring phase: exp(x/scale) = exp(r/scale)^(2^k)
   for (let i = 0; i < k; i++) {
-    sum = sum * sum / scale;
+    sum = (sum * sum) / scale;
   }
 
   return sum;
@@ -229,7 +235,12 @@ export function fpln(x: bigint, scale: bigint): bigint {
   let target = x; // the value we compute ln of (may be reduced)
   let k = 0; // number of sqrt halvings applied
 
-  if (Number.isFinite(xNum) && Number.isFinite(scaleNum) && xNum > 0 && scaleNum > 0) {
+  if (
+    Number.isFinite(xNum) &&
+    Number.isFinite(scaleNum) &&
+    xNum > 0 &&
+    scaleNum > 0
+  ) {
     const ratio = xNum / scaleNum;
     if (Number.isFinite(ratio) && ratio > 0) {
       const approx = Math.log(ratio);
@@ -288,8 +299,13 @@ export function fpln(x: bigint, scale: bigint): bigint {
     const absDelta = bigintAbs(yn - y);
     if (absDelta <= 1n) break;
     // Detect limit cycle: both deltas are small and convergence stalled
-    if (absDelta < 100000n && prevAbsDelta > 0n && prevAbsDelta < 100000n
-      && absDelta * 4n >= prevAbsDelta) break;
+    if (
+      absDelta < 100000n &&
+      prevAbsDelta > 0n &&
+      prevAbsDelta < 100000n &&
+      absDelta * 4n >= prevAbsDelta
+    )
+      break;
     prevAbsDelta = absDelta;
     y = yn;
   }
@@ -341,7 +357,8 @@ export const PI_DIGITS =
 let _fppiCache: { scale: bigint; value: bigint } | null = null;
 
 function fppi(scale: bigint): bigint {
-  if (_fppiCache !== null && _fppiCache.scale === scale) return _fppiCache.value;
+  if (_fppiCache !== null && _fppiCache.scale === scale)
+    return _fppiCache.value;
 
   // Compute PI * scale using the shared PI_DIGITS constant.
   // scale = 10^p, so we need ~p+10 digits of PI.
@@ -475,10 +492,10 @@ export function fpsincos(x: bigint, scale: bigint): [bigint, bigint] {
   for (let n = 2; ; n += 2) {
     // cos term: cosTerm = cosTerm * (-r²) / (n*(n-1)*scale²)
     // But we compute sign explicitly
-    cosTerm = cosTerm * r2 / (BigInt(n) * BigInt(n - 1) * scale2);
+    cosTerm = (cosTerm * r2) / (BigInt(n) * BigInt(n - 1) * scale2);
     if (cosTerm === 0n) {
       // Also check sin at next step
-      sinTerm = sinTerm * r2 / (BigInt(n + 1) * BigInt(n) * scale2);
+      sinTerm = (sinTerm * r2) / (BigInt(n + 1) * BigInt(n) * scale2);
       if (sinTerm !== 0n) {
         if (n % 4 === 2) {
           cosVal -= cosTerm;
@@ -492,7 +509,7 @@ export function fpsincos(x: bigint, scale: bigint): [bigint, bigint] {
     }
 
     // sin term at n+1: sinTerm = sinTerm * r² / ((n+1)*n*scale²)
-    sinTerm = sinTerm * r2 / (BigInt(n + 1) * BigInt(n) * scale2);
+    sinTerm = (sinTerm * r2) / (BigInt(n + 1) * BigInt(n) * scale2);
 
     if (n % 4 === 2) {
       // n=2: subtract for cos (term 2: -r²/2!), subtract for sin (term 3: -r³/3!)
@@ -511,8 +528,8 @@ export function fpsincos(x: bigint, scale: bigint): [bigint, bigint] {
   // sin(2θ) = 2·sin(θ)·cos(θ)
   // cos(2θ) = 2·cos²(θ) - 1
   for (let i = 0; i < k; i++) {
-    const newSin = 2n * sinVal * cosVal / scale;
-    const newCos = 2n * cosVal * cosVal / scale - scale;
+    const newSin = (2n * sinVal * cosVal) / scale;
+    const newCos = (2n * cosVal * cosVal) / scale - scale;
     sinVal = newSin;
     cosVal = newCos;
   }
@@ -549,13 +566,13 @@ export function fpatan(x: bigint, scale: bigint): bigint {
   // If x/scale > 1, use atan(x/scale) = π/2 - atan(scale/x)
   // In fixed-point: atan(x, scale) = halfPi - atan(scale² / x, scale)
   if (x > scale) {
-    const reciprocal = scale * scale / x; // scale²/x represents scale/x in fp
+    const reciprocal = (scale * scale) / x; // scale²/x represents scale/x in fp
     return halfPi - fpatan(reciprocal, scale);
   }
 
   // Halving: if x > 0.4 * scale, use atan(x) = 2*atan(x / (1 + sqrt(1 + x²)))
   // In fixed-point: threshold = 4*scale/10
-  const threshold = 4n * scale / 10n;
+  const threshold = (4n * scale) / 10n;
   let halvings = 0;
   let r = x;
 
@@ -568,7 +585,7 @@ export function fpatan(x: bigint, scale: bigint): bigint {
     const r2 = r * r;
     const val = (scale * scale + r2) / scale;
     const sqrtVal = fpsqrt(val, scale); // sqrt(1 + t²) * scale
-    r = r * scale / (scale + sqrtVal);
+    r = (r * scale) / (scale + sqrtVal);
     halvings++;
   }
 
@@ -581,7 +598,7 @@ export function fpatan(x: bigint, scale: bigint): bigint {
   const scale2 = scale * scale; // hoisted: saves one bigint multiply per term
 
   for (let n = 3; ; n += 2) {
-    term = term * r2 / scale2;
+    term = (term * r2) / scale2;
     if (term === 0n) break;
     // Late division by n: the per-term truncation error is < 1 ULP each,
     // so total error is bounded by ~nTerms/2 ULP — well within the 15 guard digits.

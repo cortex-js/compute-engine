@@ -19,7 +19,7 @@ import { isNumber, isSymbol, isFunction } from './type-guards';
 
 type ConstructibleTrigValues = [
   [numerator: number, denominator: number],
-  { [operator: string]: Expression }
+  { [operator: string]: Expression },
 ][];
 
 // For each trig function, by quadrant (0..π/2, π/2..π, π..3π/2, 3π/2..2π),
@@ -74,7 +74,7 @@ const S6: MathJsonExpression = ['Sqrt', 6];
 // The key is the argument in radian, as (num * π / den)
 const CONSTRUCTIBLE_VALUES: [
   key: [numerator: number, denominator: number],
-  values: { [name: string]: MathJsonExpression | LatexString }
+  values: { [name: string]: MathJsonExpression | LatexString },
 ][] = [
   [
     [0, 1],
@@ -301,7 +301,11 @@ export function evalTrig(
         apply(
           op,
           (x) => Math.log((1 + x) / (x - 1)) / 2,
-          (x) => BigDecimal.ONE.add(x).div(x.sub(BigDecimal.ONE)).ln().div(BigDecimal.TWO),
+          (x) =>
+            BigDecimal.ONE.add(x)
+              .div(x.sub(BigDecimal.ONE))
+              .ln()
+              .div(BigDecimal.TWO),
           (x) => ce.complex(1).add(x).div(x.sub(1)).log().div(2)
         )
       );
@@ -313,8 +317,7 @@ export function evalTrig(
           op,
           (x) => Math.log(1 / x + Math.sqrt(1 / (x * x) + 1)),
           (x) =>
-            BigDecimal.ONE
-              .div(x.mul(x))
+            BigDecimal.ONE.div(x.mul(x))
               .add(BigDecimal.ONE)
               .sqrt()
               .add(BigDecimal.ONE.div(x))
@@ -349,7 +352,8 @@ export function evalTrig(
           op,
           (x) => Math.log((1 + Math.sqrt(1 - x * x)) / x),
           // arsech(x) = ln((1 + sqrt(1 - x^2)) / x)
-          (x) => BigDecimal.ONE.sub(x.mul(x)).sqrt().add(BigDecimal.ONE).div(x).ln(),
+          (x) =>
+            BigDecimal.ONE.sub(x.mul(x)).sqrt().add(BigDecimal.ONE).div(x).ln(),
           (x) => ce.complex(1).sub(x.mul(x)).add(1).div(x).log()
         )
       );
@@ -381,7 +385,11 @@ export function evalTrig(
           op,
           Math.atanh,
           // atanh(x) = 0.5 * ln((1+x)/(1-x))
-          (x) => BigDecimal.ONE.add(x).div(BigDecimal.ONE.sub(x)).ln().div(BigDecimal.TWO),
+          (x) =>
+            BigDecimal.ONE.add(x)
+              .div(BigDecimal.ONE.sub(x))
+              .ln()
+              .div(BigDecimal.TWO),
           (x) => x.atanh()
         )
       );
@@ -557,7 +565,7 @@ function constructibleValuesInverse(
   //
   type ConstructibleTrigValuesInverse = [
     [match_arg: Expression, match_arg_N: number],
-    angle: [numerator: number, denominator: number]
+    angle: [numerator: number, denominator: number],
   ][];
   const specialInverseValues = ce._cache<ConstructibleTrigValuesInverse>(
     'constructible-inverse-trigonometric-values-' + operator,

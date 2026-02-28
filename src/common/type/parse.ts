@@ -265,7 +265,7 @@ class TypeParser {
     required: NamedElement[],
     optional: NamedElement[],
     variadic: NamedElement | undefined,
-    variadicMin: 0 | 1 | undefined
+    variadicMin: 0 | 1 | undefined,
   ] {
     const reqArgs: NamedElement[] = [];
     const optArgs: NamedElement[] = [];

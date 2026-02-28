@@ -441,7 +441,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
           [
             { re: number; im: number },
             { num: number; denom: number },
-            Expression
+            Expression,
           ]
         >
       | number
@@ -732,8 +732,8 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       canonical === true
         ? 'canonical'
         : canonical === false
-        ? 'raw'
-        : canonical;
+          ? 'raw'
+          : canonical;
     return this.engine.expr(sub[this._id], { form });
   }
 

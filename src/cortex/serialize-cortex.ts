@@ -372,7 +372,7 @@ export function serializeCortex(
     const op = OPERATORS[opName];
     if (!op) return null;
     const opSymbol = options?.fancySymbols
-      ? op.fancySymbol ?? op.symbol
+      ? (op.fancySymbol ?? op.symbol)
       : op.symbol;
 
     if (op.unary) {

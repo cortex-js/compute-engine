@@ -1,6 +1,8 @@
 import { BigDecimal } from '../../big-decimal';
 
-export function bigint(a: BigDecimal | number | bigint | string): bigint | null {
+export function bigint(
+  a: BigDecimal | number | bigint | string
+): bigint | null {
   if (typeof a === 'bigint') return a;
 
   if (typeof a === 'number') {

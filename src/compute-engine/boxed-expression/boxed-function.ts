@@ -477,8 +477,8 @@ export class BoxedFunction
       options.canonical === true
         ? 'canonical'
         : options.canonical === false
-        ? 'raw'
-        : options.canonical;
+          ? 'raw'
+          : options.canonical;
 
     if (!ops.every((x) => x.isValid))
       return this.engine.function(this._operator, ops, { form: 'raw' });
@@ -1466,8 +1466,8 @@ function type(expr: BoxedFunction): Type {
       def.signature instanceof BoxedType
         ? def.signature.type
         : typeof def.signature === 'string'
-        ? parseType(def.signature, expr.engine._typeResolver)
-        : def.signature;
+          ? parseType(def.signature, expr.engine._typeResolver)
+          : def.signature;
 
     let sigResult = functionResult(sig) ?? 'unknown';
 

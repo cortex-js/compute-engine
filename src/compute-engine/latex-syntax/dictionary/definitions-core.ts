@@ -1591,7 +1591,7 @@ function sanitizeLatex(s: string | null): string {
         ']': '\\rbrack ',
         ':': '\\colon ',
         '\\': '\\backslash ',
-      }[c] ?? '\\' + c)
+      })[c] ?? '\\' + c
   );
 }
 
@@ -2023,7 +2023,7 @@ function parseCasesEnvironment(parser: Parser): MathJsonExpression | null {
     } else if (row.length === 2) {
       const s = stringValue(row[1]);
       // If a string, probably 'else' or 'otherwise'
-      result.push(s ? 'True' : stripText(row[1]) ?? 'True');
+      result.push(s ? 'True' : (stripText(row[1]) ?? 'True'));
       result.push(row[0]);
     }
   }
