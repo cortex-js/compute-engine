@@ -40,13 +40,13 @@ describe('DMS Parsing', () => {
   });
 
   test('parse full DMS notation', () => {
-    check('9°30\'15"', ['Degrees', { num: '9.504166666666666' }]);
+    check('9°30\'15"', ['Degrees', 9.504166666666666]);
   });
 
   test('parse DMS with \\doubleprime', () => {
     check('9°30\\prime 15\\doubleprime', [
       'Degrees',
-      { num: '9.504166666666666' },
+      9.504166666666666,
     ]);
   });
 
@@ -133,7 +133,7 @@ describe('DMS Arithmetic', () => {
 
 describe('Edge Cases', () => {
   test('decimal arc-minutes', () => {
-    check("9°30.5'", ['Degrees', { num: '9.508333333333333' }]);
+    check("9°30.5'", ['Degrees', 9.508333333333333]);
   });
 
   test('out of range values are mathematically valid', () => {

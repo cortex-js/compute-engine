@@ -585,20 +585,12 @@ describe('ND', () => {
   it('should compute the numerical approximation of the derivative of a polynomial', () => {
     const expr = parse('\\mathrm{ND}(x \\mapsto x^3 + 2x - 4, 2)');
     const result = expr.N();
-    expect(result.json).toMatchInlineSnapshot(`
-      {
-        num: 14.000000000000007,
-      }
-    `);
+    expect(result.json).toMatchInlineSnapshot(`14.000000000000007`);
   });
 
   it('should compute the numerical approximation of the derivative of an expression', () => {
     const expr = parse('\\mathrm{ND}(x \\mapsto \\cos x + 2x^3 - 4, 2)');
     const result = expr.N();
-    expect(result.json).toMatchInlineSnapshot(`
-      {
-        num: 23.090702573188732,
-      }
-    `);
+    expect(result.json).toMatchInlineSnapshot(`23.090702573188732`);
   });
 });

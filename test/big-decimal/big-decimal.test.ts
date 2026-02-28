@@ -465,8 +465,8 @@ describe('State checks', () => {
       expect(new BigDecimal(-1).isPositive()).toBe(false);
     });
 
-    test('false for Infinity (not finite)', () => {
-      expect(new BigDecimal(Infinity).isPositive()).toBe(false);
+    test('true for Infinity', () => {
+      expect(new BigDecimal(Infinity).isPositive()).toBe(true);
     });
 
     test('false for NaN', () => {
@@ -489,8 +489,8 @@ describe('State checks', () => {
       expect(new BigDecimal(1).isNegative()).toBe(false);
     });
 
-    test('false for -Infinity (not finite)', () => {
-      expect(new BigDecimal(-Infinity).isNegative()).toBe(false);
+    test('true for -Infinity', () => {
+      expect(new BigDecimal(-Infinity).isNegative()).toBe(true);
     });
 
     test('false for NaN', () => {
@@ -1352,5 +1352,662 @@ describe('mul()', () => {
   test('Infinity * -Infinity → -Infinity', () => {
     const result = new BigDecimal(Infinity).mul(new BigDecimal(-Infinity));
     expect(result.toNumber()).toBe(-Infinity);
+  });
+});
+
+// ================================================================
+// trunc()
+// ================================================================
+
+describe('trunc()', () => {
+  test('positive decimal truncates toward zero', () => {
+    expect(new BigDecimal('3.7').trunc().eq(new BigDecimal('3'))).toBe(true);
+    expect(new BigDecimal('3.2').trunc().eq(new BigDecimal('3'))).toBe(true);
+  });
+
+  test('negative decimal truncates toward zero', () => {
+    expect(new BigDecimal('-3.7').trunc().eq(new BigDecimal('-3'))).toBe(true);
+    expect(new BigDecimal('-3.2').trunc().eq(new BigDecimal('-3'))).toBe(true);
+  });
+
+  test('integer returns itself', () => {
+    const d = new BigDecimal('42');
+    expect(d.trunc()).toBe(d); // same reference for integer
+  });
+
+  test('zero returns itself', () => {
+    const d = new BigDecimal('0');
+    expect(d.trunc()).toBe(d);
+  });
+
+  test('small value truncates to zero', () => {
+    expect(new BigDecimal('0.999').trunc().isZero()).toBe(true);
+    expect(new BigDecimal('-0.999').trunc().isZero()).toBe(true);
+  });
+
+  test('NaN → NaN', () => {
+    expect(new BigDecimal(NaN).trunc().isNaN()).toBe(true);
+  });
+
+  test('Infinity → Infinity', () => {
+    expect(new BigDecimal(Infinity).trunc().toNumber()).toBe(Infinity);
+    expect(new BigDecimal(-Infinity).trunc().toNumber()).toBe(-Infinity);
+  });
+
+  test('large integer is unchanged', () => {
+    const d = new BigDecimal('1e20');
+    expect(d.trunc()).toBe(d);
+  });
+});
+
+// ================================================================
+// div()
+// ================================================================
+
+describe('div()', () => {
+  beforeAll(() => {
+    BigDecimal.precision = 50;
+  });
+
+  afterAll(() => {
+    BigDecimal.precision = 50;
+  });
+
+  test('10 / 3 ≈ 3.333...', () => {
+    const result = new BigDecimal('10').div(new BigDecimal('3'));
+    const s = result.toString();
+    // Should start with 3.333...
+    expect(s.startsWith('3.3333')).toBe(true);
+    // Should have many 3s
+    expect(s.replace('.', '').replace(/3/g, '').length).toBeLessThanOrEqual(2);
+  });
+
+  test('1 / 4 = 0.25 (exact)', () => {
+    const result = new BigDecimal('1').div(new BigDecimal('4'));
+    expect(result.sub(new BigDecimal('0.25')).abs().lt(new BigDecimal('1e-40'))).toBe(true);
+  });
+
+  test('0 / 5 = 0', () => {
+    const result = new BigDecimal('0').div(new BigDecimal('5'));
+    expect(result.isZero()).toBe(true);
+  });
+
+  test('1 / 0 = Infinity', () => {
+    const result = new BigDecimal('1').div(new BigDecimal('0'));
+    expect(result.toNumber()).toBe(Infinity);
+  });
+
+  test('-1 / 0 = -Infinity', () => {
+    const result = new BigDecimal('-1').div(new BigDecimal('0'));
+    expect(result.toNumber()).toBe(-Infinity);
+  });
+
+  test('0 / 0 = NaN', () => {
+    const result = new BigDecimal('0').div(new BigDecimal('0'));
+    expect(result.isNaN()).toBe(true);
+  });
+
+  test('NaN / x = NaN', () => {
+    expect(new BigDecimal(NaN).div(new BigDecimal('5')).isNaN()).toBe(true);
+  });
+
+  test('x / NaN = NaN', () => {
+    expect(new BigDecimal('5').div(new BigDecimal(NaN)).isNaN()).toBe(true);
+  });
+
+  test('Inf / finite = Inf', () => {
+    const result = new BigDecimal(Infinity).div(new BigDecimal('5'));
+    expect(result.toNumber()).toBe(Infinity);
+  });
+
+  test('Inf / negative finite = -Inf', () => {
+    const result = new BigDecimal(Infinity).div(new BigDecimal('-5'));
+    expect(result.toNumber()).toBe(-Infinity);
+  });
+
+  test('-Inf / positive finite = -Inf', () => {
+    const result = new BigDecimal(-Infinity).div(new BigDecimal('5'));
+    expect(result.toNumber()).toBe(-Infinity);
+  });
+
+  test('-Inf / negative finite = Inf', () => {
+    const result = new BigDecimal(-Infinity).div(new BigDecimal('-5'));
+    expect(result.toNumber()).toBe(Infinity);
+  });
+
+  test('finite / Inf = 0', () => {
+    const result = new BigDecimal('5').div(new BigDecimal(Infinity));
+    expect(result.isZero()).toBe(true);
+  });
+
+  test('finite / -Inf = 0', () => {
+    const result = new BigDecimal('5').div(new BigDecimal(-Infinity));
+    expect(result.isZero()).toBe(true);
+  });
+
+  test('Inf / Inf = NaN', () => {
+    const result = new BigDecimal(Infinity).div(new BigDecimal(Infinity));
+    expect(result.isNaN()).toBe(true);
+  });
+
+  test('-6 / 3 = -2', () => {
+    const result = new BigDecimal('-6').div(new BigDecimal('3'));
+    // Should be very close to -2
+    expect(result.sub(new BigDecimal('-2')).abs().lt(new BigDecimal('1e-40'))).toBe(true);
+  });
+
+  test('6 / -3 = -2', () => {
+    const result = new BigDecimal('6').div(new BigDecimal('-3'));
+    expect(result.sub(new BigDecimal('-2')).abs().lt(new BigDecimal('1e-40'))).toBe(true);
+  });
+
+  test('-6 / -3 = 2', () => {
+    const result = new BigDecimal('-6').div(new BigDecimal('-3'));
+    expect(result.sub(new BigDecimal('2')).abs().lt(new BigDecimal('1e-40'))).toBe(true);
+  });
+
+  test('100 / 10 = 10', () => {
+    const result = new BigDecimal('100').div(new BigDecimal('10'));
+    expect(result.sub(new BigDecimal('10')).abs().lt(new BigDecimal('1e-40'))).toBe(true);
+  });
+
+  test('high precision division', () => {
+    BigDecimal.precision = 100;
+    const result = new BigDecimal('1').div(new BigDecimal('7'));
+    // 1/7 = 0.142857142857... repeating
+    const s = result.toString();
+    // Should contain the repeating pattern 142857
+    expect(s).toContain('142857142857');
+    // Check we have approximately 100 significant digits
+    const digits = s.replace('-', '').replace('0.', '').replace(/0+$/, '');
+    expect(digits.length).toBeGreaterThanOrEqual(95);
+    BigDecimal.precision = 50;
+  });
+
+  test('1/3 precision check', () => {
+    BigDecimal.precision = 50;
+    const result = new BigDecimal('1').div(new BigDecimal('3'));
+    const s = result.toString();
+    // Should have many 3s after 0.
+    const fracPart = s.replace('0.', '');
+    // All digits should be 3 (possibly with trailing rounding artifact)
+    const threeCount = (fracPart.match(/3/g) || []).length;
+    expect(threeCount).toBeGreaterThanOrEqual(45);
+  });
+});
+
+// ================================================================
+// inv()
+// ================================================================
+
+describe('inv()', () => {
+  beforeAll(() => {
+    BigDecimal.precision = 50;
+  });
+
+  test('inv of 2 = 0.5', () => {
+    const result = new BigDecimal('2').inv();
+    expect(result.sub(new BigDecimal('0.5')).abs().lt(new BigDecimal('1e-40'))).toBe(true);
+  });
+
+  test('inv of 4 = 0.25', () => {
+    const result = new BigDecimal('4').inv();
+    expect(result.sub(new BigDecimal('0.25')).abs().lt(new BigDecimal('1e-40'))).toBe(true);
+  });
+
+  test('inv of 0 = Infinity', () => {
+    expect(new BigDecimal('0').inv().toNumber()).toBe(Infinity);
+  });
+
+  test('inv of NaN = NaN', () => {
+    expect(new BigDecimal(NaN).inv().isNaN()).toBe(true);
+  });
+
+  test('inv of Infinity = 0', () => {
+    expect(new BigDecimal(Infinity).inv().isZero()).toBe(true);
+  });
+
+  test('inv of negative', () => {
+    const result = new BigDecimal('-4').inv();
+    expect(result.sub(new BigDecimal('-0.25')).abs().lt(new BigDecimal('1e-40'))).toBe(true);
+  });
+});
+
+// ================================================================
+// mod()
+// ================================================================
+
+describe('mod()', () => {
+  beforeAll(() => {
+    BigDecimal.precision = 50;
+  });
+
+  test('10 mod 3 = 1', () => {
+    const result = new BigDecimal('10').mod(new BigDecimal('3'));
+    expect(result.sub(new BigDecimal('1')).abs().lt(new BigDecimal('1e-30'))).toBe(true);
+  });
+
+  test('10.5 mod 3 = 1.5', () => {
+    const result = new BigDecimal('10.5').mod(new BigDecimal('3'));
+    expect(result.sub(new BigDecimal('1.5')).abs().lt(new BigDecimal('1e-30'))).toBe(true);
+  });
+
+  test('-10 mod 3 = -1', () => {
+    const result = new BigDecimal('-10').mod(new BigDecimal('3'));
+    expect(result.sub(new BigDecimal('-1')).abs().lt(new BigDecimal('1e-30'))).toBe(true);
+  });
+
+  test('7 mod 7 = 0', () => {
+    const result = new BigDecimal('7').mod(new BigDecimal('7'));
+    expect(result.abs().lt(new BigDecimal('1e-30'))).toBe(true);
+  });
+
+  test('0 mod 5 = 0', () => {
+    const result = new BigDecimal('0').mod(new BigDecimal('5'));
+    expect(result.isZero()).toBe(true);
+  });
+
+  test('x mod 0 = NaN', () => {
+    expect(new BigDecimal('5').mod(new BigDecimal('0')).isNaN()).toBe(true);
+  });
+
+  test('NaN mod x = NaN', () => {
+    expect(new BigDecimal(NaN).mod(new BigDecimal('3')).isNaN()).toBe(true);
+  });
+
+  test('x mod NaN = NaN', () => {
+    expect(new BigDecimal('3').mod(new BigDecimal(NaN)).isNaN()).toBe(true);
+  });
+
+  test('Inf mod x = NaN', () => {
+    expect(new BigDecimal(Infinity).mod(new BigDecimal('3')).isNaN()).toBe(true);
+  });
+
+  test('x mod Inf = x', () => {
+    const result = new BigDecimal('5').mod(new BigDecimal(Infinity));
+    expect(result.eq(new BigDecimal('5'))).toBe(true);
+  });
+
+  test('5.5 mod 2 = 1.5', () => {
+    const result = new BigDecimal('5.5').mod(new BigDecimal('2'));
+    expect(result.sub(new BigDecimal('1.5')).abs().lt(new BigDecimal('1e-30'))).toBe(true);
+  });
+});
+
+// ================================================================
+// pow()
+// ================================================================
+
+describe('pow()', () => {
+  beforeAll(() => {
+    BigDecimal.precision = 50;
+  });
+
+  afterAll(() => {
+    BigDecimal.precision = 50;
+  });
+
+  test('2^10 = 1024', () => {
+    const result = new BigDecimal('2').pow(new BigDecimal('10'));
+    expect(result.eq(new BigDecimal('1024'))).toBe(true);
+  });
+
+  test('3^0 = 1', () => {
+    const result = new BigDecimal('3').pow(new BigDecimal('0'));
+    expect(result.eq(new BigDecimal('1'))).toBe(true);
+  });
+
+  test('2^-1 = 0.5', () => {
+    const result = new BigDecimal('2').pow(new BigDecimal('-1'));
+    expect(result.sub(new BigDecimal('0.5')).abs().lt(new BigDecimal('1e-40'))).toBe(true);
+  });
+
+  test('2^-2 = 0.25', () => {
+    const result = new BigDecimal('2').pow(new BigDecimal('-2'));
+    expect(result.sub(new BigDecimal('0.25')).abs().lt(new BigDecimal('1e-40'))).toBe(true);
+  });
+
+  test('(-3)^3 = -27', () => {
+    const result = new BigDecimal('-3').pow(new BigDecimal('3'));
+    expect(result.eq(new BigDecimal('-27'))).toBe(true);
+  });
+
+  test('(-3)^2 = 9', () => {
+    const result = new BigDecimal('-3').pow(new BigDecimal('2'));
+    expect(result.eq(new BigDecimal('9'))).toBe(true);
+  });
+
+  test('0^5 = 0', () => {
+    const result = new BigDecimal('0').pow(new BigDecimal('5'));
+    expect(result.isZero()).toBe(true);
+  });
+
+  test('0^0 = 1', () => {
+    const result = new BigDecimal('0').pow(new BigDecimal('0'));
+    expect(result.eq(new BigDecimal('1'))).toBe(true);
+  });
+
+  test('1^anything = 1', () => {
+    expect(new BigDecimal('1').pow(new BigDecimal('100')).eq(new BigDecimal('1'))).toBe(true);
+    expect(new BigDecimal('1').pow(new BigDecimal('0')).eq(new BigDecimal('1'))).toBe(true);
+  });
+
+  test('x^1 = x', () => {
+    const x = new BigDecimal('42.5');
+    expect(x.pow(new BigDecimal('1')).eq(x)).toBe(true);
+  });
+
+  test('NaN base → NaN', () => {
+    expect(new BigDecimal(NaN).pow(new BigDecimal('2')).isNaN()).toBe(true);
+  });
+
+  test('NaN exponent → NaN', () => {
+    expect(new BigDecimal('2').pow(new BigDecimal(NaN)).isNaN()).toBe(true);
+  });
+
+  test('non-integer exponent on negative base → NaN', () => {
+    expect(new BigDecimal('-2').pow(new BigDecimal('1.5')).isNaN()).toBe(true);
+  });
+
+  test('Infinity exponent → NaN', () => {
+    expect(new BigDecimal('2').pow(new BigDecimal(Infinity)).isNaN()).toBe(true);
+  });
+
+  test('0^negative → Infinity', () => {
+    const result = new BigDecimal('0').pow(new BigDecimal('-1'));
+    expect(result.toNumber()).toBe(Infinity);
+  });
+
+  test('Infinity^positive → Infinity', () => {
+    const result = new BigDecimal(Infinity).pow(new BigDecimal('3'));
+    expect(result.toNumber()).toBe(Infinity);
+  });
+
+  test('(-Infinity)^3 → -Infinity', () => {
+    const result = new BigDecimal(-Infinity).pow(new BigDecimal('3'));
+    expect(result.toNumber()).toBe(-Infinity);
+  });
+
+  test('(-Infinity)^2 → Infinity', () => {
+    const result = new BigDecimal(-Infinity).pow(new BigDecimal('2'));
+    expect(result.toNumber()).toBe(Infinity);
+  });
+
+  test('Infinity^negative → 0', () => {
+    const result = new BigDecimal(Infinity).pow(new BigDecimal('-2'));
+    expect(result.isZero()).toBe(true);
+  });
+
+  test('large exponent', () => {
+    const result = new BigDecimal('2').pow(new BigDecimal('100'));
+    // 2^100 = 1267650600228229401496703205376
+    expect(result.eq(new BigDecimal('1267650600228229401496703205376'))).toBe(true);
+  });
+
+  test('decimal base with integer exponent', () => {
+    const result = new BigDecimal('0.5').pow(new BigDecimal('3'));
+    // 0.5^3 = 0.125
+    expect(result.eq(new BigDecimal('0.125'))).toBe(true);
+  });
+
+  test('negative exponent uses precision', () => {
+    BigDecimal.precision = 50;
+    const result = new BigDecimal('3').pow(new BigDecimal('-2'));
+    // 3^-2 = 1/9 ≈ 0.1111...
+    const s = result.toString();
+    expect(s.startsWith('0.1111')).toBe(true);
+    // Should have many 1s
+    const oneCount = (s.replace('0.', '').match(/1/g) || []).length;
+    expect(oneCount).toBeGreaterThanOrEqual(40);
+  });
+
+  // Non-integer exponent tests
+  test('4^0.5 = 2', () => {
+    const result = new BigDecimal('4').pow(new BigDecimal('0.5'));
+    const diff = result.sub(new BigDecimal('2')).abs();
+    expect(diff.lt(new BigDecimal('1e-45'))).toBe(true);
+  });
+
+  test('8^(1/3) ≈ 2', () => {
+    const exp = new BigDecimal('1').div(new BigDecimal('3'));
+    const result = new BigDecimal('8').pow(exp);
+    const diff = result.sub(new BigDecimal('2')).abs();
+    expect(diff.lt(new BigDecimal('1e-40'))).toBe(true);
+  });
+
+  test('e^π via pow', () => {
+    const e = new BigDecimal('1').exp();
+    const result = e.pow(BigDecimal.PI);
+    const expected = BigDecimal.PI.exp();
+    const diff = result.sub(expected).abs();
+    expect(diff.lt(new BigDecimal('1e-40'))).toBe(true);
+  });
+
+  test('(-2)^0.5 = NaN (real)', () => {
+    expect(new BigDecimal('-2').pow(new BigDecimal('0.5')).isNaN()).toBe(true);
+  });
+
+  test('2^1.5 ≈ 2*sqrt(2)', () => {
+    const result = new BigDecimal('2').pow(new BigDecimal('1.5'));
+    const expected = new BigDecimal('2').mul(new BigDecimal('2').sqrt());
+    const diff = result.sub(expected).abs();
+    expect(diff.lt(new BigDecimal('1e-40'))).toBe(true);
+  });
+
+  test('10^0.5 = sqrt(10)', () => {
+    const result = new BigDecimal('10').pow(new BigDecimal('0.5'));
+    const expected = new BigDecimal('10').sqrt();
+    const diff = result.sub(expected).abs();
+    expect(diff.lt(new BigDecimal('1e-40'))).toBe(true);
+  });
+
+  test('0^0.5 = 0', () => {
+    const result = new BigDecimal('0').pow(new BigDecimal('0.5'));
+    expect(result.isZero()).toBe(true);
+  });
+
+  test('0^(-0.5) = Infinity', () => {
+    const result = new BigDecimal('0').pow(new BigDecimal('-0.5'));
+    expect(result.toNumber()).toBe(Infinity);
+  });
+
+  test('Infinity^0.5 = Infinity', () => {
+    const result = new BigDecimal(Infinity).pow(new BigDecimal('0.5'));
+    expect(result.toNumber()).toBe(Infinity);
+  });
+
+  test('Infinity^(-0.5) = 0', () => {
+    const result = new BigDecimal(Infinity).pow(new BigDecimal('-0.5'));
+    expect(result.isZero()).toBe(true);
+  });
+
+  test('(-Inf)^0.5 = NaN', () => {
+    expect(new BigDecimal(-Infinity).pow(new BigDecimal('0.5')).isNaN()).toBe(true);
+  });
+});
+
+// ================================================================
+// floor()
+// ================================================================
+
+describe('floor()', () => {
+  test('positive decimal rounds toward -Infinity', () => {
+    expect(new BigDecimal('3.7').floor().eq(new BigDecimal('3'))).toBe(true);
+    expect(new BigDecimal('3.2').floor().eq(new BigDecimal('3'))).toBe(true);
+    expect(new BigDecimal('3.999').floor().eq(new BigDecimal('3'))).toBe(true);
+  });
+
+  test('negative decimal rounds toward -Infinity', () => {
+    expect(new BigDecimal('-3.7').floor().eq(new BigDecimal('-4'))).toBe(true);
+    expect(new BigDecimal('-3.2').floor().eq(new BigDecimal('-4'))).toBe(true);
+    expect(new BigDecimal('-3.001').floor().eq(new BigDecimal('-4'))).toBe(true);
+  });
+
+  test('integer returns itself', () => {
+    const d = new BigDecimal('5');
+    expect(d.floor()).toBe(d); // same reference
+    expect(new BigDecimal('5').floor().eq(5)).toBe(true);
+  });
+
+  test('zero returns itself', () => {
+    const d = new BigDecimal('0');
+    expect(d.floor()).toBe(d);
+    expect(new BigDecimal('0').floor().isZero()).toBe(true);
+  });
+
+  test('NaN → NaN', () => {
+    expect(new BigDecimal(NaN).floor().isNaN()).toBe(true);
+  });
+
+  test('Infinity → Infinity', () => {
+    expect(new BigDecimal(Infinity).floor().toNumber()).toBe(Infinity);
+    expect(new BigDecimal(-Infinity).floor().toNumber()).toBe(-Infinity);
+  });
+});
+
+// ================================================================
+// ceil()
+// ================================================================
+
+describe('ceil()', () => {
+  test('positive decimal rounds toward +Infinity', () => {
+    expect(new BigDecimal('3.2').ceil().eq(new BigDecimal('4'))).toBe(true);
+    expect(new BigDecimal('3.7').ceil().eq(new BigDecimal('4'))).toBe(true);
+    expect(new BigDecimal('3.001').ceil().eq(new BigDecimal('4'))).toBe(true);
+  });
+
+  test('negative decimal rounds toward +Infinity', () => {
+    expect(new BigDecimal('-3.2').ceil().eq(new BigDecimal('-3'))).toBe(true);
+    expect(new BigDecimal('-3.7').ceil().eq(new BigDecimal('-3'))).toBe(true);
+    expect(new BigDecimal('-3.999').ceil().eq(new BigDecimal('-3'))).toBe(true);
+  });
+
+  test('integer returns itself', () => {
+    const d = new BigDecimal('5');
+    expect(d.ceil()).toBe(d); // same reference
+    expect(new BigDecimal('5').ceil().eq(5)).toBe(true);
+  });
+
+  test('zero returns itself', () => {
+    const d = new BigDecimal('0');
+    expect(d.ceil()).toBe(d);
+    expect(new BigDecimal('0').ceil().isZero()).toBe(true);
+  });
+
+  test('NaN → NaN', () => {
+    expect(new BigDecimal(NaN).ceil().isNaN()).toBe(true);
+  });
+
+  test('Infinity → Infinity', () => {
+    expect(new BigDecimal(Infinity).ceil().toNumber()).toBe(Infinity);
+    expect(new BigDecimal(-Infinity).ceil().toNumber()).toBe(-Infinity);
+  });
+});
+
+// ================================================================
+// round()
+// ================================================================
+
+describe('round()', () => {
+  test('rounds half away from zero (positive)', () => {
+    expect(new BigDecimal('3.5').round().eq(new BigDecimal('4'))).toBe(true);
+    expect(new BigDecimal('3.6').round().eq(new BigDecimal('4'))).toBe(true);
+  });
+
+  test('rounds down when below half (positive)', () => {
+    expect(new BigDecimal('3.4').round().eq(new BigDecimal('3'))).toBe(true);
+    expect(new BigDecimal('3.1').round().eq(new BigDecimal('3'))).toBe(true);
+  });
+
+  test('rounds half away from zero (negative)', () => {
+    expect(new BigDecimal('-3.5').round().eq(new BigDecimal('-4'))).toBe(true);
+    expect(new BigDecimal('-3.6').round().eq(new BigDecimal('-4'))).toBe(true);
+  });
+
+  test('rounds toward zero when below half (negative)', () => {
+    expect(new BigDecimal('-3.4').round().eq(new BigDecimal('-3'))).toBe(true);
+    expect(new BigDecimal('-3.1').round().eq(new BigDecimal('-3'))).toBe(true);
+  });
+
+  test('integer returns itself', () => {
+    const d = new BigDecimal('5');
+    expect(d.round()).toBe(d); // same reference
+    expect(new BigDecimal('5').round().eq(5)).toBe(true);
+  });
+
+  test('zero returns itself', () => {
+    const d = new BigDecimal('0');
+    expect(d.round()).toBe(d);
+  });
+
+  test('NaN → NaN', () => {
+    expect(new BigDecimal(NaN).round().isNaN()).toBe(true);
+  });
+
+  test('Infinity → Infinity', () => {
+    expect(new BigDecimal(Infinity).round().toNumber()).toBe(Infinity);
+    expect(new BigDecimal(-Infinity).round().toNumber()).toBe(-Infinity);
+  });
+});
+
+// ================================================================
+// Static constants
+// ================================================================
+
+describe('Static constants', () => {
+  test('ZERO', () => {
+    expect(BigDecimal.ZERO.isZero()).toBe(true);
+    expect(BigDecimal.ZERO.eq(0)).toBe(true);
+  });
+
+  test('ONE', () => {
+    expect(BigDecimal.ONE.eq(1)).toBe(true);
+  });
+
+  test('TWO', () => {
+    expect(BigDecimal.TWO.eq(2)).toBe(true);
+  });
+
+  test('NEGATIVE_ONE', () => {
+    expect(BigDecimal.NEGATIVE_ONE.eq(-1)).toBe(true);
+  });
+
+  test('HALF', () => {
+    expect(BigDecimal.HALF.toString()).toBe('0.5');
+    expect(BigDecimal.HALF.eq(new BigDecimal('0.5'))).toBe(true);
+  });
+
+  test('NAN', () => {
+    expect(BigDecimal.NAN.isNaN()).toBe(true);
+  });
+
+  test('POSITIVE_INFINITY', () => {
+    expect(BigDecimal.POSITIVE_INFINITY.isFinite()).toBe(false);
+    expect(BigDecimal.POSITIVE_INFINITY.toNumber()).toBe(Infinity);
+  });
+
+  test('NEGATIVE_INFINITY', () => {
+    expect(BigDecimal.NEGATIVE_INFINITY.isFinite()).toBe(false);
+    expect(BigDecimal.NEGATIVE_INFINITY.toNumber()).toBe(-Infinity);
+    // isNegative works for -Infinity (significand < 0)
+    expect(BigDecimal.NEGATIVE_INFINITY.isNegative()).toBe(true);
+  });
+
+  test('PI has correct digits', () => {
+    expect(BigDecimal.PI.toString()).toMatch(/^3\.14159265358979323846/);
+  });
+
+  test('constants are frozen (immutable)', () => {
+    expect(Object.isFrozen(BigDecimal.ZERO)).toBe(true);
+    expect(Object.isFrozen(BigDecimal.ONE)).toBe(true);
+    expect(Object.isFrozen(BigDecimal.NAN)).toBe(true);
+    expect(Object.isFrozen(BigDecimal.PI)).toBe(false); // PI is lazy-computed, not frozen
+  });
+
+  test('precision getter/setter works', () => {
+    const original = BigDecimal.precision;
+    BigDecimal.precision = 100;
+    expect(BigDecimal.precision).toBe(100);
+    BigDecimal.precision = original; // restore
   });
 });

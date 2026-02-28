@@ -1,5 +1,5 @@
 import { Complex } from 'complex-esm';
-import { Decimal } from 'decimal.js';
+import { BigDecimal } from '../../big-decimal';
 
 import type { MathJsonExpression } from '../../math-json/types';
 
@@ -340,7 +340,7 @@ function serializeJsonFunction(
     if (num0 !== undefined) {
       if (typeof num0 === 'number')
         return serializeJsonNumber(ce, -num0, options);
-      if (num0 instanceof Decimal)
+      if (num0 instanceof BigDecimal)
         return serializeJsonNumber(ce, num0.neg(), options);
       if (num0 instanceof Complex)
         return serializeJsonNumber(ce, num0!.neg(), options);
@@ -590,7 +590,7 @@ function serializeRepeatingDecimals(
   while (fractionalPart.endsWith('0'))
     fractionalPart = fractionalPart.slice(0, -1);
 
-  if (typeof options.fractionalDigits === 'number') {
+  if (typeof options.fractionalDigits === 'number' && options.fractionalDigits > 0) {
     fractionalPart = fractionalPart.slice(0, options.fractionalDigits);
   }
 
@@ -601,7 +601,7 @@ function serializeRepeatingDecimals(
 
 function serializeJsonNumber(
   ce: ComputeEngine,
-  value: number | bigint | NumericValue | Decimal | Complex | Rational,
+  value: number | bigint | NumericValue | BigDecimal | Complex | Rational,
   options: Readonly<JsonSerializationOptions>,
   metadata?: Metadata
 ): MathJsonExpression {
@@ -709,7 +709,7 @@ function serializeJsonNumber(
   // Bignum
   //
   let num = '';
-  if (value instanceof Decimal) {
+  if (value instanceof BigDecimal) {
     let result: string | undefined;
     if (value.isNaN()) result = 'NaN';
     else if (!value.isFinite())
@@ -718,16 +718,20 @@ function serializeJsonNumber(
       // Use the number shorthand if the number can be represented as a machine number
       if (shorthandAllowed && isInMachineRange(value)) return value.toNumber();
 
-      // Use the scientific notation only if the resulting integer is not
-      // too big...
-      if (value.isInteger() && value.e < value.precision() + 4)
-        num = value.toFixed(0);
-      else {
+      // Use toFixed for small integers, toString (scientific notation) for large
+      if (value.isInteger()) {
+        // For very large/small integers, use toString which gives scientific notation
+        const absStr = (value.significand < 0n ? -value.significand : value.significand).toString();
+        const adjustedExp = absStr.length + value.exponent - 1;
+        num = adjustedExp > 20 ? value.toString() : value.toFixed(0);
+      } else {
         const precision = options.fractionalDigits;
         let s: string;
         if (precision === 'max') s = value.toString();
-        else if (precision === 'auto') s = value.toPrecision(ce.precision);
-        else s = value.toDecimalPlaces(precision).toString();
+        else if (precision === 'auto') s = value.toPrecision(ce.precision).toString();
+        else if (typeof precision === 'number' && precision < 0)
+          s = value.toPrecision(-precision).toString();
+        else s = value.toFixed(precision);
 
         num = serializeRepeatingDecimals(s, options);
 

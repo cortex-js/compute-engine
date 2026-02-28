@@ -1,5 +1,5 @@
 import { Complex } from 'complex-esm';
-import { Decimal } from 'decimal.js';
+import { BigDecimal } from '../big-decimal';
 
 import { isValidSymbol, validateSymbol } from '../math-json/symbols';
 import type { MathJsonNumberObject, MathJsonSymbol } from '../math-json/types';
@@ -55,7 +55,7 @@ type NumberHost = ComputeEngine & {
       | string
       | NumericValue
       | MathJsonNumberObject
-      | Decimal
+      | BigDecimal
       | Complex
       | Rational,
     options?: { metadata: Metadata; canonical: CanonicalOptions }
@@ -123,7 +123,7 @@ export function createNumberExpression(
     | string
     | NumericValue
     | MathJsonNumberObject
-    | Decimal
+    | BigDecimal
     | Complex
     | Rational,
   options?: { metadata: Metadata; canonical: CanonicalOptions }

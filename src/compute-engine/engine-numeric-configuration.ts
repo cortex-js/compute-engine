@@ -1,4 +1,4 @@
-import { Decimal } from 'decimal.js';
+import { BigDecimal } from '../big-decimal';
 
 import {
   DEFAULT_PRECISION,
@@ -8,24 +8,12 @@ import {
 
 import type { AngularUnit } from './types-definitions';
 
-type BignumConstants = {
-  nan: Decimal;
-  zero: Decimal;
-  one: Decimal;
-  two: Decimal;
-  half: Decimal;
-  pi: Decimal;
-  negativeOne: Decimal;
-};
-
 export class EngineNumericConfiguration {
-  private _bignum: Decimal.Constructor;
   private _precision: number;
   private _angularUnit: AngularUnit;
   private _tolerance: number;
-  private _bignumTolerance: Decimal;
-  private _negBignumTolerance: Decimal;
-  private _constants: BignumConstants;
+  private _bignumTolerance: BigDecimal;
+  private _negBignumTolerance: BigDecimal;
 
   constructor(options?: {
     precision?: number | 'machine';
@@ -35,17 +23,16 @@ export class EngineNumericConfiguration {
     let precision = options?.precision ?? DEFAULT_PRECISION;
     if (precision === 'machine') precision = Math.floor(MACHINE_PRECISION);
 
-    this._bignum = Decimal.clone({ precision });
     this._precision = precision;
+    BigDecimal.precision = precision;
     this._angularUnit = options?.angularUnit ?? 'rad';
 
     // Initialized before setTolerance() so fallback paths can use them.
     this._tolerance = DEFAULT_TOLERANCE;
-    this._bignumTolerance = new this._bignum(DEFAULT_TOLERANCE);
-    this._negBignumTolerance = new this._bignum(-DEFAULT_TOLERANCE);
+    this._bignumTolerance = new BigDecimal(DEFAULT_TOLERANCE);
+    this._negBignumTolerance = new BigDecimal(-DEFAULT_TOLERANCE);
 
     this.setTolerance(options?.tolerance ?? 'auto');
-    this._constants = this.computeConstants();
   }
 
   get precision(): number {
@@ -63,11 +50,10 @@ export class EngineNumericConfiguration {
       throw Error('Expected "machine" or a positive number');
 
     this._precision = Math.max(precision, MACHINE_PRECISION);
-    this._bignum = this._bignum.config({ precision: this._precision });
+    BigDecimal.precision = this._precision;
 
     // Keep historical behavior: changing precision resets tolerance.
     this.setTolerance('auto');
-    this._constants = this.computeConstants();
     return true;
   }
 
@@ -95,73 +81,54 @@ export class EngineNumericConfiguration {
       tolerance = Math.pow(10, -this._precision + 2);
 
     this._tolerance = tolerance;
-    this._bignumTolerance = this.bignum(tolerance);
-    this._negBignumTolerance = this.bignum(-tolerance);
+    this._bignumTolerance = new BigDecimal(tolerance);
+    this._negBignumTolerance = new BigDecimal(-tolerance);
   }
 
-  get bignumTolerance(): Decimal {
+  get bignumTolerance(): BigDecimal {
     return this._bignumTolerance;
   }
 
-  get negBignumTolerance(): Decimal {
+  get negBignumTolerance(): BigDecimal {
     return this._negBignumTolerance;
   }
 
-  get bignumNaN(): Decimal {
-    return this._constants.nan;
+  get bignumNaN(): BigDecimal {
+    return BigDecimal.NAN;
   }
 
-  get bignumZero(): Decimal {
-    return this._constants.zero;
+  get bignumZero(): BigDecimal {
+    return BigDecimal.ZERO;
   }
 
-  get bignumOne(): Decimal {
-    return this._constants.one;
+  get bignumOne(): BigDecimal {
+    return BigDecimal.ONE;
   }
 
-  get bignumTwo(): Decimal {
-    return this._constants.two;
+  get bignumTwo(): BigDecimal {
+    return BigDecimal.TWO;
   }
 
-  get bignumHalf(): Decimal {
-    return this._constants.half;
+  get bignumHalf(): BigDecimal {
+    return BigDecimal.HALF;
   }
 
-  get bignumPi(): Decimal {
-    return this._constants.pi;
+  get bignumPi(): BigDecimal {
+    return BigDecimal.PI;
   }
 
-  get bignumNegativeOne(): Decimal {
-    return this._constants.negativeOne;
+  get bignumNegativeOne(): BigDecimal {
+    return BigDecimal.NEGATIVE_ONE;
   }
 
-  refreshConstants(): void {
-    this._constants = this.computeConstants();
-  }
-
-  bignum(value: Decimal.Value | bigint): Decimal {
-    if (typeof value === 'bigint') return new this._bignum(value.toString());
+  bignum(value: string | number | bigint | BigDecimal): BigDecimal {
+    if (value instanceof BigDecimal) return value;
     try {
-      return new this._bignum(value);
+      return new BigDecimal(value);
     } catch (error) {
       if (error instanceof Error) console.error(error.message);
       else console.error(String(error));
     }
-    return new this._bignum(Number.NaN);
-  }
-
-  private computeConstants(): BignumConstants {
-    const negativeOne = this.bignum(-1);
-    const one = this.bignum(1);
-    const two = this.bignum(2);
-    return {
-      negativeOne,
-      nan: this.bignum(Number.NaN),
-      zero: this.bignum(0),
-      one,
-      two,
-      half: one.div(two),
-      pi: negativeOne.acos(),
-    };
+    return BigDecimal.NAN;
   }
 }

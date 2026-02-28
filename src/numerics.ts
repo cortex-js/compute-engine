@@ -12,8 +12,6 @@ export type {
   SmallInteger,
   Rational,
   BigNum,
-  BigNumFactory,
-  IBigNum,
 } from './compute-engine/numerics/types';
 
 //

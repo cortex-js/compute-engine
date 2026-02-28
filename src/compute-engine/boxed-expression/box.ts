@@ -1,5 +1,5 @@
 import { Complex } from 'complex-esm';
-import { Decimal } from 'decimal.js';
+import { BigDecimal } from '../../big-decimal';
 import type {
   ExpressionInput,
   Expression,
@@ -275,7 +275,7 @@ export function boxFunction(
     if (name === 'Negate' && ops.length === 1) {
       const op1 = ops[0];
       if (typeof op1 === 'number') return ce.number(-op1, options);
-      if (op1 instanceof Decimal) return ce.number(op1.neg(), options);
+      if (op1 instanceof BigDecimal) return ce.number(op1.neg(), options);
       const boxedop1 = ce.expr(op1, options);
       if (isNumber(boxedop1)) {
         const num = boxedop1.numericValue;
@@ -398,7 +398,7 @@ export function box(
   //
   if (
     typeof expr === 'number' ||
-    expr instanceof Decimal ||
+    expr instanceof BigDecimal ||
     expr instanceof Complex
   )
     return ce.number(expr);

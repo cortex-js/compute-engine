@@ -175,8 +175,11 @@ export function checkJson(
     const numEvalAuto = expr.N().toString();
 
     ce.precision = 'machine';
-    const evalMachine = expr.evaluate().toString();
-    const numEvalMachine = expr.N().toString();
+    // Re-box at machine precision so internal NumericValue representations
+    // use MachineNumericValue, not BigNumericValue from the higher-precision parse
+    const machExpr = ce.box(expr.json);
+    const evalMachine = machExpr.evaluate().toString();
+    const numEvalMachine = machExpr.N().toString();
 
     if (
       boxed === canonical &&

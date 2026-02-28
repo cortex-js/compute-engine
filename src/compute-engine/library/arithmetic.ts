@@ -1,4 +1,4 @@
-import { Decimal } from 'decimal.js';
+import { BigDecimal } from '../../big-decimal';
 
 import {
   checkType,
@@ -505,7 +505,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const ce = x.engine;
         if (bignumPreferred(ce))
           return ce.number(
-            run(bigFactorial2(ce, ce.bignum(n)), ce._timeRemaining)
+            run(bigFactorial2(ce.bignum(n)), ce._timeRemaining)
           );
 
         return ce.number(factorial2(n));
@@ -795,7 +795,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           (x) =>
             x.isZero()
               ? -Infinity
-              : !x.isNeg()
+              : !x.isNegative()
               ? x.ln()
               : engine.complex(x.toNumber()).log(),
           (z) => (z.isZero() ? NaN : z.log())
@@ -839,8 +839,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             (x) =>
               x.isZero()
                 ? -Infinity
-                : !x.isNeg()
-                ? Decimal.log10(x)
+                : !x.isNegative()
+                ? BigDecimal.log10(x)
                 : ce.complex(x.toNumber()).log().div(Math.LN10),
             (z) => (z.isZero() ? NaN : z.log().div(Math.LN10))
           );
@@ -912,7 +912,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             // In JavaScript, the % is remainder, not modulo
             // so adapt it to return a modulo
             (a, b) => ((a % b) + b) % b,
-            (a, b) => a.modulo(b)
+            (a, b) => a.mod(b)
           );
           return v?.sgn ?? undefined;
         }
@@ -925,7 +925,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // In JavaScript, the % is remainder, not modulo
           // so adapt it to return a modulo
           (a, b) => ((a % b) + b) % b,
-          (a, b) => a.modulo(b)
+          (a, b) => a.mod(b)
         ),
     },
 
@@ -1471,7 +1471,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
       value: (engine) =>
         engine.number(
-          bignumPreferred(engine) ? engine._BIGNUM_ONE.exp() : Math.exp(1)
+          bignumPreferred(engine) ? BigDecimal.ONE.exp() : Math.exp(1)
         ),
     },
 
@@ -2087,7 +2087,7 @@ function evaluateGcdLcm(
 
   const rest: Expression[] = [];
   if (bignumPreferred(ce)) {
-    let result: Decimal | null = null;
+    let result: BigDecimal | null = null;
     for (const op of ops) {
       if (result === null) {
         result = asBignum(op);

@@ -1,5 +1,5 @@
-import { Decimal } from 'decimal.js';
-import type { BigNumFactory, SmallInteger } from '../numerics/types';
+import { BigDecimal } from '../../big-decimal';
+import type { SmallInteger } from '../numerics/types';
 import { NumericValue, NumericValueData } from './types';
 import type { MathJsonExpression } from '../../math-json/types';
 import { numberToString } from '../numerics/strings';
@@ -13,26 +13,20 @@ export class MachineNumericValue extends NumericValue {
   // synonymous with 're'; the JavasScript number representation of the 'real' part.
   decimal: number;
 
-  bignum: BigNumFactory;
-
-  constructor(
-    value: number | Decimal | NumericValueData,
-    bignum: BigNumFactory
-  ) {
+  constructor(value: number | BigDecimal | NumericValueData) {
     super();
-    this.bignum = bignum;
 
     if (typeof value === 'number') {
       this.decimal = value;
       this.im = 0;
-    } else if (value instanceof Decimal) {
+    } else if (value instanceof BigDecimal) {
       this.decimal = value.toNumber();
       this.im = 0;
     } else {
       const decimal =
         value.re === undefined
           ? 0
-          : value.re instanceof Decimal
+          : value.re instanceof BigDecimal
           ? value.re.toNumber()
           : value.re;
 
@@ -48,7 +42,7 @@ export class MachineNumericValue extends NumericValue {
   }
 
   private _makeExact(value: number | bigint): ExactNumericValue {
-    return new ExactNumericValue(value, (x) => this.clone(x), this.bignum);
+    return new ExactNumericValue(value, (x) => this.clone(x));
   }
 
   get type(): NumericPrimitiveType {
@@ -108,15 +102,15 @@ export class MachineNumericValue extends NumericValue {
     return `(${numberToString(this.decimal)} ${im})`;
   }
 
-  clone(value: number | Decimal | NumericValueData) {
-    return new MachineNumericValue(value, this.bignum);
+  clone(value: number | BigDecimal | NumericValueData) {
+    return new MachineNumericValue(value);
   }
 
   get re(): number {
     return this.decimal;
   }
 
-  get bignumRe(): Decimal | undefined {
+  get bignumRe(): BigDecimal | undefined {
     return undefined;
   }
 
@@ -148,9 +142,9 @@ export class MachineNumericValue extends NumericValue {
     return this.im === 0 && this.decimal === 0;
   }
 
-  isZeroWithTolerance(tolerance: number | Decimal): boolean {
+  isZeroWithTolerance(tolerance: number | BigDecimal): boolean {
     if (this.im !== 0) return false;
-    const tol = tolerance instanceof Decimal ? tolerance.toNumber() : tolerance;
+    const tol = tolerance instanceof BigDecimal ? tolerance.toNumber() : tolerance;
     return Math.abs(this.decimal) < tol;
   }
 
@@ -208,7 +202,7 @@ export class MachineNumericValue extends NumericValue {
     return this.add(other.neg());
   }
 
-  mul(other: number | Decimal | NumericValue): NumericValue {
+  mul(other: number | BigDecimal | NumericValue): NumericValue {
     if (this.isNaN) return this._makeExact(NaN);
     if (this.isZero) {
       if (
@@ -222,7 +216,7 @@ export class MachineNumericValue extends NumericValue {
       return this;
     }
 
-    if (other instanceof Decimal) other = other.toNumber();
+    if (other instanceof BigDecimal) other = other.toNumber();
     if (other === 1) return this;
     if (other === -1) return this.neg();
     if (other === 0) {
@@ -238,7 +232,7 @@ export class MachineNumericValue extends NumericValue {
     // We need to ensure that non-exact propagates, so clone value in case
     // it was an ExactNumericValue
     if (this.isOne) {
-      if (typeof other === 'number' || other instanceof Decimal)
+      if (typeof other === 'number' || other instanceof BigDecimal)
         return this.clone(other);
       return this.clone({ re: other.bignumRe ?? other.re, im: other.im });
     }

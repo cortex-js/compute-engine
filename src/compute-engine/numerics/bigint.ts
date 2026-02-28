@@ -1,6 +1,6 @@
-import { Decimal } from 'decimal.js';
+import { BigDecimal } from '../../big-decimal';
 
-export function bigint(a: Decimal | number | bigint | string): bigint | null {
+export function bigint(a: BigDecimal | number | bigint | string): bigint | null {
   if (typeof a === 'bigint') return a;
 
   if (typeof a === 'number') {
@@ -14,7 +14,7 @@ export function bigint(a: Decimal | number | bigint | string): bigint | null {
     return bigint(a.toString());
   }
 
-  if (a instanceof Decimal) {
+  if (a instanceof BigDecimal) {
     if (!a.isInteger()) return null;
     // Use toFixed(0) to get the full integer representation without
     // scientific notation (which would have a decimal point like "3.14e+10")

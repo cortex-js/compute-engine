@@ -87,7 +87,7 @@ asset.
 ### 2.6 Numeric Value System
 
 The three-tier numeric precision model (machine float, exact rational, arbitrary
-precision via Decimal.js) is well-designed. `NumericValue` encapsulates this
+precision via BigDecimal) is well-designed. `NumericValue` encapsulates this
 cleanly, and the promotion/demotion logic handles edge cases correctly.
 
 ---

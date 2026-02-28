@@ -21,7 +21,7 @@ describe('SOLVING A QUADRATIC EQUATION', () => {
           num: 7.499999997187500002109374998022460939576416013289031985174980160218871836088104540722514735e-8,
         },
         {
-          num: -200.0000000749999999718750000210937499802246093957641601328903198517498016021887183608810454072251474,
+          num: -200.00000007499999997187500002109374998022460939576416013289031985174980160218871836088104540722514735,
         },
       ]
     `);
@@ -158,7 +158,7 @@ describe('expr.solve()', () => {
         ],
         [
           Complex,
-          -0,
+          0,
           -1,
         ],
       ]
@@ -849,10 +849,7 @@ describe('SOLVING SYSTEMS OF LINEAR EQUATIONS', () => {
     const z = ce.symbol('z');
     const eq1 = result.x.add(result.y).add(z).simplify();
     expect(eq1.json).toBe(6);
-    const eq2 = result.x
-      .add(result.y.mul(2))
-      .add(z.mul(3))
-      .simplify();
+    const eq2 = result.x.add(result.y.mul(2)).add(z.mul(3)).simplify();
     expect(eq2.json).toBe(10);
   });
 
@@ -928,7 +925,9 @@ describe('SOLVING NON-LINEAR POLYNOMIAL SYSTEMS', () => {
     const e = expr('\\begin{cases}xy=10\\\\x+y=1\\end{cases}');
     const result = e.solve(['x', 'y']);
     // May return null or empty array depending on implementation
-    expect(result === null || (Array.isArray(result) && result.length === 0)).toBe(true);
+    expect(
+      result === null || (Array.isArray(result) && result.length === 0)
+    ).toBe(true);
   });
 
   // Substitution method tests
@@ -970,7 +969,9 @@ describe('SOLVING NON-LINEAR POLYNOMIAL SYSTEMS', () => {
 describe('SOLVING LINEAR INEQUALITY SYSTEMS', () => {
   // Test basic triangle feasible region: x >= 0, y >= 0, x + y <= 10
   test('should solve simple triangle: x>=0, y>=0, x+y<=10', () => {
-    const e = expr('\\begin{cases}x\\geq 0\\\\y\\geq 0\\\\x+y\\leq 10\\end{cases}');
+    const e = expr(
+      '\\begin{cases}x\\geq 0\\\\y\\geq 0\\\\x+y\\leq 10\\end{cases}'
+    );
     const result = e.solve(['x', 'y']) as Array<Record<string, any>>;
     expect(result).not.toBeNull();
     expect(Array.isArray(result)).toBe(true);
@@ -990,7 +991,9 @@ describe('SOLVING LINEAR INEQUALITY SYSTEMS', () => {
 
   // Test square feasible region: 0 <= x <= 5, 0 <= y <= 5
   test('should solve square region: 0<=x<=5, 0<=y<=5', () => {
-    const e = expr('\\begin{cases}x\\geq 0\\\\x\\leq 5\\\\y\\geq 0\\\\y\\leq 5\\end{cases}');
+    const e = expr(
+      '\\begin{cases}x\\geq 0\\\\x\\leq 5\\\\y\\geq 0\\\\y\\leq 5\\end{cases}'
+    );
     const result = e.solve(['x', 'y']) as Array<Record<string, any>>;
     expect(result).not.toBeNull();
     expect(Array.isArray(result)).toBe(true);
@@ -1010,7 +1013,9 @@ describe('SOLVING LINEAR INEQUALITY SYSTEMS', () => {
 
   // Test with coefficients: 2x + 3y <= 12, x >= 0, y >= 0
   test('should solve with coefficients: 2x+3y<=12, x>=0, y>=0', () => {
-    const e = expr('\\begin{cases}2x+3y\\leq 12\\\\x\\geq 0\\\\y\\geq 0\\end{cases}');
+    const e = expr(
+      '\\begin{cases}2x+3y\\leq 12\\\\x\\geq 0\\\\y\\geq 0\\end{cases}'
+    );
     const result = e.solve(['x', 'y']) as Array<Record<string, any>>;
     expect(result).not.toBeNull();
     expect(Array.isArray(result)).toBe(true);
@@ -1039,7 +1044,9 @@ describe('SOLVING LINEAR INEQUALITY SYSTEMS', () => {
 
   // Test pentagon with multiple constraints
   test('should solve pentagon: x>=0, y>=0, x<=4, y<=4, x+y<=6', () => {
-    const e = expr('\\begin{cases}x\\geq 0\\\\y\\geq 0\\\\x\\leq 4\\\\y\\leq 4\\\\x+y\\leq 6\\end{cases}');
+    const e = expr(
+      '\\begin{cases}x\\geq 0\\\\y\\geq 0\\\\x\\leq 4\\\\y\\leq 4\\\\x+y\\leq 6\\end{cases}'
+    );
     const result = e.solve(['x', 'y']) as Array<Record<string, any>>;
     expect(result).not.toBeNull();
     expect(Array.isArray(result)).toBe(true);
@@ -1060,14 +1067,18 @@ describe('SOLVING LINEAR INEQUALITY SYSTEMS', () => {
 
   // Test infeasible region (no solution)
   test('should return null for infeasible system: x>=5, x<=2', () => {
-    const e = expr('\\begin{cases}x\\geq 5\\\\x\\leq 2\\\\y\\geq 0\\end{cases}');
+    const e = expr(
+      '\\begin{cases}x\\geq 5\\\\x\\leq 2\\\\y\\geq 0\\end{cases}'
+    );
     const result = e.solve(['x', 'y']);
     expect(result).toBeNull();
   });
 
   // Test non-linear inequality returns null
   test('should return null for non-linear inequalities: x^2+y<=10', () => {
-    const e = expr('\\begin{cases}x^2+y\\leq 10\\\\x\\geq 0\\\\y\\geq 0\\end{cases}');
+    const e = expr(
+      '\\begin{cases}x^2+y\\leq 10\\\\x\\geq 0\\\\y\\geq 0\\end{cases}'
+    );
     const result = e.solve(['x', 'y']);
     expect(result).toBeNull();
   });

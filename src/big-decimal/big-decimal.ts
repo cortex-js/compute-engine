@@ -11,7 +11,88 @@
  *  - +Infinity: { significand: 1n, exponent: Infinity }
  *  - -Infinity: { significand: -1n, exponent: Infinity }
  */
+
+import { bigintDigits, pow10, PI_DIGITS } from './utils';
+
+export { PI_DIGITS };
+
 export class BigDecimal {
+  /** Working precision (significant digits) for inexact operations like division. */
+  static precision: number = 50;
+
+  // ---------- Static constants ----------
+
+  static readonly ZERO: BigDecimal = Object.freeze(
+    Object.assign(Object.create(BigDecimal.prototype), {
+      significand: 0n,
+      exponent: 0,
+    })
+  );
+  static readonly ONE: BigDecimal = Object.freeze(
+    Object.assign(Object.create(BigDecimal.prototype), {
+      significand: 1n,
+      exponent: 0,
+    })
+  );
+  static readonly TWO: BigDecimal = Object.freeze(
+    Object.assign(Object.create(BigDecimal.prototype), {
+      significand: 2n,
+      exponent: 0,
+    })
+  );
+  static readonly NEGATIVE_ONE: BigDecimal = Object.freeze(
+    Object.assign(Object.create(BigDecimal.prototype), {
+      significand: -1n,
+      exponent: 0,
+    })
+  );
+  static readonly HALF: BigDecimal = Object.freeze(
+    Object.assign(Object.create(BigDecimal.prototype), {
+      significand: 5n,
+      exponent: -1,
+    })
+  );
+  static readonly NAN: BigDecimal = Object.freeze(
+    Object.assign(Object.create(BigDecimal.prototype), {
+      significand: 0n,
+      exponent: NaN,
+    })
+  );
+  static readonly POSITIVE_INFINITY: BigDecimal = Object.freeze(
+    Object.assign(Object.create(BigDecimal.prototype), {
+      significand: 1n,
+      exponent: Infinity,
+    })
+  );
+  static readonly NEGATIVE_INFINITY: BigDecimal = Object.freeze(
+    Object.assign(Object.create(BigDecimal.prototype), {
+      significand: -1n,
+      exponent: Infinity,
+    })
+  );
+
+  /** Full-precision PI (1100+ digits) */
+  private static _piFullPrecision: BigDecimal | null = null;
+  /** PI rounded to working precision */
+  private static _piCache: BigDecimal | null = null;
+  private static _piCachePrecision: number = 0;
+
+  /** PI to current working precision. */
+  static get PI(): BigDecimal {
+    if (BigDecimal._piFullPrecision === null) {
+      BigDecimal._piFullPrecision = new BigDecimal(
+        PI_DIGITS[0] + '.' + PI_DIGITS.slice(1)
+      );
+    }
+    // Return PI with guard digits for intermediate computation accuracy
+    const prec = BigDecimal.precision;
+    if (BigDecimal._piCache === null || BigDecimal._piCachePrecision !== prec) {
+      BigDecimal._piCache = BigDecimal._piFullPrecision.toPrecision(prec + 4);
+      BigDecimal._piCachePrecision = prec;
+    }
+    return BigDecimal._piCache;
+  }
+
   readonly significand: bigint;
   readonly exponent: number;
 
@@ -58,14 +139,14 @@ export class BigDecimal {
     return this.isFinite() && this.exponent >= 0;
   }
 
-  /** True when significand > 0 and the value is finite. */
+  /** True when significand > 0 (including positive infinity). */
   isPositive(): boolean {
-    return this.isFinite() && this.significand > 0n;
+    return this.significand > 0n;
   }
 
-  /** True when significand < 0 and the value is finite. */
+  /** True when significand < 0 (including negative infinity). */
   isNegative(): boolean {
-    return this.isFinite() && this.significand < 0n;
+    return this.significand < 0n;
   }
 
   // ---------- Comparison methods ----------
@@ -75,46 +156,101 @@ export class BigDecimal {
    * Returns -1 if this < other, 0 if equal, 1 if this > other.
    * NaN compared to anything returns 0 (but eq returns false for NaN).
    */
-  cmp(other: BigDecimal): -1 | 0 | 1 {
-    // NaN compared to anything → 0
-    if (this.isNaN() || other.isNaN()) return 0;
-
-    // Handle infinities
-    const thisInf = !this.isFinite();
-    const otherInf = !other.isFinite();
-
-    if (thisInf || otherInf) {
-      if (thisInf && otherInf) {
-        // Both infinite: compare signs
-        if (this.significand === other.significand) return 0;
-        return this.significand > other.significand ? 1 : -1;
+  cmp(other: BigDecimal | number): -1 | 0 | 1 {
+    if (typeof other === 'number') {
+      if (Number.isNaN(other)) return 0;
+      const thisExp = this.exponent;
+      if (Number.isNaN(thisExp)) return 0;
+      if (other === 0) {
+        if (this.significand === 0n) return 0;
+        return this.significand > 0n ? 1 : -1;
       }
-      if (thisInf) return this.significand > 0n ? 1 : -1;
-      // otherInf
-      return other.significand > 0n ? -1 : 1;
+      if (!Number.isFinite(thisExp)) {
+        if (other === Infinity) return this.significand > 0n ? 0 : -1;
+        if (other === -Infinity) return this.significand < 0n ? 0 : 1;
+        return this.significand > 0n ? 1 : -1;
+      }
+      if (this.significand === 0n) return other > 0 ? -1 : 1;
+      // Fast-path: other is ±Infinity, this is finite and non-zero
+      if (other === Infinity) return -1;
+      if (other === -Infinity) return 1;
+      // Different signs
+      if ((this.significand > 0n) !== (other > 0)) return this.significand > 0n ? 1 : -1;
+      // Small safe integer with non-negative exponent: compare directly
+      if (Number.isInteger(other) && thisExp >= 0 && thisExp <= 15) {
+        const thisVal = this.significand * pow10(thisExp);
+        const otherVal = BigInt(other);
+        if (thisVal < otherVal) return -1;
+        if (thisVal > otherVal) return 1;
+        return 0;
+      }
+      other = new BigDecimal(other);
     }
 
-    // Handle zeros
-    const thisZero = this.isZero();
-    const otherZero = other.isZero();
-    if (thisZero && otherZero) return 0;
-    if (thisZero) return other.significand > 0n ? -1 : 1;
-    if (otherZero) return this.significand > 0n ? 1 : -1;
+    // Fast path: both finite, non-NaN, non-zero (the overwhelmingly common case)
+    const thisExp = this.exponent;
+    const otherExp = other.exponent;
+    const thisSig = this.significand;
+    const otherSig = other.significand;
 
-    // Different signs: quick check
-    if (this.significand > 0n && other.significand < 0n) return 1;
-    if (this.significand < 0n && other.significand > 0n) return -1;
+    // NaN check — exponent is NaN only for NaN values
+    if (thisExp !== thisExp || otherExp !== otherExp) return 0; // NaN !== NaN trick
 
-    // Same sign: align exponents and compare significands
-    let aSig = this.significand;
-    let bSig = other.significand;
+    // Finite check (handles both Infinity and NaN exponents)
+    if (!Number.isFinite(thisExp) || !Number.isFinite(otherExp)) {
+      if (!Number.isFinite(thisExp) && !Number.isFinite(otherExp)) {
+        if (thisSig === otherSig) return 0;
+        return thisSig > otherSig ? 1 : -1;
+      }
+      if (!Number.isFinite(thisExp)) return thisSig > 0n ? 1 : -1;
+      return otherSig > 0n ? -1 : 1;
+    }
 
-    if (this.exponent < other.exponent) {
-      // Scale other's significand up
-      bSig = bSig * 10n ** BigInt(other.exponent - this.exponent);
-    } else if (this.exponent > other.exponent) {
-      // Scale this significand up
-      aSig = aSig * 10n ** BigInt(this.exponent - other.exponent);
+    // Zero checks
+    if (thisSig === 0n) {
+      if (otherSig === 0n) return 0;
+      return otherSig > 0n ? -1 : 1;
+    }
+    if (otherSig === 0n) return thisSig > 0n ? 1 : -1;
+
+    // Different signs
+    if (thisSig > 0n && otherSig < 0n) return 1;
+    if (thisSig < 0n && otherSig > 0n) return -1;
+
+    // Same exponent: direct significand comparison (avoids bigintDigits)
+    if (thisExp === otherExp) {
+      if (thisSig < otherSig) return -1;
+      if (thisSig > otherSig) return 1;
+      return 0;
+    }
+
+    // Same sign, different exponent: compare by order of magnitude
+    const thisDigits = bigintDigits(thisSig);
+    const otherDigits = bigintDigits(otherSig);
+
+    const thisMag = thisDigits + thisExp;
+    const otherMag = otherDigits + otherExp;
+
+    if (thisMag !== otherMag) {
+      const sign = thisSig > 0n ? 1 : -1;
+      return (thisMag > otherMag ? sign : -sign) as -1 | 0 | 1;
+    }
+
+    // Same order of magnitude: align exponents and compare significands
+    let aSig = thisSig;
+    let bSig = otherSig;
+    const diff = Math.abs(thisExp - otherExp);
+
+    if (diff > 1000) {
+      const aDigits = thisDigits; // already computed above
+      const bDigits = otherDigits;
+      const target = Math.max(aDigits, bDigits) + 1;
+      if (aDigits < target) aSig = aSig * pow10(target - aDigits);
+      if (bDigits < target) bSig = bSig * pow10(target - bDigits);
+    } else if (thisExp < otherExp) {
+      bSig = bSig * pow10(diff);
+    } else {
+      aSig = aSig * pow10(diff);
     }
 
     if (aSig < bSig) return -1;
@@ -127,87 +263,128 @@ export class BigDecimal {
    * NaN === NaN → false (standard NaN semantics).
    */
   eq(other: BigDecimal | number): boolean {
-    const o = other instanceof BigDecimal ? other : new BigDecimal(other);
-    // NaN !== NaN
-    if (this.isNaN() || o.isNaN()) return false;
-    return this.cmp(o) === 0;
+    if (typeof other === 'number') {
+      if (Number.isNaN(other) || this.exponent !== this.exponent) return false;
+      if (other === 0) return this.significand === 0n;
+      if (other === 1) return this.significand === 1n && this.exponent === 0;
+      if (other === -1) return this.significand === -1n && this.exponent === 0;
+      // Integer fast path: compare directly when possible
+      if (Number.isInteger(other) && Number.isFinite(this.exponent) && this.exponent >= 0 && this.exponent <= 15) {
+        return this.significand * pow10(this.exponent) === BigInt(other);
+      }
+      return this.cmp(other) === 0;
+    }
+    // Both normalized → equal values have identical (significand, exponent)
+    // NaN check: NaN exponent (NaN !== NaN)
+    if (this.exponent !== this.exponent || other.exponent !== other.exponent) return false;
+    return this.significand === other.significand && this.exponent === other.exponent;
   }
 
   /** Returns true if this value is strictly less than other. */
   lt(other: BigDecimal | number): boolean {
-    const o = other instanceof BigDecimal ? other : new BigDecimal(other);
-    if (this.isNaN() || o.isNaN()) return false;
-    return this.cmp(o) === -1;
+    return this.cmp(other) === -1;
   }
 
   /** Returns true if this value is less than or equal to other. */
   lte(other: BigDecimal | number): boolean {
-    const o = other instanceof BigDecimal ? other : new BigDecimal(other);
-    if (this.isNaN() || o.isNaN()) return false;
-    const c = this.cmp(o);
+    // NaN guard needed: cmp returns 0 for NaN, which would match c === 0
+    if (this.exponent !== this.exponent) return false; // NaN check
+    if (typeof other === 'number' ? Number.isNaN(other) : other.exponent !== other.exponent) return false;
+    const c = this.cmp(other);
     return c === -1 || c === 0;
   }
 
   /** Returns true if this value is strictly greater than other. */
   gt(other: BigDecimal | number): boolean {
-    const o = other instanceof BigDecimal ? other : new BigDecimal(other);
-    if (this.isNaN() || o.isNaN()) return false;
-    return this.cmp(o) === 1;
+    return this.cmp(other) === 1;
   }
 
   /** Returns true if this value is greater than or equal to other. */
   gte(other: BigDecimal | number): boolean {
-    const o = other instanceof BigDecimal ? other : new BigDecimal(other);
-    if (this.isNaN() || o.isNaN()) return false;
-    const c = this.cmp(o);
+    // NaN guard needed: cmp returns 0 for NaN, which would match c === 0
+    if (this.exponent !== this.exponent) return false; // NaN check
+    if (typeof other === 'number' ? Number.isNaN(other) : other.exponent !== other.exponent) return false;
+    const c = this.cmp(other);
     return c === 1 || c === 0;
   }
 
   // ---------- Arithmetic methods ----------
 
   /**
-   * Add this value to another. Exact — no precision loss.
-   * Aligns exponents, adds significands.
+   * Add this value to another.
+   * Aligns exponents, adds significands. The result is exact.
    */
-  add(other: BigDecimal): BigDecimal {
-    // NaN propagation
-    if (this.isNaN() || other.isNaN()) return new BigDecimal(NaN);
+  add(other: BigDecimal | number): BigDecimal {
+    if (typeof other === 'number') other = new BigDecimal(other);
 
-    // Infinity cases
-    const thisInf = !this.isFinite();
-    const otherInf = !other.isFinite();
+    const thisExp = this.exponent;
+    const otherExp = other.exponent;
 
-    if (thisInf && otherInf) {
-      // Inf + (-Inf) → NaN
-      if (this.significand !== other.significand) return new BigDecimal(NaN);
-      // Same sign infinity
-      return new BigDecimal(this.significand > 0n ? Infinity : -Infinity);
+    // NaN/Infinity: exponents are NaN or ±Infinity; finite exponents go to fast path
+    if (Number.isFinite(thisExp) && Number.isFinite(otherExp)) {
+      if (thisExp === otherExp)
+        return fromRaw(this.significand + other.significand, thisExp);
+
+      const diff = thisExp - otherExp;
+      if (diff > 0)
+        return fromRaw(this.significand * pow10(diff) + other.significand, otherExp);
+      return fromRaw(this.significand + other.significand * pow10(-diff), thisExp);
     }
-    if (thisInf) return new BigDecimal(this.significand > 0n ? Infinity : -Infinity);
-    if (otherInf) return new BigDecimal(other.significand > 0n ? Infinity : -Infinity);
 
-    // Align exponents: use the smaller exponent
-    const minExp = Math.min(this.exponent, other.exponent);
-    const aSig = this.significand * 10n ** BigInt(this.exponent - minExp);
-    const bSig = other.significand * 10n ** BigInt(other.exponent - minExp);
+    // Slow path: handle NaN, Infinity
+    if (thisExp !== thisExp || otherExp !== otherExp) return BigDecimal.NAN;
 
-    return fromRaw(aSig + bSig, minExp);
+    const thisInf = !Number.isFinite(thisExp);
+    const otherInf = !Number.isFinite(otherExp);
+    if (thisInf && otherInf) {
+      if (this.significand !== other.significand) return BigDecimal.NAN;
+      return this.significand > 0n ? BigDecimal.POSITIVE_INFINITY : BigDecimal.NEGATIVE_INFINITY;
+    }
+    if (thisInf) return this.significand > 0n ? BigDecimal.POSITIVE_INFINITY : BigDecimal.NEGATIVE_INFINITY;
+    return other.significand > 0n ? BigDecimal.POSITIVE_INFINITY : BigDecimal.NEGATIVE_INFINITY;
   }
 
   /**
-   * Subtract other from this. Exact — no precision loss.
+   * Subtract other from this.
+   * Aligns exponents, subtracts significands. The result is exact.
    */
-  sub(other: BigDecimal): BigDecimal {
-    return this.add(other.neg());
+  sub(other: BigDecimal | number): BigDecimal {
+    if (typeof other === 'number') other = new BigDecimal(other);
+
+    const thisExp = this.exponent;
+    const otherExp = other.exponent;
+
+    if (Number.isFinite(thisExp) && Number.isFinite(otherExp)) {
+      if (thisExp === otherExp)
+        return fromRaw(this.significand - other.significand, thisExp);
+
+      const diff = thisExp - otherExp;
+      if (diff > 0)
+        return fromRaw(this.significand * pow10(diff) - other.significand, otherExp);
+      return fromRaw(this.significand - other.significand * pow10(-diff), thisExp);
+    }
+
+    // Slow path: handle NaN, Infinity
+    if (thisExp !== thisExp || otherExp !== otherExp) return BigDecimal.NAN;
+
+    const thisInf = !Number.isFinite(thisExp);
+    const otherInf = !Number.isFinite(otherExp);
+    if (thisInf && otherInf) {
+      if (this.significand === other.significand) return BigDecimal.NAN;
+      return this.significand > 0n ? BigDecimal.POSITIVE_INFINITY : BigDecimal.NEGATIVE_INFINITY;
+    }
+    if (thisInf) return this.significand > 0n ? BigDecimal.POSITIVE_INFINITY : BigDecimal.NEGATIVE_INFINITY;
+    return other.significand > 0n ? BigDecimal.NEGATIVE_INFINITY : BigDecimal.POSITIVE_INFINITY;
   }
 
   /**
-   * Multiply this value by another. Exact — no precision loss.
-   * Multiplies significands, adds exponents.
+   * Multiply this value by another.
+   * Multiplies significands, adds exponents. The result is exact.
    */
-  mul(other: BigDecimal): BigDecimal {
+  mul(other: BigDecimal | number): BigDecimal {
+    if (typeof other === 'number') other = new BigDecimal(other);
     // NaN propagation
-    if (this.isNaN() || other.isNaN()) return new BigDecimal(NaN);
+    if (this.isNaN() || other.isNaN()) return BigDecimal.NAN;
 
     // Infinity * 0 → NaN, 0 * Infinity → NaN
     const thisInf = !this.isFinite();
@@ -215,13 +392,13 @@ export class BigDecimal {
 
     if (thisInf || otherInf) {
       // Check for Infinity * 0 or 0 * Infinity
-      if (thisInf && other.isZero()) return new BigDecimal(NaN);
-      if (otherInf && this.isZero()) return new BigDecimal(NaN);
+      if (thisInf && other.isZero()) return BigDecimal.NAN;
+      if (otherInf && this.isZero()) return BigDecimal.NAN;
 
       // Infinity * Infinity or Infinity * finite (non-zero)
       const signA = this.significand > 0n ? 1n : -1n;
       const signB = other.significand > 0n ? 1n : -1n;
-      return new BigDecimal(signA * signB > 0n ? Infinity : -Infinity);
+      return signA * signB > 0n ? BigDecimal.POSITIVE_INFINITY : BigDecimal.NEGATIVE_INFINITY;
     }
 
     return fromRaw(this.significand * other.significand, this.exponent + other.exponent);
@@ -231,10 +408,10 @@ export class BigDecimal {
    * Negate this value. Zero.neg() → Zero.
    */
   neg(): BigDecimal {
-    if (this.isNaN()) return new BigDecimal(NaN);
+    if (this.isNaN()) return BigDecimal.NAN;
     if (!this.isFinite())
-      return new BigDecimal(this.significand > 0n ? -Infinity : Infinity);
-    if (this.isZero()) return new BigDecimal(0);
+      return this.significand > 0n ? BigDecimal.NEGATIVE_INFINITY : BigDecimal.POSITIVE_INFINITY;
+    if (this.isZero()) return BigDecimal.ZERO;
     return fromRaw(-this.significand, this.exponent);
   }
 
@@ -242,10 +419,310 @@ export class BigDecimal {
    * Absolute value. If already non-negative, returns this.
    */
   abs(): BigDecimal {
-    if (this.isNaN()) return new BigDecimal(NaN);
-    if (!this.isFinite()) return new BigDecimal(Infinity);
+    if (this.isNaN()) return BigDecimal.NAN;
+    if (!this.isFinite()) return BigDecimal.POSITIVE_INFINITY;
     if (this.significand >= 0n) return this;
     return fromRaw(-this.significand, this.exponent);
+  }
+
+  /**
+   * Round toward -Infinity.
+   * `3.7` → `3`, `-3.7` → `-4`.
+   * For integers returns this. NaN/Infinity → return this.
+   */
+  floor(): BigDecimal {
+    if (this.isNaN()) return BigDecimal.NAN;
+    if (!this.isFinite())
+      return this.significand > 0n ? BigDecimal.POSITIVE_INFINITY : BigDecimal.NEGATIVE_INFINITY;
+    if (this.isZero()) return this;
+    if (this.exponent >= 0) return this; // already integer
+
+    // Invariant: exponent < 0 guarantees a fractional part exists (normalization
+    // strips trailing zeros, so the significand is never divisible by
+    // 10^(-exponent)). Therefore trunc() always changes the value.
+    // trunc() rounds toward zero. For negative values, toward zero is "up",
+    // so we subtract 1 to go toward -Infinity.
+    const t = this.trunc();
+    if (this.significand < 0n) return t.sub(fromRaw(1n, 0));
+    return t;
+  }
+
+  /**
+   * Round toward +Infinity.
+   * `3.2` → `4`, `-3.2` → `-3`.
+   * For integers returns this. NaN/Infinity → return this.
+   */
+  ceil(): BigDecimal {
+    if (this.isNaN()) return BigDecimal.NAN;
+    if (!this.isFinite())
+      return this.significand > 0n ? BigDecimal.POSITIVE_INFINITY : BigDecimal.NEGATIVE_INFINITY;
+    if (this.isZero()) return this;
+    if (this.exponent >= 0) return this; // already integer
+
+    // Invariant: exponent < 0 guarantees a fractional part exists (normalization
+    // strips trailing zeros, so the significand is never divisible by
+    // 10^(-exponent)). Therefore trunc() always changes the value.
+    // trunc() rounds toward zero. For positive values, toward zero is "down",
+    // so we add 1 to go toward +Infinity.
+    const t = this.trunc();
+    if (this.significand > 0n) return t.add(fromRaw(1n, 0));
+    return t;
+  }
+
+  /**
+   * Round half away from zero (standard math rounding).
+   * `3.5` → `4`, `-3.5` → `-4`, `3.4` → `3`, `3.6` → `4`.
+   * For integers returns this. NaN/Infinity → return this.
+   */
+  round(): BigDecimal {
+    if (this.isNaN()) return BigDecimal.NAN;
+    if (!this.isFinite())
+      return this.significand > 0n ? BigDecimal.POSITIVE_INFINITY : BigDecimal.NEGATIVE_INFINITY;
+    if (this.isZero()) return this;
+    if (this.exponent >= 0) return this; // already integer
+
+    // Add 0.5 for positive, subtract 0.5 for negative, then trunc
+    const half = fromRaw(5n, -1); // 0.5
+    if (this.significand > 0n) {
+      return this.add(half).trunc();
+    }
+    return this.sub(half).trunc();
+  }
+
+  /**
+   * Truncate toward zero, removing the fractional part.
+   * For integers (exponent >= 0) returns this.
+   * NaN → NaN, +/-Infinity → +/-Infinity.
+   */
+  trunc(): BigDecimal {
+    if (this.isNaN()) return BigDecimal.NAN;
+    if (!this.isFinite())
+      return this.significand > 0n ? BigDecimal.POSITIVE_INFINITY : BigDecimal.NEGATIVE_INFINITY;
+    if (this.isZero()) return this;
+
+    // If exponent >= 0, value is already an integer
+    if (this.exponent >= 0) return this;
+
+    // exponent < 0: truncate fractional digits by dividing significand
+    // BigInt division truncates toward zero, which is exactly what trunc() needs
+    const divisor = pow10(-this.exponent);
+    const truncSig = this.significand / divisor;
+
+    if (truncSig === 0n) return fromRaw(0n, 0);
+    return fromRaw(truncSig, 0);
+  }
+
+  /**
+   * Divide this value by another.
+   * Uses `BigDecimal.precision` to determine significant digits for inexact results.
+   *
+   * Special cases:
+   *  - NaN / x → NaN, x / NaN → NaN
+   *  - nonzero / 0 → +/-Infinity (matching Decimal.js behavior)
+   *  - 0 / 0 → NaN
+   *  - Inf / finite → Inf (correct sign)
+   *  - finite / Inf → 0
+   *  - Inf / Inf → NaN
+   */
+  div(other: BigDecimal | number): BigDecimal {
+    if (typeof other === 'number') other = new BigDecimal(other);
+    // NaN propagation
+    if (this.isNaN() || other.isNaN()) return BigDecimal.NAN;
+
+    const thisInf = !this.isFinite();
+    const otherInf = !other.isFinite();
+
+    // Inf / Inf → NaN
+    if (thisInf && otherInf) return BigDecimal.NAN;
+
+    // Inf / finite → Inf (correct sign)
+    if (thisInf) {
+      const signA = this.significand > 0n ? 1n : -1n;
+      const signB = other.significand > 0n ? 1n : other.significand < 0n ? -1n : 1n;
+      return signA * signB > 0n ? BigDecimal.POSITIVE_INFINITY : BigDecimal.NEGATIVE_INFINITY;
+    }
+
+    // finite / Inf → 0
+    if (otherInf) return fromRaw(0n, 0);
+
+    // Division by zero
+    if (other.isZero()) {
+      if (this.isZero()) return BigDecimal.NAN; // 0/0 → NaN
+      // nonzero/0 → +/-Infinity
+      return this.significand > 0n ? BigDecimal.POSITIVE_INFINITY : BigDecimal.NEGATIVE_INFINITY;
+    }
+
+    // 0 / nonzero → 0
+    if (this.isZero()) return fromRaw(0n, 0);
+
+    // General case: compute significand ratio with extra precision
+    // value = (thisSig * 10^thisExp) / (otherSig * 10^otherExp)
+    //       = (thisSig / otherSig) * 10^(thisExp - otherExp)
+    //
+    // To get `precision` significant digits in the quotient, we must
+    // account for the digit count difference between dividend and divisor.
+    // quotient_digits ≈ dividend_digits + scale_digits - divisor_digits
+    const prec = BigDecimal.precision;
+    const guard = 10;
+
+    const absDividend = this.significand < 0n ? -this.significand : this.significand;
+    const absDivisor = other.significand < 0n ? -other.significand : other.significand;
+    const dividendDigits = bigintDigits(absDividend);
+    const divisorDigits = bigintDigits(absDivisor);
+
+    // Ensure quotient has at least prec + guard significant digits
+    const totalScale = prec + guard + Math.max(0, divisorDigits - dividendDigits);
+    const scale = pow10(totalScale);
+
+    const quotient = (this.significand * scale) / other.significand;
+    const resultExp = this.exponent - other.exponent - totalScale;
+
+    return fromRaw(quotient, resultExp).toPrecision(BigDecimal.precision);
+  }
+
+  /**
+   * Multiplicative inverse: 1 / this.
+   * Uses `BigDecimal.precision` for the division.
+   */
+  inv(): BigDecimal {
+    return fromRaw(1n, 0).div(this);
+  }
+
+  /**
+   * Modulo (remainder after truncating division).
+   * Defined as: this - trunc(this / other) * other
+   *
+   * The sign of the result matches the sign of the dividend (this),
+   * consistent with JavaScript's % operator and Decimal.js.
+   */
+  mod(other: BigDecimal | number): BigDecimal {
+    if (typeof other === 'number') other = new BigDecimal(other);
+    // NaN propagation
+    if (this.isNaN() || other.isNaN()) return BigDecimal.NAN;
+    // Inf mod x → NaN, x mod 0 → NaN
+    if (!this.isFinite() || other.isZero()) return BigDecimal.NAN;
+    // x mod Inf → x (finite mod infinity is just x)
+    if (!other.isFinite()) return new BigDecimal(this);
+    // 0 mod x → 0
+    if (this.isZero()) return fromRaw(0n, 0);
+
+    return this.sub(this.div(other).trunc().mul(other)).toPrecision(BigDecimal.precision);
+  }
+
+  /**
+   * Raise to a power.
+   *
+   * - Integer exponent: exact result via repeated squaring
+   * - Zero exponent: 1 (for any non-NaN base)
+   * - Negative integer exponent: pow(abs(n)).inv() (uses precision)
+   * - Non-integer exponent on positive base: exp(n * ln(this))
+   * - Non-integer exponent on negative base: NaN (real-valued result doesn't exist)
+   *
+   * Special cases:
+   *  - NaN base or exponent → NaN
+   *  - Infinite exponent → NaN
+   *  - 0^0 → 1 (mathematical convention)
+   *  - 0^positive → 0
+   *  - 0^negative → Infinity
+   */
+  pow(n: BigDecimal | number): BigDecimal {
+    if (typeof n === 'number') n = new BigDecimal(n);
+    // NaN propagation
+    if (this.isNaN() || n.isNaN()) return BigDecimal.NAN;
+
+    // Infinite exponent → NaN
+    if (!n.isFinite()) return BigDecimal.NAN;
+
+    // Integer exponent path (exact via repeated squaring)
+    if (n.isInteger()) {
+      const expValue = n.toBigInt();
+
+      // x^0 → 1
+      if (expValue === 0n) return fromRaw(1n, 0);
+
+      // Handle infinity base
+      if (!this.isFinite()) {
+        if (expValue > 0n) {
+          // Inf^positive: sign depends on parity
+          if (this.significand < 0n && expValue % 2n !== 0n)
+            return BigDecimal.NEGATIVE_INFINITY;
+          return BigDecimal.POSITIVE_INFINITY;
+        }
+        // Inf^negative → 0
+        return fromRaw(0n, 0);
+      }
+
+      // 0^n
+      if (this.isZero()) {
+        if (expValue > 0n) return fromRaw(0n, 0); // 0^positive → 0
+        // 0^negative → Infinity (like Decimal.js: 1/0^|n| = 1/0 = Infinity)
+        return BigDecimal.POSITIVE_INFINITY;
+      }
+
+      // Negative exponent: compute positive power then invert
+      if (expValue < 0n) {
+        return this.pow(n.neg()).inv();
+      }
+
+      // Check if the result would overflow (exponent magnitude > 9e15)
+      // Estimate: log10(result) ≈ expValue * log10(|this|)
+      const absSig = this.significand < 0n ? -this.significand : this.significand;
+      const thisLog10 = bigintDigits(absSig) + this.exponent;
+      // Use Number for the estimate — safe since we only need a rough magnitude
+      const resultLog10 = Number(expValue) * thisLog10;
+      if (resultLog10 > 9e15) {
+        // Result is too large to represent
+        return this.significand < 0n && expValue % 2n !== 0n
+          ? BigDecimal.NEGATIVE_INFINITY
+          : BigDecimal.POSITIVE_INFINITY;
+      }
+      if (resultLog10 < -9e15) {
+        return fromRaw(0n, 0);
+      }
+
+      // Positive integer exponent: repeated squaring, truncated to working
+      // precision after each multiply to prevent exponential significand growth.
+      const prec = BigDecimal.precision;
+      let result: BigDecimal = fromRaw(1n, 0);
+      let base: BigDecimal = this;
+      let exp = expValue;
+
+      while (exp > 0n) {
+        if (exp & 1n) {
+          result = result.mul(base).toPrecision(prec);
+        }
+        exp >>= 1n;
+        if (exp > 0n) {
+          base = base.mul(base).toPrecision(prec);
+        }
+      }
+
+      return result;
+    }
+
+    // Non-integer exponent path: use exp(n * ln(base))
+
+    // Handle infinity base with non-integer exponent
+    if (!this.isFinite()) {
+      // +Inf ^ positive non-integer → +Inf
+      // +Inf ^ negative non-integer → 0
+      // -Inf ^ non-integer → NaN (not well-defined in reals)
+      if (this.significand < 0n) return BigDecimal.NAN;
+      if (n.significand > 0n) return BigDecimal.POSITIVE_INFINITY;
+      return BigDecimal.ZERO;
+    }
+
+    // 0 ^ non-integer positive → 0, 0 ^ non-integer negative → Infinity
+    if (this.isZero()) {
+      if (n.significand > 0n) return BigDecimal.ZERO;
+      return BigDecimal.POSITIVE_INFINITY;
+    }
+
+    // Negative base with non-integer exponent → NaN (not real-valued)
+    if (this.significand < 0n) return BigDecimal.NAN;
+
+    // Positive base, non-integer exponent: exp(n * ln(this))
+    return n.mul(this.ln()).exp();
   }
 
   // ---------- Conversion methods ----------
@@ -260,9 +737,10 @@ export class BigDecimal {
     // For exponent === 0, just convert significand directly
     if (this.exponent === 0) return Number(this.significand);
 
-    // Use Number() on the significand and multiply by 10**exponent.
-    // This handles the full range including subnormals and overflow to Infinity.
-    return Number(this.significand) * 10 ** this.exponent;
+    // For non-zero exponents, parse the string representation to avoid
+    // double-rounding errors from `Number(sig) * 10**exp`
+    // (e.g., 184 * 0.1 = 18.400000000000002, not 18.4)
+    return Number(this.toString());
   }
 
   /**
@@ -345,10 +823,10 @@ export class BigDecimal {
     let rounded: bigint;
     if (shift >= 0) {
       // No rounding needed — we have enough (or more than enough) precision
-      rounded = absSig * 10n ** BigInt(shift);
+      rounded = absSig * pow10(shift);
     } else {
       // Need to divide (and potentially round)
-      const divisor = 10n ** BigInt(-shift);
+      const divisor = pow10(-shift);
       const quotient = absSig / divisor;
       const remainder = absSig % divisor;
 
@@ -391,6 +869,34 @@ export class BigDecimal {
   }
 
   /**
+   * Round to n significant digits, returning a new BigDecimal.
+   * Uses round-half-to-even for tie-breaking.
+   * If the value already has n or fewer significant digits, returns this.
+   */
+  toPrecision(n: number): BigDecimal {
+    if (!this.isFinite() || this.isZero() || this.isNaN()) return this;
+
+    const absSig = this.significand < 0n ? -this.significand : this.significand;
+    const digits = bigintDigits(absSig);
+
+    if (digits <= n) return this; // already within precision
+
+    const shift = digits - n;
+    const divisor = pow10(shift);
+    let rounded = absSig / divisor;
+    const remainder = absSig % divisor;
+
+    // Round half-to-even
+    const half = divisor / 2n;
+    if (remainder > half || (remainder === half && rounded % 2n !== 0n)) {
+      rounded += 1n;
+    }
+
+    const sig = this.significand < 0n ? -rounded : rounded;
+    return fromRaw(sig, this.exponent + shift);
+  }
+
+  /**
    * Truncate fractional part and return a bigint.
    * Throws if the value is NaN or Infinity.
    */
@@ -401,11 +907,11 @@ export class BigDecimal {
 
     if (this.exponent >= 0) {
       // Integer or scaled integer
-      return this.significand * 10n ** BigInt(this.exponent);
+      return this.significand * pow10(this.exponent);
     }
 
     // exponent < 0: truncate fractional digits
-    const divisor = 10n ** BigInt(-this.exponent);
+    const divisor = pow10(-this.exponent);
     // BigInt division truncates toward zero (which is what we want)
     return this.significand / divisor;
   }
@@ -419,7 +925,7 @@ export class BigDecimal {
  * Create a BigDecimal directly from significand + exponent, normalizing.
  * Avoids the constructor's string/number parsing overhead.
  */
-function fromRaw(sig: bigint, exp: number): BigDecimal {
+export function fromRaw(sig: bigint, exp: number): BigDecimal {
   const [normSig, normExp] = normalize(sig, exp);
   // Use Object.create to avoid re-parsing; set readonly fields directly
   const bd = Object.create(BigDecimal.prototype) as BigDecimal;
@@ -432,13 +938,15 @@ function fromRaw(sig: bigint, exp: number): BigDecimal {
  * Strip trailing zeros from the significand and adjust the exponent.
  * Zero always normalizes to { 0n, 0 }.
  */
+const _1e9 = 1000000000n;
+const _1e3 = 1000n;
+
 function normalize(sig: bigint, exp: number): [bigint, number] {
   if (sig === 0n) return [0n, 0];
 
-  while (sig % 10n === 0n) {
-    sig /= 10n;
-    exp += 1;
-  }
+  while (sig % _1e9 === 0n) { sig /= _1e9; exp += 9; }
+  while (sig % _1e3 === 0n) { sig /= _1e3; exp += 3; }
+  while (sig % 10n === 0n) { sig /= 10n; exp += 1; }
   return [sig, exp];
 }
 

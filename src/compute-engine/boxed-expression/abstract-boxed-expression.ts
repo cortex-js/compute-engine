@@ -1,4 +1,4 @@
-import { Decimal } from 'decimal.js';
+import { BigDecimal } from '../../big-decimal';
 
 import type { MathJsonExpression, MathJsonSymbol } from '../../math-json/types';
 
@@ -221,6 +221,10 @@ export abstract class _BoxedExpression implements Expression {
    * Uses `toMathJson()` (not `.json`) so that the serialized form
    * reflects the canonical/simplified structure, matching the behavior
    * of the engine-based serializer.
+   *
+   * Numeric values are rounded to `ce.precision` significant digits
+   * (via `fractionalDigits: 'auto'`). This ensures that noise digits
+   * from precision-bounded operations are not displayed.
    */
   get latex(): string {
     // Materialize lazy collections before serializing
@@ -228,7 +232,9 @@ export abstract class _BoxedExpression implements Expression {
       const materialized = this.evaluate({ materialization: true });
       if (!materialized.isLazyCollection) return materialized.latex;
     }
-    return serializeToLatex(this.toMathJson({ prettify: true }));
+    return serializeToLatex(
+      this.toMathJson({ prettify: true, fractionalDigits: 'auto' })
+    );
   }
 
   /**
@@ -237,6 +243,9 @@ export abstract class _BoxedExpression implements Expression {
    *
    * This delegates to `LatexSyntax.serialize()` with the provided options.
    * Uses `toMathJson()` to get the canonical/simplified form.
+   *
+   * Numeric values are rounded to `ce.precision` significant digits
+   * (via `fractionalDigits: 'auto'`).
    */
   toLatex(options?: Record<string, any>): string {
     // Materialize lazy collections before serializing
@@ -247,7 +256,10 @@ export abstract class _BoxedExpression implements Expression {
       if (!materialized.isLazyCollection) return materialized.toLatex(options);
     }
 
-    const json = this.toMathJson({ prettify: options?.prettify ?? true });
+    const json = this.toMathJson({
+      prettify: options?.prettify ?? true,
+      fractionalDigits: 'auto',
+    });
 
     if (!options || Object.keys(options).length === 0) {
       return serializeToLatex(json);
@@ -260,11 +272,27 @@ export abstract class _BoxedExpression implements Expression {
    *
    * Note: this is a standard method of JavaScript objects.
    *
+   * Returns the full raw value with no precision rounding, identical to
+   * `.json`. This preserves data fidelity for lossless round-tripping.
+   * For precision-rounded MathJSON, use
+   * `toMathJson({ fractionalDigits: 'auto' })`.
    */
   toJSON(): MathJsonExpression {
     return this.json;
   }
 
+  /**
+   * Serialize to MathJSON with configurable options.
+   *
+   * The `fractionalDigits` option controls how many digits are emitted
+   * for arbitrary-precision numbers:
+   * - `'max'` (default): all available digits, no rounding
+   * - `'auto'`: round to `ce.precision` significant digits
+   * - `n` (number >= 0): exactly `n` digits after the decimal point
+   *
+   * Internally, `'auto'` is converted to `-ce.precision` to signal
+   * total significant digits (negative value) to the serializer.
+   */
   toMathJson(
     options?: Readonly<Partial<JsonSerializationOptions>>
   ): MathJsonExpression {
@@ -374,11 +402,11 @@ export abstract class _BoxedExpression implements Expression {
     return NaN;
   }
 
-  get bignumRe(): Decimal | undefined {
+  get bignumRe(): BigDecimal | undefined {
     return undefined;
   }
 
-  get bignumIm(): Decimal | undefined {
+  get bignumIm(): BigDecimal | undefined {
     return undefined;
   }
 

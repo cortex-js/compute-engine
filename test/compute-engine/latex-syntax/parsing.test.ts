@@ -22,10 +22,16 @@ describe('ADVANCED PARSING', () => {
 });
 
 describe('FUNCTIONS', () => {
-  test('Multiple arguments', () =>
-    expect(parse('\\gamma(2, 1)')).toMatchInlineSnapshot(
-      `["Multiply", "EulerGamma", ["Pair", 2, 1]]`
+  test('Multiple arguments of known function that take a single arugment', () =>
+    expect(parse('\\Gamma(2, 1)')).toMatchInlineSnapshot(
+      `["Gamma", 2, ["Error", "unexpected-argument", "'1'"]]`
     ));
+  test('Multiple arguments of known function that take multiple arguments', () =>
+    expect(parse('\\operatorname{Binomial}(2, 1)')).toMatchInlineSnapshot(
+      `["Binomial", 2, 1]`
+    ));
+  test('Multiple arguments of unknown symbol', () =>
+    expect(parse('q(2, 1)')).toMatchInlineSnapshot(`["q", 2, 1]`));
 });
 
 describe('CUSTOM SYMBOL TYPE CALLBACK', () => {
@@ -312,9 +318,16 @@ describe('NON-STRICT MODE (Math-ASCII/Typst-like syntax)', () => {
     });
 
     test('=> maps to Implies', () => {
-      expect(ce.parse('p => q', { strict: false })).toMatchInlineSnapshot(
-        `["Implies", "p", "q"]`
-      );
+      expect(ce.parse('p => q', { strict: false })).toMatchInlineSnapshot(`
+        [
+          "Implies",
+          "p",
+          [
+            "Error",
+            ["ErrorCode", "incompatible-type", "'boolean'", "'function'"]
+          ]
+        ]
+      `);
     });
 
     test('<=> maps to Equivalent', () => {
@@ -478,9 +491,8 @@ describe('NON-STRICT MODE (Math-ASCII/Typst-like syntax)', () => {
 
   describe('End-to-end: copy-paste from web pages', () => {
     test('x2 + y2 = sin(5x)cos(y)', () => {
-      expect(
-        ce.parse('x2 + y2 = sin(5x)cos(y)', { strict: false })
-      ).toMatchInlineSnapshot(`
+      expect(ce.parse('x2 + y2 = sin(5x)cos(y)', { strict: false }))
+        .toMatchInlineSnapshot(`
         [
           "Equal",
           ["Add", ["Square", "x"], ["Square", "y"]],

@@ -3,6 +3,7 @@ import type { Expression, SymbolDefinitions } from '../global-types';
 import { checkType } from '../boxed-expression/validate';
 import { hasSymbolicTranscendental } from '../boxed-expression/utils';
 import { isFunction, isSymbol, sym } from '../boxed-expression/type-guards';
+import { BoxedNumber } from '../boxed-expression/boxed-number';
 
 import {
   applicableN1,
@@ -218,13 +219,16 @@ volumes
         return engine._fn('ND', [fn, x]);
       },
       evaluate: ([body, x], { engine }) => {
+        // ND uses compiled JS functions (machine arithmetic), so box
+        // the result directly as a machine number to avoid wrapping
+        // in BigDecimal at higher engine precisions.
         const xValue = x.N().re;
         if (isNaN(xValue)) return undefined;
 
         const compiled = engine._compile(body);
         const fn =
           (compiled.run as (x: number) => number) ?? applicableN1(body);
-        return engine.number(centeredDiff8thOrder(fn, xValue));
+        return new BoxedNumber(engine, centeredDiff8thOrder(fn, xValue));
       },
     },
 
@@ -354,11 +358,13 @@ volumes
         return engine._fn('NIntegrate', [fn, lower.canonical, upper.canonical]);
       },
       evaluate: ([f, a, b], { engine }) => {
+        // Uses compiled JS functions (machine arithmetic)
         const [lower, upper] = [a.N().re, b.N().re];
         if (isNaN(lower) || isNaN(upper)) return undefined;
         const compiled = engine._compile(f);
         const jsf = (compiled.run as (x: number) => number) ?? applicableN1(f);
-        return engine.number(
+        return new BoxedNumber(
+          engine,
           monteCarloEstimate(jsf, lower, upper, compiled.success ? 1e7 : 1e4)
             .estimate
         );
@@ -398,12 +404,13 @@ volumes
         return engine._fn('Limit', [fn, x.canonical, dir.canonical]);
       },
       evaluate: ([f, x, dir], { engine, numericApproximation }) => {
+        // Uses compiled JS functions (machine arithmetic)
         if (numericApproximation) {
           const target = x.N().re;
           if (Number.isNaN(target)) return undefined;
           const compiled = engine._compile(f);
           const fn = (compiled.run as (x: number) => number) ?? applicableN1(f);
-          return engine.number(limit(fn, target, dir ? dir.re : 1));
+          return new BoxedNumber(engine, limit(fn, target, dir ? dir.re : 1));
         }
         return undefined;
       },
@@ -422,11 +429,12 @@ volumes
         return engine._fn('NLimit', [fn, x.canonical, dir.canonical]);
       },
       evaluate: ([f, x, dir], { engine }) => {
+        // Uses compiled JS functions (machine arithmetic)
         const target = x.N().re;
         if (Number.isNaN(target)) return undefined;
         const compiled = engine._compile(f);
         const fn = (compiled.run as (x: number) => number) ?? applicableN1(f);
-        return engine.number(limit(fn, target, dir ? dir.re : 1));
+        return new BoxedNumber(engine, limit(fn, target, dir ? dir.re : 1));
       },
     },
   },

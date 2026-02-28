@@ -1,5 +1,5 @@
-import { Decimal } from 'decimal.js';
-import type { BigNumFactory, SmallInteger } from '../numerics/types';
+import { BigDecimal } from '../../big-decimal';
+import type { SmallInteger } from '../numerics/types';
 import { NumericValue, NumericValueData } from './types';
 import { ExactNumericValue } from './exact-numeric-value';
 import { isInMachineRange } from '../numerics/numeric-bignum';
@@ -12,25 +12,22 @@ import { NumericPrimitiveType } from '../../common/type/types';
 export class BigNumericValue extends NumericValue {
   __brand: 'BigNumericValue';
 
-  decimal: Decimal;
+  decimal: BigDecimal;
 
-  bignum: BigNumFactory;
-
-  constructor(
-    value: number | Decimal | NumericValueData,
-    bignum: BigNumFactory
-  ) {
+  constructor(value: number | BigDecimal | NumericValueData) {
     super();
-    this.bignum = bignum;
 
     if (typeof value === 'number') {
-      this.decimal = bignum(value);
+      this.decimal = new BigDecimal(value);
       this.im = 0;
-    } else if (value instanceof Decimal) {
+    } else if (value instanceof BigDecimal) {
       this.decimal = value;
       this.im = 0;
     } else {
-      const decimal = bignum(value.re ?? 0);
+      const decimal =
+        value.re instanceof BigDecimal
+          ? value.re
+          : new BigDecimal(value.re ?? 0);
 
       this.decimal = decimal;
       this.im = value.im ?? 0;
@@ -63,6 +60,12 @@ export class BigNumericValue extends NumericValue {
     return this._makeExact(bigint(this.decimal)!);
   }
 
+  /**
+   * Serialize to MathJSON. Preserves the full raw `BigDecimal` value
+   * with no rounding, ensuring lossless round-tripping. Digits beyond
+   * `BigDecimal.precision` may be present (from exact arithmetic) but
+   * are not guaranteed to be accurate after precision-bounded operations.
+   */
   toJSON(): MathJsonExpression {
     if (this.isNaN) return 'NaN';
     if (this.isPositiveInfinity) return 'PositiveInfinity';
@@ -85,11 +88,22 @@ export class BigNumericValue extends NumericValue {
     ];
   }
 
+  /**
+   * Return a human-readable string representation.
+   *
+   * The real part is rounded to `BigDecimal.precision` significant digits
+   * so that noise digits from precision-bounded operations (division,
+   * transcendentals) are not displayed. The imaginary part uses native
+   * `Number.toString()` (always machine precision).
+   *
+   * For the full unrounded value, use `toJSON()`.
+   */
   toString(): string {
     if (this.isZero) return '0';
     if (this.isOne) return '1';
     if (this.isNegativeOne) return '-1';
-    if (this.im === 0) return decimalToString(this.decimal);
+    if (this.im === 0)
+      return decimalToString(this.decimal.toPrecision(BigDecimal.precision));
     if (this.decimal.isZero()) {
       if (this.im === 1) return 'i';
       if (this.im === -1) return '-i';
@@ -107,19 +121,19 @@ export class BigNumericValue extends NumericValue {
     return `(${decimalToString(this.decimal)} ${im})`;
   }
 
-  clone(value: number | Decimal | NumericValueData) {
-    return new BigNumericValue(value, this.bignum);
+  clone(value: number | BigDecimal | NumericValueData) {
+    return new BigNumericValue(value);
   }
 
   private _makeExact(value: number | bigint): ExactNumericValue {
-    return new ExactNumericValue(value, (x) => this.clone(x), this.bignum);
+    return new ExactNumericValue(value, (x) => this.clone(x));
   }
 
   get re(): number {
     return this.decimal.toNumber();
   }
 
-  get bignumRe(): Decimal {
+  get bignumRe(): BigDecimal {
     return this.decimal;
   }
 
@@ -161,10 +175,10 @@ export class BigNumericValue extends NumericValue {
     return this.im === 0 && this.decimal.isZero();
   }
 
-  isZeroWithTolerance(tolerance: number | Decimal): boolean {
+  isZeroWithTolerance(tolerance: number | BigDecimal): boolean {
     if (this.im !== 0) return false;
     const tol =
-      typeof tolerance === 'number' ? this.bignum(tolerance) : tolerance;
+      typeof tolerance === 'number' ? new BigDecimal(tolerance) : tolerance;
     return this.decimal.abs().lte(tol);
   }
 
@@ -196,7 +210,7 @@ export class BigNumericValue extends NumericValue {
   inv(): BigNumericValue {
     if (this.isOne) return this;
     if (this.isNegativeOne) return this;
-    if (this.im === 0) return this.clone(this.decimal.pow(-1));
+    if (this.im === 0) return this.clone(this.decimal.inv());
 
     const d = Math.hypot(this.re, this.im);
     const bigD = this.decimal
@@ -225,7 +239,7 @@ export class BigNumericValue extends NumericValue {
     return this.add(other.neg());
   }
 
-  mul(other: number | Decimal | NumericValue): NumericValue {
+  mul(other: number | BigDecimal | NumericValue): NumericValue {
     if (this.isZero) {
       if (
         other instanceof NumericValue &&
@@ -250,7 +264,7 @@ export class BigNumericValue extends NumericValue {
     }
 
     if (this.isOne) {
-      if (typeof other === 'number' || other instanceof Decimal)
+      if (typeof other === 'number' || other instanceof BigDecimal)
         return this.clone(other);
       return this.clone({ re: other.bignumRe ?? other.re, im: other.im });
     }
@@ -262,7 +276,7 @@ export class BigNumericValue extends NumericValue {
         im: this.im * other,
       });
     }
-    if (other instanceof Decimal) {
+    if (other instanceof BigDecimal) {
       if (this.im === 0) return this.clone(this.decimal.mul(other));
 
       return this.clone({
@@ -317,7 +331,7 @@ export class BigNumericValue extends NumericValue {
     const [a, b] = [this.re, this.im];
     const [c, d] = [other.re, other.im];
     const denominator = c * c + d * d;
-    const bigC = other.bignumRe ?? this.bignum(other.re);
+    const bigC = other.bignumRe ?? new BigDecimal(other.re);
     const bigDenominator = bigC.mul(bigC).add(d * d);
     return this.clone({
       re: this.decimal
@@ -417,7 +431,7 @@ export class BigNumericValue extends NumericValue {
       .mul(a)
       .add(b * b)
       .sqrt();
-    const argument = Decimal.atan2(b, a);
+    const argument = BigDecimal.atan2(b, a);
     const newModulus = modulus.pow(exponent);
     const newArgument = argument.mul(exponent);
     return this.clone({
@@ -452,7 +466,7 @@ export class BigNumericValue extends NumericValue {
       .mul(a)
       .add(b * b)
       .sqrt();
-    const argument = Decimal.atan2(b, a);
+    const argument = BigDecimal.atan2(b, a);
     const newModulus = modulus.pow(1 / exp);
     const newArgument = argument.div(exp);
 
@@ -493,7 +507,9 @@ export class BigNumericValue extends NumericValue {
 
     if (this.im !== 0 || other.im !== 0) return this._makeExact(NaN);
     if (!this.decimal.isInteger()) return this._makeExact(1);
-    let b = this.bignum(other.bignumRe ?? other.re);
+    let b = other.bignumRe
+      ? new BigDecimal(other.bignumRe)
+      : new BigDecimal(other.re);
     if (!b.isInteger()) return this._makeExact(1);
 
     let a = this.decimal;
@@ -538,7 +554,7 @@ export class BigNumericValue extends NumericValue {
       .mul(a)
       .add(b * b)
       .sqrt();
-    const argument = Decimal.atan2(b, a).toNumber();
+    const argument = BigDecimal.atan2(b, a).toNumber();
 
     if (base === undefined)
       return this.clone({ re: modulus.ln(), im: argument });
@@ -617,15 +633,14 @@ export class BigNumericValue extends NumericValue {
   }
 }
 
-function decimalToString(num: Decimal): string {
-  // Use scientific notation if the exponent is too large or too small
+function decimalToString(num: BigDecimal): string {
   // Convert the number to a string
   const numStr = num.toString();
 
   // Check if the number is in scientific notation
   if (num.isInteger() && numStr.includes('e')) {
     // Convert the number to a fixed notation string with no decimal places
-    const fixedStr = num.toFixed();
+    const fixedStr = num.toFixed(0);
 
     // Check the number of trailing zeros
     const trailingZeros = fixedStr.match(/0+$/);
@@ -642,7 +657,7 @@ function decimalToString(num: Decimal): string {
 }
 
 /* Use with trig functions to avoid rounding errors.
-   Note that we use 1e14 as the tolerance, as this is applied to a machine 
+   Note that we use 1e14 as the tolerance, as this is applied to a machine
    number and is independent of the compute engine tolerance */
 function chop(n: number): number {
   return Math.abs(n) <= 1e-14 ? 0 : n;

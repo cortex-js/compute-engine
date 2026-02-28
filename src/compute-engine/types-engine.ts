@@ -10,7 +10,7 @@ import type {
   NumericValue,
   NumericValueData,
 } from './numeric-value/types';
-import type { BigNum, IBigNum, Rational } from './numerics/types';
+import type { BigNum, Rational } from './numerics/types';
 
 import type { Expression, ExpressionInput } from './types-expression';
 import type {
@@ -56,7 +56,7 @@ type Scope = KernelScope<BoxedDefinition>;
 type EvalContext = KernelEvalContext<Expression, BoxedDefinition>;
 
 /** @internal */
-export interface IComputeEngine extends IBigNum {
+export interface IComputeEngine {
   // Common symbols
   readonly True: Expression;
   readonly False: Expression;
@@ -74,21 +74,6 @@ export interface IComputeEngine extends IBigNum {
   readonly PositiveInfinity: Expression;
   readonly NegativeInfinity: Expression;
   readonly ComplexInfinity: Expression;
-
-  /** @internal */
-  readonly _BIGNUM_NAN: BigNum;
-  /** @internal */
-  readonly _BIGNUM_ZERO: BigNum;
-  /** @internal */
-  readonly _BIGNUM_ONE: BigNum;
-  /** @internal */
-  readonly _BIGNUM_TWO: BigNum;
-  /** @internal */
-  readonly _BIGNUM_HALF: BigNum;
-  /** @internal */
-  readonly _BIGNUM_PI: BigNum;
-  /** @internal */
-  readonly _BIGNUM_NEGATIVE_ONE: BigNum;
 
   readonly context: EvalContext;
   contextStack: ReadonlyArray<EvalContext>;

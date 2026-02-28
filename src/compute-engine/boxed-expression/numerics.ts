@@ -1,5 +1,5 @@
 import { Complex } from 'complex-esm';
-import { Decimal } from 'decimal.js';
+import { BigDecimal } from '../../big-decimal';
 
 import type { Rational } from '../numerics/types';
 
@@ -41,7 +41,7 @@ export function asRational(expr: Expression): Rational | undefined {
   }
 
   const bignumRe = num.bignumRe;
-  if (bignumRe !== undefined && Number.isInteger(bignumRe))
+  if (bignumRe !== undefined && bignumRe.isInteger())
     return [bigint(bignumRe)!, BigInt(1)];
 
   const re = num.re;
@@ -51,7 +51,7 @@ export function asRational(expr: Expression): Rational | undefined {
 }
 
 export function asBigint(
-  x: Complex | Decimal | ExpressionInput | undefined
+  x: Complex | BigDecimal | ExpressionInput | undefined
 ): bigint | null {
   if (x === undefined || x === null) return null;
 
@@ -77,7 +77,7 @@ export function asBigint(
     return BigInt(num.re);
   }
 
-  if (x instanceof Decimal || typeof x === 'string') return bigint(x);
+  if (x instanceof BigDecimal || typeof x === 'string') return bigint(x);
 
   if (x instanceof Complex) {
     if (x.im === 0) return bigint(x.re);
@@ -87,7 +87,7 @@ export function asBigint(
   return bigintValue(x as MathJsonExpression);
 }
 
-export function asBignum(expr: Expression | undefined): Decimal | null {
+export function asBignum(expr: Expression | undefined): BigDecimal | null {
   if (expr === undefined || expr === null) return null;
   if (!isNumber(expr)) return null;
   const num = typeof expr === 'number' ? expr : expr.numericValue;

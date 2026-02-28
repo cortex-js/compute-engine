@@ -592,6 +592,12 @@ export interface Expression {
    *
    * Used when coercing a `Expression` to a `String`.
    *
+   * For arbitrary-precision numbers (`BigNumericValue`), the output is
+   * rounded to `BigDecimal.precision` significant digits. Digits beyond the
+   * working precision are noise from precision-bounded operations (division,
+   * transcendentals) and are not displayed. Machine-precision numbers use
+   * their native `Number.toString()`.
+   *
    * @category Primitive Methods
    */
   toString(): string;
@@ -604,11 +610,23 @@ export interface Expression {
    *
    * Note that lazy collections are *not* eagerly evaluated.
    *
+   * The output preserves the full raw `BigDecimal` value with no rounding,
+   * ensuring lossless round-tripping via `ce.box(expr.json)`. Digits beyond
+   * `ce.precision` may be present but are not guaranteed to be accurate.
+   * Use `toMathJson({ fractionalDigits: 'auto' })` for precision-rounded
+   * MathJSON output.
+   *
    * @category Primitive Methods
    */
   toJSON(): MathJsonExpression;
 
-  /** Serialize to a MathJSON expression with specified options */
+  /**
+   * Serialize to a MathJSON expression with specified options.
+   *
+   * Use `{ fractionalDigits: 'auto' }` to round arbitrary-precision
+   * numbers to `ce.precision` significant digits. The default
+   * (`'max'`) emits all available digits with no rounding.
+   */
   toMathJson(
     options?: Readonly<Partial<JsonSerializationOptions>>
   ): MathJsonExpression;
@@ -627,6 +645,12 @@ export interface Expression {
    *
    * Note that lazy collections are *not* eagerly evaluated.
    *
+   * For arbitrary-precision numbers, the full raw `BigDecimal` value is
+   * emitted with no rounding (same as `toJSON()`). This preserves data
+   * fidelity for round-tripping but may include trailing digits beyond
+   * `ce.precision` that are not meaningful. Use
+   * `toMathJson({ fractionalDigits: 'auto' })` for rounded output.
+   *
    * :::info[Note]
    * Applicable to canonical and non-canonical expressions.
    * :::
@@ -639,12 +663,18 @@ export interface Expression {
    *
    * This is a convenience getter that delegates to the standalone
    * `serialize()` function from the `latex-syntax` module.
+   *
+   * Numeric values are rounded to `ce.precision` significant digits.
+   * Noise digits from precision-bounded operations (division,
+   * transcendentals) are not displayed.
    */
   readonly latex: string;
 
   /**
    * Return a LaTeX representation of this expression with custom
    * serialization options.
+   *
+   * Numeric values are rounded to `ce.precision` significant digits.
    */
   toLatex(options?: Record<string, any>): string;
 

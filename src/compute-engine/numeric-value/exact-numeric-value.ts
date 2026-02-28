@@ -1,6 +1,6 @@
-import { Decimal } from 'decimal.js';
+import { BigDecimal } from '../../big-decimal';
 
-import { type BigNumFactory, Rational, SmallInteger } from '../numerics/types';
+import { Rational, SmallInteger } from '../numerics/types';
 import { canonicalInteger, gcd, SMALL_INTEGER } from '../numerics/numeric';
 import {
   isOne,
@@ -48,7 +48,6 @@ export class ExactNumericValue extends NumericValue {
   im = 0;
 
   factory: NumericValueFactory;
-  bignum: BigNumFactory;
 
   /** The caller is responsible to make sure the input is valid, i.e.
    * - rational is a fraction of integers (but it may not be reduced)
@@ -56,12 +55,10 @@ export class ExactNumericValue extends NumericValue {
    */
   constructor(
     value: number | bigint | ExactNumericValueData,
-    factory: NumericValueFactory,
-    bignum: BigNumFactory
+    factory: NumericValueFactory
   ) {
     super();
     this.factory = factory;
-    this.bignum = bignum;
 
     if (typeof value === 'number') {
       console.assert(!Number.isFinite(value) || Number.isInteger(value));
@@ -173,7 +170,7 @@ export class ExactNumericValue extends NumericValue {
   }
 
   clone(value: number | ExactNumericValueData): ExactNumericValue {
-    return new ExactNumericValue(value, this.factory, this.bignum);
+    return new ExactNumericValue(value, this.factory);
   }
 
   /** Object.toString() */
@@ -218,14 +215,14 @@ export class ExactNumericValue extends NumericValue {
     return rationalAsFloat(this.rational) * Math.sqrt(this.radical);
   }
 
-  get bignumRe(): Decimal {
-    let result: Decimal;
+  get bignumRe(): BigDecimal {
+    let result: BigDecimal;
     const r = this.rational;
-    if (isMachineRational(r)) result = this.bignum(r[0]).div(r[1]);
+    if (isMachineRational(r)) result = new BigDecimal(r[0]).div(r[1]);
     else
-      result = this.bignum(r[0].toString()).div(this.bignum(r[1].toString()));
+      result = new BigDecimal(r[0]).div(new BigDecimal(r[1]));
     if (this.radical === 1) return result;
-    return result.mul(this.bignum(this.radical).sqrt());
+    return result.mul(new BigDecimal(this.radical).sqrt());
   }
 
   get numerator(): ExactNumericValue {
@@ -395,7 +392,7 @@ export class ExactNumericValue extends NumericValue {
     return this.add(other.neg());
   }
 
-  mul(other: number | Decimal | NumericValue): NumericValue {
+  mul(other: number | BigDecimal | NumericValue): NumericValue {
     if (other === 0) {
       if (this.isPositiveInfinity || this.isNegativeInfinity || this.isNaN)
         return this.clone(NaN);
@@ -411,7 +408,7 @@ export class ExactNumericValue extends NumericValue {
         });
       return this.factory(this.bignumRe).mul(other);
     }
-    if (other instanceof Decimal) return this.factory(other).mul(this);
+    if (other instanceof BigDecimal) return this.factory(other).mul(this);
     if (other.im !== 0) return other.mul(this);
 
     if (other.isZero) {
@@ -779,8 +776,7 @@ export class ExactNumericValue extends NumericValue {
   // '1.2 + 1/4 + √5 + √5' -> '3/4 + 2√5'
   static sum(
     values: NumericValue[],
-    factory: NumericValueFactory,
-    bignumFactory: BigNumFactory
+    factory: NumericValueFactory
   ): NumericValue[] {
     if (values.length === 1) return values;
 
@@ -801,7 +797,7 @@ export class ExactNumericValue extends NumericValue {
 
     for (const value of values) {
       if (value.isNaN)
-        return [new ExactNumericValue(NaN, factory, bignumFactory)];
+        return [new ExactNumericValue(NaN, factory)];
       if (value.isZero) continue;
 
       imSum += value.im;
@@ -833,7 +829,7 @@ export class ExactNumericValue extends NumericValue {
     // If we add no additional rational or radical,
     if (isZero(rationalSum) && radicals.length === 0) {
       if (imSum === 0)
-        return [new ExactNumericValue(0, factory, bignumFactory)];
+        return [new ExactNumericValue(0, factory)];
       return [factory({ im: imSum })];
     }
 
@@ -842,7 +838,7 @@ export class ExactNumericValue extends NumericValue {
 
     if (radicals.length === 0)
       result.push(
-        new ExactNumericValue({ rational: rationalSum }, factory, bignumFactory)
+        new ExactNumericValue({ rational: rationalSum }, factory)
       );
     else {
       // If we have a rational, merge it with the radicals
@@ -852,8 +848,7 @@ export class ExactNumericValue extends NumericValue {
           (x) =>
             new ExactNumericValue(
               { rational: x.multiple, radical: x.radical },
-              factory,
-              bignumFactory
+              factory
             )
         )
       );

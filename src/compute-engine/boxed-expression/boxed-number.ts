@@ -1,5 +1,5 @@
 import { Complex } from 'complex-esm';
-import { Decimal } from 'decimal.js';
+import { BigDecimal } from '../../big-decimal';
 
 import type { MathJsonExpression, MathJsonNumberObject } from '../../math-json';
 
@@ -203,13 +203,13 @@ export class BoxedNumber
     return this._value.im;
   }
 
-  get bignumRe(): Decimal | undefined {
+  get bignumRe(): BigDecimal | undefined {
     if (typeof this._value === 'number') return undefined;
     return this._value.bignumRe;
   }
 
-  get bignumIm(): Decimal | undefined {
-    if (typeof this._value === 'number') return this.engine._BIGNUM_ZERO;
+  get bignumIm(): BigDecimal | undefined {
+    if (typeof this._value === 'number') return BigDecimal.ZERO;
     return this.engine.bignum(this._value.im);
   }
 
@@ -710,7 +710,7 @@ export function canonicalNumber(
     | number
     | bigint
     | string
-    | Decimal
+    | BigDecimal
     | Complex
     | Rational
     | NumericValue
@@ -734,7 +734,7 @@ export function canonicalNumber(
     return ce._numericValue(value);
   }
 
-  if (value instanceof Decimal) {
+  if (value instanceof BigDecimal) {
     const n = value.toNumber();
     // Is it a small integer?
     if (value.isInteger() && Math.abs(n) <= SMALL_INTEGER) return n;

@@ -75,7 +75,7 @@ This document captures the implemented architecture after the recent modularizat
 ### Engine State
 | File | Responsibility |
 |------|---------------|
-| `engine-numeric-configuration.ts` | Precision, tolerance, angular unit, and Decimal.js configuration |
+| `engine-numeric-configuration.ts` | Precision, tolerance, angular unit, and BigDecimal configuration |
 | `engine-runtime-state.ts` | Execution limits (time, iteration, recursion) and verification state |
 | `engine-configuration-lifecycle.ts` | Configuration change propagation and reset fan-out |
 | `engine-cache.ts` | Expression and rule-set caching with generation-based invalidation |

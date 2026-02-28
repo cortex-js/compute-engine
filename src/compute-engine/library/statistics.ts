@@ -79,7 +79,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         const xs = ops.map((x) => x.evaluate({ numericApproximation }));
         return engine.number(
           bignumPreferred(engine)
-            ? bigMean(engine.bignum.bind(engine), flattenBigScalars(xs))
+            ? bigMean(flattenBigScalars(xs))
             : mean(flattenScalars(xs))
         );
       },
@@ -112,7 +112,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         const xs = ops.map((x) => x.evaluate({ numericApproximation }));
         return engine.number(
           bignumPreferred(engine)
-            ? bigVariance(engine.bignum.bind(engine), flattenBigScalars(xs))
+            ? bigVariance(flattenBigScalars(xs))
             : variance(flattenScalars(xs))
         );
       },
@@ -128,10 +128,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         const xs = ops.map((x) => x.evaluate({ numericApproximation }));
         return engine.number(
           bignumPreferred(engine)
-            ? bigPopulationVariance(
-                engine.bignum.bind(engine),
-                flattenBigScalars(xs)
-              )
+            ? bigPopulationVariance(flattenBigScalars(xs))
             : populationVariance(flattenScalars(xs))
         );
       },
@@ -147,10 +144,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         const xs = ops.map((x) => x.evaluate({ numericApproximation }));
         return engine.number(
           bignumPreferred(engine)
-            ? bigVariance(
-                engine.bignum.bind(engine),
-                flattenBigScalars(xs)
-              ).sqrt()
+            ? bigVariance(flattenBigScalars(xs)).sqrt()
             : Math.sqrt(variance(flattenScalars(xs)))
         );
       },
@@ -166,10 +160,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         const xs = ops.map((x) => x.evaluate({ numericApproximation }));
         return engine.number(
           bignumPreferred(engine)
-            ? bigPopulationVariance(
-                engine.bignum.bind(engine),
-                flattenBigScalars(xs)
-              ).sqrt()
+            ? bigPopulationVariance(flattenBigScalars(xs)).sqrt()
             : Math.sqrt(populationVariance(flattenScalars(xs)))
         );
       },
@@ -185,7 +176,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         const xs = ops.map((x) => x.evaluate({ numericApproximation }));
         return engine.number(
           bignumPreferred(engine)
-            ? bigKurtosis(engine.bignum.bind(engine), flattenBigScalars(xs))
+            ? bigKurtosis(flattenBigScalars(xs))
             : kurtosis(flattenScalars(xs))
         );
       },
@@ -201,7 +192,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         const xs = ops.map((x) => x.evaluate({ numericApproximation }));
         return engine.number(
           bignumPreferred(engine)
-            ? bigSkewness(engine.bignum.bind(engine), flattenBigScalars(xs))
+            ? bigSkewness(flattenBigScalars(xs))
             : skewness(flattenScalars(xs))
         );
       },
@@ -217,7 +208,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         const xs = ops.map((x) => x.evaluate({ numericApproximation }));
         return engine.number(
           bignumPreferred(engine)
-            ? bigMode(engine.bignum.bind(engine), flattenBigScalars(xs))
+            ? bigMode(flattenBigScalars(xs))
             : mode(flattenScalars(xs))
         );
       },

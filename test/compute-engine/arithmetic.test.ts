@@ -1654,11 +1654,7 @@ describe('Factorial simplification', () => {
   it('b!/(b-1)! should simplify to b', () => {
     expect(
       ce
-        .box([
-          'Divide',
-          ['Factorial', 'b'],
-          ['Factorial', ['Add', 'b', -1]],
-        ])
+        .box(['Divide', ['Factorial', 'b'], ['Factorial', ['Add', 'b', -1]]])
         .simplify()
         .toString()
     ).toMatchInlineSnapshot(`b`);
@@ -1682,11 +1678,7 @@ describe('Factorial simplification', () => {
   it('(b+1)! - b! should simplify to b * b!', () => {
     expect(
       ce
-        .box([
-          'Subtract',
-          ['Factorial', ['Add', 'b', 1]],
-          ['Factorial', 'b'],
-        ])
+        .box(['Subtract', ['Factorial', ['Add', 'b', 1]], ['Factorial', 'b']])
         .simplify()
         .toString()
     ).toMatchInlineSnapshot(`b * b!`);
@@ -1704,11 +1696,7 @@ describe('Factorial simplification', () => {
   it('b! - (b-1)! should simplify to (b - 1) * (b - 1)!', () => {
     expect(
       ce
-        .box([
-          'Subtract',
-          ['Factorial', 'b'],
-          ['Factorial', ['Add', 'b', -1]],
-        ])
+        .box(['Subtract', ['Factorial', 'b'], ['Factorial', ['Add', 'b', -1]]])
         .simplify()
         .toString()
     ).toMatchInlineSnapshot(`(b - 1) * (b - 1)!`);

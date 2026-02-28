@@ -95,26 +95,39 @@ export function canonicalInvisibleOperator(
       args = flatten(args);
 
       const def = ce.lookupDefinition(lhsCanon.symbol);
-      if (!def) {
-        // Symbol not defined, so it's a function call - declare and return
-        ce.declare(lhsCanon.symbol, 'function');
+
+      // Explicitly declared as function/operator → function call
+      if (def && (isOperatorDef(def) || def.value?.type?.matches('function'))) {
         return ce.function(lhsCanon.symbol, args);
       }
 
-      // Symbol is defined - check if it's a function or has unknown type
-      // (unknown type means it was auto-declared and should be treated as function)
-      if (isOperatorDef(def) || def.value?.type?.matches('function')) {
+      // Multiple comma-separated args like `f(2, 1)` → always a function call,
+      // since commas strongly signal function application, not multiplication.
+      if (args.length > 1) {
+        if (!def) ce.declare(lhsCanon.symbol, 'function');
+        else if (!isOperatorDef(def) && def.value?.type?.isUnknown)
+          lhsCanon.infer('function');
         return ce.function(lhsCanon.symbol, args);
       }
 
-      if (def.value?.type?.isUnknown) {
-        // Type is unknown - infer as function and return function call
+      // Single arg: check if it's scalar-numeric.
+      // If so, prefer multiplication: q(2q) → q·(2q), not q-as-function(2q)
+      // Note: we exclude indexed collections (vectors, matrices, tuples)
+      // since those as parenthesized args are more likely function arguments.
+      const allArgsNumeric = args.every(
+        (x) =>
+          x.isValid && (x.type.isUnknown || x.type.matches('number'))
+      );
+
+      if (allArgsNumeric) {
+        return ce.function('Multiply', [lhsCanon, ...args]);
+      }
+
+      // Non-numeric args → treat as function call
+      if (!def) ce.declare(lhsCanon.symbol, 'function');
+      else if (!isOperatorDef(def) && def.value?.type?.isUnknown)
         lhsCanon.infer('function');
-        return ce.function(lhsCanon.symbol, args);
-      }
-
-      // Symbol is defined but not as a function - fall through to check
-      // if it might be multiplication (e.g., x(x+1) where x is a number)
+      return ce.function(lhsCanon.symbol, args);
     }
 
     // Is is an index operation, i.e. "v[1,2]"?

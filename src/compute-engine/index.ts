@@ -1,5 +1,5 @@
 import { Complex } from 'complex-esm';
-import { Decimal } from 'decimal.js';
+import { BigDecimal } from '../big-decimal';
 
 import { Type, TypeResolver, TypeString } from '../common/type/types';
 import { BoxedType } from '../common/type/boxed-type';
@@ -17,7 +17,6 @@ import type {
 
 import {
   MACHINE_PRECISION,
-  MAX_BIGINT_DIGITS,
   SMALL_INTEGER,
 } from './numerics/numeric';
 
@@ -344,41 +343,6 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   /** @internal */
-  get _BIGNUM_NAN(): Decimal {
-    return this._numericConfiguration.bignumNaN;
-  }
-
-  /** @internal */
-  get _BIGNUM_ZERO(): Decimal {
-    return this._numericConfiguration.bignumZero;
-  }
-
-  /** @internal */
-  get _BIGNUM_ONE(): Decimal {
-    return this._numericConfiguration.bignumOne;
-  }
-
-  /** @internal */
-  get _BIGNUM_TWO(): Decimal {
-    return this._numericConfiguration.bignumTwo;
-  }
-
-  /** @internal */
-  get _BIGNUM_HALF(): Decimal {
-    return this._numericConfiguration.bignumHalf;
-  }
-
-  /** @internal */
-  get _BIGNUM_PI(): Decimal {
-    return this._numericConfiguration.bignumPi;
-  }
-
-  /** @internal */
-  get _BIGNUM_NEGATIVE_ONE(): Decimal {
-    return this._numericConfiguration.bignumNegativeOne;
-  }
-
-  /** @internal */
   get _typeResolver(): TypeResolver {
     return createTypeResolver(this);
   }
@@ -538,8 +502,9 @@ export class ComputeEngine implements IComputeEngine {
    */
   _reset(): void {
     this._configurationLifecycle.reset({
-      refreshNumericConstants: () =>
-        this._numericConfiguration.refreshConstants(),
+      refreshNumericConstants: () => {
+        // BigDecimal constants are static/frozen — nothing to refresh
+      },
       resetCommonSymbols: () => resetCommonSymbols(this._commonSymbols),
       purgeCaches: () => this._cacheStore.purgeValues(),
     });
@@ -746,16 +711,16 @@ export class ComputeEngine implements IComputeEngine {
    * How close to 0 the number has to be to be considered 0 is determined by {@linkcode tolerance}.
    */
   chop(n: number): number;
-  chop(n: Decimal): Decimal | 0;
+  chop(n: BigDecimal): BigDecimal | 0;
   chop(n: Complex): Complex | 0;
-  chop(n: number | Decimal | Complex): number | Decimal | Complex {
+  chop(n: number | BigDecimal | Complex): number | BigDecimal | Complex {
     const tolerance = this._numericConfiguration.tolerance;
     if (typeof n === 'number') {
       if (Math.abs(n) <= tolerance) return 0;
       return n;
     }
 
-    if (n instanceof Decimal) {
+    if (n instanceof BigDecimal) {
       if (n.isPositive() && n.lte(this._numericConfiguration.bignumTolerance))
         return 0;
       if (
@@ -827,7 +792,7 @@ export class ComputeEngine implements IComputeEngine {
   * - `sign()` (1, 0 or -1)
   * 
   */
-  bignum(a: Decimal.Value | bigint): Decimal {
+  bignum(a: string | number | bigint | BigDecimal): BigDecimal {
     return this._numericConfiguration.bignum(a);
   }
 
@@ -876,9 +841,9 @@ export class ComputeEngine implements IComputeEngine {
    * - `isZero()`
    * - `sign()` (1, 0 or -1)
    */
-  complex(a: number | Decimal | Complex, b?: number | Decimal): Complex {
-    if (a instanceof Decimal) a = a.toNumber();
-    if (b instanceof Decimal) b = b.toNumber();
+  complex(a: number | BigDecimal | Complex, b?: number | BigDecimal): Complex {
+    if (a instanceof BigDecimal) a = a.toNumber();
+    if (b instanceof BigDecimal) b = b.toNumber();
     return new Complex(a, b);
   }
 
@@ -898,33 +863,31 @@ export class ComputeEngine implements IComputeEngine {
     // Convert to an ExactNumericValue if possible
     if (value instanceof NumericValue) return value.asExact ?? value;
 
-    const bignum = (x) => this.bignum(x);
     const makeNumericValue =
       this._numericConfiguration.precision > MACHINE_PRECISION
-        ? (x) => new BigNumericValue(x, bignum)
-        : (x) => new MachineNumericValue(x, bignum);
+        ? (x) => new BigNumericValue(x)
+        : (x) => new MachineNumericValue(x);
 
     if (typeof value === 'number') {
       if (Number.isInteger(value))
-        return new ExactNumericValue(value, makeNumericValue, bignum);
+        return new ExactNumericValue(value, makeNumericValue);
       return makeNumericValue(value);
     }
 
     if (typeof value === 'bigint')
-      return new ExactNumericValue(value, makeNumericValue, bignum);
+      return new ExactNumericValue(value, makeNumericValue);
 
     if (isRational(value))
       return new ExactNumericValue(
         { rational: value },
-        makeNumericValue,
-        bignum
+        makeNumericValue
       );
 
-    if (value instanceof Decimal) {
-      if (value.isInteger() && value.e <= MAX_BIGINT_DIGITS) {
+    if (value instanceof BigDecimal) {
+      if (value.isInteger()) {
         const n = bigint(value.toString());
         if (n !== null)
-          return new ExactNumericValue(n, makeNumericValue, bignum);
+          return new ExactNumericValue(n, makeNumericValue);
       }
       return makeNumericValue(value);
     }
@@ -944,14 +907,13 @@ export class ComputeEngine implements IComputeEngine {
 
       // Check if decimal part is an integer
       // console.assert(value.rational === undefined);
-      if (value.re instanceof Decimal && value.re.isInteger())
+      if (value.re instanceof BigDecimal && value.re.isInteger())
         return new ExactNumericValue(
           {
             rational: [bigint(value.re.toString())!, BigInt(1)],
             // radical: value.radical,
           },
-          makeNumericValue,
-          bignum
+          makeNumericValue
         );
       if (typeof value.re === 'number' && Number.isInteger(value.re))
         return new ExactNumericValue(
@@ -959,8 +921,7 @@ export class ComputeEngine implements IComputeEngine {
             rational: [value.re, 1],
             // radical: value.radical
           },
-          makeNumericValue,
-          bignum
+          makeNumericValue
         );
       return makeNumericValue(value);
     }
@@ -987,7 +948,7 @@ export class ComputeEngine implements IComputeEngine {
         }
       }
 
-      return new ExactNumericValue(value, makeNumericValue, bignum);
+      return new ExactNumericValue(value, makeNumericValue);
     }
     throw Error('Unexpected value');
   }
@@ -1512,7 +1473,7 @@ export class ComputeEngine implements IComputeEngine {
       | string
       | NumericValue
       | MathJsonNumberObject
-      | Decimal
+      | BigDecimal
       | Complex
       | Rational,
     options?: { metadata: Metadata; canonical: CanonicalOptions }

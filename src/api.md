@@ -244,7 +244,7 @@ recursionLimit: number;
 ##### ExpressionComputeEngine.bignum()
 
 ```ts
-bignum: (a) => Decimal;
+bignum: (a) => BigDecimal;
 ```
 
 </MemberCard>
@@ -353,22 +353,22 @@ chop(n): number
 ###### chop(n)
 
 ```ts
-chop(n): 0 | Decimal
+chop(n): 0 | BigDecimal
 ```
 
 ####### n
 
-`Decimal`
+`BigDecimal`
 
 ###### chop(n)
 
 ```ts
-chop(n): number | Decimal
+chop(n): number | BigDecimal
 ```
 
 ####### n
 
-`number` | `Decimal`
+`number` | `BigDecimal`
 
 </MemberCard>
 
@@ -1735,7 +1735,7 @@ Otherwise, return `NaN` (not a number).
 ##### Expression.bignumRe
 
 ```ts
-readonly bignumRe: Decimal;
+readonly bignumRe: BigDecimal;
 ```
 
 If the value of this expression is a number, return the real part of the
@@ -1757,7 +1757,7 @@ otherwise as a number or `NaN` if the value is not a number.
 ##### Expression.bignumIm
 
 ```ts
-readonly bignumIm: Decimal;
+readonly bignumIm: BigDecimal;
 ```
 
 If the value of this expression is a number, return the imaginary part as
@@ -3093,7 +3093,7 @@ set value(value:
   | number
   | boolean
   | number[]
-  | Decimal
+  | BigDecimal
   | OnlyFirst<{
   re: number;
   im: number;
@@ -7725,7 +7725,7 @@ The value is equal to `(decimal * rational * sqrt(radical)) + im * i`
 
 ```ts
 type NumericValueData = {
-  re: Decimal | number;
+  re: BigDecimal | number;
   im: number;
 };
 ```
@@ -7882,7 +7882,7 @@ isZeroWithTolerance(_tolerance): boolean
 
 ####### \_tolerance
 
-`number` | `Decimal`
+`number` | `BigDecimal`
 
 </MemberCard>
 
@@ -7968,7 +7968,7 @@ abstract mul(other): NumericValue
 
 ####### other
 
-`number` | `Decimal` | [`NumericValue`](#abstract-numericvalue)
+`number` | `BigDecimal` | [`NumericValue`](#abstract-numericvalue)
 
 </MemberCard>
 
@@ -8261,104 +8261,8 @@ a pair of big integers.
 ### BigNum
 
 ```ts
-type BigNum = Decimal;
+type BigNum = BigDecimal;
 ```
-
-</MemberCard>
-
-<MemberCard>
-
-### BigNumFactory()
-
-```ts
-type BigNumFactory = (value) => Decimal;
-```
-
-</MemberCard>
-
-### IBigNum
-
-<MemberCard>
-
-##### IBigNum.\_BIGNUM\_NAN
-
-```ts
-readonly _BIGNUM_NAN: Decimal;
-```
-
-</MemberCard>
-
-<MemberCard>
-
-##### IBigNum.\_BIGNUM\_ZERO
-
-```ts
-readonly _BIGNUM_ZERO: Decimal;
-```
-
-</MemberCard>
-
-<MemberCard>
-
-##### IBigNum.\_BIGNUM\_ONE
-
-```ts
-readonly _BIGNUM_ONE: Decimal;
-```
-
-</MemberCard>
-
-<MemberCard>
-
-##### IBigNum.\_BIGNUM\_TWO
-
-```ts
-readonly _BIGNUM_TWO: Decimal;
-```
-
-</MemberCard>
-
-<MemberCard>
-
-##### IBigNum.\_BIGNUM\_HALF
-
-```ts
-readonly _BIGNUM_HALF: Decimal;
-```
-
-</MemberCard>
-
-<MemberCard>
-
-##### IBigNum.\_BIGNUM\_PI
-
-```ts
-readonly _BIGNUM_PI: Decimal;
-```
-
-</MemberCard>
-
-<MemberCard>
-
-##### IBigNum.\_BIGNUM\_NEGATIVE\_ONE
-
-```ts
-readonly _BIGNUM_NEGATIVE_ONE: Decimal;
-```
-
-</MemberCard>
-
-<MemberCard>
-
-##### IBigNum.bignum()
-
-```ts
-bignum(value): Decimal
-```
-
-####### value
-
-`string` | `number` | `bigint` | `Decimal`
 
 </MemberCard>
 

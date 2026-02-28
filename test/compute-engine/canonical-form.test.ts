@@ -85,8 +85,8 @@ describe('CANONICAL FORMS', () => {
       canonical = ["Divide", -101, ["Power", 10, ["Rational", 2, 3]]]
       eval-auto = -101 / 10^(2/3)
       eval-mach = -101 / 10^(2/3)
-      N-auto    = -21.7597903693220255898
-      N-mach    = -21.75979036932202
+      N-auto    = -21.7597903693220255897
+      N-mach    = -21.759790369322012
     `);
   });
 
@@ -120,7 +120,7 @@ describe('CANONICAL FORMS', () => {
       eval-auto = 3/7sqrt(5) * x
       eval-mach = 3/7sqrt(5) * x
       N-auto    = 0.958314847499909869891 * x
-      N-mach    = 0.958314847499911 * x
+      N-mach    = 0.9583148474999109 * x
     `);
   });
 
@@ -168,7 +168,7 @@ describe('CANONICAL FORMS', () => {
       eval-auto = 10/49sqrt(15)
       eval-mach = 10/49sqrt(15)
       N-auto    = 0.790404764532125894935
-      N-mach    = 0.790404764532126
+      N-mach    = 0.7904047645321257
     `);
   });
 
@@ -935,7 +935,7 @@ describe('COMMUTATIVE ORDER', () => {
       eval-auto = -45/2 * pi * x * z * y^(3/2)
       eval-mach = -45/2 * pi * x * z * y^(3/2)
       N-auto    = -70.6858347057703478654 * x * z * y^2
-      N-mach    = -70.6858347057703 * x * z * y^2
+      N-mach    = -70.68583470577035 * x * z * y^2
     `);
   });
 
@@ -1052,7 +1052,7 @@ describe('POLYNOMIAL ORDER', () => {
       simplify  = 14pi * x^3 + x^3
       eval-auto = 14pi * x^3 + x^3
       eval-mach = 14pi * x^3 + x^3
-      N-auto    = 44.9822971502571053384 * x^3
+      N-auto    = 44.9822971502571053385 * x^3
       N-mach    = 44.982297150257104 * x^3
     `);
   });

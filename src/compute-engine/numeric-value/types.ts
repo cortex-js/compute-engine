@@ -24,7 +24,7 @@
  *
  */
 
-import { Decimal } from 'decimal.js';
+import { BigDecimal } from '../../big-decimal';
 import type { Rational, SmallInteger } from '../numerics/types';
 import { NumericPrimitiveType } from '../../common/type/types';
 
@@ -37,13 +37,13 @@ export type ExactNumericValueData = {
 
 /** @category Numerics */
 export type NumericValueData = {
-  re?: Decimal | number; // A floating point number (non-integer)
+  re?: BigDecimal | number; // A floating point number (non-integer)
   im?: number; // The imaginary part of the number
 };
 
 /** @category Numerics */
 export type NumericValueFactory = (
-  data: number | Decimal | NumericValueData
+  data: number | BigDecimal | NumericValueData
 ) => NumericValue;
 
 /** @category Numerics */
@@ -70,7 +70,7 @@ export abstract class NumericValue {
   abstract get re(): number;
 
   /**  bignum version of .re, if available */
-  get bignumRe(): Decimal | undefined {
+  get bignumRe(): BigDecimal | undefined {
     return undefined;
   }
 
@@ -80,7 +80,7 @@ export abstract class NumericValue {
    */
   im: number;
 
-  get bignumIm(): Decimal | undefined {
+  get bignumIm(): BigDecimal | undefined {
     return undefined;
   }
 
@@ -93,7 +93,7 @@ export abstract class NumericValue {
   abstract get isComplexInfinity(): boolean;
 
   abstract get isZero(): boolean;
-  isZeroWithTolerance(_tolerance: number | Decimal): boolean {
+  isZeroWithTolerance(_tolerance: number | BigDecimal): boolean {
     return this.isZero;
   }
   abstract get isOne(): boolean;
@@ -109,7 +109,7 @@ export abstract class NumericValue {
   abstract inv(): NumericValue;
   abstract add(other: number | NumericValue): NumericValue;
   abstract sub(other: NumericValue): NumericValue;
-  abstract mul(other: number | Decimal | NumericValue): NumericValue;
+  abstract mul(other: number | BigDecimal | NumericValue): NumericValue;
   abstract div(other: SmallInteger | NumericValue): NumericValue;
   abstract pow(
     n: number | NumericValue | { re: number; im: number }

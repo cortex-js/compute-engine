@@ -1,5 +1,5 @@
 import { Complex } from 'complex-esm';
-import { Decimal } from 'decimal.js';
+import { BigDecimal } from '../../big-decimal';
 
 import type { Expression } from '../global-types';
 
@@ -9,13 +9,13 @@ import { isNumber } from './type-guards';
 export function apply(
   expr: Expression,
   fn: (x: number) => number | Complex,
-  bigFn?: (x: Decimal) => Decimal | Complex | number,
+  bigFn?: (x: BigDecimal) => BigDecimal | Complex | number,
   complexFn?: (x: Complex) => number | Complex
 ): Expression | undefined {
   if (!isNumber(expr)) return undefined;
   const ce = expr.engine;
 
-  let result: number | Complex | Decimal | undefined = undefined;
+  let result: number | Complex | BigDecimal | undefined = undefined;
   if (expr.im !== 0) result = complexFn?.(ce.complex(expr.re, expr.im));
   else {
     const bigRe = expr.bignumRe;
@@ -38,14 +38,14 @@ export function apply2(
   expr1: Expression,
   expr2: Expression,
   fn: (x1: number, x2: number) => number | Complex,
-  bigFn?: (x1: Decimal, x2: Decimal) => Decimal | Complex | number,
+  bigFn?: (x1: BigDecimal, x2: BigDecimal) => BigDecimal | Complex | number,
   complexFn?: (x1: Complex, x2: number | Complex) => Complex | number
 ): Expression | undefined {
   if (!isNumber(expr1) || !isNumber(expr2)) return undefined;
 
   const ce = expr1.engine;
 
-  let result: number | Complex | Decimal | undefined = undefined;
+  let result: number | Complex | BigDecimal | undefined = undefined;
   if (expr1.im !== 0 || expr2.im !== 0) {
     result = complexFn?.(
       ce.complex(expr1.re, expr1.im),

@@ -26,7 +26,7 @@ describe('NUMERIC gamma', () => {
       box       = ["Gamma", 5]
       eval-auto = Gamma(5)
       eval-mach = Gamma(5)
-      N-auto    = 23.9999999999999999994
+      N-auto    = 24
       N-mach    = 23.999999999999996
     `));
 });

@@ -1,16 +1,24 @@
-### 0.55.0 _2026-02-27_
+### [Unreleased]
+
+- **Fix: undeclared symbols with parenthesized numeric arguments now treated as
+  multiplication**. Previously `q(2q)` with undeclared `q` was auto-declared as
+  a function call, causing type inconsistencies. Now it is interpreted as
+  `q·(2q) = 2q²`. Only explicitly declared function symbols get function-call
+  treatment. Non-numeric arguments (e.g., tuples, triples) still trigger
+  function-call behavior.
 
 **Package modularization**: The monolithic `@cortex-js/compute-engine` package
 can now be imported as seven independently usable sub-paths, enabling smaller
 bundles for consumers who only need a subset of functionality.
 
-- **New sub-path `@cortex-js/compute-engine/latex-syntax`**: Standalone LaTeX
-  to MathJSON parsing and serialization. No `ComputeEngine` instance needed.
-  Use the `LatexSyntax` class for custom configurations or the free functions
+- **New sub-path `@cortex-js/compute-engine/latex-syntax`**: Standalone LaTeX to
+  MathJSON parsing and serialization. No `ComputeEngine` instance needed. Use
+  the `LatexSyntax` class for custom configurations or the free functions
   `parse()` and `serialize()` with a lazy default instance.
 
 - **New sub-path `@cortex-js/compute-engine/interval`**: Standalone interval
-  arithmetic library for reliable function evaluation with guaranteed enclosures.
+  arithmetic library for reliable function evaluation with guaranteed
+  enclosures.
 
 - **New sub-path `@cortex-js/compute-engine/numerics`**: Standalone numeric
   functions — rationals, big integers, arbitrary-precision decimals, complex
@@ -31,21 +39,21 @@ bundles for consumers who only need a subset of functionality.
   dictionaries and options for number formatting, parse behavior, and
   serialization style.
 
-- **LaTeX dictionary constants**: All 16 domain dictionaries are now individually
-  importable: `CORE_DICTIONARY`, `SYMBOLS_DICTIONARY`, `ALGEBRA_DICTIONARY`,
-  `ARITHMETIC_DICTIONARY`, `COMPLEX_DICTIONARY`, `TRIGONOMETRY_DICTIONARY`,
-  `CALCULUS_DICTIONARY`, `LINEAR_ALGEBRA_DICTIONARY`, `STATISTICS_DICTIONARY`,
-  `LOGIC_DICTIONARY`, `SETS_DICTIONARY`, `INEQUALITIES_DICTIONARY`,
-  `UNITS_DICTIONARY`, `OTHERS_DICTIONARY`, `PHYSICS_DICTIONARY`, and the
-  combined `LATEX_DICTIONARY`.
+- **LaTeX dictionary constants**: All 16 domain dictionaries are now
+  individually importable: `CORE_DICTIONARY`, `SYMBOLS_DICTIONARY`,
+  `ALGEBRA_DICTIONARY`, `ARITHMETIC_DICTIONARY`, `COMPLEX_DICTIONARY`,
+  `TRIGONOMETRY_DICTIONARY`, `CALCULUS_DICTIONARY`, `LINEAR_ALGEBRA_DICTIONARY`,
+  `STATISTICS_DICTIONARY`, `LOGIC_DICTIONARY`, `SETS_DICTIONARY`,
+  `INEQUALITIES_DICTIONARY`, `UNITS_DICTIONARY`, `OTHERS_DICTIONARY`,
+  `PHYSICS_DICTIONARY`, and the combined `LATEX_DICTIONARY`.
 
 - **Breaking: `ce.box()` renamed to `ce.expr()`**. The free function `box()` is
   also renamed to `expr()`. The old `box()` method remains as a deprecated
   wrapper.
 
 - **Breaking: `ce.latexDictionary` getter/setter removed**. Use
-  `new LatexSyntax({ dictionary: [...LATEX_DICTIONARY, ...customEntries] })`
-  to customize LaTeX dictionaries.
+  `new LatexSyntax({ dictionary: [...LATEX_DICTIONARY, ...customEntries] })` to
+  customize LaTeX dictionaries.
 
 - **Breaking: `static ComputeEngine.getLatexDictionary()` removed**. Import
   dictionary constants directly from the `latex-syntax` sub-path or the main
@@ -63,8 +71,8 @@ bundles for consumers who only need a subset of functionality.
 - **Compilation registry methods now `@internal`**:
   `registerCompilationTarget()`, `getCompilationTarget()`,
   `listCompilationTargets()`, `unregisterCompilationTarget()` are still
-  available but marked as internal API. Use the `compile()` free function
-  with a target instance or built-in name instead.
+  available but marked as internal API. Use the `compile()` free function with a
+  target instance or built-in name instead.
 
 - **New `Parser` type export**: The `Parser` type is now exported from the main
   package, enabling typed custom `LatexDictionaryEntry` parse handlers.
@@ -72,6 +80,35 @@ bundles for consumers who only need a subset of functionality.
 - **Dead code removal**: Removed unused files from `src/common/` (buffer, json5,
   markdown, parser, result, sigil, styled-text, syntax-highlighter, terminal)
   and `src/common/type/` (error-handler, resolve).
+
+- **Replaced `decimal.js` with custom `BigDecimal`**: Arbitrary-precision
+  arithmetic is now powered by a custom `BigDecimal` class (`src/big-decimal/`)
+  backed by native JavaScript `bigint`, replacing the `decimal.js` third-party
+  dependency. This brings smaller bundle size, no external dependencies for
+  numeric computation, and uses hardware-accelerated big-integer operations. The
+  `BigDecimal` representation is `significand × 10^exponent` where `significand`
+  is a `bigint` and `exponent` is a `number`. All transcendental functions (exp,
+  ln, sin, cos, atan2, gamma, etc.) are implemented using fixed-point `bigint`
+  arithmetic with configurable precision via `BigDecimal.precision`.
+
+- **Numeric serialization respects precision**: `.latex` and `.toString()` now
+  round arbitrary-precision numbers to `ce.precision` significant digits,
+  hiding noise digits from precision-bounded operations (division,
+  transcendentals). `.json` and `toJSON()` preserve the full unrounded value
+  for lossless round-tripping. Use `toMathJson({ fractionalDigits: 'auto' })`
+  for precision-rounded MathJSON output.
+
+- **Exact BigDecimal arithmetic**: `add()`, `sub()`, and `mul()` on `BigDecimal`
+  are now exact (no precision loss). Only `div()`, non-integer `pow()`, and
+  transcendental functions round to `BigDecimal.precision`.
+
+- **Precision-scaling Gamma and polygamma functions**: `bigGamma`, `bigGammaln`,
+  `bigDigamma`, `bigTrigamma`, `bigPolygamma`, and `bigZeta` (even-integer
+  special values) now scale with `BigDecimal.precision` instead of being capped
+  at ~16–50 correct digits. The fixed Lanczos/Spouge coefficient tables are
+  replaced with a Stirling asymptotic series using Bernoulli numbers computed at
+  runtime as exact bigint rationals. Integer Gamma values are now exact (returned
+  as factorials). At precision 500, Gamma(1/2) matches √π to all 500 digits.
 
 ### 0.54.0 _2026-02-26_
 
@@ -120,26 +157,26 @@ bundles for consumers who only need a subset of functionality.
   decomposition is simpler, `simplify()` automatically applies partial fraction
   decomposition.
 
-- **Breaking: `CoefficientList` now returns descending order**: The CAS
-  function `CoefficientList` now returns coefficients from highest to lowest
-  degree (e.g., `[1, 0, 2, 1]` for `x^3 + 2x + 1`), matching the new
+- **Breaking: `CoefficientList` now returns descending order**: The CAS function
+  `CoefficientList` now returns coefficients from highest to lowest degree
+  (e.g., `[1, 0, 2, 1]` for `x^3 + 2x + 1`), matching the new
   `polynomialCoefficients()` method and common external conventions. Previously
   it returned ascending order.
 
 - **`expr.match()` now accepts string patterns with auto-wildcarding**: Pass a
   LaTeX string like `'ax^2+bx+c'` and single-character symbols are automatically
   treated as wildcards. Results use clean unprefixed keys (`{a: 3, b: 2, c: 5}`)
-  with self-matches filtered out. `useVariations` and `matchMissingTerms` default
-  to `true` for string patterns.
+  with self-matches filtered out. `useVariations` and `matchMissingTerms`
+  default to `true` for string patterns.
 
 - **`expr.match()` now accepts MathJSON arrays directly**: Pass a raw MathJSON
   pattern like `['Add', '_a', '_b']` without calling `ce.box()` first.
 
 - **New `matchMissingTerms` option for `match()`**: When enabled, expressions
   with fewer operands than the pattern can still match by treating missing terms
-  as identity elements (0 for `Add`, 1 for `Multiply`). For example,
-  `3x^2+5` matches the pattern `ax^2+bx+c` with `b = 0`. Enabled by default
-  for string patterns.
+  as identity elements (0 for `Add`, 1 for `Multiply`). For example, `3x^2+5`
+  matches the pattern `ax^2+bx+c` with `b = 0`. Enabled by default for string
+  patterns.
 
 - **Non-strict parsing: implicit superscript for letter+digit**: In non-strict
   mode, a single letter immediately followed by a digit 2–9 is parsed as an

@@ -1,5 +1,5 @@
 import { Complex } from 'complex-esm';
-import { Decimal } from 'decimal.js';
+import { BigDecimal } from '../../big-decimal';
 
 import type { MathJsonExpression } from '../../math-json/types';
 import type { LatexString } from '../latex-syntax/types';
@@ -225,7 +225,7 @@ const CONSTRUCTIBLE_VALUES: [
 function applyAngle(
   angle: Expression,
   fn: (x: number) => number | Complex,
-  bigFn?: (x: Decimal) => Decimal | Complex | number,
+  bigFn?: (x: BigDecimal) => BigDecimal | Complex | number,
   complexFn?: (x: Complex) => number | Complex
 ): Expression | undefined {
   const theta = canonicalAngle(angle)?.N();
@@ -272,7 +272,7 @@ export function evalTrig(
         apply(
           op,
           (x) => Math.atan2(1, x),
-          (x) => Decimal.atan2(ce._BIGNUM_ONE, x),
+          (x) => BigDecimal.atan2(BigDecimal.ONE, x),
           (x) => x.inverse().atan()
         )
       );
@@ -281,7 +281,7 @@ export function evalTrig(
         apply(
           op,
           (x) => Math.asin(1 / x),
-          (x) => ce._BIGNUM_ONE.div(x).asin(),
+          (x) => BigDecimal.ONE.div(x).asin(),
           (x) => x.inverse().asin()
         )
       );
@@ -290,7 +290,8 @@ export function evalTrig(
         apply(
           op,
           Math.acosh,
-          (x) => x.acosh(),
+          // acosh(x) = ln(x + sqrt(x^2 - 1))
+          (x) => x.add(x.mul(x).sub(BigDecimal.ONE).sqrt()).ln(),
           (x) => x.acosh()
         )
       );
@@ -300,7 +301,7 @@ export function evalTrig(
         apply(
           op,
           (x) => Math.log((1 + x) / (x - 1)) / 2,
-          (x) => ce._BIGNUM_ONE.add(x).div(x.sub(ce._BIGNUM_ONE)).log().div(2),
+          (x) => BigDecimal.ONE.add(x).div(x.sub(BigDecimal.ONE)).ln().div(BigDecimal.TWO),
           (x) => ce.complex(1).add(x).div(x.sub(1)).log().div(2)
         )
       );
@@ -312,12 +313,12 @@ export function evalTrig(
           op,
           (x) => Math.log(1 / x + Math.sqrt(1 / (x * x) + 1)),
           (x) =>
-            ce._BIGNUM_ONE
+            BigDecimal.ONE
               .div(x.mul(x))
-              .add(ce._BIGNUM_ONE)
+              .add(BigDecimal.ONE)
               .sqrt()
-              .add(ce._BIGNUM_ONE.div(x))
-              .log(),
+              .add(BigDecimal.ONE.div(x))
+              .ln(),
           (x) => x.mul(x).inverse().add(1).sqrt().add(x.inverse()).log()
         )
       );
@@ -327,7 +328,7 @@ export function evalTrig(
         apply(
           op,
           (x) => Math.acos(1 / x),
-          (x) => ce._BIGNUM_ONE.div(x).acos(),
+          (x) => BigDecimal.ONE.div(x).acos(),
           (x) => x.inverse().acos()
         )
       );
@@ -347,7 +348,8 @@ export function evalTrig(
         apply(
           op,
           (x) => Math.log((1 + Math.sqrt(1 - x * x)) / x),
-          (x) => ce._BIGNUM_ONE.sub(x.mul(x).add(ce._BIGNUM_ONE).div(x)).log(),
+          // arsech(x) = ln((1 + sqrt(1 - x^2)) / x)
+          (x) => BigDecimal.ONE.sub(x.mul(x)).sqrt().add(BigDecimal.ONE).div(x).ln(),
           (x) => ce.complex(1).sub(x.mul(x)).add(1).div(x).log()
         )
       );
@@ -357,7 +359,8 @@ export function evalTrig(
         apply(
           op,
           Math.asinh,
-          (x) => x.asinh(),
+          // asinh(x) = ln(x + sqrt(x^2 + 1))
+          (x) => x.add(x.mul(x).add(BigDecimal.ONE).sqrt()).ln(),
           (x) => x.asinh()
         )
       );
@@ -377,7 +380,8 @@ export function evalTrig(
         apply(
           op,
           Math.atanh,
-          (x) => x.atanh(),
+          // atanh(x) = 0.5 * ln((1+x)/(1-x))
+          (x) => BigDecimal.ONE.add(x).div(BigDecimal.ONE.sub(x)).ln().div(BigDecimal.TWO),
           (x) => x.atanh()
         )
       );
@@ -402,42 +406,42 @@ export function evalTrig(
       return applyAngle(
         op,
         (x) => 1 / Math.tan(x),
-        (x) => ce._BIGNUM_ONE.div(x.tan()),
+        (x) => BigDecimal.ONE.div(x.tan()),
         (x) => x.tan().inverse()
       );
     case 'Coth':
       return applyAngle(
         op,
         (x) => 1 / Math.tanh(x),
-        (x) => ce._BIGNUM_ONE.div(x.tanh()),
+        (x) => BigDecimal.ONE.div(x.tanh()),
         (x) => x.tanh().inverse()
       );
     case 'Csc':
       return applyAngle(
         op,
         (x) => 1 / Math.sin(x),
-        (x) => ce._BIGNUM_ONE.div(x.sin()),
+        (x) => BigDecimal.ONE.div(x.sin()),
         (x) => x.sin().inverse()
       );
     case 'Csch':
       return applyAngle(
         op,
         (x) => 1 / Math.sinh(x),
-        (x) => ce._BIGNUM_ONE.div(x.sinh()),
+        (x) => BigDecimal.ONE.div(x.sinh()),
         (x) => x.sinh().inverse()
       );
     case 'Sec':
       return applyAngle(
         op,
         (x) => 1 / Math.cos(x),
-        (x) => ce._BIGNUM_ONE.div(x.cos()),
+        (x) => BigDecimal.ONE.div(x.cos()),
         (x) => x.cos().inverse()
       );
     case 'Sech':
       return applyAngle(
         op,
         (x) => 1 / Math.cosh(x),
-        (x) => ce._BIGNUM_ONE.div(x.cosh()),
+        (x) => BigDecimal.ONE.div(x.cosh()),
         (x) => x.cosh().inverse()
       );
     case 'Sin':
@@ -465,7 +469,7 @@ export function evalTrig(
 
         (x) => {
           const y = x.tan();
-          if (y.greaterThan(1e6) || y.lessThan(-1e6)) return ce.ComplexInfinity;
+          if (y.gt(1e6) || y.lt(-1e6)) return ce.ComplexInfinity;
           return y;
         },
         (x) => x.tan()

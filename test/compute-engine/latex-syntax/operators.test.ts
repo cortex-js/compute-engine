@@ -123,15 +123,14 @@ describe('OPERATOR invisible', () => {
         "q",
         ["Delimiter", ["InvisibleOperator", 2, "q"]]
       ]
-      canonical = ["q", ["Multiply", 2, "q"]]
-      simplify  = q(2Error(ErrorCode("incompatible-type", "number", "function")))
-      eval-auto = q(2q)
+      canonical = ["Multiply", 2, "q", "q"]
+      simplify  = 2q^2
     `));
 
   test('f(2q) // Invisible operator as a function', () =>
     expect(check('f(2q)')).toMatchInlineSnapshot(`
       box       = ["f", ["InvisibleOperator", 2, "q"]]
-      canonical = ["f", ["Pair", 2, "q"]]
+      canonical = ["f", ["Multiply", 2, "q"]]
     `));
 
   test('(abc)(xyz) // Invisible operator', () =>
@@ -294,7 +293,7 @@ describe('OPERATOR multiply', () => {
       canonical = ["Multiply", 2, "Pi"]
       eval-auto = 2pi
       eval-mach = 2pi
-      N-auto    = 6.28318530717958647692
+      N-auto    = 6.28318530717958647693
       N-mach    = 6.283185307179586
     `));
 

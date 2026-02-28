@@ -1,5 +1,6 @@
 import type { IComputeEngine as ComputeEngine } from '../global-types';
 import type { BigNum } from './types';
+import { BigDecimal } from '../../big-decimal';
 
 const gammaG = 7;
 const lanczos_7_c = [
@@ -135,110 +136,218 @@ export function erf(x: number): number {
   return sign * (1 - y * Math.exp(-x * x));
 }
 
-// Spouge approximation (suitable for large arguments)
+/**
+ * Bignum log-Gamma via Stirling asymptotic series with runtime-computed
+ * Bernoulli numbers.  Precision scales with BigDecimal.precision.
+ *
+ * Uses reflection for z < 0.5, exact formulas for positive integers and
+ * half-integers, and for the general case shifts z upward so the asymptotic
+ * series converges rapidly.
+ */
 export function bigGammaln(ce: ComputeEngine, z: BigNum): BigNum {
-  if (z.isNegative()) return ce._BIGNUM_NAN;
+  if (!z.isFinite()) return BigDecimal.NAN;
 
-  const GAMMA_P_LN = ce._cache<BigNum[]>('gamma-p-ln', () => {
-    return [
-      '0.99999999999999709182',
-      '57.156235665862923517',
-      '-59.597960355475491248',
-      '14.136097974741747174',
-      '-0.49191381609762019978',
-      '0.33994649984811888699e-4',
-      '0.46523628927048575665e-4',
-      '-0.98374475304879564677e-4',
-      '0.15808870322491248884e-3',
-      '-0.21026444172410488319e-3',
-      '0.2174396181152126432e-3',
-      '-0.16431810653676389022e-3',
-      '0.84418223983852743293e-4',
-      '-0.2619083840158140867e-4',
-      '0.36899182659531622704e-5',
-    ].map((x) => ce.bignum(x));
-  });
-
-  let x = GAMMA_P_LN[0];
-  for (let i = GAMMA_P_LN.length - 1; i > 0; --i) {
-    x = x.add(GAMMA_P_LN[i].div(z.add(i)));
+  // Reflection: ln(Gamma(z)) = ln(pi) - ln(|sin(pi*z)|) - ln(Gamma(1-z))
+  if (z.lt(BigDecimal.HALF)) {
+    const pi = BigDecimal.PI;
+    const sinPiZ = pi.mul(z).sin().abs();
+    if (sinPiZ.isZero()) return BigDecimal.NAN;
+    return pi.ln().sub(sinPiZ.ln()).sub(bigGammaln(ce, BigDecimal.ONE.sub(z)));
   }
 
-  const GAMMA_G_LN = ce._cache('gamma-g-ln', () => ce.bignum(607).div(128));
+  // Exact: positive integer z -> ln((z-1)!)
+  if (z.isInteger() && z.isPositive()) {
+    const n = z.toNumber();
+    if (n <= 1) return BigDecimal.ZERO;
+    let fact = 1n;
+    for (let i = 2; i < n; i++) fact *= BigInt(i);
+    return new BigDecimal(fact.toString()).ln();
+  }
 
-  const t = z.add(GAMMA_G_LN).add(ce._BIGNUM_HALF);
-  return ce._BIGNUM_NEGATIVE_ONE
-    .acos()
-    .mul(ce._BIGNUM_TWO)
-    .log()
-    .mul(ce._BIGNUM_HALF)
-    .add(
-      t.log().mul(z.add(ce._BIGNUM_HALF)).minus(t).add(x.log()).minus(z.log())
-    );
+  // Exact: half-integer z = n + 1/2 -> ln((2n)! * sqrt(pi) / (4^n * n!))
+  const zMinusHalf = z.sub(BigDecimal.HALF);
+  if (zMinusHalf.isInteger() && !zMinusHalf.isNegative()) {
+    const n = zMinusHalf.toNumber();
+    if (n === 0) {
+      // Gamma(1/2) = sqrt(pi), so ln(Gamma(1/2)) = ln(sqrt(pi)) = ln(pi)/2
+      return BigDecimal.PI.ln().div(BigDecimal.TWO);
+    }
+    let fact2n = 1n;
+    for (let i = 2; i <= 2 * n; i++) fact2n *= BigInt(i);
+    let factN = 1n;
+    for (let i = 2; i <= n; i++) factN *= BigInt(i);
+    const fourN = 4n ** BigInt(n);
+    return new BigDecimal(fact2n.toString())
+      .ln()
+      .add(BigDecimal.PI.ln().div(BigDecimal.TWO))
+      .sub(new BigDecimal(fourN.toString()).ln())
+      .sub(new BigDecimal(factN.toString()).ln());
+  }
+
+  // General: Stirling series with upward shift
+  const p = BigDecimal.precision;
+  const guard = 10;
+  const shiftTarget = Math.ceil(0.37 * p);
+  const zNum = z.toNumber();
+  const m = Math.max(0, Math.ceil(shiftTarget - zNum));
+
+  let logProduct = BigDecimal.ZERO;
+  let w = z;
+  for (let i = 0; i < m; i++) {
+    logProduct = logProduct.add(w.ln());
+    w = w.add(BigDecimal.ONE);
+  }
+
+  const maxTerms = Math.ceil(Math.PI * w.toNumber()) + 10;
+  const bernoulliRationals = getBernoulliRationals(ce, maxTerms);
+
+  // Stirling: (w - 1/2)*ln(w) - w + ln(2*pi)/2 + sum B_{2k}/(2k*(2k-1)*w^{2k-1})
+  let result = w
+    .sub(BigDecimal.HALF)
+    .mul(w.ln())
+    .sub(w)
+    .add(BigDecimal.PI.mul(BigDecimal.TWO).ln().div(BigDecimal.TWO));
+
+  const w2 = w.mul(w);
+  let wPow = w; // w^1 -> w^3 -> w^5 -> ...
+  const tol = new BigDecimal(10).pow(-(p + guard));
+  const nTerms = Math.min(maxTerms, bernoulliRationals.length);
+  for (let k = 0; k < nTerms; k++) {
+    const twoK = 2 * (k + 1);
+    const [bNum, bDen] = bernoulliRationals[k];
+    const denom = BigInt(twoK) * BigInt(twoK - 1);
+    const coeffNum = new BigDecimal(bNum.toString());
+    const coeffDen = new BigDecimal((bDen * denom).toString());
+    const term = coeffNum.div(coeffDen.mul(wPow));
+    if (k > 0 && term.abs().lt(tol)) break;
+    result = result.add(term);
+    wPow = wPow.mul(w2);
+  }
+
+  return result.sub(logProduct);
 }
 
-// From https://github.com/substack/gamma.js/blob/master/index.js
+/**
+ * Bignum Gamma function.  Precision scales with BigDecimal.precision.
+ *
+ * Reflection for z < 0.5; general case delegates to exp(bigGammaln(z)).
+ * Note: integer fast paths are in bigGammaln (returning exact ln(n!)).
+ * bigGamma goes through exp(ln(...)) so the result is a full-precision float.
+ */
 export function bigGamma(ce: ComputeEngine, z: BigNum): BigNum {
-  if (z.lessThan(ce._BIGNUM_HALF)) {
-    const pi = ce._BIGNUM_NEGATIVE_ONE.acos();
-    return pi.div(
-      pi
-        .mul(z)
-        .sin()
-        .mul(bigGamma(ce, ce._BIGNUM_ONE.sub(z)))
-    );
+  // Exact: positive integer → (z-1)!
+  if (z.isInteger() && z.isPositive()) {
+    const n = z.toNumber();
+    let fact = 1n;
+    for (let i = 2; i < n; i++) fact *= BigInt(i);
+    return new BigDecimal(fact.toString());
   }
 
-  if (z.greaterThan(100)) return bigGammaln(ce, z).exp();
+  // Reflection for z < 0.5: Gamma(z) = pi / (sin(pi*z) * Gamma(1-z))
+  if (z.lt(BigDecimal.HALF)) {
+    const pi = BigDecimal.PI;
+    const sinPiZ = pi.mul(z).sin();
+    if (sinPiZ.isZero()) return BigDecimal.NAN;
+    return pi.div(sinPiZ.mul(bigGamma(ce, BigDecimal.ONE.sub(z))));
+  }
 
-  z = z.sub(1);
-
-  // coefficients for gamma=7, kmax=8  Lanczos method
-  // Source: GSL/specfunc/gamma.c
-  const LANCZOS_7_C = ce._cache<BigNum[]>('lanczos-7-c', () => {
-    return [
-      '0.99999999999980993227684700473478',
-      '676.520368121885098567009190444019',
-      '-1259.13921672240287047156078755283',
-      '771.3234287776530788486528258894',
-      '-176.61502916214059906584551354',
-      '12.507343278686904814458936853',
-      '-0.13857109526572011689554707',
-      '9.984369578019570859563e-6',
-      '1.50563273514931155834e-7',
-    ].map((x) => ce.bignum(x));
-  });
-
-  let x = LANCZOS_7_C[0];
-  for (let i = 1; i < gammaG + 2; i++) x = x.add(LANCZOS_7_C[i].div(z.add(i)));
-
-  const t = z.add(gammaG).add(ce._BIGNUM_HALF);
-  return ce._BIGNUM_NEGATIVE_ONE
-    .acos()
-    .times(ce._BIGNUM_TWO)
-    .sqrt()
-    .mul(x.mul(t.neg().exp()).mul(t.pow(z.add(ce._BIGNUM_HALF))));
+  // General case
+  return bigGammaln(ce, z).exp();
 }
 
-// Bernoulli numbers B_{2k} as string constants for bignum cache (k=1..15)
-// More terms than machine version for higher-precision asymptotic expansions
-const BERNOULLI_2K_STRINGS = [
-  '0.16666666666666666666666666666666666666666666666666', // B_2 = 1/6
-  '-0.03333333333333333333333333333333333333333333333333', // B_4 = -1/30
-  '0.02380952380952380952380952380952380952380952380952', // B_6 = 1/42
-  '-0.03333333333333333333333333333333333333333333333333', // B_8 = -1/30
-  '0.07575757575757575757575757575757575757575757575758', // B_10 = 5/66
-  '-0.25311355311355311355311355311355311355311355311355', // B_12 = -691/2730
-  '1.16666666666666666666666666666666666666666666666667', // B_14 = 7/6
-  '-7.09215686274509803921568627450980392156862745098039', // B_16 = -3617/510
-  '54.97117794486215538847117794486215538847117794486216', // B_18 = 43867/798
-  '-529.12424242424242424242424242424242424242424242424242', // B_20 = -174611/330
-  '6192.12318840579710144927536231884057971014492753623188', // B_22 = 854513/138
-  '-86580.25311355311355311355311355311355311355311355311355', // B_24
-  '1425517.16666666666666666666666666666666666666666666666667', // B_26
-  '-27298231.06781609195402298850574712643678160919540229885', // B_28
-  '601580873.90064236838430386817483591677140064236838430387', // B_30
-];
+function gcdBigint(a: bigint, b: bigint): bigint {
+  while (b !== 0n) {
+    const t = b;
+    b = a % b;
+    a = t;
+  }
+  return a;
+}
+
+function absBigint(x: bigint): bigint {
+  return x < 0n ? -x : x;
+}
+
+/**
+ * Compute even Bernoulli numbers B_2, B_4, ..., B_{2n} as exact rationals.
+ * Returns [numerator, denominator] bigint pairs reduced to lowest terms.
+ *
+ * Uses the identity: sum_{k=0}^{m-1} C(m,k) * B_k = 0  (for m >= 2)
+ * i.e. B_m = -1/(m+1) * sum_{k=0}^{m-1} C(m+1,k) * B_k
+ *
+ * Since all odd Bernoulli numbers except B_1 = -1/2 are zero, we compute
+ * all B_k (k=0,1,2,...,2n) but only return the even ones.
+ */
+export function computeBernoulliEven(n: number): [bigint, bigint][] {
+  // Store all Bernoulli numbers B_0..B_{2n} as [num, den] rationals
+  const all: [bigint, bigint][] = [
+    [1n, 1n],   // B_0 = 1
+    [-1n, 2n],  // B_1 = -1/2
+  ];
+
+  for (let m = 2; m <= 2 * n; m++) {
+    // Odd m > 1: B_m = 0
+    if (m % 2 === 1) {
+      all.push([0n, 1n]);
+      continue;
+    }
+
+    // B_m = -1/(m+1) * sum_{k=0}^{m-1} C(m+1,k) * B_k
+    const mp1 = BigInt(m + 1);
+    let sumNum = 0n;
+    let sumDen = 1n;
+    let binom = 1n; // C(m+1, 0) = 1
+
+    for (let k = 0; k < m; k++) {
+      if (k > 0) {
+        // C(m+1, k) = C(m+1, k-1) * (m+1 - k + 1) / k = C(m+1, k-1) * (m+2-k) / k
+        binom = binom * (mp1 - BigInt(k) + 1n) / BigInt(k);
+      }
+      const [bkNum, bkDen] = all[k];
+      if (bkNum === 0n) continue; // skip zero Bernoulli numbers
+      // sum += binom * B_k
+      sumNum = sumNum * bkDen + binom * bkNum * sumDen;
+      sumDen = sumDen * bkDen;
+      // Periodically reduce to keep numbers manageable
+      if (k % 8 === 7) {
+        const g = gcdBigint(absBigint(sumNum), sumDen);
+        sumNum /= g;
+        sumDen /= g;
+      }
+    }
+
+    // B_m = -sum / (m+1)
+    let num = -sumNum;
+    let den = mp1 * sumDen;
+    const g = gcdBigint(absBigint(num), absBigint(den));
+    num /= g;
+    den /= g;
+    if (den < 0n) { num = -num; den = -den; }
+    all.push([num, den]);
+  }
+
+  // Return only even-indexed: B_2, B_4, ..., B_{2n}
+  const result: [bigint, bigint][] = [];
+  for (let i = 1; i <= n; i++) {
+    result.push(all[2 * i]);
+  }
+  return result;
+}
+
+function getBernoulliRationals(
+  ce: ComputeEngine,
+  minTerms: number
+): [bigint, bigint][] {
+  return ce._cache<[bigint, bigint][]>(
+    'bernoulli-even-rationals',
+    () => computeBernoulliEven(minTerms),
+    (existing) => {
+      if (existing.length >= minTerms) return existing;
+      return computeBernoulliEven(minTerms);
+    }
+  );
+}
+
 
 /**
  * Bignum Digamma function ψ(z) = d/dz ln(Γ(z))
@@ -246,42 +355,47 @@ const BERNOULLI_2K_STRINGS = [
  * recurrence to shift z > 7, then asymptotic expansion with Bernoulli numbers.
  */
 export function bigDigamma(ce: ComputeEngine, z: BigNum): BigNum {
-  const BERNOULLI = ce._cache<BigNum[]>('digamma-bernoulli', () =>
-    BERNOULLI_2K_STRINGS.map((x) => ce.bignum(x))
-  );
-
-  if (!z.isFinite()) return ce._BIGNUM_NAN;
+  if (!z.isFinite()) return BigDecimal.NAN;
 
   // Reflection formula for negative values: ψ(1-z) = ψ(z) + π·cot(πz)
   if (z.isNegative()) {
-    if (z.isInteger()) return ce._BIGNUM_NAN; // poles at non-positive integers
-    const pi = ce._BIGNUM_NEGATIVE_ONE.acos();
+    if (z.isInteger()) return BigDecimal.NAN; // poles at non-positive integers
+    const pi = BigDecimal.PI;
     const piZ = pi.mul(z);
     const cotPiZ = piZ.cos().div(piZ.sin());
-    return bigDigamma(ce, ce._BIGNUM_ONE.sub(z)).sub(pi.mul(cotPiZ));
+    return bigDigamma(ce, BigDecimal.ONE.sub(z)).sub(pi.mul(cotPiZ));
   }
 
-  if (z.isZero()) return ce._BIGNUM_NAN; // pole
+  if (z.isZero()) return BigDecimal.NAN; // pole
 
-  // Shift threshold: for p digits of precision, need z ~ p/2
-  // to ensure the asymptotic series terms are small enough
-  const shift = Math.max(7, Math.ceil(ce.precision / 2));
+  const p = BigDecimal.precision;
+  const guard = 10;
+  const shift = Math.max(7, Math.ceil(0.37 * p));
 
   // Recurrence: ψ(z+1) = ψ(z) + 1/z — shift z up until z > shift
-  let result = ce.bignum(0);
+  let result = new BigDecimal(0);
   let w = z;
-  while (w.lessThan(shift)) {
-    result = result.sub(ce._BIGNUM_ONE.div(w));
-    w = w.add(ce._BIGNUM_ONE);
+  while (w.lt(shift)) {
+    result = result.sub(BigDecimal.ONE.div(w));
+    w = w.add(BigDecimal.ONE);
   }
 
+  const maxTerms = Math.ceil(Math.PI * w.toNumber()) + 10;
+  const bernoulli = getBernoulliRationals(ce, maxTerms);
+
   // Asymptotic expansion: ψ(w) ~ ln(w) - 1/(2w) - Σ B_{2k}/(2k·w^{2k})
-  result = result.add(w.ln()).sub(ce._BIGNUM_ONE.div(w.mul(2)));
+  result = result.add(w.ln()).sub(BigDecimal.ONE.div(w.mul(2)));
   let w2k = w.mul(w); // w^2
   const w2 = w2k;
-  for (let k = 0; k < BERNOULLI.length; k++) {
-    const term = BERNOULLI[k].div(ce.bignum(2 * (k + 1)).mul(w2k));
-    if (term.abs().lessThan(ce.bignum(10).pow(-ce.precision - 5))) break;
+  const tol = new BigDecimal(10).pow(-(p + guard));
+  const nTerms = Math.min(maxTerms, bernoulli.length);
+  for (let k = 0; k < nTerms; k++) {
+    const [bNum, bDen] = bernoulli[k];
+    const twoK = BigInt(2 * (k + 1));
+    const term = new BigDecimal(bNum.toString()).div(
+      new BigDecimal((bDen * twoK).toString()).mul(w2k)
+    );
+    if (k > 0 && term.abs().lt(tol)) break;
     result = result.sub(term);
     w2k = w2k.mul(w2);
   }
@@ -294,43 +408,49 @@ export function bigDigamma(ce: ComputeEngine, z: BigNum): BigNum {
  * Same recurrence/asymptotic structure as digamma but for the second derivative.
  */
 export function bigTrigamma(ce: ComputeEngine, z: BigNum): BigNum {
-  const BERNOULLI = ce._cache<BigNum[]>('digamma-bernoulli', () =>
-    BERNOULLI_2K_STRINGS.map((x) => ce.bignum(x))
-  );
-
-  if (!z.isFinite()) return ce._BIGNUM_NAN;
+  if (!z.isFinite()) return BigDecimal.NAN;
 
   // Reflection formula: ψ₁(1-z) + ψ₁(z) = π²/sin²(πz)
   if (z.isNegative()) {
-    if (z.isInteger()) return ce._BIGNUM_NAN;
-    const pi = ce._BIGNUM_NEGATIVE_ONE.acos();
+    if (z.isInteger()) return BigDecimal.NAN;
+    const pi = BigDecimal.PI;
     const s = pi.mul(z).sin();
     return pi
       .mul(pi)
       .div(s.mul(s))
-      .sub(bigTrigamma(ce, ce._BIGNUM_ONE.sub(z)));
+      .sub(bigTrigamma(ce, BigDecimal.ONE.sub(z)));
   }
 
-  if (z.isZero()) return ce._BIGNUM_NAN; // pole
+  if (z.isZero()) return BigDecimal.NAN; // pole
 
-  const shift = Math.max(7, Math.ceil(ce.precision / 2));
+  const p = BigDecimal.precision;
+  const guard = 10;
+  const shift = Math.max(7, Math.ceil(0.37 * p));
 
   // Recurrence: ψ₁(z+1) = ψ₁(z) - 1/z²
-  let result = ce.bignum(0);
+  let result = new BigDecimal(0);
   let w = z;
-  while (w.lessThan(shift)) {
-    result = result.add(ce._BIGNUM_ONE.div(w.mul(w)));
-    w = w.add(ce._BIGNUM_ONE);
+  while (w.lt(shift)) {
+    result = result.add(BigDecimal.ONE.div(w.mul(w)));
+    w = w.add(BigDecimal.ONE);
   }
 
+  const maxTerms = Math.ceil(Math.PI * w.toNumber()) + 10;
+  const bernoulli = getBernoulliRationals(ce, maxTerms);
+
   // Asymptotic: ψ₁(w) ~ 1/w + 1/(2w²) + Σ B_{2k}/w^{2k+1}
-  result = result.add(ce._BIGNUM_ONE.div(w));
-  result = result.add(ce._BIGNUM_ONE.div(w.mul(w).mul(2)));
+  result = result.add(BigDecimal.ONE.div(w));
+  result = result.add(BigDecimal.ONE.div(w.mul(w).mul(2)));
   let w2kp1 = w.mul(w).mul(w); // w^3
   const w2 = w.mul(w);
-  for (let k = 0; k < BERNOULLI.length; k++) {
-    const term = BERNOULLI[k].div(w2kp1);
-    if (term.abs().lessThan(ce.bignum(10).pow(-ce.precision - 5))) break;
+  const tol = new BigDecimal(10).pow(-(p + guard));
+  const nTerms = Math.min(maxTerms, bernoulli.length);
+  for (let k = 0; k < nTerms; k++) {
+    const [bNum, bDen] = bernoulli[k];
+    const term = new BigDecimal(bNum.toString()).div(
+      new BigDecimal(bDen.toString()).mul(w2kp1)
+    );
+    if (k > 0 && term.abs().lt(tol)) break;
     result = result.add(term);
     w2kp1 = w2kp1.mul(w2);
   }
@@ -345,65 +465,62 @@ export function bigTrigamma(ce: ComputeEngine, z: BigNum): BigNum {
  */
 export function bigPolygamma(ce: ComputeEngine, n: BigNum, z: BigNum): BigNum {
   const nNum = n.toNumber();
-  if (!Number.isInteger(nNum) || nNum < 0) return ce._BIGNUM_NAN;
+  if (!Number.isInteger(nNum) || nNum < 0) return BigDecimal.NAN;
   if (nNum === 0) return bigDigamma(ce, z);
   if (nNum === 1) return bigTrigamma(ce, z);
-  if (!z.isFinite() || z.isZero()) return ce._BIGNUM_NAN;
-
-  const BERNOULLI = ce._cache<BigNum[]>('digamma-bernoulli', () =>
-    BERNOULLI_2K_STRINGS.map((x) => ce.bignum(x))
-  );
+  if (!z.isFinite() || z.isZero()) return BigDecimal.NAN;
 
   // Bignum factorial helper (small n, simple loop)
   const bigFactorial = (m: number): BigNum => {
-    let r = ce._BIGNUM_ONE;
+    let r: BigNum = BigDecimal.ONE;
     for (let i = 2; i <= m; i++) r = r.mul(i);
     return r;
   };
 
-  const shift = Math.max(7, Math.ceil(ce.precision / 2));
+  const p = BigDecimal.precision;
+  const guard = 10;
+  const shift = Math.max(7, Math.ceil(0.37 * p));
 
   // Handle negative z via recurrence shift
   let w = z;
-  let result = ce.bignum(0);
+  let result = new BigDecimal(0);
   const sign = nNum % 2 === 0 ? -1 : 1;
 
   if (w.isNegative()) {
-    if (w.isInteger()) return ce._BIGNUM_NAN;
+    if (w.isInteger()) return BigDecimal.NAN;
     const negSign = nNum % 2 === 0 ? 1 : -1;
-    while (w.lessThan(1)) {
+    while (w.lt(1)) {
       result = result.add(
-        ce
-          .bignum(negSign)
+        new BigDecimal(negSign)
           .mul(bigFactorial(nNum))
           .div(w.pow(nNum + 1))
       );
-      w = w.add(ce._BIGNUM_ONE);
+      w = w.add(BigDecimal.ONE);
     }
   }
 
   // Recurrence: ψₙ(z+1) = ψₙ(z) + (-1)^n n! / z^{n+1}
-  while (w.lessThan(shift)) {
+  while (w.lt(shift)) {
     result = result.add(
-      ce
-        .bignum(sign)
+      new BigDecimal(sign)
         .mul(bigFactorial(nNum))
         .div(w.pow(nNum + 1))
     );
-    w = w.add(ce._BIGNUM_ONE);
+    w = w.add(BigDecimal.ONE);
   }
+
+  const maxTerms = Math.ceil(Math.PI * w.toNumber()) + 10;
+  const bernoulli = getBernoulliRationals(ce, maxTerms);
 
   // Asymptotic: ψₙ(w) ~ (-1)^{n+1} [(n-1)!/w^n + n!/(2w^{n+1}) + Σ ...]
   const signA = nNum % 2 === 0 ? -1 : 1;
   result = result.add(
-    ce
-      .bignum(signA)
+    new BigDecimal(signA)
       .mul(bigFactorial(nNum - 1))
       .div(w.pow(nNum))
   );
   result = result.add(
-    ce
-      .bignum(signA)
+    new BigDecimal(signA)
       .mul(bigFactorial(nNum))
       .div(w.pow(nNum + 1).mul(2))
   );
@@ -411,18 +528,22 @@ export function bigPolygamma(ce: ComputeEngine, n: BigNum, z: BigNum): BigNum {
   // Higher-order terms using Bernoulli numbers
   let wPow = w.pow(nNum + 2);
   const w2 = w.mul(w);
-  const limit = Math.min(BERNOULLI.length, 10);
-  const tol = ce.bignum(10).pow(-ce.precision - 5);
-  for (let k = 0; k < limit; k++) {
+  const tol = new BigDecimal(10).pow(-(p + guard));
+  const nTerms = Math.min(maxTerms, bernoulli.length);
+  for (let k = 0; k < nTerms; k++) {
     const m = 2 * (k + 1);
-    let coeff = ce._BIGNUM_ONE;
-    for (let j = 0; j < m; j++) coeff = coeff.mul(nNum + j);
-    const term = ce
-      .bignum(signA)
-      .mul(BERNOULLI[k])
-      .mul(coeff)
-      .div(bigFactorial(m).mul(wPow));
-    if (term.abs().lessThan(tol)) break;
+    const [bNum, bDen] = bernoulli[k];
+    // Rising factorial: (n)(n+1)...(n+2k-1) = Π_{j=0}^{2k-1} (n+j)
+    let coeff = 1n;
+    for (let j = 0; j < m; j++) coeff *= BigInt(nNum + j);
+    // (2k)! as bigint
+    let factM = 1n;
+    for (let j = 2; j <= m; j++) factM *= BigInt(j);
+    // term = signA * B_{2k} * coeff / (factM * w^{n+2k})
+    const term = new BigDecimal((BigInt(signA) * bNum * coeff).toString()).div(
+      new BigDecimal((bDen * factM).toString()).mul(wPow)
+    );
+    if (k > 0 && term.abs().lt(tol)) break;
     result = result.add(term);
     wPow = wPow.mul(w2);
   }
@@ -445,40 +566,40 @@ export function bigBeta(ce: ComputeEngine, a: BigNum, b: BigNum): BigNum {
  * Uses Cohen-Villegas-Zagier acceleration (same algorithm as machine version).
  */
 export function bigZeta(ce: ComputeEngine, s: BigNum): BigNum {
-  if (!s.isFinite()) return ce._BIGNUM_NAN;
-  if (s.eq(1)) return ce.bignum(Infinity); // pole
+  if (!s.isFinite()) return BigDecimal.NAN;
+  if (s.eq(1)) return new BigDecimal(Infinity); // pole
 
-  const pi = ce._BIGNUM_NEGATIVE_ONE.acos();
+  const pi = BigDecimal.PI;
 
   // Special value: ζ(0) = -1/2
-  if (s.isZero()) return ce._BIGNUM_HALF.neg();
+  if (s.isZero()) return BigDecimal.HALF.neg();
 
   // Special values for positive even integers: ζ(2k) = (-1)^{k+1} B_{2k} (2π)^{2k} / (2(2k)!)
   if (s.isInteger() && s.isPositive()) {
     const sn = s.toNumber();
-    if (sn % 2 === 0 && sn >= 2 && sn <= 20) {
+    if (sn % 2 === 0 && sn >= 2) {
       const k = sn / 2;
-      const BERNOULLI = ce._cache<BigNum[]>('digamma-bernoulli', () =>
-        BERNOULLI_2K_STRINGS.map((x) => ce.bignum(x))
+      const bernoulli = getBernoulliRationals(ce, k);
+      const [bNum, bDen] = bernoulli[k - 1];
+      const bernAbs = new BigDecimal(absBigint(bNum).toString()).div(
+        new BigDecimal(bDen.toString())
       );
-      const bern = BERNOULLI[k - 1].abs();
       const twoPi = pi.mul(2);
-      let factVal = ce._BIGNUM_ONE;
+      let factVal: BigNum = BigDecimal.ONE;
       for (let i = 2; i <= sn; i++) factVal = factVal.mul(i);
-      return bern.mul(twoPi.pow(sn)).div(factVal.mul(2));
+      return bernAbs.mul(twoPi.pow(sn)).div(factVal.mul(2));
     }
   }
 
   // Functional equation for s < 0:
   // ζ(s) = 2^s π^{s-1} sin(πs/2) Γ(1-s) ζ(1-s)
   if (s.isNegative()) {
-    return ce
-      .bignum(2)
+    return new BigDecimal(2)
       .pow(s)
       .mul(pi.pow(s.sub(1)))
       .mul(pi.mul(s).div(2).sin())
-      .mul(bigGamma(ce, ce._BIGNUM_ONE.sub(s)))
-      .mul(bigZeta(ce, ce._BIGNUM_ONE.sub(s)));
+      .mul(bigGamma(ce, BigDecimal.ONE.sub(s)))
+      .mul(bigZeta(ce, BigDecimal.ONE.sub(s)));
   }
 
   // Cohen-Villegas-Zagier acceleration for the Dirichlet eta function
@@ -486,26 +607,25 @@ export function bigZeta(ce: ComputeEngine, s: BigNum): BigNum {
   const n = Math.max(22, Math.ceil(ce.precision * 1.3));
   const d = bigZetaCoefficients(ce, n);
   const dn = d[n];
-  let sum = ce.bignum(0);
+  let sum = new BigDecimal(0);
   for (let k = 0; k <= n; k++) {
     const sign = k % 2 === 0 ? 1 : -1;
     sum = sum.add(
-      ce
-        .bignum(sign)
+      new BigDecimal(sign)
         .mul(d[k].sub(dn))
-        .div(ce.bignum(k + 1).pow(s))
+        .div(new BigDecimal(k + 1).pow(s))
     );
   }
-  const eta = ce._BIGNUM_ONE.sub(ce.bignum(2).pow(ce._BIGNUM_ONE.sub(s)));
+  const eta = BigDecimal.ONE.sub(new BigDecimal(2).pow(BigDecimal.ONE.sub(s)));
   return sum.div(dn.mul(eta)).neg();
 }
 
 /** Bignum Cohen-Villegas-Zagier coefficients */
-function bigZetaCoefficients(ce: ComputeEngine, n: number): BigNum[] {
+function bigZetaCoefficients(_ce: ComputeEngine, n: number): BigNum[] {
   const d = new Array<BigNum>(n + 1);
-  d[0] = ce._BIGNUM_ONE;
+  d[0] = BigDecimal.ONE;
   // Compute d[k] = d[k-1] + C(n, k) using bignum binomial coefficients
-  let binom = ce._BIGNUM_ONE; // C(n, 0)
+  let binom: BigNum = BigDecimal.ONE; // C(n, 0)
   for (let i = 1; i <= n; i++) {
     binom = binom.mul(n - i + 1).div(i);
     d[i] = d[i - 1].add(binom);
@@ -519,31 +639,31 @@ function bigZetaCoefficients(ce: ComputeEngine, n: number): BigNum[] {
  */
 export function bigLambertW(ce: ComputeEngine, x: BigNum): BigNum {
   if (!x.isFinite()) return x; // ±Infinity, NaN
-  if (x.isZero()) return ce.bignum(0);
+  if (x.isZero()) return new BigDecimal(0);
 
-  const invE = ce._BIGNUM_ONE.div(ce._BIGNUM_ONE.exp()); // 1/e
+  const invE = BigDecimal.ONE.div(BigDecimal.ONE.exp()); // 1/e
   const negInvE = invE.neg();
 
   // Branch point: W(-1/e) = -1
   // Use a tolerance that accounts for machine-precision inputs
-  const tol = ce.bignum(10).pow(-ce.precision);
-  const branchTol = ce.bignum(10).pow(-15); // machine precision tolerance
-  if (x.sub(negInvE).abs().lessThan(branchTol)) return ce._BIGNUM_NEGATIVE_ONE;
+  const tol = new BigDecimal(10).pow(-ce.precision);
+  const branchTol = new BigDecimal(10).pow(-15); // machine precision tolerance
+  if (x.sub(negInvE).abs().lt(branchTol)) return BigDecimal.NEGATIVE_ONE;
 
   // W is defined for x >= -1/e
-  if (x.lessThan(negInvE)) return ce._BIGNUM_NAN;
+  if (x.lt(negInvE)) return BigDecimal.NAN;
 
   // Initial guess using machine precision
   let w: BigNum;
   const xNum = x.toNumber();
   if (xNum < 0) {
     const p = Math.sqrt(2 * (Math.E * xNum + 1));
-    w = ce.bignum(-1 + p - (p * p) / 3 + (11 / 72) * p * p * p);
+    w = new BigDecimal(-1 + p - (p * p) / 3 + (11 / 72) * p * p * p);
   } else if (xNum <= 1) {
-    w = ce.bignum(xNum * (1 - xNum * (1 - 1.5 * xNum)));
+    w = new BigDecimal(xNum * (1 - xNum * (1 - 1.5 * xNum)));
   } else if (xNum < 100) {
     const lnx = Math.log(xNum);
-    w = ce.bignum(lnx - Math.log(lnx));
+    w = new BigDecimal(lnx - Math.log(lnx));
   } else {
     const l1 = x.ln();
     const l2 = l1.ln();
@@ -559,7 +679,7 @@ export function bigLambertW(ce: ComputeEngine, x: BigNum): BigNum {
     const fpp = ew.mul(w.add(2));
     const delta = f.div(fp.sub(f.mul(fpp).div(fp.mul(2))));
     w = w.sub(delta);
-    if (delta.abs().lessThan(tol.mul(w.abs().add(1)))) break;
+    if (delta.abs().lt(tol.mul(w.abs().add(1)))) break;
   }
 
   return w;

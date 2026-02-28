@@ -1,7 +1,7 @@
 import type { SymbolDefinitions } from '../global-types';
 import { toBigint } from '../boxed-expression/numerics';
 import { gcd } from '../numerics/numeric-bigint';
-import { Decimal } from 'decimal.js';
+import { BigDecimal } from '../../big-decimal';
 
 export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
   {
@@ -155,7 +155,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         const k = toBigint(n);
         if (k === null || k < 1n) return ce.False;
         const D = 8n * k + 1n;
-        const sqrt = BigInt(Decimal.sqrt(ce.bignum(D)).toFixed(0));
+        const sqrt = BigInt(ce.bignum(D).sqrt().toFixed(0));
         return ce.symbol(
           sqrt * sqrt === D && (sqrt - 1n) % 2n === 0n ? 'True' : 'False'
         );
@@ -168,7 +168,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       evaluate: ([n], { engine: ce }) => {
         const k = toBigint(n);
         if (k === null || k < 0n) return ce.False;
-        const sqrt = BigInt(Decimal.sqrt(ce.bignum(k)).toFixed(0));
+        const sqrt = BigInt(ce.bignum(k).sqrt().toFixed(0));
         return ce.symbol(sqrt * sqrt === k ? 'True' : 'False');
       },
     },
@@ -180,7 +180,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         const k = toBigint(n);
         if (k === null || k < 1n) return ce.False;
         const discriminant = 3n * k + 1n;
-        const sqrt = BigInt(Decimal.sqrt(ce.bignum(discriminant)).toFixed(0));
+        const sqrt = BigInt(ce.bignum(discriminant).sqrt().toFixed(0));
         return ce.symbol(sqrt * sqrt === discriminant ? 'True' : 'False');
       },
     },
@@ -193,7 +193,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         if (k === null || k < 1n) return ce.False;
         if ((k - 1n) % 4n !== 0n) return ce.False;
         const t = (k - 1n) / 4n;
-        const sqrt = BigInt(Decimal.sqrt(ce.bignum(t)).toFixed(0));
+        const sqrt = BigInt(ce.bignum(t).sqrt().toFixed(0));
         return ce.symbol(sqrt * sqrt * 4n + 1n === k ? 'True' : 'False');
       },
     },

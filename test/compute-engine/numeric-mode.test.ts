@@ -13,6 +13,8 @@ describe('NUMERIC MODE', () => {
     expect(check('0.1 + 0.2')).toMatchInlineSnapshot(`
       box       = ["Add", 0.1, 0.2]
       simplify  = 0.3
+      eval-auto = 0.3
+      eval-mach = 0.30000000000000004
     `));
 
   test(`\\frac{1}{7}`, () =>
@@ -41,8 +43,8 @@ describe('NUMERIC MODE', () => {
       canonical = ["Multiply", ["Rational", 1, 4], "Pi"]
       eval-auto = 1/4 * pi
       eval-mach = 1/4 * pi
-      N-auto    = 0.785398163397448309615
-      N-mach    = 0.785398163397448
+      N-auto    = 0.785398163397448309616
+      N-mach    = 0.7853981633974483
     `));
 
   test(`\\frac{12345678901234567890}{23456789012345678901}`, () =>

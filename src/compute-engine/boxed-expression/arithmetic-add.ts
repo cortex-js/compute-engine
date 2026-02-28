@@ -444,26 +444,24 @@ function nvSum(
   ce: ComputeEngine,
   numericValues: NumericValue[]
 ): NumericValue[] {
-  const bignum = (x) => ce.bignum(x);
-  const makeExact = (x) => new ExactNumericValue(x, factory, bignum);
+  const makeExact = (x) => new ExactNumericValue(x, factory);
   const factory =
     ce.precision > MACHINE_PRECISION
-      ? (x) => new BigNumericValue(x, bignum)
-      : (x) => new MachineNumericValue(x, makeExact);
-  return ExactNumericValue.sum(numericValues, factory, bignum);
+      ? (x) => new BigNumericValue(x)
+      : (x) => new MachineNumericValue(x);
+  return ExactNumericValue.sum(numericValues, factory);
 }
 
 function nvSumN(
   ce: ComputeEngine,
   numericValues: NumericValue[]
 ): NumericValue {
-  const bignum = (x) => ce.bignum(x);
-  const makeExact = (x) => new ExactNumericValue(x, factory, bignum);
+  const makeExact = (x) => new ExactNumericValue(x, factory);
   const factory =
     ce.precision > MACHINE_PRECISION
-      ? (x) => new BigNumericValue(x, bignum)
-      : (x) => new MachineNumericValue(x, makeExact);
-  const result = ExactNumericValue.sum(numericValues, factory, bignum);
+      ? (x) => new BigNumericValue(x)
+      : (x) => new MachineNumericValue(x);
+  const result = ExactNumericValue.sum(numericValues, factory);
 
   if (result.length === 0) return makeExact(0);
   if (result.length === 1) return result[0].N();

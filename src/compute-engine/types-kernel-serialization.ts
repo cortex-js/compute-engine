@@ -48,11 +48,20 @@ export type JsonSerializationOptions = {
   repeatingDecimal: boolean;
 
   /**
-   * Maximum significant digits to serialize.
-   * - `"max"`: all available digits
-   * - `"auto"`: use compute-engine precision
+   * Controls how many digits are emitted for arbitrary-precision numbers.
    *
-   * **Default**: `"auto"`
+   * - `"max"`: all available digits from the raw `BigDecimal` value,
+   *   including digits beyond the working precision (no rounding).
+   * - `"auto"`: round to `ce.precision` significant digits. Internally
+   *   converted to `-ce.precision` (negative = total significant digits).
+   * - A non-negative number: exactly that many digits after the decimal
+   *   point (passed to `BigDecimal.toFixed()`).
+   *
+   * The `.json` property and `toJSON()` use `"max"` for lossless data
+   * interchange. The `.latex` getter uses `"auto"` so that noise digits
+   * from precision-bounded operations are not displayed.
+   *
+   * **Default**: `"max"` (when called via `toMathJson()` directly)
    */
   fractionalDigits: 'auto' | 'max' | number;
 };

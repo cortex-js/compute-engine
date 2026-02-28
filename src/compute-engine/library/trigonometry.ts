@@ -1,4 +1,4 @@
-import { Decimal } from 'decimal.js';
+import { BigDecimal } from '../../big-decimal';
 
 import { bignumPreferred } from '../boxed-expression/utils';
 import { checkArity } from '../boxed-expression/validate';
@@ -51,7 +51,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       holdUntil: 'N',
       wikidata: 'Q167',
       value: (engine) =>
-        engine.number(bignumPreferred(engine) ? engine._BIGNUM_PI : Math.PI),
+        engine.number(bignumPreferred(engine) ? BigDecimal.PI : Math.PI),
     },
   },
   {
@@ -163,7 +163,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       type: (ops) => numericTypeHandler(ops),
       evaluate: ([y, x], { engine: ce, numericApproximation }) => {
         if (numericApproximation)
-          return apply2(y, x, Math.atan2, (a, b) => Decimal.atan2(a, b));
+          return apply2(y, x, Math.atan2, (a, b) => BigDecimal.atan2(a, b));
 
         // See https://en.wikipedia.org/wiki/Argument_(complex_analysis)#Realizations_of_the_function_in_computer_languages
         if (y.isFinite === false && x.isFinite === false) return ce.NaN;
