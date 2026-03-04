@@ -17,6 +17,10 @@ import { expand } from '../src/compute-engine/boxed-expression/expand';
 const ce = new ComputeEngine();
 const engine = ce;
 
+console.log(parse('\\frac{10}{2}', { form: 'raw' }).json);
+
+console.log(parse('\\pi').im, parse('\\pi').im);
+
 // 1. sin(theta)**2 + cos(theta)**2 → 1 — Clean trig identity, but too simple.
 // 2. (alpha**2 - beta**2) / (alpha - beta) → didn't simplify. Engine doesn't cancel the
 // difference of squares factoring here.

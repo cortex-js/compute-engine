@@ -1,147 +1,61 @@
 ### [Unreleased]
 
-- **Fix: undeclared symbols with parenthesized numeric arguments now treated as
-  multiplication**. Previously `q(2q)` with undeclared `q` was auto-declared as
-  a function call, causing type inconsistencies. Now it is interpreted as
-  `q·(2q) = 2q²`. Only explicitly declared function symbols get function-call
-  treatment. Non-numeric arguments (e.g., tuples, triples) still trigger
-  function-call behavior.
+#### Breaking
 
-- **LatexSyntax is now an injectable dependency**. The `ComputeEngine`
-  constructor accepts an optional `latexSyntax` option to inject a `LatexSyntax`
-  instance. When importing the full package (`@cortex-js/compute-engine`), a
-  `LatexSyntax` is created automatically — existing code works unchanged. When
-  importing only `@cortex-js/compute-engine/core`, no `LatexSyntax` is bundled;
-  `ce.parse()`, `.latex`, and `.toLatex()` will throw unless a `LatexSyntax` is
-  explicitly provided. MathJSON serialization (`.json`, `.toMathJson()`)
-  gracefully omits the optional `latex` metadata field when no `LatexSyntax` is
-  available.
+- `ce.box()`/`box()` renamed to `ce.expr()`/`expr()` (`ce.box()` remains as a
+  deprecated wrapper).
+- Removed `ce.latexDictionary` getter/setter; configure dictionaries through
+  `new LatexSyntax({ dictionary: [...] })`.
+- Removed `ComputeEngine.getLatexDictionary()`; import dictionary constants from
+  package exports.
+- Removed deprecated type guard aliases: `isBoxedExpression`, `isBoxedNumber`,
+  `isBoxedSymbol`, `isBoxedFunction`, `isBoxedString`, `isBoxedTensor` (use
+  `isExpression`, `isNumber`, `isSymbol`, `isFunction`, `isString`, `isTensor`).
+- Removed `LibraryDefinition.latexDictionary`; LaTeX dictionaries now live in
+  the `latex-syntax` module.
 
-  ```ts
-  // Full package — works as before, LatexSyntax auto-created:
-  import { ComputeEngine } from '@cortex-js/compute-engine';
-  const ce = new ComputeEngine();
-  ce.parse('x^2');  // works
+#### Fixed
 
-  // Core-only — explicit injection for LaTeX support:
-  import { ComputeEngine } from '@cortex-js/compute-engine/core';
-  import { LatexSyntax } from '@cortex-js/compute-engine/latex-syntax';
-  const ce = new ComputeEngine({ latexSyntax: new LatexSyntax() });
-  ce.parse('x^2');  // works
+- **#295** The `parse()` free function now accepts the form options object, so
+  `parse("\\frac{10}{2}", { form: "raw" })` return `["Divide", "10", "2"]`.
+- Undeclared symbols followed by parenthesized numeric expressions are now
+  interpreted as multiplication, not implicit function calls (for example,
+  `q(2q)` -> `2q^2`). Function-call behavior remains for explicitly declared
+  function symbols and non-numeric argument forms.
 
-  // Core-only — no LaTeX needed:
-  import { ComputeEngine } from '@cortex-js/compute-engine/core';
-  const ce = new ComputeEngine();
-  ce.expr(['Add', 'x', 1]).simplify();  // works
-  ce.parse('x + 1');                     // throws: LatexSyntax not available
-  ```
+#### Added
 
-- **New `ILatexSyntax` interface**: A structural interface for LaTeX
-  parser/serializers, exposed on `IComputeEngine.latexSyntax`. Allows custom
-  implementations without depending on the `LatexSyntax` class.
+- Modular package exports for smaller bundles: `@cortex-js/compute-engine/core`,
+  `@cortex-js/compute-engine/compile`, `@cortex-js/compute-engine/latex-syntax`,
+  `@cortex-js/compute-engine/numerics`, and `@cortex-js/compute-engine/interval`
+  (with existing sub-paths still available, including `math-json`).
+- New standalone `LatexSyntax` API (class + `parse()`/`serialize()` helpers) for
+  LaTeX <-> MathJSON without a `ComputeEngine` instance.
+- New `ILatexSyntax` interface exposed via `IComputeEngine.latexSyntax` to allow
+  custom LaTeX parser/serializer implementations.
+- All 16 LaTeX domain dictionaries are now exported individually, plus the
+  combined `LATEX_DICTIONARY`.
+- `Parser` type is now exported from the main package for typed custom
+  `LatexDictionaryEntry` parse handlers.
 
-**Package modularization**: The monolithic `@cortex-js/compute-engine` package
-can now be imported as seven independently usable sub-paths, enabling smaller
-bundles for consumers who only need a subset of functionality.
+#### Changed
 
-- **New sub-path `@cortex-js/compute-engine/latex-syntax`**: Standalone LaTeX to
-  MathJSON parsing and serialization. No `ComputeEngine` instance needed. Use
-  the `LatexSyntax` class for custom configurations or the free functions
-  `parse()` and `serialize()` with a lazy default instance.
-
-- **New sub-path `@cortex-js/compute-engine/interval`**: Standalone interval
-  arithmetic library for reliable function evaluation with guaranteed
-  enclosures.
-
-- **New sub-path `@cortex-js/compute-engine/numerics`**: Standalone numeric
-  functions — rationals, big integers, arbitrary-precision decimals, complex
-  numbers, special functions (gamma, erf, Bessel, Fresnel, ...), statistics,
-  primes.
-
-- **New sub-path `@cortex-js/compute-engine/core`**: The `ComputeEngine` class,
-  `expr()`, type guards, and computation free functions (`simplify`, `evaluate`,
-  `N`, `expand`, `factor`, `solve`). No LaTeX or compilation dependencies.
-
-- **New sub-path `@cortex-js/compute-engine/compile`**: Compilation targets
-  (`JavaScriptTarget`, `GLSLTarget`, `WGSLTarget`, `PythonTarget`,
-  `IntervalJavaScriptTarget`) and the `compile()` function. The existing
-  `@cortex-js/compute-engine/math-json` sub-path is unchanged.
-
-- **New `LatexSyntax` class**: Standalone replacement for the engine's LaTeX
-  parsing/serialization. Accepts a `dictionary` option for custom LaTeX
-  dictionaries and options for number formatting, parse behavior, and
-  serialization style.
-
-- **LaTeX dictionary constants**: All 16 domain dictionaries are now
-  individually importable: `CORE_DICTIONARY`, `SYMBOLS_DICTIONARY`,
-  `ALGEBRA_DICTIONARY`, `ARITHMETIC_DICTIONARY`, `COMPLEX_DICTIONARY`,
-  `TRIGONOMETRY_DICTIONARY`, `CALCULUS_DICTIONARY`, `LINEAR_ALGEBRA_DICTIONARY`,
-  `STATISTICS_DICTIONARY`, `LOGIC_DICTIONARY`, `SETS_DICTIONARY`,
-  `INEQUALITIES_DICTIONARY`, `UNITS_DICTIONARY`, `OTHERS_DICTIONARY`,
-  `PHYSICS_DICTIONARY`, and the combined `LATEX_DICTIONARY`.
-
-- **Breaking: `ce.box()` renamed to `ce.expr()`**. The free function `box()` is
-  also renamed to `expr()`. The old `box()` method remains as a deprecated
-  wrapper.
-
-- **Breaking: `ce.latexDictionary` getter/setter removed**. Use
-  `new LatexSyntax({ dictionary: [...LATEX_DICTIONARY, ...customEntries] })` to
-  customize LaTeX dictionaries.
-
-- **Breaking: `static ComputeEngine.getLatexDictionary()` removed**. Import
-  dictionary constants directly from the `latex-syntax` sub-path or the main
-  package.
-
-- **Breaking: Deprecated type guard aliases removed**: `isBoxedExpression`,
-  `isBoxedNumber`, `isBoxedSymbol`, `isBoxedFunction`, `isBoxedString`,
-  `isBoxedTensor`. Use `isExpression`, `isNumber`, `isSymbol`, `isFunction`,
-  `isString`, `isTensor` instead.
-
-- **Breaking: LaTeX dictionaries decoupled from library definitions**. The
-  `latexDictionary` field on `LibraryDefinition` is removed. LaTeX dictionaries
-  are now owned entirely by the `latex-syntax` module.
-
-- **Compilation registry methods now `@internal`**:
-  `registerCompilationTarget()`, `getCompilationTarget()`,
-  `listCompilationTargets()`, `unregisterCompilationTarget()` are still
-  available but marked as internal API. Use the `compile()` free function with a
-  target instance or built-in name instead.
-
-- **New `Parser` type export**: The `Parser` type is now exported from the main
-  package, enabling typed custom `LatexDictionaryEntry` parse handlers.
-
-- **Dead code removal**: Removed unused files from `src/common/` (buffer, json5,
-  markdown, parser, result, sigil, styled-text, syntax-highlighter, terminal)
-  and `src/common/type/` (error-handler, resolve).
-
-- **Replaced `decimal.js` with custom `BigDecimal`**: Arbitrary-precision
-  arithmetic is now powered by a custom `BigDecimal` class (`src/big-decimal/`)
-  backed by native JavaScript `bigint`, replacing the `decimal.js` third-party
-  dependency. This brings smaller bundle size, no external dependencies for
-  numeric computation, and uses hardware-accelerated big-integer operations. The
-  `BigDecimal` representation is `significand × 10^exponent` where `significand`
-  is a `bigint` and `exponent` is a `number`. All transcendental functions (exp,
-  ln, sin, cos, atan2, gamma, etc.) are implemented using fixed-point `bigint`
-  arithmetic with configurable precision via `BigDecimal.precision`.
-
-- **Numeric serialization respects precision**: `.latex` and `.toString()` now
-  round arbitrary-precision numbers to `ce.precision` significant digits,
-  hiding noise digits from precision-bounded operations (division,
-  transcendentals). `.json` and `toJSON()` preserve the full unrounded value
-  for lossless round-tripping. Use `toMathJson({ fractionalDigits: 'auto' })`
-  for precision-rounded MathJSON output.
-
-- **Exact BigDecimal arithmetic**: `add()`, `sub()`, and `mul()` on `BigDecimal`
-  are now exact (no precision loss). Only `div()`, non-integer `pow()`, and
-  transcendental functions round to `BigDecimal.precision`.
-
-- **Precision-scaling Gamma and polygamma functions**: `bigGamma`, `bigGammaln`,
-  `bigDigamma`, `bigTrigamma`, `bigPolygamma`, and `bigZeta` (even-integer
-  special values) now scale with `BigDecimal.precision` instead of being capped
-  at ~16–50 correct digits. The fixed Lanczos/Spouge coefficient tables are
-  replaced with a Stirling asymptotic series using Bernoulli numbers computed at
-  runtime as exact bigint rationals. Integer Gamma values are now exact (returned
-  as factorials). At precision 500, Gamma(1/2) matches √π to all 500 digits.
+- `ComputeEngine` now accepts an injectable `latexSyntax` dependency.
+  - Full package imports still auto-create a LaTeX syntax instance.
+  - Core-only imports do not bundle LaTeX support; `parse()`, `.latex`, and
+    `toLatex()` require an injected `LatexSyntax`.
+  - MathJSON serialization omits optional LaTeX metadata when no LaTeX syntax is
+    present.
+- `decimal.js` has been replaced with a native `bigint`-backed `BigDecimal`
+  implementation, reducing dependency surface and bundle size.
+- `BigDecimal` `add()`, `sub()`, and `mul()` are now exact; rounding is limited
+  to operations that require it (`div()`, non-integer `pow()`, transcendentals).
+- Numeric string/LaTeX serialization now respects precision settings:
+  `.latex`/`.toString()` round to `ce.precision`, while `.json`/`toJSON()`
+  remain lossless.
+- High-precision special functions (`bigGamma`, `bigGammaln`, `bigDigamma`,
+  `bigTrigamma`, `bigPolygamma`, `bigZeta`) now scale with
+  `BigDecimal.precision`; integer Gamma values are exact.
 
 ### 0.54.0 _2026-02-26_
 
