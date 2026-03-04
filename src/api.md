@@ -441,6 +441,8 @@ Use `expr()` instead.
 
 ##### ExpressionComputeEngine.parse()
 
+###### parse(latex, options)
+
 ```ts
 parse(latex, options?): Expression
 ```
@@ -449,6 +451,22 @@ Parse a LaTeX string and return a boxed expression.
 
 This is a convenience method equivalent to `ce.expr(parse(latex))`,
 but uses the engine's symbol definitions for better parsing accuracy.
+
+####### latex
+
+`string`
+
+####### options?
+
+`Partial`\<[`ParseLatexOptions`](#parselatexoptions)\> & \{
+  `form`: [`FormOption`](#formoption);
+ \}
+
+###### parse(latex, options)
+
+```ts
+parse(latex, options?): Expression
+```
 
 ####### latex
 

@@ -30,7 +30,7 @@
   `@cortex-js/compute-engine/numerics`, and `@cortex-js/compute-engine/interval`
   (with existing sub-paths still available, including `math-json`).
 - New standalone `LatexSyntax` API (class + `parse()`/`serialize()` helpers) for
-  LaTeX <-> MathJSON without a `ComputeEngine` instance.
+  LaTeX <-\> MathJSON without a `ComputeEngine` instance.
 - New `ILatexSyntax` interface exposed via `IComputeEngine.latexSyntax` to allow
   custom LaTeX parser/serializer implementations.
 - All 16 LaTeX domain dictionaries are now exported individually, plus the
