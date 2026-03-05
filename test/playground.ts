@@ -11,11 +11,18 @@ import {
   isNumber,
   numericValue,
   isFunction,
+  expr,
+  expand,
 } from '../src/compute-engine';
-import { expand } from '../src/compute-engine/boxed-expression/expand';
 
 const ce = new ComputeEngine();
 const engine = ce;
+
+parse('f(x):=sin(x)');
+console.log(expr('f').type);
+console.log(expr('f').type.matches('function'));
+console.log(parse("2f'(x)").json);
+console.log(parse('2f \\left(x\\right)').json);
 
 console.log(parse('\\frac{10}{2}', { form: 'raw' }).json);
 
@@ -227,8 +234,8 @@ console.log(ce.parse('x').value);
 console.log(ce.parse('x').re);
 
 const localInput = '12+(-2)';
-const expr = engine.parse(localInput, { form: 'raw' });
-if (isFunction(expr) && expr.operator === 'Add' && expr.op1.valueOf() === 0) {
+const xpr = engine.parse(localInput, { form: 'raw' });
+if (isFunction(xpr) && xpr.operator === 'Add' && xpr.op1.valueOf() === 0) {
 }
 
 console.info(JSON.stringify(ce.parse('12+(-2)', { form: 'raw' }).json));

@@ -66,6 +66,18 @@ describe('DERIVATION', () => {
     expect(
       evaluate('\\frac{d}{dx} \\sqrt{\\sqrt[3]{x}}')
     ).toMatchInlineSnapshot(`1 / (6x^(5/6))`));
+
+  test('D(f(x), x) type is number when f returns number', () => {
+    engine.assign('f', engine.expr(['Function', ['Multiply', 'x', 2], 'x']));
+    const expr = engine.parse("f'(x)");
+    expect(expr.type.matches('number')).toBe(true);
+  });
+
+  test("f''(x) nested derivative type is numeric", () => {
+    engine.assign('f', engine.expr(['Function', ['Power', 'x', 3], 'x']));
+    const expr = engine.parse("f''(x)");
+    expect(expr.type.matches('number')).toBe(true);
+  });
 });
 
 describe('INDEFINITE INTEGRATION', () => {
@@ -95,12 +107,12 @@ describe('INDEFINITE INTEGRATION', () => {
 
   test('product', () =>
     expect(evaluate('\\int f(x) g(x) dx')).toMatchInlineSnapshot(
-      `int((f(x), g, x) dg  dx)`
+      `g * int(x * f(x) dx)`
     ));
 
   test('product with constants', () =>
     expect(evaluate('\\int 2\\pi f(x) dx')).toMatchInlineSnapshot(
-      `int((2, pi, f(x)) dx)`
+      `2pi * int(f(x) dx)`
     ));
 
   // Additional edge cases

@@ -147,6 +147,12 @@ export function canonicalInvisibleOperator(
   //  boxing the arguments)
   ops = flattenInvisibleOperator(ops);
 
+  // Combine adjacent (function-symbol, Delimiter) pairs into function
+  // applications. This handles cases like `2f \left(x\right)` where
+  // the space causes the parser to produce [2, f, Delimiter(x)]
+  // instead of [2, f(x)].
+  ops = combineFunctionApplications(ce, ops);
+
   //
   // Is it a number juxtaposed with a tagged unit expression?
   // e.g. `12\,\mathrm{cm}` or `9.8\,\mathrm{m/s^2}`
@@ -183,6 +189,8 @@ export function canonicalInvisibleOperator(
       (x) =>
         x.isValid &&
         (x.type.isUnknown ||
+          x.type.type === 'any' ||
+          x.type.type === 'expression' ||
           x.type.matches('number') ||
           (x.isIndexedCollection && !isString(x)))
     )
@@ -211,6 +219,69 @@ function flattenInvisibleOperator(
     else ys.push(x);
   }
   return ys;
+}
+
+/**
+ * Scan for adjacent (symbol, Delimiter) pairs where the symbol is a known
+ * function, and combine them into function applications.
+ *
+ * For example, [2, f, Delimiter(x)] → [2, f(x)] when f is declared as
+ * a function.  This handles cases like `2f \left(x\right)` where a
+ * space between the function name and `\left` prevents the parser from
+ * recognising the function call.
+ */
+function combineFunctionApplications(
+  ce: ComputeEngine,
+  ops: ReadonlyArray<Expression>
+): Expression[] {
+  const result: Expression[] = [];
+  let i = 0;
+  while (i < ops.length) {
+    const op = ops[i];
+    if (
+      i < ops.length - 1 &&
+      isSymbol(op) &&
+      isFunction(ops[i + 1], 'Delimiter')
+    ) {
+      const symName = op.symbol;
+      const def = ce.lookupDefinition(symName);
+      const delim = ops[i + 1] as Expression & { op1: Expression; ops: ReadonlyArray<Expression> };
+
+      // Already declared as function/operator → function call
+      if (
+        def &&
+        (isOperatorDef(def) || def.value?.type?.matches('function'))
+      ) {
+        let args: ReadonlyArray<Expression> = delim.op1
+          ? isFunction(delim.op1, 'Sequence')
+            ? delim.op1.ops
+            : [delim.op1]
+          : [];
+        args = flatten(args);
+        result.push(ce.function(symName, args));
+        i += 2;
+        continue;
+      }
+
+      // Undeclared symbol with multiple comma-separated args → auto-declare
+      // as function (mirrors the 2-operand path behavior at line 106-111)
+      if (delim.op1 && isFunction(delim.op1, 'Sequence')) {
+        let args: ReadonlyArray<Expression> = delim.op1.ops;
+        args = flatten(args);
+        if (args.length > 1) {
+          if (!def) ce.declare(symName, 'function');
+          else if (!isOperatorDef(def) && def.value?.type?.isUnknown)
+            op.canonical.infer('function');
+          result.push(ce.function(symName, args));
+          i += 2;
+          continue;
+        }
+      }
+    }
+    result.push(ops[i]);
+    i++;
+  }
+  return result;
 }
 
 function asInteger(expr: Expression): number {

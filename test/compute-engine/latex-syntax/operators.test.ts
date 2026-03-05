@@ -158,6 +158,17 @@ describe('OPERATOR invisible', () => {
       canonical = ["Divide", ["Multiply", 2, "a"], "b"]
       simplify  = (2a) / b
     `));
+
+  test('2g(x,y) // Undeclared function with multiple args in invisible operator', () =>
+    expect(check('2g(x,y)')).toMatchInlineSnapshot(`
+      box       = [
+        "InvisibleOperator",
+        2,
+        "g",
+        ["Delimiter", ["Sequence", "x", "y"], "(,)"]
+      ]
+      canonical = ["Multiply", 2, ["g", "x", "y"]]
+    `));
 });
 
 describe('OPERATOR prefix', () => {

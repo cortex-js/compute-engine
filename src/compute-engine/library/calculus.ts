@@ -143,6 +143,11 @@ volumes
       lazy: true,
       signature:
         '(expression, variable:symbol, variables:symbol+) -> expression',
+      type: ([body]) => {
+        // The derivative of a numeric expression is numeric
+        if (body && body.type.matches('number')) return body.type;
+        return undefined; // fall back to signature
+      },
       canonical: (ops, { engine: ce, scope }) => {
         // If the first argument is a function symbol (e.g., f where f(x):=2x),
         // apply it to the differentiation variables to produce a function call.

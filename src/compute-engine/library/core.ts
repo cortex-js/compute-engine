@@ -490,7 +490,22 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           symbol = checkType(ce, lhs, 'symbol');
         }
 
-        return ce._fn('Assign', [symbol, args[1].canonical]);
+        const canonRhs = args[1].canonical;
+        const result = ce._fn('Assign', [symbol, canonRhs]);
+
+        // If the RHS is a Function expression, declare the symbol as
+        // having 'function' type so that subsequent parsing recognizes
+        // it as a function (e.g., `2f(x)` parses as `2 * f(x)`)
+        const symbolName = sym(symbol);
+        if (symbolName && isFunction(canonRhs, 'Function')) {
+          // Trigger auto-declaration if the symbol isn't declared yet
+          if (!ce.lookupDefinition(symbolName)) ce.symbol(symbolName);
+          const def = ce.lookupDefinition(symbolName);
+          if (def && isValueDef(def) && def.value.inferredType)
+            def.value.type = ce.type('function');
+        }
+
+        return result;
       },
       evaluate: ([op1, op2], { engine: ce }) => {
         //
@@ -786,7 +801,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       description: 'Simplify an expression.',
       lazy: true,
       signature: '(any) -> expression',
-
+      type: ([x]) => x?.type ?? undefined,
       canonical: (ops, { engine: ce }) =>
         ce._fn('Simplify', checkArity(ce, ops, 1)),
       evaluate: ([x]) => x.simplify() ?? undefined,

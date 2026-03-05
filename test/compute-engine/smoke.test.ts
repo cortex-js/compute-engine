@@ -473,6 +473,17 @@ describe('CANONICALIZATION invisible operators', () => {
         ],
       ]
     `));
+  test(`2f'(x) // expression-type operand should produce Multiply, not Tuple`, () => {
+    engine.assign(
+      'f',
+      engine.expr(['Function', ['Multiply', 'x', 2], 'x'])
+    );
+    expect(canonicalToJson("2f'(x)")).toMatchObject([
+      'Multiply',
+      2,
+      ['D', expect.anything(), expect.anything()],
+    ]);
+  });
 });
 
 //

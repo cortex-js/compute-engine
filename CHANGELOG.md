@@ -1,3 +1,25 @@
+### [Unreleased]
+
+#### Fixed
+
+- After `parse('f(x):=\\sin(x)')`, the symbol `f` is now immediately recognized
+  as having type `function`. Previously its type remained `unknown` until the
+  `Assign` expression was explicitly evaluated.
+- `2f(x)` and `2f \left(x\right)` now both correctly parse as
+  `["Multiply", 2, ["f", "x"]]` when `f` is a known function symbol. Previously,
+  a space before `\left` caused the parser to produce a `Tuple` instead of
+  `Multiply`, and expressions whose return type was `any` (e.g., calls to
+  generically-typed functions) were also misclassified as `Tuple`.
+- Expressions involving operators that return `expression` type (such as `D`,
+  `Simplify`, `Annotated`) are now correctly treated as multiplicable in
+  juxtaposition contexts. For example, `2f'(x)` now produces
+  `["Multiply", 2, ["D", ...]]` instead of `Tuple`.
+- The `D` (derivative) operator now returns a numeric type when its body is
+  numeric, instead of always returning the generic `expression` type.
+- Undeclared symbols followed by parenthesized multi-argument expressions
+  (e.g., `2g(x,y)`) are now auto-declared as functions in all invisible operator
+  paths, not just the two-operand path.
+
 ### 0.55.0 _2026-03-04_
 
 #### Breaking
@@ -30,7 +52,7 @@
   `@cortex-js/compute-engine/numerics`, and `@cortex-js/compute-engine/interval`
   (with existing sub-paths still available, including `math-json`).
 - New standalone `LatexSyntax` API (class + `parse()`/`serialize()` helpers) for
-  LaTeX <-\> MathJSON without a `ComputeEngine` instance.
+  LaTeX <-> MathJSON without a `ComputeEngine` instance.
 - New `ILatexSyntax` interface exposed via `IComputeEngine.latexSyntax` to allow
   custom LaTeX parser/serializer implementations.
 - All 16 LaTeX domain dictionaries are now exported individually, plus the
