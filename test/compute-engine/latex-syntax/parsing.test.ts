@@ -366,22 +366,10 @@ describe('NON-STRICT MODE (Math-ASCII/Typst-like syntax)', () => {
 
     test('Strict mode: ** is not power', () => {
       // In strict mode, ** should not be treated as exponentiation
-      // (produces a type error due to missing operand)
-      expect(parse('x**2')).toMatchInlineSnapshot(`
-        [
-          "Multiply",
-          "x",
-          [
-            "Error",
-            [
-              "ErrorCode",
-              "incompatible-type",
-              "'number'",
-              "tuple<string, finite_integer>"
-            ]
-          ]
-        ]
-      `);
+      // (second * produces a missing operand error in the multiplication)
+      expect(parse('x**2')).toMatchInlineSnapshot(
+        `["Multiply", "x", ["Error", "'missing'"], 2]`
+      );
     });
   });
 

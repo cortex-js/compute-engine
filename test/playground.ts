@@ -18,16 +18,7 @@ import {
 const ce = new ComputeEngine();
 const engine = ce;
 
-parse('f(x):=sin(x)');
-console.log(expr('f').type);
-console.log(expr('f').type.matches('function'));
-console.log(parse("2f'(x)").json);
-console.log(parse('2f \\left(x\\right)').json);
-
-console.log(parse('\\frac{10}{2}', { form: 'raw' }).json);
-
-console.log(parse('\\pi').im, parse('\\pi').im);
-
+console.log(parse('x\\text{a$x$b}').toMathJson());
 // 1. sin(theta)**2 + cos(theta)**2 → 1 — Clean trig identity, but too simple.
 // 2. (alpha**2 - beta**2) / (alpha - beta) → didn't simplify. Engine doesn't cancel the
 // difference of squares factoring here.

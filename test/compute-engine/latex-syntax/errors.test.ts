@@ -253,7 +253,7 @@ check('Too many infix commands', () =>
 
 check('Command in string', () =>
   expect(engine.parse('1\\text{hello \\alpha}')).toMatchInlineSnapshot(
-    `["Pair", 1, "hello \\alpha"]`
+    `["Text", 1, "hello \\alpha"]`
   )
 );
 
@@ -419,7 +419,9 @@ check('Syntax error: \\1', () =>
 );
 
 check('Syntax error: ##', () =>
-  expect(engine.parse('x##')).toMatchInlineSnapshot(`["Pair", "x", "##"]`)
+  expect(engine.parse('x##')).toMatchInlineSnapshot(
+    `["Sequence", "x", ["Error", ["ErrorCode", "unexpected-token", "#"]]]`
+  )
 );
 
 check('Syntax error: &', () =>

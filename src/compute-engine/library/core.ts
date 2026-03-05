@@ -372,7 +372,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     Text: {
       description:
         'A sequence of strings, annotated expressions and other Text expressions',
-      signature: '(any*) -> expression',
+      signature: '(any*) -> string',
     },
   },
   {

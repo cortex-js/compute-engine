@@ -1,3 +1,29 @@
+### [Unreleased]
+
+#### Fixed
+
+- **`\text{}` flush bug**: `\text{a$x$b}` now correctly produces
+  `["Text", "'a'", "x", "'b'"]`. Previously the text before and after inline
+  math were merged due to a missing `flush()` call in `parseTextRun`.
+- **`#` / `*` parsed as valid symbols**: Bare `#` and `*` tokens were
+  incorrectly accepted as valid symbol names because they match the Unicode
+  `Emoji` property (keycap base characters). They now produce `unexpected-token`
+  errors as expected. The fix excludes ASCII characters from the emoji regex in
+  symbol validation.
+- **`Text` operator type**: The `Text` operator now has return type `string`
+  instead of `expression`.
+
+#### Added
+
+- **Text promotion**: When `InvisibleOperator` canonicalization encounters a
+  `Text` expression or a string operand, it now absorbs all operands into a
+  single `Text` expression. For example, `a\text{ in $x$ }b` canonicalizes to
+  `["Text", "a", " in ", "x", " ", "b"]` instead of producing a `Tuple`.
+- **Text infix keywords**: `\text{and}`, `\text{or}`, `\text{iff}`, and
+  `\text{if and only if}` are now recognized as infix operators that produce
+  `And`, `Or`, and `Equivalent` expressions respectively, following the existing
+  `\text{where}` pattern.
+
 ### 0.55.1 _2026-03-04_
 
 #### Fixed
@@ -16,9 +42,9 @@
   `["Multiply", 2, ["D", ...]]` instead of `Tuple`.
 - The `D` (derivative) operator now returns a numeric type when its body is
   numeric, instead of always returning the generic `expression` type.
-- Undeclared symbols followed by parenthesized multi-argument expressions
-  (e.g., `2g(x,y)`) are now auto-declared as functions in all invisible operator
-  paths, not just the two-operand path.
+- Undeclared symbols followed by parenthesized multi-argument expressions (e.g.,
+  `2g(x,y)`) are now auto-declared as functions in all invisible operator paths,
+  not just the two-operand path.
 
 ### 0.55.0 _2026-03-04_
 

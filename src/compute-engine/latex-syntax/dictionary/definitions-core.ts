@@ -826,6 +826,86 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       until: Readonly<Terminator>
     ): MathJsonExpression | null => parseWhereExpression(parser, lhs, until),
   },
+  // \text{and} — logical conjunction infix
+  {
+    latexTrigger: ['\\text'],
+    kind: 'infix',
+    associativity: 'right',
+    precedence: 235, // Same as \land
+    parse: (
+      parser: Parser,
+      lhs: MathJsonExpression,
+      until: Readonly<Terminator>
+    ): MathJsonExpression | null => {
+      const start = parser.index;
+      if (!matchTextKeyword(parser, 'and')) {
+        parser.index = start;
+        return null;
+      }
+      const rhs = parser.parseExpression({ ...until, minPrec: 235 });
+      return ['And', lhs, rhs ?? 'Nothing'] as MathJsonExpression;
+    },
+  },
+  // \text{or} — logical disjunction infix
+  {
+    latexTrigger: ['\\text'],
+    kind: 'infix',
+    associativity: 'right',
+    precedence: 230, // Same as \lor
+    parse: (
+      parser: Parser,
+      lhs: MathJsonExpression,
+      until: Readonly<Terminator>
+    ): MathJsonExpression | null => {
+      const start = parser.index;
+      if (!matchTextKeyword(parser, 'or')) {
+        parser.index = start;
+        return null;
+      }
+      const rhs = parser.parseExpression({ ...until, minPrec: 230 });
+      return ['Or', lhs, rhs ?? 'Nothing'] as MathJsonExpression;
+    },
+  },
+  // \text{iff} — biconditional (if and only if)
+  {
+    latexTrigger: ['\\text'],
+    kind: 'infix',
+    associativity: 'right',
+    precedence: 219, // Same as \iff
+    parse: (
+      parser: Parser,
+      lhs: MathJsonExpression,
+      until: Readonly<Terminator>
+    ): MathJsonExpression | null => {
+      const start = parser.index;
+      if (!matchTextKeyword(parser, 'iff')) {
+        parser.index = start;
+        return null;
+      }
+      const rhs = parser.parseExpression({ ...until, minPrec: 219 });
+      return ['Equivalent', lhs, rhs ?? 'Nothing'] as MathJsonExpression;
+    },
+  },
+  // \text{if and only if} — verbose biconditional
+  {
+    latexTrigger: ['\\text'],
+    kind: 'infix',
+    associativity: 'right',
+    precedence: 219,
+    parse: (
+      parser: Parser,
+      lhs: MathJsonExpression,
+      until: Readonly<Terminator>
+    ): MathJsonExpression | null => {
+      const start = parser.index;
+      if (!matchTextKeyword(parser, 'if and only if')) {
+        parser.index = start;
+        return null;
+      }
+      const rhs = parser.parseExpression({ ...until, minPrec: 219 });
+      return ['Equivalent', lhs, rhs ?? 'Nothing'] as MathJsonExpression;
+    },
+  },
   // Block serializer — used by both `where` and semicolon blocks
   {
     name: 'Block',
@@ -1467,6 +1547,7 @@ function parseTextRun(
       const expr = parser.parseExpression() ?? 'Nothing';
       parser.skipSpace();
       if (parser.match('<$>')) {
+        flush();
         runs.push(expr);
       } else {
         // We had an opening `$` but no closing `$`
@@ -1479,6 +1560,7 @@ function parseTextRun(
       const expr = parser.parseExpression() ?? 'Nothing';
       parser.skipSpace();
       if (parser.match('<$$>')) {
+        flush();
         runs.push(expr);
       } else {
         // We had an opening `$$` but no closing `$$`
@@ -2047,16 +2129,22 @@ function matchTextKeyword(parser: Parser, keyword: string): boolean {
   // Skip leading spaces
   while (parser.match('<space>')) {}
 
-  // Accumulate alphabetic characters
-  let text = '';
-  while (!parser.atEnd && parser.peek !== '<}>' && parser.peek !== '<space>') {
-    const tok = parser.peek;
-    // Only accumulate alpha chars
-    if (/^[a-zA-Z]$/.test(tok)) {
-      text += tok;
-      parser.nextToken();
+  // Match keyword character by character.
+  // Spaces in the keyword require at least one <space> token.
+  for (let i = 0; i < keyword.length; i++) {
+    if (keyword[i] === ' ') {
+      // Require at least one space, skip extras
+      if (!parser.match('<space>')) {
+        parser.index = start;
+        return false;
+      }
+      while (parser.match('<space>')) {}
     } else {
-      break;
+      if (parser.peek !== keyword[i]) {
+        parser.index = start;
+        return false;
+      }
+      parser.nextToken();
     }
   }
 
@@ -2065,11 +2153,6 @@ function matchTextKeyword(parser: Parser, keyword: string): boolean {
 
   // Must close with <}>
   if (!parser.match('<}>')) {
-    parser.index = start;
-    return false;
-  }
-
-  if (text !== keyword) {
     parser.index = start;
     return false;
   }

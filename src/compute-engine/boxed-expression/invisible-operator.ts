@@ -147,6 +147,23 @@ export function canonicalInvisibleOperator(
   //  boxing the arguments)
   ops = flattenInvisibleOperator(ops);
 
+  // Text promotion: if any operand is a Text expression or a string,
+  // absorb all operands into a single Text. This handles cases like
+  // `a \text{ hello } b` where InvisibleOperator wraps math + text,
+  // but the semantically correct result is a single Text flow.
+  if (ops.some((op) => isFunction(op, 'Text') || isString(op))) {
+    const runs: Expression[] = [];
+    for (const op of ops) {
+      if (isFunction(op, 'Text')) {
+        // Flatten Text's inner runs into the parent
+        runs.push(...op.ops);
+      } else if (op.operator !== 'HorizontalSpacing') {
+        runs.push(op.canonical);
+      }
+    }
+    return ce._fn('Text', runs);
+  }
+
   // Combine adjacent (function-symbol, Delimiter) pairs into function
   // applications. This handles cases like `2f \left(x\right)` where
   // the space causes the parser to produce [2, f, Delimiter(x)]

@@ -41,7 +41,7 @@ describe('STEFNOTCH #10', () => {
 
   test('3/ 3\\text{hello}6', () => {
     expect(parse('3\\text{hello}6')).toMatchInlineSnapshot(
-      `["Triple", 3, "'hello'", 6]`
+      `["Text", 3, "'hello'", 6]`
     );
   });
 
@@ -94,15 +94,7 @@ describe('STEFNOTCH #12', () => {
       [
         "Power",
         "ExponentialE",
-        [
-          "Error",
-          [
-            "ErrorCode",
-            "incompatible-type",
-            "'number'",
-            "tuple<imaginary, finite_real, string>"
-          ]
-        ]
+        ["Error", ["ErrorCode", "incompatible-type", "'number'", "'string'"]]
       ]
     `);
   });

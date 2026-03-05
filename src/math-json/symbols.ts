@@ -83,7 +83,9 @@ const FLAG_SEQUENCE = '\\p{RI}\\p{RI}';
 
 const TAG_MOD = `(?:[\\u{E0020}-\\u{E007E}]+\\u{E007F})`;
 const EMOJI_MOD = `(?:\\p{EMod}|${VS16}${KEYCAP}?|${TAG_MOD})`;
-const EMOJI_NOT_SYMBOL = `(?:(?=\\P{XIDC})\\p{Emoji})`;
+// Exclude ASCII chars (#, *, 0-9) which have the Emoji property in Unicode
+// but should not be treated as emoji symbols
+const EMOJI_NOT_SYMBOL = `(?:(?=\\P{XIDC})(?=[^\\x23\\x2a\\x30-\\x39])\\p{Emoji})`;
 const ZWJ_ELEMENT = `(?:${EMOJI_NOT_SYMBOL}${EMOJI_MOD}*|\\p{Emoji}${EMOJI_MOD}+|${FLAG_SEQUENCE})`;
 const POSSIBLE_EMOJI = `(?:${ZWJ_ELEMENT})(${ZWJ}${ZWJ_ELEMENT})*`;
 const SOME_EMOJI = new RegExp(`(?:${POSSIBLE_EMOJI})+`, 'u');

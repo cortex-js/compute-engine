@@ -1251,6 +1251,33 @@ export class _Parser implements Parser {
   }
 
   /**
+   * Speculatively check if any \text infix entry (e.g. "and", "or", "where")
+   * would match the upcoming tokens. This is used to prevent InvisibleOperator
+   * from consuming \text{keyword} as a text run when the keyword is actually
+   * an infix operator that was skipped due to precedence constraints.
+   *
+   * Returns true if any entry's parse function would succeed (non-null result).
+   * The parser index is always restored to its original position.
+   */
+  private wouldMatchTextInfix(
+    opDefs: [IndexedInfixEntry | IndexedPrefixEntry | IndexedPostfixEntry, number][]
+  ): boolean {
+    const start = this.index;
+    for (const [def, n] of opDefs) {
+      if (def.kind !== 'infix') continue;
+      this.index = start + n;
+      // Use a dummy lhs — we only care if the parse succeeds (matches keyword)
+      const result = def.parse(this, 'Nothing', { minPrec: 0 });
+      if (result !== null) {
+        this.index = start;
+        return true;
+      }
+    }
+    this.index = start;
+    return false;
+  }
+
+  /**
    * This returns an array of arguments (as in a function application),
    * or null if there is no match.
    *
@@ -2352,26 +2379,38 @@ export class _Parser implements Parser {
             opDefs.length === 0 ||
             opDefs.every(([def]) => def.latexTrigger === '\\text')
           ) {
-            // No infix operator, join the expressions with a Sequence
-            const rhs = this.parseExpression({
-              ...until,
-              minPrec: INVISIBLE_OP_PRECEDENCE + 1,
-            });
-            if (rhs !== null) {
-              if (operator(lhs) === 'InvisibleOperator') {
-                if (operator(rhs) === 'InvisibleOperator')
-                  result = [
-                    'InvisibleOperator',
-                    ...operands(lhs),
-                    ...operands(rhs),
-                  ];
-                else result = ['InvisibleOperator', ...operands(lhs), rhs];
-              } else if (operator(rhs) === 'InvisibleOperator') {
-                result = ['InvisibleOperator', lhs, ...operands(rhs)];
-              } else result = ['InvisibleOperator', lhs, rhs];
+            // All operator defs ahead are \text entries. Check if any of
+            // them would match an infix keyword (e.g. "and", "or", "where").
+            // If so, this is a real operator that was skipped due to
+            // precedence — do NOT enter InvisibleOperator.
+            if (
+              opDefs.length > 0 &&
+              this.wouldMatchTextInfix(opDefs as [IndexedInfixEntry, number][])
+            ) {
+              // A \text infix keyword is ahead but has lower precedence
+              // than our current minPrec — stop and let the caller handle it.
             } else {
-              if (result === null) {
-                result = this.options.parseUnexpectedToken?.(lhs, this) ?? null;
+              // No infix operator, join the expressions with a Sequence
+              const rhs = this.parseExpression({
+                ...until,
+                minPrec: INVISIBLE_OP_PRECEDENCE + 1,
+              });
+              if (rhs !== null) {
+                if (operator(lhs) === 'InvisibleOperator') {
+                  if (operator(rhs) === 'InvisibleOperator')
+                    result = [
+                      'InvisibleOperator',
+                      ...operands(lhs),
+                      ...operands(rhs),
+                    ];
+                  else result = ['InvisibleOperator', ...operands(lhs), rhs];
+                } else if (operator(rhs) === 'InvisibleOperator') {
+                  result = ['InvisibleOperator', lhs, ...operands(rhs)];
+                } else result = ['InvisibleOperator', lhs, rhs];
+              } else {
+                if (result === null) {
+                  result = this.options.parseUnexpectedToken?.(lhs, this) ?? null;
+                }
               }
             }
           }

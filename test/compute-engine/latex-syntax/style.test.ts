@@ -20,16 +20,13 @@ describe('STYLE - MATH MODE', () => {
 
 describe('STYLE - TEXT MODE', () => {
   test('\\text', () => {
-    // Whitespace should be preserved
-    expect(check('a\\text{ and }b')).toMatchInlineSnapshot(`
-      box       = ["InvisibleOperator", "a", " and ", "b"]
-      canonical = ["Triple", "a", " and ", "b"]
-    `);
+    // "and" is recognized as a math operator
+    expect(check('a\\text{ and }b')).toMatchInlineSnapshot(`["And", "a", "b"]`);
 
-    // Math mode inside text mode
+    // Math mode inside text mode -> the math expression is parsed and promoted to Text
     expect(check('a\\text{ in $x$ }b')).toMatchInlineSnapshot(`
-      box       = ["InvisibleOperator", "a", ["Text", "x", " in  "], "b"]
-      canonical = ["Triple", "a", ["Text", "x", " in  "], "b"]
+      box       = ["InvisibleOperator", "a", ["Text", " in ", "x", " "], "b"]
+      canonical = ["Text", "a", " in ", "x", " ", "b"]
     `);
 
     expect(check('a\\text{ black \\textcolor{red}{RED} }b'))
@@ -70,17 +67,15 @@ describe('STYLE - TEXT MODE', () => {
         "b"
       ]
       canonical = [
-        "Triple",
+        "Text",
         "a",
-        [
-          "Text",
-          " black ",
-          ["Annotated", "'RED'", {dict: {color: "red"}}],
-          ["Annotated", "'BLUE'", {dict: {color: "blue"}}]
-        ],
+        " black ",
+        ["Annotated", "'RED'", {dict: {color: "red"}}],
+        ["Annotated", "'BLUE'", {dict: {color: "blue"}}],
         "b"
       ]
-      eval-auto = (a, Text(" black ", "RED", "BLUE"), b)
+      eval-auto = Text(a, " black ", Annotated("RED", {"dict":{"color":"red"}}), Annotated("BLUE", {"dict":{"color":"blue"}}), b)
+      eval-mach = Text(a, " black ", "RED", "BLUE", b)
     `);
     expect(check('a\\text{ black \\textcolor{red}{RED} black} b'))
       .toMatchInlineSnapshot(`
@@ -135,5 +130,25 @@ describe('STYLE - TEXT MODE', () => {
         " "
       ]
     `);
+  });
+});
+
+describe('TEXT PROMOTION', () => {
+  test('math + text + math promotes to Text', () => {
+    expect(check('a\\text{ hello }b')).toMatchInlineSnapshot(`
+      box       = ["InvisibleOperator", "a", " hello ", "b"]
+      canonical = ["Text", "a", " hello ", "b"]
+    `);
+  });
+
+  test('math + text with inline math + math promotes to Text', () => {
+    expect(check('a\\text{ in $x$ }b')).toMatchInlineSnapshot(`
+      box       = ["InvisibleOperator", "a", ["Text", " in ", "x", " "], "b"]
+      canonical = ["Text", "a", " in ", "x", " ", "b"]
+    `);
+  });
+
+  test('text alone (no surrounding math) stays as-is', () => {
+    expect(check('\\text{hello}')).toMatchInlineSnapshot(`'hello'`);
   });
 });
