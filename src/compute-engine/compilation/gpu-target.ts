@@ -1,5 +1,11 @@
 import type { Expression } from '../global-types';
-import { isFunction, isSymbol } from '../boxed-expression/type-guards';
+import { isFunction, isNumber, isSymbol } from '../boxed-expression/type-guards';
+import {
+  tryGetConstant,
+  foldTerms,
+  tryGetComplexParts,
+  formatFloat,
+} from './constant-folding';
 
 import type {
   CompileTarget,
@@ -20,7 +26,7 @@ import { BaseCompiler } from './base-compiler';
 export const GPU_OPERATORS: CompiledOperators = {
   Add: ['+', 11],
   Negate: ['-', 14],
-  Subtract: ['-', 11],
+  Subtract: ['-', 11], // Subtract canonicalizes to Add+Negate; kept as fallback
   Multiply: ['*', 12],
   Divide: ['/', 13],
   Equal: ['==', 8],
@@ -37,6 +43,20 @@ export const GPU_OPERATORS: CompiledOperators = {
 /** Return the vec2 constructor name for the target language. */
 function gpuVec2(target?: CompileTarget<Expression>): string {
   return target?.language === 'wgsl' ? 'vec2f' : 'vec2';
+}
+
+/** Compile an expression as a GPU integer argument.
+ *  Integer constants emit as plain literals (`200`); other expressions
+ *  are wrapped in a cast (`int(...)` or `i32(...)`). */
+function compileIntArg(
+  expr: Expression,
+  compile: (e: Expression) => string,
+  target?: CompileTarget<Expression>
+): string {
+  const c = tryGetConstant(expr);
+  if (c !== undefined && Number.isInteger(c)) return c.toString();
+  const intCast = target?.language === 'wgsl' ? 'i32' : 'int';
+  return `${intCast}(${compile(expr)})`;
 }
 
 /** Maximum range for inline unrolling of Sum/Product loops in GPU targets. */
@@ -162,94 +182,121 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     if (args.length === 0) return '0.0';
     if (args.length === 1) return compile(args[0]);
     const anyComplex = args.some((a) => BaseCompiler.isComplexValued(a));
-    if (!anyComplex) return args.map((x) => compile(x)).join(' + ');
-    // Complex: promote real operands to vec2(x, 0.0)
-    const v2 = gpuVec2(target);
-    return args
-      .map((a) => {
-        const code = compile(a);
-        return BaseCompiler.isComplexValued(a) ? code : `${v2}(${code}, 0.0)`;
-      })
-      .join(' + ');
+    if (!anyComplex) {
+      return foldTerms(
+        args.map((x) => compile(x)),
+        '0.0',
+        '+'
+      );
+    }
+    // Try to decompose all operands into re/im parts
+    const parts = args.map((a) => tryGetComplexParts(a, compile));
+    if (parts.some((p) => p === null)) {
+      // Opaque complex operand — fall back to promote-and-add
+      const v2 = gpuVec2(target);
+      return args
+        .map((a) => {
+          const code = compile(a);
+          return BaseCompiler.isComplexValued(a) ? code : `${v2}(${code}, 0.0)`;
+        })
+        .join(' + ');
+    }
+    // All decomposed — collect re and im parts, fold each
+    const reParts: string[] = [];
+    const imParts: string[] = [];
+    for (const p of parts) {
+      if (p!.re !== null) reParts.push(p!.re);
+      if (p!.im !== null) imParts.push(p!.im);
+    }
+    const reSum = foldTerms(reParts, '0.0', '+');
+    const imSum = foldTerms(imParts, '0.0', '+');
+    return `${gpuVec2(target)}(${reSum}, ${imSum})`;
   },
-  Multiply: (args, compile, _target) => {
+  Multiply: (args, compile, target) => {
     if (args.length === 0) return '1.0';
     if (args.length === 1) return compile(args[0]);
     const anyComplex = args.some((a) => BaseCompiler.isComplexValued(a));
-    if (!anyComplex) return args.map((x) => compile(x)).join(' * ');
-    // Complex multiply: pairwise reduction
-    let result = compile(args[0]);
-    let resultIsComplex = BaseCompiler.isComplexValued(args[0]);
-    for (let i = 1; i < args.length; i++) {
-      const code = compile(args[i]);
-      const argIsComplex = BaseCompiler.isComplexValued(args[i]);
-      if (!resultIsComplex && !argIsComplex) {
-        result = `(${result} * ${code})`;
-      } else if (resultIsComplex && !argIsComplex) {
-        // complex * real: scalar multiplication (native)
-        result = `(${code} * ${result})`;
-      } else if (!resultIsComplex && argIsComplex) {
-        // real * complex: scalar multiplication (native)
-        result = `(${result} * ${code})`;
-        resultIsComplex = true;
-      } else {
-        // complex * complex
-        result = `_gpu_cmul(${result}, ${code})`;
-      }
-    }
-    return result;
-  },
-  Subtract: (args, compile, target) => {
-    if (args.length === 0) return '0.0';
-    if (args.length === 1) return compile(args[0]);
-    const anyComplex = args.some((a) => BaseCompiler.isComplexValued(a));
     if (!anyComplex) {
-      if (args.length === 2) return `${compile(args[0])} - ${compile(args[1])}`;
-      let result = compile(args[0]);
-      for (let i = 1; i < args.length; i++) {
-        result = `${result} - ${compile(args[i])}`;
-      }
-      return result;
+      return foldTerms(
+        args.map((x) => compile(x)),
+        '1.0',
+        '*'
+      );
     }
-    // Complex: promote real operands
-    const v2 = gpuVec2(target);
-    const promote = (a: Expression) => {
-      const code = compile(a);
-      return BaseCompiler.isComplexValued(a) ? code : `${v2}(${code}, 0.0)`;
-    };
-    if (args.length === 2) return `${promote(args[0])} - ${promote(args[1])}`;
-    let result = promote(args[0]);
-    for (let i = 1; i < args.length; i++) {
-      result = `${result} - ${promote(args[i])}`;
+    // Special case: scalars * imaginary_factor → vec2(0.0, product)
+    // Recognizes both ImaginaryUnit symbol and Complex(0, k) literals
+    const iIndex = args.findIndex(
+      (op) =>
+        isSymbol(op, 'ImaginaryUnit') ||
+        (isNumber(op) && op.re === 0 && op.im !== 0)
+    );
+    if (iIndex >= 0) {
+      const iFactor = args[iIndex];
+      const iScale = isSymbol(iFactor, 'ImaginaryUnit')
+        ? 1
+        : (iFactor as any).im;
+      const realFactors = args.filter((_, i) => i !== iIndex);
+      const v2 = gpuVec2(target);
+      if (realFactors.length === 0)
+        return `${v2}(0.0, ${formatFloat(iScale)})`;
+      const factors = realFactors.map((f) => compile(f));
+      if (iScale !== 1) factors.unshift(formatFloat(iScale));
+      const imCode = foldTerms(factors, '1.0', '*');
+      return `${v2}(0.0, ${imCode})`;
     }
+    // General complex multiply: separate real scalars and complex operands
+    const realCodes: string[] = [];
+    const complexCodes: string[] = [];
+    for (const a of args) {
+      if (BaseCompiler.isComplexValued(a)) complexCodes.push(compile(a));
+      else realCodes.push(compile(a));
+    }
+    const scalarCode = foldTerms(realCodes, '1.0', '*');
+    // Pairwise reduce complex operands
+    let result = complexCodes[0];
+    for (let i = 1; i < complexCodes.length; i++) {
+      result = `_gpu_cmul(${result}, ${complexCodes[i]})`;
+    }
+    // Apply scalar factor
+    if (scalarCode !== '1.0') result = `(${scalarCode} * ${result})`;
     return result;
   },
+  // No Subtract function handler — Subtract canonicalizes to Add+Negate.
+  // The operator entry in GPU_OPERATORS handles any edge cases.
   Divide: (args, compile, target) => {
     if (args.length === 0) return '1.0';
     if (args.length === 1) return compile(args[0]);
     const ac = BaseCompiler.isComplexValued(args[0]);
     const bc = args.length >= 2 && BaseCompiler.isComplexValued(args[1]);
     if (!ac && !bc) {
-      if (args.length === 2) return `${compile(args[0])} / ${compile(args[1])}`;
-      let result = compile(args[0]);
-      for (let i = 1; i < args.length; i++) {
-        result = `${result} / ${compile(args[i])}`;
+      if (args.length === 2) {
+        const a = tryGetConstant(args[0]);
+        const b = tryGetConstant(args[1]);
+        if (a !== undefined && b !== undefined && b !== 0)
+          return formatFloat(a / b);
+        if (b === 1) return compile(args[0]);
+        return `${compile(args[0])} / ${compile(args[1])}`;
       }
+      let result = compile(args[0]);
+      for (let i = 1; i < args.length; i++)
+        result = `${result} / ${compile(args[i])}`;
       return result;
     }
     // Complex division
     if (ac && bc) return `_gpu_cdiv(${compile(args[0])}, ${compile(args[1])})`;
-    if (ac && !bc) {
-      // complex / real: scalar division (native)
-      return `(${compile(args[0])} / ${compile(args[1])})`;
-    }
-    // real / complex
+    if (ac && !bc) return `(${compile(args[0])} / ${compile(args[1])})`;
     const v2 = gpuVec2(target);
     return `_gpu_cdiv(${v2}(${compile(args[0])}, 0.0), ${compile(args[1])})`;
   },
-  Negate: ([x], compile) => {
+  Negate: ([x], compile, target) => {
     if (x === null) throw new Error('Negate: no argument');
-    // Unary minus works natively on both float and vec2
+    const c = tryGetConstant(x);
+    if (c !== undefined) return formatFloat(-c);
+    if (isNumber(x) && x.im !== 0) {
+      return `${gpuVec2(target)}(${formatFloat(-x.re)}, ${formatFloat(-x.im)})`;
+    }
+    if (isSymbol(x, 'ImaginaryUnit'))
+      return `${gpuVec2(target)}(0.0, -1.0)`;
     return `(-${compile(x)})`;
   },
 
@@ -257,6 +304,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   Abs: (args, compile) => {
     if (BaseCompiler.isComplexValued(args[0]))
       return `length(${compile(args[0])})`;
+    if (BaseCompiler.isNonNegative(args[0])) return compile(args[0]);
     return `abs(${compile(args[0])})`;
   },
   Arccos: (args, compile) => {
@@ -274,7 +322,10 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       return `_gpu_catan(${compile(args[0])})`;
     return `atan(${compile(args[0])})`;
   },
-  Ceil: 'ceil',
+  Ceil: (args, compile) => {
+    if (BaseCompiler.isIntegerValued(args[0])) return compile(args[0]);
+    return `ceil(${compile(args[0])})`;
+  },
   Clamp: 'clamp',
   Cos: (args, compile) => {
     if (BaseCompiler.isComplexValued(args[0]))
@@ -288,7 +339,10 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     return `exp(${compile(args[0])})`;
   },
   Exp2: 'exp2',
-  Floor: 'floor',
+  Floor: (args, compile) => {
+    if (BaseCompiler.isIntegerValued(args[0])) return compile(args[0]);
+    return `floor(${compile(args[0])})`;
+  },
   Fract: 'fract',
   Ln: (args, compile) => {
     if (BaseCompiler.isComplexValued(args[0]))
@@ -307,9 +361,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       BaseCompiler.isComplexValued(base) ||
       BaseCompiler.isComplexValued(exp)
     ) {
-      // Optimize: e^z → _gpu_cexp(z) when base is ExponentialE
       if (isSymbol(base, 'ExponentialE')) return `_gpu_cexp(${compile(exp)})`;
-      // Promote real operands to vec2
       const v2 = gpuVec2(target);
       const bCode = BaseCompiler.isComplexValued(base)
         ? compile(base)
@@ -319,10 +371,25 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
         : `${v2}(${compile(exp)}, 0.0)`;
       return `_gpu_cpow(${bCode}, ${eCode})`;
     }
+    const bConst = tryGetConstant(base);
+    const eConst = tryGetConstant(exp);
+    if (bConst !== undefined && eConst !== undefined)
+      return formatFloat(Math.pow(bConst, eConst));
+    if (eConst === 0) return '1.0';
+    if (eConst === 1) return compile(base);
+    if (eConst === 2 && (isSymbol(base) || isNumber(base))) {
+      const code = compile(base);
+      return `(${code} * ${code})`;
+    }
+    if (eConst === -1) return `(1.0 / ${compile(base)})`;
+    if (eConst === 0.5) return `sqrt(${compile(base)})`;
     return `pow(${compile(base)}, ${compile(exp)})`;
   },
   Radians: 'radians',
-  Round: 'round',
+  Round: (args, compile) => {
+    if (BaseCompiler.isIntegerValued(args[0])) return compile(args[0]);
+    return `round(${compile(args[0])})`;
+  },
   Sign: 'sign',
   Sin: (args, compile) => {
     if (BaseCompiler.isComplexValued(args[0]))
@@ -333,6 +400,8 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   Sqrt: (args, compile) => {
     if (BaseCompiler.isComplexValued(args[0]))
       return `_gpu_csqrt(${compile(args[0])})`;
+    const c = tryGetConstant(args[0]);
+    if (c !== undefined) return formatFloat(Math.sqrt(c));
     return `sqrt(${compile(args[0])})`;
   },
   Step: 'step',
@@ -341,18 +410,21 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       return `_gpu_ctan(${compile(args[0])})`;
     return `tan(${compile(args[0])})`;
   },
-  Truncate: 'trunc',
+  Truncate: (args, compile) => {
+    if (BaseCompiler.isIntegerValued(args[0])) return compile(args[0]);
+    return `trunc(${compile(args[0])})`;
+  },
 
   // Complex-specific functions
-  Re: (args, compile) => {
+  Real: (args, compile) => {
     if (BaseCompiler.isComplexValued(args[0])) return `(${compile(args[0])}).x`;
     return compile(args[0]);
   },
-  Im: (args, compile) => {
+  Imaginary: (args, compile) => {
     if (BaseCompiler.isComplexValued(args[0])) return `(${compile(args[0])}).y`;
     return '0.0';
   },
-  Arg: (args, compile) => {
+  Argument: (args, compile) => {
     if (BaseCompiler.isComplexValued(args[0])) {
       const code = compile(args[0]);
       return `atan(${code}.y, ${code}.x)`;
@@ -577,13 +649,20 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   Square: ([x], compile) => {
     if (x === null) throw new Error('Square: no argument');
-    const arg = compile(x);
-    return `(${arg} * ${arg})`;
+    if (isSymbol(x) || isNumber(x)) {
+      const arg = compile(x);
+      return `(${arg} * ${arg})`;
+    }
+    return `pow(${compile(x)}, 2.0)`;
   },
   Root: ([x, n], compile) => {
     if (x === null) throw new Error('Root: no argument');
     if (n === null || n === undefined) return `sqrt(${compile(x)})`;
-    if (n?.re === 2) return `sqrt(${compile(x)})`;
+    const nConst = tryGetConstant(n);
+    if (nConst === 2) return `sqrt(${compile(x)})`;
+    const xConst = tryGetConstant(x);
+    if (xConst !== undefined && nConst !== undefined)
+      return formatFloat(Math.pow(xConst, 1 / nConst));
     return `pow(${compile(x)}, 1.0 / ${compile(n)})`;
   },
 
@@ -626,18 +705,14 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   Mandelbrot: ([c, maxIter], compile, target) => {
     if (c === null || maxIter === null)
       throw new Error('Mandelbrot: missing arguments');
-    const intCast = target?.language === 'wgsl' ? 'i32' : 'int';
-    return `_fractal_mandelbrot(${compile(c)}, ${intCast}(${compile(
-      maxIter
-    )}))`;
+    const iterCode = compileIntArg(maxIter, compile, target);
+    return `_fractal_mandelbrot(${compile(c)}, ${iterCode})`;
   },
   Julia: ([z, c, maxIter], compile, target) => {
     if (z === null || c === null || maxIter === null)
       throw new Error('Julia: missing arguments');
-    const intCast = target?.language === 'wgsl' ? 'i32' : 'int';
-    return `_fractal_julia(${compile(z)}, ${compile(c)}, ${intCast}(${compile(
-      maxIter
-    )}))`;
+    const iterCode = compileIntArg(maxIter, compile, target);
+    return `_fractal_julia(${compile(z)}, ${compile(c)}, ${iterCode})`;
   },
 
   // Vector/Matrix operations

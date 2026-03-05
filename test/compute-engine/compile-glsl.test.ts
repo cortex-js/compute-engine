@@ -21,7 +21,7 @@ describe('GLSL COMPILATION', () => {
     it('should compile complex expression', () => {
       const expr = ce.parse('x^2 + y^2');
       const code = glsl.compile(expr).code;
-      expect(code).toMatchInlineSnapshot(`pow(x, 2.0) + pow(y, 2.0)`);
+      expect(code).toMatchInlineSnapshot(`(x * x) + (y * y)`);
     });
   });
 
@@ -191,7 +191,7 @@ describe('GLSL COMPILATION', () => {
       ]);
       expect(code).toMatchInlineSnapshot(`
         float distanceSquared(float x, float y) {
-          return pow(x, 2.0) + pow(y, 2.0);
+          return (x * x) + (y * y);
         }
       `);
     });
@@ -210,7 +210,7 @@ describe('GLSL COMPILATION', () => {
       );
       expect(code).toMatchInlineSnapshot(`
         float vectorLength(float x, float y, float z) {
-          return sqrt(pow(x, 2.0) + pow(y, 2.0) + pow(z, 2.0));
+          return sqrt((x * x) + (y * y) + (z * z));
         }
       `);
     });
@@ -445,13 +445,13 @@ describe('GLSL COMPILATION', () => {
       expect(code).toMatchInlineSnapshot(`length(z)`);
     });
 
-    it('should compile Re and Im of complex', () => {
-      expect(glsl.compile(ce.expr(['Re', 'z'])).code).toMatchInlineSnapshot(
+    it('should compile Real and Imaginary of complex', () => {
+      expect(glsl.compile(ce.expr(['Real', 'z'])).code).toMatchInlineSnapshot(
         `(z).x`
       );
-      expect(glsl.compile(ce.expr(['Im', 'z'])).code).toMatchInlineSnapshot(
-        `(z).y`
-      );
+      expect(
+        glsl.compile(ce.expr(['Imaginary', 'z'])).code
+      ).toMatchInlineSnapshot(`(z).y`);
     });
 
     it('should compile Conjugate of complex', () => {
@@ -459,8 +459,8 @@ describe('GLSL COMPILATION', () => {
       expect(code).toMatchInlineSnapshot(`vec2(z.x, -z.y)`);
     });
 
-    it('should compile Arg of complex', () => {
-      const code = glsl.compile(ce.expr(['Arg', 'z'])).code;
+    it('should compile Argument of complex', () => {
+      const code = glsl.compile(ce.expr(['Argument', 'z'])).code;
       expect(code).toMatchInlineSnapshot(`atan(z.y, z.x)`);
     });
 

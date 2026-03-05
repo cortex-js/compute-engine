@@ -88,7 +88,7 @@ describe('COMPILE', () => {
       expect(compile(expr)?.code ?? '').toMatchInlineSnapshot(`
         (() => {
         let a;
-        a = Math.pow(_.x, 2);
+        a = (_.x * _.x);
         return a + 1
         })()
       `);
@@ -479,7 +479,7 @@ describe('COMPILE', () => {
     // These are GLSL graphics built-ins, Python-specific numpy/scipy functions,
     // or control-flow constructs handled by the compiler.
     const TARGET_SPECIFIC: Record<string, Set<string>> = {
-      'javascript': new Set(['If', 'List', 'Range', 'Integrate', 'Re', 'Im', 'Arg']),
+      'javascript': new Set(['If', 'List', 'Range', 'Integrate']),
       'glsl': new Set([
         'Clamp',
         'Mix',
@@ -498,9 +498,6 @@ describe('COMPILE', () => {
         'Reflect',
         'Refract',
         'List',
-        'Re',
-        'Im',
-        'Arg',
         'Conjugate',
       ]),
       'wgsl': new Set([
@@ -521,9 +518,6 @@ describe('COMPILE', () => {
         'Reflect',
         'Refract',
         'List',
-        'Re',
-        'Im',
-        'Arg',
         'Conjugate',
       ]),
       'interval-javascript': new Set(['If']),

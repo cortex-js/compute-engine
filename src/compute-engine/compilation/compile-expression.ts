@@ -2,7 +2,6 @@ import type { MathJsonSymbol } from '../../math-json/types';
 import type { Expression, JSSource } from '../global-types';
 import type { CompileTarget, CompilationResult, CompiledRunner } from './types';
 import { BaseCompiler } from './base-compiler';
-import { applicableN1 } from '../function-utils';
 import { assertCompilationOptionsContract } from '../engine-extension-contracts';
 
 type CompileExpressionOptions<T extends string = string> = {
@@ -83,17 +82,29 @@ export function compile<T extends string = 'javascript'>(
       realOnly: options?.realOnly,
     }) as CompilationResult<T>;
   } catch (e) {
-    // @fixme: the fallback needs to handle multiple arguments
     if (options?.fallback ?? true) {
       console.warn(
-        `Compilation fallback for "${expr.operator}": ${(e as Error).message}`
+        `Compilation fallback for "${expr.operator}" (target: ${options?.to ?? 'javascript'}): ${(e as Error).message}`
       );
+      const ce = expr.engine;
+      const fallbackRun = ((vars: Record<string, number>) => {
+        ce.pushScope();
+        try {
+          if (vars && typeof vars === 'object') {
+            for (const [k, v] of Object.entries(vars))
+              ce.assign(k, v);
+          }
+          return expr.evaluate().re;
+        } finally {
+          ce.popScope();
+        }
+      }) as unknown as CompiledRunner;
       return {
         target: (options?.to ?? 'javascript') as T,
         success: false,
         code: '',
         calling: 'expression',
-        run: applicableN1(expr) as unknown as CompiledRunner,
+        run: fallbackRun,
       } as CompilationResult<T>;
     }
     throw e;

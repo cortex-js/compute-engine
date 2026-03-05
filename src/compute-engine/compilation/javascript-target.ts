@@ -1,7 +1,8 @@
 import type { Expression } from '../global-types';
 import type { MathJsonSymbol } from '../../math-json/types';
-import { isSymbol, isFunction } from '../boxed-expression/type-guards';
+import { isSymbol, isNumber, isFunction } from '../boxed-expression/type-guards';
 import { Complex } from 'complex-esm';
+import { tryGetConstant } from './constant-folding';
 
 import {
   chop,
@@ -103,12 +104,23 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Abs: (args, compile) => {
     if (BaseCompiler.isComplexValued(args[0]))
       return `_SYS.cabs(${compile(args[0])})`;
+    if (BaseCompiler.isNonNegative(args[0])) return compile(args[0]);
     return `Math.abs(${compile(args[0])})`;
   },
   Add: (args, compile) => {
     if (args.length === 1) return compile(args[0]);
     const anyComplex = args.some((a) => BaseCompiler.isComplexValued(a));
-    if (!anyComplex) return `(${args.map((x) => compile(x)).join(' + ')})`;
+    if (!anyComplex) {
+      // Try full constant fold
+      const constants = args.map(tryGetConstant);
+      if (constants.every((c) => c !== undefined))
+        return String(constants.reduce((a, b) => a! + b!, 0));
+      // Filter out zero-valued operands
+      const nonZero = args.filter((a) => tryGetConstant(a) !== 0);
+      if (nonZero.length === 0) return '0';
+      if (nonZero.length === 1) return compile(nonZero[0]);
+      return `(${nonZero.map((x) => compile(x)).join(' + ')})`;
+    }
 
     const parts = args.map((a) => {
       const code = compile(a);
@@ -168,7 +180,10 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     return `Math.atan(${compile(args[0])})`;
   },
   Artanh: 'Math.atanh',
-  Ceil: 'Math.ceil',
+  Ceil: (args, compile) => {
+    if (BaseCompiler.isIntegerValued(args[0])) return compile(args[0]);
+    return `Math.ceil(${compile(args[0])})`;
+  },
   Chop: '_SYS.chop',
   Cos: (args, compile) => {
     if (BaseCompiler.isComplexValued(args[0]))
@@ -211,7 +226,10 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       return `_SYS.cexp(${compile(args[0])})`;
     return `Math.exp(${compile(args[0])})`;
   },
-  Floor: 'Math.floor',
+  Floor: (args, compile) => {
+    if (BaseCompiler.isIntegerValued(args[0])) return compile(args[0]);
+    return `Math.floor(${compile(args[0])})`;
+  },
   Fract: ([x], compile) => {
     if (x === null) throw new Error('Fract: no argument');
     return BaseCompiler.inlineExpression('${x} - Math.floor(${x})', compile(x));
@@ -321,12 +339,20 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     ) {
       return `_SYS.cpow(${compile(base)}, ${compile(exp)})`;
     }
-    const expVal = exp.re;
-    if (expVal === 0.5) return `Math.sqrt(${compile(base)})`;
-    if (expVal === 1 / 3) return `Math.cbrt(${compile(base)})`;
-    if (expVal === 1) return compile(base);
-    if (expVal === -1) return `(1 / (${compile(base)}))`;
-    if (expVal === -0.5) return `(1 / Math.sqrt(${compile(base)}))`;
+    const bConst = tryGetConstant(base);
+    const eConst = tryGetConstant(exp);
+    if (bConst !== undefined && eConst !== undefined)
+      return String(Math.pow(bConst, eConst));
+    if (eConst === 0) return '1';
+    if (eConst === 1) return compile(base);
+    if (eConst === 2 && (isSymbol(base) || isNumber(base))) {
+      const code = compile(base);
+      return `(${code} * ${code})`;
+    }
+    if (eConst === -1) return `(1 / (${compile(base)}))`;
+    if (eConst === 0.5) return `Math.sqrt(${compile(base)})`;
+    if (eConst === 1 / 3) return `Math.cbrt(${compile(base)})`;
+    if (eConst === -0.5) return `(1 / Math.sqrt(${compile(base)}))`;
     return `Math.pow(${compile(base)}, ${compile(exp)})`;
   },
   Range: (args, compile) => {
@@ -366,16 +392,29 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Root: ([arg, exp], compile) => {
     if (arg === null) throw new Error('Root: no argument');
     if (exp === null) return `Math.sqrt(${compile(arg)})`;
-    if (exp?.re === 2) return `Math.sqrt(${compile(arg)})`;
-    if (exp?.re === 3) return `Math.cbrt(${compile(arg)})`;
-    if (!isNaN(exp?.re)) return `Math.pow(${compile(arg)},  ${1 / exp.re})`;
+    const aConst = tryGetConstant(arg);
+    const nConst = tryGetConstant(exp);
+    if (aConst !== undefined && nConst !== undefined && nConst !== 0)
+      return String(Math.pow(aConst, 1 / nConst));
+    if (nConst === 2) return `Math.sqrt(${compile(arg)})`;
+    if (nConst === 3) return `Math.cbrt(${compile(arg)})`;
+    if (nConst !== undefined) return `Math.pow(${compile(arg)}, ${1 / nConst})`;
     return `Math.pow(${compile(arg)}, 1 / (${compile(exp)}))`;
   },
   Random: 'Math.random',
-  Round: 'Math.round',
+  Round: (args, compile) => {
+    if (BaseCompiler.isIntegerValued(args[0])) return compile(args[0]);
+    return `Math.round(${compile(args[0])})`;
+  },
   Square: (args, compile) => {
     const arg = args[0];
     if (arg === null) throw new Error('Square: no argument');
+    const c = tryGetConstant(arg);
+    if (c !== undefined) return String(c * c);
+    if (isSymbol(arg)) {
+      const code = compile(arg);
+      return `(${code} * ${code})`;
+    }
     return `Math.pow(${compile(arg)}, 2)`;
   },
   Sec: (args, compile) => {
@@ -408,6 +447,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Sqrt: (args, compile) => {
     if (BaseCompiler.isComplexValued(args[0]))
       return `_SYS.csqrt(${compile(args[0])})`;
+    const c = tryGetConstant(args[0]);
+    if (c !== undefined) return String(Math.sqrt(c));
     return `Math.sqrt(${compile(args[0])})`;
   },
   Tan: (args, compile) => {
@@ -424,9 +465,19 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     if (a === null || b === null) throw new Error('Mod: missing argument');
     const ca = compile(a);
     const cb = compile(b);
+    // For non-negative integers, plain % is correct Euclidean modulo
+    if (
+      BaseCompiler.isIntegerValued(a) &&
+      BaseCompiler.isIntegerValued(b) &&
+      BaseCompiler.isNonNegative(a)
+    )
+      return `(${ca} % ${cb})`;
     return `((${ca} % ${cb}) + ${cb}) % ${cb}`;
   },
-  Truncate: 'Math.trunc',
+  Truncate: (args, compile) => {
+    if (BaseCompiler.isIntegerValued(args[0])) return compile(args[0]);
+    return `Math.trunc(${compile(args[0])})`;
+  },
   Remainder: ([a, b], compile) => {
     if (a === null || b === null)
       throw new Error('Remainder: missing argument');
@@ -435,26 +486,20 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     )} / ${compile(b)}))`;
   },
 
-  // Arithmetic operators handled as functions for completeness
-  Subtract: ([a, b], compile) => {
-    if (a === null || b === null) throw new Error('Subtract: missing argument');
-    const ac = BaseCompiler.isComplexValued(a);
-    const bc = BaseCompiler.isComplexValued(b);
-    if (!ac && !bc) return `(${compile(a)} - ${compile(b)})`;
-
-    const ca = compile(a);
-    const cb = compile(b);
-    const reA = ac ? `(${ca}).re` : ca;
-    const imA = ac ? `(${ca}).im` : '0';
-    const reB = bc ? `(${cb}).re` : cb;
-    const imB = bc ? `(${cb}).im` : '0';
-    return `({ re: ${reA} - ${reB}, im: ${imA} - ${imB} })`;
-  },
+  // No Subtract function handler — Subtract canonicalizes to Add+Negate.
+  // The operator entry in JAVASCRIPT_OPERATORS handles any edge cases.
   Divide: ([a, b], compile) => {
     if (a === null || b === null) throw new Error('Divide: missing argument');
     const ac = BaseCompiler.isComplexValued(a);
     const bc = BaseCompiler.isComplexValued(b);
-    if (!ac && !bc) return `(${compile(a)} / ${compile(b)})`;
+    if (!ac && !bc) {
+      const ca = tryGetConstant(a);
+      const cb = tryGetConstant(b);
+      if (ca !== undefined && cb !== undefined && cb !== 0)
+        return String(ca / cb);
+      if (cb === 1) return compile(a);
+      return `(${compile(a)} / ${compile(b)})`;
+    }
 
     if (ac && bc) {
       return `(() => { const _a = ${compile(a)}, _b = ${compile(
@@ -472,13 +517,29 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   Negate: ([x], compile) => {
     if (x === null) throw new Error('Negate: no argument');
-    if (!BaseCompiler.isComplexValued(x)) return `(-${compile(x)})`;
+    if (!BaseCompiler.isComplexValued(x)) {
+      const c = tryGetConstant(x);
+      if (c !== undefined) return String(-c);
+      return `(-${compile(x)})`;
+    }
     return `_SYS.cneg(${compile(x)})`;
   },
   Multiply: (args, compile) => {
     if (args.length === 1) return compile(args[0]);
     const anyComplex = args.some((a) => BaseCompiler.isComplexValued(a));
-    if (!anyComplex) return `(${args.map((x) => compile(x)).join(' * ')})`;
+    if (!anyComplex) {
+      // Short-circuit on zero
+      if (args.some((a) => tryGetConstant(a) === 0)) return '0';
+      // Try full constant fold
+      const constants = args.map(tryGetConstant);
+      if (constants.every((c) => c !== undefined))
+        return String(constants.reduce((a, b) => a! * b!, 1));
+      // Filter out identity (1) operands
+      const nonOne = args.filter((a) => tryGetConstant(a) !== 1);
+      if (nonOne.length === 0) return '1';
+      if (nonOne.length === 1) return compile(nonOne[0]);
+      return `(${nonOne.map((x) => compile(x)).join(' * ')})`;
+    }
 
     if (args.length === 2) {
       // Optimize: single IIFE for 2 operands
@@ -586,22 +647,33 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   AiryBi: '_SYS.airyBi',
 
   // Combinatorics
+  Mandelbrot: ([c, maxIter], compile) => {
+    if (c === null || maxIter === null)
+      throw new Error('Mandelbrot: missing arguments');
+    return `_SYS.mandelbrot(${compile(c)}, ${compile(maxIter)})`;
+  },
+  Julia: ([z, c, maxIter], compile) => {
+    if (z === null || c === null || maxIter === null)
+      throw new Error('Julia: missing arguments');
+    return `_SYS.julia(${compile(z)}, ${compile(c)}, ${compile(maxIter)})`;
+  },
+
   Binomial: (args, compile) =>
     `_SYS.binomial(${compile(args[0])}, ${compile(args[1])})`,
   Fibonacci: '_SYS.fibonacci',
 
   // Complex-specific functions
-  Re: (args, compile) => {
+  Real: (args, compile) => {
     if (BaseCompiler.isComplexValued(args[0]))
       return `(${compile(args[0])}).re`;
     return compile(args[0]);
   },
-  Im: (args, compile) => {
+  Imaginary: (args, compile) => {
     if (BaseCompiler.isComplexValued(args[0]))
       return `(${compile(args[0])}).im`;
     return '0';
   },
-  Arg: (args, compile) => {
+  Argument: (args, compile) => {
     if (BaseCompiler.isComplexValued(args[0]))
       return `_SYS.carg(${compile(args[0])})`;
     return `(${compile(args[0])} >= 0 ? 0 : Math.PI)`;
@@ -987,6 +1059,46 @@ const SYS_HELPERS = {
   sinc,
   fresnelS,
   fresnelC,
+  mandelbrot: (c: number | { re: number; im: number }, maxIter: number) => {
+    let zx = 0,
+      zy = 0;
+    const cx = typeof c === 'number' ? c : c.re;
+    const cy = typeof c === 'number' ? 0 : c.im;
+    const n = Math.round(maxIter);
+    for (let i = 0; i < n; i++) {
+      const newZx = zx * zx - zy * zy + cx;
+      zy = 2 * zx * zy + cy;
+      zx = newZx;
+      const mag2 = zx * zx + zy * zy;
+      if (mag2 > 4) {
+        const smooth = (i - Math.log2(Math.log2(mag2)) + 4.0) / n;
+        return Math.max(0, Math.min(1, smooth));
+      }
+    }
+    return 1.0;
+  },
+  julia: (
+    z: number | { re: number; im: number },
+    c: number | { re: number; im: number },
+    maxIter: number
+  ) => {
+    let zx = typeof z === 'number' ? z : z.re;
+    let zy = typeof z === 'number' ? 0 : z.im;
+    const cx = typeof c === 'number' ? c : c.re;
+    const cy = typeof c === 'number' ? 0 : c.im;
+    const n = Math.round(maxIter);
+    for (let i = 0; i < n; i++) {
+      const newZx = zx * zx - zy * zy + cx;
+      zy = 2 * zx * zy + cy;
+      zx = newZx;
+      const mag2 = zx * zx + zy * zy;
+      if (mag2 > 4) {
+        const smooth = (i - Math.log2(Math.log2(mag2)) + 4.0) / n;
+        return Math.max(0, Math.min(1, smooth));
+      }
+    }
+    return 1.0;
+  },
   binomial: choose,
   fibonacci,
   // Complex helpers

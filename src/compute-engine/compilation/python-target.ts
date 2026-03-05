@@ -19,7 +19,7 @@ import { BaseCompiler } from './base-compiler';
 const PYTHON_OPERATORS: CompiledOperators = {
   Add: ['+', 11],
   Negate: ['-', 14], // Unary operator
-  Subtract: ['-', 11],
+  Subtract: ['-', 11], // Subtract canonicalizes to Add+Negate; kept as fallback
   Multiply: ['*', 12],
   Divide: ['/', 13],
   Power: ['**', 15], // Python exponentiation operator
@@ -52,17 +52,7 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     if (args.length === 1) return compile(args[0]);
     return args.map((x) => compile(x)).join(' * ');
   },
-  Subtract: (args, compile) => {
-    if (args.length === 0) return '0';
-    if (args.length === 1) return compile(args[0]);
-    if (args.length === 2) return `${compile(args[0])} - ${compile(args[1])}`;
-    // For more than 2 args, fold left
-    let result = compile(args[0]);
-    for (let i = 1; i < args.length; i++) {
-      result = `${result} - ${compile(args[i])}`;
-    }
-    return result;
-  },
+  // No Subtract handler — canonicalizes to Add+Negate before compilation.
   Divide: (args, compile) => {
     if (args.length === 0) return '1';
     if (args.length === 1) return compile(args[0]);

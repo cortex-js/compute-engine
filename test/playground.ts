@@ -18,7 +18,10 @@ import {
 const ce = new ComputeEngine();
 const engine = ce;
 
-console.log(parse('x\\text{a$x$b}').toMathJson());
+const mandelbrot = parse('1+\\operatorname{Mandelbrot}(x+yi,200)');
+// console.log(compile(mandelbrot, { to: 'glsl' }).run?.({ x: 0.355, y: 0.355 }));
+console.log(compile(mandelbrot, { to: 'glsl' }).code);
+
 // 1. sin(theta)**2 + cos(theta)**2 → 1 — Clean trig identity, but too simple.
 // 2. (alpha**2 - beta**2) / (alpha - beta) → didn't simplify. Engine doesn't cancel the
 // difference of squares factoring here.

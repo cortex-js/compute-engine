@@ -21,7 +21,7 @@ describe('WGSL COMPILATION', () => {
     it('should compile complex expression', () => {
       const expr = ce.parse('x^2 + y^2');
       const code = wgsl.compile(expr).code;
-      expect(code).toMatchInlineSnapshot(`pow(x, 2.0) + pow(y, 2.0)`);
+      expect(code).toMatchInlineSnapshot(`(x * x) + (y * y)`);
     });
   });
 
@@ -210,7 +210,7 @@ describe('WGSL COMPILATION', () => {
       ]);
       expect(code).toMatchInlineSnapshot(`
         fn distanceSquared(x: f32, y: f32) -> f32 {
-          return pow(x, 2.0) + pow(y, 2.0);
+          return (x * x) + (y * y);
         }
       `);
     });
@@ -224,7 +224,7 @@ describe('WGSL COMPILATION', () => {
       ]);
       expect(code).toMatchInlineSnapshot(`
         fn vectorLength(x: f32, y: f32, z: f32) -> f32 {
-          return sqrt(pow(x, 2.0) + pow(y, 2.0) + pow(z, 2.0));
+          return sqrt((x * x) + (y * y) + (z * z));
         }
       `);
     });

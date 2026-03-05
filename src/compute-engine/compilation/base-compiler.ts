@@ -309,15 +309,18 @@ export class BaseCompiler {
       return BaseCompiler.compile(args[0], target);
     }
 
-    // Infer GPU type hints for Declare+Assign pairs (complex → vec2/vec2f)
+    // Infer GPU type hints for Declare+Assign pairs
     const typeHints: Record<string, string | undefined> = {};
     if (target.declare && target.language) {
       const isWGSL = target.language === 'wgsl';
       for (const local of locals) {
         for (const arg of args) {
           if (isFunction(arg, 'Assign') && isSymbol(arg.ops[0], local)) {
-            if (BaseCompiler.isComplexValued(arg.ops[1])) {
+            const rhs = arg.ops[1];
+            if (BaseCompiler.isComplexValued(rhs)) {
               typeHints[local] = isWGSL ? 'vec2f' : 'vec2';
+            } else if (BaseCompiler.isIntegerValued(rhs)) {
+              typeHints[local] = isWGSL ? 'i32' : 'int';
             }
             break;
           }
@@ -603,37 +606,46 @@ export class BaseCompiler {
   /**
    * Determine at compile time whether an expression produces a complex value.
    *
-   * Rules:
-   * - Numbers: complex if im !== 0
-   * - Symbols: ImaginaryUnit is complex; others use expr.isReal
-   *   (undefined is treated as real -- assume-real policy)
-   * - Functions: Abs, Arg, Re, Im always return real.
-   *   All others: complex if any operand is complex.
+   * Uses the expression's declared type (from operator signatures) when
+   * available. Falls back to operand inspection for functions whose
+   * return type is unknown.
    */
   static isComplexValued(expr: Expression): boolean {
     if (isNumber(expr)) return expr.im !== 0;
 
     if (isSymbol(expr)) {
       if (expr.symbol === 'ImaginaryUnit') return true;
-      // A symbol is complex-valued if its type is a subtype of complex
-      // but NOT a subtype of real (e.g., 'complex', 'imaginary',
-      // 'finite_complex'). Symbols typed as 'number' or 'real' (or its
-      // subtypes like 'finite_real', 'integer') are treated as real.
       const t = expr.type;
       if (!t) return false;
       return t.matches('complex') && !t.matches('real');
     }
 
     if (isFunction(expr)) {
-      const op = expr.operator;
-      // These functions always return real regardless of input
-      if (op === 'Abs' || op === 'Arg' || op === 'Re' || op === 'Im')
-        return false;
-      // For all other functions, complex if any operand is complex
+      // Check the function's return type from its operator definition
+      const t = expr.type;
+      if (t.matches('complex') && !t.matches('real')) return true;
+      if (t.matches('real')) return false;
+
+      // Return type is unknown — fall back to checking whether any
+      // operand is complex (conservative: assumes function propagates
+      // complex-ness from its inputs)
       return expr.ops.some((arg) => BaseCompiler.isComplexValued(arg));
     }
 
     return false;
+  }
+
+  /** True if the expression is provably integer-typed. */
+  static isIntegerValued(expr: Expression): boolean {
+    if (isNumber(expr)) return expr.im === 0 && Number.isInteger(expr.re);
+    const t = expr.type;
+    return t ? t.matches('integer') : false;
+  }
+
+  /** True if the expression is provably non-negative (sign ≥ 0). */
+  static isNonNegative(expr: Expression): boolean {
+    if (isNumber(expr)) return expr.im === 0 && expr.re >= 0;
+    return expr.isNonNegative === true;
   }
 
   /**

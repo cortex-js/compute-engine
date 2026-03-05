@@ -32,7 +32,7 @@ const INTERVAL_JAVASCRIPT_OPERATORS: CompiledOperators = {
   // We use high precedence since these become function calls
   Add: ['_IA.add', 20],
   Negate: ['_IA.negate', 20],
-  Subtract: ['_IA.sub', 20],
+  Subtract: ['_IA.sub', 20], // Subtract canonicalizes to Add+Negate; kept as fallback
   Multiply: ['_IA.mul', 20],
   Divide: ['_IA.div', 20],
   // Comparisons return BoolInterval
@@ -62,17 +62,7 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     }
     return result;
   },
-  Subtract: (args, compile) => {
-    if (args.length === 0) return '_IA.point(0)';
-    if (args.length === 1) return `_IA.negate(${compile(args[0])})`;
-    if (args.length === 2)
-      return `_IA.sub(${compile(args[0])}, ${compile(args[1])})`;
-    let result = compile(args[0]);
-    for (let i = 1; i < args.length; i++) {
-      result = `_IA.sub(${result}, ${compile(args[i])})`;
-    }
-    return result;
-  },
+  // No Subtract handler — canonicalizes to Add+Negate before compilation.
   Multiply: (args, compile) => {
     if (args.length === 0) return '_IA.point(1)';
     if (args.length === 1) return compile(args[0]);

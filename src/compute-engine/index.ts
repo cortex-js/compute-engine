@@ -952,7 +952,9 @@ export class ComputeEngine implements IComputeEngine {
 
       return new ExactNumericValue(value, makeNumericValue);
     }
-    throw Error('Unexpected value');
+    throw Error(
+      `Unexpected value: ${typeof value === 'object' ? JSON.stringify(value) : String(value)}`
+    );
   }
 
   /**

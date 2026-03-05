@@ -190,9 +190,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       idempotent: true,
       complexity: 1200,
-      signature: '(number) -> number',
-
-      type: ([x]) => x.type,
+      signature: '(number) -> real',
       sgn: ([x]) => {
         if (x.isSame(0)) return 'zero';
         if (isNumber(x)) return 'positive';

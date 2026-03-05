@@ -41,26 +41,26 @@ describe('COMPILE COMPLEX - isComplexValued', () => {
     ).toBe(false);
   });
 
-  it('Arg of complex is real', () => {
+  it('Argument of complex is real', () => {
     expect(
       BaseCompiler.isComplexValued(
-        ce.expr(['Arg', ['Complex', 3, 4]])
+        ce.expr(['Argument', ['Complex', 3, 4]])
       )
     ).toBe(false);
   });
 
-  it('Re of complex is real', () => {
+  it('Real of complex is real', () => {
     expect(
       BaseCompiler.isComplexValued(
-        ce.expr(['Re', ['Complex', 3, 4]])
+        ce.expr(['Real', ['Complex', 3, 4]])
       )
     ).toBe(false);
   });
 
-  it('Im of complex is real', () => {
+  it('Imaginary of complex is real', () => {
     expect(
       BaseCompiler.isComplexValued(
-        ce.expr(['Im', ['Complex', 3, 4]])
+        ce.expr(['Imaginary', ['Complex', 3, 4]])
       )
     ).toBe(false);
   });
@@ -146,7 +146,7 @@ describe('COMPILE COMPLEX - _SYS helpers (execution)', () => {
 
   it('should execute carg', () => {
     // arg(1+i) = pi/4
-    const expr = ce.expr(['Arg', ['Complex', 1, 1]]);
+    const expr = ce.expr(['Argument', ['Complex', 1, 1]]);
     const result = compile(expr, { fallback: false });
     expect(result.run!()).toBeCloseTo(Math.PI / 4, 10);
   });
@@ -258,14 +258,14 @@ describe('COMPILE COMPLEX - real/complex promotion', () => {
     expect(val.im).toBeCloseTo(8);
   });
 
-  it('should handle Re of complex', () => {
-    const expr = ce.expr(['Re', ['Complex', 3, 4]]);
+  it('should handle Real of complex', () => {
+    const expr = ce.expr(['Real', ['Complex', 3, 4]]);
     const result = compile(expr, { fallback: false });
     expect(result.run!()).toBeCloseTo(3);
   });
 
-  it('should handle Im of complex', () => {
-    const expr = ce.expr(['Im', ['Complex', 3, 4]]);
+  it('should handle Imaginary of complex', () => {
+    const expr = ce.expr(['Imaginary', ['Complex', 3, 4]]);
     const result = compile(expr, { fallback: false });
     expect(result.run!()).toBeCloseTo(4);
   });

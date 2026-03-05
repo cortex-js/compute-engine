@@ -1,3 +1,46 @@
+### [Unreleased]
+
+#### Improved
+
+- **Compilation: constant folding** — `Add`, `Multiply`, `Subtract`, `Negate`,
+  `Divide`, `Power`, `Sqrt`, and `Root` handlers now fold numeric literals at
+  compile time and eliminate identity values.
+  - `x + yi` compiles to `vec2(x, y)` instead of
+    `vec2(x, 0.0) + (y * vec2(0.0, 1.0))`
+  - `2 + 3` → `5.0`, `x + 0` → `x`, `x * 1` → `x`, `x * 0` → `0.0`
+  - `Power(x, 2)` → `(x * x)` for simple operands, `pow(f(x), 2.0)` for complex
+    expressions to avoid duplicate computation
+  - `Power(x, 0.5)` → `sqrt(x)`, `Power(x, 0)` → `1.0`, `Power(x, -1)` →
+    `(1.0 / x)`
+  - `Sqrt(4)` → `2.0`, `Root(x, 2)` → `sqrt(x)`
+- **`isComplexValued`** uses expression type system instead of hard-coded
+  operator list.
+- **Integer arguments** in GPU fractal functions emit as `200` instead of
+  `int(200.0)`.
+- **Type-based optimizations** — compilation handlers now use expression type
+  information for better code generation:
+  - `Floor`/`Ceil`/`Round`/`Truncate` are no-ops when the operand is
+    integer-typed
+  - `Abs` is a no-op when the operand is provably non-negative
+  - `Power(x, 2)` only expands to `(x * x)` for simple operands (symbols,
+    literals) — function calls like `Power(Sin(x), 2)` use `pow`/`Math.pow`
+    to avoid duplicate evaluation
+  - Integer `Mod` with non-negative dividend uses plain `%` instead of the
+    Euclidean double-mod formula
+  - GPU variable declarations infer `i32`/`int` type for integer-typed locals
+
+#### Fixed
+
+- **`Abs` signature**: return type is now `real` instead of propagating the
+  input type (which incorrectly returned `complex` for complex inputs).
+- **Compilation fallback**: uses `pushScope`/`assign` pattern instead of
+  crashing when receiving a vars object.
+
+#### Added
+
+- **`Mandelbrot` and `Julia`** operators in JavaScript and GPU compilation
+  targets.
+
 ### 0.55.2 _2026-03-04_
 
 #### Fixed
@@ -12,9 +55,9 @@
   symbol validation.
 - **`Text` operator type**: The `Text` operator now has return type `string`
   instead of `expression`.
-- **`\textcolor` inside `\text{}`**: `\textcolor{red}{RED}` inside `\text{}`
-  now correctly parses the body as text (`'RED'`) instead of switching to math
-  mode and treating each letter as a separate symbol.
+- **`\textcolor` inside `\text{}`**: `\textcolor{red}{RED}` inside `\text{}` now
+  correctly parses the body as text (`'RED'`) instead of switching to math mode
+  and treating each letter as a separate symbol.
 - **`parseSyntaxError` token consumption**: Non-command tokens (like `#`, `&`)
   are now consumed when producing errors, preventing potential parser loops.
 - **`parseSymbolToken` hardening**: Raw tokens are pre-validated against
