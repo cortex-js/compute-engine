@@ -401,9 +401,17 @@ check('Unexpected closing delimiter', () =>
 );
 
 check('Syntax error: @', () =>
-  expect(engine.parse('x@2')).toMatchInlineSnapshot(
-    `["Sequence", "x", ["Error", ["ErrorCode", "unexpected-token", "@"]]]`
-  )
+  expect(engine.parse('x@2')).toMatchInlineSnapshot(`
+    [
+      "Sequence",
+      "x",
+      [
+        "Error",
+        ["ErrorCode", "unexpected-token", "@"],
+        ["LatexString", "@"]
+      ]
+    ]
+  `)
 );
 
 check('Syntax error: \\', () =>
@@ -419,15 +427,31 @@ check('Syntax error: \\1', () =>
 );
 
 check('Syntax error: ##', () =>
-  expect(engine.parse('x##')).toMatchInlineSnapshot(
-    `["Sequence", "x", ["Error", ["ErrorCode", "unexpected-token", "#"]]]`
-  )
+  expect(engine.parse('x##')).toMatchInlineSnapshot(`
+    [
+      "Sequence",
+      "x",
+      [
+        "Error",
+        ["ErrorCode", "unexpected-token", "#"],
+        ["LatexString", "#"]
+      ]
+    ]
+  `)
 );
 
 check('Syntax error: &', () =>
-  expect(engine.parse('x&2')).toMatchInlineSnapshot(
-    `["Sequence", "x", ["Error", ["ErrorCode", "unexpected-token", "&"]]]`
-  )
+  expect(engine.parse('x&2')).toMatchInlineSnapshot(`
+    [
+      "Sequence",
+      "x",
+      [
+        "Error",
+        ["ErrorCode", "unexpected-token", "&"],
+        ["LatexString", "&"]
+      ]
+    ]
+  `)
 );
 
 check('VALID comment', () =>

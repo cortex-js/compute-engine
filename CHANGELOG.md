@@ -12,6 +12,14 @@
   symbol validation.
 - **`Text` operator type**: The `Text` operator now has return type `string`
   instead of `expression`.
+- **`\textcolor` inside `\text{}`**: `\textcolor{red}{RED}` inside `\text{}`
+  now correctly parses the body as text (`'RED'`) instead of switching to math
+  mode and treating each letter as a separate symbol.
+- **`parseSyntaxError` token consumption**: Non-command tokens (like `#`, `&`)
+  are now consumed when producing errors, preventing potential parser loops.
+- **`parseSymbolToken` hardening**: Raw tokens are pre-validated against
+  `\p{XIDC}` before being consumed as symbols, providing defense-in-depth
+  against future `isValidSymbol` regressions.
 
 #### Added
 
@@ -23,6 +31,14 @@
   `\text{if and only if}` are now recognized as infix operators that produce
   `And`, `Or`, and `Equivalent` expressions respectively, following the existing
   `\text{where}` pattern.
+- **Additional text keywords**: `\text{such that}` (maps to `Colon`),
+  `\text{for all}` (maps to `ForAll`), and `\text{there exists}` (maps to
+  `Exists`) are now recognized as operators.
+- **`Text` serializer**: `Text` expressions now round-trip back to proper
+  `\text{...}` LaTeX with inline `$...$` for math sub-expressions, instead of
+  falling through to the default `\mathrm{Text}(...)` output.
+- **`Text` evaluate handler**: Evaluating a `Text` expression now concatenates
+  all operands into a single string.
 
 ### 0.55.1 _2026-03-04_
 

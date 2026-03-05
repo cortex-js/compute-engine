@@ -118,9 +118,13 @@ function parseSymbolToken(
     return c;
   }
 
-  // Raw token (e.g., unrecognized LaTeX command or punctuation) — pass through
-  // without encoding so that isValidSymbol() can reject invalid characters
-  return parser.nextToken();
+  // Raw token — only pass through if it could be a valid symbol character.
+  // This prevents tokens like '#', '&', etc. from being consumed as symbols
+  // even if isValidSymbol() has a bug.
+  const raw = parser.peek;
+  if (raw && /^[\p{XIDC}\p{M}]/u.test(raw)) return parser.nextToken();
+
+  return null;
 }
 
 // The body of a symbol is a sequence of tokens contained

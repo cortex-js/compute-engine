@@ -373,6 +373,22 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       description:
         'A sequence of strings, annotated expressions and other Text expressions',
       signature: '(any*) -> string',
+      evaluate: (ops, { engine: ce }) => {
+        if (ops.length === 0) return ce.string('');
+        const parts: string[] = [];
+        for (const op of ops) {
+          // Unwrap Annotated (strip style annotations)
+          const unwrapped =
+            op.operator === 'Annotated' ? op.op1 : op;
+          if (isString(unwrapped)) parts.push(unwrapped.string);
+          else {
+            const evaluated = unwrapped.evaluate();
+            if (isString(evaluated)) parts.push(evaluated.string);
+            else parts.push(evaluated.toString());
+          }
+        }
+        return ce.string(parts.join(''));
+      },
     },
   },
   {

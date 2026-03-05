@@ -2143,6 +2143,7 @@ export class _Parser implements Parser {
       return this.error('unexpected-delimiter', start);
 
     if (command[0] !== '\\') {
+      this.nextToken();
       return this.error(
         ['unexpected-token', { str: tokensToString(command) }],
         start

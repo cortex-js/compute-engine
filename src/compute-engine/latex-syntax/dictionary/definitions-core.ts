@@ -27,6 +27,7 @@ import {
 import { joinLatex } from '../tokenizer';
 import { isEquationOperator, isInequalityOperator } from '../utils';
 import { BoxedType } from '../../../common/type/boxed-type';
+import { parseQuantifier } from './definitions-logic';
 
 // function isSpacingToken(token: string): boolean {
 //   return (
@@ -906,6 +907,60 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       return ['Equivalent', lhs, rhs ?? 'Nothing'] as MathJsonExpression;
     },
   },
+  // \text{such that} — constraint separator (like : in set-builder notation)
+  {
+    latexTrigger: ['\\text'],
+    kind: 'infix',
+    associativity: 'right',
+    precedence: 21, // Low precedence to capture full condition (same as 'where')
+    parse: (
+      parser: Parser,
+      lhs: MathJsonExpression,
+      until: Readonly<Terminator>
+    ): MathJsonExpression | null => {
+      const start = parser.index;
+      if (!matchTextKeyword(parser, 'such that')) {
+        parser.index = start;
+        return null;
+      }
+      const rhs = parser.parseExpression({ ...until, minPrec: 21 });
+      return ['Colon', lhs, rhs ?? 'Nothing'] as MathJsonExpression;
+    },
+  },
+  // \text{for all} — universal quantifier
+  {
+    latexTrigger: ['\\text'],
+    kind: 'prefix',
+    precedence: 200, // Same as \forall
+    parse: (
+      parser: Parser,
+      until?: Readonly<Terminator>
+    ): MathJsonExpression | null => {
+      const start = parser.index;
+      if (!matchTextKeyword(parser, 'for all')) {
+        parser.index = start;
+        return null;
+      }
+      return parseQuantifier('ForAll')(parser, until!);
+    },
+  },
+  // \text{there exists} — existential quantifier
+  {
+    latexTrigger: ['\\text'],
+    kind: 'prefix',
+    precedence: 200, // Same as \exists
+    parse: (
+      parser: Parser,
+      until?: Readonly<Terminator>
+    ): MathJsonExpression | null => {
+      const start = parser.index;
+      if (!matchTextKeyword(parser, 'there exists')) {
+        parser.index = start;
+        return null;
+      }
+      return parseQuantifier('Exists')(parser, until!);
+    },
+  },
   // Block serializer — used by both `where` and semicolon blocks
   {
     name: 'Block',
@@ -1032,6 +1087,52 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       'Return',
       parser.parseExpression(until) ?? 'Nothing',
     ],
+  },
+
+  // Text serializer — reconstructs \text{...} with inline $...$ for math
+  {
+    name: 'Text',
+    serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
+      const args = operands(expr);
+      if (args.length === 0) return '';
+
+      // Find extent of string (text) operands
+      let firstStr = -1;
+      let lastStr = -1;
+      for (let i = 0; i < args.length; i++) {
+        if (stringValue(args[i]) !== null) {
+          if (firstStr < 0) firstStr = i;
+          lastStr = i;
+        }
+      }
+
+      // No strings at all — just serialize math args
+      if (firstStr < 0)
+        return joinLatex(args.map((a) => serializer.serialize(a)));
+
+      const parts: string[] = [];
+
+      // Math args before the text run
+      for (let i = 0; i < firstStr; i++)
+        parts.push(serializer.serialize(args[i]));
+
+      // The text run (firstStr..lastStr inclusive)
+      let textContent = '';
+      for (let i = firstStr; i <= lastStr; i++) {
+        const s = stringValue(args[i]);
+        if (s !== null) textContent += sanitizeLatex(s);
+        else if (operator(args[i]) === 'Annotated' || operator(args[i]) === 'Text')
+          textContent += serializer.serialize(args[i]);
+        else textContent += '$' + serializer.serialize(args[i]) + '$';
+      }
+      parts.push('\\text{' + textContent + '}');
+
+      // Math args after the text run
+      for (let i = lastStr + 1; i < args.length; i++)
+        parts.push(serializer.serialize(args[i]));
+
+      return joinLatex(parts);
+    },
   },
 
   {
@@ -1525,11 +1626,11 @@ function parseTextRun(
       // Run-in style with color
       const pos = parser.index;
       const color = parser.parseStringGroup();
-      const body = parser.parseExpression();
-      if (color !== null && body !== null) {
-        runs.push(['Annotated', body, { dict: { color } }]);
+      if (color !== null) {
+        flush();
+        const body = parseTextRun(parser);
+        runs.push(['Annotated', body, dictionaryFromEntries({ color })]);
       } else {
-        // We had an opening `\textcolor` but no closing `}`
         parser.index = pos;
         text += '\\textcolor';
       }

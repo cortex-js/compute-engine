@@ -490,7 +490,7 @@ function tightBindingCondition(
   );
 }
 
-function parseQuantifier(
+export function parseQuantifier(
   kind: 'NotForAll' | 'NotExists' | 'ForAll' | 'Exists' | 'ExistsUnique'
 ): (
   parser: Parser,
