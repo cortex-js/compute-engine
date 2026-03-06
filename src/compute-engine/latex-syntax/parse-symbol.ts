@@ -159,6 +159,11 @@ function parseSymbolBody(parser: Parser): string | null {
         parser.nextToken();
         continue;
       }
+      // Try emoji sequences first (they fail parseSymbolToken's XIDC check)
+      if (EMOJIS.test(id + token)) {
+        id += parser.nextToken();
+        continue;
+      }
       const next = parseSymbolToken(parser, { toplevel: false });
       if (next === null) return null;
       id += next;
@@ -221,6 +226,7 @@ function matchPrefixedSymbol(parser: Parser): string | null {
 
   if (prefix === null) return null;
 
+  const start = parser.index;
   parser.nextToken();
   if (parser.match('<{>')) {
     // If the symbol starts with a digit,
@@ -245,7 +251,10 @@ function matchPrefixedSymbol(parser: Parser): string | null {
     }
 
     body += parseSymbolBody(parser);
-    if (body === null || !parser.match('<}>')) return null;
+    if (body === null || !parser.match('<}>')) {
+      parser.index = start;
+      return null;
+    }
     // Multi-character symbols do not need a prefix
     // if they are upright (that's their default presentation)
     if (prefix === '_upright' && body.length > 1) return body;
@@ -255,6 +264,7 @@ function matchPrefixedSymbol(parser: Parser): string | null {
   //
   // Not a prefixed symbol
   //
+  parser.index = start;
   return null;
 }
 
@@ -264,30 +274,51 @@ function matchPrefixedSymbol(parser: Parser): string | null {
 export function parseInvalidSymbol(parser: Parser): MathJsonExpression | null {
   const start = parser.index;
   const id = matchPrefixedSymbol(parser);
-  if (id === null || isValidSymbol(id)) return null;
 
-  return parser.error(['invalid-symbol', { str: validateSymbol(id) }], start);
+  if (id !== null) {
+    if (isValidSymbol(id)) return null;
+    return parser.error(['invalid-symbol', { str: validateSymbol(id) }], start);
+  }
 
-  // const prefix =SYMBOL_PREFIX[parser.peek] ?? null;
-  // if (prefix === null) return null;
+  // matchPrefixedSymbol returned null — it may have partially consumed
+  // tokens (prefix + '{') before failing on an invalid body character.
+  // Reset and try a permissive fallback: consume the entire \mathrm{...}
+  // group to report a proper error.
+  parser.index = start;
 
-  // const start = parser.index;
-  // parser.nextToken();
-  // if (parser.match('<{>')) {
-  //   let level = 0;
-  //   while (!parser.atEnd && level === 0 && parser.peek !== '<}>') {
-  //     if (parser.peek === '<{>') level += 1;
-  //     if (parser.peek === '<}>') level -= 1;
-  //     parser.nextToken();
-  //   }
-  //   parser.match('<}>');
-  // }
-  // const s = parser.latex(start, parser.index);
-  // if (isValidSymbo(s)) {
-  //   this.index = start;
-  //   return null;
-  // }
-  // return parser.error(['invalid-symbol', validateSymbol(s)], start);
+  const prefix = SYMBOL_PREFIX[parser.peek] ?? null;
+  if (prefix === null) return null;
+
+  parser.nextToken();
+  if (!parser.match('<{>')) {
+    parser.index = start;
+    return null;
+  }
+
+  // Consume everything inside the braces (including nested braces)
+  const bodyStart = parser.index;
+  let level = 0;
+  while (!parser.atEnd && !(level === 0 && parser.peek === '<}>')) {
+    if (parser.peek === '<{>') level += 1;
+    if (parser.peek === '<}>') level -= 1;
+    parser.nextToken();
+  }
+
+  // Extract the body content and check if it's actually invalid.
+  // If it's a valid symbol (e.g., pure emoji), restore and return null
+  // so other parsing paths can handle it.
+  const bodyText = parser.latex(bodyStart, parser.index);
+  if (isValidSymbol(bodyText)) {
+    parser.index = start;
+    return null;
+  }
+
+  parser.match('<}>');
+
+  return parser.error(
+    ['invalid-symbol', { str: validateSymbol(bodyText) }],
+    start
+  );
 }
 
 /**
