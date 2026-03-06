@@ -2,12 +2,20 @@
 
 #### Fixed
 
-- **LaTeX parsing: interval notation with `\lbrack`/`\lparen`** — parsing
-  `\lbrack5,7)` or `\left\lbrack5,7\right)` now correctly produces an
-  `Interval` expression. Previously, when the open delimiter was a LaTeX
-  command (e.g., `\lbrack`), the parser incorrectly required the close
-  delimiter to also be a LaTeX command (e.g., `\rparen` instead of `)`),
-  causing mismatched-delimiter intervals to fail.
+- **[#254](https://github.com/cortex-js/compute-engine/issues/254) LaTeX
+  parsing: interval notation with `\lbrack`/`\lparen`** — parsing `\lbrack5,7)`
+  or `\left\lbrack5,7\right)` now correctly produces an `Interval` expression.
+  Previously, when the open delimiter was a LaTeX command (e.g., `\lbrack`), the
+  parser incorrectly required the close delimiter to also be a LaTeX command
+  (e.g., `\rparen` instead of `)`), causing mismatched-delimiter intervals to
+  fail.
+- **LaTeX parsing: invalid symbols in `\mathrm{}` and related prefixes** —
+  invalid content inside `\mathrm{}`, `\operatorname{}`, etc. (e.g.,
+  `\mathrm{=}` or `\mathrm{DavidBowie👨🏻‍🎤}`) now produces the correct
+  `invalid-symbol` error instead of cascading parse errors. Also fixed
+  `matchPrefixedSymbol` leaking parser state on failure, and emoji sequences
+  are now properly recognized inside symbol prefixes (e.g.,
+  `\operatorname{😎🤏😳🕶🤏}`).
 
 #### Added
 

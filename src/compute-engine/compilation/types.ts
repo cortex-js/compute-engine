@@ -75,6 +75,9 @@ export interface CompileTarget<Expr = unknown> {
 
   /** Target language identifier (for debugging/logging) */
   language?: string;
+
+  /** Compilation hints (viewport, etc.) passed through from options. */
+  hints?: CompilationOptions['hints'];
 }
 
 /**
@@ -187,6 +190,23 @@ export interface CompilationOptions<Expr = unknown> {
    * results (e.g., plotting).
    */
   realOnly?: boolean;
+
+  /**
+   * Compilation hints for precision-adaptive strategies.
+   *
+   * The compiler may use these hints to select different code generation
+   * strategies (e.g., emulated double precision for deep-zoom fractals).
+   * Non-fractal functions ignore hints.
+   */
+  hints?: {
+    /** Current viewport for precision-adaptive compilation. */
+    viewport?: {
+      /** Center of the viewport as [re, im]. */
+      center: [number, number];
+      /** Viewport radius (half-width in complex plane units). */
+      radius: number;
+    };
+  };
 }
 
 /**
@@ -300,6 +320,38 @@ export type CompilationResult<
 
   /** Executable function (present for JS-executable targets only). */
   run?: CompiledRunner<R>;
+
+  /**
+   * Cheap staleness check for precision-adaptive compilation.
+   *
+   * The plot engine checks these thresholds on each viewport change
+   * (a few number comparisons). When any condition is met, the expression
+   * should be recompiled with updated hints.
+   */
+  staleWhen?: {
+    /** Recompile when viewport radius drops below this value. */
+    radiusBelow?: number;
+    /** Recompile when viewport radius rises above this value. */
+    radiusAbove?: number;
+    /** Recompile when center moves more than this distance. */
+    centerDistance?: number;
+  };
+
+  /** Scalar uniform values the shader needs. */
+  uniforms?: Record<string, number>;
+
+  /**
+   * Texture data the shader needs (e.g., reference orbit).
+   *
+   * Separated from `uniforms` because the GPU upload path is fundamentally
+   * different (createTexture + sampler vs uniform1f).
+   */
+  textures?: Record<string, {
+    data: Float32Array;
+    width: number;
+    height: number;
+    format: 'r32f' | 'rg32f' | 'rgba32f';
+  }>;
 } & (T extends ExecutableTarget
   ? { calling: 'expression' | 'lambda'; run: CompiledRunner<R> }
   : // eslint-disable-next-line @typescript-eslint/no-empty-object-type

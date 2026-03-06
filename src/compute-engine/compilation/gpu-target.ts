@@ -16,6 +16,7 @@ import type {
   CompilationResult,
 } from './types';
 import { BaseCompiler } from './base-compiler';
+import { computeReferenceOrbit } from './fractal-orbit';
 
 /**
  * GPU shader operators shared by GLSL and WGSL.
@@ -163,6 +164,19 @@ function compileGPUSumProduct(
     `return ${acc}`,
   ];
   return lines.join('\n');
+}
+
+/** Precision tier for fractal compilation based on viewport hints. */
+type FractalStrategy = 'single' | 'double' | 'perturbation';
+
+function selectFractalStrategy(
+  target: CompileTarget<Expression>
+): FractalStrategy {
+  const radius = target.hints?.viewport?.radius;
+  if (radius === undefined) return 'single';
+  if (radius > 1e-6) return 'single';
+  if (radius > 1e-14) return 'double';
+  return 'perturbation';
 }
 
 /**
@@ -706,12 +720,32 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     if (c === null || maxIter === null)
       throw new Error('Mandelbrot: missing arguments');
     const iterCode = compileIntArg(maxIter, compile, target);
+    const strategy = selectFractalStrategy(target);
+    if (strategy === 'double') {
+      const cCode = compile(c);
+      return `_fractal_mandelbrot_dp(vec4(${cCode}, vec2(0.0)), ${iterCode})`;
+    }
+    if (strategy === 'perturbation') {
+      const cCode = compile(c);
+      return `_fractal_mandelbrot_pt(${cCode}, ${iterCode})`;
+    }
     return `_fractal_mandelbrot(${compile(c)}, ${iterCode})`;
   },
   Julia: ([z, c, maxIter], compile, target) => {
     if (z === null || c === null || maxIter === null)
       throw new Error('Julia: missing arguments');
     const iterCode = compileIntArg(maxIter, compile, target);
+    const strategy = selectFractalStrategy(target);
+    if (strategy === 'double') {
+      const zCode = compile(z);
+      const cCode = compile(c);
+      return `_fractal_julia_dp(vec4(${zCode}, vec2(0.0)), vec4(${cCode}, vec2(0.0)), ${iterCode})`;
+    }
+    if (strategy === 'perturbation') {
+      const zCode = compile(z);
+      const cCode = compile(c);
+      return `_fractal_julia_pt(${zCode}, ${cCode}, ${iterCode})`;
+    }
     return `_fractal_julia(${compile(z)}, ${compile(c)}, ${iterCode})`;
   },
 
@@ -1434,6 +1468,232 @@ fn _gpu_besselJ(n_in: i32, x_in: f32) -> f32 {
 `;
 
 /**
+ * Double-single (DS) emulated double-precision arithmetic preamble (GLSL).
+ *
+ * A "double-single" number is stored as vec2(hi, lo) where value = hi + lo,
+ * giving ~48 bits of mantissa from two 32-bit floats.
+ * Algorithms: Dekker (1971) / Knuth (1997).
+ */
+export const GPU_DS_ARITHMETIC_PREAMBLE_GLSL = `
+// Split a float into high and low parts for exact multiplication
+vec2 ds_split(float a) {
+  const float SPLIT = 4097.0; // 2^12 + 1
+  float t = SPLIT * a;
+  float hi = t - (t - a);
+  float lo = a - hi;
+  return vec2(hi, lo);
+}
+
+// Create a double-single from a single float
+vec2 ds_from(float a) {
+  return vec2(a, 0.0);
+}
+
+// Error-free addition (Knuth TwoSum)
+vec2 ds_add(vec2 a, vec2 b) {
+  float s = a.x + b.x;
+  float v = s - a.x;
+  float e = (a.x - (s - v)) + (b.x - v);
+  float lo = (a.y + b.y) + e;
+  float hi = s + lo;
+  lo = lo - (hi - s);
+  return vec2(hi, lo);
+}
+
+// Double-single subtraction
+vec2 ds_sub(vec2 a, vec2 b) {
+  return ds_add(a, vec2(-b.x, -b.y));
+}
+
+// Error-free multiplication (Dekker TwoProduct)
+vec2 ds_mul(vec2 a, vec2 b) {
+  float p = a.x * b.x;
+  vec2 sa = ds_split(a.x);
+  vec2 sb = ds_split(b.x);
+  float err = ((sa.x * sb.x - p) + sa.x * sb.y + sa.y * sb.x) + sa.y * sb.y;
+  err += a.x * b.y + a.y * b.x;
+  float hi = p + err;
+  float lo = err - (hi - p);
+  return vec2(hi, lo);
+}
+
+// Optimized self-multiply
+vec2 ds_sqr(vec2 a) {
+  float p = a.x * a.x;
+  vec2 sa = ds_split(a.x);
+  float err = ((sa.x * sa.x - p) + 2.0 * sa.x * sa.y) + sa.y * sa.y;
+  err += 2.0 * a.x * a.y;
+  float hi = p + err;
+  float lo = err - (hi - p);
+  return vec2(hi, lo);
+}
+
+// Compare magnitude: returns -1, 0, or 1
+float ds_cmp(vec2 a, vec2 b) {
+  float d = a.x - b.x;
+  if (d != 0.0) return sign(d);
+  return sign(a.y - b.y);
+}
+`;
+
+/**
+ * Double-single (DS) emulated double-precision arithmetic preamble (WGSL).
+ *
+ * A "double-single" number is stored as vec2f(hi, lo) where value = hi + lo,
+ * giving ~48 bits of mantissa from two 32-bit floats.
+ * Algorithms: Dekker (1971) / Knuth (1997).
+ */
+export const GPU_DS_ARITHMETIC_PREAMBLE_WGSL = `
+fn ds_split(a: f32) -> vec2f {
+  const SPLIT: f32 = 4097.0;
+  let t = SPLIT * a;
+  let hi = t - (t - a);
+  let lo = a - hi;
+  return vec2f(hi, lo);
+}
+
+fn ds_from(a: f32) -> vec2f {
+  return vec2f(a, 0.0);
+}
+
+fn ds_add(a: vec2f, b: vec2f) -> vec2f {
+  let s = a.x + b.x;
+  let v = s - a.x;
+  let e = (a.x - (s - v)) + (b.x - v);
+  let lo_t = (a.y + b.y) + e;
+  let hi = s + lo_t;
+  let lo = lo_t - (hi - s);
+  return vec2f(hi, lo);
+}
+
+fn ds_sub(a: vec2f, b: vec2f) -> vec2f {
+  return ds_add(a, vec2f(-b.x, -b.y));
+}
+
+fn ds_mul(a: vec2f, b: vec2f) -> vec2f {
+  let p = a.x * b.x;
+  let sa = ds_split(a.x);
+  let sb = ds_split(b.x);
+  var err = ((sa.x * sb.x - p) + sa.x * sb.y + sa.y * sb.x) + sa.y * sb.y;
+  err += a.x * b.y + a.y * b.x;
+  let hi = p + err;
+  let lo = err - (hi - p);
+  return vec2f(hi, lo);
+}
+
+fn ds_sqr(a: vec2f) -> vec2f {
+  let p = a.x * a.x;
+  let sa = ds_split(a.x);
+  var err = ((sa.x * sa.x - p) + 2.0 * sa.x * sa.y) + sa.y * sa.y;
+  err += 2.0 * a.x * a.y;
+  let hi = p + err;
+  let lo = err - (hi - p);
+  return vec2f(hi, lo);
+}
+
+fn ds_cmp(a: vec2f, b: vec2f) -> f32 {
+  let d = a.x - b.x;
+  if (d != 0.0) { return sign(d); }
+  return sign(a.y - b.y);
+}
+`;
+
+/**
+ * Double-precision fractal preamble (GLSL syntax).
+ *
+ * Emulated double-precision (double-single) Mandelbrot and Julia iterations.
+ * Complex numbers are packed as vec4(re_hi, im_hi, re_lo, im_lo).
+ * Requires GPU_DS_ARITHMETIC_PREAMBLE_GLSL to be included first.
+ */
+export const GPU_FRACTAL_DP_PREAMBLE_GLSL = `
+float _fractal_mandelbrot_dp(vec4 c, int maxIter) {
+  // c = (re_hi, im_hi, re_lo, im_lo)
+  vec2 cr = vec2(c.x, c.z);  // real part as ds
+  vec2 ci = vec2(c.y, c.w);  // imag part as ds
+  vec2 zr = vec2(0.0, 0.0);
+  vec2 zi = vec2(0.0, 0.0);
+  for (int i = 0; i < maxIter; i++) {
+    vec2 zr2 = ds_sqr(zr);
+    vec2 zi2 = ds_sqr(zi);
+    // |z|^2 > 4.0 ?
+    vec2 mag2 = ds_add(zr2, zi2);
+    if (mag2.x > 4.0)
+      return clamp((float(i) - log2(log2(mag2.x)) + 4.0) / float(maxIter), 0.0, 1.0);
+    // z = z^2 + c
+    vec2 new_zi = ds_add(ds_mul(ds_add(zr, zr), zi), ci); // 2*zr*zi + ci
+    zr = ds_add(ds_sub(zr2, zi2), cr);                    // zr^2 - zi^2 + cr
+    zi = new_zi;
+  }
+  return 1.0;
+}
+
+float _fractal_julia_dp(vec4 z_in, vec4 c, int maxIter) {
+  vec2 zr = vec2(z_in.x, z_in.z);
+  vec2 zi = vec2(z_in.y, z_in.w);
+  vec2 cr = vec2(c.x, c.z);
+  vec2 ci = vec2(c.y, c.w);
+  for (int i = 0; i < maxIter; i++) {
+    vec2 zr2 = ds_sqr(zr);
+    vec2 zi2 = ds_sqr(zi);
+    vec2 mag2 = ds_add(zr2, zi2);
+    if (mag2.x > 4.0)
+      return clamp((float(i) - log2(log2(mag2.x)) + 4.0) / float(maxIter), 0.0, 1.0);
+    vec2 new_zi = ds_add(ds_mul(ds_add(zr, zr), zi), ci);
+    zr = ds_add(ds_sub(zr2, zi2), cr);
+    zi = new_zi;
+  }
+  return 1.0;
+}
+`;
+
+/**
+ * Double-precision fractal preamble (WGSL syntax).
+ *
+ * Emulated double-precision (double-single) Mandelbrot and Julia iterations.
+ * Complex numbers are packed as vec4f(re_hi, im_hi, re_lo, im_lo).
+ * Requires GPU_DS_ARITHMETIC_PREAMBLE_WGSL to be included first.
+ */
+export const GPU_FRACTAL_DP_PREAMBLE_WGSL = `
+fn _fractal_mandelbrot_dp(c: vec4f, maxIter: i32) -> f32 {
+  let cr = vec2f(c.x, c.z);
+  let ci = vec2f(c.y, c.w);
+  var zr = vec2f(0.0, 0.0);
+  var zi = vec2f(0.0, 0.0);
+  for (var i: i32 = 0; i < maxIter; i++) {
+    let zr2 = ds_sqr(zr);
+    let zi2 = ds_sqr(zi);
+    let mag2 = ds_add(zr2, zi2);
+    if (mag2.x > 4.0) {
+      return clamp((f32(i) - log2(log2(mag2.x)) + 4.0) / f32(maxIter), 0.0, 1.0);
+    }
+    let new_zi = ds_add(ds_mul(ds_add(zr, zr), zi), ci);
+    zr = ds_add(ds_sub(zr2, zi2), cr);
+    zi = new_zi;
+  }
+  return 1.0;
+}
+
+fn _fractal_julia_dp(z_in: vec4f, c: vec4f, maxIter: i32) -> f32 {
+  var zr = vec2f(z_in.x, z_in.z);
+  var zi = vec2f(z_in.y, z_in.w);
+  let cr = vec2f(c.x, c.z);
+  let ci = vec2f(c.y, c.w);
+  for (var i: i32 = 0; i < maxIter; i++) {
+    let zr2 = ds_sqr(zr);
+    let zi2 = ds_sqr(zi);
+    let mag2 = ds_add(zr2, zi2);
+    if (mag2.x > 4.0) {
+      return clamp((f32(i) - log2(log2(mag2.x)) + 4.0) / f32(maxIter), 0.0, 1.0);
+    }
+    let new_zi = ds_add(ds_mul(ds_add(zr, zr), zi), ci);
+    zr = ds_add(ds_sub(zr2, zi2), cr);
+    zi = new_zi;
+  }
+  return 1.0;
+}
+`;
+
+/**
  * Fractal preamble (GLSL syntax).
  *
  * Smooth escape-time iteration for Mandelbrot and Julia sets.
@@ -1482,6 +1742,202 @@ fn _fractal_julia(z_in: vec2f, c: vec2f, maxIter: i32) -> f32 {
     z = vec2f(z.x*z.x - z.y*z.y + c.x, 2.0*z.x*z.y + c.y);
     if (dot(z, z) > 4.0) {
       return clamp((f32(i) - log2(log2(dot(z, z))) + 4.0) / f32(maxIter), 0.0, 1.0);
+    }
+  }
+  return 1.0;
+}
+`;
+
+/**
+ * Perturbation-theory fractal preamble (GLSL syntax).
+ *
+ * Provides `_fractal_mandelbrot_pt` and `_fractal_julia_pt` which iterate
+ * a perturbation delta relative to a precomputed reference orbit stored in
+ * a RG32F texture. Includes glitch detection with single-float fallback.
+ */
+export const GPU_FRACTAL_PT_PREAMBLE_GLSL = `
+uniform sampler2D _refOrbit;
+uniform int _refOrbitLen;
+uniform int _refOrbitTexWidth;
+
+vec2 _pt_fetch_orbit(int i) {
+  int y = i / _refOrbitTexWidth;
+  int x = i - y * _refOrbitTexWidth;
+  return texelFetch(_refOrbit, ivec2(x, y), 0).rg;
+}
+
+float _fractal_mandelbrot_pt(vec2 delta_c, int maxIter) {
+  float dr = 0.0;
+  float di = 0.0;
+  int orbitLen = min(maxIter, _refOrbitLen);
+  for (int i = 0; i < orbitLen; i++) {
+    vec2 Zn = _pt_fetch_orbit(i);
+    // delta_{n+1} = 2*Z_n*delta_n + delta_n^2 + delta_c
+    float new_dr = 2.0 * (Zn.x * dr - Zn.y * di) + dr * dr - di * di + delta_c.x;
+    float new_di = 2.0 * (Zn.x * di + Zn.y * dr) + 2.0 * dr * di + delta_c.y;
+    dr = new_dr;
+    di = new_di;
+    // Full z = Z_{n+1} + delta for escape check
+    vec2 Zn1 = (i + 1 < orbitLen) ? _pt_fetch_orbit(i + 1) : vec2(0.0);
+    float zr = Zn1.x + dr;
+    float zi = Zn1.y + di;
+    float mag2 = zr * zr + zi * zi;
+    if (mag2 > 4.0)
+      return clamp((float(i) - log2(log2(mag2)) + 4.0) / float(maxIter), 0.0, 1.0);
+    // Glitch detection: |delta|^2 > |Z|^2
+    float dmag2 = dr * dr + di * di;
+    float Zmag2 = Zn.x * Zn.x + Zn.y * Zn.y;
+    if (dmag2 > Zmag2 && Zmag2 > 0.0) {
+      // Rebase to absolute coordinates and continue with single-float
+      float abs_zr = Zn1.x + dr;
+      float abs_zi = Zn1.y + di;
+      // Reconstruct absolute c from reference + delta
+      // (Use ds_from for the concept, but single-float suffices for fallback)
+      float cx = abs_zr - dr + delta_c.x;
+      float cy = abs_zi - di + delta_c.y;
+      for (int j = i + 1; j < maxIter; j++) {
+        float new_zr = abs_zr * abs_zr - abs_zi * abs_zi + cx;
+        abs_zi = 2.0 * abs_zr * abs_zi + cy;
+        abs_zr = new_zr;
+        mag2 = abs_zr * abs_zr + abs_zi * abs_zi;
+        if (mag2 > 4.0)
+          return clamp((float(j) - log2(log2(mag2)) + 4.0) / float(maxIter), 0.0, 1.0);
+      }
+      return 1.0;
+    }
+  }
+  return 1.0;
+}
+
+float _fractal_julia_pt(vec2 z_delta, vec2 delta_c, int maxIter) {
+  float dr = z_delta.x;
+  float di = z_delta.y;
+  int orbitLen = min(maxIter, _refOrbitLen);
+  for (int i = 0; i < orbitLen; i++) {
+    vec2 Zn = _pt_fetch_orbit(i);
+    float new_dr = 2.0 * (Zn.x * dr - Zn.y * di) + dr * dr - di * di + delta_c.x;
+    float new_di = 2.0 * (Zn.x * di + Zn.y * dr) + 2.0 * dr * di + delta_c.y;
+    dr = new_dr;
+    di = new_di;
+    vec2 Zn1 = (i + 1 < orbitLen) ? _pt_fetch_orbit(i + 1) : vec2(0.0);
+    float zr = Zn1.x + dr;
+    float zi = Zn1.y + di;
+    float mag2 = zr * zr + zi * zi;
+    if (mag2 > 4.0)
+      return clamp((float(i) - log2(log2(mag2)) + 4.0) / float(maxIter), 0.0, 1.0);
+    float dmag2 = dr * dr + di * di;
+    float Zmag2 = Zn.x * Zn.x + Zn.y * Zn.y;
+    if (dmag2 > Zmag2 && Zmag2 > 0.0) {
+      float abs_zr = Zn1.x + dr;
+      float abs_zi = Zn1.y + di;
+      float cx = delta_c.x;
+      float cy = delta_c.y;
+      for (int j = i + 1; j < maxIter; j++) {
+        float new_zr = abs_zr * abs_zr - abs_zi * abs_zi + cx;
+        abs_zi = 2.0 * abs_zr * abs_zi + cy;
+        abs_zr = new_zr;
+        mag2 = abs_zr * abs_zr + abs_zi * abs_zi;
+        if (mag2 > 4.0)
+          return clamp((float(j) - log2(log2(mag2)) + 4.0) / float(maxIter), 0.0, 1.0);
+      }
+      return 1.0;
+    }
+  }
+  return 1.0;
+}
+`;
+
+/**
+ * Perturbation-theory fractal preamble (WGSL syntax).
+ *
+ * Same logic as the GLSL version, adapted for WGSL syntax.
+ */
+export const GPU_FRACTAL_PT_PREAMBLE_WGSL = `
+@group(0) @binding(1) var _refOrbit: texture_2d<f32>;
+var<uniform> _refOrbitLen: i32;
+var<uniform> _refOrbitTexWidth: i32;
+
+fn _pt_fetch_orbit(i: i32) -> vec2f {
+  let y = i / _refOrbitTexWidth;
+  let x = i - y * _refOrbitTexWidth;
+  return textureLoad(_refOrbit, vec2i(x, y), 0).rg;
+}
+
+fn _fractal_mandelbrot_pt(delta_c: vec2f, maxIter: i32) -> f32 {
+  var dr: f32 = 0.0;
+  var di: f32 = 0.0;
+  let orbitLen = min(maxIter, _refOrbitLen);
+  for (var i: i32 = 0; i < orbitLen; i++) {
+    let Zn = _pt_fetch_orbit(i);
+    let new_dr = 2.0 * (Zn.x * dr - Zn.y * di) + dr * dr - di * di + delta_c.x;
+    let new_di = 2.0 * (Zn.x * di + Zn.y * dr) + 2.0 * dr * di + delta_c.y;
+    dr = new_dr;
+    di = new_di;
+    var Zn1 = vec2f(0.0);
+    if (i + 1 < orbitLen) { Zn1 = _pt_fetch_orbit(i + 1); }
+    let zr = Zn1.x + dr;
+    let zi = Zn1.y + di;
+    var mag2 = zr * zr + zi * zi;
+    if (mag2 > 4.0) {
+      return clamp((f32(i) - log2(log2(mag2)) + 4.0) / f32(maxIter), 0.0, 1.0);
+    }
+    let dmag2 = dr * dr + di * di;
+    let Zmag2 = Zn.x * Zn.x + Zn.y * Zn.y;
+    if (dmag2 > Zmag2 && Zmag2 > 0.0) {
+      var f_zr = Zn1.x + dr;
+      var f_zi = Zn1.y + di;
+      let cx = delta_c.x;
+      let cy = delta_c.y;
+      for (var j: i32 = i + 1; j < maxIter; j++) {
+        let t_zr = f_zr * f_zr - f_zi * f_zi + cx;
+        f_zi = 2.0 * f_zr * f_zi + cy;
+        f_zr = t_zr;
+        mag2 = f_zr * f_zr + f_zi * f_zi;
+        if (mag2 > 4.0) {
+          return clamp((f32(j) - log2(log2(mag2)) + 4.0) / f32(maxIter), 0.0, 1.0);
+        }
+      }
+      return 1.0;
+    }
+  }
+  return 1.0;
+}
+
+fn _fractal_julia_pt(z_delta: vec2f, delta_c: vec2f, maxIter: i32) -> f32 {
+  var dr = z_delta.x;
+  var di = z_delta.y;
+  let orbitLen = min(maxIter, _refOrbitLen);
+  for (var i: i32 = 0; i < orbitLen; i++) {
+    let Zn = _pt_fetch_orbit(i);
+    let new_dr = 2.0 * (Zn.x * dr - Zn.y * di) + dr * dr - di * di + delta_c.x;
+    let new_di = 2.0 * (Zn.x * di + Zn.y * dr) + 2.0 * dr * di + delta_c.y;
+    dr = new_dr;
+    di = new_di;
+    var Zn1 = vec2f(0.0);
+    if (i + 1 < orbitLen) { Zn1 = _pt_fetch_orbit(i + 1); }
+    let zr = Zn1.x + dr;
+    let zi = Zn1.y + di;
+    var mag2 = zr * zr + zi * zi;
+    if (mag2 > 4.0) {
+      return clamp((f32(i) - log2(log2(mag2)) + 4.0) / f32(maxIter), 0.0, 1.0);
+    }
+    let dmag2 = dr * dr + di * di;
+    let Zmag2 = Zn.x * Zn.x + Zn.y * Zn.y;
+    if (dmag2 > Zmag2 && Zmag2 > 0.0) {
+      var f_zr = Zn1.x + dr;
+      var f_zi = Zn1.y + di;
+      let cx = delta_c.x;
+      let cy = delta_c.y;
+      for (var j: i32 = i + 1; j < maxIter; j++) {
+        let t_zr = f_zr * f_zr - f_zi * f_zi + cx;
+        f_zi = 2.0 * f_zr * f_zi + cy;
+        f_zr = t_zr;
+        mag2 = f_zr * f_zr + f_zi * f_zi;
+        if (mag2 > 4.0) {
+          return clamp((f32(j) - log2(log2(mag2)) + 4.0) / f32(maxIter), 0.0, 1.0);
+        }
+      }
+      return 1.0;
     }
   }
   return 1.0;
@@ -2023,6 +2479,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
 
     const v2 = this.languageId === 'wgsl' ? 'vec2f' : 'vec2';
     const target = this.createTarget({
+      hints: options.hints,
       functions: (id) => {
         if (userFunctions && id in userFunctions) {
           const fn = userFunctions[id];
@@ -2080,10 +2537,33 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
           ? GPU_BESSELJ_PREAMBLE_WGSL
           : GPU_BESSELJ_PREAMBLE_GLSL;
     if (code.includes('_fractal_')) {
-      preamble +=
-        this.languageId === 'wgsl'
-          ? GPU_FRACTAL_PREAMBLE_WGSL
-          : GPU_FRACTAL_PREAMBLE_GLSL;
+      if (code.includes('_fractal_mandelbrot_pt') || code.includes('_fractal_julia_pt')) {
+        // Perturbation: needs ds_* (for glitch rebase) + pt preamble
+        preamble +=
+          this.languageId === 'wgsl'
+            ? GPU_DS_ARITHMETIC_PREAMBLE_WGSL
+            : GPU_DS_ARITHMETIC_PREAMBLE_GLSL;
+        preamble +=
+          this.languageId === 'wgsl'
+            ? GPU_FRACTAL_PT_PREAMBLE_WGSL
+            : GPU_FRACTAL_PT_PREAMBLE_GLSL;
+      } else if (code.includes('_fractal_mandelbrot_dp') || code.includes('_fractal_julia_dp')) {
+        // Emulated double: needs ds_* arithmetic + dp fractal preamble
+        preamble +=
+          this.languageId === 'wgsl'
+            ? GPU_DS_ARITHMETIC_PREAMBLE_WGSL
+            : GPU_DS_ARITHMETIC_PREAMBLE_GLSL;
+        preamble +=
+          this.languageId === 'wgsl'
+            ? GPU_FRACTAL_DP_PREAMBLE_WGSL
+            : GPU_FRACTAL_DP_PREAMBLE_GLSL;
+      } else {
+        // Single-precision
+        preamble +=
+          this.languageId === 'wgsl'
+            ? GPU_FRACTAL_PREAMBLE_WGSL
+            : GPU_FRACTAL_PREAMBLE_GLSL;
+      }
     }
     if (
       code.includes('_gpu_srgb_to') ||
@@ -2098,6 +2578,62 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
           : GPU_COLOR_PREAMBLE_GLSL;
     }
     if (preamble) result.preamble = preamble;
+
+    // Set staleWhen if fractal functions were compiled with viewport hints
+    if (code.includes('_fractal_') && options.hints?.viewport) {
+      const strategy = selectFractalStrategy(target);
+      const radius = options.hints.viewport.radius;
+      switch (strategy) {
+        case 'single':
+          result.staleWhen = { radiusBelow: 1e-6 };
+          break;
+        case 'double':
+          result.staleWhen = { radiusBelow: 1e-14, radiusAbove: 1e-5 };
+          break;
+        case 'perturbation':
+          result.staleWhen = {
+            radiusAbove: 1e-5,
+            radiusBelow: radius * 0.01,
+            centerDistance: radius * 2.0,
+          };
+          break;
+      }
+    }
+
+    // Compute reference orbit for perturbation strategy
+    if (
+      (code.includes('_fractal_mandelbrot_pt') ||
+        code.includes('_fractal_julia_pt')) &&
+      options.hints?.viewport
+    ) {
+      const viewport = options.hints.viewport;
+      // Precision: ~log10(1/radius) digits, minimum 50, plus margin
+      const digits = Math.max(50, Math.ceil(-Math.log10(viewport.radius)) + 10);
+      // Use 1000 as default maxIter for orbit computation
+      const maxIter = 1000;
+      const orbit = computeReferenceOrbit(
+        viewport.center as [number, number],
+        maxIter,
+        digits
+      );
+      const orbitLen = orbit.length / 2;
+      const texWidth = Math.min(orbitLen, 4096);
+      const texHeight = Math.ceil(orbitLen / texWidth);
+      result.textures = {
+        _refOrbit: {
+          data: orbit,
+          width: texWidth,
+          height: texHeight,
+          format: 'rg32f',
+        },
+      };
+      result.uniforms = {
+        ...result.uniforms,
+        _refOrbitLen: orbitLen,
+        _refOrbitTexWidth: texWidth,
+      };
+    }
+
     return result;
   }
 
