@@ -914,9 +914,7 @@ export class _Parser implements Parser {
           this.index = start;
           return false;
         }
-        // Check if we matched a LaTeX command variant (e.g., \lbrack for [)
-        const matchedToken = this.nextToken();
-        const useLatexCommand = matchedToken.startsWith('\\');
+        this.nextToken();
 
         // Consume closing brace if we had a braced delimiter \mathopen{(}
         if (hasBracedDelimiter && !this.match('<}>')) {
@@ -924,13 +922,12 @@ export class _Parser implements Parser {
           return false;
         }
 
-        // Find the corresponding close token variant
-        const closeTokens = DELIMITER_SHORTHAND[close[0] as string] ?? [
-          close[0],
-        ];
-        const closeToken = (closeTokens.find((t) =>
-          useLatexCommand ? t.startsWith('\\') : !t.startsWith('\\')
-        ) ?? closeTokens[0]) as LatexToken;
+        // Use the close token exactly as specified in the trigger.
+        // The matchfix entries already enumerate all delimiter combinations
+        // (e.g., [/), \lbrack/), [/\rparen, \lbrack/\rparen for intervals),
+        // so we should not transform the close token based on what format
+        // the open token was in.
+        const closeToken = close[0] as LatexToken;
 
         // Build the close boundary: for braced form, expect \mathclose{)}
         const closeBoundary = closePrefix

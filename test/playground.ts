@@ -18,9 +18,15 @@ import {
 const ce = new ComputeEngine();
 const engine = ce;
 
-const mandelbrot = parse('1+\\operatorname{Mandelbrot}(x+yi,200)');
-// console.log(compile(mandelbrot, { to: 'glsl' }).run?.({ x: 0.355, y: 0.355 }));
-console.log(compile(mandelbrot, { to: 'glsl' }).code);
+console.log(parse('x + 2 = \\square').json);
+console.log(parse('x + 2 = \\placeholder').json);
+
+parse('[5,7)');
+// -> ok, `["Interval", 5, ["Open", 7]]`
+parse('\\lbrack5,7)');
+// -> error
+parse('\\left\\lbrack5,7\\right)');
+// -> error
 
 // 1. sin(theta)**2 + cos(theta)**2 → 1 — Clean trig identity, but too simple.
 // 2. (alpha**2 - beta**2) / (alpha - beta) → didn't simplify. Engine doesn't cancel the

@@ -1,3 +1,34 @@
+### [Unreleased]
+
+#### Fixed
+
+- **LaTeX parsing: interval notation with `\lbrack`/`\lparen`** — parsing
+  `\lbrack5,7)` or `\left\lbrack5,7\right)` now correctly produces an
+  `Interval` expression. Previously, when the open delimiter was a LaTeX
+  command (e.g., `\lbrack`), the parser incorrectly required the close
+  delimiter to also be a LaTeX command (e.g., `\rparen` instead of `)`),
+  causing mismatched-delimiter intervals to fail.
+
+#### Added
+
+- **High-precision Mandelbrot/Julia compilation** — the GPU compilation targets
+  (GLSL, WGSL) now support three precision tiers for fractal rendering, selected
+  automatically based on viewport hints:
+  - **Single float** (zoom < 10^6x): existing implementation, no overhead
+  - **Emulated double** (zoom 10^6x–10^14x): double-single (float-float)
+    arithmetic using Dekker/Knuth algorithms, ~48-bit mantissa from two 32-bit
+    floats
+  - **Perturbation theory** (zoom > 10^14x): reference orbit computed on CPU at
+    arbitrary precision via `BigDecimal`, GPU iterates only the small delta from
+    the reference, with glitch detection and single-float rebase fallback
+- **Viewport-aware compile API** — `compile()` accepts optional
+  `hints: { viewport: { center, radius } }`. The compiler auto-selects the
+  precision strategy and returns `staleWhen` thresholds for cheap staleness
+  checking by the plot engine.
+- **`CompilationResult` extensions** — new optional fields: `staleWhen` (plain
+  data staleness predicate), `uniforms` (scalar shader uniforms), `textures`
+  (typed texture data with format/dimensions for GPU upload).
+
 ### 0.55.3 _2026-03-05_
 
 #### Improved
@@ -23,8 +54,8 @@
     integer-typed
   - `Abs` is a no-op when the operand is provably non-negative
   - `Power(x, 2)` only expands to `(x * x)` for simple operands (symbols,
-    literals) — function calls like `Power(Sin(x), 2)` use `pow`/`Math.pow`
-    to avoid duplicate evaluation
+    literals) — function calls like `Power(Sin(x), 2)` use `pow`/`Math.pow` to
+    avoid duplicate evaluation
   - Integer `Mod` with non-negative dividend uses plain `%` instead of the
     Euclidean double-mod formula
   - GPU variable declarations infer `i32`/`int` type for integer-typed locals
