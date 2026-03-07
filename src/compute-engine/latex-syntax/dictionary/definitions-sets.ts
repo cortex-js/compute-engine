@@ -594,34 +594,7 @@ function serializeSet(
   const h = operator(expr);
   if (!h) return '';
 
-  //
-  // `Set`
-  //
-  if (h === 'Set') {
-    if (nops(expr) === 0) return '\\emptyset';
-
-    //
-    // 1/ First variant: ["Set", <set | predicate>, ["Condition"]]
-    //
-    if (nops(expr) === 2 && operator(operand(expr, 2)) === 'Condition') {
-      return joinLatex([
-        '\\left\\lbrace',
-        serializer.serialize(operand(expr, 1)),
-        '\\middle\\mid',
-        serializer.serialize(operand(expr, 2)),
-        '\\right\\rbrace',
-      ]);
-    }
-
-    //
-    // 2/ 2nd variant: ["Set", ...<sequence>]
-    //
-    return joinLatex([
-      '\\left\\lbrace',
-      ...operands(expr).map((x) => serializer.serialize(x) + ' ,'),
-      '\\right\\rbrace',
-    ]);
-  }
+  // Note: `Set` serialization is handled by the matchfix entry's inline serializer.
 
   //
   // Multiple

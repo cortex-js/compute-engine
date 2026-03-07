@@ -25,9 +25,7 @@ describe('SERIALIZING SETS', () => {
   });
 
   test('Complement', () => {
-    expect(latex(['Complement', 'A'])).toMatchInlineSnapshot(
-      `A^\\complement`
-    );
+    expect(latex(['Complement', 'A'])).toMatchInlineSnapshot(`A^\\complement`);
   });
 
   // test('Range', () => {});
@@ -718,10 +716,6 @@ describe('SET BUILDER NOTATION', () => {
             x,
             0,
           ],
-          [
-            Error,
-            missing,
-          ],
         ],
       ]
     `);
@@ -744,10 +738,6 @@ describe('SET BUILDER NOTATION', () => {
             x,
             0,
           ],
-          [
-            Error,
-            missing,
-          ],
         ],
       ]
     `);
@@ -767,10 +757,6 @@ describe('SET BUILDER NOTATION', () => {
             x,
             0,
           ],
-          [
-            Error,
-            missing,
-          ],
         ],
       ]
     `);
@@ -789,10 +775,6 @@ describe('SET BUILDER NOTATION', () => {
             Greater,
             x,
             0,
-          ],
-          [
-            Error,
-            missing,
           ],
         ],
       ]

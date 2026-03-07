@@ -27,12 +27,14 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
       evaluate: evaluateBlock,
     },
 
-    // A condition expression tests for one or more conditions of an expression
-    // ['Condition', value, "positive"]
+    // A condition expression tests for one or more conditions of an expression.
+    // Two forms:
+    //   ['Condition', value, "positive"]  — tests value against named condition(s)
+    //   ['Condition', predicate]          — set-builder predicate (e.g. x > 0)
     Condition: {
       description: 'Test whether a value satisfies one or more conditions.',
       lazy: true,
-      signature: '(value, symbol) -> boolean',
+      signature: '(expression, symbol?) -> boolean',
       evaluate: ([value, conds], { engine }) => {
         let conditions: string[] = [];
         if (isSymbol(conds)) {
