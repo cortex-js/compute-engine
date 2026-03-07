@@ -87,11 +87,19 @@ export class Serializer {
   /**
    * Serialize the expression, and if the expression is an operator
    * of precedence less than or equal to prec, wrap it in some parens.
-   * @todo: don't wrap Abs, Floor, Ceil, Delimiter
+   *
+   * Skip wrapping for matchfix operators (Abs, Floor, Ceil, Norm, etc.)
+   * and Delimiter since they already have visible delimiters.
    */
   wrap(expr: MathJsonExpression | null | undefined, prec?: number): string {
     if (expr === null || expr === undefined) return '';
     if (prec === undefined) {
+      // Don't wrap matchfix operators — they already have visible delimiters
+      const name = operator(expr);
+      if (name) {
+        const def = this.dictionary.ids.get(name);
+        if (def?.kind === 'matchfix') return this.serialize(expr);
+      }
       return this.wrapString(
         this.serialize(expr),
         this.options.groupStyle(expr, this.level + 1)

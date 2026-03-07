@@ -1362,11 +1362,6 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   // Lagrange notation
   {
     name: 'Derivative',
-    // @todo: Leibniz notation: {% latex " \\frac{d^n}{dx^n} f(x)" %}
-    // @todo: Euler modified notation: This notation is used by Mathematica. The Euler notation uses `D` instead of
-    // `\partial`: `\partial_{x} f`,  `\partial_{x,y} f`
-    // Newton notation (\dot{v}, \ddot{v}) is implemented below
-
     serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
       const degree = machineValue(operand(expr, 2)) ?? 1;
       const base = serializer.serialize(operand(expr, 1));

@@ -642,4 +642,65 @@ describe('SYMBOLS', () => {
       expect(parse('\\operatorname{a~b}')).toMatchInlineSnapshot(`ab`);
     });
   });
+
+  describe('STRING GROUP SYMBOL INTERPRETATION', () => {
+    // Note: \operatorname{...} is parsed by the symbol body parser
+    // (parseSymbolBody / parseSymbolToken in parse-symbol.ts), which maps
+    // LaTeX commands to MathJSON symbol names (e.g. \alpha → 'alpha').
+    // The parseStringGroupContent() method (in parse.ts) handles string
+    // groups for other contexts like \begin/\end environment names, where
+    // it now substitutes known symbols with their Unicode characters.
+
+    test('Greek letters in operatorname produce MathJSON symbol names', () => {
+      // \operatorname uses parseSymbolBody, which maps to symbol names
+      expect(parse('\\operatorname{\\alpha}')).toMatchInlineSnapshot(`alpha`);
+      expect(parse('\\operatorname{\\beta}')).toMatchInlineSnapshot(`beta`);
+      expect(parse('\\operatorname{\\gamma}')).toMatchInlineSnapshot(`gamma`);
+      expect(parse('\\operatorname{\\theta}')).toMatchInlineSnapshot(`theta`);
+      expect(parse('\\operatorname{\\omega}')).toMatchInlineSnapshot(`omega`);
+    });
+
+    test('Uppercase Greek in operatorname', () => {
+      expect(parse('\\operatorname{\\Gamma}')).toMatchInlineSnapshot(`Gamma`);
+      expect(parse('\\operatorname{\\Delta}')).toMatchInlineSnapshot(`Delta`);
+      expect(parse('\\operatorname{\\Omega}')).toMatchInlineSnapshot(`Omega`);
+    });
+
+    test('Greek letter mixed with ASCII in operatorname', () => {
+      expect(parse('\\operatorname{f\\beta}')).toMatchInlineSnapshot(`fbeta`);
+    });
+
+    test('Multiple Greek letters in operatorname', () => {
+      expect(parse('\\operatorname{\\alpha\\beta}')).toMatchInlineSnapshot(
+        `alphabeta`
+      );
+    });
+
+    test('Variant Greek letters in operatorname', () => {
+      expect(parse('\\operatorname{\\varepsilon}')).toMatchInlineSnapshot(
+        `epsilonSymbol`
+      );
+      expect(parse('\\operatorname{\\vartheta}')).toMatchInlineSnapshot(
+        `thetaSymbol`
+      );
+      expect(parse('\\operatorname{\\varphi}')).toMatchInlineSnapshot(
+        `phiLetter`
+      );
+    });
+
+    test('Non-Greek symbols in operatorname', () => {
+      expect(parse('\\operatorname{\\aleph}')).toMatchInlineSnapshot(`aleph`);
+      expect(parse('\\operatorname{\\ell}')).toMatchInlineSnapshot(`ell`);
+      expect(parse('\\operatorname{\\hbar}')).toMatchInlineSnapshot(`hBar`);
+    });
+
+    test('\\begin/\\end with Greek symbol in name matches consistently', () => {
+      // parseStringGroupContent converts \alpha to 'α' for environment names.
+      // An unknown environment is silently consumed; the key is that
+      // \begin and \end names match so no 'unbalanced-environment' error.
+      const expr = parse('\\begin{\\alpha}x\\end{\\alpha}');
+      // Unknown environment — content is discarded, but no unbalanced error
+      expect(expr).not.toContain('unbalanced-environment');
+    });
+  });
 });

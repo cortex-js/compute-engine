@@ -1709,7 +1709,8 @@ function getIndexAssignment(
     if (operator(rhs) === 'Range') {
       const lower = operand(rhs, 1) ?? 1;
       const upper = operand(rhs, 2) ?? undefined;
-      // @todo: we currently do not support step range, i.e. `i=1..3..10`. The step is the third argument of Range. We should extend the indexing set to include step-range and collections, i.e. i={1,2,3,4}
+      // Note: Element form (i \in S) is handled below. Step-range form
+      // (i=1..3..10) intentionally deferred — uncommon LaTeX notation.
       return { index, lower, upper };
     }
     // We have i=1

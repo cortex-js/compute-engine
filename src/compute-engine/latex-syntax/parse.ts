@@ -47,6 +47,20 @@ import {
 } from './parse-number';
 import { BoxedType } from '../../common/type/boxed-type';
 import { TypeString } from '../types';
+import { SYMBOLS } from './dictionary/definitions-symbols';
+
+/** Lazy map from LaTeX command (e.g. '\\alpha') to its Unicode character.
+ * Built once from the SYMBOLS table on first access. */
+let _symbolToUnicode: Map<string, string> | null = null;
+function getSymbolToUnicode(): Map<string, string> {
+  if (!_symbolToUnicode) {
+    _symbolToUnicode = new Map();
+    for (const [, latex, codepoint] of SYMBOLS) {
+      _symbolToUnicode.set(latex, String.fromCodePoint(codepoint));
+    }
+  }
+  return _symbolToUnicode;
+}
 
 /** These delimiters can be used as 'shorthand' delimiters in
  * `openTrigger` and `closeTrigger` for `matchfix` operators.
@@ -686,7 +700,31 @@ export class _Parser implements Parser {
       this.skipVisualSpace();
     }
 
-    // @todo maybe also `\hspace` and `\hspace*` and `\hskip` and `\kern` with a glue param
+    // \hspace{dim} and \hspace*{dim}
+    if (this.match('\\hspace')) {
+      this.match('*');
+      this.parseStringGroup(); // consumes {content}
+      this.skipVisualSpace();
+    }
+
+    // \hskip <glue> and \kern <glue> take an inline dimension
+    // (e.g., \hskip5pt, \kern-3mu)
+    // Each character is a separate token from the tokenizer.
+    if (this.match('\\hskip') || this.match('\\kern')) {
+      this.skipSpace();
+      // Skip optional sign
+      this.match('-') || this.match('+');
+      // Skip digits and decimal point
+      while (/^[\d.]$/.test(this.peek)) this.nextToken();
+      // Try to match a known two-letter TeX unit
+      for (const unit of [
+        'pt', 'em', 'mu', 'ex', 'mm', 'cm', 'in', 'bp', 'sp', 'dd', 'cc',
+        'pc', 'nc', 'nd',
+      ]) {
+        if (this.matchAll([...unit])) break;
+      }
+      this.skipVisualSpace();
+    }
 
     this.skipSpace();
   }
@@ -1139,9 +1177,10 @@ export class _Parser implements Parser {
       } else if (token[0] === '\\') {
         // TeX will give a 'Missing \endcsname inserted' error
         // if it encounters any command when expecting a string.
-        // We're a bit more lax.
-        // @todo: interpret some symbols, i.e. \alpha, etc..
-        result += token;
+        // We're a bit more lax: substitute known symbols with their
+        // Unicode character (e.g. \alpha → α).
+        const unicode = getSymbolToUnicode().get(token);
+        result += unicode ?? token;
       } else {
         result += token;
       }

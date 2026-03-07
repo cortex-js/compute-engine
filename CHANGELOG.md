@@ -2,13 +2,48 @@
 
 #### Fixed
 
-- **LaTeX parsing: style, size, and color switch commands** —
-  `\displaystyle`, `\textstyle`, `\scriptstyle`, `\scriptscriptstyle`,
-  `\tiny`..`\Huge` (10 size commands), and `\color{...}` were silently
-  discarded during parsing. They now produce `Annotated` expressions that
-  preserve the styling information and round-trip correctly through
-  serialization. Added `\scriptstyle` / `\scriptscriptstyle` serialization
-  support (previously only `\displaystyle` and `\textstyle` were handled).
+- **LaTeX parsing: style, size, and color switch commands** — `\displaystyle`,
+  `\textstyle`, `\scriptstyle`, `\scriptscriptstyle`, `\tiny`..`\Huge` (10 size
+  commands), and `\color{...}` were silently discarded during parsing. They now
+  produce `Annotated` expressions that preserve the styling information and
+  round-trip correctly through serialization. Added `\scriptstyle` /
+  `\scriptscriptstyle` serialization support (previously only `\displaystyle`
+  and `\textstyle` were handled).
+
+- **LaTeX parsing: set-builder notation** — `\{x \in \R \mid x > 0\}` now parses
+  to `["Set", expr, ["Condition", cond]]`. Registered `\mid` as an infix
+  operator (`Divides`, precedence 160). The serializer round-trips set-builder
+  notation correctly.
+
+- **LaTeX serialization: `Complement`** — `["Complement", "A"]` now serializes
+  to `A^\complement` instead of falling back to the generic function form.
+  Removed stale `@todo` comments about a non-existent multi-argument case.
+
+- **LaTeX parsing: spacing commands** — `\hspace{dim}`, `\hspace*{dim}`,
+  `\hskip`, and `\kern` are now consumed during parsing (previously caused
+  "unexpected token" errors). These are treated as visual spacing and skipped.
+
+- **LaTeX serialization: `HorizontalSpacing` math classes** — the 2-argument
+  form `["HorizontalSpacing", expr, "'bin'"]` now serializes to `\mathbin{expr}`
+  (and similarly for `rel`, `op`, `ord`, `open`, `close`, `punct`, `inner`).
+  Previously the second argument was silently dropped.
+
+- **LaTeX serialization: redundant parens on matchfix operators** — `wrap()` no
+  longer adds parentheses around `Abs`, `Floor`, `Ceil`, `Norm`, and other
+  matchfix expressions that already have visible delimiters.
+
+- **LaTeX serialization: tabular environments** — default environment serializer
+  now renders matrix bodies (List of Lists) with `&` column separators and `\\`
+  row separators instead of nested function calls.
+
+- **LaTeX serialization: matchfix delimiter scaling** — default matchfix
+  serializer now respects `groupStyle` to choose between bare delimiters,
+  `\left..\right`, or `\bigl..\bigr` scaling.
+
+- **LaTeX parsing: Greek symbols in string groups** — `\alpha`, `\beta`, etc. in
+  `parseStringGroupContent()` (used by `\begin`/`\end`, color arguments) are now
+  interpreted as their Unicode equivalents instead of passing through as raw
+  LaTeX commands.
 
 ### 0.55.5 _2026-03-06_
 

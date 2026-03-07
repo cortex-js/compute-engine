@@ -1,4 +1,5 @@
 import { check, engine, latex } from '../../utils';
+import { serialize } from '../../../src/compute-engine/latex-syntax/latex-syntax';
 
 describe('STYLE - MATH MODE', () => {
   // Note: the \textcolor command must span a valid math expression, so for example, `x = \textcolor{red}{y + 1}` is valid but `x \textcolor{red}{=} y + 1}` is not valid.
@@ -368,5 +369,107 @@ describe('TEXT KEYWORDS', () => {
       simplify  = Exists(x, 0 < x)
       eval-auto = Exists(x, x > 0)
     `);
+  });
+});
+
+describe('SPACING COMMANDS', () => {
+  test('\\hspace{dim} is skipped', () => {
+    expect(engine.parse('x\\hspace{1em}y').json).toEqual(['Multiply', 'x', 'y']);
+  });
+
+  test('\\hspace*{dim} is skipped', () => {
+    expect(engine.parse('x\\hspace*{2em}y').json).toEqual([
+      'Multiply',
+      'x',
+      'y',
+    ]);
+  });
+
+  test('\\kern with dimension is skipped', () => {
+    expect(engine.parse('x\\kern3mu y').json).toEqual(['Multiply', 'x', 'y']);
+  });
+
+  test('\\kern with negative dimension is skipped', () => {
+    expect(engine.parse('x\\kern-3mu y').json).toEqual(['Multiply', 'x', 'y']);
+  });
+
+  test('\\kern with decimal dimension is skipped', () => {
+    expect(engine.parse('x\\kern0.5em y').json).toEqual([
+      'Multiply',
+      'x',
+      'y',
+    ]);
+  });
+
+  test('\\hskip with dimension is skipped', () => {
+    expect(engine.parse('x\\hskip5pt y').json).toEqual(['Multiply', 'x', 'y']);
+  });
+
+  test('\\kern without dimension is skipped', () => {
+    expect(engine.parse('x\\kern y').json).toEqual(['Multiply', 'x', 'y']);
+  });
+
+  test('\\kern alone parses to Nothing', () => {
+    expect(engine.parse('\\kern3mu').json).toEqual('Nothing');
+  });
+
+  test('\\hspace alone parses to Nothing', () => {
+    expect(engine.parse('\\hspace{1em}').json).toEqual('Nothing');
+  });
+
+  test('\\hskip alone parses to Nothing', () => {
+    expect(engine.parse('\\hskip5pt').json).toEqual('Nothing');
+  });
+});
+
+describe('HORIZONTAL SPACING SERIALIZE', () => {
+  test('HorizontalSpacing with math class bin', () => {
+    expect(serialize(['HorizontalSpacing', 'x', "'bin'"])).toBe('\\mathbin{x}');
+  });
+
+  test('HorizontalSpacing with math class rel', () => {
+    expect(serialize(['HorizontalSpacing', 'x', "'rel'"])).toBe('\\mathrel{x}');
+  });
+
+  test('HorizontalSpacing with math class op', () => {
+    expect(serialize(['HorizontalSpacing', 'x', "'op'"])).toBe('\\mathop{x}');
+  });
+
+  test('HorizontalSpacing with math class ord', () => {
+    expect(serialize(['HorizontalSpacing', 'x', "'ord'"])).toBe('\\mathord{x}');
+  });
+
+  test('HorizontalSpacing with math class open', () => {
+    expect(serialize(['HorizontalSpacing', 'x', "'open'"])).toBe(
+      '\\mathopen{x}'
+    );
+  });
+
+  test('HorizontalSpacing with math class close', () => {
+    expect(serialize(['HorizontalSpacing', 'x', "'close'"])).toBe(
+      '\\mathclose{x}'
+    );
+  });
+
+  test('HorizontalSpacing with math class punct', () => {
+    expect(serialize(['HorizontalSpacing', 'x', "'punct'"])).toBe(
+      '\\mathpunct{x}'
+    );
+  });
+
+  test('HorizontalSpacing with math class inner', () => {
+    expect(serialize(['HorizontalSpacing', 'x', "'inner'"])).toBe(
+      '\\mathinner{x}'
+    );
+  });
+
+  test('HorizontalSpacing with unknown class falls back', () => {
+    expect(serialize(['HorizontalSpacing', 'x', "'foo'"])).toBe('x');
+  });
+
+  test('HorizontalSpacing with compound expression', () => {
+    expect(serialize(['HorizontalSpacing', ['Add', 'x', 1], "'bin'"])).toBe(
+      '\\mathbin{x+1}'
+    );
   });
 });

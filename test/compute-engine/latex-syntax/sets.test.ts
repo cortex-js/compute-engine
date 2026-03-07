@@ -24,6 +24,12 @@ describe('SERIALIZING SETS', () => {
     );
   });
 
+  test('Complement', () => {
+    expect(latex(['Complement', 'A'])).toMatchInlineSnapshot(
+      `A^\\complement`
+    );
+  });
+
   // test('Range', () => {});
 
   test('Interval serialization', () => {
@@ -443,6 +449,13 @@ describe('PARSING INTERVALS', () => {
 //   }); // @fixme
 // });
 
+describe('PARSING COMPLEMENT', () => {
+  it('should parse complement', () => {
+    expect(parse('A^\\complement').json).toMatchObject(['Complement', 'A']);
+    expect(parse('A^{\\complement}').json).toMatchObject(['Complement', 'A']);
+  });
+});
+
 describe('SET OPERATOR PRECEDENCE WITH LOGIC', () => {
   // Set membership operators should bind tighter than logic operators
   // Precedence: \in (240) > \land (235) > \lor (230)
@@ -688,5 +701,145 @@ describe('RANGE AND INTERVAL SERIALIZATION', () => {
       const expr1 = ce.parse(latex);
       expect(expr1.json[0]).toBe('Interval');
     }
+  });
+});
+
+describe('SET BUILDER NOTATION', () => {
+  it('should parse set builder with \\mid', () => {
+    // \{x \mid x > 0\}
+    expect(parse('\\{x \\mid x > 0\\}').json).toMatchInlineSnapshot(`
+      [
+        Set,
+        x,
+        [
+          Condition,
+          [
+            Greater,
+            x,
+            0,
+          ],
+          [
+            Error,
+            missing,
+          ],
+        ],
+      ]
+    `);
+  });
+
+  it('should parse set builder with \\mid and element-of', () => {
+    // \{x \in \R \mid x > 0\}
+    expect(parse('\\{x \\in \\R \\mid x > 0\\}').json).toMatchInlineSnapshot(`
+      [
+        Set,
+        [
+          Element,
+          x,
+          RealNumbers,
+        ],
+        [
+          Condition,
+          [
+            Greater,
+            x,
+            0,
+          ],
+          [
+            Error,
+            missing,
+          ],
+        ],
+      ]
+    `);
+  });
+
+  it('should parse set builder with \\lbrace and \\rbrace', () => {
+    // \lbrace x \mid x > 0 \rbrace
+    expect(parse('\\lbrace x \\mid x > 0 \\rbrace').json)
+      .toMatchInlineSnapshot(`
+      [
+        Set,
+        x,
+        [
+          Condition,
+          [
+            Greater,
+            x,
+            0,
+          ],
+          [
+            Error,
+            missing,
+          ],
+        ],
+      ]
+    `);
+  });
+
+  it('should parse set builder with \\left and \\right', () => {
+    // \left\{ x \mid x > 0 \right\}
+    expect(parse('\\left\\{ x \\mid x > 0 \\right\\}').json)
+      .toMatchInlineSnapshot(`
+      [
+        Set,
+        x,
+        [
+          Condition,
+          [
+            Greater,
+            x,
+            0,
+          ],
+          [
+            Error,
+            missing,
+          ],
+        ],
+      ]
+    `);
+  });
+
+  it('should round-trip set builder notation', () => {
+    const expr1 = parse('\\{x \\mid x > 0\\}');
+    const serialized = expr1.latex;
+    const expr2 = parse(serialized);
+    expect(expr2.latex).toBe(serialized);
+  });
+
+  it('should round-trip set builder with element-of', () => {
+    const expr1 = parse('\\{x \\in \\R \\mid x > 0\\}');
+    const serialized = expr1.latex;
+    const expr2 = parse(serialized);
+    expect(expr2.latex).toBe(serialized);
+  });
+
+  it('should serialize set builder from MathJSON', () => {
+    expect(
+      latex(['Set', 'x', ['Condition', ['Greater', 'x', 0]]])
+    ).toMatchInlineSnapshot(`\\lbrace x\\mid x\\gt0\\rbrace`);
+  });
+
+  it('should still parse enumerated sets', () => {
+    expect(parse('\\{1, 2, 3\\}').json).toMatchInlineSnapshot(`
+      [
+        Set,
+        1,
+        2,
+        3,
+      ]
+    `);
+  });
+
+  it('should still parse empty sets', () => {
+    expect(parse('\\{\\}').json).toMatchInlineSnapshot(`EmptySet`);
+  });
+
+  it('should still parse single-element sets', () => {
+    expect(parse('\\{42\\}').json).toMatchInlineSnapshot(`
+      [
+        Set,
+        42,
+      ]
+    `);
   });
 });

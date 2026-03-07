@@ -19,6 +19,7 @@ import {
   LatexString,
   LatexToken,
   Parser,
+  Serializer,
   SerializeHandler,
   Terminator,
   isEnvironmentEntry,
@@ -506,6 +507,34 @@ function makeIndexedEntry(
   return result as IndexedLatexDictionaryEntry;
 }
 
+/**
+ * Serialize a body expression as tabular content if it's a matrix shape
+ * (List of Lists): cells separated by `&`, rows separated by `\\`.
+ * Otherwise, fall back to plain serialization.
+ */
+function serializeTabularBody(
+  serializer: Serializer,
+  body: MathJsonExpression | null | undefined
+): string {
+  if (!body) return '';
+  if (operator(body) !== 'List') return serializer.serialize(body);
+
+  const rows = operands(body);
+  if (rows.length === 0) return '';
+
+  // Check if all rows are Lists (matrix shape)
+  if (!rows.every((row) => operator(row) === 'List'))
+    return serializer.serialize(body);
+
+  return rows
+    .map((row) =>
+      operands(row)
+        .map((cell) => serializer.serialize(cell))
+        .join(' & ')
+    )
+    .join(' \\\\\n');
+}
+
 function makeSerializeHandler(
   entry: LatexDictionaryEntry,
   latexTrigger: LatexToken[] | null,
@@ -516,19 +545,18 @@ function makeSerializeHandler(
   const kind = entry['kind'] ?? 'expression';
 
   if (kind === 'environment') {
-    // @todo: should do a serializeTabular(). op(expr,1) is likely to be
-    // a matrix (List of List).
     const envName = entry['symbolTrigger'] ?? entry.name ?? 'unknown';
-    return (serializer, expr) =>
-      joinLatex([
+    return (serializer, expr) => {
+      const body = operand(expr, 1);
+      return joinLatex([
         `\\begin{${envName}}`,
-        serializer.serialize(operand(expr, 1)),
+        serializeTabularBody(serializer, body),
         `\\end{${envName}}`,
       ]);
+    };
   }
 
   if (isMatchfixEntry(entry)) {
-    // @todo: use groupStyle to decide on \left..\right, etc..
     const openDelim =
       typeof entry.openTrigger === 'string'
         ? DEFAULT_DELIMITER[entry.openTrigger]
@@ -538,12 +566,19 @@ function makeSerializeHandler(
         ? DEFAULT_DELIMITER[entry.closeTrigger]
         : tokensToString(entry.closeTrigger);
 
-    return (serializer, expr) =>
-      joinLatex([
-        openDelim,
-        serializer.serialize(operand(expr, 1)),
-        closeDelim,
-      ]);
+    return (serializer, expr) => {
+      const style = serializer.groupStyle(expr, serializer.level + 1);
+      const inner = serializer.serialize(operand(expr, 1));
+      if (style === 'scaled')
+        return joinLatex([`\\left${openDelim}`, inner, `\\right${closeDelim}`]);
+      if (style === 'big')
+        return joinLatex([
+          `\\Bigl${openDelim}`,
+          inner,
+          `\\Bigr${closeDelim}`,
+        ]);
+      return joinLatex([openDelim, inner, closeDelim]);
+    };
   }
 
   let latex = entry.serialize;

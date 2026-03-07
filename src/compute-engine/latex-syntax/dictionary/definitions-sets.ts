@@ -216,16 +216,19 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     parse: (_parser, lhs) => {
       return ['Complement', lhs] as MathJsonExpression;
     },
-
     // precedence: 240,
-    // @todo: serialize for the multiple argument case
   },
   {
     name: 'Complement',
     latexTrigger: ['^', '<{>', '\\complement', '<}>'],
     kind: 'postfix',
     // precedence: 240,
-    // @todo: serialize for the multiple argument case
+    serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
+      return joinLatex([
+        serializer.serialize(operand(expr, 1)),
+        '^\\complement',
+      ]);
+    },
   },
   {
     name: 'Intersection',
@@ -347,7 +350,6 @@ export const DEFINITIONS_SETS: LatexDictionary = [
   // commands like \rbrack a, b \rbrack which are unambiguous.
   {
     name: 'Multiple',
-    // @todo: parse
     serialize: serializeSet,
   },
   {
@@ -356,14 +358,34 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     kind: 'infix',
     precedence: 350,
   },
+
+  // \mid as a separator/operator (used in set-builder notation: {x \mid x > 0})
+  // Low precedence so it binds loosely — everything on each side is parsed first
+  {
+    name: 'Divides',
+    latexTrigger: ['\\mid'],
+    kind: 'infix',
+    precedence: 160,
+  },
+
   {
     name: 'Set',
     kind: 'matchfix',
     openTrigger: '{',
     closeTrigger: '}',
-    // @todo: the set syntax can also include conditions...
     parse: (_parser: Parser, body: MathJsonExpression): MathJsonExpression => {
       if (isEmptySequence(body)) return 'EmptySet';
+
+      // Check for set-builder notation: {expr | condition} or {expr \mid condition}
+      // The body is pre-parsed, so \mid appears as Divides and : or \colon as Colon
+      const h = operator(body);
+      if (h === 'Divides' || h === 'Colon') {
+        const expr = operand(body, 1);
+        const condition = operand(body, 2);
+        if (expr !== null && condition !== null)
+          return ['Set', expr, ['Condition', condition]];
+      }
+
       if (
         operator(body) == 'Delimiter' &&
         stringValue(operand(body, 2)) === ','
@@ -374,6 +396,19 @@ export const DEFINITIONS_SETS: LatexDictionary = [
       return ['Set', ...operands(body)];
     },
     serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
+      // Set-builder notation: ["Set", expr, ["Condition", cond]]
+      if (nops(expr) === 2 && operator(operand(expr, 2)) === 'Condition') {
+        const condition = operand(expr, 2);
+        return joinLatex([
+          '\\lbrace',
+          serializer.serialize(operand(expr, 1)),
+          '\\mid',
+          // Serialize the inner expression of the Condition wrapper
+          serializer.serialize(operand(condition, 1)),
+          '\\rbrace',
+        ]);
+      }
+      // Enumerated set: ["Set", ...elements]
       return joinLatex([
         '\\lbrace',
         operands(expr)
@@ -550,8 +585,6 @@ export const DEFINITIONS_SETS: LatexDictionary = [
 // - Intersection
 // - SymmetricDifference
 // - SetMinus
-// - Complement
-// - CartesianProduct
 
 function serializeSet(
   serializer: Serializer,
@@ -594,7 +627,6 @@ function serializeSet(
   // Multiple
   //
   if (h === 'Multiple') {
-    // @todo!
   }
 
   //

@@ -148,6 +148,45 @@ describe('MATCHFIX abs and norm', () => {
     `));
 });
 
+describe('MATCHFIX no redundant wrapping', () => {
+  // When wrap() is called without a precedence, matchfix operators should not
+  // be wrapped in additional parentheses since they already have visible
+  // delimiters.
+
+  test('Abs in reciprocal style (wrap without prec)', () => {
+    // |x|^{-1} not (|x|)^{-1}
+    const result = latex(['Divide', 1, ['Abs', 'x']]);
+    expect(result).not.toContain('(\\vert');
+    expect(result).not.toContain('\\vert)');
+  });
+
+  test('Floor in reciprocal style (wrap without prec)', () => {
+    const result = latex(['Divide', 1, ['Floor', 'x']]);
+    expect(result).not.toContain('(\\lfloor');
+    expect(result).not.toContain('\\rfloor)');
+  });
+
+  test('Ceil in reciprocal style (wrap without prec)', () => {
+    const result = latex(['Divide', 1, ['Ceil', 'x']]);
+    expect(result).not.toContain('(\\lceil');
+    expect(result).not.toContain('\\rceil)');
+  });
+
+  test('Abs serializes without extra parens', () => {
+    expect(latex(['Abs', 'x'])).toMatchInlineSnapshot(`\\vert x\\vert`);
+  });
+
+  test('Floor serializes without extra parens', () => {
+    expect(latex(['Floor', 'x'])).toMatchInlineSnapshot(
+      `\\lfloor x\\rfloor`
+    );
+  });
+
+  test('Ceil serializes without extra parens', () => {
+    expect(latex(['Ceil', 'x'])).toMatchInlineSnapshot(`\\lceil x\\rceil`);
+  });
+});
+
 describe('MATCHFIX invalid', () => {
   test('( // missing closing fence', () =>
     expect(check('(')).toMatchInlineSnapshot(

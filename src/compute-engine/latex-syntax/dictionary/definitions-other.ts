@@ -8,10 +8,33 @@ import {
   machineValue,
   operands,
   isEmptySequence,
+  stringValue,
   symbol,
 } from '../../../math-json/utils';
 import { MathJsonExpression, MathJsonSymbol } from '../../../math-json/types';
 import { joinLatex } from '../tokenizer';
+
+// TeX dimension units (each letter is a separate token from the tokenizer)
+const TEX_UNITS = [
+  'pt', 'em', 'mu', 'ex', 'mm', 'cm', 'in', 'bp', 'sp', 'dd', 'cc', 'pc',
+  'nc', 'nd',
+];
+
+/** Skip an inline TeX dimension (e.g., `3mu`, `-5pt`, `0.5em`).
+ *  Used to consume arguments of `\hskip` and `\kern`.
+ *  Each character is a separate token from the tokenizer. */
+function skipTexDimension(parser: Parser): void {
+  parser.skipSpace();
+  // Skip optional sign
+  if (parser.peek === '-' || parser.peek === '+') parser.nextToken();
+  // Skip digits and decimal point
+  while (/^[\d.]$/.test(parser.peek)) parser.nextToken();
+  // Try to match a known two-letter TeX unit
+  // Peek at the next two tokens to see if they form a known unit
+  for (const unit of TEX_UNITS) {
+    if (parser.matchAll([...unit])) return;
+  }
+}
 
 function parseSingleArg(cmd: string): (parser: Parser) => MathJsonExpression {
   return (parser) => {
@@ -492,6 +515,28 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
     parse: () => ['HorizontalSpacing', 9] as MathJsonExpression,
   },
   {
+    latexTrigger: ['\\hspace'],
+    parse: (parser): MathJsonExpression => {
+      if (parser.peek === '*') parser.nextToken();
+      parser.parseStringGroup(); // consume the braced dimension argument
+      return ['HorizontalSpacing', 0];
+    },
+  },
+  {
+    latexTrigger: ['\\hskip'],
+    parse: (parser): MathJsonExpression => {
+      skipTexDimension(parser);
+      return ['HorizontalSpacing', 0];
+    },
+  },
+  {
+    latexTrigger: ['\\kern'],
+    parse: (parser): MathJsonExpression => {
+      skipTexDimension(parser);
+      return ['HorizontalSpacing', 0];
+    },
+  },
+  {
     latexTrigger: ['\\phantom'],
     parse: (parser) => {
       parser.parseGroup();
@@ -541,8 +586,17 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
     // `["HorizontalSpacing", expr, 'op'|'bin'|rel]` -> indicate a spacing around and expression, i.e. `\mathbin{x}`, etc...
     serialize: (serializer, expr): string => {
       if (operand(expr, 2) !== null) {
-        // @todo: handle op(expr,2) == 'op', 'bin', etc...
-        return serializer.serialize(operand(expr, 1));
+        const cls = stringValue(operand(expr, 2));
+        const inner = serializer.serialize(operand(expr, 1));
+        if (cls === 'bin') return `\\mathbin{${inner}}`;
+        if (cls === 'op') return `\\mathop{${inner}}`;
+        if (cls === 'rel') return `\\mathrel{${inner}}`;
+        if (cls === 'ord') return `\\mathord{${inner}}`;
+        if (cls === 'open') return `\\mathopen{${inner}}`;
+        if (cls === 'close') return `\\mathclose{${inner}}`;
+        if (cls === 'punct') return `\\mathpunct{${inner}}`;
+        if (cls === 'inner') return `\\mathinner{${inner}}`;
+        return inner;
       }
 
       const v = machineValue(operand(expr, 1));
