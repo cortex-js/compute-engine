@@ -24,7 +24,7 @@ import {
   getSupertype,
   makeTensorField,
 } from '../tensor/tensor-fields';
-import { AbstractTensor, makeTensor } from '../tensor/tensors'; // @fixme
+import { AbstractTensor, makeTensor } from '../tensor/tensors';
 
 import { NumericValue } from '../numeric-value/types';
 

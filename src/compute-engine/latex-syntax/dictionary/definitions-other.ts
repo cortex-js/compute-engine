@@ -20,6 +20,32 @@ function parseSingleArg(cmd: string): (parser: Parser) => MathJsonExpression {
   };
 }
 
+/** Parse a LaTeX "switch" command that sets a math style for everything
+ *  following it in the current group (e.g. `{\displaystyle x+y}`). */
+function parseMathStyleSwitch(
+  mathStyle: string
+): (parser: Parser) => MathJsonExpression {
+  return (parser) => {
+    const body = parser.parseExpression();
+    if (body !== null && !isEmptySequence(body))
+      return ['Annotated', body, { dict: { mathStyle } }];
+    return 'Nothing';
+  };
+}
+
+/** Parse a LaTeX "switch" command that sets a font size for everything
+ *  following it in the current group (e.g. `{\large x+y}`). */
+function parseSizeSwitch(
+  size: number
+): (parser: Parser) => MathJsonExpression {
+  return (parser) => {
+    const body = parser.parseExpression();
+    if (body !== null && !isEmptySequence(body))
+      return ['Annotated', body, { dict: { size } }];
+    return 'Nothing';
+  };
+}
+
 export const DEFINITIONS_OTHERS: LatexDictionary = [
   {
     name: 'Overscript',
@@ -264,68 +290,72 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
   },
   {
     latexTrigger: ['\\displaystyle'],
-    parse: () => 'Nothing', // @todo: parse as ['Annotated'...]
+    parse: parseMathStyleSwitch('normal'),
   },
   {
     latexTrigger: ['\\textstyle'],
-    parse: () => 'Nothing', // @todo: parse as ['Annotated'...]
+    parse: parseMathStyleSwitch('compact'),
   },
   {
     latexTrigger: ['\\scriptstyle'],
-    parse: () => 'Nothing', // @todo: parse as ['Annotated'...]
+    parse: parseMathStyleSwitch('script'),
   },
   {
     latexTrigger: ['\\scriptscriptstyle'],
-    parse: () => 'Nothing', // @todo: parse as ['Annotated'...]
+    parse: parseMathStyleSwitch('scriptscript'),
   },
   {
     latexTrigger: ['\\color'],
-    parse: (parser: Parser) => {
-      // Consume the {color} argument and discard it
-      parser.parseGroup();
+    parse: (parser: Parser): MathJsonExpression => {
+      const color = parser.parseStringGroup();
+      if (color !== null) {
+        const body = parser.parseExpression();
+        if (body !== null && !isEmptySequence(body))
+          return ['Annotated', body, { dict: { color } }];
+      }
       return 'Nothing';
     },
   },
 
   {
     latexTrigger: ['\\tiny'],
-    parse: () => 'Nothing', // @todo: parse as ['Annotated'...]
+    parse: parseSizeSwitch(1),
   },
   {
     latexTrigger: ['\\scriptsize'],
-    parse: () => 'Nothing', // @todo: parse as ['Annotated'...]
+    parse: parseSizeSwitch(2),
   },
   {
     latexTrigger: ['\\footnotesize'],
-    parse: () => 'Nothing', // @todo: parse as ['Annotated'...]
+    parse: parseSizeSwitch(3),
   },
   {
     latexTrigger: ['\\small'],
-    parse: () => 'Nothing', // @todo: parse as ['Annotated'...]
+    parse: parseSizeSwitch(4),
   },
   {
     latexTrigger: ['\\normalsize'],
-    parse: () => 'Nothing', // @todo: parse as ['Annotated'...]
+    parse: parseSizeSwitch(5),
   },
   {
     latexTrigger: ['\\large'],
-    parse: () => 'Nothing', // @todo: parse as ['Annotated'...]
+    parse: parseSizeSwitch(6),
   },
   {
     latexTrigger: ['\\Large'],
-    parse: () => 'Nothing', // @todo: parse as ['Annotated'...]
+    parse: parseSizeSwitch(7),
   },
   {
     latexTrigger: ['\\LARGE'],
-    parse: () => 'Nothing', // @todo: parse as ['Annotated'...]
+    parse: parseSizeSwitch(8),
   },
   {
     latexTrigger: ['\\huge'],
-    parse: () => 'Nothing', // @todo: parse as ['Annotated'...]
+    parse: parseSizeSwitch(9),
   },
   {
     latexTrigger: ['\\Huge'],
-    parse: () => 'Nothing', // @todo: parse as ['Annotated'...]
+    parse: parseSizeSwitch(10),
   },
 
   {
@@ -343,6 +373,10 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
         result = joinLatex(['{\\displaystyle', result, '}']);
       else if (dict.dict.mathStyle === 'compact')
         result = joinLatex(['{\\textstyle', result, '}']);
+      else if (dict.dict.mathStyle === 'script')
+        result = joinLatex(['{\\scriptstyle', result, '}']);
+      else if (dict.dict.mathStyle === 'scriptscript')
+        result = joinLatex(['{\\scriptscriptstyle', result, '}']);
 
       //
       // Font Size

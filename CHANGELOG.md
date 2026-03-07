@@ -1,3 +1,15 @@
+### [Unreleased]
+
+#### Fixed
+
+- **LaTeX parsing: style, size, and color switch commands** —
+  `\displaystyle`, `\textstyle`, `\scriptstyle`, `\scriptscriptstyle`,
+  `\tiny`..`\Huge` (10 size commands), and `\color{...}` were silently
+  discarded during parsing. They now produce `Annotated` expressions that
+  preserve the styling information and round-trip correctly through
+  serialization. Added `\scriptstyle` / `\scriptscriptstyle` serialization
+  support (previously only `\displaystyle` and `\textstyle` were handled).
+
 ### 0.55.5 _2026-03-06_
 
 #### Fixed

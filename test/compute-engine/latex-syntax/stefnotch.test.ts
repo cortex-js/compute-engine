@@ -28,9 +28,13 @@ describe('STEFNOTCH #10', () => {
       parse(
         '\\displaystyle \\left(\\sin^{-1}\\left(x\\right)\\right)^{\\prime}'
       )
-    ).toMatchInlineSnapshot(
-      `["Derivative", ["Function", ["Arcsin", "x"], "x"]]`
-    );
+    ).toMatchInlineSnapshot(`
+      [
+        "Annotated",
+        ["Derivative", ["Function", ["Arcsin", "x"], "x"]],
+        {dict: {mathStyle: "normal"}}
+      ]
+    `);
   });
 
   test('2/ 1^{\\sin(x)}', () => {
@@ -46,12 +50,14 @@ describe('STEFNOTCH #10', () => {
   });
 
   test('4/ \\color{red}3', () => {
-    expect(parse('\\color{red}3')).toMatchInlineSnapshot(`3`);
+    expect(parse('\\color{red}3')).toMatchInlineSnapshot(
+      `["Annotated", 3, {dict: {color: "red"}}]`
+    );
   });
 
   test('4b/ \\color{blue}{x+y}', () => {
     expect(parse('\\color{blue}{x+y}')).toMatchInlineSnapshot(
-      `["Add", "x", "y"]`
+      `["Annotated", ["Add", "x", "y"], {dict: {color: "blue"}}]`
     );
   });
 
@@ -162,11 +168,18 @@ describe('STEFNOTCH #13', () => {
   });
 
   test('8/ a={displaystyle lim_{n\\toinfin}a_n}', () => {
-    expect(
-      parse('a={\\displaystyle \\lim_{n\\to \\infty}a_n}')
-    ).toMatchInlineSnapshot(
-      `["Equal", "a", ["Limit", ["Function", "a_n", "n"], "PositiveInfinity"]]`
-    );
+    expect(parse('a={\\displaystyle \\lim_{n\\to \\infty}a_n}'))
+      .toMatchInlineSnapshot(`
+      [
+        "Equal",
+        "a",
+        [
+          "Annotated",
+          ["Limit", ["Function", "a_n", "n"], "PositiveInfinity"],
+          {dict: {mathStyle: "normal"}}
+        ]
+      ]
+    `);
   });
 
   test('9/  \\forall x\\in\\C^2:|x|<0', () => {
