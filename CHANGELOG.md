@@ -1,3 +1,31 @@
+### [Unreleased]
+
+#### Fixed
+
+- **Deep-zoom fractal precision** — emulated-double (dp) and perturbation (pt)
+  shaders now compute per-pixel coordinates from `v_uv` and viewport uniforms
+  instead of the shader template's single-precision `mix()`, which lost
+  distinguishability at high zoom levels.
+- **Perturbation theory: absolute vs delta coordinates** — the perturbation
+  Mandelbrot/Julia handlers were passing absolute single-precision coordinates
+  to the shader instead of the small delta from the reference center. Fixed by
+  introducing `_pt_delta()` which computes the per-pixel offset from viewport
+  uniforms.
+- **`compile()` free function dropped `hints`** — the `hints` option (viewport
+  center/radius) was accepted but silently not forwarded to the language target.
+  Fixed in `compile-expression.ts`.
+
+#### Added
+
+- **`BigDecimal` export** — the arbitrary-precision decimal class is now
+  exported from the public API for use by plot engines and other consumers that
+  need precision beyond float64.
+- **`HighPrecisionCoord` type** — new union type
+  (`number | string | { hi: number; lo: number }`) for passing
+  extended-precision viewport coordinates through the compile API. The
+  `viewport.center` option now accepts this type instead of plain
+  `[number, number]`.
+
 ### 0.55.4 _2026-03-06_
 
 #### Fixed
@@ -13,8 +41,8 @@
   invalid content inside `\mathrm{}`, `\operatorname{}`, etc. (e.g.,
   `\mathrm{=}` or `\mathrm{DavidBowie👨🏻‍🎤}`) now produces the correct
   `invalid-symbol` error instead of cascading parse errors. Also fixed
-  `matchPrefixedSymbol` leaking parser state on failure, and emoji sequences
-  are now properly recognized inside symbol prefixes (e.g.,
+  `matchPrefixedSymbol` leaking parser state on failure, and emoji sequences are
+  now properly recognized inside symbol prefixes (e.g.,
   `\operatorname{😎🤏😳🕶🤏}`).
 
 #### Added

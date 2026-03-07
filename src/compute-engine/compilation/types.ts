@@ -1,6 +1,15 @@
 import type { MathJsonSymbol } from '../../math-json/types';
 
 /**
+ * A coordinate value with extended precision.
+ *
+ * - `number` — standard float64 (~16 decimal digits)
+ * - `string` — arbitrary precision (parsed by BigDecimal)
+ * - `{ hi, lo }` — double-double pair (~30 digits), true value = hi + lo
+ */
+export type HighPrecisionCoord = number | string | { hi: number; lo: number };
+
+/**
  * Source code in the target language
  */
 export type TargetSource = string;
@@ -201,8 +210,16 @@ export interface CompilationOptions<Expr = unknown> {
   hints?: {
     /** Current viewport for precision-adaptive compilation. */
     viewport?: {
-      /** Center of the viewport as [re, im]. */
-      center: [number, number];
+      /**
+       * Center of the viewport as [re, im].
+       *
+       * Each coordinate can be:
+       * - `number` — standard float64 precision (~16 digits)
+       * - `string` — arbitrary precision (parsed by BigDecimal)
+       * - `{ hi, lo }` — double-double pair (~30 digits),
+       *    true value = hi + lo
+       */
+      center: [HighPrecisionCoord, HighPrecisionCoord];
       /** Viewport radius (half-width in complex plane units). */
       radius: number;
     };

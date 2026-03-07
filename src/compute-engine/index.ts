@@ -191,7 +191,11 @@ export type {
   LanguageTarget,
   TargetSource,
   CompiledFunction,
+  HighPrecisionCoord,
 } from './compilation/types';
+
+// Export BigDecimal for arbitrary-precision arithmetic
+export { BigDecimal } from '../big-decimal';
 
 export { JavaScriptTarget } from './compilation/javascript-target';
 export { GLSLTarget } from './compilation/glsl-target';

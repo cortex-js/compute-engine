@@ -53,6 +53,9 @@ export type {
   Parser,
 } from './compute-engine/latex-syntax/types';
 
+// ── Arbitrary-precision arithmetic ──────────────────────────────────
+export { BigDecimal } from './big-decimal';
+
 // ── Compilation targets ─────────────────────────────────────────────
 export type {
   CompileTarget,
@@ -68,6 +71,7 @@ export type {
   LanguageTarget,
   TargetSource,
   CompiledFunction,
+  HighPrecisionCoord,
 } from './compute-engine/compilation/types';
 
 export { JavaScriptTarget } from './compute-engine/compilation/javascript-target';

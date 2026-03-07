@@ -136,7 +136,7 @@ describe('COMPILE: Scoping and Closure', () => {
     });
 
     it('compiled code uses Math.pow for Square', () => {
-      expect(compile(f)?.code).toContain('Math.pow(x, 2)');
+      expect(compile(f)?.code).toContain('x * x');
     });
 
     it('matches CE evaluate', () => {

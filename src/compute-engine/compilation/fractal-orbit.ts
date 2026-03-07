@@ -1,4 +1,22 @@
 import { BigDecimal } from '../../big-decimal';
+import type { HighPrecisionCoord } from './types';
+
+/** Convert a HighPrecisionCoord to BigDecimal. */
+function toBigDecimal(v: HighPrecisionCoord): BigDecimal {
+  if (typeof v === 'object' && 'hi' in v)
+    return new BigDecimal(v.hi).add(new BigDecimal(v.lo));
+  return new BigDecimal(v);
+}
+
+/**
+ * Convert a HighPrecisionCoord to a float64 number.
+ * Used for uniform values where float64 precision is sufficient.
+ */
+export function hpToNumber(v: HighPrecisionCoord): number {
+  if (typeof v === 'number') return v;
+  if (typeof v === 'string') return Number(v);
+  return v.hi + v.lo;
+}
 
 /**
  * Compute a Mandelbrot reference orbit at arbitrary precision.
@@ -7,13 +25,13 @@ import { BigDecimal } from '../../big-decimal';
  * at the specified precision (decimal digits). Stops early if |z|^2 > 256
  * (well past the escape radius of 2, giving a margin for perturbation).
  *
- * @param center - Reference point [re, im] as numbers (converted to BigDecimal)
+ * @param center - Reference point [re, im] with extended precision
  * @param maxIter - Maximum number of iterations
  * @param precision - BigDecimal working precision (decimal digits)
  * @returns Float32Array of [re0, im0, re1, im1, ...] orbit points
  */
 export function computeReferenceOrbit(
-  center: [number, number],
+  center: [HighPrecisionCoord, HighPrecisionCoord],
   maxIter: number,
   precision: number
 ): Float32Array {
@@ -21,8 +39,8 @@ export function computeReferenceOrbit(
   BigDecimal.precision = precision;
 
   try {
-    const cr = new BigDecimal(center[0]);
-    const ci = new BigDecimal(center[1]);
+    const cr = toBigDecimal(center[0]);
+    const ci = toBigDecimal(center[1]);
     let zr = BigDecimal.ZERO;
     let zi = BigDecimal.ZERO;
 

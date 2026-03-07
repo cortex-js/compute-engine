@@ -16,7 +16,7 @@ import type {
   CompilationResult,
 } from './types';
 import { BaseCompiler } from './base-compiler';
-import { computeReferenceOrbit } from './fractal-orbit';
+import { computeReferenceOrbit, hpToNumber } from './fractal-orbit';
 
 /**
  * GPU shader operators shared by GLSL and WGSL.
@@ -722,12 +722,16 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     const iterCode = compileIntArg(maxIter, compile, target);
     const strategy = selectFractalStrategy(target);
     if (strategy === 'double') {
-      const cCode = compile(c);
-      return `_fractal_mandelbrot_dp(vec4(${cCode}, vec2(0.0)), ${iterCode})`;
+      // _dp_coord() computes per-pixel emulated-double coordinates
+      // from v_uv + viewport uniforms — ignores the template's x,y
+      const dpCoord = target?.language === 'wgsl' ? '_dp_coord(v_uv)' : '_dp_coord()';
+      return `_fractal_mandelbrot_dp(${dpCoord}, ${iterCode})`;
     }
     if (strategy === 'perturbation') {
-      const cCode = compile(c);
-      return `_fractal_mandelbrot_pt(${cCode}, ${iterCode})`;
+      // Per-pixel delta from reference center — computed from v_uv and
+      // viewport uniforms, not from the template's single-precision x,y
+      const ptDelta = target?.language === 'wgsl' ? '_pt_delta(v_uv)' : '_pt_delta()';
+      return `_fractal_mandelbrot_pt(${ptDelta}, ${iterCode})`;
     }
     return `_fractal_mandelbrot(${compile(c)}, ${iterCode})`;
   },
@@ -737,14 +741,16 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     const iterCode = compileIntArg(maxIter, compile, target);
     const strategy = selectFractalStrategy(target);
     if (strategy === 'double') {
-      const zCode = compile(z);
+      // For Julia, z comes from _dp_coord (pixel position), c is the Julia parameter
+      const dpCoord = target?.language === 'wgsl' ? '_dp_coord(v_uv)' : '_dp_coord()';
       const cCode = compile(c);
-      return `_fractal_julia_dp(vec4(${zCode}, vec2(0.0)), vec4(${cCode}, vec2(0.0)), ${iterCode})`;
+      return `_fractal_julia_dp(${dpCoord}, vec4(${cCode}, vec2(0.0)), ${iterCode})`;
     }
     if (strategy === 'perturbation') {
-      const zCode = compile(z);
+      // z delta from reference center, c delta for Julia parameter
+      const ptDelta = target?.language === 'wgsl' ? '_pt_delta(v_uv)' : '_pt_delta()';
       const cCode = compile(c);
-      return `_fractal_julia_pt(${zCode}, ${cCode}, ${iterCode})`;
+      return `_fractal_julia_pt(${ptDelta}, ${cCode}, ${iterCode})`;
     }
     return `_fractal_julia(${compile(z)}, ${compile(c)}, ${iterCode})`;
   },
@@ -1604,8 +1610,32 @@ fn ds_cmp(a: vec2f, b: vec2f) -> f32 {
  * Emulated double-precision (double-single) Mandelbrot and Julia iterations.
  * Complex numbers are packed as vec4(re_hi, im_hi, re_lo, im_lo).
  * Requires GPU_DS_ARITHMETIC_PREAMBLE_GLSL to be included first.
+ *
+ * Coordinate computation:
+ * The shader template provides single-precision x,y via mix(), which lose
+ * distinguishability at deep zoom. Instead, _dp_coord() computes coordinates
+ * from the viewport UV (v_uv) and center/size uniforms. The per-pixel delta
+ * from center is small enough for float to distinguish adjacent pixels, and
+ * ds_add combines it with the center for ~48-bit total precision.
  */
 export const GPU_FRACTAL_DP_PREAMBLE_GLSL = `
+uniform float _dp_cx_hi;
+uniform float _dp_cx_lo;
+uniform float _dp_cy_hi;
+uniform float _dp_cy_lo;
+uniform float _dp_w;
+uniform float _dp_h;
+
+vec4 _dp_coord() {
+  // Per-pixel offset from center — small, so float-precise
+  float dx = (v_uv.x - 0.5) * _dp_w;
+  float dy = (v_uv.y - 0.5) * _dp_h;
+  // Combine center (hi+lo) + delta with emulated double precision
+  vec2 cre = ds_add(vec2(_dp_cx_hi, _dp_cx_lo), ds_from(dx));
+  vec2 cim = ds_add(vec2(_dp_cy_hi, _dp_cy_lo), ds_from(dy));
+  return vec4(cre.x, cim.x, cre.y, cim.y);
+}
+
 float _fractal_mandelbrot_dp(vec4 c, int maxIter) {
   // c = (re_hi, im_hi, re_lo, im_lo)
   vec2 cr = vec2(c.x, c.z);  // real part as ds
@@ -1654,6 +1684,21 @@ float _fractal_julia_dp(vec4 z_in, vec4 c, int maxIter) {
  * Requires GPU_DS_ARITHMETIC_PREAMBLE_WGSL to be included first.
  */
 export const GPU_FRACTAL_DP_PREAMBLE_WGSL = `
+@group(0) @binding(10) var<uniform> _dp_cx_hi: f32;
+@group(0) @binding(11) var<uniform> _dp_cx_lo: f32;
+@group(0) @binding(12) var<uniform> _dp_cy_hi: f32;
+@group(0) @binding(13) var<uniform> _dp_cy_lo: f32;
+@group(0) @binding(14) var<uniform> _dp_w: f32;
+@group(0) @binding(15) var<uniform> _dp_h: f32;
+
+fn _dp_coord(uv: vec2f) -> vec4f {
+  let dx = (uv.x - 0.5) * _dp_w;
+  let dy = (uv.y - 0.5) * _dp_h;
+  let cre = ds_add(vec2f(_dp_cx_hi, _dp_cx_lo), ds_from(dx));
+  let cim = ds_add(vec2f(_dp_cy_hi, _dp_cy_lo), ds_from(dy));
+  return vec4f(cre.x, cim.x, cre.y, cim.y);
+}
+
 fn _fractal_mandelbrot_dp(c: vec4f, maxIter: i32) -> f32 {
   let cr = vec2f(c.x, c.z);
   let ci = vec2f(c.y, c.w);
@@ -1759,6 +1804,16 @@ export const GPU_FRACTAL_PT_PREAMBLE_GLSL = `
 uniform sampler2D _refOrbit;
 uniform int _refOrbitLen;
 uniform int _refOrbitTexWidth;
+uniform float _pt_offset_x;
+uniform float _pt_offset_y;
+uniform float _pt_w;
+uniform float _pt_h;
+
+vec2 _pt_delta() {
+  float dx = _pt_offset_x + (v_uv.x - 0.5) * _pt_w;
+  float dy = _pt_offset_y + (v_uv.y - 0.5) * _pt_h;
+  return vec2(dx, dy);
+}
 
 vec2 _pt_fetch_orbit(int i) {
   int y = i / _refOrbitTexWidth;
@@ -1856,6 +1911,16 @@ export const GPU_FRACTAL_PT_PREAMBLE_WGSL = `
 @group(0) @binding(1) var _refOrbit: texture_2d<f32>;
 var<uniform> _refOrbitLen: i32;
 var<uniform> _refOrbitTexWidth: i32;
+var<uniform> _pt_offset_x: f32;
+var<uniform> _pt_offset_y: f32;
+var<uniform> _pt_w: f32;
+var<uniform> _pt_h: f32;
+
+fn _pt_delta(uv: vec2f) -> vec2f {
+  let dx = _pt_offset_x + (uv.x - 0.5) * _pt_w;
+  let dy = _pt_offset_y + (uv.y - 0.5) * _pt_h;
+  return vec2f(dx, dy);
+}
 
 fn _pt_fetch_orbit(i: i32) -> vec2f {
   let y = i / _refOrbitTexWidth;
@@ -2600,19 +2665,52 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       }
     }
 
-    // Compute reference orbit for perturbation strategy
+    // Set viewport uniforms for emulated-double coordinate computation
+    if (
+      (code.includes('_fractal_mandelbrot_dp') ||
+        code.includes('_fractal_julia_dp')) &&
+      options.hints?.viewport
+    ) {
+      const cx = hpToNumber(options.hints.viewport.center[0]);
+      const cy = hpToNumber(options.hints.viewport.center[1]);
+      const size = options.hints.viewport.radius * 2;
+      const cx_hi = Math.fround(cx);
+      const cy_hi = Math.fround(cy);
+      result.uniforms = {
+        ...result.uniforms,
+        _dp_cx_hi: cx_hi,
+        _dp_cx_lo: cx - cx_hi,
+        _dp_cy_hi: cy_hi,
+        _dp_cy_lo: cy - cy_hi,
+        _dp_w: size,
+        _dp_h: size,
+      };
+    }
+
+    // Set viewport uniforms and compute reference orbit for perturbation
     if (
       (code.includes('_fractal_mandelbrot_pt') ||
         code.includes('_fractal_julia_pt')) &&
       options.hints?.viewport
     ) {
       const viewport = options.hints.viewport;
+      const size = viewport.radius * 2;
+
+      // At compilation time, viewport center = reference center, so offset = 0
+      result.uniforms = {
+        ...result.uniforms,
+        _pt_offset_x: 0,
+        _pt_offset_y: 0,
+        _pt_w: size,
+        _pt_h: size,
+      };
+
       // Precision: ~log10(1/radius) digits, minimum 50, plus margin
       const digits = Math.max(50, Math.ceil(-Math.log10(viewport.radius)) + 10);
       // Use 1000 as default maxIter for orbit computation
       const maxIter = 1000;
       const orbit = computeReferenceOrbit(
-        viewport.center as [number, number],
+        viewport.center,
         maxIter,
         digits
       );

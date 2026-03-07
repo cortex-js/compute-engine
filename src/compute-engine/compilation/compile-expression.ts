@@ -1,6 +1,6 @@
 import type { MathJsonSymbol } from '../../math-json/types';
 import type { Expression, JSSource } from '../global-types';
-import type { CompileTarget, CompilationResult, CompiledRunner } from './types';
+import type { CompileTarget, CompilationResult, CompilationOptions, CompiledRunner } from './types';
 import { BaseCompiler } from './base-compiler';
 import { assertCompilationOptionsContract } from '../engine-extension-contracts';
 
@@ -19,6 +19,7 @@ type CompileExpressionOptions<T extends string = string> = {
   preamble?: string;
   fallback?: boolean;
   realOnly?: boolean;
+  hints?: CompilationOptions['hints'];
 };
 
 /**
@@ -80,6 +81,7 @@ export function compile<T extends string = 'javascript'>(
       imports: options?.imports,
       preamble: options?.preamble,
       realOnly: options?.realOnly,
+      hints: options?.hints,
     }) as CompilationResult<T>;
   } catch (e) {
     if (options?.fallback ?? true) {
