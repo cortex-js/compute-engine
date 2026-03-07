@@ -71,7 +71,6 @@ export type {
   LanguageTarget,
   TargetSource,
   CompiledFunction,
-  HighPrecisionCoord,
 } from './compute-engine/compilation/types';
 
 export { JavaScriptTarget } from './compute-engine/compilation/javascript-target';

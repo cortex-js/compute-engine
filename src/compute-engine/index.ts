@@ -191,7 +191,6 @@ export type {
   LanguageTarget,
   TargetSource,
   CompiledFunction,
-  HighPrecisionCoord,
 } from './compilation/types';
 
 // Export BigDecimal for arbitrary-precision arithmetic
