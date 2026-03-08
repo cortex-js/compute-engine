@@ -2,6 +2,12 @@
 
 #### Fixed
 
+- **LaTeX parsing: `\lim` with postfix operators** — `\lim_{x\to 0}\left(x\right)^x`
+  now correctly parses as `Limit(x^x)` instead of `Power(Limit(x), x)`. The
+  `\lim` parser was using `parseArguments('implicit')` which stripped the
+  delimiters and left the `^x` unconsumed; it now uses `parseExpression` so
+  postfix operators are included in the limit body.
+
 - **LaTeX parsing: style, size, and color switch commands** — `\displaystyle`,
   `\textstyle`, `\scriptstyle`, `\scriptscriptstyle`, `\tiny`..`\Huge` (10 size
   commands), and `\color{...}` were silently discarded during parsing. They now

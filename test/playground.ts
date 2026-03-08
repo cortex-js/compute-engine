@@ -18,8 +18,7 @@ import {
 const ce = new ComputeEngine();
 const engine = ce;
 
-console.log(parse('x + 2 = \\square').json);
-console.log(parse('x + 2 = \\placeholder').json);
+console.log(parse('\\lim_{x\\to 0}\\left(x\\right)^x').toMathJson());
 
 parse('[5,7)');
 // -> ok, `["Interval", 5, ["Open", 7]]`

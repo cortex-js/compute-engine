@@ -1319,11 +1319,16 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
       if (!parser.match('_')) return null;
       const base = parser.parseGroup();
       if (operator(base) !== 'To') return null;
-      const expr = parser.parseArguments('implicit');
+      // Use parseExpression instead of parseArguments('implicit') so that
+      // postfix operators like ^x are included in the limit body.
+      // e.g. \lim_{x\to 0}\left(x\right)^x  →  Limit(x^x) not Limit(x)^x
+      const expr = parser.parseExpression({
+        minPrec: MULTIPLICATION_PRECEDENCE,
+      });
       if (!expr) return null;
       return [
         'Limit',
-        ['Function', expr[0], operand(base, 1)],
+        ['Function', expr, operand(base, 1)],
         operand(base, 2),
       ] as MathJsonExpression;
     },
