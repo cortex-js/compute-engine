@@ -488,4 +488,12 @@ describe('LIMIT', () => {
   expect(
     engine.parse('\\lim_{x \\to 0} \\frac{\\sin(x)}{x}').N().re
   ).toMatchInlineSnapshot(`1`);
+
+  // Postfix ^ should be part of the limit body, not applied to the Limit
+  test('power inside delimited limit body', () => {
+    const expr = engine.parse('\\lim_{x\\to 0}\\left(x\\right)^x');
+    // Should be Limit(x^x), not Power(Limit(x), x)
+    expect(expr.operator).toBe('Limit');
+    expect(expr.latex).toMatchInlineSnapshot(`\\lim_{x\\to0}x^{x}`);
+  });
 });
