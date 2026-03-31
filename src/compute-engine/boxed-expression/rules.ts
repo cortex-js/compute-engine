@@ -902,7 +902,10 @@ export function applyRule(
       ? replace(expr, sub)
       : replace.subs(sub, { canonical });
 
-  if (!result) return null;
+  if (!result)
+    return operandsMatched
+      ? { value: canonical ? expr.canonical : expr, because }
+      : null;
 
   // To aid in debugging, invoke onMatch when the rule matches
   onMatch?.(rule, expr, result);
