@@ -269,7 +269,7 @@ describe('GLSL COMPILATION', () => {
       expect(code).toMatchInlineSnapshot(`
         float a;
         a = cos(t);
-        return a + 1.0
+        return a + 1.0;
       `);
     });
 
@@ -288,7 +288,7 @@ describe('GLSL COMPILATION', () => {
         float b;
         a = sin(x);
         b = cos(x);
-        return a + b
+        return a + b;
       `);
     });
 

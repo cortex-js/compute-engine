@@ -68,7 +68,7 @@ export class GLSLTarget extends GPUShaderTarget {
         .split('\n')
         .map((l) => `  ${l}`)
         .join('\n');
-      return `${returnType} ${functionName}(${params}) {\n${indented};\n}`;
+      return `${returnType} ${functionName}(${params}) {\n${indented}\n}`;
     }
     return `${returnType} ${functionName}(${params}) {
   return ${body};

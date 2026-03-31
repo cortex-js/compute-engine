@@ -325,7 +325,7 @@ describe('WGSL COMPILATION', () => {
       expect(code).toMatchInlineSnapshot(`
         var a: f32;
         a = cos(t);
-        return a + 1.0
+        return a + 1.0;
       `);
     });
 
@@ -344,7 +344,7 @@ describe('WGSL COMPILATION', () => {
         var b: f32;
         a = sin(x);
         b = cos(x);
-        return a + b
+        return a + b;
       `);
     });
 

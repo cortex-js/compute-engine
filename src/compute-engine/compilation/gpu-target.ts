@@ -160,7 +160,7 @@ function compileGPUSumProduct(
     `for (${indexDecl} = ${lowerStr}; ${index} <= ${upperStr}; ${index}++) {`,
     `  ${acc} ${op}= ${body};`,
     `}`,
-    `return ${acc}`,
+    `return ${acc};`,
   ];
   return lines.join('\n');
 }
@@ -2008,7 +2008,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
         if (stmts.length === 0) return '';
         const last = stmts.length - 1;
         stmts[last] = `return ${stmts[last]}`;
-        return stmts.join(';\n');
+        return stmts.join(';\n') + ';';
       },
       ...options,
     };
