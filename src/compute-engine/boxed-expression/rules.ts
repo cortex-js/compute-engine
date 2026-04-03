@@ -798,6 +798,21 @@ export function applyRule(
   if (!rule) return null;
   let canonical = options?.canonical ?? (expr.isCanonical || expr.isStructural);
 
+  // eslint-disable-next-line prefer-const
+  let { match, replace, condition, id, onMatch, onBeforeMatch } = rule;
+  const because = id ?? '';
+
+  const ce = expr.engine;
+
+  if (canonical && match) {
+    const awc = getWildcards(match);
+    const canonicalMatch = match.canonical;
+    const bwc = getWildcards(canonicalMatch);
+    // If the canonical form of the match loses wildcards, this rule cannot match
+    // canonical expressions (they would already be simplified). Skip this rule.
+    if (!awc.every((x) => bwc.includes(x))) return null;
+  }
+
   let operandsMatched = false;
 
   if (isFunction(expr) && options?.recursive) {
@@ -821,24 +836,10 @@ export function applyRule(
       )
         canonical = true;
 
-      expr = expr.engine.function(expr.operator, newOps, {
+      expr = ce.function(expr.operator, newOps, {
         form: canonical ? 'canonical' : 'raw',
       });
     }
-  }
-
-  // eslint-disable-next-line prefer-const
-  let { match, replace, condition, id, onMatch, onBeforeMatch } = rule;
-  const because = id ?? '';
-
-  if (canonical && match) {
-    const awc = getWildcards(match);
-    const canonicalMatch = match.canonical;
-    const bwc = getWildcards(canonicalMatch);
-    // If the canonical form of the match loses wildcards, this rule cannot match
-    // canonical expressions (they would already be simplified). Skip this rule.
-    if (!awc.every((x) => bwc.includes(x)))
-      return operandsMatched ? { value: expr, because } : null;
   }
 
   const useVariations = rule.useVariations ?? options?.useVariations ?? false;
@@ -877,7 +878,7 @@ export function applyRule(
     };
 
     try {
-      if (!condition(conditionSub, expr.engine))
+      if (!condition(conditionSub, ce))
         return operandsMatched ? { value: expr, because } : null;
     } catch (e) {
       console.error(
