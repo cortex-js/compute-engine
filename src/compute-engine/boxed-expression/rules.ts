@@ -658,16 +658,9 @@ function boxRule(
     );
   }
 
-  // Push a clean scope that only inherits from the system scope (index 0),
-  // not from the global scope or user-defined scopes. This prevents user-defined
-  // symbols (like `x` used as a function name in `x(y+z)`) from interfering with
-  // rule parsing. The system scope contains all built-in definitions.
-  const systemScope = ce.contextStack[0]?.lexicalScope;
-  if (systemScope) {
-    ce.pushScope({ parent: systemScope, bindings: new Map() });
-  } else {
-    ce.pushScope();
-  }
+  // Ensure a clean scope (that only inherits from the system scope) before boxing or parsing:
+  // preventing wildcards & user-defined from inheriting definitions in rules.
+  pushSafeScope(ce);
 
   let matchExpr: Expression | undefined;
   let replaceExpr: Expression | RuleReplaceFunction | RuleFunction | undefined;
@@ -741,6 +734,25 @@ function boxRule(
     onMatch,
     onBeforeMatch,
   };
+}
+
+/**
+ * Push a clean scope - safe for the boxing of rules - that only inherits from the system scope
+ * (index 0), not from the global scope or user-defined scopes. This prevents user-defined symbols
+ * (like `x` used as a function name in `x(y+z)`) from interfering with rule parsing. The system
+ * scope contains all built-in definitions.
+ *
+ * This also crucially prevents wildcards from being given definitions where captured & bound.
+ *
+ * @param ce
+ */
+function pushSafeScope(ce: ComputeEngine) {
+  const systemScope = ce.contextStack[0]?.lexicalScope;
+  if (systemScope) {
+    ce.pushScope({ parent: systemScope, bindings: new Map() });
+  } else {
+    ce.pushScope();
+  }
 }
 
 /**
