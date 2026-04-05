@@ -1258,6 +1258,12 @@ export interface Expression {
    * a `Expression` (e.g., `{ match: ce.expr('x'), replace: ... }`).
    * For simple symbol substitution, consider using `subs()` instead.
    * :::
+   *
+   * <!--
+   * @todo?:
+   * - Consider more generally permitting specification of 'form' (that is, allow the request of
+   * 'structural' replacements, too.)
+   * -->
    */
   replace(
     rules: BoxedRuleSet | Rule | Rule[],

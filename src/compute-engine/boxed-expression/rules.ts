@@ -808,7 +808,8 @@ export function applyRule(
   options?: Readonly<Partial<ReplaceOptions>>
 ): RuleStep | null {
   if (!rule) return null;
-  let canonical = options?.canonical ?? (expr.isCanonical || expr.isStructural);
+  //@todo?: consider 'structural' too (separately); maybe by up-typing 'options.canonical' as 'form'?
+  let canonical = options?.canonical ?? expr.isCanonical;
 
   // eslint-disable-next-line prefer-const
   let { match, replace, condition, id, onMatch, onBeforeMatch } = rule;
