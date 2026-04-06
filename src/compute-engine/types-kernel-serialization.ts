@@ -153,6 +153,23 @@ export type ReplaceOptions = {
    * Canonicalization policy after replacement.
    */
   canonical: CanonicalOptions;
+
+  /** *Traversal* direction (through the node 'tree') for both Rule matching & replacement.
+   * Can be significant in the production of the final, overall replacement result (if operating
+   * recursively) - if rule is a `RuleFunction` with arbitrary logic (e.g. replacements being
+   * index-based).
+   *
+   * In 'tree' data-structure traversal terminology, possible values span:
+   *
+   * - `'left-right'` reflects *post-order* traversal, (left sub-tree first; depth-descending) (LRN).
+   * - `'right-left'` reflects 'reverse' *post-order* (right sub-tree first; depth-descending) (RLN).
+   *
+   * For both cases traversal is always depth-first, and always visits the root/input expr. last .
+   *
+   * **Default** is: `'left-right'` (standard post-order)
+   *
+   */
+  direction: 'left-right' | 'right-left';
 };
 
 /**
