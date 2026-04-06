@@ -831,13 +831,19 @@ export function applyRule(
   let operandsMatched = false;
 
   if (isFunction(expr) && options?.recursive) {
+    const direction = options?.direction ?? 'left-right';
+    let newOps =
+      direction === 'left-right' ? expr.ops : [...expr.ops].reverse();
+
     // Apply the rule to the operands of the expression
-    const newOps = expr.ops.map((op) => {
+    newOps = newOps.map((op) => {
       const subExpr = applyRule(rule, op, {}, options);
       if (!subExpr) return op;
       operandsMatched = true;
       return subExpr.value;
     });
+
+    if (direction === 'right-left') (newOps as Expression[]).reverse();
 
     // At least one operand (directly or recursively) matched: but continue onwards to match against
     // the top-level expr., test against any 'condition', et cetera.
