@@ -18,7 +18,6 @@ import type {
 } from '../global-types';
 
 import {
-  asLatexString,
   isInequalityOperator,
   isRelationalOperator,
 } from '../latex-syntax/utils';
@@ -630,22 +629,19 @@ function boxRule(
   // Normalize the condition to a function
   let condFn: undefined | RuleConditionFunction;
   if (typeof condition === 'string') {
-    const latex = asLatexString(condition);
-    if (latex) {
-      // If the condition is a LaTeX string, it should be a predicate
-      // (an expression with a Boolean value).
-      const condPattern =
-        ce.parse(latex, {
-          form: options?.canonical ? 'canonical' : 'raw',
-        }) ?? ce.expr('Nothing');
+    // If the condition is a LaTeX string, it should be a predicate
+    // (an expression with a Boolean value).
+    const condPattern =
+      ce.parse(condition, {
+        form: options?.canonical ? 'canonical' : 'raw',
+      }) ?? ce.expr('Nothing');
 
-      // Substitute any unbound vars in the condition to a wildcard,
-      // then evaluate the condition
-      condFn = (x: BoxedSubstitution, _ce: ComputeEngine): boolean => {
-        const evaluated = condPattern.subs(x).evaluate();
-        return isSymbol(evaluated, 'True');
-      };
-    }
+    // Substitute any unbound vars in the condition to a wildcard,
+    // then evaluate the condition
+    condFn = (x: BoxedSubstitution, _ce: ComputeEngine): boolean => {
+      const evaluated = condPattern.subs(x).evaluate();
+      return isSymbol(evaluated, 'True');
+    };
   } else {
     if (condition !== undefined && typeof condition !== 'function')
       throw new Error(
