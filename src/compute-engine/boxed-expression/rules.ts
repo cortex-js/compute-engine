@@ -631,10 +631,7 @@ function boxRule(
   if (typeof condition === 'string') {
     // If the condition is a LaTeX string, it should be a predicate
     // (an expression with a Boolean value).
-    const condPattern =
-      ce.parse(condition, {
-        form: options?.canonical ? 'canonical' : 'raw',
-      }) ?? ce.expr('Nothing');
+    const condPattern = ce.parse(condition) ?? ce.expr('Nothing');
 
     // Substitute any unbound vars in the condition to a wildcard,
     // then evaluate the condition
