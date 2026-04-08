@@ -75,7 +75,7 @@ export function canonicalForm(
   // Partial canonicalization produces a structural expression, not a fully
   // canonical one. This allows subsequent .canonical calls to perform full
   // canonicalization.
-  if (isFunction(expr) && expr.isCanonical) {
+  if (isFunction(expr) && forms.length > 0) {
     expr = expr.engine.function(expr.operator, [...expr.ops!], {
       form: 'structural',
     });
