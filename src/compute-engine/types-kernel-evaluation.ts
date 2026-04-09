@@ -1,3 +1,11 @@
+/**
+ * Types associated with the evaluation (and more generally manipulation) of Expressions in the
+ * context of a ComputeEngine instance.
+ *
+ * These are 'kernel' types which do not make assumptions about the shape of for example Expression
+ * and ComputeEngine where these are used.
+ * To be imported only by other 'types-*' files.
+ */
 import type { MathJsonSymbol } from '../math-json';
 import type { TypeReference } from '../common/type/types';
 import type { BoxedType } from '../common/type/boxed-type';
@@ -152,6 +160,7 @@ export type Rule<Expr = unknown, SemiExpr = unknown, CE = unknown> =
         | SemiExpr
         | RuleReplaceFunction<Expr>
         | RuleFunction<Expr>;
+      /** Do the matched wildcards meet this condition? */
       condition?: LatexString | RuleConditionFunction<Expr, CE>;
       useVariations?: boolean;
       id?: string;

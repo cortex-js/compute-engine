@@ -1,3 +1,9 @@
+/**
+ * Exports `Expression` (boxed ExpressionInput) and related types.
+ *
+ * To only be imported directly from local 'types-*' files, with all other import instances being
+ * indirect (through imports via 'global-types.ts').
+ */
 import type { Complex } from 'complex-esm';
 import type { OneOf } from '../common/one-of';
 import type {
@@ -1236,23 +1242,23 @@ export interface Expression {
    *
    * - If no rules apply, return `null`.
    *
-   * See also `expr.subs()` for a simple substitution of symbols.
    *
-   * Procedure for the determining the canonical-status of the input expression and replacements:
+   * Option `form` may be given to specify the form of *replacements*).
+   * If value 'structural' or 'canonical' is given for this, then the policy is to nevertheless
+   * '*eagerly*' return the entire input expression as canonical/structural.
+   * Specifying form '*raw*' makes a slight difference over an 'undefined' value: with this
+   * resulting in less attempts to eagerly apply a form (non-raw) to replacements/the overall
+   * expression.(For the minutiae, consult {@linkcode ReplaceOptions.form}).
    *
-   * - If `options.canonical` is set, the *entire expr.* is canonicalized to this degree: whether
-   * the replacement occurs at the top-level, or within/recursively.
+   * Observe that in any case, a consistently canonical, or structural expression can be ensured by
+   * (a) pre-rendering the input expression to the desired form, and then (b) specifying this form
+   * in replacement options.
    *
-   * - If otherwise, the *direct replacement will be canonical* if either the 'replaced' expression
-   * is canonical, or the given replacement (- is a Expression and -) is canonical.
-   * Notably also, if this replacement takes place recursively (not at the top-level), then exprs.
-   * containing the replaced expr. will still however have their (previous) canonical-status
-   * *preserved*... unless this expr. was previously non-canonical, and *replacements have resulted
-   * in canonical operands*. In this case, an expr. meeting this criteria will be updated to
-   * canonical status. (Canonicalization is opportunistic here, in other words).
+   *
+   * For a simple substitution of symbols, also see also `expr.subs()`.
    *
    * :::info[Note]
-   * Applicable to canonical and non-canonical expressions.
+   * Applicable to input expressions of any form.
    *
    * To match a specific symbol (not a wildcard pattern), the `match` must be
    * a `Expression` (e.g., `{ match: ce.expr('x'), replace: ... }`).

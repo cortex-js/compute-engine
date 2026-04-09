@@ -1,3 +1,9 @@
+/**
+ * 'Kernel' types associated with the serialization - including canonicalization & pattern-matching
+ * - of Expressions.
+ *
+ * To be imported only by other 'types-*' files.
+ */
 /** @category Definitions */
 export type Hold = 'none' | 'all' | 'first' | 'rest' | 'last' | 'most';
 
@@ -150,9 +156,29 @@ export type ReplaceOptions = {
   iterationLimit: number;
 
   /**
-   * Canonicalization policy after replacement.
+   * `form` policy for replaced expressions. \
+   * (For recursive replacements (`recursive == true`), applies only to the replaced subexpressions
+   * (and not the the entire expression-tree)... However, if a recursive/depth replacement takes
+   * place, the policy is to 'eagerly' apply the replaced expression form as all the way up to the
+   * expression root: such that, if a replacement is 'structural' or 'canonical' and consequently
+   * the operands of the containing function-expression all possess the same form, then the
+   * containing expression will also take on this same form.
+   *
+   * If wishing to therefore ensure a the requested form for the *entire input* expression, either
+   * ensure the input is already in the requested form before any replacement, or simply request the
+   * form post-replacement.
+   *
+   * ::Additional notes
+   * - form `'raw'` loses its applicability if the replaced expression - according to replacement mechanics - already assumes a form according to
+   * replacement rule logic. (for example if the applying rule is of type `RuleFunction` and the
+   * produced expression has a non-raw form).
+   *
+   * <!--
+   * @todo:
+   * - Outline proc. for *Partial*-canonical.
+   * -->
    */
-  canonical: CanonicalOptions;
+  form: FormOption;
 
   /** *Traversal* direction (through the node 'tree') for both Rule matching & replacement.
    * Can be significant in the production of the final, overall replacement result (if operating
@@ -167,7 +193,6 @@ export type ReplaceOptions = {
    * For both cases traversal is always depth-first, and always visits the root/input expr. last .
    *
    * **Default** is: `'left-right'` (standard post-order)
-   *
    */
   direction: 'left-right' | 'right-left';
 };

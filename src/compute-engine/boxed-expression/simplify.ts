@@ -347,7 +347,7 @@ function simplifyExpression(
   if (isSymbol(expr)) {
     const result = replace(expr, rules, {
       recursive: false,
-      canonical: true,
+      form: 'canonical',
       useVariations: false,
     });
     if (result.length > 0) return [...steps, ...result];
@@ -400,7 +400,7 @@ function simplifyNonCommutativeFunction(
 ): RuleSteps {
   const result = replace(expr, rules, {
     recursive: false,
-    canonical: true,
+    form: 'canonical',
     useVariations: options.useVariations ?? false,
   });
 
