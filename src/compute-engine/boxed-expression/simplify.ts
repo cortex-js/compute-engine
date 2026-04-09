@@ -62,7 +62,13 @@ function evaluateNumericSubexpressions(expr: Expression): Expression {
   }
 
   // If purely numeric (no unknowns), evaluate the whole expression
-  if (expr.unknowns.length === 0 && BASIC_ARITHMETIC.includes(expr.operator)) {
+  if (
+    expr.unknowns.length === 0 &&
+    BASIC_ARITHMETIC.includes(expr.operator) &&
+    expr.ops.every(
+      (op) => BASIC_ARITHMETIC.includes(op.operator) || !isFunction(op)
+    )
+  ) {
     const evaluated = expr.evaluate();
     if (isNumber(evaluated)) return evaluated;
   }
