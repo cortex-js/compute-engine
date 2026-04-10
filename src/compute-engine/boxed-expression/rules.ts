@@ -846,13 +846,15 @@ export function applyRule(
       // The current policy for applying a form according to 'options.form' is for this to apply to
       // *replacements only* (this ultimately allowing for finer control of replacement operations).
       // ...However, if all child operands bear the same form, 'eagerly' assume this form for the
-      // present expression (if this present expression also later matches, form may be updated
-      // according to 'options.form'.)
+      // present expression - provided it has not been explicitly requested that the form be 'raw'.
+      // If this present expression subsequently *directly* matches, the final expression may in any
+      // case be updated according to a specified 'options.form'.
       //(@note: check 'canonical' first, because numbers may be jointly marked as structural and
       //canonical).
-      if (newOps.every((x) => x.isCanonical)) form = 'canonical';
-      else if (newOps.every((x) => x.isStructural)) form = 'structural';
-
+      if (options?.form !== 'raw') {
+        if (newOps.every((x) => x.isCanonical)) form = 'canonical';
+        else if (newOps.every((x) => x.isStructural)) form = 'structural';
+      }
       expr = ce.function(expr.operator, newOps, { form });
     }
   }

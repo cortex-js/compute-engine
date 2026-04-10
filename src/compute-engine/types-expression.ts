@@ -1242,22 +1242,23 @@ export interface Expression {
    *
    * - If no rules apply, return `null`.
    *
+   * Option `form` may be given to specify the form of *replacements* only: meaning this option is
+   * concerned with the *replaced sub-expression* if taking place at-depth.
+   * However... if value 'structural' or 'canonical' (or _undefined_) is specified, then the policy is to nevertheless '*eagerly*' return the entire input expression as canonical/structural, if possible.
+   * Specifying the explicit form '*raw*' here also carries implication (over
+   * non-specification/'undefined'): with this resulting in the absence of the attempt to eagerly
+   * apply any computed expression form (non-raw) to replacements/the overall expression. (Note that
+   * if specifying form 'raw', this makes no difference if replaced expressions are nevertheless
+   * non-raw according to the applicable rule's replacement logic).
    *
-   * Option `form` may be given to specify the form of *replacements*).
-   * If value 'structural' or 'canonical' is given for this, then the policy is to nevertheless
-   * '*eagerly*' return the entire input expression as canonical/structural.
-   * Specifying form '*raw*' makes a slight difference over an 'undefined' value: with this
-   * resulting in less attempts to eagerly apply a form (non-raw) to replacements/the overall
-   * expression.(For the minutiae, consult {@linkcode ReplaceOptions.form}).
-   *
-   * Observe that in any case, a consistently canonical, or structural expression can be ensured by
-   * (a) pre-rendering the input expression to the desired form, and then (b) specifying this form
-   * in replacement options.
-   *
-   *
-   * For a simple substitution of symbols, also see also `expr.subs()`.
+   * (Despite this overall policy, observe that in any case a consistently canonical, or structural
+   * expression can be ensured via (a) pre-rendering the input expression to the desired form, and
+   * then (b) specifying this form in replacement options.
+   * For further details on this policy, also see {@linkcode ReplaceOptions.form}.)
    *
    * :::info[Note]
+   * For a simple substitution of symbols, see `expr.subs()`.
+   * 
    * Applicable to input expressions of any form.
    *
    * To match a specific symbol (not a wildcard pattern), the `match` must be
