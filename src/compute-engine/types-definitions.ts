@@ -9,9 +9,6 @@ import type {
 } from './types-expression';
 import type {
   EvaluateOptions as KernelEvaluateOptions,
-  Rule as KernelRule,
-  BoxedRule as KernelBoxedRule,
-  BoxedRuleSet as KernelBoxedRuleSet,
   Scope as KernelScope,
 } from './types-kernel-evaluation';
 
@@ -27,9 +24,6 @@ import type {
 export interface ComputeEngine {}
 
 type EvaluateOptions = KernelEvaluateOptions;
-type Rule = KernelRule<Expression, ExpressionInput, ComputeEngine>;
-type BoxedRule = KernelBoxedRule<Expression, ComputeEngine>;
-type BoxedRuleSet = KernelBoxedRuleSet<Expression, ComputeEngine>;
 type Scope = KernelScope<BoxedDefinition>;
 
 /**
@@ -516,42 +510,6 @@ export interface BaseDefinition {
   /** If true, the value or type of the definition cannot be changed */
   readonly isConstant?: boolean;
 }
-
-/** Options for `Expression.simplify()`
- *
- * @category Boxed Expression
- */
-export type SimplifyOptions = {
-  /**
-   * The set of rules to apply. If `null`, use no rules. If not provided,
-   * use the default simplification rules.
-   */
-  rules?: null | Rule | ReadonlyArray<BoxedRule | Rule> | BoxedRuleSet;
-
-  /**
-   * Use this cost function to determine if a simplification is worth it.
-   *
-   * If not provided, `ce.costFunction`, the cost function of the engine is
-   * used.
-   */
-  costFunction?: (expr: Expression) => number;
-
-  /**
-   * The simplification strategy to use.
-   *
-   * - `'default'`: Use standard simplification rules (default)
-   * - `'fu'`: Use the Fu algorithm for trigonometric simplification.
-   *   This is more aggressive for trig expressions and may produce
-   *   different results than the default strategy.
-   *
-   *   **Note:** When using the `'fu'` strategy, the `costFunction` and `rules`
-   *   options are ignored. The Fu algorithm uses its own specialized cost
-   *   function that prioritizes minimizing the number of trigonometric
-   *   functions. Standard simplification is applied before and after the
-   *   Fu transformations using the engine's default rules.
-   */
-  strategy?: 'default' | 'fu';
-};
 
 /**
  * A table mapping symbols to their definition.

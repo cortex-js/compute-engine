@@ -137,6 +137,8 @@ export type ReplaceOptions = {
    * If false, continue applying remaining rules.
    */
   once: boolean;
+  //@consider:?
+  // once: 'one-rule' | 'one-replacement';
 
   /**
    * If true, rules may match equivalent variants.
@@ -182,8 +184,8 @@ export type ReplaceOptions = {
 
   /** *Traversal* direction (through the node 'tree') for both Rule matching & replacement.
    * Can be significant in the production of the final, overall replacement result (if operating
-   * recursively) - if rule is a `RuleFunction` with arbitrary logic (e.g. replacements being
-   * index-based).
+   * recursively) - for example if option *once* is set to `'one-replacement'; or rule is a
+   * `RuleFunction` with arbitrary logic (e.g. replacements being index-based).
    *
    * In 'tree' data-structure traversal terminology, possible values span:
    *

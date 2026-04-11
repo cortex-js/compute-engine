@@ -30,10 +30,11 @@ import type {
 } from './types-kernel-serialization';
 import type {
   EvaluateOptions as KernelEvaluateOptions,
-  BoxedRule as KernelBoxedRule,
   Rule as KernelRule,
   BoxedRuleSet as KernelBoxedRuleSet,
   Scope as KernelScope,
+  TransformOptions as KernelTransformOptions,
+  SimplifyOptions as KernelSimplifyOptions,
 } from './types-kernel-evaluation';
 
 /**
@@ -173,15 +174,19 @@ type BoxedDefinition =
 
 type Scope = KernelScope<BoxedDefinition>;
 type EvaluateOptions = KernelEvaluateOptions;
-type Rule = KernelRule<Expression, ExpressionInput, ExpressionComputeEngine>;
-type BoxedRule = KernelBoxedRule<Expression, ExpressionComputeEngine>;
-type BoxedRuleSet = KernelBoxedRuleSet<Expression, ExpressionComputeEngine>;
+type TransformOptions = KernelTransformOptions<
+  Expression,
+  ExpressionInput,
+  ExpressionComputeEngine
+>;
+type SimplifyOptions = KernelSimplifyOptions<
+  Expression,
+  ExpressionInput,
+  ExpressionComputeEngine
+>;
 
-type SimplifyOptions = {
-  rules?: null | Rule | ReadonlyArray<BoxedRule | Rule> | BoxedRuleSet;
-  costFunction?: (expr: Expression) => number;
-  strategy?: 'default' | 'fu';
-};
+type Rule = KernelRule<Expression, ExpressionInput, ExpressionComputeEngine>;
+type BoxedRuleSet = KernelBoxedRuleSet<Expression, ExpressionComputeEngine>;
 
 //
 // ── Tensor & Compilation Types ──────────────────────────────────────────
@@ -1276,6 +1281,72 @@ export interface Expression {
     rules: BoxedRuleSet | Rule | Rule[],
     options?: Partial<ReplaceOptions>
   ): null | Expression;
+
+  /**
+   *
+   * Process and transform this expression *recursively* by applying one of a set of predefined
+   * transformations (`simplify`, `canonical`, `evaluate`, `N`, `replace`, `structural`) to matching
+   * (or targeted) subexpressions (or the input expression).
+   *
+   * This method is a wrapper around method `replace()` - which always applies recursively - whilst
+   * jointly offering an alternative, 'declarative' sytnax which also conveniently permits easier
+   * sub-expression targeting and common/fundamental replacement requirements, without the
+   * requirement of custom logic (`RuleFunctions`) and long-winded 'replace()' calls.
+   *
+   * Similarly to replace, input or sub-expressions do *not* have to be canonical (but will anyway
+   * be pre-made canonical for those transformations which require this as such).
+   *
+   * In addition to matching target-expressions via traditional pattern-matching (`match`), this
+   * method uniquely permits an alternate specification of 'targets' - permitting spec. of
+   * sub-expressions via either exact-matching (referential-identity), or a custom predicate.
+   * For each transformation, type-specific options may also be paired or required (required
+   * 'replace' for 'replace'; optional 'simplifyOptions' for 'simplify'). Notably, transformation
+   * `'replace'` uniquely permits specification of resultant 'form' (and will fall back to usual
+   * calculation of its value in its absence).
+   *
+   * Note that `null` is returned in various scenarios: such as where there is no match for a given pattern or
+   * targets; or where transformations are not applicable, or some cases where these do not produce a change, e.g.:
+   * - Application of 'canonical' or 'structural' to targets which are already canonical/structural.
+   * - Application of 'evaluate' or 'N' to targets in which the resultant value is the same as input.
+   * - Application of 'simplify' with no applicable rules.
+   *
+   * If no `match` or `targets` is specified, the target is taken to be the *input expression* (and
+   * in this sole case will not recursively).
+   * Only one of `match` or `targets` should be specified (if otherwise, an exception will be
+   * raised).
+   *
+   * ::!Caveats
+   * - Currently, naturally it is not possible to target engine-common expressions, such as those representing `1`, `0`, `True`, `False`, `Pi`, since these all reference the *same common expressions* upon boxing.
+   *
+   * <!--
+   * @todo:finish/uncomment this comment-block
+   *
+   * @examples
+   * With this method, it is possible to conveniently manipulate, evaluate, simplify, and change
+   * entirely sub-expressions at whim, e.g.:
+   *
+   * Numerically evaluate all 'Power' sub-exprs.
+   * - ce.parse(')
+   *
+   * Simplify all sub-expressions containing '...'
+   * -
+   *
+   * ...
+   *
+   * -->
+   * 
+   * <!--
+   * @note (subject-to-change)
+   * - ?Re-consider the case of returning 'null' for cases of canonical or structural
+   * transformations already applying to canonical/structural targets; or evaluations yielding an
+   * expression with the same value.
+
+   * -->
+   *
+   *
+   *
+   * */
+  transform(options: TransformOptions): Expression | null;
 
   /**
    * True if the expression includes a symbol `v` or a function operator `v`.

@@ -205,40 +205,34 @@ module.exports = {
           {
             target: './src/compute-engine/tensor/**',
             from: './src/compute-engine/symbolic/**',
-            message:
-              'tensor/ must not import from symbolic/.',
+            message: 'tensor/ must not import from symbolic/.',
           },
           {
             target: './src/compute-engine/tensor/**',
             from: './src/compute-engine/library/**',
-            message:
-              'tensor/ must not import from library/.',
+            message: 'tensor/ must not import from library/.',
           },
           {
             target: './src/compute-engine/tensor/**',
             from: './src/compute-engine/compilation/**',
-            message:
-              'tensor/ must not import from compilation/.',
+            message: 'tensor/ must not import from compilation/.',
           },
 
           // interval/ cannot import from symbolic/, library/, compilation/
           {
             target: './src/compute-engine/interval/**',
             from: './src/compute-engine/symbolic/**',
-            message:
-              'interval/ must not import from symbolic/.',
+            message: 'interval/ must not import from symbolic/.',
           },
           {
             target: './src/compute-engine/interval/**',
             from: './src/compute-engine/library/**',
-            message:
-              'interval/ must not import from library/.',
+            message: 'interval/ must not import from library/.',
           },
           {
             target: './src/compute-engine/interval/**',
             from: './src/compute-engine/compilation/**',
-            message:
-              'interval/ must not import from compilation/.',
+            message: 'interval/ must not import from compilation/.',
           },
 
           // Type definition files (types-*.ts) cannot import from implementation layers
