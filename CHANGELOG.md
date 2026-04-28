@@ -1,3 +1,30 @@
+### Unreleased
+
+#### Added
+
+- **`ce.latexOptions`** — new mutable, engine-wide bag of LaTeX
+  parse/serialize options (e.g. `decimalSeparator`, `digitGroupSeparator`).
+  Available as a constructor option and as a read/write property:
+  ```ts
+  const ce = new ComputeEngine({ latexOptions: { decimalSeparator: '{,}' } });
+  // or post-construction:
+  ce.latexOptions = { decimalSeparator: '{,}' };
+  ```
+  These are merged into every `ce.parse()` and `expr.toLatex()` call.
+  Precedence (most-specific wins): LatexSyntax instance defaults <
+  `ce.latexOptions` < per-call options. Previously, the only way to change
+  options like `decimalSeparator` post-construction was per call (and the
+  `expr.latex` getter could not be customized at all).
+
+#### Fixed
+
+- **`ce.parse()` ignored the injected LatexSyntax instance's
+  `decimalSeparator`** — `ce.parse()` hardcoded `decimalSeparator: '.'`,
+  silently overriding any value configured on the `LatexSyntax` passed
+  via the constructor's `latexSyntax` option. The hardcoded default has
+  been removed; the injected instance's configured separator now takes
+  effect end-to-end.
+
 ### 0.55.6 _2026-03-08_
 
 #### Fixed

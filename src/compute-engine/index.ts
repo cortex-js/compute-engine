@@ -45,7 +45,11 @@ import type {
   LibraryDefinition,
 } from './global-types';
 
-import type { LibraryCategory, ParseLatexOptions } from './latex-syntax/types';
+import type {
+  LibraryCategory,
+  ParseLatexOptions,
+  SerializeLatexOptions,
+} from './latex-syntax/types';
 import { isOperatorDef, isValueDef } from './boxed-expression/utils';
 
 import { getStandardLibrary } from './library/library';
@@ -437,6 +441,7 @@ export class ComputeEngine implements IComputeEngine {
     precision?: number | 'machine';
     tolerance?: number | 'auto';
     latexSyntax?: ILatexSyntax;
+    latexOptions?: Partial<ParseLatexOptions & SerializeLatexOptions>;
   }) {
     if (options !== undefined && typeof options !== 'object')
       throw Error('Unexpected argument');
@@ -492,6 +497,9 @@ export class ComputeEngine implements IComputeEngine {
 
     // Store the injected LatexSyntax instance (if any)
     if (options?.latexSyntax) this._latexSyntax = options.latexSyntax;
+
+    // Store engine-wide LaTeX options (merged into every parse/serialize call)
+    if (options?.latexOptions) this._latexOptions = { ...options.latexOptions };
 
     hidePrivateProperties(this);
   }
@@ -1372,6 +1380,35 @@ export class ComputeEngine implements IComputeEngine {
     return this._latexSyntax;
   }
 
+  /** @internal Engine-wide LaTeX parse/serialize options (e.g. decimalSeparator).
+   *  Merged into every `parse()` and `toLatex()` call between the LatexSyntax
+   *  instance defaults and any per-call overrides. */
+  private _latexOptions: Partial<ParseLatexOptions & SerializeLatexOptions> =
+    {};
+
+  /** Engine-wide LaTeX parse/serialize options.
+   *
+   * These options are merged into every `parse()` and `toLatex()` call.
+   * Precedence (most-specific wins):
+   *   1. LatexSyntax instance defaults (set at its construction)
+   *   2. `ce.latexOptions` (this property)
+   *   3. Per-call options passed to `ce.parse()` / `expr.toLatex()`
+   *
+   * Assigning replaces the whole bag. Use spread to merge:
+   * ```ts
+   * ce.latexOptions = { ...ce.latexOptions, decimalSeparator: '{,}' };
+   * ```
+   */
+  get latexOptions(): Partial<ParseLatexOptions & SerializeLatexOptions> {
+    return this._latexOptions;
+  }
+
+  set latexOptions(
+    options: Partial<ParseLatexOptions & SerializeLatexOptions>
+  ) {
+    this._latexOptions = { ...options };
+  }
+
   /**
    * Parse a LaTeX string and return a boxed expression.
    *
@@ -1399,7 +1436,6 @@ export class ComputeEngine implements IComputeEngine {
     const { form, ...parseOpts } = options ?? {};
 
     const result = syntax.parse(latex, {
-      decimalSeparator: '.',
       getSymbolType: (id) => {
         const def = this.lookupDefinition(id);
         if (!def) return BoxedType.unknown;
@@ -1411,6 +1447,7 @@ export class ComputeEngine implements IComputeEngine {
         const def = this.lookupDefinition(id);
         return !!(isValueDef(def) && def.value.subscriptEvaluate);
       },
+      ...this._latexOptions,
       ...parseOpts,
     });
 

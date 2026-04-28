@@ -4,7 +4,10 @@ import type { MathJsonSymbol, MathJsonNumberObject } from '../math-json';
 import type { Type, TypeString, TypeResolver } from '../common/type/types';
 import type { BoxedType } from '../common/type/boxed-type';
 import type { ConfigurationChangeListener } from '../common/configuration-change';
-import type { ParseLatexOptions } from './latex-syntax/types';
+import type {
+  ParseLatexOptions,
+  SerializeLatexOptions,
+} from './latex-syntax/types';
 import type {
   ExactNumericValueData,
   NumericValue,
@@ -77,6 +80,11 @@ export interface IComputeEngine {
 
   /** @internal Returns the LatexSyntax instance or throws if unavailable. */
   _requireLatexSyntax(): ILatexSyntax;
+
+  /** Engine-wide LaTeX parse/serialize options (e.g. `decimalSeparator`).
+   *  Merged into every `parse()` and `toLatex()` call between LatexSyntax
+   *  defaults and per-call overrides. */
+  latexOptions: Partial<ParseLatexOptions & SerializeLatexOptions>;
 
   // Common symbols
   readonly True: Expression;

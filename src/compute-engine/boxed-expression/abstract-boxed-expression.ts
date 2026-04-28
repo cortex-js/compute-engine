@@ -229,9 +229,10 @@ export abstract class _BoxedExpression implements Expression {
       if (!materialized.isLazyCollection) return materialized.latex;
     }
     const syntax = this.engine._requireLatexSyntax();
-    return syntax.serialize(
-      this.toMathJson({ prettify: true, fractionalDigits: 'auto' })
-    );
+    const json = this.toMathJson({ prettify: true, fractionalDigits: 'auto' });
+    const latexOpts = this.engine.latexOptions;
+    if (Object.keys(latexOpts).length === 0) return syntax.serialize(json);
+    return syntax.serialize(json, { ...latexOpts });
   }
 
   /**
@@ -259,10 +260,14 @@ export abstract class _BoxedExpression implements Expression {
     });
 
     const syntax = this.engine._requireLatexSyntax();
-    if (!options || Object.keys(options).length === 0)
-      return syntax.serialize(json);
+    const latexOpts = this.engine.latexOptions;
+    const haveEngineOpts = Object.keys(latexOpts).length > 0;
+    const haveCallOpts = options && Object.keys(options).length > 0;
 
-    return syntax.serialize(json, options);
+    if (!haveEngineOpts && !haveCallOpts) return syntax.serialize(json);
+    if (!haveEngineOpts) return syntax.serialize(json, options);
+    if (!haveCallOpts) return syntax.serialize(json, { ...latexOpts });
+    return syntax.serialize(json, { ...latexOpts, ...options });
   }
 
   /** Called by `JSON.stringify()` when serializing to json.

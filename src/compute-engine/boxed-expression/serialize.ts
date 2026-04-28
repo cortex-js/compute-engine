@@ -58,6 +58,18 @@ function _escapeJsonString(s: string | undefined): string | undefined {
   return s;
 }
 
+/** Serialize an expression to LaTeX for metadata, applying any
+ *  engine-wide latexOptions (e.g. decimalSeparator). */
+function _serializeLatexMetadata(
+  ce: ComputeEngine,
+  expr: MathJsonExpression
+): string {
+  const syntax = ce.latexSyntax!;
+  const opts = ce.latexOptions;
+  if (Object.keys(opts).length === 0) return syntax.serialize(expr);
+  return syntax.serialize(expr, { ...opts });
+}
+
 /** Attempt to transform an expression a+b as a subtraction b-a. Return null
  * if could not.
  *
@@ -452,7 +464,7 @@ function serializeJsonFunction(
 
   // Determine if we need some LaTeX metadata
   if (options.metadata.includes('latex') && ce.latexSyntax) {
-    md.latex = _escapeJsonString(md.latex ?? ce.latexSyntax.serialize(fn));
+    md.latex = _escapeJsonString(md.latex ?? _serializeLatexMetadata(ce, fn));
   } else md.latex = '';
 
   // Determine if we have some wikidata metadata
@@ -495,7 +507,7 @@ function serializeJsonSymbol(
 
   metadata = { ...metadata };
   if (options.metadata.includes('latex') && ce.latexSyntax) {
-    metadata.latex = metadata.latex ?? ce.latexSyntax.serialize(sym);
+    metadata.latex = metadata.latex ?? _serializeLatexMetadata(ce, sym);
 
     if (metadata.latex !== undefined)
       metadata.latex = _escapeJsonString(metadata.latex);
@@ -749,7 +761,10 @@ function serializeJsonNumber(
     if (options.metadata.includes('latex') && ce.latexSyntax)
       metadata.latex =
         metadata.latex ??
-        ce.latexSyntax.serialize(result ?? ({ num } as MathJsonExpression));
+        _serializeLatexMetadata(
+          ce,
+          result ?? ({ num } as MathJsonExpression)
+        );
 
     if (result) {
       if (metadata.latex !== undefined)
@@ -773,7 +788,7 @@ function serializeJsonNumber(
       if (options.metadata.includes('latex') && ce.latexSyntax)
         metadata.latex =
           metadata.latex ??
-          ce.latexSyntax.serialize({ num } as MathJsonExpression);
+          _serializeLatexMetadata(ce, { num } as MathJsonExpression);
 
       return metadata.latex !== undefined
         ? { num, latex: metadata.latex }
@@ -826,7 +841,7 @@ function serializeJsonNumber(
       if (options.metadata.includes('latex') && ce.latexSyntax)
         metadata.latex =
           metadata.latex ??
-          ce.latexSyntax.serialize({
+          _serializeLatexMetadata(ce, {
             num: value.toString(),
           } as MathJsonExpression);
 
@@ -849,7 +864,8 @@ function serializeJsonNumber(
 
   if (options.metadata.includes('latex') && ce.latexSyntax)
     metadata.latex =
-      metadata.latex ?? ce.latexSyntax.serialize({ num } as MathJsonExpression);
+      metadata.latex ??
+      _serializeLatexMetadata(ce, { num } as MathJsonExpression);
 
   if (result) {
     if (metadata.latex !== undefined)
