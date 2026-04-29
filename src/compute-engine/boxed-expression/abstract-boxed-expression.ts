@@ -329,6 +329,8 @@ export abstract class _BoxedExpression implements Expression {
         options.metadata?.includes('all')
       ) {
         defaultOptions.metadata = ['latex', 'wikidata'];
+      } else if (Array.isArray(options.metadata)) {
+        defaultOptions.metadata = options.metadata;
       }
       if (options.fractionalDigits === 'auto')
         defaultOptions.fractionalDigits = -this.engine.precision; // When negative, indicate that the number of digits should be less than the number of whole digits + this value

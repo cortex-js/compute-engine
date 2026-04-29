@@ -247,3 +247,48 @@ describe('CUSTOM JSON SERIALIZATION', () => {
     `);
   });
 });
+
+describe('toMathJson metadata option', () => {
+  // Regression: passing metadata: ['latex'] (or ['wikidata']) used to be
+  // silently dropped because defaultOptions.metadata stayed []. Only
+  // metadata: ['all'] worked. Fixed by adding an Array.isArray() branch.
+
+  test(`metadata: ['latex'] populates the latex field`, () => {
+    const expr = ce.number(3.14);
+    const result = expr.toMathJson({ metadata: ['latex'] }) as {
+      latex?: string;
+      wikidata?: string;
+    };
+    expect(result.latex).toBeDefined();
+    expect(result.wikidata).toBeUndefined();
+  });
+
+  test(`metadata: ['wikidata'] populates the wikidata field, not latex`, () => {
+    // Pi has a wikidata entry
+    const expr = ce.symbol('Pi');
+    const result = expr.toMathJson({ metadata: ['wikidata'] }) as {
+      latex?: string;
+      wikidata?: string;
+    };
+    expect(result.wikidata).toBeDefined();
+    expect(result.latex).toBeUndefined();
+  });
+
+  test(`metadata: ['all'] populates both fields (legacy behavior preserved)`, () => {
+    const expr = ce.symbol('Pi');
+    const result = expr.toMathJson({ metadata: ['all'] }) as {
+      latex?: string;
+      wikidata?: string;
+    };
+    expect(result.latex).toBeDefined();
+    expect(result.wikidata).toBeDefined();
+  });
+
+  test(`metadata: [] populates neither field (default)`, () => {
+    const expr = ce.symbol('Pi');
+    // With shorthand allowed and no metadata, a symbol is shorthanded to a string
+    const result = expr.toMathJson({ metadata: [] });
+    expect(typeof result === 'string' || (result as any).latex === undefined)
+      .toBe(true);
+  });
+});

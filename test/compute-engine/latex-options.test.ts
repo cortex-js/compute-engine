@@ -117,7 +117,7 @@ describe('Engine latexOptions overrides LatexSyntax instance defaults', () => {
 
 describe('latexOptions threads through MathJSON metadata serialization', () => {
   // The latex metadata path in serialize.ts is reached via
-  // `expr.toMathJson({ metadata: ['all'] })`. It bypasses the
+  // `expr.toMathJson({ metadata: ['latex'] })`. It bypasses the
   // engine-level parse/toLatex paths and goes through six call sites
   // that all funnel into `_serializeLatexMetadata(ce, ...)`.
 
@@ -125,7 +125,7 @@ describe('latexOptions threads through MathJSON metadata serialization', () => {
     const ce = new ComputeEngine();
     ce.latexOptions = { decimalSeparator: '{,}' };
 
-    const result = ce.number(3.14).toMathJson({ metadata: ['all'] });
+    const result = ce.number(3.14).toMathJson({ metadata: ['latex'] });
     // Result is { num, latex } (or a similar shape with a latex field)
     const latex = (result as { latex?: string }).latex;
     expect(latex).toBeDefined();
@@ -137,7 +137,7 @@ describe('latexOptions threads through MathJSON metadata serialization', () => {
     ce.latexOptions = { decimalSeparator: '{,}' };
 
     const expr = ce.parse('1.5 + 2', { decimalSeparator: '.' });
-    const result = expr.toMathJson({ metadata: ['all'] });
+    const result = expr.toMathJson({ metadata: ['latex'] });
     // The top-level fn metadata, plus any nested numeric latex,
     // should use the comma separator. Stringify and look for it.
     const json = JSON.stringify(result);
@@ -150,7 +150,7 @@ describe('latexOptions threads through MathJSON metadata serialization', () => {
 
     // Symbols don't use decimalSeparator, but the path still runs through
     // _serializeLatexMetadata. Just verify no throw + latex is populated.
-    const result = ce.symbol('x').toMathJson({ metadata: ['all'] });
+    const result = ce.symbol('x').toMathJson({ metadata: ['latex'] });
     const latex = (result as { latex?: string }).latex;
     expect(latex).toBeDefined();
     expect(latex).toContain('x');

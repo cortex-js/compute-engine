@@ -25,6 +25,13 @@
   been removed; the injected instance's configured separator now takes
   effect end-to-end.
 
+- **`expr.toMathJson({ metadata: ['latex'] })` was silently dropped** —
+  passing a metadata array containing only specific fields (e.g.
+  `['latex']` or `['wikidata']`) was ignored because the option fell
+  through and the final spread overrode it with the empty default. Only
+  `metadata: ['all']` worked. The array case now correctly populates
+  the requested metadata fields.
+
 ### 0.55.6 _2026-03-08_
 
 #### Fixed
