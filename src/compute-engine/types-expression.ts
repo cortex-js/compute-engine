@@ -1,3 +1,9 @@
+/**
+ * Exports `Expression` (boxed ExpressionInput) and related types.
+ *
+ * To only be imported directly from local 'types-*' files, with all other import instances being
+ * indirect (through imports via 'global-types.ts').
+ */
 import type { Complex } from 'complex-esm';
 import type { OneOf } from '../common/one-of';
 import type {
@@ -24,10 +30,11 @@ import type {
 } from './types-kernel-serialization';
 import type {
   EvaluateOptions as KernelEvaluateOptions,
-  BoxedRule as KernelBoxedRule,
   Rule as KernelRule,
   BoxedRuleSet as KernelBoxedRuleSet,
   Scope as KernelScope,
+  TransformOptions as KernelTransformOptions,
+  SimplifyOptions as KernelSimplifyOptions,
 } from './types-kernel-evaluation';
 
 /**
@@ -167,15 +174,19 @@ type BoxedDefinition =
 
 type Scope = KernelScope<BoxedDefinition>;
 type EvaluateOptions = KernelEvaluateOptions;
-type Rule = KernelRule<Expression, ExpressionInput, ExpressionComputeEngine>;
-type BoxedRule = KernelBoxedRule<Expression, ExpressionComputeEngine>;
-type BoxedRuleSet = KernelBoxedRuleSet<Expression, ExpressionComputeEngine>;
+type TransformOptions = KernelTransformOptions<
+  Expression,
+  ExpressionInput,
+  ExpressionComputeEngine
+>;
+type SimplifyOptions = KernelSimplifyOptions<
+  Expression,
+  ExpressionInput,
+  ExpressionComputeEngine
+>;
 
-type SimplifyOptions = {
-  rules?: null | Rule | ReadonlyArray<BoxedRule | Rule> | BoxedRuleSet;
-  costFunction?: (expr: Expression) => number;
-  strategy?: 'default' | 'fu';
-};
+type Rule = KernelRule<Expression, ExpressionInput, ExpressionComputeEngine>;
+type BoxedRuleSet = KernelBoxedRuleSet<Expression, ExpressionComputeEngine>;
 
 //
 // ── Tensor & Compilation Types ──────────────────────────────────────────
@@ -1236,33 +1247,106 @@ export interface Expression {
    *
    * - If no rules apply, return `null`.
    *
-   * See also `expr.subs()` for a simple substitution of symbols.
+   * Option `form` may be given to specify the form of *replacements* only: meaning this option is
+   * concerned with the *replaced sub-expression* if taking place at-depth.
+   * However... if value 'structural' or 'canonical' (or _undefined_) is specified, then the policy is to nevertheless '*eagerly*' return the entire input expression as canonical/structural, if possible.
+   * Specifying the explicit form '*raw*' here also carries implication (over
+   * non-specification/'undefined'): with this resulting in the absence of the attempt to eagerly
+   * apply any computed expression form (non-raw) to replacements/the overall expression. (Note that
+   * if specifying form 'raw', this makes no difference if replaced expressions are nevertheless
+   * non-raw according to the applicable rule's replacement logic).
    *
-   * Procedure for the determining the canonical-status of the input expression and replacements:
-   *
-   * - If `options.canonical` is set, the *entire expr.* is canonicalized to this degree: whether
-   * the replacement occurs at the top-level, or within/recursively.
-   *
-   * - If otherwise, the *direct replacement will be canonical* if either the 'replaced' expression
-   * is canonical, or the given replacement (- is a Expression and -) is canonical.
-   * Notably also, if this replacement takes place recursively (not at the top-level), then exprs.
-   * containing the replaced expr. will still however have their (previous) canonical-status
-   * *preserved*... unless this expr. was previously non-canonical, and *replacements have resulted
-   * in canonical operands*. In this case, an expr. meeting this criteria will be updated to
-   * canonical status. (Canonicalization is opportunistic here, in other words).
+   * (Despite this overall policy, observe that in any case a consistently canonical, or structural
+   * expression can be ensured via (a) pre-rendering the input expression to the desired form, and
+   * then (b) specifying this form in replacement options.
+   * For further details on this policy, also see {@linkcode ReplaceOptions.form}.)
    *
    * :::info[Note]
-   * Applicable to canonical and non-canonical expressions.
+   * For a simple substitution of symbols, see `expr.subs()`.
+   * 
+   * Applicable to input expressions of any form.
    *
    * To match a specific symbol (not a wildcard pattern), the `match` must be
    * a `Expression` (e.g., `{ match: ce.expr('x'), replace: ... }`).
    * For simple symbol substitution, consider using `subs()` instead.
    * :::
+   *
+   * <!--
+   * @todo?:
+   * - Consider more generally permitting specification of 'form' (that is, allow the request of
+   * 'structural' replacements, too.)
+   * -->
    */
   replace(
     rules: BoxedRuleSet | Rule | Rule[],
     options?: Partial<ReplaceOptions>
   ): null | Expression;
+
+  /**
+   *
+   * Process and transform this expression *recursively* by applying one of a set of predefined
+   * transformations (`simplify`, `canonical`, `evaluate`, `N`, `replace`, `structural`) to matching
+   * (or targeted) subexpressions (or the input expression).
+   *
+   * This method is a wrapper around method `replace()` - which always applies recursively - whilst
+   * jointly offering an alternative, 'declarative' sytnax which also conveniently permits easier
+   * sub-expression targeting and common/fundamental replacement requirements, without the
+   * requirement of custom logic (`RuleFunctions`) and long-winded 'replace()' calls.
+   *
+   * Similarly to replace, input or sub-expressions do *not* have to be canonical (but will anyway
+   * be pre-made canonical for those transformations which require this as such).
+   *
+   * In addition to matching target-expressions via traditional pattern-matching (`match`), this
+   * method uniquely permits an alternate specification of 'targets' - permitting spec. of
+   * sub-expressions via either exact-matching (referential-identity), or a custom predicate.
+   * For each transformation, type-specific options may also be paired or required (required
+   * 'replace' for 'replace'; optional 'simplifyOptions' for 'simplify'). Notably, transformation
+   * `'replace'` uniquely permits specification of resultant 'form' (and will fall back to usual
+   * calculation of its value in its absence).
+   *
+   * Note that `null` is returned in various scenarios: such as where there is no match for a given pattern or
+   * targets; or where transformations are not applicable, or some cases where these do not produce a change, e.g.:
+   * - Application of 'canonical' or 'structural' to targets which are already canonical/structural.
+   * - Application of 'evaluate' or 'N' to targets in which the resultant value is the same as input.
+   * - Application of 'simplify' with no applicable rules.
+   *
+   * If no `match` or `targets` is specified, the target is taken to be the *input expression* (and
+   * in this sole case will not recursively).
+   * Only one of `match` or `targets` should be specified (if otherwise, an exception will be
+   * raised).
+   *
+   * ::!Caveats
+   * - Currently, naturally it is not possible to target engine-common expressions, such as those representing `1`, `0`, `True`, `False`, `Pi`, since these all reference the *same common expressions* upon boxing.
+   *
+   * <!--
+   * @todo:finish/uncomment this comment-block
+   *
+   * @examples
+   * With this method, it is possible to conveniently manipulate, evaluate, simplify, and change
+   * entirely sub-expressions at whim, e.g.:
+   *
+   * Numerically evaluate all 'Power' sub-exprs.
+   * - ce.parse(')
+   *
+   * Simplify all sub-expressions containing '...'
+   * -
+   *
+   * ...
+   *
+   * -->
+   * 
+   * <!--
+   * @note (subject-to-change)
+   * - ?Re-consider the case of returning 'null' for cases of canonical or structural
+   * transformations already applying to canonical/structural targets; or evaluations yielding an
+   * expression with the same value.
+
+   * -->
+   *
+   *
+   *
+   * */
+  transform(options: TransformOptions): Expression | null;
 
   /**
    * True if the expression includes a symbol `v` or a function operator `v`.

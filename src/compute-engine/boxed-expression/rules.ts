@@ -15,10 +15,10 @@ import type {
   Expression,
   ReplaceOptions,
   ExpressionInput,
+  FormOption,
 } from '../global-types';
 
 import {
-  asLatexString,
   isInequalityOperator,
   isRelationalOperator,
 } from '../latex-syntax/utils';
@@ -630,22 +630,16 @@ function boxRule(
   // Normalize the condition to a function
   let condFn: undefined | RuleConditionFunction;
   if (typeof condition === 'string') {
-    const latex = asLatexString(condition);
-    if (latex) {
-      // If the condition is a LaTeX string, it should be a predicate
-      // (an expression with a Boolean value).
-      const condPattern =
-        ce.parse(latex, {
-          form: options?.canonical ? 'canonical' : 'raw',
-        }) ?? ce.expr('Nothing');
+    // If the condition is a LaTeX string, it should be a predicate
+    // (an expression with a Boolean value).
+    const condPattern = ce.parse(condition) ?? ce.expr('Nothing');
 
-      // Substitute any unbound vars in the condition to a wildcard,
-      // then evaluate the condition
-      condFn = (x: BoxedSubstitution, _ce: ComputeEngine): boolean => {
-        const evaluated = condPattern.subs(x).evaluate();
-        return isSymbol(evaluated, 'True');
-      };
-    }
+    // Substitute any unbound vars in the condition to a wildcard,
+    // then evaluate the condition
+    condFn = (x: BoxedSubstitution, _ce: ComputeEngine): boolean => {
+      const evaluated = condPattern.subs(x).evaluate();
+      return isSymbol(evaluated, 'True');
+    };
   } else {
     if (condition !== undefined && typeof condition !== 'function')
       throw new Error(
@@ -664,16 +658,9 @@ function boxRule(
     );
   }
 
-  // Push a clean scope that only inherits from the system scope (index 0),
-  // not from the global scope or user-defined scopes. This prevents user-defined
-  // symbols (like `x` used as a function name in `x(y+z)`) from interfering with
-  // rule parsing. The system scope contains all built-in definitions.
-  const systemScope = ce.contextStack[0]?.lexicalScope;
-  if (systemScope) {
-    ce.pushScope({ parent: systemScope, bindings: new Map() });
-  } else {
-    ce.pushScope();
-  }
+  // Ensure a clean scope (that only inherits from the system scope) before boxing or parsing:
+  // preventing wildcards & user-defined from inheriting definitions in rules.
+  pushSafeScope(ce);
 
   let matchExpr: Expression | undefined;
   let replaceExpr: Expression | RuleReplaceFunction | RuleFunction | undefined;
@@ -750,6 +737,25 @@ function boxRule(
 }
 
 /**
+ * Push a clean scope - safe for the boxing of rules - that only inherits from the system scope
+ * (index 0), not from the global scope or user-defined scopes. This prevents user-defined symbols
+ * (like `x` used as a function name in `x(y+z)`) from interfering with rule parsing. The system
+ * scope contains all built-in definitions.
+ *
+ * This also crucially prevents wildcards from being given definitions where captured & bound.
+ *
+ * @param ce
+ */
+function pushSafeScope(ce: ComputeEngine) {
+  const systemScope = ce.contextStack[0]?.lexicalScope;
+  if (systemScope) {
+    ce.pushScope({ parent: systemScope, bindings: new Map() });
+  } else {
+    ce.pushScope();
+  }
+}
+
+/**
  * Create a boxed rule set from a collection of non-boxed rules
  */
 export function boxRules(
@@ -796,49 +802,61 @@ export function applyRule(
   options?: Readonly<Partial<ReplaceOptions>>
 ): RuleStep | null {
   if (!rule) return null;
-  let canonical = options?.canonical ?? (expr.isCanonical || expr.isStructural);
+
+  // eslint-disable-next-line prefer-const
+  let { match, replace, condition, id, onMatch, onBeforeMatch } = rule;
+  const because = id ?? '';
+
+  const ce = expr.engine;
+
+  // Check exceptions for skipping this rule where it cannot apply
+  // @query?: consider *partial*-canonical here...?
+  if ((options?.form === 'canonical' || expr.isCanonical) && match) {
+    const awc = getWildcards(match);
+    pushSafeScope(ce);
+    const canonicalMatch = match.canonical;
+    ce.popScope();
+    const bwc = getWildcards(canonicalMatch);
+    // If the canonical form of the match loses wildcards, this rule cannot match
+    // canonical expressions (they would already be simplified). Skip this rule.
+    if (!awc.every((x) => bwc.includes(x))) return null;
+  }
 
   let operandsMatched = false;
 
   if (isFunction(expr) && options?.recursive) {
+    const direction = options?.direction ?? 'left-right';
+    let newOps =
+      direction === 'left-right' ? expr.ops : [...expr.ops].reverse();
+
     // Apply the rule to the operands of the expression
-    const newOps = expr.ops.map((op) => {
+    newOps = newOps.map((op) => {
       const subExpr = applyRule(rule, op, {}, options);
       if (!subExpr) return op;
       operandsMatched = true;
       return subExpr.value;
     });
 
+    if (direction === 'right-left') (newOps as Expression[]).reverse();
+
     // At least one operand (directly or recursively) matched: but continue onwards to match against
     // the top-level expr., test against any 'condition', et cetera.
     if (operandsMatched) {
-      // If new/replaced operands are all canonical, and options do not explicitly specify canonical
-      // status, then should be safe to mark as fully-canonical
-      if (
-        !canonical &&
-        options?.canonical === undefined &&
-        newOps.every((x) => x.isCanonical)
-      )
-        canonical = true;
-
-      expr = expr.engine.function(expr.operator, newOps, {
-        form: canonical ? 'canonical' : 'raw',
-      });
+      let form: FormOption = 'raw';
+      // The current policy for applying a form according to 'options.form' is for this to apply to
+      // *replacements only* (this ultimately allowing for finer control of replacement operations).
+      // ...However, if all child operands bear the same form, 'eagerly' assume this form for the
+      // present expression - provided it has not been explicitly requested that the form be 'raw'.
+      // If this present expression subsequently *directly* matches, the final expression may in any
+      // case be updated according to a specified 'options.form'.
+      //(@note: check 'canonical' first, because numbers may be jointly marked as structural and
+      //canonical).
+      if (options?.form !== 'raw') {
+        if (newOps.every((x) => x.isCanonical)) form = 'canonical';
+        else if (newOps.every((x) => x.isStructural)) form = 'structural';
+      }
+      expr = ce.function(expr.operator, newOps, { form });
     }
-  }
-
-  // eslint-disable-next-line prefer-const
-  let { match, replace, condition, id, onMatch, onBeforeMatch } = rule;
-  const because = id ?? '';
-
-  if (canonical && match) {
-    const awc = getWildcards(match);
-    const canonicalMatch = match.canonical;
-    const bwc = getWildcards(canonicalMatch);
-    // If the canonical form of the match loses wildcards, this rule cannot match
-    // canonical expressions (they would already be simplified). Skip this rule.
-    if (!awc.every((x) => bwc.includes(x)))
-      return operandsMatched ? { value: expr, because } : null;
   }
 
   const useVariations = rule.useVariations ?? options?.useVariations ?? false;
@@ -877,7 +895,7 @@ export function applyRule(
     };
 
     try {
-      if (!condition(conditionSub, expr.engine))
+      if (!condition(conditionSub, ce))
         return operandsMatched ? { value: expr, because } : null;
     } catch (e) {
       console.error(
@@ -887,28 +905,63 @@ export function applyRule(
     }
   }
 
+  /** The form to be assumed by the *directly replaced* expression. */
+  let formValue =
+    options?.form ??
+    (expr.isStructural ? 'structural' : expr.isCanonical ? 'canonical' : 'raw');
+
+  //  If `true`, then the form is not 'enforced' (via options) and may be re-computed dependent on
+  //  the replace result.
+  // For example, if the form is is computed to be 'canonical', based on the form of the input
+  // expression (or re-computed because of operands), yet the replacement produces a different form
+  // (e.g. 'structural'), then in alignment with the present 'replace' policy, the result may be
+  // instead returned as 'structural'
+  const dynamicForm = options?.form === undefined;
+
+  /** Get the overall form type from *formValue* (raw/structural/canonical), accounting for
+   * 'canonical' potentially assuming multiple values. */
+  const getFormType = () =>
+    formValue === 'structural'
+      ? 'structural'
+      : formValue === 'raw'
+        ? 'raw'
+        : 'canonical';
+
   // Have a (direct) match: in this case, consider the canonical-status of the replacement, too.
   if (
-    !canonical &&
-    options?.canonical === undefined &&
+    formValue === 'raw' &&
+    dynamicForm &&
     replace instanceof _BoxedExpression &&
-    replace.isCanonical
+    (replace.isCanonical || replace.isStructural)
   )
-    canonical = true;
+    formValue = replace.isCanonical ? 'canonical' : 'structural';
 
   //@note: '.subs()' acts like an expr. 'clone' here (in case of an empty substitution)
   const result =
     typeof replace === 'function'
       ? replace(expr, sub)
-      : replace.subs(sub, { canonical });
+      : replace.subs(sub, { canonical: getFormType() === 'canonical' });
 
-  if (!result) return null;
+  if (!result) return operandsMatched ? { value: expr, because } : null;
 
   // To aid in debugging, invoke onMatch when the rule matches
   onMatch?.(rule, expr, result);
 
+  const computeValue = (x: Expression) => {
+    // If 'raw', return as is (if already structural/canonical, cannot be undone)
+    if (formValue === 'raw') return x;
+    // Non option-enforced form; let replacement expression form override
+    if (dynamicForm === true && (x.isStructural || x.isCanonical)) return x;
+    // Enforced form
+    return getFormType() === 'canonical' ? x.canonical : x.structural;
+  };
+
+  // (Need to request a 'form' variant (canonical/structural) to account for case of a custom
+  // replace: which may not have returned the same 'form' calculated here)
   if (isRuleStep(result))
-    return canonical ? { ...result, value: result.value.canonical } : result;
+    return formValue === 'raw'
+      ? result
+      : { ...result, value: computeValue(result.value) };
 
   if (!isExpression(result)) {
     throw new Error(
@@ -916,9 +969,10 @@ export function applyRule(
     );
   }
 
-  // (Need to request the canonical variant to account for case of a custom replace: which may not
-  // have returned canonical.)
-  return { value: canonical ? result.canonical : result, because };
+  return {
+    value: computeValue(result),
+    because,
+  };
 }
 
 /**
@@ -959,7 +1013,7 @@ export function replace(
         if (
           result !== null &&
           result.value !== expr &&
-          !result.value.isSame(expr)
+          (!result.value.isSame(expr) || varyingForm(expr, result.value))
         ) {
           // If `once` flag is set, bail on first matching rule
           if (once) return [result];
@@ -980,6 +1034,80 @@ export function replace(
     iterationCount += 1;
   }
   return steps;
+
+  /*
+   * Local f.
+   */
+  /**
+   * Assuming *x* and *x2* are **structurally (symbolically) equivalent**, and considering
+   * expression forms 'structural' and 'canonical':
+   *
+   * - If option 'recursive' equals `true` or `'functions-only'` (**default** = `'functions-only'`),
+   * then, if either 'x' or 'x2', or one of the matching sub-expression pairs of these has a
+   * differing 'structural' or 'canonical' status, then return `true`.
+   * (if 'functions-only', then only function-expression operands are considered)
+   *
+   * - If 'recursive' === `false`, then this status comparison applies only to/between `x` and `x2`
+   * directly.
+   *
+   * For both cases, if neither `x` nor `x2` (nor compared sub-expressions if recursive) is
+   * sructural or canonical, then return `false`.
+   *
+   * **Warning**: will throw an error if it is determined, in case of `recursive !== false`, that
+   * `x` and `x2` are not structurally equivalent/have an identical tree/branching structure.
+   * (It is therefore the responsibility of the caller to ensure this beforehand)
+   *
+   *
+   */
+  function varyingForm(
+    x: Expression,
+    x2: Expression,
+    {
+      recursive = 'functions-only',
+    }: { recursive?: boolean | 'functions-only' } = {}
+  ): boolean {
+    if (varies(x, x2)) return true;
+
+    if (recursive === false) return false;
+
+    if (isFunction(x) && isFunction(x2)) {
+      // @warning: maybe this *could* be the case for various structural vs. canonical functional
+      // representations?
+      if (x.ops.length !== x2.ops.length)
+        throw new Error(
+          `'x' and 'x2' detected to not be structurally equivalent`
+        );
+      if (x.nops === 0) return false;
+
+      // If 'functionsOnly == true', compare only the structural/canonical status of
+      // function-expressions.
+      return x.ops.some((op, index) =>
+        recursive === true || (!isFunction(op) && !isFunction(x2.ops[index]))
+          ? false
+          : varyingForm(op, x2.ops[index], { recursive })
+      );
+    } else if (isFunction(x) || isFunction(x2))
+      // If hitting a scenario where one is a function and the other isn't, then, assuming symbolic
+      // equivalence, must be the case that the form differs (including the case of one branch being
+      // in the 'raw' form)
+      return true;
+
+    // Must be literals/non-functions (assume same)
+    return false;
+
+    /*
+     * Local f().
+     */
+    /** *Directly* compare form-status of `x` & `x2` */
+    function varies(x: Expression, x2: Expression): boolean {
+      if (x.isStructural || x.isCanonical) {
+        if (x.isStructural) return !x2.isStructural;
+        return !x2.isCanonical; // Must be canonical
+      }
+      // x must be non-canonical & non-structural (if both have no form, consider as non-varying)
+      return x2.isStructural || x2.isCanonical ? true : false;
+    }
+  }
 }
 
 /**

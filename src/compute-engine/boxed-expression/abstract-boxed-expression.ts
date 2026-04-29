@@ -25,6 +25,7 @@ import type {
   JsonSerializationOptions,
   PatternMatchOptions,
   SimplifyOptions,
+  TransformOptions,
   IComputeEngine as ComputeEngine,
   Scope,
   Tensor,
@@ -38,6 +39,7 @@ import { toAsciiMath } from './ascii-math';
 // Dynamic import for serializeJson to avoid circular dependency
 import { cmp, eq, same } from './compare';
 import { CancellationError } from '../../common/interruptible';
+import { transform } from './transform';
 import { isSymbol, isString, isNumber, isFunction } from './type-guards';
 
 // Lazy reference to break circular dependency:
@@ -778,6 +780,10 @@ export abstract class _BoxedExpression implements Expression {
 
   replace(_rules: BoxedRuleSet | Rule | Rule[]): null | Expression {
     return null;
+  }
+
+  transform(options: TransformOptions): Expression | null {
+    return transform(this, options);
   }
 
   has(_v: string | string[]): boolean {

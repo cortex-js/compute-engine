@@ -1251,7 +1251,7 @@ export class BoxedFunction
 
       let evaluateFn: Expression | Promise<Expression> | undefined;
       try {
-        const opts = {
+        const opts: Partial<EvaluateOptions> & { engine?: ComputeEngine } = {
           numericApproximation,
           engine,
           signal: options?.signal,

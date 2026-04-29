@@ -62,7 +62,13 @@ function evaluateNumericSubexpressions(expr: Expression): Expression {
   }
 
   // If purely numeric (no unknowns), evaluate the whole expression
-  if (expr.unknowns.length === 0 && BASIC_ARITHMETIC.includes(expr.operator)) {
+  if (
+    expr.unknowns.length === 0 &&
+    BASIC_ARITHMETIC.includes(expr.operator) &&
+    expr.ops.every(
+      (op) => BASIC_ARITHMETIC.includes(op.operator) || !isFunction(op)
+    )
+  ) {
     const evaluated = expr.evaluate();
     if (isNumber(evaluated)) return evaluated;
   }
@@ -341,7 +347,7 @@ function simplifyExpression(
   if (isSymbol(expr)) {
     const result = replace(expr, rules, {
       recursive: false,
-      canonical: true,
+      form: 'canonical',
       useVariations: false,
     });
     if (result.length > 0) return [...steps, ...result];
@@ -394,7 +400,7 @@ function simplifyNonCommutativeFunction(
 ): RuleSteps {
   const result = replace(expr, rules, {
     recursive: false,
-    canonical: true,
+    form: 'canonical',
     useVariations: options.useVariations ?? false,
   });
 
@@ -407,7 +413,7 @@ function simplifyNonCommutativeFunction(
   let last = result.at(-1)!.value;
   if (last.isSame(expr)) return steps;
 
-  last = simplifyOperands(last);
+  last = simplifyOperands(last, options);
 
   // If the simplified expression is not cheaper, we're done.
   // Exception: power combination results (e.g., -4·2^x → -2^(x+2)) may be

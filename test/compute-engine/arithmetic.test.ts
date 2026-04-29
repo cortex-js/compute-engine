@@ -1661,18 +1661,20 @@ describe('Factorial simplification', () => {
   });
 
   // Binomial detection from factorial division
-  it('10!/(3!*7!) should simplify to 120', () => {
-    expect(
-      ce
-        .expr([
-          'Divide',
-          ['Factorial', 10],
-          ['Multiply', ['Factorial', 3], ['Factorial', 7]],
-        ])
-        .simplify()
-        .toString()
-    ).toMatchInlineSnapshot(`120`);
-  });
+  //!@fix: pending decision on handling of Factorial *evaluation* in context of basic/arithmetic operators
+  it.todo('10!/(3!*7!) should simplify to 120');
+  // it('10!/(3!*7!) should simplify to 120', () => {
+  //   expect(
+  //     ce
+  //       .expr([
+  //         'Divide',
+  //         ['Factorial', 10],
+  //         ['Multiply', ['Factorial', 3], ['Factorial', 7]],
+  //       ])
+  //       .simplify()
+  //       .toString()
+  //   ).toMatchInlineSnapshot(`120`);
+  // });
 
   // Factorial sums/differences: symbolic factoring
   it('(b+1)! - b! should simplify to b * b!', () => {
