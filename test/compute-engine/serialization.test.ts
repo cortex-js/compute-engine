@@ -292,3 +292,41 @@ describe('toMathJson metadata option', () => {
       .toBe(true);
   });
 });
+
+describe('toMathJson shorthands option', () => {
+  // Regression: passing shorthands: ['all'] used to be silently broken.
+  // The 'all' branch correctly expanded defaultOptions.shorthands, but a
+  // following unconditional `if (Array.isArray(...))` overwrote it back
+  // to the literal `['all']` (which matches no actual shorthand kind),
+  // effectively disabling all shorthands. Fixed by changing the second
+  // `if` to `else if`.
+
+  test(`shorthands: ['all'] enables shorthands (array form)`, () => {
+    const expr = ce.parse('1 + x');
+    // With shorthands enabled, an Add of a number and a symbol uses the
+    // function-shorthand array form rather than the verbose { fn: [...] } shape.
+    const result = expr.toMathJson({ shorthands: ['all'] });
+    expect(Array.isArray(result)).toBe(true);
+  });
+
+  test(`shorthands: 'all' (string) enables shorthands`, () => {
+    const expr = ce.parse('1 + x');
+    const result = expr.toMathJson({ shorthands: 'all' as any });
+    expect(Array.isArray(result)).toBe(true);
+  });
+
+  test(`shorthands: [] disables all shorthands`, () => {
+    const expr = ce.parse('1 + x');
+    const result = expr.toMathJson({ shorthands: [] });
+    // Without function shorthand, Add becomes { fn: [...] } object form.
+    expect(typeof result).toBe('object');
+    expect(Array.isArray(result)).toBe(false);
+  });
+
+  test(`shorthands: ['function'] enables only function shorthand`, () => {
+    const expr = ce.parse('1 + x');
+    const result = expr.toMathJson({ shorthands: ['function'] });
+    // Function shorthand kicks in: the result is a flat array
+    expect(Array.isArray(result)).toBe(true);
+  });
+});

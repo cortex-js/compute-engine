@@ -32,6 +32,14 @@
   `metadata: ['all']` worked. The array case now correctly populates
   the requested metadata fields.
 
+- **`expr.toMathJson({ shorthands: ['all'] })` disabled all shorthands** —
+  the `'all'` branch correctly expanded the defaults to the full kind
+  list, but a following unconditional `if (Array.isArray(...))`
+  overwrote it back to the literal `['all']`, which matches no actual
+  shorthand kind. So passing `['all']` had the opposite effect of what
+  was intended. The string form `'all'` and explicit lists like
+  `['function']` were unaffected.
+
 ### 0.55.6 _2026-03-08_
 
 #### Fixed

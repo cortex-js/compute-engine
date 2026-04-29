@@ -320,10 +320,9 @@ export abstract class _BoxedExpression implements Expression {
           'number',
           'dictionary',
         ];
-      }
-      // if (options.shorthands?.includes('none')) defaultOptions.shorthands = [];
-      if (Array.isArray(options.shorthands))
+      } else if (Array.isArray(options.shorthands)) {
         defaultOptions.shorthands = options.shorthands;
+      }
       if (
         (typeof options.metadata === 'string' && options.metadata === 'all') ||
         options.metadata?.includes('all')
