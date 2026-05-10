@@ -770,13 +770,10 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   },
 
   // -----------------------------------------------------------------------
-  // As* converters. Compile-time output convention matches the GPU target:
-  // each returns components in the named space as a 3- or 4-element array.
-  // For sRGB-based spaces (`AsRgb`/`AsHsv`/`AsHsl`), components are 0-1
-  // (not 0-255) — round-tripping through 0-255 loses precision and the
-  // shader/runtime convention is 0-1. The interpreted-layer `AsRgb` head
-  // returns 0-255 channels; the difference is intentional and matches GPU.
-  // `AsOklch` is the identity (canonical form).
+  // As* converters. Compile-time output convention matches the engine and
+  // the GPU target: each returns components in the named space as a 3- or
+  // 4-element array. `AsRgb` uses 0-1 sRGB channels (consistent across all
+  // layers). `AsOklch` is the identity (canonical form).
   // -----------------------------------------------------------------------
   AsRgb: ([c], compile) => {
     if (c === null) throw new Error('AsRgb: no argument');
@@ -807,8 +804,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   },
 
   // Euclidean distance between two tuples (any positive dimension).
-  // Distinct from the GPU `Distance` (which is the GLSL/WGSL `distance()`
-  // builtin operating on vec3): JS-side this works on plain arrays.
+  // The GPU target maps `Distance` to the GLSL/WGSL `distance()` builtin
+  // (vec-only); this JS handler works on plain arrays of any length.
   Distance: ([a, b], compile) => {
     if (a === null || b === null)
       throw new Error('Distance: need two points');
@@ -1130,7 +1127,8 @@ const colorHelpers = {
   // units and returns the canonical OKLCh array `[L, C, H]` (or with alpha).
   // -----------------------------------------------------------------------
   rgb(r: number, g: number, b: number, alpha?: number): number[] {
-    const c = rgbToOklch({ r, g, b });
+    // Inputs are 0-1 sRGB; `rgbToOklch` expects 0-255 channels.
+    const c = rgbToOklch({ r: r * 255, g: g * 255, b: b * 255 });
     return alpha !== undefined && Math.abs(alpha - 1) > 1e-4
       ? [c.L, c.C, c.H, alpha]
       : [c.L, c.C, c.H];

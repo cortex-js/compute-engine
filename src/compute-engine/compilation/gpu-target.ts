@@ -796,11 +796,8 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   Rgb: (args, compile, target) => {
     if (args.length < 3) throw new Error('Rgb: need 3 components');
     const v3 = gpuVec3(target);
-    // Channels are 0-255; normalize to 0-1 sRGB before promoting to OKLCh.
-    const r = compile(args[0]);
-    const g = compile(args[1]);
-    const b = compile(args[2]);
-    return `_gpu_srgb_to_oklch(${v3}((${r}) / 255.0, (${g}) / 255.0, (${b}) / 255.0))`;
+    // Channels are 0-1 sRGB — no scaling needed.
+    return `_gpu_srgb_to_oklch(${v3}(${compile(args[0])}, ${compile(args[1])}, ${compile(args[2])}))`;
   },
 
   Hsv: (args, compile, target) => {
@@ -845,9 +842,6 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
 
   AsRgb: ([c], compile) => {
     if (c === null) throw new Error('AsRgb: no argument');
-    // Note: emitted vec3 is 0-1 sRGB (matching ColorToColorspace), not the
-    // 0-255 channels used by the interpreted `Rgb` head — GPU shaders work
-    // in 0-1 sRGB and round-tripping through 0-255 would lose precision.
     return `_gpu_oklch_to_srgb(${compile(c)})`;
   },
 

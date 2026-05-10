@@ -102,7 +102,9 @@ function colorExprToRgb(arg: any): RgbColor | null {
   if (!c) return null;
   switch (c.space) {
     case 'Rgb':
-      return { r: c.c0, g: c.c1, b: c.c2, alpha: c.alpha };
+      // Rgb head components are 0-1 sRGB; `@arnog/colors`'s RgbColor is
+      // 0-255, so scale at the boundary.
+      return { r: c.c0 * 255, g: c.c1 * 255, b: c.c2 * 255, alpha: c.alpha };
     case 'Hsv': {
       const rgb = hsvToRgb(c.c0, c.c1, c.c2);
       return { ...rgb, alpha: c.alpha };
@@ -137,7 +139,13 @@ function colorExprToOklch(arg: any): OklchColor | null {
     case 'Oklab':
       return asOklch({ L: c.c0, a: c.c1, b: c.c2, alpha: c.alpha });
     case 'Rgb':
-      return asOklch({ r: c.c0, g: c.c1, b: c.c2, alpha: c.alpha });
+      // Rgb head components are 0-1 sRGB; `asOklch`'s RgbColor is 0-255.
+      return asOklch({
+        r: c.c0 * 255,
+        g: c.c1 * 255,
+        b: c.c2 * 255,
+        alpha: c.alpha,
+      });
     case 'Hsv': {
       const rgb = hsvToRgb(c.c0, c.c1, c.c2);
       return asOklch({ ...rgb, alpha: c.alpha });
@@ -560,10 +568,10 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
         packed = contrastingColor(bgRgb);
       }
 
-      // Unpack 0xRRGGBBAA into an Rgb head (channels 0-255).
-      const r = (packed >>> 24) & 0xff;
-      const g = (packed >>> 16) & 0xff;
-      const b = (packed >>> 8) & 0xff;
+      // Unpack 0xRRGGBBAA into an Rgb head (channels 0-1).
+      const r = ((packed >>> 24) & 0xff) / 255;
+      const g = ((packed >>> 16) & 0xff) / 255;
+      const b = ((packed >>> 8) & 0xff) / 255;
       const alpha = (packed & 0xff) / 255;
       const args = [ce.number(r), ce.number(g), ce.number(b)];
       if (Math.abs(alpha - 1) > 1e-4) args.push(ce.number(alpha));
@@ -580,7 +588,7 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
   // ---------------------------------------------------------------------------
 
   Rgb: {
-    description: 'sRGB color (channels 0-255, optional alpha 0-1)',
+    description: 'sRGB color (channels 0-1, optional alpha 0-1)',
     complexity: 8000,
     signature: '(number, number, number, number?) -> color',
   },
@@ -612,7 +620,7 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
   // ---------------------------------------------------------------------------
 
   AsRgb: {
-    description: 'Convert any color to sRGB (channels 0-255)',
+    description: 'Convert any color to sRGB (channels 0-1)',
     complexity: 8000,
     signature: '(color) -> color',
     evaluate: (ops, { engine: ce }) => {
@@ -620,7 +628,13 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
       if (isFunction(arg) && arg.operator === 'Rgb') return arg;
       const rgb = colorExprToRgb(arg);
       if (!rgb) return ce.error('incompatible-type');
-      const args = [ce.number(rgb.r), ce.number(rgb.g), ce.number(rgb.b)];
+      // colorExprToRgb returns 0-255 channels (the `@arnog/colors` internal
+      // form); divide to bring back to the Rgb head's 0-1 convention.
+      const args = [
+        ce.number(rgb.r / 255),
+        ce.number(rgb.g / 255),
+        ce.number(rgb.b / 255),
+      ];
       if (rgb.alpha !== undefined && Math.abs(rgb.alpha - 1) > 1e-4)
         args.push(ce.number(rgb.alpha));
       return ce.function('Rgb', args);

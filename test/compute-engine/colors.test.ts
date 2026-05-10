@@ -11,10 +11,9 @@ function evaluateColor(input: string) {
   if (result.operator === 'Oklch') {
     const rgb = ce.expr(['AsRgb', result.json]).evaluate();
     if (rgb.operator === 'Rgb') {
-      return rgb.ops!.map((op, i) => {
-        const v = op.re;
-        // r/g/b components are 0-255, alpha is already 0-1
-        return Math.round((i < 3 ? v / 255 : v) * 1000) / 1000;
+      return rgb.ops!.map((op) => {
+        // Rgb head channels are 0-1 sRGB (matches alpha range).
+        return Math.round(op.re * 1000) / 1000;
       });
     }
   }
@@ -198,9 +197,9 @@ describe('ColorFromColorspace', () => {
     const originalAsRgb = ce
       .expr(['AsRgb', ce.expr(['Color', "'#3366cc'"]).evaluate().json])
       .evaluate();
-    expect(back.ops![0].re).toBeCloseTo(originalAsRgb.ops![0].re / 255, 2);
-    expect(back.ops![1].re).toBeCloseTo(originalAsRgb.ops![1].re / 255, 2);
-    expect(back.ops![2].re).toBeCloseTo(originalAsRgb.ops![2].re / 255, 2);
+    expect(back.ops![0].re).toBeCloseTo(originalAsRgb.ops![0].re, 2);
+    expect(back.ops![1].re).toBeCloseTo(originalAsRgb.ops![1].re, 2);
+    expect(back.ops![2].re).toBeCloseTo(originalAsRgb.ops![2].re, 2);
   });
 });
 
@@ -243,9 +242,9 @@ describe('Edge cases', () => {
     const originalAsRgb = ce
       .expr(['AsRgb', ce.expr(['Color', "'#3366cc'"]).evaluate().json])
       .evaluate();
-    expect(back.ops![0].re).toBeCloseTo(originalAsRgb.ops![0].re / 255, 2);
-    expect(back.ops![1].re).toBeCloseTo(originalAsRgb.ops![1].re / 255, 2);
-    expect(back.ops![2].re).toBeCloseTo(originalAsRgb.ops![2].re / 255, 2);
+    expect(back.ops![0].re).toBeCloseTo(originalAsRgb.ops![0].re, 2);
+    expect(back.ops![1].re).toBeCloseTo(originalAsRgb.ops![1].re, 2);
+    expect(back.ops![2].re).toBeCloseTo(originalAsRgb.ops![2].re, 2);
   });
 });
 
@@ -278,15 +277,15 @@ describe('ColorToString', () => {
 
 describe('ColorMix', () => {
   // Helper: convert a ColorMix result (always an Oklch head now) to 0-1 sRGB
-  // for component comparison.
+  // for component comparison. AsRgb returns 0-1 channels directly.
   function mixedToRgb(result: any): { r: number; g: number; b: number } {
     expect(result.operator).toBe('Oklch');
     const rgb = ce.expr(['AsRgb', result.json]).evaluate();
     expect(rgb.operator).toBe('Rgb');
     return {
-      r: rgb.ops![0].re / 255,
-      g: rgb.ops![1].re / 255,
-      b: rgb.ops![2].re / 255,
+      r: rgb.ops![0].re,
+      g: rgb.ops![1].re,
+      b: rgb.ops![2].re,
     };
   }
 
@@ -460,10 +459,10 @@ describe('ContrastingColor', () => {
   test('black bg defaults to white text', () => {
     const result = ce.expr(['ContrastingColor', "'#000000'"]).evaluate();
     expect(result.operator).toBe('Rgb');
-    // Should be white: (255, 255, 255)
-    expect(result.ops![0].re).toBe(255);
-    expect(result.ops![1].re).toBe(255);
-    expect(result.ops![2].re).toBe(255);
+    // Should be white: (1, 1, 1)
+    expect(result.ops![0].re).toBe(1);
+    expect(result.ops![1].re).toBe(1);
+    expect(result.ops![2].re).toBe(1);
   });
 
   test('with two fg candidates', () => {
@@ -578,7 +577,7 @@ describe('Color compilation', () => {
   // ---------------------------------------------------------------------
 
   test('compile Rgb to JS produces OKLCh array', () => {
-    const compiled = compile(ce.expr(['Rgb', 255, 0, 0]));
+    const compiled = compile(ce.expr(['Rgb', 1, 0, 0]));
     expect(compiled.success).toBe(true);
     const result = compiled.run!() as unknown as number[];
     expect(result).toHaveLength(3);
@@ -604,7 +603,7 @@ describe('Color compilation', () => {
   });
 
   test('compile Rgb with alpha to JS', () => {
-    const compiled = compile(ce.expr(['Rgb', 255, 0, 0, 0.5]));
+    const compiled = compile(ce.expr(['Rgb', 1, 0, 0, 0.5]));
     expect(compiled.success).toBe(true);
     const result = compiled.run!() as unknown as number[];
     expect(result).toHaveLength(4);
@@ -623,7 +622,7 @@ describe('Color compilation', () => {
   });
 
   test('compile AsHsv to JS produces hue/sat/val', () => {
-    const compiled = compile(ce.expr(['AsHsv', ['Rgb', 255, 0, 0]]));
+    const compiled = compile(ce.expr(['AsHsv', ['Rgb', 1, 0, 0]]));
     expect(compiled.success).toBe(true);
     const result = compiled.run!() as unknown as number[];
     expect(result[0]).toBeCloseTo(0, 1);
@@ -641,7 +640,7 @@ describe('Color compilation', () => {
 
   test('compile ColorDelta to JS', () => {
     const compiled = compile(
-      ce.expr(['ColorDelta', ['Rgb', 255, 0, 0], ['Rgb', 0, 0, 255]])
+      ce.expr(['ColorDelta', ['Rgb', 1, 0, 0], ['Rgb', 0, 0, 1]])
     );
     expect(compiled.success).toBe(true);
     const result = compiled.run!() as unknown as number;
@@ -651,7 +650,7 @@ describe('Color compilation', () => {
 
   test('compile ColorDelta of identical colors is 0', () => {
     const compiled = compile(
-      ce.expr(['ColorDelta', ['Rgb', 100, 50, 200], ['Rgb', 100, 50, 200]])
+      ce.expr(['ColorDelta', ['Rgb', 0.4, 0.2, 0.8], ['Rgb', 0.4, 0.2, 0.8]])
     );
     expect(compiled.success).toBe(true);
     const result = compiled.run!() as unknown as number;
@@ -849,12 +848,13 @@ describe('GPU compile: typed color heads', () => {
     expect(compiled.success).toBe(false);
   });
 
-  test('Rgb head divides by 255 and promotes to OKLCh', () => {
-    const expr = ce.expr(['Rgb', 255, 0, 0]);
+  test('Rgb head promotes to OKLCh via sRGB', () => {
+    const expr = ce.expr(['Rgb', 1, 0, 0]);
     const compiled = compile(expr, { to: 'glsl' });
     expect(compiled.success).toBe(true);
     expect(compiled.code).toContain('_gpu_srgb_to_oklch');
-    expect(compiled.code).toContain('/ 255.0');
+    // Rgb channels are 0-1 sRGB across all layers — no 255-divide.
+    expect(compiled.code).not.toContain('/ 255.0');
   });
 
   test('Oklch head emits canonical vec3 directly', () => {
@@ -920,13 +920,12 @@ describe('GPU compile: As* operators', () => {
     expect(compiled.code).toContain('_gpu_oklch_to_oklab');
   });
 
-  test('AsRgb emits 0-1 sRGB (not 0-255)', () => {
+  test('AsRgb emits 0-1 sRGB', () => {
     const expr = ce.expr(['AsRgb', ['Oklch', 0.7, 0.2, 30]]);
     const compiled = compile(expr, { to: 'glsl' });
     expect(compiled.success).toBe(true);
     expect(compiled.code).toContain('_gpu_oklch_to_srgb');
-    // No 255-divide: matches ColorToColorspace 'rgb' semantics, not the
-    // 0-255 convention used by the interpreted Rgb head.
+    // 0-1 sRGB throughout — no 255-divide needed.
     expect(compiled.code).not.toContain('/ 255.0');
   });
 
@@ -987,9 +986,9 @@ describe('Color constructor heads', () => {
   });
 
   test('preserves colorspace on evaluation (Rgb)', () => {
-    const expr = ce.expr(['Rgb', 255, 0, 0]).evaluate();
+    const expr = ce.expr(['Rgb', 1, 0, 0]).evaluate();
     expect(expr.operator).toBe('Rgb');
-    expect(expr.ops![0].re).toBe(255);
+    expect(expr.ops![0].re).toBe(1);
   });
 
   test('preserves colorspace on evaluation (Hsv)', () => {
@@ -998,33 +997,33 @@ describe('Color constructor heads', () => {
   });
 
   test('out-of-range values are not clamped at parse time', () => {
-    // Per Desmos compatibility: parse permissive, render-time clamp.
-    const expr = ce.expr(['Rgb', 256, -1, 999]).evaluate();
+    // Parse permissive; downstream consumers decide whether to clamp.
+    const expr = ce.expr(['Rgb', 2, -0.5, 5]).evaluate();
     expect(expr.operator).toBe('Rgb');
-    expect(expr.ops![0].re).toBe(256);
-    expect(expr.ops![1].re).toBe(-1);
-    expect(expr.ops![2].re).toBe(999);
+    expect(expr.ops![0].re).toBe(2);
+    expect(expr.ops![1].re).toBe(-0.5);
+    expect(expr.ops![2].re).toBe(5);
   });
 });
 
 describe('Color conversions (As*)', () => {
   test('AsRgb identity on Rgb', () => {
-    const expr = ce.expr(['AsRgb', ['Rgb', 100, 50, 25]]).evaluate();
+    const expr = ce.expr(['AsRgb', ['Rgb', 0.4, 0.2, 0.1]]).evaluate();
     expect(expr.operator).toBe('Rgb');
-    expect(expr.ops![0].re).toBe(100);
+    expect(expr.ops![0].re).toBe(0.4);
   });
 
   test('AsRgb on Hsv produces Rgb', () => {
     // hsv(0, 1, 1) is pure red
     const expr = ce.expr(['AsRgb', ['Hsv', 0, 1, 1]]).evaluate();
     expect(expr.operator).toBe('Rgb');
-    expect(expr.ops![0].re).toBeCloseTo(255, 0);
-    expect(expr.ops![1].re).toBeCloseTo(0, 0);
-    expect(expr.ops![2].re).toBeCloseTo(0, 0);
+    expect(expr.ops![0].re).toBeCloseTo(1, 4);
+    expect(expr.ops![1].re).toBeCloseTo(0, 4);
+    expect(expr.ops![2].re).toBeCloseTo(0, 4);
   });
 
   test('AsHsv on Rgb produces Hsv', () => {
-    const expr = ce.expr(['AsHsv', ['Rgb', 255, 0, 0]]).evaluate();
+    const expr = ce.expr(['AsHsv', ['Rgb', 1, 0, 0]]).evaluate();
     expect(expr.operator).toBe('Hsv');
     expect(expr.ops![0].re).toBeCloseTo(0, 1); // hue 0
     expect(expr.ops![1].re).toBeCloseTo(1, 2); // saturation 1
@@ -1032,23 +1031,23 @@ describe('Color conversions (As*)', () => {
   });
 
   test('AsOklch on Rgb produces Oklch', () => {
-    const expr = ce.expr(['AsOklch', ['Rgb', 255, 0, 0]]).evaluate();
+    const expr = ce.expr(['AsOklch', ['Rgb', 1, 0, 0]]).evaluate();
     expect(expr.operator).toBe('Oklch');
   });
 
   test('AsRgb ∘ AsHsv ∘ ... round-trips', () => {
-    const start = ['Rgb', 200, 100, 50];
+    const start = ['Rgb', 200 / 255, 100 / 255, 50 / 255];
     const expr = ce
       .expr(['AsRgb', ['AsHsv', ['AsOklch', ['AsHsl', start]]]])
       .evaluate();
     expect(expr.operator).toBe('Rgb');
-    expect(expr.ops![0].re).toBeCloseTo(200, 0);
-    expect(expr.ops![1].re).toBeCloseTo(100, 0);
-    expect(expr.ops![2].re).toBeCloseTo(50, 0);
+    expect(expr.ops![0].re).toBeCloseTo(200 / 255, 3);
+    expect(expr.ops![1].re).toBeCloseTo(100 / 255, 3);
+    expect(expr.ops![2].re).toBeCloseTo(50 / 255, 3);
   });
 
   test('alpha is preserved through conversion', () => {
-    const expr = ce.expr(['AsHsv', ['Rgb', 255, 0, 0, 0.5]]).evaluate();
+    const expr = ce.expr(['AsHsv', ['Rgb', 1, 0, 0, 0.5]]).evaluate();
     expect(expr.operator).toBe('Hsv');
     expect(expr.ops!.length).toBe(4);
     expect(expr.ops![3].re).toBeCloseTo(0.5, 4);
@@ -1058,7 +1057,7 @@ describe('Color conversions (As*)', () => {
 describe('ColorDelta', () => {
   test('identical colors return 0', () => {
     const expr = ce
-      .expr(['ColorDelta', ['Rgb', 255, 0, 0], ['Rgb', 255, 0, 0]])
+      .expr(['ColorDelta', ['Rgb', 1, 0, 0], ['Rgb', 1, 0, 0]])
       .evaluate();
     expect(expr.re).toBe(0);
   });
@@ -1066,31 +1065,31 @@ describe('ColorDelta', () => {
   test('cross-space identical colors return 0', () => {
     // hsv(0, 1, 1) and rgb(255, 0, 0) are the same color
     const expr = ce
-      .expr(['ColorDelta', ['Rgb', 255, 0, 0], ['Hsv', 0, 1, 1]])
+      .expr(['ColorDelta', ['Rgb', 1, 0, 0], ['Hsv', 0, 1, 1]])
       .evaluate();
     expect(expr.re).toBeCloseTo(0, 4);
   });
 
   test('different colors return positive scalar', () => {
     const expr = ce
-      .expr(['ColorDelta', ['Rgb', 255, 0, 0], ['Rgb', 0, 0, 255]])
+      .expr(['ColorDelta', ['Rgb', 1, 0, 0], ['Rgb', 0, 0, 1]])
       .evaluate();
     expect(expr.re).toBeGreaterThan(0.4);
   });
 
   test('symmetric', () => {
     const ab = ce
-      .expr(['ColorDelta', ['Rgb', 100, 50, 200], ['Rgb', 200, 100, 50]])
+      .expr(['ColorDelta', ['Rgb', 0.4, 0.2, 0.8], ['Rgb', 0.8, 0.4, 0.2]])
       .evaluate();
     const ba = ce
-      .expr(['ColorDelta', ['Rgb', 200, 100, 50], ['Rgb', 100, 50, 200]])
+      .expr(['ColorDelta', ['Rgb', 0.8, 0.4, 0.2], ['Rgb', 0.4, 0.2, 0.8]])
       .evaluate();
     expect(ab.re).toBeCloseTo(ba.re, 6);
   });
 
   test('accepts color strings via extractRgb', () => {
     const expr = ce
-      .expr(['ColorDelta', "'#ff0000'", ['Rgb', 255, 0, 0]])
+      .expr(['ColorDelta', "'#ff0000'", ['Rgb', 1, 0, 0]])
       .evaluate();
     expect(expr.re).toBeCloseTo(0, 4);
   });
@@ -1112,7 +1111,7 @@ describe('Color() returns Oklch', () => {
 
 describe('Color type', () => {
   test('Rgb(...) has type "color"', () => {
-    const expr = ce.expr(['Rgb', 255, 0, 0]);
+    const expr = ce.expr(['Rgb', 1, 0, 0]);
     expect(expr.type.toString()).toBe('color');
   });
 
@@ -1133,7 +1132,7 @@ describe('Color type', () => {
   });
 
   test('ColorMix returns type "color"', () => {
-    const expr = ce.expr(['ColorMix', ['Rgb', 255, 0, 0], ['Rgb', 0, 0, 255]]);
+    const expr = ce.expr(['ColorMix', ['Rgb', 1, 0, 0], ['Rgb', 0, 0, 1]]);
     expect(expr.type.toString()).toBe('color');
   });
 
@@ -1143,12 +1142,12 @@ describe('Color type', () => {
   });
 
   test('color is a subtype of value', () => {
-    const expr = ce.expr(['Rgb', 255, 0, 0]);
+    const expr = ce.expr(['Rgb', 1, 0, 0]);
     expect(expr.type.matches('value')).toBe(true);
   });
 
   test('color is NOT a subtype of tuple', () => {
-    const expr = ce.expr(['Rgb', 255, 0, 0]);
+    const expr = ce.expr(['Rgb', 1, 0, 0]);
     expect(expr.type.matches('tuple')).toBe(false);
   });
 });
@@ -1160,7 +1159,7 @@ describe('Wide-gamut preservation', () => {
 
   test('ColorMix returns Oklch when both inputs are typed color heads', () => {
     const result = ce
-      .expr(['ColorMix', ['Rgb', 255, 0, 0], ['Rgb', 0, 0, 255], 0.5])
+      .expr(['ColorMix', ['Rgb', 1, 0, 0], ['Rgb', 0, 0, 1], 0.5])
       .evaluate();
     expect(result.operator).toBe('Oklch');
   });
@@ -1342,7 +1341,7 @@ describe('Regression: achromatic hue handling in ColorMix', () => {
     // Naive linear hue interpolation would drift toward 0° at high t;
     // the achromatic guard should keep H ≈ 29° throughout.
     const result = ce
-      .expr(['ColorMix', ['Rgb', 255, 0, 0], ['Rgb', 255, 255, 255], 0.5])
+      .expr(['ColorMix', ['Rgb', 1, 0, 0], ['Rgb', 1, 1, 1], 0.5])
       .evaluate();
     expect(result.operator).toBe('Oklch');
     // L blended toward 1, C blended toward 0, but H stays near red.

@@ -91,8 +91,8 @@
   endpoint's hue (matches CSS Color 4 `color-mix`).
 
 - **`ContrastingColor`** now returns an `Rgb` head (was: 0–1 sRGB
-  `Tuple`). White and black are sRGB by definition, so `Rgb(255,255,255)`
-  and `Rgb(0,0,0)` are the natural representations.
+  `Tuple`). White and black are sRGB by definition, so `Rgb(1, 1, 1)`
+  and `Rgb(0, 0, 0)` are the natural representations.
 
 - **`Colormap`** now returns `Oklch` heads — either a `List(Oklch, ...)`
   for full-palette / N-color resampling, or a single `Oklch` for
@@ -120,8 +120,16 @@ converter:
 // Before: const tuple = ce.expr(['Color', "'red'"]).evaluate();  // [r, g, b] in 0-1
 // Now (equivalent 0-1 sRGB):
 const rgb = ce.expr(['AsRgb', ['Color', "'red'"]]).evaluate();
-// rgb is ['Rgb', r, g, b] with channels 0-255
+// rgb is ['Rgb', r, g, b] with channels 0-1
 ```
+
+**RGB channel convention**: `Rgb` head components are **0–1 sRGB** across
+all layers (engine, JS compile, GPU compile). This is a uniform convention
+chosen for shader-pipeline interoperability and for round-trip simplicity
+(`Rgb(r, g, b) → AsRgb → [r, g, b]` matches the input). Consumers parsing
+Desmos-style formulas (which use 0–255) should normalize at the
+adapter/importer layer — `Rgb(255, 0, 0)` in Desmos source maps to
+`Rgb(1, 0, 0)` in CE.
 
 - **`ce.latexOptions`** — new mutable, engine-wide bag of LaTeX
   parse/serialize options (e.g. `decimalSeparator`, `digitGroupSeparator`).
