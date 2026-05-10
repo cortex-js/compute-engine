@@ -22,8 +22,12 @@ import {
   oklchToRgb,
   rgbToOklab,
   oklabToOklch,
+  oklchToOklab,
   rgbToHsl,
   hslToRgb,
+  rgbToHsv,
+  hsvToRgb,
+  oklabDeltaE,
   apca,
   contrastingColor,
   SEQUENTIAL_PALETTES,
@@ -737,6 +741,79 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       return `_SYS.colormap(${compile(args[0])}, ${compile(args[1])})`;
     return `_SYS.colormap(${compile(args[0])})`;
   },
+
+  // -----------------------------------------------------------------------
+  // Color constructor heads. All compile to OKLCh arrays at runtime — the
+  // canonical color representation in this target. The constructors take
+  // their own colorspace's components and convert internally.
+  // (Mirrors the GPU target's design: color values are vec3 OKLCh.)
+  // -----------------------------------------------------------------------
+  Rgb: (args, compile) => {
+    if (args.length < 3) throw new Error('Rgb: need 3 components');
+    return `_SYS.rgb(${args.map(compile).join(', ')})`;
+  },
+  Hsv: (args, compile) => {
+    if (args.length < 3) throw new Error('Hsv: need 3 components');
+    return `_SYS.hsv(${args.map(compile).join(', ')})`;
+  },
+  Hsl: (args, compile) => {
+    if (args.length < 3) throw new Error('Hsl: need 3 components');
+    return `_SYS.hsl(${args.map(compile).join(', ')})`;
+  },
+  Oklab: (args, compile) => {
+    if (args.length < 3) throw new Error('Oklab: need 3 components');
+    return `_SYS.oklab(${args.map(compile).join(', ')})`;
+  },
+  Oklch: (args, compile) => {
+    if (args.length < 3) throw new Error('Oklch: need 3 components');
+    return `_SYS.oklch(${args.map(compile).join(', ')})`;
+  },
+
+  // -----------------------------------------------------------------------
+  // As* converters. Compile-time output convention matches the GPU target:
+  // each returns components in the named space as a 3- or 4-element array.
+  // For sRGB-based spaces (`AsRgb`/`AsHsv`/`AsHsl`), components are 0-1
+  // (not 0-255) — round-tripping through 0-255 loses precision and the
+  // shader/runtime convention is 0-1. The interpreted-layer `AsRgb` head
+  // returns 0-255 channels; the difference is intentional and matches GPU.
+  // `AsOklch` is the identity (canonical form).
+  // -----------------------------------------------------------------------
+  AsRgb: ([c], compile) => {
+    if (c === null) throw new Error('AsRgb: no argument');
+    return `_SYS.asRgb(${compile(c)})`;
+  },
+  AsHsv: ([c], compile) => {
+    if (c === null) throw new Error('AsHsv: no argument');
+    return `_SYS.asHsv(${compile(c)})`;
+  },
+  AsHsl: ([c], compile) => {
+    if (c === null) throw new Error('AsHsl: no argument');
+    return `_SYS.asHsl(${compile(c)})`;
+  },
+  AsOklab: ([c], compile) => {
+    if (c === null) throw new Error('AsOklab: no argument');
+    return `_SYS.asOklab(${compile(c)})`;
+  },
+  AsOklch: ([c], compile) => {
+    if (c === null) throw new Error('AsOklch: no argument');
+    return compile(c); // identity — already in canonical form
+  },
+
+  // Perceptual color difference (ΔE_OK).
+  ColorDelta: ([a, b], compile) => {
+    if (a === null || b === null)
+      throw new Error('ColorDelta: need two colors');
+    return `_SYS.colorDelta(${compile(a)}, ${compile(b)})`;
+  },
+
+  // Euclidean distance between two tuples (any positive dimension).
+  // Distinct from the GPU `Distance` (which is the GLSL/WGSL `distance()`
+  // builtin operating on vec3): JS-side this works on plain arrays.
+  Distance: ([a, b], compile) => {
+    if (a === null || b === null)
+      throw new Error('Distance: need two points');
+    return `_SYS.distance(${compile(a)}, ${compile(b)})`;
+  },
 };
 
 /** Convert a Complex instance to a plain {re, im} object */
@@ -1046,6 +1123,102 @@ const colorHelpers = {
     return alpha !== undefined && Math.abs(alpha - 1) > 1e-4
       ? [oklch.L, oklch.C, oklch.H, alpha]
       : [oklch.L, oklch.C, oklch.H];
+  },
+
+  // -----------------------------------------------------------------------
+  // Color constructors. Each accepts components in its colorspace's natural
+  // units and returns the canonical OKLCh array `[L, C, H]` (or with alpha).
+  // -----------------------------------------------------------------------
+  rgb(r: number, g: number, b: number, alpha?: number): number[] {
+    const c = rgbToOklch({ r, g, b });
+    return alpha !== undefined && Math.abs(alpha - 1) > 1e-4
+      ? [c.L, c.C, c.H, alpha]
+      : [c.L, c.C, c.H];
+  },
+  hsv(h: number, s: number, v: number, alpha?: number): number[] {
+    const rgb = hsvToRgb(h, s, v);
+    const c = rgbToOklch(rgb);
+    return alpha !== undefined && Math.abs(alpha - 1) > 1e-4
+      ? [c.L, c.C, c.H, alpha]
+      : [c.L, c.C, c.H];
+  },
+  hsl(h: number, s: number, l: number, alpha?: number): number[] {
+    const rgb = hslToRgb(h, s, l);
+    const c = rgbToOklch({ r: rgb.r, g: rgb.g, b: rgb.b });
+    return alpha !== undefined && Math.abs(alpha - 1) > 1e-4
+      ? [c.L, c.C, c.H, alpha]
+      : [c.L, c.C, c.H];
+  },
+  oklab(L: number, a: number, b: number, alpha?: number): number[] {
+    const c = oklabToOklch({ L, a, b });
+    return alpha !== undefined && Math.abs(alpha - 1) > 1e-4
+      ? [c.L, c.C, c.H, alpha]
+      : [c.L, c.C, c.H];
+  },
+  oklch(L: number, C: number, H: number, alpha?: number): number[] {
+    return alpha !== undefined && Math.abs(alpha - 1) > 1e-4
+      ? [L, C, H, alpha]
+      : [L, C, H];
+  },
+
+  // -----------------------------------------------------------------------
+  // As* converters. Inputs are anything `toOklch` accepts (string, packed
+  // int, or OKLCh array). Outputs are 3- or 4-element arrays in the named
+  // space. sRGB-based outputs (asRgb/asHsv/asHsl) use 0-1 channels for
+  // consistency with the GPU target's shader convention.
+  // -----------------------------------------------------------------------
+  asRgb(input: string | number[]): number[] {
+    const rgb = toRgb255(input);
+    const r = rgb.r / 255;
+    const g = rgb.g / 255;
+    const b = rgb.b / 255;
+    return rgb.alpha !== undefined && Math.abs(rgb.alpha - 1) > 1e-4
+      ? [r, g, b, rgb.alpha]
+      : [r, g, b];
+  },
+  asHsv(input: string | number[]): number[] {
+    const rgb = toRgb255(input);
+    const hsv = rgbToHsv(rgb.r, rgb.g, rgb.b);
+    return rgb.alpha !== undefined && Math.abs(rgb.alpha - 1) > 1e-4
+      ? [hsv.h, hsv.s, hsv.v, rgb.alpha]
+      : [hsv.h, hsv.s, hsv.v];
+  },
+  asHsl(input: string | number[]): number[] {
+    const rgb = toRgb255(input);
+    const hsl = rgbToHsl(rgb.r, rgb.g, rgb.b);
+    return rgb.alpha !== undefined && Math.abs(rgb.alpha - 1) > 1e-4
+      ? [hsl.h, hsl.s, hsl.l, rgb.alpha]
+      : [hsl.h, hsl.s, hsl.l];
+  },
+  asOklab(input: string | number[]): number[] {
+    const c = toOklch(input);
+    const lab = oklchToOklab({ L: c.L, C: c.C, H: c.H });
+    return c.alpha !== undefined && Math.abs(c.alpha - 1) > 1e-4
+      ? [lab.L, lab.a, lab.b, c.alpha]
+      : [lab.L, lab.a, lab.b];
+  },
+  // asOklch is identity — handled at compile time as a pass-through
+
+  // Perceptual color difference (ΔE_OK).
+  colorDelta(a: string | number[], b: string | number[]): number {
+    const labA = oklchToOklab(toOklch(a));
+    const labB = oklchToOklab(toOklch(b));
+    return oklabDeltaE(labA, labB);
+  },
+
+  // Euclidean distance between two tuples. Plain numeric — not a color
+  // operation despite living in the same helpers block.
+  distance(a: number[], b: number[]): number {
+    if (!Array.isArray(a) || !Array.isArray(b))
+      throw new Error('Distance: expected two arrays');
+    if (a.length !== b.length)
+      throw new Error('Distance: dimension mismatch');
+    let sumSq = 0;
+    for (let i = 0; i < a.length; i++) {
+      const d = a[i] - b[i];
+      sumSq += d * d;
+    }
+    return Math.sqrt(sumSq);
   },
 };
 
