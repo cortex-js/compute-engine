@@ -104,6 +104,37 @@ describe('Geometric primitive heads (opaque)', () => {
   });
 });
 
+describe('GeometricVector', () => {
+  // Distinct head from the existing column-vector `Vector` operator. Routed
+  // from `\operatorname{vector}` because Desmos uses `vector(p1, p2)` for
+  // a directed segment between two points, which has different semantics
+  // from CE's `Vector(x, y, z)` column construction.
+
+  test('\\operatorname{vector}(p1, p2) parses to GeometricVector', () => {
+    const expr = ce.parse(
+      '\\operatorname{vector}((0, 0, 0), (1, 2, 3))'
+    );
+    expect(expr.operator).toBe('GeometricVector');
+    expect(expr.ops!.length).toBe(2);
+  });
+
+  test('round-trips through LaTeX', () => {
+    const expr = ce.parse('\\operatorname{vector}((0, 0), (3, 4))');
+    expect(expr.operator).toBe('GeometricVector');
+    expect(expr.toLatex()).toContain('\\operatorname{vector}');
+  });
+
+  test('does not collide with existing Vector operator', () => {
+    // `Vector(x, y, z)` is the column-vector construction operator with a
+    // (number+) -> vector signature; it canonicalizes to a Matrix. The
+    // geometric form has its own head and stays a function call.
+    const colVec = ce.expr(['Vector', 1, 2, 3]);
+    expect(colVec.operator).toBe('Matrix'); // existing canonical form preserved
+    const geom = ce.expr(['GeometricVector', ['Tuple', 0, 0], ['Tuple', 1, 1]]);
+    expect(geom.operator).toBe('GeometricVector');
+  });
+});
+
 describe('Action arrow `To`', () => {
   test('a \\to b parses to To', () => {
     const expr = ce.parse('a \\to 5');

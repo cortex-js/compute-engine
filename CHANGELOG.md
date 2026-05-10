@@ -2,6 +2,45 @@
 
 #### Added
 
+- **Function-style aliases for collection / arithmetic operators** —
+  the lowercase `\operatorname{...}` forms common in Desmos-style and
+  procedural notations now parse to their existing capitalized
+  counterparts:
+  - `\operatorname{mod}(a, b)` → `Mod`
+  - `\operatorname{var}(L)` → `Variance`
+  - `\operatorname{shuffle}(L)` → `Shuffle`
+  - `\operatorname{random}()` → `Random`
+  - `\operatorname{repeat}(x)` → `Repeat`
+  - `\operatorname{join}(L1, L2, ...)` → `Join`
+  No semantic change — the operators themselves were already
+  registered, just under their capitalized names.
+
+- **`Distance(p1, p2)`** — Euclidean distance between two points
+  represented as tuples. Accepts any positive dimension; mismatched
+  dimensions return a typed error. LaTeX trigger
+  `\operatorname{distance}(p1, p2)`.
+
+- **Geometric primitive heads** — `Triangle`, `Sphere`, `Segment`
+  registered as opaque typed function heads (signature only, no
+  evaluator). Parsed but preserved structurally; consumers branch on
+  the operator name. LaTeX triggers `\operatorname{triangle}`,
+  `\operatorname{sphere}`, `\operatorname{segment}`. Same shape as the
+  existing `["To", a, b]` pattern.
+
+- **`To` library entry** — `\to` already parsed to `["To", a, b]`,
+  but the head wasn't in the standard operator set, so rows containing
+  it were classified as `unsupported-operator`. The library entry
+  declares the head's signature (no evaluator) so the classification
+  reflects reality: this is a known typed action node.
+
+- **`GeometricVector` head** — `\operatorname{vector}(p1, p2)` (Desmos's
+  geometric form: a directed segment between two points) parses to a
+  new opaque typed head. Distinct from the existing `Vector` operator
+  for column-vector construction (`(number+) -> vector` signature), so
+  aliasing the LaTeX trigger to it would have either constrained
+  Desmos's input shape or forced a signature widening. New head, no
+  evaluator — same shape as `Triangle`/`Sphere`/`Segment`.
+
 - **First-class color values** — colors are now typed values with their
   own primitive type (`color`) and per-colorspace constructor heads,
   rather than anonymous tuples.
@@ -99,6 +138,59 @@ const rgb = ce.expr(['AsRgb', ['Color', "'red'"]]).evaluate();
   `expr.latex` getter could not be customized at all).
 
 #### Fixed
+
+- **Super-linear parse time on deeply-nested parametric expressions** —
+  `ce.parse()` could exhibit exponential blowup on inputs like nested
+  rotation matrices `\left(\cos(\theta)\cdot S+\sin(\theta)\right)`
+  (depth 6 took ~44s; depth 7 would take minutes). Two underlying causes:
+
+  - The `cachedValue()` helper that backs type / sign caches on
+    `BoxedFunction` had its early-return guard commented out, so every
+    `.type` access recomputed the type by recursing into all operand
+    types. With cache disabled, an expression of nesting depth `d`
+    triggered O(2^d) type recomputations during canonicalization.
+
+    The guard had been disabled because the original form was buggy:
+
+    ```js
+    if (v.generation === undefined || v.generation === generation) {
+      if (v.value === null) v.value = fn();
+      return v.value;
+    }
+    ```
+
+    On a fresh cache `v.generation` is `undefined`, so the first call
+    took the early-return branch, computed `v.value`, and returned —
+    but never updated `v.generation` from `undefined`. Every later
+    call, regardless of the requested generation, also matched
+    `=== undefined` and returned the same stale value. The cache
+    effectively never invalidated. Disabling it fixed staleness at the
+    cost of all caching.
+
+    Re-enabled with a corrected guard that compares against the
+    requested generation directly, so first-compute updates
+    `v.generation` and subsequent calls invalidate correctly when the
+    engine generation advances:
+
+    ```js
+    if (v.generation === generation && v.value !== null) return v.value;
+    v.generation = generation;
+    v.value = fn();
+    return v.value;
+    ```
+
+  - `parseEnclosure` tried every matchfix definition that matched the
+    open delimiter, parsing the body twice for each (once with the
+    boundary, once without). For invalid inputs containing many `.`
+    tokens (e.g. Desmos's `p.x` field-access syntax), the
+    `EvaluateAt` matchfix (`.` … `|`) was attempted on every `.` even
+    though `|` was nowhere in the input, and each speculative body
+    parse contained more nested `.` triggers. A pre-check now skips
+    matchfix defs whose close trigger doesn't appear anywhere ahead.
+
+  Combined, deeply-nested expressions and large invalid inputs (the
+  Desmos corpus's worst row was 1006 chars and previously hung
+  indefinitely) now parse in milliseconds.
 
 - **`ce.parse()` ignored the injected LatexSyntax instance's
   `decimalSeparator`** — `ce.parse()` hardcoded `decimalSeparator: '.'`,

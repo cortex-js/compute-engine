@@ -673,6 +673,16 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
     serialize: (serializer, expr) =>
       '\\operatorname{triangle}' + serializer.wrapArguments(expr),
   },
+  // Desmos's geometric `vector(p1, p2)` — a directed segment between two
+  // points. Routed to a dedicated head (not the existing column-vector
+  // `Vector`, which has a narrower `(number+) -> vector` signature).
+  {
+    name: 'GeometricVector',
+    latexTrigger: ['\\operatorname{vector}'],
+    kind: 'function',
+    serialize: (serializer, expr) =>
+      '\\operatorname{vector}' + serializer.wrapArguments(expr),
+  },
   {
     name: 'Sphere',
     latexTrigger: ['\\operatorname{sphere}'],

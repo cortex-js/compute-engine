@@ -1485,6 +1485,11 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       description: 'Triangle primitive — opaque typed head.',
       signature: '(any+) -> expression',
     },
+    GeometricVector: {
+      description:
+        'Geometric vector (directed segment between two points) — opaque typed head. Distinct from the column-vector `Vector` operator.',
+      signature: '(any, any) -> expression',
+    },
     Sphere: {
       description: 'Sphere primitive — opaque typed head.',
       signature: '(any+) -> expression',

@@ -1420,6 +1420,44 @@ export class _Parser implements Parser {
     for (const def of defs) {
       this.index = start;
 
+      // Pre-check: if the close trigger doesn't appear ahead, this def
+      // cannot match. Skip without parsing the body — otherwise
+      // speculative body parses can compound exponentially when the same
+      // open token (e.g. `.`) recurs many times in invalid input.
+      //
+      // We only apply this for cases where the close trigger has a
+      // distinct single-char or single-LaTeX-token representation in the
+      // input. Multi-char shorthands (e.g. `||`, which the tokenizer
+      // splits into two `|` tokens) and same-trigger pairs are skipped to
+      // stay conservative.
+      const closeFirst =
+        typeof def.closeTrigger === 'string'
+          ? def.closeTrigger
+          : def.closeTrigger?.[0];
+      const openFirst =
+        typeof def.openTrigger === 'string'
+          ? def.openTrigger
+          : def.openTrigger?.[0];
+      if (
+        closeFirst &&
+        closeFirst !== openFirst &&
+        closeFirst.length <= 2 &&
+        // Skip the heuristic for multi-char strings (e.g. `||`) — the
+        // tokenizer splits those, and DELIMITER_SHORTHAND won't tell us
+        // about the split form.
+        !(closeFirst.length > 1 && !closeFirst.startsWith('\\'))
+      ) {
+        const variants = DELIMITER_SHORTHAND[closeFirst] ?? [closeFirst];
+        let found = false;
+        for (const tok of variants) {
+          if (this._tokens.indexOf(tok, start) >= 0) {
+            found = true;
+            break;
+          }
+        }
+        if (!found) continue;
+      }
+
       // 1. Match the opening delimiter
       const matched = this.matchDelimiter(def.openTrigger, def.closeTrigger);
       if (!matched) continue;
