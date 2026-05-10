@@ -570,6 +570,109 @@ describe('Color compilation', () => {
     expect(result[0]).toBeGreaterThanOrEqual(0);
     expect(result[0]).toBeLessThanOrEqual(1);
   });
+
+  // ---------------------------------------------------------------------
+  // Compile-target support for the new color heads (Rgb/Hsv/Hsl/Oklab/
+  // Oklch constructors, As* converters, ColorDelta, Distance). All compile
+  // to OKLCh arrays at runtime, mirroring the GPU target's design.
+  // ---------------------------------------------------------------------
+
+  test('compile Rgb to JS produces OKLCh array', () => {
+    const compiled = compile(ce.expr(['Rgb', 255, 0, 0]));
+    expect(compiled.success).toBe(true);
+    const result = compiled.run!() as unknown as number[];
+    expect(result).toHaveLength(3);
+    expect(result[0]).toBeCloseTo(0.628, 2); // L
+    expect(result[1]).toBeCloseTo(0.258, 2); // C
+    expect(result[2]).toBeCloseTo(29.23, 0); // H
+  });
+
+  test('compile Hsv to JS produces OKLCh array', () => {
+    const compiled = compile(ce.expr(['Hsv', 0, 1, 1]));
+    expect(compiled.success).toBe(true);
+    const result = compiled.run!() as unknown as number[];
+    expect(result).toHaveLength(3);
+    // hsv(0,1,1) is red — same OKLCh as Rgb(255,0,0)
+    expect(result[0]).toBeCloseTo(0.628, 2);
+  });
+
+  test('compile Oklch to JS is identity', () => {
+    const compiled = compile(ce.expr(['Oklch', 0.7, 0.2, 30]));
+    expect(compiled.success).toBe(true);
+    const result = compiled.run!() as unknown as number[];
+    expect(result).toEqual([0.7, 0.2, 30]);
+  });
+
+  test('compile Rgb with alpha to JS', () => {
+    const compiled = compile(ce.expr(['Rgb', 255, 0, 0, 0.5]));
+    expect(compiled.success).toBe(true);
+    const result = compiled.run!() as unknown as number[];
+    expect(result).toHaveLength(4);
+    expect(result[3]).toBeCloseTo(0.5, 4);
+  });
+
+  test('compile AsRgb to JS produces 0-1 sRGB array', () => {
+    // Note: 0-1 sRGB (matching GPU target convention), NOT 0-255 like the
+    // interpreted-layer Rgb head.
+    const compiled = compile(ce.expr(['AsRgb', ['Hsv', 0, 1, 1]]));
+    expect(compiled.success).toBe(true);
+    const result = compiled.run!() as unknown as number[];
+    expect(result[0]).toBeCloseTo(1, 2); // r=1 in 0-1 sRGB
+    expect(result[1]).toBeCloseTo(0, 2);
+    expect(result[2]).toBeCloseTo(0, 2);
+  });
+
+  test('compile AsHsv to JS produces hue/sat/val', () => {
+    const compiled = compile(ce.expr(['AsHsv', ['Rgb', 255, 0, 0]]));
+    expect(compiled.success).toBe(true);
+    const result = compiled.run!() as unknown as number[];
+    expect(result[0]).toBeCloseTo(0, 1);
+    expect(result[1]).toBeCloseTo(1, 2);
+    expect(result[2]).toBeCloseTo(1, 2);
+  });
+
+  test('compile AsOklch to JS is pass-through', () => {
+    // AsOklch on canonical OKLCh input is identity.
+    const compiled = compile(ce.expr(['AsOklch', ['Oklch', 0.7, 0.2, 30]]));
+    expect(compiled.success).toBe(true);
+    const result = compiled.run!() as unknown as number[];
+    expect(result).toEqual([0.7, 0.2, 30]);
+  });
+
+  test('compile ColorDelta to JS', () => {
+    const compiled = compile(
+      ce.expr(['ColorDelta', ['Rgb', 255, 0, 0], ['Rgb', 0, 0, 255]])
+    );
+    expect(compiled.success).toBe(true);
+    const result = compiled.run!() as unknown as number;
+    expect(result).toBeGreaterThan(0.4);
+    expect(result).toBeLessThan(0.7);
+  });
+
+  test('compile ColorDelta of identical colors is 0', () => {
+    const compiled = compile(
+      ce.expr(['ColorDelta', ['Rgb', 100, 50, 200], ['Rgb', 100, 50, 200]])
+    );
+    expect(compiled.success).toBe(true);
+    const result = compiled.run!() as unknown as number;
+    expect(result).toBeCloseTo(0, 6);
+  });
+
+  test('compile Distance to JS — 2D Euclidean', () => {
+    const compiled = compile(
+      ce.expr(['Distance', ['Tuple', 0, 0], ['Tuple', 3, 4]])
+    );
+    expect(compiled.success).toBe(true);
+    expect(compiled.run!() as unknown as number).toBe(5);
+  });
+
+  test('compile Distance to JS — 3D Euclidean', () => {
+    const compiled = compile(
+      ce.expr(['Distance', ['Tuple', 1, 2, 3], ['Tuple', 4, 6, 3]])
+    );
+    expect(compiled.success).toBe(true);
+    expect(compiled.run!() as unknown as number).toBe(5);
+  });
 });
 
 describe('oklab() parsing', () => {

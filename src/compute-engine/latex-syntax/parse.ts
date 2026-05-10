@@ -1439,6 +1439,21 @@ export class _Parser implements Parser {
         if (!found) continue;
       }
 
+      // The `EvaluateAt` matchfix (open `.`, close `|`) is only meaningful
+      // with a `\left.` prefix; the canonical form is
+      // `\left.expr\right|_{x=0}`. Without a prefix, a bare `.` in input
+      // (e.g. Desmos's `p.x` field-access syntax) would speculatively try
+      // to parse the rest of the input as an `EvaluateAt` body — and on
+      // failure, fall into the matchfix re-parse loop, compounding work
+      // exponentially when many `.` tokens appear with `|` somewhere
+      // ahead.
+      if (
+        typeof def.openTrigger === 'string' &&
+        def.openTrigger === '.' &&
+        !OPEN_DELIMITER_PREFIX[currentToken]
+      )
+        continue;
+
       // 1. Match the opening delimiter
       const matched = this.matchDelimiter(def.openTrigger, def.closeTrigger);
       if (!matched) continue;

@@ -185,12 +185,20 @@ const rgb = ce.expr(['AsRgb', ['Color', "'red'"]]).evaluate();
     tokens (e.g. Desmos's `p.x` field-access syntax), the
     `EvaluateAt` matchfix (`.` … `|`) was attempted on every `.` even
     though `|` was nowhere in the input, and each speculative body
-    parse contained more nested `.` triggers. A pre-check now skips
-    matchfix defs whose close trigger doesn't appear anywhere ahead.
+    parse contained more nested `.` triggers. Two changes address this:
+    a pre-check (using a `closeTokens` set pre-computed at dictionary
+    indexing time) skips matchfix defs whose close trigger can't appear
+    ahead in the token stream; and the `EvaluateAt` def is no longer
+    tried on bare `.` (the canonical form is `\left.expr\right|_{x=0}`,
+    which the pre-check still admits via the `\left` prefix), so a `.`
+    without a `\left`/`\mathopen`/etc. prefix never speculates as
+    `EvaluateAt`.
 
   Combined, deeply-nested expressions and large invalid inputs (the
   Desmos corpus's worst row was 1006 chars and previously hung
-  indefinitely) now parse in milliseconds.
+  indefinitely) now parse in milliseconds. On the Desmos corpus
+  benchmark (2,092 probes at 5s budget), parse-timeouts dropped from
+  62 to 3 — a 95% reduction.
 
 - **`ce.parse()` ignored the injected LatexSyntax instance's
   `decimalSeparator`** — `ce.parse()` hardcoded `decimalSeparator: '.'`,
