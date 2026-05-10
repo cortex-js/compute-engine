@@ -257,6 +257,28 @@ export class BaseCompiler {
       return compilePair(0);
     }
 
+    if (h === 'When') {
+      if (args.length !== 2)
+        throw new Error('When: expected exactly 2 arguments (expr, cond)');
+      const fn = target.functions?.(h);
+      if (fn) {
+        if (typeof fn === 'function') {
+          return fn(args, (expr) => BaseCompiler.compile(expr, target), target);
+        }
+        return `${fn}(${args
+          .map((x) => BaseCompiler.compile(x, target))
+          .join(', ')})`;
+      }
+      // Compile to ternary: cond ? expr : NaN
+      // Special-case constant True/False conditions to avoid bare symbol refs
+      if (isSymbol(args[1], 'True'))
+        return `(${BaseCompiler.compile(args[0], target)})`;
+      if (isSymbol(args[1], 'False')) return 'NaN';
+      const val = BaseCompiler.compile(args[0], target);
+      const cond = BaseCompiler.compile(args[1], target);
+      return `((${cond}) ? (${val}) : NaN)`;
+    }
+
     if (h === 'Block') {
       return BaseCompiler.compileBlock(args, target);
     }
@@ -366,12 +388,37 @@ export class BaseCompiler {
   }
 
   /**
-   * Compile a Loop expression with Element(index, Range(lo, hi)) indexing.
-   * Generates: (() => { for (let i = lo; i <= hi; i++) { body } })()
+   * Compile a Loop expression.
    *
-   * The loop counter is always a raw number. For targets that wrap numeric
-   * values (e.g. interval-js wraps with `_IA.point()`), references to the
-   * loop index inside the body are wrapped via `target.number`.
+   * Two forms are supported:
+   *
+   * 1. **Imperative / single-Element form** (existing behaviour):
+   *    `Loop(body, Element(i, Range(lo, hi)))`
+   *    Generates a raw `for (let i = lo; i <= hi; i++) { body }` loop wrapped
+   *    in an IIFE.  The loop counter is always a plain number.  For targets
+   *    that wrap numeric values (e.g. interval-js uses `_IA.point()`),
+   *    references to the loop index inside the body are re-wrapped via
+   *    `target.number`.  `break` / `continue` / `return` are preserved.
+   *
+   * 2. **Comprehension / variadic-Element form** (new):
+   *    `Loop(body, Element(x, coll1), Element(y, coll2), …)`
+   *    When two or more `Element` clauses are present — or when the single
+   *    Element's collection is not a `Range` — the loop is compiled as a
+   *    comprehension that collects results into an array.  Each clause
+   *    produces a `for (const name of collection)` loop, nested
+   *    outermost-to-innermost, and the innermost body pushes into `result`.
+   *
+   *    Example output (JS):
+   *    ```js
+   *    (() => { const result = [];
+   *      for (const x of [1,2]) { for (const y of [3,4]) { result.push(body); } }
+   *      return result; })()
+   *    ```
+   *
+   *    GLSL: multi-Element comprehension is not trivially representable in
+   *    GLSL (no dynamic arrays, no push).  A compile-time error is thrown.
+   *    TODO(E3-GLSL): support GLSL multi-Element via a pre-declared fixed-size
+   *    array or by unrolling when bounds are known at compile time.
    */
   private static compileForLoop(
     args: ReadonlyArray<Expression>,
@@ -380,7 +427,102 @@ export class BaseCompiler {
     if (!args[0]) throw new Error('Loop: no body');
     if (!args[1]) throw new Error('Loop: no indexing set');
 
-    const indexing = args[1];
+    const body = args[0];
+    const elements = args.slice(1);
+
+    // ── Comprehension path ────────────────────────────────────────────────
+    // Use this path when:
+    //   (a) there are 2+ Element clauses, or
+    //   (b) the single Element's collection is not a Range, or
+    //   (c) the single Element's Range is fractional, descending, or has a
+    //       non-unit step. The legacy `for (let i = lo; i <= hi; i++)` shape
+    //       only matches Range semantics for integer ascending bounds with
+    //       step 1; everything else must go through the iterable path.
+    const useComprehension =
+      elements.length > 1 ||
+      (elements.length === 1 &&
+        isFunction(elements[0], 'Element') &&
+        !BaseCompiler.isLegacyCompatibleRange(elements[0].ops[1]));
+
+    if (useComprehension) {
+      // GLSL does not support dynamic arrays; multi-Element comprehension is
+      // deferred to a future task (see TODO above).
+      const lang = target.language ?? '';
+      if (lang === 'glsl' || lang === 'wgsl') {
+        throw new Error(
+          `${lang.toUpperCase()}: multi-Element Loop comprehension is not yet supported. ` +
+            'TODO(E3-GLSL): unroll or use a fixed-size array.'
+        );
+      }
+
+      // Validate all Element clauses and narrow their types.
+      type NarrowedElement = Expression & {
+        ops: ReadonlyArray<Expression>;
+        op1: Expression;
+        op2: Expression;
+      };
+      const narrowedElements: NarrowedElement[] = [];
+      for (let i = 0; i < elements.length; i++) {
+        const elem = elements[i];
+        if (!isFunction(elem, 'Element'))
+          throw new Error(
+            `Loop: argument ${i + 1} must be an Element clause, got ${(elem as Expression & { operator?: string }).operator ?? '?'}`
+          );
+        if (!isSymbol(elem.ops[0]))
+          throw new Error(
+            `Loop: Element index (argument ${i + 1}) must be a symbol`
+          );
+        narrowedElements.push(elem as unknown as NarrowedElement);
+      }
+
+      // For wrapping targets (e.g. interval-js where `target.number(0)` is
+      // `_IA.point(0)`), each loop variable must be wrapped wherever it
+      // appears in the body or in an inner collection expression. Without
+      // this, code like `_IA.add(x, y)` is invoked with raw numbers and
+      // produces incorrect intervals. Mirrors the legacy single-Element
+      // wrapping at the bottom of this function.
+      const loopVarSet = new Set(
+        narrowedElements.map(
+          (e) => (e.ops[0] as Expression & { symbol: string }).symbol
+        )
+      );
+      const needsWrap = target.number(0) !== '0';
+      const bodyTarget: CompileTarget<Expression> = needsWrap
+        ? {
+            ...target,
+            var: (id: string) =>
+              loopVarSet.has(id)
+                ? target.number(0).replace('0', id)
+                : target.var(id),
+          }
+        : target;
+
+      // Compile the body expression (the value pushed into the result array).
+      const bodyCode = BaseCompiler.compile(body, bodyTarget);
+
+      // Build nested for-of loops from innermost to outermost. Inner
+      // collections are compiled with `bodyTarget` so that references to
+      // outer loop variables are wrapped consistently.
+      let inner = `result.push(${bodyCode});`;
+      for (let i = narrowedElements.length - 1; i >= 0; i--) {
+        const elem = narrowedElements[i];
+        const name = (elem.ops[0] as Expression & { symbol: string }).symbol;
+        const collExpr = elem.ops[1];
+        let collection: string;
+        if (isFunction(collExpr, 'Range')) {
+          collection = BaseCompiler.compileRangeIterable(collExpr, bodyTarget);
+        } else {
+          collection = BaseCompiler.compile(collExpr, bodyTarget);
+        }
+        inner = `for (const ${name} of ${collection}) { ${inner} }`;
+      }
+
+      return `(() => { const result = []; ${inner} return result; })()`;
+    }
+
+    // ── Legacy / imperative path ─────────────────────────────────────────
+    // Single Element clause where the collection is a Range(lo, hi).
+    const indexing = elements[0];
     if (!isFunction(indexing, 'Element'))
       throw new Error('Loop: expected Element(index, Range(lo, hi))');
 
@@ -417,13 +559,88 @@ export class BaseCompiler {
           : target.var(id),
     };
 
-    const bodyStmts = BaseCompiler.compileLoopBody(args[0], bodyTarget);
+    const bodyStmts = BaseCompiler.compileLoopBody(body, bodyTarget);
 
     return `(() => {${target.ws(
       '\n'
     )}for (let ${index} = ${lower}; ${index} <= ${upper}; ${index}++) {${target.ws(
       '\n'
     )}${bodyStmts}${target.ws('\n')}}${target.ws('\n')}})()`;
+  }
+
+  /**
+   * Returns `true` when the given collection expression is a `Range` whose
+   * runtime semantics match the legacy imperative for-loop shape
+   * `for (let i = lo; i <= hi; i++)`.
+   *
+   * Concretely: integer-ascending bounds and step omitted-or-1. When bounds
+   * are not statically numeric we accept the Range (the historical
+   * behaviour) — runtime mismatch in the descending-unknown-bounds case is
+   * left as a known limitation; callers can force the iterable path by
+   * supplying an explicit step.
+   */
+  private static isLegacyCompatibleRange(coll: Expression): boolean {
+    if (!isFunction(coll, 'Range')) return false;
+    if (coll.ops.length >= 3) {
+      const stepExpr = coll.ops[2];
+      if (!isNumber(stepExpr) || stepExpr.re !== 1) return false;
+    }
+    const lo = coll.ops[0];
+    const hi = coll.ops[1];
+    if (isNumber(lo) && !Number.isInteger(lo.re)) return false;
+    if (isNumber(hi) && !Number.isInteger(hi.re)) return false;
+    if (isNumber(lo) && isNumber(hi) && lo.re > hi.re) return false;
+    return true;
+  }
+
+  /**
+   * Compile a `Range(lo, hi)` or `Range(lo, hi, step)` expression into a JS
+   * iterable expression. Mirrors the runtime semantics in
+   * `library/collections.ts` Range:
+   *     count    = step === 0 ? 0 : max(0, floor((hi - lo) / step) + 1)
+   *     element  = lo + step * k          (0-indexed)
+   * Default step is 1 when omitted. Bounds and step may be fractional.
+   *
+   * Only used from the comprehension path in `compileForLoop`.
+   * Caller must have already verified `isFunction(rangeExpr, 'Range')`.
+   */
+  private static compileRangeIterable(
+    rangeExpr: Expression & { ops: ReadonlyArray<Expression> },
+    target: CompileTarget<Expression>
+  ): string {
+    const loExpr = rangeExpr.ops[0];
+    const hiExpr = rangeExpr.ops[1];
+    const stepExpr = rangeExpr.ops[2];
+
+    // Fast path: all bounds (and step, if present) are numeric constants.
+    if (
+      isNumber(loExpr) &&
+      isNumber(hiExpr) &&
+      (stepExpr === undefined || isNumber(stepExpr))
+    ) {
+      const lo = loExpr.re;
+      const hi = hiExpr.re;
+      // When step is omitted, auto-direct: +1 if hi >= lo, else -1.
+      // Mirrors the runtime range() helper in library/collections.ts.
+      const step = stepExpr === undefined ? (hi >= lo ? 1 : -1) : stepExpr.re;
+      if (step === 0) return '[]';
+      const len = Math.max(0, Math.floor((hi - lo) / step) + 1);
+      if (step === 1) {
+        if (lo === 0) return `Array.from({length:${len}},(_,k)=>k)`;
+        return `Array.from({length:${len}},(_,k)=>${lo}+k)`;
+      }
+      return `Array.from({length:${len}},(_,k)=>${lo}+(${step})*k)`;
+    }
+
+    // General path: compute bounds (and step) at runtime.
+    const lo = BaseCompiler.compile(loExpr, target);
+    const hi = BaseCompiler.compile(hiExpr, target);
+    if (stepExpr === undefined) {
+      // Auto-direction step at runtime: +1 if _hi >= _lo, else -1.
+      return `((_lo,_hi)=>{const _st=_hi>=_lo?1:-1;return Array.from({length:Math.max(0,Math.floor((_hi-_lo)/_st)+1)},(_,k)=>_lo+_st*k);})(${lo},${hi})`;
+    }
+    const step = BaseCompiler.compile(stepExpr, target);
+    return `((_lo,_hi,_st)=>_st===0?[]:Array.from({length:Math.max(0,Math.floor((_hi-_lo)/_st)+1)},(_,k)=>_lo+_st*k))(${lo},${hi},${step})`;
   }
 
   /**

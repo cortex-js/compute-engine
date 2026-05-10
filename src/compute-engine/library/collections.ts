@@ -176,8 +176,17 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
   Range: {
     complexity: 8200,
-    signature:
-      '(number, number?, step: number?) -> indexed_collection<integer>',
+    signature: '(number, number?, step: number?) -> indexed_collection<number>',
+
+    type: (ops) => {
+      // ops: [lower, upper?, step?]
+      // The element type is integer iff every present operand is integer-
+      // valued. Range(0.5, 2.5) iterates 0.5, 1.5, 2.5 — number, not integer.
+      const allInt = ops.every((op) => op.isInteger);
+      return allInt
+        ? parseType('indexed_collection<integer>')
+        : parseType('indexed_collection<number>');
+    },
 
     canonical: (ops, { engine: ce }) => {
       if (ops.length === 0) return null;
@@ -207,24 +216,42 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         const [lower, upper, step] = range(expr);
         if (step === 0) return 0;
         if (!isFinite(lower) || !isFinite(upper)) return Infinity;
-        return 1 + Math.max(0, Math.floor((upper! - lower!) / step));
+        // Math.max guards a sign-mismatched step (e.g. Range(5, 1, 1)) from
+        // returning a positive count. The +1 must be inside the max so an
+        // empty range returns 0, not 1.
+        return Math.max(0, Math.floor((upper - lower) / step) + 1);
       },
 
       contains: (expr, target) => {
-        if (!target.type.matches('integer')) return false;
         const t = target.re;
+        if (!isFinite(t)) return false;
         const [lower, upper, step] = range(expr);
         if (step === 0) return false;
-        if (step > 0) return t >= lower && t <= upper;
-        return t <= lower && t >= upper;
+        // Directional bounds check: t must lie between lower and upper in
+        // the direction implied by step's sign.
+        if (step > 0) {
+          if (t < lower || t > upper) return false;
+        } else {
+          if (t > lower || t < upper) return false;
+        }
+        // Step-grid check: t must be reachable as `lower + k*step` for some
+        // non-negative integer k, within engine tolerance.
+        const k = (t - lower) / step;
+        const tol = expr.engine.tolerance;
+        const kRounded = Math.round(k);
+        return kRounded >= 0 && Math.abs(k - kRounded) < tol;
       },
 
       iterator: (expr) => {
         const [lower, upper, step] = range(expr);
 
-        // Number of elements in the range:
+        // Number of elements in the range. Math.max guards against a
+        // sign-mismatched step (e.g. Range(0, 1, -1)) producing a negative
+        // count and looping forever.
         const maxCount =
-          step === 0 ? 0 : Math.floor((upper - lower) / step) + 1;
+          step === 0
+            ? 0
+            : Math.max(0, Math.floor((upper - lower) / step) + 1);
 
         let index = 1;
 
@@ -248,7 +275,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       ): undefined | Expression => {
         if (typeof index !== 'number') return undefined;
         const [lower, upper, step] = range(expr);
-        if (index < 1 || index > 1 + (upper - lower) / step) return undefined;
+        if (step === 0) return undefined;
+        const maxCount = Math.max(0, Math.floor((upper - lower) / step) + 1);
+        if (index < 1 || index > maxCount) return undefined;
         return expr.engine.number(lower + step * (index - 1));
       },
 
@@ -280,7 +309,15 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         return lower >= upper ? 'positive' : 'negative';
       },
 
-      elttype: (_expr) => 'finite_integer',
+      elttype: (expr) => {
+        // Mirror the dynamic Range type: every present operand must be
+        // integer-valued for the element type to be finite_integer.
+        if (!isFunction(expr)) return 'finite_integer';
+        for (let i = 1; i <= expr.nops; i++) {
+          if (!(expr as any)[`op${i}`].isInteger) return 'finite_real';
+        }
+        return 'finite_integer';
+      },
     },
   } as OperatorDefinition,
 
@@ -991,16 +1028,47 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
   First: {
     complexity: 8200,
-    signature: '(collection) -> any',
+    signature: '(any) -> any',
     type: ([xs]) => xs.operatorDefinition?.collection?.elttype?.(xs) ?? 'any',
-    evaluate: ([xs], { engine: ce }) => xs.at(1) ?? ce.Nothing,
+    evaluate: ([xs], { engine: ce }) => {
+      if (!xs.isCollection)
+        return ce.error([
+          'incompatible-type',
+          `'collection'`,
+          xs.type.toString(),
+        ]);
+      return xs.at(1) ?? ce.Nothing;
+    },
   },
 
   Second: {
     complexity: 8200,
-    signature: '(collection) -> any',
+    signature: '(any) -> any',
     type: ([xs]) => xs.operatorDefinition?.collection?.elttype?.(xs) ?? 'any',
-    evaluate: ([xs], { engine: ce }) => xs.at(2) ?? ce.Nothing,
+    evaluate: ([xs], { engine: ce }) => {
+      if (!xs.isCollection)
+        return ce.error([
+          'incompatible-type',
+          `'collection'`,
+          xs.type.toString(),
+        ]);
+      return xs.at(2) ?? ce.Nothing;
+    },
+  },
+
+  Third: {
+    complexity: 8200,
+    signature: '(any) -> any',
+    type: ([xs]) => xs.operatorDefinition?.collection?.elttype?.(xs) ?? 'any',
+    evaluate: ([xs], { engine: ce }) => {
+      if (!xs.isCollection)
+        return ce.error([
+          'incompatible-type',
+          `'collection'`,
+          xs.type.toString(),
+        ]);
+      return xs.at(3) ?? ce.Nothing;
+    },
   },
 
   Last: {
@@ -2098,9 +2166,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 /**
  * Normalize the arguments of range:
  * - [from, to] -> [from, to, 1] if to > from, or [from, to, -1] if to < from
- * - [x] -> [1, x]
- * - arguments rounded to integers
+ * - [x] -> [1, x, 1]
  *
+ * Bounds and step are kept as raw numeric values (not rounded). The step is
+ * trusted as-given when provided explicitly; iteration produces an empty
+ * collection when the step's sign disagrees with the direction (lower→upper).
  */
 export function range(
   expr: Expression
@@ -2109,21 +2179,17 @@ export function range(
   if (expr.nops === 0) return [1, 0, 0];
 
   let op1 = expr.op1.re;
-  if (!isFinite(op1)) op1 = 1;
-  else op1 = Math.round(op1);
+  if (!isFinite(op1) && !op1) op1 = 1;
   if (expr.nops === 1) return [1, op1, 1];
 
   let op2 = expr.op2.re;
-  // Keep infinity values, only default non-finite values that aren't infinity
   if (!isFinite(op2) && !op2) op2 = 1;
-  else if (isFinite(op2)) op2 = Math.round(op2);
-  if (expr.nops === 2) return [op1, op2, op2 > op1 ? 1 : -1];
+  if (expr.nops === 2) return [op1, op2, op2 >= op1 ? 1 : -1];
 
   let op3 = expr.op3.re;
-  if (!isFinite(op3)) op3 = 1;
-  else op3 = Math.abs(Math.round(op3));
+  if (!isFinite(op3) && !op3) op3 = 1;
 
-  return [op1, op2, op1 < op2 ? op3 : -op3];
+  return [op1, op2, op3];
 }
 
 /** Return the last value in the range

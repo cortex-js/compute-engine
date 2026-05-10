@@ -825,6 +825,17 @@ export type ParseLatexOptions = NumberFormat & {
    * **Default:** `"t"`
    */
   timeDerivativeVariable: string;
+
+  /**
+   * The tolerance used when validating inferred range steps from sampled
+   * elements (e.g. `[0, 0.1, 0.2, \ldots, 1]`). Two consecutive differences
+   * are considered equal when they differ by less than this value.
+   *
+   * Populated automatically from `ce.tolerance` by `ce.parse()`.
+   *
+   * **Default:** `ce.tolerance` (typically `1e-7`)
+   */
+  tolerance: number;
 };
 
 /**
@@ -1186,6 +1197,36 @@ export type SerializeLatexOptions = NumberSerializationFormat & {
     expr: MathJsonExpression,
     level: number
   ) => 'compact' | 'regular' | 'interval' | 'set-builder';
+
+  /**
+   * When `true`, member-access heads serialize to dot notation:
+   * - `First(p)` → `p.x`
+   * - `Second(p)` → `p.y`
+   * - `Third(p)` → `p.z`
+   * - `Real(z)` → `z.\operatorname{real}`
+   * - `Imaginary(z)` → `z.\operatorname{imag}`
+   * - `Length(L)` → `L.\operatorname{count}`
+   * - `Sum(L)` → `L.\operatorname{total}`
+   * - `Max(L)` → `L.\max`
+   * - `Min(L)` → `L.\min`
+   *
+   * When `false` (default), the standard function-call form is used.
+   *
+   * Only applies to arity-1 forms. Multi-operand forms (e.g. `Sum` with
+   * an index tuple) keep their standard serialization even when this is `true`.
+   *
+   * **Serializer-only.** This flag has no effect on parsing. All input
+   * forms continue to parse as before regardless of the flag (e.g. `|L|`,
+   * `\operatorname{count}(L)`, and `L.\operatorname{count}` all parse to
+   * `["Length", L]` whether `dotNotation` is on or off). The flag only
+   * decides which form the serializer emits.
+   *
+   * Set engine-wide via `ce.latexOptions.dotNotation = true`, or per-call
+   * via `expr.toLatex({ dotNotation: true })`.
+   *
+   * **Default**: `false`
+   */
+  dotNotation: boolean;
 
   /**
    * When true, serialize angle quantities in degrees-minutes-seconds format.

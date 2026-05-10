@@ -1,3 +1,129 @@
+### [Unreleased]
+
+#### Added
+
+- **`dotNotation` serialization option** — when enabled (default off),
+  member-access heads serialize to dot notation rather than function-call
+  form: `First(p)` → `p.x`, `Length(L)` → `L.\operatorname{count}`, etc.
+  Useful for round-tripping editor-authored dot-notation back to its
+  source form. Set via `ce.latexOptions.dotNotation = true` or per-call
+  `expr.toLatex({ dotNotation: true })`. Only applies to arity-1 forms;
+  multi-operand forms (e.g. `Sum` with an index range) keep their standard
+  serialization.
+  - **Serializer-only.** The flag lives in `SerializeLatexOptions` and has
+    no effect on parsing. All input forms continue to parse as before
+    regardless of the flag: `|L|`, `\operatorname{count}(L)`,
+    `L.\operatorname{count}`, `\operatorname{length}(L)` all still parse to
+    `["Length", L]` whether `dotNotation` is on or off. The flag only
+    decides which form the serializer emits.
+
+- **Component access** (`p.x`, `L.\operatorname{count}`, `z.\operatorname{re}`)
+  — dot notation now parses to existing semantic heads at parse
+  time. No generic accessor head was introduced.
+  - Recognized members and their AST mapping:
+    `x`/`y`/`z` → `First`/`Second`/`Third`;
+    `real`/`re` → `Real`; `imag`/`im` → `Imaginary`;
+    `count` → `Length`; `total` → `Sum`;
+    `max` → `Max`; `min` → `Min`.
+  - Disambiguation: after a terminated integer or decimal, `.` followed by a
+    letter or `\operatorname{...}` is component access, not a decimal point.
+    Examples: `1.x` parses as `["First", 1]` (not a malformed decimal);
+    `1.5.x` parses as `["First", 1.5]`.
+  - Only `\operatorname{...}` and bare-letter identifiers are recognized after
+    `.`. `\mathrm{...}` is not accepted (deliberately tight).
+  - `Third` is a new operator (parallels `First`/`Second`) with
+    signature `(any) -> any`. `First`/`Second` were widened from
+    `(collection) -> any` to `(any) -> any` so component access on a
+    non-collection (e.g. `1.x`) defers type-checking to evaluation;
+    evaluation returns an `Error` expression for incompatible types.
+
+- **Restriction braces** (`expr\{cond\}`) — trailing brace predicates parse
+  to a new `When` head.
+  - `f(x)\{0 < x < 2\}` → `["When", ["f", "x"], ["Less", 0, "x", 2]]`.
+  - **Stacked restrictions canonicalize**: `expr\{c_1\}\{c_2\}` → 
+    `["When", expr, ["And", c_1, c_2]]`. Downstream simplification, evaluation,
+    interval intersection, and compilation see a single canonical shape
+    regardless of source form.
+  - Disambiguation from set literals is positional: standalone
+    `\{1, 2, 3\}` continues to parse as a `Set`; `<expr>\{cond\}` parses as a
+    `When` restriction. Allowed left operands include function calls, tuples,
+    list/set literals, bare symbols, subscripted symbols, member access,
+    power expressions, and chained restrictions.
+  - Evaluator semantics: `When(e, True)` evaluates `e`;
+    `When(e, False)` returns `Undefined`; indeterminate `cond` holds the form.
+  - Serializer round-trips to the stacked-brace form (not `\wedge` inside
+    one set of braces) so authored source and re-serialized output stay
+    visually consistent.
+  - JS and GLSL compilation: ternary `(cond ? e : NaN)`.
+
+- **List-range ellipsis** (`[1...9]`, `[0, 0.1, ..., 1]`) — ranges inside
+  list literals parse to the existing `Range` head.
+  - Endpoint-only form: `[a...b]` → `["Range", a, b]`. Triggers `...`,
+    `\ldots`, and `\dots` are all accepted.
+  - Inferred-step form: `[a_0, a_1, ..., a_n]` → `["Range", a_0, a_n, step]`
+    where `step = a_1 - a_0` is inferred from the first sample pair.
+    Intermediate samples are validated against `a_0 + k·step` within
+    `ce.tolerance`; inconsistent samples produce a parse error.
+  - The float idiom `[0, 0.1, 0.2, ..., 1]` is supported (tolerance-aware
+    comparison; `0.1 + 0.1 ≠ 0.2` exactly but is accepted within tolerance).
+  - Outside `[...]` brackets, `\ldots`/`\dots`/`...` continue to parse as the
+    `ContinuationPlaceholder` symbol. The trigger is bracket context.
+
+- **For-comprehensions** (`(x, y) \operatorname{for} x=L_1, y=L_2`) — the
+  `Loop` head now accepts multiple `Element` clauses, evaluated as nested
+  loops with later bindings seeing earlier ones in scope.
+  - `Loop(body, Element(x, L_1), Element(y, L_2), ...)` produces an
+    `indexed_collection<T>` of body evaluations, in row-major order.
+  - For independent bindings this is the Cartesian product:
+    `(x, y) \operatorname{for} x = [1...2], y = [1...2]` → 4 tuples.
+  - For dependent bindings later clauses see earlier:
+    `(x, y) \operatorname{for} x = [1...3], y = [1...x]` → 6 tuples
+    (triangle, not Cartesian).
+  - Precedence: `\operatorname{for}` binds looser than `,` and `=`, tighter
+    than `;`. So `(x + y) \operatorname{for} x = L_1, y = L_2` parses with
+    body `x + y` and two bindings.
+  - Bound names do not leak into the enclosing scope (uses
+    `Scope.noAutoDeclare`).
+  - Legacy single-Element form continues to round-trip via the existing
+    `\text{for } i \text{ from } a \text{ to } b \text{ do } body` syntax.
+    Multi-Element comprehensions serialize to the `\operatorname{for}` form.
+
+- **`Range` type is now dynamic** — element type narrows based on the step
+  argument: integer step (or no step) yields `indexed_collection<integer>`;
+  non-integer step yields `indexed_collection<number>`. Previously the type
+  was always `indexed_collection<integer>`, which was incorrect for
+  float-step ranges.
+
+- **`When` head** — new conditional-value operator.
+  `When(expr, cond)` returns `expr` when `cond` is true, `Undefined`
+  when `cond` is false, and holds when `cond` is indeterminate.
+  Used by restriction-brace parsing (see above) but also usable
+  directly.
+
+- **`ce.operatorInfo(head)`** — new method on `ComputeEngine` for
+  introspecting registered operator heads. Returns
+  `{ kind: 'function' | 'opaque', signature?: BoxedType }` or `undefined`.
+  - `'function'` — head has an `evaluate` handler or a `collection` handler
+    (lazy producers like `Range`, `Linspace`, `Tuple` work via the latter).
+  - `'opaque'` — head is declared with a signature but has neither (e.g.,
+    `Triangle`, `Sphere`, `GeometricVector`).
+  - `undefined` — no operator definition (constants like `Pi` and unknown
+    heads).
+  - Lets external tooling classify heads by capability without maintaining
+    a parallel list of supported operators.
+
+- **`tolerance` in `ParseLatexOptions`** — populated automatically from
+  `ce.tolerance` when parsing through `ce.parse()`. Used by list-range
+  sample validation; available to other parse handlers that need
+  tolerance-aware comparison.
+
+#### Fixed
+
+- **`Loop` with `Element` clause** — single-Element `Loop(body, Element(i, range))`
+  previously did not produce a list of body evaluations (the iteration path
+  for `Element` form had a bug). The new variadic evaluator correctly yields
+  a `List` of body values for each iteration.
+
 ### 0.56.0 _2026-03-10_
 
 #### Added
@@ -19,9 +145,9 @@
 
 - **JavaScript compile-target support for color values** — all color
   constructors, the `As*` converters, `ColorDelta`, and `Distance` are
-  supported. At runtime a color is a 3- or 4-element OKLCh array
-  (`[L, C, H]` or `[L, C, H, alpha]`), matching the GPU target's `vec3`/`vec4`
-  representation, so values move between JS, GLSL, and WGSL without conversion.
+  supported. At runtime a color is a 3- or 4-element OKLCh array (`[L, C, H]` or
+  `[L, C, H, alpha]`), matching the GPU target's `vec3`/`vec4` representation,
+  so values move between JS, GLSL, and WGSL without conversion.
 
 - **`Distance(p1, p2)`** — Euclidean distance between two points represented as
   tuples. Accepts any positive dimension; mismatched dimensions return a typed
@@ -111,8 +237,8 @@ GPU compile).
 
 - **`expr.toMathJson({ metadata: ['latex'] })` was silently dropped** — passing
   a metadata array of specific fields (e.g. `['latex']` or `['wikidata']`) was
-  ignored; only `metadata: 'all'` worked. The array form now correctly
-  populates the requested fields.
+  ignored; only `metadata: 'all'` worked. The array form now correctly populates
+  the requested fields.
 
 - **`expr.toMathJson({ shorthands: ['all'] })` disabled all shorthands** — the
   `['all']` array form had the opposite of its intended effect. The string form

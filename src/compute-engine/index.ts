@@ -43,6 +43,7 @@ import type {
   OEISSequenceInfo,
   OEISOptions,
   LibraryDefinition,
+  OperatorInfo,
 } from './global-types';
 
 import type {
@@ -1015,6 +1016,16 @@ export class ComputeEngine implements IComputeEngine {
     return lookupDefinitionImpl(this, id);
   }
 
+  operatorInfo(head: string): OperatorInfo | undefined {
+    const def = this.lookupDefinition(head);
+    if (!def || !isOperatorDef(def)) return undefined;
+    const op = def.operator;
+    return {
+      kind: op.evaluate || op.collection ? 'function' : 'opaque',
+      signature: op.signature,
+    };
+  }
+
   /**
    * Associate a new definition to a symbol in the current context.
    *
@@ -1447,6 +1458,7 @@ export class ComputeEngine implements IComputeEngine {
         const def = this.lookupDefinition(id);
         return !!(isValueDef(def) && def.value.subscriptEvaluate);
       },
+      tolerance: this.tolerance,
       ...this._latexOptions,
       ...parseOpts,
     });

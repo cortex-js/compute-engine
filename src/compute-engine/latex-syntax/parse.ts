@@ -2398,6 +2398,24 @@ export class _Parser implements Parser {
     //
     if (result !== null) result = this.parseSupsub(result);
 
+    //
+    // 8. Are there postfix operators after subsup?
+    //    (e.g. `[x,y]^{2}.max` where `.max` is a postfix applied after `^{2}`)
+    //
+    if (result !== null) {
+      let postfix: MathJsonExpression | null = null;
+      let index = this.index;
+      do {
+        postfix = this.parsePostfixOperator(result, until);
+        result = postfix ?? result;
+        if (this.index === index && postfix !== null) {
+          console.assert(this.index !== index, 'No token consumed');
+          break;
+        }
+        index = this.index;
+      } while (postfix !== null);
+    }
+
     if (result === null) {
       result = this.options.parseUnexpectedToken?.(null, this) ?? null;
       if (result === null && this.peek.startsWith('\\')) {

@@ -40,7 +40,7 @@ describe('FOR LOOP - PARSING', () => {
       [
         "Loop",
         ["Square", "k"],
-        ["Element", "k", ["Range", "n", ["InvisibleOperator", 2, "n"]]]
+        ["Element", "k", ["Range", "n", ["Multiply", 2, "n"]]]
       ]
     `);
   });

@@ -536,7 +536,7 @@ describe('Min/Max', () => {
   );
 
   expect(ce.expr(['Max', ['Range', 1.2, 4.5]]).N().value).toMatchInlineSnapshot(
-    `5`
+    `4.2`
   );
 
   expect(ce.expr(['Max', ['Range', 1, 10, 7]]).N().value).toMatchInlineSnapshot(
@@ -588,7 +588,7 @@ describe('Min/Max', () => {
   );
 
   expect(ce.expr(['Min', ['Range', 1.2, 4.5]]).N().value).toMatchInlineSnapshot(
-    `1`
+    `1.2`
   );
   expect(ce.expr(['Min', ['Range', 1, 10, 7]]).N().value).toMatchInlineSnapshot(
     `1`

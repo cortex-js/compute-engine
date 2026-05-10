@@ -29,6 +29,53 @@ import { SYMBOLS } from './dictionary/definitions-symbols';
 import { DELIMITERS_SHORTHAND } from './dictionary/definitions-core';
 import { EMOJIS } from '../../math-json/symbols';
 
+// ---------------------------------------------------------------------------
+// Dot-notation serialization (dotNotation option)
+// ---------------------------------------------------------------------------
+
+/**
+ * Map from function head name to the dot-notation suffix emitted when
+ * `SerializeLatexOptions.dotNotation` is `true` and the function has exactly
+ * one operand.
+ */
+const DOT_NOTATION_MAP: Readonly<Record<string, string>> = {
+  First: '.x',
+  Second: '.y',
+  Third: '.z',
+  Real: '.\\operatorname{real}',
+  Imaginary: '.\\operatorname{imag}',
+  Length: '.\\operatorname{count}',
+  Sum: '.\\operatorname{total}',
+  Max: '.\\max',
+  Min: '.\\min',
+};
+
+/**
+ * If `serializer.options.dotNotation` is enabled and `expr` is a single-arg
+ * form of a dot-notation head, return the dot-notation LaTeX string.
+ * Otherwise return `null` (fall through to normal serialization).
+ *
+ * Member-access has very high precedence (similar to postfix ~810), so we use
+ * POSTFIX_PRECEDENCE to decide whether the LHS operand needs parenthesization.
+ */
+function trySerializeDotNotation(
+  serializer: Serializer,
+  expr: MathJsonExpression
+): string | null {
+  if (!serializer.options.dotNotation) return null;
+  const ops = operands(expr);
+  if (!ops || ops.length !== 1) return null;
+  const head = operator(expr);
+  if (!head) return null;
+  const suffix = DOT_NOTATION_MAP[head];
+  if (suffix === undefined) return null;
+  // Wrap the LHS with parens if its precedence is low enough to be ambiguous.
+  // POSTFIX_PRECEDENCE (810) is used as the threshold — same order as
+  // factorial/prime which have visually unambiguous postfix delimiters.
+  const lhs = serializer.wrap(ops[0], 810);
+  return `${lhs}${suffix}`;
+}
+
 const ACCENT_MODIFIERS = {
   deg: (s: string) => `${s}\\degree`,
   prime: (s: string) => `${s}^{\\prime}`,
@@ -78,6 +125,7 @@ export class Serializer {
     this.dictionary = dictionary;
     // Ensure all required properties are present with defaults
     this.options = {
+      dotNotation: false,
       dmsFormat: false,
       angleNormalization: 'none',
       ...options,
@@ -224,6 +272,12 @@ export class Serializer {
     expr: MathJsonExpression,
     def?: IndexedLatexDictionaryEntry
   ): LatexString {
+    //
+    // 0. Check dot-notation option first (pre-dispatch hook)
+    //
+    const dotResult = trySerializeDotNotation(this, expr);
+    if (dotResult !== null) return dotResult;
+
     //
     // Use serialize handler if available
     //

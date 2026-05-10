@@ -29,6 +29,117 @@ import { isEquationOperator, isInequalityOperator } from '../utils';
 import { BoxedType } from '../../../common/type/boxed-type';
 import { parseQuantifier } from './definitions-logic';
 
+// ---------------------------------------------------------------------------
+// Component-access member-name table (C2)
+// ---------------------------------------------------------------------------
+
+const COMPONENT_ACCESS_HEADS: Record<string, string> = {
+  x: 'First',
+  y: 'Second',
+  z: 'Third',
+  real: 'Real',
+  re: 'Real',
+  imag: 'Imaginary',
+  im: 'Imaginary',
+  count: 'Length',
+  total: 'Sum',
+  max: 'Max',
+  min: 'Min',
+};
+
+function memberHead(name: string): string | null {
+  return COMPONENT_ACCESS_HEADS[name] ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// Component-access postfix parse function (C3)
+// ---------------------------------------------------------------------------
+//
+// Called after the '.' trigger has already been consumed.
+// Handles three forms:
+//   Form 1: \operatorname{name}
+//   Form 2: \command-name   (e.g. \max, \min)
+//   Form 3: bare letter     (x, y, z)
+//
+function parseComponentAccess(
+  parser: Parser,
+  lhs: MathJsonExpression
+): MathJsonExpression | null {
+  parser.skipVisualSpace();
+
+  // Form 1: \operatorname{name}
+  if (parser.match('\\operatorname')) {
+    const name = parser.parseStringGroup();
+    if (name === null) return null;
+    const head = memberHead(name.trim());
+    if (head === null) return null;
+    return [head, lhs] as MathJsonExpression;
+  }
+
+  // Form 2: \command-name  (e.g. \max → 'max', \min → 'min')
+  const tok = parser.peek;
+  if (typeof tok === 'string' && tok.startsWith('\\')) {
+    const bare = tok.slice(1); // strip leading backslash
+    const head = memberHead(bare);
+    if (head !== null) {
+      parser.nextToken(); // consume the command token
+      return [head, lhs] as MathJsonExpression;
+    }
+    // Unknown command — don't consume, return null
+    return null;
+  }
+
+  // Form 3: bare letter (single character a–z or A–Z)
+  if (typeof tok === 'string' && /^[a-zA-Z]$/.test(tok)) {
+    const head = memberHead(tok);
+    if (head === null) return null;
+    parser.nextToken(); // consume the letter
+    return [head, lhs] as MathJsonExpression;
+  }
+
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// When-restriction postfix parse function (D3)
+// ---------------------------------------------------------------------------
+//
+// Handles `expr\left\{cond\right\}` → `When(expr, cond)`.
+// Called after the trigger tokens have been consumed.
+//
+// Two postfix entries use this function:
+//   - trigger ['\\left', '\\{']  → close ['\\right', '\\}']
+//   - trigger ['\\{']            → close ['\\}']
+//
+function parseWhenRestriction(
+  parser: Parser,
+  lhs: MathJsonExpression,
+  close: string[]
+): MathJsonExpression | null {
+  // Add a boundary so that parseExpression stops before the close delimiter.
+  parser.addBoundary(close);
+
+  parser.skipVisualSpace();
+  const cond = parser.parseExpression({ minPrec: 0 });
+
+  if (cond === null) {
+    parser.removeBoundary();
+    return null;
+  }
+
+  parser.skipVisualSpace();
+
+  // matchBoundary() pops the boundary on success only; on failure the
+  // boundary stays on the stack, so we must remove it before bailing out
+  // or subsequent parsing will see a stray boundary.
+  if (!parser.matchBoundary()) {
+    parser.removeBoundary();
+    return null;
+  }
+
+  return ['When', lhs, cond] as MathJsonExpression;
+}
+
 // function isSpacingToken(token: string): boolean {
 //   return (
 //     token === '<space>' ||
@@ -627,6 +738,16 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   },
   { name: 'LatexTokens', serialize: serializeLatexTokens },
 
+  // Component-access postfix: expr.member  (C3)
+  // The '.' trigger is consumed before the parse function is called.
+  // Precedence 850 > 810 (At/indexing) so .x chains tightly.
+  {
+    kind: 'postfix',
+    precedence: 850,
+    latexTrigger: ['.'],
+    parse: parseComponentAccess,
+  },
+
   {
     name: 'At',
     kind: 'postfix',
@@ -647,6 +768,40 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     precedence: 810,
     latexTrigger: ['\\left', '\\lbrack'],
     parse: parseAt('\\right', '\\rbrack'),
+  },
+  // When-restriction: `expr\left\{cond\right\}` → `When(expr, cond)` (D3)
+  {
+    name: 'When',
+    kind: 'postfix',
+    precedence: 800,
+    latexTrigger: ['\\left', '\\{'],
+    parse: (
+      parser: Parser,
+      lhs: MathJsonExpression
+    ): MathJsonExpression | null =>
+      parseWhenRestriction(parser, lhs, ['\\right', '\\}']),
+    serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
+      const e = operand(expr, 1);
+      const cond = operand(expr, 2);
+      if (!e || !cond) return '';
+      // Unfold And clauses into stacked braces:
+      const clauses =
+        operator(cond) === 'And' ? (operands(cond) ?? []) : [cond];
+      const inner = clauses
+        .map((c) => `\\left\\{${serializer.serialize(c)}\\right\\}`)
+        .join('');
+      return `${serializer.serialize(e)}${inner}`;
+    },
+  },
+  // When-restriction: bare `expr\{cond\}` → `When(expr, cond)`
+  {
+    kind: 'postfix',
+    precedence: 800,
+    latexTrigger: ['\\{'],
+    parse: (
+      parser: Parser,
+      lhs: MathJsonExpression
+    ): MathJsonExpression | null => parseWhenRestriction(parser, lhs, ['\\}']),
   },
   {
     kind: 'postfix',
@@ -776,6 +931,29 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       }
       return '';
     },
+  },
+  // Additional triggers for Range: `...`, `\ldots`, and `\dots` are
+  // equivalent to `..` when used as infix operators (e.g. `[1...9]`).
+  // No `name` field here — names must be unique per the dictionary rules;
+  // the first Range entry owns the name. When there is no LHS the symbol
+  // entries near the top of the file still fire (ContinuationPlaceholder).
+  {
+    latexTrigger: ['.', '.', '.'],
+    kind: 'infix',
+    precedence: 800,
+    parse: parseRange,
+  },
+  {
+    latexTrigger: ['\\ldots'],
+    kind: 'infix',
+    precedence: 800,
+    parse: parseRange,
+  },
+  {
+    latexTrigger: ['\\dots'],
+    kind: 'infix',
+    precedence: 800,
+    parse: parseRange,
   },
   {
     latexTrigger: [';'],
@@ -998,13 +1176,30 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       const args = operands(expr);
       if (!args || args.length < 2) return '';
       const body = args[0];
-      const indexing = args[1]; // Element(i, Range(lo, hi))
-      if (operator(indexing) === 'Element') {
-        const index = operand(indexing, 1);
-        const range = operand(indexing, 2);
-        if (operator(range) === 'Range') {
-          const lo = operand(range, 1);
-          const hi = operand(range, 2);
+      const elements = args.slice(1);
+
+      // Check if all iterators are Element clauses
+      const allElements = elements.every((e) => operator(e) === 'Element');
+
+      if (!allElements) {
+        // Legacy fallback: emit \operatorname{Loop}(body, ...)
+        return joinLatex([
+          '\\operatorname{Loop}(',
+          serializer.serialize(body),
+          ', ',
+          serializer.serialize(elements[0]),
+          ')',
+        ]);
+      }
+
+      // Single-Element with Range → emit \text{for ... from ... to ... do ...} (legacy form)
+      if (elements.length === 1) {
+        const elem = elements[0];
+        const index = operand(elem, 1);
+        const coll = operand(elem, 2);
+        if (operator(coll) === 'Range') {
+          const lo = operand(coll, 1);
+          const hi = operand(coll, 2);
           return joinLatex([
             '\\text{for }',
             serializer.serialize(index),
@@ -1016,13 +1211,32 @@ export const DEFINITIONS_CORE: LatexDictionary = [
             serializer.serialize(body),
           ]);
         }
+        // Single-Element non-Range → emit comprehension form
+        return joinLatex([
+          serializer.serialize(body),
+          ' \\operatorname{for} ',
+          serializer.serialize(index),
+          ' = ',
+          serializer.serialize(coll),
+        ]);
       }
+
+      // Multi-Element → emit comprehension form: body \operatorname{for} x=L1, y=L2, ...
+      const bindings = elements
+        .map((elem) => {
+          const name = operand(elem, 1);
+          const coll = operand(elem, 2);
+          return joinLatex([
+            serializer.serialize(name),
+            ' = ',
+            serializer.serialize(coll),
+          ]);
+        })
+        .join(', ');
       return joinLatex([
-        '\\operatorname{Loop}(',
         serializer.serialize(body),
-        ', ',
-        serializer.serialize(indexing),
-        ')',
+        ' \\operatorname{for} ',
+        bindings,
       ]);
     },
   },
@@ -1060,6 +1274,22 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       parser: Parser,
       until?: Readonly<Terminator>
     ): MathJsonExpression | null => parseForExpression(parser, until),
+  },
+  // \operatorname{for} as postfix infix (list comprehension):
+  //   `body \operatorname{for} x = L_1, y = L_2`
+  // Precedence 19 — just below comma (20) so the body is allowed to use
+  // any operator (including comma sequencing) up to the keyword, and the
+  // bindings can be comma-separated below us.
+  {
+    symbolTrigger: 'for',
+    kind: 'infix',
+    associativity: 'none',
+    precedence: 19,
+    parse: (
+      parser: Parser,
+      lhs: MathJsonExpression,
+      until: Readonly<Terminator>
+    ): MathJsonExpression | null => parseForComprehension(parser, lhs, until),
   },
   // \operatorname{break}
   {
@@ -1302,7 +1532,10 @@ export const DEFINITIONS_CORE: LatexDictionary = [
 
       parser.addBoundary([')']);
       const expr = parser.parseExpression(until);
-      if (!parser.matchBoundary()) return null;
+      if (!parser.matchBoundary()) {
+        parser.removeBoundary();
+        return null;
+      }
 
       if (!parser.match('<}>')) return null;
 
@@ -1917,7 +2150,12 @@ function parseBrackets(
 
   const h = operator(body);
   if (h === 'Range' || h === 'Linspace') return body;
-  if (h === 'Sequence') return ['List', ...operands(body)];
+  if (h === 'Sequence') {
+    const elems = operands(body);
+    const inferred = tryInferRangeFromElements(elems, parser);
+    if (inferred) return inferred;
+    return ['List', ...elems];
+  }
 
   if (h === 'Delimiter') {
     const delim = stringValue(operand(body, 2)) ?? '...';
@@ -1931,12 +2169,65 @@ function parseBrackets(
     }
     if (delim === ',' || delim === '.,.') {
       body = operand(body, 1);
-      if (operator(body) === 'Sequence') return ['List', ...operands(body)];
+      if (operator(body) === 'Sequence') {
+        const elems = operands(body);
+        const inferred = tryInferRangeFromElements(elems, parser);
+        if (inferred) return inferred;
+        return ['List', ...elems];
+      }
       return ['List', body ?? 'Nothing'];
     }
   }
 
   return ['List', body];
+}
+
+/**
+ * Detect the inferred-step list-range form: elements ending with
+ * `[..., s0, s1, ..., sk, ContinuationPlaceholder, end]`.
+ *
+ * If the pattern is found, returns `['Range', start, end, step]`,
+ * an Error node for inconsistent/degenerate cases, or `null` to fall through.
+ */
+function tryInferRangeFromElements(
+  elems: readonly MathJsonExpression[],
+  parser: Parser
+): MathJsonExpression | null {
+  // Need at least 4 elements: s0, s1, ContinuationPlaceholder, end
+  if (elems.length < 4) return null;
+
+  const penultimate = elems[elems.length - 2];
+  // Check that the second-to-last element is ContinuationPlaceholder
+  if (symbol(penultimate) !== 'ContinuationPlaceholder') return null;
+
+  // samples = all elements before ContinuationPlaceholder
+  // end     = the last element
+  const samples = elems.slice(0, -2);
+  const endExpr = elems[elems.length - 1];
+
+  // Need at least 2 samples to infer a step
+  if (samples.length < 2) return null;
+
+  // All samples must be numeric
+  const sampleNums = samples.map(machineValue);
+  if (sampleNums.some((n) => n === null)) return null;
+  const nums = sampleNums as number[];
+
+  // Step = difference between the last two samples
+  const step = nums[nums.length - 1] - nums[nums.length - 2];
+
+  // Degenerate: step is zero (or effectively zero)
+  const tol = parser.options.tolerance;
+  if (Math.abs(step) < tol)
+    return parser.error('degenerate-range-step', parser.index);
+
+  // Validate all consecutive sample differences equal `step` within tolerance
+  for (let i = 1; i < nums.length; i++) {
+    if (Math.abs(nums[i] - nums[i - 1] - step) > tol)
+      return parser.error('inconsistent-range-samples', parser.index);
+  }
+
+  return ['Range', nums[0], endExpr, step];
 }
 
 /** A "List" expression can represent a collection of arbitrary elements,
@@ -2384,6 +2675,61 @@ function parseForExpression(
     body,
     ['Element', index, ['Range', lower, upper]],
   ] as MathJsonExpression;
+}
+
+/**
+ * Parse a for-comprehension after the `\operatorname{for}` keyword has
+ * been consumed (lhs is the body):
+ *
+ *   body \operatorname{for} x = L_1, y = L_2, ...
+ *
+ * Produces `["Loop", body, ["Element", x, L_1], ["Element", y, L_2], ...]`.
+ *
+ * The bindings are comma-separated `name = expr` pairs. We stop at the
+ * outer terminator (e.g. closing `]` of a surrounding list literal).
+ *
+ * Note: scope hygiene is handled by canonicalLoop — this function only
+ * produces the raw AST.
+ */
+function parseForComprehension(
+  parser: Parser,
+  lhs: MathJsonExpression,
+  until?: Readonly<Terminator>
+): MathJsonExpression | null {
+  // Each binding's RHS must stop at top-level commas (so commas can
+  // separate bindings) and at the outer terminator (e.g. `]`).
+  const bindingTerminator: Terminator = {
+    minPrec: 21, // Above comma (20) and ; (19), so `x = L_1` is captured whole
+    condition: (p) => {
+      if (until?.condition?.(p)) return true;
+      const saved = p.index;
+      p.skipVisualSpace();
+      const isComma = p.peek === ',';
+      p.index = saved;
+      return isComma;
+    },
+  };
+
+  const elements: MathJsonExpression[] = [];
+  do {
+    parser.skipVisualSpace();
+    const binding = parser.parseExpression(bindingTerminator);
+    if (binding === null) break;
+
+    // Binding must be `Equal(name, expr)` or `Assign(name, expr)`.
+    const op = operator(binding);
+    if (op !== 'Equal' && op !== 'Assign') return null;
+
+    const name = operand(binding, 1);
+    const list = operand(binding, 2);
+    if (!name || !list) return null;
+
+    elements.push(['Element', name, list] as MathJsonExpression);
+    parser.skipVisualSpace();
+  } while (parser.match(','));
+
+  if (elements.length === 0) return null;
+  return ['Loop', lhs, ...elements] as MathJsonExpression;
 }
 
 /**

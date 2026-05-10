@@ -129,6 +129,9 @@ function defaultParseOptions(opts: LatexSyntaxOptions): ParseLatexOptions {
     quantifierScope: opts.quantifierScope ?? 'tight',
     timeDerivativeVariable: opts.timeDerivativeVariable ?? 't',
 
+    // Standalone mode has no engine; use the same default as ComputeEngine
+    tolerance: 1e-7,
+
     // Callbacks -- standalone mode has no engine, so these are stubs
     getSymbolType: (_id) => BoxedType.unknown,
     hasSubscriptEvaluate: (_id) => false,
@@ -171,6 +174,7 @@ function defaultSerializeOptions(
     multiply: '\\times',
     missingSymbol: '\\blacksquare',
 
+    dotNotation: false,
     dmsFormat: false,
     angleNormalization: 'none' as const,
 

@@ -71,6 +71,11 @@ export interface ILatexSyntax {
   ): string;
 }
 
+export type OperatorInfo = {
+  kind: 'function' | 'opaque';
+  signature?: BoxedType;
+};
+
 /** @internal */
 export interface IComputeEngine {
   /** The LatexSyntax instance used for LaTeX parsing/serialization.
@@ -561,6 +566,20 @@ export interface IComputeEngine {
 
   /** @internal */
   listenToConfigurationChange(tracker: ConfigurationChangeListener): () => void;
+
+  /**
+   * Introspect a registered operator head.
+   *
+   * Returns `undefined` if no definition is registered in this engine.
+   * Otherwise returns `{ kind, signature? }` where `kind` is `'function'`
+   * when the operator has an `evaluate` or `collection` handler, and
+   * `'opaque'` when it is declared as a typed-but-opaque node (e.g.,
+   * `Triangle`, `Sphere`).
+   *
+   * Use this to classify heads encountered in parsed MathJSON without
+   * maintaining a parallel list of "known" operators.
+   */
+  operatorInfo(head: string): OperatorInfo | undefined;
 }
 
 declare module './types-expression' {
