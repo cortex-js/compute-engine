@@ -5,6 +5,7 @@ import {
   isString,
   isSymbol,
 } from '../boxed-expression/type-guards';
+import { parseColor, rgbToOklch } from '@arnog/colors';
 import {
   tryGetConstant,
   foldTerms,
@@ -48,6 +49,11 @@ export const GPU_OPERATORS: CompiledOperators = {
 /** Return the vec2 constructor name for the target language. */
 function gpuVec2(target?: CompileTarget<Expression>): string {
   return target?.language === 'wgsl' ? 'vec2f' : 'vec2';
+}
+
+/** Return the vec3 constructor name for the target language. */
+function gpuVec3(target?: CompileTarget<Expression>): string {
+  return target?.language === 'wgsl' ? 'vec3f' : 'vec3';
 }
 
 /**
@@ -727,6 +733,10 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
         return `_gpu_oklch_to_oklab(${c})`;
       case 'rgb':
         return `_gpu_oklch_to_srgb(${c})`;
+      case 'hsl':
+        return `_gpu_rgb_to_hsl(_gpu_oklch_to_srgb(${c}))`;
+      case 'hsv':
+        return `_gpu_rgb_to_hsv(_gpu_oklch_to_srgb(${c}))`;
       default:
         throw new Error(
           `ColorToColorspace: unsupported space "${spaceName}" on GPU target`
@@ -749,12 +759,108 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
         return `_gpu_oklab_to_oklch(${c})`;
       case 'rgb':
         return `_gpu_srgb_to_oklch(${c})`;
+      case 'hsl':
+        return `_gpu_srgb_to_oklch(_gpu_hsl_to_rgb(${c}))`;
+      case 'hsv':
+        return `_gpu_srgb_to_oklch(_gpu_hsv_to_rgb(${c}))`;
       default:
         throw new Error(
           `ColorFromColorspace: unsupported space "${spaceName}" on GPU target`
         );
     }
   },
+
+  // ---------------------------------------------------------------------------
+  // Color literals. Each typed head compiles to a canonical OKLCh vec3.
+  // Alpha (4th argument) is dropped — GPU color values are vec3 only. Pass
+  // alpha as a separate uniform if it's needed at the framebuffer boundary.
+  // ---------------------------------------------------------------------------
+
+  Color: ([s], _compile, target) => {
+    // Compile-time CSS-color-string parsing. Runtime parsing is impractical
+    // in shader code, so the string must be a literal at compile time.
+    if (s === null) throw new Error('Color: no argument');
+    const str = readStringLiteral(s);
+    if (str === null)
+      throw new Error('Color: argument must be a string literal on GPU target');
+    const packed = parseColor(str);
+    if (packed === 0 && str.trim().toLowerCase() !== 'transparent')
+      throw new Error(`Color: invalid color string "${str}"`);
+    const r = (packed >>> 24) & 0xff;
+    const g = (packed >>> 16) & 0xff;
+    const b = (packed >>> 8) & 0xff;
+    const oklch = rgbToOklch({ r, g, b });
+    return `${gpuVec3(target)}(${formatFloat(oklch.L)}, ${formatFloat(oklch.C)}, ${formatFloat(oklch.H)})`;
+  },
+
+  Rgb: (args, compile, target) => {
+    if (args.length < 3) throw new Error('Rgb: need 3 components');
+    const v3 = gpuVec3(target);
+    // Channels are 0-255; normalize to 0-1 sRGB before promoting to OKLCh.
+    const r = compile(args[0]);
+    const g = compile(args[1]);
+    const b = compile(args[2]);
+    return `_gpu_srgb_to_oklch(${v3}((${r}) / 255.0, (${g}) / 255.0, (${b}) / 255.0))`;
+  },
+
+  Hsv: (args, compile, target) => {
+    if (args.length < 3) throw new Error('Hsv: need 3 components');
+    const v3 = gpuVec3(target);
+    return `_gpu_srgb_to_oklch(_gpu_hsv_to_rgb(${v3}(${compile(args[0])}, ${compile(args[1])}, ${compile(args[2])})))`;
+  },
+
+  Hsl: (args, compile, target) => {
+    if (args.length < 3) throw new Error('Hsl: need 3 components');
+    const v3 = gpuVec3(target);
+    return `_gpu_srgb_to_oklch(_gpu_hsl_to_rgb(${v3}(${compile(args[0])}, ${compile(args[1])}, ${compile(args[2])})))`;
+  },
+
+  Oklab: (args, compile, target) => {
+    if (args.length < 3) throw new Error('Oklab: need 3 components');
+    const v3 = gpuVec3(target);
+    return `_gpu_oklab_to_oklch(${v3}(${compile(args[0])}, ${compile(args[1])}, ${compile(args[2])}))`;
+  },
+
+  Oklch: (args, compile, target) => {
+    if (args.length < 3) throw new Error('Oklch: need 3 components');
+    // Already in canonical form — no conversion needed.
+    const v3 = gpuVec3(target);
+    return `${v3}(${compile(args[0])}, ${compile(args[1])}, ${compile(args[2])})`;
+  },
+
+  // ---------------------------------------------------------------------------
+  // As* operators. AsOklch is identity (canonical). The other As* return
+  // components in the named space, equivalent to ColorToColorspace(c, 'x').
+  // ---------------------------------------------------------------------------
+
+  AsOklch: ([c], compile) => {
+    if (c === null) throw new Error('AsOklch: no argument');
+    return compile(c);
+  },
+
+  AsOklab: ([c], compile) => {
+    if (c === null) throw new Error('AsOklab: no argument');
+    return `_gpu_oklch_to_oklab(${compile(c)})`;
+  },
+
+  AsRgb: ([c], compile) => {
+    if (c === null) throw new Error('AsRgb: no argument');
+    // Note: emitted vec3 is 0-1 sRGB (matching ColorToColorspace), not the
+    // 0-255 channels used by the interpreted `Rgb` head — GPU shaders work
+    // in 0-1 sRGB and round-tripping through 0-255 would lose precision.
+    return `_gpu_oklch_to_srgb(${compile(c)})`;
+  },
+
+  AsHsv: ([c], compile) => {
+    if (c === null) throw new Error('AsHsv: no argument');
+    return `_gpu_rgb_to_hsv(_gpu_oklch_to_srgb(${compile(c)}))`;
+  },
+
+  AsHsl: ([c], compile) => {
+    if (c === null) throw new Error('AsHsl: no argument');
+    return `_gpu_rgb_to_hsl(_gpu_oklch_to_srgb(${compile(c)}))`;
+  },
+
   // Fractal functions
   Mandelbrot: ([c, maxIter], compile, target) => {
     if (c === null || maxIter === null)
@@ -1614,6 +1720,80 @@ vec3 _gpu_oklch_to_srgb(vec3 lch) {
   return _gpu_oklab_to_srgb(_gpu_oklch_to_oklab(lch));
 }
 
+// HSL conversion. Hue in degrees, saturation/lightness in 0-1.
+vec3 _gpu_hsl_to_rgb(vec3 hsl) {
+  float h = hsl.x;
+  float s = hsl.y;
+  float l = hsl.z;
+  float c = (1.0 - abs(2.0 * l - 1.0)) * s;
+  float h6 = h / 60.0;
+  float x = c * (1.0 - abs(mod(h6, 2.0) - 1.0));
+  float r = 0.0;
+  float g = 0.0;
+  float b = 0.0;
+  if (h6 < 1.0)      { r = c; g = x; b = 0.0; }
+  else if (h6 < 2.0) { r = x; g = c; b = 0.0; }
+  else if (h6 < 3.0) { r = 0.0; g = c; b = x; }
+  else if (h6 < 4.0) { r = 0.0; g = x; b = c; }
+  else if (h6 < 5.0) { r = x; g = 0.0; b = c; }
+  else               { r = c; g = 0.0; b = x; }
+  float m = l - c / 2.0;
+  return vec3(r + m, g + m, b + m);
+}
+
+vec3 _gpu_rgb_to_hsl(vec3 rgb) {
+  float maxc = max(max(rgb.x, rgb.y), rgb.z);
+  float minc = min(min(rgb.x, rgb.y), rgb.z);
+  float l = (maxc + minc) / 2.0;
+  float d = maxc - minc;
+  if (d < 1e-6) return vec3(0.0, 0.0, l);
+  float s = d / (1.0 - abs(2.0 * l - 1.0));
+  float h;
+  if (maxc == rgb.x)      h = mod((rgb.y - rgb.z) / d, 6.0);
+  else if (maxc == rgb.y) h = (rgb.z - rgb.x) / d + 2.0;
+  else                    h = (rgb.x - rgb.y) / d + 4.0;
+  h *= 60.0;
+  if (h < 0.0) h += 360.0;
+  return vec3(h, s, l);
+}
+
+// HSV conversion. Hue in degrees, saturation/value in 0-1.
+vec3 _gpu_hsv_to_rgb(vec3 hsv) {
+  float h = hsv.x;
+  float s = hsv.y;
+  float v = hsv.z;
+  float c = v * s;
+  float h6 = h / 60.0;
+  float x = c * (1.0 - abs(mod(h6, 2.0) - 1.0));
+  float r = 0.0;
+  float g = 0.0;
+  float b = 0.0;
+  if (h6 < 1.0)      { r = c; g = x; b = 0.0; }
+  else if (h6 < 2.0) { r = x; g = c; b = 0.0; }
+  else if (h6 < 3.0) { r = 0.0; g = c; b = x; }
+  else if (h6 < 4.0) { r = 0.0; g = x; b = c; }
+  else if (h6 < 5.0) { r = x; g = 0.0; b = c; }
+  else               { r = c; g = 0.0; b = x; }
+  float m = v - c;
+  return vec3(r + m, g + m, b + m);
+}
+
+vec3 _gpu_rgb_to_hsv(vec3 rgb) {
+  float maxc = max(max(rgb.x, rgb.y), rgb.z);
+  float minc = min(min(rgb.x, rgb.y), rgb.z);
+  float v = maxc;
+  float d = maxc - minc;
+  if (d < 1e-6) return vec3(0.0, 0.0, v);
+  float s = (maxc < 1e-6) ? 0.0 : d / maxc;
+  float h;
+  if (maxc == rgb.x)      h = mod((rgb.y - rgb.z) / d, 6.0);
+  else if (maxc == rgb.y) h = (rgb.z - rgb.x) / d + 2.0;
+  else                    h = (rgb.x - rgb.y) / d + 4.0;
+  h *= 60.0;
+  if (h < 0.0) h += 360.0;
+  return vec3(h, s, v);
+}
+
 vec3 _gpu_color_mix(vec3 lch1, vec3 lch2, float t) {
   float L = mix(lch1.x, lch2.x, t);
   float C = mix(lch1.y, lch2.y, t);
@@ -1718,6 +1898,89 @@ fn _gpu_srgb_to_oklch(rgb: vec3f) -> vec3f {
 
 fn _gpu_oklch_to_srgb(lch: vec3f) -> vec3f {
   return _gpu_oklab_to_srgb(_gpu_oklch_to_oklab(lch));
+}
+
+fn _gpu_hsl_to_rgb(hsl: vec3f) -> vec3f {
+  let h = hsl.x;
+  let s = hsl.y;
+  let l = hsl.z;
+  let c = (1.0 - abs(2.0 * l - 1.0)) * s;
+  let h6 = h / 60.0;
+  let x = c * (1.0 - abs((h6 - 2.0 * floor(h6 / 2.0)) - 1.0));
+  var r: f32 = 0.0;
+  var g: f32 = 0.0;
+  var b: f32 = 0.0;
+  if (h6 < 1.0)      { r = c; g = x; b = 0.0; }
+  else if (h6 < 2.0) { r = x; g = c; b = 0.0; }
+  else if (h6 < 3.0) { r = 0.0; g = c; b = x; }
+  else if (h6 < 4.0) { r = 0.0; g = x; b = c; }
+  else if (h6 < 5.0) { r = x; g = 0.0; b = c; }
+  else               { r = c; g = 0.0; b = x; }
+  let m = l - c / 2.0;
+  return vec3f(r + m, g + m, b + m);
+}
+
+fn _gpu_rgb_to_hsl(rgb: vec3f) -> vec3f {
+  let maxc = max(max(rgb.x, rgb.y), rgb.z);
+  let minc = min(min(rgb.x, rgb.y), rgb.z);
+  let l = (maxc + minc) / 2.0;
+  let d = maxc - minc;
+  if (d < 1e-6) { return vec3f(0.0, 0.0, l); }
+  let s = d / (1.0 - abs(2.0 * l - 1.0));
+  var h: f32;
+  if (maxc == rgb.x) {
+    let v = (rgb.y - rgb.z) / d;
+    h = v - 6.0 * floor(v / 6.0);
+  } else if (maxc == rgb.y) {
+    h = (rgb.z - rgb.x) / d + 2.0;
+  } else {
+    h = (rgb.x - rgb.y) / d + 4.0;
+  }
+  h = h * 60.0;
+  if (h < 0.0) { h = h + 360.0; }
+  return vec3f(h, s, l);
+}
+
+fn _gpu_hsv_to_rgb(hsv: vec3f) -> vec3f {
+  let h = hsv.x;
+  let s = hsv.y;
+  let v = hsv.z;
+  let c = v * s;
+  let h6 = h / 60.0;
+  let x = c * (1.0 - abs((h6 - 2.0 * floor(h6 / 2.0)) - 1.0));
+  var r: f32 = 0.0;
+  var g: f32 = 0.0;
+  var b: f32 = 0.0;
+  if (h6 < 1.0)      { r = c; g = x; b = 0.0; }
+  else if (h6 < 2.0) { r = x; g = c; b = 0.0; }
+  else if (h6 < 3.0) { r = 0.0; g = c; b = x; }
+  else if (h6 < 4.0) { r = 0.0; g = x; b = c; }
+  else if (h6 < 5.0) { r = x; g = 0.0; b = c; }
+  else               { r = c; g = 0.0; b = x; }
+  let m = v - c;
+  return vec3f(r + m, g + m, b + m);
+}
+
+fn _gpu_rgb_to_hsv(rgb: vec3f) -> vec3f {
+  let maxc = max(max(rgb.x, rgb.y), rgb.z);
+  let minc = min(min(rgb.x, rgb.y), rgb.z);
+  let v = maxc;
+  let d = maxc - minc;
+  if (d < 1e-6) { return vec3f(0.0, 0.0, v); }
+  var s: f32 = 0.0;
+  if (maxc >= 1e-6) { s = d / maxc; }
+  var h: f32;
+  if (maxc == rgb.x) {
+    let q = (rgb.y - rgb.z) / d;
+    h = q - 6.0 * floor(q / 6.0);
+  } else if (maxc == rgb.y) {
+    h = (rgb.z - rgb.x) / d + 2.0;
+  } else {
+    h = (rgb.x - rgb.y) / d + 4.0;
+  }
+  h = h * 60.0;
+  if (h < 0.0) { h = h + 360.0; }
+  return vec3f(h, s, v);
 }
 
 fn _gpu_color_mix(lch1: vec3f, lch2: vec3f, t: f32) -> vec3f {
