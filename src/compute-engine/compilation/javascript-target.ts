@@ -819,6 +819,20 @@ function toRI(c: Complex): { re: number; im: number } {
 }
 
 /**
+ * Canonicalize an alpha value. Returns `undefined` for undefined, non-finite,
+ * or effectively-1 inputs so downstream sites can use a simple
+ * `alpha !== undefined` check to decide whether to emit it. Mirrors the
+ * helper of the same name in `library/colors.ts` so the interpreted and
+ * compiled paths agree on alpha semantics.
+ */
+function normalizeAlpha(a: number | undefined): number | undefined {
+  if (a === undefined) return undefined;
+  if (!Number.isFinite(a)) return undefined;
+  if (Math.abs(a - 1) < 1e-9) return undefined;
+  return a;
+}
+
+/**
  * Normalize a color input to an `RgbColor` (0-255 channels).
  *
  * Strings are parsed as CSS colors; arrays are interpreted as Oklch
@@ -834,12 +848,14 @@ function toRgb255(input: string | number[]): {
 } {
   if (typeof input === 'string') {
     const c = parseColor(input);
-    return {
+    const rgb: { r: number; g: number; b: number; alpha?: number } = {
       r: (c >>> 24) & 0xff,
       g: (c >>> 16) & 0xff,
       b: (c >>> 8) & 0xff,
-      alpha: (c & 0xff) / 255,
     };
+    const alpha = normalizeAlpha((c & 0xff) / 255);
+    if (alpha !== undefined) rgb.alpha = alpha;
+    return rgb;
   }
   const rgb = oklchToRgb({ L: input[0], C: input[1], H: input[2] }) as {
     r: number;
@@ -847,7 +863,10 @@ function toRgb255(input: string | number[]): {
     b: number;
     alpha?: number;
   };
-  if (input.length >= 4) rgb.alpha = input[3];
+  if (input.length >= 4) {
+    const alpha = normalizeAlpha(input[3]);
+    if (alpha !== undefined) rgb.alpha = alpha;
+  }
   return rgb;
 }
 
@@ -863,21 +882,21 @@ function toOklch(input: string | number[]): {
     const r = (c >>> 24) & 0xff;
     const g = (c >>> 16) & 0xff;
     const b = (c >>> 8) & 0xff;
-    const a = (c & 0xff) / 255;
     const oklch = rgbToOklch({ r, g, b }) as {
       L: number;
       C: number;
       H: number;
       alpha?: number;
     };
-    if (Math.abs(a - 1) > 1e-4) oklch.alpha = a;
+    const alpha = normalizeAlpha((c & 0xff) / 255);
+    if (alpha !== undefined) oklch.alpha = alpha;
     return oklch;
   }
   return {
     L: input[0],
     C: input[1],
     H: input[2],
-    alpha: input.length >= 4 ? input[3] : undefined,
+    alpha: input.length >= 4 ? normalizeAlpha(input[3]) : undefined,
   };
 }
 
@@ -886,11 +905,11 @@ function packedToOklch(c: number): number[] {
   const r = (c >>> 24) & 0xff;
   const g = (c >>> 16) & 0xff;
   const b = (c >>> 8) & 0xff;
-  const a = (c & 0xff) / 255;
   const oklch = rgbToOklch({ r, g, b });
-  return Math.abs(a - 1) < 1e-4
-    ? [oklch.L, oklch.C, oklch.H]
-    : [oklch.L, oklch.C, oklch.H, a];
+  const alpha = normalizeAlpha((c & 0xff) / 255);
+  return alpha !== undefined
+    ? [oklch.L, oklch.C, oklch.H, alpha]
+    : [oklch.L, oklch.C, oklch.H];
 }
 
 /** Color runtime helpers shared by both SYS objects. */
@@ -909,7 +928,7 @@ const colorHelpers = {
         let hex = `#${r.toString(16).padStart(2, '0')}${g
           .toString(16)
           .padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
-        if (rgb.alpha !== undefined && Math.abs(rgb.alpha - 1) > 1e-4) {
+        if (rgb.alpha !== undefined) {
           const a = Math.round(Math.max(0, Math.min(255, rgb.alpha * 255)));
           hex += a.toString(16).padStart(2, '0');
         }
@@ -919,7 +938,7 @@ const colorHelpers = {
         const r = Math.round(rgb.r);
         const g = Math.round(rgb.g);
         const b = Math.round(rgb.b);
-        if (rgb.alpha !== undefined && Math.abs(rgb.alpha - 1) > 1e-4)
+        if (rgb.alpha !== undefined)
           return `rgb(${r} ${g} ${b} / ${rgb.alpha})`;
         return `rgb(${r} ${g} ${b})`;
       }
@@ -928,7 +947,7 @@ const colorHelpers = {
         const h = Math.round(hsl.h * 10) / 10;
         const s = Math.round(hsl.s * 1000) / 10;
         const l = Math.round(hsl.l * 1000) / 10;
-        if (rgb.alpha !== undefined && Math.abs(rgb.alpha - 1) > 1e-4)
+        if (rgb.alpha !== undefined)
           return `hsl(${h} ${s}% ${l}% / ${rgb.alpha})`;
         return `hsl(${h} ${s}% ${l}%)`;
       }
@@ -937,7 +956,7 @@ const colorHelpers = {
         const L = Math.round(c.L * 1000) / 1000;
         const C = Math.round(c.C * 1000) / 1000;
         const H = Math.round(c.H * 10) / 10;
-        if (rgb.alpha !== undefined && Math.abs(rgb.alpha - 1) > 1e-4)
+        if (rgb.alpha !== undefined)
           return `oklch(${L} ${C} ${H} / ${rgb.alpha})`;
         return `oklch(${L} ${C} ${H})`;
       }
@@ -975,8 +994,8 @@ const colorHelpers = {
     const C = c1.C + (c2.C - c1.C) * ratio;
     const a1 = c1.alpha ?? 1;
     const a2 = c2.alpha ?? 1;
-    const alpha = a1 + (a2 - a1) * ratio;
-    return Math.abs(alpha - 1) > 1e-4 ? [L, C, H, alpha] : [L, C, H];
+    const alpha = normalizeAlpha(a1 + (a2 - a1) * ratio);
+    return alpha !== undefined ? [L, C, H, alpha] : [L, C, H];
   },
   colorContrast(bg: string | number[], fg: string | number[]): number {
     return apca(toRgb255(bg), toRgb255(fg));
@@ -1021,7 +1040,7 @@ const colorHelpers = {
       default:
         throw new Error(`Unknown color space: ${space}`);
     }
-    if (alpha !== undefined && Math.abs(alpha - 1) > 1e-4) result.push(alpha);
+    if (alpha !== undefined) result.push(alpha);
     return result;
   },
   colormap(name: string, arg?: number): number[] | number[][] {
@@ -1117,7 +1136,7 @@ const colorHelpers = {
       default:
         throw new Error(`Unknown color space: ${space}`);
     }
-    return alpha !== undefined && Math.abs(alpha - 1) > 1e-4
+    return alpha !== undefined
       ? [oklch.L, oklch.C, oklch.H, alpha]
       : [oklch.L, oklch.C, oklch.H];
   },
@@ -1129,34 +1148,29 @@ const colorHelpers = {
   rgb(r: number, g: number, b: number, alpha?: number): number[] {
     // Inputs are 0-1 sRGB; `rgbToOklch` expects 0-255 channels.
     const c = rgbToOklch({ r: r * 255, g: g * 255, b: b * 255 });
-    return alpha !== undefined && Math.abs(alpha - 1) > 1e-4
-      ? [c.L, c.C, c.H, alpha]
-      : [c.L, c.C, c.H];
+    const a = normalizeAlpha(alpha);
+    return a !== undefined ? [c.L, c.C, c.H, a] : [c.L, c.C, c.H];
   },
   hsv(h: number, s: number, v: number, alpha?: number): number[] {
     const rgb = hsvToRgb(h, s, v);
     const c = rgbToOklch(rgb);
-    return alpha !== undefined && Math.abs(alpha - 1) > 1e-4
-      ? [c.L, c.C, c.H, alpha]
-      : [c.L, c.C, c.H];
+    const a = normalizeAlpha(alpha);
+    return a !== undefined ? [c.L, c.C, c.H, a] : [c.L, c.C, c.H];
   },
   hsl(h: number, s: number, l: number, alpha?: number): number[] {
     const rgb = hslToRgb(h, s, l);
     const c = rgbToOklch({ r: rgb.r, g: rgb.g, b: rgb.b });
-    return alpha !== undefined && Math.abs(alpha - 1) > 1e-4
-      ? [c.L, c.C, c.H, alpha]
-      : [c.L, c.C, c.H];
+    const a = normalizeAlpha(alpha);
+    return a !== undefined ? [c.L, c.C, c.H, a] : [c.L, c.C, c.H];
   },
   oklab(L: number, a: number, b: number, alpha?: number): number[] {
     const c = oklabToOklch({ L, a, b });
-    return alpha !== undefined && Math.abs(alpha - 1) > 1e-4
-      ? [c.L, c.C, c.H, alpha]
-      : [c.L, c.C, c.H];
+    const al = normalizeAlpha(alpha);
+    return al !== undefined ? [c.L, c.C, c.H, al] : [c.L, c.C, c.H];
   },
   oklch(L: number, C: number, H: number, alpha?: number): number[] {
-    return alpha !== undefined && Math.abs(alpha - 1) > 1e-4
-      ? [L, C, H, alpha]
-      : [L, C, H];
+    const a = normalizeAlpha(alpha);
+    return a !== undefined ? [L, C, H, a] : [L, C, H];
   },
 
   // -----------------------------------------------------------------------
@@ -1170,28 +1184,28 @@ const colorHelpers = {
     const r = rgb.r / 255;
     const g = rgb.g / 255;
     const b = rgb.b / 255;
-    return rgb.alpha !== undefined && Math.abs(rgb.alpha - 1) > 1e-4
+    return rgb.alpha !== undefined
       ? [r, g, b, rgb.alpha]
       : [r, g, b];
   },
   asHsv(input: string | number[]): number[] {
     const rgb = toRgb255(input);
     const hsv = rgbToHsv(rgb.r, rgb.g, rgb.b);
-    return rgb.alpha !== undefined && Math.abs(rgb.alpha - 1) > 1e-4
+    return rgb.alpha !== undefined
       ? [hsv.h, hsv.s, hsv.v, rgb.alpha]
       : [hsv.h, hsv.s, hsv.v];
   },
   asHsl(input: string | number[]): number[] {
     const rgb = toRgb255(input);
     const hsl = rgbToHsl(rgb.r, rgb.g, rgb.b);
-    return rgb.alpha !== undefined && Math.abs(rgb.alpha - 1) > 1e-4
+    return rgb.alpha !== undefined
       ? [hsl.h, hsl.s, hsl.l, rgb.alpha]
       : [hsl.h, hsl.s, hsl.l];
   },
   asOklab(input: string | number[]): number[] {
     const c = toOklch(input);
     const lab = oklchToOklab({ L: c.L, C: c.C, H: c.H });
-    return c.alpha !== undefined && Math.abs(c.alpha - 1) > 1e-4
+    return c.alpha !== undefined
       ? [lab.L, lab.a, lab.b, c.alpha]
       : [lab.L, lab.a, lab.b];
   },

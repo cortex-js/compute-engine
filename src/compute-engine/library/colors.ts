@@ -21,17 +21,51 @@ import {
   DIVERGING_PALETTES,
 } from '@arnog/colors';
 import type { OklchColor, RgbColor } from '@arnog/colors';
-import { isFunction, isString } from '../boxed-expression/type-guards';
+import { isFunction, isNumber, isString } from '../boxed-expression/type-guards';
+
+/**
+ * Canonicalize an alpha value. Returns `undefined` for undefined, non-finite,
+ * or effectively-1 inputs so downstream sites can use a simple
+ * `alpha !== undefined` check to decide whether the value needs to be emitted
+ * as a 4th component.
+ *
+ * The 1e-9 tolerance collapses float-arithmetic noise (e.g. an interpolation
+ * result that comes out as 0.9999999998 instead of 1) without dropping any
+ * user-supplied value above that floor.
+ */
+function normalizeAlpha(a: number | undefined): number | undefined {
+  if (a === undefined) return undefined;
+  if (!Number.isFinite(a)) return undefined;
+  if (Math.abs(a - 1) < 1e-9) return undefined;
+  return a;
+}
+
+/**
+ * For a typed color head with a 4th alpha argument, drop alpha when it's a
+ * number literal that normalizes to undefined (i.e. effectively 1, or
+ * non-finite). Used by `As*` short-circuits so that e.g. `AsRgb(Rgb(1,0,0,1))`
+ * returns the 3-component form, consistent with how every other emit site
+ * handles alpha. Symbolic alphas (variables, expressions) are left in place.
+ */
+function normalizeColorHead(ce: any, expr: any): any {
+  if (!isFunction(expr) || !expr.ops || expr.ops.length < 4) return expr;
+  const alphaExpr = expr.ops[3];
+  if (!isNumber(alphaExpr)) return expr;
+  if (normalizeAlpha(alphaExpr.re) === undefined) {
+    return ce.function(expr.operator, [expr.ops[0], expr.ops[1], expr.ops[2]]);
+  }
+  return expr;
+}
 
 /** Convert a 0xRRGGBBAA packed integer to an Oklch boxed expression. */
 function colorNumberToOklch(ce: any, color: number): any {
   const r = (color >>> 24) & 0xff;
   const g = (color >>> 16) & 0xff;
   const b = (color >>> 8) & 0xff;
-  const a = (color & 0xff) / 255;
+  const a = normalizeAlpha((color & 0xff) / 255);
   const c = rgbToOklch({ r, g, b });
   const args = [ce.number(c.L), ce.number(c.C), ce.number(c.H)];
-  if (Math.abs(a - 1) > 1e-4) args.push(ce.number(a));
+  if (a !== undefined) args.push(ce.number(a));
   return ce.function('Oklch', args);
 }
 
@@ -84,11 +118,8 @@ function readColorExpr(arg: any): {
   const c2 = arg.ops[2].re;
   if (!Number.isFinite(c0) || !Number.isFinite(c1) || !Number.isFinite(c2))
     return null;
-  let alpha: number | undefined;
-  if (arg.ops.length >= 4) {
-    const a = arg.ops[3].re;
-    if (Number.isFinite(a)) alpha = a;
-  }
+  const alpha =
+    arg.ops.length >= 4 ? normalizeAlpha(arg.ops[3].re) : undefined;
   return { space: arg.operator, c0, c1, c2, alpha };
 }
 
@@ -100,27 +131,22 @@ function readColorExpr(arg: any): {
 function colorExprToRgb(arg: any): RgbColor | null {
   const c = readColorExpr(arg);
   if (!c) return null;
+  // c.alpha is already normalized by readColorExpr — undefined ↔ opaque.
+  const withAlpha = (rgb: { r: number; g: number; b: number }): RgbColor =>
+    c.alpha !== undefined ? { ...rgb, alpha: c.alpha } : rgb;
   switch (c.space) {
     case 'Rgb':
       // Rgb head components are 0-1 sRGB; `@arnog/colors`'s RgbColor is
       // 0-255, so scale at the boundary.
-      return { r: c.c0 * 255, g: c.c1 * 255, b: c.c2 * 255, alpha: c.alpha };
-    case 'Hsv': {
-      const rgb = hsvToRgb(c.c0, c.c1, c.c2);
-      return { ...rgb, alpha: c.alpha };
-    }
-    case 'Hsl': {
-      const rgb = hslToRgb(c.c0, c.c1, c.c2);
-      return { r: rgb.r, g: rgb.g, b: rgb.b, alpha: c.alpha };
-    }
-    case 'Oklab': {
-      const rgb = oklabToRgb({ L: c.c0, a: c.c1, b: c.c2 });
-      return { r: rgb.r, g: rgb.g, b: rgb.b, alpha: c.alpha };
-    }
-    case 'Oklch': {
-      const rgb = oklchToRgb({ L: c.c0, C: c.c1, H: c.c2 });
-      return { r: rgb.r, g: rgb.g, b: rgb.b, alpha: c.alpha };
-    }
+      return withAlpha({ r: c.c0 * 255, g: c.c1 * 255, b: c.c2 * 255 });
+    case 'Hsv':
+      return withAlpha(hsvToRgb(c.c0, c.c1, c.c2));
+    case 'Hsl':
+      return withAlpha(hslToRgb(c.c0, c.c1, c.c2));
+    case 'Oklab':
+      return withAlpha(oklabToRgb({ L: c.c0, a: c.c1, b: c.c2 }));
+    case 'Oklch':
+      return withAlpha(oklchToRgb({ L: c.c0, C: c.c1, H: c.c2 }));
   }
   return null;
 }
@@ -202,15 +228,13 @@ function lerpOklchColor(a: OklchColor, b: OklchColor, t: number): OklchColor {
 
   const alphaA = a.alpha ?? 1;
   const alphaB = b.alpha ?? 1;
-  const alpha = alphaA + (alphaB - alphaA) * t;
-  return { L, C, H, alpha: Math.abs(alpha - 1) > 1e-4 ? alpha : undefined };
+  return { L, C, H, alpha: normalizeAlpha(alphaA + (alphaB - alphaA) * t) };
 }
 
 /** Build an Oklch boxed expression from an OklchColor. */
 function oklchToExpr(ce: any, c: OklchColor): any {
   const args = [ce.number(c.L), ce.number(c.C), ce.number(c.H)];
-  if (c.alpha !== undefined && Math.abs(c.alpha - 1) > 1e-4)
-    args.push(ce.number(c.alpha));
+  if (c.alpha !== undefined) args.push(ce.number(c.alpha));
   return ce.function('Oklch', args);
 }
 
@@ -223,12 +247,14 @@ function extractRgb(ce: any, arg: any): RgbColor | undefined {
     const s = arg.string;
     if (!s) return undefined;
     const color = parseColor(s);
-    return {
+    const rgb: RgbColor = {
       r: (color >>> 24) & 0xff,
       g: (color >>> 16) & 0xff,
       b: (color >>> 8) & 0xff,
-      alpha: (color & 0xff) / 255,
     };
+    const alpha = normalizeAlpha((color & 0xff) / 255);
+    if (alpha !== undefined) rgb.alpha = alpha;
+    return rgb;
   }
   const fromTyped = colorExprToRgb(arg);
   if (fromTyped) return fromTyped;
@@ -238,17 +264,19 @@ function extractRgb(ce: any, arg: any): RgbColor | undefined {
       g: arg.ops[1].re * 255,
       b: arg.ops[2].re * 255,
     };
-    if (arg.ops.length >= 4) rgb.alpha = arg.ops[3].re;
+    if (arg.ops.length >= 4) {
+      const alpha = normalizeAlpha(arg.ops[3].re);
+      if (alpha !== undefined) rgb.alpha = alpha;
+    }
     return rgb;
   }
   return undefined;
 }
 
-/** Build a Tuple expression from components, appending alpha if not 1. */
+/** Build a Tuple expression from components, appending alpha when defined. */
 function componentsTuple(ce: any, components: number[], alpha?: number): any {
   const args = components.map((v) => ce.number(v));
-  if (alpha !== undefined && Math.abs(alpha - 1) > 1e-4)
-    args.push(ce.number(alpha));
+  if (alpha !== undefined) args.push(ce.number(alpha));
   return ce.tuple(...args);
 }
 
@@ -260,7 +288,7 @@ function rgbToHex(rgb: RgbColor): string {
   const hex = `#${r.toString(16).padStart(2, '0')}${g
     .toString(16)
     .padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
-  if (rgb.alpha !== undefined && Math.abs(rgb.alpha - 1) > 1e-4) {
+  if (rgb.alpha !== undefined) {
     const a = Math.round(Math.max(0, Math.min(255, rgb.alpha * 255)));
     return hex + a.toString(16).padStart(2, '0');
   }
@@ -285,10 +313,10 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
       const r = (color >>> 24) & 0xff;
       const g = (color >>> 16) & 0xff;
       const b = (color >>> 8) & 0xff;
-      const a = (color & 0xff) / 255;
+      const a = normalizeAlpha((color & 0xff) / 255);
       const c = rgbToOklch({ r, g, b });
       const args = [ce.number(c.L), ce.number(c.C), ce.number(c.H)];
-      if (Math.abs(a - 1) > 1e-4) args.push(ce.number(a));
+      if (a !== undefined) args.push(ce.number(a));
       return ce.function('Oklch', args);
     },
   },
@@ -314,7 +342,7 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
           const r = Math.round(rgb.r);
           const g = Math.round(rgb.g);
           const b = Math.round(rgb.b);
-          if (rgb.alpha !== undefined && Math.abs(rgb.alpha - 1) > 1e-4)
+          if (rgb.alpha !== undefined)
             return ce.string(`rgb(${r} ${g} ${b} / ${rgb.alpha})`);
           return ce.string(`rgb(${r} ${g} ${b})`);
         }
@@ -324,7 +352,7 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
           const h = Math.round(hsl.h * 10) / 10;
           const s = Math.round(hsl.s * 1000) / 10;
           const l = Math.round(hsl.l * 1000) / 10;
-          if (rgb.alpha !== undefined && Math.abs(rgb.alpha - 1) > 1e-4)
+          if (rgb.alpha !== undefined)
             return ce.string(`hsl(${h} ${s}% ${l}% / ${rgb.alpha})`);
           return ce.string(`hsl(${h} ${s}% ${l}%)`);
         }
@@ -336,7 +364,7 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
           const L = Math.round(c.L * 1000) / 1000;
           const C = Math.round(c.C * 1000) / 1000;
           const H = Math.round(c.H * 10) / 10;
-          if (c.alpha !== undefined && Math.abs(c.alpha - 1) > 1e-4)
+          if (c.alpha !== undefined)
             return ce.string(`oklch(${L} ${C} ${H} / ${c.alpha})`);
           return ce.string(`oklch(${L} ${C} ${H})`);
         }
@@ -572,9 +600,9 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
       const r = ((packed >>> 24) & 0xff) / 255;
       const g = ((packed >>> 16) & 0xff) / 255;
       const b = ((packed >>> 8) & 0xff) / 255;
-      const alpha = (packed & 0xff) / 255;
+      const alpha = normalizeAlpha((packed & 0xff) / 255);
       const args = [ce.number(r), ce.number(g), ce.number(b)];
-      if (Math.abs(alpha - 1) > 1e-4) args.push(ce.number(alpha));
+      if (alpha !== undefined) args.push(ce.number(alpha));
       return ce.function('Rgb', args);
     },
   },
@@ -582,9 +610,9 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
   // ---------------------------------------------------------------------------
   // Color constructors. Each preserves its colorspace on evaluation; the
   // operator name is the discriminator. Components are interpreted per
-  // colorspace conventions (Rgb 0-255, Hsv/Hsl hue in degrees with sat/value
-  // 0-1, Oklab/Oklch L 0-1 with standard a/b/C/H ranges). The optional
-  // 4th argument is alpha in [0, 1]. No clamping at evaluation time.
+  // colorspace conventions (Rgb channels 0-1, Hsv/Hsl hue in degrees with
+  // sat/value 0-1, Oklab/Oklch L 0-1 with standard a/b/C/H ranges). The
+  // optional 4th argument is alpha in [0, 1]. No clamping at evaluation time.
   // ---------------------------------------------------------------------------
 
   Rgb: {
@@ -625,7 +653,8 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
     signature: '(color) -> color',
     evaluate: (ops, { engine: ce }) => {
       const arg = ops[0];
-      if (isFunction(arg) && arg.operator === 'Rgb') return arg;
+      if (isFunction(arg) && arg.operator === 'Rgb')
+        return normalizeColorHead(ce, arg);
       const rgb = colorExprToRgb(arg);
       if (!rgb) return ce.error('incompatible-type');
       // colorExprToRgb returns 0-255 channels (the `@arnog/colors` internal
@@ -635,8 +664,7 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
         ce.number(rgb.g / 255),
         ce.number(rgb.b / 255),
       ];
-      if (rgb.alpha !== undefined && Math.abs(rgb.alpha - 1) > 1e-4)
-        args.push(ce.number(rgb.alpha));
+      if (rgb.alpha !== undefined) args.push(ce.number(rgb.alpha));
       return ce.function('Rgb', args);
     },
   },
@@ -646,13 +674,13 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
     signature: '(color) -> color',
     evaluate: (ops, { engine: ce }) => {
       const arg = ops[0];
-      if (isFunction(arg) && arg.operator === 'Hsv') return arg;
+      if (isFunction(arg) && arg.operator === 'Hsv')
+        return normalizeColorHead(ce, arg);
       const rgb = colorExprToRgb(arg);
       if (!rgb) return ce.error('incompatible-type');
       const hsv = rgbToHsv(rgb.r, rgb.g, rgb.b);
       const args = [ce.number(hsv.h), ce.number(hsv.s), ce.number(hsv.v)];
-      if (rgb.alpha !== undefined && Math.abs(rgb.alpha - 1) > 1e-4)
-        args.push(ce.number(rgb.alpha));
+      if (rgb.alpha !== undefined) args.push(ce.number(rgb.alpha));
       return ce.function('Hsv', args);
     },
   },
@@ -662,13 +690,13 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
     signature: '(color) -> color',
     evaluate: (ops, { engine: ce }) => {
       const arg = ops[0];
-      if (isFunction(arg) && arg.operator === 'Hsl') return arg;
+      if (isFunction(arg) && arg.operator === 'Hsl')
+        return normalizeColorHead(ce, arg);
       const rgb = colorExprToRgb(arg);
       if (!rgb) return ce.error('incompatible-type');
       const hsl = rgbToHsl(rgb.r, rgb.g, rgb.b);
       const args = [ce.number(hsl.h), ce.number(hsl.s), ce.number(hsl.l)];
-      if (rgb.alpha !== undefined && Math.abs(rgb.alpha - 1) > 1e-4)
-        args.push(ce.number(rgb.alpha));
+      if (rgb.alpha !== undefined) args.push(ce.number(rgb.alpha));
       return ce.function('Hsl', args);
     },
   },
@@ -678,23 +706,22 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
     signature: '(color) -> color',
     evaluate: (ops, { engine: ce }) => {
       const arg = ops[0];
-      if (isFunction(arg) && arg.operator === 'Oklab') return arg;
+      if (isFunction(arg) && arg.operator === 'Oklab')
+        return normalizeColorHead(ce, arg);
       // Wide-gamut path: Oklch → Oklab without an sRGB pinch.
       if (isFunction(arg) && arg.operator === 'Oklch') {
         const c = readColorExpr(arg);
         if (!c) return ce.error('incompatible-type');
         const lab = oklchToOklab({ L: c.c0, C: c.c1, H: c.c2, alpha: c.alpha });
         const args = [ce.number(lab.L), ce.number(lab.a), ce.number(lab.b)];
-        if (lab.alpha !== undefined && Math.abs(lab.alpha - 1) > 1e-4)
-          args.push(ce.number(lab.alpha));
+        if (lab.alpha !== undefined) args.push(ce.number(lab.alpha));
         return ce.function('Oklab', args);
       }
       const rgb = colorExprToRgb(arg);
       if (!rgb) return ce.error('incompatible-type');
       const lab = rgbToOklab(rgb);
       const args = [ce.number(lab.L), ce.number(lab.a), ce.number(lab.b)];
-      if (rgb.alpha !== undefined && Math.abs(rgb.alpha - 1) > 1e-4)
-        args.push(ce.number(rgb.alpha));
+      if (rgb.alpha !== undefined) args.push(ce.number(rgb.alpha));
       return ce.function('Oklab', args);
     },
   },
@@ -704,7 +731,8 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
     signature: '(color) -> color',
     evaluate: (ops, { engine: ce }) => {
       const arg = ops[0];
-      if (isFunction(arg) && arg.operator === 'Oklch') return arg;
+      if (isFunction(arg) && arg.operator === 'Oklch')
+        return normalizeColorHead(ce, arg);
       // Wide-gamut path: Oklab → Oklch without an sRGB pinch.
       if (isFunction(arg) && arg.operator === 'Oklab') {
         const c = readColorExpr(arg);
@@ -716,16 +744,14 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
           alpha: c.alpha,
         });
         const args = [ce.number(oklch.L), ce.number(oklch.C), ce.number(oklch.H)];
-        if (oklch.alpha !== undefined && Math.abs(oklch.alpha - 1) > 1e-4)
-          args.push(ce.number(oklch.alpha));
+        if (oklch.alpha !== undefined) args.push(ce.number(oklch.alpha));
         return ce.function('Oklch', args);
       }
       const rgb = colorExprToRgb(arg);
       if (!rgb) return ce.error('incompatible-type');
       const c = rgbToOklch(rgb);
       const args = [ce.number(c.L), ce.number(c.C), ce.number(c.H)];
-      if (rgb.alpha !== undefined && Math.abs(rgb.alpha - 1) > 1e-4)
-        args.push(ce.number(rgb.alpha));
+      if (rgb.alpha !== undefined) args.push(ce.number(rgb.alpha));
       return ce.function('Oklch', args);
     },
   },

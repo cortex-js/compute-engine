@@ -1429,3 +1429,69 @@ describe('Regression: ColorFromColorspace accepts typed heads', () => {
     expect(result.ops![0].re).toBeCloseTo(0.5, 6);
   });
 });
+
+describe('Regression: alpha normalization', () => {
+  // Single rule: alpha is omitted from emitted expressions iff it is
+  // undefined, non-finite, or within float-noise tolerance of 1.
+
+  test('Rgb head with explicit alpha=1 emits 3-component output', () => {
+    // The user wrote alpha=1 explicitly; semantically opaque, so the
+    // round-trip should drop it (matches the "no explicit alpha" path).
+    const result = ce.expr(['AsRgb', ['Rgb', 1, 0, 0, 1]]).evaluate();
+    expect(result.operator).toBe('Rgb');
+    expect(result.ops!.length).toBe(3);
+  });
+
+  test('user-supplied near-1 alpha (0.9999) is preserved', () => {
+    // Tighter than the old 1e-4 threshold which would have silently dropped
+    // this value. Now only float-noise (< 1e-9) is collapsed.
+    const result = ce.expr(['AsRgb', ['Rgb', 1, 0, 0, 0.9999]]).evaluate();
+    expect(result.operator).toBe('Rgb');
+    expect(result.ops!.length).toBe(4);
+    expect(result.ops![3].re).toBeCloseTo(0.9999, 6);
+  });
+
+  test('non-finite alpha is treated as opaque', () => {
+    const result = ce.expr(['AsRgb', ['Rgb', 1, 0, 0, NaN]]).evaluate();
+    expect(result.operator).toBe('Rgb');
+    expect(result.ops!.length).toBe(3);
+  });
+
+  test('Tuple with non-finite alpha drops it', () => {
+    const result = ce
+      .expr(['ColorToString', ['Tuple', 1, 0, 0, NaN]])
+      .evaluate();
+    expect(result.string).toBe('#ff0000');
+  });
+
+  test('opaque hex string round-trips without alpha component', () => {
+    // Color() parses the string; AsOklch is identity on the resulting Oklch.
+    const expr = ce.expr(['AsOklch', ['Color', "'#ff0000'"]]).evaluate();
+    expect(expr.operator).toBe('Oklch');
+    expect(expr.ops!.length).toBe(3);
+  });
+
+  test('alpha=0 (fully transparent) is preserved', () => {
+    const result = ce.expr(['AsRgb', ['Rgb', 1, 0, 0, 0]]).evaluate();
+    expect(result.operator).toBe('Rgb');
+    expect(result.ops!.length).toBe(4);
+    expect(result.ops![3].re).toBe(0);
+  });
+
+  test('compiled colorMix preserves user-supplied 0.9999 alpha', () => {
+    const expr = ce.expr(['ColorMix', "'#ff0000ff'", "'#ff0000ff'", 0.5]);
+    const compiled = compile(expr);
+    expect(compiled.success).toBe(true);
+    const result = compiled.run!() as unknown as number[];
+    // Both inputs opaque, so result should have no 4th component.
+    expect(result).toHaveLength(3);
+  });
+
+  test('compiled _SYS.rgb with alpha=1 emits 3-component output', () => {
+    const expr = ce.expr(['Rgb', 1, 0, 0, 1]);
+    const compiled = compile(expr);
+    expect(compiled.success).toBe(true);
+    const result = compiled.run!() as unknown as number[];
+    expect(result).toHaveLength(3);
+  });
+});

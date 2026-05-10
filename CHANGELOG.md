@@ -48,9 +48,10 @@
   - **Constructor heads** (one per colorspace): `Rgb`, `Hsv`, `Hsl`,
     `Oklab`, `Oklch`. Each takes 3 components plus an optional 4th
     alpha argument. Components are interpreted per the colorspace's
-    own conventions — `Rgb` channels 0–255 (no parse-time clamp), HSV
-    /HSL hue in degrees, Oklab/Oklch with their standard ranges. The
-    operator name preserves the colorspace through evaluation.
+    own conventions — `Rgb` channels 0–1 sRGB (no parse-time clamp),
+    HSV/HSL hue in degrees with saturation/value/lightness 0–1,
+    Oklab/Oklch with their standard ranges. The operator name
+    preserves the colorspace through evaluation.
 
   - **LaTeX**: `\operatorname{rgb}(...)`, `\operatorname{hsv}(...)`,
     `\operatorname{hsl}(...)`, `\operatorname{oklab}(...)`,
@@ -75,6 +76,16 @@
     color formulas (`\operatorname{rgb}`, `\operatorname{hsv}`,
     `\operatorname{oklab}` were the most common unsupported color
     operators in their corpus).
+
+- **JavaScript compile-target support for color values** — all five
+  color constructor heads, the five `As*` converters, `ColorDelta`,
+  and `Distance` compile to runtime `_SYS.*` calls. At runtime a color
+  is a 3- or 4-element `[L, C, H]` (or `[L, C, H, alpha]`) array in
+  canonical OKLCh — the same shape produced by `Color()`, `ColorMix`,
+  `Colormap`, etc. (Mirrors the GPU target's design: color values are
+  `vec3` OKLCh in shader code.) `AsOklch` compiles as a no-op pass-
+  through. The compile-target representation is identical across JS,
+  GLSL, and WGSL, so values move between contexts without conversion.
 
 #### Changed
 
