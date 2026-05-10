@@ -807,8 +807,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // The GPU target maps `Distance` to the GLSL/WGSL `distance()` builtin
   // (vec-only); this JS handler works on plain arrays of any length.
   Distance: ([a, b], compile) => {
-    if (a === null || b === null)
-      throw new Error('Distance: need two points');
+    if (a === null || b === null) throw new Error('Distance: need two points');
     return `_SYS.distance(${compile(a)}, ${compile(b)})`;
   },
 };
@@ -1184,9 +1183,7 @@ const colorHelpers = {
     const r = rgb.r / 255;
     const g = rgb.g / 255;
     const b = rgb.b / 255;
-    return rgb.alpha !== undefined
-      ? [r, g, b, rgb.alpha]
-      : [r, g, b];
+    return rgb.alpha !== undefined ? [r, g, b, rgb.alpha] : [r, g, b];
   },
   asHsv(input: string | number[]): number[] {
     const rgb = toRgb255(input);
@@ -1223,8 +1220,7 @@ const colorHelpers = {
   distance(a: number[], b: number[]): number {
     if (!Array.isArray(a) || !Array.isArray(b))
       throw new Error('Distance: expected two arrays');
-    if (a.length !== b.length)
-      throw new Error('Distance: dimension mismatch');
+    if (a.length !== b.length) throw new Error('Distance: dimension mismatch');
     let sumSq = 0;
     for (let i = 0; i < a.length; i++) {
       const d = a[i] - b[i];

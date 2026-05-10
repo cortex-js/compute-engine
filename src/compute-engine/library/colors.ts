@@ -21,7 +21,11 @@ import {
   DIVERGING_PALETTES,
 } from '@arnog/colors';
 import type { OklchColor, RgbColor } from '@arnog/colors';
-import { isFunction, isNumber, isString } from '../boxed-expression/type-guards';
+import {
+  isFunction,
+  isNumber,
+  isString,
+} from '../boxed-expression/type-guards';
 
 /**
  * Canonicalize an alpha value. Returns `undefined` for undefined, non-finite,
@@ -92,7 +96,10 @@ function samplePalette(ce: any, palette: readonly string[], t: number): any {
   if (frac < 1e-9) return colorNumberToOklch(ce, parseColor(palette[i]));
 
   // interpolateOklch returns an RgbColor (gamut-clipped). Rewrap as Oklch.
-  return oklchToExpr(ce, asOklch(interpolateOklch(palette[i], palette[i + 1], frac)));
+  return oklchToExpr(
+    ce,
+    asOklch(interpolateOklch(palette[i], palette[i + 1], frac))
+  );
 }
 
 /** Heads recognized as color values. */
@@ -118,8 +125,7 @@ function readColorExpr(arg: any): {
   const c2 = arg.ops[2].re;
   if (!Number.isFinite(c0) || !Number.isFinite(c1) || !Number.isFinite(c2))
     return null;
-  const alpha =
-    arg.ops.length >= 4 ? normalizeAlpha(arg.ops[3].re) : undefined;
+  const alpha = arg.ops.length >= 4 ? normalizeAlpha(arg.ops[3].re) : undefined;
   return { space: arg.operator, c0, c1, c2, alpha };
 }
 
@@ -378,7 +384,8 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
   ColorMix: {
     description: 'Mix two colors in OKLCh space',
     complexity: 8000,
-    signature: '(color | string | tuple, color | string | tuple, number?) -> color',
+    signature:
+      '(color | string | tuple, color | string | tuple, number?) -> color',
     evaluate: (ops, { engine: ce }) => {
       let ratio = 0.5;
       if (ops.length >= 3 && ops[2] !== undefined) {
@@ -580,7 +587,8 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
     description:
       'Choose the foreground color with better APCA contrast against a background',
     complexity: 8000,
-    signature: '(color | string | tuple, (color | string | tuple)?, (color | string | tuple)?) -> color',
+    signature:
+      '(color | string | tuple, (color | string | tuple)?, (color | string | tuple)?) -> color',
     evaluate: (ops, { engine: ce }) => {
       const bgRgb = extractRgb(ce, ops[0]);
       if (!bgRgb) return ce.error('incompatible-type');
@@ -621,12 +629,14 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
     signature: '(number, number, number, number?) -> color',
   },
   Hsv: {
-    description: 'HSV color (hue degrees, saturation/value 0-1, optional alpha)',
+    description:
+      'HSV color (hue degrees, saturation/value 0-1, optional alpha)',
     complexity: 8000,
     signature: '(number, number, number, number?) -> color',
   },
   Hsl: {
-    description: 'HSL color (hue degrees, saturation/lightness 0-1, optional alpha)',
+    description:
+      'HSL color (hue degrees, saturation/lightness 0-1, optional alpha)',
     complexity: 8000,
     signature: '(number, number, number, number?) -> color',
   },
@@ -743,7 +753,11 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
           b: c.c2,
           alpha: c.alpha,
         });
-        const args = [ce.number(oklch.L), ce.number(oklch.C), ce.number(oklch.H)];
+        const args = [
+          ce.number(oklch.L),
+          ce.number(oklch.C),
+          ce.number(oklch.H),
+        ];
         if (oklch.alpha !== undefined) args.push(ce.number(oklch.alpha));
         return ce.function('Oklch', args);
       }

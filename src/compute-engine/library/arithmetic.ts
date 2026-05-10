@@ -1860,12 +1860,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
 
     Distance: {
-      description:
-        'Euclidean distance between two points (tuples of numbers).',
+      description: 'Euclidean distance between two points (tuples of numbers).',
       complexity: 6000,
       signature: '(tuple, tuple) -> number',
       evaluate: ([a, b], { engine: ce }) => {
-        if (!isFunction(a) || !isFunction(b)) return ce.error('incompatible-type');
+        if (!isFunction(a) || !isFunction(b))
+          return ce.error('incompatible-type');
         if (a.operator !== 'Tuple' || b.operator !== 'Tuple')
           return ce.error('incompatible-type');
         if (a.ops!.length !== b.ops!.length || a.ops!.length === 0)
