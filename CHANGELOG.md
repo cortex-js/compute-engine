@@ -1,131 +1,86 @@
-### Unreleased
+### 0.56.0 _2026-03-10_
 
 #### Added
 
-- **Function-style aliases for collection / arithmetic operators** —
-  the lowercase `\operatorname{...}` forms common in Desmos-style and
-  procedural notations now parse to their existing capitalized
-  counterparts:
-  - `\operatorname{mod}(a, b)` → `Mod`
-  - `\operatorname{var}(L)` → `Variance`
-  - `\operatorname{shuffle}(L)` → `Shuffle`
-  - `\operatorname{random}()` → `Random`
-  - `\operatorname{repeat}(x)` → `Repeat`
-  - `\operatorname{join}(L1, L2, ...)` → `Join`
-  No semantic change — the operators themselves were already
-  registered, just under their capitalized names.
-
-- **`Distance(p1, p2)`** — Euclidean distance between two points
-  represented as tuples. Accepts any positive dimension; mismatched
-  dimensions return a typed error. LaTeX trigger
-  `\operatorname{distance}(p1, p2)`.
-
-- **Geometric primitive heads** — `Triangle`, `Sphere`, `Segment`
-  registered as opaque typed function heads (signature only, no
-  evaluator). Parsed but preserved structurally; consumers branch on
-  the operator name. LaTeX triggers `\operatorname{triangle}`,
-  `\operatorname{sphere}`, `\operatorname{segment}`. Same shape as the
-  existing `["To", a, b]` pattern.
-
-- **`To` library entry** — `\to` already parsed to `["To", a, b]`,
-  but the head wasn't in the standard operator set, so rows containing
-  it were classified as `unsupported-operator`. The library entry
-  declares the head's signature (no evaluator) so the classification
-  reflects reality: this is a known typed action node.
-
-- **`GeometricVector` head** — `\operatorname{vector}(p1, p2)` (Desmos's
-  geometric form: a directed segment between two points) parses to a
-  new opaque typed head. Distinct from the existing `Vector` operator
-  for column-vector construction (`(number+) -> vector` signature), so
-  aliasing the LaTeX trigger to it would have either constrained
-  Desmos's input shape or forced a signature widening. New head, no
-  evaluator — same shape as `Triangle`/`Sphere`/`Segment`.
-
-- **First-class color values** — colors are now typed values with their
-  own primitive type (`color`) and per-colorspace constructor heads,
-  rather than anonymous tuples.
-
-  - **Constructor heads** (one per colorspace): `Rgb`, `Hsv`, `Hsl`,
-    `Oklab`, `Oklch`. Each takes 3 components plus an optional 4th
-    alpha argument. Components are interpreted per the colorspace's
-    own conventions — `Rgb` channels 0–1 sRGB (no parse-time clamp),
-    HSV/HSL hue in degrees with saturation/value/lightness 0–1,
-    Oklab/Oklch with their standard ranges. The operator name
-    preserves the colorspace through evaluation.
-
+- **First-class color values** — colors are now typed values with a dedicated
+  `color` primitive type and per-colorspace constructor heads, rather than
+  anonymous tuples.
+  - **Constructor heads**: `Rgb`, `Hsv`, `Hsl`, `Oklab`, `Oklch`. Each takes 3
+    components plus an optional alpha. Channels follow each colorspace's own
+    conventions (RGB: 0–1 sRGB; HSV/HSL: hue in degrees, S/V/L 0–1; Oklab/Oklch:
+    standard ranges).
   - **LaTeX**: `\operatorname{rgb}(...)`, `\operatorname{hsv}(...)`,
     `\operatorname{hsl}(...)`, `\operatorname{oklab}(...)`,
-    `\operatorname{oklch}(...)`. 1:1 with the heads, both directions.
+    `\operatorname{oklch}(...)`, parsing and serialization both directions.
+  - **Conversions**: `AsRgb`, `AsHsv`, `AsHsl`, `AsOklab`, `AsOklch` convert any
+    color to the named space (identity if already there).
+  - **`ColorDelta(a, b)`** — perceptual color difference (ΔE_OK, Euclidean
+    distance in OKLab). Wide-gamut inputs are not clipped before measurement.
 
-  - **Conversions**: `AsRgb`, `AsHsv`, `AsHsl`, `AsOklab`, `AsOklch`
-    convert any color to the named space (identity if already there).
-    Oklab↔Oklch routes directly via polar/cartesian conversion;
-    sRGB-based spaces go through RGB.
+- **JavaScript compile-target support for color values** — all color
+  constructors, the `As*` converters, `ColorDelta`, and `Distance` are
+  supported. At runtime a color is a 3- or 4-element OKLCh array
+  (`[L, C, H]` or `[L, C, H, alpha]`), matching the GPU target's `vec3`/`vec4`
+  representation, so values move between JS, GLSL, and WGSL without conversion.
 
-  - **`ColorDelta(a, b)`** — perceptual color difference (ΔE_OK,
-    Euclidean distance in OKLab). Wide-gamut inputs are not clipped
-    before measurement.
+- **`Distance(p1, p2)`** — Euclidean distance between two points represented as
+  tuples. Accepts any positive dimension; mismatched dimensions return a typed
+  error. LaTeX trigger `\operatorname{distance}(p1, p2)`.
 
-  - **`color` primitive type** — added to `PrimitiveType`. Subtype of
-    `value`. Used in the signatures of all color constructors,
-    conversions, `Color`, `ColorMix`, `ContrastingColor`, and the
-    color-input slots of `ColorDelta`/`ColorContrast`/`ColorToString`/
-    `ColorToColorspace`/`ColorFromColorspace`.
+- **Geometric primitive heads** — `Triangle`, `Sphere`, `Segment`, and
+  `GeometricVector` are now recognized as typed function heads (no evaluator,
+  preserved structurally for downstream consumers). LaTeX triggers
+  `\operatorname{triangle}`, `\operatorname{sphere}`, `\operatorname{segment}`,
+  `\operatorname{vector}(p1, p2)`. `GeometricVector` is distinct from the
+  existing `Vector` (column-vector construction).
 
-  - Driven by the Graph Paper team's roadmap for parsing Desmos-style
-    color formulas (`\operatorname{rgb}`, `\operatorname{hsv}`,
-    `\operatorname{oklab}` were the most common unsupported color
-    operators in their corpus).
+- **`To` head registered** — `\to` already parsed to `["To", a, b]` but was
+  classified as `unsupported-operator`; it is now a known typed head.
 
-- **JavaScript compile-target support for color values** — all five
-  color constructor heads, the five `As*` converters, `ColorDelta`,
-  and `Distance` compile to runtime `_SYS.*` calls. At runtime a color
-  is a 3- or 4-element `[L, C, H]` (or `[L, C, H, alpha]`) array in
-  canonical OKLCh — the same shape produced by `Color()`, `ColorMix`,
-  `Colormap`, etc. (Mirrors the GPU target's design: color values are
-  `vec3` OKLCh in shader code.) `AsOklch` compiles as a no-op pass-
-  through. The compile-target representation is identical across JS,
-  GLSL, and WGSL, so values move between contexts without conversion.
+- **Function-style aliases** — lowercase `\operatorname{...}` forms common in
+  Desmos-style notation now parse to their existing capitalized operators:
+  `\operatorname{mod}` → `Mod`, `\operatorname{var}` → `Variance`,
+  `\operatorname{shuffle}` → `Shuffle`, `\operatorname{random}` → `Random`,
+  `\operatorname{repeat}` → `Repeat`, `\operatorname{join}` → `Join`.
+
+- **`ce.latexOptions`** — new mutable, engine-wide bag of LaTeX parse/serialize
+  options (e.g. `decimalSeparator`, `digitGroupSeparator`). Available as a
+  constructor option and as a read/write property:
+  ```ts
+  const ce = new ComputeEngine({ latexOptions: { decimalSeparator: '{,}' } });
+  // or post-construction:
+  ce.latexOptions = { decimalSeparator: '{,}' };
+  ```
+  These options are merged into every `ce.parse()` and `expr.toLatex()` call.
+  Precedence (most-specific wins): `LatexSyntax` instance defaults <
+  `ce.latexOptions` < per-call options. Previously, options like
+  `decimalSeparator` could only be changed per call post-construction (and
+  `expr.latex` could not be customized at all).
 
 #### Changed
 
-- **`Color('...')`** now returns an `Oklch` head instead of a 0–1 sRGB
-  `Tuple`. Oklch is the canonical wide-gamut representation; downstream
-  code can convert via `AsRgb` etc. The string parser still accepts the
-  same set of CSS-style inputs.
-
-- **`ColorMix`** now returns an `Oklch` head regardless of input form
-  (was: 0–1 sRGB `Tuple`). When both inputs are typed color heads, the
-  mix happens in OKLCh directly without an sRGB pinch, preserving
-  out-of-gamut chroma. Hue interpolation takes the shortest path around
-  the wheel; mixing with an achromatic endpoint carries the other
+- **`Color('...')`** now returns an `Oklch` head instead of a 0–1 sRGB `Tuple`.
+  The string parser still accepts the same set of CSS-style inputs.
+- **`ColorMix`** now returns an `Oklch` head and mixes in OKLCh directly,
+  preserving out-of-gamut chroma. Hue interpolation takes the shortest path
+  around the wheel; mixing with an achromatic endpoint carries the other
   endpoint's hue (matches CSS Color 4 `color-mix`).
-
-- **`ContrastingColor`** now returns an `Rgb` head (was: 0–1 sRGB
-  `Tuple`). White and black are sRGB by definition, so `Rgb(1, 1, 1)`
-  and `Rgb(0, 0, 0)` are the natural representations.
-
-- **`Colormap`** now returns `Oklch` heads — either a `List(Oklch, ...)`
-  for full-palette / N-color resampling, or a single `Oklch` for
-  position-sampling.
-
-- **`ColorToString`** with `'oklch'` format now serializes typed color
-  inputs without an sRGB round-trip; out-of-gamut chroma serializes
-  losslessly. `'hex'`/`'rgb'`/`'hsl'` paths unchanged (sRGB is the
-  destination, so clipping is correct).
-
+- **`ContrastingColor`** now returns an `Rgb` head (was: 0–1 sRGB `Tuple`).
+- **`Colormap`** now returns `Oklch` heads — either a `List(Oklch, ...)` or a
+  single `Oklch` for position-sampling.
+- **`ColorToString`** with `'oklch'` format serializes typed color inputs
+  without an sRGB round-trip; out-of-gamut chroma serializes losslessly.
+  `'hex'`/`'rgb'`/`'hsl'` paths are unchanged.
 - **Color-consuming signatures tightened** — `(any, any)` →
   `(color | string | tuple, color | string | tuple)` for `ColorDelta`,
   `ColorContrast`, `ColorMix`, `ContrastingColor`, `ColorToString`,
-  `ColorToColorspace`. The `As*` converters tightened further to
-  `(color) -> color` since they only accept typed color heads.
+  `ColorToColorspace`. The `As*` converters take `(color) -> color`.
 
 #### Migration notes
 
-Code that consumed `Color('...')`'s tuple output, or the tuple output
-of `ColorMix` / `ContrastingColor` / `Colormap`, now sees a typed color
-head. To reconstruct the previous shape, wrap with the appropriate
-converter:
+Code that consumed the tuple output of `Color('...')`, `ColorMix`,
+`ContrastingColor`, or `Colormap` now sees a typed color head. To get the
+previous 0–1 sRGB shape, wrap with `AsRgb`:
 
 ```ts
 // Before: const tuple = ce.expr(['Color', "'red'"]).evaluate();  // [r, g, b] in 0-1
@@ -134,122 +89,45 @@ const rgb = ce.expr(['AsRgb', ['Color', "'red'"]]).evaluate();
 // rgb is ['Rgb', r, g, b] with channels 0-1
 ```
 
-**RGB channel convention**: `Rgb` head components are **0–1 sRGB** across
-all layers (engine, JS compile, GPU compile). This is a uniform convention
-chosen for shader-pipeline interoperability and for round-trip simplicity
-(`Rgb(r, g, b) → AsRgb → [r, g, b]` matches the input). Consumers parsing
-Desmos-style formulas (which use 0–255) should normalize at the
-adapter/importer layer — `Rgb(255, 0, 0)` in Desmos source maps to
-`Rgb(1, 0, 0)` in CE.
-
-- **`ce.latexOptions`** — new mutable, engine-wide bag of LaTeX
-  parse/serialize options (e.g. `decimalSeparator`, `digitGroupSeparator`).
-  Available as a constructor option and as a read/write property:
-  ```ts
-  const ce = new ComputeEngine({ latexOptions: { decimalSeparator: '{,}' } });
-  // or post-construction:
-  ce.latexOptions = { decimalSeparator: '{,}' };
-  ```
-  These are merged into every `ce.parse()` and `expr.toLatex()` call.
-  Precedence (most-specific wins): LatexSyntax instance defaults <
-  `ce.latexOptions` < per-call options. Previously, the only way to change
-  options like `decimalSeparator` post-construction was per call (and the
-  `expr.latex` getter could not be customized at all).
+`Rgb` head components are **0–1 sRGB** across all layers (engine, JS compile,
+GPU compile).
 
 #### Fixed
 
 - **Super-linear parse time on deeply-nested parametric expressions** —
-  `ce.parse()` could exhibit exponential blowup on inputs like nested
-  rotation matrices `\left(\cos(\theta)\cdot S+\sin(\theta)\right)`
-  (depth 6 took ~44s; depth 7 would take minutes). Two underlying causes:
+  `ce.parse()` could exhibit exponential blowup on inputs like nested rotation
+  matrices `\left(\cos(\theta)\cdot S+\sin(\theta)\right)` (depth 6 took ~44s).
+  Two underlying causes were addressed: the type/sign cache on `BoxedFunction`
+  was effectively disabled (causing every `.type` access to recurse through all
+  operands), and `parseEnclosure` was speculatively trying matchfix definitions
+  whose close-delimiter token wasn't even present in the input. Parse time on
+  the affected inputs is now linear.
 
-  - The `cachedValue()` helper that backs type / sign caches on
-    `BoxedFunction` had its early-return guard commented out, so every
-    `.type` access recomputed the type by recursing into all operand
-    types. With cache disabled, an expression of nesting depth `d`
-    triggered O(2^d) type recomputations during canonicalization.
-
-    The guard had been disabled because the original form was buggy:
-
-    ```js
-    if (v.generation === undefined || v.generation === generation) {
-      if (v.value === null) v.value = fn();
-      return v.value;
-    }
-    ```
-
-    On a fresh cache `v.generation` is `undefined`, so the first call
-    took the early-return branch, computed `v.value`, and returned —
-    but never updated `v.generation` from `undefined`. Every later
-    call, regardless of the requested generation, also matched
-    `=== undefined` and returned the same stale value. The cache
-    effectively never invalidated. Disabling it fixed staleness at the
-    cost of all caching.
-
-    Re-enabled with a corrected guard that compares against the
-    requested generation directly, so first-compute updates
-    `v.generation` and subsequent calls invalidate correctly when the
-    engine generation advances:
-
-    ```js
-    if (v.generation === generation && v.value !== null) return v.value;
-    v.generation = generation;
-    v.value = fn();
-    return v.value;
-    ```
-
-  - `parseEnclosure` tried every matchfix definition that matched the
-    open delimiter, parsing the body twice for each (once with the
-    boundary, once without). For invalid inputs containing many `.`
-    tokens (e.g. Desmos's `p.x` field-access syntax), the
-    `EvaluateAt` matchfix (`.` … `|`) was attempted on every `.` even
-    though `|` was nowhere in the input, and each speculative body
-    parse contained more nested `.` triggers. Two changes address this:
-    a pre-check (using a `closeTokens` set pre-computed at dictionary
-    indexing time) skips matchfix defs whose close trigger can't appear
-    ahead in the token stream; and the `EvaluateAt` def is no longer
-    tried on bare `.` (the canonical form is `\left.expr\right|_{x=0}`,
-    which the pre-check still admits via the `\left` prefix), so a `.`
-    without a `\left`/`\mathopen`/etc. prefix never speculates as
-    `EvaluateAt`.
-
-  Combined, deeply-nested expressions and large invalid inputs (the
-  Desmos corpus's worst row was 1006 chars and previously hung
-  indefinitely) now parse in milliseconds. On the Desmos corpus
-  benchmark (2,092 probes at 5s budget), parse-timeouts dropped from
-  62 to 3 — a 95% reduction.
-
-- **`ce.parse()` ignored the injected LatexSyntax instance's
+- **`ce.parse()` ignored the injected `LatexSyntax` instance's
   `decimalSeparator`** — `ce.parse()` hardcoded `decimalSeparator: '.'`,
-  silently overriding any value configured on the `LatexSyntax` passed
-  via the constructor's `latexSyntax` option. The hardcoded default has
-  been removed; the injected instance's configured separator now takes
-  effect end-to-end.
+  silently overriding any value configured on a `LatexSyntax` passed via the
+  constructor's `latexSyntax` option. The injected instance's configured
+  separator now takes effect end-to-end.
 
-- **`expr.toMathJson({ metadata: ['latex'] })` was silently dropped** —
-  passing a metadata array containing only specific fields (e.g.
-  `['latex']` or `['wikidata']`) was ignored because the option fell
-  through and the final spread overrode it with the empty default. Only
-  `metadata: ['all']` worked. The array case now correctly populates
-  the requested metadata fields.
+- **`expr.toMathJson({ metadata: ['latex'] })` was silently dropped** — passing
+  a metadata array of specific fields (e.g. `['latex']` or `['wikidata']`) was
+  ignored; only `metadata: 'all'` worked. The array form now correctly
+  populates the requested fields.
 
-- **`expr.toMathJson({ shorthands: ['all'] })` disabled all shorthands** —
-  the `'all'` branch correctly expanded the defaults to the full kind
-  list, but a following unconditional `if (Array.isArray(...))`
-  overwrote it back to the literal `['all']`, which matches no actual
-  shorthand kind. So passing `['all']` had the opposite effect of what
-  was intended. The string form `'all'` and explicit lists like
-  `['function']` were unaffected.
+- **`expr.toMathJson({ shorthands: ['all'] })` disabled all shorthands** — the
+  `['all']` array form had the opposite of its intended effect. The string form
+  `'all'` and explicit lists like `['function']` were unaffected.
 
 ### 0.55.6 _2026-03-08_
 
 #### Fixed
 
-- **LaTeX parsing: `\lim` with postfix operators** — `\lim_{x\to 0}\left(x\right)^x`
-  now correctly parses as `Limit(x^x)` instead of `Power(Limit(x), x)`. The
-  `\lim` parser was using `parseArguments('implicit')` which stripped the
-  delimiters and left the `^x` unconsumed; it now uses `parseExpression` so
-  postfix operators are included in the limit body.
+- **LaTeX parsing: `\lim` with postfix operators** —
+  `\lim_{x\to 0}\left(x\right)^x` now correctly parses as `Limit(x^x)` instead
+  of `Power(Limit(x), x)`. The `\lim` parser was using
+  `parseArguments('implicit')` which stripped the delimiters and left the `^x`
+  unconsumed; it now uses `parseExpression` so postfix operators are included in
+  the limit body.
 
 - **LaTeX parsing: style, size, and color switch commands** — `\displaystyle`,
   `\textstyle`, `\scriptstyle`, `\scriptscriptstyle`, `\tiny`..`\Huge` (10 size
