@@ -717,6 +717,7 @@ export class BigDecimal {
       // precision after each multiply to prevent exponential significand growth.
       const prec = BigDecimal.precision;
       let result: BigDecimal = fromRaw(1n, 0);
+      // eslint-disable-next-line @typescript-eslint/no-this-alias
       let base: BigDecimal = this;
       let exp = expValue;
 

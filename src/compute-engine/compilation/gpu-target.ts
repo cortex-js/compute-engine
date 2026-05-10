@@ -1,5 +1,9 @@
 import type { Expression } from '../global-types';
-import { isFunction, isNumber, isSymbol } from '../boxed-expression/type-guards';
+import {
+  isFunction,
+  isNumber,
+  isSymbol,
+} from '../boxed-expression/type-guards';
 import {
   tryGetConstant,
   foldTerms,
@@ -165,7 +169,6 @@ function compileGPUSumProduct(
   return lines.join('\n');
 }
 
-
 /**
  * GPU shader functions shared by GLSL and WGSL.
  *
@@ -238,8 +241,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
         : (iFactor as any).im;
       const realFactors = args.filter((_, i) => i !== iIndex);
       const v2 = gpuVec2(target);
-      if (realFactors.length === 0)
-        return `${v2}(0.0, ${formatFloat(iScale)})`;
+      if (realFactors.length === 0) return `${v2}(0.0, ${formatFloat(iScale)})`;
       const factors = realFactors.map((f) => compile(f));
       if (iScale !== 1) factors.unshift(formatFloat(iScale));
       const imCode = foldTerms(factors, '1.0', '*');
@@ -296,8 +298,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     if (isNumber(x) && x.im !== 0) {
       return `${gpuVec2(target)}(${formatFloat(-x.re)}, ${formatFloat(-x.im)})`;
     }
-    if (isSymbol(x, 'ImaginaryUnit'))
-      return `${gpuVec2(target)}(0.0, -1.0)`;
+    if (isSymbol(x, 'ImaginaryUnit')) return `${gpuVec2(target)}(0.0, -1.0)`;
     return `(-${compile(x)})`;
   },
 
@@ -2099,7 +2100,6 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
           : GPU_COLOR_PREAMBLE_GLSL;
     }
     if (preamble) result.preamble = preamble;
-
 
     return result;
   }

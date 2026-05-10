@@ -1,6 +1,7 @@
 # BigDecimal
 
-Arbitrary-precision decimal arithmetic for TypeScript, backed by native `bigint`.
+Arbitrary-precision decimal arithmetic for TypeScript, backed by native
+`bigint`.
 
 Built as a replacement for [decimal.js](https://github.com/MikeMcl/decimal.js/)
 in the Compute Engine, with the goal of being faster while matching or exceeding
@@ -22,20 +23,20 @@ and the exponent adjusted. This means equal values have identical
 
 Special values use sentinel exponents:
 
-| Value        | significand | exponent   |
-| ------------ | ----------- | ---------- |
-| NaN          | `0n`        | `NaN`      |
-| +Infinity    | `1n`        | `Infinity` |
-| -Infinity    | `-1n`       | `Infinity` |
+| Value     | significand | exponent   |
+| --------- | ----------- | ---------- |
+| NaN       | `0n`        | `NaN`      |
+| +Infinity | `1n`        | `Infinity` |
+| -Infinity | `-1n`       | `Infinity` |
 
 ## Module Structure
 
-| File                 | Purpose                                                 |
-| -------------------- | ------------------------------------------------------- |
-| `big-decimal.ts`     | Core class: construction, arithmetic, comparison, conversion, formatting |
+| File                 | Purpose                                                                                                                                                                 |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `big-decimal.ts`     | Core class: construction, arithmetic, comparison, conversion, formatting                                                                                                |
 | `transcendentals.ts` | `sqrt`, `cbrt`, `exp`, `ln`, `sin`, `cos`, `tan`, `atan`, `asin`, `acos`, `sinh`, `cosh`, `tanh`, `atan2` -- attached to `BigDecimal.prototype` via declaration merging |
-| `utils.ts`           | Fixed-point bigint primitives (`fpsqrt`, `fpexp`, `fpln`, `fpsincos`, `fpatan`), `pow10` cache, `bigintDigits`, PI constant (2370 digits) |
-| `index.ts`           | Barrel export; imports `transcendentals.ts` for side effects |
+| `utils.ts`           | Fixed-point bigint primitives (`fpsqrt`, `fpexp`, `fpln`, `fpsincos`, `fpatan`), `pow10` cache, `bigintDigits`, PI constant (2370 digits)                               |
+| `index.ts`           | Barrel export; imports `transcendentals.ts` for side effects                                                                                                            |
 
 ## Precision Model
 
@@ -112,6 +113,7 @@ intermediate precision loss.
 ### Hyperbolic functions
 
 Built on `exp`:
+
 - `sinh(x) = (exp(x) - 1/exp(x)) / 2`
 - `cosh(x) = (exp(x) + 1/exp(x)) / 2`
 - `tanh(x) = (exp(2x) - 1) / (exp(2x) + 1)`
@@ -120,21 +122,21 @@ Built on `exp`:
 
 Benchmarked at precisions 50, 100, and 500. Representative speedups:
 
-| Operation  | p=50   | p=100   | p=500    |
-| ---------- | ------ | ------- | -------- |
-| add        | 1.9x   | ~1x     | ~1x      |
-| sub        | 2.8x   | 4.0x    | 1.6x     |
-| mul        | 8.3x   | 4.2x    | 6.6x     |
-| div        | 2.4x   | 1.4x    | 3.4x     |
-| eq         | 5.3x   | 8.5x    | 8.8x     |
-| sqrt       | 7.0x   | 7.8x    | 40x      |
-| cbrt       | 13x    | 20x     | 153x     |
-| exp        | 9.0x   | 13x     | 44x      |
-| ln         | 2.7x   | 7.3x    | 11x      |
-| sin        | 3.5x   | 3.7x    | 3.8x     |
-| cos        | 3.5x   | 3.5x    | 4.4x     |
-| atan       | 72x    | 120x    | 599x     |
-| asin       | 35x    | 87x     | 208x     |
+| Operation | p=50 | p=100 | p=500 |
+| --------- | ---- | ----- | ----- |
+| add       | 1.9x | ~1x   | ~1x   |
+| sub       | 2.8x | 4.0x  | 1.6x  |
+| mul       | 8.3x | 4.2x  | 6.6x  |
+| div       | 2.4x | 1.4x  | 3.4x  |
+| eq        | 5.3x | 8.5x  | 8.8x  |
+| sqrt      | 7.0x | 7.8x  | 40x   |
+| cbrt      | 13x  | 20x   | 153x  |
+| exp       | 9.0x | 13x   | 44x   |
+| ln        | 2.7x | 7.3x  | 11x   |
+| sin       | 3.5x | 3.7x  | 3.8x  |
+| cos       | 3.5x | 3.5x  | 4.4x  |
+| atan      | 72x  | 120x  | 599x  |
+| asin      | 35x  | 87x   | 208x  |
 
 Accuracy is identical: both libraries produce the same significant digits at
 every tested precision (verified via cross-validation tests).
@@ -163,15 +165,15 @@ every tested precision (verified via cross-validation tests).
   series as a rational `P/Q` via a divide-and-conquer tree, deferring the single
   final division. This is asymptotically faster for high precision.
 
-- **Lazy normalization**: `add` and `sub` normalize on every call (strip trailing
-  zeros). Deferring normalization to "observation points" (toString, comparisons)
-  could speed up chains of additions, at the cost of more complex invariant
-  management.
+- **Lazy normalization**: `add` and `sub` normalize on every call (strip
+  trailing zeros). Deferring normalization to "observation points" (toString,
+  comparisons) could speed up chains of additions, at the cost of more complex
+  invariant management.
 
-- **Subquadratic multiplication threshold**: For very high precisions
-  (p > 10000), the native bigint multiply becomes the bottleneck. A
-  Number-Theoretic Transform (NTT) based multiplication could help, though V8
-  already uses Karatsuba/Toom-Cook internally.
+- **Subquadratic multiplication threshold**: For very high precisions (p >
+  10000), the native bigint multiply becomes the bottleneck. A Number-Theoretic
+  Transform (NTT) based multiplication could help, though V8 already uses
+  Karatsuba/Toom-Cook internally.
 
 - **PI computation**: The hardcoded 2370-digit constant limits working precision
   to ~2350 digits. For higher precisions, a Chudnovsky or Machin-like formula

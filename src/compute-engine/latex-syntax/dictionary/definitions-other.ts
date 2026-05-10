@@ -16,8 +16,20 @@ import { joinLatex } from '../tokenizer';
 
 // TeX dimension units (each letter is a separate token from the tokenizer)
 const TEX_UNITS = [
-  'pt', 'em', 'mu', 'ex', 'mm', 'cm', 'in', 'bp', 'sp', 'dd', 'cc', 'pc',
-  'nc', 'nd',
+  'pt',
+  'em',
+  'mu',
+  'ex',
+  'mm',
+  'cm',
+  'in',
+  'bp',
+  'sp',
+  'dd',
+  'cc',
+  'pc',
+  'nc',
+  'nd',
 ];
 
 /** Skip an inline TeX dimension (e.g., `3mu`, `-5pt`, `0.5em`).
@@ -58,9 +70,7 @@ function parseMathStyleSwitch(
 
 /** Parse a LaTeX "switch" command that sets a font size for everything
  *  following it in the current group (e.g. `{\large x+y}`). */
-function parseSizeSwitch(
-  size: number
-): (parser: Parser) => MathJsonExpression {
+function parseSizeSwitch(size: number): (parser: Parser) => MathJsonExpression {
   return (parser) => {
     const body = parser.parseExpression();
     if (body !== null && !isEmptySequence(body))

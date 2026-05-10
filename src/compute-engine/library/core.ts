@@ -378,8 +378,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         const parts: string[] = [];
         for (const op of ops) {
           // Unwrap Annotated (strip style annotations)
-          const unwrapped =
-            op.operator === 'Annotated' ? op.op1 : op;
+          const unwrapped = op.operator === 'Annotated' ? op.op1 : op;
           if (isString(unwrapped)) parts.push(unwrapped.string);
           else {
             const evaluated = unwrapped.evaluate();

@@ -572,11 +572,7 @@ function makeSerializeHandler(
       if (style === 'scaled')
         return joinLatex([`\\left${openDelim}`, inner, `\\right${closeDelim}`]);
       if (style === 'big')
-        return joinLatex([
-          `\\Bigl${openDelim}`,
-          inner,
-          `\\Bigr${closeDelim}`,
-        ]);
+        return joinLatex([`\\Bigl${openDelim}`, inner, `\\Bigr${closeDelim}`]);
       return joinLatex([openDelim, inner, closeDelim]);
     };
   }

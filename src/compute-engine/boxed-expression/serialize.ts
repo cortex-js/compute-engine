@@ -761,10 +761,7 @@ function serializeJsonNumber(
     if (options.metadata.includes('latex') && ce.latexSyntax)
       metadata.latex =
         metadata.latex ??
-        _serializeLatexMetadata(
-          ce,
-          result ?? ({ num } as MathJsonExpression)
-        );
+        _serializeLatexMetadata(ce, result ?? ({ num } as MathJsonExpression));
 
     if (result) {
       if (metadata.latex !== undefined)

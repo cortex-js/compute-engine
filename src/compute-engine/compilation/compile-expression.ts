@@ -1,6 +1,6 @@
 import type { MathJsonSymbol } from '../../math-json/types';
 import type { Expression, JSSource } from '../global-types';
-import type { CompileTarget, CompilationResult, CompilationOptions, CompiledRunner } from './types';
+import type { CompileTarget, CompilationResult, CompiledRunner } from './types';
 import { BaseCompiler } from './base-compiler';
 import { assertCompilationOptionsContract } from '../engine-extension-contracts';
 
@@ -91,8 +91,7 @@ export function compile<T extends string = 'javascript'>(
         ce.pushScope();
         try {
           if (vars && typeof vars === 'object') {
-            for (const [k, v] of Object.entries(vars))
-              ce.assign(k, v);
+            for (const [k, v] of Object.entries(vars)) ce.assign(k, v);
           }
           return expr.evaluate().re;
         } finally {

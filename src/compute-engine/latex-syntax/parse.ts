@@ -713,13 +713,25 @@ export class _Parser implements Parser {
     if (this.match('\\hskip') || this.match('\\kern')) {
       this.skipSpace();
       // Skip optional sign
-      this.match('-') || this.match('+');
+      if (!this.match('-')) this.match('+');
       // Skip digits and decimal point
       while (/^[\d.]$/.test(this.peek)) this.nextToken();
       // Try to match a known two-letter TeX unit
       for (const unit of [
-        'pt', 'em', 'mu', 'ex', 'mm', 'cm', 'in', 'bp', 'sp', 'dd', 'cc',
-        'pc', 'nc', 'nd',
+        'pt',
+        'em',
+        'mu',
+        'ex',
+        'mm',
+        'cm',
+        'in',
+        'bp',
+        'sp',
+        'dd',
+        'cc',
+        'pc',
+        'nc',
+        'nd',
       ]) {
         if (this.matchAll([...unit])) break;
       }
@@ -1296,7 +1308,10 @@ export class _Parser implements Parser {
    * The parser index is always restored to its original position.
    */
   private wouldMatchTextInfix(
-    opDefs: [IndexedInfixEntry | IndexedPrefixEntry | IndexedPostfixEntry, number][]
+    opDefs: [
+      IndexedInfixEntry | IndexedPrefixEntry | IndexedPostfixEntry,
+      number,
+    ][]
   ): boolean {
     const start = this.index;
     for (const [def, n] of opDefs) {
@@ -2446,7 +2461,8 @@ export class _Parser implements Parser {
                 } else result = ['InvisibleOperator', lhs, rhs];
               } else {
                 if (result === null) {
-                  result = this.options.parseUnexpectedToken?.(lhs, this) ?? null;
+                  result =
+                    this.options.parseUnexpectedToken?.(lhs, this) ?? null;
                 }
               }
             }

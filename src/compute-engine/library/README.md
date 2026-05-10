@@ -3,7 +3,6 @@
 ## To Do
 
 - Add Physical Constants from NIST:
-
   - https://physics.nist.gov/cuu/Constants/Table/allascii.txt
 
 - See Scala/Breeze "universal functions":

@@ -262,13 +262,13 @@ function combineFunctionApplications(
     ) {
       const symName = op.symbol;
       const def = ce.lookupDefinition(symName);
-      const delim = ops[i + 1] as Expression & { op1: Expression; ops: ReadonlyArray<Expression> };
+      const delim = ops[i + 1] as Expression & {
+        op1: Expression;
+        ops: ReadonlyArray<Expression>;
+      };
 
       // Already declared as function/operator → function call
-      if (
-        def &&
-        (isOperatorDef(def) || def.value?.type?.matches('function'))
-      ) {
+      if (def && (isOperatorDef(def) || def.value?.type?.matches('function'))) {
         let args: ReadonlyArray<Expression> = delim.op1
           ? isFunction(delim.op1, 'Sequence')
             ? delim.op1.ops

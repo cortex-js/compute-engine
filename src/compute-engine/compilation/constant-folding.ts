@@ -139,15 +139,15 @@ export function tryGetComplexParts(
     if (iIndex >= 0) {
       const iFactor = ops[iIndex];
       // The imaginary scale: 1 for ImaginaryUnit, im for Complex(0, im)
-      const iScale =
-        isSymbol(iFactor, 'ImaginaryUnit') ? 1 : (iFactor as any).im;
+      const iScale = isSymbol(iFactor, 'ImaginaryUnit')
+        ? 1
+        : (iFactor as any).im;
       const remaining = ops.filter((_, idx) => idx !== iIndex);
       if (remaining.length === 0) {
         return { re: null, im: formatFloat(iScale) };
       }
       const compiledFactors = remaining.map((r) => compile(r));
-      if (iScale !== 1)
-        compiledFactors.unshift(formatFloat(iScale));
+      if (iScale !== 1) compiledFactors.unshift(formatFloat(iScale));
       const imCode = foldTerms(compiledFactors, '1.0', '*');
       return { re: null, im: imCode };
     }

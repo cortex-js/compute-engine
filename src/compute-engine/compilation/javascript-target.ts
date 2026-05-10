@@ -1,6 +1,10 @@
 import type { Expression } from '../global-types';
 import type { MathJsonSymbol } from '../../math-json/types';
-import { isSymbol, isNumber, isFunction } from '../boxed-expression/type-guards';
+import {
+  isSymbol,
+  isNumber,
+  isFunction,
+} from '../boxed-expression/type-guards';
 import { Complex } from 'complex-esm';
 import { tryGetConstant } from './constant-folding';
 

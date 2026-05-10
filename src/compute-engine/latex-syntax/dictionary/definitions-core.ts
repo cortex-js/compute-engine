@@ -1121,7 +1121,10 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       for (let i = firstStr; i <= lastStr; i++) {
         const s = stringValue(args[i]);
         if (s !== null) textContent += sanitizeLatex(s);
-        else if (operator(args[i]) === 'Annotated' || operator(args[i]) === 'Text')
+        else if (
+          operator(args[i]) === 'Annotated' ||
+          operator(args[i]) === 'Text'
+        )
           textContent += serializer.serialize(args[i]);
         else textContent += '$' + serializer.serialize(args[i]) + '$';
       }

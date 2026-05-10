@@ -45,14 +45,6 @@ export {
   PHYSICS_DICTIONARY,
 } from './compute-engine/latex-syntax/dictionary/default-dictionary';
 
-export type {
-  LatexDictionaryEntry,
-  SerializeLatexOptions,
-  ParseLatexOptions,
-  LatexString,
-  Parser,
-} from './compute-engine/latex-syntax/types';
-
 // ── Arbitrary-precision arithmetic ──────────────────────────────────
 export { BigDecimal } from './big-decimal';
 
