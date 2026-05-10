@@ -1420,37 +1420,18 @@ export class _Parser implements Parser {
     for (const def of defs) {
       this.index = start;
 
-      // Pre-check: if the close trigger doesn't appear ahead, this def
-      // cannot match. Skip without parsing the body — otherwise
-      // speculative body parses can compound exponentially when the same
-      // open token (e.g. `.`) recurs many times in invalid input.
-      //
-      // We only apply this for cases where the close trigger has a
-      // distinct single-char or single-LaTeX-token representation in the
-      // input. Multi-char shorthands (e.g. `||`, which the tokenizer
-      // splits into two `|` tokens) and same-trigger pairs are skipped to
-      // stay conservative.
-      const closeFirst =
-        typeof def.closeTrigger === 'string'
-          ? def.closeTrigger
-          : def.closeTrigger?.[0];
-      const openFirst =
-        typeof def.openTrigger === 'string'
-          ? def.openTrigger
-          : def.openTrigger?.[0];
-      if (
-        closeFirst &&
-        closeFirst !== openFirst &&
-        closeFirst.length <= 2 &&
-        // Skip the heuristic for multi-char strings (e.g. `||`) — the
-        // tokenizer splits those, and DELIMITER_SHORTHAND won't tell us
-        // about the split form.
-        !(closeFirst.length > 1 && !closeFirst.startsWith('\\'))
-      ) {
-        const variants = DELIMITER_SHORTHAND[closeFirst] ?? [closeFirst];
+      // Pre-check: if no token that could begin a close-delimiter match
+      // appears ahead, this def cannot match. Skip without parsing the
+      // body — otherwise speculative body parses can compound
+      // exponentially when the same open token (e.g. `.`) recurs many
+      // times in invalid input. The `closeTokens` set is pre-computed at
+      // dictionary indexing time and mirrors `matchDelimiter`'s expansion
+      // (DELIMITER_SHORTHAND variants, tokenizer-split forms, etc.).
+      if (def.closeTokens.size > 0) {
         let found = false;
-        for (const tok of variants) {
-          if (this._tokens.indexOf(tok, start) >= 0) {
+        const tokens = this._tokens;
+        for (let i = start; i < tokens.length; i++) {
+          if (def.closeTokens.has(tokens[i])) {
             found = true;
             break;
           }

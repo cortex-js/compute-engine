@@ -250,6 +250,27 @@ function addEntry(
       openTokens.push(openTrigger[0]);
     }
 
+    // Pre-compute the set of tokens that could begin a successful close
+    // match, so `parseEnclosure` can skip a def whose close cannot appear
+    // ahead. Mirrors `matchDelimiter`'s expansion logic:
+    //   - String triggers expand via DELIMITER_SHORTHAND.
+    //   - Multi-char strings whose tokenizer splits (e.g. `||`) include
+    //     their split form so we can find them in the token stream.
+    //   - Array triggers are matched literally; only the first token is
+    //     significant.
+    const closeTrigger = indexedEntry.closeTrigger;
+    const closeTokens = new Set<LatexToken>();
+    if (typeof closeTrigger === 'string') {
+      const variants = DELIMITER_SHORTHAND[closeTrigger];
+      if (variants) for (const v of variants) closeTokens.add(v);
+      else closeTokens.add(closeTrigger);
+      // `||` tokenizes as two `|` tokens — include the split form.
+      if (closeTrigger === '||') closeTokens.add('|');
+    } else if (Array.isArray(closeTrigger) && closeTrigger.length > 0) {
+      closeTokens.add(closeTrigger[0]);
+    }
+    indexedEntry.closeTokens = closeTokens;
+
     // Add this entry to the index for each possible opening token
     // Use unshift() to maintain reverse order (later defs tried first) for correctness.
     // This ensures selective defs (like Boole for []) are tried before catch-all defs (like List).

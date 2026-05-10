@@ -73,6 +73,15 @@ export type IndexedMatchfixEntry = CommonEntry & {
   openTrigger: Delimiter | LatexToken[];
   closeTrigger: Delimiter | LatexToken[];
 
+  /**
+   * Set of distinct first-position tokens that could begin a successful
+   * close-delimiter match. Pre-computed from `closeTrigger` plus any
+   * `DELIMITER_SHORTHAND` variants and tokenizer-split forms (e.g. `||`
+   * splits into two `|` tokens). Used by `parseEnclosure` to skip body
+   * parsing when none of these tokens appear ahead.
+   */
+  closeTokens: Set<LatexToken>;
+
   parse: MatchfixParseHandler;
 };
 
