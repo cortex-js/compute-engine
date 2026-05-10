@@ -179,3 +179,64 @@ describe('matchPermutations option', () => {
     ).toMatchInlineSnapshot(`["Multiply", 2, "x"]`);
   });
 });
+
+// Regression tests for fixes cherry-picked from PR #301.
+describe('PR #301 cherry-picked fixes', () => {
+  it('applyRule preserves operand rewrites when function-replace returns undefined at top', () => {
+    // Pattern matches at both inner and outer Add. Function-replace rewrites the
+    // inner Add(y, z) but returns undefined for the outer (where _a is symbol x).
+    // Before the fix: result is null (operand rewrites silently discarded).
+    // After the fix: result is the operand-rewritten expression.
+    const expr = ce.expr(['Add', 'x', ['Add', 'y', 'z']], { form: 'raw' });
+
+    const rule = {
+      match: ['Add', '_a', '_b'],
+      replace: (_e, { _a, _b }) => {
+        if (_a.symbol === 'x') return undefined;
+        return ce.box(['Multiply', _a, _b]);
+      },
+    };
+
+    const result = expr.replace(rule, {
+      recursive: true,
+      matchPermutations: false,
+    });
+    expect(result).not.toBeNull();
+    expect(result?.toString()).toBe('x + y * z');
+  });
+
+  it('object-rule condition string without $ delimiters is honored', () => {
+    // Before the '$'-delimiter fix: the condition string was silently dropped,
+    // so the rule applied unconditionally.
+    const expr = ce.box(['Add', 3, 'x']);
+
+    const ruleAccept = {
+      match: ['Add', '_a', 'x'],
+      replace: ['Multiply', '_a', 2],
+      condition: 'a > 0',
+    };
+    expect(expr.replace(ruleAccept)?.toString()).toBe('6');
+
+    const ruleReject = {
+      match: ['Add', '_a', 'x'],
+      replace: ['Multiply', '_a', 2],
+      condition: 'a < 0',
+    };
+    // 3 < 0 is false, so the rule should not apply.
+    expect(expr.replace(ruleReject)).toBeNull();
+  });
+
+  it('object-rule condition string is canonicalized so it can evaluate', () => {
+    // Before the canonicalization fix: a non-trivial condition (e.g. 'a^2 > 0')
+    // was parsed as 'raw' and could not evaluate, so the rule never applied.
+    const expr = ce.box(['Add', 4, 'x']);
+
+    const rule = {
+      match: ['Add', '_a', 'x'],
+      replace: ['Multiply', '_a', 2],
+      condition: 'a^2 > 0',
+    };
+    // 4^2 = 16 > 0 → condition evaluates to True → rule applies.
+    expect(expr.replace(rule)?.toString()).toBe('8');
+  });
+});
