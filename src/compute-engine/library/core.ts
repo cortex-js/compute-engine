@@ -1473,4 +1473,29 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       evaluate: (_ops, { engine }) => engine.expr(randomExpression()),
     },
   },
+
+  // ---------------------------------------------------------------------------
+  // Opaque typed heads — registered so the names are in the standard set
+  // (consumers can branch on the operator name); CE itself does not evaluate
+  // them. Geometric primitives `Triangle`/`Sphere`/`Segment` and the action
+  // arrow `To` (`a \to b`).
+  // ---------------------------------------------------------------------------
+  {
+    Triangle: {
+      description: 'Triangle primitive — opaque typed head.',
+      signature: '(any+) -> expression',
+    },
+    Sphere: {
+      description: 'Sphere primitive — opaque typed head.',
+      signature: '(any+) -> expression',
+    },
+    Segment: {
+      description: 'Segment primitive — opaque typed head.',
+      signature: '(any+) -> expression',
+    },
+    To: {
+      description: 'Action arrow / mapping (`a \\to b`) — opaque typed head.',
+      signature: '(any, any) -> nothing',
+    },
+  },
 ];

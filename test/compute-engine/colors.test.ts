@@ -688,6 +688,162 @@ describe('GPU color compilation', () => {
   });
 });
 
+describe('GPU compile: HSL space', () => {
+  test('ColorToColorspace hsl emits sRGB→HSL chain', () => {
+    const expr = ce.expr([
+      'ColorToColorspace',
+      ['Tuple', 0.7, 0.1, 30],
+      "'hsl'",
+    ]);
+    const compiled = compile(expr, { to: 'glsl' });
+    expect(compiled.success).toBe(true);
+    expect(compiled.code).toContain('_gpu_rgb_to_hsl');
+    expect(compiled.code).toContain('_gpu_oklch_to_srgb');
+    expect(compiled.preamble).toContain('vec3 _gpu_rgb_to_hsl');
+  });
+
+  test('ColorFromColorspace hsl emits HSL→sRGB→OKLCh chain', () => {
+    const expr = ce.expr([
+      'ColorFromColorspace',
+      ['Tuple', 0, 1, 0.5],
+      "'hsl'",
+    ]);
+    const compiled = compile(expr, { to: 'wgsl' });
+    expect(compiled.success).toBe(true);
+    expect(compiled.code).toContain('_gpu_hsl_to_rgb');
+    expect(compiled.code).toContain('_gpu_srgb_to_oklch');
+    expect(compiled.preamble).toContain('fn _gpu_hsl_to_rgb');
+  });
+
+  test('ColorToColorspace hsv routes through _gpu_rgb_to_hsv', () => {
+    const expr = ce.expr([
+      'ColorToColorspace',
+      ['Tuple', 0.7, 0.1, 30],
+      "'hsv'",
+    ]);
+    const compiled = compile(expr, { to: 'glsl' });
+    expect(compiled.success).toBe(true);
+    expect(compiled.code).toContain('_gpu_rgb_to_hsv');
+  });
+});
+
+describe('GPU compile: typed color heads', () => {
+  test('Color(literal) parses at compile time and emits Oklch vec3', () => {
+    const expr = ce.expr(['Color', "'#ff0000'"]);
+    const compiled = compile(expr, { to: 'glsl' });
+    expect(compiled.success).toBe(true);
+    // Pure red: L ≈ 0.628, C ≈ 0.258, H ≈ 29.23 — emitted as a literal vec3.
+    expect(compiled.code).toMatch(/vec3\(0\.62[^,]*, 0\.25[^,]*, 29\./);
+    // No runtime parsing helper.
+    expect(compiled.code).not.toContain('parseColor');
+  });
+
+  test('Color(non-literal) is rejected at compile time', () => {
+    // Wrap the string in a function call to defeat literal recognition.
+    // The compile must fail because GPU can't parse strings at runtime.
+    const expr = ce.parse('\\operatorname{Color}(\\operatorname{Sym}(x))');
+    const compiled = compile(expr, { to: 'glsl' });
+    expect(compiled.success).toBe(false);
+  });
+
+  test('Rgb head divides by 255 and promotes to OKLCh', () => {
+    const expr = ce.expr(['Rgb', 255, 0, 0]);
+    const compiled = compile(expr, { to: 'glsl' });
+    expect(compiled.success).toBe(true);
+    expect(compiled.code).toContain('_gpu_srgb_to_oklch');
+    expect(compiled.code).toContain('/ 255.0');
+  });
+
+  test('Oklch head emits canonical vec3 directly', () => {
+    const expr = ce.expr(['Oklch', 0.628, 0.258, 29.23]);
+    const compiled = compile(expr, { to: 'glsl' });
+    expect(compiled.success).toBe(true);
+    // Identity: no conversion helper, just a vec3.
+    expect(compiled.code).not.toContain('_gpu_oklch_to_');
+    expect(compiled.code).not.toContain('_gpu_srgb_to_');
+    expect(compiled.code).toMatch(/^vec3\(/);
+  });
+
+  test('Oklab head routes through _gpu_oklab_to_oklch', () => {
+    const expr = ce.expr(['Oklab', 0.628, 0.225, 0.126]);
+    const compiled = compile(expr, { to: 'glsl' });
+    expect(compiled.success).toBe(true);
+    expect(compiled.code).toContain('_gpu_oklab_to_oklch');
+  });
+
+  test('Hsv head routes through _gpu_hsv_to_rgb → _gpu_srgb_to_oklch', () => {
+    const expr = ce.expr(['Hsv', 0, 1, 1]);
+    const compiled = compile(expr, { to: 'glsl' });
+    expect(compiled.success).toBe(true);
+    expect(compiled.code).toContain('_gpu_hsv_to_rgb');
+    expect(compiled.code).toContain('_gpu_srgb_to_oklch');
+  });
+
+  test('Hsl head routes through _gpu_hsl_to_rgb → _gpu_srgb_to_oklch', () => {
+    const expr = ce.expr(['Hsl', 0, 1, 0.5]);
+    const compiled = compile(expr, { to: 'wgsl' });
+    expect(compiled.success).toBe(true);
+    expect(compiled.code).toContain('_gpu_hsl_to_rgb');
+    expect(compiled.code).toContain('_gpu_srgb_to_oklch');
+  });
+
+  test('Typed heads compose with ColorMix', () => {
+    // Two Oklch literals mixed — the middle of red and blue.
+    const expr = ce.expr([
+      'ColorMix',
+      ['Oklch', 0.628, 0.258, 29.23],
+      ['Oklch', 0.452, 0.313, 264.05],
+      0.5,
+    ]);
+    const compiled = compile(expr, { to: 'glsl' });
+    expect(compiled.success).toBe(true);
+    expect(compiled.code).toContain('_gpu_color_mix');
+  });
+});
+
+describe('GPU compile: As* operators', () => {
+  test('AsOklch on an Oklch input is identity', () => {
+    const expr = ce.expr(['AsOklch', ['Oklch', 0.7, 0.2, 30]]);
+    const compiled = compile(expr, { to: 'glsl' });
+    expect(compiled.success).toBe(true);
+    // No conversion helper — input passes through.
+    expect(compiled.code).not.toContain('_gpu_oklch_to_');
+  });
+
+  test('AsOklab routes through _gpu_oklch_to_oklab', () => {
+    const expr = ce.expr(['AsOklab', ['Oklch', 0.7, 0.2, 30]]);
+    const compiled = compile(expr, { to: 'glsl' });
+    expect(compiled.success).toBe(true);
+    expect(compiled.code).toContain('_gpu_oklch_to_oklab');
+  });
+
+  test('AsRgb emits 0-1 sRGB (not 0-255)', () => {
+    const expr = ce.expr(['AsRgb', ['Oklch', 0.7, 0.2, 30]]);
+    const compiled = compile(expr, { to: 'glsl' });
+    expect(compiled.success).toBe(true);
+    expect(compiled.code).toContain('_gpu_oklch_to_srgb');
+    // No 255-divide: matches ColorToColorspace 'rgb' semantics, not the
+    // 0-255 convention used by the interpreted Rgb head.
+    expect(compiled.code).not.toContain('/ 255.0');
+  });
+
+  test('AsHsv routes through sRGB→HSV', () => {
+    const expr = ce.expr(['AsHsv', ['Oklch', 0.7, 0.2, 30]]);
+    const compiled = compile(expr, { to: 'wgsl' });
+    expect(compiled.success).toBe(true);
+    expect(compiled.code).toContain('_gpu_rgb_to_hsv');
+    expect(compiled.code).toContain('_gpu_oklch_to_srgb');
+  });
+
+  test('AsHsl routes through sRGB→HSL', () => {
+    const expr = ce.expr(['AsHsl', ['Oklch', 0.7, 0.2, 30]]);
+    const compiled = compile(expr, { to: 'glsl' });
+    expect(compiled.success).toBe(true);
+    expect(compiled.code).toContain('_gpu_rgb_to_hsl');
+    expect(compiled.code).toContain('_gpu_oklch_to_srgb');
+  });
+});
+
 describe('Color constructor heads', () => {
   test('rgb LaTeX parses to Rgb head', () => {
     const expr = ce.parse('\\operatorname{rgb}(255, 0, 0)');

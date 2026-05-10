@@ -1414,6 +1414,8 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     precedence: DIVISION_PRECEDENCE,
     parse: 'Mod',
   },
+  // Function-style alias: `\operatorname{mod}(a, b)`
+  { latexTrigger: '\\operatorname{mod}', parse: 'Mod' },
   {
     latexTrigger: '\\pmod',
     kind: 'prefix',
@@ -1676,6 +1678,14 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
       const rhs = serializer.wrap(operand(expr, 2), ADDITION_PRECEDENCE + 3);
       return joinLatex([lhs, '-', rhs]);
     },
+  },
+  // Euclidean distance between two points (tuples of numbers).
+  {
+    name: 'Distance',
+    latexTrigger: ['\\operatorname{distance}'],
+    kind: 'function',
+    serialize: (serializer, expr) =>
+      '\\operatorname{distance}' + serializer.wrapArguments(expr),
   },
 ];
 

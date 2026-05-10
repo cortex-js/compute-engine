@@ -1859,6 +1859,30 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       evaluate: (xs, { engine }) => evaluateMinMax(engine, xs, 'Infimum'),
     },
 
+    Distance: {
+      description:
+        'Euclidean distance between two points (tuples of numbers).',
+      complexity: 6000,
+      signature: '(tuple, tuple) -> number',
+      evaluate: ([a, b], { engine: ce }) => {
+        if (!isFunction(a) || !isFunction(b)) return ce.error('incompatible-type');
+        if (a.operator !== 'Tuple' || b.operator !== 'Tuple')
+          return ce.error('incompatible-type');
+        if (a.ops!.length !== b.ops!.length || a.ops!.length === 0)
+          return ce.error('incompatible-type');
+        let sumSq = 0;
+        for (let i = 0; i < a.ops!.length; i++) {
+          const ai = a.ops![i].re;
+          const bi = b.ops![i].re;
+          if (!Number.isFinite(ai) || !Number.isFinite(bi))
+            return ce.error('expected-value');
+          const d = ai - bi;
+          sumSq += d * d;
+        }
+        return ce.number(Math.sqrt(sumSq));
+      },
+    },
+
     Product: {
       description:
         '`Product(f, a, b)` computes the product of `f` from `a` to `b`',

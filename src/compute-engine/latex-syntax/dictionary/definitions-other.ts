@@ -649,6 +649,44 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
   //     name: '',
   //     trigger: '\\check',
   // },
+
+  // ---------------------------------------------------------------------------
+  // Function-style aliases for collection / random operators that some
+  // notations write in lowercase (e.g. `\operatorname{shuffle}(L)`).
+  // The capitalized library entries already exist; these are pure parse
+  // aliases so the lowercase names don't land in `unsupported-operator`.
+  // ---------------------------------------------------------------------------
+  { latexTrigger: '\\operatorname{random}', parse: 'Random' },
+  { latexTrigger: '\\operatorname{shuffle}', parse: 'Shuffle' },
+  { latexTrigger: '\\operatorname{repeat}', parse: 'Repeat' },
+  { latexTrigger: '\\operatorname{join}', parse: 'Join' },
+
+  // ---------------------------------------------------------------------------
+  // Geometric primitive heads. Registered as known typed heads so consumers
+  // can branch on the operator name; CE itself doesn't render them. The
+  // library entries (with no evaluator) live in `library/core.ts`.
+  // ---------------------------------------------------------------------------
+  {
+    name: 'Triangle',
+    latexTrigger: ['\\operatorname{triangle}'],
+    kind: 'function',
+    serialize: (serializer, expr) =>
+      '\\operatorname{triangle}' + serializer.wrapArguments(expr),
+  },
+  {
+    name: 'Sphere',
+    latexTrigger: ['\\operatorname{sphere}'],
+    kind: 'function',
+    serialize: (serializer, expr) =>
+      '\\operatorname{sphere}' + serializer.wrapArguments(expr),
+  },
+  {
+    name: 'Segment',
+    latexTrigger: ['\\operatorname{segment}'],
+    kind: 'function',
+    serialize: (serializer, expr) =>
+      '\\operatorname{segment}' + serializer.wrapArguments(expr),
+  },
 ];
 
 // https://reference.wolfram.com/language/tutorial/TextualInputAndOutput.html

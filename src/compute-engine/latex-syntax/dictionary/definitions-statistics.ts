@@ -26,4 +26,6 @@ export const DEFINITIONS_STATISTICS: LatexDictionary = [
       return ['Mean', expr];
     },
   },
+  // Function-style alias: `\operatorname{var}(...)`
+  { latexTrigger: '\\operatorname{var}', parse: 'Variance' },
 ];
