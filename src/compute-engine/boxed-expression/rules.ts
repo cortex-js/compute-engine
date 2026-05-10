@@ -18,7 +18,6 @@ import type {
 } from '../global-types';
 
 import {
-  asLatexString,
   isInequalityOperator,
   isRelationalOperator,
 } from '../latex-syntax/utils';
@@ -630,22 +629,16 @@ function boxRule(
   // Normalize the condition to a function
   let condFn: undefined | RuleConditionFunction;
   if (typeof condition === 'string') {
-    const latex = asLatexString(condition);
-    if (latex) {
-      // If the condition is a LaTeX string, it should be a predicate
-      // (an expression with a Boolean value).
-      const condPattern =
-        ce.parse(latex, {
-          form: options?.canonical ? 'canonical' : 'raw',
-        }) ?? ce.expr('Nothing');
+    // If the condition is a LaTeX string, it should be a predicate
+    // (an expression with a Boolean value).
+    const condPattern = ce.parse(condition) ?? ce.expr('Nothing');
 
-      // Substitute any unbound vars in the condition to a wildcard,
-      // then evaluate the condition
-      condFn = (x: BoxedSubstitution, _ce: ComputeEngine): boolean => {
-        const evaluated = condPattern.subs(x).evaluate();
-        return isSymbol(evaluated, 'True');
-      };
-    }
+    // Substitute any unbound vars in the condition to a wildcard,
+    // then evaluate the condition
+    condFn = (x: BoxedSubstitution, _ce: ComputeEngine): boolean => {
+      const evaluated = condPattern.subs(x).evaluate();
+      return isSymbol(evaluated, 'True');
+    };
   } else {
     if (condition !== undefined && typeof condition !== 'function')
       throw new Error(
@@ -798,6 +791,21 @@ export function applyRule(
   if (!rule) return null;
   let canonical = options?.canonical ?? (expr.isCanonical || expr.isStructural);
 
+  // eslint-disable-next-line prefer-const
+  let { match, replace, condition, id, onMatch, onBeforeMatch } = rule;
+  const because = id ?? '';
+
+  const ce = expr.engine;
+
+  if (canonical && match) {
+    const awc = getWildcards(match);
+    const canonicalMatch = match.canonical;
+    const bwc = getWildcards(canonicalMatch);
+    // If the canonical form of the match loses wildcards, this rule cannot match
+    // canonical expressions (they would already be simplified). Skip this rule.
+    if (!awc.every((x) => bwc.includes(x))) return null;
+  }
+
   let operandsMatched = false;
 
   if (isFunction(expr) && options?.recursive) {
@@ -821,24 +829,10 @@ export function applyRule(
       )
         canonical = true;
 
-      expr = expr.engine.function(expr.operator, newOps, {
+      expr = ce.function(expr.operator, newOps, {
         form: canonical ? 'canonical' : 'raw',
       });
     }
-  }
-
-  // eslint-disable-next-line prefer-const
-  let { match, replace, condition, id, onMatch, onBeforeMatch } = rule;
-  const because = id ?? '';
-
-  if (canonical && match) {
-    const awc = getWildcards(match);
-    const canonicalMatch = match.canonical;
-    const bwc = getWildcards(canonicalMatch);
-    // If the canonical form of the match loses wildcards, this rule cannot match
-    // canonical expressions (they would already be simplified). Skip this rule.
-    if (!awc.every((x) => bwc.includes(x)))
-      return operandsMatched ? { value: expr, because } : null;
   }
 
   const useVariations = rule.useVariations ?? options?.useVariations ?? false;
@@ -877,7 +871,7 @@ export function applyRule(
     };
 
     try {
-      if (!condition(conditionSub, expr.engine))
+      if (!condition(conditionSub, ce))
         return operandsMatched ? { value: expr, because } : null;
     } catch (e) {
       console.error(
@@ -902,7 +896,10 @@ export function applyRule(
       ? replace(expr, sub)
       : replace.subs(sub, { canonical });
 
-  if (!result) return null;
+  if (!result)
+    return operandsMatched
+      ? { value: canonical ? expr.canonical : expr, because }
+      : null;
 
   // To aid in debugging, invoke onMatch when the rule matches
   onMatch?.(rule, expr, result);
