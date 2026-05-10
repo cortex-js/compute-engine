@@ -54,6 +54,7 @@ export type PrimitiveType =
   | 'symbol'
   | 'boolean'
   | 'string'
+  | 'color'
   | 'expression'
   | 'unknown'
   | 'error'

@@ -39,6 +39,7 @@ export const SCALAR_TYPES: PrimitiveType[] = [
 
 export const VALUE_TYPES: PrimitiveType[] = [
   'value',
+  'color',
   ...COLLECTION_TYPES,
   ...SCALAR_TYPES,
 ] as const as PrimitiveType[];

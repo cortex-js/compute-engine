@@ -21,12 +21,11 @@ import {
   rgbToOklch,
   oklchToRgb,
   rgbToOklab,
-  oklabToRgb,
+  oklabToOklch,
   rgbToHsl,
   hslToRgb,
   apca,
   contrastingColor,
-  parseColorToRgb01,
   SEQUENTIAL_PALETTES,
   CATEGORICAL_PALETTES,
   DIVERGING_PALETTES,
@@ -746,8 +745,12 @@ function toRI(c: Complex): { re: number; im: number } {
 }
 
 /**
- * Normalize a color input (string or [r, g, b, a?] array with 0-1 values)
- * to an RgbColor {r, g, b, alpha?} with 0-255 r/g/b values.
+ * Normalize a color input to an `RgbColor` (0-255 channels).
+ *
+ * Strings are parsed as CSS colors; arrays are interpreted as Oklch
+ * `[L, C, H]` (or `[L, C, H, alpha]`) — the canonical compiled-runtime
+ * representation produced by `_SYS.color`, `_SYS.colorMix`, etc. Arrays
+ * cross the sRGB gamut clip via `oklchToRgb` here.
  */
 function toRgb255(input: string | number[]): {
   r: number;
@@ -764,28 +767,62 @@ function toRgb255(input: string | number[]): {
       alpha: (c & 0xff) / 255,
     };
   }
-  const rgb: { r: number; g: number; b: number; alpha?: number } = {
-    r: input[0] * 255,
-    g: input[1] * 255,
-    b: input[2] * 255,
+  const rgb = oklchToRgb({ L: input[0], C: input[1], H: input[2] }) as {
+    r: number;
+    g: number;
+    b: number;
+    alpha?: number;
   };
   if (input.length >= 4) rgb.alpha = input[3];
   return rgb;
 }
 
-/** Packed 0xRRGGBBAA integer to [r, g, b] or [r, g, b, a] with 0-1 values. */
-function packedToArray(c: number): number[] {
-  const r = ((c >>> 24) & 0xff) / 255;
-  const g = ((c >>> 16) & 0xff) / 255;
-  const b = ((c >>> 8) & 0xff) / 255;
+/** Resolve any color input to Oklch components, preserving alpha if present. */
+function toOklch(input: string | number[]): {
+  L: number;
+  C: number;
+  H: number;
+  alpha?: number;
+} {
+  if (typeof input === 'string') {
+    const c = parseColor(input);
+    const r = (c >>> 24) & 0xff;
+    const g = (c >>> 16) & 0xff;
+    const b = (c >>> 8) & 0xff;
+    const a = (c & 0xff) / 255;
+    const oklch = rgbToOklch({ r, g, b }) as {
+      L: number;
+      C: number;
+      H: number;
+      alpha?: number;
+    };
+    if (Math.abs(a - 1) > 1e-4) oklch.alpha = a;
+    return oklch;
+  }
+  return {
+    L: input[0],
+    C: input[1],
+    H: input[2],
+    alpha: input.length >= 4 ? input[3] : undefined,
+  };
+}
+
+/** Packed 0xRRGGBBAA integer to Oklch `[L, C, H]` or `[L, C, H, alpha]`. */
+function packedToOklch(c: number): number[] {
+  const r = (c >>> 24) & 0xff;
+  const g = (c >>> 16) & 0xff;
+  const b = (c >>> 8) & 0xff;
   const a = (c & 0xff) / 255;
-  return Math.abs(a - 1) < 1e-4 ? [r, g, b] : [r, g, b, a];
+  const oklch = rgbToOklch({ r, g, b });
+  return Math.abs(a - 1) < 1e-4
+    ? [oklch.L, oklch.C, oklch.H]
+    : [oklch.L, oklch.C, oklch.H, a];
 }
 
 /** Color runtime helpers shared by both SYS objects. */
 const colorHelpers = {
   color(input: string): number[] {
-    return packedToArray(parseColor(input));
+    return packedToOklch(parseColor(input));
   },
   colorToString(input: string | number[], format?: string): string {
     const rgb = toRgb255(input);
@@ -839,30 +876,33 @@ const colorHelpers = {
     input2: string | number[],
     ratio = 0.5
   ): number[] {
-    const rgb1 = toRgb255(input1);
-    const rgb2 = toRgb255(input2);
+    const c1 = toOklch(input1);
+    const c2 = toOklch(input2);
     ratio = Math.max(0, Math.min(1, ratio));
-    const c1 = rgbToOklch(rgb1);
-    const c2 = rgbToOklch(rgb2);
-    // Shorter arc hue interpolation
-    let dh = c2.H - c1.H;
-    if (dh > 180) dh -= 360;
-    if (dh < -180) dh += 360;
-    let H = c1.H + dh * ratio;
-    if (H < 0) H += 360;
-    if (H >= 360) H -= 360;
-    const mixed = oklchToRgb({
-      L: c1.L + (c2.L - c1.L) * ratio,
-      C: c1.C + (c2.C - c1.C) * ratio,
-      H,
-    });
-    const r = mixed.r / 255;
-    const g = mixed.g / 255;
-    const b = mixed.b / 255;
-    const a1 = rgb1.alpha ?? 1;
-    const a2 = rgb2.alpha ?? 1;
+
+    // Achromatic-aware shortest-arc hue interpolation: when one endpoint has
+    // C ≈ 0 its hue is undefined, so use the other endpoint's hue throughout.
+    const c1Achromatic = c1.C < 1e-6;
+    const c2Achromatic = c2.C < 1e-6;
+    let H: number;
+    if (c1Achromatic && c2Achromatic) H = c1.H;
+    else if (c1Achromatic) H = c2.H;
+    else if (c2Achromatic) H = c1.H;
+    else {
+      let dh = c2.H - c1.H;
+      if (dh > 180) dh -= 360;
+      if (dh < -180) dh += 360;
+      H = c1.H + dh * ratio;
+      if (H < 0) H += 360;
+      if (H >= 360) H -= 360;
+    }
+
+    const L = c1.L + (c2.L - c1.L) * ratio;
+    const C = c1.C + (c2.C - c1.C) * ratio;
+    const a1 = c1.alpha ?? 1;
+    const a2 = c2.alpha ?? 1;
     const alpha = a1 + (a2 - a1) * ratio;
-    return Math.abs(alpha - 1) > 1e-4 ? [r, g, b, alpha] : [r, g, b];
+    return Math.abs(alpha - 1) > 1e-4 ? [L, C, H, alpha] : [L, C, H];
   },
   colorContrast(bg: string | number[], fg: string | number[]): number {
     return apca(toRgb255(bg), toRgb255(fg));
@@ -874,11 +914,11 @@ const colorHelpers = {
   ): number[] {
     const bgRgb = toRgb255(bg);
     if (fg1 !== undefined && fg2 !== undefined) {
-      return packedToArray(
+      return packedToOklch(
         contrastingColor({ bg: bgRgb, fg1: toRgb255(fg1), fg2: toRgb255(fg2) })
       );
     }
-    return packedToArray(contrastingColor(bgRgb));
+    return packedToOklch(contrastingColor(bgRgb));
   },
   colorToColorspace(input: string | number[], space: string): number[] {
     const rgb = toRgb255(input);
@@ -919,9 +959,10 @@ const colorHelpers = {
     const palette = allPalettes[name as keyof typeof allPalettes];
     if (!palette) throw new Error(`Unknown palette: ${name}`);
 
-    // Convert hex strings to [r, g, b] arrays (0-1)
+    // Each palette stop is stored as Oklch [L, C, H] for perceptually-uniform
+    // interpolation and to match the compiled-runtime color representation.
     const colors = (palette as readonly string[]).map((hex: HexColor) =>
-      parseColorToRgb01(hex)
+      packedToOklch(parseColor(hex))
     );
 
     // No second arg → return full palette
@@ -943,7 +984,7 @@ const colorHelpers = {
     return this._interpolatePalette(colors, t);
   },
 
-  _interpolatePalette(colors: [number, number, number][], t: number): number[] {
+  _interpolatePalette(colors: number[][], t: number): number[] {
     if (colors.length === 0) return [0, 0, 0];
     if (t <= 0) return [...colors[0]];
     if (t >= 1) return [...colors[colors.length - 1]];
@@ -955,34 +996,26 @@ const colorHelpers = {
     if (frac === 0 || i >= colors.length - 1)
       return [...colors[Math.min(i, colors.length - 1)]];
 
-    // Interpolate in OKLCh for perceptual uniformity
-    const rgb1 = {
-      r: colors[i][0] * 255,
-      g: colors[i][1] * 255,
-      b: colors[i][2] * 255,
-    };
-    const rgb2 = {
-      r: colors[i + 1][0] * 255,
-      g: colors[i + 1][1] * 255,
-      b: colors[i + 1][2] * 255,
-    };
-    const c1 = rgbToOklch(rgb1);
-    const c2 = rgbToOklch(rgb2);
+    // Interpolate directly in Oklch (palette stops are already Oklch).
+    const [L1, C1, H1] = colors[i];
+    const [L2, C2, H2] = colors[i + 1];
 
-    // Shorter arc hue interpolation
-    let dh = c2.H - c1.H;
-    if (dh > 180) dh -= 360;
-    if (dh < -180) dh += 360;
-    let H = c1.H + dh * frac;
-    if (H < 0) H += 360;
-    if (H >= 360) H -= 360;
+    const c1Achromatic = C1 < 1e-6;
+    const c2Achromatic = C2 < 1e-6;
+    let H: number;
+    if (c1Achromatic && c2Achromatic) H = H1;
+    else if (c1Achromatic) H = H2;
+    else if (c2Achromatic) H = H1;
+    else {
+      let dh = H2 - H1;
+      if (dh > 180) dh -= 360;
+      if (dh < -180) dh += 360;
+      H = H1 + dh * frac;
+      if (H < 0) H += 360;
+      if (H >= 360) H -= 360;
+    }
 
-    const mixed = oklchToRgb({
-      L: c1.L + (c2.L - c1.L) * frac,
-      C: c1.C + (c2.C - c1.C) * frac,
-      H,
-    });
-    return [mixed.r / 255, mixed.g / 255, mixed.b / 255];
+    return [L1 + (L2 - L1) * frac, C1 + (C2 - C1) * frac, H];
   },
 
   colorFromColorspace(components: number[], space: string): number[] {
@@ -990,32 +1023,29 @@ const colorHelpers = {
     const c1 = components[1];
     const c2 = components[2];
     const alpha = components.length >= 4 ? components[3] : undefined;
-    let result: number[];
+    let oklch: { L: number; C: number; H: number };
     switch (space.toLowerCase()) {
       case 'rgb':
-        result = [c0, c1, c2];
+        oklch = rgbToOklch({ r: c0 * 255, g: c1 * 255, b: c2 * 255 });
         break;
       case 'hsl': {
-        const r = hslToRgb(c0, c1, c2);
-        result = [r.r / 255, r.g / 255, r.b / 255];
+        const rgb = hslToRgb(c0, c1, c2);
+        oklch = rgbToOklch(rgb);
         break;
       }
-      case 'oklch': {
-        const r = oklchToRgb({ L: c0, C: c1, H: c2 });
-        result = [r.r / 255, r.g / 255, r.b / 255];
+      case 'oklch':
+        oklch = { L: c0, C: c1, H: c2 };
         break;
-      }
       case 'oklab':
-      case 'lab': {
-        const r = oklabToRgb({ L: c0, a: c1, b: c2 });
-        result = [r.r / 255, r.g / 255, r.b / 255];
+      case 'lab':
+        oklch = oklabToOklch({ L: c0, a: c1, b: c2 });
         break;
-      }
       default:
         throw new Error(`Unknown color space: ${space}`);
     }
-    if (alpha !== undefined && Math.abs(alpha - 1) > 1e-4) result.push(alpha);
-    return result;
+    return alpha !== undefined && Math.abs(alpha - 1) > 1e-4
+      ? [oklch.L, oklch.C, oklch.H, alpha]
+      : [oklch.L, oklch.C, oklch.H];
   },
 };
 

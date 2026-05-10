@@ -23,6 +23,7 @@ import { DEFINITIONS_LINEAR_ALGEBRA } from './definitions-linear-algebra';
 import { DEFINITIONS_STATISTICS } from './definitions-statistics';
 import { DEFINITIONS_UNITS } from './definitions-units';
 import { DEFINITIONS_OTHERS } from './definitions-other';
+import { DEFINITIONS_COLORS } from './definitions-colors';
 
 // Re-export all individual dictionaries with their original names
 export {
@@ -40,6 +41,7 @@ export {
   DEFINITIONS_STATISTICS,
   DEFINITIONS_UNITS,
   DEFINITIONS_OTHERS,
+  DEFINITIONS_COLORS,
 };
 
 // Public-friendly aliases
@@ -58,6 +60,7 @@ export {
   DEFINITIONS_STATISTICS as STATISTICS_DICTIONARY,
   DEFINITIONS_UNITS as UNITS_DICTIONARY,
   DEFINITIONS_OTHERS as OTHERS_DICTIONARY,
+  DEFINITIONS_COLORS as COLORS_DICTIONARY,
 };
 
 /**
@@ -100,4 +103,5 @@ export const LATEX_DICTIONARY: LatexDictionary = [
   ...DEFINITIONS_UNITS,
   ...DEFINITIONS_OTHERS,
   ...DEFINITIONS_PHYSICS,
+  ...DEFINITIONS_COLORS,
 ];

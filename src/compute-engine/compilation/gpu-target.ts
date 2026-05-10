@@ -2,6 +2,7 @@ import type { Expression } from '../global-types';
 import {
   isFunction,
   isNumber,
+  isString,
   isSymbol,
 } from '../boxed-expression/type-guards';
 import {
@@ -47,6 +48,16 @@ export const GPU_OPERATORS: CompiledOperators = {
 /** Return the vec2 constructor name for the target language. */
 function gpuVec2(target?: CompileTarget<Expression>): string {
   return target?.language === 'wgsl' ? 'vec2f' : 'vec2';
+}
+
+/**
+ * Extract a lowercase string literal from a boxed expression, or `null`
+ * if it isn't a string literal. Operators that need to switch on a
+ * colorspace name at compile time use this to peek at the argument.
+ */
+function readStringLiteral(expr: Expression): string | null {
+  if (!isString(expr)) return null;
+  return expr.string?.toLowerCase() ?? null;
 }
 
 /** Compile an expression as a GPU integer argument.
@@ -689,19 +700,60 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       const fg2 = compile(args[2]);
       return `(abs(_gpu_apca(${bg}, ${fg1})) >= abs(_gpu_apca(${bg}, ${fg2})) ? ${fg1} : ${fg2})`;
     }
+    // Default: pick black or white in OKLCh. Black is vec3(0); white is L=1
+    // achromatic — vec3(1.0, 0.0, 0.0). Heuristic from the JS path: low-luma
+    // backgrounds get white text and vice versa.
     const isWGSL = target?.language === 'wgsl';
     const v3 = isWGSL ? 'vec3f' : 'vec3';
-    return `((_gpu_apca(${bg}, ${v3}(0.0)) > 50.0) ? ${v3}(0.0) : ${v3}(1.0))`;
+    const black = `${v3}(0.0)`;
+    const white = `${v3}(1.0, 0.0, 0.0)`;
+    return `((_gpu_apca(${bg}, ${black}) > 50.0) ? ${black} : ${white})`;
   },
   ColorToColorspace: ([color, space], compile) => {
     if (color === null || space === null)
       throw new Error('ColorToColorspace: need color and space');
-    return `_gpu_srgb_to_oklab(${compile(color)})`;
+    // The input color is canonical OKLCh; route to the requested space.
+    // The space arg must be a string literal so we can pick the helper
+    // at compile time (no runtime branching in shader code).
+    const spaceName = readStringLiteral(space);
+    if (spaceName === null)
+      throw new Error('ColorToColorspace: space must be a string literal');
+    const c = compile(color);
+    switch (spaceName) {
+      case 'oklch':
+        return c;
+      case 'oklab':
+      case 'lab':
+        return `_gpu_oklch_to_oklab(${c})`;
+      case 'rgb':
+        return `_gpu_oklch_to_srgb(${c})`;
+      default:
+        throw new Error(
+          `ColorToColorspace: unsupported space "${spaceName}" on GPU target`
+        );
+    }
   },
   ColorFromColorspace: ([components, space], compile) => {
     if (components === null || space === null)
       throw new Error('ColorFromColorspace: need components and space');
-    return `_gpu_oklab_to_srgb(${compile(components)})`;
+    // Components are in the named space; build a canonical OKLCh value.
+    const spaceName = readStringLiteral(space);
+    if (spaceName === null)
+      throw new Error('ColorFromColorspace: space must be a string literal');
+    const c = compile(components);
+    switch (spaceName) {
+      case 'oklch':
+        return c;
+      case 'oklab':
+      case 'lab':
+        return `_gpu_oklab_to_oklch(${c})`;
+      case 'rgb':
+        return `_gpu_srgb_to_oklch(${c})`;
+      default:
+        throw new Error(
+          `ColorFromColorspace: unsupported space "${spaceName}" on GPU target`
+        );
+    }
   },
   // Fractal functions
   Mandelbrot: ([c, maxIter], compile, target) => {
@@ -1493,8 +1545,14 @@ fn _fractal_julia(z_in: vec2f, c: vec2f, maxIter: i32) -> f32 {
 /**
  * GPU color space conversion preamble (GLSL syntax).
  *
- * Provides sRGB ↔ OKLab ↔ OKLCh conversions, color mixing in OKLCh
- * with shorter-arc hue interpolation, and APCA contrast calculation.
+ * Canonical color value: vec3 OKLCh `(L, C, H_deg)` — same convention as the
+ * interpreted/JS-runtime layer. Shaders that write to a sRGB framebuffer must
+ * wrap the final color in `_gpu_oklch_to_srgb()` at the boundary.
+ *
+ * Hue is in degrees throughout (matching the boxed-expression convention).
+ * `_gpu_color_mix` interpolates directly in OKLCh — no sRGB pinch — and
+ * special-cases achromatic endpoints (C ≈ 0) so e.g. mixing red with white
+ * preserves red's hue rather than drifting through arbitrary hues.
  *
  * WGSL targets must adapt syntax (vec3f, atan2→atan2, etc.).
  */
@@ -1538,28 +1596,50 @@ vec3 _gpu_oklab_to_srgb(vec3 lab) {
 
 vec3 _gpu_oklab_to_oklch(vec3 lab) {
   float C = length(lab.yz);
-  float H = atan(lab.z, lab.y);
+  float H = atan(lab.z, lab.y) * (180.0 / 3.14159265359);
+  if (H < 0.0) H += 360.0;
   return vec3(lab.x, C, H);
 }
 
 vec3 _gpu_oklch_to_oklab(vec3 lch) {
-  return vec3(lch.x, lch.y * cos(lch.z), lch.y * sin(lch.z));
+  float h_rad = lch.z * (3.14159265359 / 180.0);
+  return vec3(lch.x, lch.y * cos(h_rad), lch.y * sin(h_rad));
 }
 
-vec3 _gpu_color_mix(vec3 rgb1, vec3 rgb2, float t) {
-  vec3 lch1 = _gpu_oklab_to_oklch(_gpu_srgb_to_oklab(rgb1));
-  vec3 lch2 = _gpu_oklab_to_oklch(_gpu_srgb_to_oklab(rgb2));
+vec3 _gpu_srgb_to_oklch(vec3 rgb) {
+  return _gpu_oklab_to_oklch(_gpu_srgb_to_oklab(rgb));
+}
+
+vec3 _gpu_oklch_to_srgb(vec3 lch) {
+  return _gpu_oklab_to_srgb(_gpu_oklch_to_oklab(lch));
+}
+
+vec3 _gpu_color_mix(vec3 lch1, vec3 lch2, float t) {
   float L = mix(lch1.x, lch2.x, t);
   float C = mix(lch1.y, lch2.y, t);
-  float dh = lch2.z - lch1.z;
-  const float PI = 3.14159265359;
-  if (dh > PI) dh -= 2.0 * PI;
-  if (dh < -PI) dh += 2.0 * PI;
-  float H = lch1.z + dh * t;
-  return _gpu_oklab_to_srgb(_gpu_oklch_to_oklab(vec3(L, C, H)));
+  bool a1 = lch1.y < 1e-6;
+  bool a2 = lch2.y < 1e-6;
+  float H;
+  if (a1 && a2) {
+    H = lch1.z;
+  } else if (a1) {
+    H = lch2.z;
+  } else if (a2) {
+    H = lch1.z;
+  } else {
+    float dh = lch2.z - lch1.z;
+    if (dh > 180.0) dh -= 360.0;
+    if (dh < -180.0) dh += 360.0;
+    H = lch1.z + dh * t;
+    if (H < 0.0) H += 360.0;
+    if (H >= 360.0) H -= 360.0;
+  }
+  return vec3(L, C, H);
 }
 
-float _gpu_apca(vec3 bg, vec3 fg) {
+float _gpu_apca(vec3 lch_bg, vec3 lch_fg) {
+  vec3 bg = _gpu_oklch_to_srgb(lch_bg);
+  vec3 fg = _gpu_oklch_to_srgb(lch_fg);
   float bgR = _gpu_srgb_to_linear(bg.x);
   float bgG = _gpu_srgb_to_linear(bg.y);
   float bgB = _gpu_srgb_to_linear(bg.z);
@@ -1570,15 +1650,17 @@ float _gpu_apca(vec3 bg, vec3 fg) {
   float fgY = 0.2126729 * fgR + 0.7151522 * fgG + 0.0721750 * fgB;
   float bgC = pow(bgY, 0.56);
   float fgC = pow(fgY, 0.57);
-  float contrast = (bgC > fgC)
-    ? (bgC - fgC) * 1.14
-    : (bgC - fgC) * 1.14;
+  float contrast = (bgC - fgC) * 1.14;
   return contrast * 100.0;
 }
 `;
 
 /**
  * GPU color space conversion preamble (WGSL syntax).
+ *
+ * Same convention as the GLSL preamble: canonical color value is `vec3f`
+ * OKLCh `(L, C, H_deg)`. Shaders writing to a sRGB framebuffer must wrap
+ * their final color in `_gpu_oklch_to_srgb()`.
  */
 export const GPU_COLOR_PREAMBLE_WGSL = `
 fn _gpu_srgb_to_linear(c: f32) -> f32 {
@@ -1620,28 +1702,50 @@ fn _gpu_oklab_to_srgb(lab: vec3f) -> vec3f {
 
 fn _gpu_oklab_to_oklch(lab: vec3f) -> vec3f {
   let C = length(lab.yz);
-  let H = atan2(lab.z, lab.y);
+  var H = atan2(lab.z, lab.y) * (180.0 / 3.14159265359);
+  if (H < 0.0) { H = H + 360.0; }
   return vec3f(lab.x, C, H);
 }
 
 fn _gpu_oklch_to_oklab(lch: vec3f) -> vec3f {
-  return vec3f(lch.x, lch.y * cos(lch.z), lch.y * sin(lch.z));
+  let h_rad = lch.z * (3.14159265359 / 180.0);
+  return vec3f(lch.x, lch.y * cos(h_rad), lch.y * sin(h_rad));
 }
 
-fn _gpu_color_mix(rgb1: vec3f, rgb2: vec3f, t: f32) -> vec3f {
-  let lch1 = _gpu_oklab_to_oklch(_gpu_srgb_to_oklab(rgb1));
-  let lch2 = _gpu_oklab_to_oklch(_gpu_srgb_to_oklab(rgb2));
+fn _gpu_srgb_to_oklch(rgb: vec3f) -> vec3f {
+  return _gpu_oklab_to_oklch(_gpu_srgb_to_oklab(rgb));
+}
+
+fn _gpu_oklch_to_srgb(lch: vec3f) -> vec3f {
+  return _gpu_oklab_to_srgb(_gpu_oklch_to_oklab(lch));
+}
+
+fn _gpu_color_mix(lch1: vec3f, lch2: vec3f, t: f32) -> vec3f {
   let L = mix(lch1.x, lch2.x, t);
   let C = mix(lch1.y, lch2.y, t);
-  let PI = 3.14159265359;
-  var dh = lch2.z - lch1.z;
-  if (dh > PI) { dh -= 2.0 * PI; }
-  if (dh < -PI) { dh += 2.0 * PI; }
-  let H = lch1.z + dh * t;
-  return _gpu_oklab_to_srgb(_gpu_oklch_to_oklab(vec3f(L, C, H)));
+  let a1 = lch1.y < 1e-6;
+  let a2 = lch2.y < 1e-6;
+  var H: f32;
+  if (a1 && a2) {
+    H = lch1.z;
+  } else if (a1) {
+    H = lch2.z;
+  } else if (a2) {
+    H = lch1.z;
+  } else {
+    var dh = lch2.z - lch1.z;
+    if (dh > 180.0) { dh = dh - 360.0; }
+    if (dh < -180.0) { dh = dh + 360.0; }
+    H = lch1.z + dh * t;
+    if (H < 0.0) { H = H + 360.0; }
+    if (H >= 360.0) { H = H - 360.0; }
+  }
+  return vec3f(L, C, H);
 }
 
-fn _gpu_apca(bg: vec3f, fg: vec3f) -> f32 {
+fn _gpu_apca(lch_bg: vec3f, lch_fg: vec3f) -> f32 {
+  let bg = _gpu_oklch_to_srgb(lch_bg);
+  let fg = _gpu_oklch_to_srgb(lch_fg);
   let bgR = _gpu_srgb_to_linear(bg.x);
   let bgG = _gpu_srgb_to_linear(bg.y);
   let bgB = _gpu_srgb_to_linear(bg.z);

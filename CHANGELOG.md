@@ -2,6 +2,88 @@
 
 #### Added
 
+- **First-class color values** — colors are now typed values with their
+  own primitive type (`color`) and per-colorspace constructor heads,
+  rather than anonymous tuples.
+
+  - **Constructor heads** (one per colorspace): `Rgb`, `Hsv`, `Hsl`,
+    `Oklab`, `Oklch`. Each takes 3 components plus an optional 4th
+    alpha argument. Components are interpreted per the colorspace's
+    own conventions — `Rgb` channels 0–255 (no parse-time clamp), HSV
+    /HSL hue in degrees, Oklab/Oklch with their standard ranges. The
+    operator name preserves the colorspace through evaluation.
+
+  - **LaTeX**: `\operatorname{rgb}(...)`, `\operatorname{hsv}(...)`,
+    `\operatorname{hsl}(...)`, `\operatorname{oklab}(...)`,
+    `\operatorname{oklch}(...)`. 1:1 with the heads, both directions.
+
+  - **Conversions**: `AsRgb`, `AsHsv`, `AsHsl`, `AsOklab`, `AsOklch`
+    convert any color to the named space (identity if already there).
+    Oklab↔Oklch routes directly via polar/cartesian conversion;
+    sRGB-based spaces go through RGB.
+
+  - **`ColorDelta(a, b)`** — perceptual color difference (ΔE_OK,
+    Euclidean distance in OKLab). Wide-gamut inputs are not clipped
+    before measurement.
+
+  - **`color` primitive type** — added to `PrimitiveType`. Subtype of
+    `value`. Used in the signatures of all color constructors,
+    conversions, `Color`, `ColorMix`, `ContrastingColor`, and the
+    color-input slots of `ColorDelta`/`ColorContrast`/`ColorToString`/
+    `ColorToColorspace`/`ColorFromColorspace`.
+
+  - Driven by the Graph Paper team's roadmap for parsing Desmos-style
+    color formulas (`\operatorname{rgb}`, `\operatorname{hsv}`,
+    `\operatorname{oklab}` were the most common unsupported color
+    operators in their corpus).
+
+#### Changed
+
+- **`Color('...')`** now returns an `Oklch` head instead of a 0–1 sRGB
+  `Tuple`. Oklch is the canonical wide-gamut representation; downstream
+  code can convert via `AsRgb` etc. The string parser still accepts the
+  same set of CSS-style inputs.
+
+- **`ColorMix`** now returns an `Oklch` head regardless of input form
+  (was: 0–1 sRGB `Tuple`). When both inputs are typed color heads, the
+  mix happens in OKLCh directly without an sRGB pinch, preserving
+  out-of-gamut chroma. Hue interpolation takes the shortest path around
+  the wheel; mixing with an achromatic endpoint carries the other
+  endpoint's hue (matches CSS Color 4 `color-mix`).
+
+- **`ContrastingColor`** now returns an `Rgb` head (was: 0–1 sRGB
+  `Tuple`). White and black are sRGB by definition, so `Rgb(255,255,255)`
+  and `Rgb(0,0,0)` are the natural representations.
+
+- **`Colormap`** now returns `Oklch` heads — either a `List(Oklch, ...)`
+  for full-palette / N-color resampling, or a single `Oklch` for
+  position-sampling.
+
+- **`ColorToString`** with `'oklch'` format now serializes typed color
+  inputs without an sRGB round-trip; out-of-gamut chroma serializes
+  losslessly. `'hex'`/`'rgb'`/`'hsl'` paths unchanged (sRGB is the
+  destination, so clipping is correct).
+
+- **Color-consuming signatures tightened** — `(any, any)` →
+  `(color | string | tuple, color | string | tuple)` for `ColorDelta`,
+  `ColorContrast`, `ColorMix`, `ContrastingColor`, `ColorToString`,
+  `ColorToColorspace`. The `As*` converters tightened further to
+  `(color) -> color` since they only accept typed color heads.
+
+#### Migration notes
+
+Code that consumed `Color('...')`'s tuple output, or the tuple output
+of `ColorMix` / `ContrastingColor` / `Colormap`, now sees a typed color
+head. To reconstruct the previous shape, wrap with the appropriate
+converter:
+
+```ts
+// Before: const tuple = ce.expr(['Color', "'red'"]).evaluate();  // [r, g, b] in 0-1
+// Now (equivalent 0-1 sRGB):
+const rgb = ce.expr(['AsRgb', ['Color', "'red'"]]).evaluate();
+// rgb is ['Rgb', r, g, b] with channels 0-255
+```
+
 - **`ce.latexOptions`** — new mutable, engine-wide bag of LaTeX
   parse/serialize options (e.g. `decimalSeparator`, `digitGroupSeparator`).
   Available as a constructor option and as a read/write property:

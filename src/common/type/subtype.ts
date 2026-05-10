@@ -77,6 +77,7 @@ const PRIMITIVE_SUBTYPES: Record<PrimitiveType, PrimitiveType[]> = {
   symbol: [],
   boolean: [],
   string: [],
+  color: [],
   expression: EXPRESSION_TYPES,
 };
 
