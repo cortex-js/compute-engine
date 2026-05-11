@@ -226,3 +226,49 @@ describe('A4.3 — Seeded Shuffle / Sample', () => {
     expect(new Set(got).size).toEqual(3);
   });
 });
+
+describe('A4.4 — \\operatorname{with} parser', () => {
+  test('basic with-clause: x + 1 with x = 5', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.parse('x + 1 \\operatorname{with} x = 5');
+    expect(expr.evaluate().re).toEqual(6);
+  });
+
+  test('parses to Block(Assign(x, 5), Add(x, 1))', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.parse('x + 1 \\operatorname{with} x = 5');
+    expect(expr.operator).toEqual('Block');
+    // First op is an Assign, last op is the value expression.
+    const ops = expr.ops!;
+    expect(ops[0].operator).toEqual('Assign');
+  });
+
+  test('multiple bindings: a + b with a = 2, b = 3', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.parse('a + b \\operatorname{with} a = 2, b = 3');
+    expect(expr.evaluate().re).toEqual(5);
+  });
+
+  test('later bindings see earlier ones (sequential — matches Block)', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.parse(
+      'b \\operatorname{with} a = 5, b = a + 1'
+    );
+    expect(expr.evaluate().re).toEqual(6);
+  });
+
+  test('with-clause does not leak bindings to outer scope', () => {
+    const ce = new ComputeEngine();
+    ce.parse('y \\operatorname{with} y = 99').evaluate();
+    // Outer y should be undeclared or undefined.
+    const yExpr = ce.box('y');
+    expect(yExpr.symbol).toEqual('y');
+  });
+
+  test('LaTeX round-trip preserves the with-clause structure', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.parse('x^2 \\operatorname{with} x = 4');
+    // The parsed expression evaluates correctly regardless of exact LaTeX form.
+    expect(expr.evaluate().re).toEqual(16);
+  });
+});

@@ -1,4 +1,9 @@
-import type { LatexDictionary, Parser, Serializer } from '../types';
+import type {
+  LatexDictionary,
+  Parser,
+  Serializer,
+  Terminator,
+} from '../types';
 
 import {
   operand,
@@ -662,6 +667,76 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
   { latexTrigger: '\\operatorname{repeat}', parse: 'Repeat' },
   { latexTrigger: '\\operatorname{join}', parse: 'Join' },
   { latexTrigger: '\\operatorname{range}', parse: 'Range' },
+
+  // ---------------------------------------------------------------------------
+  // `\operatorname{with}` — Desmos's "with clause", a postfix-binding form.
+  //
+  //   expr \operatorname{with} a = v1, b = v2
+  //
+  // Parses to `Block(Assign(a, v1), Assign(b, v2), expr)`. Block's
+  // sequential semantics are *correct* for `with` (later bindings can
+  // reference earlier ones — same as JS `let*` / Scheme `let*`). Block is
+  // also `scoped: true`, so the bindings do not leak to the outer scope.
+  //
+  // Precedence 21 mirrors `\operatorname{where}` (just above `;` at 19 and
+  // `,` at 20). This ensures `expr` on the lhs captures the entire
+  // preceding primary expression, but `with` does not escape statement
+  // boundaries.
+  // ---------------------------------------------------------------------------
+  {
+    symbolTrigger: 'with',
+    kind: 'infix',
+    associativity: 'none',
+    precedence: 21,
+    parse: (
+      parser: Parser,
+      lhs: MathJsonExpression,
+      until: Readonly<Terminator>
+    ): MathJsonExpression | null => {
+      // Parse bindings: sym = expr (, sym = expr)*
+      // Each binding parses the RHS with a terminator that stops at commas
+      // so we can split comma-separated bindings cleanly.
+      const bindingTerminator: Terminator = {
+        minPrec: 21,
+        condition: (p) => {
+          if (until?.condition?.(p)) return true;
+          const saved = p.index;
+          p.skipVisualSpace();
+          const isComma = p.peek === ',';
+          p.index = saved;
+          return isComma;
+        },
+      };
+
+      const bindings: MathJsonExpression[] = [];
+      do {
+        parser.skipVisualSpace();
+        const sym = parser.parseSymbol(bindingTerminator);
+        if (!sym || !symbol(sym)) {
+          parser.error('missing-symbol', parser.index);
+          return null;
+        }
+        parser.skipVisualSpace();
+        if (!parser.match('=')) {
+          parser.error('expected-token', parser.index);
+          return null;
+        }
+        parser.skipVisualSpace();
+        const value = parser.parseExpression(bindingTerminator);
+        if (value === null) {
+          parser.error('missing-expression', parser.index);
+          return null;
+        }
+        bindings.push(['Assign', symbol(sym)!, value]);
+        parser.skipVisualSpace();
+      } while (parser.match(','));
+
+      if (bindings.length === 0) return null;
+
+      // Block(Assign(a, v1), ..., lhs) — sequential, scoped.
+      return ['Block', ...bindings, lhs] as MathJsonExpression;
+    },
+  },
 
   // ---------------------------------------------------------------------------
   // Geometric primitive heads. Registered as known typed heads so consumers
