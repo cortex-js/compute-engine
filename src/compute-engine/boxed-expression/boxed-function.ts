@@ -1676,9 +1676,7 @@ function paramsAreScalar(source: BoxedOperatorDefinition | Type): boolean {
 function isOperatorDefinition(
   source: BoxedOperatorDefinition | Type
 ): source is BoxedOperatorDefinition {
-  return (
-    typeof source === 'object' && source !== null && 'signature' in source
-  );
+  return typeof source === 'object' && source !== null && 'signature' in source;
 }
 
 /** A type is "scalar" for broadcasting purposes if it is NOT a known

@@ -1972,10 +1972,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // hang the thread and bypass `engine._timeRemaining`.
           if (first.isFiniteCollection !== true) return undefined;
           const result = run(
-            reduceCollection(
-              first,
-              engine.Zero,
-              (acc, x) => acc.add(x.evaluate({ numericApproximation }))
+            reduceCollection(first, engine.Zero, (acc, x) =>
+              acc.add(x.evaluate({ numericApproximation }))
             ),
             engine._timeRemaining
           );
@@ -2007,10 +2005,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (rest.length === 0 && first?.isCollection) {
           if (first.isFiniteCollection !== true) return undefined;
           const result = await runAsync(
-            reduceCollection(
-              first,
-              engine.Zero,
-              (acc, x) => acc.add(x.evaluate({ numericApproximation }))
+            reduceCollection(first, engine.Zero, (acc, x) =>
+              acc.add(x.evaluate({ numericApproximation }))
             ),
             engine._timeRemaining,
             signal
