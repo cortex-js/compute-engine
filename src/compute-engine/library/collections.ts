@@ -18,6 +18,7 @@ import {
   widen,
 } from '../../common/type/utils';
 import { interval } from '../numerics/interval';
+import { deterministicRandom, nextSeed } from '../numerics/random';
 import { CancellationError, run } from '../../common/interruptible';
 import type {
   Expression,
@@ -1642,18 +1643,31 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
   // Randomize the order of the elements in the collection.
   Shuffle: {
-    description: 'Randomize the order of the elements in the collection.',
+    description:
+      'Randomize the order of the elements in the collection. ' +
+      'With an optional `seed` argument, the shuffle is deterministic.',
     complexity: 8200,
-    signature: '(indexed_collection) -> indexed_collection',
+    signature: '(indexed_collection, number?) -> indexed_collection',
     type: (ops) => ops[0].type,
-    evaluate: ([xs], { engine: ce }) => {
+    evaluate: ([xs, seedOp], { engine: ce }) => {
       if (!xs.isFiniteCollection) return undefined;
 
       const data = Array.from(xs.each());
-      // Fisher-Yates shuffle
-      for (let i = data.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [data[i], data[j]] = [data[j], data[i]];
+      const seed = seedOp?.re;
+      if (seed !== undefined && !Number.isNaN(seed)) {
+        // Deterministic Fisher-Yates with advancing seed.
+        let s = seed;
+        for (let i = data.length - 1; i > 0; i--) {
+          const j = Math.floor(deterministicRandom(s) * (i + 1));
+          [data[i], data[j]] = [data[j], data[i]];
+          s = nextSeed(s);
+        }
+      } else {
+        // Non-deterministic Fisher-Yates (existing).
+        for (let i = data.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [data[i], data[j]] = [data[j], data[i]];
+        }
       }
 
       return ce.function(xs.operator, data);

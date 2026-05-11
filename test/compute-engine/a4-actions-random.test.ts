@@ -161,3 +161,68 @@ describe('A4.2 — Random(seed) polymorphic dispatch', () => {
     expect(compiled.code).toMatch(/_gpu_random/);
   });
 });
+
+describe('A4.3 — Seeded Shuffle / Sample', () => {
+  test('Shuffle without seed still works (non-deterministic)', () => {
+    const ce = new ComputeEngine();
+    const r = ce.box(['Shuffle', ['List', 1, 2, 3, 4, 5]]).evaluate();
+    expect(r.operator).toEqual('List');
+    expect(r.nops).toEqual(5);
+    const elements = r.ops!.map((x) => x.re).sort();
+    expect(elements).toEqual([1, 2, 3, 4, 5]);
+  });
+
+  test('Shuffle(L, seed) is deterministic', () => {
+    const ce = new ComputeEngine();
+    const a = ce.box(['Shuffle', ['List', 1, 2, 3, 4, 5], 0.7]).evaluate();
+    const b = ce.box(['Shuffle', ['List', 1, 2, 3, 4, 5], 0.7]).evaluate();
+    expect(a.ops!.map((x) => x.re)).toEqual(b.ops!.map((x) => x.re));
+  });
+
+  test('Shuffle(L, seed) varies with seed', () => {
+    const ce = new ComputeEngine();
+    const a = ce.box(['Shuffle', ['List', 1, 2, 3, 4, 5], 0.1]).evaluate();
+    const b = ce.box(['Shuffle', ['List', 1, 2, 3, 4, 5], 0.9]).evaluate();
+    // Almost certainly different orderings (P(equal) ≈ 1/120).
+    expect(a.ops!.map((x) => x.re)).not.toEqual(b.ops!.map((x) => x.re));
+  });
+
+  test('Shuffle(L, seed) preserves elements (permutation)', () => {
+    const ce = new ComputeEngine();
+    const r = ce
+      .box(['Shuffle', ['List', 1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 0.5])
+      .evaluate();
+    const elements = r.ops!.map((x) => x.re).sort((a, b) => a! - b!);
+    expect(elements).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  });
+
+  test('Sample(L, k) without seed still works (non-deterministic)', () => {
+    const ce = new ComputeEngine();
+    const r = ce.box(['Sample', ['List', 1, 2, 3, 4, 5], 3]).evaluate();
+    expect(r.operator).toEqual('List');
+    expect(r.nops).toEqual(3);
+  });
+
+  test('Sample(L, k, seed) is deterministic', () => {
+    const ce = new ComputeEngine();
+    const a = ce
+      .box(['Sample', ['List', 1, 2, 3, 4, 5, 6, 7, 8], 3, 0.4])
+      .evaluate();
+    const b = ce
+      .box(['Sample', ['List', 1, 2, 3, 4, 5, 6, 7, 8], 3, 0.4])
+      .evaluate();
+    expect(a.ops!.map((x) => x.re)).toEqual(b.ops!.map((x) => x.re));
+  });
+
+  test('Sample(L, k, seed) returns k distinct elements from L', () => {
+    const ce = new ComputeEngine();
+    const r = ce
+      .box(['Sample', ['List', 1, 2, 3, 4, 5, 6, 7, 8], 3, 0.4])
+      .evaluate();
+    expect(r.nops).toEqual(3);
+    const got = r.ops!.map((x) => x.re!);
+    const all = [1, 2, 3, 4, 5, 6, 7, 8];
+    for (const v of got) expect(all).toContain(v);
+    expect(new Set(got).size).toEqual(3);
+  });
+});

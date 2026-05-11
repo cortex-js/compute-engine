@@ -23,6 +23,7 @@ import type { Expression, SymbolDefinitions } from '../global-types';
 import { bignumPreferred } from '../boxed-expression/utils';
 import { toInteger } from '../boxed-expression/numerics';
 import { isFunction } from '../boxed-expression/type-guards';
+import { deterministicRandom, nextSeed } from '../numerics/random';
 
 // Geometric mean:
 // Harmonic mean:
@@ -384,10 +385,12 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
   {
     Sample: {
       description:
-        'Return a random sample of k elements from the collection, without replacement.',
+        'Return a random sample of k elements from the collection, ' +
+        'without replacement. With an optional `seed` argument, the sample ' +
+        'is deterministic.',
       complexity: 8200,
-      signature: '(collection, integer) -> list',
-      evaluate: ([xs, nArg], { engine: ce }) => {
+      signature: '(collection, integer, number?) -> list',
+      evaluate: ([xs, nArg, seedArg], { engine: ce }) => {
         if (!xs.isFiniteCollection) return undefined;
 
         const k = toInteger(nArg);
@@ -396,10 +399,21 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         const data = Array.from(xs.each()) as Expression[];
         if (k > data.length) return undefined;
 
-        // Fisher-Yates shuffle first k elements
-        for (let i = data.length - 1; i > 0; i--) {
-          const j = Math.floor(Math.random() * (i + 1));
-          [data[i], data[j]] = [data[j], data[i]];
+        const seed = seedArg?.re;
+        if (seed !== undefined && !Number.isNaN(seed)) {
+          // Deterministic Fisher-Yates with advancing seed.
+          let s = seed;
+          for (let i = data.length - 1; i > 0; i--) {
+            const j = Math.floor(deterministicRandom(s) * (i + 1));
+            [data[i], data[j]] = [data[j], data[i]];
+            s = nextSeed(s);
+          }
+        } else {
+          // Non-deterministic Fisher-Yates first k elements.
+          for (let i = data.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [data[i], data[j]] = [data[j], data[i]];
+          }
         }
 
         const sample = data.slice(0, k);
