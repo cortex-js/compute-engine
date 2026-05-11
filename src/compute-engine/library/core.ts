@@ -25,6 +25,7 @@ import {
 import { flatten, flattenSequence } from '../boxed-expression/flatten';
 
 import { fromDigits } from '../numerics/strings';
+import { deterministicRandom } from '../numerics/random';
 
 import { randomExpression } from './random-expression';
 import { canonicalInvisibleOperator } from '../boxed-expression/invisible-operator';
@@ -868,37 +869,54 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
 
     Random: {
       description: [
-        'Random(): Return a random number between 0 and 1',
-        'Random(n): Return a random integer between 0 and n-1',
-        'Random(m, n): Return a random integer between m and n-1',
+        'Random(): non-deterministic float in [0, 1)',
+        'Random(seed: real): deterministic float in [0, 1) from a real seed',
+        'Random(n: integer): non-deterministic integer in [0, n)',
+        'Random(m: integer, n: integer): non-deterministic integer in [m, n)',
       ],
       pure: false,
-      signature: '(lower:integer?, upper:integer?) -> finite_number',
-      type: ([lower, upper]) => {
-        if (lower === undefined && upper === undefined) return 'finite_number';
-        return 'finite_integer';
+      // Signature accepts: nothing, one number, or two integers.
+      // Use `number` (not `integer`) for the single-arg case so float seeds
+      // type-check; runtime dispatch differentiates integer vs real.
+      signature: '(number?, integer?) -> finite_number',
+      type: ([first, second]) => {
+        // No args: float in [0, 1)
+        if (first === undefined) return 'finite_number';
+        // Two args: integer in [m, n)
+        if (second !== undefined) return 'finite_integer';
+        // One arg — integer type → integer result; real type → float
+        if (first.type.matches('integer')) return 'finite_integer';
+        return 'finite_number';
       },
       sgn: () => 'non-negative',
       evaluate: (ops, { engine: ce }) => {
-        // With no arguments, return a random number between 0 and 1
+        // No-arg: non-deterministic float.
         if (ops.length === 0) return ce.number(Math.random());
 
-        // If one or more arguments are provided, they must be integers
-        // The result will be an integer between the two arguments
-        const [lowerOp, upperOp] = ops;
-        let lower: number;
-        let upper: number;
-        if (upperOp === undefined) {
-          lower = 0;
-          upper = Math.floor(lowerOp.re - 1)!;
-          if (isNaN(upper)) upper = 0;
-        } else {
-          lower = Math.floor(lowerOp.re);
-          upper = Math.floor(upperOp.re);
+        const [firstOp, secondOp] = ops;
+
+        // Two-arg: integer in [m, n).
+        if (secondOp !== undefined) {
+          let lower = Math.floor(firstOp.re);
+          let upper = Math.floor(secondOp.re);
           if (isNaN(lower)) lower = 0;
           if (isNaN(upper)) upper = 0;
+          return ce.number(lower + Math.floor(Math.random() * (upper - lower)));
         }
-        return ce.number(lower + Math.floor(Math.random() * (upper - lower)));
+
+        // One-arg: dispatch on the argument's type.
+        // - integer-typed → integer in [0, n)
+        // - real / non-integer → seeded float in [0, 1)
+        if (firstOp.type.matches('integer')) {
+          let n = Math.floor(firstOp.re);
+          if (isNaN(n)) n = 0;
+          return ce.number(Math.floor(Math.random() * n));
+        }
+
+        // Real-typed: seeded float in [0, 1).
+        const seed = firstOp.re;
+        if (isNaN(seed)) return ce.number(0);
+        return ce.number(deterministicRandom(seed));
       },
     },
 

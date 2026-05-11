@@ -1113,9 +1113,33 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       return '_gpu_random(gl_FragCoord.x + gl_FragCoord.y * 1024.0)';
     }
     if (args.length === 1) {
-      return `_gpu_random(${compile(args[0])})`;
+      const arg = args[0];
+      // Integer-typed → integer-bound: int(floor(_gpu_random(float(n)) * float(n)))
+      // The seed for the draw is derived from n itself, so the result is
+      // deterministic-per-pixel-and-n in GLSL; this matches the JS semantics
+      // closely enough for the integer-bound use case.
+      if (BaseCompiler.isIntegerValued(arg)) {
+        const compiled = compile(arg);
+        return `int(floor(_gpu_random(float(${compiled})) * float(${compiled})))`;
+      }
+      // Real-typed → seeded float (existing behavior).
+      return `_gpu_random(${compile(arg)})`;
     }
-    throw new Error('Random: GPU compile expects 0 or 1 argument (seed)');
+    if (args.length === 2) {
+      // Random(m, n) — integer in [m, n)
+      if (target.language === 'wgsl') {
+        throw new Error(
+          'Random(m, n): WGSL compile requires explicit seeding. ' +
+            'Use a seeded variant or compute the integer range manually.'
+        );
+      }
+      const m = compile(args[0]);
+      const n = compile(args[1]);
+      // Seed the integer draw from gl_FragCoord (GLSL fragment-shader path).
+      const seed = '_gpu_random(gl_FragCoord.x + gl_FragCoord.y * 1024.0)';
+      return `((${m}) + int(floor(${seed} * float((${n}) - (${m})))))`;
+    }
+    throw new Error('Random: GPU compile expects 0, 1, or 2 arguments');
   },
 
   // Function (lambda) — not supported in GPU

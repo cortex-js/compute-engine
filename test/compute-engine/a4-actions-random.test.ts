@@ -1,4 +1,4 @@
-import { ComputeEngine } from '../../src/compute-engine';
+import { ComputeEngine, compile } from '../../src/compute-engine';
 
 describe('A4.1 — Block is sequential (regression)', () => {
   test('Assign sees prior Assign\'s value within the same Block', () => {
@@ -73,7 +73,7 @@ describe('A4.2 — Random(seed) polymorphic dispatch', () => {
 
   test('Random(seed) returns a float in [0,1)', () => {
     const ce = new ComputeEngine();
-    for (const seed of [0.1, 1.5, 42.7, -3.2, 1e6]) {
+    for (const seed of [0.1, 1.5, 42.7, -3.2, 1e6 + 0.5]) {
       const v = ce.box(['Random', seed]).evaluate().re!;
       expect(v).toBeGreaterThanOrEqual(0);
       expect(v).toBeLessThan(1);
@@ -121,7 +121,9 @@ describe('A4.2 — Random(seed) polymorphic dispatch', () => {
   test('Random compiles to JS with deterministic-seed support', () => {
     const ce = new ComputeEngine();
     const seeded = ce.parse('\\operatorname{Random}(0.7)');
-    const fnSeeded = seeded.compile() as any;
+    const compiledSeeded = compile(seeded);
+    expect(compiledSeeded.success).toBe(true);
+    const fnSeeded = compiledSeeded.run as () => number;
     const a = fnSeeded();
     const b = fnSeeded();
     expect(a).toEqual(b);
@@ -129,7 +131,9 @@ describe('A4.2 — Random(seed) polymorphic dispatch', () => {
     expect(a).toBeLessThan(1);
 
     const unseeded = ce.parse('\\operatorname{Random}()');
-    const fnUnseeded = unseeded.compile() as any;
+    const compiledUnseeded = compile(unseeded);
+    expect(compiledUnseeded.success).toBe(true);
+    const fnUnseeded = compiledUnseeded.run as () => number;
     const c = fnUnseeded();
     expect(c).toBeGreaterThanOrEqual(0);
     expect(c).toBeLessThan(1);
@@ -139,7 +143,9 @@ describe('A4.2 — Random(seed) polymorphic dispatch', () => {
     const ce = new ComputeEngine();
     ce.declare('n', 'integer');
     const expr = ce.box(['Random', 'n']);
-    const glsl = expr.compileToSource({ target: 'glsl' });
+    const compiled = compile(expr, { to: 'glsl' });
+    expect(compiled.success).toBe(true);
+    const glsl = compiled.code;
     // Integer-bound form should not call _gpu_random directly on n; it should
     // wrap the result in an int() cast or scale a seeded draw. The exact form
     // depends on the implementation choice, but the result must NOT be a bare
@@ -150,7 +156,8 @@ describe('A4.2 — Random(seed) polymorphic dispatch', () => {
   test('Random(real-typed-arg) compiles to seeded float on GLSL', () => {
     const ce = new ComputeEngine();
     const expr = ce.parse('\\operatorname{Random}(0.5)');
-    const glsl = expr.compileToSource({ target: 'glsl' });
-    expect(glsl).toMatch(/_gpu_random/);
+    const compiled = compile(expr, { to: 'glsl' });
+    expect(compiled.success).toBe(true);
+    expect(compiled.code).toMatch(/_gpu_random/);
   });
 });

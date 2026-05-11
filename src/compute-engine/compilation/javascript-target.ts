@@ -409,7 +409,25 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     if (nConst !== undefined) return `Math.pow(${compile(arg)}, ${1 / nConst})`;
     return `Math.pow(${compile(arg)}, 1 / (${compile(exp)}))`;
   },
-  Random: 'Math.random',
+  Random: (args, compile) => {
+    if (args.length === 0) return 'Math.random()';
+    if (args.length === 2) {
+      // Random(m, n): integer in [m, n)
+      const m = compile(args[0]);
+      const n = compile(args[1]);
+      return `((${m}) + Math.floor(Math.random() * ((${n}) - (${m}))))`;
+    }
+    // One arg — branch on the arg's type.
+    const arg = args[0];
+    if (BaseCompiler.isIntegerValued(arg)) {
+      // Integer-bound: Random(n) → integer in [0, n)
+      return `Math.floor(Math.random() * (${compile(arg)}))`;
+    }
+    // Real seed: deterministic float in [0, 1)
+    // Inline the hash; no runtime helper is required.
+    const a = compile(arg);
+    return `(() => { const _s = (${a}) * 12.9898; const _v = Math.sin(_s) * 43758.5453; return _v - Math.floor(_v); })()`;
+  },
   Round: (args, compile) => {
     if (BaseCompiler.isIntegerValued(args[0])) return compile(args[0]);
     return `Math.round(${compile(args[0])})`;
