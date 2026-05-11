@@ -1086,15 +1086,26 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   /**
    * Deterministic pseudorandom for GPU.
    *
-   * Note that JS-side `Random` remains `Math.random` (non-seeded) for
-   * backward compatibility; the seeded JS form will land in A4 of the
-   * CE 0.58.0 plan.
+   * All emitted forms return a GLSL `float` (or WGSL `f32`) so the result
+   * composes with surrounding float arithmetic without explicit casts. The
+   * "integer-bound" forms return an integer-valued float (the result of
+   * `floor`), matching the convention used by `Floor` and other ostensibly
+   * integer-returning operators in this target.
    *
    * - 0 args (GLSL only): fall back to a fragment-coord-derived seed.
    *   Only meaningful in fragment shaders (gl_FragCoord is FS-only).
    * - 0 args (WGSL): throws — WGSL has no built-in fragment coordinate;
    *   caller must provide an explicit seed.
-   * - 1 arg: _gpu_random(seed)
+   * - 1 arg, real-typed: `_gpu_random(seed)` — deterministic float in [0, 1)
+   * - 1 arg, integer-typed: `floor(_gpu_random(float(n)) * float(n))` —
+   *   integer-valued float in {0, 1, ..., n-1}. The seed is derived from
+   *   `n` itself, so the result is per-pixel-and-n deterministic in GLSL.
+   * - 2 args (integer m, n): float in [m, n), seeded from gl_FragCoord.
+   *
+   * JS-side `Random` has matching semantics (see `library/core.ts`'s
+   * polymorphic dispatch). JS↔GLSL parity is approximate — same seed yields
+   * a similar value, not bit-identical, due to fp64 vs fp32 and platform
+   * `sin` differences.
    */
   Random: (args, compile, target) => {
     if (args.length === 0) {
@@ -1114,19 +1125,18 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     }
     if (args.length === 1) {
       const arg = args[0];
-      // Integer-typed → integer-bound: int(floor(_gpu_random(float(n)) * float(n)))
-      // The seed for the draw is derived from n itself, so the result is
-      // deterministic-per-pixel-and-n in GLSL; this matches the JS semantics
-      // closely enough for the integer-bound use case.
+      // Integer-typed → integer-valued float in {0, ..., n-1}. Emit `floor`
+      // (returns float in GLSL) rather than `int(floor(...))` so the result
+      // remains a float and composes with mixed-precision arithmetic.
       if (BaseCompiler.isIntegerValued(arg)) {
         const compiled = compile(arg);
-        return `int(floor(_gpu_random(float(${compiled})) * float(${compiled})))`;
+        return `floor(_gpu_random(float(${compiled})) * float(${compiled}))`;
       }
       // Real-typed → seeded float (existing behavior).
       return `_gpu_random(${compile(arg)})`;
     }
     if (args.length === 2) {
-      // Random(m, n) — integer in [m, n)
+      // Random(m, n) — integer-valued float in [m, n)
       if (target.language === 'wgsl') {
         throw new Error(
           'Random(m, n): WGSL compile requires explicit seeding. ' +
@@ -1137,7 +1147,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       const n = compile(args[1]);
       // Seed the integer draw from gl_FragCoord (GLSL fragment-shader path).
       const seed = '_gpu_random(gl_FragCoord.x + gl_FragCoord.y * 1024.0)';
-      return `((${m}) + int(floor(${seed} * float((${n}) - (${m})))))`;
+      return `(float(${m}) + floor(${seed} * float((${n}) - (${m}))))`;
     }
     throw new Error('Random: GPU compile expects 0, 1, or 2 arguments');
   },

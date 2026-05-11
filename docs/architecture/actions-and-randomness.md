@@ -72,4 +72,43 @@ non-deterministic — to seed an integer draw, scale a seeded float yourself:
 
 `Shuffle(L, seed?)` and `Sample(L, k, seed?)` accept an optional seed that
 makes the reordering deterministic. Internally, the seed advances per element
-via a linear-congruential update so element-to-element draws are decorrelated.
+via an additive Weyl-sequence increment (golden-ratio fractional part) so
+element-to-element draws are decorrelated.
+
+## 4. The `\operatorname{with}` clause — local bindings, not actions
+
+`expr \operatorname{with} a = v_1, b = v_2` is a *local-binding* expression
+(equivalent to JS `let*` / Scheme `let*`): it evaluates `expr` after binding
+`a = v_1` and `b = v_2` in order. Later bindings can reference earlier ones.
+
+It parses to a Block:
+
+```mathjson
+["Block",
+ ["Assign", "a", v_1],
+ ["Assign", "b", v_2],
+ expr]
+```
+
+### Known limitation — outer-scope leakage
+
+When a binding's symbol is already declared at an outer scope, the `Assign`
+walks up the scope chain and mutates the outer binding rather than creating
+a fresh local one. So `expr \operatorname{with} a = 5` is **safe only if
+`a` is not already declared** at the calling scope. If `a` pre-exists,
+its outer value is overwritten after the clause runs.
+
+This limitation is shared with `\operatorname{where}` (which has the same
+parser shape). The natural fix — inserting `Declare` before each `Assign`
+— collides with Block's canonical-pass auto-declare and throws "already
+declared" at evaluate time. Properly isolating Block-local `Declare`/`Assign`
+pairs is tracked as a follow-up.
+
+**Workaround for consumers:** rename the binding symbol to a fresh local
+name before emitting the `with` clause (e.g. translate
+`expr \operatorname{with} a = 5` to `expr[a := _a_local] \operatorname{with} _a_local = 5`
+when `a` may pre-exist at the calling scope).
+
+Contrast with the action-tuple translation (section 2): action tuples *do*
+want to mutate the outer scope (that's the whole point), so the
+snapshot-then-commit Block deliberately leans on the same leak.

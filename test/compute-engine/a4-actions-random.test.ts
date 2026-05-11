@@ -146,11 +146,25 @@ describe('A4.2 — Random(seed) polymorphic dispatch', () => {
     const compiled = compile(expr, { to: 'glsl' });
     expect(compiled.success).toBe(true);
     const glsl = compiled.code;
-    // Integer-bound form should not call _gpu_random directly on n; it should
-    // wrap the result in an int() cast or scale a seeded draw. The exact form
-    // depends on the implementation choice, but the result must NOT be a bare
-    // _gpu_random(float(n)) which would be a seeded float (the old A1 bug).
-    expect(glsl).toMatch(/int\(.*_gpu_random|floor.*_gpu_random|%\s*n/);
+    // Integer-bound form must scale a seeded draw by n; result must be a
+    // float-typed expression (so it composes with float arithmetic), not a
+    // bare `_gpu_random(float(n))` (which would be a seeded float in [0,1),
+    // the old A1 bug).
+    expect(glsl).toMatch(/floor.*_gpu_random.*\*\s*float\(n\)/);
+    // No `int(...)` cast — GLSL is strongly typed and `int + float` fails
+    // to compile in strict mode.
+    expect(glsl).not.toMatch(/\bint\(/);
+  });
+
+  test('Random(int) composes with float arithmetic on GLSL (no type errors)', () => {
+    const ce = new ComputeEngine();
+    ce.declare('n', 'integer');
+    const expr = ce.parse('\\operatorname{Random}(n) + 1.5');
+    const compiled = compile(expr, { to: 'glsl' });
+    expect(compiled.success).toBe(true);
+    // The emitted code must not introduce an `int + float` pattern that
+    // strict GLSL drivers reject.
+    expect(compiled.code).not.toMatch(/\bint\(/);
   });
 
   test('Random(real-typed-arg) compiles to seeded float on GLSL', () => {
@@ -257,12 +271,28 @@ describe('A4.4 — \\operatorname{with} parser', () => {
     expect(expr.evaluate().re).toEqual(6);
   });
 
-  test('with-clause does not leak bindings to outer scope', () => {
+  test('with-clause does not leak bindings to outer scope (undeclared symbol)', () => {
     const ce = new ComputeEngine();
     ce.parse('y \\operatorname{with} y = 99').evaluate();
     // Outer y should be undeclared or undefined.
     const yExpr = ce.box('y');
     expect(yExpr.symbol).toEqual('y');
+  });
+
+  test('with-clause leaks bindings to outer scope when symbol pre-exists (known limitation)', () => {
+    // Pins the current behavior: when the binding's symbol is already
+    // declared at an outer scope, `with` mutates the outer binding. This is
+    // a shared limitation with `\operatorname{where}` — see the parser's
+    // header comment in definitions-other.ts. Consumers that need true
+    // local-binding semantics should rename the binding to a fresh symbol
+    // first (or wait for the Block/Declare follow-up fix).
+    const ce = new ComputeEngine();
+    ce.assign('a', 100);
+    const inner = ce.parse('a \\operatorname{with} a = 5').evaluate();
+    expect(inner.re).toEqual(5);
+    // Currently: outer a IS mutated. If a future Block/Declare refactor
+    // isolates this correctly, flip this to .toEqual(100).
+    expect(ce.box('a').evaluate().re).toEqual(5);
   });
 
   test('LaTeX round-trip preserves the with-clause structure', () => {
