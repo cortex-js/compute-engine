@@ -244,8 +244,16 @@ export abstract class _BoxedExpression implements Expression {
    *
    * Numeric values are rounded to `ce.precision` significant digits
    * (via `fractionalDigits: 'auto'`).
+   *
+   * If `options.verbatim` is `true` and `verbatimLatex` is set on this
+   * expression (i.e. it was parsed with `preserveLatex: true`), return
+   * the verbatim source instead of re-serializing. Falls through to
+   * re-serialization if no verbatim is available.
    */
   toLatex(options?: Record<string, any>): string {
+    if (options?.verbatim === true && this.verbatimLatex !== undefined)
+      return this.verbatimLatex;
+
     // Materialize lazy collections before serializing
     if (this.isLazyCollection) {
       const materialized = this.evaluate({

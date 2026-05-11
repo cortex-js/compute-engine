@@ -2,6 +2,26 @@
 
 #### Added
 
+- **`verbatim` opt-in for `toLatex()`** — `expr.toLatex({ verbatim: true })`
+  returns the original LaTeX source captured at parse time when the
+  expression was parsed with `preserveLatex: true`. Falls back to normal
+  re-serialization if no verbatim is available (e.g. for synthetic or
+  transformed expressions). The default behavior of `expr.latex` and
+  `expr.toLatex()` is unchanged — verbatim is strictly opt-in. Useful
+  for round-tripping authored LaTeX (e.g. `p.x`, `\sin(x)`) without
+  rewriting it to canonical form.
+  - Verbatim is set only on the top-level boxed expression produced
+    directly by `ce.parse(..., { preserveLatex: true })`. Canonicalization,
+    `simplify()`, `evaluate()`, `subs()`, and `ce._fn()` produce fresh
+    expressions with `verbatimLatex === undefined`.
+  - Function expressions whose operator has a custom canonical handler
+    (e.g. `Sin`, `Add`) currently do not preserve top-level verbatim
+    through canonicalization — the handler reconstructs the result
+    without threading metadata. Atoms (symbols, numbers) and functions
+    without custom canonical handlers (e.g. `First`) do preserve it.
+    Use `form: 'structural'` to skip canonical handlers when verbatim
+    preservation matters.
+
 - **`dotNotation` serialization option** — when enabled (default off),
   member-access heads serialize to dot notation rather than function-call
   form: `First(p)` → `p.x`, `Length(L)` → `L.\operatorname{count}`, etc.
