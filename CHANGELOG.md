@@ -150,6 +150,18 @@
   and ternary compilation behavior. No behavioral change — the rules
   were already implemented; only the description was incomplete.
 
+#### Fixed
+
+- **`Linspace` endpoint inclusion** — `Linspace(a, b, n)` now produces `n`
+  points evenly spanning `[a, b]` inclusive of both endpoints (matching NumPy,
+  Julia, and MATLAB convention). Previously the divisor was `n` instead of
+  `n - 1`, so the last sample fell short of `b` (e.g. `Linspace(0, 1, 5)`
+  yielded `0, 0.2, 0.4, 0.6, 0.8` instead of `0, 0.25, 0.5, 0.75, 1`). The
+  `at`, `iterator`, and `contains` handlers are all corrected. `Linspace(a, b,
+  1)` is the degenerate case and returns just `a`. The `contains` check is
+  also now tolerance-based (was an exact `%` test that failed for typical
+  floating-point values).
+
 #### Known issues
 
 - **JS `Loop` compile produces `undefined`** — the imperative `for`-loop IIFE
