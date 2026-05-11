@@ -17,10 +17,75 @@
   integer `count` and evaluates to a finite list of `count` copies of `value`.
   The 1-arg `Repeat(value)` keeps its existing infinite-sequence semantics. Lazy
   collection handlers (`at`, `iterator`, `count`, `isFinite`, `isEmpty`,
-  `contains`) all branch on arity. To prevent memory blowup, materialization is
-  capped at 10,000 elements; larger values stay lazy (still accessible
-  element-by-element via `.at()` / iterator). This cap will switch to
-  `ce.maxCollectionSize` when that config lands.
+  `contains`) all branch on arity. Materialization is gated by the new
+  `ce.maxCollectionSize` (see below); larger values stay lazy (still accessible
+  element-by-element via `.at()` / iterator).
+
+- **`ce.maxCollectionSize`** — new configurable cap (default `10_000`) on the
+  number of elements a collection may have when it is materialized into a
+  concrete `List`. Used by `Repeat`'s arity-2 form and by the eager
+  `materialize()` path for finite indexed collections; oversize cases leave
+  the expression in its lazy form rather than building the list. Setter
+  follows the convention of `iterationLimit` and `recursionLimit`: assigning
+  `<= 0` or `Infinity` disables the cap. Exposed on the `IComputeEngine`
+  interface.
+
+- **`Sum(L)` collection-reducer form** — `Sum` now accepts a single
+  collection argument and reduces to the sum of its elements:
+  `["Sum", ["List", 1, 2, 3, 4, 5]] // ➔ 15`. The big-op form
+  `Sum(body, [i, a, b], …)` is unchanged. Previously this shape was
+  silently rewritten by canonicalization to `Reduce(L, "Add", 0)`, which
+  hid the `Sum` head from the dot-notation serializer; the head is now
+  preserved so `L.\operatorname{total}` round-trips cleanly with
+  `latexOptions.dotNotation = true`. The async path now throws
+  `CancellationError` on signal abort (matching `runAsync`'s contract).
+
+- **`At` extended with boolean-mask and integer-list indices** —
+  `At(L, mask)` where `mask` is a finite collection of `True`/`False`
+  returns the elements of `L` where the mask is `True`. `At(L, indices)`
+  where `indices` is a finite collection of integers returns a sublist
+  picked at those positions; out-of-range positions are filtered. Integer
+  indices (`At(L, 2)`) and string keys (`At(d, "key")`) work exactly as
+  before. Signature widened to
+  `(value: indexed_collection, index: (number|string|indexed_collection)+) -> unknown`.
+
+- **Function-application broadcasting for user-defined lambdas** — when a
+  user function whose parameters are scalar-typed (no `list`/`collection`/
+  `tuple` parameter types) is applied to a finite indexed collection, CE
+  now broadcasts the call elementwise instead of passing the collection as
+  a single argument. For `ce.assign('f', ce.parse('x \\mapsto x^2 + 1'))`,
+  the expression `["f", ["List", 1, 2, 3]]` evaluates to `["List", 2, 5, 10]`.
+  Multi-arg functions broadcast with zip semantics, mixing scalars and
+  lists naturally (`["h", ["List", 1, 2, 3], 10]` zips the scalar against
+  the list). Functions whose signature explicitly takes a list (via
+  `ce.declare(name, '(list<X>) -> Y')`) do **not** broadcast — the inferred
+  default for `\mapsto` lambdas is scalar parameters, so most user
+  functions broadcast by default. To opt out, declare an explicit list
+  parameter type.
+
+- **List type for mixed-kind and mixed-dimension elements** — `widen()`
+  now builds a structural union (e.g. `finite_integer | string`) when the
+  common supertype would otherwise collapse to a lossy generic category
+  (`scalar`, `value`, `list`, `tuple`, `dictionary`, …). Consumers can
+  detect heterogeneous lists by inspecting `expr.type.toString()`:
+  - `[1, 2, 3]` → `list<number>` (precise)
+  - `[1, "hello", 3]` → `list<finite_integer | string>` (union)
+  - `[(1,2), (1,2,3)]` → `list<tuple<finite_integer, finite_integer> | tuple<finite_integer, finite_integer, finite_integer>>` (mixed dimension)
+  - `[]` → `list<nothing>` (empty)
+
+  Two related fixes landed alongside: `boxed-dictionary.ts`'s `type`
+  getter and `collectionElementType` in `common/type/utils.ts` previously
+  template-interpolated type objects as `"[object Object]"` when widen
+  returned a structural type — both now construct types programmatically.
+  And `expressionTensorInfo` no longer classifies lists containing
+  tuples/sets/dictionaries/records/strings as numeric `BoxedTensor`s
+  (these were being assigned the hardcoded type `list<number^N>`).
+
+- **`ce.box(true)` / `ce.box(false)`** — JS boolean primitives now box to
+  the `True` / `False` symbols (previously fell through to `Undefined`).
+  Restores symmetry with `jsValueToExpression` in `math-json/utils.ts`,
+  which already mapped booleans in this way. Necessary for `At`'s new
+  boolean-mask path to iterate boolean tensors correctly.
 
 - **`Length` library entry** — `Length` was previously only a parse-side head
   (produced by `L.\operatorname{count}` dot notation) with no evaluator. It now

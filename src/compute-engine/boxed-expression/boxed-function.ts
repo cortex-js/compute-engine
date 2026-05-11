@@ -24,6 +24,7 @@ import type {
 
 import { isFiniteIndexedCollection, zip } from '../collection-utils';
 import { isTensor } from './boxed-tensor';
+import { _BoxedOperatorDefinition } from './boxed-operator-definition';
 import { isNumber, isFunction, isString, isSymbol } from './type-guards';
 import type { NumericPrimitiveType } from '../../common/type/types';
 import { Type } from '../../common/type/types';
@@ -1145,6 +1146,7 @@ export class BoxedFunction
       // included — a fixed-size tuple of scalars behaves like a small vector.
       //
       if (
+        def instanceof _BoxedOperatorDefinition &&
         def._isLambda &&
         this.ops!.some((x) => isFiniteIndexedCollection(x)) &&
         paramsAreScalar(def)
@@ -1258,7 +1260,8 @@ export class BoxedFunction
       // Mirrors the sync path in `_computeValue`.
       //
       if (
-        def?._isLambda &&
+        def instanceof _BoxedOperatorDefinition &&
+        def._isLambda &&
         this.ops!.some((x) => isFiniteIndexedCollection(x)) &&
         paramsAreScalar(def)
       ) {

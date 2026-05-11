@@ -324,4 +324,20 @@ describe('A3.6 — Function-application broadcasting', () => {
     expect(result.operator).toEqual('List');
     expect(result.ops!.map((x) => x.re)).toEqual([11, 22, 33]);
   });
+
+  test('lambda with list-consuming body still broadcasts (intentional design)', () => {
+    // Inferred lambda params have type `unknown`, which `paramsAreScalar`
+    // treats as scalar — so any list argument broadcasts pointwise, even
+    // when the body is itself a reducer. Users who want the whole list
+    // passed through should call the reducer directly (`Sum(L)`) rather
+    // than wrapping it in a lambda. This test pins the current behavior
+    // so any future narrowing of broadcasting must revisit it.
+    const ce = new ComputeEngine();
+    ce.assign('f', ce.parse('L \\mapsto \\operatorname{Sum}(L)'));
+    const result = ce.box(['f', ['List', 1, 2, 3]]).evaluate();
+    expect(result.operator).toEqual('List');
+    // Pointwise: [Sum(1), Sum(2), Sum(3)]. Each Sum(scalar) stays symbolic
+    // (scalar is not a collection) so we just check the broadcast shape.
+    expect(result.nops).toEqual(3);
+  });
 });
