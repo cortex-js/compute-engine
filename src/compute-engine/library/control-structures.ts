@@ -16,7 +16,17 @@ import { isFunction, isSymbol, sym } from '../boxed-expression/type-guards';
 export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
   {
     Block: {
-      description: 'Evaluate a sequence of expressions in a local scope.',
+      description:
+        'Evaluate a sequence of expressions in a local scope, **sequentially**. ' +
+        'Each operand is evaluated in order; later operands observe side effects ' +
+        '(`Assign`, `Declare`) of earlier operands. The block\'s value is the ' +
+        'value of the last expression. Short-circuiting heads (`Return`, ' +
+        '`Break`, `Continue`) terminate the sequence early.\n\n' +
+        'IMPORTANT — consumers translating *simultaneous* action tuples (e.g. ' +
+        'Desmos `(a → 1, b → a + 1)` where `b` reads the *pre-action* `a`) must ' +
+        'rewrite to a snapshot-then-commit Block: bind each RHS to a fresh temp ' +
+        'first, then assign the temps to the LHS symbols. See ' +
+        '`docs/architecture/actions-and-randomness.md` for the canonical recipe.',
       lazy: true,
       scoped: true,
       signature: '(unknown*) -> unknown',

@@ -478,7 +478,11 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     },
 
     Assign: {
-      description: 'Assign a value to a symbol or define a sequence',
+      description:
+        'Assign a value to a symbol or define a sequence. The RHS is evaluated ' +
+        'immediately and `ce.assign(name, val)` mutates the binding in the ' +
+        'current scope chain. When used inside a `Block`, the assignment is ' +
+        'visible to subsequent statements in the block (sequential semantics).',
       lazy: true,
       pure: false,
       signature: '(symbol | expression, any) -> any',
