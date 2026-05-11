@@ -404,6 +404,15 @@ export function box(
     return ce.number(expr);
 
   //
+  // Box a boolean primitive as the True/False symbol.
+  // Tensors with `dtype: 'bool'` store JS booleans directly, so `.each()`
+  // and `.at()` over such a tensor need this case to yield usable
+  // symbolic values. Mirrors the `boolean → True/False` mapping in
+  // `jsValueToExpression`.
+  //
+  if (typeof expr === 'boolean') return ce.symbol(expr ? 'True' : 'False');
+
+  //
   // Box a String, a Symbol or a number as a string shorthand
   //
   if (typeof expr === 'string') {

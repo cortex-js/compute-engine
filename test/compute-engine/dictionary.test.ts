@@ -124,9 +124,14 @@ describe('Dictionary', () => {
     test('dictionary shorthand with array values', () => {
       expect(
         evaluate({ dict: { list: [1, 2, 3], items: ['a', 'b', 'c'] } })
-      ).toMatchInlineSnapshot(
-        `{dict: {list: ["List", 1, 2, 3]; items: ["List", "a", "b", "c"]}}`
-      );
+      ).toMatchInlineSnapshot(`
+        {
+          dict: {
+            list: ["List", 1, 2, 3];
+              items: {fn: ["List", {str: "a"}, {str: "b"}, {str: "c"}]}
+          }
+        }
+      `);
     });
 
     test('dictionary shorthand with mixed types', () => {

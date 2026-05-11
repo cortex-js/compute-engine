@@ -1137,6 +1137,33 @@ export class BoxedFunction
       }
 
       //
+      // 2b/ Broadcast user-defined function literals over indexed collections
+      // When a function defined via `ce.assign('f', x \mapsto ...)` is applied
+      // to a list (or other finite indexed collection) and the function's
+      // parameters are scalar, map the function over the collection.
+      // Note: tuples satisfy `isFiniteIndexedCollection` and are intentionally
+      // included — a fixed-size tuple of scalars behaves like a small vector.
+      //
+      if (
+        def._isLambda &&
+        this.ops!.some((x) => isFiniteIndexedCollection(x)) &&
+        paramsAreScalar(def)
+      ) {
+        const items = zip(this._ops);
+        if (items) {
+          const results: Expression[] = [];
+          while (true) {
+            const { done, value } = items.next();
+            if (done) break;
+            results.push(
+              this.engine._fn(this.operator, value).evaluate(options)
+            );
+          }
+          return this.engine._fn('List', results);
+        }
+      }
+
+      //
       // 3/ Handle evaluation of lazy collections
       //
       if (materialization !== false && !def.evaluate && this.isLazyCollection)
@@ -1224,6 +1251,31 @@ export class BoxedFunction
         return Promise.all(results).then((resolved) =>
           this.engine._fn('List', resolved)
         );
+      }
+
+      //
+      // 2b/ Broadcast user-defined function literals over indexed collections.
+      // Mirrors the sync path in `_computeValue`.
+      //
+      if (
+        def?._isLambda &&
+        this.ops!.some((x) => isFiniteIndexedCollection(x)) &&
+        paramsAreScalar(def)
+      ) {
+        const items = zip(this._ops);
+        if (items) {
+          const results: Promise<Expression>[] = [];
+          while (true) {
+            const { done, value } = items.next();
+            if (done) break;
+            results.push(
+              this.engine._fn(this.operator, value).evaluateAsync(options)
+            );
+          }
+          return Promise.all(results).then((resolved) =>
+            this.engine._fn('List', resolved)
+          );
+        }
       }
 
       //
@@ -1570,8 +1622,96 @@ function applyFunctionLiteral(
   if (!value || value.type.isUnknown)
     return expr.engine.function(expr.operator, ops);
 
+  // Broadcast if any operand is a finite indexed collection and the
+  // function's parameter types are scalar. Zip operands and apply
+  // pointwise, returning a List of results. Tuples count as indexed
+  // collections, so a tuple of scalars also triggers broadcasting.
+  if (
+    ops.some((x) => isFiniteIndexedCollection(x)) &&
+    paramsAreScalar(value.type.type)
+  ) {
+    const items = zip(ops);
+    if (items) {
+      const results: Expression[] = [];
+      while (true) {
+        const { done, value: zipped } = items.next();
+        if (done) break;
+        results.push(apply(value, zipped).evaluate(options));
+      }
+      return expr.engine._fn('List', results);
+    }
+  }
+
   // The value is a function literal. Apply the arguments to it
   return apply(value, ops);
+}
+
+/** Returns true when every formal parameter of a signature is a scalar
+ * type (not a collection/list/tuple/function).
+ *
+ * Accepts either a `Type` (typically from a function-typed value) or a
+ * `BoxedOperatorDefinition` (whose `signature.type` is inspected).
+ *
+ * Conservative: unknown/any and non-signature types are treated as scalar,
+ * which makes this a permissive default for inferred lambda signatures.
+ * @internal
+ */
+function paramsAreScalar(source: BoxedOperatorDefinition | Type): boolean {
+  const sigType = isOperatorDefinition(source)
+    ? source.signature?.type
+    : source;
+  if (!sigType || typeof sigType === 'string') return true;
+  if (sigType.kind !== 'signature') return true;
+  const args = [
+    ...(sigType.args ?? []),
+    ...(sigType.optArgs ?? []),
+    ...(sigType.variadicArg ? [sigType.variadicArg] : []),
+  ];
+  return args.every((arg) => isScalarType(arg.type));
+}
+
+function isOperatorDefinition(
+  source: BoxedOperatorDefinition | Type
+): source is BoxedOperatorDefinition {
+  return (
+    typeof source === 'object' && source !== null && 'signature' in source
+  );
+}
+
+/** A type is "scalar" for broadcasting purposes if it is NOT a known
+ * collection-like type. Conservative: unknown/any → scalar.
+ */
+function isScalarType(t: Type): boolean {
+  if (typeof t === 'string') {
+    // String types like 'collection', 'list', 'tuple', 'set' are non-scalar.
+    if (
+      t === 'collection' ||
+      t === 'indexed_collection' ||
+      t === 'list' ||
+      t === 'tuple' ||
+      t === 'set' ||
+      t === 'dictionary' ||
+      t === 'record' ||
+      t === 'function'
+    )
+      return false;
+    return true;
+  }
+  if (
+    t.kind === 'collection' ||
+    t.kind === 'indexed_collection' ||
+    t.kind === 'list' ||
+    t.kind === 'tuple' ||
+    t.kind === 'set' ||
+    t.kind === 'dictionary' ||
+    t.kind === 'record' ||
+    t.kind === 'signature'
+  )
+    return false;
+  if (t.kind === 'union' || t.kind === 'intersection')
+    return t.types.every((x) => isScalarType(x));
+  if (t.kind === 'negation') return isScalarType(t.type);
+  return true;
 }
 
 /**  Eagerly evaluate xs by iterating over its elements.
@@ -1597,6 +1737,14 @@ function materialize(
 
   const isIndexed = expr.isIndexedCollection;
   const isFinite = expr.isFiniteCollection;
+
+  // Leave oversized indexed collections in their lazy form. Consumers
+  // can detect the size via `.count` without risking OOM.
+  if (isIndexed && isFinite) {
+    const count = expr.count;
+    if (count !== undefined && count > expr.engine.maxCollectionSize)
+      return expr;
+  }
 
   const xs: Expression[] = [];
 

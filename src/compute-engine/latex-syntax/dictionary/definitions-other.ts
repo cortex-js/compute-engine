@@ -661,6 +661,7 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
   { latexTrigger: '\\operatorname{shuffle}', parse: 'Shuffle' },
   { latexTrigger: '\\operatorname{repeat}', parse: 'Repeat' },
   { latexTrigger: '\\operatorname{join}', parse: 'Join' },
+  { latexTrigger: '\\operatorname{range}', parse: 'Range' },
 
   // ---------------------------------------------------------------------------
   // Geometric primitive heads. Registered as known typed heads so consumers

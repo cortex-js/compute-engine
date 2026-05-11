@@ -103,8 +103,7 @@ function parseTrig(op: string): ExpressionParseHandler {
     });
 
     // Desmos compatibility: `\arctan(y, x)` is the 2-arg atan2.
-    const head =
-      fn === 'Arctan' && args?.length === 2 ? 'Arctan2' : fn;
+    const head = fn === 'Arctan' && args?.length === 2 ? 'Arctan2' : fn;
 
     const appliedFn: MathJsonExpression =
       args === null

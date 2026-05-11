@@ -2,6 +2,7 @@ export class EngineRuntimeState {
   private _timeLimit = 2000;
   private _iterationLimit = 1024;
   private _recursionLimit = 1024;
+  private _maxCollectionSize = 10_000;
   private _deadline: number | undefined = undefined;
   private _isVerifying = false;
 
@@ -27,6 +28,14 @@ export class EngineRuntimeState {
 
   set recursionLimit(value: number) {
     this._recursionLimit = value <= 0 ? Number.POSITIVE_INFINITY : value;
+  }
+
+  get maxCollectionSize(): number {
+    return this._maxCollectionSize;
+  }
+
+  set maxCollectionSize(value: number) {
+    this._maxCollectionSize = value <= 0 ? Number.POSITIVE_INFINITY : value;
   }
 
   get deadline(): number | undefined {

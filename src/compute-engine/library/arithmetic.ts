@@ -1944,43 +1944,84 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
 
     Sum: {
-      description: '`Sum(f, [a, b])` computes the sum of `f` from `a` to `b`',
+      description:
+        '`Sum(f, [a, b])` computes the sum of `f` from `a` to `b`; `Sum(L)` sums the elements of a collection `L`',
       wikidata: 'Q218005',
       complexity: 1000,
       broadcastable: false,
 
       scoped: true,
       lazy: true,
-      signature: '((number) -> number, bounds:tuple+) -> number',
+      signature: '(any, tuple*) -> number',
 
-      canonical: ([body, ...bounds], { scope }) =>
-        canonicalBigop('Sum', body, bounds, scope),
+      canonical: ([body, ...bounds], { scope, engine: ce }) => {
+        // Arity-1 collection-reducer form: bypass canonicalBigop, which would
+        // rewrite Sum(L) as Reduce(L, 'Add', 0). Keeping the `Sum` head lets
+        // dot-notation serialization (`L.total`) round-trip.
+        if (bounds.length === 0) {
+          const canon = body?.canonical;
+          if (canon?.isCollection) return ce._fn('Sum', [canon]);
+        }
+        return canonicalBigop('Sum', body, bounds, scope);
+      },
 
-      evaluate: ([body, ...indexes], { engine, numericApproximation }) => {
+      evaluate: ([first, ...rest], { engine, numericApproximation }) => {
+        // Arity-1 collection-reducer form: Sum(L).
+        if (rest.length === 0 && first?.isCollection) {
+          // Non-finite collections stay symbolic — infinite iteration would
+          // hang the thread and bypass `engine._timeRemaining`.
+          if (first.isFiniteCollection !== true) return undefined;
+          const result = run(
+            reduceCollection(
+              first,
+              engine.Zero,
+              (acc, x) => acc.add(x.evaluate({ numericApproximation }))
+            ),
+            engine._timeRemaining
+          );
+          return result?.evaluate({ numericApproximation }) ?? engine.NaN;
+        }
+
+        // Big-op form: Sum(body, [i, a, b], …).
         const result = run(
           reduceBigOp(
-            body,
-            indexes,
+            first,
+            rest,
             (acc: Expression, x) =>
               acc.add(x.evaluate({ numericApproximation })),
             engine.Zero
           ),
           engine._timeRemaining
         );
-        // If domain is non-enumerable, keep expression unevaluated (symbolic)
-        if (result === NON_ENUMERABLE_DOMAIN) {
-          return undefined; // Return undefined to keep expression symbolic
-        }
-        // Evaluate the accumulated result to combine numeric terms
-        // e.g., 3x + 1 + 2 + 3 → 3x + 6
+        // Non-enumerable domain: keep the expression symbolic.
+        if (result === NON_ENUMERABLE_DOMAIN) return undefined;
+        // Re-evaluate to combine numeric terms (e.g., 3x + 1 + 2 + 3 → 3x + 6).
         return result?.evaluate({ numericApproximation }) ?? engine.NaN;
       },
 
-      evaluateAsync: async (xs, { engine, signal, numericApproximation }) => {
+      evaluateAsync: async (
+        [first, ...rest],
+        { engine, signal, numericApproximation }
+      ) => {
+        // Arity-1 collection-reducer form: Sum(L).
+        if (rest.length === 0 && first?.isCollection) {
+          if (first.isFiniteCollection !== true) return undefined;
+          const result = await runAsync(
+            reduceCollection(
+              first,
+              engine.Zero,
+              (acc, x) => acc.add(x.evaluate({ numericApproximation }))
+            ),
+            engine._timeRemaining,
+            signal
+          );
+          return result?.evaluate({ numericApproximation }) ?? engine.NaN;
+        }
+
         const result = await runAsync(
           reduceBigOp(
-            xs[0],
-            xs.slice(1),
+            first,
+            rest,
             (acc: Expression, x) =>
               acc.add(x.evaluate({ numericApproximation })),
             engine.Zero
@@ -1988,15 +2029,29 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           engine._timeRemaining,
           signal
         );
-        // If domain is non-enumerable, keep expression unevaluated (symbolic)
-        if (result === NON_ENUMERABLE_DOMAIN) {
-          return undefined; // Return undefined to keep expression symbolic
-        }
+        if (result === NON_ENUMERABLE_DOMAIN) return undefined;
         return result?.evaluate({ numericApproximation }) ?? engine.NaN;
       },
     },
   },
 ];
+
+/** Generator-based reducer over a finite collection. Yields between
+ * iterations so callers can wrap it with `run`/`runAsync` for timeout
+ * and cancellation. Caller is responsible for finiteness checks.
+ */
+function* reduceCollection(
+  collection: Expression,
+  init: Expression,
+  combine: (acc: Expression, x: Expression) => Expression
+): Generator<Expression, Expression> {
+  let acc = init;
+  for (const x of collection.each()) {
+    acc = combine(acc, x);
+    yield acc;
+  }
+  return acc;
+}
 
 function evaluateAbs(arg: Expression): Expression | undefined {
   const ce = arg.engine;

@@ -902,7 +902,11 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     const lo = args[0].re;
     const hi = args[1].re;
     const step = args.length === 3 ? args[2].re : 1;
-    if (!Number.isFinite(lo) || !Number.isFinite(hi) || !Number.isFinite(step)) {
+    if (
+      !Number.isFinite(lo) ||
+      !Number.isFinite(hi) ||
+      !Number.isFinite(step)
+    ) {
       throw new Error(
         'Range: GPU compile requires constant numeric bounds' +
           ' (non-constant ranges must be materialized at JS host then uploaded as a uniform)'
@@ -974,7 +978,8 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
    */
   GCD: (args, compile) => {
     if (args.length < 2) throw new Error('GCD: need at least two arguments');
-    if (args.length > 2) throw new Error('GCD: GPU target supports only two-argument GCD');
+    if (args.length > 2)
+      throw new Error('GCD: GPU target supports only two-argument GCD');
     const a = args[0];
     const b = args[1];
     if (a === null || b === null) throw new Error('GCD: missing argument');
@@ -996,7 +1001,9 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     } else if (args.length >= 2) {
       elems = args;
     } else {
-      throw new Error('Variance: GPU target requires a List argument or at least 2 scalar arguments');
+      throw new Error(
+        'Variance: GPU target requires a List argument or at least 2 scalar arguments'
+      );
     }
     const n = elems.length;
     if (n < 2) throw new Error('Variance: need at least 2 elements');
@@ -1030,14 +1037,16 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     } else if (args.length >= 1) {
       elems = args;
     } else {
-      throw new Error('Median: GPU target requires a List argument or at least 1 scalar argument');
+      throw new Error(
+        'Median: GPU target requires a List argument or at least 1 scalar argument'
+      );
     }
     const n = elems.length;
     if (n === 0) throw new Error('Median: empty list');
     if (n > 8) {
       throw new Error(
         `Median: GPU target supports up to 8 elements via inline sorting network (got ${n}). ` +
-        'For larger lists, compute on the CPU and pass the result as a uniform.'
+          'For larger lists, compute on the CPU and pass the result as a uniform.'
       );
     }
 
@@ -1092,9 +1101,9 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       if (target.language === 'wgsl') {
         throw new Error(
           'Random(): WGSL compile requires an explicit seed argument. ' +
-          'WGSL has no gl_FragCoord built-in outside fragment entry points, ' +
-          'so the no-arg fallback used in GLSL is unavailable. ' +
-          'Use Random(seed) where seed is a deterministic per-invocation value.'
+            'WGSL has no gl_FragCoord built-in outside fragment entry points, ' +
+            'so the no-arg fallback used in GLSL is unavailable. ' +
+            'Use Random(seed) where seed is a deterministic per-invocation value.'
         );
       }
       // GLSL fragment-shader fallback: derive a per-pixel seed from the
@@ -2891,10 +2900,14 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     }
     if (code.includes('_gpu_random'))
       preamble +=
-        this.languageId === 'wgsl' ? GPU_RANDOM_PREAMBLE_WGSL : GPU_RANDOM_PREAMBLE_GLSL;
+        this.languageId === 'wgsl'
+          ? GPU_RANDOM_PREAMBLE_WGSL
+          : GPU_RANDOM_PREAMBLE_GLSL;
     if (code.includes('_gpu_gcd'))
       preamble +=
-        this.languageId === 'wgsl' ? GPU_GCD_PREAMBLE_WGSL : GPU_GCD_PREAMBLE_GLSL;
+        this.languageId === 'wgsl'
+          ? GPU_GCD_PREAMBLE_WGSL
+          : GPU_GCD_PREAMBLE_GLSL;
     if (code.includes('_gpu_median_'))
       preamble +=
         this.languageId === 'wgsl'

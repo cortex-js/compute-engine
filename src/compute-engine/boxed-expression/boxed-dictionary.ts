@@ -164,7 +164,7 @@ export class BoxedDictionary
     const eltType = widen(
       ...Object.values(this._keyValues).map((op) => op.type.type)
     );
-    this._type = this.engine.type(`dictionary<${eltType}>`);
+    this._type = new BoxedType({ kind: 'dictionary', values: eltType });
     return this._type;
   }
 

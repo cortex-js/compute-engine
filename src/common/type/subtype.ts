@@ -644,7 +644,57 @@ function widen2(a: Readonly<Type>, b: Readonly<Type>): Readonly<Type> {
   if (isSubtype(a, b)) return b;
   if (isSubtype(b, a)) return a;
 
-  return superType(a, b);
+  // Two types that are not subtypes of each other. Try the common
+  // supertype: this works well for related numeric types (e.g.
+  // integer/real → real). But if the supertype collapses to a generic
+  // category that loses information (e.g. 'scalar' for number+string,
+  // or 'tuple' for two tuples of different shape), surface the
+  // heterogeneity as an explicit union so downstream consumers (e.g.
+  // the List operator's type handler) can detect mixed-kind content.
+  const sup = superType(a, b);
+  if (LOSSY_SUPERTYPE.has(sup as string)) return unionTypes(a, b);
+  return sup;
+}
+
+const LOSSY_SUPERTYPE = new Set<string>([
+  'scalar',
+  'value',
+  'function',
+  'expression',
+  'collection',
+  'indexed_collection',
+  'list',
+  'set',
+  'tuple',
+  'record',
+  'dictionary',
+  'map',
+  'any',
+]);
+
+/** Build a union of two types, flattening if either is already a union and
+ *  de-duplicating identical members. Returns the simpler type if reducible.
+ */
+function unionTypes(a: Readonly<Type>, b: Readonly<Type>): Readonly<Type> {
+  const members: Type[] = [];
+  const push = (t: Readonly<Type>) => {
+    if (typeof t === 'object' && t.kind === 'union') {
+      for (const m of t.types) push(m);
+      return;
+    }
+    // de-dup by structural equality via JSON (cheap and adequate)
+    const key = typeof t === 'string' ? t : JSON.stringify(t);
+    if (
+      !members.some(
+        (m) => (typeof m === 'string' ? m : JSON.stringify(m)) === key
+      )
+    )
+      members.push(t as Type);
+  };
+  push(a);
+  push(b);
+  if (members.length === 1) return members[0];
+  return { kind: 'union', types: members };
 }
 
 /** Convert two or more types into a more specific type that is a subtype of

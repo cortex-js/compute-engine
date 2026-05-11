@@ -436,9 +436,7 @@ export const DEFINITIONS_SETS: LatexDictionary = [
       // element, if present, becomes the default: True, default.
       if (h === 'Sequence') {
         const elements = operands(body);
-        const colonElements = elements.filter(
-          (el) => operator(el) === 'Colon'
-        );
+        const colonElements = elements.filter((el) => operator(el) === 'Colon');
         const allPiecewise =
           colonElements.length > 0 &&
           colonElements.every((el) => {

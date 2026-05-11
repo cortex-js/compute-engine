@@ -86,6 +86,13 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
   signature: BoxedType;
   inferredSignature = true;
 
+  /** True if this operator definition was created from a user-defined
+   * function literal (e.g. via `ce.assign('f', ce.parse('x \\mapsto x^2'))`).
+   * Used to enable auto-broadcasting when applied to indexed collections.
+   * @internal
+   */
+  _isLambda = false;
+
   type?: (
     ops: ReadonlyArray<Expression>,
     options: { engine: ComputeEngine }
@@ -335,6 +342,11 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
           this.engine._typeResolver
         );
       }
+
+      // Mark this operator definition as backed by a user-defined function
+      // literal. Enables auto-broadcasting at apply time.
+      if (isFunction(boxedFn) && boxedFn.operator === 'Function')
+        this._isLambda = true;
 
       const fn = applicable(boxedFn);
       evaluate = (xs, _options) => fn(xs);

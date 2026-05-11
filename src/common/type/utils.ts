@@ -57,7 +57,7 @@ export function collectionElementType(type: Readonly<Type>): Type | undefined {
   if (type.kind === 'tuple') return widen(...type.elements.map((x) => x.type));
 
   if (type.kind === 'dictionary')
-    return parseType(`tuple<string, ${type.values}>`);
+    return parseType(`tuple<string, ${typeToString(type.values)}>`);
 
   if (type.kind === 'record') {
     return parseType(

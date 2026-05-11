@@ -148,6 +148,8 @@ export interface IComputeEngine {
 
   recursionLimit: number;
 
+  maxCollectionSize: number;
+
   chop(n: number): number;
   chop(n: BigNum): BigNum | 0;
   chop(n: number | BigNum): number | BigNum;

@@ -266,9 +266,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // sign-mismatched step (e.g. Range(0, 1, -1)) producing a negative
         // count and looping forever.
         const maxCount =
-          step === 0
-            ? 0
-            : Math.max(0, Math.floor((upper - lower) / step) + 1);
+          step === 0 ? 0 : Math.max(0, Math.floor((upper - lower) / step) + 1);
 
         let index = 1;
 
@@ -917,10 +915,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Access an element of an indexed collection.',
       'If the index is negative, it is counted from the end.',
       'Multiple indices can be provided to access nested collections (e.g., matrices).',
+      'If the index is a finite collection of booleans, returns the elements where the mask is True.',
+      'If the index is a finite collection of integers, returns the elements at those indices.',
     ],
     complexity: 8200,
     signature:
-      '(value: indexed_collection, index: (number|string)+) -> unknown',
+      '(value: indexed_collection, index: (number|string|indexed_collection)+) -> unknown',
     type: ([xs]) =>
       xs.operatorDefinition?.collection?.elttype?.(xs) ??
       collectionElementType(xs.type.type) ??
@@ -935,13 +935,52 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         const at = def?.collection?.at;
         if (!at) return undefined;
         const opAtIndex = ops[index];
+
+        // Case A: string key (dictionary-style access).
         const s = isString(opAtIndex) ? opAtIndex.string : undefined;
-        if (s !== undefined) expr = at(expr, s) ?? ce.Nothing;
-        else {
-          const i = ops[index].re;
-          if (!Number.isInteger(i)) return undefined;
-          expr = at(expr, i) ?? ce.Nothing;
+        if (s !== undefined) {
+          expr = at(expr, s) ?? ce.Nothing;
+          index += 1;
+          continue;
         }
+
+        // Case B: finite collection index — boolean mask or integer list.
+        if (opAtIndex.isCollection && opAtIndex.isFiniteCollection) {
+          const indices = Array.from(opAtIndex.each()) as Expression[];
+          const isMask = indices.every((m) => {
+            const name = sym(m);
+            return name === 'True' || name === 'False';
+          });
+
+          const picked: Expression[] = [];
+          if (isMask) {
+            // Boolean mask: keep element i when mask[i] is True. Mask
+            // entries past the end of the source contribute nothing.
+            indices.forEach((m, i) => {
+              if (sym(m) !== 'True') return;
+              const v = at(expr, i + 1);
+              if (v !== undefined) picked.push(v);
+            });
+          } else {
+            // Integer-list pick: select element at each integer index.
+            // Out-of-range indices are dropped.
+            for (const m of indices) {
+              const k = m.re;
+              if (!Number.isInteger(k)) return undefined;
+              const v = at(expr, k);
+              if (v !== undefined) picked.push(v);
+            }
+          }
+
+          expr = ce._fn('List', picked);
+          index += 1;
+          continue;
+        }
+
+        // Case C: primitive integer index.
+        const i = opAtIndex.re;
+        if (!Number.isInteger(i)) return undefined;
+        expr = at(expr, i) ?? ce.Nothing;
         index += 1;
       }
       return expr;
@@ -953,7 +992,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description: ['Return `n` elements from a collection.'],
     complexity: 8200,
     signature: '(xs: indexed_collection, count: number) -> indexed_collection',
-    type: ([xs]) => `list<${collectionElementType(xs.type.type)}>`,
+    type: ([xs]) =>
+      `list<${typeToString(collectionElementType(xs.type.type) ?? 'any')}>`,
     evaluate: (ops, { engine, materialization: eager }) => {
       if (!eager) return undefined;
       // Force materialization by converting iterator to List
@@ -1007,7 +1047,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description: ['Return the collection without the first n elements.'],
     complexity: 8200,
     signature: '(xs: indexed_collection, count: number) -> indexed_collection',
-    type: ([xs]) => `list<${collectionElementType(xs.type.type)}>`,
+    type: ([xs]) =>
+      `list<${typeToString(collectionElementType(xs.type.type) ?? 'any')}>`,
     collection: {
       isLazy: (_expr) => true,
       count: (expr) => {
@@ -1227,7 +1268,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 8200,
     signature:
       '(value: indexed_collection, start: number, end: number) -> list',
-    type: ([xs]) => parseType(`list<${collectionElementType(xs.type.type)}>`),
+    type: ([xs]) =>
+      parseType(
+        `list<${typeToString(collectionElementType(xs.type.type) ?? 'any')}>`
+      ),
     collection: {
       isLazy: (_expr) => true,
       count: (expr) => {
@@ -1694,7 +1738,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       if (t === 'string')
         return parseType(`tuple<list<string>, list<integer>>`);
       return parseType(
-        `tuple<list<${collectionElementType(t)}>, list<integer>>`
+        `tuple<list<${typeToString(
+          collectionElementType(t) ?? 'any'
+        )}>, list<integer>>`
       );
     },
     evaluate: (ops, { engine: ce }) => {
@@ -1711,7 +1757,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description: 'Return a list of the unique elements of the collection.',
     complexity: 8200,
     signature: '(collection) -> list',
-    type: ([xs]) => `list<${collectionElementType(xs.type.type)}>`,
+    type: ([xs]) =>
+      `list<${typeToString(collectionElementType(xs.type.type) ?? 'any')}>`,
     evaluate: (ops, { engine: ce }) => {
       if (!ops[0].isFiniteCollection) return undefined;
       const [values, _counts] = tally(ops[0]!);
@@ -1724,7 +1771,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     wikidata: 'Q381060',
     complexity: 8200,
     signature: '(collection, integer | function) -> list',
-    type: ([xs]) => `list<${collectionElementType(xs.type.type)}>`,
+    type: ([xs]) =>
+      `list<${typeToString(collectionElementType(xs.type.type) ?? 'any')}>`,
     evaluate: ([xs, arg], { engine: ce }) => {
       if (!xs.isFiniteCollection) return undefined;
 
@@ -1936,11 +1984,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const raw = toInteger(ops[1]);
       if (raw === null) return undefined;
       const n = Math.max(0, raw);
-      // Cap materialization to prevent memory blowup. Larger requests stay
-      // lazy; consumers can still access elements via .at() / iterator.
-      // TODO: switch to ce.maxCollectionSize when A3 lands.
-      const REPEAT_MATERIALIZATION_CAP = 10_000;
-      if (n > REPEAT_MATERIALIZATION_CAP) return undefined;
+      // Larger requests stay lazy; elements remain accessible via .at()
+      // and the iterator.
+      if (n > engine.maxCollectionSize) return undefined;
       return engine._fn('List', Array(n).fill(ops[0]));
     },
     collection: {

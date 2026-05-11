@@ -993,6 +993,13 @@ export interface BoxedOperatorDefinition
    */
   inferredSignature: boolean;
 
+  /** If true, this operator definition is backed by a user-defined function
+   * literal (e.g. one assigned via `ce.assign('f', ce.parse('x \\mapsto x^2'))`).
+   * Used to enable auto-broadcasting when applied to indexed collections.
+   * @internal
+   */
+  _isLambda?: boolean;
+
   /** The type of the arguments and return value of this function */
   signature: BoxedType;
 

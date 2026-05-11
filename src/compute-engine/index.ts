@@ -675,6 +675,24 @@ export class ComputeEngine implements IComputeEngine {
     this._runtimeState.recursionLimit = t;
   }
 
+  /** Maximum number of elements a collection may have when materialized
+   * (converted from a lazy form to a `List`). Default: 10,000.
+   *
+   * When a materialization would exceed this size, the operation leaves
+   * the expression in its lazy form. Consumers can detect oversize
+   * collections via the symbolic form's `count`.
+   *
+   * Set to `Infinity` (or `0` / a negative number) to disable the cap.
+   *
+   * @experimental
+   */
+  get maxCollectionSize(): number {
+    return this._runtimeState.maxCollectionSize;
+  }
+  set maxCollectionSize(t: number) {
+    this._runtimeState.maxCollectionSize = t;
+  }
+
   /**
    * Flag to prevent infinite recursion in the verify/ask/equality checking cycle.
    *

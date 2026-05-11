@@ -438,9 +438,34 @@ export function expressionTensorInfo(
         }
       }
     }
-    // 4b. all leaves → accumulate dtype
+    // 4b. all leaves → accumulate dtype.
+    // Reject collection-like leaves and strings so mixed-kind lists like
+    // [1, 'hello'] and mixed-dim point lists like [Tuple(1,2), Tuple(3,4,5)]
+    // aren't misidentified as tensors — the List operator's type handler
+    // relies on this to surface a heterogeneous element type.
     else {
       for (const item of t) {
+        // Operator-name check: tensor detection runs on raw boxed ops where
+        // item.type may still be 'unknown', so we can't rely on type inspection.
+        const op = item.operator;
+        if (
+          op === 'Tuple' ||
+          op === 'Pair' ||
+          op === 'Single' ||
+          op === 'Triple' ||
+          op === 'Quadruple' ||
+          op === 'KeyValuePair' ||
+          op === 'Dictionary' ||
+          op === 'Set' ||
+          op === 'Record'
+        ) {
+          valid = false;
+          return;
+        }
+        if (item.type.type === 'string') {
+          valid = false;
+          return;
+        }
         dtype = getSupertype(dtype, getExpressionDatatype(item));
       }
     }

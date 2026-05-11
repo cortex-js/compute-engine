@@ -79,9 +79,7 @@ export function extractIntervalBounds(
     // Less(a, b, c)   means  a < b < c
     // Greater(a, b)   means  a > b  → treated as b < a  (flipped to [b, a])
     const flipped =
-      op === 'Greater' || op === 'GreaterEqual'
-        ? [...ops].reverse()
-        : ops;
+      op === 'Greater' || op === 'GreaterEqual' ? [...ops].reverse() : ops;
 
     // Walk the (flipped) chain looking for `symbol` as an operand.
     // For chain [lower, symbol]: lower bound.
@@ -121,10 +119,7 @@ export function extractIntervalBounds(
 
 function _mergeBounds(into: IntervalBounds, from: IntervalBounds): void {
   if (from.lower !== undefined) {
-    if (
-      into.lower === undefined ||
-      from.lower.isGreater(into.lower) === true
-    ) {
+    if (into.lower === undefined || from.lower.isGreater(into.lower) === true) {
       into.lower = from.lower;
       into.lowerStrict = from.lowerStrict;
     } else if (from.lower.isSame(into.lower)) {
@@ -133,10 +128,7 @@ function _mergeBounds(into: IntervalBounds, from: IntervalBounds): void {
     }
   }
   if (from.upper !== undefined) {
-    if (
-      into.upper === undefined ||
-      from.upper.isLess(into.upper) === true
-    ) {
+    if (into.upper === undefined || from.upper.isLess(into.upper) === true) {
       into.upper = from.upper;
       into.upperStrict = from.upperStrict;
     } else if (from.upper.isSame(into.upper)) {
@@ -239,10 +231,7 @@ export function getInequalityBoundsFromAssumptions(
     // Case 3: symbol < 0 => symbol has upper bound 0
     if (isSymbol(lhs, symbol)) {
       const bound = ce.Zero;
-      if (
-        result.upper === undefined ||
-        bound.isLess(result.upper) === true
-      ) {
+      if (result.upper === undefined || bound.isLess(result.upper) === true) {
         result.upper = bound;
         result.upperStrict = isStrict;
       }
@@ -271,10 +260,7 @@ export function getInequalityBoundsFromAssumptions(
       if (hasSymbol && constantSum !== 0) {
         // symbol + k < 0 => symbol < -k
         const bound = ce.expr(-constantSum);
-        if (
-          result.upper === undefined ||
-          bound.isLess(result.upper) === true
-        ) {
+        if (result.upper === undefined || bound.isLess(result.upper) === true) {
           result.upper = bound;
           result.upperStrict = isStrict;
         }
