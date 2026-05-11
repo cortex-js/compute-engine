@@ -1647,7 +1647,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Randomize the order of the elements in the collection. ' +
       'With an optional `seed` argument, the shuffle is deterministic.',
     complexity: 8200,
-    signature: '(indexed_collection, number?) -> indexed_collection',
+    signature: '(indexed_collection, real?) -> indexed_collection',
     type: (ops) => ops[0].type,
     evaluate: ([xs, seedOp], { engine: ce }) => {
       if (!xs.isFiniteCollection) return undefined;

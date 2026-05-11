@@ -389,7 +389,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         'without replacement. With an optional `seed` argument, the sample ' +
         'is deterministic.',
       complexity: 8200,
-      signature: '(collection, integer, number?) -> list',
+      signature: '(collection, integer, real?) -> list',
       evaluate: ([xs, nArg, seedArg], { engine: ce }) => {
         if (!xs.isFiniteCollection) return undefined;
 
