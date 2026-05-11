@@ -1,85 +1,217 @@
+### [Unreleased]
+
+#### Added
+
+- **`\operatorname{count}(L)` lowercase alias** — function-call form now parses
+  to `["Length", L]`, matching the existing dot-notation form
+  (`L.\operatorname{count}`) and the other lowercase aliases (`mod`, `var`,
+  `shuffle`, `repeat`, `join`).
+
+- **2-arg `\arctan(y, x)` → `Arctan2`** — when `\arctan` is parsed with exactly
+  two arguments, the result is lowered to the existing `Arctan2` operator (the
+  principal value of `atan2(y, x)`). Single-arg `\arctan(x)` is unchanged. This
+  matches Desmos's convention of using `\arctan` for both the 1-arg and 2-arg
+  forms.
+
+- **`Repeat(value, count)` 2-arg form** — `Repeat` now accepts an optional
+  integer `count` and evaluates to a finite list of `count` copies of `value`.
+  The 1-arg `Repeat(value)` keeps its existing infinite-sequence semantics. Lazy
+  collection handlers (`at`, `iterator`, `count`, `isFinite`, `isEmpty`,
+  `contains`) all branch on arity. To prevent memory blowup, materialization is
+  capped at 10,000 elements; larger values stay lazy (still accessible
+  element-by-element via `.at()` / iterator). This cap will switch to
+  `ce.maxCollectionSize` when that config lands.
+
+- **`Length` library entry** — `Length` was previously only a parse-side head
+  (produced by `L.\operatorname{count}` dot notation) with no evaluator. It now
+  has a full operator definition with a safe evaluator that returns `undefined`
+  (leaves expression unevaluated) for non-collection or infinite-collection
+  inputs, and an integer count otherwise. `ce.operatorInfo('Length')` now
+  returns a valid entry.
+
+- **Library entries for `Complex`, `Colon`, `Prime`** — these heads were
+  produced by the LaTeX parser but had no library definitions, so
+  `ce.operatorInfo()` returned `undefined` for them. They now have stub operator
+  definitions (signature only) for introspection. `Complex` boxing is unchanged
+  — `["Complex", re, im]` still short-circuits to a `BoxedNumber` during boxing.
+
+- **`ce.symbolInfo(name)`** — new public API parallel to `ce.operatorInfo()`,
+  for introspecting value-side definitions (constants and declared variables).
+  Returns `{ kind: 'constant' | 'variable', type: BoxedType }` for symbols like
+  `Pi`, `True`, `ExponentialE`, `ImaginaryUnit`, etc. Returns `undefined` for
+  unknown names and for operator heads (the two methods are non-overlapping; use
+  `operatorInfo` for function heads, `symbolInfo` for value symbols). Added
+  `SymbolInfo` type to the public type surface.
+  - Naming note: CE's canonical names for some Desmos-audit-listed constants
+    differ — `Infinity` is registered as `PositiveInfinity` /
+    `NegativeInfinity`; `Undefined` has no value definition. Consumers should
+    query the canonical names.
+
+- **`ce.normalizeIdentifier(latex)`** — new public helper that converts a LaTeX
+  identifier string to its canonical MathJSON name without side effects.
+  Examples: `R_{3}` → `R_3`, `f_{Bm}` → `f_Bm`, `C_{ustomizablecolor}` →
+  `C_ustomizablecolor`, `\theta_x` → `theta_x`. Already-canonical names pass
+  through unchanged via a fast path (`isValidSymbol` check before any parsing).
+  Inputs that aren't identifiers (`'1 + 2'`, empty string) return `''`. Useful
+  in importer pipelines that need to call `ce.declare()` with normalized names
+  before parsing referencing rows (avoids the auto-declare-then-redeclare
+  conflict from calling `ce.parse(latex).symbol`).
+
+- **`First`/`Second`/`Third` compile entries** — closes the 0.57.0
+  parser/compile mismatch. Component access (`p.x`, `p.y`, `p.z`) now compiles
+  cleanly:
+  - JS: `[0]`/`[1]`/`[2]` index access on the tuple argument.
+  - GLSL/WGSL: `.x`/`.y`/`.z` swizzles. Assumes the argument compiles to a
+    `vec2`/`vec3`/`vec4` (the common case for 2D/3D points); 5+-element tuples
+    that compile to `float[N]` arrays aren't supported and produce invalid
+    shader output.
+
+- **`Range` GPU compile entry** — `Range(lo, hi[, step])` with
+  compile-time-constant bounds emits an inline `float[N](...)` (GLSL) or
+  `array<f32, N>(...)` (WGSL) literal. Non-constant bounds throw a clear error
+  directing the caller to materialize at the JS host and upload as a uniform.
+  Empty ranges and zero-step ranges throw. Sequence count is capped at 256
+  elements per call site.
+
+- **`Variance`/`GCD`/`Median` GPU compile entries** — GLSL+WGSL parity with
+  their existing JS counterparts.
+  - `Variance` is inlined: each element minus mean, squared, summed, divided by
+    `N-1`. No size limit (the GPU shader compiler CSEs the mean sub-expression).
+  - `GCD` uses a preamble function (`_gpu_gcd`) implementing the Euclidean
+    algorithm. Both GLSL and WGSL preambles.
+  - `Median` uses per-size preamble functions for list sizes 2–8
+    (`_gpu_median_N`). Lists with 9+ elements throw — selection-sort networks
+    become unwieldy at larger sizes. Both GLSL and WGSL.
+
+- **`Random` GPU compile with deterministic seed** — `Random(seed)` in GLSL/WGSL
+  compiles to a hash-based pseudorandom
+  (`fract(sin(seed * 12.9898) * 43758.5453)`). `Random()` (no args) in GLSL
+  falls back to a `gl_FragCoord`-derived seed (fragment-shader only); the same
+  in WGSL throws because WGSL has no `gl_FragCoord` built-in outside fragment
+  entry points — callers must provide an explicit seed.
+  - Note: the fract-sin hash exhibits banding near `seed ≈ kπ`. For high-quality
+    shader random, callers should use a more robust hash (e.g. PCG or xxHash).
+  - **JS-side `Random` is unchanged** (still `Math.random`, non-seeded). The
+    seeded JS form will land in CE-P7 (A4) and harmonize with this GPU
+    implementation. The asymmetry is intentional and documented in the GPU
+    compile site.
+
+- **`toSignedFunction()`** — new method on `BoxedExpression` for 3D
+  implicit-surface rendering and region classification:
+  - `Equal(a, b)` → `a - b` (zero on the surface)
+  - `Less(a, b)` / `LessEqual(a, b)` → `a - b` (negative when relation holds)
+  - `Greater(a, b)` / `GreaterEqual(a, b)` → `b - a` (negative when relation
+    holds)
+  - `NotEqual(a, b)` → `a - b`
+  - Non-relation expressions return `undefined`.
+
+  Strictness and direction are encoded in `expr.operator`, not in the returned
+  expression. Note that CE canonical form normalizes `GreaterEqual(a, b)` to
+  `LessEqual(b, a)` (and similarly `Greater` to `Less`), so callers using
+  `toSignedFunction()` on parsed expressions will typically see the
+  `Less`/`LessEqual` operator — the signed-function semantics are preserved
+  through the normalization.
+
+#### Improved
+
+- **`parseTrig` Arctan2 handling** — the 2-arg `\arctan` lowering uses a
+  tighter, single-branch form instead of an `effectiveFn` intermediate.
+
+#### Known issues
+
+- **JS `Loop` compile produces `undefined`** — the imperative `for`-loop IIFE
+  generated for `Loop(body, Element(i, Range(lo, hi)))` has no `return`
+  statement, so the compiled function returns `undefined` rather than the list
+  of body values that CE evaluation produces. Verify-only tests in
+  `test/compute-engine/a1-c1-compile-parity.test.ts` lock in this behavior;
+  source-site comment at `base-compiler.ts:compileForLoop` documents the bug.
+  Tracked for a future release.
+
+- **JS `Integrate` compile produces `NaN`** — when `args[0]` is a `Function`
+  expression (the common `\int x^2 dx` parse shape), `compileIntegrate` produces
+  a double-lambda wrapping `(x) => ((x) => x*x)`, and `_SYS.integrate` receives
+  a function-returning function. Verify-only tests + source-site comment at
+  `javascript-target.ts:compileIntegrate` document the bug. Tracked for a future
+  release.
+
 ### 0.57.0 _2026-05-10_
 
 #### Added
 
 - **`verbatim` opt-in for `toLatex()`** — `expr.toLatex({ verbatim: true })`
-  returns the original LaTeX source captured at parse time when the
-  expression was parsed with `preserveLatex: true`. Falls back to normal
-  re-serialization if no verbatim is available (e.g. for synthetic or
-  transformed expressions). The default behavior of `expr.latex` and
-  `expr.toLatex()` is unchanged — verbatim is strictly opt-in. Useful
-  for round-tripping authored LaTeX (e.g. `p.x`, `\sin(x)`) without
-  rewriting it to canonical form.
-  - Verbatim is set only on the top-level boxed expression produced
-    directly by `ce.parse(..., { preserveLatex: true })`. Canonicalization,
-    `simplify()`, `evaluate()`, `subs()`, and `ce._fn()` produce fresh
-    expressions with `verbatimLatex === undefined`.
-  - Function expressions whose operator has a custom canonical handler
-    (e.g. `Sin`, `Add`) currently do not preserve top-level verbatim
-    through canonicalization — the handler reconstructs the result
-    without threading metadata. Atoms (symbols, numbers) and functions
-    without custom canonical handlers (e.g. `First`) do preserve it.
-    Use `form: 'structural'` to skip canonical handlers when verbatim
-    preservation matters.
+  returns the original LaTeX source captured at parse time when the expression
+  was parsed with `preserveLatex: true`. Falls back to normal re-serialization
+  if no verbatim is available (e.g. for synthetic or transformed expressions).
+  The default behavior of `expr.latex` and `expr.toLatex()` is unchanged —
+  verbatim is strictly opt-in. Useful for round-tripping authored LaTeX (e.g.
+  `p.x`, `\sin(x)`) without rewriting it to canonical form.
+  - Verbatim is set only on the top-level boxed expression produced directly by
+    `ce.parse(..., { preserveLatex: true })`. Canonicalization, `simplify()`,
+    `evaluate()`, `subs()`, and `ce._fn()` produce fresh expressions with
+    `verbatimLatex === undefined`.
+  - Function expressions whose operator has a custom canonical handler (e.g.
+    `Sin`, `Add`) currently do not preserve top-level verbatim through
+    canonicalization — the handler reconstructs the result without threading
+    metadata. Atoms (symbols, numbers) and functions without custom canonical
+    handlers (e.g. `First`) do preserve it. Use `form: 'structural'` to skip
+    canonical handlers when verbatim preservation matters.
 
 - **`dotNotation` serialization option** — when enabled (default off),
-  member-access heads serialize to dot notation rather than function-call
-  form: `First(p)` → `p.x`, `Length(L)` → `L.\operatorname{count}`, etc.
-  Useful for round-tripping editor-authored dot-notation back to its
-  source form. Set via `ce.latexOptions.dotNotation = true` or per-call
+  member-access heads serialize to dot notation rather than function-call form:
+  `First(p)` → `p.x`, `Length(L)` → `L.\operatorname{count}`, etc. Useful for
+  round-tripping editor-authored dot-notation back to its source form. Set via
+  `ce.latexOptions.dotNotation = true` or per-call
   `expr.toLatex({ dotNotation: true })`. Only applies to arity-1 forms;
   multi-operand forms (e.g. `Sum` with an index range) keep their standard
   serialization.
-  - **Serializer-only.** The flag lives in `SerializeLatexOptions` and has
-    no effect on parsing. All input forms continue to parse as before
-    regardless of the flag: `|L|`, `\operatorname{count}(L)`,
-    `L.\operatorname{count}`, `\operatorname{length}(L)` all still parse to
-    `["Length", L]` whether `dotNotation` is on or off. The flag only
-    decides which form the serializer emits.
+  - **Serializer-only.** The flag lives in `SerializeLatexOptions` and has no
+    effect on parsing. All input forms continue to parse as before regardless of
+    the flag: `|L|`, `\operatorname{count}(L)`, `L.\operatorname{count}`,
+    `\operatorname{length}(L)` all still parse to `["Length", L]` whether
+    `dotNotation` is on or off. The flag only decides which form the serializer
+    emits.
 
 - **Component access** (`p.x`, `L.\operatorname{count}`, `z.\operatorname{re}`)
-  — dot notation now parses to existing semantic heads at parse
-  time. No generic accessor head was introduced.
-  - Recognized members and their AST mapping:
-    `x`/`y`/`z` → `First`/`Second`/`Third`;
-    `real`/`re` → `Real`; `imag`/`im` → `Imaginary`;
-    `count` → `Length`; `total` → `Sum`;
-    `max` → `Max`; `min` → `Min`.
+  — dot notation now parses to existing semantic heads at parse time. No generic
+  accessor head was introduced.
+  - Recognized members and their AST mapping: `x`/`y`/`z` →
+    `First`/`Second`/`Third`; `real`/`re` → `Real`; `imag`/`im` → `Imaginary`;
+    `count` → `Length`; `total` → `Sum`; `max` → `Max`; `min` → `Min`.
   - Disambiguation: after a terminated integer or decimal, `.` followed by a
     letter or `\operatorname{...}` is component access, not a decimal point.
-    Examples: `1.x` parses as `["First", 1]` (not a malformed decimal);
-    `1.5.x` parses as `["First", 1.5]`.
+    Examples: `1.x` parses as `["First", 1]` (not a malformed decimal); `1.5.x`
+    parses as `["First", 1.5]`.
   - Only `\operatorname{...}` and bare-letter identifiers are recognized after
     `.`. `\mathrm{...}` is not accepted (deliberately tight).
-  - `Third` is a new operator (parallels `First`/`Second`) with
-    signature `(any) -> any`. `First`/`Second` were widened from
-    `(collection) -> any` to `(any) -> any` so component access on a
-    non-collection (e.g. `1.x`) defers type-checking to evaluation;
-    evaluation returns an `Error` expression for incompatible types.
+  - `Third` is a new operator (parallels `First`/`Second`) with signature
+    `(any) -> any`. `First`/`Second` were widened from `(collection) -> any` to
+    `(any) -> any` so component access on a non-collection (e.g. `1.x`) defers
+    type-checking to evaluation; evaluation returns an `Error` expression for
+    incompatible types.
 
-- **Restriction braces** (`expr\{cond\}`) — trailing brace predicates parse
-  to a new `When` head.
+- **Restriction braces** (`expr\{cond\}`) — trailing brace predicates parse to a
+  new `When` head.
   - `f(x)\{0 < x < 2\}` → `["When", ["f", "x"], ["Less", 0, "x", 2]]`.
-  - **Stacked restrictions canonicalize**: `expr\{c_1\}\{c_2\}` → 
+  - **Stacked restrictions canonicalize**: `expr\{c_1\}\{c_2\}` →
     `["When", expr, ["And", c_1, c_2]]`. Downstream simplification, evaluation,
     interval intersection, and compilation see a single canonical shape
     regardless of source form.
-  - Disambiguation from set literals is positional: standalone
-    `\{1, 2, 3\}` continues to parse as a `Set`; `<expr>\{cond\}` parses as a
-    `When` restriction. Allowed left operands include function calls, tuples,
-    list/set literals, bare symbols, subscripted symbols, member access,
-    power expressions, and chained restrictions.
-  - Evaluator semantics: `When(e, True)` evaluates `e`;
-    `When(e, False)` returns `Undefined`; indeterminate `cond` holds the form.
-  - Serializer round-trips to the stacked-brace form (not `\wedge` inside
-    one set of braces) so authored source and re-serialized output stay
-    visually consistent.
+  - Disambiguation from set literals is positional: standalone `\{1, 2, 3\}`
+    continues to parse as a `Set`; `<expr>\{cond\}` parses as a `When`
+    restriction. Allowed left operands include function calls, tuples, list/set
+    literals, bare symbols, subscripted symbols, member access, power
+    expressions, and chained restrictions.
+  - Evaluator semantics: `When(e, True)` evaluates `e`; `When(e, False)` returns
+    `Undefined`; indeterminate `cond` holds the form.
+  - Serializer round-trips to the stacked-brace form (not `\wedge` inside one
+    set of braces) so authored source and re-serialized output stay visually
+    consistent.
   - JS and GLSL compilation: ternary `(cond ? e : NaN)`.
 
-- **List-range ellipsis** (`[1...9]`, `[0, 0.1, ..., 1]`) — ranges inside
-  list literals parse to the existing `Range` head.
-  - Endpoint-only form: `[a...b]` → `["Range", a, b]`. Triggers `...`,
-    `\ldots`, and `\dots` are all accepted.
+- **List-range ellipsis** (`[1...9]`, `[0, 0.1, ..., 1]`) — ranges inside list
+  literals parse to the existing `Range` head.
+  - Endpoint-only form: `[a...b]` → `["Range", a, b]`. Triggers `...`, `\ldots`,
+    and `\dots` are all accepted.
   - Inferred-step form: `[a_0, a_1, ..., a_n]` → `["Range", a_0, a_n, step]`
     where `step = a_1 - a_0` is inferred from the first sample pair.
     Intermediate samples are validated against `a_0 + k·step` within
@@ -89,19 +221,19 @@
   - Outside `[...]` brackets, `\ldots`/`\dots`/`...` continue to parse as the
     `ContinuationPlaceholder` symbol. The trigger is bracket context.
 
-- **For-comprehensions** (`(x, y) \operatorname{for} x=L_1, y=L_2`) — the
-  `Loop` head now accepts multiple `Element` clauses, evaluated as nested
-  loops with later bindings seeing earlier ones in scope.
+- **For-comprehensions** (`(x, y) \operatorname{for} x=L_1, y=L_2`) — the `Loop`
+  head now accepts multiple `Element` clauses, evaluated as nested loops with
+  later bindings seeing earlier ones in scope.
   - `Loop(body, Element(x, L_1), Element(y, L_2), ...)` produces an
     `indexed_collection<T>` of body evaluations, in row-major order.
   - For independent bindings this is the Cartesian product:
     `(x, y) \operatorname{for} x = [1...2], y = [1...2]` → 4 tuples.
   - For dependent bindings later clauses see earlier:
-    `(x, y) \operatorname{for} x = [1...3], y = [1...x]` → 6 tuples
-    (triangle, not Cartesian).
-  - Precedence: `\operatorname{for}` binds looser than `,` and `=`, tighter
-    than `;`. So `(x + y) \operatorname{for} x = L_1, y = L_2` parses with
-    body `x + y` and two bindings.
+    `(x, y) \operatorname{for} x = [1...3], y = [1...x]` → 6 tuples (triangle,
+    not Cartesian).
+  - Precedence: `\operatorname{for}` binds looser than `,` and `=`, tighter than
+    `;`. So `(x + y) \operatorname{for} x = L_1, y = L_2` parses with body
+    `x + y` and two bindings.
   - Bound names do not leak into the enclosing scope (uses
     `Scope.noAutoDeclare`).
   - Legacy single-Element form continues to round-trip via the existing
@@ -110,18 +242,17 @@
 
 - **`Range` type is now dynamic** — element type narrows based on the step
   argument: integer step (or no step) yields `indexed_collection<integer>`;
-  non-integer step yields `indexed_collection<number>`. Previously the type
-  was always `indexed_collection<integer>`, which was incorrect for
-  float-step ranges.
+  non-integer step yields `indexed_collection<number>`. Previously the type was
+  always `indexed_collection<integer>`, which was incorrect for float-step
+  ranges.
 
-- **`When` head** — new conditional-value operator.
-  `When(expr, cond)` returns `expr` when `cond` is true, `Undefined`
-  when `cond` is false, and holds when `cond` is indeterminate.
-  Used by restriction-brace parsing (see above) but also usable
-  directly.
+- **`When` head** — new conditional-value operator. `When(expr, cond)` returns
+  `expr` when `cond` is true, `Undefined` when `cond` is false, and holds when
+  `cond` is indeterminate. Used by restriction-brace parsing (see above) but
+  also usable directly.
 
-- **`ce.operatorInfo(head)`** — new method on `ComputeEngine` for
-  introspecting registered operator heads. Returns
+- **`ce.operatorInfo(head)`** — new method on `ComputeEngine` for introspecting
+  registered operator heads. Returns
   `{ kind: 'function' | 'opaque', signature?: BoxedType }` or `undefined`.
   - `'function'` — head has an `evaluate` handler or a `collection` handler
     (lazy producers like `Range`, `Linspace`, `Tuple` work via the latter).
@@ -129,20 +260,21 @@
     `Triangle`, `Sphere`, `GeometricVector`).
   - `undefined` — no operator definition (constants like `Pi` and unknown
     heads).
-  - Lets external tooling classify heads by capability without maintaining
-    a parallel list of supported operators.
+  - Lets external tooling classify heads by capability without maintaining a
+    parallel list of supported operators.
 
 - **`tolerance` in `ParseLatexOptions`** — populated automatically from
-  `ce.tolerance` when parsing through `ce.parse()`. Used by list-range
-  sample validation; available to other parse handlers that need
-  tolerance-aware comparison.
+  `ce.tolerance` when parsing through `ce.parse()`. Used by list-range sample
+  validation; available to other parse handlers that need tolerance-aware
+  comparison.
 
 #### Fixed
 
-- **`Loop` with `Element` clause** — single-Element `Loop(body, Element(i, range))`
-  previously did not produce a list of body evaluations (the iteration path
-  for `Element` form had a bug). The new variadic evaluator correctly yields
-  a `List` of body values for each iteration.
+- **`Loop` with `Element` clause** — single-Element
+  `Loop(body, Element(i, range))` previously did not produce a list of body
+  evaluations (the iteration path for `Element` form had a bug). The new
+  variadic evaluator correctly yields a `List` of body values for each
+  iteration.
 
 ### 0.56.0 _2026-03-10_
 

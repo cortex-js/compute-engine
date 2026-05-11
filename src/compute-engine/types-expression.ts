@@ -1592,6 +1592,40 @@ export interface Expression {
   simplify(options?: Partial<SimplifyOptions>): Expression;
 
   /**
+   * For a relation expression (`Equal`, `Less`, `Greater`, `LessEqual`,
+   * `GreaterEqual`, `NotEqual`), return the "signed function" form
+   * useful for implicit-surface rendering and region classification:
+   *
+   * - `Equal(a, b)` → `a - b` (zero on the surface)
+   * - `Less(a, b)` / `LessEqual(a, b)` → `a - b` (negative when relation holds)
+   * - `Greater(a, b)` / `GreaterEqual(a, b)` → `b - a` (negative when relation holds)
+   * - `NotEqual(a, b)` → `a - b` (caller checks ≠ 0)
+   *
+   * For non-relation expressions, returns `undefined`.
+   *
+   * Strictness (strict vs non-strict inequality) and direction (less vs
+   * greater) are encoded in the original `expr.operator`, not in the
+   * returned expression. Callers handling 3D implicit rendering use
+   * `expr.operator` for the boundary policy and the signed function for
+   * the interior/exterior classification.
+   *
+   * Notes:
+   * - CE canonical form normalizes `GreaterEqual(a, b)` to `LessEqual(b, a)`
+   *   (and similarly `Greater` to `Less`). Callers using `toSignedFunction()`
+   *   on canonicalized parsed expressions will see `LessEqual`/`Less` rather
+   *   than `GreaterEqual`/`Greater`. The signed-function semantics are
+   *   preserved through the normalization. The `GreaterEqual`/`Greater`
+   *   branches handle non-canonical expressions constructed via
+   *   `ce.box(['GreaterEqual', ...])`.
+   * - For chained relations with more than two operands (e.g.
+   *   `Less(a, b, c)` from `a < b < c`), only the first pair is used.
+   *   The result is the signed function for the first sub-relation only;
+   *   3D implicit rendering rarely uses chained relations, but if it
+   *   does, callers should decompose first.
+   */
+  toSignedFunction(): BoxedExpression | undefined;
+
+  /**
    * Return the value of the canonical form of this expression.
    *
    * A pure expression always returns the same value (provided that it

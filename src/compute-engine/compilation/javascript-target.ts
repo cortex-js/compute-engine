@@ -233,6 +233,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       return `_SYS.cexp(${compile(args[0])})`;
     return `Math.exp(${compile(args[0])})`;
   },
+  First: (args, compile) => `${compile(args[0])}[0]`,
   Floor: (args, compile) => {
     if (BaseCompiler.isIntegerValued(args[0])) return compile(args[0]);
     return `Math.floor(${compile(args[0])})`;
@@ -436,6 +437,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     if (BaseCompiler.isComplexValued(arg)) return `_SYS.csech(${compile(arg)})`;
     return `1 / Math.cosh(${compile(arg)})`;
   },
+  Second: (args, compile) => `${compile(args[0])}[1]`,
   Heaviside: '_SYS.heaviside',
   Sign: 'Math.sign',
   Sinc: '_SYS.sinc',
@@ -468,6 +470,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       return `_SYS.ctanh(${compile(args[0])})`;
     return `Math.tanh(${compile(args[0])})`;
   },
+  Third: (args, compile) => `${compile(args[0])}[2]`,
   Mod: ([a, b], compile) => {
     if (a === null || b === null) throw new Error('Mod: missing argument');
     const ca = compile(a);
@@ -1750,6 +1753,12 @@ function compileSumProduct(
 
 /**
  * Compile integration function
+ *
+ * Known issue: when `args[0]` is a `Function` expression (the common LaTeX
+ * `\int x^2 dx` parse shape), this produces a double-lambda wrapping
+ * `(x) => ((x) => x*x)` that makes `_SYS.integrate` return NaN. See
+ * `test/compute-engine/a1-c1-compile-parity.test.ts` ("Integrate compiles
+ * in JS") for the verify-only test that locks in current behavior.
  */
 function compileIntegrate(args, _, target: CompileTarget<Expression>): string {
   const { index, lowerExpr, upperExpr, lowerNum, upperNum } = extractLimits(

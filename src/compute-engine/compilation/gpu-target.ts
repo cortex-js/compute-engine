@@ -358,6 +358,14 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     return `exp(${compile(args[0])})`;
   },
   Exp2: 'exp2',
+  // Component access — assumes the argument compiles to a vec2/vec3/vec4
+  // (the common case for 2D/3D points). For 5+-element tuples that compile
+  // to `float[N]` arrays, swizzle access is invalid GLSL and the shader
+  // will fail to compile; that's an edge case `First`/`Second`/`Third`
+  // aren't designed for. Vec swizzles are identical between GLSL and WGSL.
+  First: (args, compile) => `${compile(args[0])}.x`,
+  Second: (args, compile) => `${compile(args[0])}.y`,
+  Third: (args, compile) => `${compile(args[0])}.z`,
   Floor: (args, compile) => {
     if (BaseCompiler.isIntegerValued(args[0])) return compile(args[0]);
     return `floor(${compile(args[0])})`;
@@ -884,6 +892,41 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   Product: (args, compile, target) =>
     compileGPUSumProduct('Product', args, compile, target),
 
+  // Range — inline constant array literal (bounds must be compile-time constants)
+  Range: (args, _compile, target) => {
+    if (args.length < 2 || args.length > 3) {
+      throw new Error(
+        'Range: GPU compile expects 2 or 3 arguments (lo, hi, step?)'
+      );
+    }
+    const lo = args[0].re;
+    const hi = args[1].re;
+    const step = args.length === 3 ? args[2].re : 1;
+    if (!Number.isFinite(lo) || !Number.isFinite(hi) || !Number.isFinite(step)) {
+      throw new Error(
+        'Range: GPU compile requires constant numeric bounds' +
+          ' (non-constant ranges must be materialized at JS host then uploaded as a uniform)'
+      );
+    }
+    if (step === 0) throw new Error('Range: step cannot be zero');
+    const count = Math.max(0, Math.floor((hi - lo) / step) + 1);
+    if (count === 0) {
+      throw new Error(
+        'Range: empty range (lo > hi for positive step, or lo < hi for negative step)'
+      );
+    }
+    if (count > 256) {
+      throw new Error(
+        `Range: GPU compile inlines ranges up to 256 elements (got ${count})`
+      );
+    }
+    const values: number[] = [];
+    for (let i = 0; i < count; i++) values.push(lo + i * step);
+    const isWGSL = target.language === 'wgsl';
+    const arrayType = isWGSL ? `array<f32, ${count}>` : `float[${count}]`;
+    return `${arrayType}(${values.map(formatGPUNumber).join(', ')})`;
+  },
+
   // Loop — GPU for-loop (no IIFE, no let)
   Loop: (args, _compile, target) => {
     if (!args[0]) throw new Error('Loop: no body');
@@ -919,6 +962,151 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       ? `var ${index}: ${intType}`
       : `${intType} ${index}`;
     return `for (${indexDecl} = ${lower}; ${index} <= ${upper}; ${index}++) {\n  ${bodyCode};\n}`;
+  },
+
+  // Statistical functions
+
+  /**
+   * GCD of two scalar arguments.
+   *
+   * Uses a preamble helper `_gpu_gcd` (Euclidean algorithm via `mod`).
+   * Only two-argument form is supported in GPU targets.
+   */
+  GCD: (args, compile) => {
+    if (args.length < 2) throw new Error('GCD: need at least two arguments');
+    if (args.length > 2) throw new Error('GCD: GPU target supports only two-argument GCD');
+    const a = args[0];
+    const b = args[1];
+    if (a === null || b === null) throw new Error('GCD: missing argument');
+    return `_gpu_gcd(${compile(a)}, ${compile(b)})`;
+  },
+
+  /**
+   * Variance of a compile-time-known list.
+   *
+   * Accepts either a single `List(...)` argument or N scalar arguments.
+   * Generates fully inline code: computes mean then sum of squared deviations,
+   * divided by (N-1) for sample variance (matches JS `_SYS.variance`).
+   */
+  Variance: (args, compile) => {
+    // Normalise: if single List arg, use its elements; else use args directly.
+    let elems: ReadonlyArray<Expression>;
+    if (args.length === 1 && isFunction(args[0], 'List')) {
+      elems = args[0].ops;
+    } else if (args.length >= 2) {
+      elems = args;
+    } else {
+      throw new Error('Variance: GPU target requires a List argument or at least 2 scalar arguments');
+    }
+    const n = elems.length;
+    if (n < 2) throw new Error('Variance: need at least 2 elements');
+    const compiled = elems.map((e) => compile(e));
+    // mean = (v0 + v1 + ... + vN-1) / N
+    const sum = compiled.join(' + ');
+    const mean = `((${sum}) / ${formatGPUNumber(n)})`;
+    // sum of squared deviations: (v0 - mean)^2 + ...
+    const sqDiffs = compiled
+      .map((c) => `(${c} - ${mean}) * (${c} - ${mean})`)
+      .join(' + ');
+    // sample variance: sum / (N - 1)
+    return `((${sqDiffs}) / ${formatGPUNumber(n - 1)})`;
+  },
+
+  /**
+   * Median of a compile-time-known list.
+   *
+   * Accepts either a single `List(...)` argument or N scalar arguments.
+   * For N ≤ 8: generates a fully unrolled inline sorting network followed by
+   * a middle-element pick. For larger N, throws (too large to inline cleanly).
+   *
+   * The sorting network uses the "odd-even merge sort" comparator pattern
+   * inlined as `min`/`max` calls — no GPU statements required.
+   */
+  Median: (args, compile) => {
+    // Normalise to element list
+    let elems: ReadonlyArray<Expression>;
+    if (args.length === 1 && isFunction(args[0], 'List')) {
+      elems = args[0].ops;
+    } else if (args.length >= 1) {
+      elems = args;
+    } else {
+      throw new Error('Median: GPU target requires a List argument or at least 1 scalar argument');
+    }
+    const n = elems.length;
+    if (n === 0) throw new Error('Median: empty list');
+    if (n > 8) {
+      throw new Error(
+        `Median: GPU target supports up to 8 elements via inline sorting network (got ${n}). ` +
+        'For larger lists, compute on the CPU and pass the result as a uniform.'
+      );
+    }
+
+    // Compile each element. We'll refer to them by variable names v0..vN-1.
+    // Build a sequence of min/max comparators that sort the array in place.
+    // Then return the middle element (or average of two middles for even N).
+    const compiled = elems.map((e) => compile(e));
+
+    // For N=1, median is the single element
+    if (n === 1) return compiled[0];
+
+    // Build a small inline sort using a Batcher odd-even sort network.
+    // We represent the "array" as a mutable JS array of code strings.
+    // Each "comparator" sorts a pair: (v[i], v[j]) → min then max.
+    // We inline this as: new_i = min(a, b); new_j = max(a, b)
+    // But since GLSL/WGSL have no statements in expressions, we encode
+    // the full sorted sequence using nested min/max only when possible.
+    //
+    // Strategy: generate all comparator pairs for sorting network (as a list),
+    // then materialise the sorted array as named sub-expressions via let-binding.
+    // Since GPU compile() returns strings (not blocks), we use a different
+    // approach: produce a comma-expression–style sequence using _gpu_median helper.
+    //
+    // Simpler approach that avoids preamble: for each position from 0..n-1,
+    // compute the k-th order statistic inline using the formula:
+    //   kth_element(k, v[]) = sum over all subsets S of size k+1 of (-1)^...
+    // This is exponential. Instead use the "min of maxes" approach:
+    //   sorted[k] = (k+1)-th smallest = min over all (k+1)-subsets of max(subset)
+    // This is O(n choose k+1) — too expensive for n=8.
+    //
+    // Cleanest solution: call `_gpu_median_N` preamble function.
+    // We emit a per-size preamble (GPU_MEDIAN_PREAMBLE_N_GLSL / WGSL)
+    // and return a call to `_gpu_median_N(v0, v1, ..., vN-1)`.
+    return `_gpu_median_${n}(${compiled.join(', ')})`;
+  },
+
+  /**
+   * Deterministic pseudorandom for GPU.
+   *
+   * Note that JS-side `Random` remains `Math.random` (non-seeded) for
+   * backward compatibility; the seeded JS form will land in A4 of the
+   * CE 0.58.0 plan.
+   *
+   * - 0 args (GLSL only): fall back to a fragment-coord-derived seed.
+   *   Only meaningful in fragment shaders (gl_FragCoord is FS-only).
+   * - 0 args (WGSL): throws — WGSL has no built-in fragment coordinate;
+   *   caller must provide an explicit seed.
+   * - 1 arg: _gpu_random(seed)
+   */
+  Random: (args, compile, target) => {
+    if (args.length === 0) {
+      if (target.language === 'wgsl') {
+        throw new Error(
+          'Random(): WGSL compile requires an explicit seed argument. ' +
+          'WGSL has no gl_FragCoord built-in outside fragment entry points, ' +
+          'so the no-arg fallback used in GLSL is unavailable. ' +
+          'Use Random(seed) where seed is a deterministic per-invocation value.'
+        );
+      }
+      // GLSL fragment-shader fallback: derive a per-pixel seed from the
+      // fragment coordinates. The 1024.0 multiplier separates rows in seed
+      // space; viewport widths > 1024 px will alias (two pixels can produce
+      // the same seed). Acceptable for typical viewport sizes.
+      return '_gpu_random(gl_FragCoord.x + gl_FragCoord.y * 1024.0)';
+    }
+    if (args.length === 1) {
+      return `_gpu_random(${compile(args[0])})`;
+    }
+    throw new Error('Random: GPU compile expects 0 or 1 argument (seed)');
   },
 
   // Function (lambda) — not supported in GPU
@@ -1641,6 +1829,259 @@ fn _fractal_julia(z_in: vec2f, c: vec2f, maxIter: i32) -> f32 {
   return 1.0;
 }
 `;
+
+// ─── Statistical preambles ────────────────────────────────────────────────────
+
+/**
+ * GPU GCD preamble (GLSL syntax).
+ * Euclidean algorithm over floats; works for integer-valued inputs.
+ */
+export const GPU_GCD_PREAMBLE_GLSL = `
+float _gpu_gcd(float a, float b) {
+  a = abs(a); b = abs(b);
+  for (int i = 0; i < 32; i++) {
+    if (b < 0.5) break;
+    float t = mod(a, b);
+    a = b;
+    b = t;
+  }
+  return a;
+}
+`;
+
+/**
+ * GPU GCD preamble (WGSL syntax).
+ */
+export const GPU_GCD_PREAMBLE_WGSL = `
+fn _gpu_gcd(a_in: f32, b_in: f32) -> f32 {
+  var a = abs(a_in); var b = abs(b_in);
+  for (var i: i32 = 0; i < 32; i++) {
+    if (b < 0.5) { break; }
+    let t = a % b;
+    a = b;
+    b = t;
+  }
+  return a;
+}
+`;
+
+/**
+ * GPU Random preamble (GLSL syntax).
+ *
+ * Deterministic pseudorandom in [0, 1) from a float seed.
+ * Standard fract-sin hash; reproducible across runs for the same seed.
+ * Note: this hash exhibits visible banding near seed ≈ kπ for integer k.
+ * For high-quality shader random, callers should use a more robust hash
+ * (e.g. PCG or xxHash) and pre-seed it appropriately.
+ */
+export const GPU_RANDOM_PREAMBLE_GLSL = `
+// Deterministic pseudorandom in [0, 1) from a float seed.
+// Standard fract-sin hash; reproducible across runs for the same seed.
+// Note: this hash exhibits visible banding near seed ≈ kπ for integer k.
+// For high-quality shader random, callers should use a more robust hash
+// (e.g. PCG or xxHash) and pre-seed it appropriately.
+float _gpu_random(float seed) {
+  return fract(sin(seed * 12.9898) * 43758.5453);
+}
+`;
+
+/**
+ * GPU Random preamble (WGSL syntax).
+ *
+ * Deterministic pseudorandom in [0, 1) from a float seed.
+ * Standard fract-sin hash; reproducible across runs for the same seed.
+ * Note: this hash exhibits visible banding near seed ≈ kπ for integer k.
+ * For high-quality shader random, callers should use a more robust hash
+ * (e.g. PCG or xxHash) and pre-seed it appropriately.
+ */
+export const GPU_RANDOM_PREAMBLE_WGSL = `
+// Deterministic pseudorandom in [0, 1) from a float seed.
+// Standard fract-sin hash; reproducible across runs for the same seed.
+// Note: this hash exhibits visible banding near seed ≈ kπ for integer k.
+// For high-quality shader random, callers should use a more robust hash
+// (e.g. PCG or xxHash) and pre-seed it appropriately.
+fn _gpu_random(seed: f32) -> f32 {
+  return fract(sin(seed * 12.9898) * 43758.5453);
+}
+`;
+
+/**
+ * GPU Median preamble (GLSL syntax).
+ *
+ * One function per supported list size (2..8) using sorting networks.
+ * Each function takes N float arguments and returns the median via a
+ * Batcher odd-even merge sort encoded entirely as min/max calls.
+ */
+export const GPU_MEDIAN_PREAMBLE_GLSL = `
+float _gpu_median_2(float a, float b) {
+  return (a + b) * 0.5;
+}
+float _gpu_median_3(float a, float b, float c) {
+  return max(min(a, b), min(max(a, b), c));
+}
+float _gpu_median_4(float a, float b, float c, float d) {
+  float lo = max(min(a, b), min(c, d));
+  float hi = min(max(a, b), max(c, d));
+  return (lo + hi) * 0.5;
+}
+float _gpu_median_5(float a, float b, float c, float d, float e) {
+  // 9-comparator Bose-Nelson sort; v2 holds the median.
+  float t; float v0=a,v1=b,v2=c,v3=d,v4=e;
+  t=min(v0,v1); v1=max(v0,v1); v0=t;
+  t=min(v3,v4); v4=max(v3,v4); v3=t;
+  t=min(v2,v4); v4=max(v2,v4); v2=t;
+  t=min(v2,v3); v3=max(v2,v3); v2=t;
+  t=min(v0,v3); v3=max(v0,v3); v0=t;
+  t=min(v0,v2); v2=max(v0,v2); v0=t;
+  t=min(v1,v4); v4=max(v1,v4); v1=t;
+  t=min(v1,v3); v3=max(v1,v3); v1=t;
+  t=min(v1,v2); v2=max(v1,v2); v1=t;
+  return v2;
+}
+float _gpu_median_6(float a, float b, float c, float d, float e, float f) {
+  float t; float v0=a,v1=b,v2=c,v3=d,v4=e,v5=f;
+  t=min(v0,v1); v1=max(v0,v1); v0=t;
+  t=min(v2,v3); v3=max(v2,v3); v2=t;
+  t=min(v4,v5); v5=max(v4,v5); v4=t;
+  t=min(v0,v2); v2=max(v0,v2); v0=t;
+  t=min(v1,v3); v3=max(v1,v3); v1=t;
+  t=min(v0,v4); v4=max(v0,v4); v0=t;
+  t=min(v1,v5); v5=max(v1,v5); v1=t;
+  t=min(v2,v4); v4=max(v2,v4); v2=t;
+  t=min(v1,v2); v2=max(v1,v2); v1=t;
+  t=min(v3,v5); v5=max(v3,v5); v3=t;
+  t=min(v3,v4); v4=max(v3,v4); v3=t;
+  return (v2 + v3) * 0.5;
+}
+float _gpu_median_7(float a, float b, float c, float d, float e, float f, float g) {
+  float t; float v0=a,v1=b,v2=c,v3=d,v4=e,v5=f,v6=g;
+  t=min(v0,v1); v1=max(v0,v1); v0=t;
+  t=min(v2,v3); v3=max(v2,v3); v2=t;
+  t=min(v4,v5); v5=max(v4,v5); v4=t;
+  t=min(v0,v2); v2=max(v0,v2); v0=t;
+  t=min(v1,v3); v3=max(v1,v3); v1=t;
+  t=min(v4,v6); v6=max(v4,v6); v4=t;
+  t=min(v0,v4); v4=max(v0,v4); v0=t;
+  t=min(v1,v5); v5=max(v1,v5); v1=t;
+  t=min(v2,v6); v6=max(v2,v6); v2=t;
+  t=min(v1,v2); v2=max(v1,v2); v1=t;
+  t=min(v3,v5); v5=max(v3,v5); v3=t;
+  t=min(v2,v4); v4=max(v2,v4); v2=t;
+  t=min(v3,v4); v4=max(v3,v4); v3=t;
+  return v3;
+}
+float _gpu_median_8(float a, float b, float c, float d, float e, float f, float g, float h) {
+  float t; float v0=a,v1=b,v2=c,v3=d,v4=e,v5=f,v6=g,v7=h;
+  t=min(v0,v1); v1=max(v0,v1); v0=t;
+  t=min(v2,v3); v3=max(v2,v3); v2=t;
+  t=min(v4,v5); v5=max(v4,v5); v4=t;
+  t=min(v6,v7); v7=max(v6,v7); v6=t;
+  t=min(v0,v2); v2=max(v0,v2); v0=t;
+  t=min(v1,v3); v3=max(v1,v3); v1=t;
+  t=min(v4,v6); v6=max(v4,v6); v4=t;
+  t=min(v5,v7); v7=max(v5,v7); v5=t;
+  t=min(v0,v4); v4=max(v0,v4); v0=t;
+  t=min(v1,v5); v5=max(v1,v5); v1=t;
+  t=min(v2,v6); v6=max(v2,v6); v2=t;
+  t=min(v3,v7); v7=max(v3,v7); v3=t;
+  t=min(v1,v2); v2=max(v1,v2); v1=t;
+  t=min(v3,v4); v4=max(v3,v4); v3=t;
+  t=min(v5,v6); v6=max(v5,v6); v5=t;
+  t=min(v3,v5); v5=max(v3,v5); v3=t;
+  t=min(v2,v4); v4=max(v2,v4); v2=t;
+  t=min(v3,v4); v4=max(v3,v4); v3=t;
+  return (v3 + v4) * 0.5;
+}
+`;
+
+/**
+ * GPU Median preamble (WGSL syntax).
+ *
+ * Same sorting-network logic as the GLSL version with WGSL syntax.
+ */
+export const GPU_MEDIAN_PREAMBLE_WGSL = `
+fn _gpu_median_2(a: f32, b: f32) -> f32 {
+  return (a + b) * 0.5;
+}
+fn _gpu_median_3(a: f32, b: f32, c: f32) -> f32 {
+  return max(min(a, b), min(max(a, b), c));
+}
+fn _gpu_median_4(a: f32, b: f32, c: f32, d: f32) -> f32 {
+  let lo = max(min(a, b), min(c, d));
+  let hi = min(max(a, b), max(c, d));
+  return (lo + hi) * 0.5;
+}
+fn _gpu_median_5(a: f32, b: f32, c: f32, d: f32, e: f32) -> f32 {
+  // 9-comparator Bose-Nelson sort; v2 holds the median.
+  var v0=a; var v1=b; var v2=c; var v3=d; var v4=e; var t: f32;
+  t=min(v0,v1); v1=max(v0,v1); v0=t;
+  t=min(v3,v4); v4=max(v3,v4); v3=t;
+  t=min(v2,v4); v4=max(v2,v4); v2=t;
+  t=min(v2,v3); v3=max(v2,v3); v2=t;
+  t=min(v0,v3); v3=max(v0,v3); v0=t;
+  t=min(v0,v2); v2=max(v0,v2); v0=t;
+  t=min(v1,v4); v4=max(v1,v4); v1=t;
+  t=min(v1,v3); v3=max(v1,v3); v1=t;
+  t=min(v1,v2); v2=max(v1,v2); v1=t;
+  return v2;
+}
+fn _gpu_median_6(a: f32, b: f32, c: f32, d: f32, e: f32, f: f32) -> f32 {
+  var v0=a; var v1=b; var v2=c; var v3=d; var v4=e; var v5=f; var t: f32;
+  t=min(v0,v1); v1=max(v0,v1); v0=t;
+  t=min(v2,v3); v3=max(v2,v3); v2=t;
+  t=min(v4,v5); v5=max(v4,v5); v4=t;
+  t=min(v0,v2); v2=max(v0,v2); v0=t;
+  t=min(v1,v3); v3=max(v1,v3); v1=t;
+  t=min(v0,v4); v4=max(v0,v4); v0=t;
+  t=min(v1,v5); v5=max(v1,v5); v1=t;
+  t=min(v2,v4); v4=max(v2,v4); v2=t;
+  t=min(v1,v2); v2=max(v1,v2); v1=t;
+  t=min(v3,v5); v5=max(v3,v5); v3=t;
+  t=min(v3,v4); v4=max(v3,v4); v3=t;
+  return (v2 + v3) * 0.5;
+}
+fn _gpu_median_7(a: f32, b: f32, c: f32, d: f32, e: f32, f: f32, g: f32) -> f32 {
+  var v0=a; var v1=b; var v2=c; var v3=d; var v4=e; var v5=f; var v6=g; var t: f32;
+  t=min(v0,v1); v1=max(v0,v1); v0=t;
+  t=min(v2,v3); v3=max(v2,v3); v2=t;
+  t=min(v4,v5); v5=max(v4,v5); v4=t;
+  t=min(v0,v2); v2=max(v0,v2); v0=t;
+  t=min(v1,v3); v3=max(v1,v3); v1=t;
+  t=min(v4,v6); v6=max(v4,v6); v4=t;
+  t=min(v0,v4); v4=max(v0,v4); v0=t;
+  t=min(v1,v5); v5=max(v1,v5); v1=t;
+  t=min(v2,v6); v6=max(v2,v6); v2=t;
+  t=min(v1,v2); v2=max(v1,v2); v1=t;
+  t=min(v3,v5); v5=max(v3,v5); v3=t;
+  t=min(v2,v4); v4=max(v2,v4); v2=t;
+  t=min(v3,v4); v4=max(v3,v4); v3=t;
+  return v3;
+}
+fn _gpu_median_8(a: f32, b: f32, c: f32, d: f32, e: f32, f: f32, g: f32, h: f32) -> f32 {
+  var v0=a; var v1=b; var v2=c; var v3=d; var v4=e; var v5=f; var v6=g; var v7=h; var t: f32;
+  t=min(v0,v1); v1=max(v0,v1); v0=t;
+  t=min(v2,v3); v3=max(v2,v3); v2=t;
+  t=min(v4,v5); v5=max(v4,v5); v4=t;
+  t=min(v6,v7); v7=max(v6,v7); v6=t;
+  t=min(v0,v2); v2=max(v0,v2); v0=t;
+  t=min(v1,v3); v3=max(v1,v3); v1=t;
+  t=min(v4,v6); v6=max(v4,v6); v4=t;
+  t=min(v5,v7); v7=max(v5,v7); v5=t;
+  t=min(v0,v4); v4=max(v0,v4); v0=t;
+  t=min(v1,v5); v5=max(v1,v5); v1=t;
+  t=min(v2,v6); v6=max(v2,v6); v2=t;
+  t=min(v3,v7); v7=max(v3,v7); v3=t;
+  t=min(v1,v2); v2=max(v1,v2); v1=t;
+  t=min(v3,v4); v4=max(v3,v4); v3=t;
+  t=min(v5,v6); v6=max(v5,v6); v5=t;
+  t=min(v3,v5); v5=max(v3,v5); v3=t;
+  t=min(v2,v4); v4=max(v2,v4); v2=t;
+  t=min(v3,v4); v4=max(v3,v4); v3=t;
+  return (v3 + v4) * 0.5;
+}
+`;
+
+// ─── Color preamble ────────────────────────────────────────────────────────────
 
 /**
  * GPU color space conversion preamble (GLSL syntax).
@@ -2448,6 +2889,17 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
           ? GPU_FRACTAL_PREAMBLE_WGSL
           : GPU_FRACTAL_PREAMBLE_GLSL;
     }
+    if (code.includes('_gpu_random'))
+      preamble +=
+        this.languageId === 'wgsl' ? GPU_RANDOM_PREAMBLE_WGSL : GPU_RANDOM_PREAMBLE_GLSL;
+    if (code.includes('_gpu_gcd'))
+      preamble +=
+        this.languageId === 'wgsl' ? GPU_GCD_PREAMBLE_WGSL : GPU_GCD_PREAMBLE_GLSL;
+    if (code.includes('_gpu_median_'))
+      preamble +=
+        this.languageId === 'wgsl'
+          ? GPU_MEDIAN_PREAMBLE_WGSL
+          : GPU_MEDIAN_PREAMBLE_GLSL;
     if (
       code.includes('_gpu_srgb_to') ||
       code.includes('_gpu_oklab') ||

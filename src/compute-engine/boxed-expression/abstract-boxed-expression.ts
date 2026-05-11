@@ -869,6 +869,27 @@ export abstract class _BoxedExpression implements Expression {
     return undefined;
   }
 
+  toSignedFunction(): Expression | undefined {
+    const op = this.operator;
+    if (op === undefined || this.ops === undefined || this.ops.length < 2) {
+      return undefined;
+    }
+    const [lhs, rhs] = this.ops;
+    const engine = this.engine;
+    switch (op) {
+      case 'Equal':
+      case 'NotEqual':
+      case 'Less':
+      case 'LessEqual':
+        return engine.function('Subtract', [lhs, rhs]);
+      case 'Greater':
+      case 'GreaterEqual':
+        return engine.function('Subtract', [rhs, lhs]);
+      default:
+        return undefined;
+    }
+  }
+
   simplify(_options?: Partial<SimplifyOptions>): Expression {
     return this;
   }
