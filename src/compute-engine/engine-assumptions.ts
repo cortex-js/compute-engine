@@ -140,7 +140,7 @@ export function ask(
       const patOp1B2 = pat.op1;
       if (isSymbol(patOp1B2)) {
         const bounds = getInequalityBoundsFromAssumptions(ce, patOp1B2.symbol);
-        const bound = isLower ? bounds.lowerBound : bounds.upperBound;
+        const bound = isLower ? bounds.lower : bounds.upper;
         const strictOk = isLower ? bounds.lowerStrict : bounds.upperStrict;
         if (bound !== undefined && (!isStrict || strictOk === true))
           pushResult({ [boundWildcard]: bound });
@@ -152,7 +152,7 @@ export function ask(
         if (symbolWildcard && !symbolWildcard.startsWith('__')) {
           for (const s of candidatesFromAssumptions()) {
             const bounds = getInequalityBoundsFromAssumptions(ce, s);
-            const bound = isLower ? bounds.lowerBound : bounds.upperBound;
+            const bound = isLower ? bounds.lower : bounds.upper;
             const strictOk = isLower ? bounds.lowerStrict : bounds.upperStrict;
             if (bound === undefined || (isStrict && strictOk !== true))
               continue;

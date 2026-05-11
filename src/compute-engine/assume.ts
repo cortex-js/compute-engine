@@ -312,9 +312,9 @@ function assumeInequality(proposition: Expression): AssumeResult {
           // We're asserting symbol > k or symbol >= k
           const isStrict = effectiveOp === 'greater';
 
-          if (bounds.lowerBound !== undefined) {
-            const lowerVal = isNumber(bounds.lowerBound)
-              ? bounds.lowerBound.numericValue
+          if (bounds.lower !== undefined) {
+            const lowerVal = isNumber(bounds.lower)
+              ? bounds.lower.numericValue
               : undefined;
             if (typeof lowerVal === 'number' && isFinite(lowerVal)) {
               // We already know symbol > lowerVal (or >=)
@@ -333,9 +333,9 @@ function assumeInequality(proposition: Expression): AssumeResult {
             }
           }
 
-          if (bounds.upperBound !== undefined) {
-            const upperVal = isNumber(bounds.upperBound)
-              ? bounds.upperBound.numericValue
+          if (bounds.upper !== undefined) {
+            const upperVal = isNumber(bounds.upper)
+              ? bounds.upper.numericValue
               : undefined;
             if (typeof upperVal === 'number' && isFinite(upperVal)) {
               // We know symbol < upperVal (or <=), now checking symbol > k
@@ -357,9 +357,9 @@ function assumeInequality(proposition: Expression): AssumeResult {
           // We're asserting symbol < k or symbol <= k
           const isStrict = effectiveOp === 'less';
 
-          if (bounds.upperBound !== undefined) {
-            const upperVal = isNumber(bounds.upperBound)
-              ? bounds.upperBound.numericValue
+          if (bounds.upper !== undefined) {
+            const upperVal = isNumber(bounds.upper)
+              ? bounds.upper.numericValue
               : undefined;
             if (typeof upperVal === 'number' && isFinite(upperVal)) {
               // We already know symbol < upperVal (or <=)
@@ -375,9 +375,9 @@ function assumeInequality(proposition: Expression): AssumeResult {
             }
           }
 
-          if (bounds.lowerBound !== undefined) {
-            const lowerVal = isNumber(bounds.lowerBound)
-              ? bounds.lowerBound.numericValue
+          if (bounds.lower !== undefined) {
+            const lowerVal = isNumber(bounds.lower)
+              ? bounds.lower.numericValue
               : undefined;
             if (typeof lowerVal === 'number' && isFinite(lowerVal)) {
               // We know symbol > lowerVal (or >=), now checking symbol < k

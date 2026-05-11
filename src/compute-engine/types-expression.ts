@@ -525,6 +525,22 @@ export interface Tensor<DT extends TensorDataType> extends TensorData<DT> {
  * @category Boxed Expression
  *
  */
+
+/**
+ * Lower and upper bounds for a symbol extracted from a domain restriction.
+ *
+ * `lowerStrict`/`upperStrict` are `true` for strict (`<`, `>`) bounds and
+ * `false` (or `undefined`) for non-strict (`≤`, `≥`) bounds.
+ *
+ * @category Boxed Expression
+ */
+export type IntervalBounds = {
+  lower?: Expression;
+  lowerStrict?: boolean;
+  upper?: Expression;
+  upperStrict?: boolean;
+};
+
 export interface Expression {
   /** @internal */
   readonly _kind: string;
@@ -1624,6 +1640,28 @@ export interface Expression {
    *   does, callers should decompose first.
    */
   toSignedFunction(): BoxedExpression | undefined;
+
+  /**
+   * For an expression representing a domain restriction (a `When` whose
+   * condition is a comparison or `And` of comparisons over `symbol`, or
+   * a bare comparison expression), return the lower/upper bounds for
+   * `symbol`. Returns `undefined` if no bounds can be extracted.
+   *
+   * Supported shapes:
+   * - Bare comparisons: `a < x`, `x < b`, etc.
+   * - Chained comparisons: `a < x < b` (parsed as `Less(a, x, b)`)
+   * - `And(c1, c2, ...)` where each `ci` is a supported shape
+   * - `When(e, cond)` — operates on `cond`
+   * - `Multiply(f, When(...), ...)` — the Desmos parse shape for
+   *   `f(x)\{a < x < b\}`; bounds from each `When` factor are merged
+   *
+   * `lowerStrict`/`upperStrict` are `true` for strict (`<`, `>`) bounds
+   * and `false` for non-strict (`≤`, `≥`).
+   *
+   * Returns `undefined` for unsupported shapes (e.g. equations, non-linear
+   * constraints, comparisons over multiple symbols, disjunctions).
+   */
+  getInterval(symbol: string): IntervalBounds | undefined;
 
   /**
    * Return the value of the canonical form of this expression.

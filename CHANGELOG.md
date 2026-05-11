@@ -112,10 +112,43 @@
   `Less`/`LessEqual` operator — the signed-function semantics are preserved
   through the normalization.
 
+- **`BoxedExpression.getInterval(symbol)`** — new method for extracting
+  domain bounds from restriction expressions. Returns `IntervalBounds`
+  with `lower`/`upper`/`lowerStrict`/`upperStrict` for `When(e, cond)`,
+  `And(c1, c2, …)`, and bare comparison expressions (`Less`, `LessEqual`,
+  `Greater`, `GreaterEqual`); returns `undefined` for unsupported shapes.
+  Useful for 2D-plot domain derivation (e.g. clipping
+  `y = f(x)\{0 < x < 5\}` to `[0, 5]`). Also handles the
+  `Multiply(f, When(…))` parse shape produced by trailing
+  restriction-brace syntax. Exported alongside the existing
+  `getInequalityBoundsFromAssumptions` helper in `inequality-bounds.ts`.
+  Added `IntervalBounds` type to the public type surface.
+
+- **Compact Desmos piecewise `\{cond_1 : val_1, …, default\}`** — now
+  parses to `Which(c_1, v_1, c_2, v_2, …, True, default)`, the same head
+  CE produces for `\begin{cases}…\end{cases}`. Disambiguates from
+  set-builder `\{x : type\}`: if the LHS of the top-level `Colon` has a
+  comparison/boolean head (`Less`/`Greater`/`Equal`/`And`/`Or`/`Not`/…),
+  it's a piecewise branch; otherwise it's set-builder. Normal set
+  literals (`\{1, 2, 3\}`) and set-builder via `\mid` are unchanged.
+  - **Parser change**: `Colon` precedence lowered from 250 to 240
+    (below comparison operators) so `cond : val` parses as
+    `Colon(cond, val)` instead of binding the colon tighter than the
+    comparison. Function type annotations (`f : A \to B` where `\to`
+    is at 270) and set-builder via `\mid` (`Divides` at 160)
+    continue to parse correctly. Full test suite confirmed zero
+    regressions from the precedence change.
+
 #### Improved
 
 - **`parseTrig` Arctan2 handling** — the 2-arg `\arctan` lowering uses a
   tighter, single-branch form instead of an `effectiveFn` intermediate.
+
+- **`When` evaluator description** — expanded to document the masking
+  rule (`When(e, False) → Undefined`), stacked-restriction
+  canonicalization (`When(When(e, c1), c2) → When(e, And(c1, c2))`),
+  and ternary compilation behavior. No behavioral change — the rules
+  were already implemented; only the description was incomplete.
 
 #### Known issues
 

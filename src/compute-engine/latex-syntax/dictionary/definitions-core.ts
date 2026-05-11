@@ -482,15 +482,16 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     parse: parseAssign,
   },
 
-  // General colon operator (type annotation, mapping notation)
-  // Precedence below assignment (260) so `:=` takes priority,
-  // and below arrows (270) so `f: A \to B` parses as `Colon(f, To(A, B))`
+  // General colon operator (type annotation, mapping notation, Desmos piecewise)
+  // Precedence below comparisons (245) so `cond : val` (Desmos compact piecewise)
+  // parses as `Colon(cond, val)`, and below arrows (270) so
+  // `f: A \to B` parses as `Colon(f, To(A, B))`.
   {
     name: 'Colon',
     latexTrigger: ':',
     kind: 'infix',
     associativity: 'right',
-    precedence: 250,
+    precedence: 240,
     serialize: (serializer: Serializer, expr: MathJsonExpression): string =>
       joinLatex([
         serializer.serialize(operand(expr, 1)),
@@ -502,7 +503,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     latexTrigger: '\\colon',
     kind: 'infix',
     associativity: 'right',
-    precedence: 250,
+    precedence: 240,
     parse: 'Colon',
   },
 

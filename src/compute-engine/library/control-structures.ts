@@ -93,7 +93,12 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
 
     When: {
       description:
-        'Conditional value: returns expr when cond holds, undefined otherwise.',
+        'Conditional/restriction value. `When(e, cond)` evaluates to:\n' +
+        '  - `e` when `cond` evaluates to `True`\n' +
+        '  - `Undefined` when `cond` evaluates to `False` (the "masking rule"; consumers like 2D plotters skip masked points)\n' +
+        '  - `When(e, cond_simplified)` when `cond` is indeterminate (holds)\n' +
+        'Stacked restrictions canonicalize: `When(When(e, c1), c2)` → `When(e, And(c1, c2))`.\n' +
+        'Compiles to ternary `(cond) ? (e) : NaN` in JS and GLSL.',
       lazy: true,
       signature: '(expression, boolean) -> any',
       type: ([expr]) => expr.type,

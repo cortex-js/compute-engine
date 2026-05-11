@@ -39,6 +39,7 @@ import { toAsciiMath } from './ascii-math';
 import { cmp, eq, same } from './compare';
 import { CancellationError } from '../../common/interruptible';
 import { isSymbol, isString, isNumber, isFunction } from './type-guards';
+import { extractIntervalBounds } from './inequality-bounds';
 
 // Lazy reference to break circular dependency:
 // serialize → numerics → utils → abstract-boxed-expression
@@ -888,6 +889,10 @@ export abstract class _BoxedExpression implements Expression {
       default:
         return undefined;
     }
+  }
+
+  getInterval(symbol: string) {
+    return extractIntervalBounds(this, symbol);
   }
 
   simplify(_options?: Partial<SimplifyOptions>): Expression {

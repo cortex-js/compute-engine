@@ -479,10 +479,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         const upper = expr.op2.re;
         let count = expr.op3.re;
         if (!isFinite(count)) count = DEFAULT_LINSPACE_COUNT;
+        count = Math.floor(count);
         if (!isFinite(lower) || !isFinite(upper)) return undefined;
         if (index < 1 || index > count) return undefined;
+        // Linspace includes both endpoints: at(1) = lower, at(count) = upper.
+        // count === 1 is a degenerate case — return lower (NumPy convention).
+        if (count === 1) return expr.engine.number(lower);
         return expr.engine.number(
-          lower! + ((upper! - lower!) * (index - 1)) / count
+          lower + ((upper - lower) * (index - 1)) / (count - 1)
         );
       },
       iterator: (expr) => {
@@ -501,6 +505,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
             !isFinite(expr.op3.re) ? DEFAULT_LINSPACE_COUNT : expr.op3.re
           );
         }
+        totalCount = Math.floor(totalCount);
+
+        // Denominator for endpoint-inclusive spacing. totalCount === 1
+        // yields a single sample at `lower` (matches NumPy `linspace`).
+        const denom = totalCount > 1 ? totalCount - 1 : 1;
 
         let index = 1;
 
@@ -511,7 +520,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
             index += 1;
             return {
               value: expr.engine.number(
-                lower + ((upper - lower) * (index - 1 - 1)) / totalCount!
+                lower + ((upper - lower) * (index - 1 - 1)) / denom
               ),
               done: false,
             };
@@ -527,9 +536,16 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (t < lower || t > upper) return false;
         let count = expr.op3.re;
         if (!isFinite(count)) count = DEFAULT_LINSPACE_COUNT;
+        count = Math.floor(count);
         if (count === 0) return false;
-        const step = (upper - lower) / count;
-        return (t - lower) % step === 0;
+        if (count === 1) return t === lower;
+        const step = (upper - lower) / (count - 1);
+        const k = (t - lower) / step;
+        const tol = expr.engine.tolerance;
+        const kRounded = Math.round(k);
+        return (
+          kRounded >= 0 && kRounded <= count - 1 && Math.abs(k - kRounded) < tol
+        );
       },
     },
   },

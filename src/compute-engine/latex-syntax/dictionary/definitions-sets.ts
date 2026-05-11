@@ -67,6 +67,21 @@ function parseIntervalBody(
   return ['Interval', lowerExpr, upperExpr];
 }
 
+// Operator heads that indicate the LHS of a top-level Colon inside `{...}`
+// is a boolean predicate (compact-piecewise branch), not a value to type-tag
+// (set-builder).
+const COMPARISON_HEADS = new Set<string>([
+  'Less',
+  'LessEqual',
+  'Greater',
+  'GreaterEqual',
+  'Equal',
+  'NotEqual',
+  'And',
+  'Or',
+  'Not',
+]);
+
 export const DEFINITIONS_SETS: LatexDictionary = [
   //
   // Constants
@@ -376,24 +391,88 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     parse: (_parser: Parser, body: MathJsonExpression): MathJsonExpression => {
       if (isEmptySequence(body)) return 'EmptySet';
 
-      // Check for set-builder notation: {expr | condition} or {expr \mid condition}
-      // The body is pre-parsed, so \mid appears as Divides and : or \colon as Colon
-      const h = operator(body);
-      if (h === 'Divides' || h === 'Colon') {
-        const expr = operand(body, 1);
-        const condition = operand(body, 2);
-        if (expr !== null && condition !== null)
-          return ['Set', expr, ['Condition', condition]];
-      }
-
+      // Unwrap a trailing-comma Delimiter (e.g. `{1, 2,}` parses as
+      // `Delimiter(Sequence(1,2), ',')`) so the discriminators below see the
+      // inner shape directly. Also handles single-element trailing-comma
+      // cases like `{cond:val,}` → bare `Colon(cond, val)`.
       if (
         operator(body) == 'Delimiter' &&
         stringValue(operand(body, 2)) === ','
       ) {
         body = operand(body, 1)!;
       }
-      if (operator(body) !== 'Sequence') return ['Set', body];
-      return ['Set', ...operands(body)];
+
+      const h = operator(body);
+
+      // Set-builder via `\mid`: `{expr \mid cond}` parses to Divides(expr, cond).
+      if (h === 'Divides') {
+        const expr = operand(body, 1);
+        const condition = operand(body, 2);
+        if (expr !== null && condition !== null)
+          return ['Set', expr, ['Condition', condition]];
+      }
+
+      // A single Colon at top level could be:
+      // - Set-builder `{x : cond}` — LHS is a simple expression (variable/literal)
+      // - Compact piecewise `{cond : val}` — LHS is a comparison/boolean expression
+      // Detect the piecewise case by checking if LHS has a comparison head.
+      if (h === 'Colon') {
+        const lhs = operand(body, 1);
+        const rhs = operand(body, 2);
+        if (lhs !== null && rhs !== null) {
+          const lhsOp = operator(lhs);
+          if (lhsOp !== null && COMPARISON_HEADS.has(lhsOp)) {
+            // Compact piecewise with a single branch and no default.
+            return ['Which', lhs, rhs];
+          }
+          // Set-builder form: {x : cond}
+          return ['Set', lhs, ['Condition', rhs]];
+        }
+      }
+
+      // Sequence form: check for compact Desmos piecewise. To treat the whole
+      // brace as piecewise, EVERY Colon element must have a comparison-head
+      // LHS (mirrors the single-Colon discriminator above). A final non-Colon
+      // element, if present, becomes the default: True, default.
+      if (h === 'Sequence') {
+        const elements = operands(body);
+        const colonElements = elements.filter(
+          (el) => operator(el) === 'Colon'
+        );
+        const allPiecewise =
+          colonElements.length > 0 &&
+          colonElements.every((el) => {
+            const lhs = operand(el, 1);
+            const lhsOp = lhs !== null ? operator(lhs) : null;
+            return lhsOp !== null && COMPARISON_HEADS.has(lhsOp);
+          });
+        if (allPiecewise) {
+          const whichOps: MathJsonExpression[] = [];
+          for (let i = 0; i < elements.length; i++) {
+            const el = elements[i];
+            if (operator(el) === 'Colon') {
+              const cond = operand(el, 1);
+              const val = operand(el, 2);
+              if (cond === null || val === null) {
+                // Malformed — fall through to Set.
+                return ['Set', ...elements];
+              }
+              whichOps.push(cond, val);
+            } else {
+              // Non-Colon element — should be the final default.
+              if (i !== elements.length - 1) {
+                // Non-Colon in the middle: malformed, fall through to Set.
+                return ['Set', ...elements];
+              }
+              whichOps.push('True', el);
+            }
+          }
+          return ['Which', ...whichOps];
+        }
+        return ['Set', ...elements];
+      }
+
+      return ['Set', body];
     },
     serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
       // Set-builder notation: ["Set", expr, ["Condition", cond]]

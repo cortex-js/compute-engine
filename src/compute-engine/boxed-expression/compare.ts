@@ -234,8 +234,8 @@ export function cmp(
         if (aNum !== undefined && Number.isFinite(aNum)) {
           // We're comparing a (number) to b (symbol)
           // If b has a lower bound > a, then a < b
-          if (bounds.lowerBound !== undefined) {
-            const lb = bounds.lowerBound;
+          if (bounds.lower !== undefined) {
+            const lb = bounds.lower;
             const lowerNum = isNumber(lb)
               ? typeof lb.numericValue === 'number'
                 ? lb.numericValue
@@ -254,8 +254,8 @@ export function cmp(
           }
 
           // If b has an upper bound < a, then a > b
-          if (bounds.upperBound !== undefined) {
-            const ub = bounds.upperBound;
+          if (bounds.upper !== undefined) {
+            const ub = bounds.upper;
             const upperNum = isNumber(ub)
               ? typeof ub.numericValue === 'number'
                 ? ub.numericValue
@@ -302,8 +302,8 @@ export function cmp(
 
       // We're comparing a (symbol) to b (number)
       // If a has a lower bound >= b, then a > b (or a >= b)
-      if (bounds.lowerBound !== undefined) {
-        const lb = bounds.lowerBound;
+      if (bounds.lower !== undefined) {
+        const lb = bounds.lower;
         const lowerNum = isNumber(lb)
           ? typeof lb.numericValue === 'number'
             ? lb.numericValue
@@ -322,8 +322,8 @@ export function cmp(
       }
 
       // If a has an upper bound <= b, then a < b (or a <= b)
-      if (bounds.upperBound !== undefined) {
-        const ub = bounds.upperBound;
+      if (bounds.upper !== undefined) {
+        const ub = bounds.upper;
         const upperNum = isNumber(ub)
           ? typeof ub.numericValue === 'number'
             ? ub.numericValue
@@ -420,8 +420,8 @@ export function cmp(
 
       if (bNum !== undefined && Number.isFinite(bNum)) {
         // If symbol has a lower bound >= b, then symbol > b (or symbol >= b)
-        if (bounds.lowerBound !== undefined) {
-          const lb = bounds.lowerBound;
+        if (bounds.lower !== undefined) {
+          const lb = bounds.lower;
           const lowerNum = isNumber(lb)
             ? typeof lb.numericValue === 'number'
               ? lb.numericValue
@@ -440,8 +440,8 @@ export function cmp(
         }
 
         // If symbol has an upper bound <= b, then symbol < b (or symbol <= b)
-        if (bounds.upperBound !== undefined) {
-          const ub = bounds.upperBound;
+        if (bounds.upper !== undefined) {
+          const ub = bounds.upper;
           const upperNum = isNumber(ub)
             ? typeof ub.numericValue === 'number'
               ? ub.numericValue
