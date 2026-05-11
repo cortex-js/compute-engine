@@ -102,12 +102,16 @@ function parseTrig(op: string): ExpressionParseHandler {
         trigCommands[parser.peek] || (until?.condition?.(parser) ?? false),
     });
 
+    // Desmos compatibility: `\arctan(y, x)` is the 2-arg atan2.
+    const head =
+      fn === 'Arctan' && args?.length === 2 ? 'Arctan2' : fn;
+
     const appliedFn: MathJsonExpression =
       args === null
         ? fn
-        : typeof fn === 'string'
-          ? [fn, ...args]
-          : ['Apply', fn, ...args];
+        : typeof head === 'string'
+          ? [head, ...args]
+          : ['Apply', head, ...args];
 
     return sup === null ? appliedFn : ['Power', appliedFn, sup];
   };

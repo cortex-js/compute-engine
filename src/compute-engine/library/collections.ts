@@ -114,6 +114,23 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     },
   } as OperatorDefinition,
 
+  Length: {
+    description:
+      'Number of elements in a collection. Returns undefined for non-collections and for infinite collections.',
+    complexity: 4000,
+    signature: '(any) -> integer',
+    type: () => 'integer' as Type,
+    evaluate: ([xs], { engine }) => {
+      // Guard non-collection inputs (e.g. Length(5), Length(x+y)).
+      if (!xs.isCollection) return undefined;
+      if (xs.isEmptyCollection) return engine.Zero;
+      const n = xs.count;
+      // Guard infinite collections (e.g. Length(Repeat(5))).
+      if (n === undefined || !isFinite(n)) return undefined;
+      return engine.number(n);
+    },
+  },
+
   Tuple: {
     description: 'A fixed number of heterogeneous elements',
     complexity: 8200,
@@ -1891,30 +1908,84 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     },
   },
 
-  // Repeat(x) -> [x, x, ...]
-  // This is an infinite series. Can use Take(Repeat(x), n) to get a finite series
-  // x is evaluated once. Although could use Hold()?
-  // So that First(Repeat(Hold(Random(5))), 10) would return 10 random numbers...
+  // Repeat(x) -> [x, x, ...]        — infinite sequence
+  // Repeat(x, n) -> [x, x, ..., x]  — finite list of n copies
   Repeat: {
-    description: 'Produce an infinite sequence by repeating a single value.',
+    description:
+      'Produce a sequence by repeating a single value. With 1 argument, returns an infinite sequence; with 2 arguments (value, count), returns a finite list of `count` copies.',
     complexity: 8200,
-    signature: '(value: any) -> list',
+    signature: '(value: any, count: integer?) -> list',
+    evaluate: (ops, { engine }) => {
+      if (ops.length !== 2) return undefined;
+      const raw = toInteger(ops[1]);
+      if (raw === null) return undefined;
+      const n = Math.max(0, raw);
+      // Cap materialization to prevent memory blowup. Larger requests stay
+      // lazy; consumers can still access elements via .at() / iterator.
+      // TODO: switch to ce.maxCollectionSize when A3 lands.
+      const REPEAT_MATERIALIZATION_CAP = 10_000;
+      if (n > REPEAT_MATERIALIZATION_CAP) return undefined;
+      return engine._fn('List', Array(n).fill(ops[0]));
+    },
     collection: {
-      isLazy: (_expr) => true,
-      count: () => Infinity,
-      isEmpty: (_expr) => false, // Never empty
-      isFinite: () => false, // Infinite collection
+      isLazy: (expr) => isFunction(expr) && expr.ops?.length === 1,
+      count: (expr) => {
+        if (!isFunction(expr)) return undefined;
+        if (expr.ops?.length === 2) {
+          const n = toInteger(expr.op2);
+          return n !== null ? Math.max(0, n) : undefined;
+        }
+        return Infinity;
+      },
+      isEmpty: (expr) => {
+        if (!isFunction(expr)) return undefined;
+        if (expr.ops?.length === 2) {
+          const n = toInteger(expr.op2);
+          return n !== null ? n <= 0 : undefined;
+        }
+        return false; // infinite — never empty
+      },
+      isFinite: (expr) => isFunction(expr) && expr.ops?.length === 2,
       contains: (expr, target) => {
         if (!isFunction(expr)) return false;
+        if (expr.ops?.length === 2) {
+          const n = toInteger(expr.op2);
+          if (n !== null && n <= 0) return false; // empty list
+        }
         return expr.op1.isSame(target);
       },
       iterator: (expr) => {
         if (!isFunction(expr))
           return { next: () => ({ value: undefined, done: true }) };
+        if (expr.ops?.length === 2) {
+          const n = toInteger(expr.op2);
+          if (n === null) {
+            return { next: () => ({ value: undefined, done: true }) };
+          }
+          const count = Math.max(0, n);
+          let i = 0;
+          return {
+            next: () =>
+              i++ < count
+                ? { value: expr.op1, done: false }
+                : { value: undefined, done: true },
+          };
+        }
+        // Infinite sequence
         return { next: () => ({ value: expr.op1, done: false }) };
       },
-      at: (expr, _index) => {
+      // at is 1-based (consistent with Range, Take, and other collection handlers)
+      at: (expr, index) => {
         if (!isFunction(expr)) return undefined;
+        if (typeof index !== 'number') return undefined;
+        if (expr.ops?.length === 2) {
+          const n = toInteger(expr.op2);
+          const count = n !== null ? Math.max(0, n) : 0;
+          if (index < 1 || index > count) return undefined;
+        } else {
+          // Infinite sequence: any positive 1-based index is valid
+          if (index < 1) return undefined;
+        }
         return expr.op1;
       },
     },

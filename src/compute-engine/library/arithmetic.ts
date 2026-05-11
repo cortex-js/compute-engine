@@ -286,11 +286,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       },
     },
 
-    // Complex: {
-    //   // This function is converted during boxing, so unlikely to encounter
-    //   wikidata: 'Q11567',
-    //   complexity: 500,
-    // },
+    Complex: {
+      description:
+        'Construct a complex number from real and imaginary parts. Converted directly to a BoxedNumber during boxing; this entry exists so `operatorInfo("Complex")` returns a signature.',
+      wikidata: 'Q11567',
+      complexity: 500,
+      signature: '(real: number, imaginary: number) -> complex',
+    },
 
     Divide: {
       description: 'Quotient of a numerator and one or more denominators.',

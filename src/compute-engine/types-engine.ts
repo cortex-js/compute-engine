@@ -76,6 +76,11 @@ export type OperatorInfo = {
   signature?: BoxedType;
 };
 
+export type SymbolInfo = {
+  kind: 'constant' | 'variable';
+  type: BoxedType;
+};
+
 /** @internal */
 export interface IComputeEngine {
   /** The LatexSyntax instance used for LaTeX parsing/serialization.
@@ -580,6 +585,36 @@ export interface IComputeEngine {
    * maintaining a parallel list of "known" operators.
    */
   operatorInfo(head: string): OperatorInfo | undefined;
+
+  /**
+   * Convert a LaTeX identifier string to its canonical MathJSON name without
+   * declaring the symbol in the engine scope.
+   *
+   * Examples:
+   * - `'R_{3}'` → `'R_3'`
+   * - `'\\theta_x'` → `'theta_x'`
+   * - `'\\alpha'` → `'alpha'`
+   * - `'1 + 2'` → `''` (not an identifier)
+   *
+   * Use this instead of `ce.parse(latex).symbol` when you need the canonical
+   * name without the side-effect of auto-declaring the symbol.
+   */
+  normalizeIdentifier(latex: string): string;
+
+  /**
+   * Return introspection metadata for a symbol (value definition) in the
+   * current scope chain.
+   *
+   * - `kind: 'constant'` when the symbol is a CE-registered constant
+   *   (e.g. `Pi`, `True`, `ExponentialE`).
+   * - `kind: 'variable'` for declared but non-constant value symbols
+   *   (e.g. after `ce.declare('a', 'real')`).
+   *
+   * Returns `undefined` for unknown names and for names that resolve to
+   * operator/function definitions (use `operatorInfo()` for those — the
+   * two methods are non-overlapping).
+   */
+  symbolInfo(name: string): SymbolInfo | undefined;
 }
 
 declare module './types-expression' {

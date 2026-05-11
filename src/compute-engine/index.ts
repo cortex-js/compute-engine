@@ -44,6 +44,7 @@ import type {
   OEISOptions,
   LibraryDefinition,
   OperatorInfo,
+  SymbolInfo,
 } from './global-types';
 
 import type {
@@ -52,6 +53,7 @@ import type {
   SerializeLatexOptions,
 } from './latex-syntax/types';
 import { isOperatorDef, isValueDef } from './boxed-expression/utils';
+import { isSymbol } from './boxed-expression/type-guards';
 
 import { getStandardLibrary } from './library/library';
 
@@ -94,6 +96,7 @@ import './boxed-expression/serialize';
 import { SIMPLIFY_RULES } from './symbolic/simplify-rules';
 
 import { bigint } from './numerics/bigint';
+import { isValidSymbol } from '../math-json/symbols';
 
 import {
   lookupDefinition as lookupDefinitionImpl,
@@ -1016,6 +1019,22 @@ export class ComputeEngine implements IComputeEngine {
     return lookupDefinitionImpl(this, id);
   }
 
+  normalizeIdentifier(latex: string): string {
+    if (!latex) return '';
+    // Fast path: already a valid canonical MathJSON identifier.
+    if (isValidSymbol(latex)) return latex;
+    // Slow path: parse LaTeX in a temporary scope so any auto-declared
+    // symbol doesn't leak into the engine scope chain.
+    this.pushScope();
+    try {
+      const expr = this.parse(latex);
+      if (isSymbol(expr)) return expr.symbol;
+    } finally {
+      this.popScope();
+    }
+    return '';
+  }
+
   operatorInfo(head: string): OperatorInfo | undefined {
     const def = this.lookupDefinition(head);
     if (!def || !isOperatorDef(def)) return undefined;
@@ -1023,6 +1042,16 @@ export class ComputeEngine implements IComputeEngine {
     return {
       kind: op.evaluate || op.collection ? 'function' : 'opaque',
       signature: op.signature,
+    };
+  }
+
+  symbolInfo(name: string): SymbolInfo | undefined {
+    const def = this.lookupDefinition(name);
+    if (!def || !isValueDef(def)) return undefined;
+    const v = def.value;
+    return {
+      kind: v.isConstant ? 'constant' : 'variable',
+      type: v.type,
     };
   }
 

@@ -656,6 +656,7 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
   // The capitalized library entries already exist; these are pure parse
   // aliases so the lowercase names don't land in `unsupported-operator`.
   // ---------------------------------------------------------------------------
+  { latexTrigger: '\\operatorname{count}', parse: 'Length' },
   { latexTrigger: '\\operatorname{random}', parse: 'Random' },
   { latexTrigger: '\\operatorname{shuffle}', parse: 'Shuffle' },
   { latexTrigger: '\\operatorname{repeat}', parse: 'Repeat' },

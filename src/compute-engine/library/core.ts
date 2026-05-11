@@ -1502,5 +1502,14 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       description: 'Action arrow / mapping (`a \\to b`) — opaque typed head.',
       signature: '(any, any) -> nothing',
     },
+    Colon: {
+      description: 'Type annotation (`a : b`) — opaque typed head.',
+      signature: '(any, any) -> expression',
+    },
+    Prime: {
+      description:
+        "Derivative or prime notation (`f'`, `f^{(n)}`) — opaque typed head until a derivative library handler runs.",
+      signature: '(any, integer?) -> expression',
+    },
   },
 ];
