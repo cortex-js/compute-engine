@@ -1,8 +1,4 @@
-import type {
-  LatexDictionary,
-  Parser,
-  Serializer,
-} from '../types';
+import type { LatexDictionary, Parser, Serializer } from '../types';
 
 import {
   operand,

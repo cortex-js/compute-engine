@@ -19,7 +19,7 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
       description:
         'Evaluate a sequence of expressions in a local scope, **sequentially**. ' +
         'Each operand is evaluated in order; later operands observe side effects ' +
-        '(`Assign`, `Declare`) of earlier operands. The block\'s value is the ' +
+        "(`Assign`, `Declare`) of earlier operands. The block's value is the " +
         'value of the last expression. Short-circuiting heads (`Return`, ' +
         '`Break`, `Continue`) terminate the sequence early.\n\n' +
         'IMPORTANT — consumers translating *simultaneous* action tuples (e.g. ' +
