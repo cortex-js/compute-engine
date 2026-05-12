@@ -2,7 +2,6 @@ import type {
   LatexDictionary,
   Parser,
   Serializer,
-  Terminator,
 } from '../types';
 
 import {
@@ -668,88 +667,11 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
   { latexTrigger: '\\operatorname{join}', parse: 'Join' },
   { latexTrigger: '\\operatorname{range}', parse: 'Range' },
 
-  // ---------------------------------------------------------------------------
-  // `\operatorname{with}` — Desmos's "with clause", a postfix-binding form.
-  //
-  //   expr \operatorname{with} a = v1, b = v2
-  //
-  // Parses to `Block(Declare(a), Assign(a, v1), Declare(b), Assign(b, v2),
-  // expr)`. The explicit `Declare` before each `Assign` is what isolates
-  // the binding to the Block's local scope: without it, `Assign` walks up
-  // the scope chain and mutates a pre-existing outer binding. Mirrors the
-  // `\operatorname{where}` clause pattern in definitions-core.ts.
-  //
-  // Block's sequential semantics are correct for `with` (later bindings can
-  // reference earlier ones — same as JS `let*` / Scheme `let*`).
-  //
-  // Precedence 21 mirrors `\operatorname{where}` (just above `;` at 19 and
-  // `,` at 20). This ensures `expr` on the lhs captures the entire
-  // preceding primary expression, but `with` does not escape statement
-  // boundaries.
-  // ---------------------------------------------------------------------------
-  {
-    symbolTrigger: 'with',
-    kind: 'infix',
-    associativity: 'none',
-    precedence: 21,
-    parse: (
-      parser: Parser,
-      lhs: MathJsonExpression,
-      until: Readonly<Terminator>
-    ): MathJsonExpression | null => {
-      // Parse bindings: sym = expr (, sym = expr)*
-      // Each binding parses the RHS with a terminator that stops at commas
-      // so we can split comma-separated bindings cleanly.
-      const bindingTerminator: Terminator = {
-        minPrec: 21,
-        condition: (p) => {
-          if (until?.condition?.(p)) return true;
-          const saved = p.index;
-          p.skipVisualSpace();
-          const isComma = p.peek === ',';
-          p.index = saved;
-          return isComma;
-        },
-      };
-
-      const bindings: MathJsonExpression[] = [];
-      do {
-        parser.skipVisualSpace();
-        const sym = parser.parseSymbol(bindingTerminator);
-        if (!sym || !symbol(sym)) {
-          parser.error('missing-symbol', parser.index);
-          return null;
-        }
-        parser.skipVisualSpace();
-        if (!parser.match('=')) {
-          parser.error('expected-token', parser.index);
-          return null;
-        }
-        parser.skipVisualSpace();
-        const value = parser.parseExpression(bindingTerminator);
-        if (value === null) {
-          parser.error('missing-expression', parser.index);
-          return null;
-        }
-        bindings.push(['Assign', symbol(sym)!, value]);
-        parser.skipVisualSpace();
-      } while (parser.match(','));
-
-      if (bindings.length === 0) return null;
-
-      // Build Block: insert Declare before each Assign so the Assign binds
-      // to a fresh local declaration in the Block's scope rather than
-      // walking up to mutate the outer binding. Body (lhs) goes last.
-      const block: MathJsonExpression[] = [];
-      for (const b of bindings) {
-        const lhsSym = operand(b, 1);
-        if (lhsSym) block.push(['Declare', lhsSym]);
-        block.push(b);
-      }
-      block.push(lhs);
-      return ['Block', ...block] as MathJsonExpression;
-    },
-  },
+  // Note: `\operatorname{with}` (Desmos's local-binding clause) is intentionally
+  // NOT registered here. Use the math-notation equivalent `\operatorname{where}`
+  // (with `\coloneq` for bindings), or register `with` as a custom dictionary
+  // entry at the integration layer — see the "Desmos-Specific Syntax — Prefer
+  // Custom LaTeX Dictionary" section in COMPUTE_ENGINE.md for a worked example.
 
   // ---------------------------------------------------------------------------
   // Geometric primitive heads. Registered as known typed heads so consumers

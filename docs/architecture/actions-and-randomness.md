@@ -75,15 +75,14 @@ makes the reordering deterministic. Internally, the seed advances per element
 via an additive Weyl-sequence increment (golden-ratio fractional part) so
 element-to-element draws are decorrelated.
 
-## 4. The `\operatorname{with}` and `\operatorname{where}` clauses — local bindings
+## 4. The `\operatorname{where}` clause — local bindings
 
-`expr \operatorname{with} a = v_1, b = v_2` (and its math-notation cousin
-`expr \operatorname{where} a \coloneq v_1, b \coloneq v_2`) is a
+`expr \operatorname{where} a \coloneq v_1, b \coloneq v_2` is a
 *local-binding* expression (equivalent to JS `let*` / Scheme `let*`): it
 evaluates `expr` after binding `a = v_1`, `b = v_2` in order. Later
 bindings can reference earlier ones.
 
-Both parse to a Block of the form:
+It parses to a Block of the form:
 
 ```mathjson
 ["Block",
@@ -100,15 +99,21 @@ outer scope is unchanged.
 
 ```latex
 % Outer a = 100.
-a \operatorname{with} a = 5            % evaluates to 5; outer a still 100
-a + b \operatorname{with} a = 2, b = 3 % evaluates to 5
-b \operatorname{with} a = 5, b = a + 1 % evaluates to 6 (b sees a = 5)
+a \operatorname{where} a \coloneq 5                   % evaluates to 5; outer a still 100
+a + b \operatorname{where} a \coloneq 2, b \coloneq 3 % evaluates to 5
+b \operatorname{where} a \coloneq 5, b \coloneq a + 1 % evaluates to 6 (b sees a = 5)
 ```
 
 Contrast with the action-tuple translation (section 2): action tuples *do*
 want to mutate the outer scope (that's the whole point), and the
 snapshot-then-commit Block deliberately omits the `Declare` so the final
 pass overwrites the outer bindings.
+
+> **Desmos's `\operatorname{with}` clause.** CE does not ship a built-in
+> parser for Desmos's `with` keyword (which lowers to the same `Block`
+> shape). Consumers that need it should register it as a custom dictionary
+> entry — see the "Desmos-Specific Syntax — Prefer Custom LaTeX
+> Dictionary" section in `COMPUTE_ENGINE.md` for the worked example.
 
 ### Implementation note
 

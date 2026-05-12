@@ -241,61 +241,10 @@ describe('A4.3 — Seeded Shuffle / Sample', () => {
   });
 });
 
-describe('A4.4 — \\operatorname{with} parser', () => {
-  test('basic with-clause: x + 1 with x = 5', () => {
-    const ce = new ComputeEngine();
-    const expr = ce.parse('x + 1 \\operatorname{with} x = 5');
-    expect(expr.evaluate().re).toEqual(6);
-  });
-
-  test('parses to Block(Declare(x), Assign(x, 5), Add(x, 1))', () => {
-    const ce = new ComputeEngine();
-    const expr = ce.parse('x + 1 \\operatorname{with} x = 5');
-    expect(expr.operator).toEqual('Block');
-    // Block: Declare(x), Assign(x, 5), <body>.
-    const ops = expr.ops!;
-    expect(ops[0].operator).toEqual('Declare');
-    expect(ops[1].operator).toEqual('Assign');
-  });
-
-  test('multiple bindings: a + b with a = 2, b = 3', () => {
-    const ce = new ComputeEngine();
-    const expr = ce.parse('a + b \\operatorname{with} a = 2, b = 3');
-    expect(expr.evaluate().re).toEqual(5);
-  });
-
-  test('later bindings see earlier ones (sequential — matches Block)', () => {
-    const ce = new ComputeEngine();
-    const expr = ce.parse(
-      'b \\operatorname{with} a = 5, b = a + 1'
-    );
-    expect(expr.evaluate().re).toEqual(6);
-  });
-
-  test('with-clause does not leak bindings to outer scope (undeclared symbol)', () => {
-    const ce = new ComputeEngine();
-    ce.parse('y \\operatorname{with} y = 99').evaluate();
-    // Outer y should be undeclared or undefined.
-    const yExpr = ce.box('y');
-    expect(yExpr.symbol).toEqual('y');
-  });
-
-  test('with-clause does not leak bindings to outer scope when symbol pre-exists', () => {
-    // The parser inserts `Declare` before each `Assign`, and `Declare`
-    // upgrades the auto-declared inferred binding to an explicit local one
-    // inside the Block's scope. So an outer `a` is shadowed inside the
-    // clause, then restored when the Block ends.
-    const ce = new ComputeEngine();
-    ce.assign('a', 100);
-    const inner = ce.parse('a \\operatorname{with} a = 5').evaluate();
-    expect(inner.re).toEqual(5);
-    expect(ce.box('a').evaluate().re).toEqual(100);
-  });
-
-  test('LaTeX round-trip preserves the with-clause structure', () => {
-    const ce = new ComputeEngine();
-    const expr = ce.parse('x^2 \\operatorname{with} x = 4');
-    // The parsed expression evaluates correctly regardless of exact LaTeX form.
-    expect(expr.evaluate().re).toEqual(16);
-  });
-});
+// Note: `\operatorname{with}` was prototyped during A4 but intentionally
+// dropped from CE built-ins. Use `\operatorname{where}` (with `\coloneq` for
+// bindings) for the math-notation local-binding form, or register `with` as
+// a custom dictionary entry at the integration layer — see the
+// "Desmos-Specific Syntax — Prefer Custom LaTeX Dictionary" section in
+// COMPUTE_ENGINE.md for the worked example. Tests for `\operatorname{where}`
+// live in test/compute-engine/latex-syntax/parse-where.test.ts.
