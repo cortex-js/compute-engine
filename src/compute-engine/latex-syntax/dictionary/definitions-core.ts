@@ -2707,7 +2707,26 @@ function parseForComprehension(
       p.skipVisualSpace();
       const isComma = p.peek === ',';
       p.index = saved;
-      return isComma;
+      if (isComma) return true;
+      // Stop at trailing `where`/`with` so they're processed by the
+      // outer parser rather than swallowed into the binding RHS.
+      // Needed because `minPrec: 21` above *admits* operators at
+      // precedence 21, and `\operatorname{where}` is registered at
+      // exactly 21 — without this check, `for i = R \operatorname{where}
+      // n \coloneq 3` parses `R \operatorname{where} n \coloneq 3` as a
+      // single binding RHS (which then fails because the result isn't
+      // `Equal`/`Assign`).
+      //
+      // `with` is NOT a CE built-in (A4 dropped it; Desmos-style `with`
+      // is registered by consumers via custom LaTeX dictionary — see
+      // the GP team's `docs/COMPUTE_ENGINE.md`). It's recognized here
+      // purely so consumer-registered `with` clauses compose with `for`
+      // out of the box, matching how built-in `where` composes. If a
+      // consumer registers an additional clause keyword that also needs
+      // to compose with `for`, this list needs to grow.
+      if (peekKeyword(p, 'where')) return true;
+      if (peekKeyword(p, 'with')) return true;
+      return false;
     },
   };
 
@@ -2768,6 +2787,34 @@ function parseWhereExpression(
   } while (parser.match(','));
 
   if (bindings.length === 0) return null;
+
+  // Lookahead for trailing \operatorname{for}. If present, consume the
+  // for-clause and wrap the resulting Loop in the Block carrying the
+  // where-clause bindings. This produces the canonical Block-outermost
+  // shape: Block(Declare, Assign, ..., Loop(body, Element(...))).
+  // matchKeyword consumes on success and rewinds on failure.
+  const forStart = parser.index;
+  if (matchKeyword(parser, 'for')) {
+    const loop = parseForComprehension(parser, lhs, until);
+    if (loop) {
+      // Build Block: Declare+Assign for each binding, Loop last as body.
+      const block: MathJsonExpression[] = [];
+      for (const b of bindings) {
+        const normalized = normalizeLocalAssign(b);
+        if (operator(normalized) === 'Assign') {
+          block.push(['Declare', operand(normalized, 1)!]);
+          block.push(normalized);
+        } else {
+          block.push(normalized);
+        }
+      }
+      block.push(loop);
+      return ['Block', ...block] as MathJsonExpression;
+    }
+    // parseForComprehension failed mid-stream. Restore index and fall
+    // through to the plain Block path.
+    parser.index = forStart;
+  }
 
   // Build Block: Declare+Assign for each binding, body (lhs) last
   const block: MathJsonExpression[] = [];

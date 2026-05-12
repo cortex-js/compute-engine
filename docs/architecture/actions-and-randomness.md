@@ -113,7 +113,8 @@ pass overwrites the outer bindings.
 > parser for Desmos's `with` keyword (which lowers to the same `Block`
 > shape). Consumers that need it should register it as a custom dictionary
 > entry — see the "Desmos-Specific Syntax — Prefer Custom LaTeX
-> Dictionary" section in `COMPUTE_ENGINE.md` for the worked example.
+> Dictionary" guidance maintained by integrating consumers (e.g. the
+> Graph Paper team's `docs/COMPUTE_ENGINE.md`) for a worked example.
 
 ### Implementation note
 
@@ -124,3 +125,75 @@ symbol that an inner `Assign` references, the subsequent explicit
 rather than throwing "already declared in this scope". See
 `src/compute-engine/library/core.ts` (`Declare`'s `evaluate` handler) for
 the upgrade rule.
+
+## 5. `where`+`for` composition
+
+The `\operatorname{where}` clause composes with `\operatorname{for}`
+comprehensions in both surface orders. Both produce the same canonical
+Block-outermost AST shape, so let-bindings scope over **both the body
+and the iterator range expressions**.
+
+### Order 1: bindings before iter
+
+```latex
+i \operatorname{where} n \coloneq 3 \operatorname{for} i = \operatorname{Range}(n)
+```
+
+Parses to:
+
+```mathjson
+["Block",
+ ["Declare", "n"], ["Assign", "n", 3],
+ ["Loop", "i", ["Element", "i", ["Range", 1, "n"]]]]
+```
+
+The `\operatorname{Range}(n)` reference resolves to `3` via the outer
+`Block` scope, and the comprehension evaluates to `[1, 2, 3]`.
+
+### Order 2: iter before bindings
+
+```latex
+i \operatorname{for} i = \operatorname{Range}(n) \operatorname{where} n \coloneq 3
+```
+
+Parses to the same canonical shape and evaluates to the same `[1, 2, 3]`.
+
+### Why both orders work
+
+Two localized parser changes in
+`src/compute-engine/latex-syntax/dictionary/definitions-core.ts` make the
+two orders converge on the Block-outermost shape:
+
+1. **`parseWhereExpression` lookahead (Order 1).** After consuming its
+   bindings, the where-parser peeks for a trailing `\operatorname{for}`
+   clause via `matchKeyword(parser, 'for')`. If present, it delegates to
+   `parseForComprehension` for the iterator clause and wraps the
+   resulting `Loop` in the Block carrying the where-clause bindings.
+   This emits the canonical
+   `Block(Declare, Assign, …, Loop(body, Element))` shape directly.
+   If `parseForComprehension` fails mid-stream, the parser index is
+   restored and the function falls through to the plain Block path,
+   preserving the no-`for` behavior from §4.
+
+2. **`parseForComprehension` binding-terminator (Order 2).** The
+   for-parser's binding-RHS terminator now stops at
+   `\operatorname{where}` and `\operatorname{with}` (via
+   `peekKeyword`) in addition to commas. Without this, the trailing
+   `where` keyword was swallowed into the last binding's RHS, the
+   resulting expression no longer had operator `Equal`/`Assign`, and
+   `parseForComprehension` returned `null`. With the fix, the for-
+   parser stops cleanly at `where`, returns its `Loop`, and the outer
+   parser then engages `where` on that `Loop` — yielding the same
+   Block-outermost shape as Order 1.
+
+### Custom `\operatorname{with}` consumers
+
+Consumers that register `\operatorname{with}` via custom LaTeX dictionary
+(see, for example, the Graph Paper team's `docs/COMPUTE_ENGINE.md`
+"Desmos-Specific Syntax" guidance) inherit the same composition behavior
+automatically — provided the custom parser lowers to the same
+`Block(Declare, Assign, …, body)` shape as `where`.
+The `parseForComprehension` terminator update explicitly recognizes
+`\operatorname{with}` alongside `\operatorname{where}`, so the
+`body \operatorname{for} iter \operatorname{with} bindings` surface
+order composes without further work on the consumer side.
