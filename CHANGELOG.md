@@ -7,161 +7,113 @@
   (`L.\operatorname{count}`) and the other lowercase aliases (`mod`, `var`,
   `shuffle`, `repeat`, `join`).
 
-- **2-arg `\arctan(y, x)` → `Arctan2`** — when `\arctan` is parsed with exactly
-  two arguments, the result is lowered to the existing `Arctan2` operator (the
-  principal value of `atan2(y, x)`). Single-arg `\arctan(x)` is unchanged. This
-  matches Desmos's convention of using `\arctan` for both the 1-arg and 2-arg
-  forms.
+- **2-arg `\arctan(y, x)` → `Arctan2`** — `\arctan` with two arguments now
+  lowers to the existing `Arctan2` operator (principal value of `atan2(y, x)`).
+  Single-arg `\arctan(x)` is unchanged.
 
 - **`Repeat(value, count)` 2-arg form** — `Repeat` now accepts an optional
   integer `count` and evaluates to a finite list of `count` copies of `value`.
-  The 1-arg `Repeat(value)` keeps its existing infinite-sequence semantics. Lazy
-  collection handlers (`at`, `iterator`, `count`, `isFinite`, `isEmpty`,
-  `contains`) all branch on arity. Materialization is gated by the new
-  `ce.maxCollectionSize` (see below); larger values stay lazy (still accessible
-  element-by-element via `.at()` / iterator).
+  The 1-arg `Repeat(value)` keeps its existing infinite-sequence semantics.
+  Materialization is gated by `ce.maxCollectionSize`; larger values stay lazy
+  (still accessible via `.at()` / iterator).
 
 - **`ce.maxCollectionSize`** — new configurable cap (default `10_000`) on the
-  number of elements a collection may have when it is materialized into a
-  concrete `List`. Used by `Repeat`'s arity-2 form and by the eager
-  `materialize()` path for finite indexed collections; oversize cases leave
-  the expression in its lazy form rather than building the list. Setter
-  follows the convention of `iterationLimit` and `recursionLimit`: assigning
-  `<= 0` or `Infinity` disables the cap. Exposed on the `IComputeEngine`
-  interface.
+  number of elements a collection may have when materialized into a concrete
+  `List`. Assigning `<= 0` or `Infinity` disables the cap (matching
+  `iterationLimit` and `recursionLimit`).
 
-- **`Sum(L)` collection-reducer form** — `Sum` now accepts a single
-  collection argument and reduces to the sum of its elements:
+- **`Sum(L)` collection-reducer form** — `Sum` now accepts a single collection
+  argument and reduces to the sum of its elements:
   `["Sum", ["List", 1, 2, 3, 4, 5]] // ➔ 15`. The big-op form
-  `Sum(body, [i, a, b], …)` is unchanged. Previously this shape was
-  silently rewritten by canonicalization to `Reduce(L, "Add", 0)`, which
-  hid the `Sum` head from the dot-notation serializer; the head is now
-  preserved so `L.\operatorname{total}` round-trips cleanly with
-  `latexOptions.dotNotation = true`. The async path now throws
-  `CancellationError` on signal abort (matching `runAsync`'s contract).
+  `Sum(body, [i, a, b], …)` is unchanged. The `Sum` head is now preserved
+  through canonicalization (previously rewritten to `Reduce(L, "Add", 0)`), so
+  `L.\operatorname{total}` round-trips cleanly with
+  `latexOptions.dotNotation = true`. The async path throws `CancellationError`
+  on signal abort.
 
-- **`At` extended with boolean-mask and integer-list indices** —
-  `At(L, mask)` where `mask` is a finite collection of `True`/`False`
-  returns the elements of `L` where the mask is `True`. `At(L, indices)`
-  where `indices` is a finite collection of integers returns a sublist
-  picked at those positions; out-of-range positions are filtered. Integer
-  indices (`At(L, 2)`) and string keys (`At(d, "key")`) work exactly as
-  before. Signature widened to
-  `(value: indexed_collection, index: (number|string|indexed_collection)+) -> unknown`.
+- **`At` extended with boolean-mask and integer-list indices** — `At(L, mask)`
+  where `mask` is a finite collection of `True`/`False` returns the elements of
+  `L` where the mask is `True`. `At(L, indices)` where `indices` is a finite
+  collection of integers returns a sublist picked at those positions;
+  out-of-range positions are filtered. Integer indices (`At(L, 2)`) and string
+  keys (`At(d, "key")`) work as before.
 
-- **Function-application broadcasting for user-defined lambdas** — when a
-  user function whose parameters are scalar-typed (no `list`/`collection`/
-  `tuple` parameter types) is applied to a finite indexed collection, CE
-  now broadcasts the call elementwise instead of passing the collection as
-  a single argument. For `ce.assign('f', ce.parse('x \\mapsto x^2 + 1'))`,
-  the expression `["f", ["List", 1, 2, 3]]` evaluates to `["List", 2, 5, 10]`.
-  Multi-arg functions broadcast with zip semantics, mixing scalars and
-  lists naturally (`["h", ["List", 1, 2, 3], 10]` zips the scalar against
-  the list). Functions whose signature explicitly takes a list (via
-  `ce.declare(name, '(list<X>) -> Y')`) do **not** broadcast — the inferred
-  default for `\mapsto` lambdas is scalar parameters, so most user
-  functions broadcast by default. To opt out, declare an explicit list
-  parameter type.
+- **Function-application broadcasting for user-defined lambdas** — when a user
+  function with scalar-typed parameters is applied to a finite indexed
+  collection, CE now broadcasts the call elementwise. For
+  `ce.assign('f', ce.parse('x \\mapsto x^2 + 1'))`, the expression
+  `["f", ["List", 1, 2, 3]]` evaluates to `["List", 2, 5, 10]`. Multi-arg
+  functions broadcast with zip semantics, mixing scalars and lists naturally.
+  The inferred default for `\mapsto` lambdas is scalar parameters, so most user
+  functions broadcast by default. To opt out, declare an explicit list parameter
+  type via `ce.declare(name, '(list<X>) -> Y')`.
 
-- **List type for mixed-kind and mixed-dimension elements** — `widen()`
-  now builds a structural union (e.g. `finite_integer | string`) when the
-  common supertype would otherwise collapse to a lossy generic category
-  (`scalar`, `value`, `list`, `tuple`, `dictionary`, …). Consumers can
-  detect heterogeneous lists by inspecting `expr.type.toString()`:
+- **List type for mixed-kind and mixed-dimension elements** — `widen()` now
+  builds a structural union when the common supertype would otherwise collapse
+  to a lossy generic category (`scalar`, `value`, `list`, `tuple`, `dictionary`,
+  …). Consumers can detect heterogeneous lists by inspecting
+  `expr.type.toString()`:
   - `[1, 2, 3]` → `list<number>` (precise)
   - `[1, "hello", 3]` → `list<finite_integer | string>` (union)
-  - `[(1,2), (1,2,3)]` → `list<tuple<finite_integer, finite_integer> | tuple<finite_integer, finite_integer, finite_integer>>` (mixed dimension)
+  - `[(1,2), (1,2,3)]` →
+    `list<tuple<finite_integer, finite_integer> | tuple<finite_integer, finite_integer, finite_integer>>`
+    (mixed dimension)
   - `[]` → `list<nothing>` (empty)
 
-  Two related fixes landed alongside: `boxed-dictionary.ts`'s `type`
-  getter and `collectionElementType` in `common/type/utils.ts` previously
-  template-interpolated type objects as `"[object Object]"` when widen
-  returned a structural type — both now construct types programmatically.
-  And `expressionTensorInfo` no longer classifies lists containing
-  tuples/sets/dictionaries/records/strings as numeric `BoxedTensor`s
-  (these were being assigned the hardcoded type `list<number^N>`).
+- **`ce.box(true)` / `ce.box(false)`** — JS boolean primitives now box to the
+  `True` / `False` symbols (previously fell through to `Undefined`).
 
-- **`ce.box(true)` / `ce.box(false)`** — JS boolean primitives now box to
-  the `True` / `False` symbols (previously fell through to `Undefined`).
-  Restores symmetry with `jsValueToExpression` in `math-json/utils.ts`,
-  which already mapped booleans in this way. Necessary for `At`'s new
-  boolean-mask path to iterate boolean tensors correctly.
+- **`Length` operator definition** — `ce.operatorInfo('Length')` now returns a
+  valid entry. The evaluator returns an integer count for finite collections and
+  leaves the expression unevaluated for non-collection or infinite inputs.
 
-- **`Length` library entry** — `Length` was previously only a parse-side head
-  (produced by `L.\operatorname{count}` dot notation) with no evaluator. It now
-  has a full operator definition with a safe evaluator that returns `undefined`
-  (leaves expression unevaluated) for non-collection or infinite-collection
-  inputs, and an integer count otherwise. `ce.operatorInfo('Length')` now
-  returns a valid entry.
-
-- **Library entries for `Complex`, `Colon`, `Prime`** — these heads were
-  produced by the LaTeX parser but had no library definitions, so
-  `ce.operatorInfo()` returned `undefined` for them. They now have stub operator
-  definitions (signature only) for introspection. `Complex` boxing is unchanged
-  — `["Complex", re, im]` still short-circuits to a `BoxedNumber` during boxing.
+- **Library entries for `Complex`, `Colon`, `Prime`** — `ce.operatorInfo()` now
+  returns introspection data for these heads (previously `undefined`). `Complex`
+  boxing is unchanged — `["Complex", re, im]` still produces a `BoxedNumber`.
 
 - **`ce.symbolInfo(name)`** — new public API parallel to `ce.operatorInfo()`,
-  for introspecting value-side definitions (constants and declared variables).
-  Returns `{ kind: 'constant' | 'variable', type: BoxedType }` for symbols like
-  `Pi`, `True`, `ExponentialE`, `ImaginaryUnit`, etc. Returns `undefined` for
-  unknown names and for operator heads (the two methods are non-overlapping; use
-  `operatorInfo` for function heads, `symbolInfo` for value symbols). Added
-  `SymbolInfo` type to the public type surface.
-  - Naming note: CE's canonical names for some Desmos-audit-listed constants
-    differ — `Infinity` is registered as `PositiveInfinity` /
-    `NegativeInfinity`; `Undefined` has no value definition. Consumers should
-    query the canonical names.
+  for introspecting constants and declared variables. Returns
+  `{ kind: 'constant' | 'variable', type: BoxedType }` for symbols like `Pi`,
+  `True`, `ExponentialE`, `ImaginaryUnit`. Returns `undefined` for unknown names
+  and for operator heads. Added `SymbolInfo` type to the public type surface.
+  - Note: `Infinity` is registered as `PositiveInfinity` / `NegativeInfinity`;
+    `Undefined` has no value definition.
 
 - **`ce.normalizeIdentifier(latex)`** — new public helper that converts a LaTeX
   identifier string to its canonical MathJSON name without side effects.
-  Examples: `R_{3}` → `R_3`, `f_{Bm}` → `f_Bm`, `C_{ustomizablecolor}` →
-  `C_ustomizablecolor`, `\theta_x` → `theta_x`. Already-canonical names pass
-  through unchanged via a fast path (`isValidSymbol` check before any parsing).
-  Inputs that aren't identifiers (`'1 + 2'`, empty string) return `''`. Useful
-  in importer pipelines that need to call `ce.declare()` with normalized names
-  before parsing referencing rows (avoids the auto-declare-then-redeclare
-  conflict from calling `ce.parse(latex).symbol`).
+  Examples: `R_{3}` → `R_3`, `f_{Bm}` → `f_Bm`, `\theta_x` → `theta_x`. Inputs
+  that aren't identifiers (`'1 + 2'`, empty string) return `''`. Useful in
+  importer pipelines that need to call `ce.declare()` with normalized names
+  before parsing referencing rows.
 
-- **`First`/`Second`/`Third` compile entries** — closes the 0.57.0
-  parser/compile mismatch. Component access (`p.x`, `p.y`, `p.z`) now compiles
-  cleanly:
-  - JS: `[0]`/`[1]`/`[2]` index access on the tuple argument.
-  - GLSL/WGSL: `.x`/`.y`/`.z` swizzles. Assumes the argument compiles to a
-    `vec2`/`vec3`/`vec4` (the common case for 2D/3D points); 5+-element tuples
-    that compile to `float[N]` arrays aren't supported and produce invalid
-    shader output.
+- **`First`/`Second`/`Third` compile entries** — component access (`p.x`, `p.y`,
+  `p.z`) now compiles cleanly. JS uses `[0]`/`[1]`/`[2]` index access; GLSL/WGSL
+  use `.x`/`.y`/`.z` swizzles, assuming the argument compiles to a
+  `vec2`/`vec3`/`vec4`. 5+-element tuples (which compile to `float[N]` arrays)
+  aren't supported.
 
 - **`Range` GPU compile entry** — `Range(lo, hi[, step])` with
   compile-time-constant bounds emits an inline `float[N](...)` (GLSL) or
   `array<f32, N>(...)` (WGSL) literal. Non-constant bounds throw a clear error
-  directing the caller to materialize at the JS host and upload as a uniform.
-  Empty ranges and zero-step ranges throw. Sequence count is capped at 256
-  elements per call site.
+  directing the caller to materialize on the JS host and upload as a uniform.
+  Sequence count is capped at 256 elements per call site.
 
 - **`Variance`/`GCD`/`Median` GPU compile entries** — GLSL+WGSL parity with
-  their existing JS counterparts.
-  - `Variance` is inlined: each element minus mean, squared, summed, divided by
-    `N-1`. No size limit (the GPU shader compiler CSEs the mean sub-expression).
-  - `GCD` uses a preamble function (`_gpu_gcd`) implementing the Euclidean
-    algorithm. Both GLSL and WGSL preambles.
-  - `Median` uses per-size preamble functions for list sizes 2–8
-    (`_gpu_median_N`). Lists with 9+ elements throw — selection-sort networks
-    become unwieldy at larger sizes. Both GLSL and WGSL.
+  their JS counterparts.
+  - `Variance` is inlined (no size limit).
+  - `GCD` uses a preamble function implementing the Euclidean algorithm.
+  - `Median` is supported for list sizes 2–8; lists with 9+ elements throw.
 
 - **`Random` GPU compile with deterministic seed** — `Random(seed)` in GLSL/WGSL
-  compiles to a hash-based pseudorandom
-  (`fract(sin(seed * 12.9898) * 43758.5453)`). `Random()` (no args) in GLSL
-  falls back to a `gl_FragCoord`-derived seed (fragment-shader only); the same
-  in WGSL throws because WGSL has no `gl_FragCoord` built-in outside fragment
-  entry points — callers must provide an explicit seed.
-  - Note: the fract-sin hash exhibits banding near `seed ≈ kπ`. For high-quality
-    shader random, callers should use a more robust hash (e.g. PCG or xxHash).
-  - **JS-side `Random` is unchanged** (still `Math.random`, non-seeded). The
-    seeded JS form will land in CE-P7 (A4) and harmonize with this GPU
-    implementation. The asymmetry is intentional and documented in the GPU
-    compile site.
+  compiles to a hash-based pseudorandom. `Random()` (no args) in GLSL falls back
+  to a `gl_FragCoord`-derived seed (fragment-shader only); in WGSL it throws —
+  callers must provide an explicit seed.
+  - The fract-sin hash exhibits banding near `seed ≈ kπ`. For high-quality
+    shader random, use a more robust hash (e.g. PCG or xxHash).
+  - JS-side `Random` is unchanged (still `Math.random`, non-seeded). A seeded JS
+    form will land in a future release.
 
-- **`toSignedFunction()`** — new method on `BoxedExpression` for 3D
+- **`toSignedFunction()`** — new method on `BoxedExpression` for
   implicit-surface rendering and region classification:
   - `Equal(a, b)` → `a - b` (zero on the surface)
   - `Less(a, b)` / `LessEqual(a, b)` → `a - b` (negative when relation holds)
@@ -170,79 +122,54 @@
   - `NotEqual(a, b)` → `a - b`
   - Non-relation expressions return `undefined`.
 
-  Strictness and direction are encoded in `expr.operator`, not in the returned
-  expression. Note that CE canonical form normalizes `GreaterEqual(a, b)` to
-  `LessEqual(b, a)` (and similarly `Greater` to `Less`), so callers using
-  `toSignedFunction()` on parsed expressions will typically see the
-  `Less`/`LessEqual` operator — the signed-function semantics are preserved
-  through the normalization.
+  Strictness and direction are encoded in `expr.operator`. Note that CE
+  canonical form normalizes `GreaterEqual` to `LessEqual(b, a)` (and similarly
+  `Greater` to `Less`), so callers will typically see the `Less`/`LessEqual`
+  operator on parsed expressions — the signed-function semantics are preserved.
 
-- **`BoxedExpression.getInterval(symbol)`** — new method for extracting
-  domain bounds from restriction expressions. Returns `IntervalBounds`
-  with `lower`/`upper`/`lowerStrict`/`upperStrict` for `When(e, cond)`,
-  `And(c1, c2, …)`, and bare comparison expressions (`Less`, `LessEqual`,
-  `Greater`, `GreaterEqual`); returns `undefined` for unsupported shapes.
-  Useful for 2D-plot domain derivation (e.g. clipping
-  `y = f(x)\{0 < x < 5\}` to `[0, 5]`). Also handles the
-  `Multiply(f, When(…))` parse shape produced by trailing
-  restriction-brace syntax. Exported alongside the existing
-  `getInequalityBoundsFromAssumptions` helper in `inequality-bounds.ts`.
-  Added `IntervalBounds` type to the public type surface.
+- **`BoxedExpression.getInterval(symbol)`** — new method for extracting domain
+  bounds from restriction expressions. Returns `IntervalBounds` with
+  `lower`/`upper`/`lowerStrict`/`upperStrict` for `When(e, cond)`,
+  `And(c1, c2, …)`, and bare comparison expressions; returns `undefined` for
+  unsupported shapes. Useful for 2D-plot domain derivation (e.g. clipping
+  `y = f(x)\{0 < x < 5\}` to `[0, 5]`). Added `IntervalBounds` type to the
+  public type surface.
 
-- **Compact Desmos piecewise `\{cond_1 : val_1, …, default\}`** — now
-  parses to `Which(c_1, v_1, c_2, v_2, …, True, default)`, the same head
-  CE produces for `\begin{cases}…\end{cases}`. Disambiguates from
-  set-builder `\{x : type\}`: if the LHS of the top-level `Colon` has a
-  comparison/boolean head (`Less`/`Greater`/`Equal`/`And`/`Or`/`Not`/…),
-  it's a piecewise branch; otherwise it's set-builder. Normal set
-  literals (`\{1, 2, 3\}`) and set-builder via `\mid` are unchanged.
-  - **Parser change**: `Colon` precedence lowered from 250 to 240
-    (below comparison operators) so `cond : val` parses as
-    `Colon(cond, val)` instead of binding the colon tighter than the
-    comparison. Function type annotations (`f : A \to B` where `\to`
-    is at 270) and set-builder via `\mid` (`Divides` at 160)
-    continue to parse correctly. Full test suite confirmed zero
-    regressions from the precedence change.
-
-#### Improved
-
-- **`parseTrig` Arctan2 handling** — the 2-arg `\arctan` lowering uses a
-  tighter, single-branch form instead of an `effectiveFn` intermediate.
-
-- **`When` evaluator description** — expanded to document the masking
-  rule (`When(e, False) → Undefined`), stacked-restriction
-  canonicalization (`When(When(e, c1), c2) → When(e, And(c1, c2))`),
-  and ternary compilation behavior. No behavioral change — the rules
-  were already implemented; only the description was incomplete.
+- **Compact piecewise `\{cond_1 : val_1, …, default\}`** — now parses to
+  `Which(c_1, v_1, …, True, default)`, the same head CE produces for
+  `\begin{cases}…\end{cases}`. Disambiguated from set-builder `\{x : type\}` by
+  inspecting the LHS of the top-level `Colon`: comparison/boolean heads (`Less`,
+  `Greater`, `Equal`, `And`, `Or`, `Not`, …) → piecewise branch; otherwise →
+  set-builder. Normal set literals (`\{1, 2, 3\}`) and set-builder via `\mid`
+  are unchanged.
 
 #### Fixed
 
 - **`Linspace` endpoint inclusion** — `Linspace(a, b, n)` now produces `n`
   points evenly spanning `[a, b]` inclusive of both endpoints (matching NumPy,
-  Julia, and MATLAB convention). Previously the divisor was `n` instead of
-  `n - 1`, so the last sample fell short of `b` (e.g. `Linspace(0, 1, 5)`
-  yielded `0, 0.2, 0.4, 0.6, 0.8` instead of `0, 0.25, 0.5, 0.75, 1`). The
-  `at`, `iterator`, and `contains` handlers are all corrected. `Linspace(a, b,
-  1)` is the degenerate case and returns just `a`. The `contains` check is
-  also now tolerance-based (was an exact `%` test that failed for typical
-  floating-point values).
+  Julia, and MATLAB). Previously the last sample fell short of `b` (e.g.
+  `Linspace(0, 1, 5)` yielded `0, 0.2, 0.4, 0.6, 0.8` instead of
+  `0, 0.25, 0.5, 0.75, 1`). `Linspace(a, b, 1)` is the degenerate case and
+  returns just `a`. The `contains` check is now tolerance-based (was an exact
+  `%` test that failed for typical floating-point values).
+
+- **Heterogeneous-list type rendering** — lists containing mixed kinds or
+  mixed-dimension tuples previously rendered their type as `"[object Object]"`
+  in some paths (`BoxedDictionary.type`, `collectionElementType`). Types are now
+  constructed programmatically. Lists containing tuples, sets, dictionaries,
+  records, or strings are no longer misclassified as numeric `BoxedTensor`s.
 
 #### Known issues
 
 - **JS `Loop` compile produces `undefined`** — the imperative `for`-loop IIFE
   generated for `Loop(body, Element(i, Range(lo, hi)))` has no `return`
   statement, so the compiled function returns `undefined` rather than the list
-  of body values that CE evaluation produces. Verify-only tests in
-  `test/compute-engine/a1-c1-compile-parity.test.ts` lock in this behavior;
-  source-site comment at `base-compiler.ts:compileForLoop` documents the bug.
-  Tracked for a future release.
+  of body values. Tracked for a future release.
 
 - **JS `Integrate` compile produces `NaN`** — when `args[0]` is a `Function`
   expression (the common `\int x^2 dx` parse shape), `compileIntegrate` produces
-  a double-lambda wrapping `(x) => ((x) => x*x)`, and `_SYS.integrate` receives
-  a function-returning function. Verify-only tests + source-site comment at
-  `javascript-target.ts:compileIntegrate` document the bug. Tracked for a future
-  release.
+  a double-lambda, so `_SYS.integrate` receives a function-returning function.
+  Tracked for a future release.
 
 ### 0.57.0 _2026-05-10_
 
