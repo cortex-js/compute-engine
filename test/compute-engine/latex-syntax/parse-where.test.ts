@@ -77,3 +77,34 @@ describe('WHERE - PARSING', () => {
     `);
   });
 });
+
+describe('WHERE - EVALUATION', () => {
+  test('Simple where expression evaluates', () => {
+    expect(
+      ce.parse('x^2 \\operatorname{where} x \\coloneq 5').evaluate().re
+    ).toEqual(25);
+  });
+
+  test('Multiple bindings evaluate sequentially', () => {
+    expect(
+      ce
+        .parse('b \\operatorname{where} a \\coloneq 5, b \\coloneq a + 1')
+        .evaluate().re
+    ).toEqual(6);
+  });
+
+  test('where-clause does not leak bindings to outer scope', () => {
+    ce.pushScope();
+    try {
+      ce.assign('x', 100);
+      // Inside the where-clause, x is shadowed to 7.
+      expect(
+        ce.parse('x \\operatorname{where} x \\coloneq 7').evaluate().re
+      ).toEqual(7);
+      // After the clause, outer x is unchanged.
+      expect(ce.box('x').evaluate().re).toEqual(100);
+    } finally {
+      ce.popScope();
+    }
+  });
+});

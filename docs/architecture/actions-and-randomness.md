@@ -75,40 +75,47 @@ makes the reordering deterministic. Internally, the seed advances per element
 via an additive Weyl-sequence increment (golden-ratio fractional part) so
 element-to-element draws are decorrelated.
 
-## 4. The `\operatorname{with}` clause — local bindings, not actions
+## 4. The `\operatorname{with}` and `\operatorname{where}` clauses — local bindings
 
-`expr \operatorname{with} a = v_1, b = v_2` is a *local-binding* expression
-(equivalent to JS `let*` / Scheme `let*`): it evaluates `expr` after binding
-`a = v_1` and `b = v_2` in order. Later bindings can reference earlier ones.
+`expr \operatorname{with} a = v_1, b = v_2` (and its math-notation cousin
+`expr \operatorname{where} a \coloneq v_1, b \coloneq v_2`) is a
+*local-binding* expression (equivalent to JS `let*` / Scheme `let*`): it
+evaluates `expr` after binding `a = v_1`, `b = v_2` in order. Later
+bindings can reference earlier ones.
 
-It parses to a Block:
+Both parse to a Block of the form:
 
 ```mathjson
 ["Block",
- ["Assign", "a", v_1],
- ["Assign", "b", v_2],
+ ["Declare", "a"], ["Assign", "a", v_1],
+ ["Declare", "b"], ["Assign", "b", v_2],
  expr]
 ```
 
-### Known limitation — outer-scope leakage
+The explicit `Declare` before each `Assign` is what isolates the binding to
+the Block's local scope: without it, `Assign` would walk up the scope chain
+and mutate a pre-existing outer binding. Inside the clause, the bindings
+shadow any outer symbol of the same name; once the clause finishes, the
+outer scope is unchanged.
 
-When a binding's symbol is already declared at an outer scope, the `Assign`
-walks up the scope chain and mutates the outer binding rather than creating
-a fresh local one. So `expr \operatorname{with} a = 5` is **safe only if
-`a` is not already declared** at the calling scope. If `a` pre-exists,
-its outer value is overwritten after the clause runs.
-
-This limitation is shared with `\operatorname{where}` (which has the same
-parser shape). The natural fix — inserting `Declare` before each `Assign`
-— collides with Block's canonical-pass auto-declare and throws "already
-declared" at evaluate time. Properly isolating Block-local `Declare`/`Assign`
-pairs is tracked as a follow-up.
-
-**Workaround for consumers:** rename the binding symbol to a fresh local
-name before emitting the `with` clause (e.g. translate
-`expr \operatorname{with} a = 5` to `expr[a := _a_local] \operatorname{with} _a_local = 5`
-when `a` may pre-exist at the calling scope).
+```latex
+% Outer a = 100.
+a \operatorname{with} a = 5            % evaluates to 5; outer a still 100
+a + b \operatorname{with} a = 2, b = 3 % evaluates to 5
+b \operatorname{with} a = 5, b = a + 1 % evaluates to 6 (b sees a = 5)
+```
 
 Contrast with the action-tuple translation (section 2): action tuples *do*
-want to mutate the outer scope (that's the whole point), so the
-snapshot-then-commit Block deliberately leans on the same leak.
+want to mutate the outer scope (that's the whole point), and the
+snapshot-then-commit Block deliberately omits the `Declare` so the final
+pass overwrites the outer bindings.
+
+### Implementation note
+
+This relies on `Declare`'s evaluator being idempotent with respect to
+inferred-only bindings: when a Block's canonical pass auto-declares a
+symbol that an inner `Assign` references, the subsequent explicit
+`Declare` upgrades the inferred placeholder to an explicit local binding
+rather than throwing "already declared in this scope". See
+`src/compute-engine/library/core.ts` (`Declare`'s `evaluate` handler) for
+the upgrade rule.

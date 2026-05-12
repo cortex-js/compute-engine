@@ -673,18 +673,14 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
   //
   //   expr \operatorname{with} a = v1, b = v2
   //
-  // Parses to `Block(Assign(a, v1), Assign(b, v2), expr)`. Block's sequential
-  // semantics are correct for `with` (later bindings can reference earlier
-  // ones — same as JS `let*` / Scheme `let*`).
+  // Parses to `Block(Declare(a), Assign(a, v1), Declare(b), Assign(b, v2),
+  // expr)`. The explicit `Declare` before each `Assign` is what isolates
+  // the binding to the Block's local scope: without it, `Assign` walks up
+  // the scope chain and mutates a pre-existing outer binding. Mirrors the
+  // `\operatorname{where}` clause pattern in definitions-core.ts.
   //
-  // KNOWN LIMITATION (shared with `\operatorname{where}`): if a binding's
-  // symbol is already declared at an outer scope, the `Assign` walks up the
-  // scope chain and mutates the outer binding rather than creating a fresh
-  // local one. The natural fix — inserting `Declare` before each `Assign`,
-  // mirroring `parseWhereExpression` — collides with Block's
-  // canonical-pass auto-declare and throws "already declared" at evaluate
-  // time. Properly isolating Block-local Declare/Assign pairs requires
-  // changing Block/Declare interaction and is tracked as a follow-up.
+  // Block's sequential semantics are correct for `with` (later bindings can
+  // reference earlier ones — same as JS `let*` / Scheme `let*`).
   //
   // Precedence 21 mirrors `\operatorname{where}` (just above `;` at 19 and
   // `,` at 20). This ensures `expr` on the lhs captures the entire
@@ -741,11 +737,17 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
 
       if (bindings.length === 0) return null;
 
-      // Block(Assign(a, v1), ..., lhs) — sequential. Body (lhs) goes last.
-      // Note: explicit Declare before each Assign would isolate scope but
-      // collides with Block's canonical-pass auto-declare at evaluate time
-      // (same limitation as `\operatorname{where}` — see header comment).
-      return ['Block', ...bindings, lhs] as MathJsonExpression;
+      // Build Block: insert Declare before each Assign so the Assign binds
+      // to a fresh local declaration in the Block's scope rather than
+      // walking up to mutate the outer binding. Body (lhs) goes last.
+      const block: MathJsonExpression[] = [];
+      for (const b of bindings) {
+        const lhsSym = operand(b, 1);
+        if (lhsSym) block.push(['Declare', lhsSym]);
+        block.push(b);
+      }
+      block.push(lhs);
+      return ['Block', ...block] as MathJsonExpression;
     },
   },
 

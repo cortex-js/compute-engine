@@ -248,13 +248,14 @@ describe('A4.4 — \\operatorname{with} parser', () => {
     expect(expr.evaluate().re).toEqual(6);
   });
 
-  test('parses to Block(Assign(x, 5), Add(x, 1))', () => {
+  test('parses to Block(Declare(x), Assign(x, 5), Add(x, 1))', () => {
     const ce = new ComputeEngine();
     const expr = ce.parse('x + 1 \\operatorname{with} x = 5');
     expect(expr.operator).toEqual('Block');
-    // First op is an Assign, last op is the value expression.
+    // Block: Declare(x), Assign(x, 5), <body>.
     const ops = expr.ops!;
-    expect(ops[0].operator).toEqual('Assign');
+    expect(ops[0].operator).toEqual('Declare');
+    expect(ops[1].operator).toEqual('Assign');
   });
 
   test('multiple bindings: a + b with a = 2, b = 3', () => {
@@ -279,20 +280,16 @@ describe('A4.4 — \\operatorname{with} parser', () => {
     expect(yExpr.symbol).toEqual('y');
   });
 
-  test('with-clause leaks bindings to outer scope when symbol pre-exists (known limitation)', () => {
-    // Pins the current behavior: when the binding's symbol is already
-    // declared at an outer scope, `with` mutates the outer binding. This is
-    // a shared limitation with `\operatorname{where}` — see the parser's
-    // header comment in definitions-other.ts. Consumers that need true
-    // local-binding semantics should rename the binding to a fresh symbol
-    // first (or wait for the Block/Declare follow-up fix).
+  test('with-clause does not leak bindings to outer scope when symbol pre-exists', () => {
+    // The parser inserts `Declare` before each `Assign`, and `Declare`
+    // upgrades the auto-declared inferred binding to an explicit local one
+    // inside the Block's scope. So an outer `a` is shadowed inside the
+    // clause, then restored when the Block ends.
     const ce = new ComputeEngine();
     ce.assign('a', 100);
     const inner = ce.parse('a \\operatorname{with} a = 5').evaluate();
     expect(inner.re).toEqual(5);
-    // Currently: outer a IS mutated. If a future Block/Declare refactor
-    // isolates this correctly, flip this to .toEqual(100).
-    expect(ce.box('a').evaluate().re).toEqual(5);
+    expect(ce.box('a').evaluate().re).toEqual(100);
   });
 
   test('LaTeX round-trip preserves the with-clause structure', () => {

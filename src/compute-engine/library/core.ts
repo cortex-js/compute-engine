@@ -693,7 +693,28 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         const symbolName = sym(ops[0].evaluate());
         if (!symbolName) return undefined;
 
+        // A symbol may already exist in the current scope as an *inferred*
+        // binding with no value — typically because an earlier statement in
+        // this Block (e.g. `Assign(x, ...)`) auto-declared it during the
+        // canonical pass. In that case, `ce.declare(...)` would throw
+        // "already declared in this scope." Treat that case as an upgrade
+        // instead: keep the binding, clear the inferred flag, and (if a
+        // type is provided) tighten the type.
+        //
+        // Bindings that carry a value — e.g. function-argument bindings,
+        // or an outer explicit declaration — are NOT upgraded; the
+        // original "already declared" error is preserved for them.
+        const currentScope = ce.context.lexicalScope;
+        const existing = currentScope.bindings.get(symbolName);
+        const existingValueDef =
+          existing && isValueDef(existing) ? existing : undefined;
+        const isAutoDeclareHere =
+          !!existingValueDef &&
+          existingValueDef.value.inferredType &&
+          existingValueDef.value.value === undefined;
+
         if (!ops[1]) {
+          if (isAutoDeclareHere) return ce.Nothing;
           ce.declare(symbolName, { inferred: true, type: 'unknown' });
           return ce.Nothing;
         }
@@ -704,6 +725,12 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           (isString(t) ? t.string : undefined) ?? sym(t) ?? undefined
         );
         if (!isValidType(type)) return undefined;
+
+        if (isAutoDeclareHere && existingValueDef) {
+          existingValueDef.value.type = ce.type(type);
+          existingValueDef.value.inferredType = false;
+          return ce.Nothing;
+        }
 
         ce.declare(symbolName, type);
         return ce.Nothing;
