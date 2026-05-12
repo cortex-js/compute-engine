@@ -7,20 +7,25 @@ set -o pipefail  # don't hide errors within pipes
 
 cd "$(dirname "$0")/.."
 
-# Read the first argument, set it to "coverage" if not set
-VARIANT="${1-coverage}"
+# Read the first argument, set it to "test" if not set
+VARIANT="${1-test}"
 
 export TEST="true"
 
+run_declaration_type_tests() {
+    echo -e "\n🧐 Running Declaration Type test suite..."
+    npx tsc --noEmit --baseUrl ./dist/types ./test/public-ts-declarations/main.ts
+    echo -e "\033[2K\033[80D\033[32m✔ \033[0m Declaration Type test suite complete"
+}
+
 if [ "$VARIANT" = "coverage" ] || [ "$VARIANT" = "-coverage" ]; then
-    echo -e "\n🧐 Running Declaration Type test suite..."
-    npx tsc --noEmit --baseUrl ./dist/types ./test/public-ts-declarations/main.ts || exit_code=$?
-    echo -e "\033[2K\033[80D\033[32m✔ \033[0m Declaration Type test suite complete"
+    run_declaration_type_tests
     npx jest --config ./config/jest.config.cjs --coverage --no-cache
+elif [ "$VARIANT" = "test" ] || [ "$VARIANT" = "-test" ]; then
+    run_declaration_type_tests
+    npx jest --config ./config/jest.config.cjs --no-cache --reporters summary
 elif [ "$VARIANT" = "snapshot" ]  || [ "$VARIANT" = "-snapshot" ]; then
-    echo -e "\n🧐 Running Declaration Type test suite..."
-    npx tsc --noEmit --baseUrl ./dist/types ./test/public-ts-declarations/main.ts || exit_code=$?
-    echo -e "\033[2K\033[80D\033[32m✔ \033[0m Declaration Type test suite complete"
+    run_declaration_type_tests
     npx jest --config ./config/jest.config.cjs  --updateSnapshot
 else
     # Skip Declaration Type test for specific test files - run it directly
