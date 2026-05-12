@@ -725,6 +725,115 @@ b \coloneq ((x+1)^2 + y^2 + 0.1)^{1.5};
 (\frac{x-1}{a} - \frac{x+1}{b},\; \frac{y}{a} - \frac{y}{b})
 ```
 
+## Desmos-Specific Syntax — Prefer Custom LaTeX Dictionary
+
+When the plotting system needs to support LaTeX syntax that originates with
+Desmos (or any consumer-specific notation), the preferred approach is to
+**register a custom dictionary entry on the local `ComputeEngine` instance**
+rather than upstream the syntax into CE's standard parser.
+
+### Why
+
+CE aims to be a general-purpose LaTeX/MathJSON engine. Every notation added
+to its built-in dictionary widens the surface area users must consider:
+
+- **Tyranny of choice.** Two ways to express the same concept (e.g.
+  `\operatorname{where}` vs `\operatorname{with}` for local bindings) make
+  the canonical form ambiguous and bloat both the parser and the LSP/docs
+  story.
+- **Scope creep.** Niche Desmos-isms — action arrows, dot-notation
+  reducers, compact piecewise, etc. — are useful to GP but rarely to other
+  CE users. They belong at the integration layer.
+- **Versioning.** GP can iterate on Desmos compatibility on its own cadence
+  without waiting for a CE release.
+
+Reserve upstream requests for cases where:
+
+1. The notation is genuinely standard math (e.g. `\sum`, `\int`, `\binom`)
+   and other CE users will also want it.
+2. The behavior requires *evaluator* or *compile-target* changes that
+   can't live behind a parse rewrite — e.g. a new opaque head, a new
+   primitive type, or a structural canonicalization rule.
+
+Pure surface-syntax sugar that lowers to existing CE primitives is almost
+always better done in the consumer's dictionary.
+
+### How
+
+`ComputeEngine.latexDictionary` is a settable array. Filter out any entry
+you want to override, then spread in your own:
+
+```ts
+import { ComputeEngine } from "@cortexjs/compute-engine";
+
+const ce = new ComputeEngine();
+
+ce.latexDictionary = [
+  ...ce.latexDictionary,
+  {
+    // Desmos's `with` clause:  expr \operatorname{with} a = v1, b = v2
+    // Lowers to:  Block(Declare(a), Assign(a, v1), Declare(b), Assign(b, v2), expr)
+    // The Declare-before-Assign is what gives the bindings true Block-local
+    // scope (otherwise Assign walks up and mutates an outer same-name symbol).
+    symbolTrigger: "with",
+    kind: "infix",
+    associativity: "none",
+    precedence: 21, // Just above `;` (19) and `,` (20).
+    parse: (parser, lhs, until) => {
+      const bindingTerminator = {
+        minPrec: 21,
+        condition: (p) => {
+          if (until?.condition?.(p)) return true;
+          const saved = p.index;
+          p.skipVisualSpace();
+          const isComma = p.peek === ",";
+          p.index = saved;
+          return isComma;
+        },
+      };
+
+      const block = [];
+      do {
+        parser.skipVisualSpace();
+        const sym = parser.parseSymbol(bindingTerminator);
+        if (!sym) return null;
+        parser.skipVisualSpace();
+        if (!parser.match("=")) return null;
+        parser.skipVisualSpace();
+        const value = parser.parseExpression(bindingTerminator);
+        if (value === null) return null;
+        block.push(["Declare", sym]);
+        block.push(["Assign", sym, value]);
+        parser.skipVisualSpace();
+      } while (parser.match(","));
+
+      if (block.length === 0) return null;
+      block.push(lhs);
+      return ["Block", ...block];
+    },
+  },
+];
+
+ce.parse("x^2 \\operatorname{with} x = 5").evaluate().valueOf(); // → 25
+```
+
+This same pattern fits any Desmos-specific keyword that lowers to a Block,
+Function, or other existing CE primitive: action arrows (`\to`), dot-notation
+reducers (`L.\operatorname{total}`), compact piecewise — register the parse
+rule locally and you're done.
+
+### When to push back
+
+If a CE issue/RFE proposes adding a new keyword that:
+
+- duplicates an existing CE notation (e.g. `with` when `where` already
+  lowers to the same `Block` shape),
+- is a pure surface-form alias with no semantic difference,
+- is named or styled after a specific consumer's product,
+
+…recommend the custom-dictionary approach above instead. The integration
+layer is the right place for product-specific surface syntax.
+
 ## Resolved CE Integration Issues (CE 0.51.1)
 
 Issues resolved in CE 0.51.1 that simplified the plotting integration:
