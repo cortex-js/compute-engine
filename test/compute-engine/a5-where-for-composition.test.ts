@@ -63,7 +63,7 @@ describe('A5 — where+for composition (evaluation)', () => {
 });
 
 describe('A5 — where+for composition (scope hygiene)', () => {
-  test('Bindings do not leak to outer scope after composed expression', () => {
+  test('Bindings do not leak when outer scope already has the symbol (shadowing)', () => {
     ce.pushScope();
     try {
       ce.assign('n', 100);
@@ -76,6 +76,26 @@ describe('A5 — where+for composition (scope hygiene)', () => {
       expect(result.json).toEqual(['List', 1, 2, 3]);
       // After the clause, outer n is unchanged.
       expect(ce.box('n').evaluate().re).toEqual(100);
+    } finally {
+      ce.popScope();
+    }
+  });
+
+  test('Bindings do not leak when outer scope has no prior binding (fresh scope)', () => {
+    ce.pushScope();
+    try {
+      // Outer scope has no `n` at all.
+      const result = ce
+        .parse(
+          'i \\operatorname{where} n \\coloneq 3 \\operatorname{for} i = \\operatorname{Range}(n)'
+        )
+        .evaluate();
+      expect(result.json).toEqual(['List', 1, 2, 3]);
+      // After the clause, `n` is still undefined in the outer scope —
+      // it was created inside the Block's local scope and discarded.
+      // A bare `n` reference would auto-declare as an unknown symbol,
+      // so check the value definition directly.
+      expect(ce.lookupDefinition('n')).toBeUndefined();
     } finally {
       ce.popScope();
     }
