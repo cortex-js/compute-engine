@@ -1,3 +1,17 @@
+### [Unreleased]
+
+- **2-arg `\arctan(y, x)` / `\tan^{-1}(y, x)` → `Arctan2`** — both `\arctan` and
+  `\tan^{-1}` with two arguments now lower to the existing `Arctan2` operator
+  (principal value of `atan2(y, x)`). Single-arg forms are unchanged. Other
+  inverse trig functions with two arguments (`\sin^{-1}(y, x)` etc.) still
+  produce an arity error — there is no 2-arg variant for them.
+
+- **Trailing `\` at end of input is tolerated** — a stray bare `\` (with no
+  following command character) is silently discarded when it appears at end of
+  input. This matches Desmos's behavior, where some editor-emitted LaTeX ends
+  with a trailing `\`. Named space commands at end of input (`\,`, `\;`,
+  `\quad`, etc.) were already tolerated.
+
 ### 0.58.0 _2026-05-12_
 
 #### Added
@@ -6,10 +20,6 @@
   to `["Length", L]`, matching the existing dot-notation form
   (`L.\operatorname{count}`) and the other lowercase aliases (`mod`, `var`,
   `shuffle`, `repeat`, `join`).
-
-- **2-arg `\arctan(y, x)` → `Arctan2`** — `\arctan` with two arguments now
-  lowers to the existing `Arctan2` operator (principal value of `atan2(y, x)`).
-  Single-arg `\arctan(x)` is unchanged.
 
 - **`Repeat(value, count)` 2-arg form** — `Repeat` now accepts an optional
   integer `count` and evaluates to a finite list of `count` copies of `value`.
