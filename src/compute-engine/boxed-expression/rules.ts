@@ -1028,7 +1028,7 @@ export function replace(
         if (
           result !== null &&
           result.value !== expr &&
-          !result.value.isSame(expr)
+          (!result.value.isSame(expr) || varyingForm(expr, result.value))
         ) {
           // If `once` flag is set, bail on first matching rule
           if (once) return [result];
@@ -1049,6 +1049,64 @@ export function replace(
     iterationCount += 1;
   }
   return steps;
+
+  /*
+   * Local f.
+   */
+  /**
+   * Assuming *x* and *x2* are **structurally (symbolically) equivalent**, and considering
+   * expression forms 'structural' and 'canonical':
+   *
+   * - If option 'recursive' equals `true` or `'functions-only'` (**default** = `'functions-only'`),
+   * then, if either 'x' or 'x2', or one of the matching sub-expression pairs of these has a
+   * differing 'structural' or 'canonical' status, then return `true`.
+   * (if 'functions-only', then only function-expression operands are considered)
+   *
+   * - If 'recursive' === `false`, then this status comparison applies only to/between `x` and `x2`
+   * directly.
+   *
+   * For both cases, if neither `x` nor `x2` (nor compared sub-expressions if recursive) is
+   * structural or canonical, then return `false`.
+   *
+   * **Warning**: will throw an error if it is determined, in case of `recursive !== false`, that
+   * `x` and `x2` are not structurally equivalent/have an identical tree/branching structure.
+   * (It is therefore the responsibility of the caller to ensure this beforehand)
+   */
+  function varyingForm(
+    x: Expression,
+    x2: Expression,
+    {
+      recursive = 'functions-only',
+    }: { recursive?: boolean | 'functions-only' } = {}
+  ): boolean {
+    if (varies(x, x2)) return true;
+
+    if (recursive === false) return false;
+
+    if (isFunction(x) && isFunction(x2)) {
+      if (x.ops.length !== x2.ops.length)
+        throw new Error(
+          `'x' and 'x2' detected to not be structurally equivalent`
+        );
+      if (x.nops === 0) return false;
+
+      return x.ops.some((op, index) =>
+        recursive === true || (!isFunction(op) && !isFunction(x2.ops[index]))
+          ? false
+          : varyingForm(op, x2.ops[index], { recursive })
+      );
+    } else if (isFunction(x) || isFunction(x2)) return true;
+
+    return false;
+
+    function varies(x: Expression, x2: Expression): boolean {
+      if (x.isStructural || x.isCanonical) {
+        if (x.isStructural) return !x2.isStructural;
+        return !x2.isCanonical;
+      }
+      return x2.isStructural || x2.isCanonical ? true : false;
+    }
+  }
 }
 
 /**
