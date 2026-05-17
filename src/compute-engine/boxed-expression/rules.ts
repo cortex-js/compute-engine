@@ -861,8 +861,10 @@ export function applyRule(
     // At least one operand (directly or recursively) matched: but continue onwards to match against
     // the top-level expr., test against any 'condition', et cetera.
     if (operandsMatched) {
-      // (note: No need to consult the input-expr 'form' because, assuming that replaced operands
-      // assume the same form, this will be upcast in the subsequent branches.
+      // (note: so not consult the input-expr 'form' because, assuming that replaced operands assume
+      // the same form, this will be upcast in the subsequent branches.
+      // ^Another reason to avoid this, is if the form of replacements differ from the input expr.,
+      // then likely it is not the intention to preserve the form of the parent)
       let form: FormOption = 'raw';
       // The current policy for applying a form according to 'options.form' is for this to apply to
       // *replacements only* (this ultimately allowing for finer control of replacement operations).

@@ -150,27 +150,22 @@ export type ReplaceOptions = {
   iterationLimit: number;
 
   /**
-   * Replacement form policy.
+   * Specify the canonical-status of _replaced_ sub-expressions.
    *
-   * For recursive replacements, the requested form applies to the replaced
-   * subexpression and may be propagated upward when all child operands share
-   * the same form.
-   */
+   * The specified canonical value/form may propagate upward to the input expression/root according
+   * to 'eager' replacement polcicy. See `replace()` documentation for details.
+   *
 
   /**
-   * @deprecated Use `form` instead. This alias will be removed in the next
-   * release.
+   * @deprecated This is a legacy property: see option `form` for a wider span of forms.
    */
   canonical?: CanonicalOptions;
 
   /**
-   * `form` policy for replaced expressions. \
-   * (For recursive replacements (`recursive == true`), applies only to the replaced subexpressions
-   * (and not the the entire expression-tree)... However, if a recursive/depth replacement takes
-   * place, the policy is to 'eagerly' apply the replaced expression form as all the way up to the
-   * expression root: such that, if a replacement is 'structural' or 'canonical' and consequently
-   * the operands of the containing function-expression all possess the same form, then the
-   * containing expression will also take on this same form.
+   * `form` policy for *replaced* expressions. \
+   *
+   * (If there is a recursive replacement -) Does not automatically apply to the entire input expression... However, the present `replace()` policy is to 'eagerly' propagate any specified replaced-expression replacement form the entire way 'up' an expression-tree.
+   * A value of
    *
    * If wishing to therefore ensure a the requested form for the *entire input* expression, either
    * ensure the input is already in the requested form before any replacement, or simply request the
