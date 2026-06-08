@@ -323,3 +323,79 @@ describe('Desmos compat — tuples inside function-call arguments', () => {
     expect(expr.isValid).toBe(true);
   });
 });
+
+describe('Desmos compat — D_{...} subscripted identifiers vs Euler derivative', () => {
+  test('D_{etectsize} alone parses as a symbol', () => {
+    const ce = new ComputeEngine();
+    expect(ce.parse('D_{etectsize}').json).toEqual('D_etectsize');
+  });
+
+  test('D_{etectsize} followed by an operand stays a symbol', () => {
+    // Previously the EulerDerivative parser engaged on `D` + subscript and
+    // misread the multi-letter subscript as a differentiation variable,
+    // swallowing the trailing term as the function to differentiate.
+    const ce = new ComputeEngine();
+    const expr = ce.parse('D_{etectsize}-7');
+    expect(expr.json).toEqual(['Add', 'D_etectsize', -7]);
+    expect(expr.isValid).toBe(true);
+  });
+
+  test('D_{etectsize} inside a larger expression is valid', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.parse('\\operatorname{floor}(x)-D_{etectsize}-7');
+    expect(expr.isValid).toBe(true);
+  });
+
+  test('single-letter Euler notation D_x f still differentiates', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.parse('D_x \\sin(x)');
+    expect(expr.operator).toEqual('D');
+    expect(expr.isValid).toBe(true);
+  });
+
+  test('second-order Euler notation D^2_x f still differentiates', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.parse('D^2_x f');
+    expect(expr.operator).toEqual('D');
+    expect(expr.isValid).toBe(true);
+  });
+});
+
+describe('Desmos compat — trailing visual space does not wrap in Tuple', () => {
+  test('color constructor followed by \\, is not wrapped', () => {
+    const ce = new ComputeEngine();
+    expect(ce.parse('\\operatorname{hsv}(1,1,1)\\,').json).toEqual([
+      'Hsv',
+      1,
+      1,
+      1,
+    ]);
+  });
+
+  test('color constructor followed by \\quad is not wrapped', () => {
+    const ce = new ComputeEngine();
+    expect(ce.parse('\\operatorname{rgb}(1,1,1)\\quad').json).toEqual([
+      'Rgb',
+      1,
+      1,
+      1,
+    ]);
+  });
+
+  test('\\left(\\right) color constructor + trailing \\, is not wrapped', () => {
+    const ce = new ComputeEngine();
+    expect(
+      ce.parse('\\operatorname{hsv}\\left(1,1,1\\right)\\,').json
+    ).toEqual(['Hsv', 1, 1, 1]);
+  });
+
+  test('unit quantity with visual space still parses (regression)', () => {
+    const ce = new ComputeEngine();
+    expect(ce.parse('12\\,\\mathrm{cm}').json).toEqual(['Quantity', 12, 'cm']);
+  });
+
+  test('number-space-symbol is still multiplication (regression)', () => {
+    const ce = new ComputeEngine();
+    expect(ce.parse('2\\,x').json).toEqual(['Multiply', 2, 'x']);
+  });
+});

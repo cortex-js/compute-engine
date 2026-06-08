@@ -1736,6 +1736,14 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       // Only trigger if we have a subscript (to distinguish from D as a variable)
       if (!variable) return null;
 
+      // The subscript must be a single symbol to be a differentiation variable.
+      // A multi-character subscript (e.g. `D_{etectsize}`, common in Desmos
+      // identifiers) parses as an InvisibleOperator of letters, not a variable.
+      // In that case this is a subscripted identifier, not Euler derivative
+      // notation: bail out so the parser falls back to parsing `D_{...}` as a
+      // symbol.
+      if (symbol(variable) === null) return null;
+
       // Parse the function/expression to differentiate
       parser.skipSpace();
       const fn = parser.parseExpression({ minPrec: 740 });

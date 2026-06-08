@@ -194,6 +194,23 @@ export function canonicalInvisibleOperator(
     }
   }
 
+  //
+  // Purely visual horizontal spacing (`\,`, `\;`, `\quad`, …) carries no
+  // mathematical meaning. The unit/quantity check above needs these operands
+  // (e.g. `12\,\mathrm{cm}`), but past this point they are noise: drop them.
+  // If a single significant operand remains, the invisible operator is a
+  // no-op — this prevents a trailing space from wrapping the expression in a
+  // spurious single-element Tuple (e.g. `\operatorname{hsv}(1,1,1)\,`).
+  //
+  {
+    const significant = ops.filter((x) => x.operator !== 'HorizontalSpacing');
+    if (significant.length !== ops.length) {
+      if (significant.length === 0) return null;
+      if (significant.length === 1) return significant[0].canonical;
+      ops = significant;
+    }
+  }
+
   // Only call flatten here, because it will bind (auto-declare) the arguments
   ops = flatten(ops);
 

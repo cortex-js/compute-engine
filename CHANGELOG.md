@@ -8,9 +8,22 @@
 
 - **Trailing `\` at end of input is tolerated** — a stray bare `\` (with no
   following command character) is silently discarded when it appears at end of
-  input. This matches Desmos's behavior, where some editor-emitted LaTeX ends
-  with a trailing `\`. Named space commands at end of input (`\,`, `\;`,
-  `\quad`, etc.) were already tolerated.
+  input. Some editor-emitted LaTeX ends with a trailing `\`. Named space
+  commands at end of input (`\,`, `\;`, `\quad`, etc.) were already tolerated.
+
+- **`D_{…}` subscripted identifiers no longer collide with the derivative
+  operator** — a `D` followed by a multi-character subscript (e.g.
+  `D_{etectsize}`) is now parsed as a symbol instead of engaging Euler
+  derivative notation. Previously `D_{etectsize}-7` misread the subscript as a
+  differentiation variable and produced an invalid expression. Single-letter
+  Euler notation (`D_x f`, `D^2_x f`) is unchanged.
+
+- **A trailing visual space no longer wraps an expression in a `Tuple`** — a
+  purely visual horizontal space (`\,`, `\;`, `\quad`, …) following an
+  expression is now correctly treated as a no-op. Previously, when the preceding
+  value was non-numeric (e.g. a color constructor),
+  `\operatorname{hsv}(1,1,1)\,` was wrapped in a spurious single-element
+  `Tuple`. Unit-quantity spacing (`12\,\mathrm{cm}`) is unaffected.
 
 ### 0.58.0 _2026-05-12_
 
