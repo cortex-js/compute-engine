@@ -407,7 +407,7 @@ function simplifyNonCommutativeFunction(
   let last = result.at(-1)!.value;
   if (last.isSame(expr)) return steps;
 
-  last = simplifyOperands(last);
+  last = simplifyOperands(last, options);
 
   // If the simplified expression is not cheaper, we're done.
   // Exception: power combination results (e.g., -4·2^x → -2^(x+2)) may be
