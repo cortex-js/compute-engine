@@ -2,6 +2,12 @@
 
 This document captures the implemented architecture after the recent modularization and extension-contract hardening work.
 
+> **Scope:** This is a point-in-time snapshot focused on internal module
+> boundaries and dependency direction. For the current high-level project
+> overview (representations, subsystems, packaging), see the top-level
+> [`ARCHITECTURE.md`](../../ARCHITECTURE.md). The complete list of free
+> functions is maintained in [`docs/README.md`](../README.md#free-functions).
+
 ## Goals
 
 - Preserve a single user-facing `ComputeEngine` API.
@@ -64,7 +70,7 @@ This document captures the implemented architecture after the recent modularizat
 | File | Responsibility |
 |------|---------------|
 | `engine-parse-entrypoint.ts` | Engine-specific parse defaults, symbol type resolution, boxing of parse results |
-| `free-functions.ts` | Top-level free functions (`parse`, `simplify`, `evaluate`, `N`, `assign`) backed by a lazy global engine |
+| `free-functions.ts` | Top-level free functions (`parse`, `simplify`, `evaluate`, `N`, `expand`, `factor`, `solve`, `compile`, `assign`, `declare`, …) backed by a lazy global engine |
 
 ### Validation & Errors
 | File | Responsibility |
@@ -134,14 +140,21 @@ statically import the `LatexSyntax` class — it only uses the structural
 
 ## Free Functions & Lazy Global Engine
 
-Top-level free functions (`parse`, `simplify`, `evaluate`, `N`, `assign`) are exported from `index.ts` via `free-functions.ts`. They are backed by a lazily-instantiated global `ComputeEngine` accessible via `getDefaultEngine()`.
+Top-level free functions are exported from the entry points (`compute-engine.ts` / `core.ts`) via `free-functions.ts`. They are backed by a lazily-instantiated global `ComputeEngine` accessible via `getDefaultEngine()`.
 
-- `parse(latex)` — parse a LaTeX string
+- `parse(latex)` — parse a LaTeX string (full entry only)
 - `simplify(latex | expr)` — simplify a LaTeX string or BoxedExpression
 - `evaluate(latex | expr)` — evaluate a LaTeX string or BoxedExpression
 - `N(latex | expr)` — numeric approximation
+- `expand(latex | expr)` / `expandAll(latex | expr)` — expand products and powers
+- `factor(latex | expr)` — factor an expression as a product
+- `solve(latex | expr, vars)` — solve an equation or system
+- `compile(latex | expr, options?)` — compile to JavaScript (or another target; full entry)
+- `declare(id, type | def)` — declare a symbol/operator in the global engine
 - `assign(id, value)` / `assign({...})` — assign values in the global engine
 - `getDefaultEngine()` — access the shared engine instance for configuration
+
+See [`docs/README.md`](../README.md#free-functions) for the canonical list.
 
 The global engine is created on first call to any free function via a factory
 registered by the entry point. The full entry point (`compute-engine.ts`)

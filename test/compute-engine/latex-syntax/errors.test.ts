@@ -414,10 +414,10 @@ check('Syntax error: @', () =>
   `)
 );
 
-check('Syntax error: \\', () =>
-  expect(engine.parse('x\\')).toMatchInlineSnapshot(
-    `["Tuple", "x", ["Error", "unexpected-command", ["LatexString", "\\"]]]`
-  )
+// A trailing bare `\` at end of input is tolerated (some sources, notably
+// Desmos editors, emit a stray trailing `\`). It is silently discarded.
+check('Trailing bare backslash is tolerated', () =>
+  expect(engine.parse('x\\')).toMatchInlineSnapshot(`x`)
 );
 
 check('Syntax error: \\1', () =>

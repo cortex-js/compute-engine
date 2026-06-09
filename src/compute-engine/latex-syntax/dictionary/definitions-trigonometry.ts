@@ -102,8 +102,16 @@ function parseTrig(op: string): ExpressionParseHandler {
         trigCommands[parser.peek] || (until?.condition?.(parser) ?? false),
     });
 
-    // Desmos compatibility: `\arctan(y, x)` is the 2-arg atan2.
-    const head = fn === 'Arctan' && args?.length === 2 ? 'Arctan2' : fn;
+    // Desmos compatibility: `\arctan(y, x)` and `\tan^{-1}(y, x)` are
+    // both 2-arg atan2. We must lower to Arctan2 here, before the operator
+    // is resolved: by the time `['InverseFunction', 'Tan']` becomes
+    // `Arctan`, the 2-argument call would be treated as an arity error.
+    // No other inverse trig has a 2-arg variant, so this is Tan-only.
+    const isTwoArgArctan =
+      args?.length === 2 &&
+      (fn === 'Arctan' ||
+        (Array.isArray(fn) && fn[0] === 'InverseFunction' && fn[1] === 'Tan'));
+    const head = isTwoArgArctan ? 'Arctan2' : fn;
 
     const appliedFn: MathJsonExpression =
       args === null

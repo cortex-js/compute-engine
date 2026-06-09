@@ -2419,6 +2419,20 @@ export class _Parser implements Parser {
     if (result === null) {
       result = this.options.parseUnexpectedToken?.(null, this) ?? null;
       if (result === null && this.peek.startsWith('\\')) {
+        // Tolerate a stray bare `\` at end of input (e.g. Desmos trailing `\`).
+        // Some sources emit a trailing `\` that the tokenizer surfaces as a
+        // literal `\` token when followed by EOF.
+        if (this.peek === '\\') {
+          const saved = this.index;
+          this.nextToken();
+          this.skipVisualSpace();
+          if (this.atEnd) {
+            // The `\` was trailing junk — silently discard it.
+            return this.decorate(null, start);
+          }
+          // Not at end: restore and fall through to the error path.
+          this.index = saved;
+        }
         // We've encountered an unknown LaTeX command. May be a typo.
         // Gobble it.
         this.nextToken();

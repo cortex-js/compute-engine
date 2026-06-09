@@ -208,3 +208,194 @@ describe('A6 polish — normalizeIdentifier', () => {
     expect(ce.normalizeIdentifier('1 + 2')).toEqual(''); // not an identifier
   });
 });
+
+describe('Desmos compat — trailing stray backslash', () => {
+  test('trailing bare \\ at end of input is tolerated', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.parse('C_{x}=\\operatorname{hsv}\\left(1,1,1\\right)\\');
+    expect(expr.json).toEqual(['Equal', 'C_x', ['Hsv', 1, 1, 1]]);
+    expect(expr.isValid).toBe(true);
+  });
+
+  test('trailing \\ after a simple expression', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.parse('x+1\\');
+    expect(expr.json).toEqual(['Add', 'x', 1]);
+    expect(expr.isValid).toBe(true);
+  });
+
+  test('trailing \\ after a function call', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.parse('\\sin(x)\\');
+    expect(expr.json).toEqual(['Sin', 'x']);
+    expect(expr.isValid).toBe(true);
+  });
+
+  test('named space commands still tolerated (regression)', () => {
+    const ce = new ComputeEngine();
+    expect(ce.parse('x\\,').json).toEqual('x');
+    expect(ce.parse('x\\quad').json).toEqual('x');
+    expect(ce.parse('x\\;').json).toEqual('x');
+  });
+
+  test('trailing space command before bare \\ is also tolerated', () => {
+    const ce = new ComputeEngine();
+    // Verifies the order of operations: skipVisualSpace runs before the
+    // bare-\ check, so `x\,\` (visual space + bare \ + EOF) is accepted.
+    const expr = ce.parse('x\\,\\');
+    expect(expr.json).toEqual('x');
+    expect(expr.isValid).toBe(true);
+  });
+});
+
+describe('Desmos compat — \\tan^{-1}(y, x) → Arctan2', () => {
+  test('single-arg \\tan^{-1}(x) stays Arctan(x)', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.parse('\\tan^{-1}(x)');
+    expect(expr.operator).toEqual('Arctan');
+    expect(expr.ops?.length).toEqual(1);
+  });
+
+  test('two-arg \\tan^{-1}(y, x) lowers to Arctan2(y, x)', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.parse('\\tan^{-1}(y, x)');
+    expect(expr.operator).toEqual('Arctan2');
+    expect(expr.ops?.length).toEqual(2);
+    expect(expr.isValid).toBe(true);
+  });
+
+  test('two-arg \\tan^{-1} inside a larger expression', () => {
+    const ce = new ComputeEngine();
+    // Mirrors the Desmos "Domain coloring" row from the corpus:
+    //   p + u\tan^{-1}(\operatorname{imag}(...), \operatorname{real}(...))
+    const expr = ce.parse(
+      '\\tan^{-1}(\\operatorname{imag}(z), \\operatorname{real}(z))'
+    );
+    expect(expr.operator).toEqual('Arctan2');
+    expect(expr.isValid).toBe(true);
+  });
+
+  test('\\arctan(y, x) still lowers to Arctan2 (regression)', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.parse('\\arctan(y, x)');
+    expect(expr.operator).toEqual('Arctan2');
+    expect(expr.ops?.length).toEqual(2);
+  });
+
+  test('\\sin^{-1}(x) still parses as Arcsin (regression)', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.parse('\\sin^{-1}(x)');
+    expect(expr.operator).toEqual('Arcsin');
+    expect(expr.ops?.length).toEqual(1);
+  });
+});
+
+describe('Desmos compat — tuples inside function-call arguments', () => {
+  test('triangle with plain-paren tuples (3-component points)', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.parse(
+      '\\operatorname{triangle}\\left((-3.3,1,1.2),(-2,1.9,1.3),(-2.5,2.5,1.4)\\right)'
+    );
+    expect(expr.operator).toEqual('Triangle');
+    expect(expr.ops?.length).toEqual(3);
+    expect(expr.isValid).toBe(true);
+  });
+
+  test('triangle with \\left(\\right) tuples (Gomoku-style)', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.parse(
+      '\\operatorname{triangle}\\left(' +
+        '\\left(1, 2, 3\\right),' +
+        '\\left(4, 5, 6\\right),' +
+        '\\left(7, 8, 9\\right)' +
+      '\\right)'
+    );
+    expect(expr.operator).toEqual('Triangle');
+    expect(expr.ops?.length).toEqual(3);
+    expect(expr.isValid).toBe(true);
+  });
+
+  test('arbitrary function with tuple arguments', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.parse('f\\left(\\left(1, 2\\right), \\left(3, 4\\right)\\right)');
+    expect(expr.operator).toEqual('f');
+    expect(expr.ops?.length).toEqual(2);
+    expect(expr.isValid).toBe(true);
+  });
+});
+
+describe('Desmos compat — D_{...} subscripted identifiers vs Euler derivative', () => {
+  test('D_{etectsize} alone parses as a symbol', () => {
+    const ce = new ComputeEngine();
+    expect(ce.parse('D_{etectsize}').json).toEqual('D_etectsize');
+  });
+
+  test('D_{etectsize} followed by an operand stays a symbol', () => {
+    // Previously the EulerDerivative parser engaged on `D` + subscript and
+    // misread the multi-letter subscript as a differentiation variable,
+    // swallowing the trailing term as the function to differentiate.
+    const ce = new ComputeEngine();
+    const expr = ce.parse('D_{etectsize}-7');
+    expect(expr.json).toEqual(['Add', 'D_etectsize', -7]);
+    expect(expr.isValid).toBe(true);
+  });
+
+  test('D_{etectsize} inside a larger expression is valid', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.parse('\\operatorname{floor}(x)-D_{etectsize}-7');
+    expect(expr.isValid).toBe(true);
+  });
+
+  test('single-letter Euler notation D_x f still differentiates', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.parse('D_x \\sin(x)');
+    expect(expr.operator).toEqual('D');
+    expect(expr.isValid).toBe(true);
+  });
+
+  test('second-order Euler notation D^2_x f still differentiates', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.parse('D^2_x f');
+    expect(expr.operator).toEqual('D');
+    expect(expr.isValid).toBe(true);
+  });
+});
+
+describe('Desmos compat — trailing visual space does not wrap in Tuple', () => {
+  test('color constructor followed by \\, is not wrapped', () => {
+    const ce = new ComputeEngine();
+    expect(ce.parse('\\operatorname{hsv}(1,1,1)\\,').json).toEqual([
+      'Hsv',
+      1,
+      1,
+      1,
+    ]);
+  });
+
+  test('color constructor followed by \\quad is not wrapped', () => {
+    const ce = new ComputeEngine();
+    expect(ce.parse('\\operatorname{rgb}(1,1,1)\\quad').json).toEqual([
+      'Rgb',
+      1,
+      1,
+      1,
+    ]);
+  });
+
+  test('\\left(\\right) color constructor + trailing \\, is not wrapped', () => {
+    const ce = new ComputeEngine();
+    expect(
+      ce.parse('\\operatorname{hsv}\\left(1,1,1\\right)\\,').json
+    ).toEqual(['Hsv', 1, 1, 1]);
+  });
+
+  test('unit quantity with visual space still parses (regression)', () => {
+    const ce = new ComputeEngine();
+    expect(ce.parse('12\\,\\mathrm{cm}').json).toEqual(['Quantity', 12, 'cm']);
+  });
+
+  test('number-space-symbol is still multiplication (regression)', () => {
+    const ce = new ComputeEngine();
+    expect(ce.parse('2\\,x').json).toEqual(['Multiply', 2, 'x']);
+  });
+});

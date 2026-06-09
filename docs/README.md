@@ -13,9 +13,11 @@ read the repository [`README.md`](../README.md).
 | Goal | Recommended doc |
 | --- | --- |
 | Learn package usage quickly | [`../README.md`](../README.md) |
+| Understand the overall architecture | [`../ARCHITECTURE.md`](../ARCHITECTURE.md) |
 | Use free functions for common operations | This file (Free Functions section) |
-| Understand simplification behavior snapshots | [`SIMPLIFY.md`](./SIMPLIFY.md), [`SIMPLIFICATIONS.md`](./SIMPLIFICATIONS.md) |
+| Understand simplification behavior snapshots | [`SIMPLIFY.md`](./SIMPLIFY.md) |
 | Review playground sample outcomes | [`PLAYGROUND.md`](./PLAYGROUND.md) |
+| Validate arguments in custom function definitions | [`FUNCTION-VALIDATION.md`](./FUNCTION-VALIDATION.md) |
 | Review internal architecture boundaries | [`architecture/README.md`](./architecture/README.md) |
 
 ## Free Functions
@@ -50,5 +52,4 @@ These files are useful implementation snapshots, but they are not a canonical
 API reference:
 
 - [`PLAYGROUND.md`](./PLAYGROUND.md)
-- [`SIMPLIFICATIONS.md`](./SIMPLIFICATIONS.md)
 - [`SIMPLIFY.md`](./SIMPLIFY.md)

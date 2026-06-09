@@ -17,6 +17,32 @@
 
 - **ReplaceOptions.canonical is deprecated** — prefer `form`; specifying both
   `form` and `canonical` now raises an error.
+### [Unreleased]
+
+- **2-arg `\arctan(y, x)` / `\tan^{-1}(y, x)` → `Arctan2`** — both `\arctan` and
+  `\tan^{-1}` with two arguments now lower to the existing `Arctan2` operator
+  (principal value of `atan2(y, x)`). Single-arg forms are unchanged. Other
+  inverse trig functions with two arguments (`\sin^{-1}(y, x)` etc.) still
+  produce an arity error — there is no 2-arg variant for them.
+
+- **Trailing `\` at end of input is tolerated** — a stray bare `\` (with no
+  following command character) is silently discarded when it appears at end of
+  input. Some editor-emitted LaTeX ends with a trailing `\`. Named space
+  commands at end of input (`\,`, `\;`, `\quad`, etc.) were already tolerated.
+
+- **`D_{…}` subscripted identifiers no longer collide with the derivative
+  operator** — a `D` followed by a multi-character subscript (e.g.
+  `D_{etectsize}`) is now parsed as a symbol instead of engaging Euler
+  derivative notation. Previously `D_{etectsize}-7` misread the subscript as a
+  differentiation variable and produced an invalid expression. Single-letter
+  Euler notation (`D_x f`, `D^2_x f`) is unchanged.
+
+- **A trailing visual space no longer wraps an expression in a `Tuple`** — a
+  purely visual horizontal space (`\,`, `\;`, `\quad`, …) following an
+  expression is now correctly treated as a no-op. Previously, when the preceding
+  value was non-numeric (e.g. a color constructor),
+  `\operatorname{hsv}(1,1,1)\,` was wrapped in a spurious single-element
+  `Tuple`. Unit-quantity spacing (`12\,\mathrm{cm}`) is unaffected.
 
 ### 0.58.0 _2026-05-12_
 
@@ -26,10 +52,6 @@
   to `["Length", L]`, matching the existing dot-notation form
   (`L.\operatorname{count}`) and the other lowercase aliases (`mod`, `var`,
   `shuffle`, `repeat`, `join`).
-
-- **2-arg `\arctan(y, x)` → `Arctan2`** — `\arctan` with two arguments now
-  lowers to the existing `Arctan2` operator (principal value of `atan2(y, x)`).
-  Single-arg `\arctan(x)` is unchanged.
 
 - **`Repeat(value, count)` 2-arg form** — `Repeat` now accepts an optional
   integer `count` and evaluates to a finite list of `count` copies of `value`.

@@ -153,6 +153,10 @@ console.log(solution.y.json);  // 2
 
 [Build](BUILD.md) instructions
 
+**Q** How is the project structured?
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for an overview of the codebase.
+
 ## Related Projects
 
 <dl>

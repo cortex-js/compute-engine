@@ -106,6 +106,7 @@
     "chalk": "^5.6.2",
     "check-node-version": "^4.2.1",
     "concat-md": "^0.5.1",
+    "decimal.js": "^10.6.0",
     "esbuild": "^0.27.3",
     "eslint": "^8.56.0",
     "eslint-config-prettier": "^10.1.8",
@@ -130,7 +131,6 @@
   "prettier": "@cortex-js/prettier-config",
   "dependencies": {
     "@arnog/colors": "^0.5.0",
-    "complex-esm": "^2.1.1-esm1",
-    "decimal.js": "^10.6.0"
+    "complex-esm": "^2.1.1-esm1"
   }
 }
