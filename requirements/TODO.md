@@ -628,11 +628,32 @@ currently tracked under **Correctness Issues (wrong results)** or
 
 ---
 
-### \max/\min with Subscripts
+### \max/\min over a domain (subscript form)
 
-Expressions like `\max_{x \in S} f(x)` are common in math but involve subscript
-handling that's a separate parsing concern (related to
-[#16 Pre-Subscript and Pre-Superscript Parsing](#16-pre-subscript-and-pre-superscript-parsing)).
+Expressions like `\max_{x \in S} f(x)` or `\max_{i=1}^{n} a_i` are common in math
+but **not yet supported** — they currently parse to garbage (the `_{…}`
+subscript leaks a `_` placeholder into the operands).
+
+This is a **medium feature**, not a quick parsing tweak. Investigation
+(2026-06) showed it needs three coordinated pieces, plus a design decision:
+
+1. **Parse** — a hybrid handler for `\max`/`\min`/`\sup`/`\inf`: big-operator
+   form when a subscript follows (mirror `parseBigOp` →
+   `["Max", body, ["Element", x, S]]` / `["Tuple", i, 1, n]`), function-call
+   form otherwise (`\max(1,2,3)` must keep working). Models:
+   `parseBigOp`, `parseLog` (hybrid optional-subscript), `\lim`.
+2. **Serialize** — a hybrid serializer (big-op form when indexing-set operands
+   are present, `\max(...)` otherwise). `serializeBigOp` only handles the
+   former.
+3. **Evaluate** — `Max`/`Min`/`Supremum`/`Infimum` evaluators must recognize
+   indexing-set operands. Today `["Max", "a_i", ["Tuple", "i", 1, "n"]]`
+   evaluates to nonsense (the `Tuple` is read as extra max operands and `i` as
+   the imaginary unit). The `["Element", x, S]` form happens to stay symbolic.
+4. **Design decision** — does `\max_{x∈S} f(x)` evaluate to the max *value* over
+   the domain (iterate like `Sum`/`Product`), or stay symbolic? Pick before
+   implementing #3.
+
+Related: [#16 Pre-Subscript and Pre-Superscript Parsing](#16-pre-subscript-and-pre-superscript-parsing).
 
 ---
 
@@ -664,7 +685,6 @@ _Inventory of gaps surfaced from `todo` comments in the test suite._
 
 ### Performance & Benchmarking
 - **Precision**: Extend Wester benchmarks to support precision 50.
-- **Notation**: `toLatex({ notation: 'engineering' })` is silently ignored (output is plain decimal, not engineering); only `'scientific'` is implemented. Implement engineering notation or document it as unsupported.
 
 ### Calculus & Special Functions
 - **Integration**: Implement additional integration patterns identified in `calculus.test.ts`.

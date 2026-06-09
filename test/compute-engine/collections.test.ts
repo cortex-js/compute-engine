@@ -514,8 +514,8 @@ describe('OPERATIONS ON INDEXED COLLECTIONS', () => {
 
   test('Rest', () =>
     expect(evaluate(['Rest', list])).toMatchInlineSnapshot(
-      `["List", 13, 13, 13, 13, 13, 11]`
-    )); // @fixme should be `["List", 13, 5, 19, 2, 3, 11]`
+      `["List", 13, 5, 19, 2, 3, 11]`
+    ));
 
   test('Most', () =>
     expect(evaluate(['Most', list])).toMatchInlineSnapshot(
@@ -792,5 +792,89 @@ describe('CONTINUATION PLACEHOLDER', () => {
         "ContinuationPlaceholder"
       ]
     `);
+  });
+});
+
+// Regressions for the collection-handler bugs reported in REVIEW.md (B3–B8).
+describe('Collection handler regressions (REVIEW.md B3–B8)', () => {
+  // B3: the Rest iterator re-declared `index` inside next(), so it never
+  // advanced (yielded the 2nd element forever).
+  test('B3: Rest materializes all remaining elements', () => {
+    expect(evaluate(['Rest', ['List', 1, 2, 3, 4]])).toMatchInlineSnapshot(
+      `["List", 2, 3, 4]`
+    );
+    expect(evaluate(['Rest', ['List', 5]])).toMatchInlineSnapshot(`["List"]`);
+  });
+
+  // B4: Slice.at computed bounds then fell off the end with no return (always
+  // undefined); the count handler's negative-start formula was wrong.
+  test('B4: Slice.at returns elements; count handles negative bounds', () => {
+    const sl = engine.box(['Slice', ['List', 10, 20, 30, 40], 2, 3]);
+    expect(sl.at(1)?.toString()).toEqual('20');
+    expect(sl.at(2)?.toString()).toEqual('30');
+    expect(
+      evaluate(['Slice', ['List', 10, 20, 30, 40], 2, 3])
+    ).toMatchInlineSnapshot(`["List", 20, 30]`);
+    expect(
+      evaluate(['Slice', ['List', 1, 2, 3, 4, 5], -2, -1])
+    ).toMatchInlineSnapshot(`["List", 4, 5]`);
+    expect(
+      engine.box(['Slice', ['List', 1, 2, 3, 4, 5], -2, -1]).count
+    ).toEqual(2);
+  });
+
+  // B5: SetFrom/TupleFrom had the collection test inverted (the exact inverse
+  // of the correct ListFrom), so a collection arg was wrapped as one element.
+  test('B5: SetFrom/TupleFrom flatten their collection argument', () => {
+    expect(evaluate(['SetFrom', ['List', 1, 2, 2, 3]])).toMatchInlineSnapshot(
+      `["Set", 1, 2, 3]`
+    );
+    expect(evaluate(['TupleFrom', ['List', 1, 2, 3]])).toMatchInlineSnapshot(
+      `["Triple", 1, 2, 3]`
+    );
+  });
+
+  // B6: Position threw on every match (missing `else` before the predicate
+  // type-check throw).
+  test('B6: Position returns indices of matching elements', () => {
+    expect(
+      evaluate([
+        'Position',
+        ['List', 1, 2, 3],
+        ['Function', ['Greater', 'x', 1], 'x'],
+      ])
+    ).toMatchInlineSnapshot(`["List", 2, 3]`);
+  });
+
+  // B7: Cycle isEmpty/isFinite self-recursed (stack overflow) and isFinite was
+  // inverted; the iterator was also off-by-one (started at index 0).
+  test('B7: Cycle reports infinite/empty correctly and cycles elements', () => {
+    expect(engine.box(['Cycle', ['List', 1, 2, 3]]).isFiniteCollection).toBe(
+      false
+    );
+    expect(engine.box(['Cycle', ['List']]).isEmptyCollection).toBe(true);
+    expect(
+      evaluate(['Take', ['Cycle', ['List', 1, 2]], 5])
+    ).toMatchInlineSnapshot(`["List", 1, 2, 1, 2, 1]`);
+  });
+
+  // B8: Drop.at returned undefined for n=0 and wrong elements for negative
+  // indices; the iterator also emitted trailing Error elements past the end.
+  test('B8: Drop handles n=0, negative indices, and materializes cleanly', () => {
+    expect(
+      engine
+        .box(['Drop', ['List', 1, 2, 3, 4, 5], 2])
+        .at(-1)
+        ?.toString()
+    ).toEqual('5');
+    expect(
+      engine
+        .box(['Drop', ['List', 1, 2, 3], 0])
+        .at(1)
+        ?.toString()
+    ).toEqual('1');
+    expect(
+      evaluate(['Drop', ['List', 1, 2, 3, 4, 5], 2])
+    ).toMatchInlineSnapshot(`["List", 3, 4, 5]`);
   });
 });

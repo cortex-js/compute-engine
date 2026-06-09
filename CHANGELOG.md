@@ -1,5 +1,21 @@
 ### [Unreleased]
 
+- **Collection operation fixes** — several lazy-collection handlers returned
+  wrong results, threw, or failed to terminate:
+  - `Rest` now yields every remaining element (its iterator was stuck on the
+    second element, repeating it).
+  - `Slice` element access (`.at()`) returns elements instead of always
+    `undefined`, and the reported length of a slice with negative bounds is
+    correct.
+  - `SetFrom` / `TupleFrom` flatten their collection argument (they were
+    wrapping the whole collection as a single element).
+  - `Position` no longer throws when an element matches the predicate.
+  - `Cycle` no longer stack-overflows when queried for emptiness/finiteness,
+    correctly reports as infinite (for a non-empty argument), and cycles from
+    the first element.
+  - `Drop` element access handles `n = 0` and negative indices, and no longer
+    emits trailing error elements when materialized.
+
 - **Decomposed (NFD) Unicode input is normalized** — LaTeX input is now
   normalized to Unicode NFC at tokenization, so an identifier written with a
   combining mark (e.g. `e` + combining acute accent) is parsed identically to

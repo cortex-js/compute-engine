@@ -1075,11 +1075,17 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         const n = toInteger(nExpr) ?? 0;
         if (n <= 0) return xs.each();
 
+        const count = xs.count;
         let index = n + 1;
 
         return {
           next: () => {
-            const value = expr.op1.at(index++);
+            // Stop at the end of a finite collection: `List.at()` returns an
+            // Error (not `undefined`) past the end, so the count bound is what
+            // reliably terminates iteration.
+            if (count !== undefined && index > count)
+              return { value: undefined, done: true };
+            const value = xs.at(index++);
             if (value === undefined) return { value: undefined, done: true };
             return { value, done: false };
           },
@@ -1094,8 +1100,19 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         const [xs, nExpr] = expr.ops;
 
         const n = toInteger(nExpr) ?? 0;
-        if (n <= 0) return undefined;
+        // Dropping <= 0 elements is the identity (matches the iterator, which
+        // returns `xs.each()` for n <= 0).
+        if (n <= 0) return xs.at(index);
 
+        // A negative index counts from the end. Dropping from the front does
+        // not move the tail, so `xs.at(index)` is already correct — but reject
+        // indices that would reach back into the dropped prefix.
+        if (index < 0) {
+          const count = xs.count;
+          if (count !== undefined && -index > count - n) return undefined;
+          return xs.at(index);
+        }
+        if (index < 1) return undefined;
         return xs.at(index + n);
       },
     },
@@ -1182,11 +1199,21 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       iterator: (expr) => {
         if (!isFunction(expr))
           return { next: () => ({ value: undefined, done: true }) };
+        // Rest yields the collection without its first element, i.e. starting
+        // at the second element. `index` must persist across `next()` calls.
+        const op1 = expr.op1;
+        const count = op1.count;
+        let index = 2;
         return {
           next: () => {
-            let index = 1;
-            const value = expr.op1.at(index > 0 ? index + 1 : index);
-            if (!value) return { value: undefined, done: true };
+            // Terminate at the end of a finite collection. `List.at()` returns
+            // an Error (not `undefined`) past the end, so the count bound is
+            // what reliably stops iteration; the `undefined` check covers
+            // unbounded collections.
+            if (count !== undefined && index > count)
+              return { value: undefined, done: true };
+            const value = op1.at(index);
+            if (value === undefined) return { value: undefined, done: true };
             index += 1;
             return { value, done: false };
           },
@@ -1277,12 +1304,19 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       isLazy: (_expr) => true,
       count: (expr) => {
         if (!isFunction(expr)) return undefined;
-        const start = toInteger(expr.op2) ?? 1;
         const count = expr.op1.count;
         if (count === undefined) return undefined;
-        const end = toInteger(expr.op3) ?? count;
-        if (start < 1) return Math.max(0, end + start - 1);
-        return Math.max(0, Math.min(end, count) - start + 1);
+        // Resolve start/end the same way the `at` and `iterator` handlers do,
+        // so all three agree (negative indices count from the end).
+        let start = toInteger(expr.op2) ?? 1;
+        if (start < 1) start = count + 1 + start;
+        if (start < 1) start = 1;
+        if (start > count) return 0;
+        let end = toInteger(expr.op3) ?? count;
+        if (end < 1) end = count + 1 + end;
+        if (end < 1) end = 1;
+        if (end > count) end = count;
+        return Math.max(0, end - start + 1);
       },
       isFinite: (_expr) => true,
       at: (
@@ -1301,6 +1335,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (end < 1) end = count + 1 + end; // Convert negative index to positive
         if (end < 1) end = 1; // Ensure end is at least 1
         if (end > count) end = count; // Ensure end is within bounds
+
+        // `index` is 1-based within the slice; a negative index counts from
+        // the end of the slice. Return the element at that position.
+        const length = end - start + 1;
+        if (length <= 0) return undefined;
+        if (index < 0) index = length + 1 + index;
+        if (index < 1 || index > length) return undefined;
+        return expr.op1.at(start + index - 1);
       },
       iterator: (expr) => {
         if (!isFunction(expr))
@@ -1596,7 +1638,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       for (const item of xs.each()) {
         const pred = sym(f([item]));
         if (pred === 'True') indices.push(ce.number(index));
-        if (pred !== 'False')
+        else if (pred !== 'False')
           throw new Error(
             `Filter predicate must return "True" or "False". ${spellCheckMessage(
               fn
@@ -2076,9 +2118,22 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     signature: '(list) -> list',
     collection: {
       isLazy: (_expr) => true,
-      count: () => Infinity,
-      isEmpty: (expr) => expr.isEmptyCollection,
-      isFinite: (expr) => !expr.isEmptyCollection,
+      // Cycling a non-empty collection is infinite; cycling an empty one is
+      // empty. Inspect the *underlying* collection (`op1`) — reading
+      // `expr.isEmptyCollection`/`expr.isFiniteCollection` here would re-enter
+      // these same handlers and recurse infinitely.
+      count: (expr) => {
+        if (!isFunction(expr)) return undefined;
+        return expr.op1.isEmptyCollection ? 0 : Infinity;
+      },
+      isEmpty: (expr) => {
+        if (!isFunction(expr)) return undefined;
+        return expr.op1.isEmptyCollection;
+      },
+      isFinite: (expr) => {
+        if (!isFunction(expr)) return undefined;
+        return expr.op1.isEmptyCollection;
+      },
       contains: (expr, target) => {
         if (!isFunction(expr)) return false;
         return expr.op1.contains(target) ?? false;
@@ -2092,7 +2147,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           return { next: () => ({ value: undefined, done: true }) };
         return {
           next: () => {
-            const i = ((index - 1 - 1) % l) + 1;
+            const i = ((index - 1) % l) + 1;
             const value = expr.op1.at(i);
             if (value === undefined) return { value: undefined, done: true };
             index += 1;
@@ -2222,7 +2277,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     evaluate: (ops, { engine: ce }) => {
       const elements: Expression[] = [];
       for (const xs of ops) {
-        if (xs.isCollection) elements.push(xs);
+        if (!xs.isCollection) elements.push(xs);
         else {
           if (!xs.isFiniteCollection) return undefined;
           elements.push(...(Array.from(xs.each()) as Expression[]));
@@ -2239,7 +2294,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     evaluate: (ops, { engine: ce }) => {
       const elements: Expression[] = [];
       for (const xs of ops) {
-        if (xs.isCollection) elements.push(xs);
+        if (!xs.isCollection) elements.push(xs);
         else {
           if (!xs.isFiniteCollection) return undefined;
           elements.push(...(Array.from(xs.each()) as Expression[]));
