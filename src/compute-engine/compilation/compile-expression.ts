@@ -2,6 +2,7 @@ import type { MathJsonSymbol } from '../../math-json/types';
 import type { Expression, JSSource } from '../global-types';
 import type { CompileTarget, CompilationResult, CompiledRunner } from './types';
 import { BaseCompiler } from './base-compiler';
+import { isFunction } from '../boxed-expression/type-guards';
 import { assertCompilationOptionsContract } from '../engine-extension-contracts';
 
 type CompileExpressionOptions<T extends string = string> = {
@@ -87,6 +88,30 @@ export function compile<T extends string = 'javascript'>(
         `Compilation fallback for "${expr.operator}" (target: ${options?.to ?? 'javascript'}): ${(e as Error).message}`
       );
       const ce = expr.engine;
+      const target = (options?.to ?? 'javascript') as T;
+
+      // A function literal (lambda) compiles to the 'lambda' calling
+      // convention — `run(a, b, ...)` with positional arguments (see
+      // `compileToTarget` in javascript-target.ts). The fallback must mirror
+      // that by applying the function to its positional arguments via the
+      // interpreter. Otherwise positional arguments are silently dropped and
+      // the unbound lambda evaluates to nothing.
+      if (isFunction(expr, 'Function')) {
+        const lambdaRun = ((...args: number[]) =>
+          ce
+            .function('Apply', [expr, ...args.map((a) => ce.box(a))])
+            .evaluate().re) as unknown as CompiledRunner;
+        return {
+          target,
+          success: false,
+          code: '',
+          calling: 'lambda',
+          run: lambdaRun,
+        } as CompilationResult<T>;
+      }
+
+      // Otherwise, the expression uses the 'expression' calling convention:
+      // `run({ x, y, ... })` with a variables object.
       const fallbackRun = ((vars: Record<string, number>) => {
         ce.pushScope();
         try {
@@ -99,7 +124,7 @@ export function compile<T extends string = 'javascript'>(
         }
       }) as unknown as CompiledRunner;
       return {
-        target: (options?.to ?? 'javascript') as T,
+        target,
         success: false,
         code: '',
         calling: 'expression',

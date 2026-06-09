@@ -1,5 +1,13 @@
 ### [Unreleased]
 
+- **Compilation fallback handles multi-argument lambdas** — when a `Function`
+  literal (lambda) cannot be compiled to the target and falls back to
+  interpretation, the fallback now uses the `'lambda'` calling convention
+  (`run(a, b, …)` with positional arguments) instead of always using the
+  `'expression'` convention (`run({ vars })`). Previously the positional
+  arguments were silently dropped and `run` returned `null` for compiled
+  lambdas that fell back. Non-lambda expressions are unaffected.
+
 - **2-arg `\arctan(y, x)` / `\tan^{-1}(y, x)` → `Arctan2`** — both `\arctan` and
   `\tan^{-1}` with two arguments now lower to the existing `Arctan2` operator
   (principal value of `atan2(y, x)`). Single-arg forms are unchanged. Other

@@ -553,38 +553,6 @@ currently tracked under **Correctness Issues (wrong results)** or
 
 ## Code Quality & Maintainability
 
-### Compilation Fallback Doesn't Handle Multiple Arguments
-
-**File**: `src/compute-engine/compilation/compile-expression.ts:64`
-**Issue**: Fallback compilation path incomplete for multi-argument functions
-
-```typescript
-} catch (e) {
-  // @fixme: the fallback needs to handle multiple arguments
-  if (options?.fallback ?? true) {
-    console.warn(`Compilation fallback for "${expr.operator}": ${(e as Error).message}`);
-    return {
-      // ... fallback implementation
-```
-
-**Analysis**:
-
-- When compilation fails, system falls back to JavaScript evaluation
-- Fallback currently only handles single-argument case properly
-- Multi-argument functions may fail or produce incorrect compiled code
-- Affects performance for functions that fail to compile natively
-
-**Recommended Action**:
-
-1. Implement proper argument mapping in fallback code generator
-2. Add tests for compilation fallback with 0, 1, 2, 3+ arguments
-3. Consider warning user when fallback is used (performance impact)
-4. Document which operations can't be compiled natively
-
-**Impact**: LOW - Only affects compilation fallback path
-
----
-
 ### Collection Type Validation Warning Disabled
 
 **File**: `src/compute-engine/boxed-expression/boxed-operator-definition.ts:300`
