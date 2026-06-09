@@ -342,6 +342,39 @@ The rules used by `.simplify()` when no explicit `rules` option is passed.
 
 <MemberCard>
 
+##### ExpressionComputeEngine.solveRules
+
+```ts
+solveRules: Rule[];
+```
+
+The rules used by `solve()` to find roots of univariate expressions.
+ Each rule matches a normalized equation `f(_x) = 0` — the unknown is
+ the wildcard `_x` — and `replace` produces a root expression.
+ Conditions should reject matches where other wildcards capture `_x`.
+ Candidate roots are validated against the original equation, so an
+ over-eager template degrades to a no-op rather than a wrong answer.
+ Initialized to the built-in root-finding rules; `push()` to extend,
+ assign to replace.
+
+</MemberCard>
+
+<MemberCard>
+
+##### ExpressionComputeEngine.harmonizationRules
+
+```ts
+harmonizationRules: Rule[];
+```
+
+The rules used by `solve()` to transform an equation into equivalent,
+ easier-to-solve forms before root-finding (e.g. `ln f(x) → f(x) - 1`).
+ Same conventions and extension pattern as `solveRules`.
+
+</MemberCard>
+
+<MemberCard>
+
 ##### ExpressionComputeEngine.strict
 
 ```ts
@@ -1985,6 +2018,8 @@ type ReplaceOptions = {
   matchPermutations: boolean;
   iterationLimit: number;
   canonical: CanonicalOptions;
+  form: FormOption;
+  direction: "left-right" | "right-left";
 };
 ```
 
@@ -7508,26 +7543,29 @@ Transform the expression by applying one or more replacement rules:
 
 - If no rules apply, return `null`.
 
-See also `expr.subs()` for a simple substitution of symbols.
+The `form` option controls the form of *replacements*. The deprecated
+`canonical` option is also accepted for backward compatibility; only one
+of the two may be specified.
 
-Procedure for the determining the canonical-status of the input expression and replacements:
+When neither `form` nor `canonical` is specified, the form of each
+replacement is determined as follows:
+1. the form of the replacement produced by the rule, if it has a
+   non-`'raw'` form;
+2. otherwise, the form of the expression being replaced;
+3. otherwise, the replacement is left in its raw form.
 
-- If `options.canonical` is set, the *entire expr.* is canonicalized to this degree: whether
-the replacement occurs at the top-level, or within/recursively.
-
-- If otherwise, the *direct replacement will be canonical* if either the 'replaced' expression
-is canonical, or the given replacement (- is a Expression and -) is canonical.
-Notably also, if this replacement takes place recursively (not at the top-level), then exprs.
-containing the replaced expr. will still however have their (previous) canonical-status
-*preserved*... unless this expr. was previously non-canonical, and *replacements have resulted
-in canonical operands*. In this case, an expr. meeting this criteria will be updated to
-canonical status. (Canonicalization is opportunistic here, in other words).
+While the form applies directly to replaced sub-expressions only, a
+non-`'raw'` form also propagates 'opportunistically' up the expression
+tree: an expression whose operands all share a form after replacement
+assumes that form as well. (Specifying `form: 'raw'` disables this
+propagation.)
 
 :::info[Note]
-Applicable to canonical and non-canonical expressions.
+Applicable to input expressions of any form.
 
 To match a specific symbol (not a wildcard pattern), the `match` must be
 a `Expression` (e.g., `{ match: ce.expr('x'), replace: ... }`).
+
 For simple symbol substitution, consider using `subs()` instead.
 :::
 

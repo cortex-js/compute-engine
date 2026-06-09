@@ -1337,3 +1337,22 @@ describe('AUTO PARTIAL FRACTION IN SIMPLIFY', () => {
     }
   });
 });
+
+// Regression test for PR #307: simplify() must dispatch its options
+// (including custom rules) to the operand re-simplification that runs after a
+// top-level rule fires (simplifyNonCommutativeFunction).
+describe('CUSTOM RULES APPLY TO OPERANDS OF REWRITTEN EXPRESSIONS', () => {
+  test('operands introduced by a custom rule are simplified with the custom rules', () => {
+    // Rule 1 rewrites the top level: F(a) -> G(H(a))
+    // Rule 2 only applies inside the rewritten result: H(a) -> a
+    // Before the fix, the operand re-simplification used the default rules,
+    // so H survived: F(x) simplified to G(H(x)) instead of G(x).
+    const rules = [
+      { match: ['F', '_a'], replace: ['G', ['H', '_a']] },
+      // (the replacement must be boxed: a string would be parsed as LaTeX)
+      { match: ['H', '_a'], replace: ce.symbol('_a') },
+    ];
+    const result = ce.box(['F', 'x']).simplify({ rules });
+    expect(result.json).toEqual(['G', 'x']);
+  });
+});

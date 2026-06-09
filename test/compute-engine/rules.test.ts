@@ -240,3 +240,84 @@ describe('PR #301 cherry-picked fixes', () => {
     expect(expr.replace(rule)?.toString()).toBe('8');
   });
 });
+
+// Regression tests for PR #305: ReplaceOptions 'form' and 'direction'
+describe('ReplaceOptions form', () => {
+  const rule = { match: 'x', replace: ['Add', 1, 1] };
+
+  it("form: 'canonical' canonicalizes replacements (and result)", () => {
+    const expr = ce.parse('x + 1');
+    const result = expr.replace(rule, { recursive: true, form: 'canonical' });
+    expect(result?.isCanonical).toBe(true);
+    // Replacement (1 + 1) is canonicalized to 2, then folded: 2 + 1 → 3
+    expect(result?.toString()).toBe('3');
+  });
+
+  it("form: 'raw' preserves the replacement structure", () => {
+    const expr = ce.expr(['Add', 'x', 5], { form: 'raw' });
+    const result = expr.replace(rule, { recursive: true, form: 'raw' });
+    expect(result?.isCanonical).toBe(false);
+    expect(result?.json).toEqual(['Add', ['Add', 1, 1], 5]);
+  });
+
+  it('deprecated canonical: true behaves like form: canonical', () => {
+    const expr = ce.parse('x + 1');
+    const result = expr.replace(rule, { recursive: true, canonical: true });
+    expect(result?.toString()).toBe('3');
+  });
+
+  it('deprecated canonical: false behaves like form: raw', () => {
+    const expr = ce.expr(['Add', 'x', 5], { form: 'raw' });
+    const result = expr.replace(rule, { recursive: true, canonical: false });
+    expect(result?.json).toEqual(['Add', ['Add', 1, 1], 5]);
+  });
+
+  it('specifying both form and canonical throws', () => {
+    const expr = ce.parse('x + 1');
+    expect(() =>
+      expr.replace(rule, { form: 'canonical', canonical: true })
+    ).toThrow(/mutually exclusive/);
+  });
+
+  it('a replacement that only changes the form counts as a change', () => {
+    // The rule returns the canonical variant of a raw expression: the value
+    // is structurally the same, but the form differs. Before PR #305 this
+    // was treated as "no change" and replace() returned null.
+    const expr = ce.expr(['Multiply', 2, 'x'], { form: 'raw' });
+    const rule = {
+      match: ['Multiply', '_a', '_b'],
+      replace: (e) => e.canonical,
+    };
+    const result = expr.replace(rule);
+    expect(result).not.toBeNull();
+    expect(result?.isCanonical).toBe(true);
+  });
+});
+
+describe('ReplaceOptions direction', () => {
+  // An order-sensitive rule: each matched symbol is replaced with an
+  // incrementing counter, so the traversal order is observable.
+  const makeRule = () => {
+    let counter = 0;
+    return (e) => {
+      if (!e.symbol) return undefined;
+      counter += 1;
+      return { value: ce.number(counter), because: 'counter' };
+    };
+  };
+
+  it('left-right (default) visits operands in order', () => {
+    const expr = ce.expr(['List', 'a', 'b', 'c'], { form: 'raw' });
+    const result = expr.replace(makeRule(), { recursive: true });
+    expect(result?.json).toEqual(['List', 1, 2, 3]);
+  });
+
+  it('right-left visits operands in reverse order', () => {
+    const expr = ce.expr(['List', 'a', 'b', 'c'], { form: 'raw' });
+    const result = expr.replace(makeRule(), {
+      recursive: true,
+      direction: 'right-left',
+    });
+    expect(result?.json).toEqual(['List', 3, 2, 1]);
+  });
+});

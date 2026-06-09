@@ -861,18 +861,15 @@ export function applyRule(
     // At least one operand (directly or recursively) matched: but continue onwards to match against
     // the top-level expr., test against any 'condition', et cetera.
     if (operandsMatched) {
-      // (note: so not consult the input-expr 'form' because, assuming that replaced operands assume
-      // the same form, this will be upcast in the subsequent branches.
-      // ^Another reason to avoid this, is if the form of replacements differ from the input expr.,
-      // then likely it is not the intention to preserve the form of the parent)
+      // 'options.form' applies to *replacements only* (allowing finer control
+      // of replacement operations), so the input expression's form is not
+      // consulted here. However, if all child operands share a form after
+      // replacement, 'eagerly' assume that form for this expression. (If this
+      // expression also matches at the top level below, its form may still be
+      // updated according to 'options.form'.)
+      // Check 'canonical' first: numbers may be jointly marked as structural
+      // and canonical.
       let form: FormOption = 'raw';
-      // The current policy for applying a form according to 'options.form' is for this to apply to
-      // *replacements only* (this ultimately allowing for finer control of replacement operations).
-      // ...However, if all child operands bear the same form, 'eagerly' assume this form for the
-      // present expression (if this present expression also later matches, form may be updated
-      // according to 'options.form'.)
-      //(@note: check 'canonical' first, because numbers may be jointly marked as structural and
-      //canonical).
       if (newOps.every((x) => x.isCanonical)) form = 'canonical';
       else if (newOps.every((x) => x.isStructural)) form = 'structural';
 
@@ -1082,9 +1079,9 @@ export function replace(
    * For both cases, if neither `x` nor `x2` (nor compared sub-expressions if recursive) is
    * structural or canonical, then return `false`.
    *
-   * **Warning**: will throw an error if it is determined, in case of `recursive !== false`, that
-   * `x` and `x2` are not structurally equivalent/have an identical tree/branching structure.
-   * (It is therefore the responsibility of the caller to ensure this beforehand)
+   * If `x` and `x2` turn out not to share an identical tree/branching structure (possible since
+   * `isSame()` follows symbol value bindings), they are conservatively reported as differing
+   * (return `true`).
    */
   function varyingForm(
     x: Expression,
@@ -1098,14 +1095,11 @@ export function replace(
     if (recursive === false) return false;
 
     if (isFunction(x) && isFunction(x2)) {
-      if (x.ops.length !== x2.ops.length)
-        throw new Error(
-          `'x' and 'x2' detected to not be structurally equivalent`
-        );
+      if (x.ops.length !== x2.ops.length) return true;
       if (x.nops === 0) return false;
 
       return x.ops.some((op, index) =>
-        recursive === true || (!isFunction(op) && !isFunction(x2.ops[index]))
+        recursive !== true && !isFunction(op) && !isFunction(x2.ops[index])
           ? false
           : varyingForm(op, x2.ops[index], { recursive })
       );

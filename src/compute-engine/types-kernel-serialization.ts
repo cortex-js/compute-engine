@@ -150,47 +150,51 @@ export type ReplaceOptions = {
   iterationLimit: number;
 
   /**
-   * Specify the canonical-status of _replaced_ sub-expressions.
+   * Canonical-status of replaced sub-expressions.
    *
-   * The specified canonical value/form may propagate upward to the input expression/root according
-   * to 'eager' replacement polcicy. See `replace()` documentation for details.
+   * Equivalent to `form`: `true` maps to `'canonical'`, `false` to `'raw'`,
+   * and a `CanonicalForm` (or array of them) is used as-is. Specifying both
+   * `canonical` and `form` is an error.
    *
-
-  /**
-   * @deprecated This is a legacy property: see option `form` for a wider span of forms.
+   * @deprecated Use `form` instead, which covers a wider range of forms.
    */
   canonical?: CanonicalOptions;
 
   /**
-   * `form` policy for *replaced* expressions. \
+   * The form (`'canonical'`, `'structural'`, `'raw'`, or specific canonical
+   * transforms) applied to *replaced* sub-expressions.
    *
-   * (If there is a recursive replacement -) Does not automatically apply to the entire input expression... However, the present `replace()` policy is to 'eagerly' propagate any specified replaced-expression replacement form the entire way 'up' an expression-tree.
-   * A value of
+   * The form does not automatically apply to the entire input expression.
+   * However, a non-`'raw'` form propagates upward through the expression tree:
+   * an expression whose operands all share a form after replacement assumes
+   * that form as well.
    *
-   * If wishing to therefore ensure a the requested form for the *entire input* expression, either
-   * ensure the input is already in the requested form before any replacement, or simply request the
-   * form post-replacement.
+   * To guarantee a form for the *entire* result, either ensure the input is
+   * already in the requested form before replacing, or request the form on the
+   * result after replacement (e.g. with `.canonical`).
    *
-   * ::Additional notes
-   * - form `'raw'` loses its applicability if the replaced expression - according to replacement mechanics - already assumes a form according to
-   * replacement rule logic. (for example if the applying rule is of type `RuleFunction` and the
-   * produced expression has a non-raw form).
+   * If no `form` (or `canonical`) option is specified, the form of each
+   * replacement is determined by the rule itself: see `replace()`.
+   *
+   * Note: a `'raw'` form does not undo a form the replacement already has,
+   * e.g. when a `RuleFunction` returns an expression that is already
+   * canonical.
    */
   form: FormOption;
 
-  /** *Traversal* direction (through the node 'tree') for both Rule matching & replacement.
-   * Can be significant in the production of the final, overall replacement result (if operating
-   * recursively) - if rule is a `RuleFunction` with arbitrary logic (e.g. replacements being
-   * index-based).
+  /**
+   * Traversal direction through the expression tree, for both rule matching
+   * and replacement:
    *
-   * In 'tree' data-structure traversal terminology, possible values span:
+   * - `'left-right'` (default): post-order traversal — left sub-tree first,
+   *   depth-first (LRN).
+   * - `'right-left'`: reverse post-order — right sub-tree first, depth-first
+   *   (RLN).
    *
-   * - `'left-right'` reflects *post-order* traversal, (left sub-tree first; depth-descending) (LRN).
-   * - `'right-left'` reflects 'reverse' *post-order* (right sub-tree first; depth-descending) (RLN).
+   * In both cases the root (input) expression is visited last.
    *
-   * For both cases traversal is always depth-first, and always visits the root/input expr. last .
-   *
-   * **Default** is: `'left-right'` (standard post-order)
+   * The direction is only observable for order-sensitive rules, e.g. a
+   * `RuleFunction` whose replacements depend on visit order.
    */
   direction: 'left-right' | 'right-left';
 };

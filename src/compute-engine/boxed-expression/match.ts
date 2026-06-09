@@ -248,8 +248,11 @@ function matchOnce(
       //
       // For commutative operators, try permutations unless matchPermutations is false
       const matchPerms = options.matchPermutations ?? true;
+      // Note: the pattern operator may have no definition, e.g. a user-defined
+      // function in a rule pattern (rules are boxed in a scope that only
+      // inherits from the system scope)
       result =
-        pattern.operatorDefinition!.commutative && matchPerms
+        pattern.operatorDefinition?.commutative && matchPerms
           ? matchPermutation(expr, pattern, substitution, options)
           : matchArguments(expr, pattern.ops, substitution, options);
 
