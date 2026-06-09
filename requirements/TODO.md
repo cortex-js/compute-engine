@@ -1,6 +1,13 @@
 # TODO - Compute Engine Improvements
 
-Next: (all sqrt patterns complete)
+Pending and planned work for the Compute Engine. **Completed items have been
+removed from this file and are recorded in [`DONE.md`](./done/DONE.md).**
+
+This file also absorbs the former top-level `FIXME.md` (known issues, technical
+debt, and test gaps) — see [Known Issues & Technical Debt](#known-issues--technical-debt)
+below.
+
+---
 
 ## Lower Priority
 
@@ -34,12 +41,6 @@ output.
 
 ---
 
-### ~~3. Pattern Matching Improvements~~ ✅ COMPLETED
-
-See `requirements/DONE.md` for implementation details.
-
----
-
 ## Logic and First-Order Logic Enhancements
 
 The following improvements build on the existing FOL support (quantifiers,
@@ -65,12 +66,6 @@ ce.box(['IsEquivalent',
 ```
 
 **File:** `src/compute-engine/library/logic.ts`
-
----
-
-### ~~6. Prime Implicants/Implicates~~ ✅ COMPLETED
-
-See `requirements/DONE.md` for implementation details.
 
 ---
 
@@ -387,18 +382,6 @@ e.solve(['x', 'y']);
 
 ---
 
-### ~~27. Under-determined Systems (Parametric Solutions)~~ ✅ COMPLETED
-
-See `requirements/DONE.md` for implementation details.
-
----
-
-### ~~28. Non-linear Polynomial Systems~~ ✅ COMPLETED
-
-See `requirements/DONE.md` for implementation details.
-
----
-
 ### 29. Diagnostic Error Returns
 
 **Problem:** When `solve()` returns `null`, there's no indication of _why_ the
@@ -447,72 +430,6 @@ ce.diagnoseSystem(equations, variables);
 **Files:**
 
 - `src/compute-engine/boxed-expression/solve-linear-system.ts`
-
----
-
-### ~~30. Linear Inequality Systems~~ ✅ COMPLETED
-
-See `requirements/DONE.md` for implementation details.
-
----
-
-### ~~31. Exact Rational Arithmetic Throughout~~ ✅ COMPLETED
-
-See `requirements/DONE.md` for implementation details.
-
----
-
-## Equation Solving Enhancements
-
-### ~~14. Extraneous Root Filtering for Sqrt Equations~~ ✅ COMPLETED
-
-See `requirements/DONE.md` for implementation details.
-
----
-
-### 15. Extended Sqrt Equation Patterns
-
-**Problem:** Current sqrt rules only handle `ax + b√x + c = 0`. More complex
-patterns aren't supported.
-
-**Patterns to add:**
-
-1. **Sqrt of linear expression:** `√(ax + b) + c = 0` ✅ IMPLEMENTED (in prior work)
-   - Solution: `ax + b = c²` when `c ≤ 0`, so `x = (c² - b)/a`
-
-2. **Sqrt equals linear:** `√(ax + b) = cx + d` ✅ IMPLEMENTED
-   - Pre-processing in `transformSqrtLinearEquation()` squares both sides
-   - Transforms to: `c²x² + (2cd - a)x + (d² - b) = 0`
-   - Quadratic formula solves, `validateRoots()` filters extraneous roots
-   - Examples: `√(x+1) = x` → `1.618`, `√(3x-2) = x` → `[1, 2]`
-
-3. **Sum of two sqrt terms:** `√(ax + b) + √(cx + d) = e` ✅ IMPLEMENTED
-   - Isolate one sqrt: `√(f(x)) = e - √(g(x))`
-   - Square: `f(x) = e² - 2e√(g(x)) + g(x)`
-   - Isolate remaining sqrt: `f(x) - e² - g(x) = -2e√(g(x))`
-   - Square again: `(f(x) - e² - g(x))² = 4e²·g(x)`
-   - Solve polynomial and validate against original equation
-   - Implemented in `solveTwoSqrtEquation()` function
-   - Examples: `√(x+1) + √(x+4) = 3` → `0`, `√(x+5) - √(x-3) = 2` → `4`
-
-4. **Nested sqrt:** `√(x + √x) = a` ✅ IMPLEMENTED
-   - Uses substitution u = √x, so x = u²
-   - Becomes `√(u² + u) = a`, then `u² + u = a²`
-   - Solves quadratic for u, filters u < 0 (since u = √x ≥ 0), then x = u²
-   - Implemented in `solveNestedSqrtEquation()` function
-   - Examples: `√(x + 2√x) = 3` → `11 - 2√10`, `√(x - √x) = 1` → `φ² ≈ 2.618`
-
-**Also implemented:** Quadratic without constant term: `ax² + bx = 0`
-- Factor: `x(ax + b) = 0` → `x = 0` or `x = -b/a`
-- This enables Pattern 2 cases like `√x = x` → `x² - x = 0`
-
-**File:** `src/compute-engine/boxed-expression/solve.ts`
-
----
-
-### ~~23. Replace Method Auto-Wildcards Single-Char Symbols~~ ✅ FIXED
-
-See `requirements/DONE.md` for implementation details
 
 ---
 
@@ -601,55 +518,6 @@ test('isotope notation', () => {
 
 ---
 
-## Assumption System Enhancements
-
-The following improvements extend the assumption system beyond sign-based
-simplification (which is already implemented).
-
-### ~~18. Value Resolution from Equality Assumptions~~ ✅ COMPLETED
-
-See `requirements/DONE.md` for implementation details.
-
----
-
-### ~~19. Inequality Evaluation Using Assumptions~~ ✅ COMPLETED
-
-See `requirements/DONE.md` for implementation details.
-
----
-
-### ~~20. Tautology and Contradiction Detection~~ ✅ COMPLETED
-
-See `requirements/DONE.md` for implementation details.
-
----
-
-### ~~21. Type Inference from Assumptions~~ ✅ COMPLETED
-
-See `requirements/DONE.md` for implementation details.
-
----
-
-### ~~24. BUG: forget() Doesn't Clear Assumed Values~~ ✅ FIXED
-
-See `requirements/DONE.md` for implementation details.
-
----
-
-### ~~25. BUG: Scoped Assumptions Don't Clean Up on popScope()~~ ✅ FIXED
-
-See `requirements/DONE.md` for implementation details.
-
----
-
-## Polynomial Operations
-
-### ~~33. Polynomial Factoring~~ ✅ COMPLETED
-
-See `requirements/DONE.md` for implementation details.
-
----
-
 ## Future Improvements (Not Yet Detailed)
 
 ### Trigonometric Simplification
@@ -673,6 +541,173 @@ See `requirements/DONE.md` for implementation details.
   etc.)
 - Support `.N()` for faster numeric approximations of infinite series
 - Consider adding early termination for quickly converging series
+
+---
+
+# Known Issues & Technical Debt
+
+_Merged from the former top-level `FIXME.md`. Known issues, technical debt, and
+test gaps in the codebase, organized by impact level. No open items are
+currently tracked under **Correctness Issues (wrong results)** or
+**Missing Functionality**._
+
+## Code Quality & Maintainability
+
+### Compilation Fallback Doesn't Handle Multiple Arguments
+
+**File**: `src/compute-engine/compilation/compile-expression.ts:64`
+**Issue**: Fallback compilation path incomplete for multi-argument functions
+
+```typescript
+} catch (e) {
+  // @fixme: the fallback needs to handle multiple arguments
+  if (options?.fallback ?? true) {
+    console.warn(`Compilation fallback for "${expr.operator}": ${(e as Error).message}`);
+    return {
+      // ... fallback implementation
+```
+
+**Analysis**:
+
+- When compilation fails, system falls back to JavaScript evaluation
+- Fallback currently only handles single-argument case properly
+- Multi-argument functions may fail or produce incorrect compiled code
+- Affects performance for functions that fail to compile natively
+
+**Recommended Action**:
+
+1. Implement proper argument mapping in fallback code generator
+2. Add tests for compilation fallback with 0, 1, 2, 3+ arguments
+3. Consider warning user when fallback is used (performance impact)
+4. Document which operations can't be compiled natively
+
+**Impact**: LOW - Only affects compilation fallback path
+
+---
+
+### Collection Type Validation Warning Disabled
+
+**File**: `src/compute-engine/boxed-expression/boxed-operator-definition.ts:300`
+**Issue**: Useful validation check commented out due to type system limitations
+
+```typescript
+// @fixme: this warning cannot reliably be checked, because some functions
+// (Map, Filter) return an indexed collection if the input is indexed.
+// Would need support for type arguments in signatures.
+// if (!isSubtype(resultType, 'indexed_collection') && this.collection.at) {
+//   throw new Error(
+//     `Operator Definition "${this.name}" returns a non-indexed collection,
+//      but the 'at' handler is defined`
+//   );
+```
+
+**Analysis**:
+
+- Validation would catch mismatched collection handlers (e.g., `at` handler on
+  non-indexed collection)
+- Can't be enabled because type system doesn't support generic type parameters
+- Functions like `Map` and `Filter` preserve collection type structure from
+  input
+- Need dependent typing: `Map(f, list<T>)` → `list<U>` vs. `Map(f, indexed<T>)`
+  → `indexed<U>`
+
+**Recommended Action**:
+
+1. Add generic type parameters to function signatures
+2. Implement dependent typing or conditional types
+3. Re-enable validation once type system supports it
+4. Document this limitation in type system docs
+
+**Impact**: LOW - Validation gap but no runtime issues
+
+---
+
+## Optimization & Future Enhancements
+
+### Missing Step Range Syntax in Summations
+
+**File**:
+`src/compute-engine/latex-syntax/dictionary/definitions-arithmetic.ts:1480`
+**Issue**: Step ranges like `i=1..3..10` (start..step..end) not supported
+
+```typescript
+// @todo: we currently do not support step range, i.e. `i=1..3..10`.
+// The step is the third argument of Range. We should extend the indexing
+// set to include step-range and collections, i.e. i={1,2,3,4}
+```
+
+**Analysis**:
+
+- Summation and product indexing limited to unit step: `∑_{i=1}^{10}`
+- Can't express: `∑_{i=1,3,5,7,9}` or `∑_{i=1..2..10}` (step by 2)
+- Collection-based indexing also missing: `∑_{i ∈ {1,2,5,7}}`
+- Common mathematical notation that users expect
+
+**Use Cases**:
+
+- Sum odd numbers: `∑_{i=1..2..99}`
+- Sum over specific set: `∑_{i ∈ {2,3,5,7,11}}`
+- Product of every 3rd term: `∏_{i=0..3..30}`
+
+**Recommended Action**:
+
+1. Extend Range syntax to accept step parameter
+2. Support collection-based indexing sets
+3. Update parser to handle `..` and collection syntax
+4. Add tests for various step and collection combinations
+
+**Impact**: LOW - Enhancement request, workarounds exist
+
+---
+
+### \max/\min with Subscripts
+
+Expressions like `\max_{x \in S} f(x)` are common in math but involve subscript
+handling that's a separate parsing concern (related to
+[#16 Pre-Subscript and Pre-Superscript Parsing](#16-pre-subscript-and-pre-superscript-parsing)).
+
+---
+
+## Test Debt & Identified Gaps
+
+_Inventory of gaps surfaced from `todo` comments in the test suite._
+
+### Simplification & Arithmetic Rules
+- **Rational Expressions**: Implement common denominator rules for additions like `1/(x+1) - 1/x = -1/(x^2+x)` (`simplify-noskip.test.ts`).
+- **Logarithmic Rules**: Correct canonicalization order to allow log rules to fire before expansion (e.g., `ln((x+1)/e^{2x})`) (`simplify-noskip.test.ts`).
+- **Inverse Hyperbolic/Trigonometric**: Add rules for converting logarithms to inverse hyperbolic functions and inverse trig conversions (e.g., `arctan(x/sqrt(1-x^2)) = arcsin(x)`).
+- **Factor Extraction**: Improve `factor()` to extract common factors from `Add` expressions like `(2pi + 2pi*e)`.
+
+### Equation Solving
+- **Systems of Equations**: Enable solving systems with symbolic coefficients (e.g., `ax + by = c`) — see [#26](#26-symbolic-coefficients-in-linear-systems).
+- **Inequalities**: Fully implement and test solving for linear inequalities (e.g., `2x + 1 < 5`).
+- **Sqrt Patterns**: Complete remaining edge cases for the Sqrt-linear, Two-sqrt-terms, and Nested-sqrt patterns referenced in `solve.test.ts` (the core patterns are implemented — see `done/DONE.md`).
+
+### Latex Syntax & Set Notation
+- **Infinite Sets**: Support parsing and serializing set notation with ellipses (e.g., `\{1, 2, 3...\}`, `\{...-2, -1, 0\}`).
+- **Serialization**: Address remaining edge cases in LaTeX serialization noted in `serialize.test.ts`.
+
+### Cortex Language Features
+- **Indexed Access & Sets**: Implement support for indexed access (e.g., `a[i]`) and set membership validation in Cortex tests.
+
+### Pattern Matching
+- **Wildcards**: Extend support for repeated wildcards in deeply nested contexts and repeated-match cases (base wildcard support is implemented — see `done/DONE.md` #3).
+- **Auto-wildcarding**: Regression check that `.replace()` no longer incorrectly auto-wildcards single-char symbols (fix recorded in `done/DONE.md` #23).
+
+### Performance & Benchmarking
+- **Precision**: Extend Wester benchmarks to support precision 50.
+- **Notation**: Verify consistency for scientific vs. engineering notation in `toLatex()`.
+
+### Unicode & Normalization
+- **Normalization**: Add tests for non-NFC normalized Unicode characters (e.g., `café` vs. `café`) to `dictionary.test.ts`.
+
+### Calculus & Special Functions
+- **Integration**: Implement additional integration patterns identified in `calculus.test.ts`.
+- **Signatures**: Add tests for special functions type signatures (Issue #1).
+
+### Ambiguous / Unclear
+- **Empty TODOs**: `patterns.test.ts:625` contains an empty `//@todo`.
+- **General Revisit**: `cortex-parse.test.ts:234` and `playground.ts:66` require general logic reviews.
 
 ---
 

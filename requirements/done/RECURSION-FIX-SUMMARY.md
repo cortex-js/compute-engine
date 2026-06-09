@@ -142,7 +142,7 @@ Added tests for:
 
 **Files Created/Modified:**
 
-- `FUNCTION-VALIDATION.md` - Guidelines for implementing proper validation in
+- `docs/FUNCTION-VALIDATION.md` - Guidelines for implementing proper validation in
   custom canonical handlers
 - `RECURSION-FIX-SUMMARY.md` - This document
 
@@ -182,7 +182,7 @@ Added comprehensive tests for:
 
 ### 5. Validation Pattern Documentation
 
-**File:** `FUNCTION-VALIDATION.md`
+**File:** `docs/FUNCTION-VALIDATION.md`
 
 Documents:
 
@@ -263,7 +263,7 @@ No performance degradation expected in normal operation.
 
 ### Documentation
 
-- `FUNCTION-VALIDATION.md` (validation guidelines)
+- `docs/FUNCTION-VALIDATION.md` (validation guidelines)
 - `RECURSION-FIX-SUMMARY.md` (this document)
 
 ## Credits
