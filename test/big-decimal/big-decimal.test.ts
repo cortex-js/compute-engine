@@ -1592,6 +1592,17 @@ describe('mod()', () => {
     expect(result.sub(new BigDecimal('1.5')).abs().lt(new BigDecimal('1e-30'))).toBe(true);
   });
 
+  // REVIEW.md D5: when the quotient exceeds the working precision the old code
+  // rounded `this / other` before truncating, giving a wrong remainder. The
+  // quotient here (~3.3e59) far exceeds the precision of 50 digits.
+  test('1e60 mod 3 = 1 (quotient exceeds precision)', () => {
+    expect(new BigDecimal('1e60').mod(new BigDecimal('3')).eq(1)).toBe(true);
+  });
+
+  test('2e60 mod 3 = 2 (quotient exceeds precision)', () => {
+    expect(new BigDecimal('2e60').mod(new BigDecimal('3')).eq(2)).toBe(true);
+  });
+
   test('-10 mod 3 = -1', () => {
     const result = new BigDecimal('-10').mod(new BigDecimal('3'));
     expect(result.sub(new BigDecimal('-1')).abs().lt(new BigDecimal('1e-30'))).toBe(true);

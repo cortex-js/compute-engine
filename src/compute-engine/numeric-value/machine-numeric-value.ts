@@ -179,7 +179,8 @@ export class MachineNumericValue extends NumericValue {
     if (this.isNegativeOne) return this;
     if (this.im === 0) return this.clone(1 / this.decimal);
 
-    const d = Math.hypot(this.re, this.im);
+    // 1/z = conj(z) / |z|²  (not / |z|).
+    const d = this.re * this.re + this.im * this.im;
     return this.clone({ re: this.decimal / d, im: -this.im / d });
   }
 
@@ -373,7 +374,11 @@ export class MachineNumericValue extends NumericValue {
       if (exponent < 0) return this.clone({ im: Infinity }); // Complex/unsigned infinity
     }
 
-    if (exponent < 0) return this.clone(1 / this.decimal ** -exponent);
+    // Real base: 1/xⁿ. (Complex bases fall through to the De Moivre branch
+    // below, which handles negative exponents too — using only `this.decimal`
+    // here would drop the imaginary part.)
+    if (exponent < 0 && this.im === 0)
+      return this.clone(1 / this.decimal ** -exponent);
 
     if (this.im === 0) return this.clone(this.decimal ** exponent);
 
@@ -382,7 +387,9 @@ export class MachineNumericValue extends NumericValue {
     const modulus = Math.sqrt(a * a + b * b);
     const argument = Math.atan2(b, a);
     const newModulus = modulus ** exponent;
-    const newArgument = argument ** exponent;
+    // De Moivre: zⁿ = |z|ⁿ · (cos(n·arg) + i·sin(n·arg)). The new argument is
+    // n·arg, not argⁿ.
+    const newArgument = argument * exponent;
     return this.clone({
       re: newModulus * Math.cos(newArgument),
       im: newModulus * Math.sin(newArgument),

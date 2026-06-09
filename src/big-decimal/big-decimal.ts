@@ -629,9 +629,19 @@ export class BigDecimal {
     if (Number.isFinite(thisExp) && Number.isFinite(otherExp)) {
       if (other.significand === 0n) return BigDecimal.NAN; // x mod 0 → NaN
       if (this.significand === 0n) return fromRaw(0n, 0); // 0 mod x → 0
-      return this.sub(this.div(other).trunc().mul(other)).toPrecision(
-        BigDecimal.precision
-      );
+
+      // Compute trunc(this / other) EXACTLY with bigints. Using the
+      // precision-bounded `div` here would round the quotient before
+      // truncating, producing a wrong remainder whenever |this / other|
+      // exceeds the working precision (e.g. `1e60 mod 3`).
+      //   this / other = (s₁ · 10^(e₁−e₂)) / s₂
+      const ediff = thisExp - otherExp;
+      const num =
+        ediff >= 0 ? this.significand * pow10(ediff) : this.significand;
+      const den =
+        ediff >= 0 ? other.significand : other.significand * pow10(-ediff);
+      const q = num / den; // bigint division truncates toward zero
+      return this.sub(fromRaw(q, 0).mul(other));
     }
 
     // Slow path: NaN or Infinity

@@ -118,6 +118,7 @@ export function bigPopulationStandardDeviation(
 export function kurtosis(values: Iterable<number>): number {
   let sum = 0;
   let sum2 = 0;
+  let sum3 = 0;
   let sum4 = 0;
   let count = 0;
   for (const op of values) {
@@ -125,23 +126,30 @@ export function kurtosis(values: Iterable<number>): number {
     if (!Number.isFinite(v)) return NaN;
     sum += v;
     sum2 += v * v;
+    sum3 += v * v * v;
     sum4 += v * v * v * v;
     count++;
   }
   if (count === 0) return NaN;
-  const s2 = (sum2 - (sum * sum) / count) / (count - 1);
-  return (
+  const n = count;
+  const m = sum / n;
+  // Central moments: m2 = (1/n)Σ(x−m)², m4 = (1/n)Σ(x−m)⁴.
+  const m2 = (sum2 - (sum * sum) / n) / n;
+  const m4 =
     (sum4 -
-      (4 * sum * sum2) / count +
-      (6 * sum * sum * sum) / count / count -
-      (3 * sum * sum * sum * sum) / count / count / count) /
-    (s2 * s2)
-  );
+      4 * m * sum3 +
+      6 * m * m * sum2 -
+      4 * m * m * m * sum +
+      n * m * m * m * m) /
+    n;
+  // Non-excess kurtosis β₂ = m4 / m2² (a normal distribution gives 3).
+  return m4 / (m2 * m2);
 }
 
 export function bigKurtosis(values: Iterable<BigDecimal>): BigDecimal {
   let sum = BigDecimal.ZERO;
   let sum2 = BigDecimal.ZERO;
+  let sum3 = BigDecimal.ZERO;
   let sum4 = BigDecimal.ZERO;
   let count = 0;
   for (const op of values) {
@@ -149,26 +157,22 @@ export function bigKurtosis(values: Iterable<BigDecimal>): BigDecimal {
     if (!v.isFinite()) return BigDecimal.NAN;
     sum = sum.add(v);
     sum2 = sum2.add(v.mul(v));
+    sum3 = sum3.add(v.mul(v).mul(v));
     sum4 = sum4.add(v.mul(v).mul(v).mul(v));
     count++;
   }
   if (count === 0) return BigDecimal.NAN;
-  const bdCount = new BigDecimal(count);
-  const s2 = sum2.sub(sum.mul(sum).div(bdCount)).div(new BigDecimal(count - 1));
-  return sum4
-    .sub(sum.mul(sum2).mul(new BigDecimal(4)).div(bdCount))
-    .add(sum.mul(sum).mul(sum).mul(new BigDecimal(6)).div(bdCount).div(bdCount))
-    .sub(
-      sum
-        .mul(sum)
-        .mul(sum)
-        .mul(sum)
-        .mul(new BigDecimal(3))
-        .div(bdCount)
-        .div(bdCount)
-        .div(bdCount)
-    )
-    .div(s2.mul(s2));
+  const m = sum.div(count); // mean
+  // Central moments: m2 = (1/n)Σ(x−m)², m4 = (1/n)Σ(x−m)⁴.
+  const m2 = sum2.sub(sum.mul(sum).div(count)).div(count);
+  const m4 = sum4
+    .sub(m.mul(sum3).mul(4))
+    .add(m.mul(m).mul(sum2).mul(6))
+    .sub(m.mul(m).mul(m).mul(sum).mul(4))
+    .add(m.mul(m).mul(m).mul(m).mul(count))
+    .div(count);
+  // Non-excess kurtosis β₂ = m4 / m2² (a normal distribution gives 3).
+  return m4.div(m2.mul(m2));
 }
 
 export function skewness(values: Iterable<number>): number {
@@ -185,9 +189,13 @@ export function skewness(values: Iterable<number>): number {
     count++;
   }
   if (count === 0) return NaN;
-  const s2 = (sum2 - (sum * sum) / count) / (count - 1);
-  const s3 = (sum3 - (sum2 * sum) / count) / (count - 1);
-  return (s3 / Math.pow(s2, 3 / 2)) * Math.sqrt(count * 1);
+  const n = count;
+  const m = sum / n;
+  // Central moments: m2 = (1/n)Σ(x−m)², m3 = (1/n)Σ(x−m)³.
+  const m2 = (sum2 - (sum * sum) / n) / n;
+  const m3 = (sum3 - 3 * m * sum2 + 3 * m * m * sum - n * m * m * m) / n;
+  // Moment coefficient of skewness g₁ = m3 / m2^(3/2).
+  return m3 / Math.pow(m2, 3 / 2);
 }
 
 export function bigSkewness(values: Iterable<BigDecimal>): BigDecimal {
@@ -204,12 +212,16 @@ export function bigSkewness(values: Iterable<BigDecimal>): BigDecimal {
     count++;
   }
   if (count === 0) return BigDecimal.NAN;
-  const bdCount = new BigDecimal(count);
-  const s2 = sum2.sub(sum.mul(sum).div(bdCount)).div(new BigDecimal(count - 1));
-  const s3 = sum3
-    .sub(sum2.mul(sum).div(bdCount))
-    .div(new BigDecimal(count - 1));
-  return s3.div(s2.pow(new BigDecimal(1.5))).mul(bdCount.sqrt());
+  const m = sum.div(count); // mean
+  // Central moments: m2 = (1/n)Σ(x−m)², m3 = (1/n)Σ(x−m)³.
+  const m2 = sum2.sub(sum.mul(sum).div(count)).div(count);
+  const m3 = sum3
+    .sub(m.mul(sum2).mul(3))
+    .add(m.mul(m).mul(sum).mul(3))
+    .sub(m.mul(m).mul(m).mul(count))
+    .div(count);
+  // Moment coefficient of skewness g₁ = m3 / m2^(3/2) = m3 / (m2·√m2).
+  return m3.div(m2.mul(m2.sqrt()));
 }
 
 export function mode(values: Iterable<number>): number {

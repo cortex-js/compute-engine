@@ -1,5 +1,22 @@
 ### [Unreleased]
 
+- **Numeric correctness fixes** — several arithmetic operations produced
+  silently-wrong results:
+  - Complex `pow` (machine precision) used `arg ** n` instead of `arg · n` in
+    De Moivre's formula, so e.g. `i²` gave `−0.78 + 0.62i` instead of `−1`. A
+    negative integer exponent on a complex base also dropped the imaginary part
+    (`(1+i)⁻² → −0.5i` now).
+  - Complex reciprocal/`inv` (machine and arbitrary precision) divided the
+    conjugate by `|z|` instead of `|z|²` (`1/(2i) → −0.5i` now).
+  - Exact `x^(1/n)` took the n-th root of the numerator (always 1) instead of
+    the denominator, returning the base unchanged (`8^(1/3) → 2` now).
+  - Exact `floor`/`ceil`/`round` routed integers and rationals through a float,
+    losing digits beyond 2⁵³; they now compute exactly with bigints.
+  - `BigDecimal.mod` gave a wrong remainder when the quotient exceeded the
+    working precision (e.g. `1e60 mod 3`); the truncated quotient is now exact.
+  - Skewness and kurtosis used incorrect central-moment formulas; a symmetric
+    sample now has skewness 0 and `[1,2,3,4,5]` has (non-excess) kurtosis 1.7.
+
 - **Matrix (tensor) linear-algebra fixes** — operations were broken beyond the
   hardcoded 2×2 cases:
   - `Determinant` no longer throws for 4×4 and larger matrices, and now returns

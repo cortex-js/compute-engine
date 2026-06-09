@@ -212,11 +212,9 @@ export class BigNumericValue extends NumericValue {
     if (this.isNegativeOne) return this;
     if (this.im === 0) return this.clone(this.decimal.inv());
 
-    const d = Math.hypot(this.re, this.im);
-    const bigD = this.decimal
-      .mul(this.decimal)
-      .add(this.im * this.im)
-      .sqrt();
+    // 1/z = conj(z) / |z|²  (not / |z|).
+    const d = this.re * this.re + this.im * this.im;
+    const bigD = this.decimal.mul(this.decimal).add(this.im * this.im);
     return this.clone({ re: this.decimal.div(bigD), im: -this.im / d });
   }
 

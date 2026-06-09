@@ -499,8 +499,10 @@ export class ExactNumericValue extends NumericValue {
         exponent = { re: exponent.re, im: exponent.im };
       } else {
         if (exponent instanceof ExactNumericValue) {
+          // Exponent 1/n (numerator rational[0] === 1) ⇒ n-th root, where n is
+          // the denominator rational[1] (not the numerator).
           if (exponent.radical === 1 && exponent.rational[0] == 1)
-            return this.root(exponent.rational[0]);
+            return this.root(Number(exponent.rational[1]));
         }
         exponent = exponent.re;
       }
@@ -709,21 +711,56 @@ export class ExactNumericValue extends NumericValue {
     return this.factory(this.bignumRe).exp();
   }
 
+  /**
+   * Floor/ceil/round of a pure rational (`radical === 1`) computed exactly with
+   * bigints. Routing through `this.re` (a float) would lose digits for
+   * integers/rationals larger than 2^53.
+   */
+  private _integerPart(mode: 'floor' | 'ceil' | 'round'): ExactNumericValue {
+    let n = BigInt(this.rational[0]);
+    let d = BigInt(this.rational[1]);
+    if (d < 0n) {
+      n = -n;
+      d = -d;
+    }
+    let q: bigint;
+    if (mode === 'round') {
+      // Round half toward +∞ (matches JS `Math.round`): floor((2n + d) / (2d)).
+      const m = 2n * n + d;
+      const dd = 2n * d;
+      q = m / dd;
+      if (m % dd !== 0n && m < 0n) q -= 1n;
+    } else {
+      q = n / d; // bigint division truncates toward zero
+      const r = n % d;
+      if (r !== 0n) {
+        if (mode === 'floor' && n < 0n) q -= 1n;
+        if (mode === 'ceil' && n > 0n) q += 1n;
+      }
+    }
+    return this.clone({ rational: [q, BigInt(1)], radical: 1 });
+  }
+
+  // An exact value is an integer iff it has no radical part and a unit
+  // denominator. (`this.type` returns `'finite_integer'`, never `'integer'`.)
   floor(): NumericValue {
     if (this.isNaN) return this.clone(NaN);
-    if (this.type === 'integer') return this;
+    if (this.radical === 1 && isInteger(this.rational)) return this;
+    if (this.radical === 1) return this._integerPart('floor');
     return this.clone(Math.floor(this.re));
   }
 
   ceil(): NumericValue {
     if (this.isNaN) return this.clone(NaN);
-    if (this.type === 'integer') return this;
+    if (this.radical === 1 && isInteger(this.rational)) return this;
+    if (this.radical === 1) return this._integerPart('ceil');
     return this.clone(Math.ceil(this.re));
   }
 
   round(): NumericValue {
     if (this.isNaN) return this.clone(NaN);
-    if (this.type === 'integer') return this;
+    if (this.radical === 1 && isInteger(this.rational)) return this;
+    if (this.radical === 1) return this._integerPart('round');
     return this.clone(Math.round(this.re));
   }
 
