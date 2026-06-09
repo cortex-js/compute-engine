@@ -1,3 +1,22 @@
+## Upcoming changes
+
+### Added
+
+- **ReplaceOptions.direction** — replacement traversal can now be controlled
+  from left-to-right or right-to-left.
+
+### Fixed
+
+- **ReplaceOptions form handling** — `Expression.replace()` now accepts the new
+  `form` option, while keeping deprecated `canonical` as a backward- compatible
+  alias for one release.
+- **Replacement form propagation** — recursive replacements preserve and
+  propagate the requested form upward when child operands already share it.
+
+### Changes
+
+- **ReplaceOptions.canonical is deprecated** — prefer `form`; specifying both
+  `form` and `canonical` now raises an error.
 ### [Unreleased]
 
 - **Numeric correctness fixes** — several arithmetic operations produced
@@ -1315,8 +1334,8 @@ GPU compile).
   `oklab(L a b / alpha)` syntax, matching the existing `oklch()` support.
 - **GPU compilation**: `ColorMix`, `ColorContrast`, `ContrastingColor`,
   `ColorToColorspace`, and `ColorFromColorspace` now compile to GLSL and WGSL.
-  Preamble functions provide sRGB ↔ OKLab ↔ OKLCh conversion, color mixing with
-  shorter-arc hue interpolation, and APCA contrast on the GPU.
+  Preamble functions provide sRGB ↔ OKLab ↔ OKLCh conversion, color mixing
+  with shorter-arc hue interpolation, and APCA contrast on the GPU.
 - Added `rgbToHsl()` conversion function. Exported `hslToRgb()` (previously
   private).
 
