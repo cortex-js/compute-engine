@@ -1,23 +1,26 @@
-## Upcoming changes
-
-### Added
-
-- **ReplaceOptions.direction** — replacement traversal can now be controlled
-  from left-to-right or right-to-left.
-
-### Fixed
-
-- **ReplaceOptions form handling** — `Expression.replace()` now accepts the new
-  `form` option, while keeping deprecated `canonical` as a backward- compatible
-  alias for one release.
-- **Replacement form propagation** — recursive replacements preserve and
-  propagate the requested form upward when child operands already share it.
-
-### Changes
-
-- **ReplaceOptions.canonical is deprecated** — prefer `form`; specifying both
-  `form` and `canonical` now raises an error.
 ### [Unreleased]
+
+- **`ReplaceOptions.form` replaces `canonical`** — `expr.replace()` and rule
+  application now accept a `form` option (`'canonical'`, `'structural'`,
+  `'raw'`, or specific canonical transforms) controlling the form of
+  replacements, consistent with `ce.expr()` and `ce.function()`. The
+  `canonical` option is deprecated but still accepted as an alias for one
+  release; specifying both `form` and `canonical` throws an error.
+
+- **BREAKING: `replace()` no longer eagerly canonicalizes its result** — the
+  requested `form` (or, by default, the form produced by the rule) applies to
+  the replaced sub-expressions, not the entire input expression. A
+  non-canonical replacement inside a canonical expression now yields a
+  non-canonical result; a form propagates upward only when all sibling
+  operands already share it. Previously, `replace()` on a canonical expression
+  always re-canonicalized the result — which could undo structure a rule had
+  deliberately constructed. Call `.canonical` on the result to restore the
+  previous behavior.
+
+- **`ReplaceOptions.direction`** — rule application can now traverse operands
+  left-to-right (the default, post-order) or right-to-left (reverse
+  post-order). Only observable for order-sensitive rules, such as
+  `RuleFunction` replacements with index-based logic.
 
 - **Numeric correctness fixes** — several arithmetic operations produced
   silently-wrong results:
@@ -1334,8 +1337,8 @@ GPU compile).
   `oklab(L a b / alpha)` syntax, matching the existing `oklch()` support.
 - **GPU compilation**: `ColorMix`, `ColorContrast`, `ContrastingColor`,
   `ColorToColorspace`, and `ColorFromColorspace` now compile to GLSL and WGSL.
-  Preamble functions provide sRGB ↔ OKLab ↔ OKLCh conversion, color mixing
-  with shorter-arc hue interpolation, and APCA contrast on the GPU.
+  Preamble functions provide sRGB ↔ OKLab ↔ OKLCh conversion, color mixing with
+  shorter-arc hue interpolation, and APCA contrast on the GPU.
 - Added `rgbToHsl()` conversion function. Exported `hslToRgb()` (previously
   private).
 
