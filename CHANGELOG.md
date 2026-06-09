@@ -1,5 +1,12 @@
 ### [Unreleased]
 
+- **Decomposed (NFD) Unicode input is normalized** — LaTeX input is now
+  normalized to Unicode NFC at tokenization, so an identifier written with a
+  combining mark (e.g. `e` + combining acute accent) is parsed identically to
+  its precomposed form (`é`). Previously the combining mark surfaced as an
+  `unexpected-token` error. ASCII input is unaffected; boxed strings were
+  already NFC-normalized.
+
 - **Compilation fallback handles multi-argument lambdas** — when a `Function`
   literal (lambda) cannot be compiled to the target and falls back to
   interpretation, the fallback now uses the `'lambda'` calling convention

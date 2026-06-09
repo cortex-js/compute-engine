@@ -65,6 +65,13 @@ class Tokenizer {
   obeyspaces = false;
 
   constructor(s: string) {
+    // Normalize to Unicode NFC so decomposed sequences (e.g. "e" + combining
+    // acute accent) are treated identically to their precomposed form ("\u00E9").
+    // Otherwise the combining mark surfaces as an unexpected token. Boxed
+    // strings are already NFC-normalized; doing it here keeps identifier and
+    // text parsing consistent. ASCII input is unaffected.
+    s = s.normalize('NFC');
+
     // Bidi markers are ignored. Remove them.
     // This is because the math layout algorithm will override the
     // directionality of the math expression.

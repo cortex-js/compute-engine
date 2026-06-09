@@ -649,3 +649,26 @@ describe('NON-STRICT MODE (Math-ASCII/Typst-like syntax)', () => {
     });
   });
 });
+
+describe('UNICODE NORMALIZATION', () => {
+  // "café" decomposed (NFD): 'c','a','f','e' + combining acute accent (U+0301).
+  // NFC is derived from it via normalize() rather than written as a literal.
+  // Input is normalized to NFC at tokenization, so NFD and NFC parse alike.
+  const NFD = 'café';
+  const NFC = NFD.normalize('NFC'); // 'café' with precomposed U+00E9
+
+  test('decomposed (NFD) input parses identically to precomposed (NFC)', () => {
+    expect(NFD).not.toEqual(NFC); // sanity: distinct code-point sequences
+    const a = parse(NFC);
+    const b = parse(NFD);
+    expect(a.isValid).toBe(true);
+    expect(b.isValid).toBe(true);
+    expect(a.isSame(b)).toBe(true);
+  });
+
+  test('decomposed text inside \\mathrm matches its precomposed form', () => {
+    const a = parse(`\\mathrm{${NFD}}`);
+    expect(a.isValid).toBe(true);
+    expect(a.isSame(parse(`\\mathrm{${NFC}}`))).toBe(true);
+  });
+});

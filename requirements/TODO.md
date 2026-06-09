@@ -664,18 +664,15 @@ _Inventory of gaps surfaced from `todo` comments in the test suite._
 
 ### Performance & Benchmarking
 - **Precision**: Extend Wester benchmarks to support precision 50.
-- **Notation**: Verify consistency for scientific vs. engineering notation in `toLatex()`.
-
-### Unicode & Normalization
-- **Normalization**: Add tests for non-NFC normalized Unicode characters (e.g., `café` vs. `café`) to `dictionary.test.ts`.
+- **Notation**: `toLatex({ notation: 'engineering' })` is silently ignored (output is plain decimal, not engineering); only `'scientific'` is implemented. Implement engineering notation or document it as unsupported.
 
 ### Calculus & Special Functions
 - **Integration**: Implement additional integration patterns identified in `calculus.test.ts`.
 - **Signatures**: Add tests for special functions type signatures (Issue #1).
 
-### Ambiguous / Unclear
-- **Empty TODOs**: `patterns.test.ts:625` contains an empty `//@todo`.
-- **General Revisit**: `cortex-parse.test.ts:234` and `playground.ts:66` require general logic reviews.
+### Ambiguous / Unclear (triaged — low value)
+- **`patterns.test.ts:625`**: the `//@todo` marks an unimplemented `matchPermutations`/`Replace` matching feature, not a missing test. Track under Pattern Matching if pursued; otherwise remove the stray comment.
+- **`cortex-parse.test.ts:234`, `test/playground.ts:66`**: an undecided Cortex-lexing quirk (experimental, non-published language) and a scratch file. Low value — close by decision.
 
 ---
 
