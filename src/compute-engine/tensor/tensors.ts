@@ -238,7 +238,7 @@ export abstract class AbstractTensor<
     const data = this.data;
     const isZero = this.field.isZero.bind(this.field);
     for (let i = 1; i < n; i++)
-      for (let j = 0; j < i; j++) if (isZero(data[i * n + j])) return false;
+      for (let j = 0; j < i; j++) if (!isZero(data[i * n + j])) return false;
     return true;
   }
 
@@ -256,32 +256,19 @@ export abstract class AbstractTensor<
   }
 
   get isTriangular(): boolean {
-    if (!this.isSquare) return false;
-    const n = this.shape[0];
-    const data = this.data;
-    const isZero = this.field.isZero.bind(this.field);
-    for (let i = 0; i < n; i++)
-      for (let j = 0; j < n; j++)
-        if (
-          (i < j && !isZero(data[i * n + j])) ||
-          (i > j && !isZero(data[i * n + j]))
-        )
-          return false;
-    return true;
+    // Triangular = upper-triangular or lower-triangular.
+    return this.isUpperTriangular || this.isLowerTriangular;
   }
 
   get isDiagonal(): boolean {
+    // Diagonal = every off-diagonal entry is zero (diagonal entries are free).
     if (!this.isSquare) return false;
     const n = this.shape[0];
     const data = this.data;
     const isZero = this.field.isZero.bind(this.field);
     for (let i = 0; i < n; i++)
       for (let j = 0; j < n; j++)
-        if (
-          (i === j && !isZero(data[i * n + j])) ||
-          (i !== j && !isZero(data[i * n + j]))
-        )
-          return false;
+        if (i !== j && !isZero(data[i * n + j])) return false;
     return true;
   }
 
@@ -453,7 +440,8 @@ export abstract class AbstractTensor<
 
     const _size = this.shape[1];
     const stride = this._strides[0];
-    const start = index * stride;
+    // `index` is 1-based (consistent with the rank-1 path above).
+    const start = (index - 1) * stride;
     const end = start + stride;
 
     return makeTensor(this.ce, {
@@ -600,52 +588,54 @@ export abstract class AbstractTensor<
 
     if (m === 3) {
       const [a, b, c, d, e, f, g, h, i] = this.data;
-      return addn([
+      // Note: `addn`/`muln` are variadic — pass the terms as arguments, not as
+      // a single array (an array argument would be string-concatenated).
+      return addn(
         muln(a, e, i),
         muln(b, f, g),
         muln(c, d, h),
         neg(muln(c, e, g)),
         neg(muln(b, d, i)),
-        neg(muln(a, f, h)),
-      ]);
+        neg(muln(a, f, h))
+      );
     }
 
-    // https://en.wikipedia.org/wiki/Bareiss_algorithm
-    const rows = this.shape[0];
-    let negated = false;
+    // General case (n >= 4): fraction-free Bareiss elimination. Each division
+    // is exact (the Bareiss identity), so integer matrices stay exact instead
+    // of accumulating floating-point error. Operates on a mutable 2D copy of
+    // the flat, row-major data (all indices 0-based).
     const div = this.field.div.bind(this.field);
     const sub = this.field.sub.bind(this.field);
-    const rowIndices = new Array(rows).fill(0).map((_, i) => i);
-    const matrix = [...this.data];
-    for (let k = 0; k < rows; k++) {
-      let k_ = rowIndices[k - 1];
-      if (this.at(k_, k) === 0) {
-        let _k;
-        for (_k = k + 1; _k < rows; _k++) {
-          if (this.at(rowIndices[_k], k) !== 0) {
-            k_ = rowIndices[_k];
-            rowIndices[_k - 1] = rowIndices[k - 1];
-            rowIndices[k - 1] = k_;
-            negated = !negated;
+    const isZero = this.field.isZero.bind(this.field);
+
+    const M: DataTypeMap[DT][][] = [];
+    for (let i = 0; i < m; i++) M.push(this.data.slice(i * m, (i + 1) * m));
+
+    let sign = 1;
+    let prev: DataTypeMap[DT] = this.field.one;
+    for (let k = 0; k < m - 1; k++) {
+      if (isZero(M[k][k])) {
+        let pivotRow = -1;
+        for (let r = k + 1; r < m; r++)
+          if (!isZero(M[r][k])) {
+            pivotRow = r;
             break;
           }
-        }
-        if (_k === rows) return this.at(k_, k);
+        // A zero column on/below the diagonal means the matrix is singular.
+        if (pivotRow === -1) return this.field.zero;
+        const tmp = M[k];
+        M[k] = M[pivotRow];
+        M[pivotRow] = tmp;
+        sign = -sign;
       }
-      const piv = this.at(k_, k);
-      const piv_ = k === 0 ? 1 : this.at(rowIndices[k - 2], k - 2);
-      for (let i = k + 1; i < rows; i++) {
-        const i_ = rowIndices[i - 1];
-        for (let j = k + 1; j < rows; j++) {
-          matrix[i_][j] = div(
-            sub(mul(matrix[i_][j], piv), mul(matrix[i_][k], matrix[k_][j])),
-            piv_
-          );
-        }
-      }
+      const pivot = M[k][k];
+      for (let i = k + 1; i < m; i++)
+        for (let j = k + 1; j < m; j++)
+          M[i][j] = div(sub(mul(M[i][j], pivot), mul(M[i][k], M[k][j])), prev);
+      prev = pivot;
     }
-    const det = matrix[rowIndices[rows - 1]][rows - 1];
-    return negated ? this.field.neg(det) : det;
+    const det = M[m - 1][m - 1];
+    return sign === -1 ? neg(det) : det;
   }
 
   inverse(): undefined | AbstractTensor<DT> {
@@ -678,65 +668,56 @@ export abstract class AbstractTensor<
       });
     }
 
-    // https://en.wikipedia.org/wiki/Gaussian_elimination
-    const rows = this.shape[0];
+    // General case (n >= 3): Gauss-Jordan elimination on the augmented matrix
+    // [A | I]. Operates on a mutable 2D copy (all indices 0-based). Returns
+    // `undefined` if the matrix is singular.
     const div = this.field.div.bind(this.field);
     const sub = this.field.sub.bind(this.field);
     const mul = this.field.mul.bind(this.field);
+    const isZero = this.field.isZero.bind(this.field);
+    const one = this.field.one;
+    const zero = this.field.zero;
 
-    const matrix: DataTypeMap[DT][][] = this
-      .array as unknown as DataTypeMap[DT][][];
-    const identity = new Array(rows).fill(0).map((_, i) => {
-      const row = new Array(rows).fill(0);
-      row[i] = 1;
-      return row;
-    });
-    const augmented = matrix.map((row, i) => [...row, ...identity[i]]);
-    const rowIndices = new Array(rows).fill(0).map((_, i) => i);
-    for (let k = 0; k < rows; k++) {
-      let k_ = rowIndices[k - 1];
-      if (this.at(k_, k) === 0) {
-        let _k;
-        for (_k = k + 1; _k < rows; _k++) {
-          if (this.at(rowIndices[_k], k) !== 0) {
-            k_ = rowIndices[_k];
-            rowIndices[_k - 1] = rowIndices[k - 1];
-            rowIndices[k - 1] = k_;
+    // Build [A | I]: each row has length 2n.
+    const aug: DataTypeMap[DT][][] = [];
+    for (let i = 0; i < m; i++) {
+      const row = this.data.slice(i * m, (i + 1) * m);
+      for (let j = 0; j < m; j++) row.push(i === j ? one : zero);
+      aug.push(row);
+    }
+
+    for (let k = 0; k < m; k++) {
+      // Ensure a non-zero pivot at (k, k), swapping a lower row up if needed.
+      if (isZero(aug[k][k])) {
+        let pivotRow = -1;
+        for (let r = k + 1; r < m; r++)
+          if (!isZero(aug[r][k])) {
+            pivotRow = r;
             break;
           }
-        }
-        if (_k === rows) return undefined;
+        if (pivotRow === -1) return undefined; // singular
+        const tmp = aug[k];
+        aug[k] = aug[pivotRow];
+        aug[pivotRow] = tmp;
       }
-      const piv = this.at(k_, k);
-      const piv_ = k === 0 ? 1 : this.at(rowIndices[k - 2], k - 2);
-      for (let i = k + 1; i < rows; i++) {
-        const i_ = rowIndices[i - 1];
-        for (let j = k + 1; j < rows * 2; j++) {
-          augmented[i_][j] = sub(
-            augmented[i_][j],
-            mul(div(mul(augmented[i_][k], augmented[k_][j]), piv), piv_)
-          );
-        }
-      }
-    }
-    for (let k = rows - 1; k >= 0; k--) {
-      const piv = augmented[(rowIndices[k], k)];
-      for (let i = 0; i < k; i++) {
-        const i_ = rowIndices[i];
-        for (let j = rows; j < rows * 2; j++) {
-          augmented[i_][j] = sub(
-            augmented[i_][j],
-            mul(div(mul(augmented[i_][k], augmented[k][j]), piv), piv)
-          );
-        }
-      }
-      for (let j = rows; j < rows * 2; j++) {
-        augmented[k][j] = div(augmented[k][j], piv);
+      // Scale the pivot row so aug[k][k] === 1.
+      const pivot = aug[k][k];
+      for (let j = 0; j < 2 * m; j++) aug[k][j] = div(aug[k][j], pivot);
+      // Clear the k-th column in every other row.
+      for (let i = 0; i < m; i++) {
+        if (i === k) continue;
+        const factor = aug[i][k];
+        if (isZero(factor)) continue;
+        for (let j = 0; j < 2 * m; j++)
+          aug[i][j] = sub(aug[i][j], mul(factor, aug[k][j]));
       }
     }
-    const inverseData: DataTypeMap[DT][] = augmented.map((row) =>
-      row.slice(rows)
-    ) as unknown as DataTypeMap[DT][];
+
+    // The right half of the reduced augmented matrix is the inverse.
+    const inverseData: DataTypeMap[DT][] = [];
+    for (let i = 0; i < m; i++)
+      for (let j = m; j < 2 * m; j++) inverseData.push(aug[i][j]);
+
     return makeTensor(this.ce, {
       dtype: this.dtype,
       shape: [n, n],

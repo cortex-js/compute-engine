@@ -1,5 +1,19 @@
 ### [Unreleased]
 
+- **Matrix (tensor) linear-algebra fixes** — operations were broken beyond the
+  hardcoded 2×2 cases:
+  - `Determinant` no longer throws for 4×4 and larger matrices, and now returns
+    a usable (boxed) value for numeric matrices instead of `undefined`. The 3×3
+    case previously computed garbage (it string-concatenated its terms).
+    Integer-matrix determinants are computed exactly via fraction-free Bareiss
+    elimination.
+  - `Inverse` no longer throws for 3×3 and larger matrices.
+  - Matrix row access / slicing is 1-based and consistent for rank ≥ 2 (it was
+    off-by-one, returning the wrong row or an empty result).
+  - The matrix predicates `isUpperTriangular`, `isDiagonal`, and `isTriangular`
+    were inverted or mislabeled (`isDiagonal` tested for the zero matrix,
+    `isTriangular` tested diagonality) and are now correct.
+
 - **Collection operation fixes** — several lazy-collection handlers returned
   wrong results, threw, or failed to terminate:
   - `Rest` now yields every remaining element (its iterator was stuck on the

@@ -266,7 +266,12 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           if (shape.length === 2 && shape[0] !== shape[1])
             return ce.error('expected-square-matrix', op1.toString());
 
-          return op1.tensor.determinant();
+          const det = op1.tensor.determinant();
+          // `determinant()` returns a raw field value (e.g. a JS number for a
+          // numeric matrix); box it so the operator yields a usable expression.
+          return det === undefined
+            ? undefined
+            : op1.tensor.field.expression(det);
         }
 
         return undefined;

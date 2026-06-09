@@ -1,5 +1,6 @@
 import { MathJsonExpression as Expression } from '../../src/math-json/types';
 import { engine as ce } from '../utils';
+import { isTensor } from '../../src/compute-engine/boxed-expression/type-guards';
 
 const v2_n: Expression = ['List', 7, 11];
 
@@ -92,18 +93,8 @@ const t322_n: Expression = [
 // Tensor of shape [2, 3, 3] - two 3×3 matrices (for testing trace over different axes)
 const t233_n: Expression = [
   'List',
-  [
-    'List',
-    ['List', 1, 2, 3],
-    ['List', 4, 5, 6],
-    ['List', 7, 8, 9],
-  ],
-  [
-    'List',
-    ['List', 10, 11, 12],
-    ['List', 13, 14, 15],
-    ['List', 16, 17, 18],
-  ],
+  ['List', ['List', 1, 2, 3], ['List', 4, 5, 6], ['List', 7, 8, 9]],
+  ['List', ['List', 10, 11, 12], ['List', 13, 14, 15], ['List', 16, 17, 18]],
 ];
 
 // Tensor of shape [2, 2, 2] with complex values for conjugate transpose
@@ -180,9 +171,12 @@ describe('Kernel/Dimension/Degree/Hom', () => {
   });
 
   it('should compute dimensions of finite vectors and matrices', () => {
-    expect(ce.expr(['Dimension', ['List', 1, 2, 3]]).evaluate().toString()).toBe(
-      '3'
-    );
+    expect(
+      ce
+        .expr(['Dimension', ['List', 1, 2, 3]])
+        .evaluate()
+        .toString()
+    ).toBe('3');
     expect(ce.expr(['Dimension', m23_n]).evaluate().toString()).toBe('6');
   });
 
@@ -207,7 +201,9 @@ describe('Kernel/Dimension/Degree/Hom', () => {
   });
 
   it('should evaluate Hom arguments and preserve symbolic Hom form', () => {
-    const result = ce.expr(['Hom', ['Add', 1, 2], ['Multiply', 2, 3]]).evaluate();
+    const result = ce
+      .expr(['Hom', ['Add', 1, 2], ['Multiply', 2, 3]])
+      .evaluate();
     expect(result.toString()).toBe('Hom(3, 6)');
   });
 
@@ -233,9 +229,7 @@ describe('Kernel/Dimension/Degree/Hom', () => {
   });
 
   it('should return dimension 0 for kernel of a full-rank matrix', () => {
-    const result = ce
-      .expr(['Dimension', ['Kernel', sq2_n]])
-      .evaluate();
+    const result = ce.expr(['Dimension', ['Kernel', sq2_n]]).evaluate();
     expect(result.toString()).toBe('0');
   });
 });
@@ -673,7 +667,9 @@ describe('Reshape', () => {
 
   it('should reshape a general vector, contracting it', () => {
     const result = ce.expr(['Reshape', v9_x, ['Tuple', 2, 3]]).evaluate();
-    expect(result.toString()).toMatchInlineSnapshot(`[[a,b,c],[d,"e_1","f_1"]]`);
+    expect(result.toString()).toMatchInlineSnapshot(
+      `[[a,b,c],[d,"e_1","f_1"]]`
+    );
   });
 
   it('should reshape a general vector to a tensor', () => {
@@ -997,9 +993,7 @@ describe('Norm', () => {
   // Vector L∞ norm (max absolute value)
   it('should compute the L-infinity norm of a vector', () => {
     // max(|3|, |-4|) = 4
-    const result = ce
-      .expr(['Norm', ['List', 3, -4], 'Infinity'])
-      .evaluate();
+    const result = ce.expr(['Norm', ['List', 3, -4], 'Infinity']).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(`4`);
   });
 
@@ -1038,9 +1032,7 @@ describe('Norm', () => {
   });
 
   it('should compute the Frobenius norm with explicit type', () => {
-    const result = ce
-      .expr(['Norm', sq2_n, { str: 'Frobenius' }])
-      .evaluate();
+    const result = ce.expr(['Norm', sq2_n, { str: 'Frobenius' }]).evaluate();
     expect(result.re).toBeCloseTo(5.4772, 3);
   });
 
@@ -1068,9 +1060,7 @@ describe('Norm', () => {
     // [[1, 2], [3, 4]]
     // Row sums: |1| + |2| = 3, |3| + |4| = 7
     // max = 7
-    const result = ce
-      .expr(['Norm', sq2_n, { str: 'Infinity' }])
-      .evaluate();
+    const result = ce.expr(['Norm', sq2_n, { str: 'Infinity' }]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(`7`);
   });
 
@@ -1078,9 +1068,7 @@ describe('Norm', () => {
     // [[1, 2, 3], [4, 5, 6]]
     // Row sums: 1 + 2 + 3 = 6, 4 + 5 + 6 = 15
     // max = 15
-    const result = ce
-      .expr(['Norm', m23_n, { str: 'Infinity' }])
-      .evaluate();
+    const result = ce.expr(['Norm', m23_n, { str: 'Infinity' }]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(`15`);
   });
 
@@ -1287,12 +1275,7 @@ describe('Eigenvalues and Eigenvectors (LA-5)', () => {
       const result = ce
         .expr([
           'Eigenvalues',
-          [
-            'List',
-            ['List', 1, 0, 0],
-            ['List', 0, 2, 0],
-            ['List', 0, 0, 3],
-          ],
+          ['List', ['List', 1, 0, 0], ['List', 0, 2, 0], ['List', 0, 0, 3]],
         ])
         .evaluate();
       expect(result.toString()).toMatchInlineSnapshot(`[1,2,3]`);
@@ -1304,12 +1287,7 @@ describe('Eigenvalues and Eigenvectors (LA-5)', () => {
       const result = ce
         .expr([
           'Eigenvalues',
-          [
-            'List',
-            ['List', 6, -1, 0],
-            ['List', -1, 5, -1],
-            ['List', 0, -1, 4],
-          ],
+          ['List', ['List', 6, -1, 0], ['List', -1, 5, -1], ['List', 0, -1, 4]],
         ])
         .evaluate();
       const eigenvalues = result.ops?.map((e) => e.re ?? 0) ?? [];
@@ -1407,12 +1385,7 @@ describe('Matrix Decompositions (LA-7)', () => {
       const result = ce
         .expr([
           'LUDecomposition',
-          [
-            'List',
-            ['List', 2, 1, 1],
-            ['List', 4, 3, 3],
-            ['List', 8, 7, 9],
-          ],
+          ['List', ['List', 2, 1, 1], ['List', 4, 3, 3], ['List', 8, 7, 9]],
         ])
         .evaluate();
       expect(result.operator).toBe('Tuple');
@@ -1426,10 +1399,7 @@ describe('Matrix Decompositions (LA-7)', () => {
 
     it('should handle identity matrix', () => {
       const result = ce
-        .expr([
-          'LUDecomposition',
-          ['List', ['List', 1, 0], ['List', 0, 1]],
-        ])
+        .expr(['LUDecomposition', ['List', ['List', 1, 0], ['List', 0, 1]]])
         .evaluate();
       expect(result.operator).toBe('Tuple');
 
@@ -1513,7 +1483,10 @@ describe('Matrix Decompositions (LA-7)', () => {
     it('should decompose a positive definite 2x2 matrix', () => {
       // Matrix [[4, 2], [2, 2]] is positive definite
       const result = ce
-        .expr(['CholeskyDecomposition', ['List', ['List', 4, 2], ['List', 2, 2]]])
+        .expr([
+          'CholeskyDecomposition',
+          ['List', ['List', 4, 2], ['List', 2, 2]],
+        ])
         .evaluate();
       expect(result.operator).toBe('List');
       expect(result.ops?.length).toBe(2);
@@ -1549,7 +1522,10 @@ describe('Matrix Decompositions (LA-7)', () => {
     it('should return error for non-positive-definite matrix', () => {
       // Matrix [[1, 2], [2, 1]] is not positive definite (det = -3 < 0)
       const result = ce
-        .expr(['CholeskyDecomposition', ['List', ['List', 1, 2], ['List', 2, 1]]])
+        .expr([
+          'CholeskyDecomposition',
+          ['List', ['List', 1, 2], ['List', 2, 1]],
+        ])
         .evaluate();
       expect(result.toString()).toContain('expected-positive-definite-matrix');
     });
@@ -1618,12 +1594,7 @@ describe('Matrix Decompositions (LA-7)', () => {
       const result = ce
         .expr([
           'SVD',
-          [
-            'List',
-            ['List', 1, 0, 0],
-            ['List', 0, 2, 0],
-            ['List', 0, 0, 3],
-          ],
+          ['List', ['List', 1, 0, 0], ['List', 0, 2, 0], ['List', 0, 0, 3]],
         ])
         .evaluate();
       expect(result.operator).toBe('Tuple');
@@ -1640,5 +1611,187 @@ describe('Matrix Decompositions (LA-7)', () => {
       expect(singularValues[1]).toBeCloseTo(2, 5);
       expect(singularValues[2]).toBeCloseTo(1, 5);
     });
+  });
+});
+
+// Regressions for the tensor linear-algebra bugs reported in REVIEW.md (F1–F4).
+describe('Tensor linear algebra regressions (REVIEW.md F1–F4)', () => {
+  const M = (rows: number[][]): Expression => [
+    'List',
+    ...rows.map((r) => ['List', ...r] as Expression),
+  ];
+  const tensorOf = (m: Expression) => {
+    const e = ce.box(m).evaluate();
+    return isTensor(e) ? e.tensor : null;
+  };
+
+  // F1: determinant() threw for n >= 4 (flat array indexed as 2D, rowIndices[-1]
+  // on the first iteration); the 3x3 branch passed an array to a variadic
+  // `addn`, string-concatenating instead of summing.
+  describe('F1: Determinant (n >= 3)', () => {
+    test('3x3', () =>
+      expect(
+        ce
+          .box([
+            'Determinant',
+            M([
+              [1, 2, 3],
+              [0, 1, 4],
+              [5, 6, 0],
+            ]),
+          ])
+          .evaluate()
+          .toString()
+      ).toEqual('1'));
+    test('4x4 block-diagonal stays exact (Bareiss, no float drift)', () =>
+      expect(
+        ce
+          .box([
+            'Determinant',
+            M([
+              [1, 2, 0, 0],
+              [3, 4, 0, 0],
+              [0, 0, 5, 6],
+              [0, 0, 7, 8],
+            ]),
+          ])
+          .evaluate()
+          .toString()
+      ).toEqual('4'));
+    test('4x4 general', () =>
+      expect(
+        ce
+          .box([
+            'Determinant',
+            M([
+              [3, 1, 1, 2],
+              [5, 1, 3, 4],
+              [2, 0, 1, 0],
+              [1, 3, 2, 1],
+            ]),
+          ])
+          .evaluate()
+          .toString()
+      ).toEqual('-22'));
+    test('5x5 identity', () =>
+      expect(
+        ce
+          .box([
+            'Determinant',
+            M([
+              [1, 0, 0, 0, 0],
+              [0, 1, 0, 0, 0],
+              [0, 0, 1, 0, 0],
+              [0, 0, 0, 1, 0],
+              [0, 0, 0, 0, 1],
+            ]),
+          ])
+          .evaluate()
+          .toString()
+      ).toEqual('1'));
+    test('singular 4x4 -> 0', () =>
+      expect(
+        ce
+          .box([
+            'Determinant',
+            M([
+              [1, 2, 3, 4],
+              [2, 4, 6, 8],
+              [1, 0, 0, 0],
+              [0, 1, 0, 0],
+            ]),
+          ])
+          .evaluate()
+          .toString()
+      ).toEqual('0'));
+  });
+
+  // F2: inverse() threw for n >= 3 (same index-base bugs plus a comma-operator
+  // bug `augmented[(rowIndices[k], k)]`).
+  describe('F2: Inverse (n >= 3)', () => {
+    test('3x3', () =>
+      expect(
+        ce
+          .box([
+            'Inverse',
+            M([
+              [1, 2, 3],
+              [0, 1, 4],
+              [5, 6, 0],
+            ]),
+          ])
+          .evaluate()
+          .toString()
+      ).toMatchInlineSnapshot(`[[-24,18,5],[20,-15,-4],[-5,4,1]]`));
+    test('4x4 diagonal', () =>
+      expect(
+        ce
+          .box([
+            'Inverse',
+            M([
+              [2, 0, 0, 0],
+              [0, 4, 0, 0],
+              [0, 0, 5, 0],
+              [0, 0, 0, 10],
+            ]),
+          ])
+          .evaluate()
+          .toString()
+      ).toMatchInlineSnapshot(
+        `[[0.5,0,0,0],[0,0.25,0,0],[0,0,0.2,0],[0,0,0,0.1]]`
+      ));
+  });
+
+  // F3: slice() was off-by-one (0-based) for rank >= 2 while the rank-1 path
+  // was 1-based.
+  test('F3: matrix row slices are 1-based', () => {
+    const t = tensorOf(
+      M([
+        [1, 2, 3],
+        [4, 5, 6],
+      ])
+    );
+    expect(t?.slice(1).expression.toString()).toEqual('[1,2,3]');
+    expect(t?.slice(2).expression.toString()).toEqual('[4,5,6]');
+    expect(t?.slice(-1).expression.toString()).toEqual('[4,5,6]');
+  });
+
+  // F4: isUpperTriangular was inverted, isDiagonal tested for the zero matrix,
+  // and isTriangular tested diagonality.
+  test('F4: triangular and diagonal predicates', () => {
+    const upper = tensorOf(
+      M([
+        [1, 2],
+        [0, 3],
+      ])
+    );
+    const lower = tensorOf(
+      M([
+        [1, 0],
+        [2, 3],
+      ])
+    );
+    const diag = tensorOf(
+      M([
+        [5, 0],
+        [0, 7],
+      ])
+    );
+    const full = tensorOf(
+      M([
+        [1, 2],
+        [3, 4],
+      ])
+    );
+    expect(upper?.isUpperTriangular).toBe(true);
+    expect(upper?.isLowerTriangular).toBe(false);
+    expect(upper?.isTriangular).toBe(true);
+    expect(upper?.isDiagonal).toBe(false);
+    expect(lower?.isLowerTriangular).toBe(true);
+    expect(lower?.isTriangular).toBe(true);
+    expect(diag?.isDiagonal).toBe(true);
+    expect(diag?.isTriangular).toBe(true);
+    expect(full?.isTriangular).toBe(false);
+    expect(full?.isDiagonal).toBe(false);
   });
 });

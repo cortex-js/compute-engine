@@ -313,8 +313,8 @@ export class BoxedTensor<T extends TensorDataType>
     // Higher rank tensor: yield slices along the first axis
     return (function* (self: BoxedTensor<TensorDataType>) {
       for (let i = 1; i <= count; i += 1) {
-        // slice(i - 1) returns a tensor of rank-1 less
-        const row = self.tensor.slice(i - 1);
+        // slice(i) returns a tensor of rank-1 less (slice is 1-based)
+        const row = self.tensor.slice(i);
         const rowExpr = row.expression;
         const rowOps = isFunction(rowExpr) ? rowExpr.ops : [];
         yield new BoxedTensor(self.engine, {
