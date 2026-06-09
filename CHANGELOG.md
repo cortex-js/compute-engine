@@ -22,6 +22,12 @@
   post-order). Only observable for order-sensitive rules, such as
   `RuleFunction` replacements with index-based logic.
 
+- **Custom rules now match user-defined functions** — a rule pattern whose
+  operator is a user-defined function (e.g. `{match: ['F', '_a'], ...}` where
+  `F` is not a built-in) previously threw internally during matching, and the
+  error was silently swallowed: the rule never applied, in `replace()` and in
+  `simplify({rules})`.
+
 - **Numeric correctness fixes** — several arithmetic operations produced
   silently-wrong results:
   - Complex `pow` (machine precision) used `arg ** n` instead of `arg · n` in
