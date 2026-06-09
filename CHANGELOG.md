@@ -1,5 +1,18 @@
 ### [Unreleased]
 
+- **Comparison and simplification correctness fixes**:
+  - An operator's equality handler returning `false` (definitely *not* equal)
+    was treated as *equal*, so unordered values such as lists compared as `<=`.
+    Only a definite `true` now means equal.
+  - The comparison predicates (`isLess`/`isGreater`/`isLessEqual`/
+    `isGreaterEqual`) returned a definitive `false` for the indeterminate
+    `<=`/`>=` an assumption can produce — e.g. after `assume(y >= 3)`, `y > 3`
+    is *unknown*, not false. They now return `undefined` in that case. These
+    predicates feed sign inference throughout the engine.
+  - `(-x)^{3/4}` (and other `(-x)^{odd/even}` rational powers of a negated base)
+    is no longer simplified to `x^{3/4}`: an even root of a negative base is
+    complex, so the two are not equal.
+
 - **`ReplaceOptions.form` replaces `canonical`** — `expr.replace()` and rule
   application now accept a `form` option (`'canonical'`, `'structural'`,
   `'raw'`, or specific canonical transforms) controlling the form of

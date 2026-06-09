@@ -521,14 +521,10 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
             because: '(-x)^{n/m} -> -x^{n/m} when n and m are odd',
           };
         }
-        // (-x)^{odd/even} -> x^{odd/even} (e.g., (-x)^{3/4} -> x^{3/4})
-        // Even root eliminates the sign
-        if (numIsOdd && !denomIsOdd) {
-          return {
-            value: innerBase.pow(exp),
-            because: '(-x)^{n/m} -> x^{n/m} when m is even',
-          };
-        }
+        // NOTE: (-x)^{odd/even} is NOT rewritten. An even root of a negative
+        // base is complex (e.g. for x > 0, (-x)^{3/4} is complex), whereas
+        // x^{3/4} is a real positive — the two are not equal, so collapsing the
+        // sign here would change the expression's meaning.
       }
     }
 

@@ -83,3 +83,40 @@ describe.skip('GREATER EQUAL', () => {
     });
   }
 });
+
+// Regressions for the comparison bugs reported in REVIEW.md (A1, A3).
+describe('Comparison correctness (REVIEW.md A1, A3)', () => {
+  // A1: cmp() treated an eq-handler result of `false` (definitely NOT equal) as
+  // equality, so unordered values like lists wrongly compared as <= / equal.
+  test('A1: unordered lists do not compare as <= or equal', () => {
+    const ce = new ComputeEngine();
+    const a = ce.box(['List', 1, 2]);
+    const b = ce.box(['List', 3, 4]);
+    expect(a.isLessEqual(b)).toBeUndefined();
+    expect(a.isLess(b)).toBeUndefined();
+    expect(a.isEqual(b)).toBe(false);
+    // identical lists are still equal
+    expect(ce.box(['List', 1, 2]).isEqual(['List', 1, 2])).toBe(true);
+  });
+
+  // A3: strict/opposite predicates returned a definitive `false` for the
+  // indeterminate '<='/'>=' that an assumption produces.
+  test('A3: indeterminate strict predicates return undefined', () => {
+    const ce = new ComputeEngine();
+    ce.assume(['GreaterEqual', 'y', 3]); // y >= 3
+    const y = ce.box('y');
+    expect(y.isGreaterEqual(3)).toBe(true); // known: y >= 3
+    expect(y.isLess(3)).toBe(false); // known false
+    expect(y.isGreater(3)).toBeUndefined(); // y could be exactly 3
+    expect(y.isLessEqual(3)).toBeUndefined(); // y could be exactly 3
+  });
+
+  test('A3: definite orderings are unaffected', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(5).isGreater(3)).toBe(true);
+    expect(ce.box(3).isGreater(5)).toBe(false);
+    expect(ce.box(3).isLessEqual(3)).toBe(true);
+    ce.assume(['Greater', 'z', 10]); // z > 10
+    expect(ce.box('z').isGreater(3)).toBe(true);
+  });
+});

@@ -377,9 +377,11 @@ export function cmp(
   // to both be function expressions.
   //
   if (isFunction(a) || isFunction(b)) {
-    // If the function has a special handler for equality, use it
+    // If the function has a special handler for equality, use it. Only a
+    // definite `true` means equal; `false` (definitely not equal) and
+    // `undefined` (unknown) fall through to the numeric comparison below.
     const cmp = a.operatorDefinition?.eq?.(a, b);
-    if (cmp !== undefined) return '=';
+    if (cmp === true) return '=';
 
     // Subtract the two expressions
     const diff = a.sub(b).N();

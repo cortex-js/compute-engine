@@ -449,8 +449,11 @@ describe('Rules: Negative Signs and Powers and Roots', () => {
   test('(-x)^4 = x^4', () => checkSimplify('(-x)^4', 'x^4'));
   test('(-x)^{3/5} = -(x^{3/5})', () =>
     checkSimplify('(-x)^{3/5}', '-(x^{3/5})'));
-  test('(-x)^{3/4} = x^{3/4}', () =>
-    checkSimplify('(-x)^{3/4}', 'x^{3/4}'));
+  // (-x)^{3/4} must NOT simplify to x^{3/4}: an even root of a negative base is
+  // complex (for x > 0, (-x)^{3/4} is complex while x^{3/4} is a real positive),
+  // so the two are not equal. See REVIEW.md E6.
+  test('(-x)^{3/4} is left unchanged', () =>
+    checkSimplify('(-x)^{3/4}', '(-x)^{3/4}'));
   test('cbrt(-2) = -cbrt(2)', () =>
     checkSimplify('\\sqrt[3]{-2}', '-\\sqrt[3]{2}'));
 });

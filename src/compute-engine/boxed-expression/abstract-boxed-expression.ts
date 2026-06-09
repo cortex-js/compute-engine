@@ -633,28 +633,36 @@ export abstract class _BoxedExpression implements Expression {
     return eq(this, other);
   }
 
+  // `cmp()` may return a weak/indeterminate relation (`'<='` or `'>='`, e.g.
+  // from an assumption like `x >= 3`). A strict or opposite predicate that the
+  // weak relation does not resolve must return `undefined`, not a definitive
+  // `false` — these predicates feed sign inference throughout the engine.
   isLess(other: number | Expression): boolean | undefined {
     const c = cmp(this, other);
-    if (c === undefined) return undefined;
-    return c === '<';
+    if (c === '<') return true;
+    if (c === '>' || c === '>=' || c === '=') return false;
+    return undefined; // '<=' or undefined: strictness unknown
   }
 
   isLessEqual(other: number | Expression): boolean | undefined {
     const c = cmp(this, other);
-    if (c === undefined) return undefined;
-    return c === '<=' || c === '<' || c === '=';
+    if (c === '<' || c === '<=' || c === '=') return true;
+    if (c === '>') return false;
+    return undefined; // '>=' or undefined
   }
 
   isGreater(other: number | Expression): boolean | undefined {
     const c = cmp(this, other);
-    if (c === undefined) return undefined;
-    return c === '>';
+    if (c === '>') return true;
+    if (c === '<' || c === '<=' || c === '=') return false;
+    return undefined; // '>=' or undefined: strictness unknown
   }
 
   isGreaterEqual(other: number | Expression): boolean | undefined {
     const c = cmp(this, other);
-    if (c === undefined) return undefined;
-    return c === '>=' || c === '>' || c === '=';
+    if (c === '>' || c === '>=' || c === '=') return true;
+    if (c === '<') return false;
+    return undefined; // '<=' or undefined
   }
 
   get symbol(): string | undefined {
