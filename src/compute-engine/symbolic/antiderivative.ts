@@ -2434,7 +2434,7 @@ export function antiderivative(fn: Expression, index: string): Expression {
     xfn,
     rules,
     { _x: ce.symbol('_x') },
-    { useVariations: true, canonical: true }
+    { useVariations: true, form: 'canonical' }
   );
 
   if (result && result[0]) return result[0].subs({ _x: index });

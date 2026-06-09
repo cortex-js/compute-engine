@@ -1209,7 +1209,7 @@ export function findUnivariateRoots(
         expr,
         rules,
         { _x: ce.symbol('_x') },
-        { useVariations: true, canonical: true }
+        { useVariations: true, form: 'canonical' }
       )
     );
 
@@ -1232,7 +1232,7 @@ export function findUnivariateRoots(
           expr,
           rules,
           { _x: ce.symbol(x) },
-          { useVariations: true, canonical: true }
+          { useVariations: true, form: 'canonical' }
         )
       );
     }
@@ -1247,7 +1247,7 @@ export function findUnivariateRoots(
           expr,
           rules,
           { _x: ce.symbol(x) },
-          { useVariations: true, canonical: true }
+          { useVariations: true, form: 'canonical' }
         )
       );
     }

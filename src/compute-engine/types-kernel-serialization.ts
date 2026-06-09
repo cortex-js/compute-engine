@@ -150,9 +150,49 @@ export type ReplaceOptions = {
   iterationLimit: number;
 
   /**
-   * Canonicalization policy after replacement.
+   * Specify the canonical-status of _replaced_ sub-expressions.
+   *
+   * The specified canonical value/form may propagate upward to the input expression/root according
+   * to 'eager' replacement polcicy. See `replace()` documentation for details.
+   *
+
+  /**
+   * @deprecated This is a legacy property: see option `form` for a wider span of forms.
    */
-  canonical: CanonicalOptions;
+  canonical?: CanonicalOptions;
+
+  /**
+   * `form` policy for *replaced* expressions. \
+   *
+   * (If there is a recursive replacement -) Does not automatically apply to the entire input expression... However, the present `replace()` policy is to 'eagerly' propagate any specified replaced-expression replacement form the entire way 'up' an expression-tree.
+   * A value of
+   *
+   * If wishing to therefore ensure a the requested form for the *entire input* expression, either
+   * ensure the input is already in the requested form before any replacement, or simply request the
+   * form post-replacement.
+   *
+   * ::Additional notes
+   * - form `'raw'` loses its applicability if the replaced expression - according to replacement mechanics - already assumes a form according to
+   * replacement rule logic. (for example if the applying rule is of type `RuleFunction` and the
+   * produced expression has a non-raw form).
+   */
+  form: FormOption;
+
+  /** *Traversal* direction (through the node 'tree') for both Rule matching & replacement.
+   * Can be significant in the production of the final, overall replacement result (if operating
+   * recursively) - if rule is a `RuleFunction` with arbitrary logic (e.g. replacements being
+   * index-based).
+   *
+   * In 'tree' data-structure traversal terminology, possible values span:
+   *
+   * - `'left-right'` reflects *post-order* traversal, (left sub-tree first; depth-descending) (LRN).
+   * - `'right-left'` reflects 'reverse' *post-order* (right sub-tree first; depth-descending) (RLN).
+   *
+   * For both cases traversal is always depth-first, and always visits the root/input expr. last .
+   *
+   * **Default** is: `'left-right'` (standard post-order)
+   */
+  direction: 'left-right' | 'right-left';
 };
 
 /**
