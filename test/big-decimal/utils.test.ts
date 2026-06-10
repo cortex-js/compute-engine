@@ -2,6 +2,7 @@ import {
   fpmul,
   fpdiv,
   fpsqrt,
+  fpln,
   bigintAbs,
   bigintSign,
   bigintDigits,
@@ -216,5 +217,35 @@ describe('fpsqrt', () => {
     const squared = (result * result) / scale100;
     const diff = bigintAbs(squared - two);
     expect(diff <= 2n).toBe(true);
+  });
+});
+
+// ================================================================
+// fpln
+// ================================================================
+
+describe('fpln', () => {
+  // REVIEW.md D6 (defense in depth): a zero input used to hang forever in
+  // the sqrt-reduction loop (fpsqrt(0) = 0). Callers now range-reduce so the
+  // kernel only ever sees O(1) positive values; non-positive input is a
+  // caller bug and must fail fast instead of looping.
+  test('throws for zero input', () => {
+    expect(() => fpln(0n, SCALE20)).toThrow(RangeError);
+  });
+
+  test('throws for negative input', () => {
+    expect(() => fpln(-1n * SCALE20, SCALE20)).toThrow(RangeError);
+  });
+
+  test('ln(1) = 0', () => {
+    expect(fpln(SCALE20, SCALE20)).toBe(0n);
+  });
+
+  test('ln(2) starts with correct digits', () => {
+    const scale50 = 10n ** 50n;
+    // ln(2) = 0.69314718055994530941723212145817656807550013436026...
+    expect(fpln(2n * scale50, scale50).toString().startsWith('6931471805599453094')).toBe(
+      true
+    );
   });
 });

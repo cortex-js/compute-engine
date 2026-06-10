@@ -1726,6 +1726,27 @@ describe('pow()', () => {
     expect(x.pow(new BigDecimal('1')).eq(x)).toBe(true);
   });
 
+  // REVIEW.md D6 follow-up: the non-integer path computes exp(n·ln(base)).
+  // ln() is accurate to `precision` *relative* digits, so its absolute error
+  // scales with |ln(base)| and, multiplied by n, becomes the result's
+  // relative error: 10^100.5 used to be correct to only ~47 of 50 digits.
+  // pow now carries ~log10(|n·ln(base)|) extra working digits.
+  test('non-integer exponent with a large result keeps full precision', () => {
+    // 10^100.5 = sqrt(10)·10^100 (reference: Python decimal, 60 digits)
+    const s = new BigDecimal('10').pow(new BigDecimal('100.5')).toString();
+    expect(
+      s.startsWith('3.1622776601683793319988935444327185337195551393252')
+    ).toBe(true);
+    expect(s.endsWith('e+100')).toBe(true);
+  });
+
+  test('non-integer exponent with a tiny base does not underflow', () => {
+    // (1e-200)^0.5 = 1e-100 — exercises ln/exp range reduction end-to-end.
+    expect(new BigDecimal('1e-200').pow(new BigDecimal('0.5')).toString()).toBe(
+      '1e-100'
+    );
+  });
+
   test('NaN base → NaN', () => {
     expect(new BigDecimal(NaN).pow(new BigDecimal('2')).isNaN()).toBe(true);
   });

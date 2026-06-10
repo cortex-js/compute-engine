@@ -218,11 +218,19 @@ export function cmp(
       // To be mathematically equal to b, a must be a number
       const av = a.numericValue;
       if (typeof av === 'number') {
+        // NaN is unordered: comparisons involving it are indeterminate
+        if (Number.isNaN(av) || Number.isNaN(b)) return undefined;
+        // Exact match first: `Infinity - Infinity` is NaN, so the
+        // tolerance check below cannot detect equal infinities
+        if (av === b) return '=';
         if (Math.abs(av - b) <= a.engine.tolerance) return '=';
         return av < b ? '<' : '>';
       }
+      if (av.isNaN || Number.isNaN(b)) return undefined;
       if (av.eq(b)) return '=';
-      return av.lt(b) ? '<' : '>';
+      const lt = av.lt(b);
+      if (lt === undefined) return undefined;
+      return lt ? '<' : '>';
     }
 
     if (!isNumber(b)) {
@@ -290,12 +298,20 @@ export function cmp(
 
     const av = a.numericValue;
     const bv = b.numericValue as NumericValue;
+    // NaN is unordered: comparisons involving it are indeterminate
+    if (bv.isNaN) return undefined;
     if (typeof av === 'number') {
+      if (Number.isNaN(av)) return undefined;
       if (bv.eq(av)) return '=';
-      if (bv.lt(av)) return '>';
-      return '<';
+      const gt = bv.lt(av);
+      if (gt === undefined) return undefined;
+      return gt ? '>' : '<';
     }
-    return av.eq(bv) ? '=' : av.lt(bv) ? '<' : '>';
+    if (av.isNaN) return undefined;
+    if (av.eq(bv)) return '=';
+    const lt = av.lt(bv);
+    if (lt === undefined) return undefined;
+    return lt ? '<' : '>';
   }
 
   if (typeof b === 'number') {
@@ -405,6 +421,8 @@ export function cmp(
       return v < 0 ? '<' : '>';
     }
 
+    // A NaN difference is indeterminate, not "greater".
+    if (diff.numericValue.isNaN) return undefined;
     if (diff.numericValue.isZeroWithTolerance(tol)) return '=';
     return diff.numericValue.lt(0) ? '<' : '>';
   }

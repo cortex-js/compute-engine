@@ -121,3 +121,31 @@ describe('factors()', () => {
     expect(f.length).toBeGreaterThanOrEqual(2);
   });
 });
+
+describe('costFunction setter (REVIEW.md A5)', () => {
+  test('assigning a non-function value falls back to the default cost function', () => {
+    const engine = new ComputeEngine();
+    const defaultCost = engine.costFunction;
+
+    // Store a bogus value: previously this was kept and later *invoked*,
+    // crashing simplify(). It must reset to the default instead.
+    engine.costFunction = 'not a function' as any;
+    expect(typeof engine.costFunction).toBe('function');
+    expect(engine.costFunction).toBe(defaultCost);
+
+    // simplify() must not crash and still uses the default cost function
+    expect(engine.parse('x + x').simplify().latex).toBe('2x');
+  });
+
+  test('a function value is used, and undefined resets to the default', () => {
+    const engine = new ComputeEngine();
+    const defaultCost = engine.costFunction;
+
+    const custom = () => 42;
+    engine.costFunction = custom;
+    expect(engine.costFunction).toBe(custom);
+
+    engine.costFunction = undefined;
+    expect(engine.costFunction).toBe(defaultCost);
+  });
+});

@@ -58,9 +58,35 @@ export type Token = string;
  *
  * @param s A string of LaTeX
  */
+/** Cache of sticky (`/y`) variants of the (anchored) regexes used by
+ * `Tokenizer.match()`, keyed by source. A sticky regex with `lastIndex` set
+ * lets `match()` scan in place instead of slicing the remaining input for
+ * every token (which made tokenization O(n²)). */
+const STICKY_REGEX_CACHE = new Map<string, RegExp>();
+
+function stickyRegex(regEx: RegExp): RegExp {
+  let result = STICKY_REGEX_CACHE.get(regEx.source);
+  if (!result) {
+    // The cached regexes are all anchored with a leading '^': strip it
+    // (a sticky regex is implicitly anchored at `lastIndex`)
+    const source = regEx.source.startsWith('^')
+      ? regEx.source.slice(1)
+      : regEx.source;
+    result = new RegExp(source, 'y');
+    STICKY_REGEX_CACHE.set(regEx.source, result);
+  }
+  return result;
+}
+
 class Tokenizer {
   private s: string | string[];
   private pos: number;
+
+  /** The input as a plain string (joined graphemes), used by `match()` */
+  private joined: string;
+  /** For grapheme-array inputs: code-unit offset of each grapheme in
+   * `joined` (length `s.length + 1`, last entry is `joined.length`) */
+  private offsets: number[] | null = null;
 
   obeyspaces = false;
 
@@ -100,6 +126,23 @@ class Tokenizer {
 
     this.s = splitGraphemes(s);
     this.pos = 0;
+
+    if (typeof this.s === 'string') {
+      this.joined = this.s;
+    } else {
+      // Precompute the joined string and the code-unit offset of each
+      // grapheme so `match()` can use a sticky regex at the right position
+      // instead of re-joining the remaining graphemes for every token.
+      this.joined = this.s.join('');
+      const offsets = new Array<number>(this.s.length + 1);
+      let offset = 0;
+      for (let i = 0; i < this.s.length; i++) {
+        offsets[i] = offset;
+        offset += this.s[i].length;
+      }
+      offsets[this.s.length] = offset;
+      this.offsets = offsets;
+    }
   }
   /**
    * @return True if we reached the end of the stream
@@ -125,12 +168,17 @@ class Tokenizer {
   match(regEx: RegExp): string | null {
     // this.s can either be a string, if it's made up only of ASCII chars
     // or an array of graphemes, if it's more complicated.
-    let execResult: (string | null)[] | null;
+    //
+    // Use a sticky variant of the regex positioned at the current offset,
+    // rather than slicing the remaining input (O(n) per token, O(n²) total).
+    const re = stickyRegex(regEx);
     if (typeof this.s === 'string') {
-      execResult = regEx.exec(this.s.slice(this.pos));
+      re.lastIndex = this.pos;
     } else {
-      execResult = regEx.exec(this.s.slice(this.pos).join(''));
+      re.lastIndex =
+        this.offsets![this.pos < this.s.length ? this.pos : this.s.length];
     }
+    const execResult = re.exec(this.joined);
     if (execResult?.[0]) {
       this.pos += execResult[0].length;
       return execResult[0];
@@ -407,7 +455,7 @@ export function tokensToString(
   if (Array.isArray(tokens)) {
     for (const item of tokens) {
       if (Array.isArray(item)) {
-        flat = [...flat, ...(item as Token[])];
+        for (const token of item as Token[]) flat.push(token);
       } else {
         flat.push(item);
       }

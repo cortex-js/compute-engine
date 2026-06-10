@@ -17,6 +17,7 @@ import {
   fpatan,
   bigintDigits,
   pow10,
+  PI_DIGITS,
 } from './utils';
 
 // ---------- Declaration merging ----------
@@ -147,6 +148,29 @@ function fromFixedPoint(
   return fromRaw(sig, resultExp);
 }
 
+// ---------- Range-reduction helpers ----------
+
+/**
+ * Decimal exponent of a finite, non-zero value: |x| ∈ [10^e, 10^(e+1)).
+ *
+ * The fixed-point bridge (`toFixedPoint`) is an *absolute*-precision grid:
+ * values below 10^-workingPrec truncate to 0n and values far from 1 lose
+ * leading digits. Every transcendental that wants full *relative* precision
+ * factors this decimal exponent out of its argument (or compensates for it
+ * in the working precision) before crossing the bridge.
+ */
+function decimalExponent(x: BigDecimal): number {
+  const sig = x.significand < 0n ? -x.significand : x.significand;
+  return x.exponent + bigintDigits(sig) - 1;
+}
+
+/**
+ * The exponent of a BigDecimal is a JS number, so the largest decimal
+ * exponent that is exactly representable is Number.MAX_SAFE_INTEGER.
+ * Results whose exponent would exceed it saturate to ±Infinity / 0.
+ */
+const MAX_SAFE_EXPONENT = BigInt(Number.MAX_SAFE_INTEGER);
+
 // ---------- Range-reduction constant: ln(10) in fixed-point ----------
 
 // `exp`/`ln` factor the decimal exponent out of their argument using ln(10).
@@ -184,12 +208,23 @@ BigDecimal.prototype.sqrt = function (): BigDecimal {
   const targetPrec = BigDecimal.precision;
   const workingPrec = targetPrec + 10;
 
-  const [fp, scale] = toFixedPoint(this, workingPrec);
+  // Range reduction: write x = m·10^(2k) with m ∈ [1, 100), so
+  // sqrt(x) = sqrt(m)·10^k. The fixed-point kernel only ever sees m, an
+  // O(1) value — a tiny x (e.g. 1e-100) no longer underflows the
+  // absolute-precision fixed-point grid to 0, and the bridge keeps full
+  // relative precision for any decimal exponent.
+  const e = decimalExponent(this);
+  const k = Math.floor(e / 2);
+  const m = fromRaw(this.significand, this.exponent - 2 * k); // m ∈ [1, 100)
+
+  const [fp, scale] = toFixedPoint(m, workingPrec);
 
   // Compute fixed-point sqrt
   const sqrtFp = fpsqrt(fp, scale);
 
-  return fromFixedPoint(sqrtFp, scale, targetPrec);
+  // Reattach the decimal exponent: sqrt(m)·10^k.
+  const root = fromFixedPoint(sqrtFp, scale, targetPrec);
+  return fromRaw(root.significand, root.exponent + k);
 };
 
 // ---------- cbrt ----------
@@ -214,7 +249,15 @@ BigDecimal.prototype.cbrt = function (): BigDecimal {
   const targetPrec = BigDecimal.precision;
   const workingPrec = targetPrec + 10;
 
-  const [fp, scale] = toFixedPoint(this, workingPrec);
+  // Range reduction: write x = m·10^(3k) with m ∈ [1, 1000), so
+  // cbrt(x) = cbrt(m)·10^k. As for sqrt, the fixed-point kernel only sees
+  // the O(1) mantissa m, so tiny/huge decimal exponents neither underflow
+  // the absolute-precision grid nor inflate the working bigints.
+  const e = decimalExponent(this);
+  const k = Math.floor(e / 3);
+  const m = fromRaw(this.significand, this.exponent - 3 * k); // m ∈ [1, 1000)
+
+  const [fp, scale] = toFixedPoint(m, workingPrec);
 
   // Newton iteration for cube root in fixed-point:
   // We want cbrt(v) where v = fp / scale.
@@ -236,9 +279,9 @@ BigDecimal.prototype.cbrt = function (): BigDecimal {
 
   const C = fp * scale * scale;
 
-  // Seed from floating-point approximation
+  // Seed from floating-point approximation (m ∈ [1, 1000) is always finite)
   let x: bigint;
-  const numVal = this.toNumber();
+  const numVal = m.toNumber();
   const scaleNum = Number(scale);
   if (Number.isFinite(numVal) && numVal > 0 && Number.isFinite(scaleNum)) {
     const approx = Math.cbrt(numVal);
@@ -274,7 +317,9 @@ BigDecimal.prototype.cbrt = function (): BigDecimal {
     if (diffNext < diffX) x = next;
   }
 
-  return fromFixedPoint(x, scale, targetPrec);
+  // Reattach the decimal exponent: cbrt(m)·10^k.
+  const root = fromFixedPoint(x, scale, targetPrec);
+  return fromRaw(root.significand, root.exponent + k);
 };
 
 // ---------- Static methods ----------
@@ -304,6 +349,15 @@ BigDecimal.prototype.exp = function (): BigDecimal {
   // exp(0) = 1
   if (this.isZero()) return BigDecimal.ONE;
 
+  // Fast saturation for astronomically large arguments: |x| ≥ 1e17 implies
+  // |x / ln 10| > Number.MAX_SAFE_INTEGER (≈ 9.0e15), so the decimal
+  // exponent of the result is not representable (see MAX_SAFE_EXPONENT).
+  // Checking early avoids sizing the working precision by the magnitude.
+  if (decimalExponent(this) >= 17)
+    return this.significand > 0n
+      ? BigDecimal.POSITIVE_INFINITY
+      : BigDecimal.ZERO;
+
   const targetPrec = BigDecimal.precision;
 
   // Range reduction: exp(x) = exp(r) · 10^k with x = k·ln(10) + r and
@@ -326,11 +380,19 @@ BigDecimal.prototype.exp = function (): BigDecimal {
     rFp += l10;
   }
 
+  // Saturation policy: the decimal exponent of the result is k (plus an
+  // O(1) correction), and the class stores exponents as JS numbers, which
+  // are exact only up to Number.MAX_SAFE_INTEGER. Beyond that bound the
+  // result is not representable: saturate to +Infinity (k > 0) or 0 (k < 0),
+  // consistent with the exp(±Infinity) limits.
+  if (k > MAX_SAFE_EXPONENT || k < -MAX_SAFE_EXPONENT)
+    return k > 0n ? BigDecimal.POSITIVE_INFINITY : BigDecimal.ZERO;
+
   const expR = fromFixedPoint(fpexp(rFp, scale), scale, targetPrec);
 
   // Multiply by 10^k by shifting the decimal exponent.
   const newExp = expR.exponent + Number(k);
-  if (!Number.isFinite(newExp))
+  if (!Number.isSafeInteger(newExp))
     return k > 0n ? BigDecimal.POSITIVE_INFINITY : BigDecimal.ZERO;
   return fromRaw(expR.significand, newExp);
 };
@@ -414,7 +476,22 @@ BigDecimal.prototype.sin = function (): BigDecimal {
   if (this.isZero()) return BigDecimal.ZERO;
 
   const targetPrec = BigDecimal.precision;
-  const workingPrec = targetPrec + 15;
+  const e = decimalExponent(this);
+
+  // sin(x) = x·(1 − x²/6 + …): for tiny x the relative correction
+  // (< x² < 10^(2e+2)) is below the precision target — the answer *is* x.
+  // Without this, the absolute-precision bridge would underflow tiny x to
+  // an exact (and wrong) 0.
+  if (e < 0 && -2 * e >= targetPrec + 4) return this.toPrecision(targetPrec);
+
+  // Small (but not tiny) arguments lose −e leading digits crossing the
+  // absolute-precision bridge: compensate in the working precision.
+  const workingPrec = targetPrec + 15 + (e < 0 ? -e : 0);
+
+  // Huge arguments are reduced mod 2π inside fpsincos at extended precision,
+  // which needs ~e extra digits of π. We only store ~2370 digits of π:
+  // beyond that the reduction would be silently wrong — report NaN instead.
+  if (e > PI_DIGITS.length - workingPrec - 30) return BigDecimal.NAN;
 
   const [fp, scale] = toFixedPoint(this, workingPrec);
   const [sinFp] = fpsincos(fp, scale);
@@ -432,6 +509,12 @@ BigDecimal.prototype.cos = function (): BigDecimal {
   const targetPrec = BigDecimal.precision;
   const workingPrec = targetPrec + 15;
 
+  // π-digit budget for the mod-2π reduction of huge arguments (see sin).
+  // (Tiny arguments are fine here: the result is O(1), and a fixed-point
+  // input that truncates to 0 yields cos = 1, the correctly rounded value.)
+  const e = decimalExponent(this);
+  if (e > PI_DIGITS.length - workingPrec - 30) return BigDecimal.NAN;
+
   const [fp, scale] = toFixedPoint(this, workingPrec);
   const [, cosFp] = fpsincos(fp, scale);
   return fromFixedPoint(cosFp, scale, targetPrec);
@@ -446,7 +529,14 @@ BigDecimal.prototype.tan = function (): BigDecimal {
   if (this.isZero()) return BigDecimal.ZERO;
 
   const targetPrec = BigDecimal.precision;
-  const workingPrec = targetPrec + 15;
+  const e = decimalExponent(this);
+
+  // tan(x) = x·(1 + x²/3 + …): tiny x rounds to x (see sin).
+  if (e < 0 && -2 * e >= targetPrec + 4) return this.toPrecision(targetPrec);
+
+  // Compensate small arguments; cap huge ones by the π-digit budget (see sin).
+  const workingPrec = targetPrec + 15 + (e < 0 ? -e : 0);
+  if (e > PI_DIGITS.length - workingPrec - 30) return BigDecimal.NAN;
 
   const [fp, scale] = toFixedPoint(this, workingPrec);
   const [sinFp, cosFp] = fpsincos(fp, scale);
@@ -479,7 +569,14 @@ BigDecimal.prototype.atan = function (): BigDecimal {
   }
 
   const targetPrec = BigDecimal.precision;
-  const workingPrec = targetPrec + 15;
+  const e = decimalExponent(this);
+
+  // atan(x) = x·(1 − x²/3 + …): tiny x rounds to x (see sin).
+  if (e < 0 && -2 * e >= targetPrec + 4) return this.toPrecision(targetPrec);
+
+  // Compensate small arguments crossing the absolute-precision bridge.
+  // (Huge arguments are fine: fpatan reduces via atan(x) = π/2 − atan(1/x).)
+  const workingPrec = targetPrec + 15 + (e < 0 ? -e : 0);
 
   const [fp, scale] = toFixedPoint(this, workingPrec);
   const atanFp = fpatan(fp, scale);
@@ -505,11 +602,17 @@ BigDecimal.prototype.asin = function (): BigDecimal {
     return this.significand > 0n ? piHalf : piHalf.neg();
   }
 
+  const targetPrec = BigDecimal.precision;
+  const e = decimalExponent(this);
+
+  // asin(x) = x·(1 + x²/6 + …): tiny x rounds to x (see sin).
+  if (e < 0 && -2 * e >= targetPrec + 4) return this.toPrecision(targetPrec);
+
   // asin(x) = atan(x / sqrt(1 - x²))
   // Compute entirely in fixed-point to avoid precision loss from chaining
-  // BigDecimal operations at user-visible precision.
-  const targetPrec = BigDecimal.precision;
-  const workingPrec = targetPrec + 20;
+  // BigDecimal operations at user-visible precision. Small arguments lose
+  // −e leading digits crossing the bridge: compensate.
+  const workingPrec = targetPrec + 20 + (e < 0 ? -e : 0);
 
   const [xFp, scale] = toFixedPoint(this, workingPrec);
 
@@ -637,6 +740,35 @@ BigDecimal.prototype.sinh = function (): BigDecimal {
     return BigDecimal.NEGATIVE_INFINITY;
   }
 
+  const targetPrec = BigDecimal.precision;
+  const e = decimalExponent(this);
+
+  if (e < 0) {
+    // sinh(x) = x·(1 + x²/6 + …): tiny x rounds to x (see sin).
+    if (-2 * e >= targetPrec + 4) return this.toPrecision(targetPrec);
+
+    // Small x: exp(x) − exp(−x) cancels the leading 1, losing ~−e digits.
+    // Temporarily raise the precision to compensate, then round back.
+    const saved = BigDecimal.precision;
+    BigDecimal.precision = targetPrec - e + 5;
+    try {
+      const expX = this.exp();
+      return expX.sub(expX.inv()).div(BigDecimal.TWO).toPrecision(targetPrec);
+    } finally {
+      BigDecimal.precision = saved;
+    }
+  }
+
+  // Large |x|: exp(−x) is below the rounding grid once 2|x| > (p+3)·ln 10,
+  // so sinh(x) = ±exp(|x|)/2 correctly rounded. Short-circuit — subtracting
+  // exp(−x) from exp(x) would align exponents ~2|x|/ln 10 apart and build
+  // astronomically large significands (sinh(1e9) would attempt a
+  // ~10⁹-digit bigint subtraction).
+  if (Math.abs(this.toNumber()) > 1.16 * (targetPrec + 3)) {
+    const h = this.abs().exp().div(BigDecimal.TWO);
+    return this.significand > 0n ? h : h.neg();
+  }
+
   // sinh(x) = (exp(x) - 1/exp(x)) / 2
   // Use inv() instead of exp(-x) — a single division vs a full Taylor+squaring
   const expX = this.exp();
@@ -655,6 +787,12 @@ BigDecimal.prototype.cosh = function (): BigDecimal {
     // cosh(+Inf) = +Inf, cosh(-Inf) = +Inf (even function)
     return BigDecimal.POSITIVE_INFINITY;
   }
+
+  // Large |x|: cosh(x) = exp(|x|)/2 correctly rounded (see sinh — avoids
+  // aligning exponents ~2|x|/ln 10 apart in the addition below).
+  const targetPrec = BigDecimal.precision;
+  if (Math.abs(this.toNumber()) > 1.16 * (targetPrec + 3))
+    return this.abs().exp().div(BigDecimal.TWO);
 
   // cosh(x) = (exp(x) + 1/exp(x)) / 2
   // Use inv() instead of exp(-x) — a single division vs a full Taylor+squaring
@@ -675,6 +813,36 @@ BigDecimal.prototype.tanh = function (): BigDecimal {
     if (this.significand > 0n) return BigDecimal.ONE;
     return BigDecimal.NEGATIVE_ONE;
   }
+
+  const targetPrec = BigDecimal.precision;
+  const e = decimalExponent(this);
+
+  if (e < 0) {
+    // tanh(x) = x·(1 − x²/3 + …): tiny x rounds to x (see sin).
+    if (-2 * e >= targetPrec + 4) return this.toPrecision(targetPrec);
+
+    // Small x: exp(2x) − 1 cancels the leading 1, losing ~−e digits.
+    // Temporarily raise the precision to compensate, then round back.
+    const saved = BigDecimal.precision;
+    BigDecimal.precision = targetPrec - e + 5;
+    try {
+      const exp2x = this.mul(BigDecimal.TWO).exp();
+      return exp2x
+        .sub(BigDecimal.ONE)
+        .div(exp2x.add(BigDecimal.ONE))
+        .toPrecision(targetPrec);
+    } finally {
+      BigDecimal.precision = saved;
+    }
+  }
+
+  // Large |x|: 1 − |tanh(x)| = 2e^(−2|x|)(1 + …) is below the rounding grid
+  // once 2|x| > (p+3)·ln 10, so the result rounds to ±1. Short-circuit —
+  // exp(2x) ∓ 1 would align exponents ~2|x|/ln 10 apart and build
+  // astronomically large significands (tanh(1e9) would attempt a
+  // ~10⁹-digit bigint subtraction).
+  if (Math.abs(this.toNumber()) > 1.16 * (targetPrec + 3))
+    return this.significand > 0n ? BigDecimal.ONE : BigDecimal.NEGATIVE_ONE;
 
   // Use (exp(2x) - 1) / (exp(2x) + 1) for better numerical stability with large x
   const exp2x = this.mul(BigDecimal.TWO).exp();

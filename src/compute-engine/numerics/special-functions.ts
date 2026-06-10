@@ -1644,3 +1644,337 @@ export function fresnelC(x: number): number {
 export function sinc(x: number): number {
   return x === 0 ? 1 : Math.sin(x) / x;
 }
+
+//
+// ---------------- Bignum kernels (REVIEW.md B23) ----------------
+//
+// Precision policy: like the other bignum kernels in this file (bigGammaln,
+// bigDigamma, ...), convergence tolerances use `BigDecimal.precision` plus
+// ~10 guard digits. Unlike those kernels, the series below can suffer
+// subtractive cancellation (1 − erf for erfc, the alternating Fresnel
+// Taylor series), so the working precision itself is temporarily raised by
+// the cancellation budget and the result is rounded back to the caller's
+// precision.
+//
+// BigDecimal exp/ln regimes (REVIEW.md D6): the kernels below only call
+// `exp` with arguments of magnitude ≲ 2.3·(precision + guard) (from the
+// e^{−x²} factors — the series/asymptotic switchovers naturally bound the
+// argument), well inside the verified range. `sin`/`cos` argument reduction
+// uses the engine's 1100-digit π, so the Fresnel phase πx²/2 is reduced
+// accurately for |x²| up to ~10^(1000−precision).
+//
+
+const LOG10E = Math.LOG10E; // log10(e) ≈ 0.4343
+
+/**
+ * Run `fn` with `BigDecimal.precision` temporarily raised by `extra`
+ * digits (BigDecimal precision is a module-global, so save/restore).
+ */
+function withExtraPrecision(extra: number, fn: () => BigNum): BigNum {
+  const saved = BigDecimal.precision;
+  BigDecimal.precision = saved + Math.max(0, Math.ceil(extra));
+  try {
+    return fn();
+  } finally {
+    BigDecimal.precision = saved;
+  }
+}
+
+/**
+ * Maclaurin series for erf (DLMF 7.6.2):
+ *    erf(x) = (2/√π) e^{−x²} Σ_{n≥0} (2x²)ⁿ x / (1·3·5···(2n+1))
+ * All terms are positive, so there is no subtractive cancellation: the
+ * relative error tracks the working precision. Must be called with x > 0.
+ *
+ * `tolDigits` is the relative truncation tolerance (10^−tolDigits).
+ */
+function bigErfSeries(x: BigNum, tolDigits: number): BigNum {
+  const x2 = x.mul(x);
+  const twoX2 = x2.mul(2);
+  let term = x;
+  let sum = x;
+  const tol = new BigDecimal(10).pow(-tolDigits);
+  // Terms decay once 2n+1 > 2x²; generous cap (the loop breaks on tol)
+  const maxTerms = 1000 + 10 * Math.ceil(x2.toNumber()) + 10 * tolDigits;
+  for (let n = 1; n <= maxTerms; n++) {
+    term = term.mul(twoX2).div(2 * n + 1);
+    sum = sum.add(term);
+    if (term.lt(sum.mul(tol))) break;
+  }
+  return sum.mul(2).mul(x2.neg().exp()).div(BigDecimal.PI.sqrt());
+}
+
+/**
+ * Asymptotic series for erfc (DLMF 7.12.1):
+ *    erfc(x) = e^{−x²}/(x√π) · Σ_{m≥0} (−1)^m (2m−1)!! / (2x²)^m
+ * The minimum term is ~e^{−x²} relative, so the series can deliver about
+ * x²·log10(e) digits — callers must only use it when that exceeds the
+ * requested tolerance. Must be called with x > 0.
+ */
+function bigErfcAsymptotic(x: BigNum, tolDigits: number): BigNum {
+  const twoX2 = x.mul(x).mul(2);
+  let term: BigNum = BigDecimal.ONE;
+  let sum: BigNum = BigDecimal.ONE;
+  let prev = term.abs();
+  const tol = new BigDecimal(10).pow(-tolDigits);
+  for (let m = 1; m <= 100000; m++) {
+    term = term.mul(2 * m - 1).div(twoX2).neg();
+    const tAbs = term.abs();
+    // Divergence guard: stop at the smallest term of the asymptotic series
+    if (tAbs.gt(prev)) break;
+    prev = tAbs;
+    sum = sum.add(term);
+    if (tAbs.lt(tol)) break;
+  }
+  return x.mul(x).neg().exp().div(x.mul(BigDecimal.PI.sqrt())).mul(sum);
+}
+
+/**
+ * Bignum error function. Precision scales with `BigDecimal.precision`.
+ *
+ * - |x| ≤ √((p+10)·ln 10): Maclaurin series (DLMF 7.6.2), no cancellation.
+ * - beyond: erf(x) rounds to ±1 at the working precision
+ *   (erfc(x) < e^{−x²} ≤ 10^{−(p+10)}).
+ */
+export function bigErf(ce: ComputeEngine, x: BigNum): BigNum {
+  if (x.isNaN()) return BigDecimal.NAN;
+  if (!x.isFinite())
+    return x.isNegative() ? BigDecimal.NEGATIVE_ONE : BigDecimal.ONE;
+  if (x.isZero()) return BigDecimal.ZERO;
+  if (x.isNegative()) return bigErf(ce, x.neg()).neg();
+
+  const p = BigDecimal.precision;
+  const guard = 10;
+
+  const xN = x.toNumber();
+  if (xN * xN * LOG10E >= p + guard) return BigDecimal.ONE;
+
+  return withExtraPrecision(guard, () =>
+    bigErfSeries(x, p + guard)
+  ).toPrecision(p);
+}
+
+/**
+ * Bignum complementary error function.
+ * Precision scales with `BigDecimal.precision`.
+ *
+ * - x² log10(e) ≤ p+10: computed as 1 − erf(x) with the working precision
+ *   raised by the x²·log10(e) digits lost to cancellation.
+ * - beyond: the asymptotic series (DLMF 7.12.1), which by construction of
+ *   the switchover delivers ≥ p+10 digits there.
+ */
+export function bigErfc(ce: ComputeEngine, x: BigNum): BigNum {
+  if (x.isNaN()) return BigDecimal.NAN;
+  if (!x.isFinite()) return x.isNegative() ? BigDecimal.TWO : BigDecimal.ZERO;
+  if (x.isZero()) return BigDecimal.ONE;
+  if (x.isNegative()) return BigDecimal.TWO.sub(bigErfc(ce, x.neg()));
+
+  const p = BigDecimal.precision;
+  const guard = 10;
+
+  const xN = x.toNumber();
+  const cancellation = xN * xN * LOG10E; // digits lost in 1 − erf(x)
+
+  if (cancellation <= p + guard) {
+    return withExtraPrecision(cancellation + guard, () =>
+      BigDecimal.ONE.sub(bigErfSeries(x, p + Math.ceil(cancellation) + guard))
+    ).toPrecision(p);
+  }
+
+  return withExtraPrecision(guard, () =>
+    bigErfcAsymptotic(x, p + guard)
+  ).toPrecision(p);
+}
+
+/**
+ * Bignum inverse error function: y such that erf(y) = x, for x ∈ [−1, 1].
+ * Precision scales with `BigDecimal.precision`.
+ *
+ * Newton iteration on `bigErf`:
+ *    y ← y − (erf(y) − x)·(√π/2)·e^{y²}
+ * seeded from the machine-precision Winitzki estimate (~3 digits; each
+ * iteration doubles the digits). Note that erfInv is intrinsically
+ * ill-conditioned as |x| → 1 (|dy/dx| = (√π/2)e^{y²}): the result is the
+ * best possible for the given input, but tiny perturbations of x near ±1
+ * produce large changes in y.
+ */
+export function bigErfInv(ce: ComputeEngine, x: BigNum): BigNum {
+  if (x.isNaN()) return BigDecimal.NAN;
+  if (x.abs().gt(BigDecimal.ONE)) return BigDecimal.NAN;
+  if (x.isZero()) return BigDecimal.ZERO;
+  if (x.eq(BigDecimal.ONE)) return new BigDecimal(Infinity);
+  if (x.eq(BigDecimal.NEGATIVE_ONE)) return new BigDecimal(-Infinity);
+  if (x.isNegative()) return bigErfInv(ce, x.neg()).neg();
+
+  const p = BigDecimal.precision;
+  const guard = 15;
+
+  return withExtraPrecision(guard, () => {
+    // Seed: machine Winitzki estimate; if 1−x² underflows in double
+    // (x within ~1e−17 of 1), use the leading asymptotic √(−ln(1−x²))
+    let y: BigNum;
+    const xN = x.toNumber();
+    if (1 - xN * xN > 0) y = new BigDecimal(erfInvApprox(xN));
+    else y = BigDecimal.ONE.sub(x.mul(x)).ln().neg().sqrt();
+
+    const halfSqrtPi = BigDecimal.PI.sqrt().div(2);
+    const tol = new BigDecimal(10).pow(-(p + 5));
+    for (let i = 0; i < 100; i++) {
+      const delta = bigErf(ce, y)
+        .sub(x)
+        .mul(halfSqrtPi)
+        .mul(y.mul(y).exp());
+      y = y.sub(delta);
+      if (delta.abs().lt(y.abs().mul(tol))) break;
+    }
+    return y;
+  }).toPrecision(p);
+}
+
+/**
+ * Bignum unnormalized cardinal sine: sinc(x) = sin(x)/x, sinc(0) = 1.
+ * Precision scales with `BigDecimal.precision` (sin uses the engine's
+ * 1100-digit π for argument reduction).
+ */
+export function bigSinc(x: BigNum): BigNum {
+  if (x.isNaN()) return BigDecimal.NAN;
+  if (!x.isFinite()) return BigDecimal.ZERO; // lim sinc(±∞) = 0
+  if (x.isZero()) return BigDecimal.ONE;
+  return x.sin().div(x);
+}
+
+/**
+ * Taylor series for the Fresnel integrals:
+ *    S(x) = Σ (−1)ⁿ (π/2)^{2n+1} x^{4n+3} / ((2n+1)!·(4n+3))
+ *    C(x) = Σ (−1)ⁿ (π/2)^{2n}   x^{4n+1} / ((2n)!·(4n+1))
+ * Alternating with largest term ~e^{πx²/2}: the caller must raise the
+ * working precision by the (πx²/2)·log10(e) digits lost to cancellation.
+ * Must be called with x > 0. `tolDigits` is an absolute tolerance.
+ */
+function bigFresnelTaylor(
+  x: BigNum,
+  kind: 's' | 'c',
+  tolDigits: number
+): BigNum {
+  const h = BigDecimal.PI.div(2);
+  const h2 = h.mul(h);
+  const x4 = x.mul(x).mul(x).mul(x);
+  const h2x4 = h2.mul(x4);
+
+  // c_n = (π/2)^{2n+1} x^{4n+3}/(2n+1)!  (S)  or  (π/2)^{2n} x^{4n+1}/(2n)!  (C)
+  let c: BigNum;
+  let sum: BigNum;
+  if (kind === 's') {
+    c = h.mul(x).mul(x).mul(x);
+    sum = c.div(3);
+  } else {
+    c = x;
+    sum = x;
+  }
+
+  const tol = new BigDecimal(10).pow(-tolDigits);
+  const uN = (Math.PI / 2) * x.toNumber() ** 2;
+  // Terms decay once 2n > πx²/2; generous cap (the loop breaks on tol)
+  const maxTerms = 100 + 2 * Math.ceil(uN) + 2 * tolDigits;
+  for (let n = 1; n <= maxTerms; n++) {
+    const d = kind === 's' ? 2 * n * (2 * n + 1) : (2 * n - 1) * (2 * n);
+    c = c.mul(h2x4).div(d).neg();
+    const t = c.div(kind === 's' ? 4 * n + 3 : 4 * n + 1);
+    sum = sum.add(t);
+    if (t.abs().lt(tol)) break;
+  }
+  return sum;
+}
+
+/**
+ * Asymptotic expansion for the Fresnel integrals (DLMF 7.5.3–4, 7.12.2–3),
+ * with u = πx²/2:
+ *    f(x) ~ (1/πx) Σ (−1)^m (1/2)_{2m}   / u^{2m}
+ *    g(x) ~ (1/πx) Σ (−1)^m (1/2)_{2m+1} / u^{2m+1}
+ *    S(x) = 1/2 − f·cos u − g·sin u,   C(x) = 1/2 + f·sin u − g·cos u
+ * Minimum term ~e^{−u} relative, so usable only when u·log10(e) exceeds
+ * the requested digits (guaranteed by the switchover in bigFresnel).
+ * Must be called with x > 0.
+ */
+function bigFresnelAsymptotic(
+  x: BigNum,
+  kind: 's' | 'c',
+  tolDigits: number
+): BigNum {
+  const pi = BigDecimal.PI;
+  const u = pi.mul(x).mul(x).div(2);
+  const fourU2 = u.mul(u).mul(4);
+  const piX = pi.mul(x);
+
+  // Pochhammer ratios: (1/2)_{2m}/(1/2)_{2m−2} = (4m−3)(4m−1)/4
+  //                    (1/2)_{2m+1}/(1/2)_{2m−1} = (4m−1)(4m+1)/4
+  let fTerm: BigNum = BigDecimal.ONE;
+  let gTerm: BigNum = BigDecimal.HALF.div(u);
+  let fSum = fTerm;
+  let gSum = gTerm;
+  let prev = fTerm.abs();
+  const tol = new BigDecimal(10).pow(-tolDigits);
+  for (let m = 1; m <= 100000; m++) {
+    fTerm = fTerm.mul((4 * m - 3) * (4 * m - 1)).div(fourU2).neg();
+    gTerm = gTerm.mul((4 * m - 1) * (4 * m + 1)).div(fourU2).neg();
+    const fAbs = fTerm.abs();
+    // Divergence guard: stop at the smallest term of the asymptotic series
+    if (fAbs.gt(prev)) break;
+    prev = fAbs;
+    fSum = fSum.add(fTerm);
+    gSum = gSum.add(gTerm);
+    if (fAbs.lt(tol) && gTerm.abs().lt(tol)) break;
+  }
+  const f = fSum.div(piX);
+  const g = gSum.div(piX);
+  const sinU = u.sin();
+  const cosU = u.cos();
+
+  if (kind === 's') return BigDecimal.HALF.sub(f.mul(cosU)).sub(g.mul(sinU));
+  return BigDecimal.HALF.add(f.mul(sinU)).sub(g.mul(cosU));
+}
+
+function bigFresnel(x: BigNum, kind: 's' | 'c'): BigNum {
+  if (x.isNaN()) return BigDecimal.NAN;
+  if (!x.isFinite())
+    return x.isNegative() ? BigDecimal.HALF.neg() : BigDecimal.HALF;
+  if (x.isZero()) return BigDecimal.ZERO;
+  if (x.isNegative()) return bigFresnel(x.neg(), kind).neg(); // odd
+
+  const p = BigDecimal.precision;
+  const guard = 10;
+
+  const xN = x.toNumber();
+  const uN = (Math.PI / 2) * xN * xN; // phase πx²/2
+  const cancellation = uN * LOG10E; // digits lost in the Taylor series
+
+  if (cancellation <= p + 2 * guard) {
+    return withExtraPrecision(cancellation + guard, () =>
+      bigFresnelTaylor(x, kind, p + guard)
+    ).toPrecision(p);
+  }
+
+  // Asymptotic regime: truncation error ~e^{−u} < 10^{−(p+20)} here.
+  // Extra digits also cover the absolute phase accuracy of sin/cos(πx²/2).
+  const extra = guard + Math.ceil(Math.max(0, Math.log10(uN)));
+  return withExtraPrecision(extra, () =>
+    bigFresnelAsymptotic(x, kind, p + guard)
+  ).toPrecision(p);
+}
+
+/**
+ * Bignum Fresnel sine integral S(x). Precision scales with
+ * `BigDecimal.precision`: Taylor series for πx²/2·log10(e) ≤ p+20 (with
+ * raised working precision to absorb the alternating-series cancellation),
+ * asymptotic expansion beyond (where it delivers ≥ p+10 digits).
+ */
+export function bigFresnelS(x: BigNum): BigNum {
+  return bigFresnel(x, 's');
+}
+
+/**
+ * Bignum Fresnel cosine integral C(x). Same switchover as `bigFresnelS`.
+ */
+export function bigFresnelC(x: BigNum): BigNum {
+  return bigFresnel(x, 'c');
+}

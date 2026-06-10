@@ -365,8 +365,15 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   /** @internal */
+  private __typeResolver: TypeResolver | undefined;
+
+  /** @internal */
   get _typeResolver(): TypeResolver {
-    return createTypeResolver(this);
+    // The resolver reads `this.context` dynamically, so a single instance
+    // remains valid across scope changes — create it once and reuse it
+    // (this getter is hit on essentially every `.type` computation).
+    this.__typeResolver ??= createTypeResolver(this);
+    return this.__typeResolver;
   }
 
   /**
@@ -1007,8 +1014,9 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   set costFunction(fn: ((expr: Expression) => number) | undefined) {
-    if (typeof fn !== 'function') this._cost = DEFAULT_COST_FUNCTION;
-    this._cost = fn;
+    // A non-function value (including `undefined`) resets to the default
+    // cost function (the getter falls back to DEFAULT_COST_FUNCTION).
+    this._cost = typeof fn === 'function' ? fn : undefined;
   }
 
   /**

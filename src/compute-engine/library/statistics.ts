@@ -1,4 +1,13 @@
-import { erf, erfc, erfInv } from '../numerics/special-functions';
+import {
+  bigErf,
+  bigErfc,
+  bigErfInv,
+  erf,
+  erfc,
+  erfInv,
+} from '../numerics/special-functions';
+import { apply } from '../boxed-expression/apply';
+import { isNumber } from '../boxed-expression/type-guards';
 import {
   bigInterquartileRange,
   bigKurtosis,
@@ -83,15 +92,32 @@ function computeBinning(
 
 export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
   {
+    //
+    // Note (REVIEW.md B23): Erf/Erfc/ErfInv follow the same pattern as
+    // Gamma/Zeta in `library/arithmetic.ts`: exact special values fold in
+    // `evaluate()`, anything else stays symbolic unless
+    // `numericApproximation` is set, in which case `apply()` dispatches to
+    // the machine kernel or, when the engine precision exceeds machine
+    // precision, the bignum kernel. Complex arguments stay symbolic (no
+    // complex kernel — previously the real part was used silently, which
+    // was incorrect).
+    //
     Erf: {
       description: 'Gauss error function',
       complexity: 7500,
       signature: '(number) -> number',
       type: () => 'finite_real',
-      evaluate: (ops, { engine: ce }) => {
-        const x = ops[0].re;
-        if (!Number.isFinite(x)) return undefined;
-        return ce.number(erf(x));
+      evaluate: ([x], { numericApproximation, engine: ce }) => {
+        if (!isNumber(x) || x.im !== 0) return undefined;
+        // Exact special values, regardless of numericApproximation
+        if (x.isSame(0)) return ce.Zero;
+        if (x.isInfinity) return x.isPositive ? ce.One : ce.NegativeOne;
+        if (!numericApproximation) return undefined;
+        return apply(
+          x,
+          (x) => erf(x),
+          (x) => bigErf(ce, x)
+        );
       },
     },
 
@@ -100,10 +126,17 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       complexity: 7500,
       signature: '(number) -> number',
       type: () => 'finite_real',
-      evaluate: (ops, { engine: ce }) => {
-        const x = ops[0].re;
-        if (!Number.isFinite(x)) return undefined;
-        return ce.number(erfc(x));
+      evaluate: ([x], { numericApproximation, engine: ce }) => {
+        if (!isNumber(x) || x.im !== 0) return undefined;
+        // Exact special values, regardless of numericApproximation
+        if (x.isSame(0)) return ce.One;
+        if (x.isInfinity) return x.isPositive ? ce.Zero : ce.number(2);
+        if (!numericApproximation) return undefined;
+        return apply(
+          x,
+          (x) => erfc(x),
+          (x) => bigErfc(ce, x)
+        );
       },
     },
 
@@ -111,11 +144,21 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       description: 'Inverse of the error function',
       complexity: 7500,
       signature: '(number) -> number',
-      type: () => 'finite_real',
-      evaluate: (ops, { engine: ce }) => {
-        const x = ops[0].re;
-        if (!Number.isFinite(x)) return undefined;
-        return ce.number(erfInv(x));
+      // Not finite_real: ErfInv(±1) = ±∞
+      type: () => 'real',
+      evaluate: ([x], { numericApproximation, engine: ce }) => {
+        if (!isNumber(x) || x.im !== 0) return undefined;
+        // Exact special values, regardless of numericApproximation
+        if (x.isSame(0)) return ce.Zero;
+        if (x.isSame(1)) return ce.PositiveInfinity;
+        if (x.isSame(-1)) return ce.NegativeInfinity;
+        if (x.re < -1 || x.re > 1) return ce.NaN; // outside the domain
+        if (!numericApproximation) return undefined;
+        return apply(
+          x,
+          (x) => erfInv(x),
+          (x) => bigErfInv(ce, x)
+        );
       },
     },
   },

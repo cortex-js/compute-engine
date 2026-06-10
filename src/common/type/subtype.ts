@@ -1,10 +1,14 @@
 import {
   COLLECTION_TYPES,
+  COLLECTION_TYPES_SET,
   EXPRESSION_TYPES,
   NUMERIC_TYPES,
+  NUMERIC_TYPES_SET,
   INDEXED_COLLECTION_TYPES,
   PRIMITIVE_TYPES,
+  PRIMITIVE_TYPES_SET,
   SCALAR_TYPES,
+  SCALAR_TYPES_SET,
   VALUE_TYPES,
 } from './primitive';
 import type {
@@ -81,6 +85,37 @@ const PRIMITIVE_SUBTYPES: Record<PrimitiveType, PrimitiveType[]> = {
   expression: EXPRESSION_TYPES,
 };
 
+/**
+ * For each primitive type, the *reflexive transitive closure* of its primitive
+ * subtypes, as a `Set` for O(1) membership tests.
+ *
+ * Computed from `PRIMITIVE_SUBTYPES`. The closure repairs transitivity holes
+ * in the hand-maintained table (e.g. `imaginary ⊑ finite_complex ⊑
+ * finite_number`, but `imaginary` was missing from `finite_number`'s list).
+ */
+const PRIMITIVE_SUBTYPES_CLOSURE: Record<
+  PrimitiveType,
+  Set<PrimitiveType>
+> = (() => {
+  const closure = {} as Record<PrimitiveType, Set<PrimitiveType>>;
+
+  const closeOver = (t: PrimitiveType): Set<PrimitiveType> => {
+    if (closure[t]) return closure[t];
+    const result = new Set<PrimitiveType>([t]);
+    closure[t] = result; // Set first to guard against (unexpected) cycles
+    for (const sub of PRIMITIVE_SUBTYPES[t]) {
+      if (sub === t) continue;
+      for (const s of closeOver(sub)) result.add(s);
+    }
+    return result;
+  };
+
+  for (const t of Object.keys(PRIMITIVE_SUBTYPES) as PrimitiveType[])
+    closeOver(t);
+
+  return closure;
+})();
+
 /** Return true if lhs is a subtype of rhs */
 export function isPrimitiveSubtype(
   lhs: PrimitiveType,
@@ -99,23 +134,62 @@ export function isPrimitiveSubtype(
   // Identity
   if (lhs === rhs) return true;
 
-  return PRIMITIVE_SUBTYPES[rhs].includes(lhs);
+  return PRIMITIVE_SUBTYPES_CLOSURE[rhs].has(lhs);
 }
+
+/**
+ * The *meet* (greatest lower bound) of two primitive types in the primitive
+ * lattice: the maximal primitive types that are subtypes of both `a` and `b`.
+ *
+ * - If `a ⊑ b` (or `b ⊑ a`), the result is `[a]` (resp. `[b]`).
+ * - For incomparable but overlapping types, the result is the set of maximal
+ *   common subtypes, e.g. `meet(integer, finite_real)` = `[finite_integer]`
+ *   (`integer` admits ±∞, so the overlap is the *finite* integers), and
+ *   `meet(real, complex)` = `[finite_real, non_finite_number]` (the lattice
+ *   does not place `real` below `complex`, so the overlap is expressed as a
+ *   union of maximal common subtypes).
+ * - For disjoint types (e.g. `meet(string, integer)`), the result is `[]`.
+ *
+ * The special types `any`, `unknown`, `never`, `nothing` and `error` must be
+ * handled by the caller (they are not meaningful operands here).
+ */
+export function meetPrimitiveTypes(
+  a: PrimitiveType,
+  b: PrimitiveType
+): PrimitiveType[] {
+  if (a === b) return [a];
+  const sa = PRIMITIVE_SUBTYPES_CLOSURE[a];
+  const sb = PRIMITIVE_SUBTYPES_CLOSURE[b];
+  if (sa.has(b)) return [b];
+  if (sb.has(a)) return [a];
+
+  const key = a < b ? `${a}|${b}` : `${b}|${a}`;
+  const cached = MEET_CACHE.get(key);
+  if (cached) return cached;
+
+  // Common subtypes of a and b...
+  const common: PrimitiveType[] = [];
+  for (const t of sa) if (sb.has(t)) common.push(t);
+
+  // ... reduced to the maximal elements (those not below another common one)
+  const maximals = common.filter(
+    (t) => !common.some((u) => u !== t && PRIMITIVE_SUBTYPES_CLOSURE[u].has(t))
+  );
+
+  MEET_CACHE.set(key, maximals);
+  return maximals;
+}
+
+const MEET_CACHE = new Map<string, PrimitiveType[]>();
 
 /** Return true if lhs is a subtype of rhs */
 export function isSubtype(
   lhs: Type | TypeString,
   rhs: Type | TypeString
 ): boolean {
-  if (
-    typeof lhs === 'string' &&
-    !PRIMITIVE_TYPES.includes(lhs as PrimitiveType)
-  )
+  if (typeof lhs === 'string' && !PRIMITIVE_TYPES_SET.has(lhs as PrimitiveType))
     lhs = parseType(lhs);
-  if (
-    typeof rhs === 'string' &&
-    !PRIMITIVE_TYPES.includes(rhs as PrimitiveType)
-  )
+  if (typeof rhs === 'string' && !PRIMITIVE_TYPES_SET.has(rhs as PrimitiveType))
     rhs = parseType(rhs);
 
   // Every type is a subtype of `any`, the top type
@@ -550,7 +624,7 @@ export function isCompatible(
 
 function isNumeric(type: Type): boolean {
   if (typeof type === 'string')
-    return NUMERIC_TYPES.includes(type as NumericPrimitiveType);
+    return NUMERIC_TYPES_SET.has(type as NumericPrimitiveType);
   if (type.kind === 'value') return typeof type.value === 'number';
   if (type.kind === 'numeric') return true;
   return false;
@@ -559,7 +633,7 @@ function isNumeric(type: Type): boolean {
 function isScalar(type: Type): boolean {
   if (isNumeric(type)) return true;
   if (typeof type === 'string')
-    return SCALAR_TYPES.includes(type as PrimitiveType);
+    return SCALAR_TYPES_SET.has(type as PrimitiveType);
   if (type.kind === 'value')
     return ['string', 'boolean', 'number'].includes(typeof type.value);
   return false;
@@ -568,7 +642,7 @@ function isScalar(type: Type): boolean {
 function isCollection(type: Type): boolean {
   if (isIndexedCollection(type)) return true;
   if (typeof type === 'string')
-    return COLLECTION_TYPES.includes(type as PrimitiveType);
+    return COLLECTION_TYPES_SET.has(type as PrimitiveType);
   return ['collection', 'set', 'record', 'dictionary'].includes(type.kind);
 }
 
@@ -688,19 +762,18 @@ const LOSSY_SUPERTYPE = new Set<string>([
  */
 function unionTypes(a: Readonly<Type>, b: Readonly<Type>): Readonly<Type> {
   const members: Type[] = [];
+  // de-dup by structural equality: each member's key is computed once
+  const keys = new Set<string>();
   const push = (t: Readonly<Type>) => {
     if (typeof t === 'object' && t.kind === 'union') {
       for (const m of t.types) push(m);
       return;
     }
-    // de-dup by structural equality via JSON (cheap and adequate)
     const key = typeof t === 'string' ? t : JSON.stringify(t);
-    if (
-      !members.some(
-        (m) => (typeof m === 'string' ? m : JSON.stringify(m)) === key
-      )
-    )
+    if (!keys.has(key)) {
+      keys.add(key);
       members.push(t as Type);
+    }
   };
   push(a);
   push(b);
@@ -730,6 +803,39 @@ export function widen(...types: Readonly<Type>[]): Readonly<Type> {
   return types.reduce((a, b) => widen2(a, b));
 }
 
+/**
+ * The candidate common supertypes probed by `superType`, ordered from most
+ * specific to most general.
+ */
+const SUPERTYPE_PROBE_ORDER: PrimitiveType[] = [
+  'non_finite_number',
+  'finite_integer',
+  'integer',
+  'finite_rational',
+  'rational',
+  'finite_real',
+  'real',
+  'imaginary',
+  'finite_complex',
+  'complex',
+  'finite_number',
+  'number',
+  'list',
+  'record',
+  'dictionary',
+  'set',
+  'tuple',
+  'indexed_collection',
+  'collection',
+  'scalar',
+  'value',
+  'function',
+  'expression',
+];
+
+/** Memoized results of `superType` for pairs of primitive types */
+const PRIMITIVE_SUPERTYPE_CACHE = new Map<string, PrimitiveType>();
+
 function superType(a: Readonly<Type>, b: Readonly<Type>): Type {
   // Return the common super type of a and b
   if (a === b) return a;
@@ -741,46 +847,31 @@ function superType(a: Readonly<Type>, b: Readonly<Type>): Type {
   if (a === 'nothing') return b;
   if (b === 'nothing') return a;
 
+  // Fast path: for a pair of primitive types, use a direct lookup table
+  // (computed on demand from the closure sets, then memoized)
+  if (typeof a === 'string' && typeof b === 'string') {
+    const key = a < b ? `${a}|${b}` : `${b}|${a}`;
+    let result = PRIMITIVE_SUPERTYPE_CACHE.get(key);
+    if (result === undefined) {
+      result = 'any';
+      for (const ancestor of SUPERTYPE_PROBE_ORDER) {
+        const subtypes = PRIMITIVE_SUBTYPES_CLOSURE[ancestor];
+        if (
+          subtypes.has(a as PrimitiveType) &&
+          subtypes.has(b as PrimitiveType)
+        ) {
+          result = ancestor;
+          break;
+        }
+      }
+      PRIMITIVE_SUPERTYPE_CACHE.set(key, result);
+    }
+    return result;
+  }
+
   // Check in order from most specific to most general
-  if (commonSupertype(a, b, 'non_finite_number')) return 'non_finite_number';
-
-  if (commonSupertype(a, b, 'finite_integer')) return 'finite_integer';
-  if (commonSupertype(a, b, 'integer')) return 'integer';
-  if (commonSupertype(a, b, 'finite_rational')) return 'finite_rational';
-  if (commonSupertype(a, b, 'rational')) return 'rational';
-  if (commonSupertype(a, b, 'finite_real')) return 'finite_real';
-  if (commonSupertype(a, b, 'real')) return 'real';
-
-  if (commonSupertype(a, b, 'imaginary')) return 'imaginary';
-
-  if (commonSupertype(a, b, 'finite_complex')) return 'finite_complex';
-  if (commonSupertype(a, b, 'complex')) return 'complex';
-
-  if (commonSupertype(a, b, 'finite_number')) return 'finite_number';
-  if (commonSupertype(a, b, 'number')) return 'number';
-
-  if (commonSupertype(a, b, 'list')) return 'list';
-  if (commonSupertype(a, b, 'record')) return 'record';
-  if (commonSupertype(a, b, 'dictionary')) return 'dictionary';
-  if (commonSupertype(a, b, 'set')) return 'set';
-  if (commonSupertype(a, b, 'tuple')) return 'tuple';
-  if (commonSupertype(a, b, 'indexed_collection')) return 'indexed_collection';
-  if (commonSupertype(a, b, 'collection')) return 'collection';
-
-  if (commonSupertype(a, b, 'scalar')) return 'scalar';
-  if (commonSupertype(a, b, 'value')) return 'value';
-  if (commonSupertype(a, b, 'function')) return 'function';
-
-  if (commonSupertype(a, b, 'expression')) return 'expression';
+  for (const ancestor of SUPERTYPE_PROBE_ORDER)
+    if (isSubtype(a, ancestor) && isSubtype(b, ancestor)) return ancestor;
 
   return 'any';
-}
-
-function commonSupertype(
-  a: Readonly<Type>,
-  b: Readonly<Type>,
-  ancestor: Readonly<Type>
-): boolean {
-  if (isSubtype(a, ancestor) && isSubtype(b, ancestor)) return true;
-  return false;
 }

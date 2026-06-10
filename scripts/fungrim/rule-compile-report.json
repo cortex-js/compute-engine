@@ -1,7 +1,7 @@
 {
   "generator": "scripts/fungrim/compile-rules.ts",
-  "sliceEntries": 1647,
-  "emitted": 1349,
+  "sliceEntries": 1648,
+  "emitted": 1350,
   "ledger": {
     "box-error": 16,
     "compat-signature": 42,
@@ -14,18 +14,18 @@
   },
   "byPurpose": {
     "expand": 109,
-    "simplify": 1240
+    "simplify": 1241
   },
   "byClass": {
     "identity": 1025,
-    "specific-value": 324
+    "specific-value": 325
   },
   "byTarget": {
-    "simplify": 1349
+    "simplify": 1350
   },
   "sampleKinds": {
     "numeric": 41,
-    "symbolic": 1308
+    "symbolic": 1309
   },
   "headBuckets": {
     "Multiply": 256,
@@ -89,6 +89,7 @@
     "StieltjesGamma": 3,
     "Totient": 3,
     "WeierstrassP": 3,
+    "Zeta": 3,
     "Arctan2": 2,
     "ArgMin": 2,
     "BernoulliPolynomial": 2,
@@ -99,7 +100,6 @@
     "Max": 2,
     "Sign": 2,
     "XGCD": 2,
-    "Zeta": 2,
     "AGMSequence": 1,
     "Arccot": 1,
     "Arcsin": 1,
@@ -126,6 +126,9 @@
     "WeierstrassZeta": 1
   },
   "declaredShells": 112,
+  "injected": [
+    "zeta-trivial-zeros"
+  ],
   "solveSeeds": [
     "1f026d",
     "296627",

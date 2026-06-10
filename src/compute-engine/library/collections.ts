@@ -573,9 +573,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // of indeterminate numeric type.
         if (typeMembership(target, 'number') === false) return false;
 
-        // Concrete numeric target: decide by direct numeric comparison
-        // (the symbolic comparisons below mishandle infinite endpoints,
-        // e.g. `-∞ > -∞`)
+        // Concrete numeric target: decide by direct numeric comparison.
+        // This is more than a fast path: it refutes non-real targets
+        // (`im !== 0`), and it uses exact IEEE endpoint comparisons rather
+        // than the tolerance-based symbolic comparisons below. (The
+        // symbolic comparisons used to mishandle infinite endpoints, e.g.
+        // `-∞ > -∞` — fixed in `cmp()` — but the exact endpoint semantics
+        // still differ from the tolerance-based path.)
         const t = target.re;
         if (!Number.isNaN(t)) {
           if (target.im !== 0) return false;

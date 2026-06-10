@@ -49,6 +49,15 @@ function typeIntersection(a: Type, b: Type): Type {
  * Returning `undefined` (rather than a spurious `false`) is what allows
  * `Element(x, Integers)` and similar to stay unevaluated for symbols of
  * indeterminate type, instead of collapsing to `False`.
+ *
+ * The `false` refutation relies on the type lattice computing a correct
+ * *meet* for intersections: overlapping numeric primitives intersect to
+ * their greatest lower bound (e.g. `integer ∩ finite_real` =
+ * `finite_integer`), so `'nothing'` genuinely means "disjoint types"
+ * (REVIEW.md G15; see `meetPrimitiveTypes` in `common/type/subtype.ts`).
+ * This is what makes the precise per-set types used by the `contains`
+ * handlers below (e.g. `finite_complex`, `imaginary`) sound: a symbol
+ * declared `finite_real` is *not* refuted as an integer.
  */
 export function typeMembership(x: Expression, t: Type): boolean | undefined {
   const vt = x.type;
@@ -1288,10 +1297,13 @@ function membershipKleene(
     try {
       const type = ce.type(typeName);
       if (!type.isUnknown) {
-        const valueType = x.type;
-        if (valueType.matches(type)) return true;
-        if (typeIntersection(valueType.type, type.type) === 'nothing')
-          return false;
+        // Three-valued: in particular, a concrete number literal whose type
+        // overlaps but does not match is definitively excluded (e.g.
+        // `Element(2.5, integer)` → False, even though
+        // `finite_rational ∩ integer` is non-empty), while a symbol of
+        // overlapping type stays indeterminate (falls through).
+        const r = typeMembership(x, type.type);
+        if (r !== undefined) return r;
       }
     } catch {
       // If type parsing fails (e.g., "Booleans" is not a valid type),

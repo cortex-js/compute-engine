@@ -225,6 +225,11 @@ export function fpexp(x: bigint, scale: bigint): bigint {
  * @returns  ln(x/scale) * scale as a bigint
  */
 export function fpln(x: bigint, scale: bigint): bigint {
+  // Defense in depth: a non-positive input is a caller bug (callers
+  // range-reduce so the kernel only sees O(1) positive values). A zero
+  // input used to hang forever in the sqrt-reduction loop (fpsqrt(0) = 0).
+  if (x <= 0n) throw new RangeError('fpln: input must be positive');
+
   // ln(1) = 0
   if (x === scale) return 0n;
 

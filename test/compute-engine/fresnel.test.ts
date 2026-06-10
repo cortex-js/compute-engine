@@ -74,8 +74,11 @@ describe('FRESNEL - Numeric fresnelS', () => {
     }
   });
 
-  test('large argument: S(50) ~ 0.5', () => {
-    expect(fresnelS(50)).toBeCloseTo(0.5, 10);
+  // S(50) = 0.5 − f(50)·cos(1250π) ≈ 0.49363, not 0.5: the previous
+  // asymptotic cutoff of 36 (a transcription of the Cephes 36974) dropped
+  // the oscillating term, an absolute error of ~1/(πx)
+  test('large argument: S(50) = 0.49363380258593874...', () => {
+    expect(fresnelS(50)).toBeCloseTo(0.49363380258593874, 12);
   });
 });
 
@@ -113,8 +116,9 @@ describe('FRESNEL - Numeric fresnelC', () => {
     }
   });
 
-  test('large argument: C(50) ~ 0.5', () => {
-    expect(fresnelC(50)).toBeCloseTo(0.5, 10);
+  // C(50) = 0.5 − g(50)·cos(1250π) ≈ 0.49999919 (see S(50) note above)
+  test('large argument: C(50) = 0.49999918943072797...', () => {
+    expect(fresnelC(50)).toBeCloseTo(0.49999918943072797, 12);
   });
 });
 

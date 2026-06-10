@@ -9,7 +9,7 @@ import {
   trigSign,
 } from '../boxed-expression/trigonometry';
 
-import { apply2 } from '../boxed-expression/apply';
+import { apply, apply2 } from '../boxed-expression/apply';
 
 import { reducedRational } from '../numerics/rationals';
 import type { OperatorDefinition, SymbolDefinitions } from '../global-types';
@@ -21,7 +21,14 @@ import {
 } from '../boxed-expression/type-guards';
 import { numericTypeHandler } from './type-handlers';
 import { getUnitScale } from './unit-data';
-import { sinc, fresnelS, fresnelC } from '../numerics/special-functions';
+import {
+  bigFresnelC,
+  bigFresnelS,
+  bigSinc,
+  fresnelC,
+  fresnelS,
+  sinc,
+} from '../numerics/special-functions';
 
 //
 // Note: The name of trigonometric functions follow NIST DLMF
@@ -286,6 +293,17 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
 
     Coth: trigFunction('Coth', 6300),
 
+    //
+    // Note (REVIEW.md B23): Sinc/FresnelS/FresnelC follow the same pattern
+    // as Gamma/Zeta in `library/arithmetic.ts`: exact special values fold
+    // in `evaluate()`, anything else stays symbolic unless
+    // `numericApproximation` is set, in which case `apply()` dispatches to
+    // the machine kernel or, when the engine precision exceeds machine
+    // precision, the bignum kernel. Complex arguments stay symbolic (no
+    // complex kernel — previously the real part was used silently, which
+    // was incorrect).
+    //
+
     /** sinc(x) = sin(x)/x with sinc(0) = 1 (unnormalized cardinal sine) */
     Sinc: {
       description: 'Unnormalized sinc function: sin(x)/x with sinc(0)=1.',
@@ -293,9 +311,17 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       signature: '(number) -> real',
       type: () => 'finite_real',
-      evaluate: ([x], { engine: ce }) => {
-        if (!isNumber(x)) return undefined;
-        return ce.number(sinc(x.re));
+      evaluate: ([x], { numericApproximation, engine: ce }) => {
+        if (!isNumber(x) || x.im !== 0) return undefined;
+        // Exact special values, regardless of numericApproximation
+        if (x.isSame(0)) return ce.One;
+        if (x.isInfinity) return ce.Zero;
+        if (!numericApproximation) return undefined;
+        return apply(
+          x,
+          (x) => sinc(x),
+          (x) => bigSinc(x)
+        );
       },
     },
 
@@ -306,9 +332,18 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       signature: '(number) -> real',
       type: () => 'finite_real',
-      evaluate: ([x], { engine: ce }) => {
-        if (!isNumber(x)) return undefined;
-        return ce.number(fresnelS(x.re));
+      evaluate: ([x], { numericApproximation, engine: ce }) => {
+        if (!isNumber(x) || x.im !== 0) return undefined;
+        // Exact special values, regardless of numericApproximation
+        if (x.isSame(0)) return ce.Zero;
+        if (x.isInfinity)
+          return x.isPositive ? ce.Half : ce.Half.neg();
+        if (!numericApproximation) return undefined;
+        return apply(
+          x,
+          (x) => fresnelS(x),
+          (x) => bigFresnelS(x)
+        );
       },
     },
 
@@ -319,9 +354,18 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       signature: '(number) -> real',
       type: () => 'finite_real',
-      evaluate: ([x], { engine: ce }) => {
-        if (!isNumber(x)) return undefined;
-        return ce.number(fresnelC(x.re));
+      evaluate: ([x], { numericApproximation, engine: ce }) => {
+        if (!isNumber(x) || x.im !== 0) return undefined;
+        // Exact special values, regardless of numericApproximation
+        if (x.isSame(0)) return ce.Zero;
+        if (x.isInfinity)
+          return x.isPositive ? ce.Half : ce.Half.neg();
+        if (!numericApproximation) return undefined;
+        return apply(
+          x,
+          (x) => fresnelC(x),
+          (x) => bigFresnelC(x)
+        );
       },
     },
 

@@ -119,4 +119,78 @@ describe('Comparison correctness (REVIEW.md A1, A3)', () => {
     ce.assume(['Greater', 'z', 10]); // z > 10
     expect(ce.box('z').isGreater(3)).toBe(true);
   });
+
+  // G14: cmp() derived '>' from "not equal and not less". For equal
+  // infinities the tolerance check is `|∞ − ∞| = NaN` and `∞ < ∞` is false,
+  // so strict self-comparisons of infinities returned `true` (e.g.
+  // `-∞ > -∞`). Same derivation made NaN compare as greater than anything.
+  describe('G14: comparisons of infinities and NaN', () => {
+    for (const precision of ['machine', 50] as const) {
+      describe(`at ${precision} precision`, () => {
+        const ce = new ComputeEngine();
+        ce.precision = precision;
+        const pinf = ce.box('PositiveInfinity');
+        const ninf = ce.box('NegativeInfinity');
+        const nan = ce.box('NaN');
+
+        test('strict self-comparison of equal infinities is false', () => {
+          expect(ninf.isGreater(ninf)).toBe(false);
+          expect(ninf.isLess(ninf)).toBe(false);
+          expect(pinf.isGreater(pinf)).toBe(false);
+          expect(pinf.isLess(pinf)).toBe(false);
+        });
+
+        test('non-strict self-comparison of equal infinities is true', () => {
+          expect(ninf.isGreaterEqual(ninf)).toBe(true);
+          expect(ninf.isLessEqual(ninf)).toBe(true);
+          expect(pinf.isGreaterEqual(pinf)).toBe(true);
+          expect(pinf.isLessEqual(pinf)).toBe(true);
+        });
+
+        test('mixed-sign infinities are ordered', () => {
+          expect(ninf.isLess(pinf)).toBe(true);
+          expect(ninf.isLessEqual(pinf)).toBe(true);
+          expect(pinf.isGreater(ninf)).toBe(true);
+          expect(pinf.isGreaterEqual(ninf)).toBe(true);
+          expect(ninf.isGreater(pinf)).toBe(false);
+          expect(pinf.isLess(ninf)).toBe(false);
+        });
+
+        test('equality of infinities', () => {
+          expect(pinf.isEqual(pinf)).toBe(true);
+          expect(ninf.isEqual(ninf)).toBe(true);
+          expect(pinf.isEqual(ninf)).toBe(false);
+        });
+
+        test('comparisons involving NaN are indeterminate', () => {
+          expect(nan.isLess(pinf)).toBeUndefined();
+          expect(nan.isGreater(ninf)).toBeUndefined();
+          expect(nan.isLessEqual(nan)).toBeUndefined();
+          expect(nan.isGreaterEqual(nan)).toBeUndefined();
+          expect(pinf.isLess(nan)).toBeUndefined();
+          expect(ce.box(0).isGreater(nan)).toBeUndefined();
+        });
+
+        test('infinity vs finite numbers', () => {
+          expect(pinf.isGreater(1e308)).toBe(true);
+          expect(ninf.isLess(-1e308)).toBe(true);
+          expect(ce.box(0).isLess(pinf)).toBe(true);
+          expect(ce.box(0).isGreater(ninf)).toBe(true);
+        });
+
+        test('evaluated relational operators on equal infinities', () => {
+          const ev = (op: string) =>
+            ce
+              .box([op, 'NegativeInfinity', 'NegativeInfinity'])
+              .evaluate()
+              .symbol;
+          expect(ev('Greater')).toBe('False');
+          expect(ev('Less')).toBe('False');
+          expect(ev('GreaterEqual')).toBe('True');
+          expect(ev('LessEqual')).toBe('True');
+          expect(ev('Equal')).toBe('True');
+        });
+      });
+    }
+  });
 });

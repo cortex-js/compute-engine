@@ -49,6 +49,121 @@ import { BoxedType } from '../../common/type/boxed-type';
 import { TypeString } from '../types';
 import { SYMBOLS } from './dictionary/definitions-symbols';
 
+/** Tokens that cannot begin the braces-less argument of a LaTeX command
+ * (e.g. `\frac12`). See `parseToken()`. */
+const PARSE_TOKEN_EXCLUDED = new Set<string>([
+  ...'!"#$%&(),/;:?@[]\\`|~'.split(''),
+  '\\left',
+  '\\bigl',
+  '\\mleft',
+]);
+
+/** Commands that produce visual space, skipped by `skipVisualSpace()` */
+const VISUAL_SPACE_COMMANDS = new Set<string>([
+  '\\!',
+  '\\,',
+  '\\:',
+  '\\;',
+  '\\enskip',
+  '\\enspace',
+  '\\space',
+  '\\quad',
+  '\\qquad',
+]);
+
+/** Two-letter TeX units (as token sequences) accepted after `\hskip` and
+ * `\kern`. See `skipVisualSpace()`. */
+const TEX_UNIT_TOKENS: readonly string[][] = [
+  'pt',
+  'em',
+  'mu',
+  'ex',
+  'mm',
+  'cm',
+  'in',
+  'bp',
+  'sp',
+  'dd',
+  'cc',
+  'pc',
+  'nc',
+  'nd',
+].map((unit) => [...unit]);
+
+/** Map of common bare function names (e.g. `sin(x)` without a backslash,
+ * accepted in non-strict mode) to their MathJSON operator.
+ * See `tryParseBareFunction()`. */
+const BARE_FUNCTION_MAP: Record<string, string> = {
+  // Trigonometric
+  sin: 'Sin',
+  cos: 'Cos',
+  tan: 'Tan',
+  cot: 'Cot',
+  sec: 'Sec',
+  csc: 'Csc',
+  // Hyperbolic
+  sinh: 'Sinh',
+  cosh: 'Cosh',
+  tanh: 'Tanh',
+  coth: 'Coth',
+  sech: 'Sech',
+  csch: 'Csch',
+  // Inverse trigonometric
+  arcsin: 'Arcsin',
+  arccos: 'Arccos',
+  arctan: 'Arctan',
+  arccot: 'Arccot',
+  arcsec: 'Arcsec',
+  arccsc: 'Arccsc',
+  asin: 'Arcsin',
+  acos: 'Arccos',
+  atan: 'Arctan',
+  // Inverse hyperbolic
+  arcsinh: 'Arsinh',
+  arccosh: 'Arcosh',
+  arctanh: 'Artanh',
+  arccoth: 'Arcoth',
+  arcsech: 'Arsech',
+  arccsch: 'Arcsch',
+  asinh: 'Arsinh',
+  acosh: 'Arcosh',
+  atanh: 'Artanh',
+  // Logarithms and exponentials
+  log: 'Log',
+  ln: 'Ln',
+  exp: 'Exp',
+  lg: 'Lg',
+  lb: 'Lb',
+  // Other common functions
+  sqrt: 'Sqrt',
+  abs: 'Abs',
+  sgn: 'Sgn',
+  sign: 'Sgn',
+  floor: 'Floor',
+  ceil: 'Ceil',
+  round: 'Round',
+  max: 'Max',
+  min: 'Min',
+  gcd: 'Gcd',
+  lcm: 'Lcm',
+  // Roots
+  cbrt: 'Root', // Special-cased in `tryParseBareFunction` to add index 3
+  // Combinatorics
+  binom: 'Binomial',
+  nCr: 'Binomial',
+};
+
+/** Mapping of special tokens to their LaTeX string, as used by
+ * `tokensToString()`. Used by `lookAhead()` to build lookahead strings
+ * incrementally. */
+const LOOKAHEAD_TOKEN_TO_STRING: Record<string, string> = {
+  '<space>': ' ',
+  '<$$>': '$$',
+  '<$>': '$',
+  '<{>': '{',
+  '<}>': '}',
+};
+
 /** Lazy map from LaTeX command (e.g. '\\alpha') to its Unicode character.
  * Built once from the SYMBOLS table on first access. */
 let _symbolToUnicode: Map<string, string> | null = null;
@@ -291,6 +406,11 @@ export class _Parser implements Parser {
   private _lastPeek = '';
   private _peekCounter = 0;
 
+  // Cache for `lookAhead()`: the token stream and the dictionary are
+  // immutable, so the result only depends on the current index
+  private _lookAheadCache: [count: number, tokens: string][] | null = null;
+  private _lookAheadIndex = -1;
+
   constructor(
     tokens: LatexToken[],
     dictionary: IndexedLatexDictionary,
@@ -489,9 +609,6 @@ export class _Parser implements Parser {
     return tokensToString(this._tokens.slice(start, end));
   }
 
-  private latexAhead(n: number): string {
-    return this.latex(this.index, this.index + n);
-  }
   // latexBefore(): string {
   //   return this.latex(0, this.index);
   // }
@@ -514,15 +631,40 @@ export class _Parser implements Parser {
    *
    */
   lookAhead(): [count: number, tokens: string][] {
-    let n = Math.min(
+    // The result depends only on the (immutable) token stream, the current
+    // index and the (immutable) dictionary: cache it keyed on the index.
+    // `peekDefinitions()` is called several times at the same position
+    // (once per kind), so the cache hit rate is high.
+    if (this._lookAheadIndex === this.index && this._lookAheadCache !== null)
+      return this._lookAheadCache;
+
+    const n = Math.min(
       this._dictionary.lookahead,
       this._tokens.length - this.index
     );
-    if (n <= 0) return [];
 
     const result: [number, string][] = [];
 
-    while (n > 0) result.push([n, this.latexAhead(n--)]);
+    // Build the lookahead strings incrementally (replicating the
+    // `tokensToString()`/`joinLatex()` semantics) rather than re-joining
+    // the token slice from scratch for each length.
+    let s = '';
+    let sep = '';
+    for (let i = 0; i < n; i++) {
+      const token = this._tokens[this.index + i];
+      const segment = LOOKAHEAD_TOKEN_TO_STRING[token] ?? token;
+      // If the segment begins with a char that *could* be in a command
+      // name, insert the pending separator (see `joinLatex()`)
+      if (/[a-zA-Z]/.test(segment[0])) s += sep;
+      // If the segment ends in a command, add a space before the next one
+      sep = /\\[a-zA-Z]+\*?$/.test(segment) ? ' ' : '';
+      s += segment;
+      // Entries are ordered by decreasing token count
+      result[n - 1 - i] = [i + 1, s];
+    }
+
+    this._lookAheadCache = result;
+    this._lookAheadIndex = this.index;
 
     return result;
   }
@@ -558,87 +700,60 @@ export class _Parser implements Parser {
     if (this.atEnd) return [];
 
     const result: [IndexedLatexDictionaryEntry, number][] = [];
+    const dictionary = this._dictionary;
 
     // Get the appropriate trigger index for this kind
-    let triggerIndex: Map<string, IndexedLatexDictionaryEntry[]> | undefined;
+    let triggerIndex: Map<string, IndexedLatexDictionaryEntry[]>;
 
     switch (kind) {
       case 'infix':
-        triggerIndex = this._dictionary.infixByTrigger;
+        triggerIndex = dictionary.infixByTrigger;
         break;
       case 'prefix':
-        triggerIndex = this._dictionary.prefixByTrigger;
+        triggerIndex = dictionary.prefixByTrigger;
         break;
       case 'postfix':
-        triggerIndex = this._dictionary.postfixByTrigger;
+        triggerIndex = dictionary.postfixByTrigger;
         break;
       case 'function':
-        triggerIndex = this._dictionary.functionByTrigger;
+        triggerIndex = dictionary.functionByTrigger;
         break;
       case 'symbol':
-        triggerIndex = this._dictionary.symbolByTrigger;
+        triggerIndex = dictionary.symbolByTrigger;
         break;
       case 'expression':
-        triggerIndex = this._dictionary.expressionByTrigger;
+        triggerIndex = dictionary.expressionByTrigger;
         break;
       case 'operator':
-        // 'operator' kind needs special handling - fall back to iteration
-        triggerIndex = undefined;
+        triggerIndex = dictionary.operatorByTrigger;
         break;
     }
 
-    if (triggerIndex) {
-      // OPTIMIZED PATH: Use trigger index for fast lookup
+    // 1. Universal definitions (empty `latexTrigger`), precomputed at
+    //    indexing time, in priority order
+    const universalDefs = dictionary.universalDefs.get(kind);
+    if (universalDefs) for (const def of universalDefs) result.push([def, 0]);
 
-      // Collect defs that need iteration (universal and symbolTrigger)
-      // Do this in a single pass to avoid multiple getDefs() calls
-      const defsNeedingIteration: IndexedLatexDictionaryEntry[] = [];
-      for (const def of this.getDefs(kind)) {
-        if (def.latexTrigger === '' || def.symbolTrigger) {
-          defsNeedingIteration.push(def);
-        }
+    // 2. Direct index lookup for latexTrigger matches - O(lookahead)
+    for (const [n, tokens] of this.lookAhead()) {
+      const defs = triggerIndex.get(tokens);
+      if (defs) {
+        for (const def of defs) result.push([def, n]);
       }
+    }
 
-      // Add universal definitions (empty trigger)
-      for (const def of defsNeedingIteration) {
-        if (def.latexTrigger === '') result.push([def, 0]);
-      }
-
-      // Direct index lookup for latexTrigger matches - O(lookahead)
-      for (const [n, tokens] of this.lookAhead()) {
-        const defs = triggerIndex.get(tokens);
-        if (defs) {
-          for (const def of defs) result.push([def, n]);
-        }
-      }
-
-      // Process symbolTrigger defs
-      for (const def of defsNeedingIteration) {
-        if (def.symbolTrigger) {
-          const n = parseComplexId(this, def.symbolTrigger);
-          if (n > 0) result.push([def, n]);
-        }
-      }
-    } else {
-      // FALLBACK PATH: For 'operator' kind or if no index available
-      const defs = [...this.getDefs(kind)];
-
-      // Add universal definitions
-      for (const def of defs)
-        if (def.latexTrigger === '') result.push([def, 0]);
-
-      // Match latexTrigger
-      for (const [n, tokens] of this.lookAhead()) {
-        for (const def of defs)
-          if (def.latexTrigger === tokens) result.push([def, n]);
-      }
-
-      // Match symbolTrigger
-      for (const def of defs) {
-        if (def.symbolTrigger) {
-          const n = parseComplexId(this, def.symbolTrigger);
-          if (n > 0) result.push([def, n]);
-        }
+    // 3. symbolTrigger definitions: speculatively parse the symbol ahead
+    //    *once*, then look it up in the trigger map precomputed at indexing
+    //    time (instead of one speculative parse per symbolTrigger def)
+    const symbolTriggerDefs = dictionary.symbolTriggerDefs.get(kind);
+    if (symbolTriggerDefs) {
+      const start = this.index;
+      const candidate = parseSymbol(this)?.trim();
+      const n = this.index - start;
+      this.index = start;
+      if (candidate && n > 0) {
+        const defs = symbolTriggerDefs.get(candidate);
+        if (defs) for (const def of defs) result.push([def, n]);
       }
     }
 
@@ -686,19 +801,7 @@ export class _Parser implements Parser {
 
     this.skipSpace();
 
-    if (
-      [
-        '\\!',
-        '\\,',
-        '\\:',
-        '\\;',
-        '\\enskip',
-        '\\enspace',
-        '\\space',
-        '\\quad',
-        '\\qquad',
-      ].includes(this.peek)
-    ) {
+    if (VISUAL_SPACE_COMMANDS.has(this.peek)) {
       this.nextToken();
       this.skipVisualSpace();
     }
@@ -720,23 +823,8 @@ export class _Parser implements Parser {
       // Skip digits and decimal point
       while (/^[\d.]$/.test(this.peek)) this.nextToken();
       // Try to match a known two-letter TeX unit
-      for (const unit of [
-        'pt',
-        'em',
-        'mu',
-        'ex',
-        'mm',
-        'cm',
-        'in',
-        'bp',
-        'sp',
-        'dd',
-        'cc',
-        'pc',
-        'nc',
-        'nd',
-      ]) {
-        if (this.matchAll([...unit])) break;
+      for (const unit of TEX_UNIT_TOKENS) {
+        if (this.matchAll(unit)) break;
       }
       this.skipVisualSpace();
     }
@@ -1081,13 +1169,7 @@ export class _Parser implements Parser {
     // Skip any white space, for example in `\frac5 7`
     this.skipSpace();
 
-    const excluding = [
-      ...'!"#$%&(),/;:?@[]\\`|~'.split(''),
-      '\\left',
-      '\\bigl',
-      '\\mleft',
-    ];
-    if (excluding.includes(this.peek)) return null;
+    if (PARSE_TOKEN_EXCLUDED.has(this.peek)) return null;
 
     // Is it a single digit?
     // Note: `x^23` is `x^{2}3`, not x^{23}
@@ -1763,67 +1845,6 @@ export class _Parser implements Parser {
       return null;
     }
 
-    // Map of common function names to their LaTeX equivalents
-    const BARE_FUNCTION_MAP: Record<string, string> = {
-      // Trigonometric
-      sin: 'Sin',
-      cos: 'Cos',
-      tan: 'Tan',
-      cot: 'Cot',
-      sec: 'Sec',
-      csc: 'Csc',
-      // Hyperbolic
-      sinh: 'Sinh',
-      cosh: 'Cosh',
-      tanh: 'Tanh',
-      coth: 'Coth',
-      sech: 'Sech',
-      csch: 'Csch',
-      // Inverse trigonometric
-      arcsin: 'Arcsin',
-      arccos: 'Arccos',
-      arctan: 'Arctan',
-      arccot: 'Arccot',
-      arcsec: 'Arcsec',
-      arccsc: 'Arccsc',
-      asin: 'Arcsin',
-      acos: 'Arccos',
-      atan: 'Arctan',
-      // Inverse hyperbolic
-      arcsinh: 'Arsinh',
-      arccosh: 'Arcosh',
-      arctanh: 'Artanh',
-      arccoth: 'Arcoth',
-      arcsech: 'Arsech',
-      arccsch: 'Arcsch',
-      asinh: 'Arsinh',
-      acosh: 'Arcosh',
-      atanh: 'Artanh',
-      // Logarithms and exponentials
-      log: 'Log',
-      ln: 'Ln',
-      exp: 'Exp',
-      lg: 'Lg',
-      lb: 'Lb',
-      // Other common functions
-      sqrt: 'Sqrt',
-      abs: 'Abs',
-      sgn: 'Sgn',
-      sign: 'Sgn',
-      floor: 'Floor',
-      ceil: 'Ceil',
-      round: 'Round',
-      max: 'Max',
-      min: 'Min',
-      gcd: 'Gcd',
-      lcm: 'Lcm',
-      // Roots
-      cbrt: 'Root', // Special-cased below to add index 3
-      // Combinatorics
-      binom: 'Binomial',
-      nCr: 'Binomial',
-    };
-
     const fnName = BARE_FUNCTION_MAP[name];
     if (!fnName) {
       // Not a recognized function name, backtrack
@@ -2067,9 +2088,9 @@ export class _Parser implements Parser {
     // 2/ Apply subscripts (first)
     //
     if (subscripts.length > 0) {
-      const defs = [...this.getDefs('infix')].filter(
-        (x) => x.latexTrigger === '_'
-      ) as IndexedInfixEntry[];
+      // The `infixByTrigger` index buckets are in priority order
+      // (later definitions first), same as filtering `getDefs('infix')`
+      const defs = this._dictionary.infixByTrigger.get('_') ?? [];
       if (defs) {
         const arg: MathJsonExpression = [
           'Subscript',
@@ -2089,9 +2110,7 @@ export class _Parser implements Parser {
     // 3/ Apply superscripts (second)
     //
     if (superscripts.length > 0) {
-      const defs = [...this.getDefs('infix')].filter(
-        (x) => x.latexTrigger === '^'
-      ) as IndexedInfixEntry[];
+      const defs = this._dictionary.infixByTrigger.get('^') ?? [];
 
       if (defs) {
         const nonEmptySuperscripts = superscripts.filter(
@@ -2666,20 +2685,6 @@ export class _Parser implements Parser {
       }
     }
   }
-}
-
-/** Return the number of tokens matched, 0 if none */
-function parseComplexId(parser: Parser, id: string): number {
-  const start = parser.index;
-
-  const candidate = parseSymbol(parser)?.trim();
-  if (candidate === null) return 0;
-
-  const result = candidate !== id ? 0 : parser.index - start;
-
-  parser.index = start;
-
-  return result;
 }
 
 function isDelimiterCommand(parser: Parser): boolean {

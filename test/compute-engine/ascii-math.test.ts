@@ -219,7 +219,7 @@ describe('ARITHMETIC OPERATORS', () => {
     expect(check('4 \\times (2+3i)')).toMatchInlineSnapshot(`4(2 + 3i)`);
     expect(check('(2+3i) \\times 4')).toMatchInlineSnapshot(`4(2 + 3i)`);
     expect(check('-4 \\times (-2-3i)')).toMatchInlineSnapshot(`-4(-2 - 3i)`);
-    expect(check('(-2-3i) \\times -4')).toMatchInlineSnapshot(`4(2 + 3i)`);
+    expect(check('(-2-3i) \\times -4')).toMatchInlineSnapshot(`-4(-2 - 3i)`);
     expect(check('\\pi \\times i')).toMatchInlineSnapshot(`i * pi`);
     expect(check('\\pi \\times -i')).toMatchInlineSnapshot(`-i * pi`);
 

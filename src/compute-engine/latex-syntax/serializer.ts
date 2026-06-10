@@ -413,6 +413,66 @@ export function appendLatex(src: string, s: string): string {
   return src + s;
 }
 
+/** Lazy map from symbol name (e.g. 'alpha') to LaTeX command (e.g.
+ * '\\alpha'). Built once from the SYMBOLS table on first access; first entry
+ * wins (like the `findIndex()` scan it replaces). */
+let _latexBySymbolName: Map<string, string> | null = null;
+function getLatexBySymbolName(): Map<string, string> {
+  if (!_latexBySymbolName) {
+    _latexBySymbolName = new Map();
+    for (const [name, latex] of SYMBOLS)
+      if (!_latexBySymbolName.has(name)) _latexBySymbolName.set(name, latex);
+  }
+  return _latexBySymbolName;
+}
+
+/** Lazy map from Unicode codepoint to LaTeX command. Built once from the
+ * SYMBOLS table on first access; first entry wins. */
+let _latexByCodepoint: Map<number, string> | null = null;
+function getLatexByCodepoint(): Map<number, string> {
+  if (!_latexByCodepoint) {
+    _latexByCodepoint = new Map();
+    for (const [, latex, codepoint] of SYMBOLS)
+      if (!_latexByCodepoint.has(codepoint))
+        _latexByCodepoint.set(codepoint, latex);
+  }
+  return _latexByCodepoint;
+}
+
+/** Digits spelled out, e.g. for `\mathbb{1}`. See `specialName()` */
+const SPELLED_OUT_DIGITS = new Map<string, string>([
+  ['zero', '0'],
+  ['one', '1'],
+  ['two', '2'],
+  ['three', '3'],
+  ['four', '4'],
+  ['five', '5'],
+  ['six', '6'],
+  ['seven', '7'],
+  ['eight', '8'],
+  ['nine', '9'],
+  ['ten', '10'],
+]);
+
+/** Special symbol-body names mapped to LaTeX. See `specialName()` */
+const EXTRA_SYMBOLS = new Map<string, string>([
+  ['plus', '+'],
+  ['minus', '-'],
+  ['pm', '\\pm'],
+  ['ast', '\\ast'],
+  ['dag', '\\dag'],
+  ['ddag', '\\ddag'],
+  ['hash', '\\#'],
+  ['bottom', '\\bot'],
+  ['top', '\\top'],
+  ['bullet', '\\bullet'],
+  ['circle', '\\circ'],
+  ['diamond', '\\diamond'],
+  ['times', '\\times'],
+  ['square', '\\square'],
+  ['star', '\\star'],
+]);
+
 /** If the string is a special name, extract it. A special name is considered
  * until we run into a '_' or a digit.
  * So, for example `Number` is not `\Nu mber`, but `Number`.
@@ -429,61 +489,27 @@ function specialName(s: string): [result: string, rest: string] {
 
   const prefix = s.match(/^([^_]+)/)?.[1] ?? '';
   // Does the name start with a greek letter or other special symbol?
-  let i = SYMBOLS.findIndex((x) => prefix === x[0]);
-  if (i >= 0) return [SYMBOLS[i][1], s.substring(SYMBOLS[i][0].length)];
+  const symbolLatex = getLatexBySymbolName().get(prefix);
+  if (symbolLatex !== undefined)
+    return [symbolLatex, s.substring(prefix.length)];
 
   // Does the name start with a digit, spelled out?
   // i.e. for `\mathbb{1}`.
-  const DIGITS = {
-    zero: '0',
-    one: '1',
-    two: '2',
-    three: '3',
-    four: '4',
-    five: '5',
-    six: '6',
-    seven: '7',
-    eight: '8',
-    nine: '9',
-    ten: '10',
-  };
   // Match against the whole prefix (up to a subscript), like the SYMBOLS
   // branch above — not `startsWith`, which corrupted symbols such as
   // `tensor` → `10sor` and `onesie` → `1sie`.
-  i = Object.keys(DIGITS).findIndex((x) => prefix === x);
-  if (i >= 0) {
-    const key = Object.keys(DIGITS)[i];
-    return [DIGITS[key], s.substring(key.length)];
-  }
+  const digit = SPELLED_OUT_DIGITS.get(prefix);
+  if (digit !== undefined) return [digit, s.substring(prefix.length)];
 
   // Does the name start with a Unicode symbol?
   const code = s.codePointAt(0);
-  i = SYMBOLS.findIndex((x) => x[2] === code);
-  if (i >= 0) return [SYMBOLS[i][1], s.substring(1)];
-
-  const EXTRA_SYMBOLS = {
-    plus: '+',
-    minus: '-',
-    pm: '\\pm',
-    ast: '\\ast',
-    dag: '\\dag',
-    ddag: '\\ddag',
-    hash: '\\#',
-    bottom: '\\bot',
-    top: '\\top',
-    bullet: '\\bullet',
-    circle: '\\circ',
-    diamond: '\\diamond',
-    times: '\\times',
-    square: '\\square',
-    star: '\\star',
-  };
-  i = Object.keys(EXTRA_SYMBOLS).findIndex((x) => prefix === x);
-  if (i >= 0) {
-    // Access the ith key of the object
-    const key = Object.keys(EXTRA_SYMBOLS)[i];
-    return [EXTRA_SYMBOLS[key], s.substring(key.length)];
+  if (code !== undefined) {
+    const latex = getLatexByCodepoint().get(code);
+    if (latex !== undefined) return [latex, s.substring(1)];
   }
+
+  const extra = EXTRA_SYMBOLS.get(prefix);
+  if (extra !== undefined) return [extra, s.substring(prefix.length)];
 
   return [prefix, s.substring(prefix.length)];
 }

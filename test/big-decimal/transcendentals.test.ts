@@ -1078,3 +1078,296 @@ describe('BigDecimal tanh', () => {
     expect(BigDecimal.tanh(new BigDecimal('0')).isZero()).toBe(true);
   });
 });
+
+// ================================================================
+// D6: range reduction across the fixed-point bridge
+// ================================================================
+//
+// REVIEW.md D6: the fixed-point bridge (`toFixedPoint`) is an
+// *absolute*-precision grid, so arguments/results far from 1 used to
+// underflow to an exact 0 (exp(-200) → 0, sqrt(1e-100) → 0, sin(1e-100) → 0)
+// or silently lose leading digits, and ln of a tiny value hung forever
+// (`fpsqrt(0) = 0` infinite loop). The fix factors the decimal exponent out
+// of the argument before the kernel: exp(x) = exp(r)·10^k (r ∈ [0, ln 10)),
+// ln(x) = ln(m) + e·ln 10 (m ∈ [1, 10)), sqrt(x) = sqrt(m)·10^k
+// (m ∈ [1, 100)), cbrt(x) = cbrt(m)·10^k (m ∈ [1, 1000)). Small
+// trig/hyperbolic arguments short-circuit (f(x) = x·(1 + O(x²)) rounds to x)
+// or compensate the lost leading digits in the working precision.
+
+/** Number of matching leading significant digits between two decimal strings. */
+function digitsAgree(a: string, b: string): number {
+  const norm = (s: string) => s.replace('-', '').replace('.', '').split('e')[0];
+  const [x, y] = [norm(a), norm(b)];
+  let i = 0;
+  while (i < x.length && i < y.length && x[i] === y[i]) i++;
+  return i;
+}
+
+/** Decimal exponent of a finite non-zero value: |x| ∈ [10^e, 10^(e+1)). */
+function decimalExponentOf(x: BigDecimal): number {
+  const sig = x.significand < 0n ? -x.significand : x.significand;
+  return x.exponent + sig.toString().length - 1;
+}
+
+/** Relative difference |a - b| / |b| is below `bound` (given as a string). */
+function relClose(a: BigDecimal, b: BigDecimal, bound: string): boolean {
+  return a.sub(b).div(b).abs().lt(new BigDecimal(bound));
+}
+
+describe('D6: exp at large magnitudes', () => {
+  // References computed independently (Python decimal, 115 digits).
+  test('exp(-200) is correct to full precision', () => {
+    const s = new BigDecimal('-200').exp().toString();
+    expect(s.startsWith('1.383896526736737530648681456979084685403047582339')).toBe(true);
+    expect(s.endsWith('e-87')).toBe(true);
+  });
+
+  test('exp(-80) ≥ 48 correct digits', () => {
+    const s = new BigDecimal('-80').exp().toString();
+    expect(s.startsWith('1.804851387845415172312128357350027421171103097839')).toBe(true);
+    expect(s.endsWith('e-35')).toBe(true);
+  });
+
+  test('exp(80) ≥ 48 correct digits', () => {
+    const s = new BigDecimal('80').exp().toString();
+    expect(s.startsWith('5.540622384393510052571173395831661292485672883268')).toBe(true);
+    expect(s.endsWith('e+34')).toBe(true);
+  });
+
+  test('exp(700) ≥ 48 correct digits', () => {
+    const s = new BigDecimal('700').exp().toString();
+    expect(s.startsWith('1.014232054735004509455329595231267615204679572243')).toBe(true);
+    expect(s.endsWith('e+304')).toBe(true);
+  });
+
+  test('exp(-700) ≥ 48 correct digits', () => {
+    const s = new BigDecimal('-700').exp().toString();
+    expect(s.startsWith('9.859676543759770856705372947849465105115600181400')).toBe(true);
+    expect(s.endsWith('e-305')).toBe(true);
+  });
+
+  test('exp(1e16) is finite with the exact decimal exponent', () => {
+    // ⌊1e16 / ln 10⌋ = 4342944819032518 — still a safe-integer exponent.
+    const r = new BigDecimal('1e16').exp();
+    expect(r.isFinite()).toBe(true);
+    expect(decimalExponentOf(r)).toBe(4342944819032518);
+  });
+
+  test('exp saturates at the representational exponent bound', () => {
+    // Beyond |x/ln 10| > Number.MAX_SAFE_INTEGER the decimal exponent of the
+    // result is not exactly representable: saturate to +Infinity / 0
+    // (documented policy), consistent with exp(±Infinity).
+    const big = new BigDecimal('2.1e16').exp();
+    expect(big.isFinite()).toBe(false);
+    expect(big.isNaN()).toBe(false);
+    expect(big.significand > 0n).toBe(true);
+
+    expect(new BigDecimal('-2.1e16').exp().isZero()).toBe(true);
+
+    // Astronomically large arguments saturate without building
+    // magnitude-sized working bigints.
+    const huge = new BigDecimal('1e9999').exp();
+    expect(huge.isFinite()).toBe(false);
+    expect(huge.significand > 0n).toBe(true);
+    expect(new BigDecimal('-1e9999').exp().isZero()).toBe(true);
+  });
+});
+
+describe('D6: ln at large magnitudes', () => {
+  // This computation used to hang forever (fpln(0n) sqrt-reduction loop);
+  // if the fix regresses, the jest per-test timeout will catch it.
+  test('ln(1e-100) = -100·ln(10) to full precision', () => {
+    const r = new BigDecimal('1e-100').ln();
+    expect(
+      r.toString().startsWith('-230.258509299404568401799145468436420760110148862')
+    ).toBe(true);
+
+    const expected = new BigDecimal('10').ln().mul(-100);
+    expect(r.sub(expected).abs().lt(new BigDecimal('1e-45'))).toBe(true);
+  });
+
+  test('ln(1e+100) = +100·ln(10) to full precision', () => {
+    expect(
+      new BigDecimal('1e100')
+        .ln()
+        .toString()
+        .startsWith('230.258509299404568401799145468436420760110148862')
+    ).toBe(true);
+  });
+
+  test('ln(1e±300) = ±300·ln(10) to full precision', () => {
+    const prefix = '690.775527898213705205397436405309262280330446588';
+    expect(new BigDecimal('1e300').ln().toString().startsWith(prefix)).toBe(true);
+    expect(new BigDecimal('1e-300').ln().toString().startsWith('-' + prefix)).toBe(
+      true
+    );
+  });
+
+  test('ln(2) to full precision', () => {
+    expect(
+      new BigDecimal('2')
+        .ln()
+        .toString()
+        .startsWith('0.69314718055994530941723212145817656807550013436')
+    ).toBe(true);
+  });
+});
+
+describe('D6: exp/ln round-trips across 200 orders of magnitude', () => {
+  test('exp(ln(x)) ≈ x for x spanning 1e-100 .. 1e100', () => {
+    for (const s of ['1e-100', '3.7e-50', '0.5', '3.7', '4.2e50', '1e100']) {
+      const x = new BigDecimal(s);
+      expect(relClose(x.ln().exp(), x, '1e-45')).toBe(true);
+    }
+  });
+
+  test('ln(exp(x)) ≈ x for large-magnitude x', () => {
+    for (const s of ['-200', '-80', '80', '200', '700', '-700']) {
+      const x = new BigDecimal(s);
+      expect(x.exp().ln().sub(x).abs().lt(new BigDecimal('1e-44'))).toBe(true);
+    }
+  });
+});
+
+describe('D6: sqrt range reduction', () => {
+  test('sqrt of tiny values does not underflow to 0', () => {
+    expect(new BigDecimal('1e-100').sqrt().toString()).toBe('1e-50');
+    expect(new BigDecimal('4e-100').sqrt().toString()).toBe('2e-50');
+  });
+
+  test('sqrt(2e-90) = sqrt(2)·1e-45 to full precision', () => {
+    const s = new BigDecimal('2e-90').sqrt().toString();
+    expect(s.startsWith('1.414213562373095048801688724209698078569671875376')).toBe(true);
+    expect(s.endsWith('e-45')).toBe(true);
+  });
+
+  test('sqrt(2e300) = sqrt(2)·1e+150 to full precision', () => {
+    const s = new BigDecimal('2e300').sqrt().toString();
+    expect(s.startsWith('1.414213562373095048801688724209698078569671875376')).toBe(true);
+    expect(s.endsWith('e+150')).toBe(true);
+  });
+
+  test('sqrt round-trips at full relative precision for tiny/huge x', () => {
+    for (const s of ['1.7e-123', '5e-7', '9.4e211']) {
+      const x = new BigDecimal(s);
+      const root = x.sqrt();
+      expect(relClose(root.mul(root), x, '1e-48')).toBe(true);
+    }
+  });
+});
+
+describe('D6: cbrt range reduction', () => {
+  test('cbrt of tiny values does not underflow to 0', () => {
+    expect(new BigDecimal('8e-99').cbrt().toString()).toBe('2e-33');
+    expect(new BigDecimal('-8e-99').cbrt().toString()).toBe('-2e-33');
+    expect(new BigDecimal('1e-300').cbrt().toString()).toBe('1e-100');
+  });
+
+  test('cbrt round-trips at full relative precision for tiny/huge x', () => {
+    for (const s of ['2e-61', '3.1e-200', '7e155']) {
+      const x = new BigDecimal(s);
+      const root = x.cbrt();
+      expect(relClose(root.mul(root).mul(root), x, '1e-47')).toBe(true);
+    }
+  });
+});
+
+describe('D6: precision sweep (20/50/100 digits)', () => {
+  // References computed independently (Python decimal, 115 digits).
+  const EXP_M200 =
+    '1.383896526736737530648681456979084685403047582339477209393925353112436030450992987808798982287027040947149891771217e-87';
+  const LN_1EM100 =
+    '-230.2585092994045684017991454684364207601101488628772976033327900967572609677352480235997205089598298341967784042286';
+  const SQRT_2 =
+    '1.414213562373095048801688724209698078569671875376948073176679737990732478462107038850387534327641572735013846230912';
+
+  test.each([20, 50, 100])('precision %i', (prec) => {
+    BigDecimal.precision = prec;
+    expect(
+      digitsAgree(new BigDecimal('-200').exp().toString(), EXP_M200)
+    ).toBeGreaterThanOrEqual(prec - 2);
+    expect(
+      digitsAgree(new BigDecimal('1e-100').ln().toString(), LN_1EM100)
+    ).toBeGreaterThanOrEqual(prec - 2);
+    expect(
+      digitsAgree(new BigDecimal('2e-90').sqrt().toString(), SQRT_2)
+    ).toBeGreaterThanOrEqual(prec - 2);
+  });
+});
+
+describe('D6: trig/hyperbolic small arguments', () => {
+  test('tiny arguments return x, not a wrong exact 0', () => {
+    // f(x) = x·(1 + O(x²)): at 50 digits, f(1e-100) is exactly 1e-100.
+    for (const fn of ['sin', 'tan', 'atan', 'asin', 'sinh', 'tanh'] as const) {
+      expect(new BigDecimal('1e-100')[fn]().toString()).toBe('1e-100');
+      expect(new BigDecimal('-1e-100')[fn]().toString()).toBe('-1e-100');
+    }
+    expect(new BigDecimal('1e-100').cos().toString()).toBe('1');
+    expect(new BigDecimal('1e-100').cosh().toString()).toBe('1');
+  });
+
+  // References: x ± x³/6 etc. (Python decimal, 60 digits); the small-argument
+  // working-precision compensation keeps full relative precision where the
+  // absolute-precision bridge used to truncate ~|e| leading digits.
+  test('small (not tiny) arguments keep full relative precision', () => {
+    const x20 = new BigDecimal('1.2345678901234567890123456789e-20');
+    expect(
+      x20.sin().toString().startsWith('1.23456789012345678901234567889999999999996863872')
+    ).toBe(true);
+    expect(
+      x20.atan().toString().startsWith('1.23456789012345678901234567889999999999993727745')
+    ).toBe(true);
+    expect(
+      x20.asin().toString().startsWith('1.23456789012345678901234567890000000000003136127')
+    ).toBe(true);
+
+    const x15 = new BigDecimal('1.2345678901234567890123456789e-15');
+    expect(
+      x15.sinh().toString().startsWith('1.23456789012345678901234567890031361272872560962')
+    ).toBe(true);
+    expect(
+      x15.tanh().toString().startsWith('1.23456789012345678901234567889937277454254878074')
+    ).toBe(true);
+  });
+});
+
+describe('D6: trig/hyperbolic large arguments', () => {
+  test('sin/cos(1e300) reduce mod 2π at full precision', () => {
+    // References computed independently (Python decimal, 400-digit π).
+    expect(
+      new BigDecimal('1e300')
+        .sin()
+        .toString()
+        .startsWith('-0.98575042516037699660904753142989546907771531256')
+    ).toBe(true);
+    expect(
+      new BigDecimal('1e300')
+        .cos()
+        .toString()
+        .startsWith('-0.16821444437424507285187566443555584453305088766')
+    ).toBe(true);
+  });
+
+  test('trig beyond the stored π budget reports NaN, not a wrong value', () => {
+    // mod-2π reduction of 10^3000 needs ~3000 digits of π; only ~2370 are
+    // stored, so an accurate reduction is impossible — report NaN.
+    expect(new BigDecimal('1e3000').sin().isNaN()).toBe(true);
+    expect(new BigDecimal('1e3000').cos().isNaN()).toBe(true);
+    expect(new BigDecimal('1e3000').tan().isNaN()).toBe(true);
+  });
+
+  test('tanh of huge arguments rounds to ±1 (and terminates)', () => {
+    // Used to attempt exp(2e9) − 1 with exponent alignment, building a
+    // ~10⁹-digit bigint.
+    expect(new BigDecimal('1e9').tanh().toString()).toBe('1');
+    expect(new BigDecimal('-1e9').tanh().toString()).toBe('-1');
+  });
+
+  test('sinh/cosh of large arguments avoid exponent-alignment blowup', () => {
+    const s = new BigDecimal('1e6').sinh();
+    // log10(e^1e6 / 2) = 1e6/ln 10 − log10 2 → decimal exponent 434294
+    expect(decimalExponentOf(s)).toBe(434294);
+    expect(new BigDecimal('1e6').cosh().eq(s)).toBe(true);
+    expect(new BigDecimal('-1e6').sinh().eq(s.neg())).toBe(true);
+  });
+});

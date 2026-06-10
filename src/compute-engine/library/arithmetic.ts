@@ -29,6 +29,10 @@ import {
 } from '../numerics/numeric-bignum';
 import { factorial as bigFactorial } from '../numerics/numeric-bigint';
 import {
+  zetaEvenCoefficient,
+  zetaNegativeInteger,
+} from '../numerics/bernoulli';
+import {
   gamma,
   gammaln,
   bigGamma,
@@ -674,10 +678,34 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       signature: '(number) -> number',
       type: (ops) => numericTypeHandler(ops),
-      evaluate: ([x], { numericApproximation, engine }) =>
-        numericApproximation
-          ? apply(x, zeta, (x) => bigZeta(engine, x))
-          : undefined,
+      evaluate: ([x], { numericApproximation, engine }) => {
+        if (numericApproximation)
+          return apply(x, zeta, (x) => bigZeta(engine, x));
+
+        // Exact values at integer literals (via exact Bernoulli rationals):
+        // - ζ(2k) = (−1)^{k+1}·B₂ₖ·(2π)^{2k}/(2·(2k)!) → rational · π^{2k}
+        //   (ζ(2) = π²/6, ζ(4) = π⁴/90, ζ(6) = π⁶/945, …)
+        // - ζ(0) = −1/2; ζ(1) is a pole → ComplexInfinity
+        // - ζ(−n) = −Bₙ₊₁/(n+1): ζ(−1) = −1/12, ζ(−3) = 1/120, and
+        //   ζ(−2k) = 0 (the trivial zeros)
+        // - ζ(3), ζ(5), … have no known closed form: stay symbolic
+        // Capped at |s| ≤ 100 to avoid huge factorials; beyond, stay
+        // symbolic (the numeric path is unaffected).
+        const n = asSmallInteger(x);
+        if (n === null || !Number.isInteger(n) || Math.abs(n) > 100)
+          return undefined;
+        if (n === 1) return engine.ComplexInfinity;
+        if (n === 0) return engine.number([-1, 2]);
+        if (n < 0) {
+          if (n % 2 === 0) return engine.Zero;
+          return engine.number(zetaNegativeInteger(-n));
+        }
+        if (n % 2 === 0)
+          return engine.number(zetaEvenCoefficient(n / 2)).mul(
+            engine.Pi.pow(n)
+          );
+        return undefined;
+      },
     },
 
     // Beta function B(a,b) = Γ(a)Γ(b)/Γ(a+b) = ∫₀¹ t^(a-1)(1-t)^(b-1) dt
@@ -2160,6 +2188,10 @@ function evaluateMinMax(
   for (const op of ops) {
     const [val, others] = processMinMaxItem(op, mode);
     if (val) {
+      // NaN absorbs: Min/Max of an indeterminate value is indeterminate.
+      // (Comparisons with NaN are themselves indeterminate, so without this
+      // guard a NaN operand would be silently dropped.)
+      if (val.isNaN) return ce.NaN;
       if (!result) result = val;
       else {
         if ((upper && val.isGreater(result)) || (!upper && val.isLess(result)))

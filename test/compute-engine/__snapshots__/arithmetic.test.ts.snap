@@ -2,7 +2,7 @@
 
 exports[` 1`] = `
 box       = ["Max", 2.5, -1.1, "NaN", 18.4]
-eval-auto = 18.4
+eval-auto = NaN
 `;
 
 exports[` 2`] = `

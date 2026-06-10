@@ -148,4 +148,26 @@ export type IndexedLatexDictionary = {
   functionByTrigger: Map<string, IndexedFunctionEntry[]>;
   symbolByTrigger: Map<string, IndexedSymbolEntry[]>;
   expressionByTrigger: Map<string, IndexedExpressionEntry[]>;
+
+  // Merged trigger index over infix, prefix and postfix entries, used by
+  // `peekDefinitions('operator')`. Entries are in priority order (later
+  // definitions first), interleaved across the three kinds.
+  operatorByTrigger: Map<
+    string,
+    (IndexedInfixEntry | IndexedPrefixEntry | IndexedPostfixEntry)[]
+  >;
+
+  // Precomputed at indexing time (the dictionary is immutable once indexed):
+  // for each `peekDefinitions` kind (including the synthetic 'operator'
+  // kind), the definitions with an empty `latexTrigger` (universal triggers),
+  // in priority order (later definitions first). Only kinds with at least
+  // one such definition have an entry.
+  universalDefs: Map<string, IndexedLatexDictionaryEntry[]>;
+
+  // Precomputed at indexing time: for each `peekDefinitions` kind (including
+  // 'operator'), a map from `symbolTrigger` to the matching definitions, in
+  // priority order. Only kinds with at least one such definition have an
+  // entry. Lets `peekDefinitions` parse the symbol ahead once and look it
+  // up, instead of one speculative parse per symbolTrigger definition.
+  symbolTriggerDefs: Map<string, Map<string, IndexedLatexDictionaryEntry[]>>;
 };

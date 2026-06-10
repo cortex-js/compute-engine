@@ -1,6 +1,5 @@
-import { parseType } from './parse';
 import { typeToString } from './serialize';
-import { isSubtype } from './subtype';
+import { isSubtype, meetPrimitiveTypes } from './subtype';
 import type {
   Type,
   PrimitiveType,
@@ -79,9 +78,35 @@ export function reduceType(type: Type): Type {
 function decorate(t: Type): Type {
   if (typeof t !== 'object') return t;
 
+  // Cached/shared types (e.g. memoized `parseType()` results) are frozen and
+  // cannot be decorated; already-decorated types are left as-is (the
+  // decoration is non-configurable, so redefining it would throw).
+  if (Object.isFrozen(t) || Object.prototype.hasOwnProperty.call(t, 'toString'))
+    return t;
+
   Object.defineProperty(t, 'toString', { value: () => typeToString(t) });
 
   return t;
+}
+
+/**
+ * Reduce and structurally de-duplicate the member types of an algebraic
+ * type. The key of each member is computed once (a string for primitive
+ * types, the serialized form otherwise) — no `typeToString` → `parseType`
+ * round-trip.
+ */
+function reduceMembers(types: Readonly<Type[]>): Type[] {
+  const result: Type[] = [];
+  const seen = new Set<string>();
+  for (const t of types) {
+    const reduced = reduceType(t);
+    const key = typeof reduced === 'string' ? reduced : typeToString(reduced);
+    if (!seen.has(key)) {
+      seen.add(key);
+      result.push(reduced);
+    }
+  }
+  return result;
 }
 
 function reduceNegationType(type: NegationType): Type {
@@ -95,12 +120,7 @@ function reduceNegationType(type: NegationType): Type {
 }
 
 function reduceUnionType(type: AlgebraicType): Type {
-  const uniqueTypes = new Set(
-    type.types.map((t) => typeToString(reduceType(t)))
-  );
-  const reducedTypes: Type[] = Array.from(uniqueTypes).map(
-    (x) => parseType(x)!
-  );
+  const reducedTypes = reduceMembers(type.types);
 
   if (reducedTypes.length === 0) return 'never';
 
@@ -108,66 +128,81 @@ function reduceUnionType(type: AlgebraicType): Type {
 
   if (reducedTypes.length === 1) return decorate(reducedTypes[0]!); // "boolean | boolean" -> "boolean"
 
-  return decorate(
-    reducedTypes
-      .reduce<Type[]>((acc, current) => {
-        // A union keeps the *supertype* of any subtype-related pair, e.g.
-        // `integer | number` reduces to `number`. If `current` is already
-        // covered by an existing (super)type, drop it; otherwise drop any
-        // existing types that `current` subsumes, then add `current`.
-        if (acc.some((t) => isSubtype(current, t))) return acc;
-        acc = acc.filter((t) => !isSubtype(t, current));
-        acc.push(current);
-        return acc;
-      }, [])
-      .reduce((acc, cur, idx, arr) =>
-        arr.length === 1 ? cur : { kind: 'union', types: arr }
-      )
-  );
+  // A union keeps the *supertype* of any subtype-related pair, e.g.
+  // `integer | number` reduces to `number`. If `current` is already
+  // covered by an existing (super)type, drop it; otherwise drop any
+  // existing types that `current` subsumes, then add `current`.
+  const acc: Type[] = [];
+  for (const current of reducedTypes) {
+    if (acc.some((t) => isSubtype(current, t))) continue;
+    for (let i = acc.length - 1; i >= 0; i--)
+      if (isSubtype(acc[i], current)) acc.splice(i, 1);
+    acc.push(current);
+  }
+
+  if (acc.length === 1) return decorate(acc[0]);
+  return decorate({ kind: 'union', types: acc });
+}
+
+/**
+ * The *meet* (intersection) of two types.
+ *
+ * - For subtype-related pairs, the narrower type.
+ * - For incomparable but overlapping *primitive* pairs, the meet in the
+ *   primitive lattice (see `meetPrimitiveTypes`), e.g.
+ *   `integer ∧ finite_real` = `finite_integer` (`integer` admits ±∞, so the
+ *   overlap is the finite integers), `finite_number ∧ real` = `finite_real`.
+ *   When the maximal common subtypes are incomparable, the meet is their
+ *   union, e.g. `real ∧ complex` = `finite_real | non_finite_number` (the
+ *   lattice does not place the infinity-admitting `real` below `complex`).
+ * - Unions (which can arise from previous meets) distribute:
+ *   `(a | b) ∧ c` = `(a ∧ c) | (b ∧ c)`.
+ * - Incomparable non-primitive pairs are considered disjoint → `nothing`.
+ */
+function meet2(a: Type, b: Type): Type {
+  if (isSubtype(a, b)) return a;
+  if (isSubtype(b, a)) return b;
+
+  // Distribute the meet over union members
+  if (typeof a === 'object' && a.kind === 'union') return meetUnion(a.types, b);
+  if (typeof b === 'object' && b.kind === 'union') return meetUnion(b.types, a);
+
+  if (typeof a === 'string' && typeof b === 'string') {
+    const maximals = meetPrimitiveTypes(a as PrimitiveType, b as PrimitiveType);
+    if (maximals.length === 0) return 'nothing';
+    if (maximals.length === 1) return maximals[0];
+    return { kind: 'union', types: maximals };
+  }
+
+  return 'nothing';
+}
+
+function meetUnion(types: Readonly<Type[]>, b: Type): Type {
+  const members = types.map((t) => meet2(t, b)).filter((t) => t !== 'nothing');
+  if (members.length === 0) return 'nothing';
+  if (members.length === 1) return members[0];
+  return reduceUnionType({ kind: 'union', types: members });
 }
 
 function reduceIntersectionType(type: AlgebraicType): Type {
-  // Reduce intersection types
-  const uniqueTypes = new Set(
-    type.types.map((t) => typeToString(reduceType(t)))
-  );
-  const reducedTypes = Array.from(uniqueTypes).map((x) => parseType(x)!);
+  const reducedTypes = reduceMembers(type.types);
 
-  // If the intersection includes incompatible types, return `nothing`
-  const incompatible = reducedTypes.some((t1) =>
-    reducedTypes.some(
-      (t2) => t1 !== t2 && !isSubtype(t1, t2) && !isSubtype(t2, t1)
-    )
-  );
-
-  // e.g., "number & boolean" -> "nothing"
-  if (incompatible) return 'nothing';
-
-  // Simplify the intersection based on the reduced types
-  const simplified = reducedTypes.reduce<Type[]>((acc, current) => {
-    // Remove from acc any type that is a supertype of `current`
-    acc = acc.filter((t) => isSubtype(t, current));
-
-    // If `current` is not already in `acc` (meaning it's not more general), add it
-    if (!acc.some((t) => isSubtype(t, current))) acc.push(current);
-
-    return acc;
-  }, []);
+  if (reducedTypes.length === 0) return 'nothing';
 
   // If the intersection contains an `error`, return `error`
-  if (simplified.some((type) => type === 'error')) return 'error';
+  if (reducedTypes.some((type) => type === 'error')) return 'error';
 
-  // If the intersection is empty (shouldn't happen normally), return `nothing`
-  if (simplified.length === 0) return 'nothing';
+  // Fold the members pairwise through the meet. Overlapping numeric
+  // primitives intersect to their lattice meet (e.g. `integer & finite_real`
+  // = `finite_integer`) instead of collapsing to `nothing`; genuinely
+  // disjoint types (e.g. `number & boolean`) still annihilate to `nothing`.
+  let result: Type = reducedTypes[0];
+  for (let i = 1; i < reducedTypes.length; i++) {
+    result = meet2(result, reducedTypes[i]);
+    if (result === 'nothing') return 'nothing';
+  }
 
-  // If the intersection reduces to a single type, return that type
-  if (simplified.length === 1) return decorate(simplified[0]);
-
-  // Otherwise, return the simplified intersection
-  return decorate({
-    kind: 'intersection',
-    types: simplified,
-  });
+  return decorate(result);
 }
 
 function reduceCollectionType(

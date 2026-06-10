@@ -3,6 +3,19 @@ import { EMOJIS, isValidSymbol, validateSymbol } from '../../math-json/symbols';
 import { SYMBOLS } from './dictionary/definitions-symbols';
 import { Parser } from './types';
 
+/** Lazy map from LaTeX command (e.g. '\\alpha') to symbol name (e.g.
+ * 'alpha'). Built once from the SYMBOLS table on first access; first entry
+ * wins (like the `findIndex()` scan it replaces). */
+let _symbolNameByLatex: Map<string, string> | null = null;
+function getSymbolNameByLatex(): Map<string, string> {
+  if (!_symbolNameByLatex) {
+    _symbolNameByLatex = new Map();
+    for (const [name, latex] of SYMBOLS)
+      if (!_symbolNameByLatex.has(latex)) _symbolNameByLatex.set(latex, name);
+  }
+  return _symbolNameByLatex;
+}
+
 const SYMBOL_PREFIX = {
   // Those are "grouping" prefix that also specify spacing
   // around the symbol. We ignore the spacing, though.
@@ -95,10 +108,10 @@ function parseSymbolToken(
     return special;
   }
 
-  const i = SYMBOLS.findIndex((x) => x[1] === token);
-  if (i >= 0) {
+  const symbolName = getSymbolNameByLatex().get(token);
+  if (symbolName !== undefined) {
     parser.nextToken();
-    return SYMBOLS[i][0];
+    return symbolName;
   }
 
   // Handle \char, \unicode, and ^^ character escapes

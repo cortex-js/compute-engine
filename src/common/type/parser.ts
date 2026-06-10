@@ -28,8 +28,130 @@ import {
   DimensionNode,
 } from './ast-nodes';
 import { TypeResolver } from './types';
-import { PRIMITIVE_TYPES } from './primitive';
+import { PRIMITIVE_TYPES_SET } from './primitive';
 
+/**
+ * BNF grammar for the type parser:
+ *
+<type> ::= <union_type>
+         | <function_signature>
+
+<union_type> ::= <intersection_type> ( " | " <intersection_type> )*
+
+<intersection_type> ::= <primary_type_with_negation> ( " & " <primary_type_with_negation> )*
+
+<primary_type_with_negation> ::= ( "!" )? <primary_type>
+
+<primary_type> ::= <group>
+                 | <list_type>
+                 | <tuple_type>
+                 | <record_type>
+                 | <dictionary_type>
+                 | <set_type>
+                 | <collection_type>
+                 | <expression_type>
+                 | <symbol_type>
+                 | <numeric_type>
+                 | <primitive_type>
+                 | <value>
+                 | <type_reference>
+
+<group> ::= "(" <type> ")"
+
+(* --- Function Signatures --- *)
+
+<function_signature> ::= <arguments> " -> " <type>
+
+<arguments> ::= "()"
+              | "(" <argument_list>? ")"
+
+(* Note: The parser enforces a semantic rule: required arguments must come before optional and variadic arguments. *)
+<argument_list> ::= <argument_specifier> ( "," <argument_specifier> )*
+
+<argument_specifier> ::= <named_element> ( "?" | "*" | "+" )?
+
+<named_element> ::= ( <name> ":" )? <type>
+
+<name> ::= <identifier> | <verbatim_string>
+
+
+(* --- Collection-like Types --- *)
+
+<list_type> ::= "list" ( "<" <type> ( "^" <dimensions> )? ">" )?
+              | "vector" ( "<" ( <type> ("^" <dimension_specifier>)? | <dimensions> ) ">" )?
+              | "matrix" ( "<" ( <type> ("^" <dimensions>)? | <dimensions> ) ">" )?
+              | "tensor" ( "<" <type> ">" )?
+
+<dimensions> ::= <dimension_specifier> ( "x" <dimension_specifier> )*
+               | "(" <dimension_specifier> ( "x" <dimension_specifier> )* ")"
+
+<dimension_specifier> ::= <positive_integer_literal> | "?"
+
+<tuple_type> ::= "tuple<" ( <named_element> ( "," <named_element> )* )? ">"
+
+<record_type> ::= "record"
+                | "record<" <record_element> ( "," <record_element> )* ">"
+
+<record_element> ::= <key> ":" <type>
+
+<key> ::= <identifier> | <verbatim_string>
+
+<dictionary_type> ::= "dictionary"
+                    | "dictionary<" <type> ">"
+
+<set_type> ::= "set"
+             | "set<" <type> ">"
+
+<collection_type> ::= ( "collection" | "indexed_collection" ) ( "<" <type> ">" )?
+
+
+(* --- Other Constructed Types --- *)
+
+<expression_type> ::= "expression<" <identifier> ">"
+
+<symbol_type> ::= "symbol<" <identifier> ">"
+
+<numeric_type> ::= <numeric_primitive> "<" <bound> ".." <bound> ">"
+
+<bound> ::= <number_literal> | "-oo" | "oo" | ""
+
+
+(* --- Atomic and Primitive Types --- *)
+
+<type_reference> ::= ( "type" )? <identifier>
+
+<value> ::= <string_literal>
+          | <number_literal>
+          | "true" | "false"
+          | "nan" | "infinity" | "+infinity" | "oo" | "∞" | "+oo" | "+∞"
+          | "-infinity" | "-oo" | "-∞"
+
+<primitive_type> ::= <numeric_primitive>
+                   | "any" | "unknown" | "nothing" | "never" | "error"
+                   | "expression" | "symbol" | "function" | "value"
+                   | "scalar" | "boolean" | "string"
+                   | "collection" | "indexed_collection" | "list" | "tuple"
+                   | "set" | "record" | "dictionary"
+
+<numeric_primitive> ::= "number" | "finite_number" | "complex" | "finite_complex"
+                      | "imaginary" | "real" | "finite_real" | "rational"
+                      | "finite_rational" | "integer" | "finite_integer"
+                      | "non_finite_number"
+
+
+(* --- Terminals (Lexical Tokens) --- *)
+
+<identifier> ::= [a-zA-Z_][a-zA-Z0-9_]*
+
+<verbatim_string> ::= "`" ( [^`] | "\`" | "\\" )* "`"
+
+<positive_integer_literal> ::= [1-9][0-9]*
+
+<number_literal> ::= (* As parsed by the valueParser, including integers, decimals, and scientific notation *)
+
+<string_literal> ::= '"' ( [^"] | '\"' )* '"'
+ *
+ */
 export class Parser {
   private lexer: Lexer;
   private typeResolver: TypeResolver;
@@ -1018,7 +1140,7 @@ export class Parser {
   private parsePrimitiveType(): PrimitiveTypeNode | undefined {
     if (this.current.type === 'IDENTIFIER') {
       const name = this.current.value;
-      if (PRIMITIVE_TYPES.includes(name as any)) {
+      if (PRIMITIVE_TYPES_SET.has(name as any)) {
         this.advance();
         return this.createNode<PrimitiveTypeNode>('primitive', { name });
       }

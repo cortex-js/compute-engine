@@ -17,20 +17,20 @@
       "real-simple",
       "complex-domain"
     ],
-    "entries": 1647
+    "entries": 1648
   },
   "counts": {
-    "rules": 1349,
+    "rules": 1350,
     "byPurpose": {
       "expand": 109,
-      "simplify": 1240
+      "simplify": 1241
     },
     "byClass": {
       "identity": 1025,
-      "specific-value": 324
+      "specific-value": 325
     },
     "byTarget": {
-      "simplify": 1349
+      "simplify": 1350
     }
   },
   "ledger": {
@@ -1507,6 +1507,7 @@
 {"id":"fungrim:ff58cf","match":["Which",["NotEqual","_y",0],["Divide","Pi",["Multiply",2,["Sqrt","_y"]]],["Equal","_y",0],"ComplexInfinity"],"replace":["CarlsonRC",0,"_y"],"guards":[{"k":"type","wc":"_y","t":"complex"}],"purpose":"simplify","target":"simplify","class":"identity","heads":["CarlsonRC"],"topics":["carlson_elliptic"]},
 {"id":"fungrim:ff5e82","match":["Add",["Multiply","_z",["Divide",["Apply",["Derivative",["Function",["Block",["Sinc","_z"]],"_z"],["Add","_n",3]],"_z"],["Factorial",["Add","_n",3]]],["Add",["Power","_n",2],["Multiply",5,"_n"],6]],["Multiply",["Divide",["Apply",["Derivative",["Function",["Block",["Sinc","_z"]],"_z"],["Add","_n",2]],"_z"],["Factorial",["Add","_n",2]]],["Add",["Power","_n",2],["Multiply",5,"_n"],6]],["Multiply","_z",["Divide",["Apply",["Derivative",["Function",["Block",["Sinc","_z"]],"_z"],["Add","_n",1]],"_z"],["Factorial",["Add","_n",1]]]],["Divide",["Apply",["Derivative",["Function",["Block",["Sinc","_z"]],"_z"],"_n"],"_z"],["Factorial","_n"]]],"replace":0,"guards":[{"k":"type","wc":"_z","t":"complex"},{"k":"type","wc":"_n","t":"integer"},{"k":"cmp","wc":"_n","op":"ge","bound":0}],"purpose":"simplify","target":"simplify","class":"identity","heads":["Derivative","Factorial","Sinc"],"topics":["sinc"]},
 {"id":"fungrim:ff8254","match":["DirichletL","_s",["DirichletCharacter",["Power",2,"_n"],1]],"replace":["Multiply",["Subtract",1,["Power",2,["Negate","_s"]]],["Zeta","_s"]],"guards":[{"k":"type","wc":"_n","t":"integer"},{"k":"cmp","wc":"_n","op":"gt","bound":0},{"k":"type","wc":"_s","t":"complex"}],"purpose":"expand","target":"simplify","class":"identity","heads":["DirichletCharacter","DirichletL","Zeta"],"topics":["dirichlet"]},
-{"id":"fungrim:ffcc0f","match":["Add",["WeierstrassZeta",["Rational",1,2],"_tau"],["WeierstrassZeta","_z","_tau"]],"replace":["WeierstrassZeta",["Add","_z",1],"_tau"],"guards":[{"k":"type","wc":"_z","t":"complex"},{"k":"member","wc":"_tau","set":"HH"},{"k":"eval","pred":["NotElement","_z",["Lattice",1,"_tau"]]}],"purpose":"simplify","target":"simplify","class":"identity","heads":["HH","Lattice","WeierstrassZeta"],"topics":["weierstrass_elliptic"]}
+{"id":"fungrim:ffcc0f","match":["Add",["WeierstrassZeta",["Rational",1,2],"_tau"],["WeierstrassZeta","_z","_tau"]],"replace":["WeierstrassZeta",["Add","_z",1],"_tau"],"guards":[{"k":"type","wc":"_z","t":"complex"},{"k":"member","wc":"_tau","set":"HH"},{"k":"eval","pred":["NotElement","_z",["Lattice",1,"_tau"]]}],"purpose":"simplify","target":"simplify","class":"identity","heads":["HH","Lattice","WeierstrassZeta"],"topics":["weierstrass_elliptic"]},
+{"id":"fungrim:zeta-trivial-zeros","match":["Zeta",["Multiply",-2,"_n"]],"replace":0,"guards":[{"k":"type","wc":"_n","t":"integer"},{"k":"cmp","wc":"_n","op":"gt","bound":0}],"purpose":"simplify","target":"simplify","class":"specific-value","heads":["Zeta"],"topics":["riemann_zeta"]}
 ]
 }

@@ -775,8 +775,29 @@ export class BigDecimal {
     // Negative base with non-integer exponent → NaN (not real-valued)
     if (this.significand < 0n) return BigDecimal.NAN;
 
-    // Positive base, non-integer exponent: exp(n * ln(this))
-    return n.mul(this.ln()).exp();
+    // Positive base, non-integer exponent: exp(n · ln(this)).
+    //
+    // ln() is computed to `precision` *relative* digits, so its absolute
+    // error scales with |ln(this)|; multiplied by n it becomes the result's
+    // relative error — losing ~log10(|n·ln(this)|) digits (e.g. 10^100.5
+    // was correct to only ~47 of 50 digits). Temporarily carry that many
+    // extra digits, capped at 20: beyond |n·ln(this)| ≈ 10^17 the result's
+    // decimal exponent exceeds the representable bound and exp() saturates
+    // to 0/Infinity anyway.
+    const baseSig = this.significand; // positive here
+    const decExpBase = this.exponent + bigintDigits(baseSig) - 1;
+    const nSig = n.significand < 0n ? -n.significand : n.significand;
+    const decExpN = n.exponent + bigintDigits(nSig) - 1;
+    const argMag = decExpN + Math.log10(Math.abs(decExpBase) * 2.303 + 3) + 1;
+    const extra = Math.min(20, Math.max(2, Math.ceil(argMag) + 2));
+
+    const savedPrec = BigDecimal.precision;
+    BigDecimal.precision = savedPrec + extra;
+    try {
+      return n.mul(this.ln()).exp().toPrecision(savedPrec);
+    } finally {
+      BigDecimal.precision = savedPrec;
+    }
   }
 
   // ---------- Conversion methods ----------

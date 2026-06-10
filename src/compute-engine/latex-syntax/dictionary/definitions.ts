@@ -51,6 +51,7 @@ import type {
   IndexedFunctionEntry,
   IndexedMatchfixEntry,
   IndexedInfixEntry,
+  IndexedPrefixEntry,
   IndexedPostfixEntry,
   IndexedEnvironmentEntry,
   IndexedLatexDictionaryEntry,
@@ -352,10 +353,54 @@ export function indexLatexDictionary(
     functionByTrigger: new Map(),
     symbolByTrigger: new Map(),
     expressionByTrigger: new Map(),
+    operatorByTrigger: new Map(),
+    universalDefs: new Map(),
+    symbolTriggerDefs: new Map(),
   };
 
   for (const entry of dic)
     addEntry(result, entry as LatexDictionaryEntry, onError);
+
+  // Precompute the per-kind def lists used by `peekDefinitions()`:
+  // - `universalDefs`: defs with an empty `latexTrigger`
+  // - `symbolTriggerDefs`: defs with a `symbolTrigger`, keyed by trigger
+  // - `operatorByTrigger`: merged infix/prefix/postfix index by `latexTrigger`
+  // All lists are in priority order: later definitions take precedence over
+  // earlier ones, so iterate the definitions backwards (same order as
+  // `getDefs()`). The dictionary is immutable once indexed, so these can be
+  // computed once here rather than rebuilt on each `peekDefinitions()` call.
+  for (let i = result.defs.length - 1; i >= 0; i--) {
+    const def = result.defs[i];
+    const isOperator =
+      def.kind === 'infix' || def.kind === 'prefix' || def.kind === 'postfix';
+    const kinds = isOperator ? [def.kind, 'operator'] : [def.kind];
+    for (const kind of kinds) {
+      if (def.latexTrigger === '') {
+        const defs = result.universalDefs.get(kind);
+        if (defs) defs.push(def);
+        else result.universalDefs.set(kind, [def]);
+      }
+      if (def.symbolTrigger) {
+        let byTrigger = result.symbolTriggerDefs.get(kind);
+        if (!byTrigger) {
+          byTrigger = new Map();
+          result.symbolTriggerDefs.set(kind, byTrigger);
+        }
+        const defs = byTrigger.get(def.symbolTrigger);
+        if (defs) defs.push(def);
+        else byTrigger.set(def.symbolTrigger, [def]);
+      }
+      if (kind === 'operator' && def.latexTrigger && def.latexTrigger !== '') {
+        const operatorDef = def as
+          | IndexedInfixEntry
+          | IndexedPrefixEntry
+          | IndexedPostfixEntry;
+        const defs = result.operatorByTrigger.get(def.latexTrigger);
+        if (defs) defs.push(operatorDef);
+        else result.operatorByTrigger.set(def.latexTrigger, [operatorDef]);
+      }
+    }
+  }
 
   // Optimize matchfix index: sort each bucket to try common patterns first.
   // For delimiters with multiple definitions (like '(' with (), (], (\rbrack),

@@ -60,14 +60,31 @@ export const PRIMITIVE_TYPES: PrimitiveType[] = [
   ...EXPRESSION_TYPES,
 ] as const as PrimitiveType[];
 
+//
+// Set counterparts of the arrays above, for O(1) membership tests on hot
+// paths (the arrays are kept for ordered iteration and backward
+// compatibility).
+//
+export const NUMERIC_TYPES_SET: ReadonlySet<NumericPrimitiveType> = new Set(
+  NUMERIC_TYPES
+);
+export const COLLECTION_TYPES_SET: ReadonlySet<PrimitiveType> = new Set(
+  COLLECTION_TYPES
+);
+export const SCALAR_TYPES_SET: ReadonlySet<PrimitiveType> = new Set(
+  SCALAR_TYPES
+);
+export const PRIMITIVE_TYPES_SET: ReadonlySet<PrimitiveType> = new Set(
+  PRIMITIVE_TYPES
+);
+
 export function isValidPrimitiveType(s: any): s is PrimitiveType {
   if (typeof s !== 'string') return false;
-  return PRIMITIVE_TYPES.includes(s as PrimitiveType);
+  return PRIMITIVE_TYPES_SET.has(s as PrimitiveType);
 }
 
 export function isValidType(t: any): t is Readonly<Type> {
-  if (typeof t === 'string')
-    return PRIMITIVE_TYPES.includes(t as PrimitiveType);
+  if (typeof t === 'string') return PRIMITIVE_TYPES_SET.has(t as PrimitiveType);
   if (typeof t !== 'object') return false;
   if (!('kind' in t)) return false;
   return (

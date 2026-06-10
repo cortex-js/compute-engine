@@ -85,7 +85,7 @@ describe('CANONICAL FORMS', () => {
       canonical = ["Divide", -101, ["Power", 10, ["Rational", 2, 3]]]
       eval-auto = -101 / 10^(2/3)
       eval-mach = -101 / 10^(2/3)
-      N-auto    = -21.7597903693220255897
+      N-auto    = -21.7597903693220255898
       N-mach    = -21.759790369322012
     `);
   });

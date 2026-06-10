@@ -108,6 +108,15 @@ export type CurationOverride = {
 export type CurationOverrides = {
   overrides?: Record<string, CurationOverride>;
   transformAllowlist?: string[];
+  /**
+   * Hand-curated synthetic entries appended to the corpus slice. Each entry
+   * is corpus-`Entry`-shaped and goes through the FULL compile pipeline
+   * (guard compilation, orientation, canonicalization, dedup, self-test) —
+   * injection adds candidates, it never bypasses the machinery. Use for
+   * sound identities missing from the upstream corpus (e.g. the trivial
+   * zeros of Zeta). Ids must not collide with corpus entry ids.
+   */
+  inject?: Entry[];
   solveSeeds?: Record<string, { target: 'solve'; note: string }>;
 };
 
@@ -1557,10 +1566,15 @@ function main(): void {
   const reportPath = path.join(scriptDir, 'rule-compile-report.json');
 
   const corpus = loadCorpus(corpusDir);
-  const slice = corpus.entries.filter(isSliceEntry);
   const overrides: CurationOverrides = fs.existsSync(overridesPath)
     ? JSON.parse(fs.readFileSync(overridesPath, 'utf8'))
     : {};
+  // Curated injected entries are appended to the slice and compiled through
+  // the full pipeline (guards, orientation, self-test) like corpus entries.
+  const slice = [
+    ...corpus.entries.filter(isSliceEntry),
+    ...(overrides.inject ?? []),
+  ];
 
   const started = Date.now();
   const result = compileEntries(slice, corpus.declarations, overrides);
@@ -1619,6 +1633,7 @@ function main(): void {
       Object.entries(headBuckets).sort(([, a], [, b]) => b - a)
     ),
     declaredShells: Object.keys(result.declarations).length,
+    injected: (overrides.inject ?? []).map((e) => e.id).sort(),
     solveSeeds: Object.keys(overrides.solveSeeds ?? {}).sort(),
     skips: result.skips,
   };
