@@ -797,7 +797,13 @@ describe('fungrim-core-data.json artifact', () => {
     for (const r of artifact.rules) {
       collect(r.match);
       collect(r.replace);
-      for (const g of r.guards) collect(g);
+      // Guard specs are objects whose MathJSON payloads (member sets,
+      // cmp bounds, ne sides, eval predicates) may reference shells that
+      // appear nowhere in match/replace (e.g. `Lattice` in the
+      // weierstrass NotElement member-guards, `Interior` in
+      // modular_lambda/b7174d) — mirror compile-rules.ts
+      // `guardShellPayload`.
+      for (const g of r.guards) collect(Object.values(g));
     }
     for (const name of Object.keys(artifact.declarations))
       expect(referenced.has(name)).toBe(true);

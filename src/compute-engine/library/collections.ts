@@ -6,7 +6,11 @@ import {
 } from '../boxed-expression/validate';
 import { toInteger } from '../boxed-expression/numerics';
 
-import { basicIndexedCollectionHandlers } from '../collection-utils';
+import {
+  basicIndexedCollectionHandlers,
+  MAX_SIZE_EAGER_COLLECTION,
+} from '../collection-utils';
+import { extractFiniteDomainWithReason } from './logic-analysis';
 import { applicable, canonicalFunctionLiteral } from '../function-utils';
 // Dynamic import for compile to avoid circular dependency
 // (collections → compile-expression → base-compiler → library/utils → collections)
@@ -41,6 +45,10 @@ import { typeMembership } from './sets';
 
 // From NumPy:
 export const DEFAULT_LINSPACE_COUNT = 50;
+
+// Shared instance of the basic handlers, used by the `Set` handlers to
+// delegate the literal (non-comprehension) cases.
+const SET_BASE_HANDLERS = basicIndexedCollectionHandlers();
 
 // @todo: future thoughts. Consider
 // - operations from the Scala library, which is particularly well designed:
@@ -93,14 +101,49 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
   // Extensional set. Elements do not repeat. The order of the elements is not significant.
   // For intensional set, use `Filter` with a condition, e.g. `Filter(RealNumbers, _ > 0)`
+  //
+  // A `Set` expression can also be a set-builder (comprehension), e.g.
+  // `["Set", body, ["Element", k, domain, cond?]]` or
+  // `["Set", body, ["Condition", ...]]` (see `parseSetComprehension()`).
+  // Comprehensions are not literal 2-element sets: their elements are the
+  // substituted bodies over the (filtered) domain.
   Set: {
     complexity: 8200,
 
     signature: '(any*) -> set',
-    type: (ops, { engine: _ce }) =>
-      parseType(`set<${BoxedType.widen(...ops.map((op) => op.type))}>`),
+    type: (ops, { engine: _ce }) => {
+      // A comprehension's element type is not the type of its syntactic
+      // operands (body + indexing set)
+      if (parseSetComprehension(ops) !== null) return parseType('set');
+      return parseType(`set<${BoxedType.widen(...ops.map((op) => op.type))}>`);
+    },
 
     canonical: canonicalSet,
+    // The `lazy` flag suppresses the default operand evaluation: evaluating
+    // the operands of a comprehension would mangle its indexing set (e.g.
+    // the condition `gcd(n,k) = 1` with a free `k` evaluates to `False`).
+    // Literal elements are evaluated explicitly in the `evaluate` handler.
+    lazy: true,
+    evaluate: (ops, { engine: ce, numericApproximation, materialization }) => {
+      const comp = parseSetComprehension(ops);
+      if (comp !== null) {
+        // Materialize the comprehension as a literal set if the (filtered)
+        // domain is enumerable and small enough; otherwise stay symbolic.
+        const elements = enumerateSetComprehension(comp);
+        if (
+          elements === undefined ||
+          elements.length > MAX_SIZE_EAGER_COLLECTION
+        )
+          return undefined;
+        return ce.function('Set', elements);
+      }
+      // Literal set: evaluate each element (matches the default, non-lazy
+      // evaluation behavior this operator had before it was marked lazy)
+      return ce.function(
+        'Set',
+        ops.map((op) => op.evaluate({ numericApproximation, materialization }))
+      );
+    },
     eq: (a: Expression, b: Expression) => {
       if (a.operator !== b.operator) return false;
       if (!isFunction(a) || !isFunction(b)) return false;
@@ -110,31 +153,72 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       return a.ops.every(has);
     },
     collection: {
-      ...basicIndexedCollectionHandlers(),
+      ...SET_BASE_HANDLERS,
       // A set is not indexable
       at: undefined,
       indexWhere: undefined,
+      // A comprehension computes its elements on demand
+      isLazy: (expr) =>
+        isFunction(expr) && parseSetComprehension(expr.ops) !== null,
+      count: (expr) => {
+        if (!isFunction(expr)) return 0;
+        const comp = parseSetComprehension(expr.ops);
+        if (comp === null) return expr.nops;
+        // Cardinality of the comprehension: number of distinct substituted
+        // bodies. Symbolic or infinite domains are not enumerable: undefined.
+        return enumerateSetComprehension(comp)?.length;
+      },
+      isEmpty: (expr) => {
+        if (!isFunction(expr)) return true;
+        const comp = parseSetComprehension(expr.ops);
+        if (comp === null) return expr.nops === 0;
+        const elements = enumerateSetComprehension(comp);
+        return elements === undefined ? undefined : elements.length === 0;
+      },
+      isFinite: (expr) => {
+        if (!isFunction(expr)) return true;
+        const comp = parseSetComprehension(expr.ops);
+        if (comp === null) return true;
+        if (enumerateSetComprehension(comp) !== undefined) return true;
+        // A comprehension over a finite domain is finite even when it cannot
+        // be enumerated. The converse doesn't hold: a condition may filter an
+        // infinite domain down to a finite set, so otherwise we can't tell.
+        if (comp.domain?.isFiniteCollection === true) return true;
+        return undefined;
+      },
+      iterator: (expr) => {
+        if (!isFunction(expr)) return SET_BASE_HANDLERS.iterator(expr);
+        const comp = parseSetComprehension(expr.ops);
+        if (comp === null) return SET_BASE_HANDLERS.iterator(expr);
+        const elements = enumerateSetComprehension(comp);
+        // Non-enumerable comprehension: no iterator (`each()` yields nothing;
+        // consumers should check `isFinite`/`count` first, e.g. `Reduce`)
+        if (elements === undefined) return undefined;
+        let i = 0;
+        return {
+          next: () =>
+            i >= elements.length
+              ? { value: undefined, done: true as const }
+              : { value: elements[i++], done: false as const },
+        };
+      },
       // Three-valued membership: `true` when an element matches, `false`
       // only when every element is definitively different from `target`
       // (concrete values), `undefined` otherwise — e.g. a symbolic target
       // (`Element(ω, {-1, 1})`) is indeterminate, not refuted.
       contains: (expr, target) => {
         if (!isFunction(expr)) return undefined;
-        let indeterminate = false;
-        for (const op of expr.ops) {
-          if (target.isSame(op)) return true;
-          if (isNumber(target) && isNumber(op)) {
-            // Concrete numbers decide definitively
-            const eq = target.isEqual(op);
-            if (eq === true) return true;
-            if (eq !== false) indeterminate = true;
-          } else if (isString(target) && isString(op)) {
-            // Two distinct string literals (isSame was false): refuted
-          } else {
-            indeterminate = true;
-          }
-        }
-        return indeterminate ? undefined : false;
+        const comp = parseSetComprehension(expr.ops);
+        if (comp !== null) return setComprehensionContains(comp, target);
+        return literalSetContains(expr.ops, target);
+      },
+      elttype: (expr) => {
+        if (!isFunction(expr)) return SET_BASE_HANDLERS.elttype!(expr);
+        const comp = parseSetComprehension(expr.ops);
+        if (comp === null) return SET_BASE_HANDLERS.elttype!(expr);
+        const elements = enumerateSetComprehension(comp);
+        if (elements === undefined || elements.length === 0) return 'unknown';
+        return widen(...elements.map((op) => op.type.type));
       },
     },
   } as OperatorDefinition,
@@ -663,9 +747,20 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description: ['Return the number of elements in the collection.'],
     complexity: 8200,
     signature: '(collection) -> integer',
-    evaluate: ([xs], { engine }) =>
-      xs.isEmptyCollection ? engine.Zero : engine.number(xs.count),
-    sgn: ([xs]) => (xs.isEmptyCollection ? 'zero' : 'positive'),
+    evaluate: ([xs], { engine }) => {
+      if (xs.isEmptyCollection) return engine.Zero;
+      // An indeterminate count (e.g. a set-builder over a symbolic domain)
+      // stays symbolic
+      const n = xs.count;
+      if (n === undefined) return undefined;
+      return engine.number(n);
+    },
+    sgn: ([xs]) => {
+      const empty = xs.isEmptyCollection;
+      if (empty === true) return 'zero';
+      if (empty === false) return 'positive';
+      return undefined;
+    },
   },
 
   IsEmpty: {
@@ -2614,6 +2709,14 @@ function canonicalList(ops: Expression[], { engine: ce }): Expression {
 }
 
 function canonicalSet(ops: ReadonlyArray<Expression>, { engine }): Expression {
+  // Since the `Set` operator is `lazy`, the canonical handler receives raw
+  // operands: canonicalize them first
+  ops = ops.map((op) => op.canonical);
+
+  // A set-builder (comprehension) is not a literal set: do not deduplicate
+  // its syntactic operands (body + indexing set)
+  if (parseSetComprehension(ops) !== null) return engine._fn('Set', [...ops]);
+
   // Check that each element is only present once
   const set: Expression[] = [];
   const has = (x) => set.some((y) => y.isSame(x));
@@ -2621,6 +2724,268 @@ function canonicalSet(ops: ReadonlyArray<Expression>, { engine }): Expression {
   for (const op of ops) if (!has(op)) set.push(op);
 
   return engine._fn('Set', set);
+}
+
+/**
+ * A set-builder (comprehension) expression, e.g. `{k ∈ 1..n : gcd(n,k) = 1}`.
+ *
+ * - `body`: the expression each domain value is substituted into
+ * - `variable`: the bound (index) variable, or `undefined` if it could not
+ *   be identified (the comprehension is then never enumerable)
+ * - `domain`: the collection the variable ranges over, or `undefined` if
+ *   unknown (e.g. `{x | x > 0}`)
+ * - `condition`: an optional filter predicate
+ */
+type SetComprehension = {
+  body: Expression;
+  variable: string | undefined;
+  domain: Expression | undefined;
+  condition: Expression | undefined;
+};
+
+/**
+ * Determine whether the operands of a `Set` expression describe a
+ * set-builder (comprehension) rather than a literal set.
+ *
+ * A `Set` is a comprehension iff it has exactly two operands and the second
+ * operand is an indexing-set form:
+ *
+ * - `["Set", body, ["Element", v, domain, cond?]]` — the form used by the
+ *   big operators (Sum/Product) and the Fungrim corpus — provided the bound
+ *   variable `v` occurs in `body` (otherwise the `Element` is just a
+ *   proposition and the set is literal, e.g. `{x, k ∈ S}`);
+ * - `["Set", ["Element", v, domain], ["Condition", pred]]` — produced by the
+ *   LaTeX parser for `\{k \in S \mid pred\}`;
+ * - `["Set", body, ["Condition", ...]]` — produced by the LaTeX parser for
+ *   `\{body \mid ...\}`. A `Condition` operand is a syntactic marker, not a
+ *   value, so such a `Set` is always treated as a comprehension, possibly
+ *   with an unknown (non-enumerable) domain, e.g. `{x | x > 0}`.
+ *
+ * Literal sets — `{1, 2}`, `{x, y}`, … — never match: their second operand
+ * is not an `Element`/`Condition` indexing-set form.
+ *
+ * Returns `null` if the operands describe a literal set.
+ */
+function parseSetComprehension(
+  ops: ReadonlyArray<Expression>
+): SetComprehension | null {
+  if (ops.length !== 2) return null;
+  const [body, spec] = ops;
+
+  // The `Condition` operator holds its operands, so the domain/condition
+  // extracted from inside it may be non-canonical (unbound). Canonicalize
+  // the extracted pieces so they can be enumerated and evaluated.
+  const canon = (x: Expression) => (x.isCanonical ? x : x.canonical);
+
+  // Form A: ["Set", body, ["Element", v, domain, cond?]]
+  if (isFunction(spec, 'Element') && spec.nops >= 2) {
+    if (!isSymbol(spec.op1)) return null;
+    const v = spec.op1.symbol;
+    // The bound variable must occur in the body, else this is a literal set
+    if (!body.has(v)) return null;
+    const cond =
+      spec.nops >= 3 && sym(spec.op3) !== 'Nothing' ? spec.op3 : undefined;
+    return { body, variable: v, domain: spec.op2, condition: cond };
+  }
+
+  if (isFunction(spec, 'Condition') && spec.nops >= 1) {
+    const pred = spec.op1;
+
+    // Form B: ["Set", ["Element", v, domain], ["Condition", pred]]
+    // e.g. `\{k \in S \mid pred\}`: the body is the bound variable itself
+    if (isFunction(body, 'Element') && body.nops === 2 && isSymbol(body.op1)) {
+      return {
+        body: body.op1,
+        variable: body.op1.symbol,
+        domain: canon(body.op2),
+        condition: canon(pred),
+      };
+    }
+
+    // Form C: ["Set", body, ["Condition", ["Element", v, domain]]]
+    // e.g. `\{2k \mid k \in S\}`
+    if (isFunction(pred, 'Element') && pred.nops === 2 && isSymbol(pred.op1)) {
+      const v = pred.op1.symbol;
+      if (body.has(v))
+        return {
+          body,
+          variable: v,
+          domain: canon(pred.op2),
+          condition: undefined,
+        };
+    }
+
+    // Form C': the predicate is a conjunction including exactly one
+    // membership over a variable of the body,
+    // e.g. ["Set", body, ["Condition", ["And", ["Element", v, domain], cond]]]
+    if (isFunction(pred, 'And')) {
+      const memberships = pred.ops.filter(
+        (x) =>
+          isFunction(x, 'Element') &&
+          x.nops === 2 &&
+          isSymbol(x.op1) &&
+          body.has(x.op1.symbol)
+      );
+      const membership = memberships.length === 1 ? memberships[0] : undefined;
+      if (
+        membership &&
+        isFunction(membership, 'Element') &&
+        isSymbol(membership.op1)
+      ) {
+        const rest = pred.ops.filter((x) => x !== membership).map(canon);
+        const ce = body.engine;
+        const cond =
+          rest.length === 0
+            ? undefined
+            : rest.length === 1
+              ? rest[0]
+              : ce._fn('And', rest);
+        return {
+          body,
+          variable: membership.op1.symbol,
+          domain: canon(membership.op2),
+          condition: cond,
+        };
+      }
+    }
+
+    // Unrecognized `Condition` form: still a comprehension (a `Condition` is
+    // not a value), but over an unknown domain — never enumerable, e.g.
+    // `{x | x > 0}`. This keeps it symbolic instead of a 2-element literal.
+    return {
+      body,
+      variable: isSymbol(body) ? body.symbol : undefined,
+      domain: undefined,
+      condition: pred,
+    };
+  }
+
+  return null;
+}
+
+/**
+ * Enumerate the elements of a set-builder: the distinct substituted bodies
+ * over the (filtered) domain.
+ *
+ * Returns `undefined` if the domain cannot be enumerated (symbolic bounds,
+ * infinite or unknown domain, more than 1000 values...): the comprehension
+ * must then stay symbolic.
+ */
+function enumerateSetComprehension(
+  comp: SetComprehension
+): Expression[] | undefined {
+  const { body, variable, domain, condition } = comp;
+  if (variable === undefined || domain === undefined) return undefined;
+  const ce = body.engine;
+
+  // Reuse the big-op machinery (how Sum/Product enumerate an
+  // `Element(v, domain, cond?)` indexing set, including condition filtering)
+  const extract = (dom: Expression) =>
+    extractFiniteDomainWithReason(
+      ce._fn('Element', [
+        ce.symbol(variable),
+        dom,
+        ...(condition ? [condition] : []),
+      ]),
+      ce
+    );
+
+  let result = extract(domain);
+
+  // The domain may reference symbols with assigned values, e.g.
+  // `Range(1, n)` with `n := 5`: retry with the evaluated domain
+  if (result.status !== 'success') {
+    const evaluatedDomain = domain.evaluate();
+    if (!evaluatedDomain.isSame(domain)) result = extract(evaluatedDomain);
+  }
+  if (result.status !== 'success') return undefined;
+
+  // Substitute each domain value into the body and evaluate. A set has no
+  // duplicate elements: equal substituted bodies collapse, e.g.
+  // `{k mod 2 : k ∈ 1..4}` has two elements, `{0, 1}`.
+  const isIdentity = isSymbol(body) && body.symbol === variable;
+  const elements: Expression[] = [];
+  for (const value of result.values) {
+    const x = isIdentity ? value : body.subs({ [variable]: value }).evaluate();
+    if (!elements.some((y) => y.isSame(x))) elements.push(x);
+  }
+  return elements;
+}
+
+/**
+ * Three-valued membership for a literal set: `true` when an element matches,
+ * `false` only when every element is definitively different from `target`
+ * (concrete values), `undefined` otherwise.
+ */
+function literalSetContains(
+  ops: ReadonlyArray<Expression>,
+  target: Expression
+): boolean | undefined {
+  let indeterminate = false;
+  for (const op of ops) {
+    if (target.isSame(op)) return true;
+    if (isNumber(target) && isNumber(op)) {
+      // Concrete numbers decide definitively
+      const eq = target.isEqual(op);
+      if (eq === true) return true;
+      if (eq !== false) indeterminate = true;
+    } else if (isString(target) && isString(op)) {
+      // Two distinct string literals (isSame was false): refuted
+    } else {
+      indeterminate = true;
+    }
+  }
+  return indeterminate ? undefined : false;
+}
+
+/**
+ * Three-valued membership for a set-builder: decide by enumeration over
+ * finite domains; over symbolic/infinite domains, decide via the domain and
+ * the condition when the body is the bare bound variable, and stay
+ * indeterminate otherwise.
+ */
+function setComprehensionContains(
+  comp: SetComprehension,
+  target: Expression
+): boolean | undefined {
+  const elements = enumerateSetComprehension(comp);
+  if (elements !== undefined) return literalSetContains(elements, target);
+
+  // Non-enumerable domain: when the body is the bare bound variable, the
+  // comprehension is `{v ∈ domain : cond(v)}`, so membership is the Kleene
+  // conjunction of domain membership and the condition.
+  if (
+    comp.domain !== undefined &&
+    comp.variable !== undefined &&
+    isSymbol(comp.body) &&
+    comp.body.symbol === comp.variable
+  ) {
+    const inDomain = comp.domain.contains(target);
+    // Exclusion from the domain refutes membership (e.g. `1/2 ∉ {k ∈ ℤ : …}`)
+    if (inDomain === false) return false;
+
+    let condition: boolean | undefined = true;
+    if (comp.condition !== undefined) {
+      // Only literal candidates can be decided by evaluating the condition:
+      // a symbolic target could make the condition evaluate to a spurious
+      // `False` (e.g. `Equal` of distinct symbolic expressions)
+      if (isNumber(target) || isString(target)) {
+        const result = comp.condition
+          .subs({ [comp.variable]: target })
+          .evaluate();
+        condition =
+          sym(result) === 'True'
+            ? true
+            : sym(result) === 'False'
+              ? false
+              : undefined;
+      } else condition = undefined;
+    }
+    if (condition === false) return false;
+    if (inDomain === true && condition === true) return true;
+  }
+
+  return undefined;
 }
 
 function tally(collection: Expression): [ReadonlyArray<Expression>, number[]] {

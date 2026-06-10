@@ -193,12 +193,10 @@ describe('harmonizationRules', () => {
   //
   // The harmonization pass rewrites the normalized equation (in terms of
   // the `_x` wildcard symbol) into an equivalent, easier-to-solve form,
-  // which is then run through the root-finding rules.
-  //
-  // Note: in the post-harmonization root-finding pass, pattern root rules
-  // have their `_x` wildcard bound to the original unknown symbol, so the
-  // harmonized form (which contains the `_x` symbol) is matched with a
-  // functional root rule, which receives the expression directly.
+  // which is then run through the root-finding rules. In the
+  // post-harmonization root-finding pass the `_x` wildcard is bound to the
+  // literal `_x` symbol (same as in the first pass), so both pattern root
+  // rules and functional root rules can match the harmonized form.
   //
   function pushHarmonizationScenario(ce: ComputeEngine): void {
     // sinh(_x) + b = 0 → _x - arsinh(-b) = 0
@@ -225,6 +223,64 @@ describe('harmonizationRules', () => {
     const result = ce.parse('\\sinh(x) - 3 = 0').solve('x') as any[];
     expect(result?.length).toBe(1);
     expect(result[0].N().re).toBeCloseTo(ARSINH_3, 10);
+  });
+
+  //
+  // Natural path: a pushed harmonization rule whose output is solved by the
+  // BUILT-IN pattern root rules (no functional rule needed). The harmonized
+  // form `_x - arsinh(3) = 0` is matched by the built-in linear template.
+  //
+  it('pushed harmonization rule feeds built-in pattern root rules', () => {
+    const ce = new ComputeEngine();
+    expect(ce.parse('\\sinh(x) - 3 = 0').solve('x')).toEqual([]);
+
+    ce.harmonizationRules.push({
+      match: ['Add', ['Sinh', '_x'], '__b'],
+      replace: ['Subtract', '_x', ['Arsinh', ['Negate', '__b']]],
+      condition: (sub) => !sub.__b.has('_x'),
+    });
+
+    const result = ce.parse('\\sinh(x) - 3 = 0').solve('x') as any[];
+    expect(result?.length).toBe(1);
+    expect(result[0].N().re).toBeCloseTo(ARSINH_3, 10);
+  });
+
+  //
+  // Natural path: BUILT-IN harmonization rules firing.
+  //
+  // `ln(x² + 1) = 0` is not matched by any root template (the `Ln` templates
+  // require the unknown as the direct argument), but the built-in
+  // harmonization rule `ln(f(x)) → f(x) - 1` rewrites it to `x² = 0`.
+  //
+  it('built-in harmonization rules solve ln(f(x)) = 0', () => {
+    const ce = new ComputeEngine();
+    const result = ce.parse('\\ln(x^2 + 1) = 0').solve('x') as any[];
+    expect(result?.map((x) => x.json)).toEqual([0]);
+  });
+
+  it('emptying harmonizationRules changes solve outcomes', () => {
+    const ce = new ComputeEngine();
+    // Solvable with the built-in harmonization rules...
+    expect(
+      (ce.parse('\\ln(x^2 + 1) = 0').solve('x') as any[])?.map((x) => x.json)
+    ).toEqual([0]);
+
+    // ...but not without them
+    ce.harmonizationRules = [];
+    expect(ce.parse('\\ln(x^2 + 1) = 0').solve('x')).toEqual([]);
+  });
+
+  //
+  // Built-in harmonization rules can CHAIN: `ln(a) + ln(b) → ln(ab)`, then
+  // `ln(f(x)) → f(x) - 1`, then the expansion pass finds the roots of
+  // `(x+1)(x-1) - 1 = x² - 2`. The extraneous candidate `-√2` (which makes
+  // both logarithm arguments negative) is rejected by root validation
+  // against the original equation.
+  //
+  it('built-in harmonization rules chain', () => {
+    const ce = new ComputeEngine();
+    const result = ce.parse('\\ln(x+1) + \\ln(x-1) = 0').solve('x') as any[];
+    expect(result?.map((x) => x.json)).toEqual([['Sqrt', 2]]);
   });
 
   //

@@ -192,6 +192,42 @@ describe('expr.solve()', () => {
     expect(result).toMatchInlineSnapshot(`[]`);
   });
 
+  // Exponential and logarithmic equations (regression tests for the
+  // harmonization pass being inert, REVIEW G2)
+  test('should solve e^x = 5', () => {
+    const e = expr('e^x = 5');
+    const result = e.solve('x') as any[];
+    expect(result?.length).toBe(1);
+    // x = ln(5)
+    expect(result[0].N().re).toBeCloseTo(Math.log(5), 10);
+  });
+
+  test('should solve 10^x = 100', () => {
+    const e = expr('10^x = 100');
+    const result = e.solve('x')?.map((x) => x.json);
+    expect(result).toEqual([2]);
+  });
+
+  test('should solve ln(x) = ln(3) exactly', () => {
+    const e = expr('\\ln(x) = \\ln(3)');
+    const result = e.solve('x')?.map((x) => x.json);
+    expect(result).toEqual([3]);
+  });
+
+  test('should solve ln(ln(x)) = ln(ln(5)) exactly', () => {
+    const e = expr('\\ln(\\ln(x)) = \\ln(\\ln(5))');
+    const result = e.solve('x')?.map((x) => x.json);
+    expect(result).toEqual([5]);
+  });
+
+  test('should solve e^{2x} = 4', () => {
+    const e = expr('e^{2x} = 4');
+    const result = e.solve('x') as any[];
+    expect(result?.length).toBe(1);
+    // x = ln(2)
+    expect(result[0].N().re).toBeCloseTo(Math.log(2), 10);
+  });
+
   // test('should solve an inequality', () => {
   //   const e = expr('2x + 1 < 5');
   //   const result = e.solve('x')?.map((x) => x.json);

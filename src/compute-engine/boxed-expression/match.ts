@@ -29,6 +29,37 @@ function hasWildcards(expr: string | Expression): boolean {
 }
 
 /**
+ * Return `true` if `expr` contains a wildcard that is NOT already bound in
+ * `substitution`.
+ *
+ * A wildcard bound in the substitution is no longer a free pattern variable:
+ * it denotes a concrete (sub)expression. For example, during equation
+ * solving the unknown is renamed to the literal symbol `_x` and pre-bound
+ * (`{_x: ce.symbol('_x')}`), so capturing a subexpression that contains `_x`
+ * is a legitimate capture of a concrete expression — while still rejecting
+ * captures that contain genuinely free wildcards (which would make the match
+ * ill-defined). Anonymous wildcards (`_`, `__`, `___`) are never bound, so
+ * any expression containing them is always rejected.
+ */
+function hasUnboundWildcards(
+  expr: Expression,
+  substitution: BoxedSubstitution
+): boolean {
+  if (isWildcard(expr)) {
+    const name = wildcardName(expr);
+    return name === null || !(name in substitution);
+  }
+
+  if (isFunction(expr))
+    return (
+      (expr.operator.startsWith('_') && !(expr.operator in substitution)) ||
+      expr.ops.some((op) => hasUnboundWildcards(op, substitution))
+    );
+
+  return false;
+}
+
+/**
  * Return a new substitution based on arg. `substitution`, but with wildcard (of value *expr*)
  * added.
  * Returns given *substitution* unchanged if wildcard is a unnamed, or is already present in
@@ -60,7 +91,11 @@ function captureWildcard(
     return substitution;
   }
 
-  if (hasWildcards(expr)) return null;
+  // Reject captures containing free (unbound) wildcards. Wildcards that are
+  // pre-bound in the substitution (e.g. the unknown `_x` during equation
+  // solving) are concrete and may appear in captures: rule conditions (e.g.
+  // `filter()` in solve.ts) decide whether such captures are acceptable.
+  if (hasUnboundWildcards(expr, substitution)) return null;
 
   return { ...substitution, [wildcard]: expr };
 }
@@ -413,9 +448,12 @@ function matchVariations(
   }
 
   if (operator === 'Exp') {
-    // Power(E, x) -> Exp(x)
-    const result = matchVariation('Power', [ce.E, expr]);
-    if (result !== null) return result;
+    // Power(E, x) -> Exp(x): a subject `e^z` (canonicalized to
+    // `Power(E, z)`) matches an `Exp` pattern as `Exp(z)`
+    if (isFunction(expr, 'Power') && isSymbol(expr.op1, 'ExponentialE')) {
+      const result = matchVariation('Exp', [expr.op2]);
+      if (result !== null) return result;
+    }
   }
 
   if (operator === 'Power' && isFunction(pattern)) {

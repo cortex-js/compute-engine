@@ -631,10 +631,13 @@ function clearDenominators(expr: Expression, _variable?: string): Expression {
   const ops = expr.ops;
   if (ops.length === 0) return expr;
 
-  // Collect all non-trivial denominators
+  // Collect all non-trivial denominators. A denominator of the form `1^a`
+  // is trivially 1 (e.g. `.denominator` of `e^x` is `1^x`): multiplying
+  // through by it would needlessly mangle the expression (e.g. `e^x - 5`
+  // would become `1^x e^x - 5·1^x`, which no root template matches).
   const denominators = ops
     .map((op) => op.denominator)
-    .filter((d) => !d.isSame(1));
+    .filter((d) => !d.isSame(1) && !(isFunction(d, 'Power') && d.op1.isSame(1)));
 
   if (denominators.length === 0) return expr;
 
@@ -1141,6 +1144,26 @@ function solveNestedSqrtEquation(
 }
 
 /**
+ * Unary operators that are injective (one-to-one) on their real domain.
+ * For these, `f(u) = f(v) ⟺ u = v` (on the domain of `f`), so the wrapper
+ * can be peeled from both sides of an equation, e.g. `ln(x) = ln(3) → x = 3`.
+ * Candidates that fall outside the domain of `f` are extraneous and get
+ * rejected by `validateRoots()` against the original equation.
+ */
+const INJECTIVE_UNARY_OPERATORS = new Set([
+  'Ln',
+  'Exp',
+  'Sqrt',
+  'Sinh',
+  'Arsinh',
+  'Tanh',
+  'Artanh',
+  'Arcsin',
+  'Arccos',
+  'Arctan',
+]);
+
+/**
  * MathJsonExpression is a function of a single variable (`x`) or an Equality
  *
  * Return the roots of that variable
@@ -1152,18 +1175,47 @@ export function findUnivariateRoots(
 ): ReadonlyArray<Expression> {
   const ce = expr.engine;
 
-  if (isFunction(expr, 'Equal')) {
-    const lhs = expand(expr.op1);
-    const rhs = expand(expr.op2);
-    expr = lhs.sub(rhs).simplify();
-  } else expr = expand(expr).simplify();
+  // Save the expression to solve BEFORE peeling, clearing denominators and
+  // other transformations. This is crucial for validating roots: those
+  // transformations can introduce extraneous roots that satisfy the
+  // transformed equation but not the original. For example, sqrt equations
+  // using quadratic substitution (u = √x → au² + bu + c = 0 → x = u²) may
+  // produce extraneous roots.
+  let originalExpr: Expression;
 
-  // Save the expression BEFORE clearing denominators and other transformations.
-  // This is crucial for validating roots: clearing denominators and harmonization
-  // can introduce extraneous roots that satisfy the transformed equation but not
-  // the original. For example, sqrt equations using quadratic substitution
-  // (u = √x → au² + bu + c = 0 → x = u²) may produce extraneous roots.
-  const originalExpr = expr;
+  if (isFunction(expr, 'Equal')) {
+    const lhs0 = expr.op1;
+    const rhs0 = expr.op2;
+
+    // Peel identical injective unary functions from both sides:
+    // f(u) = f(v) ⟺ u = v. This preserves exactness, e.g.
+    // `ln(x) = ln(3)` becomes `x = 3` instead of `x = e^{ln 3}` (which
+    // simplification would otherwise degrade to a numeric approximation).
+    let lhs = lhs0;
+    let rhs = rhs0;
+    while (
+      isFunction(lhs) &&
+      isFunction(rhs) &&
+      lhs.operator === rhs.operator &&
+      lhs.nops === 1 &&
+      rhs.nops === 1 &&
+      INJECTIVE_UNARY_OPERATORS.has(lhs.operator)
+    ) {
+      lhs = lhs.op1;
+      rhs = rhs.op1;
+    }
+
+    expr = expand(lhs).sub(expand(rhs)).simplify();
+
+    // Validate against the ORIGINAL (unpeeled, unsimplified) equation:
+    // simplification rules may assume principal domains (e.g.
+    // `ln(a) + ln(b) → ln(ab)`), which would make extraneous roots
+    // introduced by the transformations below appear valid.
+    originalExpr = lhs0.sub(rhs0);
+  } else {
+    originalExpr = expr;
+    expr = expand(expr).simplify();
+  }
 
   // Clear denominators to enable matching of expressions like F - 3x/h = 0
   expr = clearDenominators(expr);
@@ -1193,7 +1245,7 @@ export function findUnivariateRoots(
   const rules = ce.getRuleSet('solve-univariate')!;
 
   // Make the unknown '_x' so that we can match against it
-  let exprs = [expr.subs({ [x]: '_x' }, { canonical: false })];
+  const exprs = [expr.subs({ [x]: '_x' }, { canonical: false })];
 
   // Create a lexical scope for the unknown
   ce.pushScope();
@@ -1204,14 +1256,21 @@ export function findUnivariateRoots(
     const varType = ce.symbol(x).type.type;
     ce.declare('_x', typeof varType === 'string' ? varType : 'number');
 
-    result = exprs.flatMap((expr) =>
+    // Match the root templates against an expression in which the unknown is
+    // the literal `_x` symbol. The substitution pre-binds the `_x` wildcard
+    // to that same symbol, in EVERY pass: the harmonized forms produced by
+    // `harmonize()` also contain the literal `_x` symbol, so binding `_x` to
+    // the original unknown post-harmonization would make every pattern rule
+    // fail to match.
+    const matchRoots = (expr: Expression): Expression[] =>
       matchAnyRules(
         expr,
         rules,
         { _x: ce.symbol('_x') },
         { useVariations: true, form: 'canonical' }
-      )
-    );
+      );
+
+    result = exprs.flatMap(matchRoots);
 
     // If we didn't find a solution yet, try modifying the expression
     //expr.
@@ -1225,31 +1284,21 @@ export function findUnivariateRoots(
     // Homogenization: replace a function of the unknown by a new variable,
     // e.g. exp(x) -> y, then solve for y
 
+    let harmonized: Expression[] = [];
     if (result.length === 0) {
-      exprs = exprs.flatMap((expr) => harmonize(expr));
-      result = exprs.flatMap((expr) =>
-        matchAnyRules(
-          expr,
-          rules,
-          { _x: ce.symbol(x) },
-          { useVariations: true, form: 'canonical' }
-        )
-      );
+      harmonized = exprs.flatMap((expr) => harmonize(expr));
+      result = harmonized.flatMap(matchRoots);
     }
 
     if (result.length === 0) {
-      exprs = exprs
-        .flatMap((expr) => expand(expr.canonical))
-        .filter((x) => x !== null) as Expression[];
-      exprs = exprs.flatMap((expr) => harmonize(expr));
-      result = exprs.flatMap((expr) =>
-        matchAnyRules(
-          expr,
-          rules,
-          { _x: ce.symbol(x) },
-          { useVariations: true, form: 'canonical' }
-        )
-      );
+      // Expand the original and harmonized forms (harmonization may produce
+      // factored forms like `x(x+2) - 1` whose roots only match once
+      // expanded), then harmonize once more
+      const expanded = [...exprs, ...harmonized]
+        .map((expr) => expand(expr.canonical))
+        .filter((expr) => expr !== null);
+      result = [...expanded, ...expanded.flatMap((expr) => harmonize(expr))]
+        .flatMap(matchRoots);
     }
 
     // Fallback: solve polynomials via coefficient extraction when the
@@ -1270,6 +1319,14 @@ export function findUnivariateRoots(
         if (rationalRoots.length > 0) result = rationalRoots;
       }
     }
+
+    // A root may reference the `_x` wildcard symbol (e.g. when produced by a
+    // functional root rule): rewrite it in terms of the original unknown.
+    // (Roots still containing the unknown are then rejected by
+    // `validateRoots()`.)
+    result = result.map((root) =>
+      root.has('_x') ? root.subs({ _x: ce.symbol(x) }) : root
+    );
   } finally {
     ce.popScope();
   }
@@ -1314,7 +1371,7 @@ export const HARMONIZATION_RULES: Rule[] = [
   // a√b(x)  -> a^2 b(x)
   {
     match: ['Multiply', '__a', ['Sqrt', '_b']],
-    replace: ['Multiply', ['Square', '_a'], '__b'],
+    replace: ['Multiply', ['Square', '__a'], '_b'],
     condition: ({ _b }) => _b.has('_x'),
   },
   // a(x)/b -> a(x)
@@ -1333,13 +1390,13 @@ export const HARMONIZATION_RULES: Rule[] = [
   },
   // ln(a(x))+ln(b(x))+c -> ln(a(x)b(x)) + c
   {
-    match: ['Add', ['Ln', '_a'], ['Ln', '_b'], '__c'],
-    replace: ['Add', ['Ln', ['Multiply', '_a', '_b']], '__c'],
+    match: ['Add', ['Ln', '_a'], ['Ln', '_b'], '___c'],
+    replace: ['Add', ['Ln', ['Multiply', '_a', '_b']], '___c'],
   },
-  // e^a * e^b -> e^(a+b)
+  // e^a * e^b * c -> e^(a+b) * c
   {
-    match: ['Multiply', ['Exp', '__a'], ['Exp', '__b'], '__c'],
-    replace: ['Multiply', ['Exp', ['Add', '_a', '_b']], '__c'],
+    match: ['Multiply', ['Exp', '_a'], ['Exp', '_b'], '___c'],
+    replace: ['Multiply', ['Exp', ['Add', '_a', '_b']], '___c'],
   },
   // ln(f(x)) -> f(x) - 1
   {
@@ -1360,7 +1417,7 @@ export const HARMONIZATION_RULES: Rule[] = [
     replace: ['Subtract', '_a', ['Divide', 'Pi', 2]],
     condition: ({ _a }) => _a.has('_x'),
   },
-  // tan(f(x)) -> f(x) - π/4
+  // tan(f(x)) -> f(x)
   {
     match: ['Tan', '_a'],
     replace: '_a',
@@ -1380,13 +1437,46 @@ export const HARMONIZATION_RULES: Rule[] = [
   },
 ];
 
-/** Transform expr into one or more equivalent expressions that
- * are easier to solve
+/** Maximum number of chained harmonization rewrites applied to a single
+ * expression (a harmonization rule may apply to the result of another one,
+ * e.g. `ln(a)+ln(b) → ln(ab)` then `ln(f(x)) → f(x) - 1`). */
+const MAX_HARMONIZATION_DEPTH = 4;
+
+/** Transform expr into one or more equivalent expressions (with the same
+ * root set) that are easier to solve.
+ *
+ * The unknown in `expr` is the literal `_x` symbol; the substitution
+ * pre-binds the `_x` wildcard to it so that the harmonization rule patterns
+ * (which use `_x` for the unknown) match it, and so that other wildcards may
+ * capture subexpressions containing the unknown (their rule conditions, e.g.
+ * `_a.has('_x')`, decide whether the capture is acceptable).
+ *
+ * Rules are chained (breadth-first, up to `MAX_HARMONIZATION_DEPTH`): every
+ * intermediate form is returned, least-rewritten first.
  */
 function harmonize(expr: Expression): Expression[] {
   const ce = expr.engine;
   const rules = ce.getRuleSet('harmonization')!;
-  return matchAnyRules(expr, rules, { _x: ce.symbol('_x') });
+  const sub = { _x: ce.symbol('_x') };
+
+  const results: Expression[] = [];
+  let frontier: Expression[] = [expr];
+  for (
+    let depth = 0;
+    depth < MAX_HARMONIZATION_DEPTH && frontier.length > 0;
+    depth++
+  ) {
+    const next: Expression[] = [];
+    for (const e of frontier) {
+      for (const h of matchAnyRules(e, rules, sub)) {
+        if (h.isSame(expr) || results.some((r) => r.isSame(h))) continue;
+        results.push(h);
+        next.push(h);
+      }
+    }
+    frontier = next;
+  }
+  return results;
 }
 
 function validateRoots(
@@ -1405,6 +1495,13 @@ function validateRoots(
     // Important: we want to use `isEqual()`, not `is(0)` here
     // The former accounts for tolerance, the latter does not.
     if (value.isEqual(0)) return true;
+
+    // For a fully numeric value (no unknowns left), `isEqual(0)` is
+    // definitive: do NOT fall back to symbolic simplification, which may
+    // wrongly accept an extraneous root (e.g. simplification rules like
+    // `ln(a) + ln(b) → ln(ab)` assume principal domains and can collapse a
+    // non-zero constant to 0).
+    if (value.unknowns.length === 0) return false;
 
     // A root with a symbolic (parametric) coefficient — e.g. the quadratic
     // formula for `x^2 - a x + 1 = 0` — substituted back into the equation

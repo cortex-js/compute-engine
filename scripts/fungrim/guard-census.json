@@ -1,14 +1,14 @@
 {
-  "generated": "2026-06-10T12:26:01.381Z",
-  "elapsedMs": 965,
+  "generated": "2026-06-10T14:59:38.740Z",
+  "elapsedMs": 977,
   "timeGuardMs": 2000,
   "entriesWithAssumptions": 1870,
   "totalEntries": 2551,
   "byGuardLevel": {
     "real-simple": {
-      "entries": 544,
-      "assumable": 541,
-      "dischargeable": 497,
+      "entries": 546,
+      "assumable": 543,
+      "dischargeable": 499,
       "failed": 47,
       "reasons": {
         "verify-undefined": 32,
@@ -41,15 +41,14 @@
       }
     },
     "complex-domain": {
-      "entries": 1211,
-      "assumable": 1108,
-      "dischargeable": 1060,
-      "failed": 151,
+      "entries": 1283,
+      "assumable": 1196,
+      "dischargeable": 1149,
+      "failed": 134,
       "reasons": {
-        "verify-undefined": 43,
+        "verify-undefined": 46,
         "not-a-predicate": 87,
-        "contradiction": 16,
-        "verify-false": 5
+        "verify-false": 1
       },
       "examples": {
         "verify-undefined": [
@@ -66,31 +65,19 @@
           "sqrt/08bd37",
           "carlson_elliptic/0ba30f"
         ],
-        "contradiction": [
-          "sqrt/0d8e03",
-          "bessel/2488bb",
-          "atan/268c9e",
-          "atan/3ea11b",
-          "bessel/4fb391"
-        ],
         "verify-false": [
-          "dirichlet/4c3678",
-          "factorials/7c014b",
-          "bessel/81eec6",
-          "bessel/9ad254",
-          "bessel/ecd36f"
+          "dirichlet/4c3678"
         ]
       }
     },
     "undischargeable": {
-      "entries": 115,
-      "assumable": 78,
-      "dischargeable": 70,
-      "failed": 45,
+      "entries": 41,
+      "assumable": 6,
+      "dischargeable": 2,
+      "failed": 39,
       "reasons": {
-        "not-a-predicate": 28,
-        "assume-threw": 9,
-        "verify-undefined": 4,
+        "not-a-predicate": 27,
+        "assume-threw": 8,
         "verify-false": 4
       },
       "examples": {
@@ -108,12 +95,6 @@
           "gaussian_quadrature/545987",
           "general_functions/78bb08"
         ],
-        "verify-undefined": [
-          "eisenstein/3e84e3",
-          "dirichlet/9b3fde",
-          "eisenstein/9bf0ad",
-          "dirichlet/d69b41"
-        ],
         "verify-false": [
           "dirichlet/5df909",
           "dirichlet/789ca4",
@@ -125,9 +106,9 @@
   },
   "totals": {
     "entries": 1870,
-    "assumable": 1727,
-    "dischargeable": 1627,
-    "failed": 243,
+    "assumable": 1745,
+    "dischargeable": 1650,
+    "failed": 220,
     "reasons": {},
     "examples": {}
   },
@@ -145,17 +126,17 @@
     "factorials/001a0b": {
       "guardLevel": "real-simple",
       "outcome": "verify-undefined",
-      "ms": 3
+      "ms": 2
     },
     "sinc/005478": {
       "guardLevel": "undischargeable",
       "outcome": "not-a-predicate",
-      "ms": 0
+      "ms": 1
     },
     "jacobi_theta/0096a8": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "digamma_function/00c02a": {
       "guardLevel": "real-simple",
@@ -165,7 +146,7 @@
     "carlson_elliptic/00c331": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 2
     },
     "carlson_elliptic/00cdb7": {
       "guardLevel": "real-simple",
@@ -205,7 +186,7 @@
     "coulomb_wave/01af55": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 4
+      "ms": 5
     },
     "airy/01bbb6": {
       "guardLevel": "complex-domain",
@@ -213,9 +194,9 @@
       "ms": 0
     },
     "weierstrass_elliptic/0207dc": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "jacobi_theta/024a84": {
       "guardLevel": "complex-domain",
@@ -235,12 +216,12 @@
     "carlson_elliptic/02a8d7": {
       "guardLevel": "complex-domain",
       "outcome": "not-a-predicate",
-      "ms": 0
+      "ms": 1
     },
     "dedekind_eta/02d14f": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "integrals/02e3d2": {
       "guardLevel": "complex-domain",
@@ -265,12 +246,12 @@
     "jacobi_theta/0373dc": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "sine/037a6e": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "digamma_function/039051": {
       "guardLevel": "complex-domain",
@@ -300,7 +281,7 @@
     "eisenstein/044128": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "prime_numbers/04427b": {
       "guardLevel": "real-simple",
@@ -310,7 +291,7 @@
     "legendre_elliptic/0455b3": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "totient/0477b3": {
       "guardLevel": "real-simple",
@@ -360,12 +341,12 @@
     "chebyshev/05fe07": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "legendre_elliptic/06223c": {
       "guardLevel": "real-simple",
       "outcome": "verify-undefined",
-      "ms": 2
+      "ms": 1
     },
     "gcd/062423": {
       "guardLevel": "real-simple",
@@ -385,7 +366,7 @@
     "chebyshev/0649c9": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "jacobi_theta/0650f8": {
       "guardLevel": "complex-domain",
@@ -395,7 +376,7 @@
     "jacobi_theta/06633e": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "confluent_hypergeometric/06f229": {
       "guardLevel": "complex-domain",
@@ -405,7 +386,7 @@
     "stirling_numbers/071a94": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "atan/072166": {
       "guardLevel": "complex-domain",
@@ -420,7 +401,7 @@
     "atan/073e1a": {
       "guardLevel": "complex-domain",
       "outcome": "not-a-predicate",
-      "ms": 1
+      "ms": 0
     },
     "carlson_elliptic/07584a": {
       "guardLevel": "real-simple",
@@ -428,9 +409,9 @@
       "ms": 0
     },
     "jacobi_theta/077394": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "coulomb_wave/07a654": {
       "guardLevel": "complex-domain",
@@ -440,7 +421,7 @@
     "gcd/07ac4a": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "modular_lambda/07bf27": {
       "guardLevel": "complex-domain",
@@ -465,7 +446,7 @@
     "beta_function/082a69": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "agm/08329d": {
       "guardLevel": "complex-domain",
@@ -475,10 +456,10 @@
     "bessel/0836b4": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "dirichlet/0851cf": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
       "ms": 0
     },
@@ -490,7 +471,7 @@
     "jacobi_theta/0878a4": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "legendre_elliptic/087a7c": {
       "guardLevel": "complex-domain",
@@ -500,7 +481,7 @@
     "jacobi_theta/08822c": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "sqrt/08bd37": {
       "guardLevel": "complex-domain",
@@ -535,7 +516,7 @@
     "eisenstein/097efc": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "sqrt/0984ef": {
       "guardLevel": "complex-domain",
@@ -545,7 +526,7 @@
     "modular_lambda/099301": {
       "guardLevel": "undischargeable",
       "outcome": "not-a-predicate",
-      "ms": 1
+      "ms": 0
     },
     "log/099b19": {
       "guardLevel": "complex-domain",
@@ -595,7 +576,7 @@
     "powers/0aac97": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 5
+      "ms": 6
     },
     "barnes_g/0ad263": {
       "guardLevel": "complex-domain",
@@ -635,12 +616,12 @@
     "log/0ba9b2": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "gcd/0bb73e": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "hurwitz_zeta/0bd6aa": {
       "guardLevel": "complex-domain",
@@ -660,12 +641,12 @@
     "legendre_elliptic/0cc11f": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "coulomb_wave/0cc301": {
       "guardLevel": "complex-domain",
       "outcome": "not-a-predicate",
-      "ms": 1
+      "ms": 0
     },
     "golden_ratio/0cd1a4": {
       "guardLevel": "complex-domain",
@@ -685,12 +666,12 @@
     "carlson_elliptic/0d8639": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "sqrt/0d8e03": {
       "guardLevel": "complex-domain",
-      "outcome": "contradiction",
-      "ms": 1
+      "outcome": "dischargeable",
+      "ms": 0
     },
     "factorials/0d92f6": {
       "guardLevel": "real-simple",
@@ -723,14 +704,14 @@
       "ms": 0
     },
     "weierstrass_elliptic/0e649f": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "lambertw/0eb699": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "chebyshev/0ed026": {
       "guardLevel": "complex-domain",
@@ -745,12 +726,12 @@
     "atan/0ee626": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "bernoulli_numbers/0f02a5": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "gcd/0f26cc": {
       "guardLevel": "real-simple",
@@ -758,7 +739,7 @@
       "ms": 0
     },
     "dirichlet/0f96c3": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
       "ms": 0
     },
@@ -770,7 +751,7 @@
     "totient/0fdb94": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "factorials/0feb19": {
       "guardLevel": "real-simple",
@@ -780,7 +761,7 @@
     "jacobi_theta/100d3c": {
       "guardLevel": "undischargeable",
       "outcome": "not-a-predicate",
-      "ms": 0
+      "ms": 1
     },
     "fibonacci/10165f": {
       "guardLevel": "real-simple",
@@ -795,22 +776,22 @@
     "jacobi_theta/103bfb": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "sinc/108daa": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "jacobi_theta/10ca40": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "eisenstein/10cdf4": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "eisenstein/10f3b2": {
       "guardLevel": "complex-domain",
@@ -830,7 +811,7 @@
     "totient/11a56b": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "digamma_function/11dfd2": {
       "guardLevel": "complex-domain",
@@ -840,7 +821,7 @@
     "carlson_elliptic/120284": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "bessel/121b21": {
       "guardLevel": "complex-domain",
@@ -855,12 +836,12 @@
     "sqrt/1232f7": {
       "guardLevel": "real-simple",
       "outcome": "verify-undefined",
-      "ms": 0
+      "ms": 1
     },
     "carlson_elliptic/124339": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "gcd/125606": {
       "guardLevel": "real-simple",
@@ -890,12 +871,12 @@
     "bessel/127f05": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "weierstrass_elliptic/12a9e8": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "carlson_elliptic/12b1d0": {
       "guardLevel": "real-simple",
@@ -910,12 +891,12 @@
     "chebyshev/12ce84": {
       "guardLevel": "complex-domain",
       "outcome": "not-a-predicate",
-      "ms": 0
+      "ms": 1
     },
     "log/13895b": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "carlson_elliptic/13a092": {
       "guardLevel": "complex-domain",
@@ -935,7 +916,7 @@
     "gcd/13ed5e": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "legendre_polynomial/13f971": {
       "guardLevel": "complex-domain",
@@ -950,7 +931,7 @@
     "barnes_g/147db6": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "gamma/14af98": {
       "guardLevel": "complex-domain",
@@ -990,7 +971,7 @@
     "gcd/157c33": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "carlson_elliptic/157ebb": {
       "guardLevel": "complex-domain",
@@ -1005,7 +986,7 @@
     "bessel/15ac84": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "eisenstein/15b347": {
       "guardLevel": "complex-domain",
@@ -1020,12 +1001,12 @@
     "digamma_function/15d56a": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "chebyshev/15dd69": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "imaginary_unit/15f92d": {
       "guardLevel": "complex-domain",
@@ -1035,7 +1016,7 @@
     "agm/162ecf": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "exp/1635f5": {
       "guardLevel": "complex-domain",
@@ -1045,17 +1026,17 @@
     "modular_lambda/166402": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "hurwitz_zeta/1699a9": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "integrals/16a1f4": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "legendre_elliptic/16d2e1": {
       "guardLevel": "complex-domain",
@@ -1070,7 +1051,7 @@
     "sine/1721bf": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "factorials/1745f5": {
       "guardLevel": "real-simple",
@@ -1078,9 +1059,9 @@
       "ms": 0
     },
     "jacobi_theta/1792a9": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "jacobi_theta/1842d9": {
       "guardLevel": "complex-domain",
@@ -1090,17 +1071,17 @@
     "jacobi_theta/1848f1": {
       "guardLevel": "complex-domain",
       "outcome": "verify-undefined",
-      "ms": 3
+      "ms": 2
     },
     "sqrt/185efc": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "powers/18873d": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 2
+      "ms": 1
     },
     "eisenstein/18a4d1": {
       "guardLevel": "complex-domain",
@@ -1110,7 +1091,7 @@
     "complex_parts/18d335": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "gauss_hypergeometric/18d955": {
       "guardLevel": "complex-domain",
@@ -1120,12 +1101,12 @@
     "stirling_numbers/18ec99": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "confluent_hypergeometric/18ef23": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "sine/18f40c": {
       "guardLevel": "complex-domain",
@@ -1165,12 +1146,12 @@
     "sinc/19d7d9": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "digamma_function/19e67f": {
       "guardLevel": "complex-domain",
       "outcome": "verify-undefined",
-      "ms": 0
+      "ms": 1
     },
     "chebyshev/1a0d11": {
       "guardLevel": "complex-domain",
@@ -1190,7 +1171,7 @@
     "general_functions/1b1ec5": {
       "guardLevel": "undischargeable",
       "outcome": "assume-threw",
-      "ms": 0
+      "ms": 1
     },
     "exp/1b3014": {
       "guardLevel": "complex-domain",
@@ -1200,7 +1181,7 @@
     "gcd/1b47db": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "legendre_elliptic/1b881e": {
       "guardLevel": "complex-domain",
@@ -1215,12 +1196,12 @@
     "dedekind_eta/1bae52": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "gcd/1bbdaf": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "sine/1c22f1": {
       "guardLevel": "complex-domain",
@@ -1238,14 +1219,14 @@
       "ms": 0
     },
     "dirichlet/1c3957": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "jacobi_theta/1c67c8": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "fibonacci/1c90fb": {
       "guardLevel": "real-simple",
@@ -1260,12 +1241,12 @@
     "jacobi_theta/1cdd7b": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "gcd/1cde02": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "jacobi_theta/1cec67": {
       "guardLevel": "complex-domain",
@@ -1278,14 +1259,14 @@
       "ms": 0
     },
     "carlson_elliptic/1d2811": {
-      "guardLevel": "complex-domain",
-      "outcome": "not-a-predicate",
-      "ms": 0
+      "guardLevel": "real-simple",
+      "outcome": "dischargeable",
+      "ms": 1
     },
     "bernoulli_numbers/1d2f4a": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "atan/1d3fd7": {
       "guardLevel": "complex-domain",
@@ -1295,7 +1276,7 @@
     "barnes_g/1d4638": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "riemann_zeta/1d46d4": {
       "guardLevel": "complex-domain",
@@ -1305,12 +1286,12 @@
     "factorials/1d5e92": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "atan/1d730a": {
       "guardLevel": "complex-domain",
       "outcome": "not-a-predicate",
-      "ms": 0
+      "ms": 1
     },
     "totient/1d731f": {
       "guardLevel": "real-simple",
@@ -1345,12 +1326,12 @@
     "bell_numbers/1e00d2": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "prime_numbers/1e3388": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "digamma_function/1e47db": {
       "guardLevel": "real-simple",
@@ -1370,12 +1351,12 @@
     "jacobi_theta/1ee920": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "atan/1eeccf": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "atan/1f026d": {
       "guardLevel": "complex-domain",
@@ -1405,10 +1386,10 @@
     "lambertw/1fc63b": {
       "guardLevel": "complex-domain",
       "outcome": "not-a-predicate",
-      "ms": 4
+      "ms": 5
     },
     "jacobi_theta/1feda6": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
       "ms": 1
     },
@@ -1420,22 +1401,22 @@
     "powers/2090c3": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "factorials/209fc8": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "gauss_hypergeometric/20bf69": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "jacobi_theta/20d581": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "airy/20e530": {
       "guardLevel": "complex-domain",
@@ -1460,27 +1441,27 @@
     "lambertw/214b1c": {
       "guardLevel": "complex-domain",
       "outcome": "not-a-predicate",
-      "ms": 0
+      "ms": 1
     },
     "legendre_polynomial/217521": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "modular_lambda/21839d": {
       "guardLevel": "undischargeable",
       "outcome": "not-a-predicate",
-      "ms": 0
+      "ms": 1
     },
     "jacobi_theta/21851b": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "jacobi_theta/21c2f7": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "jacobi_theta/21dc98": {
       "guardLevel": "complex-domain",
@@ -1495,7 +1476,7 @@
     "sine/21f156": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "agm/21f412": {
       "guardLevel": "complex-domain",
@@ -1505,7 +1486,7 @@
     "digamma_function/21f4f9": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "fibonacci/223ce1": {
       "guardLevel": "real-simple",
@@ -1525,12 +1506,12 @@
     "digamma_function/22a9cd": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "sine/22c4f6": {
       "guardLevel": "real-simple",
       "outcome": "verify-undefined",
-      "ms": 1
+      "ms": 0
     },
     "fibonacci/22dc6e": {
       "guardLevel": "real-simple",
@@ -1550,17 +1531,17 @@
     "atan/22fb4a": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "jacobi_theta/23077c": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "carlson_elliptic/230a49": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "modular_lambda/231141": {
       "guardLevel": "real-simple",
@@ -1575,12 +1556,12 @@
     "digamma_function/233814": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "jacobi_theta/235d0d": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "factorials/2362af": {
       "guardLevel": "real-simple",
@@ -1590,7 +1571,7 @@
     "sine/2392f5": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "dedekind_eta/23961e": {
       "guardLevel": "real-simple",
@@ -1605,12 +1586,12 @@
     "eisenstein/23a5e0": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "weierstrass_elliptic/23beb5": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "carlson_elliptic/23e0a7": {
       "guardLevel": "real-simple",
@@ -1644,18 +1625,18 @@
     },
     "bessel/2488bb": {
       "guardLevel": "complex-domain",
-      "outcome": "contradiction",
+      "outcome": "dischargeable",
       "ms": 0
     },
     "carlson_elliptic/2499cd": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "jacobi_theta/24a793": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "sinc/24c17b": {
       "guardLevel": "complex-domain",
@@ -1675,12 +1656,12 @@
     "gcd/250a45": {
       "guardLevel": "real-simple",
       "outcome": "verify-false",
-      "ms": 0
+      "ms": 1
     },
     "carlson_elliptic/255142": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "stirling_numbers/255576": {
       "guardLevel": "real-simple",
@@ -1690,12 +1671,12 @@
     "legendre_elliptic/255d81": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "gcd/258fc7": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "gcd/25986e": {
       "guardLevel": "undischargeable",
@@ -1715,17 +1696,17 @@
     "jacobi_theta/265d9c": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "atan/268c9e": {
       "guardLevel": "complex-domain",
-      "outcome": "contradiction",
-      "ms": 2
+      "outcome": "verify-undefined",
+      "ms": 1
     },
     "agm/26fd1b": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "carlson_elliptic/271b73": {
       "guardLevel": "complex-domain",
@@ -1785,12 +1766,12 @@
     "jacobi_theta/2853d4": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "dirichlet/288207": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "jacobi_theta/28b4c3": {
       "guardLevel": "complex-domain",
@@ -1800,22 +1781,22 @@
     "jacobi_theta/290f36": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "dirichlet/291569": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "bernoulli_numbers/292d70": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "exp/296627": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "sine/297b3c": {
       "guardLevel": "complex-domain",
@@ -1823,7 +1804,7 @@
       "ms": 0
     },
     "eisenstein/298bb1": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
       "ms": 0
     },
@@ -1845,22 +1826,22 @@
     "jacobi_theta/2a2a38": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "coulomb_wave/2a2f18": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 2
+      "ms": 1
     },
     "bessel/2a4195": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "gamma/2a47d7": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "dirichlet/2a48bd": {
       "guardLevel": "real-simple",
@@ -1875,7 +1856,7 @@
     "chebyshev/2a5337": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "sine/2a6702": {
       "guardLevel": "complex-domain",
@@ -1890,7 +1871,7 @@
     "sinc/2a8ec9": {
       "guardLevel": "undischargeable",
       "outcome": "not-a-predicate",
-      "ms": 1
+      "ms": 0
     },
     "error_functions/2aaba8": {
       "guardLevel": "complex-domain",
@@ -1900,17 +1881,17 @@
     "chebyshev/2ada0f": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "jacobi_theta/2ae142": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "factorials/2b2066": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "sinc/2b7b1d": {
       "guardLevel": "complex-domain",
@@ -1920,7 +1901,7 @@
     "jacobi_theta/2ba423": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "modular_lambda/2ba627": {
       "guardLevel": "complex-domain",
@@ -1935,7 +1916,7 @@
     "fibonacci/2ca869": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "carlson_elliptic/2cdd2f": {
       "guardLevel": "real-simple",
@@ -1945,12 +1926,12 @@
     "jacobi_theta/2d2dde": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "confluent_hypergeometric/2df3e3": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "powers/2e0d99": {
       "guardLevel": "complex-domain",
@@ -1960,12 +1941,12 @@
     "carlson_elliptic/2e40b8": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "jacobi_theta/2e4da0": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "bell_numbers/2e576e": {
       "guardLevel": "real-simple",
@@ -1975,7 +1956,7 @@
     "dedekind_eta/2e7fdb": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "exp/2ea614": {
       "guardLevel": "real-simple",
@@ -1985,7 +1966,7 @@
     "legendre_elliptic/2ef763": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "sinc/2f09ad": {
       "guardLevel": "complex-domain",
@@ -2010,12 +1991,12 @@
     "eisenstein/2f6805": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "jacobi_theta/2f97f5": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "jacobi_theta/2faeb9": {
       "guardLevel": "complex-domain",
@@ -2025,22 +2006,22 @@
     "chebyshev/2fc479": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "coulomb_wave/2fec14": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 2
     },
     "legendre_elliptic/2ff7e7": {
       "guardLevel": "complex-domain",
       "outcome": "verify-undefined",
-      "ms": 1
+      "ms": 0
     },
     "fibonacci/301081": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "chebyshev/303204": {
       "guardLevel": "complex-domain",
@@ -2050,7 +2031,7 @@
     "coulomb_wave/304559": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 4
+      "ms": 3
     },
     "chebyshev/305a29": {
       "guardLevel": "complex-domain",
@@ -2060,12 +2041,12 @@
     "factorials/30652c": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "gauss_hypergeometric/306ef7": {
       "guardLevel": "complex-domain",
       "outcome": "not-a-predicate",
-      "ms": 1
+      "ms": 0
     },
     "chebyshev/30b67b": {
       "guardLevel": "complex-domain",
@@ -2075,22 +2056,22 @@
     "lambertw/30bd5b": {
       "guardLevel": "real-simple",
       "outcome": "verify-undefined",
-      "ms": 0
+      "ms": 1
     },
     "powers/310f36": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "dirichlet/312147": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "beta_function/3141e4": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "beta_function/315b3d": {
       "guardLevel": "complex-domain",
@@ -2120,12 +2101,12 @@
     "bessel/32e162": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "factorials/332721": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "carlson_elliptic/33e034": {
       "guardLevel": "real-simple",
@@ -2145,12 +2126,12 @@
     "sqrt/34136c": {
       "guardLevel": "complex-domain",
       "outcome": "verify-undefined",
-      "ms": 0
+      "ms": 1
     },
     "atan/3478af": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "jacobi_theta/3479be": {
       "guardLevel": "complex-domain",
@@ -2160,27 +2141,27 @@
     "modular_j/348b26": {
       "guardLevel": "complex-domain",
       "outcome": "verify-undefined",
-      "ms": 1
+      "ms": 2
     },
     "jacobi_theta/34d1c6": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
       "ms": 0
     },
     "carlson_elliptic/34e932": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "digamma_function/34fafa": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "atan/34ff28": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "sinc/351d87": {
       "guardLevel": "real-simple",
@@ -2190,7 +2171,7 @@
     "weierstrass_elliptic/35403b": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "barnes_g/3544a0": {
       "guardLevel": "real-simple",
@@ -2210,22 +2191,22 @@
     "chebyshev/35e13b": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "gcd/3605cc": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "atan/36171f": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "digamma_function/361f61": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "legendre_polynomial/367ac2": {
       "guardLevel": "complex-domain",
@@ -2245,12 +2226,12 @@
     "totient/36fe36": {
       "guardLevel": "real-simple",
       "outcome": "verify-false",
-      "ms": 0
+      "ms": 1
     },
     "eisenstein/36fff2": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "integer_sequences/373aa1": {
       "guardLevel": "real-simple",
@@ -2340,12 +2321,12 @@
     "jacobi_theta/3a77e0": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "modular_lambda/3a7a0b": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "fibonacci/3a9c67": {
       "guardLevel": "real-simple",
@@ -2375,12 +2356,12 @@
     "dedekind_eta/3b806f": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "sine/3b839c": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "hurwitz_zeta/3ba544": {
       "guardLevel": "complex-domain",
@@ -2395,7 +2376,7 @@
     "eisenstein/3bf702": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "eisenstein/3bfced": {
       "guardLevel": "complex-domain",
@@ -2405,7 +2386,7 @@
     "bessel/3bffa9": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "exp/3c4480": {
       "guardLevel": "complex-domain",
@@ -2435,12 +2416,12 @@
     "jacobi_theta/3c88a7": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "jacobi_theta/3cac28": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "sqrt/3cc884": {
       "guardLevel": "real-simple",
@@ -2450,22 +2431,22 @@
     "landau_function/3d5019": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
-    },
-    "dirichlet/3d5327": {
-      "guardLevel": "undischargeable",
-      "outcome": "dischargeable",
       "ms": 1
     },
-    "gauss_hypergeometric/3d6d7e": {
+    "dirichlet/3d5327": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
       "ms": 0
     },
+    "gauss_hypergeometric/3d6d7e": {
+      "guardLevel": "complex-domain",
+      "outcome": "dischargeable",
+      "ms": 1
+    },
     "chebyshev/3d77ab": {
       "guardLevel": "real-simple",
       "outcome": "verify-undefined",
-      "ms": 1
+      "ms": 0
     },
     "sine/3dd162": {
       "guardLevel": "real-simple",
@@ -2475,12 +2456,12 @@
     "carlson_elliptic/3dd30a": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "legendre_polynomial/3df748": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "carlson_elliptic/3e05c6": {
       "guardLevel": "complex-domain",
@@ -2488,7 +2469,7 @@
       "ms": 0
     },
     "dirichlet/3e0817": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
       "ms": 0
     },
@@ -2505,16 +2486,16 @@
     "sqrt/3e71f4": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "eisenstein/3e84e3": {
       "guardLevel": "undischargeable",
-      "outcome": "verify-undefined",
+      "outcome": "dischargeable",
       "ms": 1
     },
     "atan/3ea11b": {
       "guardLevel": "complex-domain",
-      "outcome": "contradiction",
+      "outcome": "dischargeable",
       "ms": 1
     },
     "carlson_elliptic/3f1547": {
@@ -2535,7 +2516,7 @@
     "carlson_elliptic/3f6d40": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "jacobi_theta/3fb309": {
       "guardLevel": "real-simple",
@@ -2565,12 +2546,12 @@
     "carlson_elliptic/4091ad": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "carlson_elliptic/409873": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "gcd/4099d2": {
       "guardLevel": "real-simple",
@@ -2605,27 +2586,27 @@
     "legendre_polynomial/415911": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "carlson_elliptic/415ff0": {
       "guardLevel": "complex-domain",
       "outcome": "verify-undefined",
-      "ms": 1
+      "ms": 2
     },
     "jacobi_theta/41631f": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "agm/417619": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "legendre_elliptic/41cf8e": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "factorials/41f950": {
       "guardLevel": "complex-domain",
@@ -2640,17 +2621,17 @@
     "hurwitz_zeta/4228cd": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "carlson_elliptic/423b36": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "bernoulli_numbers/4246ae": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "lambertw/4257f4": {
       "guardLevel": "complex-domain",
@@ -2660,7 +2641,7 @@
     "legendre_elliptic/4268fc": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "jacobi_theta/429093": {
       "guardLevel": "complex-domain",
@@ -2675,17 +2656,17 @@
     "digamma_function/42c1f5": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "carlson_elliptic/42c7f1": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "jacobi_theta/42d832": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "chebyshev/42eb01": {
       "guardLevel": "complex-domain",
@@ -2695,7 +2676,7 @@
     "complex_parts/432926": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "totient/433a5c": {
       "guardLevel": "real-simple",
@@ -2705,17 +2686,17 @@
     "factorials/433d8b": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "gcd/4366b2": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "jacobi_theta/43fa0e": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "modular_j/441301": {
       "guardLevel": "complex-domain",
@@ -2725,12 +2706,12 @@
     "chebyshev/443759": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "jacobi_theta/4448f1": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "agm/447541": {
       "guardLevel": "real-simple",
@@ -2740,12 +2721,12 @@
     "hurwitz_zeta/448d90": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "exp/4491b8": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "modular_lambda/44a529": {
       "guardLevel": "complex-domain",
@@ -2758,14 +2739,14 @@
       "ms": 2
     },
     "jacobi_theta/45165c": {
-      "guardLevel": "undischargeable",
-      "outcome": "dischargeable",
-      "ms": 1
-    },
-    "dirichlet/458198": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
       "ms": 0
+    },
+    "dirichlet/458198": {
+      "guardLevel": "complex-domain",
+      "outcome": "dischargeable",
+      "ms": 1
     },
     "digamma_function/458a97": {
       "guardLevel": "real-simple",
@@ -2773,7 +2754,7 @@
       "ms": 0
     },
     "jacobi_theta/45a130": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
       "ms": 1
     },
@@ -2825,7 +2806,7 @@
     "factorials/471485": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "atan/47331d": {
       "guardLevel": "real-simple",
@@ -2850,7 +2831,7 @@
     "gaussian_quadrature/47b181": {
       "guardLevel": "undischargeable",
       "outcome": "assume-threw",
-      "ms": 1
+      "ms": 0
     },
     "carlson_elliptic/47cf5d": {
       "guardLevel": "complex-domain",
@@ -2868,7 +2849,7 @@
       "ms": 0
     },
     "jacobi_theta/47e587": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
       "ms": 1
     },
@@ -2898,7 +2879,7 @@
       "ms": 0
     },
     "dirichlet/4877d1": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
       "ms": 0
     },
@@ -2908,7 +2889,7 @@
       "ms": 1
     },
     "jacobi_theta/48a1c6": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
       "ms": 0
     },
@@ -2918,7 +2899,7 @@
       "ms": 0
     },
     "dirichlet/4911bd": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
       "ms": 1
     },
@@ -3035,27 +3016,27 @@
     "carlson_elliptic/4c882a": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "confluent_hypergeometric/4cf1e9": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "jacobi_theta/4cf228": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "dirichlet/4cf4e4": {
       "guardLevel": "real-simple",
       "outcome": "verify-false",
-      "ms": 1
+      "ms": 3
     },
     "legendre_polynomial/4cfeac": {
-      "guardLevel": "complex-domain",
+      "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "factorials/4d1365": {
       "guardLevel": "complex-domain",
@@ -3065,7 +3046,7 @@
     "hurwitz_zeta/4d1f6b": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "atan/4d2168": {
       "guardLevel": "real-simple",
@@ -3075,7 +3056,7 @@
     "jacobi_theta/4d26ec": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "partitions/4d2e45": {
       "guardLevel": "real-simple",
@@ -3090,12 +3071,12 @@
     "sinc/4d3f04": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "powers/4d6416": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "airy/4d65e5": {
       "guardLevel": "complex-domain",
@@ -3115,12 +3096,12 @@
     "bessel/4dfd41": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "carlson_elliptic/4e21c7": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "digamma_function/4e3853": {
       "guardLevel": "complex-domain",
@@ -3170,12 +3151,12 @@
     "complex_parts/4f0049": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "gcd/4f1441": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "factorials/4f20ff": {
       "guardLevel": "real-simple",
@@ -3209,7 +3190,7 @@
     },
     "bessel/4fb391": {
       "guardLevel": "complex-domain",
-      "outcome": "contradiction",
+      "outcome": "dischargeable",
       "ms": 0
     },
     "digamma_function/4fdf65": {
@@ -3220,17 +3201,17 @@
     "atan/500c0a": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "atan/503d4d": {
       "guardLevel": "complex-domain",
-      "outcome": "contradiction",
-      "ms": 0
+      "outcome": "dischargeable",
+      "ms": 1
     },
     "gauss_hypergeometric/504717": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 2
+      "ms": 1
     },
     "sine/506d0c": {
       "guardLevel": "real-simple",
@@ -3243,7 +3224,7 @@
       "ms": 0
     },
     "dirichlet/50adea": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
       "ms": 1
     },
@@ -3255,7 +3236,7 @@
     "factorials/50f57e": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "sinc/50f72f": {
       "guardLevel": "complex-domain",
@@ -3265,7 +3246,7 @@
     "riemann_zeta/51206a": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "bell_numbers/512beb": {
       "guardLevel": "real-simple",
@@ -3275,7 +3256,7 @@
     "gamma/513a30": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "eisenstein/5161ab": {
       "guardLevel": "undischargeable",
@@ -3285,12 +3266,12 @@
     "airy/51b241": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "sinc/51f9b4": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "riemann_zeta/51fd98": {
       "guardLevel": "real-simple",
@@ -3300,12 +3281,12 @@
     "bernoulli_numbers/522b04": {
       "guardLevel": "complex-domain",
       "outcome": "verify-undefined",
-      "ms": 1
+      "ms": 0
     },
     "prime_numbers/5258c0": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "barnes_g/5261e3": {
       "guardLevel": "complex-domain",
@@ -3335,12 +3316,12 @@
     "carlson_elliptic/538c8c": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "gamma/53a2a1": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "carlson_elliptic/53d869": {
       "guardLevel": "complex-domain",
@@ -3430,7 +3411,7 @@
     "legendre_elliptic/55d23d": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "jacobi_theta/561d75": {
       "guardLevel": "complex-domain",
@@ -3438,14 +3419,14 @@
       "ms": 1
     },
     "modular_transformations/5636db": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "jacobi_theta/563d18": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "bessel/5679f2": {
       "guardLevel": "complex-domain",
@@ -3455,12 +3436,12 @@
     "gcd/56acd6": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "factorials/56d4ff": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "gamma/56d710": {
       "guardLevel": "complex-domain",
@@ -3470,22 +3451,22 @@
     "totient/56d7fe": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "fibonacci/5745bd": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "jacobi_theta/5752b8": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "gcd/5781de": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "sqrt/57af50": {
       "guardLevel": "complex-domain",
@@ -3493,24 +3474,24 @@
       "ms": 0
     },
     "dirichlet/57d31a": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "jacobi_theta/580ba0": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "carlson_elliptic/583c27": {
       "guardLevel": "complex-domain",
       "outcome": "not-a-predicate",
-      "ms": 0
+      "ms": 1
     },
     "carlson_elliptic/584a61": {
       "guardLevel": "real-simple",
       "outcome": "verify-undefined",
-      "ms": 1
+      "ms": 0
     },
     "lambertw/58c19a": {
       "guardLevel": "complex-domain",
@@ -3519,8 +3500,8 @@
     },
     "bessel/58d91f": {
       "guardLevel": "complex-domain",
-      "outcome": "contradiction",
-      "ms": 0
+      "outcome": "dischargeable",
+      "ms": 1
     },
     "jacobi_theta/59184e": {
       "guardLevel": "complex-domain",
@@ -3570,12 +3551,12 @@
     "barnes_g/5a11eb": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "digamma_function/5a3c4a": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "jacobi_theta/5a3ebf": {
       "guardLevel": "complex-domain",
@@ -3599,7 +3580,7 @@
     },
     "bessel/5aceb9": {
       "guardLevel": "complex-domain",
-      "outcome": "contradiction",
+      "outcome": "dischargeable",
       "ms": 1
     },
     "carlson_elliptic/5ada5f": {
@@ -3648,7 +3629,7 @@
       "ms": 1
     },
     "dirichlet/5c4552": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
       "ms": 0
     },
@@ -3690,12 +3671,12 @@
     "jacobi_theta/5d41b1": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "atan/5d6f74": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "factorials/5d6f99": {
       "guardLevel": "real-simple",
@@ -3710,12 +3691,12 @@
     "bessel/5d9c43": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "digamma_function/5db5f2": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "modular_lambda/5dd24a": {
       "guardLevel": "complex-domain",
@@ -3725,12 +3706,12 @@
     "dirichlet/5df909": {
       "guardLevel": "undischargeable",
       "outcome": "verify-false",
-      "ms": 1
+      "ms": 2
     },
     "legendre_elliptic/5e869b": {
       "guardLevel": "complex-domain",
       "outcome": "verify-undefined",
-      "ms": 1
+      "ms": 0
     },
     "fibonacci/5eb446": {
       "guardLevel": "real-simple",
@@ -3740,17 +3721,17 @@
     "beta_function/5ec9c0": {
       "guardLevel": "complex-domain",
       "outcome": "not-a-predicate",
-      "ms": 0
+      "ms": 1
     },
     "chebyshev/5f09f4": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "factorials/5f7334": {
       "guardLevel": "real-simple",
       "outcome": "verify-undefined",
-      "ms": 0
+      "ms": 1
     },
     "legendre_elliptic/5f84d9": {
       "guardLevel": "complex-domain",
@@ -3758,7 +3739,7 @@
       "ms": 1
     },
     "jacobi_theta/5f9e54": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
       "ms": 1
     },
@@ -3775,12 +3756,12 @@
     "error_functions/603a49": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "dirichlet/604c7c": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "carlson_elliptic/60541a": {
       "guardLevel": "real-simple",
@@ -3820,12 +3801,12 @@
     "legendre_elliptic/60f858": {
       "guardLevel": "real-simple",
       "outcome": "verify-undefined",
-      "ms": 1
+      "ms": 0
     },
     "sine/612b21": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "chebyshev/61375f": {
       "guardLevel": "complex-domain",
@@ -3835,12 +3816,12 @@
     "sqrt/616bcb": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "stirling_numbers/6189b9": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "carlson_elliptic/618a9f": {
       "guardLevel": "complex-domain",
@@ -3850,7 +3831,7 @@
     "carlson_elliptic/61c002": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "atan/61d8f3": {
       "guardLevel": "complex-domain",
@@ -3860,7 +3841,7 @@
     "carlson_elliptic/61f98d": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "bessel/621a9b": {
       "guardLevel": "complex-domain",
@@ -3870,7 +3851,7 @@
     "error_functions/622772": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "sqrt/627c9c": {
       "guardLevel": "complex-domain",
@@ -3880,12 +3861,12 @@
     "dirichlet/629f70": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "digamma_function/62b81d": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "factorials/62c6c9": {
       "guardLevel": "real-simple",
@@ -3895,17 +3876,17 @@
     "carlson_elliptic/62eade": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "dirichlet/62f12c": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "bessel/62f23c": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "dirichlet/62f7d5": {
       "guardLevel": "real-simple",
@@ -3915,7 +3896,7 @@
     "atan/632063": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "powers/634687": {
       "guardLevel": "complex-domain",
@@ -3925,7 +3906,7 @@
     "barnes_g/6395ee": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "gamma/639d91": {
       "guardLevel": "complex-domain",
@@ -3935,17 +3916,17 @@
     "carlson_elliptic/63d11e": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "jacobi_theta/64081c": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "hurwitz_zeta/6419ac": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "gamma/6430cc": {
       "guardLevel": "complex-domain",
@@ -3980,7 +3961,7 @@
     "jacobi_theta/64c188": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "carlson_elliptic/64d87a": {
       "guardLevel": "real-simple",
@@ -3990,7 +3971,7 @@
     "jacobi_theta/64f0a5": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "gauss_hypergeometric/651a4a": {
       "guardLevel": "complex-domain",
@@ -4020,12 +4001,12 @@
     "gauss_hypergeometric/65693e": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "gcd/6572c5": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "chebyshev/6582c4": {
       "guardLevel": "complex-domain",
@@ -4035,25 +4016,25 @@
     "gauss_hypergeometric/659ce8": {
       "guardLevel": "complex-domain",
       "outcome": "verify-undefined",
-      "ms": 0
+      "ms": 1
     },
     "factorials/65c610": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "gcd/65cfe5": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "gamma/661054": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "jacobi_theta/663a02": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
       "ms": 0
     },
@@ -4070,22 +4051,22 @@
     "modular_lambda/6678af": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "jacobi_theta/66eb8b": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "jacobi_theta/66efb8": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "legendre_polynomial/674afa": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "gcd/67978f": {
       "guardLevel": "real-simple",
@@ -4095,32 +4076,32 @@
     "atan/67c0be": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "legendre_elliptic/685126": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "bessel/685892": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "chebyshev/685d1a": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "digamma_function/686524": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "jacobi_theta/686ce0": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "riemann_zeta/687b4d": {
       "guardLevel": "complex-domain",
@@ -4130,12 +4111,12 @@
     "gcd/6880d0": {
       "guardLevel": "complex-domain",
       "outcome": "not-a-predicate",
-      "ms": 0
+      "ms": 1
     },
     "carlson_elliptic/688efb": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "bessel/68cc2f": {
       "guardLevel": "complex-domain",
@@ -4150,22 +4131,22 @@
     "riemann_zeta/69348a": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "hurwitz_zeta/693e0e": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "hurwitz_zeta/69a1a9": {
       "guardLevel": "complex-domain",
       "outcome": "verify-undefined",
-      "ms": 0
+      "ms": 1
     },
     "jacobi_theta/69b32e": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "bernoulli_numbers/69ca86": {
       "guardLevel": "real-simple",
@@ -4175,7 +4156,7 @@
     "coulomb_wave/69e5fb": {
       "guardLevel": "complex-domain",
       "outcome": "not-a-predicate",
-      "ms": 1
+      "ms": 2
     },
     "prime_numbers/69fd4b": {
       "guardLevel": "real-simple",
@@ -4185,17 +4166,17 @@
     "golden_ratio/6a11ce": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "chebyshev/6a24ab": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "bessel/6a6a09": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "jacobi_theta/6a7704": {
       "guardLevel": "complex-domain",
@@ -4205,12 +4186,12 @@
     "sine/6a8889": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "complex_parts/6a894d": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "integer_sequences/6af603": {
       "guardLevel": "real-simple",
@@ -4220,17 +4201,17 @@
     "sine/6b13be": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "jacobi_theta/6b2078": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "factorials/6b3af0": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "atan/6b8963": {
       "guardLevel": "complex-domain",
@@ -4245,12 +4226,12 @@
     "sinc/6c28fa": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "powers/6c2b31": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "hurwitz_zeta/6c3523": {
       "guardLevel": "complex-domain",
@@ -4263,7 +4244,7 @@
       "ms": 0
     },
     "dirichlet/6c3fff": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
       "ms": 0
     },
@@ -4280,12 +4261,12 @@
     "legendre_polynomial/6cd4a1": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "gcd/6cefd7": {
       "guardLevel": "undischargeable",
       "outcome": "not-a-predicate",
-      "ms": 1
+      "ms": 0
     },
     "confluent_hypergeometric/6cf802": {
       "guardLevel": "complex-domain",
@@ -4305,17 +4286,17 @@
     "fibonacci/6d437c": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "jacobi_theta/6d918c": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "lambertw/6d936e": {
       "guardLevel": "complex-domain",
       "outcome": "not-a-predicate",
-      "ms": 0
+      "ms": 1
     },
     "fibonacci/6db705": {
       "guardLevel": "real-simple",
@@ -4325,7 +4306,7 @@
     "digamma_function/6db9fc": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "carlson_elliptic/6dda7a": {
       "guardLevel": "complex-domain",
@@ -4335,12 +4316,12 @@
     "sqrt/6ddbf4": {
       "guardLevel": "complex-domain",
       "outcome": "not-a-predicate",
-      "ms": 0
+      "ms": 1
     },
     "lambertw/6e05c9": {
       "guardLevel": "complex-domain",
       "outcome": "not-a-predicate",
-      "ms": 1
+      "ms": 0
     },
     "factorials/6e1f13": {
       "guardLevel": "complex-domain",
@@ -4375,17 +4356,17 @@
     "factorials/6f7746": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "barnes_g/6f8e14": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "jacobi_theta/6fad93": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "gcd/6fd925": {
       "guardLevel": "real-simple",
@@ -4395,27 +4376,27 @@
     "gcd/7009cc": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "jacobi_theta/700d94": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "confluent_hypergeometric/70111e": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "fibonacci/70878b": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "jacobi_theta/709905": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "airy/70ec9f": {
       "guardLevel": "complex-domain",
@@ -4435,12 +4416,12 @@
     "jacobi_theta/7137a2": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "legendre_elliptic/713966": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "jacobi_theta/713b6b": {
       "guardLevel": "complex-domain",
@@ -4450,12 +4431,12 @@
     "agm/7189d6": {
       "guardLevel": "complex-domain",
       "outcome": "not-a-predicate",
-      "ms": 0
+      "ms": 1
     },
     "carlson_elliptic/718f3a": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "agm/71a0ff": {
       "guardLevel": "complex-domain",
@@ -4465,7 +4446,7 @@
     "sine/71a264": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "jacobi_theta/71d5ee": {
       "guardLevel": "complex-domain",
@@ -4485,12 +4466,12 @@
     "lambertw/72712c": {
       "guardLevel": "complex-domain",
       "outcome": "not-a-predicate",
-      "ms": 0
+      "ms": 1
     },
     "atan/7272a8": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "sine/729215": {
       "guardLevel": "complex-domain",
@@ -4500,12 +4481,12 @@
     "sine/729b70": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "sinc/729c78": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "carlson_elliptic/72b5bd": {
       "guardLevel": "complex-domain",
@@ -4515,20 +4496,20 @@
     "lambertw/72b6ca": {
       "guardLevel": "complex-domain",
       "outcome": "not-a-predicate",
-      "ms": 0
+      "ms": 1
     },
     "riemann_zeta/72ccda": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "beta_function/72db94": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "weierstrass_elliptic/72eb69": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
       "ms": 0
     },
@@ -4573,7 +4554,7 @@
       "ms": 0
     },
     "jacobi_theta/73eb5d": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
       "ms": 1
     },
@@ -4595,12 +4576,12 @@
     "dirichlet/75231e": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "legendre_elliptic/752619": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "jacobi_theta/7527f1": {
       "guardLevel": "complex-domain",
@@ -4613,7 +4594,7 @@
       "ms": 0
     },
     "jacobi_theta/75cb8c": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
       "ms": 1
     },
@@ -4625,17 +4606,17 @@
     "chebyshev/75eacb": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "carlson_elliptic/7609c8": {
       "guardLevel": "complex-domain",
       "outcome": "not-a-predicate",
-      "ms": 1
+      "ms": 0
     },
     "gcd/7638c5": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "sinc/768c77": {
       "guardLevel": "complex-domain",
@@ -4645,7 +4626,7 @@
     "partitions/7697af": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "carlson_elliptic/771801": {
       "guardLevel": "complex-domain",
@@ -4655,17 +4636,17 @@
     "jacobi_theta/772c88": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "gamma/774d37": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "jacobi_theta/775637": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "totient/775e10": {
       "guardLevel": "real-simple",
@@ -4675,7 +4656,7 @@
     "log/77aa12": {
       "guardLevel": "complex-domain",
       "outcome": "verify-undefined",
-      "ms": 1
+      "ms": 0
     },
     "jacobi_theta/77aed2": {
       "guardLevel": "complex-domain",
@@ -4765,7 +4746,7 @@
     "carlson_elliptic/799894": {
       "guardLevel": "complex-domain",
       "outcome": "not-a-predicate",
-      "ms": 6
+      "ms": 7
     },
     "carlson_elliptic/7a168a": {
       "guardLevel": "complex-domain",
@@ -4855,17 +4836,17 @@
     "eisenstein/7c00e6": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "factorials/7c014b": {
       "guardLevel": "complex-domain",
-      "outcome": "verify-false",
-      "ms": 1
+      "outcome": "dischargeable",
+      "ms": 0
     },
     "carlson_elliptic/7c50d1": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "jacobi_theta/7c78ea": {
       "guardLevel": "complex-domain",
@@ -4873,14 +4854,14 @@
       "ms": 1
     },
     "dirichlet/7c86d5": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
       "ms": 1
     },
     "jacobi_theta/7c90eb": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "jacobi_theta/7cb651": {
       "guardLevel": "complex-domain",
@@ -4905,17 +4886,17 @@
     "carlson_elliptic/7cddc6": {
       "guardLevel": "complex-domain",
       "outcome": "verify-undefined",
-      "ms": 1
+      "ms": 2
     },
     "chebyshev/7d111e": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "jacobi_theta/7d559c": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "hurwitz_zeta/7d9feb": {
       "guardLevel": "complex-domain",
@@ -4935,22 +4916,22 @@
     "barnes_g/7df1c4": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "jacobi_theta/7e0002": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "bell_numbers/7e449a": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "chebyshev/7e882c": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "fibonacci/7ef2c7": {
       "guardLevel": "real-simple",
@@ -4965,7 +4946,7 @@
     "bessel/7f3485": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "error_functions/7f355d": {
       "guardLevel": "complex-domain",
@@ -4980,17 +4961,17 @@
     "totient/7f5468": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "carlson_elliptic/7fbbe8": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "coulomb_wave/8027e8": {
       "guardLevel": "complex-domain",
       "outcome": "not-a-predicate",
-      "ms": 1
+      "ms": 2
     },
     "gcd/805c7a": {
       "guardLevel": "real-simple",
@@ -5000,12 +4981,12 @@
     "bessel/807f3f": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "riemann_zeta/809bc0": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "gcd/80f20f": {
       "guardLevel": "real-simple",
@@ -5015,12 +4996,12 @@
     "gamma/80f7dc": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "exp/812707": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "jacobi_theta/81550a": {
       "guardLevel": "real-simple",
@@ -5034,28 +5015,28 @@
     },
     "bessel/81eec6": {
       "guardLevel": "complex-domain",
-      "outcome": "verify-false",
+      "outcome": "dischargeable",
       "ms": 0
     },
     "legendre_elliptic/81f7db": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "legendre_elliptic/81fb10": {
       "guardLevel": "complex-domain",
       "outcome": "verify-undefined",
-      "ms": 0
+      "ms": 1
     },
     "bessel/81ffcd": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "chebyshev/82288c": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "fibonacci/82373a": {
       "guardLevel": "real-simple",
@@ -5065,7 +5046,7 @@
     "bernoulli_numbers/829185": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "lambertw/82926c": {
       "guardLevel": "complex-domain",
@@ -5075,12 +5056,12 @@
     "barnes_g/82b410": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "sine/82c83f": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "hurwitz_zeta/83065e": {
       "guardLevel": "complex-domain",
@@ -5095,12 +5076,12 @@
     "sqrt/83abff": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "digamma_function/8415c7": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "hurwitz_zeta/84196a": {
       "guardLevel": "complex-domain",
@@ -5120,7 +5101,7 @@
     "eisenstein/848d97": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "carlson_elliptic/849751": {
       "guardLevel": "real-simple",
@@ -5130,12 +5111,12 @@
     "agm/84b888": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "gauss_hypergeometric/853a62": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 2
     },
     "coulomb_wave/8547ab": {
       "guardLevel": "complex-domain",
@@ -5145,12 +5126,12 @@
     "factorials/858c8f": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "legendre_polynomial/859445": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "jacobi_theta/85b2ff": {
       "guardLevel": "complex-domain",
@@ -5170,12 +5151,12 @@
     "lambertw/8654a3": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "digamma_function/8671a4": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "barnes_g/86b3ec": {
       "guardLevel": "complex-domain",
@@ -5185,7 +5166,7 @@
     "bessel/86bc7d": {
       "guardLevel": "complex-domain",
       "outcome": "not-a-predicate",
-      "ms": 1
+      "ms": 0
     },
     "dedekind_eta/871996": {
       "guardLevel": "complex-domain",
@@ -5200,7 +5181,7 @@
     "landau_function/87d19b": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "lambertw/88168b": {
       "guardLevel": "complex-domain",
@@ -5220,12 +5201,12 @@
     "digamma_function/88e89f": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "partitions/89260d": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "jacobi_theta/89985a": {
       "guardLevel": "complex-domain",
@@ -5233,7 +5214,7 @@
       "ms": 0
     },
     "jacobi_theta/89c9e4": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
       "ms": 1
     },
@@ -5250,12 +5231,12 @@
     "jacobi_theta/8a34d1": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "fibonacci/8a548e": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "chebyshev/8a785a": {
       "guardLevel": "complex-domain",
@@ -5280,12 +5261,12 @@
     "jacobi_theta/8b825c": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "hurwitz_zeta/8bbb6f": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "sqrt/8c1ee5": {
       "guardLevel": "complex-domain",
@@ -5300,12 +5281,12 @@
     "jacobi_theta/8c4ab4": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "prime_numbers/8c52de": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "barnes_g/8c96a5": {
       "guardLevel": "complex-domain",
@@ -5315,12 +5296,12 @@
     "carlson_elliptic/8c9ba1": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "complex_parts/8cac46": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "carlson_elliptic/8d0629": {
       "guardLevel": "complex-domain",
@@ -5345,12 +5326,12 @@
     "gcd/8d90e9": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "fibonacci/8db61e": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "gcd/8dc1c9": {
       "guardLevel": "real-simple",
@@ -5365,22 +5346,22 @@
     "legendre_elliptic/8e5c81": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "carlson_elliptic/8e6189": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "complex_parts/8e6867": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "agm/8e80c6": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "lambertw/8e8a59": {
       "guardLevel": "real-simple",
@@ -5390,7 +5371,7 @@
     "integer_sequences/8eed2c": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "sinc/8ef3d7": {
       "guardLevel": "complex-domain",
@@ -5400,17 +5381,17 @@
     "carlson_elliptic/8f0a91": {
       "guardLevel": "complex-domain",
       "outcome": "not-a-predicate",
-      "ms": 1
+      "ms": 0
     },
     "dedekind_eta/8f10b0": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "agm/8f176c": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "jacobi_theta/8f43ab": {
       "guardLevel": "complex-domain",
@@ -5420,17 +5401,17 @@
     "legendre_elliptic/8f4e31": {
       "guardLevel": "complex-domain",
       "outcome": "verify-undefined",
-      "ms": 1
+      "ms": 2
     },
     "totient/8f51dd": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "carlson_elliptic/8f5d76": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "riemann_zeta/8f5e66": {
       "guardLevel": "complex-domain",
@@ -5450,17 +5431,17 @@
     "atan/8fbf69": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "dirichlet/8ff1ff": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
       "ms": 1
     },
     "eisenstein/8ffe07": {
       "guardLevel": "undischargeable",
       "outcome": "not-a-predicate",
-      "ms": 1
+      "ms": 2
     },
     "chebyshev/9001e6": {
       "guardLevel": "complex-domain",
@@ -5470,17 +5451,17 @@
     "jacobi_theta/901934": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "modular_lambda/903962": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "atan/90631b": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "sine/906569": {
       "guardLevel": "real-simple",
@@ -5490,17 +5471,17 @@
     "chebyshev/9093a3": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "gamma/90a1e1": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "atan/90a864": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "gauss_hypergeometric/90ac58": {
       "guardLevel": "complex-domain",
@@ -5515,12 +5496,12 @@
     "totient/90bb4a": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "fibonacci/90c290": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "sinc/90c66a": {
       "guardLevel": "complex-domain",
@@ -5535,12 +5516,12 @@
     "totient/91f156": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "dedekind_eta/921ef0": {
       "guardLevel": "real-simple",
       "outcome": "verify-false",
-      "ms": 1
+      "ms": 2
     },
     "legendre_elliptic/9227bf": {
       "guardLevel": "complex-domain",
@@ -5590,12 +5571,12 @@
     "jacobi_theta/9376ec": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "legendre_polynomial/9395fc": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "totient/93a877": {
       "guardLevel": "real-simple",
@@ -5605,12 +5586,12 @@
     "sine/941a86": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "jacobi_theta/9448f2": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "carlson_elliptic/944a14": {
       "guardLevel": "complex-domain",
@@ -5620,12 +5601,12 @@
     "gcd/945be9": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "bell_numbers/948167": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "digamma_function/94a81f": {
       "guardLevel": "real-simple",
@@ -5640,37 +5621,37 @@
     "gamma/94db60": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "legendre_elliptic/94f646": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "gcd/9500d3": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "sine/954066": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "jacobi_theta/95988c": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "gcd/959a25": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "hurwitz_zeta/95e270": {
       "guardLevel": "complex-domain",
       "outcome": "not-a-predicate",
-      "ms": 0
+      "ms": 1
     },
     "jacobi_theta/95e508": {
       "guardLevel": "complex-domain",
@@ -5679,18 +5660,18 @@
     },
     "bessel/95e561": {
       "guardLevel": "complex-domain",
-      "outcome": "contradiction",
+      "outcome": "dischargeable",
       "ms": 0
     },
     "barnes_g/95f771": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "atan/96289e": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "fibonacci/9638c1": {
       "guardLevel": "real-simple",
@@ -5710,22 +5691,22 @@
     "exp/96af56": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "factorials/973b2c": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "carlson_elliptic/978287": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "chebyshev/9789ee": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "sqrt/97b736": {
       "guardLevel": "complex-domain",
@@ -5738,12 +5719,12 @@
       "ms": 1
     },
     "dirichlet/97fe89": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
       "ms": 0
     },
     "dirichlet/982e3b": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
       "ms": 1
     },
@@ -5783,7 +5764,7 @@
       "ms": 0
     },
     "jacobi_theta/9973ef": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
       "ms": 1
     },
@@ -5825,27 +5806,27 @@
     "carlson_elliptic/9a0bc8": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "jacobi_theta/9a2054": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
-    },
-    "jacobi_theta/9a9487": {
-      "guardLevel": "undischargeable",
-      "outcome": "dischargeable",
       "ms": 0
     },
+    "jacobi_theta/9a9487": {
+      "guardLevel": "complex-domain",
+      "outcome": "dischargeable",
+      "ms": 1
+    },
     "jacobi_theta/9aa437": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
       "ms": 1
     },
     "bessel/9ad254": {
       "guardLevel": "complex-domain",
-      "outcome": "verify-false",
-      "ms": 1
+      "outcome": "dischargeable",
+      "ms": 0
     },
     "carlson_elliptic/9b0388": {
       "guardLevel": "complex-domain",
@@ -5854,13 +5835,13 @@
     },
     "bessel/9b2f38": {
       "guardLevel": "complex-domain",
-      "outcome": "contradiction",
+      "outcome": "dischargeable",
       "ms": 1
     },
     "dirichlet/9b3fde": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "verify-undefined",
-      "ms": 1
+      "ms": 2
     },
     "jacobi_theta/9b7d8c": {
       "guardLevel": "complex-domain",
@@ -5875,7 +5856,7 @@
     "jacobi_theta/9bda2f": {
       "guardLevel": "undischargeable",
       "outcome": "not-a-predicate",
-      "ms": 2
+      "ms": 1
     },
     "legendre_polynomial/9bdf22": {
       "guardLevel": "complex-domain",
@@ -5885,22 +5866,22 @@
     "lambertw/9be916": {
       "guardLevel": "real-simple",
       "outcome": "verify-undefined",
-      "ms": 0
+      "ms": 1
     },
     "eisenstein/9bf0ad": {
       "guardLevel": "undischargeable",
-      "outcome": "verify-undefined",
+      "outcome": "dischargeable",
       "ms": 1
     },
     "carlson_elliptic/9bfd88": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "jacobi_theta/9c1e9a": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "fibonacci/9c53d7": {
       "guardLevel": "real-simple",
@@ -5910,12 +5891,12 @@
     "sine/9cc0f2": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "legendre_elliptic/9ccaef": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "integer_sequences/9d0839": {
       "guardLevel": "real-simple",
@@ -5940,22 +5921,22 @@
     "chebyshev/9d7c61": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "agm/9d84d8": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "bessel/9d98f8": {
       "guardLevel": "complex-domain",
-      "outcome": "contradiction",
+      "outcome": "dischargeable",
       "ms": 0
     },
     "atan/9dec3e": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 2
     },
     "eisenstein/9e1f83": {
       "guardLevel": "complex-domain",
@@ -5965,12 +5946,12 @@
     "exp/9e388b": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "digamma_function/9ee737": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "dedekind_eta/9f19c1": {
       "guardLevel": "undischargeable",
@@ -5980,7 +5961,7 @@
     "digamma_function/9f32fe": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "stirling_numbers/9fbe4f": {
       "guardLevel": "real-simple",
@@ -6000,7 +5981,7 @@
     "barnes_g/a044e1": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "confluent_hypergeometric/a047eb": {
       "guardLevel": "complex-domain",
@@ -6010,12 +5991,12 @@
     "totient/a05466": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "jacobi_theta/a0552b": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "dirichlet/a07d28": {
       "guardLevel": "real-simple",
@@ -6030,22 +6011,22 @@
     "jacobi_theta/a0955b": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "jacobi_theta/a0a1ee": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "jacobi_theta/a0ba58": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "weierstrass_elliptic/a0c85d": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "gamma/a0ca3e": {
       "guardLevel": "real-simple",
@@ -6055,7 +6036,7 @@
     "exp/a0d93c": {
       "guardLevel": "complex-domain",
       "outcome": "not-a-predicate",
-      "ms": 1
+      "ms": 0
     },
     "eisenstein/a0dff6": {
       "guardLevel": "complex-domain",
@@ -6085,7 +6066,7 @@
     "legendre_polynomial/a17386": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "atan/a18b77": {
       "guardLevel": "complex-domain",
@@ -6095,7 +6076,7 @@
     "jacobi_theta/a19141": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "beta_function/a1941b": {
       "guardLevel": "complex-domain",
@@ -6105,7 +6086,7 @@
     "dedekind_eta/a1a3d4": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "bernoulli_numbers/a1d2d7": {
       "guardLevel": "real-simple",
@@ -6115,7 +6096,7 @@
     "lambertw/a1e634": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "carlson_elliptic/a203e9": {
       "guardLevel": "complex-domain",
@@ -6145,12 +6126,12 @@
     "gamma/a26ac7": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "bessel/a2a294": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "sine/a2a30d": {
       "guardLevel": "complex-domain",
@@ -6160,17 +6141,17 @@
     "atan/a2af66": {
       "guardLevel": "complex-domain",
       "outcome": "not-a-predicate",
-      "ms": 0
+      "ms": 1
     },
     "carlson_elliptic/a2e9dd": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "lambertw/a34260": {
       "guardLevel": "real-simple",
       "outcome": "verify-undefined",
-      "ms": 0
+      "ms": 1
     },
     "log/a3a253": {
       "guardLevel": "complex-domain",
@@ -6180,7 +6161,7 @@
     "riemann_zeta/a41c92": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 2
+      "ms": 1
     },
     "atan/a42212": {
       "guardLevel": "real-simple",
@@ -6223,7 +6204,7 @@
       "ms": 1
     },
     "dirichlet/a4e947": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
       "ms": 1
     },
@@ -6250,12 +6231,12 @@
     "bessel/a59981": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "jacobi_theta/a5c258": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "jacobi_theta/a5e568": {
       "guardLevel": "complex-domain",
@@ -6290,12 +6271,12 @@
     "lambertw/a68e0e": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "chebyshev/a68f0e": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "digamma_function/a6bdf5": {
       "guardLevel": "complex-domain",
@@ -6330,12 +6311,12 @@
     "factorials/a7b330": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "beta_function/a7dbf6": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "carlson_elliptic/a839d5": {
       "guardLevel": "complex-domain",
@@ -6355,7 +6336,7 @@
     "jacobi_theta/a8ea67": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "fibonacci/a8f2ac": {
       "guardLevel": "real-simple",
@@ -6380,22 +6361,22 @@
     "sinc/a934d1": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "jacobi_theta/a94b43": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "weierstrass_elliptic/a95b7e": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
       "ms": 1
     },
     "bernoulli_numbers/a98234": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "modular_j/a997f2": {
       "guardLevel": "complex-domain",
@@ -6405,27 +6386,27 @@
     "totient/a9a405": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "stirling_numbers/a9a610": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "gcd/a9c81e": {
       "guardLevel": "complex-domain",
       "outcome": "not-a-predicate",
-      "ms": 0
+      "ms": 1
     },
     "jacobi_theta/a9c825": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "jacobi_theta/a9cdda": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "sinc/aa15f0": {
       "guardLevel": "complex-domain",
@@ -6435,12 +6416,12 @@
     "legendre_elliptic/aa1b8e": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "digamma_function/aa47cd": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "fibonacci/aaa244": {
       "guardLevel": "real-simple",
@@ -6450,17 +6431,17 @@
     "jacobi_theta/aaa582": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "bell_numbers/aab4e3": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "fibonacci/aadf90": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "gcd/aaef97": {
       "guardLevel": "real-simple",
@@ -6485,22 +6466,22 @@
     "error_functions/abadc7": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "sine/abaf91": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "jacobi_theta/abbe42": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "jacobi_theta/abc1e7": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "fibonacci/ac4d13": {
       "guardLevel": "real-simple",
@@ -6530,12 +6511,12 @@
     "dedekind_eta/acee1a": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "sine/acf63c": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 2
+      "ms": 1
     },
     "fibonacci/ad0d7a": {
       "guardLevel": "real-simple",
@@ -6569,7 +6550,7 @@
     },
     "bessel/ad9caa": {
       "guardLevel": "complex-domain",
-      "outcome": "contradiction",
+      "outcome": "dischargeable",
       "ms": 1
     },
     "eisenstein/adaf5a": {
@@ -6580,7 +6561,7 @@
     "sine/adbc1a": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "carlson_elliptic/add3ea": {
       "guardLevel": "real-simple",
@@ -6590,7 +6571,7 @@
     "digamma_function/adf5e2": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "lambertw/adf83a": {
       "guardLevel": "real-simple",
@@ -6600,12 +6581,12 @@
     "error_functions/ae3110": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "fibonacci/ae76a3": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "chebyshev/ae791d": {
       "guardLevel": "complex-domain",
@@ -6613,7 +6594,7 @@
       "ms": 0
     },
     "weierstrass_elliptic/af0dfc": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
       "ms": 1
     },
@@ -6625,12 +6606,12 @@
     "general_functions/af2d4b": {
       "guardLevel": "undischargeable",
       "outcome": "assume-threw",
-      "ms": 1
+      "ms": 2
     },
     "eisenstein/af2ea9": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "barnes_g/af31ae": {
       "guardLevel": "complex-domain",
@@ -6658,19 +6639,19 @@
       "ms": 1
     },
     "dirichlet/afd0c5": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
       "ms": 1
     },
     "partitions/afd27a": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "stirling_numbers/b01280": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "bessel/b049dc": {
       "guardLevel": "complex-domain",
@@ -6680,57 +6661,57 @@
     "eisenstein/b07750": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "atan/b0a4e9": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "chebyshev/b0c84b": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "legendre_elliptic/b0eb37": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "carlson_elliptic/b136bd": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "digamma_function/b16177": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "barnes_g/b16d00": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "riemann_zeta/b1a2e1": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "eisenstein/b1a5e4": {
       "guardLevel": "undischargeable",
       "outcome": "not-a-predicate",
-      "ms": 1
+      "ms": 2
     },
     "jacobi_theta/b1d07b": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "sinc/b1d132": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "gauss_hypergeometric/b25089": {
       "guardLevel": "complex-domain",
@@ -6740,12 +6721,12 @@
     "bell_numbers/b29b24": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "complex_parts/b2a880": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "carlson_elliptic/b2cd79": {
       "guardLevel": "complex-domain",
@@ -6765,12 +6746,12 @@
     "jacobi_theta/b2f31a": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "carlson_elliptic/b2fdfe": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "gcd/b36dba": {
       "guardLevel": "real-simple",
@@ -6795,27 +6776,27 @@
     "agm/b41bdd": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "bell_numbers/b41c49": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "sinc/b41d08": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "barnes_g/b4355e": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "jacobi_theta/b46534": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "carlson_elliptic/b478a1": {
       "guardLevel": "complex-domain",
@@ -6825,7 +6806,7 @@
     "digamma_function/b4825b": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "carlson_elliptic/b4a735": {
       "guardLevel": "complex-domain",
@@ -6835,17 +6816,17 @@
     "chebyshev/b5049d": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "gamma/b510b6": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "eisenstein/b52b6f": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "error_functions/b5bd5d": {
       "guardLevel": "complex-domain",
@@ -6855,27 +6836,27 @@
     "barnes_g/b6017f": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "gcd/b60924": {
       "guardLevel": "complex-domain",
       "outcome": "not-a-predicate",
-      "ms": 0
+      "ms": 1
     },
     "integer_sequences/b6111c": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "atan/b63481": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "barnes_g/b64782": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "general_functions/b6582a": {
       "guardLevel": "undischargeable",
@@ -6890,25 +6871,25 @@
     "gcd/b66d1e": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "riemann_zeta/b6808d": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "chebyshev/b6b014": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "bessel/b6d600": {
       "guardLevel": "complex-domain",
-      "outcome": "contradiction",
-      "ms": 1
+      "outcome": "dischargeable",
+      "ms": 0
     },
     "modular_lambda/b7174d": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
       "ms": 1
     },
@@ -6920,27 +6901,27 @@
     "legendre_elliptic/b760d1": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "legendre_polynomial/b786ad": {
       "guardLevel": "real-simple",
       "outcome": "verify-undefined",
-      "ms": 1
+      "ms": 0
     },
     "dirichlet/b788a1": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "not-a-predicate",
-      "ms": 1
+      "ms": 2
     },
     "dirichlet/b78a50": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 2
+      "ms": 0
     },
     "gamma/b7a578": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "legendre_elliptic/b7cfb3": {
       "guardLevel": "complex-domain",
@@ -6955,7 +6936,7 @@
     "bell_numbers/b7e899": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "digamma_function/b7f13b": {
       "guardLevel": "complex-domain",
@@ -6970,12 +6951,12 @@
     "totient/b81b45": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "stirling_numbers/b823b0": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "jacobi_theta/b83f63": {
       "guardLevel": "complex-domain",
@@ -7005,7 +6986,7 @@
     "weierstrass_elliptic/b96c9d": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "atan/b971fe": {
       "guardLevel": "real-simple",
@@ -7020,12 +7001,12 @@
     "totient/b9c36d": {
       "guardLevel": "undischargeable",
       "outcome": "not-a-predicate",
-      "ms": 1
+      "ms": 0
     },
     "totient/b9c50f": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "jacobi_theta/b9c650": {
       "guardLevel": "complex-domain",
@@ -7035,12 +7016,12 @@
     "complex_parts/ba6d81": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "beta_function/ba7baf": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "hurwitz_zeta/ba7f85": {
       "guardLevel": "complex-domain",
@@ -7070,12 +7051,12 @@
     "beta_function/bb4f41": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "confluent_hypergeometric/bb5d67": {
       "guardLevel": "complex-domain",
       "outcome": "not-a-predicate",
-      "ms": 2
+      "ms": 1
     },
     "factorials/bb8a75": {
       "guardLevel": "real-simple",
@@ -7095,22 +7076,22 @@
     "carlson_elliptic/bbf003": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "modular_lambda/bbfb6c": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "carlson_elliptic/bc2f88": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "powers/bc4d0a": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 2
+      "ms": 1
     },
     "complex_parts/bcd22f": {
       "guardLevel": "complex-domain",
@@ -7120,12 +7101,12 @@
     "coulomb_wave/bcdfc6": {
       "guardLevel": "complex-domain",
       "outcome": "not-a-predicate",
-      "ms": 1
+      "ms": 2
     },
     "fibonacci/bceed4": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "airy/bd319e": {
       "guardLevel": "complex-domain",
@@ -7135,17 +7116,17 @@
     "eisenstein/bd7d8e": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "beta_function/bdea17": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "dirichlet/bdf58d": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "confluent_hypergeometric/be533c": {
       "guardLevel": "complex-domain",
@@ -7155,7 +7136,7 @@
     "chebyshev/be5652": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "chebyshev/be9a45": {
       "guardLevel": "real-simple",
@@ -7170,7 +7151,7 @@
     "digamma_function/bf533f": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "jacobi_theta/bf747b": {
       "guardLevel": "complex-domain",
@@ -7180,17 +7161,17 @@
     "gcd/bf877e": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "prime_numbers/bfa464": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "atan/bfc13f": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "error_functions/bfc86e": {
       "guardLevel": "complex-domain",
@@ -7268,7 +7249,7 @@
       "ms": 1
     },
     "dirichlet/c31c10": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
       "ms": 1
     },
@@ -7300,7 +7281,7 @@
     "sine/c47a86": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "gcd/c4a892": {
       "guardLevel": "real-simple",
@@ -7310,17 +7291,17 @@
     "jacobi_theta/c4b16c": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "fibonacci/c4d78a": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "powers/c53d94": {
-      "guardLevel": "undischargeable",
-      "outcome": "assume-threw",
-      "ms": 1
+      "guardLevel": "complex-domain",
+      "outcome": "dischargeable",
+      "ms": 0
     },
     "carlson_elliptic/c56825": {
       "guardLevel": "complex-domain",
@@ -7350,7 +7331,7 @@
     "gauss_hypergeometric/c60679": {
       "guardLevel": "complex-domain",
       "outcome": "verify-undefined",
-      "ms": 2
+      "ms": 3
     },
     "sine/c62afa": {
       "guardLevel": "real-simple",
@@ -7375,7 +7356,7 @@
     "eisenstein/c6be24": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "hurwitz_zeta/c6d6e2": {
       "guardLevel": "complex-domain",
@@ -7385,7 +7366,7 @@
     "sinc/c6e6b2": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "gcd/c70178": {
       "guardLevel": "real-simple",
@@ -7400,12 +7381,12 @@
     "factorials/c733f7": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "jacobi_theta/c743eb": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "chebyshev/c76e72": {
       "guardLevel": "complex-domain",
@@ -7415,17 +7396,17 @@
     "digamma_function/c76eaf": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "log/c77f9a": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "gamma/c7b921": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "sinc/c7c483": {
       "guardLevel": "complex-domain",
@@ -7440,25 +7421,25 @@
     "agm/c7f885": {
       "guardLevel": "complex-domain",
       "outcome": "not-a-predicate",
-      "ms": 0
+      "ms": 1
     },
     "fibonacci/c84407": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "carlson_elliptic/c85c2f": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "digamma_function/c86ca1": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "jacobi_theta/c891a1": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
       "ms": 1
     },
@@ -7495,12 +7476,12 @@
     "complex_plane/c98bad": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "factorials/c9bcf7": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "gauss_hypergeometric/ca9123": {
       "guardLevel": "complex-domain",
@@ -7515,27 +7496,27 @@
     "exp/caf706": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "powers/caf8cf": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 2
     },
     "totient/cb410e": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "jacobi_theta/cb493d": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "gamma/cb5071": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "error_functions/cb93ea": {
       "guardLevel": "complex-domain",
@@ -7545,7 +7526,7 @@
     "gcd/cb9f61": {
       "guardLevel": "real-simple",
       "outcome": "assume-threw",
-      "ms": 1
+      "ms": 2
     },
     "riemann_zeta/cbbf16": {
       "guardLevel": "real-simple",
@@ -7555,17 +7536,17 @@
     "fibonacci/cbfe21": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "beta_function/cc2ebb": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "barnes_g/cc3a51": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "bessel/cc4572": {
       "guardLevel": "complex-domain",
@@ -7575,7 +7556,7 @@
     "eisenstein/cc579c": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "jacobi_theta/cc59e4": {
       "guardLevel": "complex-domain",
@@ -7585,12 +7566,12 @@
     "jacobi_theta/cc6d21": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "carlson_elliptic/ccb4d1": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "riemann_zeta/cce75b": {
       "guardLevel": "real-simple",
@@ -7600,12 +7581,12 @@
     "partitions/cd3013": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "jacobi_theta/cd5f45": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "carlson_elliptic/cdb587": {
       "guardLevel": "complex-domain",
@@ -7713,7 +7694,7 @@
       "ms": 1
     },
     "dirichlet/d088ea": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
       "ms": 1
     },
@@ -7735,12 +7716,12 @@
     "hurwitz_zeta/d0d03b": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 2
+      "ms": 1
     },
     "fibonacci/d0d91a": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "jacobi_theta/d0dfba": {
       "guardLevel": "complex-domain",
@@ -7775,7 +7756,7 @@
     "barnes_g/d1a0ec": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "confluent_hypergeometric/d1b3b5": {
       "guardLevel": "complex-domain",
@@ -7785,12 +7766,12 @@
     "complex_plane/d1cf0c": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "totient/d1ea57": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "prime_numbers/d1ec2d": {
       "guardLevel": "real-simple",
@@ -7810,62 +7791,62 @@
     "bessel/d1f5c5": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "hurwitz_zeta/d25d10": {
       "guardLevel": "complex-domain",
       "outcome": "not-a-predicate",
-      "ms": 1
+      "ms": 2
     },
     "coulomb_wave/d280c5": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 3
+      "ms": 2
     },
     "jacobi_theta/d29148": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 2
     },
     "dirichlet/d29554": {
-      "guardLevel": "undischargeable",
-      "outcome": "dischargeable",
-      "ms": 1
-    },
-    "legendre_elliptic/d2adb6": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
       "ms": 0
     },
-    "jacobi_theta/d2f183": {
+    "legendre_elliptic/d2adb6": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
       "ms": 1
+    },
+    "jacobi_theta/d2f183": {
+      "guardLevel": "complex-domain",
+      "outcome": "dischargeable",
+      "ms": 0
     },
     "riemann_zeta/d31b04": {
       "guardLevel": "complex-domain",
       "outcome": "verify-undefined",
-      "ms": 1
+      "ms": 2
     },
     "barnes_g/d35c54": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "jacobi_theta/d36e97": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
       "ms": 1
     },
     "lambertw/d37d0f": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "sine/d38739": {
       "guardLevel": "real-simple",
       "outcome": "verify-undefined",
-      "ms": 1
+      "ms": 0
     },
     "sine/d38a03": {
       "guardLevel": "complex-domain",
@@ -7875,17 +7856,17 @@
     "bessel/d39c46": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "carlson_elliptic/d3b39c": {
       "guardLevel": "complex-domain",
       "outcome": "not-a-predicate",
-      "ms": 2
+      "ms": 1
     },
     "factorials/d3baaf": {
       "guardLevel": "real-simple",
       "outcome": "verify-undefined",
-      "ms": 0
+      "ms": 1
     },
     "sqrt/d40229": {
       "guardLevel": "complex-domain",
@@ -7900,12 +7881,12 @@
     "fibonacci/d454a3": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "jacobi_theta/d45548": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "gcd/d4852c": {
       "guardLevel": "real-simple",
@@ -7915,7 +7896,7 @@
     "atan/d4b0b6": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "carlson_elliptic/d4b12e": {
       "guardLevel": "complex-domain",
@@ -7925,26 +7906,26 @@
     "digamma_function/d4bdf8": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "jacobi_theta/d4e418": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "sinc/d5000a": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "fibonacci/d56025": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "bessel/d56914": {
       "guardLevel": "complex-domain",
-      "outcome": "contradiction",
+      "outcome": "dischargeable",
       "ms": 1
     },
     "eisenstein/d56eb6": {
@@ -7955,12 +7936,12 @@
     "sine/d59bd9": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "jacobi_theta/d5a29e": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "bessel/d5b7e8": {
       "guardLevel": "complex-domain",
@@ -7970,7 +7951,7 @@
     "modular_j/d5f569": {
       "guardLevel": "undischargeable",
       "outcome": "not-a-predicate",
-      "ms": 1
+      "ms": 2
     },
     "agm/d60119": {
       "guardLevel": "complex-domain",
@@ -7985,17 +7966,17 @@
     "factorials/d651d1": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "dirichlet/d69b41": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "verify-undefined",
       "ms": 2
     },
     "jacobi_theta/d6a799": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "sinc/d6c29e": {
       "guardLevel": "complex-domain",
@@ -8005,7 +7986,7 @@
     "agm/d6d836": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "digamma_function/d6fbc8": {
       "guardLevel": "complex-domain",
@@ -8020,17 +8001,17 @@
     "partitions/d72123": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "golden_ratio/d774fe": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "legendre_polynomial/d77f0a": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "fibonacci/d7c89c": {
       "guardLevel": "real-simple",
@@ -8040,22 +8021,22 @@
     "gamma/d7d2a0": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "sine/d81355": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "jacobi_theta/d81f05": {
       "guardLevel": "complex-domain",
       "outcome": "verify-undefined",
-      "ms": 1
+      "ms": 2
     },
     "carlson_elliptic/d829be": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "legendre_polynomial/d84519": {
       "guardLevel": "complex-domain",
@@ -8065,22 +8046,22 @@
     "sqrt/d8791e": {
       "guardLevel": "complex-domain",
       "outcome": "not-a-predicate",
-      "ms": 1
+      "ms": 0
     },
     "log/d87f6e": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "prime_numbers/d898b9": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "dirichlet/d8c6d1": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "sinc/d8d286": {
       "guardLevel": "real-simple",
@@ -8120,22 +8101,22 @@
     "dirichlet/d9a187": {
       "guardLevel": "real-simple",
       "outcome": "verify-false",
-      "ms": 1
+      "ms": 2
     },
     "barnes_g/d9a7a3": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "digamma_function/d9c818": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "lambertw/da0f15": {
       "guardLevel": "complex-domain",
       "outcome": "not-a-predicate",
-      "ms": 4
+      "ms": 3
     },
     "carlson_elliptic/da16db": {
       "guardLevel": "complex-domain",
@@ -8145,7 +8126,7 @@
     "riemann_zeta/da2fdb": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "gcd/da45c0": {
       "guardLevel": "real-simple",
@@ -8170,12 +8151,12 @@
     "jacobi_theta/dac0aa": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 2
     },
     "partitions/dacd74": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "barnes_g/daef08": {
       "guardLevel": "real-simple",
@@ -8210,12 +8191,12 @@
     "jacobi_theta/dc7c83": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "modular_j/dc8251": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "log/dcc1e5": {
       "guardLevel": "complex-domain",
@@ -8240,17 +8221,17 @@
     "jacobi_theta/dd5f43": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "legendre_elliptic/dd67fb": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "bell_numbers/dd9d26": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "digamma_function/ddc7e1": {
       "guardLevel": "complex-domain",
@@ -8318,19 +8299,19 @@
       "ms": 2
     },
     "jacobi_theta/dfea7d": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
       "ms": 1
     },
     "chebyshev/e03fa4": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "barnes_g/e05807": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "jacobi_theta/e08bb4": {
       "guardLevel": "complex-domain",
@@ -8340,7 +8321,7 @@
     "gamma/e0b322": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "exp/e103e7": {
       "guardLevel": "complex-domain",
@@ -8380,12 +8361,12 @@
     "digamma_function/e1e71f": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "partitions/e1f15b": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "coulomb_wave/e20938": {
       "guardLevel": "complex-domain",
@@ -8395,16 +8376,16 @@
     "eisenstein/e20db0": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "jacobi_theta/e2288d": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "bessel/e233b0": {
       "guardLevel": "complex-domain",
-      "outcome": "contradiction",
+      "outcome": "dischargeable",
       "ms": 1
     },
     "legendre_elliptic/e2445d": {
@@ -8413,14 +8394,14 @@
       "ms": 1
     },
     "modular_transformations/e28209": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "bessel/e284d7": {
       "guardLevel": "complex-domain",
-      "outcome": "contradiction",
-      "ms": 1
+      "outcome": "dischargeable",
+      "ms": 2
     },
     "sinc/e2878f": {
       "guardLevel": "complex-domain",
@@ -8445,22 +8426,22 @@
     "totient/e3005f": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "gcd/e3392b": {
       "guardLevel": "complex-domain",
       "outcome": "not-a-predicate",
-      "ms": 1
+      "ms": 0
     },
     "gcd/e352ca": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 2
+      "ms": 1
     },
     "legendre_polynomial/e36542": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "riemann_zeta/e37535": {
       "guardLevel": "complex-domain",
@@ -8478,7 +8459,7 @@
       "ms": 1
     },
     "dirichlet/e44796": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
       "ms": 1
     },
@@ -8533,7 +8514,7 @@
       "ms": 1
     },
     "weierstrass_elliptic/e677fb": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
       "ms": 1
     },
@@ -8585,7 +8566,7 @@
     "factorials/e78084": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "factorials/e78989": {
       "guardLevel": "complex-domain",
@@ -8615,7 +8596,7 @@
     "bernoulli_numbers/e89eb5": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "jacobi_theta/e8ce0b": {
       "guardLevel": "complex-domain",
@@ -8625,12 +8606,12 @@
     "chebyshev/e9232b": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "carlson_elliptic/e93f43": {
       "guardLevel": "complex-domain",
       "outcome": "not-a-predicate",
-      "ms": 2
+      "ms": 1
     },
     "complex_parts/e9465d": {
       "guardLevel": "complex-domain",
@@ -8650,12 +8631,12 @@
     "legendre_elliptic/e9c797": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "modular_lambda/e9f0c8": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "beta_function/e9f966": {
       "guardLevel": "complex-domain",
@@ -8680,12 +8661,12 @@
     "gaussian_quadrature/ea4754": {
       "guardLevel": "real-simple",
       "outcome": "verify-undefined",
-      "ms": 1
+      "ms": 0
     },
     "modular_lambda/ea56d1": {
       "guardLevel": "undischargeable",
       "outcome": "not-a-predicate",
-      "ms": 1
+      "ms": 2
     },
     "stirling_numbers/ea9e2f": {
       "guardLevel": "real-simple",
@@ -8705,7 +8686,7 @@
     "carlson_elliptic/eb1d4f": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "carlson_elliptic/ebaa1a": {
       "guardLevel": "complex-domain",
@@ -8715,7 +8696,7 @@
     "hurwitz_zeta/ebc49c": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "jacobi_theta/ebc673": {
       "guardLevel": "complex-domain",
@@ -8725,17 +8706,17 @@
     "complex_parts/ebf8cc": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "error_functions/ec0205": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "modular_lambda/ec5a44": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "atan/ec7f2d": {
       "guardLevel": "complex-domain",
@@ -8750,11 +8731,11 @@
     "atan/eca4ce": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 2
     },
     "bessel/ecd36f": {
       "guardLevel": "complex-domain",
-      "outcome": "verify-false",
+      "outcome": "dischargeable",
       "ms": 0
     },
     "jacobi_theta/ed0756": {
@@ -8818,7 +8799,7 @@
       "ms": 0
     },
     "jacobi_theta/ee8617": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
       "ms": 1
     },
@@ -8910,12 +8891,12 @@
     "lambertw/f171a6": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "gcd/f1817f": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "sine/f183d0": {
       "guardLevel": "complex-domain",
@@ -8930,12 +8911,12 @@
     "complex_parts/f1a29b": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "bessel/f1afc0": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "gauss_hypergeometric/f1bd89": {
       "guardLevel": "complex-domain",
@@ -8955,12 +8936,12 @@
     "jacobi_theta/f1f42f": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "carlson_elliptic/f29729": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 2
     },
     "jacobi_theta/f2e28a": {
       "guardLevel": "complex-domain",
@@ -8995,17 +8976,17 @@
     "fibonacci/f3aff5": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "hurwitz_zeta/f3b870": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "carlson_elliptic/f3b8dc": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "jacobi_theta/f3e75c": {
       "guardLevel": "complex-domain",
@@ -9023,24 +9004,24 @@
       "ms": 0
     },
     "jacobi_theta/f4554f": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 2
+      "ms": 1
     },
     "stirling_numbers/f46e0e": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "barnes_g/f4750b": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "legendre_elliptic/f48f54": {
       "guardLevel": "complex-domain",
       "outcome": "verify-undefined",
-      "ms": 1
+      "ms": 2
     },
     "chebyshev/f4b3fa": {
       "guardLevel": "complex-domain",
@@ -9055,12 +9036,12 @@
     "bell_numbers/f4e249": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "sinc/f4fd7d": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "barnes_g/f50c74": {
       "guardLevel": "real-simple",
@@ -9070,7 +9051,7 @@
     "gamma/f50ec9": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "atan/f516e3": {
       "guardLevel": "complex-domain",
@@ -9098,19 +9079,19 @@
       "ms": 1
     },
     "dirichlet/f5c3c5": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
       "ms": 1
     },
     "atan/f5d28c": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "fibonacci/f5f706": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "chebyshev/f5fa23": {
       "guardLevel": "complex-domain",
@@ -9140,12 +9121,12 @@
     "jacobi_theta/f697d5": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 2
     },
     "carlson_elliptic/f6b4a2": {
       "guardLevel": "complex-domain",
       "outcome": "not-a-predicate",
-      "ms": 1
+      "ms": 0
     },
     "sine/f6d0c6": {
       "guardLevel": "complex-domain",
@@ -9155,7 +9136,7 @@
     "jacobi_theta/f71675": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 2
+      "ms": 1
     },
     "partitions/f7407a": {
       "guardLevel": "real-simple",
@@ -9173,7 +9154,7 @@
       "ms": 1
     },
     "dirichlet/f7a866": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
       "ms": 1
     },
@@ -9195,12 +9176,12 @@
     "imaginary_unit/f8a56f": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "jacobi_theta/f8cd8f": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "integrals/f8de2e": {
       "guardLevel": "complex-domain",
@@ -9288,24 +9269,24 @@
       "ms": 3
     },
     "dirichlet/fad52f": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
       "ms": 1
     },
     "error_functions/fae9d3": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "chebyshev/faeed9": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "jacobi_theta/fb4b1b": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 2
+      "ms": 1
     },
     "jacobi_theta/fb55cb": {
       "guardLevel": "complex-domain",
@@ -9315,7 +9296,7 @@
     "bell_numbers/fb6ce2": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "partitions/fb7a63": {
       "guardLevel": "real-simple",
@@ -9360,12 +9341,12 @@
     "chebyshev/fc5d42": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "hurwitz_zeta/fc6fe0": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "factorials/fc8d5d": {
       "guardLevel": "real-simple",
@@ -9375,17 +9356,17 @@
     "riemann_zeta/fcab61": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "beta_function/fd0e48": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 2
     },
     "fibonacci/fd732d": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "bessel/fd9add": {
       "guardLevel": "complex-domain",
@@ -9400,17 +9381,17 @@
     "bessel/fda595": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "chebyshev/fda800": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "gcd/fdae67": {
       "guardLevel": "real-simple",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 2
     },
     "chebyshev/fdf80d": {
       "guardLevel": "complex-domain",
@@ -9425,7 +9406,7 @@
     "gauss_hypergeometric/fe6e74": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 2
+      "ms": 1
     },
     "factorials/fe9fb7": {
       "guardLevel": "complex-domain",
@@ -9435,12 +9416,12 @@
     "eisenstein/feb95e": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "hurwitz_zeta/febdd2": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "bernoulli_numbers/ff190c": {
       "guardLevel": "real-simple",
@@ -9450,12 +9431,12 @@
     "dedekind_eta/ff587a": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 0
+      "ms": 1
     },
     "carlson_elliptic/ff58cf": {
       "guardLevel": "complex-domain",
       "outcome": "dischargeable",
-      "ms": 1
+      "ms": 0
     },
     "sinc/ff5e82": {
       "guardLevel": "complex-domain",
@@ -9473,7 +9454,7 @@
       "ms": 1
     },
     "weierstrass_elliptic/ffcc0f": {
-      "guardLevel": "undischargeable",
+      "guardLevel": "complex-domain",
       "outcome": "dischargeable",
       "ms": 1
     },

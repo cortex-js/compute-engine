@@ -356,7 +356,11 @@ exports[`solve for x \\tan(x) - 1 = 0 1`] = `
 ]
 `;
 
-exports[`solve for x 2^x - 8 = 0 1`] = `[]`;
+exports[`solve for x 2^x - 8 = 0 1`] = `
+[
+  3,
+]
+`;
 
 exports[`solve for x 2x^2 + 4x = 0 1`] = `
 [
@@ -383,9 +387,17 @@ exports[`solve for x ax + b = 0 1`] = `
 ]
 `;
 
-exports[`solve for x e^{2x} - 4 = 0 1`] = `[]`;
+exports[`solve for x e^{2x} - 4 = 0 1`] = `
+[
+  0.6931471805599453,
+]
+`;
 
-exports[`solve for x e^x - 1 = 0 1`] = `[]`;
+exports[`solve for x e^x - 1 = 0 1`] = `
+[
+  0,
+]
+`;
 
 exports[`solve for x x^2 + 1 = 0 1`] = `
 [

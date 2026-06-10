@@ -72,7 +72,7 @@ describe('loadIdentities (full artifact)', () => {
 
   it('loads every rule of the artifact on a fresh engine', () => {
     expect(report.loaded).toBe(FUNGRIM_CORE.rules.length);
-    expect(report.loaded).toBe(1275);
+    expect(report.loaded).toBe(1349);
     expect(report.skipped).toEqual([]);
     expect(ce.simplificationRules.length).toBe(rulesBefore + report.loaded);
   });
@@ -84,14 +84,14 @@ describe('loadIdentities (full artifact)', () => {
 
   it('reports byTarget and byPurpose consistent with the artifact manifest', () => {
     expect(report.byTarget).toEqual({
-      simplify: 1275,
+      simplify: 1349,
       solve: 0,
       harmonization: 0,
     });
     expect(report.byPurpose).toEqual({
-      simplify: 1171,
+      simplify: 1240,
       transform: 0,
-      expand: 104,
+      expand: 109,
     });
     expect(
       report.byPurpose.simplify +
