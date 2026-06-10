@@ -10,11 +10,12 @@ integration plan (`FUNGRIM-PLAN-1-TRANSLATOR.md` at the repository root).
 - **Upstream:** Fungrim by Fredrik Johansson, MIT licensed (see `LICENSE` —
   the upstream notice is reproduced verbatim; this data set is a *translated
   derivative*, not a copy, of the upstream Python sources).
-- **Snapshot pin:** the upstream is an unversioned local snapshot at
-  `fungrim-master/`. `MANIFEST.json` records a content hash as the pin:
-  SHA-256 over the concatenation of all `pygrim/**/*.py` files sorted by path
-  (`find pygrim -name '*.py' -type f | LC_ALL=C sort | xargs cat | shasum -a 256`).
-  If the fork is ever pushed to a git host, replace the hash with the commit id.
+- **Source pin:** the corpus is generated from the published fork
+  [`arnog/fungrim`](https://github.com/arnog/fungrim) (branch
+  `grim2mathjson`); `MANIFEST.json` records the fork commit, the upstream
+  parent commit it mirrors (`pygrim/` content verified identical by recursive
+  diff), and a belt-and-braces content hash: SHA-256 over the concatenation of
+  all `pygrim/**/*.py` files sorted by path.
 - **Translator:** `grim2mathjson` (lives in the fungrim fork as a sibling
   package to `pygrim`). Every emitted file embeds a
   `"generator": "grim2mathjson <version>"` field.
@@ -151,20 +152,26 @@ not build failures).
 From a clean state:
 
 ```sh
-# 1. Re-run the translator over the pinned fungrim snapshot
-cd /Users/arno/dev/fungrim-master
+# 0. Get the translator + source (once)
+gh repo clone arnog/fungrim ~/dev/fungrim   # branch grim2mathjson is the default
+
+# 1. Re-run the translator (check out the MANIFEST.json commit for an exact
+#    reproduction, or HEAD of grim2mathjson for a refresh)
+cd ~/dev/fungrim
 python3 -m grim2mathjson --strict --out grim2mathjson/out
 
 # 2. Copy the artifacts into this directory
 cd /Users/arno/dev/compute-engine
-cp -R /Users/arno/dev/fungrim-master/grim2mathjson/out/corpus data/fungrim/corpus
-cp /Users/arno/dev/fungrim-master/grim2mathjson/out/{declarations,properties,skipped}.json data/fungrim/
+cp -R ~/dev/fungrim/grim2mathjson/out/corpus data/fungrim/corpus
+cp ~/dev/fungrim/grim2mathjson/out/{declarations,properties,skipped}.json data/fungrim/
 
-# 3. Recompute the upstream pin and update MANIFEST.json if pygrim changed
-(cd /Users/arno/dev/fungrim-master && find pygrim -name '*.py' -type f | LC_ALL=C sort | xargs cat | shasum -a 256)
+# 3. Update the provenance in MANIFEST.json: the fork commit
+#    (git -C ~/dev/fungrim log -1 --format=%H), and the content hash:
+(cd ~/dev/fungrim && find pygrim -name '*.py' -type f | LC_ALL=C sort | xargs cat | shasum -a 256)
 
-# 4. Validate
+# 4. Validate, then recompile the rule artifact
 npx tsx scripts/fungrim/validate.ts --corpus data/fungrim
+npx tsx scripts/fungrim/compile-rules.ts
 ```
 
 The output is deterministic; review the git diff of `data/fungrim/` as the

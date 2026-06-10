@@ -4,7 +4,14 @@
   "generator": "grim2mathjson 0.1.0",
   "upstream": {
     "name": "fungrim",
-    "snapshot": "/Users/arno/dev/fungrim-master (unversioned local snapshot)",
+    "repository": "https://github.com/arnog/fungrim",
+    "branch": "grim2mathjson",
+    "commit": "5ead4a37bb489b5ef71ef58cd4ed3afee1429f1c",
+    "parent": {
+      "repository": "https://github.com/fredrik-johansson/fungrim",
+      "commit": "b7c3ca6e565e1058638cab6ba2bc811090296767",
+      "note": "pygrim/ content in the fork is identical to this upstream commit (verified by recursive diff)"
+    },
     "pin": {
       "sha256": "c7178f4f40cabc7dbc6b2b50da977520e8921806c0b65ea57690170cc499bebe",
       "method": "cd fungrim-master && find pygrim -name '*.py' -type f | LC_ALL=C sort | xargs cat | shasum -a 256",
