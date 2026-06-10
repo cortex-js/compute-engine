@@ -74,6 +74,11 @@
   - `GCD`/`LCM` under machine precision never seeded its accumulator, so it stayed
     unevaluated (`GCD(4, 6)` returned `gcd(4, 6)`); a leading non-integer operand
     was also silently dropped. Both are now handled.
+  - `LCM` carried the sign of its operands (`LCM(-2, 3) → -6`); the least common
+    multiple is non-negative by convention, so it now returns `6`. The seed is
+    also taken as a magnitude, so single-operand `LCM(-7)`/`GCD(-8)` give `7`/`8`,
+    and the arbitrary-precision path no longer mishandles a non-integer leading
+    operand.
 
 - **Combinatorics, number-theory, and equation fixes** — several library
   functions returned wrong results:
@@ -144,6 +149,13 @@
   strategies (perfect square, difference of squares) ran. When no variable is
   given and the expression has a single unknown, that unknown is now used —
   `Factor(x^2 + 5x + 6)` gives `(x+2)(x+3)`. (#309)
+
+- **`Factor` keeps extracted numeric content in factored form** — content
+  extraction reconstructed `content · primitive` with the arithmetic multiply,
+  which distributes a numeric factor over a bare sum and collapsed the result
+  back to the expanded form when the primitive didn't factor further (e.g.
+  `Factor(6x + 9)` returned `6x + 9` instead of `3(2x + 3)`). The product is now
+  built so the content stays factored.
 
 - **LaTeX serialization and parsing fixes**:
   - The `'scaled'` and `'big'` delimiter styles emitted a stray trailing `}` /

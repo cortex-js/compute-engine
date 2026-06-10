@@ -475,7 +475,15 @@ function extractContent(expr: Expression, variable: string): Expression | null {
   // Recursively factor the primitive part
   const factoredPrimitive = factorPolynomial(primitive, variable);
 
-  return ce.number(content).mul(factoredPrimitive);
+  // Build the product `content · primitive` with ce.function rather than
+  // `.mul()`. The arithmetic `.mul()` distributes a numeric factor over a
+  // bare sum — e.g. `3 · (2x + 3)` collapses back to `6x + 9`, undoing the
+  // content extraction for a primitive that doesn't factor further (such as
+  // a linear polynomial). Canonical `Multiply` does not distribute, so the
+  // factored form is preserved. `content` is always ≥ 2 here (we returned
+  // null for content ≤ 1), so the coefficient-±1 canonical edge cases (which
+  // would fold into a Negate or drop the factor) don't apply.
+  return ce.function('Multiply', [ce.number(content), factoredPrimitive]);
 }
 
 /**
