@@ -388,19 +388,19 @@ export class BoxedNumber
         return ce.number(factor).ln(base).mul(2).add(ce.number(root).ln(base));
     }
 
-    if (base && base.isInteger) {
+    // log_base(x) for any base (the previous code only handled an integer
+    // base and silently dropped a non-integer one, e.g. `(8).ln(2.5)` returned
+    // ln(8) instead of log_2.5(8)).
+    if (base !== undefined) {
       if (typeof this._value === 'number')
         return this.engine.number(Math.log(this._value) / Math.log(base.re));
       return this.engine.number(this._value.ln(base.re));
     }
 
-    if (base === undefined) {
-      if (typeof this._value === 'number')
-        return this.engine.number(Math.log(this._value));
-      return this.engine.number(this._value.ln());
-    }
-
-    return this.engine._fn('Ln', [this]);
+    // Natural log (base undefined).
+    if (typeof this._value === 'number')
+      return this.engine.number(Math.log(this._value));
+    return this.engine.number(this._value.ln());
   }
 
   get value(): Expression {

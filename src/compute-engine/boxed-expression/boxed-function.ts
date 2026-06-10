@@ -863,7 +863,9 @@ export class BoxedFunction
     if (this.operator === 'Divide')
       return this.op1.ln(base).sub(this.op2.ln(base));
 
-    if (base && base.type.matches('finite_integer')) {
+    // log_base(x) for any base — keep the base instead of dropping it (a
+    // non-integer base previously fell through to a base-less `Ln`).
+    if (base !== undefined) {
       // ln_10(x) -> log(x)
       if (base.re === 10) return this.engine._fn('Log', [this]);
       // ln_n(x) -> log_n(x)

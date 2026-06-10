@@ -390,13 +390,18 @@ export function cmp(
     // For example, '1 + y' and 'x - 1' can't be compared
     if (!isNumber(diff)) return undefined;
 
-    if (typeof diff.numericValue === 'number') {
-      if (diff.numericValue === 0) return '=';
-      return diff.numericValue < 0 ? '<' : '>';
-    }
-
     // We'll use the the tolerance of the engine
     const tol = a.engine.tolerance;
+
+    if (typeof diff.numericValue === 'number') {
+      const v = diff.numericValue;
+      // A NaN difference is indeterminate, not "greater".
+      if (Number.isNaN(v)) return undefined;
+      // Compare within tolerance, consistent with the NumericValue path below.
+      if (Math.abs(v) <= tol) return '=';
+      return v < 0 ? '<' : '>';
+    }
+
     if (diff.numericValue.isZeroWithTolerance(tol)) return '=';
     return diff.numericValue.lt(0) ? '<' : '>';
   }

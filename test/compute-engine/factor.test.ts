@@ -40,6 +40,18 @@ describe('Gaussian-integer sums (G13)', () => {
   });
 });
 
+// REVIEW.md A10: commonTerms early-returned when the numeric gcd was 1,
+// skipping symbolic common factors — so `factor` could not cancel `x` from
+// `x·y < x·z` even when `x > 0`.
+describe('Common symbolic factors (A10)', () => {
+  it('factor cancels a positive symbolic common factor', () => {
+    const e = new ComputeEngine();
+    e.assume(['Greater', 'x', 0]);
+    const r = factor(e.box(['Less', ['Multiply', 'x', 'y'], ['Multiply', 'x', 'z']]));
+    expect(r.toString()).toBe('y < z');
+  });
+});
+
 describe('Perfect Square Trinomial Factoring', () => {
   test('x² + 2x + 1 → (x+1)²', () => {
     const expr = parse('x^2 + 2x + 1');

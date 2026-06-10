@@ -460,7 +460,9 @@ export function commonTerms(
   //
   const coef = lhs.coefficient.gcd(rhs.coefficient);
 
-  if (coef.isOne) return [ce._numericValue(1), ce.One];
+  // Note: do NOT early-return when `coef` is 1 — a unit numeric gcd does not
+  // mean there are no common factors. The two products may still share
+  // symbolic terms (e.g. `x` in `x·y` and `x·z`), extracted below.
 
   //
   // Extract common terms between the two products
@@ -754,8 +756,9 @@ export function div(num: Expression, denom: number | Expression): Expression {
     // a/(-1) = -a
     if (denom.isSame(-1)) return num.neg();
 
-    // a/0 = NaN (a≠0)
-    if (denom.isSame(0)) return ce.NaN;
+    // a/0 = ~∞ (a≠0) — ComplexInfinity, consistent with the JS-number path
+    // above (the boxed-zero case previously returned NaN).
+    if (denom.isSame(0)) return ce.ComplexInfinity;
 
     if (isNumber(num) && isNumber(denom)) {
       const numV = num.numericValue;

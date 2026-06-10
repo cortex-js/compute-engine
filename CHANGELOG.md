@@ -90,6 +90,28 @@
     result. `factor()` now leaves sums with complex coefficients unfactored, and
     the division yields `(1+i)/2` (= `0.5 + 0.5i`).
 
+- **Core arithmetic correctness fixes**:
+  - **Even root of a negative real returned a wrong real** — `Root(-16, 4).N()`
+    gave `2` (the real 4th root of 16) instead of the complex principal root
+    `√2 + √2·i`, inconsistent with `Sqrt(-4).N() → 2i`.
+  - **`ln`/`log` dropped a non-integer base** — `(8).ln(2.5)` returned `ln(8)`
+    instead of `log_2.5(8)`. Non-integer bases are now honored (BoxedNumber and
+    BoxedFunction, matching BoxedSymbol).
+  - **Plain symbols reported as empty collections** — a symbol's `count`,
+    `isEmptyCollection`, and `isFiniteCollection` returned `0`/`true` via
+    fallbacks; they now return `undefined` for non-collections (the
+    abstract-class contract).
+  - **Function comparison ignored tolerance** — comparing two function
+    expressions used an exact `=== 0` on the machine path (unlike the
+    arbitrary-precision path) and mapped a `NaN` difference to `>`. It now
+    compares within the engine tolerance and returns `undefined` for `NaN`.
+  - **`commonTerms` skipped symbolic common factors** — it early-returned when
+    the numeric gcd was 1, so `factor` could not cancel `x` from `x·y < x·z`
+    (even with `x > 0`).
+  - **Division by zero was inconsistent** — `a/0` gave `ComplexInfinity` for a
+    JS-number denominator but `NaN` for a boxed zero; both are now
+    `ComplexInfinity`.
+
 - **More numeric-value correctness fixes**:
   - **`NumericValue` n-th root lost precision** — `root(n)` computed `pow(1/n)`
     with a machine-precision reciprocal, so the result had only ~17 correct

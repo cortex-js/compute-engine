@@ -95,7 +95,10 @@ export function negateProduct(
   if (!done) {
     result = [];
     for (const arg of args) {
-      if (done || (!isNumber(arg) && !arg.isInteger)) result.push(arg);
+      // Skip anything that isn't an integer literal, so a non-integer number
+      // is left for the next pass. (The condition was `!isNumber && !isInteger`,
+      // which matched non-integer numbers here and left pass 3 dead.)
+      if (done || !(isNumber(arg) && arg.isInteger)) result.push(arg);
       else {
         done = true;
         if (!arg.isSame(-1)) result.push(arg.neg());

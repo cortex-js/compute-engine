@@ -771,25 +771,23 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     );
   }
 
-  get count(): number {
-    return (
-      this._asCollection?.count(this._value ?? this) ?? this._value?.count ?? 0
-    );
+  // For a non-collection symbol these return `undefined` (the abstract-class
+  // contract), not 0 / true — a plain symbol is not an empty collection.
+  get count(): number | undefined {
+    return this._asCollection?.count(this._value ?? this) ?? this._value?.count;
   }
 
-  get isEmptyCollection(): boolean {
+  get isEmptyCollection(): boolean | undefined {
     return (
       this._asCollection?.isEmpty?.(this._value ?? this) ??
-      this._value?.isEmptyCollection ??
-      this.count === 0
+      this._value?.isEmptyCollection
     );
   }
 
   get isFiniteCollection(): boolean | undefined {
     return (
       this._asCollection?.isFinite?.(this._value ?? this) ??
-      this._value?.isFiniteCollection ??
-      isFinite(this.count)
+      this._value?.isFiniteCollection
     );
   }
 

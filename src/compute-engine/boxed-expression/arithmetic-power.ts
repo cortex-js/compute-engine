@@ -579,6 +579,18 @@ export function root(
       // (-x)^n = (-1)^n x^n
       const isNegative = a.isNegative;
       const isEven = b.isEven;
+      if (isNegative && isEven) {
+        // An even root of a negative real has no real value. Return the
+        // complex principal root |a|^(1/n)·(cos(π/n) + i·sin(π/n)) — consistent
+        // with `Sqrt(-4).N()` → 2i. (The old code returned the real root of
+        // |a|, e.g. `Root(-16, 4).N()` → 2 instead of √2 + √2·i.)
+        const n = b.re;
+        const mod = Math.pow(-a.re, 1 / n);
+        const angle = Math.PI / n;
+        return a.engine.number(
+          a.engine.complex(mod * Math.cos(angle), mod * Math.sin(angle))
+        );
+      }
       if (isNegative) a = a.neg();
 
       return (

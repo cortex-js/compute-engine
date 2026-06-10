@@ -1811,3 +1811,55 @@ describe('Binomial/Choose simplification', () => {
     ).toMatchInlineSnapshot(`10`);
   });
 });
+
+// REVIEW.md A6–A12: boxed-expression core arithmetic correctness fixes.
+describe('Core arithmetic correctness (REVIEW.md A6–A12)', () => {
+  // A6: an even root of a negative real returned the real root of |a| (a wrong
+  // real) instead of the complex principal root.
+  it('A6: Root(-16, 4) is the complex principal root, not 2', () => {
+    const r = ce.box(['Root', -16, 4]).N();
+    expect(r.re).toBeCloseTo(Math.SQRT2, 10); // √2
+    expect(r.im).toBeCloseTo(Math.SQRT2, 10);
+    // Consistent with Sqrt of a negative.
+    expect(ce.box(['Sqrt', -4]).N().im).toBeCloseTo(2, 10);
+  });
+
+  // A7: ln with a non-integer base silently dropped the base (→ natural log).
+  it('A7: log with a non-integer base is honored', () => {
+    expect((ce.number(8).ln(2.5) as any).re).toBeCloseTo(
+      Math.log(8) / Math.log(2.5),
+      10
+    );
+  });
+
+  // A8: a plain symbol must not report as an empty finite collection.
+  it('A8: a plain symbol has undefined collection properties', () => {
+    const fresh = new ComputeEngine();
+    const x = fresh.symbol('someUndeclaredSymbol');
+    expect(x.count).toBeUndefined();
+    expect(x.isEmptyCollection).toBeUndefined();
+    expect(x.isFiniteCollection).toBeUndefined();
+  });
+
+  // A9: function-difference comparison used an exact === 0 (no tolerance).
+  it('A9: function comparison uses tolerance', () => {
+    // (0.1 + 0.2 + x) − (0.3 + x) = 5.55e-17 (within tolerance) → equal.
+    const a = ce.box(['Add', 0.1, 0.2, 'x']);
+    const b = ce.box(['Add', 0.3, 'x']);
+    expect(a.isEqual(b)).toBe(true);
+  });
+
+  // A11: a/0 was inconsistent — ComplexInfinity for a JS-number denominator,
+  // NaN for a boxed zero.
+  it('A11: division by zero is ComplexInfinity for both denominator forms', () => {
+    expect(ce.number(5).div(0).toString()).toBe(ce.number(5).div(ce.Zero).toString());
+    expect(ce.number(5).div(ce.Zero).toString()).toBe('~oo');
+  });
+
+  // A12: negate of a product still produces the correct value.
+  it('A12: negate of a product is correct', () => {
+    expect(ce.box(['Negate', ['Multiply', 3, 'x', 'y']]).N().toString()).toBe(
+      ce.box(['Multiply', -3, 'x', 'y']).N().toString()
+    );
+  });
+});

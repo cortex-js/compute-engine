@@ -80,6 +80,17 @@ were reproduced at runtime against the live engine, not just inferred from readi
   D18: complex-exponent `pow` now the principal value `exp(w·Ln z)` (was correct
   only for positive real bases; `i^i`, `(1+i)^(1+i)` now correct). D19: the
   (dead) `intervalContains`/`intervalSubset` predicates corrected.
+- A6–A12 (boxed-expression core arithmetic MED cluster) fixed +
+  regression-tested (`arithmetic.test.ts` → "Core arithmetic correctness
+  (A6–A12)", `factor.test.ts` for A10). A6: even root of a negative → complex
+  principal root (was a wrong real). A7: `ln`/`log` now honor a non-integer
+  base. A8: a plain symbol's collection props are `undefined` (was 0/true). A9:
+  function comparison uses tolerance + `undefined` for NaN. A10: `commonTerms`
+  no longer skips symbolic common factors. A11: `a/0` is `ComplexInfinity` for
+  both denominator forms. A12: `negateProduct` pass-2 condition corrected
+  (output unchanged; pass 3 no longer dead). (The 3 `@fixme` matrix
+  Take/Drop/Slice tests in `collections.test.ts` remain pre-existing failures —
+  stale snapshots on HEAD, not in this cluster's code path.)
 
 ---
 
@@ -119,13 +130,13 @@ findings there are edge cases. The areas with the most serious problems are:
 | ✅ A3 | HIGH | `boxed-expression/abstract-boxed-expression.ts:636-658` | `isLess`/`isGreater`/etc. return definitive `false` when `cmp()` returns the indeterminate `'<='`/`'>='`. **✓ verified:** after `assume(y >= 3)`, `y.isGreater(3)` → `false` (should be `undefined`). These predicates feed sign inference engine-wide. |
 | ✅ A4 | HIGH | `boxed-expression/boxed-number.ts:786-791` | `canonicalNumber` returns **+∞** for a rational with −∞ numerator (inverted sign logic; denominator sign also ignored). **✓ verified:** `ce.number([-Infinity, 5])` → `+oo`. Fixed: result sign is now the product of numerator/denominator signs. Regression test in `numbers.test.ts` → "Rational with an infinite numerator/denominator (REVIEW.md A4)". |
 | A5 | HIGH | `index.ts:1000-1003` | `costFunction` setter is missing an `else`: the guard assignment is always overwritten, so any non-function value is stored and later invoked, crashing `simplify()`. |
-| A6 | MED | `boxed-expression/arithmetic-power.ts:577-605` | `root()` numeric path returns a positive real for even roots of negatives. **✓ verified:** `Root(-16, 4).N()` → `2` (should be NaN/complex). |
-| A7 | MED | `boxed-number.ts:391-403`, `boxed-function.ts:866-872` | `ln(base)` silently drops non-integer bases (falls through to natural log). **✓ verified:** `ce.number(8).ln(2.5)` loses the base. `BoxedSymbol.ln` handles it correctly — the three implementations are inconsistent. |
-| A8 | MED | `boxed-expression/boxed-symbol.ts:774-794` | Plain symbols report `isEmptyCollection: true`, `isFiniteCollection: true`, `count: 0` via `?? 0` fallbacks, contradicting the abstract-class contract (`undefined` for non-collections). **✓ verified.** |
-| A9 | MED | `boxed-expression/compare.ts:387-399` | Function-difference comparison: machine path uses exact `=== 0` (no tolerance, unlike the NumericValue path), and NaN diff maps to `'>'` instead of `undefined`. |
-| A10 | MED | `boxed-expression/arithmetic-mul-div.ts:461` | `commonTerms()` early-returns when the numeric gcd is 1, skipping symbolic common factors. **✓ verified:** `factor(x·y < x·z)` fails to cancel `x`. |
-| A11 | MED | `boxed-expression/arithmetic-mul-div.ts:732,758` | `div()` inconsistent on a/0: JS-number denominator → `ComplexInfinity`, boxed zero denominator → `NaN`. |
-| A12 | MED | `boxed-expression/negate.ts:95-117` | `negateProduct` pass-2 boolean condition is inverted (`!isNumber(arg) && !arg.isInteger` should be `!(isNumber(arg) && arg.isInteger)`); result still correct but the documented priority isn't implemented and pass 3 is dead. |
+| ✅ A6 | MED | `boxed-expression/arithmetic-power.ts:577-605` | `root()` numeric path returns a positive real for even roots of negatives. **✓ verified:** `Root(-16, 4).N()` → `2` (should be NaN/complex). **✓ verified + fixed:** even root of a negative now returns the complex principal root `|a|^(1/n)·(cos(π/n)+i·sin(π/n))` — `Root(-16,4).N()`=√2+√2i, consistent with `Sqrt(-4)`=2i. |
+| ✅ A7 | MED | `boxed-number.ts:391-403`, `boxed-function.ts:866-872` | `ln(base)` silently drops non-integer bases (falls through to natural log). **✓ verified:** `ce.number(8).ln(2.5)` loses the base. `BoxedSymbol.ln` handles it correctly — the three implementations are inconsistent. **✓ verified + fixed:** BoxedNumber/BoxedFunction `ln` now honor any base — `(8).ln(2.5)`=log_2.5(8)≈2.269 (was ln 8). |
+| ✅ A8 | MED | `boxed-expression/boxed-symbol.ts:774-794` | Plain symbols report `isEmptyCollection: true`, `isFiniteCollection: true`, `count: 0` via `?? 0` fallbacks, contradicting the abstract-class contract (`undefined` for non-collections). **✓ verified.** **✓ verified + fixed:** removed the `??0`/`count===0`/`isFinite(count)` fallbacks; a plain symbol now returns `undefined` for `count`/`isEmptyCollection`/`isFiniteCollection`. |
+| ✅ A9 | MED | `boxed-expression/compare.ts:387-399` | Function-difference comparison: machine path uses exact `=== 0` (no tolerance, unlike the NumericValue path), and NaN diff maps to `'>'` instead of `undefined`. **✓ verified + fixed:** the machine path now compares within `engine.tolerance` (like the NumericValue path) and returns `undefined` for a NaN difference. |
+| ✅ A10 | MED | `boxed-expression/arithmetic-mul-div.ts:461` | `commonTerms()` early-returns when the numeric gcd is 1, skipping symbolic common factors. **✓ verified:** `factor(x·y < x·z)` fails to cancel `x`. **✓ verified + fixed:** removed the `coef.isOne` early return so symbolic common terms are still extracted — `factor(x·y<x·z)` with `x>0` → `y<z`. |
+| ✅ A11 | MED | `boxed-expression/arithmetic-mul-div.ts:732,758` | `div()` inconsistent on a/0: JS-number denominator → `ComplexInfinity`, boxed zero denominator → `NaN`. **✓ verified + fixed:** the boxed-zero denominator now returns `ComplexInfinity`, matching the JS-number path (was NaN). |
+| ✅ A12 | MED | `boxed-expression/negate.ts:95-117` | `negateProduct` pass-2 boolean condition is inverted (`!isNumber(arg) && !arg.isInteger` should be `!(isNumber(arg) && arg.isInteger)`); result still correct but the documented priority isn't implemented and pass 3 is dead. **✓ verified + fixed:** pass-2 condition corrected to `!(isNumber && isInteger)` so a non-integer number falls through to pass 3 (no longer dead); output unchanged. |
 | A13 | LOW | `boxed-expression/boxed-symbol.ts:243` | `mul(0)` fastpath returns `Zero` even for infinite symbol values; the `Product.mul` slow path correctly returns NaN for ∞·0. |
 | A14 | LOW | `boxed-expression/order.ts:357-372` | Operator and string tie-breaks sort descending while the symbol branch and the doc comment say ascending — inconsistent canonical ordering. |
 | A15 | LOW | `boxed-expression/simplify.ts:410` | `simplifyNonCommutativeFunction` drops `options` when re-simplifying operands (custom rules/costFunction ignored in that pass). |
