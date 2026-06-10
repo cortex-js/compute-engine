@@ -495,6 +495,16 @@ export function factorPolynomial(
   expr: Expression,
   variable?: string
 ): Expression {
+  // If no variable was specified, try to infer it. Most factoring
+  // strategies (content extraction, quadratic, rational roots) require a
+  // variable; for a univariate polynomial the single unknown is the
+  // natural choice. Without this, `Factor(x^2 + 5x + 6)` (no variable
+  // argument) would only attempt the variable-agnostic strategies
+  // (perfect square, difference of squares) and return the input
+  // unchanged. (#309)
+  if (variable === undefined && expr.unknowns.length === 1)
+    variable = expr.unknowns[0];
+
   // Try content extraction first (requires variable)
   if (variable !== undefined) {
     const contentFactored = extractContent(expr, variable);

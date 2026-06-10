@@ -96,6 +96,34 @@
     unknown, so distinct multi-unknown equations compared equal (e.g.
     `x + y = 0` vs `2x = 0`). Each unknown now gets an independent value.
 
+- **Gamma / Factorial of complex and pole arguments** — the complex `Gamma`
+  and `GammaLn` kernels were unimplemented stubs that returned their argument
+  unchanged, so `Gamma(i).N()` gave `i` (instead of `−0.1549 − 0.498i`) and a
+  complex `Factorial` passed through. Both are now computed with the Lanczos
+  approximation. In addition:
+  - `Gamma` of a non-positive integer (`Gamma(0)`, `Gamma(-1)`, …) now returns
+    `ComplexInfinity` (the pole) instead of a garbage value or `NaN`.
+  - Explicit `Factorial(-2)` was canonicalized to `−(2!) = −2`. Since `n! =
+    Γ(n+1)` has poles at the negative integers, `Factorial` of a negative
+    integer is now `ComplexInfinity`. The `-3! = -(3!)` precedence convention is
+    handled by the LaTeX parser (which already yields `Negate(Factorial(3))`),
+    not by mangling the explicit function form.
+
+- **Set membership and subset correctness** — set-theory predicates were
+  three-valued in name only:
+  - `Element(x, S)` for a number set `S` (e.g. `Integers`, `RealNumbers`)
+    collapsed to `False` when `x` had an indeterminate type, because the
+    `contains` handlers used a two-valued type test. They are now genuinely
+    three-valued, so `Element(x, Integers)` with `x` of unknown type stays
+    unevaluated, while concrete values (`Element(2.5, Integers) → False`) and
+    sign assumptions remain decidable.
+  - `Subset`/`SubsetEqual`/`Superset` tested the relation backwards: the
+    dispatcher invoked the *subset* candidate's handler instead of the
+    *superset* candidate's, so `Subset(Integers, RationalNumbers)` was `False`
+    and `Subset(RationalNumbers, Integers)` was `True`. The direction is fixed,
+    the empty set is correctly a subset of every set, and `EmptySet`'s own
+    `subsetOf` handler no longer claimed every set as a subset of the empty set.
+
 - **`solve()` handles quadratics with symbolic coefficients** — solving a
   quadratic for `x` when its coefficients are parameters (e.g.
   `x^2 - a x + 1 = 0`) returned no solutions. Two issues are fixed (#300):
@@ -108,6 +136,14 @@
     simplifying, so a symbolic root that is zero only after symbolic
     simplification was wrongly discarded. Validation now simplifies before the
     zero-check, which also fixes `x^2 + b x + c = 0` and `a x^2 + b x + c = 0`.
+
+- **`Factor` infers the variable for a univariate polynomial** — calling
+  `Factor` without an explicit variable (e.g. `Factor(x^2 + 5x + 6)`) returned
+  the expanded form unchanged, because the quadratic, content-extraction, and
+  rational-root strategies all require a variable and only the variable-agnostic
+  strategies (perfect square, difference of squares) ran. When no variable is
+  given and the expression has a single unknown, that unknown is now used —
+  `Factor(x^2 + 5x + 6)` gives `(x+2)(x+3)`. (#309)
 
 - **LaTeX serialization and parsing fixes**:
   - The `'scaled'` and `'big'` delimiter styles emitted a stray trailing `}` /
