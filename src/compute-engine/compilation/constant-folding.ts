@@ -94,6 +94,26 @@ export function foldTerms(
 }
 
 /**
+ * Parenthesize a compiled operand for safe use as a multiplicative factor.
+ *
+ * `foldTerms(..., '*')` joins operand strings with ` * ` without adding
+ * precedence parentheses. That is fine when operands come through the
+ * operator path (which already wraps lower-precedence operands), but the
+ * complex-multiply function handlers compile their operands with no
+ * precedence context, so a top-level additive factor like `x + 1.0` would be
+ * joined as `x + 1.0 * z` (mis-grouped). Wrap `Add`/`Subtract` operands so
+ * they bind as a single factor.
+ *
+ * @param expr The source expression for the operand.
+ * @param code The already-compiled operand code.
+ */
+export function parenthesizeFactor(expr: Expression, code: string): string {
+  if (isFunction(expr, 'Add') || isFunction(expr, 'Subtract'))
+    return `(${code})`;
+  return code;
+}
+
+/**
  * Decompose an expression into real and imaginary compiled code strings
  * for direct `vec2(re, im)` construction.
  *
@@ -146,7 +166,9 @@ export function tryGetComplexParts(
       if (remaining.length === 0) {
         return { re: null, im: formatFloat(iScale) };
       }
-      const compiledFactors = remaining.map((r) => compile(r));
+      const compiledFactors = remaining.map((r) =>
+        parenthesizeFactor(r, compile(r))
+      );
       if (iScale !== 1) compiledFactors.unshift(formatFloat(iScale));
       const imCode = foldTerms(compiledFactors, '1.0', '*');
       return { re: null, im: imCode };

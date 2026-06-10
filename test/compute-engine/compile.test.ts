@@ -685,3 +685,37 @@ describe('COMPILE', () => {
     }
   });
 });
+
+// REVIEW.md E1: Range with symbolic bounds compiled to
+// `Array.from({length: NaN})` because the guard tested `parseFloat(...) !==
+// null`, but parseFloat returns NaN (never null) for symbolic bounds — so the
+// constant-length branch always won and every symbolic Range yielded `[]`.
+describe('COMPILE Range with symbolic bounds (E1)', () => {
+  it('Range(1, n) emits a runtime length, not NaN', () => {
+    const code = compile(ce.expr(['Range', 1, 'n']))!.code;
+    expect(code).not.toContain('NaN');
+    expect(code).toContain('_.n');
+  });
+
+  it('Range(1, n) evaluates to [1..n]', () => {
+    const fn = compile(ce.expr(['Range', 1, 'n']))!;
+    expect(fn.run!({ n: 5 })).toEqual([1, 2, 3, 4, 5]);
+  });
+
+  it('Range(a, b) with a symbolic start evaluates inclusively', () => {
+    // Regression for the throwaway map-callback param shadowing the argument
+    // object `_`: a symbolic start compiles to `_.a` inside the callback.
+    const fn = compile(ce.expr(['Range', 'a', 'b']))!;
+    expect(fn.run!({ a: 2, b: 6 })).toEqual([2, 3, 4, 5, 6]);
+  });
+
+  it('Range(a, n, 2) with a symbolic step evaluates correctly', () => {
+    const fn = compile(ce.expr(['Range', 'a', 'n', 2]))!;
+    expect(fn.run!({ a: 1, n: 9 })).toEqual([1, 3, 5, 7, 9]);
+  });
+
+  it('constant Range(1, 5) is still unrolled', () => {
+    const fn = compile(ce.expr(['Range', 1, 5]))!;
+    expect(fn.run!()).toEqual([1, 2, 3, 4, 5]);
+  });
+});

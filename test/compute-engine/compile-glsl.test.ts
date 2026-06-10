@@ -75,6 +75,14 @@ describe('GLSL COMPILATION', () => {
       expect(code).toMatchInlineSnapshot(`(1.0 / cos(x))`);
     });
 
+    // REVIEW.md E3: CE's `Degrees` converts degrees→radians (Degrees(180) = π),
+    // which is GLSL's `radians()`. It was wrongly mapped to GLSL `degrees()`
+    // (the rad→deg inverse).
+    it('should compile Degrees as radians() (E3)', () => {
+      const code = glsl.compile(ce.expr(['Degrees', 'x'])).code;
+      expect(code).toMatchInlineSnapshot(`radians(x)`);
+    });
+
     it('should compile hyperbolic functions', () => {
       expect(glsl.compile(ce.parse('\\sinh(x)')).code).toMatchInlineSnapshot(
         `sinh(x)`
@@ -383,6 +391,25 @@ describe('GLSL COMPILATION', () => {
     it('should compile scalar * complex (native)', () => {
       const code = glsl.compile(ce.expr(['Multiply', 2, 'z'])).code;
       expect(code).toMatchInlineSnapshot(`(2.0 * z)`);
+    });
+
+    // REVIEW.md E4: a compound (additive) real factor in a complex multiply
+    // was compiled without precedence parens, so `(x+1)·z·w` mis-grouped as
+    // `(x + 1.0 * _gpu_cmul(w, z))` = x + (1.0·z·w). The additive factor must
+    // be parenthesized as a single multiplicative term.
+    it('should parenthesize a compound real factor in complex multiply (E4)', () => {
+      const code = glsl.compile(ce.parse('(x+1)zw')).code;
+      expect(code).toMatchInlineSnapshot(`((x + 1.0) * _gpu_cmul(w, z))`);
+    });
+
+    it('should parenthesize a compound real factor times one complex (E4)', () => {
+      const code = glsl.compile(ce.parse('(a+b)z')).code;
+      expect(code).toMatchInlineSnapshot(`((a + b) * z)`);
+    });
+
+    it('keeps a simple numeric scalar unparenthesized (E4 regression)', () => {
+      const code = glsl.compile(ce.parse('2zw')).code;
+      expect(code).toMatchInlineSnapshot(`(2.0 * _gpu_cmul(w, z))`);
     });
 
     it('should compile complex divide', () => {

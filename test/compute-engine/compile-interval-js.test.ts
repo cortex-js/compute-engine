@@ -619,6 +619,47 @@ describe('INTERVAL JS - NEGATIVE BASE POWER', () => {
     expect(Number.isFinite(result.value.lo)).toBe(true);
     expect(Number.isFinite(result.value.hi)).toBe(true);
   });
+
+  // REVIEW.md E5: a compound symbolic bound (e.g. `n + 2`) compiles to an
+  // `_IA.*` call that returns an IntervalResult wrapper ({kind, value}), not a
+  // bare {lo, hi}. The loop bound read `.hi` off the wrapper → undefined →
+  // Math.floor(undefined) = NaN → the loop never ran, silently returning the
+  // identity (0 for Sum, 1 for Product) instead of the real value.
+  test('Sum with a compound symbolic upper bound (n + 2)', () => {
+    // Sum(k, k=1..n+2) with n=3 → 1+2+3+4+5 = 15
+    const expr = ce.expr(['Sum', 'k', ['Limits', 'k', 1, ['Add', 'n', 2]]]);
+    const fn = compile(expr, { to: 'interval-js' });
+    expect(fn.success).toBe(true);
+
+    const result = fn.run!({ n: { lo: 3, hi: 3 } });
+    expect(result.kind).toBe('interval');
+    expect(result.value.lo).toBe(15);
+    expect(result.value.hi).toBe(15);
+  });
+
+  test('Sum with a simple symbolic upper bound (n) still works', () => {
+    // Sum(k, k=1..n) with n=5 → 15 (the bare-interval `.hi` path)
+    const expr = ce.expr(['Sum', 'k', ['Limits', 'k', 1, 'n']]);
+    const fn = compile(expr, { to: 'interval-js' });
+    expect(fn.success).toBe(true);
+
+    const result = fn.run!({ n: { lo: 5, hi: 5 } });
+    expect(result.kind).toBe('interval');
+    expect(result.value.lo).toBe(15);
+    expect(result.value.hi).toBe(15);
+  });
+
+  test('Product with a compound symbolic upper bound (n + 1)', () => {
+    // Product(k, k=1..n+1) with n=3 → 1·2·3·4 = 24
+    const expr = ce.expr(['Product', 'k', ['Limits', 'k', 1, ['Add', 'n', 1]]]);
+    const fn = compile(expr, { to: 'interval-js' });
+    expect(fn.success).toBe(true);
+
+    const result = fn.run!({ n: { lo: 3, hi: 3 } });
+    expect(result.kind).toBe('interval');
+    expect(result.value.lo).toBe(24);
+    expect(result.value.hi).toBe(24);
+  });
 });
 
 /**

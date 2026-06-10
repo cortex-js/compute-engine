@@ -251,6 +251,32 @@
   `unexpected-token` error. ASCII input is unaffected; boxed strings were
   already NFC-normalized.
 
+- **Compilation correctness fixes** — several targets emitted silently-wrong
+  code:
+  - **`Range` with symbolic bounds (JavaScript)** compiled to
+    `Array.from({length: NaN})` and always produced `[]`. The guard tested
+    `parseFloat(bound) !== null`, but `parseFloat` returns `NaN` (never `null`)
+    for symbolic bounds, so the constant-length branch always won. Symbolic
+    `Range(a, b[, step])` now compiles to a correct runtime length. (A related
+    latent bug — the map callback's throwaway parameter shadowing the argument
+    object `_`, breaking a symbolic *start* like `_.a` — is also fixed.)
+  - **`Arcsec`/`Arccsc` derivatives** in the symbolic derivative table were
+    wrong and identical to each other (`-x²/√(1-x²)`, complex on the actual
+    domain `|x| ≥ 1`). They are now `±1/(|x|·√(x²-1))`, so e.g.
+    `d/dx arcsec(x)` at `x = 2` is `≈ 0.2887` instead of `NaN`.
+  - **`Degrees` on GPU targets (GLSL/WGSL)** mapped to GLSL `degrees()`
+    (radians→degrees) — the inverse of every other target. CE's `Degrees`
+    converts degrees→radians (`Degrees(180) = π`), which is GLSL `radians()`.
+  - **GPU complex multiply** compiled a compound (additive) real factor without
+    precedence parentheses, so `(x+1)·z·w` emitted
+    `(x + 1.0 * _gpu_cmul(w, z))` (= `x + z·w`) instead of
+    `((x + 1.0) * _gpu_cmul(w, z))`. Additive factors are now parenthesized.
+  - **Interval Sum/Product with a compound symbolic bound** (e.g. `n + 2`)
+    silently returned the identity (`0`/`1`). The loop bound read `.hi` off an
+    `IntervalResult` wrapper (`{kind, value: {lo, hi}}`) rather than its
+    `.value`, yielding `Math.floor(undefined) = NaN`, so the loop never ran.
+    The bound now unwraps either an `IntervalResult` or a bare interval.
+
 - **Compilation fallback handles multi-argument lambdas** — when a `Function`
   literal (lambda) cannot be compiled to the target and falls back to
   interpretation, the fallback now uses the `'lambda'` calling convention

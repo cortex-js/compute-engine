@@ -594,3 +594,27 @@ describe('ND', () => {
     expect(result.json).toMatchInlineSnapshot(`23.090702573188732`);
   });
 });
+
+// REVIEW.md E2: the Arcsec/Arccsc entries in the derivative table were wrong
+// (and identical to each other): both gave -x^2/sqrt(1-x^2), which is complex
+// on the actual domain |x| >= 1. The correct derivatives are
+// d/dx arcsec(x) =  1 / (|x| sqrt(x^2 - 1)) and
+// d/dx arccsc(x) = -1 / (|x| sqrt(x^2 - 1)).
+describe('Inverse secant/cosecant derivatives (E2)', () => {
+  it('d/dx arcsec(x) = 1 / (|x| sqrt(x^2 - 1))', () => {
+    const result = engine.expr(['D', ['Arcsec', 'x'], 'x']).evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(
+      `1 / (|x| * sqrt(x^2 - 1))`
+    );
+    // At x = 2 the derivative is real and ≈ 0.288675 (was NaN/complex before).
+    expect(result.subs({ x: 2 }).N().re).toBeCloseTo(0.28867513459, 8);
+  });
+
+  it('d/dx arccsc(x) = -1 / (|x| sqrt(x^2 - 1))', () => {
+    const result = engine.expr(['D', ['Arccsc', 'x'], 'x']).evaluate();
+    expect(result.toString()).toMatchInlineSnapshot(
+      `-1 / (|x| * sqrt(x^2 - 1))`
+    );
+    expect(result.subs({ x: 2 }).N().re).toBeCloseTo(-0.28867513459, 8);
+  });
+});

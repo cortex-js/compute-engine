@@ -315,9 +315,11 @@ function extractIntervalLimits(limitsExpr: Expression): {
  * Compile a bound expression to a scalar JavaScript value for use as a loop
  * counter. For the interval target, bounds must be plain numbers (not intervals).
  *
- * At runtime, compiled interval expressions produce {lo, hi} objects.
- * For integer loop bounds we extract the scalar via .hi (for point intervals
- * lo === hi so either works).
+ * At runtime, a compiled bound expression produces one of two shapes:
+ * a bare `Interval` ({lo, hi}) — e.g. a plain input variable `_.n` — or an
+ * `IntervalResult` wrapper ({kind, value: {lo, hi}}) returned by `_IA.*`
+ * operators (e.g. a compound bound like `n + 2`). We extract the upper bound
+ * from whichever shape is present (for point intervals lo === hi).
  */
 function compileIntervalBound(
   expr: Expression,
@@ -325,10 +327,12 @@ function compileIntervalBound(
   target: CompileTarget<Expression>
 ): string {
   if (numVal !== undefined) return String(numVal);
-  // Compile the bound expression (produces interval at runtime), then
-  // extract the scalar value via .hi for the loop counter.
+  // Compile the bound expression (produces an interval or an IntervalResult
+  // wrapper at runtime), then extract the scalar upper bound for the loop
+  // counter. Reading `.hi` directly off an IntervalResult is `undefined`
+  // (→ NaN → the loop never runs), so unwrap `.value` when present.
   const compiled = BaseCompiler.compile(expr, target);
-  return `Math.floor((${compiled}).hi)`;
+  return `Math.floor(((_b) => (_b && _b.value ? _b.value.hi : _b.hi))(${compiled}))`;
 }
 
 /**

@@ -381,7 +381,12 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       const fStop = parseFloat(stop);
       const fStart = parseFloat(start);
 
-      if (fStop !== null && fStart !== null) {
+      // `parseFloat` returns NaN (never null) for symbolic bounds, so a
+      // `!== null` guard would always pass and emit `Array.from({length: NaN})`
+      // — silently yielding `[]` for any symbolic Range. Test for numeric
+      // constants with `!isNaN`; symbolic bounds fall through to the runtime
+      // length branch below.
+      if (!isNaN(fStop) && !isNaN(fStart)) {
         if (fStop - fStart < 50) {
           return `[${Array.from(
             { length: fStop - fStart + 1 },
@@ -392,10 +397,15 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         }, (_, i) => ${start} + i)`;
       }
 
+      // The map callback's throwaway element parameter must not be named `_`:
+      // the compiled function binds its argument object to `_`, and a symbolic
+      // bound compiles to a member access like `_.a`. A `_` callback param
+      // would shadow the argument object, so `_.a` in the body would read from
+      // the (undefined) array element. Use `_e` for the unused element.
       return `Array.from({length: ${stop} - ${start} + 1
-      }, (_, i) => ${start} + i)`;
+      }, (_e, i) => ${start} + i)`;
     }
-    return `Array.from({length: Math.floor((${stop} - ${start}) / ${step}) + 1}, (_, i) => ${start} + i * ${step})`;
+    return `Array.from({length: Math.floor((${stop} - ${start}) / ${step}) + 1}, (_e, i) => ${start} + i * ${step})`;
   },
   Root: ([arg, exp], compile) => {
     if (arg === null) throw new Error('Root: no argument');

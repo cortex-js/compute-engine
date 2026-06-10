@@ -63,15 +63,20 @@ const DERIVATIVES_TABLE = {
     ['Power', ['Subtract', 1, ['Power', '_', 2]], ['Negate', 'Half']],
   ],
   Arctan: ['Power', ['Add', 1, ['Power', '_', 2]], -1],
+  // d/dx arcsec(x) = 1 / (|x| * sqrt(x^2 - 1)), defined on |x| >= 1
   Arcsec: [
-    'Multiply',
-    ['Power', ['Subtract', 1, ['Power', '_', 2]], ['Negate', 'Half']],
-    ['Negate', ['Power', '_', 2]],
+    'Divide',
+    1,
+    ['Multiply', ['Abs', '_'], ['Sqrt', ['Subtract', ['Power', '_', 2], 1]]],
   ],
+  // d/dx arccsc(x) = -1 / (|x| * sqrt(x^2 - 1)), defined on |x| >= 1
   Arccsc: [
-    'Multiply',
-    ['Power', ['Subtract', 1, ['Power', '_', 2]], ['Negate', 'Half']],
-    ['Negate', ['Power', '_', 2]],
+    'Negate',
+    [
+      'Divide',
+      1,
+      ['Multiply', ['Abs', '_'], ['Sqrt', ['Subtract', ['Power', '_', 2], 1]]],
+    ],
   ],
   Arccot: ['Negate', ['Power', ['Add', 1, ['Power', '_', 2]], -1]],
   Sinh: ['Cosh', '_'],

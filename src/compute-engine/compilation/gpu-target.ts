@@ -11,6 +11,7 @@ import {
   foldTerms,
   tryGetComplexParts,
   formatFloat,
+  parenthesizeFactor,
 } from './constant-folding';
 
 import type {
@@ -259,7 +260,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       const realFactors = args.filter((_, i) => i !== iIndex);
       const v2 = gpuVec2(target);
       if (realFactors.length === 0) return `${v2}(0.0, ${formatFloat(iScale)})`;
-      const factors = realFactors.map((f) => compile(f));
+      const factors = realFactors.map((f) => parenthesizeFactor(f, compile(f)));
       if (iScale !== 1) factors.unshift(formatFloat(iScale));
       const imCode = foldTerms(factors, '1.0', '*');
       return `${v2}(0.0, ${imCode})`;
@@ -269,7 +270,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     const complexCodes: string[] = [];
     for (const a of args) {
       if (BaseCompiler.isComplexValued(a)) complexCodes.push(compile(a));
-      else realCodes.push(compile(a));
+      else realCodes.push(parenthesizeFactor(a, compile(a)));
     }
     const scalarCode = foldTerms(realCodes, '1.0', '*');
     // Pairwise reduce complex operands
@@ -351,7 +352,9 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       return `_gpu_ccos(${compile(args[0])})`;
     return `cos(${compile(args[0])})`;
   },
-  Degrees: 'degrees',
+  // CE's `Degrees` converts degrees→radians (Degrees(180) = π), which is
+  // GLSL's `radians()`. GLSL's `degrees()` is the inverse (rad→deg).
+  Degrees: 'radians',
   Exp: (args, compile) => {
     if (BaseCompiler.isComplexValued(args[0]))
       return `_gpu_cexp(${compile(args[0])})`;
