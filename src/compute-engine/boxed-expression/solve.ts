@@ -1252,10 +1252,20 @@ export function findUnivariateRoots(
       );
     }
 
-    // Fallback: try rational root theorem for degree 3+ polynomials
+    // Fallback: solve polynomials via coefficient extraction when the
+    // rule-based matching above didn't fire.
     if (result.length === 0) {
       const deg = polynomialDegree(originalExpr, x);
-      if (deg >= 3) {
+      if (deg === 2) {
+        // The quadratic rules match the surface form `Multiply(__b, _x)` for
+        // the middle term, but a negated symbolic/unit coefficient
+        // canonicalizes to `Negate(Multiply(b, x))` (or `Negate(x)`), which
+        // that pattern misses — so e.g. `x^2 - a x + 1 = 0` found no roots.
+        // Coefficient extraction handles every sign form uniformly (#300).
+        const quadraticRoots = solveQuadraticByCoefficients(originalExpr, x);
+        if (quadraticRoots.length > 0) result = quadraticRoots;
+      } else if (deg >= 3) {
+        // Fallback: try rational root theorem for degree 3+ polynomials
         const rationalRoots = findRationalRoots(originalExpr, x, ce);
         if (rationalRoots.length > 0) result = rationalRoots;
       }
@@ -1393,8 +1403,16 @@ function validateRoots(
     if (value.has(x)) return false;
 
     // Important: we want to use `isEqual()`, not `is(0)` here
-    // The former accounts for tolerance, the latter does not
-    return value.isEqual(0);
+    // The former accounts for tolerance, the latter does not.
+    if (value.isEqual(0)) return true;
+
+    // A root with a symbolic (parametric) coefficient — e.g. the quadratic
+    // formula for `x^2 - a x + 1 = 0` — substituted back into the equation
+    // produces an expression that is zero, but only recognizably so after
+    // symbolic simplification. An unsimplified `evaluate()` leaves it as a
+    // non-zero-looking expression, so without this the valid root would be
+    // discarded (issue #300).
+    return value.simplify().isEqual(0);
   });
 
   // Deduplicate roots (e.g., arccos(1) and -arccos(1) both equal 0)
@@ -1433,6 +1451,43 @@ function filterRootsByType(
       return val.isReal === true;
     return true;
   });
+}
+
+/**
+ * Solve a quadratic `a·x² + b·x + c = 0` by extracting its coefficients and
+ * applying the quadratic formula.
+ *
+ * This is more robust than surface pattern matching: `getPolynomialCoefficients`
+ * normalizes every sign and coefficient form (numeric, symbolic, negated), so a
+ * negated middle term such as `Negate(Multiply(a, x))` — which the rule pattern
+ * `Multiply(__b, _x)` does not match — is handled correctly.
+ *
+ * Returns the two roots (which may coincide), or `[]` if `expr` is not a degree-2
+ * polynomial in `variable`. The caller is responsible for validating and
+ * deduplicating the returned roots.
+ */
+function solveQuadraticByCoefficients(
+  expr: Expression,
+  variable: string
+): Expression[] {
+  const ce = expr.engine;
+  const coeffs = getPolynomialCoefficients(expr, variable);
+  // Coefficients are in ascending order: [c, b, a] for a·x² + b·x + c.
+  if (!coeffs || coeffs.length !== 3) return [];
+  const [c, b, a] = coeffs;
+  if (a.isSame(0)) return [];
+
+  // discriminant = b² - 4·a·c
+  const discriminant = b.mul(b).sub(ce.number(4).mul(a).mul(c));
+  const sqrtDiscriminant = discriminant.sqrt();
+  const twoA = a.mul(2);
+  const negB = b.neg();
+
+  // x = (-b ± √(b² - 4ac)) / (2a)
+  return [
+    negB.add(sqrtDiscriminant).div(twoA),
+    negB.sub(sqrtDiscriminant).div(twoA),
+  ];
 }
 
 /**

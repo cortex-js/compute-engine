@@ -81,6 +81,25 @@ describe('SOLVING A QUADRATIC EQUATION', () => {
       ]
     `);
   });
+
+  it('should solve a quadratic with a symbolic (parametric) coefficient (#300)', () => {
+    // `x^2 - a x + 1 = 0` has a negated middle term `-a x`, which
+    // canonicalizes to `Negate(Multiply(a, x))` — a form the quadratic rule
+    // patterns don't match. Coefficient extraction handles it, yielding the
+    // quadratic formula (a ± √(a²−4)) / 2.
+    const roots = ce.parse('x^2 - a x + 1 = 0').solve('x') ?? [];
+    expect(roots.map((r) => r.toLatex())).toMatchInlineSnapshot(`
+      [
+        \\frac{a}{2}+\\frac{1}{2}(\\sqrt{a^2-4}),
+        \\frac{a}{2}-\\frac{1}{2}(\\sqrt{a^2-4}),
+      ]
+    `);
+    // Each root must satisfy the original equation
+    for (const r of roots)
+      expect(ce.parse('x^2 - a x + 1').subs({ x: r }).simplify().isEqual(0)).toBe(
+        true
+      );
+  });
 });
 
 describe('expr.solve()', () => {

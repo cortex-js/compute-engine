@@ -96,6 +96,19 @@
     unknown, so distinct multi-unknown equations compared equal (e.g.
     `x + y = 0` vs `2x = 0`). Each unknown now gets an independent value.
 
+- **`solve()` handles quadratics with symbolic coefficients** — solving a
+  quadratic for `x` when its coefficients are parameters (e.g.
+  `x^2 - a x + 1 = 0`) returned no solutions. Two issues are fixed (#300):
+  - A quadratic with a negated middle term canonicalizes that term to
+    `Negate(Multiply(a, x))` (or `Negate(x)`), which the rule patterns
+    (`Multiply(__b, _x)`) don't match. Degree-2 polynomials are now solved by
+    coefficient extraction, which handles every sign and coefficient form,
+    giving `(a ± √(a²−4)) / 2`.
+  - Root validation evaluated the back-substituted candidate without
+    simplifying, so a symbolic root that is zero only after symbolic
+    simplification was wrongly discarded. Validation now simplifies before the
+    zero-check, which also fixes `x^2 + b x + c = 0` and `a x^2 + b x + c = 0`.
+
 - **LaTeX serialization and parsing fixes**:
   - The `'scaled'` and `'big'` delimiter styles emitted a stray trailing `}` /
     `)` (e.g. `f\left(x, y\right)}`), producing invalid LaTeX.
