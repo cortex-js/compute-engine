@@ -420,3 +420,73 @@ describe('BIGNUM SPECIAL FUNCTIONS', () => {
     );
   });
 });
+
+describe('GAMMA FUNCTION', () => {
+  // Regression for G11: complex Gamma was an unimplemented stub that returned
+  // its argument unchanged (e.g. Gamma(i).N() → i).
+  function expectComplex(
+    expr: any,
+    re: number,
+    im: number,
+    tolerance = 1e-8
+  ) {
+    const v = expr.N();
+    expect(Math.abs(v.re - re)).toBeLessThan(tolerance);
+    expect(Math.abs(v.im - im)).toBeLessThan(tolerance);
+  }
+
+  test('Γ(4) = 6 (real)', () => {
+    expectApprox(ce.box(['Gamma', 4]), 6);
+  });
+
+  test('Γ(1/2) = √π (real)', () => {
+    expectApprox(ce.box(['Gamma', ['Rational', 1, 2]]), Math.sqrt(Math.PI));
+  });
+
+  test('Γ(i) ≈ -0.15495 - 0.49802i (complex)', () => {
+    expectComplex(ce.box(['Gamma', 'ImaginaryUnit']), -0.1549498283, -0.4980156681);
+  });
+
+  test('Γ(1+i) ≈ 0.49802 - 0.15495i (complex)', () => {
+    expectComplex(ce.box(['Gamma', ['Complex', 1, 1]]), 0.4980156681, -0.1549498283);
+  });
+
+  test('Γ at non-positive integers is ComplexInfinity (poles)', () => {
+    expect(ce.box(['Gamma', 0]).evaluate().json).toBe('ComplexInfinity');
+    expect(ce.box(['Gamma', -1]).evaluate().json).toBe('ComplexInfinity');
+    expect(ce.box(['Gamma', -2]).evaluate().json).toBe('ComplexInfinity');
+  });
+
+  test('GammaLn(1+i): exp(logΓ) matches Γ', () => {
+    const g = ce.box(['Gamma', ['Complex', 1, 1]]).N();
+    const lg = ce.box(['GammaLn', ['Complex', 1, 1]]).N();
+    const back = ce.box(['Exp', lg]).N();
+    expect(Math.abs(back.re - g.re)).toBeLessThan(1e-8);
+    expect(Math.abs(back.im - g.im)).toBeLessThan(1e-8);
+  });
+});
+
+describe('FACTORIAL', () => {
+  test('5! = 120', () => {
+    expect(ce.box(['Factorial', 5]).evaluate().toString()).toBe('120');
+  });
+
+  // Regression for G11: explicit Factorial(-2) was canonicalized to -(2!) = -2.
+  // n! = Γ(n+1), and Γ has poles at the non-positive integers, so the
+  // factorial of a negative integer is ComplexInfinity.
+  test('(-2)! is ComplexInfinity (Γ pole)', () => {
+    expect(ce.box(['Factorial', -2]).evaluate().json).toBe('ComplexInfinity');
+    expect(ce.box(['Factorial', -3]).evaluate().json).toBe('ComplexInfinity');
+  });
+
+  test('(-1/2)! = √π (negative non-integer via Gamma)', () => {
+    expectApprox(ce.box(['Factorial', -0.5]), Math.sqrt(Math.PI), 1e-12);
+  });
+
+  // The unary-minus precedence convention `-3! = -(3!)` is handled by the LaTeX
+  // parser, not by canonicalizing the explicit function form.
+  test('LaTeX -3! parses as -(3!) and evaluates to -6', () => {
+    expect(ce.parse('-3!').json).toEqual(['Negate', ['Factorial', 3]]);
+    expect(ce.parse('-3!').N().toString()).toBe('-6');
+  });
+});

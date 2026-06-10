@@ -6,7 +6,7 @@ import { parseType } from '../../common/type/parse';
 import { reduceType } from '../../common/type/reduce';
 import type { Type } from '../../common/type/types';
 import { flatten } from '../boxed-expression/flatten';
-import { isFunction, sym } from '../boxed-expression/type-guards';
+import { isFunction, isNumber, sym } from '../boxed-expression/type-guards';
 import { validateArguments } from '../boxed-expression/validate';
 import {
   isFiniteIndexedCollection,
@@ -26,6 +26,49 @@ import {
 
 function typeIntersection(a: Type, b: Type): Type {
   return reduceType({ kind: 'intersection', types: [a, b] });
+}
+
+/**
+ * Three-valued type membership test used by the `contains` handlers of the
+ * mathematical number sets.
+ *
+ * - `true`: `x` is definitely of type `t` (its type is a subtype of `t`).
+ * - `false`: `x` is definitely *not* of type `t` — either its type is disjoint
+ *   from `t`, or it is a concrete number literal whose exact value (reflected
+ *   in its narrow type) does not match.
+ * - `undefined`: membership is indeterminate — e.g. `x` is a symbol of unknown
+ *   or broader type that could, but need not, be of type `t`.
+ *
+ * Returning `undefined` (rather than a spurious `false`) is what allows
+ * `Element(x, Integers)` and similar to stay unevaluated for symbols of
+ * indeterminate type, instead of collapsing to `False`.
+ */
+function typeMembership(x: Expression, t: Type): boolean | undefined {
+  const vt = x.type;
+  if (vt.matches(t)) return true;
+  if (typeIntersection(vt.type, t) === 'nothing') return false;
+  // The static type overlaps `t` but does not entail it. A concrete number
+  // literal has an exact value, so a non-match is definitive; a symbol of
+  // indeterminate type is unknown.
+  if (isNumber(x)) return false;
+  return undefined;
+}
+
+/**
+ * Three-valued membership for a set defined by a base type together with a
+ * sign predicate (e.g. the negative reals). `sign` is the relevant three-valued
+ * sign property of `x` (e.g. `x.isNegative`).
+ */
+function signedMembership(
+  x: Expression,
+  baseType: Type,
+  sign: boolean | undefined
+): boolean | undefined {
+  const inBase = typeMembership(x, baseType);
+  if (inBase === false) return false; // wrong type → definitely not a member
+  if (sign === false) return false; // wrong sign → definitely not a member
+  if (sign === true) return inBase; // right sign; membership tracks the type
+  return undefined; // sign indeterminate
 }
 
 /**
@@ -77,7 +120,10 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       isEmpty: () => true,
       isFinite: () => true,
       contains: () => false,
-      subsetOf: () => true,
+      // `other` ⊆ EmptySet iff `other` is itself empty. A strict subset is
+      // impossible (EmptySet has no elements to spare).
+      subsetOf: (_, other, strict) =>
+        !strict && other.isEmptyCollection === true,
       eltsgn: () => undefined,
       elttype: () => 'never',
     },
@@ -93,7 +139,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       isEmpty: () => false,
       isFinite: () => false,
 
-      contains: (_, x) => x.type.matches('number'),
+      contains: (_, x) => typeMembership(x, 'number'),
       subsetOf: (_, other, strict) => {
         if (other.operator === 'Range' || other.operator === 'Linspace')
           return true;
@@ -116,7 +162,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       count: () => Infinity,
       isEmpty: () => false,
       isFinite: () => false,
-      contains: (_, x) => x.type.matches('finite_complex'),
+      contains: (_, x) => typeMembership(x, 'finite_complex'),
       subsetOf: (_, rhs, strict) => {
         if (rhs.operator === 'Range' || rhs.operator === 'Linspace')
           return true;
@@ -139,13 +185,13 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       count: () => Infinity,
       isEmpty: () => false,
       isFinite: () => false,
-      contains: (_, x) => x.type.matches('complex'),
+      contains: (_, x) => typeMembership(x, 'complex'),
       subsetOf: (_, rhs, strict) => {
         if (rhs.operator === 'Range' || rhs.operator === 'Linspace')
           return true;
         return (
           rhs.type.matches(BoxedType.setComplex) &&
-          (!strict || sym(rhs) !== 'ComplexNumbers')
+          (!strict || sym(rhs) !== 'ExtendedComplexNumbers')
         );
       },
       eltsgn: () => 'unsigned',
@@ -162,7 +208,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       count: () => Infinity,
       isEmpty: () => false,
       isFinite: () => false,
-      contains: (_, x) => x.type.matches(BoxedType.setImaginary),
+      contains: (_, x) => typeMembership(x, 'imaginary'),
       subsetOf: (_, rhs, strict) =>
         rhs.type.matches(BoxedType.setImaginary) &&
         (!strict || sym(rhs) !== 'ImaginaryNumbers'),
@@ -177,7 +223,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     description: 'The set of all finite real numbers.',
     collection: {
       iterator: (self) => rationalIterator(self),
-      contains: (_, x) => x.type.matches('finite_real'),
+      contains: (_, x) => typeMembership(x, 'finite_real'),
       count: () => Infinity,
       isEmpty: () => false,
       isFinite: () => false,
@@ -195,7 +241,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     description: 'The set of all real numbers, including infinities.',
     collection: {
       iterator: (self) => rationalIterator(self),
-      contains: (_, x) => x.type.matches('real'),
+      contains: (_, x) => typeMembership(x, 'real'),
       count: () => Infinity,
       isEmpty: () => false,
       isFinite: () => false,
@@ -213,7 +259,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     description: 'The set of all finite integers.',
     collection: {
       iterator: integerIterator,
-      contains: (_, x) => x.type.matches('finite_integer'),
+      contains: (_, x) => typeMembership(x, 'finite_integer'),
       count: () => Infinity,
       isEmpty: () => false,
       isFinite: () => false,
@@ -235,7 +281,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     description: 'The set of all integers, including infinities.',
     collection: {
       iterator: integerIterator,
-      contains: (_, x) => x.type.matches('integer'),
+      contains: (_, x) => typeMembership(x, 'integer'),
       count: () => Infinity,
       isEmpty: () => false,
       isFinite: () => false,
@@ -260,7 +306,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       count: () => Infinity,
       isEmpty: () => false,
       isFinite: () => false,
-      contains: (_, x) => x.type.matches('finite_rational'),
+      contains: (_, x) => typeMembership(x, 'finite_rational'),
       subsetOf: (_, rhs, strict) =>
         rhs.type.matches(BoxedType.setRational) &&
         (!strict || sym(rhs) !== 'RationalNumbers'),
@@ -275,7 +321,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     description: 'The set of all rational numbers, including infinities.',
     collection: {
       iterator: (self) => rationalIterator(self),
-      contains: (_, x) => x.type.matches('rational'),
+      contains: (_, x) => typeMembership(x, 'rational'),
       count: () => Infinity,
       isEmpty: () => false,
       isFinite: () => false,
@@ -296,7 +342,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       iterator: (self) =>
         rationalIterator(self, { sign: '-', includeZero: false }),
       count: () => Infinity,
-      contains: (_, x) => x.type.matches('real') && x.isNegative === true,
+      contains: (_, x) => signedMembership(x, 'real', x.isNegative),
       subsetOf: (_, rhs, strict) => {
         if (
           (rhs.operator === 'Range' || rhs.operator === 'Linspace') &&
@@ -326,7 +372,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     collection: {
       iterator: (self) =>
         rationalIterator(self, { sign: '-', includeZero: true }),
-      contains: (_, x) => x.type.matches('real') && x.isNonPositive === true,
+      contains: (_, x) => signedMembership(x, 'real', x.isNonPositive),
       count: () => Infinity,
       isEmpty: () => false,
       isFinite: () => false,
@@ -359,7 +405,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     collection: {
       iterator: (self) =>
         rationalIterator(self, { sign: '+', includeZero: true }),
-      contains: (_, x) => x.type.matches('real') && x.isNonNegative === true,
+      contains: (_, x) => signedMembership(x, 'real', x.isNonNegative),
       count: () => Infinity,
       isEmpty: () => false,
       isFinite: () => false,
@@ -391,7 +437,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     collection: {
       iterator: (self) =>
         rationalIterator(self, { sign: '+', includeZero: false }),
-      contains: (_, x) => x.type.matches('real') && x.isPositive === true,
+      contains: (_, x) => signedMembership(x, 'real', x.isPositive),
       count: () => Infinity,
       subsetOf: (_, rhs, strict) => {
         if (
@@ -420,7 +466,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     description: 'The set of all negative integers.',
     collection: {
       iterator: (self) => integerRangeIterator(self.engine, -1, -1),
-      contains: (_, x) => x.type.matches('integer') && x.isNegative === true,
+      contains: (_, x) => signedMembership(x, 'integer', x.isNegative),
       count: () => Infinity,
       isEmpty: () => false,
       isFinite: () => false,
@@ -449,7 +495,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     description: 'The set of all non-positive integers.',
     collection: {
       iterator: (self) => integerRangeIterator(self.engine, 0, -1),
-      contains: (_, x) => x.type.matches('integer') && x.isNonPositive === true,
+      contains: (_, x) => signedMembership(x, 'integer', x.isNonPositive),
       count: () => Infinity,
       isEmpty: () => false,
       isFinite: () => false,
@@ -477,7 +523,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     description: 'The set of all non-negative integers.',
     collection: {
       iterator: (self) => integerRangeIterator(self.engine, 0, 1),
-      contains: (_, x) => x.type.matches('integer') && x.isNonNegative === true,
+      contains: (_, x) => signedMembership(x, 'integer', x.isNonNegative),
       count: () => Infinity,
       isEmpty: () => false,
       isFinite: () => false,
@@ -505,7 +551,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     description: 'The set of all positive integers.',
     collection: {
       iterator: (self) => integerRangeIterator(self.engine, 1, 1),
-      contains: (_, x) => x.type.matches('integer') && x.isPositive === true,
+      contains: (_, x) => signedMembership(x, 'integer', x.isPositive),
       count: () => Infinity,
       isEmpty: () => false,
       isFinite: () => false,
@@ -945,7 +991,16 @@ export const SETS_LIBRARY: SymbolDefinitions = {
 
 function subset(lhs: Expression, rhs: Expression, strict = true): boolean {
   if (!lhs.isCollection || !rhs.isCollection) return false;
-  if (lhs.baseDefinition?.collection?.subsetOf?.(lhs, rhs, strict)) return true;
+  // The empty set is a subset of every set (strictly so unless `rhs` is also
+  // empty). Handle it here since its generic `set` type defeats the
+  // type-based per-set handlers below.
+  if (lhs.isEmptyCollection === true)
+    return !strict || rhs.isEmptyCollection !== true;
+  // The `subsetOf(collection, other, strict)` handler tests whether every
+  // element of `other` is in `collection` (i.e. `other` ⊆ `collection`).
+  // To test `lhs` ⊆ `rhs`, dispatch on the candidate *superset* `rhs`,
+  // passing `lhs` as the candidate subset.
+  if (rhs.baseDefinition?.collection?.subsetOf?.(rhs, lhs, strict)) return true;
   return false;
 }
 

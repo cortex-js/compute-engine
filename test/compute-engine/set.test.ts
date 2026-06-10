@@ -156,4 +156,98 @@ describe('ELEMENT', () => {
       `False` // 2 is not a string
     );
   });
+
+  // Regression for G3: membership of an indeterminate-type value in a number
+  // set must stay unevaluated (three-valued logic), not collapse to `False`.
+  test('Element of a symbol of indeterminate type stays unevaluated', () => {
+    ce.declare('g3a', 'unknown');
+    // Indeterminate: g3a could be a real / integer, so neither True nor False.
+    expect(ce.expr(['Element', 'g3a', 'RealNumbers']).evaluate().json).toEqual([
+      'Element',
+      'g3a',
+      'RealNumbers',
+    ]);
+    expect(ce.expr(['Element', 'g3a', 'Integers']).evaluate().json).toEqual([
+      'Element',
+      'g3a',
+      'Integers',
+    ]);
+    ce.forget('g3a');
+  });
+
+  test('Element of concrete values remains decidable', () => {
+    // Concrete number literals keep an exact (definitive) membership answer.
+    expect(ce.expr(['Element', 3, 'Integers']).evaluate()).toMatchInlineSnapshot(
+      `True`
+    );
+    expect(
+      ce.expr(['Element', 2.5, 'Integers']).evaluate()
+    ).toMatchInlineSnapshot(`False`);
+    expect(
+      ce.expr(['Element', -5, 'NegativeNumbers']).evaluate()
+    ).toMatchInlineSnapshot(`True`);
+    expect(
+      ce.expr(['Element', 5, 'NegativeNumbers']).evaluate()
+    ).toMatchInlineSnapshot(`False`);
+    // Disjoint type → definitive False even though the value is symbolic.
+    ce.declare('g3s', 'string');
+    expect(
+      ce.expr(['Element', 'g3s', 'Integers']).evaluate()
+    ).toMatchInlineSnapshot(`False`);
+    ce.forget('g3s');
+  });
+});
+
+describe('SUBSET', () => {
+  // Regression for G12: the subset dispatcher tested the relation backwards,
+  // so primitive-set chains were inverted.
+  test('strict subset of primitive number sets', () => {
+    expect(
+      ce.expr(['Subset', 'Integers', 'RationalNumbers']).evaluate()
+    ).toMatchInlineSnapshot(`True`);
+    expect(
+      ce.expr(['Subset', 'RationalNumbers', 'RealNumbers']).evaluate()
+    ).toMatchInlineSnapshot(`True`);
+    expect(
+      ce.expr(['Subset', 'RealNumbers', 'ComplexNumbers']).evaluate()
+    ).toMatchInlineSnapshot(`True`);
+    // The reverse direction is False, and a set is not a *strict* subset of
+    // itself.
+    expect(
+      ce.expr(['Subset', 'RationalNumbers', 'Integers']).evaluate()
+    ).toMatchInlineSnapshot(`False`);
+    expect(
+      ce.expr(['Subset', 'Integers', 'Integers']).evaluate()
+    ).toMatchInlineSnapshot(`False`);
+  });
+
+  test('SubsetEqual allows equality', () => {
+    expect(
+      ce.expr(['SubsetEqual', 'Integers', 'RationalNumbers']).evaluate()
+    ).toMatchInlineSnapshot(`True`);
+    expect(
+      ce.expr(['SubsetEqual', 'Integers', 'Integers']).evaluate()
+    ).toMatchInlineSnapshot(`True`);
+  });
+
+  test('Superset is the reverse of Subset', () => {
+    expect(
+      ce.expr(['Superset', 'RationalNumbers', 'Integers']).evaluate()
+    ).toMatchInlineSnapshot(`True`);
+  });
+
+  test('the empty set is a subset of every set', () => {
+    expect(
+      ce.expr(['Subset', 'EmptySet', 'Integers']).evaluate()
+    ).toMatchInlineSnapshot(`True`);
+    expect(
+      ce.expr(['Subset', 'Integers', 'EmptySet']).evaluate()
+    ).toMatchInlineSnapshot(`False`);
+    expect(
+      ce.expr(['SubsetEqual', 'EmptySet', 'EmptySet']).evaluate()
+    ).toMatchInlineSnapshot(`True`);
+    expect(
+      ce.expr(['Subset', 'EmptySet', 'EmptySet']).evaluate()
+    ).toMatchInlineSnapshot(`False`);
+  });
 });

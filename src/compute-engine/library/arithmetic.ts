@@ -414,13 +414,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           : x.isNegative || x.isReal === false
             ? 'unsigned'
             : undefined,
-      canonical: (args, { engine }) => {
-        const x = args[0];
-        // We assume that -3! is -(3!) = -6
-        if (isNumber(x) && x.isNegative)
-          return engine._fn('Factorial', [x.neg()]).neg();
-        return engine._fn('Factorial', [x]);
-      },
+      canonical: (args, { engine }) => engine._fn('Factorial', [args[0]]),
       evaluate: ([x]) => {
         const ce = x.engine;
 
@@ -434,8 +428,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // The argument is real...
         if (!x.isFinite) return undefined;
 
-        // Not a positive integer, use the Gamma function
-        if (x.isNegative) return ce.number(gamma(1 + x.re));
+        // n! = Γ(n+1). Γ has poles at the non-positive integers, so the
+        // factorial of a negative integer is the (unsigned) complex infinity.
+        if (x.isNegative) {
+          if (x.isInteger) return ce.ComplexInfinity;
+          return ce.number(gamma(1 + x.re));
+        }
         try {
           return ce.number(
             run(
@@ -462,8 +460,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // The argument is real...
         if (!x.isFinite) return undefined;
 
-        // Not a positive integer, use the Gamma function
-        if (x.isNegative) return ce.number(gamma(1 + x.re));
+        // n! = Γ(n+1). Γ has poles at the non-positive integers, so the
+        // factorial of a negative integer is the (unsigned) complex infinity.
+        if (x.isNegative) {
+          if (x.isInteger) return ce.ComplexInfinity;
+          return ce.number(gamma(1 + x.re));
+        }
 
         try {
           return ce.number(
@@ -565,15 +567,20 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
       sgn: ([x]) =>
         x.isPositive ? 'positive' : x.isSame(0) ? 'zero' : undefined,
-      evaluate: ([x], { numericApproximation, engine }) =>
-        numericApproximation
+      evaluate: ([x], { numericApproximation, engine }) => {
+        // Gamma has poles at the non-positive integers (0, -1, -2, ...).
+        // This is exact, so return it regardless of numericApproximation.
+        if (isNumber(x) && x.im === 0 && x.isInteger && x.isNonPositive)
+          return engine.ComplexInfinity;
+        return numericApproximation
           ? apply(
               x,
               (x) => gamma(x),
               (x) => bigGamma(engine, x),
               (x) => gammaComplex(x)
             )
-          : undefined,
+          : undefined;
+      },
     },
 
     GammaLn: {
