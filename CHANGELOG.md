@@ -24,6 +24,17 @@
   `compileLedger`). Engines that don't import the subpath pay no bundle
   cost.
 
+- **Assorted low-severity fixes**:
+  - A symbol with a *known infinite* value times zero is now `NaN` (e.g. with
+    `a := ∞`, `a·0` was `0`); a free symbol keeps the conventional `·0 → 0`.
+  - `InterquartileRange` now equals `Q3 − Q1` from `Quartiles` (it used a
+    different upper-half slice, so the two disagreed).
+  - Interval `mod` with a *negative* modulus now encloses the compiled scalar
+    `Mod` (which uses the floored, sign-of-divisor convention); the interval
+    previously returned a non-negative `[0, |b|)` range that did not.
+  - Removed a redundant `.simplify()` in the numeric-equality path of `eq()`
+    (a latent recursion hazard, since `eq` is reachable from `isEqual`).
+
 - **Comparison and simplification correctness fixes**:
   - An operator's equality handler returning `false` (definitely *not* equal)
     was treated as *equal*, so unordered values such as lists compared as `<=`.

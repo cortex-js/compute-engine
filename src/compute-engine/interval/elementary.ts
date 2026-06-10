@@ -503,6 +503,13 @@ export function mod(
       : Math.max(Math.abs(bVal.lo), Math.abs(bVal.hi))
   );
 
+  // The compiled scalar `Mod` (`((a % b) + b) % b`) uses the floored
+  // (sign-of-divisor) convention: the result is in `[0, b)` for `b > 0` and
+  // `(b, 0]` for `b < 0`. The divisor sign is determinate here (a `b`
+  // straddling 0 returned `singular` above). The interval result must enclose
+  // that scalar value — the previous `[0, |b|)` result did not for `b < 0`.
+  const divisorNegative = bVal.hi < 0;
+
   // Check if interval crosses a period boundary
   const flo = Math.floor(aVal.lo / period);
   const fhi = Math.floor(aVal.hi / period);
@@ -513,9 +520,20 @@ export function mod(
     return { kind: 'singular', at: (flo + 1) * period, continuity: 'right' };
   }
 
-  // No discontinuity — mod is continuous (linear) on this interval
+  // No discontinuity — mod is continuous (linear) on this interval.
+  // `modLo`/`modHi` are the Euclidean ([0, period)) values.
   const modLo = aVal.lo - period * flo;
   const modHi = aVal.hi - period * flo;
+
+  if (divisorNegative) {
+    // floored(a, b<0) = Euclidean(a, |b|) − |b|, except it is 0 at multiples
+    // of |b| (a right-discontinuity). If `aVal.lo` sits on a multiple
+    // (`modLo === 0`), the interval straddles that jump.
+    if (modLo === 0)
+      return { kind: 'singular', at: aVal.lo, continuity: 'right' };
+    return ok({ lo: modLo - period, hi: modHi - period });
+  }
+
   return ok({ lo: Math.min(modLo, modHi), hi: Math.max(modLo, modHi) });
 }
 

@@ -1874,3 +1874,28 @@ describe('Factorial of non-integer reals (REVIEW.md B16)', () => {
     expect(ce.box(['Factorial', 5]).evaluate().json).toBe(120);
   });
 });
+
+// REVIEW.md A13: a symbol whose *value* is infinite, times 0, is NaN (not 0) —
+// the `BoxedSymbol.mul(0)` fastpath short-circuited to Zero.
+describe('Infinite-symbol times zero (REVIEW.md A13)', () => {
+  it('∞·0 = NaN for a symbol with an infinite value', () => {
+    const e = new ComputeEngine();
+    e.assign('bigval', e.PositiveInfinity);
+    expect(e.box('bigval').mul(0).toString()).toBe('NaN');
+  });
+  it('a free symbol keeps the conventional ·0 → 0', () => {
+    const e = new ComputeEngine();
+    expect(e.box('freeSym').mul(0).toString()).toBe('0');
+  });
+});
+
+// REVIEW.md D20: InterquartileRange used a different quartile slice than
+// Quartiles (`slice(mid+1)` vs `slice(mid)`), so IQR ≠ Q3 − Q1.
+describe('InterquartileRange consistent with Quartiles (REVIEW.md D20)', () => {
+  it('IQR equals Q3 − Q1', () => {
+    const data = ['List', 1, 2, 3, 4, 5, 6, 7, 8, 9];
+    const iqr = ce.box(['InterquartileRange', data]).evaluate().re;
+    // Quartiles of [1..9] are (2.5, 5, 7) → Q3 − Q1 = 4.5
+    expect(iqr).toBeCloseTo(4.5, 10);
+  });
+});

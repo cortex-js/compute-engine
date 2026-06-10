@@ -241,11 +241,18 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   mul(rhs: NumericValue | number | Expression): Expression {
     if (rhs === 1) return this;
     if (rhs === -1) return this.neg();
-    if (rhs === 0 && !this.isNaN) return this.engine.Zero;
+
+    // `x·0 = 0` only when `x` is finite. A symbol with a *known infinite*
+    // value (or NaN) gives `∞·0 = NaN`; the fastpath used to short-circuit to
+    // Zero. Free symbols (infinity unknown) keep the conventional `·0 → 0`.
+    const isZeroRhs = rhs === 0 || (rhs instanceof NumericValue && rhs.isZero);
+    if (isZeroRhs) {
+      if (this.isNaN || this.isInfinity === true) return this.engine.NaN;
+      return this.engine.Zero;
+    }
     if (rhs instanceof NumericValue) {
       if (rhs.isOne) return this;
       if (rhs.isNegativeOne) return this.neg();
-      if (rhs.isZero && !this.isNaN) return this.engine.Zero;
     }
     return mul(this, this.engine.expr(rhs));
   }

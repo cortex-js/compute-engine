@@ -283,23 +283,16 @@ export function bigQuartiles(
 }
 
 export function interquartileRange(values: Iterable<number>): number {
-  const sorted = [...values].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-
-  const lower = sorted.slice(0, mid);
-  const upper = sorted.slice(mid + 1);
-
-  return median(upper) - median(lower);
+  // IQR = Q3 − Q1, using the same quartile convention as `quartiles()`. (It
+  // used to slice the upper half at `mid + 1` while `quartiles` slices at
+  // `mid`, so `IQR` disagreed with `Q3 − Q1`.)
+  const [q1, , q3] = quartiles(values);
+  return q3 - q1;
 }
 
 export function bigInterquartileRange(
   values: Iterable<BigDecimal>
 ): BigDecimal {
-  const sorted = [...values].sort((a, b) => a.cmp(b));
-  const mid = Math.floor(sorted.length / 2);
-
-  const lower = sorted.slice(0, mid);
-  const upper = sorted.slice(mid + 1);
-
-  return bigMedian(upper).sub(bigMedian(lower));
+  const [q1, , q3] = bigQuartiles(values);
+  return q3.sub(q1);
 }

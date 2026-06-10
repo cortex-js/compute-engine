@@ -127,8 +127,11 @@ export function eq(
 
     // If the difference is zero (within tolerance), the expressions are equal
     if (a.unknowns.length === 0 && b.unknowns.length === 0) {
+      // No free variables, so `.N()` already evaluates the difference fully —
+      // the intermediate `.simplify()` was redundant and a latent recursion
+      // hazard (`eq` is reachable from `isEqual`, which evaluate handlers call).
       if (a.isFinite && b.isFinite)
-        return isZeroWithTolerance(a.sub(b).simplify().N());
+        return isZeroWithTolerance(a.sub(b).N());
       if (a.isNaN || b.isNaN) return false;
       if (a.isInfinity && b.isInfinity && a.sgn === b.sgn) return true;
       return false;

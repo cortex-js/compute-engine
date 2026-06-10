@@ -351,6 +351,19 @@ describe('INTERVAL ELEMENTARY FUNCTIONS', () => {
     expect(result.kind).toBe('singular');
   });
 
+  // REVIEW.md E16: with a negative modulus the interval result must enclose the
+  // compiled scalar `Mod` (floored, sign-of-divisor convention: `((a%b)+b)%b`),
+  // which is negative for `b < 0`. The old `[0, |b|)` result did not.
+  test('mod - negative modulus encloses the floored scalar (E16)', () => {
+    const floored = (a: number, b: number) => ((a % b) + b) % b;
+    // 5 mod -3 = -1, 7 mod -4 = -1, -1 mod -3 = -1
+    expectInterval(mod({ lo: 5, hi: 5 }, { lo: -3, hi: -3 }), floored(5, -3), floored(5, -3));
+    expectInterval(mod({ lo: 7, hi: 7 }, { lo: -4, hi: -4 }), floored(7, -4), floored(7, -4));
+    expectInterval(mod({ lo: -1, hi: -1 }, { lo: -3, hi: -3 }), floored(-1, -3), floored(-1, -3));
+    // Positive modulus is unchanged (Euclidean == floored for b > 0).
+    expectInterval(mod({ lo: 5, hi: 5 }, { lo: 3, hi: 3 }), floored(5, 3), floored(5, 3));
+  });
+
   test('round - no boundary crossing', () => {
     expectInterval(round({ lo: 1.1, hi: 1.4 }), 1, 1);
   });
