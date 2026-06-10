@@ -70,6 +70,14 @@
     looping forever in the `fpsqrt(0) = 0` reduction). Both now range-reduce the
     decimal exponent via `ln(10)` (`exp(x) = exp(r)·10^k`, `ln(x) = ln(m) +
     e·ln 10`) so the kernel only ever sees an O(1) value.
+  - The two-argument numeric apply path (`apply2`, used by `Power`, `Arctan2`,
+    `Log`, …) chopped its *real* result to 0 below the engine tolerance, while
+    the one-argument `apply` did not. A legitimately-small value was therefore
+    discarded: `Power(10, -100).N()` and `exp(-200).N()` returned `0`, and
+    `ln(10^-100).N()` returned `-∞` (its input had been chopped to 0). `apply2`
+    no longer chops a real result, so these evaluate correctly end-to-end
+    (`Power(10,-100).N()` → `1e-100`); the complex branch still chops each
+    component, where a tiny re/im part is typically trig roundoff.
   - Skewness and kurtosis used incorrect central-moment formulas; a symmetric
     sample now has skewness 0 and `[1,2,3,4,5]` has (non-excess) kurtosis 1.7.
 

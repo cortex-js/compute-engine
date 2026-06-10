@@ -80,5 +80,10 @@ export function apply2(
     return ce.number(
       ce._numericValue({ re: ce.chop(result.re), im: ce.chop(result.im) })
     );
-  return ce.number(ce.chop(result));
+  // Do not chop a real result: a legitimately-small value (e.g. 10^-100 from
+  // `Power(10, -100)`) is not roundoff noise, and chopping it to 0 is both
+  // wrong and inconsistent with the single-argument `apply` above. (The
+  // complex branch still chops each component, where a tiny re/im part is
+  // typically trig roundoff.)
+  return ce.number(result);
 }
