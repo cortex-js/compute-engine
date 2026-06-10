@@ -72,7 +72,7 @@ describe('loadIdentities (full artifact)', () => {
 
   it('loads every rule of the artifact on a fresh engine', () => {
     expect(report.loaded).toBe(FUNGRIM_CORE.rules.length);
-    expect(report.loaded).toBe(558);
+    expect(report.loaded).toBe(1275);
     expect(report.skipped).toEqual([]);
     expect(ce.simplificationRules.length).toBe(rulesBefore + report.loaded);
   });
@@ -84,11 +84,15 @@ describe('loadIdentities (full artifact)', () => {
 
   it('reports byTarget and byPurpose consistent with the artifact manifest', () => {
     expect(report.byTarget).toEqual({
-      simplify: 558,
+      simplify: 1275,
       solve: 0,
       harmonization: 0,
     });
-    expect(report.byPurpose).toEqual({ simplify: 541, transform: 0, expand: 17 });
+    expect(report.byPurpose).toEqual({
+      simplify: 1171,
+      transform: 0,
+      expand: 104,
+    });
     expect(
       report.byPurpose.simplify +
         report.byPurpose.transform +
@@ -999,6 +1003,278 @@ describe('hot-head pre-screened dispatch', () => {
   });
 });
 
+// ===========================================================================
+// Phase 3 — complex-domain guards (part-cmp / member / type:complex), per
+// the Phase-3 compiler extension. Two layers:
+//   1. synthetic-artifact closure-semantics tests (precise three-valued
+//      behavior of each new guard kind, incl. the onGuardUndecided hook),
+//   2. real-corpus theta/modular acceptance (HH membership via the Track-3
+//      stored-membership fact path).
+// ===========================================================================
+
+describe('Phase 3: artifact carries complex-domain rules', () => {
+  it('contains the new guard kinds and the theta/modular/hypergeometric topics', () => {
+    const kinds = new Set(
+      FUNGRIM_CORE.rules.flatMap((r) => r.guards.map((g) => g.k))
+    );
+    expect(kinds.has('part-cmp')).toBe(true);
+    expect(kinds.has('member')).toBe(true);
+    expect(
+      FUNGRIM_CORE.rules.some((r) =>
+        r.guards.some((g) => g.k === 'type' && g.t === 'complex')
+      )
+    ).toBe(true);
+
+    const topics = new Set(FUNGRIM_CORE.rules.flatMap((r) => r.topics));
+    for (const t of [
+      'jacobi_theta',
+      'dedekind_eta',
+      'modular_j',
+      'modular_lambda',
+      'eisenstein',
+      'gauss_hypergeometric',
+      'confluent_hypergeometric',
+    ])
+      expect(topics.has(t)).toBe(true);
+
+    // HH is declared as a shell so member guards box validly
+    expect(FUNGRIM_CORE.declarations['HH']).toBeDefined();
+  });
+});
+
+describe('Phase 3: guard-closure semantics (synthetic artifact)', () => {
+  const syntheticData: FungrimRuleData = {
+    manifest: {
+      schemaVersion: 1,
+      generator: 'test',
+      upstream: { name: 'test', snapshotSha256: null, translator: null },
+      slice: { classes: ['identity'], guardLevels: ['complex-domain'], entries: 3 },
+      counts: {
+        rules: 3,
+        byPurpose: { simplify: 3 },
+        byClass: { identity: 3 },
+        byTarget: { simplify: 3 },
+      },
+      ledger: {},
+    },
+    declarations: {
+      HH: { signature: 'set<complex>' },
+      PartCmpF: { signature: '(complex) -> complex' },
+      MemberF: { signature: '(complex) -> complex' },
+      ComplexF: { signature: '(complex) -> complex' },
+    },
+    rules: [
+      {
+        id: 'fungrim:test-part-cmp',
+        match: ['PartCmpF', '_z'],
+        replace: 0,
+        guards: [{ k: 'part-cmp', wc: '_z', part: 're', op: 'gt', bound: 0 }],
+        purpose: 'simplify',
+        target: 'simplify',
+        class: 'identity',
+        heads: ['PartCmpF'],
+        topics: ['test'],
+      },
+      {
+        id: 'fungrim:test-member',
+        match: ['MemberF', '_tau'],
+        replace: 0,
+        guards: [{ k: 'member', wc: '_tau', set: 'HH' }],
+        purpose: 'simplify',
+        target: 'simplify',
+        class: 'identity',
+        heads: ['MemberF'],
+        topics: ['test'],
+      },
+      {
+        id: 'fungrim:test-complex',
+        match: ['ComplexF', '_z'],
+        replace: 0,
+        guards: [{ k: 'type', wc: '_z', t: 'complex' }],
+        purpose: 'simplify',
+        target: 'simplify',
+        class: 'identity',
+        heads: ['ComplexF'],
+        topics: ['test'],
+      },
+    ],
+  };
+
+  const load = (
+    onGuardUndecided?: (id: string, wc: object) => void
+  ): ComputeEngine => {
+    const ce = new ComputeEngine();
+    loadIdentities(ce, { data: syntheticData, onGuardUndecided });
+    return ce;
+  };
+
+  it('part-cmp: literal substitutions fold numerically (three-valued)', () => {
+    const ce = load();
+    // Re(2 + 3i) = 2 > 0: fires
+    expect(
+      ce.box(['PartCmpF', ['Complex', 2, 3]]).simplify().isSame(0)
+    ).toBe(true);
+    // Re(−1) = −1: definitively violated, no fire
+    const neg = ce.box(['PartCmpF', -1]);
+    expect(neg.simplify().isSame(neg)).toBe(true);
+  });
+
+  it('part-cmp: symbol substitutions consult the Track-3 part-bound facts', () => {
+    const ce = load();
+    ce.declare('s', 'complex');
+    ce.assume(ce.box(['Greater', ['Real', 's'], 1], { canonical: false }));
+    expect(ce.box(['PartCmpF', 's']).simplify().isSame(0)).toBe(true);
+    // unconstrained symbol: undecided, fail-closed
+    ce.declare('v', 'complex');
+    const expr = ce.box(['PartCmpF', 'v']);
+    expect(expr.simplify().isSame(expr)).toBe(true);
+  });
+
+  it('part-cmp: onGuardUndecided fires for undecided, not for refuted', () => {
+    const undecided: string[] = [];
+    const ce = load((id) => undecided.push(id));
+    ce.declare('v', 'complex');
+    ce.box(['PartCmpF', 'v']).simplify(); // Re(v) > 0 unknown
+    expect(undecided).toContain('fungrim:test-part-cmp');
+    undecided.length = 0;
+    ce.box(['PartCmpF', -1]).simplify(); // Re(−1) > 0 definitively false
+    expect(undecided).not.toContain('fungrim:test-part-cmp');
+  });
+
+  it('member: discharges via the stored-membership exact match, NOT via literals', () => {
+    const ce = load();
+    ce.declare('tau', 'complex');
+    ce.assume(ce.box(['Element', 'tau', 'HH'], { canonical: false }));
+    expect(ce.box(['MemberF', 'tau']).simplify().isSame(0)).toBe(true);
+    // KEY ENCODING FACT: HH is an inert shell with NO contains handler —
+    // a literal (even i, which IS in the upper half-plane) stays undecided
+    const lit = ce.box(['MemberF', 'ImaginaryUnit']);
+    expect(lit.simplify().isSame(lit)).toBe(true);
+  });
+
+  it('member: onGuardUndecided fires for the inert-set literal', () => {
+    const undecided: string[] = [];
+    const ce = load((id) => undecided.push(id));
+    ce.box(['MemberF', 'ImaginaryUnit']).simplify();
+    expect(undecided).toContain('fungrim:test-member');
+  });
+
+  it('type complex: literals and declared-complex symbols pass; unknown stays undecided', () => {
+    const ce = load();
+    // finite complex literal
+    expect(
+      ce.box(['ComplexF', ['Complex', 1, 2]]).simplify().isSame(0)
+    ).toBe(true);
+    // declared complex symbol
+    ce.declare('z', 'complex');
+    expect(ce.box(['ComplexF', 'z']).simplify().isSame(0)).toBe(true);
+    // infinity is NOT a finite complex number
+    const inf = ce.box(['ComplexF', 'PositiveInfinity']);
+    expect(inf.simplify().isSame(inf)).toBe(true);
+  });
+});
+
+describe('Phase 3: theta/modular acceptance (real corpus, HH assumptions)', () => {
+  let ce: ComputeEngine;
+
+  beforeAll(() => {
+    ce = new ComputeEngine();
+    loadIdentities(ce);
+    ce.declare('tau', 'complex');
+    // The corpus encodes Element(tau, HH) VERBATIM; discharge goes through
+    // the Track-3 stored-membership exact-match path
+    ce.assume(ce.box(['Element', 'tau', 'HH'], { canonical: false }));
+    ce.declare('z', 'complex');
+    ce.declare('m', 'integer');
+  });
+
+  it('Jacobi identity: θ₂(0,τ)⁴ + θ₄(0,τ)⁴ → θ₃(0,τ)⁴  [fungrim:1fbc09]', () => {
+    expect(
+      ce
+        .box([
+          'Add',
+          ['Power', ['JacobiTheta', 2, 0, 'tau'], 4],
+          ['Power', ['JacobiTheta', 4, 0, 'tau'], 4],
+        ])
+        .simplify()
+        .isSame(ce.box(['Power', ['JacobiTheta', 3, 0, 'tau'], 4]))
+    ).toBe(true);
+  });
+
+  it('theta periodicity: θ₄(z, 2m + τ) → θ₄(z, τ)  [fungrim:19acd8]', () => {
+    expect(
+      ce
+        .box(['JacobiTheta', 4, 'z', ['Add', ['Multiply', 2, 'm'], 'tau']])
+        .simplify()
+        .isSame(ce.box(['JacobiTheta', 4, 'z', 'tau']))
+    ).toBe(true);
+  });
+
+  it('modular j periodicity: j(τ + 1) → j(τ)  [fungrim:42a909]', () => {
+    expect(
+      ce.box(['ModularJ', ['Add', 'tau', 1]]).simplify().isSame(
+        ce.box(['ModularJ', 'tau'])
+      )
+    ).toBe(true);
+  });
+
+  it('modular λ inversion: λ(−1/τ) → 1 − λ(τ) via replace()  [fungrim:07bf27]', () => {
+    // Slightly larger RHS: cost-gated in simplify(), reachable via replace()
+    const rs = ce.getRuleSet('standard-simplification')!;
+    const result = ce
+      .box(['ModularLambda', ['Negate', ['Divide', 1, 'tau']]])
+      .replace(rs);
+    expect(result).not.toBeNull();
+    expect(
+      result!.isSame(ce.box(['Subtract', 1, ['ModularLambda', 'tau']]))
+    ).toBe(true);
+  });
+
+  it('definitional expansions are exiled to expand: ModularJ(τ) does not explode in simplify()', () => {
+    // fungrim:664b4c (j(τ) → Dedekind-eta quotient) is a bare-generic-match
+    // definitional expansion: purpose 'expand', out of simplify()'s scan
+    const j = ce.box(['ModularJ', 'tau']);
+    expect(j.simplify().isSame(j)).toBe(true);
+    const rule = FUNGRIM_CORE.rules.find((r) => r.id === 'fungrim:664b4c')!;
+    expect(rule.purpose).toBe('expand');
+  });
+
+  it('negative controls: no rewrite without the HH assumption', () => {
+    const ce2 = new ComputeEngine();
+    loadIdentities(ce2);
+    ce2.declare('sigma', 'complex');
+    const theta = ce2.box([
+      'Add',
+      ['Power', ['JacobiTheta', 2, 0, 'sigma'], 4],
+      ['Power', ['JacobiTheta', 4, 0, 'sigma'], 4],
+    ]);
+    expect(theta.simplify().isSame(theta)).toBe(true);
+    const j = ce2.box(['ModularJ', ['Add', 'sigma', 1]]);
+    expect(j.simplify().isSame(j)).toBe(true);
+  });
+
+  it('part-cmp on a real corpus rule: Arg(e^z) → Im(z) for in-band literals  [fungrim:a0d93c]', () => {
+    const ce2 = new ComputeEngine();
+    loadIdentities(ce2);
+    const allRules = ce2.rules(ce2.simplificationRules); // 'expand' purpose
+    // Im(1 + i) = 1 ∈ (−π, π]: fires
+    const inBand = ce2
+      .box(['Argument', ['Power', 'ExponentialE', ['Add', 1, 'ImaginaryUnit']]])
+      .replace(allRules);
+    expect(inBand).not.toBeNull();
+    expect(inBand!.isEqual(ce2.box(1))).toBe(true);
+    // Im(4i) = 4 > π: guard definitively violated, no fire
+    expect(
+      ce2
+        .box([
+          'Argument',
+          ['Power', 'ExponentialE', ['Multiply', 4, 'ImaginaryUnit']],
+        ])
+        .replace(allRules)
+    ).toBeNull();
+  });
+});
+
 // ---------------------------------------------------------------------------
 // M5 negative controls (§2.7): the same inputs WITHOUT the required
 // assumptions must NOT rewrite (fail-closed), across all guard kinds
@@ -1032,12 +1308,31 @@ describe('M5 negative controls: guards fail closed without assumptions', () => {
     staysPut(['ChebyshevT', 'x', 1]);
   });
 
-  it('type(integer) fails on a real symbol: Sin(πt + π/2) does NOT rewrite', () => {
+  it('type(integer) fails on a real symbol: Sin(πt + π/2) rewrites via the COMPLEX rule, not the integer rule', () => {
+    // Phase 3: the integer-guarded rule fungrim:506d0c
+    // (Sin(πk + π/2) → (−1)^k) must NOT fire for a real t — but the
+    // complex-domain identity fungrim:bae475 (Sin(z + π/2) → Cos(z),
+    // z ∈ ℂ) legitimately does, since πt is finite complex.
     ce.declare('t', 'real');
-    staysPut([
+    const result = ce
+      .box([
+        'Sin',
+        ['Add', ['Multiply', 'Pi', 't'], ['Multiply', ['Rational', 1, 2], 'Pi']],
+      ])
+      .simplify();
+    expect(result.isSame(ce.box(['Cos', ['Multiply', 'Pi', 't']]))).toBe(true);
+    // …and specifically NOT the integer rule's (−1)^t
+    expect(JSON.stringify(result.json)).not.toContain('"Power"');
+  });
+
+  it('type(complex) undecided on an unknown-type symbol: Sin(u + π/2) does NOT rewrite', () => {
+    // u has no declared type and no assumptions: Element(u, ℂ) is
+    // indeterminate, so the fail-closed complex guard blocks fungrim:bae475
+    const expr = ce.box([
       'Sin',
-      ['Add', ['Multiply', 'Pi', 't'], ['Multiply', ['Rational', 1, 2], 'Pi']],
+      ['Add', 'u', ['Multiply', ['Rational', 1, 2], 'Pi']],
     ]);
+    expect(expr.simplify().isSame(expr)).toBe(true);
   });
 
   it('cmp(gt 0) undecided: m·(m−1)! does NOT rewrite for sign-unknown integer m', () => {

@@ -318,9 +318,12 @@ describe('PARSING INTERVALS', () => {
           ],
         ],
         [
-          Subtract,
+          Add,
           c,
-          d,
+          [
+            Negate,
+            d,
+          ],
         ],
       ]
     `);
@@ -345,10 +348,7 @@ describe('PARSING INTERVALS', () => {
         Interval,
         [
           Open,
-          [
-            Negate,
-            PositiveInfinity,
-          ],
+          NegativeInfinity,
         ],
         0,
       ]

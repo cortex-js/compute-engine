@@ -1,10 +1,11 @@
-// Offline rule compiler for the Fungrim Phase-1 loader
-// (FUNGRIM-PLAN-5-LOADER.md §2.2–§2.5, milestone M1).
+// Offline rule compiler for the Fungrim loader
+// (FUNGRIM-PLAN-5-LOADER.md §2.2–§2.5, milestone M1; extended in Phase 3 to
+// complex-domain guards).
 //
-// Reads the translated corpus (`data/fungrim/`), selects the Phase-1 slice
-// (class ∈ {specific-value, identity} × guardLevel ∈ {none, real-simple}),
-// and compiles each `["Equal", lhs, rhs]` entry into a declarative
-// `CompiledFungrimRule` record:
+// Reads the translated corpus (`data/fungrim/`), selects the slice
+// (class ∈ {specific-value, identity} × guardLevel ∈ {none, real-simple,
+// complex-domain}), and compiles each `["Equal", lhs, rhs]` entry into a
+// declarative `CompiledFungrimRule` record:
 //
 //  1. wildcardize entry variables (`z` → `_z`),
 //  2. orient (cost-function policy with a 10% margin; ties → `'expand'`
@@ -48,8 +49,21 @@ import type { Entry, Declarations } from './load';
 export type MathJSON = unknown;
 
 export type GuardSpec =
-  | { k: 'type'; wc: string; t: 'integer' | 'real' | 'rational' }
+  | { k: 'type'; wc: string; t: 'integer' | 'real' | 'rational' | 'complex' }
   | { k: 'cmp'; wc: string; op: 'gt' | 'ge' | 'lt' | 'le'; bound: MathJSON }
+  // Phase 3: comparison over a part extractor of the substituted value —
+  // Greater(Re(z), 0), Less(Abs(q), 1), Element(Im(z), Interval(a, b)), …
+  | {
+      k: 'part-cmp';
+      wc: string;
+      part: 're' | 'im' | 'abs' | 'arg';
+      op: 'gt' | 'ge' | 'lt' | 'le';
+      bound: MathJSON;
+    }
+  // Phase 3: membership in an inert/compound set (HH, explicit Set(…), …).
+  // Fires only on a literal `True` from the Element evaluation — for inert
+  // shells like HH this is the Track-3 stored-membership exact-match path.
+  | { k: 'member'; wc: string; set: MathJSON }
   | { k: 'ne'; lhs: MathJSON; rhs: MathJSON }
   | { k: 'eval'; pred: MathJSON };
 
@@ -116,7 +130,9 @@ export type CompileResult = {
 export function isSliceEntry(e: Entry): boolean {
   return (
     (e.class === 'specific-value' || e.class === 'identity') &&
-    (e.guardLevel === 'none' || e.guardLevel === 'real-simple')
+    (e.guardLevel === 'none' ||
+      e.guardLevel === 'real-simple' ||
+      e.guardLevel === 'complex-domain')
   );
 }
 
@@ -163,6 +179,15 @@ function isSubset(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
   return true;
 }
 
+/** The non-wildcard MathJSON payload(s) of a guard (for shell collection). */
+function guardShellPayload(g: GuardSpec): MathJSON {
+  if (g.k === 'cmp' || g.k === 'part-cmp') return g.bound;
+  if (g.k === 'member') return g.set;
+  if (g.k === 'ne') return [g.lhs, g.rhs];
+  if (g.k === 'eval') return g.pred;
+  return null;
+}
+
 /** `collection` → `set` in shell signatures (same rewrite as load.ts). */
 function setify(signature: string): string {
   return signature.replace(/\bcollection\b/g, 'set');
@@ -192,6 +217,46 @@ function flattenAnd(a: MathJSON): MathJSON[] {
   return [a];
 }
 
+/** Corpus part-extractor heads → GuardSpec part tags (Phase 3). */
+const PART_HEADS: Record<string, 're' | 'im' | 'abs' | 'arg'> = {
+  Real: 're',
+  Imaginary: 'im',
+  Abs: 'abs',
+  Argument: 'arg',
+};
+
+/** GuardSpec part tags → CE operator heads (used by the guard closures and
+ *  the self-test assumption seeding). */
+export const PART_TO_OPERATOR: Record<'re' | 'im' | 'abs' | 'arg', string> = {
+  re: 'Real',
+  im: 'Imaginary',
+  abs: 'Abs',
+  arg: 'Argument',
+};
+
+/** Inert corpus set shells with NO `contains` evaluator: membership guards
+ *  on these discharge only via the Track-3 stored-membership exact-match
+ *  path (assume `Element(tau, HH)`), never on literals. The corpus encodes
+ *  `["Element", "tau", "HH"]` VERBATIM (HH is a `set<complex>` shell). */
+const INERT_SET_DOMAINS = new Set(['HH']);
+
+/** `[PartHead, v]` for an entry variable `v` → the part tag, else null. */
+function partOfVariable(
+  x: MathJSON,
+  variables: ReadonlyArray<string>
+): { part: 're' | 'im' | 'abs' | 'arg'; v: string } | null {
+  if (
+    Array.isArray(x) &&
+    x.length === 2 &&
+    typeof x[0] === 'string' &&
+    x[0] in PART_HEADS &&
+    typeof x[1] === 'string' &&
+    variables.includes(x[1])
+  )
+    return { part: PART_HEADS[x[0]], v: x[1] };
+  return null;
+}
+
 /**
  * Compile entry assumptions to a GuardSpec list. Fail-closed: any conjunct
  * outside the mapping table makes the whole entry uncompilable.
@@ -218,6 +283,30 @@ export function compileGuards(
     }
     if (isInfiniteBound(bound)) return; // skip infinite bounds
     guards.push({ k: 'cmp', wc: wc(v), op: open ? openOp : closedOp, bound: W(bound) });
+  };
+
+  // Same, for a part extractor of a variable (Element(Im(z), Interval(a,b)))
+  const pushPartBound = (
+    part: 're' | 'im' | 'abs' | 'arg',
+    v: string,
+    raw: MathJSON,
+    openOp: 'gt' | 'lt',
+    closedOp: 'ge' | 'le'
+  ): void => {
+    let bound = raw;
+    let open = false;
+    if (Array.isArray(bound) && bound[0] === 'Open') {
+      open = true;
+      bound = bound[1];
+    }
+    if (isInfiniteBound(bound)) return; // skip infinite bounds
+    guards.push({
+      k: 'part-cmp',
+      wc: wc(v),
+      part,
+      op: open ? openOp : closedOp,
+      bound: W(bound),
+    });
   };
 
   // Element(v, domain) for a bare entry variable v
@@ -249,6 +338,12 @@ export function compileGuards(
         case 'RationalNumbers':
           guards.push({ k: 'type', wc: wc(v), t: 'rational' });
           return null;
+        case 'ComplexNumbers':
+          // Fungrim's CC is the FINITE complex numbers; the runtime closure
+          // mirrors `ComplexNumbers.contains` (typeMembership finite_complex)
+          // via the boxed Element evaluation.
+          guards.push({ k: 'type', wc: wc(v), t: 'complex' });
+          return null;
         case 'Primes':
           // CE's `Primes` is a shell with no membership evaluator; compile to
           // the built-in IsPrime predicate (still fail-closed: fires only on
@@ -257,6 +352,12 @@ export function compileGuards(
           guards.push({ k: 'eval', pred: ['IsPrime', wc(v)] });
           return null;
         default:
+          // Inert set shells (HH): membership guard, dischargeable only via
+          // the Track-3 stored-membership fact path (assume Element(v, HH)).
+          if (INERT_SET_DOMAINS.has(dom)) {
+            guards.push({ k: 'member', wc: wc(v), set: dom });
+            return null;
+          }
           return `unsupported domain "${dom}"`;
       }
     }
@@ -274,16 +375,35 @@ export function compileGuards(
         pushBound(v, dom[2], 'lt', 'le');
         return null;
       }
-      if (
-        op === 'SetMinus' &&
-        dom.length === 3 &&
-        Array.isArray(dom[2]) &&
-        dom[2][0] === 'Set'
-      ) {
+      if (op === 'SetMinus' && dom.length === 3) {
         const err = element(v, dom[1]);
         if (err) return err;
-        for (const excluded of dom[2].slice(1))
-          guards.push({ k: 'ne', lhs: wc(v), rhs: W(excluded) });
+        const excludedSet = dom[2];
+        if (Array.isArray(excludedSet) && excludedSet[0] === 'Set') {
+          // Finite exclusion set: one disequality per element
+          for (const excluded of excludedSet.slice(1))
+            guards.push({ k: 'ne', lhs: wc(v), rhs: W(excluded) });
+          return null;
+        }
+        // Phase 3: non-finite exclusion (NonPositiveIntegers, Interval,
+        // Range, …) → a direct NotElement predicate. Compile-time
+        // decomposition matters: the Track-3 assume side stores a
+        // `NotElement(v, T)` fact when the SetMinus guard is assumed, and
+        // the DIRECT NotElement query discharges by exact fact match —
+        // sidestepping the SetMinus query-decomposition typing gap for
+        // infinite-endpoint Intervals (see fungrim-guards.test.ts,
+        // log/0ba9b2 vs gamma/37a95a).
+        guards.push({
+          k: 'eval',
+          pred: ['NotElement', wc(v), W(excludedSet)],
+        });
+        return null;
+      }
+      if (op === 'Set' || op === 'Union') {
+        // Phase 3: explicit finite sets and unions → membership guard
+        // (decidable for literals via `contains`; for symbols via the
+        // Track-3 stored-membership fact path).
+        guards.push({ k: 'member', wc: wc(v), set: W(dom) });
         return null;
       }
       return `unsupported domain ${JSON.stringify(op)}`;
@@ -310,13 +430,31 @@ export function compileGuards(
     const op = cj[0];
 
     if (op === 'Element' && cj.length === 3) {
+      const partSubject = partOfVariable(cj[1], variables);
       if (typeof cj[1] === 'string' && variables.includes(cj[1])) {
         const err = element(cj[1], cj[2]);
         if (err) return { error: err };
+      } else if (
+        partSubject !== null &&
+        Array.isArray(cj[2]) &&
+        cj[2][0] === 'Interval' &&
+        cj[2].length === 3
+      ) {
+        // Phase 3: Element(Im(z), Interval(a, b)) → part-cmp bounds.
+        // (Part-term *memberships* are not assumable — only part
+        // *inequalities* are, per Track-3 §4.2 — so compile-time
+        // decomposition into inequalities is what makes these dischargeable.)
+        pushPartBound(partSubject.part, partSubject.v, cj[2][1], 'gt', 'ge');
+        pushPartBound(partSubject.part, partSubject.v, cj[2][2], 'lt', 'le');
       } else {
         // Element over a non-variable expression: evaluate-fallback
         guards.push({ k: 'eval', pred: W(cj) });
       }
+    } else if (op === 'NotElement' && cj.length === 3) {
+      // Phase 3: direct NotElement conjunct → NotElement predicate
+      // (literal-decidable via membershipKleene; symbol-decidable via the
+      // Track-3 exclusion-fact exact match).
+      guards.push({ k: 'eval', pred: ['NotElement', W(cj[1]), W(cj[2])] });
     } else if (op === 'NotEqual' && cj.length >= 3) {
       // pairwise distinctness
       for (let i = 1; i < cj.length; i++)
@@ -327,10 +465,29 @@ export function compileGuards(
       for (let i = 1; i < cj.length - 1; i++) {
         const a = cj[i];
         const b = cj[i + 1];
+        const partA = partOfVariable(a, variables);
+        const partB = partOfVariable(b, variables);
         if (typeof a === 'string' && variables.includes(a))
           guards.push({ k: 'cmp', wc: wc(a), op: CMP_OP[op], bound: W(b) });
         else if (typeof b === 'string' && variables.includes(b))
           guards.push({ k: 'cmp', wc: wc(b), op: FLIP[CMP_OP[op]], bound: W(a) });
+        else if (partA !== null)
+          // Phase 3: Greater(Re(z), 0), Less(Abs(q), 1), …
+          guards.push({
+            k: 'part-cmp',
+            wc: wc(partA.v),
+            part: partA.part,
+            op: CMP_OP[op],
+            bound: W(b),
+          });
+        else if (partB !== null)
+          guards.push({
+            k: 'part-cmp',
+            wc: wc(partB.v),
+            part: partB.part,
+            op: FLIP[CMP_OP[op]],
+            bound: W(a),
+          });
         else guards.push({ k: 'eval', pred: [op, W(a), W(b)] });
       }
     } else if (op === 'Equal') {
@@ -339,7 +496,7 @@ export function compileGuards(
       // CE's `Divides` is a shell with no evaluator; Divides(d, n) ⇔ n mod d = 0
       guards.push({ k: 'eval', pred: ['Equal', ['Mod', W(cj[2]), W(cj[1])], 0] });
     } else {
-      // Not, NotElement, Or, quantifiers, … — fail-closed
+      // Not, Or, quantifiers, … — fail-closed
       return { error: `unsupported conjunct "${op}"` };
     }
   }
@@ -350,9 +507,12 @@ export function compileGuards(
 export function guardWildcards(g: GuardSpec): Set<string> {
   const out = new Set<string>();
   if (g.k === 'type') out.add(g.wc);
-  else if (g.k === 'cmp') {
+  else if (g.k === 'cmp' || g.k === 'part-cmp') {
     out.add(g.wc);
     collectWildcards(g.bound, out);
+  } else if (g.k === 'member') {
+    out.add(g.wc);
+    collectWildcards(g.set, out);
   } else if (g.k === 'ne') {
     collectWildcards(g.lhs, out);
     collectWildcards(g.rhs, out);
@@ -383,7 +543,24 @@ export function buildGuardClosures(
 
   return guards.map((g) => {
     switch (g.k) {
-      case 'type':
+      case 'type': {
+        if (g.t === 'complex') {
+          // Fungrim CC = FINITE complex numbers. Literal fast path via the
+          // type lattice; symbols go through the boxed Element evaluation
+          // (mirrors `ComplexNumbers.contains`, and consults the Track-3
+          // type refinements made by `assume(Element(z, ComplexNumbers))`).
+          const pred = boxGuardExpr(['Element', g.wc, 'ComplexNumbers']);
+          return (sub: Sub) => {
+            const v = sub[g.wc];
+            if (v === undefined) return false;
+            if (v.type.matches('finite_complex')) return true;
+            try {
+              return pred.subs(sub).evaluate().json === 'True';
+            } catch {
+              return false;
+            }
+          };
+        }
         return (sub: Sub) => {
           const v = sub[g.wc];
           if (v === undefined) return false;
@@ -391,6 +568,49 @@ export function buildGuardClosures(
           if (g.t === 'real') return v.isReal === true;
           return v.isRational === true;
         };
+      }
+      case 'part-cmp': {
+        // Compare a part extractor of the substituted value: literal
+        // substitutions fold numerically (Re(1+2i) → 1); symbol
+        // substitutions consult the Track-3 part-bound facts
+        // (assume(Re(s) > 1) ⇒ Greater(Re(s), 0) evaluates to True).
+        // Fail-closed: anything but a literal True/False stays blocking.
+        const pred = boxGuardExpr([
+          CMP_TO_OPERATOR[g.op],
+          [PART_TO_OPERATOR[g.part], g.wc],
+          g.bound,
+        ]);
+        return (sub: Sub) => {
+          const v = sub[g.wc];
+          if (v === undefined) return false;
+          try {
+            const inst = pred.subs(sub);
+            const r = inst.evaluate().json;
+            if (r === 'True') return true;
+            if (r === 'False') return false;
+            // Composite constant bounds (2π, 1/e, …) do not fold exactly;
+            // retry numerically. Unknown stays false (fail-closed).
+            return inst.N().json === 'True';
+          } catch {
+            return false;
+          }
+        };
+      }
+      case 'member': {
+        // Membership via the boxed Element evaluation: literals through the
+        // set's `contains` handler; symbols through the Track-3
+        // stored-membership exact-match path (Element(tau, HH) assumed).
+        const pred = boxGuardExpr(['Element', g.wc, g.set]);
+        return (sub: Sub) => {
+          const v = sub[g.wc];
+          if (v === undefined) return false;
+          try {
+            return pred.subs(sub).evaluate().json === 'True';
+          } catch {
+            return false;
+          }
+        };
+      }
       case 'cmp': {
         const bound = boxGuardExpr(g.bound);
         const compare = (
@@ -486,6 +706,25 @@ function isSpecialHeaded(side: MathJSON): boolean {
   return (
     Array.isArray(side) && typeof side[0] === 'string' && !CORE_HEADS.has(side[0])
   );
+}
+
+/** A match of the form `[Head, _w1, _w2, …]` (distinct bare wildcards only):
+ *  such a rule rewrites EVERY occurrence of `Head` its guards admit. */
+export function isBareGenericCall(m: MathJSON): boolean {
+  return (
+    Array.isArray(m) &&
+    typeof m[0] === 'string' &&
+    !m[0].startsWith('_') &&
+    m.length > 1 &&
+    m.slice(1).every((a) => typeof a === 'string' && a.startsWith('_')) &&
+    new Set(m.slice(1)).size === m.length - 1
+  );
+}
+
+/** Number of function-application nodes in a MathJSON tree. */
+function applicationCount(x: MathJSON): number {
+  if (!Array.isArray(x)) return 0;
+  return 1 + x.reduce((n: number, y) => n + applicationCount(y), 0);
 }
 
 export type Orientation = {
@@ -657,6 +896,19 @@ const REAL_CANDIDATES: MathJSON[] = [
   ['Rational', 7, 2],
   5,
   ['Rational', -3, 2],
+];
+
+// Phase 3: complex-typed variables try the real candidates FIRST (preserving
+// the Phase-1 seed search byte-for-byte on the Phase-1 slice), then small
+// exact non-real values for guards that require them (Im(z) bounds, …).
+const COMPLEX_CANDIDATES: MathJSON[] = [
+  ...REAL_CANDIDATES,
+  'ImaginaryUnit',
+  ['Add', 1, 'ImaginaryUnit'],
+  ['Divide', 'ImaginaryUnit', 2],
+  ['Multiply', 2, 'ImaginaryUnit'],
+  ['Add', ['Rational', 1, 2], ['Divide', 'ImaginaryUnit', 2]],
+  ['Subtract', 1, 'ImaginaryUnit'],
 ];
 
 const CMP_TO_OPERATOR: Record<string, string> = {
@@ -835,15 +1087,65 @@ function selfTestScoped(
     const dewild: Record<string, MathJSON> = {};
     for (const v of e.variables) dewild['_' + v] = v;
     for (const g of guards) {
-      if (g.k !== 'cmp') continue;
       try {
-        ce.assume(
-          ce.box([
-            CMP_TO_OPERATOR[g.op],
-            substituteWildcards(g.wc, dewild),
-            substituteWildcards(g.bound, dewild),
-          ] as never)
-        );
+        if (g.k === 'cmp') {
+          ce.assume(
+            ce.box([
+              CMP_TO_OPERATOR[g.op],
+              substituteWildcards(g.wc, dewild),
+              substituteWildcards(g.bound, dewild),
+            ] as never)
+          );
+        } else if (g.k === 'part-cmp') {
+          // Part inequalities must be boxed NON-canonically at assume time:
+          // canonical boxing can collapse the part term (Re(s) → s for an
+          // inferred-real s), destroying the constraint subject (Track-3).
+          ce.assume(
+            ce.box(
+              [
+                CMP_TO_OPERATOR[g.op],
+                [PART_TO_OPERATOR[g.part], substituteWildcards(g.wc, dewild)],
+                substituteWildcards(g.bound, dewild),
+              ] as never,
+              { canonical: false }
+            )
+          );
+        } else if (g.k === 'member') {
+          // Inert-set membership (Element(tau, HH)): for shells with no
+          // `contains` handler the LITERAL path can never decide — the
+          // assumption path (Track-3 stored-membership exact match) is the
+          // self-test channel for these guards, by design.
+          ce.assume(
+            ce.box(
+              [
+                'Element',
+                substituteWildcards(g.wc, dewild),
+                substituteWildcards(g.set, dewild),
+              ] as never,
+              { canonical: false }
+            )
+          );
+        } else if (g.k === 'ne') {
+          // Track-3 disequality facts make isEqual definitively false
+          ce.assume(
+            ce.box(
+              [
+                'NotEqual',
+                substituteWildcards(g.lhs, dewild),
+                substituteWildcards(g.rhs, dewild),
+              ] as never,
+              { canonical: false }
+            )
+          );
+        } else if (Array.isArray(g.pred) && g.pred[0] === 'NotElement') {
+          // Direct NotElement predicates (from SetMinus exclusions and
+          // NotElement conjuncts) are assumable exclusion facts
+          ce.assume(
+            ce.box(substituteWildcards(g.pred, dewild) as never, {
+              canonical: false,
+            })
+          );
+        }
       } catch {
         /* unsupported assumption — the guard check below decides */
       }
@@ -931,7 +1233,11 @@ function findNumericSeed(
   if (vars.length === 0) return {};
 
   const candidates = vars.map((v) =>
-    seedTypes[v] === 'integer' ? INTEGER_CANDIDATES : REAL_CANDIDATES
+    seedTypes[v] === 'integer'
+      ? INTEGER_CANDIDATES
+      : seedTypes[v] === 'complex'
+        ? COMPLEX_CANDIDATES
+        : REAL_CANDIDATES
   );
   const boxed = candidates.map((list) => list.map((c) => ce.box(c as never)));
 
@@ -1137,8 +1443,24 @@ export function compileEntries(
 
     seenUndirected.set(key, e.id);
 
-    // 9. Merge curation overrides (purpose/target), then emit
+    // 9. Merge curation overrides (purpose/target), then emit.
+    //    Definitional-expansion guard (Phase 3): a rule whose match is a
+    //    bare generic call (`ChebyshevT(_n, _x)`, `ModularJ(_tau)`, …)
+    //    rewrites every guard-admitted occurrence of its head. The cost
+    //    model prices special-function heads high, so the machine policy
+    //    can classify "expand the definition into arithmetic" as 'simplify'
+    //    — and on degenerate literal instantiations the runtime cost gate
+    //    lets it shadow curated value rules (ChebyshevT(n, 1) → (1ⁿ+1⁻ⁿ)/2
+    //    instead of 1). Such a rule keeps purpose 'simplify' only if it
+    //    does not structurally grow the expression; otherwise it is exiled
+    //    to 'expand' (reachable via replace(), out of simplify()'s scan).
     let purpose = oriented.purpose;
+    if (
+      purpose === 'simplify' &&
+      isBareGenericCall(matchJson) &&
+      applicationCount(oriented.replace) > applicationCount(matchJson)
+    )
+      purpose = 'expand';
     if (transformAllowlist.has(e.id)) purpose = 'transform';
     if (override?.purpose !== undefined) purpose = override.purpose;
     const target: RuleTarget = override?.target ?? 'simplify';
@@ -1146,8 +1468,7 @@ export function compileEntries(
     const shellRefs = new Set<string>();
     collectSymbols(matchJson, shellRefs);
     collectSymbols(oriented.replace, shellRefs);
-    for (const g of guards)
-      collectSymbols(g.k === 'cmp' ? g.bound : g.k === 'ne' ? [g.lhs, g.rhs] : g.k === 'eval' ? g.pred : null, shellRefs);
+    for (const g of guards) collectSymbols(guardShellPayload(g), shellRefs);
     const shellHeads = [...shellRefs].filter((s) => s in declarations.declarations);
 
     const id = 'fungrim:' + e.id;
@@ -1174,11 +1495,7 @@ export function compileEntries(
   for (const r of rules) {
     collectSymbols(r.match, usedShells);
     collectSymbols(r.replace, usedShells);
-    for (const g of r.guards)
-      collectSymbols(
-        g.k === 'cmp' ? g.bound : g.k === 'ne' ? [g.lhs, g.rhs] : g.k === 'eval' ? g.pred : null,
-        usedShells
-      );
+    for (const g of r.guards) collectSymbols(guardShellPayload(g), usedShells);
   }
   for (const name of Object.keys(declarations.declarations).sort()) {
     if (!usedShells.has(name)) continue;
@@ -1271,7 +1588,7 @@ function main(): void {
     },
     slice: {
       classes: ['specific-value', 'identity'],
-      guardLevels: ['none', 'real-simple'],
+      guardLevels: ['none', 'real-simple', 'complex-domain'],
       entries: slice.length,
     },
     counts: {
@@ -1308,7 +1625,7 @@ function main(): void {
   fs.writeFileSync(reportPath, JSON.stringify(report, undefined, 2) + '\n');
 
   // -- console summary
-  console.log(`Fungrim Phase-1 rule compiler (${elapsed} ms)`);
+  console.log(`Fungrim rule compiler (${elapsed} ms)`);
   console.log(`  slice entries:   ${slice.length}`);
   console.log(`  rules emitted:   ${result.rules.length}`);
   console.log(`  shells declared: ${Object.keys(result.declarations).length}`);

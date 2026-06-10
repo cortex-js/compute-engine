@@ -18,8 +18,10 @@ import '../../utils'; // For snapshot serializers
 //
 // Entries whose guards do NOT discharge are kept (marked
 // `dischargeable: false`) and pinned to their current behavior, with the
-// precise reason documented — the design §7.4 honesty list, plus one
-// sets.ts typing gap discovered in P4 (see `log/0ba9b2`).
+// precise reason documented — the design §7.4 honesty list. (The sets.ts
+// typing gap discovered in P4 — `log/0ba9b2`, intervals with an infinite
+// endpoint — has since been fixed; the entry is now in the dischargeable
+// list, as is `atan/12765e` via the verbatim compound-subject fact match.)
 //
 // Notes on the corpus encoding:
 // - `HH` (upper half-plane) is NOT desugared by the translator: entries
@@ -252,17 +254,12 @@ const GUARDS: GuardCase[] = [
     dischargeable: true,
   },
 
-  //
-  // ── Not dischargeable: the §7.4 residue, pinned with reasons ────────────
-  //
   {
-    // ℂ ∖ Interval(Open(-∞), 0): the conjunct IS assumable (a NotElement
-    // fact is stored, see gamma/37a95a), but the *query-side* SetMinus
-    // decomposition cannot process the exclusion: an `Interval` with an
-    // infinite endpoint has type `unknown` and `isCollection === false`,
-    // so membershipKleene's SetMinus branch falls back to treating it as
-    // a scalar (notEqualKleene → undefined). sets.ts typing gap found in
-    // P4, distinct from the §7.4 list.
+    // ℂ ∖ Interval(Open(-∞), 0): the branch-cut SetMinus shape. An
+    // `Interval` with an infinite endpoint is now well-typed (`set<real>`,
+    // a collection), so the query-side SetMinus decomposition recurses on
+    // the exclusion and matches the stored NotElement fact. (Was pinned
+    // non-dischargeable as the P4 sets.ts typing gap.)
     entry: 'log/0ba9b2',
     guard: [
       'Element',
@@ -274,15 +271,13 @@ const GUARDS: GuardCase[] = [
       ],
     ],
     assume: ['ok'],
-    dischargeable: false,
-    reason:
-      'Interval with infinite endpoint is not typed as a collection; ' +
-      'SetMinus query decomposition cannot match the stored NotElement fact',
+    dischargeable: true,
   },
   {
-    // NotElement with a *compound* lhs (z·i): stored opaque; the
-    // membership fact index is keyed by bare symbol only (§7.4: parts of
-    // compound expressions are stored but never decide).
+    // NotElement with a *compound* lhs (z·i): the symbol-keyed fact index
+    // does not apply, but the stored fact is now matched verbatim against
+    // the assumptions DB by membershipKleene's compound-subject scan.
+    // (Was pinned non-dischargeable under §7.4.)
     entry: 'atan/12765e',
     guard: [
       'And',
@@ -294,11 +289,12 @@ const GUARDS: GuardCase[] = [
       ],
     ],
     assume: ['ok', 'ok'],
-    dischargeable: false,
-    reason:
-      'NotElement(z*i, ...) has a compound subject; membership facts are ' +
-      'keyed by bare symbols (§7.4)',
+    dischargeable: true,
   },
+
+  //
+  // ── Not dischargeable: the §7.4 residue, pinned with reasons ────────────
+  //
   {
     // NotEqual with a compound lhs (a function application): stored
     // verbatim, but eq() cannot discharge it (§7.4).

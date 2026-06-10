@@ -1,112 +1,129 @@
 {
   "generator": "scripts/fungrim/compile-rules.ts",
-  "sliceEntries": 707,
-  "emitted": 558,
+  "sliceEntries": 1598,
+  "emitted": 1275,
   "ledger": {
-    "box-error": 4,
-    "compat-signature": 23,
-    "duplicate-undirected": 2,
-    "guard-uncompilable": 5,
+    "box-error": 16,
+    "compat-signature": 42,
+    "curated-exclude": 56,
+    "duplicate-undirected": 14,
+    "guard-uncompilable": 50,
     "lhs-not-value-form": 94,
-    "no-fire": 15,
-    "not-equation": 6
+    "no-fire": 43,
+    "not-equation": 8
   },
   "byPurpose": {
-    "expand": 17,
-    "simplify": 541
+    "expand": 104,
+    "simplify": 1171
   },
   "byClass": {
-    "identity": 239,
-    "specific-value": 319
+    "identity": 951,
+    "specific-value": 324
   },
   "byTarget": {
-    "simplify": 558
+    "simplify": 1275
   },
   "sampleKinds": {
-    "numeric": 32,
-    "symbolic": 526
+    "numeric": 44,
+    "symbolic": 1231
   },
   "headBuckets": {
-    "Multiply": 41,
-    "CarlsonRJ": 31,
-    "Add": 28,
-    "JacobiTheta": 27,
+    "Multiply": 235,
+    "Add": 173,
+    "Divide": 91,
+    "JacobiTheta": 62,
+    "Apply": 53,
+    "Which": 44,
+    "CarlsonRJ": 36,
+    "Negate": 33,
+    "CarlsonRF": 25,
     "GCD": 24,
-    "Divide": 21,
-    "Which": 20,
-    "CarlsonRF": 19,
-    "CarlsonRD": 17,
-    "HurwitzZeta": 17,
-    "Digamma": 13,
+    "CarlsonRD": 20,
+    "HurwitzZeta": 20,
+    "Power": 20,
+    "Sin": 19,
+    "AGM": 16,
+    "Arctan": 16,
+    "IncompleteEllipticE": 16,
+    "IncompleteEllipticF": 16,
+    "ModularJ": 16,
+    "CarlsonRG": 14,
+    "Digamma": 14,
+    "ChebyshevT": 13,
     "LCM": 13,
-    "Arctan": 12,
-    "ModularJ": 12,
-    "DedekindEta": 11,
-    "IncompleteEllipticE": 11,
-    "CarlsonRC": 10,
-    "CarlsonRG": 10,
-    "IncompleteEllipticF": 10,
-    "EllipticK": 9,
-    "Sin": 9,
-    "Power": 8,
-    "Sqrt": 8,
+    "CarlsonRC": 12,
+    "DedekindEta": 12,
+    "EllipticK": 12,
+    "ModularLambda": 12,
+    "Sqrt": 12,
+    "Imaginary": 9,
+    "Abs": 8,
+    "Argument": 8,
+    "ChebyshevU": 8,
+    "EisensteinE": 8,
+    "EllipticPi": 8,
+    "Hypergeometric2F1": 8,
+    "LegendrePolynomial": 8,
+    "Sinc": 8,
+    "EisensteinG": 7,
+    "Gamma": 7,
     "SloaneA": 7,
-    "AGM": 6,
-    "EisensteinG": 6,
-    "EllipticPi": 6,
-    "Imaginary": 6,
+    "Count": 6,
     "LambertW": 6,
     "NPartition": 6,
+    "Set": 6,
     "Tuple": 6,
-    "Abs": 5,
-    "Argument": 5,
-    "ChebyshevU": 5,
+    "BarnesG": 5,
     "Conjugate": 5,
-    "Count": 5,
+    "DirichletL": 5,
     "EllipticE": 5,
-    "Gamma": 5,
-    "ModularLambda": 5,
     "MultiZetaValue": 5,
-    "Negate": 5,
-    "Sinc": 5,
-    "ChebyshevT": 4,
-    "EisensteinE": 4,
+    "FallingFactorial": 4,
+    "Ln": 4,
     "Min": 4,
-    "Set": 4,
-    "Apply": 3,
-    "BarnesG": 3,
+    "Real": 4,
     "Binomial": 3,
-    "DirichletL": 3,
     "Fibonacci": 3,
-    "LegendrePolynomial": 3,
-    "Ln": 3,
-    "Real": 3,
+    "RisingFactorial": 3,
     "StieltjesGamma": 3,
     "Totient": 3,
     "Arctan2": 2,
     "ArgMin": 2,
+    "BernoulliPolynomial": 2,
+    "Cos": 2,
+    "Factorial": 2,
+    "IncompleteBeta": 2,
     "KeiperLiLambda": 2,
     "Max": 2,
+    "Sign": 2,
     "XGCD": 2,
+    "Zeta": 2,
+    "AGMSequence": 1,
+    "Arccot": 1,
+    "Arcsin": 1,
     "ArgMax": 1,
     "ArgMaxUnique": 1,
     "BernoulliB": 1,
-    "BernoulliPolynomial": 1,
+    "BesselI": 1,
+    "Beta": 1,
+    "Cosh": 1,
     "DedekindEtaEpsilon": 1,
-    "Factorial": 1,
-    "FallingFactorial": 1,
+    "Erf": 1,
+    "Erfi": 1,
     "Floor": 1,
-    "Hypergeometric2F1": 1,
+    "Hypergeometric0F1": 1,
+    "Hypergeometric2F0": 1,
+    "IncompleteEllipticPi": 1,
     "Matrix": 1,
     "PolyLog": 1,
-    "RisingFactorial": 1,
     "SequenceLimitSuperior": 1,
-    "Sign": 1,
     "Spectrum": 1,
+    "Tan": 1,
     "UniqueZero": 1,
-    "Zeta": 1
+    "WeierstrassP": 1,
+    "WeierstrassSigma": 1
   },
-  "declaredShells": 71,
+  "declaredShells": 107,
   "solveSeeds": [
     "1f026d",
     "296627",
@@ -117,6 +134,16 @@
   ],
   "skips": [
     {
+      "id": "00c331",
+      "reason": "curated-exclude",
+      "detail": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    {
+      "id": "01af55",
+      "reason": "curated-exclude",
+      "detail": "Phase 3 triage: self-test fired-vs-expected comparison is nondeterministic — the result settles in a different canonical shape and the isEqual fallback random-probes deep CoulombF/G/Sigma shell expressions, flipping across runs (breaks artifact byte-determinism). Excluded pending shell-aware structural comparison."
+    },
+    {
       "id": "030560",
       "reason": "lhs-not-value-form",
       "detail": "symbol"
@@ -125,6 +152,11 @@
       "id": "033c51",
       "reason": "lhs-not-value-form",
       "detail": "symbol"
+    },
+    {
+      "id": "039051",
+      "reason": "compat-signature",
+      "detail": "2-arg LambertW/Digamma"
     },
     {
       "id": "03aca0",
@@ -147,14 +179,24 @@
       "detail": "symbol"
     },
     {
+      "id": "06f229",
+      "reason": "guard-uncompilable",
+      "detail": "unsupported conjunct \"Or\""
+    },
+    {
+      "id": "073e1a",
+      "reason": "guard-uncompilable",
+      "detail": "unsupported conjunct \"Or\""
+    },
+    {
       "id": "07731b",
       "reason": "no-fire",
       "detail": "rule did not fire"
     },
     {
-      "id": "078869",
+      "id": "07a654",
       "reason": "no-fire",
-      "detail": "rule did not fire"
+      "detail": "no seed satisfying the guards"
     },
     {
       "id": "07e35f",
@@ -162,9 +204,14 @@
       "detail": "symbol"
     },
     {
-      "id": "0abbe1",
-      "reason": "no-fire",
-      "detail": "rule did not fire"
+      "id": "081188",
+      "reason": "box-error",
+      "detail": "invalid lhs: Binomial(Error(ErrorCode(\"incompatible-type\", \"integer\", \"complex\")), k + 1)"
+    },
+    {
+      "id": "08bd37",
+      "reason": "guard-uncompilable",
+      "detail": "unsupported conjunct \"Or\""
     },
     {
       "id": "0bd544",
@@ -177,9 +224,49 @@
       "detail": "symbol"
     },
     {
+      "id": "0cc301",
+      "reason": "guard-uncompilable",
+      "detail": "unsupported conjunct \"Or\""
+    },
+    {
+      "id": "0cf60d",
+      "reason": "guard-uncompilable",
+      "detail": "unsupported conjunct \"Or\""
+    },
+    {
+      "id": "0d8e03",
+      "reason": "no-fire",
+      "detail": "rule did not fire"
+    },
+    {
       "id": "0e2425",
       "reason": "compat-signature",
       "detail": "no-fire: fired but produced Matrix([[Fibonacci(_n + 1)],[Fibonacci(_n)]]) ≠ Matrix([[Fibonacci(n + 1)],[Fibonacci(n)]])"
+    },
+    {
+      "id": "0ed026",
+      "reason": "guard-uncompilable",
+      "detail": "unsupported conjunct \"Or\""
+    },
+    {
+      "id": "10cdf4",
+      "reason": "no-fire",
+      "detail": "no seed satisfying the guards"
+    },
+    {
+      "id": "12765e",
+      "reason": "curated-exclude",
+      "detail": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    {
+      "id": "12ce84",
+      "reason": "guard-uncompilable",
+      "detail": "unsupported conjunct \"Or\""
+    },
+    {
+      "id": "13895b",
+      "reason": "curated-exclude",
+      "detail": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
     },
     {
       "id": "1448e3",
@@ -187,14 +274,19 @@
       "detail": "symbol"
     },
     {
-      "id": "175b7a",
-      "reason": "no-fire",
-      "detail": "rule did not fire"
+      "id": "14f8c2",
+      "reason": "guard-uncompilable",
+      "detail": "unsupported conjunct \"Not\""
     },
     {
-      "id": "1bbdaf",
-      "reason": "no-fire",
-      "detail": "rule did not fire"
+      "id": "1d3fd7",
+      "reason": "guard-uncompilable",
+      "detail": "unsupported conjunct \"Or\""
+    },
+    {
+      "id": "1d5e92",
+      "reason": "box-error",
+      "detail": "invalid lhs: Binomial(Error(ErrorCode(\"incompatible-type\", \"integer\", \"complex\")), k)"
     },
     {
       "id": "1d65c2",
@@ -202,14 +294,59 @@
       "detail": "symbol"
     },
     {
+      "id": "1d730a",
+      "reason": "guard-uncompilable",
+      "detail": "unsupported conjunct \"Not\""
+    },
+    {
+      "id": "1df686",
+      "reason": "box-error",
+      "detail": "invalid lhs: Binomial(Error(ErrorCode(\"incompatible-type\", \"integer\", \"complex\")), 2)"
+    },
+    {
+      "id": "1fc63b",
+      "reason": "compat-signature",
+      "detail": "2-arg LambertW/Digamma"
+    },
+    {
+      "id": "20828c",
+      "reason": "curated-exclude",
+      "detail": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    {
+      "id": "209fc8",
+      "reason": "box-error",
+      "detail": "invalid lhs: Binomial(Error(ErrorCode(\"incompatible-type\", \"integer\", \"complex\")), k + 1)"
+    },
+    {
+      "id": "21f4f9",
+      "reason": "compat-signature",
+      "detail": "2-arg LambertW/Digamma"
+    },
+    {
       "id": "2251c6",
       "reason": "compat-signature",
       "detail": "2-arg LambertW/Digamma"
     },
     {
+      "id": "22ee07",
+      "reason": "box-error",
+      "detail": "invalid lhs: Binomial(Error(ErrorCode(\"incompatible-type\", \"integer\", \"complex\")), k)"
+    },
+    {
       "id": "2371b9",
       "reason": "lhs-not-value-form",
       "detail": "symbol"
+    },
+    {
+      "id": "24c9e9",
+      "reason": "compat-signature",
+      "detail": "2-arg LambertW/Digamma"
+    },
+    {
+      "id": "268c9e",
+      "reason": "no-fire",
+      "detail": "rule did not fire"
     },
     {
       "id": "2744d4",
@@ -220,6 +357,11 @@
       "id": "27586f",
       "reason": "lhs-not-value-form",
       "detail": "symbol"
+    },
+    {
+      "id": "27bc34",
+      "reason": "curated-exclude",
+      "detail": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
     },
     {
       "id": "27ca8d",
@@ -237,6 +379,16 @@
       "detail": "symbol"
     },
     {
+      "id": "2a11ab",
+      "reason": "curated-exclude",
+      "detail": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    {
+      "id": "2a2f18",
+      "reason": "curated-exclude",
+      "detail": "Phase 3 triage: nondeterministic self-test (random-probe isEqual over Coulomb shell expressions) — see 01af55."
+    },
+    {
       "id": "2a48bd",
       "reason": "no-fire",
       "detail": "no seed satisfying the guards"
@@ -252,6 +404,26 @@
       "detail": "symbol"
     },
     {
+      "id": "2f4f74",
+      "reason": "no-fire",
+      "detail": "rule did not fire"
+    },
+    {
+      "id": "2fec14",
+      "reason": "curated-exclude",
+      "detail": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    {
+      "id": "304559",
+      "reason": "curated-exclude",
+      "detail": "Phase 3 triage: nondeterministic self-test (random-probe isEqual over Coulomb shell expressions) — see 01af55."
+    },
+    {
+      "id": "30b67b",
+      "reason": "guard-uncompilable",
+      "detail": "unsupported conjunct \"Or\""
+    },
+    {
       "id": "31adf6",
       "reason": "lhs-not-value-form",
       "detail": "symbol"
@@ -260,6 +432,41 @@
       "id": "33139b",
       "reason": "box-error",
       "detail": "invalid lhs: SequenceLimitInferior((n) |-> Totient(Error(ErrorCode(\"incompatible-type\", \"integer\", \"number\"))) / Totient(Error(ErrorCode(\"incompatible-type\", \"integer\", \"number\"))), +oo)"
+    },
+    {
+      "id": "348b26",
+      "reason": "no-fire",
+      "detail": "no seed satisfying the guards"
+    },
+    {
+      "id": "34fafa",
+      "reason": "compat-signature",
+      "detail": "2-arg LambertW/Digamma"
+    },
+    {
+      "id": "361f61",
+      "reason": "compat-signature",
+      "detail": "2-arg LambertW/Digamma"
+    },
+    {
+      "id": "37a95a",
+      "reason": "curated-exclude",
+      "detail": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    {
+      "id": "37e644",
+      "reason": "curated-exclude",
+      "detail": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    {
+      "id": "37ffb7",
+      "reason": "curated-exclude",
+      "detail": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    {
+      "id": "38fa65",
+      "reason": "curated-exclude",
+      "detail": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
     },
     {
       "id": "3a9c67",
@@ -272,9 +479,24 @@
       "detail": "symbol"
     },
     {
+      "id": "3d6d7e",
+      "reason": "curated-exclude",
+      "detail": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    {
       "id": "3da9b7",
       "reason": "lhs-not-value-form",
       "detail": "Apply"
+    },
+    {
+      "id": "3e71f4",
+      "reason": "curated-exclude",
+      "detail": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    {
+      "id": "3ea11b",
+      "reason": "no-fire",
+      "detail": "rule did not fire"
     },
     {
       "id": "3fc797",
@@ -292,6 +514,16 @@
       "detail": "symbol"
     },
     {
+      "id": "409873",
+      "reason": "duplicate-undirected",
+      "detail": "same equality as 3dd30a"
+    },
+    {
+      "id": "42c7f1",
+      "reason": "curated-exclude",
+      "detail": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    {
       "id": "42d727",
       "reason": "lhs-not-value-form",
       "detail": "symbol"
@@ -300,6 +532,11 @@
       "id": "44ad09",
       "reason": "lhs-not-value-form",
       "detail": "Set"
+    },
+    {
+      "id": "47cf5d",
+      "reason": "guard-uncompilable",
+      "detail": "unsupported conjunct \"Or\""
     },
     {
       "id": "487e35",
@@ -332,19 +569,34 @@
       "detail": "symbol"
     },
     {
-      "id": "5174ea",
+      "id": "4eac3f",
+      "reason": "curated-exclude",
+      "detail": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    {
+      "id": "4fb391",
       "reason": "no-fire",
-      "detail": "fired but produced (sqrt(2) * NaN * pi^(3/2)) / Gamma(1/4)^2 ≠ (sqrt(2) * NaN * pi^(3/2)) / Gamma(1/4)^2"
+      "detail": "rule did not fire"
+    },
+    {
+      "id": "500c0a",
+      "reason": "curated-exclude",
+      "detail": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    {
+      "id": "503d4d",
+      "reason": "no-fire",
+      "detail": "rule did not fire"
+    },
+    {
+      "id": "504717",
+      "reason": "curated-exclude",
+      "detail": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
     },
     {
       "id": "5278da",
       "reason": "lhs-not-value-form",
       "detail": "symbol"
-    },
-    {
-      "id": "541e2e",
-      "reason": "guard-uncompilable",
-      "detail": "unsupported conjunct \"NotElement\""
     },
     {
       "id": "54c80d",
@@ -357,9 +609,19 @@
       "detail": "Set"
     },
     {
+      "id": "56d4ff",
+      "reason": "box-error",
+      "detail": "invalid lhs: Binomial(Error(ErrorCode(\"incompatible-type\", \"integer\", \"complex\")), k)"
+    },
+    {
       "id": "5706ab",
       "reason": "lhs-not-value-form",
       "detail": "Apply"
+    },
+    {
+      "id": "57af50",
+      "reason": "guard-uncompilable",
+      "detail": "unsupported conjunct \"Or\""
     },
     {
       "id": "590136",
@@ -377,9 +639,9 @@
       "detail": "2-arg LambertW/Digamma"
     },
     {
-      "id": "5a11eb",
-      "reason": "guard-uncompilable",
-      "detail": "unsupported conjunct \"NotElement\""
+      "id": "5a8f57",
+      "reason": "curated-exclude",
+      "detail": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
     },
     {
       "id": "5aad5c",
@@ -387,9 +649,34 @@
       "detail": "same equality as 499cfc"
     },
     {
+      "id": "5b85bf",
+      "reason": "box-error",
+      "detail": "invalid lhs: Binomial(Error(ErrorCode(\"incompatible-type\", \"integer\", \"complex\")), 1)"
+    },
+    {
       "id": "5ce30b",
       "reason": "compat-signature",
       "detail": "2-arg LambertW/Digamma"
+    },
+    {
+      "id": "5db5f2",
+      "reason": "compat-signature",
+      "detail": "2-arg LambertW/Digamma"
+    },
+    {
+      "id": "5ec9c0",
+      "reason": "guard-uncompilable",
+      "detail": "unsupported conjunct \"Or\""
+    },
+    {
+      "id": "61d8f3",
+      "reason": "no-fire",
+      "detail": "no seed satisfying the guards"
+    },
+    {
+      "id": "634687",
+      "reason": "no-fire",
+      "detail": "rule did not fire"
     },
     {
       "id": "63ba30",
@@ -397,14 +684,19 @@
       "detail": "symbol"
     },
     {
+      "id": "63d11e",
+      "reason": "duplicate-undirected",
+      "detail": "same equality as 61f98d"
+    },
+    {
       "id": "646745",
       "reason": "no-fire",
       "detail": "rule did not fire"
     },
     {
-      "id": "6572c5",
-      "reason": "no-fire",
-      "detail": "rule did not fire"
+      "id": "649dc0",
+      "reason": "guard-uncompilable",
+      "detail": "unsupported conjunct \"Or\""
     },
     {
       "id": "67bb53",
@@ -412,9 +704,29 @@
       "detail": "symbol"
     },
     {
-      "id": "69d0a3",
+      "id": "6880d0",
+      "reason": "guard-uncompilable",
+      "detail": "unsupported conjunct \"Or\""
+    },
+    {
+      "id": "69e5fb",
+      "reason": "guard-uncompilable",
+      "detail": "unsupported conjunct \"Or\""
+    },
+    {
+      "id": "6b8963",
+      "reason": "guard-uncompilable",
+      "detail": "unsupported conjunct \"Or\""
+    },
+    {
+      "id": "6bcfa6",
       "reason": "no-fire",
-      "detail": "fired but produced (sqrt(2) * NaN * pi^(3/2)) / Gamma(1/4)^2 ≠ (sqrt(2) * NaN * pi^(3/2)) / Gamma(1/4)^2"
+      "detail": "no seed satisfying the guards"
+    },
+    {
+      "id": "6d0a95",
+      "reason": "curated-exclude",
+      "detail": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
     },
     {
       "id": "6d2709",
@@ -422,9 +734,44 @@
       "detail": "symbol"
     },
     {
+      "id": "6d936e",
+      "reason": "compat-signature",
+      "detail": "2-arg LambertW/Digamma"
+    },
+    {
+      "id": "6db9fc",
+      "reason": "compat-signature",
+      "detail": "2-arg LambertW/Digamma"
+    },
+    {
+      "id": "6e1f13",
+      "reason": "box-error",
+      "detail": "invalid lhs: Binomial(Error(ErrorCode(\"incompatible-type\", \"integer\", \"complex\")), k + 1)"
+    },
+    {
       "id": "6ed553",
       "reason": "lhs-not-value-form",
       "detail": "symbol"
+    },
+    {
+      "id": "6f8e14",
+      "reason": "curated-exclude",
+      "detail": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    {
+      "id": "713966",
+      "reason": "curated-exclude",
+      "detail": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    {
+      "id": "7189d6",
+      "reason": "guard-uncompilable",
+      "detail": "unsupported conjunct \"Or\""
+    },
+    {
+      "id": "71a0ff",
+      "reason": "curated-exclude",
+      "detail": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
     },
     {
       "id": "722241",
@@ -432,9 +779,44 @@
       "detail": "symbol"
     },
     {
+      "id": "72b6ca",
+      "reason": "compat-signature",
+      "detail": "2-arg LambertW/Digamma"
+    },
+    {
       "id": "72cef9",
       "reason": "lhs-not-value-form",
       "detail": "symbol"
+    },
+    {
+      "id": "72db94",
+      "reason": "box-error",
+      "detail": "invalid rhs: Which(Element(-b, Range(0, n - 1)), ~oo, \"True\", 1 / (n * Binomial(Error(ErrorCode(\"incompatible-type\", \"integer\", \"number\")), n)))"
+    },
+    {
+      "id": "7314c4",
+      "reason": "curated-exclude",
+      "detail": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    {
+      "id": "73b76c",
+      "reason": "guard-uncompilable",
+      "detail": "unsupported conjunct \"Or\""
+    },
+    {
+      "id": "74274a",
+      "reason": "curated-exclude",
+      "detail": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    {
+      "id": "75e141",
+      "reason": "guard-uncompilable",
+      "detail": "unsupported conjunct \"Or\""
+    },
+    {
+      "id": "7609c8",
+      "reason": "guard-uncompilable",
+      "detail": "unsupported conjunct \"Or\""
     },
     {
       "id": "769f6e",
@@ -447,14 +829,54 @@
       "detail": "symbol"
     },
     {
+      "id": "781eae",
+      "reason": "guard-uncompilable",
+      "detail": "unsupported conjunct \"Or\""
+    },
+    {
+      "id": "785668",
+      "reason": "duplicate-undirected",
+      "detail": "same equality as 563d18"
+    },
+    {
       "id": "78c19c",
       "reason": "compat-signature",
       "detail": "2-arg LambertW/Digamma"
     },
     {
+      "id": "791c44",
+      "reason": "guard-uncompilable",
+      "detail": "unsupported conjunct \"Or\""
+    },
+    {
+      "id": "792f7b",
+      "reason": "no-fire",
+      "detail": "rule did not fire"
+    },
+    {
+      "id": "7b5755",
+      "reason": "guard-uncompilable",
+      "detail": "unsupported conjunct \"Or\""
+    },
+    {
       "id": "7ce79e",
       "reason": "lhs-not-value-form",
       "detail": "symbol"
+    },
+    {
+      "id": "7d559c",
+      "reason": "duplicate-undirected",
+      "detail": "same equality as 5d41b1"
+    },
+    {
+      "id": "7ded8f",
+      "reason": "curated-exclude",
+      "detail": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    {
+      "id": "8027e8",
+      "reason": "guard-uncompilable",
+      "detail": "unsupported conjunct \"Or\""
     },
     {
       "id": "807c7d",
@@ -492,9 +914,24 @@
       "detail": "symbol"
     },
     {
+      "id": "83abff",
+      "reason": "curated-exclude",
+      "detail": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    {
+      "id": "84196a",
+      "reason": "compat-signature",
+      "detail": "2-arg LambertW/Digamma"
+    },
+    {
       "id": "859856",
       "reason": "lhs-not-value-form",
       "detail": "symbol"
+    },
+    {
+      "id": "86bc7d",
+      "reason": "guard-uncompilable",
+      "detail": "unsupported conjunct \"Or\""
     },
     {
       "id": "86fcf1",
@@ -502,14 +939,59 @@
       "detail": "Equal"
     },
     {
+      "id": "88168b",
+      "reason": "compat-signature",
+      "detail": "2-arg LambertW/Digamma"
+    },
+    {
+      "id": "8c96a5",
+      "reason": "curated-exclude",
+      "detail": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    {
+      "id": "8d304b",
+      "reason": "guard-uncompilable",
+      "detail": "unsupported conjunct \"Or\""
+    },
+    {
+      "id": "8d486c",
+      "reason": "compat-signature",
+      "detail": "2-arg LambertW/Digamma"
+    },
+    {
+      "id": "8e5c81",
+      "reason": "curated-exclude",
+      "detail": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    {
+      "id": "8e80c6",
+      "reason": "curated-exclude",
+      "detail": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    {
       "id": "8ee7c9",
       "reason": "lhs-not-value-form",
       "detail": "symbol"
     },
     {
+      "id": "8f71cb",
+      "reason": "guard-uncompilable",
+      "detail": "unsupported conjunct \"Or\""
+    },
+    {
       "id": "8fab22",
       "reason": "lhs-not-value-form",
       "detail": "symbol"
+    },
+    {
+      "id": "901934",
+      "reason": "duplicate-undirected",
+      "detail": "same equality as 055b0a"
+    },
+    {
+      "id": "90ac58",
+      "reason": "curated-exclude",
+      "detail": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
     },
     {
       "id": "90b26f",
@@ -542,14 +1024,54 @@
       "detail": "2-arg LambertW/Digamma"
     },
     {
+      "id": "927e6e",
+      "reason": "guard-uncompilable",
+      "detail": "unsupported conjunct \"Or\""
+    },
+    {
+      "id": "936694",
+      "reason": "curated-exclude",
+      "detail": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    {
       "id": "95c04c",
       "reason": "not-equation",
       "detail": "EqualNearestDecimal"
     },
     {
+      "id": "95e270",
+      "reason": "guard-uncompilable",
+      "detail": "unsupported conjunct \"Or\""
+    },
+    {
+      "id": "95e561",
+      "reason": "no-fire",
+      "detail": "rule did not fire"
+    },
+    {
+      "id": "95f771",
+      "reason": "curated-exclude",
+      "detail": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    {
       "id": "9758ac",
       "reason": "lhs-not-value-form",
       "detail": "symbol"
+    },
+    {
+      "id": "97b736",
+      "reason": "no-fire",
+      "detail": "rule did not fire"
+    },
+    {
+      "id": "984d9c",
+      "reason": "no-fire",
+      "detail": "no seed satisfying the guards"
+    },
+    {
+      "id": "988310",
+      "reason": "box-error",
+      "detail": "invalid lhs: Binomial(Error(ErrorCode(\"incompatible-type\", \"integer\", \"complex\")), 0)"
     },
     {
       "id": "98a765",
@@ -567,9 +1089,29 @@
       "detail": "rule did not fire"
     },
     {
+      "id": "9ad254",
+      "reason": "no-fire",
+      "detail": "rule did not fire"
+    },
+    {
+      "id": "9b2f38",
+      "reason": "no-fire",
+      "detail": "rule did not fire"
+    },
+    {
       "id": "9d26d2",
       "reason": "lhs-not-value-form",
       "detail": "Set"
+    },
+    {
+      "id": "9d66de",
+      "reason": "guard-uncompilable",
+      "detail": "unsupported conjunct \"Or\""
+    },
+    {
+      "id": "9d98f8",
+      "reason": "no-fire",
+      "detail": "rule did not fire"
     },
     {
       "id": "9e9922",
@@ -577,9 +1119,14 @@
       "detail": "symbol"
     },
     {
-      "id": "a044e1",
+      "id": "9ee737",
+      "reason": "compat-signature",
+      "detail": "2-arg LambertW/Digamma"
+    },
+    {
+      "id": "a020e9",
       "reason": "guard-uncompilable",
-      "detail": "unsupported conjunct \"NotElement\""
+      "detail": "unsupported conjunct \"Not\""
     },
     {
       "id": "a172c7",
@@ -587,9 +1134,39 @@
       "detail": "2-arg LambertW/Digamma"
     },
     {
+      "id": "a203e9",
+      "reason": "curated-exclude",
+      "detail": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    {
+      "id": "a222ed",
+      "reason": "curated-exclude",
+      "detail": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    {
+      "id": "a249f6",
+      "reason": "no-fire",
+      "detail": "rule did not fire"
+    },
+    {
+      "id": "a2af66",
+      "reason": "guard-uncompilable",
+      "detail": "unsupported conjunct \"Or\""
+    },
+    {
       "id": "a4ac32",
       "reason": "not-equation",
       "detail": "RealIndefiniteIntegralEqual"
+    },
+    {
+      "id": "a4cc5a",
+      "reason": "curated-exclude",
+      "detail": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    {
+      "id": "a51a4b",
+      "reason": "curated-exclude",
+      "detail": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
     },
     {
       "id": "a54fb0",
@@ -612,9 +1189,24 @@
       "detail": "symbol"
     },
     {
+      "id": "a7dbf6",
+      "reason": "box-error",
+      "detail": "invalid rhs: Which(Element(b, Range(1, n)), (-1)^b / (b * Binomial(n, Error(ErrorCode(\"incompatible-type\", \"integer\", \"complex\")))), \"True\", ~oo)"
+    },
+    {
       "id": "a8657e",
       "reason": "lhs-not-value-form",
       "detail": "symbol"
+    },
+    {
+      "id": "a891da",
+      "reason": "curated-exclude",
+      "detail": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    {
+      "id": "aa15f0",
+      "reason": "no-fire",
+      "detail": "no seed satisfying the guards"
     },
     {
       "id": "acfc1f",
@@ -622,14 +1214,49 @@
       "detail": " Invalid rule fungrim:acfc1f | the match expression is not valid: SequenceLimitInferior((n) |-> (ln(ln(n)) * Totient(Error(ErrorCode(\"incompatible-type\", \"integ"
     },
     {
+      "id": "ad8df6",
+      "reason": "no-fire",
+      "detail": "no seed satisfying the guards"
+    },
+    {
+      "id": "ad9caa",
+      "reason": "no-fire",
+      "detail": "rule did not fire"
+    },
+    {
+      "id": "afabeb",
+      "reason": "guard-uncompilable",
+      "detail": "unsupported conjunct \"Or\""
+    },
+    {
       "id": "b1357b",
       "reason": "lhs-not-value-form",
       "detail": "symbol"
     },
     {
+      "id": "b25089",
+      "reason": "curated-exclude",
+      "detail": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    {
+      "id": "b2cd79",
+      "reason": "guard-uncompilable",
+      "detail": "unsupported conjunct \"Or\""
+    },
+    {
       "id": "b31fd2",
       "reason": "compat-signature",
       "detail": "2-arg LambertW/Digamma"
+    },
+    {
+      "id": "b4a735",
+      "reason": "curated-exclude",
+      "detail": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    {
+      "id": "b6d600",
+      "reason": "no-fire",
+      "detail": "rule did not fire"
     },
     {
       "id": "b89166",
@@ -647,14 +1274,44 @@
       "detail": "symbol"
     },
     {
+      "id": "bb2d01",
+      "reason": "duplicate-undirected",
+      "detail": "same equality as b3fc6d"
+    },
+    {
+      "id": "bb5d67",
+      "reason": "guard-uncompilable",
+      "detail": "unsupported conjunct \"Or\""
+    },
+    {
       "id": "bb88c8",
       "reason": "compat-signature",
       "detail": "2-arg LambertW/Digamma"
     },
     {
+      "id": "bba4ec",
+      "reason": "compat-signature",
+      "detail": "2-arg LambertW/Digamma"
+    },
+    {
+      "id": "bcdfc6",
+      "reason": "guard-uncompilable",
+      "detail": "unsupported conjunct \"Or\""
+    },
+    {
       "id": "bd3faa",
       "reason": "lhs-not-value-form",
       "detail": "symbol"
+    },
+    {
+      "id": "bed7ee",
+      "reason": "guard-uncompilable",
+      "detail": "unsupported conjunct \"Or\""
+    },
+    {
+      "id": "c0dea0",
+      "reason": "guard-uncompilable",
+      "detail": "unsupported conjunct \"Or\""
     },
     {
       "id": "c19cd6",
@@ -667,9 +1324,39 @@
       "detail": "symbol"
     },
     {
+      "id": "c58f46",
+      "reason": "curated-exclude",
+      "detail": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    {
+      "id": "c687d6",
+      "reason": "compat-signature",
+      "detail": "2-arg LambertW/Digamma"
+    },
+    {
+      "id": "c77f9a",
+      "reason": "not-equation",
+      "detail": "ComplexIndefiniteIntegralEqual"
+    },
+    {
+      "id": "c7f7a5",
+      "reason": "no-fire",
+      "detail": "no seed satisfying the guards"
+    },
+    {
+      "id": "c7f885",
+      "reason": "guard-uncompilable",
+      "detail": "unsupported conjunct \"Or\""
+    },
+    {
       "id": "c87ff4",
       "reason": "lhs-not-value-form",
       "detail": "Apply"
+    },
+    {
+      "id": "ca9123",
+      "reason": "curated-exclude",
+      "detail": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
     },
     {
       "id": "cb9f61",
@@ -682,6 +1369,16 @@
       "detail": "symbol"
     },
     {
+      "id": "cdbdc7",
+      "reason": "duplicate-undirected",
+      "detail": "same equality as 474c51"
+    },
+    {
+      "id": "ce2395",
+      "reason": "curated-exclude",
+      "detail": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    {
       "id": "ce5423",
       "reason": "lhs-not-value-form",
       "detail": "symbol"
@@ -692,9 +1389,24 @@
       "detail": "symbol"
     },
     {
+      "id": "cf5355",
+      "reason": "curated-exclude",
+      "detail": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    {
       "id": "d09380",
       "reason": "compat-signature",
       "detail": "2-arg LambertW/Digamma"
+    },
+    {
+      "id": "d0a331",
+      "reason": "no-fire",
+      "detail": "rule did not fire"
+    },
+    {
+      "id": "d0c9ff",
+      "reason": "curated-exclude",
+      "detail": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
     },
     {
       "id": "d17d0b",
@@ -702,9 +1414,14 @@
       "detail": "symbol"
     },
     {
-      "id": "d1a0ec",
+      "id": "d25d10",
       "reason": "guard-uncompilable",
-      "detail": "unsupported conjunct \"NotElement\""
+      "detail": "unsupported conjunct \"Or\""
+    },
+    {
+      "id": "d280c5",
+      "reason": "curated-exclude",
+      "detail": "Phase 3 triage: nondeterministic self-test (random-probe isEqual over Coulomb shell expressions) — see 01af55."
     },
     {
       "id": "d2f9fb",
@@ -722,14 +1439,49 @@
       "detail": "symbol"
     },
     {
+      "id": "d4e418",
+      "reason": "duplicate-undirected",
+      "detail": "same equality as a19141"
+    },
+    {
+      "id": "d56914",
+      "reason": "no-fire",
+      "detail": "rule did not fire"
+    },
+    {
+      "id": "d60119",
+      "reason": "guard-uncompilable",
+      "detail": "unsupported conjunct \"Or\""
+    },
+    {
       "id": "d6703a",
       "reason": "lhs-not-value-form",
       "detail": "symbol"
     },
     {
+      "id": "d6d836",
+      "reason": "curated-exclude",
+      "detail": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    {
+      "id": "d6fbc8",
+      "reason": "compat-signature",
+      "detail": "2-arg LambertW/Digamma"
+    },
+    {
       "id": "d7962e",
       "reason": "lhs-not-value-form",
       "detail": "symbol"
+    },
+    {
+      "id": "d87f6e",
+      "reason": "duplicate-undirected",
+      "detail": "same equality as 296627"
+    },
+    {
+      "id": "d967af",
+      "reason": "duplicate-undirected",
+      "detail": "same equality as b3c440"
     },
     {
       "id": "dabb47",
@@ -740,6 +1492,11 @@
       "id": "dae4a7",
       "reason": "lhs-not-value-form",
       "detail": "symbol"
+    },
+    {
+      "id": "db3eb9",
+      "reason": "curated-exclude",
+      "detail": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
     },
     {
       "id": "dbdf08",
@@ -757,12 +1514,37 @@
       "detail": "Set"
     },
     {
+      "id": "ddc7e1",
+      "reason": "compat-signature",
+      "detail": "2-arg LambertW/Digamma"
+    },
+    {
       "id": "df52fc",
       "reason": "guard-uncompilable",
       "detail": "unsupported conjunct \"Not\""
     },
     {
-      "id": "e2288d",
+      "id": "dfbddd",
+      "reason": "no-fire",
+      "detail": "no seed satisfying the guards"
+    },
+    {
+      "id": "e103e7",
+      "reason": "duplicate-undirected",
+      "detail": "same equality as adbc1a"
+    },
+    {
+      "id": "e1a3fb",
+      "reason": "guard-uncompilable",
+      "detail": "unsupported conjunct \"Or\""
+    },
+    {
+      "id": "e20db0",
+      "reason": "no-fire",
+      "detail": "no seed satisfying the guards"
+    },
+    {
+      "id": "e233b0",
       "reason": "no-fire",
       "detail": "rule did not fire"
     },
@@ -772,9 +1554,29 @@
       "detail": "EqualNearestDecimal"
     },
     {
+      "id": "e3d274",
+      "reason": "guard-uncompilable",
+      "detail": "unsupported conjunct \"Or\""
+    },
+    {
       "id": "e4315f",
       "reason": "lhs-not-value-form",
       "detail": "Set"
+    },
+    {
+      "id": "e4f73a",
+      "reason": "not-equation",
+      "detail": "ComplexIndefiniteIntegralEqual"
+    },
+    {
+      "id": "e51ec3",
+      "reason": "no-fire",
+      "detail": "rule did not fire"
+    },
+    {
+      "id": "e722ca",
+      "reason": "curated-exclude",
+      "detail": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
     },
     {
       "id": "e83059",
@@ -787,9 +1589,39 @@
       "detail": "symbol"
     },
     {
+      "id": "e87c43",
+      "reason": "box-error",
+      "detail": "invalid lhs: Binomial(Error(ErrorCode(\"incompatible-type\", \"integer\", \"complex\")), k)"
+    },
+    {
+      "id": "e93f43",
+      "reason": "guard-uncompilable",
+      "detail": "unsupported conjunct \"Or\""
+    },
+    {
       "id": "e9a269",
       "reason": "lhs-not-value-form",
       "detail": "symbol"
+    },
+    {
+      "id": "ea1d58",
+      "reason": "curated-exclude",
+      "detail": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    {
+      "id": "ebc673",
+      "reason": "curated-exclude",
+      "detail": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    {
+      "id": "eca10b",
+      "reason": "no-fire",
+      "detail": "no seed satisfying the guards"
+    },
+    {
+      "id": "ed4f6f",
+      "reason": "guard-uncompilable",
+      "detail": "unsupported conjunct \"Or\""
     },
     {
       "id": "ed7dac",
@@ -802,9 +1634,29 @@
       "detail": "Set"
     },
     {
+      "id": "f0414a",
+      "reason": "guard-uncompilable",
+      "detail": "unsupported conjunct \"Or\""
+    },
+    {
+      "id": "f1691f",
+      "reason": "no-fire",
+      "detail": "no seed satisfying the guards"
+    },
+    {
       "id": "f178f2",
       "reason": "lhs-not-value-form",
       "detail": "Apply"
+    },
+    {
+      "id": "f1bd89",
+      "reason": "curated-exclude",
+      "detail": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    {
+      "id": "f1e02b",
+      "reason": "compat-signature",
+      "detail": "2-arg LambertW/Digamma"
     },
     {
       "id": "f372e9",
@@ -832,6 +1684,11 @@
       "detail": "EqualNearestDecimal"
     },
     {
+      "id": "f6b4a2",
+      "reason": "guard-uncompilable",
+      "detail": "unsupported conjunct \"Or\""
+    },
+    {
       "id": "f78fa0",
       "reason": "lhs-not-value-form",
       "detail": "symbol"
@@ -842,9 +1699,19 @@
       "detail": "symbol"
     },
     {
+      "id": "f8dfaf",
+      "reason": "no-fire",
+      "detail": "no seed satisfying the guards"
+    },
+    {
       "id": "fa0292",
       "reason": "compat-signature",
       "detail": "2-arg LambertW/Digamma"
+    },
+    {
+      "id": "faa118",
+      "reason": "no-fire",
+      "detail": "no seed satisfying the guards"
     },
     {
       "id": "fad16f",
@@ -857,9 +1724,29 @@
       "detail": "symbol"
     },
     {
+      "id": "fda084",
+      "reason": "curated-exclude",
+      "detail": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    {
+      "id": "fe1b96",
+      "reason": "curated-exclude",
+      "detail": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    {
       "id": "feb1a0",
       "reason": "box-error",
       "detail": "invalid lhs: SequenceLimitSuperior((n) |-> Totient(Error(ErrorCode(\"incompatible-type\", \"integer\", \"number\"))) / Totient(Error(ErrorCode(\"incompatible-type\", \"integer\", \"number\"))), +oo)"
+    },
+    {
+      "id": "febdd2",
+      "reason": "duplicate-undirected",
+      "detail": "same equality as af23f7"
+    },
+    {
+      "id": "ff613a",
+      "reason": "no-fire",
+      "detail": "no seed satisfying the guards"
     }
   ]
 }

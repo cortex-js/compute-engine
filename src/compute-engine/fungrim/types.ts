@@ -22,13 +22,34 @@ export type FungrimMathJson = unknown;
  * definitive positive for the rule to fire (fail-closed).
  */
 export type GuardSpec =
-  | { k: 'type'; wc: string; t: 'integer' | 'real' | 'rational' }
+  | { k: 'type'; wc: string; t: 'integer' | 'real' | 'rational' | 'complex' }
   | {
       k: 'cmp';
       wc: string;
       op: 'gt' | 'ge' | 'lt' | 'le';
       bound: FungrimMathJson;
     }
+  /**
+   * Phase 3: comparison over a part extractor of the substituted value —
+   * `Greater(Re(z), 0)`, `Less(Abs(q), 1)`, `Element(Im(z), Interval(a,b))`.
+   * Literal substitutions fold numerically; symbol substitutions consult the
+   * Track-3 part-bound assumption facts.
+   */
+  | {
+      k: 'part-cmp';
+      wc: string;
+      part: 're' | 'im' | 'abs' | 'arg';
+      op: 'gt' | 'ge' | 'lt' | 'le';
+      bound: FungrimMathJson;
+    }
+  /**
+   * Phase 3: membership in an inert or compound set (`HH`, explicit
+   * `Set(…)`, `Union(…)`). Fires only on a literal `True` from the Element
+   * evaluation — for inert shells like `HH` (no `contains` handler) that is
+   * the Track-3 stored-membership exact-match path
+   * (`assume(Element(tau, HH))`); literals can never discharge those.
+   */
+  | { k: 'member'; wc: string; set: FungrimMathJson }
   | { k: 'ne'; lhs: FungrimMathJson; rhs: FungrimMathJson }
   | { k: 'eval'; pred: FungrimMathJson };
 

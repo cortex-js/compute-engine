@@ -33,12 +33,14 @@ const EMPTY_DECLS: Declarations = {
   existing: {},
 };
 
-/** Shells used by fixtures (uninterpreted special-function heads). */
+/** Shells used by fixtures (uninterpreted special-function heads + the HH
+ *  inert set shell). */
 const FIXTURE_DECLS: Declarations = {
   generator: 'fixture',
   declarations: {
     FooF: { signature: '(complex) -> complex' },
     BarG: { signature: '(complex) -> complex' },
+    HH: { signature: 'set<complex>' },
   },
   existing: {},
 };
@@ -235,14 +237,138 @@ describe('compileGuards: mapping table', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Phase 3: complex-domain guard mappings
+// ---------------------------------------------------------------------------
+
+describe('compileGuards: complex-domain mapping table (Phase 3)', () => {
+  it('Element(z, ComplexNumbers) → type complex', () => {
+    expect(guards(['Element', 'z', 'ComplexNumbers'], ['z'])).toEqual([
+      { k: 'type', wc: '_z', t: 'complex' },
+    ]);
+  });
+
+  it('Element(tau, HH) → member (verbatim inert-set membership)', () => {
+    expect(guards(['Element', 'tau', 'HH'], ['tau'])).toEqual([
+      { k: 'member', wc: '_tau', set: 'HH' },
+    ]);
+  });
+
+  it('Element(omega, Set(-1, 1)) → member', () => {
+    expect(guards(['Element', 'omega', ['Set', -1, 1]], ['omega'])).toEqual([
+      { k: 'member', wc: '_omega', set: ['Set', -1, 1] },
+    ]);
+  });
+
+  it('SetMinus(CC, Set(i, -i)) → type complex + one ne per branch point', () => {
+    expect(
+      guards(
+        [
+          'Element',
+          'z',
+          [
+            'SetMinus',
+            'ComplexNumbers',
+            ['Set', 'ImaginaryUnit', ['Negate', 'ImaginaryUnit']],
+          ],
+        ],
+        ['z']
+      )
+    ).toEqual([
+      { k: 'type', wc: '_z', t: 'complex' },
+      { k: 'ne', lhs: '_z', rhs: 'ImaginaryUnit' },
+      { k: 'ne', lhs: '_z', rhs: ['Negate', 'ImaginaryUnit'] },
+    ]);
+  });
+
+  it('SetMinus(CC, NonPositiveIntegers) → type complex + DIRECT NotElement eval (Gamma guards)', () => {
+    expect(
+      guards(
+        ['Element', 'z', ['SetMinus', 'ComplexNumbers', 'NonPositiveIntegers']],
+        ['z']
+      )
+    ).toEqual([
+      { k: 'type', wc: '_z', t: 'complex' },
+      { k: 'eval', pred: ['NotElement', '_z', 'NonPositiveIntegers'] },
+    ]);
+  });
+
+  it('SetMinus(CC, Interval(Open(-oo), 0)) → type complex + NotElement eval (branch cut, sidesteps the SetMinus query gap)', () => {
+    expect(
+      guards(
+        [
+          'Element',
+          'z',
+          [
+            'SetMinus',
+            'ComplexNumbers',
+            ['Interval', ['Open', 'NegativeInfinity'], 0],
+          ],
+        ],
+        ['z']
+      )
+    ).toEqual([
+      { k: 'type', wc: '_z', t: 'complex' },
+      {
+        k: 'eval',
+        pred: [
+          'NotElement',
+          '_z',
+          ['Interval', ['Open', 'NegativeInfinity'], 0],
+        ],
+      },
+    ]);
+  });
+
+  it('NotElement conjuncts compile to NotElement eval predicates', () => {
+    expect(guards(['NotElement', 'x', 'Integers'], ['x'])).toEqual([
+      { k: 'eval', pred: ['NotElement', '_x', 'Integers'] },
+    ]);
+  });
+
+  it('Greater(Re(z), 0) / Less(Abs(q), 1) → part-cmp', () => {
+    expect(guards(['Greater', ['Real', 'z'], 0], ['z'])).toEqual([
+      { k: 'part-cmp', wc: '_z', part: 're', op: 'gt', bound: 0 },
+    ]);
+    expect(guards(['Less', ['Abs', 'q'], 1], ['q'])).toEqual([
+      { k: 'part-cmp', wc: '_q', part: 'abs', op: 'lt', bound: 1 },
+    ]);
+  });
+
+  it('part on the right side of the comparison is flipped', () => {
+    expect(guards(['Less', 0, ['Imaginary', 'tau']], ['tau'])).toEqual([
+      { k: 'part-cmp', wc: '_tau', part: 'im', op: 'gt', bound: 0 },
+    ]);
+  });
+
+  it('Element(Im(z), Interval(Open(-π), π)) → two part-cmp bounds', () => {
+    expect(
+      guards(
+        [
+          'Element',
+          ['Imaginary', 'z'],
+          ['Interval', ['Open', ['Negate', 'Pi']], 'Pi'],
+        ],
+        ['z']
+      )
+    ).toEqual([
+      { k: 'part-cmp', wc: '_z', part: 'im', op: 'gt', bound: ['Negate', 'Pi'] },
+      { k: 'part-cmp', wc: '_z', part: 'im', op: 'le', bound: 'Pi' },
+    ]);
+  });
+
+  it('Argument part bounds map like the other extractors', () => {
+    expect(
+      guards(['LessEqual', ['Argument', 'z'], 2], ['z'])
+    ).toEqual([{ k: 'part-cmp', wc: '_z', part: 'arg', op: 'le', bound: 2 }]);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Fail-closed guard compilation
 // ---------------------------------------------------------------------------
 
 describe('compileGuards: fail-closed', () => {
-  it('rejects NotElement, Not and Or conjuncts', () => {
-    expect(guardError(['NotElement', 'x', 'Integers'], ['x'])).toMatch(
-      /NotElement/
-    );
+  it('rejects Not and Or conjuncts (NotElement compiles since Phase 3)', () => {
     expect(guardError(['Not', ['Equal', 'x', 0]], ['x'])).toMatch(/Not/);
     expect(
       guardError(['Or', ['Element', 'x', 'Integers'], ['Equal', 'x', 0]], ['x'])
@@ -250,7 +376,7 @@ describe('compileGuards: fail-closed', () => {
   });
 
   it('rejects unsupported domains', () => {
-    expect(guardError(['Element', 'z', 'ComplexNumbers'], ['z'])).toMatch(
+    expect(guardError(['Element', 'z', 'AlgebraicNumbers'], ['z'])).toMatch(
       /unsupported domain/
     );
   });
@@ -262,7 +388,7 @@ describe('compileGuards: fail-closed', () => {
           'aaaa01',
           ['Equal', ['Gamma', 'x'], ['Gamma', 'x']],
           ['x'],
-          ['NotElement', 'x', 'Integers']
+          ['Or', ['Element', 'x', 'Integers'], ['Equal', 'x', 0]]
         ),
       ],
       EMPTY_DECLS
@@ -272,7 +398,7 @@ describe('compileGuards: fail-closed', () => {
       {
         id: 'aaaa01',
         reason: 'guard-uncompilable',
-        detail: 'unsupported conjunct "NotElement"',
+        detail: 'unsupported conjunct "Or"',
       },
     ]);
   });
@@ -418,6 +544,107 @@ describe('compileEntries: orientation, dedup and self-test', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Phase 3: complex-domain self-test seeding + definitional-expansion guard
+// ---------------------------------------------------------------------------
+
+describe('compileEntries: complex-domain entries (Phase 3)', () => {
+  let result: CompileResult;
+
+  const FIXTURES: Entry[] = [
+    // (a) HH-guarded identity: the literal path can never discharge an
+    //     inert-set membership; the self-test must seed it through the
+    //     Track-3 assumption path (declare tau + assume Element(tau, HH))
+    {
+      ...entry(
+        'cplx01',
+        ['Equal', ['FooF', ['Add', 'tau', 2]], ['FooF', 'tau']],
+        ['tau'],
+        ['Element', 'tau', 'HH']
+      ),
+      guardLevel: 'complex-domain',
+    } as Entry,
+    // (b) part-cmp-guarded identity (numeric bound): symbolic seed via the
+    //     assumed part inequality, or numeric fallback Re(1/2) > 0
+    {
+      ...entry(
+        'cplx02',
+        [
+          'Equal',
+          ['Multiply', 'z', ['BarG', 'z']],
+          ['BarG', ['Add', 'z', 1]],
+        ],
+        ['z'],
+        [
+          'And',
+          ['Element', 'z', 'ComplexNumbers'],
+          ['Greater', ['Real', 'z'], 0],
+        ]
+      ),
+      guardLevel: 'complex-domain',
+    } as Entry,
+    // (c) bare-generic definitional expansion: FooF(_z) → arithmetic of z.
+    //     The cost model prices the FooF shell high (cheaper RHS ⇒ machine
+    //     purpose 'simplify'), but a bare-generic match that structurally
+    //     grows must be exiled to 'expand'
+    {
+      ...entry(
+        'cplx03',
+        [
+          'Equal',
+          ['FooF', 'z'],
+          [
+            'Multiply',
+            ['Rational', 1, 2],
+            ['Add', ['Power', 'z', 3], ['Power', 'z', 5], 1],
+          ],
+        ],
+        ['z'],
+        ['Element', 'z', 'ComplexNumbers']
+      ),
+      guardLevel: 'complex-domain',
+    } as Entry,
+  ];
+
+  beforeAll(() => {
+    result = compileEntries(FIXTURES, FIXTURE_DECLS);
+  });
+
+  const ruleOf = (id: string) =>
+    result.rules.find((r) => r.id === `fungrim:${id}`);
+
+  it('HH-guarded identities self-test through the assumption path', () => {
+    const r = ruleOf('cplx01')!;
+    expect(r).toBeDefined();
+    expect(r.guards).toEqual([{ k: 'member', wc: '_tau', set: 'HH' }]);
+    // …and the seeding was symbolic (assumption path), not numeric
+    expect(result.sampleKinds['fungrim:cplx01']).toBe('symbolic');
+  });
+
+  it('part-cmp-guarded identities compile and fire', () => {
+    const r = ruleOf('cplx02')!;
+    expect(r).toBeDefined();
+    expect(r.guards).toContainEqual({
+      k: 'part-cmp',
+      wc: '_z',
+      part: 're',
+      op: 'gt',
+      bound: 0,
+    });
+  });
+
+  it('bare-generic structural growth is exiled to expand (definitional-expansion guard)', () => {
+    const r = ruleOf('cplx03')!;
+    expect(r).toBeDefined();
+    expect(r.match).toEqual(['FooF', '_z']);
+    expect(r.purpose).toBe('expand');
+  });
+
+  it('accounts for every entry', () => {
+    expect(result.rules.length + result.skips.length).toBe(FIXTURES.length);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Curation overrides
 // ---------------------------------------------------------------------------
 
@@ -513,8 +740,8 @@ describe('fungrim-core-data.json artifact', () => {
     artifact = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
   });
 
-  it('contains at least 550 rules (M1 acceptance floor)', () => {
-    expect(artifact.rules.length).toBeGreaterThanOrEqual(550);
+  it('contains at least 1250 rules (Phase-3 acceptance floor; M1 floor was 550)', () => {
+    expect(artifact.rules.length).toBeGreaterThanOrEqual(1250);
     expect(artifact.manifest.counts.rules).toBe(artifact.rules.length);
   });
 
@@ -576,7 +803,7 @@ describe('fungrim-core-data.json artifact', () => {
       expect(referenced.has(name)).toBe(true);
   });
 
-  it('artifact slice matches the corpus Phase-1 slice definition', () => {
+  it('artifact slice matches the corpus slice definition (Phase 3: complex-domain included)', () => {
     // isSliceEntry is the single source of truth for slice membership
     expect(
       isSliceEntry(entry('e00001', ['Equal', 1, 1], [], null, 'identity'))
@@ -585,6 +812,28 @@ describe('fungrim-core-data.json artifact', () => {
       ...entry('e00002', ['Equal', 1, 1]),
       guardLevel: 'complex-domain',
     } as Entry;
-    expect(isSliceEntry(complexEntry)).toBe(false);
+    expect(isSliceEntry(complexEntry)).toBe(true);
+    // …but undischargeable guards stay out of the slice
+    const undischargeable = {
+      ...entry('e00003', ['Equal', 1, 1]),
+      guardLevel: 'undischargeable',
+    } as Entry;
+    expect(isSliceEntry(undischargeable)).toBe(false);
+  });
+
+  it('Phase-1 no-regression: every real-simple/none-guard rule id is still present', () => {
+    // The Phase-3 slice extension must be purely additive on the Phase-1
+    // subset (the byte-level comparison is done at compile time against the
+    // regenerated Phase-1 artifact; here we pin a representative id set).
+    const ids = new Set(artifact.rules.map((r) => r.id));
+    for (const id of [
+      'fungrim:f826a6', // Gamma(1/2) → √π
+      'fungrim:62c6c9', // Gamma(n+1) → n!
+      'fungrim:c62afa', // Sin(πk) → 0
+      'fungrim:a01b6e', // Zeta(2) → π²/6
+      'fungrim:8654a3', // W(x·eˣ) → x
+      'fungrim:cb410e', // Totient(p) → p−1
+    ])
+      expect(ids.has(id)).toBe(true);
   });
 });

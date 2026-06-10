@@ -1,5 +1,8 @@
-// Runtime loader for the Fungrim Phase-1 compiled artifact
-// (FUNGRIM-PLAN-5-LOADER.md §2.1, §2.2 runtime half, §2.8 — milestone M2).
+// Runtime loader for the compiled Fungrim artifact
+// (FUNGRIM-PLAN-5-LOADER.md §2.1, §2.2 runtime half, §2.8 — milestone M2;
+// extended in Phase 3 to complex-domain guards: part-cmp/member guard kinds
+// and the `complex` type guard, discharged through the Track-3 assumptions
+// machinery).
 //
 // `loadIdentities(ce, options?)`:
 //
@@ -60,7 +63,7 @@ import type {
   GuardSpec,
 } from './types';
 
-/** The compiled Phase-1 artifact (the whole slice, bundled as JSON). */
+/** The compiled artifact (the whole slice, bundled as JSON). */
 export const FUNGRIM_CORE: FungrimRuleData =
   coreDataJson as unknown as FungrimRuleData;
 
@@ -91,10 +94,26 @@ function collectSymbols(
 /** The MathJSON payload(s) of a guard (for symbol/wildcard collection). */
 function guardJson(g: GuardSpec): FungrimMathJson {
   if (g.k === 'type') return g.wc;
-  if (g.k === 'cmp') return [g.wc, g.bound];
+  if (g.k === 'cmp' || g.k === 'part-cmp') return [g.wc, g.bound];
+  if (g.k === 'member') return [g.wc, g.set];
   if (g.k === 'ne') return [g.lhs, g.rhs];
   return g.pred;
 }
+
+/** GuardSpec part tags → CE operator heads. */
+const PART_TO_OPERATOR: Record<'re' | 'im' | 'abs' | 'arg', string> = {
+  re: 'Real',
+  im: 'Imaginary',
+  abs: 'Abs',
+  arg: 'Argument',
+};
+
+const CMP_TO_OPERATOR: Record<'gt' | 'ge' | 'lt' | 'le', string> = {
+  gt: 'Greater',
+  ge: 'GreaterEqual',
+  lt: 'Less',
+  le: 'LessEqual',
+};
 
 // ---------------------------------------------------------------------------
 // Guard-spec → tri-valued condition closures (§2.2 runtime half)
@@ -125,7 +144,27 @@ function buildGuardClosures(
 
   return guards.map((g): GuardClosure => {
     switch (g.k) {
-      case 'type':
+      case 'type': {
+        if (g.t === 'complex') {
+          // Fungrim CC = FINITE complex numbers. Literal fast path via the
+          // type lattice; symbols go through the boxed Element evaluation,
+          // which mirrors `ComplexNumbers.contains` and consults the Track-3
+          // type refinements made by `assume(Element(z, ComplexNumbers))`.
+          const pred = boxGuardExpr(['Element', g.wc, 'ComplexNumbers']);
+          return (sub) => {
+            const v = sub[g.wc];
+            if (v === undefined) return false;
+            if (v.type.matches('finite_complex')) return true;
+            try {
+              const r = pred.subs(sub).evaluate().json;
+              if (r === 'True') return true;
+              if (r === 'False') return false;
+              return undefined; // symbolic residue: undecided
+            } catch {
+              return undefined;
+            }
+          };
+        }
         return (sub) => {
           const v = sub[g.wc];
           if (v === undefined) return false;
@@ -133,6 +172,57 @@ function buildGuardClosures(
           if (g.t === 'real') return v.isReal;
           return v.isRational;
         };
+      }
+      case 'part-cmp': {
+        // Compare a part extractor of the substituted value: a LITERAL
+        // substitution folds numerically (Re(1+2i) → 1 > 0); a SYMBOL
+        // substitution consults the Track-3 part-bound facts
+        // (assume(Re(s) > 1) ⇒ Greater(Re(s), 0) evaluates to True).
+        const pred = boxGuardExpr([
+          CMP_TO_OPERATOR[g.op],
+          [PART_TO_OPERATOR[g.part], g.wc],
+          g.bound,
+        ]);
+        return (sub) => {
+          const v = sub[g.wc];
+          if (v === undefined) return false;
+          try {
+            const inst = pred.subs(sub);
+            const r = inst.evaluate().json;
+            if (r === 'True') return true;
+            if (r === 'False') return false;
+            // Composite constant bounds (2π, 1/e, …) do not fold exactly;
+            // retry numerically. An unknown stays `undefined` ⇒ the rule
+            // does not fire (fail-closed).
+            const rN = inst.N().json;
+            if (rN === 'True') return true;
+            if (rN === 'False') return false;
+            return undefined;
+          } catch {
+            return undefined;
+          }
+        };
+      }
+      case 'member': {
+        // Membership via the boxed Element evaluation: literals through the
+        // set's `contains` handler; symbols through the Track-3
+        // stored-membership exact-match path. Inert shells (HH) have no
+        // `contains`, so literal substitutions stay undecided there —
+        // observable through the onGuardUndecided hook.
+        const pred = boxGuardExpr(['Element', g.wc, g.set]);
+        return (sub) => {
+          const v = sub[g.wc];
+          if (v === undefined) return false;
+          try {
+            const r = pred.subs(sub).evaluate().json;
+            if (r === 'True') return true;
+            if (r === 'False') return false;
+            return undefined; // symbolic residue: undecided
+          } catch {
+            return undefined;
+          }
+        };
+      }
       case 'cmp': {
         const bound = boxGuardExpr(g.bound);
         const compare = (v: Expression, b: Expression): boolean | undefined =>
@@ -415,6 +505,31 @@ function requiredFeatures(pattern: Expression): ReadonlyArray<string> {
 }
 
 /**
+ * Order the required features so the MOST DISCRIMINATING one is checked
+ * first, and drop the dispatch-bucket head itself (the rule is only
+ * consulted for nodes that already carry that operator, so it conveys zero
+ * information). Rarity heuristic over generic corpora, rarest first:
+ * special-function operator heads < named symbols < core arithmetic heads.
+ * With ~470 complex-domain rules in the Multiply/Add/Divide buckets, the
+ * first-feature check decides almost every pre-screen (437 of the 474 new
+ * hot-bucket rules carry a rare feature), keeping the per-rule cost at one
+ * or two set lookups per candidate node (Phase-3 M5).
+ */
+function rankRequiredFeatures(
+  features: ReadonlyArray<string>,
+  bucketHead: string
+): ReadonlyArray<string> {
+  const rank = (f: string): number => {
+    if (f.startsWith(FEATURE_SYM_PREFIX)) return 1;
+    // operator feature
+    return HOT_DISPATCH_HEADS.has(f.slice(FEATURE_OP_PREFIX.length)) ? 2 : 0;
+  };
+  return features
+    .filter((f) => f !== FEATURE_OP_PREFIX + bucketHead)
+    .sort((a, b) => rank(a) - rank(b));
+}
+
+/**
  * For a simplify-target rule whose canonical match head is in a hot bucket,
  * return a pre-screened functional rule with an `operators` dispatch hint;
  * for all other rules return the plain pattern rule unchanged.
@@ -440,7 +555,7 @@ function wrapHotHeadRule(parts: BoxedRuleParts): Rule {
   )
     return parts as Rule;
 
-  const required = requiredFeatures(match);
+  const required = rankRequiredFeatures(requiredFeatures(match), head);
 
   const replaceFn = (expr: Expression): RuleStep | undefined => {
     // 1. Cheap conservative pre-screen
@@ -568,13 +683,24 @@ export function loadIdentities(
     }
   }
 
-  // -- 3. Box each rule and route it to its target store
+  // -- 3. Box each rule and route it to its target store.
+  //       Specific-value rules are registered AHEAD of identity rules:
+  //       rule application is registration-ordered within a dispatch
+  //       bucket, and a curated literal value (ChebyshevT(n, 1) → 1) must
+  //       win over a generic identity rewrite of the same head (e.g. the
+  //       exponential closed form ChebyshevT(n, x) → ((x+√(x²−1))ⁿ+…)/2,
+  //       which the cost model otherwise lets fire on degenerate literal
+  //       instantiations). Stable within each class (artifact order).
+  const ordered = [
+    ...selected.filter((r) => r.class === 'specific-value'),
+    ...selected.filter((r) => r.class !== 'specific-value'),
+  ];
   const buckets: Record<CompiledFungrimRule['target'], Rule[]> = {
     simplify: [],
     solve: [],
     harmonization: [],
   };
-  for (const r of selected) {
+  for (const r of ordered) {
     const boxed = boxCompiledRule(ce, r, options.onGuardUndecided);
     if ('error' in boxed) {
       report.skipped.push({ id: r.id, reason: `box-error: ${boxed.error}` });

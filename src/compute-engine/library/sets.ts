@@ -50,7 +50,7 @@ function typeIntersection(a: Type, b: Type): Type {
  * `Element(x, Integers)` and similar to stay unevaluated for symbols of
  * indeterminate type, instead of collapsing to `False`.
  */
-function typeMembership(x: Expression, t: Type): boolean | undefined {
+export function typeMembership(x: Expression, t: Type): boolean | undefined {
   const vt = x.type;
   if (vt.matches(t)) return true;
   if (typeIntersection(vt.type, t) === 'nothing') return false;
@@ -76,6 +76,45 @@ function signedMembership(
   if (sign === false) return false; // wrong sign → definitely not a member
   if (sign === true) return inBase; // right sign; membership tracks the type
   return undefined; // sign indeterminate
+}
+
+/**
+ * Kleene three-valued OR: `true` as soon as any value is `true`, `false`
+ * only when every value is `false`, `undefined` otherwise.
+ *
+ * Used by the `contains` handlers of compound sets (e.g. `Union`) so that an
+ * indeterminate member test does not collapse to a definitive `false`
+ * (FUNGRIM-PLAN-3-ASSUMPTIONS.md §5.2 invariant).
+ */
+function kleeneOr(
+  values: Iterable<boolean | undefined>
+): boolean | undefined {
+  let indeterminate = false;
+  for (const v of values) {
+    if (v === true) return true;
+    if (v === undefined) indeterminate = true;
+  }
+  return indeterminate ? undefined : false;
+}
+
+/**
+ * Kleene three-valued AND: `false` as soon as any value is `false`, `true`
+ * only when every value is `true`, `undefined` otherwise.
+ */
+function kleeneAnd(
+  values: Iterable<boolean | undefined>
+): boolean | undefined {
+  let indeterminate = false;
+  for (const v of values) {
+    if (v === false) return false;
+    if (v === undefined) indeterminate = true;
+  }
+  return indeterminate ? undefined : true;
+}
+
+/** Kleene three-valued NOT. */
+function kleeneNot(v: boolean | undefined): boolean | undefined {
+  return v === undefined ? undefined : !v;
 }
 
 /**
@@ -815,12 +854,16 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     description:
       'Return the elements of the first set that are not in any of the subsequent sets.',
     collection: {
+      // Three-valued: `x ∈ col ∧ x ∉ s1 ∧ x ∉ s2 ∧ …` with Kleene
+      // combination — indeterminate member tests yield `undefined`, not a
+      // spurious definitive answer.
       contains: (expr, x) => {
-        if (!isFunction(expr)) return false;
+        if (!isFunction(expr)) return undefined;
         const [col, ...others] = expr.ops;
-        return (
-          (col.contains(x) ?? false) && others.every((set) => !set.contains(x))
-        );
+        return kleeneAnd([
+          col.contains(x),
+          ...others.map((set) => kleeneNot(set.contains(x))),
+        ]);
       },
       count: (expr) => {
         if (!isFunction(expr)) return 0;
@@ -894,16 +937,27 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     // that is a union of collections with more than MAX_SIZE_EAGER_COLLECTION
     // elements. Otherwise, when we evaluated the union, we got a set literal.
     collection: {
+      // Kleene OR over the members: any `true` → `true`, all `false` →
+      // `false`, otherwise `undefined` (an indeterminate member test must
+      // not collapse to a definitive `false`).
       contains: (col, x) =>
-        isFunction(col) && col.ops.some((op) => op.contains(x)),
+        isFunction(col)
+          ? kleeneOr(col.ops.map((op) => op.contains(x)))
+          : undefined,
       count: (col) =>
         countMatchingUnion(col, (elem, seen) =>
           seen.every((e) => !e.contains(elem))
         ),
+      // A union is empty iff every operand is empty (Kleene AND).
       isEmpty: (col) =>
-        isFunction(col) && col.ops.every((op) => op.isEmptyCollection),
+        isFunction(col)
+          ? kleeneAnd(col.ops.map((op) => op.isEmptyCollection))
+          : undefined,
+      // A union is finite iff every operand is finite (Kleene AND).
       isFinite: (col) =>
-        isFunction(col) && col.ops.every((op) => op.isFiniteCollection),
+        isFunction(col)
+          ? kleeneAnd(col.ops.map((op) => op.isFiniteCollection))
+          : undefined,
       iterator: unionIterator,
     },
   },
@@ -915,13 +969,17 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       'Return the set difference between the first set and subsequent values.',
     evaluate: setMinus,
     collection: {
+      // Three-valued: `x ∈ col ∧ ¬excluded(v1, x) ∧ …` with Kleene
+      // combination (mirrors the `membershipKleene` SetMinus decomposition).
       contains: (expr, x) => {
-        if (!isFunction(expr)) return false;
+        if (!isFunction(expr)) return undefined;
         const [col, ...values] = expr.ops;
-        return (
-          (col.contains(x) ?? false) &&
-          !values.some((val) => isExcludedBy(val, x))
-        );
+        return kleeneAnd([
+          col.contains(x),
+          ...values.map((val) =>
+            kleeneNot(isExcludedByKleene(expr.engine, val, x))
+          ),
+        ]);
       },
       count: (expr) => {
         if (!isFunction(expr)) return 0;
@@ -942,12 +1000,14 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     description:
       'Return the symmetric difference of two sets (elements in either set but not both).',
     collection: {
+      // Three-valued XOR: decided only when both member tests are decided.
       contains: (expr, x) => {
-        if (!isFunction(expr)) return false;
+        if (!isFunction(expr)) return undefined;
         const [a, b] = expr.ops;
-        const inA = a.contains(x) ?? false;
-        const inB = b.contains(x) ?? false;
-        return (inA && !inB) || (!inA && inB);
+        const inA = a.contains(x);
+        const inB = b.contains(x);
+        if (inA === undefined || inB === undefined) return undefined;
+        return inA !== inB;
       },
       count: (expr) => {
         if (!isFunction(expr)) return 0;
@@ -1032,6 +1092,21 @@ function isExcludedBy(val: Expression, x: Expression): boolean {
 }
 
 /**
+ * Three-valued version of `isExcludedBy` for the `SetMinus.contains`
+ * handler: `true` when `x` is definitely excluded by the operand, `false`
+ * when definitely not, `undefined` when indeterminate.
+ */
+function isExcludedByKleene(
+  ce: ComputeEngine,
+  val: Expression,
+  x: Expression
+): boolean | undefined {
+  if (val.isCollection) return val.contains(x);
+  // Scalar exclusion: `x` is excluded iff `x = val`
+  return kleeneNot(notEqualKleene(ce, x, val));
+}
+
+/**
  * Three-valued disequality `x ≠ e`, used by the `SetMinus` query
  * decomposition (FUNGRIM-PLAN-3-ASSUMPTIONS.md §5.1c/§5.1d).
  *
@@ -1066,6 +1141,40 @@ function notEqualKleene(
   }
 
   return undefined;
+}
+
+/**
+ * Three-valued bound conjunct for the query-side Range/Interval
+ * decomposition (`membershipKleene` step 2b), mirroring `assumeBound`
+ * (assume.ts):
+ *
+ * - finite numeric bound → the corresponding three-valued comparison
+ *   (which consults stored bound facts);
+ * - infinite bound on its natural side (lower −∞ / upper +∞) → vacuously
+ *   satisfied, exactly as the assume side skips it;
+ * - infinite bound on the wrong side, or a symbolic bound → indeterminate
+ *   (the assume side stores no fact that could entail it).
+ */
+function boundKleene(
+  x: Expression,
+  op: 'Less' | 'LessEqual' | 'Greater' | 'GreaterEqual',
+  bound: Expression
+): boolean | undefined {
+  const b = bound.re;
+  // Symbolic bound (e.g. Range(1, q − 1)): indeterminate
+  if (Number.isNaN(b)) return undefined;
+  if (!isFinite(b)) {
+    // Lower bound of −∞ / upper bound of +∞: vacuously satisfied
+    if (b === -Infinity && (op === 'Greater' || op === 'GreaterEqual'))
+      return true;
+    if (b === Infinity && (op === 'Less' || op === 'LessEqual')) return true;
+    // Degenerate direction (e.g. x ≥ +∞): cannot be decided here
+    return undefined;
+  }
+  if (op === 'Less') return x.isLess(b);
+  if (op === 'LessEqual') return x.isLessEqual(b);
+  if (op === 'Greater') return x.isGreater(b);
+  return x.isGreaterEqual(b);
 }
 
 /**
@@ -1131,6 +1240,48 @@ function membershipKleene(
     if (result === false) return false;
   }
 
+  // 2b. Range/Interval queries with a symbolic element: mirror the
+  // assume-side decomposition (`assumeElementOfSet` cases 2 & 3, design
+  // §3.2/§5.1c) — a type conjunct plus one bound conjunct per finite
+  // numeric endpoint, with infinite endpoints skipped exactly as
+  // `assumeBound` skips them. Facts stored decomposed thus answer queries
+  // decomposed. Symbolic endpoints yield an indeterminate conjunct (the
+  // assume side drops them, so no stored fact can entail the bound).
+  if (isFunction(collection, 'Range') && collection.nops >= 2) {
+    let [lo, hi] = collection.ops;
+    const step = collection.ops[2];
+    if (step !== undefined && step.isSame(-1)) [lo, hi] = [hi, lo];
+    // Non-unit steps do not decompose (assume keeps only the type there)
+    if (step === undefined || step.isSame(1) || step.isSame(-1)) {
+      const r = kleeneAnd([
+        x.type.matches('integer') ? true : undefined,
+        boundKleene(x, 'GreaterEqual', lo),
+        boundKleene(x, 'LessEqual', hi),
+      ]);
+      if (r !== undefined) return r;
+    }
+  }
+
+  if (isFunction(collection, 'Interval') && collection.nops === 2) {
+    let [lo, hi] = collection.ops;
+    let loStrict = false;
+    let hiStrict = false;
+    if (isFunction(lo, 'Open')) {
+      loStrict = true;
+      lo = lo.op1;
+    }
+    if (isFunction(hi, 'Open')) {
+      hiStrict = true;
+      hi = hi.op1;
+    }
+    const r = kleeneAnd([
+      x.type.matches('real') ? true : undefined,
+      boundKleene(x, loStrict ? 'Greater' : 'GreaterEqual', lo),
+      boundKleene(x, hiStrict ? 'Less' : 'LessEqual', hi),
+    ]);
+    if (r !== undefined) return r;
+  }
+
   const typeName = sym(collection);
   if (typeName) {
     // 3. Type-style membership, e.g. Element(x, finite_real)
@@ -1164,6 +1315,22 @@ function membershipKleene(
       if (facts) {
         if (facts.in.some((s) => s.isSame(collection))) return true;
         if (facts.notIn.some((s) => s.isSame(collection))) return false;
+      }
+    } else {
+      // Compound subject (e.g. `NotElement(1 + ℓ + iη, NonPositiveIntegers)`
+      // guards): the fact index is keyed by bare symbols, so match stored
+      // Element/NotElement facts verbatim against the assumptions DB.
+      // `x` reaches this point evaluated, while stored facts are canonical
+      // but unevaluated — also compare the evaluated fact subject (cheap:
+      // only for facts whose set already matches).
+      for (const [fact, truth] of ce.context.assumptions) {
+        if (truth !== true || !isFunction(fact)) continue;
+        if (fact.operator !== 'Element' && fact.operator !== 'NotElement')
+          continue;
+        if (fact.nops !== 2) continue;
+        if (!fact.op2.isSame(collection)) continue;
+        if (!fact.op1.isSame(x) && !fact.op1.evaluate().isSame(x)) continue;
+        return fact.operator === 'Element';
       }
     }
   }
@@ -1357,7 +1524,12 @@ function countMatchingUnion(
   return count;
 }
 
-function containsAll(expr: Expression, x: Expression): boolean {
-  if (!isFunction(expr)) return false;
-  return expr.ops.every((op) => op.contains(x) ?? false);
+/**
+ * Three-valued `contains` for `Intersection`: Kleene AND over the member
+ * tests — `false` as soon as one operand definitively excludes `x`, `true`
+ * only when every operand definitively contains it, `undefined` otherwise.
+ */
+function containsAll(expr: Expression, x: Expression): boolean | undefined {
+  if (!isFunction(expr)) return undefined;
+  return kleeneAnd(expr.ops.map((op) => op.contains(x)));
 }

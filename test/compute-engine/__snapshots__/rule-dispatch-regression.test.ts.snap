@@ -202,7 +202,7 @@ exports[`simplify: radicals \\sqrt{12}+\\sqrt{27} 1`] = `["Multiply", 5, ["Sqrt"
 
 exports[`simplify: radicals \\sqrt{50} 1`] = `["Multiply", 5, ["Sqrt", 2]]`;
 
-exports[`simplify: radicals \\sqrt{997} - (997^3)^{\\frac16} 1`] = `4.36039247984411269789337009308588989020237213158186925530957032914124987998383657042e-15`;
+exports[`simplify: radicals \\sqrt{997} - (997^3)^{\\frac16} 1`] = `2e-98`;
 
 exports[`simplify: rational expressions \\frac{0}{x} 1`] = `0`;
 

@@ -1,8 +1,241 @@
 {
   "$comment": "Hand-maintained curation overrides for the Fungrim Phase-1 rule compiler (FUNGRIM-PLAN-5-LOADER.md §2.3/§2.6). Merged last by scripts/fungrim/compile-rules.ts. `overrides` entries ({ direction?, purpose?, target?, exclude?, note? }, keyed by corpus entry id) adjust or exclude compiled artifact rules. `transformAllowlist` promotes hand-vetted growth-neutral canonicalizations from 'expand' to 'transform' (the machine policy never emits 'transform'). `solveSeeds` is the §2.6 hand-curated solve-template seed set: it is NOT compiled into the M1 artifact and does not affect default loading — the M2 runtime loader compiles these entries into UNIVARIATE_ROOTS-style templates behind loadFungrim(ce, { solve: true }) (off by default, Q7).",
-  "overrides": {},
+  "overrides": {
+    "304559": {
+      "exclude": true,
+      "note": "Phase 3 triage: nondeterministic self-test (random-probe isEqual over Coulomb shell expressions) — see 01af55."
+    },
+    "504717": {
+      "exclude": true,
+      "note": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    "713966": {
+      "exclude": true,
+      "note": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    "936694": {
+      "exclude": true,
+      "note": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    "5bd0ec": {
+      "purpose": "expand",
+      "note": "Phase 3 triage: ChebyshevT(n, (x + 1/x)/2) -> (x^n + x^-n)/2 is a sound recognition rule, but its (x + 1/x)/2 argument pattern matches DEGENERATE literals (1 = (1 + 1/1)/2 with x = 1), rewriting ChebyshevT(n, 1) to (1^n + 1^-n)/2 inside simplify() and shadowing the direct value rule fc5d42 (CE does not fold 1^n for symbolic n). Demoted to 'expand': reachable via replace(), out of simplify()'s scan."
+    },
+    "01af55": {
+      "exclude": true,
+      "note": "Phase 3 triage: self-test fired-vs-expected comparison is nondeterministic — the result settles in a different canonical shape and the isEqual fallback random-probes deep CoulombF/G/Sigma shell expressions, flipping across runs (breaks artifact byte-determinism). Excluded pending shell-aware structural comparison."
+    },
+    "2a2f18": {
+      "exclude": true,
+      "note": "Phase 3 triage: nondeterministic self-test (random-probe isEqual over Coulomb shell expressions) — see 01af55."
+    },
+    "d280c5": {
+      "exclude": true,
+      "note": "Phase 3 triage: nondeterministic self-test (random-probe isEqual over Coulomb shell expressions) — see 01af55."
+    },
+    "00c331": {
+      "exclude": true,
+      "note": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    "37ffb7": {
+      "exclude": true,
+      "note": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    "42c7f1": {
+      "exclude": true,
+      "note": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    "7ded8f": {
+      "exclude": true,
+      "note": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    "b4a735": {
+      "exclude": true,
+      "note": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    "d0c9ff": {
+      "exclude": true,
+      "note": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    "12765e": {
+      "exclude": true,
+      "note": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    "13895b": {
+      "exclude": true,
+      "note": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    "2a11ab": {
+      "exclude": true,
+      "note": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    "3e71f4": {
+      "exclude": true,
+      "note": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    "500c0a": {
+      "exclude": true,
+      "note": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    "6d0a95": {
+      "exclude": true,
+      "note": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    "8c96a5": {
+      "exclude": true,
+      "note": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    "8e5c81": {
+      "exclude": true,
+      "note": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    "8e80c6": {
+      "exclude": true,
+      "note": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    "95f771": {
+      "exclude": true,
+      "note": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    "c58f46": {
+      "exclude": true,
+      "note": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    "e722ca": {
+      "exclude": true,
+      "note": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    "20828c": {
+      "exclude": true,
+      "note": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    "27bc34": {
+      "exclude": true,
+      "note": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    "90ac58": {
+      "exclude": true,
+      "note": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    "b25089": {
+      "exclude": true,
+      "note": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    "2fec14": {
+      "exclude": true,
+      "note": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    "a51a4b": {
+      "exclude": true,
+      "note": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    "37a95a": {
+      "exclude": true,
+      "note": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    "6f8e14": {
+      "exclude": true,
+      "note": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    "83abff": {
+      "exclude": true,
+      "note": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    "cf5355": {
+      "exclude": true,
+      "note": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    "37e644": {
+      "exclude": true,
+      "note": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    "38fa65": {
+      "exclude": true,
+      "note": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    "a203e9": {
+      "exclude": true,
+      "note": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    "3d6d7e": {
+      "exclude": true,
+      "note": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    "ca9123": {
+      "exclude": true,
+      "note": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    "db3eb9": {
+      "exclude": true,
+      "note": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    "f1bd89": {
+      "exclude": true,
+      "note": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    "4eac3f": {
+      "exclude": true,
+      "note": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    "5a8f57": {
+      "exclude": true,
+      "note": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    "7314c4": {
+      "exclude": true,
+      "note": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    "fda084": {
+      "exclude": true,
+      "note": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    "71a0ff": {
+      "exclude": true,
+      "note": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    "a4cc5a": {
+      "exclude": true,
+      "note": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    "ce2395": {
+      "exclude": true,
+      "note": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    "d6d836": {
+      "exclude": true,
+      "note": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    "ea1d58": {
+      "exclude": true,
+      "note": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    "74274a": {
+      "exclude": true,
+      "note": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    "a222ed": {
+      "exclude": true,
+      "note": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    "a891da": {
+      "exclude": true,
+      "note": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    "ebc673": {
+      "exclude": true,
+      "note": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    },
+    "fe1b96": {
+      "exclude": true,
+      "note": "Phase 3 triage: the self-test for this entry discharges ONLY with the in-flight sets.ts three-valued membership fixes (compound-subject NotElement fact matching, three-valued compound-set contains) — not with committed library behavior. Ledgered as curated-exclude so the artifact is reproducible from the committed tree; re-include by deleting this override and recompiling once that work lands."
+    }
+  },
   "transformAllowlist": [],
   "solveSeeds": {
+    "296627": {
+      "target": "solve",
+      "note": "Exp(Ln(z)) = z inverse composition. complex-domain guard accepted for solve templates because validateRoots filters every candidate against the original equation."
+    },
     "8654a3": {
       "target": "solve",
       "note": "W(x*e^x) = x — seed for the LambertW root template _x*Exp(_x) + __b = 0 -> _x = LambertW(Negate(__b)). Off by default; validateRoots checks every candidate against the original equation, so an over-broad template degrades to a no-op, never a wrong answer."
@@ -14,10 +247,6 @@
     "4c1e1e": {
       "target": "solve",
       "note": "Ln(Exp(z)) = z inverse composition. complex-domain guard accepted for solve templates because validateRoots filters every candidate against the original equation (the safety property promised by the ce.solveRules docs)."
-    },
-    "296627": {
-      "target": "solve",
-      "note": "Exp(Ln(z)) = z inverse composition. complex-domain guard accepted for solve templates because validateRoots filters every candidate against the original equation."
     },
     "1f026d": {
       "target": "solve",
