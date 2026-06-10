@@ -29,6 +29,19 @@ describe('PYTHON TARGET', () => {
       const code = python.compile(expr).code;
       expect(code).toBe('x ** 4 + 3 * x ** 3 + 2 * x ** 2 + x + 1');
     });
+
+    // REVIEW.md E13: `**` is right-associative in Python, so the left operand
+    // of a nested power needs parentheses — `(a^b)^c` must not emit
+    // `a ** b ** c` (which Python parses as `a ** (b ** c)`).
+    it('should parenthesize the left base of a nested power', () => {
+      const expr = ce.expr(['Power', ['Power', 'a', 'b'], 'c']);
+      expect(python.compile(expr).code).toBe('(a ** b) ** c');
+    });
+
+    it('should not parenthesize a right-nested power (already right-assoc)', () => {
+      const expr = ce.expr(['Power', 'a', ['Power', 'b', 'c']]);
+      expect(python.compile(expr).code).toBe('a ** b ** c');
+    });
   });
 
   describe('Mathematical Functions', () => {

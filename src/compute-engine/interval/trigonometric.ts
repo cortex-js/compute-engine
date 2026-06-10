@@ -588,9 +588,6 @@ const SINC_EXTREMA = [
   29.8116, 32.95639,
 ];
 
-// Global bounds of sinc(x): the first minimum is the most negative
-const SINC_GLOBAL_LO = -0.21724;
-
 export function sinc(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
@@ -619,14 +616,19 @@ export function sinc(x: Interval | IntervalResult): IntervalResult {
     if (-e >= xVal.lo && -e <= xVal.hi) update(sincVal(-e));
   }
 
-  // If the interval extends beyond the last tabulated extremum,
-  // fall back to global bounds to guarantee correctness
-  if (Math.abs(xVal.lo) > lastExtremum || Math.abs(xVal.hi) > lastExtremum) {
-    update(SINC_GLOBAL_LO);
-    // sinc approaches 0 from above for large x, and the global max
-    // is 1 at x=0 (already handled above); for large |x| the local
-    // maxima are all < 1, so no need to widen hi beyond what the
-    // endpoints and extrema already give.
+  // For the portion of the interval beyond the last tabulated extremum, the
+  // local extrema are not enumerated — and they are NOT all captured by the
+  // endpoints (the previous code widened only `lo`, letting the true max
+  // escape, e.g. on [38, 40]). There |sinc(x)| = |sin(x)/x| ≤ 1/|x|, so bound
+  // that portion by ±1/m, where m is its closest approach to 0.
+  let minBeyondAbs = Infinity;
+  if (xVal.hi > lastExtremum)
+    minBeyondAbs = Math.min(minBeyondAbs, Math.max(xVal.lo, lastExtremum));
+  if (xVal.lo < -lastExtremum)
+    minBeyondAbs = Math.min(minBeyondAbs, -Math.min(xVal.hi, -lastExtremum));
+  if (Number.isFinite(minBeyondAbs) && minBeyondAbs > 0) {
+    update(1 / minBeyondAbs);
+    update(-1 / minBeyondAbs);
   }
 
   return ok({ lo, hi });
@@ -673,7 +675,36 @@ export function fresnelS(x: Interval | IntervalResult): IntervalResult {
     if (-e >= xVal.lo && -e <= xVal.hi) update(scalarFresnelS(-e));
   }
 
+  // Beyond the last tabulated extremum the oscillation amplitude only
+  // decreases, so bound that portion by the convergence band 0.5 ± A, where A
+  // is the deviation at the last extremum (S(±∞) = ±0.5; S is odd).
+  fresnelConvergenceBound(xVal, FRESNEL_S_EXTREMA, scalarFresnelS, update);
+
   return ok({ lo, hi });
+}
+
+// Fresnel integrals converge to ±0.5 as x → ±∞, with monotonically decreasing
+// oscillation amplitude. For the part of `xVal` beyond the last tabulated
+// extremum, the value lies in 0.5 ± A (positive side) or −0.5 ± A (negative
+// side), where A is the deviation from 0.5 at the last extremum — a guaranteed
+// upper bound on the remaining amplitude. Without this, the table had no
+// fallback past x ≈ 6.2 and the enclosure was not conservative.
+function fresnelConvergenceBound(
+  xVal: Interval,
+  extrema: number[],
+  scalar: (x: number) => number,
+  update: (v: number) => void
+): void {
+  const lastE = extrema[extrema.length - 1];
+  const amp = Math.abs(scalar(lastE) - 0.5);
+  if (xVal.hi > lastE) {
+    update(0.5 + amp);
+    update(0.5 - amp);
+  }
+  if (xVal.lo < -lastE) {
+    update(-0.5 - amp);
+    update(-0.5 + amp);
+  }
 }
 
 /**
@@ -703,6 +734,9 @@ export function fresnelC(x: Interval | IntervalResult): IntervalResult {
     if (e >= xVal.lo && e <= xVal.hi) update(scalarFresnelC(e));
     if (-e >= xVal.lo && -e <= xVal.hi) update(scalarFresnelC(-e));
   }
+
+  // Same convergence-band fallback as fresnelS (C(±∞) = ±0.5, C is odd).
+  fresnelConvergenceBound(xVal, FRESNEL_C_EXTREMA, scalarFresnelC, update);
 
   return ok({ lo, hi });
 }

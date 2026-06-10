@@ -586,6 +586,29 @@ export function gamma(x: Interval | IntervalResult): IntervalResult {
   return _gamma(xVal);
 }
 
+// Locations of the local extrema of gamma on the negative strips — the zeros
+// of the digamma function. The extremum in strip (n, n+1) (n a negative
+// integer) is at index (−n − 1). Gamma is NOT monotonic across a strip: it
+// runs from ±∞ at one pole, through this interior extremum (the value closest
+// to 0), back to ±∞ at the other pole — so the endpoints alone do not enclose
+// the range.
+const GAMMA_NEG_EXTREMA_X = [
+  -0.504083008264455, -1.573498473162391, -2.610720868444145,
+  -3.635293366436901, -4.653163765628266, -5.667162441556885,
+  -6.678418213073426, -7.687788325031709, -8.695764163640955,
+  -9.702672540001863,
+];
+
+/** Local-extremum location of gamma in the strip containing the negative,
+ * pole-free interval [lo, hi], or `null` for strips past the table. */
+function gammaNegStripExtremum(lo: number): number | null {
+  const n = Math.floor(lo); // negative integer: the strip is (n, n+1)
+  const idx = -n - 1;
+  return idx >= 0 && idx < GAMMA_NEG_EXTREMA_X.length
+    ? GAMMA_NEG_EXTREMA_X[idx]
+    : null;
+}
+
 function _gamma(x: Interval): IntervalResult {
   // Check for poles: gamma has poles at every non-positive integer.
   // If the interval contains any non-positive integer, report singular.
@@ -601,11 +624,28 @@ function _gamma(x: Interval): IntervalResult {
     if (ceilLo <= floorHi) {
       return { kind: 'singular', at: ceilLo };
     }
-    // No pole in interval — both endpoints are between same consecutive
-    // negative integers, gamma is monotonic here. Evaluate endpoints.
+    // No pole in interval, but gamma has one interior extremum on the strip.
     const gLo = scalarGamma(x.lo);
     const gHi = scalarGamma(x.hi);
-    return ok({ lo: Math.min(gLo, gHi), hi: Math.max(gLo, gHi) });
+    let lo = Math.min(gLo, gHi);
+    let hi = Math.max(gLo, gHi);
+    const xStar = gammaNegStripExtremum(x.lo);
+    if (xStar !== null) {
+      // Include the extremum if it lies within the interval.
+      if (xStar >= x.lo && xStar <= x.hi) {
+        const g = scalarGamma(xStar);
+        lo = Math.min(lo, g);
+        hi = Math.max(hi, g);
+      }
+    } else {
+      // Past the table: the extremum value (closest to 0) has magnitude < 1e-3
+      // and shrinks toward 0. Conservatively extend the near-zero bound to 0
+      // (gamma keeps a constant sign on the strip, so only one side moves).
+      const stripEven = Math.floor(x.lo) % 2 === 0; // gamma > 0 on even strips
+      if (stripEven) lo = Math.min(lo, 0);
+      else hi = Math.max(hi, 0);
+    }
+    return ok({ lo, hi });
   }
 
   // x.lo > 0: entirely positive
@@ -657,10 +697,20 @@ function _gammaln(x: Interval): IntervalResult {
     if (ceilLo <= floorHi) {
       return { kind: 'singular', at: ceilLo };
     }
-    // No pole in interval — gammaln is continuous between poles
+    // No pole in interval, but gammaln = ln|gamma| has one interior extremum
+    // (a minimum, where |gamma| is smallest) on the strip.
     const gLo = scalarGammaln(x.lo);
     const gHi = scalarGammaln(x.hi);
-    return ok({ lo: Math.min(gLo, gHi), hi: Math.max(gLo, gHi) });
+    let lo = Math.min(gLo, gHi);
+    const hi = Math.max(gLo, gHi);
+    const xStar = gammaNegStripExtremum(x.lo);
+    if (xStar !== null) {
+      if (xStar >= x.lo && xStar <= x.hi) lo = Math.min(lo, scalarGammaln(xStar));
+    } else {
+      // Past the table: |gamma| at the extremum → 0, so ln|gamma| → −∞.
+      lo = -Infinity;
+    }
+    return ok({ lo, hi });
   }
 
   // x.lo > 0: entirely positive
@@ -702,9 +752,57 @@ export function factorial2(x: Interval | IntervalResult): IntervalResult {
   return ok({ lo: fLo, hi: fHi });
 }
 
+// Cap on the number of integer grid points enumerated for the integer-valued
+// interval functions below. Plotting subdivides domains finely, so the rounded
+// integer width of an interval is normally tiny; this bound only guards against
+// pathologically wide inputs.
+const MAX_INT_ENUM_POINTS = 4096;
+
+/** Integer points in [round(lo), round(hi)], or `null` if wider than `cap`. */
+function integerPoints(lo: number, hi: number, cap: number): number[] | null {
+  const a = Math.round(lo);
+  const b = Math.round(hi);
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+  if (b - a + 1 > cap) return null;
+  const out: number[] = [];
+  for (let i = a; i <= b; i++) out.push(i);
+  return out;
+}
+
+/**
+ * Tight enclosure of an integer-valued binary function over the integer grid
+ * spanned by two intervals, by enumerating every grid point. Returns `null`
+ * when the grid is too large to enumerate (caller supplies a conservative
+ * fallback). Corner sampling is unsound here: these functions are not monotone
+ * in their arguments, so interior points (e.g. `C(10, 5)`) are the extrema.
+ */
+function enumerateInteger2(
+  a: Interval,
+  b: Interval,
+  f: (x: number, y: number) => number
+): IntervalResult | null {
+  const xs = integerPoints(a.lo, a.hi, MAX_INT_ENUM_POINTS);
+  const ys = integerPoints(b.lo, b.hi, MAX_INT_ENUM_POINTS);
+  if (!xs || !ys || xs.length * ys.length > MAX_INT_ENUM_POINTS) return null;
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (const x of xs)
+    for (const y of ys) {
+      const v = f(x, y);
+      if (Number.isFinite(v)) {
+        if (v < lo) lo = v;
+        if (v > hi) hi = v;
+      }
+    }
+  if (lo === Infinity) return null;
+  return ok({ lo, hi });
+}
+
 /**
  * Binomial coefficient C(n, k) on intervals.
- * Both arguments are rounded to nearest integer. Monotonic in n for fixed k.
+ *
+ * Both arguments are rounded to nearest integer. C(n, k) is not monotone in k
+ * (it peaks at k ≈ n/2), so the enclosure enumerates the integer grid.
  */
 export function binomial(
   n: Interval | IntervalResult,
@@ -716,18 +814,19 @@ export function binomial(
   if (!Array.isArray(uK)) return uK;
   const [nVal] = uN;
   const [kVal] = uK;
-  // Evaluate at four corners and take min/max
-  const vals = [
-    scalarBinomial(Math.round(nVal.lo), Math.round(kVal.lo)),
-    scalarBinomial(Math.round(nVal.lo), Math.round(kVal.hi)),
-    scalarBinomial(Math.round(nVal.hi), Math.round(kVal.lo)),
-    scalarBinomial(Math.round(nVal.hi), Math.round(kVal.hi)),
-  ];
-  return ok({ lo: Math.min(...vals), hi: Math.max(...vals) });
+  const enumerated = enumerateInteger2(nVal, kVal, scalarBinomial);
+  if (enumerated) return enumerated;
+  // Conservative fallback for very wide ranges: C(n, k) ≥ 0 and is maximized,
+  // over all n ≤ nMax, at the central coefficient C(nMax, ⌊nMax/2⌋).
+  const nMax = Math.round(nVal.hi);
+  return ok({ lo: 0, hi: scalarBinomial(nMax, Math.floor(nMax / 2)) });
 }
 
 /**
  * GCD on intervals. Both arguments rounded to nearest integer.
+ *
+ * gcd is not monotone (e.g. gcd(6, 5) = 1 sits between gcd(6, 6) = 6 and
+ * gcd(6, 4) = 2), so the enclosure enumerates the integer grid.
  */
 export function gcd(
   a: Interval | IntervalResult,
@@ -739,17 +838,23 @@ export function gcd(
   if (!Array.isArray(uB)) return uB;
   const [aVal] = uA;
   const [bVal] = uB;
-  const vals = [
-    scalarGcd(Math.round(aVal.lo), Math.round(bVal.lo)),
-    scalarGcd(Math.round(aVal.lo), Math.round(bVal.hi)),
-    scalarGcd(Math.round(aVal.hi), Math.round(bVal.lo)),
-    scalarGcd(Math.round(aVal.hi), Math.round(bVal.hi)),
-  ];
-  return ok({ lo: Math.min(...vals), hi: Math.max(...vals) });
+  const enumerated = enumerateInteger2(aVal, bVal, scalarGcd);
+  if (enumerated) return enumerated;
+  // Conservative fallback: 0 ≤ gcd(a, b) ≤ max(|a|, |b|).
+  const m = Math.max(
+    Math.abs(Math.round(aVal.lo)),
+    Math.abs(Math.round(aVal.hi)),
+    Math.abs(Math.round(bVal.lo)),
+    Math.abs(Math.round(bVal.hi))
+  );
+  return ok({ lo: 0, hi: m });
 }
 
 /**
  * LCM on intervals. Both arguments rounded to nearest integer.
+ *
+ * lcm is not monotone (e.g. lcm(2, 5) = 10 exceeds lcm(2, 6) = 6), so the
+ * enclosure enumerates the integer grid.
  */
 export function lcm(
   a: Interval | IntervalResult,
@@ -761,13 +866,12 @@ export function lcm(
   if (!Array.isArray(uB)) return uB;
   const [aVal] = uA;
   const [bVal] = uB;
-  const vals = [
-    scalarLcm(Math.round(aVal.lo), Math.round(bVal.lo)),
-    scalarLcm(Math.round(aVal.lo), Math.round(bVal.hi)),
-    scalarLcm(Math.round(aVal.hi), Math.round(bVal.lo)),
-    scalarLcm(Math.round(aVal.hi), Math.round(bVal.hi)),
-  ];
-  return ok({ lo: Math.min(...vals), hi: Math.max(...vals) });
+  const enumerated = enumerateInteger2(aVal, bVal, scalarLcm);
+  if (enumerated) return enumerated;
+  // Conservative fallback: 0 ≤ lcm(a, b) ≤ |a|·|b|.
+  const ma = Math.max(Math.abs(Math.round(aVal.lo)), Math.abs(Math.round(aVal.hi)));
+  const mb = Math.max(Math.abs(Math.round(bVal.lo)), Math.abs(Math.round(bVal.hi)));
+  return ok({ lo: 0, hi: ma * mb });
 }
 
 /**

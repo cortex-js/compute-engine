@@ -61,8 +61,26 @@ export function negate(x: Interval | IntervalResult): IntervalResult {
  * Used by div() and other operations that need plain interval results.
  */
 export function _mul(a: Interval, b: Interval): Interval {
-  const products = [a.lo * b.lo, a.lo * b.hi, a.hi * b.lo, a.hi * b.hi];
+  const products = [
+    _prod(a.lo, b.lo),
+    _prod(a.lo, b.hi),
+    _prod(a.hi, b.lo),
+    _prod(a.hi, b.hi),
+  ];
   return { lo: Math.min(...products), hi: Math.max(...products) };
+}
+
+/**
+ * Endpoint product using the interval convention `0 · ±∞ = 0`.
+ *
+ * A plain `0 * Infinity` is `NaN`, which would poison `Math.min`/`Math.max`
+ * and collapse the whole interval to `NaN` — e.g. `[0, 1] · [1, ∞)` or an
+ * ordinary expression like `x · ln(x)` evaluated on `[0, 1]`. In interval
+ * arithmetic an exact zero endpoint annihilates an infinite one.
+ */
+function _prod(x: number, y: number): number {
+  if (x === 0 || y === 0) return 0;
+  return x * y;
 }
 
 /**

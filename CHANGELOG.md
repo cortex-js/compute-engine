@@ -1,5 +1,32 @@
 ### [Unreleased]
 
+- **New: curated mathematical identities loader (`loadIdentities()`)** — an
+  opt-in library of 558 curated identities and special values (gamma, zeta,
+  arctan, log/exp, factorials, Lambert W, digamma, elliptic integrals, …)
+  translated from the [Fungrim](https://fungrim.org) corpus, loadable as
+  guarded simplification rules:
+
+  ```ts
+  import { ComputeEngine } from '@cortex-js/compute-engine';
+  import { loadIdentities } from '@cortex-js/compute-engine/identities';
+
+  const ce = new ComputeEngine();
+  loadIdentities(ce); // or e.g. { topics: ['gamma'] }
+  ce.parse('\\Gamma(\\frac12)').simplify(); // → √π
+  ```
+
+  The loader is synchronous, idempotent per engine, and uses only the public
+  engine API. Rules carry tri-valued, fail-closed guard conditions (a rule
+  whose side condition cannot be proven does not fire); the
+  `onGuardUndecided` hook makes non-firing observable. Selection options:
+  `topics`, `classes`, `purposes`, `solve`. Returns a load report
+  (`loaded`, `byTarget`, `byPurpose`, `declared`, `skipped`,
+  `compileLedger`). Engines that don't import the subpath pay no bundle
+  cost.
+
+  _The subpath name `@cortex-js/compute-engine/identities` is provisional,
+  pending final naming._
+
 - **Comparison and simplification correctness fixes**:
   - An operator's equality handler returning `false` (definitely *not* equal)
     was treated as *equal*, so unordered values such as lists compared as `<=`.
@@ -276,6 +303,39 @@
     `IntervalResult` wrapper (`{kind, value: {lo, hi}}`) rather than its
     `.value`, yielding `Math.floor(undefined) = NaN`, so the loop never ran.
     The bound now unwraps either an `IntervalResult` or a bare interval.
+  - **GPU `Degrees` mapping (continued):** the same deg→rad fix applies to WGSL.
+  - **Python `Power` right-associativity** — `(a^b)^c` compiled to
+    `a ** b ** c`, which Python parses right-associatively as `a ** (b ** c)`.
+    The left base of a nested power is now parenthesized: `(a ** b) ** c`.
+  - **WGSL Gamma/Erf preambles** — `Gamma`/`Factorial`/`Beta`/`Erf` emitted the
+    GLSL preamble (`float _gpu_gamma(...)`) into WGSL shaders, which do not
+    compile. WGSL now gets `fn ... -> f32` variants.
+  - **GPU `If`/`Which`/`When`** — the default emitted a JS ternary and a bare
+    `NaN`, neither valid on GPU (WGSL has no `?:`; no shader language has a
+    `NaN` identifier). GPU targets now emit `select(...)` for WGSL, the ternary
+    for GLSL, and a language-appropriate NaN (`0.0/0.0` for GLSL,
+    `bitcast<f32>(0x7fc00000u)` for WGSL).
+
+- **Interval arithmetic conservative-enclosure fixes** — several interval
+  functions returned ranges that did not enclose the true result (unsound for
+  reliable plotting):
+  - **`mul`** propagated `NaN` through `0 · ∞` (e.g. `[0,1]·[1,∞)`, or `x·ln x`
+    on `[0,1]`). It now uses the interval convention `0 · ±∞ = 0`.
+  - **`clamp`** was computed as an intersection, returning `empty` when the
+    input lay entirely outside `[lo, hi]`. It is now `min(max(x, lo), hi)`, so
+    an out-of-range interval maps onto the nearer bound.
+  - **`binomial`/`gcd`/`lcm`** sampled only the four interval corners, but these
+    functions are not monotone (`C(10, [0,10])` corners are both `1`, missing
+    `C(10,5)=252`). They now enumerate the integer grid (with a conservative
+    fallback for very wide ranges).
+  - **`gamma`/`gammaln`** assumed monotonicity on each negative strip
+    `(−n−1, −n)`, but every strip has an interior extremum (a digamma zero); the
+    enclosure dropped it (e.g. `γ([−0.9,−0.1])` missed `γ(−0.5) ≈ −3.54`). The
+    extrema are now tabulated, with a conservative fallback for deep strips.
+  - **`sinc`/`fresnelS`/`fresnelC`** were not conservative past their tabulated
+    extrema (`sinc` widened only its lower bound; the Fresnel integrals had no
+    fallback at all). `sinc` now bounds the tail by `±1/|x|`, and the Fresnel
+    integrals by their `0.5 ± A` convergence band.
 
 - **Compilation fallback handles multi-argument lambdas** — when a `Function`
   literal (lambda) cannot be compiled to the target and falls back to

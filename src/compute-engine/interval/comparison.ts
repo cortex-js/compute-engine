@@ -215,13 +215,14 @@ export function clamp(
   const unwrapped = unwrapOrPropagate(x, lo, hi);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal, loVal, hiVal] = unwrapped;
-  // Use the most restrictive bounds
-  const resultLo = Math.max(xVal.lo, loVal.lo);
-  const resultHi = Math.min(xVal.hi, hiVal.hi);
-
-  if (resultLo > resultHi) {
-    return { kind: 'empty' };
-  }
+  // clamp(x, lo, hi) = min(max(x, lo), hi), applied elementwise to the
+  // interval bounds. The previous implementation computed the *intersection*
+  // (max of los, min of his), which returns `empty` when x lies entirely
+  // outside [lo, hi] — but clamping maps such an x onto the nearer bound, it
+  // never produces an empty result.
+  const lowered = { lo: Math.max(xVal.lo, loVal.lo), hi: Math.max(xVal.hi, loVal.hi) };
+  const resultLo = Math.min(lowered.lo, hiVal.lo);
+  const resultHi = Math.min(lowered.hi, hiVal.hi);
 
   return { kind: 'interval', value: { lo: resultLo, hi: resultHi } };
 }

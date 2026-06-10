@@ -58,6 +58,37 @@ function gpuVec3(target?: CompileTarget<Expression>): string {
 }
 
 /**
+ * Emit a NaN literal valid for the target shader language.
+ *
+ * Neither GLSL nor WGSL has a `NaN` identifier (the base compiler's default
+ * `If`/`Which`/`When` emit a bare `NaN`, which fails to compile on GPU). GLSL
+ * evaluates `0.0 / 0.0` to NaN at runtime; WGSL rejects a constant `0.0 / 0.0`
+ * during const-evaluation, so use a NaN bit pattern there.
+ */
+function gpuNaN(target?: CompileTarget<Expression>): string {
+  return target?.language === 'wgsl'
+    ? 'bitcast<f32>(0x7fc00000u)'
+    : '(0.0 / 0.0)';
+}
+
+/**
+ * Emit a conditional `cond ? whenTrue : whenFalse` for the target language.
+ *
+ * GLSL has the ternary operator; WGSL does not and uses
+ * `select(false_value, true_value, condition)` instead.
+ */
+function gpuConditional(
+  cond: string,
+  whenTrue: string,
+  whenFalse: string,
+  target?: CompileTarget<Expression>
+): string {
+  if (target?.language === 'wgsl')
+    return `select(${whenFalse}, ${whenTrue}, ${cond})`;
+  return `((${cond}) ? (${whenTrue}) : (${whenFalse}))`;
+}
+
+/**
  * Extract a lowercase string literal from a boxed expression, or `null`
  * if it isn't a string literal. Operators that need to switch on a
  * colorspace name at compile time use this to peek at the argument.
@@ -383,6 +414,44 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   Max: 'max',
   Min: 'min',
   Mix: 'mix',
+  // Control-flow forms — the base compiler's default emits a JS ternary and a
+  // bare `NaN`, neither of which is valid GPU code (WGSL has no `?:`, and no
+  // shader language has a `NaN` identifier). Emit `select(...)` for WGSL and a
+  // language-appropriate NaN.
+  If: (args, compile, target) => {
+    if (args.length !== 3) throw new Error('If: wrong number of arguments');
+    return gpuConditional(
+      compile(args[0]),
+      compile(args[1]),
+      compile(args[2]),
+      target
+    );
+  },
+  When: (args, compile, target) => {
+    if (args.length !== 2)
+      throw new Error('When: expected exactly 2 arguments (expr, cond)');
+    if (isSymbol(args[1], 'True')) return `(${compile(args[0])})`;
+    if (isSymbol(args[1], 'False')) return gpuNaN(target);
+    return gpuConditional(
+      compile(args[1]),
+      compile(args[0]),
+      gpuNaN(target),
+      target
+    );
+  },
+  Which: (args, compile, target) => {
+    if (args.length < 2 || args.length % 2 !== 0)
+      throw new Error('Which: expected condition/value pairs');
+    const build = (i: number): string => {
+      if (i >= args.length) return gpuNaN(target);
+      const cond = args[i];
+      const val = args[i + 1];
+      // `True` marks the default branch.
+      if (isSymbol(cond, 'True')) return `(${compile(val)})`;
+      return gpuConditional(compile(cond), compile(val), build(i + 2), target);
+    };
+    return build(0);
+  },
   Power: (args, compile, target) => {
     const base = args[0];
     const exp = args[1];
@@ -1225,9 +1294,9 @@ export function compileGPUMatrix(
  * GPU gamma function using Lanczos approximation (g=7, n=9 coefficients).
  *
  * Uses reflection formula for z < 0.5 and Lanczos for z >= 0.5.
- * Valid for both GLSL and WGSL (uses standard math builtins).
+ * GLSL syntax.
  */
-export const GPU_GAMMA_PREAMBLE = `
+export const GPU_GAMMA_PREAMBLE_GLSL = `
 float _gpu_gamma(float z) {
   const float PI = 3.14159265358979;
   // For z < 0.5, use reflection formula with inlined Lanczos (non-recursive)
@@ -1261,10 +1330,46 @@ float _gpu_gammaln(float z) {
 `;
 
 /**
- * GPU error function using Abramowitz & Stegun approximation.
- * Maximum error: |epsilon(x)| <= 1.5e-7.
+ * GPU Gamma function preamble (WGSL syntax). WGSL has no implicit GLSL-style
+ * `float`/braceless-`if` syntax, so a `_WGSL` variant is required (the GLSL
+ * preamble does not compile as WGSL).
  */
-export const GPU_ERF_PREAMBLE = `
+export const GPU_GAMMA_PREAMBLE_WGSL = `
+fn _gpu_gamma(z: f32) -> f32 {
+  let PI = 3.14159265358979;
+  var w = z;
+  if (z < 0.5) { w = 1.0 - z; }
+  w = w - 1.0;
+  var x = 0.99999999999980993;
+  x = x + 676.5203681218851 / (w + 1.0);
+  x = x + -1259.1392167224028 / (w + 2.0);
+  x = x + 771.32342877765313 / (w + 3.0);
+  x = x + -176.61502916214059 / (w + 4.0);
+  x = x + 12.507343278686905 / (w + 5.0);
+  x = x + -0.13857109526572012 / (w + 6.0);
+  x = x + 9.9843695780195716e-6 / (w + 7.0);
+  x = x + 1.5056327351493116e-7 / (w + 8.0);
+  let t = w + 7.5;
+  let g = sqrt(2.0 * PI) * pow(t, w + 0.5) * exp(-t) * x;
+  if (z < 0.5) { return PI / (sin(PI * z) * g); }
+  return g;
+}
+
+fn _gpu_gammaln(z: f32) -> f32 {
+  let z3 = z * z * z;
+  return z * log(z) - z - 0.5 * log(z)
+    + 0.5 * log(2.0 * 3.14159265358979)
+    + 1.0 / (12.0 * z)
+    - 1.0 / (360.0 * z3)
+    + 1.0 / (1260.0 * z3 * z * z);
+}
+`;
+
+/**
+ * GPU error function using Abramowitz & Stegun approximation.
+ * Maximum error: |epsilon(x)| <= 1.5e-7. GLSL syntax.
+ */
+export const GPU_ERF_PREAMBLE_GLSL = `
 float _gpu_erf(float x) {
   float ax = abs(x);
   float t = 1.0 / (1.0 + 0.3275911 * ax);
@@ -1280,6 +1385,30 @@ float _gpu_erfinv(float x) {
   float x5 = x3 * x2;
   float x7 = x5 * x2;
   float x9 = x7 * x2;
+  return sqrt(pi) * 0.5 * (x + (pi / 12.0) * x3 + (7.0 * pi * pi / 480.0) * x5 + (127.0 * pi * pi * pi / 40320.0) * x7 + (4369.0 * pi * pi * pi * pi / 5806080.0) * x9);
+}
+`;
+
+/**
+ * GPU error function preamble (WGSL syntax). See GPU_GAMMA_PREAMBLE_WGSL.
+ */
+export const GPU_ERF_PREAMBLE_WGSL = `
+fn _gpu_erf(x: f32) -> f32 {
+  let ax = abs(x);
+  let t = 1.0 / (1.0 + 0.3275911 * ax);
+  let y = ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t;
+  let result = 1.0 - y * exp(-ax * ax);
+  if (x < 0.0) { return -result; }
+  return result;
+}
+
+fn _gpu_erfinv(x: f32) -> f32 {
+  let pi = 3.14159265358979;
+  let x2 = x * x;
+  let x3 = x * x2;
+  let x5 = x3 * x2;
+  let x7 = x5 * x2;
+  let x9 = x7 * x2;
   return sqrt(pi) * 0.5 * (x + (pi / 12.0) * x3 + (7.0 * pi * pi / 480.0) * x5 + (127.0 * pi * pi * pi / 40320.0) * x7 + (4369.0 * pi * pi * pi * pi / 5806080.0) * x9);
 }
 `;
@@ -2897,8 +3026,16 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     };
     let preamble = '';
     preamble += buildComplexPreamble(code, this.languageId);
-    if (code.includes('_gpu_gamma')) preamble += GPU_GAMMA_PREAMBLE;
-    if (code.includes('_gpu_erf')) preamble += GPU_ERF_PREAMBLE;
+    if (code.includes('_gpu_gamma'))
+      preamble +=
+        this.languageId === 'wgsl'
+          ? GPU_GAMMA_PREAMBLE_WGSL
+          : GPU_GAMMA_PREAMBLE_GLSL;
+    if (code.includes('_gpu_erf'))
+      preamble +=
+        this.languageId === 'wgsl'
+          ? GPU_ERF_PREAMBLE_WGSL
+          : GPU_ERF_PREAMBLE_GLSL;
     if (code.includes('_gpu_heaviside'))
       preamble +=
         this.languageId === 'wgsl'

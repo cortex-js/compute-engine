@@ -477,4 +477,55 @@ describe('WGSL COMPILATION', () => {
       expect(code).toContain('var v: vec2f');
     });
   });
+
+  // REVIEW.md E14: Gamma/Erf preambles were GLSL-only (no `_WGSL` variant), so
+  // WGSL shaders using them emitted GLSL `float ...` syntax and would not
+  // compile. WGSL must get `fn ... -> f32` definitions.
+  describe('WGSL special-function preambles (E14)', () => {
+    it('emits WGSL fn syntax for the Gamma preamble', () => {
+      const r = wgsl.compile(ce.expr(['Gamma', 'x']));
+      expect(r.code).toContain('_gpu_gamma(x)');
+      expect(r.preamble).toContain('fn _gpu_gamma(z: f32) -> f32');
+      expect(r.preamble).not.toContain('float _gpu_gamma');
+    });
+
+    it('emits WGSL fn syntax for the Erf preamble', () => {
+      const r = wgsl.compile(ce.expr(['Erf', 'x']));
+      expect(r.preamble).toContain('fn _gpu_erf(x: f32) -> f32');
+      expect(r.preamble).not.toContain('float _gpu_erf');
+    });
+  });
+
+  // REVIEW.md E15: WGSL has no `?:` ternary and no `NaN` identifier, so the
+  // base compiler's default If/Which/When (JS ternary + bare NaN) produced
+  // invalid WGSL. These must use `select(...)` and a NaN bit pattern.
+  describe('WGSL control flow (E15)', () => {
+    it('compiles If to select(...)', () => {
+      const e = ce.expr(['If', ['Greater', 'x', 0], 1, ['Negate', 1]]);
+      const code = wgsl.compile(e).code;
+      expect(code).toContain('select(');
+      expect(code).not.toContain('?');
+    });
+
+    it('compiles When to select(...) with a valid NaN, never a bare NaN', () => {
+      const e = ce.expr(['When', 'x', ['Greater', 'x', 0]]);
+      const code = wgsl.compile(e).code;
+      expect(code).toContain('select(');
+      expect(code).toContain('bitcast<f32>(0x7fc00000u)');
+      expect(/\bNaN\b/.test(code)).toBe(false);
+    });
+
+    it('compiles Which to nested select(...)', () => {
+      const e = ce.expr([
+        'Which',
+        ['Greater', 'x', 0],
+        1,
+        'True',
+        ['Negate', 1],
+      ]);
+      const code = wgsl.compile(e).code;
+      expect(code).toContain('select(');
+      expect(code).not.toContain('?');
+    });
+  });
 });

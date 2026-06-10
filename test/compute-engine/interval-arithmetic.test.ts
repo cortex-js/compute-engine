@@ -57,11 +57,20 @@ import {
   acoth,
   acsch,
   asech,
+  sinc,
+  fresnelS,
+  fresnelC,
+  gamma,
+  gammaln,
+  binomial,
+  gcd,
+  lcm,
   // Comparison
   less,
   lessEqual,
   equal,
   notEqual,
+  clamp,
 } from '../../src/compute-engine/interval';
 
 // Helper to check interval results
@@ -739,6 +748,81 @@ describe('INTERVAL SINGULARITY DETECTION', () => {
     if (result.kind === 'partial') {
       expect(result.value.lo).toBe(-Infinity);
       expect(result.domainClipped).toBe('lo');
+    }
+  });
+});
+
+// REVIEW.md E8–E12: conservative-enclosure fixes for the interval library.
+describe('INTERVAL ENCLOSURE REGRESSIONS (REVIEW.md E8–E12)', () => {
+  // E9: 0 · ∞ must follow the interval convention 0·±∞ = 0, not propagate NaN.
+  test('E9: mul with a zero endpoint and an infinite endpoint', () => {
+    const r = mul({ lo: 0, hi: 1 }, { lo: 1, hi: Infinity });
+    expect(r.kind).toBe('interval');
+    if (r.kind === 'interval') {
+      expect(r.value.lo).toBe(0); // was NaN
+      expect(r.value.hi).toBe(Infinity);
+    }
+    // x·ln(x) shape on [0,1]: [0,1] · [-∞, 0] should stay finite-lo
+    const r2 = mul({ lo: 0, hi: 1 }, { lo: -Infinity, hi: 0 });
+    expect(r2.kind).toBe('interval');
+    if (r2.kind === 'interval') expect(Number.isNaN(r2.value.lo)).toBe(false);
+  });
+
+  // E12: clamp is min(max(x,lo),hi), never empty for out-of-range x.
+  test('E12: clamp of an out-of-range interval maps onto the bound', () => {
+    expectInterval(clamp({ lo: 5, hi: 6 }, { lo: 0, hi: 0 }, { lo: 2, hi: 3 }), 2, 3);
+    expectInterval(clamp({ lo: 1, hi: 4 }, { lo: 0, hi: 0 }, { lo: 2, hi: 3 }), 1, 3);
+    // Entirely below the lower bound clamps up.
+    expectInterval(clamp({ lo: -5, hi: -4 }, { lo: 0, hi: 0 }, { lo: 2, hi: 3 }), 0, 0);
+  });
+
+  // E11: binomial/gcd/lcm enumerate the integer grid (corners miss interior
+  // extrema of these non-monotone functions).
+  test('E11: binomial encloses the central coefficient', () => {
+    // C(10, k) for k ∈ [0,10] peaks at C(10,5) = 252 (corners are both 1).
+    expectInterval(binomial({ lo: 10, hi: 10 }, { lo: 0, hi: 10 }), 1, 252, 1);
+  });
+
+  test('E11: gcd encloses coprime interior points', () => {
+    // gcd(6, k) for k ∈ [0,9] reaches 1 (e.g. gcd(6,5)); corners missed it.
+    expectInterval(gcd({ lo: 6, hi: 6 }, { lo: 0, hi: 9 }), 1, 6, 1);
+  });
+
+  test('E11: lcm encloses interior maxima', () => {
+    // lcm(2, k) for k ∈ [1,6] reaches 10 (lcm(2,5)); corners gave max 6.
+    expectInterval(lcm({ lo: 2, hi: 2 }, { lo: 1, hi: 6 }), 2, 10, 1);
+  });
+
+  // E8: gamma is not monotone on a negative strip; the interior extremum must
+  // be in the enclosure.
+  test('E8: gamma on [-0.9,-0.1] encloses the local extremum gamma(-0.5)', () => {
+    const r = gamma({ lo: -0.9, hi: -0.1 });
+    expect(r.kind).toBe('interval');
+    if (r.kind === 'interval') {
+      // gamma(-0.5) ≈ -3.5449 must be within [lo, hi].
+      expect(r.value.lo).toBeLessThanOrEqual(-3.5449);
+      expect(r.value.hi).toBeGreaterThanOrEqual(-3.5449);
+    }
+  });
+
+  // E10: sinc/fresnel must stay conservative past their tabulated extrema.
+  test('E10: sinc on [38,40] encloses the true local maximum', () => {
+    const r = sinc({ lo: 38, hi: 40 });
+    expect(r.kind).toBe('interval');
+    if (r.kind === 'interval') {
+      // True max ≈ sin(39.27)/39.27 ≈ 0.02546.
+      expect(r.value.hi).toBeGreaterThanOrEqual(0.02546);
+      expect(r.value.lo).toBeLessThanOrEqual(-0.02546);
+    }
+  });
+
+  test('E10: fresnelS past the table is a conservative band around 0.5', () => {
+    const r = fresnelS({ lo: 6.5, hi: 7 });
+    expect(r.kind).toBe('interval');
+    if (r.kind === 'interval') {
+      // True S on [6.5,7] stays within ~[0.49, 0.54]; the band must enclose it.
+      expect(r.value.lo).toBeLessThanOrEqual(0.49);
+      expect(r.value.hi).toBeGreaterThanOrEqual(0.54);
     }
   });
 });

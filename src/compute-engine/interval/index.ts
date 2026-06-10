@@ -165,6 +165,9 @@ export {
   gammaln,
   factorial,
   factorial2,
+  binomial,
+  gcd,
+  lcm,
 } from './elementary';
 
 // Trigonometric functions

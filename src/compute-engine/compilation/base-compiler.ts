@@ -155,8 +155,18 @@ export class BaseCompiler {
                 op[1]
               )}`;
             } else {
+              // `Power` is right-associative: `a ** b ** c` parses as
+              // `a ** (b ** c)`. So a *left* operand of equal precedence must
+              // be parenthesized — otherwise `(a^b)^c` would emit the
+              // right-associative `a ** b ** c` (wrong grouping in Python,
+              // where `**` is the only right-associative arithmetic operator).
+              const rightAssoc = h === 'Power';
               resultStr = args
-                .map((arg) => BaseCompiler.compile(arg, target, op[1]))
+                .map((arg, i) => {
+                  const operandPrec =
+                    rightAssoc && i < args.length - 1 ? op[1] + 1 : op[1];
+                  return BaseCompiler.compile(arg, target, operandPrec);
+                })
                 .join(` ${op[0]} `);
             }
             return op[1] < prec ? `(${resultStr})` : resultStr;
