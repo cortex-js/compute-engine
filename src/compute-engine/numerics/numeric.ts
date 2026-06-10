@@ -99,7 +99,7 @@ export function canonicalInteger(
         [1, 5],
         [1, 6],
         [1, 7],
-        [1, 8],
+        [2, 2], // √8 = 2√2
         [3, 1],
         [1, 10],
         [1, 11],
@@ -111,7 +111,7 @@ export function canonicalInteger(
         [1, 17],
         [3, 2],
         [1, 19],
-        [1, 20],
+        [2, 5], // √20 = 2√5
       ] as const
     )[n];
     if (result) return result;

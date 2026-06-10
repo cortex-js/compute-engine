@@ -58,10 +58,12 @@ describe('SOLVING A QUADRATIC EQUATION', () => {
 
   it('should solve ax^2 + c', () => {
     const eqn = ce.expr(['Add', ['Multiply', 2, ['Square', 'x']], -16]);
+    // x = ±√8 = ±2√2 (normalized; see REVIEW.md D8 — the radical table now
+    // extracts the perfect-square factor from √8).
     expect(eqn.solve('x')).toMatchInlineSnapshot(`
       [
-        ["Sqrt", 8],
-        ["Negate", ["Sqrt", 8]],
+        ["Multiply", 2, ["Sqrt", 2]],
+        ["Multiply", -2, ["Sqrt", 2]],
       ]
     `);
   });

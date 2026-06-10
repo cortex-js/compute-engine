@@ -1,5 +1,6 @@
 import { Expression, ComputeEngine } from '../../src/compute-engine';
 import {
+  factor,
   factorPerfectSquare,
   factorDifferenceOfSquares,
   factorQuadratic,
@@ -12,6 +13,32 @@ const ce = new ComputeEngine();
 function parse(latex: string): Expression {
   return ce.parse(latex);
 }
+
+// REVIEW.md G13: factor()'s Add case takes the gcd of term coefficients to
+// extract content; a complex coefficient (the `i` in `1 + i`) has no gcd, so
+// `gcd` returned NaN and poisoned the whole result. factor() must leave such
+// sums unfactored — otherwise dividing a Gaussian integer destroys it at
+// boxing time (Divide((1+i), 2) → Multiply(1/2, NaN)).
+describe('Gaussian-integer sums (G13)', () => {
+  it('factor(1 + i) is not NaN', () => {
+    const r = factor(ce.box(['Add', 1, 'ImaginaryUnit']));
+    expect(r.isNaN).not.toBe(true);
+    expect(r.isSame(ce.box(['Add', 1, 'ImaginaryUnit']))).toBe(true);
+  });
+
+  it('factor(2 + 2i) is not NaN', () => {
+    const r = factor(ce.box(['Add', 2, ['Multiply', 2, 'ImaginaryUnit']]));
+    expect(r.isNaN).not.toBe(true);
+  });
+
+  it('dividing a Gaussian integer by an integer preserves the value', () => {
+    const q = ce.box(['Divide', ['Add', 1, 'ImaginaryUnit'], 2]);
+    expect(q.isNaN).not.toBe(true);
+    const n = q.N();
+    expect(n.re).toBeCloseTo(0.5, 12);
+    expect(n.im).toBeCloseTo(0.5, 12);
+  });
+});
 
 describe('Perfect Square Trinomial Factoring', () => {
   test('x² + 2x + 1 → (x+1)²', () => {

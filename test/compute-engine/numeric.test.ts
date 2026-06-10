@@ -56,3 +56,19 @@ describe('NUMERIC small magnitudes (REVIEW.md D6)', () => {
     expect(r.re).toBeCloseTo(-230.2585092994, 10);
   });
 });
+
+// REVIEW.md D8: the canonicalInteger radical lookup table had two wrong
+// entries — 8 → [1,8] (should be [2,2]) and 20 → [1,20] (should be [2,5]) —
+// so exact √8 / √20 did not normalize, breaking structural equality.
+describe('NUMERIC radical normalization (REVIEW.md D8)', () => {
+  test('exact sqrt extracts perfect-square factors for 8 and 20', () => {
+    expect(ce.parse('\\sqrt{8}').isSame(ce.parse('2\\sqrt{2}'))).toBe(true);
+    expect(ce.parse('\\sqrt{20}').isSame(ce.parse('2\\sqrt{5}'))).toBe(true);
+  });
+
+  test('previously-correct table entries are unaffected', () => {
+    expect(ce.parse('\\sqrt{12}').isSame(ce.parse('2\\sqrt{3}'))).toBe(true);
+    expect(ce.parse('\\sqrt{18}').isSame(ce.parse('3\\sqrt{2}'))).toBe(true);
+    expect(ce.parse('\\sqrt{16}').isSame(ce.number(4))).toBe(true);
+  });
+});

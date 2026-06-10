@@ -588,6 +588,12 @@ export function factor(expr: Expression): Expression {
     const terms: { coeff: NumericValue; term: Expression }[] = [];
     for (const op of expr.ops) {
       const [coeff, term] = op.toNumericValue();
+      // GCD-based content extraction is only defined for real (rational)
+      // coefficients. A complex coefficient — e.g. the `i` in `1 + i` — has no
+      // meaningful gcd: `gcd` returns NaN, which would poison `common` and make
+      // factor() return NaN (destroying a Gaussian integer at boxing time).
+      // Leave such sums unfactored.
+      if (coeff.im !== 0) return expr;
       common = common ? common.gcd(coeff) : coeff;
       if (!coeff.isZero) terms.push({ coeff, term });
     }

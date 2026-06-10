@@ -76,6 +76,23 @@
   error was silently swallowed: the rule never applied, in `replace()` and in
   `simplify({rules})`.
 
+- **Radical, big-decimal-power, and factoring correctness fixes**:
+  - **Exact `√8` and `√20`** did not normalize — the small-integer radical
+    lookup table had two wrong entries (`8 → √8`, `20 → √20` instead of `2√2`,
+    `2√5`), so e.g. `√8` was not structurally equal to `2√2` and `solve` of
+    `2x²−16=0` returned `±√8` rather than `±2√2`.
+  - **`BigDecimal.pow` falsely overflowed** for large exponents: the overflow
+    guard used the significand's digit count (`floor(log10)+1`) as its log10,
+    overestimating by up to a full order of magnitude, then amplifying the error
+    by the exponent — `1^1e16` returned `Infinity` (and `2^1e16`, which is
+    representable, also did). It now estimates `log10` from the leading digits.
+  - **Dividing a Gaussian integer by an integer destroyed it** —
+    `Divide((1+i), 2)` canonicalized to `Multiply(1/2, NaN)`. `factor()`'s Add
+    case takes the gcd of term coefficients to extract content, but a complex
+    coefficient (the `i`) has no gcd, so `gcd` returned `NaN` and poisoned the
+    result. `factor()` now leaves sums with complex coefficients unfactored, and
+    the division yields `(1+i)/2` (= `0.5 + 0.5i`).
+
 - **Numeric correctness fixes** — several arithmetic operations produced
   silently-wrong results:
   - Complex `pow` (machine precision) used `arg ** n` instead of `arg · n` in

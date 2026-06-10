@@ -1703,6 +1703,24 @@ describe('pow()', () => {
     expect(new BigDecimal('1').pow(new BigDecimal('0')).eq(new BigDecimal('1'))).toBe(true);
   });
 
+  // REVIEW.md D9: the overflow guard used the significand's digit count
+  // (floor(log10)+1) as its log10, overestimating by up to a full order of
+  // magnitude. Multiplied by a large exponent it falsely reported overflow.
+  test('1^1e16 = 1 (overflow estimate must not over-count log10)', () => {
+    expect(new BigDecimal('1').pow(1e16).eq(new BigDecimal('1'))).toBe(true);
+  });
+
+  test('a single-digit base with a large exponent does not falsely overflow', () => {
+    // 2^1e16 has log10 ≈ 3e15 < 9e15, so it is representable (finite).
+    expect(new BigDecimal('2').pow(1e16).isFinite()).toBe(true);
+  });
+
+  test('a genuine overflow still returns Infinity', () => {
+    // 10^1e16 has exponent 1e16 > 9e15 — beyond the representable range.
+    expect(new BigDecimal('10').pow(1e16).isFinite()).toBe(false);
+    expect(new BigDecimal('1e100').pow(1e15).isFinite()).toBe(false);
+  });
+
   test('x^1 = x', () => {
     const x = new BigDecimal('42.5');
     expect(x.pow(new BigDecimal('1')).eq(x)).toBe(true);

@@ -710,7 +710,17 @@ export class BigDecimal {
       // Estimate: log10(result) ≈ expValue * log10(|this|)
       const absSig =
         this.significand < 0n ? -this.significand : this.significand;
-      const thisLog10 = bigintDigits(absSig) + this.exponent;
+      // log10(|significand|), NOT its digit count: `bigintDigits` returns
+      // floor(log10)+1, overestimating by up to a full order of magnitude.
+      // Multiplied by a large exponent this falsely overflows — e.g.
+      // `1^1e16` (digits=1, log10=0) was estimated at 1e16 > 9e15 → Infinity.
+      // Use the leading ~15 digits for an accurate float log10 (avoids Number
+      // overflow when the significand has more digits than a double can hold).
+      const sigDigits = bigintDigits(absSig);
+      const dropped = sigDigits > 15 ? sigDigits - 15 : 0;
+      const lead =
+        dropped > 0 ? Number(absSig / 10n ** BigInt(dropped)) : Number(absSig);
+      const thisLog10 = Math.log10(lead) + dropped + this.exponent;
       // Use Number for the estimate — safe since we only need a rough magnitude
       const resultLog10 = Number(expValue) * thisLog10;
       if (resultLog10 > 9e15) {
