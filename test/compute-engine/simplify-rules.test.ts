@@ -205,4 +205,30 @@ describe('simplificationRules', () => {
     const result = ce.parse('1 \\times x').simplify();
     expect(result.latex).toBe('x');
   });
+
+  //
+  // REVIEW.md E7: rules that used to return a RuleStep unconditionally (the
+  // Derivative rule re-fired a nested simplify every pass) now fire only on a
+  // real change, and Hypot no longer calls .simplify() internally. These are
+  // output-neutral refactors — lock in the outputs and idempotency.
+  //
+  describe('E7: no always-firing / redundant in-rule .simplify()', () => {
+    const ce = new ComputeEngine();
+
+    it('Hypot still simplifies (driver handles the Sqrt rewrite)', () => {
+      expect(ce.box(['Hypot', 3, 4]).simplify().toString()).toBe('5');
+      expect(ce.box(['Hypot', 'x', 'y']).simplify().toString()).toBe(
+        'sqrt(x^2 + y^2)'
+      );
+    });
+
+    it('Derivative simplification is stable (idempotent)', () => {
+      const d = ce.box(['Derivative', 'Sin']).simplify();
+      expect(d.simplify().isSame(d)).toBe(true);
+      const d2 = ce
+        .box(['Derivative', ['Function', ['Add', 'x', 'x'], 'x']])
+        .simplify();
+      expect(d2.simplify().isSame(d2)).toBe(true);
+    });
+  });
 });

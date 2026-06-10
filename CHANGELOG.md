@@ -12,6 +12,14 @@
   - `(-x)^{3/4}` (and other `(-x)^{odd/even}` rational powers of a negated base)
     is no longer simplified to `x^{3/4}`: an even root of a negative base is
     complex, so the two are not equal.
+  - Two simplification rules returned a rewrite step unconditionally, re-firing a
+    nested `simplify()` on every pass: the `Derivative` rule (`Derivative` is
+    lazy, so it simplified its operand but reported a change even when nothing
+    changed) and the system-of-equations rule. Both now emit a step only when
+    the result actually differs. `Hypot` also no longer calls `.simplify()`
+    internally — the driver simplifies its `Sqrt(x²+y²)` rewrite. Output is
+    unchanged; this removes redundant work and a documented recursion-hazard
+    pattern.
 
 - **`ReplaceOptions.form` replaces `canonical`** — `expr.replace()` and rule
   application now accept a `form` option (`'canonical'`, `'structural'`,

@@ -613,20 +613,22 @@ export const SIMPLIFY_RULES: Rule[] = [
   //
   (x): RuleStep | undefined => {
     if (!isFunction(x, 'Derivative')) return undefined;
+    if (x.nops < 1 || x.nops > 2) return undefined;
     const ce = x.engine;
     const [f, degree] = x.ops;
-    if (x.nops === 2)
-      return {
-        value: ce._fn('Derivative', [f.simplify(), degree]),
-        because: 'derivative',
-      };
-    if (x.nops === 1) {
-      return {
-        value: ce._fn('Derivative', [f.simplify()]),
-        because: 'derivative',
-      };
-    }
-    return undefined;
+    // `Derivative` is lazy, so the driver does not recurse into its operand —
+    // simplifying the function operand here is the only place it happens. But
+    // only emit a step when that actually changes `f`: returning a RuleStep
+    // unconditionally re-fires this rule (Derivative → Derivative) and re-runs
+    // a nested simplification on every pass for no benefit.
+    const simplifiedF = f.simplify();
+    if (simplifiedF.isSame(f)) return undefined;
+    return {
+      value: degree
+        ? ce._fn('Derivative', [simplifiedF, degree])
+        : ce._fn('Derivative', [simplifiedF]),
+      because: 'derivative',
+    };
   },
 
   //
@@ -636,9 +638,7 @@ export const SIMPLIFY_RULES: Rule[] = [
     if (!isFunction(x, 'Hypot')) return undefined;
     const ce = x.engine;
     return {
-      value: ce
-        .expr(['Sqrt', ['Add', ['Square', x.op1], ['Square', x.op2]]])
-        .simplify(),
+      value: ce.expr(['Sqrt', ['Add', ['Square', x.op1], ['Square', x.op2]]]),
       because: 'hypot(x,y) -> sqrt(x^2+y^2)',
     };
   },
@@ -1080,11 +1080,12 @@ function simplifySystemOfEquations(expr: Expression): RuleStep | undefined {
   // @todo: could also resolve it... See https://github.com/cortex-js/compute-engine/issues/189
 
   const ce = expr.engine;
+  const simplified = expr.ops.map((x) => x.simplify());
+  // Only emit a step when simplifying an equation actually changes it; an
+  // unconditional RuleStep re-fires this rule on every pass.
+  if (simplified.every((s, i) => s.isSame(expr.ops[i]))) return undefined;
   return {
-    value: ce.function(
-      'List',
-      expr.ops.map((x) => x.simplify())
-    ),
+    value: ce.function('List', simplified),
     because: 'simplify-system-of-equations',
   };
 }
