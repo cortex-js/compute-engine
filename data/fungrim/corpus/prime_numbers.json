@@ -1,0 +1,705 @@
+{
+ "topic": "prime_numbers",
+ "title": "Prime numbers",
+ "source": "pygrim/formulas/prime_numbers.py",
+ "generator": "grim2mathjson 0.1.0",
+ "entries": [
+  {
+   "id": "04427b",
+   "formula": [
+    "Equal",
+    [
+     "PrimePi",
+     "x"
+    ],
+    [
+     "Count",
+     [
+      "Set",
+      "p",
+      [
+       "Element",
+       "p",
+       "Primes",
+       [
+        "LessEqual",
+        "p",
+        "x"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": [
+    "Element",
+    "x",
+    "RealNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "PrimePi"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "prime_numbers"
+   ]
+  },
+  {
+   "id": "1e3388",
+   "formula": [
+    "Greater",
+    [
+     "PrimeNumber",
+     "n"
+    ],
+    [
+     "Multiply",
+     "n",
+     [
+      "Subtract",
+      [
+       "Add",
+       [
+        "Subtract",
+        [
+         "Add",
+         [
+          "Ln",
+          "n"
+         ],
+         [
+          "Ln",
+          [
+           "Ln",
+           "n"
+          ]
+         ]
+        ],
+        1
+       ],
+       [
+        "Divide",
+        [
+         "Subtract",
+         [
+          "Ln",
+          [
+           "Ln",
+           "n"
+          ]
+         ],
+         2
+        ],
+        [
+         "Ln",
+         "n"
+        ]
+       ]
+      ],
+      [
+       "Divide",
+       [
+        "Add",
+        [
+         "Subtract",
+         [
+          "Power",
+          [
+           "Ln",
+           [
+            "Ln",
+            "n"
+           ]
+          ],
+          2
+         ],
+         [
+          "Multiply",
+          6,
+          [
+           "Ln",
+           [
+            "Ln",
+            "n"
+           ]
+          ]
+         ]
+        ],
+        {
+         "num": "11.508"
+        }
+       ],
+       [
+        "Multiply",
+        2,
+        [
+         "Power",
+         [
+          "Ln",
+          "n"
+         ],
+         2
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    [
+     "Range",
+     2,
+     "PositiveInfinity"
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Ln",
+    "PrimeNumber"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": [
+    "https://arxiv.org/abs/1706.03651"
+   ],
+   "topics": [
+    "prime_numbers"
+   ]
+  },
+  {
+   "id": "375afe",
+   "formula": [
+    "Less",
+    [
+     "Abs",
+     [
+      "Subtract",
+      [
+       "PrimePi",
+       "x"
+      ],
+      [
+       "LogIntegral",
+       "x"
+      ]
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Multiply",
+      [
+       "Sqrt",
+       "x"
+      ],
+      [
+       "Ln",
+       "x"
+      ]
+     ],
+     [
+      "Multiply",
+      8,
+      "Pi"
+     ]
+    ]
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     "RealNumbers"
+    ],
+    [
+     "GreaterEqual",
+     "x",
+     2657
+    ],
+    "RiemannHypothesis"
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Ln",
+    "LogIntegral",
+    "PrimePi"
+   ],
+   "guardLevel": "undischargeable",
+   "flavor": null,
+   "references": [
+    "L. Schoenfeld (1976). Sharper bounds for the Chebyshev functions \u03b8(x) and \u03c8(x). II. Mathematics of Computation. 30 (134): 337-360. DOI: 10.2307/2005976"
+   ],
+   "topics": [
+    "prime_numbers",
+    "riemann_zeta"
+   ]
+  },
+  {
+   "id": "3fc797",
+   "formula": [
+    "Equal",
+    "Primes",
+    [
+     "Set",
+     [
+      "PrimeNumber",
+      "n"
+     ],
+     [
+      "Element",
+      "n",
+      "PositiveIntegers"
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "PrimeNumber"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "prime_numbers"
+   ]
+  },
+  {
+   "id": "5258c0",
+   "formula": [
+    "Less",
+    [
+     "PrimePi",
+     "x"
+    ],
+    [
+     "Divide",
+     [
+      "Multiply",
+      {
+       "num": "1.25506"
+      },
+      "x"
+     ],
+     [
+      "Ln",
+      "x"
+     ]
+    ]
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     "RealNumbers"
+    ],
+    [
+     "Greater",
+     "x",
+     1
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Ln",
+    "PrimePi"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "prime_numbers"
+   ]
+  },
+  {
+   "id": "69fd4b",
+   "formula": [
+    "GreaterEqual",
+    [
+     "Subtract",
+     [
+      "PrimePi",
+      [
+       "Multiply",
+       2,
+       "x"
+      ]
+     ],
+     [
+      "PrimePi",
+      "x"
+     ]
+    ],
+    1
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     "RealNumbers"
+    ],
+    [
+     "GreaterEqual",
+     "x",
+     1
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "PrimePi"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "prime_numbers"
+   ]
+  },
+  {
+   "id": "6f3cf7",
+   "formula": [
+    "Less",
+    [
+     "PrimeNumber",
+     "n"
+    ],
+    [
+     "Multiply",
+     "n",
+     [
+      "Ln",
+      [
+       "Multiply",
+       "n",
+       [
+        "Ln",
+        "n"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    [
+     "Range",
+     6,
+     "PositiveInfinity"
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Ln",
+    "PrimeNumber"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "prime_numbers"
+   ]
+  },
+  {
+   "id": "8c52de",
+   "formula": [
+    "Greater",
+    [
+     "PrimeNumber",
+     "n"
+    ],
+    [
+     "Multiply",
+     "n",
+     [
+      "Subtract",
+      [
+       "Ln",
+       [
+        "Multiply",
+        "n",
+        [
+         "Ln",
+         "n"
+        ]
+       ]
+      ],
+      1
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    [
+     "Range",
+     2,
+     "PositiveInfinity"
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Ln",
+    "PrimeNumber"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "prime_numbers"
+   ]
+  },
+  {
+   "id": "bfa464",
+   "formula": [
+    "Less",
+    [
+     "PrimeNumber",
+     "n"
+    ],
+    [
+     "Multiply",
+     "n",
+     [
+      "Subtract",
+      [
+       "Add",
+       [
+        "Subtract",
+        [
+         "Add",
+         [
+          "Ln",
+          "n"
+         ],
+         [
+          "Ln",
+          [
+           "Ln",
+           "n"
+          ]
+         ]
+        ],
+        1
+       ],
+       [
+        "Divide",
+        [
+         "Subtract",
+         [
+          "Ln",
+          [
+           "Ln",
+           "n"
+          ]
+         ],
+         2
+        ],
+        [
+         "Ln",
+         "n"
+        ]
+       ]
+      ],
+      [
+       "Divide",
+       [
+        "Add",
+        [
+         "Subtract",
+         [
+          "Power",
+          [
+           "Ln",
+           [
+            "Ln",
+            "n"
+           ]
+          ],
+          2
+         ],
+         [
+          "Multiply",
+          6,
+          [
+           "Ln",
+           [
+            "Ln",
+            "n"
+           ]
+          ]
+         ]
+        ],
+        {
+         "num": "10.667"
+        }
+       ],
+       [
+        "Multiply",
+        2,
+        [
+         "Power",
+         [
+          "Ln",
+          "n"
+         ],
+         2
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    [
+     "Range",
+     46254381,
+     "PositiveInfinity"
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Ln",
+    "PrimeNumber"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": [
+    "https://arxiv.org/abs/1706.03651"
+   ],
+   "topics": [
+    "prime_numbers"
+   ]
+  },
+  {
+   "id": "d1ec2d",
+   "formula": [
+    "Less",
+    [
+     "PrimeNumber",
+     [
+      "Add",
+      "n",
+      1
+     ]
+    ],
+    [
+     "Multiply",
+     2,
+     [
+      "PrimeNumber",
+      "n"
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "PositiveIntegers"
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "PrimeNumber"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "prime_numbers"
+   ]
+  },
+  {
+   "id": "d898b9",
+   "formula": [
+    "Greater",
+    [
+     "PrimePi",
+     "x"
+    ],
+    [
+     "Divide",
+     "x",
+     [
+      "Ln",
+      "x"
+     ]
+    ]
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     "RealNumbers"
+    ],
+    [
+     "GreaterEqual",
+     "x",
+     17
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Ln",
+    "PrimePi"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "prime_numbers"
+   ]
+  }
+ ]
+}

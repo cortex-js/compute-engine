@@ -1,0 +1,423 @@
+{
+ "topic": "integer_sequences",
+ "title": "Integer sequences",
+ "source": "pygrim/formulas/integer_sequences.py",
+ "generator": "grim2mathjson 0.1.0",
+ "entries": [
+  {
+   "id": "373aa1",
+   "formula": [
+    "Equal",
+    [
+     "Fibonacci",
+     "n"
+    ],
+    [
+     "SloaneA",
+     {
+      "str": "A000045"
+     },
+     "n"
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Fibonacci",
+    "SloaneA"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "fibonacci",
+    "integer_sequences"
+   ]
+  },
+  {
+   "id": "483547",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "SloaneA",
+       {
+        "str": "A000796"
+       },
+       "n"
+      ],
+      [
+       "Power",
+       10,
+       [
+        "Subtract",
+        1,
+        "n"
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "n",
+      1,
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "SloaneA",
+    "Sum"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "integer_sequences",
+    "pi"
+   ]
+  },
+  {
+   "id": "4fa169",
+   "formula": [
+    "Equal",
+    [
+     "PrimePi",
+     "n"
+    ],
+    [
+     "SloaneA",
+     {
+      "str": "A000720"
+     },
+     "n"
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "PrimePi",
+    "SloaneA"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "integer_sequences",
+    "prime_numbers"
+   ]
+  },
+  {
+   "id": "60dc3e",
+   "formula": [
+    "Equal",
+    [
+     "BellNumber",
+     "n"
+    ],
+    [
+     "SloaneA",
+     {
+      "str": "A000110"
+     },
+     "n"
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BellNumber",
+    "SloaneA"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bell_numbers",
+    "integer_sequences"
+   ]
+  },
+  {
+   "id": "6af603",
+   "formula": [
+    "Equal",
+    [
+     "LandauG",
+     "n"
+    ],
+    [
+     "SloaneA",
+     {
+      "str": "A000793"
+     },
+     "n"
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "LandauG",
+    "SloaneA"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "integer_sequences",
+    "landau_function"
+   ]
+  },
+  {
+   "id": "8eed2c",
+   "formula": [
+    "Equal",
+    [
+     "NPartition",
+     "n"
+    ],
+    [
+     "SloaneA",
+     {
+      "str": "A000041"
+     },
+     "n"
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "NPartition",
+    "SloaneA"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "integer_sequences",
+    "partitions"
+   ]
+  },
+  {
+   "id": "963387",
+   "formula": [
+    "Implies",
+    [
+     "And",
+     [
+      "Element",
+      "X",
+      "PositiveIntegers"
+     ],
+     [
+      "Element",
+      "n",
+      "Integers"
+     ]
+    ],
+    [
+     "Element",
+     [
+      "SloaneA",
+      "X",
+      "n"
+     ],
+     [
+      "Union",
+      "Integers",
+      [
+       "Set",
+       "NaN"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "X",
+    "n"
+   ],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "SloaneA"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "integer_sequences"
+   ]
+  },
+  {
+   "id": "9d0839",
+   "formula": [
+    "Equal",
+    [
+     "PrimeNumber",
+     "n"
+    ],
+    [
+     "SloaneA",
+     {
+      "str": "A000040"
+     },
+     "n"
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "PositiveIntegers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "PrimeNumber",
+    "SloaneA"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "integer_sequences",
+    "prime_numbers"
+   ]
+  },
+  {
+   "id": "b6111c",
+   "formula": [
+    "Equal",
+    [
+     "BernoulliB",
+     "n"
+    ],
+    [
+     "Divide",
+     [
+      "SloaneA",
+      {
+       "str": "A027641"
+      },
+      "n"
+     ],
+     [
+      "SloaneA",
+      {
+       "str": "A027642"
+      },
+      "n"
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BernoulliB",
+    "SloaneA"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bernoulli_numbers",
+    "integer_sequences"
+   ]
+  },
+  {
+   "id": "d12aa0",
+   "formula": [
+    "Equal",
+    [
+     "Factorial",
+     "n"
+    ],
+    [
+     "SloaneA",
+     {
+      "str": "A000142"
+     },
+     "n"
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Factorial",
+    "SloaneA"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "factorials",
+    "integer_sequences"
+   ]
+  }
+ ]
+}

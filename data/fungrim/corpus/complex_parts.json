@@ -1,0 +1,1267 @@
+{
+ "topic": "complex_parts",
+ "title": "Complex parts",
+ "source": "pygrim/formulas/complex_parts.py",
+ "generator": "grim2mathjson 0.1.0",
+ "entries": [
+  {
+   "id": "08268d",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "Argument",
+      "z"
+     ]
+    ],
+    "Pi"
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Argument"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "complex_parts"
+   ]
+  },
+  {
+   "id": "089f85",
+   "formula": [
+    "Equal",
+    [
+     "Argument",
+     [
+      "Negate",
+      "ImaginaryUnit"
+     ]
+    ],
+    [
+     "Negate",
+     [
+      "Divide",
+      "Pi",
+      2
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Argument"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "complex_parts",
+    "imaginary_unit"
+   ]
+  },
+  {
+   "id": "12664e",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     "z"
+    ],
+    [
+     "Add",
+     [
+      "Abs",
+      [
+       "Real",
+       "z"
+      ]
+     ],
+     [
+      "Abs",
+      [
+       "Imaginary",
+       "z"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Imaginary",
+    "Real"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "complex_parts"
+   ]
+  },
+  {
+   "id": "18d335",
+   "formula": [
+    "Equal",
+    [
+     "Sign",
+     "x"
+    ],
+    [
+     "Which",
+     [
+      "Greater",
+      "x",
+      0
+     ],
+     1,
+     [
+      "Less",
+      "x",
+      0
+     ],
+     -1,
+     [
+      "Equal",
+      "x",
+      0
+     ],
+     0
+    ]
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": [
+    "Element",
+    "x",
+    "RealNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Sign"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "complex_parts"
+   ]
+  },
+  {
+   "id": "26565c",
+   "formula": [
+    "Equal",
+    [
+     "Sign",
+     "z"
+    ],
+    [
+     "Divide",
+     "z",
+     [
+      "Abs",
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     [
+      "Set",
+      0
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Sign"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "complex_parts"
+   ]
+  },
+  {
+   "id": "3866dc",
+   "formula": [
+    "Equal",
+    [
+     "Real",
+     "z"
+    ],
+    [
+     "Divide",
+     [
+      "Add",
+      "z",
+      [
+       "Conjugate",
+       "z"
+      ]
+     ],
+     2
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Conjugate",
+    "Real"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "complex_parts"
+   ]
+  },
+  {
+   "id": "432926",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "Sign",
+      "z"
+     ]
+    ],
+    1
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Sign"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "complex_parts"
+   ]
+  },
+  {
+   "id": "48fe10",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "Subtract",
+      [
+       "Abs",
+       "a"
+      ],
+      [
+       "Abs",
+       "b"
+      ]
+     ]
+    ],
+    [
+     "Abs",
+     [
+      "Subtract",
+      "a",
+      "b"
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "b",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "complex_parts"
+   ]
+  },
+  {
+   "id": "4f0049",
+   "formula": [
+    "Equal",
+    [
+     "Abs",
+     [
+      "Add",
+      "x",
+      [
+       "Multiply",
+       "y",
+       "ImaginaryUnit"
+      ]
+     ]
+    ],
+    [
+     "Sqrt",
+     [
+      "Add",
+      [
+       "Power",
+       "x",
+       2
+      ],
+      [
+       "Power",
+       "y",
+       2
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "x",
+    "y"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     "RealNumbers"
+    ],
+    [
+     "Element",
+     "y",
+     "RealNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Abs"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "complex_parts"
+   ]
+  },
+  {
+   "id": "54340e",
+   "formula": [
+    "Equal",
+    [
+     "Sign",
+     "z"
+    ],
+    [
+     "Exp",
+     [
+      "Multiply",
+      "ImaginaryUnit",
+      [
+       "Argument",
+       "z"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     [
+      "Set",
+      0
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Argument",
+    "Exp",
+    "Sign"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "complex_parts"
+   ]
+  },
+  {
+   "id": "59a5d6",
+   "formula": [
+    "Equal",
+    [
+     "Csgn",
+     "z"
+    ],
+    [
+     "Which",
+     [
+      "Equal",
+      [
+       "Real",
+       "z"
+      ],
+      0
+     ],
+     [
+      "Sign",
+      [
+       "Imaginary",
+       "z"
+      ]
+     ],
+     "True",
+     [
+      "Sign",
+      [
+       "Real",
+       "z"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Csgn",
+    "Imaginary",
+    "Real",
+    "Sign"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "complex_parts"
+   ]
+  },
+  {
+   "id": "60772e",
+   "formula": [
+    "Equal",
+    [
+     "Argument",
+     "z"
+    ],
+    [
+     "Negate",
+     [
+      "Multiply",
+      "ImaginaryUnit",
+      [
+       "Ln",
+       [
+        "Sign",
+        "z"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     [
+      "Set",
+      0
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Argument",
+    "Ln",
+    "Sign"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "complex_parts"
+   ]
+  },
+  {
+   "id": "6a894d",
+   "formula": [
+    "Equal",
+    [
+     "Abs",
+     [
+      "Conjugate",
+      "z"
+     ]
+    ],
+    [
+     "Abs",
+     "z"
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Conjugate"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "complex_parts"
+   ]
+  },
+  {
+   "id": "735409",
+   "formula": [
+    "Equal",
+    [
+     "Argument",
+     "ImaginaryUnit"
+    ],
+    [
+     "Divide",
+     "Pi",
+     2
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Argument"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "complex_parts",
+    "imaginary_unit"
+   ]
+  },
+  {
+   "id": "8cac46",
+   "formula": [
+    "Equal",
+    [
+     "Argument",
+     [
+      "Multiply",
+      "c",
+      "z"
+     ]
+    ],
+    [
+     "Argument",
+     "z"
+    ]
+   ],
+   "variables": [
+    "c",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      [
+       "Set",
+       0
+      ]
+     ]
+    ],
+    [
+     "Element",
+     "c",
+     [
+      "Interval",
+      [
+       "Open",
+       0
+      ],
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Argument"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "complex_parts"
+   ]
+  },
+  {
+   "id": "8e6867",
+   "formula": [
+    "Equal",
+    [
+     "Real",
+     [
+      "Add",
+      "x",
+      [
+       "Multiply",
+       "y",
+       "ImaginaryUnit"
+      ]
+     ]
+    ],
+    "x"
+   ],
+   "variables": [
+    "x",
+    "y"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     "RealNumbers"
+    ],
+    [
+     "Element",
+     "y",
+     "RealNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Real"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "complex_parts"
+   ]
+  },
+  {
+   "id": "98efc1",
+   "formula": [
+    "Equal",
+    [
+     "Abs",
+     [
+      "Multiply",
+      "a",
+      "b"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Abs",
+      "a"
+     ],
+     [
+      "Abs",
+      "b"
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "b",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Abs"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "complex_parts"
+   ]
+  },
+  {
+   "id": "a6e081",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "Add",
+      "a",
+      "b"
+     ]
+    ],
+    [
+     "Add",
+     [
+      "Abs",
+      "a"
+     ],
+     [
+      "Abs",
+      "b"
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "b",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "complex_parts"
+   ]
+  },
+  {
+   "id": "a8b41c",
+   "formula": [
+    "Equal",
+    [
+     "Argument",
+     -1
+    ],
+    "Pi"
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Argument"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "complex_parts"
+   ]
+  },
+  {
+   "id": "acda23",
+   "formula": [
+    "Equal",
+    [
+     "Conjugate",
+     [
+      "Add",
+      "x",
+      [
+       "Multiply",
+       "y",
+       "ImaginaryUnit"
+      ]
+     ]
+    ],
+    [
+     "Subtract",
+     "x",
+     [
+      "Multiply",
+      "y",
+      "ImaginaryUnit"
+     ]
+    ]
+   ],
+   "variables": [
+    "x",
+    "y"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     "RealNumbers"
+    ],
+    [
+     "Element",
+     "y",
+     "RealNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Conjugate"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "complex_parts"
+   ]
+  },
+  {
+   "id": "b2a880",
+   "formula": [
+    "Equal",
+    [
+     "Argument",
+     [
+      "Add",
+      "x",
+      [
+       "Multiply",
+       "y",
+       "ImaginaryUnit"
+      ]
+     ]
+    ],
+    [
+     "Arctan2",
+     "y",
+     "x"
+    ]
+   ],
+   "variables": [
+    "x",
+    "y"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     "RealNumbers"
+    ],
+    [
+     "Element",
+     "y",
+     "RealNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Arctan2",
+    "Argument"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "complex_parts"
+   ]
+  },
+  {
+   "id": "ba6d81",
+   "formula": [
+    "Equal",
+    [
+     "Imaginary",
+     [
+      "Add",
+      "x",
+      [
+       "Multiply",
+       "y",
+       "ImaginaryUnit"
+      ]
+     ]
+    ],
+    "y"
+   ],
+   "variables": [
+    "x",
+    "y"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     "RealNumbers"
+    ],
+    [
+     "Element",
+     "y",
+     "RealNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Imaginary"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "complex_parts"
+   ]
+  },
+  {
+   "id": "bcd22f",
+   "formula": [
+    "Equal",
+    [
+     "Multiply",
+     "z",
+     [
+      "Conjugate",
+      "z"
+     ]
+    ],
+    [
+     "Power",
+     [
+      "Abs",
+      "z"
+     ],
+     2
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Conjugate"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "complex_parts"
+   ]
+  },
+  {
+   "id": "c423d2",
+   "formula": [
+    "Equal",
+    [
+     "Argument",
+     1
+    ],
+    0
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Argument"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "complex_parts"
+   ]
+  },
+  {
+   "id": "e9465d",
+   "formula": [
+    "Equal",
+    [
+     "Csgn",
+     "z"
+    ],
+    [
+     "Divide",
+     [
+      "Sqrt",
+      [
+       "Power",
+       "z",
+       2
+      ]
+     ],
+     "z"
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     [
+      "Set",
+      0
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Csgn"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "complex_parts"
+   ]
+  },
+  {
+   "id": "ebf8cc",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "Real",
+      "z"
+     ]
+    ],
+    [
+     "Abs",
+     "z"
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Real"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "complex_parts"
+   ]
+  },
+  {
+   "id": "f1a29b",
+   "formula": [
+    "Equal",
+    [
+     "Imaginary",
+     "z"
+    ],
+    [
+     "Divide",
+     [
+      "Subtract",
+      "z",
+      [
+       "Conjugate",
+       "z"
+      ]
+     ],
+     [
+      "Multiply",
+      2,
+      "ImaginaryUnit"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Conjugate",
+    "Imaginary"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "complex_parts"
+   ]
+  },
+  {
+   "id": "fc427b",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "Imaginary",
+      "z"
+     ]
+    ],
+    [
+     "Abs",
+     "z"
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Imaginary"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "complex_parts"
+   ]
+  }
+ ]
+}

@@ -1,0 +1,5446 @@
+{
+ "topic": "sinc",
+ "title": "Sinc function",
+ "source": "pygrim/formulas/sinc.py",
+ "generator": "grim2mathjson 0.1.0",
+ "entries": [
+  {
+   "id": "005478",
+   "formula": [
+    "Implies",
+    [
+     "Which",
+     [
+      "Equal",
+      "N_var",
+      0
+     ],
+     [
+      "Less",
+      [
+       "Sum",
+       [
+        "a_",
+        "k"
+       ],
+       [
+        "Limits",
+        "k",
+        0,
+        "N_var"
+       ]
+      ],
+      [
+       "Multiply",
+       2,
+       "Pi"
+      ]
+     ],
+     [
+      "GreaterEqual",
+      "N_var",
+      1
+     ],
+     [
+      "LessEqual",
+      [
+       "Sum",
+       [
+        "a_",
+        "k"
+       ],
+       [
+        "Limits",
+        "k",
+        0,
+        "N_var"
+       ]
+      ],
+      [
+       "Multiply",
+       2,
+       "Pi"
+      ]
+     ]
+    ],
+    [
+     "Equal",
+     [
+      "Sum",
+      [
+       "Product",
+       [
+        "Sinc",
+        [
+         "Multiply",
+         [
+          "a_",
+          "k"
+         ],
+         "n"
+        ]
+       ],
+       [
+        "Limits",
+        "k",
+        0,
+        "N_var"
+       ]
+      ],
+      [
+       "Limits",
+       "n",
+       1,
+       "PositiveInfinity"
+      ]
+     ],
+     [
+      "Add",
+      [
+       "Negate",
+       [
+        "Divide",
+        1,
+        2
+       ]
+      ],
+      [
+       "Integrate",
+       [
+        "Product",
+        [
+         "Sinc",
+         [
+          "Multiply",
+          [
+           "a_",
+           "k"
+          ],
+          "x"
+         ]
+        ],
+        [
+         "Limits",
+         "k",
+         0,
+         "N_var"
+        ]
+       ],
+       [
+        "Limits",
+        "x",
+        0,
+        "PositiveInfinity"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "N_var",
+    "a"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "N_var",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     [
+      "a_",
+      "k"
+     ],
+     [
+      "Interval",
+      [
+       "Open",
+       0
+      ],
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "Integrate",
+    "Product",
+    "Sinc",
+    "Sum"
+   ],
+   "guardLevel": "undischargeable",
+   "flavor": null,
+   "references": [
+    "https://www.carma.newcastle.edu.au/resources/jon/sinc-sums.pdf"
+   ],
+   "topics": [
+    "sinc"
+   ],
+   "indexedFamilies": [
+    "a_"
+   ]
+  },
+  {
+   "id": "01422b",
+   "formula": [
+    "Equal",
+    [
+     "Sinc",
+     "z"
+    ],
+    [
+     "Which",
+     [
+      "NotEqual",
+      "z",
+      0
+     ],
+     [
+      "Divide",
+      [
+       "Sin",
+       "z"
+      ],
+      "z"
+     ],
+     [
+      "Equal",
+      "z",
+      0
+     ],
+     1
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Sin",
+    "Sinc"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "08583a",
+   "formula": [
+    "Equal",
+    [
+     "Sinc",
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      1,
+      2
+     ],
+     [
+      "Integrate",
+      [
+       "Exp",
+       [
+        "Multiply",
+        [
+         "Multiply",
+         "ImaginaryUnit",
+         "z"
+        ],
+        "x"
+       ]
+      ],
+      [
+       "Limits",
+       "x",
+       -1,
+       1
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Exp",
+    "Integrate",
+    "Sinc"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "088fdb",
+   "formula": [
+    "Equal",
+    [
+     "Sinc",
+     [
+      "Negate",
+      [
+       "Multiply",
+       "ImaginaryUnit",
+       "PositiveInfinity"
+      ]
+     ]
+    ],
+    [
+     "Limit",
+     [
+      "Function",
+      [
+       "Sinc",
+       [
+        "Multiply",
+        "ImaginaryUnit",
+        "x"
+       ]
+      ],
+      "x"
+     ],
+     "NegativeInfinity"
+    ],
+    "PositiveInfinity"
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "limit",
+   "heads": [
+    "Limit",
+    "Sinc"
+   ],
+   "guardLevel": "none",
+   "flavor": "real",
+   "references": null,
+   "topics": [
+    "sinc"
+   ],
+   "directedInfinity": true
+  },
+  {
+   "id": "0c847f",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Power",
+      [
+       "Sinc",
+       "n"
+      ],
+      5
+     ],
+     [
+      "Limits",
+      "n",
+      "NegativeInfinity",
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Multiply",
+      115,
+      "Pi"
+     ],
+     192
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Sinc",
+    "Sum"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "108daa",
+   "formula": [
+    "Equal",
+    [
+     "Integrate",
+     [
+      "Multiply",
+      [
+       "Sinc",
+       [
+        "Multiply",
+        "a",
+        "x"
+       ]
+      ],
+      [
+       "Sinc",
+       [
+        "Multiply",
+        "b",
+        "x"
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "x",
+      "NegativeInfinity",
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      "Pi",
+      2
+     ],
+     [
+      "Divide",
+      [
+       "Subtract",
+       [
+        "Abs",
+        [
+         "Add",
+         "a",
+         "b"
+        ]
+       ],
+       [
+        "Abs",
+        [
+         "Subtract",
+         "a",
+         "b"
+        ]
+       ]
+      ],
+      [
+       "Multiply",
+       "a",
+       "b"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "RealNumbers"
+    ],
+    [
+     "Element",
+     "b",
+     "RealNumbers"
+    ],
+    [
+     "NotEqual",
+     "a",
+     0
+    ],
+    [
+     "NotEqual",
+     "b",
+     0
+    ]
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Abs",
+    "Integrate",
+    "Sinc"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "122e3d",
+   "formula": [
+    "Equal",
+    [
+     "Integrate",
+     [
+      "Sinc",
+      "x"
+     ],
+     [
+      "Limits",
+      "x",
+      0,
+      "z"
+     ]
+    ],
+    [
+     "SinIntegral",
+     "z"
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Integrate",
+    "SinIntegral",
+    "Sinc"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "1596d2",
+   "formula": [
+    "Equal",
+    [
+     "Integrate",
+     [
+      "Power",
+      [
+       "Sinc",
+       "x"
+      ],
+      "n"
+     ],
+     [
+      "Limits",
+      "x",
+      0,
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      "Pi",
+      [
+       "Multiply",
+       [
+        "Power",
+        2,
+        "n"
+       ],
+       [
+        "Factorial",
+        [
+         "Subtract",
+         "n",
+         1
+        ]
+       ]
+      ]
+     ],
+     [
+      "Sum",
+      [
+       "Multiply",
+       [
+        "Multiply",
+        [
+         "Power",
+         -1,
+         "k"
+        ],
+        [
+         "Binomial",
+         "n",
+         "k"
+        ]
+       ],
+       [
+        "Power",
+        [
+         "Subtract",
+         "n",
+         [
+          "Multiply",
+          2,
+          "k"
+         ]
+        ],
+        [
+         "Subtract",
+         "n",
+         1
+        ]
+       ]
+      ],
+      [
+       "Limits",
+       "k",
+       0,
+       [
+        "Floor",
+        [
+         "Divide",
+         "n",
+         2
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "PositiveIntegers"
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Binomial",
+    "Factorial",
+    "Floor",
+    "Integrate",
+    "Sinc",
+    "Sum"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "19d7d9",
+   "formula": [
+    "Equal",
+    [
+     "Sinc",
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Power",
+      [
+       "Divide",
+       [
+        "Multiply",
+        2,
+        "z"
+       ],
+       "Pi"
+      ],
+      [
+       "Negate",
+       [
+        "Divide",
+        1,
+        2
+       ]
+      ]
+     ],
+     [
+      "BesselJ",
+      [
+       "Divide",
+       1,
+       2
+      ],
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "NotEqual",
+     "z",
+     0
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BesselJ",
+    "Sinc"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "1a7e22",
+   "formula": [
+    "Equal",
+    [
+     "Integrate",
+     [
+      "Power",
+      [
+       "Sinc",
+       "x"
+      ],
+      2
+     ],
+     [
+      "Limits",
+      "x",
+      0,
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Divide",
+     "Pi",
+     2
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Integrate",
+    "Sinc"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "1c3766",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "Sinc",
+        "z"
+       ],
+       "z"
+      ],
+      "n"
+     ],
+     0
+    ],
+    [
+     "Which",
+     [
+      "IsEven",
+      "n"
+     ],
+     [
+      "Multiply",
+      [
+       "Power",
+       -1,
+       [
+        "Floor",
+        [
+         "Divide",
+         "n",
+         2
+        ]
+       ]
+      ],
+      [
+       "Divide",
+       1,
+       [
+        "Add",
+        "n",
+        1
+       ]
+      ]
+     ],
+     [
+      "IsOdd",
+      "n"
+     ],
+     0
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Derivative",
+    "Floor",
+    "IsEven",
+    "IsOdd",
+    "Sinc"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "1e6344",
+   "formula": [
+    "Equal",
+    [
+     "ArgMin",
+     [
+      "Function",
+      [
+       "Sinc",
+       "x"
+      ],
+      "x"
+     ],
+     "RealNumbers"
+    ],
+    [
+     "Set",
+     [
+      "Negate",
+      [
+       "BesselJZero",
+       [
+        "Divide",
+        3,
+        2
+       ],
+       1
+      ]
+     ],
+     [
+      "BesselJZero",
+      [
+       "Divide",
+       3,
+       2
+      ],
+      1
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "ArgMin",
+    "BesselJZero",
+    "Sinc"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "1f9beb",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Power",
+      [
+       "Sinc",
+       "n"
+      ],
+      2
+     ],
+     [
+      "Limits",
+      "n",
+      "NegativeInfinity",
+      "PositiveInfinity"
+     ]
+    ],
+    "Pi"
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Sinc",
+    "Sum"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "20f069",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "Sinc",
+      "x"
+     ]
+    ],
+    1
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": [
+    "Element",
+    "x",
+    "RealNumbers"
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Sinc"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "2379e6",
+   "formula": [
+    "Implies",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     [
+      "Sinc",
+      "z"
+     ],
+     "ComplexNumbers"
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "Sinc"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "24c17b",
+   "formula": [
+    "Equal",
+    [
+     "Sinc",
+     "z"
+    ],
+    [
+     "Product",
+     [
+      "Cos",
+      [
+       "Divide",
+       "z",
+       [
+        "Power",
+        2,
+        "n"
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "n",
+      1,
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "representation",
+   "subclass": "product",
+   "heads": [
+    "Cos",
+    "Product",
+    "Sinc"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "2a69ce",
+   "formula": [
+    "Equal",
+    [
+     "Integrate",
+     [
+      "Multiply",
+      [
+       "Exp",
+       [
+        "Multiply",
+        [
+         "Multiply",
+         "ImaginaryUnit",
+         "a"
+        ],
+        "x"
+       ]
+      ],
+      [
+       "Sinc",
+       "x"
+      ]
+     ],
+     [
+      "Limits",
+      "x",
+      "NegativeInfinity",
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Integrate",
+     [
+      "Multiply",
+      [
+       "Cos",
+       [
+        "Multiply",
+        "a",
+        "x"
+       ]
+      ],
+      [
+       "Sinc",
+       "x"
+      ]
+     ],
+     [
+      "Limits",
+      "x",
+      "NegativeInfinity",
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Which",
+     [
+      "Less",
+      [
+       "Abs",
+       "a"
+      ],
+      1
+     ],
+     "Pi",
+     [
+      "Equal",
+      [
+       "Abs",
+       "a"
+      ],
+      1
+     ],
+     [
+      "Divide",
+      "Pi",
+      2
+     ],
+     [
+      "Greater",
+      [
+       "Abs",
+       "a"
+      ],
+      1
+     ],
+     0
+    ]
+   ],
+   "variables": [
+    "a"
+   ],
+   "assumptions": [
+    "Element",
+    "a",
+    "RealNumbers"
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Abs",
+    "Cos",
+    "Exp",
+    "Integrate",
+    "Sinc"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "2a8ec9",
+   "formula": [
+    "Implies",
+    [
+     "Which",
+     [
+      "Equal",
+      "N_var",
+      0
+     ],
+     [
+      "Less",
+      [
+       "Sum",
+       [
+        "a_",
+        "k"
+       ],
+       [
+        "Limits",
+        "k",
+        0,
+        "N_var"
+       ]
+      ],
+      [
+       "Multiply",
+       2,
+       "Pi"
+      ]
+     ],
+     [
+      "GreaterEqual",
+      "N_var",
+      1
+     ],
+     [
+      "LessEqual",
+      [
+       "Sum",
+       [
+        "a_",
+        "k"
+       ],
+       [
+        "Limits",
+        "k",
+        0,
+        "N_var"
+       ]
+      ],
+      [
+       "Multiply",
+       2,
+       "Pi"
+      ]
+     ]
+    ],
+    [
+     "Equal",
+     [
+      "Sum",
+      [
+       "Product",
+       [
+        "Sinc",
+        [
+         "Multiply",
+         [
+          "a_",
+          "k"
+         ],
+         "n"
+        ]
+       ],
+       [
+        "Limits",
+        "k",
+        0,
+        "N_var"
+       ]
+      ],
+      [
+       "Limits",
+       "n",
+       "NegativeInfinity",
+       "PositiveInfinity"
+      ]
+     ],
+     [
+      "Integrate",
+      [
+       "Product",
+       [
+        "Sinc",
+        [
+         "Multiply",
+         [
+          "a_",
+          "k"
+         ],
+         "x"
+        ]
+       ],
+       [
+        "Limits",
+        "k",
+        0,
+        "N_var"
+       ]
+      ],
+      [
+       "Limits",
+       "x",
+       "NegativeInfinity",
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "N_var",
+    "a"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "N_var",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     [
+      "a_",
+      "k"
+     ],
+     [
+      "Interval",
+      [
+       "Open",
+       0
+      ],
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "Integrate",
+    "Product",
+    "Sinc",
+    "Sum"
+   ],
+   "guardLevel": "undischargeable",
+   "flavor": null,
+   "references": [
+    "https://www.carma.newcastle.edu.au/resources/jon/sinc-sums.pdf"
+   ],
+   "topics": [
+    "sinc"
+   ],
+   "indexedFamilies": [
+    "a_"
+   ]
+  },
+  {
+   "id": "2ac5eb",
+   "formula": [
+    "EqualNearestDecimal",
+    [
+     "Min",
+     [
+      "Set",
+      [
+       "Sinc",
+       "x"
+      ],
+      [
+       "Element",
+       "x",
+       "RealNumbers"
+      ]
+     ]
+    ],
+    {
+     "num": "-0.217233628211221657408279325562"
+    },
+    30
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "EqualNearestDecimal",
+    "Min",
+    "Sinc"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "2b7b1d",
+   "formula": [
+    "Equal",
+    [
+     "Integrate",
+     [
+      "Sinc",
+      "x"
+     ],
+     [
+      "Limits",
+      "x",
+      "z",
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Subtract",
+     [
+      "Divide",
+      "Pi",
+      2
+     ],
+     [
+      "SinIntegral",
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Integrate",
+    "SinIntegral",
+    "Sinc"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "2f09ad",
+   "formula": [
+    "Equal",
+    [
+     "Sinc",
+     "PositiveInfinity"
+    ],
+    [
+     "Limit",
+     [
+      "Function",
+      [
+       "Sinc",
+       [
+        "Add",
+        [
+         "Multiply",
+         "a",
+         "ImaginaryUnit"
+        ],
+        "x"
+       ]
+      ],
+      "x"
+     ],
+     "PositiveInfinity"
+    ],
+    0
+   ],
+   "variables": [
+    "a"
+   ],
+   "assumptions": [
+    "Element",
+    "a",
+    "ComplexNumbers"
+   ],
+   "class": "representation",
+   "subclass": "limit",
+   "heads": [
+    "Limit",
+    "Sinc"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": "real",
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "340936",
+   "formula": [
+    "Equal",
+    [
+     "Sinc",
+     [
+      "Divide",
+      "Pi",
+      3
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Multiply",
+      3,
+      [
+       "Sqrt",
+       3
+      ]
+     ],
+     [
+      "Multiply",
+      2,
+      "Pi"
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Sinc"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "351d87",
+   "formula": [
+    "Less",
+    [
+     "Abs",
+     [
+      "Sinc",
+      "x"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      [
+       "Sqrt",
+       2
+      ],
+      "x"
+     ],
+     [
+      "Tanh",
+      [
+       "Divide",
+       "x",
+       [
+        "Sqrt",
+        2
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     "RealNumbers"
+    ],
+    [
+     "NotEqual",
+     "x",
+     0
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Sinc",
+    "Tanh"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "38dc04",
+   "formula": [
+    "Equal",
+    [
+     "Integrate",
+     [
+      "Multiply",
+      [
+       "Exp",
+       [
+        "Negate",
+        [
+         "Multiply",
+         "a",
+         "x"
+        ]
+       ]
+      ],
+      [
+       "Sinc",
+       "x"
+      ]
+     ],
+     [
+      "Limits",
+      "x",
+      0,
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Arccot",
+     "a"
+    ]
+   ],
+   "variables": [
+    "a"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ],
+    [
+     "Greater",
+     [
+      "Real",
+      "a"
+     ],
+     0
+    ]
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Arccot",
+    "Exp",
+    "Integrate",
+    "Sinc"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "3a428f",
+   "formula": [
+    "Equal",
+    [
+     "Sinc",
+     [
+      "Conjugate",
+      "z"
+     ]
+    ],
+    [
+     "Conjugate",
+     [
+      "Sinc",
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Conjugate",
+    "Sinc"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "3fe2b0",
+   "formula": [
+    "Equal",
+    [
+     "Integrate",
+     [
+      "Multiply",
+      [
+       "Sinc",
+       [
+        "Add",
+        "x",
+        "a"
+       ]
+      ],
+      [
+       "Sinc",
+       [
+        "Add",
+        "x",
+        "b"
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "x",
+      "NegativeInfinity",
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Multiply",
+     "Pi",
+     [
+      "Sinc",
+      [
+       "Subtract",
+       "a",
+       "b"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "b",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Integrate",
+    "Sinc"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "41998e",
+   "formula": [
+    "Implies",
+    [
+     "Element",
+     "x",
+     "RealNumbers"
+    ],
+    [
+     "Element",
+     [
+      "Sinc",
+      "x"
+     ],
+     [
+      "Interval",
+      [
+       "Open",
+       {
+        "num": "-0.217234"
+       }
+      ],
+      1
+     ]
+    ]
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "Sinc"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "45740a",
+   "formula": [
+    "Equal",
+    [
+     "Sinc",
+     [
+      "Divide",
+      "Pi",
+      6
+     ]
+    ],
+    [
+     "Divide",
+     3,
+     "Pi"
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Sinc"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "45f05f",
+   "formula": [
+    "Equal",
+    [
+     "Divide",
+     1,
+     [
+      "Sinc",
+      [
+       "Divide",
+       "Pi",
+       "z"
+      ]
+     ]
+    ],
+    [
+     "Integrate",
+     [
+      "Divide",
+      1,
+      [
+       "Add",
+       [
+        "Power",
+        "x",
+        "z"
+       ],
+       1
+      ]
+     ],
+     [
+      "Limits",
+      "x",
+      0,
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Greater",
+     [
+      "Real",
+      "z"
+     ],
+     1
+    ]
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Integrate",
+    "Sinc"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "49514d",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Power",
+      [
+       "Sinc",
+       "n"
+      ],
+      4
+     ],
+     [
+      "Limits",
+      "n",
+      "NegativeInfinity",
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Multiply",
+      2,
+      "Pi"
+     ],
+     3
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Sinc",
+    "Sum"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "4a1b00",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Power",
+      [
+       "Sinc",
+       "n"
+      ],
+      7
+     ],
+     [
+      "Limits",
+      "n",
+      "NegativeInfinity",
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Add",
+      [
+       "Subtract",
+       [
+        "Add",
+        [
+         "Subtract",
+         [
+          "Add",
+          [
+           "Subtract",
+           [
+            "Multiply",
+            129423,
+            "Pi"
+           ],
+           [
+            "Multiply",
+            201684,
+            [
+             "Power",
+             "Pi",
+             2
+            ]
+           ]
+          ],
+          [
+           "Multiply",
+           144060,
+           [
+            "Power",
+            "Pi",
+            3
+           ]
+          ]
+         ],
+         [
+          "Multiply",
+          54880,
+          [
+           "Power",
+           "Pi",
+           4
+          ]
+         ]
+        ],
+        [
+         "Multiply",
+         11760,
+         [
+          "Power",
+          "Pi",
+          5
+         ]
+        ]
+       ],
+       [
+        "Multiply",
+        1344,
+        [
+         "Power",
+         "Pi",
+         6
+        ]
+       ]
+      ],
+      [
+       "Multiply",
+       64,
+       [
+        "Power",
+        "Pi",
+        7
+       ]
+      ]
+     ],
+     23040
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Sinc",
+    "Sum"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "4a5b9a",
+   "formula": [
+    "Equal",
+    [
+     "Integrate",
+     [
+      "Divide",
+      "x",
+      [
+       "Sinc",
+       "x"
+      ]
+     ],
+     [
+      "Limits",
+      "x",
+      0,
+      [
+       "Divide",
+       "Pi",
+       2
+      ]
+     ]
+    ],
+    [
+     "Subtract",
+     [
+      "Multiply",
+      [
+       "Multiply",
+       2,
+       "Pi"
+      ],
+      "CatalanConstant"
+     ],
+     [
+      "Divide",
+      [
+       "Multiply",
+       7,
+       [
+        "Zeta",
+        3
+       ]
+      ],
+      2
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Integrate",
+    "Sinc",
+    "Zeta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "4d3f04",
+   "formula": [
+    "Greater",
+    [
+     "Sinc",
+     "x"
+    ],
+    {
+     "num": "-0.217234"
+    }
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": [
+    "Element",
+    "x",
+    "RealNumbers"
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Sinc"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "4d5410",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Sinc",
+      "n"
+     ],
+     [
+      "Limits",
+      "n",
+      "NegativeInfinity",
+      "PositiveInfinity"
+     ]
+    ],
+    "Pi"
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Sinc",
+    "Sum"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "4f9844",
+   "formula": [
+    "Equal",
+    [
+     "Sinc",
+     "z"
+    ],
+    [
+     "Sum",
+     [
+      "Divide",
+      [
+       "Multiply",
+       [
+        "Power",
+        -1,
+        "n"
+       ],
+       [
+        "Power",
+        "z",
+        [
+         "Multiply",
+         2,
+         "n"
+        ]
+       ]
+      ],
+      [
+       "Factorial",
+       [
+        "Add",
+        [
+         "Multiply",
+         2,
+         "n"
+        ],
+        1
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "n",
+      0,
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Factorial",
+    "Sinc",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "50f72f",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "Sinc",
+        "z"
+       ],
+       "z"
+      ],
+      1
+     ],
+     "z"
+    ],
+    [
+     "Negate",
+     [
+      "Multiply",
+      [
+       "Divide",
+       "z",
+       3
+      ],
+      [
+       "Hypergeometric0F1",
+       [
+        "Divide",
+        5,
+        2
+       ],
+       [
+        "Negate",
+        [
+         "Divide",
+         [
+          "Power",
+          "z",
+          2
+         ],
+         4
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Derivative",
+    "Hypergeometric0F1",
+    "Sinc"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "51f9b4",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "Sinc",
+      "z"
+     ]
+    ],
+    [
+     "Sinc",
+     [
+      "Multiply",
+      "ImaginaryUnit",
+      [
+       "Abs",
+       "z"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Sinc"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "593e63",
+   "formula": [
+    "Equal",
+    [
+     "Sinc",
+     [
+      "Multiply",
+      "Pi",
+      "n"
+     ]
+    ],
+    [
+     "Which",
+     [
+      "Equal",
+      "n",
+      0
+     ],
+     1,
+     [
+      "NotEqual",
+      "n",
+      0
+     ],
+     0
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "Integers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Sinc"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "5c9675",
+   "formula": [
+    "Equal",
+    [
+     "Integrate",
+     [
+      "Divide",
+      1,
+      [
+       "Power",
+       [
+        "Sinc",
+        "x"
+       ],
+       2
+      ]
+     ],
+     [
+      "Limits",
+      "x",
+      0,
+      [
+       "Divide",
+       "Pi",
+       4
+      ]
+     ]
+    ],
+    [
+     "Subtract",
+     [
+      "Add",
+      [
+       "Divide",
+       [
+        "Multiply",
+        "Pi",
+        [
+         "Ln",
+         2
+        ]
+       ],
+       4
+      ],
+      "CatalanConstant"
+     ],
+     [
+      "Divide",
+      [
+       "Power",
+       "Pi",
+       2
+      ],
+      16
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Integrate",
+    "Ln",
+    "Sinc"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "5d16e5",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "Apply",
+      [
+       "Derivative",
+       [
+        "Function",
+        [
+         "Sinc",
+         "x"
+        ],
+        "x"
+       ],
+       "n"
+      ],
+      "x"
+     ]
+    ],
+    1
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     "RealNumbers"
+    ],
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Derivative",
+    "Sinc"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "5e0c58",
+   "formula": [
+    "Equal",
+    [
+     "Sinc",
+     "PositiveInfinity"
+    ],
+    [
+     "Limit",
+     [
+      "Function",
+      [
+       "Sinc",
+       "x"
+      ],
+      "x"
+     ],
+     "PositiveInfinity"
+    ],
+    0
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "limit",
+   "heads": [
+    "Limit",
+    "Sinc"
+   ],
+   "guardLevel": "none",
+   "flavor": "real",
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "632d1c",
+   "formula": [
+    "Equal",
+    [
+     "Max",
+     [
+      "Set",
+      [
+       "Sinc",
+       "x"
+      ],
+      [
+       "Element",
+       "x",
+       "RealNumbers"
+      ]
+     ]
+    ],
+    1
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Max",
+    "Sinc"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "6c28fa",
+   "formula": [
+    "Equal",
+    [
+     "Sinc",
+     "NegativeInfinity"
+    ],
+    [
+     "Limit",
+     [
+      "Function",
+      [
+       "Sinc",
+       [
+        "Add",
+        [
+         "Multiply",
+         "a",
+         "ImaginaryUnit"
+        ],
+        "x"
+       ]
+      ],
+      "x"
+     ],
+     "NegativeInfinity"
+    ],
+    0
+   ],
+   "variables": [
+    "a"
+   ],
+   "assumptions": [
+    "Element",
+    "a",
+    "ComplexNumbers"
+   ],
+   "class": "representation",
+   "subclass": "limit",
+   "heads": [
+    "Limit",
+    "Sinc"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": "real",
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "6e4f58",
+   "formula": [
+    "Equal",
+    [
+     "Sinc",
+     "z"
+    ],
+    [
+     "Integrate",
+     [
+      "Cos",
+      [
+       "Multiply",
+       "z",
+       "x"
+      ]
+     ],
+     [
+      "Limits",
+      "x",
+      0,
+      1
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Cos",
+    "Integrate",
+    "Sinc"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "729c78",
+   "formula": [
+    "Equal",
+    [
+     "Sinc",
+     [
+      "Multiply",
+      "Pi",
+      "z"
+     ]
+    ],
+    [
+     "Integrate",
+     [
+      "Cos",
+      [
+       "Multiply",
+       [
+        "Multiply",
+        "Pi",
+        "z"
+       ],
+       "x"
+      ]
+     ],
+     [
+      "Limits",
+      "x",
+      0,
+      1
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Cos",
+    "Integrate",
+    "Sinc"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "768c77",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "Sinc",
+        "z"
+       ],
+       "z"
+      ],
+      1
+     ],
+     "z"
+    ],
+    [
+     "Which",
+     [
+      "NotEqual",
+      "z",
+      0
+     ],
+     [
+      "Subtract",
+      [
+       "Divide",
+       [
+        "Cos",
+        "z"
+       ],
+       "z"
+      ],
+      [
+       "Divide",
+       [
+        "Sin",
+        "z"
+       ],
+       [
+        "Power",
+        "z",
+        2
+       ]
+      ]
+     ],
+     [
+      "Equal",
+      "z",
+      0
+     ],
+     0
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Cos",
+    "Derivative",
+    "Sin",
+    "Sinc"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "78fca3",
+   "formula": [
+    "Equal",
+    [
+     "Integrate",
+     [
+      "Multiply",
+      [
+       "Exp",
+       [
+        "Negate",
+        [
+         "Multiply",
+         "a",
+         [
+          "Power",
+          "x",
+          2
+         ]
+        ]
+       ]
+      ],
+      [
+       "Sinc",
+       "x"
+      ]
+     ],
+     [
+      "Limits",
+      "x",
+      0,
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      "Pi",
+      2
+     ],
+     [
+      "Erf",
+      [
+       "Divide",
+       1,
+       [
+        "Multiply",
+        2,
+        [
+         "Sqrt",
+         "a"
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "a"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ],
+    [
+     "Greater",
+     [
+      "Real",
+      "a"
+     ],
+     0
+    ]
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Erf",
+    "Exp",
+    "Integrate",
+    "Sinc"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "81f531",
+   "formula": [
+    "EqualNearestDecimal",
+    [
+     "Integrate",
+     [
+      "Sinc",
+      "x"
+     ],
+     [
+      "Limits",
+      "x",
+      0,
+      "Pi"
+     ]
+    ],
+    {
+     "num": "1.85193705198246617036105337016"
+    },
+    30
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "EqualNearestDecimal",
+    "Integrate",
+    "Sinc"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "8814ad",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Power",
+      [
+       "Sinc",
+       "n"
+      ],
+      3
+     ],
+     [
+      "Limits",
+      "n",
+      "NegativeInfinity",
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Multiply",
+      3,
+      "Pi"
+     ],
+     4
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Sinc",
+    "Sum"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "89be58",
+   "formula": [
+    "Implies",
+    [
+     "Element",
+     "x",
+     "RealNumbers"
+    ],
+    [
+     "Element",
+     [
+      "Sinc",
+      "x"
+     ],
+     "RealNumbers"
+    ]
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "Sinc"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "8ef3d7",
+   "formula": [
+    "Equal",
+    [
+     "Integrate",
+     [
+      "Sinc",
+      "x"
+     ],
+     [
+      "Limits",
+      "x",
+      "NegativeInfinity",
+      "z"
+     ]
+    ],
+    [
+     "Add",
+     [
+      "SinIntegral",
+      "z"
+     ],
+     [
+      "Divide",
+      "Pi",
+      2
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Integrate",
+    "SinIntegral",
+    "Sinc"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "90c66a",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "Sinc",
+        "z"
+       ],
+       "z"
+      ],
+      2
+     ],
+     "z"
+    ],
+    [
+     "Which",
+     [
+      "NotEqual",
+      "z",
+      0
+     ],
+     [
+      "Subtract",
+      [
+       "Multiply",
+       [
+        "Subtract",
+        [
+         "Divide",
+         2,
+         [
+          "Power",
+          "z",
+          3
+         ]
+        ],
+        [
+         "Divide",
+         1,
+         "z"
+        ]
+       ],
+       [
+        "Sin",
+        "z"
+       ]
+      ],
+      [
+       "Divide",
+       [
+        "Multiply",
+        2,
+        [
+         "Cos",
+         "z"
+        ]
+       ],
+       [
+        "Power",
+        "z",
+        2
+       ]
+      ]
+     ],
+     [
+      "Equal",
+      "z",
+      0
+     ],
+     [
+      "Negate",
+      [
+       "Divide",
+       1,
+       3
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Cos",
+    "Derivative",
+    "Sin",
+    "Sinc"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "95c04c",
+   "formula": [
+    "EqualNearestDecimal",
+    [
+     "ArgMinUnique",
+     [
+      "Function",
+      [
+       "Sinc",
+       "x"
+      ],
+      "x"
+     ],
+     [
+      "Interval",
+      [
+       "Open",
+       0
+      ],
+      "PositiveInfinity"
+     ]
+    ],
+    {
+     "num": "4.49340945790906417530788092728"
+    },
+    30
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "ArgMinUnique",
+    "EqualNearestDecimal",
+    "Sinc"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "99ad29",
+   "formula": [
+    "Equal",
+    [
+     "Sinc",
+     [
+      "Multiply",
+      "Pi",
+      "z"
+     ]
+    ],
+    [
+     "Integrate",
+     [
+      "Exp",
+      [
+       "Multiply",
+       [
+        "Multiply",
+        [
+         "Multiply",
+         [
+          "Multiply",
+          2,
+          "Pi"
+         ],
+         "ImaginaryUnit"
+        ],
+        "z"
+       ],
+       "x"
+      ]
+     ],
+     [
+      "Limits",
+      "x",
+      [
+       "Negate",
+       [
+        "Divide",
+        1,
+        2
+       ]
+      ],
+      [
+       "Divide",
+       1,
+       2
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Exp",
+    "Integrate",
+    "Sinc"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "a0b0b3",
+   "formula": [
+    "Equal",
+    [
+     "Integrate",
+     [
+      "Abs",
+      [
+       "Sinc",
+       "x"
+      ]
+     ],
+     [
+      "Limits",
+      "x",
+      0,
+      "PositiveInfinity"
+     ]
+    ],
+    "PositiveInfinity"
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Abs",
+    "Integrate",
+    "Sinc"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "a2f5a9",
+   "formula": [
+    "Equal",
+    [
+     "Sinc",
+     "NegativeInfinity"
+    ],
+    [
+     "Limit",
+     [
+      "Function",
+      [
+       "Sinc",
+       "x"
+      ],
+      "x"
+     ],
+     "NegativeInfinity"
+    ],
+    0
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "limit",
+   "heads": [
+    "Limit",
+    "Sinc"
+   ],
+   "guardLevel": "none",
+   "flavor": "real",
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "a934d1",
+   "formula": [
+    "Less",
+    [
+     "Abs",
+     [
+      "Sinc",
+      "x"
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Arsinh",
+      "x"
+     ],
+     "x"
+    ]
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     "RealNumbers"
+    ],
+    [
+     "NotEqual",
+     "x",
+     0
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Arsinh",
+    "Sinc"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "aa15f0",
+   "formula": [
+    "Equal",
+    [
+     "Add",
+     [
+      "Add",
+      [
+       "Multiply",
+       "z",
+       [
+        "Apply",
+        [
+         "Derivative",
+         [
+          "Function",
+          [
+           "Add",
+           [
+            "Multiply",
+            "C_1",
+            [
+             "Sinc",
+             [
+              "Multiply",
+              "A",
+              "z"
+             ]
+            ]
+           ],
+           [
+            "Multiply",
+            "C_2",
+            [
+             "Divide",
+             [
+              "Cos",
+              [
+               "Multiply",
+               "A",
+               "z"
+              ]
+             ],
+             "z"
+            ]
+           ]
+          ],
+          "z"
+         ],
+         2
+        ],
+        "z"
+       ]
+      ],
+      [
+       "Multiply",
+       2,
+       [
+        "Apply",
+        [
+         "Derivative",
+         [
+          "Function",
+          [
+           "Add",
+           [
+            "Multiply",
+            "C_1",
+            [
+             "Sinc",
+             [
+              "Multiply",
+              "A",
+              "z"
+             ]
+            ]
+           ],
+           [
+            "Multiply",
+            "C_2",
+            [
+             "Divide",
+             [
+              "Cos",
+              [
+               "Multiply",
+               "A",
+               "z"
+              ]
+             ],
+             "z"
+            ]
+           ]
+          ],
+          "z"
+         ],
+         1
+        ],
+        "z"
+       ]
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Multiply",
+       [
+        "Power",
+        "A",
+        2
+       ],
+       "z"
+      ],
+      [
+       "Add",
+       [
+        "Multiply",
+        "C_1",
+        [
+         "Sinc",
+         [
+          "Multiply",
+          "A",
+          "z"
+         ]
+        ]
+       ],
+       [
+        "Multiply",
+        "C_2",
+        [
+         "Divide",
+         [
+          "Cos",
+          [
+           "Multiply",
+           "A",
+           "z"
+          ]
+         ],
+         "z"
+        ]
+       ]
+      ]
+     ]
+    ],
+    0
+   ],
+   "variables": [
+    "A",
+    "C",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "NotEqual",
+     "z",
+     0
+    ],
+    [
+     "Element",
+     "A",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "C_1",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "C_2",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Cos",
+    "Derivative",
+    "Sinc"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "aa404c",
+   "formula": [
+    "Equal",
+    [
+     "Sinc",
+     [
+      "Multiply",
+      "ImaginaryUnit",
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Limit",
+     [
+      "Function",
+      [
+       "Sinc",
+       [
+        "Multiply",
+        "ImaginaryUnit",
+        "x"
+       ]
+      ],
+      "x"
+     ],
+     "PositiveInfinity"
+    ],
+    "PositiveInfinity"
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "limit",
+   "heads": [
+    "Limit",
+    "Sinc"
+   ],
+   "guardLevel": "none",
+   "flavor": "real",
+   "references": null,
+   "topics": [
+    "sinc"
+   ],
+   "directedInfinity": true
+  },
+  {
+   "id": "af8328",
+   "formula": [
+    "Equal",
+    [
+     "Integrate",
+     [
+      "Product",
+      [
+       "Sinc",
+       [
+        "Divide",
+        "x",
+        [
+         "Add",
+         [
+          "Multiply",
+          2,
+          "k"
+         ],
+         1
+        ]
+       ]
+      ],
+      [
+       "Limits",
+       "k",
+       0,
+       "n"
+      ]
+     ],
+     [
+      "Limits",
+      "x",
+      0,
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Which",
+     [
+      "Element",
+      "n",
+      [
+       "Range",
+       0,
+       6
+      ]
+     ],
+     [
+      "Divide",
+      "Pi",
+      2
+     ],
+     [
+      "Equal",
+      "n",
+      7
+     ],
+     [
+      "Multiply",
+      [
+       "Divide",
+       {
+        "num": "467807924713440738696537864469"
+       },
+       {
+        "num": "467807924720320453655260875000"
+       }
+      ],
+      [
+       "Divide",
+       "Pi",
+       2
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    [
+     "Range",
+     0,
+     7
+    ]
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Integrate",
+    "Product",
+    "Sinc"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "b18020",
+   "formula": [
+    "Equal",
+    [
+     "Sinc",
+     0
+    ],
+    1
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Sinc"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "b1a260",
+   "formula": [
+    "Equal",
+    [
+     "ArgMaxUnique",
+     [
+      "Function",
+      [
+       "Sinc",
+       "x"
+      ],
+      "x"
+     ],
+     "RealNumbers"
+    ],
+    0
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "ArgMaxUnique",
+    "Sinc"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "b1d132",
+   "formula": [
+    "Equal",
+    [
+     "Sinc",
+     [
+      "Multiply",
+      "a",
+      "z"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      1,
+      [
+       "Multiply",
+       2,
+       "a"
+      ]
+     ],
+     [
+      "Integrate",
+      [
+       "Exp",
+       [
+        "Multiply",
+        [
+         "Multiply",
+         "ImaginaryUnit",
+         "z"
+        ],
+        "x"
+       ]
+      ],
+      [
+       "Limits",
+       "x",
+       [
+        "Negate",
+        "a"
+       ],
+       "a"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ],
+    [
+     "NotEqual",
+     "a",
+     0
+    ]
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Exp",
+    "Integrate",
+    "Sinc"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "b41d08",
+   "formula": [
+    "Equal",
+    [
+     "Sinc",
+     [
+      "Multiply",
+      "ImaginaryUnit",
+      "z"
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Sinh",
+      "z"
+     ],
+     "z"
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "NotEqual",
+     "z",
+     0
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Sinc",
+    "Sinh"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "b894a3",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Power",
+      [
+       "Sinc",
+       "n"
+      ],
+      6
+     ],
+     [
+      "Limits",
+      "n",
+      "NegativeInfinity",
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Multiply",
+      11,
+      "Pi"
+     ],
+     20
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Sinc",
+    "Sum"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "be0f54",
+   "formula": [
+    "Equal",
+    [
+     "Integrate",
+     [
+      "Power",
+      [
+       "Sinc",
+       "x"
+      ],
+      3
+     ],
+     [
+      "Limits",
+      "x",
+      0,
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Multiply",
+      3,
+      "Pi"
+     ],
+     8
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Integrate",
+    "Sinc"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "c2976e",
+   "formula": [
+    "Equal",
+    [
+     "Integrate",
+     [
+      "Divide",
+      1,
+      [
+       "Sinc",
+       "x"
+      ]
+     ],
+     [
+      "Limits",
+      "x",
+      0,
+      [
+       "Divide",
+       "Pi",
+       2
+      ]
+     ]
+    ],
+    [
+     "Multiply",
+     2,
+     "CatalanConstant"
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Integrate",
+    "Sinc"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "c6e6b2",
+   "formula": [
+    "Equal",
+    [
+     "Add",
+     [
+      "Add",
+      [
+       "Multiply",
+       "z",
+       [
+        "Apply",
+        [
+         "Derivative",
+         [
+          "Function",
+          [
+           "Sinc",
+           "z"
+          ],
+          "z"
+         ],
+         2
+        ],
+        "z"
+       ]
+      ],
+      [
+       "Multiply",
+       2,
+       [
+        "Apply",
+        [
+         "Derivative",
+         [
+          "Function",
+          [
+           "Sinc",
+           "z"
+          ],
+          "z"
+         ],
+         1
+        ],
+        "z"
+       ]
+      ]
+     ],
+     [
+      "Multiply",
+      "z",
+      [
+       "Sinc",
+       "z"
+      ]
+     ]
+    ],
+    0
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Derivative",
+    "Sinc"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "c7c483",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "Sinc",
+      "z"
+     ]
+    ],
+    [
+     "Exp",
+     [
+      "Abs",
+      [
+       "Imaginary",
+       "z"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Exp",
+    "Imaginary",
+    "Sinc"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "c9ead2",
+   "formula": [
+    "Equal",
+    [
+     "Sinc",
+     [
+      "Divide",
+      "Pi",
+      4
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Multiply",
+      2,
+      [
+       "Sqrt",
+       2
+      ]
+     ],
+     "Pi"
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Sinc"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "cb152f",
+   "formula": [
+    "Equal",
+    [
+     "Integrate",
+     [
+      "Sinc",
+      "x"
+     ],
+     [
+      "Limits",
+      "x",
+      0,
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Divide",
+     "Pi",
+     2
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Integrate",
+    "Sinc"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "d5000a",
+   "formula": [
+    "Equal",
+    [
+     "Sinc",
+     [
+      "Multiply",
+      2,
+      "z"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Sinc",
+      "z"
+     ],
+     [
+      "Cos",
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Cos",
+    "Sinc"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "d6c29e",
+   "formula": [
+    "Equal",
+    [
+     "Integrate",
+     [
+      "Sinc",
+      "x"
+     ],
+     [
+      "Limits",
+      "x",
+      "a",
+      "b"
+     ]
+    ],
+    [
+     "Subtract",
+     [
+      "SinIntegral",
+      "b"
+     ],
+     [
+      "SinIntegral",
+      "a"
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "b",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Integrate",
+    "SinIntegral",
+    "Sinc"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "d8d286",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "Sinc",
+      "x"
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Add",
+      1,
+      [
+       "Abs",
+       "x"
+      ]
+     ],
+     [
+      "Add",
+      1,
+      [
+       "Power",
+       "x",
+       2
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     "RealNumbers"
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Sinc"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "da7fb1",
+   "formula": [
+    "Equal",
+    [
+     "Min",
+     [
+      "Set",
+      [
+       "Sinc",
+       "x"
+      ],
+      [
+       "Element",
+       "x",
+       "RealNumbers"
+      ]
+     ]
+    ],
+    [
+     "Sinc",
+     [
+      "BesselJZero",
+      [
+       "Divide",
+       3,
+       2
+      ],
+      1
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "BesselJZero",
+    "Min",
+    "Sinc"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "dad27b",
+   "formula": [
+    "Equal",
+    [
+     "Integrate",
+     [
+      "Divide",
+      1,
+      [
+       "Power",
+       [
+        "Sinc",
+        "x"
+       ],
+       2
+      ]
+     ],
+     [
+      "Limits",
+      "x",
+      0,
+      [
+       "Divide",
+       "Pi",
+       2
+      ]
+     ]
+    ],
+    [
+     "Multiply",
+     "Pi",
+     [
+      "Ln",
+      2
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Integrate",
+    "Ln",
+    "Sinc"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "e2878f",
+   "formula": [
+    "Equal",
+    [
+     "Sinc",
+     "z"
+    ],
+    [
+     "Hypergeometric0F1",
+     [
+      "Divide",
+      3,
+      2
+     ],
+     [
+      "Negate",
+      [
+       "Divide",
+       [
+        "Power",
+        "z",
+        2
+       ],
+       4
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Hypergeometric0F1",
+    "Sinc"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "e2c10d",
+   "formula": [
+    "Equal",
+    [
+     "Sinc",
+     [
+      "Multiply",
+      "a",
+      "z"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      1,
+      "a"
+     ],
+     [
+      "Integrate",
+      [
+       "Cos",
+       [
+        "Multiply",
+        "z",
+        "x"
+       ]
+      ],
+      [
+       "Limits",
+       "x",
+       0,
+       "a"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ],
+    [
+     "NotEqual",
+     "a",
+     0
+    ]
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Cos",
+    "Integrate",
+    "Sinc"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "f0325d",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "Sinc",
+      "x"
+     ]
+    ],
+    [
+     "Divide",
+     1,
+     [
+      "Abs",
+      "x"
+     ]
+    ]
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     "RealNumbers"
+    ],
+    [
+     "NotEqual",
+     "x",
+     0
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Sinc"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "f0f0a6",
+   "formula": [
+    "Equal",
+    [
+     "Integrate",
+     [
+      "Sinc",
+      "x"
+     ],
+     [
+      "Limits",
+      "x",
+      "NegativeInfinity",
+      "PositiveInfinity"
+     ]
+    ],
+    "Pi"
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Integrate",
+    "Sinc"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "f19e0a",
+   "formula": [
+    "Equal",
+    [
+     "Sinc",
+     [
+      "Negate",
+      "z"
+     ]
+    ],
+    [
+     "Sinc",
+     "z"
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Sinc"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "f4fd7d",
+   "formula": [
+    "Equal",
+    [
+     "Abs",
+     [
+      "Sinc",
+      [
+       "Multiply",
+       [
+        "Exp",
+        [
+         "Multiply",
+         "ImaginaryUnit",
+         "theta"
+        ]
+       ],
+       "PositiveInfinity"
+      ]
+     ]
+    ],
+    [
+     "Limit",
+     [
+      "Function",
+      [
+       "Abs",
+       [
+        "Sinc",
+        [
+         "Multiply",
+         [
+          "Exp",
+          [
+           "Multiply",
+           "ImaginaryUnit",
+           "theta"
+          ]
+         ],
+         "x"
+        ]
+       ]
+      ],
+      "x"
+     ],
+     "PositiveInfinity"
+    ],
+    [
+     "Which",
+     [
+      "Element",
+      [
+       "Exp",
+       [
+        "Multiply",
+        "ImaginaryUnit",
+        "theta"
+       ]
+      ],
+      [
+       "Set",
+       -1,
+       1
+      ]
+     ],
+     0,
+     "True",
+     "PositiveInfinity"
+    ]
+   ],
+   "variables": [
+    "theta"
+   ],
+   "assumptions": [
+    "Element",
+    "theta",
+    "RealNumbers"
+   ],
+   "class": "representation",
+   "subclass": "limit",
+   "heads": [
+    "Abs",
+    "Exp",
+    "Limit",
+    "Sinc"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": "real",
+   "references": null,
+   "topics": [
+    "sinc"
+   ],
+   "directedInfinity": true
+  },
+  {
+   "id": "f5887b",
+   "formula": [
+    "Equal",
+    [
+     "Integrate",
+     [
+      "Multiply",
+      [
+       "Sinc",
+       [
+        "Add",
+        "x",
+        [
+         "Multiply",
+         "Pi",
+         "n"
+        ]
+       ]
+      ],
+      [
+       "Sinc",
+       [
+        "Add",
+        "x",
+        [
+         "Multiply",
+         "Pi",
+         "m"
+        ]
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "x",
+      "NegativeInfinity",
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Which",
+     [
+      "Equal",
+      "n",
+      "m"
+     ],
+     "Pi",
+     [
+      "NotEqual",
+      "n",
+      "m"
+     ],
+     0
+    ]
+   ],
+   "variables": [
+    "m",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "Element",
+     "m",
+     "Integers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Integrate",
+    "Sinc"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "f64eef",
+   "formula": [
+    "Equal",
+    [
+     "Sinc",
+     [
+      "Multiply",
+      "Pi",
+      "z"
+     ]
+    ],
+    [
+     "Product",
+     [
+      "Subtract",
+      1,
+      [
+       "Divide",
+       [
+        "Power",
+        "z",
+        2
+       ],
+       [
+        "Power",
+        "n",
+        2
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "n",
+      1,
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "representation",
+   "subclass": "product",
+   "heads": [
+    "Product",
+    "Sinc"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "fa9283",
+   "formula": [
+    "Equal",
+    [
+     "Sinc",
+     "z"
+    ],
+    [
+     "Divide",
+     [
+      "Sin",
+      "z"
+     ],
+     "z"
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "NotEqual",
+     "z",
+     0
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Sin",
+    "Sinc"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "fdc94c",
+   "formula": [
+    "Equal",
+    [
+     "Sinc",
+     [
+      "Divide",
+      "Pi",
+      2
+     ]
+    ],
+    [
+     "Divide",
+     2,
+     "Pi"
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Sinc"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "ff5e82",
+   "formula": [
+    "Equal",
+    [
+     "Add",
+     [
+      "Add",
+      [
+       "Add",
+       [
+        "Multiply",
+        [
+         "Multiply",
+         "z",
+         [
+          "Add",
+          [
+           "Add",
+           [
+            "Power",
+            "n",
+            2
+           ],
+           [
+            "Multiply",
+            5,
+            "n"
+           ]
+          ],
+          6
+         ]
+        ],
+        [
+         "Divide",
+         [
+          "Apply",
+          [
+           "Derivative",
+           [
+            "Function",
+            [
+             "Sinc",
+             "z"
+            ],
+            "z"
+           ],
+           [
+            "Add",
+            "n",
+            3
+           ]
+          ],
+          "z"
+         ],
+         [
+          "Factorial",
+          [
+           "Add",
+           "n",
+           3
+          ]
+         ]
+        ]
+       ],
+       [
+        "Multiply",
+        [
+         "Add",
+         [
+          "Add",
+          [
+           "Power",
+           "n",
+           2
+          ],
+          [
+           "Multiply",
+           5,
+           "n"
+          ]
+         ],
+         6
+        ],
+        [
+         "Divide",
+         [
+          "Apply",
+          [
+           "Derivative",
+           [
+            "Function",
+            [
+             "Sinc",
+             "z"
+            ],
+            "z"
+           ],
+           [
+            "Add",
+            "n",
+            2
+           ]
+          ],
+          "z"
+         ],
+         [
+          "Factorial",
+          [
+           "Add",
+           "n",
+           2
+          ]
+         ]
+        ]
+       ]
+      ],
+      [
+       "Multiply",
+       "z",
+       [
+        "Divide",
+        [
+         "Apply",
+         [
+          "Derivative",
+          [
+           "Function",
+           [
+            "Sinc",
+            "z"
+           ],
+           "z"
+          ],
+          [
+           "Add",
+           "n",
+           1
+          ]
+         ],
+         "z"
+        ],
+        [
+         "Factorial",
+         [
+          "Add",
+          "n",
+          1
+         ]
+        ]
+       ]
+      ]
+     ],
+     [
+      "Divide",
+      [
+       "Apply",
+       [
+        "Derivative",
+        [
+         "Function",
+         [
+          "Sinc",
+          "z"
+         ],
+         "z"
+        ],
+        "n"
+       ],
+       "z"
+      ],
+      [
+       "Factorial",
+       "n"
+      ]
+     ]
+    ],
+    0
+   ],
+   "variables": [
+    "n",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Derivative",
+    "Factorial",
+    "Sinc"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sinc"
+   ]
+  }
+ ]
+}

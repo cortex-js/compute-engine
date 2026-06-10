@@ -1,0 +1,6510 @@
+{
+ "topic": "chebyshev",
+ "title": "Chebyshev polynomials",
+ "source": "pygrim/formulas/chebyshev.py",
+ "generator": "grim2mathjson 0.1.0",
+ "entries": [
+  {
+   "id": "05fe07",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "ChebyshevT",
+        "n",
+        "x"
+       ],
+       "x"
+      ],
+      2
+     ],
+     "x"
+    ],
+    [
+     "Divide",
+     [
+      "Multiply",
+      "n",
+      [
+       "Subtract",
+       [
+        "Multiply",
+        "n",
+        [
+         "ChebyshevT",
+         "n",
+         "x"
+        ]
+       ],
+       [
+        "Multiply",
+        "x",
+        [
+         "ChebyshevU",
+         [
+          "Subtract",
+          "n",
+          1
+         ],
+         "x"
+        ]
+       ]
+      ]
+     ],
+     [
+      "Subtract",
+      [
+       "Power",
+       "x",
+       2
+      ],
+      1
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "Element",
+     "x",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      [
+       "Set",
+       -1,
+       1
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ChebyshevT",
+    "ChebyshevU",
+    "Derivative"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "0649c9",
+   "formula": [
+    "Equal",
+    [
+     "ChebyshevT",
+     "n",
+     "x"
+    ],
+    [
+     "Divide",
+     [
+      "Subtract",
+      [
+       "ChebyshevU",
+       "n",
+       "x"
+      ],
+      [
+       "ChebyshevU",
+       [
+        "Subtract",
+        "n",
+        2
+       ],
+       "x"
+      ]
+     ],
+     2
+    ]
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ChebyshevT",
+    "ChebyshevU"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "0b3fd6",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "ChebyshevU",
+      "n",
+      "z"
+     ]
+    ],
+    [
+     "Abs",
+     [
+      "ChebyshevU",
+      "n",
+      [
+       "Multiply",
+       "ImaginaryUnit",
+       [
+        "Abs",
+        "z"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "ChebyshevU"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "0cbe75",
+   "formula": [
+    "Equal",
+    [
+     "ChebyshevT",
+     "n",
+     "x"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      1,
+      2
+     ],
+     [
+      "Add",
+      [
+       "Power",
+       [
+        "Add",
+        "x",
+        [
+         "Sqrt",
+         [
+          "Subtract",
+          [
+           "Power",
+           "x",
+           2
+          ],
+          1
+         ]
+        ]
+       ],
+       "n"
+      ],
+      [
+       "Power",
+       [
+        "Subtract",
+        "x",
+        [
+         "Sqrt",
+         [
+          "Subtract",
+          [
+           "Power",
+           "x",
+           2
+          ],
+          1
+         ]
+        ]
+       ],
+       "n"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ChebyshevT"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "0ed026",
+   "formula": [
+    "Equal",
+    [
+     "Add",
+     [
+      "Subtract",
+      [
+       "Multiply",
+       [
+        "Subtract",
+        1,
+        [
+         "Power",
+         "x",
+         2
+        ]
+       ],
+       [
+        "Apply",
+        [
+         "Derivative",
+         [
+          "Function",
+          [
+           "Add",
+           [
+            "Multiply",
+            "c_1",
+            [
+             "ChebyshevT",
+             "n",
+             "x"
+            ]
+           ],
+           [
+            "Multiply",
+            [
+             "Multiply",
+             "c_2",
+             [
+              "ChebyshevU",
+              [
+               "Subtract",
+               "n",
+               1
+              ],
+              "x"
+             ]
+            ],
+            [
+             "Sqrt",
+             [
+              "Subtract",
+              1,
+              [
+               "Power",
+               "x",
+               2
+              ]
+             ]
+            ]
+           ]
+          ],
+          "x"
+         ],
+         2
+        ],
+        "x"
+       ]
+      ],
+      [
+       "Multiply",
+       "x",
+       [
+        "Apply",
+        [
+         "Derivative",
+         [
+          "Function",
+          [
+           "Add",
+           [
+            "Multiply",
+            "c_1",
+            [
+             "ChebyshevT",
+             "n",
+             "x"
+            ]
+           ],
+           [
+            "Multiply",
+            [
+             "Multiply",
+             "c_2",
+             [
+              "ChebyshevU",
+              [
+               "Subtract",
+               "n",
+               1
+              ],
+              "x"
+             ]
+            ],
+            [
+             "Sqrt",
+             [
+              "Subtract",
+              1,
+              [
+               "Power",
+               "x",
+               2
+              ]
+             ]
+            ]
+           ]
+          ],
+          "x"
+         ],
+         1
+        ],
+        "x"
+       ]
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Power",
+       "n",
+       2
+      ],
+      [
+       "Add",
+       [
+        "Multiply",
+        "c_1",
+        [
+         "ChebyshevT",
+         "n",
+         "x"
+        ]
+       ],
+       [
+        "Multiply",
+        [
+         "Multiply",
+         "c_2",
+         [
+          "ChebyshevU",
+          [
+           "Subtract",
+           "n",
+           1
+          ],
+          "x"
+         ]
+        ],
+        [
+         "Sqrt",
+         [
+          "Subtract",
+          1,
+          [
+           "Power",
+           "x",
+           2
+          ]
+         ]
+        ]
+       ]
+      ]
+     ]
+    ],
+    0
+   ],
+   "variables": [
+    "c",
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "c_1",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "c_2",
+     "ComplexNumbers"
+    ],
+    [
+     "Or",
+     [
+      "Equal",
+      "c_2",
+      0
+     ],
+     [
+      "NotElement",
+      "x",
+      [
+       "Union",
+       [
+        "Interval",
+        [
+         "Open",
+         "NegativeInfinity"
+        ],
+        1
+       ],
+       [
+        "Interval",
+        1,
+        [
+         "Open",
+         "PositiveInfinity"
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ChebyshevT",
+    "ChebyshevU",
+    "Derivative"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "12ce84",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "ChebyshevT",
+        "n",
+        "x"
+       ],
+       "x"
+      ],
+      "r"
+     ],
+     "x"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      [
+       "Multiply",
+       [
+        "RisingFactorial",
+        "n",
+        "r"
+       ],
+       [
+        "RisingFactorial",
+        [
+         "Add",
+         [
+          "Subtract",
+          "n",
+          "r"
+         ],
+         1
+        ],
+        "r"
+       ]
+      ],
+      [
+       "Factorial2",
+       [
+        "Subtract",
+        [
+         "Multiply",
+         2,
+         "r"
+        ],
+        1
+       ]
+      ]
+     ],
+     [
+      "Hypergeometric2F1",
+      [
+       "Add",
+       "r",
+       "n"
+      ],
+      [
+       "Subtract",
+       "r",
+       "n"
+      ],
+      [
+       "Add",
+       [
+        "Divide",
+        1,
+        2
+       ],
+       "r"
+      ],
+      [
+       "Divide",
+       [
+        "Subtract",
+        1,
+        "x"
+       ],
+       2
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "r",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "Element",
+     "r",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ],
+    [
+     "Or",
+     [
+      "LessEqual",
+      "r",
+      "n"
+     ],
+     [
+      "NotEqual",
+      "x",
+      -1
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ChebyshevT",
+    "Derivative",
+    "Factorial2",
+    "Hypergeometric2F1",
+    "RisingFactorial"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "15dd69",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "ChebyshevT",
+      "n",
+      "x"
+     ]
+    ],
+    1
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "Element",
+     "x",
+     [
+      "Interval",
+      -1,
+      1
+     ]
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "ChebyshevT"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "1a0d11",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "ChebyshevT",
+        "n",
+        "x"
+       ],
+       "x"
+      ],
+      1
+     ],
+     "x"
+    ],
+    [
+     "Multiply",
+     "n",
+     [
+      "ChebyshevU",
+      [
+       "Subtract",
+       "n",
+       1
+      ],
+      "x"
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ChebyshevT",
+    "ChebyshevU",
+    "Derivative"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "2760e7",
+   "formula": [
+    "Equal",
+    [
+     "ChebyshevT",
+     "n",
+     -1
+    ],
+    [
+     "Power",
+     -1,
+     "n"
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "Integers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ChebyshevT"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "27b2bb",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "ChebyshevT",
+       "n",
+       "x"
+      ],
+      [
+       "Divide",
+       [
+        "Power",
+        "z",
+        "n"
+       ],
+       "n"
+      ]
+     ],
+     [
+      "Limits",
+      "n",
+      1,
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Negate",
+      [
+       "Divide",
+       1,
+       2
+      ]
+     ],
+     [
+      "Ln",
+      [
+       "Add",
+       [
+        "Subtract",
+        1,
+        [
+         "Multiply",
+         [
+          "Multiply",
+          2,
+          "x"
+         ],
+         "z"
+        ]
+       ],
+       [
+        "Power",
+        "z",
+        2
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "x",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     [
+      "Interval",
+      -1,
+      1
+     ]
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Less",
+     [
+      "Abs",
+      "z"
+     ],
+     1
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "ChebyshevT",
+    "Ln",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "2a4b9d",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "ChebyshevU",
+      "n",
+      "z"
+     ]
+    ],
+    [
+     "Power",
+     [
+      "Add",
+      [
+       "Abs",
+       "z"
+      ],
+      [
+       "Sqrt",
+       [
+        "Add",
+        [
+         "Power",
+         [
+          "Abs",
+          "z"
+         ],
+         2
+        ],
+        1
+       ]
+      ]
+     ],
+     "n"
+    ]
+   ],
+   "variables": [
+    "n",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "ChebyshevU"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "2a5337",
+   "formula": [
+    "Equal",
+    [
+     "ChebyshevU",
+     [
+      "Multiply",
+      2,
+      "n"
+     ],
+     0
+    ],
+    [
+     "Power",
+     -1,
+     "n"
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "Integers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ChebyshevU"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "2ada0f",
+   "formula": [
+    "Greater",
+    [
+     "Subtract",
+     [
+      "Power",
+      [
+       "ChebyshevT",
+       "n",
+       "x"
+      ],
+      2
+     ],
+     [
+      "Multiply",
+      [
+       "ChebyshevT",
+       [
+        "Subtract",
+        "n",
+        1
+       ],
+       "x"
+      ],
+      [
+       "ChebyshevT",
+       [
+        "Add",
+        "n",
+        1
+       ],
+       "x"
+      ]
+     ]
+    ],
+    0
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "x",
+     [
+      "Interval",
+      [
+       "Open",
+       -1
+      ],
+      [
+       "Open",
+       1
+      ]
+     ]
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "ChebyshevT"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "2c26a1",
+   "formula": [
+    "Equal",
+    [
+     "Integrate",
+     [
+      "Multiply",
+      [
+       "Multiply",
+       [
+        "ChebyshevT",
+        "n",
+        "x"
+       ],
+       [
+        "ChebyshevT",
+        "m",
+        "x"
+       ]
+      ],
+      [
+       "Divide",
+       1,
+       [
+        "Sqrt",
+        [
+         "Subtract",
+         1,
+         [
+          "Power",
+          "x",
+          2
+         ]
+        ]
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "x",
+      -1,
+      1
+     ]
+    ],
+    [
+     "Which",
+     [
+      "NotEqual",
+      "n",
+      "m"
+     ],
+     0,
+     [
+      "Equal",
+      "n",
+      "m",
+      0
+     ],
+     "Pi",
+     [
+      "And",
+      [
+       "Equal",
+       "n",
+       "m"
+      ],
+      [
+       "NotEqual",
+       "n",
+       0
+      ]
+     ],
+     [
+      "Divide",
+      "Pi",
+      2
+     ]
+    ]
+   ],
+   "variables": [
+    "m",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "m",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "ChebyshevT",
+    "Integrate"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "2fc479",
+   "formula": [
+    "Equal",
+    [
+     "ChebyshevT",
+     "n",
+     "x"
+    ],
+    [
+     "Cosh",
+     [
+      "Multiply",
+      "n",
+      [
+       "Arcosh",
+       "x"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Arcosh",
+    "ChebyshevT",
+    "Cosh"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "303204",
+   "formula": [
+    "Equal",
+    [
+     "ChebyshevU",
+     "n",
+     "x"
+    ],
+    [
+     "Subtract",
+     [
+      "Multiply",
+      [
+       "Multiply",
+       2,
+       "x"
+      ],
+      [
+       "ChebyshevU",
+       [
+        "Add",
+        "n",
+        1
+       ],
+       "x"
+      ]
+     ],
+     [
+      "ChebyshevU",
+      [
+       "Add",
+       "n",
+       2
+      ],
+      "x"
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ChebyshevU"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "305a29",
+   "formula": [
+    "Equal",
+    [
+     "ChebyshevT",
+     "n",
+     "x"
+    ],
+    [
+     "Multiply",
+     [
+      "Power",
+      2,
+      [
+       "Subtract",
+       "n",
+       1
+      ]
+     ],
+     [
+      "Product",
+      [
+       "Subtract",
+       "x",
+       [
+        "Cos",
+        [
+         "Multiply",
+         [
+          "Divide",
+          [
+           "Subtract",
+           [
+            "Multiply",
+            2,
+            "k"
+           ],
+           1
+          ],
+          [
+           "Multiply",
+           2,
+           "n"
+          ]
+         ],
+         "Pi"
+        ]
+       ]
+      ],
+      [
+       "Limits",
+       "k",
+       1,
+       "n"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "product",
+   "heads": [
+    "ChebyshevT",
+    "Cos",
+    "Product"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "30b67b",
+   "formula": [
+    "Equal",
+    [
+     "Add",
+     [
+      "Subtract",
+      [
+       "Multiply",
+       [
+        "Subtract",
+        1,
+        [
+         "Power",
+         "x",
+         2
+        ]
+       ],
+       [
+        "Apply",
+        [
+         "Derivative",
+         [
+          "Function",
+          [
+           "Add",
+           [
+            "Multiply",
+            "c_1",
+            [
+             "ChebyshevU",
+             "n",
+             "x"
+            ]
+           ],
+           [
+            "Multiply",
+            "c_2",
+            [
+             "Divide",
+             [
+              "ChebyshevT",
+              [
+               "Add",
+               "n",
+               1
+              ],
+              "x"
+             ],
+             [
+              "Sqrt",
+              [
+               "Subtract",
+               1,
+               [
+                "Power",
+                "x",
+                2
+               ]
+              ]
+             ]
+            ]
+           ]
+          ],
+          "x"
+         ],
+         2
+        ],
+        "x"
+       ]
+      ],
+      [
+       "Multiply",
+       [
+        "Multiply",
+        3,
+        "x"
+       ],
+       [
+        "Apply",
+        [
+         "Derivative",
+         [
+          "Function",
+          [
+           "Add",
+           [
+            "Multiply",
+            "c_1",
+            [
+             "ChebyshevU",
+             "n",
+             "x"
+            ]
+           ],
+           [
+            "Multiply",
+            "c_2",
+            [
+             "Divide",
+             [
+              "ChebyshevT",
+              [
+               "Add",
+               "n",
+               1
+              ],
+              "x"
+             ],
+             [
+              "Sqrt",
+              [
+               "Subtract",
+               1,
+               [
+                "Power",
+                "x",
+                2
+               ]
+              ]
+             ]
+            ]
+           ]
+          ],
+          "x"
+         ],
+         1
+        ],
+        "x"
+       ]
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Multiply",
+       "n",
+       [
+        "Add",
+        "n",
+        2
+       ]
+      ],
+      [
+       "Add",
+       [
+        "Multiply",
+        "c_1",
+        [
+         "ChebyshevU",
+         "n",
+         "x"
+        ]
+       ],
+       [
+        "Multiply",
+        "c_2",
+        [
+         "Divide",
+         [
+          "ChebyshevT",
+          [
+           "Add",
+           "n",
+           1
+          ],
+          "x"
+         ],
+         [
+          "Sqrt",
+          [
+           "Subtract",
+           1,
+           [
+            "Power",
+            "x",
+            2
+           ]
+          ]
+         ]
+        ]
+       ]
+      ]
+     ]
+    ],
+    0
+   ],
+   "variables": [
+    "c",
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "c_1",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "c_2",
+     "ComplexNumbers"
+    ],
+    [
+     "Or",
+     [
+      "Equal",
+      "c_2",
+      0
+     ],
+     [
+      "NotElement",
+      "x",
+      [
+       "Union",
+       [
+        "Interval",
+        [
+         "Open",
+         "NegativeInfinity"
+        ],
+        1
+       ],
+       [
+        "Interval",
+        1,
+        [
+         "Open",
+         "PositiveInfinity"
+        ]
+       ]
+      ]
+     ]
+    ],
+    [
+     "NotElement",
+     "x",
+     [
+      "Set",
+      -1,
+      1
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ChebyshevT",
+    "ChebyshevU",
+    "Derivative"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "35e13b",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "ChebyshevU",
+        "n",
+        "x"
+       ],
+       "x"
+      ],
+      1
+     ],
+     "x"
+    ],
+    [
+     "Divide",
+     [
+      "Subtract",
+      [
+       "Multiply",
+       [
+        "Add",
+        "n",
+        1
+       ],
+       [
+        "ChebyshevT",
+        [
+         "Add",
+         "n",
+         1
+        ],
+        "x"
+       ]
+      ],
+      [
+       "Multiply",
+       "x",
+       [
+        "ChebyshevU",
+        "n",
+        "x"
+       ]
+      ]
+     ],
+     [
+      "Subtract",
+      [
+       "Power",
+       "x",
+       2
+      ],
+      1
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "Element",
+     "x",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      [
+       "Set",
+       -1,
+       1
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ChebyshevT",
+    "ChebyshevU",
+    "Derivative"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "382679",
+   "formula": [
+    "Equal",
+    [
+     "ChebyshevT",
+     "n",
+     "x"
+    ],
+    [
+     "Hypergeometric2F1",
+     [
+      "Negate",
+      "n"
+     ],
+     "n",
+     [
+      "Divide",
+      1,
+      2
+     ],
+     [
+      "Divide",
+      [
+       "Subtract",
+       1,
+       "x"
+      ],
+      2
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ChebyshevT",
+    "Hypergeometric2F1"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "3c662e",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "ChebyshevU",
+      "n",
+      "x"
+     ]
+    ],
+    [
+     "Abs",
+     [
+      "Add",
+      "n",
+      1
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "Element",
+     "x",
+     [
+      "Interval",
+      -1,
+      1
+     ]
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "ChebyshevU"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "3d77ab",
+   "formula": [
+    "Equal",
+    [
+     "Integrate",
+     [
+      "Multiply",
+      [
+       "Multiply",
+       [
+        "ChebyshevT",
+        "n",
+        "x"
+       ],
+       [
+        "Power",
+        "x",
+        "m"
+       ]
+      ],
+      [
+       "Divide",
+       1,
+       [
+        "Sqrt",
+        [
+         "Subtract",
+         1,
+         [
+          "Power",
+          "x",
+          2
+         ]
+        ]
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "x",
+      -1,
+      1
+     ]
+    ],
+    0
+   ],
+   "variables": [
+    "m",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "m",
+     [
+      "Range",
+      0,
+      [
+       "Subtract",
+       "n",
+       1
+      ]
+     ]
+    ]
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "ChebyshevT",
+    "Integrate"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "42102c",
+   "formula": [
+    "Equal",
+    [
+     "ChebyshevT",
+     [
+      "Add",
+      [
+       "Multiply",
+       2,
+       "n"
+      ],
+      1
+     ],
+     0
+    ],
+    0
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "Integers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ChebyshevT"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "42eb01",
+   "formula": [
+    "Equal",
+    [
+     "Add",
+     [
+      "Power",
+      [
+       "ChebyshevT",
+       "n",
+       "x"
+      ],
+      2
+     ],
+     [
+      "Multiply",
+      [
+       "Subtract",
+       [
+        "Power",
+        "x",
+        2
+       ],
+       1
+      ],
+      [
+       "Power",
+       [
+        "ChebyshevU",
+        [
+         "Subtract",
+         "n",
+         1
+        ],
+        "x"
+       ],
+       2
+      ]
+     ]
+    ],
+    1
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ChebyshevT",
+    "ChebyshevU"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "443759",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "ChebyshevT",
+      "n",
+      "z"
+     ]
+    ],
+    [
+     "Power",
+     [
+      "Add",
+      [
+       "Abs",
+       "z"
+      ],
+      [
+       "Sqrt",
+       [
+        "Add",
+        [
+         "Power",
+         [
+          "Abs",
+          "z"
+         ],
+         2
+        ],
+        1
+       ]
+      ]
+     ],
+     "n"
+    ]
+   ],
+   "variables": [
+    "n",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "ChebyshevT"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "473c36",
+   "formula": [
+    "Equal",
+    [
+     "Integrate",
+     [
+      "Multiply",
+      [
+       "Multiply",
+       [
+        "ChebyshevU",
+        "n",
+        "x"
+       ],
+       [
+        "ChebyshevU",
+        "m",
+        "x"
+       ]
+      ],
+      [
+       "Sqrt",
+       [
+        "Subtract",
+        1,
+        [
+         "Power",
+         "x",
+         2
+        ]
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "x",
+      -1,
+      1
+     ]
+    ],
+    [
+     "Which",
+     [
+      "NotEqual",
+      "n",
+      "m"
+     ],
+     0,
+     [
+      "Equal",
+      "n",
+      "m"
+     ],
+     [
+      "Divide",
+      "Pi",
+      2
+     ]
+    ]
+   ],
+   "variables": [
+    "m",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "m",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "ChebyshevU",
+    "Integrate"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "48765b",
+   "formula": [
+    "Equal",
+    [
+     "ChebyshevU",
+     0,
+     "x"
+    ],
+    1
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": [
+    "Element",
+    "x",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ChebyshevU"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "4b83c6",
+   "formula": [
+    "Equal",
+    [
+     "ChebyshevT",
+     [
+      "Multiply",
+      2,
+      "n"
+     ],
+     "x"
+    ],
+    [
+     "Subtract",
+     [
+      "Multiply",
+      2,
+      [
+       "Power",
+       [
+        "ChebyshevT",
+        "n",
+        "x"
+       ],
+       2
+      ]
+     ],
+     1
+    ]
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ChebyshevT"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "4c7aeb",
+   "formula": [
+    "Equal",
+    [
+     "Multiply",
+     [
+      "ChebyshevU",
+      "n",
+      [
+       "Cos",
+       "x"
+      ]
+     ],
+     [
+      "Sin",
+      "x"
+     ]
+    ],
+    [
+     "Sin",
+     [
+      "Multiply",
+      "n",
+      "x"
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ChebyshevU",
+    "Cos",
+    "Sin"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "4e914f",
+   "formula": [
+    "Equal",
+    [
+     "ChebyshevU",
+     "n",
+     "x"
+    ],
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "Multiply",
+       [
+        "Binomial",
+        [
+         "Add",
+         "n",
+         1
+        ],
+        [
+         "Add",
+         [
+          "Multiply",
+          2,
+          "k"
+         ],
+         1
+        ]
+       ],
+       [
+        "Power",
+        [
+         "Subtract",
+         [
+          "Power",
+          "x",
+          2
+         ],
+         1
+        ],
+        "k"
+       ]
+      ],
+      [
+       "Power",
+       "x",
+       [
+        "Subtract",
+        "n",
+        [
+         "Multiply",
+         2,
+         "k"
+        ]
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "k",
+      0,
+      [
+       "Floor",
+       [
+        "Divide",
+        "n",
+        2
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Binomial",
+    "ChebyshevU",
+    "Floor",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "4f3e30",
+   "formula": [
+    "Equal",
+    [
+     "ChebyshevT",
+     "n",
+     "x"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      "n",
+      2
+     ],
+     [
+      "Sum",
+      [
+       "Multiply",
+       [
+        "Divide",
+        [
+         "Multiply",
+         [
+          "Power",
+          -1,
+          "k"
+         ],
+         [
+          "Factorial",
+          [
+           "Subtract",
+           [
+            "Subtract",
+            "n",
+            "k"
+           ],
+           1
+          ]
+         ]
+        ],
+        [
+         "Multiply",
+         [
+          "Factorial",
+          "k"
+         ],
+         [
+          "Factorial",
+          [
+           "Subtract",
+           "n",
+           [
+            "Multiply",
+            2,
+            "k"
+           ]
+          ]
+         ]
+        ]
+       ],
+       [
+        "Power",
+        [
+         "Multiply",
+         2,
+         "x"
+        ],
+        [
+         "Subtract",
+         "n",
+         [
+          "Multiply",
+          2,
+          "k"
+         ]
+        ]
+       ]
+      ],
+      [
+       "Limits",
+       "k",
+       0,
+       [
+        "Floor",
+        [
+         "Divide",
+         "n",
+         2
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "ChebyshevT",
+    "Factorial",
+    "Floor",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "50cb6b",
+   "formula": [
+    "Equal",
+    [
+     "ChebyshevU",
+     "n",
+     "x"
+    ],
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "Multiply",
+       [
+        "Power",
+        -1,
+        "k"
+       ],
+       [
+        "Binomial",
+        [
+         "Subtract",
+         "n",
+         "k"
+        ],
+        "k"
+       ]
+      ],
+      [
+       "Power",
+       [
+        "Multiply",
+        2,
+        "x"
+       ],
+       [
+        "Subtract",
+        "n",
+        [
+         "Multiply",
+         2,
+         "k"
+        ]
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "k",
+      0,
+      [
+       "Floor",
+       [
+        "Divide",
+        "n",
+        2
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Binomial",
+    "ChebyshevU",
+    "Floor",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "54be3e",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "Apply",
+      [
+       "Derivative",
+       [
+        "Function",
+        [
+         "ChebyshevT",
+         [
+          "Subtract",
+          "n",
+          1
+         ],
+         "x"
+        ],
+        "x"
+       ],
+       "r"
+      ],
+      "x"
+     ]
+    ],
+    [
+     "Abs",
+     [
+      "Apply",
+      [
+       "Derivative",
+       [
+        "Function",
+        [
+         "ChebyshevT",
+         "n",
+         "x"
+        ],
+        "x"
+       ],
+       "r"
+      ],
+      "x"
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "r",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "x",
+     "RealNumbers"
+    ],
+    [
+     "GreaterEqual",
+     [
+      "Abs",
+      "x"
+     ],
+     1
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "ChebyshevT",
+    "Derivative"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": [
+    "V. V. Prasolov, Polynomials, Springer, 2004, ISBN 978-3-642-03980-5. Theorem 3.14.10."
+   ],
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "5bd0ec",
+   "formula": [
+    "Equal",
+    [
+     "ChebyshevT",
+     "n",
+     [
+      "Divide",
+      [
+       "Add",
+       "x",
+       [
+        "Power",
+        "x",
+        -1
+       ]
+      ],
+      2
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Add",
+      [
+       "Power",
+       "x",
+       "n"
+      ],
+      [
+       "Power",
+       "x",
+       [
+        "Negate",
+        "n"
+       ]
+      ]
+     ],
+     2
+    ]
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "Element",
+     "x",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      [
+       "Set",
+       0
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ChebyshevT"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "5f09f4",
+   "formula": [
+    "Equal",
+    [
+     "ChebyshevU",
+     [
+      "Multiply",
+      2,
+      "n"
+     ],
+     "x"
+    ],
+    [
+     "Add",
+     [
+      "ChebyshevT",
+      "n",
+      [
+       "Subtract",
+       [
+        "Multiply",
+        2,
+        [
+         "Power",
+         "x",
+         2
+        ]
+       ],
+       1
+      ]
+     ],
+     [
+      "ChebyshevU",
+      [
+       "Subtract",
+       "n",
+       1
+      ],
+      [
+       "Subtract",
+       [
+        "Multiply",
+        2,
+        [
+         "Power",
+         "x",
+         2
+        ]
+       ],
+       1
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ChebyshevT",
+    "ChebyshevU"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "61375f",
+   "formula": [
+    "Equal",
+    [
+     "Multiply",
+     [
+      "ChebyshevU",
+      [
+       "Subtract",
+       "n",
+       1
+      ],
+      "x"
+     ],
+     [
+      "Sqrt",
+      [
+       "Subtract",
+       [
+        "Power",
+        "x",
+        2
+       ],
+       1
+      ]
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      1,
+      2
+     ],
+     [
+      "Subtract",
+      [
+       "Power",
+       [
+        "Add",
+        "x",
+        [
+         "Sqrt",
+         [
+          "Subtract",
+          [
+           "Power",
+           "x",
+           2
+          ],
+          1
+         ]
+        ]
+       ],
+       "n"
+      ],
+      [
+       "Power",
+       [
+        "Subtract",
+        "x",
+        [
+         "Sqrt",
+         [
+          "Subtract",
+          [
+           "Power",
+           "x",
+           2
+          ],
+          1
+         ]
+        ]
+       ],
+       "n"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ChebyshevU"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "6582c4",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "ChebyshevT",
+        "n",
+        "x"
+       ],
+       "x"
+      ],
+      "r"
+     ],
+     "x"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      [
+       "Sqrt",
+       "Pi"
+      ],
+      [
+       "Power",
+       [
+        "Subtract",
+        "x",
+        1
+       ],
+       "r"
+      ]
+     ],
+     [
+      "Hypergeometric3F2Regularized",
+      1,
+      [
+       "Negate",
+       "n"
+      ],
+      "n",
+      [
+       "Divide",
+       1,
+       2
+      ],
+      [
+       "Subtract",
+       1,
+       "r"
+      ],
+      [
+       "Divide",
+       [
+        "Subtract",
+        1,
+        "x"
+       ],
+       2
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "r",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "Element",
+     "r",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "x",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      [
+       "Set",
+       -1,
+       1
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ChebyshevT",
+    "Derivative",
+    "Hypergeometric3F2Regularized"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": [
+    "http://functions.wolfram.com/Polynomials/ChebyshevT/20/02/01/0002/"
+   ],
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "685d1a",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "ChebyshevT",
+       "n",
+       "x"
+      ],
+      [
+       "Power",
+       "z",
+       "n"
+      ]
+     ],
+     [
+      "Limits",
+      "n",
+      0,
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Subtract",
+      1,
+      [
+       "Multiply",
+       "x",
+       "z"
+      ]
+     ],
+     [
+      "Add",
+      [
+       "Subtract",
+       1,
+       [
+        "Multiply",
+        [
+         "Multiply",
+         2,
+         "x"
+        ],
+        "z"
+       ]
+      ],
+      [
+       "Power",
+       "z",
+       2
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "x",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     [
+      "Interval",
+      -1,
+      1
+     ]
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Less",
+     [
+      "Abs",
+      "z"
+     ],
+     1
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "ChebyshevT",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "6a24ab",
+   "formula": [
+    "Equal",
+    [
+     "ChebyshevT",
+     "n",
+     [
+      "Negate",
+      "x"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Power",
+      -1,
+      "n"
+     ],
+     [
+      "ChebyshevT",
+      "n",
+      "x"
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ChebyshevT"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "75eacb",
+   "formula": [
+    "Equal",
+    [
+     "ChebyshevU",
+     1,
+     "x"
+    ],
+    [
+     "Multiply",
+     2,
+     "x"
+    ]
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": [
+    "Element",
+    "x",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ChebyshevU"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "78f5bb",
+   "formula": [
+    "Equal",
+    [
+     "ChebyshevU",
+     [
+      "Negate",
+      "n"
+     ],
+     "x"
+    ],
+    [
+     "Negate",
+     [
+      "ChebyshevU",
+      [
+       "Subtract",
+       "n",
+       2
+      ],
+      "x"
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ChebyshevU"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "7b2c26",
+   "formula": [
+    "Equal",
+    [
+     "ChebyshevT",
+     "n",
+     "x"
+    ],
+    [
+     "Subtract",
+     [
+      "Multiply",
+      "x",
+      [
+       "ChebyshevT",
+       [
+        "Subtract",
+        "n",
+        1
+       ],
+       "x"
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Subtract",
+       1,
+       [
+        "Power",
+        "x",
+        2
+       ]
+      ],
+      [
+       "ChebyshevU",
+       [
+        "Subtract",
+        "n",
+        2
+       ],
+       "x"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ChebyshevT",
+    "ChebyshevU"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "7d111e",
+   "formula": [
+    "Equal",
+    [
+     "ChebyshevU",
+     [
+      "Add",
+      [
+       "Multiply",
+       2,
+       "n"
+      ],
+      1
+     ],
+     0
+    ],
+    0
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "Integers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ChebyshevU"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "7e882c",
+   "formula": [
+    "Equal",
+    [
+     "ChebyshevT",
+     "m",
+     [
+      "ChebyshevT",
+      "n",
+      "x"
+     ]
+    ],
+    [
+     "ChebyshevT",
+     [
+      "Multiply",
+      "m",
+      "n"
+     ],
+     "x"
+    ]
+   ],
+   "variables": [
+    "m",
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "m",
+     "Integers"
+    ],
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ChebyshevT"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "82288c",
+   "formula": [
+    "Equal",
+    [
+     "ChebyshevT",
+     [
+      "Multiply",
+      2,
+      "n"
+     ],
+     "x"
+    ],
+    [
+     "ChebyshevT",
+     "n",
+     [
+      "Subtract",
+      [
+       "Multiply",
+       2,
+       [
+        "Power",
+        "x",
+        2
+       ]
+      ],
+      1
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ChebyshevT"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "844561",
+   "formula": [
+    "Equal",
+    [
+     "ChebyshevT",
+     "n",
+     "x"
+    ],
+    [
+     "Subtract",
+     [
+      "ChebyshevU",
+      "n",
+      "x"
+     ],
+     [
+      "Multiply",
+      "x",
+      [
+       "ChebyshevU",
+       [
+        "Subtract",
+        "n",
+        1
+       ],
+       "x"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ChebyshevT",
+    "ChebyshevU"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "88aeb6",
+   "formula": [
+    "Equal",
+    [
+     "ChebyshevU",
+     "n",
+     [
+      "Negate",
+      "x"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Power",
+      -1,
+      "n"
+     ],
+     [
+      "ChebyshevU",
+      "n",
+      "x"
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ChebyshevU"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "8a785a",
+   "formula": [
+    "Equal",
+    [
+     "ChebyshevT",
+     "n",
+     "x"
+    ],
+    [
+     "Subtract",
+     [
+      "Multiply",
+      [
+       "Multiply",
+       2,
+       "x"
+      ],
+      [
+       "ChebyshevT",
+       [
+        "Add",
+        "n",
+        1
+       ],
+       "x"
+      ]
+     ],
+     [
+      "ChebyshevT",
+      [
+       "Add",
+       "n",
+       2
+      ],
+      "x"
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ChebyshevT"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "9001e6",
+   "formula": [
+    "Equal",
+    [
+     "ChebyshevU",
+     -1,
+     "x"
+    ],
+    0
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": [
+    "Element",
+    "x",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ChebyshevU"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "9093a3",
+   "formula": [
+    "Equal",
+    [
+     "ChebyshevT",
+     [
+      "Negate",
+      "n"
+     ],
+     "x"
+    ],
+    [
+     "ChebyshevT",
+     "n",
+     "x"
+    ]
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ChebyshevT"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "9789ee",
+   "formula": [
+    "Equal",
+    [
+     "ChebyshevT",
+     [
+      "Add",
+      [
+       "Multiply",
+       2,
+       "n"
+      ],
+      1
+     ],
+     [
+      "Sin",
+      "x"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Power",
+      -1,
+      "n"
+     ],
+     [
+      "Sin",
+      [
+       "Multiply",
+       [
+        "Add",
+        [
+         "Multiply",
+         2,
+         "n"
+        ],
+        1
+       ],
+       "x"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ChebyshevT",
+    "Sin"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "99aa38",
+   "formula": [
+    "Equal",
+    [
+     "ChebyshevT",
+     "n",
+     "x"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      "n",
+      2
+     ],
+     [
+      "Sum",
+      [
+       "Multiply",
+       [
+        "Multiply",
+        [
+         "Divide",
+         [
+          "Power",
+          -1,
+          "k"
+         ],
+         [
+          "Subtract",
+          "n",
+          "k"
+         ]
+        ],
+        [
+         "Binomial",
+         [
+          "Subtract",
+          "n",
+          "k"
+         ],
+         "k"
+        ]
+       ],
+       [
+        "Power",
+        [
+         "Multiply",
+         2,
+         "x"
+        ],
+        [
+         "Subtract",
+         "n",
+         [
+          "Multiply",
+          2,
+          "k"
+         ]
+        ]
+       ]
+      ],
+      [
+       "Limits",
+       "k",
+       0,
+       [
+        "Floor",
+        [
+         "Divide",
+         "n",
+         2
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Binomial",
+    "ChebyshevT",
+    "Floor",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "9d66de",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "ChebyshevU",
+        "n",
+        "x"
+       ],
+       "x"
+      ],
+      "r"
+     ],
+     "x"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      [
+       "Multiply",
+       [
+        "RisingFactorial",
+        [
+         "Add",
+         "n",
+         1
+        ],
+        [
+         "Add",
+         "r",
+         1
+        ]
+       ],
+       [
+        "RisingFactorial",
+        [
+         "Add",
+         [
+          "Subtract",
+          "n",
+          "r"
+         ],
+         1
+        ],
+        "r"
+       ]
+      ],
+      [
+       "Factorial2",
+       [
+        "Add",
+        [
+         "Multiply",
+         2,
+         "r"
+        ],
+        1
+       ]
+      ]
+     ],
+     [
+      "Hypergeometric2F1",
+      [
+       "Add",
+       [
+        "Add",
+        "r",
+        "n"
+       ],
+       2
+      ],
+      [
+       "Subtract",
+       "r",
+       "n"
+      ],
+      [
+       "Add",
+       [
+        "Divide",
+        3,
+        2
+       ],
+       "r"
+      ],
+      [
+       "Divide",
+       [
+        "Subtract",
+        1,
+        "x"
+       ],
+       2
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "r",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "Element",
+     "r",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ],
+    [
+     "Or",
+     [
+      "LessEqual",
+      "r",
+      "n"
+     ],
+     [
+      "NotEqual",
+      "x",
+      -1
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ChebyshevU",
+    "Derivative",
+    "Factorial2",
+    "Hypergeometric2F1",
+    "RisingFactorial"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "9d7c61",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "ChebyshevT",
+       "n",
+       "x"
+      ],
+      [
+       "Divide",
+       [
+        "Power",
+        "z",
+        "n"
+       ],
+       [
+        "Factorial",
+        "n"
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "n",
+      0,
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Exp",
+      [
+       "Multiply",
+       "z",
+       "x"
+      ]
+     ],
+     [
+      "Cosh",
+      [
+       "Multiply",
+       "z",
+       [
+        "Sqrt",
+        [
+         "Subtract",
+         [
+          "Power",
+          "x",
+          2
+         ],
+         1
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "x",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "ChebyshevT",
+    "Cosh",
+    "Exp",
+    "Factorial",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "a46d91",
+   "formula": [
+    "Equal",
+    [
+     "ChebyshevT",
+     [
+      "Multiply",
+      2,
+      "n"
+     ],
+     0
+    ],
+    [
+     "Power",
+     -1,
+     "n"
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "Integers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ChebyshevT"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "a68f0e",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "ChebyshevT",
+        "n",
+        "x"
+       ],
+       "x"
+      ],
+      "r"
+     ],
+     1
+    ],
+    [
+     "Divide",
+     [
+      "Multiply",
+      [
+       "RisingFactorial",
+       "n",
+       "r"
+      ],
+      [
+       "RisingFactorial",
+       [
+        "Add",
+        [
+         "Subtract",
+         "n",
+         "r"
+        ],
+        1
+       ],
+       "r"
+      ]
+     ],
+     [
+      "Factorial2",
+      [
+       "Subtract",
+       [
+        "Multiply",
+        2,
+        "r"
+       ],
+       1
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "r"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "Element",
+     "r",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ChebyshevT",
+    "Derivative",
+    "Factorial2",
+    "RisingFactorial"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "a9077a",
+   "formula": [
+    "Equal",
+    [
+     "ChebyshevU",
+     "n",
+     "x"
+    ],
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "Divide",
+       [
+        "Multiply",
+        [
+         "Power",
+         2,
+         "k"
+        ],
+        [
+         "Factorial",
+         [
+          "Add",
+          [
+           "Add",
+           "n",
+           "k"
+          ],
+          1
+         ]
+        ]
+       ],
+       [
+        "Multiply",
+        [
+         "Factorial",
+         [
+          "Subtract",
+          "n",
+          "k"
+         ]
+        ],
+        [
+         "Factorial",
+         [
+          "Add",
+          [
+           "Multiply",
+           2,
+           "k"
+          ],
+          1
+         ]
+        ]
+       ]
+      ],
+      [
+       "Power",
+       [
+        "Subtract",
+        "x",
+        1
+       ],
+       "k"
+      ]
+     ],
+     [
+      "Limits",
+      "k",
+      0,
+      "n"
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "ChebyshevU",
+    "Factorial",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "ae791d",
+   "formula": [
+    "Equal",
+    [
+     "ChebyshevT",
+     "n",
+     "x"
+    ],
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "Multiply",
+       [
+        "Binomial",
+        "n",
+        [
+         "Multiply",
+         2,
+         "k"
+        ]
+       ],
+       [
+        "Power",
+        [
+         "Subtract",
+         [
+          "Power",
+          "x",
+          2
+         ],
+         1
+        ],
+        "k"
+       ]
+      ],
+      [
+       "Power",
+       "x",
+       [
+        "Subtract",
+        "n",
+        [
+         "Multiply",
+         2,
+         "k"
+        ]
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "k",
+      0,
+      [
+       "Floor",
+       [
+        "Divide",
+        "n",
+        2
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Binomial",
+    "ChebyshevT",
+    "Floor",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "b0c84b",
+   "formula": [
+    "GreaterEqual",
+    [
+     "Subtract",
+     [
+      "Power",
+      [
+       "ChebyshevT",
+       "n",
+       "x"
+      ],
+      2
+     ],
+     [
+      "Multiply",
+      [
+       "ChebyshevT",
+       [
+        "Subtract",
+        "n",
+        1
+       ],
+       "x"
+      ],
+      [
+       "ChebyshevT",
+       [
+        "Add",
+        "n",
+        1
+       ],
+       "x"
+      ]
+     ]
+    ],
+    0
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "x",
+     [
+      "Interval",
+      -1,
+      1
+     ]
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "ChebyshevT"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "b5049d",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "ChebyshevU",
+       "n",
+       "x"
+      ],
+      [
+       "Power",
+       "z",
+       "n"
+      ]
+     ],
+     [
+      "Limits",
+      "n",
+      0,
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Divide",
+     1,
+     [
+      "Add",
+      [
+       "Subtract",
+       1,
+       [
+        "Multiply",
+        [
+         "Multiply",
+         2,
+         "x"
+        ],
+        "z"
+       ]
+      ],
+      [
+       "Power",
+       "z",
+       2
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "x",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     [
+      "Interval",
+      -1,
+      1
+     ]
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Less",
+     [
+      "Abs",
+      "z"
+     ],
+     1
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "ChebyshevU",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "b6b014",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "ChebyshevU",
+        "n",
+        "x"
+       ],
+       "x"
+      ],
+      "r"
+     ],
+     1
+    ],
+    [
+     "Divide",
+     [
+      "Multiply",
+      [
+       "RisingFactorial",
+       [
+        "Add",
+        "n",
+        1
+       ],
+       [
+        "Add",
+        "r",
+        1
+       ]
+      ],
+      [
+       "RisingFactorial",
+       [
+        "Add",
+        [
+         "Subtract",
+         "n",
+         "r"
+        ],
+        1
+       ],
+       "r"
+      ]
+     ],
+     [
+      "Factorial2",
+      [
+       "Add",
+       [
+        "Multiply",
+        2,
+        "r"
+       ],
+       1
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "r"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "Element",
+     "r",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ChebyshevU",
+    "Derivative",
+    "Factorial2",
+    "RisingFactorial"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "b8fdcd",
+   "formula": [
+    "Equal",
+    [
+     "Multiply",
+     [
+      "ChebyshevU",
+      [
+       "Subtract",
+       "n",
+       1
+      ],
+      "x"
+     ],
+     [
+      "Sqrt",
+      [
+       "Subtract",
+       1,
+       [
+        "Power",
+        "x",
+        2
+       ]
+      ]
+     ]
+    ],
+    [
+     "Sin",
+     [
+      "Multiply",
+      "n",
+      [
+       "Arccos",
+       "x"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Arccos",
+    "ChebyshevU",
+    "Sin"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "be5652",
+   "formula": [
+    "Equal",
+    [
+     "ChebyshevT",
+     1,
+     "x"
+    ],
+    "x"
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": [
+    "Element",
+    "x",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ChebyshevT"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "be9a45",
+   "formula": [
+    "Equal",
+    [
+     "ChebyshevU",
+     "n",
+     -1
+    ],
+    [
+     "Multiply",
+     [
+      "Power",
+      -1,
+      "n"
+     ],
+     [
+      "Add",
+      "n",
+      1
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "Integers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ChebyshevU"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "c718ea",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "ChebyshevT",
+      "n",
+      "z"
+     ]
+    ],
+    [
+     "Abs",
+     [
+      "ChebyshevT",
+      "n",
+      [
+       "Multiply",
+       "ImaginaryUnit",
+       [
+        "Abs",
+        "z"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "ChebyshevT"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "c76e72",
+   "formula": [
+    "Equal",
+    [
+     "ChebyshevT",
+     0,
+     "x"
+    ],
+    1
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": [
+    "Element",
+    "x",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ChebyshevT"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "ce5e03",
+   "formula": [
+    "Equal",
+    [
+     "ChebyshevU",
+     "n",
+     "x"
+    ],
+    [
+     "Add",
+     [
+      "Multiply",
+      "x",
+      [
+       "ChebyshevU",
+       [
+        "Subtract",
+        "n",
+        1
+       ],
+       "x"
+      ]
+     ],
+     [
+      "ChebyshevT",
+      "n",
+      "x"
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ChebyshevT",
+    "ChebyshevU"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "ce9a39",
+   "formula": [
+    "Equal",
+    [
+     "ChebyshevU",
+     "n",
+     "x"
+    ],
+    [
+     "Multiply",
+     [
+      "Add",
+      "n",
+      1
+     ],
+     [
+      "Hypergeometric2F1",
+      [
+       "Negate",
+       "n"
+      ],
+      [
+       "Add",
+       "n",
+       2
+      ],
+      [
+       "Divide",
+       3,
+       2
+      ],
+      [
+       "Divide",
+       [
+        "Subtract",
+        1,
+        "x"
+       ],
+       2
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ChebyshevU",
+    "Hypergeometric2F1"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "d1ef91",
+   "formula": [
+    "Equal",
+    [
+     "ChebyshevU",
+     "n",
+     "x"
+    ],
+    [
+     "Subtract",
+     [
+      "Multiply",
+      [
+       "Multiply",
+       2,
+       "x"
+      ],
+      [
+       "ChebyshevU",
+       [
+        "Subtract",
+        "n",
+        1
+       ],
+       "x"
+      ]
+     ],
+     [
+      "ChebyshevU",
+      [
+       "Subtract",
+       "n",
+       2
+      ],
+      "x"
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ChebyshevU"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "de0968",
+   "formula": [
+    "Equal",
+    [
+     "ChebyshevT",
+     [
+      "Add",
+      [
+       "Multiply",
+       2,
+       "n"
+      ],
+      1
+     ],
+     "x"
+    ],
+    [
+     "Subtract",
+     [
+      "Multiply",
+      [
+       "Multiply",
+       2,
+       [
+        "ChebyshevT",
+        [
+         "Add",
+         "n",
+         1
+        ],
+        "x"
+       ]
+      ],
+      [
+       "ChebyshevT",
+       "n",
+       "x"
+      ]
+     ],
+     "x"
+    ]
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ChebyshevT"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "e03fa4",
+   "formula": [
+    "Equal",
+    [
+     "ChebyshevU",
+     "n",
+     1
+    ],
+    [
+     "Add",
+     "n",
+     1
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "Integers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ChebyshevU"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "e1797b",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "ChebyshevU",
+        "n",
+        "x"
+       ],
+       "x"
+      ],
+      "r"
+     ],
+     "x"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      [
+       "Multiply",
+       [
+        "Sqrt",
+        "Pi"
+       ],
+       [
+        "Add",
+        "n",
+        1
+       ]
+      ],
+      [
+       "Multiply",
+       2,
+       [
+        "Power",
+        [
+         "Subtract",
+         "x",
+         1
+        ],
+        "r"
+       ]
+      ]
+     ],
+     [
+      "Hypergeometric3F2Regularized",
+      1,
+      [
+       "Negate",
+       "n"
+      ],
+      [
+       "Add",
+       "n",
+       2
+      ],
+      [
+       "Divide",
+       3,
+       2
+      ],
+      [
+       "Subtract",
+       1,
+       "r"
+      ],
+      [
+       "Divide",
+       [
+        "Subtract",
+        1,
+        "x"
+       ],
+       2
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "r",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "Element",
+     "r",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "x",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      [
+       "Set",
+       -1,
+       1
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ChebyshevU",
+    "Derivative",
+    "Hypergeometric3F2Regularized"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": [
+    "http://functions.wolfram.com/Polynomials/ChebyshevU/20/02/01/0002/"
+   ],
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "e9232b",
+   "formula": [
+    "Equal",
+    [
+     "ChebyshevT",
+     "n",
+     "x"
+    ],
+    [
+     "Multiply",
+     "n",
+     [
+      "Sum",
+      [
+       "Multiply",
+       [
+        "Divide",
+        [
+         "Multiply",
+         [
+          "Power",
+          2,
+          "k"
+         ],
+         [
+          "Factorial",
+          [
+           "Subtract",
+           [
+            "Add",
+            "n",
+            "k"
+           ],
+           1
+          ]
+         ]
+        ],
+        [
+         "Multiply",
+         [
+          "Factorial",
+          [
+           "Subtract",
+           "n",
+           "k"
+          ]
+         ],
+         [
+          "Factorial",
+          [
+           "Multiply",
+           2,
+           "k"
+          ]
+         ]
+        ]
+       ],
+       [
+        "Power",
+        [
+         "Subtract",
+         "x",
+         1
+        ],
+        "k"
+       ]
+      ],
+      [
+       "Limits",
+       "k",
+       0,
+       "n"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "ChebyshevT",
+    "Factorial",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "ed5222",
+   "formula": [
+    "Equal",
+    [
+     "Multiply",
+     [
+      "ChebyshevT",
+      "m",
+      "x"
+     ],
+     [
+      "ChebyshevT",
+      "n",
+      "x"
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Add",
+      [
+       "ChebyshevT",
+       [
+        "Add",
+        "m",
+        "n"
+       ],
+       "x"
+      ],
+      [
+       "ChebyshevT",
+       [
+        "Abs",
+        [
+         "Subtract",
+         "m",
+         "n"
+        ]
+       ],
+       "x"
+      ]
+     ],
+     2
+    ]
+   ],
+   "variables": [
+    "m",
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "m",
+     "Integers"
+    ],
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "ChebyshevT"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "f4b3fa",
+   "formula": [
+    "Equal",
+    [
+     "ChebyshevT",
+     "n",
+     [
+      "Cos",
+      "x"
+     ]
+    ],
+    [
+     "Cos",
+     [
+      "Multiply",
+      "n",
+      "x"
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ChebyshevT",
+    "Cos"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "f5fa23",
+   "formula": [
+    "Equal",
+    [
+     "ChebyshevU",
+     "n",
+     "x"
+    ],
+    [
+     "Multiply",
+     [
+      "Power",
+      2,
+      "n"
+     ],
+     [
+      "Product",
+      [
+       "Subtract",
+       "x",
+       [
+        "Cos",
+        [
+         "Multiply",
+         [
+          "Divide",
+          "k",
+          [
+           "Add",
+           "n",
+           1
+          ]
+         ],
+         "Pi"
+        ]
+       ]
+      ],
+      [
+       "Limits",
+       "k",
+       1,
+       "n"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "product",
+   "heads": [
+    "ChebyshevU",
+    "Cos",
+    "Product"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "f61927",
+   "formula": [
+    "LessEqual",
+    [
+     "ChebyshevT",
+     "n",
+     [
+      "Multiply",
+      "x",
+      "y"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "ChebyshevT",
+      "n",
+      "x"
+     ],
+     [
+      "ChebyshevT",
+      "n",
+      "y"
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "x",
+    "y"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "Element",
+     "x",
+     [
+      "Interval",
+      1,
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
+     ]
+    ],
+    [
+     "Element",
+     "y",
+     [
+      "Interval",
+      1,
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "ChebyshevT"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": [
+    "V. V. Prasolov, Polynomials, Springer, 2004, ISBN 978-3-642-03980-5. Theorem 3.14.11.",
+    "R. Askey, An inequality for Tchebycheff polynomials and extensions, Journal of Approximation Theory, 1975, Volume 14, pp 1-11"
+   ],
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "faeed9",
+   "formula": [
+    "Equal",
+    [
+     "ChebyshevT",
+     "n",
+     "x"
+    ],
+    [
+     "Subtract",
+     [
+      "Multiply",
+      [
+       "Multiply",
+       2,
+       "x"
+      ],
+      [
+       "ChebyshevT",
+       [
+        "Subtract",
+        "n",
+        1
+       ],
+       "x"
+      ]
+     ],
+     [
+      "ChebyshevT",
+      [
+       "Subtract",
+       "n",
+       2
+      ],
+      "x"
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ChebyshevT"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "fc5d42",
+   "formula": [
+    "Equal",
+    [
+     "ChebyshevT",
+     "n",
+     1
+    ],
+    1
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "Integers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ChebyshevT"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "fda800",
+   "formula": [
+    "Equal",
+    [
+     "ChebyshevT",
+     "n",
+     "x"
+    ],
+    [
+     "Cos",
+     [
+      "Multiply",
+      "n",
+      [
+       "Arccos",
+       "x"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Arccos",
+    "ChebyshevT",
+    "Cos"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "fdf80d",
+   "formula": [
+    "Equal",
+    [
+     "Add",
+     [
+      "ChebyshevT",
+      "n",
+      "x"
+     ],
+     [
+      "Multiply",
+      [
+       "ChebyshevU",
+       [
+        "Subtract",
+        "n",
+        1
+       ],
+       "x"
+      ],
+      [
+       "Sqrt",
+       [
+        "Subtract",
+        [
+         "Power",
+         "x",
+         2
+        ],
+        1
+       ]
+      ]
+     ]
+    ],
+    [
+     "Power",
+     [
+      "Add",
+      "x",
+      [
+       "Sqrt",
+       [
+        "Subtract",
+        [
+         "Power",
+         "x",
+         2
+        ],
+        1
+       ]
+      ]
+     ],
+     "n"
+    ]
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ChebyshevT",
+    "ChebyshevU"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "fff8ff",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "ChebyshevU",
+       "n",
+       "x"
+      ],
+      [
+       "Divide",
+       [
+        "Power",
+        "z",
+        "n"
+       ],
+       [
+        "Factorial",
+        "n"
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "n",
+      0,
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Exp",
+      [
+       "Multiply",
+       "z",
+       "x"
+      ]
+     ],
+     [
+      "Add",
+      [
+       "Cosh",
+       [
+        "Multiply",
+        "z",
+        [
+         "Sqrt",
+         [
+          "Subtract",
+          [
+           "Power",
+           "x",
+           2
+          ],
+          1
+         ]
+        ]
+       ]
+      ],
+      [
+       "Multiply",
+       [
+        "Multiply",
+        "z",
+        "x"
+       ],
+       [
+        "Sinc",
+        [
+         "Multiply",
+         [
+          "Multiply",
+          "ImaginaryUnit",
+          "z"
+         ],
+         [
+          "Sqrt",
+          [
+           "Subtract",
+           [
+            "Power",
+            "x",
+            2
+           ],
+           1
+          ]
+         ]
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "x",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "ChebyshevU",
+    "Cosh",
+    "Exp",
+    "Factorial",
+    "Sinc",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "chebyshev"
+   ]
+  }
+ ]
+}

@@ -1,0 +1,1285 @@
+{
+ "topic": "airy",
+ "title": "Airy functions",
+ "source": "pygrim/formulas/airy.py",
+ "generator": "grim2mathjson 0.1.0",
+ "entries": [
+  {
+   "id": "01bbb6",
+   "formula": [
+    "Equal",
+    [
+     "AiryAi",
+     "z"
+    ],
+    [
+     "Add",
+     [
+      "Multiply",
+      [
+       "AiryAi",
+       0
+      ],
+      [
+       "Hypergeometric0F1",
+       [
+        "Divide",
+        2,
+        3
+       ],
+       [
+        "Divide",
+        [
+         "Power",
+         "z",
+         3
+        ],
+        9
+       ]
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Multiply",
+       "z",
+       [
+        "Apply",
+        [
+         "Derivative",
+         [
+          "Function",
+          [
+           "AiryAi",
+           "z"
+          ],
+          "z"
+         ],
+         1
+        ],
+        0
+       ]
+      ],
+      [
+       "Hypergeometric0F1",
+       [
+        "Divide",
+        4,
+        3
+       ],
+       [
+        "Divide",
+        [
+         "Power",
+         "z",
+         3
+        ],
+        9
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "AiryAi",
+    "Derivative",
+    "Hypergeometric0F1"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "airy"
+   ]
+  },
+  {
+   "id": "20e530",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "AiryAi",
+        "z"
+       ],
+       "z"
+      ],
+      1
+     ],
+     "z"
+    ],
+    [
+     "Add",
+     [
+      "Multiply",
+      [
+       "Apply",
+       [
+        "Derivative",
+        [
+         "Function",
+         [
+          "AiryAi",
+          "z"
+         ],
+         "z"
+        ],
+        1
+       ],
+       0
+      ],
+      [
+       "Hypergeometric0F1",
+       [
+        "Divide",
+        1,
+        3
+       ],
+       [
+        "Divide",
+        [
+         "Power",
+         "z",
+         3
+        ],
+        9
+       ]
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Multiply",
+       [
+        "Divide",
+        [
+         "Power",
+         "z",
+         2
+        ],
+        2
+       ],
+       [
+        "AiryAi",
+        0
+       ]
+      ],
+      [
+       "Hypergeometric0F1",
+       [
+        "Divide",
+        5,
+        3
+       ],
+       [
+        "Divide",
+        [
+         "Power",
+         "z",
+         3
+        ],
+        9
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "AiryAi",
+    "Derivative",
+    "Hypergeometric0F1"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "airy"
+   ]
+  },
+  {
+   "id": "4d65e5",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "AiryBi",
+        "z"
+       ],
+       "z"
+      ],
+      1
+     ],
+     "z"
+    ],
+    [
+     "Add",
+     [
+      "Multiply",
+      [
+       "Apply",
+       [
+        "Derivative",
+        [
+         "Function",
+         [
+          "AiryBi",
+          "z"
+         ],
+         "z"
+        ],
+        1
+       ],
+       0
+      ],
+      [
+       "Hypergeometric0F1",
+       [
+        "Divide",
+        1,
+        3
+       ],
+       [
+        "Divide",
+        [
+         "Power",
+         "z",
+         3
+        ],
+        9
+       ]
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Multiply",
+       [
+        "Divide",
+        [
+         "Power",
+         "z",
+         2
+        ],
+        2
+       ],
+       [
+        "AiryBi",
+        0
+       ]
+      ],
+      [
+       "Hypergeometric0F1",
+       [
+        "Divide",
+        5,
+        3
+       ],
+       [
+        "Divide",
+        [
+         "Power",
+         "z",
+         3
+        ],
+        9
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "AiryBi",
+    "Derivative",
+    "Hypergeometric0F1"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "airy"
+   ]
+  },
+  {
+   "id": "51b241",
+   "formula": [
+    "Equal",
+    [
+     "Subtract",
+     [
+      "Apply",
+      [
+       "Derivative",
+       [
+        "Function",
+        [
+         "Add",
+         [
+          "Multiply",
+          "C",
+          [
+           "AiryAi",
+           "z"
+          ]
+         ],
+         [
+          "Multiply",
+          "D_var",
+          [
+           "AiryBi",
+           "z"
+          ]
+         ]
+        ],
+        "z"
+       ],
+       2
+      ],
+      "z"
+     ],
+     [
+      "Multiply",
+      "z",
+      [
+       "Add",
+       [
+        "Multiply",
+        "C",
+        [
+         "AiryAi",
+         "z"
+        ]
+       ],
+       [
+        "Multiply",
+        "D_var",
+        [
+         "AiryBi",
+         "z"
+        ]
+       ]
+      ]
+     ]
+    ],
+    0
+   ],
+   "variables": [
+    "C",
+    "D_var",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "C",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "D_var",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "AiryAi",
+    "AiryBi",
+    "Derivative"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "airy"
+   ]
+  },
+  {
+   "id": "693cfe",
+   "formula": [
+    "And",
+    [
+     "Equal",
+     [
+      "AiryAi",
+      0
+     ],
+     [
+      "Divide",
+      1,
+      [
+       "Multiply",
+       [
+        "Power",
+        3,
+        [
+         "Divide",
+         2,
+         3
+        ]
+       ],
+       [
+        "Gamma",
+        [
+         "Divide",
+         2,
+         3
+        ]
+       ]
+      ]
+     ]
+    ],
+    [
+     "Element",
+     [
+      "AiryAi",
+      0
+     ],
+     [
+      "RealBall",
+      {
+       "num": "0.355028053887817239260063186004"
+      },
+      {
+       "num": "1.84e-31"
+      }
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "AiryAi",
+    "Gamma",
+    "RealBall"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "airy"
+   ]
+  },
+  {
+   "id": "70ec9f",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "AiryBi",
+        "z"
+       ],
+       "z"
+      ],
+      2
+     ],
+     "z"
+    ],
+    [
+     "Multiply",
+     "z",
+     [
+      "AiryBi",
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "AiryBi",
+    "Derivative"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "airy"
+   ]
+  },
+  {
+   "id": "807917",
+   "formula": [
+    "And",
+    [
+     "Equal",
+     [
+      "Apply",
+      [
+       "Derivative",
+       [
+        "Function",
+        [
+         "AiryAi",
+         "z"
+        ],
+        "z"
+       ],
+       1
+      ],
+      0
+     ],
+     [
+      "Negate",
+      [
+       "Divide",
+       1,
+       [
+        "Multiply",
+        [
+         "Power",
+         3,
+         [
+          "Divide",
+          1,
+          3
+         ]
+        ],
+        [
+         "Gamma",
+         [
+          "Divide",
+          1,
+          3
+         ]
+        ]
+       ]
+      ]
+     ]
+    ],
+    [
+     "Element",
+     [
+      "Apply",
+      [
+       "Derivative",
+       [
+        "Function",
+        [
+         "AiryAi",
+         "z"
+        ],
+        "z"
+       ],
+       1
+      ],
+      0
+     ],
+     [
+      "RealBall",
+      {
+       "num": "-0.258819403792806798405183560189"
+      },
+      {
+       "num": "2.04e-31"
+      }
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "AiryAi",
+    "Derivative",
+    "Gamma",
+    "RealBall"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "airy"
+   ]
+  },
+  {
+   "id": "9a8d4d",
+   "formula": [
+    "And",
+    [
+     "Equal",
+     [
+      "AiryBi",
+      0
+     ],
+     [
+      "Divide",
+      1,
+      [
+       "Multiply",
+       [
+        "Power",
+        3,
+        [
+         "Divide",
+         1,
+         6
+        ]
+       ],
+       [
+        "Gamma",
+        [
+         "Divide",
+         2,
+         3
+        ]
+       ]
+      ]
+     ]
+    ],
+    [
+     "Element",
+     [
+      "AiryBi",
+      0
+     ],
+     [
+      "RealBall",
+      {
+       "num": "0.614926627446000735150922369094"
+      },
+      {
+       "num": "3.87e-31"
+      }
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "AiryBi",
+    "Gamma",
+    "RealBall"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "airy"
+   ]
+  },
+  {
+   "id": "a2df77",
+   "formula": [
+    "Subset",
+    [
+     "Zeros",
+     [
+      "Function",
+      [
+       "Apply",
+       [
+        "Derivative",
+        [
+         "Function",
+         [
+          "AiryAi",
+          "z"
+         ],
+         "z"
+        ],
+        1
+       ],
+       "z"
+      ],
+      "z"
+     ],
+     "ComplexNumbers"
+    ],
+    "RealNumbers"
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "AiryAi",
+    "Derivative",
+    "Zeros"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "airy"
+   ]
+  },
+  {
+   "id": "b2e9d0",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "AiryAi",
+        "z"
+       ],
+       "z"
+      ],
+      2
+     ],
+     "z"
+    ],
+    [
+     "Multiply",
+     "z",
+     [
+      "AiryAi",
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "AiryAi",
+    "Derivative"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "airy"
+   ]
+  },
+  {
+   "id": "bd319e",
+   "formula": [
+    "Equal",
+    [
+     "AiryBi",
+     "z"
+    ],
+    [
+     "Add",
+     [
+      "Multiply",
+      [
+       "AiryBi",
+       0
+      ],
+      [
+       "Hypergeometric0F1",
+       [
+        "Divide",
+        2,
+        3
+       ],
+       [
+        "Divide",
+        [
+         "Power",
+         "z",
+         3
+        ],
+        9
+       ]
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Multiply",
+       "z",
+       [
+        "Apply",
+        [
+         "Derivative",
+         [
+          "Function",
+          [
+           "AiryBi",
+           "z"
+          ],
+          "z"
+         ],
+         1
+        ],
+        0
+       ]
+      ],
+      [
+       "Hypergeometric0F1",
+       [
+        "Divide",
+        4,
+        3
+       ],
+       [
+        "Divide",
+        [
+         "Power",
+         "z",
+         3
+        ],
+        9
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "AiryBi",
+    "Derivative",
+    "Hypergeometric0F1"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "airy"
+   ]
+  },
+  {
+   "id": "d1f9d0",
+   "formula": [
+    "Subset",
+    [
+     "Zeros",
+     [
+      "Function",
+      [
+       "AiryAi",
+       "z"
+      ],
+      "z"
+     ],
+     "ComplexNumbers"
+    ],
+    "RealNumbers"
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "AiryAi",
+    "Zeros"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "airy"
+   ]
+  },
+  {
+   "id": "de9800",
+   "formula": [
+    "Equal",
+    [
+     "Subtract",
+     [
+      "Multiply",
+      [
+       "AiryAi",
+       "z"
+      ],
+      [
+       "Apply",
+       [
+        "Derivative",
+        [
+         "Function",
+         [
+          "AiryBi",
+          "z"
+         ],
+         "z"
+        ],
+        1
+       ],
+       "z"
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Apply",
+       [
+        "Derivative",
+        [
+         "Function",
+         [
+          "AiryAi",
+          "z"
+         ],
+         "z"
+        ],
+        1
+       ],
+       "z"
+      ],
+      [
+       "AiryBi",
+       "z"
+      ]
+     ]
+    ],
+    [
+     "Divide",
+     1,
+     "Pi"
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": null,
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "AiryAi",
+    "AiryBi",
+    "Derivative"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "airy"
+   ]
+  },
+  {
+   "id": "eadca2",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "Add",
+        [
+         "Multiply",
+         "C",
+         [
+          "AiryAi",
+          "z"
+         ]
+        ],
+        [
+         "Multiply",
+         "D_var",
+         [
+          "AiryBi",
+          "z"
+         ]
+        ]
+       ],
+       "z"
+      ],
+      "n"
+     ],
+     "z"
+    ],
+    [
+     "Add",
+     [
+      "Multiply",
+      "z",
+      [
+       "Apply",
+       [
+        "Derivative",
+        [
+         "Function",
+         [
+          "Add",
+          [
+           "Multiply",
+           "C",
+           [
+            "AiryAi",
+            "z"
+           ]
+          ],
+          [
+           "Multiply",
+           "D_var",
+           [
+            "AiryBi",
+            "z"
+           ]
+          ]
+         ],
+         "z"
+        ],
+        [
+         "Subtract",
+         "n",
+         2
+        ]
+       ],
+       "z"
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Subtract",
+       "n",
+       2
+      ],
+      [
+       "Apply",
+       [
+        "Derivative",
+        [
+         "Function",
+         [
+          "Add",
+          [
+           "Multiply",
+           "C",
+           [
+            "AiryAi",
+            "z"
+           ]
+          ],
+          [
+           "Multiply",
+           "D_var",
+           [
+            "AiryBi",
+            "z"
+           ]
+          ]
+         ],
+         "z"
+        ],
+        [
+         "Subtract",
+         "n",
+         3
+        ]
+       ],
+       "z"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "C",
+    "D_var",
+    "n",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "n",
+     [
+      "Range",
+      3,
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Element",
+     "C",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "D_var",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "AiryAi",
+    "AiryBi",
+    "Derivative"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "airy"
+   ]
+  },
+  {
+   "id": "fba07c",
+   "formula": [
+    "And",
+    [
+     "Equal",
+     [
+      "Apply",
+      [
+       "Derivative",
+       [
+        "Function",
+        [
+         "AiryBi",
+         "z"
+        ],
+        "z"
+       ],
+       1
+      ],
+      0
+     ],
+     [
+      "Divide",
+      [
+       "Power",
+       3,
+       [
+        "Divide",
+        1,
+        6
+       ]
+      ],
+      [
+       "Gamma",
+       [
+        "Divide",
+        1,
+        3
+       ]
+      ]
+     ]
+    ],
+    [
+     "Element",
+     [
+      "Apply",
+      [
+       "Derivative",
+       [
+        "Function",
+        [
+         "AiryBi",
+         "z"
+        ],
+        "z"
+       ],
+       1
+      ],
+      0
+     ],
+     [
+      "RealBall",
+      {
+       "num": "0.448288357353826357914823710399"
+      },
+      {
+       "num": "1.72e-31"
+      }
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "AiryBi",
+    "Derivative",
+    "Gamma",
+    "RealBall"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "airy"
+   ]
+  }
+ ]
+}

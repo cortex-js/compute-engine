@@ -1,0 +1,5015 @@
+{
+ "generator": "grim2mathjson 0.1.0",
+ "entries": [
+  {
+   "id": "037342",
+   "property": "IsHolomorphic",
+   "operator": "LogBarnesG",
+   "expr": [
+    "LogBarnesG",
+    "z"
+   ],
+   "var": "z",
+   "domain": [
+    "SetMinus",
+    "ComplexNumbers",
+    [
+     "Interval",
+     [
+      "Open",
+      "NegativeInfinity"
+     ],
+     0
+    ]
+   ],
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": null,
+   "assumptions": null,
+   "topics": [
+    "barnes_g"
+   ]
+  },
+  {
+   "id": "04f4a0",
+   "property": "Poles",
+   "operator": "DedekindEta",
+   "expr": [
+    "DedekindEta",
+    "tau"
+   ],
+   "var": "tau",
+   "domain": [
+    "Union",
+    "HH",
+    [
+     "Set",
+     "ComplexInfinity"
+    ]
+   ],
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set"
+   ],
+   "assumptions": null,
+   "topics": [
+    "dedekind_eta"
+   ]
+  },
+  {
+   "id": "0745ee",
+   "property": "Zeros",
+   "operator": "LegendrePolynomial",
+   "expr": [
+    "LegendrePolynomial",
+    "n",
+    "z"
+   ],
+   "var": "z",
+   "domain": "ComplexNumbers",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": null,
+   "valueSource": "Set(LegendrePolynomialZero(n, k), For(k, 1, n))",
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "topics": [
+    "gaussian_quadrature",
+    "legendre_polynomial"
+   ]
+  },
+  {
+   "id": "08ad28",
+   "property": "Solutions",
+   "operator": null,
+   "expr": [
+    "Equal",
+    [
+     "Add",
+     [
+      "Power",
+      "x",
+      2
+     ],
+     1
+    ],
+    0
+   ],
+   "var": "x",
+   "domain": "ComplexNumbers",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set",
+    "ImaginaryUnit",
+    [
+     "Negate",
+     "ImaginaryUnit"
+    ]
+   ],
+   "assumptions": null,
+   "topics": [
+    "imaginary_unit"
+   ]
+  },
+  {
+   "id": "08d275",
+   "property": "Zeros",
+   "operator": null,
+   "expr": [
+    "Subtract",
+    [
+     "Power",
+     "z",
+     2
+    ],
+    "c"
+   ],
+   "var": "z",
+   "domain": "ComplexNumbers",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set",
+    [
+     "Sqrt",
+     "c"
+    ],
+    [
+     "Negate",
+     [
+      "Sqrt",
+      "c"
+     ]
+    ]
+   ],
+   "assumptions": [
+    "Element",
+    "c",
+    "ComplexNumbers"
+   ],
+   "topics": [
+    "sqrt"
+   ]
+  },
+  {
+   "id": "0901a1",
+   "property": "Poles",
+   "operator": "Exp",
+   "expr": [
+    "Exp",
+    "z"
+   ],
+   "var": "z",
+   "domain": [
+    "Union",
+    "ComplexNumbers",
+    [
+     "Set",
+     "ComplexInfinity"
+    ]
+   ],
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set"
+   ],
+   "assumptions": null,
+   "topics": [
+    "exp"
+   ]
+  },
+  {
+   "id": "0d3b91",
+   "property": "IsHolomorphic",
+   "operator": "LambertW",
+   "expr": [
+    "LambertW",
+    "z"
+   ],
+   "var": "z",
+   "domain": [
+    "SetMinus",
+    "ComplexNumbers",
+    [
+     "Interval",
+     [
+      "Open",
+      "NegativeInfinity"
+     ],
+     [
+      "Negate",
+      [
+       "Exp",
+       -1
+      ]
+     ]
+    ]
+   ],
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": null,
+   "assumptions": null,
+   "topics": [
+    "lambertw"
+   ]
+  },
+  {
+   "id": "114913",
+   "property": "IsHolomorphic",
+   "operator": "Sin",
+   "expr": [
+    "Sin",
+    "z"
+   ],
+   "var": "z",
+   "domain": "ComplexNumbers",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": null,
+   "assumptions": null,
+   "topics": [
+    "sine"
+   ]
+  },
+  {
+   "id": "1349b5",
+   "property": "Zeros",
+   "operator": "Sinc",
+   "expr": [
+    "Sinc",
+    [
+     "Multiply",
+     "Pi",
+     "z"
+    ]
+   ],
+   "var": "z",
+   "domain": "ComplexNumbers",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set",
+    "n",
+    [
+     "Element",
+     "n",
+     "Integers",
+     [
+      "NotEqual",
+      "n",
+      0
+     ]
+    ]
+   ],
+   "assumptions": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "151e42",
+   "property": "IsHolomorphic",
+   "operator": "WeierstrassZeta",
+   "expr": [
+    "WeierstrassZeta",
+    "z",
+    "tau"
+   ],
+   "var": "z",
+   "domain": [
+    "SetMinus",
+    "ComplexNumbers",
+    [
+     "Lattice",
+     1,
+     "tau"
+    ]
+   ],
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": null,
+   "assumptions": [
+    "Element",
+    "tau",
+    "HH"
+   ],
+   "topics": [
+    "weierstrass_elliptic"
+   ]
+  },
+  {
+   "id": "154c44",
+   "property": "Zeros",
+   "operator": "JacobiTheta",
+   "expr": [
+    "JacobiTheta",
+    1,
+    "z",
+    "tau"
+   ],
+   "var": "z",
+   "domain": "ComplexNumbers",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": null,
+   "valueSource": "Set(Add(m, Mul(n, tau)), For(Tuple(m, n)), And(Element(m, ZZ), Element(n, ZZ)))",
+   "assumptions": [
+    "Element",
+    "tau",
+    "HH"
+   ],
+   "topics": [
+    "jacobi_theta"
+   ]
+  },
+  {
+   "id": "17eaad",
+   "property": "BranchPoints",
+   "operator": "LambertW",
+   "expr": [
+    "LambertW",
+    "z",
+    "k"
+   ],
+   "var": "z",
+   "domain": [
+    "Union",
+    "ComplexNumbers",
+    [
+     "Set",
+     "ComplexInfinity"
+    ]
+   ],
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set",
+    0,
+    [
+     "Negate",
+     [
+      "Exp",
+      -1
+     ]
+    ],
+    "ComplexInfinity"
+   ],
+   "assumptions": [
+    "Element",
+    "k",
+    [
+     "Set",
+     -1,
+     1
+    ]
+   ],
+   "topics": [
+    "lambertw"
+   ]
+  },
+  {
+   "id": "184c11",
+   "property": "BranchPoints",
+   "operator": "Exp",
+   "expr": [
+    "Exp",
+    "z"
+   ],
+   "var": "z",
+   "domain": [
+    "Union",
+    "ComplexNumbers",
+    [
+     "Set",
+     "ComplexInfinity"
+    ]
+   ],
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set"
+   ],
+   "assumptions": null,
+   "topics": [
+    "exp"
+   ]
+  },
+  {
+   "id": "1b2d8a",
+   "property": "Zeros",
+   "operator": "ModularJ",
+   "expr": [
+    "ModularJ",
+    "tau"
+   ],
+   "var": "tau",
+   "domain": "HH",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set",
+    [
+     "ModularGroupAction",
+     "gamma",
+     [
+      "Exp",
+      [
+       "Divide",
+       [
+        "Multiply",
+        [
+         "Multiply",
+         2,
+         "Pi"
+        ],
+        "ImaginaryUnit"
+       ],
+       3
+      ]
+     ]
+    ],
+    [
+     "Element",
+     "gamma",
+     "PSL2Z"
+    ]
+   ],
+   "assumptions": null,
+   "topics": [
+    "modular_j"
+   ]
+  },
+  {
+   "id": "1d447b",
+   "property": "Zeros",
+   "operator": "Ln",
+   "expr": [
+    "Ln",
+    "z"
+   ],
+   "var": "z",
+   "domain": "ComplexNumbers",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set",
+    1
+   ],
+   "assumptions": null,
+   "topics": [
+    "log"
+   ]
+  },
+  {
+   "id": "1da705",
+   "property": "Zeros",
+   "operator": "WeierstrassSigma",
+   "expr": [
+    "WeierstrassSigma",
+    "z",
+    "tau"
+   ],
+   "var": "z",
+   "domain": "ComplexNumbers",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Lattice",
+    1,
+    "tau"
+   ],
+   "assumptions": [
+    "Element",
+    "tau",
+    "HH"
+   ],
+   "topics": [
+    "weierstrass_elliptic"
+   ]
+  },
+  {
+   "id": "1f0577",
+   "property": "Poles",
+   "operator": null,
+   "expr": [
+    "Add",
+    [
+     "Multiply",
+     "C",
+     [
+      "AiryAi",
+      "z"
+     ]
+    ],
+    [
+     "Multiply",
+     "D_var",
+     [
+      "AiryBi",
+      "z"
+     ]
+    ]
+   ],
+   "var": "z",
+   "domain": [
+    "Union",
+    "ComplexNumbers",
+    [
+     "Set",
+     "ComplexInfinity"
+    ]
+   ],
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "C",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "D_var",
+     "ComplexNumbers"
+    ],
+    [
+     "Not",
+     [
+      "And",
+      [
+       "Equal",
+       "C",
+       0
+      ],
+      [
+       "Equal",
+       "D_var",
+       0
+      ]
+     ]
+    ]
+   ],
+   "topics": [
+    "airy"
+   ]
+  },
+  {
+   "id": "1f72e9",
+   "property": "Residue",
+   "operator": "Beta",
+   "expr": [
+    "Beta",
+    "z",
+    "b"
+   ],
+   "var": "z",
+   "domain": null,
+   "point": "a",
+   "path": null,
+   "condition": null,
+   "value": [
+    "Which",
+    [
+     "Element",
+     [
+      "Negate",
+      "a"
+     ],
+     "NonNegativeIntegers"
+    ],
+    [
+     "Binomial",
+     [
+      "Subtract",
+      [
+       "Negate",
+       "a"
+      ],
+      "b"
+     ],
+     [
+      "Negate",
+      "a"
+     ]
+    ],
+    "True",
+    0
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "b",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      "NonPositiveIntegers"
+     ]
+    ]
+   ],
+   "topics": [
+    "beta_function"
+   ]
+  },
+  {
+   "id": "22a42f",
+   "property": "BranchCuts",
+   "operator": "LegendrePolynomial",
+   "expr": [
+    "LegendrePolynomial",
+    "n",
+    "z"
+   ],
+   "var": "z",
+   "domain": "ComplexNumbers",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "topics": [
+    "legendre_polynomial"
+   ]
+  },
+  {
+   "id": "26c47c",
+   "property": "BranchPoints",
+   "operator": "Arctan",
+   "expr": [
+    "Arctan",
+    "z"
+   ],
+   "var": "z",
+   "domain": [
+    "Union",
+    "ComplexNumbers",
+    [
+     "Set",
+     "ComplexInfinity"
+    ]
+   ],
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set",
+    [
+     "Negate",
+     "ImaginaryUnit"
+    ],
+    "ImaginaryUnit",
+    "ComplexInfinity"
+   ],
+   "assumptions": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "26faf3",
+   "property": "Zeros",
+   "operator": "EisensteinE",
+   "expr": [
+    "EisensteinE",
+    10,
+    "tau"
+   ],
+   "var": "tau",
+   "domain": "ModularGroupFundamentalDomain",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set",
+    "ImaginaryUnit",
+    [
+     "Exp",
+     [
+      "Divide",
+      [
+       "Multiply",
+       [
+        "Multiply",
+        2,
+        "Pi"
+       ],
+       "ImaginaryUnit"
+      ],
+      3
+     ]
+    ]
+   ],
+   "assumptions": null,
+   "topics": [
+    "eisenstein"
+   ]
+  },
+  {
+   "id": "276d78",
+   "property": "BranchCuts",
+   "operator": "LambertW",
+   "expr": [
+    "LambertW",
+    "z",
+    "k"
+   ],
+   "var": "z",
+   "domain": "ComplexNumbers",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set",
+    [
+     "Interval",
+     [
+      "Open",
+      "NegativeInfinity"
+     ],
+     [
+      "Negate",
+      [
+       "Exp",
+       -1
+      ]
+     ]
+    ],
+    [
+     "Interval",
+     [
+      "Negate",
+      [
+       "Exp",
+       -1
+      ]
+     ],
+     0
+    ],
+    [
+     "Interval",
+     [
+      "Open",
+      "NegativeInfinity"
+     ],
+     0
+    ]
+   ],
+   "assumptions": [
+    "Element",
+    "k",
+    [
+     "Set",
+     -1,
+     1
+    ]
+   ],
+   "topics": [
+    "lambertw"
+   ]
+  },
+  {
+   "id": "27f9d2",
+   "property": "IsHolomorphic",
+   "operator": "ModularJ",
+   "expr": [
+    "ModularJ",
+    "tau"
+   ],
+   "var": "tau",
+   "domain": "HH",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": null,
+   "assumptions": null,
+   "topics": [
+    "modular_j"
+   ]
+  },
+  {
+   "id": "2870f0",
+   "property": "Poles",
+   "operator": "Gamma",
+   "expr": [
+    "Gamma",
+    "z"
+   ],
+   "var": "z",
+   "domain": [
+    "Union",
+    "ComplexNumbers",
+    [
+     "Set",
+     "ComplexInfinity"
+    ]
+   ],
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": "NonPositiveIntegers",
+   "assumptions": null,
+   "topics": [
+    "gamma"
+   ]
+  },
+  {
+   "id": "28d158",
+   "property": "IsHolomorphic",
+   "operator": "Exp",
+   "expr": [
+    "Exp",
+    "z"
+   ],
+   "var": "z",
+   "domain": "ComplexNumbers",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": null,
+   "assumptions": null,
+   "topics": [
+    "exp"
+   ]
+  },
+  {
+   "id": "2a34c3",
+   "property": "Zeros",
+   "operator": "DirichletL",
+   "expr": [
+    "DirichletL",
+    "s",
+    "chi"
+   ],
+   "var": "s",
+   "domain": null,
+   "point": null,
+   "path": null,
+   "condition": [
+    "And",
+    [
+     "Element",
+     "s",
+     "ComplexNumbers"
+    ],
+    [
+     "Less",
+     0,
+     [
+      "Real",
+      "s"
+     ],
+     1
+    ]
+   ],
+   "value": [
+    "Set",
+    [
+     "DirichletLZero",
+     "n",
+     "chi"
+    ],
+    [
+     "Element",
+     "n",
+     [
+      "SetMinus",
+      "Integers",
+      [
+       "Set",
+       0
+      ]
+     ]
+    ]
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "q",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "chi",
+     [
+      "DirichletGroup",
+      "q"
+     ]
+    ]
+   ],
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "2b021c",
+   "property": "Zeros",
+   "operator": "LogBarnesG",
+   "expr": [
+    "LogBarnesG",
+    "z"
+   ],
+   "var": "z",
+   "domain": "ComplexNumbers",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set",
+    1,
+    2,
+    3
+   ],
+   "assumptions": null,
+   "topics": [
+    "barnes_g"
+   ]
+  },
+  {
+   "id": "2caf78",
+   "property": "IsHolomorphic",
+   "operator": "LambertW",
+   "expr": [
+    "LambertW",
+    "z",
+    "k"
+   ],
+   "var": "z",
+   "domain": [
+    "SetMinus",
+    "ComplexNumbers",
+    [
+     "Interval",
+     [
+      "Open",
+      "NegativeInfinity"
+     ],
+     0
+    ]
+   ],
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": null,
+   "assumptions": [
+    "Element",
+    "k",
+    [
+     "SetMinus",
+     "Integers",
+     [
+      "Set",
+      0
+     ]
+    ]
+   ],
+   "topics": [
+    "lambertw"
+   ]
+  },
+  {
+   "id": "2e1ff3",
+   "property": "Zeros",
+   "operator": "Zeta",
+   "expr": [
+    "Zeta",
+    "s"
+   ],
+   "var": "s",
+   "domain": "RealNumbers",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set",
+    [
+     "Negate",
+     [
+      "Multiply",
+      2,
+      "n"
+     ]
+    ],
+    [
+     "Element",
+     "n",
+     "PositiveIntegers"
+    ]
+   ],
+   "assumptions": null,
+   "topics": [
+    "riemann_zeta"
+   ]
+  },
+  {
+   "id": "2f6818",
+   "property": "Zeros",
+   "operator": "Sin",
+   "expr": [
+    "Sin",
+    "z"
+   ],
+   "var": "z",
+   "domain": "ComplexNumbers",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set",
+    [
+     "Multiply",
+     "Pi",
+     "n"
+    ],
+    [
+     "Element",
+     "n",
+     "Integers"
+    ]
+   ],
+   "assumptions": null,
+   "topics": [
+    "sine"
+   ]
+  },
+  {
+   "id": "30ba67",
+   "property": "EssentialSingularities",
+   "operator": "Arctan",
+   "expr": [
+    "Arctan",
+    "z"
+   ],
+   "var": "z",
+   "domain": [
+    "Union",
+    "ComplexNumbers",
+    [
+     "Set",
+     "ComplexInfinity"
+    ]
+   ],
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set"
+   ],
+   "assumptions": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "314807",
+   "property": "UniqueSolution",
+   "operator": null,
+   "expr": [
+    "Equal",
+    [
+     "Multiply",
+     "w",
+     [
+      "Exp",
+      "w"
+     ]
+    ],
+    "x"
+   ],
+   "var": "w",
+   "domain": [
+    "Interval",
+    -1,
+    [
+     "Open",
+     "PositiveInfinity"
+    ]
+   ],
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "LambertW",
+    "x"
+   ],
+   "assumptions": [
+    "Element",
+    "x",
+    [
+     "Interval",
+     [
+      "Negate",
+      [
+       "Divide",
+       1,
+       "ExponentialE"
+      ]
+     ],
+     [
+      "Open",
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "topics": [
+    "lambertw"
+   ]
+  },
+  {
+   "id": "34d6ae",
+   "property": "EssentialSingularities",
+   "operator": "Gamma",
+   "expr": [
+    "Gamma",
+    "z"
+   ],
+   "var": "z",
+   "domain": [
+    "Union",
+    "ComplexNumbers",
+    [
+     "Set",
+     "ComplexInfinity"
+    ]
+   ],
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set",
+    "ComplexInfinity"
+   ],
+   "assumptions": null,
+   "topics": [
+    "gamma"
+   ]
+  },
+  {
+   "id": "36a095",
+   "property": "BranchPoints",
+   "operator": "Zeta",
+   "expr": [
+    "Zeta",
+    "s"
+   ],
+   "var": "s",
+   "domain": [
+    "Union",
+    "ComplexNumbers",
+    [
+     "Set",
+     "ComplexInfinity"
+    ]
+   ],
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set"
+   ],
+   "assumptions": null,
+   "topics": [
+    "riemann_zeta"
+   ]
+  },
+  {
+   "id": "394cdc",
+   "property": "IsHolomorphic",
+   "operator": "Digamma",
+   "expr": [
+    "Digamma",
+    "z",
+    "m"
+   ],
+   "var": "z",
+   "domain": [
+    "SetMinus",
+    "ComplexNumbers",
+    "NonPositiveIntegers"
+   ],
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": null,
+   "assumptions": [
+    "Element",
+    "m",
+    "NonNegativeIntegers"
+   ],
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "39fb36",
+   "property": "Zeros",
+   "operator": "DedekindEta",
+   "expr": [
+    "DedekindEta",
+    "tau"
+   ],
+   "var": "tau",
+   "domain": "HH",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set"
+   ],
+   "assumptions": null,
+   "topics": [
+    "dedekind_eta"
+   ]
+  },
+  {
+   "id": "3b11d3",
+   "property": "BranchCuts",
+   "operator": "Arctan",
+   "expr": [
+    "Arctan",
+    "z"
+   ],
+   "var": "z",
+   "domain": "ComplexNumbers",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set",
+    [
+     "Multiply",
+     [
+      "Interval",
+      [
+       "Open",
+       "NegativeInfinity"
+      ],
+      -1
+     ],
+     "ImaginaryUnit"
+    ],
+    [
+     "Multiply",
+     [
+      "Interval",
+      1,
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
+     ],
+     "ImaginaryUnit"
+    ]
+   ],
+   "assumptions": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "3d25dd",
+   "property": "Solutions",
+   "operator": "Element",
+   "expr": [
+    "Element",
+    [
+     "ChebyshevT",
+     "n",
+     "x"
+    ],
+    [
+     "Set",
+     -1,
+     1
+    ]
+   ],
+   "var": "x",
+   "domain": "ComplexNumbers",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set",
+    [
+     "Cos",
+     [
+      "Multiply",
+      [
+       "Divide",
+       "k",
+       "n"
+      ],
+      "Pi"
+     ]
+    ],
+    [
+     "Element",
+     "k",
+     [
+      "Range",
+      0,
+      "n"
+     ]
+    ]
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "PositiveIntegers"
+   ],
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "40fa59",
+   "property": "IsHolomorphic",
+   "operator": "LegendrePolynomial",
+   "expr": [
+    "LegendrePolynomial",
+    "n",
+    "z"
+   ],
+   "var": "z",
+   "domain": "ComplexNumbers",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": null,
+   "assumptions": [
+    "Element",
+    "n",
+    "PositiveIntegers"
+   ],
+   "topics": [
+    "legendre_polynomial"
+   ]
+  },
+  {
+   "id": "41ece5",
+   "property": "BranchPoints",
+   "operator": "LambertW",
+   "expr": [
+    "LambertW",
+    "z"
+   ],
+   "var": "z",
+   "domain": [
+    "Union",
+    "ComplexNumbers",
+    [
+     "Set",
+     "ComplexInfinity"
+    ]
+   ],
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set",
+    [
+     "Negate",
+     [
+      "Exp",
+      -1
+     ]
+    ],
+    "ComplexInfinity"
+   ],
+   "assumptions": null,
+   "topics": [
+    "lambertw"
+   ]
+  },
+  {
+   "id": "4538ba",
+   "property": "IsHolomorphic",
+   "operator": "Ln",
+   "expr": [
+    "Ln",
+    "z"
+   ],
+   "var": "z",
+   "domain": [
+    "SetMinus",
+    "ComplexNumbers",
+    [
+     "Interval",
+     [
+      "Open",
+      "NegativeInfinity"
+     ],
+     0
+    ]
+   ],
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": null,
+   "assumptions": null,
+   "topics": [
+    "log"
+   ]
+  },
+  {
+   "id": "453c11",
+   "property": "Poles",
+   "operator": "Digamma",
+   "expr": [
+    "Digamma",
+    "z"
+   ],
+   "var": "z",
+   "domain": "ComplexNumbers",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": "NonPositiveIntegers",
+   "assumptions": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "48031d",
+   "property": "Poles",
+   "operator": "Arctan",
+   "expr": [
+    "Arctan",
+    "z"
+   ],
+   "var": "z",
+   "domain": [
+    "Union",
+    "ComplexNumbers",
+    [
+     "Set",
+     "ComplexInfinity"
+    ]
+   ],
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set"
+   ],
+   "assumptions": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "4a200a",
+   "property": "Zeros",
+   "operator": "EisensteinE",
+   "expr": [
+    "EisensteinE",
+    4,
+    "tau"
+   ],
+   "var": "tau",
+   "domain": "ModularGroupFundamentalDomain",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set",
+    [
+     "Exp",
+     [
+      "Divide",
+      [
+       "Multiply",
+       [
+        "Multiply",
+        2,
+        "Pi"
+       ],
+       "ImaginaryUnit"
+      ],
+      3
+     ]
+    ]
+   ],
+   "assumptions": null,
+   "topics": [
+    "eisenstein"
+   ]
+  },
+  {
+   "id": "52c4ab",
+   "property": "Poles",
+   "operator": "Zeta",
+   "expr": [
+    "Zeta",
+    "s"
+   ],
+   "var": "s",
+   "domain": [
+    "Union",
+    "ComplexNumbers",
+    [
+     "Set",
+     "ComplexInfinity"
+    ]
+   ],
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set",
+    1
+   ],
+   "assumptions": null,
+   "topics": [
+    "riemann_zeta"
+   ]
+  },
+  {
+   "id": "55ee4a",
+   "property": "IsHolomorphic",
+   "operator": "ModularLambda",
+   "expr": [
+    "ModularLambda",
+    "tau"
+   ],
+   "var": "tau",
+   "domain": [
+    "Union",
+    "HH",
+    [
+     "Set",
+     [
+      "Multiply",
+      "ImaginaryUnit",
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": null,
+   "assumptions": null,
+   "topics": [
+    "modular_lambda"
+   ]
+  },
+  {
+   "id": "6000d0",
+   "property": "Zeros",
+   "operator": "Digamma",
+   "expr": [
+    "Digamma",
+    "z"
+   ],
+   "var": "z",
+   "domain": "ComplexNumbers",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set",
+    [
+     "DigammaFunctionZero",
+     "n"
+    ],
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "assumptions": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "6021ba",
+   "property": "Poles",
+   "operator": "WeierstrassZeta",
+   "expr": [
+    "WeierstrassZeta",
+    "z",
+    "tau"
+   ],
+   "var": "z",
+   "domain": "ComplexNumbers",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Lattice",
+    1,
+    "tau"
+   ],
+   "assumptions": [
+    "Element",
+    "tau",
+    "HH"
+   ],
+   "topics": [
+    "weierstrass_elliptic"
+   ]
+  },
+  {
+   "id": "6191cd",
+   "property": "BranchCuts",
+   "operator": "LambertW",
+   "expr": [
+    "LambertW",
+    "z",
+    "k"
+   ],
+   "var": "z",
+   "domain": "ComplexNumbers",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set",
+    [
+     "Interval",
+     [
+      "Open",
+      "NegativeInfinity"
+     ],
+     0
+    ]
+   ],
+   "assumptions": [
+    "Element",
+    "k",
+    [
+     "SetMinus",
+     "Integers",
+     [
+      "Set",
+      -1,
+      0,
+      1
+     ]
+    ]
+   ],
+   "topics": [
+    "lambertw"
+   ]
+  },
+  {
+   "id": "636929",
+   "property": "UniqueSolution",
+   "operator": null,
+   "expr": [
+    "Equal",
+    [
+     "Multiply",
+     "w",
+     [
+      "Exp",
+      "w"
+     ]
+    ],
+    "x"
+   ],
+   "var": "w",
+   "domain": [
+    "Interval",
+    [
+     "Open",
+     "NegativeInfinity"
+    ],
+    -1
+   ],
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "LambertW",
+    "x",
+    -1
+   ],
+   "assumptions": [
+    "Element",
+    "x",
+    [
+     "Interval",
+     [
+      "Negate",
+      [
+       "Divide",
+       1,
+       "ExponentialE"
+      ]
+     ],
+     [
+      "Open",
+      0
+     ]
+    ]
+   ],
+   "topics": [
+    "lambertw"
+   ]
+  },
+  {
+   "id": "692e42",
+   "property": "Zeros",
+   "operator": "Zeta",
+   "expr": [
+    "Zeta",
+    "s"
+   ],
+   "var": "s",
+   "domain": "ComplexNumbers",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Union",
+    [
+     "Set",
+     [
+      "Negate",
+      [
+       "Multiply",
+       2,
+       "n"
+      ]
+     ],
+     [
+      "Element",
+      "n",
+      "PositiveIntegers"
+     ]
+    ],
+    [
+     "Set",
+     [
+      "RiemannZetaZero",
+      "n"
+     ],
+     [
+      "Element",
+      "n",
+      "Integers",
+      [
+       "NotEqual",
+       "n",
+       0
+      ]
+     ]
+    ]
+   ],
+   "assumptions": null,
+   "topics": [
+    "riemann_zeta"
+   ]
+  },
+  {
+   "id": "69eb9b",
+   "property": "IsHolomorphic",
+   "operator": "WeierstrassP",
+   "expr": [
+    "WeierstrassP",
+    "z",
+    "tau"
+   ],
+   "var": "z",
+   "domain": [
+    "SetMinus",
+    "ComplexNumbers",
+    [
+     "Lattice",
+     1,
+     "tau"
+    ]
+   ],
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": null,
+   "assumptions": [
+    "Element",
+    "tau",
+    "HH"
+   ],
+   "topics": [
+    "weierstrass_elliptic"
+   ]
+  },
+  {
+   "id": "6aa0bc",
+   "property": "EssentialSingularities",
+   "operator": "Sin",
+   "expr": [
+    "Sin",
+    "z"
+   ],
+   "var": "z",
+   "domain": [
+    "Union",
+    "ComplexNumbers",
+    [
+     "Set",
+     "ComplexInfinity"
+    ]
+   ],
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set",
+    "ComplexInfinity"
+   ],
+   "assumptions": null,
+   "topics": [
+    "sine"
+   ]
+  },
+  {
+   "id": "6ae250",
+   "property": "Zeros",
+   "operator": "EisensteinE",
+   "expr": [
+    "EisensteinE",
+    12,
+    "tau"
+   ],
+   "var": "tau",
+   "domain": "ModularGroupFundamentalDomain",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set",
+    [
+     "Divide",
+     [
+      "Multiply",
+      "ImaginaryUnit",
+      [
+       "Hypergeometric2F1",
+       [
+        "Divide",
+        1,
+        6
+       ],
+       [
+        "Divide",
+        5,
+        6
+       ],
+       1,
+       [
+        "Add",
+        [
+         "Divide",
+         1,
+         2
+        ],
+        [
+         "Divide",
+         [
+          "Multiply",
+          [
+           "Multiply",
+           21,
+           [
+            "Sqrt",
+            10
+           ]
+          ],
+          "ImaginaryUnit"
+         ],
+         100
+        ]
+       ]
+      ]
+     ],
+     [
+      "Hypergeometric2F1",
+      [
+       "Divide",
+       1,
+       6
+      ],
+      [
+       "Divide",
+       5,
+       6
+      ],
+      1,
+      [
+       "Subtract",
+       1,
+       [
+        "Add",
+        [
+         "Divide",
+         1,
+         2
+        ],
+        [
+         "Divide",
+         [
+          "Multiply",
+          [
+           "Multiply",
+           21,
+           [
+            "Sqrt",
+            10
+           ]
+          ],
+          "ImaginaryUnit"
+         ],
+         100
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "assumptions": null,
+   "topics": [
+    "eisenstein"
+   ]
+  },
+  {
+   "id": "6d7668",
+   "property": "BranchCuts",
+   "operator": "DedekindEta",
+   "expr": [
+    "DedekindEta",
+    "tau"
+   ],
+   "var": "tau",
+   "domain": "HH",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set"
+   ],
+   "assumptions": null,
+   "topics": [
+    "dedekind_eta"
+   ]
+  },
+  {
+   "id": "718a9b",
+   "property": "Zeros",
+   "operator": "Arctan",
+   "expr": [
+    "Arctan",
+    "z"
+   ],
+   "var": "z",
+   "domain": "ComplexNumbers",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set",
+    0
+   ],
+   "assumptions": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "7194d4",
+   "property": "BranchCuts",
+   "operator": null,
+   "expr": [
+    "Add",
+    [
+     "Multiply",
+     "C",
+     [
+      "AiryAi",
+      "z"
+     ]
+    ],
+    [
+     "Multiply",
+     "D_var",
+     [
+      "AiryBi",
+      "z"
+     ]
+    ]
+   ],
+   "var": "z",
+   "domain": "ComplexNumbers",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "C",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "D_var",
+     "ComplexNumbers"
+    ]
+   ],
+   "topics": [
+    "airy"
+   ]
+  },
+  {
+   "id": "766302",
+   "property": "Zeros",
+   "operator": "LambertW",
+   "expr": [
+    "LambertW",
+    "z",
+    "k"
+   ],
+   "var": "z",
+   "domain": "ComplexNumbers",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set"
+   ],
+   "assumptions": [
+    "Element",
+    "k",
+    [
+     "SetMinus",
+     "Integers",
+     [
+      "Set",
+      0
+     ]
+    ]
+   ],
+   "topics": [
+    "lambertw"
+   ]
+  },
+  {
+   "id": "7680d3",
+   "property": "BranchPoints",
+   "operator": "LegendrePolynomial",
+   "expr": [
+    "LegendrePolynomial",
+    "n",
+    "z"
+   ],
+   "var": "z",
+   "domain": [
+    "Union",
+    "ComplexNumbers",
+    [
+     "Set",
+     "ComplexInfinity"
+    ]
+   ],
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "topics": [
+    "legendre_polynomial"
+   ]
+  },
+  {
+   "id": "77c324",
+   "property": "Zeros",
+   "operator": null,
+   "expr": [
+    "Subtract",
+    [
+     "Subtract",
+     [
+      "Power",
+      "x",
+      2
+     ],
+     "x"
+    ],
+    1
+   ],
+   "var": "x",
+   "domain": "ComplexNumbers",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set",
+    "GoldenRatio",
+    [
+     "Subtract",
+     1,
+     "GoldenRatio"
+    ]
+   ],
+   "assumptions": null,
+   "topics": [
+    "golden_ratio"
+   ]
+  },
+  {
+   "id": "798c5d",
+   "property": "IsHolomorphic",
+   "operator": "Gamma",
+   "expr": [
+    "Gamma",
+    "z"
+   ],
+   "var": "z",
+   "domain": [
+    "SetMinus",
+    "ComplexNumbers",
+    "NonPositiveIntegers"
+   ],
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": null,
+   "assumptions": null,
+   "topics": [
+    "gamma"
+   ]
+  },
+  {
+   "id": "7a7d1d",
+   "property": "Zeros",
+   "operator": "ChebyshevT",
+   "expr": [
+    "ChebyshevT",
+    "n",
+    "x"
+   ],
+   "var": "x",
+   "domain": "ComplexNumbers",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set",
+    [
+     "Cos",
+     [
+      "Multiply",
+      [
+       "Divide",
+       [
+        "Subtract",
+        [
+         "Multiply",
+         2,
+         "k"
+        ],
+        1
+       ],
+       [
+        "Multiply",
+        2,
+        "n"
+       ]
+      ],
+      "Pi"
+     ]
+    ],
+    [
+     "Element",
+     "k",
+     [
+      "Range",
+      1,
+      "n"
+     ]
+    ]
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "83566f",
+   "property": "Zeros",
+   "operator": "EisensteinE",
+   "expr": [
+    "EisensteinE",
+    8,
+    "tau"
+   ],
+   "var": "tau",
+   "domain": "ModularGroupFundamentalDomain",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set",
+    [
+     "Exp",
+     [
+      "Divide",
+      [
+       "Multiply",
+       [
+        "Multiply",
+        2,
+        "Pi"
+       ],
+       "ImaginaryUnit"
+      ],
+      3
+     ]
+    ]
+   ],
+   "assumptions": null,
+   "topics": [
+    "eisenstein"
+   ]
+  },
+  {
+   "id": "8533f5",
+   "property": "BranchCuts",
+   "operator": "DirichletL",
+   "expr": [
+    "DirichletL",
+    "s",
+    "chi"
+   ],
+   "var": "s",
+   "domain": [
+    "Union",
+    "ComplexNumbers",
+    [
+     "Set",
+     "ComplexInfinity"
+    ]
+   ],
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "q",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "chi",
+     [
+      "DirichletGroup",
+      "q"
+     ]
+    ]
+   ],
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "86333d",
+   "property": "Poles",
+   "operator": "Digamma",
+   "expr": [
+    "Digamma",
+    "z",
+    "m"
+   ],
+   "var": "z",
+   "domain": "ComplexNumbers",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": "NonPositiveIntegers",
+   "assumptions": [
+    "Element",
+    "m",
+    "NonNegativeIntegers"
+   ],
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "881aee",
+   "property": "IsHolomorphic",
+   "operator": "WeierstrassSigma",
+   "expr": [
+    "WeierstrassSigma",
+    "z",
+    "tau"
+   ],
+   "var": "z",
+   "domain": "ComplexNumbers",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": null,
+   "assumptions": [
+    "Element",
+    "tau",
+    "HH"
+   ],
+   "topics": [
+    "weierstrass_elliptic"
+   ]
+  },
+  {
+   "id": "8b5ddb",
+   "property": "IsHolomorphic",
+   "operator": "Zeta",
+   "expr": [
+    "Zeta",
+    "s"
+   ],
+   "var": "s",
+   "domain": [
+    "SetMinus",
+    "ComplexNumbers",
+    [
+     "Set",
+     1
+    ]
+   ],
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": null,
+   "assumptions": null,
+   "topics": [
+    "riemann_zeta"
+   ]
+  },
+  {
+   "id": "90f31e",
+   "property": "EssentialSingularities",
+   "operator": null,
+   "expr": [
+    "Add",
+    [
+     "Multiply",
+     "C",
+     [
+      "AiryAi",
+      "z"
+     ]
+    ],
+    [
+     "Multiply",
+     "D_var",
+     [
+      "AiryBi",
+      "z"
+     ]
+    ]
+   ],
+   "var": "z",
+   "domain": [
+    "Union",
+    "ComplexNumbers",
+    [
+     "Set",
+     "ComplexInfinity"
+    ]
+   ],
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set",
+    "ComplexInfinity"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "C",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "D_var",
+     "ComplexNumbers"
+    ],
+    [
+     "Not",
+     [
+      "And",
+      [
+       "Equal",
+       "C",
+       0
+      ],
+      [
+       "Equal",
+       "D_var",
+       0
+      ]
+     ]
+    ]
+   ],
+   "topics": [
+    "airy"
+   ]
+  },
+  {
+   "id": "926b2c",
+   "property": "Zeros",
+   "operator": "JacobiTheta",
+   "expr": [
+    "JacobiTheta",
+    4,
+    "z",
+    "tau"
+   ],
+   "var": "z",
+   "domain": "ComplexNumbers",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": null,
+   "valueSource": "Set(Add(m, Mul(Add(n, Div(1, 2)), tau)), For(Tuple(m, n)), And(Element(m, ZZ), Element(n, ZZ)))",
+   "assumptions": [
+    "Element",
+    "tau",
+    "HH"
+   ],
+   "topics": [
+    "jacobi_theta"
+   ]
+  },
+  {
+   "id": "940c48",
+   "property": "BranchPoints",
+   "operator": "Ln",
+   "expr": [
+    "Ln",
+    "z"
+   ],
+   "var": "z",
+   "domain": [
+    "Union",
+    "ComplexNumbers",
+    [
+     "Set",
+     "ComplexInfinity"
+    ]
+   ],
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set",
+    "ComplexInfinity",
+    0
+   ],
+   "assumptions": null,
+   "topics": [
+    "log"
+   ]
+  },
+  {
+   "id": "96550d",
+   "property": "BranchPoints",
+   "operator": "Sin",
+   "expr": [
+    "Sin",
+    "z"
+   ],
+   "var": "z",
+   "domain": [
+    "Union",
+    "ComplexNumbers",
+    [
+     "Set",
+     "ComplexInfinity"
+    ]
+   ],
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set"
+   ],
+   "assumptions": null,
+   "topics": [
+    "sine"
+   ]
+  },
+  {
+   "id": "971881",
+   "property": "IsHolomorphic",
+   "operator": "BarnesG",
+   "expr": [
+    "BarnesG",
+    "z"
+   ],
+   "var": "z",
+   "domain": "ComplexNumbers",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": null,
+   "assumptions": null,
+   "topics": [
+    "barnes_g"
+   ]
+  },
+  {
+   "id": "97f631",
+   "property": "EssentialSingularities",
+   "operator": "DirichletL",
+   "expr": [
+    "DirichletL",
+    "s",
+    "chi"
+   ],
+   "var": "s",
+   "domain": [
+    "Union",
+    "ComplexNumbers",
+    [
+     "Set",
+     "ComplexInfinity"
+    ]
+   ],
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set",
+    "ComplexInfinity"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "q",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "chi",
+     [
+      "DirichletGroup",
+      "q"
+     ]
+    ]
+   ],
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "99e62f",
+   "property": "EssentialSingularities",
+   "operator": "LegendrePolynomial",
+   "expr": [
+    "LegendrePolynomial",
+    "n",
+    "z"
+   ],
+   "var": "z",
+   "domain": [
+    "Union",
+    "ComplexNumbers",
+    [
+     "Set",
+     "ComplexInfinity"
+    ]
+   ],
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "topics": [
+    "legendre_polynomial"
+   ]
+  },
+  {
+   "id": "9a258f",
+   "property": "BranchCuts",
+   "operator": "Zeta",
+   "expr": [
+    "Zeta",
+    "s"
+   ],
+   "var": "s",
+   "domain": [
+    "Union",
+    "ComplexNumbers"
+   ],
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set"
+   ],
+   "assumptions": null,
+   "topics": [
+    "riemann_zeta"
+   ]
+  },
+  {
+   "id": "9a44c5",
+   "property": "BranchCuts",
+   "operator": "Gamma",
+   "expr": [
+    "Gamma",
+    "z"
+   ],
+   "var": "z",
+   "domain": "ComplexNumbers",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set"
+   ],
+   "assumptions": null,
+   "topics": [
+    "gamma"
+   ]
+  },
+  {
+   "id": "9ba78a",
+   "property": "Zeros",
+   "operator": "DirichletL",
+   "expr": [
+    "DirichletL",
+    "s",
+    "chi"
+   ],
+   "var": "s",
+   "domain": "ComplexNumbers",
+   "point": null,
+   "path": null,
+   "condition": [
+    "LessEqual",
+    [
+     "Real",
+     "s"
+    ],
+    0
+   ],
+   "value": [
+    "Which",
+    [
+     "Equal",
+     "q",
+     1
+    ],
+    [
+     "Set",
+     [
+      "Negate",
+      [
+       "Multiply",
+       2,
+       "n"
+      ]
+     ],
+     [
+      "Element",
+      "n",
+      "PositiveIntegers"
+     ]
+    ],
+    [
+     "And",
+     [
+      "Equal",
+      [
+       "chi",
+       -1
+      ],
+      1
+     ],
+     [
+      "NotEqual",
+      "q",
+      1
+     ]
+    ],
+    [
+     "Set",
+     [
+      "Negate",
+      [
+       "Multiply",
+       2,
+       "n"
+      ]
+     ],
+     [
+      "Element",
+      "n",
+      "NonNegativeIntegers"
+     ]
+    ],
+    [
+     "Equal",
+     [
+      "chi",
+      -1
+     ],
+     -1
+    ],
+    [
+     "Set",
+     [
+      "Subtract",
+      [
+       "Negate",
+       [
+        "Multiply",
+        2,
+        "n"
+       ]
+      ],
+      1
+     ],
+     [
+      "Element",
+      "n",
+      "NonNegativeIntegers"
+     ]
+    ]
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "q",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "chi",
+     [
+      "PrimitiveDirichletCharacters",
+      "q"
+     ]
+    ]
+   ],
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "a45c61",
+   "property": "BranchCuts",
+   "operator": "Sin",
+   "expr": [
+    "Sin",
+    "z"
+   ],
+   "var": "z",
+   "domain": "ComplexNumbers",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set"
+   ],
+   "assumptions": null,
+   "topics": [
+    "sine"
+   ]
+  },
+  {
+   "id": "a527c4",
+   "property": "IsHolomorphic",
+   "operator": "Sinc",
+   "expr": [
+    "Sinc",
+    "z"
+   ],
+   "var": "z",
+   "domain": "ComplexNumbers",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": null,
+   "assumptions": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "a6cd13",
+   "property": "IsHolomorphic",
+   "operator": "Arctan",
+   "expr": [
+    "Arctan",
+    "z"
+   ],
+   "var": "z",
+   "domain": [
+    "SetMinus",
+    "ComplexNumbers",
+    [
+     "Union",
+     [
+      "Multiply",
+      [
+       "Interval",
+       [
+        "Open",
+        "NegativeInfinity"
+       ],
+       -1
+      ],
+      "ImaginaryUnit"
+     ],
+     [
+      "Multiply",
+      [
+       "Interval",
+       1,
+       [
+        "Open",
+        "PositiveInfinity"
+       ]
+      ],
+      "ImaginaryUnit"
+     ]
+    ]
+   ],
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": null,
+   "assumptions": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "a76328",
+   "property": "Zeros",
+   "operator": "Gamma",
+   "expr": [
+    "Gamma",
+    "z"
+   ],
+   "var": "z",
+   "domain": "ComplexNumbers",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set"
+   ],
+   "assumptions": null,
+   "topics": [
+    "gamma"
+   ]
+  },
+  {
+   "id": "a78abc",
+   "property": "Zeros",
+   "operator": "Zeta",
+   "expr": [
+    "Zeta",
+    "s"
+   ],
+   "var": "s",
+   "domain": "ComplexNumbers",
+   "point": null,
+   "path": null,
+   "condition": [
+    "LessEqual",
+    0,
+    [
+     "Real",
+     "s"
+    ],
+    1
+   ],
+   "value": [
+    "Set",
+    [
+     "RiemannZetaZero",
+     "n"
+    ],
+    [
+     "Element",
+     "n",
+     "Integers",
+     [
+      "NotEqual",
+      "n",
+      0
+     ]
+    ]
+   ],
+   "assumptions": null,
+   "topics": [
+    "riemann_zeta"
+   ]
+  },
+  {
+   "id": "aca420",
+   "property": "Poles",
+   "operator": "LambertW",
+   "expr": [
+    "LambertW",
+    "z",
+    "k"
+   ],
+   "var": "z",
+   "domain": [
+    "Union",
+    "ComplexNumbers",
+    [
+     "Set",
+     "ComplexInfinity"
+    ]
+   ],
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set"
+   ],
+   "assumptions": [
+    "Element",
+    "k",
+    "Integers"
+   ],
+   "topics": [
+    "lambertw"
+   ]
+  },
+  {
+   "id": "ad1eaf",
+   "property": "Zeros",
+   "operator": "JacobiTheta",
+   "expr": [
+    "JacobiTheta",
+    2,
+    "z",
+    "tau"
+   ],
+   "var": "z",
+   "domain": "ComplexNumbers",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": null,
+   "valueSource": "Set(Add(Parentheses(Add(m, Div(1, 2))), Mul(n, tau)), For(Tuple(m, n)), And(Element(m, ZZ), Element(n, ZZ)))",
+   "assumptions": [
+    "Element",
+    "tau",
+    "HH"
+   ],
+   "topics": [
+    "jacobi_theta"
+   ]
+  },
+  {
+   "id": "ad91ae",
+   "property": "Zeros",
+   "operator": "EisensteinE",
+   "expr": [
+    "EisensteinE",
+    14,
+    "tau"
+   ],
+   "var": "tau",
+   "domain": "ModularGroupFundamentalDomain",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set",
+    "ImaginaryUnit",
+    [
+     "Exp",
+     [
+      "Divide",
+      [
+       "Multiply",
+       [
+        "Multiply",
+        2,
+        "Pi"
+       ],
+       "ImaginaryUnit"
+      ],
+      3
+     ]
+    ]
+   ],
+   "assumptions": null,
+   "topics": [
+    "eisenstein"
+   ]
+  },
+  {
+   "id": "ae2c5d",
+   "property": "Poles",
+   "operator": "WeierstrassP",
+   "expr": [
+    "WeierstrassP",
+    "z",
+    "tau"
+   ],
+   "var": "z",
+   "domain": "ComplexNumbers",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Lattice",
+    1,
+    "tau"
+   ],
+   "assumptions": [
+    "Element",
+    "tau",
+    "HH"
+   ],
+   "topics": [
+    "weierstrass_elliptic"
+   ]
+  },
+  {
+   "id": "af4516",
+   "property": "Zeros",
+   "operator": "Sinc",
+   "expr": [
+    "Sinc",
+    "z"
+   ],
+   "var": "z",
+   "domain": "ComplexNumbers",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set",
+    [
+     "Multiply",
+     "Pi",
+     "n"
+    ],
+    [
+     "Element",
+     "n",
+     "Integers",
+     [
+      "NotEqual",
+      "n",
+      0
+     ]
+    ]
+   ],
+   "assumptions": null,
+   "topics": [
+    "sinc"
+   ]
+  },
+  {
+   "id": "b5a25e",
+   "property": "Solutions",
+   "operator": null,
+   "expr": [
+    "Equal",
+    [
+     "ChebyshevT",
+     "n",
+     "x"
+    ],
+    1
+   ],
+   "var": "x",
+   "domain": "ComplexNumbers",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set",
+    [
+     "Cos",
+     [
+      "Multiply",
+      [
+       "Divide",
+       [
+        "Multiply",
+        2,
+        "k"
+       ],
+       "n"
+      ],
+      "Pi"
+     ]
+    ],
+    [
+     "Element",
+     "k",
+     [
+      "Range",
+      0,
+      [
+       "Floor",
+       [
+        "Divide",
+        "n",
+        2
+       ]
+      ]
+     ]
+    ]
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "PositiveIntegers"
+   ],
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "b5ded1",
+   "property": "BranchCuts",
+   "operator": "Ln",
+   "expr": [
+    "Ln",
+    "z"
+   ],
+   "var": "z",
+   "domain": "ComplexNumbers",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set",
+    [
+     "Interval",
+     [
+      "Open",
+      "NegativeInfinity"
+     ],
+     0
+    ]
+   ],
+   "assumptions": null,
+   "topics": [
+    "log"
+   ]
+  },
+  {
+   "id": "b62d05",
+   "property": "BranchCuts",
+   "operator": "Exp",
+   "expr": [
+    "Exp",
+    "z"
+   ],
+   "var": "z",
+   "domain": "ComplexNumbers",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set"
+   ],
+   "assumptions": null,
+   "topics": [
+    "exp"
+   ]
+  },
+  {
+   "id": "b88f65",
+   "property": "BranchPoints",
+   "operator": null,
+   "expr": [
+    "Add",
+    [
+     "Multiply",
+     "C",
+     [
+      "AiryAi",
+      "z"
+     ]
+    ],
+    [
+     "Multiply",
+     "D_var",
+     [
+      "AiryBi",
+      "z"
+     ]
+    ]
+   ],
+   "var": "z",
+   "domain": [
+    "Union",
+    "ComplexNumbers",
+    [
+     "Set",
+     "ComplexInfinity"
+    ]
+   ],
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "C",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "D_var",
+     "ComplexNumbers"
+    ]
+   ],
+   "topics": [
+    "airy"
+   ]
+  },
+  {
+   "id": "bc755b",
+   "property": "Zeros",
+   "operator": "DirichletL",
+   "expr": [
+    "DirichletL",
+    "s",
+    "chi"
+   ],
+   "var": "s",
+   "domain": "ComplexNumbers",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Union",
+    [
+     "Zeros",
+     [
+      "Function",
+      [
+       "DirichletL",
+       "s",
+       "chi"
+      ],
+      "s"
+     ],
+     [
+      "And",
+      [
+       "Element",
+       "s",
+       "ComplexNumbers"
+      ],
+      [
+       "LessEqual",
+       [
+        "Real",
+        "s"
+       ],
+       0
+      ]
+     ]
+    ],
+    [
+     "Set",
+     [
+      "DirichletLZero",
+      "n",
+      "chi"
+     ],
+     [
+      "Element",
+      "n",
+      [
+       "SetMinus",
+       "Integers",
+       [
+        "Set",
+        0
+       ]
+      ]
+     ]
+    ]
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "q",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "chi",
+     [
+      "DirichletGroup",
+      "q"
+     ]
+    ]
+   ],
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "bceb84",
+   "property": "Zeros",
+   "operator": "Exp",
+   "expr": [
+    "Exp",
+    "z"
+   ],
+   "var": "z",
+   "domain": "ComplexNumbers",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set"
+   ],
+   "assumptions": null,
+   "topics": [
+    "exp"
+   ]
+  },
+  {
+   "id": "be4b28",
+   "property": "EssentialSingularities",
+   "operator": "Exp",
+   "expr": [
+    "Exp",
+    "z"
+   ],
+   "var": "z",
+   "domain": [
+    "Union",
+    "ComplexNumbers",
+    [
+     "Set",
+     "ComplexInfinity"
+    ]
+   ],
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set",
+    "ComplexInfinity"
+   ],
+   "assumptions": null,
+   "topics": [
+    "exp"
+   ]
+  },
+  {
+   "id": "c1bee1",
+   "property": "AnalyticContinuation",
+   "operator": "Ln",
+   "expr": [
+    "Ln",
+    "z"
+   ],
+   "var": "z",
+   "domain": null,
+   "point": null,
+   "path": [
+    "a",
+    "b"
+   ],
+   "condition": null,
+   "value": [
+    "Subtract",
+    [
+     "Ln",
+     [
+      "Negate",
+      "b"
+     ]
+    ],
+    [
+     "Multiply",
+     "Pi",
+     "ImaginaryUnit"
+    ]
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "b",
+     "ComplexNumbers"
+    ],
+    [
+     "Less",
+     [
+      "Imaginary",
+      "a"
+     ],
+     0
+    ],
+    [
+     "Greater",
+     [
+      "Imaginary",
+      "b"
+     ],
+     0
+    ],
+    [
+     "Less",
+     [
+      "Subtract",
+      [
+       "Multiply",
+       [
+        "Real",
+        "a"
+       ],
+       [
+        "Imaginary",
+        "b"
+       ]
+      ],
+      [
+       "Multiply",
+       [
+        "Real",
+        "b"
+       ],
+       [
+        "Imaginary",
+        "a"
+       ]
+      ]
+     ],
+     0
+    ]
+   ],
+   "topics": [
+    "log"
+   ]
+  },
+  {
+   "id": "c3e340",
+   "property": "BranchPoints",
+   "operator": "LogBarnesG",
+   "expr": [
+    "LogBarnesG",
+    "z"
+   ],
+   "var": "z",
+   "domain": "ComplexNumbers",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": "NonPositiveIntegers",
+   "assumptions": null,
+   "topics": [
+    "barnes_g"
+   ]
+  },
+  {
+   "id": "c464e3",
+   "property": "Poles",
+   "operator": "Ln",
+   "expr": [
+    "Ln",
+    "z"
+   ],
+   "var": "z",
+   "domain": [
+    "Union",
+    "ComplexNumbers",
+    [
+     "Set",
+     "ComplexInfinity"
+    ]
+   ],
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set"
+   ],
+   "assumptions": null,
+   "topics": [
+    "log"
+   ]
+  },
+  {
+   "id": "c6234b",
+   "property": "Zeros",
+   "operator": "WeierstrassP",
+   "expr": [
+    "WeierstrassP",
+    "z",
+    "ImaginaryUnit"
+   ],
+   "var": "z",
+   "domain": "ComplexNumbers",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": null,
+   "valueSource": "Set(Add(Parentheses(Add(m, Div(1, 2))), Mul(Add(n, Div(1, 2)), ConstI)), For(Tuple(m, n)), And(Element(m, ZZ), Element(n, ZZ)))",
+   "assumptions": null,
+   "topics": [
+    "weierstrass_elliptic"
+   ]
+  },
+  {
+   "id": "cae067",
+   "property": "Zeros",
+   "operator": "EisensteinE",
+   "expr": [
+    "EisensteinE",
+    2,
+    "tau"
+   ],
+   "var": "tau",
+   "domain": "HH",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": null,
+   "valueSource": "Set(Add(tau, n), For(Tuple(tau, n)), And(Element(tau, Zeros(EisensteinE(2, z), For(z), And(Element(z, HH), Element(Re(z), ClosedOpenInterval(Neg(Div(1, 2)), Div(1, 2)))))), Element(n, ZZ)))",
+   "assumptions": null,
+   "topics": [
+    "eisenstein"
+   ]
+  },
+  {
+   "id": "caf10a",
+   "property": "Zeros",
+   "operator": "JacobiTheta",
+   "expr": [
+    "JacobiTheta",
+    3,
+    "z",
+    "tau"
+   ],
+   "var": "z",
+   "domain": "ComplexNumbers",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": null,
+   "valueSource": "Set(Add(Parentheses(Add(m, Div(1, 2))), Mul(Add(n, Div(1, 2)), tau)), For(Tuple(m, n)), And(Element(m, ZZ), Element(n, ZZ)))",
+   "assumptions": [
+    "Element",
+    "tau",
+    "HH"
+   ],
+   "topics": [
+    "jacobi_theta"
+   ]
+  },
+  {
+   "id": "cbce7f",
+   "property": "Solutions",
+   "operator": null,
+   "expr": [
+    "Equal",
+    [
+     "Tan",
+     "w"
+    ],
+    "z"
+   ],
+   "var": "w",
+   "domain": "ComplexNumbers",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set",
+    [
+     "Add",
+     [
+      "Arctan",
+      "z"
+     ],
+     [
+      "Multiply",
+      "Pi",
+      "n"
+     ]
+    ],
+    [
+     "Element",
+     "n",
+     "Integers"
+    ]
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     [
+      "Set",
+      [
+       "Negate",
+       "ImaginaryUnit"
+      ],
+      "ImaginaryUnit"
+     ]
+    ]
+   ],
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "cbfd70",
+   "property": "AnalyticContinuation",
+   "operator": "Ln",
+   "expr": [
+    "Ln",
+    [
+     "Multiply",
+     "R",
+     [
+      "Exp",
+      [
+       "Multiply",
+       "ImaginaryUnit",
+       "t"
+      ]
+     ]
+    ]
+   ],
+   "var": "t",
+   "domain": null,
+   "point": null,
+   "path": [
+    0,
+    "theta"
+   ],
+   "condition": null,
+   "value": [
+    "Add",
+    [
+     "Ln",
+     "R"
+    ],
+    [
+     "Multiply",
+     "theta",
+     "ImaginaryUnit"
+    ]
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "R",
+     [
+      "Interval",
+      [
+       "Open",
+       0
+      ],
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
+     ]
+    ],
+    [
+     "Element",
+     "theta",
+     "RealNumbers"
+    ]
+   ],
+   "topics": [
+    "log"
+   ]
+  },
+  {
+   "id": "ce39ac",
+   "property": "Zeros",
+   "operator": "ChebyshevU",
+   "expr": [
+    "ChebyshevU",
+    "n",
+    "x"
+   ],
+   "var": "x",
+   "domain": "ComplexNumbers",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set",
+    [
+     "Cos",
+     [
+      "Multiply",
+      [
+       "Divide",
+       "k",
+       [
+        "Add",
+        "n",
+        1
+       ]
+      ],
+      "Pi"
+     ]
+    ],
+    [
+     "Element",
+     "k",
+     [
+      "Range",
+      1,
+      "n"
+     ]
+    ]
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "d086bd",
+   "property": "BranchPoints",
+   "operator": "Gamma",
+   "expr": [
+    "Gamma",
+    "z"
+   ],
+   "var": "z",
+   "domain": [
+    "Union",
+    "ComplexNumbers",
+    [
+     "Set",
+     "ComplexInfinity"
+    ]
+   ],
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set"
+   ],
+   "assumptions": null,
+   "topics": [
+    "gamma"
+   ]
+  },
+  {
+   "id": "d36fd7",
+   "property": "Poles",
+   "operator": "LegendrePolynomial",
+   "expr": [
+    "LegendrePolynomial",
+    "n",
+    "z"
+   ],
+   "var": "z",
+   "domain": [
+    "Union",
+    "ComplexNumbers",
+    [
+     "Set",
+     "ComplexInfinity"
+    ]
+   ],
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set",
+    "ComplexInfinity"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "PositiveIntegers"
+   ],
+   "topics": [
+    "legendre_polynomial"
+   ]
+  },
+  {
+   "id": "d7136f",
+   "property": "Solutions",
+   "operator": null,
+   "expr": [
+    "Equal",
+    [
+     "Multiply",
+     "w",
+     [
+      "Exp",
+      "w"
+     ]
+    ],
+    "z"
+   ],
+   "var": "w",
+   "domain": "ComplexNumbers",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set",
+    [
+     "LambertW",
+     "z",
+     "k"
+    ],
+    [
+     "Element",
+     "k",
+     "Integers",
+     [
+      "Or",
+      [
+       "NotEqual",
+       "z",
+       0
+      ],
+      [
+       "Equal",
+       "k",
+       0
+      ]
+     ]
+    ]
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "topics": [
+    "lambertw"
+   ]
+  },
+  {
+   "id": "d9403e",
+   "property": "IsMeromorphic",
+   "operator": "Digamma",
+   "expr": [
+    "Digamma",
+    "z",
+    "m"
+   ],
+   "var": "z",
+   "domain": "ComplexNumbers",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": null,
+   "assumptions": [
+    "Element",
+    "m",
+    "NonNegativeIntegers"
+   ],
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "db2b0a",
+   "property": "Solutions",
+   "operator": null,
+   "expr": [
+    "Equal",
+    [
+     "ChebyshevT",
+     "n",
+     "x"
+    ],
+    -1
+   ],
+   "var": "x",
+   "domain": "ComplexNumbers",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set",
+    [
+     "Cos",
+     [
+      "Multiply",
+      [
+       "Divide",
+       [
+        "Subtract",
+        [
+         "Multiply",
+         2,
+         "k"
+        ],
+        1
+       ],
+       "n"
+      ],
+      "Pi"
+     ]
+    ],
+    [
+     "Element",
+     "k",
+     [
+      "Range",
+      1,
+      [
+       "Floor",
+       [
+        "Divide",
+        [
+         "Add",
+         "n",
+         1
+        ],
+        2
+       ]
+      ]
+     ]
+    ]
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "PositiveIntegers"
+   ],
+   "topics": [
+    "chebyshev"
+   ]
+  },
+  {
+   "id": "ddc8a1",
+   "property": "EssentialSingularities",
+   "operator": "Ln",
+   "expr": [
+    "Ln",
+    "z"
+   ],
+   "var": "z",
+   "domain": [
+    "Union",
+    "ComplexNumbers",
+    [
+     "Set",
+     "ComplexInfinity"
+    ]
+   ],
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set"
+   ],
+   "assumptions": null,
+   "topics": [
+    "log"
+   ]
+  },
+  {
+   "id": "def37e",
+   "property": "IsHolomorphic",
+   "operator": null,
+   "expr": [
+    "Add",
+    [
+     "Multiply",
+     "C",
+     [
+      "AiryAi",
+      "z"
+     ]
+    ],
+    [
+     "Multiply",
+     "D_var",
+     [
+      "AiryBi",
+      "z"
+     ]
+    ]
+   ],
+   "var": "z",
+   "domain": "ComplexNumbers",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": null,
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "C",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "D_var",
+     "ComplexNumbers"
+    ],
+    [
+     "Not",
+     [
+      "And",
+      [
+       "Equal",
+       "C",
+       0
+      ],
+      [
+       "Equal",
+       "D_var",
+       0
+      ]
+     ]
+    ]
+   ],
+   "topics": [
+    "airy"
+   ]
+  },
+  {
+   "id": "e06d87",
+   "property": "IsHolomorphic",
+   "operator": "DedekindEta",
+   "expr": [
+    "DedekindEta",
+    "tau"
+   ],
+   "var": "tau",
+   "domain": "HH",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": null,
+   "assumptions": null,
+   "topics": [
+    "dedekind_eta"
+   ]
+  },
+  {
+   "id": "e0ac95",
+   "property": "Zeros",
+   "operator": null,
+   "expr": [
+    "Subtract",
+    [
+     "Power",
+     "z",
+     2
+    ],
+    "c"
+   ],
+   "var": "z",
+   "domain": "ComplexNumbers",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set",
+    [
+     "Multiply",
+     "ImaginaryUnit",
+     [
+      "Sqrt",
+      [
+       "Negate",
+       "c"
+      ]
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Negate",
+      "ImaginaryUnit"
+     ],
+     [
+      "Sqrt",
+      [
+       "Negate",
+       "c"
+      ]
+     ]
+    ]
+   ],
+   "assumptions": [
+    "Element",
+    "c",
+    "ComplexNumbers"
+   ],
+   "topics": [
+    "sqrt"
+   ]
+  },
+  {
+   "id": "e1f73d",
+   "property": "BranchCuts",
+   "operator": "LogBarnesG",
+   "expr": [
+    "LogBarnesG",
+    "z"
+   ],
+   "var": "z",
+   "domain": "ComplexNumbers",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set",
+    [
+     "Interval",
+     [
+      "Open",
+      [
+       "Subtract",
+       [
+        "Negate",
+        "n"
+       ],
+       1
+      ]
+     ],
+     [
+      "Open",
+      [
+       "Negate",
+       "n"
+      ]
+     ]
+    ],
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "assumptions": null,
+   "topics": [
+    "barnes_g"
+   ]
+  },
+  {
+   "id": "e46697",
+   "property": "Zeros",
+   "operator": "EisensteinE",
+   "expr": [
+    "EisensteinE",
+    [
+     "Multiply",
+     2,
+     "k"
+    ],
+    "tau"
+   ],
+   "var": "tau",
+   "domain": "HH",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": null,
+   "valueSource": "Set(ModularGroupAction(gamma, tau), For(Tuple(gamma, tau)), And(Element(tau, Zeros(EisensteinE(Mul(2, k), z), ForElement(z, ModularGroupFundamentalDomain))), Element(gamma, PSL2Z)))",
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "k",
+     [
+      "Range",
+      2,
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "topics": [
+    "eisenstein"
+   ]
+  },
+  {
+   "id": "e488dc",
+   "property": "Zeros",
+   "operator": "BarnesG",
+   "expr": [
+    "BarnesG",
+    "z"
+   ],
+   "var": "z",
+   "domain": "ComplexNumbers",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": "NonPositiveIntegers",
+   "assumptions": null,
+   "topics": [
+    "barnes_g"
+   ]
+  },
+  {
+   "id": "e6e7a2",
+   "property": "BranchPoints",
+   "operator": "LambertW",
+   "expr": [
+    "LambertW",
+    "z",
+    "k"
+   ],
+   "var": "z",
+   "domain": [
+    "Union",
+    "ComplexNumbers",
+    [
+     "Set",
+     "ComplexInfinity"
+    ]
+   ],
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set",
+    0,
+    "ComplexInfinity"
+   ],
+   "assumptions": [
+    "Element",
+    "k",
+    [
+     "SetMinus",
+     "Integers",
+     [
+      "Set",
+      -1,
+      0,
+      1
+     ]
+    ]
+   ],
+   "topics": [
+    "lambertw"
+   ]
+  },
+  {
+   "id": "e7aef3",
+   "property": "IsHolomorphic",
+   "operator": "Digamma",
+   "expr": [
+    "Digamma",
+    "z"
+   ],
+   "var": "z",
+   "domain": [
+    "SetMinus",
+    "ComplexNumbers",
+    "NonPositiveIntegers"
+   ],
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": null,
+   "assumptions": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "ea3e3c",
+   "property": "Zeros",
+   "operator": "ModularJ",
+   "expr": [
+    "ModularJ",
+    "tau"
+   ],
+   "var": "tau",
+   "domain": "ModularGroupFundamentalDomain",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set",
+    [
+     "Exp",
+     [
+      "Divide",
+      [
+       "Multiply",
+       [
+        "Multiply",
+        2,
+        "Pi"
+       ],
+       "ImaginaryUnit"
+      ],
+      3
+     ]
+    ]
+   ],
+   "assumptions": null,
+   "topics": [
+    "modular_j"
+   ]
+  },
+  {
+   "id": "ea8c55",
+   "property": "Poles",
+   "operator": "DirichletL",
+   "expr": [
+    "DirichletL",
+    "s",
+    "chi"
+   ],
+   "var": "s",
+   "domain": [
+    "Union",
+    "ComplexNumbers",
+    [
+     "Set",
+     "ComplexInfinity"
+    ]
+   ],
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Which",
+    [
+     "Equal",
+     "chi",
+     [
+      "DirichletCharacter",
+      "q",
+      1
+     ]
+    ],
+    [
+     "Set",
+     1
+    ],
+    "True",
+    [
+     "Set"
+    ]
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "q",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "chi",
+     [
+      "DirichletGroup",
+      "q"
+     ]
+    ]
+   ],
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "ec4f56",
+   "property": "Zeros",
+   "operator": "EisensteinE",
+   "expr": [
+    "EisensteinE",
+    6,
+    "tau"
+   ],
+   "var": "tau",
+   "domain": "ModularGroupFundamentalDomain",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set",
+    "ImaginaryUnit"
+   ],
+   "assumptions": null,
+   "topics": [
+    "eisenstein"
+   ]
+  },
+  {
+   "id": "ed6590",
+   "property": "AnalyticContinuation",
+   "operator": "Ln",
+   "expr": [
+    "Ln",
+    "z"
+   ],
+   "var": "z",
+   "domain": null,
+   "point": null,
+   "path": [
+    "a",
+    "b"
+   ],
+   "condition": null,
+   "value": [
+    "Add",
+    [
+     "Ln",
+     [
+      "Negate",
+      "b"
+     ]
+    ],
+    [
+     "Multiply",
+     "Pi",
+     "ImaginaryUnit"
+    ]
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "b",
+     "ComplexNumbers"
+    ],
+    [
+     "Greater",
+     [
+      "Imaginary",
+      "a"
+     ],
+     0
+    ],
+    [
+     "Less",
+     [
+      "Imaginary",
+      "b"
+     ],
+     0
+    ],
+    [
+     "Greater",
+     [
+      "Subtract",
+      [
+       "Multiply",
+       [
+        "Real",
+        "a"
+       ],
+       [
+        "Imaginary",
+        "b"
+       ]
+      ],
+      [
+       "Multiply",
+       [
+        "Real",
+        "b"
+       ],
+       [
+        "Imaginary",
+        "a"
+       ]
+      ]
+     ],
+     0
+    ]
+   ],
+   "topics": [
+    "log"
+   ]
+  },
+  {
+   "id": "f0f17c",
+   "property": "Zeros",
+   "operator": "LambertW",
+   "expr": [
+    "LambertW",
+    "z"
+   ],
+   "var": "z",
+   "domain": "ComplexNumbers",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set",
+    0
+   ],
+   "assumptions": null,
+   "topics": [
+    "lambertw"
+   ]
+  },
+  {
+   "id": "f29019",
+   "property": "IsMeromorphic",
+   "operator": "Digamma",
+   "expr": [
+    "Digamma",
+    "z"
+   ],
+   "var": "z",
+   "domain": "ComplexNumbers",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": null,
+   "assumptions": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "f2e2c2",
+   "property": "BranchPoints",
+   "operator": "DedekindEta",
+   "expr": [
+    "DedekindEta",
+    "tau"
+   ],
+   "var": "tau",
+   "domain": [
+    "Union",
+    "HH",
+    [
+     "Set",
+     "ComplexInfinity"
+    ]
+   ],
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set"
+   ],
+   "assumptions": null,
+   "topics": [
+    "dedekind_eta"
+   ]
+  },
+  {
+   "id": "f33f09",
+   "property": "Zeros",
+   "operator": "EisensteinE",
+   "expr": [
+    "EisensteinE",
+    2,
+    "tau"
+   ],
+   "var": "tau",
+   "domain": "HH",
+   "point": null,
+   "path": null,
+   "condition": [
+    "Element",
+    [
+     "Real",
+     "tau"
+    ],
+    [
+     "Interval",
+     [
+      "Negate",
+      [
+       "Divide",
+       1,
+       2
+      ]
+     ],
+     [
+      "Open",
+      [
+       "Divide",
+       1,
+       2
+      ]
+     ]
+    ]
+   ],
+   "value": null,
+   "valueSource": "Where(Set(Parentheses(UniqueZero(EisensteinE(2, z), ForElement(z, D(c, d)))), For(Tuple(c, d)), And(Element(c, ZZ), Element(d, ZZ), Equal(GCD(c, d), 1), Element(Neg(Div(d, c)), ClosedOpenInterval(Neg(Div(1, 2)), Div(1, 2))))), Equal(D(c, d), ClosedDisk(Add(Neg(Div(d, c)), Div(Mul(ConstI, Pi), Mul(6, Pow(c, 2)))), Div(Mul(Decimal(\"0.000283\"), Pow(Pi, 2)), Mul(36, Pow(c, 2))))))",
+   "assumptions": null,
+   "topics": [
+    "eisenstein"
+   ]
+  },
+  {
+   "id": "f4cc9e",
+   "property": "Poles",
+   "operator": "Sin",
+   "expr": [
+    "Sin",
+    "z"
+   ],
+   "var": "z",
+   "domain": [
+    "Union",
+    "ComplexNumbers",
+    [
+     "Set",
+     "ComplexInfinity"
+    ]
+   ],
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set"
+   ],
+   "assumptions": null,
+   "topics": [
+    "sine"
+   ]
+  },
+  {
+   "id": "f77124",
+   "property": "ComplexZeroMultiplicity",
+   "operator": "BarnesG",
+   "expr": [
+    "BarnesG",
+    "z"
+   ],
+   "var": "z",
+   "domain": null,
+   "point": [
+    "Negate",
+    "n"
+   ],
+   "path": null,
+   "condition": null,
+   "value": [
+    "Add",
+    "n",
+    1
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "topics": [
+    "barnes_g"
+   ]
+  },
+  {
+   "id": "fc2582",
+   "property": "Zeros",
+   "operator": null,
+   "expr": [
+    "Add",
+    [
+     "Add",
+     [
+      "Multiply",
+      "a",
+      [
+       "Power",
+       "z",
+       2
+      ]
+     ],
+     [
+      "Multiply",
+      "b",
+      "z"
+     ]
+    ],
+    "c"
+   ],
+   "var": "z",
+   "domain": "ComplexNumbers",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set",
+    [
+     "Divide",
+     [
+      "Add",
+      [
+       "Negate",
+       "b"
+      ],
+      [
+       "Sqrt",
+       [
+        "Subtract",
+        [
+         "Power",
+         "b",
+         2
+        ],
+        [
+         "Multiply",
+         [
+          "Multiply",
+          4,
+          "a"
+         ],
+         "c"
+        ]
+       ]
+      ]
+     ],
+     [
+      "Multiply",
+      2,
+      "a"
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Subtract",
+      [
+       "Negate",
+       "b"
+      ],
+      [
+       "Sqrt",
+       [
+        "Subtract",
+        [
+         "Power",
+         "b",
+         2
+        ],
+        [
+         "Multiply",
+         [
+          "Multiply",
+          4,
+          "a"
+         ],
+         "c"
+        ]
+       ]
+      ]
+     ],
+     [
+      "Multiply",
+      2,
+      "a"
+     ]
+    ]
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "b",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "c",
+     "ComplexNumbers"
+    ],
+    [
+     "NotEqual",
+     "a",
+     0
+    ]
+   ],
+   "topics": [
+    "sqrt"
+   ]
+  },
+  {
+   "id": "fdb94b",
+   "property": "EssentialSingularities",
+   "operator": "Zeta",
+   "expr": [
+    "Zeta",
+    "s"
+   ],
+   "var": "s",
+   "domain": [
+    "Union",
+    "ComplexNumbers",
+    [
+     "Set",
+     "ComplexInfinity"
+    ]
+   ],
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set",
+    "ComplexInfinity"
+   ],
+   "assumptions": null,
+   "topics": [
+    "riemann_zeta"
+   ]
+  },
+  {
+   "id": "fdfb16",
+   "property": "BranchCuts",
+   "operator": "LambertW",
+   "expr": [
+    "LambertW",
+    "z"
+   ],
+   "var": "z",
+   "domain": "ComplexNumbers",
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": [
+    "Set",
+    [
+     "Interval",
+     [
+      "Open",
+      "NegativeInfinity"
+     ],
+     [
+      "Negate",
+      [
+       "Exp",
+       -1
+      ]
+     ]
+    ]
+   ],
+   "assumptions": null,
+   "topics": [
+    "lambertw"
+   ]
+  },
+  {
+   "id": "fe4692",
+   "property": "IsHolomorphic",
+   "operator": "DirichletL",
+   "expr": [
+    "DirichletL",
+    "s",
+    "chi"
+   ],
+   "var": "s",
+   "domain": [
+    "Which",
+    [
+     "Equal",
+     "chi",
+     [
+      "DirichletCharacter",
+      "q",
+      1
+     ]
+    ],
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     [
+      "Set",
+      1
+     ]
+    ],
+    "True",
+    "ComplexNumbers"
+   ],
+   "point": null,
+   "path": null,
+   "condition": null,
+   "value": null,
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "q",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "chi",
+     [
+      "DirichletGroup",
+      "q"
+     ]
+    ]
+   ],
+   "topics": [
+    "dirichlet"
+   ]
+  }
+ ]
+}

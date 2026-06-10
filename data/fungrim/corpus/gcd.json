@@ -1,0 +1,4588 @@
+{
+ "topic": "gcd",
+ "title": "Greatest common divisor",
+ "source": "pygrim/formulas/gcd.py",
+ "generator": "grim2mathjson 0.1.0",
+ "entries": [
+  {
+   "id": "062423",
+   "formula": [
+    "Equal",
+    [
+     "GCD",
+     "p",
+     "q"
+    ],
+    1
+   ],
+   "variables": [
+    "p",
+    "q"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "p",
+     "Primes"
+    ],
+    [
+     "Element",
+     "q",
+     "Primes"
+    ],
+    [
+     "NotEqual",
+     "p",
+     "q"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "GCD"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "07ac4a",
+   "formula": [
+    "Equal",
+    [
+     "GCD",
+     [
+      "Add",
+      "a",
+      [
+       "Multiply",
+       "n",
+       "b"
+      ]
+     ],
+     "b"
+    ],
+    [
+     "GCD",
+     "a",
+     "b"
+    ]
+   ],
+   "variables": [
+    "a",
+    "b",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "Integers"
+    ],
+    [
+     "Element",
+     "b",
+     "Integers"
+    ],
+    [
+     "Element",
+     "n",
+     "Integers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "GCD"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "0a7aff",
+   "formula": [
+    "Equal",
+    [
+     "LCM",
+     "a",
+     0
+    ],
+    0
+   ],
+   "variables": [
+    "a"
+   ],
+   "assumptions": [
+    "Element",
+    "a",
+    "Integers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "LCM"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "0bb73e",
+   "formula": [
+    "Equal",
+    [
+     "XGCD",
+     "a",
+     [
+      "Negate",
+      "a"
+     ]
+    ],
+    [
+     "Tuple",
+     [
+      "Abs",
+      "a"
+     ],
+     0,
+     [
+      "Negate",
+      [
+       "Sign",
+       "a"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "a"
+   ],
+   "assumptions": [
+    "Element",
+    "a",
+    "Integers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Sign",
+    "XGCD"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "0f26cc",
+   "formula": [
+    "Equal",
+    [
+     "GCD",
+     "a",
+     "a"
+    ],
+    [
+     "Abs",
+     "a"
+    ]
+   ],
+   "variables": [
+    "a"
+   ],
+   "assumptions": [
+    "Element",
+    "a",
+    "Integers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "GCD"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "125606",
+   "formula": [
+    "LessEqual",
+    [
+     "LCM",
+     "a",
+     "b"
+    ],
+    [
+     "Abs",
+     [
+      "Multiply",
+      "a",
+      "b"
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "Integers"
+    ],
+    [
+     "Element",
+     "b",
+     "Integers"
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "LCM"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "1277f6",
+   "formula": [
+    "Divides",
+    [
+     "GCD",
+     "a",
+     "b"
+    ],
+    [
+     "LCM",
+     "a",
+     "b"
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "Integers"
+    ],
+    [
+     "Element",
+     "b",
+     "Integers"
+    ],
+    [
+     "And",
+     [
+      "NotEqual",
+      "a",
+      0
+     ],
+     [
+      "NotEqual",
+      "b",
+      0
+     ]
+    ]
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "Divides",
+    "GCD",
+    "LCM"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "13ed5e",
+   "formula": [
+    "Equal",
+    [
+     "XGCD",
+     "a",
+     1
+    ],
+    [
+     "Tuple",
+     1,
+     0,
+     1
+    ]
+   ],
+   "variables": [
+    "a"
+   ],
+   "assumptions": [
+    "Element",
+    "a",
+    "Integers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "XGCD"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "14b96c",
+   "formula": [
+    "Equal",
+    [
+     "LCM",
+     "a",
+     "b"
+    ],
+    [
+     "LCM",
+     "b",
+     "a"
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "Integers"
+    ],
+    [
+     "Element",
+     "b",
+     "Integers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "LCM"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "157c33",
+   "formula": [
+    "Equal",
+    [
+     "LCM",
+     "a",
+     2
+    ],
+    [
+     "Multiply",
+     [
+      "Abs",
+      "a"
+     ],
+     [
+      "Add",
+      1,
+      [
+       "Divide",
+       [
+        "Subtract",
+        1,
+        [
+         "Power",
+         -1,
+         "a"
+        ]
+       ],
+       2
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "a"
+   ],
+   "assumptions": [
+    "Element",
+    "a",
+    "Integers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "LCM"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "19ceaa",
+   "formula": [
+    "Equal",
+    [
+     "GCD",
+     0,
+     0
+    ],
+    0
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "GCD"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "1b47db",
+   "formula": [
+    "Equal",
+    [
+     "XGCD",
+     -1,
+     "b"
+    ],
+    [
+     "Tuple",
+     1,
+     [
+      "Negate",
+      [
+       "Abs",
+       [
+        "Sign",
+        [
+         "Multiply",
+         [
+          "Subtract",
+          "b",
+          1
+         ],
+         [
+          "Add",
+          "b",
+          1
+         ]
+        ]
+       ]
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Sign",
+       "b"
+      ],
+      [
+       "Subtract",
+       [
+        "Sign",
+        [
+         "Add",
+         "b",
+         1
+        ]
+       ],
+       [
+        "Sign",
+        [
+         "Subtract",
+         "b",
+         1
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "b"
+   ],
+   "assumptions": [
+    "Element",
+    "b",
+    "Integers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Sign",
+    "XGCD"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "1bbdaf",
+   "formula": [
+    "Equal",
+    [
+     "LCM",
+     [
+      "Add",
+      "a",
+      [
+       "Multiply",
+       "n",
+       "b"
+      ]
+     ],
+     "b"
+    ],
+    [
+     "Divide",
+     [
+      "Multiply",
+      [
+       "Abs",
+       [
+        "Add",
+        "a",
+        [
+         "Multiply",
+         "n",
+         "b"
+        ]
+       ]
+      ],
+      [
+       "LCM",
+       "a",
+       "b"
+      ]
+     ],
+     [
+      "Abs",
+      "a"
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     [
+      "SetMinus",
+      "Integers",
+      [
+       "Set",
+       0
+      ]
+     ]
+    ],
+    [
+     "Element",
+     "b",
+     "Integers"
+    ],
+    [
+     "Element",
+     "n",
+     "Integers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "LCM"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "1cde02",
+   "formula": [
+    "Equal",
+    [
+     "LCM",
+     "a",
+     [
+      "LCM",
+      "b",
+      "c"
+     ]
+    ],
+    [
+     "LCM",
+     [
+      "LCM",
+      "a",
+      "b"
+     ],
+     "c"
+    ]
+   ],
+   "variables": [
+    "a",
+    "b",
+    "c"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "Integers"
+    ],
+    [
+     "Element",
+     "b",
+     "Integers"
+    ],
+    [
+     "Element",
+     "c",
+     "Integers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "LCM"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "1d1653",
+   "formula": [
+    "Equal",
+    [
+     "GCD",
+     "a",
+     [
+      "LCM",
+      "a",
+      "b"
+     ]
+    ],
+    [
+     "Abs",
+     "a"
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "Integers"
+    ],
+    [
+     "Element",
+     "b",
+     "Integers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "GCD",
+    "LCM"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "250a45",
+   "formula": [
+    "Equal",
+    [
+     "LCM",
+     "r",
+     "s"
+    ],
+    [
+     "Abs",
+     [
+      "Multiply",
+      "r",
+      "s"
+     ]
+    ]
+   ],
+   "variables": [
+    "r",
+    "s"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "r",
+     "Integers"
+    ],
+    [
+     "Element",
+     "s",
+     "Integers"
+    ],
+    [
+     "Equal",
+     [
+      "GCD",
+      "r",
+      "s"
+     ],
+     1
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "LCM"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "258fc7",
+   "formula": [
+    "Equal",
+    [
+     "GCD",
+     "a",
+     "b"
+    ],
+    [
+     "GCD",
+     "b",
+     "a"
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "Integers"
+    ],
+    [
+     "Element",
+     "b",
+     "Integers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "GCD"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "25986e",
+   "formula": [
+    "Equal",
+    [
+     "GCD",
+     [
+      "Product",
+      [
+       "Power",
+       [
+        "PrimeNumber",
+        "k"
+       ],
+       [
+        "e_",
+        "k"
+       ]
+      ],
+      [
+       "Limits",
+       "k",
+       1,
+       "m"
+      ]
+     ],
+     [
+      "Product",
+      [
+       "Power",
+       [
+        "PrimeNumber",
+        "k"
+       ],
+       [
+        "f_",
+        "k"
+       ]
+      ],
+      [
+       "Limits",
+       "k",
+       1,
+       "m"
+      ]
+     ]
+    ],
+    [
+     "Product",
+     [
+      "Power",
+      [
+       "PrimeNumber",
+       "k"
+      ],
+      [
+       "Min",
+       [
+        "e_",
+        "k"
+       ],
+       [
+        "f_",
+        "k"
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "k",
+      1,
+      "m"
+     ]
+    ]
+   ],
+   "variables": [
+    "e_var",
+    "f",
+    "m"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     [
+      "e_",
+      "k"
+     ],
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     [
+      "f_",
+      "k"
+     ],
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "m",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "product",
+   "heads": [
+    "GCD",
+    "Min",
+    "PrimeNumber",
+    "Product"
+   ],
+   "guardLevel": "undischargeable",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ],
+   "indexedFamilies": [
+    "e_",
+    "f_"
+   ]
+  },
+  {
+   "id": "272bc8",
+   "formula": [
+    "Divides",
+    [
+     "GCD",
+     "a",
+     "b"
+    ],
+    "b"
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "Integers"
+    ],
+    [
+     "Element",
+     "b",
+     "Integers"
+    ],
+    [
+     "Or",
+     [
+      "NotEqual",
+      "a",
+      0
+     ],
+     [
+      "NotEqual",
+      "b",
+      0
+     ]
+    ]
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "Divides",
+    "GCD"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "34378a",
+   "formula": [
+    "Equal",
+    [
+     "LCM",
+     1,
+     1
+    ],
+    1
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "LCM"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "3605cc",
+   "formula": [
+    "Implies",
+    [
+     "And",
+     [
+      "Divides",
+      "a",
+      "m"
+     ],
+     [
+      "Divides",
+      "b",
+      "m"
+     ]
+    ],
+    [
+     "Divides",
+     [
+      "LCM",
+      "a",
+      "b"
+     ],
+     "m"
+    ]
+   ],
+   "variables": [
+    "a",
+    "b",
+    "m"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "Integers"
+    ],
+    [
+     "Element",
+     "b",
+     "Integers"
+    ],
+    [
+     "Element",
+     "m",
+     "Integers"
+    ]
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "Divides",
+    "LCM"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "4099d2",
+   "formula": [
+    "Equal",
+    [
+     "Limit",
+     [
+      "Function",
+      [
+       "Multiply",
+       [
+        "Divide",
+        1,
+        [
+         "Power",
+         "N_var",
+         "n"
+        ]
+       ],
+       [
+        "Count",
+        [
+         "Set",
+         "T",
+         [
+          "Element",
+          "T",
+          [
+           "Power",
+           [
+            "Range",
+            1,
+            "N_var"
+           ],
+           "n"
+          ],
+          [
+           "Equal",
+           [
+            "GCD",
+            "T"
+           ],
+           1
+          ]
+         ]
+        ]
+       ]
+      ],
+      "N_var"
+     ],
+     "PositiveInfinity"
+    ],
+    [
+     "Divide",
+     1,
+     [
+      "Zeta",
+      "n"
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    [
+     "Range",
+     2,
+     "PositiveInfinity"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "limit",
+   "heads": [
+    "GCD",
+    "Limit",
+    "Zeta"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": "sequence",
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "4366b2",
+   "formula": [
+    "Equal",
+    [
+     "GCD",
+     "a",
+     [
+      "GCD",
+      "b",
+      "c"
+     ]
+    ],
+    [
+     "GCD",
+     [
+      "GCD",
+      "a",
+      "b"
+     ],
+     "c"
+    ]
+   ],
+   "variables": [
+    "a",
+    "b",
+    "c"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "Integers"
+    ],
+    [
+     "Element",
+     "b",
+     "Integers"
+    ],
+    [
+     "Element",
+     "c",
+     "Integers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "GCD"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "499cfc",
+   "formula": [
+    "Equal",
+    [
+     "GCD",
+     [
+      "Power",
+      "p",
+      "m"
+     ],
+     [
+      "Power",
+      "q",
+      "n"
+     ]
+    ],
+    1
+   ],
+   "variables": [
+    "m",
+    "n",
+    "p",
+    "q"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "p",
+     "Primes"
+    ],
+    [
+     "Element",
+     "q",
+     "Primes"
+    ],
+    [
+     "NotEqual",
+     "p",
+     "q"
+    ],
+    [
+     "Element",
+     "m",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "GCD"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "4d3127",
+   "formula": [
+    "Equal",
+    [
+     "Multiply",
+     [
+      "GCD",
+      "a",
+      "b"
+     ],
+     [
+      "LCM",
+      "a",
+      "b"
+     ]
+    ],
+    [
+     "Abs",
+     [
+      "Multiply",
+      "a",
+      "b"
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "Integers"
+    ],
+    [
+     "Element",
+     "b",
+     "Integers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "GCD",
+    "LCM"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "4f1441",
+   "formula": [
+    "Divides",
+    "b",
+    [
+     "LCM",
+     "a",
+     "b"
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "Integers"
+    ],
+    [
+     "Element",
+     "b",
+     [
+      "SetMinus",
+      "Integers",
+      [
+       "Set",
+       0
+      ]
+     ]
+    ]
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "Divides",
+    "LCM"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "554b2e",
+   "formula": [
+    "Equal",
+    [
+     "GCD",
+     1,
+     1
+    ],
+    1
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "GCD"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "56acd6",
+   "formula": [
+    "LessEqual",
+    [
+     "GCD",
+     "a",
+     "b"
+    ],
+    [
+     "Max",
+     [
+      "Abs",
+      "a"
+     ],
+     [
+      "Abs",
+      "b"
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "Integers"
+    ],
+    [
+     "Element",
+     "b",
+     "Integers"
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "GCD",
+    "Max"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "5781de",
+   "formula": [
+    "Equal",
+    [
+     "LCM",
+     [
+      "Add",
+      "a",
+      "b"
+     ],
+     "b"
+    ],
+    [
+     "Divide",
+     [
+      "Multiply",
+      [
+       "Abs",
+       [
+        "Add",
+        "a",
+        "b"
+       ]
+      ],
+      [
+       "LCM",
+       "a",
+       "b"
+      ]
+     ],
+     [
+      "Abs",
+      "a"
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     [
+      "SetMinus",
+      "Integers",
+      [
+       "Set",
+       0
+      ]
+     ]
+    ],
+    [
+     "Element",
+     "b",
+     "Integers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "LCM"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "5aad5c",
+   "formula": [
+    "Equal",
+    [
+     "GCD",
+     [
+      "Power",
+      "r",
+      "m"
+     ],
+     [
+      "Power",
+      "s",
+      "n"
+     ]
+    ],
+    1
+   ],
+   "variables": [
+    "m",
+    "n",
+    "r",
+    "s"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "r",
+     "Integers"
+    ],
+    [
+     "Element",
+     "s",
+     "Integers"
+    ],
+    [
+     "Equal",
+     [
+      "GCD",
+      "r",
+      "s"
+     ],
+     1
+    ],
+    [
+     "Element",
+     "m",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "GCD"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "5d03d2",
+   "formula": [
+    "Implies",
+    [
+     "Or",
+     [
+      "Divides",
+      "d",
+      "a"
+     ],
+     [
+      "Divides",
+      "d",
+      "b"
+     ]
+    ],
+    [
+     "Divides",
+     "d",
+     [
+      "LCM",
+      "a",
+      "b"
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b",
+    "d"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "Integers"
+    ],
+    [
+     "Element",
+     "b",
+     "Integers"
+    ],
+    [
+     "Element",
+     "d",
+     "Integers"
+    ]
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "Divides",
+    "LCM"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "5fb5e2",
+   "formula": [
+    "Equal",
+    [
+     "GCD",
+     "a",
+     2
+    ],
+    [
+     "Add",
+     1,
+     [
+      "Divide",
+      [
+       "Add",
+       1,
+       [
+        "Power",
+        -1,
+        "a"
+       ]
+      ],
+      2
+     ]
+    ]
+   ],
+   "variables": [
+    "a"
+   ],
+   "assumptions": [
+    "Element",
+    "a",
+    "Integers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "GCD"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "646745",
+   "formula": [
+    "Equal",
+    [
+     "GCD",
+     [
+      "Divide",
+      "a",
+      "d"
+     ],
+     [
+      "Divide",
+      "b",
+      "d"
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "GCD",
+      "a",
+      "b"
+     ],
+     [
+      "Abs",
+      "d"
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b",
+    "d"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "Integers"
+    ],
+    [
+     "Element",
+     "b",
+     "Integers"
+    ],
+    [
+     "Element",
+     "d",
+     "Integers"
+    ],
+    [
+     "Divides",
+     "d",
+     "a"
+    ],
+    [
+     "Divides",
+     "d",
+     "b"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "GCD"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "6572c5",
+   "formula": [
+    "Equal",
+    [
+     "GCD",
+     "a",
+     "b"
+    ],
+    [
+     "Divide",
+     [
+      "Abs",
+      [
+       "Multiply",
+       "a",
+       "b"
+      ]
+     ],
+     [
+      "LCM",
+      "a",
+      "b"
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "Integers"
+    ],
+    [
+     "Element",
+     "b",
+     "Integers"
+    ],
+    [
+     "NotEqual",
+     "a",
+     0
+    ],
+    [
+     "NotEqual",
+     "b",
+     0
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "GCD",
+    "LCM"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "65cfe5",
+   "formula": [
+    "Divides",
+    [
+     "LCM",
+     "a",
+     "b"
+    ],
+    [
+     "Multiply",
+     "a",
+     "b"
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "Integers"
+    ],
+    [
+     "Element",
+     "b",
+     "Integers"
+    ],
+    [
+     "And",
+     [
+      "NotEqual",
+      "a",
+      0
+     ],
+     [
+      "NotEqual",
+      "b",
+      0
+     ]
+    ]
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "Divides",
+    "LCM"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "663d9c",
+   "formula": [
+    "Divides",
+    [
+     "GCD",
+     "a",
+     "b"
+    ],
+    [
+     "Add",
+     [
+      "Multiply",
+      "a",
+      "x"
+     ],
+     [
+      "Multiply",
+      "b",
+      "y"
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b",
+    "x",
+    "y"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "Integers"
+    ],
+    [
+     "Element",
+     "b",
+     "Integers"
+    ],
+    [
+     "Element",
+     "x",
+     "Integers"
+    ],
+    [
+     "Element",
+     "y",
+     "Integers"
+    ],
+    [
+     "Or",
+     [
+      "NotEqual",
+      "a",
+      0
+     ],
+     [
+      "NotEqual",
+      "b",
+      0
+     ]
+    ]
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "Divides",
+    "GCD"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "67978f",
+   "formula": [
+    "Divides",
+    "a",
+    [
+     "LCM",
+     "a",
+     "b"
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     [
+      "SetMinus",
+      "Integers",
+      [
+       "Set",
+       0
+      ]
+     ]
+    ],
+    [
+     "Element",
+     "b",
+     "Integers"
+    ]
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "Divides",
+    "LCM"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "6880d0",
+   "formula": [
+    "Equal",
+    [
+     "GCD",
+     "a",
+     "b"
+    ],
+    [
+     "Max",
+     [
+      "Set",
+      "d",
+      [
+       "Element",
+       "d",
+       "PositiveIntegers",
+       [
+        "And",
+        [
+         "Divides",
+         "d",
+         "a"
+        ],
+        [
+         "Divides",
+         "d",
+         "b"
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "Integers"
+    ],
+    [
+     "Element",
+     "b",
+     "Integers"
+    ],
+    [
+     "Or",
+     [
+      "NotEqual",
+      "a",
+      0
+     ],
+     [
+      "NotEqual",
+      "b",
+      0
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Divides",
+    "GCD",
+    "Max"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "6cefd7",
+   "formula": [
+    "Equal",
+    [
+     "LCM",
+     [
+      "Product",
+      [
+       "Power",
+       [
+        "PrimeNumber",
+        "k"
+       ],
+       [
+        "e_",
+        "k"
+       ]
+      ],
+      [
+       "Limits",
+       "k",
+       1,
+       "m"
+      ]
+     ],
+     [
+      "Product",
+      [
+       "Power",
+       [
+        "PrimeNumber",
+        "k"
+       ],
+       [
+        "f_",
+        "k"
+       ]
+      ],
+      [
+       "Limits",
+       "k",
+       1,
+       "m"
+      ]
+     ]
+    ],
+    [
+     "Product",
+     [
+      "Power",
+      [
+       "PrimeNumber",
+       "k"
+      ],
+      [
+       "Max",
+       [
+        "e_",
+        "k"
+       ],
+       [
+        "f_",
+        "k"
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "k",
+      1,
+      "m"
+     ]
+    ]
+   ],
+   "variables": [
+    "e_var",
+    "f",
+    "m"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     [
+      "e_",
+      "k"
+     ],
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     [
+      "f_",
+      "k"
+     ],
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "m",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "product",
+   "heads": [
+    "LCM",
+    "Max",
+    "PrimeNumber",
+    "Product"
+   ],
+   "guardLevel": "undischargeable",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ],
+   "indexedFamilies": [
+    "e_",
+    "f_"
+   ]
+  },
+  {
+   "id": "6fd925",
+   "formula": [
+    "Equal",
+    [
+     "XGCD",
+     0,
+     "b"
+    ],
+    [
+     "Tuple",
+     [
+      "Abs",
+      "b"
+     ],
+     0,
+     [
+      "Sign",
+      "b"
+     ]
+    ]
+   ],
+   "variables": [
+    "b"
+   ],
+   "assumptions": [
+    "Element",
+    "b",
+    "Integers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Sign",
+    "XGCD"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "7009cc",
+   "formula": [
+    "Equal",
+    [
+     "LCM",
+     "a",
+     [
+      "GCD",
+      "a",
+      "b"
+     ]
+    ],
+    [
+     "Abs",
+     "a"
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "Integers"
+    ],
+    [
+     "Element",
+     "b",
+     "Integers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "GCD",
+    "LCM"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "720766",
+   "formula": [
+    "Equal",
+    [
+     "GCD",
+     "a",
+     1
+    ],
+    1
+   ],
+   "variables": [
+    "a"
+   ],
+   "assumptions": [
+    "Element",
+    "a",
+    "Integers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "GCD"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "7638c5",
+   "formula": [
+    "Implies",
+    [
+     "And",
+     [
+      "Divides",
+      "d",
+      "a"
+     ],
+     [
+      "Divides",
+      "d",
+      "b"
+     ]
+    ],
+    [
+     "Divides",
+     "d",
+     [
+      "GCD",
+      "a",
+      "b"
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b",
+    "d"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "Integers"
+    ],
+    [
+     "Element",
+     "b",
+     "Integers"
+    ],
+    [
+     "Element",
+     "d",
+     "Integers"
+    ]
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "Divides",
+    "GCD"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "7a1799",
+   "formula": [
+    "Equal",
+    [
+     "LCM",
+     "a",
+     [
+      "Subtract",
+      "a",
+      2
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      [
+       "Abs",
+       [
+        "Multiply",
+        "a",
+        [
+         "Subtract",
+         "a",
+         2
+        ]
+       ]
+      ],
+      2
+     ],
+     [
+      "Add",
+      1,
+      [
+       "Divide",
+       [
+        "Subtract",
+        1,
+        [
+         "Power",
+         -1,
+         "a"
+        ]
+       ],
+       2
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "a"
+   ],
+   "assumptions": [
+    "Element",
+    "a",
+    "Integers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "LCM"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "7b27cd",
+   "formula": [
+    "Equal",
+    [
+     "Count",
+     [
+      "Set",
+      "k",
+      [
+       "Element",
+       "k",
+       [
+        "Range",
+        1,
+        "n"
+       ],
+       [
+        "Equal",
+        [
+         "GCD",
+         "n",
+         "k"
+        ],
+        1
+       ]
+      ]
+     ]
+    ],
+    [
+     "Totient",
+     "n"
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "PositiveIntegers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "GCD",
+    "Totient"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "805c7a",
+   "formula": [
+    "Equal",
+    [
+     "LCM",
+     "a",
+     "b"
+    ],
+    [
+     "Min",
+     [
+      "Set",
+      "m",
+      [
+       "Element",
+       "m",
+       "PositiveIntegers",
+       [
+        "And",
+        [
+         "Divides",
+         "a",
+         "m"
+        ],
+        [
+         "Divides",
+         "b",
+         "m"
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     [
+      "SetMinus",
+      "Integers",
+      [
+       "Set",
+       0
+      ]
+     ]
+    ],
+    [
+     "Element",
+     "b",
+     [
+      "SetMinus",
+      "Integers",
+      [
+       "Set",
+       0
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Divides",
+    "LCM",
+    "Min"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "80f20f",
+   "formula": [
+    "Equal",
+    [
+     "GCD",
+     "a",
+     [
+      "Subtract",
+      "a",
+      2
+     ]
+    ],
+    [
+     "Add",
+     1,
+     [
+      "Divide",
+      [
+       "Add",
+       1,
+       [
+        "Power",
+        -1,
+        "a"
+       ]
+      ],
+      2
+     ]
+    ]
+   ],
+   "variables": [
+    "a"
+   ],
+   "assumptions": [
+    "Element",
+    "a",
+    "Integers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "GCD"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "8621f6",
+   "formula": [
+    "Equal",
+    [
+     "GCD",
+     [
+      "Multiply",
+      "r",
+      "s"
+     ],
+     "c"
+    ],
+    [
+     "Multiply",
+     [
+      "GCD",
+      "r",
+      "c"
+     ],
+     [
+      "GCD",
+      "s",
+      "c"
+     ]
+    ]
+   ],
+   "variables": [
+    "c",
+    "r",
+    "s"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "r",
+     "Integers"
+    ],
+    [
+     "Element",
+     "s",
+     "Integers"
+    ],
+    [
+     "Element",
+     "c",
+     "Integers"
+    ],
+    [
+     "Equal",
+     [
+      "GCD",
+      "r",
+      "s"
+     ],
+     1
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "GCD"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "8d90e9",
+   "formula": [
+    "Equal",
+    [
+     "LCM",
+     "a",
+     1
+    ],
+    [
+     "Abs",
+     "a"
+    ]
+   ],
+   "variables": [
+    "a"
+   ],
+   "assumptions": [
+    "Element",
+    "a",
+    "Integers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "LCM"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "8dc1c9",
+   "formula": [
+    "Equal",
+    [
+     "GCD",
+     "a",
+     [
+      "LCM",
+      "b",
+      "c"
+     ]
+    ],
+    [
+     "LCM",
+     [
+      "GCD",
+      "a",
+      "b"
+     ],
+     [
+      "GCD",
+      "a",
+      "c"
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b",
+    "c"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "Integers"
+    ],
+    [
+     "Element",
+     "b",
+     "Integers"
+    ],
+    [
+     "Element",
+     "c",
+     "Integers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "GCD",
+    "LCM"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "927e6e",
+   "formula": [
+    "Equal",
+    [
+     "LCM",
+     "a",
+     "b"
+    ],
+    [
+     "Divide",
+     [
+      "Abs",
+      [
+       "Multiply",
+       "a",
+       "b"
+      ]
+     ],
+     [
+      "GCD",
+      "a",
+      "b"
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "Integers"
+    ],
+    [
+     "Element",
+     "b",
+     "Integers"
+    ],
+    [
+     "Or",
+     [
+      "NotEqual",
+      "a",
+      0
+     ],
+     [
+      "NotEqual",
+      "b",
+      0
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "GCD",
+    "LCM"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "945be9",
+   "formula": [
+    "Equal",
+    [
+     "XGCD",
+     "a",
+     "a"
+    ],
+    [
+     "Tuple",
+     [
+      "Abs",
+      "a"
+     ],
+     0,
+     [
+      "Sign",
+      "a"
+     ]
+    ]
+   ],
+   "variables": [
+    "a"
+   ],
+   "assumptions": [
+    "Element",
+    "a",
+    "Integers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Sign",
+    "XGCD"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "9500d3",
+   "formula": [
+    "Equal",
+    [
+     "LCM",
+     [
+      "Multiply",
+      "n",
+      "a"
+     ],
+     [
+      "Multiply",
+      "n",
+      "b"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Abs",
+      "n"
+     ],
+     [
+      "LCM",
+      "a",
+      "b"
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "Integers"
+    ],
+    [
+     "Element",
+     "b",
+     "Integers"
+    ],
+    [
+     "Element",
+     "n",
+     "Integers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "LCM"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "959a25",
+   "formula": [
+    "Equal",
+    [
+     "GCD",
+     [
+      "Mod",
+      "a",
+      "b"
+     ],
+     "b"
+    ],
+    [
+     "GCD",
+     "a",
+     "b"
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "Integers"
+    ],
+    [
+     "Element",
+     "b",
+     "Integers"
+    ],
+    [
+     "NotEqual",
+     "b",
+     0
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "GCD",
+    "Mod"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "a9c81e",
+   "formula": [
+    "Divides",
+    [
+     "GCD",
+     "a",
+     "b"
+    ],
+    "a"
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "Integers"
+    ],
+    [
+     "Element",
+     "b",
+     "Integers"
+    ],
+    [
+     "Or",
+     [
+      "NotEqual",
+      "a",
+      0
+     ],
+     [
+      "NotEqual",
+      "b",
+      0
+     ]
+    ]
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "Divides",
+    "GCD"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "aaef97",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "GCD",
+      "n",
+      "k"
+     ],
+     [
+      "Limits",
+      "k",
+      1,
+      "n"
+     ]
+    ],
+    [
+     "Sum",
+     [
+      "Multiply",
+      "d",
+      [
+       "Totient",
+       [
+        "Divide",
+        "n",
+        "d"
+       ]
+      ]
+     ],
+     [
+      "Element",
+      "d",
+      [
+       "Divisors",
+       "n"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Divisors",
+    "GCD",
+    "Sum",
+    "Totient"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "af512f",
+   "formula": [
+    "Equal",
+    [
+     "LCM",
+     0,
+     0
+    ],
+    0
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "LCM"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "b36dba",
+   "formula": [
+    "Equal",
+    [
+     "GCD",
+     [
+      "Subtract",
+      "a",
+      "b"
+     ],
+     "b"
+    ],
+    [
+     "GCD",
+     "a",
+     "b"
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "Integers"
+    ],
+    [
+     "Element",
+     "b",
+     "Integers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "GCD"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "b60924",
+   "formula": [
+    "Divides",
+    [
+     "GCD",
+     "a",
+     "b"
+    ],
+    [
+     "Multiply",
+     "a",
+     "b"
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "Integers"
+    ],
+    [
+     "Element",
+     "b",
+     "Integers"
+    ],
+    [
+     "Or",
+     [
+      "NotEqual",
+      "a",
+      0
+     ],
+     [
+      "NotEqual",
+      "b",
+      0
+     ]
+    ]
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "Divides",
+    "GCD"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "b66d1e",
+   "formula": [
+    "Equal",
+    [
+     "XGCD",
+     "a",
+     -1
+    ],
+    [
+     "Tuple",
+     1,
+     0,
+     -1
+    ]
+   ],
+   "variables": [
+    "a"
+   ],
+   "assumptions": [
+    "Element",
+    "a",
+    "Integers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "XGCD"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "bf877e",
+   "formula": [
+    "Equal",
+    [
+     "XGCD",
+     1,
+     "b"
+    ],
+    [
+     "Tuple",
+     1,
+     [
+      "Abs",
+      [
+       "Sign",
+       [
+        "Multiply",
+        [
+         "Subtract",
+         "b",
+         1
+        ],
+        [
+         "Add",
+         "b",
+         1
+        ]
+       ]
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Sign",
+       "b"
+      ],
+      [
+       "Subtract",
+       [
+        "Sign",
+        [
+         "Add",
+         "b",
+         1
+        ]
+       ],
+       [
+        "Sign",
+        [
+         "Subtract",
+         "b",
+         1
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "b"
+   ],
+   "assumptions": [
+    "Element",
+    "b",
+    "Integers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Sign",
+    "XGCD"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "c24323",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "LCM",
+      "n",
+      "k"
+     ],
+     [
+      "Limits",
+      "k",
+      1,
+      "n"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      "n",
+      2
+     ],
+     [
+      "Add",
+      1,
+      [
+       "Sum",
+       [
+        "Multiply",
+        "d",
+        [
+         "Totient",
+         "d"
+        ]
+       ],
+       [
+        "Element",
+        "d",
+        [
+         "Divisors",
+         "n"
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Divisors",
+    "LCM",
+    "Sum",
+    "Totient"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "c40be0",
+   "formula": [
+    "Equal",
+    [
+     "GCD",
+     "a",
+     0
+    ],
+    [
+     "Abs",
+     "a"
+    ]
+   ],
+   "variables": [
+    "a"
+   ],
+   "assumptions": [
+    "Element",
+    "a",
+    "Integers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "GCD"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "c4a892",
+   "formula": [
+    "Equal",
+    [
+     "LCM",
+     "a",
+     [
+      "GCD",
+      "b",
+      "c"
+     ]
+    ],
+    [
+     "GCD",
+     [
+      "LCM",
+      "a",
+      "b"
+     ],
+     [
+      "LCM",
+      "a",
+      "c"
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b",
+    "c"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "Integers"
+    ],
+    [
+     "Element",
+     "b",
+     "Integers"
+    ],
+    [
+     "Element",
+     "c",
+     "Integers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "GCD",
+    "LCM"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "c6631e",
+   "formula": [
+    "Equal",
+    [
+     "LCM",
+     "a",
+     "a"
+    ],
+    [
+     "Abs",
+     "a"
+    ]
+   ],
+   "variables": [
+    "a"
+   ],
+   "assumptions": [
+    "Element",
+    "a",
+    "Integers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "LCM"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "c70178",
+   "formula": [
+    "Equal",
+    [
+     "GCD",
+     "a",
+     [
+      "Subtract",
+      "a",
+      1
+     ]
+    ],
+    1
+   ],
+   "variables": [
+    "a"
+   ],
+   "assumptions": [
+    "Element",
+    "a",
+    "Integers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "GCD"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "cb9f61",
+   "formula": [
+    "Equal",
+    [
+     "LCM",
+     [
+      "Divide",
+      "a",
+      "d"
+     ],
+     [
+      "Divide",
+      "b",
+      "d"
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "LCM",
+      "a",
+      "b"
+     ],
+     [
+      "Abs",
+      "d"
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b",
+    "d"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "Integers"
+    ],
+    [
+     "Element",
+     "b",
+     "Integers"
+    ],
+    [
+     "Element",
+     "d",
+     "Integers"
+    ],
+    [
+     "Divides",
+     "d",
+     "a"
+    ],
+    [
+     "Divides",
+     "d",
+     "b"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "LCM"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "d4852c",
+   "formula": [
+    "Equal",
+    [
+     "GCD",
+     [
+      "Multiply",
+      "n",
+      "a"
+     ],
+     [
+      "Multiply",
+      "n",
+      "b"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Abs",
+      "n"
+     ],
+     [
+      "GCD",
+      "a",
+      "b"
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "Integers"
+    ],
+    [
+     "Element",
+     "b",
+     "Integers"
+    ],
+    [
+     "Element",
+     "n",
+     "Integers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "GCD"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "da45c0",
+   "formula": [
+    "Equal",
+    [
+     "GCD",
+     [
+      "Fibonacci",
+      "m"
+     ],
+     [
+      "Fibonacci",
+      "n"
+     ]
+    ],
+    [
+     "Fibonacci",
+     [
+      "GCD",
+      "m",
+      "n"
+     ]
+    ]
+   ],
+   "variables": [
+    "m",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "m",
+     "Integers"
+    ],
+    [
+     "Element",
+     "n",
+     "Integers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Fibonacci",
+    "GCD"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "fibonacci",
+    "gcd"
+   ]
+  },
+  {
+   "id": "dc0823",
+   "formula": [
+    "Equal",
+    [
+     "LCM",
+     "a",
+     "b"
+    ],
+    [
+     "LCM",
+     [
+      "Negate",
+      "a"
+     ],
+     "b"
+    ],
+    [
+     "LCM",
+     "a",
+     [
+      "Negate",
+      "b"
+     ]
+    ],
+    [
+     "LCM",
+     [
+      "Negate",
+      "a"
+     ],
+     [
+      "Negate",
+      "b"
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "Integers"
+    ],
+    [
+     "Element",
+     "b",
+     "Integers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "LCM"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "e19e40",
+   "formula": [
+    "Equal",
+    [
+     "LCM",
+     "a",
+     [
+      "Subtract",
+      "a",
+      1
+     ]
+    ],
+    [
+     "Multiply",
+     "a",
+     [
+      "Subtract",
+      "a",
+      1
+     ]
+    ]
+   ],
+   "variables": [
+    "a"
+   ],
+   "assumptions": [
+    "Element",
+    "a",
+    "Integers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "LCM"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "e3392b",
+   "formula": [
+    "Divides",
+    [
+     "GCD",
+     "a",
+     "b"
+    ],
+    [
+     "Add",
+     "a",
+     "b"
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "Integers"
+    ],
+    [
+     "Element",
+     "b",
+     "Integers"
+    ],
+    [
+     "Or",
+     [
+      "NotEqual",
+      "a",
+      0
+     ],
+     [
+      "NotEqual",
+      "b",
+      0
+     ]
+    ]
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "Divides",
+    "GCD"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "e352ca",
+   "formula": [
+    "Equal",
+    [
+     "XGCD",
+     "a",
+     0
+    ],
+    [
+     "Tuple",
+     [
+      "Abs",
+      "a"
+     ],
+     [
+      "Sign",
+      "a"
+     ],
+     0
+    ]
+   ],
+   "variables": [
+    "a"
+   ],
+   "assumptions": [
+    "Element",
+    "a",
+    "Integers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Sign",
+    "XGCD"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "e65763",
+   "formula": [
+    "Equal",
+    [
+     "GCD",
+     [
+      "Add",
+      "a",
+      "b"
+     ],
+     "b"
+    ],
+    [
+     "GCD",
+     "a",
+     "b"
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "Integers"
+    ],
+    [
+     "Element",
+     "b",
+     "Integers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "GCD"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "e74d86",
+   "formula": [
+    "Equal",
+    [
+     "LCM",
+     [
+      "Subtract",
+      "a",
+      "b"
+     ],
+     "b"
+    ],
+    [
+     "Divide",
+     [
+      "Multiply",
+      [
+       "Abs",
+       [
+        "Subtract",
+        "a",
+        "b"
+       ]
+      ],
+      [
+       "LCM",
+       "a",
+       "b"
+      ]
+     ],
+     [
+      "Abs",
+      "a"
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     [
+      "SetMinus",
+      "Integers",
+      [
+       "Set",
+       0
+      ]
+     ]
+    ],
+    [
+     "Element",
+     "b",
+     "Integers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "LCM"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "f1817f",
+   "formula": [
+    "Equal",
+    [
+     "GCD",
+     "a",
+     "b"
+    ],
+    [
+     "GCD",
+     [
+      "Negate",
+      "a"
+     ],
+     "b"
+    ],
+    [
+     "GCD",
+     "a",
+     [
+      "Negate",
+      "b"
+     ]
+    ],
+    [
+     "GCD",
+     [
+      "Negate",
+      "a"
+     ],
+     [
+      "Negate",
+      "b"
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "Integers"
+    ],
+    [
+     "Element",
+     "b",
+     "Integers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "GCD"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "f91d1c",
+   "formula": [
+    "LessEqual",
+    [
+     "GCD",
+     "a",
+     "b"
+    ],
+    [
+     "Min",
+     [
+      "Abs",
+      "a"
+     ],
+     [
+      "Abs",
+      "b"
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     [
+      "SetMinus",
+      "Integers",
+      [
+       "Set",
+       0
+      ]
+     ]
+    ],
+    [
+     "Element",
+     "b",
+     [
+      "SetMinus",
+      "Integers",
+      [
+       "Set",
+       0
+      ]
+     ]
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "GCD",
+    "Min"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "fbe121",
+   "formula": [
+    "Equal",
+    [
+     "LCM",
+     [
+      "Multiply",
+      "r",
+      "s"
+     ],
+     "c"
+    ],
+    [
+     "Divide",
+     [
+      "Multiply",
+      [
+       "LCM",
+       "r",
+       "c"
+      ],
+      [
+       "LCM",
+       "s",
+       "c"
+      ]
+     ],
+     [
+      "Abs",
+      "c"
+     ]
+    ]
+   ],
+   "variables": [
+    "c",
+    "r",
+    "s"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "r",
+     "Integers"
+    ],
+    [
+     "Element",
+     "s",
+     "Integers"
+    ],
+    [
+     "Element",
+     "c",
+     "Integers"
+    ],
+    [
+     "Equal",
+     [
+      "GCD",
+      "r",
+      "s"
+     ],
+     1
+    ],
+    [
+     "NotEqual",
+     "c",
+     0
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "LCM"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  },
+  {
+   "id": "fdae67",
+   "formula": [
+    "Equal",
+    [
+     "GCD",
+     [
+      "Subtract",
+      [
+       "Power",
+       "n",
+       "a"
+      ],
+      1
+     ],
+     [
+      "Subtract",
+      [
+       "Power",
+       "n",
+       "b"
+      ],
+      1
+     ]
+    ],
+    [
+     "Subtract",
+     [
+      "Power",
+      "n",
+      [
+       "GCD",
+       "a",
+       "b"
+      ]
+     ],
+     1
+    ]
+   ],
+   "variables": [
+    "a",
+    "b",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "b",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "n",
+     "PositiveIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "GCD"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gcd"
+   ]
+  }
+ ]
+}

@@ -1,0 +1,2847 @@
+{
+ "topic": "dedekind_eta",
+ "title": "Dedekind eta function",
+ "source": "pygrim/formulas/dedekind_eta.py",
+ "generator": "grim2mathjson 0.1.0",
+ "entries": [
+  {
+   "id": "02d14f",
+   "formula": [
+    "Equal",
+    [
+     "Add",
+     [
+      "Subtract",
+      [
+       "Multiply",
+       36,
+       [
+        "Power",
+        [
+         "Apply",
+         [
+          "Derivative",
+          [
+           "Function",
+           [
+            "Divide",
+            [
+             "Apply",
+             [
+              "Derivative",
+              [
+               "Function",
+               [
+                "DedekindEta",
+                "tau"
+               ],
+               "tau"
+              ],
+              1
+             ],
+             "tau"
+            ],
+            [
+             "DedekindEta",
+             "tau"
+            ]
+           ],
+           "tau"
+          ],
+          1
+         ],
+         "tau"
+        ],
+        2
+       ]
+      ],
+      [
+       "Multiply",
+       [
+        "Multiply",
+        24,
+        [
+         "Apply",
+         [
+          "Derivative",
+          [
+           "Function",
+           [
+            "Divide",
+            [
+             "Apply",
+             [
+              "Derivative",
+              [
+               "Function",
+               [
+                "DedekindEta",
+                "tau"
+               ],
+               "tau"
+              ],
+              1
+             ],
+             "tau"
+            ],
+            [
+             "DedekindEta",
+             "tau"
+            ]
+           ],
+           "tau"
+          ],
+          2
+         ],
+         "tau"
+        ]
+       ],
+       [
+        "Divide",
+        [
+         "Apply",
+         [
+          "Derivative",
+          [
+           "Function",
+           [
+            "DedekindEta",
+            "tau"
+           ],
+           "tau"
+          ],
+          1
+         ],
+         "tau"
+        ],
+        [
+         "DedekindEta",
+         "tau"
+        ]
+       ]
+      ]
+     ],
+     [
+      "Apply",
+      [
+       "Derivative",
+       [
+        "Function",
+        [
+         "Divide",
+         [
+          "Apply",
+          [
+           "Derivative",
+           [
+            "Function",
+            [
+             "DedekindEta",
+             "tau"
+            ],
+            "tau"
+           ],
+           1
+          ],
+          "tau"
+         ],
+         [
+          "DedekindEta",
+          "tau"
+         ]
+        ],
+        "tau"
+       ],
+       3
+      ],
+      "tau"
+     ]
+    ],
+    0
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": [
+    "Element",
+    "tau",
+    "HH"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "DedekindEta",
+    "Derivative"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": [
+    "http://functions.wolfram.com/EllipticFunctions/DedekindEta/13/01/0002/"
+   ],
+   "topics": [
+    "dedekind_eta"
+   ]
+  },
+  {
+   "id": "0701dc",
+   "formula": [
+    "Equal",
+    [
+     "DedekindEta",
+     [
+      "Multiply",
+      16,
+      "ImaginaryUnit"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      [
+       "Multiply",
+       [
+        "Divide",
+        1,
+        [
+         "Power",
+         2,
+         [
+          "Divide",
+          113,
+          64
+         ]
+        ]
+       ],
+       [
+        "Divide",
+        [
+         "Power",
+         [
+          "Subtract",
+          [
+           "Power",
+           2,
+           [
+            "Divide",
+            1,
+            4
+           ]
+          ],
+          1
+         ],
+         [
+          "Divide",
+          1,
+          4
+         ]
+        ],
+        [
+         "Power",
+         [
+          "Add",
+          1,
+          [
+           "Sqrt",
+           2
+          ]
+         ],
+         [
+          "Divide",
+          1,
+          16
+         ]
+        ]
+       ]
+      ],
+      [
+       "Power",
+       [
+        "Add",
+        [
+         "Negate",
+         [
+          "Power",
+          2,
+          [
+           "Divide",
+           5,
+           8
+          ]
+         ]
+        ],
+        [
+         "Sqrt",
+         [
+          "Add",
+          1,
+          [
+           "Sqrt",
+           2
+          ]
+         ]
+        ]
+       ],
+       [
+        "Divide",
+        1,
+        2
+       ]
+      ]
+     ],
+     [
+      "DedekindEta",
+      "ImaginaryUnit"
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "DedekindEta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": [
+    "https://math.stackexchange.com/questions/1334684/what-is-the-exact-value-of-eta6i/1334940"
+   ],
+   "topics": [
+    "dedekind_eta"
+   ]
+  },
+  {
+   "id": "1bae52",
+   "formula": [
+    "Equal",
+    [
+     "DedekindEta",
+     [
+      "Add",
+      "tau",
+      1
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Exp",
+      [
+       "Divide",
+       [
+        "Multiply",
+        "Pi",
+        "ImaginaryUnit"
+       ],
+       12
+      ]
+     ],
+     [
+      "DedekindEta",
+      "tau"
+     ]
+    ]
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": [
+    "Element",
+    "tau",
+    "HH"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "DedekindEta",
+    "Exp"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dedekind_eta"
+   ]
+  },
+  {
+   "id": "1c25d3",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "DedekindEta",
+        "tau"
+       ],
+       "tau"
+      ],
+      1
+     ],
+     "tau"
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      [
+       "Divide",
+       "ImaginaryUnit",
+       [
+        "Multiply",
+        2,
+        "Pi"
+       ]
+      ],
+      [
+       "DedekindEta",
+       "tau"
+      ]
+     ],
+     [
+      "WeierstrassZeta",
+      [
+       "Divide",
+       1,
+       2
+      ],
+      "tau"
+     ]
+    ]
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": [
+    "Element",
+    "tau",
+    "HH"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "DedekindEta",
+    "Derivative",
+    "WeierstrassZeta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dedekind_eta"
+   ]
+  },
+  {
+   "id": "1dc520",
+   "formula": [
+    "Equal",
+    [
+     "DedekindEta",
+     "tau"
+    ],
+    [
+     "Multiply",
+     [
+      "Exp",
+      [
+       "Divide",
+       [
+        "Multiply",
+        [
+         "Multiply",
+         "Pi",
+         "ImaginaryUnit"
+        ],
+        "tau"
+       ],
+       12
+      ]
+     ],
+     [
+      "Product",
+      [
+       "Subtract",
+       1,
+       [
+        "Exp",
+        [
+         "Multiply",
+         [
+          "Multiply",
+          [
+           "Multiply",
+           [
+            "Multiply",
+            2,
+            "Pi"
+           ],
+           "ImaginaryUnit"
+          ],
+          "k"
+         ],
+         "tau"
+        ]
+       ]
+      ],
+      [
+       "Limits",
+       "k",
+       1,
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": [
+    "Element",
+    "tau",
+    "HH"
+   ],
+   "class": "representation",
+   "subclass": "product",
+   "heads": [
+    "DedekindEta",
+    "Exp",
+    "Product"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dedekind_eta"
+   ]
+  },
+  {
+   "id": "204acd",
+   "formula": [
+    "Equal",
+    [
+     "DedekindEta",
+     [
+      "Exp",
+      [
+       "Divide",
+       [
+        "Multiply",
+        [
+         "Multiply",
+         2,
+         "Pi"
+        ],
+        "ImaginaryUnit"
+       ],
+       3
+      ]
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Exp",
+      [
+       "Negate",
+       [
+        "Divide",
+        [
+         "Multiply",
+         "Pi",
+         "ImaginaryUnit"
+        ],
+        24
+       ]
+      ]
+     ],
+     [
+      "Divide",
+      [
+       "Multiply",
+       [
+        "Power",
+        3,
+        [
+         "Divide",
+         1,
+         8
+        ]
+       ],
+       [
+        "Power",
+        [
+         "Gamma",
+         [
+          "Divide",
+          1,
+          3
+         ]
+        ],
+        [
+         "Divide",
+         3,
+         2
+        ]
+       ]
+      ],
+      [
+       "Multiply",
+       2,
+       "Pi"
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "DedekindEta",
+    "Exp",
+    "Gamma"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dedekind_eta"
+   ]
+  },
+  {
+   "id": "23961e",
+   "formula": [
+    "Equal",
+    [
+     "DedekindSum",
+     "n",
+     "k"
+    ],
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "Divide",
+       "r",
+       "k"
+      ],
+      [
+       "Subtract",
+       [
+        "Subtract",
+        [
+         "Divide",
+         [
+          "Multiply",
+          "n",
+          "r"
+         ],
+         "k"
+        ],
+        [
+         "Floor",
+         [
+          "Divide",
+          [
+           "Multiply",
+           "n",
+           "r"
+          ],
+          "k"
+         ]
+        ]
+       ],
+       [
+        "Divide",
+        1,
+        2
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "r",
+      1,
+      [
+       "Subtract",
+       "k",
+       1
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "k",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "Element",
+     "k",
+     "Integers"
+    ],
+    [
+     "Greater",
+     "k",
+     0
+    ],
+    [
+     "Equal",
+     [
+      "GCD",
+      "n",
+      "k"
+     ],
+     1
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "DedekindSum",
+    "Floor",
+    "Sum"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dedekind_eta"
+   ]
+  },
+  {
+   "id": "29d9ab",
+   "formula": [
+    "Equal",
+    [
+     "Power",
+     [
+      "DedekindEta",
+      [
+       "Divide",
+       [
+        "Add",
+        [
+         "Multiply",
+         "a",
+         "tau"
+        ],
+        "b"
+       ],
+       [
+        "Add",
+        [
+         "Multiply",
+         "c",
+         "tau"
+        ],
+        "d"
+       ]
+      ]
+     ],
+     24
+    ],
+    [
+     "Multiply",
+     [
+      "Power",
+      [
+       "Add",
+       [
+        "Multiply",
+        "c",
+        "tau"
+       ],
+       "d"
+      ],
+      12
+     ],
+     [
+      "Power",
+      [
+       "DedekindEta",
+       "tau"
+      ],
+      24
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b",
+    "c",
+    "d",
+    "tau"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "tau",
+     "HH"
+    ],
+    [
+     "Element",
+     [
+      "Matrix",
+      [
+       "List",
+       [
+        "List",
+        "a",
+        "b"
+       ],
+       [
+        "List",
+        "c",
+        "d"
+       ]
+      ]
+     ],
+     "SL2Z"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "DedekindEta"
+   ],
+   "guardLevel": "undischargeable",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dedekind_eta"
+   ]
+  },
+  {
+   "id": "2e7fdb",
+   "formula": [
+    "Equal",
+    [
+     "EulerQSeries",
+     "q"
+    ],
+    [
+     "Product",
+     [
+      "Subtract",
+      1,
+      [
+       "Power",
+       "q",
+       "k"
+      ]
+     ],
+     [
+      "Limits",
+      "k",
+      1,
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "variables": [
+    "q"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "q",
+     "ComplexNumbers"
+    ],
+    [
+     "Less",
+     [
+      "Abs",
+      "q"
+     ],
+     1
+    ]
+   ],
+   "class": "representation",
+   "subclass": "product",
+   "heads": [
+    "EulerQSeries",
+    "Product"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dedekind_eta"
+   ]
+  },
+  {
+   "id": "3a56d8",
+   "formula": [
+    "Equal",
+    [
+     "DedekindEta",
+     [
+      "Multiply",
+      4,
+      "ImaginaryUnit"
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "DedekindEta",
+      "ImaginaryUnit"
+     ],
+     [
+      "Multiply",
+      [
+       "Power",
+       2,
+       [
+        "Divide",
+        13,
+        16
+       ]
+      ],
+      [
+       "Power",
+       [
+        "Add",
+        1,
+        [
+         "Sqrt",
+         2
+        ]
+       ],
+       [
+        "Divide",
+        1,
+        4
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "DedekindEta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dedekind_eta"
+   ]
+  },
+  {
+   "id": "3b806f",
+   "formula": [
+    "Equal",
+    [
+     "DedekindEta",
+     [
+      "Negate",
+      [
+       "Divide",
+       1,
+       "tau"
+      ]
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Power",
+      [
+       "Negate",
+       [
+        "Multiply",
+        "ImaginaryUnit",
+        "tau"
+       ]
+      ],
+      [
+       "Divide",
+       1,
+       2
+      ]
+     ],
+     [
+      "DedekindEta",
+      "tau"
+     ]
+    ]
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": [
+    "Element",
+    "tau",
+    "HH"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "DedekindEta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dedekind_eta"
+   ]
+  },
+  {
+   "id": "4af6db",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "DedekindEta",
+        "tau"
+       ],
+       "tau"
+      ],
+      1
+     ],
+     [
+      "Exp",
+      [
+       "Divide",
+       [
+        "Multiply",
+        [
+         "Multiply",
+         2,
+         "Pi"
+        ],
+        "ImaginaryUnit"
+       ],
+       3
+      ]
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      [
+       "Multiply",
+       "ImaginaryUnit",
+       [
+        "Sqrt",
+        3
+       ]
+      ],
+      6
+     ],
+     [
+      "DedekindEta",
+      [
+       "Exp",
+       [
+        "Divide",
+        [
+         "Multiply",
+         [
+          "Multiply",
+          2,
+          "Pi"
+         ],
+         "ImaginaryUnit"
+        ],
+        3
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "DedekindEta",
+    "Derivative",
+    "Exp"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dedekind_eta"
+   ]
+  },
+  {
+   "id": "5706ab",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "DedekindEta",
+        "tau"
+       ],
+       "tau"
+      ],
+      1
+     ],
+     "ImaginaryUnit"
+    ],
+    [
+     "Multiply",
+     [
+      "Negate",
+      [
+       "Divide",
+       "ImaginaryUnit",
+       4
+      ]
+     ],
+     [
+      "DedekindEta",
+      "ImaginaryUnit"
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "DedekindEta",
+    "Derivative"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dedekind_eta"
+   ]
+  },
+  {
+   "id": "62ffb3",
+   "formula": [
+    "Equal",
+    [
+     "DedekindEta",
+     [
+      "Multiply",
+      6,
+      "ImaginaryUnit"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      [
+       "Divide",
+       1,
+       [
+        "Power",
+        6,
+        [
+         "Divide",
+         3,
+         8
+        ]
+       ]
+      ],
+      [
+       "Power",
+       [
+        "Subtract",
+        [
+         "Divide",
+         [
+          "Subtract",
+          5,
+          [
+           "Sqrt",
+           3
+          ]
+         ],
+         2
+        ],
+        [
+         "Divide",
+         [
+          "Power",
+          3,
+          [
+           "Divide",
+           3,
+           4
+          ]
+         ],
+         [
+          "Sqrt",
+          2
+         ]
+        ]
+       ],
+       [
+        "Divide",
+        1,
+        6
+       ]
+      ]
+     ],
+     [
+      "DedekindEta",
+      "ImaginaryUnit"
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "DedekindEta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": [
+    "https://math.stackexchange.com/questions/1334684/what-is-the-exact-value-of-eta6i/1334940"
+   ],
+   "topics": [
+    "dedekind_eta"
+   ]
+  },
+  {
+   "id": "6b9935",
+   "formula": [
+    "Equal",
+    [
+     "DedekindEta",
+     [
+      "Multiply",
+      "ImaginaryUnit",
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Limit",
+     [
+      "Function",
+      [
+       "DedekindEta",
+       "tau"
+      ],
+      "tau"
+     ],
+     [
+      "Multiply",
+      "ImaginaryUnit",
+      "PositiveInfinity"
+     ]
+    ],
+    0
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "limit",
+   "heads": [
+    "DedekindEta",
+    "Limit"
+   ],
+   "guardLevel": "none",
+   "flavor": "complex",
+   "references": null,
+   "topics": [
+    "dedekind_eta"
+   ],
+   "directedInfinity": true
+  },
+  {
+   "id": "737805",
+   "formula": [
+    "Equal",
+    [
+     "DedekindEta",
+     "tau"
+    ],
+    [
+     "Multiply",
+     [
+      "Exp",
+      [
+       "Divide",
+       [
+        "Multiply",
+        [
+         "Multiply",
+         "Pi",
+         "ImaginaryUnit"
+        ],
+        "tau"
+       ],
+       12
+      ]
+     ],
+     [
+      "JacobiTheta",
+      3,
+      [
+       "Divide",
+       [
+        "Add",
+        "tau",
+        1
+       ],
+       2
+      ],
+      [
+       "Multiply",
+       3,
+       "tau"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": [
+    "Element",
+    "tau",
+    "HH"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "DedekindEta",
+    "Exp",
+    "JacobiTheta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dedekind_eta",
+    "jacobi_theta"
+   ]
+  },
+  {
+   "id": "7cc3d3",
+   "formula": [
+    "Equal",
+    [
+     "DedekindEta",
+     [
+      "Multiply",
+      7,
+      "ImaginaryUnit"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      [
+       "Divide",
+       1,
+       [
+        "Sqrt",
+        7
+       ]
+      ],
+      [
+       "Power",
+       [
+        "Add",
+        [
+         "Add",
+         [
+          "Negate",
+          [
+           "Divide",
+           7,
+           2
+          ]
+         ],
+         [
+          "Sqrt",
+          7
+         ]
+        ],
+        [
+         "Multiply",
+         [
+          "Divide",
+          1,
+          2
+         ],
+         [
+          "Sqrt",
+          [
+           "Add",
+           -7,
+           [
+            "Multiply",
+            4,
+            [
+             "Sqrt",
+             7
+            ]
+           ]
+          ]
+         ]
+        ]
+       ],
+       [
+        "Divide",
+        1,
+        4
+       ]
+      ]
+     ],
+     [
+      "DedekindEta",
+      "ImaginaryUnit"
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "DedekindEta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": [
+    "https://math.stackexchange.com/questions/1334684/what-is-the-exact-value-of-eta6i/1334940"
+   ],
+   "topics": [
+    "dedekind_eta"
+   ]
+  },
+  {
+   "id": "871996",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "DedekindEta",
+        "tau"
+       ],
+       "tau"
+      ],
+      1
+     ],
+     "tau"
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      [
+       "Divide",
+       [
+        "Multiply",
+        "ImaginaryUnit",
+        "Pi"
+       ],
+       12
+      ],
+      [
+       "DedekindEta",
+       "tau"
+      ]
+     ],
+     [
+      "EisensteinE",
+      2,
+      "tau"
+     ]
+    ]
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": [
+    "Element",
+    "tau",
+    "HH"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "DedekindEta",
+    "Derivative",
+    "EisensteinE"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dedekind_eta"
+   ]
+  },
+  {
+   "id": "87e9ed",
+   "formula": [
+    "Equal",
+    [
+     "DedekindEta",
+     [
+      "Multiply",
+      2,
+      "ImaginaryUnit"
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "DedekindEta",
+      "ImaginaryUnit"
+     ],
+     [
+      "Power",
+      2,
+      [
+       "Divide",
+       3,
+       8
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "DedekindEta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dedekind_eta"
+   ]
+  },
+  {
+   "id": "8f10b0",
+   "formula": [
+    "Equal",
+    [
+     "EulerQSeries",
+     "q"
+    ],
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "Power",
+       -1,
+       "k"
+      ],
+      [
+       "Power",
+       "q",
+       [
+        "Divide",
+        [
+         "Multiply",
+         "k",
+         [
+          "Subtract",
+          [
+           "Multiply",
+           3,
+           "k"
+          ],
+          1
+         ]
+        ],
+        2
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "k",
+      "NegativeInfinity",
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "variables": [
+    "q"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "q",
+     "ComplexNumbers"
+    ],
+    [
+     "Less",
+     [
+      "Abs",
+      "q"
+     ],
+     1
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "EulerQSeries",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dedekind_eta"
+   ]
+  },
+  {
+   "id": "921ef0",
+   "formula": [
+    "Equal",
+    [
+     "DedekindEtaEpsilon",
+     "a",
+     "b",
+     "c",
+     "d"
+    ],
+    [
+     "Exp",
+     [
+      "Multiply",
+      [
+       "Multiply",
+       "Pi",
+       "ImaginaryUnit"
+      ],
+      [
+       "Subtract",
+       [
+        "Subtract",
+        [
+         "Divide",
+         [
+          "Add",
+          "a",
+          "d"
+         ],
+         [
+          "Multiply",
+          12,
+          "c"
+         ]
+        ],
+        [
+         "DedekindSum",
+         "d",
+         "c"
+        ]
+       ],
+       [
+        "Divide",
+        1,
+        4
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b",
+    "c",
+    "d"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "Integers"
+    ],
+    [
+     "Element",
+     "b",
+     "Integers"
+    ],
+    [
+     "Element",
+     "c",
+     "Integers"
+    ],
+    [
+     "Element",
+     "d",
+     "Integers"
+    ],
+    [
+     "Equal",
+     [
+      "Subtract",
+      [
+       "Multiply",
+       "a",
+       "d"
+      ],
+      [
+       "Multiply",
+       "b",
+       "c"
+      ]
+     ],
+     1
+    ],
+    [
+     "Greater",
+     "c",
+     0
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "DedekindEtaEpsilon",
+    "DedekindSum",
+    "Exp"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dedekind_eta"
+   ]
+  },
+  {
+   "id": "9b8c9f",
+   "formula": [
+    "Equal",
+    [
+     "DedekindEta",
+     "ImaginaryUnit"
+    ],
+    [
+     "Divide",
+     [
+      "Gamma",
+      [
+       "Divide",
+       1,
+       4
+      ]
+     ],
+     [
+      "Multiply",
+      2,
+      [
+       "Power",
+       "Pi",
+       [
+        "Divide",
+        3,
+        4
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "DedekindEta",
+    "Gamma"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dedekind_eta"
+   ]
+  },
+  {
+   "id": "9ce413",
+   "formula": [
+    "Equal",
+    [
+     "DedekindEta",
+     [
+      "Multiply",
+      3,
+      "ImaginaryUnit"
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "DedekindEta",
+      "ImaginaryUnit"
+     ],
+     [
+      "Multiply",
+      [
+       "Power",
+       3,
+       [
+        "Divide",
+        3,
+        8
+       ]
+      ],
+      [
+       "Power",
+       [
+        "Add",
+        2,
+        [
+         "Sqrt",
+         3
+        ]
+       ],
+       [
+        "Divide",
+        1,
+        12
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "DedekindEta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dedekind_eta"
+   ]
+  },
+  {
+   "id": "9f19c1",
+   "formula": [
+    "Equal",
+    [
+     "DedekindEta",
+     [
+      "Divide",
+      [
+       "Add",
+       [
+        "Multiply",
+        "a",
+        "tau"
+       ],
+       "b"
+      ],
+      [
+       "Add",
+       [
+        "Multiply",
+        "c",
+        "tau"
+       ],
+       "d"
+      ]
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      [
+       "DedekindEtaEpsilon",
+       "a",
+       "b",
+       "c",
+       "d"
+      ],
+      [
+       "Power",
+       [
+        "Add",
+        [
+         "Multiply",
+         "c",
+         "tau"
+        ],
+        "d"
+       ],
+       [
+        "Divide",
+        1,
+        2
+       ]
+      ]
+     ],
+     [
+      "DedekindEta",
+      "tau"
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b",
+    "c",
+    "d",
+    "tau"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "tau",
+     "HH"
+    ],
+    [
+     "Element",
+     [
+      "Matrix",
+      [
+       "List",
+       [
+        "List",
+        "a",
+        "b"
+       ],
+       [
+        "List",
+        "c",
+        "d"
+       ]
+      ]
+     ],
+     "PSL2Z"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "DedekindEta",
+    "DedekindEtaEpsilon"
+   ],
+   "guardLevel": "undischargeable",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dedekind_eta"
+   ]
+  },
+  {
+   "id": "a1a3d4",
+   "formula": [
+    "Equal",
+    [
+     "DedekindEta",
+     [
+      "Add",
+      "tau",
+      [
+       "Divide",
+       1,
+       2
+      ]
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Exp",
+      [
+       "Divide",
+       [
+        "Multiply",
+        "Pi",
+        "ImaginaryUnit"
+       ],
+       24
+      ]
+     ],
+     [
+      "Divide",
+      [
+       "Power",
+       [
+        "DedekindEta",
+        [
+         "Multiply",
+         2,
+         "tau"
+        ]
+       ],
+       3
+      ],
+      [
+       "Multiply",
+       [
+        "DedekindEta",
+        "tau"
+       ],
+       [
+        "DedekindEta",
+        [
+         "Multiply",
+         4,
+         "tau"
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": [
+    "Element",
+    "tau",
+    "HH"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "DedekindEta",
+    "Exp"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dedekind_eta"
+   ]
+  },
+  {
+   "id": "acee1a",
+   "formula": [
+    "Equal",
+    [
+     "DedekindEta",
+     [
+      "Add",
+      "tau",
+      24
+     ]
+    ],
+    [
+     "DedekindEta",
+     "tau"
+    ]
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": [
+    "Element",
+    "tau",
+    "HH"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "DedekindEta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dedekind_eta"
+   ]
+  },
+  {
+   "id": "be2f32",
+   "formula": [
+    "Equal",
+    [
+     "DedekindEta",
+     [
+      "Multiply",
+      8,
+      "ImaginaryUnit"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      [
+       "Divide",
+       1,
+       [
+        "Power",
+        2,
+        [
+         "Divide",
+         41,
+         32
+        ]
+       ]
+      ],
+      [
+       "Divide",
+       [
+        "Power",
+        [
+         "Subtract",
+         [
+          "Power",
+          2,
+          [
+           "Divide",
+           1,
+           4
+          ]
+         ],
+         1
+        ],
+        [
+         "Divide",
+         1,
+         2
+        ]
+       ],
+       [
+        "Power",
+        [
+         "Add",
+         1,
+         [
+          "Sqrt",
+          2
+         ]
+        ],
+        [
+         "Divide",
+         1,
+         8
+        ]
+       ]
+      ]
+     ],
+     [
+      "DedekindEta",
+      "ImaginaryUnit"
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "DedekindEta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": [
+    "https://math.stackexchange.com/questions/1334684/what-is-the-exact-value-of-eta6i/1334940"
+   ],
+   "topics": [
+    "dedekind_eta"
+   ]
+  },
+  {
+   "id": "c2e919",
+   "formula": [
+    "Equal",
+    [
+     "DedekindSum",
+     "n",
+     "k"
+    ],
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "Which",
+       [
+        "NotElement",
+        [
+         "Divide",
+         "r",
+         "k"
+        ],
+        "Integers"
+       ],
+       [
+        "Subtract",
+        [
+         "Subtract",
+         [
+          "Divide",
+          "r",
+          "k"
+         ],
+         [
+          "Floor",
+          [
+           "Divide",
+           "r",
+           "k"
+          ]
+         ]
+        ],
+        [
+         "Divide",
+         1,
+         2
+        ]
+       ],
+       [
+        "Element",
+        [
+         "Divide",
+         "r",
+         "k"
+        ],
+        "Integers"
+       ],
+       0
+      ],
+      [
+       "Which",
+       [
+        "NotElement",
+        [
+         "Divide",
+         [
+          "Multiply",
+          "n",
+          "r"
+         ],
+         "k"
+        ],
+        "Integers"
+       ],
+       [
+        "Subtract",
+        [
+         "Subtract",
+         [
+          "Divide",
+          [
+           "Multiply",
+           "n",
+           "r"
+          ],
+          "k"
+         ],
+         [
+          "Floor",
+          [
+           "Divide",
+           [
+            "Multiply",
+            "n",
+            "r"
+           ],
+           "k"
+          ]
+         ]
+        ],
+        [
+         "Divide",
+         1,
+         2
+        ]
+       ],
+       [
+        "Element",
+        [
+         "Divide",
+         [
+          "Multiply",
+          "n",
+          "r"
+         ],
+         "k"
+        ],
+        "Integers"
+       ],
+       0
+      ]
+     ],
+     [
+      "Limits",
+      "r",
+      1,
+      [
+       "Subtract",
+       "k",
+       1
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "k",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "Element",
+     "k",
+     "Integers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "DedekindSum",
+    "Floor",
+    "Sum"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dedekind_eta"
+   ]
+  },
+  {
+   "id": "d2900f",
+   "formula": [
+    "Equal",
+    [
+     "DedekindEta",
+     [
+      "Multiply",
+      5,
+      "ImaginaryUnit"
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "DedekindEta",
+      "ImaginaryUnit"
+     ],
+     [
+      "Sqrt",
+      [
+       "Multiply",
+       5,
+       "GoldenRatio"
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "DedekindEta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": [
+    "https://math.stackexchange.com/questions/1334684/what-is-the-exact-value-of-eta6i/1334940"
+   ],
+   "topics": [
+    "dedekind_eta"
+   ]
+  },
+  {
+   "id": "d8025b",
+   "formula": [
+    "Equal",
+    [
+     "Limit",
+     [
+      "Function",
+      [
+       "DedekindEta",
+       [
+        "Multiply",
+        "ImaginaryUnit",
+        "epsilon"
+       ]
+      ],
+      "epsilon"
+     ],
+     0,
+     1
+    ],
+    0
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "limit",
+   "heads": [
+    "DedekindEta",
+    "Limit"
+   ],
+   "guardLevel": "none",
+   "flavor": "right",
+   "references": null,
+   "topics": [
+    "dedekind_eta"
+   ]
+  },
+  {
+   "id": "df5f38",
+   "formula": [
+    "Equal",
+    [
+     "Subtract",
+     [
+      "Add",
+      [
+       "Subtract",
+       [
+        "Multiply",
+        [
+         "Power",
+         [
+          "DedekindEta",
+          "tau"
+         ],
+         2
+        ],
+        [
+         "Add",
+         [
+          "Multiply",
+          33,
+          [
+           "Power",
+           [
+            "Apply",
+            [
+             "Derivative",
+             [
+              "Function",
+              [
+               "DedekindEta",
+               "tau"
+              ],
+              "tau"
+             ],
+             2
+            ],
+            "tau"
+           ],
+           2
+          ]
+         ],
+         [
+          "Multiply",
+          [
+           "DedekindEta",
+           "tau"
+          ],
+          [
+           "Apply",
+           [
+            "Derivative",
+            [
+             "Function",
+             [
+              "DedekindEta",
+              "tau"
+             ],
+             "tau"
+            ],
+            4
+           ],
+           "tau"
+          ]
+         ]
+        ]
+       ],
+       [
+        "Multiply",
+        18,
+        [
+         "Power",
+         [
+          "Apply",
+          [
+           "Derivative",
+           [
+            "Function",
+            [
+             "DedekindEta",
+             "tau"
+            ],
+            "tau"
+           ],
+           1
+          ],
+          "tau"
+         ],
+         4
+        ]
+       ]
+      ],
+      [
+       "Multiply",
+       [
+        "Multiply",
+        [
+         "Multiply",
+         12,
+         [
+          "DedekindEta",
+          "tau"
+         ]
+        ],
+        [
+         "Apply",
+         [
+          "Derivative",
+          [
+           "Function",
+           [
+            "DedekindEta",
+            "tau"
+           ],
+           "tau"
+          ],
+          2
+         ],
+         "tau"
+        ]
+       ],
+       [
+        "Power",
+        [
+         "Apply",
+         [
+          "Derivative",
+          [
+           "Function",
+           [
+            "DedekindEta",
+            "tau"
+           ],
+           "tau"
+          ],
+          1
+         ],
+         "tau"
+        ],
+        2
+       ]
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Multiply",
+       [
+        "Multiply",
+        28,
+        [
+         "Power",
+         [
+          "DedekindEta",
+          "tau"
+         ],
+         2
+        ]
+       ],
+       [
+        "Apply",
+        [
+         "Derivative",
+         [
+          "Function",
+          [
+           "DedekindEta",
+           "tau"
+          ],
+          "tau"
+         ],
+         3
+        ],
+        "tau"
+       ]
+      ],
+      [
+       "Apply",
+       [
+        "Derivative",
+        [
+         "Function",
+         [
+          "DedekindEta",
+          "tau"
+         ],
+         "tau"
+        ],
+        1
+       ],
+       "tau"
+      ]
+     ]
+    ],
+    0
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": [
+    "Element",
+    "tau",
+    "HH"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "DedekindEta",
+    "Derivative"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": [
+    "http://functions.wolfram.com/EllipticFunctions/DedekindEta/13/01/0001/"
+   ],
+   "topics": [
+    "dedekind_eta"
+   ]
+  },
+  {
+   "id": "e3e4c5",
+   "formula": [
+    "Equal",
+    [
+     "DedekindEta",
+     [
+      "Multiply",
+      [
+       "Sqrt",
+       3
+      ],
+      "ImaginaryUnit"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      [
+       "Power",
+       3,
+       [
+        "Divide",
+        1,
+        8
+       ]
+      ],
+      [
+       "Power",
+       2,
+       [
+        "Divide",
+        4,
+        3
+       ]
+      ]
+     ],
+     [
+      "Divide",
+      [
+       "Power",
+       [
+        "Gamma",
+        [
+         "Divide",
+         1,
+         3
+        ]
+       ],
+       [
+        "Divide",
+        3,
+        2
+       ]
+      ],
+      "Pi"
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "DedekindEta",
+    "Gamma"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": [
+    "https://math.stackexchange.com/questions/1334684/what-is-the-exact-value-of-eta6i/1334940"
+   ],
+   "topics": [
+    "dedekind_eta"
+   ]
+  },
+  {
+   "id": "f04e01",
+   "formula": [
+    "Equal",
+    [
+     "DedekindEtaEpsilon",
+     1,
+     "b",
+     0,
+     1
+    ],
+    [
+     "Exp",
+     [
+      "Divide",
+      [
+       "Multiply",
+       [
+        "Multiply",
+        "Pi",
+        "ImaginaryUnit"
+       ],
+       "b"
+      ],
+      12
+     ]
+    ]
+   ],
+   "variables": [
+    "b"
+   ],
+   "assumptions": null,
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "DedekindEtaEpsilon",
+    "Exp"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dedekind_eta"
+   ]
+  },
+  {
+   "id": "ff587a",
+   "formula": [
+    "Equal",
+    [
+     "DedekindEta",
+     "tau"
+    ],
+    [
+     "Multiply",
+     [
+      "Exp",
+      [
+       "Divide",
+       [
+        "Multiply",
+        [
+         "Multiply",
+         "Pi",
+         "ImaginaryUnit"
+        ],
+        "tau"
+       ],
+       12
+      ]
+     ],
+     [
+      "EulerQSeries",
+      [
+       "Exp",
+       [
+        "Multiply",
+        [
+         "Multiply",
+         [
+          "Multiply",
+          2,
+          "Pi"
+         ],
+         "ImaginaryUnit"
+        ],
+        "tau"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": [
+    "Element",
+    "tau",
+    "HH"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "DedekindEta",
+    "EulerQSeries",
+    "Exp"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dedekind_eta"
+   ]
+  }
+ ]
+}

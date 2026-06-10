@@ -1,0 +1,624 @@
+{
+ "topic": "golden_ratio",
+ "title": "Golden ratio",
+ "source": "pygrim/formulas/golden_ratio.py",
+ "generator": "grim2mathjson 0.1.0",
+ "entries": [
+  {
+   "id": "08fcaf",
+   "formula": [
+    "Element",
+    "GoldenRatio",
+    [
+     "RealBall",
+     {
+      "num": "1.6180339887498948482045868343656381177203091798058"
+     },
+     {
+      "num": "3.72e-50"
+     }
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "RealBall"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "golden_ratio"
+   ]
+  },
+  {
+   "id": "0cd1a4",
+   "formula": [
+    "Equal",
+    [
+     "Power",
+     "GoldenRatio",
+     [
+      "Add",
+      "n",
+      1
+     ]
+    ],
+    [
+     "Add",
+     [
+      "Power",
+      "GoldenRatio",
+      "n"
+     ],
+     [
+      "Power",
+      "GoldenRatio",
+      [
+       "Subtract",
+       "n",
+       1
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "golden_ratio"
+   ]
+  },
+  {
+   "id": "2b6e60",
+   "formula": [
+    "Equal",
+    "GoldenRatio",
+    [
+     "Limit",
+     [
+      "Function",
+      [
+       "Divide",
+       [
+        "Fibonacci",
+        [
+         "Add",
+         "n",
+         1
+        ]
+       ],
+       [
+        "Fibonacci",
+        "n"
+       ]
+      ],
+      "n"
+     ],
+     "PositiveInfinity"
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "limit",
+   "heads": [
+    "Fibonacci",
+    "Limit"
+   ],
+   "guardLevel": "none",
+   "flavor": "sequence",
+   "references": null,
+   "topics": [
+    "golden_ratio"
+   ]
+  },
+  {
+   "id": "2e0596",
+   "formula": [
+    "Equal",
+    "GoldenRatio",
+    [
+     "Add",
+     1,
+     [
+      "Divide",
+      1,
+      [
+       "Add",
+       1,
+       [
+        "Divide",
+        1,
+        "GoldenRatio"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "golden_ratio"
+   ]
+  },
+  {
+   "id": "31f52c",
+   "formula": [
+    "Equal",
+    [
+     "Divide",
+     1,
+     "GoldenRatio"
+    ],
+    [
+     "Subtract",
+     "GoldenRatio",
+     1
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "golden_ratio"
+   ]
+  },
+  {
+   "id": "487e35",
+   "formula": [
+    "Equal",
+    "GoldenRatio",
+    [
+     "Multiply",
+     2,
+     [
+      "Sin",
+      [
+       "Divide",
+       [
+        "Multiply",
+        3,
+        "Pi"
+       ],
+       10
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Sin"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "golden_ratio"
+   ]
+  },
+  {
+   "id": "6a11ce",
+   "formula": [
+    "Equal",
+    [
+     "Power",
+     "GoldenRatio",
+     "n"
+    ],
+    [
+     "Add",
+     [
+      "Multiply",
+      [
+       "Fibonacci",
+       "n"
+      ],
+      "GoldenRatio"
+     ],
+     [
+      "Fibonacci",
+      [
+       "Subtract",
+       "n",
+       1
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "Integers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Fibonacci"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "golden_ratio"
+   ]
+  },
+  {
+   "id": "6d2709",
+   "formula": [
+    "Equal",
+    "GoldenRatio",
+    [
+     "Add",
+     1,
+     [
+      "Divide",
+      1,
+      "GoldenRatio"
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "golden_ratio"
+   ]
+  },
+  {
+   "id": "77d2f8",
+   "formula": [
+    "Equal",
+    "GoldenRatio",
+    [
+     "Divide",
+     [
+      "Add",
+      1,
+      [
+       "Sqrt",
+       5
+      ]
+     ],
+     2
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "golden_ratio"
+   ]
+  },
+  {
+   "id": "98a765",
+   "formula": [
+    "Equal",
+    "GoldenRatio",
+    [
+     "Multiply",
+     2,
+     [
+      "Cos",
+      [
+       "Divide",
+       "Pi",
+       5
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Cos"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "golden_ratio"
+   ]
+  },
+  {
+   "id": "b464d3",
+   "formula": [
+    "Equal",
+    [
+     "Subtract",
+     [
+      "Subtract",
+      [
+       "Power",
+       "GoldenRatio",
+       2
+      ],
+      "GoldenRatio"
+     ],
+     1
+    ],
+    0
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "golden_ratio"
+   ]
+  },
+  {
+   "id": "d774fe",
+   "formula": [
+    "Implies",
+    [
+     "Equal",
+     [
+      "Divide",
+      [
+       "Add",
+       "a",
+       "b"
+      ],
+      "a"
+     ],
+     [
+      "Divide",
+      "a",
+      "b"
+     ]
+    ],
+    [
+     "Equal",
+     [
+      "Divide",
+      "a",
+      "b"
+     ],
+     "GoldenRatio"
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     [
+      "Interval",
+      [
+       "Open",
+       0
+      ],
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
+     ]
+    ],
+    [
+     "Element",
+     "b",
+     [
+      "Interval",
+      [
+       "Open",
+       0
+      ],
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "golden_ratio"
+   ]
+  },
+  {
+   "id": "e09458",
+   "formula": [
+    "NotElement",
+    "GoldenRatio",
+    "RationalNumbers"
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "golden_ratio"
+   ]
+  },
+  {
+   "id": "e9a269",
+   "formula": [
+    "Equal",
+    "GoldenRatio",
+    [
+     "Multiply",
+     [
+      "Divide",
+      1,
+      5
+     ],
+     [
+      "Power",
+      [
+       "Divide",
+       [
+        "DedekindEta",
+        "ImaginaryUnit"
+       ],
+       [
+        "DedekindEta",
+        [
+         "Multiply",
+         5,
+         "ImaginaryUnit"
+        ]
+       ]
+      ],
+      2
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "DedekindEta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "golden_ratio"
+   ]
+  },
+  {
+   "id": "ebfcd8",
+   "formula": [
+    "Equal",
+    [
+     "Spectrum",
+     [
+      "Matrix",
+      [
+       "List",
+       [
+        "List",
+        1,
+        1
+       ],
+       [
+        "List",
+        1,
+        0
+       ]
+      ]
+     ]
+    ],
+    [
+     "Set",
+     "GoldenRatio",
+     [
+      "Subtract",
+      1,
+      "GoldenRatio"
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Spectrum"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "golden_ratio"
+   ]
+  },
+  {
+   "id": "fad16f",
+   "formula": [
+    "Equal",
+    "GoldenRatio",
+    [
+     "Add",
+     [
+      "Multiply",
+      2,
+      [
+       "Sin",
+       [
+        "Divide",
+        "Pi",
+        10
+       ]
+      ]
+     ],
+     1
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Sin"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "golden_ratio"
+   ]
+  }
+ ]
+}

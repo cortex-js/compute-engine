@@ -1,0 +1,2350 @@
+{
+ "topic": "sqrt",
+ "title": "Square roots",
+ "source": "pygrim/formulas/sqrt.py",
+ "generator": "grim2mathjson 0.1.0",
+ "entries": [
+  {
+   "id": "02751f",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "Subtract",
+      [
+       "Sqrt",
+       [
+        "Add",
+        "x",
+        "a"
+       ]
+      ],
+      [
+       "Sqrt",
+       "x"
+      ]
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Sqrt",
+      "x"
+     ],
+     [
+      "Subtract",
+      1,
+      [
+       "Sqrt",
+       [
+        "Subtract",
+        1,
+        [
+         "Divide",
+         [
+          "Abs",
+          "a"
+         ],
+         "x"
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     [
+      "Interval",
+      [
+       "Open",
+       0
+      ],
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
+     ]
+    ],
+    [
+     "Element",
+     "a",
+     "RealNumbers"
+    ],
+    [
+     "LessEqual",
+     [
+      "Abs",
+      "a"
+     ],
+     "x"
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sqrt"
+   ]
+  },
+  {
+   "id": "08bd37",
+   "formula": [
+    "Equal",
+    [
+     "Sqrt",
+     [
+      "Negate",
+      "z"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Negate",
+      "ImaginaryUnit"
+     ],
+     [
+      "Sqrt",
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Or",
+    [
+     "Element",
+     "z",
+     [
+      "Interval",
+      [
+       "Open",
+       "NegativeInfinity"
+      ],
+      0
+     ]
+    ],
+    [
+     "And",
+     [
+      "Element",
+      "z",
+      "ComplexNumbers"
+     ],
+     [
+      "Greater",
+      [
+       "Imaginary",
+       "z"
+      ],
+      0
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sqrt"
+   ]
+  },
+  {
+   "id": "0984ef",
+   "formula": [
+    "Equal",
+    [
+     "Power",
+     [
+      "Sqrt",
+      "z"
+     ],
+     2
+    ],
+    "z"
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sqrt"
+   ]
+  },
+  {
+   "id": "0ad836",
+   "formula": [
+    "Equal",
+    [
+     "Sqrt",
+     "ImaginaryUnit"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      1,
+      [
+       "Sqrt",
+       2
+      ]
+     ],
+     [
+      "Add",
+      1,
+      "ImaginaryUnit"
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "imaginary_unit",
+    "sqrt"
+   ]
+  },
+  {
+   "id": "0d8e03",
+   "formula": [
+    "Equal",
+    [
+     "Sqrt",
+     [
+      "Divide",
+      "a",
+      "b"
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Sqrt",
+      "a"
+     ],
+     [
+      "Sqrt",
+      "b"
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "b",
+     [
+      "Interval",
+      [
+       "Open",
+       0
+      ],
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "assumptionAlternatives": [
+    [
+     "And",
+     [
+      "Element",
+      "a",
+      [
+       "Interval",
+       0,
+       [
+        "Open",
+        "PositiveInfinity"
+       ]
+      ]
+     ],
+     [
+      "Element",
+      "b",
+      [
+       "SetMinus",
+       "ComplexNumbers",
+       [
+        "Interval",
+        [
+         "Open",
+         "NegativeInfinity"
+        ],
+        0
+       ]
+      ]
+     ]
+    ],
+    [
+     "And",
+     [
+      "Element",
+      "a",
+      "ComplexNumbers"
+     ],
+     [
+      "Element",
+      "b",
+      [
+       "SetMinus",
+       "ComplexNumbers",
+       [
+        "Set",
+        0
+       ]
+      ]
+     ],
+     [
+      "Element",
+      [
+       "Subtract",
+       [
+        "Argument",
+        "a"
+       ],
+       [
+        "Argument",
+        "b"
+       ]
+      ],
+      [
+       "Interval",
+       [
+        "Open",
+        [
+         "Negate",
+         "Pi"
+        ]
+       ],
+       "Pi"
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sqrt"
+   ]
+  },
+  {
+   "id": "1232f7",
+   "formula": [
+    "Equal",
+    [
+     "Sqrt",
+     [
+      "Multiply",
+      "r",
+      [
+       "Exp",
+       [
+        "Multiply",
+        "ImaginaryUnit",
+        "theta"
+       ]
+      ]
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Sqrt",
+      "r"
+     ],
+     [
+      "Exp",
+      [
+       "Divide",
+       [
+        "Multiply",
+        "ImaginaryUnit",
+        "theta"
+       ],
+       2
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "r",
+    "theta"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "r",
+     [
+      "Interval",
+      0,
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
+     ]
+    ],
+    [
+     "Element",
+     "theta",
+     [
+      "Interval",
+      [
+       "Open",
+       [
+        "Negate",
+        "Pi"
+       ]
+      ],
+      "Pi"
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Exp"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sqrt"
+   ]
+  },
+  {
+   "id": "14cbeb",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "Subtract",
+      [
+       "Sqrt",
+       [
+        "Add",
+        "x",
+        "a"
+       ]
+      ],
+      [
+       "Sqrt",
+       "x"
+      ]
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      [
+       "Sqrt",
+       "x"
+      ],
+      2
+     ],
+     [
+      "Add",
+      [
+       "Divide",
+       [
+        "Abs",
+        "a"
+       ],
+       "x"
+      ],
+      [
+       "Divide",
+       [
+        "Power",
+        [
+         "Abs",
+         "a"
+        ],
+        2
+       ],
+       [
+        "Power",
+        "x",
+        2
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     [
+      "Interval",
+      [
+       "Open",
+       0
+      ],
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
+     ]
+    ],
+    [
+     "Element",
+     "a",
+     "RealNumbers"
+    ],
+    [
+     "LessEqual",
+     [
+      "Abs",
+      "a"
+     ],
+     "x"
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sqrt"
+   ]
+  },
+  {
+   "id": "185efc",
+   "formula": [
+    "Equal",
+    [
+     "Sqrt",
+     [
+      "Divide",
+      "z",
+      [
+       "Subtract",
+       "c",
+       "z"
+      ]
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Sqrt",
+      "z"
+     ],
+     [
+      "Sqrt",
+      [
+       "Divide",
+       1,
+       [
+        "Subtract",
+        "c",
+        "z"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "c",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "RealNumbers"
+    ],
+    [
+     "Element",
+     "c",
+     [
+      "Interval",
+      0,
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
+     ]
+    ],
+    [
+     "NotEqual",
+     [
+      "Subtract",
+      "c",
+      "z"
+     ],
+     0
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sqrt"
+   ]
+  },
+  {
+   "id": "22e0be",
+   "formula": [
+    "Equal",
+    [
+     "Argument",
+     [
+      "Sqrt",
+      "z"
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Argument",
+      "z"
+     ],
+     2
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Argument"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sqrt"
+   ]
+  },
+  {
+   "id": "2a11ab",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "Sqrt",
+        "z"
+       ],
+       "z"
+      ],
+      1
+     ],
+     "z"
+    ],
+    [
+     "Divide",
+     1,
+     [
+      "Multiply",
+      2,
+      [
+       "Sqrt",
+       "z"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     [
+      "Interval",
+      [
+       "Open",
+       "NegativeInfinity"
+      ],
+      0
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Derivative"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sqrt"
+   ]
+  },
+  {
+   "id": "2eb54a",
+   "formula": [
+    "Equal",
+    [
+     "Sqrt",
+     -1
+    ],
+    "ImaginaryUnit"
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sqrt"
+   ]
+  },
+  {
+   "id": "31a8ca",
+   "formula": [
+    "Equal",
+    [
+     "Sqrt",
+     "ComplexInfinity"
+    ],
+    "ComplexInfinity"
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sqrt"
+   ]
+  },
+  {
+   "id": "34136c",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "Subtract",
+      [
+       "Divide",
+       1,
+       [
+        "Sqrt",
+        [
+         "Add",
+         "x",
+         "a"
+        ]
+       ]
+      ],
+      [
+       "Divide",
+       1,
+       [
+        "Sqrt",
+        "x"
+       ]
+      ]
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Abs",
+      "a"
+     ],
+     [
+      "Multiply",
+      2,
+      [
+       "Power",
+       [
+        "Subtract",
+        "x",
+        [
+         "Abs",
+         "a"
+        ]
+       ],
+       [
+        "Divide",
+        3,
+        2
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     [
+      "Interval",
+      [
+       "Open",
+       0
+      ],
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
+     ]
+    ],
+    [
+     "Element",
+     "a",
+     "RealNumbers"
+    ],
+    [
+     "Less",
+     [
+      "Abs",
+      "a"
+     ],
+     "x"
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sqrt"
+   ]
+  },
+  {
+   "id": "3cc884",
+   "formula": [
+    "Equal",
+    [
+     "Sqrt",
+     [
+      "Power",
+      "x",
+      2
+     ]
+    ],
+    [
+     "Abs",
+     "x"
+    ]
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": [
+    "Element",
+    "x",
+    "RealNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Abs"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sqrt"
+   ]
+  },
+  {
+   "id": "3e71f4",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "Sqrt",
+        "z"
+       ],
+       "z"
+      ],
+      2
+     ],
+     "z"
+    ],
+    [
+     "Negate",
+     [
+      "Divide",
+      1,
+      [
+       "Multiply",
+       4,
+       [
+        "Power",
+        "z",
+        [
+         "Divide",
+         3,
+         2
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     [
+      "Interval",
+      [
+       "Open",
+       "NegativeInfinity"
+      ],
+      0
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Derivative"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sqrt"
+   ]
+  },
+  {
+   "id": "4ed6a8",
+   "formula": [
+    "Equal",
+    [
+     "Real",
+     [
+      "Sqrt",
+      "z"
+     ]
+    ],
+    [
+     "Sqrt",
+     [
+      "Divide",
+      [
+       "Add",
+       [
+        "Abs",
+        "z"
+       ],
+       [
+        "Real",
+        "z"
+       ]
+      ],
+      2
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Real"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sqrt"
+   ]
+  },
+  {
+   "id": "57af50",
+   "formula": [
+    "Equal",
+    [
+     "Sqrt",
+     [
+      "Negate",
+      "z"
+     ]
+    ],
+    [
+     "Multiply",
+     "ImaginaryUnit",
+     [
+      "Sqrt",
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Or",
+    [
+     "Element",
+     "z",
+     [
+      "Interval",
+      0,
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
+     ]
+    ],
+    [
+     "And",
+     [
+      "Element",
+      "z",
+      "ComplexNumbers"
+     ],
+     [
+      "Less",
+      [
+       "Imaginary",
+       "z"
+      ],
+      0
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sqrt"
+   ]
+  },
+  {
+   "id": "61480c",
+   "formula": [
+    "Element",
+    [
+     "Equal",
+     [
+      "Sqrt",
+      [
+       "Divide",
+       1,
+       2
+      ]
+     ],
+     [
+      "Divide",
+      1,
+      [
+       "Sqrt",
+       2
+      ]
+     ],
+     [
+      "Divide",
+      [
+       "Sqrt",
+       2
+      ],
+      2
+     ]
+    ],
+    [
+     "RealBall",
+     {
+      "num": "0.707106781186547524400844362105"
+     },
+     {
+      "num": "1.51e-31"
+     }
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "RealBall"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sqrt"
+   ]
+  },
+  {
+   "id": "616bcb",
+   "formula": [
+    "Equal",
+    [
+     "Sqrt",
+     [
+      "Divide",
+      "z",
+      2
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Sqrt",
+      "z"
+     ],
+     [
+      "Sqrt",
+      2
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sqrt"
+   ]
+  },
+  {
+   "id": "627c9c",
+   "formula": [
+    "Equal",
+    [
+     "Sqrt",
+     "z"
+    ],
+    [
+     "Exp",
+     [
+      "Multiply",
+      [
+       "Divide",
+       1,
+       2
+      ],
+      [
+       "Ln",
+       "z"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     [
+      "Set",
+      0
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Exp",
+    "Ln"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sqrt"
+   ]
+  },
+  {
+   "id": "6ddbf4",
+   "formula": [
+    "Equal",
+    [
+     "Integrate",
+     [
+      "Sqrt",
+      "z"
+     ],
+     [
+      "Limits",
+      "z",
+      "a",
+      "b"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      2,
+      3
+     ],
+     [
+      "Subtract",
+      [
+       "Power",
+       "b",
+       [
+        "Divide",
+        3,
+        2
+       ]
+      ],
+      [
+       "Power",
+       "a",
+       [
+        "Divide",
+        3,
+        2
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "b",
+     "ComplexNumbers"
+    ],
+    [
+     "Or",
+     [
+      "And",
+      [
+       "GreaterEqual",
+       [
+        "Real",
+        "a"
+       ],
+       0
+      ],
+      [
+       "GreaterEqual",
+       [
+        "Real",
+        "b"
+       ],
+       0
+      ]
+     ],
+     [
+      "And",
+      [
+       "GreaterEqual",
+       [
+        "Imaginary",
+        "a"
+       ],
+       0
+      ],
+      [
+       "GreaterEqual",
+       [
+        "Imaginary",
+        "b"
+       ],
+       0
+      ]
+     ],
+     [
+      "And",
+      [
+       "Less",
+       [
+        "Imaginary",
+        "a"
+       ],
+       0
+      ],
+      [
+       "Less",
+       [
+        "Imaginary",
+        "b"
+       ],
+       0
+      ]
+     ]
+    ]
+   ],
+   "assumptionAlternatives": [
+    [
+     "And",
+     [
+      "Element",
+      "a",
+      "ComplexNumbers"
+     ],
+     [
+      "Element",
+      "b",
+      "ComplexNumbers"
+     ],
+     [
+      "Equal",
+      [
+       "Intersection",
+       [
+        "Interval",
+        [
+         "Open",
+         "a"
+        ],
+        [
+         "Open",
+         "b"
+        ]
+       ],
+       [
+        "Interval",
+        [
+         "Open",
+         "NegativeInfinity"
+        ],
+        [
+         "Open",
+         0
+        ]
+       ]
+      ],
+      [
+       "Set"
+      ]
+     ]
+    ]
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Integrate"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sqrt"
+   ]
+  },
+  {
+   "id": "6f63dd",
+   "formula": [
+    "Equal",
+    [
+     "Sqrt",
+     [
+      "Divide",
+      "z",
+      [
+       "Subtract",
+       "z",
+       "c"
+      ]
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Sqrt",
+      [
+       "Negate",
+       "z"
+      ]
+     ],
+     [
+      "Sqrt",
+      [
+       "Subtract",
+       "c",
+       "z"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "c",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "c",
+     [
+      "Interval",
+      0,
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
+     ]
+    ],
+    [
+     "NotEqual",
+     [
+      "Subtract",
+      "z",
+      "c"
+     ],
+     0
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sqrt"
+   ]
+  },
+  {
+   "id": "73b76c",
+   "formula": [
+    "Equal",
+    [
+     "Sqrt",
+     [
+      "Multiply",
+      "a",
+      "b"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Sqrt",
+      "a"
+     ],
+     [
+      "Sqrt",
+      "b"
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "Or",
+    [
+     "And",
+     [
+      "Element",
+      "a",
+      "ComplexNumbers"
+     ],
+     [
+      "Element",
+      "b",
+      [
+       "Interval",
+       0,
+       [
+        "Open",
+        "PositiveInfinity"
+       ]
+      ]
+     ]
+    ],
+    [
+     "And",
+     [
+      "Element",
+      "b",
+      "ComplexNumbers"
+     ],
+     [
+      "Element",
+      "a",
+      [
+       "Interval",
+       0,
+       [
+        "Open",
+        "PositiveInfinity"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "assumptionAlternatives": [
+    [
+     "And",
+     [
+      "Element",
+      "a",
+      "ComplexNumbers"
+     ],
+     [
+      "Element",
+      "b",
+      "ComplexNumbers"
+     ],
+     [
+      "Element",
+      [
+       "Add",
+       [
+        "Argument",
+        "a"
+       ],
+       [
+        "Argument",
+        "b"
+       ]
+      ],
+      [
+       "Interval",
+       [
+        "Open",
+        [
+         "Negate",
+         "Pi"
+        ]
+       ],
+       "Pi"
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sqrt"
+   ]
+  },
+  {
+   "id": "83abff",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "Sqrt",
+        "z"
+       ],
+       "z"
+      ],
+      "r"
+     ],
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      [
+       "Power",
+       -1,
+       "r"
+      ],
+      [
+       "RisingFactorial",
+       [
+        "Negate",
+        [
+         "Divide",
+         1,
+         2
+        ]
+       ],
+       "r"
+      ]
+     ],
+     [
+      "Power",
+      "z",
+      [
+       "Subtract",
+       "r",
+       [
+        "Divide",
+        1,
+        2
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "r",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      [
+       "Interval",
+       [
+        "Open",
+        "NegativeInfinity"
+       ],
+       0
+      ]
+     ]
+    ],
+    [
+     "Element",
+     "r",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Derivative",
+    "RisingFactorial"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sqrt"
+   ]
+  },
+  {
+   "id": "8c1ee5",
+   "formula": [
+    "Equal",
+    [
+     "Sign",
+     [
+      "Sqrt",
+      "z"
+     ]
+    ],
+    [
+     "Sqrt",
+     [
+      "Sign",
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Sign"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sqrt"
+   ]
+  },
+  {
+   "id": "97b736",
+   "formula": [
+    "Equal",
+    [
+     "Sqrt",
+     "z"
+    ],
+    [
+     "Power",
+     "z",
+     [
+      "Divide",
+      1,
+      2
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sqrt"
+   ]
+  },
+  {
+   "id": "99c0b3",
+   "formula": [
+    "Equal",
+    [
+     "Sqrt",
+     [
+      "Subtract",
+      "z",
+      [
+       "Multiply",
+       "c",
+       [
+        "Power",
+        "z",
+        2
+       ]
+      ]
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Sqrt",
+      "z"
+     ],
+     [
+      "Sqrt",
+      [
+       "Subtract",
+       1,
+       [
+        "Multiply",
+        "c",
+        "z"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "c",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "c",
+     [
+      "Interval",
+      0,
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sqrt"
+   ]
+  },
+  {
+   "id": "9dec73",
+   "formula": [
+    "Equal",
+    [
+     "Sqrt",
+     "PositiveInfinity"
+    ],
+    "PositiveInfinity"
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sqrt"
+   ]
+  },
+  {
+   "id": "ac54c7",
+   "formula": [
+    "Equal",
+    [
+     "Abs",
+     [
+      "Sqrt",
+      "z"
+     ]
+    ],
+    [
+     "Sqrt",
+     [
+      "Abs",
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Abs"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sqrt"
+   ]
+  },
+  {
+   "id": "c58f46",
+   "formula": [
+    "Equal",
+    [
+     "Sqrt",
+     [
+      "Conjugate",
+      "z"
+     ]
+    ],
+    [
+     "Conjugate",
+     [
+      "Sqrt",
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     [
+      "Interval",
+      [
+       "Open",
+       "NegativeInfinity"
+      ],
+      [
+       "Open",
+       0
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Conjugate"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sqrt"
+   ]
+  },
+  {
+   "id": "d0a331",
+   "formula": [
+    "Equal",
+    [
+     "Sqrt",
+     [
+      "Divide",
+      1,
+      "z"
+     ]
+    ],
+    [
+     "Divide",
+     1,
+     [
+      "Sqrt",
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     [
+      "Interval",
+      [
+       "Open",
+       "NegativeInfinity"
+      ],
+      0
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sqrt"
+   ]
+  },
+  {
+   "id": "d40229",
+   "formula": [
+    "Equal",
+    [
+     "Sqrt",
+     [
+      "Divide",
+      "z",
+      [
+       "Add",
+       "z",
+       "c"
+      ]
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Sqrt",
+      "z"
+     ],
+     [
+      "Sqrt",
+      [
+       "Add",
+       "z",
+       "c"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "c",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "c",
+     [
+      "Interval",
+      0,
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
+     ]
+    ],
+    [
+     "NotEqual",
+     [
+      "Add",
+      "z",
+      "c"
+     ],
+     0
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sqrt"
+   ]
+  },
+  {
+   "id": "d8791e",
+   "formula": [
+    "Equal",
+    [
+     "Sqrt",
+     [
+      "Power",
+      "z",
+      2
+     ]
+    ],
+    "z"
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     [
+      "Argument",
+      "z"
+     ],
+     [
+      "Interval",
+      [
+       "Open",
+       [
+        "Divide",
+        [
+         "Negate",
+         "Pi"
+        ],
+        2
+       ]
+      ],
+      [
+       "Divide",
+       "Pi",
+       2
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sqrt"
+   ]
+  },
+  {
+   "id": "e722ca",
+   "formula": [
+    "Equal",
+    [
+     "Imaginary",
+     [
+      "Sqrt",
+      "z"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Sign",
+      [
+       "Imaginary",
+       "z"
+      ]
+     ],
+     [
+      "Sqrt",
+      [
+       "Divide",
+       [
+        "Subtract",
+        [
+         "Abs",
+         "z"
+        ],
+        [
+         "Real",
+         "z"
+        ]
+       ],
+       2
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     [
+      "Interval",
+      [
+       "Open",
+       "NegativeInfinity"
+      ],
+      [
+       "Open",
+       0
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Imaginary",
+    "Real",
+    "Sign"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sqrt"
+   ]
+  },
+  {
+   "id": "f9f31d",
+   "formula": [
+    "Equal",
+    [
+     "Sqrt",
+     [
+      "Multiply",
+      [
+       "Exp",
+       [
+        "Multiply",
+        "ImaginaryUnit",
+        "theta"
+       ]
+      ],
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Exp",
+      [
+       "Divide",
+       [
+        "Multiply",
+        "ImaginaryUnit",
+        "theta"
+       ],
+       2
+      ]
+     ],
+     "PositiveInfinity"
+    ]
+   ],
+   "variables": [
+    "theta"
+   ],
+   "assumptions": [
+    "Element",
+    "theta",
+    [
+     "Interval",
+     [
+      "Open",
+      [
+       "Negate",
+       "Pi"
+      ]
+     ],
+     "Pi"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Exp"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "sqrt"
+   ],
+   "directedInfinity": true
+  }
+ ]
+}

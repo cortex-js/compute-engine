@@ -1,0 +1,2887 @@
+{
+ "topic": "agm",
+ "title": "Arithmetic-geometric mean",
+ "source": "pygrim/formulas/agm.py",
+ "generator": "grim2mathjson 0.1.0",
+ "entries": [
+  {
+   "id": "08329d",
+   "formula": [
+    "Equal",
+    [
+     "AGM",
+     0,
+     "b"
+    ],
+    0
+   ],
+   "variables": [
+    "b"
+   ],
+   "assumptions": [
+    "Element",
+    "b",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "AGM"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "agm"
+   ]
+  },
+  {
+   "id": "098757",
+   "formula": [
+    "Implies",
+    [
+     "Element",
+     "x",
+     [
+      "Interval",
+      0,
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
+     ]
+    ],
+    [
+     "Element",
+     [
+      "AGM",
+      "x"
+     ],
+     [
+      "Interval",
+      0,
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "AGM"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "agm"
+   ]
+  },
+  {
+   "id": "0d9352",
+   "formula": [
+    "Equal",
+    [
+     "AGM",
+     1,
+     [
+      "Sqrt",
+      2
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Multiply",
+      2,
+      [
+       "Sqrt",
+       2
+      ],
+      [
+       "Power",
+       "Pi",
+       [
+        "Divide",
+        3,
+        2
+       ]
+      ]
+     ],
+     [
+      "Power",
+      [
+       "Gamma",
+       [
+        "Divide",
+        1,
+        4
+       ]
+      ],
+      2
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "AGM",
+    "Gamma"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "agm"
+   ]
+  },
+  {
+   "id": "162ecf",
+   "formula": [
+    "LessEqual",
+    [
+     "Sqrt",
+     [
+      "Multiply",
+      "a",
+      "b"
+     ]
+    ],
+    [
+     "AGM",
+     "a",
+     "b"
+    ],
+    [
+     "Divide",
+     [
+      "Add",
+      "a",
+      "b"
+     ],
+     2
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     [
+      "Interval",
+      0,
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
+     ]
+    ],
+    [
+     "Element",
+     "b",
+     [
+      "Interval",
+      0,
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "AGM"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "agm"
+   ]
+  },
+  {
+   "id": "20828c",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "AGM",
+        "a",
+        "b"
+       ],
+       "a"
+      ],
+      1
+     ],
+     "a"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      [
+       "AGM",
+       "a",
+       "b"
+      ],
+      [
+       "Multiply",
+       [
+        "Multiply",
+        "Pi",
+        "a"
+       ],
+       [
+        "Subtract",
+        "a",
+        "b"
+       ]
+      ]
+     ],
+     [
+      "Subtract",
+      [
+       "Multiply",
+       "Pi",
+       "a"
+      ],
+      [
+       "Multiply",
+       [
+        "Multiply",
+        2,
+        [
+         "AGM",
+         "a",
+         "b"
+        ]
+       ],
+       [
+        "EllipticE",
+        [
+         "Power",
+         [
+          "Divide",
+          [
+           "Subtract",
+           "a",
+           "b"
+          ],
+          [
+           "Add",
+           "a",
+           "b"
+          ]
+         ],
+         2
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "b",
+     "ComplexNumbers"
+    ],
+    [
+     "NotEqual",
+     "b",
+     0
+    ],
+    [
+     "NotEqual",
+     "a",
+     "b"
+    ],
+    [
+     "NotElement",
+     [
+      "Divide",
+      "a",
+      "b"
+     ],
+     [
+      "Interval",
+      [
+       "Open",
+       "NegativeInfinity"
+      ],
+      0
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "AGM",
+    "Derivative",
+    "EllipticE"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": [
+    "http://functions.wolfram.com/09.54.20.0001.01"
+   ],
+   "topics": [
+    "agm"
+   ]
+  },
+  {
+   "id": "21f412",
+   "formula": [
+    "Equal",
+    [
+     "AGM",
+     "z"
+    ],
+    [
+     "AGM",
+     1,
+     "z"
+    ],
+    [
+     "AGM",
+     "z",
+     1
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "AGM"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "agm"
+   ]
+  },
+  {
+   "id": "23ee29",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "AGM",
+      "a",
+      "b"
+     ]
+    ],
+    [
+     "Abs",
+     [
+      "AGM",
+      [
+       "Abs",
+       "a"
+      ],
+      [
+       "Abs",
+       "b"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "b",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "AGM",
+    "Abs"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "agm"
+   ]
+  },
+  {
+   "id": "26fd1b",
+   "formula": [
+    "Equal",
+    [
+     "Ln",
+     [
+      "Divide",
+      1,
+      "q"
+     ]
+    ],
+    [
+     "Divide",
+     "Pi",
+     [
+      "AGM",
+      [
+       "Power",
+       [
+        "JacobiThetaQ",
+        2,
+        0,
+        "q"
+       ],
+       2
+      ],
+      [
+       "Power",
+       [
+        "JacobiThetaQ",
+        3,
+        0,
+        "q"
+       ],
+       2
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "q"
+   ],
+   "assumptions": [
+    "Element",
+    "q",
+    [
+     "Interval",
+     [
+      "Open",
+      0
+     ],
+     [
+      "Open",
+      1
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "AGM",
+    "JacobiThetaQ",
+    "Ln"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "agm"
+   ]
+  },
+  {
+   "id": "32b3b4",
+   "formula": [
+    "Implies",
+    [
+     "And",
+     [
+      "Element",
+      "a",
+      "ComplexNumbers"
+     ],
+     [
+      "Element",
+      "b",
+      "ComplexNumbers"
+     ]
+    ],
+    [
+     "Element",
+     [
+      "AGM",
+      "a",
+      "b"
+     ],
+     "ComplexNumbers"
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "AGM"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "agm"
+   ]
+  },
+  {
+   "id": "361801",
+   "formula": [
+    "Equal",
+    [
+     "AGM",
+     1,
+     [
+      "Add",
+      3,
+      [
+       "Multiply",
+       2,
+       [
+        "Sqrt",
+        2
+       ]
+      ]
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Multiply",
+      2,
+      [
+       "Add",
+       2,
+       [
+        "Sqrt",
+        2
+       ]
+      ],
+      [
+       "Power",
+       "Pi",
+       [
+        "Divide",
+        3,
+        2
+       ]
+      ]
+     ],
+     [
+      "Power",
+      [
+       "Gamma",
+       [
+        "Divide",
+        1,
+        4
+       ]
+      ],
+      2
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "AGM",
+    "Gamma"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "agm"
+   ]
+  },
+  {
+   "id": "3da9b7",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "AGM",
+        1,
+        "x"
+       ],
+       "x"
+      ],
+      1
+     ],
+     1
+    ],
+    [
+     "Divide",
+     1,
+     2
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "AGM",
+    "Derivative"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "agm"
+   ]
+  },
+  {
+   "id": "3e1398",
+   "formula": [
+    "Equal",
+    [
+     "AGM",
+     "a",
+     [
+      "Negate",
+      "a"
+     ]
+    ],
+    0
+   ],
+   "variables": [
+    "a"
+   ],
+   "assumptions": [
+    "Element",
+    "a",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "AGM"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "agm"
+   ]
+  },
+  {
+   "id": "417619",
+   "formula": [
+    "Equal",
+    [
+     "AGM",
+     "a",
+     "b"
+    ],
+    [
+     "Divide",
+     "Pi",
+     [
+      "Multiply",
+      2,
+      [
+       "Integrate",
+       [
+        "Divide",
+        1,
+        [
+         "Sqrt",
+         [
+          "Add",
+          [
+           "Multiply",
+           [
+            "Power",
+            "a",
+            2
+           ],
+           [
+            "Power",
+            [
+             "Cos",
+             "x"
+            ],
+            2
+           ]
+          ],
+          [
+           "Multiply",
+           [
+            "Power",
+            "b",
+            2
+           ],
+           [
+            "Power",
+            [
+             "Sin",
+             "x"
+            ],
+            2
+           ]
+          ]
+         ]
+        ]
+       ],
+       [
+        "Limits",
+        "x",
+        0,
+        [
+         "Divide",
+         "Pi",
+         2
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     [
+      "Interval",
+      [
+       "Open",
+       0
+      ],
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
+     ]
+    ],
+    [
+     "Element",
+     "b",
+     [
+      "Interval",
+      [
+       "Open",
+       0
+      ],
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "AGM",
+    "Cos",
+    "Integrate",
+    "Sin"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "agm"
+   ]
+  },
+  {
+   "id": "447541",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "AGM",
+        1,
+        "x"
+       ],
+       "x"
+      ],
+      "n"
+     ],
+     1
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      [
+       "Multiply",
+       [
+        "Power",
+        -1,
+        "n"
+       ],
+       [
+        "Factorial",
+        "n"
+       ]
+      ],
+      [
+       "Power",
+       8,
+       "n"
+      ]
+     ],
+     [
+      "SloaneA",
+      {
+       "str": "060691"
+      },
+      "n"
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "AGM",
+    "Derivative",
+    "Factorial",
+    "SloaneA"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "agm"
+   ]
+  },
+  {
+   "id": "46c021",
+   "formula": [
+    "Equal",
+    [
+     "AGM",
+     1,
+     "b"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      [
+       "Add",
+       "b",
+       1
+      ],
+      2
+     ],
+     [
+      "AGM",
+      1,
+      [
+       "Divide",
+       [
+        "Multiply",
+        2,
+        [
+         "Sqrt",
+         "b"
+        ]
+       ],
+       [
+        "Add",
+        "b",
+        1
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "b"
+   ],
+   "assumptions": [
+    "Element",
+    "b",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "AGM"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "agm"
+   ]
+  },
+  {
+   "id": "5174ea",
+   "formula": [
+    "Equal",
+    [
+     "AGM",
+     1,
+     [
+      "Negate",
+      "ImaginaryUnit"
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Multiply",
+      [
+       "Multiply",
+       [
+        "Sqrt",
+        2
+       ],
+       [
+        "Subtract",
+        1,
+        "ImaginaryUnit"
+       ]
+      ],
+      [
+       "Power",
+       "Pi",
+       [
+        "Divide",
+        3,
+        2
+       ]
+      ]
+     ],
+     [
+      "Power",
+      [
+       "Gamma",
+       [
+        "Divide",
+        1,
+        4
+       ]
+      ],
+      2
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "AGM",
+    "Gamma"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "agm"
+   ]
+  },
+  {
+   "id": "59fab1",
+   "formula": [
+    "Equal",
+    [
+     "AGM",
+     "a",
+     "b"
+    ],
+    [
+     "AGM",
+     "b",
+     "a"
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "b",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "AGM"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "agm"
+   ]
+  },
+  {
+   "id": "69d0a3",
+   "formula": [
+    "Equal",
+    [
+     "AGM",
+     1,
+     "ImaginaryUnit"
+    ],
+    [
+     "Divide",
+     [
+      "Multiply",
+      [
+       "Multiply",
+       [
+        "Sqrt",
+        2
+       ],
+       [
+        "Add",
+        1,
+        "ImaginaryUnit"
+       ]
+      ],
+      [
+       "Power",
+       "Pi",
+       [
+        "Divide",
+        3,
+        2
+       ]
+      ]
+     ],
+     [
+      "Power",
+      [
+       "Gamma",
+       [
+        "Divide",
+        1,
+        4
+       ]
+      ],
+      2
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "AGM",
+    "Gamma"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "agm"
+   ]
+  },
+  {
+   "id": "7189d6",
+   "formula": [
+    "Equal",
+    [
+     "AGM",
+     [
+      "Negate",
+      "a"
+     ],
+     [
+      "Negate",
+      "b"
+     ]
+    ],
+    [
+     "Negate",
+     [
+      "AGM",
+      "a",
+      "b"
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "b",
+     "ComplexNumbers"
+    ],
+    [
+     "Or",
+     [
+      "Equal",
+      "a",
+      0
+     ],
+     [
+      "NotElement",
+      [
+       "Divide",
+       "b",
+       "a"
+      ],
+      [
+       "Interval",
+       [
+        "Open",
+        "NegativeInfinity"
+       ],
+       0
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "AGM"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "agm"
+   ]
+  },
+  {
+   "id": "71a0ff",
+   "formula": [
+    "Equal",
+    [
+     "AGM",
+     "a",
+     "b"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      "Pi",
+      4
+     ],
+     [
+      "Divide",
+      [
+       "Add",
+       "a",
+       "b"
+      ],
+      [
+       "EllipticK",
+       [
+        "Power",
+        [
+         "Divide",
+         [
+          "Subtract",
+          "a",
+          "b"
+         ],
+         [
+          "Add",
+          "a",
+          "b"
+         ]
+        ],
+        2
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "b",
+     "ComplexNumbers"
+    ],
+    [
+     "NotEqual",
+     "b",
+     0
+    ],
+    [
+     "NotElement",
+     [
+      "Divide",
+      "a",
+      "b"
+     ],
+     [
+      "Interval",
+      [
+       "Open",
+       "NegativeInfinity"
+      ],
+      0
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "AGM",
+    "EllipticK"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "agm",
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "7b362f",
+   "formula": [
+    "Equal",
+    [
+     "AGM",
+     1,
+     [
+      "Sqrt",
+      2
+     ]
+    ],
+    [
+     "Divide",
+     1,
+     [
+      "Power",
+      [
+       "JacobiTheta",
+       4,
+       0,
+       "ImaginaryUnit"
+      ],
+      2
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "AGM",
+    "JacobiTheta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "agm"
+   ]
+  },
+  {
+   "id": "84b888",
+   "formula": [
+    "Equal",
+    [
+     "AGMSequence",
+     0,
+     "a",
+     "b"
+    ],
+    [
+     "Tuple",
+     "a",
+     "b"
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "b",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "AGMSequence"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "agm"
+   ]
+  },
+  {
+   "id": "8e80c6",
+   "formula": [
+    "Equal",
+    [
+     "AGM",
+     1,
+     "b"
+    ],
+    [
+     "Multiply",
+     "b",
+     [
+      "AGM",
+      1,
+      [
+       "Divide",
+       1,
+       "b"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "b",
+     "ComplexNumbers"
+    ],
+    [
+     "NotElement",
+     "b",
+     [
+      "Interval",
+      [
+       "Open",
+       "NegativeInfinity"
+      ],
+      0
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "AGM"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "agm"
+   ]
+  },
+  {
+   "id": "8f176c",
+   "formula": [
+    "Equal",
+    [
+     "AGM",
+     "a",
+     0
+    ],
+    0
+   ],
+   "variables": [
+    "a"
+   ],
+   "assumptions": [
+    "Element",
+    "a",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "AGM"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "agm"
+   ]
+  },
+  {
+   "id": "9d84d8",
+   "formula": [
+    "Equal",
+    [
+     "AGM",
+     [
+      "Add",
+      1,
+      "b"
+     ],
+     [
+      "Subtract",
+      1,
+      "b"
+     ]
+    ],
+    [
+     "AGM",
+     1,
+     [
+      "Sqrt",
+      [
+       "Subtract",
+       1,
+       [
+        "Power",
+        "b",
+        2
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "b"
+   ],
+   "assumptions": [
+    "Element",
+    "b",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "AGM"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "agm"
+   ]
+  },
+  {
+   "id": "a4cc5a",
+   "formula": [
+    "Equal",
+    [
+     "Add",
+     [
+      "Subtract",
+      [
+       "Multiply",
+       [
+        "Multiply",
+        [
+         "Multiply",
+         2,
+         "a"
+        ],
+        [
+         "Subtract",
+         [
+          "Power",
+          "b",
+          2
+         ],
+         [
+          "Power",
+          "a",
+          2
+         ]
+        ]
+       ],
+       [
+        "Power",
+        [
+         "Apply",
+         [
+          "Derivative",
+          [
+           "Function",
+           [
+            "AGM",
+            "a",
+            "b"
+           ],
+           "a"
+          ],
+          1
+         ],
+         "a"
+        ],
+        2
+       ]
+      ],
+      [
+       "Multiply",
+       "a",
+       [
+        "Power",
+        [
+         "AGM",
+         "a",
+         "b"
+        ],
+        2
+       ]
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Add",
+       [
+        "Multiply",
+        [
+         "Subtract",
+         [
+          "Multiply",
+          3,
+          [
+           "Power",
+           "a",
+           2
+          ]
+         ],
+         [
+          "Power",
+          "b",
+          2
+         ]
+        ],
+        [
+         "Apply",
+         [
+          "Derivative",
+          [
+           "Function",
+           [
+            "AGM",
+            "a",
+            "b"
+           ],
+           "a"
+          ],
+          1
+         ],
+         "a"
+        ]
+       ],
+       [
+        "Multiply",
+        [
+         "Multiply",
+         "a",
+         [
+          "Subtract",
+          [
+           "Power",
+           "a",
+           2
+          ],
+          [
+           "Power",
+           "b",
+           2
+          ]
+         ]
+        ],
+        [
+         "Apply",
+         [
+          "Derivative",
+          [
+           "Function",
+           [
+            "AGM",
+            "a",
+            "b"
+           ],
+           "a"
+          ],
+          2
+         ],
+         "a"
+        ]
+       ]
+      ],
+      [
+       "AGM",
+       "a",
+       "b"
+      ]
+     ]
+    ],
+    0
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "b",
+     "ComplexNumbers"
+    ],
+    [
+     "NotEqual",
+     "b",
+     0
+    ],
+    [
+     "NotElement",
+     [
+      "Divide",
+      "a",
+      "b"
+     ],
+     [
+      "Interval",
+      [
+       "Open",
+       "NegativeInfinity"
+      ],
+      0
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "AGM",
+    "Derivative"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": [
+    "http://functions.wolfram.com/09.54.13.0001.01"
+   ],
+   "topics": [
+    "agm"
+   ]
+  },
+  {
+   "id": "b41bdd",
+   "formula": [
+    "Equal",
+    [
+     "AGM",
+     "a",
+     "a"
+    ],
+    "a"
+   ],
+   "variables": [
+    "a"
+   ],
+   "assumptions": [
+    "Element",
+    "a",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "AGM"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "agm"
+   ]
+  },
+  {
+   "id": "c0dea0",
+   "formula": [
+    "Equal",
+    [
+     "AGM",
+     [
+      "Conjugate",
+      "a"
+     ],
+     [
+      "Conjugate",
+      "b"
+     ]
+    ],
+    [
+     "Conjugate",
+     [
+      "AGM",
+      "a",
+      "b"
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "b",
+     "ComplexNumbers"
+    ],
+    [
+     "Or",
+     [
+      "Equal",
+      "a",
+      0
+     ],
+     [
+      "NotElement",
+      [
+       "Divide",
+       "b",
+       "a"
+      ],
+      [
+       "Interval",
+       [
+        "Open",
+        "NegativeInfinity"
+       ],
+       0
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "AGM",
+    "Conjugate"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "agm"
+   ]
+  },
+  {
+   "id": "c38209",
+   "formula": [
+    "Implies",
+    [
+     "And",
+     [
+      "Element",
+      "a",
+      [
+       "Interval",
+       0,
+       [
+        "Open",
+        "PositiveInfinity"
+       ]
+      ]
+     ],
+     [
+      "Element",
+      "b",
+      [
+       "Interval",
+       0,
+       [
+        "Open",
+        "PositiveInfinity"
+       ]
+      ]
+     ]
+    ],
+    [
+     "Element",
+     [
+      "AGM",
+      "a",
+      "b"
+     ],
+     [
+      "Interval",
+      0,
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "AGM"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "agm"
+   ]
+  },
+  {
+   "id": "c7f885",
+   "formula": [
+    "Equal",
+    [
+     "AGM",
+     "a",
+     "b"
+    ],
+    [
+     "AGM",
+     [
+      "Divide",
+      [
+       "Add",
+       "a",
+       "b"
+      ],
+      2
+     ],
+     [
+      "Sqrt",
+      [
+       "Multiply",
+       "a",
+       "b"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "b",
+     "ComplexNumbers"
+    ],
+    [
+     "Or",
+     [
+      "Equal",
+      "a",
+      0
+     ],
+     [
+      "Equal",
+      "b",
+      0
+     ],
+     [
+      "And",
+      [
+       "Greater",
+       [
+        "Real",
+        "a"
+       ],
+       0
+      ],
+      [
+       "Greater",
+       [
+        "Real",
+        "b"
+       ],
+       0
+      ]
+     ],
+     [
+      "Less",
+      [
+       "Add",
+       [
+        "Abs",
+        [
+         "Argument",
+         "a"
+        ]
+       ],
+       [
+        "Abs",
+        [
+         "Argument",
+         "b"
+        ]
+       ]
+      ],
+      "Pi"
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "AGM"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "agm"
+   ]
+  },
+  {
+   "id": "ce2395",
+   "formula": [
+    "Equal",
+    [
+     "AGM",
+     "a",
+     "b"
+    ],
+    [
+     "Multiply",
+     "a",
+     [
+      "AGM",
+      1,
+      [
+       "Divide",
+       "b",
+       "a"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "b",
+     "ComplexNumbers"
+    ],
+    [
+     "NotEqual",
+     "a",
+     0
+    ],
+    [
+     "NotElement",
+     [
+      "Divide",
+      "b",
+      "a"
+     ],
+     [
+      "Interval",
+      [
+       "Open",
+       "NegativeInfinity"
+      ],
+      0
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "AGM"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "agm"
+   ]
+  },
+  {
+   "id": "cfefa9",
+   "formula": [
+    "Equal",
+    [
+     "AGM",
+     1,
+     [
+      "Add",
+      1,
+      "x"
+     ]
+    ],
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "Divide",
+       [
+        "SloaneA",
+        {
+         "str": "060691"
+        },
+        "n"
+       ],
+       [
+        "Power",
+        8,
+        "n"
+       ]
+      ],
+      [
+       "Power",
+       [
+        "Negate",
+        "x"
+       ],
+       "n"
+      ]
+     ],
+     [
+      "Limits",
+      "n",
+      0,
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ],
+    [
+     "Less",
+     [
+      "Abs",
+      "x"
+     ],
+     1
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "AGM",
+    "SloaneA",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "agm"
+   ]
+  },
+  {
+   "id": "d60119",
+   "formula": [
+    "Equal",
+    [
+     "AGM",
+     [
+      "Multiply",
+      "c",
+      "a"
+     ],
+     [
+      "Multiply",
+      "c",
+      "b"
+     ]
+    ],
+    [
+     "Multiply",
+     "c",
+     [
+      "AGM",
+      "a",
+      "b"
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b",
+    "c"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "b",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "c",
+     "ComplexNumbers"
+    ],
+    [
+     "Or",
+     [
+      "Equal",
+      "a",
+      0
+     ],
+     [
+      "Equal",
+      "b",
+      0
+     ],
+     [
+      "Equal",
+      "c",
+      0
+     ],
+     [
+      "NotElement",
+      [
+       "Divide",
+       "b",
+       "a"
+      ],
+      [
+       "Interval",
+       [
+        "Open",
+        "NegativeInfinity"
+       ],
+       0
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "AGM"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "agm"
+   ]
+  },
+  {
+   "id": "d6d836",
+   "formula": [
+    "Equal",
+    [
+     "AGM",
+     "a",
+     "b"
+    ],
+    [
+     "Divide",
+     [
+      "Add",
+      "a",
+      "b"
+     ],
+     [
+      "Multiply",
+      2,
+      [
+       "Hypergeometric2F1",
+       [
+        "Divide",
+        1,
+        2
+       ],
+       [
+        "Divide",
+        1,
+        2
+       ],
+       1,
+       [
+        "Power",
+        [
+         "Divide",
+         [
+          "Subtract",
+          "a",
+          "b"
+         ],
+         [
+          "Add",
+          "a",
+          "b"
+         ]
+        ],
+        2
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "b",
+     "ComplexNumbers"
+    ],
+    [
+     "NotEqual",
+     "b",
+     0
+    ],
+    [
+     "NotElement",
+     [
+      "Divide",
+      "a",
+      "b"
+     ],
+     [
+      "Interval",
+      [
+       "Open",
+       "NegativeInfinity"
+      ],
+      0
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "AGM",
+    "Hypergeometric2F1"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "agm"
+   ]
+  },
+  {
+   "id": "e15f43",
+   "formula": [
+    "Equal",
+    [
+     "EllipticK",
+     "m"
+    ],
+    [
+     "Divide",
+     "Pi",
+     [
+      "Multiply",
+      2,
+      [
+       "AGM",
+       1,
+       [
+        "Sqrt",
+        [
+         "Subtract",
+         1,
+         "m"
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "m"
+   ],
+   "assumptions": [
+    "Element",
+    "m",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "AGM",
+    "EllipticK"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "agm",
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "e3896e",
+   "formula": [
+    "Equal",
+    [
+     "AGM",
+     1,
+     [
+      "Divide",
+      [
+       "Sqrt",
+       2
+      ],
+      2
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Multiply",
+      2,
+      [
+       "Power",
+       "Pi",
+       [
+        "Divide",
+        3,
+        2
+       ]
+      ]
+     ],
+     [
+      "Power",
+      [
+       "Gamma",
+       [
+        "Divide",
+        1,
+        4
+       ]
+      ],
+      2
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "AGM",
+    "Gamma"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "agm"
+   ]
+  },
+  {
+   "id": "ea1d58",
+   "formula": [
+    "Equal",
+    [
+     "AGM",
+     "a",
+     "b"
+    ],
+    [
+     "Multiply",
+     "b",
+     [
+      "AGM",
+      1,
+      [
+       "Divide",
+       "a",
+       "b"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "b",
+     "ComplexNumbers"
+    ],
+    [
+     "NotEqual",
+     "b",
+     0
+    ],
+    [
+     "NotElement",
+     [
+      "Divide",
+      "a",
+      "b"
+     ],
+     [
+      "Interval",
+      [
+       "Open",
+       "NegativeInfinity"
+      ],
+      0
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "AGM"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "agm"
+   ]
+  },
+  {
+   "id": "eb0661",
+   "formula": [
+    "Equal",
+    [
+     "AGM",
+     1,
+     1
+    ],
+    1
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "AGM"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "agm"
+   ]
+  },
+  {
+   "id": "f178f2",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "AGM",
+        1,
+        "x"
+       ],
+       "x"
+      ],
+      2
+     ],
+     1
+    ],
+    [
+     "Negate",
+     [
+      "Divide",
+      1,
+      8
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "AGM",
+    "Derivative"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "agm"
+   ]
+  },
+  {
+   "id": "f9190b",
+   "formula": [
+    "Equal",
+    [
+     "AGM",
+     1,
+     [
+      "Subtract",
+      3,
+      [
+       "Multiply",
+       2,
+       [
+        "Sqrt",
+        2
+       ]
+      ]
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Multiply",
+      2,
+      [
+       "Subtract",
+       2,
+       [
+        "Sqrt",
+        2
+       ]
+      ],
+      [
+       "Power",
+       "Pi",
+       [
+        "Divide",
+        3,
+        2
+       ]
+      ]
+     ],
+     [
+      "Power",
+      [
+       "Gamma",
+       [
+        "Divide",
+        1,
+        4
+       ]
+      ],
+      2
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "AGM",
+    "Gamma"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "agm"
+   ]
+  },
+  {
+   "id": "f9caac",
+   "formula": [
+    "Implies",
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     [
+      "AGM",
+      "x"
+     ],
+     "ComplexNumbers"
+    ]
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "AGM"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "agm"
+   ]
+  },
+  {
+   "id": "fa6ff7",
+   "formula": [
+    "Equal",
+    [
+     "AGM",
+     "a",
+     "b"
+    ],
+    [
+     "AGM",
+     [
+      "Divide",
+      [
+       "Add",
+       "a",
+       "b"
+      ],
+      2
+     ],
+     [
+      "Multiply",
+      [
+       "Which",
+       [
+        "Or",
+        [
+         "Equal",
+         [
+          "Sqrt",
+          [
+           "Multiply",
+           "a",
+           "b"
+          ]
+         ],
+         0
+        ],
+        [
+         "GreaterEqual",
+         [
+          "Real",
+          [
+           "Divide",
+           [
+            "Divide",
+            [
+             "Add",
+             "a",
+             "b"
+            ],
+            2
+           ],
+           [
+            "Sqrt",
+            [
+             "Multiply",
+             "a",
+             "b"
+            ]
+           ]
+          ]
+         ],
+         0
+        ]
+       ],
+       1,
+       "True",
+       [
+        "Negate",
+        1
+       ]
+      ],
+      [
+       "Sqrt",
+       [
+        "Multiply",
+        "a",
+        "b"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "b",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "AGM",
+    "Real"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "agm"
+   ]
+  }
+ ]
+}

@@ -76,36 +76,43 @@ export function gamma(z: number): number {
 }
 
 /**
- * Inverse Error Function.
+ * Winitzki's approximation for the inverse error function, accurate to
+ * ~2e-3 relative over (-1, 1). Used as the Newton seed for `erfInv()` and
+ * `bigErfInv()`.
+ */
+function erfInvApprox(x: number): number {
+  const a = 0.147;
+  const ln1mx2 = Math.log(1 - x * x);
+  const b = 2 / (Math.PI * a) + ln1mx2 / 2;
+  return Math.sign(x) * Math.sqrt(Math.sqrt(b * b - ln1mx2 / a) - b);
+}
+
+/**
+ * Inverse Error Function, accurate to full machine (double) precision.
  *
+ * Winitzki's approximation (~3 correct digits) refined with Newton's
+ * method on the full-precision `erf()`:
+ *    y ← y − (erf(y) − x)·(√π/2)·e^{y²}
+ * Each iteration doubles the number of correct digits, so 4 iterations
+ * reach machine precision.
+ *
+ * (Previously used a 6-term truncated Maclaurin series, which was only
+ * ~4-digit accurate at x = 0.5 and diverged badly for |x| → 1.)
  */
 export function erfInv(x: number): number {
-  // From https://en.wikipedia.org/wiki/Error_function#Numerical_approximations
-  // {\displaystyle \operatorname {erf} ^{-1}z={\frac {\sqrt {\pi }}{2}}\left(z+{\frac {\pi }{12}}z^{3}+{\frac {7\pi ^{2}}{480}}z^{5}+{\frac {127\pi ^{3}}{40320}}z^{7}+{\frac {4369\pi ^{4}}{5806080}}z^{9}+{\frac {34807\pi ^{5}}{182476800}}z^{11}+\cdots \right).}
+  if (Number.isNaN(x) || x < -1 || x > 1) return NaN;
+  if (x === 0) return 0;
+  if (x === 1) return Infinity;
+  if (x === -1) return -Infinity;
 
-  const pi = Math.PI;
-  const pi2 = pi * pi;
-  const pi3 = pi2 * pi;
-  const x2 = x * x;
-  const x3 = x * x2;
-  const x5 = x3 * x2;
-  const x7 = x5 * x2;
+  const sign = x < 0 ? -1 : 1;
+  const ax = Math.abs(x);
 
-  return (
-    (Math.sqrt(pi) / 2) *
-    (x +
-      (pi / 12) * x3 +
-      ((7 * pi2) / 480) * x5 +
-      ((127 * pi3) / 40320) * x7 +
-      ((4369 * pi2 * pi2) / 5806080) * x7 * x2 +
-      ((34807 * pi3 * pi2) / 182476800) * x7 * x2 * x2)
-  );
+  let y = erfInvApprox(ax);
+  const c = Math.sqrt(Math.PI) / 2;
+  for (let i = 0; i < 4; i++) y -= (erf(y) - ax) * c * Math.exp(y * y);
 
-  // const a = 0.147;
-  // const b = 2 / (Math.PI * a) + Math.log(1 - x ** 2) / 2;
-  // const sqrt1 = Math.sqrt(b ** 2 - Math.log(1 - x ** 2) / a);
-  // const sqrt2 = Math.sqrt(sqrt1 - b);
-  // return sqrt2 * Math.sign(x);
+  return sign * y;
 }
 
 /**
@@ -1577,7 +1584,11 @@ export function fresnelS(x: number): number {
     return (sign * x * x2 * polevl(t, SN)) / polevl(t, SD);
   }
 
-  if (x < 36) {
+  // Cephes threshold: beyond 36974 the phase πx²/2 is no longer
+  // representable in a double, so the oscillating terms are dropped.
+  // (Previously the cutoff was 36, which gave errors up to ~9e-3:
+  // |S(x) − 1/2| ~ 1/(πx) at the cutoff.)
+  if (x < 36974) {
     const x2 = x * x;
     const t = Math.PI * x2; // πx²
     const u = 1 / (t * t); // 1/(π²x⁴)
@@ -1589,7 +1600,7 @@ export function fresnelS(x: number): number {
     return sign * (0.5 - (f * c + g * s) / (Math.PI * x));
   }
 
-  // Asymptotic: |x| >= 36
+  // |x| >= 36974: S, C -> ±1/2 (phase not representable in a double)
   return sign * 0.5;
 }
 
@@ -1612,7 +1623,8 @@ export function fresnelC(x: number): number {
     return (sign * x * polevl(t, CN)) / polevl(t, CD);
   }
 
-  if (x < 36) {
+  // Cephes threshold: see fresnelS() above.
+  if (x < 36974) {
     const x2 = x * x;
     const t = Math.PI * x2; // πx²
     const u = 1 / (t * t); // 1/(π²x⁴)
@@ -1624,7 +1636,7 @@ export function fresnelC(x: number): number {
     return sign * (0.5 + (f * s - g * c) / (Math.PI * x));
   }
 
-  // Asymptotic: |x| >= 36
+  // |x| >= 36974: S, C -> ±1/2 (phase not representable in a double)
   return sign * 0.5;
 }
 

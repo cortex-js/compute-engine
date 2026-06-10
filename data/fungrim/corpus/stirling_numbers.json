@@ -1,0 +1,829 @@
+{
+ "topic": "stirling_numbers",
+ "title": "Stirling numbers",
+ "source": "pygrim/formulas/stirling_numbers.py",
+ "generator": "grim2mathjson 0.1.0",
+ "entries": [
+  {
+   "id": "071a94",
+   "formula": [
+    "Equal",
+    [
+     "StirlingS1",
+     "n",
+     "k"
+    ],
+    [
+     "Multiply",
+     [
+      "Power",
+      -1,
+      [
+       "Add",
+       "n",
+       "k"
+      ]
+     ],
+     [
+      "StirlingCycle",
+      "n",
+      "k"
+     ]
+    ]
+   ],
+   "variables": [
+    "k",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "k",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "StirlingCycle",
+    "StirlingS1"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "stirling_numbers"
+   ]
+  },
+  {
+   "id": "18ec99",
+   "formula": [
+    "Equal",
+    [
+     "StirlingS1",
+     [
+      "Add",
+      "n",
+      1
+     ],
+     "k"
+    ],
+    [
+     "Subtract",
+     [
+      "StirlingS1",
+      "n",
+      [
+       "Subtract",
+       "k",
+       1
+      ]
+     ],
+     [
+      "Multiply",
+      "n",
+      [
+       "StirlingS1",
+       "n",
+       "k"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "k",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "k",
+     "PositiveIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "StirlingS1"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "stirling_numbers"
+   ]
+  },
+  {
+   "id": "21241f",
+   "formula": [
+    "Equal",
+    [
+     "RisingFactorial",
+     "x",
+     "n"
+    ],
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "StirlingCycle",
+       "n",
+       "k"
+      ],
+      [
+       "Power",
+       "x",
+       "k"
+      ]
+     ],
+     [
+      "Limits",
+      "k",
+      0,
+      "n"
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "RisingFactorial",
+    "StirlingCycle",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "stirling_numbers"
+   ]
+  },
+  {
+   "id": "255576",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Stirling",
+      "n",
+      "k"
+     ],
+     [
+      "Limits",
+      "k",
+      0,
+      "n"
+     ]
+    ],
+    [
+     "BellNumber",
+     "n"
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "BellNumber",
+    "Stirling",
+    "Sum"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "stirling_numbers"
+   ]
+  },
+  {
+   "id": "6189b9",
+   "formula": [
+    "Equal",
+    [
+     "Stirling",
+     "n",
+     "k"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      1,
+      [
+       "Factorial",
+       "k"
+      ]
+     ],
+     [
+      "Sum",
+      [
+       "Multiply",
+       [
+        "Multiply",
+        [
+         "Power",
+         -1,
+         "i_var"
+        ],
+        [
+         "Binomial",
+         "k",
+         "i_var"
+        ]
+       ],
+       [
+        "Power",
+        [
+         "Subtract",
+         "k",
+         "i_var"
+        ],
+        "n"
+       ]
+      ],
+      [
+       "Limits",
+       "i_var",
+       0,
+       "k"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "k",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "k",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Binomial",
+    "Factorial",
+    "Stirling",
+    "Sum"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "stirling_numbers"
+   ]
+  },
+  {
+   "id": "9fbe4f",
+   "formula": [
+    "Equal",
+    [
+     "Stirling",
+     [
+      "Add",
+      "n",
+      1
+     ],
+     "k"
+    ],
+    [
+     "Add",
+     [
+      "Multiply",
+      "k",
+      [
+       "Stirling",
+       "n",
+       "k"
+      ]
+     ],
+     [
+      "Stirling",
+      "n",
+      [
+       "Subtract",
+       "k",
+       1
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "k",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "k",
+     "PositiveIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Stirling"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "stirling_numbers"
+   ]
+  },
+  {
+   "id": "a9a610",
+   "formula": [
+    "Equal",
+    [
+     "Divide",
+     [
+      "Power",
+      [
+       "Subtract",
+       [
+        "Exp",
+        "x"
+       ],
+       1
+      ],
+      "k"
+     ],
+     [
+      "Factorial",
+      "k"
+     ]
+    ],
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "Stirling",
+       "n",
+       "k"
+      ],
+      [
+       "Divide",
+       [
+        "Power",
+        "x",
+        "n"
+       ],
+       [
+        "Factorial",
+        "n"
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "n",
+      "k",
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "variables": [
+    "k",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "k",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Exp",
+    "Factorial",
+    "Stirling",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "stirling_numbers"
+   ]
+  },
+  {
+   "id": "b01280",
+   "formula": [
+    "Equal",
+    [
+     "Divide",
+     [
+      "Power",
+      [
+       "Ln",
+       [
+        "Add",
+        1,
+        "x"
+       ]
+      ],
+      "k"
+     ],
+     [
+      "Factorial",
+      "k"
+     ]
+    ],
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "Multiply",
+       [
+        "Power",
+        -1,
+        [
+         "Subtract",
+         "n",
+         "k"
+        ]
+       ],
+       [
+        "StirlingCycle",
+        "n",
+        "k"
+       ]
+      ],
+      [
+       "Divide",
+       [
+        "Power",
+        "x",
+        "n"
+       ],
+       [
+        "Factorial",
+        "n"
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "n",
+      "k",
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "variables": [
+    "k",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "k",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ],
+    [
+     "Less",
+     [
+      "Abs",
+      "x"
+     ],
+     1
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Factorial",
+    "Ln",
+    "StirlingCycle",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "stirling_numbers"
+   ]
+  },
+  {
+   "id": "b823b0",
+   "formula": [
+    "Equal",
+    [
+     "Power",
+     "x",
+     "n"
+    ],
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "Stirling",
+       "n",
+       "k"
+      ],
+      [
+       "RisingFactorial",
+       [
+        "Add",
+        [
+         "Subtract",
+         "x",
+         "n"
+        ],
+        1
+       ],
+       "n"
+      ]
+     ],
+     [
+      "Limits",
+      "k",
+      0,
+      "n"
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "RisingFactorial",
+    "Stirling",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "stirling_numbers"
+   ]
+  },
+  {
+   "id": "ea9e2f",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "StirlingCycle",
+      "n",
+      "k"
+     ],
+     [
+      "Limits",
+      "k",
+      0,
+      "n"
+     ]
+    ],
+    [
+     "Factorial",
+     "n"
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Factorial",
+    "StirlingCycle",
+    "Sum"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "stirling_numbers"
+   ]
+  },
+  {
+   "id": "f0d72c",
+   "formula": [
+    "Equal",
+    [
+     "StirlingCycle",
+     [
+      "Add",
+      "n",
+      1
+     ],
+     "k"
+    ],
+    [
+     "Add",
+     [
+      "Multiply",
+      "n",
+      [
+       "StirlingCycle",
+       "n",
+       "k"
+      ]
+     ],
+     [
+      "StirlingCycle",
+      "n",
+      [
+       "Subtract",
+       "k",
+       1
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "k",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "k",
+     "PositiveIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "StirlingCycle"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "stirling_numbers"
+   ]
+  },
+  {
+   "id": "f46e0e",
+   "formula": [
+    "Equal",
+    [
+     "RisingFactorial",
+     [
+      "Add",
+      [
+       "Subtract",
+       "x",
+       "n"
+      ],
+      1
+     ],
+     "n"
+    ],
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "StirlingS1",
+       "n",
+       "k"
+      ],
+      [
+       "Power",
+       "x",
+       "k"
+      ]
+     ],
+     [
+      "Limits",
+      "k",
+      0,
+      "n"
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "RisingFactorial",
+    "StirlingS1",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "stirling_numbers"
+   ]
+  }
+ ]
+}

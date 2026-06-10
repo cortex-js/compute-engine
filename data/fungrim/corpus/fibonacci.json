@@ -1,0 +1,4223 @@
+{
+ "topic": "fibonacci",
+ "title": "Fibonacci numbers",
+ "source": "pygrim/formulas/fibonacci.py",
+ "generator": "grim2mathjson 0.1.0",
+ "entries": [
+  {
+   "id": "050fdb",
+   "formula": [
+    "Equal",
+    [
+     "Fibonacci",
+     "n"
+    ],
+    [
+     "Floor",
+     [
+      "Add",
+      [
+       "Divide",
+       [
+        "Power",
+        "GoldenRatio",
+        "n"
+       ],
+       [
+        "Sqrt",
+        5
+       ]
+      ],
+      [
+       "Divide",
+       1,
+       2
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Fibonacci",
+    "Floor"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "fibonacci"
+   ]
+  },
+  {
+   "id": "05209f",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "Fibonacci",
+       "n"
+      ],
+      [
+       "Power",
+       "z",
+       "n"
+      ]
+     ],
+     [
+      "Limits",
+      "n",
+      0,
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Divide",
+     "z",
+     [
+      "Subtract",
+      [
+       "Subtract",
+       1,
+       "z"
+      ],
+      [
+       "Power",
+       "z",
+       2
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Less",
+     [
+      "Abs",
+      "z"
+     ],
+     [
+      "Subtract",
+      "GoldenRatio",
+      1
+     ]
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Fibonacci",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "fibonacci"
+   ]
+  },
+  {
+   "id": "0574c1",
+   "formula": [
+    "AsymptoticTo",
+    [
+     "Fibonacci",
+     "n"
+    ],
+    [
+     "Divide",
+     [
+      "Power",
+      "GoldenRatio",
+      "n"
+     ],
+     [
+      "Sqrt",
+      5
+     ]
+    ],
+    "n",
+    "PositiveInfinity"
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": null,
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "AsymptoticTo",
+    "Fibonacci"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "fibonacci"
+   ]
+  },
+  {
+   "id": "073466",
+   "formula": [
+    "Equal",
+    [
+     "Power",
+     [
+      "Fibonacci",
+      "n"
+     ],
+     2
+    ],
+    [
+     "Subtract",
+     [
+      "Multiply",
+      [
+       "Fibonacci",
+       [
+        "Add",
+        "n",
+        1
+       ]
+      ],
+      [
+       "Fibonacci",
+       [
+        "Subtract",
+        "n",
+        1
+       ]
+      ]
+     ],
+     [
+      "Power",
+      -1,
+      "n"
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "Integers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Fibonacci"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "fibonacci"
+   ]
+  },
+  {
+   "id": "0e2425",
+   "formula": [
+    "Equal",
+    [
+     "Matrix",
+     [
+      "List",
+      [
+       "List",
+       [
+        "Fibonacci",
+        [
+         "Add",
+         "n",
+         1
+        ]
+       ]
+      ],
+      [
+       "List",
+       [
+        "Fibonacci",
+        "n"
+       ]
+      ]
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Matrix",
+      [
+       "List",
+       [
+        "List",
+        1,
+        1
+       ],
+       [
+        "List",
+        1,
+        0
+       ]
+      ]
+     ],
+     [
+      "Matrix",
+      [
+       "List",
+       [
+        "List",
+        [
+         "Fibonacci",
+         "n"
+        ]
+       ],
+       [
+        "List",
+        [
+         "Fibonacci",
+         [
+          "Subtract",
+          "n",
+          1
+         ]
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "Integers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Fibonacci"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "fibonacci"
+   ]
+  },
+  {
+   "id": "10165f",
+   "formula": [
+    "Equal",
+    [
+     "Fibonacci",
+     [
+      "Add",
+      "n",
+      2
+     ]
+    ],
+    [
+     "Add",
+     [
+      "Fibonacci",
+      [
+       "Add",
+       "n",
+       1
+      ]
+     ],
+     [
+      "Fibonacci",
+      "n"
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "Integers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Fibonacci"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "fibonacci"
+   ]
+  },
+  {
+   "id": "12b336",
+   "formula": [
+    "Equal",
+    [
+     "Fibonacci",
+     "n"
+    ],
+    [
+     "Divide",
+     [
+      "Subtract",
+      [
+       "Exp",
+       [
+        "Multiply",
+        "n",
+        [
+         "Ln",
+         "GoldenRatio"
+        ]
+       ]
+      ],
+      [
+       "Multiply",
+       [
+        "Cos",
+        [
+         "Multiply",
+         "Pi",
+         "n"
+        ]
+       ],
+       [
+        "Exp",
+        [
+         "Multiply",
+         [
+          "Negate",
+          "n"
+         ],
+         [
+          "Ln",
+          "GoldenRatio"
+         ]
+        ]
+       ]
+      ]
+     ],
+     [
+      "Sqrt",
+      5
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "Integers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Cos",
+    "Exp",
+    "Fibonacci",
+    "Ln"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "fibonacci"
+   ]
+  },
+  {
+   "id": "1c90fb",
+   "formula": [
+    "Equal",
+    [
+     "Fibonacci",
+     "n"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      "n",
+      [
+       "Power",
+       2,
+       [
+        "Subtract",
+        "n",
+        1
+       ]
+      ]
+     ],
+     [
+      "Hypergeometric2F1",
+      [
+       "Divide",
+       [
+        "Subtract",
+        1,
+        "n"
+       ],
+       2
+      ],
+      [
+       "Divide",
+       [
+        "Subtract",
+        2,
+        "n"
+       ],
+       2
+      ],
+      [
+       "Divide",
+       3,
+       2
+      ],
+      5
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "Integers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Fibonacci",
+    "Hypergeometric2F1"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": [
+    "http://functions.wolfram.com/IntegerFunctions/Fibonacci/26/01/01/0007/"
+   ],
+   "topics": [
+    "fibonacci"
+   ]
+  },
+  {
+   "id": "1eb5e7",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Fibonacci",
+      "k"
+     ],
+     [
+      "Limits",
+      "k",
+      0,
+      "n"
+     ]
+    ],
+    [
+     "Subtract",
+     [
+      "Fibonacci",
+      [
+       "Add",
+       "n",
+       2
+      ]
+     ],
+     1
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Fibonacci",
+    "Sum"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "fibonacci"
+   ]
+  },
+  {
+   "id": "223ce1",
+   "formula": [
+    "Equal",
+    [
+     "Fibonacci",
+     [
+      "Add",
+      [
+       "Multiply",
+       2,
+       "n"
+      ],
+      1
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      2,
+      [
+       "Sqrt",
+       5
+      ]
+     ],
+     [
+      "ChebyshevT",
+      [
+       "Add",
+       [
+        "Multiply",
+        2,
+        "n"
+       ],
+       1
+      ],
+      [
+       "Divide",
+       [
+        "Sqrt",
+        5
+       ],
+       2
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "Integers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ChebyshevT",
+    "Fibonacci"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "fibonacci"
+   ]
+  },
+  {
+   "id": "22b67a",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Divide",
+      1,
+      [
+       "Power",
+       [
+        "Fibonacci",
+        "n"
+       ],
+       2
+      ]
+     ],
+     [
+      "Limits",
+      "n",
+      1,
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      5,
+      24
+     ],
+     [
+      "Add",
+      [
+       "Subtract",
+       [
+        "Power",
+        [
+         "JacobiTheta",
+         2,
+         0,
+         [
+          "Multiply",
+          [
+           "Divide",
+           1,
+           [
+            "Multiply",
+            "Pi",
+            "ImaginaryUnit"
+           ]
+          ],
+          [
+           "Ln",
+           [
+            "Divide",
+            [
+             "Subtract",
+             3,
+             [
+              "Sqrt",
+              5
+             ]
+            ],
+            2
+           ]
+          ]
+         ]
+        ],
+        4
+       ],
+       [
+        "Power",
+        [
+         "JacobiTheta",
+         4,
+         0,
+         [
+          "Multiply",
+          [
+           "Divide",
+           1,
+           [
+            "Multiply",
+            "Pi",
+            "ImaginaryUnit"
+           ]
+          ],
+          [
+           "Ln",
+           [
+            "Divide",
+            [
+             "Subtract",
+             3,
+             [
+              "Sqrt",
+              5
+             ]
+            ],
+            2
+           ]
+          ]
+         ]
+        ],
+        4
+       ]
+      ],
+      1
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Fibonacci",
+    "JacobiTheta",
+    "Ln",
+    "Sum"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": [
+    "J. M. Borwein and P. B. Borwein. Pi and the AGM. Wiley, New York, 1987."
+   ],
+   "topics": [
+    "fibonacci"
+   ]
+  },
+  {
+   "id": "22dc6e",
+   "formula": [
+    "Equal",
+    [
+     "Fibonacci",
+     "n"
+    ],
+    [
+     "Add",
+     [
+      "Fibonacci",
+      [
+       "Subtract",
+       "n",
+       1
+      ]
+     ],
+     [
+      "Fibonacci",
+      [
+       "Subtract",
+       "n",
+       2
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "Integers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Fibonacci"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "fibonacci"
+   ]
+  },
+  {
+   "id": "24107d",
+   "formula": [
+    "Equal",
+    [
+     "Fibonacci",
+     "n"
+    ],
+    [
+     "Divide",
+     [
+      "Subtract",
+      [
+       "Power",
+       "GoldenRatio",
+       "n"
+      ],
+      [
+       "Power",
+       [
+        "Negate",
+        "GoldenRatio"
+       ],
+       [
+        "Negate",
+        "n"
+       ]
+      ]
+     ],
+     [
+      "Sqrt",
+      5
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "Integers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Fibonacci"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "fibonacci"
+   ]
+  },
+  {
+   "id": "2ca869",
+   "formula": [
+    "Equal",
+    [
+     "Fibonacci",
+     [
+      "Multiply",
+      2,
+      "n"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Add",
+      [
+       "Fibonacci",
+       [
+        "Add",
+        "n",
+        1
+       ]
+      ],
+      [
+       "Fibonacci",
+       [
+        "Subtract",
+        "n",
+        1
+       ]
+      ]
+     ],
+     [
+      "Fibonacci",
+      "n"
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "Integers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Fibonacci"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "fibonacci"
+   ]
+  },
+  {
+   "id": "301081",
+   "formula": [
+    "Equal",
+    [
+     "Subtract",
+     [
+      "Multiply",
+      [
+       "Fibonacci",
+       "m"
+      ],
+      [
+       "Fibonacci",
+       [
+        "Add",
+        "n",
+        1
+       ]
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Fibonacci",
+       [
+        "Add",
+        "m",
+        1
+       ]
+      ],
+      [
+       "Fibonacci",
+       "n"
+      ]
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Power",
+      -1,
+      "n"
+     ],
+     [
+      "Fibonacci",
+      [
+       "Subtract",
+       "m",
+       "n"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "m",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "Element",
+     "m",
+     "Integers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Fibonacci"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "fibonacci"
+   ]
+  },
+  {
+   "id": "344963",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Divide",
+      [
+       "Power",
+       -1,
+       [
+        "Add",
+        "n",
+        1
+       ]
+      ],
+      [
+       "Multiply",
+       [
+        "Fibonacci",
+        "n"
+       ],
+       [
+        "Fibonacci",
+        [
+         "Add",
+         "n",
+         1
+        ]
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "n",
+      1,
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Subtract",
+      [
+       "Sqrt",
+       5
+      ],
+      1
+     ],
+     2
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Fibonacci",
+    "Sum"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": [
+    "J. M. Borwein and P. B. Borwein. Pi and the AGM. Wiley, New York, 1987."
+   ],
+   "topics": [
+    "fibonacci"
+   ]
+  },
+  {
+   "id": "35956b",
+   "formula": [
+    "Equal",
+    [
+     "Fibonacci",
+     [
+      "Multiply",
+      2,
+      "n"
+     ]
+    ],
+    [
+     "Subtract",
+     [
+      "Power",
+      [
+       "Fibonacci",
+       [
+        "Add",
+        "n",
+        1
+       ]
+      ],
+      2
+     ],
+     [
+      "Power",
+      [
+       "Fibonacci",
+       [
+        "Subtract",
+        "n",
+        1
+       ]
+      ],
+      2
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "Integers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Fibonacci"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "fibonacci"
+   ]
+  },
+  {
+   "id": "3a9c67",
+   "formula": [
+    "Equal",
+    [
+     "Matrix",
+     [
+      "List",
+      [
+       "List",
+       [
+        "Fibonacci",
+        [
+         "Add",
+         "n",
+         "m"
+        ]
+       ]
+      ],
+      [
+       "List",
+       [
+        "Fibonacci",
+        [
+         "Subtract",
+         [
+          "Add",
+          "n",
+          "m"
+         ],
+         1
+        ]
+       ]
+      ]
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Power",
+      [
+       "Matrix",
+       [
+        "List",
+        [
+         "List",
+         1,
+         1
+        ],
+        [
+         "List",
+         1,
+         0
+        ]
+       ]
+      ],
+      "m"
+     ],
+     [
+      "Matrix",
+      [
+       "List",
+       [
+        "List",
+        [
+         "Fibonacci",
+         "n"
+        ]
+       ],
+       [
+        "List",
+        [
+         "Fibonacci",
+         [
+          "Subtract",
+          "n",
+          1
+         ]
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "m",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "Element",
+     "m",
+     "Integers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Fibonacci"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "fibonacci"
+   ]
+  },
+  {
+   "id": "3bb7e4",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Fibonacci",
+      [
+       "Multiply",
+       2,
+       "k"
+      ]
+     ],
+     [
+      "Limits",
+      "k",
+      0,
+      "n"
+     ]
+    ],
+    [
+     "Subtract",
+     [
+      "Fibonacci",
+      [
+       "Add",
+       [
+        "Multiply",
+        2,
+        "n"
+       ],
+       1
+      ]
+     ],
+     1
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Fibonacci",
+    "Sum"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "fibonacci"
+   ]
+  },
+  {
+   "id": "412334",
+   "formula": [
+    "Less",
+    [
+     "Fibonacci",
+     [
+      "Multiply",
+      2,
+      "n"
+     ]
+    ],
+    [
+     "Power",
+     [
+      "Fibonacci",
+      [
+       "Add",
+       "n",
+       1
+      ]
+     ],
+     2
+    ],
+    [
+     "Fibonacci",
+     [
+      "Add",
+      [
+       "Multiply",
+       2,
+       "n"
+      ],
+      1
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    [
+     "Range",
+     2,
+     "PositiveInfinity"
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Fibonacci"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "fibonacci"
+   ]
+  },
+  {
+   "id": "4b3947",
+   "formula": [
+    "Divides",
+    [
+     "Fibonacci",
+     "d"
+    ],
+    [
+     "Fibonacci",
+     [
+      "Multiply",
+      "d",
+      "n"
+     ]
+    ]
+   ],
+   "variables": [
+    "d",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "d",
+     [
+      "SetMinus",
+      "Integers",
+      [
+       "Set",
+       0
+      ]
+     ]
+    ],
+    [
+     "Element",
+     "n",
+     "Integers"
+    ]
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "Divides",
+    "Fibonacci"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "fibonacci"
+   ]
+  },
+  {
+   "id": "4ec333",
+   "formula": [
+    "Equal",
+    [
+     "Count",
+     [
+      "Set",
+      "k",
+      [
+       "Element",
+       "k",
+       "Integers",
+       [
+        "Divides",
+        "n",
+        [
+         "Fibonacci",
+         "k"
+        ]
+       ]
+      ]
+     ]
+    ],
+    [
+     "Count",
+     "Integers"
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    [
+     "SetMinus",
+     "Integers",
+     [
+      "Set",
+      0
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Divides",
+    "Fibonacci"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "fibonacci"
+   ]
+  },
+  {
+   "id": "5745bd",
+   "formula": [
+    "Equal",
+    [
+     "Fibonacci",
+     [
+      "Multiply",
+      2,
+      "n"
+     ]
+    ],
+    [
+     "Subtract",
+     [
+      "Subtract",
+      [
+       "Power",
+       [
+        "Fibonacci",
+        [
+         "Add",
+         "n",
+         2
+        ]
+       ],
+       2
+      ],
+      [
+       "Power",
+       [
+        "Fibonacci",
+        [
+         "Add",
+         "n",
+         1
+        ]
+       ],
+       2
+      ]
+     ],
+     [
+      "Multiply",
+      2,
+      [
+       "Power",
+       [
+        "Fibonacci",
+        "n"
+       ],
+       2
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "Integers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Fibonacci"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "fibonacci"
+   ]
+  },
+  {
+   "id": "5cb57e",
+   "formula": [
+    "Equal",
+    [
+     "Fibonacci",
+     "n"
+    ],
+    [
+     "Add",
+     [
+      "Multiply",
+      [
+       "Fibonacci",
+       [
+        "Add",
+        "m",
+        1
+       ]
+      ],
+      [
+       "Fibonacci",
+       [
+        "Subtract",
+        "n",
+        "m"
+       ]
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Fibonacci",
+       "m"
+      ],
+      [
+       "Fibonacci",
+       [
+        "Subtract",
+        [
+         "Subtract",
+         "n",
+         "m"
+        ],
+        1
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "m",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "m",
+     "Integers"
+    ],
+    [
+     "Element",
+     "n",
+     "Integers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Fibonacci"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "fibonacci"
+   ]
+  },
+  {
+   "id": "5eb446",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Fibonacci",
+      [
+       "Add",
+       [
+        "Multiply",
+        2,
+        "k"
+       ],
+       1
+      ]
+     ],
+     [
+      "Limits",
+      "k",
+      0,
+      "n"
+     ]
+    ],
+    [
+     "Fibonacci",
+     [
+      "Add",
+      [
+       "Multiply",
+       2,
+       "n"
+      ],
+      2
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Fibonacci",
+    "Sum"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "fibonacci"
+   ]
+  },
+  {
+   "id": "6d437c",
+   "formula": [
+    "Equal",
+    [
+     "Fibonacci",
+     "n"
+    ],
+    [
+     "Subtract",
+     [
+      "Fibonacci",
+      [
+       "Add",
+       "n",
+       2
+      ]
+     ],
+     [
+      "Fibonacci",
+      [
+       "Add",
+       "n",
+       1
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "Integers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Fibonacci"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "fibonacci"
+   ]
+  },
+  {
+   "id": "6d8bf0",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Divide",
+      1,
+      [
+       "Fibonacci",
+       [
+        "Power",
+        2,
+        "n"
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "n",
+      0,
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Subtract",
+      7,
+      [
+       "Sqrt",
+       5
+      ]
+     ],
+     2
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Fibonacci",
+    "Sum"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": [
+    "J. M. Borwein and P. B. Borwein. Pi and the AGM. Wiley, New York, 1987."
+   ],
+   "topics": [
+    "fibonacci"
+   ]
+  },
+  {
+   "id": "6db705",
+   "formula": [
+    "Divides",
+    "p",
+    [
+     "Fibonacci",
+     [
+      "Subtract",
+      "p",
+      [
+       "KroneckerSymbol",
+       "p",
+       5
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "p"
+   ],
+   "assumptions": [
+    "Element",
+    "p",
+    "Primes"
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "Divides",
+    "Fibonacci",
+    "KroneckerSymbol"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "fibonacci"
+   ]
+  },
+  {
+   "id": "70878b",
+   "formula": [
+    "Equal",
+    [
+     "Fibonacci",
+     [
+      "Subtract",
+      [
+       "Add",
+       "m",
+       "n"
+      ],
+      1
+     ]
+    ],
+    [
+     "Add",
+     [
+      "Multiply",
+      [
+       "Fibonacci",
+       "m"
+      ],
+      [
+       "Fibonacci",
+       "n"
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Fibonacci",
+       [
+        "Subtract",
+        "m",
+        1
+       ]
+      ],
+      [
+       "Fibonacci",
+       [
+        "Subtract",
+        "n",
+        1
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "m",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "m",
+     "Integers"
+    ],
+    [
+     "Element",
+     "n",
+     "Integers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Fibonacci"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "fibonacci"
+   ]
+  },
+  {
+   "id": "7b0abf",
+   "formula": [
+    "Equal",
+    [
+     "GCD",
+     [
+      "Fibonacci",
+      "n"
+     ],
+     [
+      "Fibonacci",
+      [
+       "Add",
+       "n",
+       1
+      ]
+     ]
+    ],
+    1
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "Integers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Fibonacci",
+    "GCD"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "fibonacci"
+   ]
+  },
+  {
+   "id": "7ef2c7",
+   "formula": [
+    "Equal",
+    [
+     "Fibonacci",
+     "n"
+    ],
+    [
+     "Add",
+     [
+      "Multiply",
+      2,
+      [
+       "Fibonacci",
+       [
+        "Subtract",
+        "n",
+        2
+       ]
+      ]
+     ],
+     [
+      "Fibonacci",
+      [
+       "Subtract",
+       "n",
+       3
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "Integers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Fibonacci"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "fibonacci"
+   ]
+  },
+  {
+   "id": "82373a",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Power",
+      [
+       "Fibonacci",
+       "k"
+      ],
+      2
+     ],
+     [
+      "Limits",
+      "k",
+      0,
+      "n"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Fibonacci",
+      "n"
+     ],
+     [
+      "Fibonacci",
+      [
+       "Add",
+       "n",
+       1
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Fibonacci",
+    "Sum"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "fibonacci"
+   ]
+  },
+  {
+   "id": "8a548e",
+   "formula": [
+    "Equal",
+    [
+     "Power",
+     [
+      "Matrix",
+      [
+       "List",
+       [
+        "List",
+        1,
+        1
+       ],
+       [
+        "List",
+        1,
+        0
+       ]
+      ]
+     ],
+     "n"
+    ],
+    [
+     "Matrix",
+     [
+      "List",
+      [
+       "List",
+       [
+        "Fibonacci",
+        [
+         "Add",
+         "n",
+         1
+        ]
+       ],
+       [
+        "Fibonacci",
+        "n"
+       ]
+      ],
+      [
+       "List",
+       [
+        "Fibonacci",
+        "n"
+       ],
+       [
+        "Fibonacci",
+        [
+         "Subtract",
+         "n",
+         1
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "Integers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Fibonacci"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "fibonacci"
+   ]
+  },
+  {
+   "id": "8db61e",
+   "formula": [
+    "Equal",
+    [
+     "Subtract",
+     [
+      "Multiply",
+      [
+       "Fibonacci",
+       [
+        "Add",
+        "n",
+        "i_var"
+       ]
+      ],
+      [
+       "Fibonacci",
+       [
+        "Add",
+        "n",
+        "j"
+       ]
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Fibonacci",
+       "n"
+      ],
+      [
+       "Fibonacci",
+       [
+        "Add",
+        [
+         "Add",
+         "n",
+         "i_var"
+        ],
+        "j"
+       ]
+      ]
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      [
+       "Power",
+       -1,
+       "n"
+      ],
+      [
+       "Fibonacci",
+       "i_var"
+      ]
+     ],
+     [
+      "Fibonacci",
+      "j"
+     ]
+    ]
+   ],
+   "variables": [
+    "i_var",
+    "j",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "Element",
+     "i_var",
+     "Integers"
+    ],
+    [
+     "Element",
+     "j",
+     "Integers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Fibonacci"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "fibonacci"
+   ]
+  },
+  {
+   "id": "90c290",
+   "formula": [
+    "Equal",
+    [
+     "Fibonacci",
+     "n"
+    ],
+    [
+     "Hypergeometric2F1",
+     [
+      "Divide",
+      [
+       "Subtract",
+       1,
+       "n"
+      ],
+      2
+     ],
+     [
+      "Divide",
+      [
+       "Subtract",
+       2,
+       "n"
+      ],
+      2
+     ],
+     [
+      "Subtract",
+      1,
+      "n"
+     ],
+     -4
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "PositiveIntegers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Fibonacci",
+    "Hypergeometric2F1"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "fibonacci"
+   ]
+  },
+  {
+   "id": "9638c1",
+   "formula": [
+    "Equal",
+    [
+     "Fibonacci",
+     "n"
+    ],
+    [
+     "Sum",
+     [
+      "Binomial",
+      [
+       "Subtract",
+       [
+        "Subtract",
+        "n",
+        "k"
+       ],
+       1
+      ],
+      "k"
+     ],
+     [
+      "Limits",
+      "k",
+      0,
+      [
+       "Subtract",
+       "n",
+       1
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Binomial",
+    "Fibonacci",
+    "Sum"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "fibonacci"
+   ]
+  },
+  {
+   "id": "9c53d7",
+   "formula": [
+    "Greater",
+    [
+     "Fibonacci",
+     "n"
+    ],
+    [
+     "Divide",
+     [
+      "Subtract",
+      [
+       "Power",
+       "GoldenRatio",
+       "n"
+      ],
+      1
+     ],
+     [
+      "Sqrt",
+      5
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "PositiveIntegers"
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Fibonacci"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "fibonacci"
+   ]
+  },
+  {
+   "id": "9d26d2",
+   "formula": [
+    "Equal",
+    [
+     "Set",
+     [
+      "Fibonacci",
+      "n"
+     ],
+     [
+      "Element",
+      "n",
+      "NonNegativeIntegers",
+      [
+       "Element",
+       [
+        "Sqrt",
+        [
+         "Fibonacci",
+         "n"
+        ]
+       ],
+       "Integers"
+      ]
+     ]
+    ],
+    [
+     "Set",
+     [
+      "Fibonacci",
+      0
+     ],
+     [
+      "Fibonacci",
+      1
+     ],
+     [
+      "Fibonacci",
+      2
+     ],
+     [
+      "Fibonacci",
+      12
+     ]
+    ],
+    [
+     "Set",
+     0,
+     1,
+     144
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Fibonacci"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "fibonacci"
+   ]
+  },
+  {
+   "id": "a0206a",
+   "formula": [
+    "Equivalent",
+    [
+     "Element",
+     "x",
+     [
+      "Set",
+      [
+       "Fibonacci",
+       "n"
+      ],
+      [
+       "Element",
+       "n",
+       "NonNegativeIntegers"
+      ]
+     ]
+    ],
+    [
+     "Or",
+     [
+      "Element",
+      [
+       "Sqrt",
+       [
+        "Add",
+        [
+         "Multiply",
+         5,
+         [
+          "Power",
+          "x",
+          2
+         ]
+        ],
+        4
+       ]
+      ],
+      "Integers"
+     ],
+     [
+      "Element",
+      [
+       "Sqrt",
+       [
+        "Subtract",
+        [
+         "Multiply",
+         5,
+         [
+          "Power",
+          "x",
+          2
+         ]
+        ],
+        4
+       ]
+      ],
+      "Integers"
+     ]
+    ]
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": [
+    "Element",
+    "x",
+    "NonNegativeIntegers"
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "Fibonacci"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "fibonacci"
+   ]
+  },
+  {
+   "id": "a104b0",
+   "formula": [
+    "Equal",
+    [
+     "Fibonacci",
+     [
+      "Add",
+      "m",
+      "n"
+     ]
+    ],
+    [
+     "Add",
+     [
+      "Multiply",
+      [
+       "Fibonacci",
+       "m"
+      ],
+      [
+       "Fibonacci",
+       [
+        "Add",
+        "n",
+        1
+       ]
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Fibonacci",
+       [
+        "Subtract",
+        "m",
+        1
+       ]
+      ],
+      [
+       "Fibonacci",
+       "n"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "m",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "m",
+     "Integers"
+    ],
+    [
+     "Element",
+     "n",
+     "Integers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Fibonacci"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "fibonacci"
+   ]
+  },
+  {
+   "id": "a8f2ac",
+   "formula": [
+    "Equal",
+    [
+     "Fibonacci",
+     [
+      "Add",
+      "n",
+      1
+     ]
+    ],
+    [
+     "Add",
+     [
+      "Fibonacci",
+      "n"
+     ],
+     [
+      "Fibonacci",
+      [
+       "Subtract",
+       "n",
+       1
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "Integers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Fibonacci"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "fibonacci"
+   ]
+  },
+  {
+   "id": "aaa244",
+   "formula": [
+    "Equal",
+    [
+     "GCD",
+     [
+      "Fibonacci",
+      "n"
+     ],
+     [
+      "Fibonacci",
+      [
+       "Add",
+       "n",
+       2
+      ]
+     ]
+    ],
+    1
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "Integers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Fibonacci",
+    "GCD"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "fibonacci"
+   ]
+  },
+  {
+   "id": "aadf90",
+   "formula": [
+    "Equal",
+    [
+     "Fibonacci",
+     [
+      "Multiply",
+      2,
+      "n"
+     ]
+    ],
+    [
+     "ChebyshevU",
+     [
+      "Subtract",
+      "n",
+      1
+     ],
+     [
+      "Divide",
+      3,
+      2
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "Integers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ChebyshevU",
+    "Fibonacci"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "fibonacci"
+   ]
+  },
+  {
+   "id": "ab563e",
+   "formula": [
+    "Equal",
+    [
+     "Power",
+     [
+      "Fibonacci",
+      "n"
+     ],
+     2
+    ],
+    [
+     "Add",
+     [
+      "Multiply",
+      [
+       "Fibonacci",
+       [
+        "Add",
+        "n",
+        "m"
+       ]
+      ],
+      [
+       "Fibonacci",
+       [
+        "Subtract",
+        "n",
+        "m"
+       ]
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Power",
+       -1,
+       [
+        "Add",
+        "n",
+        "m"
+       ]
+      ],
+      [
+       "Power",
+       [
+        "Fibonacci",
+        "m"
+       ],
+       2
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "m",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "Element",
+     "m",
+     "Integers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Fibonacci"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "fibonacci"
+   ]
+  },
+  {
+   "id": "ac4d13",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "Binomial",
+       "n",
+       "k"
+      ],
+      [
+       "Fibonacci",
+       "k"
+      ]
+     ],
+     [
+      "Limits",
+      "k",
+      0,
+      "n"
+     ]
+    ],
+    [
+     "Fibonacci",
+     [
+      "Multiply",
+      2,
+      "n"
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Binomial",
+    "Fibonacci",
+    "Sum"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "fibonacci"
+   ]
+  },
+  {
+   "id": "ad0d7a",
+   "formula": [
+    "Equal",
+    [
+     "Fibonacci",
+     "n"
+    ],
+    [
+     "Divide",
+     [
+      "Subtract",
+      [
+       "Power",
+       "GoldenRatio",
+       "n"
+      ],
+      [
+       "Multiply",
+       [
+        "Cos",
+        [
+         "Multiply",
+         "Pi",
+         "n"
+        ]
+       ],
+       [
+        "Power",
+        "GoldenRatio",
+        [
+         "Negate",
+         "n"
+        ]
+       ]
+      ]
+     ],
+     [
+      "Sqrt",
+      5
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "Integers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Cos",
+    "Fibonacci"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "fibonacci"
+   ]
+  },
+  {
+   "id": "ae76a3",
+   "formula": [
+    "Equal",
+    [
+     "Fibonacci",
+     "n"
+    ],
+    [
+     "Multiply",
+     [
+      "Power",
+      "ImaginaryUnit",
+      [
+       "Subtract",
+       "n",
+       1
+      ]
+     ],
+     [
+      "ChebyshevU",
+      [
+       "Subtract",
+       "n",
+       1
+      ],
+      [
+       "Negate",
+       [
+        "Divide",
+        "ImaginaryUnit",
+        2
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "Integers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ChebyshevU",
+    "Fibonacci"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "fibonacci"
+   ]
+  },
+  {
+   "id": "ae9d30",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Divide",
+      1,
+      [
+       "Add",
+       [
+        "Fibonacci",
+        [
+         "Add",
+         [
+          "Multiply",
+          2,
+          "n"
+         ],
+         1
+        ]
+       ],
+       1
+      ]
+     ],
+     [
+      "Limits",
+      "n",
+      0,
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Sqrt",
+      5
+     ],
+     2
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Fibonacci",
+    "Sum"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": [
+    "J. M. Borwein and P. B. Borwein. Pi and the AGM. Wiley, New York, 1987."
+   ],
+   "topics": [
+    "fibonacci"
+   ]
+  },
+  {
+   "id": "b8ed8f",
+   "formula": [
+    "Equal",
+    [
+     "Fibonacci",
+     "n"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      1,
+      [
+       "Power",
+       2,
+       [
+        "Subtract",
+        "n",
+        1
+       ]
+      ]
+     ],
+     [
+      "Sum",
+      [
+       "Multiply",
+       [
+        "Power",
+        5,
+        "k"
+       ],
+       [
+        "Binomial",
+        "n",
+        [
+         "Add",
+         [
+          "Multiply",
+          2,
+          "k"
+         ],
+         1
+        ]
+       ]
+      ],
+      [
+       "Limits",
+       "k",
+       0,
+       [
+        "Floor",
+        [
+         "Divide",
+         [
+          "Subtract",
+          "n",
+          1
+         ],
+         2
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Binomial",
+    "Fibonacci",
+    "Floor",
+    "Sum"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "fibonacci"
+   ]
+  },
+  {
+   "id": "bceed4",
+   "formula": [
+    "Equal",
+    [
+     "Fibonacci",
+     "n"
+    ],
+    [
+     "Divide",
+     [
+      "Add",
+      [
+       "Multiply",
+       [
+        "Add",
+        1,
+        [
+         "Cos",
+         [
+          "Multiply",
+          "Pi",
+          "n"
+         ]
+        ]
+       ],
+       [
+        "Sinh",
+        [
+         "Multiply",
+         "n",
+         [
+          "Ln",
+          "GoldenRatio"
+         ]
+        ]
+       ]
+      ],
+      [
+       "Multiply",
+       [
+        "Subtract",
+        1,
+        [
+         "Cos",
+         [
+          "Multiply",
+          "Pi",
+          "n"
+         ]
+        ]
+       ],
+       [
+        "Cosh",
+        [
+         "Multiply",
+         "n",
+         [
+          "Ln",
+          "GoldenRatio"
+         ]
+        ]
+       ]
+      ]
+     ],
+     [
+      "Sqrt",
+      5
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "Integers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Cos",
+    "Cosh",
+    "Fibonacci",
+    "Ln",
+    "Sinh"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "fibonacci"
+   ]
+  },
+  {
+   "id": "c4d78a",
+   "formula": [
+    "Equal",
+    [
+     "Fibonacci",
+     "n"
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      [
+       "Divide",
+       2,
+       [
+        "Sqrt",
+        5
+       ]
+      ],
+      [
+       "Power",
+       [
+        "Negate",
+        "ImaginaryUnit"
+       ],
+       "n"
+      ]
+     ],
+     [
+      "Sinh",
+      [
+       "Multiply",
+       "n",
+       [
+        "Add",
+        [
+         "Ln",
+         "GoldenRatio"
+        ],
+        [
+         "Multiply",
+         [
+          "Multiply",
+          [
+           "Divide",
+           1,
+           2
+          ],
+          "Pi"
+         ],
+         "ImaginaryUnit"
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "Integers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Fibonacci",
+    "Ln",
+    "Sinh"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "fibonacci"
+   ]
+  },
+  {
+   "id": "c84407",
+   "formula": [
+    "CongruentMod",
+    [
+     "Fibonacci",
+     "p"
+    ],
+    [
+     "KroneckerSymbol",
+     "p",
+     5
+    ],
+    "p"
+   ],
+   "variables": [
+    "p"
+   ],
+   "assumptions": [
+    "Element",
+    "p",
+    "Primes"
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "CongruentMod",
+    "Fibonacci",
+    "KroneckerSymbol"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "fibonacci"
+   ]
+  },
+  {
+   "id": "cbfe21",
+   "formula": [
+    "Equal",
+    [
+     "Fibonacci",
+     "n"
+    ],
+    [
+     "Add",
+     [
+      "Multiply",
+      3,
+      [
+       "Fibonacci",
+       [
+        "Subtract",
+        "n",
+        3
+       ]
+      ]
+     ],
+     [
+      "Multiply",
+      2,
+      [
+       "Fibonacci",
+       [
+        "Subtract",
+        "n",
+        4
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "Integers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Fibonacci"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "fibonacci"
+   ]
+  },
+  {
+   "id": "ce6dd0",
+   "formula": [
+    "Equal",
+    [
+     "Fibonacci",
+     [
+      "Negate",
+      "n"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Power",
+      -1,
+      [
+       "Add",
+       "n",
+       1
+      ]
+     ],
+     [
+      "Fibonacci",
+      "n"
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "Integers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Fibonacci"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "fibonacci"
+   ]
+  },
+  {
+   "id": "d0d91a",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "Fibonacci",
+       "n"
+      ],
+      [
+       "Divide",
+       [
+        "Power",
+        "z",
+        "n"
+       ],
+       [
+        "Factorial",
+        "n"
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "n",
+      0,
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      [
+       "Divide",
+       2,
+       [
+        "Sqrt",
+        5
+       ]
+      ],
+      [
+       "Exp",
+       [
+        "Divide",
+        "z",
+        2
+       ]
+      ]
+     ],
+     [
+      "Sinh",
+      [
+       "Multiply",
+       [
+        "Divide",
+        [
+         "Sqrt",
+         5
+        ],
+        2
+       ],
+       "z"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Exp",
+    "Factorial",
+    "Fibonacci",
+    "Sinh",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "fibonacci"
+   ]
+  },
+  {
+   "id": "d454a3",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "Multiply",
+       [
+        "Binomial",
+        "n",
+        "k"
+       ],
+       [
+        "Power",
+        2,
+        "k"
+       ]
+      ],
+      [
+       "Fibonacci",
+       "k"
+      ]
+     ],
+     [
+      "Limits",
+      "k",
+      0,
+      "n"
+     ]
+    ],
+    [
+     "Fibonacci",
+     [
+      "Multiply",
+      3,
+      "n"
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Binomial",
+    "Fibonacci",
+    "Sum"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "fibonacci"
+   ]
+  },
+  {
+   "id": "d56025",
+   "formula": [
+    "Equal",
+    [
+     "Limit",
+     [
+      "Function",
+      [
+       "Divide",
+       [
+        "Fibonacci",
+        [
+         "Add",
+         "n",
+         "m"
+        ]
+       ],
+       [
+        "Fibonacci",
+        "n"
+       ]
+      ],
+      "n"
+     ],
+     "PositiveInfinity"
+    ],
+    [
+     "Power",
+     "GoldenRatio",
+     "m"
+    ]
+   ],
+   "variables": [
+    "m"
+   ],
+   "assumptions": [
+    "Element",
+    "m",
+    "Integers"
+   ],
+   "class": "representation",
+   "subclass": "limit",
+   "heads": [
+    "Fibonacci",
+    "Limit"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": "sequence",
+   "references": null,
+   "topics": [
+    "fibonacci"
+   ]
+  },
+  {
+   "id": "d7c89c",
+   "formula": [
+    "Equal",
+    [
+     "Fibonacci",
+     "n"
+    ],
+    [
+     "Sum",
+     [
+      "Binomial",
+      [
+       "Subtract",
+       [
+        "Subtract",
+        "n",
+        "k"
+       ],
+       1
+      ],
+      "k"
+     ],
+     [
+      "Limits",
+      "k",
+      0,
+      [
+       "Floor",
+       [
+        "Divide",
+        [
+         "Subtract",
+         "n",
+         1
+        ],
+        2
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Binomial",
+    "Fibonacci",
+    "Floor",
+    "Sum"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "fibonacci"
+   ]
+  },
+  {
+   "id": "da1873",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Divide",
+      1,
+      [
+       "Fibonacci",
+       [
+        "Add",
+        [
+         "Multiply",
+         2,
+         "n"
+        ],
+        1
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "n",
+      0,
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      [
+       "Sqrt",
+       5
+      ],
+      4
+     ],
+     [
+      "Power",
+      [
+       "JacobiTheta",
+       2,
+       0,
+       [
+        "Multiply",
+        [
+         "Divide",
+         1,
+         [
+          "Multiply",
+          "Pi",
+          "ImaginaryUnit"
+         ]
+        ],
+        [
+         "Ln",
+         [
+          "Divide",
+          [
+           "Subtract",
+           3,
+           [
+            "Sqrt",
+            5
+           ]
+          ],
+          2
+         ]
+        ]
+       ]
+      ],
+      2
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Fibonacci",
+    "JacobiTheta",
+    "Ln",
+    "Sum"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": [
+    "J. M. Borwein and P. B. Borwein. Pi and the AGM. Wiley, New York, 1987."
+   ],
+   "topics": [
+    "fibonacci"
+   ]
+  },
+  {
+   "id": "f3aff5",
+   "formula": [
+    "Less",
+    [
+     "Fibonacci",
+     "n"
+    ],
+    [
+     "Divide",
+     [
+      "Add",
+      [
+       "Power",
+       "GoldenRatio",
+       "n"
+      ],
+      1
+     ],
+     [
+      "Sqrt",
+      5
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Fibonacci"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "fibonacci"
+   ]
+  },
+  {
+   "id": "f5f706",
+   "formula": [
+    "CongruentMod",
+    [
+     "Fibonacci",
+     [
+      "Add",
+      "n",
+      60
+     ]
+    ],
+    [
+     "Fibonacci",
+     "n"
+    ],
+    10
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "Integers"
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "CongruentMod",
+    "Fibonacci"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "fibonacci"
+   ]
+  },
+  {
+   "id": "f95561",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "Multiply",
+       [
+        "Power",
+        -1,
+        [
+         "Add",
+         "k",
+         1
+        ]
+       ],
+       [
+        "Binomial",
+        "n",
+        "k"
+       ]
+      ],
+      [
+       "Fibonacci",
+       "k"
+      ]
+     ],
+     [
+      "Limits",
+      "k",
+      0,
+      "n"
+     ]
+    ],
+    [
+     "Fibonacci",
+     "n"
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Binomial",
+    "Fibonacci",
+    "Sum"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "fibonacci"
+   ]
+  },
+  {
+   "id": "fc4fd1",
+   "formula": [
+    "Equal",
+    [
+     "Fibonacci",
+     [
+      "Add",
+      [
+       "Multiply",
+       2,
+       "n"
+      ],
+      1
+     ]
+    ],
+    [
+     "Add",
+     [
+      "Power",
+      [
+       "Fibonacci",
+       [
+        "Add",
+        "n",
+        1
+       ]
+      ],
+      2
+     ],
+     [
+      "Power",
+      [
+       "Fibonacci",
+       "n"
+      ],
+      2
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "Integers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Fibonacci"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "fibonacci"
+   ]
+  },
+  {
+   "id": "fd732d",
+   "formula": [
+    "Equal",
+    [
+     "Fibonacci",
+     "n"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      2,
+      [
+       "Sqrt",
+       5
+      ]
+     ],
+     [
+      "Which",
+      [
+       "IsEven",
+       "n"
+      ],
+      [
+       "Sinh",
+       [
+        "Multiply",
+        "n",
+        [
+         "Ln",
+         "GoldenRatio"
+        ]
+       ]
+      ],
+      [
+       "IsOdd",
+       "n"
+      ],
+      [
+       "Cosh",
+       [
+        "Multiply",
+        "n",
+        [
+         "Ln",
+         "GoldenRatio"
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "Integers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Cosh",
+    "Fibonacci",
+    "IsEven",
+    "IsOdd",
+    "Ln",
+    "Sinh"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "fibonacci"
+   ]
+  },
+  {
+   "id": "fdfdcc",
+   "formula": [
+    "Equal",
+    [
+     "Limit",
+     [
+      "Function",
+      [
+       "Divide",
+       [
+        "Fibonacci",
+        [
+         "Add",
+         "n",
+         1
+        ]
+       ],
+       [
+        "Fibonacci",
+        "n"
+       ]
+      ],
+      "n"
+     ],
+     "PositiveInfinity"
+    ],
+    "GoldenRatio"
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "limit",
+   "heads": [
+    "Fibonacci",
+    "Limit"
+   ],
+   "guardLevel": "none",
+   "flavor": "sequence",
+   "references": null,
+   "topics": [
+    "fibonacci"
+   ]
+  }
+ ]
+}

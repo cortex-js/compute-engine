@@ -1,0 +1,2618 @@
+{
+ "generator": "grim2mathjson 0.1.0",
+ "declarations": {
+  "AGM": {
+   "fungrimId": "b0d256",
+   "description": "Arithmetic-geometric mean",
+   "arity": [
+    1,
+    2
+   ],
+   "signature": "(complex, complex) -> complex",
+   "signatureSource": "verified",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "AGMSequence": {
+   "fungrimId": "eda1e3",
+   "description": "Convergents in AGM iteration",
+   "arity": 3,
+   "signature": "(integer, complex, complex) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "AlgebraicNumbers": {
+   "fungrimId": "be9c83",
+   "description": "Algebraic numbers",
+   "arity": null,
+   "signature": "collection<complex>",
+   "signatureSource": "verified",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "ArgMax": {
+   "fungrimId": "617fe3",
+   "description": "Locations of maximum value",
+   "arity": 2,
+   "signature": "(function, collection, any*) -> set",
+   "signatureSource": "curated",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "ArgMaxUnique": {
+   "fungrimId": "be4926",
+   "description": "Unique location of maximum value",
+   "arity": 2,
+   "signature": "(function, collection, any*) -> any",
+   "signatureSource": "curated",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "ArgMin": {
+   "fungrimId": "0a3e5a",
+   "description": "Locations of minimum value",
+   "arity": 2,
+   "signature": "(function, collection, any*) -> set",
+   "signatureSource": "curated",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "ArgMinUnique": {
+   "fungrimId": "f4fbb8",
+   "description": "Unique location of minimum value",
+   "arity": 2,
+   "signature": "(function, collection, any*) -> any",
+   "signatureSource": "curated",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "AsymptoticTo": {
+   "fungrimId": null,
+   "description": null,
+   "arity": 4,
+   "signature": "(any, any, any, any) -> boolean",
+   "signatureSource": "curated",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "BarnesG": {
+   "fungrimId": "82a1b1",
+   "description": "Barnes G-function",
+   "arity": 1,
+   "signature": "(complex) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "BernoulliB": {
+   "fungrimId": "ac8eca",
+   "description": "Bernoulli number",
+   "arity": 1,
+   "signature": "(integer) -> rational",
+   "signatureSource": "verified",
+   "signatureInferred": true,
+   "domainTable": [
+    {
+     "section": null,
+     "domain": [
+      "Element",
+      "n",
+      "NonNegativeIntegers"
+     ],
+     "codomain": [
+      "Element",
+      [
+       "BernoulliB",
+       "n"
+      ],
+      "RationalNumbers"
+     ]
+    }
+   ],
+   "wikidata": null
+  },
+  "BernoulliPolynomial": {
+   "fungrimId": "1f88a4",
+   "description": "Bernoulli polynomial",
+   "arity": 2,
+   "signature": "(integer, complex) -> complex",
+   "signatureSource": "table",
+   "signatureInferred": true,
+   "domainTable": [
+    {
+     "section": null,
+     "domain": [
+      "And",
+      [
+       "Element",
+       "n",
+       "NonNegativeIntegers"
+      ],
+      [
+       "Element",
+       "z",
+       "RealNumbers"
+      ]
+     ],
+     "codomain": [
+      "Element",
+      [
+       "BernoulliPolynomial",
+       "n",
+       "z"
+      ],
+      "RealNumbers"
+     ]
+    },
+    {
+     "section": null,
+     "domain": [
+      "And",
+      [
+       "Element",
+       "n",
+       "NonNegativeIntegers"
+      ],
+      [
+       "Element",
+       "z",
+       "ComplexNumbers"
+      ]
+     ],
+     "codomain": [
+      "Element",
+      [
+       "BernoulliPolynomial",
+       "n",
+       "z"
+      ],
+      "ComplexNumbers"
+     ]
+    },
+    {
+     "section": null,
+     "domain": [
+      "And",
+      [
+       "Element",
+       "n",
+       "NonNegativeIntegers"
+      ],
+      [
+       "Element",
+       "z",
+       "R"
+      ],
+      [
+       "Element",
+       "R",
+       "Rings"
+      ],
+      [
+       "SubsetEqual",
+       "RationalNumbers",
+       "R"
+      ]
+     ],
+     "codomain": [
+      "Element",
+      [
+       "BernoulliPolynomial",
+       "n",
+       "z"
+      ],
+      "R"
+     ]
+    }
+   ],
+   "wikidata": null
+  },
+  "BernsteinEllipse": {
+   "fungrimId": null,
+   "description": null,
+   "arity": 1,
+   "signature": "(real) -> set<complex>",
+   "signatureSource": "curated",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "BesselJZero": {
+   "fungrimId": null,
+   "description": null,
+   "arity": 2,
+   "signature": "(any, integer) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "CarlsonHypergeometricR": {
+   "fungrimId": "b576e6",
+   "description": "Carlson multivariate hypergeometric function",
+   "arity": 3,
+   "signature": "(any+) -> any",
+   "signatureSource": "fallback",
+   "signatureInferred": false,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "CarlsonRC": {
+   "fungrimId": "132ec5",
+   "description": "Degenerate Carlson symmetric elliptic integral of the first kind",
+   "arity": 2,
+   "signature": "(complex, complex) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "CarlsonRD": {
+   "fungrimId": "663d75",
+   "description": "Degenerate Carlson symmetric elliptic integral of the third kind",
+   "arity": 3,
+   "signature": "(complex, complex, complex) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "CarlsonRF": {
+   "fungrimId": "5cd377",
+   "description": "Carlson symmetric elliptic integral of the first kind",
+   "arity": 3,
+   "signature": "(complex, complex, complex) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "CarlsonRG": {
+   "fungrimId": "8f7c2a",
+   "description": "Carlson symmetric elliptic integral of the second kind",
+   "arity": 3,
+   "signature": "(complex, complex, complex) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "CarlsonRJ": {
+   "fungrimId": "bac745",
+   "description": "Carlson symmetric elliptic integral of the third kind",
+   "arity": 4,
+   "signature": "(complex, complex, complex, complex) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "ChebyshevT": {
+   "fungrimId": "1a0c43",
+   "description": "Chebyshev polynomial of the first kind",
+   "arity": 2,
+   "signature": "(integer, complex) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "ChebyshevU": {
+   "fungrimId": "d4e9aa",
+   "description": "Chebyshev polynomial of the second kind",
+   "arity": 2,
+   "signature": "(integer, complex) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "ClosedDisk": {
+   "fungrimId": null,
+   "description": null,
+   "arity": 2,
+   "signature": "(complex, real) -> set<complex>",
+   "signatureSource": "curated",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "ComplexIndefiniteIntegralEqual": {
+   "fungrimId": "fb2790",
+   "description": "Indefinite integral, complex derivative",
+   "arity": 3,
+   "signature": "(any, any, any, any?) -> boolean",
+   "signatureSource": "curated",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "ComplexZeroMultiplicity": {
+   "fungrimId": "231a99",
+   "description": "Multiplicity (order) of complex zero",
+   "arity": 2,
+   "signature": "(function, any*) -> integer",
+   "signatureSource": "curated",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "CongruentMod": {
+   "fungrimId": null,
+   "description": null,
+   "arity": 3,
+   "signature": "(integer, integer, integer) -> boolean",
+   "signatureSource": "verified",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "ConreyGenerator": {
+   "fungrimId": "166a87",
+   "description": "Conrey generator",
+   "arity": 1,
+   "signature": "(integer) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "ConstGlaisher": {
+   "fungrimId": null,
+   "description": null,
+   "arity": null,
+   "signature": "real",
+   "signatureSource": "curated",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "CoulombC": {
+   "fungrimId": "2b12f4",
+   "description": "Coulomb wave function Gamow factor",
+   "arity": 2,
+   "signature": "(complex, complex) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "CoulombF": {
+   "fungrimId": "8b2cb9",
+   "description": "Regular Coulomb wave function",
+   "arity": 3,
+   "signature": "(complex, complex, complex) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "CoulombG": {
+   "fungrimId": "f25e3d",
+   "description": "Irregular Coulomb wave function",
+   "arity": 3,
+   "signature": "(complex, complex, complex) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "CoulombH": {
+   "fungrimId": "16a4e7",
+   "description": "Outgoing and ingoing Coulomb wave function",
+   "arity": 4,
+   "signature": "(integer, complex, complex, complex) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "CoulombSigma": {
+   "fungrimId": "512063",
+   "description": "Coulomb wave function phase shift",
+   "arity": 2,
+   "signature": "(complex, complex) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "Csgn": {
+   "fungrimId": "ce8ee4",
+   "description": "Real-valued sign function for complex numbers",
+   "arity": 1,
+   "signature": "(complex) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": [
+    {
+     "section": null,
+     "domain": [
+      "Element",
+      "z",
+      "ComplexNumbers"
+     ],
+     "codomain": [
+      "Element",
+      [
+       "Csgn",
+       "z"
+      ],
+      [
+       "Set",
+       -1,
+       0,
+       1
+      ]
+     ]
+    }
+   ],
+   "wikidata": null
+  },
+  "DeBruijnNewmanLambda": {
+   "fungrimId": "22ab47",
+   "description": "De Bruijn-Newman constant",
+   "arity": null,
+   "signature": "real",
+   "signatureSource": "curated",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "DedekindEta": {
+   "fungrimId": "a203bb",
+   "description": "Dedekind eta function",
+   "arity": 1,
+   "signature": "(complex) -> complex",
+   "signatureSource": "verified",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "DedekindEtaEpsilon": {
+   "fungrimId": "f4dc79",
+   "description": "Root of unity in the functional equation of the Dedekind eta function",
+   "arity": 4,
+   "signature": "(integer, integer, integer, integer) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "DedekindSum": {
+   "fungrimId": "7af83f",
+   "description": "Dedekind sum",
+   "arity": 2,
+   "signature": "(integer, integer) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "DigammaFunctionZero": {
+   "fungrimId": "8bdd03",
+   "description": "Zero of the digamma function",
+   "arity": 1,
+   "signature": "(integer) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "DirichletCharacter": {
+   "fungrimId": "c7e2fb",
+   "description": "Dirichlet character",
+   "arity": [
+    2,
+    3
+   ],
+   "signature": "(integer, integer, integer?) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "DirichletGroup": {
+   "fungrimId": "e810d8",
+   "description": "Dirichlet characters with given modulus",
+   "arity": 1,
+   "signature": "(integer) -> collection",
+   "signatureSource": "verified",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "DirichletL": {
+   "fungrimId": "d5a598",
+   "description": "Dirichlet L-function",
+   "arity": 2,
+   "signature": "(complex, any) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "DirichletLZero": {
+   "fungrimId": "3f96c1",
+   "description": "Nontrivial zero of Dirichlet L-function",
+   "arity": 2,
+   "signature": "(integer, any) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "DirichletLambda": {
+   "fungrimId": "cc6a5a",
+   "description": "Completed Dirichlet L-function",
+   "arity": 2,
+   "signature": "(complex, any) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "DiscreteLog": {
+   "fungrimId": "a9847a",
+   "description": "Discrete logarithm",
+   "arity": 3,
+   "signature": "(integer, any, any) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "Divides": {
+   "fungrimId": null,
+   "description": null,
+   "arity": 2,
+   "signature": "(integer, integer) -> boolean",
+   "signatureSource": "verified",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "DivisorSigma": {
+   "fungrimId": null,
+   "description": null,
+   "arity": 2,
+   "signature": "(integer, integer) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "Divisors": {
+   "fungrimId": null,
+   "description": null,
+   "arity": 1,
+   "signature": "(integer) -> collection<integer>",
+   "signatureSource": "verified",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "EisensteinE": {
+   "fungrimId": "df3334",
+   "description": "Normalized Eisenstein series",
+   "arity": 2,
+   "signature": "(integer, complex) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "EisensteinG": {
+   "fungrimId": "9bb960",
+   "description": "Eisenstein series",
+   "arity": 2,
+   "signature": "(integer, complex) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "EllipticE": {
+   "fungrimId": "723fd0",
+   "description": "Legendre complete elliptic integral of the second kind",
+   "arity": 1,
+   "signature": "(complex) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "EllipticK": {
+   "fungrimId": "e8ae42",
+   "description": "Legendre complete elliptic integral of the first kind",
+   "arity": 1,
+   "signature": "(complex) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "EllipticPi": {
+   "fungrimId": "34482b",
+   "description": "Legendre complete elliptic integral of the third kind",
+   "arity": 2,
+   "signature": "(complex, complex) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "EllipticRootE": {
+   "fungrimId": null,
+   "description": null,
+   "arity": 2,
+   "signature": "(integer, complex) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "EqualNearestDecimal": {
+   "fungrimId": null,
+   "description": null,
+   "arity": 3,
+   "signature": "(any, any, integer) -> boolean",
+   "signatureSource": "curated",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "Erfi": {
+   "fungrimId": "d2914b",
+   "description": "Imaginary error function",
+   "arity": 1,
+   "signature": "(complex) -> complex",
+   "signatureSource": "verified",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "EulerQSeries": {
+   "fungrimId": "82a63c",
+   "description": "Euler's q-series",
+   "arity": 1,
+   "signature": "(complex) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "FallingFactorial": {
+   "fungrimId": "3c2469",
+   "description": "Falling factorial",
+   "arity": 2,
+   "signature": "(complex, integer) -> complex",
+   "signatureSource": "table",
+   "signatureInferred": true,
+   "domainTable": [
+    {
+     "section": null,
+     "domain": [
+      "And",
+      [
+       "Element",
+       "z",
+       "ComplexNumbers"
+      ],
+      [
+       "Element",
+       "k",
+       "NonNegativeIntegers"
+      ]
+     ],
+     "codomain": [
+      "Element",
+      [
+       "FallingFactorial",
+       "z",
+       "k"
+      ],
+      "ComplexNumbers"
+     ]
+    }
+   ],
+   "wikidata": null
+  },
+  "Fields": {
+   "fungrimId": null,
+   "description": null,
+   "arity": null,
+   "signature": "collection",
+   "signatureSource": "curated",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "GaussLegendreWeight": {
+   "fungrimId": null,
+   "description": null,
+   "arity": 2,
+   "signature": "(integer, integer) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "GaussSum": {
+   "fungrimId": "11a763",
+   "description": "Gauss sum",
+   "arity": 2,
+   "signature": "(integer, any) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "GeneralLinearGroup": {
+   "fungrimId": null,
+   "description": null,
+   "arity": 2,
+   "signature": "(integer, collection) -> collection",
+   "signatureSource": "curated",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "GeneralizedBernoulliB": {
+   "fungrimId": "cb5d51",
+   "description": "Generalized Bernoulli number",
+   "arity": 2,
+   "signature": "(integer, any) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "GeneralizedRiemannHypothesis": {
+   "fungrimId": "dc593e",
+   "description": "Generalized Riemann hypothesis",
+   "arity": null,
+   "signature": "boolean",
+   "signatureSource": "curated",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "HH": {
+   "fungrimId": "a65a14",
+   "description": "Upper complex half-plane",
+   "arity": null,
+   "signature": "collection<complex>",
+   "signatureSource": "verified",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "HalphenConstant": {
+   "fungrimId": "6161c7",
+   "description": "Halphen's constant (one-ninth constant) 0.10765...",
+   "arity": null,
+   "signature": "real",
+   "signatureSource": "curated",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "HankelH1": {
+   "fungrimId": "24d383",
+   "description": "Hankel function of the first kind",
+   "arity": 2,
+   "signature": "(complex, complex) -> complex",
+   "signatureSource": "table",
+   "signatureInferred": true,
+   "domainTable": [
+    {
+     "section": "Numbers",
+     "domain": [
+      "And",
+      [
+       "Element",
+       "nu",
+       "ComplexNumbers"
+      ],
+      [
+       "Element",
+       "z",
+       [
+        "SetMinus",
+        "ComplexNumbers",
+        [
+         "Set",
+         0
+        ]
+       ]
+      ]
+     ],
+     "codomain": [
+      "Element",
+      [
+       "HankelH1",
+       "nu",
+       "z"
+      ],
+      "ComplexNumbers"
+     ]
+    }
+   ],
+   "wikidata": null
+  },
+  "HankelH2": {
+   "fungrimId": "d154dd",
+   "description": "Hankel function of the second kind",
+   "arity": 2,
+   "signature": "(complex, complex) -> complex",
+   "signatureSource": "table",
+   "signatureInferred": true,
+   "domainTable": [
+    {
+     "section": "Numbers",
+     "domain": [
+      "And",
+      [
+       "Element",
+       "nu",
+       "ComplexNumbers"
+      ],
+      [
+       "Element",
+       "z",
+       [
+        "SetMinus",
+        "ComplexNumbers",
+        [
+         "Set",
+         0
+        ]
+       ]
+      ]
+     ],
+     "codomain": [
+      "Element",
+      [
+       "HankelH2",
+       "nu",
+       "z"
+      ],
+      "ComplexNumbers"
+     ]
+    }
+   ],
+   "wikidata": null
+  },
+  "HardyRamanujanA": {
+   "fungrimId": "3eae25",
+   "description": "Exponential sum in the Hardy-Ramanujan-Rademacher formula",
+   "arity": 2,
+   "signature": "(integer, integer) -> real",
+   "signatureSource": "table",
+   "signatureInferred": true,
+   "domainTable": [
+    {
+     "section": null,
+     "domain": [
+      "And",
+      [
+       "Element",
+       "n",
+       "NonNegativeIntegers"
+      ],
+      [
+       "Element",
+       "k",
+       "PositiveIntegers"
+      ]
+     ],
+     "codomain": [
+      "Element",
+      [
+       "HardyRamanujanA",
+       "n",
+       "k"
+      ],
+      "RealNumbers"
+     ]
+    }
+   ],
+   "wikidata": null
+  },
+  "HarmonicNumber": {
+   "fungrimId": null,
+   "description": null,
+   "arity": 1,
+   "signature": "(integer) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "HermitePolynomial": {
+   "fungrimId": null,
+   "description": null,
+   "arity": 2,
+   "signature": "(any, complex) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "HilbertMatrix": {
+   "fungrimId": null,
+   "description": null,
+   "arity": 1,
+   "signature": "(integer) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "HurwitzZeta": {
+   "fungrimId": "04217b",
+   "description": "Hurwitz zeta function",
+   "arity": [
+    2,
+    3
+   ],
+   "signature": "(complex, complex, integer?) -> complex",
+   "signatureSource": "verified",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "Hypergeometric0F1": {
+   "fungrimId": "316533",
+   "description": "Confluent hypergeometric limit function",
+   "arity": 2,
+   "signature": "(complex, complex) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "Hypergeometric0F1Regularized": {
+   "fungrimId": "f565f5",
+   "description": "Regularized confluent hypergeometric limit function",
+   "arity": 2,
+   "signature": "(complex, complex) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "Hypergeometric1F1": {
+   "fungrimId": "512bea",
+   "description": "Kummer confluent hypergeometric function",
+   "arity": 3,
+   "signature": "(complex, complex, complex) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "Hypergeometric1F1Regularized": {
+   "fungrimId": "cee331",
+   "description": "Regularized Kummer confluent hypergeometric function",
+   "arity": 3,
+   "signature": "(complex, complex, complex) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "Hypergeometric2F0": {
+   "fungrimId": "b9cc75",
+   "description": "Tricomi confluent hypergeometric function, alternative notation",
+   "arity": 3,
+   "signature": "(complex, any, any) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "Hypergeometric2F1": {
+   "fungrimId": "e03016",
+   "description": "Gauss hypergeometric function",
+   "arity": 4,
+   "signature": "(complex, complex, complex, complex) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "Hypergeometric2F1Regularized": {
+   "fungrimId": "c43abd",
+   "description": "Regularized Gauss hypergeometric function",
+   "arity": 4,
+   "signature": "(complex, complex, complex, complex) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "Hypergeometric3F2": {
+   "fungrimId": null,
+   "description": null,
+   "arity": 6,
+   "signature": "(integer, complex, complex, integer, integer, integer) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "Hypergeometric3F2Regularized": {
+   "fungrimId": null,
+   "description": null,
+   "arity": 6,
+   "signature": "(integer, any, integer, any, any, any) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "HypergeometricU": {
+   "fungrimId": "d6add6",
+   "description": "Tricomi confluent hypergeometric function",
+   "arity": 3,
+   "signature": "(complex, complex, complex) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "HypergeometricUStar": {
+   "fungrimId": "1b9cc5",
+   "description": "Scaled Tricomi confluent hypergeometric function",
+   "arity": 3,
+   "signature": "(complex, complex, complex) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "HypergeometricUStarRemainder": {
+   "fungrimId": "99f69c",
+   "description": "Error term in asymptotic expansion of Tricomi confluent hypergeometric function",
+   "arity": 4,
+   "signature": "(integer, complex, complex, complex) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "IncompleteBeta": {
+   "fungrimId": "795fe5",
+   "description": "Incomplete beta function",
+   "arity": 3,
+   "signature": "(complex, complex, complex) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "IncompleteBetaRegularized": {
+   "fungrimId": "6bd011",
+   "description": "Regularized incomplete beta function",
+   "arity": 3,
+   "signature": "(complex, complex, complex) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "IncompleteEllipticE": {
+   "fungrimId": "afdf5d",
+   "description": "Legendre incomplete elliptic integral of the second kind",
+   "arity": 2,
+   "signature": "(complex, complex) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "IncompleteEllipticF": {
+   "fungrimId": "107140",
+   "description": "Legendre incomplete elliptic integral of the first kind",
+   "arity": 2,
+   "signature": "(complex, complex) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "IncompleteEllipticPi": {
+   "fungrimId": "53b1e7",
+   "description": "Legendre incomplete elliptic integral of the third kind",
+   "arity": 3,
+   "signature": "(complex, complex, complex) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "Interior": {
+   "fungrimId": null,
+   "description": null,
+   "arity": 1,
+   "signature": "(collection) -> collection",
+   "signatureSource": "curated",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "InteriorClosure": {
+   "fungrimId": null,
+   "description": null,
+   "arity": 1,
+   "signature": "(collection) -> collection",
+   "signatureSource": "curated",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "IsHolomorphic": {
+   "fungrimId": "499bdf",
+   "description": "Holomorphic predicate",
+   "arity": 2,
+   "signature": "(function, any*) -> boolean",
+   "signatureSource": "curated",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "IsMeromorphic": {
+   "fungrimId": "0895b1",
+   "description": "Meromorphic predicate",
+   "arity": 2,
+   "signature": "(function, any*) -> boolean",
+   "signatureSource": "curated",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "JacobiTheta": {
+   "fungrimId": "f96eac",
+   "description": "Jacobi theta function",
+   "arity": [
+    3,
+    4
+   ],
+   "signature": "(integer, complex, complex, integer?) -> complex",
+   "signatureSource": "verified",
+   "signatureInferred": true,
+   "domainTable": [
+    {
+     "section": null,
+     "domain": [
+      "And",
+      [
+       "Element",
+       "j",
+       [
+        "Set",
+        1,
+        2,
+        3,
+        4
+       ]
+      ],
+      [
+       "Element",
+       "z",
+       "ComplexNumbers"
+      ],
+      [
+       "Element",
+       "tau",
+       "HH"
+      ]
+     ],
+     "codomain": [
+      "Element",
+      [
+       "JacobiTheta",
+       "j",
+       "z",
+       "tau"
+      ],
+      "ComplexNumbers"
+     ]
+    },
+    {
+     "section": null,
+     "domain": [
+      "And",
+      [
+       "Element",
+       "j",
+       [
+        "Set",
+        1,
+        2,
+        3,
+        4
+       ]
+      ],
+      [
+       "Element",
+       "z",
+       "ComplexNumbers"
+      ],
+      [
+       "Element",
+       "tau",
+       "HH"
+      ],
+      [
+       "Element",
+       "r",
+       "NonNegativeIntegers"
+      ]
+     ],
+     "codomain": [
+      "Element",
+      [
+       "JacobiTheta",
+       "j",
+       "z",
+       "tau",
+       "r"
+      ],
+      "ComplexNumbers"
+     ]
+    }
+   ],
+   "wikidata": null
+  },
+  "JacobiThetaEpsilon": {
+   "fungrimId": "c4714a",
+   "description": "Root of unity in modular transformation of Jacobi theta functions",
+   "arity": 5,
+   "signature": "(integer, any, any, any, any) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "JacobiThetaPermutation": {
+   "fungrimId": "20172a",
+   "description": "Index permutation in modular transformation of Jacobi theta functions",
+   "arity": 5,
+   "signature": "(any+) -> any",
+   "signatureSource": "fallback",
+   "signatureInferred": false,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "JacobiThetaQ": {
+   "fungrimId": null,
+   "description": null,
+   "arity": 3,
+   "signature": "(integer, integer, real) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "KeiperLiLambda": {
+   "fungrimId": "432bee",
+   "description": "Keiper-Li coefficient",
+   "arity": 1,
+   "signature": "(integer) -> real",
+   "signatureSource": "verified",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "KroneckerSymbol": {
+   "fungrimId": null,
+   "description": null,
+   "arity": 2,
+   "signature": "(integer, integer) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "LambertWPuiseuxCoefficient": {
+   "fungrimId": "c5a8c2",
+   "description": "Coefficient in scaled Puiseux expansion of Lambert W-function",
+   "arity": 1,
+   "signature": "(integer) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "LandauG": {
+   "fungrimId": "32e430",
+   "description": "Landau's function",
+   "arity": 1,
+   "signature": "(integer) -> integer",
+   "signatureSource": "table",
+   "signatureInferred": true,
+   "domainTable": [
+    {
+     "section": null,
+     "domain": [
+      "Element",
+      "n",
+      "NonNegativeIntegers"
+     ],
+     "codomain": [
+      "Element",
+      [
+       "LandauG",
+       "n"
+      ],
+      "PositiveIntegers"
+     ]
+    }
+   ],
+   "wikidata": null
+  },
+  "Lattice": {
+   "fungrimId": "3c1659",
+   "description": "Complex lattice with periods a, b",
+   "arity": 2,
+   "signature": "(any+) -> collection",
+   "signatureSource": "curated",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "LegendrePolynomial": {
+   "fungrimId": null,
+   "description": null,
+   "arity": 2,
+   "signature": "(integer, complex) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "LegendrePolynomialZero": {
+   "fungrimId": null,
+   "description": null,
+   "arity": 2,
+   "signature": "(integer, integer) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "LerchPhi": {
+   "fungrimId": null,
+   "description": null,
+   "arity": 3,
+   "signature": "(integer, integer, complex) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "LiouvilleLambda": {
+   "fungrimId": null,
+   "description": null,
+   "arity": 1,
+   "signature": "(integer) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "LogBarnesG": {
+   "fungrimId": "da1509",
+   "description": "Logarithmic Barnes G-function",
+   "arity": 1,
+   "signature": "(complex) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "LogBarnesGRemainder": {
+   "fungrimId": "752bde",
+   "description": "Remainder term in asymptotic expansion of logarithmic Barnes G-function",
+   "arity": 2,
+   "signature": "(integer, complex) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "LogIntegral": {
+   "fungrimId": null,
+   "description": null,
+   "arity": 1,
+   "signature": "(real) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "Matrices": {
+   "fungrimId": null,
+   "description": null,
+   "arity": 3,
+   "signature": "(any+) -> collection",
+   "signatureSource": "curated",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "ModularGroupAction": {
+   "fungrimId": "76de9d",
+   "description": "Action of modular group",
+   "arity": 2,
+   "signature": "(any, complex) -> complex",
+   "signatureSource": "curated",
+   "signatureInferred": true,
+   "domainTable": [
+    {
+     "section": null,
+     "domain": [
+      "And",
+      [
+       "Element",
+       "gamma",
+       "SL2Z"
+      ],
+      [
+       "Element",
+       "tau",
+       "HH"
+      ]
+     ],
+     "codomain": [
+      "Element",
+      [
+       "ModularGroupAction",
+       "gamma",
+       "tau"
+      ],
+      "HH"
+     ]
+    }
+   ],
+   "wikidata": null
+  },
+  "ModularGroupFundamentalDomain": {
+   "fungrimId": "dc2c26",
+   "description": "Fundamental domain for action of the modular group",
+   "arity": null,
+   "signature": "set<complex>",
+   "signatureSource": "curated",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "ModularJ": {
+   "fungrimId": "70eb98",
+   "description": "Modular j-invariant",
+   "arity": 1,
+   "signature": "(complex) -> complex",
+   "signatureSource": "verified",
+   "signatureInferred": true,
+   "domainTable": [
+    {
+     "section": null,
+     "domain": [
+      "Element",
+      "tau",
+      "HH"
+     ],
+     "codomain": [
+      "Element",
+      [
+       "ModularJ",
+       "tau"
+      ],
+      "ComplexNumbers"
+     ]
+    }
+   ],
+   "wikidata": null
+  },
+  "ModularLambda": {
+   "fungrimId": "f53771",
+   "description": "Modular lambda function",
+   "arity": 1,
+   "signature": "(complex) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "ModularLambdaFundamentalDomain": {
+   "fungrimId": "6c6204",
+   "description": "Fundamental domain of the modular lambda function",
+   "arity": null,
+   "signature": "set<complex>",
+   "signatureSource": "curated",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "MoebiusMu": {
+   "fungrimId": null,
+   "description": null,
+   "arity": 1,
+   "signature": "(integer) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "MultiZetaValue": {
+   "fungrimId": "aab550",
+   "description": "Multiple zeta value (MZV)",
+   "arity": [
+    2,
+    3
+   ],
+   "signature": "(integer, integer) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "OpenDisk": {
+   "fungrimId": null,
+   "description": null,
+   "arity": 2,
+   "signature": "(complex, real) -> set<complex>",
+   "signatureSource": "curated",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "PSL2Z": {
+   "fungrimId": "1e211d",
+   "description": "Modular group (canonical representatives)",
+   "arity": null,
+   "signature": "collection",
+   "signatureSource": "curated",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "PolyLog": {
+   "fungrimId": null,
+   "description": null,
+   "arity": 2,
+   "signature": "(complex, complex) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "PrimeNumber": {
+   "fungrimId": "0b643d",
+   "description": "nth prime number",
+   "arity": 1,
+   "signature": "(integer) -> integer",
+   "signatureSource": "table",
+   "signatureInferred": true,
+   "domainTable": [
+    {
+     "section": null,
+     "domain": [
+      "Element",
+      "n",
+      "PositiveIntegers"
+     ],
+     "codomain": [
+      "Element",
+      [
+       "PrimeNumber",
+       "n"
+      ],
+      "Primes"
+     ]
+    }
+   ],
+   "wikidata": null
+  },
+  "PrimePi": {
+   "fungrimId": "6c22c8",
+   "description": "Prime counting function",
+   "arity": 1,
+   "signature": "(real) -> integer",
+   "signatureSource": "table",
+   "signatureInferred": true,
+   "domainTable": [
+    {
+     "section": null,
+     "domain": [
+      "Element",
+      "x",
+      "RealNumbers"
+     ],
+     "codomain": [
+      "Element",
+      [
+       "PrimePi",
+       "x"
+      ],
+      "NonNegativeIntegers"
+     ]
+    },
+    {
+     "section": null,
+     "domain": [
+      "Element",
+      "x",
+      [
+       "Set",
+       "PositiveInfinity"
+      ]
+     ],
+     "codomain": [
+      "Element",
+      [
+       "PrimePi",
+       "x"
+      ],
+      [
+       "Set",
+       "PositiveInfinity"
+      ]
+     ]
+    }
+   ],
+   "wikidata": null
+  },
+  "Primes": {
+   "fungrimNames": [
+    "PP"
+   ],
+   "fungrimId": "38f111",
+   "description": "Prime numbers",
+   "arity": null,
+   "signature": "collection<integer>",
+   "signatureSource": "verified",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "PrimitiveDirichletCharacters": {
+   "fungrimId": "2f52bc",
+   "description": "Primitive Dirichlet characters with given modulus",
+   "arity": 1,
+   "signature": "(integer) -> collection",
+   "signatureSource": "curated",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "RealBall": {
+   "fungrimId": null,
+   "description": null,
+   "arity": 2,
+   "signature": "(real, real) -> collection<real>",
+   "signatureSource": "verified",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "RealIndefiniteIntegralEqual": {
+   "fungrimId": "0be77d",
+   "description": "Indefinite integral, real derivative",
+   "arity": 3,
+   "signature": "(any, any, any, any?) -> boolean",
+   "signatureSource": "curated",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "RiemannHypothesis": {
+   "fungrimId": "c03de4",
+   "description": "Riemann hypothesis",
+   "arity": null,
+   "signature": "boolean",
+   "signatureSource": "curated",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "RiemannXi": {
+   "fungrimId": null,
+   "description": null,
+   "arity": 1,
+   "signature": "(complex) -> complex",
+   "signatureSource": "curated",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "RiemannZetaZero": {
+   "fungrimId": "669509",
+   "description": "Nontrivial zero of the Riemann zeta function",
+   "arity": 1,
+   "signature": "(integer) -> complex",
+   "signatureSource": "verified",
+   "signatureInferred": true,
+   "domainTable": [
+    {
+     "section": null,
+     "domain": [
+      "Element",
+      "n",
+      [
+       "SetMinus",
+       "Integers",
+       [
+        "Set",
+        0
+       ]
+      ]
+     ],
+     "codomain": [
+      "Element",
+      [
+       "RiemannZetaZero",
+       "n"
+      ],
+      "ComplexNumbers"
+     ]
+    }
+   ],
+   "wikidata": null
+  },
+  "Rings": {
+   "fungrimId": null,
+   "description": null,
+   "arity": null,
+   "signature": "collection",
+   "signatureSource": "curated",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "RisingFactorial": {
+   "fungrimId": "579595",
+   "description": "Rising factorial",
+   "arity": 2,
+   "signature": "(complex, integer) -> complex",
+   "signatureSource": "table",
+   "signatureInferred": true,
+   "domainTable": [
+    {
+     "section": null,
+     "domain": [
+      "And",
+      [
+       "Element",
+       "z",
+       "ComplexNumbers"
+      ],
+      [
+       "Element",
+       "k",
+       "NonNegativeIntegers"
+      ]
+     ],
+     "codomain": [
+      "Element",
+      [
+       "RisingFactorial",
+       "z",
+       "k"
+      ],
+      "ComplexNumbers"
+     ]
+    }
+   ],
+   "wikidata": null
+  },
+  "SL2Z": {
+   "fungrimId": "094772",
+   "description": "Modular group",
+   "arity": null,
+   "signature": "collection",
+   "signatureSource": "verified",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "SequenceLimitInferior": {
+   "fungrimId": "6cd302",
+   "description": "Limit inferior of sequence",
+   "arity": 2,
+   "signature": "(function, any) -> any",
+   "signatureSource": "curated",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "SequenceLimitSuperior": {
+   "fungrimId": "fdf152",
+   "description": "Limit superior of sequence",
+   "arity": 2,
+   "signature": "(function, any) -> any",
+   "signatureSource": "curated",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "SinIntegral": {
+   "fungrimId": null,
+   "description": null,
+   "arity": 1,
+   "signature": "(complex) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "SloaneA": {
+   "fungrimId": "aac67f",
+   "description": "Sequence X in Sloane's OEIS",
+   "arity": 2,
+   "signature": "(any, integer) -> any",
+   "signatureSource": "verified",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "Solutions": {
+   "fungrimId": "5862bb",
+   "description": "Solution set",
+   "arity": 2,
+   "signature": "(function, any*) -> collection",
+   "signatureSource": "curated",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "Spectrum": {
+   "fungrimId": null,
+   "description": null,
+   "arity": 1,
+   "signature": "(matrix) -> set<complex>",
+   "signatureSource": "verified",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "SquaresR": {
+   "fungrimId": null,
+   "description": null,
+   "arity": 2,
+   "signature": "(integer, integer) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "StieltjesGamma": {
+   "fungrimId": "d10029",
+   "description": "Stieltjes constant",
+   "arity": [
+    1,
+    2
+   ],
+   "signature": "(integer, complex?) -> complex",
+   "signatureSource": "table",
+   "signatureInferred": true,
+   "domainTable": [
+    {
+     "section": null,
+     "domain": [
+      "Element",
+      "n",
+      "NonNegativeIntegers"
+     ],
+     "codomain": [
+      "Element",
+      [
+       "StieltjesGamma",
+       "n"
+      ],
+      "RealNumbers"
+     ]
+    },
+    {
+     "section": null,
+     "domain": [
+      "And",
+      [
+       "Element",
+       "n",
+       "NonNegativeIntegers"
+      ],
+      [
+       "Element",
+       "a",
+       "ComplexNumbers"
+      ],
+      [
+       "NotElement",
+       "a",
+       "NonPositiveIntegers"
+      ]
+     ],
+     "codomain": [
+      "Element",
+      [
+       "StieltjesGamma",
+       "n",
+       "a"
+      ],
+      "ComplexNumbers"
+     ]
+    }
+   ],
+   "wikidata": null
+  },
+  "StirlingCycle": {
+   "fungrimId": "778fa2",
+   "description": "Unsigned Stirling number of the first kind",
+   "arity": 2,
+   "signature": "(integer, integer) -> integer",
+   "signatureSource": "table",
+   "signatureInferred": true,
+   "domainTable": [
+    {
+     "section": null,
+     "domain": [
+      "And",
+      [
+       "Element",
+       "n",
+       "NonNegativeIntegers"
+      ],
+      [
+       "Element",
+       "k",
+       "NonNegativeIntegers"
+      ]
+     ],
+     "codomain": [
+      "Element",
+      [
+       "StirlingCycle",
+       "n",
+       "k"
+      ],
+      "NonNegativeIntegers"
+     ]
+    }
+   ],
+   "wikidata": null
+  },
+  "StirlingS1": {
+   "fungrimId": "2e9d0c",
+   "description": "Signed Stirling number of the first kind",
+   "arity": 2,
+   "signature": "(integer, integer) -> integer",
+   "signatureSource": "table",
+   "signatureInferred": true,
+   "domainTable": [
+    {
+     "section": null,
+     "domain": [
+      "And",
+      [
+       "Element",
+       "n",
+       "NonNegativeIntegers"
+      ],
+      [
+       "Element",
+       "k",
+       "NonNegativeIntegers"
+      ]
+     ],
+     "codomain": [
+      "Element",
+      [
+       "StirlingS1",
+       "n",
+       "k"
+      ],
+      "Integers"
+     ]
+    }
+   ],
+   "wikidata": null
+  },
+  "StirlingSeriesRemainder": {
+   "fungrimId": "8cf1fd",
+   "description": "Remainder term in the Stirling series for the logarithmic gamma function",
+   "arity": 2,
+   "signature": "(integer, complex) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "UniqueSolution": {
+   "fungrimId": "f5ae93",
+   "description": "Unique solution",
+   "arity": 2,
+   "signature": "(function, any*) -> complex",
+   "signatureSource": "curated",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "UniqueZero": {
+   "fungrimId": "d2714b",
+   "description": "Unique zero (root) of function",
+   "arity": 2,
+   "signature": "(function, any*) -> complex",
+   "signatureSource": "curated",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "UnitCircle": {
+   "fungrimId": null,
+   "description": null,
+   "arity": null,
+   "signature": "set<complex>",
+   "signatureSource": "curated",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "UpperGamma": {
+   "fungrimId": null,
+   "description": null,
+   "arity": 2,
+   "signature": "(complex, complex) -> complex",
+   "signatureSource": "curated",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
+  "WeierstrassP": {
+   "fungrimId": "f7a534",
+   "description": "Weierstrass elliptic function",
+   "arity": 2,
+   "signature": "(complex, complex) -> complex",
+   "signatureSource": "table",
+   "signatureInferred": true,
+   "domainTable": [
+    {
+     "section": "Numbers",
+     "domain": [
+      "And",
+      [
+       "Element",
+       "z",
+       [
+        "SetMinus",
+        "ComplexNumbers",
+        [
+         "Lattice",
+         1,
+         "tau"
+        ]
+       ]
+      ],
+      [
+       "Element",
+       "tau",
+       "HH"
+      ]
+     ],
+     "codomain": [
+      "Element",
+      [
+       "WeierstrassP",
+       "z",
+       "tau"
+      ],
+      "ComplexNumbers"
+     ]
+    },
+    {
+     "section": "Numbers",
+     "domain": [
+      "And",
+      [
+       "Element",
+       "z",
+       [
+        "Lattice",
+        1,
+        "tau"
+       ]
+      ],
+      [
+       "Element",
+       "tau",
+       "HH"
+      ]
+     ],
+     "codomain": [
+      "Element",
+      [
+       "WeierstrassP",
+       "z",
+       "tau"
+      ],
+      [
+       "Set",
+       "ComplexInfinity"
+      ]
+     ]
+    }
+   ],
+   "wikidata": null
+  },
+  "WeierstrassSigma": {
+   "fungrimId": "5f3210",
+   "description": "Weierstrass sigma function",
+   "arity": 2,
+   "signature": "(complex, complex) -> complex",
+   "signatureSource": "table",
+   "signatureInferred": true,
+   "domainTable": [
+    {
+     "section": "Numbers",
+     "domain": [
+      "And",
+      [
+       "Element",
+       "z",
+       "ComplexNumbers"
+      ],
+      [
+       "Element",
+       "tau",
+       "HH"
+      ]
+     ],
+     "codomain": [
+      "Element",
+      [
+       "WeierstrassSigma",
+       "z",
+       "tau"
+      ],
+      "ComplexNumbers"
+     ]
+    }
+   ],
+   "wikidata": null
+  },
+  "WeierstrassZeta": {
+   "fungrimId": "69be32",
+   "description": "Weierstrass zeta function",
+   "arity": 2,
+   "signature": "(complex, complex) -> complex",
+   "signatureSource": "table",
+   "signatureInferred": true,
+   "domainTable": [
+    {
+     "section": "Numbers",
+     "domain": [
+      "And",
+      [
+       "Element",
+       "z",
+       [
+        "SetMinus",
+        "ComplexNumbers",
+        [
+         "Lattice",
+         1,
+         "tau"
+        ]
+       ]
+      ],
+      [
+       "Element",
+       "tau",
+       "HH"
+      ]
+     ],
+     "codomain": [
+      "Element",
+      [
+       "WeierstrassZeta",
+       "z",
+       "tau"
+      ],
+      "ComplexNumbers"
+     ]
+    },
+    {
+     "section": "Numbers",
+     "domain": [
+      "And",
+      [
+       "Element",
+       "z",
+       [
+        "Lattice",
+        1,
+        "tau"
+       ]
+      ],
+      [
+       "Element",
+       "tau",
+       "HH"
+      ]
+     ],
+     "codomain": [
+      "Element",
+      [
+       "WeierstrassZeta",
+       "z",
+       "tau"
+      ],
+      [
+       "Set",
+       "ComplexInfinity"
+      ]
+     ]
+    }
+   ],
+   "wikidata": null
+  },
+  "XGCD": {
+   "fungrimId": "5daceb",
+   "description": "Extended greatest common divisor",
+   "arity": 2,
+   "signature": "(integer, integer) -> complex",
+   "signatureSource": "usage",
+   "signatureInferred": true,
+   "domainTable": [
+    {
+     "section": null,
+     "domain": [
+      "And",
+      [
+       "Element",
+       "a",
+       "Integers"
+      ],
+      [
+       "Element",
+       "b",
+       "Integers"
+      ]
+     ],
+     "codomain": null,
+     "codomainSource": "Where(And(Element(d, ZZGreaterEqual(0)), Element(u, ZZ), Element(v, ZZ)), Equal(Tuple(d, u, v), XGCD(a, b)))"
+    }
+   ],
+   "wikidata": null
+  },
+  "Zeros": {
+   "fungrimId": "f7ce46",
+   "description": "Zeros (roots) of function",
+   "arity": 2,
+   "signature": "(function, any*) -> set<complex>",
+   "signatureSource": "curated",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  }
+ },
+ "existing": {
+  "Abs": {},
+  "Add": {},
+  "AiryAi": {},
+  "AiryBi": {},
+  "And": {},
+  "Apply": {},
+  "Arccos": {
+   "fungrimNames": [
+    "Acos"
+   ]
+  },
+  "Arccot": {
+   "fungrimNames": [
+    "Acot"
+   ]
+  },
+  "Arcosh": {
+   "fungrimNames": [
+    "Acosh"
+   ]
+  },
+  "Arcsin": {
+   "fungrimNames": [
+    "Asin"
+   ]
+  },
+  "Arctan": {
+   "fungrimNames": [
+    "Atan"
+   ]
+  },
+  "Arctan2": {
+   "fungrimNames": [
+    "Atan2"
+   ]
+  },
+  "Argument": {
+   "fungrimNames": [
+    "Arg"
+   ]
+  },
+  "Arsinh": {
+   "fungrimNames": [
+    "Asinh"
+   ]
+  },
+  "Artanh": {
+   "fungrimNames": [
+    "Atanh"
+   ]
+  },
+  "BellNumber": {},
+  "BesselI": {},
+  "BesselJ": {},
+  "BesselK": {},
+  "BesselY": {},
+  "Beta": {
+   "fungrimNames": [
+    "BetaFunction"
+   ]
+  },
+  "Binomial": {},
+  "CatalanConstant": {
+   "fungrimNames": [
+    "ConstCatalan"
+   ]
+  },
+  "Ceil": {},
+  "ComplexInfinity": {
+   "fungrimNames": [
+    "UnsignedInfinity"
+   ]
+  },
+  "ComplexNumbers": {
+   "fungrimNames": [
+    "CC"
+   ]
+  },
+  "Conjugate": {},
+  "Cos": {},
+  "Cosh": {},
+  "Cot": {},
+  "Coth": {},
+  "Count": {
+   "fungrimNames": [
+    "Cardinality"
+   ]
+  },
+  "Derivative": {},
+  "Determinant": {
+   "fungrimNames": [
+    "Det"
+   ]
+  },
+  "Digamma": {
+   "fungrimNames": [
+    "DigammaFunction"
+   ]
+  },
+  "Divide": {
+   "fungrimNames": [
+    "Div"
+   ]
+  },
+  "Element": {},
+  "Equal": {
+   "fungrimNames": [
+    "Same"
+   ]
+  },
+  "Equivalent": {},
+  "Erf": {
+   "note": "CE numeric kernel is ~1e-7 accurate (SPIKE-DECISIONS.md #15); tolerance >= 1e-6 for numeric validation"
+  },
+  "Erfc": {
+   "note": "CE numeric kernel is ~1e-7 accurate (SPIKE-DECISIONS.md #15); tolerance >= 1e-6 for numeric validation"
+  },
+  "EulerGamma": {
+   "fungrimNames": [
+    "ConstGamma"
+   ]
+  },
+  "Exists": {},
+  "Exp": {},
+  "ExponentialE": {
+   "fungrimNames": [
+    "ConstE"
+   ]
+  },
+  "Factorial": {},
+  "Factorial2": {
+   "fungrimNames": [
+    "DoubleFactorial"
+   ]
+  },
+  "Fibonacci": {},
+  "Floor": {},
+  "ForAll": {},
+  "Function": {},
+  "GCD": {},
+  "Gamma": {},
+  "GammaLn": {
+   "fungrimNames": [
+    "LogGamma"
+   ]
+  },
+  "GoldenRatio": {},
+  "Greater": {},
+  "GreaterEqual": {},
+  "Imaginary": {
+   "fungrimNames": [
+    "Im"
+   ]
+  },
+  "ImaginaryUnit": {
+   "fungrimNames": [
+    "ConstI"
+   ]
+  },
+  "Implies": {},
+  "Infimum": {},
+  "Integers": {
+   "fungrimNames": [
+    "ZZ"
+   ]
+  },
+  "Integrate": {
+   "fungrimNames": [
+    "Integral"
+   ]
+  },
+  "Intersection": {},
+  "Interval": {},
+  "IsEven": {
+   "fungrimNames": [
+    "Even"
+   ]
+  },
+  "IsOdd": {
+   "fungrimNames": [
+    "Odd"
+   ]
+  },
+  "KroneckerDelta": {},
+  "LCM": {},
+  "LambertW": {
+   "note": "CE LambertW is 1-arg (principal branch); the corpus emits 2-arg [LambertW, z, k] for non-principal branches -- re-declare '(complex, integer?) -> complex' in a child scope before boxing (mapping.py note)"
+  },
+  "Less": {},
+  "LessEqual": {},
+  "Limit": {},
+  "Limits": {},
+  "List": {},
+  "Ln": {
+   "fungrimNames": [
+    "Log"
+   ]
+  },
+  "Matrix": {},
+  "Max": {
+   "fungrimNames": [
+    "Maximum"
+   ]
+  },
+  "Min": {
+   "fungrimNames": [
+    "Minimum"
+   ]
+  },
+  "Mod": {},
+  "Multiply": {
+   "fungrimNames": [
+    "Mul"
+   ]
+  },
+  "NPartition": {
+   "fungrimNames": [
+    "PartitionsP"
+   ]
+  },
+  "NaN": {
+   "fungrimNames": [
+    "Undefined"
+   ]
+  },
+  "Negate": {
+   "fungrimNames": [
+    "Neg"
+   ]
+  },
+  "NegativeInfinity": {},
+  "NonNegativeIntegers": {},
+  "NonPositiveIntegers": {},
+  "Not": {},
+  "NotElement": {},
+  "NotEqual": {},
+  "Or": {},
+  "Pi": {},
+  "PositiveInfinity": {
+   "fungrimNames": [
+    "Infinity"
+   ]
+  },
+  "PositiveIntegers": {},
+  "Power": {
+   "fungrimNames": [
+    "Pow"
+   ]
+  },
+  "Product": {},
+  "Range": {},
+  "RationalNumbers": {
+   "fungrimNames": [
+    "QQ"
+   ]
+  },
+  "Real": {
+   "fungrimNames": [
+    "Re"
+   ]
+  },
+  "RealNumbers": {
+   "fungrimNames": [
+    "RR"
+   ]
+  },
+  "Sec": {},
+  "Set": {},
+  "SetMinus": {},
+  "Sign": {},
+  "Sin": {},
+  "Sinc": {},
+  "Sinh": {},
+  "Sqrt": {},
+  "Stirling": {
+   "fungrimNames": [
+    "StirlingS2"
+   ]
+  },
+  "Subset": {},
+  "SubsetEqual": {},
+  "Subtract": {
+   "fungrimNames": [
+    "Sub"
+   ]
+  },
+  "Sum": {},
+  "Supremum": {},
+  "Tan": {},
+  "Tanh": {},
+  "Totient": {},
+  "True": {
+   "fungrimNames": [
+    "True_"
+   ]
+  },
+  "Tuple": {},
+  "Union": {},
+  "Which": {},
+  "Zeta": {
+   "fungrimNames": [
+    "RiemannZeta"
+   ]
+  }
+ }
+}

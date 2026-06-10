@@ -1,0 +1,3530 @@
+{
+ "topic": "gamma",
+ "title": "Gamma function",
+ "source": "pygrim/formulas/gamma.py",
+ "generator": "grim2mathjson 0.1.0",
+ "entries": [
+  {
+   "id": "06260c",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "Divide",
+      1,
+      [
+       "Gamma",
+       "z"
+      ]
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Exp",
+      [
+       "Divide",
+       [
+        "Multiply",
+        "Pi",
+        [
+         "Abs",
+         "z"
+        ]
+       ],
+       2
+      ]
+     ],
+     [
+      "Power",
+      [
+       "Abs",
+       "z"
+      ],
+      [
+       "Add",
+       [
+        "Abs",
+        "z"
+       ],
+       [
+        "Divide",
+        1,
+        2
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Exp",
+    "Gamma"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gamma"
+   ]
+  },
+  {
+   "id": "143002",
+   "formula": [
+    "Less",
+    [
+     "Abs",
+     [
+      "Divide",
+      1,
+      [
+       "Gamma",
+       "z"
+      ]
+     ]
+    ],
+    "PositiveInfinity"
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Gamma"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gamma"
+   ]
+  },
+  {
+   "id": "14af98",
+   "formula": [
+    "Equal",
+    [
+     "Gamma",
+     [
+      "Subtract",
+      "z",
+      1
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Gamma",
+      "z"
+     ],
+     [
+      "Subtract",
+      "z",
+      1
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     [
+      "Range",
+      "NegativeInfinity",
+      1
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Gamma"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gamma"
+   ]
+  },
+  {
+   "id": "1976db",
+   "formula": [
+    "Equal",
+    [
+     "Abs",
+     [
+      "Gamma",
+      [
+       "Multiply",
+       "y",
+       "ImaginaryUnit"
+      ]
+     ]
+    ],
+    [
+     "Sqrt",
+     [
+      "Divide",
+      "Pi",
+      [
+       "Multiply",
+       "y",
+       [
+        "Sinh",
+        [
+         "Multiply",
+         "Pi",
+         "y"
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "y"
+   ],
+   "assumptions": [
+    "Element",
+    "y",
+    [
+     "SetMinus",
+     "RealNumbers",
+     [
+      "Set",
+      0
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Gamma",
+    "Sinh"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gamma"
+   ]
+  },
+  {
+   "id": "19d480",
+   "formula": [
+    "Equal",
+    [
+     "Gamma",
+     2
+    ],
+    1
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Gamma"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gamma"
+   ]
+  },
+  {
+   "id": "1bbbc7",
+   "formula": [
+    "Element",
+    [
+     "ArgMinUnique",
+     [
+      "Function",
+      [
+       "Gamma",
+       "x"
+      ],
+      "x"
+     ],
+     [
+      "Interval",
+      [
+       "Open",
+       0
+      ],
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
+     ]
+    ],
+    [
+     "RealBall",
+     {
+      "num": "1.46163214496836234126265954233"
+     },
+     {
+      "num": "4.28e-30"
+     }
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "ArgMinUnique",
+    "Gamma",
+    "RealBall"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gamma"
+   ]
+  },
+  {
+   "id": "2398a1",
+   "formula": [
+    "Greater",
+    [
+     "GammaLn",
+     "x"
+    ],
+    [
+     "Add",
+     [
+      "Add",
+      [
+       "Subtract",
+       [
+        "Multiply",
+        [
+         "Subtract",
+         "x",
+         [
+          "Divide",
+          1,
+          2
+         ]
+        ],
+        [
+         "Ln",
+         "x"
+        ]
+       ],
+       "x"
+      ],
+      [
+       "Divide",
+       [
+        "Ln",
+        [
+         "Multiply",
+         2,
+         "Pi"
+        ]
+       ],
+       2
+      ]
+     ],
+     [
+      "Sum",
+      [
+       "Divide",
+       [
+        "BernoulliB",
+        [
+         "Multiply",
+         2,
+         "k"
+        ]
+       ],
+       [
+        "Multiply",
+        [
+         "Multiply",
+         [
+          "Multiply",
+          2,
+          "k"
+         ],
+         [
+          "Subtract",
+          [
+           "Multiply",
+           2,
+           "k"
+          ],
+          1
+         ]
+        ],
+        [
+         "Power",
+         "x",
+         [
+          "Subtract",
+          [
+           "Multiply",
+           2,
+           "k"
+          ],
+          1
+         ]
+        ]
+       ]
+      ],
+      [
+       "Limits",
+       "k",
+       1,
+       [
+        "Multiply",
+        2,
+        "n"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     [
+      "Interval",
+      [
+       "Open",
+       0
+      ],
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
+     ]
+    ],
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "BernoulliB",
+    "GammaLn",
+    "Ln",
+    "Sum"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": [
+    "H. Alzer, On some inequalities for the gamma and psi functions, Math. Comp. 66(217), pp. 373-389. Theorem 8."
+   ],
+   "topics": [
+    "gamma"
+   ]
+  },
+  {
+   "id": "2a47d7",
+   "formula": [
+    "Greater",
+    [
+     "Gamma",
+     "x"
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      [
+       "Power",
+       [
+        "Multiply",
+        2,
+        "Pi"
+       ],
+       [
+        "Divide",
+        1,
+        2
+       ]
+      ],
+      [
+       "Power",
+       "x",
+       [
+        "Subtract",
+        "x",
+        [
+         "Divide",
+         1,
+         2
+        ]
+       ]
+      ]
+     ],
+     [
+      "Exp",
+      [
+       "Negate",
+       "x"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": [
+    "Element",
+    "x",
+    [
+     "Interval",
+     [
+      "Open",
+      0
+     ],
+     [
+      "Open",
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Exp",
+    "Gamma"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gamma"
+   ]
+  },
+  {
+   "id": "37a95a",
+   "formula": [
+    "Equal",
+    [
+     "GammaLn",
+     "z"
+    ],
+    [
+     "Add",
+     [
+      "Add",
+      [
+       "Add",
+       [
+        "Subtract",
+        [
+         "Multiply",
+         [
+          "Subtract",
+          "z",
+          [
+           "Divide",
+           1,
+           2
+          ]
+         ],
+         [
+          "Ln",
+          "z"
+         ]
+        ],
+        "z"
+       ],
+       [
+        "Divide",
+        [
+         "Ln",
+         [
+          "Multiply",
+          2,
+          "Pi"
+         ]
+        ],
+        2
+       ]
+      ],
+      [
+       "Sum",
+       [
+        "Divide",
+        [
+         "BernoulliB",
+         [
+          "Multiply",
+          2,
+          "k"
+         ]
+        ],
+        [
+         "Multiply",
+         [
+          "Multiply",
+          [
+           "Multiply",
+           2,
+           "k"
+          ],
+          [
+           "Subtract",
+           [
+            "Multiply",
+            2,
+            "k"
+           ],
+           1
+          ]
+         ],
+         [
+          "Power",
+          "z",
+          [
+           "Subtract",
+           [
+            "Multiply",
+            2,
+            "k"
+           ],
+           1
+          ]
+         ]
+        ]
+       ],
+       [
+        "Limits",
+        "k",
+        1,
+        [
+         "Subtract",
+         "n",
+         1
+        ]
+       ]
+      ]
+     ],
+     [
+      "StirlingSeriesRemainder",
+      "n",
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "NotElement",
+     "z",
+     [
+      "Interval",
+      [
+       "Open",
+       "NegativeInfinity"
+      ],
+      0
+     ]
+    ],
+    [
+     "Element",
+     "n",
+     "PositiveIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BernoulliB",
+    "GammaLn",
+    "Ln",
+    "StirlingSeriesRemainder",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gamma"
+   ]
+  },
+  {
+   "id": "48ac55",
+   "formula": [
+    "Equal",
+    [
+     "Gamma",
+     [
+      "Divide",
+      3,
+      2
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Sqrt",
+      "Pi"
+     ],
+     2
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Gamma"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gamma"
+   ]
+  },
+  {
+   "id": "4a2ac8",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "Gamma",
+      [
+       "Add",
+       "x",
+       [
+        "Multiply",
+        "y",
+        "ImaginaryUnit"
+       ]
+      ]
+     ]
+    ],
+    [
+     "Abs",
+     [
+      "Gamma",
+      "x"
+     ]
+    ]
+   ],
+   "variables": [
+    "x",
+    "y"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     "RealNumbers"
+    ],
+    [
+     "Element",
+     "y",
+     "RealNumbers"
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Gamma"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": [
+    "B. C. Carlson (1977), Special functions of applied mathematics, Academic Press. Inequality 3.10-3."
+   ],
+   "topics": [
+    "gamma"
+   ]
+  },
+  {
+   "id": "4e4e0f",
+   "formula": [
+    "Equal",
+    [
+     "Gamma",
+     "z"
+    ],
+    [
+     "Integrate",
+     [
+      "Multiply",
+      [
+       "Power",
+       "t",
+       [
+        "Subtract",
+        "z",
+        1
+       ]
+      ],
+      [
+       "Exp",
+       [
+        "Negate",
+        "t"
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "t",
+      0,
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Greater",
+     [
+      "Real",
+      "z"
+     ],
+     0
+    ]
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Exp",
+    "Gamma",
+    "Integrate"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gamma"
+   ]
+  },
+  {
+   "id": "513a30",
+   "formula": [
+    "Equal",
+    [
+     "Abs",
+     [
+      "Gamma",
+      [
+       "Add",
+       "x",
+       [
+        "Multiply",
+        "y",
+        "ImaginaryUnit"
+       ]
+      ]
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Abs",
+      [
+       "Gamma",
+       "x"
+      ]
+     ],
+     [
+      "Product",
+      [
+       "Power",
+       [
+        "Add",
+        1,
+        [
+         "Divide",
+         [
+          "Power",
+          "y",
+          2
+         ],
+         [
+          "Power",
+          [
+           "Add",
+           "x",
+           "k"
+          ],
+          2
+         ]
+        ]
+       ],
+       [
+        "Negate",
+        [
+         "Divide",
+         1,
+         2
+        ]
+       ]
+      ],
+      [
+       "Limits",
+       "k",
+       0,
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "x",
+    "y"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     "RealNumbers"
+    ],
+    [
+     "Element",
+     "y",
+     "RealNumbers"
+    ],
+    [
+     "NotElement",
+     [
+      "Add",
+      "x",
+      [
+       "Multiply",
+       "y",
+       "ImaginaryUnit"
+      ]
+     ],
+     "NonPositiveIntegers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "product",
+   "heads": [
+    "Abs",
+    "Gamma",
+    "Product"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": [
+    "Abramowitz & Stegun 6.1.25"
+   ],
+   "topics": [
+    "gamma"
+   ]
+  },
+  {
+   "id": "53a2a1",
+   "formula": [
+    "Equal",
+    [
+     "StirlingSeriesRemainder",
+     "n",
+     "z"
+    ],
+    [
+     "Integrate",
+     [
+      "Divide",
+      [
+       "Subtract",
+       [
+        "BernoulliB",
+        [
+         "Multiply",
+         2,
+         "n"
+        ]
+       ],
+       [
+        "BernoulliPolynomial",
+        [
+         "Multiply",
+         2,
+         "n"
+        ],
+        [
+         "Subtract",
+         "t",
+         [
+          "Floor",
+          "t"
+         ]
+        ]
+       ]
+      ],
+      [
+       "Multiply",
+       [
+        "Multiply",
+        2,
+        "n"
+       ],
+       [
+        "Power",
+        [
+         "Add",
+         "z",
+         "t"
+        ],
+        [
+         "Multiply",
+         2,
+         "n"
+        ]
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "t",
+      0,
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "NotElement",
+     "z",
+     [
+      "Interval",
+      [
+       "Open",
+       "NegativeInfinity"
+      ],
+      0
+     ]
+    ],
+    [
+     "Element",
+     "n",
+     "PositiveIntegers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "BernoulliB",
+    "BernoulliPolynomial",
+    "Floor",
+    "Integrate",
+    "StirlingSeriesRemainder"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gamma"
+   ]
+  },
+  {
+   "id": "56d710",
+   "formula": [
+    "Equal",
+    [
+     "Gamma",
+     [
+      "Add",
+      "z",
+      "n"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "RisingFactorial",
+      "z",
+      "n"
+     ],
+     [
+      "Gamma",
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      "NonPositiveIntegers"
+     ]
+    ],
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Gamma",
+    "RisingFactorial"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gamma"
+   ]
+  },
+  {
+   "id": "639d91",
+   "formula": [
+    "Equal",
+    [
+     "Gamma",
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Subtract",
+      "z",
+      1
+     ],
+     [
+      "Gamma",
+      [
+       "Subtract",
+       "z",
+       1
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     [
+      "Range",
+      "NegativeInfinity",
+      1
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Gamma"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gamma"
+   ]
+  },
+  {
+   "id": "6430cc",
+   "formula": [
+    "Equal",
+    [
+     "Exp",
+     [
+      "Multiply",
+      "Pi",
+      "z"
+     ]
+    ],
+    [
+     "Multiply",
+     "Pi",
+     [
+      "Add",
+      [
+       "Divide",
+       1,
+       [
+        "Multiply",
+        [
+         "Gamma",
+         [
+          "Add",
+          [
+           "Divide",
+           1,
+           2
+          ],
+          [
+           "Multiply",
+           "ImaginaryUnit",
+           "z"
+          ]
+         ]
+        ],
+        [
+         "Gamma",
+         [
+          "Subtract",
+          [
+           "Divide",
+           1,
+           2
+          ],
+          [
+           "Multiply",
+           "ImaginaryUnit",
+           "z"
+          ]
+         ]
+        ]
+       ]
+      ],
+      [
+       "Divide",
+       "z",
+       [
+        "Multiply",
+        [
+         "Gamma",
+         [
+          "Add",
+          1,
+          [
+           "Multiply",
+           "ImaginaryUnit",
+           "z"
+          ]
+         ]
+        ],
+        [
+         "Gamma",
+         [
+          "Subtract",
+          1,
+          [
+           "Multiply",
+           "ImaginaryUnit",
+           "z"
+          ]
+         ]
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Exp",
+    "Gamma"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gamma"
+   ]
+  },
+  {
+   "id": "661054",
+   "formula": [
+    "Equal",
+    [
+     "GammaLn",
+     [
+      "Add",
+      1,
+      "z"
+     ]
+    ],
+    [
+     "Add",
+     [
+      "Negate",
+      [
+       "Multiply",
+       "EulerGamma",
+       "z"
+      ]
+     ],
+     [
+      "Sum",
+      [
+       "Multiply",
+       [
+        "Divide",
+        [
+         "Zeta",
+         "k"
+        ],
+        "k"
+       ],
+       [
+        "Power",
+        [
+         "Negate",
+         "z"
+        ],
+        "k"
+       ]
+      ],
+      [
+       "Limits",
+       "k",
+       2,
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Less",
+     [
+      "Abs",
+      "z"
+     ],
+     1
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "GammaLn",
+    "Sum",
+    "Zeta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gamma"
+   ]
+  },
+  {
+   "id": "6d0a95",
+   "formula": [
+    "Equal",
+    [
+     "Gamma",
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      [
+       "Multiply",
+       [
+        "Power",
+        [
+         "Multiply",
+         2,
+         "Pi"
+        ],
+        [
+         "Divide",
+         1,
+         2
+        ]
+       ],
+       [
+        "Power",
+        "z",
+        [
+         "Subtract",
+         "z",
+         [
+          "Divide",
+          1,
+          2
+         ]
+        ]
+       ]
+      ],
+      [
+       "Exp",
+       [
+        "Negate",
+        "z"
+       ]
+      ]
+     ],
+     [
+      "Exp",
+      [
+       "Sum",
+       [
+        "Subtract",
+        [
+         "Multiply",
+         [
+          "Subtract",
+          [
+           "Add",
+           "z",
+           "n"
+          ],
+          [
+           "Divide",
+           1,
+           2
+          ]
+         ],
+         [
+          "Ln",
+          [
+           "Divide",
+           [
+            "Add",
+            "z",
+            "n"
+           ],
+           [
+            "Subtract",
+            [
+             "Add",
+             "z",
+             "n"
+            ],
+            1
+           ]
+          ]
+         ]
+        ],
+        1
+       ],
+       [
+        "Limits",
+        "n",
+        1,
+        "PositiveInfinity"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "NotElement",
+     "z",
+     [
+      "Interval",
+      [
+       "Open",
+       "NegativeInfinity"
+      ],
+      0
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Exp",
+    "Gamma",
+    "Ln",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": [
+    "B. C. Carlson (1977), Special functions of applied mathematics, Academic Press. Proposition 3.8-1."
+   ],
+   "topics": [
+    "gamma"
+   ]
+  },
+  {
+   "id": "774d37",
+   "formula": [
+    "Equal",
+    [
+     "GammaLn",
+     [
+      "Add",
+      "z",
+      1
+     ]
+    ],
+    [
+     "Add",
+     [
+      "GammaLn",
+      "z"
+     ],
+     [
+      "Ln",
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      "NonPositiveIntegers"
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "GammaLn",
+    "Ln"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gamma"
+   ]
+  },
+  {
+   "id": "78f1f4",
+   "formula": [
+    "Equal",
+    [
+     "Gamma",
+     [
+      "Add",
+      "z",
+      1
+     ]
+    ],
+    [
+     "Multiply",
+     "z",
+     [
+      "Gamma",
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     "NonPositiveIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Gamma"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gamma"
+   ]
+  },
+  {
+   "id": "7af1b9",
+   "formula": [
+    "GreaterEqual",
+    [
+     "Abs",
+     [
+      "Gamma",
+      [
+       "Add",
+       "x",
+       [
+        "Multiply",
+        "y",
+        "ImaginaryUnit"
+       ]
+      ]
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Gamma",
+      "x"
+     ],
+     [
+      "Exp",
+      [
+       "Negate",
+       [
+        "Divide",
+        [
+         "Multiply",
+         "Pi",
+         [
+          "Abs",
+          "y"
+         ]
+        ],
+        2
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "x",
+    "y"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     [
+      "Interval",
+      [
+       "Divide",
+       1,
+       2
+      ],
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
+     ]
+    ],
+    [
+     "Element",
+     "y",
+     "RealNumbers"
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Exp",
+    "Gamma"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": [
+    "B. C. Carlson (1977), Special functions of applied mathematics, Academic Press. Inequality 3.10-4."
+   ],
+   "topics": [
+    "gamma"
+   ]
+  },
+  {
+   "id": "80f7dc",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "Gamma",
+      "z"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      [
+       "Power",
+       [
+        "Multiply",
+        2,
+        "Pi"
+       ],
+       [
+        "Divide",
+        1,
+        2
+       ]
+      ],
+      [
+       "Abs",
+       [
+        "Multiply",
+        [
+         "Power",
+         "z",
+         [
+          "Subtract",
+          "z",
+          [
+           "Divide",
+           1,
+           2
+          ]
+         ]
+        ],
+        [
+         "Exp",
+         [
+          "Negate",
+          "z"
+         ]
+        ]
+       ]
+      ]
+     ],
+     [
+      "Exp",
+      [
+       "Divide",
+       1,
+       [
+        "Multiply",
+        6,
+        [
+         "Abs",
+         "z"
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "GreaterEqual",
+     [
+      "Real",
+      "z"
+     ],
+     0
+    ],
+    [
+     "NotEqual",
+     "z",
+     0
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Exp",
+    "Gamma"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": [
+    "R. B. Paris and D. Kaminski (2001), Asymptotics of Mellin-Barnes integrals, Cambridge University Press. (2.1.18), p. 34."
+   ],
+   "topics": [
+    "gamma"
+   ]
+  },
+  {
+   "id": "90a1e1",
+   "formula": [
+    "Equal",
+    [
+     "Product",
+     [
+      "Gamma",
+      [
+       "Add",
+       "z",
+       [
+        "Divide",
+        "k",
+        "m"
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "k",
+      0,
+      [
+       "Subtract",
+       "m",
+       1
+      ]
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      [
+       "Power",
+       [
+        "Multiply",
+        2,
+        "Pi"
+       ],
+       [
+        "Divide",
+        [
+         "Subtract",
+         "m",
+         1
+        ],
+        2
+       ]
+      ],
+      [
+       "Power",
+       "m",
+       [
+        "Subtract",
+        [
+         "Divide",
+         1,
+         2
+        ],
+        [
+         "Multiply",
+         "m",
+         "z"
+        ]
+       ]
+      ]
+     ],
+     [
+      "Gamma",
+      [
+       "Multiply",
+       "m",
+       "z"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "m",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "m",
+     "PositiveIntegers"
+    ],
+    [
+     "NotElement",
+     [
+      "Multiply",
+      "m",
+      "z"
+     ],
+     "NonPositiveIntegers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "product",
+   "heads": [
+    "Gamma",
+    "Product"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gamma"
+   ]
+  },
+  {
+   "id": "931d89",
+   "formula": [
+    "GreaterEqual",
+    [
+     "Abs",
+     [
+      "Gamma",
+      "z"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      [
+       "Power",
+       [
+        "Multiply",
+        2,
+        "Pi"
+       ],
+       [
+        "Divide",
+        1,
+        2
+       ]
+      ],
+      [
+       "Abs",
+       [
+        "Multiply",
+        [
+         "Power",
+         "z",
+         [
+          "Subtract",
+          "z",
+          [
+           "Divide",
+           1,
+           2
+          ]
+         ]
+        ],
+        [
+         "Exp",
+         [
+          "Negate",
+          "z"
+         ]
+        ]
+       ]
+      ]
+     ],
+     [
+      "Exp",
+      [
+       "Negate",
+       [
+        "Divide",
+        1,
+        [
+         "Multiply",
+         6,
+         [
+          "Abs",
+          "z"
+         ]
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "GreaterEqual",
+     [
+      "Real",
+      "z"
+     ],
+     0
+    ],
+    [
+     "NotEqual",
+     "z",
+     0
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Exp",
+    "Gamma"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gamma"
+   ]
+  },
+  {
+   "id": "94db60",
+   "formula": [
+    "Equal",
+    [
+     "Abs",
+     [
+      "Gamma",
+      [
+       "Add",
+       1,
+       [
+        "Multiply",
+        "y",
+        "ImaginaryUnit"
+       ]
+      ]
+     ]
+    ],
+    [
+     "Sqrt",
+     [
+      "Divide",
+      [
+       "Multiply",
+       "Pi",
+       "y"
+      ],
+      [
+       "Sinh",
+       [
+        "Multiply",
+        "Pi",
+        "y"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "y"
+   ],
+   "assumptions": [
+    "Element",
+    "y",
+    [
+     "SetMinus",
+     "RealNumbers",
+     [
+      "Set",
+      0
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Gamma",
+    "Sinh"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gamma"
+   ]
+  },
+  {
+   "id": "99a9c6",
+   "formula": [
+    "Less",
+    [
+     "GammaLn",
+     "x"
+    ],
+    [
+     "Add",
+     [
+      "Add",
+      [
+       "Subtract",
+       [
+        "Multiply",
+        [
+         "Subtract",
+         "x",
+         [
+          "Divide",
+          1,
+          2
+         ]
+        ],
+        [
+         "Ln",
+         "x"
+        ]
+       ],
+       "x"
+      ],
+      [
+       "Divide",
+       [
+        "Ln",
+        [
+         "Multiply",
+         2,
+         "Pi"
+        ]
+       ],
+       2
+      ]
+     ],
+     [
+      "Sum",
+      [
+       "Divide",
+       [
+        "BernoulliB",
+        [
+         "Multiply",
+         2,
+         "k"
+        ]
+       ],
+       [
+        "Multiply",
+        [
+         "Multiply",
+         [
+          "Multiply",
+          2,
+          "k"
+         ],
+         [
+          "Subtract",
+          [
+           "Multiply",
+           2,
+           "k"
+          ],
+          1
+         ]
+        ],
+        [
+         "Power",
+         "x",
+         [
+          "Subtract",
+          [
+           "Multiply",
+           2,
+           "k"
+          ],
+          1
+         ]
+        ]
+       ]
+      ],
+      [
+       "Limits",
+       "k",
+       1,
+       [
+        "Add",
+        [
+         "Multiply",
+         2,
+         "n"
+        ],
+        1
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     [
+      "Interval",
+      [
+       "Open",
+       0
+      ],
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
+     ]
+    ],
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "BernoulliB",
+    "GammaLn",
+    "Ln",
+    "Sum"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": [
+    "H. Alzer, On some inequalities for the gamma and psi functions, Math. Comp. 66(217), pp. 373-389. Theorem 8."
+   ],
+   "topics": [
+    "gamma"
+   ]
+  },
+  {
+   "id": "a0ca3e",
+   "formula": [
+    "Less",
+    [
+     "Gamma",
+     "x"
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      [
+       "Multiply",
+       [
+        "Power",
+        [
+         "Multiply",
+         2,
+         "Pi"
+        ],
+        [
+         "Divide",
+         1,
+         2
+        ]
+       ],
+       [
+        "Power",
+        "x",
+        [
+         "Subtract",
+         "x",
+         [
+          "Divide",
+          1,
+          2
+         ]
+        ]
+       ]
+      ],
+      [
+       "Exp",
+       [
+        "Negate",
+        "x"
+       ]
+      ]
+     ],
+     [
+      "Exp",
+      [
+       "Divide",
+       1,
+       [
+        "Multiply",
+        12,
+        "x"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": [
+    "Element",
+    "x",
+    [
+     "Interval",
+     [
+      "Open",
+      0
+     ],
+     [
+      "Open",
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Exp",
+    "Gamma"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gamma"
+   ]
+  },
+  {
+   "id": "a26ac7",
+   "formula": [
+    "Equal",
+    [
+     "Gamma",
+     "z"
+    ],
+    [
+     "Exp",
+     [
+      "GammaLn",
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      "NonPositiveIntegers"
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Exp",
+    "Gamma",
+    "GammaLn"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gamma"
+   ]
+  },
+  {
+   "id": "a787eb",
+   "formula": [
+    "Equal",
+    [
+     "Multiply",
+     [
+      "Gamma",
+      "z"
+     ],
+     [
+      "Gamma",
+      [
+       "Add",
+       "z",
+       [
+        "Divide",
+        1,
+        2
+       ]
+      ]
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      [
+       "Power",
+       2,
+       [
+        "Subtract",
+        1,
+        [
+         "Multiply",
+         2,
+         "z"
+        ]
+       ]
+      ],
+      [
+       "Sqrt",
+       "Pi"
+      ]
+     ],
+     [
+      "Gamma",
+      [
+       "Multiply",
+       2,
+       "z"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "NotElement",
+     [
+      "Multiply",
+      2,
+      "z"
+     ],
+     "NonPositiveIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Gamma"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gamma"
+   ]
+  },
+  {
+   "id": "b05f2b",
+   "formula": [
+    "Element",
+    [
+     "Min",
+     [
+      "Set",
+      [
+       "GammaLn",
+       "x"
+      ],
+      [
+       "Element",
+       "x",
+       [
+        "Interval",
+        [
+         "Open",
+         0
+        ],
+        [
+         "Open",
+         "PositiveInfinity"
+        ]
+       ]
+      ]
+     ]
+    ],
+    [
+     "RealBall",
+     {
+      "num": "-0.121486290535849608095514557178"
+     },
+     {
+      "num": "3.09e-31"
+     }
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "GammaLn",
+    "Min",
+    "RealBall"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gamma"
+   ]
+  },
+  {
+   "id": "b510b6",
+   "formula": [
+    "Equal",
+    [
+     "Gamma",
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      "Pi",
+      [
+       "Sin",
+       [
+        "Multiply",
+        "Pi",
+        "z"
+       ]
+      ]
+     ],
+     [
+      "Divide",
+      1,
+      [
+       "Gamma",
+       [
+        "Subtract",
+        1,
+        "z"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     "Integers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Gamma",
+    "Sin"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gamma"
+   ]
+  },
+  {
+   "id": "b7a578",
+   "formula": [
+    "Equal",
+    [
+     "Cos",
+     [
+      "Multiply",
+      "Pi",
+      "z"
+     ]
+    ],
+    [
+     "Divide",
+     "Pi",
+     [
+      "Multiply",
+      [
+       "Gamma",
+       [
+        "Add",
+        [
+         "Divide",
+         1,
+         2
+        ],
+        "z"
+       ]
+      ],
+      [
+       "Gamma",
+       [
+        "Subtract",
+        [
+         "Divide",
+         1,
+         2
+        ],
+        "z"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Cos",
+    "Gamma"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gamma"
+   ]
+  },
+  {
+   "id": "b7fec0",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "Gamma",
+      [
+       "Add",
+       "x",
+       [
+        "Multiply",
+        "y",
+        "ImaginaryUnit"
+       ]
+      ]
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      [
+       "Multiply",
+       [
+        "Power",
+        [
+         "Multiply",
+         2,
+         "Pi"
+        ],
+        [
+         "Divide",
+         1,
+         2
+        ]
+       ],
+       [
+        "Power",
+        [
+         "Abs",
+         [
+          "Add",
+          "x",
+          [
+           "Multiply",
+           "y",
+           "ImaginaryUnit"
+          ]
+         ]
+        ],
+        [
+         "Subtract",
+         "x",
+         [
+          "Divide",
+          1,
+          2
+         ]
+        ]
+       ]
+      ],
+      [
+       "Exp",
+       [
+        "Negate",
+        [
+         "Divide",
+         [
+          "Multiply",
+          "Pi",
+          [
+           "Abs",
+           "y"
+          ]
+         ],
+         2
+        ]
+       ]
+      ]
+     ],
+     [
+      "Exp",
+      [
+       "Divide",
+       1,
+       [
+        "Multiply",
+        6,
+        [
+         "Abs",
+         [
+          "Add",
+          "x",
+          [
+           "Multiply",
+           "y",
+           "ImaginaryUnit"
+          ]
+         ]
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "x",
+    "y"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     [
+      "Interval",
+      0,
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
+     ]
+    ],
+    [
+     "Element",
+     "y",
+     "RealNumbers"
+    ],
+    [
+     "NotEqual",
+     [
+      "Add",
+      "x",
+      [
+       "Multiply",
+       "y",
+       "ImaginaryUnit"
+      ]
+     ],
+     0
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Exp",
+    "Gamma"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": [
+    "R. B. Paris and D. Kaminski (2001), Asymptotics of Mellin-Barnes integrals, Cambridge University Press. (2.1.19), p. 34."
+   ],
+   "topics": [
+    "gamma"
+   ]
+  },
+  {
+   "id": "c7b921",
+   "formula": [
+    "Equal",
+    [
+     "Abs",
+     [
+      "Gamma",
+      [
+       "Add",
+       [
+        "Divide",
+        1,
+        2
+       ],
+       [
+        "Multiply",
+        "y",
+        "ImaginaryUnit"
+       ]
+      ]
+     ]
+    ],
+    [
+     "Sqrt",
+     [
+      "Divide",
+      "Pi",
+      [
+       "Cosh",
+       [
+        "Multiply",
+        "Pi",
+        "y"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "y"
+   ],
+   "assumptions": [
+    "Element",
+    "y",
+    "RealNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Cosh",
+    "Gamma"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gamma"
+   ]
+  },
+  {
+   "id": "cb5071",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "Multiply",
+      [
+       "Divide",
+       1,
+       [
+        "Factorial",
+        "n"
+       ]
+      ],
+      [
+       "Apply",
+       [
+        "Derivative",
+        [
+         "Function",
+         [
+          "Divide",
+          1,
+          [
+           "Gamma",
+           "x"
+          ]
+         ],
+         "x"
+        ],
+        "n"
+       ],
+       0
+      ]
+     ]
+    ],
+    [
+     "Divide",
+     2,
+     [
+      "Sqrt",
+      [
+       "Factorial",
+       "n"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Derivative",
+    "Factorial",
+    "Gamma"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": [
+    "L. Fekih-Ahmed, On the Power Series Expansion of the Reciprocal Gamma Function, https://arxiv.org/abs/1407.5983 (simplified version of (1.5))"
+   ],
+   "topics": [
+    "gamma"
+   ]
+  },
+  {
+   "id": "d16cb4",
+   "formula": [
+    "Equal",
+    [
+     "Sinc",
+     [
+      "Multiply",
+      "Pi",
+      "z"
+     ]
+    ],
+    [
+     "Divide",
+     1,
+     [
+      "Multiply",
+      [
+       "Gamma",
+       [
+        "Add",
+        1,
+        "z"
+       ]
+      ],
+      [
+       "Gamma",
+       [
+        "Subtract",
+        1,
+        "z"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Gamma",
+    "Sinc"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gamma",
+    "sinc"
+   ]
+  },
+  {
+   "id": "d7d2a0",
+   "formula": [
+    "Equal",
+    [
+     "Gamma",
+     [
+      "Conjugate",
+      "z"
+     ]
+    ],
+    [
+     "Conjugate",
+     [
+      "Gamma",
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     "NonPositiveIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Conjugate",
+    "Gamma"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gamma"
+   ]
+  },
+  {
+   "id": "dd5e3a",
+   "formula": [
+    "Less",
+    [
+     "Abs",
+     [
+      "Gamma",
+      [
+       "Add",
+       "x",
+       [
+        "Multiply",
+        "y",
+        "ImaginaryUnit"
+       ]
+      ]
+     ]
+    ],
+    [
+     "Abs",
+     [
+      "Gamma",
+      [
+       "Add",
+       "x",
+       [
+        "Multiply",
+        "t",
+        "ImaginaryUnit"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "t",
+    "x",
+    "y"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     "RealNumbers"
+    ],
+    [
+     "Element",
+     "y",
+     "RealNumbers"
+    ],
+    [
+     "Element",
+     "t",
+     "RealNumbers"
+    ],
+    [
+     "Greater",
+     [
+      "Abs",
+      "y"
+     ],
+     [
+      "Abs",
+      "t"
+     ]
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Gamma"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gamma"
+   ]
+  },
+  {
+   "id": "e010c9",
+   "formula": [
+    "Element",
+    [
+     "Min",
+     [
+      "Set",
+      [
+       "Gamma",
+       "x"
+      ],
+      [
+       "Element",
+       "x",
+       [
+        "Interval",
+        [
+         "Open",
+         0
+        ],
+        [
+         "Open",
+         "PositiveInfinity"
+        ]
+       ]
+      ]
+     ]
+    ],
+    [
+     "RealBall",
+     {
+      "num": "0.885603194410888700278815900583"
+     },
+     {
+      "num": "4.12e-31"
+     }
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "Gamma",
+    "Min",
+    "RealBall"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gamma"
+   ]
+  },
+  {
+   "id": "e0b322",
+   "formula": [
+    "GreaterEqual",
+    [
+     "Abs",
+     [
+      "Gamma",
+      [
+       "Add",
+       "x",
+       [
+        "Multiply",
+        "y",
+        "ImaginaryUnit"
+       ]
+      ]
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Gamma",
+      "x"
+     ],
+     [
+      "Sqrt",
+      [
+       "Cosh",
+       [
+        "Multiply",
+        "Pi",
+        "y"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "x",
+    "y"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     [
+      "Interval",
+      [
+       "Divide",
+       1,
+       2
+      ],
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
+     ]
+    ],
+    [
+     "Element",
+     "y",
+     "RealNumbers"
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Cosh",
+    "Gamma"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": [
+    "B. C. Carlson (1977), Special functions of applied mathematics, Academic Press. Inequality 3.10-4."
+   ],
+   "topics": [
+    "gamma"
+   ]
+  },
+  {
+   "id": "e68d11",
+   "formula": [
+    "Equal",
+    [
+     "Gamma",
+     1
+    ],
+    1
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Gamma"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gamma"
+   ]
+  },
+  {
+   "id": "ee56b9",
+   "formula": [
+    "Equal",
+    [
+     "Tan",
+     [
+      "Multiply",
+      "Pi",
+      "z"
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Multiply",
+      [
+       "Gamma",
+       [
+        "Add",
+        [
+         "Divide",
+         1,
+         2
+        ],
+        "z"
+       ]
+      ],
+      [
+       "Gamma",
+       [
+        "Subtract",
+        [
+         "Divide",
+         1,
+         2
+        ],
+        "z"
+       ]
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Gamma",
+       "z"
+      ],
+      [
+       "Gamma",
+       [
+        "Subtract",
+        1,
+        "z"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Gamma",
+    "Tan"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gamma"
+   ]
+  },
+  {
+   "id": "f1d31a",
+   "formula": [
+    "Equal",
+    [
+     "Gamma",
+     "n"
+    ],
+    [
+     "Factorial",
+     [
+      "Subtract",
+      "n",
+      1
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     "NonPositiveIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Factorial",
+    "Gamma"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gamma"
+   ]
+  },
+  {
+   "id": "f50ec9",
+   "formula": [
+    "Greater",
+    [
+     "Abs",
+     [
+      "Gamma",
+      "z"
+     ]
+    ],
+    0
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Gamma"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gamma"
+   ]
+  },
+  {
+   "id": "f826a6",
+   "formula": [
+    "Equal",
+    [
+     "Gamma",
+     [
+      "Divide",
+      1,
+      2
+     ]
+    ],
+    [
+     "Sqrt",
+     "Pi"
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Gamma"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "gamma"
+   ]
+  }
+ ]
+}

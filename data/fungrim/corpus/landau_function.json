@@ -1,0 +1,335 @@
+{
+ "topic": "landau_function",
+ "title": "Landau's function",
+ "source": "pygrim/formulas/landau_function.py",
+ "generator": "grim2mathjson 0.1.0",
+ "entries": [
+  {
+   "id": "3d5019",
+   "formula": [
+    "GreaterEqual",
+    [
+     "Ln",
+     [
+      "LandauG",
+      "n"
+     ]
+    ],
+    [
+     "Sqrt",
+     [
+      "Multiply",
+      "n",
+      [
+       "Ln",
+       "n"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    [
+     "Range",
+     906,
+     "PositiveInfinity"
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "LandauG",
+    "Ln"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": [
+    "Jean-Pierre Massias, Jean-Louis Nicolas and Guy Robin (1989), Effective bounds for the maximal order of an element in the symmetric group, Mathematics of Computation, 53, 118, pp. 665-665, https://doi.org/10.1090/s0025-5718-1989-0979940-4"
+   ],
+   "topics": [
+    "landau_function"
+   ]
+  },
+  {
+   "id": "65fa9f",
+   "formula": [
+    "Equivalent",
+    "RiemannHypothesis",
+    [
+     "ForAll",
+     [
+      "Element",
+      "n",
+      "PositiveIntegers"
+     ],
+     [
+      "Less",
+      [
+       "Ln",
+       [
+        "LandauG",
+        "n"
+       ]
+      ],
+      [
+       "Sqrt",
+       [
+        "UniqueSolution",
+        [
+         "Function",
+         [
+          "Equal",
+          [
+           "LogIntegral",
+           "x"
+          ],
+          "n"
+         ],
+         "x"
+        ],
+        [
+         "Interval",
+         [
+          "Open",
+          1
+         ],
+         [
+          "Open",
+          "PositiveInfinity"
+         ]
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "LandauG",
+    "Ln",
+    "LogIntegral",
+    "RiemannHypothesis",
+    "UniqueSolution"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": [
+    "Marc Deleglise, Jean-Louis Nicolas, The Landau function and the Riemann Hypothesis, https://arxiv.org/abs/1907.07664"
+   ],
+   "topics": [
+    "landau_function",
+    "riemann_zeta"
+   ]
+  },
+  {
+   "id": "87d19b",
+   "formula": [
+    "LessEqual",
+    [
+     "Max",
+     [
+      "Set",
+      "p",
+      [
+       "Element",
+       "p",
+       "Primes",
+       [
+        "Divides",
+        "p",
+        [
+         "LandauG",
+         "n"
+        ]
+       ]
+      ]
+     ]
+    ],
+    [
+     "Multiply",
+     {
+      "num": "1.328"
+     },
+     [
+      "Sqrt",
+      [
+       "Multiply",
+       "n",
+       [
+        "Ln",
+        "n"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    [
+     "Range",
+     5,
+     "PositiveInfinity"
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Divides",
+    "LandauG",
+    "Ln",
+    "Max"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": [
+    "Jon Grantham (1995), The largest prime dividing the maximal order of an element of S_n, 64, 209, pp. 407--210, https://doi.org/10.2307/2153344"
+   ],
+   "topics": [
+    "landau_function"
+   ]
+  },
+  {
+   "id": "9697b8",
+   "formula": [
+    "LessEqual",
+    [
+     "Ln",
+     [
+      "LandauG",
+      "n"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Sqrt",
+      [
+       "Multiply",
+       "n",
+       [
+        "Ln",
+        "n"
+       ]
+      ]
+     ],
+     [
+      "Add",
+      1,
+      [
+       "Divide",
+       [
+        "Subtract",
+        [
+         "Ln",
+         [
+          "Ln",
+          "n"
+         ]
+        ],
+        {
+         "num": "0.975"
+        }
+       ],
+       [
+        "Multiply",
+        2,
+        [
+         "Ln",
+         "n"
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    [
+     "Range",
+     4,
+     "PositiveInfinity"
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "LandauG",
+    "Ln"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": [
+    "Jean-Pierre Massias, Jean-Louis Nicolas and Guy Robin (1989), Effective bounds for the maximal order of an element in the symmetric group, Mathematics of Computation, 53, 118, 665--665, https://doi.org/10.1090/s0025-5718-1989-0979940-4"
+   ],
+   "topics": [
+    "landau_function"
+   ]
+  },
+  {
+   "id": "a3ab2a",
+   "formula": [
+    "Equal",
+    [
+     "Limit",
+     [
+      "Function",
+      [
+       "Divide",
+       [
+        "Ln",
+        [
+         "LandauG",
+         "n"
+        ]
+       ],
+       [
+        "Sqrt",
+        [
+         "Multiply",
+         "n",
+         [
+          "Ln",
+          "n"
+         ]
+        ]
+       ]
+      ],
+      "n"
+     ],
+     "PositiveInfinity"
+    ],
+    1
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "limit",
+   "heads": [
+    "LandauG",
+    "Limit",
+    "Ln"
+   ],
+   "guardLevel": "none",
+   "flavor": "sequence",
+   "references": null,
+   "topics": [
+    "landau_function"
+   ]
+  }
+ ]
+}

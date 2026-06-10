@@ -1,0 +1,1770 @@
+{
+ "topic": "bell_numbers",
+ "title": "Bell numbers",
+ "source": "pygrim/formulas/bell_numbers.py",
+ "generator": "grim2mathjson 0.1.0",
+ "entries": [
+  {
+   "id": "050c46",
+   "formula": [
+    "Equal",
+    [
+     "BellNumber",
+     "n"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      1,
+      "ExponentialE"
+     ],
+     [
+      "Sum",
+      [
+       "Divide",
+       [
+        "Power",
+        "k",
+        "n"
+       ],
+       [
+        "Factorial",
+        "k"
+       ]
+      ],
+      [
+       "Limits",
+       "k",
+       0,
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "BellNumber",
+    "Factorial",
+    "Sum"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bell_numbers"
+   ]
+  },
+  {
+   "id": "050ee1",
+   "formula": [
+    "CongruentMod",
+    [
+     "BellNumber",
+     "n"
+    ],
+    [
+     "Which",
+     [
+      "CongruentMod",
+      "n",
+      2,
+      3
+     ],
+     0,
+     "True",
+     1
+    ],
+    2
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "BellNumber",
+    "CongruentMod"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bell_numbers"
+   ]
+  },
+  {
+   "id": "1026e3",
+   "formula": [
+    "Equal",
+    [
+     "BellNumber",
+     [
+      "Add",
+      "n",
+      1
+     ]
+    ],
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "Binomial",
+       "n",
+       "k"
+      ],
+      [
+       "BellNumber",
+       "k"
+      ]
+     ],
+     [
+      "Limits",
+      "k",
+      0,
+      "n"
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "BellNumber",
+    "Binomial",
+    "Sum"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bell_numbers"
+   ]
+  },
+  {
+   "id": "1e00d2",
+   "formula": [
+    "LessEqual",
+    [
+     "Power",
+     [
+      "BellNumber",
+      "n"
+     ],
+     2
+    ],
+    [
+     "Multiply",
+     [
+      "BellNumber",
+      [
+       "Subtract",
+       "n",
+       1
+      ]
+     ],
+     [
+      "BellNumber",
+      [
+       "Add",
+       "n",
+       1
+      ]
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Add",
+      1,
+      [
+       "Divide",
+       1,
+       "n"
+      ]
+     ],
+     [
+      "Power",
+      [
+       "BellNumber",
+       "n"
+      ],
+      2
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "PositiveIntegers"
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "BellNumber"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": [
+    "https://arxiv.org/abs/math/0104137"
+   ],
+   "topics": [
+    "bell_numbers"
+   ]
+  },
+  {
+   "id": "2e576e",
+   "formula": [
+    "GreaterEqual",
+    [
+     "BellNumber",
+     [
+      "Add",
+      "n",
+      1
+     ]
+    ],
+    [
+     "BellNumber",
+     "n"
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "BellNumber"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bell_numbers"
+   ]
+  },
+  {
+   "id": "320dc9",
+   "formula": [
+    "Greater",
+    [
+     "BellNumber",
+     [
+      "Add",
+      "n",
+      1
+     ]
+    ],
+    [
+     "BellNumber",
+     "n"
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "PositiveIntegers"
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "BellNumber"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bell_numbers"
+   ]
+  },
+  {
+   "id": "343946",
+   "formula": [
+    "AsymptoticTo",
+    [
+     "Divide",
+     [
+      "Ln",
+      [
+       "BellNumber",
+       "n"
+      ]
+     ],
+     "n"
+    ],
+    [
+     "Add",
+     [
+      "Add",
+      [
+       "Add",
+       [
+        "Subtract",
+        [
+         "Subtract",
+         [
+          "Ln",
+          "n"
+         ],
+         [
+          "Ln",
+          [
+           "Ln",
+           "n"
+          ]
+         ]
+        ],
+        1
+       ],
+       [
+        "Divide",
+        [
+         "Ln",
+         [
+          "Ln",
+          "n"
+         ]
+        ],
+        [
+         "Ln",
+         "n"
+        ]
+       ]
+      ],
+      [
+       "Divide",
+       1,
+       [
+        "Ln",
+        "n"
+       ]
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Divide",
+       1,
+       2
+      ],
+      [
+       "Power",
+       [
+        "Divide",
+        [
+         "Ln",
+         [
+          "Ln",
+          "n"
+         ]
+        ],
+        [
+         "Ln",
+         "n"
+        ]
+       ],
+       2
+      ]
+     ]
+    ],
+    "n",
+    "PositiveInfinity"
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": null,
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "AsymptoticTo",
+    "BellNumber",
+    "Ln"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bell_numbers"
+   ]
+  },
+  {
+   "id": "468def",
+   "formula": [
+    "GreaterEqual",
+    [
+     "BellNumber",
+     "n"
+    ],
+    [
+     "Power",
+     [
+      "Divide",
+      "n",
+      [
+       "Multiply",
+       "ExponentialE",
+       [
+        "Ln",
+        "n"
+       ]
+      ]
+     ],
+     "n"
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    [
+     "Range",
+     2,
+     "PositiveInfinity"
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "BellNumber",
+    "Ln"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bell_numbers"
+   ]
+  },
+  {
+   "id": "46bc62",
+   "formula": [
+    "GreaterEqual",
+    [
+     "BellNumber",
+     [
+      "Add",
+      "n",
+      1
+     ]
+    ],
+    [
+     "Multiply",
+     2,
+     [
+      "BellNumber",
+      "n"
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "PositiveIntegers"
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "BellNumber"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bell_numbers"
+   ]
+  },
+  {
+   "id": "4b65d0",
+   "formula": [
+    "Equal",
+    [
+     "BellNumber",
+     "n"
+    ],
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "Divide",
+       [
+        "Power",
+        "k",
+        "n"
+       ],
+       [
+        "Factorial",
+        "k"
+       ]
+      ],
+      [
+       "Sum",
+       [
+        "Divide",
+        [
+         "Power",
+         -1,
+         "j"
+        ],
+        [
+         "Factorial",
+         "j"
+        ]
+       ],
+       [
+        "Limits",
+        "j",
+        0,
+        [
+         "Subtract",
+         "n",
+         "k"
+        ]
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "k",
+      1,
+      "n"
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "PositiveIntegers"
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "BellNumber",
+    "Factorial",
+    "Sum"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bell_numbers"
+   ]
+  },
+  {
+   "id": "512beb",
+   "formula": [
+    "LessEqual",
+    [
+     "BellNumber",
+     "n"
+    ],
+    [
+     "Power",
+     [
+      "Divide",
+      [
+       "Multiply",
+       {
+        "num": "0.792"
+       },
+       "n"
+      ],
+      [
+       "Ln",
+       [
+        "Add",
+        "n",
+        1
+       ]
+      ]
+     ],
+     "n"
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "PositiveIntegers"
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "BellNumber",
+    "Ln"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bell_numbers"
+   ]
+  },
+  {
+   "id": "589758",
+   "formula": [
+    "AsymptoticTo",
+    [
+     "BellNumber",
+     "n"
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      [
+       "Power",
+       "n",
+       [
+        "Negate",
+        [
+         "Divide",
+         1,
+         2
+        ]
+       ]
+      ],
+      [
+       "Power",
+       [
+        "Divide",
+        "n",
+        [
+         "LambertW",
+         "n"
+        ]
+       ],
+       [
+        "Add",
+        "n",
+        [
+         "Divide",
+         1,
+         2
+        ]
+       ]
+      ]
+     ],
+     [
+      "Exp",
+      [
+       "Subtract",
+       [
+        "Subtract",
+        [
+         "Divide",
+         "n",
+         [
+          "LambertW",
+          "n"
+         ]
+        ],
+        "n"
+       ],
+       1
+      ]
+     ]
+    ],
+    "n",
+    "PositiveInfinity"
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": null,
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "AsymptoticTo",
+    "BellNumber",
+    "Exp",
+    "LambertW"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bell_numbers"
+   ]
+  },
+  {
+   "id": "60740b",
+   "formula": [
+    "CongruentMod",
+    [
+     "BellNumber",
+     "p"
+    ],
+    2,
+    "p"
+   ],
+   "variables": [
+    "p"
+   ],
+   "assumptions": [
+    "Element",
+    "p",
+    "Primes"
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "BellNumber",
+    "CongruentMod"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bell_numbers"
+   ]
+  },
+  {
+   "id": "7e449a",
+   "formula": [
+    "GreaterEqual",
+    [
+     "BellNumber",
+     "n"
+    ],
+    [
+     "Exp",
+     [
+      "Subtract",
+      "n",
+      2
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "BellNumber",
+    "Exp"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bell_numbers"
+   ]
+  },
+  {
+   "id": "948167",
+   "formula": [
+    "Equal",
+    [
+     "BellNumber",
+     "n"
+    ],
+    [
+     "Sum",
+     [
+      "Stirling",
+      "n",
+      "k"
+     ],
+     [
+      "Limits",
+      "k",
+      0,
+      "n"
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "BellNumber",
+    "Stirling",
+    "Sum"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bell_numbers"
+   ]
+  },
+  {
+   "id": "9d666f",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "BellNumber",
+       "n"
+      ],
+      [
+       "Power",
+       "x",
+       "n"
+      ]
+     ],
+     [
+      "Limits",
+      "n",
+      0,
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Sum",
+     [
+      "Divide",
+      [
+       "Power",
+       "x",
+       "k"
+      ],
+      [
+       "Product",
+       [
+        "Subtract",
+        1,
+        [
+         "Multiply",
+         "j",
+         "x"
+        ]
+       ],
+       [
+        "Limits",
+        "j",
+        1,
+        "k"
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "k",
+      0,
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": [
+    "Equal",
+    "x",
+    0
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "BellNumber",
+    "Product",
+    "Sum"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bell_numbers"
+   ]
+  },
+  {
+   "id": "a1108d",
+   "formula": [
+    "Implies",
+    [
+     "Element",
+     "n",
+     [
+      "Set",
+      2,
+      3,
+      7,
+      13,
+      42,
+      55,
+      2841
+     ]
+    ],
+    [
+     "Element",
+     [
+      "BellNumber",
+      "n"
+     ],
+     "Primes"
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "BellNumber"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": [],
+   "topics": [
+    "bell_numbers"
+   ]
+  },
+  {
+   "id": "a4d6fc",
+   "formula": [
+    "CongruentMod",
+    [
+     "BellNumber",
+     [
+      "Add",
+      "n",
+      [
+       "Which",
+       [
+        "Equal",
+        "m",
+        2
+       ],
+       3,
+       [
+        "Equal",
+        "m",
+        3
+       ],
+       13,
+       [
+        "Equal",
+        "m",
+        4
+       ],
+       12,
+       [
+        "Equal",
+        "m",
+        5
+       ],
+       781,
+       [
+        "Equal",
+        "m",
+        6
+       ],
+       39
+      ]
+     ]
+    ],
+    [
+     "BellNumber",
+     "n"
+    ],
+    "m"
+   ],
+   "variables": [
+    "m",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "m",
+     [
+      "Range",
+      2,
+      6
+     ]
+    ]
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "BellNumber",
+    "CongruentMod"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bell_numbers"
+   ]
+  },
+  {
+   "id": "a71381",
+   "formula": [
+    "Equal",
+    [
+     "BellNumber",
+     "n"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      [
+       "Multiply",
+       2,
+       [
+        "Factorial",
+        "n"
+       ]
+      ],
+      [
+       "Multiply",
+       "Pi",
+       "ExponentialE"
+      ]
+     ],
+     [
+      "Integrate",
+      [
+       "Multiply",
+       [
+        "Multiply",
+        [
+         "Power",
+         "ExponentialE",
+         [
+          "Multiply",
+          [
+           "Power",
+           "ExponentialE",
+           [
+            "Cos",
+            "x"
+           ]
+          ],
+          [
+           "Cos",
+           [
+            "Sin",
+            "x"
+           ]
+          ]
+         ]
+        ],
+        [
+         "Sin",
+         [
+          "Multiply",
+          [
+           "Power",
+           "ExponentialE",
+           [
+            "Cos",
+            "x"
+           ]
+          ],
+          [
+           "Sin",
+           [
+            "Sin",
+            "x"
+           ]
+          ]
+         ]
+        ]
+       ],
+       [
+        "Sin",
+        [
+         "Multiply",
+         "n",
+         "x"
+        ]
+       ]
+      ],
+      [
+       "Limits",
+       "x",
+       0,
+       "Pi"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "PositiveIntegers"
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "BellNumber",
+    "Cos",
+    "Factorial",
+    "Integrate",
+    "Sin"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": [
+    "https://arxiv.org/abs/0708.3301"
+   ],
+   "topics": [
+    "bell_numbers"
+   ]
+  },
+  {
+   "id": "a747a4",
+   "formula": [
+    "GreaterEqual",
+    [
+     "BellNumber",
+     "n"
+    ],
+    [
+     "Power",
+     "k",
+     [
+      "Subtract",
+      "n",
+      "k"
+     ]
+    ]
+   ],
+   "variables": [
+    "k",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "k",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "BellNumber"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": [
+    "https://cs.stackexchange.com/q/93003"
+   ],
+   "topics": [
+    "bell_numbers"
+   ]
+  },
+  {
+   "id": "aab4e3",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "Divide",
+       [
+        "BellNumber",
+        "n"
+       ],
+       [
+        "Factorial",
+        "n"
+       ]
+      ],
+      [
+       "Power",
+       "x",
+       "n"
+      ]
+     ],
+     [
+      "Limits",
+      "n",
+      0,
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Exp",
+     [
+      "Subtract",
+      [
+       "Exp",
+       "x"
+      ],
+      1
+     ]
+    ]
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": [
+    "Element",
+    "x",
+    "ComplexNumbers"
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "BellNumber",
+    "Exp",
+    "Factorial",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bell_numbers"
+   ]
+  },
+  {
+   "id": "b29b24",
+   "formula": [
+    "GreaterEqual",
+    [
+     "BellNumber",
+     "n"
+    ],
+    [
+     "NPartition",
+     "n"
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "BellNumber",
+    "NPartition"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bell_numbers"
+   ]
+  },
+  {
+   "id": "b41c49",
+   "formula": [
+    "CongruentMod",
+    [
+     "BellNumber",
+     [
+      "Add",
+      "n",
+      [
+       "Power",
+       "p",
+       "m"
+      ]
+     ]
+    ],
+    [
+     "Add",
+     [
+      "Multiply",
+      "m",
+      [
+       "BellNumber",
+       "n"
+      ]
+     ],
+     [
+      "BellNumber",
+      [
+       "Add",
+       "n",
+       1
+      ]
+     ]
+    ],
+    "p"
+   ],
+   "variables": [
+    "m",
+    "n",
+    "p"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "p",
+     "Primes"
+    ],
+    [
+     "Element",
+     "m",
+     "PositiveIntegers"
+    ]
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "BellNumber",
+    "CongruentMod"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bell_numbers"
+   ]
+  },
+  {
+   "id": "b7e899",
+   "formula": [
+    "CongruentMod",
+    [
+     "BellNumber",
+     [
+      "Add",
+      "n",
+      [
+       "SloaneA",
+       {
+        "str": "A054767"
+       },
+       "m"
+      ]
+     ]
+    ],
+    [
+     "BellNumber",
+     "n"
+    ],
+    "m"
+   ],
+   "variables": [
+    "m",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "m",
+     "PositiveIntegers"
+    ]
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "BellNumber",
+    "CongruentMod",
+    "SloaneA"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bell_numbers"
+   ]
+  },
+  {
+   "id": "d1438d",
+   "formula": [
+    "LessEqual",
+    [
+     "Multiply",
+     [
+      "BellNumber",
+      "n"
+     ],
+     [
+      "BellNumber",
+      "m"
+     ]
+    ],
+    [
+     "BellNumber",
+     [
+      "Add",
+      "n",
+      "m"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      [
+       "Binomial",
+       [
+        "Add",
+        "n",
+        "m"
+       ],
+       "n"
+      ],
+      [
+       "BellNumber",
+       "n"
+      ]
+     ],
+     [
+      "BellNumber",
+      "m"
+     ]
+    ]
+   ],
+   "variables": [
+    "m",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "m",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "BellNumber",
+    "Binomial"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": [
+    "https://arxiv.org/abs/math/0104137"
+   ],
+   "topics": [
+    "bell_numbers"
+   ]
+  },
+  {
+   "id": "d1f218",
+   "formula": [
+    "LessEqual",
+    [
+     "BellNumber",
+     "n"
+    ],
+    [
+     "Factorial",
+     "n"
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "BellNumber",
+    "Factorial"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bell_numbers"
+   ]
+  },
+  {
+   "id": "dd9d26",
+   "formula": [
+    "CongruentMod",
+    [
+     "BellNumber",
+     [
+      "Add",
+      "n",
+      "p"
+     ]
+    ],
+    [
+     "Add",
+     [
+      "BellNumber",
+      "n"
+     ],
+     [
+      "BellNumber",
+      [
+       "Add",
+       "n",
+       1
+      ]
+     ]
+    ],
+    "p"
+   ],
+   "variables": [
+    "n",
+    "p"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "p",
+     "Primes"
+    ]
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "BellNumber",
+    "CongruentMod"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bell_numbers"
+   ]
+  },
+  {
+   "id": "f4e249",
+   "formula": [
+    "Equal",
+    [
+     "BellNumber",
+     "n"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      [
+       "Multiply",
+       2,
+       [
+        "Factorial",
+        "n"
+       ]
+      ],
+      [
+       "Multiply",
+       "Pi",
+       "ExponentialE"
+      ]
+     ],
+     [
+      "Imaginary",
+      [
+       "Integrate",
+       [
+        "Multiply",
+        [
+         "Power",
+         "ExponentialE",
+         [
+          "Power",
+          "ExponentialE",
+          [
+           "Power",
+           "ExponentialE",
+           [
+            "Multiply",
+            "ImaginaryUnit",
+            "x"
+           ]
+          ]
+         ]
+        ],
+        [
+         "Sin",
+         [
+          "Multiply",
+          "n",
+          "x"
+         ]
+        ]
+       ],
+       [
+        "Limits",
+        "x",
+        0,
+        "Pi"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "PositiveIntegers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BellNumber",
+    "Factorial",
+    "Imaginary",
+    "Integrate",
+    "Sin"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": [
+    "https://arxiv.org/abs/0708.3301"
+   ],
+   "topics": [
+    "bell_numbers"
+   ]
+  },
+  {
+   "id": "fb6ce2",
+   "formula": [
+    "Less",
+    [
+     "BellNumber",
+     [
+      "Add",
+      "n",
+      1
+     ]
+    ],
+    [
+     "Multiply",
+     "n",
+     [
+      "BellNumber",
+      "n"
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    [
+     "Range",
+     4,
+     "PositiveInfinity"
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "BellNumber"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bell_numbers"
+   ]
+  }
+ ]
+}

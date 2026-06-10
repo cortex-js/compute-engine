@@ -1,0 +1,1251 @@
+{
+ "topic": "partitions",
+ "title": "Partition function",
+ "source": "pygrim/formulas/partitions.py",
+ "generator": "grim2mathjson 0.1.0",
+ "entries": [
+  {
+   "id": "4d2e45",
+   "formula": [
+    "Equal",
+    [
+     "NPartition",
+     "n"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      1,
+      "n"
+     ],
+     [
+      "Sum",
+      [
+       "Multiply",
+       [
+        "DivisorSigma",
+        1,
+        [
+         "Subtract",
+         "n",
+         "k"
+        ]
+       ],
+       [
+        "NPartition",
+        "k"
+       ]
+      ],
+      [
+       "Limits",
+       "k",
+       0,
+       [
+        "Subtract",
+        "n",
+        1
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "PositiveIntegers"
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "DivisorSigma",
+    "NPartition",
+    "Sum"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "partitions"
+   ]
+  },
+  {
+   "id": "599417",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "NPartition",
+       "n"
+      ],
+      [
+       "Power",
+       "q",
+       "n"
+      ]
+     ],
+     [
+      "Limits",
+      "n",
+      0,
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Divide",
+     1,
+     [
+      "EulerQSeries",
+      "q"
+     ]
+    ]
+   ],
+   "variables": [
+    "q"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "q",
+     "ComplexNumbers"
+    ],
+    [
+     "Less",
+     [
+      "Abs",
+      "q"
+     ],
+     1
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "EulerQSeries",
+    "NPartition",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "partitions"
+   ]
+  },
+  {
+   "id": "5adbc3",
+   "formula": [
+    "Equal",
+    [
+     "HardyRamanujanA",
+     "n",
+     "k"
+    ],
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "KroneckerDelta",
+       [
+        "GCD",
+        "r",
+        "k"
+       ],
+       1
+      ],
+      [
+       "Exp",
+       [
+        "Multiply",
+        [
+         "Multiply",
+         "Pi",
+         "ImaginaryUnit"
+        ],
+        [
+         "Subtract",
+         [
+          "DedekindSum",
+          "r",
+          "k"
+         ],
+         [
+          "Divide",
+          [
+           "Multiply",
+           [
+            "Multiply",
+            2,
+            "n"
+           ],
+           "r"
+          ],
+          "k"
+         ]
+        ]
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "r",
+      0,
+      [
+       "Subtract",
+       "k",
+       1
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "k",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "k",
+     "PositiveIntegers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "DedekindSum",
+    "Exp",
+    "GCD",
+    "HardyRamanujanA",
+    "KroneckerDelta",
+    "Sum"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "partitions"
+   ]
+  },
+  {
+   "id": "6018a4",
+   "formula": [
+    "Equal",
+    [
+     "NPartition",
+     4
+    ],
+    [
+     "Count",
+     [
+      "Set",
+      [
+       "List",
+       4
+      ],
+      [
+       "List",
+       3,
+       1
+      ],
+      [
+       "List",
+       2,
+       2
+      ],
+      [
+       "List",
+       2,
+       1,
+       1
+      ],
+      [
+       "List",
+       1,
+       1,
+       1,
+       1
+      ]
+     ]
+    ],
+    5
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "NPartition"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "partitions"
+   ]
+  },
+  {
+   "id": "7697af",
+   "formula": [
+    "AsymptoticTo",
+    [
+     "NPartition",
+     "n"
+    ],
+    [
+     "Divide",
+     [
+      "Exp",
+      [
+       "Multiply",
+       "Pi",
+       [
+        "Sqrt",
+        [
+         "Divide",
+         [
+          "Multiply",
+          2,
+          "n"
+         ],
+         3
+        ]
+       ]
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Multiply",
+       4,
+       "n"
+      ],
+      [
+       "Sqrt",
+       3
+      ]
+     ]
+    ],
+    "n",
+    "PositiveInfinity"
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "Integers"
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "AsymptoticTo",
+    "Exp",
+    "NPartition"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "partitions"
+   ]
+  },
+  {
+   "id": "7ef291",
+   "formula": [
+    "Equal",
+    [
+     "NPartition",
+     3
+    ],
+    [
+     "Count",
+     [
+      "Set",
+      [
+       "List",
+       3
+      ],
+      [
+       "List",
+       2,
+       1
+      ],
+      [
+       "List",
+       1,
+       1,
+       1
+      ]
+     ]
+    ],
+    3
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "NPartition"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "partitions"
+   ]
+  },
+  {
+   "id": "89260d",
+   "formula": [
+    "CongruentMod",
+    [
+     "NPartition",
+     [
+      "Add",
+      [
+       "Multiply",
+       7,
+       "n"
+      ],
+      5
+     ]
+    ],
+    0,
+    7
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "Integers"
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "CongruentMod",
+    "NPartition"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "partitions"
+   ]
+  },
+  {
+   "id": "acdce8",
+   "formula": [
+    "Equal",
+    [
+     "NPartition",
+     "n"
+    ],
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "Power",
+       -1,
+       [
+        "Add",
+        "k",
+        1
+       ]
+      ],
+      [
+       "Add",
+       [
+        "NPartition",
+        [
+         "Subtract",
+         "n",
+         [
+          "Divide",
+          [
+           "Multiply",
+           "k",
+           [
+            "Subtract",
+            [
+             "Multiply",
+             3,
+             "k"
+            ],
+            1
+           ]
+          ],
+          2
+         ]
+        ]
+       ],
+       [
+        "NPartition",
+        [
+         "Subtract",
+         "n",
+         [
+          "Divide",
+          [
+           "Multiply",
+           "k",
+           [
+            "Add",
+            [
+             "Multiply",
+             3,
+             "k"
+            ],
+            1
+           ]
+          ],
+          2
+         ]
+        ]
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "k",
+      1,
+      [
+       "Add",
+       "n",
+       1
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "Integers"
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "NPartition",
+    "Sum"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "partitions"
+   ]
+  },
+  {
+   "id": "afd27a",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "Subtract",
+      [
+       "NPartition",
+       "n"
+      ],
+      [
+       "Multiply",
+       [
+        "Divide",
+        [
+         "Multiply",
+         2,
+         "Pi"
+        ],
+        [
+         "Power",
+         [
+          "Subtract",
+          [
+           "Multiply",
+           24,
+           "n"
+          ],
+          1
+         ],
+         [
+          "Divide",
+          3,
+          4
+         ]
+        ]
+       ],
+       [
+        "Sum",
+        [
+         "Multiply",
+         [
+          "Divide",
+          [
+           "HardyRamanujanA",
+           "n",
+           "k"
+          ],
+          "k"
+         ],
+         [
+          "BesselI",
+          [
+           "Divide",
+           3,
+           2
+          ],
+          [
+           "Multiply",
+           [
+            "Divide",
+            "Pi",
+            "k"
+           ],
+           [
+            "Sqrt",
+            [
+             "Multiply",
+             [
+              "Divide",
+              2,
+              3
+             ],
+             [
+              "Subtract",
+              "n",
+              [
+               "Divide",
+               1,
+               24
+              ]
+             ]
+            ]
+           ]
+          ]
+         ]
+        ],
+        [
+         "Limits",
+         "k",
+         1,
+         "N_var"
+        ]
+       ]
+      ]
+     ]
+    ],
+    [
+     "Add",
+     [
+      "Divide",
+      [
+       "Multiply",
+       44,
+       [
+        "Power",
+        "Pi",
+        2
+       ]
+      ],
+      [
+       "Multiply",
+       225,
+       [
+        "Sqrt",
+        [
+         "Multiply",
+         3,
+         "N_var"
+        ]
+       ]
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Multiply",
+       [
+        "Divide",
+        [
+         "Multiply",
+         "Pi",
+         [
+          "Sqrt",
+          2
+         ]
+        ],
+        75
+       ],
+       [
+        "Sqrt",
+        [
+         "Divide",
+         "N_var",
+         [
+          "Subtract",
+          "n",
+          1
+         ]
+        ]
+       ]
+      ],
+      [
+       "Sinh",
+       [
+        "Multiply",
+        [
+         "Divide",
+         "Pi",
+         "N_var"
+        ],
+        [
+         "Sqrt",
+         [
+          "Divide",
+          [
+           "Multiply",
+           2,
+           "n"
+          ],
+          3
+         ]
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "N_var",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     [
+      "Range",
+      2,
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Element",
+     "N_var",
+     "PositiveIntegers"
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "BesselI",
+    "HardyRamanujanA",
+    "NPartition",
+    "Sinh",
+    "Sum"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "partitions"
+   ]
+  },
+  {
+   "id": "b2583f",
+   "formula": [
+    "Equal",
+    [
+     "NPartition",
+     2
+    ],
+    [
+     "Count",
+     [
+      "Set",
+      [
+       "List",
+       2
+      ],
+      [
+       "List",
+       1,
+       1
+      ]
+     ]
+    ],
+    2
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "NPartition"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "partitions"
+   ]
+  },
+  {
+   "id": "cd3013",
+   "formula": [
+    "Equal",
+    [
+     "NPartition",
+     [
+      "Negate",
+      "n"
+     ]
+    ],
+    0
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "PositiveIntegers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "NPartition"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "partitions"
+   ]
+  },
+  {
+   "id": "cebe1b",
+   "formula": [
+    "Equal",
+    [
+     "NPartition",
+     0
+    ],
+    [
+     "Count",
+     [
+      "Set",
+      [
+       "List"
+      ]
+     ]
+    ],
+    1
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "NPartition"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "partitions"
+   ]
+  },
+  {
+   "id": "d72123",
+   "formula": [
+    "GreaterEqual",
+    [
+     "NPartition",
+     "n"
+    ],
+    "n"
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "Integers"
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "NPartition"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "partitions"
+   ]
+  },
+  {
+   "id": "d8e37d",
+   "formula": [
+    "CongruentMod",
+    [
+     "NPartition",
+     [
+      "Add",
+      [
+       "Multiply",
+       5,
+       "n"
+      ],
+      4
+     ]
+    ],
+    0,
+    5
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "Integers"
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "CongruentMod",
+    "NPartition"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "partitions"
+   ]
+  },
+  {
+   "id": "dacd74",
+   "formula": [
+    "CongruentMod",
+    [
+     "NPartition",
+     [
+      "Add",
+      [
+       "Multiply",
+       11,
+       "n"
+      ],
+      6
+     ]
+    ],
+    0,
+    11
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "Integers"
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "CongruentMod",
+    "NPartition"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "partitions"
+   ]
+  },
+  {
+   "id": "df3c07",
+   "formula": [
+    "Less",
+    [
+     "NPartition",
+     "n"
+    ],
+    [
+     "NPartition",
+     [
+      "Add",
+      "n",
+      1
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "PositiveIntegers"
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "NPartition"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "partitions"
+   ]
+  },
+  {
+   "id": "e1f15b",
+   "formula": [
+    "LessEqual",
+    [
+     "NPartition",
+     "n"
+    ],
+    [
+     "Power",
+     2,
+     "n"
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "NPartition"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "partitions"
+   ]
+  },
+  {
+   "id": "e84642",
+   "formula": [
+    "Equal",
+    [
+     "NPartition",
+     1
+    ],
+    [
+     "Count",
+     [
+      "Set",
+      [
+       "List",
+       1
+      ]
+     ]
+    ],
+    1
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "NPartition"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "partitions"
+   ]
+  },
+  {
+   "id": "f7407a",
+   "formula": [
+    "LessEqual",
+    [
+     "NPartition",
+     "n"
+    ],
+    [
+     "NPartition",
+     [
+      "Add",
+      "n",
+      1
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "Integers"
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "NPartition"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "partitions"
+   ]
+  },
+  {
+   "id": "fb7a63",
+   "formula": [
+    "Equal",
+    [
+     "NPartition",
+     "n"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      [
+       "Multiply",
+       2,
+       "Pi"
+      ],
+      [
+       "Power",
+       [
+        "Subtract",
+        [
+         "Multiply",
+         24,
+         "n"
+        ],
+        1
+       ],
+       [
+        "Divide",
+        3,
+        4
+       ]
+      ]
+     ],
+     [
+      "Sum",
+      [
+       "Multiply",
+       [
+        "Divide",
+        [
+         "HardyRamanujanA",
+         "n",
+         "k"
+        ],
+        "k"
+       ],
+       [
+        "BesselI",
+        [
+         "Divide",
+         3,
+         2
+        ],
+        [
+         "Multiply",
+         [
+          "Divide",
+          "Pi",
+          "k"
+         ],
+         [
+          "Sqrt",
+          [
+           "Multiply",
+           [
+            "Divide",
+            2,
+            3
+           ],
+           [
+            "Subtract",
+            "n",
+            [
+             "Divide",
+             1,
+             24
+            ]
+           ]
+          ]
+         ]
+        ]
+       ]
+      ],
+      [
+       "Limits",
+       "k",
+       1,
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "PositiveIntegers"
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "BesselI",
+    "HardyRamanujanA",
+    "NPartition",
+    "Sum"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "partitions"
+   ]
+  }
+ ]
+}

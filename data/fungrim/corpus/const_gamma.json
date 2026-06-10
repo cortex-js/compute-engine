@@ -1,0 +1,864 @@
+{
+ "topic": "const_gamma",
+ "title": "Euler's constant",
+ "source": "pygrim/formulas/const_gamma.py",
+ "generator": "grim2mathjson 0.1.0",
+ "entries": [
+  {
+   "id": "014c4e",
+   "formula": [
+    "Less",
+    [
+     "Abs",
+     [
+      "Subtract",
+      "EulerGamma",
+      [
+       "Subtract",
+       [
+        "Subtract",
+        [
+         "Divide",
+         [
+          "Sum",
+          [
+           "Divide",
+           [
+            "Multiply",
+            [
+             "HarmonicNumber",
+             "k"
+            ],
+            [
+             "Power",
+             "n",
+             [
+              "Multiply",
+              2,
+              "k"
+             ]
+            ]
+           ],
+           [
+            "Power",
+            [
+             "Factorial",
+             "k"
+            ],
+            2
+           ]
+          ],
+          [
+           "Limits",
+           "k",
+           0,
+           [
+            "Multiply",
+            5,
+            "n"
+           ]
+          ]
+         ],
+         [
+          "Sum",
+          [
+           "Divide",
+           [
+            "Power",
+            "n",
+            [
+             "Multiply",
+             2,
+             "k"
+            ]
+           ],
+           [
+            "Power",
+            [
+             "Factorial",
+             "k"
+            ],
+            2
+           ]
+          ],
+          [
+           "Limits",
+           "k",
+           0,
+           [
+            "Multiply",
+            5,
+            "n"
+           ]
+          ]
+         ]
+        ],
+        [
+         "Divide",
+         [
+          "Multiply",
+          [
+           "Divide",
+           1,
+           [
+            "Multiply",
+            4,
+            "n"
+           ]
+          ],
+          [
+           "Sum",
+           [
+            "Divide",
+            [
+             "Power",
+             [
+              "Factorial",
+              [
+               "Multiply",
+               2,
+               "k"
+              ]
+             ],
+             3
+            ],
+            [
+             "Multiply",
+             [
+              "Multiply",
+              [
+               "Power",
+               [
+                "Factorial",
+                "k"
+               ],
+               4
+              ],
+              [
+               "Power",
+               8,
+               [
+                "Multiply",
+                2,
+                "k"
+               ]
+              ]
+             ],
+             [
+              "Power",
+              [
+               "Multiply",
+               2,
+               "n"
+              ],
+              [
+               "Multiply",
+               2,
+               "k"
+              ]
+             ]
+            ]
+           ],
+           [
+            "Limits",
+            "k",
+            0,
+            [
+             "Subtract",
+             [
+              "Multiply",
+              2,
+              "n"
+             ],
+             1
+            ]
+           ]
+          ]
+         ],
+         [
+          "Power",
+          [
+           "Sum",
+           [
+            "Divide",
+            [
+             "Power",
+             "n",
+             [
+              "Multiply",
+              2,
+              "k"
+             ]
+            ],
+            [
+             "Power",
+             [
+              "Factorial",
+              "k"
+             ],
+             2
+            ]
+           ],
+           [
+            "Limits",
+            "k",
+            0,
+            [
+             "Multiply",
+             5,
+             "n"
+            ]
+           ]
+          ],
+          2
+         ]
+        ]
+       ],
+       [
+        "Ln",
+        "n"
+       ]
+      ]
+     ]
+    ],
+    [
+     "Multiply",
+     24,
+     [
+      "Exp",
+      [
+       "Negate",
+       [
+        "Multiply",
+        8,
+        "n"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "PositiveIntegers"
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Exp",
+    "Factorial",
+    "HarmonicNumber",
+    "Ln",
+    "Sum"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": [
+    "R. Brent and F. Johansson. A bound for the error term in the Brent-McMillan algorithm. Mathematics of Computation 2015, 84(295). DOI: 10.1090/S0025-5718-2015-02931-7"
+   ],
+   "topics": [
+    "const_gamma"
+   ]
+  },
+  {
+   "id": "0888b3",
+   "formula": [
+    "Equal",
+    "EulerGamma",
+    [
+     "Limit",
+     [
+      "Function",
+      [
+       "Subtract",
+       [
+        "Multiply",
+        [
+         "Divide",
+         "Pi",
+         2
+        ],
+        [
+         "BesselY",
+         0,
+         "x"
+        ]
+       ],
+       [
+        "Ln",
+        [
+         "Divide",
+         "x",
+         2
+        ]
+       ]
+      ],
+      "x"
+     ],
+     0,
+     1
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "limit",
+   "heads": [
+    "BesselY",
+    "Limit",
+    "Ln"
+   ],
+   "guardLevel": "none",
+   "flavor": "right",
+   "references": null,
+   "topics": [
+    "const_gamma"
+   ]
+  },
+  {
+   "id": "288da1",
+   "formula": [
+    "Equal",
+    [
+     "Exp",
+     "EulerGamma"
+    ],
+    [
+     "Limit",
+     [
+      "Function",
+      [
+       "Multiply",
+       [
+        "Divide",
+        1,
+        [
+         "Ln",
+         [
+          "PrimeNumber",
+          "N_var"
+         ]
+        ]
+       ],
+       [
+        "Product",
+        [
+         "Divide",
+         [
+          "PrimeNumber",
+          "n"
+         ],
+         [
+          "Subtract",
+          [
+           "PrimeNumber",
+           "n"
+          ],
+          1
+         ]
+        ],
+        [
+         "Limits",
+         "n",
+         1,
+         "N_var"
+        ]
+       ]
+      ],
+      "N_var"
+     ],
+     "PositiveInfinity"
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "limit",
+   "heads": [
+    "Exp",
+    "Limit",
+    "Ln",
+    "PrimeNumber",
+    "Product"
+   ],
+   "guardLevel": "none",
+   "flavor": "sequence",
+   "references": null,
+   "topics": [
+    "const_gamma"
+   ]
+  },
+  {
+   "id": "39fe5f",
+   "formula": [
+    "Equal",
+    "EulerGamma",
+    [
+     "Negate",
+     [
+      "Integrate",
+      [
+       "Multiply",
+       [
+        "Exp",
+        [
+         "Negate",
+         "x"
+        ]
+       ],
+       [
+        "Ln",
+        "x"
+       ]
+      ],
+      [
+       "Limits",
+       "x",
+       0,
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Exp",
+    "Integrate",
+    "Ln"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "const_gamma"
+   ]
+  },
+  {
+   "id": "4644c0",
+   "formula": [
+    "Equal",
+    "EulerGamma",
+    [
+     "Limit",
+     [
+      "Function",
+      [
+       "Subtract",
+       [
+        "Sum",
+        [
+         "Divide",
+         1,
+         "k"
+        ],
+        [
+         "Limits",
+         "k",
+         1,
+         "n"
+        ]
+       ],
+       [
+        "Ln",
+        "n"
+       ]
+      ],
+      "n"
+     ],
+     "PositiveInfinity"
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "limit",
+   "heads": [
+    "Limit",
+    "Ln",
+    "Sum"
+   ],
+   "guardLevel": "none",
+   "flavor": "sequence",
+   "references": null,
+   "topics": [
+    "const_gamma"
+   ]
+  },
+  {
+   "id": "79d6ba",
+   "formula": [
+    "Equal",
+    "EulerGamma",
+    [
+     "Negate",
+     [
+      "Limit",
+      [
+       "Function",
+       [
+        "Subtract",
+        [
+         "Gamma",
+         "z"
+        ],
+        [
+         "Divide",
+         1,
+         "z"
+        ]
+       ],
+       "z"
+      ],
+      0
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "limit",
+   "heads": [
+    "Gamma",
+    "Limit"
+   ],
+   "guardLevel": "none",
+   "flavor": "complex",
+   "references": null,
+   "topics": [
+    "const_gamma"
+   ]
+  },
+  {
+   "id": "818008",
+   "formula": [
+    "Equal",
+    "EulerGamma",
+    [
+     "Subtract",
+     1,
+     [
+      "Sum",
+      [
+       "Divide",
+       [
+        "Subtract",
+        [
+         "Zeta",
+         "k"
+        ],
+        1
+       ],
+       "k"
+      ],
+      [
+       "Limits",
+       "k",
+       2,
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Sum",
+    "Zeta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "const_gamma"
+   ]
+  },
+  {
+   "id": "9d5c86",
+   "formula": [
+    "Equal",
+    "EulerGamma",
+    [
+     "Negate",
+     [
+      "Limit",
+      [
+       "Function",
+       [
+        "Add",
+        [
+         "Digamma",
+         "z"
+        ],
+        [
+         "Divide",
+         1,
+         "z"
+        ]
+       ],
+       "z"
+      ],
+      0
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "limit",
+   "heads": [
+    "Digamma",
+    "Limit"
+   ],
+   "guardLevel": "none",
+   "flavor": "complex",
+   "references": null,
+   "topics": [
+    "const_gamma"
+   ]
+  },
+  {
+   "id": "a1ca3e",
+   "formula": [
+    "Equal",
+    "EulerGamma",
+    [
+     "Negate",
+     [
+      "Integrate",
+      [
+       "Ln",
+       [
+        "Ln",
+        [
+         "Divide",
+         1,
+         "x"
+        ]
+       ]
+      ],
+      [
+       "Limits",
+       "x",
+       0,
+       1
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Integrate",
+    "Ln"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "const_gamma"
+   ]
+  },
+  {
+   "id": "a1f1ec",
+   "formula": [
+    "Equal",
+    "EulerGamma",
+    [
+     "Limit",
+     [
+      "Function",
+      [
+       "Subtract",
+       [
+        "Zeta",
+        "s"
+       ],
+       [
+        "Divide",
+        1,
+        [
+         "Subtract",
+         "s",
+         1
+        ]
+       ]
+      ],
+      "s"
+     ],
+     1
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "limit",
+   "heads": [
+    "Limit",
+    "Zeta"
+   ],
+   "guardLevel": "none",
+   "flavor": "complex",
+   "references": null,
+   "topics": [
+    "const_gamma"
+   ]
+  },
+  {
+   "id": "cf3977",
+   "formula": [
+    "Equal",
+    "EulerGamma",
+    [
+     "Negate",
+     [
+      "Apply",
+      [
+       "Derivative",
+       [
+        "Function",
+        [
+         "Gamma",
+         "z"
+        ],
+        "z"
+       ],
+       1
+      ],
+      1
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Derivative",
+    "Gamma"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "const_gamma"
+   ]
+  },
+  {
+   "id": "d17d0b",
+   "formula": [
+    "Equal",
+    "EulerGamma",
+    [
+     "Negate",
+     [
+      "Digamma",
+      1
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Digamma"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "const_gamma"
+   ]
+  },
+  {
+   "id": "e876e8",
+   "formula": [
+    "Element",
+    "EulerGamma",
+    [
+     "RealBall",
+     {
+      "num": "0.57721566490153286060651209008240243104215933593992"
+     },
+     {
+      "num": "3.60e-51"
+     }
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "RealBall"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "const_gamma"
+   ]
+  },
+  {
+   "id": "e8af68",
+   "formula": [
+    "Equal",
+    "EulerGamma",
+    [
+     "Limit",
+     [
+      "Function",
+      [
+       "Subtract",
+       [
+        "Negate",
+        [
+         "BesselK",
+         0,
+         "x"
+        ]
+       ],
+       [
+        "Ln",
+        [
+         "Divide",
+         "x",
+         2
+        ]
+       ]
+      ],
+      "x"
+     ],
+     0,
+     1
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "limit",
+   "heads": [
+    "BesselK",
+    "Limit",
+    "Ln"
+   ],
+   "guardLevel": "none",
+   "flavor": "right",
+   "references": null,
+   "topics": [
+    "const_gamma"
+   ]
+  }
+ ]
+}

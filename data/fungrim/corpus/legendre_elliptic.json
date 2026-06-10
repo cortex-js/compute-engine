@@ -1,0 +1,5935 @@
+{
+ "topic": "legendre_elliptic",
+ "title": "Legendre elliptic integrals",
+ "source": "pygrim/formulas/legendre_elliptic.py",
+ "generator": "grim2mathjson 0.1.0",
+ "entries": [
+  {
+   "id": "0455b3",
+   "formula": [
+    "Equal",
+    [
+     "EllipticK",
+     "m"
+    ],
+    [
+     "Integrate",
+     [
+      "Divide",
+      1,
+      [
+       "Sqrt",
+       [
+        "Subtract",
+        1,
+        [
+         "Multiply",
+         "m",
+         [
+          "Power",
+          [
+           "Sin",
+           "x"
+          ],
+          2
+         ]
+        ]
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "x",
+      0,
+      [
+       "Divide",
+       "Pi",
+       2
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "m"
+   ],
+   "assumptions": [
+    "Element",
+    "m",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     [
+      "Interval",
+      1,
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "EllipticK",
+    "Integrate",
+    "Sin"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "04c829",
+   "formula": [
+    "Equal",
+    [
+     "IncompleteEllipticF",
+     [
+      "Divide",
+      [
+       "Negate",
+       "Pi"
+      ],
+      2
+     ],
+     1
+    ],
+    "NegativeInfinity"
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "IncompleteEllipticF"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "061c49",
+   "formula": [
+    "Equal",
+    [
+     "EllipticPi",
+     1,
+     0
+    ],
+    "ComplexInfinity"
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "EllipticPi"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "06223c",
+   "formula": [
+    "Equal",
+    [
+     "IncompleteEllipticPi",
+     "n",
+     "phi",
+     "m"
+    ],
+    [
+     "Integrate",
+     [
+      "Divide",
+      1,
+      [
+       "Multiply",
+       [
+        "Multiply",
+        [
+         "Subtract",
+         1,
+         [
+          "Multiply",
+          "n",
+          [
+           "Power",
+           "x",
+           2
+          ]
+         ]
+        ],
+        [
+         "Sqrt",
+         [
+          "Subtract",
+          1,
+          [
+           "Power",
+           "x",
+           2
+          ]
+         ]
+        ]
+       ],
+       [
+        "Sqrt",
+        [
+         "Subtract",
+         1,
+         [
+          "Multiply",
+          "m",
+          [
+           "Power",
+           "x",
+           2
+          ]
+         ]
+        ]
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "x",
+      0,
+      [
+       "Sin",
+       "phi"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "m",
+    "n",
+    "phi"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "phi",
+     [
+      "Interval",
+      [
+       "Divide",
+       [
+        "Negate",
+        "Pi"
+       ],
+       2
+      ],
+      [
+       "Divide",
+       "Pi",
+       2
+      ]
+     ]
+    ],
+    [
+     "Element",
+     "n",
+     [
+      "Interval",
+      [
+       "Open",
+       "NegativeInfinity"
+      ],
+      [
+       "Open",
+       1
+      ]
+     ]
+    ],
+    [
+     "Element",
+     "m",
+     [
+      "Interval",
+      [
+       "Open",
+       "NegativeInfinity"
+      ],
+      [
+       "Open",
+       1
+      ]
+     ]
+    ]
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "IncompleteEllipticPi",
+    "Integrate",
+    "Sin"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "087a7c",
+   "formula": [
+    "Equal",
+    [
+     "IncompleteEllipticF",
+     [
+      "Arcsin",
+      [
+       "Divide",
+       1,
+       [
+        "Sqrt",
+        "m"
+       ]
+      ]
+     ],
+     "m"
+    ],
+    [
+     "Divide",
+     [
+      "EllipticK",
+      [
+       "Divide",
+       1,
+       "m"
+      ]
+     ],
+     [
+      "Sqrt",
+      "m"
+     ]
+    ]
+   ],
+   "variables": [
+    "m"
+   ],
+   "assumptions": [
+    "Element",
+    "m",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     [
+      "Set",
+      0
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Arcsin",
+    "EllipticK",
+    "IncompleteEllipticF"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "0abbe1",
+   "formula": [
+    "Equal",
+    [
+     "EllipticK",
+     [
+      "Divide",
+      [
+       "Add",
+       1,
+       [
+        "Multiply",
+        [
+         "Sqrt",
+         3
+        ],
+        "ImaginaryUnit"
+       ]
+      ],
+      2
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Multiply",
+      [
+       "Multiply",
+       [
+        "Exp",
+        [
+         "Divide",
+         [
+          "Multiply",
+          "ImaginaryUnit",
+          "Pi"
+         ],
+         12
+        ]
+       ],
+       [
+        "Power",
+        3,
+        [
+         "Divide",
+         1,
+         4
+        ]
+       ]
+      ],
+      [
+       "Power",
+       [
+        "Gamma",
+        [
+         "Divide",
+         1,
+         3
+        ]
+       ],
+       3
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Power",
+       2,
+       [
+        "Divide",
+        7,
+        3
+       ]
+      ],
+      "Pi"
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "EllipticK",
+    "Exp",
+    "Gamma"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "0b8fd6",
+   "formula": [
+    "Equal",
+    [
+     "IncompleteEllipticF",
+     [
+      "Divide",
+      "Pi",
+      2
+     ],
+     "m"
+    ],
+    [
+     "EllipticK",
+     "m"
+    ]
+   ],
+   "variables": [
+    "m"
+   ],
+   "assumptions": [
+    "Element",
+    "m",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "EllipticK",
+    "IncompleteEllipticF"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "0cc11f",
+   "formula": [
+    "Equal",
+    [
+     "EllipticK",
+     "m"
+    ],
+    [
+     "CarlsonRF",
+     0,
+     [
+      "Subtract",
+      1,
+      "m"
+     ],
+     1
+    ]
+   ],
+   "variables": [
+    "m"
+   ],
+   "assumptions": [
+    "Element",
+    "m",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "CarlsonRF",
+    "EllipticK"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "carlson_elliptic",
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "124d02",
+   "formula": [
+    "Equal",
+    [
+     "EllipticPi",
+     [
+      "Divide",
+      1,
+      2
+     ],
+     0
+    ],
+    [
+     "Divide",
+     [
+      "Multiply",
+      "Pi",
+      [
+       "Sqrt",
+       2
+      ]
+     ],
+     2
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "EllipticPi"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "16612f",
+   "formula": [
+    "Equal",
+    [
+     "IncompleteEllipticF",
+     [
+      "Divide",
+      "Pi",
+      2
+     ],
+     1
+    ],
+    "PositiveInfinity"
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "IncompleteEllipticF"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "16d2e1",
+   "formula": [
+    "Equal",
+    [
+     "EllipticE",
+     "m"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      "Pi",
+      2
+     ],
+     [
+      "Hypergeometric2F1",
+      [
+       "Negate",
+       [
+        "Divide",
+        1,
+        2
+       ]
+      ],
+      [
+       "Divide",
+       1,
+       2
+      ],
+      1,
+      "m"
+     ]
+    ]
+   ],
+   "variables": [
+    "m"
+   ],
+   "assumptions": [
+    "Element",
+    "m",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "EllipticE",
+    "Hypergeometric2F1"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "175b7a",
+   "formula": [
+    "Equal",
+    [
+     "EllipticK",
+     [
+      "Divide",
+      [
+       "Subtract",
+       1,
+       [
+        "Multiply",
+        [
+         "Sqrt",
+         3
+        ],
+        "ImaginaryUnit"
+       ]
+      ],
+      2
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Multiply",
+      [
+       "Multiply",
+       [
+        "Exp",
+        [
+         "Negate",
+         [
+          "Divide",
+          [
+           "Multiply",
+           "ImaginaryUnit",
+           "Pi"
+          ],
+          12
+         ]
+        ]
+       ],
+       [
+        "Power",
+        3,
+        [
+         "Divide",
+         1,
+         4
+        ]
+       ]
+      ],
+      [
+       "Power",
+       [
+        "Gamma",
+        [
+         "Divide",
+         1,
+         3
+        ]
+       ],
+       3
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Power",
+       2,
+       [
+        "Divide",
+        7,
+        3
+       ]
+      ],
+      "Pi"
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "EllipticK",
+    "Exp",
+    "Gamma"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "18e226",
+   "formula": [
+    "Equal",
+    [
+     "EllipticPi",
+     0,
+     1
+    ],
+    "PositiveInfinity"
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "EllipticPi"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "190843",
+   "formula": [
+    "Equal",
+    [
+     "EllipticE",
+     "m"
+    ],
+    [
+     "Integrate",
+     [
+      "Sqrt",
+      [
+       "Subtract",
+       1,
+       [
+        "Multiply",
+        "m",
+        [
+         "Power",
+         [
+          "Sin",
+          "x"
+         ],
+         2
+        ]
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "x",
+      0,
+      [
+       "Divide",
+       "Pi",
+       2
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "m"
+   ],
+   "assumptions": [
+    "Element",
+    "m",
+    "ComplexNumbers"
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "EllipticE",
+    "Integrate",
+    "Sin"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "1b881e",
+   "formula": [
+    "Equal",
+    [
+     "IncompleteEllipticE",
+     [
+      "Divide",
+      "Pi",
+      2
+     ],
+     "m"
+    ],
+    [
+     "EllipticE",
+     "m"
+    ]
+   ],
+   "variables": [
+    "m"
+   ],
+   "assumptions": [
+    "Element",
+    "m",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "EllipticE",
+    "IncompleteEllipticE"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "1d62a7",
+   "formula": [
+    "Equal",
+    [
+     "EllipticE",
+     0
+    ],
+    [
+     "Divide",
+     "Pi",
+     2
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "EllipticE"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "2245df",
+   "formula": [
+    "Equal",
+    [
+     "IncompleteEllipticE",
+     [
+      "Divide",
+      [
+       "Multiply",
+       "Pi",
+       "k"
+      ],
+      2
+     ],
+     1
+    ],
+    "k"
+   ],
+   "variables": [
+    "k"
+   ],
+   "assumptions": [
+    "Element",
+    "k",
+    "Integers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "IncompleteEllipticE"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "255d81",
+   "formula": [
+    "Equal",
+    [
+     "IncompleteEllipticPi",
+     "n",
+     [
+      "Negate",
+      "phi"
+     ],
+     "m"
+    ],
+    [
+     "Negate",
+     [
+      "IncompleteEllipticPi",
+      "n",
+      "phi",
+      "m"
+     ]
+    ]
+   ],
+   "variables": [
+    "m",
+    "n",
+    "phi"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "phi",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "m",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "IncompleteEllipticPi"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "2573ba",
+   "formula": [
+    "Equal",
+    [
+     "IncompleteEllipticE",
+     [
+      "Divide",
+      "Pi",
+      2
+     ],
+     -1
+    ],
+    [
+     "Multiply",
+     [
+      "Sqrt",
+      2
+     ],
+     [
+      "Add",
+      [
+       "Divide",
+       [
+        "Power",
+        [
+         "Gamma",
+         [
+          "Divide",
+          1,
+          4
+         ]
+        ],
+        2
+       ],
+       [
+        "Multiply",
+        8,
+        [
+         "Sqrt",
+         "Pi"
+        ]
+       ]
+      ],
+      [
+       "Divide",
+       [
+        "Power",
+        "Pi",
+        [
+         "Divide",
+         3,
+         2
+        ]
+       ],
+       [
+        "Power",
+        [
+         "Gamma",
+         [
+          "Divide",
+          1,
+          4
+         ]
+        ],
+        2
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Gamma",
+    "IncompleteEllipticE"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "2991b5",
+   "formula": [
+    "Equal",
+    [
+     "EllipticK",
+     [
+      "Power",
+      [
+       "Subtract",
+       3,
+       [
+        "Multiply",
+        2,
+        [
+         "Sqrt",
+         2
+        ]
+       ]
+      ],
+      2
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Multiply",
+      [
+       "Add",
+       2,
+       [
+        "Sqrt",
+        2
+       ]
+      ],
+      [
+       "Power",
+       [
+        "Gamma",
+        [
+         "Divide",
+         1,
+         4
+        ]
+       ],
+       2
+      ]
+     ],
+     [
+      "Multiply",
+      16,
+      [
+       "Sqrt",
+       "Pi"
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "EllipticK",
+    "Gamma"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "2ef763",
+   "formula": [
+    "Equal",
+    [
+     "IncompleteEllipticE",
+     [
+      "Divide",
+      [
+       "Negate",
+       "Pi"
+      ],
+      2
+     ],
+     "m"
+    ],
+    [
+     "Negate",
+     [
+      "EllipticE",
+      "m"
+     ]
+    ]
+   ],
+   "variables": [
+    "m"
+   ],
+   "assumptions": [
+    "Element",
+    "m",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "EllipticE",
+    "IncompleteEllipticE"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "2ff7e7",
+   "formula": [
+    "Equal",
+    [
+     "IncompleteEllipticE",
+     "phi",
+     "m"
+    ],
+    [
+     "Integrate",
+     [
+      "Sqrt",
+      [
+       "Subtract",
+       1,
+       [
+        "Multiply",
+        "m",
+        [
+         "Power",
+         [
+          "Sin",
+          "x"
+         ],
+         2
+        ]
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "x",
+      0,
+      "phi"
+     ]
+    ]
+   ],
+   "variables": [
+    "m",
+    "phi"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "phi",
+     [
+      "Interval",
+      [
+       "Divide",
+       [
+        "Negate",
+        "Pi"
+       ],
+       2
+      ],
+      [
+       "Divide",
+       "Pi",
+       2
+      ]
+     ]
+    ],
+    [
+     "Element",
+     "m",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "IncompleteEllipticE",
+    "Integrate",
+    "Sin"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "33ee4a",
+   "formula": [
+    "Equal",
+    [
+     "IncompleteEllipticF",
+     "phi",
+     "m"
+    ],
+    [
+     "Integrate",
+     [
+      "Divide",
+      1,
+      [
+       "Multiply",
+       [
+        "Sqrt",
+        [
+         "Subtract",
+         1,
+         [
+          "Power",
+          "x",
+          2
+         ]
+        ]
+       ],
+       [
+        "Sqrt",
+        [
+         "Subtract",
+         1,
+         [
+          "Multiply",
+          "m",
+          [
+           "Power",
+           "x",
+           2
+          ]
+         ]
+        ]
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "x",
+      0,
+      [
+       "Sin",
+       "phi"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "m",
+    "phi"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "phi",
+     [
+      "Interval",
+      [
+       "Divide",
+       [
+        "Negate",
+        "Pi"
+       ],
+       2
+      ],
+      [
+       "Divide",
+       "Pi",
+       2
+      ]
+     ]
+    ],
+    [
+     "Element",
+     "m",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      [
+       "Interval",
+       1,
+       [
+        "Open",
+        "PositiveInfinity"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "IncompleteEllipticF",
+    "Integrate",
+    "Sin"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "3aed02",
+   "formula": [
+    "Equal",
+    [
+     "IncompleteEllipticE",
+     [
+      "Divide",
+      "Pi",
+      3
+     ],
+     1
+    ],
+    [
+     "Divide",
+     [
+      "Sqrt",
+      3
+     ],
+     2
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "IncompleteEllipticE"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "3b272e",
+   "formula": [
+    "Equal",
+    [
+     "EllipticE",
+     [
+      "Divide",
+      1,
+      2
+     ]
+    ],
+    [
+     "Add",
+     [
+      "Divide",
+      [
+       "Power",
+       [
+        "Gamma",
+        [
+         "Divide",
+         1,
+         4
+        ]
+       ],
+       2
+      ],
+      [
+       "Multiply",
+       8,
+       [
+        "Sqrt",
+        "Pi"
+       ]
+      ]
+     ],
+     [
+      "Divide",
+      [
+       "Power",
+       "Pi",
+       [
+        "Divide",
+        3,
+        2
+       ]
+      ],
+      [
+       "Power",
+       [
+        "Gamma",
+        [
+         "Divide",
+         1,
+         4
+        ]
+       ],
+       2
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "EllipticE",
+    "Gamma"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "3c4979",
+   "formula": [
+    "Equal",
+    [
+     "EllipticPi",
+     0,
+     [
+      "Divide",
+      1,
+      2
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Power",
+      [
+       "Gamma",
+       [
+        "Divide",
+        1,
+        4
+       ]
+      ],
+      2
+     ],
+     [
+      "Multiply",
+      4,
+      [
+       "Sqrt",
+       "Pi"
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "EllipticPi",
+    "Gamma"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "40a376",
+   "formula": [
+    "Equal",
+    [
+     "EllipticK",
+     [
+      "Subtract",
+      [
+       "Divide",
+       1,
+       2
+      ],
+      [
+       "Divide",
+       [
+        "Sqrt",
+        3
+       ],
+       4
+      ]
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Multiply",
+      [
+       "Power",
+       3,
+       [
+        "Divide",
+        1,
+        4
+       ]
+      ],
+      [
+       "Power",
+       [
+        "Gamma",
+        [
+         "Divide",
+         1,
+         3
+        ]
+       ],
+       3
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Multiply",
+       4,
+       [
+        "Power",
+        2,
+        [
+         "Divide",
+         1,
+         3
+        ]
+       ]
+      ],
+      "Pi"
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "EllipticK",
+    "Gamma"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "41cf8e",
+   "formula": [
+    "Equal",
+    [
+     "EllipticE",
+     "m"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      [
+       "Subtract",
+       1,
+       "m"
+      ],
+      3
+     ],
+     [
+      "Add",
+      [
+       "CarlsonRD",
+       0,
+       [
+        "Subtract",
+        1,
+        "m"
+       ],
+       1
+      ],
+      [
+       "CarlsonRD",
+       0,
+       1,
+       [
+        "Subtract",
+        1,
+        "m"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "m"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "m",
+     "ComplexNumbers"
+    ],
+    [
+     "NotEqual",
+     "m",
+     1
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "CarlsonRD",
+    "EllipticE"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "carlson_elliptic",
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "4268fc",
+   "formula": [
+    "Equal",
+    [
+     "IncompleteEllipticF",
+     0,
+     "m"
+    ],
+    0
+   ],
+   "variables": [
+    "m"
+   ],
+   "assumptions": [
+    "Element",
+    "m",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "IncompleteEllipticF"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "45b157",
+   "formula": [
+    "Equal",
+    [
+     "EllipticK",
+     1
+    ],
+    "PositiveInfinity"
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "EllipticK"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "47dead",
+   "formula": [
+    "Equal",
+    [
+     "EllipticK",
+     "m"
+    ],
+    [
+     "Integrate",
+     [
+      "Divide",
+      1,
+      [
+       "Multiply",
+       [
+        "Sqrt",
+        [
+         "Subtract",
+         1,
+         [
+          "Power",
+          "x",
+          2
+         ]
+        ]
+       ],
+       [
+        "Sqrt",
+        [
+         "Subtract",
+         1,
+         [
+          "Multiply",
+          "m",
+          [
+           "Power",
+           "x",
+           2
+          ]
+         ]
+        ]
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "x",
+      0,
+      1
+     ]
+    ]
+   ],
+   "variables": [
+    "m"
+   ],
+   "assumptions": [
+    "Element",
+    "m",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     [
+      "Interval",
+      1,
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "EllipticK",
+    "Integrate"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "4b040d",
+   "formula": [
+    "Equal",
+    [
+     "EllipticK",
+     [
+      "Divide",
+      [
+       "Subtract",
+       4,
+       [
+        "Multiply",
+        3,
+        [
+         "Sqrt",
+         2
+        ]
+       ]
+      ],
+      8
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Power",
+      [
+       "Gamma",
+       [
+        "Divide",
+        1,
+        4
+       ]
+      ],
+      2
+     ],
+     [
+      "Multiply",
+      [
+       "Multiply",
+       4,
+       [
+        "Power",
+        2,
+        [
+         "Divide",
+         1,
+         4
+        ]
+       ]
+      ],
+      [
+       "Sqrt",
+       "Pi"
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "EllipticK",
+    "Gamma"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "4dabda",
+   "formula": [
+    "Equal",
+    [
+     "IncompleteEllipticE",
+     [
+      "Divide",
+      "Pi",
+      4
+     ],
+     2
+    ],
+    [
+     "Divide",
+     [
+      "Multiply",
+      [
+       "Sqrt",
+       2
+      ],
+      [
+       "Power",
+       "Pi",
+       [
+        "Divide",
+        3,
+        2
+       ]
+      ]
+     ],
+     [
+      "Power",
+      [
+       "Gamma",
+       [
+        "Divide",
+        1,
+        4
+       ]
+      ],
+      2
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Gamma",
+    "IncompleteEllipticE"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "51a946",
+   "formula": [
+    "Equal",
+    [
+     "IncompleteEllipticE",
+     [
+      "Divide",
+      "Pi",
+      2
+     ],
+     0
+    ],
+    [
+     "Divide",
+     "Pi",
+     2
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "IncompleteEllipticE"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "55d23d",
+   "formula": [
+    "Equal",
+    [
+     "Subtract",
+     [
+      "EllipticE",
+      "m"
+     ],
+     [
+      "Multiply",
+      [
+       "Subtract",
+       1,
+       "m"
+      ],
+      [
+       "EllipticK",
+       "m"
+      ]
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      [
+       "Multiply",
+       "m",
+       [
+        "Subtract",
+        1,
+        "m"
+       ]
+      ],
+      3
+     ],
+     [
+      "CarlsonRD",
+      0,
+      1,
+      [
+       "Subtract",
+       1,
+       "m"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "m"
+   ],
+   "assumptions": [
+    "Element",
+    "m",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "CarlsonRD",
+    "EllipticE",
+    "EllipticK"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "carlson_elliptic",
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "5d2c01",
+   "formula": [
+    "Equal",
+    [
+     "EllipticE",
+     2
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      [
+       "Multiply",
+       [
+        "Sqrt",
+        2
+       ],
+       [
+        "Power",
+        "Pi",
+        [
+         "Divide",
+         3,
+         2
+        ]
+       ]
+      ],
+      [
+       "Power",
+       [
+        "Gamma",
+        [
+         "Divide",
+         1,
+         4
+        ]
+       ],
+       2
+      ]
+     ],
+     [
+      "Add",
+      1,
+      "ImaginaryUnit"
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "EllipticE",
+    "Gamma"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "5d8804",
+   "formula": [
+    "Equal",
+    [
+     "EllipticPi",
+     "n",
+     0
+    ],
+    [
+     "Divide",
+     "Pi",
+     [
+      "Multiply",
+      2,
+      [
+       "Sqrt",
+       [
+        "Subtract",
+        1,
+        "n"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "EllipticPi"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "5e869b",
+   "formula": [
+    "Equal",
+    [
+     "IncompleteEllipticE",
+     "phi",
+     "m"
+    ],
+    [
+     "Integrate",
+     [
+      "Divide",
+      [
+       "Sqrt",
+       [
+        "Subtract",
+        1,
+        [
+         "Multiply",
+         "m",
+         [
+          "Power",
+          "x",
+          2
+         ]
+        ]
+       ]
+      ],
+      [
+       "Sqrt",
+       [
+        "Subtract",
+        1,
+        [
+         "Power",
+         "x",
+         2
+        ]
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "x",
+      0,
+      [
+       "Sin",
+       "phi"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "m",
+    "phi"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "phi",
+     [
+      "Interval",
+      [
+       "Divide",
+       [
+        "Negate",
+        "Pi"
+       ],
+       2
+      ],
+      [
+       "Divide",
+       "Pi",
+       2
+      ]
+     ]
+    ],
+    [
+     "Element",
+     "m",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "IncompleteEllipticE",
+    "Integrate",
+    "Sin"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "5f84d9",
+   "formula": [
+    "Equal",
+    [
+     "IncompleteEllipticPi",
+     "n",
+     [
+      "Add",
+      "phi",
+      [
+       "Multiply",
+       "k",
+       "Pi"
+      ]
+     ],
+     "m"
+    ],
+    [
+     "Add",
+     [
+      "IncompleteEllipticPi",
+      "n",
+      "phi",
+      "m"
+     ],
+     [
+      "Multiply",
+      [
+       "Multiply",
+       2,
+       "k"
+      ],
+      [
+       "EllipticPi",
+       "n",
+       "m"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "k",
+    "m",
+    "n",
+    "phi"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "phi",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "m",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "k",
+     "Integers"
+    ],
+    [
+     "NotEqual",
+     "n",
+     1
+    ],
+    [
+     "NotEqual",
+     "m",
+     1
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "EllipticPi",
+    "IncompleteEllipticPi"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "60f858",
+   "formula": [
+    "Equal",
+    [
+     "IncompleteEllipticPi",
+     "n",
+     "phi",
+     "m"
+    ],
+    [
+     "Integrate",
+     [
+      "Divide",
+      1,
+      [
+       "Multiply",
+       [
+        "Subtract",
+        1,
+        [
+         "Multiply",
+         "n",
+         [
+          "Power",
+          [
+           "Sin",
+           "x"
+          ],
+          2
+         ]
+        ]
+       ],
+       [
+        "Sqrt",
+        [
+         "Subtract",
+         1,
+         [
+          "Multiply",
+          "m",
+          [
+           "Power",
+           [
+            "Sin",
+            "x"
+           ],
+           2
+          ]
+         ]
+        ]
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "x",
+      0,
+      "phi"
+     ]
+    ]
+   ],
+   "variables": [
+    "m",
+    "n",
+    "phi"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "phi",
+     [
+      "Interval",
+      [
+       "Divide",
+       [
+        "Negate",
+        "Pi"
+       ],
+       2
+      ],
+      [
+       "Divide",
+       "Pi",
+       2
+      ]
+     ]
+    ],
+    [
+     "Element",
+     "n",
+     [
+      "Interval",
+      [
+       "Open",
+       "NegativeInfinity"
+      ],
+      [
+       "Open",
+       1
+      ]
+     ]
+    ],
+    [
+     "Element",
+     "m",
+     [
+      "Interval",
+      [
+       "Open",
+       "NegativeInfinity"
+      ],
+      [
+       "Open",
+       1
+      ]
+     ]
+    ]
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "IncompleteEllipticPi",
+    "Integrate",
+    "Sin"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "618a54",
+   "formula": [
+    "Equal",
+    [
+     "EllipticPi",
+     0,
+     0
+    ],
+    [
+     "Divide",
+     "Pi",
+     2
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "EllipticPi"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "630eca",
+   "formula": [
+    "Equal",
+    [
+     "EllipticK",
+     2
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      [
+       "Power",
+       [
+        "Gamma",
+        [
+         "Divide",
+         1,
+         4
+        ]
+       ],
+       2
+      ],
+      [
+       "Multiply",
+       4,
+       [
+        "Sqrt",
+        [
+         "Multiply",
+         2,
+         "Pi"
+        ]
+       ]
+      ]
+     ],
+     [
+      "Subtract",
+      1,
+      "ImaginaryUnit"
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "EllipticK",
+    "Gamma"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "6520e7",
+   "formula": [
+    "Equal",
+    [
+     "EllipticE",
+     "m"
+    ],
+    [
+     "Multiply",
+     2,
+     [
+      "CarlsonRG",
+      0,
+      [
+       "Subtract",
+       1,
+       "m"
+      ],
+      1
+     ]
+    ]
+   ],
+   "variables": [
+    "m"
+   ],
+   "assumptions": [
+    "Element",
+    "m",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "CarlsonRG",
+    "EllipticE"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "carlson_elliptic",
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "685126",
+   "formula": [
+    "Equal",
+    [
+     "IncompleteEllipticF",
+     [
+      "Add",
+      "phi",
+      [
+       "Multiply",
+       "k",
+       "Pi"
+      ]
+     ],
+     "m"
+    ],
+    [
+     "Add",
+     [
+      "IncompleteEllipticF",
+      "phi",
+      "m"
+     ],
+     [
+      "Multiply",
+      [
+       "Multiply",
+       2,
+       "k"
+      ],
+      [
+       "EllipticK",
+       "m"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "k",
+    "m",
+    "phi"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "phi",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "m",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "k",
+     "Integers"
+    ],
+    [
+     "NotEqual",
+     "m",
+     1
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "EllipticK",
+    "IncompleteEllipticF"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "713966",
+   "formula": [
+    "Equal",
+    [
+     "EllipticK",
+     [
+      "Conjugate",
+      "m"
+     ]
+    ],
+    [
+     "Conjugate",
+     [
+      "EllipticK",
+      "m"
+     ]
+    ]
+   ],
+   "variables": [
+    "m"
+   ],
+   "assumptions": [
+    "Element",
+    "m",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     [
+      "Interval",
+      [
+       "Open",
+       1
+      ],
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Conjugate",
+    "EllipticK"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "752619",
+   "formula": [
+    "Equal",
+    [
+     "Subtract",
+     [
+      "Multiply",
+      2,
+      [
+       "EllipticE",
+       "m"
+      ]
+     ],
+     [
+      "EllipticK",
+      "m"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      "Pi",
+      2
+     ],
+     [
+      "Hypergeometric2F1",
+      [
+       "Negate",
+       [
+        "Divide",
+        1,
+        2
+       ]
+      ],
+      [
+       "Divide",
+       3,
+       2
+      ],
+      1,
+      "m"
+     ]
+    ]
+   ],
+   "variables": [
+    "m"
+   ],
+   "assumptions": [
+    "Element",
+    "m",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "EllipticE",
+    "EllipticK",
+    "Hypergeometric2F1"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "75e141",
+   "formula": [
+    "Equal",
+    [
+     "IncompleteEllipticE",
+     "phi",
+     1
+    ],
+    [
+     "Sin",
+     "phi"
+    ]
+   ],
+   "variables": [
+    "phi"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "phi",
+     "ComplexNumbers"
+    ],
+    [
+     "Or",
+     [
+      "Element",
+      [
+       "Real",
+       "phi"
+      ],
+      [
+       "Interval",
+       [
+        "Divide",
+        [
+         "Negate",
+         "Pi"
+        ],
+        2
+       ],
+       [
+        "Open",
+        [
+         "Divide",
+         "Pi",
+         2
+        ]
+       ]
+      ]
+     ],
+     [
+      "Equal",
+      "phi",
+      [
+       "Divide",
+       "Pi",
+       2
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "IncompleteEllipticE",
+    "Sin"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "7cd257",
+   "formula": [
+    "Equal",
+    [
+     "EllipticK",
+     "m"
+    ],
+    [
+     "Integrate",
+     [
+      "Divide",
+      1,
+      [
+       "Multiply",
+       [
+        "Sqrt",
+        [
+         "Subtract",
+         [
+          "Power",
+          "x",
+          2
+         ],
+         1
+        ]
+       ],
+       [
+        "Sqrt",
+        [
+         "Subtract",
+         [
+          "Power",
+          "x",
+          2
+         ],
+         "m"
+        ]
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "x",
+      1,
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "variables": [
+    "m"
+   ],
+   "assumptions": [
+    "Element",
+    "m",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     [
+      "Interval",
+      1,
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "EllipticK",
+    "Integrate"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "81f7db",
+   "formula": [
+    "Equal",
+    [
+     "IncompleteEllipticF",
+     [
+      "Divide",
+      [
+       "Negate",
+       "Pi"
+      ],
+      2
+     ],
+     "m"
+    ],
+    [
+     "Negate",
+     [
+      "EllipticK",
+      "m"
+     ]
+    ]
+   ],
+   "variables": [
+    "m"
+   ],
+   "assumptions": [
+    "Element",
+    "m",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "EllipticK",
+    "IncompleteEllipticF"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "81fb10",
+   "formula": [
+    "Equal",
+    [
+     "IncompleteEllipticF",
+     "phi",
+     "m"
+    ],
+    [
+     "Integrate",
+     [
+      "Divide",
+      1,
+      [
+       "Sqrt",
+       [
+        "Subtract",
+        1,
+        [
+         "Multiply",
+         "m",
+         [
+          "Power",
+          [
+           "Sin",
+           "x"
+          ],
+          2
+         ]
+        ]
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "x",
+      0,
+      "phi"
+     ]
+    ]
+   ],
+   "variables": [
+    "m",
+    "phi"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "phi",
+     [
+      "Interval",
+      [
+       "Divide",
+       [
+        "Negate",
+        "Pi"
+       ],
+       2
+      ],
+      [
+       "Divide",
+       "Pi",
+       2
+      ]
+     ]
+    ],
+    [
+     "Element",
+     "m",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      [
+       "Interval",
+       1,
+       [
+        "Open",
+        "PositiveInfinity"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "IncompleteEllipticF",
+    "Integrate",
+    "Sin"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "83a535",
+   "formula": [
+    "Equal",
+    [
+     "EllipticPi",
+     "n",
+     "m"
+    ],
+    [
+     "Integrate",
+     [
+      "Divide",
+      1,
+      [
+       "Multiply",
+       [
+        "Subtract",
+        1,
+        [
+         "Multiply",
+         "n",
+         [
+          "Power",
+          [
+           "Sin",
+           "x"
+          ],
+          2
+         ]
+        ]
+       ],
+       [
+        "Sqrt",
+        [
+         "Subtract",
+         1,
+         [
+          "Multiply",
+          "m",
+          [
+           "Power",
+           [
+            "Sin",
+            "x"
+           ],
+           2
+          ]
+         ]
+        ]
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "x",
+      0,
+      [
+       "Divide",
+       "Pi",
+       2
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "m",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     [
+      "Interval",
+      [
+       "Open",
+       "NegativeInfinity"
+      ],
+      [
+       "Open",
+       1
+      ]
+     ]
+    ],
+    [
+     "Element",
+     "m",
+     [
+      "Interval",
+      [
+       "Open",
+       "NegativeInfinity"
+      ],
+      [
+       "Open",
+       1
+      ]
+     ]
+    ]
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "EllipticPi",
+    "Integrate",
+    "Sin"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "8b4be6",
+   "formula": [
+    "Equal",
+    [
+     "IncompleteEllipticF",
+     [
+      "Divide",
+      "Pi",
+      4
+     ],
+     2
+    ],
+    [
+     "Divide",
+     [
+      "Multiply",
+      [
+       "Sqrt",
+       2
+      ],
+      [
+       "Power",
+       [
+        "Gamma",
+        [
+         "Divide",
+         1,
+         4
+        ]
+       ],
+       2
+      ]
+     ],
+     [
+      "Multiply",
+      8,
+      [
+       "Sqrt",
+       "Pi"
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Gamma",
+    "IncompleteEllipticF"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "8e5c81",
+   "formula": [
+    "Equal",
+    [
+     "EllipticE",
+     [
+      "Conjugate",
+      "m"
+     ]
+    ],
+    [
+     "Conjugate",
+     [
+      "EllipticE",
+      "m"
+     ]
+    ]
+   ],
+   "variables": [
+    "m"
+   ],
+   "assumptions": [
+    "Element",
+    "m",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     [
+      "Interval",
+      [
+       "Open",
+       1
+      ],
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Conjugate",
+    "EllipticE"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "8f4e31",
+   "formula": [
+    "Equal",
+    [
+     "IncompleteEllipticPi",
+     "n",
+     "phi",
+     "m"
+    ],
+    [
+     "Add",
+     [
+      "Multiply",
+      [
+       "Sin",
+       "phi"
+      ],
+      [
+       "CarlsonRF",
+       [
+        "Power",
+        [
+         "Cos",
+         "phi"
+        ],
+        2
+       ],
+       [
+        "Subtract",
+        1,
+        [
+         "Multiply",
+         "m",
+         [
+          "Power",
+          [
+           "Sin",
+           "phi"
+          ],
+          2
+         ]
+        ]
+       ],
+       1
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Multiply",
+       [
+        "Multiply",
+        [
+         "Divide",
+         1,
+         3
+        ],
+        "n"
+       ],
+       [
+        "Power",
+        [
+         "Sin",
+         "phi"
+        ],
+        3
+       ]
+      ],
+      [
+       "CarlsonRJ",
+       [
+        "Power",
+        [
+         "Cos",
+         "phi"
+        ],
+        2
+       ],
+       [
+        "Subtract",
+        1,
+        [
+         "Multiply",
+         "m",
+         [
+          "Power",
+          [
+           "Sin",
+           "phi"
+          ],
+          2
+         ]
+        ]
+       ],
+       1,
+       [
+        "Subtract",
+        1,
+        [
+         "Multiply",
+         "n",
+         [
+          "Power",
+          [
+           "Sin",
+           "phi"
+          ],
+          2
+         ]
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "m",
+    "n",
+    "phi"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "phi",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "m",
+     "ComplexNumbers"
+    ],
+    [
+     "LessEqual",
+     [
+      "Divide",
+      [
+       "Negate",
+       "Pi"
+      ],
+      2
+     ],
+     [
+      "Real",
+      "phi"
+     ],
+     [
+      "Divide",
+      "Pi",
+      2
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "CarlsonRF",
+    "CarlsonRJ",
+    "Cos",
+    "IncompleteEllipticPi",
+    "Sin"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "carlson_elliptic",
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "9227bf",
+   "formula": [
+    "Equal",
+    [
+     "EllipticPi",
+     "m",
+     "m"
+    ],
+    [
+     "Divide",
+     [
+      "EllipticE",
+      "m"
+     ],
+     [
+      "Subtract",
+      1,
+      "m"
+     ]
+    ]
+   ],
+   "variables": [
+    "m"
+   ],
+   "assumptions": [
+    "Element",
+    "m",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "EllipticE",
+    "EllipticPi"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "94f646",
+   "formula": [
+    "Equal",
+    [
+     "Subtract",
+     [
+      "EllipticK",
+      "m"
+     ],
+     [
+      "EllipticE",
+      "m"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      "m",
+      3
+     ],
+     [
+      "CarlsonRD",
+      0,
+      [
+       "Subtract",
+       1,
+       "m"
+      ],
+      1
+     ]
+    ]
+   ],
+   "variables": [
+    "m"
+   ],
+   "assumptions": [
+    "Element",
+    "m",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "CarlsonRD",
+    "EllipticE",
+    "EllipticK"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "carlson_elliptic",
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "958a3f",
+   "formula": [
+    "Equal",
+    [
+     "EllipticE",
+     1
+    ],
+    1
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "EllipticE"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "9b0385",
+   "formula": [
+    "Equal",
+    [
+     "EllipticPi",
+     [
+      "Divide",
+      1,
+      2
+     ],
+     [
+      "Divide",
+      1,
+      2
+     ]
+    ],
+    [
+     "Add",
+     [
+      "Divide",
+      [
+       "Power",
+       [
+        "Gamma",
+        [
+         "Divide",
+         1,
+         4
+        ]
+       ],
+       2
+      ],
+      [
+       "Multiply",
+       4,
+       [
+        "Sqrt",
+        "Pi"
+       ]
+      ]
+     ],
+     [
+      "Divide",
+      [
+       "Multiply",
+       2,
+       [
+        "Power",
+        "Pi",
+        [
+         "Divide",
+         3,
+         2
+        ]
+       ]
+      ],
+      [
+       "Power",
+       [
+        "Gamma",
+        [
+         "Divide",
+         1,
+         4
+        ]
+       ],
+       2
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "EllipticPi",
+    "Gamma"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "9ccaef",
+   "formula": [
+    "Equal",
+    [
+     "EllipticPi",
+     "n",
+     "m"
+    ],
+    [
+     "Add",
+     [
+      "CarlsonRF",
+      0,
+      [
+       "Subtract",
+       1,
+       "m"
+      ],
+      1
+     ],
+     [
+      "Multiply",
+      [
+       "Divide",
+       "n",
+       3
+      ],
+      [
+       "CarlsonRJ",
+       0,
+       [
+        "Subtract",
+        1,
+        "m"
+       ],
+       1,
+       [
+        "Subtract",
+        1,
+        "n"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "m",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "m",
+     "ComplexNumbers"
+    ],
+    [
+     "NotEqual",
+     "m",
+     1
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "CarlsonRF",
+    "CarlsonRJ",
+    "EllipticPi"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "carlson_elliptic",
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "9f3474",
+   "formula": [
+    "Equal",
+    [
+     "EllipticE",
+     -1
+    ],
+    [
+     "Multiply",
+     [
+      "Sqrt",
+      2
+     ],
+     [
+      "Add",
+      [
+       "Divide",
+       [
+        "Power",
+        [
+         "Gamma",
+         [
+          "Divide",
+          1,
+          4
+         ]
+        ],
+        2
+       ],
+       [
+        "Multiply",
+        8,
+        [
+         "Sqrt",
+         "Pi"
+        ]
+       ]
+      ],
+      [
+       "Divide",
+       [
+        "Power",
+        "Pi",
+        [
+         "Divide",
+         3,
+         2
+        ]
+       ],
+       [
+        "Power",
+        [
+         "Gamma",
+         [
+          "Divide",
+          1,
+          4
+         ]
+        ],
+        2
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "EllipticE",
+    "Gamma"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "a14442",
+   "formula": [
+    "Equal",
+    [
+     "IncompleteEllipticE",
+     [
+      "Divide",
+      [
+       "Multiply",
+       "Pi",
+       "k"
+      ],
+      2
+     ],
+     "m"
+    ],
+    [
+     "Multiply",
+     "k",
+     [
+      "EllipticE",
+      "m"
+     ]
+    ]
+   ],
+   "variables": [
+    "k",
+    "m"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "m",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "k",
+     "Integers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "EllipticE",
+    "IncompleteEllipticE"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "a6c07e",
+   "formula": [
+    "Equal",
+    [
+     "IncompleteEllipticE",
+     0,
+     0
+    ],
+    0
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "IncompleteEllipticE"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "a91f8d",
+   "formula": [
+    "Equal",
+    [
+     "IncompleteEllipticF",
+     [
+      "Divide",
+      "Pi",
+      6
+     ],
+     1
+    ],
+    [
+     "Divide",
+     [
+      "Ln",
+      3
+     ],
+     2
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "IncompleteEllipticF",
+    "Ln"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "aa1b8e",
+   "formula": [
+    "Equal",
+    [
+     "IncompleteEllipticE",
+     [
+      "Negate",
+      "phi"
+     ],
+     "m"
+    ],
+    [
+     "Negate",
+     [
+      "IncompleteEllipticE",
+      "phi",
+      "m"
+     ]
+    ]
+   ],
+   "variables": [
+    "m",
+    "phi"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "phi",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "m",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "IncompleteEllipticE"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "aac129",
+   "formula": [
+    "Equal",
+    [
+     "IncompleteEllipticF",
+     [
+      "Divide",
+      "Pi",
+      6
+     ],
+     4
+    ],
+    [
+     "Divide",
+     [
+      "EllipticK",
+      [
+       "Divide",
+       1,
+       4
+      ]
+     ],
+     2
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "EllipticK",
+    "IncompleteEllipticF"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "ace837",
+   "formula": [
+    "Equal",
+    [
+     "IncompleteEllipticF",
+     [
+      "Divide",
+      "Pi",
+      2
+     ],
+     -1
+    ],
+    [
+     "Divide",
+     [
+      "Power",
+      [
+       "Gamma",
+       [
+        "Divide",
+        1,
+        4
+       ]
+      ],
+      2
+     ],
+     [
+      "Multiply",
+      4,
+      [
+       "Sqrt",
+       [
+        "Multiply",
+        2,
+        "Pi"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Gamma",
+    "IncompleteEllipticF"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "afabeb",
+   "formula": [
+    "Equal",
+    [
+     "IncompleteEllipticF",
+     [
+      "Divide",
+      [
+       "Multiply",
+       "Pi",
+       "k"
+      ],
+      2
+     ],
+     "m"
+    ],
+    [
+     "Multiply",
+     "k",
+     [
+      "EllipticK",
+      "m"
+     ]
+    ]
+   ],
+   "variables": [
+    "k",
+    "m"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "m",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "k",
+     "Integers"
+    ],
+    [
+     "Or",
+     [
+      "NotEqual",
+      "k",
+      0
+     ],
+     [
+      "NotEqual",
+      "m",
+      1
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "EllipticK",
+    "IncompleteEllipticF"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "afb22a",
+   "formula": [
+    "Equal",
+    [
+     "EllipticK",
+     -1
+    ],
+    [
+     "Divide",
+     [
+      "Power",
+      [
+       "Gamma",
+       [
+        "Divide",
+        1,
+        4
+       ]
+      ],
+      2
+     ],
+     [
+      "Multiply",
+      4,
+      [
+       "Sqrt",
+       [
+        "Multiply",
+        2,
+        "Pi"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "EllipticK",
+    "Gamma"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "b0eb37",
+   "formula": [
+    "Equal",
+    [
+     "IncompleteEllipticF",
+     [
+      "Negate",
+      "phi"
+     ],
+     "m"
+    ],
+    [
+     "Negate",
+     [
+      "IncompleteEllipticF",
+      "phi",
+      "m"
+     ]
+    ]
+   ],
+   "variables": [
+    "m",
+    "phi"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "phi",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "m",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "IncompleteEllipticF"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "b62aae",
+   "formula": [
+    "Equal",
+    [
+     "IncompleteEllipticE",
+     [
+      "Divide",
+      "Pi",
+      2
+     ],
+     1
+    ],
+    1
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "IncompleteEllipticE"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "b760d1",
+   "formula": [
+    "Equal",
+    [
+     "EllipticK",
+     "m"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      "Pi",
+      2
+     ],
+     [
+      "Hypergeometric2F1",
+      [
+       "Divide",
+       1,
+       2
+      ],
+      [
+       "Divide",
+       1,
+       2
+      ],
+      1,
+      "m"
+     ]
+    ]
+   ],
+   "variables": [
+    "m"
+   ],
+   "assumptions": [
+    "Element",
+    "m",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "EllipticK",
+    "Hypergeometric2F1"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "b7cfb3",
+   "formula": [
+    "Equal",
+    [
+     "IncompleteEllipticF",
+     "phi",
+     1
+    ],
+    [
+     "Which",
+     [
+      "And",
+      [
+       "LessEqual",
+       [
+        "Divide",
+        [
+         "Negate",
+         "Pi"
+        ],
+        2
+       ],
+       [
+        "Real",
+        "phi"
+       ],
+       [
+        "Divide",
+        "Pi",
+        2
+       ]
+      ],
+      [
+       "NotElement",
+       "phi",
+       [
+        "Set",
+        [
+         "Divide",
+         [
+          "Negate",
+          "Pi"
+         ],
+         2
+        ],
+        [
+         "Divide",
+         "Pi",
+         2
+        ]
+       ]
+      ]
+     ],
+     [
+      "Ln",
+      [
+       "Divide",
+       [
+        "Add",
+        1,
+        [
+         "Sin",
+         "phi"
+        ]
+       ],
+       [
+        "Cos",
+        "phi"
+       ]
+      ]
+     ],
+     [
+      "Element",
+      "phi",
+      [
+       "Set",
+       [
+        "Divide",
+        [
+         "Negate",
+         "Pi"
+        ],
+        2
+       ],
+       [
+        "Divide",
+        "Pi",
+        2
+       ]
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Sign",
+       "phi"
+      ],
+      "PositiveInfinity"
+     ],
+     "True",
+     "ComplexInfinity"
+    ]
+   ],
+   "variables": [
+    "phi"
+   ],
+   "assumptions": [
+    "Element",
+    "phi",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Cos",
+    "IncompleteEllipticF",
+    "Ln",
+    "Real",
+    "Sign",
+    "Sin"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ],
+   "directedInfinity": true
+  },
+  {
+   "id": "b95ffa",
+   "formula": [
+    "Equal",
+    [
+     "EllipticK",
+     [
+      "Subtract",
+      [
+       "Multiply",
+       4,
+       [
+        "Sqrt",
+        3
+       ]
+      ],
+      7
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Multiply",
+      [
+       "Sqrt",
+       [
+        "Add",
+        3,
+        [
+         "Multiply",
+         2,
+         [
+          "Sqrt",
+          3
+         ]
+        ]
+       ]
+      ],
+      [
+       "Power",
+       [
+        "Gamma",
+        [
+         "Divide",
+         1,
+         3
+        ]
+       ],
+       3
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Power",
+       2,
+       [
+        "Divide",
+        10,
+        3
+       ]
+      ],
+      "Pi"
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "EllipticK",
+    "Gamma"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "ba1965",
+   "formula": [
+    "Equal",
+    [
+     "IncompleteEllipticF",
+     0,
+     0
+    ],
+    0
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "IncompleteEllipticF"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "bb4501",
+   "formula": [
+    "Equal",
+    [
+     "EllipticK",
+     0
+    ],
+    [
+     "Divide",
+     "Pi",
+     2
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "EllipticK"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "be3e09",
+   "formula": [
+    "Equal",
+    [
+     "IncompleteEllipticE",
+     0,
+     "m"
+    ],
+    0
+   ],
+   "variables": [
+    "m"
+   ],
+   "assumptions": null,
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "IncompleteEllipticE"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "c0ad12",
+   "formula": [
+    "Equal",
+    [
+     "IncompleteEllipticF",
+     [
+      "Divide",
+      "Pi",
+      2
+     ],
+     0
+    ],
+    [
+     "Divide",
+     "Pi",
+     2
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "IncompleteEllipticF"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "c10014",
+   "formula": [
+    "Equal",
+    [
+     "EllipticPi",
+     "n",
+     "m"
+    ],
+    [
+     "Integrate",
+     [
+      "Divide",
+      1,
+      [
+       "Multiply",
+       [
+        "Multiply",
+        [
+         "Subtract",
+         1,
+         [
+          "Multiply",
+          "n",
+          [
+           "Power",
+           "x",
+           2
+          ]
+         ]
+        ],
+        [
+         "Sqrt",
+         [
+          "Subtract",
+          1,
+          [
+           "Power",
+           "x",
+           2
+          ]
+         ]
+        ]
+       ],
+       [
+        "Sqrt",
+        [
+         "Subtract",
+         1,
+         [
+          "Multiply",
+          "m",
+          [
+           "Power",
+           "x",
+           2
+          ]
+         ]
+        ]
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "x",
+      0,
+      1
+     ]
+    ]
+   ],
+   "variables": [
+    "m",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     [
+      "Interval",
+      [
+       "Open",
+       "NegativeInfinity"
+      ],
+      [
+       "Open",
+       1
+      ]
+     ]
+    ],
+    [
+     "Element",
+     "m",
+     [
+      "Interval",
+      [
+       "Open",
+       "NegativeInfinity"
+      ],
+      [
+       "Open",
+       1
+      ]
+     ]
+    ]
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "EllipticPi",
+    "Integrate"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "c28288",
+   "formula": [
+    "Equal",
+    [
+     "IncompleteEllipticE",
+     [
+      "Add",
+      "phi",
+      [
+       "Multiply",
+       "k",
+       "Pi"
+      ]
+     ],
+     "m"
+    ],
+    [
+     "Add",
+     [
+      "IncompleteEllipticE",
+      "phi",
+      "m"
+     ],
+     [
+      "Multiply",
+      [
+       "Multiply",
+       2,
+       "k"
+      ],
+      [
+       "EllipticE",
+       "m"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "k",
+    "m",
+    "phi"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "phi",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "m",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "k",
+     "Integers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "EllipticE",
+    "IncompleteEllipticE"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "c584c3",
+   "formula": [
+    "Equal",
+    [
+     "IncompleteEllipticF",
+     [
+      "Divide",
+      "Pi",
+      3
+     ],
+     1
+    ],
+    [
+     "Ln",
+     [
+      "Add",
+      2,
+      [
+       "Sqrt",
+       3
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "IncompleteEllipticF",
+    "Ln"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "cc22bf",
+   "formula": [
+    "Equal",
+    [
+     "EllipticK",
+     [
+      "Divide",
+      1,
+      2
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Power",
+      [
+       "Gamma",
+       [
+        "Divide",
+        1,
+        4
+       ]
+      ],
+      2
+     ],
+     [
+      "Multiply",
+      4,
+      [
+       "Sqrt",
+       "Pi"
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "EllipticK",
+    "Gamma"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "ce4df4",
+   "formula": [
+    "Equal",
+    [
+     "EllipticPi",
+     1,
+     "m"
+    ],
+    "ComplexInfinity"
+   ],
+   "variables": [
+    "m"
+   ],
+   "assumptions": [
+    "Element",
+    "m",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "EllipticPi"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "d2adb6",
+   "formula": [
+    "Equal",
+    [
+     "IncompleteEllipticF",
+     "phi",
+     0
+    ],
+    "phi"
+   ],
+   "variables": [
+    "phi"
+   ],
+   "assumptions": [
+    "Element",
+    "phi",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "IncompleteEllipticF"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "d88dd1",
+   "formula": [
+    "Equal",
+    [
+     "IncompleteEllipticE",
+     [
+      "Divide",
+      "Pi",
+      6
+     ],
+     1
+    ],
+    [
+     "Divide",
+     1,
+     2
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "IncompleteEllipticE"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "dd67fb",
+   "formula": [
+    "Equal",
+    [
+     "EllipticPi",
+     0,
+     "m"
+    ],
+    [
+     "EllipticK",
+     "m"
+    ]
+   ],
+   "variables": [
+    "m"
+   ],
+   "assumptions": [
+    "Element",
+    "m",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "EllipticK",
+    "EllipticPi"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "dec0d2",
+   "formula": [
+    "Equal",
+    [
+     "IncompleteEllipticE",
+     [
+      "Divide",
+      [
+       "Negate",
+       "Pi"
+      ],
+      2
+     ],
+     1
+    ],
+    -1
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "IncompleteEllipticE"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "e2445d",
+   "formula": [
+    "Equal",
+    [
+     "IncompleteEllipticF",
+     "phi",
+     "m"
+    ],
+    [
+     "Multiply",
+     [
+      "Sin",
+      "phi"
+     ],
+     [
+      "CarlsonRF",
+      [
+       "Power",
+       [
+        "Cos",
+        "phi"
+       ],
+       2
+      ],
+      [
+       "Subtract",
+       1,
+       [
+        "Multiply",
+        "m",
+        [
+         "Power",
+         [
+          "Sin",
+          "phi"
+         ],
+         2
+        ]
+       ]
+      ],
+      1
+     ]
+    ]
+   ],
+   "variables": [
+    "m",
+    "phi"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "phi",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "m",
+     "ComplexNumbers"
+    ],
+    [
+     "LessEqual",
+     [
+      "Divide",
+      [
+       "Negate",
+       "Pi"
+      ],
+      2
+     ],
+     [
+      "Real",
+      "phi"
+     ],
+     [
+      "Divide",
+      "Pi",
+      2
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "CarlsonRF",
+    "Cos",
+    "IncompleteEllipticF",
+    "Sin"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "carlson_elliptic",
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "e9c797",
+   "formula": [
+    "Equal",
+    [
+     "EllipticPi",
+     "n",
+     1
+    ],
+    [
+     "Which",
+     [
+      "NotEqual",
+      "n",
+      1
+     ],
+     [
+      "Multiply",
+      [
+       "Power",
+       [
+        "Subtract",
+        1,
+        "n"
+       ],
+       -1
+      ],
+      "PositiveInfinity"
+     ],
+     [
+      "Equal",
+      "n",
+      1
+     ],
+     "ComplexInfinity"
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "EllipticPi"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ],
+   "directedInfinity": true
+  },
+  {
+   "id": "eba27c",
+   "formula": [
+    "Equal",
+    [
+     "IncompleteEllipticE",
+     [
+      "Divide",
+      "Pi",
+      6
+     ],
+     4
+    ],
+    [
+     "Subtract",
+     [
+      "Multiply",
+      2,
+      [
+       "EllipticE",
+       [
+        "Divide",
+        1,
+        4
+       ]
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Divide",
+       3,
+       2
+      ],
+      [
+       "EllipticK",
+       [
+        "Divide",
+        1,
+        4
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "EllipticE",
+    "EllipticK",
+    "IncompleteEllipticE"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "efc7a4",
+   "formula": [
+    "Equal",
+    [
+     "IncompleteEllipticE",
+     "phi",
+     0
+    ],
+    "phi"
+   ],
+   "variables": [
+    "phi"
+   ],
+   "assumptions": [
+    "Element",
+    "phi",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "IncompleteEllipticE"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "f0bcb5",
+   "formula": [
+    "Equal",
+    [
+     "IncompleteEllipticE",
+     [
+      "Arcsin",
+      [
+       "Divide",
+       1,
+       [
+        "Sqrt",
+        "m"
+       ]
+      ]
+     ],
+     "m"
+    ],
+    [
+     "Multiply",
+     [
+      "Sqrt",
+      "m"
+     ],
+     [
+      "Subtract",
+      [
+       "EllipticE",
+       [
+        "Divide",
+        1,
+        "m"
+       ]
+      ],
+      [
+       "Multiply",
+       [
+        "Subtract",
+        1,
+        [
+         "Divide",
+         1,
+         "m"
+        ]
+       ],
+       [
+        "EllipticK",
+        [
+         "Divide",
+         1,
+         "m"
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "m"
+   ],
+   "assumptions": [
+    "Element",
+    "m",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     [
+      "Set",
+      0,
+      1
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Arcsin",
+    "EllipticE",
+    "EllipticK",
+    "IncompleteEllipticE"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "f35a37",
+   "formula": [
+    "Equal",
+    [
+     "IncompleteEllipticE",
+     "phi",
+     1
+    ],
+    [
+     "Add",
+     [
+      "Multiply",
+      [
+       "Power",
+       -1,
+       [
+        "Floor",
+        [
+         "Add",
+         [
+          "Divide",
+          [
+           "Real",
+           "phi"
+          ],
+          "Pi"
+         ],
+         [
+          "Divide",
+          1,
+          2
+         ]
+        ]
+       ]
+      ],
+      [
+       "Sin",
+       "phi"
+      ]
+     ],
+     [
+      "Multiply",
+      2,
+      [
+       "Floor",
+       [
+        "Add",
+        [
+         "Divide",
+         [
+          "Real",
+          "phi"
+         ],
+         "Pi"
+        ],
+        [
+         "Divide",
+         1,
+         2
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "phi"
+   ],
+   "assumptions": [
+    "Element",
+    "phi",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Floor",
+    "IncompleteEllipticE",
+    "Real",
+    "Sin"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "f48f54",
+   "formula": [
+    "Equal",
+    [
+     "IncompleteEllipticE",
+     "phi",
+     "m"
+    ],
+    [
+     "Subtract",
+     [
+      "Multiply",
+      [
+       "Sin",
+       "phi"
+      ],
+      [
+       "CarlsonRF",
+       [
+        "Power",
+        [
+         "Cos",
+         "phi"
+        ],
+        2
+       ],
+       [
+        "Subtract",
+        1,
+        [
+         "Multiply",
+         "m",
+         [
+          "Power",
+          [
+           "Sin",
+           "phi"
+          ],
+          2
+         ]
+        ]
+       ],
+       1
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Multiply",
+       [
+        "Multiply",
+        [
+         "Divide",
+         1,
+         3
+        ],
+        "m"
+       ],
+       [
+        "Power",
+        [
+         "Sin",
+         "phi"
+        ],
+        3
+       ]
+      ],
+      [
+       "CarlsonRD",
+       [
+        "Power",
+        [
+         "Cos",
+         "phi"
+        ],
+        2
+       ],
+       [
+        "Subtract",
+        1,
+        [
+         "Multiply",
+         "m",
+         [
+          "Power",
+          [
+           "Sin",
+           "phi"
+          ],
+          2
+         ]
+        ]
+       ],
+       1
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "m",
+    "phi"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "phi",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "m",
+     "ComplexNumbers"
+    ],
+    [
+     "LessEqual",
+     [
+      "Divide",
+      [
+       "Negate",
+       "Pi"
+      ],
+      2
+     ],
+     [
+      "Real",
+      "phi"
+     ],
+     [
+      "Divide",
+      "Pi",
+      2
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "CarlsonRD",
+    "CarlsonRF",
+    "Cos",
+    "IncompleteEllipticE",
+    "Sin"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "carlson_elliptic",
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "f5d489",
+   "formula": [
+    "Equal",
+    [
+     "IncompleteEllipticF",
+     [
+      "Divide",
+      "Pi",
+      4
+     ],
+     1
+    ],
+    [
+     "Ln",
+     [
+      "Add",
+      1,
+      [
+       "Sqrt",
+       2
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "IncompleteEllipticF",
+    "Ln"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  },
+  {
+   "id": "fa8666",
+   "formula": [
+    "Equal",
+    [
+     "EllipticE",
+     "m"
+    ],
+    [
+     "Integrate",
+     [
+      "Divide",
+      [
+       "Sqrt",
+       [
+        "Subtract",
+        1,
+        [
+         "Multiply",
+         "m",
+         [
+          "Power",
+          "x",
+          2
+         ]
+        ]
+       ]
+      ],
+      [
+       "Sqrt",
+       [
+        "Subtract",
+        1,
+        [
+         "Power",
+         "x",
+         2
+        ]
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "x",
+      0,
+      1
+     ]
+    ]
+   ],
+   "variables": [
+    "m"
+   ],
+   "assumptions": [
+    "Element",
+    "m",
+    "ComplexNumbers"
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "EllipticE",
+    "Integrate"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_elliptic"
+   ]
+  }
+ ]
+}

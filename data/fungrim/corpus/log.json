@@ -1,0 +1,1008 @@
+{
+ "topic": "log",
+ "title": "Natural logarithm",
+ "source": "pygrim/formulas/log.py",
+ "generator": "grim2mathjson 0.1.0",
+ "entries": [
+  {
+   "id": "07731b",
+   "formula": [
+    "Equal",
+    [
+     "Ln",
+     1
+    ],
+    0
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Ln"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "log"
+   ]
+  },
+  {
+   "id": "099b19",
+   "formula": [
+    "Equal",
+    [
+     "Real",
+     [
+      "Ln",
+      "z"
+     ]
+    ],
+    [
+     "Ln",
+     [
+      "Abs",
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     [
+      "Set",
+      0
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Ln",
+    "Real"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "log"
+   ]
+  },
+  {
+   "id": "0ba9b2",
+   "formula": [
+    "Equal",
+    [
+     "Ln",
+     "z"
+    ],
+    [
+     "Integrate",
+     [
+      "Divide",
+      1,
+      "t"
+     ],
+     [
+      "Limits",
+      "t",
+      1,
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     [
+      "Interval",
+      [
+       "Open",
+       "NegativeInfinity"
+      ],
+      0
+     ]
+    ]
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Integrate",
+    "Ln"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "log"
+   ]
+  },
+  {
+   "id": "13895b",
+   "formula": [
+    "Equal",
+    [
+     "Ln",
+     [
+      "Conjugate",
+      "z"
+     ]
+    ],
+    [
+     "Conjugate",
+     [
+      "Ln",
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     [
+      "Interval",
+      [
+       "Open",
+       "NegativeInfinity"
+      ],
+      0
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Conjugate",
+    "Ln"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "log"
+   ]
+  },
+  {
+   "id": "2f1f7b",
+   "formula": [
+    "Equal",
+    [
+     "Ln",
+     -1
+    ],
+    [
+     "Multiply",
+     "Pi",
+     "ImaginaryUnit"
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Ln"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "log"
+   ]
+  },
+  {
+   "id": "4986ed",
+   "formula": [
+    "LessEqual",
+    [
+     "Ln",
+     "x"
+    ],
+    [
+     "Subtract",
+     "x",
+     1
+    ]
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": [
+    "Element",
+    "x",
+    [
+     "Interval",
+     [
+      "Open",
+      0
+     ],
+     [
+      "Open",
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Ln"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "log"
+   ]
+  },
+  {
+   "id": "4c1e1e",
+   "formula": [
+    "Equal",
+    [
+     "Ln",
+     [
+      "Exp",
+      "z"
+     ]
+    ],
+    "z"
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     [
+      "Imaginary",
+      "z"
+     ],
+     [
+      "Interval",
+      [
+       "Open",
+       [
+        "Negate",
+        "Pi"
+       ]
+      ],
+      "Pi"
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Exp",
+    "Ln"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "log"
+   ]
+  },
+  {
+   "id": "699c83",
+   "formula": [
+    "Equal",
+    [
+     "Ln",
+     "ExponentialE"
+    ],
+    1
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Ln"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "log"
+   ]
+  },
+  {
+   "id": "77aa12",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "Subtract",
+      [
+       "Ln",
+       [
+        "Add",
+        "x",
+        "a"
+       ]
+      ],
+      [
+       "Ln",
+       "x"
+      ]
+     ]
+    ],
+    [
+     "Ln",
+     [
+      "Add",
+      1,
+      [
+       "Divide",
+       [
+        "Abs",
+        "a"
+       ],
+       [
+        "Subtract",
+        "x",
+        [
+         "Abs",
+         "a"
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     "RealNumbers"
+    ],
+    [
+     "Element",
+     "a",
+     "RealNumbers"
+    ],
+    [
+     "GreaterEqual",
+     "a",
+     0
+    ],
+    [
+     "Less",
+     [
+      "Abs",
+      "a"
+     ],
+     "x"
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Ln"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "log"
+   ]
+  },
+  {
+   "id": "792c76",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "Ln",
+      "z"
+     ]
+    ],
+    [
+     "Add",
+     [
+      "Abs",
+      [
+       "Ln",
+       [
+        "Abs",
+        "z"
+       ]
+      ]
+     ],
+     "Pi"
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     [
+      "Set",
+      0
+     ]
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Ln"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "log"
+   ]
+  },
+  {
+   "id": "a3a253",
+   "formula": [
+    "Equal",
+    [
+     "Ln",
+     [
+      "Exp",
+      "z"
+     ]
+    ],
+    [
+     "Subtract",
+     "z",
+     [
+      "Multiply",
+      [
+       "Multiply",
+       [
+        "Multiply",
+        2,
+        "Pi"
+       ],
+       "ImaginaryUnit"
+      ],
+      [
+       "Ceil",
+       [
+        "Subtract",
+        [
+         "Divide",
+         [
+          "Imaginary",
+          "z"
+         ],
+         [
+          "Multiply",
+          2,
+          "Pi"
+         ]
+        ],
+        [
+         "Divide",
+         1,
+         2
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Ceil",
+    "Exp",
+    "Imaginary",
+    "Ln"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "log"
+   ]
+  },
+  {
+   "id": "a4ac32",
+   "formula": [
+    "RealIndefiniteIntegralEqual",
+    [
+     "Divide",
+     1,
+     "x"
+    ],
+    [
+     "Ln",
+     [
+      "Abs",
+      "x"
+     ]
+    ],
+    "x"
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": [
+    "Element",
+    "x",
+    [
+     "SetMinus",
+     "RealNumbers",
+     [
+      "Set",
+      0
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Ln",
+    "RealIndefiniteIntegralEqual"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "log"
+   ]
+  },
+  {
+   "id": "c331da",
+   "formula": [
+    "Equal",
+    [
+     "Ln",
+     "ImaginaryUnit"
+    ],
+    [
+     "Divide",
+     [
+      "Multiply",
+      "Pi",
+      "ImaginaryUnit"
+     ],
+     2
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Ln"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "imaginary_unit",
+    "log"
+   ]
+  },
+  {
+   "id": "c43533",
+   "formula": [
+    "Equal",
+    [
+     "Ln",
+     "z"
+    ],
+    [
+     "Add",
+     [
+      "Ln",
+      [
+       "Abs",
+       "z"
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Argument",
+       "z"
+      ],
+      "ImaginaryUnit"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     [
+      "Set",
+      0
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Argument",
+    "Ln"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "log"
+   ]
+  },
+  {
+   "id": "c77f9a",
+   "formula": [
+    "ComplexIndefiniteIntegralEqual",
+    [
+     "Divide",
+     1,
+     "z"
+    ],
+    [
+     "Ln",
+     "z"
+    ],
+    "z"
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     [
+      "Interval",
+      [
+       "Open",
+       "NegativeInfinity"
+      ],
+      0
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ComplexIndefiniteIntegralEqual",
+    "Ln"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "log"
+   ]
+  },
+  {
+   "id": "d87f6e",
+   "formula": [
+    "Equal",
+    [
+     "Exp",
+     [
+      "Ln",
+      "z"
+     ]
+    ],
+    "z"
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     [
+      "Set",
+      0
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Exp",
+    "Ln"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "log"
+   ]
+  },
+  {
+   "id": "dcc1e5",
+   "formula": [
+    "Equal",
+    [
+     "Abs",
+     [
+      "Ln",
+      "z"
+     ]
+    ],
+    [
+     "Sqrt",
+     [
+      "Add",
+      [
+       "Power",
+       [
+        "Ln",
+        [
+         "Abs",
+         "z"
+        ]
+       ],
+       2
+      ],
+      [
+       "Power",
+       [
+        "Argument",
+        "z"
+       ],
+       2
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     [
+      "Set",
+      0
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Argument",
+    "Ln"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "log"
+   ]
+  },
+  {
+   "id": "e4f73a",
+   "formula": [
+    "ComplexIndefiniteIntegralEqual",
+    [
+     "Divide",
+     1,
+     "z"
+    ],
+    [
+     "Ln",
+     [
+      "Negate",
+      "z"
+     ]
+    ],
+    "z"
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     [
+      "Interval",
+      0,
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ComplexIndefiniteIntegralEqual",
+    "Ln"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "log"
+   ]
+  },
+  {
+   "id": "f67fa2",
+   "formula": [
+    "Equal",
+    [
+     "Ln",
+     [
+      "Multiply",
+      "c",
+      "z"
+     ]
+    ],
+    [
+     "Add",
+     [
+      "Ln",
+      "c"
+     ],
+     [
+      "Ln",
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "c",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "c",
+     [
+      "Interval",
+      [
+       "Open",
+       0
+      ],
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
+     ]
+    ],
+    [
+     "Element",
+     "z",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      [
+       "Set",
+       0
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Ln"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "log"
+   ]
+  },
+  {
+   "id": "fbfb81",
+   "formula": [
+    "Equal",
+    [
+     "Imaginary",
+     [
+      "Ln",
+      "z"
+     ]
+    ],
+    [
+     "Argument",
+     "z"
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     [
+      "Set",
+      0
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Argument",
+    "Imaginary",
+    "Ln"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "log"
+   ]
+  }
+ ]
+}

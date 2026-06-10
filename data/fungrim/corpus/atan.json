@@ -1,0 +1,5157 @@
+{
+ "topic": "atan",
+ "title": "Inverse tangent",
+ "source": "pygrim/formulas/atan.py",
+ "generator": "grim2mathjson 0.1.0",
+ "entries": [
+  {
+   "id": "00e608",
+   "formula": [
+    "Equal",
+    [
+     "Subtract",
+     [
+      "Arctan",
+      "x"
+     ],
+     [
+      "Arctan",
+      "y"
+     ]
+    ],
+    [
+     "Arctan2",
+     [
+      "Subtract",
+      "x",
+      "y"
+     ],
+     [
+      "Add",
+      1,
+      [
+       "Multiply",
+       "x",
+       "y"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "x",
+    "y"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     "RealNumbers"
+    ],
+    [
+     "Element",
+     "y",
+     "RealNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Arctan",
+    "Arctan2"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "072166",
+   "formula": [
+    "Equal",
+    [
+     "Arctan",
+     [
+      "Multiply",
+      "ImaginaryUnit",
+      "z"
+     ]
+    ],
+    [
+     "Multiply",
+     "ImaginaryUnit",
+     [
+      "Artanh",
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Arctan",
+    "Artanh"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "073e1a",
+   "formula": [
+    "Equal",
+    [
+     "Arctan",
+     [
+      "Divide",
+      1,
+      "z"
+     ]
+    ],
+    [
+     "Subtract",
+     [
+      "Negate",
+      [
+       "Divide",
+       "Pi",
+       2
+      ]
+     ],
+     [
+      "Arctan",
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Or",
+     [
+      "Less",
+      [
+       "Real",
+       "z"
+      ],
+      0
+     ],
+     [
+      "And",
+      [
+       "Equal",
+       [
+        "Real",
+        "z"
+       ],
+       0
+      ],
+      [
+       "Element",
+       [
+        "Imaginary",
+        "z"
+       ],
+       [
+        "Union",
+        [
+         "Interval",
+         [
+          "Open",
+          "NegativeInfinity"
+         ],
+         [
+          "Open",
+          -1
+         ]
+        ],
+        [
+         "Interval",
+         [
+          "Open",
+          0
+         ],
+         [
+          "Open",
+          1
+         ]
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Arctan"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "0b829e",
+   "formula": [
+    "Equal",
+    [
+     "Cos",
+     [
+      "Arctan",
+      "z"
+     ]
+    ],
+    [
+     "Divide",
+     1,
+     [
+      "Sqrt",
+      [
+       "Add",
+       1,
+       [
+        "Power",
+        "z",
+        2
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     [
+      "Set",
+      [
+       "Negate",
+       "ImaginaryUnit"
+      ],
+      "ImaginaryUnit"
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Arctan",
+    "Cos"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "0ee626",
+   "formula": [
+    "Equal",
+    [
+     "Arctan",
+     [
+      "Negate",
+      "z"
+     ]
+    ],
+    [
+     "Negate",
+     [
+      "Arctan",
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    [
+     "Union",
+     "ComplexNumbers",
+     [
+      "Set",
+      "NegativeInfinity",
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Arctan"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "12765e",
+   "formula": [
+    "Equal",
+    [
+     "Arctan",
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Negate",
+      [
+       "Divide",
+       "ImaginaryUnit",
+       2
+      ]
+     ],
+     [
+      "Ln",
+      [
+       "Divide",
+       [
+        "Add",
+        1,
+        [
+         "Multiply",
+         "ImaginaryUnit",
+         "z"
+        ]
+       ],
+       [
+        "Subtract",
+        1,
+        [
+         "Multiply",
+         "ImaginaryUnit",
+         "z"
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "NotElement",
+     [
+      "Multiply",
+      "z",
+      "ImaginaryUnit"
+     ],
+     [
+      "Interval",
+      1,
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Arctan",
+    "Ln"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "14f8c2",
+   "formula": [
+    "Equal",
+    [
+     "Arctan",
+     [
+      "Multiply",
+      2,
+      "z"
+     ]
+    ],
+    [
+     "Add",
+     [
+      "Arctan",
+      "z"
+     ],
+     [
+      "Arctan",
+      [
+       "Divide",
+       "z",
+       [
+        "Add",
+        1,
+        [
+         "Multiply",
+         2,
+         [
+          "Power",
+          "z",
+          2
+         ]
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Not",
+     [
+      "And",
+      [
+       "Equal",
+       [
+        "Real",
+        "z"
+       ],
+       0
+      ],
+      [
+       "Element",
+       [
+        "Abs",
+        [
+         "Imaginary",
+         "z"
+        ]
+       ],
+       [
+        "Interval",
+        [
+         "Divide",
+         [
+          "Sqrt",
+          2
+         ],
+         2
+        ],
+        1
+       ]
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Arctan"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "157c6c",
+   "formula": [
+    "Equal",
+    [
+     "Arctan",
+     1
+    ],
+    [
+     "Divide",
+     "Pi",
+     4
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Arctan"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "1d3fd7",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "Arctan2",
+        "y",
+        "x"
+       ],
+       "y"
+      ],
+      1
+     ],
+     "y"
+    ],
+    [
+     "Divide",
+     "x",
+     [
+      "Add",
+      [
+       "Power",
+       "x",
+       2
+      ],
+      [
+       "Power",
+       "y",
+       2
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "x",
+    "y"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     "RealNumbers"
+    ],
+    [
+     "Element",
+     "y",
+     "RealNumbers"
+    ],
+    [
+     "Or",
+     [
+      "Greater",
+      "x",
+      0
+     ],
+     [
+      "NotEqual",
+      "y",
+      0
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Arctan2",
+    "Derivative"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": "real",
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "1d730a",
+   "formula": [
+    "Equal",
+    [
+     "Subtract",
+     [
+      "Arctan2",
+      "y_1",
+      "x_1"
+     ],
+     [
+      "Arctan2",
+      "y_2",
+      "x_2"
+     ]
+    ],
+    [
+     "Arctan2",
+     [
+      "Subtract",
+      [
+       "Multiply",
+       "y_1",
+       "x_2"
+      ],
+      [
+       "Multiply",
+       "y_2",
+       "x_1"
+      ]
+     ],
+     [
+      "Add",
+      [
+       "Multiply",
+       "x_1",
+       "x_2"
+      ],
+      [
+       "Multiply",
+       "y_1",
+       "y_2"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "x",
+    "y"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x_1",
+     "RealNumbers"
+    ],
+    [
+     "Element",
+     "x_2",
+     "RealNumbers"
+    ],
+    [
+     "Element",
+     "y_1",
+     "RealNumbers"
+    ],
+    [
+     "Element",
+     "y_2",
+     "RealNumbers"
+    ],
+    [
+     "Element",
+     [
+      "Subtract",
+      [
+       "Arctan2",
+       "y_1",
+       "x_1"
+      ],
+      [
+       "Arctan2",
+       "y_2",
+       "x_2"
+      ]
+     ],
+     [
+      "Interval",
+      [
+       "Open",
+       [
+        "Negate",
+        "Pi"
+       ]
+      ],
+      "Pi"
+     ]
+    ],
+    [
+     "Not",
+     [
+      "Equal",
+      "x_1",
+      "y_1",
+      0
+     ]
+    ],
+    [
+     "Not",
+     [
+      "Equal",
+      "x_2",
+      "y_2",
+      0
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Arctan2"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "1eeccf",
+   "formula": [
+    "GreaterEqual",
+    [
+     "Arctan",
+     "x"
+    ],
+    [
+     "Sum",
+     [
+      "Divide",
+      [
+       "Multiply",
+       [
+        "Power",
+        -1,
+        "k"
+       ],
+       [
+        "Power",
+        "x",
+        [
+         "Add",
+         [
+          "Multiply",
+          2,
+          "k"
+         ],
+         1
+        ]
+       ]
+      ],
+      [
+       "Add",
+       [
+        "Multiply",
+        2,
+        "k"
+       ],
+       1
+      ]
+     ],
+     [
+      "Limits",
+      "k",
+      0,
+      [
+       "Add",
+       [
+        "Multiply",
+        2,
+        "N_var"
+       ],
+       1
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "N_var",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     [
+      "Interval",
+      0,
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
+     ]
+    ],
+    [
+     "Element",
+     "N_var",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Arctan",
+    "Sum"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "1f026d",
+   "formula": [
+    "Equal",
+    [
+     "Tan",
+     [
+      "Arctan",
+      "z"
+     ]
+    ],
+    "z"
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Arctan",
+    "Tan"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "22fb4a",
+   "formula": [
+    "Equal",
+    [
+     "Arctan2",
+     "y",
+     "x"
+    ],
+    [
+     "Which",
+     [
+      "Equal",
+      "x",
+      "y",
+      0
+     ],
+     0,
+     [
+      "Greater",
+      "x",
+      0
+     ],
+     [
+      "Arctan",
+      [
+       "Divide",
+       "y",
+       "x"
+      ]
+     ],
+     [
+      "NotEqual",
+      "y",
+      0
+     ],
+     [
+      "Subtract",
+      [
+       "Multiply",
+       [
+        "Divide",
+        "Pi",
+        2
+       ],
+       [
+        "Sign",
+        "y"
+       ]
+      ],
+      [
+       "Arctan",
+       [
+        "Divide",
+        "x",
+        "y"
+       ]
+      ]
+     ],
+     [
+      "And",
+      [
+       "Equal",
+       "y",
+       0
+      ],
+      [
+       "Less",
+       "x",
+       0
+      ]
+     ],
+     "Pi"
+    ]
+   ],
+   "variables": [
+    "x",
+    "y"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     "RealNumbers"
+    ],
+    [
+     "Element",
+     "y",
+     "RealNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Arctan",
+    "Arctan2",
+    "Sign"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "268c9e",
+   "formula": [
+    "Equal",
+    [
+     "Arctan",
+     [
+      "Add",
+      "x",
+      "y"
+     ]
+    ],
+    [
+     "Add",
+     [
+      "Arctan",
+      "x"
+     ],
+     [
+      "Arctan",
+      [
+       "Divide",
+       "y",
+       [
+        "Add",
+        1,
+        [
+         "Multiply",
+         "x",
+         [
+          "Add",
+          "x",
+          "y"
+         ]
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "x",
+    "y"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "y",
+     "ComplexNumbers"
+    ],
+    [
+     "Less",
+     [
+      "Abs",
+      [
+       "Add",
+       "x",
+       "y"
+      ]
+     ],
+     1
+    ],
+    [
+     "Less",
+     [
+      "Abs",
+      "x"
+     ],
+     1
+    ]
+   ],
+   "assumptionAlternatives": [
+    [
+     "And",
+     [
+      "Element",
+      "x",
+      "RealNumbers"
+     ],
+     [
+      "Element",
+      "y",
+      "RealNumbers"
+     ],
+     [
+      "Greater",
+      [
+       "Multiply",
+       "x",
+       [
+        "Add",
+        "x",
+        "y"
+       ]
+      ],
+      -1
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Arctan"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "3478af",
+   "formula": [
+    "LessEqual",
+    [
+     "Arctan",
+     "x"
+    ],
+    [
+     "Sum",
+     [
+      "Divide",
+      [
+       "Multiply",
+       [
+        "Power",
+        -1,
+        "k"
+       ],
+       [
+        "Power",
+        "x",
+        [
+         "Add",
+         [
+          "Multiply",
+          2,
+          "k"
+         ],
+         1
+        ]
+       ]
+      ],
+      [
+       "Add",
+       [
+        "Multiply",
+        2,
+        "k"
+       ],
+       1
+      ]
+     ],
+     [
+      "Limits",
+      "k",
+      0,
+      [
+       "Multiply",
+       2,
+       "N_var"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "N_var",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     [
+      "Interval",
+      0,
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
+     ]
+    ],
+    [
+     "Element",
+     "N_var",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Arctan",
+    "Sum"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "34ff28",
+   "formula": [
+    "Equal",
+    [
+     "Arctan",
+     "z"
+    ],
+    [
+     "Multiply",
+     "z",
+     [
+      "Hypergeometric2F1",
+      1,
+      [
+       "Divide",
+       1,
+       2
+      ],
+      [
+       "Divide",
+       3,
+       2
+      ],
+      [
+       "Negate",
+       [
+        "Power",
+        "z",
+        2
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     [
+      "Set",
+      [
+       "Negate",
+       "ImaginaryUnit"
+      ],
+      "ImaginaryUnit"
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Arctan",
+    "Hypergeometric2F1"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "36171f",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "Arctan",
+        "z"
+       ],
+       "z"
+      ],
+      "n"
+     ],
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      [
+       "Multiply",
+       [
+        "Power",
+        -1,
+        "n"
+       ],
+       [
+        "Factorial",
+        [
+         "Subtract",
+         "n",
+         1
+        ]
+       ]
+      ],
+      [
+       "Multiply",
+       2,
+       "ImaginaryUnit"
+      ]
+     ],
+     [
+      "Subtract",
+      [
+       "Divide",
+       1,
+       [
+        "Power",
+        [
+         "Add",
+         "z",
+         "ImaginaryUnit"
+        ],
+        "n"
+       ]
+      ],
+      [
+       "Divide",
+       1,
+       [
+        "Power",
+        [
+         "Subtract",
+         "z",
+         "ImaginaryUnit"
+        ],
+        "n"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "NotElement",
+     [
+      "Multiply",
+      "ImaginaryUnit",
+      "z"
+     ],
+     [
+      "Union",
+      [
+       "Interval",
+       [
+        "Open",
+        "NegativeInfinity"
+       ],
+       -1
+      ],
+      [
+       "Interval",
+       1,
+       [
+        "Open",
+        "PositiveInfinity"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Arctan",
+    "Derivative",
+    "Factorial"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "3c1021",
+   "formula": [
+    "Equal",
+    [
+     "Arctan",
+     [
+      "Divide",
+      1,
+      [
+       "Sqrt",
+       3
+      ]
+     ]
+    ],
+    [
+     "Divide",
+     "Pi",
+     6
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Arctan"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "3ea11b",
+   "formula": [
+    "Equal",
+    [
+     "Add",
+     [
+      "Arctan",
+      "x"
+     ],
+     [
+      "Arctan",
+      "y"
+     ]
+    ],
+    [
+     "Arctan",
+     [
+      "Divide",
+      [
+       "Add",
+       "x",
+       "y"
+      ],
+      [
+       "Subtract",
+       1,
+       [
+        "Multiply",
+        "x",
+        "y"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "x",
+    "y"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "y",
+     "ComplexNumbers"
+    ],
+    [
+     "Less",
+     [
+      "Abs",
+      "x"
+     ],
+     1
+    ],
+    [
+     "Less",
+     [
+      "Abs",
+      "y"
+     ],
+     1
+    ]
+   ],
+   "assumptionAlternatives": [
+    [
+     "And",
+     [
+      "Element",
+      "x",
+      "RealNumbers"
+     ],
+     [
+      "Element",
+      "y",
+      "RealNumbers"
+     ],
+     [
+      "Less",
+      [
+       "Multiply",
+       "x",
+       "y"
+      ],
+      1
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Arctan"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "3fe47b",
+   "formula": [
+    "GreaterEqual",
+    [
+     "Arctan",
+     "x"
+    ],
+    [
+     "Divide",
+     [
+      "Multiply",
+      "Pi",
+      "x"
+     ],
+     [
+      "Add",
+      "Pi",
+      [
+       "Multiply",
+       2,
+       "x"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": [
+    "Element",
+    "x",
+    [
+     "Interval",
+     0,
+     [
+      "Open",
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Arctan"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "466095",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "Arctan",
+      "x"
+     ]
+    ],
+    [
+     "Abs",
+     "x"
+    ]
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": [
+    "Element",
+    "x",
+    [
+     "Union",
+     "RealNumbers",
+     [
+      "Set",
+      "NegativeInfinity",
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Arctan"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "47331d",
+   "formula": [
+    "Equal",
+    [
+     "Abs",
+     [
+      "Subtract",
+      [
+       "Arctan",
+       [
+        "Add",
+        "x",
+        "y"
+       ]
+      ],
+      [
+       "Arctan",
+       "x"
+      ]
+     ]
+    ],
+    [
+     "Arctan2",
+     [
+      "Abs",
+      "y"
+     ],
+     [
+      "Add",
+      1,
+      [
+       "Multiply",
+       "x",
+       [
+        "Add",
+        "x",
+        "y"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "x",
+    "y"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     "RealNumbers"
+    ],
+    [
+     "Element",
+     "y",
+     "RealNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Arctan",
+    "Arctan2"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "4d2168",
+   "formula": [
+    "Less",
+    [
+     "Abs",
+     [
+      "Subtract",
+      [
+       "Arctan",
+       [
+        "Add",
+        "x",
+        "y"
+       ]
+      ],
+      [
+       "Arctan",
+       "x"
+      ]
+     ]
+    ],
+    "Pi"
+   ],
+   "variables": [
+    "x",
+    "y"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     "RealNumbers"
+    ],
+    [
+     "Element",
+     "y",
+     "RealNumbers"
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Arctan"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "4e5947",
+   "formula": [
+    "Equal",
+    [
+     "Arctan",
+     "z"
+    ],
+    [
+     "Sum",
+     [
+      "Divide",
+      [
+       "Multiply",
+       [
+        "Power",
+        -1,
+        "k"
+       ],
+       [
+        "Power",
+        "z",
+        [
+         "Add",
+         [
+          "Multiply",
+          2,
+          "k"
+         ],
+         1
+        ]
+       ]
+      ],
+      [
+       "Add",
+       [
+        "Multiply",
+        2,
+        "k"
+       ],
+       1
+      ]
+     ],
+     [
+      "Limits",
+      "k",
+      0,
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Less",
+     [
+      "Abs",
+      "z"
+     ],
+     1
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Arctan",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "500c0a",
+   "formula": [
+    "Equal",
+    [
+     "Arctan",
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      "ImaginaryUnit",
+      2
+     ],
+     [
+      "Ln",
+      [
+       "Divide",
+       [
+        "Subtract",
+        1,
+        [
+         "Multiply",
+         "ImaginaryUnit",
+         "z"
+        ]
+       ],
+       [
+        "Add",
+        1,
+        [
+         "Multiply",
+         "ImaginaryUnit",
+         "z"
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "NotElement",
+     [
+      "Multiply",
+      [
+       "Negate",
+       "z"
+      ],
+      "ImaginaryUnit"
+     ],
+     [
+      "Interval",
+      1,
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Arctan",
+    "Ln"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "503d4d",
+   "formula": [
+    "Equal",
+    [
+     "Subtract",
+     [
+      "Arctan",
+      "x"
+     ],
+     [
+      "Arctan",
+      "y"
+     ]
+    ],
+    [
+     "Arctan",
+     [
+      "Divide",
+      [
+       "Subtract",
+       "x",
+       "y"
+      ],
+      [
+       "Add",
+       1,
+       [
+        "Multiply",
+        "x",
+        "y"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "x",
+    "y"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "y",
+     "ComplexNumbers"
+    ],
+    [
+     "Less",
+     [
+      "Abs",
+      "x"
+     ],
+     1
+    ],
+    [
+     "Less",
+     [
+      "Abs",
+      "y"
+     ],
+     1
+    ]
+   ],
+   "assumptionAlternatives": [
+    [
+     "And",
+     [
+      "Element",
+      "x",
+      "RealNumbers"
+     ],
+     [
+      "Element",
+      "y",
+      "RealNumbers"
+     ],
+     [
+      "Greater",
+      [
+       "Multiply",
+       "x",
+       "y"
+      ],
+      -1
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Arctan"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "5d6f74",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "Arctan",
+      "x"
+     ]
+    ],
+    [
+     "Divide",
+     "Pi",
+     2
+    ]
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": [
+    "Element",
+    "x",
+    [
+     "Union",
+     "RealNumbers",
+     [
+      "Set",
+      "NegativeInfinity",
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Arctan"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "61d8f3",
+   "formula": [
+    "Equal",
+    [
+     "Add",
+     [
+      "Multiply",
+      [
+       "Add",
+       1,
+       [
+        "Power",
+        "z",
+        2
+       ]
+      ],
+      [
+       "Apply",
+       [
+        "Derivative",
+        [
+         "Function",
+         [
+          "Add",
+          "c_1",
+          [
+           "Multiply",
+           "c_2",
+           [
+            "Arctan",
+            "z"
+           ]
+          ]
+         ],
+         "z"
+        ],
+        2
+       ],
+       "z"
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Multiply",
+       2,
+       "z"
+      ],
+      [
+       "Apply",
+       [
+        "Derivative",
+        [
+         "Function",
+         [
+          "Add",
+          "c_1",
+          [
+           "Multiply",
+           "c_2",
+           [
+            "Arctan",
+            "z"
+           ]
+          ]
+         ],
+         "z"
+        ],
+        1
+       ],
+       "z"
+      ]
+     ]
+    ],
+    0
+   ],
+   "variables": [
+    "c",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "c_1",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "c_2",
+     "ComplexNumbers"
+    ],
+    [
+     "NotElement",
+     [
+      "Multiply",
+      "ImaginaryUnit",
+      "z"
+     ],
+     [
+      "Union",
+      [
+       "Interval",
+       [
+        "Open",
+        "NegativeInfinity"
+       ],
+       -1
+      ],
+      [
+       "Interval",
+       1,
+       [
+        "Open",
+        "PositiveInfinity"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Arctan",
+    "Derivative"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "632063",
+   "formula": [
+    "Equal",
+    [
+     "Arctan",
+     [
+      "Conjugate",
+      "z"
+     ]
+    ],
+    [
+     "Conjugate",
+     [
+      "Arctan",
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "NotElement",
+     [
+      "Multiply",
+      "ImaginaryUnit",
+      "z"
+     ],
+     [
+      "Union",
+      [
+       "Interval",
+       [
+        "Open",
+        "NegativeInfinity"
+       ],
+       [
+        "Open",
+        -1
+       ]
+      ],
+      [
+       "Interval",
+       [
+        "Open",
+        1
+       ],
+       [
+        "Open",
+        "PositiveInfinity"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Arctan",
+    "Conjugate"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "645e30",
+   "formula": [
+    "Equal",
+    [
+     "Arctan",
+     0
+    ],
+    0
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Arctan"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "67c0be",
+   "formula": [
+    "Equal",
+    [
+     "Arctan",
+     "z"
+    ],
+    [
+     "Multiply",
+     2,
+     [
+      "Arctan",
+      [
+       "Divide",
+       "z",
+       [
+        "Add",
+        1,
+        [
+         "Sqrt",
+         [
+          "Add",
+          1,
+          [
+           "Power",
+           "z",
+           2
+          ]
+         ]
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Arctan"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "6b8963",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "Arctan2",
+        "y",
+        "x"
+       ],
+       "x"
+      ],
+      1
+     ],
+     "x"
+    ],
+    [
+     "Negate",
+     [
+      "Divide",
+      "y",
+      [
+       "Add",
+       [
+        "Power",
+        "x",
+        2
+       ],
+       [
+        "Power",
+        "y",
+        2
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "x",
+    "y"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     "RealNumbers"
+    ],
+    [
+     "Element",
+     "y",
+     "RealNumbers"
+    ],
+    [
+     "Or",
+     [
+      "Greater",
+      "x",
+      0
+     ],
+     [
+      "NotEqual",
+      "y",
+      0
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Arctan2",
+    "Derivative"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": "real",
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "706783",
+   "formula": [
+    "Equal",
+    [
+     "Arctan",
+     [
+      "Sqrt",
+      3
+     ]
+    ],
+    [
+     "Divide",
+     "Pi",
+     3
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Arctan"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "7272a8",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "Arctan",
+      "z"
+     ]
+    ],
+    [
+     "Abs",
+     [
+      "Artanh",
+      [
+       "Abs",
+       "z"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Arctan",
+    "Artanh"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "7295b5",
+   "formula": [
+    "Equal",
+    [
+     "Arctan",
+     "NegativeInfinity"
+    ],
+    [
+     "Negate",
+     [
+      "Divide",
+      "Pi",
+      2
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Arctan"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "77e519",
+   "formula": [
+    "Equal",
+    [
+     "Arctan2",
+     "y",
+     0
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      "Pi",
+      2
+     ],
+     [
+      "Sign",
+      "y"
+     ]
+    ]
+   ],
+   "variables": [
+    "y"
+   ],
+   "assumptions": [
+    "Element",
+    "y",
+    "RealNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Arctan2",
+    "Sign"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "7954ad",
+   "formula": [
+    "Equal",
+    [
+     "Arctan",
+     "z"
+    ],
+    [
+     "Arcsin",
+     [
+      "Divide",
+      "z",
+      [
+       "Sqrt",
+       [
+        "Add",
+        1,
+        [
+         "Power",
+         "z",
+         2
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "NotElement",
+     [
+      "Multiply",
+      "ImaginaryUnit",
+      "z"
+     ],
+     [
+      "Union",
+      [
+       "Interval",
+       [
+        "Open",
+        "NegativeInfinity"
+       ],
+       -1
+      ],
+      [
+       "Interval",
+       1,
+       [
+        "Open",
+        "PositiveInfinity"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Arcsin",
+    "Arctan"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "7dd050",
+   "formula": [
+    "Equal",
+    [
+     "Arctan",
+     [
+      "Subtract",
+      2,
+      [
+       "Sqrt",
+       3
+      ]
+     ]
+    ],
+    [
+     "Divide",
+     "Pi",
+     12
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Arctan"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "8fbf69",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "Arctan",
+        "z"
+       ],
+       "z"
+      ],
+      1
+     ],
+     "z"
+    ],
+    [
+     "Divide",
+     1,
+     [
+      "Add",
+      1,
+      [
+       "Power",
+       "z",
+       2
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "NotElement",
+     [
+      "Multiply",
+      "ImaginaryUnit",
+      "z"
+     ],
+     [
+      "Union",
+      [
+       "Interval",
+       [
+        "Open",
+        "NegativeInfinity"
+       ],
+       -1
+      ],
+      [
+       "Interval",
+       1,
+       [
+        "Open",
+        "PositiveInfinity"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Arctan",
+    "Derivative"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "90631b",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "Arctan",
+        "z"
+       ],
+       "z"
+      ],
+      "n"
+     ],
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      [
+       "Factorial",
+       [
+        "Subtract",
+        "n",
+        1
+       ]
+      ],
+      [
+       "Power",
+       [
+        "Add",
+        1,
+        [
+         "Power",
+         "z",
+         2
+        ]
+       ],
+       [
+        "Divide",
+        [
+         "Add",
+         "n",
+         1
+        ],
+        2
+       ]
+      ]
+     ],
+     [
+      "ChebyshevU",
+      [
+       "Subtract",
+       "n",
+       1
+      ],
+      [
+       "Negate",
+       [
+        "Divide",
+        "z",
+        [
+         "Sqrt",
+         [
+          "Add",
+          1,
+          [
+           "Power",
+           "z",
+           2
+          ]
+         ]
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "NotElement",
+     [
+      "Multiply",
+      "ImaginaryUnit",
+      "z"
+     ],
+     [
+      "Union",
+      [
+       "Interval",
+       [
+        "Open",
+        "NegativeInfinity"
+       ],
+       -1
+      ],
+      [
+       "Interval",
+       1,
+       [
+        "Open",
+        "PositiveInfinity"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Arctan",
+    "ChebyshevU",
+    "Derivative",
+    "Factorial"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": [
+    "M. A. Boutiche and M. Rahmani (2017), On the higher derivatives of the inverse tangent function, https://arxiv.org/abs/1712.03521, Theorem 9"
+   ],
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "90a864",
+   "formula": [
+    "Equal",
+    [
+     "Arctan",
+     "z"
+    ],
+    [
+     "Integrate",
+     [
+      "Divide",
+      1,
+      [
+       "Add",
+       1,
+       [
+        "Power",
+        "t",
+        2
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "t",
+      0,
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "NotElement",
+     [
+      "Multiply",
+      "ImaginaryUnit",
+      "z"
+     ],
+     [
+      "Union",
+      [
+       "Interval",
+       [
+        "Open",
+        "NegativeInfinity"
+       ],
+       -1
+      ],
+      [
+       "Interval",
+       1,
+       [
+        "Open",
+        "PositiveInfinity"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Arctan",
+    "Integrate"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "96289e",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "Subtract",
+      [
+       "Arctan",
+       [
+        "Add",
+        "x",
+        "y"
+       ]
+      ],
+      [
+       "Arctan",
+       "x"
+      ]
+     ]
+    ],
+    [
+     "Abs",
+     "y"
+    ]
+   ],
+   "variables": [
+    "x",
+    "y"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     "RealNumbers"
+    ],
+    [
+     "Element",
+     "y",
+     "RealNumbers"
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Arctan"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "9b0994",
+   "formula": [
+    "Equal",
+    [
+     "Arctan",
+     [
+      "Negate",
+      "ImaginaryUnit"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Negate",
+      "ImaginaryUnit"
+     ],
+     "PositiveInfinity"
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Arctan"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ],
+   "directedInfinity": true
+  },
+  {
+   "id": "9dec3e",
+   "formula": [
+    "Equal",
+    [
+     "Arctan2",
+     "y",
+     "x"
+    ],
+    [
+     "Multiply",
+     [
+      "Negate",
+      "ImaginaryUnit"
+     ],
+     [
+      "Ln",
+      [
+       "Sign",
+       [
+        "Add",
+        "x",
+        [
+         "Multiply",
+         "y",
+         "ImaginaryUnit"
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "x",
+    "y"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     "RealNumbers"
+    ],
+    [
+     "Element",
+     "y",
+     "RealNumbers"
+    ],
+    [
+     "NotEqual",
+     [
+      "Add",
+      "x",
+      [
+       "Multiply",
+       "y",
+       "ImaginaryUnit"
+      ]
+     ],
+     0
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Arctan2",
+    "Ln",
+    "Sign"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "a020e9",
+   "formula": [
+    "Equal",
+    [
+     "Add",
+     [
+      "Arctan2",
+      "y_1",
+      "x_1"
+     ],
+     [
+      "Arctan2",
+      "y_2",
+      "x_2"
+     ]
+    ],
+    [
+     "Arctan2",
+     [
+      "Add",
+      [
+       "Multiply",
+       "y_1",
+       "x_2"
+      ],
+      [
+       "Multiply",
+       "y_2",
+       "x_1"
+      ]
+     ],
+     [
+      "Subtract",
+      [
+       "Multiply",
+       "x_1",
+       "x_2"
+      ],
+      [
+       "Multiply",
+       "y_1",
+       "y_2"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "x",
+    "y"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x_1",
+     "RealNumbers"
+    ],
+    [
+     "Element",
+     "x_2",
+     "RealNumbers"
+    ],
+    [
+     "Element",
+     "y_1",
+     "RealNumbers"
+    ],
+    [
+     "Element",
+     "y_2",
+     "RealNumbers"
+    ],
+    [
+     "Element",
+     [
+      "Add",
+      [
+       "Arctan2",
+       "y_1",
+       "x_1"
+      ],
+      [
+       "Arctan2",
+       "y_2",
+       "x_2"
+      ]
+     ],
+     [
+      "Interval",
+      [
+       "Open",
+       [
+        "Negate",
+        "Pi"
+       ]
+      ],
+      "Pi"
+     ]
+    ],
+    [
+     "Not",
+     [
+      "Equal",
+      "x_1",
+      "y_1",
+      0
+     ]
+    ],
+    [
+     "Not",
+     [
+      "Equal",
+      "x_2",
+      "y_2",
+      0
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Arctan2"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "a18b77",
+   "formula": [
+    "Equal",
+    [
+     "Arctan",
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      "ImaginaryUnit",
+      2
+     ],
+     [
+      "Subtract",
+      [
+       "Ln",
+       [
+        "Subtract",
+        1,
+        [
+         "Multiply",
+         "ImaginaryUnit",
+         "z"
+        ]
+       ]
+      ],
+      [
+       "Ln",
+       [
+        "Add",
+        1,
+        [
+         "Multiply",
+         "ImaginaryUnit",
+         "z"
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Arctan",
+    "Ln"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "a2af66",
+   "formula": [
+    "Equal",
+    [
+     "Arctan2",
+     "y",
+     "x"
+    ],
+    [
+     "UniqueSolution",
+     [
+      "Function",
+      [
+       "Equal",
+       [
+        "Tuple",
+        "x",
+        "y"
+       ],
+       [
+        "Tuple",
+        [
+         "Multiply",
+         [
+          "Sqrt",
+          [
+           "Add",
+           [
+            "Power",
+            "x",
+            2
+           ],
+           [
+            "Power",
+            "y",
+            2
+           ]
+          ]
+         ],
+         [
+          "Cos",
+          "theta"
+         ]
+        ],
+        [
+         "Multiply",
+         [
+          "Sqrt",
+          [
+           "Add",
+           [
+            "Power",
+            "x",
+            2
+           ],
+           [
+            "Power",
+            "y",
+            2
+           ]
+          ]
+         ],
+         [
+          "Sin",
+          "theta"
+         ]
+        ]
+       ]
+      ],
+      "theta"
+     ],
+     [
+      "Interval",
+      [
+       "Open",
+       [
+        "Negate",
+        "Pi"
+       ]
+      ],
+      "Pi"
+     ]
+    ]
+   ],
+   "variables": [
+    "x",
+    "y"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     "RealNumbers"
+    ],
+    [
+     "Element",
+     "y",
+     "RealNumbers"
+    ],
+    [
+     "Or",
+     [
+      "NotEqual",
+      "x",
+      0
+     ],
+     [
+      "NotEqual",
+      "y",
+      0
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Arctan2",
+    "Cos",
+    "Sin",
+    "UniqueSolution"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "a2d208",
+   "formula": [
+    "Equal",
+    [
+     "Arctan",
+     "ImaginaryUnit"
+    ],
+    [
+     "Multiply",
+     "ImaginaryUnit",
+     "PositiveInfinity"
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Arctan"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ],
+   "directedInfinity": true
+  },
+  {
+   "id": "a42212",
+   "formula": [
+    "GreaterEqual",
+    [
+     "Arctan",
+     "x"
+    ],
+    [
+     "Divide",
+     "x",
+     [
+      "Add",
+      1,
+      "x"
+     ]
+    ]
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": [
+    "Element",
+    "x",
+    [
+     "Interval",
+     0,
+     [
+      "Open",
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Arctan"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "a4eb86",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "Arctan",
+        "z"
+       ],
+       "z"
+      ],
+      2
+     ],
+     "z"
+    ],
+    [
+     "Negate",
+     [
+      "Divide",
+      [
+       "Multiply",
+       2,
+       "z"
+      ],
+      [
+       "Power",
+       [
+        "Add",
+        1,
+        [
+         "Power",
+         "z",
+         2
+        ]
+       ],
+       2
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "NotElement",
+     [
+      "Multiply",
+      "ImaginaryUnit",
+      "z"
+     ],
+     [
+      "Union",
+      [
+       "Interval",
+       [
+        "Open",
+        "NegativeInfinity"
+       ],
+       -1
+      ],
+      [
+       "Interval",
+       1,
+       [
+        "Open",
+        "PositiveInfinity"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Arctan",
+    "Derivative"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "a6776b",
+   "formula": [
+    "Equal",
+    [
+     "Arctan2",
+     0,
+     "x"
+    ],
+    [
+     "Which",
+     [
+      "GreaterEqual",
+      "x",
+      0
+     ],
+     0,
+     [
+      "Less",
+      "x",
+      0
+     ],
+     "Pi"
+    ]
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": [
+    "Element",
+    "x",
+    "RealNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Arctan2"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "a9ecff",
+   "formula": [
+    "Equal",
+    [
+     "Arctan",
+     [
+      "Subtract",
+      [
+       "Sqrt",
+       2
+      ],
+      1
+     ]
+    ],
+    [
+     "Divide",
+     "Pi",
+     8
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Arctan"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "b0049f",
+   "formula": [
+    "Equal",
+    [
+     "Arctan",
+     [
+      "Add",
+      2,
+      [
+       "Sqrt",
+       3
+      ]
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Multiply",
+      5,
+      "Pi"
+     ],
+     12
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Arctan"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "b0a4e9",
+   "formula": [
+    "GreaterEqual",
+    [
+     "Arctan",
+     "x"
+    ],
+    [
+     "Divide",
+     "x",
+     [
+      "Sqrt",
+      [
+       "Add",
+       1,
+       [
+        "Power",
+        "x",
+        2
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": [
+    "Element",
+    "x",
+    [
+     "Interval",
+     0,
+     [
+      "Open",
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Arctan"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "b63481",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "Arctan2",
+      "y",
+      "x"
+     ]
+    ],
+    "Pi"
+   ],
+   "variables": [
+    "x",
+    "y"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     "RealNumbers"
+    ],
+    [
+     "Element",
+     "y",
+     "RealNumbers"
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Arctan2"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "b65d19",
+   "formula": [
+    "Equal",
+    [
+     "Imaginary",
+     [
+      "Arctan",
+      [
+       "Add",
+       "x",
+       [
+        "Multiply",
+        "y",
+        "ImaginaryUnit"
+       ]
+      ]
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      1,
+      4
+     ],
+     [
+      "Ln",
+      [
+       "Divide",
+       [
+        "Add",
+        [
+         "Power",
+         "x",
+         2
+        ],
+        [
+         "Power",
+         [
+          "Add",
+          1,
+          "y"
+         ],
+         2
+        ]
+       ],
+       [
+        "Add",
+        [
+         "Power",
+         "x",
+         2
+        ],
+        [
+         "Power",
+         [
+          "Subtract",
+          1,
+          "y"
+         ],
+         2
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "x",
+    "y"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     "RealNumbers"
+    ],
+    [
+     "Element",
+     "y",
+     "RealNumbers"
+    ],
+    [
+     "NotElement",
+     [
+      "Add",
+      "x",
+      [
+       "Multiply",
+       "y",
+       "ImaginaryUnit"
+      ]
+     ],
+     [
+      "Set",
+      [
+       "Negate",
+       "ImaginaryUnit"
+      ],
+      "ImaginaryUnit"
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Arctan",
+    "Imaginary",
+    "Ln"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "b971fe",
+   "formula": [
+    "GreaterEqual",
+    [
+     "Arctan",
+     "x"
+    ],
+    [
+     "Tanh",
+     "x"
+    ]
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": [
+    "Element",
+    "x",
+    [
+     "Interval",
+     0,
+     [
+      "Open",
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Arctan",
+    "Tanh"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "bfc13f",
+   "formula": [
+    "Equal",
+    [
+     "Arctan",
+     [
+      "Divide",
+      1,
+      "z"
+     ]
+    ],
+    [
+     "Subtract",
+     [
+      "Multiply",
+      [
+       "Divide",
+       "Pi",
+       2
+      ],
+      [
+       "Csgn",
+       [
+        "Divide",
+        1,
+        "z"
+       ]
+      ]
+     ],
+     [
+      "Arctan",
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "NotElement",
+     [
+      "Multiply",
+      "ImaginaryUnit",
+      "z"
+     ],
+     [
+      "Union",
+      [
+       "Set",
+       0
+      ],
+      [
+       "Interval",
+       [
+        "Open",
+        "NegativeInfinity"
+       ],
+       -1
+      ],
+      [
+       "Interval",
+       1,
+       [
+        "Open",
+        "PositiveInfinity"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Arctan",
+    "Csgn"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "c580f4",
+   "formula": [
+    "Equal",
+    [
+     "Arctan",
+     "z"
+    ],
+    [
+     "Arccot",
+     [
+      "Divide",
+      1,
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Arccot",
+    "Arctan"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "c6c92a",
+   "formula": [
+    "Equal",
+    [
+     "Arctan",
+     [
+      "Add",
+      [
+       "Sqrt",
+       2
+      ],
+      1
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Multiply",
+      3,
+      "Pi"
+     ],
+     8
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Arctan"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "cf64b3",
+   "formula": [
+    "Equal",
+    [
+     "Add",
+     [
+      "Arctan",
+      "x"
+     ],
+     [
+      "Arctan",
+      "y"
+     ]
+    ],
+    [
+     "Arctan2",
+     [
+      "Add",
+      "x",
+      "y"
+     ],
+     [
+      "Subtract",
+      1,
+      [
+       "Multiply",
+       "x",
+       "y"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "x",
+    "y"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     "RealNumbers"
+    ],
+    [
+     "Element",
+     "y",
+     "RealNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Arctan",
+    "Arctan2"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "d04a5b",
+   "formula": [
+    "LessEqual",
+    [
+     "Arctan",
+     "x"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      "Pi",
+      2
+     ],
+     [
+      "Tanh",
+      "x"
+     ]
+    ]
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": [
+    "Element",
+    "x",
+    [
+     "Interval",
+     0,
+     [
+      "Open",
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Arctan",
+    "Tanh"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "d418d3",
+   "formula": [
+    "Equal",
+    [
+     "Arctan",
+     "PositiveInfinity"
+    ],
+    [
+     "Divide",
+     "Pi",
+     2
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Arctan"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "d4b0b6",
+   "formula": [
+    "Equal",
+    [
+     "Sin",
+     [
+      "Arctan",
+      "z"
+     ]
+    ],
+    [
+     "Divide",
+     "z",
+     [
+      "Sqrt",
+      [
+       "Add",
+       1,
+       [
+        "Power",
+        "z",
+        2
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     [
+      "Set",
+      [
+       "Negate",
+       "ImaginaryUnit"
+      ],
+      "ImaginaryUnit"
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Arctan",
+    "Sin"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "df52fc",
+   "formula": [
+    "Equal",
+    [
+     "Real",
+     [
+      "Arctan",
+      [
+       "Add",
+       "x",
+       [
+        "Multiply",
+        "y",
+        "ImaginaryUnit"
+       ]
+      ]
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      1,
+      2
+     ],
+     [
+      "Arctan2",
+      [
+       "Multiply",
+       2,
+       "x"
+      ],
+      [
+       "Subtract",
+       [
+        "Subtract",
+        1,
+        [
+         "Power",
+         "x",
+         2
+        ]
+       ],
+       [
+        "Power",
+        "y",
+        2
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "x",
+    "y"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     "RealNumbers"
+    ],
+    [
+     "Element",
+     "y",
+     "RealNumbers"
+    ],
+    [
+     "Not",
+     [
+      "And",
+      [
+       "Equal",
+       "x",
+       0
+      ],
+      [
+       "Element",
+       "y",
+       [
+        "Union",
+        [
+         "Interval",
+         [
+          "Open",
+          "NegativeInfinity"
+         ],
+         -1
+        ],
+        [
+         "Set",
+         1
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Arctan",
+    "Arctan2",
+    "Real"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "e3d274",
+   "formula": [
+    "Equal",
+    [
+     "Arctan",
+     [
+      "Divide",
+      1,
+      "z"
+     ]
+    ],
+    [
+     "Subtract",
+     [
+      "Divide",
+      "Pi",
+      2
+     ],
+     [
+      "Arctan",
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Or",
+     [
+      "Greater",
+      [
+       "Real",
+       "z"
+      ],
+      0
+     ],
+     [
+      "And",
+      [
+       "Equal",
+       [
+        "Real",
+        "z"
+       ],
+       0
+      ],
+      [
+       "Element",
+       [
+        "Imaginary",
+        "z"
+       ],
+       [
+        "Union",
+        [
+         "Interval",
+         [
+          "Open",
+          -1
+         ],
+         [
+          "Open",
+          0
+         ]
+        ],
+        [
+         "Interval",
+         [
+          "Open",
+          1
+         ],
+         [
+          "Open",
+          "PositiveInfinity"
+         ]
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Arctan"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "e7a9b1",
+   "formula": [
+    "Less",
+    [
+     "Abs",
+     [
+      "Arctan",
+      "x"
+     ]
+    ],
+    [
+     "Divide",
+     "Pi",
+     2
+    ]
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": [
+    "Element",
+    "x",
+    "RealNumbers"
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Arctan"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "ec7f2d",
+   "formula": [
+    "Equal",
+    [
+     "Arctan",
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Csgn",
+      "z"
+     ],
+     [
+      "Arccos",
+      [
+       "Divide",
+       1,
+       [
+        "Sqrt",
+        [
+         "Add",
+         1,
+         [
+          "Power",
+          "z",
+          2
+         ]
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     [
+      "Set",
+      [
+       "Negate",
+       "ImaginaryUnit"
+      ],
+      "ImaginaryUnit"
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Arccos",
+    "Arctan",
+    "Csgn"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "eca4ce",
+   "formula": [
+    "Equal",
+    [
+     "Arctan2",
+     "y",
+     "x"
+    ],
+    [
+     "Imaginary",
+     [
+      "Ln",
+      [
+       "Add",
+       "x",
+       [
+        "Multiply",
+        "y",
+        "ImaginaryUnit"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "x",
+    "y"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     "RealNumbers"
+    ],
+    [
+     "Element",
+     "y",
+     "RealNumbers"
+    ],
+    [
+     "NotEqual",
+     [
+      "Add",
+      "x",
+      [
+       "Multiply",
+       "y",
+       "ImaginaryUnit"
+      ]
+     ],
+     0
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Arctan2",
+    "Imaginary",
+    "Ln"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "efebb8",
+   "formula": [
+    "LessEqual",
+    [
+     "Arctan",
+     "x"
+    ],
+    [
+     "Multiply",
+     [
+      "Power",
+      [
+       "Divide",
+       "Pi",
+       2
+      ],
+      2
+     ],
+     [
+      "Divide",
+      "x",
+      [
+       "Add",
+       1,
+       [
+        "Multiply",
+        [
+         "Divide",
+         "Pi",
+         2
+        ],
+        "x"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": [
+    "Element",
+    "x",
+    [
+     "Interval",
+     0,
+     [
+      "Open",
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Arctan"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "f516e3",
+   "formula": [
+    "Equal",
+    [
+     "Arctan",
+     [
+      "Tan",
+      "theta"
+     ]
+    ],
+    "theta"
+   ],
+   "variables": [
+    "theta"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "theta",
+     "ComplexNumbers"
+    ],
+    [
+     "Less",
+     [
+      "Negate",
+      [
+       "Divide",
+       "Pi",
+       2
+      ]
+     ],
+     [
+      "Real",
+      "theta"
+     ],
+     [
+      "Divide",
+      "Pi",
+      2
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Arctan",
+    "Tan"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "f5d28c",
+   "formula": [
+    "LessEqual",
+    [
+     "Arctan",
+     "x"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      "Pi",
+      2
+     ],
+     [
+      "Divide",
+      "x",
+      [
+       "Sqrt",
+       [
+        "Add",
+        1,
+        [
+         "Power",
+         "x",
+         2
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": [
+    "Element",
+    "x",
+    [
+     "Interval",
+     0,
+     [
+      "Open",
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Arctan"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "fa30c7",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "Subtract",
+      [
+       "Arctan",
+       [
+        "Add",
+        "x",
+        "y"
+       ]
+      ],
+      [
+       "Arctan",
+       "x"
+      ]
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Abs",
+      "y"
+     ],
+     [
+      "Add",
+      1,
+      [
+       "Power",
+       [
+        "Max",
+        0,
+        [
+         "Subtract",
+         [
+          "Abs",
+          "x"
+         ],
+         [
+          "Abs",
+          "y"
+         ]
+        ]
+       ],
+       2
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "x",
+    "y"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     "RealNumbers"
+    ],
+    [
+     "Element",
+     "y",
+     "RealNumbers"
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Arctan",
+    "Max"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  },
+  {
+   "id": "fa9b71",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "Arctan",
+      "z"
+     ]
+    ],
+    [
+     "Negate",
+     [
+      "Ln",
+      [
+       "Subtract",
+       1,
+       [
+        "Abs",
+        "z"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "LessEqual",
+     [
+      "Abs",
+      "z"
+     ],
+     1
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Arctan",
+    "Ln"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "atan"
+   ]
+  }
+ ]
+}

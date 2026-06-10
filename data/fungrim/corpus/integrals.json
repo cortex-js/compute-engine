@@ -1,0 +1,711 @@
+{
+ "topic": "integrals",
+ "title": "Definite integrals",
+ "source": "pygrim/formulas/integrals.py",
+ "generator": "grim2mathjson 0.1.0",
+ "entries": [
+  {
+   "id": "02e3d2",
+   "formula": [
+    "Equal",
+    [
+     "Integrate",
+     [
+      "Exp",
+      [
+       "Add",
+       [
+        "Negate",
+        [
+         "Multiply",
+         "a",
+         "x"
+        ]
+       ],
+       "b"
+      ]
+     ],
+     [
+      "Limits",
+      "x",
+      "z",
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Exp",
+      [
+       "Subtract",
+       "b",
+       [
+        "Multiply",
+        "a",
+        "z"
+       ]
+      ]
+     ],
+     "a"
+    ]
+   ],
+   "variables": [
+    "a",
+    "b",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "b",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Greater",
+     [
+      "Real",
+      "a"
+     ],
+     0
+    ]
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Exp",
+    "Integrate"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "integrals"
+   ]
+  },
+  {
+   "id": "16a1f4",
+   "formula": [
+    "Equal",
+    [
+     "Integrate",
+     [
+      "Exp",
+      [
+       "Add",
+       [
+        "Negate",
+        [
+         "Multiply",
+         "a",
+         [
+          "Power",
+          "x",
+          "c"
+         ]
+        ]
+       ],
+       "b"
+      ]
+     ],
+     [
+      "Limits",
+      "x",
+      "z",
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      [
+       "Exp",
+       "b"
+      ],
+      [
+       "Multiply",
+       "c",
+       [
+        "Power",
+        "a",
+        [
+         "Divide",
+         1,
+         "c"
+        ]
+       ]
+      ]
+     ],
+     [
+      "UpperGamma",
+      [
+       "Divide",
+       1,
+       "c"
+      ],
+      [
+       "Multiply",
+       "a",
+       [
+        "Power",
+        "z",
+        "c"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b",
+    "c",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "RealNumbers"
+    ],
+    [
+     "Element",
+     "b",
+     "RealNumbers"
+    ],
+    [
+     "Element",
+     "c",
+     "RealNumbers"
+    ],
+    [
+     "Element",
+     "z",
+     "RealNumbers"
+    ],
+    [
+     "Greater",
+     "a",
+     0
+    ],
+    [
+     "Greater",
+     "c",
+     0
+    ],
+    [
+     "Greater",
+     "z",
+     0
+    ]
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Exp",
+    "Integrate",
+    "UpperGamma"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "integrals"
+   ]
+  },
+  {
+   "id": "463077",
+   "formula": [
+    "Equal",
+    [
+     "Integrate",
+     [
+      "Divide",
+      1,
+      [
+       "Power",
+       [
+        "Add",
+        [
+         "Multiply",
+         "a",
+         "x"
+        ],
+        "b"
+       ],
+       "c"
+      ]
+     ],
+     [
+      "Limits",
+      "x",
+      "z",
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Divide",
+     1,
+     [
+      "Multiply",
+      [
+       "Multiply",
+       "a",
+       [
+        "Subtract",
+        "c",
+        1
+       ]
+      ],
+      [
+       "Power",
+       [
+        "Add",
+        [
+         "Multiply",
+         "a",
+         "z"
+        ],
+        "b"
+       ],
+       [
+        "Subtract",
+        "c",
+        1
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b",
+    "c",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "RealNumbers"
+    ],
+    [
+     "Element",
+     "b",
+     "RealNumbers"
+    ],
+    [
+     "Element",
+     "c",
+     "RealNumbers"
+    ],
+    [
+     "Element",
+     "z",
+     "RealNumbers"
+    ],
+    [
+     "Greater",
+     "a",
+     0
+    ],
+    [
+     "Greater",
+     [
+      "Add",
+      [
+       "Multiply",
+       "a",
+       "z"
+      ],
+      "b"
+     ],
+     0
+    ],
+    [
+     "Greater",
+     "c",
+     1
+    ]
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Integrate"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "integrals"
+   ]
+  },
+  {
+   "id": "66fefb",
+   "formula": [
+    "Equal",
+    [
+     "Integrate",
+     [
+      "Power",
+      "x",
+      "x"
+     ],
+     [
+      "Limits",
+      "x",
+      0,
+      1
+     ]
+    ],
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "Power",
+       -1,
+       [
+        "Add",
+        "n",
+        1
+       ]
+      ],
+      [
+       "Power",
+       "n",
+       [
+        "Negate",
+        "n"
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "n",
+      1,
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Integrate",
+    "Sum"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "integrals"
+   ]
+  },
+  {
+   "id": "9a06fb",
+   "formula": [
+    "Equal",
+    [
+     "Integrate",
+     [
+      "Multiply",
+      [
+       "Power",
+       "x",
+       "c"
+      ],
+      [
+       "Exp",
+       [
+        "Add",
+        [
+         "Negate",
+         [
+          "Multiply",
+          "a",
+          "x"
+         ]
+        ],
+        "b"
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "x",
+      "z",
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      [
+       "Exp",
+       "b"
+      ],
+      [
+       "Power",
+       "a",
+       [
+        "Add",
+        "c",
+        1
+       ]
+      ]
+     ],
+     [
+      "UpperGamma",
+      [
+       "Add",
+       "c",
+       1
+      ],
+      [
+       "Multiply",
+       "a",
+       "z"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b",
+    "c",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "RealNumbers"
+    ],
+    [
+     "Element",
+     "b",
+     "RealNumbers"
+    ],
+    [
+     "Element",
+     "c",
+     "RealNumbers"
+    ],
+    [
+     "Element",
+     "z",
+     "RealNumbers"
+    ],
+    [
+     "Greater",
+     "a",
+     0
+    ],
+    [
+     "Greater",
+     "c",
+     0
+    ],
+    [
+     "Greater",
+     "z",
+     0
+    ]
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Exp",
+    "Integrate",
+    "UpperGamma"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "integrals"
+   ]
+  },
+  {
+   "id": "b77faf",
+   "formula": [
+    "Equal",
+    [
+     "Integrate",
+     [
+      "Power",
+      "x",
+      [
+       "Negate",
+       "x"
+      ]
+     ],
+     [
+      "Limits",
+      "x",
+      0,
+      1
+     ]
+    ],
+    [
+     "Sum",
+     [
+      "Power",
+      "n",
+      [
+       "Negate",
+       "n"
+      ]
+     ],
+     [
+      "Limits",
+      "n",
+      1,
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Integrate",
+    "Sum"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "integrals"
+   ]
+  },
+  {
+   "id": "f8de2e",
+   "formula": [
+    "Equal",
+    [
+     "Integrate",
+     [
+      "Exp",
+      [
+       "Add",
+       [
+        "Negate",
+        [
+         "Multiply",
+         "a",
+         [
+          "Power",
+          "x",
+          2
+         ]
+        ]
+       ],
+       "b"
+      ]
+     ],
+     [
+      "Limits",
+      "x",
+      "z",
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      [
+       "Divide",
+       [
+        "Exp",
+        "b"
+       ],
+       2
+      ],
+      [
+       "Sqrt",
+       [
+        "Divide",
+        "Pi",
+        "a"
+       ]
+      ]
+     ],
+     [
+      "Erfc",
+      [
+       "Multiply",
+       [
+        "Sqrt",
+        "a"
+       ],
+       "z"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "b",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Greater",
+     [
+      "Real",
+      "a"
+     ],
+     0
+    ]
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Erfc",
+    "Exp",
+    "Integrate"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "integrals"
+   ]
+  }
+ ]
+}

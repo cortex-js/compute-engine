@@ -1,0 +1,1563 @@
+{
+ "topic": "beta_function",
+ "title": "Beta function",
+ "source": "pygrim/formulas/beta_function.py",
+ "generator": "grim2mathjson 0.1.0",
+ "entries": [
+  {
+   "id": "082a69",
+   "formula": [
+    "Equal",
+    [
+     "Beta",
+     "m",
+     "n"
+    ],
+    [
+     "Divide",
+     [
+      "Multiply",
+      [
+       "Factorial",
+       [
+        "Subtract",
+        "m",
+        1
+       ]
+      ],
+      [
+       "Factorial",
+       [
+        "Subtract",
+        "n",
+        1
+       ]
+      ]
+     ],
+     [
+      "Factorial",
+      [
+       "Subtract",
+       [
+        "Add",
+        "m",
+        "n"
+       ],
+       1
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "m",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "m",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "n",
+     "PositiveIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Beta",
+    "Factorial"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "beta_function"
+   ]
+  },
+  {
+   "id": "3141e4",
+   "formula": [
+    "Equal",
+    [
+     "IncompleteBeta",
+     1,
+     "a",
+     "b"
+    ],
+    [
+     "Beta",
+     "a",
+     "b"
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      "NonPositiveIntegers"
+     ]
+    ],
+    [
+     "Element",
+     "b",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      "NonPositiveIntegers"
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Beta",
+    "IncompleteBeta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "beta_function"
+   ]
+  },
+  {
+   "id": "315b3d",
+   "formula": [
+    "Equal",
+    [
+     "IncompleteBetaRegularized",
+     "x",
+     "a",
+     "b"
+    ],
+    [
+     "Subtract",
+     1,
+     [
+      "IncompleteBetaRegularized",
+      [
+       "Subtract",
+       1,
+       "x"
+      ],
+      "b",
+      "a"
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "a",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      "NonPositiveIntegers"
+     ]
+    ],
+    [
+     "Element",
+     "b",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      "NonPositiveIntegers"
+     ]
+    ],
+    [
+     "NotElement",
+     [
+      "Add",
+      "a",
+      "b"
+     ],
+     "NonPositiveIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "IncompleteBetaRegularized"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "beta_function"
+   ]
+  },
+  {
+   "id": "3e08b6",
+   "formula": [
+    "Equal",
+    [
+     "IncompleteBeta",
+     "x",
+     "a",
+     "b"
+    ],
+    [
+     "Integrate",
+     [
+      "Multiply",
+      [
+       "Power",
+       "t",
+       [
+        "Subtract",
+        "a",
+        1
+       ]
+      ],
+      [
+       "Power",
+       [
+        "Subtract",
+        1,
+        "t"
+       ],
+       [
+        "Subtract",
+        "b",
+        1
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "t",
+      0,
+      "x"
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     [
+      "Interval",
+      0,
+      1
+     ]
+    ],
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "b",
+     "ComplexNumbers"
+    ],
+    [
+     "Greater",
+     [
+      "Real",
+      "a"
+     ],
+     0
+    ],
+    [
+     "Greater",
+     [
+      "Real",
+      "b"
+     ],
+     0
+    ]
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "IncompleteBeta",
+    "Integrate"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "beta_function"
+   ]
+  },
+  {
+   "id": "48910b",
+   "formula": [
+    "Equal",
+    [
+     "Beta",
+     "a",
+     "b"
+    ],
+    [
+     "Multiply",
+     2,
+     [
+      "Integrate",
+      [
+       "Multiply",
+       [
+        "Power",
+        [
+         "Sin",
+         "t"
+        ],
+        [
+         "Subtract",
+         [
+          "Multiply",
+          2,
+          "a"
+         ],
+         1
+        ]
+       ],
+       [
+        "Power",
+        [
+         "Cos",
+         "t"
+        ],
+        [
+         "Subtract",
+         [
+          "Multiply",
+          2,
+          "b"
+         ],
+         1
+        ]
+       ]
+      ],
+      [
+       "Limits",
+       "t",
+       0,
+       [
+        "Divide",
+        "Pi",
+        2
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "b",
+     "ComplexNumbers"
+    ],
+    [
+     "Greater",
+     [
+      "Real",
+      "a"
+     ],
+     0
+    ],
+    [
+     "Greater",
+     [
+      "Real",
+      "b"
+     ],
+     0
+    ]
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Beta",
+    "Cos",
+    "Integrate",
+    "Sin"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "beta_function"
+   ]
+  },
+  {
+   "id": "542cf7",
+   "formula": [
+    "Equal",
+    [
+     "Beta",
+     "a",
+     "b"
+    ],
+    [
+     "Integrate",
+     [
+      "Multiply",
+      [
+       "Power",
+       "t",
+       [
+        "Subtract",
+        "a",
+        1
+       ]
+      ],
+      [
+       "Power",
+       [
+        "Subtract",
+        1,
+        "t"
+       ],
+       [
+        "Subtract",
+        "b",
+        1
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "t",
+      0,
+      1
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "b",
+     "ComplexNumbers"
+    ],
+    [
+     "Greater",
+     [
+      "Real",
+      "a"
+     ],
+     0
+    ],
+    [
+     "Greater",
+     [
+      "Real",
+      "b"
+     ],
+     0
+    ]
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Beta",
+    "Integrate"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "beta_function"
+   ]
+  },
+  {
+   "id": "5ec9c0",
+   "formula": [
+    "Equal",
+    [
+     "IncompleteBeta",
+     "x",
+     "a",
+     "b"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      [
+       "Power",
+       "x",
+       "a"
+      ],
+      "a"
+     ],
+     [
+      "Hypergeometric2F1",
+      "a",
+      [
+       "Subtract",
+       1,
+       "b"
+      ],
+      [
+       "Add",
+       "a",
+       1
+      ],
+      "x"
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      "NonPositiveIntegers"
+     ]
+    ],
+    [
+     "Element",
+     "b",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "x",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      [
+       "Set",
+       1
+      ]
+     ]
+    ],
+    [
+     "Or",
+     [
+      "NotEqual",
+      "x",
+      0
+     ],
+     [
+      "Greater",
+      [
+       "Real",
+       "a"
+      ],
+      0
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Hypergeometric2F1",
+    "IncompleteBeta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "beta_function"
+   ]
+  },
+  {
+   "id": "6bcfa6",
+   "formula": [
+    "Equal",
+    [
+     "IncompleteBetaRegularized",
+     1,
+     "a",
+     "b"
+    ],
+    1
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "a",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      "NonPositiveIntegers"
+     ]
+    ],
+    [
+     "Element",
+     "b",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      "NonPositiveIntegers"
+     ]
+    ],
+    [
+     "NotElement",
+     [
+      "Add",
+      "a",
+      "b"
+     ],
+     "NonPositiveIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "IncompleteBetaRegularized"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "beta_function"
+   ]
+  },
+  {
+   "id": "72db94",
+   "formula": [
+    "Equal",
+    [
+     "Beta",
+     "n",
+     "b"
+    ],
+    [
+     "Which",
+     [
+      "Element",
+      [
+       "Negate",
+       "b"
+      ],
+      [
+       "Range",
+       0,
+       [
+        "Subtract",
+        "n",
+        1
+       ]
+      ]
+     ],
+     "ComplexInfinity",
+     "True",
+     [
+      "Divide",
+      1,
+      [
+       "Multiply",
+       "n",
+       [
+        "Binomial",
+        [
+         "Subtract",
+         [
+          "Add",
+          "n",
+          "b"
+         ],
+         1
+        ],
+        "n"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "b",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "b",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Beta",
+    "Binomial"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "beta_function"
+   ]
+  },
+  {
+   "id": "888581",
+   "formula": [
+    "Equal",
+    [
+     "Beta",
+     "a",
+     "b"
+    ],
+    [
+     "Divide",
+     [
+      "Multiply",
+      [
+       "Gamma",
+       "a"
+      ],
+      [
+       "Gamma",
+       "b"
+      ]
+     ],
+     [
+      "Gamma",
+      [
+       "Add",
+       "a",
+       "b"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      "NonPositiveIntegers"
+     ]
+    ],
+    [
+     "Element",
+     "b",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      "NonPositiveIntegers"
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Beta",
+    "Gamma"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "beta_function",
+    "gamma"
+   ]
+  },
+  {
+   "id": "a1941b",
+   "formula": [
+    "Equal",
+    [
+     "IncompleteBetaRegularized",
+     "x",
+     "a",
+     "b"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      1,
+      [
+       "Beta",
+       "a",
+       "b"
+      ]
+     ],
+     [
+      "Integrate",
+      [
+       "Multiply",
+       [
+        "Power",
+        "t",
+        [
+         "Subtract",
+         "a",
+         1
+        ]
+       ],
+       [
+        "Power",
+        [
+         "Subtract",
+         1,
+         "t"
+        ],
+        [
+         "Subtract",
+         "b",
+         1
+        ]
+       ]
+      ],
+      [
+       "Limits",
+       "t",
+       0,
+       "x"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     [
+      "Interval",
+      0,
+      1
+     ]
+    ],
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "b",
+     "ComplexNumbers"
+    ],
+    [
+     "Greater",
+     [
+      "Real",
+      "a"
+     ],
+     0
+    ],
+    [
+     "Greater",
+     [
+      "Real",
+      "b"
+     ],
+     0
+    ]
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Beta",
+    "IncompleteBetaRegularized",
+    "Integrate"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "beta_function"
+   ]
+  },
+  {
+   "id": "a7dbf6",
+   "formula": [
+    "Equal",
+    [
+     "Beta",
+     [
+      "Negate",
+      "n"
+     ],
+     "b"
+    ],
+    [
+     "Which",
+     [
+      "Element",
+      "b",
+      [
+       "Range",
+       1,
+       "n"
+      ]
+     ],
+     [
+      "Divide",
+      [
+       "Power",
+       -1,
+       "b"
+      ],
+      [
+       "Multiply",
+       "b",
+       [
+        "Binomial",
+        "n",
+        "b"
+       ]
+      ]
+     ],
+     "True",
+     "ComplexInfinity"
+    ]
+   ],
+   "variables": [
+    "b",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "b",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Beta",
+    "Binomial"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "beta_function"
+   ]
+  },
+  {
+   "id": "ba7baf",
+   "formula": [
+    "Equal",
+    [
+     "IncompleteBeta",
+     0,
+     "a",
+     "b"
+    ],
+    0
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      "NonPositiveIntegers"
+     ]
+    ],
+    [
+     "Element",
+     "b",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      "NonPositiveIntegers"
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "IncompleteBeta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "beta_function"
+   ]
+  },
+  {
+   "id": "bb4f41",
+   "formula": [
+    "Equal",
+    [
+     "Beta",
+     "m",
+     "n"
+    ],
+    [
+     "Divide",
+     1,
+     [
+      "Multiply",
+      "m",
+      [
+       "Binomial",
+       [
+        "Subtract",
+        [
+         "Add",
+         "m",
+         "n"
+        ],
+        1
+       ],
+       "m"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "m",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "m",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "n",
+     "PositiveIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Beta",
+    "Binomial"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "beta_function"
+   ]
+  },
+  {
+   "id": "bdea17",
+   "formula": [
+    "Equal",
+    [
+     "Multiply",
+     [
+      "Add",
+      "a",
+      "b"
+     ],
+     [
+      "Beta",
+      [
+       "Add",
+       "a",
+       1
+      ],
+      "b"
+     ]
+    ],
+    [
+     "Multiply",
+     "a",
+     [
+      "Beta",
+      "a",
+      "b"
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      "NonPositiveIntegers"
+     ]
+    ],
+    [
+     "Element",
+     "b",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      "NonPositiveIntegers"
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Beta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "beta_function"
+   ]
+  },
+  {
+   "id": "c92da4",
+   "formula": [
+    "Equal",
+    [
+     "IncompleteBetaRegularized",
+     "x",
+     "a",
+     "b"
+    ],
+    [
+     "Divide",
+     [
+      "IncompleteBeta",
+      "x",
+      "a",
+      "b"
+     ],
+     [
+      "Beta",
+      "a",
+      "b"
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "a",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      "NonPositiveIntegers"
+     ]
+    ],
+    [
+     "Element",
+     "b",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      "NonPositiveIntegers"
+     ]
+    ],
+    [
+     "NotElement",
+     [
+      "Add",
+      "a",
+      "b"
+     ],
+     "NonPositiveIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Beta",
+    "IncompleteBeta",
+    "IncompleteBetaRegularized"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "beta_function"
+   ]
+  },
+  {
+   "id": "cc2ebb",
+   "formula": [
+    "Equal",
+    [
+     "Beta",
+     "a",
+     "b"
+    ],
+    [
+     "Beta",
+     "b",
+     "a"
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      "NonPositiveIntegers"
+     ]
+    ],
+    [
+     "Element",
+     "b",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      "NonPositiveIntegers"
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Beta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "beta_function"
+   ]
+  },
+  {
+   "id": "e9f966",
+   "formula": [
+    "Equal",
+    [
+     "Beta",
+     "a",
+     "b"
+    ],
+    [
+     "Add",
+     [
+      "Beta",
+      [
+       "Add",
+       "a",
+       1
+      ],
+      "b"
+     ],
+     [
+      "Beta",
+      "a",
+      [
+       "Add",
+       "b",
+       1
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      "NonPositiveIntegers"
+     ]
+    ],
+    [
+     "Element",
+     "b",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      "NonPositiveIntegers"
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Beta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "beta_function"
+   ]
+  },
+  {
+   "id": "fd0e48",
+   "formula": [
+    "Equal",
+    [
+     "Multiply",
+     [
+      "Beta",
+      "a",
+      "b"
+     ],
+     [
+      "Beta",
+      [
+       "Add",
+       "a",
+       "b"
+      ],
+      "c"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Beta",
+      "b",
+      "c"
+     ],
+     [
+      "Beta",
+      "a",
+      [
+       "Add",
+       "b",
+       "c"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b",
+    "c"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      "NonPositiveIntegers"
+     ]
+    ],
+    [
+     "Element",
+     "b",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      "NonPositiveIntegers"
+     ]
+    ],
+    [
+     "Element",
+     "c",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      "NonPositiveIntegers"
+     ]
+    ],
+    [
+     "NotElement",
+     [
+      "Add",
+      "a",
+      "b"
+     ],
+     "NonPositiveIntegers"
+    ],
+    [
+     "NotElement",
+     [
+      "Add",
+      "b",
+      "c"
+     ],
+     "NonPositiveIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Beta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "beta_function"
+   ]
+  },
+  {
+   "id": "ff613a",
+   "formula": [
+    "Equal",
+    [
+     "IncompleteBetaRegularized",
+     0,
+     "a",
+     "b"
+    ],
+    0
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "a",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      "NonPositiveIntegers"
+     ]
+    ],
+    [
+     "Element",
+     "b",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      "NonPositiveIntegers"
+     ]
+    ],
+    [
+     "NotElement",
+     [
+      "Add",
+      "a",
+      "b"
+     ],
+     "NonPositiveIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "IncompleteBetaRegularized"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "beta_function"
+   ]
+  }
+ ]
+}

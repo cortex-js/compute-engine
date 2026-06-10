@@ -1,0 +1,8432 @@
+{
+ "topic": "digamma_function",
+ "title": "Digamma function",
+ "source": "pygrim/formulas/digamma_function.py",
+ "generator": "grim2mathjson 0.1.0",
+ "entries": [
+  {
+   "id": "00c02a",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     "n"
+    ],
+    [
+     "Subtract",
+     [
+      "HarmonicNumber",
+      [
+       "Subtract",
+       "n",
+       1
+      ]
+     ],
+     "EulerGamma"
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "PositiveIntegers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Digamma",
+    "HarmonicNumber"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "039051",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     [
+      "Add",
+      "z",
+      1
+     ],
+     "m"
+    ],
+    [
+     "Add",
+     [
+      "Digamma",
+      "z",
+      "m"
+     ],
+     [
+      "Divide",
+      [
+       "Multiply",
+       [
+        "Power",
+        -1,
+        "m"
+       ],
+       [
+        "Factorial",
+        "m"
+       ]
+      ],
+      [
+       "Power",
+       "z",
+       [
+        "Add",
+        "m",
+        1
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "m",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "m",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "NotElement",
+     "z",
+     "NonPositiveIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Digamma",
+    "Factorial"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "03aca0",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     [
+      "Divide",
+      1,
+      4
+     ],
+     2
+    ],
+    [
+     "Subtract",
+     [
+      "Negate",
+      [
+       "Multiply",
+       2,
+       [
+        "Power",
+        "Pi",
+        3
+       ]
+      ]
+     ],
+     [
+      "Multiply",
+      56,
+      [
+       "Zeta",
+       3
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Digamma",
+    "Zeta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "03d70f",
+   "formula": [
+    "Implies",
+    [
+     "Element",
+     "x",
+     [
+      "SetMinus",
+      "RealNumbers",
+      "NonPositiveIntegers"
+     ]
+    ],
+    [
+     "Element",
+     [
+      "Digamma",
+      "x"
+     ],
+     "RealNumbers"
+    ]
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "Digamma"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "03e2a6",
+   "formula": [
+    "Equal",
+    [
+     "Imaginary",
+     [
+      "Digamma",
+      [
+       "Multiply",
+       "ImaginaryUnit",
+       "y"
+      ]
+     ]
+    ],
+    [
+     "Add",
+     [
+      "Multiply",
+      [
+       "Divide",
+       "Pi",
+       2
+      ],
+      [
+       "Coth",
+       [
+        "Multiply",
+        "Pi",
+        "y"
+       ]
+      ]
+     ],
+     [
+      "Divide",
+      1,
+      [
+       "Multiply",
+       2,
+       "y"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "y"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "y",
+     "RealNumbers"
+    ],
+    [
+     "NotEqual",
+     "y",
+     0
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Coth",
+    "Digamma",
+    "Imaginary"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "0e5d90",
+   "formula": [
+    "Implies",
+    [
+     "And",
+     [
+      "Element",
+      "m",
+      "PositiveIntegers"
+     ],
+     [
+      "IsOdd",
+      "m"
+     ],
+     [
+      "Element",
+      "x",
+      [
+       "SetMinus",
+       "RealNumbers",
+       "NonPositiveIntegers"
+      ]
+     ]
+    ],
+    [
+     "Element",
+     [
+      "Digamma",
+      "x",
+      "m"
+     ],
+     [
+      "Interval",
+      [
+       "Open",
+       0
+      ],
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "m",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "m",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "x",
+     "RealNumbers"
+    ]
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "Digamma",
+    "IsOdd"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "1165fc",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Divide",
+      1,
+      [
+       "Power",
+       [
+        "DigammaFunctionZero",
+        "n"
+       ],
+       2
+      ]
+     ],
+     [
+      "Limits",
+      "n",
+      0,
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Add",
+     [
+      "Power",
+      "EulerGamma",
+      2
+     ],
+     [
+      "Divide",
+      [
+       "Power",
+       "Pi",
+       2
+      ],
+      2
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "DigammaFunctionZero",
+    "Sum"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "11dfd2",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     [
+      "Add",
+      "z",
+      1
+     ]
+    ],
+    [
+     "Add",
+     [
+      "Digamma",
+      "z"
+     ],
+     [
+      "Divide",
+      1,
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "NotElement",
+     "z",
+     "NonPositiveIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Digamma"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "15d56a",
+   "formula": [
+    "Implies",
+    [
+     "And",
+     [
+      "Element",
+      "x",
+      [
+       "Interval",
+       [
+        "Open",
+        0
+       ],
+       [
+        "Open",
+        "PositiveInfinity"
+       ]
+      ]
+     ],
+     [
+      "Element",
+      "m",
+      "PositiveIntegers"
+     ]
+    ],
+    [
+     "Element",
+     [
+      "Digamma",
+      "x",
+      "m"
+     ],
+     [
+      "Which",
+      [
+       "IsOdd",
+       "m"
+      ],
+      [
+       "Interval",
+       [
+        "Open",
+        0
+       ],
+       [
+        "Open",
+        "PositiveInfinity"
+       ]
+      ],
+      [
+       "IsEven",
+       "m"
+      ],
+      [
+       "Interval",
+       [
+        "Open",
+        "NegativeInfinity"
+       ],
+       [
+        "Open",
+        0
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "m",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "m",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "x",
+     "RealNumbers"
+    ]
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "Digamma",
+    "IsEven",
+    "IsOdd"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "177de7",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     [
+      "Divide",
+      1,
+      6
+     ]
+    ],
+    [
+     "Subtract",
+     [
+      "Subtract",
+      [
+       "Subtract",
+       [
+        "Negate",
+        [
+         "Divide",
+         [
+          "Multiply",
+          [
+           "Sqrt",
+           3
+          ],
+          "Pi"
+         ],
+         2
+        ]
+       ],
+       "EulerGamma"
+      ],
+      [
+       "Multiply",
+       2,
+       [
+        "Ln",
+        2
+       ]
+      ]
+     ],
+     [
+      "Divide",
+      [
+       "Multiply",
+       3,
+       [
+        "Ln",
+        3
+       ]
+      ],
+      2
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Digamma",
+    "Ln"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "19e67f",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Divide",
+      1,
+      [
+       "Add",
+       "n",
+       "a"
+      ]
+     ],
+     [
+      "Limits",
+      "n",
+      "A",
+      "B"
+     ]
+    ],
+    [
+     "Subtract",
+     [
+      "Digamma",
+      [
+       "Add",
+       [
+        "Add",
+        "a",
+        "B"
+       ],
+       1
+      ]
+     ],
+     [
+      "Digamma",
+      [
+       "Add",
+       "a",
+       "A"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "A",
+    "B",
+    "a"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "A",
+     "Integers"
+    ],
+    [
+     "Element",
+     "B",
+     "Integers"
+    ],
+    [
+     "LessEqual",
+     "A",
+     "B"
+    ],
+    [
+     "NotElement",
+     [
+      "Negate",
+      "a"
+     ],
+     [
+      "Range",
+      "A",
+      "B"
+     ]
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Digamma",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "1cbe83",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     "PositiveInfinity",
+     "m"
+    ],
+    [
+     "Limit",
+     [
+      "Function",
+      [
+       "Digamma",
+       "x"
+      ],
+      "x"
+     ],
+     "PositiveInfinity"
+    ],
+    [
+     "Which",
+     [
+      "Equal",
+      "m",
+      0
+     ],
+     "PositiveInfinity",
+     [
+      "Greater",
+      "m",
+      0
+     ],
+     0
+    ]
+   ],
+   "variables": [
+    "m"
+   ],
+   "assumptions": [
+    "Element",
+    "m",
+    "NonNegativeIntegers"
+   ],
+   "class": "representation",
+   "subclass": "limit",
+   "heads": [
+    "Digamma",
+    "Limit"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": "real",
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "1e47db",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Digamma",
+      "k"
+     ],
+     [
+      "Limits",
+      "k",
+      1,
+      "n"
+     ]
+    ],
+    [
+     "Multiply",
+     "n",
+     [
+      "Subtract",
+      [
+       "Digamma",
+       [
+        "Add",
+        "n",
+        1
+       ]
+      ],
+      1
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "PositiveIntegers"
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Digamma",
+    "Sum"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "21e21a",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Divide",
+      1,
+      [
+       "Multiply",
+       [
+        "Add",
+        "n",
+        "a"
+       ],
+       [
+        "Add",
+        "n",
+        "b"
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "n",
+      0,
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Which",
+     [
+      "NotEqual",
+      "a",
+      "b"
+     ],
+     [
+      "Multiply",
+      [
+       "Divide",
+       1,
+       [
+        "Subtract",
+        "a",
+        "b"
+       ]
+      ],
+      [
+       "Subtract",
+       [
+        "Digamma",
+        "a"
+       ],
+       [
+        "Digamma",
+        "b"
+       ]
+      ]
+     ],
+     [
+      "Equal",
+      "a",
+      "b"
+     ],
+     [
+      "Digamma",
+      "a",
+      1
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "b",
+     "ComplexNumbers"
+    ],
+    [
+     "NotElement",
+     "a",
+     "NonPositiveIntegers"
+    ],
+    [
+     "NotElement",
+     "b",
+     "NonPositiveIntegers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Digamma",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "21f4f9",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "Digamma",
+        "z",
+        "m"
+       ],
+       "z"
+      ],
+      "n"
+     ],
+     "z"
+    ],
+    [
+     "Digamma",
+     "z",
+     [
+      "Add",
+      "m",
+      "n"
+     ]
+    ]
+   ],
+   "variables": [
+    "m",
+    "n",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "m",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "NotElement",
+     "z",
+     "NonPositiveIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Derivative",
+    "Digamma"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "2251c6",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     [
+      "Divide",
+      1,
+      2
+     ],
+     3
+    ],
+    [
+     "Power",
+     "Pi",
+     4
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Digamma"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "22a9cd",
+   "formula": [
+    "Equal",
+    [
+     "Imaginary",
+     [
+      "Digamma",
+      [
+       "Add",
+       1,
+       [
+        "Multiply",
+        "ImaginaryUnit",
+        "y"
+       ]
+      ]
+     ]
+    ],
+    [
+     "Subtract",
+     [
+      "Multiply",
+      [
+       "Divide",
+       "Pi",
+       2
+      ],
+      [
+       "Coth",
+       [
+        "Multiply",
+        "Pi",
+        "y"
+       ]
+      ]
+     ],
+     [
+      "Divide",
+      1,
+      [
+       "Multiply",
+       2,
+       "y"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "y"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "y",
+     "RealNumbers"
+    ],
+    [
+     "NotEqual",
+     "y",
+     0
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Coth",
+    "Digamma",
+    "Imaginary"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "233814",
+   "formula": [
+    "Equal",
+    [
+     "DigammaFunctionZero",
+     "n"
+    ],
+    [
+     "UniqueZero",
+     [
+      "Function",
+      [
+       "Digamma",
+       "x"
+      ],
+      "x"
+     ],
+     [
+      "Which",
+      [
+       "Equal",
+       "n",
+       0
+      ],
+      [
+       "Interval",
+       [
+        "Open",
+        0
+       ],
+       [
+        "Open",
+        "PositiveInfinity"
+       ]
+      ],
+      [
+       "Less",
+       "n",
+       0
+      ],
+      [
+       "Interval",
+       [
+        "Open",
+        [
+         "Negate",
+         "n"
+        ]
+       ],
+       [
+        "Open",
+        [
+         "Add",
+         [
+          "Negate",
+          "n"
+         ],
+         1
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Digamma",
+    "DigammaFunctionZero",
+    "UniqueZero"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "24c9e9",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     "z",
+     "m"
+    ],
+    [
+     "Add",
+     [
+      "Multiply",
+      [
+       "Divide",
+       [
+        "Power",
+        -1,
+        [
+         "Add",
+         "m",
+         1
+        ]
+       ],
+       [
+        "Factorial",
+        "m"
+       ]
+      ],
+      [
+       "Add",
+       [
+        "Add",
+        [
+         "Divide",
+         1,
+         [
+          "Multiply",
+          "m",
+          [
+           "Power",
+           "z",
+           "m"
+          ]
+         ]
+        ],
+        [
+         "Divide",
+         1,
+         [
+          "Multiply",
+          2,
+          [
+           "Power",
+           "z",
+           [
+            "Add",
+            "m",
+            1
+           ]
+          ]
+         ]
+        ]
+       ],
+       [
+        "Sum",
+        [
+         "Multiply",
+         [
+          "Divide",
+          [
+           "RisingFactorial",
+           [
+            "Add",
+            "m",
+            1
+           ],
+           [
+            "Subtract",
+            [
+             "Multiply",
+             2,
+             "n"
+            ],
+            1
+           ]
+          ],
+          [
+           "Factorial",
+           [
+            "Multiply",
+            2,
+            "n"
+           ]
+          ]
+         ],
+         [
+          "Divide",
+          [
+           "BernoulliB",
+           [
+            "Multiply",
+            2,
+            "n"
+           ]
+          ],
+          [
+           "Power",
+           "z",
+           [
+            "Add",
+            "m",
+            [
+             "Multiply",
+             2,
+             "n"
+            ]
+           ]
+          ]
+         ]
+        ],
+        [
+         "Limits",
+         "n",
+         1,
+         [
+          "Subtract",
+          "N_var",
+          1
+         ]
+        ]
+       ]
+      ]
+     ],
+     [
+      "Apply",
+      [
+       "Derivative",
+       [
+        "Function",
+        [
+         "StirlingSeriesRemainder",
+         "N_var",
+         "z"
+        ],
+        "z"
+       ],
+       [
+        "Add",
+        "m",
+        1
+       ]
+      ],
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "N_var",
+    "m",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "m",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "z",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      [
+       "Interval",
+       [
+        "Open",
+        "NegativeInfinity"
+       ],
+       0
+      ]
+     ]
+    ],
+    [
+     "Element",
+     "N_var",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BernoulliB",
+    "Derivative",
+    "Digamma",
+    "Factorial",
+    "RisingFactorial",
+    "StirlingSeriesRemainder",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "24d810",
+   "formula": [
+    "Less",
+    [
+     "Digamma",
+     "x"
+    ],
+    [
+     "Ln",
+     "x"
+    ]
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": [
+    "Element",
+    "x",
+    [
+     "Interval",
+     [
+      "Open",
+      0
+     ],
+     [
+      "Open",
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Digamma",
+    "Ln"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "34fafa",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     [
+      "Add",
+      "z",
+      "n"
+     ],
+     "m"
+    ],
+    [
+     "Add",
+     [
+      "Digamma",
+      "z",
+      "m"
+     ],
+     [
+      "Multiply",
+      [
+       "Multiply",
+       [
+        "Power",
+        -1,
+        "m"
+       ],
+       [
+        "Factorial",
+        "m"
+       ]
+      ],
+      [
+       "Sum",
+       [
+        "Divide",
+        1,
+        [
+         "Power",
+         [
+          "Add",
+          "z",
+          "k"
+         ],
+         [
+          "Add",
+          "m",
+          1
+         ]
+        ]
+       ],
+       [
+        "Limits",
+        "k",
+        0,
+        [
+         "Subtract",
+         "n",
+         1
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "m",
+    "n",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "m",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "NotElement",
+     "z",
+     "NonPositiveIntegers"
+    ],
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Digamma",
+    "Factorial",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "361f61",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     [
+      "Subtract",
+      1,
+      "z"
+     ],
+     "m"
+    ],
+    [
+     "Multiply",
+     [
+      "Power",
+      -1,
+      "m"
+     ],
+     [
+      "Add",
+      [
+       "Digamma",
+       "z",
+       "m"
+      ],
+      [
+       "Multiply",
+       "Pi",
+       [
+        "Apply",
+        [
+         "Derivative",
+         [
+          "Function",
+          [
+           "Cot",
+           [
+            "Multiply",
+            "Pi",
+            "z"
+           ]
+          ],
+          "z"
+         ],
+         "m"
+        ],
+        "z"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "m",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "m",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "NotElement",
+     "z",
+     "Integers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Cot",
+    "Derivative",
+    "Digamma"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "39ce44",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Divide",
+      1,
+      [
+       "Power",
+       [
+        "DigammaFunctionZero",
+        "n"
+       ],
+       3
+      ]
+     ],
+     [
+      "Limits",
+      "n",
+      0,
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Subtract",
+     [
+      "Subtract",
+      [
+       "Negate",
+       [
+        "Power",
+        "EulerGamma",
+        3
+       ]
+      ],
+      [
+       "Divide",
+       [
+        "Multiply",
+        "EulerGamma",
+        [
+         "Power",
+         "Pi",
+         2
+        ]
+       ],
+       2
+      ]
+     ],
+     [
+      "Multiply",
+      4,
+      [
+       "Zeta",
+       3
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "DigammaFunctionZero",
+    "Sum",
+    "Zeta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "3c4f5f",
+   "formula": [
+    "Implies",
+    [
+     "Element",
+     "x",
+     [
+      "Interval",
+      [
+       "Open",
+       0
+      ],
+      [
+       "Open",
+       [
+        "DigammaFunctionZero",
+        0
+       ]
+      ]
+     ]
+    ],
+    [
+     "Element",
+     [
+      "Digamma",
+      "x"
+     ],
+     [
+      "Interval",
+      [
+       "Open",
+       "NegativeInfinity"
+      ],
+      [
+       "Open",
+       0
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": [
+    "Element",
+    "x",
+    "RealNumbers"
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "Digamma",
+    "DigammaFunctionZero"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "3f15eb",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     [
+      "DigammaFunctionZero",
+      "n"
+     ]
+    ],
+    0
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Digamma",
+    "DigammaFunctionZero"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "3fe553",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     [
+      "Divide",
+      "p",
+      "q"
+     ]
+    ],
+    [
+     "Add",
+     [
+      "Subtract",
+      [
+       "Subtract",
+       [
+        "Negate",
+        "EulerGamma"
+       ],
+       [
+        "Ln",
+        [
+         "Multiply",
+         2,
+         "q"
+        ]
+       ]
+      ],
+      [
+       "Multiply",
+       [
+        "Divide",
+        "Pi",
+        2
+       ],
+       [
+        "Cot",
+        [
+         "Divide",
+         [
+          "Multiply",
+          "Pi",
+          "p"
+         ],
+         "q"
+        ]
+       ]
+      ]
+     ],
+     [
+      "Multiply",
+      2,
+      [
+       "Sum",
+       [
+        "Multiply",
+        [
+         "Cos",
+         [
+          "Divide",
+          [
+           "Multiply",
+           [
+            "Multiply",
+            [
+             "Multiply",
+             2,
+             "Pi"
+            ],
+            "k"
+           ],
+           "p"
+          ],
+          "q"
+         ]
+        ],
+        [
+         "Ln",
+         [
+          "Sin",
+          [
+           "Divide",
+           [
+            "Multiply",
+            "Pi",
+            "k"
+           ],
+           "q"
+          ]
+         ]
+        ]
+       ],
+       [
+        "Limits",
+        "k",
+        1,
+        [
+         "Floor",
+         [
+          "Divide",
+          [
+           "Subtract",
+           "q",
+           1
+          ],
+          2
+         ]
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "p",
+    "q"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "q",
+     [
+      "Range",
+      2,
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Element",
+     "p",
+     [
+      "Range",
+      1,
+      [
+       "Subtract",
+       "q",
+       1
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Cos",
+    "Cot",
+    "Digamma",
+    "Floor",
+    "Ln",
+    "Sin",
+    "Sum"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "42c1f5",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     [
+      "Negate",
+      "n"
+     ]
+    ],
+    "ComplexInfinity"
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Digamma"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "458a97",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "Digamma",
+       [
+        "Divide",
+        "k",
+        "n"
+       ]
+      ],
+      [
+       "Exp",
+       [
+        "Divide",
+        [
+         "Multiply",
+         [
+          "Multiply",
+          [
+           "Multiply",
+           [
+            "Multiply",
+            2,
+            "Pi"
+           ],
+           "r"
+          ],
+          "k"
+         ],
+         "ImaginaryUnit"
+        ],
+        "n"
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "k",
+      1,
+      "n"
+     ]
+    ],
+    [
+     "Multiply",
+     "n",
+     [
+      "Ln",
+      [
+       "Subtract",
+       1,
+       [
+        "Exp",
+        [
+         "Divide",
+         [
+          "Multiply",
+          [
+           "Multiply",
+           [
+            "Multiply",
+            2,
+            "Pi"
+           ],
+           "r"
+          ],
+          "ImaginaryUnit"
+         ],
+         "n"
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "r"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     [
+      "Range",
+      2,
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Element",
+     "r",
+     [
+      "Range",
+      1,
+      [
+       "Subtract",
+       "n",
+       1
+      ]
+     ]
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Digamma",
+    "Exp",
+    "Ln",
+    "Sum"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "45a969",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     [
+      "Divide",
+      2,
+      3
+     ]
+    ],
+    [
+     "Subtract",
+     [
+      "Subtract",
+      [
+       "Divide",
+       [
+        "Multiply",
+        [
+         "Sqrt",
+         3
+        ],
+        "Pi"
+       ],
+       6
+      ],
+      "EulerGamma"
+     ],
+     [
+      "Divide",
+      [
+       "Multiply",
+       3,
+       [
+        "Ln",
+        3
+       ]
+      ],
+      2
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Digamma",
+    "Ln"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "4a30f1",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     1,
+     2
+    ],
+    [
+     "Negate",
+     [
+      "Multiply",
+      2,
+      [
+       "Zeta",
+       3
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Digamma",
+    "Zeta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "4b6ccb",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     "z"
+    ],
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "GammaLn",
+        "z"
+       ],
+       "z"
+      ],
+      1
+     ],
+     "z"
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "NotElement",
+     "z",
+     "NonPositiveIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Derivative",
+    "Digamma",
+    "GammaLn"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": "complex-branch",
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "4e3853",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "Digamma",
+       "n"
+      ],
+      [
+       "Power",
+       "z",
+       "n"
+      ]
+     ],
+     [
+      "Limits",
+      "n",
+      1,
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Multiply",
+      "z",
+      [
+       "Add",
+       "EulerGamma",
+       [
+        "Ln",
+        [
+         "Subtract",
+         1,
+         "z"
+        ]
+       ]
+      ]
+     ],
+     [
+      "Subtract",
+      "z",
+      1
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Less",
+     [
+      "Abs",
+      "z"
+     ],
+     1
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Digamma",
+    "Ln",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "4f5575",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     "z"
+    ],
+    [
+     "Subtract",
+     [
+      "Subtract",
+      [
+       "Ln",
+       "z"
+      ],
+      [
+       "Divide",
+       1,
+       [
+        "Multiply",
+        2,
+        "z"
+       ]
+      ]
+     ],
+     [
+      "Integrate",
+      [
+       "Multiply",
+       [
+        "Exp",
+        [
+         "Negate",
+         [
+          "Multiply",
+          "z",
+          "t"
+         ]
+        ]
+       ],
+       [
+        "Add",
+        [
+         "Subtract",
+         [
+          "Divide",
+          1,
+          2
+         ],
+         [
+          "Divide",
+          1,
+          "t"
+         ]
+        ],
+        [
+         "Divide",
+         1,
+         [
+          "Subtract",
+          [
+           "Exp",
+           "t"
+          ],
+          1
+         ]
+        ]
+       ]
+      ],
+      [
+       "Limits",
+       "t",
+       0,
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Greater",
+     [
+      "Real",
+      "z"
+     ],
+     0
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Digamma",
+    "Exp",
+    "Integrate",
+    "Ln"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "4fdf65",
+   "formula": [
+    "Implies",
+    [
+     "Element",
+     "x",
+     [
+      "Interval",
+      [
+       "Open",
+       [
+        "DigammaFunctionZero",
+        0
+       ]
+      ],
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
+     ]
+    ],
+    [
+     "Element",
+     [
+      "Digamma",
+      "x"
+     ],
+     [
+      "Interval",
+      [
+       "Open",
+       0
+      ],
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": [
+    "Element",
+    "x",
+    "RealNumbers"
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "Digamma",
+    "DigammaFunctionZero"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "547fcd",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     "z",
+     "m"
+    ],
+    [
+     "Negate",
+     [
+      "Integrate",
+      [
+       "Multiply",
+       [
+        "Divide",
+        [
+         "Power",
+         "t",
+         [
+          "Subtract",
+          "z",
+          1
+         ]
+        ],
+        [
+         "Subtract",
+         1,
+         "t"
+        ]
+       ],
+       [
+        "Power",
+        [
+         "Ln",
+         "t"
+        ],
+        "m"
+       ]
+      ],
+      [
+       "Limits",
+       "t",
+       0,
+       1
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "m",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Greater",
+     [
+      "Real",
+      "z"
+     ],
+     0
+    ],
+    [
+     "Element",
+     "m",
+     "PositiveIntegers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Digamma",
+    "Integrate",
+    "Ln"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "554ac2",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     [
+      "Subtract",
+      "z",
+      "n"
+     ]
+    ],
+    [
+     "Subtract",
+     [
+      "Digamma",
+      "z"
+     ],
+     [
+      "Sum",
+      [
+       "Divide",
+       1,
+       [
+        "Subtract",
+        "z",
+        "k"
+       ]
+      ],
+      [
+       "Limits",
+       "k",
+       1,
+       "n"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "NotElement",
+     [
+      "Subtract",
+      "z",
+      "n"
+     ],
+     "NonPositiveIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Digamma",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "595f46",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     [
+      "Divide",
+      1,
+      2
+     ],
+     1
+    ],
+    [
+     "Divide",
+     [
+      "Power",
+      "Pi",
+      2
+     ],
+     2
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Digamma"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "5a3c4a",
+   "formula": [
+    "Greater",
+    [
+     "Multiply",
+     [
+      "Power",
+      -1,
+      [
+       "Add",
+       "m",
+       1
+      ]
+     ],
+     [
+      "Digamma",
+      "x",
+      "m"
+     ]
+    ],
+    [
+     "Add",
+     [
+      "Divide",
+      [
+       "Factorial",
+       [
+        "Subtract",
+        "m",
+        1
+       ]
+      ],
+      [
+       "Power",
+       "x",
+       "m"
+      ]
+     ],
+     [
+      "Divide",
+      [
+       "Factorial",
+       "m"
+      ],
+      [
+       "Multiply",
+       2,
+       [
+        "Power",
+        "x",
+        [
+         "Add",
+         "m",
+         1
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "m",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "m",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "x",
+     [
+      "Interval",
+      [
+       "Open",
+       0
+      ],
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Digamma",
+    "Factorial"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "5ce30b",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     [
+      "Divide",
+      1,
+      2
+     ],
+     "m"
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      [
+       "Multiply",
+       [
+        "Power",
+        -1,
+        [
+         "Add",
+         "m",
+         1
+        ]
+       ],
+       [
+        "Subtract",
+        [
+         "Power",
+         2,
+         [
+          "Add",
+          "m",
+          1
+         ]
+        ],
+        1
+       ]
+      ],
+      [
+       "Factorial",
+       "m"
+      ]
+     ],
+     [
+      "Zeta",
+      [
+       "Add",
+       "m",
+       1
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "m"
+   ],
+   "assumptions": [
+    "Element",
+    "m",
+    "PositiveIntegers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Digamma",
+    "Factorial",
+    "Zeta"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "5db5f2",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     [
+      "Conjugate",
+      "z"
+     ],
+     "m"
+    ],
+    [
+     "Conjugate",
+     [
+      "Digamma",
+      "z",
+      "m"
+     ]
+    ]
+   ],
+   "variables": [
+    "m",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "m",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Conjugate",
+    "Digamma"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "62b81d",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     "z"
+    ],
+    [
+     "Integrate",
+     [
+      "Subtract",
+      [
+       "Divide",
+       [
+        "Exp",
+        [
+         "Negate",
+         "t"
+        ]
+       ],
+       "t"
+      ],
+      [
+       "Divide",
+       [
+        "Exp",
+        [
+         "Negate",
+         [
+          "Multiply",
+          "z",
+          "t"
+         ]
+        ]
+       ],
+       [
+        "Subtract",
+        1,
+        [
+         "Exp",
+         [
+          "Negate",
+          "t"
+         ]
+        ]
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "t",
+      0,
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Greater",
+     [
+      "Real",
+      "z"
+     ],
+     0
+    ]
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Digamma",
+    "Exp",
+    "Integrate"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "6547da",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Divide",
+      1,
+      [
+       "Power",
+       [
+        "DigammaFunctionZero",
+        "n"
+       ],
+       [
+        "Add",
+        "r",
+        1
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "n",
+      0,
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Apply",
+      [
+       "Derivative",
+       [
+        "Function",
+        [
+         "Limit",
+         [
+          "Function",
+          [
+           "Subtract",
+           [
+            "Digamma",
+            "t"
+           ],
+           [
+            "Divide",
+            [
+             "Digamma",
+             "t",
+             1
+            ],
+            [
+             "Digamma",
+             "t"
+            ]
+           ]
+          ],
+          "t"
+         ],
+         "z"
+        ],
+        "z"
+       ],
+       "r"
+      ],
+      0
+     ],
+     [
+      "Factorial",
+      "r"
+     ]
+    ]
+   ],
+   "variables": [
+    "r"
+   ],
+   "assumptions": [
+    "Element",
+    "r",
+    "PositiveIntegers"
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Derivative",
+    "Digamma",
+    "DigammaFunctionZero",
+    "Factorial",
+    "Limit",
+    "Sum"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": "complex",
+   "references": [
+    "https://doi.org/10.1080%2F10652469.2017.1376193"
+   ],
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "686524",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     "z"
+    ],
+    [
+     "Add",
+     [
+      "Negate",
+      "EulerGamma"
+     ],
+     [
+      "Sum",
+      [
+       "Subtract",
+       [
+        "Divide",
+        1,
+        [
+         "Add",
+         "n",
+         1
+        ]
+       ],
+       [
+        "Divide",
+        1,
+        [
+         "Add",
+         "n",
+         "z"
+        ]
+       ]
+      ],
+      [
+       "Limits",
+       "n",
+       0,
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "NotElement",
+     "z",
+     "NonPositiveIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Digamma",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "6cabb7",
+   "formula": [
+    "Greater",
+    [
+     "Digamma",
+     [
+      "Add",
+      "x",
+      "y"
+     ]
+    ],
+    [
+     "Digamma",
+     "x"
+    ]
+   ],
+   "variables": [
+    "x",
+    "y"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     [
+      "Interval",
+      [
+       "Open",
+       0
+      ],
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
+     ]
+    ],
+    [
+     "Element",
+     "y",
+     [
+      "Interval",
+      [
+       "Open",
+       0
+      ],
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Digamma"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "6db9fc",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "Digamma",
+        "z"
+       ],
+       "z"
+      ],
+      "n"
+     ],
+     "z"
+    ],
+    [
+     "Digamma",
+     "z",
+     "n"
+    ]
+   ],
+   "variables": [
+    "n",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "NotElement",
+     "z",
+     "NonPositiveIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Derivative",
+    "Digamma"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "6f3fec",
+   "formula": [
+    "Equal",
+    [
+     "Imaginary",
+     [
+      "Digamma",
+      [
+       "Add",
+       [
+        "Divide",
+        1,
+        2
+       ],
+       [
+        "Multiply",
+        "ImaginaryUnit",
+        "y"
+       ]
+      ]
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      "Pi",
+      2
+     ],
+     [
+      "Tanh",
+      [
+       "Multiply",
+       "Pi",
+       "y"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "y"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "y",
+     "RealNumbers"
+    ],
+    [
+     "NotEqual",
+     "y",
+     0
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Digamma",
+    "Imaginary",
+    "Tanh"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "7212ea",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Divide",
+      [
+       "Power",
+       -1,
+       "n"
+      ],
+      [
+       "Add",
+       "n",
+       "a"
+      ]
+     ],
+     [
+      "Limits",
+      "n",
+      0,
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      1,
+      2
+     ],
+     [
+      "Subtract",
+      [
+       "Digamma",
+       [
+        "Divide",
+        [
+         "Add",
+         "a",
+         1
+        ],
+        2
+       ]
+      ],
+      [
+       "Digamma",
+       [
+        "Divide",
+        "a",
+        2
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "a"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ],
+    [
+     "NotElement",
+     "a",
+     "NonPositiveIntegers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Digamma",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "739819",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "Digamma",
+       [
+        "Divide",
+        "k",
+        "n"
+       ]
+      ],
+      [
+       "Cos",
+       [
+        "Divide",
+        [
+         "Multiply",
+         [
+          "Multiply",
+          [
+           "Multiply",
+           2,
+           "Pi"
+          ],
+          "r"
+         ],
+         "k"
+        ],
+        "n"
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "k",
+      1,
+      "n"
+     ]
+    ],
+    [
+     "Multiply",
+     "n",
+     [
+      "Ln",
+      [
+       "Multiply",
+       2,
+       [
+        "Sin",
+        [
+         "Divide",
+         [
+          "Multiply",
+          "Pi",
+          "r"
+         ],
+         "n"
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "r"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     [
+      "Range",
+      2,
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Element",
+     "r",
+     [
+      "Range",
+      1,
+      [
+       "Subtract",
+       "n",
+       1
+      ]
+     ]
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Cos",
+    "Digamma",
+    "Ln",
+    "Sin",
+    "Sum"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "75f9bf",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     3
+    ],
+    [
+     "Subtract",
+     [
+      "Divide",
+      3,
+      2
+     ],
+     "EulerGamma"
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Digamma"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "78c19c",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     [
+      "Negate",
+      "n"
+     ],
+     "m"
+    ],
+    "ComplexInfinity"
+   ],
+   "variables": [
+    "m",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "m",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Digamma"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "7b724b",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     [
+      "Multiply",
+      "n",
+      "z"
+     ],
+     "m"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      1,
+      [
+       "Power",
+       "n",
+       [
+        "Add",
+        "m",
+        1
+       ]
+      ]
+     ],
+     [
+      "Sum",
+      [
+       "Digamma",
+       [
+        "Add",
+        "z",
+        [
+         "Divide",
+         "k",
+         "n"
+        ]
+       ],
+       "m"
+      ],
+      [
+       "Limits",
+       "k",
+       0,
+       [
+        "Subtract",
+        "n",
+        1
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "m",
+    "n",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "m",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "n",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "NotElement",
+     [
+      "Multiply",
+      "n",
+      "z"
+     ],
+     "NonPositiveIntegers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Digamma",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "7ec4f0",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     [
+      "Divide",
+      1,
+      4
+     ]
+    ],
+    [
+     "Subtract",
+     [
+      "Subtract",
+      [
+       "Negate",
+       [
+        "Divide",
+        "Pi",
+        2
+       ]
+      ],
+      "EulerGamma"
+     ],
+     [
+      "Multiply",
+      3,
+      [
+       "Ln",
+       2
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Digamma",
+    "Ln"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "807c7d",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     [
+      "Divide",
+      1,
+      4
+     ],
+     1
+    ],
+    [
+     "Add",
+     [
+      "Power",
+      "Pi",
+      2
+     ],
+     [
+      "Multiply",
+      8,
+      "CatalanConstant"
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Digamma"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "8415c7",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     "z"
+    ],
+    [
+     "Divide",
+     [
+      "Apply",
+      [
+       "Derivative",
+       [
+        "Function",
+        [
+         "Gamma",
+         "z"
+        ],
+        "z"
+       ],
+       1
+      ],
+      "z"
+     ],
+     [
+      "Gamma",
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "NotElement",
+     "z",
+     "NonPositiveIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Derivative",
+    "Digamma",
+    "Gamma"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "8671a4",
+   "formula": [
+    "Less",
+    [
+     "Multiply",
+     [
+      "Power",
+      -1,
+      [
+       "Add",
+       "m",
+       1
+      ]
+     ],
+     [
+      "Digamma",
+      "x",
+      "m"
+     ]
+    ],
+    [
+     "Add",
+     [
+      "Divide",
+      [
+       "Factorial",
+       [
+        "Subtract",
+        "m",
+        1
+       ]
+      ],
+      [
+       "Power",
+       "x",
+       "m"
+      ]
+     ],
+     [
+      "Divide",
+      [
+       "Factorial",
+       "m"
+      ],
+      [
+       "Power",
+       "x",
+       [
+        "Add",
+        "m",
+        1
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "m",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "m",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "x",
+     [
+      "Interval",
+      [
+       "Open",
+       0
+      ],
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Digamma",
+    "Factorial"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "88e89f",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "Digamma",
+       "n"
+      ],
+      [
+       "Divide",
+       [
+        "Power",
+        "z",
+        "n"
+       ],
+       [
+        "Factorial",
+        "n"
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "n",
+      1,
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Subtract",
+     [
+      "Multiply",
+      "z",
+      [
+       "Apply",
+       [
+        "Derivative",
+        [
+         "Function",
+         [
+          "Hypergeometric1F1",
+          "a",
+          2,
+          "z"
+         ],
+         "a"
+        ],
+        1
+       ],
+       1
+      ]
+     ],
+     [
+      "Multiply",
+      "EulerGamma",
+      [
+       "Subtract",
+       [
+        "Exp",
+        "z"
+       ],
+       1
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Derivative",
+    "Digamma",
+    "Exp",
+    "Factorial",
+    "Hypergeometric1F1",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "89bed3",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     [
+      "Divide",
+      1,
+      2
+     ]
+    ],
+    [
+     "Subtract",
+     [
+      "Negate",
+      [
+       "Multiply",
+       2,
+       [
+        "Ln",
+        2
+       ]
+      ]
+     ],
+     "EulerGamma"
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Digamma",
+    "Ln"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "8c368f",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     [
+      "Divide",
+      1,
+      8
+     ]
+    ],
+    [
+     "Subtract",
+     [
+      "Subtract",
+      [
+       "Subtract",
+       [
+        "Negate",
+        [
+         "Multiply",
+         [
+          "Divide",
+          "Pi",
+          2
+         ],
+         [
+          "Add",
+          [
+           "Sqrt",
+           2
+          ],
+          1
+         ]
+        ]
+       ],
+       "EulerGamma"
+      ],
+      [
+       "Multiply",
+       4,
+       [
+        "Ln",
+        2
+       ]
+      ]
+     ],
+     [
+      "Divide",
+      [
+       "Subtract",
+       [
+        "Ln",
+        [
+         "Add",
+         2,
+         [
+          "Sqrt",
+          2
+         ]
+        ]
+       ],
+       [
+        "Ln",
+        [
+         "Subtract",
+         2,
+         [
+          "Sqrt",
+          2
+         ]
+        ]
+       ]
+      ],
+      [
+       "Sqrt",
+       2
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Digamma",
+    "Ln"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "90b26f",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     "n",
+     "m"
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      [
+       "Power",
+       -1,
+       [
+        "Add",
+        "m",
+        1
+       ]
+      ],
+      [
+       "Factorial",
+       "m"
+      ]
+     ],
+     [
+      "HurwitzZeta",
+      [
+       "Add",
+       "m",
+       1
+      ],
+      "n"
+     ]
+    ]
+   ],
+   "variables": [
+    "m",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "m",
+     "PositiveIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Digamma",
+    "Factorial",
+    "HurwitzZeta"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "921d61",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     [
+      "Divide",
+      5,
+      6
+     ],
+     2
+    ],
+    [
+     "Add",
+     [
+      "Negate",
+      [
+       "Multiply",
+       182,
+       [
+        "Zeta",
+        3
+       ]
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Multiply",
+       4,
+       [
+        "Sqrt",
+        3
+       ]
+      ],
+      [
+       "Power",
+       "Pi",
+       3
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Digamma",
+    "Zeta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "94a81f",
+   "formula": [
+    "Less",
+    [
+     "Digamma",
+     "x"
+    ],
+    [
+     "Subtract",
+     [
+      "Ln",
+      "x"
+     ],
+     [
+      "Divide",
+      1,
+      [
+       "Multiply",
+       2,
+       "x"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": [
+    "Element",
+    "x",
+    [
+     "Interval",
+     [
+      "Open",
+      0
+     ],
+     [
+      "Open",
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Digamma",
+    "Ln"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "967bbb",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     [
+      "Divide",
+      5,
+      6
+     ]
+    ],
+    [
+     "Subtract",
+     [
+      "Subtract",
+      [
+       "Subtract",
+       [
+        "Divide",
+        [
+         "Multiply",
+         [
+          "Sqrt",
+          3
+         ],
+         "Pi"
+        ],
+        2
+       ],
+       "EulerGamma"
+      ],
+      [
+       "Multiply",
+       2,
+       [
+        "Ln",
+        2
+       ]
+      ]
+     ],
+     [
+      "Divide",
+      [
+       "Multiply",
+       3,
+       [
+        "Ln",
+        3
+       ]
+      ],
+      2
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Digamma",
+    "Ln"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "98f642",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     [
+      "Divide",
+      1,
+      3
+     ]
+    ],
+    [
+     "Subtract",
+     [
+      "Subtract",
+      [
+       "Negate",
+       [
+        "Divide",
+        [
+         "Multiply",
+         [
+          "Sqrt",
+          3
+         ],
+         "Pi"
+        ],
+        6
+       ]
+      ],
+      "EulerGamma"
+     ],
+     [
+      "Divide",
+      [
+       "Multiply",
+       3,
+       [
+        "Ln",
+        3
+       ]
+      ],
+      2
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Digamma",
+    "Ln"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "9ee737",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     "z",
+     0
+    ],
+    [
+     "Digamma",
+     "z"
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Digamma"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "9f32fe",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     [
+      "Add",
+      "z",
+      "n"
+     ]
+    ],
+    [
+     "Add",
+     [
+      "Digamma",
+      "z"
+     ],
+     [
+      "Sum",
+      [
+       "Divide",
+       1,
+       [
+        "Add",
+        "z",
+        "k"
+       ]
+      ],
+      [
+       "Limits",
+       "k",
+       0,
+       [
+        "Subtract",
+        "n",
+        1
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "NotElement",
+     "z",
+     "NonPositiveIntegers"
+    ],
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Digamma",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "a0845d",
+   "formula": [
+    "Implies",
+    [
+     "Element",
+     "z",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      "NonPositiveIntegers"
+     ]
+    ],
+    [
+     "Element",
+     [
+      "Digamma",
+      "z"
+     ],
+     "ComplexNumbers"
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "Digamma"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "a2675b",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     "z"
+    ],
+    [
+     "Add",
+     [
+      "Subtract",
+      [
+       "Negate",
+       [
+        "Divide",
+        1,
+        "z"
+       ]
+      ],
+      "EulerGamma"
+     ],
+     [
+      "Sum",
+      [
+       "Multiply",
+       [
+        "Multiply",
+        [
+         "Power",
+         -1,
+         [
+          "Add",
+          "n",
+          1
+         ]
+        ],
+        [
+         "Zeta",
+         [
+          "Add",
+          "n",
+          1
+         ]
+        ]
+       ],
+       [
+        "Power",
+        "z",
+        "n"
+       ]
+      ],
+      [
+       "Limits",
+       "n",
+       1,
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Less",
+     [
+      "Abs",
+      "z"
+     ],
+     1
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Digamma",
+    "Sum",
+    "Zeta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "a4cc3b",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     "z"
+    ],
+    [
+     "Add",
+     [
+      "Negate",
+      "EulerGamma"
+     ],
+     [
+      "Integrate",
+      [
+       "Divide",
+       [
+        "Subtract",
+        1,
+        [
+         "Power",
+         "t",
+         [
+          "Subtract",
+          "z",
+          1
+         ]
+        ]
+       ],
+       [
+        "Subtract",
+        1,
+        "t"
+       ]
+      ],
+      [
+       "Limits",
+       "t",
+       0,
+       1
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Greater",
+     [
+      "Real",
+      "z"
+     ],
+     0
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Digamma",
+    "Integrate"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "a4f9c9",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Divide",
+      1,
+      [
+       "Power",
+       [
+        "DigammaFunctionZero",
+        "n"
+       ],
+       4
+      ]
+     ],
+     [
+      "Limits",
+      "n",
+      0,
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Add",
+     [
+      "Add",
+      [
+       "Add",
+       [
+        "Power",
+        "EulerGamma",
+        4
+       ],
+       [
+        "Divide",
+        [
+         "Power",
+         "Pi",
+         4
+        ],
+        9
+       ]
+      ],
+      [
+       "Divide",
+       [
+        "Multiply",
+        [
+         "Multiply",
+         2,
+         [
+          "Power",
+          "EulerGamma",
+          2
+         ]
+        ],
+        [
+         "Power",
+         "Pi",
+         2
+        ]
+       ],
+       3
+      ]
+     ],
+     [
+      "Multiply",
+      4,
+      [
+       "Multiply",
+       "EulerGamma",
+       [
+        "Zeta",
+        3
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "DigammaFunctionZero",
+    "Sum",
+    "Zeta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "a62320",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     1,
+     "m"
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      [
+       "Power",
+       -1,
+       [
+        "Add",
+        "m",
+        1
+       ]
+      ],
+      [
+       "Factorial",
+       "m"
+      ]
+     ],
+     [
+      "Zeta",
+      [
+       "Add",
+       "m",
+       1
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "m"
+   ],
+   "assumptions": [
+    "Element",
+    "m",
+    "PositiveIntegers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Digamma",
+    "Factorial",
+    "Zeta"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "a6bdf5",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     "z"
+    ],
+    [
+     "Negate",
+     [
+      "StieltjesGamma",
+      0,
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "NotElement",
+     "z",
+     "NonPositiveIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Digamma",
+    "StieltjesGamma"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "a8ab81",
+   "formula": [
+    "Implies",
+    [
+     "And",
+     [
+      "Element",
+      "m",
+      "NonNegativeIntegers"
+     ],
+     [
+      "Element",
+      "z",
+      [
+       "SetMinus",
+       "ComplexNumbers",
+       "NonPositiveIntegers"
+      ]
+     ]
+    ],
+    [
+     "Element",
+     [
+      "Digamma",
+      "z",
+      "m"
+     ],
+     "ComplexNumbers"
+    ]
+   ],
+   "variables": [
+    "m",
+    "z"
+   ],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "Digamma"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "aa47cd",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     [
+      "Conjugate",
+      "z"
+     ]
+    ],
+    [
+     "Conjugate",
+     [
+      "Digamma",
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Conjugate",
+    "Digamma"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "ada157",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     2
+    ],
+    [
+     "Subtract",
+     1,
+     "EulerGamma"
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Digamma"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "adf5e2",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     [
+      "Subtract",
+      1,
+      "z"
+     ]
+    ],
+    [
+     "Add",
+     [
+      "Digamma",
+      "z"
+     ],
+     [
+      "Multiply",
+      "Pi",
+      [
+       "Cot",
+       [
+        "Multiply",
+        "Pi",
+        "z"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "NotElement",
+     "z",
+     "Integers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Cot",
+    "Digamma"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "b16177",
+   "formula": [
+    "Which",
+    [
+     "IsEven",
+     "m"
+    ],
+    [
+     "Greater",
+     [
+      "Digamma",
+      [
+       "Add",
+       "x",
+       "y"
+      ],
+      "m"
+     ],
+     [
+      "Digamma",
+      "x"
+     ]
+    ],
+    [
+     "IsOdd",
+     "m"
+    ],
+    [
+     "Less",
+     [
+      "Digamma",
+      [
+       "Add",
+       "x",
+       "y"
+      ],
+      "m"
+     ],
+     [
+      "Digamma",
+      "x"
+     ]
+    ]
+   ],
+   "variables": [
+    "m",
+    "x",
+    "y"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "m",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "x",
+     [
+      "Interval",
+      [
+       "Open",
+       0
+      ],
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
+     ]
+    ],
+    [
+     "Element",
+     "y",
+     [
+      "Interval",
+      [
+       "Open",
+       0
+      ],
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "Digamma",
+    "IsEven",
+    "IsOdd"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "b31fd2",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     [
+      "Divide",
+      1,
+      2
+     ],
+     2
+    ],
+    [
+     "Negate",
+     [
+      "Multiply",
+      14,
+      [
+       "Zeta",
+       3
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Digamma",
+    "Zeta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "b4825b",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     [
+      "Add",
+      [
+       "Negate",
+       "n"
+      ],
+      "z"
+     ]
+    ],
+    [
+     "Add",
+     [
+      "Add",
+      [
+       "Negate",
+       [
+        "Divide",
+        1,
+        "z"
+       ]
+      ],
+      [
+       "Digamma",
+       [
+        "Add",
+        "n",
+        1
+       ]
+      ]
+     ],
+     [
+      "Sum",
+      [
+       "Multiply",
+       [
+        "Add",
+        [
+         "Multiply",
+         [
+          "Power",
+          -1,
+          [
+           "Add",
+           "k",
+           1
+          ]
+         ],
+         [
+          "Zeta",
+          [
+           "Add",
+           "k",
+           1
+          ]
+         ]
+        ],
+        [
+         "Sum",
+         [
+          "Divide",
+          1,
+          [
+           "Power",
+           "j",
+           [
+            "Add",
+            "k",
+            1
+           ]
+          ]
+         ],
+         [
+          "Limits",
+          "j",
+          1,
+          "n"
+         ]
+        ]
+       ],
+       [
+        "Power",
+        "z",
+        "k"
+       ]
+      ],
+      [
+       "Limits",
+       "k",
+       1,
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Less",
+     [
+      "Abs",
+      "z"
+     ],
+     1
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Digamma",
+    "Sum",
+    "Zeta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "b7f13b",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Divide",
+      [
+       "Power",
+       -1,
+       "n"
+      ],
+      [
+       "Multiply",
+       [
+        "Add",
+        "n",
+        "a"
+       ],
+       [
+        "Add",
+        "n",
+        "b"
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "n",
+      0,
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Which",
+     [
+      "NotEqual",
+      "a",
+      "b"
+     ],
+     [
+      "Multiply",
+      [
+       "Divide",
+       1,
+       [
+        "Multiply",
+        2,
+        [
+         "Subtract",
+         "a",
+         "b"
+        ]
+       ]
+      ],
+      [
+       "Subtract",
+       [
+        "Subtract",
+        [
+         "Add",
+         [
+          "Digamma",
+          [
+           "Divide",
+           "a",
+           2
+          ]
+         ],
+         [
+          "Digamma",
+          [
+           "Divide",
+           [
+            "Add",
+            "b",
+            1
+           ],
+           2
+          ]
+         ]
+        ],
+        [
+         "Digamma",
+         [
+          "Divide",
+          "b",
+          2
+         ]
+        ]
+       ],
+       [
+        "Digamma",
+        [
+         "Divide",
+         [
+          "Add",
+          "a",
+          1
+         ],
+         2
+        ]
+       ]
+      ]
+     ],
+     [
+      "Equal",
+      "a",
+      "b"
+     ],
+     [
+      "Multiply",
+      [
+       "Divide",
+       1,
+       4
+      ],
+      [
+       "Subtract",
+       [
+        "Digamma",
+        [
+         "Divide",
+         "a",
+         2
+        ],
+        1
+       ],
+       [
+        "Digamma",
+        [
+         "Divide",
+         [
+          "Add",
+          "a",
+          1
+         ],
+         2
+        ],
+        1
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "b",
+     "ComplexNumbers"
+    ],
+    [
+     "NotElement",
+     "a",
+     "NonPositiveIntegers"
+    ],
+    [
+     "NotElement",
+     "b",
+     "NonPositiveIntegers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Digamma",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "babd3c",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     1,
+     1
+    ],
+    [
+     "Divide",
+     [
+      "Power",
+      "Pi",
+      2
+     ],
+     6
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Digamma"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "bb88c8",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     [
+      "Divide",
+      1,
+      6
+     ],
+     2
+    ],
+    [
+     "Subtract",
+     [
+      "Negate",
+      [
+       "Multiply",
+       182,
+       [
+        "Zeta",
+        3
+       ]
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Multiply",
+       4,
+       [
+        "Sqrt",
+        3
+       ]
+      ],
+      [
+       "Power",
+       "Pi",
+       3
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Digamma",
+    "Zeta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "bb9eb6",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "Digamma",
+       [
+        "Divide",
+        "k",
+        "n"
+       ]
+      ],
+      [
+       "Sin",
+       [
+        "Divide",
+        [
+         "Multiply",
+         [
+          "Multiply",
+          [
+           "Multiply",
+           2,
+           "Pi"
+          ],
+          "r"
+         ],
+         "k"
+        ],
+        "n"
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "k",
+      1,
+      "n"
+     ]
+    ],
+    [
+     "Multiply",
+     "Pi",
+     [
+      "Subtract",
+      "r",
+      [
+       "Divide",
+       "n",
+       2
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "r"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     [
+      "Range",
+      2,
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Element",
+     "r",
+     [
+      "Range",
+      1,
+      [
+       "Subtract",
+       "n",
+       1
+      ]
+     ]
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Digamma",
+    "Sin",
+    "Sum"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "bba4ec",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     "z",
+     "m"
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      [
+       "Power",
+       -1,
+       [
+        "Add",
+        "m",
+        1
+       ]
+      ],
+      [
+       "Factorial",
+       "m"
+      ]
+     ],
+     [
+      "HurwitzZeta",
+      [
+       "Add",
+       "m",
+       1
+      ],
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "m",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "m",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "NotElement",
+     "z",
+     "NonPositiveIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Digamma",
+    "Factorial",
+    "HurwitzZeta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function",
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "bf533f",
+   "formula": [
+    "Equal",
+    [
+     "Divide",
+     [
+      "Digamma",
+      "z"
+     ],
+     [
+      "Gamma",
+      "z"
+     ]
+    ],
+    [
+     "Negate",
+     [
+      "Multiply",
+      [
+       "Exp",
+       [
+        "Multiply",
+        [
+         "Multiply",
+         2,
+         "EulerGamma"
+        ],
+        "z"
+       ]
+      ],
+      [
+       "Product",
+       [
+        "Multiply",
+        [
+         "Subtract",
+         1,
+         [
+          "Divide",
+          "z",
+          [
+           "DigammaFunctionZero",
+           "n"
+          ]
+         ]
+        ],
+        [
+         "Exp",
+         [
+          "Divide",
+          "z",
+          [
+           "DigammaFunctionZero",
+           "n"
+          ]
+         ]
+        ]
+       ],
+       [
+        "Limits",
+        "n",
+        0,
+        "PositiveInfinity"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "NotElement",
+     "z",
+     "NonPositiveIntegers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "product",
+   "heads": [
+    "Digamma",
+    "DigammaFunctionZero",
+    "Exp",
+    "Gamma",
+    "Product"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": [
+    "https://doi.org/10.1080%2F10652469.2017.1376193"
+   ],
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "c687d6",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     [
+      "Subtract",
+      "z",
+      "n"
+     ],
+     "m"
+    ],
+    [
+     "Subtract",
+     [
+      "Digamma",
+      "z",
+      "m"
+     ],
+     [
+      "Multiply",
+      [
+       "Multiply",
+       [
+        "Power",
+        -1,
+        "m"
+       ],
+       [
+        "Factorial",
+        "m"
+       ]
+      ],
+      [
+       "Sum",
+       [
+        "Divide",
+        1,
+        [
+         "Power",
+         [
+          "Subtract",
+          "z",
+          "k"
+         ],
+         [
+          "Add",
+          "m",
+          1
+         ]
+        ]
+       ],
+       [
+        "Limits",
+        "k",
+        1,
+        "n"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "m",
+    "n",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "m",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "NotElement",
+     [
+      "Subtract",
+      "z",
+      "n"
+     ],
+     "NonPositiveIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Digamma",
+    "Factorial",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "c76eaf",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     [
+      "Add",
+      1,
+      "z"
+     ]
+    ],
+    [
+     "Add",
+     [
+      "Negate",
+      "EulerGamma"
+     ],
+     [
+      "Sum",
+      [
+       "Multiply",
+       [
+        "Multiply",
+        [
+         "Power",
+         -1,
+         [
+          "Add",
+          "n",
+          1
+         ]
+        ],
+        [
+         "Zeta",
+         [
+          "Add",
+          "n",
+          1
+         ]
+        ]
+       ],
+       [
+        "Power",
+        "z",
+        "n"
+       ]
+      ],
+      [
+       "Limits",
+       "n",
+       1,
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Less",
+     [
+      "Abs",
+      "z"
+     ],
+     1
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Digamma",
+    "Sum",
+    "Zeta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "c86ca1",
+   "formula": [
+    "Implies",
+    [
+     "Element",
+     "x",
+     [
+      "Interval",
+      [
+       "Open",
+       [
+        "DigammaFunctionZero",
+        "n"
+       ]
+      ],
+      [
+       "Open",
+       [
+        "Add",
+        [
+         "Negate",
+         "n"
+        ],
+        1
+       ]
+      ]
+     ]
+    ],
+    [
+     "Element",
+     [
+      "Digamma",
+      "x"
+     ],
+     [
+      "Interval",
+      [
+       "Open",
+       0
+      ],
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "x",
+     "RealNumbers"
+    ]
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "Digamma",
+    "DigammaFunctionZero"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "c89abc",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     "z",
+     "m"
+    ],
+    [
+     "Multiply",
+     [
+      "Power",
+      -1,
+      [
+       "Add",
+       "m",
+       1
+      ]
+     ],
+     [
+      "Integrate",
+      [
+       "Divide",
+       [
+        "Multiply",
+        [
+         "Power",
+         "t",
+         "m"
+        ],
+        [
+         "Exp",
+         [
+          "Negate",
+          [
+           "Multiply",
+           "z",
+           "t"
+          ]
+         ]
+        ]
+       ],
+       [
+        "Subtract",
+        1,
+        [
+         "Exp",
+         [
+          "Negate",
+          "t"
+         ]
+        ]
+       ]
+      ],
+      [
+       "Limits",
+       "t",
+       0,
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "m",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Greater",
+     [
+      "Real",
+      "z"
+     ],
+     0
+    ],
+    [
+     "Element",
+     "m",
+     "PositiveIntegers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Digamma",
+    "Exp",
+    "Integrate"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "cf5355",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     "z"
+    ],
+    [
+     "Add",
+     [
+      "Subtract",
+      [
+       "Subtract",
+       [
+        "Ln",
+        "z"
+       ],
+       [
+        "Divide",
+        1,
+        [
+         "Multiply",
+         2,
+         "z"
+        ]
+       ]
+      ],
+      [
+       "Sum",
+       [
+        "Divide",
+        [
+         "BernoulliB",
+         [
+          "Multiply",
+          2,
+          "n"
+         ]
+        ],
+        [
+         "Multiply",
+         [
+          "Multiply",
+          2,
+          "n"
+         ],
+         [
+          "Power",
+          "z",
+          [
+           "Multiply",
+           2,
+           "n"
+          ]
+         ]
+        ]
+       ],
+       [
+        "Limits",
+        "n",
+        1,
+        [
+         "Subtract",
+         "N_var",
+         1
+        ]
+       ]
+      ]
+     ],
+     [
+      "Apply",
+      [
+       "Derivative",
+       [
+        "Function",
+        [
+         "StirlingSeriesRemainder",
+         "N_var",
+         "z"
+        ],
+        "z"
+       ],
+       1
+      ],
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "N_var",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      [
+       "Interval",
+       [
+        "Open",
+        "NegativeInfinity"
+       ],
+       0
+      ]
+     ]
+    ],
+    [
+     "Element",
+     "N_var",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BernoulliB",
+    "Derivative",
+    "Digamma",
+    "Ln",
+    "StirlingSeriesRemainder",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "cfb999",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     "z"
+    ],
+    [
+     "Add",
+     [
+      "Ln",
+      "z"
+     ],
+     [
+      "Integrate",
+      [
+       "Multiply",
+       [
+        "Exp",
+        [
+         "Negate",
+         [
+          "Multiply",
+          "z",
+          "t"
+         ]
+        ]
+       ],
+       [
+        "Subtract",
+        [
+         "Divide",
+         1,
+         "t"
+        ],
+        [
+         "Divide",
+         1,
+         [
+          "Subtract",
+          1,
+          [
+           "Exp",
+           [
+            "Negate",
+            "t"
+           ]
+          ]
+         ]
+        ]
+       ]
+      ],
+      [
+       "Limits",
+       "t",
+       0,
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Greater",
+     [
+      "Real",
+      "z"
+     ],
+     0
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Digamma",
+    "Exp",
+    "Integrate",
+    "Ln"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "d02cf9",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Divide",
+      [
+       "Power",
+       -1,
+       "n"
+      ],
+      [
+       "Power",
+       [
+        "Add",
+        "n",
+        "a"
+       ],
+       "r"
+      ]
+     ],
+     [
+      "Limits",
+      "n",
+      0,
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      [
+       "Power",
+       -1,
+       "r"
+      ],
+      [
+       "Multiply",
+       [
+        "Power",
+        2,
+        "r"
+       ],
+       [
+        "Factorial",
+        [
+         "Subtract",
+         "r",
+         1
+        ]
+       ]
+      ]
+     ],
+     [
+      "Subtract",
+      [
+       "Digamma",
+       [
+        "Divide",
+        "a",
+        2
+       ],
+       [
+        "Subtract",
+        "r",
+        1
+       ]
+      ],
+      [
+       "Digamma",
+       [
+        "Divide",
+        [
+         "Add",
+         "a",
+         1
+        ],
+        2
+       ],
+       [
+        "Subtract",
+        "r",
+        1
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "r"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "r",
+     [
+      "Range",
+      2,
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ],
+    [
+     "NotElement",
+     "a",
+     "NonPositiveIntegers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Digamma",
+    "Factorial",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "d0b65a",
+   "formula": [
+    "Implies",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     [
+      "DigammaFunctionZero",
+      "n"
+     ],
+     "RealNumbers"
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "DigammaFunctionZero"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "d0bba3",
+   "formula": [
+    "Implies",
+    [
+     "And",
+     [
+      "Element",
+      "m",
+      "NonNegativeIntegers"
+     ],
+     [
+      "Element",
+      "x",
+      [
+       "SetMinus",
+       "RealNumbers",
+       "NonPositiveIntegers"
+      ]
+     ]
+    ],
+    [
+     "Element",
+     [
+      "Digamma",
+      "x",
+      "m"
+     ],
+     "RealNumbers"
+    ]
+   ],
+   "variables": [
+    "m",
+    "x"
+   ],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "Digamma"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "d2f9fb",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     [
+      "Divide",
+      3,
+      4
+     ],
+     1
+    ],
+    [
+     "Subtract",
+     [
+      "Power",
+      "Pi",
+      2
+     ],
+     [
+      "Multiply",
+      8,
+      "CatalanConstant"
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Digamma"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "d4bdf8",
+   "formula": [
+    "Implies",
+    [
+     "Element",
+     "x",
+     [
+      "Interval",
+      [
+       "Open",
+       [
+        "Negate",
+        "n"
+       ]
+      ],
+      [
+       "Open",
+       [
+        "DigammaFunctionZero",
+        "n"
+       ]
+      ]
+     ]
+    ],
+    [
+     "Element",
+     [
+      "Digamma",
+      "x"
+     ],
+     [
+      "Interval",
+      [
+       "Open",
+       "NegativeInfinity"
+      ],
+      [
+       "Open",
+       0
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "x",
+     "RealNumbers"
+    ]
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "Digamma",
+    "DigammaFunctionZero"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "d6fbc8",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     "z",
+     "m"
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      [
+       "Power",
+       -1,
+       [
+        "Add",
+        "m",
+        1
+       ]
+      ],
+      [
+       "Factorial",
+       "m"
+      ]
+     ],
+     [
+      "LerchPhi",
+      1,
+      [
+       "Add",
+       "m",
+       1
+      ],
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "m",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "m",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "NotElement",
+     "z",
+     "NonPositiveIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Digamma",
+    "Factorial",
+    "LerchPhi"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "d9c818",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     "z"
+    ],
+    [
+     "Subtract",
+     [
+      "Subtract",
+      [
+       "Ln",
+       "z"
+      ],
+      [
+       "Divide",
+       1,
+       [
+        "Multiply",
+        2,
+        "z"
+       ]
+      ]
+     ],
+     [
+      "Multiply",
+      2,
+      [
+       "Integrate",
+       [
+        "Divide",
+        "t",
+        [
+         "Multiply",
+         [
+          "Add",
+          [
+           "Power",
+           "t",
+           2
+          ],
+          [
+           "Power",
+           "z",
+           2
+          ]
+         ],
+         [
+          "Subtract",
+          [
+           "Exp",
+           [
+            "Multiply",
+            [
+             "Multiply",
+             2,
+             "Pi"
+            ],
+            "t"
+           ]
+          ],
+          1
+         ]
+        ]
+       ],
+       [
+        "Limits",
+        "t",
+        0,
+        "PositiveInfinity"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Greater",
+     [
+      "Real",
+      "z"
+     ],
+     0
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Digamma",
+    "Exp",
+    "Integrate",
+    "Ln"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "dce62c",
+   "formula": [
+    "Equal",
+    [
+     "Limit",
+     [
+      "Function",
+      [
+       "Digamma",
+       "x"
+      ],
+      "x"
+     ],
+     0,
+     1
+    ],
+    [
+     "Multiply",
+     [
+      "Power",
+      -1,
+      [
+       "Add",
+       "m",
+       1
+      ]
+     ],
+     "PositiveInfinity"
+    ]
+   ],
+   "variables": [
+    "m"
+   ],
+   "assumptions": [
+    "Element",
+    "m",
+    "NonNegativeIntegers"
+   ],
+   "class": "representation",
+   "subclass": "limit",
+   "heads": [
+    "Digamma",
+    "Limit"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": "right",
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ],
+   "directedInfinity": true
+  },
+  {
+   "id": "ddc7e1",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     [
+      "Add",
+      [
+       "Negate",
+       "n"
+      ],
+      "z"
+     ],
+     "m"
+    ],
+    [
+     "Add",
+     [
+      "Divide",
+      [
+       "Multiply",
+       [
+        "Power",
+        -1,
+        [
+         "Add",
+         "m",
+         1
+        ]
+       ],
+       [
+        "Factorial",
+        "m"
+       ]
+      ],
+      [
+       "Power",
+       "z",
+       [
+        "Add",
+        "m",
+        1
+       ]
+      ]
+     ],
+     [
+      "Sum",
+      [
+       "Multiply",
+       [
+        "Multiply",
+        [
+         "RisingFactorial",
+         [
+          "Add",
+          "k",
+          1
+         ],
+         "m"
+        ],
+        [
+         "Add",
+         [
+          "Multiply",
+          [
+           "Power",
+           -1,
+           [
+            "Add",
+            [
+             "Add",
+             "m",
+             "k"
+            ],
+            1
+           ]
+          ],
+          [
+           "Zeta",
+           [
+            "Add",
+            [
+             "Add",
+             "m",
+             "k"
+            ],
+            1
+           ]
+          ]
+         ],
+         [
+          "Sum",
+          [
+           "Divide",
+           1,
+           [
+            "Power",
+            "j",
+            [
+             "Add",
+             [
+              "Add",
+              "k",
+              "m"
+             ],
+             1
+            ]
+           ]
+          ],
+          [
+           "Limits",
+           "j",
+           1,
+           "n"
+          ]
+         ]
+        ]
+       ],
+       [
+        "Power",
+        "z",
+        "k"
+       ]
+      ],
+      [
+       "Limits",
+       "k",
+       0,
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "m",
+    "n",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "m",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Less",
+     [
+      "Abs",
+      "z"
+     ],
+     1
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Digamma",
+    "Factorial",
+    "RisingFactorial",
+    "Sum",
+    "Zeta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "dfb55b",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     "z",
+     "m"
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      [
+       "Power",
+       -1,
+       [
+        "Add",
+        "m",
+        1
+       ]
+      ],
+      [
+       "Factorial",
+       "m"
+      ]
+     ],
+     [
+      "Sum",
+      [
+       "Divide",
+       1,
+       [
+        "Power",
+        [
+         "Add",
+         "n",
+         "z"
+        ],
+        [
+         "Add",
+         "m",
+         1
+        ]
+       ]
+      ],
+      [
+       "Limits",
+       "n",
+       0,
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "m",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "m",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "NotElement",
+     "z",
+     "NonPositiveIntegers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Digamma",
+    "Factorial",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "e1e71f",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     "z"
+    ],
+    [
+     "Integrate",
+     [
+      "Multiply",
+      [
+       "Subtract",
+       [
+        "Exp",
+        [
+         "Negate",
+         "t"
+        ]
+       ],
+       [
+        "Divide",
+        1,
+        [
+         "Power",
+         [
+          "Add",
+          1,
+          "t"
+         ],
+         "z"
+        ]
+       ]
+      ],
+      [
+       "Divide",
+       1,
+       "t"
+      ]
+     ],
+     [
+      "Limits",
+      "t",
+      0,
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Greater",
+     [
+      "Real",
+      "z"
+     ],
+     0
+    ]
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Digamma",
+    "Exp",
+    "Integrate"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "e63fe8",
+   "formula": [
+    "Greater",
+    [
+     "Digamma",
+     "x"
+    ],
+    [
+     "Subtract",
+     [
+      "Ln",
+      "x"
+     ],
+     [
+      "Divide",
+      1,
+      "x"
+     ]
+    ]
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": [
+    "Element",
+    "x",
+    [
+     "Interval",
+     [
+      "Open",
+      0
+     ],
+     [
+      "Open",
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Digamma",
+    "Ln"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "e83059",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     [
+      "Divide",
+      3,
+      4
+     ],
+     2
+    ],
+    [
+     "Subtract",
+     [
+      "Multiply",
+      2,
+      [
+       "Power",
+       "Pi",
+       3
+      ]
+     ],
+     [
+      "Multiply",
+      56,
+      [
+       "Zeta",
+       3
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Digamma",
+    "Zeta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "ea2482",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     1
+    ],
+    [
+     "Negate",
+     "EulerGamma"
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Digamma"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "ee3dc5",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     "z"
+    ],
+    [
+     "Subtract",
+     [
+      "Multiply",
+      [
+       "Subtract",
+       "z",
+       1
+      ],
+      [
+       "Hypergeometric3F2",
+       1,
+       1,
+       [
+        "Subtract",
+        2,
+        "z"
+       ],
+       2,
+       2,
+       1
+      ]
+     ],
+     "EulerGamma"
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Greater",
+     [
+      "Real",
+      "z"
+     ],
+     0
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Digamma",
+    "Hypergeometric3F2"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": [
+    "http://functions.wolfram.com/GammaBetaErf/PolyGamma/26/01/01/0001/"
+   ],
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "eec21a",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     [
+      "Multiply",
+      "n",
+      "z"
+     ]
+    ],
+    [
+     "Add",
+     [
+      "Ln",
+      "n"
+     ],
+     [
+      "Multiply",
+      [
+       "Divide",
+       1,
+       "n"
+      ],
+      [
+       "Sum",
+       [
+        "Digamma",
+        [
+         "Add",
+         "z",
+         [
+          "Divide",
+          "k",
+          "n"
+         ]
+        ]
+       ],
+       [
+        "Limits",
+        "k",
+        0,
+        [
+         "Subtract",
+         "n",
+         1
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "NotElement",
+     [
+      "Multiply",
+      "n",
+      "z"
+     ],
+     "NonPositiveIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Digamma",
+    "Ln",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "f1e02b",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     "z",
+     "m"
+    ],
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "GammaLn",
+        "z"
+       ],
+       "z"
+      ],
+      [
+       "Add",
+       "m",
+       1
+      ]
+     ],
+     "z"
+    ]
+   ],
+   "variables": [
+    "m",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "m",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "NotElement",
+     "z",
+     "NonPositiveIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Derivative",
+    "Digamma",
+    "GammaLn"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": "complex-branch",
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "f42042",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Divide",
+      1,
+      [
+       "Power",
+       [
+        "Add",
+        "n",
+        "a"
+       ],
+       "r"
+      ]
+     ],
+     [
+      "Limits",
+      "n",
+      0,
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      [
+       "Power",
+       -1,
+       "r"
+      ],
+      [
+       "Factorial",
+       [
+        "Subtract",
+        "r",
+        1
+       ]
+      ]
+     ],
+     [
+      "Digamma",
+      "a",
+      [
+       "Subtract",
+       "r",
+       1
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "r"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "r",
+     [
+      "Range",
+      2,
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ],
+    [
+     "NotElement",
+     "a",
+     "NonPositiveIntegers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Digamma",
+    "Factorial",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "f93bae",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     [
+      "Divide",
+      3,
+      4
+     ]
+    ],
+    [
+     "Subtract",
+     [
+      "Subtract",
+      [
+       "Divide",
+       "Pi",
+       2
+      ],
+      "EulerGamma"
+     ],
+     [
+      "Multiply",
+      3,
+      [
+       "Ln",
+       2
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Digamma",
+    "Ln"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "f946a5",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     "z"
+    ],
+    [
+     "Add",
+     [
+      "Negate",
+      "EulerGamma"
+     ],
+     [
+      "Integrate",
+      [
+       "Divide",
+       [
+        "Subtract",
+        [
+         "Exp",
+         [
+          "Negate",
+          "t"
+         ]
+        ],
+        [
+         "Exp",
+         [
+          "Negate",
+          [
+           "Multiply",
+           "z",
+           "t"
+          ]
+         ]
+        ]
+       ],
+       [
+        "Subtract",
+        1,
+        [
+         "Exp",
+         [
+          "Negate",
+          "t"
+         ]
+        ]
+       ]
+      ],
+      [
+       "Limits",
+       "t",
+       0,
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Greater",
+     [
+      "Real",
+      "z"
+     ],
+     0
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Digamma",
+    "Exp",
+    "Integrate"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "fa0292",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     2,
+     1
+    ],
+    [
+     "Subtract",
+     [
+      "Divide",
+      [
+       "Power",
+       "Pi",
+       2
+      ],
+      6
+     ],
+     1
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Digamma"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  },
+  {
+   "id": "fb9942",
+   "formula": [
+    "AsymptoticTo",
+    [
+     "DigammaFunctionZero",
+     "n"
+    ],
+    [
+     "Add",
+     [
+      "Negate",
+      "n"
+     ],
+     [
+      "Multiply",
+      [
+       "Divide",
+       1,
+       "Pi"
+      ],
+      [
+       "Arctan",
+       [
+        "Divide",
+        "Pi",
+        [
+         "Ln",
+         "n"
+        ]
+       ]
+      ]
+     ]
+    ],
+    "n",
+    "PositiveInfinity"
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": null,
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Arctan",
+    "AsymptoticTo",
+    "DigammaFunctionZero",
+    "Ln"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "digamma_function"
+   ]
+  }
+ ]
+}

@@ -1,0 +1,4720 @@
+{
+ "topic": "hurwitz_zeta",
+ "title": "Hurwitz zeta function",
+ "source": "pygrim/formulas/hurwitz_zeta.py",
+ "generator": "grim2mathjson 0.1.0",
+ "entries": [
+  {
+   "id": "05c2dd",
+   "formula": [
+    "Implies",
+    [
+     "Element",
+     "s",
+     [
+      "Range",
+      2,
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "IsMeromorphic",
+     [
+      "Function",
+      [
+       "HurwitzZeta",
+       "s",
+       "a"
+      ],
+      "a"
+     ],
+     "ComplexNumbers"
+    ]
+   ],
+   "variables": [
+    "s"
+   ],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "HurwitzZeta",
+    "IsMeromorphic"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "0bd6aa",
+   "formula": [
+    "Equal",
+    [
+     "HurwitzZeta",
+     "s",
+     "N_var"
+    ],
+    [
+     "Sum",
+     [
+      "Divide",
+      1,
+      [
+       "Power",
+       "n",
+       "s"
+      ]
+     ],
+     [
+      "Limits",
+      "n",
+      "N_var",
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "variables": [
+    "N_var",
+    "s"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "s",
+     "ComplexNumbers"
+    ],
+    [
+     "Greater",
+     [
+      "Real",
+      "s"
+     ],
+     1
+    ],
+    [
+     "Element",
+     "N_var",
+     "PositiveIntegers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "HurwitzZeta",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "150b3e",
+   "formula": [
+    "Equal",
+    [
+     "HurwitzZeta",
+     0,
+     0
+    ],
+    [
+     "Divide",
+     1,
+     2
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "HurwitzZeta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "1699a9",
+   "formula": [
+    "Equal",
+    [
+     "HurwitzZeta",
+     "s",
+     "a"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      "Pi",
+      [
+       "Multiply",
+       2,
+       [
+        "Subtract",
+        "s",
+        1
+       ]
+      ]
+     ],
+     [
+      "Integrate",
+      [
+       "Divide",
+       [
+        "Power",
+        [
+         "Add",
+         [
+          "Subtract",
+          "a",
+          [
+           "Divide",
+           1,
+           2
+          ]
+         ],
+         [
+          "Multiply",
+          "ImaginaryUnit",
+          "x"
+         ]
+        ],
+        [
+         "Subtract",
+         1,
+         "s"
+        ]
+       ],
+       [
+        "Power",
+        [
+         "Cosh",
+         [
+          "Multiply",
+          "Pi",
+          "x"
+         ]
+        ],
+        2
+       ]
+      ],
+      [
+       "Limits",
+       "x",
+       "NegativeInfinity",
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "s"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "s",
+     "ComplexNumbers"
+    ],
+    [
+     "NotEqual",
+     "s",
+     1
+    ],
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ],
+    [
+     "Greater",
+     [
+      "Real",
+      "a"
+     ],
+     [
+      "Divide",
+      1,
+      2
+     ]
+    ]
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Cosh",
+    "HurwitzZeta",
+    "Integrate"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": [
+    "https://doi.org/10.1090/mcom/3401"
+   ],
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "26418b",
+   "formula": [
+    "Implies",
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ],
+    [
+     "IsHolomorphic",
+     [
+      "Function",
+      [
+       "HurwitzZeta",
+       "s",
+       "a"
+      ],
+      "s"
+     ],
+     [
+      "Set",
+      "t",
+      [
+       "Element",
+       "t",
+       "ComplexNumbers",
+       [
+        "Less",
+        [
+         "Real",
+         "t"
+        ],
+        0
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "a"
+   ],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "HurwitzZeta",
+    "IsHolomorphic",
+    "Real"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "2d4828",
+   "formula": [
+    "Equal",
+    [
+     "HurwitzZeta",
+     4,
+     1
+    ],
+    [
+     "Divide",
+     [
+      "Power",
+      "Pi",
+      4
+     ],
+     90
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "HurwitzZeta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "2fabeb",
+   "formula": [
+    "Equal",
+    [
+     "HurwitzZeta",
+     3,
+     [
+      "Divide",
+      1,
+      6
+     ]
+    ],
+    [
+     "Add",
+     [
+      "Multiply",
+      91,
+      [
+       "Zeta",
+       3
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Multiply",
+       2,
+       [
+        "Sqrt",
+        3
+       ]
+      ],
+      [
+       "Power",
+       "Pi",
+       3
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "HurwitzZeta",
+    "Zeta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "33690e",
+   "formula": [
+    "Equal",
+    [
+     "HurwitzZeta",
+     4,
+     2
+    ],
+    [
+     "Subtract",
+     [
+      "Divide",
+      [
+       "Power",
+       "Pi",
+       4
+      ],
+      90
+     ],
+     1
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "HurwitzZeta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "3ba544",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "HurwitzZeta",
+        "s",
+        "a"
+       ],
+       "s"
+      ],
+      1
+     ],
+     "s"
+    ],
+    [
+     "HurwitzZeta",
+     "s",
+     "a",
+     1
+    ]
+   ],
+   "variables": [
+    "a",
+    "s"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "s",
+     "ComplexNumbers"
+    ],
+    [
+     "NotEqual",
+     "s",
+     1
+    ],
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ],
+    [
+     "Greater",
+     [
+      "Real",
+      "a"
+     ],
+     0
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Derivative",
+    "HurwitzZeta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "3db90c",
+   "formula": [
+    "Equal",
+    [
+     "HurwitzZeta",
+     0,
+     [
+      "Divide",
+      1,
+      2
+     ]
+    ],
+    0
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "HurwitzZeta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "3e82c3",
+   "formula": [
+    "Equal",
+    [
+     "HurwitzZeta",
+     2,
+     [
+      "Divide",
+      1,
+      4
+     ]
+    ],
+    [
+     "Add",
+     [
+      "Power",
+      "Pi",
+      2
+     ],
+     [
+      "Multiply",
+      8,
+      "CatalanConstant"
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "HurwitzZeta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "4064f5",
+   "formula": [
+    "Equal",
+    [
+     "HurwitzZeta",
+     4,
+     [
+      "Divide",
+      1,
+      2
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Power",
+      "Pi",
+      4
+     ],
+     6
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "HurwitzZeta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "40c3e2",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "HurwitzZeta",
+        "s",
+        "a"
+       ],
+       "a"
+      ],
+      "r"
+     ],
+     "a"
+    ],
+    [
+     "Multiply",
+     [
+      "RisingFactorial",
+      [
+       "Subtract",
+       [
+        "Subtract",
+        1,
+        "s"
+       ],
+       "r"
+      ],
+      "r"
+     ],
+     [
+      "HurwitzZeta",
+      [
+       "Add",
+       "s",
+       "r"
+      ],
+      "a"
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "r",
+    "s"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "s",
+     "ComplexNumbers"
+    ],
+    [
+     "NotEqual",
+     "s",
+     1
+    ],
+    [
+     "NotEqual",
+     [
+      "Add",
+      "s",
+      "r"
+     ],
+     1
+    ],
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ],
+    [
+     "Greater",
+     [
+      "Real",
+      "a"
+     ],
+     0
+    ],
+    [
+     "Element",
+     "r",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Derivative",
+    "HurwitzZeta",
+    "RisingFactorial"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "4228cd",
+   "formula": [
+    "Equal",
+    [
+     "BernoulliPolynomial",
+     "n",
+     "z"
+    ],
+    [
+     "Negate",
+     [
+      "Multiply",
+      "n",
+      [
+       "HurwitzZeta",
+       [
+        "Subtract",
+        1,
+        "n"
+       ],
+       "z"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BernoulliPolynomial",
+    "HurwitzZeta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bernoulli_numbers",
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "448d90",
+   "formula": [
+    "Equal",
+    [
+     "HurwitzZeta",
+     "s",
+     "a"
+    ],
+    [
+     "Sum",
+     [
+      "Divide",
+      1,
+      [
+       "Power",
+       [
+        "Add",
+        "n",
+        "a"
+       ],
+       "s"
+      ]
+     ],
+     [
+      "Limits",
+      "n",
+      0,
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "s"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "s",
+     "ComplexNumbers"
+    ],
+    [
+     "Greater",
+     [
+      "Real",
+      "s"
+     ],
+     1
+    ],
+    [
+     "Element",
+     "a",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      "NonPositiveIntegers"
+     ]
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "HurwitzZeta",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "498036",
+   "formula": [
+    "Equal",
+    [
+     "HurwitzZeta",
+     "s",
+     "a"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      1,
+      [
+       "Gamma",
+       "s"
+      ]
+     ],
+     [
+      "Integrate",
+      [
+       "Divide",
+       [
+        "Multiply",
+        [
+         "Power",
+         "x",
+         [
+          "Subtract",
+          "s",
+          1
+         ]
+        ],
+        [
+         "Exp",
+         [
+          "Negate",
+          [
+           "Multiply",
+           "a",
+           "x"
+          ]
+         ]
+        ]
+       ],
+       [
+        "Subtract",
+        1,
+        [
+         "Exp",
+         [
+          "Negate",
+          "x"
+         ]
+        ]
+       ]
+      ],
+      [
+       "Limits",
+       "x",
+       0,
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "s"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "s",
+     "ComplexNumbers"
+    ],
+    [
+     "Greater",
+     [
+      "Real",
+      "s"
+     ],
+     1
+    ],
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ],
+    [
+     "Greater",
+     [
+      "Real",
+      "a"
+     ],
+     0
+    ]
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Exp",
+    "Gamma",
+    "HurwitzZeta",
+    "Integrate"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "4bf3da",
+   "formula": [
+    "Implies",
+    [
+     "Element",
+     "a",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      "NonPositiveIntegers"
+     ]
+    ],
+    [
+     "IsHolomorphic",
+     [
+      "Function",
+      [
+       "HurwitzZeta",
+       "s",
+       "a"
+      ],
+      "s"
+     ],
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      [
+       "Set",
+       1
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "a"
+   ],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "HurwitzZeta",
+    "IsHolomorphic"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "4d1f6b",
+   "formula": [
+    "Equal",
+    [
+     "Add",
+     [
+      "HurwitzZeta",
+      "s",
+      [
+       "Divide",
+       1,
+       6
+      ]
+     ],
+     [
+      "HurwitzZeta",
+      "s",
+      [
+       "Divide",
+       5,
+       6
+      ]
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      [
+       "Subtract",
+       [
+        "Power",
+        2,
+        "s"
+       ],
+       1
+      ],
+      [
+       "Subtract",
+       [
+        "Power",
+        3,
+        "s"
+       ],
+       1
+      ]
+     ],
+     [
+      "Zeta",
+      "s"
+     ]
+    ]
+   ],
+   "variables": [
+    "s"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "s",
+     "ComplexNumbers"
+    ],
+    [
+     "NotEqual",
+     "s",
+     1
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "HurwitzZeta",
+    "Zeta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "4dd87c",
+   "formula": [
+    "Equal",
+    [
+     "HurwitzZeta",
+     3,
+     2
+    ],
+    [
+     "Subtract",
+     [
+      "Zeta",
+      3
+     ],
+     1
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "HurwitzZeta",
+    "Zeta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "52ea5f",
+   "formula": [
+    "Equal",
+    [
+     "PolyLog",
+     "s",
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      [
+       "Gamma",
+       [
+        "Subtract",
+        1,
+        "s"
+       ]
+      ],
+      [
+       "Power",
+       [
+        "Multiply",
+        2,
+        "Pi"
+       ],
+       [
+        "Subtract",
+        1,
+        "s"
+       ]
+      ]
+     ],
+     [
+      "Add",
+      [
+       "Multiply",
+       [
+        "Power",
+        "ImaginaryUnit",
+        [
+         "Subtract",
+         1,
+         "s"
+        ]
+       ],
+       [
+        "HurwitzZeta",
+        [
+         "Subtract",
+         1,
+         "s"
+        ],
+        [
+         "Add",
+         [
+          "Divide",
+          1,
+          2
+         ],
+         [
+          "Divide",
+          [
+           "Ln",
+           [
+            "Negate",
+            "z"
+           ]
+          ],
+          [
+           "Multiply",
+           [
+            "Multiply",
+            2,
+            "Pi"
+           ],
+           "ImaginaryUnit"
+          ]
+         ]
+        ]
+       ]
+      ],
+      [
+       "Multiply",
+       [
+        "Power",
+        "ImaginaryUnit",
+        [
+         "Subtract",
+         "s",
+         1
+        ]
+       ],
+       [
+        "HurwitzZeta",
+        [
+         "Subtract",
+         1,
+         "s"
+        ],
+        [
+         "Subtract",
+         [
+          "Divide",
+          1,
+          2
+         ],
+         [
+          "Divide",
+          [
+           "Ln",
+           [
+            "Negate",
+            "z"
+           ]
+          ],
+          [
+           "Multiply",
+           [
+            "Multiply",
+            2,
+            "Pi"
+           ],
+           "ImaginaryUnit"
+          ]
+         ]
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "s",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "s",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "NotElement",
+     "z",
+     [
+      "Set",
+      0,
+      1
+     ]
+    ],
+    [
+     "NotElement",
+     "s",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Gamma",
+    "HurwitzZeta",
+    "Ln",
+    "PolyLog"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "53026a",
+   "formula": [
+    "Equal",
+    [
+     "Gamma",
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Sqrt",
+      [
+       "Multiply",
+       2,
+       "Pi"
+      ]
+     ],
+     [
+      "Exp",
+      [
+       "HurwitzZeta",
+       0,
+       "z",
+       1
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     "NonPositiveIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Exp",
+    "Gamma",
+    "HurwitzZeta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "532f31",
+   "formula": [
+    "Equal",
+    [
+     "HurwitzZeta",
+     1,
+     "a"
+    ],
+    "ComplexInfinity"
+   ],
+   "variables": [
+    "a"
+   ],
+   "assumptions": [
+    "Element",
+    "a",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     "NonPositiveIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "HurwitzZeta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "56dcbd",
+   "formula": [
+    "Implies",
+    [
+     "And",
+     [
+      "Element",
+      "s",
+      [
+       "SetMinus",
+       "ComplexNumbers",
+       [
+        "Set",
+        1
+       ]
+      ]
+     ],
+     [
+      "Element",
+      "a",
+      [
+       "SetMinus",
+       "ComplexNumbers",
+       "NonPositiveIntegers"
+      ]
+     ]
+    ],
+    [
+     "Element",
+     [
+      "HurwitzZeta",
+      "s",
+      "a"
+     ],
+     "ComplexNumbers"
+    ]
+   ],
+   "variables": [
+    "a",
+    "s"
+   ],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "HurwitzZeta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "575b8f",
+   "formula": [
+    "Equal",
+    [
+     "HurwitzZeta",
+     2,
+     1
+    ],
+    [
+     "Divide",
+     [
+      "Power",
+      "Pi",
+      2
+     ],
+     6
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "HurwitzZeta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "5bdba2",
+   "formula": [
+    "Equal",
+    [
+     "HurwitzZeta",
+     [
+      "Negate",
+      "n"
+     ],
+     "a"
+    ],
+    [
+     "Negate",
+     [
+      "Divide",
+      [
+       "BernoulliPolynomial",
+       [
+        "Add",
+        "n",
+        1
+       ],
+       "a"
+      ],
+      [
+       "Add",
+       "n",
+       1
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BernoulliPolynomial",
+    "HurwitzZeta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "6419ac",
+   "formula": [
+    "Equal",
+    [
+     "HurwitzZeta",
+     2,
+     "a"
+    ],
+    [
+     "Multiply",
+     [
+      "Power",
+      "a",
+      -2
+     ],
+     [
+      "Hypergeometric3F2",
+      1,
+      "a",
+      "a",
+      [
+       "Add",
+       "a",
+       1
+      ],
+      [
+       "Add",
+       "a",
+       1
+      ],
+      1
+     ]
+    ]
+   ],
+   "variables": [
+    "a"
+   ],
+   "assumptions": [
+    "Element",
+    "a",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     "NonPositiveIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "HurwitzZeta",
+    "Hypergeometric3F2"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "693e0e",
+   "formula": [
+    "Equal",
+    [
+     "Digamma",
+     "z"
+    ],
+    [
+     "Limit",
+     [
+      "Function",
+      [
+       "Subtract",
+       [
+        "Divide",
+        1,
+        [
+         "Subtract",
+         "s",
+         1
+        ]
+       ],
+       [
+        "HurwitzZeta",
+        "s",
+        "z"
+       ]
+      ],
+      "s"
+     ],
+     1
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     "NonPositiveIntegers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "limit",
+   "heads": [
+    "Digamma",
+    "HurwitzZeta",
+    "Limit"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": "complex",
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "69a1a9",
+   "formula": [
+    "Equal",
+    [
+     "HurwitzZeta",
+     [
+      "Subtract",
+      1,
+      "s"
+     ],
+     [
+      "Divide",
+      "p",
+      "q"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      [
+       "Multiply",
+       2,
+       [
+        "Gamma",
+        "s"
+       ]
+      ],
+      [
+       "Power",
+       [
+        "Multiply",
+        [
+         "Multiply",
+         2,
+         "Pi"
+        ],
+        "q"
+       ],
+       "s"
+      ]
+     ],
+     [
+      "Sum",
+      [
+       "Multiply",
+       [
+        "Cos",
+        [
+         "Subtract",
+         [
+          "Divide",
+          [
+           "Multiply",
+           "Pi",
+           "s"
+          ],
+          2
+         ],
+         [
+          "Divide",
+          [
+           "Multiply",
+           [
+            "Multiply",
+            [
+             "Multiply",
+             2,
+             "Pi"
+            ],
+            "k"
+           ],
+           "p"
+          ],
+          "q"
+         ]
+        ]
+       ],
+       [
+        "HurwitzZeta",
+        "s",
+        [
+         "Divide",
+         "k",
+         "q"
+        ]
+       ]
+      ],
+      [
+       "Limits",
+       "k",
+       1,
+       "q"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "p",
+    "q",
+    "s"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "s",
+     "ComplexNumbers"
+    ],
+    [
+     "NotElement",
+     "s",
+     "Integers"
+    ],
+    [
+     "Element",
+     "q",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "p",
+     [
+      "Range",
+      1,
+      "q"
+     ]
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Cos",
+    "Gamma",
+    "HurwitzZeta",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "6c3523",
+   "formula": [
+    "Equal",
+    [
+     "HurwitzZeta",
+     "s",
+     [
+      "Add",
+      [
+       "Divide",
+       1,
+       2
+      ],
+      "n"
+     ]
+    ],
+    [
+     "Subtract",
+     [
+      "Multiply",
+      [
+       "Subtract",
+       [
+        "Power",
+        2,
+        "s"
+       ],
+       1
+      ],
+      [
+       "Zeta",
+       "s"
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Power",
+       2,
+       "s"
+      ],
+      [
+       "Sum",
+       [
+        "Divide",
+        1,
+        [
+         "Power",
+         [
+          "Add",
+          [
+           "Multiply",
+           2,
+           "k"
+          ],
+          1
+         ],
+         "s"
+        ]
+       ],
+       [
+        "Limits",
+        "k",
+        0,
+        [
+         "Subtract",
+         "n",
+         1
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "s"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "s",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "HurwitzZeta",
+    "Sum",
+    "Zeta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "6e69fc",
+   "formula": [
+    "Equal",
+    [
+     "HurwitzZeta",
+     "s",
+     "n"
+    ],
+    [
+     "Subtract",
+     [
+      "Zeta",
+      "s"
+     ],
+     [
+      "Sum",
+      [
+       "Divide",
+       1,
+       [
+        "Power",
+        "k",
+        "s"
+       ]
+      ],
+      [
+       "Limits",
+       "k",
+       1,
+       [
+        "Subtract",
+        "n",
+        1
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "s"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "s",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "n",
+     "PositiveIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "HurwitzZeta",
+    "Sum",
+    "Zeta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "77e507",
+   "formula": [
+    "Equal",
+    [
+     "HurwitzZeta",
+     "s",
+     "a",
+     "r"
+    ],
+    [
+     "Multiply",
+     [
+      "Power",
+      -1,
+      "r"
+     ],
+     [
+      "Sum",
+      [
+       "Divide",
+       [
+        "Power",
+        [
+         "Ln",
+         [
+          "Add",
+          "n",
+          "a"
+         ]
+        ],
+        "r"
+       ],
+       [
+        "Power",
+        [
+         "Add",
+         "n",
+         "a"
+        ],
+        "s"
+       ]
+      ],
+      [
+       "Limits",
+       "n",
+       0,
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "r",
+    "s"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "s",
+     "ComplexNumbers"
+    ],
+    [
+     "Greater",
+     [
+      "Real",
+      "s"
+     ],
+     1
+    ],
+    [
+     "Element",
+     "a",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      "NonPositiveIntegers"
+     ]
+    ],
+    [
+     "Element",
+     "r",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "HurwitzZeta",
+    "Ln",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "7d9feb",
+   "formula": [
+    "Equal",
+    [
+     "HurwitzZeta",
+     "s",
+     "a"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      1,
+      [
+       "Power",
+       "N_var",
+       "s"
+      ]
+     ],
+     [
+      "Sum",
+      [
+       "HurwitzZeta",
+       "s",
+       [
+        "Divide",
+        [
+         "Add",
+         "a",
+         "k"
+        ],
+        "N_var"
+       ]
+      ],
+      [
+       "Limits",
+       "k",
+       0,
+       [
+        "Subtract",
+        "N_var",
+        1
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "N_var",
+    "a",
+    "s"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "s",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ],
+    [
+     "NotEqual",
+     "s",
+     1
+    ],
+    [
+     "Greater",
+     [
+      "Real",
+      "a"
+     ],
+     0
+    ],
+    [
+     "Element",
+     "N_var",
+     "PositiveIntegers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "HurwitzZeta",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "7dab87",
+   "formula": [
+    "Equal",
+    [
+     "HurwitzZeta",
+     [
+      "Negate",
+      "n"
+     ],
+     0
+    ],
+    [
+     "Negate",
+     [
+      "Divide",
+      [
+       "BernoulliB",
+       [
+        "Add",
+        "n",
+        1
+       ]
+      ],
+      [
+       "Add",
+       "n",
+       1
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BernoulliB",
+    "HurwitzZeta"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "83065e",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "HurwitzZeta",
+        "s",
+        "a"
+       ],
+       "a"
+      ],
+      1
+     ],
+     "a"
+    ],
+    [
+     "Negate",
+     [
+      "Multiply",
+      "s",
+      [
+       "HurwitzZeta",
+       [
+        "Add",
+        "s",
+        1
+       ],
+       "a"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "s"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "s",
+     "ComplexNumbers"
+    ],
+    [
+     "NotElement",
+     "s",
+     [
+      "Set",
+      0,
+      1
+     ]
+    ],
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ],
+    [
+     "Greater",
+     [
+      "Real",
+      "a"
+     ],
+     0
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Derivative",
+    "HurwitzZeta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "84196a",
+   "formula": [
+    "Equal",
+    [
+     "HurwitzZeta",
+     "n",
+     "a"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      [
+       "Power",
+       -1,
+       "n"
+      ],
+      [
+       "Factorial",
+       [
+        "Subtract",
+        "n",
+        1
+       ]
+      ]
+     ],
+     [
+      "Digamma",
+      "a",
+      [
+       "Subtract",
+       "n",
+       1
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     [
+      "Range",
+      2,
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Digamma",
+    "Factorial",
+    "HurwitzZeta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "868061",
+   "formula": [
+    "Equal",
+    [
+     "HurwitzZeta",
+     2,
+     [
+      "Divide",
+      1,
+      2
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Power",
+      "Pi",
+      2
+     ],
+     2
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "HurwitzZeta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "8bbb6f",
+   "formula": [
+    "Equal",
+    [
+     "Add",
+     [
+      "HurwitzZeta",
+      "s",
+      [
+       "Divide",
+       1,
+       4
+      ]
+     ],
+     [
+      "HurwitzZeta",
+      "s",
+      [
+       "Divide",
+       3,
+       4
+      ]
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      [
+       "Power",
+       2,
+       "s"
+      ],
+      [
+       "Subtract",
+       [
+        "Power",
+        2,
+        "s"
+       ],
+       1
+      ]
+     ],
+     [
+      "Zeta",
+      "s"
+     ]
+    ]
+   ],
+   "variables": [
+    "s"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "s",
+     "ComplexNumbers"
+    ],
+    [
+     "NotEqual",
+     "s",
+     1
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "HurwitzZeta",
+    "Zeta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "8c7cdb",
+   "formula": [
+    "Implies",
+    [
+     "Element",
+     "s",
+     [
+      "Range",
+      2,
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "IsHolomorphic",
+     [
+      "Function",
+      [
+       "HurwitzZeta",
+       "s",
+       "a"
+      ],
+      "a"
+     ],
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      "NonPositiveIntegers"
+     ]
+    ]
+   ],
+   "variables": [
+    "s"
+   ],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "HurwitzZeta",
+    "IsHolomorphic"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "93e149",
+   "formula": [
+    "Implies",
+    [
+     "Element",
+     "s",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      [
+       "Set",
+       1
+      ]
+     ]
+    ],
+    [
+     "IsHolomorphic",
+     [
+      "Function",
+      [
+       "HurwitzZeta",
+       "s",
+       "a"
+      ],
+      "a"
+     ],
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      [
+       "Interval",
+       [
+        "Open",
+        "NegativeInfinity"
+       ],
+       0
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "s"
+   ],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "HurwitzZeta",
+    "IsHolomorphic"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "9417f4",
+   "formula": [
+    "Equal",
+    [
+     "HurwitzZeta",
+     3,
+     [
+      "Divide",
+      1,
+      2
+     ]
+    ],
+    [
+     "Multiply",
+     7,
+     [
+      "Zeta",
+      3
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "HurwitzZeta",
+    "Zeta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "951f86",
+   "formula": [
+    "Equal",
+    [
+     "HurwitzZeta",
+     2,
+     [
+      "Divide",
+      3,
+      4
+     ]
+    ],
+    [
+     "Subtract",
+     [
+      "Power",
+      "Pi",
+      2
+     ],
+     [
+      "Multiply",
+      8,
+      "CatalanConstant"
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "HurwitzZeta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "95e270",
+   "formula": [
+    "Equal",
+    [
+     "HurwitzZeta",
+     "s",
+     [
+      "Add",
+      "a",
+      "N_var"
+     ],
+     "r"
+    ],
+    [
+     "Add",
+     [
+      "HurwitzZeta",
+      "s",
+      "a",
+      "r"
+     ],
+     [
+      "Multiply",
+      [
+       "Power",
+       -1,
+       [
+        "Add",
+        "r",
+        1
+       ]
+      ],
+      [
+       "Sum",
+       [
+        "Divide",
+        [
+         "Power",
+         [
+          "Ln",
+          [
+           "Add",
+           "a",
+           "k"
+          ]
+         ],
+         "r"
+        ],
+        [
+         "Power",
+         [
+          "Add",
+          "a",
+          "k"
+         ],
+         "s"
+        ]
+       ],
+       [
+        "Limits",
+        "k",
+        0,
+        [
+         "Subtract",
+         "N_var",
+         1
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "N_var",
+    "a",
+    "r",
+    "s"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "s",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ],
+    [
+     "NotEqual",
+     "s",
+     1
+    ],
+    [
+     "Or",
+     [
+      "NotElement",
+      "a",
+      "NonPositiveIntegers"
+     ],
+     [
+      "Less",
+      [
+       "Real",
+       "s"
+      ],
+      0
+     ]
+    ],
+    [
+     "Element",
+     "N_var",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "r",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "HurwitzZeta",
+    "Ln",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "a5980a",
+   "formula": [
+    "Implies",
+    [
+     "And",
+     [
+      "Element",
+      "s",
+      "NonPositiveIntegers"
+     ],
+     [
+      "Element",
+      "a",
+      "ComplexNumbers"
+     ]
+    ],
+    [
+     "Element",
+     [
+      "HurwitzZeta",
+      "s",
+      "a"
+     ],
+     "ComplexNumbers"
+    ]
+   ],
+   "variables": [
+    "a",
+    "s"
+   ],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "HurwitzZeta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "ac8d3c",
+   "formula": [
+    "Equal",
+    [
+     "HurwitzZeta",
+     2,
+     2
+    ],
+    [
+     "Subtract",
+     [
+      "Divide",
+      [
+       "Power",
+       "Pi",
+       2
+      ],
+      6
+     ],
+     1
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "HurwitzZeta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "ad269f",
+   "formula": [
+    "Implies",
+    [
+     "And",
+     [
+      "Element",
+      "s",
+      "ComplexNumbers"
+     ],
+     [
+      "Less",
+      [
+       "Real",
+       "s"
+      ],
+      0
+     ],
+     [
+      "Element",
+      "a",
+      "ComplexNumbers"
+     ]
+    ],
+    [
+     "Element",
+     [
+      "HurwitzZeta",
+      "s",
+      "a"
+     ],
+     "ComplexNumbers"
+    ]
+   ],
+   "variables": [
+    "a",
+    "s"
+   ],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "HurwitzZeta",
+    "Real"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "af23f7",
+   "formula": [
+    "Equal",
+    [
+     "HurwitzZeta",
+     "s",
+     1
+    ],
+    [
+     "Zeta",
+     "s"
+    ]
+   ],
+   "variables": [
+    "s"
+   ],
+   "assumptions": [
+    "Element",
+    "s",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "HurwitzZeta",
+    "Zeta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "af7d3d",
+   "formula": [
+    "Equal",
+    [
+     "HurwitzZeta",
+     "s",
+     [
+      "Divide",
+      1,
+      2
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Subtract",
+      [
+       "Power",
+       2,
+       "s"
+      ],
+      1
+     ],
+     [
+      "Zeta",
+      "s"
+     ]
+    ]
+   ],
+   "variables": [
+    "s"
+   ],
+   "assumptions": [
+    "Element",
+    "s",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "HurwitzZeta",
+    "Zeta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "b0f500",
+   "formula": [
+    "Implies",
+    [
+     "And",
+     [
+      "Element",
+      "s",
+      [
+       "SetMinus",
+       "Integers",
+       [
+        "Set",
+        1
+       ]
+      ]
+     ],
+     [
+      "Element",
+      "a",
+      [
+       "SetMinus",
+       "RealNumbers",
+       "NonPositiveIntegers"
+      ]
+     ]
+    ],
+    [
+     "Element",
+     [
+      "HurwitzZeta",
+      "s",
+      "a"
+     ],
+     "RealNumbers"
+    ]
+   ],
+   "variables": [
+    "a",
+    "s"
+   ],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "HurwitzZeta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "b347d3",
+   "formula": [
+    "Equal",
+    [
+     "HurwitzZeta",
+     3,
+     [
+      "Divide",
+      3,
+      4
+     ]
+    ],
+    [
+     "Subtract",
+     [
+      "Multiply",
+      28,
+      [
+       "Zeta",
+       3
+      ]
+     ],
+     [
+      "Power",
+      "Pi",
+      3
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "HurwitzZeta",
+    "Zeta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "b4ed44",
+   "formula": [
+    "Equal",
+    [
+     "HurwitzZeta",
+     3,
+     1
+    ],
+    [
+     "Zeta",
+     3
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "HurwitzZeta",
+    "Zeta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "b721b4",
+   "formula": [
+    "Equal",
+    [
+     "HurwitzZeta",
+     "s",
+     2
+    ],
+    [
+     "Subtract",
+     [
+      "Zeta",
+      "s"
+     ],
+     1
+    ]
+   ],
+   "variables": [
+    "s"
+   ],
+   "assumptions": [
+    "Element",
+    "s",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "HurwitzZeta",
+    "Zeta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "ba7f85",
+   "formula": [
+    "Equal",
+    [
+     "HurwitzZeta",
+     "s",
+     [
+      "Multiply",
+      "N_var",
+      "a"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      1,
+      [
+       "Power",
+       "N_var",
+       "s"
+      ]
+     ],
+     [
+      "Sum",
+      [
+       "HurwitzZeta",
+       "s",
+       [
+        "Add",
+        "a",
+        [
+         "Divide",
+         "k",
+         "N_var"
+        ]
+       ]
+      ],
+      [
+       "Limits",
+       "k",
+       0,
+       [
+        "Subtract",
+        "N_var",
+        1
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "N_var",
+    "a",
+    "s"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "s",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ],
+    [
+     "NotEqual",
+     "s",
+     1
+    ],
+    [
+     "Greater",
+     [
+      "Real",
+      "a"
+     ],
+     0
+    ],
+    [
+     "Element",
+     "N_var",
+     "PositiveIntegers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "HurwitzZeta",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "bed7ee",
+   "formula": [
+    "Equal",
+    [
+     "HurwitzZeta",
+     "s",
+     [
+      "Add",
+      "a",
+      "N_var"
+     ]
+    ],
+    [
+     "Subtract",
+     [
+      "HurwitzZeta",
+      "s",
+      "a"
+     ],
+     [
+      "Sum",
+      [
+       "Divide",
+       1,
+       [
+        "Power",
+        [
+         "Add",
+         "n",
+         "a"
+        ],
+        "s"
+       ]
+      ],
+      [
+       "Limits",
+       "n",
+       0,
+       [
+        "Subtract",
+        "N_var",
+        1
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "N_var",
+    "a",
+    "s"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "s",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ],
+    [
+     "NotEqual",
+     "s",
+     1
+    ],
+    [
+     "Or",
+     [
+      "NotElement",
+      "a",
+      "NonPositiveIntegers"
+     ],
+     [
+      "Less",
+      [
+       "Real",
+       "s"
+      ],
+      0
+     ],
+     [
+      "Equal",
+      "s",
+      0
+     ]
+    ],
+    [
+     "Element",
+     "N_var",
+     "PositiveIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "HurwitzZeta",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "c5d844",
+   "formula": [
+    "Implies",
+    [
+     "And",
+     [
+      "Element",
+      "s",
+      [
+       "Range",
+       2,
+       "PositiveInfinity"
+      ]
+     ],
+     [
+      "Element",
+      "a",
+      "NonPositiveIntegers"
+     ]
+    ],
+    [
+     "Element",
+     [
+      "HurwitzZeta",
+      "s",
+      "a"
+     ],
+     [
+      "Set",
+      "ComplexInfinity"
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "s"
+   ],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "HurwitzZeta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "c6d6e2",
+   "formula": [
+    "Equal",
+    [
+     "HurwitzZeta",
+     "s",
+     [
+      "Divide",
+      3,
+      2
+     ]
+    ],
+    [
+     "Subtract",
+     [
+      "Multiply",
+      [
+       "Subtract",
+       [
+        "Power",
+        2,
+        "s"
+       ],
+       1
+      ],
+      [
+       "Zeta",
+       "s"
+      ]
+     ],
+     [
+      "Power",
+      2,
+      "s"
+     ]
+    ]
+   ],
+   "variables": [
+    "s"
+   ],
+   "assumptions": [
+    "Element",
+    "s",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "HurwitzZeta",
+    "Zeta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "cc523f",
+   "formula": [
+    "Implies",
+    [
+     "And",
+     [
+      "Element",
+      "s",
+      "NonPositiveIntegers"
+     ],
+     [
+      "Element",
+      "a",
+      "RationalNumbers"
+     ]
+    ],
+    [
+     "Element",
+     [
+      "HurwitzZeta",
+      "s",
+      "a"
+     ],
+     "RationalNumbers"
+    ]
+   ],
+   "variables": [
+    "a",
+    "s"
+   ],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "HurwitzZeta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "d0b234",
+   "formula": [
+    "Implies",
+    [
+     "And",
+     [
+      "Element",
+      "s",
+      [
+       "Set",
+       1
+      ]
+     ],
+     [
+      "Element",
+      "a",
+      [
+       "SetMinus",
+       "ComplexNumbers",
+       "NonPositiveIntegers"
+      ]
+     ]
+    ],
+    [
+     "Element",
+     [
+      "HurwitzZeta",
+      "s",
+      "a"
+     ],
+     [
+      "Set",
+      "ComplexInfinity"
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "s"
+   ],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "HurwitzZeta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "d0d03b",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "HurwitzZeta",
+        "s",
+        "a"
+       ],
+       "s"
+      ],
+      "r"
+     ],
+     "s"
+    ],
+    [
+     "HurwitzZeta",
+     "s",
+     "a",
+     "r"
+    ]
+   ],
+   "variables": [
+    "a",
+    "r",
+    "s"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "s",
+     "ComplexNumbers"
+    ],
+    [
+     "NotEqual",
+     "s",
+     1
+    ],
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ],
+    [
+     "Greater",
+     [
+      "Real",
+      "a"
+     ],
+     0
+    ],
+    [
+     "Element",
+     "r",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Derivative",
+    "HurwitzZeta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "d25d10",
+   "formula": [
+    "Equal",
+    [
+     "HurwitzZeta",
+     "s",
+     "a"
+    ],
+    [
+     "Subtract",
+     [
+      "Add",
+      [
+       "Add",
+       [
+        "Sum",
+        [
+         "Divide",
+         1,
+         [
+          "Power",
+          [
+           "Add",
+           "a",
+           "k"
+          ],
+          "s"
+         ]
+        ],
+        [
+         "Limits",
+         "k",
+         0,
+         [
+          "Subtract",
+          "N_var",
+          1
+         ]
+        ]
+       ],
+       [
+        "Divide",
+        [
+         "Power",
+         [
+          "Add",
+          "a",
+          "N_var"
+         ],
+         [
+          "Subtract",
+          1,
+          "s"
+         ]
+        ],
+        [
+         "Subtract",
+         "s",
+         1
+        ]
+       ]
+      ],
+      [
+       "Multiply",
+       [
+        "Divide",
+        1,
+        [
+         "Power",
+         [
+          "Add",
+          "a",
+          "N_var"
+         ],
+         "s"
+        ]
+       ],
+       [
+        "Add",
+        [
+         "Divide",
+         1,
+         2
+        ],
+        [
+         "Sum",
+         [
+          "Multiply",
+          [
+           "Divide",
+           [
+            "BernoulliB",
+            [
+             "Multiply",
+             2,
+             "k"
+            ]
+           ],
+           [
+            "Factorial",
+            [
+             "Multiply",
+             2,
+             "k"
+            ]
+           ]
+          ],
+          [
+           "Divide",
+           [
+            "RisingFactorial",
+            "s",
+            [
+             "Subtract",
+             [
+              "Multiply",
+              2,
+              "k"
+             ],
+             1
+            ]
+           ],
+           [
+            "Power",
+            [
+             "Add",
+             "a",
+             "N_var"
+            ],
+            [
+             "Subtract",
+             [
+              "Multiply",
+              2,
+              "k"
+             ],
+             1
+            ]
+           ]
+          ]
+         ],
+         [
+          "Limits",
+          "k",
+          1,
+          "M"
+         ]
+        ]
+       ]
+      ]
+     ],
+     [
+      "Integrate",
+      [
+       "Multiply",
+       [
+        "Divide",
+        [
+         "BernoulliPolynomial",
+         [
+          "Multiply",
+          2,
+          "M"
+         ],
+         [
+          "Subtract",
+          "t",
+          [
+           "Floor",
+           "t"
+          ]
+         ]
+        ],
+        [
+         "Factorial",
+         [
+          "Multiply",
+          2,
+          "M"
+         ]
+        ]
+       ],
+       [
+        "Divide",
+        [
+         "RisingFactorial",
+         "s",
+         [
+          "Multiply",
+          2,
+          "M"
+         ]
+        ],
+        [
+         "Power",
+         [
+          "Add",
+          "a",
+          "t"
+         ],
+         [
+          "Add",
+          "s",
+          [
+           "Multiply",
+           2,
+           "M"
+          ]
+         ]
+        ]
+       ]
+      ],
+      [
+       "Limits",
+       "t",
+       "N_var",
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "M",
+    "N_var",
+    "a",
+    "s"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "s",
+     "ComplexNumbers"
+    ],
+    [
+     "NotEqual",
+     "s",
+     1
+    ],
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "N_var",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "M",
+     "PositiveIntegers"
+    ],
+    [
+     "Greater",
+     [
+      "Real",
+      [
+       "Add",
+       "a",
+       "N_var"
+      ]
+     ],
+     0
+    ],
+    [
+     "Greater",
+     [
+      "Real",
+      [
+       "Subtract",
+       [
+        "Add",
+        "s",
+        [
+         "Multiply",
+         2,
+         "M"
+        ]
+       ],
+       1
+      ]
+     ],
+     0
+    ],
+    [
+     "Or",
+     [
+      "NotElement",
+      "a",
+      "NonPositiveIntegers"
+     ],
+     [
+      "Less",
+      [
+       "Real",
+       "s"
+      ],
+      0
+     ],
+     [
+      "Equal",
+      "s",
+      0
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BernoulliB",
+    "BernoulliPolynomial",
+    "Factorial",
+    "Floor",
+    "HurwitzZeta",
+    "Integrate",
+    "RisingFactorial",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": [
+    "http://dx.doi.org/10.1007/s11075-014-9893-1"
+   ],
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "d99808",
+   "formula": [
+    "Equal",
+    [
+     "HurwitzZeta",
+     0,
+     "a"
+    ],
+    [
+     "Subtract",
+     [
+      "Divide",
+      1,
+      2
+     ],
+     "a"
+    ]
+   ],
+   "variables": [
+    "a"
+   ],
+   "assumptions": [
+    "Element",
+    "a",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "HurwitzZeta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "e7224b",
+   "formula": [
+    "Implies",
+    [
+     "And",
+     [
+      "Element",
+      "s",
+      [
+       "SetMinus",
+       "RealNumbers",
+       [
+        "Set",
+        1
+       ]
+      ]
+     ],
+     [
+      "Element",
+      "a",
+      [
+       "Interval",
+       [
+        "Open",
+        0
+       ],
+       [
+        "Open",
+        "PositiveInfinity"
+       ]
+      ]
+     ]
+    ],
+    [
+     "Element",
+     [
+      "HurwitzZeta",
+      "s",
+      "a"
+     ],
+     "RealNumbers"
+    ]
+   ],
+   "variables": [
+    "a",
+    "s"
+   ],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "HurwitzZeta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "ea271f",
+   "formula": [
+    "Implies",
+    [
+     "Element",
+     "a",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      "NonPositiveIntegers"
+     ]
+    ],
+    [
+     "IsMeromorphic",
+     [
+      "Function",
+      [
+       "HurwitzZeta",
+       "s",
+       "a"
+      ],
+      "s"
+     ],
+     "ComplexNumbers"
+    ]
+   ],
+   "variables": [
+    "a"
+   ],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "HurwitzZeta",
+    "IsMeromorphic"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "ebc49c",
+   "formula": [
+    "Equal",
+    [
+     "HurwitzZeta",
+     "s",
+     "a"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      1,
+      [
+       "Power",
+       2,
+       "s"
+      ]
+     ],
+     [
+      "Add",
+      [
+       "HurwitzZeta",
+       "s",
+       [
+        "Divide",
+        "a",
+        2
+       ]
+      ],
+      [
+       "HurwitzZeta",
+       "s",
+       [
+        "Divide",
+        [
+         "Add",
+         "a",
+         1
+        ],
+        2
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "s"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "s",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ],
+    [
+     "NotEqual",
+     "s",
+     1
+    ],
+    [
+     "Greater",
+     [
+      "Real",
+      "a"
+     ],
+     0
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "HurwitzZeta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "ec2dd5",
+   "formula": [
+    "Implies",
+    [
+     "And",
+     [
+      "Element",
+      "s",
+      "NonPositiveIntegers"
+     ],
+     [
+      "Element",
+      "a",
+      "RealNumbers"
+     ]
+    ],
+    [
+     "Element",
+     [
+      "HurwitzZeta",
+      "s",
+      "a"
+     ],
+     "RealNumbers"
+    ]
+   ],
+   "variables": [
+    "a",
+    "s"
+   ],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "HurwitzZeta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "ed4f6f",
+   "formula": [
+    "Equal",
+    [
+     "HurwitzZeta",
+     "s",
+     [
+      "Add",
+      "a",
+      1
+     ]
+    ],
+    [
+     "Subtract",
+     [
+      "HurwitzZeta",
+      "s",
+      "a"
+     ],
+     [
+      "Divide",
+      1,
+      [
+       "Power",
+       "a",
+       "s"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "s"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "s",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ],
+    [
+     "NotEqual",
+     "s",
+     1
+    ],
+    [
+     "Or",
+     [
+      "NotElement",
+      "a",
+      "NonPositiveIntegers"
+     ],
+     [
+      "Less",
+      [
+       "Real",
+       "s"
+      ],
+      0
+     ],
+     [
+      "Equal",
+      "s",
+      0
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "HurwitzZeta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "eda0f3",
+   "formula": [
+    "Equal",
+    [
+     "HurwitzZeta",
+     3,
+     [
+      "Divide",
+      1,
+      4
+     ]
+    ],
+    [
+     "Add",
+     [
+      "Multiply",
+      28,
+      [
+       "Zeta",
+       3
+      ]
+     ],
+     [
+      "Power",
+      "Pi",
+      3
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "HurwitzZeta",
+    "Zeta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "edad97",
+   "formula": [
+    "Equal",
+    [
+     "HurwitzZeta",
+     3,
+     [
+      "Divide",
+      5,
+      6
+     ]
+    ],
+    [
+     "Subtract",
+     [
+      "Multiply",
+      91,
+      [
+       "Zeta",
+       3
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Multiply",
+       2,
+       [
+        "Sqrt",
+        3
+       ]
+      ],
+      [
+       "Power",
+       "Pi",
+       3
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "HurwitzZeta",
+    "Zeta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "f045b3",
+   "formula": [
+    "Implies",
+    [
+     "Element",
+     "s",
+     "NonPositiveIntegers"
+    ],
+    [
+     "IsHolomorphic",
+     [
+      "Function",
+      [
+       "HurwitzZeta",
+       "s",
+       "a"
+      ],
+      "a"
+     ],
+     "ComplexNumbers"
+    ]
+   ],
+   "variables": [
+    "s"
+   ],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "HurwitzZeta",
+    "IsHolomorphic"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "f3b870",
+   "formula": [
+    "Equal",
+    [
+     "GammaLn",
+     "z"
+    ],
+    [
+     "Add",
+     [
+      "HurwitzZeta",
+      0,
+      "z",
+      1
+     ],
+     [
+      "Divide",
+      [
+       "Ln",
+       [
+        "Multiply",
+        2,
+        "Pi"
+       ]
+      ],
+      2
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     "NonPositiveIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "GammaLn",
+    "HurwitzZeta",
+    "Ln"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "fc6fe0",
+   "formula": [
+    "Equal",
+    [
+     "HurwitzZeta",
+     "s",
+     3
+    ],
+    [
+     "Subtract",
+     [
+      "Subtract",
+      [
+       "Zeta",
+       "s"
+      ],
+      1
+     ],
+     [
+      "Divide",
+      1,
+      [
+       "Power",
+       2,
+       "s"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "s"
+   ],
+   "assumptions": [
+    "Element",
+    "s",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "HurwitzZeta",
+    "Zeta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "febdd2",
+   "formula": [
+    "Equal",
+    [
+     "Zeta",
+     "s"
+    ],
+    [
+     "HurwitzZeta",
+     "s",
+     1
+    ]
+   ],
+   "variables": [
+    "s"
+   ],
+   "assumptions": [
+    "Element",
+    "s",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "HurwitzZeta",
+    "Zeta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta"
+   ]
+  }
+ ]
+}

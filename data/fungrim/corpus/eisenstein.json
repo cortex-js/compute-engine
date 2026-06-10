@@ -1,0 +1,5019 @@
+{
+ "topic": "eisenstein",
+ "title": "Illustrations of Eisenstein series",
+ "source": "pygrim/formulas/eisenstein.py",
+ "generator": "grim2mathjson 0.1.0",
+ "entries": [
+  {
+   "id": "03ad5a",
+   "formula": [
+    "Equal",
+    [
+     "EisensteinE",
+     2,
+     "tau"
+    ],
+    [
+     "Negate",
+     [
+      "Multiply",
+      [
+       "Divide",
+       [
+        "Multiply",
+        12,
+        "ImaginaryUnit"
+       ],
+       "Pi"
+      ],
+      [
+       "Divide",
+       [
+        "Apply",
+        [
+         "Derivative",
+         [
+          "Function",
+          [
+           "DedekindEta",
+           "tau"
+          ],
+          "tau"
+         ],
+         1
+        ],
+        "tau"
+       ],
+       [
+        "DedekindEta",
+        "tau"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": [
+    "Element",
+    "tau",
+    "HH"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "DedekindEta",
+    "Derivative",
+    "EisensteinE"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "eisenstein"
+   ]
+  },
+  {
+   "id": "044128",
+   "formula": [
+    "Equal",
+    [
+     "EisensteinE",
+     8,
+     "tau"
+    ],
+    [
+     "Power",
+     [
+      "EisensteinE",
+      4,
+      "tau"
+     ],
+     2
+    ]
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": [
+    "Element",
+    "tau",
+    "HH"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "EisensteinE"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "eisenstein"
+   ]
+  },
+  {
+   "id": "097efc",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "Multiply",
+       [
+        "ModularJ",
+        "tau"
+       ],
+       [
+        "Which",
+        [
+         "Equal",
+         "tau",
+         "ImaginaryUnit"
+        ],
+        [
+         "Divide",
+         1,
+         2
+        ],
+        "True",
+        1
+       ]
+      ],
+      [
+       "ComplexZeroMultiplicity",
+       [
+        "Function",
+        [
+         "EisensteinE",
+         [
+          "Multiply",
+          2,
+          "k"
+         ],
+         "z"
+        ],
+        "z"
+       ],
+       "tau"
+      ]
+     ],
+     [
+      "Element",
+      "tau",
+      "ModularGroupFundamentalDomain"
+     ]
+    ],
+    [
+     "Subtract",
+     [
+      "Multiply",
+      120,
+      "k"
+     ],
+     [
+      "Divide",
+      2,
+      [
+       "Zeta",
+       [
+        "Subtract",
+        1,
+        [
+         "Multiply",
+         2,
+         "k"
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "k"
+   ],
+   "assumptions": [
+    "Element",
+    "k",
+    [
+     "Range",
+     2,
+     "PositiveInfinity"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "ComplexZeroMultiplicity",
+    "EisensteinE",
+    "ModularGroupFundamentalDomain",
+    "ModularJ",
+    "Sum",
+    "Zeta"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": [
+    "K. Ono and M. A. Papanikolas (2004). p-Adic Properties of Values of the Modular j-Function. In: Hashimoto K., Miyake K., Nakamura H. (eds) Galois Theory and Modular Forms. Developments in Mathematics, vol 11. Springer, Boston, MA, https://doi.org/10.1007/978-1-4613-0249-0_19",
+    "S. Garthwaite, L. Long, H. Swisher, S. Treneer. Zeros of classical Eisenstein series and recent developments, Fields Communications Volume 60, WIN - Women In Numbers, Proceedings of the WIN Workshop, (2011), 251-263. http://math.oregonstate.edu/~swisherh/C1P.pdf"
+   ],
+   "topics": [
+    "eisenstein"
+   ]
+  },
+  {
+   "id": "0a2120",
+   "formula": [
+    "Equal",
+    [
+     "EisensteinE",
+     [
+      "Multiply",
+      2,
+      "k"
+     ],
+     "tau"
+    ],
+    [
+     "Divide",
+     [
+      "EisensteinG",
+      [
+       "Multiply",
+       2,
+       "k"
+      ],
+      "tau"
+     ],
+     [
+      "Multiply",
+      2,
+      [
+       "Zeta",
+       [
+        "Multiply",
+        2,
+        "k"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "k",
+    "tau"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "k",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "tau",
+     "HH"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "EisensteinE",
+    "EisensteinG",
+    "Zeta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "eisenstein"
+   ]
+  },
+  {
+   "id": "0a5ef4",
+   "formula": [
+    "Equal",
+    [
+     "EisensteinE",
+     6,
+     "tau"
+    ],
+    [
+     "Add",
+     [
+      "Subtract",
+      [
+       "Subtract",
+       [
+        "Divide",
+        [
+         "Power",
+         [
+          "DedekindEta",
+          "tau"
+         ],
+         24
+        ],
+        [
+         "Power",
+         [
+          "DedekindEta",
+          [
+           "Multiply",
+           2,
+           "tau"
+          ]
+         ],
+         12
+        ]
+       ],
+       [
+        "Multiply",
+        480,
+        [
+         "Power",
+         [
+          "DedekindEta",
+          [
+           "Multiply",
+           2,
+           "tau"
+          ]
+         ],
+         12
+        ]
+       ]
+      ],
+      [
+       "Multiply",
+       16896,
+       [
+        "Divide",
+        [
+         "Multiply",
+         [
+          "Power",
+          [
+           "DedekindEta",
+           [
+            "Multiply",
+            2,
+            "tau"
+           ]
+          ],
+          12
+         ],
+         [
+          "Power",
+          [
+           "DedekindEta",
+           [
+            "Multiply",
+            4,
+            "tau"
+           ]
+          ],
+          8
+         ]
+        ],
+        [
+         "Power",
+         [
+          "DedekindEta",
+          "tau"
+         ],
+         8
+        ]
+       ]
+      ]
+     ],
+     [
+      "Multiply",
+      8192,
+      [
+       "Divide",
+       [
+        "Power",
+        [
+         "DedekindEta",
+         [
+          "Multiply",
+          4,
+          "tau"
+         ]
+        ],
+        24
+       ],
+       [
+        "Power",
+        [
+         "DedekindEta",
+         [
+          "Multiply",
+          2,
+          "tau"
+         ]
+        ],
+        12
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": [
+    "Element",
+    "tau",
+    "HH"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "DedekindEta",
+    "EisensteinE"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": [
+    "K. Ono (2004), Web of Modularity: Arithmetic of the Coefficients of Modular Forms and q-series, American Mathematical Society. Theorem 1.67."
+   ],
+   "topics": [
+    "eisenstein"
+   ]
+  },
+  {
+   "id": "0b5b04",
+   "formula": [
+    "Equal",
+    [
+     "EisensteinG",
+     [
+      "Multiply",
+      2,
+      "k"
+     ],
+     [
+      "Divide",
+      [
+       "Add",
+       [
+        "Multiply",
+        "a",
+        "tau"
+       ],
+       "b"
+      ],
+      [
+       "Add",
+       [
+        "Multiply",
+        "c",
+        "tau"
+       ],
+       "d"
+      ]
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Power",
+      [
+       "Add",
+       [
+        "Multiply",
+        "c",
+        "tau"
+       ],
+       "d"
+      ],
+      [
+       "Multiply",
+       2,
+       "k"
+      ]
+     ],
+     [
+      "EisensteinG",
+      [
+       "Multiply",
+       2,
+       "k"
+      ],
+      "tau"
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b",
+    "c",
+    "d",
+    "k",
+    "tau"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "k",
+     [
+      "Range",
+      2,
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Element",
+     "tau",
+     "HH"
+    ],
+    [
+     "Element",
+     [
+      "Matrix",
+      [
+       "List",
+       [
+        "List",
+        "a",
+        "b"
+       ],
+       [
+        "List",
+        "c",
+        "d"
+       ]
+      ]
+     ],
+     "SL2Z"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "EisensteinG"
+   ],
+   "guardLevel": "undischargeable",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "eisenstein"
+   ]
+  },
+  {
+   "id": "0fda1b",
+   "formula": [
+    "Equal",
+    [
+     "EisensteinG",
+     6,
+     [
+      "Exp",
+      [
+       "Divide",
+       [
+        "Multiply",
+        [
+         "Multiply",
+         2,
+         "Pi"
+        ],
+        "ImaginaryUnit"
+       ],
+       3
+      ]
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Power",
+      [
+       "Gamma",
+       [
+        "Divide",
+        1,
+        3
+       ]
+      ],
+      18
+     ],
+     [
+      "Multiply",
+      8960,
+      [
+       "Power",
+       "Pi",
+       6
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "EisensteinG",
+    "Exp",
+    "Gamma"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "eisenstein"
+   ]
+  },
+  {
+   "id": "10cdf4",
+   "formula": [
+    "Equal",
+    [
+     "EisensteinE",
+     2,
+     "tau"
+    ],
+    [
+     "Subtract",
+     1,
+     [
+      "Multiply",
+      24,
+      [
+       "Sum",
+       [
+        "Multiply",
+        [
+         "DivisorSigma",
+         1,
+         "n"
+        ],
+        [
+         "Power",
+         [
+          "Exp",
+          [
+           "Multiply",
+           [
+            "Multiply",
+            [
+             "Multiply",
+             2,
+             "Pi"
+            ],
+            "ImaginaryUnit"
+           ],
+           "tau"
+          ]
+         ],
+         "n"
+        ]
+       ],
+       [
+        "Limits",
+        "n",
+        1,
+        "PositiveInfinity"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "k",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "tau",
+     "HH"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "DivisorSigma",
+    "EisensteinE",
+    "Exp",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "eisenstein"
+   ]
+  },
+  {
+   "id": "10f3b2",
+   "formula": [
+    "Equal",
+    [
+     "EisensteinE",
+     6,
+     "tau"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      1,
+      2
+     ],
+     [
+      "Subtract",
+      [
+       "Add",
+       [
+        "Power",
+        [
+         "JacobiTheta",
+         3,
+         0,
+         "tau"
+        ],
+        12
+       ],
+       [
+        "Power",
+        [
+         "JacobiTheta",
+         4,
+         0,
+         "tau"
+        ],
+        12
+       ]
+      ],
+      [
+       "Multiply",
+       [
+        "Multiply",
+        3,
+        [
+         "Power",
+         [
+          "JacobiTheta",
+          2,
+          0,
+          "tau"
+         ],
+         8
+        ]
+       ],
+       [
+        "Add",
+        [
+         "Power",
+         [
+          "JacobiTheta",
+          3,
+          0,
+          "tau"
+         ],
+         4
+        ],
+        [
+         "Power",
+         [
+          "JacobiTheta",
+          4,
+          0,
+          "tau"
+         ],
+         4
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": [
+    "Element",
+    "tau",
+    "HH"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "EisensteinE",
+    "JacobiTheta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "eisenstein",
+    "jacobi_theta"
+   ]
+  },
+  {
+   "id": "13cac5",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "Which",
+       [
+        "Equal",
+        "tau",
+        "ImaginaryUnit"
+       ],
+       [
+        "Divide",
+        1,
+        2
+       ],
+       [
+        "Equal",
+        "tau",
+        [
+         "Exp",
+         [
+          "Divide",
+          [
+           "Multiply",
+           [
+            "Multiply",
+            2,
+            "Pi"
+           ],
+           "ImaginaryUnit"
+          ],
+          3
+         ]
+        ]
+       ],
+       [
+        "Divide",
+        1,
+        3
+       ],
+       "True",
+       1
+      ],
+      [
+       "ComplexZeroMultiplicity",
+       [
+        "Function",
+        [
+         "EisensteinE",
+         [
+          "Multiply",
+          2,
+          "k"
+         ],
+         "z"
+        ],
+        "z"
+       ],
+       "tau"
+      ]
+     ],
+     [
+      "Element",
+      "tau",
+      "ModularGroupFundamentalDomain"
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Multiply",
+      2,
+      "k"
+     ],
+     12
+    ]
+   ],
+   "variables": [
+    "k"
+   ],
+   "assumptions": [
+    "Element",
+    "k",
+    [
+     "Range",
+     2,
+     "PositiveInfinity"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "ComplexZeroMultiplicity",
+    "EisensteinE",
+    "Exp",
+    "ModularGroupFundamentalDomain",
+    "Sum"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": [
+    "K. Ono and M. A. Papanikolas (2004). p-Adic Properties of Values of the Modular j-Function. In: Hashimoto K., Miyake K., Nakamura H. (eds) Galois Theory and Modular Forms. Developments in Mathematics, vol 11. Springer, Boston, MA, https://doi.org/10.1007/978-1-4613-0249-0_19",
+    "S. Garthwaite, L. Long, H. Swisher, S. Treneer. Zeros of classical Eisenstein series and recent developments, Fields Communications Volume 60, WIN - Women In Numbers, Proceedings of the WIN Workshop, (2011), 251-263. http://math.oregonstate.edu/~swisherh/C1P.pdf"
+   ],
+   "topics": [
+    "eisenstein"
+   ]
+  },
+  {
+   "id": "15b347",
+   "formula": [
+    "Equal",
+    [
+     "EisensteinE",
+     [
+      "Multiply",
+      2,
+      "k"
+     ],
+     "tau"
+    ],
+    [
+     "Subtract",
+     1,
+     [
+      "Multiply",
+      [
+       "Divide",
+       [
+        "Multiply",
+        4,
+        "k"
+       ],
+       [
+        "BernoulliB",
+        [
+         "Multiply",
+         2,
+         "k"
+        ]
+       ]
+      ],
+      [
+       "Sum",
+       [
+        "Sum",
+        [
+         "Multiply",
+         [
+          "Power",
+          "n",
+          [
+           "Subtract",
+           [
+            "Multiply",
+            2,
+            "k"
+           ],
+           1
+          ]
+         ],
+         [
+          "Power",
+          [
+           "Exp",
+           [
+            "Multiply",
+            [
+             "Multiply",
+             [
+              "Multiply",
+              2,
+              "Pi"
+             ],
+             "ImaginaryUnit"
+            ],
+            "tau"
+           ]
+          ],
+          [
+           "Multiply",
+           "m",
+           "n"
+          ]
+         ]
+        ],
+        [
+         "Limits",
+         "m",
+         1,
+         "PositiveInfinity"
+        ]
+       ],
+       [
+        "Limits",
+        "n",
+        1,
+        "PositiveInfinity"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "k",
+    "tau"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "k",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "tau",
+     "HH"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BernoulliB",
+    "EisensteinE",
+    "Exp",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "eisenstein"
+   ]
+  },
+  {
+   "id": "171724",
+   "formula": [
+    "Equal",
+    [
+     "EisensteinE",
+     6,
+     "tau"
+    ],
+    [
+     "Add",
+     1,
+     [
+      "Multiply",
+      63,
+      [
+       "Sum",
+       [
+        "Divide",
+        [
+         "Add",
+         [
+          "Add",
+          [
+           "Multiply",
+           2,
+           [
+            "Power",
+            [
+             "Cos",
+             [
+              "Multiply",
+              [
+               "Multiply",
+               "Pi",
+               "m"
+              ],
+              "tau"
+             ]
+            ],
+            4
+           ]
+          ],
+          [
+           "Multiply",
+           11,
+           [
+            "Power",
+            [
+             "Cos",
+             [
+              "Multiply",
+              [
+               "Multiply",
+               "Pi",
+               "m"
+              ],
+              "tau"
+             ]
+            ],
+            2
+           ]
+          ]
+         ],
+         2
+        ],
+        [
+         "Power",
+         [
+          "Sin",
+          [
+           "Multiply",
+           [
+            "Multiply",
+            "Pi",
+            "m"
+           ],
+           "tau"
+          ]
+         ],
+         6
+        ]
+       ],
+       [
+        "Limits",
+        "m",
+        1,
+        "PositiveInfinity"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "tau",
+     "HH"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Cos",
+    "EisensteinE",
+    "Sin",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "eisenstein"
+   ]
+  },
+  {
+   "id": "18a4d1",
+   "formula": [
+    "Equal",
+    [
+     "EisensteinE",
+     2,
+     "tau"
+    ],
+    [
+     "Add",
+     1,
+     [
+      "Multiply",
+      6,
+      [
+       "Sum",
+       [
+        "Divide",
+        1,
+        [
+         "Power",
+         [
+          "Sin",
+          [
+           "Multiply",
+           [
+            "Multiply",
+            "Pi",
+            "m"
+           ],
+           "tau"
+          ]
+         ],
+         2
+        ]
+       ],
+       [
+        "Limits",
+        "m",
+        1,
+        "PositiveInfinity"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "tau",
+     "HH"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "EisensteinE",
+    "Sin",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "eisenstein"
+   ]
+  },
+  {
+   "id": "23a5e0",
+   "formula": [
+    "Equal",
+    [
+     "EisensteinG",
+     [
+      "Multiply",
+      2,
+      "k"
+     ],
+     [
+      "Add",
+      "tau",
+      "n"
+     ]
+    ],
+    [
+     "EisensteinG",
+     [
+      "Multiply",
+      2,
+      "k"
+     ],
+     "tau"
+    ]
+   ],
+   "variables": [
+    "k",
+    "n",
+    "tau"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "k",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "tau",
+     "HH"
+    ],
+    [
+     "Element",
+     "n",
+     "Integers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "EisensteinG"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "eisenstein"
+   ]
+  },
+  {
+   "id": "298bb1",
+   "formula": [
+    "Implies",
+    [
+     "And",
+     [
+      "Equal",
+      [
+       "EisensteinE",
+       [
+        "Multiply",
+        2,
+        "k"
+       ],
+       "tau"
+      ],
+      0
+     ],
+     [
+      "NotElement",
+      "tau",
+      [
+       "Set",
+       "ImaginaryUnit",
+       [
+        "Exp",
+        [
+         "Divide",
+         [
+          "Multiply",
+          [
+           "Multiply",
+           2,
+           "Pi"
+          ],
+          "ImaginaryUnit"
+         ],
+         3
+        ]
+       ]
+      ]
+     ]
+    ],
+    [
+     "NotElement",
+     "tau",
+     "AlgebraicNumbers"
+    ]
+   ],
+   "variables": [
+    "k",
+    "tau"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "k",
+     [
+      "Range",
+      2,
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Element",
+     "tau",
+     "ModularGroupFundamentalDomain"
+    ]
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "EisensteinE",
+    "Exp"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": [
+    "https://doi.org/10.14992/00008713"
+   ],
+   "topics": [
+    "eisenstein"
+   ]
+  },
+  {
+   "id": "2f6805",
+   "formula": [
+    "Subset",
+    [
+     "Zeros",
+     [
+      "Function",
+      [
+       "EisensteinE",
+       [
+        "Multiply",
+        2,
+        "k"
+       ],
+       "tau"
+      ],
+      "tau"
+     ],
+     "ModularGroupFundamentalDomain"
+    ],
+    [
+     "Set",
+     [
+      "Exp",
+      [
+       "Multiply",
+       "ImaginaryUnit",
+       "theta"
+      ]
+     ],
+     [
+      "Element",
+      "theta",
+      [
+       "Interval",
+       [
+        "Divide",
+        "Pi",
+        2
+       ],
+       [
+        "Divide",
+        [
+         "Multiply",
+         2,
+         "Pi"
+        ],
+        3
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "k"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "k",
+     [
+      "Range",
+      2,
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "EisensteinE",
+    "Exp",
+    "ModularGroupFundamentalDomain",
+    "Zeros"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": [
+    "F. K. C. Rankin and H. P. F. Swinnerton-Dyer, On the zeros of Eisenstein Series, Bull. London Math. Soc., 2(1970),169-170."
+   ],
+   "topics": [
+    "eisenstein"
+   ]
+  },
+  {
+   "id": "30a054",
+   "formula": [
+    "Equal",
+    [
+     "EisensteinE",
+     2,
+     [
+      "Exp",
+      [
+       "Divide",
+       [
+        "Multiply",
+        [
+         "Multiply",
+         2,
+         "Pi"
+        ],
+        "ImaginaryUnit"
+       ],
+       3
+      ]
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Multiply",
+      2,
+      [
+       "Sqrt",
+       3
+      ]
+     ],
+     "Pi"
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "EisensteinE",
+    "Exp"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "eisenstein"
+   ]
+  },
+  {
+   "id": "3102a7",
+   "formula": [
+    "Equal",
+    [
+     "EisensteinG",
+     4,
+     [
+      "Exp",
+      [
+       "Divide",
+       [
+        "Multiply",
+        [
+         "Multiply",
+         2,
+         "Pi"
+        ],
+        "ImaginaryUnit"
+       ],
+       3
+      ]
+     ]
+    ],
+    [
+     "EisensteinE",
+     4,
+     [
+      "Exp",
+      [
+       "Divide",
+       [
+        "Multiply",
+        [
+         "Multiply",
+         2,
+         "Pi"
+        ],
+        "ImaginaryUnit"
+       ],
+       3
+      ]
+     ]
+    ],
+    0
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "EisensteinE",
+    "EisensteinG",
+    "Exp"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "eisenstein"
+   ]
+  },
+  {
+   "id": "36fff2",
+   "formula": [
+    "Equal",
+    [
+     "EisensteinE",
+     12,
+     "tau"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      1,
+      691
+     ],
+     [
+      "Add",
+      [
+       "Multiply",
+       441,
+       [
+        "Power",
+        [
+         "EisensteinE",
+         4,
+         "tau"
+        ],
+        3
+       ]
+      ],
+      [
+       "Multiply",
+       250,
+       [
+        "Power",
+        [
+         "EisensteinE",
+         6,
+         "tau"
+        ],
+        2
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": [
+    "Element",
+    "tau",
+    "HH"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "EisensteinE"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "eisenstein"
+   ]
+  },
+  {
+   "id": "3bf702",
+   "formula": [
+    "Equal",
+    [
+     "EisensteinE",
+     2,
+     "tau"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      6,
+      [
+       "Power",
+       "Pi",
+       2
+      ]
+     ],
+     [
+      "WeierstrassZeta",
+      [
+       "Divide",
+       1,
+       2
+      ],
+      "tau"
+     ]
+    ]
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": [
+    "Element",
+    "tau",
+    "HH"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "EisensteinE",
+    "WeierstrassZeta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "eisenstein"
+   ]
+  },
+  {
+   "id": "3bfced",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "EisensteinE",
+        6,
+        "tau"
+       ],
+       "tau"
+      ],
+      1
+     ],
+     "tau"
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      [
+       "Multiply",
+       2,
+       "Pi"
+      ],
+      "ImaginaryUnit"
+     ],
+     [
+      "Divide",
+      [
+       "Subtract",
+       [
+        "Multiply",
+        [
+         "EisensteinE",
+         2,
+         "tau"
+        ],
+        [
+         "EisensteinE",
+         6,
+         "tau"
+        ]
+       ],
+       [
+        "Power",
+        [
+         "EisensteinE",
+         4,
+         "tau"
+        ],
+        2
+       ]
+      ],
+      2
+     ]
+    ]
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": [
+    "Element",
+    "tau",
+    "HH"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Derivative",
+    "EisensteinE"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": [
+    "B. C. Berndt and A. J. Yee (2002) Ramanujan's Contributions to Eisenstein Series, Especially in His Lost Notebook. In: Kanemitsu S., Jia C. (eds) Number Theoretic Methods. Developments in Mathematics, vol 8. Springer, Boston, MA. https://doi.org/10.1007/978-1-4757-3675-5_3"
+   ],
+   "topics": [
+    "eisenstein"
+   ]
+  },
+  {
+   "id": "3e84e3",
+   "formula": [
+    "Equal",
+    [
+     "WeierstrassZeta",
+     "z",
+     "tau"
+    ],
+    [
+     "Subtract",
+     [
+      "Divide",
+      1,
+      "z"
+     ],
+     [
+      "Sum",
+      [
+       "Multiply",
+       [
+        "EisensteinG",
+        [
+         "Add",
+         [
+          "Multiply",
+          2,
+          "k"
+         ],
+         2
+        ],
+        "tau"
+       ],
+       [
+        "Power",
+        "z",
+        [
+         "Add",
+         [
+          "Multiply",
+          2,
+          "k"
+         ],
+         1
+        ]
+       ]
+      ],
+      [
+       "Limits",
+       "k",
+       1,
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "tau",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "tau",
+     "HH"
+    ],
+    [
+     "Less",
+     [
+      "Abs",
+      "z"
+     ],
+     [
+      "Infimum",
+      [
+       "Set",
+       [
+        "Abs",
+        "s"
+       ],
+       [
+        "Element",
+        "s",
+        [
+         "SetMinus",
+         [
+          "Lattice",
+          1,
+          "tau"
+         ],
+         [
+          "Set",
+          0
+         ]
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "EisensteinG",
+    "Sum",
+    "WeierstrassZeta"
+   ],
+   "guardLevel": "undischargeable",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "eisenstein",
+    "weierstrass_elliptic"
+   ]
+  },
+  {
+   "id": "4da2cd",
+   "formula": [
+    "Equal",
+    [
+     "EisensteinE",
+     4,
+     "tau"
+    ],
+    [
+     "Add",
+     [
+      "Divide",
+      [
+       "Power",
+       [
+        "DedekindEta",
+        "tau"
+       ],
+       16
+      ],
+      [
+       "Power",
+       [
+        "DedekindEta",
+        [
+         "Multiply",
+         2,
+         "tau"
+        ]
+       ],
+       8
+      ]
+     ],
+     [
+      "Multiply",
+      256,
+      [
+       "Divide",
+       [
+        "Power",
+        [
+         "DedekindEta",
+         [
+          "Multiply",
+          2,
+          "tau"
+         ]
+        ],
+        16
+       ],
+       [
+        "Power",
+        [
+         "DedekindEta",
+         "tau"
+        ],
+        8
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": [
+    "Element",
+    "tau",
+    "HH"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "DedekindEta",
+    "EisensteinE"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": [
+    "K. Ono (2004), Web of Modularity: Arithmetic of the Coefficients of Modular Forms and q-series, American Mathematical Society. Theorem 1.67."
+   ],
+   "topics": [
+    "eisenstein"
+   ]
+  },
+  {
+   "id": "5161ab",
+   "formula": [
+    "Equal",
+    [
+     "EisensteinG",
+     2,
+     [
+      "Divide",
+      [
+       "Add",
+       [
+        "Multiply",
+        "a",
+        "tau"
+       ],
+       "b"
+      ],
+      [
+       "Add",
+       [
+        "Multiply",
+        "c",
+        "tau"
+       ],
+       "d"
+      ]
+     ]
+    ],
+    [
+     "Subtract",
+     [
+      "Multiply",
+      [
+       "Power",
+       [
+        "Add",
+        [
+         "Multiply",
+         "c",
+         "tau"
+        ],
+        "d"
+       ],
+       2
+      ],
+      [
+       "EisensteinG",
+       2,
+       "tau"
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Multiply",
+       [
+        "Multiply",
+        [
+         "Multiply",
+         2,
+         "Pi"
+        ],
+        "ImaginaryUnit"
+       ],
+       "c"
+      ],
+      [
+       "Add",
+       [
+        "Multiply",
+        "c",
+        "tau"
+       ],
+       "d"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b",
+    "c",
+    "d",
+    "tau"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "tau",
+     "HH"
+    ],
+    [
+     "Element",
+     [
+      "Matrix",
+      [
+       "List",
+       [
+        "List",
+        "a",
+        "b"
+       ],
+       [
+        "List",
+        "c",
+        "d"
+       ]
+      ]
+     ],
+     "SL2Z"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "EisensteinG"
+   ],
+   "guardLevel": "undischargeable",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "eisenstein"
+   ]
+  },
+  {
+   "id": "53fcdd",
+   "formula": [
+    "Equal",
+    [
+     "EisensteinE",
+     4,
+     "ImaginaryUnit"
+    ],
+    [
+     "Divide",
+     [
+      "Multiply",
+      3,
+      [
+       "Power",
+       [
+        "Gamma",
+        [
+         "Divide",
+         1,
+         4
+        ]
+       ],
+       8
+      ]
+     ],
+     [
+      "Multiply",
+      64,
+      [
+       "Power",
+       "Pi",
+       6
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "EisensteinE",
+    "Gamma"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "eisenstein"
+   ]
+  },
+  {
+   "id": "5540a1",
+   "formula": [
+    "Equal",
+    [
+     "EisensteinG",
+     [
+      "Multiply",
+      2,
+      "k"
+     ],
+     "tau"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      3,
+      [
+       "Multiply",
+       [
+        "Multiply",
+        [
+         "Add",
+         [
+          "Multiply",
+          2,
+          "k"
+         ],
+         1
+        ],
+        [
+         "Subtract",
+         "k",
+         3
+        ]
+       ],
+       [
+        "Subtract",
+        [
+         "Multiply",
+         2,
+         "k"
+        ],
+        1
+       ]
+      ]
+     ],
+     [
+      "Sum",
+      [
+       "Multiply",
+       [
+        "Multiply",
+        [
+         "Multiply",
+         [
+          "Subtract",
+          [
+           "Multiply",
+           2,
+           "r"
+          ],
+          1
+         ],
+         [
+          "Subtract",
+          [
+           "Subtract",
+           [
+            "Multiply",
+            2,
+            "k"
+           ],
+           [
+            "Multiply",
+            2,
+            "r"
+           ]
+          ],
+          1
+         ]
+        ],
+        [
+         "EisensteinG",
+         [
+          "Multiply",
+          2,
+          "r"
+         ],
+         "tau"
+        ]
+       ],
+       [
+        "EisensteinG",
+        [
+         "Subtract",
+         [
+          "Multiply",
+          2,
+          "k"
+         ],
+         [
+          "Multiply",
+          2,
+          "r"
+         ]
+        ],
+        "tau"
+       ]
+      ],
+      [
+       "Limits",
+       "r",
+       2,
+       [
+        "Subtract",
+        "k",
+        2
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "k",
+    "tau"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "k",
+     [
+      "Range",
+      4,
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Element",
+     "tau",
+     "HH"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "EisensteinG",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": [
+    "T. Apostol (1976), Modular Functions and Dirichlet Series in Number Theory, Springer. Theorem 1.13."
+   ],
+   "topics": [
+    "eisenstein"
+   ]
+  },
+  {
+   "id": "570399",
+   "formula": [
+    "Equal",
+    [
+     "EisensteinG",
+     2,
+     "ImaginaryUnit"
+    ],
+    "Pi"
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "EisensteinG"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "eisenstein"
+   ]
+  },
+  {
+   "id": "67f2ef",
+   "formula": [
+    "Element",
+    [
+     "UniqueZero",
+     [
+      "Function",
+      [
+       "EisensteinE",
+       2,
+       [
+        "Multiply",
+        "ImaginaryUnit",
+        "y"
+       ]
+      ],
+      "y"
+     ],
+     [
+      "Interval",
+      [
+       "Open",
+       0
+      ],
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
+     ]
+    ],
+    [
+     "RealBall",
+     {
+      "num": "0.523521700017999266800534404806"
+     },
+     {
+      "num": "1.10e-31"
+     }
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "EisensteinE",
+    "RealBall",
+    "UniqueZero"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "eisenstein"
+   ]
+  },
+  {
+   "id": "6c71c0",
+   "formula": [
+    "Equal",
+    [
+     "EisensteinE",
+     6,
+     [
+      "Exp",
+      [
+       "Divide",
+       [
+        "Multiply",
+        [
+         "Multiply",
+         2,
+         "Pi"
+        ],
+        "ImaginaryUnit"
+       ],
+       3
+      ]
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Multiply",
+      27,
+      [
+       "Power",
+       [
+        "Gamma",
+        [
+         "Divide",
+         1,
+         3
+        ]
+       ],
+       18
+      ]
+     ],
+     [
+      "Multiply",
+      512,
+      [
+       "Power",
+       "Pi",
+       12
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "EisensteinE",
+    "Exp",
+    "Gamma"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "eisenstein"
+   ]
+  },
+  {
+   "id": "6d2880",
+   "formula": [
+    "Equal",
+    [
+     "EisensteinE",
+     8,
+     "tau"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      1,
+      2
+     ],
+     [
+      "Add",
+      [
+       "Add",
+       [
+        "Power",
+        [
+         "JacobiTheta",
+         2,
+         0,
+         "tau"
+        ],
+        16
+       ],
+       [
+        "Power",
+        [
+         "JacobiTheta",
+         3,
+         0,
+         "tau"
+        ],
+        16
+       ]
+      ],
+      [
+       "Power",
+       [
+        "JacobiTheta",
+        4,
+        0,
+        "tau"
+       ],
+       16
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": [
+    "Element",
+    "tau",
+    "HH"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "EisensteinE",
+    "JacobiTheta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "eisenstein"
+   ]
+  },
+  {
+   "id": "7b62e4",
+   "formula": [
+    "Equal",
+    [
+     "EisensteinE",
+     2,
+     "tau"
+    ],
+    [
+     "Subtract",
+     1,
+     [
+      "Multiply",
+      12,
+      [
+       "Sum",
+       [
+        "Divide",
+        1,
+        [
+         "Subtract",
+         [
+          "Cos",
+          [
+           "Multiply",
+           [
+            "Multiply",
+            [
+             "Multiply",
+             2,
+             "Pi"
+            ],
+            "m"
+           ],
+           "tau"
+          ]
+         ],
+         1
+        ]
+       ],
+       [
+        "Limits",
+        "m",
+        1,
+        "PositiveInfinity"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "tau",
+     "HH"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Cos",
+    "EisensteinE",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "eisenstein"
+   ]
+  },
+  {
+   "id": "7c00e6",
+   "formula": [
+    "Equal",
+    [
+     "EisensteinE",
+     [
+      "Multiply",
+      2,
+      "k"
+     ],
+     "tau"
+    ],
+    [
+     "Subtract",
+     1,
+     [
+      "Multiply",
+      [
+       "Divide",
+       [
+        "Multiply",
+        4,
+        "k"
+       ],
+       [
+        "BernoulliB",
+        [
+         "Multiply",
+         2,
+         "k"
+        ]
+       ]
+      ],
+      [
+       "Sum",
+       [
+        "Multiply",
+        [
+         "DivisorSigma",
+         [
+          "Subtract",
+          [
+           "Multiply",
+           2,
+           "k"
+          ],
+          1
+         ],
+         "n"
+        ],
+        [
+         "Power",
+         [
+          "Exp",
+          [
+           "Multiply",
+           [
+            "Multiply",
+            [
+             "Multiply",
+             2,
+             "Pi"
+            ],
+            "ImaginaryUnit"
+           ],
+           "tau"
+          ]
+         ],
+         "n"
+        ]
+       ],
+       [
+        "Limits",
+        "n",
+        1,
+        "PositiveInfinity"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "k",
+    "tau"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "k",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "tau",
+     "HH"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BernoulliB",
+    "DivisorSigma",
+    "EisensteinE",
+    "Exp",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "eisenstein"
+   ]
+  },
+  {
+   "id": "7cda09",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "EisensteinE",
+        2,
+        "tau"
+       ],
+       "tau"
+      ],
+      1
+     ],
+     "tau"
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      [
+       "Multiply",
+       2,
+       "Pi"
+      ],
+      "ImaginaryUnit"
+     ],
+     [
+      "Divide",
+      [
+       "Subtract",
+       [
+        "Power",
+        [
+         "EisensteinE",
+         2,
+         "tau"
+        ],
+        2
+       ],
+       [
+        "EisensteinE",
+        4,
+        "tau"
+       ]
+      ],
+      12
+     ]
+    ]
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": [
+    "Element",
+    "tau",
+    "HH"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Derivative",
+    "EisensteinE"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": [
+    "B. C. Berndt and A. J. Yee (2002) Ramanujan's Contributions to Eisenstein Series, Especially in His Lost Notebook. In: Kanemitsu S., Jia C. (eds) Number Theoretic Methods. Developments in Mathematics, vol 8. Springer, Boston, MA. https://doi.org/10.1007/978-1-4757-3675-5_3"
+   ],
+   "topics": [
+    "eisenstein"
+   ]
+  },
+  {
+   "id": "7f4c85",
+   "formula": [
+    "Equal",
+    [
+     "EisensteinE",
+     2,
+     [
+      "Divide",
+      [
+       "Add",
+       [
+        "Multiply",
+        "a",
+        "tau"
+       ],
+       "b"
+      ],
+      [
+       "Add",
+       [
+        "Multiply",
+        "c",
+        "tau"
+       ],
+       "d"
+      ]
+     ]
+    ],
+    [
+     "Subtract",
+     [
+      "Multiply",
+      [
+       "Power",
+       [
+        "Add",
+        [
+         "Multiply",
+         "c",
+         "tau"
+        ],
+        "d"
+       ],
+       2
+      ],
+      [
+       "EisensteinE",
+       2,
+       "tau"
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Multiply",
+       [
+        "Divide",
+        [
+         "Multiply",
+         6,
+         "ImaginaryUnit"
+        ],
+        "Pi"
+       ],
+       "c"
+      ],
+      [
+       "Add",
+       [
+        "Multiply",
+        "c",
+        "tau"
+       ],
+       "d"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b",
+    "c",
+    "d",
+    "tau"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "tau",
+     "HH"
+    ],
+    [
+     "Element",
+     [
+      "Matrix",
+      [
+       "List",
+       [
+        "List",
+        "a",
+        "b"
+       ],
+       [
+        "List",
+        "c",
+        "d"
+       ]
+      ]
+     ],
+     "SL2Z"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "EisensteinE"
+   ],
+   "guardLevel": "undischargeable",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "eisenstein"
+   ]
+  },
+  {
+   "id": "848d97",
+   "formula": [
+    "Equal",
+    [
+     "EisensteinE",
+     [
+      "Multiply",
+      2,
+      "k"
+     ],
+     "tau"
+    ],
+    [
+     "Subtract",
+     1,
+     [
+      "Multiply",
+      [
+       "Divide",
+       [
+        "Multiply",
+        4,
+        "k"
+       ],
+       [
+        "BernoulliB",
+        [
+         "Multiply",
+         2,
+         "k"
+        ]
+       ]
+      ],
+      [
+       "Sum",
+       [
+        "Divide",
+        [
+         "Multiply",
+         [
+          "Power",
+          "n",
+          [
+           "Subtract",
+           [
+            "Multiply",
+            2,
+            "k"
+           ],
+           1
+          ]
+         ],
+         [
+          "Power",
+          [
+           "Exp",
+           [
+            "Multiply",
+            [
+             "Multiply",
+             [
+              "Multiply",
+              2,
+              "Pi"
+             ],
+             "ImaginaryUnit"
+            ],
+            "tau"
+           ]
+          ],
+          "n"
+         ]
+        ],
+        [
+         "Subtract",
+         1,
+         [
+          "Power",
+          [
+           "Exp",
+           [
+            "Multiply",
+            [
+             "Multiply",
+             [
+              "Multiply",
+              2,
+              "Pi"
+             ],
+             "ImaginaryUnit"
+            ],
+            "tau"
+           ]
+          ],
+          "n"
+         ]
+        ]
+       ],
+       [
+        "Limits",
+        "n",
+        1,
+        "PositiveInfinity"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "k",
+    "tau"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "k",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "tau",
+     "HH"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BernoulliB",
+    "EisensteinE",
+    "Exp",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "eisenstein"
+   ]
+  },
+  {
+   "id": "8ffe07",
+   "formula": [
+    "Equal",
+    [
+     "EisensteinE",
+     [
+      "Multiply",
+      2,
+      "k"
+     ],
+     [
+      "Divide",
+      [
+       "Add",
+       [
+        "Multiply",
+        "a",
+        "tau"
+       ],
+       "b"
+      ],
+      [
+       "Add",
+       [
+        "Multiply",
+        "c",
+        "tau"
+       ],
+       "d"
+      ]
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Power",
+      [
+       "Add",
+       [
+        "Multiply",
+        "c",
+        "tau"
+       ],
+       "d"
+      ],
+      [
+       "Multiply",
+       2,
+       "k"
+      ]
+     ],
+     [
+      "EisensteinE",
+      [
+       "Multiply",
+       2,
+       "k"
+      ],
+      "tau"
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b",
+    "c",
+    "d",
+    "k",
+    "tau"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "k",
+     [
+      "Range",
+      2,
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Element",
+     "tau",
+     "HH"
+    ],
+    [
+     "Element",
+     [
+      "Matrix",
+      [
+       "List",
+       [
+        "List",
+        "a",
+        "b"
+       ],
+       [
+        "List",
+        "c",
+        "d"
+       ]
+      ]
+     ],
+     "SL2Z"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "EisensteinE"
+   ],
+   "guardLevel": "undischargeable",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "eisenstein"
+   ]
+  },
+  {
+   "id": "9bf0ad",
+   "formula": [
+    "Equal",
+    [
+     "WeierstrassP",
+     "z",
+     "tau"
+    ],
+    [
+     "Add",
+     [
+      "Divide",
+      1,
+      [
+       "Power",
+       "z",
+       2
+      ]
+     ],
+     [
+      "Sum",
+      [
+       "Multiply",
+       [
+        "Multiply",
+        [
+         "Add",
+         [
+          "Multiply",
+          2,
+          "k"
+         ],
+         1
+        ],
+        [
+         "EisensteinG",
+         [
+          "Add",
+          [
+           "Multiply",
+           2,
+           "k"
+          ],
+          2
+         ],
+         "tau"
+        ]
+       ],
+       [
+        "Power",
+        "z",
+        [
+         "Multiply",
+         2,
+         "k"
+        ]
+       ]
+      ],
+      [
+       "Limits",
+       "k",
+       1,
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "tau",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "tau",
+     "HH"
+    ],
+    [
+     "Less",
+     [
+      "Abs",
+      "z"
+     ],
+     [
+      "Infimum",
+      [
+       "Set",
+       [
+        "Abs",
+        "s"
+       ],
+       [
+        "Element",
+        "s",
+        [
+         "SetMinus",
+         [
+          "Lattice",
+          1,
+          "tau"
+         ],
+         [
+          "Set",
+          0
+         ]
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "EisensteinG",
+    "Sum",
+    "WeierstrassP"
+   ],
+   "guardLevel": "undischargeable",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "eisenstein",
+    "weierstrass_elliptic"
+   ]
+  },
+  {
+   "id": "9e1f83",
+   "formula": [
+    "Equal",
+    [
+     "EisensteinE",
+     14,
+     "tau"
+    ],
+    [
+     "Multiply",
+     [
+      "EisensteinE",
+      4,
+      "tau"
+     ],
+     [
+      "EisensteinE",
+      10,
+      "tau"
+     ]
+    ]
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": [
+    "Element",
+    "tau",
+    "HH"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "EisensteinE"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "eisenstein"
+   ]
+  },
+  {
+   "id": "9ea739",
+   "formula": [
+    "Equal",
+    [
+     "EisensteinG",
+     2,
+     [
+      "Exp",
+      [
+       "Divide",
+       [
+        "Multiply",
+        [
+         "Multiply",
+         2,
+         "Pi"
+        ],
+        "ImaginaryUnit"
+       ],
+       3
+      ]
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Multiply",
+      2,
+      "Pi"
+     ],
+     [
+      "Sqrt",
+      3
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "EisensteinG",
+    "Exp"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "eisenstein"
+   ]
+  },
+  {
+   "id": "a0dff6",
+   "formula": [
+    "Equal",
+    [
+     "Power",
+     [
+      "EisensteinE",
+      6,
+      "tau"
+     ],
+     2
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      1,
+      8
+     ],
+     [
+      "Subtract",
+      [
+       "Power",
+       [
+        "Add",
+        [
+         "Add",
+         [
+          "Power",
+          [
+           "JacobiTheta",
+           2,
+           0,
+           "tau"
+          ],
+          8
+         ],
+         [
+          "Power",
+          [
+           "JacobiTheta",
+           3,
+           0,
+           "tau"
+          ],
+          8
+         ]
+        ],
+        [
+         "Power",
+         [
+          "JacobiTheta",
+          4,
+          0,
+          "tau"
+         ],
+         8
+        ]
+       ],
+       3
+      ],
+      [
+       "Multiply",
+       54,
+       [
+        "Power",
+        [
+         "Multiply",
+         [
+          "Multiply",
+          [
+           "JacobiTheta",
+           2,
+           0,
+           "tau"
+          ],
+          [
+           "JacobiTheta",
+           3,
+           0,
+           "tau"
+          ]
+         ],
+         [
+          "JacobiTheta",
+          4,
+          0,
+          "tau"
+         ]
+        ],
+        8
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": [
+    "Element",
+    "tau",
+    "HH"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "EisensteinE",
+    "JacobiTheta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "eisenstein"
+   ]
+  },
+  {
+   "id": "a4109c",
+   "formula": [
+    "Equal",
+    [
+     "EisensteinG",
+     6,
+     "ImaginaryUnit"
+    ],
+    [
+     "EisensteinE",
+     6,
+     "ImaginaryUnit"
+    ],
+    0
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "EisensteinE",
+    "EisensteinG"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "eisenstein"
+   ]
+  },
+  {
+   "id": "a50278",
+   "formula": [
+    "GreaterEqual",
+    [
+     "Count",
+     [
+      "Zeros",
+      [
+       "Function",
+       [
+        "EisensteinE",
+        [
+         "Multiply",
+         2,
+         "k"
+        ],
+        "tau"
+       ],
+       "tau"
+      ],
+      "ModularGroupFundamentalDomain"
+     ]
+    ],
+    1
+   ],
+   "variables": [
+    "k"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "k",
+     [
+      "Range",
+      2,
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "EisensteinE",
+    "ModularGroupFundamentalDomain",
+    "Zeros"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": [
+    "F. K. C. Rankin and H. P. F. Swinnerton-Dyer, On the zeros of Eisenstein Series, Bull. London Math. Soc., 2(1970),169-170."
+   ],
+   "topics": [
+    "eisenstein"
+   ]
+  },
+  {
+   "id": "a691b3",
+   "formula": [
+    "Equal",
+    [
+     "EisensteinE",
+     2,
+     "ImaginaryUnit"
+    ],
+    [
+     "Divide",
+     3,
+     "Pi"
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "EisensteinE"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "eisenstein"
+   ]
+  },
+  {
+   "id": "a92c1a",
+   "formula": [
+    "Equal",
+    [
+     "EisensteinE",
+     4,
+     "tau"
+    ],
+    [
+     "Add",
+     1,
+     [
+      "Multiply",
+      30,
+      [
+       "Sum",
+       [
+        "Divide",
+        [
+         "Add",
+         [
+          "Power",
+          [
+           "Cos",
+           [
+            "Multiply",
+            [
+             "Multiply",
+             "Pi",
+             "m"
+            ],
+            "tau"
+           ]
+          ],
+          2
+         ],
+         1
+        ],
+        [
+         "Power",
+         [
+          "Sin",
+          [
+           "Multiply",
+           [
+            "Multiply",
+            "Pi",
+            "m"
+           ],
+           "tau"
+          ]
+         ],
+         4
+        ]
+       ],
+       [
+        "Limits",
+        "m",
+        1,
+        "PositiveInfinity"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "tau",
+     "HH"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Cos",
+    "EisensteinE",
+    "Sin",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "eisenstein"
+   ]
+  },
+  {
+   "id": "ad9ba2",
+   "formula": [
+    "Equal",
+    [
+     "EisensteinE",
+     [
+      "Multiply",
+      2,
+      "k"
+     ],
+     [
+      "Multiply",
+      "ImaginaryUnit",
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Limit",
+     [
+      "Function",
+      [
+       "EisensteinE",
+       [
+        "Multiply",
+        2,
+        "k"
+       ],
+       "tau"
+      ],
+      "tau"
+     ],
+     [
+      "Multiply",
+      "ImaginaryUnit",
+      "PositiveInfinity"
+     ]
+    ],
+    1
+   ],
+   "variables": [
+    "k"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "k",
+     "PositiveIntegers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "limit",
+   "heads": [
+    "EisensteinE",
+    "Limit"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": "complex",
+   "references": null,
+   "topics": [
+    "eisenstein"
+   ],
+   "directedInfinity": true
+  },
+  {
+   "id": "adaf5a",
+   "formula": [
+    "Equal",
+    [
+     "EisensteinE",
+     10,
+     "tau"
+    ],
+    [
+     "Multiply",
+     [
+      "EisensteinE",
+      4,
+      "tau"
+     ],
+     [
+      "EisensteinE",
+      6,
+      "tau"
+     ]
+    ]
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": [
+    "Element",
+    "tau",
+    "HH"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "EisensteinE"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "eisenstein"
+   ]
+  },
+  {
+   "id": "af2ea9",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "EisensteinE",
+        4,
+        "tau"
+       ],
+       "tau"
+      ],
+      1
+     ],
+     "tau"
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      [
+       "Multiply",
+       2,
+       "Pi"
+      ],
+      "ImaginaryUnit"
+     ],
+     [
+      "Divide",
+      [
+       "Subtract",
+       [
+        "Multiply",
+        [
+         "EisensteinE",
+         2,
+         "tau"
+        ],
+        [
+         "EisensteinE",
+         4,
+         "tau"
+        ]
+       ],
+       [
+        "EisensteinE",
+        6,
+        "tau"
+       ]
+      ],
+      3
+     ]
+    ]
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": [
+    "Element",
+    "tau",
+    "HH"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Derivative",
+    "EisensteinE"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": [
+    "B. C. Berndt and A. J. Yee (2002) Ramanujan's Contributions to Eisenstein Series, Especially in His Lost Notebook. In: Kanemitsu S., Jia C. (eds) Number Theoretic Methods. Developments in Mathematics, vol 8. Springer, Boston, MA. https://doi.org/10.1007/978-1-4757-3675-5_3"
+   ],
+   "topics": [
+    "eisenstein"
+   ]
+  },
+  {
+   "id": "b07750",
+   "formula": [
+    "Equal",
+    [
+     "EisensteinG",
+     [
+      "Multiply",
+      2,
+      "k"
+     ],
+     "tau"
+    ],
+    [
+     "Add",
+     [
+      "Multiply",
+      2,
+      [
+       "Zeta",
+       [
+        "Multiply",
+        2,
+        "k"
+       ]
+      ]
+     ],
+     [
+      "Multiply",
+      2,
+      [
+       "Sum",
+       [
+        "Sum",
+        [
+         "Divide",
+         1,
+         [
+          "Power",
+          [
+           "Add",
+           [
+            "Multiply",
+            "m",
+            "tau"
+           ],
+           "n"
+          ],
+          [
+           "Multiply",
+           2,
+           "k"
+          ]
+         ]
+        ],
+        [
+         "Element",
+         "n",
+         "Integers"
+        ]
+       ],
+       [
+        "Limits",
+        "m",
+        1,
+        "PositiveInfinity"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "k",
+    "tau"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "k",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "tau",
+     "HH"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "EisensteinG",
+    "Sum",
+    "Zeta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "eisenstein"
+   ]
+  },
+  {
+   "id": "b1a5e4",
+   "formula": [
+    "Equal",
+    [
+     "Subtract",
+     [
+      "EisensteinG",
+      2,
+      [
+       "Divide",
+       [
+        "Add",
+        [
+         "Multiply",
+         "a",
+         "tau"
+        ],
+        "b"
+       ],
+       [
+        "Add",
+        [
+         "Multiply",
+         "c",
+         "tau"
+        ],
+        "d"
+       ]
+      ]
+     ],
+     [
+      "Divide",
+      "Pi",
+      [
+       "Imaginary",
+       [
+        "Divide",
+        [
+         "Add",
+         [
+          "Multiply",
+          "a",
+          "tau"
+         ],
+         "b"
+        ],
+        [
+         "Add",
+         [
+          "Multiply",
+          "c",
+          "tau"
+         ],
+         "d"
+        ]
+       ]
+      ]
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Power",
+      [
+       "Add",
+       [
+        "Multiply",
+        "c",
+        "tau"
+       ],
+       "d"
+      ],
+      2
+     ],
+     [
+      "Subtract",
+      [
+       "EisensteinG",
+       2,
+       "tau"
+      ],
+      [
+       "Divide",
+       "Pi",
+       [
+        "Imaginary",
+        "tau"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b",
+    "c",
+    "d",
+    "tau"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "tau",
+     "HH"
+    ],
+    [
+     "Element",
+     [
+      "Matrix",
+      [
+       "List",
+       [
+        "List",
+        "a",
+        "b"
+       ],
+       [
+        "List",
+        "c",
+        "d"
+       ]
+      ]
+     ],
+     "SL2Z"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "EisensteinG",
+    "Imaginary"
+   ],
+   "guardLevel": "undischargeable",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "eisenstein"
+   ]
+  },
+  {
+   "id": "b52b6f",
+   "formula": [
+    "Equal",
+    [
+     "EisensteinG",
+     2,
+     "tau"
+    ],
+    [
+     "Multiply",
+     2,
+     [
+      "WeierstrassZeta",
+      [
+       "Divide",
+       1,
+       2
+      ],
+      "tau"
+     ]
+    ]
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": [
+    "Element",
+    "tau",
+    "HH"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "EisensteinG",
+    "WeierstrassZeta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "eisenstein"
+   ]
+  },
+  {
+   "id": "bd7d8e",
+   "formula": [
+    "Equal",
+    [
+     "Subtract",
+     [
+      "Power",
+      [
+       "EisensteinE",
+       4,
+       "tau"
+      ],
+      3
+     ],
+     [
+      "Power",
+      [
+       "EisensteinE",
+       6,
+       "tau"
+      ],
+      2
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      27,
+      4
+     ],
+     [
+      "Power",
+      [
+       "Multiply",
+       [
+        "Multiply",
+        [
+         "JacobiTheta",
+         2,
+         0,
+         "tau"
+        ],
+        [
+         "JacobiTheta",
+         3,
+         0,
+         "tau"
+        ]
+       ],
+       [
+        "JacobiTheta",
+        4,
+        0,
+        "tau"
+       ]
+      ],
+      8
+     ]
+    ]
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": [
+    "Element",
+    "tau",
+    "HH"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "EisensteinE",
+    "JacobiTheta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "eisenstein"
+   ]
+  },
+  {
+   "id": "be9790",
+   "formula": [
+    "Element",
+    [
+     "UniqueZero",
+     [
+      "Function",
+      [
+       "EisensteinE",
+       2,
+       [
+        "Add",
+        [
+         "Negate",
+         [
+          "Divide",
+          1,
+          2
+         ]
+        ],
+        [
+         "Multiply",
+         "ImaginaryUnit",
+         "y"
+        ]
+       ]
+      ],
+      "y"
+     ],
+     [
+      "Interval",
+      [
+       "Open",
+       0
+      ],
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
+     ]
+    ],
+    [
+     "RealBall",
+     {
+      "num": "0.130919030396762446904114826020"
+     },
+     {
+      "num": "2.87e-31"
+     }
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "EisensteinE",
+    "RealBall",
+    "UniqueZero"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "eisenstein"
+   ]
+  },
+  {
+   "id": "c6be24",
+   "formula": [
+    "Equal",
+    [
+     "EisensteinG",
+     [
+      "Multiply",
+      2,
+      "k"
+     ],
+     [
+      "Multiply",
+      "ImaginaryUnit",
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Limit",
+     [
+      "Function",
+      [
+       "EisensteinG",
+       [
+        "Multiply",
+        2,
+        "k"
+       ],
+       "tau"
+      ],
+      "tau"
+     ],
+     [
+      "Multiply",
+      "ImaginaryUnit",
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Multiply",
+     2,
+     [
+      "Zeta",
+      [
+       "Multiply",
+       2,
+       "k"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "k"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "k",
+     "PositiveIntegers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "limit",
+   "heads": [
+    "EisensteinG",
+    "Limit",
+    "Zeta"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": "complex",
+   "references": null,
+   "topics": [
+    "eisenstein"
+   ],
+   "directedInfinity": true
+  },
+  {
+   "id": "cc579c",
+   "formula": [
+    "Equal",
+    [
+     "EisensteinE",
+     4,
+     "tau"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      1,
+      2
+     ],
+     [
+      "Add",
+      [
+       "Add",
+       [
+        "Power",
+        [
+         "JacobiTheta",
+         2,
+         0,
+         "tau"
+        ],
+        8
+       ],
+       [
+        "Power",
+        [
+         "JacobiTheta",
+         3,
+         0,
+         "tau"
+        ],
+        8
+       ]
+      ],
+      [
+       "Power",
+       [
+        "JacobiTheta",
+        4,
+        0,
+        "tau"
+       ],
+       8
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": [
+    "Element",
+    "tau",
+    "HH"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "EisensteinE",
+    "JacobiTheta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "eisenstein",
+    "jacobi_theta"
+   ]
+  },
+  {
+   "id": "d56eb6",
+   "formula": [
+    "Equal",
+    [
+     "EisensteinE",
+     [
+      "Multiply",
+      2,
+      "k"
+     ],
+     [
+      "Add",
+      "tau",
+      "n"
+     ]
+    ],
+    [
+     "EisensteinE",
+     [
+      "Multiply",
+      2,
+      "k"
+     ],
+     "tau"
+    ]
+   ],
+   "variables": [
+    "k",
+    "n",
+    "tau"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "k",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "tau",
+     "HH"
+    ],
+    [
+     "Element",
+     "n",
+     "Integers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "EisensteinE"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "eisenstein"
+   ]
+  },
+  {
+   "id": "dbf388",
+   "formula": [
+    "Equal",
+    [
+     "EisensteinG",
+     2,
+     "tau"
+    ],
+    [
+     "Negate",
+     [
+      "Multiply",
+      [
+       "Multiply",
+       [
+        "Multiply",
+        4,
+        "Pi"
+       ],
+       "ImaginaryUnit"
+      ],
+      [
+       "Divide",
+       [
+        "Apply",
+        [
+         "Derivative",
+         [
+          "Function",
+          [
+           "DedekindEta",
+           "tau"
+          ],
+          "tau"
+         ],
+         1
+        ],
+        "tau"
+       ],
+       [
+        "DedekindEta",
+        "tau"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": [
+    "Element",
+    "tau",
+    "HH"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "DedekindEta",
+    "Derivative",
+    "EisensteinG"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "eisenstein"
+   ]
+  },
+  {
+   "id": "e03b7c",
+   "formula": [
+    "Equal",
+    [
+     "EisensteinG",
+     4,
+     "ImaginaryUnit"
+    ],
+    [
+     "Divide",
+     [
+      "Power",
+      [
+       "Gamma",
+       [
+        "Divide",
+        1,
+        4
+       ]
+      ],
+      8
+     ],
+     [
+      "Multiply",
+      960,
+      [
+       "Power",
+       "Pi",
+       2
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "EisensteinG",
+    "Gamma"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "eisenstein"
+   ]
+  },
+  {
+   "id": "e20db0",
+   "formula": [
+    "Equal",
+    [
+     "EisensteinE",
+     6,
+     "tau"
+    ],
+    [
+     "Subtract",
+     1,
+     [
+      "Multiply",
+      504,
+      [
+       "Sum",
+       [
+        "Multiply",
+        [
+         "DivisorSigma",
+         5,
+         "n"
+        ],
+        [
+         "Power",
+         [
+          "Exp",
+          [
+           "Multiply",
+           [
+            "Multiply",
+            [
+             "Multiply",
+             2,
+             "Pi"
+            ],
+            "ImaginaryUnit"
+           ],
+           "tau"
+          ]
+         ],
+         "n"
+        ]
+       ],
+       [
+        "Limits",
+        "n",
+        1,
+        "PositiveInfinity"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "k",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "tau",
+     "HH"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "DivisorSigma",
+    "EisensteinE",
+    "Exp",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "eisenstein"
+   ]
+  },
+  {
+   "id": "e60fd4",
+   "formula": [
+    "Equal",
+    [
+     "EisensteinE",
+     14,
+     "tau"
+    ],
+    [
+     "Multiply",
+     [
+      "Power",
+      [
+       "EisensteinE",
+       4,
+       "tau"
+      ],
+      2
+     ],
+     [
+      "EisensteinE",
+      6,
+      "tau"
+     ]
+    ]
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": [
+    "Element",
+    "tau",
+    "HH"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "EisensteinE"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "eisenstein"
+   ]
+  },
+  {
+   "id": "f8dfaf",
+   "formula": [
+    "Equal",
+    [
+     "EisensteinE",
+     4,
+     "tau"
+    ],
+    [
+     "Add",
+     1,
+     [
+      "Multiply",
+      240,
+      [
+       "Sum",
+       [
+        "Multiply",
+        [
+         "DivisorSigma",
+         3,
+         "n"
+        ],
+        [
+         "Power",
+         [
+          "Exp",
+          [
+           "Multiply",
+           [
+            "Multiply",
+            [
+             "Multiply",
+             2,
+             "Pi"
+            ],
+            "ImaginaryUnit"
+           ],
+           "tau"
+          ]
+         ],
+         "n"
+        ]
+       ],
+       [
+        "Limits",
+        "n",
+        1,
+        "PositiveInfinity"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "k",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "tau",
+     "HH"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "DivisorSigma",
+    "EisensteinE",
+    "Exp",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "eisenstein"
+   ]
+  },
+  {
+   "id": "feb95e",
+   "formula": [
+    "Equal",
+    [
+     "EisensteinE",
+     14,
+     "tau"
+    ],
+    [
+     "Multiply",
+     [
+      "EisensteinE",
+      6,
+      "tau"
+     ],
+     [
+      "EisensteinE",
+      8,
+      "tau"
+     ]
+    ]
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": [
+    "Element",
+    "tau",
+    "HH"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "EisensteinE"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "eisenstein"
+   ]
+  }
+ ]
+}

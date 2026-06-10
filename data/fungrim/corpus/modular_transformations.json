@@ -1,0 +1,485 @@
+{
+ "topic": "modular_transformations",
+ "title": "Modular transformations",
+ "source": "pygrim/formulas/modular_transformations.py",
+ "generator": "grim2mathjson 0.1.0",
+ "entries": [
+  {
+   "id": "127a52",
+   "formula": [
+    "Equal",
+    [
+     "ModularGroupAction",
+     [
+      "Matrix",
+      [
+       "List",
+       [
+        "List",
+        "a",
+        "b"
+       ],
+       [
+        "List",
+        "c",
+        "d"
+       ]
+      ]
+     ],
+     "tau"
+    ],
+    [
+     "Divide",
+     [
+      "Add",
+      [
+       "Multiply",
+       "a",
+       "tau"
+      ],
+      "b"
+     ],
+     [
+      "Add",
+      [
+       "Multiply",
+       "c",
+       "tau"
+      ],
+      "d"
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b",
+    "c",
+    "d",
+    "tau"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     [
+      "Matrix",
+      [
+       "List",
+       [
+        "List",
+        "a",
+        "b"
+       ],
+       [
+        "List",
+        "c",
+        "d"
+       ]
+      ]
+     ],
+     "SL2Z"
+    ],
+    [
+     "Element",
+     "tau",
+     "HH"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ModularGroupAction"
+   ],
+   "guardLevel": "undischargeable",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "modular_transformations"
+   ]
+  },
+  {
+   "id": "1d1028",
+   "formula": [
+    "Element",
+    "ImaginaryUnit",
+    "ModularGroupFundamentalDomain"
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "ModularGroupFundamentalDomain"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "modular_transformations"
+   ]
+  },
+  {
+   "id": "21b67f",
+   "formula": [
+    "And",
+    [
+     "Equal",
+     [
+      "Exp",
+      [
+       "Divide",
+       [
+        "Multiply",
+        [
+         "Multiply",
+         2,
+         "Pi"
+        ],
+        "ImaginaryUnit"
+       ],
+       3
+      ]
+     ],
+     [
+      "Divide",
+      [
+       "Add",
+       -1,
+       [
+        "Multiply",
+        [
+         "Sqrt",
+         3
+        ],
+        "ImaginaryUnit"
+       ]
+      ],
+      2
+     ]
+    ],
+    [
+     "Element",
+     [
+      "Exp",
+      [
+       "Divide",
+       [
+        "Multiply",
+        [
+         "Multiply",
+         2,
+         "Pi"
+        ],
+        "ImaginaryUnit"
+       ],
+       3
+      ]
+     ],
+     "ModularGroupFundamentalDomain"
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "Exp",
+    "ModularGroupFundamentalDomain"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "modular_transformations"
+   ]
+  },
+  {
+   "id": "5636db",
+   "formula": [
+    "Equal",
+    [
+     "ModularGroupAction",
+     [
+      "Multiply",
+      "gamma",
+      "eta"
+     ],
+     "tau"
+    ],
+    [
+     "ModularGroupAction",
+     "gamma",
+     [
+      "ModularGroupAction",
+      "eta",
+      "tau"
+     ]
+    ]
+   ],
+   "variables": [
+    "eta",
+    "gamma",
+    "tau"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "gamma",
+     "SL2Z"
+    ],
+    [
+     "Element",
+     "eta",
+     "SL2Z"
+    ],
+    [
+     "Element",
+     "tau",
+     "HH"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ModularGroupAction"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "modular_transformations"
+   ]
+  },
+  {
+   "id": "8a9884",
+   "formula": [
+    "Equal",
+    [
+     "Multiply",
+     [
+      "Divide",
+      "Pi",
+      4
+     ],
+     [
+      "Sum",
+      [
+       "Divide",
+       [
+        "Totient",
+        "q"
+       ],
+       [
+        "Power",
+        "q",
+        4
+       ]
+      ],
+      [
+       "Limits",
+       "q",
+       1,
+       "PositiveInfinity"
+      ]
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      "Pi",
+      4
+     ],
+     [
+      "Divide",
+      [
+       "Zeta",
+       3
+      ],
+      [
+       "Zeta",
+       4
+      ]
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Multiply",
+      45,
+      [
+       "Zeta",
+       3
+      ]
+     ],
+     [
+      "Multiply",
+      2,
+      [
+       "Power",
+       "Pi",
+       3
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Sum",
+    "Totient",
+    "Zeta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "modular_transformations"
+   ]
+  },
+  {
+   "id": "a637cd",
+   "formula": [
+    "Equal",
+    "ModularGroupFundamentalDomain",
+    [
+     "Set",
+     "tau",
+     [
+      "Element",
+      "tau",
+      "HH",
+      [
+       "And",
+       [
+        "Element",
+        [
+         "Real",
+         "tau"
+        ],
+        [
+         "Interval",
+         [
+          "Negate",
+          [
+           "Divide",
+           1,
+           2
+          ]
+         ],
+         [
+          "Open",
+          [
+           "Divide",
+           1,
+           2
+          ]
+         ]
+        ]
+       ],
+       [
+        "Or",
+        [
+         "Greater",
+         [
+          "Abs",
+          "tau"
+         ],
+         1
+        ],
+        [
+         "And",
+         [
+          "Equal",
+          [
+           "Abs",
+           "tau"
+          ],
+          1
+         ],
+         [
+          "LessEqual",
+          [
+           "Real",
+           "tau"
+          ],
+          0
+         ]
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "HH",
+    "ModularGroupFundamentalDomain",
+    "Real"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": [
+    "H. Cohen, A Course in Computational Algebraic Number Theory, Springer, 1993"
+   ],
+   "topics": [
+    "modular_transformations"
+   ]
+  },
+  {
+   "id": "e28209",
+   "formula": [
+    "Less",
+    [
+     "Abs",
+     [
+      "Exp",
+      [
+       "Multiply",
+       [
+        "Multiply",
+        [
+         "Multiply",
+         2,
+         "Pi"
+        ],
+        "ImaginaryUnit"
+       ],
+       "tau"
+      ]
+     ]
+    ],
+    {
+     "num": "0.004334"
+    }
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": [
+    "Element",
+    "tau",
+    "ModularGroupFundamentalDomain"
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Exp"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "modular_transformations"
+   ]
+  }
+ ]
+}

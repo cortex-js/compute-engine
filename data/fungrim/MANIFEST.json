@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "generated": "2026-06-10",
+  "generator": "grim2mathjson 0.1.0",
+  "upstream": {
+    "name": "fungrim",
+    "snapshot": "/Users/arno/dev/fungrim-master (unversioned local snapshot)",
+    "pin": {
+      "sha256": "c7178f4f40cabc7dbc6b2b50da977520e8921806c0b65ea57690170cc499bebe",
+      "method": "cd fungrim-master && find pygrim -name '*.py' -type f | LC_ALL=C sort | xargs cat | shasum -a 256",
+      "fileCount": 70
+    },
+    "license": "MIT, Copyright (c) 2019 Fredrik Johansson (see LICENSE)"
+  },
+  "counts": {
+    "totalEntries": 3130,
+    "formulaEntries": 2764,
+    "corpusEntries": 2551,
+    "propertyEntries": 131,
+    "skippedFormulaEntries": 82,
+    "skippedRecords": 448,
+    "symbolDefinitionEntries": 366,
+    "shellDeclarations": 152,
+    "existingCESymbols": 122,
+    "topicFiles": 57
+  },
+  "classCounts": {
+    "identity": 1226,
+    "inequality": 242,
+    "logical": 179,
+    "other": 2,
+    "representation": 459,
+    "specific-value": 443
+  },
+  "guardLevelCounts": {
+    "none": 681,
+    "real-simple": 546,
+    "complex-domain": 1283,
+    "undischargeable": 41
+  },
+  "skipReasons": {
+    "symbol-definition": 366,
+    "tuple-indexing-set": 26,
+    "where-def-tuple": 19,
+    "formal-indeterminate": 13,
+    "generator-list": 8,
+    "repeat-splice": 6,
+    "where-function-def": 4,
+    "matrix-generator": 2,
+    "where-recursive-def": 1,
+    "ellipsis": 1,
+    "step-splice": 1,
+    "path-integral": 1
+  },
+  "files": {
+    "corpus/<topic>.json": "57 per-topic files, 2551 annotated formula entries",
+    "declarations.json": "152 symbol-shell declarations for heads CE does not define, plus an `existing` audit section",
+    "properties.json": "131 analytic-property records (Poles, Zeros, BranchCuts, ...)",
+    "skipped.json": "448 skip records (full ledger, incl. the 366 SymbolDefinition entries)",
+    "LICENSE": "upstream MIT license (verbatim, with derivative-work header)",
+    "README.md": "provenance, schema documentation, regeneration workflow"
+  }
+}

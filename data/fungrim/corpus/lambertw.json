@@ -1,0 +1,3932 @@
+{
+ "topic": "lambertw",
+ "title": "Lambert W-function",
+ "source": "pygrim/formulas/lambertw.py",
+ "generator": "grim2mathjson 0.1.0",
+ "entries": [
+  {
+   "id": "0be17d",
+   "formula": [
+    "Equal",
+    [
+     "LambertW",
+     0
+    ],
+    0
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "LambertW"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "lambertw"
+   ]
+  },
+  {
+   "id": "0eb699",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "Apply",
+      [
+       "Derivative",
+       [
+        "Function",
+        [
+         "LambertW",
+         "z"
+        ],
+        "z"
+       ],
+       1
+      ],
+      "z"
+     ]
+    ],
+    [
+     "Abs",
+     [
+      "Divide",
+      {
+       "num": "2.25"
+      },
+      [
+       "Sqrt",
+       [
+        "Multiply",
+        [
+         "Abs",
+         [
+          "Add",
+          [
+           "Multiply",
+           "ExponentialE",
+           "z"
+          ],
+          1
+         ]
+        ],
+        [
+         "Add",
+         1,
+         [
+          "Abs",
+          [
+           "Add",
+           [
+            "Multiply",
+            "ExponentialE",
+            "z"
+           ],
+           1
+          ]
+         ]
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "LessEqual",
+     [
+      "Abs",
+      "z"
+     ],
+     64
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Derivative",
+    "LambertW"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "lambertw"
+   ]
+  },
+  {
+   "id": "1fc63b",
+   "formula": [
+    "Equal",
+    [
+     "LambertW",
+     "z",
+     "k"
+    ],
+    [
+     "Add",
+     [
+      "Subtract",
+      [
+       "Add",
+       [
+        "Ln",
+        "z"
+       ],
+       [
+        "Multiply",
+        [
+         "Multiply",
+         [
+          "Multiply",
+          2,
+          "Pi"
+         ],
+         "ImaginaryUnit"
+        ],
+        "k"
+       ]
+      ],
+      [
+       "Ln",
+       [
+        "Add",
+        [
+         "Ln",
+         "z"
+        ],
+        [
+         "Multiply",
+         [
+          "Multiply",
+          [
+           "Multiply",
+           2,
+           "Pi"
+          ],
+          "ImaginaryUnit"
+         ],
+         "k"
+        ]
+       ]
+      ]
+     ],
+     [
+      "Sum",
+      [
+       "Sum",
+       [
+        "Multiply",
+        [
+         "Multiply",
+         [
+          "Multiply",
+          [
+           "Divide",
+           [
+            "Power",
+            -1,
+            "n"
+           ],
+           [
+            "Factorial",
+            "m"
+           ]
+          ],
+          [
+           "StirlingCycle",
+           [
+            "Add",
+            "n",
+            "m"
+           ],
+           [
+            "Add",
+            "n",
+            1
+           ]
+          ]
+         ],
+         [
+          "Power",
+          [
+           "Divide",
+           1,
+           [
+            "Add",
+            [
+             "Ln",
+             "z"
+            ],
+            [
+             "Multiply",
+             [
+              "Multiply",
+              [
+               "Multiply",
+               2,
+               "Pi"
+              ],
+              "ImaginaryUnit"
+             ],
+             "k"
+            ]
+           ]
+          ],
+          "n"
+         ]
+        ],
+        [
+         "Power",
+         [
+          "Divide",
+          [
+           "Ln",
+           [
+            "Add",
+            [
+             "Ln",
+             "z"
+            ],
+            [
+             "Multiply",
+             [
+              "Multiply",
+              [
+               "Multiply",
+               2,
+               "Pi"
+              ],
+              "ImaginaryUnit"
+             ],
+             "k"
+            ]
+           ]
+          ],
+          [
+           "Add",
+           [
+            "Ln",
+            "z"
+           ],
+           [
+            "Multiply",
+            [
+             "Multiply",
+             [
+              "Multiply",
+              2,
+              "Pi"
+             ],
+             "ImaginaryUnit"
+            ],
+            "k"
+           ]
+          ]
+         ],
+         "m"
+        ]
+       ],
+       [
+        "Limits",
+        "m",
+        1,
+        "PositiveInfinity"
+       ]
+      ],
+      [
+       "Limits",
+       "n",
+       0,
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "k",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "k",
+     "Integers"
+    ],
+    [
+     "Element",
+     "z",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      [
+       "Set",
+       0
+      ]
+     ]
+    ],
+    [
+     "Less",
+     [
+      "Abs",
+      [
+       "Divide",
+       1,
+       [
+        "Add",
+        [
+         "Ln",
+         "z"
+        ],
+        [
+         "Multiply",
+         [
+          "Multiply",
+          [
+           "Multiply",
+           2,
+           "Pi"
+          ],
+          "ImaginaryUnit"
+         ],
+         "k"
+        ]
+       ]
+      ]
+     ],
+     [
+      "Divide",
+      1,
+      4
+     ]
+    ],
+    [
+     "Less",
+     [
+      "Abs",
+      [
+       "Divide",
+       [
+        "Ln",
+        [
+         "Add",
+         [
+          "Ln",
+          "z"
+         ],
+         [
+          "Multiply",
+          [
+           "Multiply",
+           [
+            "Multiply",
+            2,
+            "Pi"
+           ],
+           "ImaginaryUnit"
+          ],
+          "k"
+         ]
+        ]
+       ],
+       [
+        "Add",
+        [
+         "Ln",
+         "z"
+        ],
+        [
+         "Multiply",
+         [
+          "Multiply",
+          [
+           "Multiply",
+           2,
+           "Pi"
+          ],
+          "ImaginaryUnit"
+         ],
+         "k"
+        ]
+       ]
+      ]
+     ],
+     [
+      "Divide",
+      1,
+      4
+     ]
+    ],
+    [
+     "Or",
+     [
+      "NotEqual",
+      "k",
+      0
+     ],
+     [
+      "Greater",
+      [
+       "Abs",
+       "z"
+      ],
+      1
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Factorial",
+    "LambertW",
+    "Ln",
+    "StirlingCycle",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "lambertw"
+   ]
+  },
+  {
+   "id": "214b1c",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "Apply",
+      [
+       "Derivative",
+       [
+        "Function",
+        [
+         "LambertW",
+         "z",
+         "k"
+        ],
+        "z"
+       ],
+       1
+      ],
+      "z"
+     ]
+    ],
+    [
+     "Abs",
+     [
+      "Multiply",
+      [
+       "Divide",
+       1,
+       [
+        "Abs",
+        "z"
+       ]
+      ],
+      [
+       "Add",
+       1,
+       [
+        "Divide",
+        1,
+        [
+         "Add",
+         4,
+         [
+          "Power",
+          [
+           "Abs",
+           "z"
+          ],
+          2
+         ]
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "k",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Or",
+     [
+      "And",
+      [
+       "Element",
+       "k",
+       [
+        "Set",
+        1,
+        -1
+       ]
+      ],
+      [
+       "GreaterEqual",
+       [
+        "Real",
+        "z"
+       ],
+       0
+      ]
+     ],
+     [
+      "And",
+      [
+       "Equal",
+       "k",
+       -1
+      ],
+      [
+       "Less",
+       [
+        "Imaginary",
+        "z"
+       ],
+       0
+      ]
+     ],
+     [
+      "And",
+      [
+       "Equal",
+       "k",
+       1
+      ],
+      [
+       "GreaterEqual",
+       [
+        "Imaginary",
+        "z"
+       ],
+       0
+      ]
+     ]
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Derivative",
+    "LambertW"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "lambertw"
+   ]
+  },
+  {
+   "id": "30bd5b",
+   "formula": [
+    "Equal",
+    [
+     "LambertW",
+     [
+      "Multiply",
+      "x",
+      [
+       "Ln",
+       "x"
+      ]
+     ]
+    ],
+    [
+     "Ln",
+     "x"
+    ]
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": [
+    "Element",
+    "x",
+    [
+     "Interval",
+     [
+      "Divide",
+      1,
+      "ExponentialE"
+     ],
+     [
+      "Open",
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "LambertW",
+    "Ln"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "lambertw"
+   ]
+  },
+  {
+   "id": "4257f4",
+   "formula": [
+    "Less",
+    [
+     "Abs",
+     [
+      "Imaginary",
+      [
+       "LambertW",
+       "z"
+      ]
+     ]
+    ],
+    "Pi"
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Imaginary",
+    "LambertW"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "lambertw"
+   ]
+  },
+  {
+   "id": "44ad09",
+   "formula": [
+    "Equal",
+    [
+     "Set",
+     [
+      "LambertW",
+      "x"
+     ],
+     [
+      "Element",
+      "x",
+      [
+       "Interval",
+       [
+        "Open",
+        "NegativeInfinity"
+       ],
+       [
+        "Open",
+        [
+         "Negate",
+         [
+          "Exp",
+          -1
+         ]
+        ]
+       ]
+      ]
+     ]
+    ],
+    [
+     "Set",
+     [
+      "Add",
+      [
+       "Multiply",
+       [
+        "Negate",
+        "y"
+       ],
+       [
+        "Cot",
+        "y"
+       ]
+      ],
+      [
+       "Multiply",
+       "y",
+       "ImaginaryUnit"
+      ]
+     ],
+     [
+      "Element",
+      "y",
+      [
+       "Interval",
+       [
+        "Open",
+        0
+       ],
+       [
+        "Open",
+        "Pi"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Cot",
+    "Exp",
+    "LambertW"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "lambertw"
+   ]
+  },
+  {
+   "id": "55498b",
+   "formula": [
+    "Equal",
+    [
+     "Set",
+     [
+      "LambertW",
+      "x"
+     ],
+     [
+      "Element",
+      "x",
+      [
+       "Set",
+       [
+        "Negate",
+        [
+         "Exp",
+         -1
+        ]
+       ]
+      ]
+     ]
+    ],
+    [
+     "Set",
+     -1
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Exp",
+    "LambertW"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "lambertw"
+   ]
+  },
+  {
+   "id": "58c19a",
+   "formula": [
+    "Equal",
+    [
+     "LambertW",
+     "z"
+    ],
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "Divide",
+       [
+        "Power",
+        [
+         "Negate",
+         "n"
+        ],
+        [
+         "Subtract",
+         "n",
+         1
+        ]
+       ],
+       [
+        "Factorial",
+        "n"
+       ]
+      ],
+      [
+       "Power",
+       "z",
+       "n"
+      ]
+     ],
+     [
+      "Limits",
+      "n",
+      1,
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Less",
+     [
+      "Abs",
+      "z"
+     ],
+     [
+      "Divide",
+      1,
+      "ExponentialE"
+     ]
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Factorial",
+    "LambertW",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "lambertw"
+   ]
+  },
+  {
+   "id": "5d4cce",
+   "formula": [
+    "Element",
+    [
+     "LambertW",
+     1
+    ],
+    [
+     "RealBall",
+     {
+      "num": "0.56714329040978387299996866221035554975381578718651"
+     },
+     {
+      "num": "2.51e-51"
+     }
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "LambertW",
+    "RealBall"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "lambertw"
+   ]
+  },
+  {
+   "id": "6d936e",
+   "formula": [
+    "Equal",
+    [
+     "LambertW",
+     [
+      "Conjugate",
+      "z"
+     ],
+     "k"
+    ],
+    [
+     "Conjugate",
+     [
+      "LambertW",
+      "z",
+      [
+       "Negate",
+       "k"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "k",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "k",
+     "Integers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Or",
+     [
+      "And",
+      [
+       "Equal",
+       "k",
+       0
+      ],
+      [
+       "NotElement",
+       "z",
+       [
+        "Interval",
+        [
+         "Open",
+         "NegativeInfinity"
+        ],
+        [
+         "Open",
+         [
+          "Negate",
+          [
+           "Exp",
+           -1
+          ]
+         ]
+        ]
+       ]
+      ]
+     ],
+     [
+      "And",
+      [
+       "NotEqual",
+       "k",
+       0
+      ],
+      [
+       "NotElement",
+       "z",
+       [
+        "Interval",
+        [
+         "Open",
+         "NegativeInfinity"
+        ],
+        0
+       ]
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Conjugate",
+    "LambertW"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "lambertw"
+   ]
+  },
+  {
+   "id": "6e05c9",
+   "formula": [
+    "NotEqual",
+    [
+     "LambertW",
+     "z_1",
+     "k_1"
+    ],
+    [
+     "LambertW",
+     "z_2",
+     "k_2"
+    ]
+   ],
+   "variables": [
+    "k",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "k_1",
+     "Integers"
+    ],
+    [
+     "Element",
+     "k_2",
+     "Integers"
+    ],
+    [
+     "Element",
+     "z_1",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "z_2",
+     "ComplexNumbers"
+    ],
+    [
+     "Or",
+     [
+      "NotEqual",
+      "k_1",
+      "k_2"
+     ],
+     [
+      "NotEqual",
+      "z_1",
+      "z_2"
+     ]
+    ],
+    [
+     "NotElement",
+     [
+      "LambertW",
+      "z_1",
+      "k_1"
+     ],
+     [
+      "Set",
+      -1,
+      "NegativeInfinity"
+     ]
+    ]
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "LambertW"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "lambertw"
+   ]
+  },
+  {
+   "id": "72712c",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "Apply",
+      [
+       "Derivative",
+       [
+        "Function",
+        [
+         "LambertW",
+         "z",
+         "k"
+        ],
+        "z"
+       ],
+       1
+      ],
+      "z"
+     ]
+    ],
+    [
+     "Divide",
+     1,
+     [
+      "Abs",
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "k",
+    "z"
+   ],
+   "assumptions": [
+    "Or",
+    [
+     "And",
+     [
+      "Equal",
+      "k",
+      0
+     ],
+     [
+      "GreaterEqual",
+      [
+       "Abs",
+       "z"
+      ],
+      1
+     ]
+    ],
+    [
+     "And",
+     [
+      "Element",
+      "k",
+      "Integers"
+     ],
+     [
+      "Element",
+      "z",
+      "ComplexNumbers"
+     ],
+     [
+      "GreaterEqual",
+      [
+       "Abs",
+       "z"
+      ],
+      [
+       "Multiply",
+       4,
+       [
+        "Add",
+        [
+         "Abs",
+         "k"
+        ],
+        1
+       ]
+      ]
+     ]
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Derivative",
+    "LambertW"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "lambertw"
+   ]
+  },
+  {
+   "id": "72b6ca",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "LambertW",
+        "z",
+        "k"
+       ],
+       "z"
+      ],
+      1
+     ],
+     "z"
+    ],
+    [
+     "Divide",
+     [
+      "LambertW",
+      "z",
+      "k"
+     ],
+     [
+      "Multiply",
+      "z",
+      [
+       "Add",
+       1,
+       [
+        "LambertW",
+        "z",
+        "k"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "k",
+    "z"
+   ],
+   "assumptions": [
+    "Or",
+    [
+     "And",
+     [
+      "Element",
+      "k",
+      [
+       "Set",
+       0,
+       1
+      ]
+     ],
+     [
+      "Element",
+      "z",
+      [
+       "SetMinus",
+       "ComplexNumbers",
+       [
+        "Set",
+        0,
+        [
+         "Negate",
+         [
+          "Exp",
+          -1
+         ]
+        ]
+       ]
+      ]
+     ]
+    ],
+    [
+     "And",
+     [
+      "Element",
+      "k",
+      [
+       "SetMinus",
+       "Integers",
+       [
+        "Set",
+        0,
+        1
+       ]
+      ]
+     ],
+     [
+      "Element",
+      "z",
+      [
+       "SetMinus",
+       "ComplexNumbers",
+       [
+        "Set",
+        0
+       ]
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Derivative",
+    "LambertW"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "lambertw"
+   ]
+  },
+  {
+   "id": "82926c",
+   "formula": [
+    "Element",
+    [
+     "Imaginary",
+     [
+      "LambertW",
+      "z",
+      1
+     ]
+    ],
+    [
+     "Interval",
+     [
+      "Open",
+      0
+     ],
+     [
+      "Open",
+      [
+       "Multiply",
+       3,
+       "Pi"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     [
+      "Set",
+      0
+     ]
+    ]
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "Imaginary",
+    "LambertW"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "lambertw"
+   ]
+  },
+  {
+   "id": "8654a3",
+   "formula": [
+    "Equal",
+    [
+     "LambertW",
+     [
+      "Multiply",
+      "x",
+      [
+       "Exp",
+       "x"
+      ]
+     ]
+    ],
+    "x"
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": [
+    "Element",
+    "x",
+    [
+     "Interval",
+     -1,
+     [
+      "Open",
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Exp",
+    "LambertW"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "lambertw"
+   ]
+  },
+  {
+   "id": "88168b",
+   "formula": [
+    "Equal",
+    [
+     "Multiply",
+     [
+      "LambertW",
+      "z",
+      "k"
+     ],
+     [
+      "Exp",
+      [
+       "LambertW",
+       "z",
+       "k"
+      ]
+     ]
+    ],
+    "z"
+   ],
+   "variables": [
+    "k",
+    "z"
+   ],
+   "assumptions": [
+    "Or",
+    [
+     "And",
+     [
+      "Element",
+      "k",
+      "Integers"
+     ],
+     [
+      "Element",
+      "z",
+      [
+       "SetMinus",
+       "ComplexNumbers",
+       [
+        "Set",
+        0
+       ]
+      ]
+     ]
+    ],
+    [
+     "And",
+     [
+      "Equal",
+      "k",
+      0
+     ],
+     [
+      "Equal",
+      "z",
+      0
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Exp",
+    "LambertW"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "lambertw"
+   ]
+  },
+  {
+   "id": "8d486c",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "LambertW",
+        "z",
+        "k"
+       ],
+       "z"
+      ],
+      1
+     ],
+     "z"
+    ],
+    [
+     "Divide",
+     1,
+     [
+      "Multiply",
+      [
+       "Add",
+       1,
+       [
+        "LambertW",
+        "z",
+        "k"
+       ]
+      ],
+      [
+       "Exp",
+       [
+        "LambertW",
+        "z",
+        "k"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "k",
+    "z"
+   ],
+   "assumptions": [
+    "Or",
+    [
+     "And",
+     [
+      "Equal",
+      "k",
+      0
+     ],
+     [
+      "Element",
+      "z",
+      [
+       "SetMinus",
+       "ComplexNumbers",
+       [
+        "Set",
+        [
+         "Negate",
+         [
+          "Exp",
+          -1
+         ]
+        ]
+       ]
+      ]
+     ]
+    ],
+    [
+     "And",
+     [
+      "Equal",
+      "k",
+      -1
+     ],
+     [
+      "Element",
+      "z",
+      [
+       "SetMinus",
+       "ComplexNumbers",
+       [
+        "Set",
+        0,
+        [
+         "Negate",
+         [
+          "Exp",
+          -1
+         ]
+        ]
+       ]
+      ]
+     ]
+    ],
+    [
+     "And",
+     [
+      "Element",
+      "k",
+      [
+       "SetMinus",
+       "Integers",
+       [
+        "Set",
+        0,
+        1
+       ]
+      ]
+     ],
+     [
+      "Element",
+      "z",
+      [
+       "SetMinus",
+       "ComplexNumbers",
+       [
+        "Set",
+        0
+       ]
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Derivative",
+    "Exp",
+    "LambertW"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "lambertw"
+   ]
+  },
+  {
+   "id": "8e06be",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "Apply",
+      [
+       "Derivative",
+       [
+        "Function",
+        [
+         "LambertW",
+         "z",
+         "k"
+        ],
+        "z"
+       ],
+       1
+      ],
+      "z"
+     ]
+    ],
+    [
+     "Abs",
+     [
+      "Divide",
+      {
+       "num": "1.5"
+      },
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "k",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Or",
+     [
+      "And",
+      [
+       "Equal",
+       "k",
+       1
+      ],
+      [
+       "GreaterEqual",
+       [
+        "Imaginary",
+        "z"
+       ],
+       0
+      ]
+     ],
+     [
+      "And",
+      [
+       "Equal",
+       "k",
+       -1
+      ],
+      [
+       "Less",
+       [
+        "Imaginary",
+        "z"
+       ],
+       0
+      ]
+     ]
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Derivative",
+    "LambertW"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "lambertw"
+   ]
+  },
+  {
+   "id": "8e8a59",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "LambertW",
+        "z"
+       ],
+       "z"
+      ],
+      "r"
+     ],
+     0
+    ],
+    [
+     "Power",
+     [
+      "Negate",
+      "r"
+     ],
+     [
+      "Subtract",
+      "r",
+      1
+     ]
+    ]
+   ],
+   "variables": [
+    "r"
+   ],
+   "assumptions": [
+    "Element",
+    "r",
+    "PositiveIntegers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Derivative",
+    "LambertW"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "lambertw"
+   ]
+  },
+  {
+   "id": "9136b9",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "Apply",
+      [
+       "Derivative",
+       [
+        "Function",
+        [
+         "LambertW",
+         "z",
+         "k"
+        ],
+        "z"
+       ],
+       1
+      ],
+      "z"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Abs",
+      [
+       "Divide",
+       1,
+       "z"
+      ]
+     ],
+     [
+      "Max",
+      3,
+      [
+       "Abs",
+       [
+        "Divide",
+        {
+         "num": "1.5"
+        },
+        [
+         "Sqrt",
+         [
+          "Abs",
+          [
+           "Add",
+           [
+            "Multiply",
+            "ExponentialE",
+            "z"
+           ],
+           1
+          ]
+         ]
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "k",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "k",
+     "Integers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Derivative",
+    "LambertW",
+    "Max"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "lambertw"
+   ]
+  },
+  {
+   "id": "99ff4c",
+   "formula": [
+    "Equal",
+    [
+     "LambertW",
+     "z",
+     "k"
+    ],
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "LambertWPuiseuxCoefficient",
+       "n"
+      ],
+      [
+       "Power",
+       [
+        "Negate",
+        [
+         "Sqrt",
+         [
+          "Multiply",
+          2,
+          [
+           "Add",
+           [
+            "Multiply",
+            "ExponentialE",
+            "z"
+           ],
+           1
+          ]
+         ]
+        ]
+       ],
+       "n"
+      ]
+     ],
+     [
+      "Limits",
+      "n",
+      0,
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "variables": [
+    "k",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Less",
+     [
+      "Abs",
+      [
+       "Add",
+       [
+        "Multiply",
+        "ExponentialE",
+        "z"
+       ],
+       1
+      ]
+     ],
+     1
+    ],
+    [
+     "Or",
+     [
+      "And",
+      [
+       "Equal",
+       "k",
+       -1
+      ],
+      [
+       "GreaterEqual",
+       [
+        "Imaginary",
+        "z"
+       ],
+       0
+      ]
+     ],
+     [
+      "And",
+      [
+       "Equal",
+       "k",
+       1
+      ],
+      [
+       "Less",
+       [
+        "Imaginary",
+        "z"
+       ],
+       0
+      ]
+     ]
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "LambertW",
+    "LambertWPuiseuxCoefficient",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "lambertw"
+   ]
+  },
+  {
+   "id": "9be916",
+   "formula": [
+    "Less",
+    [
+     "Abs",
+     [
+      "Apply",
+      [
+       "Derivative",
+       [
+        "Function",
+        [
+         "LambertW",
+         "x",
+         -1
+        ],
+        "x"
+       ],
+       1
+      ],
+      "x"
+     ]
+    ],
+    [
+     "Add",
+     [
+      "Divide",
+      2,
+      [
+       "Sqrt",
+       [
+        "Add",
+        1,
+        [
+         "Multiply",
+         "ExponentialE",
+         "x"
+        ]
+       ]
+      ]
+     ],
+     [
+      "Divide",
+      2,
+      [
+       "Abs",
+       "x"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": [
+    "Element",
+    "x",
+    [
+     "Interval",
+     [
+      "Open",
+      [
+       "Negate",
+       [
+        "Exp",
+        -1
+       ]
+      ]
+     ],
+     [
+      "Open",
+      0
+     ]
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Derivative",
+    "LambertW"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "lambertw"
+   ]
+  },
+  {
+   "id": "a172c7",
+   "formula": [
+    "Equal",
+    [
+     "LambertW",
+     [
+      "Multiply",
+      "x",
+      [
+       "Ln",
+       "x"
+      ]
+     ],
+     -1
+    ],
+    [
+     "Ln",
+     "x"
+    ]
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": [
+    "Element",
+    "x",
+    [
+     "Interval",
+     [
+      "Open",
+      0
+     ],
+     [
+      "Negate",
+      [
+       "Divide",
+       1,
+       "ExponentialE"
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "LambertW",
+    "Ln"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "lambertw"
+   ]
+  },
+  {
+   "id": "a1e634",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "Apply",
+      [
+       "Derivative",
+       [
+        "Function",
+        [
+         "LambertW",
+         "z",
+         "k"
+        ],
+        "z"
+       ],
+       1
+      ],
+      "z"
+     ]
+    ],
+    [
+     "Abs",
+     [
+      "Multiply",
+      [
+       "Divide",
+       1,
+       [
+        "Abs",
+        "z"
+       ]
+      ],
+      [
+       "Add",
+       1,
+       [
+        "Multiply",
+        [
+         "Divide",
+         23,
+         32
+        ],
+        [
+         "Divide",
+         1,
+         [
+          "Sqrt",
+          [
+           "Abs",
+           [
+            "Add",
+            [
+             "Multiply",
+             "ExponentialE",
+             "z"
+            ],
+            1
+           ]
+          ]
+         ]
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "k",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "k",
+     [
+      "Set",
+      -1,
+      1
+     ]
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Derivative",
+    "LambertW"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "lambertw"
+   ]
+  },
+  {
+   "id": "a34260",
+   "formula": [
+    "Less",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "LambertW",
+        "x"
+       ],
+       "x"
+      ],
+      1
+     ],
+     "x"
+    ],
+    [
+     "Divide",
+     2,
+     [
+      "Sqrt",
+      [
+       "Add",
+       1,
+       [
+        "Multiply",
+        "ExponentialE",
+        "x"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": [
+    "Element",
+    "x",
+    [
+     "Interval",
+     [
+      "Open",
+      [
+       "Negate",
+       [
+        "Exp",
+        -1
+       ]
+      ]
+     ],
+     [
+      "Open",
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Derivative",
+    "LambertW"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "lambertw"
+   ]
+  },
+  {
+   "id": "a68e0e",
+   "formula": [
+    "Element",
+    [
+     "Multiply",
+     [
+      "Sign",
+      "k"
+     ],
+     [
+      "Imaginary",
+      [
+       "LambertW",
+       "z",
+       "k"
+      ]
+     ]
+    ],
+    [
+     "Interval",
+     [
+      "Open",
+      [
+       "Multiply",
+       [
+        "Subtract",
+        [
+         "Multiply",
+         2,
+         [
+          "Abs",
+          "k"
+         ]
+        ],
+        2
+       ],
+       "Pi"
+      ]
+     ],
+     [
+      "Open",
+      [
+       "Multiply",
+       [
+        "Add",
+        [
+         "Multiply",
+         2,
+         [
+          "Abs",
+          "k"
+         ]
+        ],
+        1
+       ],
+       "Pi"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "k",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      [
+       "Set",
+       0
+      ]
+     ]
+    ],
+    [
+     "Element",
+     "k",
+     [
+      "SetMinus",
+      "Integers",
+      [
+       "Set",
+       -1,
+       0,
+       1
+      ]
+     ]
+    ]
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Imaginary",
+    "LambertW",
+    "Sign"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "lambertw"
+   ]
+  },
+  {
+   "id": "adf83a",
+   "formula": [
+    "Less",
+    [
+     "Abs",
+     [
+      "LambertWPuiseuxCoefficient",
+      "k"
+     ]
+    ],
+    [
+     "Multiply",
+     2,
+     [
+      "Power",
+      [
+       "Divide",
+       4,
+       5
+      ],
+      "k"
+     ]
+    ]
+   ],
+   "variables": [
+    "k"
+   ],
+   "assumptions": [
+    "Element",
+    "k",
+    "NonNegativeIntegers"
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "LambertWPuiseuxCoefficient"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "lambertw"
+   ]
+  },
+  {
+   "id": "b3d435",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "Apply",
+      [
+       "Derivative",
+       [
+        "Function",
+        [
+         "LambertW",
+         "z",
+         "k"
+        ],
+        "z"
+       ],
+       1
+      ],
+      "z"
+     ]
+    ],
+    [
+     "Abs",
+     [
+      "Divide",
+      {
+       "num": "1.2"
+      },
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "k",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "k",
+     [
+      "SetMinus",
+      "Integers",
+      [
+       "Set",
+       -1,
+       0,
+       1
+      ]
+     ]
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Derivative",
+    "LambertW"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "lambertw"
+   ]
+  },
+  {
+   "id": "b93d09",
+   "formula": [
+    "Equal",
+    [
+     "LambertW",
+     [
+      "Negate",
+      [
+       "Divide",
+       1,
+       "ExponentialE"
+      ]
+     ]
+    ],
+    -1
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "LambertW"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "lambertw"
+   ]
+  },
+  {
+   "id": "c87ff4",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "LambertW",
+        "z"
+       ],
+       "z"
+      ],
+      1
+     ],
+     0
+    ],
+    1
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Derivative",
+    "LambertW"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "lambertw"
+   ]
+  },
+  {
+   "id": "c95c4f",
+   "formula": [
+    "Equal",
+    [
+     "LambertW",
+     "ExponentialE"
+    ],
+    1
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "LambertW"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "lambertw"
+   ]
+  },
+  {
+   "id": "d09380",
+   "formula": [
+    "Equal",
+    [
+     "LambertW",
+     [
+      "Negate",
+      [
+       "Divide",
+       1,
+       "ExponentialE"
+      ]
+     ],
+     -1
+    ],
+    -1
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "LambertW"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "lambertw"
+   ]
+  },
+  {
+   "id": "d37d0f",
+   "formula": [
+    "Equal",
+    [
+     "LambertWPuiseuxCoefficient",
+     "k"
+    ],
+    [
+     "Subtract",
+     [
+      "Subtract",
+      [
+       "Multiply",
+       [
+        "Divide",
+        [
+         "Subtract",
+         "k",
+         1
+        ],
+        [
+         "Add",
+         "k",
+         1
+        ]
+       ],
+       [
+        "Add",
+        [
+         "Divide",
+         [
+          "LambertWPuiseuxCoefficient",
+          [
+           "Subtract",
+           "k",
+           2
+          ]
+         ],
+         2
+        ],
+        [
+         "Divide",
+         [
+          "Which",
+          [
+           "Equal",
+           [
+            "Subtract",
+            "k",
+            2
+           ],
+           0
+          ],
+          2,
+          [
+           "Equal",
+           [
+            "Subtract",
+            "k",
+            2
+           ],
+           1
+          ],
+          -1,
+          "True",
+          [
+           "Sum",
+           [
+            "Multiply",
+            [
+             "LambertWPuiseuxCoefficient",
+             "j"
+            ],
+            [
+             "LambertWPuiseuxCoefficient",
+             [
+              "Subtract",
+              [
+               "Add",
+               [
+                "Subtract",
+                "k",
+                2
+               ],
+               1
+              ],
+              "j"
+             ]
+            ]
+           ],
+           [
+            "Limits",
+            "j",
+            2,
+            [
+             "Subtract",
+             [
+              "Subtract",
+              "k",
+              2
+             ],
+             1
+            ]
+           ]
+          ]
+         ],
+         4
+        ]
+       ]
+      ],
+      [
+       "Divide",
+       [
+        "Which",
+        [
+         "Equal",
+         "k",
+         0
+        ],
+        2,
+        [
+         "Equal",
+         "k",
+         1
+        ],
+        -1,
+        "True",
+        [
+         "Sum",
+         [
+          "Multiply",
+          [
+           "LambertWPuiseuxCoefficient",
+           "j"
+          ],
+          [
+           "LambertWPuiseuxCoefficient",
+           [
+            "Subtract",
+            [
+             "Add",
+             "k",
+             1
+            ],
+            "j"
+           ]
+          ]
+         ],
+         [
+          "Limits",
+          "j",
+          2,
+          [
+           "Subtract",
+           "k",
+           1
+          ]
+         ]
+        ]
+       ],
+       2
+      ]
+     ],
+     [
+      "Divide",
+      [
+       "LambertWPuiseuxCoefficient",
+       [
+        "Subtract",
+        "k",
+        1
+       ]
+      ],
+      [
+       "Add",
+       "k",
+       1
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "k"
+   ],
+   "assumptions": [
+    "Element",
+    "k",
+    [
+     "Range",
+     2,
+     "PositiveInfinity"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "LambertWPuiseuxCoefficient",
+    "Sum"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "lambertw"
+   ]
+  },
+  {
+   "id": "da0f15",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "Subtract",
+      [
+       "LambertW",
+       "z",
+       "k"
+      ],
+      [
+       "Add",
+       [
+        "Subtract",
+        [
+         "Add",
+         [
+          "Ln",
+          "z"
+         ],
+         [
+          "Multiply",
+          [
+           "Multiply",
+           [
+            "Multiply",
+            2,
+            "Pi"
+           ],
+           "ImaginaryUnit"
+          ],
+          "k"
+         ]
+        ],
+        [
+         "Ln",
+         [
+          "Add",
+          [
+           "Ln",
+           "z"
+          ],
+          [
+           "Multiply",
+           [
+            "Multiply",
+            [
+             "Multiply",
+             2,
+             "Pi"
+            ],
+            "ImaginaryUnit"
+           ],
+           "k"
+          ]
+         ]
+        ]
+       ],
+       [
+        "Sum",
+        [
+         "Sum",
+         [
+          "Multiply",
+          [
+           "Multiply",
+           [
+            "Multiply",
+            [
+             "Divide",
+             [
+              "Power",
+              -1,
+              "n"
+             ],
+             [
+              "Factorial",
+              "m"
+             ]
+            ],
+            [
+             "StirlingCycle",
+             [
+              "Add",
+              "n",
+              "m"
+             ],
+             [
+              "Add",
+              "n",
+              1
+             ]
+            ]
+           ],
+           [
+            "Power",
+            [
+             "Divide",
+             1,
+             [
+              "Add",
+              [
+               "Ln",
+               "z"
+              ],
+              [
+               "Multiply",
+               [
+                "Multiply",
+                [
+                 "Multiply",
+                 2,
+                 "Pi"
+                ],
+                "ImaginaryUnit"
+               ],
+               "k"
+              ]
+             ]
+            ],
+            "n"
+           ]
+          ],
+          [
+           "Power",
+           [
+            "Divide",
+            [
+             "Ln",
+             [
+              "Add",
+              [
+               "Ln",
+               "z"
+              ],
+              [
+               "Multiply",
+               [
+                "Multiply",
+                [
+                 "Multiply",
+                 2,
+                 "Pi"
+                ],
+                "ImaginaryUnit"
+               ],
+               "k"
+              ]
+             ]
+            ],
+            [
+             "Add",
+             [
+              "Ln",
+              "z"
+             ],
+             [
+              "Multiply",
+              [
+               "Multiply",
+               [
+                "Multiply",
+                2,
+                "Pi"
+               ],
+               "ImaginaryUnit"
+              ],
+              "k"
+             ]
+            ]
+           ],
+           "m"
+          ]
+         ],
+         [
+          "Limits",
+          "m",
+          1,
+          [
+           "Subtract",
+           "M",
+           1
+          ]
+         ]
+        ],
+        [
+         "Limits",
+         "n",
+         0,
+         [
+          "Subtract",
+          "N_var",
+          1
+         ]
+        ]
+       ]
+      ]
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Add",
+      [
+       "Multiply",
+       [
+        "Multiply",
+        4,
+        [
+         "Abs",
+         [
+          "Divide",
+          [
+           "Ln",
+           [
+            "Add",
+            [
+             "Ln",
+             "z"
+            ],
+            [
+             "Multiply",
+             [
+              "Multiply",
+              [
+               "Multiply",
+               2,
+               "Pi"
+              ],
+              "ImaginaryUnit"
+             ],
+             "k"
+            ]
+           ]
+          ],
+          [
+           "Add",
+           [
+            "Ln",
+            "z"
+           ],
+           [
+            "Multiply",
+            [
+             "Multiply",
+             [
+              "Multiply",
+              2,
+              "Pi"
+             ],
+             "ImaginaryUnit"
+            ],
+            "k"
+           ]
+          ]
+         ]
+        ]
+       ],
+       [
+        "Power",
+        [
+         "Multiply",
+         4,
+         [
+          "Abs",
+          [
+           "Divide",
+           1,
+           [
+            "Add",
+            [
+             "Ln",
+             "z"
+            ],
+            [
+             "Multiply",
+             [
+              "Multiply",
+              [
+               "Multiply",
+               2,
+               "Pi"
+              ],
+              "ImaginaryUnit"
+             ],
+             "k"
+            ]
+           ]
+          ]
+         ]
+        ],
+        "N_var"
+       ]
+      ],
+      [
+       "Power",
+       [
+        "Multiply",
+        4,
+        [
+         "Abs",
+         [
+          "Divide",
+          [
+           "Ln",
+           [
+            "Add",
+            [
+             "Ln",
+             "z"
+            ],
+            [
+             "Multiply",
+             [
+              "Multiply",
+              [
+               "Multiply",
+               2,
+               "Pi"
+              ],
+              "ImaginaryUnit"
+             ],
+             "k"
+            ]
+           ]
+          ],
+          [
+           "Add",
+           [
+            "Ln",
+            "z"
+           ],
+           [
+            "Multiply",
+            [
+             "Multiply",
+             [
+              "Multiply",
+              2,
+              "Pi"
+             ],
+             "ImaginaryUnit"
+            ],
+            "k"
+           ]
+          ]
+         ]
+        ]
+       ],
+       "M"
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Subtract",
+       1,
+       [
+        "Multiply",
+        4,
+        [
+         "Abs",
+         [
+          "Divide",
+          1,
+          [
+           "Add",
+           [
+            "Ln",
+            "z"
+           ],
+           [
+            "Multiply",
+            [
+             "Multiply",
+             [
+              "Multiply",
+              2,
+              "Pi"
+             ],
+             "ImaginaryUnit"
+            ],
+            "k"
+           ]
+          ]
+         ]
+        ]
+       ]
+      ],
+      [
+       "Subtract",
+       1,
+       [
+        "Multiply",
+        4,
+        [
+         "Abs",
+         [
+          "Divide",
+          [
+           "Ln",
+           [
+            "Add",
+            [
+             "Ln",
+             "z"
+            ],
+            [
+             "Multiply",
+             [
+              "Multiply",
+              [
+               "Multiply",
+               2,
+               "Pi"
+              ],
+              "ImaginaryUnit"
+             ],
+             "k"
+            ]
+           ]
+          ],
+          [
+           "Add",
+           [
+            "Ln",
+            "z"
+           ],
+           [
+            "Multiply",
+            [
+             "Multiply",
+             [
+              "Multiply",
+              2,
+              "Pi"
+             ],
+             "ImaginaryUnit"
+            ],
+            "k"
+           ]
+          ]
+         ]
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "M",
+    "N_var",
+    "k",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "N_var",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "M",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "k",
+     "Integers"
+    ],
+    [
+     "Element",
+     "z",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      [
+       "Set",
+       0
+      ]
+     ]
+    ],
+    [
+     "Less",
+     [
+      "Abs",
+      [
+       "Divide",
+       1,
+       [
+        "Add",
+        [
+         "Ln",
+         "z"
+        ],
+        [
+         "Multiply",
+         [
+          "Multiply",
+          [
+           "Multiply",
+           2,
+           "Pi"
+          ],
+          "ImaginaryUnit"
+         ],
+         "k"
+        ]
+       ]
+      ]
+     ],
+     [
+      "Divide",
+      1,
+      4
+     ]
+    ],
+    [
+     "Less",
+     [
+      "Abs",
+      [
+       "Divide",
+       [
+        "Ln",
+        [
+         "Add",
+         [
+          "Ln",
+          "z"
+         ],
+         [
+          "Multiply",
+          [
+           "Multiply",
+           [
+            "Multiply",
+            2,
+            "Pi"
+           ],
+           "ImaginaryUnit"
+          ],
+          "k"
+         ]
+        ]
+       ],
+       [
+        "Add",
+        [
+         "Ln",
+         "z"
+        ],
+        [
+         "Multiply",
+         [
+          "Multiply",
+          [
+           "Multiply",
+           2,
+           "Pi"
+          ],
+          "ImaginaryUnit"
+         ],
+         "k"
+        ]
+       ]
+      ]
+     ],
+     [
+      "Divide",
+      1,
+      4
+     ]
+    ],
+    [
+     "Or",
+     [
+      "NotEqual",
+      "k",
+      0
+     ],
+     [
+      "Greater",
+      [
+       "Abs",
+       "z"
+      ],
+      1
+     ]
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Factorial",
+    "LambertW",
+    "Ln",
+    "StirlingCycle",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "lambertw"
+   ]
+  },
+  {
+   "id": "e1dd64",
+   "formula": [
+    "Equal",
+    [
+     "LambertW",
+     [
+      "Negate",
+      [
+       "Divide",
+       "Pi",
+       2
+      ]
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Multiply",
+      "ImaginaryUnit",
+      "Pi"
+     ],
+     2
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "LambertW"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "lambertw"
+   ]
+  },
+  {
+   "id": "e50532",
+   "formula": [
+    "Equal",
+    [
+     "LambertW",
+     "z"
+    ],
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "LambertWPuiseuxCoefficient",
+       "n"
+      ],
+      [
+       "Power",
+       [
+        "Sqrt",
+        [
+         "Multiply",
+         2,
+         [
+          "Add",
+          [
+           "Multiply",
+           "ExponentialE",
+           "z"
+          ],
+          1
+         ]
+        ]
+       ],
+       "n"
+      ]
+     ],
+     [
+      "Limits",
+      "n",
+      0,
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Less",
+     [
+      "Abs",
+      [
+       "Add",
+       [
+        "Multiply",
+        "ExponentialE",
+        "z"
+       ],
+       1
+      ]
+     ],
+     1
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "LambertW",
+    "LambertWPuiseuxCoefficient",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "lambertw"
+   ]
+  },
+  {
+   "id": "e5bba3",
+   "formula": [
+    "Element",
+    [
+     "Imaginary",
+     [
+      "LambertW",
+      "z",
+      -1
+     ]
+    ],
+    [
+     "Interval",
+     [
+      "Open",
+      [
+       "Negate",
+       [
+        "Multiply",
+        3,
+        "Pi"
+       ]
+      ]
+     ],
+     0
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     [
+      "Set",
+      0
+     ]
+    ]
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "Imaginary",
+    "LambertW"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "lambertw"
+   ]
+  },
+  {
+   "id": "ed7dac",
+   "formula": [
+    "Equal",
+    [
+     "LambertW",
+     [
+      "Multiply",
+      "x",
+      [
+       "Exp",
+       "x"
+      ]
+     ],
+     -1
+    ],
+    "x"
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": [
+    "Element",
+    "x",
+    [
+     "Interval",
+     [
+      "Open",
+      "NegativeInfinity"
+     ],
+     -1
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Exp",
+    "LambertW"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "lambertw"
+   ]
+  },
+  {
+   "id": "ee86fb",
+   "formula": [
+    "Equal",
+    [
+     "Set",
+     [
+      "LambertW",
+      "x"
+     ],
+     [
+      "Element",
+      "x",
+      [
+       "Interval",
+       [
+        "Open",
+        [
+         "Negate",
+         [
+          "Exp",
+          -1
+         ]
+        ]
+       ],
+       [
+        "Open",
+        "PositiveInfinity"
+       ]
+      ]
+     ]
+    ],
+    [
+     "Interval",
+     [
+      "Open",
+      -1
+     ],
+     [
+      "Open",
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Exp",
+    "LambertW"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "lambertw"
+   ]
+  },
+  {
+   "id": "f171a6",
+   "formula": [
+    "LessEqual",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "LambertW",
+        "x"
+       ],
+       "x"
+      ],
+      1
+     ],
+     "x"
+    ],
+    [
+     "Divide",
+     1,
+     [
+      "Add",
+      "x",
+      1
+     ]
+    ]
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": [
+    "Element",
+    "x",
+    [
+     "Interval",
+     0,
+     [
+      "Open",
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Derivative",
+    "LambertW"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "lambertw"
+   ]
+  },
+  {
+   "id": "f372e9",
+   "formula": [
+    "Equal",
+    [
+     "LambertW",
+     0,
+     "k"
+    ],
+    "NegativeInfinity"
+   ],
+   "variables": [
+    "k"
+   ],
+   "assumptions": [
+    "Element",
+    "k",
+    [
+     "SetMinus",
+     "Integers",
+     [
+      "Set",
+      0
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "LambertW"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "lambertw"
+   ]
+  }
+ ]
+}

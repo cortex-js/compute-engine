@@ -1,0 +1,2851 @@
+{
+ "topic": "totient",
+ "title": "Totient function",
+ "source": "pygrim/formulas/totient.py",
+ "generator": "grim2mathjson 0.1.0",
+ "entries": [
+  {
+   "id": "0477b3",
+   "formula": [
+    "Greater",
+    [
+     "Multiply",
+     [
+      "Totient",
+      "n"
+     ],
+     [
+      "DivisorSigma",
+      1,
+      "n"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      6,
+      [
+       "Power",
+       "Pi",
+       2
+      ]
+     ],
+     [
+      "Power",
+      "n",
+      2
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "PositiveIntegers"
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "DivisorSigma",
+    "Totient"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": [
+    "G. H. Hardy and E. M. Wright (1979), An Introduction to the Theory of Numbers (Fifth ed.), Oxford University Press. Theorem 327."
+   ],
+   "topics": [
+    "totient"
+   ]
+  },
+  {
+   "id": "05e9ae",
+   "formula": [
+    "Equal",
+    [
+     "Totient",
+     [
+      "Power",
+      "m",
+      "n"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Power",
+      "m",
+      [
+       "Subtract",
+       "n",
+       1
+      ]
+     ],
+     [
+      "Totient",
+      "m"
+     ]
+    ]
+   ],
+   "variables": [
+    "m",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "m",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "n",
+     "PositiveIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Totient"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "totient"
+   ]
+  },
+  {
+   "id": "081abd",
+   "formula": [
+    "Equal",
+    [
+     "Totient",
+     [
+      "Power",
+      2,
+      "n"
+     ]
+    ],
+    [
+     "Power",
+     2,
+     [
+      "Subtract",
+      "n",
+      1
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "PositiveIntegers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Totient"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "totient"
+   ]
+  },
+  {
+   "id": "08fb81",
+   "formula": [
+    "LessEqual",
+    [
+     "Totient",
+     [
+      "Multiply",
+      "m",
+      "n"
+     ]
+    ],
+    [
+     "Multiply",
+     "m",
+     [
+      "Totient",
+      "n"
+     ]
+    ]
+   ],
+   "variables": [
+    "m",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "m",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Totient"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "totient"
+   ]
+  },
+  {
+   "id": "08ff0b",
+   "formula": [
+    "Equal",
+    [
+     "Totient",
+     "n"
+    ],
+    [
+     "Subtract",
+     "n",
+     [
+      "Sum",
+      [
+       "Totient",
+       "d"
+      ],
+      [
+       "Element",
+       "d",
+       [
+        "Divisors",
+        "n"
+       ],
+       [
+        "Less",
+        "d",
+        "n"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Divisors",
+    "Sum",
+    "Totient"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "totient"
+   ]
+  },
+  {
+   "id": "0fdb94",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "Totient",
+       "d"
+      ],
+      [
+       "Divide",
+       "n",
+       "d"
+      ]
+     ],
+     [
+      "Element",
+      "d",
+      [
+       "Divisors",
+       "n"
+      ]
+     ]
+    ],
+    [
+     "Sum",
+     [
+      "GCD",
+      "n",
+      "k"
+     ],
+     [
+      "Limits",
+      "k",
+      1,
+      "n"
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Divisors",
+    "GCD",
+    "Sum",
+    "Totient"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "totient"
+   ]
+  },
+  {
+   "id": "11a56b",
+   "formula": [
+    "Equal",
+    [
+     "Totient",
+     [
+      "Negate",
+      "n"
+     ]
+    ],
+    [
+     "Totient",
+     "n"
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "Integers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Totient"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "totient"
+   ]
+  },
+  {
+   "id": "1a907e",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Divide",
+      [
+       "Totient",
+       "n"
+      ],
+      [
+       "Power",
+       "n",
+       "s"
+      ]
+     ],
+     [
+      "Limits",
+      "n",
+      1,
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Zeta",
+      [
+       "Subtract",
+       "s",
+       1
+      ]
+     ],
+     [
+      "Zeta",
+      "s"
+     ]
+    ]
+   ],
+   "variables": [
+    "s"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "s",
+     "ComplexNumbers"
+    ],
+    [
+     "Greater",
+     [
+      "Real",
+      "s"
+     ],
+     2
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Sum",
+    "Totient",
+    "Zeta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "totient"
+   ]
+  },
+  {
+   "id": "1d731f",
+   "formula": [
+    "Equal",
+    [
+     "Totient",
+     [
+      "Power",
+      "p",
+      "k"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Power",
+      "p",
+      [
+       "Subtract",
+       "k",
+       1
+      ]
+     ],
+     [
+      "Subtract",
+      "p",
+      1
+     ]
+    ]
+   ],
+   "variables": [
+    "k",
+    "p"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "p",
+     "Primes"
+    ],
+    [
+     "Element",
+     "k",
+     "PositiveIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Totient"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "totient"
+   ]
+  },
+  {
+   "id": "33139b",
+   "formula": [
+    "Equal",
+    [
+     "SequenceLimitInferior",
+     [
+      "Function",
+      [
+       "Divide",
+       [
+        "Totient",
+        [
+         "Add",
+         "n",
+         1
+        ]
+       ],
+       [
+        "Totient",
+        "n"
+       ]
+      ],
+      "n"
+     ],
+     "PositiveInfinity"
+    ],
+    0
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "SequenceLimitInferior",
+    "Totient"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "totient"
+   ]
+  },
+  {
+   "id": "36fe36",
+   "formula": [
+    "Implies",
+    [
+     "CongruentMod",
+     "x",
+     "y",
+     [
+      "Totient",
+      "n"
+     ]
+    ],
+    [
+     "CongruentMod",
+     [
+      "Power",
+      "a",
+      "x"
+     ],
+     [
+      "Power",
+      "a",
+      "y"
+     ],
+     "n"
+    ]
+   ],
+   "variables": [
+    "a",
+    "n",
+    "x",
+    "y"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "Integers"
+    ],
+    [
+     "Element",
+     "n",
+     "PositiveIntegers"
+    ],
+    [
+     "Equal",
+     [
+      "GCD",
+      "a",
+      "n"
+     ],
+     1
+    ],
+    [
+     "Element",
+     "x",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "y",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "CongruentMod",
+    "Totient"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "totient"
+   ]
+  },
+  {
+   "id": "3f5711",
+   "formula": [
+    "Equal",
+    [
+     "Totient",
+     "n"
+    ],
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "GCD",
+       "n",
+       "k"
+      ],
+      [
+       "Exp",
+       [
+        "Divide",
+        [
+         "Multiply",
+         [
+          "Multiply",
+          [
+           "Multiply",
+           2,
+           "Pi"
+          ],
+          "ImaginaryUnit"
+         ],
+         "k"
+        ],
+        "n"
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "k",
+      1,
+      "n"
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Exp",
+    "GCD",
+    "Sum",
+    "Totient"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "totient"
+   ]
+  },
+  {
+   "id": "433a5c",
+   "formula": [
+    "Greater",
+    [
+     "Totient",
+     "n"
+    ],
+    [
+     "Divide",
+     "n",
+     [
+      "Add",
+      [
+       "Multiply",
+       [
+        "Exp",
+        "EulerGamma"
+       ],
+       [
+        "Ln",
+        [
+         "Ln",
+         "n"
+        ]
+       ]
+      ],
+      [
+       "Divide",
+       {
+        "num": "2.50637"
+       },
+       [
+        "Ln",
+        [
+         "Ln",
+         "n"
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    [
+     "Range",
+     3,
+     "PositiveInfinity"
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Exp",
+    "Ln",
+    "Totient"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "totient"
+   ]
+  },
+  {
+   "id": "485ab6",
+   "formula": [
+    "LessEqual",
+    [
+     "Totient",
+     "n"
+    ],
+    [
+     "Subtract",
+     "n",
+     1
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    [
+     "Range",
+     2,
+     "PositiveInfinity"
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Totient"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "totient"
+   ]
+  },
+  {
+   "id": "4b5b44",
+   "formula": [
+    "Equal",
+    [
+     "Limit",
+     [
+      "Function",
+      [
+       "Divide",
+       [
+        "Totient",
+        "n"
+       ],
+       [
+        "Power",
+        "n",
+        [
+         "Subtract",
+         1,
+         "delta"
+        ]
+       ]
+      ],
+      "n"
+     ],
+     "PositiveInfinity"
+    ],
+    "PositiveInfinity"
+   ],
+   "variables": [
+    "delta"
+   ],
+   "assumptions": [
+    "Element",
+    "delta",
+    [
+     "Interval",
+     [
+      "Open",
+      0
+     ],
+     [
+      "Open",
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "class": "representation",
+   "subclass": "limit",
+   "heads": [
+    "Limit",
+    "Totient"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": "sequence",
+   "references": null,
+   "topics": [
+    "totient"
+   ]
+  },
+  {
+   "id": "56d7fe",
+   "formula": [
+    "Equal",
+    [
+     "Totient",
+     [
+      "Multiply",
+      "m",
+      "n"
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Multiply",
+      [
+       "Multiply",
+       [
+        "Totient",
+        "m"
+       ],
+       [
+        "Totient",
+        "n"
+       ]
+      ],
+      [
+       "GCD",
+       "m",
+       "n"
+      ]
+     ],
+     [
+      "Totient",
+      [
+       "GCD",
+       "m",
+       "n"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "m",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "m",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "n",
+     "PositiveIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "GCD",
+    "Totient"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "totient"
+   ]
+  },
+  {
+   "id": "775e10",
+   "formula": [
+    "LessEqual",
+    [
+     "Multiply",
+     [
+      "Totient",
+      "m"
+     ],
+     [
+      "Totient",
+      "n"
+     ]
+    ],
+    [
+     "Totient",
+     [
+      "Multiply",
+      "m",
+      "n"
+     ]
+    ]
+   ],
+   "variables": [
+    "m",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "m",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Totient"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "totient"
+   ]
+  },
+  {
+   "id": "7f5468",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Divide",
+      [
+       "Multiply",
+       [
+        "Totient",
+        "n"
+       ],
+       [
+        "Power",
+        "q",
+        "n"
+       ]
+      ],
+      [
+       "Subtract",
+       1,
+       [
+        "Power",
+        "q",
+        "n"
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "n",
+      1,
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Divide",
+     "q",
+     [
+      "Power",
+      [
+       "Subtract",
+       1,
+       "q"
+      ],
+      2
+     ]
+    ]
+   ],
+   "variables": [
+    "q"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "q",
+     "ComplexNumbers"
+    ],
+    [
+     "Less",
+     [
+      "Abs",
+      "q"
+     ],
+     1
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Sum",
+    "Totient"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "totient"
+   ]
+  },
+  {
+   "id": "86fcf1",
+   "formula": [
+    "Equal",
+    [
+     "Count",
+     [
+      "Set",
+      "n",
+      [
+       "Element",
+       "n",
+       "PositiveIntegers",
+       [
+        "Less",
+        [
+         "Totient",
+         "n"
+        ],
+        [
+         "Divide",
+         "n",
+         [
+          "Multiply",
+          [
+           "Exp",
+           "EulerGamma"
+          ],
+          [
+           "Ln",
+           [
+            "Ln",
+            "n"
+           ]
+          ]
+         ]
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Exp",
+    "Ln",
+    "Totient"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "totient"
+   ]
+  },
+  {
+   "id": "8d7b3d",
+   "formula": [
+    "Equal",
+    [
+     "Limit",
+     [
+      "Function",
+      [
+       "Multiply",
+       [
+        "Divide",
+        1,
+        [
+         "Power",
+         "N_var",
+         2
+        ]
+       ],
+       [
+        "Sum",
+        [
+         "Totient",
+         "n"
+        ],
+        [
+         "Limits",
+         "n",
+         1,
+         "N_var"
+        ]
+       ]
+      ],
+      "N_var"
+     ],
+     "PositiveInfinity"
+    ],
+    [
+     "Divide",
+     3,
+     [
+      "Power",
+      "Pi",
+      2
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "limit",
+   "heads": [
+    "Limit",
+    "Sum",
+    "Totient"
+   ],
+   "guardLevel": "none",
+   "flavor": "sequence",
+   "references": null,
+   "topics": [
+    "totient"
+   ]
+  },
+  {
+   "id": "8f51dd",
+   "formula": [
+    "Divides",
+    "n",
+    [
+     "Totient",
+     [
+      "Subtract",
+      [
+       "Power",
+       "m",
+       "n"
+      ],
+      1
+     ]
+    ]
+   ],
+   "variables": [
+    "m",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "m",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "n",
+     "PositiveIntegers"
+    ]
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "Divides",
+    "Totient"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "totient"
+   ]
+  },
+  {
+   "id": "90bb4a",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "Totient",
+       "d"
+      ],
+      "d"
+     ],
+     [
+      "Element",
+      "d",
+      [
+       "Divisors",
+       "n"
+      ]
+     ]
+    ],
+    [
+     "Subtract",
+     [
+      "Multiply",
+      [
+       "Divide",
+       2,
+       "n"
+      ],
+      [
+       "Sum",
+       [
+        "LCM",
+        "n",
+        "k"
+       ],
+       [
+        "Limits",
+        "k",
+        1,
+        "n"
+       ]
+      ]
+     ],
+     1
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Divisors",
+    "LCM",
+    "Sum",
+    "Totient"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "totient"
+   ]
+  },
+  {
+   "id": "91f156",
+   "formula": [
+    "Equal",
+    [
+     "Totient",
+     "n"
+    ],
+    [
+     "Sum",
+     [
+      "Which",
+      [
+       "Equal",
+       [
+        "GCD",
+        "n",
+        "k"
+       ],
+       1
+      ],
+      1,
+      "True",
+      0
+     ],
+     [
+      "Limits",
+      "k",
+      1,
+      "n"
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "GCD",
+    "Sum",
+    "Totient"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "totient"
+   ]
+  },
+  {
+   "id": "93a877",
+   "formula": [
+    "Equal",
+    [
+     "Totient",
+     "n"
+    ],
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "GCD",
+       "n",
+       "k"
+      ],
+      [
+       "Cos",
+       [
+        "Divide",
+        [
+         "Multiply",
+         [
+          "Multiply",
+          2,
+          "Pi"
+         ],
+         "k"
+        ],
+        "n"
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "k",
+      1,
+      "n"
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Cos",
+    "GCD",
+    "Sum",
+    "Totient"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "totient"
+   ]
+  },
+  {
+   "id": "9923b7",
+   "formula": [
+    "Equal",
+    [
+     "Limit",
+     [
+      "Function",
+      [
+       "Multiply",
+       [
+        "Divide",
+        1,
+        [
+         "Ln",
+         "N_var"
+        ]
+       ],
+       [
+        "Sum",
+        [
+         "Divide",
+         1,
+         [
+          "Totient",
+          "n"
+         ]
+        ],
+        [
+         "Limits",
+         "n",
+         1,
+         "N_var"
+        ]
+       ]
+      ],
+      "N_var"
+     ],
+     "PositiveInfinity"
+    ],
+    [
+     "Divide",
+     [
+      "Multiply",
+      [
+       "Zeta",
+       2
+      ],
+      [
+       "Zeta",
+       3
+      ]
+     ],
+     [
+      "Zeta",
+      6
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "limit",
+   "heads": [
+    "Limit",
+    "Ln",
+    "Sum",
+    "Totient",
+    "Zeta"
+   ],
+   "guardLevel": "none",
+   "flavor": "sequence",
+   "references": null,
+   "topics": [
+    "totient"
+   ]
+  },
+  {
+   "id": "a05466",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "Totient",
+       "d"
+      ],
+      [
+       "DivisorSigma",
+       "k",
+       [
+        "Divide",
+        "n",
+        "d"
+       ]
+      ]
+     ],
+     [
+      "Element",
+      "d",
+      [
+       "Divisors",
+       "n"
+      ]
+     ]
+    ],
+    [
+     "Multiply",
+     "n",
+     [
+      "DivisorSigma",
+      [
+       "Subtract",
+       "k",
+       1
+      ],
+      "n"
+     ]
+    ]
+   ],
+   "variables": [
+    "k",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "k",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "DivisorSigma",
+    "Divisors",
+    "Sum",
+    "Totient"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "totient"
+   ]
+  },
+  {
+   "id": "a08583",
+   "formula": [
+    "Equal",
+    [
+     "Multiply",
+     [
+      "Totient",
+      "n"
+     ],
+     [
+      "DivisorSigma",
+      0,
+      "n"
+     ]
+    ],
+    [
+     "Sum",
+     [
+      "Which",
+      [
+       "Equal",
+       [
+        "GCD",
+        "n",
+        "k"
+       ],
+       1
+      ],
+      [
+       "GCD",
+       "n",
+       [
+        "Subtract",
+        "k",
+        1
+       ]
+      ],
+      "True",
+      0
+     ],
+     [
+      "Limits",
+      "k",
+      1,
+      "n"
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "DivisorSigma",
+    "GCD",
+    "Sum",
+    "Totient"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "totient"
+   ]
+  },
+  {
+   "id": "a68214",
+   "formula": [
+    "CongruentMod",
+    [
+     "Power",
+     "a",
+     [
+      "Totient",
+      "n"
+     ]
+    ],
+    1,
+    "n"
+   ],
+   "variables": [
+    "a",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "Integers"
+    ],
+    [
+     "Element",
+     "n",
+     "PositiveIntegers"
+    ],
+    [
+     "Equal",
+     [
+      "GCD",
+      "a",
+      "n"
+     ],
+     1
+    ]
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "CongruentMod",
+    "Totient"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "totient"
+   ]
+  },
+  {
+   "id": "a9a405",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "Divide",
+       [
+        "Totient",
+        "n"
+       ],
+       "n"
+      ],
+      [
+       "Ln",
+       [
+        "Subtract",
+        1,
+        [
+         "Power",
+         "x",
+         "n"
+        ]
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "n",
+      1,
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Divide",
+     "x",
+     [
+      "Subtract",
+      "x",
+      1
+     ]
+    ]
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ],
+    [
+     "Less",
+     [
+      "Abs",
+      "x"
+     ],
+     1
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Ln",
+    "Sum",
+    "Totient"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "totient"
+   ]
+  },
+  {
+   "id": "acb28a",
+   "formula": [
+    "Less",
+    [
+     "Multiply",
+     [
+      "Totient",
+      "n"
+     ],
+     [
+      "DivisorSigma",
+      1,
+      "n"
+     ]
+    ],
+    [
+     "Power",
+     "n",
+     2
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    [
+     "Range",
+     2,
+     "PositiveInfinity"
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "DivisorSigma",
+    "Totient"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": [
+    "G. H. Hardy and E. M. Wright (1979), An Introduction to the Theory of Numbers (Fifth ed.), Oxford University Press. Theorem 327."
+   ],
+   "topics": [
+    "totient"
+   ]
+  },
+  {
+   "id": "acfc1f",
+   "formula": [
+    "Equal",
+    [
+     "SequenceLimitInferior",
+     [
+      "Function",
+      [
+       "Divide",
+       [
+        "Multiply",
+        [
+         "Totient",
+         "n"
+        ],
+        [
+         "Ln",
+         [
+          "Ln",
+          "n"
+         ]
+        ]
+       ],
+       "n"
+      ],
+      "n"
+     ],
+     "PositiveInfinity"
+    ],
+    [
+     "Exp",
+     [
+      "Negate",
+      "EulerGamma"
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Exp",
+    "Ln",
+    "SequenceLimitInferior",
+    "Totient"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "totient"
+   ]
+  },
+  {
+   "id": "b81b45",
+   "formula": [
+    "Implies",
+    [
+     "NotElement",
+     "n",
+     "Primes"
+    ],
+    [
+     "LessEqual",
+     [
+      "Totient",
+      "n"
+     ],
+     [
+      "Subtract",
+      "n",
+      [
+       "Sqrt",
+       "n"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    [
+     "Range",
+     2,
+     "PositiveInfinity"
+    ]
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "Totient"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "totient"
+   ]
+  },
+  {
+   "id": "b9c36d",
+   "formula": [
+    "Equal",
+    [
+     "Totient",
+     [
+      "Product",
+      [
+       "Power",
+       [
+        "PrimeNumber",
+        "k"
+       ],
+       [
+        "e_",
+        "k"
+       ]
+      ],
+      [
+       "Limits",
+       "k",
+       1,
+       "m"
+      ]
+     ]
+    ],
+    [
+     "Product",
+     [
+      "Totient",
+      [
+       "Power",
+       [
+        "PrimeNumber",
+        "k"
+       ],
+       [
+        "e_",
+        "k"
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "k",
+      1,
+      "m"
+     ]
+    ]
+   ],
+   "variables": [
+    "e_var",
+    "m"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     [
+      "e_",
+      "k"
+     ],
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "m",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "product",
+   "heads": [
+    "PrimeNumber",
+    "Product",
+    "Totient"
+   ],
+   "guardLevel": "undischargeable",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "totient"
+   ],
+   "indexedFamilies": [
+    "e_"
+   ]
+  },
+  {
+   "id": "b9c50f",
+   "formula": [
+    "Equal",
+    [
+     "Totient",
+     "n"
+    ],
+    [
+     "Multiply",
+     "n",
+     [
+      "Product",
+      [
+       "Subtract",
+       1,
+       [
+        "Divide",
+        1,
+        "p"
+       ]
+      ],
+      [
+       "Element",
+       "p",
+       "Primes",
+       [
+        "Divides",
+        "p",
+        "n"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "PositiveIntegers"
+   ],
+   "class": "representation",
+   "subclass": "product",
+   "heads": [
+    "Divides",
+    "Primes",
+    "Product",
+    "Totient"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "totient"
+   ]
+  },
+  {
+   "id": "bb4ce0",
+   "formula": [
+    "Equal",
+    [
+     "Totient",
+     "n"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      2,
+      "n"
+     ],
+     [
+      "Sum",
+      [
+       "Which",
+       [
+        "Equal",
+        [
+         "GCD",
+         "n",
+         "k"
+        ],
+        1
+       ],
+       "k",
+       "True",
+       0
+      ],
+      [
+       "Limits",
+       "k",
+       1,
+       "n"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    [
+     "Range",
+     2,
+     "PositiveInfinity"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "GCD",
+    "Sum",
+    "Totient"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "totient"
+   ]
+  },
+  {
+   "id": "c0e088",
+   "formula": [
+    "Equal",
+    [
+     "Totient",
+     [
+      "Multiply",
+      2,
+      "n"
+     ]
+    ],
+    [
+     "Which",
+     [
+      "IsEven",
+      "n"
+     ],
+     [
+      "Multiply",
+      2,
+      [
+       "Totient",
+       "n"
+      ]
+     ],
+     [
+      "IsOdd",
+      "n"
+     ],
+     [
+      "Totient",
+      "n"
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "IsEven",
+    "IsOdd",
+    "Totient"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "totient"
+   ]
+  },
+  {
+   "id": "c19cd6",
+   "formula": [
+    "Equal",
+    [
+     "Totient",
+     "n"
+    ],
+    [
+     "Count",
+     [
+      "Set",
+      "k",
+      [
+       "Element",
+       "k",
+       [
+        "Range",
+        1,
+        "n"
+       ],
+       [
+        "Equal",
+        [
+         "GCD",
+         "n",
+         "k"
+        ],
+        1
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "GCD",
+    "Totient"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "totient"
+   ]
+  },
+  {
+   "id": "cb410e",
+   "formula": [
+    "Equal",
+    [
+     "Totient",
+     "p"
+    ],
+    [
+     "Subtract",
+     "p",
+     1
+    ]
+   ],
+   "variables": [
+    "p"
+   ],
+   "assumptions": [
+    "Element",
+    "p",
+    "Primes"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Totient"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "totient"
+   ]
+  },
+  {
+   "id": "cd7877",
+   "formula": [
+    "Equal",
+    [
+     "SequenceLimitSuperior",
+     [
+      "Function",
+      [
+       "Divide",
+       [
+        "Totient",
+        "n"
+       ],
+       "n"
+      ],
+      "n"
+     ],
+     "PositiveInfinity"
+    ],
+    1
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "SequenceLimitSuperior",
+    "Totient"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "totient"
+   ]
+  },
+  {
+   "id": "cdd7e7",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Totient",
+      "d"
+     ],
+     [
+      "Element",
+      "d",
+      [
+       "Divisors",
+       "n"
+      ]
+     ]
+    ],
+    "n"
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Divisors",
+    "Sum",
+    "Totient"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "totient"
+   ]
+  },
+  {
+   "id": "d0b5a7",
+   "formula": [
+    "GreaterEqual",
+    [
+     "Totient",
+     "n"
+    ],
+    [
+     "Sqrt",
+     "n"
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    [
+     "Range",
+     7,
+     "PositiveInfinity"
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Totient"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "totient"
+   ]
+  },
+  {
+   "id": "d1ea57",
+   "formula": [
+    "Equal",
+    [
+     "Multiply",
+     [
+      "Totient",
+      [
+       "LCM",
+       "m",
+       "n"
+      ]
+     ],
+     [
+      "Totient",
+      [
+       "GCD",
+       "m",
+       "n"
+      ]
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Totient",
+      "m"
+     ],
+     [
+      "Totient",
+      "n"
+     ]
+    ]
+   ],
+   "variables": [
+    "m",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "m",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "GCD",
+    "LCM",
+    "Totient"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "totient"
+   ]
+  },
+  {
+   "id": "db4763",
+   "formula": [
+    "Implies",
+    [
+     "Equal",
+     [
+      "GCD",
+      "m",
+      "n"
+     ],
+     1
+    ],
+    [
+     "Equal",
+     [
+      "Totient",
+      [
+       "Multiply",
+       "m",
+       "n"
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Totient",
+       "m"
+      ],
+      [
+       "Totient",
+       "n"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "m",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "m",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "GCD",
+    "Totient"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "totient"
+   ]
+  },
+  {
+   "id": "e3005f",
+   "formula": [
+    "LessEqual",
+    [
+     "Totient",
+     "n"
+    ],
+    "n"
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Totient"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "totient"
+   ]
+  },
+  {
+   "id": "ea27a7",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "Totient",
+       "k"
+      ],
+      [
+       "Floor",
+       [
+        "Divide",
+        "n",
+        "k"
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "k",
+      1,
+      "n"
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Multiply",
+      "n",
+      [
+       "Add",
+       "n",
+       1
+      ]
+     ],
+     2
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Floor",
+    "Sum",
+    "Totient"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "totient"
+   ]
+  },
+  {
+   "id": "eae0de",
+   "formula": [
+    "Implies",
+    [
+     "Divides",
+     "m",
+     "n"
+    ],
+    [
+     "Divides",
+     [
+      "Totient",
+      "m"
+     ],
+     [
+      "Totient",
+      "n"
+     ]
+    ]
+   ],
+   "variables": [
+    "m",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "m",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "Divides",
+    "Totient"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "totient"
+   ]
+  },
+  {
+   "id": "efd378",
+   "formula": [
+    "Equal",
+    [
+     "Totient",
+     "n"
+    ],
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "MoebiusMu",
+       "d"
+      ],
+      [
+       "Divide",
+       "n",
+       "d"
+      ]
+     ],
+     [
+      "Element",
+      "d",
+      [
+       "Divisors",
+       "n"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Divisors",
+    "MoebiusMu",
+    "Sum",
+    "Totient"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "totient"
+   ]
+  },
+  {
+   "id": "f0639c",
+   "formula": [
+    "Which",
+    [
+     "Element",
+     "n",
+     [
+      "Set",
+      1,
+      2
+     ]
+    ],
+    [
+     "IsOdd",
+     [
+      "Totient",
+      "n"
+     ]
+    ],
+    "True",
+    [
+     "IsEven",
+     [
+      "Totient",
+      "n"
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "IsEven",
+    "IsOdd",
+    "Totient"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "totient"
+   ]
+  },
+  {
+   "id": "feb1a0",
+   "formula": [
+    "Equal",
+    [
+     "SequenceLimitSuperior",
+     [
+      "Function",
+      [
+       "Divide",
+       [
+        "Totient",
+        [
+         "Add",
+         "n",
+         1
+        ]
+       ],
+       [
+        "Totient",
+        "n"
+       ]
+      ],
+      "n"
+     ],
+     "PositiveInfinity"
+    ],
+    "PositiveInfinity"
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "SequenceLimitSuperior",
+    "Totient"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "totient"
+   ]
+  }
+ ]
+}

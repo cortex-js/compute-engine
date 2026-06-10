@@ -1,0 +1,447 @@
+{
+ "topic": "multiple_zeta_values",
+ "title": "Multiple zeta values",
+ "source": "pygrim/formulas/multiple_zeta_values.py",
+ "generator": "grim2mathjson 0.1.0",
+ "entries": [
+  {
+   "id": "345c26",
+   "formula": [
+    "Equal",
+    [
+     "MultiZetaValue",
+     2,
+     1
+    ],
+    [
+     "Sum",
+     [
+      "Divide",
+      [
+       "HarmonicNumber",
+       "n"
+      ],
+      [
+       "Power",
+       [
+        "Add",
+        "n",
+        1
+       ],
+       2
+      ]
+     ],
+     [
+      "Limits",
+      "n",
+      1,
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Zeta",
+     3
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "HarmonicNumber",
+    "MultiZetaValue",
+    "Sum",
+    "Zeta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "multiple_zeta_values"
+   ]
+  },
+  {
+   "id": "3a5167",
+   "formula": [
+    "Equal",
+    [
+     "MultiZetaValue",
+     3,
+     3
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      1,
+      2
+     ],
+     [
+      "Subtract",
+      [
+       "Power",
+       [
+        "Zeta",
+        3
+       ],
+       2
+      ],
+      [
+       "Zeta",
+       6
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "MultiZetaValue",
+    "Zeta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "multiple_zeta_values"
+   ]
+  },
+  {
+   "id": "62de01",
+   "formula": [
+    "Equal",
+    [
+     "MultiZetaValue",
+     2,
+     2
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      3,
+      4
+     ],
+     [
+      "Zeta",
+      4
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "MultiZetaValue",
+    "Zeta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "multiple_zeta_values"
+   ]
+  },
+  {
+   "id": "856317",
+   "formula": [
+    "Equal",
+    [
+     "MultiZetaValue",
+     2,
+     3
+    ],
+    [
+     "Subtract",
+     [
+      "Multiply",
+      [
+       "Divide",
+       9,
+       2
+      ],
+      [
+       "Zeta",
+       5
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Multiply",
+       2,
+       [
+        "Zeta",
+        2
+       ]
+      ],
+      [
+       "Zeta",
+       3
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "MultiZetaValue",
+    "Zeta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "multiple_zeta_values"
+   ]
+  },
+  {
+   "id": "a5e52e",
+   "formula": [
+    "Equal",
+    [
+     "MultiZetaValue",
+     3,
+     2
+    ],
+    [
+     "Subtract",
+     [
+      "Multiply",
+      [
+       "Multiply",
+       3,
+       [
+        "Zeta",
+        2
+       ]
+      ],
+      [
+       "Zeta",
+       3
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Divide",
+       11,
+       2
+      ],
+      [
+       "Zeta",
+       5
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "MultiZetaValue",
+    "Zeta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "multiple_zeta_values"
+   ]
+  },
+  {
+   "id": "da71d3",
+   "formula": [
+    "Equal",
+    [
+     "Add",
+     [
+      "MultiZetaValue",
+      "a",
+      "b"
+     ],
+     [
+      "MultiZetaValue",
+      "b",
+      "a"
+     ]
+    ],
+    [
+     "Subtract",
+     [
+      "Multiply",
+      [
+       "Zeta",
+       "a"
+      ],
+      [
+       "Zeta",
+       "b"
+      ]
+     ],
+     [
+      "Zeta",
+      [
+       "Add",
+       "a",
+       "b"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     [
+      "Range",
+      2,
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Element",
+     "b",
+     [
+      "Range",
+      2,
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "MultiZetaValue",
+    "Zeta"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "multiple_zeta_values"
+   ]
+  },
+  {
+   "id": "ef2c71",
+   "formula": [
+    "Equal",
+    [
+     "MultiZetaValue",
+     4,
+     2
+    ],
+    [
+     "Subtract",
+     [
+      "Power",
+      [
+       "Zeta",
+       3
+      ],
+      2
+     ],
+     [
+      "Multiply",
+      [
+       "Divide",
+       4,
+       3
+      ],
+      [
+       "Zeta",
+       6
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "MultiZetaValue",
+    "Zeta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "multiple_zeta_values"
+   ]
+  },
+  {
+   "id": "ef8b17",
+   "formula": [
+    "Equal",
+    [
+     "MultiZetaValue",
+     "s",
+     "s"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      1,
+      2
+     ],
+     [
+      "Subtract",
+      [
+       "Power",
+       [
+        "Zeta",
+        "s"
+       ],
+       2
+      ],
+      [
+       "Zeta",
+       [
+        "Multiply",
+        2,
+        "s"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "s"
+   ],
+   "assumptions": [
+    "Element",
+    "s",
+    [
+     "Range",
+     2,
+     "PositiveInfinity"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "MultiZetaValue",
+    "Zeta"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "multiple_zeta_values"
+   ]
+  }
+ ]
+}

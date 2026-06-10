@@ -1,0 +1,3170 @@
+{
+ "topic": "factorials",
+ "title": "Factorials and binomial coefficients",
+ "source": "pygrim/formulas/factorials.py",
+ "generator": "grim2mathjson 0.1.0",
+ "entries": [
+  {
+   "id": "001a0b",
+   "formula": [
+    "GreaterEqual",
+    [
+     "Binomial",
+     "n",
+     "k"
+    ],
+    [
+     "Divide",
+     [
+      "Power",
+      "n",
+      "k"
+     ],
+     [
+      "Power",
+      "k",
+      "k"
+     ]
+    ]
+   ],
+   "variables": [
+    "k",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "k",
+     [
+      "Range",
+      0,
+      "n"
+     ]
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Binomial"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "factorials"
+   ]
+  },
+  {
+   "id": "02ee06",
+   "formula": [
+    "Equal",
+    [
+     "RisingFactorial",
+     "z",
+     [
+      "Add",
+      "k",
+      "m"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "RisingFactorial",
+      "z",
+      "k"
+     ],
+     [
+      "RisingFactorial",
+      [
+       "Add",
+       "z",
+       "k"
+      ],
+      "m"
+     ]
+    ]
+   ],
+   "variables": [
+    "k",
+    "m",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "k",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "m",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "RisingFactorial"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "factorials"
+   ]
+  },
+  {
+   "id": "081188",
+   "formula": [
+    "Equal",
+    [
+     "Binomial",
+     [
+      "Add",
+      "z",
+      1
+     ],
+     [
+      "Add",
+      "k",
+      1
+     ]
+    ],
+    [
+     "Add",
+     [
+      "Binomial",
+      "z",
+      "k"
+     ],
+     [
+      "Binomial",
+      "z",
+      [
+       "Add",
+       "k",
+       1
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "k",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "k",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Binomial"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "factorials"
+   ]
+  },
+  {
+   "id": "0d92f6",
+   "formula": [
+    "Equal",
+    [
+     "Binomial",
+     [
+      "Multiply",
+      2,
+      "n"
+     ],
+     "n"
+    ],
+    [
+     "Divide",
+     [
+      "Factorial",
+      [
+       "Multiply",
+       2,
+       "n"
+      ]
+     ],
+     [
+      "Power",
+      [
+       "Factorial",
+       "n"
+      ],
+      2
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Binomial",
+    "Factorial"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "factorials"
+   ]
+  },
+  {
+   "id": "0feb19",
+   "formula": [
+    "Equal",
+    [
+     "RisingFactorial",
+     1,
+     "k"
+    ],
+    [
+     "Factorial",
+     "k"
+    ]
+   ],
+   "variables": [
+    "k"
+   ],
+   "assumptions": [
+    "Element",
+    "k",
+    "NonNegativeIntegers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Factorial",
+    "RisingFactorial"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "factorials"
+   ]
+  },
+  {
+   "id": "1745f5",
+   "formula": [
+    "Greater",
+    [
+     "Factorial",
+     "n"
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      [
+       "Multiply",
+       [
+        "Sqrt",
+        [
+         "Multiply",
+         2,
+         "Pi"
+        ]
+       ],
+       [
+        "Power",
+        "n",
+        [
+         "Add",
+         "n",
+         [
+          "Divide",
+          1,
+          2
+         ]
+        ]
+       ]
+      ],
+      [
+       "Exp",
+       [
+        "Negate",
+        "n"
+       ]
+      ]
+     ],
+     [
+      "Exp",
+      [
+       "Divide",
+       1,
+       [
+        "Add",
+        [
+         "Multiply",
+         12,
+         "n"
+        ],
+        1
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Exp",
+    "Factorial"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": [
+    "H. Robbins (1955), A remark on Stirling's formula, Am. Math. Monthly 62(1), pp. 26-29."
+   ],
+   "topics": [
+    "factorials"
+   ]
+  },
+  {
+   "id": "1d5e92",
+   "formula": [
+    "Equal",
+    [
+     "Binomial",
+     "z",
+     "k"
+    ],
+    [
+     "Divide",
+     [
+      "FallingFactorial",
+      "z",
+      "k"
+     ],
+     [
+      "Factorial",
+      "k"
+     ]
+    ]
+   ],
+   "variables": [
+    "k",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "k",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Binomial",
+    "Factorial",
+    "FallingFactorial"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "factorials"
+   ]
+  },
+  {
+   "id": "1df686",
+   "formula": [
+    "Equal",
+    [
+     "Binomial",
+     "z",
+     2
+    ],
+    [
+     "Divide",
+     [
+      "Multiply",
+      "z",
+      [
+       "Subtract",
+       "z",
+       1
+      ]
+     ],
+     2
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Binomial"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "factorials"
+   ]
+  },
+  {
+   "id": "209fc8",
+   "formula": [
+    "Equal",
+    [
+     "Binomial",
+     "z",
+     [
+      "Add",
+      "k",
+      1
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      [
+       "Subtract",
+       "z",
+       "k"
+      ],
+      [
+       "Add",
+       "k",
+       1
+      ]
+     ],
+     [
+      "Binomial",
+      "z",
+      "k"
+     ]
+    ]
+   ],
+   "variables": [
+    "k",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "k",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Binomial"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "factorials"
+   ]
+  },
+  {
+   "id": "22ee07",
+   "formula": [
+    "Equal",
+    [
+     "Binomial",
+     "z",
+     "k"
+    ],
+    [
+     "Divide",
+     [
+      "RisingFactorial",
+      [
+       "Add",
+       [
+        "Subtract",
+        "z",
+        "k"
+       ],
+       1
+      ],
+      "k"
+     ],
+     [
+      "Factorial",
+      "k"
+     ]
+    ]
+   ],
+   "variables": [
+    "k",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "k",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Binomial",
+    "Factorial",
+    "RisingFactorial"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "factorials"
+   ]
+  },
+  {
+   "id": "2362af",
+   "formula": [
+    "Equal",
+    [
+     "Binomial",
+     "n",
+     "k"
+    ],
+    [
+     "Binomial",
+     "n",
+     [
+      "Subtract",
+      "n",
+      "k"
+     ]
+    ]
+   ],
+   "variables": [
+    "k",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "k",
+     [
+      "Range",
+      0,
+      "n"
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Binomial"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "factorials"
+   ]
+  },
+  {
+   "id": "25b7bd",
+   "formula": [
+    "Greater",
+    [
+     "Factorial",
+     "n"
+    ],
+    [
+     "Power",
+     "C",
+     "n"
+    ]
+   ],
+   "variables": [
+    "C",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "C",
+     [
+      "Interval",
+      [
+       "Open",
+       0
+      ],
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
+     ]
+    ],
+    [
+     "GreaterEqual",
+     "n",
+     [
+      "Multiply",
+      "C",
+      "ExponentialE"
+     ]
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Factorial"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "factorials"
+   ]
+  },
+  {
+   "id": "2b2066",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "Binomial",
+       [
+        "Multiply",
+        2,
+        "n"
+       ],
+       "n"
+      ],
+      [
+       "Power",
+       "x",
+       "n"
+      ]
+     ],
+     [
+      "Limits",
+      "n",
+      0,
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Divide",
+     1,
+     [
+      "Sqrt",
+      [
+       "Subtract",
+       1,
+       [
+        "Multiply",
+        4,
+        "x"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ],
+    [
+     "Less",
+     [
+      "Abs",
+      "x"
+     ],
+     [
+      "Divide",
+      1,
+      4
+     ]
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Binomial",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "factorials"
+   ]
+  },
+  {
+   "id": "30652c",
+   "formula": [
+    "Equal",
+    [
+     "RisingFactorial",
+     "n",
+     "k"
+    ],
+    [
+     "Divide",
+     [
+      "Factorial",
+      [
+       "Subtract",
+       [
+        "Add",
+        "n",
+        "k"
+       ],
+       1
+      ]
+     ],
+     [
+      "Factorial",
+      [
+       "Subtract",
+       "n",
+       1
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "k",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "k",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Factorial",
+    "RisingFactorial"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "factorials"
+   ]
+  },
+  {
+   "id": "332721",
+   "formula": [
+    "Equal",
+    [
+     "Binomial",
+     "n",
+     "k"
+    ],
+    [
+     "Divide",
+     [
+      "Factorial",
+      "n"
+     ],
+     [
+      "Multiply",
+      [
+       "Factorial",
+       "k"
+      ],
+      [
+       "Factorial",
+       [
+        "Subtract",
+        "n",
+        "k"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "k",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "k",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Binomial",
+    "Factorial"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "factorials"
+   ]
+  },
+  {
+   "id": "355c22",
+   "formula": [
+    "Equal",
+    [
+     "FallingFactorial",
+     "k",
+     "k"
+    ],
+    [
+     "Factorial",
+     "k"
+    ]
+   ],
+   "variables": [
+    "k"
+   ],
+   "assumptions": [
+    "Element",
+    "k",
+    "NonNegativeIntegers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Factorial",
+    "FallingFactorial"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "factorials"
+   ]
+  },
+  {
+   "id": "41f950",
+   "formula": [
+    "Equal",
+    [
+     "RisingFactorial",
+     [
+      "Add",
+      "z",
+      1
+     ],
+     "k"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      [
+       "Add",
+       "z",
+       "k"
+      ],
+      "z"
+     ],
+     [
+      "RisingFactorial",
+      "z",
+      "k"
+     ]
+    ]
+   ],
+   "variables": [
+    "k",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      [
+       "Set",
+       0
+      ]
+     ]
+    ],
+    [
+     "Element",
+     "k",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "RisingFactorial"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "factorials"
+   ]
+  },
+  {
+   "id": "433d8b",
+   "formula": [
+    "Less",
+    [
+     "Binomial",
+     [
+      "Multiply",
+      2,
+      "n"
+     ],
+     "n"
+    ],
+    [
+     "Divide",
+     [
+      "Power",
+      4,
+      "n"
+     ],
+     [
+      "Sqrt",
+      [
+       "Multiply",
+       "Pi",
+       "n"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "PositiveIntegers"
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Binomial"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "factorials"
+   ]
+  },
+  {
+   "id": "471485",
+   "formula": [
+    "Equal",
+    [
+     "Binomial",
+     "n",
+     [
+      "Add",
+      "n",
+      "m"
+     ]
+    ],
+    0
+   ],
+   "variables": [
+    "m",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "m",
+     "PositiveIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Binomial"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "factorials"
+   ]
+  },
+  {
+   "id": "4d1365",
+   "formula": [
+    "Equal",
+    [
+     "Binomial",
+     "z",
+     "k"
+    ],
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "StirlingS1",
+       "k",
+       "i_var"
+      ],
+      [
+       "Divide",
+       [
+        "Power",
+        "z",
+        "i_var"
+       ],
+       [
+        "Factorial",
+        "k"
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "i_var",
+      0,
+      "k"
+     ]
+    ]
+   ],
+   "variables": [
+    "k",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "k",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Binomial",
+    "Factorial",
+    "StirlingS1",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "factorials"
+   ]
+  },
+  {
+   "id": "4e7120",
+   "formula": [
+    "LessEqual",
+    [
+     "Binomial",
+     "n",
+     "k"
+    ],
+    [
+     "Divide",
+     [
+      "Power",
+      "n",
+      "n"
+     ],
+     [
+      "Multiply",
+      [
+       "Power",
+       "k",
+       "k"
+      ],
+      [
+       "Power",
+       [
+        "Subtract",
+        "n",
+        "k"
+       ],
+       [
+        "Subtract",
+        "n",
+        "k"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "k",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "k",
+     [
+      "Range",
+      0,
+      "n"
+     ]
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Binomial"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "factorials"
+   ]
+  },
+  {
+   "id": "4f20ff",
+   "formula": [
+    "Equal",
+    [
+     "Factorial",
+     "n"
+    ],
+    [
+     "Multiply",
+     "n",
+     [
+      "Factorial",
+      [
+       "Subtract",
+       "n",
+       1
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "PositiveIntegers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Factorial"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "factorials"
+   ]
+  },
+  {
+   "id": "50f57e",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "Binomial",
+       [
+        "Multiply",
+        2,
+        "n"
+       ],
+       "n"
+      ],
+      [
+       "Divide",
+       [
+        "Power",
+        "x",
+        "n"
+       ],
+       [
+        "Factorial",
+        "n"
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "n",
+      0,
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Exp",
+      [
+       "Multiply",
+       2,
+       "x"
+      ]
+     ],
+     [
+      "BesselI",
+      0,
+      [
+       "Multiply",
+       2,
+       "x"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": [
+    "Element",
+    "x",
+    "ComplexNumbers"
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "BesselI",
+    "Binomial",
+    "Exp",
+    "Factorial",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "factorials"
+   ]
+  },
+  {
+   "id": "56d4ff",
+   "formula": [
+    "Equal",
+    [
+     "Binomial",
+     "z",
+     "k"
+    ],
+    [
+     "Multiply",
+     [
+      "Power",
+      -1,
+      "k"
+     ],
+     [
+      "Binomial",
+      [
+       "Subtract",
+       [
+        "Subtract",
+        "k",
+        "z"
+       ],
+       1
+      ],
+      "k"
+     ]
+    ]
+   ],
+   "variables": [
+    "k",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "k",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Binomial"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "factorials"
+   ]
+  },
+  {
+   "id": "5b414d",
+   "formula": [
+    "Equal",
+    [
+     "FallingFactorial",
+     "z",
+     0
+    ],
+    1
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "FallingFactorial"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "factorials"
+   ]
+  },
+  {
+   "id": "5b85bf",
+   "formula": [
+    "Equal",
+    [
+     "Binomial",
+     "z",
+     1
+    ],
+    "z"
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Binomial"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "factorials"
+   ]
+  },
+  {
+   "id": "5d6f99",
+   "formula": [
+    "LessEqual",
+    [
+     "Binomial",
+     "n",
+     "k"
+    ],
+    [
+     "Divide",
+     [
+      "Power",
+      [
+       "Multiply",
+       "n",
+       "ExponentialE"
+      ],
+      "k"
+     ],
+     [
+      "Power",
+      "k",
+      "k"
+     ]
+    ]
+   ],
+   "variables": [
+    "k",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "k",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Binomial"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "factorials"
+   ]
+  },
+  {
+   "id": "5f7334",
+   "formula": [
+    "GreaterEqual",
+    [
+     "Binomial",
+     "n",
+     "k"
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      [
+       "Divide",
+       1,
+       [
+        "Sqrt",
+        8
+       ]
+      ],
+      [
+       "Sqrt",
+       [
+        "Divide",
+        "n",
+        [
+         "Multiply",
+         "k",
+         [
+          "Subtract",
+          "n",
+          "k"
+         ]
+        ]
+       ]
+      ]
+     ],
+     [
+      "Divide",
+      [
+       "Power",
+       "n",
+       "n"
+      ],
+      [
+       "Multiply",
+       [
+        "Power",
+        "k",
+        "k"
+       ],
+       [
+        "Power",
+        [
+         "Subtract",
+         "n",
+         "k"
+        ],
+        [
+         "Subtract",
+         "n",
+         "k"
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "k",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     [
+      "Range",
+      2,
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Element",
+     "k",
+     [
+      "Range",
+      1,
+      [
+       "Subtract",
+       "n",
+       1
+      ]
+     ]
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Binomial"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "factorials"
+   ]
+  },
+  {
+   "id": "62c6c9",
+   "formula": [
+    "Equal",
+    [
+     "Factorial",
+     "n"
+    ],
+    [
+     "Gamma",
+     [
+      "Add",
+      "n",
+      1
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Factorial",
+    "Gamma"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "factorials",
+    "gamma"
+   ]
+  },
+  {
+   "id": "65c610",
+   "formula": [
+    "Equal",
+    [
+     "Exp",
+     [
+      "Add",
+      "x",
+      "y"
+     ]
+    ],
+    [
+     "Sum",
+     [
+      "Sum",
+      [
+       "Multiply",
+       [
+        "Binomial",
+        [
+         "Add",
+         "n",
+         "k"
+        ],
+        "k"
+       ],
+       [
+        "Divide",
+        [
+         "Multiply",
+         [
+          "Power",
+          "x",
+          "k"
+         ],
+         [
+          "Power",
+          "y",
+          "n"
+         ]
+        ],
+        [
+         "Factorial",
+         [
+          "Add",
+          "n",
+          "k"
+         ]
+        ]
+       ]
+      ],
+      [
+       "Limits",
+       "n",
+       0,
+       "PositiveInfinity"
+      ]
+     ],
+     [
+      "Limits",
+      "k",
+      0,
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "variables": [
+    "x",
+    "y"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "y",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Binomial",
+    "Exp",
+    "Factorial",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "factorials"
+   ]
+  },
+  {
+   "id": "6b3af0",
+   "formula": [
+    "LessEqual",
+    [
+     "Binomial",
+     "n",
+     "k"
+    ],
+    [
+     "Divide",
+     [
+      "Power",
+      "n",
+      "k"
+     ],
+     [
+      "Factorial",
+      "k"
+     ]
+    ]
+   ],
+   "variables": [
+    "k",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "k",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Binomial",
+    "Factorial"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "factorials"
+   ]
+  },
+  {
+   "id": "6e1f13",
+   "formula": [
+    "Equal",
+    [
+     "Binomial",
+     [
+      "Add",
+      "z",
+      1
+     ],
+     [
+      "Add",
+      "k",
+      1
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      [
+       "Add",
+       "z",
+       1
+      ],
+      [
+       "Add",
+       "k",
+       1
+      ]
+     ],
+     [
+      "Binomial",
+      "z",
+      "k"
+     ]
+    ]
+   ],
+   "variables": [
+    "k",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "k",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Binomial"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "factorials"
+   ]
+  },
+  {
+   "id": "6f7746",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "Multiply",
+       [
+        "Binomial",
+        "n",
+        "k"
+       ],
+       [
+        "Power",
+        "x",
+        "k"
+       ]
+      ],
+      [
+       "Power",
+       "y",
+       [
+        "Subtract",
+        "n",
+        "k"
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "k",
+      0,
+      "n"
+     ]
+    ],
+    [
+     "Power",
+     [
+      "Add",
+      "x",
+      "y"
+     ],
+     "n"
+    ]
+   ],
+   "variables": [
+    "n",
+    "x",
+    "y"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "y",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Binomial",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "factorials"
+   ]
+  },
+  {
+   "id": "7c014b",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "Binomial",
+       "z",
+       "k"
+      ],
+      [
+       "Power",
+       "x",
+       "k"
+      ]
+     ],
+     [
+      "Limits",
+      "k",
+      0,
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Power",
+     [
+      "Add",
+      1,
+      "x"
+     ],
+     "z"
+    ]
+   ],
+   "variables": [
+    "x",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ],
+    [
+     "Less",
+     [
+      "Abs",
+      "x"
+     ],
+     1
+    ]
+   ],
+   "assumptionAlternatives": [
+    [
+     "And",
+     [
+      "Element",
+      "z",
+      "NonNegativeIntegers"
+     ],
+     [
+      "Element",
+      "z",
+      "ComplexNumbers"
+     ]
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Binomial",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "factorials"
+   ]
+  },
+  {
+   "id": "858c8f",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Binomial",
+      "n",
+      "k"
+     ],
+     [
+      "Limits",
+      "k",
+      0,
+      "n"
+     ]
+    ],
+    [
+     "Power",
+     2,
+     "n"
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Binomial",
+    "Sum"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "factorials"
+   ]
+  },
+  {
+   "id": "8c21f5",
+   "formula": [
+    "Equal",
+    [
+     "Binomial",
+     "n",
+     "n"
+    ],
+    1
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Binomial"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "factorials"
+   ]
+  },
+  {
+   "id": "973b2c",
+   "formula": [
+    "Equal",
+    [
+     "RisingFactorial",
+     "z",
+     1
+    ],
+    "z"
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "RisingFactorial"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "factorials"
+   ]
+  },
+  {
+   "id": "988310",
+   "formula": [
+    "Equal",
+    [
+     "Binomial",
+     "n",
+     0
+    ],
+    1
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Binomial"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "factorials"
+   ]
+  },
+  {
+   "id": "a7b330",
+   "formula": [
+    "Equal",
+    [
+     "FallingFactorial",
+     "z",
+     1
+    ],
+    "z"
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "FallingFactorial"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "factorials"
+   ]
+  },
+  {
+   "id": "bb8a75",
+   "formula": [
+    "LessEqual",
+    [
+     "Factorial",
+     "n"
+    ],
+    [
+     "Power",
+     "n",
+     "n"
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Factorial"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "factorials"
+   ]
+  },
+  {
+   "id": "c640bf",
+   "formula": [
+    "Equal",
+    [
+     "RisingFactorial",
+     [
+      "Negate",
+      "z"
+     ],
+     "k"
+    ],
+    [
+     "Multiply",
+     [
+      "Power",
+      -1,
+      "k"
+     ],
+     [
+      "RisingFactorial",
+      [
+       "Add",
+       [
+        "Subtract",
+        "z",
+        "k"
+       ],
+       1
+      ],
+      "k"
+     ]
+    ]
+   ],
+   "variables": [
+    "k",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "k",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "RisingFactorial"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "factorials"
+   ]
+  },
+  {
+   "id": "c733f7",
+   "formula": [
+    "Equal",
+    [
+     "RisingFactorial",
+     "z",
+     "k"
+    ],
+    [
+     "Divide",
+     [
+      "Gamma",
+      [
+       "Add",
+       "z",
+       "k"
+      ]
+     ],
+     [
+      "Gamma",
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "k",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "k",
+     "NonNegativeIntegers"
+    ],
+    [
+     "NotElement",
+     [
+      "Add",
+      "z",
+      "k"
+     ],
+     "NonPositiveIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Gamma",
+    "RisingFactorial"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "factorials",
+    "gamma"
+   ]
+  },
+  {
+   "id": "c9bcf7",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "Divide",
+       1,
+       [
+        "Binomial",
+        [
+         "Multiply",
+         2,
+         "n"
+        ],
+        "n"
+       ]
+      ],
+      [
+       "Power",
+       "x",
+       "n"
+      ]
+     ],
+     [
+      "Limits",
+      "n",
+      0,
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Hypergeometric2F1",
+     1,
+     1,
+     [
+      "Divide",
+      1,
+      2
+     ],
+     [
+      "Divide",
+      "x",
+      4
+     ]
+    ],
+    [
+     "Add",
+     [
+      "Divide",
+      1,
+      [
+       "Subtract",
+       1,
+       [
+        "Divide",
+        "x",
+        4
+       ]
+      ]
+     ],
+     [
+      "Divide",
+      [
+       "Multiply",
+       [
+        "Sqrt",
+        [
+         "Divide",
+         "x",
+         4
+        ]
+       ],
+       [
+        "Arcsin",
+        [
+         "Sqrt",
+         [
+          "Divide",
+          "x",
+          4
+         ]
+        ]
+       ]
+      ],
+      [
+       "Power",
+       [
+        "Subtract",
+        1,
+        [
+         "Divide",
+         "x",
+         4
+        ]
+       ],
+       [
+        "Divide",
+        3,
+        2
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ],
+    [
+     "Less",
+     [
+      "Abs",
+      "x"
+     ],
+     4
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Arcsin",
+    "Binomial",
+    "Hypergeometric2F1",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "factorials"
+   ]
+  },
+  {
+   "id": "d3baaf",
+   "formula": [
+    "Less",
+    [
+     "Binomial",
+     "n",
+     "k"
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      [
+       "Divide",
+       1,
+       [
+        "Sqrt",
+        [
+         "Multiply",
+         2,
+         "Pi"
+        ]
+       ]
+      ],
+      [
+       "Sqrt",
+       [
+        "Divide",
+        "n",
+        [
+         "Multiply",
+         "k",
+         [
+          "Subtract",
+          "n",
+          "k"
+         ]
+        ]
+       ]
+      ]
+     ],
+     [
+      "Divide",
+      [
+       "Power",
+       "n",
+       "n"
+      ],
+      [
+       "Multiply",
+       [
+        "Power",
+        "k",
+        "k"
+       ],
+       [
+        "Power",
+        [
+         "Subtract",
+         "n",
+         "k"
+        ],
+        [
+         "Subtract",
+         "n",
+         "k"
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "k",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     [
+      "Range",
+      2,
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Element",
+     "k",
+     [
+      "Range",
+      1,
+      [
+       "Subtract",
+       "n",
+       1
+      ]
+     ]
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Binomial"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "factorials"
+   ]
+  },
+  {
+   "id": "d651d1",
+   "formula": [
+    "Equal",
+    [
+     "RisingFactorial",
+     "z",
+     [
+      "Multiply",
+      2,
+      "k"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      [
+       "Power",
+       4,
+       "k"
+      ],
+      [
+       "RisingFactorial",
+       [
+        "Divide",
+        "z",
+        2
+       ],
+       "k"
+      ]
+     ],
+     [
+      "RisingFactorial",
+      [
+       "Divide",
+       [
+        "Add",
+        "z",
+        1
+       ],
+       2
+      ],
+      "k"
+     ]
+    ]
+   ],
+   "variables": [
+    "k",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "k",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "RisingFactorial"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "factorials"
+   ]
+  },
+  {
+   "id": "d8c274",
+   "formula": [
+    "Equal",
+    [
+     "Factorial",
+     0
+    ],
+    1
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Factorial"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "factorials"
+   ]
+  },
+  {
+   "id": "e78084",
+   "formula": [
+    "Equal",
+    [
+     "RisingFactorial",
+     "z",
+     0
+    ],
+    1
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "RisingFactorial"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "factorials"
+   ]
+  },
+  {
+   "id": "e78989",
+   "formula": [
+    "Equal",
+    [
+     "RisingFactorial",
+     "z",
+     "k"
+    ],
+    [
+     "FallingFactorial",
+     [
+      "Subtract",
+      [
+       "Add",
+       "z",
+       "k"
+      ],
+      1
+     ],
+     "k"
+    ]
+   ],
+   "variables": [
+    "k",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "k",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "FallingFactorial",
+    "RisingFactorial"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "factorials"
+   ]
+  },
+  {
+   "id": "e87c43",
+   "formula": [
+    "Equal",
+    [
+     "Binomial",
+     "z",
+     "k"
+    ],
+    [
+     "Divide",
+     [
+      "Gamma",
+      [
+       "Add",
+       "z",
+       1
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Gamma",
+       [
+        "Add",
+        "k",
+        1
+       ]
+      ],
+      [
+       "Gamma",
+       [
+        "Add",
+        [
+         "Subtract",
+         "z",
+         "k"
+        ],
+        1
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "k",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "k",
+     "NonNegativeIntegers"
+    ],
+    [
+     "NotElement",
+     [
+      "Subtract",
+      "z",
+      "k"
+     ],
+     [
+      "Range",
+      "NegativeInfinity",
+      -1
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Binomial",
+    "Gamma"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "factorials",
+    "gamma"
+   ]
+  },
+  {
+   "id": "f9efd0",
+   "formula": [
+    "Greater",
+    [
+     "Factorial",
+     "n"
+    ],
+    [
+     "Exp",
+     "n"
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    [
+     "Range",
+     6,
+     "PositiveInfinity"
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Exp",
+    "Factorial"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "factorials"
+   ]
+  },
+  {
+   "id": "fa3b53",
+   "formula": [
+    "LessEqual",
+    [
+     "Binomial",
+     "n",
+     "k"
+    ],
+    [
+     "Power",
+     2,
+     "n"
+    ]
+   ],
+   "variables": [
+    "k",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "k",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Binomial"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "factorials"
+   ]
+  },
+  {
+   "id": "fc8d5d",
+   "formula": [
+    "Less",
+    [
+     "Factorial",
+     "n"
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      [
+       "Multiply",
+       [
+        "Sqrt",
+        [
+         "Multiply",
+         2,
+         "Pi"
+        ]
+       ],
+       [
+        "Power",
+        "n",
+        [
+         "Add",
+         "n",
+         [
+          "Divide",
+          1,
+          2
+         ]
+        ]
+       ]
+      ],
+      [
+       "Exp",
+       [
+        "Negate",
+        "n"
+       ]
+      ]
+     ],
+     [
+      "Exp",
+      [
+       "Divide",
+       1,
+       [
+        "Multiply",
+        12,
+        "n"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "PositiveIntegers"
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Exp",
+    "Factorial"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": [
+    "H. Robbins (1955), A remark on Stirling's formula, Am. Math. Monthly 62(1), pp. 26-29."
+   ],
+   "topics": [
+    "factorials"
+   ]
+  },
+  {
+   "id": "fe9fb7",
+   "formula": [
+    "Equal",
+    [
+     "RisingFactorial",
+     "z",
+     [
+      "Add",
+      "k",
+      1
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Add",
+      "z",
+      "k"
+     ],
+     [
+      "RisingFactorial",
+      "z",
+      "k"
+     ]
+    ]
+   ],
+   "variables": [
+    "k",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "k",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "RisingFactorial"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "factorials"
+   ]
+  }
+ ]
+}

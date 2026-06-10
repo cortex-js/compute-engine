@@ -1,0 +1,1618 @@
+{
+ "topic": "bernoulli_numbers",
+ "title": "Bernoulli numbers and polynomials",
+ "source": "pygrim/formulas/bernoulli_numbers.py",
+ "generator": "grim2mathjson 0.1.0",
+ "entries": [
+  {
+   "id": "03ee0b",
+   "formula": [
+    "Equal",
+    [
+     "BernoulliPolynomial",
+     "n",
+     [
+      "Divide",
+      1,
+      2
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Subtract",
+      [
+       "Power",
+       2,
+       [
+        "Subtract",
+        1,
+        "n"
+       ]
+      ],
+      1
+     ],
+     [
+      "BernoulliB",
+      "n"
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BernoulliB",
+    "BernoulliPolynomial"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bernoulli_numbers"
+   ]
+  },
+  {
+   "id": "05202b",
+   "formula": [
+    "Equal",
+    [
+     "Integrate",
+     [
+      "BernoulliPolynomial",
+      "n",
+      "t"
+     ],
+     [
+      "Limits",
+      "t",
+      "z",
+      [
+       "Add",
+       "z",
+       1
+      ]
+     ]
+    ],
+    [
+     "Power",
+     "z",
+     "n"
+    ]
+   ],
+   "variables": [
+    "n",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "BernoulliPolynomial",
+    "Integrate"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bernoulli_numbers"
+   ]
+  },
+  {
+   "id": "0f02a5",
+   "formula": [
+    "Less",
+    [
+     "Abs",
+     [
+      "BernoulliB",
+      [
+       "Multiply",
+       2,
+       "n"
+      ]
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Add",
+      1,
+      [
+       "Divide",
+       1,
+       "n"
+      ]
+     ],
+     [
+      "Divide",
+      [
+       "Multiply",
+       2,
+       [
+        "Factorial",
+        [
+         "Multiply",
+         2,
+         "n"
+        ]
+       ]
+      ],
+      [
+       "Power",
+       [
+        "Multiply",
+        2,
+        "Pi"
+       ],
+       [
+        "Multiply",
+        2,
+        "n"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "PositiveIntegers"
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "BernoulliB",
+    "Factorial"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bernoulli_numbers"
+   ]
+  },
+  {
+   "id": "14ecc4",
+   "formula": [
+    "Equal",
+    [
+     "BernoulliB",
+     [
+      "Multiply",
+      2,
+      "n"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Power",
+      -1,
+      [
+       "Add",
+       "n",
+       1
+      ]
+     ],
+     [
+      "Divide",
+      [
+       "Multiply",
+       [
+        "Multiply",
+        2,
+        [
+         "Factorial",
+         [
+          "Multiply",
+          2,
+          "n"
+         ]
+        ]
+       ],
+       [
+        "Zeta",
+        [
+         "Multiply",
+         2,
+         "n"
+        ]
+       ]
+      ],
+      [
+       "Power",
+       [
+        "Multiply",
+        2,
+        "Pi"
+       ],
+       [
+        "Multiply",
+        2,
+        "n"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "PositiveIntegers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BernoulliB",
+    "Factorial",
+    "Zeta"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bernoulli_numbers"
+   ]
+  },
+  {
+   "id": "1d2f4a",
+   "formula": [
+    "Greater",
+    [
+     "Abs",
+     [
+      "BernoulliB",
+      [
+       "Multiply",
+       2,
+       "n"
+      ]
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Multiply",
+      2,
+      [
+       "Factorial",
+       [
+        "Multiply",
+        2,
+        "n"
+       ]
+      ]
+     ],
+     [
+      "Power",
+      [
+       "Multiply",
+       2,
+       "Pi"
+      ],
+      [
+       "Multiply",
+       2,
+       "n"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "PositiveIntegers"
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "BernoulliB",
+    "Factorial"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bernoulli_numbers"
+   ]
+  },
+  {
+   "id": "292d70",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "BernoulliPolynomial",
+      [
+       "Multiply",
+       2,
+       "n"
+      ],
+      "x"
+     ]
+    ],
+    [
+     "Abs",
+     [
+      "BernoulliB",
+      [
+       "Multiply",
+       2,
+       "n"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "x",
+     [
+      "Interval",
+      0,
+      1
+     ]
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "BernoulliB",
+    "BernoulliPolynomial"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bernoulli_numbers"
+   ]
+  },
+  {
+   "id": "3a1316",
+   "formula": [
+    "Less",
+    [
+     "Abs",
+     [
+      "BernoulliB",
+      [
+       "Multiply",
+       2,
+       "n"
+      ]
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      [
+       "Multiply",
+       [
+        "Add",
+        1,
+        [
+         "Divide",
+         1,
+         "n"
+        ]
+       ],
+       4
+      ],
+      [
+       "Sqrt",
+       [
+        "Multiply",
+        "Pi",
+        "n"
+       ]
+      ]
+     ],
+     [
+      "Power",
+      [
+       "Divide",
+       "n",
+       [
+        "Multiply",
+        "Pi",
+        "ExponentialE"
+       ]
+      ],
+      [
+       "Multiply",
+       2,
+       "n"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "PositiveIntegers"
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "BernoulliB"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bernoulli_numbers"
+   ]
+  },
+  {
+   "id": "4246ae",
+   "formula": [
+    "Less",
+    [
+     "Abs",
+     [
+      "BernoulliPolynomial",
+      [
+       "Multiply",
+       2,
+       "n"
+      ],
+      "x"
+     ]
+    ],
+    [
+     "Abs",
+     [
+      "BernoulliB",
+      [
+       "Multiply",
+       2,
+       "n"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "x",
+     [
+      "Interval",
+      [
+       "Open",
+       0
+      ],
+      [
+       "Open",
+       1
+      ]
+     ]
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "BernoulliB",
+    "BernoulliPolynomial"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bernoulli_numbers"
+   ]
+  },
+  {
+   "id": "4aab8a",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Power",
+      "k",
+      "n"
+     ],
+     [
+      "Limits",
+      "k",
+      1,
+      "m"
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Subtract",
+      [
+       "BernoulliPolynomial",
+       [
+        "Add",
+        "n",
+        1
+       ],
+       [
+        "Add",
+        "m",
+        1
+       ]
+      ],
+      [
+       "BernoulliB",
+       [
+        "Add",
+        "m",
+        1
+       ]
+      ]
+     ],
+     [
+      "Add",
+      "m",
+      1
+     ]
+    ]
+   ],
+   "variables": [
+    "m",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "m",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "BernoulliB",
+    "BernoulliPolynomial",
+    "Sum"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bernoulli_numbers"
+   ]
+  },
+  {
+   "id": "522b04",
+   "formula": [
+    "Equal",
+    [
+     "Divide",
+     "z",
+     [
+      "Subtract",
+      [
+       "Exp",
+       "z"
+      ],
+      1
+     ]
+    ],
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "BernoulliB",
+       "n"
+      ],
+      [
+       "Divide",
+       [
+        "Power",
+        "z",
+        "n"
+       ],
+       [
+        "Factorial",
+        "n"
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "n",
+      0,
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Less",
+     [
+      "Abs",
+      "z"
+     ],
+     [
+      "Multiply",
+      2,
+      "Pi"
+     ]
+    ],
+    [
+     "NotEqual",
+     "z",
+     0
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "BernoulliB",
+    "Exp",
+    "Factorial",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bernoulli_numbers"
+   ]
+  },
+  {
+   "id": "555e10",
+   "formula": [
+    "Equal",
+    [
+     "BernoulliPolynomial",
+     "n",
+     "x"
+    ],
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "Multiply",
+       [
+        "Binomial",
+        "n",
+        "k"
+       ],
+       [
+        "BernoulliB",
+        [
+         "Subtract",
+         "n",
+         "k"
+        ]
+       ]
+      ],
+      [
+       "Power",
+       "x",
+       "k"
+      ]
+     ],
+     [
+      "Limits",
+      "k",
+      0,
+      "n"
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "BernoulliB",
+    "BernoulliPolynomial",
+    "Binomial",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bernoulli_numbers"
+   ]
+  },
+  {
+   "id": "69ca86",
+   "formula": [
+    "Greater",
+    [
+     "Abs",
+     [
+      "BernoulliB",
+      [
+       "Multiply",
+       2,
+       "n"
+      ]
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      4,
+      [
+       "Sqrt",
+       [
+        "Multiply",
+        "Pi",
+        "n"
+       ]
+      ]
+     ],
+     [
+      "Power",
+      [
+       "Divide",
+       "n",
+       [
+        "Multiply",
+        "Pi",
+        "ExponentialE"
+       ]
+      ],
+      [
+       "Multiply",
+       2,
+       "n"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "PositiveIntegers"
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "BernoulliB"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bernoulli_numbers"
+   ]
+  },
+  {
+   "id": "7adfd6",
+   "formula": [
+    "Equal",
+    [
+     "Integrate",
+     [
+      "BernoulliPolynomial",
+      "n",
+      "t"
+     ],
+     [
+      "Limits",
+      "t",
+      "a",
+      "b"
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Subtract",
+      [
+       "BernoulliPolynomial",
+       [
+        "Add",
+        "n",
+        1
+       ],
+       "b"
+      ],
+      [
+       "BernoulliPolynomial",
+       [
+        "Add",
+        "n",
+        1
+       ],
+       "a"
+      ]
+     ],
+     [
+      "Add",
+      "n",
+      1
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "b",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "BernoulliPolynomial",
+    "Integrate"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bernoulli_numbers"
+   ]
+  },
+  {
+   "id": "829185",
+   "formula": [
+    "Equal",
+    [
+     "BernoulliPolynomial",
+     "n",
+     1
+    ],
+    [
+     "Multiply",
+     [
+      "Power",
+      -1,
+      "n"
+     ],
+     [
+      "BernoulliB",
+      "n"
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BernoulliB",
+    "BernoulliPolynomial"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bernoulli_numbers"
+   ]
+  },
+  {
+   "id": "8b4f7f",
+   "formula": [
+    "Equal",
+    [
+     "BernoulliPolynomial",
+     "n",
+     [
+      "Add",
+      "x",
+      1
+     ]
+    ],
+    [
+     "Add",
+     [
+      "BernoulliPolynomial",
+      "n",
+      "x"
+     ],
+     [
+      "Multiply",
+      "n",
+      [
+       "Power",
+       "x",
+       [
+        "Subtract",
+        "n",
+        1
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BernoulliPolynomial"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bernoulli_numbers"
+   ]
+  },
+  {
+   "id": "a1d2d7",
+   "formula": [
+    "Equal",
+    [
+     "BernoulliPolynomial",
+     "n",
+     0
+    ],
+    [
+     "BernoulliB",
+     "n"
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BernoulliB",
+    "BernoulliPolynomial"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bernoulli_numbers"
+   ]
+  },
+  {
+   "id": "a98234",
+   "formula": [
+    "Equal",
+    [
+     "BernoulliB",
+     [
+      "Add",
+      [
+       "Multiply",
+       2,
+       "n"
+      ],
+      3
+     ]
+    ],
+    0
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BernoulliB"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bernoulli_numbers"
+   ]
+  },
+  {
+   "id": "c2dcfa",
+   "formula": [
+    "Equal",
+    [
+     "BernoulliPolynomial",
+     "n",
+     [
+      "Subtract",
+      1,
+      "x"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Power",
+      -1,
+      "n"
+     ],
+     [
+      "BernoulliPolynomial",
+      "n",
+      "x"
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BernoulliPolynomial"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bernoulli_numbers"
+   ]
+  },
+  {
+   "id": "c33e2b",
+   "formula": [
+    "Element",
+    [
+     "Multiply",
+     [
+      "BernoulliB",
+      [
+       "Multiply",
+       2,
+       "n"
+      ]
+     ],
+     [
+      "Product",
+      [
+       "Divide",
+       1,
+       "p"
+      ],
+      [
+       "Element",
+       "p",
+       "Primes",
+       [
+        "Divides",
+        [
+         "Subtract",
+         "p",
+         1
+        ],
+        [
+         "Multiply",
+         2,
+         "n"
+        ]
+       ]
+      ]
+     ]
+    ],
+    "Integers"
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "PositiveIntegers"
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "BernoulliB",
+    "Divides",
+    "Primes",
+    "Product"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bernoulli_numbers"
+   ]
+  },
+  {
+   "id": "d10873",
+   "formula": [
+    "Greater",
+    [
+     "Multiply",
+     [
+      "Power",
+      -1,
+      "n"
+     ],
+     [
+      "BernoulliB",
+      [
+       "Add",
+       [
+        "Multiply",
+        2,
+        "n"
+       ],
+       2
+      ]
+     ]
+    ],
+    0
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "BernoulliB"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bernoulli_numbers"
+   ]
+  },
+  {
+   "id": "e89eb5",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "BernoulliPolynomial",
+        "n",
+        "x"
+       ],
+       "x"
+      ],
+      1
+     ],
+     "x"
+    ],
+    [
+     "Multiply",
+     "n",
+     [
+      "BernoulliPolynomial",
+      [
+       "Subtract",
+       "n",
+       1
+      ],
+      "x"
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BernoulliPolynomial",
+    "Derivative"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bernoulli_numbers"
+   ]
+  },
+  {
+   "id": "f79ff0",
+   "formula": [
+    "Equal",
+    [
+     "Divide",
+     [
+      "Multiply",
+      "z",
+      [
+       "Exp",
+       [
+        "Multiply",
+        "x",
+        "z"
+       ]
+      ]
+     ],
+     [
+      "Subtract",
+      [
+       "Exp",
+       "z"
+      ],
+      1
+     ]
+    ],
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "BernoulliPolynomial",
+       "n",
+       "x"
+      ],
+      [
+       "Divide",
+       [
+        "Power",
+        "z",
+        "n"
+       ],
+       [
+        "Factorial",
+        "n"
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "n",
+      0,
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "variables": [
+    "x",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Less",
+     [
+      "Abs",
+      "z"
+     ],
+     [
+      "Multiply",
+      2,
+      "Pi"
+     ]
+    ],
+    [
+     "NotEqual",
+     "z",
+     0
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "BernoulliPolynomial",
+    "Exp",
+    "Factorial",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bernoulli_numbers"
+   ]
+  },
+  {
+   "id": "f80439",
+   "formula": [
+    "Equal",
+    [
+     "BernoulliPolynomial",
+     "n",
+     [
+      "Negate",
+      "x"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Power",
+      -1,
+      "n"
+     ],
+     [
+      "Add",
+      [
+       "BernoulliPolynomial",
+       "n",
+       "x"
+      ],
+      [
+       "Multiply",
+       "n",
+       [
+        "Power",
+        "x",
+        [
+         "Subtract",
+         "n",
+         1
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "x",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BernoulliPolynomial"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bernoulli_numbers"
+   ]
+  },
+  {
+   "id": "ff190c",
+   "formula": [
+    "Element",
+    [
+     "Add",
+     [
+      "BernoulliB",
+      [
+       "Multiply",
+       2,
+       "n"
+      ]
+     ],
+     [
+      "Sum",
+      [
+       "Divide",
+       1,
+       "p"
+      ],
+      [
+       "Element",
+       "p",
+       "Primes",
+       [
+        "Divides",
+        [
+         "Subtract",
+         "p",
+         1
+        ],
+        [
+         "Multiply",
+         2,
+         "n"
+        ]
+       ]
+      ]
+     ]
+    ],
+    "Integers"
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "PositiveIntegers"
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "BernoulliB",
+    "Divides",
+    "Primes",
+    "Sum"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bernoulli_numbers"
+   ]
+  }
+ ]
+}

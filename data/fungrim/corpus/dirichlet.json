@@ -1,0 +1,5055 @@
+{
+ "topic": "dirichlet",
+ "title": "Dirichlet characters",
+ "source": "pygrim/formulas/dirichlet.py",
+ "generator": "grim2mathjson 0.1.0",
+ "entries": [
+  {
+   "id": "0851cf",
+   "formula": [
+    "Equal",
+    [
+     "chi",
+     [
+      "Multiply",
+      "m",
+      "n"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "chi",
+      "m"
+     ],
+     [
+      "chi",
+      "n"
+     ]
+    ]
+   ],
+   "variables": [
+    "chi",
+    "m",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "q",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "chi",
+     [
+      "DirichletGroup",
+      "q"
+     ]
+    ],
+    [
+     "Element",
+     "m",
+     "Integers"
+    ],
+    [
+     "Element",
+     "n",
+     "Integers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "0ba38f",
+   "formula": [
+    "Equal",
+    [
+     "Count",
+     [
+      "PrimitiveDirichletCharacters",
+      "q"
+     ]
+    ],
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "Totient",
+       "d"
+      ],
+      [
+       "MoebiusMu",
+       [
+        "Divide",
+        "q",
+        "d"
+       ]
+      ]
+     ],
+     [
+      "Element",
+      "d",
+      [
+       "Divisors",
+       "q"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "q"
+   ],
+   "assumptions": [
+    "Element",
+    "q",
+    "PositiveIntegers"
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Divisors",
+    "MoebiusMu",
+    "PrimitiveDirichletCharacters",
+    "Sum",
+    "Totient"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": [
+    "http://oeis.org/A007431"
+   ],
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "0f96c3",
+   "formula": [
+    "Equal",
+    [
+     "Divide",
+     1,
+     [
+      "DirichletL",
+      "s",
+      "chi"
+     ]
+    ],
+    [
+     "Product",
+     [
+      "Subtract",
+      1,
+      [
+       "Divide",
+       [
+        "chi",
+        "p"
+       ],
+       [
+        "Power",
+        "p",
+        "s"
+       ]
+      ]
+     ],
+     [
+      "Element",
+      "p",
+      "Primes"
+     ]
+    ]
+   ],
+   "variables": [
+    "chi",
+    "s"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "q",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "chi",
+     [
+      "DirichletGroup",
+      "q"
+     ]
+    ],
+    [
+     "Element",
+     "s",
+     "ComplexNumbers"
+    ],
+    [
+     "Greater",
+     [
+      "Real",
+      "s"
+     ],
+     1
+    ]
+   ],
+   "class": "representation",
+   "subclass": "product",
+   "heads": [
+    "DirichletL",
+    "Primes",
+    "Product"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "1c3957",
+   "formula": [
+    "Equal",
+    [
+     "chi",
+     [
+      "Add",
+      "n",
+      "q"
+     ]
+    ],
+    [
+     "chi",
+     "n"
+    ]
+   ],
+   "variables": [
+    "chi",
+    "n",
+    "q"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "q",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "chi",
+     [
+      "DirichletGroup",
+      "q"
+     ]
+    ],
+    [
+     "Element",
+     "n",
+     "Integers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "214a91",
+   "formula": [
+    "Equal",
+    [
+     "Real",
+     [
+      "DirichletLZero",
+      "n",
+      "chi"
+     ]
+    ],
+    [
+     "Divide",
+     1,
+     2
+    ]
+   ],
+   "variables": [
+    "chi",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "q",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "chi",
+     [
+      "PrimitiveDirichletCharacters",
+      "q"
+     ]
+    ],
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "NotEqual",
+     "n",
+     0
+    ],
+    [
+     "Or",
+     [
+      "And",
+      [
+       "Less",
+       "q",
+       400000
+      ],
+      [
+       "Less",
+       [
+        "Abs",
+        [
+         "Imaginary",
+         [
+          "DirichletLZero",
+          "n",
+          "chi"
+         ]
+        ]
+       ],
+       [
+        "Divide",
+        [
+         "Power",
+         10,
+         8
+        ],
+        "q"
+       ]
+      ]
+     ],
+     "GeneralizedRiemannHypothesis"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "DirichletLZero",
+    "Real"
+   ],
+   "guardLevel": "undischargeable",
+   "flavor": null,
+   "references": [
+    "D. J. Platt (2013), Numerical computations concerning the GRH. https://arxiv.org/pdf/1305.3087.pdf"
+   ],
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "23256b",
+   "formula": [
+    "Equal",
+    [
+     "Limit",
+     [
+      "Function",
+      [
+       "Multiply",
+       [
+        "Subtract",
+        "s",
+        1
+       ],
+       [
+        "DirichletL",
+        1,
+        [
+         "DirichletCharacter",
+         "q",
+         1
+        ]
+       ]
+      ],
+      "s"
+     ],
+     1
+    ],
+    [
+     "Divide",
+     [
+      "Totient",
+      "q"
+     ],
+     "q"
+    ]
+   ],
+   "variables": [
+    "q"
+   ],
+   "assumptions": [
+    "Element",
+    "q",
+    "PositiveIntegers"
+   ],
+   "class": "representation",
+   "subclass": "limit",
+   "heads": [
+    "DirichletCharacter",
+    "DirichletL",
+    "Limit",
+    "Totient"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": "complex",
+   "references": null,
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "288207",
+   "formula": [
+    "Equal",
+    [
+     "DirichletLambda",
+     "s",
+     "chi"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      [
+       "GaussSum",
+       "q",
+       "chi"
+      ],
+      [
+       "Multiply",
+       [
+        "Power",
+        "ImaginaryUnit",
+        [
+         "Divide",
+         [
+          "Subtract",
+          1,
+          [
+           "chi",
+           -1
+          ]
+         ],
+         2
+        ]
+       ],
+       [
+        "Sqrt",
+        "q"
+       ]
+      ]
+     ],
+     [
+      "DirichletLambda",
+      [
+       "Subtract",
+       1,
+       "s"
+      ],
+      [
+       "Conjugate",
+       "chi"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "chi",
+    "q",
+    "s"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "q",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "chi",
+     [
+      "PrimitiveDirichletCharacters",
+      "q"
+     ]
+    ],
+    [
+     "Element",
+     "s",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Conjugate",
+    "DirichletLambda",
+    "GaussSum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "291569",
+   "formula": [
+    "Equal",
+    [
+     "Divide",
+     1,
+     [
+      "DirichletL",
+      "s",
+      "chi"
+     ]
+    ],
+    [
+     "Sum",
+     [
+      "Divide",
+      [
+       "Multiply",
+       [
+        "MoebiusMu",
+        "n"
+       ],
+       [
+        "chi",
+        "n"
+       ]
+      ],
+      [
+       "Power",
+       "n",
+       "s"
+      ]
+     ],
+     [
+      "Limits",
+      "n",
+      1,
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "variables": [
+    "chi",
+    "s"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "q",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "chi",
+     [
+      "DirichletGroup",
+      "q"
+     ]
+    ],
+    [
+     "Element",
+     "s",
+     "ComplexNumbers"
+    ],
+    [
+     "Greater",
+     [
+      "Real",
+      "s"
+     ],
+     1
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "DirichletL",
+    "MoebiusMu",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "2a48bd",
+   "formula": [
+    "Equal",
+    [
+     "DirichletCharacter",
+     [
+      "Multiply",
+      "q_1",
+      "q_2"
+     ],
+     "ell"
+    ],
+    [
+     "Multiply",
+     [
+      "DirichletCharacter",
+      "q_1",
+      [
+       "Mod",
+       "ell",
+       "q_1"
+      ]
+     ],
+     [
+      "DirichletCharacter",
+      "q_2",
+      [
+       "Mod",
+       "ell",
+       "q_2"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "ell",
+    "q"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "q_1",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "q_2",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "ell",
+     [
+      "Range",
+      1,
+      [
+       "Subtract",
+       [
+        "Max",
+        [
+         "Multiply",
+         "q_1",
+         "q_2"
+        ],
+        2
+       ],
+       1
+      ]
+     ]
+    ],
+    [
+     "Equal",
+     [
+      "GCD",
+      "ell",
+      "q_1"
+     ],
+     [
+      "GCD",
+      "ell",
+      "q_2"
+     ],
+     [
+      "GCD",
+      "q_1",
+      "q_2"
+     ],
+     1
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "DirichletCharacter",
+    "Mod"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "312147",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "Subtract",
+      [
+       "DirichletL",
+       "s",
+       "chi"
+      ],
+      [
+       "Sum",
+       [
+        "Divide",
+        [
+         "chi",
+         "k"
+        ],
+        [
+         "Power",
+         "k",
+         "s"
+        ]
+       ],
+       [
+        "Limits",
+        "k",
+        1,
+        [
+         "Subtract",
+         "N_var",
+         1
+        ]
+       ]
+      ]
+     ]
+    ],
+    [
+     "HurwitzZeta",
+     [
+      "Real",
+      "s"
+     ],
+     "N_var"
+    ]
+   ],
+   "variables": [
+    "N_var",
+    "chi",
+    "s"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "q",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "chi",
+     [
+      "DirichletGroup",
+      "q"
+     ]
+    ],
+    [
+     "Element",
+     "s",
+     "ComplexNumbers"
+    ],
+    [
+     "Greater",
+     [
+      "Real",
+      "s"
+     ],
+     1
+    ],
+    [
+     "Element",
+     "N_var",
+     "PositiveIntegers"
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "DirichletL",
+    "HurwitzZeta",
+    "Real",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "3ab92d",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "chi",
+      "n"
+     ],
+     [
+      "Element",
+      "chi",
+      [
+       "DirichletGroup",
+       "q"
+      ]
+     ]
+    ],
+    [
+     "Which",
+     [
+      "CongruentMod",
+      "n",
+      1,
+      "q"
+     ],
+     [
+      "Totient",
+      "q"
+     ],
+     "True",
+     0
+    ]
+   ],
+   "variables": [
+    "n",
+    "q"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "q",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "n",
+     "Integers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "CongruentMod",
+    "DirichletGroup",
+    "Sum",
+    "Totient"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "3b43b0",
+   "formula": [
+    "Equal",
+    [
+     "Limit",
+     [
+      "Function",
+      [
+       "Divide",
+       [
+        "Sum",
+        [
+         "Count",
+         [
+          "PrimitiveDirichletCharacters",
+          "q"
+         ]
+        ],
+        [
+         "Limits",
+         "q",
+         1,
+         "N_var"
+        ]
+       ],
+       [
+        "Sum",
+        [
+         "Count",
+         [
+          "DirichletGroup",
+          "q"
+         ]
+        ],
+        [
+         "Limits",
+         "q",
+         1,
+         "N_var"
+        ]
+       ]
+      ],
+      "N_var"
+     ],
+     "PositiveInfinity"
+    ],
+    [
+     "Divide",
+     6,
+     [
+      "Power",
+      "Pi",
+      2
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "limit",
+   "heads": [
+    "DirichletGroup",
+    "Limit",
+    "PrimitiveDirichletCharacters",
+    "Sum"
+   ],
+   "guardLevel": "none",
+   "flavor": "sequence",
+   "references": [
+    "H. Jager, On the number of Dirichlet characters with modulus not exceeding x, Indagationes Mathematicae, Volume 76, Issue 5, 1973, Pages 452-455, https://doi.org/10.1016/1385-7258(73)90069-3"
+   ],
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "3b8c97",
+   "formula": [
+    "Equal",
+    [
+     "DirichletL",
+     1,
+     [
+      "DirichletCharacter",
+      4,
+      3
+     ]
+    ],
+    [
+     "Divide",
+     "Pi",
+     4
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "DirichletCharacter",
+    "DirichletL"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "3d5327",
+   "formula": [
+    "NotEqual",
+    [
+     "DirichletL",
+     1,
+     "chi"
+    ],
+    0
+   ],
+   "variables": [
+    "chi"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "q",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "chi",
+     [
+      "DirichletGroup",
+      "q"
+     ]
+    ]
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "DirichletL"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "3e0817",
+   "formula": [
+    "Equal",
+    [
+     "GeneralizedBernoulliB",
+     "n",
+     "chi"
+    ],
+    [
+     "Multiply",
+     [
+      "Power",
+      "q",
+      [
+       "Subtract",
+       "n",
+       1
+      ]
+     ],
+     [
+      "Sum",
+      [
+       "Multiply",
+       [
+        "chi",
+        "a"
+       ],
+       [
+        "BernoulliPolynomial",
+        "n",
+        [
+         "Divide",
+         "a",
+         "q"
+        ]
+       ]
+      ],
+      [
+       "Limits",
+       "a",
+       1,
+       "q"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "chi",
+    "n",
+    "q"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "q",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "chi",
+     [
+      "DirichletGroup",
+      "q"
+     ]
+    ],
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "BernoulliPolynomial",
+    "GeneralizedBernoulliB",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "458198",
+   "formula": [
+    "Equal",
+    [
+     "chi",
+     0
+    ],
+    [
+     "Which",
+     [
+      "Equal",
+      "q",
+      1
+     ],
+     1,
+     [
+      "NotEqual",
+      "q",
+      1
+     ],
+     0
+    ]
+   ],
+   "variables": [
+    "chi",
+    "q"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "q",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "chi",
+     [
+      "DirichletGroup",
+      "q"
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "47d430",
+   "formula": [
+    "Equal",
+    [
+     "DirichletGroup",
+     "q"
+    ],
+    [
+     "Set",
+     [
+      "DirichletCharacter",
+      "q",
+      "ell"
+     ],
+     [
+      "Element",
+      "ell",
+      [
+       "Range",
+       1,
+       [
+        "Subtract",
+        [
+         "Max",
+         "q",
+         2
+        ],
+        1
+       ]
+      ],
+      [
+       "Equal",
+       [
+        "GCD",
+        "ell",
+        "q"
+       ],
+       1
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "q"
+   ],
+   "assumptions": [
+    "Element",
+    "q",
+    "PositiveIntegers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "DirichletCharacter",
+    "DirichletGroup",
+    "GCD",
+    "Max"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "4877d1",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "chi",
+      "n"
+     ],
+     [
+      "Limits",
+      "n",
+      0,
+      [
+       "Subtract",
+       "q",
+       1
+      ]
+     ]
+    ],
+    [
+     "Which",
+     [
+      "Equal",
+      "chi",
+      [
+       "DirichletCharacter",
+       "q",
+       1
+      ]
+     ],
+     [
+      "Totient",
+      "q"
+     ],
+     "True",
+     0
+    ]
+   ],
+   "variables": [
+    "chi",
+    "q"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "q",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "chi",
+     [
+      "DirichletGroup",
+      "q"
+     ]
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "DirichletCharacter",
+    "Sum",
+    "Totient"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "4911bd",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "Subtract",
+      [
+       "Divide",
+       1,
+       [
+        "DirichletL",
+        "s",
+        "chi"
+       ]
+      ],
+      [
+       "Product",
+       [
+        "Subtract",
+        1,
+        [
+         "Divide",
+         [
+          "chi",
+          "p"
+         ],
+         [
+          "Power",
+          "p",
+          "s"
+         ]
+        ]
+       ],
+       [
+        "Element",
+        "p",
+        "Primes",
+        [
+         "Less",
+         "p",
+         "N_var"
+        ]
+       ]
+      ]
+     ]
+    ],
+    [
+     "HurwitzZeta",
+     [
+      "Real",
+      "s"
+     ],
+     "N_var"
+    ]
+   ],
+   "variables": [
+    "N_var",
+    "chi",
+    "s"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "q",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "chi",
+     [
+      "DirichletGroup",
+      "q"
+     ]
+    ],
+    [
+     "Element",
+     "s",
+     "ComplexNumbers"
+    ],
+    [
+     "Greater",
+     [
+      "Real",
+      "s"
+     ],
+     1
+    ],
+    [
+     "Element",
+     "N_var",
+     "PositiveIntegers"
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "DirichletL",
+    "HurwitzZeta",
+    "Primes",
+    "Product",
+    "Real"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "4c3678",
+   "formula": [
+    "Equal",
+    [
+     "HurwitzZeta",
+     "s",
+     [
+      "Divide",
+      "k",
+      "q"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      [
+       "Power",
+       "q",
+       "s"
+      ],
+      [
+       "Totient",
+       "q"
+      ]
+     ],
+     [
+      "Sum",
+      [
+       "Multiply",
+       [
+        "Conjugate",
+        [
+         "chi",
+         "k"
+        ]
+       ],
+       [
+        "DirichletL",
+        "s",
+        "chi"
+       ]
+      ],
+      [
+       "Element",
+       "chi",
+       [
+        "DirichletGroup",
+        "q"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "k",
+    "q",
+    "s"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "q",
+     [
+      "Range",
+      2,
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Element",
+     "k",
+     [
+      "Range",
+      1,
+      [
+       "Subtract",
+       "q",
+       1
+      ]
+     ]
+    ],
+    [
+     "Equal",
+     [
+      "GCD",
+      "k",
+      "q"
+     ],
+     1
+    ],
+    [
+     "Element",
+     "s",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      [
+       "Set",
+       1
+      ]
+     ]
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Conjugate",
+    "DirichletGroup",
+    "DirichletL",
+    "HurwitzZeta",
+    "Sum",
+    "Totient"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dirichlet",
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "4cf4e4",
+   "formula": [
+    "Equal",
+    [
+     "DirichletCharacter",
+     [
+      "Power",
+      "p",
+      "e_var"
+     ],
+     "ell",
+     "n"
+    ],
+    [
+     "Exp",
+     [
+      "Divide",
+      [
+       "Multiply",
+       [
+        "Multiply",
+        [
+         "Multiply",
+         [
+          "Multiply",
+          2,
+          "Pi"
+         ],
+         "ImaginaryUnit"
+        ],
+        [
+         "DiscreteLog",
+         "ell",
+         [
+          "ConreyGenerator",
+          "p"
+         ],
+         [
+          "Power",
+          "p",
+          "e_var"
+         ]
+        ]
+       ],
+       [
+        "DiscreteLog",
+        "n",
+        [
+         "ConreyGenerator",
+         "p"
+        ],
+        [
+         "Power",
+         "p",
+         "e_var"
+        ]
+       ]
+      ],
+      [
+       "Totient",
+       [
+        "Power",
+        "p",
+        "e_var"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "e_var",
+    "ell",
+    "n",
+    "p"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "p",
+     "Primes"
+    ],
+    [
+     "GreaterEqual",
+     "p",
+     3
+    ],
+    [
+     "Element",
+     "e_var",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "ell",
+     [
+      "Range",
+      1,
+      [
+       "Subtract",
+       [
+        "Power",
+        "p",
+        "e_var"
+       ],
+       1
+      ]
+     ]
+    ],
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "Equal",
+     [
+      "GCD",
+      "ell",
+      [
+       "Power",
+       "p",
+       "e_var"
+      ]
+     ],
+     [
+      "GCD",
+      "n",
+      [
+       "Power",
+       "p",
+       "e_var"
+      ]
+     ],
+     1
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ConreyGenerator",
+    "DirichletCharacter",
+    "DiscreteLog",
+    "Exp",
+    "Totient"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "50adea",
+   "formula": [
+    "Equal",
+    [
+     "DirichletL",
+     [
+      "Conjugate",
+      "s"
+     ],
+     "chi"
+    ],
+    [
+     "Conjugate",
+     [
+      "DirichletL",
+      "s",
+      [
+       "Conjugate",
+       "chi"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "chi",
+    "s"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "q",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "chi",
+     [
+      "DirichletGroup",
+      "q"
+     ]
+    ],
+    [
+     "Element",
+     "s",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Conjugate",
+    "DirichletL"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "540931",
+   "formula": [
+    "Equal",
+    [
+     "ConreyGenerator",
+     "p"
+    ],
+    [
+     "Which",
+     [
+      "Equal",
+      "p",
+      40487
+     ],
+     10,
+     [
+      "Equal",
+      "p",
+      6692367337
+     ],
+     7,
+     "True",
+     [
+      "Min",
+      [
+       "Set",
+       "a",
+       [
+        "Element",
+        "a",
+        "PositiveIntegers",
+        [
+         "Equal",
+         [
+          "Count",
+          [
+           "Set",
+           [
+            "Mod",
+            [
+             "Power",
+             "a",
+             "k"
+            ],
+            "p"
+           ],
+           [
+            "Element",
+            "k",
+            "NonNegativeIntegers"
+           ]
+          ]
+         ],
+         [
+          "Subtract",
+          "p",
+          1
+         ]
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "p"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "p",
+     "Primes"
+    ],
+    [
+     "GreaterEqual",
+     "p",
+     3
+    ],
+    [
+     "Less",
+     "p",
+     [
+      "Power",
+      10,
+      12
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ConreyGenerator",
+    "Min",
+    "Mod"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "57d31a",
+   "formula": [
+    "Element",
+    [
+     "chi",
+     "n"
+    ],
+    [
+     "Union",
+     [
+      "Set",
+      [
+       "Exp",
+       [
+        "Divide",
+        [
+         "Multiply",
+         [
+          "Multiply",
+          [
+           "Multiply",
+           2,
+           "Pi"
+          ],
+          "ImaginaryUnit"
+         ],
+         "k"
+        ],
+        [
+         "Totient",
+         "q"
+        ]
+       ]
+      ],
+      [
+       "Element",
+       "k",
+       "Integers"
+      ]
+     ],
+     [
+      "Set",
+      0
+     ]
+    ]
+   ],
+   "variables": [
+    "chi",
+    "n",
+    "q"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "q",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "chi",
+     [
+      "DirichletGroup",
+      "q"
+     ]
+    ],
+    [
+     "Element",
+     "n",
+     "Integers"
+    ]
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "Exp",
+    "Totient"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "5c4552",
+   "formula": [
+    "NotElement",
+    [
+     "DirichletL",
+     1,
+     "chi"
+    ],
+    "AlgebraicNumbers"
+   ],
+   "variables": [
+    "chi"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "q",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "chi",
+     [
+      "DirichletGroup",
+      "q"
+     ]
+    ]
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "DirichletL"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": [
+    "https://doi.org/10.4153/CJM-2010-078-9"
+   ],
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "5df909",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "Sum",
+      [
+       "chi",
+       "n"
+      ],
+      [
+       "Limits",
+       "n",
+       "M",
+       "N_var"
+      ]
+     ]
+    ],
+    [
+     "Add",
+     [
+      "Divide",
+      [
+       "Multiply",
+       [
+        "Sqrt",
+        "q"
+       ],
+       [
+        "Ln",
+        "q"
+       ]
+      ],
+      [
+       "Multiply",
+       2,
+       [
+        "Ln",
+        2
+       ]
+      ]
+     ],
+     [
+      "Multiply",
+      3,
+      [
+       "Sqrt",
+       "q"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "M",
+    "N_var",
+    "chi",
+    "q"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "q",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "M",
+     "Integers"
+    ],
+    [
+     "Element",
+     "N_var",
+     "Integers"
+    ],
+    [
+     "Element",
+     "chi",
+     [
+      "DirichletGroup",
+      "q"
+     ]
+    ],
+    [
+     "NotEqual",
+     "chi",
+     [
+      "DirichletCharacter",
+      "q",
+      1
+     ]
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Ln",
+    "Sum"
+   ],
+   "guardLevel": "undischargeable",
+   "flavor": null,
+   "references": [
+    "E. Dobrowolski and K. S. Williams, An upper bound for the sum ... for a certain class of functions f, Proceedings of the American Mathematical Society, Vol. 114, No. 1 (Jan., 1992), pp. 29-35, http://doi.org/10.2307/2159779"
+   ],
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "604c7c",
+   "formula": [
+    "Equal",
+    [
+     "DirichletL",
+     "s",
+     "chi"
+    ],
+    [
+     "Sum",
+     [
+      "Divide",
+      [
+       "chi",
+       "n"
+      ],
+      [
+       "Power",
+       "n",
+       "s"
+      ]
+     ],
+     [
+      "Limits",
+      "n",
+      1,
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "variables": [
+    "chi",
+    "s"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "q",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "chi",
+     [
+      "DirichletGroup",
+      "q"
+     ]
+    ],
+    [
+     "Element",
+     "s",
+     "ComplexNumbers"
+    ],
+    [
+     "Greater",
+     [
+      "Real",
+      "s"
+     ],
+     1
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "DirichletL",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "629f70",
+   "formula": [
+    "Equal",
+    [
+     "DirichletL",
+     "s",
+     [
+      "DirichletCharacter",
+      "q",
+      1
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Zeta",
+      "s"
+     ],
+     [
+      "Product",
+      [
+       "Subtract",
+       1,
+       [
+        "Divide",
+        1,
+        [
+         "Power",
+         "p",
+         "s"
+        ]
+       ]
+      ],
+      [
+       "Element",
+       "p",
+       "Primes",
+       [
+        "Divides",
+        "p",
+        "q"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "q",
+    "s"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "q",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "s",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "product",
+   "heads": [
+    "DirichletCharacter",
+    "DirichletL",
+    "Divides",
+    "Primes",
+    "Product",
+    "Zeta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "62f12c",
+   "formula": [
+    "Equal",
+    [
+     "GaussSum",
+     "q",
+     "chi"
+    ],
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "chi",
+       "n"
+      ],
+      [
+       "Exp",
+       [
+        "Divide",
+        [
+         "Multiply",
+         [
+          "Multiply",
+          [
+           "Multiply",
+           2,
+           "Pi"
+          ],
+          "ImaginaryUnit"
+         ],
+         "n"
+        ],
+        "q"
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "n",
+      1,
+      "q"
+     ]
+    ]
+   ],
+   "variables": [
+    "chi",
+    "q"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "q",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "chi",
+     [
+      "DirichletGroup",
+      "q"
+     ]
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Exp",
+    "GaussSum",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "62f7d5",
+   "formula": [
+    "Equal",
+    [
+     "Count",
+     [
+      "DirichletGroup",
+      "q"
+     ]
+    ],
+    [
+     "Totient",
+     "q"
+    ]
+   ],
+   "variables": [
+    "q"
+   ],
+   "assumptions": [
+    "Element",
+    "q",
+    "PositiveIntegers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "DirichletGroup",
+    "Totient"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "6c3fff",
+   "formula": [
+    "Equal",
+    [
+     "DirichletL",
+     1,
+     "chi"
+    ],
+    [
+     "Which",
+     [
+      "Equal",
+      "chi",
+      [
+       "DirichletCharacter",
+       "q",
+       1
+      ]
+     ],
+     "ComplexInfinity",
+     "True",
+     [
+      "Limit",
+      [
+       "Function",
+       [
+        "DirichletL",
+        "s",
+        "chi"
+       ],
+       "s"
+      ],
+      1
+     ]
+    ]
+   ],
+   "variables": [
+    "chi",
+    "q"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "q",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "chi",
+     [
+      "DirichletGroup",
+      "q"
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "DirichletCharacter",
+    "DirichletL",
+    "Limit"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": "complex",
+   "references": null,
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "75231e",
+   "formula": [
+    "Equal",
+    [
+     "ConreyGenerator",
+     "p"
+    ],
+    [
+     "Min",
+     [
+      "Set",
+      "a",
+      [
+       "Element",
+       "a",
+       "PositiveIntegers",
+       [
+        "And",
+        [
+         "Equal",
+         [
+          "Count",
+          [
+           "Set",
+           [
+            "Mod",
+            [
+             "Power",
+             "a",
+             "k"
+            ],
+            "p"
+           ],
+           [
+            "Element",
+            "k",
+            "NonNegativeIntegers"
+           ]
+          ]
+         ],
+         [
+          "Subtract",
+          "p",
+          1
+         ]
+        ],
+        [
+         "Equal",
+         [
+          "Count",
+          [
+           "Set",
+           [
+            "Mod",
+            [
+             "Power",
+             "a",
+             "k"
+            ],
+            [
+             "Power",
+             "p",
+             2
+            ]
+           ],
+           [
+            "Element",
+            "k",
+            "NonNegativeIntegers"
+           ]
+          ]
+         ],
+         [
+          "Multiply",
+          "p",
+          [
+           "Subtract",
+           "p",
+           1
+          ]
+         ]
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "p"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "p",
+     "Primes"
+    ],
+    [
+     "GreaterEqual",
+     "p",
+     3
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ConreyGenerator",
+    "Min",
+    "Mod"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "789ca4",
+   "formula": [
+    "Equal",
+    [
+     "DirichletL",
+     0,
+     "chi"
+    ],
+    [
+     "Multiply",
+     [
+      "Negate",
+      [
+       "Divide",
+       1,
+       "q"
+      ]
+     ],
+     [
+      "Sum",
+      [
+       "Multiply",
+       "k",
+       [
+        "chi",
+        "k"
+       ]
+      ],
+      [
+       "Limits",
+       "k",
+       1,
+       "q"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "chi",
+    "q"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "q",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "chi",
+     [
+      "DirichletGroup",
+      "q"
+     ]
+    ],
+    [
+     "NotEqual",
+     "chi",
+     [
+      "DirichletCharacter",
+      "q",
+      1
+     ]
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "DirichletL",
+    "Sum"
+   ],
+   "guardLevel": "undischargeable",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "7c86d5",
+   "formula": [
+    "Equal",
+    [
+     "DirichletL",
+     "s",
+     [
+      "Conjugate",
+      "chi"
+     ]
+    ],
+    [
+     "Conjugate",
+     [
+      "DirichletL",
+      [
+       "Conjugate",
+       "s"
+      ],
+      "chi"
+     ]
+    ]
+   ],
+   "variables": [
+    "chi",
+    "s"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "q",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "chi",
+     [
+      "DirichletGroup",
+      "q"
+     ]
+    ],
+    [
+     "Element",
+     "s",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Conjugate",
+    "DirichletL"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "8ff1ff",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "DirichletL",
+      "s",
+      "chi"
+     ]
+    ],
+    [
+     "Zeta",
+     [
+      "Real",
+      "s"
+     ]
+    ]
+   ],
+   "variables": [
+    "chi",
+    "s"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "q",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "chi",
+     [
+      "DirichletGroup",
+      "q"
+     ]
+    ],
+    [
+     "Element",
+     "s",
+     "ComplexNumbers"
+    ],
+    [
+     "Greater",
+     [
+      "Real",
+      "s"
+     ],
+     1
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "DirichletL",
+    "Real",
+    "Zeta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "97fe89",
+   "formula": [
+    "Equal",
+    [
+     "DirichletL",
+     [
+      "Conjugate",
+      "s"
+     ],
+     [
+      "Conjugate",
+      "chi"
+     ]
+    ],
+    [
+     "Conjugate",
+     [
+      "DirichletL",
+      "s",
+      "chi"
+     ]
+    ]
+   ],
+   "variables": [
+    "chi",
+    "s"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "q",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "chi",
+     [
+      "DirichletGroup",
+      "q"
+     ]
+    ],
+    [
+     "Element",
+     "s",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Conjugate",
+    "DirichletL"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "982e3b",
+   "formula": [
+    "Less",
+    0,
+    [
+     "Real",
+     [
+      "DirichletLZero",
+      "n",
+      "chi"
+     ]
+    ],
+    1
+   ],
+   "variables": [
+    "chi",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "q",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "chi",
+     [
+      "PrimitiveDirichletCharacters",
+      "q"
+     ]
+    ],
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "NotEqual",
+     "n",
+     0
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "DirichletLZero",
+    "Real"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "9b3fde",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "DirichletL",
+      "s",
+      "chi"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Power",
+      [
+       "Divide",
+       [
+        "Multiply",
+        "q",
+        [
+         "Abs",
+         [
+          "Add",
+          1,
+          "s"
+         ]
+        ]
+       ],
+       [
+        "Multiply",
+        2,
+        "Pi"
+       ]
+      ],
+      [
+       "Divide",
+       [
+        "Subtract",
+        [
+         "Add",
+         1,
+         "eta"
+        ],
+        [
+         "Real",
+         "s"
+        ]
+       ],
+       2
+      ]
+     ],
+     [
+      "Zeta",
+      [
+       "Add",
+       1,
+       "eta"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "chi",
+    "eta",
+    "q",
+    "s"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "q",
+     [
+      "Range",
+      2,
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Element",
+     "chi",
+     [
+      "PrimitiveDirichletCharacters",
+      "q"
+     ]
+    ],
+    [
+     "Element",
+     "s",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "eta",
+     [
+      "Interval",
+      [
+       "Open",
+       0
+      ],
+      [
+       "Divide",
+       1,
+       2
+      ]
+     ]
+    ],
+    [
+     "LessEqual",
+     [
+      "Negate",
+      "eta"
+     ],
+     [
+      "Real",
+      "s"
+     ],
+     [
+      "Add",
+      1,
+      "eta"
+     ]
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "DirichletL",
+    "Real",
+    "Zeta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": [
+    "H. Rademacher, On the Phragm\u00e9n-Lindel\u00f6f theorem and some applications, Mathematische Zeitschrift, December 1959, Volume 72, Issue 1, pp 192-204. Theorem 3. https://doi.org/10.1007/BF01162949"
+   ],
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "a07d28",
+   "formula": [
+    "Equal",
+    [
+     "DirichletL",
+     0,
+     [
+      "DirichletCharacter",
+      "q",
+      1
+     ]
+    ],
+    [
+     "Which",
+     [
+      "Equal",
+      "q",
+      1
+     ],
+     [
+      "Negate",
+      [
+       "Divide",
+       1,
+       2
+      ]
+     ],
+     "True",
+     0
+    ]
+   ],
+   "variables": [
+    "q"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "q",
+     "PositiveIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "DirichletCharacter",
+    "DirichletL"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "a4e947",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "chi_1",
+       "n"
+      ],
+      [
+       "Conjugate",
+       [
+        "chi_2",
+        "n"
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "n",
+      0,
+      [
+       "Subtract",
+       "q",
+       1
+      ]
+     ]
+    ],
+    [
+     "Which",
+     [
+      "Equal",
+      "chi_1",
+      "chi_2"
+     ],
+     [
+      "Totient",
+      "q"
+     ],
+     "True",
+     0
+    ]
+   ],
+   "variables": [
+    "chi",
+    "q"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "q",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "chi_1",
+     [
+      "DirichletGroup",
+      "q"
+     ]
+    ],
+    [
+     "Element",
+     "chi_2",
+     [
+      "DirichletGroup",
+      "q"
+     ]
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Conjugate",
+    "Sum",
+    "Totient"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "a9337b",
+   "formula": [
+    "Equal",
+    [
+     "DirichletL",
+     "s",
+     [
+      "DirichletCharacter",
+      1,
+      1
+     ]
+    ],
+    [
+     "Zeta",
+     "s"
+    ]
+   ],
+   "variables": [
+    "s"
+   ],
+   "assumptions": [
+    "Element",
+    "s",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "DirichletCharacter",
+    "DirichletL",
+    "Zeta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "afd0c5",
+   "formula": [
+    "Equivalent",
+    [
+     "Equal",
+     [
+      "chi",
+      "n"
+     ],
+     0
+    ],
+    [
+     "NotEqual",
+     [
+      "GCD",
+      "n",
+      "q"
+     ],
+     1
+    ]
+   ],
+   "variables": [
+    "chi",
+    "n",
+    "q"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "q",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "chi",
+     [
+      "DirichletGroup",
+      "q"
+     ]
+    ],
+    [
+     "Element",
+     "n",
+     "Integers"
+    ]
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "GCD"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "b788a1",
+   "formula": [
+    "Equal",
+    [
+     "DirichletLambda",
+     "s",
+     "chi"
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      [
+       "Multiply",
+       [
+        "Which",
+        [
+         "Equal",
+         "q",
+         1
+        ],
+        [
+         "Multiply",
+         "s",
+         [
+          "Subtract",
+          "s",
+          1
+         ]
+        ],
+        "True",
+        1
+       ],
+       [
+        "Power",
+        [
+         "Divide",
+         "q",
+         "Pi"
+        ],
+        [
+         "Divide",
+         [
+          "Add",
+          "s",
+          [
+           "Divide",
+           [
+            "Subtract",
+            1,
+            [
+             "chi",
+             -1
+            ]
+           ],
+           2
+          ]
+         ],
+         2
+        ]
+       ]
+      ],
+      [
+       "Gamma",
+       [
+        "Divide",
+        [
+         "Add",
+         "s",
+         [
+          "Divide",
+          [
+           "Subtract",
+           1,
+           [
+            "chi",
+            -1
+           ]
+          ],
+          2
+         ]
+        ],
+        2
+       ]
+      ]
+     ],
+     [
+      "DirichletL",
+      "s",
+      "chi"
+     ]
+    ]
+   ],
+   "variables": [
+    "chi",
+    "q",
+    "s"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "q",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "chi",
+     [
+      "PrimitiveDirichletCharacters",
+      "q"
+     ]
+    ],
+    [
+     "Element",
+     "s",
+     "ComplexNumbers"
+    ],
+    [
+     "NotElement",
+     "s",
+     [
+      "Which",
+      [
+       "Equal",
+       [
+        "chi",
+        -1
+       ],
+       1
+      ],
+      [
+       "Set",
+       [
+        "Negate",
+        [
+         "Multiply",
+         2,
+         "n"
+        ]
+       ],
+       [
+        "Element",
+        "n",
+        "NonNegativeIntegers"
+       ]
+      ],
+      [
+       "Equal",
+       [
+        "chi",
+        -1
+       ],
+       -1
+      ],
+      [
+       "Set",
+       [
+        "Subtract",
+        [
+         "Negate",
+         [
+          "Multiply",
+          2,
+          "n"
+         ]
+        ],
+        1
+       ],
+       [
+        "Element",
+        "n",
+        "NonNegativeIntegers"
+       ]
+      ]
+     ]
+    ],
+    [
+     "Not",
+     [
+      "And",
+      [
+       "Equal",
+       "q",
+       1
+      ],
+      [
+       "Equal",
+       "s",
+       1
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "DirichletL",
+    "DirichletLambda",
+    "Gamma"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "b78a50",
+   "formula": [
+    "Equal",
+    [
+     "Abs",
+     [
+      "GaussSum",
+      "q",
+      "chi"
+     ]
+    ],
+    [
+     "Sqrt",
+     "q"
+    ]
+   ],
+   "variables": [
+    "chi",
+    "q"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "q",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "chi",
+     [
+      "PrimitiveDirichletCharacters",
+      "q"
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "GaussSum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "bdf58d",
+   "formula": [
+    "Equal",
+    [
+     "chi",
+     1
+    ],
+    1
+   ],
+   "variables": [
+    "chi"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "q",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "chi",
+     [
+      "DirichletGroup",
+      "q"
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "c2750a",
+   "formula": [
+    "Equal",
+    [
+     "DirichletL",
+     1,
+     "chi"
+    ],
+    [
+     "Negate",
+     [
+      "Multiply",
+      [
+       "Divide",
+       1,
+       "q"
+      ],
+      [
+       "Sum",
+       [
+        "Multiply",
+        [
+         "chi",
+         "k"
+        ],
+        [
+         "Digamma",
+         [
+          "Divide",
+          "k",
+          "q"
+         ]
+        ]
+       ],
+       [
+        "Limits",
+        "k",
+        1,
+        [
+         "Subtract",
+         "q",
+         1
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "chi",
+    "q"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "q",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "chi",
+     [
+      "DirichletGroup",
+      "q"
+     ]
+    ],
+    [
+     "NotEqual",
+     "chi",
+     [
+      "DirichletCharacter",
+      "q",
+      1
+     ]
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Digamma",
+    "DirichletL",
+    "Sum"
+   ],
+   "guardLevel": "undischargeable",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "c31c10",
+   "formula": [
+    "Equal",
+    [
+     "DirichletL",
+     "s",
+     "chi"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      1,
+      [
+       "Power",
+       "q",
+       "s"
+      ]
+     ],
+     [
+      "Sum",
+      [
+       "Multiply",
+       [
+        "chi",
+        "k"
+       ],
+       [
+        "HurwitzZeta",
+        "s",
+        [
+         "Divide",
+         "k",
+         "q"
+        ]
+       ]
+      ],
+      [
+       "Limits",
+       "k",
+       1,
+       "q"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "chi",
+    "q",
+    "s"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "q",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "chi",
+     [
+      "DirichletGroup",
+      "q"
+     ]
+    ],
+    [
+     "Element",
+     "s",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      [
+       "Set",
+       1
+      ]
+     ]
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "DirichletL",
+    "HurwitzZeta",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dirichlet",
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "c9d117",
+   "formula": [
+    "Equal",
+    [
+     "DirichletL",
+     1,
+     [
+      "DirichletCharacter",
+      5,
+      4
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Multiply",
+      2,
+      [
+       "Ln",
+       "GoldenRatio"
+      ]
+     ],
+     [
+      "Sqrt",
+      5
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "DirichletCharacter",
+    "DirichletL",
+    "Ln"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "d088ea",
+   "formula": [
+    "Equal",
+    [
+     "DirichletL",
+     "s",
+     "chi"
+    ],
+    [
+     "Product",
+     [
+      "Divide",
+      1,
+      [
+       "Subtract",
+       1,
+       [
+        "Multiply",
+        [
+         "chi",
+         "p"
+        ],
+        [
+         "Power",
+         "p",
+         [
+          "Negate",
+          "s"
+         ]
+        ]
+       ]
+      ]
+     ],
+     [
+      "Element",
+      "p",
+      "Primes"
+     ]
+    ]
+   ],
+   "variables": [
+    "chi",
+    "s"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "q",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "chi",
+     [
+      "DirichletGroup",
+      "q"
+     ]
+    ],
+    [
+     "Element",
+     "s",
+     "ComplexNumbers"
+    ],
+    [
+     "Greater",
+     [
+      "Real",
+      "s"
+     ],
+     1
+    ]
+   ],
+   "class": "representation",
+   "subclass": "product",
+   "heads": [
+    "DirichletL",
+    "Primes",
+    "Product"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "d29554",
+   "formula": [
+    "Element",
+    [
+     "chi",
+     -1
+    ],
+    [
+     "Set",
+     1,
+     -1
+    ]
+   ],
+   "variables": [
+    "chi"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "q",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "chi",
+     [
+      "DirichletGroup",
+      "q"
+     ]
+    ]
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "d69b41",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "chi",
+       "a"
+      ],
+      [
+       "Divide",
+       [
+        "Multiply",
+        "z",
+        [
+         "Exp",
+         [
+          "Multiply",
+          "a",
+          "z"
+         ]
+        ]
+       ],
+       [
+        "Subtract",
+        [
+         "Exp",
+         [
+          "Multiply",
+          "q",
+          "z"
+         ]
+        ],
+        1
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "a",
+      1,
+      "q"
+     ]
+    ],
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "GeneralizedBernoulliB",
+       "n",
+       "chi"
+      ],
+      [
+       "Divide",
+       [
+        "Power",
+        "z",
+        "n"
+       ],
+       [
+        "Factorial",
+        "n"
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "n",
+      0,
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "variables": [
+    "chi",
+    "q",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "q",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "chi",
+     [
+      "DirichletGroup",
+      "q"
+     ]
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "NotEqual",
+     "z",
+     0
+    ],
+    [
+     "Less",
+     [
+      "Abs",
+      "z"
+     ],
+     [
+      "Divide",
+      [
+       "Multiply",
+       2,
+       "Pi"
+      ],
+      "q"
+     ]
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Exp",
+    "Factorial",
+    "GeneralizedBernoulliB",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "d83109",
+   "formula": [
+    "Equal",
+    [
+     "DirichletL",
+     1,
+     [
+      "DirichletCharacter",
+      3,
+      2
+     ]
+    ],
+    [
+     "Divide",
+     "Pi",
+     [
+      "Sqrt",
+      27
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "DirichletCharacter",
+    "DirichletL"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "d8c6d1",
+   "formula": [
+    "Equal",
+    [
+     "DirichletCharacter",
+     "q",
+     1,
+     "n"
+    ],
+    [
+     "Which",
+     [
+      "Equal",
+      [
+       "GCD",
+       "n",
+       "q"
+      ],
+      1
+     ],
+     1,
+     "True",
+     0
+    ]
+   ],
+   "variables": [
+    "n",
+    "q"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "q",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "n",
+     "Integers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "DirichletCharacter",
+    "GCD"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "d9a187",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "DirichletCharacter",
+      "q",
+      "ell"
+     ],
+     "n"
+    ],
+    [
+     "DirichletCharacter",
+     "q",
+     "ell",
+     "n"
+    ]
+   ],
+   "variables": [
+    "ell",
+    "n",
+    "q"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "q",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "ell",
+     [
+      "Range",
+      1,
+      [
+       "Subtract",
+       [
+        "Max",
+        "q",
+        2
+       ],
+       1
+      ]
+     ]
+    ],
+    [
+     "Equal",
+     [
+      "GCD",
+      "ell",
+      "q"
+     ],
+     1
+    ],
+    [
+     "Element",
+     "n",
+     "Integers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "DirichletCharacter"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "e44796",
+   "formula": [
+    "Equal",
+    [
+     "GeneralizedBernoulliB",
+     "n",
+     "chi"
+    ],
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "chi",
+       "a"
+      ],
+      [
+       "Sum",
+       [
+        "Multiply",
+        [
+         "Multiply",
+         [
+          "Multiply",
+          [
+           "Binomial",
+           "n",
+           "k"
+          ],
+          [
+           "BernoulliB",
+           "k"
+          ]
+         ],
+         [
+          "Power",
+          "a",
+          [
+           "Subtract",
+           "n",
+           "k"
+          ]
+         ]
+        ],
+        [
+         "Power",
+         "q",
+         [
+          "Subtract",
+          "k",
+          1
+         ]
+        ]
+       ],
+       [
+        "Limits",
+        "k",
+        0,
+        "n"
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "a",
+      1,
+      "q"
+     ]
+    ]
+   ],
+   "variables": [
+    "chi",
+    "n",
+    "q"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "q",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "chi",
+     [
+      "DirichletGroup",
+      "q"
+     ]
+    ],
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "BernoulliB",
+    "Binomial",
+    "GeneralizedBernoulliB",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "e6deb7",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "Sum",
+      [
+       "chi",
+       "n"
+      ],
+      [
+       "Limits",
+       "n",
+       0,
+       "N_var"
+      ]
+     ]
+    ],
+    [
+     "Totient",
+     "q"
+    ]
+   ],
+   "variables": [
+    "N_var",
+    "chi",
+    "q"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "q",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "N_var",
+     "Integers"
+    ],
+    [
+     "Element",
+     "chi",
+     [
+      "DirichletGroup",
+      "q"
+     ]
+    ],
+    [
+     "NotEqual",
+     "chi",
+     [
+      "DirichletCharacter",
+      "q",
+      1
+     ]
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Sum",
+    "Totient"
+   ],
+   "guardLevel": "undischargeable",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "ed65c8",
+   "formula": [
+    "Equal",
+    [
+     "PrimitiveDirichletCharacters",
+     "q"
+    ],
+    [
+     "Set",
+     "chi",
+     [
+      "Element",
+      "chi",
+      [
+       "DirichletGroup",
+       "q"
+      ],
+      [
+       "ForAll",
+       [
+        "Element",
+        "d",
+        [
+         "Range",
+         1,
+         [
+          "Subtract",
+          "q",
+          1
+         ]
+        ]
+       ],
+       [
+        "Implies",
+        [
+         "Divides",
+         "d",
+         "q"
+        ],
+        [
+         "Exists",
+         [
+          "Element",
+          "a",
+          [
+           "Range",
+           0,
+           [
+            "Subtract",
+            "q",
+            1
+           ]
+          ]
+         ],
+         [
+          "And",
+          [
+           "CongruentMod",
+           "a",
+           1,
+           "d"
+          ],
+          [
+           "Equal",
+           [
+            "GCD",
+            "a",
+            "q"
+           ],
+           1
+          ],
+          [
+           "NotEqual",
+           [
+            "chi",
+            "a"
+           ],
+           1
+          ]
+         ]
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "q"
+   ],
+   "assumptions": [
+    "Element",
+    "q",
+    "PositiveIntegers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "CongruentMod",
+    "DirichletGroup",
+    "Divides",
+    "GCD",
+    "PrimitiveDirichletCharacters"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": [
+    "T. Apostol (1976), Introduction to Analytic Number Theory, Springer. Chapter 8.7."
+   ],
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "f4de66",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "chi",
+       "m"
+      ],
+      [
+       "Conjugate",
+       [
+        "chi",
+        "n"
+       ]
+      ]
+     ],
+     [
+      "Element",
+      "chi",
+      [
+       "DirichletGroup",
+       "q"
+      ]
+     ]
+    ],
+    [
+     "Which",
+     [
+      "And",
+      [
+       "CongruentMod",
+       "n",
+       "m",
+       "q"
+      ],
+      [
+       "Equal",
+       [
+        "GCD",
+        "m",
+        "q"
+       ],
+       1
+      ]
+     ],
+     [
+      "Totient",
+      "q"
+     ],
+     "True",
+     0
+    ]
+   ],
+   "variables": [
+    "m",
+    "n",
+    "q"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "q",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "m",
+     "Integers"
+    ],
+    [
+     "Element",
+     "n",
+     "Integers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "CongruentMod",
+    "Conjugate",
+    "DirichletGroup",
+    "GCD",
+    "Sum",
+    "Totient"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "f5c3c5",
+   "formula": [
+    "Equal",
+    [
+     "DirichletL",
+     [
+      "Negate",
+      "n"
+     ],
+     "chi"
+    ],
+    [
+     "Negate",
+     [
+      "Divide",
+      [
+       "GeneralizedBernoulliB",
+       [
+        "Add",
+        "n",
+        1
+       ],
+       "chi"
+      ],
+      [
+       "Add",
+       "n",
+       1
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "chi",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "q",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "chi",
+     [
+      "DirichletGroup",
+      "q"
+     ]
+    ],
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "DirichletL",
+    "GeneralizedBernoulliB"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "f7a866",
+   "formula": [
+    "Equal",
+    [
+     "GeneralizedBernoulliB",
+     0,
+     "chi"
+    ],
+    [
+     "Which",
+     [
+      "Equal",
+      "chi",
+      [
+       "DirichletCharacter",
+       "q",
+       1
+      ]
+     ],
+     [
+      "Divide",
+      [
+       "Totient",
+       "q"
+      ],
+      "q"
+     ],
+     "True",
+     0
+    ]
+   ],
+   "variables": [
+    "chi",
+    "q"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "q",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "chi",
+     [
+      "DirichletGroup",
+      "q"
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "DirichletCharacter",
+    "GeneralizedBernoulliB",
+    "Totient"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "f88596",
+   "formula": [
+    "Equal",
+    [
+     "Limit",
+     [
+      "Function",
+      [
+       "Divide",
+       [
+        "Sum",
+        [
+         "Count",
+         [
+          "DirichletGroup",
+          "q"
+         ]
+        ],
+        [
+         "Limits",
+         "q",
+         1,
+         "N_var"
+        ]
+       ],
+       [
+        "Multiply",
+        [
+         "Divide",
+         1,
+         2
+        ],
+        [
+         "Power",
+         "N_var",
+         2
+        ]
+       ]
+      ],
+      "N_var"
+     ],
+     "PositiveInfinity"
+    ],
+    [
+     "Divide",
+     6,
+     [
+      "Power",
+      "Pi",
+      2
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "limit",
+   "heads": [
+    "DirichletGroup",
+    "Limit",
+    "Sum"
+   ],
+   "guardLevel": "none",
+   "flavor": "sequence",
+   "references": null,
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "fad52f",
+   "formula": [
+    "Implies",
+    [
+     "Equal",
+     [
+      "chi",
+      -1
+     ],
+     1
+    ],
+    [
+     "Equal",
+     [
+      "DirichletL",
+      0,
+      "chi"
+     ],
+     0
+    ]
+   ],
+   "variables": [
+    "chi"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "q",
+     [
+      "Range",
+      2,
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Element",
+     "chi",
+     [
+      "DirichletGroup",
+      "q"
+     ]
+    ]
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "DirichletL"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "fc4f6a",
+   "formula": [
+    "Equal",
+    [
+     "DirichletCharacter",
+     4,
+     3,
+     "n"
+    ],
+    [
+     "Which",
+     [
+      "CongruentMod",
+      "n",
+      1,
+      4
+     ],
+     1,
+     [
+      "CongruentMod",
+      "n",
+      3,
+      4
+     ],
+     -1,
+     "True",
+     0
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "Integers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "CongruentMod",
+    "DirichletCharacter"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dirichlet"
+   ]
+  },
+  {
+   "id": "ff8254",
+   "formula": [
+    "Equal",
+    [
+     "DirichletL",
+     "s",
+     [
+      "DirichletCharacter",
+      [
+       "Power",
+       2,
+       "n"
+      ],
+      1
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Subtract",
+      1,
+      [
+       "Power",
+       2,
+       [
+        "Negate",
+        "s"
+       ]
+      ]
+     ],
+     [
+      "Zeta",
+      "s"
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "s"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "s",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "DirichletCharacter",
+    "DirichletL",
+    "Zeta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "dirichlet"
+   ]
+  }
+ ]
+}

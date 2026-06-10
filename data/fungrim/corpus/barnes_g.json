@@ -1,0 +1,5070 @@
+{
+ "topic": "barnes_g",
+ "title": "Barnes G-function",
+ "source": "pygrim/formulas/barnes_g.py",
+ "generator": "grim2mathjson 0.1.0",
+ "entries": [
+  {
+   "id": "092cee",
+   "formula": [
+    "Equal",
+    [
+     "LogBarnesGRemainder",
+     "N_var",
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      [
+       "Divide",
+       1,
+       [
+        "Power",
+        "z",
+        [
+         "Multiply",
+         2,
+         "N_var"
+        ]
+       ]
+      ],
+      [
+       "Divide",
+       [
+        "Power",
+        -1,
+        [
+         "Add",
+         "N_var",
+         1
+        ]
+       ],
+       "Pi"
+      ]
+     ],
+     [
+      "Integrate",
+      [
+       "Multiply",
+       [
+        "Divide",
+        [
+         "Power",
+         "t",
+         [
+          "Subtract",
+          [
+           "Multiply",
+           2,
+           "N_var"
+          ],
+          1
+         ]
+        ],
+        [
+         "Add",
+         1,
+         [
+          "Power",
+          [
+           "Divide",
+           "t",
+           "z"
+          ],
+          2
+         ]
+        ]
+       ],
+       [
+        "PolyLog",
+        2,
+        [
+         "Exp",
+         [
+          "Negate",
+          [
+           "Multiply",
+           [
+            "Multiply",
+            2,
+            "Pi"
+           ],
+           "t"
+          ]
+         ]
+        ]
+       ]
+      ],
+      [
+       "Limits",
+       "t",
+       0,
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "N_var",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Greater",
+     [
+      "Real",
+      "z"
+     ],
+     0
+    ],
+    [
+     "Element",
+     "N_var",
+     "PositiveIntegers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Exp",
+    "Integrate",
+    "LogBarnesGRemainder",
+    "PolyLog"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": [
+    "https://dx.doi.org/10.1098/rspa.2014.0534"
+   ],
+   "topics": [
+    "barnes_g"
+   ]
+  },
+  {
+   "id": "0ad263",
+   "formula": [
+    "Equal",
+    [
+     "LogBarnesG",
+     [
+      "Add",
+      1,
+      "z"
+     ]
+    ],
+    [
+     "Add",
+     [
+      "Subtract",
+      [
+       "Multiply",
+       [
+        "Divide",
+        [
+         "Subtract",
+         [
+          "Ln",
+          [
+           "Multiply",
+           2,
+           "Pi"
+          ]
+         ],
+         1
+        ],
+        2
+       ],
+       "z"
+      ],
+      [
+       "Multiply",
+       [
+        "Divide",
+        [
+         "Add",
+         1,
+         "EulerGamma"
+        ],
+        2
+       ],
+       [
+        "Power",
+        "z",
+        2
+       ]
+      ]
+     ],
+     [
+      "Sum",
+      [
+       "Multiply",
+       [
+        "Divide",
+        [
+         "Multiply",
+         [
+          "Power",
+          -1,
+          [
+           "Add",
+           "n",
+           1
+          ]
+         ],
+         [
+          "Zeta",
+          [
+           "Subtract",
+           "n",
+           1
+          ]
+         ]
+        ],
+        "n"
+       ],
+       [
+        "Power",
+        "z",
+        "n"
+       ]
+      ],
+      [
+       "Limits",
+       "n",
+       3,
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Less",
+     [
+      "Abs",
+      "z"
+     ],
+     1
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Ln",
+    "LogBarnesG",
+    "Sum",
+    "Zeta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "barnes_g"
+   ]
+  },
+  {
+   "id": "147db6",
+   "formula": [
+    "Equal",
+    [
+     "BarnesG",
+     [
+      "Conjugate",
+      "z"
+     ]
+    ],
+    [
+     "Conjugate",
+     [
+      "BarnesG",
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BarnesG",
+    "Conjugate"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "barnes_g"
+   ]
+  },
+  {
+   "id": "19b40f",
+   "formula": [
+    "Implies",
+    [
+     "Element",
+     "x",
+     [
+      "Interval",
+      [
+       "Open",
+       0
+      ],
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
+     ]
+    ],
+    [
+     "Element",
+     [
+      "LogBarnesG",
+      "x"
+     ],
+     "RealNumbers"
+    ]
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "LogBarnesG"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "barnes_g"
+   ]
+  },
+  {
+   "id": "1d4638",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "LogBarnesGRemainder",
+      "N_var",
+      "z"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      [
+       "Abs",
+       [
+        "BernoulliB",
+        [
+         "Add",
+         [
+          "Multiply",
+          2,
+          "N_var"
+         ],
+         2
+        ]
+       ]
+      ],
+      [
+       "Multiply",
+       [
+        "Multiply",
+        [
+         "Multiply",
+         [
+          "Multiply",
+          2,
+          "N_var"
+         ],
+         [
+          "Add",
+          [
+           "Multiply",
+           2,
+           "N_var"
+          ],
+          1
+         ]
+        ],
+        [
+         "Add",
+         [
+          "Multiply",
+          2,
+          "N_var"
+         ],
+         2
+        ]
+       ],
+       [
+        "Power",
+        [
+         "Abs",
+         "z"
+        ],
+        [
+         "Multiply",
+         2,
+         "N_var"
+        ]
+       ]
+      ]
+     ],
+     [
+      "Which",
+      [
+       "LessEqual",
+       [
+        "Abs",
+        [
+         "Argument",
+         "z"
+        ]
+       ],
+       [
+        "Divide",
+        "Pi",
+        4
+       ]
+      ],
+      1,
+      [
+       "Less",
+       [
+        "Abs",
+        [
+         "Argument",
+         "z"
+        ]
+       ],
+       "Pi"
+      ],
+      [
+       "Power",
+       [
+        "Sec",
+        [
+         "Multiply",
+         [
+          "Divide",
+          1,
+          2
+         ],
+         [
+          "Argument",
+          "z"
+         ]
+        ]
+       ],
+       [
+        "Add",
+        [
+         "Multiply",
+         2,
+         "N_var"
+        ],
+        1
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "N_var",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "NotElement",
+     "z",
+     [
+      "Interval",
+      [
+       "Open",
+       "NegativeInfinity"
+      ],
+      0
+     ]
+    ],
+    [
+     "Element",
+     "N_var",
+     "PositiveIntegers"
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Argument",
+    "BernoulliB",
+    "LogBarnesGRemainder",
+    "Sec"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": [
+    "https://dx.doi.org/10.1098/rspa.2014.0534"
+   ],
+   "topics": [
+    "barnes_g"
+   ]
+  },
+  {
+   "id": "23ed69",
+   "formula": [
+    "Equal",
+    [
+     "LogBarnesG",
+     [
+      "Subtract",
+      1,
+      "z"
+     ]
+    ],
+    [
+     "Add",
+     [
+      "Subtract",
+      [
+       "LogBarnesG",
+       [
+        "Add",
+        1,
+        "z"
+       ]
+      ],
+      [
+       "Multiply",
+       [
+        "Ln",
+        [
+         "Multiply",
+         2,
+         "Pi"
+        ]
+       ],
+       "z"
+      ]
+     ],
+     [
+      "Which",
+      [
+       "Or",
+       [
+        "Less",
+        -1,
+        [
+         "Real",
+         "z"
+        ],
+        1
+       ],
+       [
+        "Greater",
+        [
+         "Imaginary",
+         "z"
+        ],
+        0
+       ],
+       [
+        "And",
+        [
+         "Equal",
+         [
+          "Imaginary",
+          "z"
+         ],
+         0
+        ],
+        [
+         "Less",
+         [
+          "Real",
+          "z"
+         ],
+         1
+        ]
+       ]
+      ],
+      [
+       "Add",
+       [
+        "Integrate",
+        [
+         "Multiply",
+         [
+          "Multiply",
+          "Pi",
+          "x"
+         ],
+         [
+          "Cot",
+          [
+           "Multiply",
+           "Pi",
+           "x"
+          ]
+         ]
+        ],
+        [
+         "Limits",
+         "x",
+         0,
+         "ImaginaryUnit"
+        ]
+       ],
+       [
+        "Integrate",
+        [
+         "Multiply",
+         [
+          "Multiply",
+          "Pi",
+          "x"
+         ],
+         [
+          "Cot",
+          [
+           "Multiply",
+           "Pi",
+           "x"
+          ]
+         ]
+        ],
+        [
+         "Limits",
+         "x",
+         "ImaginaryUnit",
+         "z"
+        ]
+       ]
+      ],
+      [
+       "Or",
+       [
+        "Less",
+        -1,
+        [
+         "Real",
+         "z"
+        ],
+        1
+       ],
+       [
+        "Less",
+        [
+         "Imaginary",
+         "z"
+        ],
+        0
+       ],
+       [
+        "And",
+        [
+         "Equal",
+         [
+          "Imaginary",
+          "z"
+         ],
+         0
+        ],
+        [
+         "Greater",
+         [
+          "Real",
+          "z"
+         ],
+         -1
+        ]
+       ]
+      ],
+      [
+       "Add",
+       [
+        "Integrate",
+        [
+         "Multiply",
+         [
+          "Multiply",
+          "Pi",
+          "x"
+         ],
+         [
+          "Cot",
+          [
+           "Multiply",
+           "Pi",
+           "x"
+          ]
+         ]
+        ],
+        [
+         "Limits",
+         "x",
+         0,
+         [
+          "Negate",
+          "ImaginaryUnit"
+         ]
+        ]
+       ],
+       [
+        "Integrate",
+        [
+         "Multiply",
+         [
+          "Multiply",
+          "Pi",
+          "x"
+         ],
+         [
+          "Cot",
+          [
+           "Multiply",
+           "Pi",
+           "x"
+          ]
+         ]
+        ],
+        [
+         "Limits",
+         "x",
+         [
+          "Negate",
+          "ImaginaryUnit"
+         ],
+         "z"
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "NotElement",
+     "z",
+     "Integers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Cot",
+    "Imaginary",
+    "Integrate",
+    "Ln",
+    "LogBarnesG",
+    "Real"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "barnes_g"
+   ]
+  },
+  {
+   "id": "33f13a",
+   "formula": [
+    "Equal",
+    [
+     "BarnesG",
+     "n"
+    ],
+    [
+     "Which",
+     [
+      "GreaterEqual",
+      "n",
+      1
+     ],
+     [
+      "Product",
+      [
+       "Factorial",
+       "k"
+      ],
+      [
+       "Limits",
+       "k",
+       1,
+       [
+        "Subtract",
+        "n",
+        2
+       ]
+      ]
+     ],
+     [
+      "LessEqual",
+      "n",
+      0
+     ],
+     0
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "Integers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BarnesG",
+    "Factorial",
+    "Product"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "barnes_g"
+   ]
+  },
+  {
+   "id": "3544a0",
+   "formula": [
+    "Greater",
+    [
+     "LogBarnesG",
+     [
+      "Add",
+      "x",
+      1
+     ]
+    ],
+    [
+     "Subtract",
+     [
+      "Subtract",
+      [
+       "Add",
+       [
+        "Add",
+        [
+         "Subtract",
+         [
+          "Multiply",
+          [
+           "Subtract",
+           [
+            "Divide",
+            [
+             "Power",
+             "x",
+             2
+            ],
+            2
+           ],
+           [
+            "Divide",
+            1,
+            12
+           ]
+          ],
+          [
+           "Ln",
+           "x"
+          ]
+         ],
+         [
+          "Divide",
+          [
+           "Multiply",
+           3,
+           [
+            "Power",
+            "x",
+            2
+           ]
+          ],
+          4
+         ]
+        ],
+        [
+         "Multiply",
+         [
+          "Divide",
+          [
+           "Ln",
+           [
+            "Multiply",
+            2,
+            "Pi"
+           ]
+          ],
+          2
+         ],
+         "x"
+        ]
+       ],
+       [
+        "Divide",
+        1,
+        12
+       ]
+      ],
+      [
+       "Ln",
+       "ConstGlaisher"
+      ]
+     ],
+     [
+      "Divide",
+      1,
+      [
+       "Multiply",
+       240,
+       [
+        "Power",
+        "x",
+        2
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": [
+    "Element",
+    "x",
+    [
+     "Interval",
+     [
+      "Open",
+      0
+     ],
+     [
+      "Open",
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "ConstGlaisher",
+    "Ln",
+    "LogBarnesG"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": [
+    "https://dx.doi.org/10.1098/rspa.2014.0534"
+   ],
+   "topics": [
+    "barnes_g"
+   ]
+  },
+  {
+   "id": "3d46ea",
+   "formula": [
+    "Implies",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "Element",
+     [
+      "BarnesG",
+      "n"
+     ],
+     "NonNegativeIntegers"
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "BarnesG"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "barnes_g"
+   ]
+  },
+  {
+   "id": "4a3612",
+   "formula": [
+    "Less",
+    [
+     "LogBarnesG",
+     [
+      "Add",
+      "x",
+      1
+     ]
+    ],
+    [
+     "Subtract",
+     [
+      "Add",
+      [
+       "Add",
+       [
+        "Subtract",
+        [
+         "Multiply",
+         [
+          "Subtract",
+          [
+           "Divide",
+           [
+            "Power",
+            "x",
+            2
+           ],
+           2
+          ],
+          [
+           "Divide",
+           1,
+           12
+          ]
+         ],
+         [
+          "Ln",
+          "x"
+         ]
+        ],
+        [
+         "Divide",
+         [
+          "Multiply",
+          3,
+          [
+           "Power",
+           "x",
+           2
+          ]
+         ],
+         4
+        ]
+       ],
+       [
+        "Multiply",
+        [
+         "Divide",
+         [
+          "Ln",
+          [
+           "Multiply",
+           2,
+           "Pi"
+          ]
+         ],
+         2
+        ],
+        "x"
+       ]
+      ],
+      [
+       "Divide",
+       1,
+       12
+      ]
+     ],
+     [
+      "Ln",
+      "ConstGlaisher"
+     ]
+    ]
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": [
+    "Element",
+    "x",
+    [
+     "Interval",
+     [
+      "Open",
+      0
+     ],
+     [
+      "Open",
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "ConstGlaisher",
+    "Ln",
+    "LogBarnesG"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": [
+    "https://dx.doi.org/10.1098/rspa.2014.0534"
+   ],
+   "topics": [
+    "barnes_g"
+   ]
+  },
+  {
+   "id": "5261e3",
+   "formula": [
+    "Equal",
+    [
+     "LogBarnesG",
+     [
+      "Add",
+      "z",
+      1
+     ]
+    ],
+    [
+     "Add",
+     [
+      "GammaLn",
+      "z"
+     ],
+     [
+      "LogBarnesG",
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "NotElement",
+     "z",
+     "NonPositiveIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "GammaLn",
+    "LogBarnesG"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "barnes_g"
+   ]
+  },
+  {
+   "id": "541e2e",
+   "formula": [
+    "Equal",
+    [
+     "BarnesG",
+     [
+      "Subtract",
+      1,
+      "x"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      [
+       "Multiply",
+       [
+        "Power",
+        -1,
+        [
+         "Add",
+         [
+          "Floor",
+          [
+           "Divide",
+           [
+            "Subtract",
+            "x",
+            1
+           ],
+           2
+          ]
+         ],
+         1
+        ]
+       ],
+       [
+        "BarnesG",
+        [
+         "Add",
+         1,
+         "x"
+        ]
+       ]
+      ],
+      [
+       "Power",
+       [
+        "Divide",
+        [
+         "Abs",
+         [
+          "Sin",
+          [
+           "Multiply",
+           "Pi",
+           "x"
+          ]
+         ]
+        ],
+        "Pi"
+       ],
+       "x"
+      ]
+     ],
+     [
+      "Exp",
+      [
+       "Multiply",
+       [
+        "Divide",
+        1,
+        [
+         "Multiply",
+         2,
+         "Pi"
+        ]
+       ],
+       [
+        "Imaginary",
+        [
+         "PolyLog",
+         2,
+         [
+          "Exp",
+          [
+           "Multiply",
+           [
+            "Multiply",
+            [
+             "Multiply",
+             2,
+             "Pi"
+            ],
+            "ImaginaryUnit"
+           ],
+           "x"
+          ]
+         ]
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     "RealNumbers"
+    ],
+    [
+     "NotElement",
+     "x",
+     [
+      "Range",
+      "NegativeInfinity",
+      -1
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "BarnesG",
+    "Exp",
+    "Floor",
+    "Imaginary",
+    "PolyLog",
+    "Sin"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": [
+    "https://doi.org/10.1145/384101.384104"
+   ],
+   "topics": [
+    "barnes_g"
+   ]
+  },
+  {
+   "id": "54d4e2",
+   "formula": [
+    "Equal",
+    [
+     "BarnesG",
+     [
+      "Add",
+      "z",
+      1
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      [
+       "Power",
+       [
+        "Multiply",
+        2,
+        "Pi"
+       ],
+       [
+        "Divide",
+        "z",
+        2
+       ]
+      ],
+      [
+       "Exp",
+       [
+        "Negate",
+        [
+         "Divide",
+         [
+          "Add",
+          "z",
+          [
+           "Multiply",
+           [
+            "Add",
+            "EulerGamma",
+            1
+           ],
+           [
+            "Power",
+            "z",
+            2
+           ]
+          ]
+         ],
+         2
+        ]
+       ]
+      ]
+     ],
+     [
+      "Product",
+      [
+       "Multiply",
+       [
+        "Power",
+        [
+         "Add",
+         1,
+         [
+          "Divide",
+          "z",
+          "k"
+         ]
+        ],
+        "k"
+       ],
+       [
+        "Exp",
+        [
+         "Subtract",
+         [
+          "Divide",
+          [
+           "Power",
+           "z",
+           2
+          ],
+          [
+           "Multiply",
+           2,
+           "k"
+          ]
+         ],
+         "z"
+        ]
+       ]
+      ],
+      [
+       "Limits",
+       "k",
+       1,
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "representation",
+   "subclass": "product",
+   "heads": [
+    "BarnesG",
+    "Exp",
+    "Product"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "barnes_g"
+   ]
+  },
+  {
+   "id": "5a11eb",
+   "formula": [
+    "Equal",
+    [
+     "LogBarnesG",
+     "x"
+    ],
+    [
+     "Which",
+     [
+      "Greater",
+      "x",
+      0
+     ],
+     [
+      "Ln",
+      [
+       "BarnesG",
+       "x"
+      ]
+     ],
+     "True",
+     [
+      "Add",
+      [
+       "Ln",
+       [
+        "Abs",
+        [
+         "BarnesG",
+         "x"
+        ]
+       ]
+      ],
+      [
+       "Multiply",
+       [
+        "Multiply",
+        [
+         "Multiply",
+         [
+          "Multiply",
+          [
+           "Divide",
+           1,
+           2
+          ],
+          [
+           "Floor",
+           "x"
+          ]
+         ],
+         [
+          "Subtract",
+          [
+           "Floor",
+           "x"
+          ],
+          1
+         ]
+        ],
+        "Pi"
+       ],
+       "ImaginaryUnit"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     "RealNumbers"
+    ],
+    [
+     "NotElement",
+     "x",
+     "NonPositiveIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "BarnesG",
+    "Floor",
+    "Ln",
+    "LogBarnesG"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "barnes_g"
+   ]
+  },
+  {
+   "id": "5babc2",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "BarnesG",
+        "z"
+       ],
+       "z"
+      ],
+      1
+     ],
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "BarnesG",
+      "z"
+     ],
+     [
+      "Add",
+      [
+       "Subtract",
+       [
+        "Multiply",
+        [
+         "Subtract",
+         "z",
+         1
+        ],
+        [
+         "Digamma",
+         "z"
+        ]
+       ],
+       "z"
+      ],
+      [
+       "Divide",
+       [
+        "Add",
+        [
+         "Ln",
+         [
+          "Multiply",
+          2,
+          "Pi"
+         ]
+        ],
+        1
+       ],
+       2
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "NotElement",
+     "z",
+     "NonPositiveIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BarnesG",
+    "Derivative",
+    "Digamma",
+    "Ln"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "barnes_g"
+   ]
+  },
+  {
+   "id": "62bdb8",
+   "formula": [
+    "Implies",
+    [
+     "Element",
+     "z",
+     "NonPositiveIntegers"
+    ],
+    [
+     "Element",
+     [
+      "LogBarnesG",
+      "z"
+     ],
+     [
+      "Set",
+      "NegativeInfinity"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "LogBarnesG"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "barnes_g"
+   ]
+  },
+  {
+   "id": "6395ee",
+   "formula": [
+    "Equal",
+    [
+     "LogBarnesG",
+     [
+      "Add",
+      "z",
+      1
+     ]
+    ],
+    [
+     "Subtract",
+     [
+      "Subtract",
+      [
+       "Subtract",
+       [
+        "Add",
+        [
+         "Multiply",
+         "z",
+         [
+          "GammaLn",
+          "z"
+         ]
+        ],
+        [
+         "Divide",
+         [
+          "Power",
+          "z",
+          2
+         ],
+         4
+        ]
+       ],
+       [
+        "Multiply",
+        [
+         "Divide",
+         [
+          "Ln",
+          "z"
+         ],
+         2
+        ],
+        [
+         "BernoulliPolynomial",
+         2,
+         "z"
+        ]
+       ]
+      ],
+      [
+       "Ln",
+       "ConstGlaisher"
+      ]
+     ],
+     [
+      "Integrate",
+      [
+       "Multiply",
+       [
+        "Divide",
+        [
+         "Exp",
+         [
+          "Multiply",
+          [
+           "Negate",
+           "z"
+          ],
+          "x"
+         ]
+        ],
+        [
+         "Power",
+         "x",
+         2
+        ]
+       ],
+       [
+        "Subtract",
+        [
+         "Subtract",
+         [
+          "Subtract",
+          [
+           "Divide",
+           1,
+           [
+            "Subtract",
+            1,
+            [
+             "Exp",
+             [
+              "Negate",
+              "x"
+             ]
+            ]
+           ]
+          ],
+          [
+           "Divide",
+           1,
+           "x"
+          ]
+         ],
+         [
+          "Divide",
+          1,
+          2
+         ]
+        ],
+        [
+         "Divide",
+         "x",
+         12
+        ]
+       ]
+      ],
+      [
+       "Limits",
+       "x",
+       0,
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Greater",
+     [
+      "Real",
+      "z"
+     ],
+     0
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BernoulliPolynomial",
+    "ConstGlaisher",
+    "Exp",
+    "GammaLn",
+    "Integrate",
+    "Ln",
+    "LogBarnesG"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": [
+    "https://arxiv.org/abs/math/0308086"
+   ],
+   "topics": [
+    "barnes_g"
+   ]
+  },
+  {
+   "id": "645c98",
+   "formula": [
+    "Equal",
+    [
+     "LogBarnesGRemainder",
+     "N_var",
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      1,
+      [
+       "Multiply",
+       [
+        "Multiply",
+        2,
+        "N_var"
+       ],
+       [
+        "Add",
+        [
+         "Multiply",
+         2,
+         "N_var"
+        ],
+        1
+       ]
+      ]
+     ],
+     [
+      "Integrate",
+      [
+       "Divide",
+       [
+        "BernoulliPolynomial",
+        [
+         "Add",
+         [
+          "Multiply",
+          2,
+          "N_var"
+         ],
+         1
+        ],
+        [
+         "Subtract",
+         "t",
+         [
+          "Floor",
+          "t"
+         ]
+        ]
+       ],
+       [
+        "Power",
+        [
+         "Add",
+         "t",
+         "z"
+        ],
+        [
+         "Multiply",
+         2,
+         "N_var"
+        ]
+       ]
+      ],
+      [
+       "Limits",
+       "t",
+       0,
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "N_var",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Greater",
+     [
+      "Real",
+      "z"
+     ],
+     0
+    ],
+    [
+     "Element",
+     "N_var",
+     "PositiveIntegers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "BernoulliPolynomial",
+    "Floor",
+    "Integrate",
+    "LogBarnesGRemainder"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": [
+    "https://dx.doi.org/10.1098/rspa.2014.0534"
+   ],
+   "topics": [
+    "barnes_g"
+   ]
+  },
+  {
+   "id": "6c6d3e",
+   "formula": [
+    "Equal",
+    [
+     "LogBarnesG",
+     [
+      "Conjugate",
+      "z"
+     ]
+    ],
+    [
+     "Which",
+     [
+      "Element",
+      "z",
+      [
+       "Interval",
+       [
+        "Open",
+        "NegativeInfinity"
+       ],
+       0
+      ]
+     ],
+     [
+      "LogBarnesG",
+      "z"
+     ],
+     "True",
+     [
+      "Conjugate",
+      [
+       "LogBarnesG",
+       "z"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Conjugate",
+    "LogBarnesG"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "barnes_g"
+   ]
+  },
+  {
+   "id": "6f8e14",
+   "formula": [
+    "Equal",
+    [
+     "LogBarnesG",
+     [
+      "Add",
+      "z",
+      1
+     ]
+    ],
+    [
+     "Add",
+     [
+      "Add",
+      [
+       "Subtract",
+       [
+        "Subtract",
+        [
+         "Add",
+         [
+          "Divide",
+          [
+           "Power",
+           "z",
+           2
+          ],
+          4
+         ],
+         [
+          "Multiply",
+          "z",
+          [
+           "GammaLn",
+           [
+            "Add",
+            "z",
+            1
+           ]
+          ]
+         ]
+        ],
+        [
+         "Multiply",
+         [
+          "Add",
+          [
+           "Divide",
+           [
+            "Multiply",
+            "z",
+            [
+             "Add",
+             "z",
+             1
+            ]
+           ],
+           2
+          ],
+          [
+           "Divide",
+           1,
+           12
+          ]
+         ],
+         [
+          "Ln",
+          "z"
+         ]
+        ]
+       ],
+       [
+        "Ln",
+        "ConstGlaisher"
+       ]
+      ],
+      [
+       "Sum",
+       [
+        "Divide",
+        [
+         "BernoulliB",
+         [
+          "Add",
+          [
+           "Multiply",
+           2,
+           "n"
+          ],
+          2
+         ]
+        ],
+        [
+         "Multiply",
+         [
+          "Multiply",
+          [
+           "Multiply",
+           [
+            "Multiply",
+            2,
+            "n"
+           ],
+           [
+            "Add",
+            [
+             "Multiply",
+             2,
+             "n"
+            ],
+            1
+           ]
+          ],
+          [
+           "Add",
+           [
+            "Multiply",
+            2,
+            "n"
+           ],
+           2
+          ]
+         ],
+         [
+          "Power",
+          "z",
+          [
+           "Multiply",
+           2,
+           "n"
+          ]
+         ]
+        ]
+       ],
+       [
+        "Limits",
+        "n",
+        1,
+        [
+         "Subtract",
+         "N_var",
+         1
+        ]
+       ]
+      ]
+     ],
+     [
+      "LogBarnesGRemainder",
+      "N_var",
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "N_var",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "NotElement",
+     "z",
+     [
+      "Interval",
+      [
+       "Open",
+       "NegativeInfinity"
+      ],
+      0
+     ]
+    ],
+    [
+     "Element",
+     "N_var",
+     "PositiveIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BernoulliB",
+    "ConstGlaisher",
+    "GammaLn",
+    "Ln",
+    "LogBarnesG",
+    "LogBarnesGRemainder",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": [
+    "https://dx.doi.org/10.1098/rspa.2014.0534"
+   ],
+   "topics": [
+    "barnes_g"
+   ]
+  },
+  {
+   "id": "7a36e5",
+   "formula": [
+    "Equal",
+    [
+     "BarnesG",
+     [
+      "Add",
+      "z",
+      "n"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      [
+       "Product",
+       [
+        "Power",
+        [
+         "Subtract",
+         [
+          "Add",
+          "z",
+          "k"
+         ],
+         1
+        ],
+        [
+         "Subtract",
+         "n",
+         "k"
+        ]
+       ],
+       [
+        "Limits",
+        "k",
+        1,
+        "n"
+       ]
+      ],
+      [
+       "Power",
+       [
+        "Gamma",
+        "z"
+       ],
+       "n"
+      ]
+     ],
+     [
+      "BarnesG",
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "NotElement",
+     "z",
+     "NonPositiveIntegers"
+    ],
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "product",
+   "heads": [
+    "BarnesG",
+    "Gamma",
+    "Product"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "barnes_g"
+   ]
+  },
+  {
+   "id": "7df1c4",
+   "formula": [
+    "Greater",
+    [
+     "BarnesG",
+     "x"
+    ],
+    0
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": [
+    "Element",
+    "x",
+    [
+     "Interval",
+     [
+      "Open",
+      0
+     ],
+     [
+      "Open",
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "BarnesG"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "barnes_g"
+   ]
+  },
+  {
+   "id": "82b410",
+   "formula": [
+    "Equal",
+    [
+     "LogBarnesG",
+     [
+      "Subtract",
+      1,
+      "z"
+     ]
+    ],
+    [
+     "Add",
+     [
+      "LogBarnesG",
+      [
+       "Add",
+       1,
+       "z"
+      ]
+     ],
+     [
+      "Which",
+      [
+       "Or",
+       [
+        "Less",
+        0,
+        [
+         "Real",
+         "z"
+        ],
+        1
+       ],
+       [
+        "Greater",
+        [
+         "Imaginary",
+         "z"
+        ],
+        0
+       ],
+       [
+        "And",
+        [
+         "Equal",
+         [
+          "Imaginary",
+          "z"
+         ],
+         0
+        ],
+        [
+         "Less",
+         [
+          "Real",
+          "z"
+         ],
+         1
+        ]
+       ]
+      ],
+      [
+       "Subtract",
+       [
+        "Subtract",
+        [
+         "Multiply",
+         [
+          "Divide",
+          [
+           "Multiply",
+           "Pi",
+           "ImaginaryUnit"
+          ],
+          2
+         ],
+         [
+          "Add",
+          [
+           "Subtract",
+           [
+            "Power",
+            "z",
+            2
+           ],
+           "z"
+          ],
+          [
+           "Divide",
+           1,
+           6
+          ]
+         ]
+        ],
+        [
+         "Multiply",
+         "z",
+         [
+          "Add",
+          [
+           "GammaLn",
+           "z"
+          ],
+          [
+           "GammaLn",
+           [
+            "Subtract",
+            1,
+            "z"
+           ]
+          ]
+         ]
+        ]
+       ],
+       [
+        "Multiply",
+        [
+         "Divide",
+         "ImaginaryUnit",
+         [
+          "Multiply",
+          2,
+          "Pi"
+         ]
+        ],
+        [
+         "PolyLog",
+         2,
+         [
+          "Exp",
+          [
+           "Multiply",
+           [
+            "Multiply",
+            [
+             "Multiply",
+             2,
+             "Pi"
+            ],
+            "ImaginaryUnit"
+           ],
+           "z"
+          ]
+         ]
+        ]
+       ]
+      ],
+      [
+       "Or",
+       [
+        "Less",
+        -1,
+        [
+         "Real",
+         "z"
+        ],
+        0
+       ],
+       [
+        "Less",
+        [
+         "Imaginary",
+         "z"
+        ],
+        0
+       ],
+       [
+        "And",
+        [
+         "Equal",
+         [
+          "Imaginary",
+          "z"
+         ],
+         0
+        ],
+        [
+         "Greater",
+         [
+          "Real",
+          "z"
+         ],
+         -1
+        ]
+       ]
+      ],
+      [
+       "Negate",
+       [
+        "Subtract",
+        [
+         "Subtract",
+         [
+          "Multiply",
+          [
+           "Divide",
+           [
+            "Multiply",
+            "Pi",
+            "ImaginaryUnit"
+           ],
+           2
+          ],
+          [
+           "Add",
+           [
+            "Subtract",
+            [
+             "Power",
+             [
+              "Negate",
+              "z"
+             ],
+             2
+            ],
+            [
+             "Negate",
+             "z"
+            ]
+           ],
+           [
+            "Divide",
+            1,
+            6
+           ]
+          ]
+         ],
+         [
+          "Multiply",
+          [
+           "Negate",
+           "z"
+          ],
+          [
+           "Add",
+           [
+            "GammaLn",
+            [
+             "Negate",
+             "z"
+            ]
+           ],
+           [
+            "GammaLn",
+            [
+             "Subtract",
+             1,
+             [
+              "Negate",
+              "z"
+             ]
+            ]
+           ]
+          ]
+         ]
+        ],
+        [
+         "Multiply",
+         [
+          "Divide",
+          "ImaginaryUnit",
+          [
+           "Multiply",
+           2,
+           "Pi"
+          ]
+         ],
+         [
+          "PolyLog",
+          2,
+          [
+           "Exp",
+           [
+            "Multiply",
+            [
+             "Multiply",
+             [
+              "Multiply",
+              2,
+              "Pi"
+             ],
+             "ImaginaryUnit"
+            ],
+            [
+             "Negate",
+             "z"
+            ]
+           ]
+          ]
+         ]
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "NotElement",
+     "z",
+     "Integers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Exp",
+    "GammaLn",
+    "Imaginary",
+    "LogBarnesG",
+    "PolyLog",
+    "Real"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "barnes_g"
+   ]
+  },
+  {
+   "id": "86b3ec",
+   "formula": [
+    "Equal",
+    [
+     "BarnesG",
+     [
+      "Add",
+      "z",
+      1
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Gamma",
+      "z"
+     ],
+     [
+      "BarnesG",
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "NotElement",
+     "z",
+     "NonPositiveIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BarnesG",
+    "Gamma"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "barnes_g"
+   ]
+  },
+  {
+   "id": "8b7991",
+   "formula": [
+    "Equal",
+    [
+     "BarnesG",
+     [
+      "Divide",
+      1,
+      2
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Multiply",
+      [
+       "Power",
+       2,
+       [
+        "Divide",
+        1,
+        24
+       ]
+      ],
+      [
+       "Exp",
+       [
+        "Divide",
+        1,
+        8
+       ]
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Power",
+       "Pi",
+       [
+        "Divide",
+        1,
+        4
+       ]
+      ],
+      [
+       "Power",
+       "ConstGlaisher",
+       [
+        "Divide",
+        3,
+        2
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "BarnesG",
+    "ConstGlaisher",
+    "Exp"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "barnes_g"
+   ]
+  },
+  {
+   "id": "8c96a5",
+   "formula": [
+    "Equal",
+    [
+     "LogBarnesG",
+     [
+      "Add",
+      "z",
+      1
+     ]
+    ],
+    [
+     "Subtract",
+     [
+      "Add",
+      [
+       "Add",
+       [
+        "Divide",
+        [
+         "Multiply",
+         "z",
+         [
+          "Subtract",
+          1,
+          "z"
+         ]
+        ],
+        2
+       ],
+       [
+        "Multiply",
+        [
+         "Divide",
+         "z",
+         2
+        ],
+        [
+         "Ln",
+         [
+          "Multiply",
+          2,
+          "Pi"
+         ]
+        ]
+       ]
+      ],
+      [
+       "Multiply",
+       "z",
+       [
+        "GammaLn",
+        "z"
+       ]
+      ]
+     ],
+     [
+      "Integrate",
+      [
+       "GammaLn",
+       "x"
+      ],
+      [
+       "Limits",
+       "x",
+       0,
+       "z"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "NotElement",
+     "z",
+     [
+      "Interval",
+      [
+       "Open",
+       "NegativeInfinity"
+      ],
+      -1
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "GammaLn",
+    "Integrate",
+    "Ln",
+    "LogBarnesG"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": [
+    "https://arxiv.org/abs/math/0308086"
+   ],
+   "topics": [
+    "barnes_g"
+   ]
+  },
+  {
+   "id": "8ec739",
+   "formula": [
+    "Implies",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     [
+      "BarnesG",
+      "z"
+     ],
+     "ComplexNumbers"
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "BarnesG"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "barnes_g"
+   ]
+  },
+  {
+   "id": "90b367",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "BarnesG",
+        "z"
+       ],
+       "z"
+      ],
+      1
+     ],
+     0
+    ],
+    1
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "BarnesG",
+    "Derivative"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "barnes_g"
+   ]
+  },
+  {
+   "id": "95f771",
+   "formula": [
+    "Equal",
+    [
+     "LogBarnesG",
+     [
+      "Add",
+      "z",
+      1
+     ]
+    ],
+    [
+     "Add",
+     [
+      "Add",
+      [
+       "Divide",
+       [
+        "Multiply",
+        "z",
+        [
+         "Subtract",
+         1,
+         "z"
+        ]
+       ],
+       2
+      ],
+      [
+       "Multiply",
+       [
+        "Divide",
+        "z",
+        2
+       ],
+       [
+        "Ln",
+        [
+         "Multiply",
+         2,
+         "Pi"
+        ]
+       ]
+      ]
+     ],
+     [
+      "Integrate",
+      [
+       "Multiply",
+       "x",
+       [
+        "Digamma",
+        "x"
+       ]
+      ],
+      [
+       "Limits",
+       "x",
+       0,
+       "z"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "NotElement",
+     "z",
+     [
+      "Interval",
+      [
+       "Open",
+       "NegativeInfinity"
+      ],
+      -1
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Digamma",
+    "Integrate",
+    "Ln",
+    "LogBarnesG"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": [
+    "https://arxiv.org/abs/math/0308086"
+   ],
+   "topics": [
+    "barnes_g"
+   ]
+  },
+  {
+   "id": "a044e1",
+   "formula": [
+    "Equal",
+    [
+     "Imaginary",
+     [
+      "LogBarnesG",
+      "x"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      [
+       "Multiply",
+       [
+        "Floor",
+        "x"
+       ],
+       [
+        "Subtract",
+        [
+         "Floor",
+         "x"
+        ],
+        1
+       ]
+      ],
+      2
+     ],
+     "Pi"
+    ]
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     "RealNumbers"
+    ],
+    [
+     "Less",
+     "x",
+     0
+    ],
+    [
+     "NotElement",
+     "x",
+     "Integers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Floor",
+    "Imaginary",
+    "LogBarnesG"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "barnes_g"
+   ]
+  },
+  {
+   "id": "a471d0",
+   "formula": [
+    "Implies",
+    [
+     "Element",
+     "z",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      "NonPositiveIntegers"
+     ]
+    ],
+    [
+     "Element",
+     [
+      "LogBarnesG",
+      "z"
+     ],
+     "ComplexNumbers"
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "LogBarnesG"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "barnes_g"
+   ]
+  },
+  {
+   "id": "a54fb0",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "BarnesG",
+        "z"
+       ],
+       "z"
+      ],
+      1
+     ],
+     2
+    ],
+    [
+     "Subtract",
+     [
+      "Divide",
+      [
+       "Subtract",
+       [
+        "Ln",
+        [
+         "Multiply",
+         2,
+         "Pi"
+        ]
+       ],
+       1
+      ],
+      2
+     ],
+     "EulerGamma"
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "BarnesG",
+    "Derivative",
+    "Ln"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "barnes_g"
+   ]
+  },
+  {
+   "id": "af31ae",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "LogBarnesG",
+        "z"
+       ],
+       "z"
+      ],
+      1
+     ],
+     "z"
+    ],
+    [
+     "Add",
+     [
+      "Subtract",
+      [
+       "Multiply",
+       [
+        "Subtract",
+        "z",
+        1
+       ],
+       [
+        "Digamma",
+        "z"
+       ]
+      ],
+      "z"
+     ],
+     [
+      "Divide",
+      [
+       "Add",
+       [
+        "Ln",
+        [
+         "Multiply",
+         2,
+         "Pi"
+        ]
+       ],
+       1
+      ],
+      2
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "NotElement",
+     "z",
+     "NonPositiveIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Derivative",
+    "Digamma",
+    "Ln",
+    "LogBarnesG"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": "complex-branch",
+   "references": null,
+   "topics": [
+    "barnes_g"
+   ]
+  },
+  {
+   "id": "b16d00",
+   "formula": [
+    "Equal",
+    [
+     "LogBarnesGRemainder",
+     "N_var",
+     "z"
+    ],
+    [
+     "Integrate",
+     [
+      "Multiply",
+      [
+       "Subtract",
+       [
+        "Multiply",
+        [
+         "Divide",
+         "t",
+         2
+        ],
+        [
+         "Coth",
+         [
+          "Divide",
+          "t",
+          2
+         ]
+        ]
+       ],
+       [
+        "Sum",
+        [
+         "Multiply",
+         [
+          "Divide",
+          [
+           "BernoulliB",
+           [
+            "Multiply",
+            2,
+            "k"
+           ]
+          ],
+          [
+           "Factorial",
+           [
+            "Multiply",
+            2,
+            "k"
+           ]
+          ]
+         ],
+         [
+          "Power",
+          "t",
+          [
+           "Multiply",
+           2,
+           "k"
+          ]
+         ]
+        ],
+        [
+         "Limits",
+         "k",
+         0,
+         "N_var"
+        ]
+       ]
+      ],
+      [
+       "Divide",
+       [
+        "Exp",
+        [
+         "Negate",
+         [
+          "Multiply",
+          "z",
+          "t"
+         ]
+        ]
+       ],
+       [
+        "Power",
+        "t",
+        3
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "t",
+      0,
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "variables": [
+    "N_var",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Greater",
+     [
+      "Real",
+      "z"
+     ],
+     0
+    ],
+    [
+     "Element",
+     "N_var",
+     "PositiveIntegers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "BernoulliB",
+    "Coth",
+    "Exp",
+    "Factorial",
+    "Integrate",
+    "LogBarnesGRemainder",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": [
+    "https://dx.doi.org/10.1098/rspa.2014.0534"
+   ],
+   "topics": [
+    "barnes_g"
+   ]
+  },
+  {
+   "id": "b4355e",
+   "formula": [
+    "Equal",
+    [
+     "BarnesG",
+     "z"
+    ],
+    [
+     "Exp",
+     [
+      "LogBarnesG",
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BarnesG",
+    "Exp",
+    "LogBarnesG"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "barnes_g"
+   ]
+  },
+  {
+   "id": "b6017f",
+   "formula": [
+    "Equal",
+    [
+     "LogBarnesG",
+     [
+      "Subtract",
+      1,
+      "z"
+     ]
+    ],
+    [
+     "Add",
+     [
+      "Subtract",
+      [
+       "LogBarnesG",
+       [
+        "Add",
+        1,
+        "z"
+       ]
+      ],
+      [
+       "Multiply",
+       [
+        "Ln",
+        [
+         "Multiply",
+         2,
+         "Pi"
+        ]
+       ],
+       "z"
+      ]
+     ],
+     [
+      "Integrate",
+      [
+       "Multiply",
+       [
+        "Multiply",
+        "Pi",
+        "x"
+       ],
+       [
+        "Cot",
+        [
+         "Multiply",
+         "Pi",
+         "x"
+        ]
+       ]
+      ],
+      [
+       "Limits",
+       "x",
+       0,
+       "z"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "NotElement",
+     "z",
+     [
+      "Union",
+      [
+       "Interval",
+       [
+        "Open",
+        "NegativeInfinity"
+       ],
+       -1
+      ],
+      [
+       "Interval",
+       1,
+       [
+        "Open",
+        "PositiveInfinity"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Cot",
+    "Integrate",
+    "Ln",
+    "LogBarnesG"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "barnes_g"
+   ]
+  },
+  {
+   "id": "b64782",
+   "formula": [
+    "Equal",
+    [
+     "LogBarnesG",
+     [
+      "Add",
+      "z",
+      1
+     ]
+    ],
+    [
+     "Subtract",
+     [
+      "Subtract",
+      [
+       "Add",
+       [
+        "Add",
+        [
+         "Multiply",
+         [
+          "Divide",
+          [
+           "Power",
+           "z",
+           2
+          ],
+          4
+         ],
+         [
+          "Subtract",
+          [
+           "Multiply",
+           2,
+           [
+            "Ln",
+            "z"
+           ]
+          ],
+          3
+         ]
+        ],
+        [
+         "Divide",
+         [
+          "Multiply",
+          "z",
+          [
+           "Ln",
+           [
+            "Multiply",
+            2,
+            "Pi"
+           ]
+          ]
+         ],
+         2
+        ]
+       ],
+       [
+        "Divide",
+        1,
+        12
+       ]
+      ],
+      [
+       "Ln",
+       "ConstGlaisher"
+      ]
+     ],
+     [
+      "Integrate",
+      [
+       "Divide",
+       [
+        "Multiply",
+        "x",
+        [
+         "Ln",
+         [
+          "Add",
+          [
+           "Power",
+           "x",
+           2
+          ],
+          [
+           "Power",
+           "z",
+           2
+          ]
+         ]
+        ]
+       ],
+       [
+        "Subtract",
+        [
+         "Exp",
+         [
+          "Multiply",
+          [
+           "Multiply",
+           2,
+           "Pi"
+          ],
+          "x"
+         ]
+        ],
+        1
+       ]
+      ],
+      [
+       "Limits",
+       "x",
+       0,
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Greater",
+     [
+      "Real",
+      "z"
+     ],
+     0
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ConstGlaisher",
+    "Exp",
+    "Integrate",
+    "Ln",
+    "LogBarnesG"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": [
+    "https://arxiv.org/abs/math/0308086"
+   ],
+   "topics": [
+    "barnes_g"
+   ]
+  },
+  {
+   "id": "cc3a51",
+   "formula": [
+    "Equal",
+    [
+     "Limit",
+     [
+      "Function",
+      [
+       "LogBarnesG",
+       [
+        "Add",
+        "x",
+        [
+         "Multiply",
+         "epsilon",
+         "ImaginaryUnit"
+        ]
+       ]
+      ],
+      "epsilon"
+     ],
+     0,
+     1
+    ],
+    [
+     "LogBarnesG",
+     "x"
+    ]
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     "RealNumbers"
+    ],
+    [
+     "Less",
+     "x",
+     0
+    ],
+    [
+     "NotElement",
+     "x",
+     "Integers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "limit",
+   "heads": [
+    "Limit",
+    "LogBarnesG"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": "right",
+   "references": null,
+   "topics": [
+    "barnes_g"
+   ]
+  },
+  {
+   "id": "ce66a9",
+   "formula": [
+    "Equal",
+    [
+     "BarnesG",
+     [
+      "Divide",
+      1,
+      4
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Power",
+      "ExponentialE",
+      [
+       "Subtract",
+       [
+        "Divide",
+        3,
+        32
+       ],
+       [
+        "Divide",
+        "CatalanConstant",
+        [
+         "Multiply",
+         4,
+         "Pi"
+        ]
+       ]
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Power",
+       "ConstGlaisher",
+       [
+        "Divide",
+        9,
+        8
+       ]
+      ],
+      [
+       "Power",
+       [
+        "Gamma",
+        [
+         "Divide",
+         1,
+         4
+        ]
+       ],
+       [
+        "Divide",
+        3,
+        4
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "BarnesG",
+    "ConstGlaisher",
+    "Gamma"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "barnes_g"
+   ]
+  },
+  {
+   "id": "d1a0ec",
+   "formula": [
+    "Equal",
+    [
+     "LogBarnesG",
+     [
+      "Subtract",
+      1,
+      "x"
+     ]
+    ],
+    [
+     "Add",
+     [
+      "Add",
+      [
+       "Add",
+       [
+        "LogBarnesG",
+        [
+         "Add",
+         1,
+         "x"
+        ]
+       ],
+       [
+        "Multiply",
+        "x",
+        [
+         "Ln",
+         [
+          "Divide",
+          [
+           "Abs",
+           [
+            "Sin",
+            [
+             "Multiply",
+             "Pi",
+             "x"
+            ]
+           ]
+          ],
+          "Pi"
+         ]
+        ]
+       ]
+      ],
+      [
+       "Multiply",
+       [
+        "Divide",
+        1,
+        [
+         "Multiply",
+         2,
+         "Pi"
+        ]
+       ],
+       [
+        "Imaginary",
+        [
+         "PolyLog",
+         2,
+         [
+          "Exp",
+          [
+           "Multiply",
+           [
+            "Multiply",
+            [
+             "Multiply",
+             2,
+             "Pi"
+            ],
+            "ImaginaryUnit"
+           ],
+           "x"
+          ]
+         ]
+        ]
+       ]
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Multiply",
+       [
+        "Sign",
+        "x"
+       ],
+       [
+        "Multiply",
+        [
+         "Floor",
+         "x"
+        ],
+        [
+         "Add",
+         [
+          "Floor",
+          "x"
+         ],
+         1
+        ]
+       ]
+      ],
+      [
+       "Divide",
+       [
+        "Multiply",
+        "Pi",
+        "ImaginaryUnit"
+       ],
+       2
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     "RealNumbers"
+    ],
+    [
+     "NotElement",
+     "x",
+     "Integers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Exp",
+    "Floor",
+    "Imaginary",
+    "Ln",
+    "LogBarnesG",
+    "PolyLog",
+    "Sign",
+    "Sin"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "barnes_g"
+   ]
+  },
+  {
+   "id": "d35c54",
+   "formula": [
+    "Equal",
+    [
+     "Limit",
+     [
+      "Function",
+      [
+       "LogBarnesG",
+       [
+        "Subtract",
+        "x",
+        [
+         "Multiply",
+         "epsilon",
+         "ImaginaryUnit"
+        ]
+       ]
+      ],
+      "epsilon"
+     ],
+     0,
+     1
+    ],
+    [
+     "Conjugate",
+     [
+      "LogBarnesG",
+      "x"
+     ]
+    ],
+    [
+     "Subtract",
+     [
+      "LogBarnesG",
+      "x"
+     ],
+     [
+      "Multiply",
+      [
+       "Multiply",
+       [
+        "Multiply",
+        [
+         "Floor",
+         "x"
+        ],
+        [
+         "Subtract",
+         [
+          "Floor",
+          "x"
+         ],
+         1
+        ]
+       ],
+       "Pi"
+      ],
+      "ImaginaryUnit"
+     ]
+    ]
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     "RealNumbers"
+    ],
+    [
+     "Less",
+     "x",
+     0
+    ],
+    [
+     "NotElement",
+     "x",
+     "Integers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "limit",
+   "heads": [
+    "Conjugate",
+    "Floor",
+    "Limit",
+    "LogBarnesG"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": "right",
+   "references": null,
+   "topics": [
+    "barnes_g"
+   ]
+  },
+  {
+   "id": "d9a7a3",
+   "formula": [
+    "Implies",
+    [
+     "Or",
+     [
+      "Element",
+      "z",
+      [
+       "Interval",
+       [
+        "Open",
+        0
+       ],
+       [
+        "Open",
+        "PositiveInfinity"
+       ]
+      ]
+     ],
+     [
+      "Less",
+      [
+       "Abs",
+       [
+        "Subtract",
+        "z",
+        {
+         "num": "2.5"
+        }
+       ]
+      ],
+      {
+       "num": "2.5"
+      }
+     ]
+    ],
+    [
+     "Equal",
+     [
+      "LogBarnesG",
+      "z"
+     ],
+     [
+      "Ln",
+      [
+       "BarnesG",
+       "z"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "BarnesG",
+    "Ln",
+    "LogBarnesG"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "barnes_g"
+   ]
+  },
+  {
+   "id": "daef08",
+   "formula": [
+    "Equal",
+    [
+     "LogBarnesG",
+     "n"
+    ],
+    [
+     "Which",
+     [
+      "GreaterEqual",
+      "n",
+      1
+     ],
+     [
+      "Ln",
+      [
+       "BarnesG",
+       "n"
+      ]
+     ],
+     [
+      "LessEqual",
+      "n",
+      0
+     ],
+     "NegativeInfinity"
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "Integers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BarnesG",
+    "Ln",
+    "LogBarnesG"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "barnes_g"
+   ]
+  },
+  {
+   "id": "dbfd5b",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "BarnesG",
+        "z"
+       ],
+       "z"
+      ],
+      1
+     ],
+     1
+    ],
+    [
+     "Divide",
+     [
+      "Subtract",
+      [
+       "Ln",
+       [
+        "Multiply",
+        2,
+        "Pi"
+       ]
+      ],
+      1
+     ],
+     2
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "BarnesG",
+    "Derivative",
+    "Ln"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "barnes_g"
+   ]
+  },
+  {
+   "id": "dc507f",
+   "formula": [
+    "Equal",
+    [
+     "BarnesG",
+     [
+      "Divide",
+      3,
+      4
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Multiply",
+      [
+       "Power",
+       "ExponentialE",
+       [
+        "Add",
+        [
+         "Divide",
+         3,
+         32
+        ],
+        [
+         "Divide",
+         "CatalanConstant",
+         [
+          "Multiply",
+          4,
+          "Pi"
+         ]
+        ]
+       ]
+      ],
+      [
+       "Power",
+       [
+        "Gamma",
+        [
+         "Divide",
+         1,
+         4
+        ]
+       ],
+       [
+        "Divide",
+        1,
+        4
+       ]
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Multiply",
+       [
+        "Power",
+        2,
+        [
+         "Divide",
+         1,
+         8
+        ]
+       ],
+       [
+        "Power",
+        "Pi",
+        [
+         "Divide",
+         1,
+         4
+        ]
+       ]
+      ],
+      [
+       "Power",
+       "ConstGlaisher",
+       [
+        "Divide",
+        9,
+        8
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "BarnesG",
+    "ConstGlaisher",
+    "Gamma"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "barnes_g"
+   ]
+  },
+  {
+   "id": "e05807",
+   "formula": [
+    "Equal",
+    [
+     "LogBarnesG",
+     "z"
+    ],
+    [
+     "Add",
+     [
+      "Subtract",
+      [
+       "Multiply",
+       [
+        "Subtract",
+        "z",
+        1
+       ],
+       [
+        "GammaLn",
+        "z"
+       ]
+      ],
+      [
+       "HurwitzZeta",
+       -1,
+       "z",
+       1
+      ]
+     ],
+     [
+      "Apply",
+      [
+       "Derivative",
+       [
+        "Function",
+        [
+         "Zeta",
+         "s"
+        ],
+        "s"
+       ],
+       1
+      ],
+      -1
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "NotElement",
+     "z",
+     "NonPositiveIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Derivative",
+    "GammaLn",
+    "HurwitzZeta",
+    "LogBarnesG",
+    "Zeta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "barnes_g",
+    "hurwitz_zeta"
+   ]
+  },
+  {
+   "id": "ea26d4",
+   "formula": [
+    "Equal",
+    [
+     "BarnesG",
+     [
+      "Multiply",
+      "n",
+      "z"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      [
+       "Multiply",
+       [
+        "Power",
+        "ExponentialE",
+        [
+         "Multiply",
+         [
+          "Subtract",
+          [
+           "Ln",
+           "ConstGlaisher"
+          ],
+          [
+           "Divide",
+           1,
+           12
+          ]
+         ],
+         [
+          "Subtract",
+          [
+           "Power",
+           "n",
+           2
+          ],
+          1
+         ]
+        ]
+       ],
+       [
+        "Power",
+        "n",
+        [
+         "Add",
+         [
+          "Subtract",
+          [
+           "Divide",
+           [
+            "Multiply",
+            [
+             "Power",
+             "n",
+             2
+            ],
+            [
+             "Power",
+             "z",
+             2
+            ]
+           ],
+           2
+          ],
+          [
+           "Multiply",
+           "n",
+           "z"
+          ]
+         ],
+         [
+          "Divide",
+          5,
+          12
+         ]
+        ]
+       ]
+      ],
+      [
+       "Power",
+       [
+        "Multiply",
+        2,
+        "Pi"
+       ],
+       [
+        "Divide",
+        [
+         "Multiply",
+         [
+          "Subtract",
+          "n",
+          1
+         ],
+         [
+          "Subtract",
+          1,
+          [
+           "Multiply",
+           "n",
+           "z"
+          ]
+         ]
+        ],
+        2
+       ]
+      ]
+     ],
+     [
+      "Product",
+      [
+       "Product",
+       [
+        "BarnesG",
+        [
+         "Add",
+         "z",
+         [
+          "Divide",
+          [
+           "Add",
+           "i_var",
+           "j"
+          ],
+          "n"
+         ]
+        ]
+       ],
+       [
+        "Limits",
+        "j",
+        0,
+        [
+         "Subtract",
+         "n",
+         1
+        ]
+       ]
+      ],
+      [
+       "Limits",
+       "i_var",
+       0,
+       [
+        "Subtract",
+        "n",
+        1
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "n",
+     "PositiveIntegers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "product",
+   "heads": [
+    "BarnesG",
+    "ConstGlaisher",
+    "Ln",
+    "Product"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": [
+    "https://arxiv.org/abs/math/0308086"
+   ],
+   "topics": [
+    "barnes_g"
+   ]
+  },
+  {
+   "id": "f3f0a7",
+   "formula": [
+    "Implies",
+    [
+     "Element",
+     "x",
+     "RealNumbers"
+    ],
+    [
+     "Element",
+     [
+      "BarnesG",
+      "x"
+     ],
+     "RealNumbers"
+    ]
+   ],
+   "variables": [
+    "x"
+   ],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "BarnesG"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "barnes_g"
+   ]
+  },
+  {
+   "id": "f4750b",
+   "formula": [
+    "Equal",
+    [
+     "Determinant",
+     [
+      "HilbertMatrix",
+      "n"
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Power",
+      [
+       "BarnesG",
+       [
+        "Add",
+        "n",
+        1
+       ]
+      ],
+      4
+     ],
+     [
+      "BarnesG",
+      [
+       "Add",
+       [
+        "Multiply",
+        2,
+        "n"
+       ],
+       1
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BarnesG",
+    "Determinant",
+    "HilbertMatrix"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "barnes_g"
+   ]
+  },
+  {
+   "id": "f50c74",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "BarnesG",
+        "z"
+       ],
+       "z"
+      ],
+      1
+     ],
+     "n"
+    ],
+    [
+     "Which",
+     [
+      "Less",
+      "n",
+      0
+     ],
+     0,
+     [
+      "Equal",
+      "n",
+      0
+     ],
+     1,
+     [
+      "Equal",
+      "n",
+      1
+     ],
+     [
+      "Multiply",
+      [
+       "Divide",
+       1,
+       2
+      ],
+      [
+       "Subtract",
+       [
+        "Ln",
+        [
+         "Multiply",
+         2,
+         "Pi"
+        ]
+       ],
+       1
+      ]
+     ],
+     [
+      "GreaterEqual",
+      "n",
+      2
+     ],
+     [
+      "Multiply",
+      [
+       "BarnesG",
+       "n"
+      ],
+      [
+       "Add",
+       [
+        "Add",
+        [
+         "Multiply",
+         [
+          "Divide",
+          1,
+          2
+         ],
+         [
+          "Ln",
+          [
+           "Multiply",
+           2,
+           "Pi"
+          ]
+         ]
+        ],
+        [
+         "Multiply",
+         [
+          "Subtract",
+          "n",
+          1
+         ],
+         [
+          "Subtract",
+          [
+           "Subtract",
+           [
+            "HarmonicNumber",
+            [
+             "Subtract",
+             "n",
+             2
+            ]
+           ],
+           "EulerGamma"
+          ],
+          1
+         ]
+        ]
+       ],
+       [
+        "Divide",
+        1,
+        2
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "Integers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BarnesG",
+    "Derivative",
+    "HarmonicNumber",
+    "Ln"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "barnes_g"
+   ]
+  }
+ ]
+}

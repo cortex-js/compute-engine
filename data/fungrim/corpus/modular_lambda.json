@@ -1,0 +1,2634 @@
+{
+ "topic": "modular_lambda",
+ "title": "Modular lambda function",
+ "source": "pygrim/formulas/modular_lambda.py",
+ "generator": "grim2mathjson 0.1.0",
+ "entries": [
+  {
+   "id": "033d39",
+   "formula": [
+    "Equal",
+    [
+     "Divide",
+     1,
+     [
+      "ModularLambda",
+      "tau"
+     ]
+    ],
+    [
+     "Add",
+     [
+      "Multiply",
+      [
+       "Divide",
+       1,
+       16
+      ],
+      [
+       "Divide",
+       [
+        "Power",
+        [
+         "DedekindEta",
+         [
+          "Divide",
+          "tau",
+          2
+         ]
+        ],
+        8
+       ],
+       [
+        "Power",
+        [
+         "DedekindEta",
+         [
+          "Multiply",
+          2,
+          "tau"
+         ]
+        ],
+        8
+       ]
+      ]
+     ],
+     1
+    ]
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": [
+    "Element",
+    "tau",
+    "HH"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "DedekindEta",
+    "ModularLambda"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "modular_lambda"
+   ]
+  },
+  {
+   "id": "04d3a6",
+   "formula": [
+    "Equal",
+    [
+     "Subtract",
+     1,
+     [
+      "ModularLambda",
+      "tau"
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Power",
+      [
+       "JacobiTheta",
+       4,
+       0,
+       "tau"
+      ],
+      4
+     ],
+     [
+      "Power",
+      [
+       "JacobiTheta",
+       3,
+       0,
+       "tau"
+      ],
+      4
+     ]
+    ]
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": [
+    "Element",
+    "tau",
+    "HH"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "JacobiTheta",
+    "ModularLambda"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "jacobi_theta",
+    "modular_lambda"
+   ]
+  },
+  {
+   "id": "078869",
+   "formula": [
+    "Equal",
+    [
+     "ModularLambda",
+     [
+      "Divide",
+      [
+       "Add",
+       1,
+       "ImaginaryUnit"
+      ],
+      2
+     ]
+    ],
+    2
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "ModularLambda"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "modular_lambda"
+   ]
+  },
+  {
+   "id": "07bf27",
+   "formula": [
+    "Equal",
+    [
+     "ModularLambda",
+     [
+      "Negate",
+      [
+       "Divide",
+       1,
+       "tau"
+      ]
+     ]
+    ],
+    [
+     "Subtract",
+     1,
+     [
+      "ModularLambda",
+      "tau"
+     ]
+    ]
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": [
+    "Element",
+    "tau",
+    "HH"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ModularLambda"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "modular_lambda"
+   ]
+  },
+  {
+   "id": "099301",
+   "formula": [
+    "Equal",
+    [
+     "ModularLambda",
+     [
+      "Divide",
+      [
+       "Add",
+       [
+        "Multiply",
+        "a",
+        "tau"
+       ],
+       "b"
+      ],
+      [
+       "Add",
+       [
+        "Multiply",
+        "c",
+        "tau"
+       ],
+       "d"
+      ]
+     ]
+    ],
+    [
+     "Which",
+     [
+      "CongruentMod",
+      [
+       "Tuple",
+       "a",
+       "b",
+       "c",
+       "d"
+      ],
+      [
+       "Tuple",
+       1,
+       0,
+       0,
+       1
+      ],
+      2
+     ],
+     [
+      "ModularLambda",
+      "tau"
+     ],
+     [
+      "CongruentMod",
+      [
+       "Tuple",
+       "a",
+       "b",
+       "c",
+       "d"
+      ],
+      [
+       "Tuple",
+       0,
+       1,
+       1,
+       0
+      ],
+      2
+     ],
+     [
+      "Subtract",
+      1,
+      [
+       "ModularLambda",
+       "tau"
+      ]
+     ],
+     [
+      "CongruentMod",
+      [
+       "Tuple",
+       "a",
+       "b",
+       "c",
+       "d"
+      ],
+      [
+       "Tuple",
+       1,
+       0,
+       1,
+       1
+      ],
+      2
+     ],
+     [
+      "Divide",
+      1,
+      [
+       "ModularLambda",
+       "tau"
+      ]
+     ],
+     [
+      "CongruentMod",
+      [
+       "Tuple",
+       "a",
+       "b",
+       "c",
+       "d"
+      ],
+      [
+       "Tuple",
+       0,
+       1,
+       1,
+       1
+      ],
+      2
+     ],
+     [
+      "Divide",
+      1,
+      [
+       "Subtract",
+       1,
+       [
+        "ModularLambda",
+        "tau"
+       ]
+      ]
+     ],
+     [
+      "CongruentMod",
+      [
+       "Tuple",
+       "a",
+       "b",
+       "c",
+       "d"
+      ],
+      [
+       "Tuple",
+       1,
+       1,
+       1,
+       0
+      ],
+      2
+     ],
+     [
+      "Divide",
+      [
+       "Subtract",
+       [
+        "ModularLambda",
+        "tau"
+       ],
+       1
+      ],
+      [
+       "ModularLambda",
+       "tau"
+      ]
+     ],
+     [
+      "CongruentMod",
+      [
+       "Tuple",
+       "a",
+       "b",
+       "c",
+       "d"
+      ],
+      [
+       "Tuple",
+       1,
+       1,
+       0,
+       1
+      ],
+      2
+     ],
+     [
+      "Divide",
+      [
+       "ModularLambda",
+       "tau"
+      ],
+      [
+       "Subtract",
+       [
+        "ModularLambda",
+        "tau"
+       ],
+       1
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b",
+    "c",
+    "d",
+    "tau"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "tau",
+     "HH"
+    ],
+    [
+     "Element",
+     [
+      "Matrix",
+      [
+       "List",
+       [
+        "List",
+        "a",
+        "b"
+       ],
+       [
+        "List",
+        "c",
+        "d"
+       ]
+      ]
+     ],
+     "SL2Z"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "CongruentMod",
+    "ModularLambda"
+   ],
+   "guardLevel": "undischargeable",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "modular_lambda"
+   ]
+  },
+  {
+   "id": "166402",
+   "formula": [
+    "Equal",
+    [
+     "ModularLambda",
+     "tau"
+    ],
+    [
+     "Divide",
+     [
+      "Subtract",
+      [
+       "WeierstrassP",
+       [
+        "Multiply",
+        [
+         "Divide",
+         1,
+         2
+        ],
+        [
+         "Add",
+         1,
+         "tau"
+        ]
+       ],
+       "tau"
+      ],
+      [
+       "WeierstrassP",
+       [
+        "Divide",
+        "tau",
+        2
+       ],
+       "tau"
+      ]
+     ],
+     [
+      "Subtract",
+      [
+       "WeierstrassP",
+       [
+        "Divide",
+        1,
+        2
+       ],
+       "tau"
+      ],
+      [
+       "WeierstrassP",
+       [
+        "Divide",
+        "tau",
+        2
+       ],
+       "tau"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": [
+    "Element",
+    "tau",
+    "HH"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ModularLambda",
+    "WeierstrassP"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "modular_lambda"
+   ]
+  },
+  {
+   "id": "21839d",
+   "formula": [
+    "Equal",
+    [
+     "ModularLambda",
+     [
+      "Divide",
+      [
+       "Add",
+       [
+        "Multiply",
+        "a",
+        "tau"
+       ],
+       "b"
+      ],
+      [
+       "Add",
+       [
+        "Multiply",
+        "c",
+        "tau"
+       ],
+       "d"
+      ]
+     ]
+    ],
+    [
+     "ModularLambda",
+     "tau"
+    ]
+   ],
+   "variables": [
+    "a",
+    "b",
+    "c",
+    "d",
+    "tau"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "tau",
+     "HH"
+    ],
+    [
+     "Element",
+     [
+      "Matrix",
+      [
+       "List",
+       [
+        "List",
+        "a",
+        "b"
+       ],
+       [
+        "List",
+        "c",
+        "d"
+       ]
+      ]
+     ],
+     "SL2Z"
+    ],
+    [
+     "CongruentMod",
+     [
+      "Matrix",
+      [
+       "List",
+       [
+        "List",
+        "a",
+        "b"
+       ],
+       [
+        "List",
+        "c",
+        "d"
+       ]
+      ]
+     ],
+     [
+      "Matrix",
+      [
+       "List",
+       [
+        "List",
+        1,
+        0
+       ],
+       [
+        "List",
+        0,
+        1
+       ]
+      ]
+     ],
+     2
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ModularLambda"
+   ],
+   "guardLevel": "undischargeable",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "modular_lambda"
+   ]
+  },
+  {
+   "id": "231141",
+   "formula": [
+    "Equal",
+    [
+     "Limit",
+     [
+      "Function",
+      [
+       "ModularLambda",
+       [
+        "Add",
+        "n",
+        [
+         "Multiply",
+         "ImaginaryUnit",
+         "epsilon"
+        ]
+       ]
+      ],
+      "epsilon"
+     ],
+     0,
+     1
+    ],
+    [
+     "Which",
+     [
+      "IsEven",
+      "n"
+     ],
+     1,
+     [
+      "IsOdd",
+      "n"
+     ],
+     "NegativeInfinity"
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "Integers"
+   ],
+   "class": "representation",
+   "subclass": "limit",
+   "heads": [
+    "IsEven",
+    "IsOdd",
+    "Limit",
+    "ModularLambda"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": "right",
+   "references": null,
+   "topics": [
+    "modular_lambda"
+   ]
+  },
+  {
+   "id": "27b2c7",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "ModularLambda",
+        "tau"
+       ],
+       "tau"
+      ],
+      1
+     ],
+     "tau"
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      [
+       "Divide",
+       [
+        "Multiply",
+        "Pi",
+        "ImaginaryUnit"
+       ],
+       3
+      ],
+      [
+       "Subtract",
+       [
+        "Add",
+        [
+         "EisensteinE",
+         2,
+         [
+          "Divide",
+          "tau",
+          2
+         ]
+        ],
+        [
+         "Multiply",
+         8,
+         [
+          "EisensteinE",
+          2,
+          [
+           "Multiply",
+           2,
+           "tau"
+          ]
+         ]
+        ]
+       ],
+       [
+        "Multiply",
+        6,
+        [
+         "EisensteinE",
+         2,
+         "tau"
+        ]
+       ]
+      ]
+     ],
+     [
+      "ModularLambda",
+      "tau"
+     ]
+    ]
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": [
+    "Element",
+    "tau",
+    "HH"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Derivative",
+    "EisensteinE",
+    "ModularLambda"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "modular_lambda"
+   ]
+  },
+  {
+   "id": "2ba627",
+   "formula": [
+    "Equal",
+    [
+     "ModularLambda",
+     [
+      "Divide",
+      1,
+      [
+       "Subtract",
+       1,
+       "tau"
+      ]
+     ]
+    ],
+    [
+     "Divide",
+     1,
+     [
+      "Subtract",
+      1,
+      [
+       "ModularLambda",
+       "tau"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": [
+    "Element",
+    "tau",
+    "HH"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ModularLambda"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "modular_lambda"
+   ]
+  },
+  {
+   "id": "35c85f",
+   "formula": [
+    "Equal",
+    [
+     "ModularLambda",
+     [
+      "Multiply",
+      2,
+      "ImaginaryUnit"
+     ]
+    ],
+    [
+     "Subtract",
+     17,
+     [
+      "Multiply",
+      12,
+      [
+       "Sqrt",
+       2
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "ModularLambda"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "modular_lambda"
+   ]
+  },
+  {
+   "id": "3a7a0b",
+   "formula": [
+    "Equal",
+    [
+     "ModularLambda",
+     [
+      "Divide",
+      [
+       "Subtract",
+       "tau",
+       1
+      ],
+      "tau"
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Subtract",
+      [
+       "ModularLambda",
+       "tau"
+      ],
+      1
+     ],
+     [
+      "ModularLambda",
+      "tau"
+     ]
+    ]
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": [
+    "Element",
+    "tau",
+    "HH"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ModularLambda"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "modular_lambda"
+   ]
+  },
+  {
+   "id": "44a529",
+   "formula": [
+    "Equal",
+    [
+     "ModularJ",
+     "tau"
+    ],
+    [
+     "Multiply",
+     256,
+     [
+      "Divide",
+      [
+       "Power",
+       [
+        "Add",
+        [
+         "Subtract",
+         1,
+         [
+          "ModularLambda",
+          "tau"
+         ]
+        ],
+        [
+         "Power",
+         [
+          "ModularLambda",
+          "tau"
+         ],
+         2
+        ]
+       ],
+       3
+      ],
+      [
+       "Multiply",
+       [
+        "Power",
+        [
+         "ModularLambda",
+         "tau"
+        ],
+        2
+       ],
+       [
+        "Power",
+        [
+         "Subtract",
+         1,
+         [
+          "ModularLambda",
+          "tau"
+         ]
+        ],
+        2
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": [
+    "Element",
+    "tau",
+    "HH"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ModularJ",
+    "ModularLambda"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "modular_lambda"
+   ]
+  },
+  {
+   "id": "4877f2",
+   "formula": [
+    "Equal",
+    [
+     "ModularLambda",
+     [
+      "Divide",
+      "ImaginaryUnit",
+      2
+     ]
+    ],
+    [
+     "Subtract",
+     [
+      "Multiply",
+      12,
+      [
+       "Sqrt",
+       2
+      ]
+     ],
+     16
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "ModularLambda"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "modular_lambda"
+   ]
+  },
+  {
+   "id": "4b20ab",
+   "formula": [
+    "Equal",
+    [
+     "Set",
+     [
+      "ModularLambda",
+      "tau"
+     ],
+     [
+      "Element",
+      "tau",
+      "HH",
+      [
+       "Equal",
+       [
+        "Real",
+        "tau"
+       ],
+       -1
+      ]
+     ]
+    ],
+    [
+     "Interval",
+     [
+      "Open",
+      "NegativeInfinity"
+     ],
+     [
+      "Open",
+      0
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "HH",
+    "ModularLambda",
+    "Real"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": [
+    "J. M. Borwein and P. B. Borwein. Pi and the AGM. Wiley, New York, 1987. p. 118."
+   ],
+   "topics": [
+    "modular_lambda"
+   ]
+  },
+  {
+   "id": "5b9c02",
+   "formula": [
+    "Equal",
+    [
+     "ModularLambda",
+     "tau"
+    ],
+    [
+     "Divide",
+     [
+      "Power",
+      [
+       "JacobiTheta",
+       2,
+       0,
+       "tau"
+      ],
+      4
+     ],
+     [
+      "Power",
+      [
+       "JacobiTheta",
+       3,
+       0,
+       "tau"
+      ],
+      4
+     ]
+    ]
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": [
+    "Element",
+    "tau",
+    "HH"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "JacobiTheta",
+    "ModularLambda"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "jacobi_theta",
+    "modular_lambda"
+   ]
+  },
+  {
+   "id": "5dd24a",
+   "formula": [
+    "Equal",
+    [
+     "ModularLambda",
+     "tau"
+    ],
+    [
+     "Multiply",
+     16,
+     [
+      "Divide",
+      [
+       "Multiply",
+       [
+        "Power",
+        [
+         "DedekindEta",
+         [
+          "Divide",
+          "tau",
+          2
+         ]
+        ],
+        8
+       ],
+       [
+        "Power",
+        [
+         "DedekindEta",
+         [
+          "Multiply",
+          2,
+          "tau"
+         ]
+        ],
+        16
+       ]
+      ],
+      [
+       "Power",
+       [
+        "DedekindEta",
+        "tau"
+       ],
+       24
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": [
+    "Element",
+    "tau",
+    "HH"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "DedekindEta",
+    "ModularLambda"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "modular_lambda"
+   ]
+  },
+  {
+   "id": "6678af",
+   "formula": [
+    "Equal",
+    [
+     "ModularLambda",
+     [
+      "Add",
+      "tau",
+      2
+     ]
+    ],
+    [
+     "ModularLambda",
+     "tau"
+    ]
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": [
+    "Element",
+    "tau",
+    "HH"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ModularLambda"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "modular_lambda"
+   ]
+  },
+  {
+   "id": "73427b",
+   "formula": [
+    "Element",
+    [
+     "ModularLambda",
+     [
+      "Divide",
+      [
+       "Add",
+       [
+        "Multiply",
+        "a",
+        "tau"
+       ],
+       "b"
+      ],
+      [
+       "Add",
+       [
+        "Multiply",
+        "c",
+        "tau"
+       ],
+       "d"
+      ]
+     ]
+    ],
+    [
+     "Set",
+     [
+      "ModularLambda",
+      "tau"
+     ],
+     [
+      "Subtract",
+      1,
+      [
+       "ModularLambda",
+       "tau"
+      ]
+     ],
+     [
+      "Divide",
+      1,
+      [
+       "ModularLambda",
+       "tau"
+      ]
+     ],
+     [
+      "Divide",
+      1,
+      [
+       "Subtract",
+       1,
+       [
+        "ModularLambda",
+        "tau"
+       ]
+      ]
+     ],
+     [
+      "Divide",
+      [
+       "Subtract",
+       [
+        "ModularLambda",
+        "tau"
+       ],
+       1
+      ],
+      [
+       "ModularLambda",
+       "tau"
+      ]
+     ],
+     [
+      "Divide",
+      [
+       "ModularLambda",
+       "tau"
+      ],
+      [
+       "Subtract",
+       [
+        "ModularLambda",
+        "tau"
+       ],
+       1
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b",
+    "c",
+    "d",
+    "tau"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "tau",
+     "HH"
+    ],
+    [
+     "Element",
+     [
+      "Matrix",
+      [
+       "List",
+       [
+        "List",
+        "a",
+        "b"
+       ],
+       [
+        "List",
+        "c",
+        "d"
+       ]
+      ]
+     ],
+     "SL2Z"
+    ]
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "ModularLambda"
+   ],
+   "guardLevel": "undischargeable",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "modular_lambda"
+   ]
+  },
+  {
+   "id": "737f2b",
+   "formula": [
+    "Equal",
+    "ModularLambdaFundamentalDomain",
+    [
+     "Set",
+     "tau",
+     [
+      "Element",
+      "tau",
+      "HH",
+      [
+       "Or",
+       [
+        "And",
+        [
+         "Element",
+         [
+          "Real",
+          "tau"
+         ],
+         [
+          "Interval",
+          [
+           "Open",
+           -1
+          ],
+          [
+           "Open",
+           1
+          ]
+         ]
+        ],
+        [
+         "Greater",
+         [
+          "Min",
+          [
+           "Abs",
+           [
+            "Subtract",
+            "tau",
+            [
+             "Divide",
+             1,
+             2
+            ]
+           ]
+          ],
+          [
+           "Abs",
+           [
+            "Add",
+            "z",
+            [
+             "Divide",
+             1,
+             2
+            ]
+           ]
+          ]
+         ],
+         [
+          "Divide",
+          1,
+          2
+         ]
+        ]
+       ],
+       [
+        "Equal",
+        [
+         "Real",
+         "tau"
+        ],
+        -1
+       ],
+       [
+        "Equal",
+        [
+         "Abs",
+         [
+          "Add",
+          "tau",
+          [
+           "Divide",
+           1,
+           2
+          ]
+         ]
+        ],
+        [
+         "Divide",
+         1,
+         2
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": null,
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "HH",
+    "Min",
+    "ModularLambdaFundamentalDomain",
+    "Real"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": [
+    "J. M. Borwein and P. B. Borwein. Pi and the AGM. Wiley, New York, 1987. p. 113."
+   ],
+   "topics": [
+    "modular_lambda"
+   ]
+  },
+  {
+   "id": "813d25",
+   "formula": [
+    "Implies",
+    [
+     "Element",
+     "tau",
+     "HH"
+    ],
+    [
+     "Element",
+     [
+      "ModularLambda",
+      "tau"
+     ],
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      [
+       "Set",
+       0,
+       1
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "HH",
+    "ModularLambda"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "modular_lambda"
+   ]
+  },
+  {
+   "id": "830dd4",
+   "formula": [
+    "Equal",
+    [
+     "Set",
+     [
+      "ModularLambda",
+      "tau"
+     ],
+     [
+      "Element",
+      "tau",
+      [
+       "Interior",
+       "ModularLambdaFundamentalDomain"
+      ]
+     ]
+    ],
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     [
+      "Union",
+      [
+       "Interval",
+       [
+        "Open",
+        "NegativeInfinity"
+       ],
+       0
+      ],
+      [
+       "Interval",
+       1,
+       [
+        "Open",
+        "PositiveInfinity"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Interior",
+    "ModularLambda",
+    "ModularLambdaFundamentalDomain"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": [
+    "J. M. Borwein and P. B. Borwein. Pi and the AGM. Wiley, New York, 1987. p. 118."
+   ],
+   "topics": [
+    "modular_lambda"
+   ]
+  },
+  {
+   "id": "903962",
+   "formula": [
+    "Equal",
+    [
+     "Divide",
+     [
+      "ModularLambda",
+      "tau"
+     ],
+     [
+      "Subtract",
+      [
+       "ModularLambda",
+       "tau"
+      ],
+      1
+     ]
+    ],
+    [
+     "Negate",
+     [
+      "Divide",
+      [
+       "Power",
+       [
+        "JacobiTheta",
+        2,
+        0,
+        "tau"
+       ],
+       4
+      ],
+      [
+       "Power",
+       [
+        "JacobiTheta",
+        4,
+        0,
+        "tau"
+       ],
+       4
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": [
+    "Element",
+    "tau",
+    "HH"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "JacobiTheta",
+    "ModularLambda"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "jacobi_theta",
+    "modular_lambda"
+   ]
+  },
+  {
+   "id": "90b419",
+   "formula": [
+    "Equal",
+    [
+     "Set",
+     [
+      "ModularLambda",
+      "tau"
+     ],
+     [
+      "Element",
+      "tau",
+      "HH"
+     ]
+    ],
+    [
+     "Set",
+     [
+      "ModularLambda",
+      "tau"
+     ],
+     [
+      "Element",
+      "tau",
+      "ModularLambdaFundamentalDomain"
+     ]
+    ],
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     [
+      "Set",
+      0,
+      1
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "HH",
+    "ModularLambda",
+    "ModularLambdaFundamentalDomain"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "modular_lambda"
+   ]
+  },
+  {
+   "id": "a35b3c",
+   "formula": [
+    "Equal",
+    [
+     "ModularLambda",
+     "ImaginaryUnit"
+    ],
+    [
+     "Divide",
+     1,
+     2
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "ModularLambda"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "modular_lambda"
+   ]
+  },
+  {
+   "id": "ad5aff",
+   "formula": [
+    "Implies",
+    [
+     "Element",
+     "tau",
+     [
+      "Set",
+      [
+       "Multiply",
+       2,
+       "n"
+      ],
+      [
+       "Element",
+       "n",
+       "Integers"
+      ]
+     ]
+    ],
+    [
+     "Element",
+     [
+      "ModularLambda",
+      "tau"
+     ],
+     [
+      "Set",
+      1
+     ]
+    ]
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "ModularLambda"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "modular_lambda"
+   ]
+  },
+  {
+   "id": "b0e1cb",
+   "formula": [
+    "Equal",
+    [
+     "ModularLambda",
+     [
+      "Exp",
+      [
+       "Divide",
+       [
+        "Multiply",
+        [
+         "Multiply",
+         2,
+         "Pi"
+        ],
+        "ImaginaryUnit"
+       ],
+       3
+      ]
+     ]
+    ],
+    [
+     "Negate",
+     [
+      "Exp",
+      [
+       "Divide",
+       [
+        "Multiply",
+        [
+         "Multiply",
+         2,
+         "Pi"
+        ],
+        "ImaginaryUnit"
+       ],
+       3
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Exp",
+    "ModularLambda"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "modular_lambda"
+   ]
+  },
+  {
+   "id": "b7174d",
+   "formula": [
+    "Equal",
+    "tau",
+    [
+     "Multiply",
+     "ImaginaryUnit",
+     [
+      "Divide",
+      [
+       "EllipticK",
+       [
+        "Subtract",
+        1,
+        [
+         "ModularLambda",
+         "tau"
+        ]
+       ]
+      ],
+      [
+       "EllipticK",
+       [
+        "ModularLambda",
+        "tau"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": [
+    "Element",
+    "tau",
+    [
+     "Union",
+     [
+      "Interior",
+      "ModularLambdaFundamentalDomain"
+     ],
+     [
+      "Set",
+      "tau",
+      [
+       "Element",
+       "tau",
+       "HH",
+       [
+        "Equal",
+        [
+         "Real",
+         "tau"
+        ],
+        1
+       ]
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "EllipticK",
+    "ModularLambda"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "modular_lambda"
+   ]
+  },
+  {
+   "id": "bbfb6c",
+   "formula": [
+    "Equal",
+    [
+     "ModularLambda",
+     [
+      "Add",
+      "tau",
+      1
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "ModularLambda",
+      "tau"
+     ],
+     [
+      "Subtract",
+      [
+       "ModularLambda",
+       "tau"
+      ],
+      1
+     ]
+    ]
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": [
+    "Element",
+    "tau",
+    "HH"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ModularLambda"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "modular_lambda"
+   ]
+  },
+  {
+   "id": "c18c95",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "ModularLambda",
+        "tau"
+       ],
+       "tau"
+      ],
+      1
+     ],
+     "tau"
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      [
+       "Divide",
+       [
+        "Multiply",
+        2,
+        "ImaginaryUnit"
+       ],
+       "Pi"
+      ],
+      [
+       "Subtract",
+       [
+        "Add",
+        [
+         "WeierstrassZeta",
+         [
+          "Divide",
+          1,
+          2
+         ],
+         [
+          "Divide",
+          "tau",
+          2
+         ]
+        ],
+        [
+         "Multiply",
+         8,
+         [
+          "WeierstrassZeta",
+          [
+           "Divide",
+           1,
+           2
+          ],
+          [
+           "Multiply",
+           2,
+           "tau"
+          ]
+         ]
+        ]
+       ],
+       [
+        "Multiply",
+        6,
+        [
+         "WeierstrassZeta",
+         [
+          "Divide",
+          1,
+          2
+         ],
+         "tau"
+        ]
+       ]
+      ]
+     ],
+     [
+      "ModularLambda",
+      "tau"
+     ]
+    ]
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": [
+    "Element",
+    "tau",
+    "HH"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Derivative",
+    "ModularLambda",
+    "WeierstrassZeta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "modular_lambda"
+   ]
+  },
+  {
+   "id": "c7f85b",
+   "formula": [
+    "Implies",
+    [
+     "Element",
+     "tau",
+     [
+      "Set",
+      [
+       "Multiply",
+       "ImaginaryUnit",
+       "PositiveInfinity"
+      ]
+     ]
+    ],
+    [
+     "Element",
+     [
+      "ModularLambda",
+      "tau"
+     ],
+     [
+      "Set",
+      0
+     ]
+    ]
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "ModularLambda"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "modular_lambda"
+   ],
+   "directedInfinity": true
+  },
+  {
+   "id": "e4315f",
+   "formula": [
+    "Equal",
+    [
+     "Set",
+     [
+      "ModularLambda",
+      "tau"
+     ],
+     [
+      "Element",
+      "tau",
+      "HH",
+      [
+       "Equal",
+       [
+        "Abs",
+        [
+         "Add",
+         "tau",
+         [
+          "Divide",
+          1,
+          2
+         ]
+        ]
+       ],
+       [
+        "Divide",
+        1,
+        2
+       ]
+      ]
+     ]
+    ],
+    [
+     "Interval",
+     [
+      "Open",
+      1
+     ],
+     [
+      "Open",
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "HH",
+    "ModularLambda"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": [
+    "J. M. Borwein and P. B. Borwein. Pi and the AGM. Wiley, New York, 1987. p. 118."
+   ],
+   "topics": [
+    "modular_lambda"
+   ]
+  },
+  {
+   "id": "e8252c",
+   "formula": [
+    "Equal",
+    [
+     "ModularLambda",
+     [
+      "Multiply",
+      "ImaginaryUnit",
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Limit",
+     [
+      "Function",
+      [
+       "ModularLambda",
+       "tau"
+      ],
+      "tau"
+     ],
+     [
+      "Multiply",
+      "ImaginaryUnit",
+      "PositiveInfinity"
+     ]
+    ],
+    0
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "limit",
+   "heads": [
+    "Limit",
+    "ModularLambda"
+   ],
+   "guardLevel": "none",
+   "flavor": "complex",
+   "references": null,
+   "topics": [
+    "modular_lambda"
+   ],
+   "directedInfinity": true
+  },
+  {
+   "id": "e96684",
+   "formula": [
+    "Equal",
+    [
+     "ModularLambda",
+     "tau"
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      16,
+      [
+       "Exp",
+       [
+        "Multiply",
+        [
+         "Multiply",
+         "Pi",
+         "ImaginaryUnit"
+        ],
+        "tau"
+       ]
+      ]
+     ],
+     [
+      "Product",
+      [
+       "Power",
+       [
+        "Divide",
+        [
+         "Add",
+         1,
+         [
+          "Power",
+          [
+           "Exp",
+           [
+            "Multiply",
+            [
+             "Multiply",
+             "Pi",
+             "ImaginaryUnit"
+            ],
+            "tau"
+           ]
+          ],
+          [
+           "Multiply",
+           2,
+           "k"
+          ]
+         ]
+        ],
+        [
+         "Add",
+         1,
+         [
+          "Power",
+          [
+           "Exp",
+           [
+            "Multiply",
+            [
+             "Multiply",
+             "Pi",
+             "ImaginaryUnit"
+            ],
+            "tau"
+           ]
+          ],
+          [
+           "Subtract",
+           [
+            "Multiply",
+            2,
+            "k"
+           ],
+           1
+          ]
+         ]
+        ]
+       ],
+       8
+      ],
+      [
+       "Limits",
+       "k",
+       1,
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": [
+    "Element",
+    "tau",
+    "HH"
+   ],
+   "class": "representation",
+   "subclass": "product",
+   "heads": [
+    "Exp",
+    "ModularLambda",
+    "Product"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "modular_lambda"
+   ]
+  },
+  {
+   "id": "e9f0c8",
+   "formula": [
+    "Equal",
+    [
+     "ModularLambda",
+     [
+      "Divide",
+      "tau",
+      [
+       "Subtract",
+       1,
+       "tau"
+      ]
+     ]
+    ],
+    [
+     "Divide",
+     1,
+     [
+      "ModularLambda",
+      "tau"
+     ]
+    ]
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": [
+    "Element",
+    "tau",
+    "HH"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ModularLambda"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "modular_lambda"
+   ]
+  },
+  {
+   "id": "ea56d1",
+   "formula": [
+    "Element",
+    [
+     "ModularLambda",
+     [
+      "Divide",
+      [
+       "Add",
+       [
+        "Multiply",
+        "a",
+        "ImaginaryUnit"
+       ],
+       "b"
+      ],
+      [
+       "Add",
+       [
+        "Multiply",
+        "c",
+        "ImaginaryUnit"
+       ],
+       "d"
+      ]
+     ]
+    ],
+    [
+     "Set",
+     -1,
+     [
+      "Divide",
+      1,
+      2
+     ],
+     2
+    ]
+   ],
+   "variables": [
+    "a",
+    "b",
+    "c",
+    "d"
+   ],
+   "assumptions": [
+    "Element",
+    [
+     "Matrix",
+     [
+      "List",
+      [
+       "List",
+       "a",
+       "b"
+      ],
+      [
+       "List",
+       "c",
+       "d"
+      ]
+     ]
+    ],
+    "SL2Z"
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "ModularLambda"
+   ],
+   "guardLevel": "undischargeable",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "modular_lambda"
+   ]
+  },
+  {
+   "id": "ec5a44",
+   "formula": [
+    "Equal",
+    [
+     "ModularLambda",
+     [
+      "Divide",
+      "tau",
+      [
+       "Add",
+       [
+        "Multiply",
+        2,
+        "tau"
+       ],
+       1
+      ]
+     ]
+    ],
+    [
+     "ModularLambda",
+     "tau"
+    ]
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": [
+    "Element",
+    "tau",
+    "HH"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ModularLambda"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "modular_lambda"
+   ]
+  },
+  {
+   "id": "fe2627",
+   "formula": [
+    "Equal",
+    [
+     "ModularLambda",
+     [
+      "Add",
+      1,
+      "ImaginaryUnit"
+     ]
+    ],
+    -1
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "ModularLambda"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "modular_lambda"
+   ]
+  }
+ ]
+}

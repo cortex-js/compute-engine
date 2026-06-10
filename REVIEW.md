@@ -169,6 +169,55 @@ were reproduced at runtime against the live engine, not just inferred from readi
 
 ---
 
+## Known test failures (tracked for follow-up)
+
+These suites fail on `main` **independently of this bug-fix initiative** — they
+were red before it started and none of the fixes above touch their code paths
+(verified by reverting suspect changes). They are catalogued here so they are
+not mistaken for regressions and can be investigated separately.
+
+### Genuine, persistent
+
+- **`collections.test.ts` — `Take`/`Drop`/`Slice` of a matrix (3 tests, all
+  marked `// @fixme`).** Row-slicing a rank-2 list operates on the *flattened*
+  element stream instead of whole rows. With
+  `matrix = [[2,3,4],[6,7,9],[11,12,13]]`:
+  - `Take(matrix, 1)` → `["List", 2]`; should be the first **row**
+    `["List", 2, 3, 4]`.
+  - `Slice(matrix, 2, 3)` → `["List", 6, 11]`; should be rows 2–3
+    `[[6,7,9],[11,12,13]]`.
+  - `Drop(matrix, 2)` similarly drops by element, not by row.
+
+  The committed inline snapshots are **stale** (e.g. `Take` expects
+  `["List", 6]`, `Slice` expects `["List", 11, ["Error", "'missing'"]]`) — they
+  match neither the current output nor the correct row-wise result, so the tests
+  fail. **Do not** `-u` them: that would bake in the wrong output and hide the
+  bug. Root cause is in the collection slice/take/drop handlers' indexing for
+  indexed (rank≥2) collections (cf. the F3 `tensor.slice` off-by-one and the B4/
+  B8 `Slice`/`Drop` `at` fixes — those addressed the rank-1 paths; the rank-2
+  row semantics here are still wrong). **Follow-up:** make `Take`/`Drop`/`Slice`
+  on a matrix select rows, then refresh the `@fixme` snapshots.
+
+- **`ascii-math.test.ts` — `ARITHMETIC OPERATORS › should serialize Multiply`.**
+  `check('(-2-3i) \\times -4')` expects `4(2 + 3i)` but yields `-4(-2 - 3i)`
+  (both equal `8 + 12i`). The product of two negatives is not normalized so the
+  leading sign is factored out; a canonicalization/serialization quality issue
+  for `Multiply` of a negative real and a complex sum. Pre-existing and not
+  touched by the fixes above. **Follow-up:** decide the canonical sign
+  convention for `negativeReal · (complexSum)` and normalize.
+
+### Flaky (not a correctness bug)
+
+- **`compile-performance.test.ts`** can fail under parallel load (it asserts
+  wall-clock timing budgets; it took ~25 s in a full `jest` run vs ~15 s in
+  isolation). It passes when run alone. **Follow-up:** make the timing
+  assertions load-tolerant (or mark them non-CI) so the suite is deterministic.
+
+> Note: `rule-dispatch-regression.test.ts` was failing in earlier batches while
+> the in-tree Fungrim solve/rules WIP was uncommitted; it passes now.
+
+---
+
 ## Executive Summary
 
 The core engine (boxed-expression, canonicalization, arithmetic) is in good shape; most

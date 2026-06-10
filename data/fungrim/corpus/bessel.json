@@ -1,0 +1,7767 @@
+{
+ "topic": "bessel",
+ "title": "Bessel functions",
+ "source": "pygrim/formulas/bessel.py",
+ "generator": "grim2mathjson 0.1.0",
+ "entries": [
+  {
+   "id": "0836b4",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "BesselJ",
+      "n",
+      "z"
+     ]
+    ],
+    [
+     "Exp",
+     [
+      "Abs",
+      [
+       "Imaginary",
+       "z"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "BesselJ",
+    "Exp",
+    "Imaginary"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "0c09cc",
+   "formula": [
+    "Equal",
+    [
+     "BesselK",
+     [
+      "Divide",
+      3,
+      2
+     ],
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Power",
+      [
+       "Divide",
+       [
+        "Multiply",
+        "Pi",
+        "z"
+       ],
+       2
+      ],
+      [
+       "Divide",
+       1,
+       2
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Exp",
+       [
+        "Negate",
+        "z"
+       ]
+      ],
+      [
+       "Add",
+       [
+        "Divide",
+        1,
+        "z"
+       ],
+       [
+        "Divide",
+        1,
+        [
+         "Power",
+         "z",
+         2
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     [
+      "Set",
+      0
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BesselK",
+    "Exp"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "121b21",
+   "formula": [
+    "Equal",
+    [
+     "BesselJ",
+     [
+      "Divide",
+      1,
+      2
+     ],
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Power",
+      [
+       "Divide",
+       [
+        "Multiply",
+        2,
+        "z"
+       ],
+       "Pi"
+      ],
+      [
+       "Divide",
+       1,
+       2
+      ]
+     ],
+     [
+      "Divide",
+      [
+       "Sin",
+       "z"
+      ],
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     [
+      "Set",
+      0
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BesselJ",
+    "Sin"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "127f05",
+   "formula": [
+    "Equal",
+    [
+     "BesselJ",
+     "nu",
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Power",
+      [
+       "Multiply",
+       [
+        "Multiply",
+        2,
+        "Pi"
+       ],
+       "z"
+      ],
+      [
+       "Negate",
+       [
+        "Divide",
+        1,
+        2
+       ]
+      ]
+     ],
+     [
+      "Add",
+      [
+       "Multiply",
+       [
+        "Exp",
+        [
+         "Negate",
+         [
+          "Multiply",
+          "ImaginaryUnit",
+          [
+           "Subtract",
+           [
+            "Divide",
+            [
+             "Multiply",
+             "Pi",
+             [
+              "Add",
+              [
+               "Multiply",
+               2,
+               "nu"
+              ],
+              1
+             ]
+            ],
+            4
+           ],
+           "z"
+          ]
+         ]
+        ]
+       ],
+       [
+        "HypergeometricUStar",
+        [
+         "Add",
+         "nu",
+         [
+          "Divide",
+          1,
+          2
+         ]
+        ],
+        [
+         "Add",
+         [
+          "Multiply",
+          2,
+          "nu"
+         ],
+         1
+        ],
+        [
+         "Negate",
+         [
+          "Multiply",
+          [
+           "Multiply",
+           2,
+           "ImaginaryUnit"
+          ],
+          "z"
+         ]
+        ]
+       ]
+      ],
+      [
+       "Multiply",
+       [
+        "Exp",
+        [
+         "Multiply",
+         "ImaginaryUnit",
+         [
+          "Subtract",
+          [
+           "Divide",
+           [
+            "Multiply",
+            "Pi",
+            [
+             "Add",
+             [
+              "Multiply",
+              2,
+              "nu"
+             ],
+             1
+            ]
+           ],
+           4
+          ],
+          "z"
+         ]
+        ]
+       ],
+       [
+        "HypergeometricUStar",
+        [
+         "Add",
+         "nu",
+         [
+          "Divide",
+          1,
+          2
+         ]
+        ],
+        [
+         "Add",
+         [
+          "Multiply",
+          2,
+          "nu"
+         ],
+         1
+        ],
+        [
+         "Multiply",
+         [
+          "Multiply",
+          2,
+          "ImaginaryUnit"
+         ],
+         "z"
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "nu",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "nu",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Greater",
+     [
+      "Real",
+      "z"
+     ],
+     0
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BesselJ",
+    "Exp",
+    "HypergeometricUStar"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "15ac84",
+   "formula": [
+    "Equal",
+    [
+     "Add",
+     [
+      "Multiply",
+      [
+       "Add",
+       [
+        "Subtract",
+        [
+         "Add",
+         [
+          "Power",
+          "r",
+          2
+         ],
+         [
+          "Multiply",
+          4,
+          "r"
+         ]
+        ],
+        [
+         "Power",
+         "n",
+         2
+        ]
+       ],
+       4
+      ],
+      [
+       "Apply",
+       [
+        "Derivative",
+        [
+         "Function",
+         [
+          "BesselJ",
+          "n",
+          "z"
+         ],
+         "z"
+        ],
+        [
+         "Add",
+         "r",
+         2
+        ]
+       ],
+       0
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Multiply",
+       [
+        "Add",
+        "r",
+        1
+       ],
+       [
+        "Add",
+        "r",
+        2
+       ]
+      ],
+      [
+       "Apply",
+       [
+        "Derivative",
+        [
+         "Function",
+         [
+          "BesselJ",
+          "n",
+          "z"
+         ],
+         "z"
+        ],
+        "r"
+       ],
+       0
+      ]
+     ]
+    ],
+    0
+   ],
+   "variables": [
+    "n",
+    "r"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "Element",
+     "r",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BesselJ",
+    "Derivative"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "15bbb1",
+   "formula": [
+    "Equal",
+    [
+     "BesselI",
+     "n",
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Power",
+      "ImaginaryUnit",
+      [
+       "Negate",
+       "n"
+      ]
+     ],
+     [
+      "BesselJ",
+      "n",
+      [
+       "Multiply",
+       "ImaginaryUnit",
+       "z"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BesselI",
+    "BesselJ"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "1dce21",
+   "formula": [
+    "Equal",
+    [
+     "HankelH2",
+     "nu",
+     "z"
+    ],
+    [
+     "Subtract",
+     [
+      "BesselJ",
+      "nu",
+      "z"
+     ],
+     [
+      "Multiply",
+      "ImaginaryUnit",
+      [
+       "BesselY",
+       "nu",
+       "z"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "nu",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "nu",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "z",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      [
+       "Set",
+       0
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BesselJ",
+    "BesselY",
+    "HankelH2"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "2488bb",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "BesselJ",
+        "nu",
+        "z"
+       ],
+       "z"
+      ],
+      "r"
+     ],
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      1,
+      [
+       "Power",
+       2,
+       "r"
+      ]
+     ],
+     [
+      "Sum",
+      [
+       "Multiply",
+       [
+        "Multiply",
+        [
+         "Power",
+         -1,
+         "k"
+        ],
+        [
+         "Binomial",
+         "r",
+         "k"
+        ]
+       ],
+       [
+        "BesselJ",
+        [
+         "Subtract",
+         [
+          "Add",
+          "nu",
+          [
+           "Multiply",
+           2,
+           "k"
+          ]
+         ],
+         "r"
+        ],
+        "z"
+       ]
+      ],
+      [
+       "Limits",
+       "k",
+       0,
+       "r"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "nu",
+    "r",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "nu",
+     "Integers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "r",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "assumptionAlternatives": [
+    [
+     "And",
+     [
+      "Element",
+      "nu",
+      "ComplexNumbers"
+     ],
+     [
+      "Element",
+      "z",
+      [
+       "SetMinus",
+       "ComplexNumbers",
+       [
+        "Set",
+        0
+       ]
+      ]
+     ],
+     [
+      "Element",
+      "r",
+      "NonNegativeIntegers"
+     ]
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "BesselJ",
+    "Binomial",
+    "Derivative",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "2a4195",
+   "formula": [
+    "Equal",
+    [
+     "BesselY",
+     "nu",
+     "z"
+    ],
+    [
+     "Divide",
+     [
+      "Subtract",
+      [
+       "Multiply",
+       [
+        "Cos",
+        [
+         "Multiply",
+         "Pi",
+         "nu"
+        ]
+       ],
+       [
+        "BesselJ",
+        "nu",
+        "z"
+       ]
+      ],
+      [
+       "BesselJ",
+       [
+        "Negate",
+        "nu"
+       ],
+       "z"
+      ]
+     ],
+     [
+      "Sin",
+      [
+       "Multiply",
+       "Pi",
+       "nu"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "nu",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "nu",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      "Integers"
+     ]
+    ],
+    [
+     "Element",
+     "z",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      [
+       "Set",
+       0
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BesselJ",
+    "BesselY",
+    "Cos",
+    "Sin"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "32e162",
+   "formula": [
+    "Equal",
+    [
+     "BesselJ",
+     "nu",
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      [
+       "Power",
+       "z",
+       "nu"
+      ],
+      [
+       "Power",
+       [
+        "Multiply",
+        2,
+        "Pi"
+       ],
+       [
+        "Divide",
+        1,
+        2
+       ]
+      ]
+     ],
+     [
+      "Add",
+      [
+       "Multiply",
+       [
+        "Power",
+        [
+         "Multiply",
+         "ImaginaryUnit",
+         "z"
+        ],
+        [
+         "Subtract",
+         [
+          "Negate",
+          [
+           "Divide",
+           1,
+           2
+          ]
+         ],
+         "nu"
+        ]
+       ],
+       [
+        "Multiply",
+        [
+         "Exp",
+         [
+          "Multiply",
+          "ImaginaryUnit",
+          "z"
+         ]
+        ],
+        [
+         "HypergeometricUStar",
+         [
+          "Add",
+          "nu",
+          [
+           "Divide",
+           1,
+           2
+          ]
+         ],
+         [
+          "Add",
+          [
+           "Multiply",
+           2,
+           "nu"
+          ],
+          1
+         ],
+         [
+          "Negate",
+          [
+           "Multiply",
+           [
+            "Multiply",
+            2,
+            "ImaginaryUnit"
+           ],
+           "z"
+          ]
+         ]
+        ]
+       ]
+      ],
+      [
+       "Multiply",
+       [
+        "Power",
+        [
+         "Negate",
+         [
+          "Multiply",
+          "ImaginaryUnit",
+          "z"
+         ]
+        ],
+        [
+         "Subtract",
+         [
+          "Negate",
+          [
+           "Divide",
+           1,
+           2
+          ]
+         ],
+         "nu"
+        ]
+       ],
+       [
+        "Multiply",
+        [
+         "Exp",
+         [
+          "Negate",
+          [
+           "Multiply",
+           "ImaginaryUnit",
+           "z"
+          ]
+         ]
+        ],
+        [
+         "HypergeometricUStar",
+         [
+          "Add",
+          "nu",
+          [
+           "Divide",
+           1,
+           2
+          ]
+         ],
+         [
+          "Add",
+          [
+           "Multiply",
+           2,
+           "nu"
+          ],
+          1
+         ],
+         [
+          "Multiply",
+          [
+           "Multiply",
+           2,
+           "ImaginaryUnit"
+          ],
+          "z"
+         ]
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "nu",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "nu",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "z",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      [
+       "Set",
+       0
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BesselJ",
+    "Exp",
+    "HypergeometricUStar"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "3bffa9",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "BesselJ",
+      "nu",
+      "x"
+     ]
+    ],
+    1
+   ],
+   "variables": [
+    "nu",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "nu",
+     [
+      "Interval",
+      0,
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
+     ]
+    ],
+    [
+     "Element",
+     "x",
+     "RealNumbers"
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "BesselJ"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "40aeb6",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "BesselY",
+        "nu",
+        "z"
+       ],
+       "z"
+      ],
+      1
+     ],
+     "z"
+    ],
+    [
+     "Divide",
+     [
+      "Subtract",
+      [
+       "BesselY",
+       [
+        "Subtract",
+        "nu",
+        1
+       ],
+       "z"
+      ],
+      [
+       "BesselY",
+       [
+        "Add",
+        "nu",
+        1
+       ],
+       "z"
+      ]
+     ],
+     2
+    ]
+   ],
+   "variables": [
+    "nu",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "nu",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "z",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      [
+       "Set",
+       0
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BesselY",
+    "Derivative"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "49d754",
+   "formula": [
+    "Equal",
+    [
+     "BesselK",
+     [
+      "Divide",
+      1,
+      3
+     ],
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      [
+       "Multiply",
+       [
+        "Sqrt",
+        3
+       ],
+       "Pi"
+      ],
+      [
+       "Power",
+       [
+        "Divide",
+        [
+         "Multiply",
+         3,
+         "z"
+        ],
+        2
+       ],
+       [
+        "Divide",
+        1,
+        3
+       ]
+      ]
+     ],
+     [
+      "AiryAi",
+      [
+       "Power",
+       [
+        "Power",
+        [
+         "Divide",
+         [
+          "Multiply",
+          3,
+          "z"
+         ],
+         2
+        ],
+        [
+         "Divide",
+         1,
+         3
+        ]
+       ],
+       2
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     [
+      "Set",
+      0
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "AiryAi",
+    "BesselK"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "4dfd41",
+   "formula": [
+    "Equal",
+    [
+     "BesselY",
+     [
+      "Divide",
+      1,
+      2
+     ],
+     "z"
+    ],
+    [
+     "Negate",
+     [
+      "Multiply",
+      [
+       "Power",
+       [
+        "Divide",
+        [
+         "Multiply",
+         2,
+         "z"
+        ],
+        "Pi"
+       ],
+       [
+        "Divide",
+        1,
+        2
+       ]
+      ],
+      [
+       "Divide",
+       [
+        "Cos",
+        "z"
+       ],
+       "z"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     [
+      "Set",
+      0
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BesselY",
+    "Cos"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "4fb391",
+   "formula": [
+    "Equal",
+    [
+     "BesselI",
+     "nu",
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      "z",
+      [
+       "Multiply",
+       2,
+       "nu"
+      ]
+     ],
+     [
+      "Subtract",
+      [
+       "BesselI",
+       [
+        "Subtract",
+        "nu",
+        1
+       ],
+       "z"
+      ],
+      [
+       "BesselI",
+       [
+        "Add",
+        "nu",
+        1
+       ],
+       "z"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "nu",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "nu",
+     [
+      "SetMinus",
+      "Integers",
+      [
+       "Set",
+       0
+      ]
+     ]
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ]
+   ],
+   "assumptionAlternatives": [
+    [
+     "And",
+     [
+      "Element",
+      "nu",
+      [
+       "SetMinus",
+       "ComplexNumbers",
+       [
+        "Set",
+        0
+       ]
+      ]
+     ],
+     [
+      "Element",
+      "z",
+      [
+       "SetMinus",
+       "ComplexNumbers",
+       [
+        "Set",
+        0
+       ]
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BesselI"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "54bce2",
+   "formula": [
+    "Equal",
+    [
+     "BesselJ",
+     [
+      "Negate",
+      "n"
+     ],
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Power",
+      -1,
+      "n"
+     ],
+     [
+      "BesselJ",
+      "n",
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BesselJ"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "5679f2",
+   "formula": [
+    "Equal",
+    [
+     "BesselY",
+     [
+      "Negate",
+      [
+       "Divide",
+       1,
+       2
+      ]
+     ],
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Power",
+      [
+       "Divide",
+       [
+        "Multiply",
+        2,
+        "z"
+       ],
+       "Pi"
+      ],
+      [
+       "Divide",
+       1,
+       2
+      ]
+     ],
+     [
+      "Divide",
+      [
+       "Sin",
+       "z"
+      ],
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     [
+      "Set",
+      0
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BesselY",
+    "Sin"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "58d91f",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "BesselI",
+        "nu",
+        "z"
+       ],
+       "z"
+      ],
+      1
+     ],
+     "z"
+    ],
+    [
+     "Divide",
+     [
+      "Add",
+      [
+       "BesselI",
+       [
+        "Subtract",
+        "nu",
+        1
+       ],
+       "z"
+      ],
+      [
+       "BesselI",
+       [
+        "Add",
+        "nu",
+        1
+       ],
+       "z"
+      ]
+     ],
+     2
+    ]
+   ],
+   "variables": [
+    "nu",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "nu",
+     "Integers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ]
+   ],
+   "assumptionAlternatives": [
+    [
+     "And",
+     [
+      "Element",
+      "nu",
+      "ComplexNumbers"
+     ],
+     [
+      "Element",
+      "z",
+      [
+       "SetMinus",
+       "ComplexNumbers",
+       [
+        "Set",
+        0
+       ]
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BesselI",
+    "Derivative"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "5aceb9",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "BesselJ",
+        "nu",
+        "z"
+       ],
+       "z"
+      ],
+      1
+     ],
+     "z"
+    ],
+    [
+     "Divide",
+     [
+      "Subtract",
+      [
+       "BesselJ",
+       [
+        "Subtract",
+        "nu",
+        1
+       ],
+       "z"
+      ],
+      [
+       "BesselJ",
+       [
+        "Add",
+        "nu",
+        1
+       ],
+       "z"
+      ]
+     ],
+     2
+    ]
+   ],
+   "variables": [
+    "nu",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "nu",
+     "Integers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ]
+   ],
+   "assumptionAlternatives": [
+    [
+     "And",
+     [
+      "Element",
+      "nu",
+      "ComplexNumbers"
+     ],
+     [
+      "Element",
+      "z",
+      [
+       "SetMinus",
+       "ComplexNumbers",
+       [
+        "Set",
+        0
+       ]
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BesselJ",
+    "Derivative"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "5d9c43",
+   "formula": [
+    "Equal",
+    [
+     "BesselI",
+     [
+      "Negate",
+      [
+       "Divide",
+       1,
+       2
+      ]
+     ],
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Power",
+      [
+       "Divide",
+       [
+        "Multiply",
+        2,
+        "z"
+       ],
+       "Pi"
+      ],
+      [
+       "Divide",
+       1,
+       2
+      ]
+     ],
+     [
+      "Divide",
+      [
+       "Cosh",
+       "z"
+      ],
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     [
+      "Set",
+      0
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BesselI",
+    "Cosh"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "621a9b",
+   "formula": [
+    "Equal",
+    [
+     "BesselJ",
+     [
+      "Negate",
+      [
+       "Divide",
+       1,
+       2
+      ]
+     ],
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Power",
+      [
+       "Divide",
+       [
+        "Multiply",
+        2,
+        "z"
+       ],
+       "Pi"
+      ],
+      [
+       "Divide",
+       1,
+       2
+      ]
+     ],
+     [
+      "Divide",
+      [
+       "Cos",
+       "z"
+      ],
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     [
+      "Set",
+      0
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BesselJ",
+    "Cos"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "62f23c",
+   "formula": [
+    "Equal",
+    [
+     "Add",
+     [
+      "Add",
+      [
+       "Multiply",
+       [
+        "Power",
+        "z",
+        2
+       ],
+       [
+        "Apply",
+        [
+         "Derivative",
+         [
+          "Function",
+          [
+           "BesselY",
+           "nu",
+           "z"
+          ],
+          "z"
+         ],
+         2
+        ],
+        "z"
+       ]
+      ],
+      [
+       "Multiply",
+       "z",
+       [
+        "Apply",
+        [
+         "Derivative",
+         [
+          "Function",
+          [
+           "BesselY",
+           "nu",
+           "z"
+          ],
+          "z"
+         ],
+         1
+        ],
+        "z"
+       ]
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Subtract",
+       [
+        "Power",
+        "z",
+        2
+       ],
+       [
+        "Power",
+        "nu",
+        2
+       ]
+      ],
+      [
+       "BesselY",
+       "nu",
+       "z"
+      ]
+     ]
+    ],
+    0
+   ],
+   "variables": [
+    "nu",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "nu",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "z",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      [
+       "Set",
+       0
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BesselY",
+    "Derivative"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "65647f",
+   "formula": [
+    "Equal",
+    [
+     "BesselI",
+     [
+      "Divide",
+      3,
+      2
+     ],
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Power",
+      [
+       "Divide",
+       [
+        "Multiply",
+        2,
+        "z"
+       ],
+       "Pi"
+      ],
+      [
+       "Divide",
+       1,
+       2
+      ]
+     ],
+     [
+      "Subtract",
+      [
+       "Divide",
+       [
+        "Cosh",
+        "z"
+       ],
+       "z"
+      ],
+      [
+       "Divide",
+       [
+        "Sinh",
+        "z"
+       ],
+       [
+        "Power",
+        "z",
+        2
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     [
+      "Set",
+      0
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BesselI",
+    "Cosh",
+    "Sinh"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "685892",
+   "formula": [
+    "Equal",
+    [
+     "BesselJ",
+     [
+      "Negate",
+      [
+       "Divide",
+       1,
+       3
+      ]
+     ],
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      1,
+      [
+       "Multiply",
+       2,
+       [
+        "Power",
+        [
+         "Divide",
+         [
+          "Multiply",
+          3,
+          "z"
+         ],
+         2
+        ],
+        [
+         "Divide",
+         1,
+         3
+        ]
+       ]
+      ]
+     ],
+     [
+      "Add",
+      [
+       "Multiply",
+       3,
+       [
+        "AiryAi",
+        [
+         "Negate",
+         [
+          "Power",
+          [
+           "Power",
+           [
+            "Divide",
+            [
+             "Multiply",
+             3,
+             "z"
+            ],
+            2
+           ],
+           [
+            "Divide",
+            1,
+            3
+           ]
+          ],
+          2
+         ]
+        ]
+       ]
+      ],
+      [
+       "Multiply",
+       [
+        "Sqrt",
+        3
+       ],
+       [
+        "AiryBi",
+        [
+         "Negate",
+         [
+          "Power",
+          [
+           "Power",
+           [
+            "Divide",
+            [
+             "Multiply",
+             3,
+             "z"
+            ],
+            2
+           ],
+           [
+            "Divide",
+            1,
+            3
+           ]
+          ],
+          2
+         ]
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     [
+      "Set",
+      0
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "AiryAi",
+    "AiryBi",
+    "BesselJ"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "68cc2f",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "BesselY",
+        "nu",
+        "z"
+       ],
+       "z"
+      ],
+      "r"
+     ],
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      1,
+      [
+       "Power",
+       2,
+       "r"
+      ]
+     ],
+     [
+      "Sum",
+      [
+       "Multiply",
+       [
+        "Multiply",
+        [
+         "Power",
+         -1,
+         "k"
+        ],
+        [
+         "Binomial",
+         "r",
+         "k"
+        ]
+       ],
+       [
+        "BesselY",
+        [
+         "Subtract",
+         [
+          "Add",
+          "nu",
+          [
+           "Multiply",
+           2,
+           "k"
+          ]
+         ],
+         "r"
+        ],
+        "z"
+       ]
+      ],
+      [
+       "Limits",
+       "k",
+       0,
+       "r"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "nu",
+    "r",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "nu",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "z",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      [
+       "Set",
+       0
+      ]
+     ]
+    ],
+    [
+     "Element",
+     "r",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "BesselY",
+    "Binomial",
+    "Derivative",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "6a6a09",
+   "formula": [
+    "Equal",
+    [
+     "HankelH1",
+     "nu",
+     "z"
+    ],
+    [
+     "Add",
+     [
+      "BesselJ",
+      "nu",
+      "z"
+     ],
+     [
+      "Multiply",
+      "ImaginaryUnit",
+      [
+       "BesselY",
+       "nu",
+       "z"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "nu",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "nu",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "z",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      [
+       "Set",
+       0
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BesselJ",
+    "BesselY",
+    "HankelH1"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "7377c8",
+   "formula": [
+    "Equal",
+    [
+     "Subtract",
+     [
+      "Subtract",
+      [
+       "Add",
+       [
+        "Add",
+        [
+         "Multiply",
+         [
+          "Multiply",
+          [
+           "Power",
+           "z",
+           2
+          ],
+          [
+           "Add",
+           [
+            "Add",
+            [
+             "Power",
+             "r",
+             2
+            ],
+            [
+             "Multiply",
+             7,
+             "r"
+            ]
+           ],
+           12
+          ]
+         ],
+         [
+          "Divide",
+          [
+           "Apply",
+           [
+            "Derivative",
+            [
+             "Function",
+             [
+              "BesselK",
+              "nu",
+              "z"
+             ],
+             "z"
+            ],
+            [
+             "Add",
+             "r",
+             4
+            ]
+           ],
+           "z"
+          ],
+          [
+           "Factorial",
+           [
+            "Add",
+            "r",
+            4
+           ]
+          ]
+         ]
+        ],
+        [
+         "Multiply",
+         [
+          "Multiply",
+          "z",
+          [
+           "Add",
+           [
+            "Add",
+            [
+             "Multiply",
+             2,
+             [
+              "Power",
+              "r",
+              2
+             ]
+            ],
+            [
+             "Multiply",
+             11,
+             "r"
+            ]
+           ],
+           15
+          ]
+         ],
+         [
+          "Divide",
+          [
+           "Apply",
+           [
+            "Derivative",
+            [
+             "Function",
+             [
+              "BesselK",
+              "nu",
+              "z"
+             ],
+             "z"
+            ],
+            [
+             "Add",
+             "r",
+             3
+            ]
+           ],
+           "z"
+          ],
+          [
+           "Factorial",
+           [
+            "Add",
+            "r",
+            3
+           ]
+          ]
+         ]
+        ]
+       ],
+       [
+        "Multiply",
+        [
+         "Add",
+         [
+          "Subtract",
+          [
+           "Subtract",
+           [
+            "Multiply",
+            "r",
+            [
+             "Add",
+             "r",
+             4
+            ]
+           ],
+           [
+            "Power",
+            "z",
+            2
+           ]
+          ],
+          [
+           "Power",
+           "nu",
+           2
+          ]
+         ],
+         4
+        ],
+        [
+         "Divide",
+         [
+          "Apply",
+          [
+           "Derivative",
+           [
+            "Function",
+            [
+             "BesselK",
+             "nu",
+             "z"
+            ],
+            "z"
+           ],
+           [
+            "Add",
+            "r",
+            2
+           ]
+          ],
+          "z"
+         ],
+         [
+          "Factorial",
+          [
+           "Add",
+           "r",
+           2
+          ]
+         ]
+        ]
+       ]
+      ],
+      [
+       "Multiply",
+       [
+        "Multiply",
+        2,
+        "z"
+       ],
+       [
+        "Divide",
+        [
+         "Apply",
+         [
+          "Derivative",
+          [
+           "Function",
+           [
+            "BesselK",
+            "nu",
+            "z"
+           ],
+           "z"
+          ],
+          [
+           "Add",
+           "r",
+           1
+          ]
+         ],
+         "z"
+        ],
+        [
+         "Factorial",
+         [
+          "Add",
+          "r",
+          1
+         ]
+        ]
+       ]
+      ]
+     ],
+     [
+      "Divide",
+      [
+       "Apply",
+       [
+        "Derivative",
+        [
+         "Function",
+         [
+          "BesselK",
+          "nu",
+          "z"
+         ],
+         "z"
+        ],
+        "r"
+       ],
+       "z"
+      ],
+      [
+       "Factorial",
+       "r"
+      ]
+     ]
+    ],
+    0
+   ],
+   "variables": [
+    "nu",
+    "r",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "nu",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "z",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      [
+       "Set",
+       0
+      ]
+     ]
+    ],
+    [
+     "Element",
+     "r",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BesselK",
+    "Derivative",
+    "Factorial"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "7ac286",
+   "formula": [
+    "Equal",
+    [
+     "BesselK",
+     [
+      "Negate",
+      [
+       "Divide",
+       1,
+       2
+      ]
+     ],
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Power",
+      [
+       "Divide",
+       [
+        "Multiply",
+        "Pi",
+        "z"
+       ],
+       2
+      ],
+      [
+       "Divide",
+       1,
+       2
+      ]
+     ],
+     [
+      "Divide",
+      [
+       "Exp",
+       [
+        "Negate",
+        "z"
+       ]
+      ],
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     [
+      "Set",
+      0
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BesselK",
+    "Exp"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "7ae3ed",
+   "formula": [
+    "Equal",
+    [
+     "BesselI",
+     "nu",
+     "z"
+    ],
+    [
+     "Subtract",
+     [
+      "Multiply",
+      [
+       "Divide",
+       1,
+       "Pi"
+      ],
+      [
+       "Integrate",
+       [
+        "Multiply",
+        [
+         "Exp",
+         [
+          "Multiply",
+          "z",
+          [
+           "Cos",
+           "t"
+          ]
+         ]
+        ],
+        [
+         "Cos",
+         [
+          "Multiply",
+          "nu",
+          "t"
+         ]
+        ]
+       ],
+       [
+        "Limits",
+        "t",
+        0,
+        "Pi"
+       ]
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Divide",
+       [
+        "Sin",
+        [
+         "Multiply",
+         "Pi",
+         "nu"
+        ]
+       ],
+       "Pi"
+      ],
+      [
+       "Integrate",
+       [
+        "Exp",
+        [
+         "Subtract",
+         [
+          "Negate",
+          [
+           "Multiply",
+           "z",
+           [
+            "Cosh",
+            "t"
+           ]
+          ]
+         ],
+         [
+          "Multiply",
+          "nu",
+          "t"
+         ]
+        ]
+       ],
+       [
+        "Limits",
+        "t",
+        0,
+        "PositiveInfinity"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "nu",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "nu",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Greater",
+     [
+      "Real",
+      "z"
+     ],
+     0
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BesselI",
+    "Cos",
+    "Cosh",
+    "Exp",
+    "Integrate",
+    "Sin"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "7efe21",
+   "formula": [
+    "Equal",
+    [
+     "BesselK",
+     "nu",
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      [
+       "Power",
+       [
+        "Divide",
+        [
+         "Multiply",
+         2,
+         "z"
+        ],
+        "Pi"
+       ],
+       [
+        "Negate",
+        [
+         "Divide",
+         1,
+         2
+        ]
+       ]
+      ],
+      [
+       "Exp",
+       [
+        "Negate",
+        "z"
+       ]
+      ]
+     ],
+     [
+      "HypergeometricUStar",
+      [
+       "Add",
+       "nu",
+       [
+        "Divide",
+        1,
+        2
+       ]
+      ],
+      [
+       "Add",
+       [
+        "Multiply",
+        2,
+        "nu"
+       ],
+       1
+      ],
+      [
+       "Multiply",
+       2,
+       "z"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "nu",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "nu",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "z",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      [
+       "Set",
+       0
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BesselK",
+    "Exp",
+    "HypergeometricUStar"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "7f3485",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "BesselJ",
+      "nu",
+      "x"
+     ]
+    ],
+    [
+     "Multiply",
+     {
+      "num": "0.7858"
+     },
+     [
+      "Power",
+      "x",
+      [
+       "Negate",
+       [
+        "Divide",
+        1,
+        3
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "nu",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "nu",
+     [
+      "Interval",
+      0,
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
+     ]
+    ],
+    [
+     "Element",
+     "x",
+     [
+      "Interval",
+      [
+       "Open",
+       0
+      ],
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "BesselJ"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": [
+    "L. Landau. Monotonicity and bounds on Bessel functions. Proceedings of the Symposium on Mathematical Physics and Quantum Field Theory. Vol. 4. Southwest Texas State Univ. San Marcos, TX, 2000. http://emis.ams.org/journals/EJDE/conf-proc/04/l1/landau.pdf"
+   ],
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "807f3f",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "BesselK",
+        "nu",
+        "z"
+       ],
+       "z"
+      ],
+      "r"
+     ],
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      [
+       "Power",
+       -1,
+       "r"
+      ],
+      [
+       "Power",
+       2,
+       "r"
+      ]
+     ],
+     [
+      "Sum",
+      [
+       "Multiply",
+       [
+        "Binomial",
+        "r",
+        "k"
+       ],
+       [
+        "BesselK",
+        [
+         "Subtract",
+         [
+          "Add",
+          "nu",
+          [
+           "Multiply",
+           2,
+           "k"
+          ]
+         ],
+         "r"
+        ],
+        "z"
+       ]
+      ],
+      [
+       "Limits",
+       "k",
+       0,
+       "r"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "nu",
+    "r",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "nu",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "z",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      [
+       "Set",
+       0
+      ]
+     ]
+    ],
+    [
+     "Element",
+     "r",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "BesselK",
+    "Binomial",
+    "Derivative",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "81eec6",
+   "formula": [
+    "Equal",
+    [
+     "BesselI",
+     "nu",
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Power",
+      [
+       "Divide",
+       "z",
+       2
+      ],
+      "nu"
+     ],
+     [
+      "Hypergeometric0F1Regularized",
+      [
+       "Add",
+       "nu",
+       1
+      ],
+      [
+       "Divide",
+       [
+        "Power",
+        "z",
+        2
+       ],
+       4
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "nu",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "nu",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ]
+   ],
+   "assumptionAlternatives": [
+    [
+     "And",
+     [
+      "Element",
+      "nu",
+      "ComplexNumbers"
+     ],
+     [
+      "Element",
+      "z",
+      [
+       "SetMinus",
+       "ComplexNumbers",
+       [
+        "Set",
+        0
+       ]
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BesselI",
+    "Hypergeometric0F1Regularized"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "81ffcd",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "BesselK",
+        0,
+        "z"
+       ],
+       "z"
+      ],
+      1
+     ],
+     "z"
+    ],
+    [
+     "Negate",
+     [
+      "BesselK",
+      1,
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     [
+      "Set",
+      0
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BesselK",
+    "Derivative"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "8472cc",
+   "formula": [
+    "Equal",
+    [
+     "BesselY",
+     [
+      "Divide",
+      3,
+      2
+     ],
+     "z"
+    ],
+    [
+     "Negate",
+     [
+      "Multiply",
+      [
+       "Power",
+       [
+        "Divide",
+        [
+         "Multiply",
+         2,
+         "z"
+        ],
+        "Pi"
+       ],
+       [
+        "Divide",
+        1,
+        2
+       ]
+      ],
+      [
+       "Add",
+       [
+        "Divide",
+        [
+         "Cos",
+         "z"
+        ],
+        [
+         "Power",
+         "z",
+         2
+        ]
+       ],
+       [
+        "Divide",
+        [
+         "Sin",
+         "z"
+        ],
+        "z"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     [
+      "Set",
+      0
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BesselY",
+    "Cos",
+    "Sin"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "86bc7d",
+   "formula": [
+    "Equal",
+    [
+     "BesselI",
+     "nu",
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      [
+       "Power",
+       "z",
+       "nu"
+      ],
+      [
+       "Power",
+       [
+        "Multiply",
+        "ImaginaryUnit",
+        "z"
+       ],
+       [
+        "Negate",
+        "nu"
+       ]
+      ]
+     ],
+     [
+      "BesselJ",
+      "nu",
+      [
+       "Multiply",
+       "ImaginaryUnit",
+       "z"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "nu",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "nu",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Or",
+     [
+      "NotEqual",
+      "z",
+      0
+     ],
+     [
+      "Equal",
+      "nu",
+      0
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BesselI",
+    "BesselJ"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "8b6264",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "BesselY",
+        0,
+        "z"
+       ],
+       "z"
+      ],
+      1
+     ],
+     "z"
+    ],
+    [
+     "Negate",
+     [
+      "BesselY",
+      1,
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     [
+      "Set",
+      0
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BesselY",
+    "Derivative"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "95e561",
+   "formula": [
+    "Equal",
+    [
+     "Subtract",
+     [
+      "Add",
+      [
+       "Multiply",
+       [
+        "Power",
+        "z",
+        2
+       ],
+       [
+        "Apply",
+        [
+         "Derivative",
+         [
+          "Function",
+          [
+           "BesselI",
+           "nu",
+           "z"
+          ],
+          "z"
+         ],
+         2
+        ],
+        "z"
+       ]
+      ],
+      [
+       "Multiply",
+       "z",
+       [
+        "Apply",
+        [
+         "Derivative",
+         [
+          "Function",
+          [
+           "BesselI",
+           "nu",
+           "z"
+          ],
+          "z"
+         ],
+         1
+        ],
+        "z"
+       ]
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Add",
+       [
+        "Power",
+        "z",
+        2
+       ],
+       [
+        "Power",
+        "nu",
+        2
+       ]
+      ],
+      [
+       "BesselI",
+       "nu",
+       "z"
+      ]
+     ]
+    ],
+    0
+   ],
+   "variables": [
+    "nu",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "nu",
+     "Integers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ]
+   ],
+   "assumptionAlternatives": [
+    [
+     "And",
+     [
+      "Element",
+      "nu",
+      "ComplexNumbers"
+     ],
+     [
+      "Element",
+      "z",
+      [
+       "SetMinus",
+       "ComplexNumbers",
+       [
+        "Set",
+        0
+       ]
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BesselI",
+    "Derivative"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "98703d",
+   "formula": [
+    "Equal",
+    [
+     "BesselK",
+     "nu",
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      [
+       "Divide",
+       1,
+       2
+      ],
+      [
+       "Divide",
+       "Pi",
+       [
+        "Sin",
+        [
+         "Multiply",
+         "Pi",
+         "nu"
+        ]
+       ]
+      ]
+     ],
+     [
+      "Subtract",
+      [
+       "Multiply",
+       [
+        "Power",
+        [
+         "Divide",
+         "z",
+         2
+        ],
+        [
+         "Negate",
+         "nu"
+        ]
+       ],
+       [
+        "Hypergeometric0F1Regularized",
+        [
+         "Subtract",
+         1,
+         "nu"
+        ],
+        [
+         "Divide",
+         [
+          "Power",
+          "z",
+          2
+         ],
+         4
+        ]
+       ]
+      ],
+      [
+       "Multiply",
+       [
+        "Power",
+        [
+         "Divide",
+         "z",
+         2
+        ],
+        "nu"
+       ],
+       [
+        "Hypergeometric0F1Regularized",
+        [
+         "Add",
+         1,
+         "nu"
+        ],
+        [
+         "Divide",
+         [
+          "Power",
+          "z",
+          2
+         ],
+         4
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "nu",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "nu",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      "Integers"
+     ]
+    ],
+    [
+     "Element",
+     "z",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      [
+       "Set",
+       0
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BesselK",
+    "Hypergeometric0F1Regularized",
+    "Sin"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "99c077",
+   "formula": [
+    "Equal",
+    [
+     "BesselJ",
+     "n",
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      1,
+      "Pi"
+     ],
+     [
+      "Integrate",
+      [
+       "Cos",
+       [
+        "Subtract",
+        [
+         "Multiply",
+         "n",
+         "t"
+        ],
+        [
+         "Multiply",
+         "z",
+         [
+          "Sin",
+          "t"
+         ]
+        ]
+       ]
+      ],
+      [
+       "Limits",
+       "t",
+       0,
+       "Pi"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "BesselJ",
+    "Cos",
+    "Integrate",
+    "Sin"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "9ad254",
+   "formula": [
+    "Equal",
+    [
+     "BesselJ",
+     "nu",
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      [
+       "Power",
+       [
+        "Divide",
+        "z",
+        2
+       ],
+       "nu"
+      ],
+      [
+       "Divide",
+       [
+        "Exp",
+        [
+         "Negate",
+         [
+          "Multiply",
+          "ImaginaryUnit",
+          "z"
+         ]
+        ]
+       ],
+       [
+        "Gamma",
+        [
+         "Add",
+         "nu",
+         1
+        ]
+       ]
+      ]
+     ],
+     [
+      "Hypergeometric1F1",
+      [
+       "Add",
+       "nu",
+       [
+        "Divide",
+        1,
+        2
+       ]
+      ],
+      [
+       "Add",
+       [
+        "Multiply",
+        2,
+        "nu"
+       ],
+       1
+      ],
+      [
+       "Multiply",
+       [
+        "Multiply",
+        2,
+        "ImaginaryUnit"
+       ],
+       "z"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "nu",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "nu",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ]
+   ],
+   "assumptionAlternatives": [
+    [
+     "And",
+     [
+      "Element",
+      "nu",
+      "ComplexNumbers"
+     ],
+     [
+      "NotElement",
+      "nu",
+      [
+       "Range",
+       "NegativeInfinity",
+       -1
+      ]
+     ],
+     [
+      "Element",
+      "z",
+      [
+       "SetMinus",
+       "ComplexNumbers",
+       [
+        "Set",
+        0
+       ]
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BesselJ",
+    "Exp",
+    "Gamma",
+    "Hypergeometric1F1"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "9b2f38",
+   "formula": [
+    "Equal",
+    [
+     "Add",
+     [
+      "Add",
+      [
+       "Add",
+       [
+        "Add",
+        [
+         "Multiply",
+         [
+          "Multiply",
+          [
+           "Power",
+           "z",
+           2
+          ],
+          [
+           "Add",
+           [
+            "Add",
+            [
+             "Power",
+             "r",
+             2
+            ],
+            [
+             "Multiply",
+             7,
+             "r"
+            ]
+           ],
+           12
+          ]
+         ],
+         [
+          "Divide",
+          [
+           "Apply",
+           [
+            "Derivative",
+            [
+             "Function",
+             [
+              "BesselJ",
+              "nu",
+              "z"
+             ],
+             "z"
+            ],
+            [
+             "Add",
+             "r",
+             4
+            ]
+           ],
+           "z"
+          ],
+          [
+           "Factorial",
+           [
+            "Add",
+            "r",
+            4
+           ]
+          ]
+         ]
+        ],
+        [
+         "Multiply",
+         [
+          "Multiply",
+          "z",
+          [
+           "Add",
+           [
+            "Add",
+            [
+             "Multiply",
+             2,
+             [
+              "Power",
+              "r",
+              2
+             ]
+            ],
+            [
+             "Multiply",
+             11,
+             "r"
+            ]
+           ],
+           15
+          ]
+         ],
+         [
+          "Divide",
+          [
+           "Apply",
+           [
+            "Derivative",
+            [
+             "Function",
+             [
+              "BesselJ",
+              "nu",
+              "z"
+             ],
+             "z"
+            ],
+            [
+             "Add",
+             "r",
+             3
+            ]
+           ],
+           "z"
+          ],
+          [
+           "Factorial",
+           [
+            "Add",
+            "r",
+            3
+           ]
+          ]
+         ]
+        ]
+       ],
+       [
+        "Multiply",
+        [
+         "Add",
+         [
+          "Subtract",
+          [
+           "Add",
+           [
+            "Multiply",
+            "r",
+            [
+             "Add",
+             "r",
+             4
+            ]
+           ],
+           [
+            "Power",
+            "z",
+            2
+           ]
+          ],
+          [
+           "Power",
+           "nu",
+           2
+          ]
+         ],
+         4
+        ],
+        [
+         "Divide",
+         [
+          "Apply",
+          [
+           "Derivative",
+           [
+            "Function",
+            [
+             "BesselJ",
+             "nu",
+             "z"
+            ],
+            "z"
+           ],
+           [
+            "Add",
+            "r",
+            2
+           ]
+          ],
+          "z"
+         ],
+         [
+          "Factorial",
+          [
+           "Add",
+           "r",
+           2
+          ]
+         ]
+        ]
+       ]
+      ],
+      [
+       "Multiply",
+       [
+        "Multiply",
+        2,
+        "z"
+       ],
+       [
+        "Divide",
+        [
+         "Apply",
+         [
+          "Derivative",
+          [
+           "Function",
+           [
+            "BesselJ",
+            "nu",
+            "z"
+           ],
+           "z"
+          ],
+          [
+           "Add",
+           "r",
+           1
+          ]
+         ],
+         "z"
+        ],
+        [
+         "Factorial",
+         [
+          "Add",
+          "r",
+          1
+         ]
+        ]
+       ]
+      ]
+     ],
+     [
+      "Divide",
+      [
+       "Apply",
+       [
+        "Derivative",
+        [
+         "Function",
+         [
+          "BesselJ",
+          "nu",
+          "z"
+         ],
+         "z"
+        ],
+        "r"
+       ],
+       "z"
+      ],
+      [
+       "Factorial",
+       "r"
+      ]
+     ]
+    ],
+    0
+   ],
+   "variables": [
+    "nu",
+    "r",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "nu",
+     "Integers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "r",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "assumptionAlternatives": [
+    [
+     "And",
+     [
+      "Element",
+      "nu",
+      "ComplexNumbers"
+     ],
+     [
+      "Element",
+      "z",
+      [
+       "SetMinus",
+       "ComplexNumbers",
+       [
+        "Set",
+        0
+       ]
+      ]
+     ],
+     [
+      "Element",
+      "r",
+      "NonNegativeIntegers"
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BesselJ",
+    "Derivative",
+    "Factorial"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "9d98f8",
+   "formula": [
+    "Equal",
+    [
+     "BesselK",
+     "nu",
+     "z"
+    ],
+    [
+     "Negate",
+     [
+      "Multiply",
+      [
+       "Divide",
+       "z",
+       [
+        "Multiply",
+        2,
+        "nu"
+       ]
+      ],
+      [
+       "Subtract",
+       [
+        "BesselK",
+        [
+         "Subtract",
+         "nu",
+         1
+        ],
+        "z"
+       ],
+       [
+        "BesselK",
+        [
+         "Add",
+         "nu",
+         1
+        ],
+        "z"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "nu",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "nu",
+     [
+      "SetMinus",
+      "Integers",
+      [
+       "Set",
+       0
+      ]
+     ]
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ]
+   ],
+   "assumptionAlternatives": [
+    [
+     "And",
+     [
+      "Element",
+      "nu",
+      [
+       "SetMinus",
+       "ComplexNumbers",
+       [
+        "Set",
+        0
+       ]
+      ]
+     ],
+     [
+      "Element",
+      "z",
+      [
+       "SetMinus",
+       "ComplexNumbers",
+       [
+        "Set",
+        0
+       ]
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BesselK"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "a0ff0b",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "BesselK",
+        "nu",
+        "z"
+       ],
+       "z"
+      ],
+      1
+     ],
+     "z"
+    ],
+    [
+     "Negate",
+     [
+      "Divide",
+      [
+       "Add",
+       [
+        "BesselK",
+        [
+         "Subtract",
+         "nu",
+         1
+        ],
+        "z"
+       ],
+       [
+        "BesselK",
+        [
+         "Add",
+         "nu",
+         1
+        ],
+        "z"
+       ]
+      ],
+      2
+     ]
+    ]
+   ],
+   "variables": [
+    "nu",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "nu",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "z",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      [
+       "Set",
+       0
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BesselK",
+    "Derivative"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "a2a294",
+   "formula": [
+    "Equal",
+    [
+     "BesselJ",
+     [
+      "Divide",
+      3,
+      2
+     ],
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Power",
+      [
+       "Divide",
+       [
+        "Multiply",
+        2,
+        "z"
+       ],
+       "Pi"
+      ],
+      [
+       "Divide",
+       1,
+       2
+      ]
+     ],
+     [
+      "Subtract",
+      [
+       "Divide",
+       [
+        "Sin",
+        "z"
+       ],
+       [
+        "Power",
+        "z",
+        2
+       ]
+      ],
+      [
+       "Divide",
+       [
+        "Cos",
+        "z"
+       ],
+       "z"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     [
+      "Set",
+      0
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BesselJ",
+    "Cos",
+    "Sin"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "a59981",
+   "formula": [
+    "Equal",
+    [
+     "BesselI",
+     [
+      "Divide",
+      1,
+      2
+     ],
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Power",
+      [
+       "Divide",
+       [
+        "Multiply",
+        2,
+        "z"
+       ],
+       "Pi"
+      ],
+      [
+       "Divide",
+       1,
+       2
+      ]
+     ],
+     [
+      "Divide",
+      [
+       "Sinh",
+       "z"
+      ],
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     [
+      "Set",
+      0
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BesselI",
+    "Sinh"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "ad9caa",
+   "formula": [
+    "Equal",
+    [
+     "Add",
+     [
+      "Add",
+      [
+       "Multiply",
+       [
+        "Power",
+        "z",
+        2
+       ],
+       [
+        "Apply",
+        [
+         "Derivative",
+         [
+          "Function",
+          [
+           "BesselJ",
+           "nu",
+           "z"
+          ],
+          "z"
+         ],
+         2
+        ],
+        "z"
+       ]
+      ],
+      [
+       "Multiply",
+       "z",
+       [
+        "Apply",
+        [
+         "Derivative",
+         [
+          "Function",
+          [
+           "BesselJ",
+           "nu",
+           "z"
+          ],
+          "z"
+         ],
+         1
+        ],
+        "z"
+       ]
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Subtract",
+       [
+        "Power",
+        "z",
+        2
+       ],
+       [
+        "Power",
+        "nu",
+        2
+       ]
+      ],
+      [
+       "BesselJ",
+       "nu",
+       "z"
+      ]
+     ]
+    ],
+    0
+   ],
+   "variables": [
+    "nu",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "nu",
+     "Integers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ]
+   ],
+   "assumptionAlternatives": [
+    [
+     "And",
+     [
+      "Element",
+      "nu",
+      "ComplexNumbers"
+     ],
+     [
+      "Element",
+      "z",
+      [
+       "SetMinus",
+       "ComplexNumbers",
+       [
+        "Set",
+        0
+       ]
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BesselJ",
+    "Derivative"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "afbd22",
+   "formula": [
+    "Equal",
+    [
+     "BesselI",
+     [
+      "Negate",
+      "n"
+     ],
+     "z"
+    ],
+    [
+     "BesselI",
+     "n",
+     "z"
+    ]
+   ],
+   "variables": [
+    "n",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BesselI"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "b049dc",
+   "formula": [
+    "Equal",
+    [
+     "BesselY",
+     "nu",
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      1,
+      [
+       "Sin",
+       [
+        "Multiply",
+        "Pi",
+        "nu"
+       ]
+      ]
+     ],
+     [
+      "Subtract",
+      [
+       "Multiply",
+       [
+        "Multiply",
+        [
+         "Cos",
+         [
+          "Multiply",
+          "Pi",
+          "nu"
+         ]
+        ],
+        [
+         "Power",
+         [
+          "Divide",
+          "z",
+          2
+         ],
+         "nu"
+        ]
+       ],
+       [
+        "Hypergeometric0F1Regularized",
+        [
+         "Add",
+         "nu",
+         1
+        ],
+        [
+         "Negate",
+         [
+          "Divide",
+          [
+           "Power",
+           "z",
+           2
+          ],
+          4
+         ]
+        ]
+       ]
+      ],
+      [
+       "Multiply",
+       [
+        "Power",
+        [
+         "Divide",
+         "z",
+         2
+        ],
+        [
+         "Negate",
+         "nu"
+        ]
+       ],
+       [
+        "Hypergeometric0F1Regularized",
+        [
+         "Subtract",
+         1,
+         "nu"
+        ],
+        [
+         "Negate",
+         [
+          "Divide",
+          [
+           "Power",
+           "z",
+           2
+          ],
+          4
+         ]
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "nu",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "nu",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      "Integers"
+     ]
+    ],
+    [
+     "Element",
+     "z",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      [
+       "Set",
+       0
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BesselY",
+    "Cos",
+    "Hypergeometric0F1Regularized",
+    "Sin"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "b6d600",
+   "formula": [
+    "Equal",
+    [
+     "BesselY",
+     "nu",
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      "z",
+      [
+       "Multiply",
+       2,
+       "nu"
+      ]
+     ],
+     [
+      "Add",
+      [
+       "BesselY",
+       [
+        "Subtract",
+        "nu",
+        1
+       ],
+       "z"
+      ],
+      [
+       "BesselY",
+       [
+        "Add",
+        "nu",
+        1
+       ],
+       "z"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "nu",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "nu",
+     [
+      "SetMinus",
+      "Integers",
+      [
+       "Set",
+       0
+      ]
+     ]
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ]
+   ],
+   "assumptionAlternatives": [
+    [
+     "And",
+     [
+      "Element",
+      "nu",
+      [
+       "SetMinus",
+       "ComplexNumbers",
+       [
+        "Set",
+        0
+       ]
+      ]
+     ],
+     [
+      "Element",
+      "z",
+      [
+       "SetMinus",
+       "ComplexNumbers",
+       [
+        "Set",
+        0
+       ]
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BesselY"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "c0247f",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "BesselI",
+        0,
+        "z"
+       ],
+       "z"
+      ],
+      1
+     ],
+     "z"
+    ],
+    [
+     "BesselI",
+     1,
+     "z"
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BesselI",
+    "Derivative"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "c29d6f",
+   "formula": [
+    "Equal",
+    [
+     "BesselK",
+     "nu",
+     "z"
+    ],
+    [
+     "Integrate",
+     [
+      "Multiply",
+      [
+       "Exp",
+       [
+        "Negate",
+        [
+         "Multiply",
+         "z",
+         [
+          "Cosh",
+          "t"
+         ]
+        ]
+       ]
+      ],
+      [
+       "Cosh",
+       [
+        "Multiply",
+        "nu",
+        "t"
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "t",
+      0,
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "variables": [
+    "nu",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "nu",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Greater",
+     [
+      "Real",
+      "z"
+     ],
+     0
+    ]
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "BesselK",
+    "Cosh",
+    "Exp",
+    "Integrate"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "c362e8",
+   "formula": [
+    "Equal",
+    [
+     "BesselK",
+     [
+      "Divide",
+      2,
+      3
+     ],
+     "z"
+    ],
+    [
+     "Negate",
+     [
+      "Multiply",
+      [
+       "Divide",
+       [
+        "Multiply",
+        [
+         "Sqrt",
+         3
+        ],
+        "Pi"
+       ],
+       [
+        "Power",
+        [
+         "Power",
+         [
+          "Divide",
+          [
+           "Multiply",
+           3,
+           "z"
+          ],
+          2
+         ],
+         [
+          "Divide",
+          1,
+          3
+         ]
+        ],
+        2
+       ]
+      ],
+      [
+       "Apply",
+       [
+        "Derivative",
+        [
+         "Function",
+         [
+          "AiryAi",
+          "w"
+         ],
+         "w"
+        ],
+        1
+       ],
+       [
+        "Power",
+        [
+         "Power",
+         [
+          "Divide",
+          [
+           "Multiply",
+           3,
+           "z"
+          ],
+          2
+         ],
+         [
+          "Divide",
+          1,
+          3
+         ]
+        ],
+        2
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     [
+      "Set",
+      0
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "AiryAi",
+    "BesselK",
+    "Derivative"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "cac83e",
+   "formula": [
+    "Equal",
+    [
+     "BesselJ",
+     "nu",
+     "z"
+    ],
+    [
+     "Subtract",
+     [
+      "Multiply",
+      [
+       "Divide",
+       1,
+       "Pi"
+      ],
+      [
+       "Integrate",
+       [
+        "Cos",
+        [
+         "Subtract",
+         [
+          "Multiply",
+          "nu",
+          "t"
+         ],
+         [
+          "Multiply",
+          "z",
+          [
+           "Sin",
+           "t"
+          ]
+         ]
+        ]
+       ],
+       [
+        "Limits",
+        "t",
+        0,
+        "Pi"
+       ]
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Divide",
+       [
+        "Sin",
+        [
+         "Multiply",
+         "Pi",
+         "nu"
+        ]
+       ],
+       "Pi"
+      ],
+      [
+       "Integrate",
+       [
+        "Exp",
+        [
+         "Subtract",
+         [
+          "Negate",
+          [
+           "Multiply",
+           "z",
+           [
+            "Sinh",
+            "t"
+           ]
+          ]
+         ],
+         [
+          "Multiply",
+          "nu",
+          "t"
+         ]
+        ]
+       ],
+       [
+        "Limits",
+        "t",
+        0,
+        "PositiveInfinity"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "nu",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "nu",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Greater",
+     [
+      "Real",
+      "z"
+     ],
+     0
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BesselJ",
+    "Cos",
+    "Exp",
+    "Integrate",
+    "Sin",
+    "Sinh"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "cc4572",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "BesselJ",
+      "nu",
+      "z"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      [
+       "Divide",
+       1,
+       [
+        "Gamma",
+        [
+         "Add",
+         "nu",
+         1
+        ]
+       ]
+      ],
+      [
+       "Power",
+       [
+        "Abs",
+        [
+         "Divide",
+         "z",
+         2
+        ]
+       ],
+       "nu"
+      ]
+     ],
+     [
+      "Exp",
+      [
+       "Abs",
+       [
+        "Imaginary",
+        "z"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "nu",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "nu",
+     [
+      "Interval",
+      [
+       "Negate",
+       [
+        "Divide",
+        1,
+        2
+       ]
+      ],
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
+     ]
+    ],
+    [
+     "Element",
+     "z",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      [
+       "Set",
+       0
+      ]
+     ]
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "BesselJ",
+    "Exp",
+    "Gamma",
+    "Imaginary"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "d1f5c5",
+   "formula": [
+    "Equal",
+    [
+     "BesselK",
+     [
+      "Divide",
+      1,
+      2
+     ],
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Power",
+      [
+       "Divide",
+       [
+        "Multiply",
+        "Pi",
+        "z"
+       ],
+       2
+      ],
+      [
+       "Divide",
+       1,
+       2
+      ]
+     ],
+     [
+      "Divide",
+      [
+       "Exp",
+       [
+        "Negate",
+        "z"
+       ]
+      ],
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     [
+      "Set",
+      0
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BesselK",
+    "Exp"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "d39c46",
+   "formula": [
+    "Equal",
+    [
+     "BesselJ",
+     [
+      "Divide",
+      1,
+      3
+     ],
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      1,
+      [
+       "Multiply",
+       2,
+       [
+        "Power",
+        [
+         "Divide",
+         [
+          "Multiply",
+          3,
+          "z"
+         ],
+         2
+        ],
+        [
+         "Divide",
+         1,
+         3
+        ]
+       ]
+      ]
+     ],
+     [
+      "Subtract",
+      [
+       "Multiply",
+       3,
+       [
+        "AiryAi",
+        [
+         "Negate",
+         [
+          "Power",
+          [
+           "Power",
+           [
+            "Divide",
+            [
+             "Multiply",
+             3,
+             "z"
+            ],
+            2
+           ],
+           [
+            "Divide",
+            1,
+            3
+           ]
+          ],
+          2
+         ]
+        ]
+       ]
+      ],
+      [
+       "Multiply",
+       [
+        "Sqrt",
+        3
+       ],
+       [
+        "AiryBi",
+        [
+         "Negate",
+         [
+          "Power",
+          [
+           "Power",
+           [
+            "Divide",
+            [
+             "Multiply",
+             3,
+             "z"
+            ],
+            2
+           ],
+           [
+            "Divide",
+            1,
+            3
+           ]
+          ],
+          2
+         ]
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     [
+      "Set",
+      0
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "AiryAi",
+    "AiryBi",
+    "BesselJ"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "d56914",
+   "formula": [
+    "Equal",
+    [
+     "BesselJ",
+     "nu",
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      "z",
+      [
+       "Multiply",
+       2,
+       "nu"
+      ]
+     ],
+     [
+      "Add",
+      [
+       "BesselJ",
+       [
+        "Subtract",
+        "nu",
+        1
+       ],
+       "z"
+      ],
+      [
+       "BesselJ",
+       [
+        "Add",
+        "nu",
+        1
+       ],
+       "z"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "nu",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "nu",
+     [
+      "SetMinus",
+      "Integers",
+      [
+       "Set",
+       0
+      ]
+     ]
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ]
+   ],
+   "assumptionAlternatives": [
+    [
+     "And",
+     [
+      "Element",
+      "nu",
+      [
+       "SetMinus",
+       "ComplexNumbers",
+       [
+        "Set",
+        0
+       ]
+      ]
+     ],
+     [
+      "Element",
+      "z",
+      [
+       "SetMinus",
+       "ComplexNumbers",
+       [
+        "Set",
+        0
+       ]
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BesselJ"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "d5b7e8",
+   "formula": [
+    "Equal",
+    [
+     "BesselY",
+     "n",
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Negate",
+      [
+       "Divide",
+       2,
+       "Pi"
+      ]
+     ],
+     [
+      "Add",
+      [
+       "Multiply",
+       [
+        "Power",
+        "ImaginaryUnit",
+        "n"
+       ],
+       [
+        "BesselK",
+        "n",
+        [
+         "Multiply",
+         "ImaginaryUnit",
+         "z"
+        ]
+       ]
+      ],
+      [
+       "Multiply",
+       [
+        "Subtract",
+        [
+         "Ln",
+         [
+          "Multiply",
+          "ImaginaryUnit",
+          "z"
+         ]
+        ],
+        [
+         "Ln",
+         "z"
+        ]
+       ],
+       [
+        "BesselJ",
+        "n",
+        "z"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "Element",
+     "z",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      [
+       "Set",
+       0
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BesselJ",
+    "BesselK",
+    "BesselY",
+    "Ln"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "e233b0",
+   "formula": [
+    "Equal",
+    [
+     "Subtract",
+     [
+      "Subtract",
+      [
+       "Add",
+       [
+        "Add",
+        [
+         "Multiply",
+         [
+          "Multiply",
+          [
+           "Power",
+           "z",
+           2
+          ],
+          [
+           "Add",
+           [
+            "Add",
+            [
+             "Power",
+             "r",
+             2
+            ],
+            [
+             "Multiply",
+             7,
+             "r"
+            ]
+           ],
+           12
+          ]
+         ],
+         [
+          "Divide",
+          [
+           "Apply",
+           [
+            "Derivative",
+            [
+             "Function",
+             [
+              "BesselI",
+              "nu",
+              "z"
+             ],
+             "z"
+            ],
+            [
+             "Add",
+             "r",
+             4
+            ]
+           ],
+           "z"
+          ],
+          [
+           "Factorial",
+           [
+            "Add",
+            "r",
+            4
+           ]
+          ]
+         ]
+        ],
+        [
+         "Multiply",
+         [
+          "Multiply",
+          "z",
+          [
+           "Add",
+           [
+            "Add",
+            [
+             "Multiply",
+             2,
+             [
+              "Power",
+              "r",
+              2
+             ]
+            ],
+            [
+             "Multiply",
+             11,
+             "r"
+            ]
+           ],
+           15
+          ]
+         ],
+         [
+          "Divide",
+          [
+           "Apply",
+           [
+            "Derivative",
+            [
+             "Function",
+             [
+              "BesselI",
+              "nu",
+              "z"
+             ],
+             "z"
+            ],
+            [
+             "Add",
+             "r",
+             3
+            ]
+           ],
+           "z"
+          ],
+          [
+           "Factorial",
+           [
+            "Add",
+            "r",
+            3
+           ]
+          ]
+         ]
+        ]
+       ],
+       [
+        "Multiply",
+        [
+         "Add",
+         [
+          "Subtract",
+          [
+           "Subtract",
+           [
+            "Multiply",
+            "r",
+            [
+             "Add",
+             "r",
+             4
+            ]
+           ],
+           [
+            "Power",
+            "z",
+            2
+           ]
+          ],
+          [
+           "Power",
+           "nu",
+           2
+          ]
+         ],
+         4
+        ],
+        [
+         "Divide",
+         [
+          "Apply",
+          [
+           "Derivative",
+           [
+            "Function",
+            [
+             "BesselI",
+             "nu",
+             "z"
+            ],
+            "z"
+           ],
+           [
+            "Add",
+            "r",
+            2
+           ]
+          ],
+          "z"
+         ],
+         [
+          "Factorial",
+          [
+           "Add",
+           "r",
+           2
+          ]
+         ]
+        ]
+       ]
+      ],
+      [
+       "Multiply",
+       [
+        "Multiply",
+        2,
+        "z"
+       ],
+       [
+        "Divide",
+        [
+         "Apply",
+         [
+          "Derivative",
+          [
+           "Function",
+           [
+            "BesselI",
+            "nu",
+            "z"
+           ],
+           "z"
+          ],
+          [
+           "Add",
+           "r",
+           1
+          ]
+         ],
+         "z"
+        ],
+        [
+         "Factorial",
+         [
+          "Add",
+          "r",
+          1
+         ]
+        ]
+       ]
+      ]
+     ],
+     [
+      "Divide",
+      [
+       "Apply",
+       [
+        "Derivative",
+        [
+         "Function",
+         [
+          "BesselI",
+          "nu",
+          "z"
+         ],
+         "z"
+        ],
+        "r"
+       ],
+       "z"
+      ],
+      [
+       "Factorial",
+       "r"
+      ]
+     ]
+    ],
+    0
+   ],
+   "variables": [
+    "nu",
+    "r",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "nu",
+     "Integers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "r",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "assumptionAlternatives": [
+    [
+     "And",
+     [
+      "Element",
+      "nu",
+      "ComplexNumbers"
+     ],
+     [
+      "Element",
+      "z",
+      [
+       "SetMinus",
+       "ComplexNumbers",
+       [
+        "Set",
+        0
+       ]
+      ]
+     ],
+     [
+      "Element",
+      "r",
+      "NonNegativeIntegers"
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BesselI",
+    "Derivative",
+    "Factorial"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "e284d7",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "BesselI",
+        "nu",
+        "z"
+       ],
+       "z"
+      ],
+      "r"
+     ],
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      1,
+      [
+       "Power",
+       2,
+       "r"
+      ]
+     ],
+     [
+      "Sum",
+      [
+       "Multiply",
+       [
+        "Binomial",
+        "r",
+        "k"
+       ],
+       [
+        "BesselI",
+        [
+         "Subtract",
+         [
+          "Add",
+          "nu",
+          [
+           "Multiply",
+           2,
+           "k"
+          ]
+         ],
+         "r"
+        ],
+        "z"
+       ]
+      ],
+      [
+       "Limits",
+       "k",
+       0,
+       "r"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "nu",
+    "r",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "nu",
+     "Integers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "r",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "assumptionAlternatives": [
+    [
+     "And",
+     [
+      "Element",
+      "nu",
+      "ComplexNumbers"
+     ],
+     [
+      "Element",
+      "z",
+      [
+       "SetMinus",
+       "ComplexNumbers",
+       [
+        "Set",
+        0
+       ]
+      ]
+     ],
+     [
+      "Element",
+      "r",
+      "NonNegativeIntegers"
+     ]
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "BesselI",
+    "Binomial",
+    "Derivative",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "e72e96",
+   "formula": [
+    "Equal",
+    [
+     "BesselJ",
+     [
+      "Divide",
+      2,
+      3
+     ],
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      1,
+      [
+       "Multiply",
+       2,
+       [
+        "Power",
+        [
+         "Power",
+         [
+          "Divide",
+          [
+           "Multiply",
+           3,
+           "z"
+          ],
+          2
+         ],
+         [
+          "Divide",
+          1,
+          3
+         ]
+        ],
+        2
+       ]
+      ]
+     ],
+     [
+      "Add",
+      [
+       "Multiply",
+       3,
+       [
+        "Apply",
+        [
+         "Derivative",
+         [
+          "Function",
+          [
+           "AiryAi",
+           "w"
+          ],
+          "w"
+         ],
+         1
+        ],
+        [
+         "Negate",
+         [
+          "Power",
+          [
+           "Power",
+           [
+            "Divide",
+            [
+             "Multiply",
+             3,
+             "z"
+            ],
+            2
+           ],
+           [
+            "Divide",
+            1,
+            3
+           ]
+          ],
+          2
+         ]
+        ]
+       ]
+      ],
+      [
+       "Multiply",
+       [
+        "Sqrt",
+        3
+       ],
+       [
+        "Apply",
+        [
+         "Derivative",
+         [
+          "Function",
+          [
+           "AiryBi",
+           "w"
+          ],
+          "w"
+         ],
+         1
+        ],
+        [
+         "Negate",
+         [
+          "Power",
+          [
+           "Power",
+           [
+            "Divide",
+            [
+             "Multiply",
+             3,
+             "z"
+            ],
+            2
+           ],
+           [
+            "Divide",
+            1,
+            3
+           ]
+          ],
+          2
+         ]
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     [
+      "Set",
+      0
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "AiryAi",
+    "AiryBi",
+    "BesselJ",
+    "Derivative"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "e7b5be",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "BesselJ",
+      "nu",
+      "x"
+     ]
+    ],
+    [
+     "Multiply",
+     {
+      "num": "0.6749"
+     },
+     [
+      "Power",
+      "nu",
+      [
+       "Negate",
+       [
+        "Divide",
+        1,
+        3
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "nu",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "nu",
+     [
+      "Interval",
+      [
+       "Open",
+       0
+      ],
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
+     ]
+    ],
+    [
+     "Element",
+     "x",
+     [
+      "Interval",
+      0,
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "BesselJ"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": [
+    "L. Landau. Monotonicity and bounds on Bessel functions. Proceedings of the Symposium on Mathematical Physics and Quantum Field Theory. Vol. 4. Southwest Texas State Univ. San Marcos, TX, 2000. http://emis.ams.org/journals/EJDE/conf-proc/04/l1/landau.pdf"
+   ],
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "e85dee",
+   "formula": [
+    "Equal",
+    [
+     "Add",
+     [
+      "Add",
+      [
+       "Add",
+       [
+        "Add",
+        [
+         "Multiply",
+         [
+          "Multiply",
+          [
+           "Power",
+           "z",
+           2
+          ],
+          [
+           "Add",
+           [
+            "Add",
+            [
+             "Power",
+             "r",
+             2
+            ],
+            [
+             "Multiply",
+             7,
+             "r"
+            ]
+           ],
+           12
+          ]
+         ],
+         [
+          "Divide",
+          [
+           "Apply",
+           [
+            "Derivative",
+            [
+             "Function",
+             [
+              "BesselY",
+              "nu",
+              "z"
+             ],
+             "z"
+            ],
+            [
+             "Add",
+             "r",
+             4
+            ]
+           ],
+           "z"
+          ],
+          [
+           "Factorial",
+           [
+            "Add",
+            "r",
+            4
+           ]
+          ]
+         ]
+        ],
+        [
+         "Multiply",
+         [
+          "Multiply",
+          "z",
+          [
+           "Add",
+           [
+            "Add",
+            [
+             "Multiply",
+             2,
+             [
+              "Power",
+              "r",
+              2
+             ]
+            ],
+            [
+             "Multiply",
+             11,
+             "r"
+            ]
+           ],
+           15
+          ]
+         ],
+         [
+          "Divide",
+          [
+           "Apply",
+           [
+            "Derivative",
+            [
+             "Function",
+             [
+              "BesselY",
+              "nu",
+              "z"
+             ],
+             "z"
+            ],
+            [
+             "Add",
+             "r",
+             3
+            ]
+           ],
+           "z"
+          ],
+          [
+           "Factorial",
+           [
+            "Add",
+            "r",
+            3
+           ]
+          ]
+         ]
+        ]
+       ],
+       [
+        "Multiply",
+        [
+         "Add",
+         [
+          "Subtract",
+          [
+           "Add",
+           [
+            "Multiply",
+            "r",
+            [
+             "Add",
+             "r",
+             4
+            ]
+           ],
+           [
+            "Power",
+            "z",
+            2
+           ]
+          ],
+          [
+           "Power",
+           "nu",
+           2
+          ]
+         ],
+         4
+        ],
+        [
+         "Divide",
+         [
+          "Apply",
+          [
+           "Derivative",
+           [
+            "Function",
+            [
+             "BesselY",
+             "nu",
+             "z"
+            ],
+            "z"
+           ],
+           [
+            "Add",
+            "r",
+            2
+           ]
+          ],
+          "z"
+         ],
+         [
+          "Factorial",
+          [
+           "Add",
+           "r",
+           2
+          ]
+         ]
+        ]
+       ]
+      ],
+      [
+       "Multiply",
+       [
+        "Multiply",
+        2,
+        "z"
+       ],
+       [
+        "Divide",
+        [
+         "Apply",
+         [
+          "Derivative",
+          [
+           "Function",
+           [
+            "BesselY",
+            "nu",
+            "z"
+           ],
+           "z"
+          ],
+          [
+           "Add",
+           "r",
+           1
+          ]
+         ],
+         "z"
+        ],
+        [
+         "Factorial",
+         [
+          "Add",
+          "r",
+          1
+         ]
+        ]
+       ]
+      ]
+     ],
+     [
+      "Divide",
+      [
+       "Apply",
+       [
+        "Derivative",
+        [
+         "Function",
+         [
+          "BesselY",
+          "nu",
+          "z"
+         ],
+         "z"
+        ],
+        "r"
+       ],
+       "z"
+      ],
+      [
+       "Factorial",
+       "r"
+      ]
+     ]
+    ],
+    0
+   ],
+   "variables": [
+    "nu",
+    "r",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "nu",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "z",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      [
+       "Set",
+       0
+      ]
+     ]
+    ],
+    [
+     "Element",
+     "r",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BesselY",
+    "Derivative",
+    "Factorial"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "ecd36f",
+   "formula": [
+    "Equal",
+    [
+     "BesselJ",
+     "nu",
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Power",
+      [
+       "Divide",
+       "z",
+       2
+      ],
+      "nu"
+     ],
+     [
+      "Hypergeometric0F1Regularized",
+      [
+       "Add",
+       "nu",
+       1
+      ],
+      [
+       "Negate",
+       [
+        "Divide",
+        [
+         "Power",
+         "z",
+         2
+        ],
+        4
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "nu",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "nu",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ]
+   ],
+   "assumptionAlternatives": [
+    [
+     "And",
+     [
+      "Element",
+      "nu",
+      "ComplexNumbers"
+     ],
+     [
+      "Element",
+      "z",
+      [
+       "SetMinus",
+       "ComplexNumbers",
+       [
+        "Set",
+        0
+       ]
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BesselJ",
+    "Hypergeometric0F1Regularized"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "f1afc0",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "BesselJ",
+        0,
+        "z"
+       ],
+       "z"
+      ],
+      1
+     ],
+     "z"
+    ],
+    [
+     "Negate",
+     [
+      "BesselJ",
+      1,
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BesselJ",
+    "Derivative"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "f303c9",
+   "formula": [
+    "Equal",
+    [
+     "Subtract",
+     [
+      "Multiply",
+      [
+       "Add",
+       [
+        "Subtract",
+        [
+         "Add",
+         [
+          "Power",
+          "r",
+          2
+         ],
+         [
+          "Multiply",
+          4,
+          "r"
+         ]
+        ],
+        [
+         "Power",
+         "n",
+         2
+        ]
+       ],
+       4
+      ],
+      [
+       "Apply",
+       [
+        "Derivative",
+        [
+         "Function",
+         [
+          "BesselI",
+          "n",
+          "z"
+         ],
+         "z"
+        ],
+        [
+         "Add",
+         "r",
+         2
+        ]
+       ],
+       0
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Multiply",
+       [
+        "Add",
+        "r",
+        1
+       ],
+       [
+        "Add",
+        "r",
+        2
+       ]
+      ],
+      [
+       "Apply",
+       [
+        "Derivative",
+        [
+         "Function",
+         [
+          "BesselI",
+          "n",
+          "z"
+         ],
+         "z"
+        ],
+        "r"
+       ],
+       0
+      ]
+     ]
+    ],
+    0
+   ],
+   "variables": [
+    "n",
+    "r"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "Element",
+     "r",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BesselI",
+    "Derivative"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "fd9add",
+   "formula": [
+    "Equal",
+    [
+     "Subtract",
+     [
+      "Add",
+      [
+       "Multiply",
+       [
+        "Power",
+        "z",
+        2
+       ],
+       [
+        "Apply",
+        [
+         "Derivative",
+         [
+          "Function",
+          [
+           "BesselK",
+           "nu",
+           "z"
+          ],
+          "z"
+         ],
+         2
+        ],
+        "z"
+       ]
+      ],
+      [
+       "Multiply",
+       "z",
+       [
+        "Apply",
+        [
+         "Derivative",
+         [
+          "Function",
+          [
+           "BesselK",
+           "nu",
+           "z"
+          ],
+          "z"
+         ],
+         1
+        ],
+        "z"
+       ]
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Add",
+       [
+        "Power",
+        "z",
+        2
+       ],
+       [
+        "Power",
+        "nu",
+        2
+       ]
+      ],
+      [
+       "BesselK",
+       "nu",
+       "z"
+      ]
+     ]
+    ],
+    0
+   ],
+   "variables": [
+    "nu",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "nu",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "z",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      [
+       "Set",
+       0
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BesselK",
+    "Derivative"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  },
+  {
+   "id": "fda595",
+   "formula": [
+    "Equal",
+    [
+     "BesselK",
+     [
+      "Negate",
+      [
+       "Divide",
+       1,
+       3
+      ]
+     ],
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      [
+       "Multiply",
+       [
+        "Sqrt",
+        3
+       ],
+       "Pi"
+      ],
+      [
+       "Power",
+       [
+        "Divide",
+        [
+         "Multiply",
+         3,
+         "z"
+        ],
+        2
+       ],
+       [
+        "Divide",
+        1,
+        3
+       ]
+      ]
+     ],
+     [
+      "AiryAi",
+      [
+       "Power",
+       [
+        "Power",
+        [
+         "Divide",
+         [
+          "Multiply",
+          3,
+          "z"
+         ],
+         2
+        ],
+        [
+         "Divide",
+         1,
+         3
+        ]
+       ],
+       2
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     [
+      "Set",
+      0
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "AiryAi",
+    "BesselK"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "bessel"
+   ]
+  }
+ ]
+}

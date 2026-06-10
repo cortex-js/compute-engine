@@ -1,0 +1,528 @@
+{
+ "topic": "halphen_constant",
+ "title": "Halphen's constant",
+ "source": "pygrim/formulas/halphen_constant.py",
+ "generator": "grim2mathjson 0.1.0",
+ "entries": [
+  {
+   "id": "06c468",
+   "formula": [
+    "Equal",
+    "HalphenConstant",
+    [
+     "UniqueZero",
+     [
+      "Function",
+      [
+       "JacobiTheta",
+       2,
+       0,
+       [
+        "Divide",
+        [
+         "Ln",
+         [
+          "Negate",
+          "x"
+         ]
+        ],
+        [
+         "Multiply",
+         [
+          "Multiply",
+          2,
+          "Pi"
+         ],
+         "ImaginaryUnit"
+        ]
+       ],
+       2
+      ],
+      "x"
+     ],
+     [
+      "Interval",
+      [
+       "Open",
+       0
+      ],
+      [
+       "Open",
+       1
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "HalphenConstant",
+    "JacobiTheta",
+    "Ln",
+    "UniqueZero"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "halphen_constant"
+   ]
+  },
+  {
+   "id": "31adf6",
+   "formula": [
+    "Equal",
+    "HalphenConstant",
+    [
+     "UniqueZero",
+     [
+      "Function",
+      [
+       "Sum",
+       [
+        "Multiply",
+        [
+         "Power",
+         [
+          "Add",
+          [
+           "Multiply",
+           2,
+           "n"
+          ],
+          1
+         ],
+         2
+        ],
+        [
+         "Power",
+         [
+          "Negate",
+          "x"
+         ],
+         [
+          "Divide",
+          [
+           "Multiply",
+           "n",
+           [
+            "Add",
+            "n",
+            1
+           ]
+          ],
+          2
+         ]
+        ]
+       ],
+       [
+        "Limits",
+        "n",
+        0,
+        "PositiveInfinity"
+       ]
+      ],
+      "x"
+     ],
+     [
+      "Interval",
+      [
+       "Open",
+       0
+      ],
+      [
+       "Open",
+       1
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "HalphenConstant",
+    "Sum",
+    "UniqueZero"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "halphen_constant"
+   ]
+  },
+  {
+   "id": "831ea4",
+   "formula": [
+    "Equal",
+    "HalphenConstant",
+    [
+     "UniqueZero",
+     [
+      "Function",
+      [
+       "Add",
+       [
+        "Negate",
+        [
+         "Divide",
+         1,
+         8
+        ]
+       ],
+       [
+        "Sum",
+        [
+         "Multiply",
+         [
+          "Abs",
+          [
+           "Sum",
+           [
+            "Multiply",
+            [
+             "Power",
+             -1,
+             "d"
+            ],
+            "d"
+           ],
+           [
+            "Element",
+            "d",
+            [
+             "Divisors",
+             "n"
+            ]
+           ]
+          ]
+         ],
+         [
+          "Power",
+          "x",
+          "n"
+         ]
+        ],
+        [
+         "Limits",
+         "n",
+         1,
+         "PositiveInfinity"
+        ]
+       ]
+      ],
+      "x"
+     ],
+     [
+      "Interval",
+      [
+       "Open",
+       0
+      ],
+      [
+       "Open",
+       1
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Divisors",
+    "HalphenConstant",
+    "Sum",
+    "UniqueZero"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "halphen_constant"
+   ]
+  },
+  {
+   "id": "9758ac",
+   "formula": [
+    "Equal",
+    "HalphenConstant",
+    [
+     "UniqueZero",
+     [
+      "Function",
+      [
+       "Add",
+       [
+        "Negate",
+        [
+         "Divide",
+         1,
+         8
+        ]
+       ],
+       [
+        "Sum",
+        [
+         "Divide",
+         [
+          "Multiply",
+          "n",
+          [
+           "Power",
+           "x",
+           "n"
+          ]
+         ],
+         [
+          "Subtract",
+          1,
+          [
+           "Power",
+           [
+            "Negate",
+            "x"
+           ],
+           "n"
+          ]
+         ]
+        ],
+        [
+         "Limits",
+         "n",
+         1,
+         "PositiveInfinity"
+        ]
+       ]
+      ],
+      "x"
+     ],
+     [
+      "Interval",
+      [
+       "Open",
+       0
+      ],
+      [
+       "Open",
+       1
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "HalphenConstant",
+    "Sum",
+    "UniqueZero"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "halphen_constant"
+   ]
+  },
+  {
+   "id": "c26bc9",
+   "formula": [
+    "Equal",
+    "HalphenConstant",
+    [
+     "Exp",
+     [
+      "Negate",
+      [
+       "Divide",
+       [
+        "Multiply",
+        "Pi",
+        [
+         "EllipticK",
+         [
+          "Subtract",
+          1,
+          [
+           "UniqueZero",
+           [
+            "Function",
+            [
+             "Subtract",
+             [
+              "EllipticK",
+              "m"
+             ],
+             [
+              "Multiply",
+              2,
+              [
+               "EllipticE",
+               "m"
+              ]
+             ]
+            ],
+            "m"
+           ],
+           [
+            "Interval",
+            [
+             "Open",
+             0
+            ],
+            [
+             "Open",
+             1
+            ]
+           ]
+          ]
+         ]
+        ]
+       ],
+       [
+        "EllipticK",
+        [
+         "UniqueZero",
+         [
+          "Function",
+          [
+           "Subtract",
+           [
+            "EllipticK",
+            "m"
+           ],
+           [
+            "Multiply",
+            2,
+            [
+             "EllipticE",
+             "m"
+            ]
+           ]
+          ],
+          "m"
+         ],
+         [
+          "Interval",
+          [
+           "Open",
+           0
+          ],
+          [
+           "Open",
+           1
+          ]
+         ]
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "EllipticE",
+    "EllipticK",
+    "Exp",
+    "HalphenConstant",
+    "UniqueZero"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "halphen_constant"
+   ]
+  },
+  {
+   "id": "d0993b",
+   "formula": [
+    "NotEqual",
+    "HalphenConstant",
+    [
+     "Divide",
+     1,
+     9
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "HalphenConstant"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "halphen_constant"
+   ]
+  },
+  {
+   "id": "e2bfdb",
+   "formula": [
+    "EqualNearestDecimal",
+    "HalphenConstant",
+    {
+     "num": "0.10765391922648457661532344509094719058797656329012"
+    },
+    50
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "EqualNearestDecimal",
+    "HalphenConstant"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": [],
+   "topics": [
+    "halphen_constant"
+   ]
+  },
+  {
+   "id": "f5e0b0",
+   "formula": [
+    "EqualNearestDecimal",
+    [
+     "Divide",
+     1,
+     "HalphenConstant"
+    ],
+    {
+     "num": "9.2890254919208189187554494359517450610316948677501"
+    },
+    50
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "EqualNearestDecimal",
+    "HalphenConstant"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": [],
+   "topics": [
+    "halphen_constant"
+   ]
+  }
+ ]
+}

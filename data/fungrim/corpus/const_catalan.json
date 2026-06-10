@@ -1,0 +1,1803 @@
+{
+ "topic": "const_catalan",
+ "title": "Catalan's constant",
+ "source": "pygrim/formulas/const_catalan.py",
+ "generator": "grim2mathjson 0.1.0",
+ "entries": [
+  {
+   "id": "08cda4",
+   "formula": [
+    "Equal",
+    "CatalanConstant",
+    [
+     "Negate",
+     [
+      "Integrate",
+      [
+       "Ln",
+       [
+        "Tan",
+        "x"
+       ]
+      ],
+      [
+       "Limits",
+       "x",
+       0,
+       [
+        "Divide",
+        "Pi",
+        4
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Integrate",
+    "Ln",
+    "Tan"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "const_catalan"
+   ]
+  },
+  {
+   "id": "0bd544",
+   "formula": [
+    "Equal",
+    "CatalanConstant",
+    [
+     "Add",
+     [
+      "Multiply",
+      [
+       "Divide",
+       "Pi",
+       8
+      ],
+      [
+       "Ln",
+       [
+        "Add",
+        2,
+        [
+         "Sqrt",
+         3
+        ]
+       ]
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Divide",
+       3,
+       8
+      ],
+      [
+       "Sum",
+       [
+        "Divide",
+        1,
+        [
+         "Multiply",
+         [
+          "Power",
+          [
+           "Add",
+           [
+            "Multiply",
+            2,
+            "n"
+           ],
+           1
+          ],
+          2
+         ],
+         [
+          "Binomial",
+          [
+           "Multiply",
+           2,
+           "n"
+          ],
+          "n"
+         ]
+        ]
+       ],
+       [
+        "Limits",
+        "n",
+        0,
+        "PositiveInfinity"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Binomial",
+    "Ln",
+    "Sum"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "const_catalan"
+   ]
+  },
+  {
+   "id": "1d65c2",
+   "formula": [
+    "Equal",
+    "CatalanConstant",
+    [
+     "Imaginary",
+     [
+      "PolyLog",
+      2,
+      "ImaginaryUnit"
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Imaginary",
+    "PolyLog"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "const_catalan"
+   ]
+  },
+  {
+   "id": "1f1fb4",
+   "formula": [
+    "Equal",
+    "CatalanConstant",
+    [
+     "Multiply",
+     [
+      "Divide",
+      1,
+      2
+     ],
+     [
+      "Integrate",
+      [
+       "EllipticK",
+       [
+        "Power",
+        "m",
+        2
+       ]
+      ],
+      [
+       "Limits",
+       "m",
+       0,
+       1
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "EllipticK",
+    "Integrate"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "const_catalan"
+   ]
+  },
+  {
+   "id": "270e67",
+   "formula": [
+    "Equal",
+    "CatalanConstant",
+    [
+     "Integrate",
+     [
+      "Ln",
+      [
+       "Cot",
+       "x"
+      ]
+     ],
+     [
+      "Limits",
+      "x",
+      0,
+      [
+       "Divide",
+       "Pi",
+       4
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Cot",
+    "Integrate",
+    "Ln"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "const_catalan"
+   ]
+  },
+  {
+   "id": "2744d4",
+   "formula": [
+    "Equal",
+    "CatalanConstant",
+    [
+     "Multiply",
+     [
+      "Divide",
+      1,
+      8
+     ],
+     [
+      "Subtract",
+      [
+       "Digamma",
+       [
+        "Divide",
+        1,
+        4
+       ],
+       1
+      ],
+      [
+       "Power",
+       "Pi",
+       2
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Digamma"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "const_catalan"
+   ]
+  },
+  {
+   "id": "33aa62",
+   "formula": [
+    "Equal",
+    "CatalanConstant",
+    [
+     "Sum",
+     [
+      "Divide",
+      [
+       "Power",
+       -1,
+       "n"
+      ],
+      [
+       "Power",
+       [
+        "Add",
+        [
+         "Multiply",
+         2,
+         "n"
+        ],
+        1
+       ],
+       2
+      ]
+     ],
+     [
+      "Limits",
+      "n",
+      0,
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Sum"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "const_catalan"
+   ]
+  },
+  {
+   "id": "37fb5f",
+   "formula": [
+    "Equal",
+    "CatalanConstant",
+    [
+     "Multiply",
+     [
+      "Divide",
+      1,
+      64
+     ],
+     [
+      "Sum",
+      [
+       "Divide",
+       [
+        "Multiply",
+        [
+         "Power",
+         256,
+         "n"
+        ],
+        [
+         "Add",
+         [
+          "Subtract",
+          [
+           "Multiply",
+           580,
+           [
+            "Power",
+            "n",
+            2
+           ]
+          ],
+          [
+           "Multiply",
+           184,
+           "n"
+          ]
+         ],
+         15
+        ]
+       ],
+       [
+        "Multiply",
+        [
+         "Multiply",
+         [
+          "Multiply",
+          [
+           "Multiply",
+           [
+            "Power",
+            "n",
+            3
+           ],
+           [
+            "Subtract",
+            [
+             "Multiply",
+             2,
+             "n"
+            ],
+            1
+           ]
+          ],
+          [
+           "Binomial",
+           [
+            "Multiply",
+            6,
+            "n"
+           ],
+           [
+            "Multiply",
+            3,
+            "n"
+           ]
+          ]
+         ],
+         [
+          "Binomial",
+          [
+           "Multiply",
+           6,
+           "n"
+          ],
+          [
+           "Multiply",
+           4,
+           "n"
+          ]
+         ]
+        ],
+        [
+         "Binomial",
+         [
+          "Multiply",
+          4,
+          "n"
+         ],
+         [
+          "Multiply",
+          2,
+          "n"
+         ]
+        ]
+       ]
+      ],
+      [
+       "Limits",
+       "n",
+       1,
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Binomial",
+    "Sum"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": [
+    "https://hal.inria.fr/hal-00990465/"
+   ],
+   "topics": [
+    "const_catalan"
+   ]
+  },
+  {
+   "id": "38c2d5",
+   "formula": [
+    "Equal",
+    "CatalanConstant",
+    [
+     "Integrate",
+     [
+      "Divide",
+      [
+       "Arsinh",
+       "x"
+      ],
+      [
+       "Sqrt",
+       [
+        "Subtract",
+        1,
+        [
+         "Power",
+         "x",
+         2
+        ]
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "x",
+      0,
+      1
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Arsinh",
+    "Integrate"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "const_catalan"
+   ]
+  },
+  {
+   "id": "49df16",
+   "formula": [
+    "Equal",
+    "CatalanConstant",
+    [
+     "Integrate",
+     [
+      "Divide",
+      [
+       "Ln",
+       "x"
+      ],
+      [
+       "Add",
+       [
+        "Power",
+        "x",
+        2
+       ],
+       1
+      ]
+     ],
+     [
+      "Limits",
+      "x",
+      1,
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Integrate",
+    "Ln"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "const_catalan"
+   ]
+  },
+  {
+   "id": "4c166d",
+   "formula": [
+    "Equal",
+    "CatalanConstant",
+    [
+     "Multiply",
+     [
+      "Divide",
+      1,
+      4
+     ],
+     [
+      "LerchPhi",
+      -1,
+      2,
+      [
+       "Divide",
+       1,
+       2
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "LerchPhi"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "const_catalan"
+   ]
+  },
+  {
+   "id": "4dec89",
+   "formula": [
+    "Equal",
+    "CatalanConstant",
+    [
+     "Integrate",
+     [
+      "Arsinh",
+      [
+       "Sin",
+       "x"
+      ]
+     ],
+     [
+      "Limits",
+      "x",
+      0,
+      [
+       "Divide",
+       "Pi",
+       2
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Arsinh",
+    "Integrate",
+    "Sin"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "const_catalan"
+   ]
+  },
+  {
+   "id": "5b31ee",
+   "formula": [
+    "Equal",
+    "CatalanConstant",
+    [
+     "Integrate",
+     [
+      "Integrate",
+      [
+       "Divide",
+       1,
+       [
+        "Add",
+        1,
+        [
+         "Multiply",
+         [
+          "Power",
+          "x",
+          2
+         ],
+         [
+          "Power",
+          "y",
+          2
+         ]
+        ]
+       ]
+      ],
+      [
+       "Limits",
+       "x",
+       0,
+       1
+      ]
+     ],
+     [
+      "Limits",
+      "y",
+      0,
+      1
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Integrate"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "const_catalan"
+   ]
+  },
+  {
+   "id": "6a83ad",
+   "formula": [
+    "Element",
+    "CatalanConstant",
+    [
+     "RealBall",
+     {
+      "num": "0.91596559417721901505460351493238411077414937428167"
+     },
+     {
+      "num": "2.14e-51"
+     }
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "RealBall"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "const_catalan"
+   ]
+  },
+  {
+   "id": "6d3591",
+   "formula": [
+    "Equal",
+    "CatalanConstant",
+    [
+     "Multiply",
+     2,
+     [
+      "Integrate",
+      [
+       "Ln",
+       [
+        "Multiply",
+        2,
+        [
+         "Cos",
+         "x"
+        ]
+       ]
+      ],
+      [
+       "Limits",
+       "x",
+       0,
+       [
+        "Divide",
+        "Pi",
+        4
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Cos",
+    "Integrate",
+    "Ln"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "const_catalan"
+   ]
+  },
+  {
+   "id": "79f20e",
+   "formula": [
+    "Equal",
+    "CatalanConstant",
+    [
+     "Integrate",
+     [
+      "Divide",
+      "x",
+      [
+       "Multiply",
+       [
+        "Sin",
+        "x"
+       ],
+       [
+        "Cos",
+        "x"
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "x",
+      0,
+      [
+       "Divide",
+       "Pi",
+       4
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Cos",
+    "Integrate",
+    "Sin"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "const_catalan"
+   ]
+  },
+  {
+   "id": "937fa9",
+   "formula": [
+    "Equal",
+    "CatalanConstant",
+    [
+     "Multiply",
+     [
+      "Divide",
+      "Pi",
+      2
+     ],
+     [
+      "Integrate",
+      [
+       "Multiply",
+       [
+        "Gamma",
+        [
+         "Add",
+         1,
+         "x"
+        ]
+       ],
+       [
+        "Gamma",
+        [
+         "Subtract",
+         1,
+         "x"
+        ]
+       ]
+      ],
+      [
+       "Limits",
+       "x",
+       0,
+       [
+        "Divide",
+        1,
+        2
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Gamma",
+    "Integrate"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "const_catalan"
+   ]
+  },
+  {
+   "id": "997777",
+   "formula": [
+    "Equal",
+    "CatalanConstant",
+    [
+     "Subtract",
+     [
+      "Add",
+      [
+       "Divide",
+       [
+        "Power",
+        "Pi",
+        2
+       ],
+       16
+      ],
+      [
+       "Divide",
+       [
+        "Multiply",
+        "Pi",
+        [
+         "Ln",
+         2
+        ]
+       ],
+       4
+      ]
+     ],
+     [
+      "Integrate",
+      [
+       "Power",
+       [
+        "Arctan",
+        "x"
+       ],
+       2
+      ],
+      [
+       "Limits",
+       "x",
+       0,
+       1
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Arctan",
+    "Integrate",
+    "Ln"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "const_catalan"
+   ]
+  },
+  {
+   "id": "9e9922",
+   "formula": [
+    "Equal",
+    "CatalanConstant",
+    [
+     "DirichletL",
+     2,
+     [
+      "DirichletCharacter",
+      4,
+      3
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "DirichletCharacter",
+    "DirichletL"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "const_catalan"
+   ]
+  },
+  {
+   "id": "a766f2",
+   "formula": [
+    "Equal",
+    "CatalanConstant",
+    [
+     "Hypergeometric3F2",
+     [
+      "Divide",
+      1,
+      2
+     ],
+     [
+      "Divide",
+      1,
+      2
+     ],
+     1,
+     [
+      "Divide",
+      3,
+      2
+     ],
+     [
+      "Divide",
+      3,
+      2
+     ],
+     -1
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Hypergeometric3F2"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "const_catalan"
+   ]
+  },
+  {
+   "id": "a8657e",
+   "formula": [
+    "Equal",
+    "CatalanConstant",
+    [
+     "Subtract",
+     1,
+     [
+      "Sum",
+      [
+       "Divide",
+       [
+        "Multiply",
+        "n",
+        [
+         "Zeta",
+         [
+          "Add",
+          [
+           "Multiply",
+           2,
+           "n"
+          ],
+          1
+         ]
+        ]
+       ],
+       [
+        "Power",
+        16,
+        "n"
+       ]
+      ],
+      [
+       "Limits",
+       "n",
+       1,
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Sum",
+    "Zeta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "const_catalan"
+   ]
+  },
+  {
+   "id": "ba58e0",
+   "formula": [
+    "Equal",
+    "CatalanConstant",
+    [
+     "Integrate",
+     [
+      "Divide",
+      [
+       "Arctan",
+       "x"
+      ],
+      "x"
+     ],
+     [
+      "Limits",
+      "x",
+      0,
+      1
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Arctan",
+    "Integrate"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "const_catalan"
+   ]
+  },
+  {
+   "id": "c54c85",
+   "formula": [
+    "Equal",
+    "CatalanConstant",
+    [
+     "Multiply",
+     [
+      "Divide",
+      1,
+      2
+     ],
+     [
+      "Integrate",
+      [
+       "Divide",
+       "x",
+       [
+        "Cosh",
+        "x"
+       ]
+      ],
+      [
+       "Limits",
+       "x",
+       0,
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Cosh",
+    "Integrate"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "const_catalan"
+   ]
+  },
+  {
+   "id": "d3cfc2",
+   "formula": [
+    "Equal",
+    "CatalanConstant",
+    [
+     "Subtract",
+     [
+      "Integrate",
+      [
+       "EllipticE",
+       [
+        "Power",
+        "m",
+        2
+       ]
+      ],
+      [
+       "Limits",
+       "m",
+       0,
+       1
+      ]
+     ],
+     [
+      "Divide",
+      1,
+      2
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "EllipticE",
+    "Integrate"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "const_catalan"
+   ]
+  },
+  {
+   "id": "d43f30",
+   "formula": [
+    "Equal",
+    "CatalanConstant",
+    [
+     "Multiply",
+     [
+      "Divide",
+      1,
+      2
+     ],
+     [
+      "Sum",
+      [
+       "Divide",
+       [
+        "Power",
+        4,
+        "n"
+       ],
+       [
+        "Multiply",
+        [
+         "Power",
+         [
+          "Add",
+          [
+           "Multiply",
+           2,
+           "n"
+          ],
+          1
+         ],
+         2
+        ],
+        [
+         "Binomial",
+         [
+          "Multiply",
+          2,
+          "n"
+         ],
+         "n"
+        ]
+       ]
+      ],
+      [
+       "Limits",
+       "n",
+       0,
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Binomial",
+    "Sum"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "const_catalan"
+   ]
+  },
+  {
+   "id": "d6415e",
+   "formula": [
+    "Equal",
+    "CatalanConstant",
+    [
+     "Integrate",
+     [
+      "Arsinh",
+      [
+       "Cos",
+       "x"
+      ]
+     ],
+     [
+      "Limits",
+      "x",
+      0,
+      [
+       "Divide",
+       "Pi",
+       2
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Arsinh",
+    "Cos",
+    "Integrate"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "const_catalan"
+   ]
+  },
+  {
+   "id": "d6703a",
+   "formula": [
+    "Equal",
+    "CatalanConstant",
+    [
+     "Add",
+     [
+      "Divide",
+      [
+       "Multiply",
+       7,
+       [
+        "Zeta",
+        3
+       ]
+      ],
+      [
+       "Multiply",
+       4,
+       "Pi"
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Divide",
+       2,
+       "Pi"
+      ],
+      [
+       "Integrate",
+       [
+        "Divide",
+        [
+         "Power",
+         [
+          "Arctan",
+          "x"
+         ],
+         2
+        ],
+        "x"
+       ],
+       [
+        "Limits",
+        "x",
+        0,
+        1
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Arctan",
+    "Integrate",
+    "Zeta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "const_catalan"
+   ]
+  },
+  {
+   "id": "d864b2",
+   "formula": [
+    "Equal",
+    "CatalanConstant",
+    [
+     "Negate",
+     [
+      "Integrate",
+      [
+       "Divide",
+       [
+        "Ln",
+        "x"
+       ],
+       [
+        "Add",
+        [
+         "Power",
+         "x",
+         2
+        ],
+        1
+       ]
+      ],
+      [
+       "Limits",
+       "x",
+       0,
+       1
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Integrate",
+    "Ln"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "const_catalan"
+   ]
+  },
+  {
+   "id": "e09b77",
+   "formula": [
+    "Equal",
+    "CatalanConstant",
+    [
+     "Negate",
+     [
+      "Multiply",
+      2,
+      [
+       "Integrate",
+       [
+        "Ln",
+        [
+         "Multiply",
+         2,
+         [
+          "Sin",
+          "x"
+         ]
+        ]
+       ],
+       [
+        "Limits",
+        "x",
+        0,
+        [
+         "Divide",
+         "Pi",
+         4
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Integrate",
+    "Ln",
+    "Sin"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "const_catalan"
+   ]
+  },
+  {
+   "id": "e85723",
+   "formula": [
+    "Equal",
+    "CatalanConstant",
+    [
+     "Multiply",
+     [
+      "Divide",
+      1,
+      16
+     ],
+     [
+      "Subtract",
+      [
+       "HurwitzZeta",
+       2,
+       [
+        "Divide",
+        1,
+        4
+       ]
+      ],
+      [
+       "HurwitzZeta",
+       2,
+       [
+        "Divide",
+        3,
+        4
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "HurwitzZeta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "const_catalan"
+   ]
+  },
+  {
+   "id": "ec1435",
+   "formula": [
+    "Equal",
+    "CatalanConstant",
+    [
+     "Multiply",
+     [
+      "Divide",
+      1,
+      4
+     ],
+     [
+      "Integrate",
+      [
+       "Divide",
+       "x",
+       [
+        "Sin",
+        "x"
+       ]
+      ],
+      [
+       "Limits",
+       "x",
+       [
+        "Negate",
+        [
+         "Divide",
+         "Pi",
+         2
+        ]
+       ],
+       [
+        "Divide",
+        "Pi",
+        2
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Integrate",
+    "Sin"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "const_catalan"
+   ]
+  },
+  {
+   "id": "ed4cca",
+   "formula": [
+    "Equal",
+    "CatalanConstant",
+    [
+     "Multiply",
+     [
+      "Divide",
+      1,
+      4
+     ],
+     [
+      "Integrate",
+      [
+       "Integrate",
+       [
+        "Divide",
+        1,
+        [
+         "Multiply",
+         [
+          "Multiply",
+          [
+           "Add",
+           "x",
+           "y"
+          ],
+          [
+           "Sqrt",
+           [
+            "Subtract",
+            1,
+            "x"
+           ]
+          ]
+         ],
+         [
+          "Sqrt",
+          [
+           "Subtract",
+           1,
+           "y"
+          ]
+         ]
+        ]
+       ],
+       [
+        "Limits",
+        "x",
+        0,
+        1
+       ]
+      ],
+      [
+       "Limits",
+       "y",
+       0,
+       1
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Integrate"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "const_catalan"
+   ]
+  },
+  {
+   "id": "fc5ea9",
+   "formula": [
+    "Equal",
+    "CatalanConstant",
+    [
+     "Integrate",
+     [
+      "Arctan",
+      [
+       "Exp",
+       [
+        "Negate",
+        "x"
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "x",
+      0,
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Arctan",
+    "Exp",
+    "Integrate"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "const_catalan"
+   ]
+  },
+  {
+   "id": "fd82ab",
+   "formula": [
+    "Equal",
+    "CatalanConstant",
+    [
+     "Integrate",
+     [
+      "Divide",
+      [
+       "Arccos",
+       "x"
+      ],
+      [
+       "Sqrt",
+       [
+        "Add",
+        [
+         "Power",
+         "x",
+         2
+        ],
+        1
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "x",
+      0,
+      1
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Arccos",
+    "Integrate"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "const_catalan"
+   ]
+  }
+ ]
+}

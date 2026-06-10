@@ -1,0 +1,4341 @@
+{
+ "topic": "pi",
+ "title": "Pi",
+ "source": "pygrim/formulas/pi.py",
+ "generator": "grim2mathjson 0.1.0",
+ "entries": [
+  {
+   "id": "030560",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "Multiply",
+     10,
+     [
+      "Arcsin",
+      [
+       "Divide",
+       1,
+       [
+        "Multiply",
+        2,
+        "GoldenRatio"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Arcsin"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "033c51",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "EisensteinG",
+     2,
+     "ImaginaryUnit"
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "EisensteinG"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "0479f5",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "Add",
+     [
+      "Subtract",
+      [
+       "Multiply",
+       72,
+       [
+        "Sum",
+        [
+         "Divide",
+         1,
+         [
+          "Multiply",
+          "n",
+          [
+           "Subtract",
+           [
+            "Exp",
+            [
+             "Multiply",
+             "Pi",
+             "n"
+            ]
+           ],
+           1
+          ]
+         ]
+        ],
+        [
+         "Limits",
+         "n",
+         1,
+         "PositiveInfinity"
+        ]
+       ]
+      ],
+      [
+       "Multiply",
+       96,
+       [
+        "Sum",
+        [
+         "Divide",
+         1,
+         [
+          "Multiply",
+          "n",
+          [
+           "Subtract",
+           [
+            "Exp",
+            [
+             "Multiply",
+             [
+              "Multiply",
+              2,
+              "Pi"
+             ],
+             "n"
+            ]
+           ],
+           1
+          ]
+         ]
+        ],
+        [
+         "Limits",
+         "n",
+         1,
+         "PositiveInfinity"
+        ]
+       ]
+      ]
+     ],
+     [
+      "Multiply",
+      24,
+      [
+       "Sum",
+       [
+        "Divide",
+        1,
+        [
+         "Multiply",
+         "n",
+         [
+          "Subtract",
+          [
+           "Exp",
+           [
+            "Multiply",
+            [
+             "Multiply",
+             4,
+             "Pi"
+            ],
+            "n"
+           ]
+          ],
+          1
+         ]
+        ]
+       ],
+       [
+        "Limits",
+        "n",
+        1,
+        "PositiveInfinity"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Exp",
+    "Sum"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": [
+    "http://www.lacim.uqam.ca/~plouffe/inspired2.pdf"
+   ],
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "04cd99",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "Integrate",
+     [
+      "Divide",
+      1,
+      [
+       "Add",
+       [
+        "Power",
+        "x",
+        2
+       ],
+       1
+      ]
+     ],
+     [
+      "Limits",
+      "x",
+      "NegativeInfinity",
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Integrate"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "0644b6",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "Add",
+     [
+      "Multiply",
+      8,
+      [
+       "Arctan",
+       [
+        "Divide",
+        1,
+        3
+       ]
+      ]
+     ],
+     [
+      "Multiply",
+      4,
+      [
+       "Arctan",
+       [
+        "Divide",
+        1,
+        7
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Arctan"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "07e35f",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "Multiply",
+     2,
+     [
+      "EllipticE",
+      0
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "EllipticE"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "0c838a",
+   "formula": [
+    "NotElement",
+    "Pi",
+    "RationalNumbers"
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "numbers",
+    "pi"
+   ]
+  },
+  {
+   "id": "0c9939",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "Multiply",
+     4,
+     [
+      "Arctan",
+      1
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Arctan"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "11302a",
+   "formula": [
+    "Equal",
+    [
+     "Divide",
+     [
+      "Power",
+      "Pi",
+      2
+     ],
+     12
+    ],
+    [
+     "Sum",
+     [
+      "Divide",
+      [
+       "Power",
+       -1,
+       [
+        "Add",
+        "n",
+        1
+       ]
+      ],
+      [
+       "Power",
+       "n",
+       2
+      ]
+     ],
+     [
+      "Limits",
+      "n",
+      1,
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Sum"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "1448e3",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "Multiply",
+     2,
+     [
+      "Hypergeometric2F1",
+      [
+       "Divide",
+       1,
+       2
+      ],
+      [
+       "Divide",
+       1,
+       2
+      ],
+      [
+       "Divide",
+       3,
+       2
+      ],
+      1
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Hypergeometric2F1"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "155575",
+   "formula": [
+    "NotElement",
+    "Pi",
+    "AlgebraicNumbers"
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "numbers",
+    "pi"
+   ]
+  },
+  {
+   "id": "1e3a25",
+   "formula": [
+    "Less",
+    [
+     "Abs",
+     [
+      "Subtract",
+      "Pi",
+      [
+       "Divide",
+       355,
+       113
+      ]
+     ]
+    ],
+    {
+     "num": "2.67e-7"
+    }
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "220e8d",
+   "formula": [
+    "Equal",
+    [
+     "Divide",
+     3,
+     [
+      "Power",
+      "Pi",
+      2
+     ]
+    ],
+    [
+     "Limit",
+     [
+      "Function",
+      [
+       "Multiply",
+       [
+        "Divide",
+        1,
+        [
+         "Power",
+         "N_var",
+         2
+        ]
+       ],
+       [
+        "Sum",
+        [
+         "Totient",
+         "n"
+        ],
+        [
+         "Limits",
+         "n",
+         1,
+         "N_var"
+        ]
+       ]
+      ],
+      "N_var"
+     ],
+     "PositiveInfinity"
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "limit",
+   "heads": [
+    "Limit",
+    "Sum",
+    "Totient"
+   ],
+   "guardLevel": "none",
+   "flavor": "sequence",
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "2371b9",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "Multiply",
+     [
+      "Divide",
+      [
+       "Sqrt",
+       3
+      ],
+      2
+     ],
+     [
+      "Multiply",
+      [
+       "Gamma",
+       [
+        "Divide",
+        1,
+        3
+       ]
+      ],
+      [
+       "Gamma",
+       [
+        "Divide",
+        2,
+        3
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Gamma"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "2516c2",
+   "formula": [
+    "Less",
+    [
+     "Abs",
+     [
+      "Subtract",
+      "Pi",
+      [
+       "Divide",
+       22,
+       7
+      ]
+     ]
+    ],
+    {
+     "num": "0.00127"
+    }
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "271314",
+   "formula": [
+    "Equal",
+    [
+     "Add",
+     [
+      "Exp",
+      [
+       "Multiply",
+       "Pi",
+       "ImaginaryUnit"
+      ]
+     ],
+     1
+    ],
+    0
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Exp"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "2806fd",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "Multiply",
+     [
+      "Divide",
+      9,
+      [
+       "Multiply",
+       2,
+       [
+        "Sqrt",
+        3
+       ]
+      ]
+     ],
+     [
+      "Hypergeometric2F1",
+      1,
+      1,
+      [
+       "Divide",
+       3,
+       2
+      ],
+      [
+       "Divide",
+       1,
+       4
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Hypergeometric2F1"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "2a0316",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "Multiply",
+     2,
+     [
+      "Hypergeometric2F1",
+      [
+       "Negate",
+       [
+        "Divide",
+        1,
+        2
+       ]
+      ],
+      [
+       "Negate",
+       [
+        "Divide",
+        1,
+        2
+       ]
+      ],
+      [
+       "Divide",
+       1,
+       2
+      ],
+      1
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Hypergeometric2F1"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "31eecc",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "Multiply",
+     2,
+     [
+      "Sum",
+      [
+       "Arctan",
+       [
+        "Divide",
+        1,
+        [
+         "Fibonacci",
+         [
+          "Add",
+          [
+           "Multiply",
+           2,
+           "n"
+          ],
+          1
+         ]
+        ]
+       ]
+      ],
+      [
+       "Limits",
+       "n",
+       0,
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Arctan",
+    "Fibonacci",
+    "Sum"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "338055",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "Multiply",
+     8,
+     [
+      "Sum",
+      [
+       "Divide",
+       1,
+       [
+        "Multiply",
+        [
+         "Add",
+         [
+          "Multiply",
+          4,
+          "n"
+         ],
+         1
+        ],
+        [
+         "Add",
+         [
+          "Multiply",
+          4,
+          "n"
+         ],
+         3
+        ]
+       ]
+      ],
+      [
+       "Limits",
+       "n",
+       0,
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Sum"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "3d276b",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "Subtract",
+     [
+      "Multiply",
+      12,
+      [
+       "Hypergeometric2F1",
+       [
+        "Negate",
+        [
+         "Divide",
+         1,
+         2
+        ]
+       ],
+       [
+        "Negate",
+        [
+         "Divide",
+         1,
+         2
+        ]
+       ],
+       [
+        "Divide",
+        1,
+        2
+       ],
+       [
+        "Divide",
+        1,
+        4
+       ]
+      ]
+     ],
+     [
+      "Multiply",
+      6,
+      [
+       "Sqrt",
+       3
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Hypergeometric2F1"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "3ff35f",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "Multiply",
+     2,
+     [
+      "Arccos",
+      0
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Arccos"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "419b45",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "Sum",
+     [
+      "Divide",
+      [
+       "Factorial",
+       "n"
+      ],
+      [
+       "Factorial2",
+       [
+        "Add",
+        [
+         "Multiply",
+         2,
+         "n"
+        ],
+        1
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "n",
+      0,
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Factorial",
+    "Factorial2",
+    "Sum"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "420007",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "Limit",
+     [
+      "Function",
+      [
+       "Multiply",
+       [
+        "Divide",
+        1,
+        2
+       ],
+       [
+        "Power",
+        [
+         "Multiply",
+         [
+          "Power",
+          -1,
+          [
+           "Add",
+           "n",
+           1
+          ]
+         ],
+         [
+          "Divide",
+          [
+           "Factorial",
+           [
+            "Multiply",
+            2,
+            "n"
+           ]
+          ],
+          [
+           "BernoulliB",
+           [
+            "Multiply",
+            2,
+            "n"
+           ]
+          ]
+         ]
+        ],
+        [
+         "Divide",
+         1,
+         [
+          "Multiply",
+          2,
+          "n"
+         ]
+        ]
+       ]
+      ],
+      "n"
+     ],
+     "PositiveInfinity"
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "limit",
+   "heads": [
+    "BernoulliB",
+    "Factorial",
+    "Limit"
+   ],
+   "guardLevel": "none",
+   "flavor": "sequence",
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "42d727",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "Multiply",
+     [
+      "Divide",
+      [
+       "Multiply",
+       5,
+       [
+        "Sqrt",
+        [
+         "Add",
+         "GoldenRatio",
+         2
+        ]
+       ]
+      ],
+      [
+       "Multiply",
+       2,
+       "GoldenRatio"
+      ]
+     ],
+     [
+      "Hypergeometric2F1",
+      1,
+      1,
+      [
+       "Divide",
+       3,
+       2
+      ],
+      [
+       "Divide",
+       1,
+       [
+        "Power",
+        [
+         "Multiply",
+         2,
+         "GoldenRatio"
+        ],
+        2
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Hypergeometric2F1"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "464961",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "Multiply",
+     2,
+     [
+      "Integrate",
+      [
+       "Sqrt",
+       [
+        "Subtract",
+        1,
+        [
+         "Power",
+         "x",
+         2
+        ]
+       ]
+      ],
+      [
+       "Limits",
+       "x",
+       -1,
+       1
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Integrate"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "488a30",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "Multiply",
+     4,
+     [
+      "Subtract",
+      [
+       "Multiply",
+       [
+        "Sqrt",
+        2
+       ],
+       [
+        "Hypergeometric2F1",
+        [
+         "Negate",
+         [
+          "Divide",
+          1,
+          2
+         ]
+        ],
+        [
+         "Negate",
+         [
+          "Divide",
+          1,
+          2
+         ]
+        ],
+        [
+         "Divide",
+         1,
+         2
+        ],
+        [
+         "Divide",
+         1,
+         2
+        ]
+       ]
+      ],
+      1
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Hypergeometric2F1"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "490cf4",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "Multiply",
+     2,
+     [
+      "Product",
+      [
+       "Sec",
+       [
+        "Divide",
+        "Pi",
+        [
+         "Power",
+         2,
+         "n"
+        ]
+       ]
+      ],
+      [
+       "Limits",
+       "n",
+       2,
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "product",
+   "heads": [
+    "Product",
+    "Sec"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "4c0698",
+   "formula": [
+    "Less",
+    [
+     "Abs",
+     [
+      "Subtract",
+      [
+       "Divide",
+       1,
+       "Pi"
+      ],
+      [
+       "Multiply",
+       12,
+       [
+        "Sum",
+        [
+         "Divide",
+         [
+          "Multiply",
+          [
+           "Multiply",
+           [
+            "Power",
+            -1,
+            "n"
+           ],
+           [
+            "Factorial",
+            [
+             "Multiply",
+             6,
+             "n"
+            ]
+           ]
+          ],
+          [
+           "Add",
+           13591409,
+           [
+            "Multiply",
+            545140134,
+            "n"
+           ]
+          ]
+         ],
+         [
+          "Multiply",
+          [
+           "Multiply",
+           [
+            "Factorial",
+            [
+             "Multiply",
+             3,
+             "n"
+            ]
+           ],
+           [
+            "Power",
+            [
+             "Factorial",
+             "n"
+            ],
+            3
+           ]
+          ],
+          [
+           "Power",
+           640320,
+           [
+            "Add",
+            [
+             "Multiply",
+             3,
+             "n"
+            ],
+            [
+             "Divide",
+             3,
+             2
+            ]
+           ]
+          ]
+         ]
+        ],
+        [
+         "Limits",
+         "n",
+         0,
+         [
+          "Subtract",
+          "N_var",
+          1
+         ]
+        ]
+       ]
+      ]
+     ]
+    ],
+    [
+     "Divide",
+     1,
+     [
+      "Power",
+      151931373056000,
+      "N_var"
+     ]
+    ]
+   ],
+   "variables": [
+    "N_var"
+   ],
+   "assumptions": [
+    "Element",
+    "N_var",
+    "NonNegativeIntegers"
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Factorial",
+    "Sum"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "5033c7",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "Multiply",
+     [
+      "Multiply",
+      2,
+      "ExponentialE"
+     ],
+     [
+      "Integrate",
+      [
+       "Divide",
+       [
+        "Cos",
+        "x"
+       ],
+       [
+        "Add",
+        [
+         "Power",
+         "x",
+         2
+        ],
+        1
+       ]
+      ],
+      [
+       "Limits",
+       "x",
+       0,
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Cos",
+    "Integrate"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "5278da",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "Add",
+     [
+      "Add",
+      [
+       "Multiply",
+       4,
+       [
+        "Arctan",
+        [
+         "Divide",
+         1,
+         2
+        ]
+       ]
+      ],
+      [
+       "Multiply",
+       4,
+       [
+        "Arctan",
+        [
+         "Divide",
+         1,
+         5
+        ]
+       ]
+      ]
+     ],
+     [
+      "Multiply",
+      4,
+      [
+       "Arctan",
+       [
+        "Divide",
+        1,
+        8
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Arctan"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "54c80d",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "Subtract",
+     [
+      "Multiply",
+      [
+       "Multiply",
+       4,
+       [
+        "Sqrt",
+        2
+       ]
+      ],
+      [
+       "Sum",
+       [
+        "Divide",
+        [
+         "Power",
+         -1,
+         "n"
+        ],
+        [
+         "Add",
+         [
+          "Multiply",
+          4,
+          "n"
+         ],
+         1
+        ]
+       ],
+       [
+        "Limits",
+        "n",
+        0,
+        "PositiveInfinity"
+       ]
+      ]
+     ],
+     [
+      "Multiply",
+      2,
+      [
+       "Ln",
+       [
+        "Add",
+        1,
+        [
+         "Sqrt",
+         2
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Ln",
+    "Sum"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "57fcaf",
+   "formula": [
+    "Equal",
+    [
+     "Divide",
+     1,
+     "Pi"
+    ],
+    [
+     "Multiply",
+     12,
+     [
+      "Sum",
+      [
+       "Divide",
+       [
+        "Multiply",
+        [
+         "Multiply",
+         [
+          "Power",
+          -1,
+          "n"
+         ],
+         [
+          "Factorial",
+          [
+           "Multiply",
+           6,
+           "n"
+          ]
+         ]
+        ],
+        [
+         "Add",
+         13591409,
+         [
+          "Multiply",
+          545140134,
+          "n"
+         ]
+        ]
+       ],
+       [
+        "Multiply",
+        [
+         "Multiply",
+         [
+          "Factorial",
+          [
+           "Multiply",
+           3,
+           "n"
+          ]
+         ],
+         [
+          "Power",
+          [
+           "Factorial",
+           "n"
+          ],
+          3
+         ]
+        ],
+        [
+         "Power",
+         640320,
+         [
+          "Add",
+          [
+           "Multiply",
+           3,
+           "n"
+          ],
+          [
+           "Divide",
+           3,
+           2
+          ]
+         ]
+        ]
+       ]
+      ],
+      [
+       "Limits",
+       "n",
+       0,
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Factorial",
+    "Sum"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "590136",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "Negate",
+     [
+      "Multiply",
+      "ImaginaryUnit",
+      [
+       "Ln",
+       -1
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Ln"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "591d64",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "Beta",
+     [
+      "Divide",
+      1,
+      2
+     ],
+     [
+      "Divide",
+      1,
+      2
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Beta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "63ba30",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "Multiply",
+     [
+      "Divide",
+      1,
+      [
+       "Sqrt",
+       2
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Gamma",
+       [
+        "Divide",
+        1,
+        4
+       ]
+      ],
+      [
+       "Gamma",
+       [
+        "Divide",
+        3,
+        4
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Gamma"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "6505a9",
+   "formula": [
+    "Element",
+    "Pi",
+    [
+     "RealBall",
+     {
+      "num": "3.1415926535897932384626433832795028841971693993751"
+     },
+     {
+      "num": "5.83e-51"
+     }
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "RealBall"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "67bb53",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "Sqrt",
+     [
+      "Multiply",
+      6,
+      [
+       "Zeta",
+       2
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Zeta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "68b73d",
+   "formula": [
+    "Equal",
+    [
+     "Divide",
+     1,
+     "Pi"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      [
+       "Multiply",
+       2,
+       [
+        "Sqrt",
+        3
+       ]
+      ],
+      9
+     ],
+     [
+      "Hypergeometric2F1",
+      [
+       "Negate",
+       [
+        "Divide",
+        1,
+        3
+       ]
+      ],
+      [
+       "Divide",
+       1,
+       3
+      ],
+      1,
+      1
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Hypergeometric2F1"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "69fe63",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "Multiply",
+     2,
+     [
+      "Product",
+      [
+       "Divide",
+       [
+        "Multiply",
+        4,
+        [
+         "Power",
+         "n",
+         2
+        ]
+       ],
+       [
+        "Subtract",
+        [
+         "Multiply",
+         4,
+         [
+          "Power",
+          "n",
+          2
+         ]
+        ],
+        1
+       ]
+      ],
+      [
+       "Limits",
+       "n",
+       1,
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "product",
+   "heads": [
+    "Product"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "6b9f81",
+   "formula": [
+    "Equal",
+    [
+     "Divide",
+     1,
+     "Pi"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      [
+       "Multiply",
+       2,
+       [
+        "Sqrt",
+        2
+       ]
+      ],
+      9801
+     ],
+     [
+      "Sum",
+      [
+       "Divide",
+       [
+        "Multiply",
+        [
+         "Factorial",
+         [
+          "Multiply",
+          4,
+          "n"
+         ]
+        ],
+        [
+         "Add",
+         1103,
+         [
+          "Multiply",
+          26390,
+          "n"
+         ]
+        ]
+       ],
+       [
+        "Multiply",
+        [
+         "Power",
+         [
+          "Factorial",
+          "n"
+         ],
+         4
+        ],
+        [
+         "Power",
+         396,
+         [
+          "Multiply",
+          4,
+          "n"
+         ]
+        ]
+       ]
+      ],
+      [
+       "Limits",
+       "n",
+       0,
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Factorial",
+    "Sum"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "6ed553",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "Multiply",
+     8,
+     [
+      "Power",
+      [
+       "Integrate",
+       [
+        "Sin",
+        [
+         "Power",
+         "x",
+         2
+        ]
+       ],
+       [
+        "Limits",
+        "x",
+        0,
+        "PositiveInfinity"
+       ]
+      ],
+      2
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Integrate",
+    "Sin"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "722241",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "Multiply",
+     2,
+     [
+      "Arcsin",
+      1
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Arcsin"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "769f6e",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "Subtract",
+     [
+      "Multiply",
+      2,
+      [
+       "Hypergeometric2F1",
+       1,
+       1,
+       [
+        "Divide",
+        1,
+        2
+       ],
+       [
+        "Divide",
+        1,
+        2
+       ]
+      ]
+     ],
+     4
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Hypergeometric2F1"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "7ce79e",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "Add",
+     [
+      "Add",
+      [
+       "Add",
+       [
+        "Multiply",
+        4,
+        [
+         "Arctan",
+         [
+          "Divide",
+          1,
+          3
+         ]
+        ]
+       ],
+       [
+        "Multiply",
+        4,
+        [
+         "Arctan",
+         [
+          "Divide",
+          1,
+          4
+         ]
+        ]
+       ]
+      ],
+      [
+       "Multiply",
+       4,
+       [
+        "Arctan",
+        [
+         "Divide",
+         1,
+         7
+        ]
+       ]
+      ]
+     ],
+     [
+      "Multiply",
+      4,
+      [
+       "Arctan",
+       [
+        "Divide",
+        1,
+        13
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Arctan"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "8107d6",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "Integrate",
+     [
+      "Power",
+      [
+       "Sinc",
+       "x"
+      ],
+      2
+     ],
+     [
+      "Limits",
+      "x",
+      "NegativeInfinity",
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Integrate",
+    "Sinc"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "81f500",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "Subtract",
+     [
+      "Divide",
+      22,
+      7
+     ],
+     [
+      "Integrate",
+      [
+       "Divide",
+       [
+        "Multiply",
+        [
+         "Power",
+         "x",
+         4
+        ],
+        [
+         "Power",
+         [
+          "Subtract",
+          1,
+          "x"
+         ],
+         4
+        ]
+       ],
+       [
+        "Add",
+        1,
+        [
+         "Power",
+         "x",
+         2
+        ]
+       ]
+      ],
+      [
+       "Limits",
+       "x",
+       0,
+       1
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Integrate"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "826257",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "Multiply",
+     [
+      "Sqrt",
+      3
+     ],
+     [
+      "Subtract",
+      [
+       "Multiply",
+       [
+        "Divide",
+        9,
+        2
+       ],
+       [
+        "Hypergeometric2F1",
+        1,
+        1,
+        [
+         "Divide",
+         1,
+         2
+        ],
+        [
+         "Divide",
+         1,
+         4
+        ]
+       ]
+      ],
+      6
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Hypergeometric2F1"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "8332d8",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "Add",
+     [
+      "Subtract",
+      [
+       "Add",
+       [
+        "Multiply",
+        48,
+        [
+         "Arctan",
+         [
+          "Divide",
+          1,
+          49
+         ]
+        ]
+       ],
+       [
+        "Multiply",
+        128,
+        [
+         "Arctan",
+         [
+          "Divide",
+          1,
+          57
+         ]
+        ]
+       ]
+      ],
+      [
+       "Multiply",
+       20,
+       [
+        "Arctan",
+        [
+         "Divide",
+         1,
+         239
+        ]
+       ]
+      ]
+     ],
+     [
+      "Multiply",
+      48,
+      [
+       "Arctan",
+       [
+        "Divide",
+        1,
+        110443
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Arctan"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "859856",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "Multiply",
+     8,
+     [
+      "Power",
+      [
+       "Integrate",
+       [
+        "Cos",
+        [
+         "Power",
+         "x",
+         2
+        ]
+       ],
+       [
+        "Limits",
+        "x",
+        0,
+        "PositiveInfinity"
+       ]
+      ],
+      2
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Cos",
+    "Integrate"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "8dff72",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "Multiply",
+     2,
+     [
+      "Sum",
+      [
+       "Arctan",
+       [
+        "Divide",
+        1,
+        [
+         "Add",
+         [
+          "Add",
+          [
+           "Power",
+           "n",
+           2
+          ],
+          "n"
+         ],
+         1
+        ]
+       ]
+      ],
+      [
+       "Limits",
+       "n",
+       0,
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Arctan",
+    "Sum"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "8ee7c9",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "Sqrt",
+     [
+      "Subtract",
+      [
+       "Digamma",
+       [
+        "Divide",
+        1,
+        4
+       ],
+       1
+      ],
+      [
+       "Multiply",
+       8,
+       "CatalanConstant"
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Digamma"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "8fab22",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "Power",
+     [
+      "Gamma",
+      [
+       "Divide",
+       1,
+       2
+      ]
+     ],
+     2
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Gamma"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "9206a3",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "Sqrt",
+     [
+      "Multiply",
+      6,
+      [
+       "PolyLog",
+       2,
+       1
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "PolyLog"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "93831d",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "Sum",
+     [
+      "Divide",
+      [
+       "Multiply",
+       [
+        "Power",
+        2,
+        [
+         "Add",
+         "n",
+         1
+        ]
+       ],
+       [
+        "Power",
+        [
+         "Factorial",
+         "n"
+        ],
+        2
+       ]
+      ],
+      [
+       "Factorial",
+       [
+        "Add",
+        [
+         "Multiply",
+         2,
+         "n"
+        ],
+        1
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "n",
+      0,
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Factorial",
+    "Sum"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "9a3503",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "Integrate",
+     [
+      "Sinc",
+      "x"
+     ],
+     [
+      "Limits",
+      "x",
+      "NegativeInfinity",
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Integrate",
+    "Sinc"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "9bf21b",
+   "formula": [
+    "Equal",
+    [
+     "Divide",
+     [
+      "Power",
+      "Pi",
+      4
+     ],
+     90
+    ],
+    [
+     "Sum",
+     [
+      "Divide",
+      1,
+      [
+       "Power",
+       "n",
+       4
+      ]
+     ],
+     [
+      "Limits",
+      "n",
+      1,
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Sum"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "a2e6f9",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "Sum",
+     [
+      "Divide",
+      [
+       "Multiply",
+       [
+        "Subtract",
+        [
+         "Power",
+         3,
+         "n"
+        ],
+        1
+       ],
+       [
+        "Zeta",
+        [
+         "Add",
+         "n",
+         1
+        ]
+       ]
+      ],
+      [
+       "Power",
+       4,
+       "n"
+      ]
+     ],
+     [
+      "Limits",
+      "n",
+      1,
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Sum",
+    "Zeta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "a7095f",
+   "formula": [
+    "Equal",
+    [
+     "Divide",
+     1,
+     "Pi"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      1,
+      2
+     ],
+     [
+      "Hypergeometric2F1",
+      [
+       "Divide",
+       1,
+       2
+      ],
+      [
+       "Negate",
+       [
+        "Divide",
+        1,
+        2
+       ]
+      ],
+      1,
+      1
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Hypergeometric2F1"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "a91200",
+   "formula": [
+    "Equal",
+    [
+     "Divide",
+     [
+      "Power",
+      "Pi",
+      2
+     ],
+     6
+    ],
+    [
+     "Product",
+     [
+      "Power",
+      [
+       "Subtract",
+       1,
+       [
+        "Divide",
+        1,
+        [
+         "Power",
+         "p",
+         2
+        ]
+       ]
+      ],
+      -1
+     ],
+     [
+      "Element",
+      "p",
+      "Primes"
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "product",
+   "heads": [
+    "Primes",
+    "Product"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "b1357b",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "Subtract",
+     [
+      "Multiply",
+      8,
+      [
+       "Arctan",
+       [
+        "Divide",
+        1,
+        2
+       ]
+      ]
+     ],
+     [
+      "Multiply",
+      4,
+      [
+       "Arctan",
+       [
+        "Divide",
+        1,
+        7
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Arctan"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "b89166",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "UniqueZero",
+     [
+      "Function",
+      [
+       "Sin",
+       "x"
+      ],
+      "x"
+     ],
+     [
+      "Interval",
+      3,
+      4
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Sin",
+    "UniqueZero"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "bad5d9",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "Multiply",
+     [
+      "Sqrt",
+      3
+     ],
+     [
+      "Subtract",
+      [
+       "Multiply",
+       3,
+       [
+        "Sum",
+        [
+         "Divide",
+         [
+          "Power",
+          -1,
+          "n"
+         ],
+         [
+          "Add",
+          [
+           "Multiply",
+           3,
+           "n"
+          ],
+          1
+         ]
+        ],
+        [
+         "Limits",
+         "n",
+         0,
+         "PositiveInfinity"
+        ]
+       ]
+      ],
+      [
+       "Ln",
+       2
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Ln",
+    "Sum"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "bd3faa",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "Subtract",
+     [
+      "Divide",
+      355,
+      113
+     ],
+     [
+      "Multiply",
+      [
+       "Divide",
+       1,
+       3164
+      ],
+      [
+       "Integrate",
+       [
+        "Divide",
+        [
+         "Multiply",
+         [
+          "Multiply",
+          [
+           "Power",
+           "x",
+           8
+          ],
+          [
+           "Power",
+           [
+            "Subtract",
+            1,
+            "x"
+           ],
+           8
+          ]
+         ],
+         [
+          "Add",
+          25,
+          [
+           "Multiply",
+           816,
+           [
+            "Power",
+            "x",
+            2
+           ]
+          ]
+         ]
+        ],
+        [
+         "Add",
+         1,
+         [
+          "Power",
+          "x",
+          2
+         ]
+        ]
+       ],
+       [
+        "Limits",
+        "x",
+        0,
+        1
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Integrate"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": [
+    "https://mathworld.wolfram.com/PiFormulas.html"
+   ],
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "c6c108",
+   "formula": [
+    "Equal",
+    [
+     "Divide",
+     1,
+     "Pi"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      1,
+      4
+     ],
+     [
+      "Hypergeometric2F1",
+      [
+       "Negate",
+       [
+        "Divide",
+        1,
+        2
+       ]
+      ],
+      [
+       "Negate",
+       [
+        "Divide",
+        1,
+        2
+       ]
+      ],
+      1,
+      1
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Hypergeometric2F1"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "cbf396",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "Add",
+     [
+      "Multiply",
+      4,
+      [
+       "Arctan",
+       [
+        "Divide",
+        1,
+        2
+       ]
+      ]
+     ],
+     [
+      "Multiply",
+      4,
+      [
+       "Arctan",
+       [
+        "Divide",
+        1,
+        3
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Arctan"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "ce5423",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "Multiply",
+     2,
+     [
+      "EllipticK",
+      0
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "EllipticK"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "d8cb3e",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "Integrate",
+     [
+      "JacobiTheta",
+      2,
+      0,
+      [
+       "Multiply",
+       "ImaginaryUnit",
+       "t"
+      ]
+     ],
+     [
+      "Limits",
+      "t",
+      0,
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Integrate",
+    "JacobiTheta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "dabb47",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "Multiply",
+     [
+      "Multiply",
+      [
+       "Divide",
+       1,
+       2
+      ],
+      [
+       "Power",
+       [
+        "Gamma",
+        [
+         "Divide",
+         1,
+         4
+        ]
+       ],
+       [
+        "Divide",
+        4,
+        3
+       ]
+      ]
+     ],
+     [
+      "Power",
+      [
+       "AGM",
+       1,
+       [
+        "Sqrt",
+        2
+       ]
+      ],
+      [
+       "Divide",
+       2,
+       3
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "AGM",
+    "Gamma"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "dae4a7",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "Power",
+     [
+      "Integrate",
+      [
+       "Exp",
+       [
+        "Negate",
+        [
+         "Power",
+         "x",
+         2
+        ]
+       ]
+      ],
+      [
+       "Limits",
+       "x",
+       "NegativeInfinity",
+       "PositiveInfinity"
+      ]
+     ],
+     2
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Exp",
+    "Integrate"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "dbdf08",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "Multiply",
+     [
+      "Sqrt",
+      3
+     ],
+     [
+      "Subtract",
+      [
+       "Multiply",
+       [
+        "Divide",
+        9,
+        2
+       ],
+       [
+        "Sum",
+        [
+         "Divide",
+         "n",
+         [
+          "Binomial",
+          [
+           "Multiply",
+           2,
+           "n"
+          ],
+          "n"
+         ]
+        ],
+        [
+         "Limits",
+         "n",
+         1,
+         "PositiveInfinity"
+        ]
+       ]
+      ],
+      3
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Binomial",
+    "Sum"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "dea83d",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "Limit",
+     [
+      "Function",
+      [
+       "Multiply",
+       [
+        "Divide",
+        4,
+        [
+         "Power",
+         "n",
+         2
+        ]
+       ],
+       [
+        "Sum",
+        [
+         "Sqrt",
+         [
+          "Subtract",
+          [
+           "Power",
+           "n",
+           2
+          ],
+          [
+           "Power",
+           "k",
+           2
+          ]
+         ]
+        ],
+        [
+         "Limits",
+         "k",
+         0,
+         "n"
+        ]
+       ]
+      ],
+      "n"
+     ],
+     "PositiveInfinity"
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "limit",
+   "heads": [
+    "Limit",
+    "Sum"
+   ],
+   "guardLevel": "none",
+   "flavor": "sequence",
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "e00d9e",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "Multiply",
+     3,
+     [
+      "Integrate",
+      [
+       "Subtract",
+       [
+        "JacobiTheta",
+        3,
+        0,
+        [
+         "Multiply",
+         "ImaginaryUnit",
+         "t"
+        ]
+       ],
+       1
+      ],
+      [
+       "Limits",
+       "t",
+       0,
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Integrate",
+    "JacobiTheta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "e1e106",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "Limit",
+     [
+      "Function",
+      [
+       "Divide",
+       [
+        "Power",
+        16,
+        "n"
+       ],
+       [
+        "Multiply",
+        "n",
+        [
+         "Power",
+         [
+          "Binomial",
+          [
+           "Multiply",
+           2,
+           "n"
+          ],
+          "n"
+         ],
+         2
+        ]
+       ]
+      ],
+      "n"
+     ],
+     "PositiveInfinity"
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "limit",
+   "heads": [
+    "Binomial",
+    "Limit"
+   ],
+   "guardLevel": "none",
+   "flavor": "sequence",
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "f55b36",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "Multiply",
+     4,
+     [
+      "Subtract",
+      [
+       "Hypergeometric2F1",
+       [
+        "Negate",
+        [
+         "Divide",
+         1,
+         2
+        ]
+       ],
+       1,
+       [
+        "Divide",
+        1,
+        2
+       ],
+       -1
+      ],
+      1
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Hypergeometric2F1"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "f56273",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "Multiply",
+     4,
+     [
+      "DirichletL",
+      1,
+      [
+       "DirichletCharacter",
+       4,
+       3
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "DirichletCharacter",
+    "DirichletL"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "f617c0",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "Multiply",
+     4,
+     [
+      "Sum",
+      [
+       "Divide",
+       [
+        "Power",
+        -1,
+        "n"
+       ],
+       [
+        "Add",
+        [
+         "Multiply",
+         2,
+         "n"
+        ],
+        1
+       ]
+      ],
+      [
+       "Limits",
+       "n",
+       0,
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Sum"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "f78fa0",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "Multiply",
+     [
+      "Sqrt",
+      3
+     ],
+     [
+      "Subtract",
+      [
+       "Multiply",
+       [
+        "Divide",
+        9,
+        2
+       ],
+       [
+        "Sum",
+        [
+         "Divide",
+         1,
+         [
+          "Binomial",
+          [
+           "Multiply",
+           2,
+           "n"
+          ],
+          "n"
+         ]
+        ],
+        [
+         "Limits",
+         "n",
+         0,
+         "PositiveInfinity"
+        ]
+       ]
+      ],
+      6
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Binomial",
+    "Sum"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "f8d280",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "Subtract",
+     [
+      "Multiply",
+      16,
+      [
+       "Arctan",
+       [
+        "Divide",
+        1,
+        5
+       ]
+      ]
+     ],
+     [
+      "Multiply",
+      4,
+      [
+       "Arctan",
+       [
+        "Divide",
+        1,
+        239
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Arctan"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "fbc53d",
+   "formula": [
+    "Equal",
+    [
+     "Divide",
+     [
+      "Power",
+      "Pi",
+      2
+     ],
+     6
+    ],
+    [
+     "Sum",
+     [
+      "Divide",
+      1,
+      [
+       "Power",
+       "n",
+       2
+      ]
+     ],
+     [
+      "Limits",
+      "n",
+      1,
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Sum"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "fc8149",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "Integrate",
+     [
+      "Divide",
+      1,
+      [
+       "Sqrt",
+       [
+        "Subtract",
+        1,
+        [
+         "Power",
+         "x",
+         2
+        ]
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "x",
+      -1,
+      1
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Integrate"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "fdc3a3",
+   "formula": [
+    "Less",
+    [
+     "Abs",
+     [
+      "Subtract",
+      "Pi",
+      [
+       "Divide",
+       [
+        "Ln",
+        [
+         "Add",
+         [
+          "Power",
+          640320,
+          3
+         ],
+         744
+        ]
+       ],
+       [
+        "Sqrt",
+        163
+       ]
+      ]
+     ]
+    ],
+    {
+     "num": "2.24e-31"
+    }
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Ln"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "pi"
+   ]
+  },
+  {
+   "id": "fddfe6",
+   "formula": [
+    "Equal",
+    "Pi",
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "Divide",
+       1,
+       [
+        "Power",
+        16,
+        "n"
+       ]
+      ],
+      [
+       "Subtract",
+       [
+        "Subtract",
+        [
+         "Subtract",
+         [
+          "Divide",
+          4,
+          [
+           "Add",
+           [
+            "Multiply",
+            8,
+            "n"
+           ],
+           1
+          ]
+         ],
+         [
+          "Divide",
+          2,
+          [
+           "Add",
+           [
+            "Multiply",
+            8,
+            "n"
+           ],
+           4
+          ]
+         ]
+        ],
+        [
+         "Divide",
+         1,
+         [
+          "Add",
+          [
+           "Multiply",
+           8,
+           "n"
+          ],
+          5
+         ]
+        ]
+       ],
+       [
+        "Divide",
+        1,
+        [
+         "Add",
+         [
+          "Multiply",
+          8,
+          "n"
+         ],
+         6
+        ]
+       ]
+      ]
+     ],
+     [
+      "Limits",
+      "n",
+      0,
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Sum"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": [
+    "D. H. Bailey and P. B. Borwein and S. Plouffe (1997). On the rapid computation of various polylogarithmic constants. Mathematics of Computation. vol 66, no 218, p. 903\u2013913. DOI:10.1090/S0025-5718-97-00856-9"
+   ],
+   "topics": [
+    "pi"
+   ]
+  }
+ ]
+}

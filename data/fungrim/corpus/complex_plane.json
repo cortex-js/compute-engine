@@ -1,0 +1,360 @@
+{
+ "topic": "complex_plane",
+ "title": "Complex plane",
+ "source": "pygrim/formulas/complex_plane.py",
+ "generator": "grim2mathjson 0.1.0",
+ "entries": [
+  {
+   "id": "40baa9",
+   "formula": [
+    "Equal",
+    [
+     "BernsteinEllipse",
+     "rho"
+    ],
+    [
+     "Set",
+     [
+      "Divide",
+      [
+       "Add",
+       [
+        "Multiply",
+        "rho",
+        [
+         "Exp",
+         [
+          "Multiply",
+          "ImaginaryUnit",
+          "theta"
+         ]
+        ]
+       ],
+       [
+        "Multiply",
+        [
+         "Power",
+         "rho",
+         -1
+        ],
+        [
+         "Exp",
+         [
+          "Negate",
+          [
+           "Multiply",
+           "ImaginaryUnit",
+           "theta"
+          ]
+         ]
+        ]
+       ]
+      ],
+      2
+     ],
+     [
+      "Element",
+      "theta",
+      [
+       "Interval",
+       0,
+       [
+        "Open",
+        [
+         "Multiply",
+         2,
+         "Pi"
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "rho"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "rho",
+     "RealNumbers"
+    ],
+    [
+     "Greater",
+     "rho",
+     1
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BernsteinEllipse",
+    "Exp"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "complex_plane"
+   ]
+  },
+  {
+   "id": "912ff9",
+   "formula": [
+    "Equal",
+    "UnitCircle",
+    [
+     "Set",
+     [
+      "Exp",
+      [
+       "Multiply",
+       "ImaginaryUnit",
+       "theta"
+      ]
+     ],
+     [
+      "Element",
+      "theta",
+      [
+       "Interval",
+       0,
+       [
+        "Open",
+        [
+         "Multiply",
+         2,
+         "Pi"
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Exp",
+    "UnitCircle"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "complex_plane"
+   ]
+  },
+  {
+   "id": "c98bad",
+   "formula": [
+    "Equal",
+    [
+     "OpenDisk",
+     "z",
+     "r"
+    ],
+    [
+     "Set",
+     "t",
+     [
+      "Element",
+      "t",
+      "ComplexNumbers",
+      [
+       "Less",
+       [
+        "Abs",
+        [
+         "Subtract",
+         "z",
+         "t"
+        ]
+       ],
+       "r"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "r",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "r",
+     "RealNumbers"
+    ],
+    [
+     "Greater",
+     "r",
+     0
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "OpenDisk"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "complex_plane"
+   ]
+  },
+  {
+   "id": "d1cf0c",
+   "formula": [
+    "Equal",
+    [
+     "ClosedDisk",
+     "z",
+     "r"
+    ],
+    [
+     "Set",
+     "t",
+     [
+      "Element",
+      "t",
+      "ComplexNumbers",
+      [
+       "LessEqual",
+       [
+        "Abs",
+        [
+         "Subtract",
+         "z",
+         "t"
+        ]
+       ],
+       "r"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "r",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "r",
+     "RealNumbers"
+    ],
+    [
+     "GreaterEqual",
+     "r",
+     0
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "ClosedDisk"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "complex_plane"
+   ]
+  },
+  {
+   "id": "d7962e",
+   "formula": [
+    "Equal",
+    "HH",
+    [
+     "Set",
+     "tau",
+     [
+      "Element",
+      "tau",
+      "ComplexNumbers",
+      [
+       "Greater",
+       [
+        "Imaginary",
+        "tau"
+       ],
+       0
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "HH",
+    "Imaginary"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "complex_plane",
+    "modular_transformations"
+   ]
+  },
+  {
+   "id": "fc0d55",
+   "formula": [
+    "Equal",
+    "UnitCircle",
+    [
+     "Set",
+     "z",
+     [
+      "Element",
+      "z",
+      "ComplexNumbers",
+      [
+       "Equal",
+       [
+        "Abs",
+        "z"
+       ],
+       1
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "UnitCircle"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "complex_plane"
+   ]
+  }
+ ]
+}

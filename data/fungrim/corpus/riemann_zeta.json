@@ -1,0 +1,3677 @@
+{
+ "topic": "riemann_zeta",
+ "title": "Riemann zeta function",
+ "source": "pygrim/formulas/riemann_zeta.py",
+ "generator": "grim2mathjson 0.1.0",
+ "entries": [
+  {
+   "id": "081205",
+   "formula": [
+    "Equal",
+    [
+     "KeiperLiLambda",
+     0
+    ],
+    0
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "KeiperLiLambda"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "riemann_zeta"
+   ]
+  },
+  {
+   "id": "1d46d4",
+   "formula": [
+    "Equal",
+    [
+     "Divide",
+     1,
+     [
+      "Zeta",
+      "s"
+     ]
+    ],
+    [
+     "Sum",
+     [
+      "Divide",
+      [
+       "MoebiusMu",
+       "k"
+      ],
+      [
+       "Power",
+       "k",
+       "s"
+      ]
+     ],
+     [
+      "Limits",
+      "k",
+      1,
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "variables": [
+    "s"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "s",
+     "ComplexNumbers"
+    ],
+    [
+     "Greater",
+     [
+      "Real",
+      "s"
+     ],
+     1
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "MoebiusMu",
+    "Sum",
+    "Zeta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "riemann_zeta"
+   ]
+  },
+  {
+   "id": "1dec0d",
+   "formula": [
+    "Less",
+    [
+     "Abs",
+     [
+      "StieltjesGamma",
+      "n"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Power",
+      10,
+      -4
+     ],
+     [
+      "Exp",
+      [
+       "Multiply",
+       "n",
+       [
+        "Ln",
+        [
+         "Ln",
+         "n"
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    [
+     "Range",
+     5,
+     "PositiveInfinity"
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Exp",
+    "Ln",
+    "StieltjesGamma"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "riemann_zeta"
+   ]
+  },
+  {
+   "id": "3142ec",
+   "formula": [
+    "Equivalent",
+    "RiemannHypothesis",
+    [
+     "ForAll",
+     [
+      "Element",
+      "n",
+      [
+       "Range",
+       5041,
+       "PositiveInfinity"
+      ]
+     ],
+     [
+      "Less",
+      [
+       "DivisorSigma",
+       1,
+       "n"
+      ],
+      [
+       "Multiply",
+       [
+        "Multiply",
+        [
+         "Exp",
+         "EulerGamma"
+        ],
+        "n"
+       ],
+       [
+        "Ln",
+        [
+         "Ln",
+         "n"
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "DivisorSigma",
+    "Exp",
+    "Ln",
+    "RiemannHypothesis"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "riemann_zeta"
+   ]
+  },
+  {
+   "id": "3a5eb6",
+   "formula": [
+    "Less",
+    [
+     "Abs",
+     [
+      "Zeta",
+      "s"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      [
+       "Multiply",
+       3,
+       [
+        "Abs",
+        [
+         "Divide",
+         [
+          "Add",
+          1,
+          "s"
+         ],
+         [
+          "Subtract",
+          1,
+          "s"
+         ]
+        ]
+       ]
+      ],
+      [
+       "Power",
+       [
+        "Abs",
+        [
+         "Divide",
+         [
+          "Add",
+          1,
+          "s"
+         ],
+         [
+          "Multiply",
+          2,
+          "Pi"
+         ]
+        ]
+       ],
+       [
+        "Divide",
+        [
+         "Subtract",
+         [
+          "Add",
+          1,
+          "eta"
+         ],
+         [
+          "Real",
+          "s"
+         ]
+        ],
+        2
+       ]
+      ]
+     ],
+     [
+      "Zeta",
+      [
+       "Add",
+       1,
+       "eta"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "eta",
+    "s"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "s",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "eta",
+     "RealNumbers"
+    ],
+    [
+     "NotEqual",
+     "s",
+     1
+    ],
+    [
+     "Element",
+     "eta",
+     [
+      "Interval",
+      [
+       "Open",
+       0
+      ],
+      [
+       "Divide",
+       1,
+       2
+      ]
+     ]
+    ],
+    [
+     "LessEqual",
+     [
+      "Negate",
+      "eta"
+     ],
+     [
+      "Real",
+      "s"
+     ],
+     [
+      "Add",
+      1,
+      "eta"
+     ]
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Real",
+    "Zeta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": [
+    "H. Rademacher, Topics in analytic number theory, Springer, 1973. Equation 43.3."
+   ],
+   "topics": [
+    "riemann_zeta"
+   ]
+  },
+  {
+   "id": "411f3b",
+   "formula": [
+    "Equal",
+    [
+     "StieltjesGamma",
+     "n",
+     "a"
+    ],
+    [
+     "Limit",
+     [
+      "Function",
+      [
+       "Subtract",
+       [
+        "Sum",
+        [
+         "Divide",
+         [
+          "Power",
+          [
+           "Ln",
+           [
+            "Add",
+            "k",
+            "a"
+           ]
+          ],
+          "n"
+         ],
+         [
+          "Add",
+          "k",
+          "a"
+         ]
+        ],
+        [
+         "Limits",
+         "k",
+         0,
+         "N_var"
+        ]
+       ],
+       [
+        "Divide",
+        [
+         "Power",
+         [
+          "Ln",
+          [
+           "Add",
+           "N_var",
+           "a"
+          ]
+         ],
+         [
+          "Add",
+          "n",
+          1
+         ]
+        ],
+        [
+         "Add",
+         "n",
+         1
+        ]
+       ]
+      ],
+      "N_var"
+     ],
+     "PositiveInfinity"
+    ]
+   ],
+   "variables": [
+    "a",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ],
+    [
+     "NotElement",
+     "a",
+     "NonPositiveIntegers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "limit",
+   "heads": [
+    "Limit",
+    "Ln",
+    "StieltjesGamma",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": "sequence",
+   "references": null,
+   "topics": [
+    "riemann_zeta"
+   ]
+  },
+  {
+   "id": "49704a",
+   "formula": [
+    "Equivalent",
+    "RiemannHypothesis",
+    [
+     "ForAll",
+     [
+      "Element",
+      "n",
+      "PositiveIntegers"
+     ],
+     [
+      "Equal",
+      [
+       "Real",
+       [
+        "RiemannZetaZero",
+        "n"
+       ]
+      ],
+      [
+       "Divide",
+       1,
+       2
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "Real",
+    "RiemannHypothesis",
+    "RiemannZetaZero"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "riemann_zeta"
+   ]
+  },
+  {
+   "id": "51206a",
+   "formula": [
+    "Equal",
+    [
+     "StieltjesGamma",
+     "n",
+     1
+    ],
+    [
+     "StieltjesGamma",
+     "n"
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "StieltjesGamma"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "riemann_zeta"
+   ]
+  },
+  {
+   "id": "51fd98",
+   "formula": [
+    "Equal",
+    [
+     "Zeta",
+     [
+      "Negate",
+      "n"
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Multiply",
+      [
+       "Power",
+       -1,
+       "n"
+      ],
+      [
+       "BernoulliB",
+       [
+        "Add",
+        "n",
+        1
+       ]
+      ]
+     ],
+     [
+      "Add",
+      "n",
+      1
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "GreaterEqual",
+     "n",
+     0
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BernoulliB",
+    "Zeta"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "riemann_zeta"
+   ]
+  },
+  {
+   "id": "60c2ec",
+   "formula": [
+    "Equal",
+    [
+     "RiemannZetaZero",
+     [
+      "Negate",
+      "n"
+     ]
+    ],
+    [
+     "Conjugate",
+     [
+      "RiemannZetaZero",
+      "n"
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "NotEqual",
+     "n",
+     0
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Conjugate",
+    "RiemannZetaZero"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "riemann_zeta"
+   ]
+  },
+  {
+   "id": "60c6da",
+   "formula": [
+    "Equal",
+    [
+     "HurwitzZeta",
+     "s",
+     "a"
+    ],
+    [
+     "Add",
+     [
+      "Divide",
+      1,
+      [
+       "Subtract",
+       "s",
+       1
+      ]
+     ],
+     [
+      "Sum",
+      [
+       "Multiply",
+       [
+        "Multiply",
+        [
+         "Divide",
+         [
+          "Power",
+          -1,
+          "n"
+         ],
+         [
+          "Factorial",
+          "n"
+         ]
+        ],
+        [
+         "StieltjesGamma",
+         "n",
+         "a"
+        ]
+       ],
+       [
+        "Power",
+        [
+         "Subtract",
+         "s",
+         1
+        ],
+        "n"
+       ]
+      ],
+      [
+       "Limits",
+       "n",
+       0,
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "s"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "s",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ],
+    [
+     "NotElement",
+     "a",
+     "NonPositiveIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Factorial",
+    "HurwitzZeta",
+    "StieltjesGamma",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "hurwitz_zeta",
+    "riemann_zeta"
+   ]
+  },
+  {
+   "id": "64bd32",
+   "formula": [
+    "Implies",
+    "RiemannHypothesis",
+    [
+     "AsymptoticTo",
+     [
+      "KeiperLiLambda",
+      "n"
+     ],
+     [
+      "Subtract",
+      [
+       "Divide",
+       [
+        "Ln",
+        "n"
+       ],
+       2
+      ],
+      [
+       "Divide",
+       [
+        "Subtract",
+        [
+         "Add",
+         [
+          "Ln",
+          [
+           "Multiply",
+           2,
+           "Pi"
+          ]
+         ],
+         1
+        ],
+        "EulerGamma"
+       ],
+       2
+      ]
+     ],
+     "n",
+     "PositiveInfinity"
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "AsymptoticTo",
+    "KeiperLiLambda",
+    "Ln",
+    "RiemannHypothesis"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": [
+    "https://doi.org/10.7169/facm/1317045228"
+   ],
+   "topics": [
+    "riemann_zeta"
+   ]
+  },
+  {
+   "id": "687b4d",
+   "formula": [
+    "Equal",
+    [
+     "StieltjesGamma",
+     "n",
+     [
+      "Add",
+      "a",
+      1
+     ]
+    ],
+    [
+     "Subtract",
+     [
+      "StieltjesGamma",
+      "n",
+      "a"
+     ],
+     [
+      "Divide",
+      [
+       "Power",
+       [
+        "Ln",
+        "a"
+       ],
+       "n"
+      ],
+      "a"
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ],
+    [
+     "NotElement",
+     "a",
+     "NonPositiveIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Ln",
+    "StieltjesGamma"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "riemann_zeta"
+   ]
+  },
+  {
+   "id": "69348a",
+   "formula": [
+    "Equal",
+    [
+     "Zeta",
+     [
+      "Conjugate",
+      "s"
+     ]
+    ],
+    [
+     "Conjugate",
+     [
+      "Zeta",
+      "s"
+     ]
+    ]
+   ],
+   "variables": [
+    "s"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "s",
+     "ComplexNumbers"
+    ],
+    [
+     "NotEqual",
+     "s",
+     1
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Conjugate",
+    "Zeta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "riemann_zeta"
+   ]
+  },
+  {
+   "id": "70a705",
+   "formula": [
+    "Equal",
+    [
+     "StieltjesGamma",
+     1,
+     [
+      "Divide",
+      1,
+      2
+     ]
+    ],
+    [
+     "Subtract",
+     [
+      "Subtract",
+      [
+       "StieltjesGamma",
+       1
+      ],
+      [
+       "Multiply",
+       [
+        "Multiply",
+        2,
+        "EulerGamma"
+       ],
+       [
+        "Ln",
+        2
+       ]
+      ]
+     ],
+     [
+      "Power",
+      [
+       "Ln",
+       2
+      ],
+      2
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Ln",
+    "StieltjesGamma"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "riemann_zeta"
+   ]
+  },
+  {
+   "id": "72ccda",
+   "formula": [
+    "Equal",
+    [
+     "Zeta",
+     [
+      "Multiply",
+      2,
+      "n"
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Multiply",
+      [
+       "Multiply",
+       [
+        "Power",
+        -1,
+        [
+         "Add",
+         "n",
+         1
+        ]
+       ],
+       [
+        "BernoulliB",
+        [
+         "Multiply",
+         2,
+         "n"
+        ]
+       ]
+      ],
+      [
+       "Power",
+       [
+        "Multiply",
+        2,
+        "Pi"
+       ],
+       [
+        "Multiply",
+        2,
+        "n"
+       ]
+      ]
+     ],
+     [
+      "Multiply",
+      2,
+      [
+       "Factorial",
+       [
+        "Multiply",
+        2,
+        "n"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "GreaterEqual",
+     "n",
+     1
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BernoulliB",
+    "Factorial",
+    "Zeta"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "riemann_zeta"
+   ]
+  },
+  {
+   "id": "7783f9",
+   "formula": [
+    "Equivalent",
+    "RiemannHypothesis",
+    [
+     "Equal",
+     [
+      "Multiply",
+      [
+       "Divide",
+       1,
+       "Pi"
+      ],
+      [
+       "Integrate",
+       [
+        "Multiply",
+        [
+         "Ln",
+         [
+          "Abs",
+          [
+           "Divide",
+           [
+            "Zeta",
+            [
+             "Add",
+             [
+              "Divide",
+              1,
+              2
+             ],
+             [
+              "Multiply",
+              "ImaginaryUnit",
+              "t"
+             ]
+            ]
+           ],
+           [
+            "Zeta",
+            [
+             "Divide",
+             1,
+             2
+            ]
+           ]
+          ]
+         ]
+        ],
+        [
+         "Divide",
+         1,
+         [
+          "Power",
+          "t",
+          2
+         ]
+        ]
+       ],
+       [
+        "Limits",
+        "t",
+        0,
+        "PositiveInfinity"
+       ]
+      ]
+     ],
+     [
+      "Subtract",
+      [
+       "Add",
+       [
+        "Add",
+        [
+         "Divide",
+         "Pi",
+         8
+        ],
+        [
+         "Divide",
+         "EulerGamma",
+         4
+        ]
+       ],
+       [
+        "Divide",
+        [
+         "Ln",
+         [
+          "Multiply",
+          8,
+          "Pi"
+         ]
+        ],
+        4
+       ]
+      ],
+      2
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Integrate",
+    "Ln",
+    "RiemannHypothesis",
+    "Zeta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": [
+    "https://mathoverflow.net/q/279936"
+   ],
+   "topics": [
+    "riemann_zeta"
+   ]
+  },
+  {
+   "id": "792f7b",
+   "formula": [
+    "Equal",
+    [
+     "Zeta",
+     "s"
+    ],
+    [
+     "Subtract",
+     [
+      "Add",
+      [
+       "Add",
+       [
+        "Sum",
+        [
+         "Divide",
+         1,
+         [
+          "Power",
+          "k",
+          "s"
+         ]
+        ],
+        [
+         "Limits",
+         "k",
+         1,
+         [
+          "Subtract",
+          "N_var",
+          1
+         ]
+        ]
+       ],
+       [
+        "Divide",
+        [
+         "Power",
+         "N_var",
+         [
+          "Subtract",
+          1,
+          "s"
+         ]
+        ],
+        [
+         "Subtract",
+         "s",
+         1
+        ]
+       ]
+      ],
+      [
+       "Multiply",
+       [
+        "Divide",
+        1,
+        [
+         "Power",
+         "N_var",
+         "s"
+        ]
+       ],
+       [
+        "Add",
+        [
+         "Divide",
+         1,
+         2
+        ],
+        [
+         "Sum",
+         [
+          "Multiply",
+          [
+           "Divide",
+           [
+            "BernoulliB",
+            [
+             "Multiply",
+             2,
+             "k"
+            ]
+           ],
+           [
+            "Factorial",
+            [
+             "Multiply",
+             2,
+             "k"
+            ]
+           ]
+          ],
+          [
+           "Divide",
+           [
+            "RisingFactorial",
+            "s",
+            [
+             "Subtract",
+             [
+              "Multiply",
+              2,
+              "k"
+             ],
+             1
+            ]
+           ],
+           [
+            "Power",
+            "N_var",
+            [
+             "Subtract",
+             [
+              "Multiply",
+              2,
+              "k"
+             ],
+             1
+            ]
+           ]
+          ]
+         ],
+         [
+          "Limits",
+          "k",
+          1,
+          "M"
+         ]
+        ]
+       ]
+      ]
+     ],
+     [
+      "Integrate",
+      [
+       "Multiply",
+       [
+        "Divide",
+        [
+         "BernoulliPolynomial",
+         [
+          "Multiply",
+          2,
+          "M"
+         ],
+         [
+          "Subtract",
+          "t",
+          [
+           "Floor",
+           "t"
+          ]
+         ]
+        ],
+        [
+         "Factorial",
+         [
+          "Multiply",
+          2,
+          "M"
+         ]
+        ]
+       ],
+       [
+        "Divide",
+        [
+         "RisingFactorial",
+         "s",
+         [
+          "Multiply",
+          2,
+          "M"
+         ]
+        ],
+        [
+         "Power",
+         "t",
+         [
+          "Add",
+          "s",
+          [
+           "Multiply",
+           2,
+           "M"
+          ]
+         ]
+        ]
+       ]
+      ],
+      [
+       "Limits",
+       "t",
+       "N_var",
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "M",
+    "N_var",
+    "s"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "s",
+     "ComplexNumbers"
+    ],
+    [
+     "NotEqual",
+     "s",
+     1
+    ],
+    [
+     "Element",
+     "N_var",
+     "Integers"
+    ],
+    [
+     "Element",
+     "M",
+     "Integers"
+    ],
+    [
+     "Greater",
+     [
+      "Real",
+      [
+       "Subtract",
+       [
+        "Add",
+        "s",
+        [
+         "Multiply",
+         2,
+         "M"
+        ]
+       ],
+       1
+      ]
+     ],
+     0
+    ],
+    [
+     "GreaterEqual",
+     "N_var",
+     1
+    ],
+    [
+     "GreaterEqual",
+     "M",
+     1
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "BernoulliB",
+    "BernoulliPolynomial",
+    "Factorial",
+    "Floor",
+    "Integrate",
+    "RisingFactorial",
+    "Sum",
+    "Zeta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": [
+    "F. Johansson (2015), Rigorous high-precision computation of the Hurwitz zeta function and its derivatives, Numerical Algorithms 69:253, DOI: 10.1007/s11075-014-9893-1",
+    "F. W. J. Olver, Asymptotics and Special Functions, AK Peters, 1997. Chapter 8."
+   ],
+   "topics": [
+    "riemann_zeta"
+   ]
+  },
+  {
+   "id": "809bc0",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "Zeta",
+      "s"
+     ]
+    ],
+    [
+     "Zeta",
+     [
+      "Real",
+      "s"
+     ]
+    ]
+   ],
+   "variables": [
+    "s"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "s",
+     "ComplexNumbers"
+    ],
+    [
+     "Greater",
+     [
+      "Real",
+      "s"
+     ],
+     1
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Real",
+    "Zeta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "riemann_zeta"
+   ]
+  },
+  {
+   "id": "8ae153",
+   "formula": [
+    "Equal",
+    [
+     "StieltjesGamma",
+     0,
+     1
+    ],
+    [
+     "StieltjesGamma",
+     0
+    ],
+    "EulerGamma"
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "StieltjesGamma"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "riemann_zeta"
+   ]
+  },
+  {
+   "id": "8f5e66",
+   "formula": [
+    "Equal",
+    [
+     "Zeta",
+     "s"
+    ],
+    [
+     "Product",
+     [
+      "Divide",
+      1,
+      [
+       "Subtract",
+       1,
+       [
+        "Divide",
+        1,
+        [
+         "Power",
+         "p",
+         "s"
+        ]
+       ]
+      ]
+     ],
+     [
+      "Element",
+      "p",
+      "Primes"
+     ]
+    ]
+   ],
+   "variables": [
+    "s"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "s",
+     "ComplexNumbers"
+    ],
+    [
+     "Greater",
+     [
+      "Real",
+      "s"
+     ],
+     1
+    ]
+   ],
+   "class": "representation",
+   "subclass": "product",
+   "heads": [
+    "Primes",
+    "Product",
+    "Zeta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "riemann_zeta"
+   ]
+  },
+  {
+   "id": "8f8fb7",
+   "formula": [
+    "Implies",
+    [
+     "ForAll",
+     [
+      "Element",
+      "n",
+      "PositiveIntegers"
+     ],
+     [
+      "Implies",
+      [
+       "Less",
+       [
+        "Imaginary",
+        [
+         "RiemannZetaZero",
+         "n"
+        ]
+       ],
+       "T"
+      ],
+      [
+       "Equal",
+       [
+        "Real",
+        [
+         "RiemannZetaZero",
+         "n"
+        ]
+       ],
+       [
+        "Divide",
+        1,
+        2
+       ]
+      ]
+     ]
+    ],
+    [
+     "ForAll",
+     [
+      "Element",
+      "n",
+      "NonNegativeIntegers"
+     ],
+     [
+      "Implies",
+      [
+       "LessEqual",
+       "n",
+       [
+        "Power",
+        "T",
+        2
+       ]
+      ],
+      [
+       "GreaterEqual",
+       [
+        "KeiperLiLambda",
+        "n"
+       ],
+       0
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "T"
+   ],
+   "assumptions": [
+    "Element",
+    "T",
+    [
+     "Interval",
+     0,
+     [
+      "Open",
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "Imaginary",
+    "KeiperLiLambda",
+    "Real",
+    "RiemannZetaZero"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": [
+    "https://arxiv.org/abs/1703.02844"
+   ],
+   "topics": [
+    "riemann_zeta"
+   ]
+  },
+  {
+   "id": "945fa5",
+   "formula": [
+    "Element",
+    [
+     "RiemannZetaZero",
+     1
+    ],
+    [
+     "Add",
+     [
+      "Divide",
+      1,
+      2
+     ],
+     [
+      "Multiply",
+      [
+       "RealBall",
+       {
+        "num": "14.134725141734693790457251983562470270784257115699"
+       },
+       {
+        "num": "2.44e-49"
+       }
+      ],
+      "ImaginaryUnit"
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "RealBall",
+    "RiemannZetaZero"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "riemann_zeta"
+   ]
+  },
+  {
+   "id": "9fa2a1",
+   "formula": [
+    "Equivalent",
+    "RiemannHypothesis",
+    [
+     "ForAll",
+     [
+      "Element",
+      "s",
+      "ComplexNumbers"
+     ],
+     [
+      "Implies",
+      [
+       "And",
+       [
+        "LessEqual",
+        0,
+        [
+         "Real",
+         "s"
+        ],
+        1
+       ],
+       [
+        "Equal",
+        [
+         "Zeta",
+         "s"
+        ],
+        0
+       ]
+      ],
+      [
+       "Equal",
+       [
+        "Real",
+        "s"
+       ],
+       [
+        "Divide",
+        1,
+        2
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "Real",
+    "RiemannHypothesis",
+    "Zeta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "riemann_zeta"
+   ]
+  },
+  {
+   "id": "a01b6e",
+   "formula": [
+    "Equal",
+    [
+     "Zeta",
+     2
+    ],
+    [
+     "Divide",
+     [
+      "Power",
+      "Pi",
+      2
+     ],
+     6
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Zeta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "riemann_zeta"
+   ]
+  },
+  {
+   "id": "a41c92",
+   "formula": [
+    "Equal",
+    [
+     "StieltjesGamma",
+     "n",
+     "a"
+    ],
+    [
+     "Negate",
+     [
+      "Multiply",
+      [
+       "Divide",
+       "Pi",
+       [
+        "Multiply",
+        2,
+        [
+         "Add",
+         "n",
+         1
+        ]
+       ]
+      ],
+      [
+       "Integrate",
+       [
+        "Divide",
+        [
+         "Add",
+         [
+          "Power",
+          [
+           "Ln",
+           [
+            "Add",
+            [
+             "Subtract",
+             "a",
+             [
+              "Divide",
+              1,
+              2
+             ]
+            ],
+            [
+             "Multiply",
+             "ImaginaryUnit",
+             "x"
+            ]
+           ]
+          ],
+          [
+           "Add",
+           "n",
+           1
+          ]
+         ],
+         [
+          "Power",
+          [
+           "Ln",
+           [
+            "Subtract",
+            [
+             "Subtract",
+             "a",
+             [
+              "Divide",
+              1,
+              2
+             ]
+            ],
+            [
+             "Multiply",
+             "ImaginaryUnit",
+             "x"
+            ]
+           ]
+          ],
+          [
+           "Add",
+           "n",
+           1
+          ]
+         ]
+        ],
+        [
+         "Power",
+         [
+          "Cosh",
+          [
+           "Multiply",
+           "Pi",
+           "x"
+          ]
+         ],
+         2
+        ]
+       ],
+       [
+        "Limits",
+        "x",
+        0,
+        "PositiveInfinity"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ],
+    [
+     "Greater",
+     [
+      "Real",
+      "a"
+     ],
+     [
+      "Divide",
+      1,
+      2
+     ]
+    ]
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Cosh",
+    "Integrate",
+    "Ln",
+    "StieltjesGamma"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "riemann_zeta"
+   ]
+  },
+  {
+   "id": "a5d65f",
+   "formula": [
+    "Equivalent",
+    "RiemannHypothesis",
+    [
+     "Less",
+     [
+      "Sum",
+      [
+       "Power",
+       [
+        "Abs",
+        [
+         "Subtract",
+         [
+          "KeiperLiLambda",
+          "n"
+         ],
+         [
+          "Subtract",
+          [
+           "Divide",
+           [
+            "Ln",
+            "n"
+           ],
+           2
+          ],
+          [
+           "Divide",
+           [
+            "Subtract",
+            [
+             "Add",
+             [
+              "Ln",
+              [
+               "Multiply",
+               2,
+               "Pi"
+              ]
+             ],
+             1
+            ],
+            "EulerGamma"
+           ],
+           2
+          ]
+         ]
+        ]
+       ],
+       2
+      ],
+      [
+       "Limits",
+       "n",
+       1,
+       "PositiveInfinity"
+      ]
+     ],
+     "PositiveInfinity"
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "KeiperLiLambda",
+    "Ln",
+    "RiemannHypothesis",
+    "Sum"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": [
+    "https://doi.org/10.7169/facm/1317045228"
+   ],
+   "topics": [
+    "riemann_zeta"
+   ]
+  },
+  {
+   "id": "a71ddd",
+   "formula": [
+    "Equivalent",
+    "RiemannHypothesis",
+    [
+     "Equal",
+     "DeBruijnNewmanLambda",
+     0
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "DeBruijnNewmanLambda",
+    "RiemannHypothesis"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": [
+    "https://arxiv.org/abs/1801.05914"
+   ],
+   "topics": [
+    "riemann_zeta"
+   ]
+  },
+  {
+   "id": "b1a2e1",
+   "formula": [
+    "Equal",
+    [
+     "Zeta",
+     "s"
+    ],
+    [
+     "Add",
+     [
+      "Divide",
+      1,
+      [
+       "Subtract",
+       "s",
+       1
+      ]
+     ],
+     [
+      "Sum",
+      [
+       "Multiply",
+       [
+        "Multiply",
+        [
+         "Divide",
+         [
+          "Power",
+          -1,
+          "n"
+         ],
+         [
+          "Factorial",
+          "n"
+         ]
+        ],
+        [
+         "StieltjesGamma",
+         "n"
+        ]
+       ],
+       [
+        "Power",
+        [
+         "Subtract",
+         "s",
+         1
+        ],
+        "n"
+       ]
+      ],
+      [
+       "Limits",
+       "n",
+       0,
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "s"
+   ],
+   "assumptions": [
+    "Element",
+    "s",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Factorial",
+    "StieltjesGamma",
+    "Sum",
+    "Zeta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "riemann_zeta"
+   ]
+  },
+  {
+   "id": "b6808d",
+   "formula": [
+    "Equal",
+    [
+     "StieltjesGamma",
+     0,
+     "a"
+    ],
+    [
+     "Negate",
+     [
+      "Digamma",
+      "a"
+     ]
+    ]
+   ],
+   "variables": [
+    "a"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ],
+    [
+     "NotElement",
+     "a",
+     "NonPositiveIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Digamma",
+    "StieltjesGamma"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "riemann_zeta"
+   ]
+  },
+  {
+   "id": "bfaeb5",
+   "formula": [
+    "Equivalent",
+    "RiemannHypothesis",
+    [
+     "ForAll",
+     [
+      "Element",
+      "x",
+      [
+       "Interval",
+       2,
+       [
+        "Open",
+        "PositiveInfinity"
+       ]
+      ]
+     ],
+     [
+      "Less",
+      [
+       "Abs",
+       [
+        "Subtract",
+        [
+         "PrimePi",
+         "x"
+        ],
+        [
+         "LogIntegral",
+         "x"
+        ]
+       ]
+      ],
+      [
+       "Multiply",
+       [
+        "Sqrt",
+        "x"
+       ],
+       [
+        "Ln",
+        "x"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Ln",
+    "LogIntegral",
+    "PrimePi",
+    "RiemannHypothesis"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": [
+    "https://mathoverflow.net/q/338066"
+   ],
+   "topics": [
+    "riemann_zeta"
+   ]
+  },
+  {
+   "id": "c0ae99",
+   "formula": [
+    "Element",
+    [
+     "RiemannZetaZero",
+     2
+    ],
+    [
+     "Add",
+     [
+      "Divide",
+      1,
+      2
+     ],
+     [
+      "Multiply",
+      [
+       "RealBall",
+       {
+        "num": "21.022039638771554992628479593896902777334340524903"
+       },
+       {
+        "num": "2.19e-49"
+       }
+      ],
+      "ImaginaryUnit"
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "RealBall",
+    "RiemannZetaZero"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "riemann_zeta"
+   ]
+  },
+  {
+   "id": "cbbf16",
+   "formula": [
+    "Less",
+    0,
+    [
+     "Real",
+     [
+      "RiemannZetaZero",
+      "n"
+     ]
+    ],
+    1
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "NotEqual",
+     "n",
+     0
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Real",
+    "RiemannZetaZero"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "riemann_zeta"
+   ]
+  },
+  {
+   "id": "cce75b",
+   "formula": [
+    "Equal",
+    [
+     "KeiperLiLambda",
+     "n"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      1,
+      "n"
+     ],
+     [
+      "Sum",
+      [
+       "Subtract",
+       1,
+       [
+        "Power",
+        [
+         "Divide",
+         [
+          "RiemannZetaZero",
+          "k"
+         ],
+         [
+          "Subtract",
+          [
+           "RiemannZetaZero",
+           "k"
+          ],
+          1
+         ]
+        ],
+        "n"
+       ]
+      ],
+      [
+       "Element",
+       "k",
+       "Integers",
+       [
+        "NotEqual",
+        "k",
+        0
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "PositiveIntegers"
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "KeiperLiLambda",
+    "RiemannZetaZero",
+    "Sum"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "riemann_zeta"
+   ]
+  },
+  {
+   "id": "cf70ce",
+   "formula": [
+    "Equivalent",
+    "RiemannHypothesis",
+    [
+     "Equal",
+     [
+      "Integrate",
+      [
+       "Multiply",
+       [
+        "Divide",
+        [
+         "Subtract",
+         1,
+         [
+          "Multiply",
+          12,
+          [
+           "Power",
+           "t",
+           2
+          ]
+         ]
+        ],
+        [
+         "Power",
+         [
+          "Add",
+          1,
+          [
+           "Multiply",
+           4,
+           [
+            "Power",
+            "t",
+            2
+           ]
+          ]
+         ],
+         3
+        ]
+       ],
+       [
+        "Integrate",
+        [
+         "Ln",
+         [
+          "Abs",
+          [
+           "Zeta",
+           [
+            "Add",
+            "sigma",
+            [
+             "Multiply",
+             "ImaginaryUnit",
+             "t"
+            ]
+           ]
+          ]
+         ]
+        ],
+        [
+         "Limits",
+         "sigma",
+         [
+          "Divide",
+          1,
+          2
+         ],
+         "PositiveInfinity"
+        ]
+       ]
+      ],
+      [
+       "Limits",
+       "t",
+       0,
+       "PositiveInfinity"
+      ]
+     ],
+     [
+      "Divide",
+      [
+       "Multiply",
+       "Pi",
+       [
+        "Subtract",
+        3,
+        "EulerGamma"
+       ]
+      ],
+      32
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Integrate",
+    "Ln",
+    "RiemannHypothesis",
+    "Zeta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": [
+    "https://doi.org/10.1007/BF01056314"
+   ],
+   "topics": [
+    "riemann_zeta"
+   ]
+  },
+  {
+   "id": "d31b04",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "Subtract",
+      [
+       "Zeta",
+       "s"
+      ],
+      [
+       "Add",
+       [
+        "Add",
+        [
+         "Sum",
+         [
+          "Divide",
+          1,
+          [
+           "Power",
+           "k",
+           "s"
+          ]
+         ],
+         [
+          "Limits",
+          "k",
+          1,
+          [
+           "Subtract",
+           "N_var",
+           1
+          ]
+         ]
+        ],
+        [
+         "Divide",
+         [
+          "Power",
+          "N_var",
+          [
+           "Subtract",
+           1,
+           "s"
+          ]
+         ],
+         [
+          "Subtract",
+          "s",
+          1
+         ]
+        ]
+       ],
+       [
+        "Multiply",
+        [
+         "Divide",
+         1,
+         [
+          "Power",
+          "N_var",
+          "s"
+         ]
+        ],
+        [
+         "Add",
+         [
+          "Divide",
+          1,
+          2
+         ],
+         [
+          "Sum",
+          [
+           "Multiply",
+           [
+            "Divide",
+            [
+             "BernoulliB",
+             [
+              "Multiply",
+              2,
+              "k"
+             ]
+            ],
+            [
+             "Factorial",
+             [
+              "Multiply",
+              2,
+              "k"
+             ]
+            ]
+           ],
+           [
+            "Divide",
+            [
+             "RisingFactorial",
+             "s",
+             [
+              "Subtract",
+              [
+               "Multiply",
+               2,
+               "k"
+              ],
+              1
+             ]
+            ],
+            [
+             "Power",
+             "N_var",
+             [
+              "Subtract",
+              [
+               "Multiply",
+               2,
+               "k"
+              ],
+              1
+             ]
+            ]
+           ]
+          ],
+          [
+           "Limits",
+           "k",
+           1,
+           "M"
+          ]
+         ]
+        ]
+       ]
+      ]
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      [
+       "Multiply",
+       4,
+       [
+        "Abs",
+        [
+         "RisingFactorial",
+         "s",
+         [
+          "Multiply",
+          2,
+          "M"
+         ]
+        ]
+       ]
+      ],
+      [
+       "Power",
+       [
+        "Multiply",
+        2,
+        "Pi"
+       ],
+       [
+        "Multiply",
+        2,
+        "M"
+       ]
+      ]
+     ],
+     [
+      "Divide",
+      [
+       "Power",
+       "N_var",
+       [
+        "Negate",
+        [
+         "Subtract",
+         [
+          "Add",
+          [
+           "Real",
+           "s"
+          ],
+          [
+           "Multiply",
+           2,
+           "M"
+          ]
+         ],
+         1
+        ]
+       ]
+      ],
+      [
+       "Subtract",
+       [
+        "Add",
+        [
+         "Real",
+         "s"
+        ],
+        [
+         "Multiply",
+         2,
+         "M"
+        ]
+       ],
+       1
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "M",
+    "N_var",
+    "s"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "s",
+     "ComplexNumbers"
+    ],
+    [
+     "NotEqual",
+     "s",
+     1
+    ],
+    [
+     "Element",
+     "N_var",
+     "Integers"
+    ],
+    [
+     "Element",
+     "M",
+     "Integers"
+    ],
+    [
+     "Greater",
+     [
+      "Real",
+      [
+       "Subtract",
+       [
+        "Add",
+        "s",
+        [
+         "Multiply",
+         2,
+         "M"
+        ]
+       ],
+       1
+      ]
+     ],
+     0
+    ],
+    [
+     "GreaterEqual",
+     "N_var",
+     1
+    ],
+    [
+     "GreaterEqual",
+     "M",
+     1
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "BernoulliB",
+    "Factorial",
+    "Real",
+    "RisingFactorial",
+    "Sum",
+    "Zeta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": [
+    "F. Johansson (2015), Rigorous high-precision computation of the Hurwitz zeta function and its derivatives, Numerical Algorithms 69:253, DOI: 10.1007/s11075-014-9893-1",
+    "F. W. J. Olver, Asymptotics and Special Functions, AK Peters, 1997. Chapter 8."
+   ],
+   "topics": [
+    "riemann_zeta"
+   ]
+  },
+  {
+   "id": "d8d820",
+   "formula": [
+    "Equal",
+    [
+     "KeiperLiLambda",
+     1
+    ],
+    [
+     "Subtract",
+     [
+      "Add",
+      [
+       "Divide",
+       "EulerGamma",
+       2
+      ],
+      1
+     ],
+     [
+      "Divide",
+      [
+       "Ln",
+       [
+        "Multiply",
+        4,
+        "Pi"
+       ]
+      ],
+      2
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "KeiperLiLambda",
+    "Ln"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "riemann_zeta"
+   ]
+  },
+  {
+   "id": "da2fdb",
+   "formula": [
+    "Equal",
+    [
+     "Zeta",
+     "s"
+    ],
+    [
+     "Sum",
+     [
+      "Divide",
+      1,
+      [
+       "Power",
+       "k",
+       "s"
+      ]
+     ],
+     [
+      "Limits",
+      "k",
+      1,
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "variables": [
+    "s"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "s",
+     "ComplexNumbers"
+    ],
+    [
+     "Greater",
+     [
+      "Real",
+      "s"
+     ],
+     1
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Sum",
+    "Zeta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "riemann_zeta"
+   ]
+  },
+  {
+   "id": "e37535",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "Subtract",
+      [
+       "Multiply",
+       [
+        "Subtract",
+        1,
+        [
+         "Power",
+         2,
+         [
+          "Subtract",
+          1,
+          "s"
+         ]
+        ]
+       ],
+       [
+        "Zeta",
+        "s"
+       ]
+      ],
+      [
+       "Multiply",
+       [
+        "Divide",
+        1,
+        [
+         "Multiply",
+         "n",
+         [
+          "Sum",
+          [
+           "Divide",
+           [
+            "Multiply",
+            [
+             "Factorial",
+             [
+              "Subtract",
+              [
+               "Add",
+               "n",
+               "i_var"
+              ],
+              1
+             ]
+            ],
+            [
+             "Power",
+             4,
+             "i_var"
+            ]
+           ],
+           [
+            "Multiply",
+            [
+             "Factorial",
+             [
+              "Subtract",
+              "n",
+              "i_var"
+             ]
+            ],
+            [
+             "Factorial",
+             [
+              "Multiply",
+              2,
+              "i_var"
+             ]
+            ]
+           ]
+          ],
+          [
+           "Limits",
+           "i_var",
+           0,
+           "n"
+          ]
+         ]
+        ]
+       ],
+       [
+        "Sum",
+        [
+         "Divide",
+         [
+          "Multiply",
+          [
+           "Power",
+           -1,
+           "k"
+          ],
+          [
+           "Subtract",
+           [
+            "Multiply",
+            "n",
+            [
+             "Sum",
+             [
+              "Divide",
+              [
+               "Multiply",
+               [
+                "Factorial",
+                [
+                 "Subtract",
+                 [
+                  "Add",
+                  "n",
+                  "i_var"
+                 ],
+                 1
+                ]
+               ],
+               [
+                "Power",
+                4,
+                "i_var"
+               ]
+              ],
+              [
+               "Multiply",
+               [
+                "Factorial",
+                [
+                 "Subtract",
+                 "n",
+                 "i_var"
+                ]
+               ],
+               [
+                "Factorial",
+                [
+                 "Multiply",
+                 2,
+                 "i_var"
+                ]
+               ]
+              ]
+             ],
+             [
+              "Limits",
+              "i_var",
+              0,
+              "n"
+             ]
+            ]
+           ],
+           [
+            "Multiply",
+            "n",
+            [
+             "Sum",
+             [
+              "Divide",
+              [
+               "Multiply",
+               [
+                "Factorial",
+                [
+                 "Subtract",
+                 [
+                  "Add",
+                  "n",
+                  "i_var"
+                 ],
+                 1
+                ]
+               ],
+               [
+                "Power",
+                4,
+                "i_var"
+               ]
+              ],
+              [
+               "Multiply",
+               [
+                "Factorial",
+                [
+                 "Subtract",
+                 "n",
+                 "i_var"
+                ]
+               ],
+               [
+                "Factorial",
+                [
+                 "Multiply",
+                 2,
+                 "i_var"
+                ]
+               ]
+              ]
+             ],
+             [
+              "Limits",
+              "i_var",
+              0,
+              "k"
+             ]
+            ]
+           ]
+          ]
+         ],
+         [
+          "Power",
+          [
+           "Add",
+           "k",
+           1
+          ],
+          "s"
+         ]
+        ],
+        [
+         "Limits",
+         "k",
+         0,
+         [
+          "Subtract",
+          "n",
+          1
+         ]
+        ]
+       ]
+      ]
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      [
+       "Multiply",
+       3,
+       [
+        "Add",
+        1,
+        [
+         "Multiply",
+         2,
+         [
+          "Abs",
+          [
+           "Imaginary",
+           "s"
+          ]
+         ]
+        ]
+       ]
+      ],
+      [
+       "Power",
+       [
+        "Add",
+        3,
+        [
+         "Sqrt",
+         8
+        ]
+       ],
+       "n"
+      ]
+     ],
+     [
+      "Exp",
+      [
+       "Divide",
+       [
+        "Multiply",
+        [
+         "Abs",
+         [
+          "Imaginary",
+          "s"
+         ]
+        ],
+        "Pi"
+       ],
+       2
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "s"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "s",
+     "ComplexNumbers"
+    ],
+    [
+     "GreaterEqual",
+     [
+      "Real",
+      "s"
+     ],
+     [
+      "Divide",
+      1,
+      2
+     ]
+    ],
+    [
+     "NotEqual",
+     "s",
+     1
+    ],
+    [
+     "Element",
+     "n",
+     "PositiveIntegers"
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Exp",
+    "Factorial",
+    "Imaginary",
+    "Sum",
+    "Zeta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": [
+    "P. Borwein. An efficient algorithm for the Riemann zeta function. Canadian Mathematical Society Conference Proceedings, vol. 27, pp. 29-34. 2000."
+   ],
+   "topics": [
+    "riemann_zeta"
+   ]
+  },
+  {
+   "id": "e4287f",
+   "formula": [
+    "Equivalent",
+    "RiemannHypothesis",
+    [
+     "ForAll",
+     [
+      "Element",
+      "n",
+      [
+       "Range",
+       2,
+       "PositiveInfinity"
+      ]
+     ],
+     [
+      "Less",
+      [
+       "DivisorSigma",
+       1,
+       "n"
+      ],
+      [
+       "Add",
+       [
+        "HarmonicNumber",
+        "n"
+       ],
+       [
+        "Multiply",
+        [
+         "Exp",
+         [
+          "HarmonicNumber",
+          "n"
+         ]
+        ],
+        [
+         "Ln",
+         [
+          "HarmonicNumber",
+          "n"
+         ]
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "DivisorSigma",
+    "Exp",
+    "HarmonicNumber",
+    "Ln",
+    "RiemannHypothesis"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": [
+    "https://doi.org/10.2307/2695443"
+   ],
+   "topics": [
+    "riemann_zeta"
+   ]
+  },
+  {
+   "id": "e68f82",
+   "formula": [
+    "Equivalent",
+    "RiemannHypothesis",
+    [
+     "ForAll",
+     [
+      "Element",
+      "n",
+      "PositiveIntegers"
+     ],
+     [
+      "Greater",
+      [
+       "KeiperLiLambda",
+       "n"
+      ],
+      0
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "KeiperLiLambda",
+    "RiemannHypothesis"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": [
+    "https://doi.org/10.1006/jnth.1997.2137"
+   ],
+   "topics": [
+    "riemann_zeta"
+   ]
+  },
+  {
+   "id": "e6ff64",
+   "formula": [
+    "Equal",
+    [
+     "Real",
+     [
+      "RiemannZetaZero",
+      "n"
+     ]
+    ],
+    [
+     "Divide",
+     1,
+     2
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "Integers"
+    ],
+    [
+     "NotEqual",
+     "n",
+     0
+    ],
+    [
+     "Or",
+     [
+      "Less",
+      [
+       "Abs",
+       "n"
+      ],
+      103800788359
+     ],
+     "RiemannHypothesis"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Real",
+    "RiemannZetaZero"
+   ],
+   "guardLevel": "undischargeable",
+   "flavor": null,
+   "references": [
+    "D. J. Platt (2016), Isolating some non-trivial zeros of zeta, Mathematics of Computation 86(307):1, DOI: 10.1090/mcom/3198"
+   ],
+   "topics": [
+    "riemann_zeta"
+   ]
+  },
+  {
+   "id": "e84983",
+   "formula": [
+    "NotElement",
+    [
+     "Zeta",
+     3
+    ],
+    "RationalNumbers"
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "Zeta"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": [
+    "R. Ap\u00e9ry (1979), Irrationalit\u00e9 de \u03b6(2) et \u03b6(3), Ast\u00e9risque, 61: 11-13."
+   ],
+   "topics": [
+    "riemann_zeta"
+   ]
+  },
+  {
+   "id": "fcab61",
+   "formula": [
+    "Equal",
+    [
+     "KeiperLiLambda",
+     "n"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      1,
+      [
+       "Factorial",
+       "n"
+      ]
+     ],
+     [
+      "Apply",
+      [
+       "Derivative",
+       [
+        "Function",
+        [
+         "Ln",
+         [
+          "Multiply",
+          2,
+          [
+           "RiemannXi",
+           [
+            "Divide",
+            "s",
+            [
+             "Subtract",
+             "s",
+             1
+            ]
+           ]
+          ]
+         ]
+        ],
+        "s"
+       ],
+       "n"
+      ],
+      0
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Derivative",
+    "Factorial",
+    "KeiperLiLambda",
+    "Ln",
+    "RiemannXi"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "riemann_zeta"
+   ]
+  }
+ ]
+}

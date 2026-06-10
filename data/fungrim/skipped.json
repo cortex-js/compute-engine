@@ -1,0 +1,3312 @@
+{
+ "generator": "grim2mathjson 0.1.0",
+ "skipped": [
+  {
+   "id": "00b82b",
+   "topic": "numbers",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "00d5df",
+   "topic": "agm",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "03fbae",
+   "topic": "numbers",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "03fbe8",
+   "topic": "dirichlet",
+   "reason": "where-def-tuple",
+   "heads": [
+    "Where"
+   ],
+   "source": "Where(Equal(DirichletCharacter(q, ell, n), Exp(Mul(Mul(Mul(2, Pi), ConstI), Add(Div(Mul(Sub(1, x), Sub(1, y)), 8), Div(Mul(a, b), Pow(2, Sub(e, 2))))))), Equal(q, Pow(2, e)), Equal(L(k), Cases(Tuple(Tuple(1, DiscreteLog(k, 5, q)), Element(k, Set(Mod(Pow(5, i), q), For(i), Element(i, ZZGreaterEqual(1))))), Tuple(Tuple(-1, DiscreteLog(Neg(k), 5, q)), Element(k, Set(Mod(Neg(Pow(5, i)), q), For(i), Element(i, ZZGreaterEqual(1))))))), Equal(Tuple(x, a), L(ell)), Equal(Tuple(y, b), L(n)))"
+  },
+  {
+   "id": "04217b",
+   "topic": "hurwitz_zeta",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "042551",
+   "topic": "agm",
+   "reason": "where-def-tuple",
+   "heads": [
+    "Where"
+   ],
+   "source": "Equal(Exp(Pi), Where(Mul(32, Product(Pow(Div(a_(Add(n, 1)), a_(n)), Pow(2, Sub(1, n))), For(n, 0, Infinity))), Def(Tuple(a_(n), b_(n)), AGMSequence(n, 1, Div(1, Sqrt(2))))))"
+  },
+  {
+   "id": "044e42",
+   "topic": "operators",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "05a3ee",
+   "topic": "operators",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "0895b1",
+   "topic": "operators",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "08b69d",
+   "topic": "agm",
+   "reason": "where-def-tuple",
+   "heads": [
+    "Where"
+   ],
+   "source": "Where(Equal(Tuple(a_(Add(n, 1)), b_(Add(n, 1))), Tuple(Div(Add(a_(n), b_(n)), 2), Sqrt(Mul(a_(n), b_(n))))), Def(Tuple(a_(k), b_(k)), AGMSequence(k, a, b)))"
+  },
+  {
+   "id": "094772",
+   "topic": "modular_transformations",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "0983d1",
+   "topic": "lambertw",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "09e2ed",
+   "topic": "gamma",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "0a3e5a",
+   "topic": "operators",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "0a6d2e",
+   "topic": "logic",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "0a7f30",
+   "topic": "carlson_elliptic",
+   "reason": "repeat-splice",
+   "heads": [
+    "Repeat"
+   ],
+   "source": "Equal(CarlsonHypergeometricT(N, List(Repeat(beta, n)), List(z_(k), For(k, 1, n))), Sum(Where(Mul(Mul(Pow(-1, Add(M, N)), RisingFactorial(beta, M)), Product(Div(Pow(SymmetricPolynomial(k, List(z_(k), For(k, 1, n))), m_(k)), Factorial(m_(k))), For(k, 1, n))), Def(M, Sum(m_(k), For(k, 1, n)))), ForElement(Tuple(m_(k), For(k, 1, n)), CartesianPower(Parentheses(ZZGreaterEqual(0)), n)), Equal(Sum(Mul(k, m_(k)), For(k, 1, n)), N)))"
+  },
+  {
+   "id": "0b4d4b",
+   "topic": "modular_j",
+   "reason": "tuple-indexing-set",
+   "heads": [
+    "For"
+   ],
+   "source": "Equal(PrimitiveReducedPositiveIntegralBinaryQuadraticForms(D), Set(Tuple(a, b, c), For(Tuple(a, b, c)), And(Element(a, ZZGreaterEqual(1)), Element(b, ZZ), Element(c, ZZ), Equal(Sub(Pow(b, 2), Mul(Mul(4, a), c)), D), LessEqual(Abs(b), a, c), Parentheses(Implies(Or(Equal(Abs(b), a), Equal(a, c)), GreaterEqual(b, 0))), Equal(GCD(a, b, c), 1))))"
+  },
+  {
+   "id": "0b643d",
+   "topic": "prime_numbers",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "0be77d",
+   "topic": "operators",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "0c7de4",
+   "topic": "dirichlet",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "0c8084",
+   "topic": "weierstrass_elliptic",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "0ce854",
+   "topic": "jacobi_theta",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "0d82d4",
+   "topic": "exp",
+   "reason": "formal-indeterminate",
+   "heads": [
+    "PowerSeries"
+   ],
+   "source": "Implies(Element(z, PowerSeries(RR, SerX)), And(Element(Exp(z), PowerSeries(RR, SerX)), NotEqual(Coefficient(Exp(z), SerX, 0), 0)))"
+  },
+  {
+   "id": "0d9952",
+   "topic": "symbolic_expressions",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "0deea6",
+   "topic": "numbers",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "0e2bcb",
+   "topic": "hurwitz_zeta",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "0e613e",
+   "topic": "logic",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "106bf7",
+   "topic": "barnes_g",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "107140",
+   "topic": "legendre_elliptic",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "10ed14",
+   "topic": "gcd",
+   "reason": "where-def-tuple",
+   "heads": [
+    "Where"
+   ],
+   "source": "Where(LessEqual(Abs(v), Div(Abs(a), d)), Equal(Tuple(d, u, v), XGCD(a, b)))"
+  },
+  {
+   "id": "11a763",
+   "topic": "dirichlet",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "126f3e",
+   "topic": "gcd",
+   "reason": "where-def-tuple",
+   "heads": [
+    "Where"
+   ],
+   "source": "Equal(GCD(a, b), Where(d, Equal(Tuple(d, u, v), XGCD(a, b))))"
+  },
+  {
+   "id": "12d5ab",
+   "topic": "numbers",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "132ec5",
+   "topic": "carlson_elliptic",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "13c539",
+   "topic": "agm",
+   "reason": "where-def-tuple",
+   "heads": [
+    "Where"
+   ],
+   "source": "Where(LessEqual(Abs(Sub(Pi, Div(Pow(Add(a_(n), b_(n)), 2), Sub(1, Sum(Mul(Pow(2, j), Pow(c_(j), 2)), For(j, 0, n)))))), Mul(Pow(2, Add(n, 8)), Exp(Neg(Mul(Pi, Pow(2, Add(n, 1))))))), Def(Tuple(a_(n), b_(n)), AGMSequence(n, 1, Div(1, Sqrt(2)))), Def(c_(n), Sub(a_(n), b_(n))))"
+  },
+  {
+   "id": "13f252",
+   "topic": "carlson_elliptic",
+   "reason": "repeat-splice",
+   "heads": [
+    "Repeat"
+   ],
+   "source": "Where(Equal(CarlsonHypergeometricR(Neg(a), List(Repeat(beta, n)), List(z_(k), For(k, 1, n))), Mul(Pow(A, Neg(a)), CarlsonHypergeometricR(Neg(a), List(Repeat(beta, n)), List(Div(z_(k), A), For(k, 1, n))))), Def(A, Mul(Div(1, n), Sum(z_(k), For(k, 1, n)))))"
+  },
+  {
+   "id": "148f96",
+   "topic": "exp",
+   "reason": "formal-indeterminate",
+   "heads": [
+    "PowerSeries"
+   ],
+   "source": "Implies(Element(z, PowerSeries(CC, SerX)), And(Element(Exp(z), PowerSeries(CC, SerX)), NotEqual(Coefficient(Exp(z), SerX, 0), 0)))"
+  },
+  {
+   "id": "166a87",
+   "topic": "dirichlet",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "16a4e7",
+   "topic": "coulomb_wave",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "16fe51",
+   "topic": "bell_numbers",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "1706bb",
+   "topic": "bell_numbers",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "177218",
+   "topic": "landau_function",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "19f13b",
+   "topic": "factorials",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "1a0c43",
+   "topic": "chebyshev",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "1a63af",
+   "topic": "riemann_zeta",
+   "reason": "formal-indeterminate",
+   "heads": [
+    "PowerSeries"
+   ],
+   "source": "Assumptions(And(Element(s, CC), NotElement(s, ZZLessEqual(1))), And(Element(s, PowerSeries(CC, SerX)), NotElement(s, ZZLessEqual(1))))",
+   "in": "assumptions"
+  },
+  {
+   "id": "1b6a57",
+   "topic": "operators",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "1b9cc5",
+   "topic": "confluent_hypergeometric",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "1bd945",
+   "topic": "dirichlet",
+   "reason": "where-function-def",
+   "heads": [
+    "Where"
+   ],
+   "source": "Where(Equal(DirichletL(s, chi), Mul(DirichletL(s, Subscript(chi, 0)), PrimeProduct(Parentheses(Sub(1, Div(Call(Subscript(chi, 0), p), Pow(p, s)))), For(p), Divides(p, q)))), Equal(Subscript(chi, 1), DirichletCharacter(q, 1)), Equal(chi, Mul(Subscript(chi, 0), Subscript(chi, 1))))"
+  },
+  {
+   "id": "1c46fa",
+   "topic": "beta_function",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "1c770c",
+   "topic": "barnes_g",
+   "reason": "where-function-def",
+   "heads": [
+    "Where"
+   ],
+   "source": "Where(Implies(Greater(x, Subscript(x, 0)), Greater(RealDerivative(BarnesG(x), For(x, x, n)), 0)), Equal(Subscript(x, 0), Cases(Tuple(0, Equal(n, 0)), Tuple(Decimal(\"2.557664\"), Equal(n, 1)), Tuple(Decimal(\"1.898850\"), Equal(n, 2)), Tuple(Decimal(\"0.788740\"), Equal(n, 3)))))"
+  },
+  {
+   "id": "1d2ee5",
+   "topic": "operators",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "1d963f",
+   "topic": "logic",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "1e142c",
+   "topic": "prime_numbers",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "1e211d",
+   "topic": "modular_transformations",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "1e2755",
+   "topic": "operators",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "1f88a4",
+   "topic": "bernoulli_numbers",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "20172a",
+   "topic": "jacobi_theta",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "20b6d2",
+   "topic": "modular_j",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "20d72c",
+   "topic": "legendre_elliptic",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "210213",
+   "topic": "legendre_elliptic",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "21d9a0",
+   "topic": "lambertw",
+   "reason": "tuple-indexing-set",
+   "heads": [
+    "For"
+   ],
+   "source": "Equal(Set(LambertW(z, -1), ForElement(z, SetMinus(CC, Set(0)))), Union(OpenClosedInterval(Neg(Infinity), -1), Set(Add(x, Mul(y, ConstI)), For(Tuple(x, y)), Where(And(Element(x, RR), Element(y, RR), Or(And(Less(0, u, 2), LessEqual(t, v)), Parentheses(LessEqual(1, u, 2)), And(Less(1, u, 3), Greater(t, v)))), Equal(t, Mul(x, Sinc(y))), Equal(v, Neg(Cos(y))), Equal(u, Neg(Div(y, Pi)))))))"
+  },
+  {
+   "id": "21d9b8",
+   "topic": "sqrt",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "2246a7",
+   "topic": "eisenstein",
+   "reason": "tuple-indexing-set",
+   "heads": [
+    "ForElement"
+   ],
+   "source": "Equal(EisensteinG(Mul(2, k), tau), Sum(Div(1, Pow(Add(Mul(m, tau), n), Mul(2, k))), ForElement(Tuple(m, n), SetMinus(Pow(ZZ, 2), Set(Tuple(0, 0))))))"
+  },
+  {
+   "id": "22ab47",
+   "topic": "riemann_zeta",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "231a99",
+   "topic": "operators",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "2443de",
+   "topic": "carlson_elliptic",
+   "reason": "generator-list",
+   "heads": [
+    "List"
+   ],
+   "source": "Where(Equal(CarlsonHypergeometricR(Neg(a), List(b_(k), For(k, 1, n)), List(z_(k), For(k, 1, n))), Mul(Pow(z_(n), Neg(a)), Sum(Mul(Div(RisingFactorial(a, N), RisingFactorial(c, N)), CarlsonHypergeometricT(N, List(b_(k), For(k, 1, Sub(n, 1))), List(Sub(1, Div(z_(k), z_(n))), For(k, 1, Sub(n, 1))))), For(N, 0, Infinity)))), Def(c, Sum(b_(k), For(k, 1, n))))"
+  },
+  {
+   "id": "24d383",
+   "topic": "bessel",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "26ea9f",
+   "topic": "operators",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "27f845",
+   "topic": "logic",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "287d9b",
+   "topic": "dirichlet",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "287e28",
+   "topic": "gcd",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "28bf9a",
+   "topic": "const_gamma",
+   "reason": "tuple-indexing-set",
+   "heads": [
+    "For"
+   ],
+   "source": "NotElement(ConstGamma, Set(Div(p, q), For(Tuple(p, q)), And(Element(p, ZZ), Element(q, ZZGreaterEqual(1)), LessEqual(q, Pow(10, 242080)))))"
+  },
+  {
+   "id": "29741c",
+   "topic": "factorials",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "298e9e",
+   "topic": "numbers",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "2a52af",
+   "topic": "numbers",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "2a896d",
+   "topic": "operators",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "2b12f4",
+   "topic": "coulomb_wave",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "2be0b5",
+   "topic": "operators",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "2c1df7",
+   "topic": "carlson_elliptic",
+   "reason": "generator-list",
+   "heads": [
+    "List"
+   ],
+   "source": "Equal(CarlsonHypergeometricR(Neg(a), List(b_(k), For(k, 1, n)), List(Mul(lamda, z_(k)), For(k, 1, n))), Mul(Pow(lamda, Neg(a)), CarlsonHypergeometricR(Neg(a), List(b_(k), For(k, 1, n)), List(z_(k), For(k, 1, n)))))"
+  },
+  {
+   "id": "2c46dc",
+   "topic": "totient",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "2d3356",
+   "topic": "lambertw",
+   "reason": "tuple-indexing-set",
+   "heads": [
+    "For"
+   ],
+   "source": "Equal(Set(LambertW(z), ForElement(z, SetMinus(CC, RR))), Set(Add(x, Mul(y, ConstI)), For(Tuple(x, y)), And(Element(y, SetMinus(OpenInterval(Neg(Pi), Pi), Set(0))), Element(x, OpenInterval(Mul(Neg(y), Cot(y)), Infinity)))))"
+  },
+  {
+   "id": "2d6cf1",
+   "topic": "logic",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "2e1cc7",
+   "topic": "riemann_zeta",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "2e4fbc",
+   "topic": "operators",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "2e9d0c",
+   "topic": "stirling_numbers",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "2f52bc",
+   "topic": "dirichlet",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "3009a7",
+   "topic": "factorials",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "3009a8",
+   "topic": "weierstrass_elliptic",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "306699",
+   "topic": "barnes_g",
+   "reason": "where-function-def",
+   "heads": [
+    "Where"
+   ],
+   "source": "Where(Implies(Greater(x, Subscript(x, 0)), Greater(RealDerivative(Brackets(LogBarnesG(x)), For(x, x, n)), 0)), Equal(Subscript(x, 0), Cases(Tuple(3, Equal(n, 0)), Tuple(Decimal(\"2.557664\"), Equal(n, 1)), Tuple(Decimal(\"1.925864\"), Equal(n, 2)), Tuple(0, Equal(n, 3)))))"
+  },
+  {
+   "id": "3131df",
+   "topic": "riemann_zeta",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "316533",
+   "topic": "confluent_hypergeometric",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "31fef8",
+   "topic": "sine",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "32e430",
+   "topic": "landau_function",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "338b5c",
+   "topic": "dirichlet",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "34482b",
+   "topic": "legendre_elliptic",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "356d7a",
+   "topic": "eisenstein",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "3627de",
+   "topic": "bell_numbers",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "36eb82",
+   "topic": "modular_j",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "379aa0",
+   "topic": "logic",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "37f505",
+   "topic": "golden_ratio",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "38b4f3",
+   "topic": "modular_lambda",
+   "reason": "tuple-indexing-set",
+   "heads": [
+    "For"
+   ],
+   "source": "Assumptions(Element(tau, Set(Add(Subscript(tau, 1), n), For(Tuple(Subscript(tau, 1), n)), And(Element(Subscript(tau, 1), Interior(ModularLambdaFundamentalDomain)), Element(n, ZZ)))))",
+   "in": "assumptions"
+  },
+  {
+   "id": "38f111",
+   "topic": "prime_numbers",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "39e0cb",
+   "topic": "const_gamma",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "3be335",
+   "topic": "error_functions",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "3c1659",
+   "topic": "weierstrass_elliptic",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "3c2469",
+   "topic": "factorials",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "3c2557",
+   "topic": "sqrt",
+   "reason": "formal-indeterminate",
+   "heads": [
+    "FormalGenerator"
+   ],
+   "source": "Assumptions(And(Element(z, SetMinus(CC, Set(0))), Element(x, CC), And(Less(Abs(x), Abs(z)), Or(Greater(Re(z), 0), Equal(Sign(Im(x)), Sign(Im(z)))))), And(Element(z, SetMinus(CC, Set(0))), FormalGenerator(x, PowerSeries(CC, x))))",
+   "in": "assumptions"
+  },
+  {
+   "id": "3c8d31",
+   "topic": "symbolic_expressions",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "3e1435",
+   "topic": "carlson_elliptic",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "3eae25",
+   "topic": "partitions",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "3f96c1",
+   "topic": "dirichlet",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "3fb3ca",
+   "topic": "sine",
+   "reason": "formal-indeterminate",
+   "heads": [
+    "PowerSeries"
+   ],
+   "source": "Assumptions(And(Element(z, CC), NotElement(z, Set(Mul(Add(Mul(2, n), 1), Pi), ForElement(n, ZZ)))), And(Element(z, PowerSeries(CC, SerX)), NotElement(z, Set(Mul(Add(Mul(2, n), 1), Pi), ForElement(n, ZZ)))))",
+   "in": "assumptions"
+  },
+  {
+   "id": "3fe68f",
+   "topic": "numbers",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "41f67b",
+   "topic": "agm",
+   "reason": "where-def-tuple",
+   "heads": [
+    "Where"
+   ],
+   "source": "Where(And(Equal(Mul(2, a_(Add(n, 1))), Add(a_(n), b_(n))), Equal(Pow(b_(Add(n, 1)), 2), Mul(a_(n), b_(n)))), Def(Tuple(a_(k), b_(k)), AGMSequence(k, a, b)))"
+  },
+  {
+   "id": "432bee",
+   "topic": "riemann_zeta",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "43cc72",
+   "topic": "symbolic_expressions",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "452407",
+   "topic": "operators",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "457aaa",
+   "topic": "operators",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "4704f9",
+   "topic": "legendre_elliptic",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "47acde",
+   "topic": "pi",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "486ab2",
+   "topic": "numbers",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "488b6d",
+   "topic": "logic",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "488c5c",
+   "topic": "barnes_g",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "499bdf",
+   "topic": "operators",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "4a23c7",
+   "topic": "multiple_zeta_values",
+   "reason": "repeat-splice",
+   "heads": [
+    "Repeat"
+   ],
+   "source": "Equal(MultiZetaValue(Repeat(2, n)), Div(Pow(Pi, Mul(2, n)), Factorial(Add(Mul(2, n), 1))))"
+  },
+  {
+   "id": "4b4816",
+   "topic": "bell_numbers",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "4c6267",
+   "topic": "bell_numbers",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "4c6780",
+   "topic": "operators",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "4c6c43",
+   "topic": "stirling_numbers",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "4cb707",
+   "topic": "carlson_elliptic",
+   "reason": "generator-list",
+   "heads": [
+    "List"
+   ],
+   "source": "Where(Equal(CarlsonHypergeometricR(Neg(a), List(b_(k), For(k, 1, n)), List(z_(k), For(k, 1, n))), Sum(Mul(Div(RisingFactorial(a, N), RisingFactorial(c, N)), CarlsonHypergeometricT(N, List(b_(k), For(k, 1, n)), List(Sub(1, z_(k)), For(k, 1, n)))), For(N, 0, Infinity))), Def(c, Sum(b_(k), For(k, 1, n))))"
+  },
+  {
+   "id": "4cbfd4",
+   "topic": "sinc",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "4d0e14",
+   "topic": "operators",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "4e5aad",
+   "topic": "gcd",
+   "reason": "where-def-tuple",
+   "heads": [
+    "Where"
+   ],
+   "source": "Where(Implies(And(NotEqual(Abs(a), Abs(b)), Equal(Abs(a), Abs(Mul(2, d)))), Equal(v, Sign(b))), Equal(Tuple(d, u, v), XGCD(a, b)))"
+  },
+  {
+   "id": "4fe0ff",
+   "topic": "log",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "512063",
+   "topic": "coulomb_wave",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "512bea",
+   "topic": "confluent_hypergeometric",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "534f7d",
+   "topic": "bell_numbers",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "53b1e7",
+   "topic": "legendre_elliptic",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "5404ce",
+   "topic": "prime_numbers",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "54951a",
+   "topic": "eisenstein",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "55bf43",
+   "topic": "factorials",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "569278",
+   "topic": "gcd",
+   "reason": "where-def-tuple",
+   "heads": [
+    "Where"
+   ],
+   "source": "Where(Implies(And(NotEqual(Abs(a), Abs(b)), Equal(Abs(b), Abs(Mul(2, d)))), Equal(u, Sign(a))), Equal(Tuple(d, u, v), XGCD(a, b)))"
+  },
+  {
+   "id": "569d5c",
+   "topic": "riemann_zeta",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "56acfe",
+   "topic": "jacobi_theta",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "579595",
+   "topic": "factorials",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "5818e3",
+   "topic": "fibonacci",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "5830eb",
+   "topic": "operators",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "583bf9",
+   "topic": "hurwitz_zeta",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "5862bb",
+   "topic": "operators",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "588889",
+   "topic": "bernoulli_numbers",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "58d67b",
+   "topic": "weierstrass_elliptic",
+   "reason": "tuple-indexing-set",
+   "heads": [
+    "ForElement"
+   ],
+   "source": "Equal(WeierstrassP(z, tau), Add(Div(1, Pow(z, 2)), Sum(Sub(Div(1, Pow(Add(Add(z, m), Mul(n, tau)), 2)), Div(1, Pow(Add(m, Mul(n, tau)), 2))), ForElement(Tuple(m, n), SetMinus(Pow(ZZ, 2), Set(Tuple(0, 0)))))))"
+  },
+  {
+   "id": "590290",
+   "topic": "logic",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "5a9d3f",
+   "topic": "airy",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "5bb42e",
+   "topic": "bessel",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "5c1e44",
+   "topic": "halphen_constant",
+   "reason": "formal-indeterminate",
+   "heads": [
+    "RationalFunctions"
+   ],
+   "source": "Equal(HalphenConstant, Where(SequenceLimit(Pow(Subscript(lamda, n), Div(1, n)), For(n, Infinity)), Equal(R, Set(r, ForElement(r, RationalFunctions(RR, t)), LessEqual(RationalFunctionDegree(r), Tuple(n, n)))), Equal(Subscript(lamda, n), Infimum(Supremum(Abs(Sub(Exp(x), r(x))), ForElement(x, OpenClosedInterval(Neg(Infinity), 0))), ForElement(r, R)))))"
+  },
+  {
+   "id": "5cb675",
+   "topic": "barnes_g",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "5cd377",
+   "topic": "carlson_elliptic",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "5d550c",
+   "topic": "modular_lambda",
+   "reason": "tuple-indexing-set",
+   "heads": [
+    "For"
+   ],
+   "source": "Assumptions(Element(tau, Set(Add(Subscript(tau, 1), n), For(Tuple(Subscript(tau, 1), n)), And(Element(Subscript(tau, 1), Interior(ModularLambdaFundamentalDomain)), Element(n, ZZ)))))",
+   "in": "assumptions"
+  },
+  {
+   "id": "5daceb",
+   "topic": "gcd",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "5dc1c0",
+   "topic": "dirichlet",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "5e1d3b",
+   "topic": "dirichlet",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "5e639e",
+   "topic": "complex_parts",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "5f0adb",
+   "topic": "carlson_elliptic",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "5f3210",
+   "topic": "weierstrass_elliptic",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "5ff181",
+   "topic": "sqrt",
+   "reason": "formal-indeterminate",
+   "heads": [
+    "SeriesCoefficient"
+   ],
+   "source": "Where(Equal(Subscript(c, n), Mul(Div(1, Mul(n, Subscript(a, 0))), Sum(Mul(Mul(Sub(Div(k, 2), n), Subscript(a, k)), Subscript(c, Sub(n, k))), For(k, 1, n)))), Equal(Subscript(c, n), SeriesCoefficient(Div(1, Sqrt(A)), x, n)), Equal(Subscript(a, n), SeriesCoefficient(A, x, n)))"
+  },
+  {
+   "id": "6161c7",
+   "topic": "halphen_constant",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "617fe3",
+   "topic": "operators",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "6202cb",
+   "topic": "sqrt",
+   "reason": "formal-indeterminate",
+   "heads": [
+    "SeriesCoefficient"
+   ],
+   "source": "Where(Equal(Subscript(c, n), Mul(Div(1, Mul(n, Subscript(a, 0))), Sum(Mul(Mul(Sub(Div(Mul(3, k), 2), n), Subscript(a, k)), Subscript(c, Sub(n, k))), For(k, 1, n)))), Equal(Subscript(c, n), SeriesCoefficient(Sqrt(A), x, n)), Equal(Subscript(a, n), SeriesCoefficient(A, x, n)))"
+  },
+  {
+   "id": "626026",
+   "topic": "eisenstein",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "633265",
+   "topic": "gcd",
+   "reason": "where-def-tuple",
+   "heads": [
+    "Where"
+   ],
+   "source": "Where(Implies(And(NotEqual(Abs(a), Abs(b)), NotEqual(Abs(a), Abs(Mul(2, d)))), Less(Mul(Mul(2, d), Abs(v)), Abs(a))), Equal(Tuple(d, u, v), XGCD(a, b)))"
+  },
+  {
+   "id": "638fa6",
+   "topic": "carlson_elliptic",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "639d7b",
+   "topic": "sinc",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "63f368",
+   "topic": "factorials",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "644d75",
+   "topic": "carlson_elliptic",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "65ccf2",
+   "topic": "operators",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "6636f2",
+   "topic": "jacobi_theta",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "663d75",
+   "topic": "carlson_elliptic",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "668877",
+   "topic": "dirichlet",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "669509",
+   "topic": "riemann_zeta",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "69be32",
+   "topic": "weierstrass_elliptic",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "6ae152",
+   "topic": "carlson_elliptic",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "6bd011",
+   "topic": "beta_function",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "6c22c8",
+   "topic": "prime_numbers",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "6c6204",
+   "topic": "modular_lambda",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "6cd302",
+   "topic": "operators",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "6d37c9",
+   "topic": "totient",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "6d9ceb",
+   "topic": "agm",
+   "reason": "where-def-tuple",
+   "heads": [
+    "Where"
+   ],
+   "source": "Where(Equal(Pi, Div(Mul(4, Pow(AGM(1, Div(1, Sqrt(2))), 2)), Sub(1, Sum(Mul(Pow(2, j), Pow(c_(j), 2)), For(j, 0, Infinity)))), SequenceLimit(Div(Pow(Add(a_(n), b_(n)), 2), Sub(1, Sum(Mul(Pow(2, j), Pow(c_(j), 2)), For(j, 0, n)))), For(n, Infinity))), Def(Tuple(a_(n), b_(n)), AGMSequence(n, 1, Div(1, Sqrt(2)))), Def(c_(n), Sub(a_(n), b_(n))))"
+  },
+  {
+   "id": "6da738",
+   "topic": "lambertw",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "6db9b2",
+   "topic": "symbolic_expressions",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "6ec976",
+   "topic": "operators",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "6ef3d1",
+   "topic": "exp",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "6fce07",
+   "topic": "pi",
+   "reason": "where-recursive-def",
+   "heads": [
+    "Where"
+   ],
+   "source": "Equal(Div(2, Pi), Where(Product(Div(a_(n), 2), For(n, 1, Infinity)), Def(a_(1), Sqrt(2)), Def(a_(n), Sqrt(Add(2, a_(Sub(n, 1)))))))"
+  },
+  {
+   "id": "6fe5c1",
+   "topic": "operators",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "706f66",
+   "topic": "riemann_zeta",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "70c42b",
+   "topic": "multiple_zeta_values",
+   "reason": "repeat-splice",
+   "heads": [
+    "Repeat"
+   ],
+   "source": "Equal(MultiZetaValue(Repeat(3, 1, n)), Mul(Div(1, Add(Mul(2, n), 1)), MultiZetaValue(Repeat(2, Mul(2, n)))))"
+  },
+  {
+   "id": "70eb98",
+   "topic": "modular_j",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "71d9d9",
+   "topic": "riemann_zeta",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "723fd0",
+   "topic": "legendre_elliptic",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "7375c0",
+   "topic": "error_functions",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "73f5e7",
+   "topic": "symbolic_expressions",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "741859",
+   "topic": "carlson_elliptic",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "7466a2",
+   "topic": "bell_numbers",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "752bde",
+   "topic": "barnes_g",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "75e692",
+   "topic": "agm",
+   "reason": "where-def-tuple",
+   "heads": [
+    "Where"
+   ],
+   "source": "Where(LessEqual(Abs(Sub(AGM(1, z), a_(n))), Abs(Sub(a_(n), b_(n)))), Def(Tuple(a_(n), b_(n)), AGMSequence(n, 1, z)))"
+  },
+  {
+   "id": "76de9d",
+   "topic": "modular_transformations",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "7774a3",
+   "topic": "stirling_numbers",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "778fa2",
+   "topic": "stirling_numbers",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "77ef0c",
+   "topic": "complex_plane",
+   "reason": "tuple-indexing-set",
+   "heads": [
+    "For"
+   ],
+   "source": "Equal(CC, Set(Add(x, Mul(y, ConstI)), For(Tuple(x, y)), And(Element(x, RR), Element(y, RR))))"
+  },
+  {
+   "id": "788fa4",
+   "topic": "factorials",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "7902fc",
+   "topic": "jacobi_theta",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "7932c3",
+   "topic": "landau_function",
+   "reason": "tuple-indexing-set",
+   "heads": [
+    "For"
+   ],
+   "source": "Equal(LandauG(n), Maximum(Set(LCM(Subscript(s, 1), Ellipsis, Subscript(s, k)), For(Tuple(k, Subscript(s, i))), And(Element(k, ZZGreaterEqual(0)), Element(Subscript(s, i), ZZGreaterEqual(1)), Equal(Sum(Subscript(s, i), For(i, 1, k)), n)))))"
+  },
+  {
+   "id": "795fe5",
+   "topic": "beta_function",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "7a56c2",
+   "topic": "dirichlet",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "7af83f",
+   "topic": "dedekind_eta",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "7be5dc",
+   "topic": "numbers",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "7c4457",
+   "topic": "weierstrass_elliptic",
+   "reason": "tuple-indexing-set",
+   "heads": [
+    "ForElement"
+   ],
+   "source": "Equal(WeierstrassSigma(z, tau), Mul(z, Product(Mul(Sub(1, Div(z, Add(m, Mul(n, tau)))), Exp(Add(Div(z, Add(m, Mul(n, tau))), Div(Pow(z, 2), Mul(2, Pow(Add(m, Mul(n, tau)), 2)))))), ForElement(Tuple(m, n), SetMinus(Pow(ZZ, 2), Set(Tuple(0, 0)))))))"
+  },
+  {
+   "id": "7cb17f",
+   "topic": "riemann_zeta",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "7ddf69",
+   "topic": "gamma",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "7e1850",
+   "topic": "eisenstein",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "80279d",
+   "topic": "modular_transformations",
+   "reason": "tuple-indexing-set",
+   "heads": [
+    "For"
+   ],
+   "source": "Equal(PSL2Z, Set(Matrix2x2(a, b, c, d), For(Tuple(a, b, c, d)), And(Element(Matrix2x2(a, b, c, d), SL2Z), Or(Greater(c, 0), And(Equal(c, 0), Greater(d, 0))))))"
+  },
+  {
+   "id": "80f43a",
+   "topic": "jacobi_theta",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "81aeba",
+   "topic": "factorials",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "81efd5",
+   "topic": "logic",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "82a1b1",
+   "topic": "barnes_g",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "82a63c",
+   "topic": "dedekind_eta",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "82c978",
+   "topic": "symbolic_expressions",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "855201",
+   "topic": "hurwitz_zeta",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "856db2",
+   "topic": "partitions",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "85e42e",
+   "topic": "chebyshev",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "89d93c",
+   "topic": "legendre_elliptic",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "8ac81d",
+   "topic": "bessel",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "8af90e",
+   "topic": "symbolic_expressions",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "8b2743",
+   "topic": "gcd",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "8b2cb9",
+   "topic": "coulomb_wave",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "8baf79",
+   "topic": "operators",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "8bb3d8",
+   "topic": "atan",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "8bdd03",
+   "topic": "digamma_function",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "8c2862",
+   "topic": "modular_j",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "8c9f96",
+   "topic": "jacobi_theta",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "8cf1fd",
+   "topic": "gamma",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "8f7c2a",
+   "topic": "carlson_elliptic",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "9086c6",
+   "topic": "complex_parts",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "920cc8",
+   "topic": "complex_parts",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "921f34",
+   "topic": "modular_lambda",
+   "reason": "ellipsis",
+   "heads": [
+    "EqualQSeriesEllipsis"
+   ],
+   "source": "EqualQSeriesEllipsis(ModularLambda(tau), tau, q, Sub(Add(Sub(Add(Sub(Mul(16, q), Mul(128, Pow(q, 2))), Mul(704, Pow(q, 3))), Mul(3072, Pow(q, 4))), Mul(11488, Pow(q, 5))), Mul(38400, Pow(q, 6))), Equal(q, Exp(Mul(Mul(Pi, ConstI), tau))))"
+  },
+  {
+   "id": "926b36",
+   "topic": "carlson_elliptic",
+   "reason": "repeat-splice",
+   "heads": [
+    "Repeat"
+   ],
+   "source": "Where(LessEqual(Abs(Sub(CarlsonHypergeometricR(Neg(a), List(Repeat(beta, n)), List(z_(k), For(k, 1, n))), Mul(Pow(A, Neg(a)), Sum(Mul(Div(RisingFactorial(a, N), RisingFactorial(Mul(n, beta), N)), CarlsonHypergeometricT(N, List(Repeat(beta, n)), List(z_(k), For(k, 1, n)))), For(N, 0, Sub(K, 1)))))), Div(Mul(Mul(Abs(Pow(A, Neg(a))), RisingFactorial(Abs(a), K)), Pow(M, K)), Mul(Factorial(K), Pow(Sub(1, M), Max(Abs(a), 1))))), Def(A, Mul(Div(1, n), Sum(z_(k), For(k, 1, n)))), Def(Z_(k), Sub(1, Div(z_(k), A))), Def(M, Max(Step(Abs(Z_(k)), For(k, 1, n)))))"
+  },
+  {
+   "id": "92cc17",
+   "topic": "bell_numbers",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "94a39f",
+   "topic": "multiple_zeta_values",
+   "reason": "step-splice",
+   "heads": [
+    "Step"
+   ],
+   "source": "Equal(MultiZetaValue(Step(Subscript(s, i), For(i, 1, k))), Sum(Product(Div(1, Pow(Subscript(n, i), Subscript(s, i))), For(i, 1, k)), ForElement(n, Pow(ZZ, k)), Greater(Step(Subscript(n, i), For(i, 1, k)), 0)))"
+  },
+  {
+   "id": "950e5a",
+   "topic": "digamma_function",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "9522c6",
+   "topic": "jacobi_theta",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "95fb3e",
+   "topic": "agm",
+   "reason": "where-def-tuple",
+   "heads": [
+    "Where"
+   ],
+   "source": "Where(Equal(AGM(a, b), SequenceLimit(a_(n), For(n, Infinity)), SequenceLimit(b_(n), For(n, Infinity))), Def(Tuple(a_(n), b_(n)), AGMSequence(n, a, b)))"
+  },
+  {
+   "id": "965ac0",
+   "topic": "gcd",
+   "reason": "tuple-indexing-set",
+   "heads": [
+    "For"
+   ],
+   "source": "Where(Equal(Set(Add(Mul(a, x), Mul(b, y)), For(Tuple(x, y)), And(Element(x, ZZ), Element(y, ZZ))), Set(Mul(n, d), ForElement(n, ZZ))), Equal(d, GCD(a, b)))"
+  },
+  {
+   "id": "96f695",
+   "topic": "operators",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "978576",
+   "topic": "symbolic_expressions",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "985bda",
+   "topic": "logic",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "9933df",
+   "topic": "partitions",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "99dc4a",
+   "topic": "gcd",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "99f69c",
+   "topic": "confluent_hypergeometric",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "9ac289",
+   "topic": "airy",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "9b868d",
+   "topic": "jacobi_theta",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "9bb960",
+   "topic": "eisenstein",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "9d5b81",
+   "topic": "sqrt",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "9ee8bc",
+   "topic": "riemann_zeta",
+   "reason": "formal-indeterminate",
+   "heads": [
+    "PowerSeries"
+   ],
+   "source": "Assumptions(And(Element(s, CC), NotElement(s, ZZGreaterEqual(0))), And(Element(s, PowerSeries(CC, SerX)), NotElement(s, ZZGreaterEqual(0))))",
+   "in": "assumptions"
+  },
+  {
+   "id": "9f703a",
+   "topic": "operators",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "a0d13f",
+   "topic": "gcd",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "a14cfc",
+   "topic": "eisenstein",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "a1f7ea",
+   "topic": "carlson_elliptic",
+   "reason": "generator-list",
+   "heads": [
+    "List"
+   ],
+   "source": "Equal(CarlsonHypergeometricR(Neg(a), List(b_(k), For(k, 1, n)), List(z_(k), For(k, 1, n))), Where(Mul(Div(1, BetaFunction(a, c)), Integral(Mul(Pow(t, Sub(c, 1)), Product(Pow(Add(t, z_(k)), Neg(b_(k))), For(k, 1, n))), For(t, 0, Infinity))), Def(c, Add(Neg(a), Sum(b_(j), For(j, 1, n))))))"
+  },
+  {
+   "id": "a203bb",
+   "topic": "dedekind_eta",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "a20761",
+   "topic": "digamma_function",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "a21395",
+   "topic": "carlson_elliptic",
+   "reason": "repeat-splice",
+   "heads": [
+    "Repeat"
+   ],
+   "source": "Where(Equal(CarlsonHypergeometricR(Neg(a), List(Repeat(beta, n)), List(z_(k), For(k, 1, n))), Mul(Pow(A, Neg(a)), Sum(Mul(Div(RisingFactorial(a, N), RisingFactorial(Mul(n, beta), N)), CarlsonHypergeometricT(N, List(Repeat(beta, n)), List(Sub(1, Div(z_(k), A)), For(k, 1, n)))), For(N, 0, Infinity)))), Def(A, Mul(Div(1, n), Sum(z_(k), For(k, 1, n)))))"
+  },
+  {
+   "id": "a2189a",
+   "topic": "log",
+   "reason": "path-integral",
+   "heads": [
+    "CurvePath"
+   ],
+   "source": "Equal(AnalyticContinuation(Log(z), For(z, CurvePath(Mul(R, Exp(Mul(ConstI, t))), For(t, 0, theta)))), Add(Log(R), Mul(theta, ConstI)))"
+  },
+  {
+   "id": "a2b0f9",
+   "topic": "agm",
+   "reason": "where-def-tuple",
+   "heads": [
+    "Where"
+   ],
+   "source": "Where(Equal(Tuple(a_(Add(n, 1)), b_(Add(n, 1))), Where(Tuple(x, Mul(s, y)), Def(x, Div(Add(a_(n), b_(n)), 2)), Def(y, Sqrt(Mul(a_(n), b_(n)))), Def(s, Cases(Tuple(Pos(1), Or(Equal(y, 0), GreaterEqual(Re(Div(x, y)), 0))), Tuple(Neg(1), Otherwise))))), Def(Tuple(a_(k), b_(k)), AGMSequence(k, a, b)))"
+  },
+  {
+   "id": "a3035f",
+   "topic": "prime_numbers",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "a53803",
+   "topic": "logic",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "a5852d",
+   "topic": "factorials",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "a5ef5f",
+   "topic": "gcd",
+   "reason": "where-def-tuple",
+   "heads": [
+    "Where"
+   ],
+   "source": "Where(Implies(Equal(Abs(a), Abs(b)), Equal(Tuple(u, v), Tuple(0, Sign(b)))), Equal(Tuple(d, u, v), XGCD(a, b)))"
+  },
+  {
+   "id": "a65a14",
+   "topic": "complex_plane",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "a75407",
+   "topic": "jacobi_theta",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "a7d592",
+   "topic": "dirichlet",
+   "reason": "where-function-def",
+   "heads": [
+    "Where"
+   ],
+   "source": "Where(Exists(Equal(chi, Mul(Subscript(chi, 0), Subscript(chi, 1))), For(Tuple(d, Subscript(chi, 0))), And(Element(d, Range(1, q)), Divides(d, q), Element(Subscript(chi, 0), PrimitiveDirichletCharacters(d)))), Equal(Subscript(chi, 1), DirichletCharacter(q, 1)))"
+  },
+  {
+   "id": "a807a7",
+   "topic": "exp",
+   "reason": "formal-indeterminate",
+   "heads": [
+    "PowerSeries"
+   ],
+   "source": "Implies(And(Element(z, PowerSeries(QQ, SerX)), Equal(Coefficient(z, SerX, 0), 0)), And(Element(Exp(z), PowerSeries(QQ, SerX)), Equal(Coefficient(Exp(z), SerX, 0), 1)))"
+  },
+  {
+   "id": "a82bd6",
+   "topic": "carlson_elliptic",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "a93679",
+   "topic": "stirling_numbers",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "a9847a",
+   "topic": "dirichlet",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "a9e8df",
+   "topic": "logic",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "aa6b07",
+   "topic": "numbers",
+   "reason": "formal-indeterminate",
+   "heads": [
+    "Polynomials"
+   ],
+   "source": "Equal(AlgebraicNumbers, Set(z, ForElement(z, CC), Parentheses(Exists(Equal(CallIndeterminate(f, XX(1), z), 0), ForElement(f, SetMinus(Polynomials(ZZ, XX(1)), Set(0)))))))"
+  },
+  {
+   "id": "aa967b",
+   "topic": "gamma",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "aab550",
+   "topic": "multiple_zeta_values",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "aac67f",
+   "topic": "integer_sequences",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "ac236f",
+   "topic": "modular_lambda",
+   "reason": "formal-indeterminate",
+   "heads": [
+    "QSeriesCoefficient"
+   ],
+   "source": "Where(AsymptoticTo(a(n), Mul(Pow(-1, Add(n, 1)), Div(Exp(Mul(Mul(2, Pi), Sqrt(n))), Mul(32, Pow(n, Div(3, 4))))), n, Infinity), Equal(a(n), QSeriesCoefficient(ModularLambda(tau), tau, q, n, Equal(q, Exp(Mul(Mul(Pi, ConstI), tau))))))"
+  },
+  {
+   "id": "ac8eca",
+   "topic": "bernoulli_numbers",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "ad8a9a",
+   "topic": "jacobi_theta",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "aed6bd",
+   "topic": "bernoulli_numbers",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "af984e",
+   "topic": "sqrt",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "afd5ca",
+   "topic": "operators",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "afdf5d",
+   "topic": "legendre_elliptic",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "b0921b",
+   "topic": "carlson_elliptic",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "b0d256",
+   "topic": "agm",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "b0f293",
+   "topic": "gamma",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "b10ca7",
+   "topic": "weierstrass_elliptic",
+   "reason": "tuple-indexing-set",
+   "heads": [
+    "ForElement"
+   ],
+   "source": "Equal(WeierstrassZeta(z, tau), Add(Div(1, z), Sum(Add(Add(Div(1, Sub(Sub(z, m), Mul(n, tau))), Div(1, Add(m, Mul(n, tau)))), Div(z, Pow(Add(m, Mul(n, tau)), 2))), ForElement(Tuple(m, n), SetMinus(Pow(ZZ, 2), Set(Tuple(0, 0)))))))"
+  },
+  {
+   "id": "b120b9",
+   "topic": "atan",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "b14da0",
+   "topic": "sqrt",
+   "reason": "formal-indeterminate",
+   "heads": [
+    "FormalGenerator"
+   ],
+   "source": "Assumptions(And(Element(z, SetMinus(CC, Set(0))), Element(x, CC), And(Less(Abs(x), Abs(z)), Or(Greater(Re(z), 0), Equal(Sign(Im(x)), Sign(Im(z)))))), And(Element(z, SetMinus(CC, Set(0))), FormalGenerator(x, PowerSeries(CC, x))))",
+   "in": "assumptions"
+  },
+  {
+   "id": "b2162a",
+   "topic": "numbers",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "b23575",
+   "topic": "modular_lambda",
+   "reason": "tuple-indexing-set",
+   "heads": [
+    "For"
+   ],
+   "source": "Equal(HH, Set(ModularGroupAction(gamma, tau), For(Tuple(tau, gamma)), And(Element(tau, ModularLambdaFundamentalDomain), Element(gamma, SL2Z), CongruentMod(gamma, Matrix2x2(1, 0, 0, 1), 2))))"
+  },
+  {
+   "id": "b4165c",
+   "topic": "bessel",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "b43dac",
+   "topic": "gcd",
+   "reason": "where-def-tuple",
+   "heads": [
+    "Where"
+   ],
+   "source": "Where(LessEqual(Abs(u), Div(Abs(b), d)), Equal(Tuple(d, u, v), XGCD(a, b)))"
+  },
+  {
+   "id": "b4b319",
+   "topic": "operators",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "b4c968",
+   "topic": "airy",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "b506ad",
+   "topic": "fibonacci",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "b576e6",
+   "topic": "carlson_elliptic",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "b5a382",
+   "topic": "bell_numbers",
+   "reason": "matrix-generator",
+   "heads": [
+    "Matrix"
+   ],
+   "source": "Equal(BellNumber(n), Item(Exp(Sub(Matrix(Binomial(i, j), For(i, 0, N), For(j, 0, N)), IdentityMatrix(Add(N, 1)))), Tuple(Add(n, 1), 1)))"
+  },
+  {
+   "id": "b5d706",
+   "topic": "pi",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "b63dce",
+   "topic": "sine",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "b738b1",
+   "topic": "numbers",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "b7d740",
+   "topic": "complex_parts",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "b81ca0",
+   "topic": "carlson_elliptic",
+   "reason": "generator-list",
+   "heads": [
+    "List"
+   ],
+   "source": "Equal(CarlsonHypergeometricR(Neg(a), List(b_(k), For(k, 1, n)), List(Repeat(z, n))), Pow(z, Neg(a)))"
+  },
+  {
+   "id": "b976df",
+   "topic": "symbolic_expressions",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "b9cc75",
+   "topic": "confluent_hypergeometric",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "bac5fb",
+   "topic": "jacobi_theta",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "bac745",
+   "topic": "carlson_elliptic",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "baf960",
+   "topic": "sinc",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "bbeb35",
+   "topic": "operators",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "be4926",
+   "topic": "operators",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "be5fcd",
+   "topic": "gcd",
+   "reason": "where-def-tuple",
+   "heads": [
+    "Where"
+   ],
+   "source": "Where(Equal(GCD(a, b), d, Add(Mul(a, u), Mul(b, v))), Equal(Tuple(d, u, v), XGCD(a, b)))"
+  },
+  {
+   "id": "be8e05",
+   "topic": "imaginary_unit",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "be9c83",
+   "topic": "numbers",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "bf3e29",
+   "topic": "lambertw",
+   "reason": "tuple-indexing-set",
+   "heads": [
+    "For"
+   ],
+   "source": "Equal(Set(LambertW(z, Neg(k)), ForElement(z, SetMinus(CC, Set(0)))), Set(Add(x, Mul(y, ConstI)), For(Tuple(x, y)), Where(And(Element(x, RR), Element(y, RR), Or(And(Less(Sub(Mul(2, k), 2), u, Mul(2, k)), LessEqual(t, v)), Parentheses(LessEqual(Sub(Mul(2, k), 1), u, Mul(2, k))), And(Less(Sub(Mul(2, k), 1), u, Add(Mul(2, k), 1)), Greater(t, v)))), Equal(t, Mul(x, Sinc(y))), Equal(v, Neg(Cos(y))), Equal(u, Neg(Div(y, Pi))))))"
+  },
+  {
+   "id": "bf8f37",
+   "topic": "operators",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "bfe358",
+   "topic": "numbers",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "c01d22",
+   "topic": "numbers",
+   "reason": "tuple-indexing-set",
+   "heads": [
+    "For"
+   ],
+   "source": "Equal(QQ, Set(Div(p, q), For(Tuple(p, q)), And(Element(p, ZZ), Element(q, SetMinus(ZZ, Set(0))))))"
+  },
+  {
+   "id": "c03de4",
+   "topic": "riemann_zeta",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "c03ed9",
+   "topic": "gcd",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "c0ae5b",
+   "topic": "lambertw",
+   "reason": "tuple-indexing-set",
+   "heads": [
+    "For"
+   ],
+   "source": "Equal(Set(LambertW(z, k), For(Tuple(k, z)), And(Element(k, ZZ), Element(z, CC), Or(NotEqual(z, 0), Equal(k, 0)))), CC)"
+  },
+  {
+   "id": "c1ffd4",
+   "topic": "eisenstein",
+   "reason": "tuple-indexing-set",
+   "heads": [
+    "ForElement"
+   ],
+   "source": "Equal(EisensteinG(Mul(2, k), tau), Mul(RiemannZeta(Mul(2, k)), Sum(Div(1, Pow(Add(Mul(m, tau), n), Mul(2, k))), ForElement(Tuple(m, n), SetMinus(Pow(ZZ, 2), Set(Tuple(0, 0)))), Equal(GCD(m, n), 1))))"
+  },
+  {
+   "id": "c285c7",
+   "topic": "operators",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "c2c002",
+   "topic": "jacobi_theta",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "c2fb41",
+   "topic": "symbolic_expressions",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "c40df4",
+   "topic": "dirichlet",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "c43abd",
+   "topic": "gauss_hypergeometric",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "c4714a",
+   "topic": "jacobi_theta",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "c4febd",
+   "topic": "jacobi_theta",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "c54261",
+   "topic": "operators",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "c5a8c2",
+   "topic": "lambertw",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "c5d388",
+   "topic": "carlson_elliptic",
+   "reason": "generator-list",
+   "heads": [
+    "List"
+   ],
+   "source": "Equal(CarlsonHypergeometricR(Neg(a), List(b_(k), For(k, 1, n)), List(z_(k), For(k, 1, n))), Where(Mul(Div(1, BetaFunction(a, c)), Integral(Mul(Pow(t, Sub(a, 1)), Product(Pow(Add(1, Mul(t, z_(k))), Neg(b_(k))), For(k, 1, n))), For(t, 0, Infinity))), Def(c, Add(Neg(a), Sum(b_(j), For(j, 1, n))))))"
+  },
+  {
+   "id": "c6038c",
+   "topic": "gamma",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "c7d4c2",
+   "topic": "gamma",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "c7e2fb",
+   "topic": "dirichlet",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "c84f3f",
+   "topic": "modular_transformations",
+   "reason": "tuple-indexing-set",
+   "heads": [
+    "For"
+   ],
+   "source": "Equal(SL2Z, Set(Matrix2x2(a, b, c, d), For(Tuple(a, b, c, d)), And(Element(a, ZZ), Element(b, ZZ), Element(c, ZZ), Element(d, ZZ), Equal(Sub(Mul(a, d), Mul(b, c)), 1))))"
+  },
+  {
+   "id": "c8a5f0",
+   "topic": "operators",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "c941c4",
+   "topic": "agm",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "ca1edc",
+   "topic": "symbolic_expressions",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "cb0a9b",
+   "topic": "lambertw",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "cb5d51",
+   "topic": "dirichlet",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "cbcad9",
+   "topic": "carlson_elliptic",
+   "reason": "generator-list",
+   "heads": [
+    "List"
+   ],
+   "source": "Equal(CarlsonHypergeometricR(Neg(a), List(b_(k), For(k, 1, n)), List(0, Step(z_(k), For(k, 2, n)))), Where(Mul(Div(BetaFunction(a, Sub(c, b_(1))), BetaFunction(a, c)), CarlsonHypergeometricR(Neg(a), List(b_(k), For(k, 2, n)), List(z_(k), For(k, 2, n)))), Def(c, Add(Neg(a), Sum(b_(k), For(k, 1, n))))))"
+  },
+  {
+   "id": "cc234c",
+   "topic": "carlson_elliptic",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "cc6a5a",
+   "topic": "dirichlet",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "ce327b",
+   "topic": "carlson_elliptic",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "ce3a8e",
+   "topic": "atan",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "ce8ee4",
+   "topic": "complex_parts",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "cecede",
+   "topic": "stirling_numbers",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "cee331",
+   "topic": "confluent_hypergeometric",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "cf447f",
+   "topic": "logic",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "cf93bc",
+   "topic": "digamma_function",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "d0cb24",
+   "topic": "operators",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "d10029",
+   "topic": "riemann_zeta",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "d14265",
+   "topic": "symbolic_expressions",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "d154dd",
+   "topic": "bessel",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "d2714b",
+   "topic": "operators",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "d2914b",
+   "topic": "error_functions",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "d3b45d",
+   "topic": "jacobi_theta",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "d496b8",
+   "topic": "log",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "d4e9aa",
+   "topic": "chebyshev",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "d530b1",
+   "topic": "weierstrass_elliptic",
+   "reason": "tuple-indexing-set",
+   "heads": [
+    "For"
+   ],
+   "source": "Equal(Lattice(a, b), Set(Add(Mul(a, m), Mul(b, n)), For(Tuple(m, n)), And(Element(m, ZZ), Element(n, ZZ))))"
+  },
+  {
+   "id": "d5917b",
+   "topic": "lambertw",
+   "reason": "tuple-indexing-set",
+   "heads": [
+    "For"
+   ],
+   "source": "Equal(Set(LambertW(z, k), ForElement(z, SetMinus(CC, Set(0)))), Set(Add(x, Mul(y, ConstI)), For(Tuple(x, y)), Where(And(Element(x, RR), Element(y, RR), Or(And(Less(Sub(Mul(2, k), 2), u, Mul(2, k)), Less(t, v)), Parentheses(LessEqual(Sub(Mul(2, k), 1), u, Mul(2, k))), And(Less(Sub(Mul(2, k), 1), u, Add(Mul(2, k), 1)), GreaterEqual(t, v)))), Equal(t, Mul(x, Sinc(y))), Equal(v, Neg(Cos(y))), Equal(u, Div(y, Pi)))))"
+  },
+  {
+   "id": "d5a598",
+   "topic": "dirichlet",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "d6add6",
+   "topic": "confluent_hypergeometric",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "d7a4e5",
+   "topic": "jacobi_theta",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "d8155f",
+   "topic": "dirichlet",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "d8cac6",
+   "topic": "dirichlet",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "d98ccc",
+   "topic": "jacobi_theta",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "da1509",
+   "topic": "barnes_g",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "da47f6",
+   "topic": "carlson_elliptic",
+   "reason": "generator-list",
+   "heads": [
+    "List"
+   ],
+   "source": "Equal(CarlsonHypergeometricT(N, List(b_(k), For(k, 1, n)), List(z_(k), For(k, 1, n))), Sum(Product(Mul(Div(RisingFactorial(b_(k), m_(k)), Factorial(m_(k))), Pow(z_(k), m_(k))), For(k, 1, n)), ForElement(Tuple(m_(k), For(k, 1, n)), CartesianPower(Parentheses(ZZGreaterEqual(0)), n)), Equal(Sum(m_(k), For(k, 1, n)), N)))"
+  },
+  {
+   "id": "da5d5e",
+   "topic": "complex_parts",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "da7d00",
+   "topic": "gcd",
+   "reason": "where-def-tuple",
+   "heads": [
+    "Where"
+   ],
+   "source": "Where(Implies(And(NotEqual(Abs(a), Abs(b)), NotEqual(Abs(b), Abs(Mul(2, d)))), Less(Mul(Mul(2, d), Abs(u)), Abs(b))), Equal(Tuple(d, u, v), XGCD(a, b)))"
+  },
+  {
+   "id": "dac0bb",
+   "topic": "eisenstein",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "dbc117",
+   "topic": "barnes_g",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "dc2c26",
+   "topic": "modular_transformations",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "dc558b",
+   "topic": "riemann_zeta",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "dc593e",
+   "topic": "dirichlet",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "dc6806",
+   "topic": "bell_numbers",
+   "reason": "matrix-generator",
+   "heads": [
+    "Matrix"
+   ],
+   "source": "Equal(Det(Matrix(BellNumber(Add(i, j)), For(i, 0, n), For(j, 0, n))), Product(Factorial(k), For(k, 1, n)), BarnesG(Add(n, 2)))"
+  },
+  {
+   "id": "dd5681",
+   "topic": "modular_j",
+   "reason": "tuple-indexing-set",
+   "heads": [
+    "ForElement"
+   ],
+   "source": "Equal(HilbertClassPolynomial(D, x), Product(Parentheses(Sub(x, ModularJ(Div(Add(Neg(b), Sqrt(D)), Mul(2, a))))), ForElement(Tuple(a, b, c), PrimitiveReducedPositiveIntegralBinaryQuadraticForms(D))))"
+  },
+  {
+   "id": "de8485",
+   "topic": "carlson_elliptic",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "def588",
+   "topic": "factorials",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "df3334",
+   "topic": "eisenstein",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "dfbcd9",
+   "topic": "exp",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "e03016",
+   "topic": "gauss_hypergeometric",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "e0a6a2",
+   "topic": "riemann_zeta",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "e1497f",
+   "topic": "barnes_g",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "e2035a",
+   "topic": "jacobi_theta",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "e2a734",
+   "topic": "dirichlet",
+   "reason": "tuple-indexing-set",
+   "heads": [
+    "All"
+   ],
+   "source": "Equivalent(GeneralizedRiemannHypothesis, All(Equal(Re(DirichletLZero(n, chi)), Div(1, 2)), For(Tuple(q, chi, n)), And(Element(q, ZZGreaterEqual(1)), Element(chi, DirichletGroup(q)), Element(n, SetMinus(ZZ, Set(0))))))"
+  },
+  {
+   "id": "e46223",
+   "topic": "error_functions",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "e47bfb",
+   "topic": "jacobi_theta",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "e50a56",
+   "topic": "riemann_zeta",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "e58aaf",
+   "topic": "logic",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "e5bd3c",
+   "topic": "riemann_zeta",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "e74de0",
+   "topic": "exp",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "e810d8",
+   "topic": "dirichlet",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "e8ae42",
+   "topic": "legendre_elliptic",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "e922c4",
+   "topic": "gcd",
+   "reason": "tuple-indexing-set",
+   "heads": [
+    "For"
+   ],
+   "source": "Equal(GCD(a, b), Minimum(Set(Add(Mul(a, x), Mul(b, y)), For(Tuple(x, y)), And(Element(x, ZZ), Element(y, ZZ), GreaterEqual(Add(Mul(a, x), Mul(b, y)), 1)))))"
+  },
+  {
+   "id": "e93ca8",
+   "topic": "riemann_zeta",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "ec0054",
+   "topic": "dirichlet",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "ec33ac",
+   "topic": "logic",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "ecfe08",
+   "topic": "symbolic_expressions",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "ed210c",
+   "topic": "log",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "ed302a",
+   "topic": "numbers",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "eda1e3",
+   "topic": "agm",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "ef432d",
+   "topic": "dirichlet",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "ef9f8a",
+   "topic": "powers",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "f0981b",
+   "topic": "modular_lambda",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "f1527d",
+   "topic": "digamma_function",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "f20503",
+   "topic": "gcd",
+   "reason": "where-def-tuple",
+   "heads": [
+    "Where"
+   ],
+   "source": "Where(Equal(d, Add(Mul(a, x), Mul(b, y))), Equal(Tuple(d, u, v), XGCD(a, b)), Equal(Tuple(x, y), Tuple(Add(u, Div(Mul(k, b), d)), Sub(v, Div(Mul(k, a), d)))))"
+  },
+  {
+   "id": "f25e3d",
+   "topic": "coulomb_wave",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "f37520",
+   "topic": "symbolic_expressions",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "f4dc79",
+   "topic": "dedekind_eta",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "f4fbb8",
+   "topic": "operators",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "f53771",
+   "topic": "modular_lambda",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "f565f5",
+   "topic": "confluent_hypergeometric",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "f5ae93",
+   "topic": "operators",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "f5e153",
+   "topic": "partitions",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "f5e62c",
+   "topic": "complex_parts",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "f758c6",
+   "topic": "exp",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "f7a534",
+   "topic": "weierstrass_elliptic",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "f7b6aa",
+   "topic": "const_catalan",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "f7ce46",
+   "topic": "operators",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "f88455",
+   "topic": "stirling_numbers",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "f96eac",
+   "topic": "jacobi_theta",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "fa65f3",
+   "topic": "airy",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "fa8e96",
+   "topic": "jacobi_theta",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "faf448",
+   "topic": "riemann_zeta",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "fb2790",
+   "topic": "operators",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "fb5d88",
+   "topic": "factorials",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "fc267b",
+   "topic": "dirichlet",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "fc6cf6",
+   "topic": "modular_lambda",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "fd53ab",
+   "topic": "modular_transformations",
+   "reason": "tuple-indexing-set",
+   "heads": [
+    "For"
+   ],
+   "source": "Equal(Set(ModularGroupAction(gamma, tau), For(Tuple(gamma, tau)), And(Element(tau, ModularGroupFundamentalDomain), Element(gamma, PSL2Z))), HH)"
+  },
+  {
+   "id": "fd72e0",
+   "topic": "modular_j",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "fd8310",
+   "topic": "chebyshev",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "fdf152",
+   "topic": "operators",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "fe11ce",
+   "topic": "fibonacci",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "ff0c9f",
+   "topic": "weierstrass_elliptic",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  },
+  {
+   "id": "ff93d0",
+   "topic": "bessel",
+   "reason": "symbol-definition",
+   "heads": [],
+   "source": ""
+  }
+ ]
+}

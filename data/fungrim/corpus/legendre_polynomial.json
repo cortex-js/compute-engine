@@ -1,0 +1,2892 @@
+{
+ "topic": "legendre_polynomial",
+ "title": "Legendre polynomials",
+ "source": "pygrim/formulas/legendre_polynomial.py",
+ "generator": "grim2mathjson 0.1.0",
+ "entries": [
+  {
+   "id": "0010f3",
+   "formula": [
+    "Equal",
+    [
+     "LegendrePolynomial",
+     "n",
+     [
+      "Negate",
+      "z"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Power",
+      -1,
+      "n"
+     ],
+     [
+      "LegendrePolynomial",
+      "n",
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "LegendrePolynomial"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_polynomial"
+   ]
+  },
+  {
+   "id": "13f971",
+   "formula": [
+    "Equal",
+    [
+     "LegendrePolynomial",
+     5,
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      1,
+      8
+     ],
+     [
+      "Add",
+      [
+       "Subtract",
+       [
+        "Multiply",
+        63,
+        [
+         "Power",
+         "z",
+         5
+        ]
+       ],
+       [
+        "Multiply",
+        70,
+        [
+         "Power",
+         "z",
+         3
+        ]
+       ]
+      ],
+      [
+       "Multiply",
+       15,
+       "z"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "LegendrePolynomial"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_polynomial"
+   ]
+  },
+  {
+   "id": "155343",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "LegendrePolynomial",
+      "n",
+      "x"
+     ]
+    ],
+    [
+     "Multiply",
+     2,
+     [
+      "BesselI",
+      0,
+      [
+       "Multiply",
+       [
+        "Multiply",
+        2,
+        "n"
+       ],
+       [
+        "Sqrt",
+        [
+         "Divide",
+         [
+          "Abs",
+          [
+           "Subtract",
+           "x",
+           1
+          ]
+         ],
+         2
+        ]
+       ]
+      ]
+     ]
+    ],
+    [
+     "Multiply",
+     2,
+     [
+      "Exp",
+      [
+       "Multiply",
+       [
+        "Multiply",
+        2,
+        "n"
+       ],
+       [
+        "Sqrt",
+        [
+         "Divide",
+         [
+          "Abs",
+          [
+           "Subtract",
+           "x",
+           1
+          ]
+         ],
+         2
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "x",
+     "RealNumbers"
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "BesselI",
+    "Exp",
+    "LegendrePolynomial"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_polynomial"
+   ]
+  },
+  {
+   "id": "1ba9a5",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "LegendrePolynomial",
+      "n",
+      "x"
+     ]
+    ],
+    1
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "LessEqual",
+     -1,
+     "x",
+     1
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "LegendrePolynomial"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_polynomial"
+   ]
+  },
+  {
+   "id": "217521",
+   "formula": [
+    "Equal",
+    [
+     "LegendrePolynomial",
+     1,
+     "z"
+    ],
+    "z"
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "LegendrePolynomial"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_polynomial"
+   ]
+  },
+  {
+   "id": "227d60",
+   "formula": [
+    "Greater",
+    [
+     "Subtract",
+     [
+      "Power",
+      [
+       "LegendrePolynomial",
+       "n",
+       "x"
+      ],
+      2
+     ],
+     [
+      "Multiply",
+      [
+       "LegendrePolynomial",
+       [
+        "Subtract",
+        "n",
+        1
+       ],
+       "x"
+      ],
+      [
+       "LegendrePolynomial",
+       [
+        "Add",
+        "n",
+        1
+       ],
+       "x"
+      ]
+     ]
+    ],
+    0
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "x",
+     [
+      "Interval",
+      [
+       "Open",
+       -1
+      ],
+      [
+       "Open",
+       1
+      ]
+     ]
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "LegendrePolynomial"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_polynomial"
+   ]
+  },
+  {
+   "id": "27688e",
+   "formula": [
+    "Equal",
+    [
+     "Add",
+     [
+      "Subtract",
+      [
+       "Multiply",
+       [
+        "Subtract",
+        1,
+        [
+         "Power",
+         "z",
+         2
+        ]
+       ],
+       [
+        "Apply",
+        [
+         "Derivative",
+         [
+          "Function",
+          [
+           "LegendrePolynomial",
+           "n",
+           "z"
+          ],
+          "z"
+         ],
+         2
+        ],
+        "z"
+       ]
+      ],
+      [
+       "Multiply",
+       [
+        "Multiply",
+        2,
+        "z"
+       ],
+       [
+        "Apply",
+        [
+         "Derivative",
+         [
+          "Function",
+          [
+           "LegendrePolynomial",
+           "n",
+           "z"
+          ],
+          "z"
+         ],
+         1
+        ],
+        "z"
+       ]
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Multiply",
+       "n",
+       [
+        "Add",
+        "n",
+        1
+       ]
+      ],
+      [
+       "LegendrePolynomial",
+       "n",
+       "z"
+      ]
+     ]
+    ],
+    0
+   ],
+   "variables": [
+    "n",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Derivative",
+    "LegendrePolynomial"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_polynomial"
+   ]
+  },
+  {
+   "id": "367ac2",
+   "formula": [
+    "Equal",
+    [
+     "Add",
+     [
+      "Subtract",
+      [
+       "Multiply",
+       [
+        "Add",
+        "n",
+        1
+       ],
+       [
+        "LegendrePolynomial",
+        [
+         "Add",
+         "n",
+         1
+        ],
+        "z"
+       ]
+      ],
+      [
+       "Multiply",
+       [
+        "Multiply",
+        [
+         "Add",
+         [
+          "Multiply",
+          2,
+          "n"
+         ],
+         1
+        ],
+        "z"
+       ],
+       [
+        "LegendrePolynomial",
+        "n",
+        "z"
+       ]
+      ]
+     ],
+     [
+      "Multiply",
+      "n",
+      [
+       "LegendrePolynomial",
+       [
+        "Subtract",
+        "n",
+        1
+       ],
+       "z"
+      ]
+     ]
+    ],
+    0
+   ],
+   "variables": [
+    "n",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "LegendrePolynomial"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_polynomial"
+   ]
+  },
+  {
+   "id": "3b175b",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "Apply",
+      [
+       "Derivative",
+       [
+        "Function",
+        [
+         "LegendrePolynomial",
+         "n",
+         "x"
+        ],
+        "x"
+       ],
+       2
+      ],
+      "x"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      [
+       "Power",
+       2,
+       [
+        "Divide",
+        5,
+        2
+       ]
+      ],
+      [
+       "Sqrt",
+       "Pi"
+      ]
+     ],
+     [
+      "Divide",
+      [
+       "Power",
+       "n",
+       [
+        "Divide",
+        3,
+        2
+       ]
+      ],
+      [
+       "Power",
+       [
+        "Subtract",
+        1,
+        [
+         "Power",
+         "x",
+         2
+        ]
+       ],
+       [
+        "Divide",
+        5,
+        4
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Less",
+     -1,
+     "x",
+     1
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Derivative",
+    "LegendrePolynomial"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_polynomial"
+   ]
+  },
+  {
+   "id": "3c87b9",
+   "formula": [
+    "Equal",
+    [
+     "LegendrePolynomial",
+     "n",
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Power",
+      [
+       "Divide",
+       [
+        "Subtract",
+        "z",
+        1
+       ],
+       2
+      ],
+      "n"
+     ],
+     [
+      "Hypergeometric2F1",
+      [
+       "Negate",
+       "n"
+      ],
+      [
+       "Negate",
+       "n"
+      ],
+      1,
+      [
+       "Divide",
+       [
+        "Add",
+        "z",
+        1
+       ],
+       [
+        "Subtract",
+        "z",
+        1
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "z",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      [
+       "Set",
+       1
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Hypergeometric2F1",
+    "LegendrePolynomial"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_polynomial"
+   ]
+  },
+  {
+   "id": "3df748",
+   "formula": [
+    "Equal",
+    [
+     "LegendrePolynomial",
+     "n",
+     -1
+    ],
+    [
+     "Power",
+     -1,
+     "n"
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "LegendrePolynomial"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_polynomial"
+   ]
+  },
+  {
+   "id": "415911",
+   "formula": [
+    "Equal",
+    [
+     "Count",
+     [
+      "Zeros",
+      [
+       "Function",
+       [
+        "LegendrePolynomial",
+        "n",
+        "z"
+       ],
+       "z"
+      ],
+      "ComplexNumbers"
+     ]
+    ],
+    "n"
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "LegendrePolynomial",
+    "Zeros"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_polynomial"
+   ]
+  },
+  {
+   "id": "4cfeac",
+   "formula": [
+    "Equal",
+    [
+     "LegendrePolynomial",
+     "n",
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      1,
+      [
+       "Multiply",
+       [
+        "Power",
+        2,
+        "n"
+       ],
+       [
+        "Factorial",
+        "n"
+       ]
+      ]
+     ],
+     [
+      "Apply",
+      [
+       "Derivative",
+       [
+        "Function",
+        [
+         "Power",
+         [
+          "Subtract",
+          [
+           "Power",
+           "t",
+           2
+          ],
+          1
+         ],
+         "n"
+        ],
+        "t"
+       ],
+       "n"
+      ],
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "assumptionAlternatives": [
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Derivative",
+    "Factorial",
+    "LegendrePolynomial"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_polynomial"
+   ]
+  },
+  {
+   "id": "59e5df",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "Apply",
+      [
+       "Derivative",
+       [
+        "Function",
+        [
+         "LegendrePolynomial",
+         "n",
+         "x"
+        ],
+        "x"
+       ],
+       2
+      ],
+      "x"
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Multiply",
+      [
+       "Multiply",
+       [
+        "Multiply",
+        [
+         "Subtract",
+         "n",
+         1
+        ],
+        "n"
+       ],
+       [
+        "Add",
+        "n",
+        1
+       ]
+      ],
+      [
+       "Add",
+       "n",
+       2
+      ]
+     ],
+     8
+    ]
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "LessEqual",
+     -1,
+     "x",
+     1
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Derivative",
+    "LegendrePolynomial"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_polynomial"
+   ]
+  },
+  {
+   "id": "60ac50",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "Apply",
+      [
+       "Derivative",
+       [
+        "Function",
+        [
+         "LegendrePolynomial",
+         "n",
+         "x"
+        ],
+        "x"
+       ],
+       1
+      ],
+      "x"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      [
+       "Power",
+       2,
+       [
+        "Divide",
+        3,
+        2
+       ]
+      ],
+      [
+       "Sqrt",
+       "Pi"
+      ]
+     ],
+     [
+      "Divide",
+      [
+       "Power",
+       "n",
+       [
+        "Divide",
+        1,
+        2
+       ]
+      ],
+      [
+       "Power",
+       [
+        "Subtract",
+        1,
+        [
+         "Power",
+         "x",
+         2
+        ]
+       ],
+       [
+        "Divide",
+        3,
+        4
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Less",
+     -1,
+     "x",
+     1
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Derivative",
+    "LegendrePolynomial"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_polynomial"
+   ]
+  },
+  {
+   "id": "6476bd",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "Apply",
+      [
+       "Derivative",
+       [
+        "Function",
+        [
+         "LegendrePolynomial",
+         "n",
+         "x"
+        ],
+        "x"
+       ],
+       "r"
+      ],
+      "x"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      [
+       "Power",
+       2,
+       [
+        "Add",
+        "r",
+        [
+         "Divide",
+         1,
+         2
+        ]
+       ]
+      ],
+      [
+       "Sqrt",
+       "Pi"
+      ]
+     ],
+     [
+      "Divide",
+      [
+       "Power",
+       "n",
+       [
+        "Subtract",
+        "r",
+        [
+         "Divide",
+         1,
+         2
+        ]
+       ]
+      ],
+      [
+       "Power",
+       [
+        "Subtract",
+        1,
+        [
+         "Power",
+         "x",
+         2
+        ]
+       ],
+       [
+        "Divide",
+        [
+         "Add",
+         [
+          "Multiply",
+          2,
+          "n"
+         ],
+         1
+        ],
+        4
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "r",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "r",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Less",
+     -1,
+     "x",
+     1
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Derivative",
+    "LegendrePolynomial"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_polynomial"
+   ]
+  },
+  {
+   "id": "674afa",
+   "formula": [
+    "Equal",
+    [
+     "LegendrePolynomial",
+     [
+      "Multiply",
+      2,
+      "n"
+     ],
+     0
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      [
+       "Power",
+       -1,
+       "n"
+      ],
+      [
+       "Power",
+       4,
+       "n"
+      ]
+     ],
+     [
+      "Binomial",
+      [
+       "Multiply",
+       2,
+       "n"
+      ],
+      "n"
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Binomial",
+    "LegendrePolynomial"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_polynomial"
+   ]
+  },
+  {
+   "id": "6cd4a1",
+   "formula": [
+    "Equal",
+    [
+     "LegendrePolynomial",
+     [
+      "Multiply",
+      2,
+      "n"
+     ],
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      [
+       "Divide",
+       [
+        "Power",
+        -1,
+        "n"
+       ],
+       [
+        "Power",
+        4,
+        "n"
+       ]
+      ],
+      [
+       "Binomial",
+       [
+        "Multiply",
+        2,
+        "n"
+       ],
+       "n"
+      ]
+     ],
+     [
+      "Hypergeometric2F1",
+      [
+       "Negate",
+       "n"
+      ],
+      [
+       "Add",
+       "n",
+       [
+        "Divide",
+        1,
+        2
+       ]
+      ],
+      [
+       "Divide",
+       1,
+       2
+      ],
+      [
+       "Power",
+       "z",
+       2
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Binomial",
+    "Hypergeometric2F1",
+    "LegendrePolynomial"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_polynomial"
+   ]
+  },
+  {
+   "id": "7a85b7",
+   "formula": [
+    "Equal",
+    [
+     "LegendrePolynomial",
+     "n",
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      1,
+      [
+       "Power",
+       2,
+       "n"
+      ]
+     ],
+     [
+      "Sum",
+      [
+       "Multiply",
+       [
+        "Multiply",
+        [
+         "Multiply",
+         [
+          "Power",
+          -1,
+          "k"
+         ],
+         [
+          "Binomial",
+          "n",
+          "k"
+         ]
+        ],
+        [
+         "Binomial",
+         [
+          "Subtract",
+          [
+           "Multiply",
+           2,
+           "n"
+          ],
+          [
+           "Multiply",
+           2,
+           "k"
+          ]
+         ],
+         "n"
+        ]
+       ],
+       [
+        "Power",
+        "z",
+        [
+         "Subtract",
+         "n",
+         [
+          "Multiply",
+          2,
+          "k"
+         ]
+        ]
+       ]
+      ],
+      [
+       "Limits",
+       "k",
+       0,
+       [
+        "Floor",
+        [
+         "Divide",
+         "n",
+         2
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Binomial",
+    "Floor",
+    "LegendrePolynomial",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_polynomial"
+   ]
+  },
+  {
+   "id": "859445",
+   "formula": [
+    "Equal",
+    [
+     "LegendrePolynomial",
+     [
+      "Add",
+      [
+       "Multiply",
+       2,
+       "n"
+      ],
+      1
+     ],
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      [
+       "Multiply",
+       [
+        "Multiply",
+        [
+         "Divide",
+         [
+          "Power",
+          -1,
+          "n"
+         ],
+         [
+          "Power",
+          4,
+          "n"
+         ]
+        ],
+        [
+         "Add",
+         [
+          "Multiply",
+          2,
+          "n"
+         ],
+         1
+        ]
+       ],
+       [
+        "Binomial",
+        [
+         "Multiply",
+         2,
+         "n"
+        ],
+        "n"
+       ]
+      ],
+      "z"
+     ],
+     [
+      "Hypergeometric2F1",
+      [
+       "Negate",
+       "n"
+      ],
+      [
+       "Add",
+       "n",
+       [
+        "Divide",
+        3,
+        2
+       ]
+      ],
+      [
+       "Divide",
+       3,
+       2
+      ],
+      [
+       "Power",
+       "z",
+       2
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Binomial",
+    "Hypergeometric2F1",
+    "LegendrePolynomial"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_polynomial"
+   ]
+  },
+  {
+   "id": "85eebc",
+   "formula": [
+    "Equal",
+    [
+     "LegendrePolynomial",
+     [
+      "Add",
+      [
+       "Multiply",
+       2,
+       "n"
+      ],
+      1
+     ],
+     0
+    ],
+    0
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "LegendrePolynomial"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_polynomial"
+   ]
+  },
+  {
+   "id": "925fdf",
+   "formula": [
+    "Equal",
+    [
+     "Subtract",
+     [
+      "Add",
+      [
+       "Multiply",
+       [
+        "Subtract",
+        1,
+        [
+         "Power",
+         "z",
+         2
+        ]
+       ],
+       [
+        "Apply",
+        [
+         "Derivative",
+         [
+          "Function",
+          [
+           "LegendrePolynomial",
+           "n",
+           "z"
+          ],
+          "z"
+         ],
+         1
+        ],
+        "z"
+       ]
+      ],
+      [
+       "Multiply",
+       [
+        "Multiply",
+        "n",
+        "z"
+       ],
+       [
+        "LegendrePolynomial",
+        "n",
+        "z"
+       ]
+      ]
+     ],
+     [
+      "Multiply",
+      "n",
+      [
+       "LegendrePolynomial",
+       [
+        "Subtract",
+        "n",
+        1
+       ],
+       "z"
+      ]
+     ]
+    ],
+    0
+   ],
+   "variables": [
+    "n",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Derivative",
+    "LegendrePolynomial"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_polynomial"
+   ]
+  },
+  {
+   "id": "9395fc",
+   "formula": [
+    "Equal",
+    [
+     "LegendrePolynomial",
+     "n",
+     "z"
+    ],
+    [
+     "Hypergeometric2F1",
+     [
+      "Negate",
+      "n"
+     ],
+     [
+      "Add",
+      "n",
+      1
+     ],
+     1,
+     [
+      "Divide",
+      [
+       "Subtract",
+       1,
+       "z"
+      ],
+      2
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Hypergeometric2F1",
+    "LegendrePolynomial"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_polynomial"
+   ]
+  },
+  {
+   "id": "9b7f05",
+   "formula": [
+    "Equal",
+    [
+     "LegendrePolynomial",
+     3,
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      1,
+      2
+     ],
+     [
+      "Subtract",
+      [
+       "Multiply",
+       5,
+       [
+        "Power",
+        "z",
+        3
+       ]
+      ],
+      [
+       "Multiply",
+       3,
+       "z"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "LegendrePolynomial"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_polynomial"
+   ]
+  },
+  {
+   "id": "9bdf22",
+   "formula": [
+    "Equal",
+    [
+     "LegendrePolynomial",
+     0,
+     "z"
+    ],
+    1
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "LegendrePolynomial"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_polynomial"
+   ]
+  },
+  {
+   "id": "a17386",
+   "formula": [
+    "Equal",
+    [
+     "LegendrePolynomial",
+     4,
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      1,
+      8
+     ],
+     [
+      "Add",
+      [
+       "Subtract",
+       [
+        "Multiply",
+        35,
+        [
+         "Power",
+         "z",
+         4
+        ]
+       ],
+       [
+        "Multiply",
+        30,
+        [
+         "Power",
+         "z",
+         2
+        ]
+       ]
+      ],
+      3
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "LegendrePolynomial"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_polynomial"
+   ]
+  },
+  {
+   "id": "a7ac51",
+   "formula": [
+    "Equal",
+    [
+     "LegendrePolynomial",
+     "n",
+     1
+    ],
+    1
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "LegendrePolynomial"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_polynomial"
+   ]
+  },
+  {
+   "id": "b2d723",
+   "formula": [
+    "Equal",
+    [
+     "LegendrePolynomial",
+     "n",
+     [
+      "Conjugate",
+      "z"
+     ]
+    ],
+    [
+     "Conjugate",
+     [
+      "LegendrePolynomial",
+      "n",
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Conjugate",
+    "LegendrePolynomial"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_polynomial"
+   ]
+  },
+  {
+   "id": "b786ad",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "Apply",
+      [
+       "Derivative",
+       [
+        "Function",
+        [
+         "LegendrePolynomial",
+         "n",
+         "x"
+        ],
+        "x"
+       ],
+       1
+      ],
+      "x"
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Multiply",
+      "n",
+      [
+       "Add",
+       "n",
+       1
+      ]
+     ],
+     2
+    ]
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "LessEqual",
+     -1,
+     "x",
+     1
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Derivative",
+    "LegendrePolynomial"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_polynomial"
+   ]
+  },
+  {
+   "id": "c5dd9b",
+   "formula": [
+    "Equal",
+    [
+     "LegendrePolynomial",
+     "n",
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      1,
+      [
+       "Power",
+       2,
+       "n"
+      ]
+     ],
+     [
+      "Sum",
+      [
+       "Multiply",
+       [
+        "Multiply",
+        [
+         "Power",
+         [
+          "Binomial",
+          "n",
+          "k"
+         ],
+         2
+        ],
+        [
+         "Power",
+         [
+          "Subtract",
+          "z",
+          1
+         ],
+         [
+          "Subtract",
+          "n",
+          "k"
+         ]
+        ]
+       ],
+       [
+        "Power",
+        [
+         "Add",
+         "z",
+         1
+        ],
+        "k"
+       ]
+      ],
+      [
+       "Limits",
+       "k",
+       0,
+       "n"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Binomial",
+    "LegendrePolynomial",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_polynomial"
+   ]
+  },
+  {
+   "id": "c8d10e",
+   "formula": [
+    "GreaterEqual",
+    [
+     "Subtract",
+     [
+      "Power",
+      [
+       "LegendrePolynomial",
+       "n",
+       "x"
+      ],
+      2
+     ],
+     [
+      "Multiply",
+      [
+       "LegendrePolynomial",
+       [
+        "Subtract",
+        "n",
+        1
+       ],
+       "x"
+      ],
+      [
+       "LegendrePolynomial",
+       [
+        "Add",
+        "n",
+        1
+       ],
+       "x"
+      ]
+     ]
+    ],
+    0
+   ],
+   "variables": [
+    "n",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "PositiveIntegers"
+    ],
+    [
+     "Element",
+     "x",
+     [
+      "Interval",
+      -1,
+      1
+     ]
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "LegendrePolynomial"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_polynomial"
+   ]
+  },
+  {
+   "id": "d77f0a",
+   "formula": [
+    "Equal",
+    [
+     "LegendrePolynomial",
+     2,
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      1,
+      2
+     ],
+     [
+      "Subtract",
+      [
+       "Multiply",
+       3,
+       [
+        "Power",
+        "z",
+        2
+       ]
+      ],
+      1
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "LegendrePolynomial"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_polynomial"
+   ]
+  },
+  {
+   "id": "d84519",
+   "formula": [
+    "Equal",
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "LegendrePolynomial",
+       "n",
+       "x"
+      ],
+      [
+       "Power",
+       "z",
+       "n"
+      ]
+     ],
+     [
+      "Limits",
+      "n",
+      0,
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Divide",
+     1,
+     [
+      "Sqrt",
+      [
+       "Add",
+       [
+        "Subtract",
+        1,
+        [
+         "Multiply",
+         [
+          "Multiply",
+          2,
+          "x"
+         ],
+         "z"
+        ]
+       ],
+       [
+        "Power",
+        "z",
+        2
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "x",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     [
+      "Interval",
+      -1,
+      1
+     ]
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Less",
+     [
+      "Abs",
+      "z"
+     ],
+     1
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "LegendrePolynomial",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_polynomial"
+   ]
+  },
+  {
+   "id": "df439e",
+   "formula": [
+    "Subset",
+    [
+     "Zeros",
+     [
+      "Function",
+      [
+       "LegendrePolynomial",
+       "n",
+       "z"
+      ],
+      "z"
+     ],
+     "ComplexNumbers"
+    ],
+    [
+     "Interval",
+     [
+      "Open",
+      -1
+     ],
+     [
+      "Open",
+      1
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "LegendrePolynomial",
+    "Zeros"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_polynomial"
+   ]
+  },
+  {
+   "id": "e36542",
+   "formula": [
+    "Equal",
+    [
+     "Integrate",
+     [
+      "Multiply",
+      [
+       "LegendrePolynomial",
+       "n",
+       "x"
+      ],
+      [
+       "LegendrePolynomial",
+       "m",
+       "x"
+      ]
+     ],
+     [
+      "Limits",
+      "x",
+      -1,
+      1
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      2,
+      [
+       "Add",
+       [
+        "Multiply",
+        2,
+        "n"
+       ],
+       1
+      ]
+     ],
+     [
+      "KroneckerDelta",
+      "n",
+      "m"
+     ]
+    ]
+   ],
+   "variables": [
+    "m",
+    "n"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "m",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Integrate",
+    "KroneckerDelta",
+    "LegendrePolynomial"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_polynomial"
+   ]
+  },
+  {
+   "id": "ef4b53",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "LegendrePolynomial",
+      "n",
+      "z"
+     ]
+    ],
+    [
+     "Abs",
+     [
+      "LegendrePolynomial",
+      "n",
+      [
+       "Multiply",
+       [
+        "Abs",
+        "z"
+       ],
+       "ImaginaryUnit"
+      ]
+     ]
+    ],
+    [
+     "Power",
+     [
+      "Add",
+      [
+       "Abs",
+       "z"
+      ],
+      [
+       "Sqrt",
+       [
+        "Add",
+        1,
+        [
+         "Power",
+         [
+          "Abs",
+          "z"
+         ],
+         2
+        ]
+       ]
+      ]
+     ],
+     "n"
+    ]
+   ],
+   "variables": [
+    "n",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "LegendrePolynomial"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_polynomial"
+   ]
+  },
+  {
+   "id": "f0569a",
+   "formula": [
+    "Equal",
+    [
+     "LegendrePolynomial",
+     "n",
+     "z"
+    ],
+    [
+     "Sum",
+     [
+      "Multiply",
+      [
+       "Multiply",
+       [
+        "Binomial",
+        "n",
+        "k"
+       ],
+       [
+        "Binomial",
+        [
+         "Add",
+         "n",
+         "k"
+        ],
+        "k"
+       ]
+      ],
+      [
+       "Power",
+       [
+        "Divide",
+        [
+         "Subtract",
+         "z",
+         1
+        ],
+        2
+       ],
+       "k"
+      ]
+     ],
+     [
+      "Limits",
+      "k",
+      0,
+      "n"
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Binomial",
+    "LegendrePolynomial",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_polynomial"
+   ]
+  },
+  {
+   "id": "f55f0a",
+   "formula": [
+    "Equal",
+    [
+     "LegendrePolynomial",
+     "n",
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      [
+       "Binomial",
+       [
+        "Multiply",
+        2,
+        "n"
+       ],
+       "n"
+      ],
+      [
+       "Power",
+       [
+        "Divide",
+        "z",
+        2
+       ],
+       "n"
+      ]
+     ],
+     [
+      "Hypergeometric2F1",
+      [
+       "Negate",
+       [
+        "Divide",
+        "n",
+        2
+       ]
+      ],
+      [
+       "Divide",
+       [
+        "Subtract",
+        1,
+        "n"
+       ],
+       2
+      ],
+      [
+       "Subtract",
+       [
+        "Divide",
+        1,
+        2
+       ],
+       "n"
+      ],
+      [
+       "Divide",
+       1,
+       [
+        "Power",
+        "z",
+        2
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ],
+    [
+     "Element",
+     "z",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      [
+       "Set",
+       0
+      ]
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Binomial",
+    "Hypergeometric2F1",
+    "LegendrePolynomial"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "legendre_polynomial"
+   ]
+  }
+ ]
+}

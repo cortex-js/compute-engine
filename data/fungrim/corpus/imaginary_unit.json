@@ -1,0 +1,677 @@
+{
+ "topic": "imaginary_unit",
+ "title": "Imaginary unit",
+ "source": "pygrim/formulas/imaginary_unit.py",
+ "generator": "grim2mathjson 0.1.0",
+ "entries": [
+  {
+   "id": "09c107",
+   "formula": [
+    "Equal",
+    [
+     "Sign",
+     "ImaginaryUnit"
+    ],
+    "ImaginaryUnit"
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Sign"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "imaginary_unit"
+   ]
+  },
+  {
+   "id": "15f92d",
+   "formula": [
+    "Equal",
+    [
+     "Power",
+     "ImaginaryUnit",
+     "z"
+    ],
+    [
+     "Add",
+     [
+      "Cos",
+      [
+       "Multiply",
+       [
+        "Divide",
+        "Pi",
+        2
+       ],
+       "z"
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Sin",
+       [
+        "Multiply",
+        [
+         "Divide",
+         "Pi",
+         2
+        ],
+        "z"
+       ]
+      ],
+      "ImaginaryUnit"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Cos",
+    "Sin"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "imaginary_unit"
+   ]
+  },
+  {
+   "id": "208da7",
+   "formula": [
+    "Equal",
+    [
+     "PolyLog",
+     2,
+     "ImaginaryUnit"
+    ],
+    [
+     "Add",
+     [
+      "Negate",
+      [
+       "Divide",
+       [
+        "Power",
+        "Pi",
+        2
+       ],
+       48
+      ]
+     ],
+     [
+      "Multiply",
+      "CatalanConstant",
+      "ImaginaryUnit"
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "PolyLog"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "imaginary_unit"
+   ]
+  },
+  {
+   "id": "249fd6",
+   "formula": [
+    "Equal",
+    [
+     "Real",
+     "ImaginaryUnit"
+    ],
+    0
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Real"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "imaginary_unit"
+   ]
+  },
+  {
+   "id": "27586f",
+   "formula": [
+    "Equal",
+    "ImaginaryUnit",
+    [
+     "Power",
+     -1,
+     [
+      "Divide",
+      1,
+      2
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "imaginary_unit"
+   ]
+  },
+  {
+   "id": "31b0df",
+   "formula": [
+    "Equal",
+    [
+     "Power",
+     "ImaginaryUnit",
+     2
+    ],
+    -1
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "imaginary_unit"
+   ]
+  },
+  {
+   "id": "3ac0ce",
+   "formula": [
+    "Equal",
+    [
+     "Imaginary",
+     [
+      "Digamma",
+      "ImaginaryUnit"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      1,
+      2
+     ],
+     [
+      "Add",
+      [
+       "Multiply",
+       "Pi",
+       [
+        "Coth",
+        "Pi"
+       ]
+      ],
+      1
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Coth",
+    "Digamma",
+    "Imaginary"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "imaginary_unit"
+   ]
+  },
+  {
+   "id": "44ae4a",
+   "formula": [
+    "Equal",
+    [
+     "Conjugate",
+     "ImaginaryUnit"
+    ],
+    [
+     "Negate",
+     "ImaginaryUnit"
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Conjugate"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "imaginary_unit"
+   ]
+  },
+  {
+   "id": "61784f",
+   "formula": [
+    "Equal",
+    [
+     "Imaginary",
+     "ImaginaryUnit"
+    ],
+    1
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Imaginary"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "imaginary_unit"
+   ]
+  },
+  {
+   "id": "65bbd6",
+   "formula": [
+    "Equal",
+    [
+     "Abs",
+     "ImaginaryUnit"
+    ],
+    1
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Abs"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "imaginary_unit"
+   ]
+  },
+  {
+   "id": "67c262",
+   "formula": [
+    "Equal",
+    [
+     "Divide",
+     1,
+     "ImaginaryUnit"
+    ],
+    [
+     "Negate",
+     "ImaginaryUnit"
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "imaginary_unit"
+   ]
+  },
+  {
+   "id": "72cef9",
+   "formula": [
+    "Equal",
+    "ImaginaryUnit",
+    [
+     "Sqrt",
+     -1
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "imaginary_unit",
+    "numbers"
+   ]
+  },
+  {
+   "id": "88ad6f",
+   "formula": [
+    "Element",
+    "ImaginaryUnit",
+    "ComplexNumbers"
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "imaginary_unit",
+    "numbers"
+   ]
+  },
+  {
+   "id": "8be138",
+   "formula": [
+    "Equal",
+    [
+     "Power",
+     "ImaginaryUnit",
+     3
+    ],
+    [
+     "Negate",
+     "ImaginaryUnit"
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "imaginary_unit"
+   ]
+  },
+  {
+   "id": "9c93bb",
+   "formula": [
+    "Equal",
+    [
+     "Abs",
+     [
+      "Gamma",
+      "ImaginaryUnit"
+     ]
+    ],
+    [
+     "Sqrt",
+     [
+      "Divide",
+      "Pi",
+      [
+       "Sinh",
+       "Pi"
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Gamma",
+    "Sinh"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "imaginary_unit"
+   ]
+  },
+  {
+   "id": "a08fb9",
+   "formula": [
+    "NotElement",
+    "ImaginaryUnit",
+    "RealNumbers"
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "imaginary_unit",
+    "numbers"
+   ]
+  },
+  {
+   "id": "a39534",
+   "formula": [
+    "Equal",
+    [
+     "Power",
+     "ImaginaryUnit",
+     "ImaginaryUnit"
+    ],
+    [
+     "Exp",
+     [
+      "Negate",
+      [
+       "Divide",
+       "Pi",
+       2
+      ]
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Exp"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "imaginary_unit"
+   ]
+  },
+  {
+   "id": "c12a41",
+   "formula": [
+    "Equal",
+    [
+     "Power",
+     "ImaginaryUnit",
+     "n"
+    ],
+    [
+     "Which",
+     [
+      "CongruentMod",
+      "n",
+      0,
+      4
+     ],
+     1,
+     [
+      "CongruentMod",
+      "n",
+      1,
+      4
+     ],
+     "ImaginaryUnit",
+     [
+      "CongruentMod",
+      "n",
+      2,
+      4
+     ],
+     -1,
+     [
+      "CongruentMod",
+      "n",
+      3,
+      4
+     ],
+     [
+      "Negate",
+      "ImaginaryUnit"
+     ]
+    ]
+   ],
+   "variables": [
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "Integers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "CongruentMod"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "imaginary_unit"
+   ]
+  },
+  {
+   "id": "cd8a07",
+   "formula": [
+    "Element",
+    "ImaginaryUnit",
+    "AlgebraicNumbers"
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "imaginary_unit",
+    "numbers"
+   ]
+  },
+  {
+   "id": "e0425a",
+   "formula": [
+    "Equal",
+    [
+     "Power",
+     "ImaginaryUnit",
+     4
+    ],
+    1
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "imaginary_unit"
+   ]
+  },
+  {
+   "id": "f8a56f",
+   "formula": [
+    "Equal",
+    [
+     "Power",
+     "ImaginaryUnit",
+     "z"
+    ],
+    [
+     "Exp",
+     [
+      "Divide",
+      [
+       "Multiply",
+       [
+        "Multiply",
+        "Pi",
+        "ImaginaryUnit"
+       ],
+       "z"
+      ],
+      2
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Exp"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "imaginary_unit"
+   ]
+  }
+ ]
+}

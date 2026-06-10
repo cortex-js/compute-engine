@@ -1,0 +1,1023 @@
+{
+ "topic": "weierstrass_elliptic",
+ "title": "Weierstrass elliptic functions",
+ "source": "pygrim/formulas/weierstrass_elliptic.py",
+ "generator": "grim2mathjson 0.1.0",
+ "entries": [
+  {
+   "id": "0207dc",
+   "formula": [
+    "Equal",
+    [
+     "WeierstrassZeta",
+     "z",
+     "tau"
+    ],
+    [
+     "Add",
+     [
+      "Multiply",
+      [
+       "Negate",
+       [
+        "Divide",
+        "z",
+        3
+       ]
+      ],
+      [
+       "Divide",
+       [
+        "JacobiTheta",
+        1,
+        0,
+        "tau",
+        3
+       ],
+       [
+        "JacobiTheta",
+        1,
+        0,
+        "tau",
+        1
+       ]
+      ]
+     ],
+     [
+      "Divide",
+      [
+       "JacobiTheta",
+       1,
+       "z",
+       "tau",
+       1
+      ],
+      [
+       "JacobiTheta",
+       1,
+       "z",
+       "tau"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "tau",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "tau",
+     "HH"
+    ],
+    [
+     "NotElement",
+     "z",
+     [
+      "Lattice",
+      1,
+      "tau"
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "JacobiTheta",
+    "WeierstrassZeta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "jacobi_theta",
+    "weierstrass_elliptic"
+   ]
+  },
+  {
+   "id": "0e649f",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "WeierstrassSigma",
+        "z",
+        "tau"
+       ],
+       "z"
+      ],
+      1
+     ],
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "WeierstrassZeta",
+      "z",
+      "tau"
+     ],
+     [
+      "WeierstrassSigma",
+      "z",
+      "tau"
+     ]
+    ]
+   ],
+   "variables": [
+    "tau",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "tau",
+     "HH"
+    ],
+    [
+     "NotElement",
+     "z",
+     [
+      "Lattice",
+      1,
+      "tau"
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Derivative",
+    "WeierstrassSigma",
+    "WeierstrassZeta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "weierstrass_elliptic"
+   ]
+  },
+  {
+   "id": "12a9e8",
+   "formula": [
+    "Equal",
+    [
+     "WeierstrassP",
+     [
+      "Negate",
+      "z"
+     ],
+     "tau"
+    ],
+    [
+     "WeierstrassP",
+     "z",
+     "tau"
+    ]
+   ],
+   "variables": [
+    "tau",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "tau",
+     "HH"
+    ],
+    [
+     "NotElement",
+     "z",
+     [
+      "Lattice",
+      1,
+      "tau"
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "WeierstrassP"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "weierstrass_elliptic"
+   ]
+  },
+  {
+   "id": "23beb5",
+   "formula": [
+    "Equal",
+    [
+     "WeierstrassSigma",
+     [
+      "Negate",
+      "z"
+     ],
+     "tau"
+    ],
+    [
+     "Negate",
+     [
+      "WeierstrassSigma",
+      "z",
+      "tau"
+     ]
+    ]
+   ],
+   "variables": [
+    "tau",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "tau",
+     "HH"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "WeierstrassSigma"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "weierstrass_elliptic"
+   ]
+  },
+  {
+   "id": "35403b",
+   "formula": [
+    "Equal",
+    [
+     "WeierstrassSigma",
+     [
+      "Add",
+      "z",
+      1
+     ],
+     "tau"
+    ],
+    [
+     "Negate",
+     [
+      "Multiply",
+      [
+       "Exp",
+       [
+        "Multiply",
+        [
+         "Multiply",
+         2,
+         [
+          "Add",
+          "z",
+          [
+           "Divide",
+           1,
+           2
+          ]
+         ]
+        ],
+        [
+         "WeierstrassZeta",
+         [
+          "Divide",
+          1,
+          2
+         ],
+         "tau"
+        ]
+       ]
+      ],
+      [
+       "WeierstrassSigma",
+       "z",
+       "tau"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "tau",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "tau",
+     "HH"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Exp",
+    "WeierstrassSigma",
+    "WeierstrassZeta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "weierstrass_elliptic"
+   ]
+  },
+  {
+   "id": "72eb69",
+   "formula": [
+    "Equal",
+    [
+     "WeierstrassZeta",
+     [
+      "Negate",
+      "z"
+     ],
+     "tau"
+    ],
+    [
+     "Negate",
+     [
+      "WeierstrassZeta",
+      "z",
+      "tau"
+     ]
+    ]
+   ],
+   "variables": [
+    "tau",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "tau",
+     "HH"
+    ],
+    [
+     "NotElement",
+     "z",
+     [
+      "Lattice",
+      1,
+      "tau"
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "WeierstrassZeta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "weierstrass_elliptic"
+   ]
+  },
+  {
+   "id": "a0c85d",
+   "formula": [
+    "Equal",
+    [
+     "WeierstrassZeta",
+     [
+      "Add",
+      "z",
+      "tau"
+     ],
+     "tau"
+    ],
+    [
+     "Add",
+     [
+      "WeierstrassZeta",
+      "z",
+      "tau"
+     ],
+     [
+      "WeierstrassZeta",
+      [
+       "Divide",
+       "tau",
+       2
+      ],
+      "tau"
+     ]
+    ]
+   ],
+   "variables": [
+    "tau",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "tau",
+     "HH"
+    ],
+    [
+     "NotElement",
+     "z",
+     [
+      "Lattice",
+      1,
+      "tau"
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "WeierstrassZeta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "weierstrass_elliptic"
+   ]
+  },
+  {
+   "id": "a95b7e",
+   "formula": [
+    "Equal",
+    [
+     "WeierstrassP",
+     [
+      "Add",
+      [
+       "Add",
+       "z",
+       "m"
+      ],
+      [
+       "Multiply",
+       "n",
+       "tau"
+      ]
+     ],
+     "tau"
+    ],
+    [
+     "WeierstrassP",
+     "z",
+     "tau"
+    ]
+   ],
+   "variables": [
+    "m",
+    "n",
+    "tau",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "tau",
+     "HH"
+    ],
+    [
+     "NotElement",
+     "z",
+     [
+      "Lattice",
+      1,
+      "tau"
+     ]
+    ],
+    [
+     "Element",
+     "m",
+     "Integers"
+    ],
+    [
+     "Element",
+     "n",
+     "Integers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "WeierstrassP"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "weierstrass_elliptic"
+   ]
+  },
+  {
+   "id": "af0dfc",
+   "formula": [
+    "Equal",
+    [
+     "WeierstrassP",
+     "z",
+     "tau"
+    ],
+    [
+     "Subtract",
+     [
+      "Power",
+      [
+       "Multiply",
+       [
+        "Multiply",
+        [
+         "Multiply",
+         "Pi",
+         [
+          "JacobiTheta",
+          2,
+          0,
+          "tau"
+         ]
+        ],
+        [
+         "JacobiTheta",
+         3,
+         0,
+         "tau"
+        ]
+       ],
+       [
+        "Divide",
+        [
+         "JacobiTheta",
+         4,
+         "z",
+         "tau"
+        ],
+        [
+         "JacobiTheta",
+         1,
+         "z",
+         "tau"
+        ]
+       ]
+      ],
+      2
+     ],
+     [
+      "Multiply",
+      [
+       "Divide",
+       [
+        "Power",
+        "Pi",
+        2
+       ],
+       3
+      ],
+      [
+       "Add",
+       [
+        "Power",
+        [
+         "JacobiTheta",
+         2,
+         0,
+         "tau"
+        ],
+        4
+       ],
+       [
+        "Power",
+        [
+         "JacobiTheta",
+         3,
+         0,
+         "tau"
+        ],
+        4
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "tau",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "tau",
+     "HH"
+    ],
+    [
+     "NotElement",
+     "z",
+     [
+      "Lattice",
+      1,
+      "tau"
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "JacobiTheta",
+    "WeierstrassP"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "jacobi_theta",
+    "weierstrass_elliptic"
+   ]
+  },
+  {
+   "id": "b96c9d",
+   "formula": [
+    "Equal",
+    [
+     "WeierstrassSigma",
+     "z",
+     "tau"
+    ],
+    [
+     "Multiply",
+     [
+      "Exp",
+      [
+       "Multiply",
+       [
+        "Negate",
+        [
+         "Divide",
+         [
+          "Power",
+          "z",
+          2
+         ],
+         6
+        ]
+       ],
+       [
+        "Divide",
+        [
+         "JacobiTheta",
+         1,
+         0,
+         "tau",
+         3
+        ],
+        [
+         "JacobiTheta",
+         1,
+         0,
+         "tau",
+         1
+        ]
+       ]
+      ]
+     ],
+     [
+      "Divide",
+      [
+       "JacobiTheta",
+       1,
+       "z",
+       "tau"
+      ],
+      [
+       "JacobiTheta",
+       1,
+       0,
+       "tau",
+       1
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "tau",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "tau",
+     "HH"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Exp",
+    "JacobiTheta",
+    "WeierstrassSigma"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "jacobi_theta",
+    "weierstrass_elliptic"
+   ]
+  },
+  {
+   "id": "de9f42",
+   "formula": [
+    "Equal",
+    [
+     "WeierstrassSigma",
+     [
+      "Add",
+      "z",
+      "tau"
+     ],
+     "tau"
+    ],
+    [
+     "Negate",
+     [
+      "Multiply",
+      [
+       "Exp",
+       [
+        "Multiply",
+        [
+         "Multiply",
+         2,
+         [
+          "Add",
+          "z",
+          [
+           "Divide",
+           "tau",
+           2
+          ]
+         ]
+        ],
+        [
+         "WeierstrassZeta",
+         [
+          "Divide",
+          "tau",
+          2
+         ],
+         "tau"
+        ]
+       ]
+      ],
+      [
+       "WeierstrassSigma",
+       "z",
+       "tau"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "tau",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "tau",
+     "HH"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Exp",
+    "WeierstrassSigma",
+    "WeierstrassZeta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "weierstrass_elliptic"
+   ]
+  },
+  {
+   "id": "e677fb",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "WeierstrassZeta",
+        "z",
+        "tau"
+       ],
+       "z"
+      ],
+      1
+     ],
+     "z"
+    ],
+    [
+     "Negate",
+     [
+      "WeierstrassP",
+      "z",
+      "tau"
+     ]
+    ]
+   ],
+   "variables": [
+    "tau",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "tau",
+     "HH"
+    ],
+    [
+     "NotElement",
+     "z",
+     [
+      "Lattice",
+      1,
+      "tau"
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Derivative",
+    "WeierstrassP",
+    "WeierstrassZeta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "weierstrass_elliptic"
+   ]
+  },
+  {
+   "id": "ffcc0f",
+   "formula": [
+    "Equal",
+    [
+     "WeierstrassZeta",
+     [
+      "Add",
+      "z",
+      1
+     ],
+     "tau"
+    ],
+    [
+     "Add",
+     [
+      "WeierstrassZeta",
+      "z",
+      "tau"
+     ],
+     [
+      "WeierstrassZeta",
+      [
+       "Divide",
+       1,
+       2
+      ],
+      "tau"
+     ]
+    ]
+   ],
+   "variables": [
+    "tau",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "tau",
+     "HH"
+    ],
+    [
+     "NotElement",
+     "z",
+     [
+      "Lattice",
+      1,
+      "tau"
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "WeierstrassZeta"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "weierstrass_elliptic"
+   ]
+  }
+ ]
+}

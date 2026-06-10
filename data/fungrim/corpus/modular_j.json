@@ -1,0 +1,1191 @@
+{
+ "topic": "modular_j",
+ "title": "Modular j-invariant",
+ "source": "pygrim/formulas/modular_j.py",
+ "generator": "grim2mathjson 0.1.0",
+ "entries": [
+  {
+   "id": "1356e4",
+   "formula": [
+    "Equal",
+    [
+     "ModularJ",
+     [
+      "Multiply",
+      [
+       "Sqrt",
+       2
+      ],
+      "ImaginaryUnit"
+     ]
+    ],
+    [
+     "Power",
+     20,
+     3
+    ],
+    8000
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "ModularJ"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "modular_j"
+   ]
+  },
+  {
+   "id": "1cb24e",
+   "formula": [
+    "Equal",
+    [
+     "ModularJ",
+     [
+      "Multiply",
+      [
+       "Divide",
+       1,
+       2
+      ],
+      [
+       "Add",
+       1,
+       [
+        "Multiply",
+        [
+         "Sqrt",
+         163
+        ],
+        "ImaginaryUnit"
+       ]
+      ]
+     ]
+    ],
+    [
+     "Negate",
+     [
+      "Power",
+      640320,
+      3
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "ModularJ"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "modular_j"
+   ]
+  },
+  {
+   "id": "229c97",
+   "formula": [
+    "Equal",
+    [
+     "ModularJ",
+     [
+      "Multiply",
+      2,
+      "ImaginaryUnit"
+     ]
+    ],
+    [
+     "Power",
+     66,
+     3
+    ],
+    287496
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "ModularJ"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "modular_j"
+   ]
+  },
+  {
+   "id": "29c095",
+   "formula": [
+    "Equal",
+    [
+     "ModularJ",
+     [
+      "Multiply",
+      [
+       "Divide",
+       1,
+       2
+      ],
+      [
+       "Add",
+       1,
+       [
+        "Multiply",
+        [
+         "Sqrt",
+         7
+        ],
+        "ImaginaryUnit"
+       ]
+      ]
+     ]
+    ],
+    [
+     "Negate",
+     [
+      "Power",
+      15,
+      3
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "ModularJ"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "modular_j"
+   ]
+  },
+  {
+   "id": "3189b9",
+   "formula": [
+    "Equal",
+    [
+     "ModularJ",
+     [
+      "Multiply",
+      4,
+      "ImaginaryUnit"
+     ]
+    ],
+    [
+     "Multiply",
+     27,
+     [
+      "Power",
+      [
+       "Add",
+       724,
+       [
+        "Multiply",
+        513,
+        [
+         "Sqrt",
+         2
+        ]
+       ]
+      ],
+      3
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "ModularJ"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "modular_j"
+   ]
+  },
+  {
+   "id": "348b26",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "ModularJ",
+        "tau"
+       ],
+       "tau"
+      ],
+      1
+     ],
+     "tau"
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      [
+       "Negate",
+       [
+        "Multiply",
+        [
+         "Multiply",
+         2,
+         "Pi"
+        ],
+        "ImaginaryUnit"
+       ]
+      ],
+      [
+       "Divide",
+       [
+        "EisensteinE",
+        6,
+        "tau"
+       ],
+       [
+        "EisensteinE",
+        4,
+        "tau"
+       ]
+      ]
+     ],
+     [
+      "ModularJ",
+      "tau"
+     ]
+    ]
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "tau",
+     "HH"
+    ],
+    [
+     "NotEqual",
+     [
+      "EisensteinE",
+      4,
+      "tau"
+     ],
+     0
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Derivative",
+    "EisensteinE",
+    "ModularJ"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "modular_j"
+   ]
+  },
+  {
+   "id": "3ee358",
+   "formula": [
+    "Equal",
+    [
+     "ModularJ",
+     [
+      "Multiply",
+      [
+       "Divide",
+       1,
+       2
+      ],
+      [
+       "Add",
+       1,
+       [
+        "Multiply",
+        [
+         "Sqrt",
+         19
+        ],
+        "ImaginaryUnit"
+       ]
+      ]
+     ]
+    ],
+    [
+     "Negate",
+     [
+      "Power",
+      96,
+      3
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "ModularJ"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "modular_j"
+   ]
+  },
+  {
+   "id": "42a909",
+   "formula": [
+    "Equal",
+    [
+     "ModularJ",
+     [
+      "Negate",
+      [
+       "Divide",
+       1,
+       "tau"
+      ]
+     ]
+    ],
+    [
+     "ModularJ",
+     "tau"
+    ]
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": [
+    "Element",
+    "tau",
+    "HH"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ModularJ"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "modular_j"
+   ]
+  },
+  {
+   "id": "441301",
+   "formula": [
+    "Equal",
+    [
+     "Count",
+     [
+      "Solutions",
+      [
+       "Function",
+       [
+        "Equal",
+        [
+         "ModularJ",
+         "tau"
+        ],
+        "z"
+       ],
+       "tau"
+      ],
+      "ModularGroupFundamentalDomain"
+     ]
+    ],
+    1
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ModularGroupFundamentalDomain",
+    "ModularJ",
+    "Solutions"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "modular_j"
+   ]
+  },
+  {
+   "id": "5b108e",
+   "formula": [
+    "Equal",
+    [
+     "ModularJ",
+     [
+      "Multiply",
+      [
+       "Divide",
+       1,
+       2
+      ],
+      [
+       "Add",
+       1,
+       [
+        "Multiply",
+        [
+         "Sqrt",
+         43
+        ],
+        "ImaginaryUnit"
+       ]
+      ]
+     ]
+    ],
+    [
+     "Negate",
+     [
+      "Power",
+      960,
+      3
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "ModularJ"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "modular_j"
+   ]
+  },
+  {
+   "id": "664b4c",
+   "formula": [
+    "Equal",
+    [
+     "ModularJ",
+     "tau"
+    ],
+    [
+     "Power",
+     [
+      "Add",
+      [
+       "Power",
+       [
+        "Divide",
+        [
+         "DedekindEta",
+         "tau"
+        ],
+        [
+         "DedekindEta",
+         [
+          "Multiply",
+          2,
+          "tau"
+         ]
+        ]
+       ],
+       8
+      ],
+      [
+       "Multiply",
+       [
+        "Power",
+        2,
+        8
+       ],
+       [
+        "Power",
+        [
+         "Divide",
+         [
+          "DedekindEta",
+          [
+           "Multiply",
+           2,
+           "tau"
+          ]
+         ],
+         [
+          "DedekindEta",
+          "tau"
+         ]
+        ],
+        16
+       ]
+      ]
+     ],
+     3
+    ]
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": [
+    "Element",
+    "tau",
+    "HH"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "DedekindEta",
+    "ModularJ"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "modular_j"
+   ]
+  },
+  {
+   "id": "8be46c",
+   "formula": [
+    "Equal",
+    [
+     "ModularJ",
+     [
+      "Multiply",
+      3,
+      "ImaginaryUnit"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      64,
+      [
+       "Power",
+       [
+        "Add",
+        2,
+        [
+         "Sqrt",
+         3
+        ]
+       ],
+       2
+      ]
+     ],
+     [
+      "Power",
+      [
+       "Add",
+       21,
+       [
+        "Multiply",
+        20,
+        [
+         "Sqrt",
+         3
+        ]
+       ]
+      ],
+      3
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "ModularJ"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "modular_j"
+   ]
+  },
+  {
+   "id": "951017",
+   "formula": [
+    "Equal",
+    [
+     "ModularJ",
+     [
+      "Multiply",
+      [
+       "Divide",
+       1,
+       2
+      ],
+      [
+       "Add",
+       1,
+       [
+        "Multiply",
+        [
+         "Sqrt",
+         67
+        ],
+        "ImaginaryUnit"
+       ]
+      ]
+     ]
+    ],
+    [
+     "Negate",
+     [
+      "Power",
+      5280,
+      3
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "ModularJ"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "modular_j"
+   ]
+  },
+  {
+   "id": "9aa62c",
+   "formula": [
+    "Equal",
+    [
+     "ModularJ",
+     [
+      "Exp",
+      [
+       "Divide",
+       [
+        "Multiply",
+        "Pi",
+        "ImaginaryUnit"
+       ],
+       3
+      ]
+     ]
+    ],
+    0
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Exp",
+    "ModularJ"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "modular_j"
+   ]
+  },
+  {
+   "id": "a498dd",
+   "formula": [
+    "Equal",
+    [
+     "ModularJ",
+     [
+      "Multiply",
+      [
+       "Divide",
+       1,
+       2
+      ],
+      [
+       "Add",
+       1,
+       [
+        "Multiply",
+        [
+         "Sqrt",
+         11
+        ],
+        "ImaginaryUnit"
+       ]
+      ]
+     ]
+    ],
+    [
+     "Negate",
+     [
+      "Power",
+      32,
+      3
+     ]
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "ModularJ"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "modular_j"
+   ]
+  },
+  {
+   "id": "a997f2",
+   "formula": [
+    "Equal",
+    [
+     "ModularJ",
+     [
+      "Add",
+      "tau",
+      1
+     ]
+    ],
+    [
+     "ModularJ",
+     "tau"
+    ]
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": [
+    "Element",
+    "tau",
+    "HH"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ModularJ"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "modular_j"
+   ]
+  },
+  {
+   "id": "ad228f",
+   "formula": [
+    "Equal",
+    [
+     "ModularJ",
+     "ImaginaryUnit"
+    ],
+    1728
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "ModularJ"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "modular_j"
+   ]
+  },
+  {
+   "id": "cedcfc",
+   "formula": [
+    "Equal",
+    [
+     "ModularJ",
+     "tau"
+    ],
+    [
+     "Divide",
+     [
+      "Multiply",
+      32,
+      [
+       "Power",
+       [
+        "Add",
+        [
+         "Add",
+         [
+          "Power",
+          [
+           "JacobiTheta",
+           2,
+           0,
+           "tau"
+          ],
+          8
+         ],
+         [
+          "Power",
+          [
+           "JacobiTheta",
+           3,
+           0,
+           "tau"
+          ],
+          8
+         ]
+        ],
+        [
+         "Power",
+         [
+          "JacobiTheta",
+          4,
+          0,
+          "tau"
+         ],
+         8
+        ]
+       ],
+       3
+      ]
+     ],
+     [
+      "Power",
+      [
+       "Multiply",
+       [
+        "Multiply",
+        [
+         "JacobiTheta",
+         2,
+         0,
+         "tau"
+        ],
+        [
+         "JacobiTheta",
+         3,
+         0,
+         "tau"
+        ]
+       ],
+       [
+        "JacobiTheta",
+        4,
+        0,
+        "tau"
+       ]
+      ],
+      8
+     ]
+    ]
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": [
+    "Element",
+    "tau",
+    "HH"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "JacobiTheta",
+    "ModularJ"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "jacobi_theta",
+    "modular_j"
+   ]
+  },
+  {
+   "id": "d5f569",
+   "formula": [
+    "Equal",
+    [
+     "ModularJ",
+     [
+      "Divide",
+      [
+       "Add",
+       [
+        "Multiply",
+        "a",
+        "tau"
+       ],
+       "b"
+      ],
+      [
+       "Add",
+       [
+        "Multiply",
+        "c",
+        "tau"
+       ],
+       "d"
+      ]
+     ]
+    ],
+    [
+     "ModularJ",
+     "tau"
+    ]
+   ],
+   "variables": [
+    "a",
+    "b",
+    "c",
+    "d",
+    "tau"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "tau",
+     "HH"
+    ],
+    [
+     "Element",
+     [
+      "Matrix",
+      [
+       "List",
+       [
+        "List",
+        "a",
+        "b"
+       ],
+       [
+        "List",
+        "c",
+        "d"
+       ]
+      ]
+     ],
+     "SL2Z"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "ModularJ"
+   ],
+   "guardLevel": "undischargeable",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "modular_j"
+   ]
+  },
+  {
+   "id": "dc8251",
+   "formula": [
+    "Equal",
+    [
+     "ModularJ",
+     "tau"
+    ],
+    [
+     "Divide",
+     [
+      "Power",
+      [
+       "EisensteinE",
+       4,
+       "tau"
+      ],
+      3
+     ],
+     [
+      "Power",
+      [
+       "DedekindEta",
+       "tau"
+      ],
+      24
+     ]
+    ]
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": [
+    "Element",
+    "tau",
+    "HH"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "DedekindEta",
+    "EisensteinE",
+    "ModularJ"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "modular_j"
+   ]
+  },
+  {
+   "id": "dcc8b1",
+   "formula": [
+    "Equal",
+    [
+     "Set",
+     [
+      "ModularJ",
+      "tau"
+     ],
+     [
+      "Element",
+      "tau",
+      "ModularGroupFundamentalDomain"
+     ]
+    ],
+    "ComplexNumbers"
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "ModularGroupFundamentalDomain",
+    "ModularJ"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "modular_j"
+   ]
+  },
+  {
+   "id": "f0f53b",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "ModularJ",
+        "tau"
+       ],
+       "tau"
+      ],
+      1
+     ],
+     "tau"
+    ],
+    [
+     "Multiply",
+     [
+      "Negate",
+      [
+       "Multiply",
+       [
+        "Multiply",
+        2,
+        "Pi"
+       ],
+       "ImaginaryUnit"
+      ]
+     ],
+     [
+      "Divide",
+      [
+       "EisensteinE",
+       14,
+       "tau"
+      ],
+      [
+       "Power",
+       [
+        "DedekindEta",
+        "tau"
+       ],
+       24
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "tau"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "tau",
+     "HH"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "DedekindEta",
+    "Derivative",
+    "EisensteinE",
+    "ModularJ"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "modular_j"
+   ]
+  }
+ ]
+}

@@ -1,0 +1,94 @@
+{
+ "topic": "numbers",
+ "title": "Numbers and infinities",
+ "source": "pygrim/formulas/numbers.py",
+ "generator": "grim2mathjson 0.1.0",
+ "entries": [
+  {
+   "id": "24c179",
+   "formula": [
+    "Element",
+    [
+     "Sqrt",
+     2
+    ],
+    "AlgebraicNumbers"
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "numbers"
+   ]
+  },
+  {
+   "id": "4fd123",
+   "formula": [
+    "Subset",
+    "Integers",
+    "RationalNumbers",
+    "RealNumbers",
+    "ComplexNumbers"
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "numbers"
+   ]
+  },
+  {
+   "id": "81c491",
+   "formula": [
+    "NotElement",
+    [
+     "Sqrt",
+     2
+    ],
+    "RationalNumbers"
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "numbers"
+   ]
+  },
+  {
+   "id": "e5a04c",
+   "formula": [
+    "Subset",
+    "Integers",
+    "RationalNumbers",
+    "AlgebraicNumbers",
+    "ComplexNumbers"
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "numbers"
+   ]
+  }
+ ]
+}

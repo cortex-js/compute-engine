@@ -1,0 +1,1847 @@
+{
+ "topic": "exp",
+ "title": "Exponential function",
+ "source": "pygrim/formulas/exp.py",
+ "generator": "grim2mathjson 0.1.0",
+ "entries": [
+  {
+   "id": "1568e1",
+   "formula": [
+    "Equal",
+    [
+     "Exp",
+     "z"
+    ],
+    [
+     "Add",
+     [
+      "Cosh",
+      "z"
+     ],
+     [
+      "Sinh",
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Cosh",
+    "Exp",
+    "Sinh"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "exp"
+   ]
+  },
+  {
+   "id": "1635f5",
+   "formula": [
+    "Equal",
+    [
+     "Exp",
+     "z"
+    ],
+    [
+     "Sum",
+     [
+      "Divide",
+      [
+       "Power",
+       "z",
+       "k"
+      ],
+      [
+       "Factorial",
+       "k"
+      ]
+     ],
+     [
+      "Limits",
+      "k",
+      0,
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Exp",
+    "Factorial",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "exp",
+    "factorials"
+   ]
+  },
+  {
+   "id": "1b3014",
+   "formula": [
+    "Equal",
+    [
+     "Abs",
+     [
+      "Exp",
+      "z"
+     ]
+    ],
+    [
+     "Exp",
+     [
+      "Real",
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Exp",
+    "Real"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "exp"
+   ]
+  },
+  {
+   "id": "1fa6b7",
+   "formula": [
+    "Equal",
+    [
+     "Exp",
+     [
+      "Add",
+      "z",
+      [
+       "Multiply",
+       [
+        "Multiply",
+        [
+         "Multiply",
+         2,
+         "n"
+        ],
+        "Pi"
+       ],
+       "ImaginaryUnit"
+      ]
+     ]
+    ],
+    [
+     "Exp",
+     "z"
+    ]
+   ],
+   "variables": [
+    "n",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "n",
+     "Integers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Exp"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "exp"
+   ]
+  },
+  {
+   "id": "27ca8d",
+   "formula": [
+    "Equal",
+    [
+     "Exp",
+     0
+    ],
+    1
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Exp"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "exp"
+   ]
+  },
+  {
+   "id": "296627",
+   "formula": [
+    "Equal",
+    [
+     "Exp",
+     [
+      "Ln",
+      "z"
+     ]
+    ],
+    "z"
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Exp",
+    "Ln"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "exp"
+   ]
+  },
+  {
+   "id": "2ea614",
+   "formula": [
+    "Implies",
+    [
+     "Element",
+     "A",
+     [
+      "Matrices",
+      "ComplexNumbers",
+      "n",
+      "n"
+     ]
+    ],
+    [
+     "Element",
+     [
+      "Exp",
+      "A"
+     ],
+     [
+      "GeneralLinearGroup",
+      "n",
+      "ComplexNumbers"
+     ]
+    ]
+   ],
+   "variables": [
+    "A",
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "Exp",
+    "GeneralLinearGroup",
+    "Matrices"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "exp"
+   ]
+  },
+  {
+   "id": "2f4f74",
+   "formula": [
+    "Equal",
+    [
+     "Exp",
+     [
+      "Negate",
+      "z"
+     ]
+    ],
+    [
+     "Divide",
+     1,
+     [
+      "Exp",
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Exp"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "exp"
+   ]
+  },
+  {
+   "id": "2f57ad",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "Exp",
+      "z"
+     ]
+    ],
+    [
+     "Exp",
+     [
+      "Abs",
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Exp"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "exp"
+   ]
+  },
+  {
+   "id": "3ac8a5",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "Subtract",
+      [
+       "Exp",
+       [
+        "Add",
+        "x",
+        "a"
+       ]
+      ],
+      [
+       "Exp",
+       "x"
+      ]
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Exp",
+      "x"
+     ],
+     [
+      "Subtract",
+      [
+       "Exp",
+       [
+        "Abs",
+        "a"
+       ]
+      ],
+      1
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "x"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     "RealNumbers"
+    ],
+    [
+     "Element",
+     "a",
+     "RealNumbers"
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Exp"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "exp"
+   ]
+  },
+  {
+   "id": "3c4480",
+   "formula": [
+    "LessEqual",
+    [
+     "Abs",
+     [
+      "Subtract",
+      [
+       "Exp",
+       "z"
+      ],
+      [
+       "Sum",
+       [
+        "Divide",
+        [
+         "Power",
+         "z",
+         "k"
+        ],
+        [
+         "Factorial",
+         "k"
+        ]
+       ],
+       [
+        "Limits",
+        "k",
+        0,
+        [
+         "Subtract",
+         "N_var",
+         1
+        ]
+       ]
+      ]
+     ]
+    ],
+    [
+     "Divide",
+     [
+      "Power",
+      [
+       "Abs",
+       "z"
+      ],
+      "N_var"
+     ],
+     [
+      "Multiply",
+      [
+       "Factorial",
+       "N_var"
+      ],
+      [
+       "Subtract",
+       1,
+       [
+        "Divide",
+        [
+         "Abs",
+         "z"
+        ],
+        "N_var"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "N_var",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "N_var",
+     "Integers"
+    ],
+    [
+     "Greater",
+     "N_var",
+     [
+      "Abs",
+      "z"
+     ]
+    ]
+   ],
+   "class": "inequality",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Exp",
+    "Factorial",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "exp"
+   ]
+  },
+  {
+   "id": "424db5",
+   "formula": [
+    "Implies",
+    [
+     "Element",
+     "z",
+     [
+      "Set",
+      "NegativeInfinity"
+     ]
+    ],
+    [
+     "Element",
+     [
+      "Exp",
+      "z"
+     ],
+     [
+      "Set",
+      0
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "Exp"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "exp"
+   ]
+  },
+  {
+   "id": "4491b8",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "Exp",
+        "z"
+       ],
+       "z"
+      ],
+      "n"
+     ],
+     "z"
+    ],
+    [
+     "Exp",
+     "z"
+    ]
+   ],
+   "variables": [
+    "n",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Derivative",
+    "Exp"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "exp"
+   ]
+  },
+  {
+   "id": "52d827",
+   "formula": [
+    "Equal",
+    [
+     "Exp",
+     [
+      "Conjugate",
+      "z"
+     ]
+    ],
+    [
+     "Conjugate",
+     [
+      "Exp",
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Conjugate",
+    "Exp"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "exp"
+   ]
+  },
+  {
+   "id": "54aaf1",
+   "formula": [
+    "Equal",
+    [
+     "Exp",
+     [
+      "Multiply",
+      "Pi",
+      "ImaginaryUnit"
+     ]
+    ],
+    -1
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Exp"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "exp"
+   ]
+  },
+  {
+   "id": "66f4c8",
+   "formula": [
+    "Implies",
+    [
+     "Element",
+     "z",
+     [
+      "Set",
+      "PositiveInfinity"
+     ]
+    ],
+    [
+     "Element",
+     [
+      "Exp",
+      "z"
+     ],
+     [
+      "Set",
+      "PositiveInfinity"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "Exp"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "exp"
+   ]
+  },
+  {
+   "id": "71a0b8",
+   "formula": [
+    "ForAll",
+    [
+     "Element",
+     "alpha",
+     [
+      "SetMinus",
+      "RationalNumbers",
+      [
+       "Set",
+       0
+      ]
+     ]
+    ],
+    [
+     "NotElement",
+     [
+      "Exp",
+      "alpha"
+     ],
+     "RationalNumbers"
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "Exp"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "exp"
+   ]
+  },
+  {
+   "id": "77d6bf",
+   "formula": [
+    "Equal",
+    [
+     "Exp",
+     [
+      "Add",
+      "a",
+      [
+       "Multiply",
+       "b",
+       "ImaginaryUnit"
+      ]
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Exp",
+      "a"
+     ],
+     [
+      "Add",
+      [
+       "Cos",
+       "b"
+      ],
+      [
+       "Multiply",
+       [
+        "Sin",
+        "b"
+       ],
+       "ImaginaryUnit"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "b",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Cos",
+    "Exp",
+    "Sin"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "exp"
+   ]
+  },
+  {
+   "id": "812707",
+   "formula": [
+    "Equal",
+    [
+     "Exp",
+     [
+      "Add",
+      "a",
+      "b"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Exp",
+      "a"
+     ],
+     [
+      "Exp",
+      "b"
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "b",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Exp"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "exp"
+   ]
+  },
+  {
+   "id": "819b5f",
+   "formula": [
+    "Implies",
+    [
+     "Element",
+     "z",
+     "RealNumbers"
+    ],
+    [
+     "Element",
+     [
+      "Exp",
+      "z"
+     ],
+     [
+      "Interval",
+      [
+       "Open",
+       0
+      ],
+      [
+       "Open",
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "Exp"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "exp"
+   ]
+  },
+  {
+   "id": "8f9143",
+   "formula": [
+    "NotElement",
+    "ExponentialE",
+    "AlgebraicNumbers"
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "exp"
+   ]
+  },
+  {
+   "id": "935b2f",
+   "formula": [
+    "Equal",
+    [
+     "Integrate",
+     [
+      "Exp",
+      "z"
+     ],
+     [
+      "Limits",
+      "z",
+      "a",
+      "b"
+     ]
+    ],
+    [
+     "Subtract",
+     [
+      "Exp",
+      "b"
+     ],
+     [
+      "Exp",
+      "a"
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "b",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Exp",
+    "Integrate"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "exp"
+   ]
+  },
+  {
+   "id": "96af56",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "Exp",
+        "z"
+       ],
+       "z"
+      ],
+      1
+     ],
+     "z"
+    ],
+    [
+     "Exp",
+     "z"
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Derivative",
+    "Exp"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "exp"
+   ]
+  },
+  {
+   "id": "97ba8d",
+   "formula": [
+    "Equal",
+    [
+     "Exp",
+     [
+      "Add",
+      "z",
+      [
+       "Multiply",
+       [
+        "Multiply",
+        "n",
+        "Pi"
+       ],
+       "ImaginaryUnit"
+      ]
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Power",
+      -1,
+      "n"
+     ],
+     [
+      "Exp",
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "n",
+     "Integers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Exp"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "exp"
+   ]
+  },
+  {
+   "id": "987e3c",
+   "formula": [
+    "Implies",
+    [
+     "Element",
+     [
+      "Imaginary",
+      "z"
+     ],
+     [
+      "Interval",
+      [
+       "Open",
+       [
+        "Negate",
+        "Pi"
+       ]
+      ],
+      "Pi"
+     ]
+    ],
+    [
+     "Equal",
+     [
+      "Ln",
+      [
+       "Exp",
+       "z"
+      ]
+     ],
+     "z"
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "Exp",
+    "Imaginary",
+    "Ln"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "exp"
+   ]
+  },
+  {
+   "id": "9a944c",
+   "formula": [
+    "Equal",
+    [
+     "Exp",
+     1
+    ],
+    "ExponentialE"
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Exp"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "exp"
+   ]
+  },
+  {
+   "id": "9e388b",
+   "formula": [
+    "Implies",
+    [
+     "Element",
+     "A",
+     [
+      "Matrices",
+      "RealNumbers",
+      "n",
+      "n"
+     ]
+    ],
+    [
+     "Element",
+     [
+      "Exp",
+      "A"
+     ],
+     [
+      "GeneralLinearGroup",
+      "n",
+      "RealNumbers"
+     ]
+    ]
+   ],
+   "variables": [
+    "A",
+    "n"
+   ],
+   "assumptions": [
+    "Element",
+    "n",
+    "NonNegativeIntegers"
+   ],
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "Exp",
+    "GeneralLinearGroup",
+    "Matrices"
+   ],
+   "guardLevel": "real-simple",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "exp"
+   ]
+  },
+  {
+   "id": "a0d93c",
+   "formula": [
+    "Equal",
+    [
+     "Argument",
+     [
+      "Exp",
+      "z"
+     ]
+    ],
+    [
+     "Imaginary",
+     "z"
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     [
+      "Imaginary",
+      "z"
+     ],
+     [
+      "Interval",
+      [
+       "Open",
+       [
+        "Negate",
+        "Pi"
+       ]
+      ],
+      "Pi"
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Argument",
+    "Exp",
+    "Imaginary"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "exp"
+   ]
+  },
+  {
+   "id": "a90f35",
+   "formula": [
+    "Equal",
+    [
+     "Exp",
+     [
+      "Divide",
+      [
+       "Multiply",
+       "Pi",
+       "ImaginaryUnit"
+      ],
+      2
+     ]
+    ],
+    "ImaginaryUnit"
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [
+    "Exp"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "exp"
+   ]
+  },
+  {
+   "id": "b7d62b",
+   "formula": [
+    "Equal",
+    [
+     "Real",
+     [
+      "Exp",
+      "z"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Exp",
+      [
+       "Real",
+       "z"
+      ]
+     ],
+     [
+      "Cos",
+      [
+       "Imaginary",
+       "z"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Cos",
+    "Exp",
+    "Imaginary",
+    "Real"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "exp"
+   ]
+  },
+  {
+   "id": "bad502",
+   "formula": [
+    "Equal",
+    [
+     "Exp",
+     [
+      "Add",
+      "c",
+      "z"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Exp",
+      "c"
+     ],
+     [
+      "Sum",
+      [
+       "Divide",
+       [
+        "Power",
+        "z",
+        "k"
+       ],
+       [
+        "Factorial",
+        "k"
+       ]
+      ],
+      [
+       "Limits",
+       "k",
+       0,
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "c",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "c",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "representation",
+   "subclass": "series",
+   "heads": [
+    "Exp",
+    "Factorial",
+    "Sum"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "exp"
+   ]
+  },
+  {
+   "id": "bb7d22",
+   "formula": [
+    "NotElement",
+    "ExponentialE",
+    "RationalNumbers"
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "exp"
+   ]
+  },
+  {
+   "id": "be1092",
+   "formula": [
+    "Implies",
+    [
+     "Element",
+     "z",
+     [
+      "Set",
+      0
+     ]
+    ],
+    [
+     "Element",
+     [
+      "Exp",
+      "z"
+     ],
+     [
+      "Set",
+      1
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "Exp"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "exp"
+   ]
+  },
+  {
+   "id": "ca8b0a",
+   "formula": [
+    "Implies",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     [
+      "Exp",
+      "z"
+     ],
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      [
+       "Set",
+       0
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "Exp"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "exp"
+   ]
+  },
+  {
+   "id": "caf706",
+   "formula": [
+    "Equal",
+    [
+     "Sign",
+     [
+      "Exp",
+      "z"
+     ]
+    ],
+    [
+     "Exp",
+     [
+      "Multiply",
+      [
+       "Imaginary",
+       "z"
+      ],
+      "ImaginaryUnit"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Exp",
+    "Imaginary",
+    "Sign"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "exp"
+   ]
+  },
+  {
+   "id": "e103e7",
+   "formula": [
+    "Equal",
+    [
+     "Exp",
+     [
+      "Multiply",
+      "ImaginaryUnit",
+      "z"
+     ]
+    ],
+    [
+     "Add",
+     [
+      "Cos",
+      "z"
+     ],
+     [
+      "Multiply",
+      "ImaginaryUnit",
+      [
+       "Sin",
+       "z"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Cos",
+    "Exp",
+    "Sin"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "exp"
+   ]
+  },
+  {
+   "id": "e2b379",
+   "formula": [
+    "ForAll",
+    [
+     "Element",
+     "alpha",
+     [
+      "SetMinus",
+      "AlgebraicNumbers",
+      [
+       "Set",
+       0
+      ]
+     ]
+    ],
+    [
+     "NotElement",
+     [
+      "Exp",
+      "alpha"
+     ],
+     "AlgebraicNumbers"
+    ]
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "logical",
+   "subclass": null,
+   "heads": [
+    "Exp"
+   ],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "exp"
+   ]
+  },
+  {
+   "id": "e2fac7",
+   "formula": [
+    "Equal",
+    [
+     "Imaginary",
+     [
+      "Exp",
+      "z"
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Exp",
+      [
+       "Real",
+       "z"
+      ]
+     ],
+     [
+      "Sin",
+      [
+       "Imaginary",
+       "z"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Exp",
+    "Imaginary",
+    "Real",
+    "Sin"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "exp"
+   ]
+  },
+  {
+   "id": "e51ec3",
+   "formula": [
+    "Equal",
+    [
+     "Power",
+     [
+      "Exp",
+      "z"
+     ],
+     "n"
+    ],
+    [
+     "Exp",
+     [
+      "Multiply",
+      "n",
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "n",
+     "Integers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Exp"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "exp"
+   ]
+  }
+ ]
+}

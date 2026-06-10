@@ -1,0 +1,1179 @@
+{
+ "topic": "powers",
+ "title": "Powers",
+ "source": "pygrim/formulas/powers.py",
+ "generator": "grim2mathjson 0.1.0",
+ "entries": [
+  {
+   "id": "0aac97",
+   "formula": [
+    "Equal",
+    [
+     "Power",
+     [
+      "Add",
+      "a",
+      [
+       "Multiply",
+       "b",
+       "ImaginaryUnit"
+      ]
+     ],
+     [
+      "Add",
+      "c",
+      [
+       "Multiply",
+       "d",
+       "ImaginaryUnit"
+      ]
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      [
+       "Power",
+       [
+        "Abs",
+        [
+         "Add",
+         "a",
+         [
+          "Multiply",
+          "b",
+          "ImaginaryUnit"
+         ]
+        ]
+       ],
+       "c"
+      ],
+      [
+       "Exp",
+       [
+        "Negate",
+        [
+         "Multiply",
+         "d",
+         [
+          "Argument",
+          [
+           "Add",
+           "a",
+           [
+            "Multiply",
+            "b",
+            "ImaginaryUnit"
+           ]
+          ]
+         ]
+        ]
+       ]
+      ]
+     ],
+     [
+      "Add",
+      [
+       "Cos",
+       [
+        "Add",
+        [
+         "Multiply",
+         "c",
+         [
+          "Argument",
+          [
+           "Add",
+           "a",
+           [
+            "Multiply",
+            "b",
+            "ImaginaryUnit"
+           ]
+          ]
+         ]
+        ],
+        [
+         "Multiply",
+         "d",
+         [
+          "Ln",
+          [
+           "Abs",
+           [
+            "Add",
+            "a",
+            [
+             "Multiply",
+             "b",
+             "ImaginaryUnit"
+            ]
+           ]
+          ]
+         ]
+        ]
+       ]
+      ],
+      [
+       "Multiply",
+       "ImaginaryUnit",
+       [
+        "Sin",
+        [
+         "Add",
+         [
+          "Multiply",
+          "c",
+          [
+           "Argument",
+           [
+            "Add",
+            "a",
+            [
+             "Multiply",
+             "b",
+             "ImaginaryUnit"
+            ]
+           ]
+          ]
+         ],
+         [
+          "Multiply",
+          "d",
+          [
+           "Ln",
+           [
+            "Abs",
+            [
+             "Add",
+             "a",
+             [
+              "Multiply",
+              "b",
+              "ImaginaryUnit"
+             ]
+            ]
+           ]
+          ]
+         ]
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b",
+    "c",
+    "d"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "RealNumbers"
+    ],
+    [
+     "Element",
+     "b",
+     "RealNumbers"
+    ],
+    [
+     "Element",
+     "c",
+     "RealNumbers"
+    ],
+    [
+     "Element",
+     "d",
+     "RealNumbers"
+    ],
+    [
+     "NotEqual",
+     [
+      "Add",
+      "a",
+      [
+       "Multiply",
+       "b",
+       "ImaginaryUnit"
+      ]
+     ],
+     0
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Argument",
+    "Cos",
+    "Exp",
+    "Ln",
+    "Sin"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "powers"
+   ]
+  },
+  {
+   "id": "18873d",
+   "formula": [
+    "Equal",
+    [
+     "Imaginary",
+     [
+      "Power",
+      [
+       "Add",
+       "a",
+       [
+        "Multiply",
+        "b",
+        "ImaginaryUnit"
+       ]
+      ],
+      [
+       "Add",
+       "c",
+       [
+        "Multiply",
+        "d",
+        "ImaginaryUnit"
+       ]
+      ]
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      [
+       "Power",
+       [
+        "Abs",
+        [
+         "Add",
+         "a",
+         [
+          "Multiply",
+          "b",
+          "ImaginaryUnit"
+         ]
+        ]
+       ],
+       "c"
+      ],
+      [
+       "Exp",
+       [
+        "Negate",
+        [
+         "Multiply",
+         "d",
+         [
+          "Argument",
+          [
+           "Add",
+           "a",
+           [
+            "Multiply",
+            "b",
+            "ImaginaryUnit"
+           ]
+          ]
+         ]
+        ]
+       ]
+      ]
+     ],
+     [
+      "Sin",
+      [
+       "Add",
+       [
+        "Multiply",
+        "c",
+        [
+         "Argument",
+         [
+          "Add",
+          "a",
+          [
+           "Multiply",
+           "b",
+           "ImaginaryUnit"
+          ]
+         ]
+        ]
+       ],
+       [
+        "Multiply",
+        "d",
+        [
+         "Ln",
+         [
+          "Abs",
+          [
+           "Add",
+           "a",
+           [
+            "Multiply",
+            "b",
+            "ImaginaryUnit"
+           ]
+          ]
+         ]
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b",
+    "c",
+    "d"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "RealNumbers"
+    ],
+    [
+     "Element",
+     "b",
+     "RealNumbers"
+    ],
+    [
+     "Element",
+     "c",
+     "RealNumbers"
+    ],
+    [
+     "Element",
+     "d",
+     "RealNumbers"
+    ],
+    [
+     "NotEqual",
+     [
+      "Add",
+      "a",
+      [
+       "Multiply",
+       "b",
+       "ImaginaryUnit"
+      ]
+     ],
+     0
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Argument",
+    "Exp",
+    "Imaginary",
+    "Ln",
+    "Sin"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "powers"
+   ]
+  },
+  {
+   "id": "2090c3",
+   "formula": [
+    "Equal",
+    [
+     "Power",
+     [
+      "Multiply",
+      "x",
+      "y"
+     ],
+     "a"
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      [
+       "Power",
+       "x",
+       "a"
+      ],
+      [
+       "Power",
+       "y",
+       "a"
+      ]
+     ],
+     [
+      "Exp",
+      [
+       "Multiply",
+       [
+        "Multiply",
+        [
+         "Multiply",
+         [
+          "Multiply",
+          2,
+          "Pi"
+         ],
+         "ImaginaryUnit"
+        ],
+        "a"
+       ],
+       [
+        "Floor",
+        [
+         "Divide",
+         [
+          "Subtract",
+          [
+           "Subtract",
+           "Pi",
+           [
+            "Argument",
+            "x"
+           ]
+          ],
+          [
+           "Argument",
+           "y"
+          ]
+         ],
+         [
+          "Multiply",
+          2,
+          "Pi"
+         ]
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "x",
+    "y"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "x",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      [
+       "Set",
+       0
+      ]
+     ]
+    ],
+    [
+     "Element",
+     "y",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      [
+       "Set",
+       0
+      ]
+     ]
+    ],
+    [
+     "Element",
+     "a",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Argument",
+    "Exp",
+    "Floor"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "powers"
+   ]
+  },
+  {
+   "id": "2e0d99",
+   "formula": [
+    "Equal",
+    [
+     "Power",
+     "z",
+     [
+      "Negate",
+      [
+       "Divide",
+       1,
+       2
+      ]
+     ]
+    ],
+    [
+     "Divide",
+     1,
+     [
+      "Sqrt",
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    [
+     "SetMinus",
+     "ComplexNumbers",
+     [
+      "Set",
+      0
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "powers"
+   ]
+  },
+  {
+   "id": "310f36",
+   "formula": [
+    "Equal",
+    [
+     "Power",
+     "z",
+     0
+    ],
+    1
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "powers"
+   ]
+  },
+  {
+   "id": "4d6416",
+   "formula": [
+    "Equal",
+    [
+     "Power",
+     "a",
+     "b"
+    ],
+    [
+     "Exp",
+     [
+      "Multiply",
+      "b",
+      [
+       "Ln",
+       "a"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     [
+      "SetMinus",
+      "ComplexNumbers",
+      [
+       "Set",
+       0
+      ]
+     ]
+    ],
+    [
+     "Element",
+     "b",
+     "ComplexNumbers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Exp",
+    "Ln"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "powers"
+   ]
+  },
+  {
+   "id": "634687",
+   "formula": [
+    "Equal",
+    [
+     "Power",
+     "z",
+     [
+      "Divide",
+      1,
+      2
+     ]
+    ],
+    [
+     "Sqrt",
+     "z"
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "powers"
+   ]
+  },
+  {
+   "id": "6c2b31",
+   "formula": [
+    "Multiply",
+    [
+     "Equal",
+     [
+      "Power",
+      "z",
+      [
+       "Add",
+       "n",
+       1
+      ]
+     ],
+     [
+      "Power",
+      "z",
+      "n"
+     ]
+    ],
+    "z"
+   ],
+   "variables": [
+    "n",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "n",
+     "NonNegativeIntegers"
+    ]
+   ],
+   "assumptionAlternatives": [
+    [
+     "And",
+     [
+      "Element",
+      "z",
+      "R"
+     ],
+     [
+      "Element",
+      "R",
+      "Rings"
+     ],
+     [
+      "Element",
+      "n",
+      "NonNegativeIntegers"
+     ]
+    ]
+   ],
+   "class": "other",
+   "subclass": null,
+   "heads": [],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "powers"
+   ]
+  },
+  {
+   "id": "a249f6",
+   "formula": [
+    "Equal",
+    [
+     "Power",
+     "z",
+     1
+    ],
+    "z"
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "powers"
+   ]
+  },
+  {
+   "id": "bc4d0a",
+   "formula": [
+    "Equal",
+    [
+     "Abs",
+     [
+      "Power",
+      [
+       "Add",
+       "a",
+       [
+        "Multiply",
+        "b",
+        "ImaginaryUnit"
+       ]
+      ],
+      [
+       "Add",
+       "c",
+       [
+        "Multiply",
+        "d",
+        "ImaginaryUnit"
+       ]
+      ]
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Power",
+      [
+       "Abs",
+       [
+        "Add",
+        "a",
+        [
+         "Multiply",
+         "b",
+         "ImaginaryUnit"
+        ]
+       ]
+      ],
+      "c"
+     ],
+     [
+      "Exp",
+      [
+       "Negate",
+       [
+        "Multiply",
+        "d",
+        [
+         "Argument",
+         [
+          "Add",
+          "a",
+          [
+           "Multiply",
+           "b",
+           "ImaginaryUnit"
+          ]
+         ]
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b",
+    "c",
+    "d"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "RealNumbers"
+    ],
+    [
+     "Element",
+     "b",
+     "RealNumbers"
+    ],
+    [
+     "Element",
+     "c",
+     "RealNumbers"
+    ],
+    [
+     "Element",
+     "d",
+     "RealNumbers"
+    ],
+    [
+     "NotEqual",
+     [
+      "Add",
+      "a",
+      [
+       "Multiply",
+       "b",
+       "ImaginaryUnit"
+      ]
+     ],
+     0
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Argument",
+    "Exp"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "powers"
+   ]
+  },
+  {
+   "id": "c53d94",
+   "formula": [
+    "Equal",
+    [
+     "Power",
+     "z",
+     -1
+    ],
+    [
+     "Divide",
+     1,
+     "z"
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "assumptionAlternatives": [
+    [
+     "And",
+     [
+      "Element",
+      "z",
+      [
+       "SetMinus",
+       "K",
+       [
+        "Set",
+        0
+       ]
+      ]
+     ],
+     [
+      "Element",
+      "K",
+      "Fields"
+     ],
+     [
+      "SubsetEqual",
+      "RationalNumbers",
+      "K"
+     ]
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "powers"
+   ]
+  },
+  {
+   "id": "caf8cf",
+   "formula": [
+    "Equal",
+    [
+     "Real",
+     [
+      "Power",
+      [
+       "Add",
+       "a",
+       [
+        "Multiply",
+        "b",
+        "ImaginaryUnit"
+       ]
+      ],
+      [
+       "Add",
+       "c",
+       [
+        "Multiply",
+        "d",
+        "ImaginaryUnit"
+       ]
+      ]
+     ]
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      [
+       "Power",
+       [
+        "Abs",
+        [
+         "Add",
+         "a",
+         [
+          "Multiply",
+          "b",
+          "ImaginaryUnit"
+         ]
+        ]
+       ],
+       "c"
+      ],
+      [
+       "Exp",
+       [
+        "Negate",
+        [
+         "Multiply",
+         "d",
+         [
+          "Argument",
+          [
+           "Add",
+           "a",
+           [
+            "Multiply",
+            "b",
+            "ImaginaryUnit"
+           ]
+          ]
+         ]
+        ]
+       ]
+      ]
+     ],
+     [
+      "Cos",
+      [
+       "Add",
+       [
+        "Multiply",
+        "c",
+        [
+         "Argument",
+         [
+          "Add",
+          "a",
+          [
+           "Multiply",
+           "b",
+           "ImaginaryUnit"
+          ]
+         ]
+        ]
+       ],
+       [
+        "Multiply",
+        "d",
+        [
+         "Ln",
+         [
+          "Abs",
+          [
+           "Add",
+           "a",
+           [
+            "Multiply",
+            "b",
+            "ImaginaryUnit"
+           ]
+          ]
+         ]
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "a",
+    "b",
+    "c",
+    "d"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "a",
+     "RealNumbers"
+    ],
+    [
+     "Element",
+     "b",
+     "RealNumbers"
+    ],
+    [
+     "Element",
+     "c",
+     "RealNumbers"
+    ],
+    [
+     "Element",
+     "d",
+     "RealNumbers"
+    ],
+    [
+     "NotEqual",
+     [
+      "Add",
+      "a",
+      [
+       "Multiply",
+       "b",
+       "ImaginaryUnit"
+      ]
+     ],
+     0
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Abs",
+    "Argument",
+    "Cos",
+    "Exp",
+    "Ln",
+    "Real"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "powers"
+   ]
+  },
+  {
+   "id": "d316bc",
+   "formula": [
+    "Equal",
+    [
+     "Power",
+     0,
+     0
+    ],
+    1
+   ],
+   "variables": [],
+   "assumptions": null,
+   "class": "specific-value",
+   "subclass": null,
+   "heads": [],
+   "guardLevel": "none",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "powers"
+   ]
+  }
+ ]
+}

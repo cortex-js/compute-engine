@@ -1,0 +1,916 @@
+{
+ "topic": "error_functions",
+ "title": "Error functions",
+ "source": "pygrim/formulas/error_functions.py",
+ "generator": "grim2mathjson 0.1.0",
+ "entries": [
+  {
+   "id": "01440f",
+   "formula": [
+    "Equal",
+    [
+     "Erfi",
+     "z"
+    ],
+    [
+     "Negate",
+     [
+      "Multiply",
+      "ImaginaryUnit",
+      [
+       "Erf",
+       [
+        "Multiply",
+        "ImaginaryUnit",
+        "z"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Erf",
+    "Erfi"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "error_functions"
+   ]
+  },
+  {
+   "id": "2aaba8",
+   "formula": [
+    "Equal",
+    [
+     "Erf",
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      2,
+      [
+       "Sqrt",
+       "Pi"
+      ]
+     ],
+     [
+      "Integrate",
+      [
+       "Exp",
+       [
+        "Negate",
+        [
+         "Power",
+         "t",
+         2
+        ]
+       ]
+      ],
+      [
+       "Limits",
+       "t",
+       0,
+       "z"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Erf",
+    "Exp",
+    "Integrate"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "error_functions"
+   ]
+  },
+  {
+   "id": "36ef64",
+   "formula": [
+    "Equal",
+    [
+     "Erfc",
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      2,
+      [
+       "Sqrt",
+       "Pi"
+      ]
+     ],
+     [
+      "Integrate",
+      [
+       "Exp",
+       [
+        "Negate",
+        [
+         "Power",
+         "t",
+         2
+        ]
+       ]
+      ],
+      [
+       "Limits",
+       "t",
+       "z",
+       "PositiveInfinity"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Erfc",
+    "Exp",
+    "Integrate"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "error_functions"
+   ]
+  },
+  {
+   "id": "603a49",
+   "formula": [
+    "Equal",
+    [
+     "Erfi",
+     [
+      "Negate",
+      "z"
+     ]
+    ],
+    [
+     "Negate",
+     [
+      "Erfi",
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Erfi"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "error_functions"
+   ]
+  },
+  {
+   "id": "622772",
+   "formula": [
+    "Equal",
+    [
+     "Erfi",
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      2,
+      [
+       "Sqrt",
+       "Pi"
+      ]
+     ],
+     [
+      "Integrate",
+      [
+       "Exp",
+       [
+        "Power",
+        "t",
+        2
+       ]
+      ],
+      [
+       "Limits",
+       "t",
+       0,
+       "z"
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "representation",
+   "subclass": "integral",
+   "heads": [
+    "Erfi",
+    "Exp",
+    "Integrate"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "error_functions"
+   ]
+  },
+  {
+   "id": "7f355d",
+   "formula": [
+    "Equal",
+    [
+     "Add",
+     [
+      "Erf",
+      "z"
+     ],
+     [
+      "Erfc",
+      "z"
+     ]
+    ],
+    1
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Erf",
+    "Erfc"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "error_functions"
+   ]
+  },
+  {
+   "id": "94db18",
+   "formula": [
+    "Equal",
+    [
+     "Erf",
+     [
+      "Negate",
+      "z"
+     ]
+    ],
+    [
+     "Negate",
+     [
+      "Erf",
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Erf"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "error_functions"
+   ]
+  },
+  {
+   "id": "98688d",
+   "formula": [
+    "Equal",
+    [
+     "Erf",
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      [
+       "Multiply",
+       [
+        "Multiply",
+        2,
+        "z"
+       ],
+       [
+        "Exp",
+        [
+         "Negate",
+         [
+          "Power",
+          "z",
+          2
+         ]
+        ]
+       ]
+      ],
+      [
+       "Sqrt",
+       "Pi"
+      ]
+     ],
+     [
+      "Hypergeometric1F1",
+      1,
+      [
+       "Divide",
+       3,
+       2
+      ],
+      [
+       "Power",
+       "z",
+       2
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Erf",
+    "Exp",
+    "Hypergeometric1F1"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "error_functions"
+   ]
+  },
+  {
+   "id": "abadc7",
+   "formula": [
+    "Equal",
+    [
+     "Erf",
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      [
+       "Multiply",
+       2,
+       "z"
+      ],
+      [
+       "Sqrt",
+       "Pi"
+      ]
+     ],
+     [
+      "Hypergeometric1F1",
+      [
+       "Divide",
+       1,
+       2
+      ],
+      [
+       "Divide",
+       3,
+       2
+      ],
+      [
+       "Negate",
+       [
+        "Power",
+        "z",
+        2
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Erf",
+    "Hypergeometric1F1"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "error_functions"
+   ]
+  },
+  {
+   "id": "ae3110",
+   "formula": [
+    "Equal",
+    [
+     "Erfc",
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      [
+       "Exp",
+       [
+        "Negate",
+        [
+         "Power",
+         "z",
+         2
+        ]
+       ]
+      ],
+      [
+       "Multiply",
+       "z",
+       [
+        "Sqrt",
+        "Pi"
+       ]
+      ]
+     ],
+     [
+      "HypergeometricUStar",
+      [
+       "Divide",
+       1,
+       2
+      ],
+      [
+       "Divide",
+       1,
+       2
+      ],
+      [
+       "Power",
+       "z",
+       2
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Greater",
+     [
+      "Real",
+      "z"
+     ],
+     0
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Erfc",
+    "Exp",
+    "HypergeometricUStar"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "error_functions"
+   ]
+  },
+  {
+   "id": "b5bd5d",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "Erf",
+        "z"
+       ],
+       "z"
+      ],
+      1
+     ],
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Divide",
+      2,
+      [
+       "Sqrt",
+       "Pi"
+      ]
+     ],
+     [
+      "Exp",
+      [
+       "Negate",
+       [
+        "Power",
+        "z",
+        2
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Derivative",
+    "Erf",
+    "Exp"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "error_functions"
+   ]
+  },
+  {
+   "id": "bfc86e",
+   "formula": [
+    "Equal",
+    [
+     "Erfc",
+     "z"
+    ],
+    [
+     "Subtract",
+     1,
+     [
+      "Erf",
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Erf",
+    "Erfc"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "error_functions"
+   ]
+  },
+  {
+   "id": "cb93ea",
+   "formula": [
+    "Equal",
+    [
+     "Erf",
+     "z"
+    ],
+    [
+     "Subtract",
+     [
+      "Divide",
+      "z",
+      [
+       "Sqrt",
+       [
+        "Power",
+        "z",
+        2
+       ]
+      ]
+     ],
+     [
+      "Multiply",
+      [
+       "Divide",
+       [
+        "Exp",
+        [
+         "Negate",
+         [
+          "Power",
+          "z",
+          2
+         ]
+        ]
+       ],
+       [
+        "Multiply",
+        "z",
+        [
+         "Sqrt",
+         "Pi"
+        ]
+       ]
+      ],
+      [
+       "HypergeometricUStar",
+       [
+        "Divide",
+        1,
+        2
+       ],
+       [
+        "Divide",
+        1,
+        2
+       ],
+       [
+        "Power",
+        "z",
+        2
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "NotEqual",
+     "z",
+     0
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Erf",
+    "Exp",
+    "HypergeometricUStar"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "error_functions"
+   ]
+  },
+  {
+   "id": "ec0205",
+   "formula": [
+    "Equal",
+    [
+     "Erfc",
+     [
+      "Negate",
+      "z"
+     ]
+    ],
+    [
+     "Subtract",
+     2,
+     [
+      "Erfc",
+      "z"
+     ]
+    ]
+   ],
+   "variables": [
+    "z"
+   ],
+   "assumptions": [
+    "Element",
+    "z",
+    "ComplexNumbers"
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Erfc"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "error_functions"
+   ]
+  },
+  {
+   "id": "fae9d3",
+   "formula": [
+    "Equal",
+    [
+     "Apply",
+     [
+      "Derivative",
+      [
+       "Function",
+       [
+        "Erf",
+        "z"
+       ],
+       "z"
+      ],
+      "n"
+     ],
+     "z"
+    ],
+    [
+     "Multiply",
+     [
+      "Multiply",
+      [
+       "Multiply",
+       [
+        "Divide",
+        2,
+        [
+         "Sqrt",
+         "Pi"
+        ]
+       ],
+       [
+        "Power",
+        -1,
+        [
+         "Add",
+         "n",
+         1
+        ]
+       ]
+      ],
+      [
+       "HermitePolynomial",
+       [
+        "Subtract",
+        "n",
+        1
+       ],
+       "z"
+      ]
+     ],
+     [
+      "Exp",
+      [
+       "Negate",
+       [
+        "Power",
+        "z",
+        2
+       ]
+      ]
+     ]
+    ]
+   ],
+   "variables": [
+    "n",
+    "z"
+   ],
+   "assumptions": [
+    "And",
+    [
+     "Element",
+     "z",
+     "ComplexNumbers"
+    ],
+    [
+     "Element",
+     "n",
+     "PositiveIntegers"
+    ]
+   ],
+   "class": "identity",
+   "subclass": null,
+   "heads": [
+    "Derivative",
+    "Erf",
+    "Exp",
+    "HermitePolynomial"
+   ],
+   "guardLevel": "complex-domain",
+   "flavor": null,
+   "references": null,
+   "topics": [
+    "error_functions"
+   ]
+  }
+ ]
+}
