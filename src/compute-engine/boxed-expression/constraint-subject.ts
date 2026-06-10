@@ -7,7 +7,7 @@ import type {
 import { isFunction, isSymbol, isNumber } from './type-guards';
 
 /**
- * Constraint subjects (FUNGRIM-PLAN-3-ASSUMPTIONS.md §2).
+ * Constraint subjects (docs/fungrim/FUNGRIM-PLAN-3-ASSUMPTIONS.md §2).
  *
  * The assumptions system keys facts not just on bare symbols, but on a small
  * algebra of "subjects": a symbol, or one of the four part-extractors
@@ -209,7 +209,7 @@ export function mergeTightestBounds(
 }
 
 //
-// ─── Fact index (FUNGRIM-PLAN-3-ASSUMPTIONS.md §3.1) ────────────────────────
+// ─── Fact index (docs/fungrim/FUNGRIM-PLAN-3-ASSUMPTIONS.md §3.1) ────────────────────────
 //
 
 /** Facts indexed for a single subject. */
@@ -400,7 +400,7 @@ export function getFactIndex(ce: ComputeEngine): FactIndex {
 }
 
 //
-// ─── Query helpers (FUNGRIM-PLAN-3-ASSUMPTIONS.md §5.1) ─────────────────────
+// ─── Query helpers (docs/fungrim/FUNGRIM-PLAN-3-ASSUMPTIONS.md §5.1) ─────────────────────
 //
 
 /**

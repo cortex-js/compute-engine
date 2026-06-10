@@ -1,6 +1,6 @@
 # Implementation Plan — Fungrim Phase 1: Corpus Loader (Value Tables + Real-Domain Identities)
 
-**Scope:** FUNGRIM.md §5 Phase 1 — load the translated Fungrim corpus (`/Users/arno/dev/compute-engine/data/fungrim/`, 2,551 entries) into the Compute Engine as usable simplification rules and value tables, restricted to the slice `class ∈ {specific-value, identity}` × `guardLevel ∈ {none, real-simple}` (**707 entries**: 443 specific values + 260 real-simple identities + 4 unguarded identities), plus a small seeded solve-template set. Builds on the landed Track-2 mechanics (rule index in `src/compute-engine/boxed-expression/rule-index.ts`, the `operators` dispatch hint in `types-kernel-evaluation.ts`, `ce.solveRules`/`ce.harmonizationRules`) and the landed M3 purpose tags (`Rule.purpose?: 'simplify'|'transform'|'expand'`, `ce.rules(rules, {purpose})` default, `'expand'` skipped by `simplify()` but reachable via `replace()`).
+**Scope:** docs/fungrim/FUNGRIM.md §5 Phase 1 — load the translated Fungrim corpus (`/Users/arno/dev/compute-engine/data/fungrim/`, 2,551 entries) into the Compute Engine as usable simplification rules and value tables, restricted to the slice `class ∈ {specific-value, identity}` × `guardLevel ∈ {none, real-simple}` (**707 entries**: 443 specific values + 260 real-simple identities + 4 unguarded identities), plus a small seeded solve-template set. Builds on the landed Track-2 mechanics (rule index in `src/compute-engine/boxed-expression/rule-index.ts`, the `operators` dispatch hint in `types-kernel-evaluation.ts`, `ce.solveRules`/`ce.harmonizationRules`) and the landed M3 purpose tags (`Rule.purpose?: 'simplify'|'transform'|'expand'`, `ce.rules(rules, {purpose})` default, `'expand'` skipped by `simplify()` but reachable via `replace()`).
 
 **Completion gate per milestone:** `npm run typecheck` (zero new circular deps, no `any` in `types-*.ts`) + targeted jest suites via `npx jest --config ./config/jest.config.cjs --reporters default -- <path>`. No git commit steps in this plan.
 
@@ -113,7 +113,7 @@ Guard sub-expressions (`bound`, `ne` operands, `eval` predicates) are boxed **on
   - `c(RHS) ≤ 0.9·c(LHS)` → orient LHS→RHS, `purpose: 'simplify'`.
   - `c(LHS) ≤ 0.9·c(RHS)` **and** `vars(LHS) ⊆ vars(RHS)` **and** RHS is pattern-viable (function expression, not a bare variable/literal) → orient RHS→LHS, `purpose: 'simplify'`.
   - Otherwise (tie band, or the cheap side is un-patternable like `z`): orient toward the side rooted in a named special-function head where possible and tag **`purpose: 'expand'`** — excluded from `simplify()` by the M3 semantics, fully usable via `expr.replace()`. The machine policy never emits `'transform'` (cost-gate-exempt is too dangerous to automate); `'transform'` is **override-only**, for hand-vetted growth-neutral canonicalizations.
-  - The 10% margin means every machine-loaded `'simplify'` rule is *statically* expected to shrink, and the runtime 1.3× gate remains as the per-instance backstop — double protection, per FUNGRIM.md §6's curation mandate.
+  - The 10% margin means every machine-loaded `'simplify'` rule is *statically* expected to shrink, and the runtime 1.3× gate remains as the per-instance backstop — double protection, per docs/fungrim/FUNGRIM.md §6's curation mandate.
 - **Dedup of undirected duplicates:** key each entry by the unordered pair of canonical side hashes; when two entries are the same equality (or exact inverses), load **one** oriented rule and ledger the other (`duplicate-undirected`), preventing A→B and B→A from ever coexisting in the simplify set.
 
 ### 2.4 Specific values: individual indexed rules (recommended)
@@ -149,7 +149,7 @@ Honest scoping from the data: the slice contains **almost no solve-shaped entrie
 3. **Benchmark** (extend `benchmarks/rule-dispatch.benchmark.test.ts`): full Phase-1 slice loaded (~600+ rules), `simplify()` over the M0 corpus **≤ 1.5× the unloaded baseline**; index build amortization checked (first vs. second call).
 4. **No regression:** full jest suite + `npm run typecheck` green.
 
-### 2.8 Failure visibility (FUNGRIM.md §6)
+### 2.8 Failure visibility (docs/fungrim/FUNGRIM.md §6)
 
 Two layers, matching the two failure modes:
 
@@ -166,7 +166,7 @@ type FungrimLoadReport = {
 };
 ```
 
-- **Silent guard failures (rule loaded but never fires):** per-rule ids surface in `simplify()` steps (`because: 'fungrim:xxxxxx'`), so *firing* is observable; for *non*-firing, add `loadFungrim(ce, { onGuardUndecided?: (ruleId, wc) => void })` — a debug hook invoked when a fungrim condition fails specifically because a predicate returned `undefined` (vs. definitively false). Cheap to implement inside the generated closure, zero cost when unset; converts FUNGRIM.md §6's "users see nothing happened" into an actionable trace.
+- **Silent guard failures (rule loaded but never fires):** per-rule ids surface in `simplify()` steps (`because: 'fungrim:xxxxxx'`), so *firing* is observable; for *non*-firing, add `loadFungrim(ce, { onGuardUndecided?: (ruleId, wc) => void })` — a debug hook invoked when a fungrim condition fails specifically because a predicate returned `undefined` (vs. definitively false). Cheap to implement inside the generated closure, zero cost when unset; converts docs/fungrim/FUNGRIM.md §6's "users see nothing happened" into an actionable trace.
 
 ---
 
@@ -238,7 +238,7 @@ Acceptance:
 ### M6 (stretch, gated on a human call — Q7) — Solve seed activation
 **Effort: 1–2 days.** Flip the curated solve templates from overrides into the default artifact, document `{ solve: true }`, add `solve()` examples (`x·eˣ = 3`, `ln f(x)` harmonization variant). Acceptance: `solve.test.ts` unchanged; new equations solvable; `validateRoots` filtering demonstrated with a deliberately over-broad template.
 
-**Total: ~14–18 working days**, consistent with FUNGRIM.md §5's "Phase 1 ≈ 2–3 weeks (mostly curation + the dispatcher)" with the dispatcher already banked by Track 2.
+**Total: ~14–18 working days**, consistent with docs/fungrim/FUNGRIM.md §5's "Phase 1 ≈ 2–3 weeks (mostly curation + the dispatcher)" with the dispatcher already banked by Track 2.
 
 ---
 

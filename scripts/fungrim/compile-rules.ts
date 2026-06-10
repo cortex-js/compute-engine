@@ -1,5 +1,5 @@
 // Offline rule compiler for the Fungrim loader
-// (FUNGRIM-PLAN-5-LOADER.md §2.2–§2.5, milestone M1; extended in Phase 3 to
+// (docs/fungrim/FUNGRIM-PLAN-5-LOADER.md §2.2–§2.5, milestone M1; extended in Phase 3 to
 // complex-domain guards).
 //
 // Reads the translated corpus (`data/fungrim/`), selects the slice
@@ -42,7 +42,7 @@ import {
 import type { Entry, Declarations } from './load';
 
 // ---------------------------------------------------------------------------
-// Types (artifact schema per FUNGRIM-PLAN-5-LOADER.md §2.2)
+// Types (artifact schema per docs/fungrim/FUNGRIM-PLAN-5-LOADER.md §2.2)
 // ---------------------------------------------------------------------------
 
 /** Raw MathJSON — the corpus is plain JSON. */

@@ -1,4 +1,4 @@
-// Stage 2 — numeric spot checks (FUNGRIM-PLAN-1-TRANSLATOR.md §5), behind
+// Stage 2 — numeric spot checks (docs/fungrim/FUNGRIM-PLAN-1-TRANSLATOR.md §5), behind
 // `--numeric`. A TypeScript port of the *strategy* of pygrim's Expr.test()
 // + Brain.some_values():
 //

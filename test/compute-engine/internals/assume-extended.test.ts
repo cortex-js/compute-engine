@@ -4,7 +4,7 @@ import { getInequalityBoundsFromAssumptions } from '../../../src/compute-engine/
 
 import '../../utils'; // For snapshot serializers
 
-// P2+P3 of FUNGRIM-PLAN-3-ASSUMPTIONS.md: the `assume()` extension and the
+// P2+P3 of docs/fungrim/FUNGRIM-PLAN-3-ASSUMPTIONS.md: the `assume()` extension and the
 // query/discharge hooks.
 //
 // These tests cover the assume-side half of the design §11 acceptance

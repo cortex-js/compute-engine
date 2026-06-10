@@ -103,7 +103,7 @@ export function assume(proposition: Expression): AssumeResult {
 
 /**
  * Predicate operators that are syntactically valid assumptions but that the
- * structural-predicate layer cannot represent (FUNGRIM-PLAN-3-ASSUMPTIONS.md
+ * structural-predicate layer cannot represent (docs/fungrim/FUNGRIM-PLAN-3-ASSUMPTIONS.md
  * §7 non-goals). `assume()` reports these as `'not-a-predicate'`.
  */
 const UNSUPPORTED_PREDICATE_OPERATORS = new Set<string>([

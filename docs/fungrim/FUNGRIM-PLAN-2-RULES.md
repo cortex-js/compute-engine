@@ -1,6 +1,6 @@
 # Implementation Plan — Fungrim Track 2: CE Rule Mechanics (Feature A: Operator-Indexed Rule Dispatch + Cost Policy; Feature D: Public Solve-Rules API)
 
-**Scope:** Implements FUNGRIM.md §4 Feature A (operator-indexed rule dispatch + cost policy / purpose tags) and Feature D (`ce.solveRules` extension API) in `/Users/arno/dev/compute-engine`. Goal: the engine can host ~1,500 externally-loaded Fungrim rules without `simplify()`/`replace()` becoming unusable, and `solve()` can absorb new equation templates without source edits.
+**Scope:** Implements docs/fungrim/FUNGRIM.md §4 Feature A (operator-indexed rule dispatch + cost policy / purpose tags) and Feature D (`ce.solveRules` extension API) in `/Users/arno/dev/compute-engine`. Goal: the engine can host ~1,500 externally-loaded Fungrim rules without `simplify()`/`replace()` becoming unusable, and `solve()` can absorb new equation templates without source edits.
 
 **Completion gate for every milestone:** `npm run typecheck` (this also enforces a zero circular-dependency budget via madge and bans explicit `any` in `types-*.ts` / `global-types.ts` — both constrain the design below) plus the targeted jest suites listed per milestone, run as:
 
@@ -141,7 +141,7 @@ To let functional rules (and the Fungrim functional-dispatcher shim) participate
 operators?: ReadonlyArray<string>;
 ```
 
-A bare-function rule cannot carry the hint; the object form `{ replace: fn, operators: ['Sin','Cos'] }` (match omitted) can — `boxRule` (`rules.ts:594-743`) already supports `match === undefined` with a `replace` function. This is also exactly the hook FUNGRIM.md's "single functional dispatcher rule" shim needs (one object rule per corpus, hinted with the corpus's head list, doing its own Map lookup) — making the shim and the first-class index converge.
+A bare-function rule cannot carry the hint; the object form `{ replace: fn, operators: ['Sin','Cos'] }` (match omitted) can — `boxRule` (`rules.ts:594-743`) already supports `match === undefined` with a `replace` function. This is also exactly the hook docs/fungrim/FUNGRIM.md's "single functional dispatcher rule" shim needs (one object rule per corpus, hinted with the corpus's head list, doing its own Map lookup) — making the shim and the first-class index converge.
 
 ### 2.2 Feature A (part 2) — Cost policy / purpose tags
 
@@ -165,7 +165,7 @@ purpose?: RulePurpose;   // stamped by applyRule from the firing rule
 ```
 
 Plumbing:
-- `boxRules(ce, rs, options)` and `ce.rules(rules, options)` (`index.ts:1615-1625`, `types-engine.ts:312-320`) accept `options.purpose?: RulePurpose` as the **default** applied to any rule in the set that doesn't carry its own tag — this is the "per-ruleset policy" from FUNGRIM.md §4.A, so a corpus loader can tag a whole file in one call.
+- `boxRules(ce, rs, options)` and `ce.rules(rules, options)` (`index.ts:1615-1625`, `types-engine.ts:312-320`) accept `options.purpose?: RulePurpose` as the **default** applied to any rule in the set that doesn't carry its own tag — this is the "per-ruleset policy" from docs/fungrim/FUNGRIM.md §4.A, so a corpus loader can tag a whole file in one call.
 - `applyRule` stamps `purpose` onto the returned `RuleStep`; `replace()` propagates it (it already returns the steps untouched).
 - `simplify.ts`:
   - In `simplify()` where the rule set is resolved (`:163-165`), filter `purpose === 'expand'` rules out of the working set (cheap: do it once when boxing/caching, i.e. in `getRuleSet('standard-simplification')`'s build closure plus on the per-call `options.rules` path).
@@ -304,7 +304,7 @@ Acceptance: budgets met locally; numbers recorded in the test output; `npm run t
 Files:
 - Doc comments finalized on all new public surface (`solveRules`, `harmonizationRules`, `RulePurpose`, `operators` hint) — these flow into the generated `.d.ts` checked by `test/public-ts-declarations/main.ts`.
 - `CHANGELOG.md` entries (additive API: `ce.solveRules`, `ce.harmonizationRules`, `Rule.purpose`, `Rule.operators`).
-- FUNGRIM.md §4 A/D status notes can be updated by the parent effort (not this plan's file).
+- docs/fungrim/FUNGRIM.md §4 A/D status notes can be updated by the parent effort (not this plan's file).
 
 Acceptance: `npm run typecheck`; public-declarations test green; full test suite pass.
 
@@ -327,7 +327,7 @@ Acceptance: `npm run typecheck`; public-declarations test green; full test suite
 
 ## 5. Open Questions
 
-1. **API naming/shape for Feature D:** two flat properties (`ce.solveRules`, `ce.harmonizationRules`, proposed — symmetric with `simplificationRules`) vs. a single `ce.solveRules` namespace `{ roots: Rule[]; harmonization: Rule[] }`. FUNGRIM.md says "`ce.solveRules` (same push/replace pattern)"; the flat pair keeps the established pattern and trivial cache wiring. Needs a maintainer call before M1.
+1. **API naming/shape for Feature D:** two flat properties (`ce.solveRules`, `ce.harmonizationRules`, proposed — symmetric with `simplificationRules`) vs. a single `ce.solveRules` namespace `{ roots: Rule[]; harmonization: Rule[] }`. docs/fungrim/FUNGRIM.md says "`ce.solveRules` (same push/replace pattern)"; the flat pair keeps the established pattern and trivial cache wiring. Needs a maintainer call before M1.
 2. **Priority control for user solve/simplify rules:** is append + `unshift()` + full-replacement enough, or is a numeric `priority` field on `Rule` warranted? (Current evidence: `matchAnyRules` collects all matches, so ordering is rarely semantic for solve; recommend deferring.)
 3. **Purpose taxonomy completeness:** is a fourth value (e.g. `'canonicalize'`/`'harmonize'`) needed for Fungrim Phase 4 representation lookup, or do `'expand'`+`replace()` cover it? Affects only the string-union, additive later.
 4. **Index threshold and tuning:** default min-size 8 before indexing kicks in — validate with M4 measurements; expose nothing publicly for now?

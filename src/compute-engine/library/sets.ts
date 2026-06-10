@@ -93,7 +93,7 @@ function signedMembership(
  *
  * Used by the `contains` handlers of compound sets (e.g. `Union`) so that an
  * indeterminate member test does not collapse to a definitive `false`
- * (FUNGRIM-PLAN-3-ASSUMPTIONS.md §5.2 invariant).
+ * (docs/fungrim/FUNGRIM-PLAN-3-ASSUMPTIONS.md §5.2 invariant).
  */
 function kleeneOr(values: Iterable<boolean | undefined>): boolean | undefined {
   let indeterminate = false;
@@ -1113,7 +1113,7 @@ function isExcludedByKleene(
 
 /**
  * Three-valued disequality `x ≠ e`, used by the `SetMinus` query
- * decomposition (FUNGRIM-PLAN-3-ASSUMPTIONS.md §5.1c/§5.1d).
+ * decomposition (docs/fungrim/FUNGRIM-PLAN-3-ASSUMPTIONS.md §5.1c/§5.1d).
  *
  * - `false` when `x` is (structurally or as a concrete number) equal to `e`;
  * - `true` when concrete numbers differ, or when a `NotEqual(x, e)` fact is

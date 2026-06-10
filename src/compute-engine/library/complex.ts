@@ -20,7 +20,7 @@ import { getInequalityBoundsFromAssumptions } from '../boxed-expression/inequali
  * (`Real`, `Imaginary`, `Argument` — and `Abs` in the arithmetic library):
  * when the operand is a symbol with no value, look up assumed bounds for the
  * corresponding subject (e.g. `im:tau` after `assume(Im(tau) > 0)`) and
- * derive the sign from them (FUNGRIM-PLAN-3-ASSUMPTIONS.md §5.1b).
+ * derive the sign from them (docs/fungrim/FUNGRIM-PLAN-3-ASSUMPTIONS.md §5.1b).
  *
  * Reads the fact index directly (never `ask()`), so it works inside
  * `verify()`. Returns `undefined` when the facts don't entail a sign.

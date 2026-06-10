@@ -1,5 +1,5 @@
 // Guard-dischargeability census over the full Fungrim corpus
-// (FUNGRIM-PLAN-3-ASSUMPTIONS.md §11, "Secondary validation": re-run the
+// (docs/fungrim/FUNGRIM-PLAN-3-ASSUMPTIONS.md §11, "Secondary validation": re-run the
 // guard-discharge counting after the P1–P4 assumptions extension).
 //
 // For every corpus entry with assumptions, in a fresh scope:

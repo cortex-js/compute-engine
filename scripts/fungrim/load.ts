@@ -1,5 +1,5 @@
 // Corpus + declarations loading for the Fungrim validation harness
-// (FUNGRIM-PLAN-1-TRANSLATOR.md §5).
+// (docs/fungrim/FUNGRIM-PLAN-1-TRANSLATOR.md §5).
 //
 // Responsibilities:
 //  - read data/fungrim/corpus/*.json, declarations.json, MANIFEST.json

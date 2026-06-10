@@ -56,7 +56,7 @@ function quantityCompare(a: Expression, b: Expression): number | null {
 
 /**
  * Decide `lhs < rhs` (when `strict`) or `lhs ≤ rhs` from assumed bounds on
- * a constraint subject (FUNGRIM-PLAN-3-ASSUMPTIONS.md §5.1a).
+ * a constraint subject (docs/fungrim/FUNGRIM-PLAN-3-ASSUMPTIONS.md §5.1a).
  *
  * Applies when one side normalizes to a subject term — a bare symbol or
  * `Real/Imaginary/Abs/Argument` of one — and the other side is numeric.

@@ -1,6 +1,6 @@
 /**
  * Shared corpus and helpers for the rule-dispatch milestones
- * (FUNGRIM-PLAN-2-RULES.md M0/M2/M4).
+ * (docs/fungrim/FUNGRIM-PLAN-2-RULES.md M0/M2/M4).
  *
  * This module is intentionally NOT a `.test.ts` file: it is imported both by
  * `rule-dispatch-regression.test.ts` (the pre/post-index equivalence oracle)

@@ -2,7 +2,7 @@ import { ComputeEngine } from '../../../src/compute-engine';
 
 import '../../utils'; // For snapshot serializers
 
-// P4 of FUNGRIM-PLAN-3-ASSUMPTIONS.md: the Fungrim guard acceptance suite
+// P4 of docs/fungrim/FUNGRIM-PLAN-3-ASSUMPTIONS.md: the Fungrim guard acceptance suite
 // (design §11, "Secondary validation").
 //
 // Every guard below is the verbatim `assumptions` MathJSON of a real

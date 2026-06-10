@@ -138,7 +138,7 @@ export function ask(
       const isStrict = pat.operator === 'Greater' || pat.operator === 'Less';
 
       // Subject on LHS: a bare symbol — Greater(x, _k) — or a part
-      // extractor of one (FUNGRIM-PLAN-3-ASSUMPTIONS.md §2):
+      // extractor of one (docs/fungrim/FUNGRIM-PLAN-3-ASSUMPTIONS.md §2):
       // Greater(Real(s), _k), Greater(Imaginary(tau), _k), Less(Abs(q), _k),
       // Less(Argument(z), _k). The bare-symbol case behaves exactly as
       // before (subjectOf maps it to the 'self' part).

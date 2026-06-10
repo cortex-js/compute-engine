@@ -1,6 +1,6 @@
 /**
  * M0 scale-benchmark scaffold for the rule-dispatch track
- * (FUNGRIM-PLAN-2-RULES.md §3 M0, finished in M4).
+ * (docs/fungrim/FUNGRIM-PLAN-2-RULES.md §3 M0, finished in M4).
  *
  * Measures `simplify()` over the shared corpus:
  *   (a) with the standard simplification rule set only, and
@@ -166,7 +166,7 @@ describe('rule-dispatch scale benchmark (M0 baseline)', () => {
 
 // ---------------------------------------------------------------------------
 // M5 — Real-corpus scenario: the full Fungrim Phase-1 artifact (558 rules)
-// loaded via loadIdentities() (FUNGRIM-PLAN-5-LOADER.md §2.7 item 3, §3 M5).
+// loaded via loadIdentities() (docs/fungrim/FUNGRIM-PLAN-5-LOADER.md §2.7 item 3, §3 M5).
 //
 // Same machine-independent philosophy as the M0 scenario above (in-process
 // ratio, never absolute milliseconds), with one methodology hardening: the

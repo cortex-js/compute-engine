@@ -1,6 +1,6 @@
 /**
  * M2 unit tests for the operator-indexed rule dispatch
- * (FUNGRIM-PLAN-2-RULES.md §2.1, §3 M2).
+ * (docs/fungrim/FUNGRIM-PLAN-2-RULES.md §2.1, §3 M2).
  *
  * Covers:
  * - classification of rules into `byHead` / `alwaysTry` (plain and

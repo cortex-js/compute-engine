@@ -1,10 +1,10 @@
 # Implementation Plan — Track 1: Fungrim → Compute Engine Translator + Corpus Pipeline
 
-**Scope:** Phase 0 of `FUNGRIM.md` §5 — the Python translator, the JSON corpus with `class`/`heads`/`guardLevel` annotations, the auto-generated symbol-shell declaration table, the CE-side validation harness, and packaging/versioning. No engine features (rule dispatch, assumption extensions) are in scope; this track only has to make the corpus *exist, be honest about itself, and be loadable/boxable by CE*.
+**Scope:** Phase 0 of `docs/fungrim/FUNGRIM.md` §5 — the Python translator, the JSON corpus with `class`/`heads`/`guardLevel` annotations, the auto-generated symbol-shell declaration table, the CE-side validation harness, and packaging/versioning. No engine features (rule dispatch, assumption extensions) are in scope; this track only has to make the corpus *exist, be honest about itself, and be loadable/boxable by CE*.
 
 **Sources verified during planning:**
-- Fungrim snapshot at `/Users/arno/dev/fungrim-master`: `pygrim.formulas.all_entries` imports cleanly under `python3` and yields **3,130 entries, 2,764 with `Formula`, 228 with `SymbolDefinition`** (matches FUNGRIM.md §1).
-- **292 distinct builtin heads** actually occur inside `Formula(...)` expressions (FUNGRIM.md's "~330 incl. assumptions" is consistent).
+- Fungrim snapshot at `/Users/arno/dev/fungrim-master`: `pygrim.formulas.all_entries` imports cleanly under `python3` and yields **3,130 entries, 2,764 with `Formula`, 228 with `SymbolDefinition`** (matches docs/fungrim/FUNGRIM.md §1).
+- **292 distinct builtin heads** actually occur inside `Formula(...)` expressions (docs/fungrim/FUNGRIM.md's "~330 incl. assumptions" is consistent).
 - Assumption-condition head census (after flattening `And`): `Element` 3,647, `NotElement` 181, `Greater` 132, `NotEqual` 109, `Or` 85, `Less` 72, `GreaterEqual` 34, `All` 24, `LessEqual` 15, `Equal` 15, plus a tail (`IsHolomorphic` 7, `Divides` 5, `Where` 2, `CongruentMod` 1, …).
 - `Element` domain census: `CC` 1,373, `ZZGreaterEqual` 616, `ZZ` 373, `HH` 348, `SetMinus` 329, `RR` 184, `OpenInterval` 128, `ClosedOpenInterval` 68, `DirichletGroup` 42, …, `SL2Z` 18, `PP` 14. These numbers directly drive the `guardLevel` classifier below.
 - CE names verified against `/Users/arno/dev/compute-engine/src/compute-engine/library/*.ts` (details in the mapping table, §2.2).
@@ -23,7 +23,7 @@
 | M5 | CE validation harness (box + optional numeric) | M2 (corpus exists) | 3–4 days | `scripts/fungrim/validate.ts` + report |
 | M6 | Packaging, manifest, license, regeneration docs | M3–M5 | 1–2 days | `data/fungrim/` layout + `MANIFEST.json` |
 
-Total ≈ 2.5–3.5 weeks, matching the FUNGRIM.md Phase-0 estimate. M4 can run in parallel with M2/M3; M5 can start against the partial M1 corpus to shake out the harness early.
+Total ≈ 2.5–3.5 weeks, matching the docs/fungrim/FUNGRIM.md Phase-0 estimate. M4 can run in parallel with M2/M3; M5 can start against the partial M1 corpus to shake out the harness early.
 
 ---
 
@@ -100,9 +100,9 @@ Everything in the 292-head census not mapped and not skipped (≈150 special-fun
 - **Multi-arg relation chains**: `Equal(a,b,c)` → `["And", ["Equal",a,b], ["Equal",b,c]]`; same for `Less/LessEqual/...` chains (M0 check: CE `Equal`/`Less` may already be n-ary chain-semantics — if so, pass through and simplify the translator).
 - **`Parentheses/Brackets/Braces/AngleBrackets`** (≈140): strip, keep child.
 - **`Subscript(z, k)` and generator-variable calls `z_(k)`**: translate to plain symbols when the index is a literal integer (`z_1` → symbol `z_1`); symbolic indices `z_(k)` → `["Subscript", "z_", "k"]` (CE `core.ts` has `Subscript`). The trailing-underscore family symbols (`z_`) are how Fungrim writes indexed families — normalize the name (`z_` → `z`) and record `indexedFamily: true` on the entry so consumers can treat it specially.
-- **Typed limit/derivative variants** (`RealLimit, ComplexLimit, LeftLimit, RightLimit, SequenceLimit, MeromorphicLimit; RealDerivative, ComplexBranchDerivative, MeromorphicDerivative`): collapse to CE `Limit`/`D` and record the variant in an entry-level `"flavor"` annotation (not inside the expression) — per FUNGRIM.md the distinction only matters for future symbolic-limits work.
+- **Typed limit/derivative variants** (`RealLimit, ComplexLimit, LeftLimit, RightLimit, SequenceLimit, MeromorphicLimit; RealDerivative, ComplexBranchDerivative, MeromorphicDerivative`): collapse to CE `Limit`/`D` and record the variant in an entry-level `"flavor"` annotation (not inside the expression) — per docs/fungrim/FUNGRIM.md the distinction only matters for future symbolic-limits work.
 - **Skip list** (emit skip records, never expressions): `Repeat`, `Step` (9 Carlson entries), `XX/SerX/Pol*/PowerSeries/SeriesCoefficient/FormalGenerator` formal-indeterminate domains, `Ellipsis`, `EqualQSeriesEllipsis`, `CodeExample`, presentation heads (`Description`, `Table*`, `Image*`, `SourceForm`, …).
-- **Metadata heads** (`properties.py`): formulas whose top-level shape is `Equal(Poles/Zeros/BranchPoints/BranchCuts/EssentialSingularities/Residue/AnalyticContinuation/ComplexZeroMultiplicity(...), S)` or `IsHolomorphic/IsMeromorphic(...)` → routed to `properties.json` keyed by operator (FUNGRIM.md §4-E says extract from day one). Their generator syntax (`Var`, `ForElement`) is preserved in a documented JSON micro-format rather than forced into MathJSON expressions.
+- **Metadata heads** (`properties.py`): formulas whose top-level shape is `Equal(Poles/Zeros/BranchPoints/BranchCuts/EssentialSingularities/Residue/AnalyticContinuation/ComplexZeroMultiplicity(...), S)` or `IsHolomorphic/IsMeromorphic(...)` → routed to `properties.json` keyed by operator (docs/fungrim/FUNGRIM.md §4-E says extract from day one). Their generator syntax (`Var`, `ForElement`) is preserved in a documented JSON micro-format rather than forced into MathJSON expressions.
 
 ### 2.4 Failure policy
 
@@ -130,7 +130,7 @@ One file per topic source module (62): `corpus/atan.json`, `corpus/gamma.json`, 
 }
 ```
 
-### 3.2 Entry schema (FUNGRIM.md §2, extended)
+### 3.2 Entry schema (docs/fungrim/FUNGRIM.md §2, extended)
 
 ```json
 {
@@ -228,7 +228,7 @@ scripts/fungrim/
 - Fixed value pools per base set, mirroring Fungrim's `some_integers`/`some_rationals`/`some_reals`/`some_complexes`/`some_upper_half_plane` (small integers, ±1/2, `Sqrt(2)`, `Pi`, `1/2 + i/2`, `i`, `2i−1`, `τ = i`, `τ = (1+i√3)/2`, …) — exact MathJSON constants, not floats.
 - For each entry with variables: derive each variable's base pool from its `Element` conjunct (the same dispatch as `some_values`, brain.py:5810-5841), iterate a seeded randomized cartesian product, keep assignments where `ce.box(assumptions).subs(assignment).evaluate()` is definitively `True` (three-valued: skip `Unknown`), cap candidates.
 - For each accepted assignment (default 5/entry): substitute into the formula; for `Equal` classes compare `N()` of both sides to relative tolerance 1e-10 at 30-digit precision; for inequalities check the relation numerically; record `True`/`False`/`Unknown` per instance, Fungrim-style.
-- **A `False` instance flags the entry (likely a translation bug or CE numeric bug) but does not fail the build initially** — failures land in `numeric-failures.json` for triage, since FUNGRIM.md §6 predicts this doubles as a CE fuzz corpus. Entries whose heads have no CE numeric kernel are reported `not-evaluable` (expected for most special functions until Tier-2 work).
+- **A `False` instance flags the entry (likely a translation bug or CE numeric bug) but does not fail the build initially** — failures land in `numeric-failures.json` for triage, since docs/fungrim/FUNGRIM.md §6 predicts this doubles as a CE fuzz corpus. Entries whose heads have no CE numeric kernel are reported `not-evaluable` (expected for most special functions until Tier-2 work).
 
 ---
 
@@ -283,11 +283,11 @@ In priority order, each spiked against real entries before committing to the arc
 
 **M0 — Spike.** Each of the 15 items above has a written decision (mapping, encoding, or skip-code) recorded in `mapping.py`/`structural.py` docstrings; at least one real entry per item hand-translated and `ce.box`-verified via a scratch script.
 
-**M1 — Core translator.** `python3 -m grim2mathjson --topic atan` emits `atan.json`; all atoms, arithmetic, elementary functions, constants, relations, sets translate; pytest golden tests pass for ≥20 hand-checked entries including `d4b0b6` matching the FUNGRIM.md §2 example byte-for-byte (modulo schema fields); unknown-head ⇒ hard error.
+**M1 — Core translator.** `python3 -m grim2mathjson --topic atan` emits `atan.json`; all atoms, arithmetic, elementary functions, constants, relations, sets translate; pytest golden tests pass for ≥20 hand-checked entries including `d4b0b6` matching the docs/fungrim/FUNGRIM.md §2 example byte-for-byte (modulo schema fields); unknown-head ⇒ hard error.
 
 **M2 — Structural + totality.** Full `all_entries` run completes with **zero `unknown-head` failures**; every entry lands in corpus / properties / skip ledger; skip ledger ≤ ~10% of formula entries and every skip has an enumerated reason code; `Where`-substituted entries verified by golden tests; deterministic re-run produces identical bytes.
 
-**M3 — Annotations.** `class` distribution within ±10% of FUNGRIM.md §1 table; `guardLevel` classifier errors on no conjunct (full coverage of observed shapes); summary report prints per-topic and per-level counts; spot-audit of 30 random entries (10 per non-trivial level) confirms labels.
+**M3 — Annotations.** `class` distribution within ±10% of docs/fungrim/FUNGRIM.md §1 table; `guardLevel` classifier errors on no conjunct (full coverage of observed shapes); summary report prints per-topic and per-level counts; spot-audit of 30 random entries (10 per non-trivial level) confirms labels.
 
 **M4 — Shells.** `declarations.json` covers every head appearing in the corpus that CE doesn't define (cross-checked mechanically by the harness, not by eye); ≥80% of shells have a table-derived signature (rest flagged inferred); loading the full table via `ce.declare()` in the harness raises no errors.
 

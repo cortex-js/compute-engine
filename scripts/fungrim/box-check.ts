@@ -1,4 +1,4 @@
-// Stage 1 — representability check (FUNGRIM-PLAN-1-TRANSLATOR.md §5).
+// Stage 1 — representability check (docs/fungrim/FUNGRIM-PLAN-1-TRANSLATOR.md §5).
 //
 // For every corpus entry: declare its variables (typed from assumptions),
 // then ce.box(formula).canonical and ce.box(assumptions).canonical. An entry

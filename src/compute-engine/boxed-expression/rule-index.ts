@@ -1,5 +1,5 @@
 /**
- * Operator-indexed rule dispatch (FUNGRIM-PLAN-2-RULES.md §2.1, Feature A).
+ * Operator-indexed rule dispatch (docs/fungrim/FUNGRIM-PLAN-2-RULES.md §2.1, Feature A).
  *
  * This is an INTERNAL side table: the public `BoxedRuleSet` type is
  * unchanged. The index is keyed (via a `WeakMap`) on the identity of the

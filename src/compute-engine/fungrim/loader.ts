@@ -1,5 +1,5 @@
 // Runtime loader for the compiled Fungrim artifact
-// (FUNGRIM-PLAN-5-LOADER.md §2.1, §2.2 runtime half, §2.8 — milestone M2;
+// (docs/fungrim/FUNGRIM-PLAN-5-LOADER.md §2.1, §2.2 runtime half, §2.8 — milestone M2;
 // extended in Phase 3 to complex-domain guards: part-cmp/member guard kinds
 // and the `complex` type guard, discharged through the Track-3 assumptions
 // machinery).

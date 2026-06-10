@@ -3,7 +3,7 @@
 A machine-translated snapshot of the [Fungrim](https://fungrim.org) (Mathematical
 Functions Grimoire) formula collection, expressed as MathJSON, annotated for
 Compute Engine consumption. This is the Phase-0 deliverable of the Fungrim
-integration plan (`FUNGRIM-PLAN-1-TRANSLATOR.md` at the repository root).
+integration plan (`docs/fungrim/FUNGRIM-PLAN-1-TRANSLATOR.md` at the repository root).
 
 ## Provenance
 

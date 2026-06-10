@@ -1,5 +1,5 @@
 /**
- * M0 baseline for the rule-dispatch track (FUNGRIM-PLAN-2-RULES.md §3 M0).
+ * M0 baseline for the rule-dispatch track (docs/fungrim/FUNGRIM-PLAN-2-RULES.md §3 M0).
  *
  * This suite is the pre/post-index EQUIVALENCE ORACLE for the
  * operator-indexed rule dispatch work (Feature A): it snapshots the result of

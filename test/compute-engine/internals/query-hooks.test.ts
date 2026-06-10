@@ -4,7 +4,7 @@ import { getInequalityBoundsFromAssumptions } from '../../../src/compute-engine/
 
 import '../../utils'; // For snapshot serializers
 
-// P3 of FUNGRIM-PLAN-3-ASSUMPTIONS.md: the query/discharge hooks (§5.1).
+// P3 of docs/fungrim/FUNGRIM-PLAN-3-ASSUMPTIONS.md: the query/discharge hooks (§5.1).
 //
 // This is the query-side acceptance suite for the design §11 cases:
 // relational operators over constraint subjects (a), sgn fallbacks for the

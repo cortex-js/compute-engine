@@ -1,5 +1,5 @@
 // Public types for the Fungrim Phase-1 identities loader
-// (FUNGRIM-PLAN-5-LOADER.md §2.1, §2.2, §2.8 — milestone M2).
+// (docs/fungrim/FUNGRIM-PLAN-5-LOADER.md §2.1, §2.2, §2.8 — milestone M2).
 //
 // These types describe the checked-in compiled artifact
 // (`fungrim-core-data.json`, produced by `scripts/fungrim/compile-rules.ts`)
@@ -17,7 +17,7 @@ export type FungrimMathJson = unknown;
 
 /**
  * A declarative guard specification, compiled offline from a corpus entry's
- * assumptions (FUNGRIM-PLAN-5-LOADER.md §2.2). The runtime loader turns each
+ * assumptions (docs/fungrim/FUNGRIM-PLAN-5-LOADER.md §2.2). The runtime loader turns each
  * spec into a tri-valued condition closure; every predicate must return a
  * definitive positive for the rule to fire (fail-closed).
  */
@@ -124,14 +124,14 @@ export type FungrimRuleData = {
  * Debug hook invoked when a rule's condition fails specifically because a
  * guard predicate returned `undefined` (unknown) — as opposed to a
  * definitive negative. Converts "the rule silently didn't fire" into an
- * actionable trace (FUNGRIM-PLAN-5-LOADER.md §2.8).
+ * actionable trace (docs/fungrim/FUNGRIM-PLAN-5-LOADER.md §2.8).
  */
 export type FungrimGuardUndecidedHandler = (
   ruleId: string,
   wildcards: BoxedSubstitution
 ) => void;
 
-/** Options for `loadIdentities()` (FUNGRIM-PLAN-5-LOADER.md §2.1). */
+/** Options for `loadIdentities()` (docs/fungrim/FUNGRIM-PLAN-5-LOADER.md §2.1). */
 export type FungrimLoadOptions = {
   /** Only load rules tagged with at least one of these corpus topics. */
   topics?: ReadonlyArray<string>;
@@ -150,7 +150,7 @@ export type FungrimLoadOptions = {
   data?: FungrimRuleData;
 };
 
-/** The report returned by `loadIdentities()` (FUNGRIM-PLAN-5-LOADER.md §2.8). */
+/** The report returned by `loadIdentities()` (docs/fungrim/FUNGRIM-PLAN-5-LOADER.md §2.8). */
 export type FungrimLoadReport = {
   /** Number of rules registered by this call. */
   loaded: number;

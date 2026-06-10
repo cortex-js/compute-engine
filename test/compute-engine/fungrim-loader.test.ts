@@ -1,6 +1,6 @@
 /**
  * Acceptance suite for the Fungrim Phase-1 runtime loader
- * (FUNGRIM-PLAN-5-LOADER.md §3 M2, §2.7, §2.8).
+ * (docs/fungrim/FUNGRIM-PLAN-5-LOADER.md §3 M2, §2.7, §2.8).
  *
  * Covers: load report shape, idempotence, topic/class/purpose filtering,
  * shell declarations, guard positive/negative controls (fail-closed),
@@ -169,7 +169,7 @@ describe('loadIdentities (full artifact)', () => {
     expect(ce.simplificationRules.length).toBe(countBefore);
   });
 
-  // -- Curated before/after examples (artifact rules, FUNGRIM-PLAN §2.7) ----
+  // -- Curated before/after examples (artifact rules, docs/fungrim/FUNGRIM-PLAN-5-LOADER.md §2.7) ----
 
   it('Gamma(1/2) → √π  [fungrim:f826a6]', () => {
     expect(
@@ -556,7 +556,7 @@ describe('solve routing', () => {
 });
 
 // ===========================================================================
-// M5 — Curated before/after acceptance suite (FUNGRIM-PLAN-5-LOADER.md §2.7,
+// M5 — Curated before/after acceptance suite (docs/fungrim/FUNGRIM-PLAN-5-LOADER.md §2.7,
 // §3 M5).
 //
 // Each case asserts the channel the rule actually serves (M2-documented

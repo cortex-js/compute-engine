@@ -3,7 +3,7 @@ import { ComputeEngine } from '../../../src/compute-engine';
 import '../../utils'; // For snapshot serializers
 
 // Three-valued membership discipline for the set library
-// (FUNGRIM-PLAN-3-ASSUMPTIONS.md §5.2 invariant: `true` only when entailed,
+// (docs/fungrim/FUNGRIM-PLAN-3-ASSUMPTIONS.md §5.2 invariant: `true` only when entailed,
 // `false` only when refuted, `undefined` otherwise).
 //
 // Covers the two P4 guard-census FIXABLE buckets:

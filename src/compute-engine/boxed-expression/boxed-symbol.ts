@@ -609,7 +609,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   get isFinite(): boolean | undefined {
     const fromValue = this.value?.isFinite;
     if (fromValue !== undefined) return fromValue;
-    // Type fallback (FUNGRIM-PLAN-3-ASSUMPTIONS.md §5.1e): a
+    // Type fallback (docs/fungrim/FUNGRIM-PLAN-3-ASSUMPTIONS.md §5.1e): a
     // `finite_number` refinement — e.g. from `assume(|q| < 1)` — entails
     // finiteness even without a value.
     const t = this.type;
@@ -673,7 +673,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
 
     // The type cannot prove real-ness. A stored `NotElement(x, RealNumbers)`
     // fact — e.g. derived from `assume(Im(x) > 0)` — refutes it
-    // (FUNGRIM-PLAN-3-ASSUMPTIONS.md §5.1e): types cannot express negation.
+    // (docs/fungrim/FUNGRIM-PLAN-3-ASSUMPTIONS.md §5.1e): types cannot express negation.
     if (hasAssumptions(this.engine)) {
       const facts = getFactIndex(this.engine).membership.get(this._id);
       if (facts?.notIn.some((s) => isSymbol(s, 'RealNumbers'))) return false;

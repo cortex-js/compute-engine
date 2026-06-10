@@ -1,5 +1,5 @@
 // Unit tests for the offline Fungrim rule compiler
-// (FUNGRIM-PLAN-5-LOADER.md §2.2–§2.5, milestone M1).
+// (docs/fungrim/FUNGRIM-PLAN-5-LOADER.md §2.2–§2.5, milestone M1).
 //
 // Fixture-corpus tests: guard-shape mappings, fail-closed guard exclusion,
 // the three orientation cases (cheaper-RHS, cheaper-LHS-with-var-subset,

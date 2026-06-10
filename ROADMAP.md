@@ -12,8 +12,8 @@ and the full correctness/performance sweep from the June codebase review
 captures what comes next, in priority order, with enough context to start each
 item cold.
 
-Related documents: `FUNGRIM.md` (feasibility analysis and feature map A–E),
-`FUNGRIM-PLAN-1…5` (executed plans for the translator, rule mechanics,
+Related documents: `docs/fungrim/FUNGRIM.md` (feasibility analysis and feature map A–E),
+`docs/fungrim/FUNGRIM-PLAN-1…5` (executed plans for the translator, rule mechanics,
 assumptions, and loader — useful as architecture references), `data/fungrim/`
 (the translated corpus + manifest), `scripts/fungrim/` (translator-side tooling:
 rule compiler, validation harness, guard census).
@@ -134,17 +134,21 @@ sets, WeakMap-memoized per-expression feature sets in
 
 ### 6. Corpus refresh from live fungrim.org + upstream contributions
 
-**What:** the local snapshot (`~/dev/fungrim-master`, pinned by SHA-256 in
-`data/fungrim/MANIFEST.json`) dates from ~2019–2021. The live site has more
-entries and — important for shell quality — more `SymbolDefinition` domain
-tables (only 48 of 228 in the snapshot have them; signature inference covers
-the rest). The translator (`grim2mathjson`) re-runs in seconds and is
-deterministic, so the refresh diff is reviewable.
+**What:** the corpus source (the published fork
+[`arnog/fungrim`](https://github.com/arnog/fungrim), pinned by commit in
+`data/fungrim/MANIFEST.json`; its `master` tracks upstream) mirrors an
+upstream state from ~2019–2021. The live fungrim.org has more entries and —
+important for shell quality — more `SymbolDefinition` domain tables (only 48
+of 228 in the pinned tree have them; signature inference covers the rest).
+Refresh = `git pull upstream master` in the fork, rebase `grim2mathjson`,
+re-run the translator (seconds, deterministic), review the corpus diff,
+re-validate.
 
-**Also:** report upstream the two malformed entries found during validation
-(`6c2b31`, `e54e61` — `powers.py` multiplies an `Equal(...)` by a value), and
-consider offering the `grim2mathjson` translator to the Fungrim project —
-goodwill, and a sync path for future refreshes.
+**Status:** the two malformed upstream entries (`6c2b31`/`e54e61`
+Equal-times-expression; plus the `Element(w, tau)` ×24 typo in
+jacobi_theta.py) have been reported upstream. Offering the `grim2mathjson`
+translator as an upstream PR remains open — goodwill, and a sync path for
+future refreshes.
 
 **Effort:** ~2–3 days for the refresh + re-validation cycle.
 
@@ -157,7 +161,7 @@ goodwill, and a sync path for future refreshes.
 **What:** `data/fungrim/properties.json` ships 131 extracted records — poles,
 zeros, branch points, branch cuts, residues, holomorphic domains, keyed by
 operator — that nothing consumes yet. Build the per-operator metadata store
-sketched in `FUNGRIM.md` §4 Feature E: `ce.functionProperties('Gamma').poles →
+sketched in `docs/fungrim/FUNGRIM.md` §4 Feature E: `ce.functionProperties('Gamma').poles →
 ℤ≤0`-style queries feeding (a) branch-cut-safe simplification guards, (b)
 pole-aware `N()` (return `ComplexInfinity` at poles instead of garbage), and
 (c) the foundation for symbolic limits and residues — the next genuinely new
@@ -171,7 +175,7 @@ work. Start by defining the query API and wiring `Gamma`/`Zeta` poles into
 
 **What:** 87 complex-domain corpus entries remain undischargeable because
 their guards are `Or`-rooted (the assumptions design deliberately scoped
-disjunction out — see `FUNGRIM-PLAN-3-ASSUMPTIONS.md` §7 non-goals). The
+disjunction out — see `docs/fungrim/FUNGRIM-PLAN-3-ASSUMPTIONS.md` §7 non-goals). The
 remaining ~43 failures are symbolic bounds (`|z| < φ−1`), which the
 assume-side decomposition deliberately drops.
 

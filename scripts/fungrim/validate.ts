@@ -1,5 +1,5 @@
 // Fungrim corpus validation harness — CLI entry point
-// (FUNGRIM-PLAN-1-TRANSLATOR.md §5, milestone M5).
+// (docs/fungrim/FUNGRIM-PLAN-1-TRANSLATOR.md §5, milestone M5).
 //
 // Usage (from the repo root):
 //   npx tsx scripts/fungrim/validate.ts --corpus data/fungrim \

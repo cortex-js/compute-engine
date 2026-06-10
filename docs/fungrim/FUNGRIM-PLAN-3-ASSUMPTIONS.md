@@ -2,7 +2,7 @@
 
 **Status:** Draft design document (not an implementation plan)
 **Scope:** `ce.assume()`, the assumptions store, `verify()`/`ask()`, symbol predicates, and rule-guard discharge in the Compute Engine
-**Driving requirement:** FUNGRIM.md §4 Feature B — discharge the `complex-domain` guard slice of the Fungrim corpus (theta, modular, hypergeometric, gamma reflection/multiplication families)
+**Driving requirement:** docs/fungrim/FUNGRIM.md §4 Feature B — discharge the `complex-domain` guard slice of the Fungrim corpus (theta, modular, hypergeometric, gamma reflection/multiplication families)
 
 ---
 
@@ -190,7 +190,7 @@ Invariant stated for the whole layer: **a predicate evaluation may return `True`
 
 - **Concrete element** (value known): the `contains` handler decides. No change except the §5.2(2) undefined-audit.
 - **Symbolic element**: `Element.evaluate` falls through `contains` (now honestly `undefined`) into the new fact-index lookup + structural decomposition of §5.1(c).
-- **Inert sets** (`AlgebraicNumbers`, `SL2Z`, `ZZp` — FUNGRIM.md §4.F): declared as set symbols with no `contains`; membership works purely by exact-match facts. That is all the modular topics need.
+- **Inert sets** (`AlgebraicNumbers`, `SL2Z`, `ZZp` — docs/fungrim/FUNGRIM.md §4.F): declared as set symbols with no `contains`; membership works purely by exact-match facts. That is all the modular topics need.
 - `domainToType` (`utils.ts:154`) is extended only marginally (e.g. recognize `NonNegativeIntegers` etc. where a type exists); it is no longer the gatekeeper whose failure throws — its failure now routes to fact storage.
 
 ---
@@ -250,7 +250,7 @@ P0–P1 are independently shippable; P2 and P3 can land behind tests without the
 
 ## 11. Validation Strategy
 
-**Target slice:** with this design, the Fungrim `guardLevel: complex-domain` annotation (FUNGRIM.md §2 translator output) becomes the loadable slice — guards composed of part-inequalities vs constants, `SetMinus`/finite-exclusion membership, `NotEqual`, and conjunctions thereof. The translator's offline `guardLevel` computation is re-run against the *implemented* capability list so the active rule set stays honest (FUNGRIM.md §6, "guard discharge failures are silent").
+**Target slice:** with this design, the Fungrim `guardLevel: complex-domain` annotation (docs/fungrim/FUNGRIM.md §2 translator output) becomes the loadable slice — guards composed of part-inequalities vs constants, `SetMinus`/finite-exclusion membership, `NotEqual`, and conjunctions thereof. The translator's offline `guardLevel` computation is re-run against the *implemented* capability list so the active rule set stays honest (docs/fungrim/FUNGRIM.md §6, "guard discharge failures are silent").
 
 **Acceptance tests** — each asserts (i) `assume()` returns `'ok'`, (ii) the guard `verify()`s to `true` under the assumption and to `undefined` without it, (iii) a guarded rule fires only under (ii)-true, and (iv) no destructive retype occurred (`s.type` unchanged or only narrowed to `number`):
 
