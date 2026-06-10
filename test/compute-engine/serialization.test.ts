@@ -330,3 +330,23 @@ describe('toMathJson shorthands option', () => {
     expect(Array.isArray(result)).toBe(true);
   });
 });
+
+// REVIEW.md G6: BoxedString.json dropped the MathJSON '...' string delimiters
+// for symbol-like content, so re-boxing the serialized JSON yielded a *symbol*
+// instead of a string — a round-trip identity loss. A string literal must
+// always be single-quote wrapped.
+describe('String round-trip (REVIEW.md G6)', () => {
+  for (const s of ['world', 'hello', 'hello world', '123', '']) {
+    test(`ce.string(${JSON.stringify(s)}) round-trips as a string`, () => {
+      const str = ce.string(s);
+      const reboxed = ce.box(str.json as any);
+      expect(reboxed.type.toString()).toBe('string');
+      expect(reboxed.string).toBe(s);
+      expect(str.isSame(reboxed)).toBe(true);
+    });
+  }
+
+  test('symbol-like string json is quoted, not bare', () => {
+    expect(ce.string('world').json).toBe("'world'");
+  });
+});

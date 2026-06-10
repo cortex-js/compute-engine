@@ -366,9 +366,12 @@ describe('Dictionary', () => {
 
       if (isDictionary(dict)) {
         const items = Array.from(dict.each()).map((item: any) => item.json);
+        // Keys are string literals (`{ str: 'x' }`), so they serialize as the
+        // quoted MathJSON string form `'x'` (not the bare `x`, which would
+        // re-box as a symbol — see REVIEW.md G6).
         expect(items).toEqual([
-          ['Tuple', 'x', 120],
-          ['Tuple', 'y', 36],
+          ['Tuple', "'x'", 120],
+          ['Tuple', "'y'", 36],
         ]);
       }
     });

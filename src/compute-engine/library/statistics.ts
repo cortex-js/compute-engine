@@ -1,4 +1,4 @@
-import { erf, erfInv } from '../numerics/special-functions';
+import { erf, erfc, erfInv } from '../numerics/special-functions';
 import {
   bigInterquartileRange,
   bigKurtosis,
@@ -50,7 +50,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       evaluate: (ops, { engine: ce }) => {
         const x = ops[0].re;
         if (!Number.isFinite(x)) return undefined;
-        return ce.number(1 - erf(x));
+        return ce.number(erfc(x));
       },
     },
 

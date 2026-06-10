@@ -373,7 +373,14 @@ export function box(
   //  Box a function
   //
   if (Array.isArray(expr)) {
-    if (typeof expr[0] !== 'string')
+    if (typeof expr[0] !== 'string') {
+      // A function-literal head (or any boxed/array expression head) is
+      // treated as an application, e.g.
+      //   [["Function", body, "x"], arg] ≡ ["Apply", ["Function", body, "x"], arg]
+      // This matches the explicit `Apply` form, which already beta-reduces.
+      if (Array.isArray(expr[0]) || expr[0] instanceof _BoxedExpression)
+        return box(ce, ['Apply', ...expr] as ExpressionInput, options);
+
       throw new Error(
         `The first element of an array should be a string (the function name): ${JSON.stringify(
           expr,
@@ -381,6 +388,7 @@ export function box(
           4
         )}`
       );
+    }
 
     return canonicalForm(
       boxFunction(ce, expr[0], expr.slice(1) as ExpressionInput[], {

@@ -232,3 +232,31 @@ describe('Changing type from function to non-function', () => {
     engine.popScope();
   });
 });
+
+// REVIEW.md G4: a function-literal head, e.g. [["Function", body, "x"], arg],
+// used to throw ("The first element of an array should be a string"), even
+// though the explicit ["Apply", ["Function", ...], arg] form worked. Boxing a
+// function-literal head now beta-reduces, consistent with Apply.
+describe('Function-literal head application (G4)', () => {
+  test('[[Function, x+1, x], 5] beta-reduces to 6', () =>
+    expect(
+      engine.box([['Function', ['Add', 'x', 1], 'x'], 5]).evaluate().re
+    ).toBe(6));
+
+  test('parity with explicit Apply form', () => {
+    const direct = engine
+      .box([['Function', ['Add', 'x', 1], 'x'], 5])
+      .evaluate();
+    const viaApply = engine
+      .box(['Apply', ['Function', ['Add', 'x', 1], 'x'], 5])
+      .evaluate();
+    expect(direct.isSame(viaApply)).toBe(true);
+  });
+
+  test('multi-argument lambda head', () =>
+    expect(
+      engine
+        .box([['Function', ['Add', 'x', 'y'], 'x', 'y'], 3, 4])
+        .evaluate().re
+    ).toBe(7));
+});

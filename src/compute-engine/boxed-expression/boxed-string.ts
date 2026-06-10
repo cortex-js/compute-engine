@@ -11,7 +11,6 @@ import { _BoxedExpression } from './abstract-boxed-expression';
 import { hashCode, isExpression } from './utils';
 import { isWildcard, wildcardName } from './pattern-utils';
 import { BoxedType } from '../../common/type/boxed-type';
-import { matchesNumber, matchesSymbol } from '../../math-json/utils';
 
 /**
  * BoxedString
@@ -32,9 +31,10 @@ export class BoxedString extends _BoxedExpression implements StringInterface {
     this._string = expr.normalize();
   }
   get json(): string {
-    return !(matchesSymbol(this._string) && !matchesNumber(this._string))
-      ? `'${this._string}'`
-      : this._string;
+    // A MathJSON string literal must always be wrapped in single quotes.
+    // Emitting the bare string for symbol-like content (e.g. "world") would
+    // re-box as a *symbol*, not a string, losing round-trip identity.
+    return `'${this._string}'`;
   }
   get hash(): number {
     return hashCode('String' + this._string);

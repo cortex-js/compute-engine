@@ -168,7 +168,8 @@ describe('Logic', () => {
   it('should parse complex nested logic expressions', () => {
     // AND binds tighter than OR: a = b ∧ c = d ∨ g = f → ((a = b) ∧ (c = d)) ∨ (g = f)
     // Note: using 'g' instead of 'e' since 'e' is parsed as ExponentialE
-    expect(ce.parse('a = b \\land c = d \\lor g = f').json).toMatchInlineSnapshot(`
+    expect(ce.parse('a = b \\land c = d \\lor g = f').json)
+      .toMatchInlineSnapshot(`
       [
         Or,
         [
@@ -332,7 +333,8 @@ describe('Logic', () => {
 
   it('should parse mixed comparisons and logic', () => {
     // Multiple comparisons with multiple logic operators
-    expect(ce.parse('x = 1 \\land y = 2 \\land z = 3').json).toMatchInlineSnapshot(`
+    expect(ce.parse('x = 1 \\land y = 2 \\land z = 3').json)
+      .toMatchInlineSnapshot(`
       [
         And,
         [
@@ -371,7 +373,8 @@ describe('Logic', () => {
     `);
 
     // Complex: (a ≤ b) ∧ (b ≤ c) → (a ≤ c)
-    expect(ce.parse('a \\leq b \\land b \\leq c \\implies a \\leq c').json).toMatchInlineSnapshot(`
+    expect(ce.parse('a \\leq b \\land b \\leq c \\implies a \\leq c').json)
+      .toMatchInlineSnapshot(`
       [
         Implies,
         [
@@ -650,7 +653,7 @@ describe('Logic', () => {
           Factorial,
           [
             Error,
-            missing,
+            'missing',
             [
               LatexString,
               '!',
@@ -1084,13 +1087,21 @@ describe('Predicate', () => {
 
   it('should allow Predicate in boolean contexts', () => {
     // Predicate should work as argument to And, Or, Not, etc.
-    const expr1 = ce.expr(['And', ['Predicate', 'P', 'x'], ['Predicate', 'Q', 'x']]);
+    const expr1 = ce.expr([
+      'And',
+      ['Predicate', 'P', 'x'],
+      ['Predicate', 'Q', 'x'],
+    ]);
     expect(expr1.type.toString()).toBe('boolean');
 
     const expr2 = ce.expr(['Not', ['Predicate', 'P', 'x']]);
     expect(expr2.type.toString()).toBe('boolean');
 
-    const expr3 = ce.expr(['Implies', ['Predicate', 'P', 'x'], ['Predicate', 'Q', 'x']]);
+    const expr3 = ce.expr([
+      'Implies',
+      ['Predicate', 'P', 'x'],
+      ['Predicate', 'Q', 'x'],
+    ]);
     expect(expr3.type.toString()).toBe('boolean');
   });
 

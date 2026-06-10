@@ -53,7 +53,6 @@ describe('STYLE - TEXT MODE', () => {
         "b"
       ]
       eval-auto = "a black RED b"
-      eval-mach = "a black \\"RED\\" b"
     `);
 
     expect(check('a\\text{ black \\color{red}RED\\color{blue}BLUE} b'))
@@ -78,7 +77,6 @@ describe('STYLE - TEXT MODE', () => {
         "b"
       ]
       eval-auto = "a black REDBLUEb"
-      eval-mach = "a black \\"RED\\"\\"BLUE\\"b"
     `);
     expect(check('a\\text{ black \\textcolor{red}{RED} black} b'))
       .toMatchInlineSnapshot(`
@@ -102,7 +100,6 @@ describe('STYLE - TEXT MODE', () => {
         "b"
       ]
       eval-auto = "a black RED blackb"
-      eval-mach = "a black \\"RED\\" blackb"
     `);
 
     expect(
@@ -374,7 +371,11 @@ describe('TEXT KEYWORDS', () => {
 
 describe('SPACING COMMANDS', () => {
   test('\\hspace{dim} is skipped', () => {
-    expect(engine.parse('x\\hspace{1em}y').json).toEqual(['Multiply', 'x', 'y']);
+    expect(engine.parse('x\\hspace{1em}y').json).toEqual([
+      'Multiply',
+      'x',
+      'y',
+    ]);
   });
 
   test('\\hspace*{dim} is skipped', () => {
@@ -394,11 +395,7 @@ describe('SPACING COMMANDS', () => {
   });
 
   test('\\kern with decimal dimension is skipped', () => {
-    expect(engine.parse('x\\kern0.5em y').json).toEqual([
-      'Multiply',
-      'x',
-      'y',
-    ]);
+    expect(engine.parse('x\\kern0.5em y').json).toEqual(['Multiply', 'x', 'y']);
   });
 
   test('\\hskip with dimension is skipped', () => {

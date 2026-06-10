@@ -112,6 +112,25 @@
     JS-number denominator but `NaN` for a boxed zero; both are now
     `ComplexInfinity`.
 
+- **Special-function, derivative, string, and boxing fixes**:
+  - **`Erf`/`Erfc` were only ~7-digit accurate** — the kernel used the 5-term
+    Abramowitz & Stegun approximation. It now uses a full machine-precision
+    series for `Erf` and a continued fraction for `Erfc` (so large arguments
+    like `Erfc(10)` no longer lose all precision to `1 - Erf` cancellation).
+  - **Derivative of a function with no derivative table could overflow the
+    stack** — evaluating `Apply(Derivative(Function(AiryAi(z), z), 1), 0)`
+    recursed forever; the unresolved symbolic derivative is now applied
+    structurally and stays symbolic (`Apply(Derivative("AiryAi", 1), 0)`).
+  - **String literals lost their type on round-trip** — `BoxedString.json`
+    omitted the MathJSON `'…'` delimiters for symbol-like content (e.g.
+    `"world"`), so re-boxing the serialized JSON yielded a *symbol*. String
+    literals now always serialize quoted. (This also makes embedded strings —
+    error codes, `\text{…}` content, dictionary keys — round-trip faithfully.)
+  - **A function-literal head threw instead of applying** — boxing
+    `[["Function", body, "x"], arg]` raised an error, even though the explicit
+    `["Apply", …]` form beta-reduced; a function-literal head is now treated as
+    an application.
+
 - **More numeric-value correctness fixes**:
   - **`NumericValue` n-th root lost precision** — `root(n)` computed `pow(1/n)`
     with a machine-precision reciprocal, so the result had only ~17 correct

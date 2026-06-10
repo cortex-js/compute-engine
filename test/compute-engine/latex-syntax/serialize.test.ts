@@ -253,7 +253,7 @@ describe('LATEX', () => {
         LatexString,
         [
           Error,
-          missing,
+          'missing',
         ],
       ]
     `);
@@ -265,8 +265,8 @@ describe('LATEX', () => {
           [
             ErrorCode,
             'incompatible-type',
-            string,
-            finite_integer,
+            'string',
+            'finite_integer',
           ],
         ],
       ]
@@ -291,7 +291,7 @@ describe('LATEX', () => {
         Parse,
         [
           Error,
-          missing,
+          'missing',
         ],
       ]
     `);
@@ -318,8 +318,8 @@ describe('LATEX', () => {
           [
             ErrorCode,
             'incompatible-type',
-            string,
-            finite_real,
+            'string',
+            'finite_real',
           ],
         ],
       ]

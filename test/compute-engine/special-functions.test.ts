@@ -490,3 +490,39 @@ describe('FACTORIAL', () => {
     expect(ce.parse('-3!').N().toString()).toBe('-6');
   });
 });
+
+// REVIEW.md G1: the Erf/Erfc kernel was the 5-term Abramowitz & Stegun
+// approximation, only ~7-digit accurate. It now uses a full machine-precision
+// series (erf) and continued fraction (erfc, for large |x|).
+describe('ERROR FUNCTION (REVIEW.md G1)', () => {
+  test('Erf(1) full precision ≈ 0.84270079294971...', () => {
+    expectApprox(ce.box(['Erf', 1]), 0.8427007929497149, 1e-14);
+  });
+
+  test('Erf(0.5) full precision', () => {
+    expectApprox(ce.box(['Erf', 0.5]), 0.5204998778130465, 1e-14);
+  });
+
+  test('Erf is odd: Erf(-1) = -Erf(1)', () => {
+    expectApprox(ce.box(['Erf', -1]), -0.8427007929497149, 1e-14);
+  });
+
+  test('Erfc(0.5) full precision ≈ 0.47950012218695...', () => {
+    expectApprox(ce.box(['Erfc', 0.5]), 0.4795001221869534, 1e-14);
+  });
+
+  // For large x, the old `1 - erf(x)` lost all precision (erf ≈ 1). The
+  // continued-fraction path keeps these accurate.
+  test('Erfc(5) ≈ 1.5374597944e-12 (no 1-erf cancellation)', () => {
+    expectApprox(ce.box(['Erfc', 5]), 1.5374597944280349e-12, 1e-12);
+  });
+
+  test('Erfc(10) ≈ 2.0884875838e-45', () => {
+    expectApprox(ce.box(['Erfc', 10]), 2.0884875837625448e-45, 1e-12);
+  });
+
+  test('Erf(0) = 0, Erfc(0) = 1', () => {
+    expect(ce.box(['Erf', 0]).N().re).toBe(0);
+    expect(ce.box(['Erfc', 0]).N().re).toBe(1);
+  });
+});

@@ -80,8 +80,8 @@ describe('DELIMITERS', () => {
           [
             ErrorCode,
             'incompatible-type',
-            indexed_collection,
-            function,
+            'indexed_collection',
+            'function',
           ],
         ],
         3,
@@ -95,8 +95,8 @@ describe('DELIMITERS', () => {
           [
             ErrorCode,
             'incompatible-type',
-            indexed_collection,
-            function,
+            'indexed_collection',
+            'function',
           ],
         ],
         3,

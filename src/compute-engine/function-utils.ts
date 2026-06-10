@@ -252,6 +252,22 @@ export function apply(
   fn: Expression,
   args: ReadonlyArray<Expression>
 ): Expression {
+  // An unresolved symbolic derivative applied to an argument must stay
+  // symbolic. `derivative()` represents the derivative of a function with no
+  // known derivative as the self-applied lambda `Apply(Derivative(f, n), _)`.
+  // Letting `makeLambda` beta-reduce and re-evaluate that body would
+  // re-evaluate the inner `Derivative`, regenerating the same lambda and
+  // recursing forever (stack overflow). Instead, substitute the argument
+  // structurally — swap the placeholder operand for the actual argument — so
+  // `Apply(Derivative(f, n), 0)` is returned unevaluated.
+  if (
+    args.length === 1 &&
+    isFunction(fn, 'Apply') &&
+    fn.op1?.operator === 'Derivative'
+  ) {
+    return fn.engine._fn('Apply', [fn.op1, args[0]]);
+  }
+
   const result = makeLambda(fn)?.(args);
   if (result) return result;
   return fn.engine.function('Apply', [fn, ...args]);

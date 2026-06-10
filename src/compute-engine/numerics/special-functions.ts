@@ -109,43 +109,78 @@ export function erfInv(x: number): number {
 }
 
 /**
- * Trivial function, used when compiling.
+ * Complementary error function, erfc(x) = 1 - erf(x), accurate to full
+ * machine (double) precision.
+ *
+ * For |x| < 2 the value is computed as `1 - erf(x)` (no significant
+ * cancellation). For larger |x|, `1 - erf(x)` would lose all precision
+ * (erf(x) ≈ 1), so erfc is computed directly from a continued fraction
+ * (DLMF 7.9.3) evaluated with the modified Lentz algorithm.
+ *
+ * References:
+ * - NIST DLMF: https://dlmf.nist.gov/7.9
  */
 export function erfc(x: number): number {
-  return 1 - erf(x);
+  if (Number.isNaN(x)) return NaN;
+  if (!Number.isFinite(x)) return x > 0 ? 0 : 2;
+  if (x < 0) return 2 - erfc(-x);
+  if (x < 2) return 1 - erf(x);
+
+  // erfc(x) = e^{-x²} / (√π · g),  where
+  //   g = x + (1/2)/(x + (2/2)/(x + (3/2)/(x + ...)))   (continued fraction)
+  // evaluated with the modified Lentz algorithm.
+  const tiny = 1e-300;
+  let f = x === 0 ? tiny : x;
+  let c = f;
+  let d = 0;
+  for (let k = 1; k <= 500; k++) {
+    const a = k / 2;
+    d = x + a * d;
+    if (d === 0) d = tiny;
+    d = 1 / d;
+    c = x + a / c;
+    if (c === 0) c = tiny;
+    const delta = c * d;
+    f *= delta;
+    if (Math.abs(delta - 1) < 1e-17) break;
+  }
+  return Math.exp(-x * x) / (Math.sqrt(Math.PI) * f);
 }
 
 /**
- * An approximation of the gaussian error function, Erf(), using
- * Abramowitz and Stegun approximation.
- * 
- * Thoughts for future improvements:
- * - https://math.stackexchange.com/questions/321569/approximating-the-error-function-erf-by-analytical-functions
- * - https://en.wikipedia.org/wiki/Error_function#Approximation_with_elementary_functions
-
- * 
+ * The Gauss error function, erf(x), accurate to full machine (double)
+ * precision.
+ *
+ * Computed from the well-conditioned Maclaurin series (DLMF 7.6.2):
+ *   erf(x) = (2/√π) e^{-x²} Σ_{n≥0} 2^n x^{2n+1} / (1·3·5···(2n+1))
+ * All terms are positive, so there is no subtractive cancellation. For
+ * |x| ≥ 6 the result rounds to ±1 (erfc(6) ≈ 2.15e-17, below machine eps).
+ *
+ * (Previously used the 5-term Abramowitz & Stegun rational approximation,
+ * which was only ~7-digit accurate.)
+ *
  * References:
- * - NIST: https://dlmf.nist.gov/7.24#i
+ * - NIST DLMF: https://dlmf.nist.gov/7.6
  */
-
 export function erf(x: number): number {
-  const a1 = 0.254829592;
-  const a2 = -0.284496736;
-  const a3 = 1.421413741;
-  const a4 = -1.453152027;
-  const a5 = 1.061405429;
-  const p = 0.3275911;
+  if (Number.isNaN(x)) return NaN;
+  if (x === 0) return 0;
+  if (!Number.isFinite(x)) return x > 0 ? 1 : -1;
 
-  // Save the sign of x
   const sign = x < 0 ? -1 : 1;
-  x = Math.abs(x);
+  const ax = Math.abs(x);
+  if (ax >= 6) return sign;
 
-  // Abramowitz and Stegun approximation
-  // https://personal.math.ubc.ca/~cbm/aands/page_299.htm
-  const t = 1.0 / (1.0 + p * x);
-  const y = ((((a5 * t + a4) * t + a3) * t + a2) * t + a1) * t;
-
-  return sign * (1 - y * Math.exp(-x * x));
+  const x2 = ax * ax;
+  let term = ax; // n = 0 term: x
+  let sum = ax;
+  for (let n = 1; n < 200; n++) {
+    // term_{n} = term_{n-1} · 2x² / (2n+1)
+    term *= (2 * x2) / (2 * n + 1);
+    sum += term;
+    if (term < sum * 1e-18) break;
+  }
+  return sign * (2 / Math.sqrt(Math.PI)) * Math.exp(-x2) * sum;
 }
 
 /**

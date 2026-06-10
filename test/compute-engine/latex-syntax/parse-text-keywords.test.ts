@@ -48,15 +48,16 @@ describe('TEXT KEYWORDS', () => {
   });
 
   test('\\text{andy} is NOT a keyword (text run)', () => {
-    expect(ce.parse('\\text{andy}').json).toMatchInlineSnapshot(`andy`);
+    expect(ce.parse('\\text{andy}').json).toMatchInlineSnapshot(`'andy'`);
   });
 
   test('\\text{organic} is NOT a keyword (text run)', () => {
-    expect(ce.parse('\\text{organic}').json).toMatchInlineSnapshot(`organic`);
+    expect(ce.parse('\\text{organic}').json).toMatchInlineSnapshot(`'organic'`);
   });
 
   test('\\text{if and only if} as biconditional', () => {
-    expect(ce.parse('P \\text{ if and only if } Q').json).toMatchInlineSnapshot(`
+    expect(ce.parse('P \\text{ if and only if } Q').json)
+      .toMatchInlineSnapshot(`
       [
         Equivalent,
         P,
