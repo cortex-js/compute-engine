@@ -47,7 +47,7 @@ fi
 export BUILD="${1-production}"
 
 # export TARGETS="math-json cortex compute-engine"
-export TARGETS="math-json latex-syntax interval numerics core compile compute-engine"
+export TARGETS="math-json latex-syntax interval numerics core compile identities compute-engine"
 
 # export GIT_VERSION=`git describe --long --dirty`
 
@@ -106,6 +106,14 @@ fi
 if [[ "$TARGETS" == *compile* ]]; then
   npx tsc --target "es2022" -d --moduleResolution "node" --allowImportingTsExtensions "true" \
     --emitDeclarationOnly --outDir ./dist/types ./src/compile.ts
+fi
+if [[ "$TARGETS" == *identities* ]]; then
+  # --resolveJsonModule/--esModuleInterop: the identities entry imports the
+  # compiled rule artifact (fungrim-core-data.json); these flags are not in
+  # the root tsconfig and CLI invocations ignore tsconfig.
+  npx tsc --target "es2022" -d --moduleResolution "node" --allowImportingTsExtensions "true" \
+    --resolveJsonModule --esModuleInterop \
+    --emitDeclarationOnly --outDir ./dist/types ./src/identities.ts
 fi
 echo -e $LINECLEAR$BASENAME$CHECK$DIM" Building TypeScript declaration files$RESET"
 

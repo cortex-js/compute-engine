@@ -84,6 +84,12 @@
       "import": "./dist/compile.min.esm.js",
       "require": "./dist/compile.min.umd.cjs",
       "default": "./dist/compile.min.esm.js"
+    },
+    "./identities": {
+      "types": "./dist/types/identities.d.ts",
+      "import": "./dist/identities.min.esm.js",
+      "require": "./dist/identities.min.umd.cjs",
+      "default": "./dist/identities.min.esm.js"
     }
   },
   "main": "./dist/compute-engine.min.esm.js",

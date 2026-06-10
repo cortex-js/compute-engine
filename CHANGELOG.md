@@ -24,9 +24,6 @@
   `compileLedger`). Engines that don't import the subpath pay no bundle
   cost.
 
-  _The subpath name `@cortex-js/compute-engine/identities` is provisional,
-  pending final naming._
-
 - **Comparison and simplification correctness fixes**:
   - An operator's equality handler returning `false` (definitely *not* equal)
     was treated as *equal*, so unordered values such as lists compared as `<=`.
