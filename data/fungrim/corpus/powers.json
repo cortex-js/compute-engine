@@ -697,25 +697,25 @@
   {
    "id": "6c2b31",
    "formula": [
-    "Multiply",
+    "Equal",
     [
-     "Equal",
+     "Power",
+     "z",
      [
-      "Power",
-      "z",
-      [
-       "Add",
-       "n",
-       1
-      ]
-     ],
+      "Add",
+      "n",
+      1
+     ]
+    ],
+    [
+     "Multiply",
      [
       "Power",
       "z",
       "n"
-     ]
-    ],
-    "z"
+     ],
+     "z"
+    ]
    ],
    "variables": [
     "n",
@@ -754,7 +754,7 @@
      ]
     ]
    ],
-   "class": "other",
+   "class": "identity",
    "subclass": null,
    "heads": [],
    "guardLevel": "complex-domain",

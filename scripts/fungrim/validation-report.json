@@ -1,17 +1,17 @@
 {
-  "generated": "2026-06-10T00:58:57.093Z",
+  "generated": "2026-06-10T23:41:54.170Z",
   "corpus": "/Users/arno/dev/compute-engine/data/fungrim",
   "stage1": {
     "total": 2551,
-    "ok": 2544,
-    "boxError": 7,
+    "ok": 2546,
+    "boxError": 5,
     "unknownSymbol": 0,
     "timeout": 0,
-    "passRate": 0.9973,
-    "elapsedMs": 1762,
+    "passRate": 0.998,
+    "elapsedMs": 1166,
     "failureBuckets": [
       {
-        "error": "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"integer\",\"number\"]]",
+        "error": "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"'integer'\",\"'number'\"]]",
         "count": 3,
         "ids": [
           "33139b",
@@ -20,22 +20,14 @@
         ]
       },
       {
-        "error": "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"number\",\"boolean\"]]",
-        "count": 2,
-        "ids": [
-          "6c2b31",
-          "e54e61"
-        ]
-      },
-      {
-        "error": "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"integer\",\"finite_rational\"]]",
+        "error": "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"'integer'\",\"'finite_rational'\"]]",
         "count": 1,
         "ids": [
           "aaef97"
         ]
       },
       {
-        "error": "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"integer\",\"real\"]]",
+        "error": "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"'integer'\",\"'real'\"]]",
         "count": 1,
         "ids": [
           "acdce8"
@@ -93,11 +85,9 @@
       },
       "carlson_elliptic": {
         "total": 247,
-        "ok": 246,
-        "passRate": 0.996,
-        "failures": [
-          "e54e61"
-        ]
+        "ok": 247,
+        "passRate": 1,
+        "failures": []
       },
       "chebyshev": {
         "total": 82,
@@ -339,11 +329,9 @@
       },
       "powers": {
         "total": 13,
-        "ok": 12,
-        "passRate": 0.9231,
-        "failures": [
-          "6c2b31"
-        ]
+        "ok": 13,
+        "passRate": 1,
+        "failures": []
       },
       "prime_numbers": {
         "total": 11,
@@ -404,16 +392,8 @@
         "topic": "totient",
         "outcome": "box-error",
         "errors": [
-          "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"integer\",\"number\"]]",
-          "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"integer\",\"number\"]]"
-        ]
-      },
-      {
-        "id": "6c2b31",
-        "topic": "powers",
-        "outcome": "box-error",
-        "errors": [
-          "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"number\",\"boolean\"]]"
+          "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"'integer'\",\"'number'\"]]",
+          "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"'integer'\",\"'number'\"]]"
         ]
       },
       {
@@ -421,7 +401,7 @@
         "topic": "gcd",
         "outcome": "box-error",
         "errors": [
-          "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"integer\",\"finite_rational\"]]"
+          "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"'integer'\",\"'finite_rational'\"]]"
         ]
       },
       {
@@ -429,8 +409,8 @@
         "topic": "partitions",
         "outcome": "box-error",
         "errors": [
-          "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"integer\",\"real\"]]",
-          "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"integer\",\"real\"]]"
+          "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"'integer'\",\"'real'\"]]",
+          "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"'integer'\",\"'real'\"]]"
         ]
       },
       {
@@ -438,15 +418,7 @@
         "topic": "totient",
         "outcome": "box-error",
         "errors": [
-          "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"integer\",\"number\"]]"
-        ]
-      },
-      {
-        "id": "e54e61",
-        "topic": "carlson_elliptic",
-        "outcome": "box-error",
-        "errors": [
-          "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"number\",\"boolean\"]]"
+          "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"'integer'\",\"'number'\"]]"
         ]
       },
       {
@@ -454,55 +426,10 @@
         "topic": "totient",
         "outcome": "box-error",
         "errors": [
-          "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"integer\",\"number\"]]",
-          "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"integer\",\"number\"]]"
+          "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"'integer'\",\"'number'\"]]",
+          "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"'integer'\",\"'number'\"]]"
         ]
       }
     ]
-  },
-  "stage2": {
-    "seed": 42,
-    "slice": [
-      "none",
-      "real-simple"
-    ],
-    "entries": 1225,
-    "entriesWithInstances": 347,
-    "entriesSkipped": {
-      "shell-head": 567,
-      "representation": 202,
-      "box-error": 28,
-      "directed-infinity": 9,
-      "derivative": 33
-    },
-    "entriesNoAcceptedAssignment": 39,
-    "instances": 1122,
-    "outcomes": {
-      "True": 915,
-      "False": 44,
-      "Unknown": 7,
-      "not-evaluable": 156
-    },
-    "falseEntries": [
-      "157c33",
-      "250a45",
-      "332721",
-      "4a2ac8",
-      "4d3127",
-      "4fd123",
-      "6572c5",
-      "7b27cd",
-      "8d90e9",
-      "9c93bb",
-      "a0206a",
-      "c19cd6",
-      "c4a892",
-      "c7b921",
-      "ca8b0a",
-      "dc0823",
-      "e5a04c",
-      "fbe121"
-    ],
-    "elapsedMs": 29148
   }
 }

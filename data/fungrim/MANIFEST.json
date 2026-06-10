@@ -6,15 +6,15 @@
     "name": "fungrim",
     "repository": "https://github.com/arnog/fungrim",
     "branch": "grim2mathjson",
-    "commit": "5ead4a37bb489b5ef71ef58cd4ed3afee1429f1c",
+    "commit": "de62e7aae1918f1fdab6d836ea2efe453ae007ea",
     "parent": {
       "repository": "https://github.com/fredrik-johansson/fungrim",
       "commit": "b7c3ca6e565e1058638cab6ba2bc811090296767",
-      "note": "pygrim/ content in the fork is identical to this upstream commit (verified by recursive diff)"
+      "note": "pygrim/ content = upstream commit + 2 fix commits (Equal-paren in 6c2b31/e54e61; Element(w,CC) x24 in jacobi_theta.py) \u2014 submitted upstream as PRs; numerically verified at 30 digits"
     },
     "pin": {
-      "sha256": "c7178f4f40cabc7dbc6b2b50da977520e8921806c0b65ea57690170cc499bebe",
-      "method": "cd fungrim-master && find pygrim -name '*.py' -type f | LC_ALL=C sort | xargs cat | shasum -a 256",
+      "sha256": "953c2afd2822d487c47a4247b74915d79a3598a9da251c374b996513bf026044",
+      "method": "cd fungrim && find pygrim -name '*.py' -type f | LC_ALL=C sort | xargs cat | shasum -a 256",
       "fileCount": 70
     },
     "license": "MIT, Copyright (c) 2019 Fredrik Johansson (see LICENSE)"

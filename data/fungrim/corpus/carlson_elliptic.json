@@ -29330,20 +29330,20 @@
   {
    "id": "e54e61",
    "formula": [
-    "Multiply",
+    "Equal",
+    [
+     "CarlsonRF",
+     0,
+     "x",
+     [
+      "Negate",
+      "x"
+     ]
+    ],
     [
      "Multiply",
      [
-      "Equal",
-      [
-       "CarlsonRF",
-       0,
-       "x",
-       [
-        "Negate",
-        "x"
-       ]
-      ],
+      "Multiply",
       [
        "Divide",
        1,
@@ -29351,52 +29351,41 @@
         "Sqrt",
         "x"
        ]
-      ]
-     ],
-     [
-      "Divide",
-      [
-       "Power",
-       [
-        "Gamma",
-        [
-         "Divide",
-         1,
-         4
-        ]
-       ],
-       2
       ],
       [
-       "Multiply",
-       4,
+       "Divide",
        [
-        "Sqrt",
+        "Power",
         [
-         "Multiply",
-         2,
-         "Pi"
+         "Gamma",
+         [
+          "Divide",
+          1,
+          4
+         ]
+        ],
+        2
+       ],
+       [
+        "Multiply",
+        4,
+        [
+         "Sqrt",
+         [
+          "Multiply",
+          2,
+          "Pi"
+         ]
         ]
        ]
       ]
-     ]
-    ],
-    [
-     "Which",
+     ],
      [
-      "Or",
+      "Which",
       [
-       "Less",
+       "Or",
        [
-        "Imaginary",
-        "x"
-       ],
-       0
-      ],
-      [
-       "And",
-       [
-        "Equal",
+        "Less",
         [
          "Imaginary",
          "x"
@@ -29404,25 +29393,36 @@
         0
        ],
        [
-        "GreaterEqual",
+        "And",
         [
-         "Real",
-         "x"
+         "Equal",
+         [
+          "Imaginary",
+          "x"
+         ],
+         0
         ],
-        0
+        [
+         "GreaterEqual",
+         [
+          "Real",
+          "x"
+         ],
+         0
+        ]
        ]
+      ],
+      [
+       "Subtract",
+       1,
+       "ImaginaryUnit"
+      ],
+      "True",
+      [
+       "Add",
+       1,
+       "ImaginaryUnit"
       ]
-     ],
-     [
-      "Subtract",
-      1,
-      "ImaginaryUnit"
-     ],
-     "True",
-     [
-      "Add",
-      1,
-      "ImaginaryUnit"
      ]
     ]
    ],
@@ -29434,7 +29434,7 @@
     "x",
     "ComplexNumbers"
    ],
-   "class": "other",
+   "class": "identity",
    "subclass": null,
    "heads": [
     "CarlsonRF",

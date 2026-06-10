@@ -1,35 +1,35 @@
 {
   "generator": "scripts/fungrim/compile-rules.ts",
-  "sliceEntries": 1648,
-  "emitted": 1350,
+  "sliceEntries": 1650,
+  "emitted": 1376,
   "ledger": {
     "box-error": 16,
     "compat-signature": 42,
     "curated-exclude": 4,
     "duplicate-undirected": 14,
-    "guard-uncompilable": 88,
+    "guard-uncompilable": 64,
     "lhs-not-value-form": 94,
     "no-fire": 32,
     "not-equation": 8
   },
   "byPurpose": {
     "expand": 109,
-    "simplify": 1241
+    "simplify": 1267
   },
   "byClass": {
-    "identity": 1025,
+    "identity": 1051,
     "specific-value": 325
   },
   "byTarget": {
-    "simplify": 1350
+    "simplify": 1376
   },
   "sampleKinds": {
     "numeric": 41,
-    "symbolic": 1309
+    "symbolic": 1335
   },
   "headBuckets": {
-    "Multiply": 256,
-    "Add": 201,
+    "Multiply": 270,
+    "Add": 213,
     "Divide": 92,
     "JacobiTheta": 62,
     "Apply": 60,
@@ -194,11 +194,6 @@
       "detail": "rule did not fire"
     },
     {
-      "id": "077394",
-      "reason": "guard-uncompilable",
-      "detail": "unsupported domain \"tau\""
-    },
-    {
       "id": "07a654",
       "reason": "no-fire",
       "detail": "no seed satisfying the guards"
@@ -274,11 +269,6 @@
       "detail": "unsupported conjunct \"Not\""
     },
     {
-      "id": "1792a9",
-      "reason": "guard-uncompilable",
-      "detail": "unsupported domain \"tau\""
-    },
-    {
       "id": "1c3957",
       "reason": "guard-uncompilable",
       "detail": "unsupported domain \"DirichletGroup\""
@@ -312,11 +302,6 @@
       "id": "1fc63b",
       "reason": "compat-signature",
       "detail": "2-arg LambertW/Digamma"
-    },
-    {
-      "id": "1feda6",
-      "reason": "guard-uncompilable",
-      "detail": "unsupported domain \"tau\""
     },
     {
       "id": "209fc8",
@@ -429,11 +414,6 @@
       "detail": "no seed satisfying the guards"
     },
     {
-      "id": "34d1c6",
-      "reason": "guard-uncompilable",
-      "detail": "unsupported domain \"tau\""
-    },
-    {
       "id": "34fafa",
       "reason": "compat-signature",
       "detail": "2-arg LambertW/Digamma"
@@ -447,11 +427,6 @@
       "id": "3a9c67",
       "reason": "compat-signature",
       "detail": "no-fire: fired but produced Matrix([[Fibonacci(_n)],[Fibonacci(_n - 1)]]) * Matrix([[1,1],[1,0]])^m ≠ Matrix([[Fibonacci(n)],[Fibonacci(n - 1)]]) * Matrix([[1,1],[1,0]])"
-    },
-    {
-      "id": "3cac28",
-      "reason": "guard-uncompilable",
-      "detail": "unsupported domain \"tau\""
     },
     {
       "id": "3d276b",
@@ -494,29 +469,14 @@
       "detail": "Set"
     },
     {
-      "id": "45165c",
-      "reason": "guard-uncompilable",
-      "detail": "unsupported domain \"tau\""
-    },
-    {
       "id": "458198",
       "reason": "guard-uncompilable",
       "detail": "unsupported domain \"DirichletGroup\""
     },
     {
-      "id": "45a130",
-      "reason": "guard-uncompilable",
-      "detail": "unsupported domain \"tau\""
-    },
-    {
       "id": "47cf5d",
       "reason": "guard-uncompilable",
       "detail": "unsupported conjunct \"Or\""
-    },
-    {
-      "id": "47e587",
-      "reason": "guard-uncompilable",
-      "detail": "unsupported domain \"tau\""
     },
     {
       "id": "487e35",
@@ -527,11 +487,6 @@
       "id": "488a30",
       "reason": "lhs-not-value-form",
       "detail": "symbol"
-    },
-    {
-      "id": "48a1c6",
-      "reason": "guard-uncompilable",
-      "detail": "unsupported domain \"tau\""
     },
     {
       "id": "4a30f1",
@@ -589,11 +544,6 @@
       "detail": "Apply"
     },
     {
-      "id": "5752b8",
-      "reason": "guard-uncompilable",
-      "detail": "unsupported domain \"tau\""
-    },
-    {
       "id": "57af50",
       "reason": "guard-uncompilable",
       "detail": "unsupported conjunct \"Or\""
@@ -639,11 +589,6 @@
       "detail": "unsupported conjunct \"Or\""
     },
     {
-      "id": "5f9e54",
-      "reason": "guard-uncompilable",
-      "detail": "unsupported domain \"tau\""
-    },
-    {
       "id": "61d8f3",
       "reason": "no-fire",
       "detail": "no seed satisfying the guards"
@@ -672,16 +617,6 @@
       "id": "649dc0",
       "reason": "guard-uncompilable",
       "detail": "unsupported conjunct \"Or\""
-    },
-    {
-      "id": "663a02",
-      "reason": "guard-uncompilable",
-      "detail": "unsupported domain \"tau\""
-    },
-    {
-      "id": "66efb8",
-      "reason": "guard-uncompilable",
-      "detail": "unsupported domain \"tau\""
     },
     {
       "id": "67bb53",
@@ -767,16 +702,6 @@
       "id": "73b76c",
       "reason": "guard-uncompilable",
       "detail": "unsupported conjunct \"Or\""
-    },
-    {
-      "id": "73eb5d",
-      "reason": "guard-uncompilable",
-      "detail": "unsupported domain \"tau\""
-    },
-    {
-      "id": "75cb8c",
-      "reason": "guard-uncompilable",
-      "detail": "unsupported domain \"tau\""
     },
     {
       "id": "75e141",
@@ -909,11 +834,6 @@
       "detail": "2-arg LambertW/Digamma"
     },
     {
-      "id": "89c9e4",
-      "reason": "guard-uncompilable",
-      "detail": "unsupported domain \"tau\""
-    },
-    {
       "id": "8d304b",
       "reason": "guard-uncompilable",
       "detail": "unsupported conjunct \"Or\""
@@ -1019,11 +939,6 @@
       "detail": "symbol"
     },
     {
-      "id": "9973ef",
-      "reason": "guard-uncompilable",
-      "detail": "unsupported domain \"tau\""
-    },
-    {
       "id": "997777",
       "reason": "lhs-not-value-form",
       "detail": "symbol"
@@ -1032,16 +947,6 @@
       "id": "9a944c",
       "reason": "no-fire",
       "detail": "rule did not fire"
-    },
-    {
-      "id": "9a9487",
-      "reason": "guard-uncompilable",
-      "detail": "unsupported domain \"tau\""
-    },
-    {
-      "id": "9aa437",
-      "reason": "guard-uncompilable",
-      "detail": "unsupported domain \"tau\""
     },
     {
       "id": "9d26d2",
@@ -1269,11 +1174,6 @@
       "detail": "Apply"
     },
     {
-      "id": "c891a1",
-      "reason": "guard-uncompilable",
-      "detail": "unsupported domain \"tau\""
-    },
-    {
       "id": "cb9f61",
       "reason": "no-fire",
       "detail": "rule did not fire"
@@ -1332,11 +1232,6 @@
       "id": "d316bc",
       "reason": "no-fire",
       "detail": "rule did not fire"
-    },
-    {
-      "id": "d36e97",
-      "reason": "guard-uncompilable",
-      "detail": "unsupported domain \"tau\""
     },
     {
       "id": "d3cfc2",
@@ -1419,11 +1314,6 @@
       "detail": "no seed satisfying the guards"
     },
     {
-      "id": "dfea7d",
-      "reason": "guard-uncompilable",
-      "detail": "unsupported domain \"tau\""
-    },
-    {
       "id": "e103e7",
       "reason": "duplicate-undirected",
       "detail": "same equality as adbc1a"
@@ -1504,11 +1394,6 @@
       "detail": "2-arg LambertW/Digamma"
     },
     {
-      "id": "ee8617",
-      "reason": "guard-uncompilable",
-      "detail": "unsupported domain \"tau\""
-    },
-    {
       "id": "ee86fb",
       "reason": "lhs-not-value-form",
       "detail": "Set"
@@ -1537,11 +1422,6 @@
       "id": "f372e9",
       "reason": "compat-signature",
       "detail": "2-arg LambertW/Digamma"
-    },
-    {
-      "id": "f4554f",
-      "reason": "guard-uncompilable",
-      "detail": "unsupported domain \"tau\""
     },
     {
       "id": "f4750b",
