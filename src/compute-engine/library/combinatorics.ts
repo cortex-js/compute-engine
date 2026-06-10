@@ -31,18 +31,27 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
       evaluate: ([n], { engine: ce }) => {
         const k = toBigint(n);
         if (k === null) return undefined;
-        if (k < 0n) return ce.function('Negate', ['Fibonacci', ce.number(-k)]);
-        if (k === 0n) return ce.Zero;
-        if (k === 1n) return ce.One;
 
-        let a = 0n;
-        let b = 1n;
-        for (let i = 2n; i <= k; i++) {
-          const next = a + b;
-          a = b;
-          b = next;
+        // Compute F(|k|); negative indices use the reflection formula below.
+        const m = k < 0n ? -k : k;
+        let result: bigint;
+        if (m === 0n) result = 0n;
+        else if (m === 1n) result = 1n;
+        else {
+          let a = 0n;
+          let b = 1n;
+          for (let i = 2n; i <= m; i++) {
+            const next = a + b;
+            a = b;
+            b = next;
+          }
+          result = b;
         }
-        return ce.number(b);
+
+        // Reflection formula: F(−m) = (−1)^{m+1} F(m). The previous code built
+        // a malformed `Negate(Fibonacci, m)` (two operands) → an Error.
+        if (k < 0n && m % 2n === 0n) result = -result;
+        return ce.number(result);
       },
     },
 
@@ -216,9 +225,14 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
       evaluate: ([n], { engine: ce }) => {
         const k = toInteger(n);
         if (k === null || k < 0) return undefined;
-        let result = 1;
+        // Recurrence (exact, in bigint): !0 = 1, !m = m·!(m−1) + (−1)^m.
+        // The previous float formula reduced to result·(i−1), which is 0 at
+        // i = 1 and pinned every !n≥1 to 0.
+        let result = 1n;
+        let sign = 1n;
         for (let i = 1; i <= k; i++) {
-          result = Math.round(result * i * (1 - 1 / i));
+          sign = -sign;
+          result = BigInt(i) * result + sign;
         }
         return ce.number(result);
       },

@@ -178,9 +178,17 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       evaluate: ([n], { engine: ce }) => {
         const k = toBigint(n);
         if (k === null || k < 1n) return ce.False;
-        const discriminant = 3n * k + 1n;
-        const sqrt = BigInt(ce.bignum(discriminant).sqrt().toFixed(0));
-        return ce.symbol(sqrt * sqrt === discriminant ? 'True' : 'False');
+        // The m-th octahedral number is O(m) = m(2m² + 1)/3, i.e.
+        // 2m³ + m = 3n. The previous code tested a perfect square of 3n+1,
+        // which is unrelated. Estimate m via a cube root, then verify
+        // exactly over a small neighborhood (guards against rounding).
+        const target = 3n * k; // = 2m³ + m
+        const est = BigInt(ce.bignum(target / 2n).cbrt().toFixed(0));
+        for (let m = est - 2n; m <= est + 2n; m++) {
+          if (m < 1n) continue;
+          if (2n * m * m * m + m === target) return ce.True;
+        }
+        return ce.False;
       },
     },
 

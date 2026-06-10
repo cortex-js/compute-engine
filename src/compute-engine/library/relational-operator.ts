@@ -146,10 +146,16 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
       let constantRatio: number | undefined = undefined;
       const tolerance = ce.tolerance;
 
-      for (const testVal of testValues) {
-        // Create substitution for all unknowns
+      for (let t = 0; t < testValues.length; t++) {
+        // Assign an INDEPENDENT value to each unknown. Previously every
+        // unknown was given the same value, so e.g. `x + y` and `2x` both
+        // collapsed to `2·v` and compared equal. Rotating the sample pool by
+        // the unknown's index (plus an index offset) keeps the unknowns
+        // distinct within a trial and varies the assignment across trials.
         const sub: Record<string, number> = {};
-        for (const u of unknowns) sub[u] = testVal;
+        unknowns.forEach((u, j) => {
+          sub[u] = testValues[(t + j * 3) % testValues.length] + j;
+        });
 
         const v1 = expr1.subs(sub).N();
         const v2 = expr2.subs(sub).N();

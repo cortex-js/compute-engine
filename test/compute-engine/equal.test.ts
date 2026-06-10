@@ -51,3 +51,28 @@ describe('Equation equivalence - non-equivalent equations', () => {
       expect(ce.parse(a).isEqual(ce.parse(b))).toBe(false));
   }
 });
+
+// REVIEW.md B13: the sample-based equivalence check substituted the SAME value
+// for every unknown, so multi-unknown equations collapsed — e.g. `x + y` and
+// `2x` both became `2v` and compared equal. Each unknown now gets an
+// independent value.
+describe('Equation equivalence - multiple unknowns (REVIEW.md B13)', () => {
+  const EQUIVALENT: [string, string][] = [
+    ['x+y=0', '2x+2y=0'], // differ by a non-zero constant factor
+    ['x+y=0', 'y+x=0'], // reordered
+    ['x+2y=0', '3x+6y=0'],
+  ];
+  const NOT_EQUIVALENT: [string, string][] = [
+    ['x+y=0', '2x=0'], // the original false positive
+    ['x-y=0', 'x+y=0'],
+    ['x+y=0', 'x+2y=0'],
+  ];
+
+  for (const [a, b] of EQUIVALENT)
+    it(`("${a}").isEqual("${b}") is true`, () =>
+      expect(ce.parse(a).isEqual(ce.parse(b))).toBe(true));
+
+  for (const [a, b] of NOT_EQUIVALENT)
+    it(`("${a}").isEqual("${b}") is false`, () =>
+      expect(ce.parse(a).isEqual(ce.parse(b))).toBe(false));
+});

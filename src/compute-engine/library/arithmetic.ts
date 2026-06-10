@@ -1051,10 +1051,16 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       signature: '(number, number) -> number',
       type: ([base, exp]) => {
         if (base.isNaN || exp.isNaN) return 'number';
-        if (!exp.isFinite) return 'non_finite_number';
+        // `=== false` (not `!`): a symbolic operand has `isFinite ===
+        // undefined`, which must not be treated as non-finite.
+        if (base.isFinite === false || exp.isFinite === false)
+          return 'non_finite_number';
         if (base.isInteger && exp.isInteger) return 'finite_integer';
         if (base.isRational && exp.isInteger) return 'finite_rational';
-        if (base.isReal && exp.isReal) return 'finite_real';
+        // A real result needs a non-negative base or an integer exponent;
+        // otherwise the result may be complex (e.g. (−2)^0.5).
+        if (base.isReal && exp.isReal && (base.isNonNegative || exp.isInteger))
+          return 'finite_real';
         return 'finite_number';
       },
       canonical: (args, { engine }) => {

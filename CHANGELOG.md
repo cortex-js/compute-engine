@@ -75,6 +75,27 @@
     unevaluated (`GCD(4, 6)` returned `gcd(4, 6)`); a leading non-integer operand
     was also silently dropped. Both are now handled.
 
+- **Combinatorics, number-theory, and equation fixes** — several library
+  functions returned wrong results:
+  - `Subfactorial(n)` (derangements) returned 0 for every `n ≥ 1`: the float
+    recurrence reduced to `result·(n−1)`, which is 0 at `n = 1`. It now uses the
+    exact integer recurrence `!n = n·!(n−1) + (−1)ⁿ`, so `!4 = 9`, `!5 = 44`, ….
+  - `Fibonacci(−n)` produced an `Error` (it built a malformed `Negate` with two
+    operands). It now applies the reflection formula `F(−n) = (−1)^{n+1}·F(n)`
+    (`Fibonacci(-6) → -8`).
+  - `IsOctahedral(n)` tested an unrelated perfect-square condition on `3n+1`
+    (e.g. `IsOctahedral(6)` was `False`, `IsOctahedral(5)` was `True`). It now
+    solves `2m³ + m = 3n` exactly, so the octahedral numbers 1, 6, 19, 44, 85, …
+    are recognized.
+  - The `Power` type handler classified any expression with a symbolic exponent
+    as `non_finite_number` (it used `!exp.isFinite`, which is true when
+    `isFinite` is `undefined`); `2^x` is now `finite_real`. It also no longer
+    claims `finite_real` for a possibly-negative base with a non-integer exponent
+    (which may be complex).
+  - `Equal` equation-equivalence sampling substituted the *same* value for every
+    unknown, so distinct multi-unknown equations compared equal (e.g.
+    `x + y = 0` vs `2x = 0`). Each unknown now gets an independent value.
+
 - **Matrix (tensor) linear-algebra fixes** — operations were broken beyond the
   hardcoded 2×2 cases:
   - `Determinant` no longer throws for 4×4 and larger matrices, and now returns

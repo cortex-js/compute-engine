@@ -171,6 +171,36 @@ describe('TYPE INFERENCE FOR ARITHMETIC FUNCTIONS', () => {
     localCe.declare('x', { type: 'real' });
     expect(localCe.expr(['Arctan', 'x']).type.toString()).toBe('finite_real');
   });
+
+  // REVIEW.md B12: `!exp.isFinite` was true for a symbolic exponent (whose
+  // isFinite is `undefined`), so any symbolic exponent was classified
+  // `non_finite_number`. The `finite_real` branch also over-claimed for a
+  // possibly-negative base with a non-integer exponent.
+  it('Power with a symbolic exponent is not non_finite_number', () => {
+    const localCe = new ComputeEngine();
+    localCe.declare('x', { type: 'real' });
+    // 2^x: a positive base raised to a real exponent is finite real.
+    expect(localCe.expr(['Power', 2, 'x']).type.toString()).toBe('finite_real');
+  });
+
+  it('Power of integers stays finite_integer', () => {
+    expect(ce.expr(['Power', 2, 3]).type.toString()).toBe('finite_integer');
+  });
+
+  it('Power of a possibly-negative base with non-integer exponent is finite_number', () => {
+    const localCe = new ComputeEngine();
+    localCe.declare('a', { type: 'real' }); // sign unknown → may be negative
+    // a^0.3 may be complex, so it must not claim finite_real.
+    expect(localCe.expr(['Power', 'a', 0.3]).type.toString()).toBe(
+      'finite_number'
+    );
+  });
+
+  it('Power with an infinite operand is non_finite_number', () => {
+    expect(ce.expr(['Power', 'PositiveInfinity', 2]).type.toString()).toBe(
+      'non_finite_number'
+    );
+  });
 });
 
 describe('TYPE INFERENCE FOR COMPLEX FUNCTIONS', () => {
