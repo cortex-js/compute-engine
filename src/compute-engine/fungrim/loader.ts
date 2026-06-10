@@ -588,7 +588,11 @@ function wrapHotHeadRule(parts: BoxedRuleParts): Rule {
     }
 
     // 4. Replacement (canonical, as on the engine's simplification channels)
-    return { value: replace.subs(sub, { canonical: true }), because: id, purpose };
+    return {
+      value: replace.subs(sub, { canonical: true }),
+      because: id,
+      purpose,
+    };
   };
 
   return { replace: replaceFn, operators: [head], id, purpose };

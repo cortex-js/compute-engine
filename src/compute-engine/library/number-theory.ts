@@ -183,7 +183,12 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         // which is unrelated. Estimate m via a cube root, then verify
         // exactly over a small neighborhood (guards against rounding).
         const target = 3n * k; // = 2m³ + m
-        const est = BigInt(ce.bignum(target / 2n).cbrt().toFixed(0));
+        const est = BigInt(
+          ce
+            .bignum(target / 2n)
+            .cbrt()
+            .toFixed(0)
+        );
         for (let m = est - 2n; m <= est + 2n; m++) {
           if (m < 1n) continue;
           if (2n * m * m * m + m === target) return ce.True;

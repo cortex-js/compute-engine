@@ -90,8 +90,9 @@ export function bernoulliRational(n: number): [bigint, bigint] {
 export function zetaEvenCoefficient(k: number): [bigint, bigint] {
   if (!Number.isInteger(k) || k < 1)
     throw new RangeError(`zetaEvenCoefficient: invalid index ${k}`);
-  let [num, den] = bernoulliRational(2 * k);
-  if (num < 0n) num = -num; // (−1)^{k+1}·B₂ₖ = |B₂ₖ|
+  const [bernoulliNumerator, den] = bernoulliRational(2 * k);
+  const num =
+    bernoulliNumerator < 0n ? -bernoulliNumerator : bernoulliNumerator;
   return reduce(num * 2n ** BigInt(2 * k - 1), den * factorial(2 * k));
 }
 

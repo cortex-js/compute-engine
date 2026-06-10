@@ -309,4 +309,3 @@ function* powerSetIterator(
     yield subset.length === 0 ? ce.symbol('EmptySet') : ce._fn('Set', subset);
   }
 }
-

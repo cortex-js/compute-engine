@@ -357,9 +357,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // `integer` vs `finite_real` — as disjoint, which would unsoundly
         // refute symbols of extended numeric type.)
         if (Number.isNaN(t))
-          return typeMembership(target, 'number') === false
-            ? false
-            : undefined;
+          return typeMembership(target, 'number') === false ? false : undefined;
         // A non-real number (imaginary part ≠ 0) is never in a Range
         if (target.im !== 0) return false;
         if (!isFinite(t)) return false;
@@ -706,9 +704,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // Symbolic target: indeterminate unless the type refutes membership
         // (`'number'`, not `'finite_real'` — see the Range.contains note)
         if (Number.isNaN(t))
-          return typeMembership(target, 'number') === false
-            ? false
-            : undefined;
+          return typeMembership(target, 'number') === false ? false : undefined;
         if (target.im !== 0) return false;
         if (!isFinite(t)) return false;
         if (!isFunction(expr)) return undefined;
@@ -1050,7 +1046,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
               let first = true;
               for (const item of collection.each()) {
                 if (first && !hasInitial) accumulator = item.re;
-                else accumulator = compiled.run!(accumulator, item.re) as number;
+                else
+                  accumulator = compiled.run!(accumulator, item.re) as number;
                 first = false;
                 yield;
               }

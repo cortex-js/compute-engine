@@ -236,11 +236,9 @@ export class Serializer {
     if ((openFence === '.' || closeFence === '.') && style === 'normal')
       style = 'scaled';
 
-    if (style === 'scaled')
-      return `\\left${openFence}${s}\\right${closeFence}`;
+    if (style === 'scaled') return `\\left${openFence}${s}\\right${closeFence}`;
 
-    if (style === 'big')
-      return `\\Bigl${openFence}${s}\\Bigr${closeFence}`;
+    if (style === 'big') return `\\Bigl${openFence}${s}\\Bigr${closeFence}`;
 
     return openFence + s + closeFence;
   }

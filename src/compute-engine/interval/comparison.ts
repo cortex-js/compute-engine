@@ -220,7 +220,10 @@ export function clamp(
   // (max of los, min of his), which returns `empty` when x lies entirely
   // outside [lo, hi] — but clamping maps such an x onto the nearer bound, it
   // never produces an empty result.
-  const lowered = { lo: Math.max(xVal.lo, loVal.lo), hi: Math.max(xVal.hi, loVal.hi) };
+  const lowered = {
+    lo: Math.max(xVal.lo, loVal.lo),
+    hi: Math.max(xVal.hi, loVal.hi),
+  };
   const resultLo = Math.min(lowered.lo, hiVal.lo);
   const resultHi = Math.min(lowered.hi, hiVal.hi);
 

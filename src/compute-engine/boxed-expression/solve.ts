@@ -637,7 +637,9 @@ function clearDenominators(expr: Expression, _variable?: string): Expression {
   // would become `1^x e^x - 5·1^x`, which no root template matches).
   const denominators = ops
     .map((op) => op.denominator)
-    .filter((d) => !d.isSame(1) && !(isFunction(d, 'Power') && d.op1.isSame(1)));
+    .filter(
+      (d) => !d.isSame(1) && !(isFunction(d, 'Power') && d.op1.isSame(1))
+    );
 
   if (denominators.length === 0) return expr;
 
@@ -1297,8 +1299,10 @@ export function findUnivariateRoots(
       const expanded = [...exprs, ...harmonized]
         .map((expr) => expand(expr.canonical))
         .filter((expr) => expr !== null);
-      result = [...expanded, ...expanded.flatMap((expr) => harmonize(expr))]
-        .flatMap(matchRoots);
+      result = [
+        ...expanded,
+        ...expanded.flatMap((expr) => harmonize(expr)),
+      ].flatMap(matchRoots);
     }
 
     // Fallback: solve polynomials via coefficient extraction when the

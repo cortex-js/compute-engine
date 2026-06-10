@@ -198,8 +198,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         //   atan2(y, x) = atan(y/x)        if x > 0
         //               = atan(y/x) + π    if x < 0 and y ≥ 0
         //               = atan(y/x) − π    if x < 0 and y < 0
-        if (x.isPositive)
-          return ce.function('Arctan', [y.div(x)]).evaluate();
+        if (x.isPositive) return ce.function('Arctan', [y.div(x)]).evaluate();
         if (x.isNegative) {
           const principal = ce.function('Arctan', [y.div(x)]).evaluate();
           if (y.isNonNegative) return principal.add(ce.Pi);
@@ -336,8 +335,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         if (!isNumber(x) || x.im !== 0) return undefined;
         // Exact special values, regardless of numericApproximation
         if (x.isSame(0)) return ce.Zero;
-        if (x.isInfinity)
-          return x.isPositive ? ce.Half : ce.Half.neg();
+        if (x.isInfinity) return x.isPositive ? ce.Half : ce.Half.neg();
         if (!numericApproximation) return undefined;
         return apply(
           x,
@@ -358,8 +356,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         if (!isNumber(x) || x.im !== 0) return undefined;
         // Exact special values, regardless of numericApproximation
         if (x.isSame(0)) return ce.Zero;
-        if (x.isInfinity)
-          return x.isPositive ? ce.Half : ce.Half.neg();
+        if (x.isInfinity) return x.isPositive ? ce.Half : ce.Half.neg();
         if (!numericApproximation) return undefined;
         return apply(
           x,

@@ -153,11 +153,7 @@ function assumeNotEqual(proposition: Expression): AssumeResult {
   console.assert(proposition.operator === 'NotEqual');
   if (!isFunction(proposition) || proposition.ops.length !== 2)
     return 'not-a-predicate';
-  return storeNotEqual(
-    proposition.engine,
-    proposition.op1,
-    proposition.op2
-  );
+  return storeNotEqual(proposition.engine, proposition.op1, proposition.op2);
 }
 
 /**
@@ -711,8 +707,7 @@ function assumeElementOfSet(
     const step = setExpr.ops[2];
     if (step !== undefined && step.isSame(-1)) [lo, hi] = [hi, lo];
     // For non-unit steps only the type refinement is kept
-    if (step !== undefined && !step.isSame(1) && !step.isSame(-1))
-      return 'ok';
+    if (step !== undefined && !step.isSame(1) && !step.isSame(-1)) return 'ok';
 
     if (assumeBound(ce, symbol, 'GreaterEqual', lo) === 'contradiction')
       return 'contradiction';
@@ -814,8 +809,7 @@ function refineSymbolType(
 
   // Shadow a parent-scope declaration in the current scope so the
   // assumption is reverted when the scope is popped.
-  if (!ce.context?.lexicalScope?.bindings.has(symbol))
-    ce.declare(symbol, type);
+  if (!ce.context?.lexicalScope?.bindings.has(symbol)) ce.declare(symbol, type);
 
   const def = ce.lookupDefinition(symbol);
   if (isValueDef(def)) {

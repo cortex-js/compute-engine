@@ -341,8 +341,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
         // Try quantity comparison first
         const qcmp = quantityCompare(lhs, rhs);
         if (qcmp !== null) return qcmp < 0 ? ce.True : ce.False;
-        const cmp =
-          lhs.isLess(rhs) ?? compareFromAssumedBounds(lhs, rhs, true);
+        const cmp = lhs.isLess(rhs) ?? compareFromAssumedBounds(lhs, rhs, true);
         if (cmp === undefined) return undefined;
         return cmp ? ce.True : ce.False;
       }
@@ -419,8 +418,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
             if (qcmp > 0) return ce.False;
           } else {
             const cmp =
-              lhs.isLessEqual(arg) ??
-              compareFromAssumedBounds(lhs, arg, false);
+              lhs.isLessEqual(arg) ?? compareFromAssumedBounds(lhs, arg, false);
             if (cmp === undefined) return undefined;
             if (cmp === false) return ce.False;
           }

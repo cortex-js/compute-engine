@@ -23,7 +23,9 @@ export function gamma(c: Complex): Complex {
   if (c.re < 0.5) {
     // Γ(z) = π / (sin(πz) · Γ(1 − z))
     const sinPiZ = c.mul(Math.PI).sin();
-    return new Complex(Math.PI, 0).div(sinPiZ.mul(gamma(new Complex(1, 0).sub(c))));
+    return new Complex(Math.PI, 0).div(
+      sinPiZ.mul(gamma(new Complex(1, 0).sub(c)))
+    );
   }
 
   const z = c.sub(1);

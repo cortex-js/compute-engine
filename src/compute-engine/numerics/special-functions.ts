@@ -1718,7 +1718,10 @@ function bigErfcAsymptotic(x: BigNum, tolDigits: number): BigNum {
   let prev = term.abs();
   const tol = new BigDecimal(10).pow(-tolDigits);
   for (let m = 1; m <= 100000; m++) {
-    term = term.mul(2 * m - 1).div(twoX2).neg();
+    term = term
+      .mul(2 * m - 1)
+      .div(twoX2)
+      .neg();
     const tAbs = term.abs();
     // Divergence guard: stop at the smallest term of the asymptotic series
     if (tAbs.gt(prev)) break;
@@ -1820,10 +1823,7 @@ export function bigErfInv(ce: ComputeEngine, x: BigNum): BigNum {
     const halfSqrtPi = BigDecimal.PI.sqrt().div(2);
     const tol = new BigDecimal(10).pow(-(p + 5));
     for (let i = 0; i < 100; i++) {
-      const delta = bigErf(ce, y)
-        .sub(x)
-        .mul(halfSqrtPi)
-        .mul(y.mul(y).exp());
+      const delta = bigErf(ce, y).sub(x).mul(halfSqrtPi).mul(y.mul(y).exp());
       y = y.sub(delta);
       if (delta.abs().lt(y.abs().mul(tol))) break;
     }
@@ -1915,8 +1915,14 @@ function bigFresnelAsymptotic(
   let prev = fTerm.abs();
   const tol = new BigDecimal(10).pow(-tolDigits);
   for (let m = 1; m <= 100000; m++) {
-    fTerm = fTerm.mul((4 * m - 3) * (4 * m - 1)).div(fourU2).neg();
-    gTerm = gTerm.mul((4 * m - 1) * (4 * m + 1)).div(fourU2).neg();
+    fTerm = fTerm
+      .mul((4 * m - 3) * (4 * m - 1))
+      .div(fourU2)
+      .neg();
+    gTerm = gTerm
+      .mul((4 * m - 1) * (4 * m + 1))
+      .div(fourU2)
+      .neg();
     const fAbs = fTerm.abs();
     // Divergence guard: stop at the smallest term of the asymptotic series
     if (fAbs.gt(prev)) break;

@@ -701,9 +701,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           return engine.number(zetaNegativeInteger(-n));
         }
         if (n % 2 === 0)
-          return engine.number(zetaEvenCoefficient(n / 2)).mul(
-            engine.Pi.pow(n)
-          );
+          return engine
+            .number(zetaEvenCoefficient(n / 2))
+            .mul(engine.Pi.pow(n));
         return undefined;
       },
     },

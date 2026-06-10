@@ -723,7 +723,8 @@ function _gammaln(x: Interval): IntervalResult {
     const hi = Math.max(gLo, gHi);
     const xStar = gammaNegStripExtremum(x.lo);
     if (xStar !== null) {
-      if (xStar >= x.lo && xStar <= x.hi) lo = Math.min(lo, scalarGammaln(xStar));
+      if (xStar >= x.lo && xStar <= x.hi)
+        lo = Math.min(lo, scalarGammaln(xStar));
     } else {
       // Past the table: |gamma| at the extremum → 0, so ln|gamma| → −∞.
       lo = -Infinity;
@@ -887,8 +888,14 @@ export function lcm(
   const enumerated = enumerateInteger2(aVal, bVal, scalarLcm);
   if (enumerated) return enumerated;
   // Conservative fallback: 0 ≤ lcm(a, b) ≤ |a|·|b|.
-  const ma = Math.max(Math.abs(Math.round(aVal.lo)), Math.abs(Math.round(aVal.hi)));
-  const mb = Math.max(Math.abs(Math.round(bVal.lo)), Math.abs(Math.round(bVal.hi)));
+  const ma = Math.max(
+    Math.abs(Math.round(aVal.lo)),
+    Math.abs(Math.round(aVal.hi))
+  );
+  const mb = Math.max(
+    Math.abs(Math.round(bVal.lo)),
+    Math.abs(Math.round(bVal.hi))
+  );
   return ok({ lo: 0, hi: ma * mb });
 }
 

@@ -95,9 +95,7 @@ function signedMembership(
  * indeterminate member test does not collapse to a definitive `false`
  * (FUNGRIM-PLAN-3-ASSUMPTIONS.md §5.2 invariant).
  */
-function kleeneOr(
-  values: Iterable<boolean | undefined>
-): boolean | undefined {
+function kleeneOr(values: Iterable<boolean | undefined>): boolean | undefined {
   let indeterminate = false;
   for (const v of values) {
     if (v === true) return true;
@@ -110,9 +108,7 @@ function kleeneOr(
  * Kleene three-valued AND: `false` as soon as any value is `false`, `true`
  * only when every value is `true`, `undefined` otherwise.
  */
-function kleeneAnd(
-  values: Iterable<boolean | undefined>
-): boolean | undefined {
+function kleeneAnd(values: Iterable<boolean | undefined>): boolean | undefined {
   let indeterminate = false;
   for (const v of values) {
     if (v === false) return false;

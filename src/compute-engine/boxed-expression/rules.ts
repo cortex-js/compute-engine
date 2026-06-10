@@ -858,8 +858,7 @@ export function applyRule(
   const requestedForm = normalizeReplaceForm(options);
 
   // eslint-disable-next-line prefer-const
-  let { match, replace, condition, id, onMatch, onBeforeMatch, purpose } =
-    rule;
+  let { match, replace, condition, id, onMatch, onBeforeMatch, purpose } = rule;
   const because = id ?? '';
 
   const ce = expr.engine;
