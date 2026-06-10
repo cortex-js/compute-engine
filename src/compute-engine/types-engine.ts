@@ -180,6 +180,21 @@ export interface IComputeEngine {
    *  Users can `push()` additional rules or replace the entire array. */
   simplificationRules: Rule[];
 
+  /** The rules used by `solve()` to find roots of univariate expressions.
+   *  Each rule matches a normalized equation `f(_x) = 0` — the unknown is
+   *  the wildcard `_x` — and `replace` produces a root expression.
+   *  Conditions should reject matches where other wildcards capture `_x`.
+   *  Candidate roots are validated against the original equation, so an
+   *  over-eager template degrades to a no-op rather than a wrong answer.
+   *  Initialized to the built-in root-finding rules; `push()` to extend,
+   *  assign to replace. */
+  solveRules: Rule[];
+
+  /** The rules used by `solve()` to transform an equation into equivalent,
+   *  easier-to-solve forms before root-finding (e.g. `ln f(x) → f(x) - 1`).
+   *  Same conventions and extension pattern as `solveRules`. */
+  harmonizationRules: Rule[];
+
   strict: boolean;
 
   expr(

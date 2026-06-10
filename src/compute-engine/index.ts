@@ -292,6 +292,14 @@ export class ComputeEngine implements IComputeEngine {
     ...SIMPLIFY_RULES,
   ]);
 
+  /** @internal Backing state for solveRules */
+  private _solveRules = new SimplificationRuleStore([...UNIVARIATE_ROOTS]);
+
+  /** @internal Backing state for harmonizationRules */
+  private _harmonizationRules = new SimplificationRuleStore([
+    ...HARMONIZATION_RULES,
+  ]);
+
   /** @internal Registry of compilation targets */
   private _compilationTargets = new CompilationTargetRegistry();
 
@@ -1030,6 +1038,59 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   /**
+   * The rules used by `solve()` to find roots of univariate expressions.
+   *
+   * Each rule matches a normalized equation `f(_x) = 0` — the unknown is
+   * the wildcard `_x` — and `replace` produces a root expression.
+   * Conditions should reject matches where other wildcards capture `_x`.
+   *
+   * Candidate roots are validated against the original equation, so an
+   * over-eager template degrades to a no-op rather than a wrong answer.
+   *
+   * Initialized to a copy of the built-in root-finding rules.
+   *
+   * Add custom rules with `push()`:
+   * ```ts
+   * ce.solveRules.push({
+   *   match: ['Add', ['Tan', '_x'], '__b'],
+   *   replace: ['Arctan', ['Negate', '__b']],
+   *   condition: ({ __b }) => !__b.has('_x'),
+   * });
+   * ```
+   *
+   * Or replace entirely:
+   * ```ts
+   * ce.solveRules = myCustomRules;
+   * ```
+   */
+  get solveRules(): Rule[] {
+    return this._solveRules.rules;
+  }
+
+  set solveRules(rules: Rule[]) {
+    this._solveRules.rules = rules;
+    // Invalidate the cached boxed rule set
+    this._cacheStore.invalidate('univariate-roots-rules');
+  }
+
+  /**
+   * The rules used by `solve()` to transform an equation into equivalent,
+   * easier-to-solve forms before root-finding (e.g. `ln f(x) → f(x) - 1`).
+   *
+   * Same conventions and extension pattern as `solveRules`: the unknown is
+   * the wildcard `_x`; `push()` to extend, assign to replace.
+   */
+  get harmonizationRules(): Rule[] {
+    return this._harmonizationRules.rules;
+  }
+
+  set harmonizationRules(rules: Rule[]) {
+    this._harmonizationRules.rules = rules;
+    // Invalidate the cached boxed rule set
+    this._cacheStore.invalidate('harmonization-rules');
+  }
+
+  /**
    * Return definition matching the symbol, starting with the current
    * lexical scope and going up the scope chain.
    */
@@ -1643,15 +1704,31 @@ export class ComputeEngine implements IComputeEngine {
       return result;
     }
 
-    if (id === 'solve-univariate')
-      return this._cache('univariate-roots-rules', () =>
-        boxRules(this, UNIVARIATE_ROOTS)
-      );
+    if (id === 'solve-univariate') {
+      // Invalidate cache if rules array was mutated (e.g. via push/splice)
+      if (this._solveRules.hasMutatedSinceLastCache()) {
+        this._cacheStore.invalidate('univariate-roots-rules');
+      }
 
-    if (id === 'harmonization')
-      return this._cache('harmonization-rules', () =>
-        boxRules(this, HARMONIZATION_RULES)
+      const result = this._cache('univariate-roots-rules', () =>
+        boxRules(this, this._solveRules.rules)
       );
+      this._solveRules.markCached();
+      return result;
+    }
+
+    if (id === 'harmonization') {
+      // Invalidate cache if rules array was mutated (e.g. via push/splice)
+      if (this._harmonizationRules.hasMutatedSinceLastCache()) {
+        this._cacheStore.invalidate('harmonization-rules');
+      }
+
+      const result = this._cache('harmonization-rules', () =>
+        boxRules(this, this._harmonizationRules.rules)
+      );
+      this._harmonizationRules.markCached();
+      return result;
+    }
 
     return undefined;
   }

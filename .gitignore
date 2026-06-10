@@ -2,6 +2,7 @@ CLAUDE.md
 .claude/
 
 doc/
+data/
 
 build/
 dist/

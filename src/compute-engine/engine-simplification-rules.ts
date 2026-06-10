@@ -1,7 +1,15 @@
 import type { Rule } from './types-evaluation';
 
 /**
- * Internal holder for simplification rules and their cache-staleness marker.
+ * Internal holder for a rule array and its cache-staleness marker.
+ *
+ * Despite its name, this class is rule-agnostic and backs all three
+ * engine rule stores: `ce.simplificationRules`, `ce.solveRules` and
+ * `ce.harmonizationRules`.
+ *
+ * Note: mutation detection is length-based, so a same-length in-place
+ * element replacement is not detected. Use the property setter (full
+ * replacement) for that.
  *
  * @internal
  */

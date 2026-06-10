@@ -1,0 +1,508 @@
+{
+  "generated": "2026-06-10T00:58:57.093Z",
+  "corpus": "/Users/arno/dev/compute-engine/data/fungrim",
+  "stage1": {
+    "total": 2551,
+    "ok": 2544,
+    "boxError": 7,
+    "unknownSymbol": 0,
+    "timeout": 0,
+    "passRate": 0.9973,
+    "elapsedMs": 1762,
+    "failureBuckets": [
+      {
+        "error": "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"integer\",\"number\"]]",
+        "count": 3,
+        "ids": [
+          "33139b",
+          "b9c36d",
+          "feb1a0"
+        ]
+      },
+      {
+        "error": "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"number\",\"boolean\"]]",
+        "count": 2,
+        "ids": [
+          "6c2b31",
+          "e54e61"
+        ]
+      },
+      {
+        "error": "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"integer\",\"finite_rational\"]]",
+        "count": 1,
+        "ids": [
+          "aaef97"
+        ]
+      },
+      {
+        "error": "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"integer\",\"real\"]]",
+        "count": 1,
+        "ids": [
+          "acdce8"
+        ]
+      }
+    ],
+    "perTopic": {
+      "agm": {
+        "total": 42,
+        "ok": 42,
+        "passRate": 1,
+        "failures": []
+      },
+      "airy": {
+        "total": 15,
+        "ok": 15,
+        "passRate": 1,
+        "failures": []
+      },
+      "atan": {
+        "total": 74,
+        "ok": 74,
+        "passRate": 1,
+        "failures": []
+      },
+      "barnes_g": {
+        "total": 50,
+        "ok": 50,
+        "passRate": 1,
+        "failures": []
+      },
+      "bell_numbers": {
+        "total": 29,
+        "ok": 29,
+        "passRate": 1,
+        "failures": []
+      },
+      "bernoulli_numbers": {
+        "total": 24,
+        "ok": 24,
+        "passRate": 1,
+        "failures": []
+      },
+      "bessel": {
+        "total": 69,
+        "ok": 69,
+        "passRate": 1,
+        "failures": []
+      },
+      "beta_function": {
+        "total": 20,
+        "ok": 20,
+        "passRate": 1,
+        "failures": []
+      },
+      "carlson_elliptic": {
+        "total": 247,
+        "ok": 246,
+        "passRate": 0.996,
+        "failures": [
+          "e54e61"
+        ]
+      },
+      "chebyshev": {
+        "total": 82,
+        "ok": 82,
+        "passRate": 1,
+        "failures": []
+      },
+      "complex_parts": {
+        "total": 28,
+        "ok": 28,
+        "passRate": 1,
+        "failures": []
+      },
+      "complex_plane": {
+        "total": 6,
+        "ok": 6,
+        "passRate": 1,
+        "failures": []
+      },
+      "confluent_hypergeometric": {
+        "total": 23,
+        "ok": 23,
+        "passRate": 1,
+        "failures": []
+      },
+      "const_catalan": {
+        "total": 34,
+        "ok": 34,
+        "passRate": 1,
+        "failures": []
+      },
+      "const_gamma": {
+        "total": 14,
+        "ok": 14,
+        "passRate": 1,
+        "failures": []
+      },
+      "coulomb_wave": {
+        "total": 24,
+        "ok": 24,
+        "passRate": 1,
+        "failures": []
+      },
+      "dedekind_eta": {
+        "total": 34,
+        "ok": 34,
+        "passRate": 1,
+        "failures": []
+      },
+      "digamma_function": {
+        "total": 112,
+        "ok": 112,
+        "passRate": 1,
+        "failures": []
+      },
+      "dirichlet": {
+        "total": 64,
+        "ok": 64,
+        "passRate": 1,
+        "failures": []
+      },
+      "eisenstein": {
+        "total": 61,
+        "ok": 61,
+        "passRate": 1,
+        "failures": []
+      },
+      "error_functions": {
+        "total": 15,
+        "ok": 15,
+        "passRate": 1,
+        "failures": []
+      },
+      "exp": {
+        "total": 39,
+        "ok": 39,
+        "passRate": 1,
+        "failures": []
+      },
+      "factorials": {
+        "total": 53,
+        "ok": 53,
+        "passRate": 1,
+        "failures": []
+      },
+      "fibonacci": {
+        "total": 65,
+        "ok": 65,
+        "passRate": 1,
+        "failures": []
+      },
+      "gamma": {
+        "total": 46,
+        "ok": 46,
+        "passRate": 1,
+        "failures": []
+      },
+      "gauss_hypergeometric": {
+        "total": 20,
+        "ok": 20,
+        "passRate": 1,
+        "failures": []
+      },
+      "gaussian_quadrature": {
+        "total": 3,
+        "ok": 3,
+        "passRate": 1,
+        "failures": []
+      },
+      "gcd": {
+        "total": 79,
+        "ok": 78,
+        "passRate": 0.9873,
+        "failures": [
+          "aaef97"
+        ]
+      },
+      "general_functions": {
+        "total": 5,
+        "ok": 5,
+        "passRate": 1,
+        "failures": []
+      },
+      "golden_ratio": {
+        "total": 16,
+        "ok": 16,
+        "passRate": 1,
+        "failures": []
+      },
+      "halphen_constant": {
+        "total": 8,
+        "ok": 8,
+        "passRate": 1,
+        "failures": []
+      },
+      "hurwitz_zeta": {
+        "total": 71,
+        "ok": 71,
+        "passRate": 1,
+        "failures": []
+      },
+      "imaginary_unit": {
+        "total": 21,
+        "ok": 21,
+        "passRate": 1,
+        "failures": []
+      },
+      "integer_sequences": {
+        "total": 10,
+        "ok": 10,
+        "passRate": 1,
+        "failures": []
+      },
+      "integrals": {
+        "total": 7,
+        "ok": 7,
+        "passRate": 1,
+        "failures": []
+      },
+      "jacobi_theta": {
+        "total": 310,
+        "ok": 310,
+        "passRate": 1,
+        "failures": []
+      },
+      "lambertw": {
+        "total": 42,
+        "ok": 42,
+        "passRate": 1,
+        "failures": []
+      },
+      "landau_function": {
+        "total": 5,
+        "ok": 5,
+        "passRate": 1,
+        "failures": []
+      },
+      "legendre_elliptic": {
+        "total": 95,
+        "ok": 95,
+        "passRate": 1,
+        "failures": []
+      },
+      "legendre_polynomial": {
+        "total": 38,
+        "ok": 38,
+        "passRate": 1,
+        "failures": []
+      },
+      "log": {
+        "total": 20,
+        "ok": 20,
+        "passRate": 1,
+        "failures": []
+      },
+      "modular_j": {
+        "total": 22,
+        "ok": 22,
+        "passRate": 1,
+        "failures": []
+      },
+      "modular_lambda": {
+        "total": 38,
+        "ok": 38,
+        "passRate": 1,
+        "failures": []
+      },
+      "modular_transformations": {
+        "total": 7,
+        "ok": 7,
+        "passRate": 1,
+        "failures": []
+      },
+      "multiple_zeta_values": {
+        "total": 8,
+        "ok": 8,
+        "passRate": 1,
+        "failures": []
+      },
+      "numbers": {
+        "total": 4,
+        "ok": 4,
+        "passRate": 1,
+        "failures": []
+      },
+      "partitions": {
+        "total": 20,
+        "ok": 19,
+        "passRate": 0.95,
+        "failures": [
+          "acdce8"
+        ]
+      },
+      "pi": {
+        "total": 83,
+        "ok": 83,
+        "passRate": 1,
+        "failures": []
+      },
+      "powers": {
+        "total": 13,
+        "ok": 12,
+        "passRate": 0.9231,
+        "failures": [
+          "6c2b31"
+        ]
+      },
+      "prime_numbers": {
+        "total": 11,
+        "ok": 11,
+        "passRate": 1,
+        "failures": []
+      },
+      "riemann_zeta": {
+        "total": 44,
+        "ok": 44,
+        "passRate": 1,
+        "failures": []
+      },
+      "sinc": {
+        "total": 87,
+        "ok": 87,
+        "passRate": 1,
+        "failures": []
+      },
+      "sine": {
+        "total": 85,
+        "ok": 85,
+        "passRate": 1,
+        "failures": []
+      },
+      "sqrt": {
+        "total": 35,
+        "ok": 35,
+        "passRate": 1,
+        "failures": []
+      },
+      "stirling_numbers": {
+        "total": 12,
+        "ok": 12,
+        "passRate": 1,
+        "failures": []
+      },
+      "totient": {
+        "total": 49,
+        "ok": 46,
+        "passRate": 0.9388,
+        "failures": [
+          "33139b",
+          "b9c36d",
+          "feb1a0"
+        ]
+      },
+      "weierstrass_elliptic": {
+        "total": 13,
+        "ok": 13,
+        "passRate": 1,
+        "failures": []
+      }
+    },
+    "failures": [
+      {
+        "id": "33139b",
+        "topic": "totient",
+        "outcome": "box-error",
+        "errors": [
+          "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"integer\",\"number\"]]",
+          "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"integer\",\"number\"]]"
+        ]
+      },
+      {
+        "id": "6c2b31",
+        "topic": "powers",
+        "outcome": "box-error",
+        "errors": [
+          "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"number\",\"boolean\"]]"
+        ]
+      },
+      {
+        "id": "aaef97",
+        "topic": "gcd",
+        "outcome": "box-error",
+        "errors": [
+          "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"integer\",\"finite_rational\"]]"
+        ]
+      },
+      {
+        "id": "acdce8",
+        "topic": "partitions",
+        "outcome": "box-error",
+        "errors": [
+          "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"integer\",\"real\"]]",
+          "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"integer\",\"real\"]]"
+        ]
+      },
+      {
+        "id": "b9c36d",
+        "topic": "totient",
+        "outcome": "box-error",
+        "errors": [
+          "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"integer\",\"number\"]]"
+        ]
+      },
+      {
+        "id": "e54e61",
+        "topic": "carlson_elliptic",
+        "outcome": "box-error",
+        "errors": [
+          "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"number\",\"boolean\"]]"
+        ]
+      },
+      {
+        "id": "feb1a0",
+        "topic": "totient",
+        "outcome": "box-error",
+        "errors": [
+          "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"integer\",\"number\"]]",
+          "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"integer\",\"number\"]]"
+        ]
+      }
+    ]
+  },
+  "stage2": {
+    "seed": 42,
+    "slice": [
+      "none",
+      "real-simple"
+    ],
+    "entries": 1225,
+    "entriesWithInstances": 347,
+    "entriesSkipped": {
+      "shell-head": 567,
+      "representation": 202,
+      "box-error": 28,
+      "directed-infinity": 9,
+      "derivative": 33
+    },
+    "entriesNoAcceptedAssignment": 39,
+    "instances": 1122,
+    "outcomes": {
+      "True": 915,
+      "False": 44,
+      "Unknown": 7,
+      "not-evaluable": 156
+    },
+    "falseEntries": [
+      "157c33",
+      "250a45",
+      "332721",
+      "4a2ac8",
+      "4d3127",
+      "4fd123",
+      "6572c5",
+      "7b27cd",
+      "8d90e9",
+      "9c93bb",
+      "a0206a",
+      "c19cd6",
+      "c4a892",
+      "c7b921",
+      "ca8b0a",
+      "dc0823",
+      "e5a04c",
+      "fbe121"
+    ],
+    "elapsedMs": 29148
+  }
+}

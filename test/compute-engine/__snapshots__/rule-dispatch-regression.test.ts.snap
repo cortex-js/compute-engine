@@ -1,0 +1,435 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`simplify: absolute value \\frac{|x|}{|y|} 1`] = `["Divide", ["Abs", "x"], ["Abs", "y"]]`;
+
+exports[`simplify: absolute value \\left|\\left|x\\right|\\right| 1`] = `["Abs", "x"]`;
+
+exports[`simplify: absolute value \\left|x\\right|\\cdot\\left|y\\right| 1`] = `["Multiply", ["Abs", "x"], ["Abs", "y"]]`;
+
+exports[`simplify: absolute value |\\pi - 4| 1`] = `["Abs", ["Subtract", "Pi", 4]]`;
+
+exports[`simplify: absolute value |\\sin(x)| 1`] = `["Sin", ["Abs", "x"]]`;
+
+exports[`simplify: absolute value |-3| 1`] = `3`;
+
+exports[`simplify: absolute value |-x| 1`] = `["Abs", "x"]`;
+
+exports[`simplify: absolute value |2x| 1`] = `["Multiply", 2, ["Abs", "x"]]`;
+
+exports[`simplify: absolute value |3| 1`] = `3`;
+
+exports[`simplify: absolute value |e - 2| 1`] = `["Abs", ["Subtract", "ExponentialE", 2]]`;
+
+exports[`simplify: absolute value |x^2| 1`] = `["Square", "x"]`;
+
+exports[`simplify: absolute value |x|^2 1`] = `["Square", "x"]`;
+
+exports[`simplify: arithmetic \\frac{1}{2} + 0.5 1`] = `1`;
+
+exports[`simplify: arithmetic \\frac{3.1}{2.8} 1`] = `1.10714285714285714285714285714285714285714285714285714285714285714285714285714285714285714285714285701`;
+
+exports[`simplify: arithmetic \\frac{3}{4} 1`] = `["Rational", 3, 4]`;
+
+exports[`simplify: arithmetic \\frac{3}{4}+\\frac{5}{7} 1`] = `["Rational", 41, 28]`;
+
+exports[`simplify: arithmetic \\frac{3}{4}+2 1`] = `["Rational", 11, 4]`;
+
+exports[`simplify: arithmetic \\frac{6!}{4!\\cdot 2!} 1`] = `15`;
+
+exports[`simplify: arithmetic \\frac{6}{8} 1`] = `["Rational", 3, 4]`;
+
+exports[`simplify: arithmetic \\frac{10!}{8!} 1`] = `90`;
+
+exports[`simplify: arithmetic \\frac12+\\frac13+\\frac14+\\frac15+\\frac16+\\frac17+\\frac18+\\frac19+\\frac{1}{10} 1`] = `["Rational", 4861, 2520]`;
+
+exports[`simplify: arithmetic -23 1`] = `-23`;
+
+exports[`simplify: arithmetic -1234 - 5678 1`] = `-6912`;
+
+exports[`simplify: arithmetic 0! 1`] = `["Factorial", 0]`;
+
+exports[`simplify: arithmetic 0.3 1`] = `0.3`;
+
+exports[`simplify: arithmetic 1.234 + 5.678 1`] = `6.912`;
+
+exports[`simplify: arithmetic 2 + 4 1`] = `6`;
+
+exports[`simplify: arithmetic 5! 1`] = `["Factorial", 5]`;
+
+exports[`simplify: logarithms and exponentials (e^x)^2 1`] = `["Exp", ["Multiply", 2, "x"]]`;
+
+exports[`simplify: logarithms and exponentials \\exp(x)\\exp(-x) 1`] = `1`;
+
+exports[`simplify: logarithms and exponentials \\ln(\\frac{1}{x}) 1`] = `["Negate", ["Ln", "x"]]`;
+
+exports[`simplify: logarithms and exponentials \\ln(\\sqrt{x}) 1`] = `["Multiply", ["Rational", 1, 2], ["Ln", "x"]]`;
+
+exports[`simplify: logarithms and exponentials \\ln(1) 1`] = `0`;
+
+exports[`simplify: logarithms and exponentials \\ln(e) 1`] = `1`;
+
+exports[`simplify: logarithms and exponentials \\ln(e^2) 1`] = `2`;
+
+exports[`simplify: logarithms and exponentials \\ln(e^x) 1`] = `x`;
+
+exports[`simplify: logarithms and exponentials \\ln(x)+\\ln(y) 1`] = `["Ln", ["Multiply", "x", "y"]]`;
+
+exports[`simplify: logarithms and exponentials \\log_{10}(1) 1`] = `0`;
+
+exports[`simplify: logarithms and exponentials \\log_{10}(10^x) 1`] = `x`;
+
+exports[`simplify: logarithms and exponentials \\log_{10}(100) 1`] = `2`;
+
+exports[`simplify: logarithms and exponentials \\log_2(8) 1`] = `3`;
+
+exports[`simplify: logarithms and exponentials 2\\ln(x) - \\ln(x) 1`] = `["Ln", "x"]`;
+
+exports[`simplify: logarithms and exponentials 10^{\\log_{10}(x)} 1`] = `["Power", 10, ["Log", "x"]]`;
+
+exports[`simplify: logarithms and exponentials e^{\\ln(2)} 1`] = `["Exp", 0.6931471805599453]`;
+
+exports[`simplify: logarithms and exponentials e^{2\\ln(x)} 1`] = `["Square", "x"]`;
+
+exports[`simplify: logarithms and exponentials e^0 1`] = `1`;
+
+exports[`simplify: logarithms and exponentials e^x e^y 1`] = `["Exp", ["Add", "x", "y"]]`;
+
+exports[`simplify: polynomials (-2)(-x) 1`] = `["Multiply", 2, "x"]`;
+
+exports[`simplify: polynomials (2x+1)(x-3) 1`] = `["Add", ["Multiply", 2, ["Square", "x"]], ["Multiply", -5, "x"], -3]`;
+
+exports[`simplify: polynomials (x+1)(x-1) 1`] = `["Subtract", ["Square", "x"], 1]`;
+
+exports[`simplify: polynomials (x+1)^2 - x^2 - 2x - 1 1`] = `0`;
+
+exports[`simplify: polynomials \\sqrt{3}(\\sqrt{2}x + x) 1`] = `["Multiply", "x", ["Add", ["Sqrt", 3], ["Sqrt", 6]]]`;
+
+exports[`simplify: polynomials -1 \\cdot x 1`] = `["Negate", "x"]`;
+
+exports[`simplify: polynomials -2+x 1`] = `["Subtract", "x", 2]`;
+
+exports[`simplify: polynomials 0 \\cdot x 1`] = `0`;
+
+exports[`simplify: polynomials 1 \\cdot x 1`] = `x`;
+
+exports[`simplify: polynomials 2(-x) 1`] = `["Multiply", -2, "x"]`;
+
+exports[`simplify: polynomials 2(13.1+x) - 26.2 - 2x 1`] = `0`;
+
+exports[`simplify: polynomials 2(13.1+x) 1`] = `["Add", ["Multiply", 2, "x"], 26.2]`;
+
+exports[`simplify: polynomials 2\\pi x^2 - \\pi x^2 + 2\\pi 1`] = `["Add", ["Multiply", "Pi", ["Square", "x"]], ["Multiply", 2, "Pi"]]`;
+
+exports[`simplify: polynomials 2x \\times x \\times 3 \\times x 1`] = `["Multiply", 6, ["Power", "x", 3]]`;
+
+exports[`simplify: polynomials 3x - 2x 1`] = `x`;
+
+exports[`simplify: polynomials x + x 1`] = `["Multiply", 2, "x"]`;
+
+exports[`simplify: polynomials x - x 1`] = `0`;
+
+exports[`simplify: polynomials x+(-1) 1`] = `["Subtract", "x", 1]`;
+
+exports[`simplify: polynomials x+0 1`] = `x`;
+
+exports[`simplify: polynomials x+2x 1`] = `["Multiply", 3, "x"]`;
+
+exports[`simplify: polynomials x^2+2x+1 1`] = `["Add", ["Square", "x"], ["Multiply", 2, "x"], 1]`;
+
+exports[`simplify: polynomials x-(-1) 1`] = `["Add", "x", 1]`;
+
+exports[`simplify: powers (\\sqrt{x})^2 1`] = `x`;
+
+exports[`simplify: powers (x^{-2})^{-3} 1`] = `["Power", "x", 6]`;
+
+exports[`simplify: powers (x^1)^3 1`] = `["Power", "x", 3]`;
+
+exports[`simplify: powers (x^2)^{-2} 1`] = `["Divide", 1, ["Power", "x", 4]]`;
+
+exports[`simplify: powers (x^2)^3 1`] = `["Power", "x", 6]`;
+
+exports[`simplify: powers (xy)^2 1`] = `["Multiply", ["Square", "x"], ["Square", "y"]]`;
+
+exports[`simplify: powers \\frac{1}{x^{-2}} 1`] = `["Square", "x"]`;
+
+exports[`simplify: powers \\frac{2^x}{2^y} 1`] = `["Power", 2, ["Subtract", "x", "y"]]`;
+
+exports[`simplify: powers \\frac{x^5}{x^2} 1`] = `["Power", "x", 3]`;
+
+exports[`simplify: powers \\sqrt[3]{x^3} 1`] = `x`;
+
+exports[`simplify: powers \\sqrt{4x^2} 1`] = `["Multiply", 2, ["Abs", "x"]]`;
+
+exports[`simplify: powers \\sqrt{x^2} 1`] = `["Abs", "x"]`;
+
+exports[`simplify: powers \\sqrt{x}\\sqrt{x} 1`] = `x`;
+
+exports[`simplify: powers 2^x 2^y 1`] = `["Power", 2, ["Add", "x", "y"]]`;
+
+exports[`simplify: powers x^{-1} 1`] = `["Divide", 1, "x"]`;
+
+exports[`simplify: powers x^0 1`] = `1`;
+
+exports[`simplify: powers x^1 1`] = `x`;
+
+exports[`simplify: powers x^3 x^4 1`] = `["Power", "x", 7]`;
+
+exports[`simplify: radicals (\\sqrt{2}+\\sqrt{3})^2 1`] = `["Square", ["Add", ["Sqrt", 2], ["Sqrt", 3]]]`;
+
+exports[`simplify: radicals (-8)^{\\frac13} 1`] = `-2`;
+
+exports[`simplify: radicals \\frac{\\sqrt{5}+1}{4} 1`] = `["Add", ["Rational", 1, 4], ["Divide", ["Sqrt", 5], 4]]`;
+
+exports[`simplify: radicals \\frac{2}{\\sqrt{2}} 1`] = `["Sqrt", 2]`;
+
+exports[`simplify: radicals \\sqrt[3]{27} 1`] = `3`;
+
+exports[`simplify: radicals \\sqrt[4]{16} 1`] = `2`;
+
+exports[`simplify: radicals \\sqrt{2\\sqrt{3}+4} 1`] = `["Sqrt", ["Add", 4, ["Multiply", 2, ["Sqrt", 3]]]]`;
+
+exports[`simplify: radicals \\sqrt{2}\\sqrt{3} 1`] = `["Sqrt", 6]`;
+
+exports[`simplify: radicals \\sqrt{3} - 2 1`] = `["Subtract", ["Sqrt", 3], 2]`;
+
+exports[`simplify: radicals \\sqrt{3} 1`] = `["Sqrt", 3]`;
+
+exports[`simplify: radicals \\sqrt{3}+\\frac12 1`] = `["Add", ["Rational", 1, 2], ["Sqrt", 3]]`;
+
+exports[`simplify: radicals \\sqrt{3}+3 1`] = `["Add", 3, ["Sqrt", 3]]`;
+
+exports[`simplify: radicals \\sqrt{12}+\\sqrt{27} 1`] = `["Multiply", 5, ["Sqrt", 3]]`;
+
+exports[`simplify: radicals \\sqrt{50} 1`] = `["Multiply", 5, ["Sqrt", 2]]`;
+
+exports[`simplify: radicals \\sqrt{997} - (997^3)^{\\frac16} 1`] = `4.36039247984411269789337009308588989020237213158186925530957032914124987998383657042e-15`;
+
+exports[`simplify: rational expressions \\frac{0}{x} 1`] = `0`;
+
+exports[`simplify: rational expressions \\frac{1}{\\frac{1}{x}} 1`] = `x`;
+
+exports[`simplify: rational expressions \\frac{1}{x}+\\frac{1}{y} 1`] = `["Add", ["Divide", 1, "x"], ["Divide", 1, "y"]]`;
+
+exports[`simplify: rational expressions \\frac{2x}{4} 1`] = `["Multiply", ["Rational", 1, 2], "x"]`;
+
+exports[`simplify: rational expressions \\frac{a}{b}+\\frac{c}{d} 1`] = `["Add", ["Divide", "a", "b"], ["Divide", "c", "d"]]`;
+
+exports[`simplify: rational expressions \\frac{x+1}{x+1} 1`] = `1`;
+
+exports[`simplify: rational expressions \\frac{x^2 - 4}{x^2 + 4x + 4} 1`] = `
+[
+  "Divide",
+  ["Subtract", ["Square", "x"], 4],
+  ["Add", ["Square", "x"], ["Multiply", 4, "x"], 4]
+]
+`;
+
+exports[`simplify: rational expressions \\frac{x^2 y}{x y^2} 1`] = `["Divide", "x", "y"]`;
+
+exports[`simplify: rational expressions \\frac{x^2-1}{x-1} 1`] = `["Add", "x", 1]`;
+
+exports[`simplify: rational expressions \\frac{x}{\\frac{y}{2}} 1`] = `["Divide", ["Multiply", 2, "x"], "y"]`;
+
+exports[`simplify: rational expressions \\frac{x}{1} 1`] = `x`;
+
+exports[`simplify: rational expressions \\frac{x}{x} 1`] = `1`;
+
+exports[`simplify: rational expressions x/(\\pi/2)^3 1`] = `["Divide", ["Multiply", 8, "x"], ["Power", "Pi", 3]]`;
+
+exports[`simplify: rational expressions x/(2/y)^3 1`] = `["Multiply", ["Rational", 1, 8], "x", ["Power", "y", 3]]`;
+
+exports[`simplify: rational expressions x/(y/2)^3 1`] = `["Divide", ["Multiply", 8, "x"], ["Power", "y", 3]]`;
+
+exports[`simplify: relational 2\\pi < 4\\pi 1`] = `["Less", 1, 2]`;
+
+exports[`simplify: relational 2a < 4b 1`] = `["Less", "a", ["Multiply", 2, "b"]]`;
+
+exports[`simplify: trigonometry \\cos(\\arccos(x)) 1`] = `["Cos", ["Arccos", "x"]]`;
+
+exports[`simplify: trigonometry \\cos(\\frac{\\pi}{2}) 1`] = `0`;
+
+exports[`simplify: trigonometry \\cos(\\frac{\\pi}{3}) 1`] = `["Rational", 1, 2]`;
+
+exports[`simplify: trigonometry \\cos(\\pi) 1`] = `-1`;
+
+exports[`simplify: trigonometry \\cos(-x) 1`] = `["Cos", "x"]`;
+
+exports[`simplify: trigonometry \\cos(0) 1`] = `1`;
+
+exports[`simplify: trigonometry \\cos(x + \\pi) 1`] = `["Negate", ["Cos", "x"]]`;
+
+exports[`simplify: trigonometry \\cosh(-x) 1`] = `["Cosh", "x"]`;
+
+exports[`simplify: trigonometry \\cosh^2(x) - \\sinh^2(x) 1`] = `["Subtract", ["Square", ["Cosh", "x"]], ["Square", ["Sinh", "x"]]]`;
+
+exports[`simplify: trigonometry \\cot(x)\\tan(x) 1`] = `1`;
+
+exports[`simplify: trigonometry \\csc(x)\\sin(x) 1`] = `["Multiply", ["Sin", "x"], ["Csc", "x"]]`;
+
+exports[`simplify: trigonometry \\frac{\\sin(x)}{\\cos(x)} 1`] = `["Divide", ["Sin", "x"], ["Cos", "x"]]`;
+
+exports[`simplify: trigonometry \\sec^2(x) - \\tan^2(x) 1`] = `["Subtract", ["Square", ["Sec", "x"]], ["Square", ["Tan", "x"]]]`;
+
+exports[`simplify: trigonometry \\sin(\\arcsin(x)) 1`] = `["Sin", ["Arcsin", "x"]]`;
+
+exports[`simplify: trigonometry \\sin(\\frac{\\pi}{2}) 1`] = `1`;
+
+exports[`simplify: trigonometry \\sin(\\frac{\\pi}{6}) 1`] = `["Rational", 1, 2]`;
+
+exports[`simplify: trigonometry \\sin(\\pi - x) 1`] = `["Sin", "x"]`;
+
+exports[`simplify: trigonometry \\sin(\\pi) 1`] = `0`;
+
+exports[`simplify: trigonometry \\sin(-x) 1`] = `["Negate", ["Sin", "x"]]`;
+
+exports[`simplify: trigonometry \\sin(0) 1`] = `0`;
+
+exports[`simplify: trigonometry \\sin(x + 2\\pi) 1`] = `["Sin", "x"]`;
+
+exports[`simplify: trigonometry \\sin^2(x) + \\cos^2(x) 1`] = `1`;
+
+exports[`simplify: trigonometry \\sinh(-x) 1`] = `["Negate", ["Sinh", "x"]]`;
+
+exports[`simplify: trigonometry \\tan(\\arctan(x)) 1`] = `["Tan", ["Arctan", "x"]]`;
+
+exports[`simplify: trigonometry \\tan(\\frac{\\pi}{4}) 1`] = `1`;
+
+exports[`simplify: trigonometry \\tan(-x) 1`] = `["Negate", ["Tan", "x"]]`;
+
+exports[`simplify: trigonometry \\tan(0) 1`] = `0`;
+
+exports[`simplify: trigonometry \\tan(x)\\cos(x) 1`] = `["Multiply", ["Cos", "x"], ["Tan", "x"]]`;
+
+exports[`simplify: trigonometry \\tanh(0) 1`] = `["Tanh", 0]`;
+
+exports[`simplify: trigonometry 1 - \\sin^2(x) 1`] = `["Square", ["Cos", "x"]]`;
+
+exports[`simplify: trigonometry 2\\sin(x)\\cos(x) 1`] = `["Sin", ["Multiply", 2, "x"]]`;
+
+exports[`solve for x (x-1)(x+2) = 0 1`] = `
+[
+  1,
+  -2,
+]
+`;
+
+exports[`solve for x \\cos(x) = 1 1`] = `
+[
+  0,
+]
+`;
+
+exports[`solve for x \\frac{1}{x} - 2 = 0 1`] = `
+[
+  ["Rational", 1, 2],
+]
+`;
+
+exports[`solve for x \\frac{x}{2} + 3 = 5 1`] = `
+[
+  4,
+]
+`;
+
+exports[`solve for x \\ln(x) - 1 = 0 1`] = `
+[
+  ExponentialE,
+]
+`;
+
+exports[`solve for x \\sin(x) = 0 1`] = `
+[
+  0,
+  Pi,
+]
+`;
+
+exports[`solve for x \\sqrt{x} - 2 = 0 1`] = `
+[
+  4,
+]
+`;
+
+exports[`solve for x \\tan(x) - 1 = 0 1`] = `
+[
+  0.785398163397448309615660845819875721049292349843776455243736148076954101571552249657008706335529267,
+]
+`;
+
+exports[`solve for x 2^x - 8 = 0 1`] = `[]`;
+
+exports[`solve for x 2x^2 + 4x = 0 1`] = `
+[
+  0,
+  -2,
+]
+`;
+
+exports[`solve for x 5x = 0 1`] = `
+[
+  0,
+]
+`;
+
+exports[`solve for x 5x - 10 = 0 1`] = `
+[
+  2,
+]
+`;
+
+exports[`solve for x ax + b = 0 1`] = `
+[
+  ["Divide", ["Negate", "b"], "a"],
+]
+`;
+
+exports[`solve for x e^{2x} - 4 = 0 1`] = `[]`;
+
+exports[`solve for x e^x - 1 = 0 1`] = `[]`;
+
+exports[`solve for x x^2 + 1 = 0 1`] = `
+[
+  ["Complex", 0, 1],
+  ["Complex", 0, -1],
+]
+`;
+
+exports[`solve for x x^2 + 2x + 1 = 0 1`] = `
+[
+  -1,
+]
+`;
+
+exports[`solve for x x^2 = 4 1`] = `
+[
+  2,
+  -2,
+]
+`;
+
+exports[`solve for x x^2 - 16 = 0 1`] = `
+[
+  4,
+  -4,
+]
+`;
+
+exports[`solve for x x^2 - x - 6 = 0 1`] = `
+[
+  3,
+  -2,
+]
+`;
+
+exports[`solve for x x^3 - 8 = 0 1`] = `
+[
+  2,
+]
+`;
+
+exports[`solve for x x^4 - 1 = 0 1`] = `
+[
+  1,
+  -1,
+]
+`;

@@ -128,6 +128,15 @@ describe('LATEX SERIALIZING', () => {
     // A numeric base that prettifies to a square still needs an explicit sign
     expect(term('x', 2)).toMatchInlineSnapshot(`3\\times2^2`);
     expect(term('x', 10)).toMatchInlineSnapshot(`3\\times10^2`);
+
+    // ...but a factor that does NOT serialize starting with a digit stays
+    // juxtaposed: `3·√2` must remain `3\sqrt{2}` (renders as `3√2`), not
+    // `3\times\sqrt{2}`. The rule keys on a digit-leading term, not on the
+    // operator, so radicals are unaffected.
+    const radical = ce
+      .box(['Multiply', 3, ['Sqrt', 'x']], { canonical: false })
+      .subs({ x: 2 }, { canonical: false });
+    expect(radical.toLatex()).toMatchInlineSnapshot(`3\\sqrt{2}`);
   });
   test('Power', () => {
     expect(latex(['Power', 'x', -2])).toMatchInlineSnapshot(`\\frac{1}{x^2}`);
