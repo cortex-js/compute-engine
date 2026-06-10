@@ -1,0 +1,865 @@
+{
+  "generator": "scripts/fungrim/compile-rules.ts",
+  "sliceEntries": 707,
+  "emitted": 558,
+  "ledger": {
+    "box-error": 4,
+    "compat-signature": 23,
+    "duplicate-undirected": 2,
+    "guard-uncompilable": 5,
+    "lhs-not-value-form": 94,
+    "no-fire": 15,
+    "not-equation": 6
+  },
+  "byPurpose": {
+    "expand": 17,
+    "simplify": 541
+  },
+  "byClass": {
+    "identity": 239,
+    "specific-value": 319
+  },
+  "byTarget": {
+    "simplify": 558
+  },
+  "sampleKinds": {
+    "numeric": 32,
+    "symbolic": 526
+  },
+  "headBuckets": {
+    "Multiply": 41,
+    "CarlsonRJ": 31,
+    "Add": 28,
+    "JacobiTheta": 27,
+    "GCD": 24,
+    "Divide": 21,
+    "Which": 20,
+    "CarlsonRF": 19,
+    "CarlsonRD": 17,
+    "HurwitzZeta": 17,
+    "Digamma": 13,
+    "LCM": 13,
+    "Arctan": 12,
+    "ModularJ": 12,
+    "DedekindEta": 11,
+    "IncompleteEllipticE": 11,
+    "CarlsonRC": 10,
+    "CarlsonRG": 10,
+    "IncompleteEllipticF": 10,
+    "EllipticK": 9,
+    "Sin": 9,
+    "Power": 8,
+    "Sqrt": 8,
+    "SloaneA": 7,
+    "AGM": 6,
+    "EisensteinG": 6,
+    "EllipticPi": 6,
+    "Imaginary": 6,
+    "LambertW": 6,
+    "NPartition": 6,
+    "Tuple": 6,
+    "Abs": 5,
+    "Argument": 5,
+    "ChebyshevU": 5,
+    "Conjugate": 5,
+    "Count": 5,
+    "EllipticE": 5,
+    "Gamma": 5,
+    "ModularLambda": 5,
+    "MultiZetaValue": 5,
+    "Negate": 5,
+    "Sinc": 5,
+    "ChebyshevT": 4,
+    "EisensteinE": 4,
+    "Min": 4,
+    "Set": 4,
+    "Apply": 3,
+    "BarnesG": 3,
+    "Binomial": 3,
+    "DirichletL": 3,
+    "Fibonacci": 3,
+    "LegendrePolynomial": 3,
+    "Ln": 3,
+    "Real": 3,
+    "StieltjesGamma": 3,
+    "Totient": 3,
+    "Arctan2": 2,
+    "ArgMin": 2,
+    "KeiperLiLambda": 2,
+    "Max": 2,
+    "XGCD": 2,
+    "ArgMax": 1,
+    "ArgMaxUnique": 1,
+    "BernoulliB": 1,
+    "BernoulliPolynomial": 1,
+    "DedekindEtaEpsilon": 1,
+    "Factorial": 1,
+    "FallingFactorial": 1,
+    "Floor": 1,
+    "Hypergeometric2F1": 1,
+    "Matrix": 1,
+    "PolyLog": 1,
+    "RisingFactorial": 1,
+    "SequenceLimitSuperior": 1,
+    "Sign": 1,
+    "Spectrum": 1,
+    "UniqueZero": 1,
+    "Zeta": 1
+  },
+  "declaredShells": 71,
+  "solveSeeds": [
+    "1f026d",
+    "296627",
+    "4c1e1e",
+    "8654a3",
+    "ed7dac",
+    "f516e3"
+  ],
+  "skips": [
+    {
+      "id": "030560",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "033c51",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "03aca0",
+      "reason": "compat-signature",
+      "detail": "2-arg LambertW/Digamma"
+    },
+    {
+      "id": "0479f5",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "0644b6",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "06c468",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "07731b",
+      "reason": "no-fire",
+      "detail": "rule did not fire"
+    },
+    {
+      "id": "078869",
+      "reason": "no-fire",
+      "detail": "rule did not fire"
+    },
+    {
+      "id": "07e35f",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "0abbe1",
+      "reason": "no-fire",
+      "detail": "rule did not fire"
+    },
+    {
+      "id": "0bd544",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "0c9939",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "0e2425",
+      "reason": "compat-signature",
+      "detail": "no-fire: fired but produced Matrix([[Fibonacci(_n + 1)],[Fibonacci(_n)]]) ≠ Matrix([[Fibonacci(n + 1)],[Fibonacci(n)]])"
+    },
+    {
+      "id": "1448e3",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "175b7a",
+      "reason": "no-fire",
+      "detail": "rule did not fire"
+    },
+    {
+      "id": "1bbdaf",
+      "reason": "no-fire",
+      "detail": "rule did not fire"
+    },
+    {
+      "id": "1d65c2",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "2251c6",
+      "reason": "compat-signature",
+      "detail": "2-arg LambertW/Digamma"
+    },
+    {
+      "id": "2371b9",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "2744d4",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "27586f",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "27ca8d",
+      "reason": "no-fire",
+      "detail": "rule did not fire"
+    },
+    {
+      "id": "2806fd",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "2a0316",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "2a48bd",
+      "reason": "no-fire",
+      "detail": "no seed satisfying the guards"
+    },
+    {
+      "id": "2ac5eb",
+      "reason": "not-equation",
+      "detail": "EqualNearestDecimal"
+    },
+    {
+      "id": "2e0596",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "31adf6",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "33139b",
+      "reason": "box-error",
+      "detail": "invalid lhs: SequenceLimitInferior((n) |-> Totient(Error(ErrorCode(\"incompatible-type\", \"integer\", \"number\"))) / Totient(Error(ErrorCode(\"incompatible-type\", \"integer\", \"number\"))), +oo)"
+    },
+    {
+      "id": "3a9c67",
+      "reason": "compat-signature",
+      "detail": "no-fire: fired but produced Matrix([[Fibonacci(_n)],[Fibonacci(_n - 1)]]) * Matrix([[1,1],[1,0]])^m ≠ Matrix([[Fibonacci(n)],[Fibonacci(n - 1)]]) * Matrix([[1,1],[1,0]])"
+    },
+    {
+      "id": "3d276b",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "3da9b7",
+      "reason": "lhs-not-value-form",
+      "detail": "Apply"
+    },
+    {
+      "id": "3fc797",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "3fe553",
+      "reason": "compat-signature",
+      "detail": "no-fire: rule did not fire"
+    },
+    {
+      "id": "3ff35f",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "42d727",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "44ad09",
+      "reason": "lhs-not-value-form",
+      "detail": "Set"
+    },
+    {
+      "id": "487e35",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "488a30",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "4a30f1",
+      "reason": "compat-signature",
+      "detail": "2-arg LambertW/Digamma"
+    },
+    {
+      "id": "4af6db",
+      "reason": "lhs-not-value-form",
+      "detail": "Apply"
+    },
+    {
+      "id": "4b20ab",
+      "reason": "lhs-not-value-form",
+      "detail": "Set"
+    },
+    {
+      "id": "4c166d",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "5174ea",
+      "reason": "no-fire",
+      "detail": "fired but produced (sqrt(2) * NaN * pi^(3/2)) / Gamma(1/4)^2 ≠ (sqrt(2) * NaN * pi^(3/2)) / Gamma(1/4)^2"
+    },
+    {
+      "id": "5278da",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "541e2e",
+      "reason": "guard-uncompilable",
+      "detail": "unsupported conjunct \"NotElement\""
+    },
+    {
+      "id": "54c80d",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "55498b",
+      "reason": "lhs-not-value-form",
+      "detail": "Set"
+    },
+    {
+      "id": "5706ab",
+      "reason": "lhs-not-value-form",
+      "detail": "Apply"
+    },
+    {
+      "id": "590136",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "591d64",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "595f46",
+      "reason": "compat-signature",
+      "detail": "2-arg LambertW/Digamma"
+    },
+    {
+      "id": "5a11eb",
+      "reason": "guard-uncompilable",
+      "detail": "unsupported conjunct \"NotElement\""
+    },
+    {
+      "id": "5aad5c",
+      "reason": "duplicate-undirected",
+      "detail": "same equality as 499cfc"
+    },
+    {
+      "id": "5ce30b",
+      "reason": "compat-signature",
+      "detail": "2-arg LambertW/Digamma"
+    },
+    {
+      "id": "63ba30",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "646745",
+      "reason": "no-fire",
+      "detail": "rule did not fire"
+    },
+    {
+      "id": "6572c5",
+      "reason": "no-fire",
+      "detail": "rule did not fire"
+    },
+    {
+      "id": "67bb53",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "69d0a3",
+      "reason": "no-fire",
+      "detail": "fired but produced (sqrt(2) * NaN * pi^(3/2)) / Gamma(1/4)^2 ≠ (sqrt(2) * NaN * pi^(3/2)) / Gamma(1/4)^2"
+    },
+    {
+      "id": "6d2709",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "6ed553",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "722241",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "72cef9",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "769f6e",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "77d2f8",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "78c19c",
+      "reason": "compat-signature",
+      "detail": "2-arg LambertW/Digamma"
+    },
+    {
+      "id": "7ce79e",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "807c7d",
+      "reason": "compat-signature",
+      "detail": "2-arg LambertW/Digamma"
+    },
+    {
+      "id": "818008",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "81f500",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "826257",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "830dd4",
+      "reason": "lhs-not-value-form",
+      "detail": "Set"
+    },
+    {
+      "id": "831ea4",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "8332d8",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "859856",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "86fcf1",
+      "reason": "not-equation",
+      "detail": "Equal"
+    },
+    {
+      "id": "8ee7c9",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "8fab22",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "90b26f",
+      "reason": "compat-signature",
+      "detail": "2-arg LambertW/Digamma"
+    },
+    {
+      "id": "90b367",
+      "reason": "lhs-not-value-form",
+      "detail": "Apply"
+    },
+    {
+      "id": "90b419",
+      "reason": "lhs-not-value-form",
+      "detail": "Set"
+    },
+    {
+      "id": "912ff9",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "9206a3",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "921d61",
+      "reason": "compat-signature",
+      "detail": "2-arg LambertW/Digamma"
+    },
+    {
+      "id": "95c04c",
+      "reason": "not-equation",
+      "detail": "EqualNearestDecimal"
+    },
+    {
+      "id": "9758ac",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "98a765",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "997777",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "9a944c",
+      "reason": "no-fire",
+      "detail": "rule did not fire"
+    },
+    {
+      "id": "9d26d2",
+      "reason": "lhs-not-value-form",
+      "detail": "Set"
+    },
+    {
+      "id": "9e9922",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "a044e1",
+      "reason": "guard-uncompilable",
+      "detail": "unsupported conjunct \"NotElement\""
+    },
+    {
+      "id": "a172c7",
+      "reason": "compat-signature",
+      "detail": "2-arg LambertW/Digamma"
+    },
+    {
+      "id": "a4ac32",
+      "reason": "not-equation",
+      "detail": "RealIndefiniteIntegralEqual"
+    },
+    {
+      "id": "a54fb0",
+      "reason": "lhs-not-value-form",
+      "detail": "Apply"
+    },
+    {
+      "id": "a62320",
+      "reason": "compat-signature",
+      "detail": "2-arg LambertW/Digamma"
+    },
+    {
+      "id": "a637cd",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "a766f2",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "a8657e",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "acfc1f",
+      "reason": "box-error",
+      "detail": " Invalid rule fungrim:acfc1f | the match expression is not valid: SequenceLimitInferior((n) |-> (ln(ln(n)) * Totient(Error(ErrorCode(\"incompatible-type\", \"integ"
+    },
+    {
+      "id": "b1357b",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "b31fd2",
+      "reason": "compat-signature",
+      "detail": "2-arg LambertW/Digamma"
+    },
+    {
+      "id": "b89166",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "babd3c",
+      "reason": "compat-signature",
+      "detail": "2-arg LambertW/Digamma"
+    },
+    {
+      "id": "bad5d9",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "bb88c8",
+      "reason": "compat-signature",
+      "detail": "2-arg LambertW/Digamma"
+    },
+    {
+      "id": "bd3faa",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "c19cd6",
+      "reason": "duplicate-undirected",
+      "detail": "same equality as 7b27cd"
+    },
+    {
+      "id": "c26bc9",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "c87ff4",
+      "reason": "lhs-not-value-form",
+      "detail": "Apply"
+    },
+    {
+      "id": "cb9f61",
+      "reason": "no-fire",
+      "detail": "rule did not fire"
+    },
+    {
+      "id": "cbf396",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "ce5423",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "cf3977",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "d09380",
+      "reason": "compat-signature",
+      "detail": "2-arg LambertW/Digamma"
+    },
+    {
+      "id": "d17d0b",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "d1a0ec",
+      "reason": "guard-uncompilable",
+      "detail": "unsupported conjunct \"NotElement\""
+    },
+    {
+      "id": "d2f9fb",
+      "reason": "compat-signature",
+      "detail": "2-arg LambertW/Digamma"
+    },
+    {
+      "id": "d316bc",
+      "reason": "no-fire",
+      "detail": "rule did not fire"
+    },
+    {
+      "id": "d3cfc2",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "d6703a",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "d7962e",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "dabb47",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "dae4a7",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "dbdf08",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "dbfd5b",
+      "reason": "lhs-not-value-form",
+      "detail": "Apply"
+    },
+    {
+      "id": "dcc8b1",
+      "reason": "lhs-not-value-form",
+      "detail": "Set"
+    },
+    {
+      "id": "df52fc",
+      "reason": "guard-uncompilable",
+      "detail": "unsupported conjunct \"Not\""
+    },
+    {
+      "id": "e2288d",
+      "reason": "no-fire",
+      "detail": "rule did not fire"
+    },
+    {
+      "id": "e2bfdb",
+      "reason": "not-equation",
+      "detail": "EqualNearestDecimal"
+    },
+    {
+      "id": "e4315f",
+      "reason": "lhs-not-value-form",
+      "detail": "Set"
+    },
+    {
+      "id": "e83059",
+      "reason": "compat-signature",
+      "detail": "2-arg LambertW/Digamma"
+    },
+    {
+      "id": "e85723",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "e9a269",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "ed7dac",
+      "reason": "compat-signature",
+      "detail": "2-arg LambertW/Digamma"
+    },
+    {
+      "id": "ee86fb",
+      "reason": "lhs-not-value-form",
+      "detail": "Set"
+    },
+    {
+      "id": "f178f2",
+      "reason": "lhs-not-value-form",
+      "detail": "Apply"
+    },
+    {
+      "id": "f372e9",
+      "reason": "compat-signature",
+      "detail": "2-arg LambertW/Digamma"
+    },
+    {
+      "id": "f4750b",
+      "reason": "box-error",
+      "detail": "invalid lhs: Determinant(Error(ErrorCode(\"incompatible-type\", \"matrix\", \"complex\")))"
+    },
+    {
+      "id": "f55b36",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "f56273",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "f5e0b0",
+      "reason": "not-equation",
+      "detail": "EqualNearestDecimal"
+    },
+    {
+      "id": "f78fa0",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "f8d280",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "fa0292",
+      "reason": "compat-signature",
+      "detail": "2-arg LambertW/Digamma"
+    },
+    {
+      "id": "fad16f",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "fc0d55",
+      "reason": "lhs-not-value-form",
+      "detail": "symbol"
+    },
+    {
+      "id": "feb1a0",
+      "reason": "box-error",
+      "detail": "invalid lhs: SequenceLimitSuperior((n) |-> Totient(Error(ErrorCode(\"incompatible-type\", \"integer\", \"number\"))) / Totient(Error(ErrorCode(\"incompatible-type\", \"integer\", \"number\"))), +oo)"
+    }
+  ]
+}

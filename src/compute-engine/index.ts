@@ -30,6 +30,7 @@ import type {
   CanonicalOptions,
   Metadata,
   Rule,
+  RulePurpose,
   Scope,
   EvalContext,
   ExpressionInput,
@@ -1680,7 +1681,12 @@ export class ComputeEngine implements IComputeEngine {
       | BoxedRuleSet
       | undefined
       | null,
-    options?: { canonical?: boolean }
+    options?: {
+      canonical?: boolean;
+      /** Default purpose applied to any rule in the set that doesn't carry
+       *  its own `purpose` tag (a per-rule tag takes precedence). */
+      purpose?: RulePurpose;
+    }
   ): BoxedRuleSet {
     return boxRules(this, rules, options);
   }
@@ -1697,9 +1703,15 @@ export class ComputeEngine implements IComputeEngine {
         this._cacheStore.invalidate('standard-simplification-rules');
       }
 
-      const result = this._cache('standard-simplification-rules', () =>
-        boxRules(this, this._simplificationRules.rules, { canonical: true })
-      );
+      const result = this._cache('standard-simplification-rules', () => {
+        // Rules tagged `purpose: 'expand'` grow expressions by design
+        // (series, argument expansion): they are excluded from simplify()'s
+        // scan, but remain reachable via `expr.replace()`.
+        const boxed = boxRules(this, this._simplificationRules.rules, {
+          canonical: true,
+        });
+        return { rules: boxed.rules.filter((r) => r.purpose !== 'expand') };
+      });
       this._simplificationRules.markCached();
       return result;
     }

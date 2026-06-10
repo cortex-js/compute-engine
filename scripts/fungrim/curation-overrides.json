@@ -1,0 +1,31 @@
+{
+  "$comment": "Hand-maintained curation overrides for the Fungrim Phase-1 rule compiler (FUNGRIM-PLAN-5-LOADER.md §2.3/§2.6). Merged last by scripts/fungrim/compile-rules.ts. `overrides` entries ({ direction?, purpose?, target?, exclude?, note? }, keyed by corpus entry id) adjust or exclude compiled artifact rules. `transformAllowlist` promotes hand-vetted growth-neutral canonicalizations from 'expand' to 'transform' (the machine policy never emits 'transform'). `solveSeeds` is the §2.6 hand-curated solve-template seed set: it is NOT compiled into the M1 artifact and does not affect default loading — the M2 runtime loader compiles these entries into UNIVARIATE_ROOTS-style templates behind loadFungrim(ce, { solve: true }) (off by default, Q7).",
+  "overrides": {},
+  "transformAllowlist": [],
+  "solveSeeds": {
+    "8654a3": {
+      "target": "solve",
+      "note": "W(x*e^x) = x — seed for the LambertW root template _x*Exp(_x) + __b = 0 -> _x = LambertW(Negate(__b)). Off by default; validateRoots checks every candidate against the original equation, so an over-broad template degrades to a no-op, never a wrong answer."
+    },
+    "ed7dac": {
+      "target": "solve",
+      "note": "LambertW branch -1 variant of 8654a3 (2-arg LambertW). Trips the compat-signature rule in M1 (CE's LambertW is 1-arg principal branch) and is therefore excluded from the artifact — revisit when branch support lands (Phase 2)."
+    },
+    "4c1e1e": {
+      "target": "solve",
+      "note": "Ln(Exp(z)) = z inverse composition. complex-domain guard accepted for solve templates because validateRoots filters every candidate against the original equation (the safety property promised by the ce.solveRules docs)."
+    },
+    "296627": {
+      "target": "solve",
+      "note": "Exp(Ln(z)) = z inverse composition. complex-domain guard accepted for solve templates because validateRoots filters every candidate against the original equation."
+    },
+    "1f026d": {
+      "target": "solve",
+      "note": "Tan(Arctan(z)) = z inverse composition. complex-domain guard accepted for solve templates because validateRoots filters every candidate against the original equation."
+    },
+    "f516e3": {
+      "target": "solve",
+      "note": "Arctan(Tan(theta)) = theta inverse composition (principal branch). complex-domain guard accepted for solve templates because validateRoots filters every candidate against the original equation."
+    }
+  }
+}

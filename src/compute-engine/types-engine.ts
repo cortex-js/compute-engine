@@ -39,12 +39,15 @@ import type {
   Rule as KernelRule,
   BoxedRule as KernelBoxedRule,
   BoxedRuleSet as KernelBoxedRuleSet,
+  RulePurpose,
   RuleStep as KernelRuleStep,
   AssignValue as KernelAssignValue,
   Scope as KernelScope,
   EvalContext as KernelEvalContext,
 } from './types-kernel-evaluation';
 import type { LanguageTarget, CompilationResult } from './compilation/types';
+
+export type { RulePurpose } from './types-kernel-evaluation';
 
 type Rule = KernelRule<Expression, ExpressionInput, IComputeEngine>;
 type BoxedRule = KernelBoxedRule<Expression, IComputeEngine>;
@@ -331,7 +334,12 @@ export interface IComputeEngine {
       | BoxedRuleSet
       | undefined
       | null,
-    options?: { canonical?: boolean }
+    options?: {
+      canonical?: boolean;
+      /** Default purpose applied to any rule in the set that doesn't carry
+       *  its own `purpose` tag (a per-rule tag takes precedence). */
+      purpose?: RulePurpose;
+    }
   ): BoxedRuleSet;
 
   getRuleSet(

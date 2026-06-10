@@ -9,6 +9,7 @@ import type {
   Rule,
   RuleConditionFunction,
   RuleFunction,
+  RulePurpose,
   RuleReplaceFunction,
   RuleStep,
   RuleSteps,
@@ -384,7 +385,7 @@ function parseRulePart(
 function parseRule(
   ce: ComputeEngine,
   rule: string,
-  options?: { canonical?: boolean }
+  options?: { canonical?: boolean; purpose?: RulePurpose }
 ): BoxedRule {
   const makeWildcardEntry = (x: string) => {
     return {
@@ -596,12 +597,18 @@ function parseRule(
 function boxRule(
   ce: ComputeEngine,
   rule: Rule | BoxedRule,
-  options?: { canonical?: boolean }
+  options?: { canonical?: boolean; purpose?: RulePurpose }
 ): BoxedRule {
   if (rule === undefined || rule === null)
     throw new Error('Expected a rule, not ' + rule);
 
-  if (isBoxedRule(rule)) return rule;
+  if (isBoxedRule(rule)) {
+    // Apply the default purpose to already-boxed rules that don't carry
+    // their own tag (a per-rule tag takes precedence).
+    if (options?.purpose !== undefined && rule.purpose === undefined)
+      return { ...rule, purpose: options.purpose };
+    return rule;
+  }
 
   // If the rule is defined as a single string, parse it
   // e.g. `|x| -> x; x > 0`
@@ -615,12 +622,16 @@ function boxRule(
       match: undefined,
       replace: rule,
       condition: undefined,
+      purpose: options?.purpose,
       id: rule.toString().replace(/\n/g, ' '),
     };
 
   // eslint-disable-next-line prefer-const
   let { match, replace, condition, id, onMatch, onBeforeMatch, operators } =
     rule;
+
+  // The per-rule purpose tag takes precedence over the per-ruleset default
+  const purpose = rule.purpose ?? options?.purpose;
 
   if (replace === undefined)
     throw new Error(
@@ -733,6 +744,7 @@ function boxRule(
     condition: condFn,
     useVariations: rule.useVariations,
     operators,
+    purpose,
     id,
     onMatch,
     onBeforeMatch,
@@ -764,7 +776,7 @@ function pushSafeScope(ce: ComputeEngine) {
 export function boxRules(
   ce: ComputeEngine,
   rs: Rule | ReadonlyArray<Rule | BoxedRule> | BoxedRuleSet | undefined | null,
-  options?: { canonical?: boolean }
+  options?: { canonical?: boolean; purpose?: RulePurpose }
 ): BoxedRuleSet {
   if (!rs) return { rules: [] };
 
@@ -846,7 +858,8 @@ export function applyRule(
   const requestedForm = normalizeReplaceForm(options);
 
   // eslint-disable-next-line prefer-const
-  let { match, replace, condition, id, onMatch, onBeforeMatch } = rule;
+  let { match, replace, condition, id, onMatch, onBeforeMatch, purpose } =
+    rule;
   const because = id ?? '';
 
   const ce = expr.engine;
@@ -913,8 +926,12 @@ export function applyRule(
       })
     : {};
 
+  // Stamp the purpose of the firing rule onto emitted steps
+  const stepOf = (value: Expression): RuleStep =>
+    purpose !== undefined ? { value, because, purpose } : { value, because };
+
   // If the `expr` does not match the pattern, the rule doesn't apply
-  if (sub === null) return operandsMatched ? { value: expr, because } : null;
+  if (sub === null) return operandsMatched ? stepOf(expr) : null;
 
   // If the condition doesn't match, the rule doesn't apply
   if (typeof condition === 'function') {
@@ -935,7 +952,7 @@ export function applyRule(
 
     try {
       if (!condition(conditionSub, ce))
-        return operandsMatched ? { value: expr, because } : null;
+        return operandsMatched ? stepOf(expr) : null;
     } catch (e) {
       console.error(
         `\n|   Rule "${rule.id}"\n|   Error while checking condition\n|    ${e.message}`
@@ -981,7 +998,7 @@ export function applyRule(
         // : replace.subs(sub, { form: dynamicForm ? undefined : formValue });
         replace.subs(sub, { canonical: getFormType() === 'canonical' });
 
-  if (!result) return operandsMatched ? { value: expr, because } : null;
+  if (!result) return operandsMatched ? stepOf(expr) : null;
 
   // To aid in debugging, invoke onMatch when the rule matches
   onMatch?.(rule, expr, result);
@@ -1004,10 +1021,19 @@ export function applyRule(
 
   // (Need to request a 'form' variant (canonical/structural) to account for case of a custom
   // replace: which may not have returned the same 'form' calculated here)
-  if (isRuleStep(result))
-    return getFormType() === 'raw'
-      ? result
-      : { ...result, value: computeValue(result.value) };
+  if (isRuleStep(result)) {
+    // A step purpose set by a rule function takes precedence over the
+    // rule-level purpose tag
+    if (getFormType() === 'raw')
+      return purpose !== undefined && result.purpose === undefined
+        ? { ...result, purpose }
+        : result;
+    return {
+      ...result,
+      value: computeValue(result.value),
+      purpose: result.purpose ?? purpose,
+    };
+  }
 
   if (!isExpression(result)) {
     throw new Error(
@@ -1015,10 +1041,7 @@ export function applyRule(
     );
   }
 
-  return {
-    value: computeValue(result),
-    because,
-  };
+  return stepOf(computeValue(result));
 }
 
 /**

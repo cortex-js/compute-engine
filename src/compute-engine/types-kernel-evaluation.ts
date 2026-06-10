@@ -108,10 +108,28 @@ export type RuleFunction<Expr = unknown> = (
   expr: Expr
 ) => undefined | Expr | RuleStep<Expr>;
 
+/**
+ * The purpose of a rule determines how its result is treated by
+ * the simplification cost policy:
+ *
+ * - `'simplify'`: the result must pass the cost gate (the default;
+ *   today's behavior — results that grow the expression are discarded).
+ * - `'transform'`: a mathematically-preferred rewrite; exempt from the
+ *   cost gate (accepted by `simplify()` even if structurally larger).
+ * - `'expand'`: growth-by-design (series, argument expansion); skipped by
+ *   `simplify()`, but reachable via `expr.replace()` and future expand APIs.
+ *
+ * @category Rules
+ */
+export type RulePurpose = 'simplify' | 'transform' | 'expand';
+
 /** @category Rules */
 export type RuleStep<Expr = unknown> = {
   value: Expr;
   because: string; // id of the rule
+  /** The purpose of the rule that produced this step, stamped by
+   * `applyRule` from the firing rule. */
+  purpose?: RulePurpose;
 };
 
 /** @category Rules */
@@ -158,6 +176,9 @@ export type Rule<Expr = unknown, SemiExpr = unknown, CE = unknown> =
        *  operator is one of these. Used to index the rule; semantics are
        *  unchanged (the rule is simply never tried on other operators). */
       operators?: ReadonlyArray<string>;
+      /** How the result of this rule is treated by the simplification cost
+       *  policy. See {@linkcode RulePurpose}. **Default**: `'simplify'`. */
+      purpose?: RulePurpose;
       id?: string;
       onBeforeMatch?: (rule: Rule<Expr, SemiExpr, CE>, expr: Expr) => void;
       onMatch?: (
@@ -182,6 +203,9 @@ export type BoxedRule<Expr = unknown, CE = unknown> = {
    *  operator is one of these. Used to index the rule; semantics are
    *  unchanged (the rule is simply never tried on other operators). */
   operators?: ReadonlyArray<string>;
+  /** How the result of this rule is treated by the simplification cost
+   *  policy. See {@linkcode RulePurpose}. **Default**: `'simplify'`. */
+  purpose?: RulePurpose;
   id?: string;
   onBeforeMatch?: (rule: Rule<Expr, unknown, CE>, expr: Expr) => void;
   onMatch?: (

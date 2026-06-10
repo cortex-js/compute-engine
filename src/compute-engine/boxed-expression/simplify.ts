@@ -160,9 +160,15 @@ export function simplify(
     return steps as RuleSteps;
   }
 
-  const rules = options?.rules
-    ? ce.rules(options.rules, { canonical: true })
-    : ce.getRuleSet('standard-simplification')!;
+  // Rules tagged `purpose: 'expand'` grow expressions by design: they are
+  // excluded from simplify()'s scan (the 'standard-simplification' set is
+  // already filtered in its build closure), but remain reachable via
+  // `expr.replace()`.
+  let rules: BoxedRuleSet;
+  if (options?.rules) {
+    const boxed = ce.rules(options.rules, { canonical: true });
+    rules = { rules: boxed.rules.filter((r) => r.purpose !== 'expand') };
+  } else rules = ce.getRuleSet('standard-simplification')!;
 
   options = { ...options, rules };
 
@@ -459,6 +465,9 @@ function simplifyNonCommutativeFunction(
       }
       return false;
     })();
+  // Steps from rules tagged `purpose: 'transform'` are mathematically
+  // preferred rewrites: they are exempt from the cost gate.
+  const isTransformPurpose = result.at(-1)!.purpose === 'transform';
   if (
     !isCheaper(expr, last, options?.costFunction) &&
     !isPowerCombination &&
@@ -467,7 +476,8 @@ function simplifyNonCommutativeFunction(
     !isAbsRule &&
     !isQuotientPowerRule &&
     !isFactorialFactoring &&
-    !isExpandWithSimplification
+    !isExpandWithSimplification &&
+    !isTransformPurpose
   )
     return steps;
 

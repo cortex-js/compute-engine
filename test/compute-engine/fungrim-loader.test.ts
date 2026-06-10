@@ -1,0 +1,1056 @@
+/**
+ * Acceptance suite for the Fungrim Phase-1 runtime loader
+ * (FUNGRIM-PLAN-5-LOADER.md §3 M2, §2.7, §2.8).
+ *
+ * Covers: load report shape, idempotence, topic/class/purpose filtering,
+ * shell declarations, guard positive/negative controls (fail-closed),
+ * per-engine isolation, solve/harmonization routing, the onGuardUndecided
+ * debug hook, and curated before/after examples from the artifact.
+ *
+ * NOTE: this suite intentionally does NOT use the shared engine from
+ * `test/utils` — the loader mutates the engine's rule stores and scope, so
+ * each scenario gets its own engine instance.
+ */
+
+import { ComputeEngine } from '../../src/compute-engine';
+import { loadIdentities, FUNGRIM_CORE } from '../../src/identities';
+import type { FungrimRuleData } from '../../src/identities';
+
+// ---------------------------------------------------------------------------
+// Import side effects
+// ---------------------------------------------------------------------------
+
+describe('importing the loader module', () => {
+  it('has no side effects on a fresh engine', () => {
+    // `loadIdentities` and `FUNGRIM_CORE` are imported above; merely
+    // importing them must not register rules or declare shells anywhere.
+    const ce = new ComputeEngine();
+    expect(
+      ce.simplificationRules.some(
+        (r) =>
+          typeof r === 'object' &&
+          r !== null &&
+          'id' in r &&
+          typeof r.id === 'string' &&
+          r.id.startsWith('fungrim:')
+      )
+    ).toBe(false);
+    expect(
+      ce.solveRules.some(
+        (r) =>
+          typeof r === 'object' &&
+          r !== null &&
+          'id' in r &&
+          typeof r.id === 'string' &&
+          r.id.startsWith('fungrim:')
+      )
+    ).toBe(false);
+    expect(ce.lookupDefinition('JacobiTheta')).toBeUndefined();
+    expect(ce.box(['Gamma', ['Rational', 1, 2]]).simplify().toString()).toBe(
+      'Gamma(1/2)'
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Full load: report shape, idempotence, shells, before/after examples
+// ---------------------------------------------------------------------------
+
+describe('loadIdentities (full artifact)', () => {
+  let ce: ComputeEngine;
+  let report: ReturnType<typeof loadIdentities>;
+  let rulesBefore: number;
+  let loadTimeMs: number;
+
+  beforeAll(() => {
+    ce = new ComputeEngine();
+    rulesBefore = ce.simplificationRules.length;
+    const t0 = Date.now();
+    report = loadIdentities(ce);
+    loadTimeMs = Date.now() - t0;
+  });
+
+  it('loads every rule of the artifact on a fresh engine', () => {
+    expect(report.loaded).toBe(FUNGRIM_CORE.rules.length);
+    expect(report.loaded).toBe(558);
+    expect(report.skipped).toEqual([]);
+    expect(ce.simplificationRules.length).toBe(rulesBefore + report.loaded);
+  });
+
+  it('loads in a reasonable time', () => {
+    // ~150ms on a dev laptop; generous CI margin
+    expect(loadTimeMs).toBeLessThan(10_000);
+  });
+
+  it('reports byTarget and byPurpose consistent with the artifact manifest', () => {
+    expect(report.byTarget).toEqual({
+      simplify: 558,
+      solve: 0,
+      harmonization: 0,
+    });
+    expect(report.byPurpose).toEqual({ simplify: 541, transform: 0, expand: 17 });
+    expect(
+      report.byPurpose.simplify +
+        report.byPurpose.transform +
+        report.byPurpose.expand
+    ).toBe(report.loaded);
+  });
+
+  it('carries the offline compile ledger from the artifact manifest', () => {
+    expect(report.compileLedger).toEqual(FUNGRIM_CORE.manifest.ledger);
+    // The corpus-vs-artifact accounting: slice entries = rules + ledgered skips
+    const ledgerTotal = Object.values(report.compileLedger).reduce(
+      (a, b) => a + b,
+      0
+    );
+    expect(FUNGRIM_CORE.rules.length + ledgerTotal).toBe(
+      FUNGRIM_CORE.manifest.slice.entries
+    );
+  });
+
+  it('declares shell heads in the current scope', () => {
+    expect(report.declared).toContain('JacobiTheta');
+    expect(report.declared).toContain('CarlsonRF');
+    expect(report.declared).toContain('DedekindEta');
+    // The artifact declarations table is already pruned of CE built-ins
+    // (Gamma, Digamma, LambertW, … are not shells); a full load declares
+    // exactly the pruned table
+    expect(report.declared).not.toContain('Gamma');
+    expect(report.declared).toEqual(
+      Object.keys(FUNGRIM_CORE.declarations).sort()
+    );
+    expect(ce.lookupDefinition('JacobiTheta')).toBeDefined();
+  });
+
+  it('never overwrites an already-defined name (user symbols are not shadowed)', () => {
+    const ce2 = new ComputeEngine();
+    // The user declared their own `JacobiTheta` before loading
+    ce2.declare('JacobiTheta', 'real');
+    const r = loadIdentities(ce2);
+    expect(r.declared).not.toContain('JacobiTheta');
+    expect(r.declared).toContain('CarlsonRF');
+    // The user definition is untouched (still a plain real-valued symbol)
+    expect(ce2.box('JacobiTheta').type.toString()).toBe('real');
+  });
+
+  it('makes shell heads usable (JacobiTheta boxes validly and its value rule fires)', () => {
+    const theta = ce.box(['JacobiTheta', 3, 0, 'ImaginaryUnit']);
+    expect(theta.isValid).toBe(true);
+    // fungrim:1403b5 — θ₃(0, i) = Γ(1/4) / (√2 π^(3/4)). The closed form is
+    // structurally larger, so simplify()'s cost gate rejects it; it remains
+    // reachable via replace() (purpose 'simplify', not 'expand').
+    const rs = ce.getRuleSet('standard-simplification')!;
+    const closed = theta.replace(rs);
+    expect(closed).not.toBeNull();
+    expect(
+      closed!.isEqual(
+        ce.box([
+          'Divide',
+          ['Gamma', ['Divide', 1, 4]],
+          ['Multiply', ['Sqrt', 2], ['Power', 'Pi', ['Divide', 3, 4]]],
+        ])
+      )
+    ).toBe(true);
+  });
+
+  it('is idempotent: a second load adds nothing', () => {
+    const countBefore = ce.simplificationRules.length;
+    const second = loadIdentities(ce);
+    expect(second.loaded).toBe(0);
+    expect(second.declared).toEqual([]);
+    expect(second.skipped.length).toBe(FUNGRIM_CORE.rules.length);
+    expect(second.skipped.every((s) => s.reason === 'already-loaded')).toBe(
+      true
+    );
+    expect(ce.simplificationRules.length).toBe(countBefore);
+  });
+
+  // -- Curated before/after examples (artifact rules, FUNGRIM-PLAN §2.7) ----
+
+  it('Gamma(1/2) → √π  [fungrim:f826a6]', () => {
+    expect(
+      ce.box(['Gamma', ['Rational', 1, 2]]).simplify().isSame(
+        ce.box(['Sqrt', 'Pi'])
+      )
+    ).toBe(true);
+  });
+
+  it('Gamma(3/2) → √π/2  [fungrim:48ac55]', () => {
+    expect(
+      ce.box(['Gamma', ['Rational', 3, 2]]).simplify().isSame(
+        ce.box(['Divide', ['Sqrt', 'Pi'], 2])
+      )
+    ).toBe(true);
+  });
+
+  it('Gamma(2) → 1  [fungrim:19d480]', () => {
+    expect(ce.box(['Gamma', 2]).simplify().isSame(1)).toBe(true);
+  });
+
+  it('Digamma(1) → -EulerGamma  [fungrim:ea2482]', () => {
+    expect(
+      ce.box(['Digamma', 1]).simplify().isSame(ce.box(['Negate', 'EulerGamma']))
+    ).toBe(true);
+  });
+
+  it('Digamma(1/2) → -2 ln 2 - EulerGamma  [fungrim:89bed3]', () => {
+    const result = ce.box(['Digamma', ['Rational', 1, 2]]).simplify();
+    const expected = ce.box([
+      'Subtract',
+      ['Negate', ['Multiply', 2, ['Ln', 2]]],
+      'EulerGamma',
+    ]);
+    expect(result.isSame(expected) || result.isEqual(expected) === true).toBe(
+      true
+    );
+  });
+
+  it('Arctan(1 + √2) → 3π/8  [fungrim:c6c92a]', () => {
+    expect(
+      ce.box(['Arctan', ['Add', 1, ['Sqrt', 2]]]).simplify().isSame(
+        ce.box(['Divide', ['Multiply', 3, 'Pi'], 8])
+      )
+    ).toBe(true);
+  });
+
+  it('LambertW(e) → 1  [fungrim:c95c4f]', () => {
+    expect(ce.box(['LambertW', 'ExponentialE']).simplify().isSame(1)).toBe(
+      true
+    );
+  });
+
+  it('AGM(1, √2) → 2√2 π^(3/2)/Γ(1/4)² via replace() (cost-gated in simplify)  [fungrim:0d9352]', () => {
+    const agm = ce.box(['AGM', 1, ['Sqrt', 2]]);
+    // The closed form is larger: simplify()'s 1.3× cost gate rejects it…
+    expect(agm.simplify().isSame(agm)).toBe(true);
+    // …but the loaded rule fires through replace()
+    const closed = agm.replace(ce.getRuleSet('standard-simplification')!);
+    expect(closed).not.toBeNull();
+    expect(
+      closed!.isEqual(
+        ce.box([
+          'Divide',
+          ['Multiply', 2, ['Sqrt', 2], ['Power', 'Pi', ['Divide', 3, 2]]],
+          ['Power', ['Gamma', ['Divide', 1, 4]], 2],
+        ])
+      )
+    ).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Guard controls (fail-closed runtime semantics, §2.2/§2.7)
+// ---------------------------------------------------------------------------
+
+describe('guard controls', () => {
+  let ce: ComputeEngine;
+
+  beforeAll(() => {
+    ce = new ComputeEngine();
+    loadIdentities(ce);
+  });
+
+  it('positive: Sin(πk) → 0 for an integer-typed symbol  [fungrim:c62afa]', () => {
+    ce.declare('k', 'integer');
+    expect(
+      ce.box(['Sin', ['Multiply', 'Pi', 'k']]).simplify().isSame(0)
+    ).toBe(true);
+  });
+
+  it('positive: Gamma(n+1) → n! with integer n ≥ 0 assumed  [fungrim:62c6c9]', () => {
+    ce.declare('n', 'integer');
+    ce.assume(ce.box(['GreaterEqual', 'n', 0]));
+    expect(
+      ce.box(['Gamma', ['Add', 'n', 1]]).simplify().isSame(
+        ce.box(['Factorial', 'n'])
+      )
+    ).toBe(true);
+  });
+
+  it('positive: ne guard provable on a literal — Conjugate(ζ₀(3)) → ζ₀(-3)  [fungrim:60c2ec]', () => {
+    expect(
+      ce.box(['Conjugate', ['RiemannZetaZero', 3]]).simplify().isSame(
+        ce.box(['RiemannZetaZero', -3])
+      )
+    ).toBe(true);
+  });
+
+  it('negative: Sin(πx) does NOT rewrite for a real (non-integer-typed) symbol', () => {
+    ce.declare('x', 'real');
+    const expr = ce.box(['Sin', ['Multiply', 'Pi', 'x']]);
+    expect(expr.simplify().isSame(expr)).toBe(true);
+  });
+
+  it('negative: Gamma(y+1) does NOT rewrite to a factorial for a real symbol', () => {
+    ce.declare('y', 'real');
+    const result = ce.box(['Gamma', ['Add', 'y', 1]]).simplify();
+    expect(result.operator).toBe('Gamma');
+  });
+
+  it('negative: ne guard undecidable for a symbolic integer — no rewrite', () => {
+    // isEqual(m, 0) is undefined for a plain integer symbol, so the
+    // fail-closed condition blocks the rule (fungrim:60c2ec).
+    ce.declare('m', 'integer');
+    const result = ce.box(['Conjugate', ['RiemannZetaZero', 'm']]).simplify();
+    expect(result.operator).toBe('Conjugate');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// onGuardUndecided debug hook (§2.8)
+// ---------------------------------------------------------------------------
+
+describe('onGuardUndecided hook', () => {
+  it('fires when a guard predicate returns undefined (and only then)', () => {
+    const ce = new ComputeEngine();
+    const undecided: { id: string; wildcards: string[] }[] = [];
+    loadIdentities(ce, {
+      onGuardUndecided: (ruleId, wildcards) =>
+        undecided.push({ id: ruleId, wildcards: Object.keys(wildcards) }),
+    });
+
+    // Provable case: guard decides definitively, hook must not fire for
+    // this rule
+    ce.box(['Conjugate', ['RiemannZetaZero', 3]]).simplify();
+    expect(undecided.some((u) => u.id === 'fungrim:60c2ec')).toBe(false);
+
+    // Undecidable case: `m ≠ 0` is unknown for a plain integer symbol —
+    // the rule does not fire and the hook reports it, with the captured
+    // wildcard substitution
+    ce.declare('m', 'integer');
+    ce.box(['Conjugate', ['RiemannZetaZero', 'm']]).simplify();
+    const hit = undecided.find((u) => u.id === 'fungrim:60c2ec');
+    expect(hit).toBeDefined();
+    expect(hit!.wildcards).toContain('_n');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Selection filters (§2.1)
+// ---------------------------------------------------------------------------
+
+describe('selection filters', () => {
+  it('topics: loads only rules tagged with a requested topic', () => {
+    const ce = new ComputeEngine();
+    const report = loadIdentities(ce, { topics: ['gamma'] });
+    const gammaCount = FUNGRIM_CORE.rules.filter((r) =>
+      r.topics.includes('gamma')
+    ).length;
+    expect(report.loaded).toBe(gammaCount);
+    expect(report.loaded).toBeGreaterThan(0);
+    expect(
+      report.skipped.filter((s) => s.reason === 'filtered-topic').length
+    ).toBe(FUNGRIM_CORE.rules.length - gammaCount);
+    // accounting: every rule is either loaded or skipped
+    expect(report.loaded + report.skipped.length).toBe(
+      FUNGRIM_CORE.rules.length
+    );
+
+    // a gamma rule fires…
+    expect(
+      ce.box(['Gamma', ['Rational', 1, 2]]).simplify().isSame(
+        ce.box(['Sqrt', 'Pi'])
+      )
+    ).toBe(true);
+    // …an atan rule was not loaded
+    const atan = ce.box(['Arctan', ['Add', 1, ['Sqrt', 2]]]);
+    expect(atan.simplify().isSame(atan)).toBe(true);
+  });
+
+  it('classes: loads only the requested class', () => {
+    const ce = new ComputeEngine();
+    const report = loadIdentities(ce, { classes: ['identity'] });
+    const identityCount = FUNGRIM_CORE.rules.filter(
+      (r) => r.class === 'identity'
+    ).length;
+    expect(report.loaded).toBe(identityCount);
+    expect(
+      report.skipped.every((s) => s.reason === 'filtered-class')
+    ).toBe(true);
+    // a specific value is NOT loaded…
+    const g = ce.box(['Gamma', ['Rational', 1, 2]]);
+    expect(g.simplify().isSame(g)).toBe(true);
+    // …but an identity is
+    ce.declare('k', 'integer');
+    expect(
+      ce.box(['Sin', ['Multiply', 'Pi', 'k']]).simplify().isSame(0)
+    ).toBe(true);
+  });
+
+  it('purposes: filters by rule purpose', () => {
+    const ce = new ComputeEngine();
+    const report = loadIdentities(ce, { purposes: ['expand'] });
+    const expandCount = FUNGRIM_CORE.rules.filter(
+      (r) => r.purpose === 'expand'
+    ).length;
+    expect(report.loaded).toBe(expandCount);
+    expect(report.byPurpose).toEqual({
+      simplify: 0,
+      transform: 0,
+      expand: expandCount,
+    });
+  });
+
+  it('filters compose with idempotence (incremental loads)', () => {
+    const ce = new ComputeEngine();
+    const first = loadIdentities(ce, { topics: ['gamma'] });
+    const second = loadIdentities(ce); // everything else
+    expect(first.loaded + second.loaded).toBe(FUNGRIM_CORE.rules.length);
+    expect(
+      second.skipped.filter((s) => s.reason === 'already-loaded').length
+    ).toBe(first.loaded);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Per-engine isolation
+// ---------------------------------------------------------------------------
+
+describe('per-engine isolation', () => {
+  it('loading into one engine does not affect another', () => {
+    const ceA = new ComputeEngine();
+    const ceB = new ComputeEngine();
+    const reportA = loadIdentities(ceA);
+    expect(reportA.loaded).toBe(FUNGRIM_CORE.rules.length);
+
+    // ceB untouched: no fungrim rules, no shells, no simplification
+    expect(
+      ceB.simplificationRules.some(
+        (r) =>
+          typeof r === 'object' &&
+          r !== null &&
+          'id' in r &&
+          typeof r.id === 'string' &&
+          r.id.startsWith('fungrim:')
+      )
+    ).toBe(false);
+    expect(ceB.lookupDefinition('JacobiTheta')).toBeUndefined();
+    const g = ceB.box(['Gamma', ['Rational', 1, 2]]);
+    expect(g.simplify().isSame(g)).toBe(true);
+
+    // …and ceB has its own idempotence tracking: a fresh load works fully
+    const reportB = loadIdentities(ceB);
+    expect(reportB.loaded).toBe(FUNGRIM_CORE.rules.length);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Solve/harmonization routing (§2.6 mechanism; the Phase-1 artifact itself
+// contains no solve-target rules, so routing is exercised with a synthetic
+// artifact through the `data` option)
+// ---------------------------------------------------------------------------
+
+describe('solve routing', () => {
+  const syntheticData: FungrimRuleData = {
+    manifest: {
+      schemaVersion: 1,
+      generator: 'test',
+      upstream: { name: 'test', snapshotSha256: null, translator: null },
+      slice: { classes: ['identity'], guardLevels: ['none'], entries: 3 },
+      counts: {
+        rules: 3,
+        byPurpose: { simplify: 3 },
+        byClass: { identity: 3 },
+        byTarget: { simplify: 1, solve: 1, harmonization: 1 },
+      },
+      ledger: {},
+    },
+    declarations: {},
+    rules: [
+      {
+        id: 'fungrim:test-simplify',
+        match: ['Sech', '_x'],
+        replace: ['Divide', 1, ['Cosh', '_x']],
+        guards: [],
+        purpose: 'simplify',
+        target: 'simplify',
+        class: 'identity',
+        heads: ['Sech'],
+        topics: ['test'],
+      },
+      {
+        id: 'fungrim:test-solve',
+        match: ['Tanh', '_x'],
+        replace: ['Arctanh', '_x'],
+        guards: [],
+        purpose: 'simplify',
+        target: 'solve',
+        class: 'identity',
+        heads: ['Tanh'],
+        topics: ['test'],
+      },
+      {
+        id: 'fungrim:test-harmonization',
+        match: ['Coth', '_x'],
+        replace: ['Divide', 1, ['Tanh', '_x']],
+        guards: [],
+        purpose: 'simplify',
+        target: 'harmonization',
+        class: 'identity',
+        heads: ['Coth'],
+        topics: ['test'],
+      },
+    ],
+  };
+
+  const hasFungrimId = (rules: ReadonlyArray<unknown>, id: string) =>
+    rules.some(
+      (r) =>
+        typeof r === 'object' &&
+        r !== null &&
+        'id' in r &&
+        (r as { id?: unknown }).id === id
+    );
+
+  it('default (solve: false): solve/harmonization rules are skipped', () => {
+    const ce = new ComputeEngine();
+    const solveBefore = ce.solveRules.length;
+    const harmonizationBefore = ce.harmonizationRules.length;
+    const report = loadIdentities(ce, { data: syntheticData });
+
+    expect(report.loaded).toBe(1);
+    expect(report.byTarget).toEqual({ simplify: 1, solve: 0, harmonization: 0 });
+    expect(report.skipped).toEqual([
+      { id: 'fungrim:test-solve', reason: 'solve-disabled' },
+      { id: 'fungrim:test-harmonization', reason: 'solve-disabled' },
+    ]);
+    expect(ce.solveRules.length).toBe(solveBefore);
+    expect(ce.harmonizationRules.length).toBe(harmonizationBefore);
+    expect(hasFungrimId(ce.simplificationRules, 'fungrim:test-simplify')).toBe(
+      true
+    );
+  });
+
+  it('solve: true routes templates to solveRules/harmonizationRules', () => {
+    const ce = new ComputeEngine();
+    const solveBefore = ce.solveRules.length;
+    const harmonizationBefore = ce.harmonizationRules.length;
+    const report = loadIdentities(ce, { data: syntheticData, solve: true });
+
+    expect(report.loaded).toBe(3);
+    expect(report.byTarget).toEqual({ simplify: 1, solve: 1, harmonization: 1 });
+    expect(report.skipped).toEqual([]);
+    expect(ce.solveRules.length).toBe(solveBefore + 1);
+    expect(ce.harmonizationRules.length).toBe(harmonizationBefore + 1);
+    expect(hasFungrimId(ce.solveRules, 'fungrim:test-solve')).toBe(true);
+    expect(
+      hasFungrimId(ce.harmonizationRules, 'fungrim:test-harmonization')
+    ).toBe(true);
+    // solve rules are NOT added to the simplification store
+    expect(hasFungrimId(ce.simplificationRules, 'fungrim:test-solve')).toBe(
+      false
+    );
+  });
+
+  it('the Phase-1 artifact itself contains no solve-target rules', () => {
+    expect(FUNGRIM_CORE.rules.every((r) => r.target === 'simplify')).toBe(true);
+    const ce = new ComputeEngine();
+    const report = loadIdentities(ce, { solve: true });
+    expect(report.byTarget.solve).toBe(0);
+    expect(report.byTarget.harmonization).toBe(0);
+  });
+});
+
+// ===========================================================================
+// M5 — Curated before/after acceptance suite (FUNGRIM-PLAN-5-LOADER.md §2.7,
+// §3 M5).
+//
+// Each case asserts the channel the rule actually serves (M2-documented
+// behavior):
+//   - simplify(): shrinking rules (purpose 'simplify', RHS within the 1.3×
+//     cost gate),
+//   - replace(getRuleSet('standard-simplification')): correct closed forms
+//     that are structurally LARGER (Digamma(1/4), √i, Carlson values, …) —
+//     rejected by simplify()'s cost gate by design,
+//   - replace(ce.rules(ce.simplificationRules)): purpose-'expand' rules —
+//     getRuleSet('standard-simplification') filters them out, so they are
+//     reachable only through an explicitly boxed full set.
+//
+// Every expected output below was verified mathematically before being
+// asserted (classic values: tan(π/12)=2−√3, ψ(1/4)=−γ−π/2−3ln2,
+// R_F(0,1,2)=Γ(1/4)²/(4√(2π)), W(−1/e)=−1, φ(p)=p−1 for prime p, …).
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// M5 before/after — specific values, no assumptions (simplify() channel)
+// ---------------------------------------------------------------------------
+
+describe('M5 before/after: unguarded specific values via simplify()', () => {
+  let ce: ComputeEngine;
+
+  beforeAll(() => {
+    ce = new ComputeEngine();
+    loadIdentities(ce);
+  });
+
+  const simplifiesTo = (input: unknown, expected: unknown) => {
+    const result = ce.box(input as Parameters<ComputeEngine['box']>[0]).simplify();
+    const want = ce.box(expected as Parameters<ComputeEngine['box']>[0]);
+    expect(result.isSame(want) || result.isEqual(want) === true).toBe(true);
+    // and specifically the *structural* target, not just numeric equality
+    expect(result.isSame(want)).toBe(true);
+  };
+
+  // gamma
+  it('Gamma(1) → 1  [fungrim:e68d11]', () =>
+    simplifiesTo(['Gamma', 1], 1));
+
+  // zeta / Hurwitz zeta / Stieltjes
+  it('Zeta(2) → π²/6  [fungrim:a01b6e]', () =>
+    simplifiesTo(['Zeta', 2], ['Divide', ['Power', 'Pi', 2], 6]));
+
+  it('HurwitzZeta(3, 1) → ζ(3)  [fungrim:b4ed44]', () =>
+    simplifiesTo(['HurwitzZeta', 3, 1], ['Zeta', 3]));
+
+  it('HurwitzZeta(2, 1/2) → π²/2  [fungrim:868061]', () =>
+    simplifiesTo(
+      ['HurwitzZeta', 2, ['Rational', 1, 2]],
+      ['Divide', ['Power', 'Pi', 2], 2]
+    ));
+
+  it('HurwitzZeta(0, 0) → 1/2  [fungrim:150b3e]', () =>
+    simplifiesTo(['HurwitzZeta', 0, 0], ['Rational', 1, 2]));
+
+  it('StieltjesGamma(0, 1) → EulerGamma  [fungrim:8ae153]', () =>
+    simplifiesTo(['StieltjesGamma', 0, 1], 'EulerGamma'));
+
+  // arctan specific values (none of these are simplified by the base engine)
+  it('Arctan(√3) → π/3  [fungrim:706783]', () =>
+    simplifiesTo(['Arctan', ['Sqrt', 3]], ['Divide', 'Pi', 3]));
+
+  it('Arctan(√3/3) → π/6  [fungrim:3c1021]', () =>
+    simplifiesTo(
+      ['Arctan', ['Divide', ['Sqrt', 3], 3]],
+      ['Divide', 'Pi', 6]
+    ));
+
+  it('Arctan(2 − √3) → π/12  [fungrim:7dd050]', () =>
+    simplifiesTo(['Arctan', ['Subtract', 2, ['Sqrt', 3]]], ['Divide', 'Pi', 12]));
+
+  it('Arctan(√2 − 1) → π/8  [fungrim:a9ecff]', () =>
+    simplifiesTo(['Arctan', ['Add', -1, ['Sqrt', 2]]], ['Divide', 'Pi', 8]));
+
+  it('Arctan(2 + √3) → 5π/12  [fungrim:b0049f]', () =>
+    simplifiesTo(
+      ['Arctan', ['Add', 2, ['Sqrt', 3]]],
+      ['Divide', ['Multiply', 5, 'Pi'], 12]
+    ));
+
+  // sinc (the base engine leaves Sinc(π/2) untouched)
+  it('Sinc(π/2) → 2/π  [fungrim:fdc94c]', () =>
+    simplifiesTo(['Sinc', ['Divide', 'Pi', 2]], ['Divide', 2, 'Pi']));
+
+  it('Sinc(π/6) → 3/π  [fungrim:45740a]', () =>
+    simplifiesTo(['Sinc', ['Divide', 'Pi', 6]], ['Divide', 3, 'Pi']));
+
+  // exp
+  it('e^{iπ/2} → i  [fungrim:a90f35]', () =>
+    simplifiesTo(
+      ['Power', 'ExponentialE', ['Divide', ['Multiply', 'ImaginaryUnit', 'Pi'], 2]],
+      'ImaginaryUnit'
+    ));
+
+  // lambertw
+  it('LambertW(0) → 0  [fungrim:0be17d]', () =>
+    simplifiesTo(['LambertW', 0], 0));
+
+  // totient — `eval` guard (IsPrime) provable on a literal prime
+  it('Totient(7) → 6 (eval guard: IsPrime(7) ⇒ True)  [fungrim:cb410e]', () =>
+    simplifiesTo(['Totient', 7], 6));
+});
+
+// ---------------------------------------------------------------------------
+// M5 before/after — guarded identities under assumptions (simplify() channel)
+// ---------------------------------------------------------------------------
+
+describe('M5 before/after: guarded identities via simplify()', () => {
+  let ce: ComputeEngine;
+
+  beforeAll(() => {
+    ce = new ComputeEngine();
+    loadIdentities(ce);
+    // n: positive integer (⇒ n ≥ 0, n > 0 and integer guards all decidable)
+    ce.declare('n', 'integer');
+    ce.assume(ce.box(['Greater', 'n', 0]));
+    // k: plain integer (type guard only)
+    ce.declare('k', 'integer');
+    // p: positive real (⇒ p ≥ −1 decidable)
+    ce.declare('p', 'real');
+    ce.assume(ce.box(['Greater', 'p', 0]));
+    // q: real > 1 (⇒ q ≥ 1/e decidable — composite bound, exercises the
+    // numeric-retry path of the cmp guard closure)
+    ce.declare('q', 'real');
+    ce.assume(ce.box(['Greater', 'q', 1]));
+  });
+
+  const simplifiesTo = (input: unknown, expected: unknown) => {
+    const result = ce.box(input as Parameters<ComputeEngine['box']>[0]).simplify();
+    expect(
+      result.isSame(ce.box(expected as Parameters<ComputeEngine['box']>[0]))
+    ).toBe(true);
+  };
+
+  // trig, type guard only
+  it('Sin(πk + π/2) → (−1)^k for integer k  [fungrim:506d0c]', () =>
+    simplifiesTo(
+      ['Sin', ['Add', ['Multiply', 'Pi', 'k'], ['Multiply', ['Rational', 1, 2], 'Pi']]],
+      ['Power', -1, 'k']
+    ));
+
+  // factorials, type + cmp(gt 0) guards
+  it('n·(n−1)! → n! for integer n > 0  [fungrim:4f20ff]', () =>
+    simplifiesTo(
+      ['Multiply', 'n', ['Factorial', ['Add', 'n', -1]]],
+      ['Factorial', 'n']
+    ));
+
+  // factorials, type + cmp(ge 0) guards
+  it('(2n)!/(n!)² → Binomial(2n, n) for integer n ≥ 0  [fungrim:0d92f6]', () =>
+    simplifiesTo(
+      ['Divide', ['Factorial', ['Multiply', 2, 'n']], ['Square', ['Factorial', 'n']]],
+      ['Binomial', ['Multiply', 2, 'n'], 'n']
+    ));
+
+  // digamma, recognition direction (large match → small replace)
+  it('HarmonicNumber(n−1) − γ → Digamma(n) for integer n > 0  [fungrim:00c02a]', () =>
+    simplifiesTo(
+      ['Subtract', ['HarmonicNumber', ['Add', 'n', -1]], 'EulerGamma'],
+      ['Digamma', 'n']
+    ));
+
+  it('Digamma(2) → 1 − γ  [fungrim:ada157]', () =>
+    simplifiesTo(['Digamma', 2], ['Subtract', 1, 'EulerGamma']));
+
+  it('Digamma(−n) → ComplexInfinity for integer n ≥ 0  [fungrim:42c1f5]', () =>
+    simplifiesTo(['Digamma', ['Negate', 'n']], 'ComplexInfinity'));
+
+  // chebyshev, type guard only
+  it('ChebyshevT(n, 1) → 1 for integer n  [fungrim:fc5d42]', () =>
+    simplifiesTo(['ChebyshevT', 'n', 1], 1));
+
+  it('ChebyshevU(n, 1) → n + 1 for integer n  [fungrim:e03fa4]', () =>
+    simplifiesTo(['ChebyshevU', 'n', 1], ['Add', 'n', 1]));
+
+  // totient, type + cmp guards
+  it('Totient(2^n) → 2^(n−1) for integer n > 0  [fungrim:081abd]', () =>
+    simplifiesTo(
+      ['Totient', ['Power', 2, 'n']],
+      ['Power', 2, ['Subtract', 'n', 1]]
+    ));
+
+  // fibonacci, type guard only
+  it('GCD(Fibonacci(n), Fibonacci(n+1)) → 1 for integer n  [fungrim:7b0abf]', () =>
+    simplifiesTo(
+      ['GCD', ['Fibonacci', 'n'], ['Fibonacci', ['Add', 'n', 1]]],
+      1
+    ));
+
+  // lambertw inverse compositions, type + cmp guards (real-simple slice)
+  it('W(p·e^p) → p for real p > 0 (≥ −1 guard)  [fungrim:8654a3]', () =>
+    simplifiesTo(['LambertW', ['Multiply', 'p', ['Exp', 'p']]], 'p'));
+
+  it('W(q·ln q) → ln q for real q > 1 (≥ 1/e composite bound)  [fungrim:30bd5b]', () =>
+    simplifiesTo(['LambertW', ['Multiply', 'q', ['Ln', 'q']]], ['Ln', 'q']));
+});
+
+// ---------------------------------------------------------------------------
+// M5 before/after — growth rules via replace() (cost-gated in simplify(),
+// M2-documented behavior: large closed forms are reachable only through
+// expr.replace())
+// ---------------------------------------------------------------------------
+
+describe('M5 before/after: cost-gated closed forms via replace()', () => {
+  let ce: ComputeEngine;
+  let rs: NonNullable<ReturnType<ComputeEngine['getRuleSet']>>;
+
+  beforeAll(() => {
+    ce = new ComputeEngine();
+    loadIdentities(ce);
+    rs = ce.getRuleSet('standard-simplification')!;
+  });
+
+  const replacesTo = (input: unknown, expected: unknown) => {
+    const result = ce
+      .box(input as Parameters<ComputeEngine['box']>[0])
+      .replace(rs);
+    expect(result).not.toBeNull();
+    expect(
+      result!.isEqual(ce.box(expected as Parameters<ComputeEngine['box']>[0]))
+    ).toBe(true);
+  };
+
+  it('Digamma(1/4) → −π/2 − γ − 3 ln 2  [fungrim:7ec4f0]', () =>
+    replacesTo(
+      ['Digamma', ['Rational', 1, 4]],
+      [
+        'Subtract',
+        ['Subtract', ['Negate', ['Divide', 'Pi', 2]], 'EulerGamma'],
+        ['Multiply', 3, ['Ln', 2]],
+      ]
+    ));
+
+  it('Digamma(1/6) → −(√3 π)/2 − 2 ln 2 − (3/2) ln 3 − γ  [fungrim:177de7]', () =>
+    replacesTo(
+      ['Digamma', ['Rational', 1, 6]],
+      [
+        'Subtract',
+        [
+          'Subtract',
+          [
+            'Subtract',
+            ['Negate', ['Divide', ['Multiply', ['Sqrt', 3], 'Pi'], 2]],
+            ['Multiply', 2, ['Ln', 2]],
+          ],
+          ['Multiply', ['Rational', 3, 2], ['Ln', 3]],
+        ],
+        'EulerGamma',
+      ]
+    ));
+
+  it('√i → (1/√2)(1 + i)  [fungrim:0ad836]', () =>
+    replacesTo(
+      ['Sqrt', 'ImaginaryUnit'],
+      ['Multiply', ['Divide', 1, ['Sqrt', 2]], ['Add', 1, 'ImaginaryUnit']]
+    ));
+
+  it('Ln(i) → iπ/2  [fungrim:c331da]', () =>
+    replacesTo(
+      ['Ln', 'ImaginaryUnit'],
+      ['Divide', ['Multiply', 'ImaginaryUnit', 'Pi'], 2]
+    ));
+
+  it('CarlsonRF(0, 1, 2) → Γ(1/4)²/(4√(2π))  [fungrim:28237a]', () =>
+    replacesTo(
+      ['CarlsonRF', 0, 1, 2],
+      [
+        'Divide',
+        ['Power', ['Gamma', ['Divide', 1, 4]], 2],
+        ['Multiply', 4, ['Sqrt', ['Multiply', 2, 'Pi']]],
+      ]
+    ));
+
+  // W(−1/e) = −1 since (−1)·e^{−1} = −1/e. The match form drifts from the
+  // canonical operand produced inside simplify()'s traversal, so this value
+  // currently fires only through top-level replace().
+  it('W(−1/e) → −1  [fungrim:b93d09]', () =>
+    replacesTo(['LambertW', ['Negate', ['Divide', 1, 'ExponentialE']]], -1));
+});
+
+// ---------------------------------------------------------------------------
+// M5 before/after — purpose 'expand' channel: filtered out of both simplify()
+// AND getRuleSet('standard-simplification'); reachable only via an explicitly
+// boxed full rule set
+// ---------------------------------------------------------------------------
+
+describe("M5 before/after: purpose 'expand' rules", () => {
+  let ce: ComputeEngine;
+  let allRules: ReturnType<ComputeEngine['rules']>;
+
+  beforeAll(() => {
+    ce = new ComputeEngine();
+    loadIdentities(ce);
+    ce.declare('n', 'integer');
+    ce.assume(ce.box(['Greater', 'n', 0]));
+    // Box the FULL simplification store — including the 17 'expand' rules
+    // that getRuleSet('standard-simplification') filters out
+    allRules = ce.rules(ce.simplificationRules);
+  });
+
+  const expandsTo = (input: unknown, expected: unknown) => {
+    const boxed = ce.box(input as Parameters<ComputeEngine['box']>[0]);
+    // not via simplify() …
+    expect(boxed.simplify().isSame(boxed)).toBe(true);
+    // … and not via the standard (expand-filtered) rule set …
+    expect(boxed.replace(ce.getRuleSet('standard-simplification')!)).toBeNull();
+    // … but via the full set
+    const result = boxed.replace(allRules);
+    expect(result).not.toBeNull();
+    expect(
+      result!.isSame(ce.box(expected as Parameters<ComputeEngine['box']>[0]))
+    ).toBe(true);
+  };
+
+  it('RisingFactorial(1, n) → n!  [fungrim:0feb19]', () =>
+    expandsTo(['RisingFactorial', 1, 'n'], ['Factorial', 'n']));
+
+  it('BernoulliPolynomial(n, 0) → BernoulliB(n)  [fungrim:a1d2d7]', () =>
+    expandsTo(['BernoulliPolynomial', 'n', 0], ['BernoulliB', 'n']));
+
+  it('ChebyshevU(n, −1) → (−1)^n (n + 1)  [fungrim:be9a45]', () =>
+    expandsTo(
+      ['ChebyshevU', 'n', -1],
+      ['Multiply', ['Power', -1, 'n'], ['Add', 'n', 1]]
+    ));
+
+  it('StieltjesGamma(n, 1) → StieltjesGamma(n)  [fungrim:51206a]', () =>
+    expandsTo(['StieltjesGamma', 'n', 1], ['StieltjesGamma', 'n']));
+});
+
+// ---------------------------------------------------------------------------
+// Hot-head pre-screened dispatch (§2.4 fallback; M5 benchmark fix)
+//
+// Rules whose canonical match head is a high-traffic arithmetic operator
+// (Multiply, Add, Divide, Power, …) are registered by the loader as
+// pre-screened FUNCTIONAL rules with an `operators` dispatch hint, instead
+// of plain pattern rules — see loader.ts. These tests pin the registration
+// shape and, more importantly, that the wrapped rules behave identically to
+// pattern rules through every engine channel.
+// ---------------------------------------------------------------------------
+
+describe('hot-head pre-screened dispatch', () => {
+  let ce: ComputeEngine;
+
+  beforeAll(() => {
+    ce = new ComputeEngine();
+    loadIdentities(ce);
+  });
+
+  it('registers one entry per rule (hot-head rules are functional with an operators hint)', () => {
+    const fungrim = ce.simplificationRules.filter(
+      (r): r is Extract<typeof r, object> =>
+        typeof r === 'object' &&
+        r !== null &&
+        'id' in r &&
+        typeof r.id === 'string' &&
+        r.id.startsWith('fungrim:')
+    );
+    expect(fungrim.length).toBe(FUNGRIM_CORE.rules.length);
+
+    // fungrim:4f20ff (n·(n−1)! → n!) has a Multiply match head: functional
+    // wrapper with the dispatch hint, keeping its own id and purpose
+    const hot = fungrim.find((r) => r.id === 'fungrim:4f20ff')!;
+    expect(hot).toBeDefined();
+    expect(typeof hot.replace).toBe('function');
+    expect(hot.operators).toEqual(['Multiply']);
+
+    // fungrim:f826a6 (Gamma(1/2) → √π) is in a low-traffic bucket: still a
+    // plain pattern rule (the M2 index dispatches it by head)
+    const cold = fungrim.find((r) => r.id === 'fungrim:f826a6')!;
+    expect(cold).toBeDefined();
+    expect(typeof cold.replace).not.toBe('function');
+    expect(cold.operators).toBeUndefined();
+  });
+
+  it('wrapped rules fire through simplify() (Multiply head)  [fungrim:4f20ff]', () => {
+    ce.declare('n', 'integer');
+    ce.assume(ce.box(['Greater', 'n', 0]));
+    expect(
+      ce.box(['Multiply', 'n', ['Factorial', ['Add', 'n', -1]]])
+        .simplify()
+        .isSame(ce.box(['Factorial', 'n']))
+    ).toBe(true);
+  });
+
+  it('wrapped rules fire through an explicitly boxed full rule set  [fungrim:4f20ff]', () => {
+    // The subtle channel: ce.rules(ce.simplificationRules) boxes the raw
+    // rule list (no purpose filtering, no engine cache) — the functional
+    // wrappers must fire there too.
+    const allRules = ce.rules(ce.simplificationRules);
+    const result = ce
+      .box(['Multiply', 'n', ['Factorial', ['Add', 'n', -1]]])
+      .replace(allRules);
+    expect(result).not.toBeNull();
+    expect(result!.isSame(ce.box(['Factorial', 'n']))).toBe(true);
+  });
+
+  it('wrapped rules honor guards fail-closed and the onGuardUndecided hook', () => {
+    const ce2 = new ComputeEngine();
+    const undecided: { id: string; wildcards: string[] }[] = [];
+    loadIdentities(ce2, {
+      onGuardUndecided: (ruleId, wildcards) =>
+        undecided.push({ id: ruleId, wildcards: Object.keys(wildcards) }),
+    });
+
+    // m: integer of unknown sign — the `m > 0` cmp guard of fungrim:4f20ff
+    // (a wrapped Multiply-head rule) is undecided: no rewrite, hook fires
+    ce2.declare('m', 'integer');
+    const expr = ce2.box(['Multiply', 'm', ['Factorial', ['Add', 'm', -1]]]);
+    expect(expr.simplify().isSame(expr)).toBe(true);
+    const hit = undecided.find((u) => u.id === 'fungrim:4f20ff');
+    expect(hit).toBeDefined();
+    expect(hit!.wildcards).toContain('_n');
+  });
+
+  it('pre-screen is conservative: hot-head rules with symbol-only requirements still fire', () => {
+    // fungrim:a90f35 (e^{iπ/2} → i) has a Power match head whose only
+    // discriminating features are the symbols ExponentialE/ImaginaryUnit/Pi
+    expect(
+      ce
+        .box([
+          'Power',
+          'ExponentialE',
+          ['Divide', ['Multiply', 'ImaginaryUnit', 'Pi'], 2],
+        ])
+        .simplify()
+        .isSame(ce.box('ImaginaryUnit'))
+    ).toBe(true);
+  });
+
+  it('plain arithmetic simplification is unchanged by the load', () => {
+    // The M5 profiling exemplar: simplifying `2a < 4b` must produce the
+    // same result with and without the artifact loaded.
+    const ceBase = new ComputeEngine();
+    const inputs = ['2a<4b', '\\frac{x^2-1}{x-1}', '\\sqrt{8}+\\sin(\\pi/6)'];
+    for (const src of inputs) {
+      expect(ce.parse(src).simplify().toString()).toBe(
+        ceBase.parse(src).simplify().toString()
+      );
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// M5 negative controls (§2.7): the same inputs WITHOUT the required
+// assumptions must NOT rewrite (fail-closed), across all guard kinds
+// ---------------------------------------------------------------------------
+
+describe('M5 negative controls: guards fail closed without assumptions', () => {
+  let ce: ComputeEngine;
+
+  beforeAll(() => {
+    ce = new ComputeEngine();
+    loadIdentities(ce);
+  });
+
+  const staysPut = (input: unknown) => {
+    const boxed = ce.box(input as Parameters<ComputeEngine['box']>[0]);
+    expect(boxed.simplify().isSame(boxed)).toBe(true);
+  };
+
+  it('cmp(ge −1) undecided: W(r·e^r) does NOT rewrite for unbounded real r', () => {
+    ce.declare('r', 'real'); // no lower bound: r ≥ −1 is unknown
+    staysPut(['LambertW', ['Multiply', 'r', ['Exp', 'r']]]);
+  });
+
+  it('cmp(ge 1/e, composite bound) undecided: W(s·ln s) does NOT rewrite for unbounded real s', () => {
+    ce.declare('s', 'real');
+    staysPut(['LambertW', ['Multiply', 's', ['Ln', 's']]]);
+  });
+
+  it('type(integer) fails on a real symbol: ChebyshevT(x, 1) does NOT rewrite', () => {
+    ce.declare('x', 'real'); // symbolic non-integer
+    staysPut(['ChebyshevT', 'x', 1]);
+  });
+
+  it('type(integer) fails on a real symbol: Sin(πt + π/2) does NOT rewrite', () => {
+    ce.declare('t', 'real');
+    staysPut([
+      'Sin',
+      ['Add', ['Multiply', 'Pi', 't'], ['Multiply', ['Rational', 1, 2], 'Pi']],
+    ]);
+  });
+
+  it('cmp(gt 0) undecided: m·(m−1)! does NOT rewrite for sign-unknown integer m', () => {
+    ce.declare('m', 'integer'); // no positivity assumption
+    staysPut(['Multiply', 'm', ['Factorial', ['Add', 'm', -1]]]);
+  });
+
+  it('eval guard definitively false: Totient(6) does NOT rewrite (IsPrime(6) ⇒ False)', () => {
+    staysPut(['Totient', 6]);
+  });
+
+  it('eval guard undecided: Totient(j) does NOT rewrite for a symbolic integer j', () => {
+    ce.declare('j', 'integer'); // IsPrime(j) is symbolic ⇒ undecided
+    staysPut(['Totient', 'j']);
+  });
+});
