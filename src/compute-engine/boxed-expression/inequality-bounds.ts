@@ -3,7 +3,13 @@ import type {
   IComputeEngine as ComputeEngine,
   IntervalBounds,
 } from '../global-types';
-import { isFunction, isSymbol, isNumber } from './type-guards';
+import { isFunction, isSymbol } from './type-guards';
+import {
+  type Subject,
+  toSubject,
+  subjectKey,
+  getFactIndex,
+} from './constraint-subject';
 
 /**
  * Extract interval bounds for `symbol` from a condition expression.
@@ -142,131 +148,33 @@ function _hasAnyBound(b: IntervalBounds): boolean {
 }
 
 /**
- * Get inequality bounds for a symbol from the assumption database.
+ * Get inequality bounds for a subject from the assumption database.
  *
  * For example, if `x > 4` is assumed, this returns `{ lower: 4, lowerStrict: true }`.
  * If `x <= 10` is assumed, this returns `{ upper: 10, upperStrict: false }`.
  *
+ * The subject may be a bare symbol (pass the symbol name, or a `Subject`
+ * with `part: 'self'`) or a part-extractor of a symbol, e.g.
+ * `{ symbol: 's', part: 're' }` for facts about `Real(s)`
+ * (see `constraint-subject.ts`).
+ *
  * Note: Assumptions are normalized to forms like:
  * - `x > 4` becomes `Less(Add(Negate(x), 4), 0)` i.e., `4 - x < 0`
  * - `x > 0` becomes `Less(Negate(x), 0)` i.e., `-x < 0`
+ * - `Re(s) > 1` becomes `Less(Add(Negate(Real(s)), 1), 0)`
+ *
+ * The result is derived from the cached fact index (see `getFactIndex`),
+ * so repeated queries against unchanged assumptions cost a lookup.
  *
  * @param ce - The compute engine instance
- * @param symbol - The symbol name to query
+ * @param subject - The symbol name or `Subject` to query
  * @returns The `IntervalBounds` (same shape used by `extractIntervalBounds`).
  */
 export function getInequalityBoundsFromAssumptions(
   ce: ComputeEngine,
-  symbol: string
+  subject: string | Subject
 ): IntervalBounds {
-  const result: IntervalBounds = {};
-
-  const assumptions = ce.context?.assumptions;
-  if (!assumptions) return result;
-
-  for (const [assumption, _] of assumptions.entries()) {
-    const op = assumption.operator;
-    if (!op) continue;
-
-    // Assumptions are normalized to Less or LessEqual with RHS = 0
-    if (op !== 'Less' && op !== 'LessEqual') continue;
-
-    if (!isFunction(assumption)) continue;
-    const ops = assumption.ops;
-    if (ops.length !== 2) continue;
-
-    const [lhs, rhs] = ops;
-
-    // RHS should be 0 for normalized assumptions
-    if (!rhs.isSame(0)) continue;
-
-    const isStrict = op === 'Less';
-
-    // Case 1: Negate(symbol) < 0 => -symbol < 0 => symbol > 0
-    // This gives us a lower bound of 0
-    if (isFunction(lhs, 'Negate') && isSymbol(lhs.op1, symbol)) {
-      const bound = ce.Zero;
-      if (
-        result.lower === undefined ||
-        bound.isGreater(result.lower) === true
-      ) {
-        result.lower = bound;
-        result.lowerStrict = isStrict;
-      }
-    }
-
-    // Case 2: Add(Negate(symbol), k) < 0 => k - symbol < 0 => symbol > k
-    // This gives us a lower bound of k
-    if (isFunction(lhs, 'Add')) {
-      let hasNegatedSymbol = false;
-      let constantSum = 0;
-
-      for (const term of lhs.ops) {
-        if (isFunction(term, 'Negate') && isSymbol(term.op1, symbol)) {
-          hasNegatedSymbol = true;
-        } else if (isNumber(term)) {
-          const val =
-            typeof term.numericValue === 'number'
-              ? term.numericValue
-              : term.numericValue?.re;
-          if (val !== undefined && Number.isFinite(val)) {
-            constantSum += val;
-          }
-        }
-      }
-
-      if (hasNegatedSymbol && constantSum !== 0) {
-        // k - symbol < 0 => symbol > k
-        const bound = ce.expr(constantSum);
-        if (
-          result.lower === undefined ||
-          bound.isGreater(result.lower) === true
-        ) {
-          result.lower = bound;
-          result.lowerStrict = isStrict;
-        }
-      }
-    }
-
-    // Case 3: symbol < 0 => symbol has upper bound 0
-    if (isSymbol(lhs, symbol)) {
-      const bound = ce.Zero;
-      if (result.upper === undefined || bound.isLess(result.upper) === true) {
-        result.upper = bound;
-        result.upperStrict = isStrict;
-      }
-    }
-
-    // Case 4: Add(symbol, k) < 0 => symbol + k < 0 => symbol < -k
-    // This gives us an upper bound of -k
-    if (isFunction(lhs, 'Add')) {
-      let hasSymbol = false;
-      let constantSum = 0;
-
-      for (const term of lhs.ops) {
-        if (isSymbol(term, symbol)) {
-          hasSymbol = true;
-        } else if (isNumber(term)) {
-          const val =
-            typeof term.numericValue === 'number'
-              ? term.numericValue
-              : term.numericValue?.re;
-          if (val !== undefined && Number.isFinite(val)) {
-            constantSum += val;
-          }
-        }
-      }
-
-      if (hasSymbol && constantSum !== 0) {
-        // symbol + k < 0 => symbol < -k
-        const bound = ce.expr(-constantSum);
-        if (result.upper === undefined || bound.isLess(result.upper) === true) {
-          result.upper = bound;
-          result.upperStrict = isStrict;
-        }
-      }
-    }
-  }
-
-  return result;
+  const facts = getFactIndex(ce).bySubject.get(subjectKey(toSubject(subject)));
+  // Return a copy: the index is shared and must not be mutated by callers.
+  return facts ? { ...facts.bounds } : {};
 }

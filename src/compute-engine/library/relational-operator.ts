@@ -9,6 +9,13 @@ import { isRelationalOperator } from '../latex-syntax/utils';
 import { flatten } from '../boxed-expression/flatten';
 import { eq } from '../boxed-expression/compare';
 import { isNumber, isFunction } from '../boxed-expression/type-guards';
+import {
+  subjectOf,
+  finiteNumericValue,
+  hasAssumptions,
+  decideComparisonFromBounds,
+} from '../boxed-expression/constraint-subject';
+import { getInequalityBoundsFromAssumptions } from '../boxed-expression/inequality-bounds';
 import { isQuantity } from './quantity-arithmetic';
 import { boxedToUnitExpression } from './units';
 import {
@@ -44,6 +51,55 @@ function quantityCompare(a: Expression, b: Expression): number | null {
   if (aScale === null || bScale === null) return null;
 
   return aMag * aScale - bMag * bScale;
+}
+
+/**
+ * Decide `lhs < rhs` (when `strict`) or `lhs ≤ rhs` from assumed bounds on
+ * a constraint subject (FUNGRIM-PLAN-3-ASSUMPTIONS.md §5.1a).
+ *
+ * Applies when one side normalizes to a subject term — a bare symbol or
+ * `Real/Imaginary/Abs/Argument` of one — and the other side is numeric.
+ * The bounds are read directly from the fact index (never via `ask()`), so
+ * this also works inside `verify()` where `_isVerifying` suppresses the
+ * `ask()` fallbacks.
+ *
+ * Strict three-valued semantics: `true` only when entailed, `false` only
+ * when refuted, `undefined` (stay unevaluated) otherwise.
+ */
+function compareFromAssumedBounds(
+  lhs: Expression,
+  rhs: Expression,
+  strict: boolean
+): boolean | undefined {
+  const ce = lhs.engine;
+  // Fast gate: engines with no assumptions do no subject or index work.
+  if (!hasAssumptions(ce)) return undefined;
+
+  // subject < k / subject ≤ k
+  let subject = subjectOf(lhs);
+  if (subject !== undefined) {
+    const k = finiteNumericValue(rhs);
+    if (k !== undefined)
+      return decideComparisonFromBounds(
+        getInequalityBoundsFromAssumptions(ce, subject),
+        k,
+        strict ? 'less' : 'lessEqual'
+      );
+  }
+
+  // k < subject / k ≤ subject ⇔ subject > k / subject ≥ k
+  subject = subjectOf(rhs);
+  if (subject !== undefined) {
+    const k = finiteNumericValue(lhs);
+    if (k !== undefined)
+      return decideComparisonFromBounds(
+        getInequalityBoundsFromAssumptions(ce, subject),
+        k,
+        strict ? 'greater' : 'greaterEqual'
+      );
+  }
+
+  return undefined;
 }
 
 //   // eq, lt, leq, gt, geq, neq, approx
@@ -281,7 +337,8 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
         // Try quantity comparison first
         const qcmp = quantityCompare(lhs, rhs);
         if (qcmp !== null) return qcmp < 0 ? ce.True : ce.False;
-        const cmp = lhs.isLess(rhs);
+        const cmp =
+          lhs.isLess(rhs) ?? compareFromAssumedBounds(lhs, rhs, true);
         if (cmp === undefined) return undefined;
         return cmp ? ce.True : ce.False;
       }
@@ -295,7 +352,8 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
           if (qcmp !== null) {
             if (qcmp >= 0) return ce.False;
           } else {
-            const cmp = lhs.isLess(arg);
+            const cmp =
+              lhs.isLess(arg) ?? compareFromAssumedBounds(lhs, arg, true);
             if (cmp === undefined) return undefined;
             if (cmp === false) return ce.False;
           }
@@ -341,7 +399,8 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
         const [lhs, rhs] = ops;
         const qcmp = quantityCompare(lhs, rhs);
         if (qcmp !== null) return qcmp <= 0 ? ce.True : ce.False;
-        const cmp = lhs.isLessEqual(rhs);
+        const cmp =
+          lhs.isLessEqual(rhs) ?? compareFromAssumedBounds(lhs, rhs, false);
         if (cmp === undefined) return undefined;
         return cmp ? ce.True : ce.False;
       }
@@ -355,7 +414,9 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
           if (qcmp !== null) {
             if (qcmp > 0) return ce.False;
           } else {
-            const cmp = lhs.isLessEqual(arg);
+            const cmp =
+              lhs.isLessEqual(arg) ??
+              compareFromAssumedBounds(lhs, arg, false);
             if (cmp === undefined) return undefined;
             if (cmp === false) return ce.False;
           }

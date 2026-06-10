@@ -1,8 +1,42 @@
 // complex-cartesian (constructor) = re + i * im
 // complex-polar = abs * exp(i * arg)
 
-import type { SymbolDefinitions } from '../global-types';
-import { isNumber } from '../boxed-expression/type-guards';
+import type {
+  Expression,
+  Sign,
+  SymbolDefinitions,
+  IComputeEngine as ComputeEngine,
+} from '../global-types';
+import { isNumber, isSymbol } from '../boxed-expression/type-guards';
+import {
+  type SubjectPart,
+  hasAssumptions,
+  signFromBounds,
+} from '../boxed-expression/constraint-subject';
+import { getInequalityBoundsFromAssumptions } from '../boxed-expression/inequality-bounds';
+
+/**
+ * Assumption-based sign fallback for the part extractors
+ * (`Real`, `Imaginary`, `Argument` — and `Abs` in the arithmetic library):
+ * when the operand is a symbol with no value, look up assumed bounds for the
+ * corresponding subject (e.g. `im:tau` after `assume(Im(tau) > 0)`) and
+ * derive the sign from them (FUNGRIM-PLAN-3-ASSUMPTIONS.md §5.1b).
+ *
+ * Reads the fact index directly (never `ask()`), so it works inside
+ * `verify()`. Returns `undefined` when the facts don't entail a sign.
+ */
+export function signFromAssumedPart(
+  ce: ComputeEngine,
+  op: Expression,
+  part: SubjectPart
+): Sign | undefined {
+  if (!isSymbol(op) || op.value !== undefined) return undefined;
+  // Fast gate: engines with no assumptions do no index work.
+  if (!hasAssumptions(ce)) return undefined;
+  return signFromBounds(
+    getInequalityBoundsFromAssumptions(ce, { symbol: op.symbol, part })
+  );
+}
 
 export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
   {
@@ -13,9 +47,11 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
       complexity: 1200,
       signature: '(number) -> real',
       type: () => 'finite_real',
-      sgn: ([op]) => {
+      sgn: ([op], { engine: ce }) => {
         const re = op.re;
-        if (isNaN(re)) return undefined;
+        // Symbol with no value: fall back to assumed bounds on `re:op`
+        // (design §5.1b)
+        if (isNaN(re)) return signFromAssumedPart(ce, op, 're');
         if (re === 0) return 'zero';
         return re > 0 ? 'positive' : 'negative';
       },
@@ -32,9 +68,11 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
       complexity: 1200,
       signature: '(number) -> real',
       type: () => 'finite_real',
-      sgn: ([op]) => {
+      sgn: ([op], { engine: ce }) => {
         const im = op.im;
-        if (isNaN(im)) return undefined;
+        // Symbol with no value: fall back to assumed bounds on `im:op`
+        // (design §5.1b)
+        if (isNaN(im)) return signFromAssumedPart(ce, op, 'im');
         if (im === 0) return 'zero';
         return im > 0 ? 'positive' : 'negative';
       },
@@ -51,6 +89,9 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
       complexity: 1200,
       signature: '(number) -> real',
       type: () => 'finite_real',
+      // Sign from assumed bounds on `arg:op` (design §5.1b); values are
+      // handled by `evaluate`
+      sgn: ([op], { engine: ce }) => signFromAssumedPart(ce, op, 'arg'),
       evaluate: (ops, { engine: ce }) => {
         if (!isNumber(ops[0])) return undefined;
         const op = ops[0].numericValue;

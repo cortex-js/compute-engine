@@ -1,11 +1,13 @@
 import { isSubtype } from '../common/type/subtype';
 import { functionResult } from '../common/type/utils';
 import { BoxedType } from '../common/type/boxed-type';
+import type { Type } from '../common/type/types';
 
 import {
   AssumeResult,
   Expression,
   IComputeEngine as ComputeEngine,
+  IntervalBounds,
   Sign,
 } from './global-types';
 
@@ -16,7 +18,19 @@ import {
   isOperatorDef,
 } from './boxed-expression/utils';
 import { isInequalityOperator } from './latex-syntax/utils';
-import { isFunction, isSymbol, isNumber } from './boxed-expression/type-guards';
+import {
+  isFunction,
+  isSymbol,
+  isNumber,
+  isString,
+} from './boxed-expression/type-guards';
+import {
+  type Subject,
+  subjectOf,
+  toSubject,
+  matchesSubject,
+  boundsFromNormalizedInequality,
+} from './boxed-expression/constraint-subject';
 
 /**
  * Infer a promoted type from a value expression.
@@ -67,14 +81,144 @@ function inferTypeFromValue(ce: ComputeEngine, value: Expression): BoxedType {
  */
 
 export function assume(proposition: Expression): AssumeResult {
-  if (proposition.operator === 'Element') return assumeElement(proposition);
-  if (proposition.operator === 'Equal') return assumeEquality(proposition);
-  if (isInequalityOperator(proposition.operator))
-    return assumeInequality(proposition);
+  const op = proposition.operator;
+  if (op === 'Element') return assumeElement(proposition);
+  if (op === 'NotElement') return assumeNotElement(proposition);
+  if (op === 'Equal') return assumeEquality(proposition);
+  if (op === 'NotEqual') return assumeNotEqual(proposition);
+  if (op === 'And') return assumeConjunction(proposition);
+  if (isInequalityOperator(op)) return assumeInequality(proposition);
 
+  // Well-formed predicate shapes that the assumptions layer cannot
+  // represent (disjunctions, quantifiers...): return 'not-a-predicate'
+  // instead of throwing, so callers (e.g. the Fungrim loader) can probe
+  // guard dischargeability in bulk (design §4.1, §9).
+  if (UNSUPPORTED_PREDICATE_OPERATORS.has(op)) return 'not-a-predicate';
+
+  // Outright malformed input (not a predicate operator at all) still throws.
   throw new Error(
-    'Unsupported assumption. Use `Element`, `Equal` or an inequality'
+    'Unsupported assumption. Use `Element`, `NotElement`, `Equal`, `NotEqual`, `And` or an inequality'
   );
+}
+
+/**
+ * Predicate operators that are syntactically valid assumptions but that the
+ * structural-predicate layer cannot represent (FUNGRIM-PLAN-3-ASSUMPTIONS.md
+ * §7 non-goals). `assume()` reports these as `'not-a-predicate'`.
+ */
+const UNSUPPORTED_PREDICATE_OPERATORS = new Set<string>([
+  'Or',
+  'Not',
+  'Implies',
+  'Equivalent',
+  'Xor',
+  'Nand',
+  'Nor',
+  'ForAll',
+  'Exists',
+  'ExistsUnique',
+  'ForElement',
+]);
+
+/**
+ * Assume a conjunction: each conjunct is assumed independently
+ * (design §3.2, "shallow saturation").
+ *
+ * Result: `'contradiction'` if any conjunct contradicts,
+ * `'not-a-predicate'` if any conjunct is unsupported, `'tautology'` if
+ * every conjunct was already known, `'ok'` otherwise.
+ */
+function assumeConjunction(proposition: Expression): AssumeResult {
+  console.assert(proposition.operator === 'And');
+  if (!isFunction(proposition)) return 'not-a-predicate';
+
+  let sawOk = false;
+  let sawNotAPredicate = false;
+  for (const conjunct of proposition.ops) {
+    const result = assume(conjunct);
+    if (result === 'contradiction' || result === 'internal-error')
+      return result;
+    if (result === 'not-a-predicate') sawNotAPredicate = true;
+    else if (result === 'ok') sawOk = true;
+  }
+  if (sawNotAPredicate) return 'not-a-predicate';
+  return sawOk ? 'ok' : 'tautology';
+}
+
+/**
+ * Assume a disequality `NotEqual(x, v)` or `NotEqual(Part(x), v)`
+ * (design §4.1; stored in the §3.2 normal form `NotEqual(subject, v)`).
+ */
+function assumeNotEqual(proposition: Expression): AssumeResult {
+  console.assert(proposition.operator === 'NotEqual');
+  if (!isFunction(proposition) || proposition.ops.length !== 2)
+    return 'not-a-predicate';
+  return storeNotEqual(
+    proposition.engine,
+    proposition.op1,
+    proposition.op2
+  );
+}
+
+/**
+ * Store a `NotEqual(lhs, rhs)` fact in the assumptions DB.
+ *
+ * Contradiction scope (design §4.3): if neither side has unknowns (e.g.
+ * the symbol has an assigned value), the disequality is decided now and
+ * yields `'tautology'`/`'contradiction'` instead of being stored.
+ */
+function storeNotEqual(
+  ce: ComputeEngine,
+  lhs: Expression,
+  rhs: Expression
+): AssumeResult {
+  const fact = ce.function('NotEqual', [lhs, rhs]);
+  if (!fact.isValid) return 'not-a-predicate';
+
+  if (fact.unknowns.length === 0) {
+    const val = fact.evaluate();
+    if (isSymbol(val, 'True')) return 'tautology';
+    if (isSymbol(val, 'False')) return 'contradiction';
+  }
+
+  ce.context.assumptions.set(fact, true);
+  return 'ok';
+}
+
+/**
+ * Assume `NotElement(x, S)`: store an exclusion fact (design §4.1).
+ */
+function assumeNotElement(proposition: Expression): AssumeResult {
+  console.assert(proposition.operator === 'NotElement');
+  if (!isFunction(proposition) || proposition.ops.length !== 2)
+    return 'not-a-predicate';
+  const ce = proposition.engine;
+  const dom = proposition.op2.evaluate();
+  if (!dom.isValid) return 'not-a-predicate';
+  return storeNotElement(ce, proposition.op1, dom);
+}
+
+/**
+ * Store a `NotElement(x, setExpr)` exclusion fact in the assumptions DB.
+ * If `x` has a value, the exclusion is decided by evaluation instead.
+ */
+function storeNotElement(
+  ce: ComputeEngine,
+  x: Expression,
+  setExpr: Expression
+): AssumeResult {
+  const fact = ce.function('NotElement', [x, setExpr]);
+  if (!fact.isValid) return 'not-a-predicate';
+
+  const xSymbol = isSymbol(x) ? x.symbol : undefined;
+  if (xSymbol === undefined || hasValue(ce, xSymbol)) {
+    const val = fact.evaluate();
+    if (isSymbol(val, 'True')) return 'tautology';
+    if (isSymbol(val, 'False')) return 'contradiction';
+  }
+
+  ce.context.assumptions.set(fact, true);
+  return 'ok';
 }
 
 function assumeEquality(proposition: Expression): AssumeResult {
@@ -263,6 +407,61 @@ function assumeInequality(proposition: Expression): AssumeResult {
   const unknowns = result.unknowns;
   if (unknowns.length === 0) return 'not-a-predicate';
 
+  //
+  // Part-subject inequalities (design §4.2), e.g. `Re(s) > 1` normalized to
+  // `Less(1 - Real(s), 0)`: the normalized lhs is ±Part(x) plus an optional
+  // numeric constant, where Part ∈ {Real, Imaginary, Abs, Argument}.
+  //
+  const normalizedLhs = isFunction(result) ? result.op1 : undefined;
+  const partSubject =
+    normalizedLhs !== undefined ? partBoundSubject(normalizedLhs) : undefined;
+  if (partSubject !== undefined) {
+    const newBounds = boundsFromNormalizedInequality(result, partSubject);
+
+    // Bounds-level tautology/contradiction check against existing bounds on
+    // the *same* subject (design §4.3; cross-subject consistency is out of
+    // scope).
+    if (newBounds !== undefined) {
+      const existing = getInequalityBoundsFromAssumptions(ce, partSubject);
+      const status = checkBoundsAgainst(existing, newBounds);
+      if (status !== undefined) return status;
+    }
+
+    // Type side-effect (design §3.3): a part-predicate over
+    // Real/Imaginary/Abs/Argument(x) implies at most `x: number` — never
+    // `x: real` — and only when the type is currently unknown/inferred.
+    // Exception: a finite upper bound on `Abs(x)` implies `x` is finite
+    // (design §3.2), so refine to `finite_number` in that case.
+    const impliedType: Type =
+      partSubject.part === 'abs' &&
+      newBounds !== undefined &&
+      numericBoundValue(newBounds.upper) !== undefined
+        ? 'finite_number'
+        : 'number';
+    refineTypeIfUnknown(ce, partSubject.symbol, impliedType);
+
+    // Store the normalized part-bound (normal form §3.2)
+    ce.context.assumptions.set(result, true);
+
+    // Derived facts (design §3.2), stored alongside — never inferred at
+    // query time: `Imaginary(x)` bounded away from 0 implies `x ∉ ℝ` and
+    // `x ≠ 0`.
+    if (
+      partSubject.part === 'im' &&
+      newBounds !== undefined &&
+      boundsExcludeZero(newBounds)
+    ) {
+      storeNotElement(
+        ce,
+        ce.symbol(partSubject.symbol),
+        ce.symbol('RealNumbers')
+      );
+      storeNotEqual(ce, ce.symbol(partSubject.symbol), ce.Zero);
+    }
+
+    return 'ok';
+  }
+
   // Check if the new inequality is implied by or contradicts existing bounds
   // (for single-symbol inequalities)
   if (unknowns.length === 1) {
@@ -400,8 +599,15 @@ function assumeInequality(proposition: Expression): AssumeResult {
   }
 
   // Case 3: single unknown - ensure the symbol has type 'real'
-  // (inequalities imply the symbol is a real number)
-  if (unknowns.length === 1) {
+  // (inequalities imply the symbol is a real number).
+  //
+  // EXCEPT when the inequality involves a part term (Real/Imaginary/Abs/
+  // Argument of a symbol): `Re(s) + Im(s) < 0` does not imply `s: real`
+  // (design §4.2, case 4 — this was the `Re(s) > 1` destructive-retype bug).
+  if (
+    unknowns.length === 1 &&
+    (normalizedLhs === undefined || !containsPartTerm(normalizedLhs))
+  ) {
     const symbol = unknowns[0];
     const def = ce.lookupDefinition(symbol);
     if (!def) {
@@ -422,76 +628,378 @@ function assumeInequality(proposition: Expression): AssumeResult {
 function assumeElement(proposition: Expression): AssumeResult {
   console.assert(proposition.operator === 'Element');
 
-  // Four cases:
-  // 1/ lhs is a single free variable with no definition
-  //    e.g. `x \in \R`
-  //    => define a new var with the specified domain
+  // Cases:
+  // 1/ lhs is a bare symbol
+  //    => decompose the set per the design §3.2 table
+  //       (`assumeElementOfSet`): type refinement, bound facts, exclusion
+  //       facts, membership facts
   //
-  // 2/ lhs is a symbol with a definition
-  //    => update domain, if compatible
-  //
-  // 3/ lhs is an expression with some free variables with no definition
-  //    => add to assumptions DB
-  //
-  // 4/ otherwise  (expression)
+  // 2/ lhs is an expression with some free variables with no definition
   //    e.g. `x+2 \in \R`
+  //    => declare the single undefined var if the domain maps to a type
+  //       (historical behavior), otherwise add to assumptions DB
+  //
+  // 3/ otherwise (expression with no undefined vars)
   //    => evaluate and return result (contradiction or tautology)
 
   const ce = proposition.engine;
   if (!isFunction(proposition)) return 'not-a-predicate';
-  // Note: this is not 'unknowns' because proposition is not canonical (so all symbols are "unknowns")
-  const undefs = undefinedIdentifiers(proposition.op1);
-  // Case 1
-  if (undefs.length === 1) {
-    const dom = proposition.op2.evaluate();
-    if (!dom.isValid) return 'not-a-predicate';
 
-    const type = domainToType(dom);
-    if (type === 'unknown')
-      throw new Error(`Invalid domain "${dom.toString()}"`);
+  const dom = proposition.op2.evaluate();
+  if (!dom.isValid) return 'not-a-predicate';
 
-    ce.declare(undefs[0], type);
-    return 'ok';
-  }
-
-  // Case 2
+  // Case 1: bare symbol — decompose the set
   const propOp1 = proposition.op1;
-  const propOp1Symbol = isSymbol(propOp1) ? propOp1.symbol : undefined;
-  if (propOp1Symbol && hasDef(ce, propOp1Symbol)) {
-    const domain = proposition.op2.evaluate();
-    if (!domain.isValid) return 'not-a-predicate';
-    const type = domainToType(domain);
+  if (isSymbol(propOp1)) return assumeElementOfSet(ce, propOp1.symbol, dom);
 
-    if (!ce.context?.lexicalScope?.bindings.has(propOp1Symbol))
-      ce.declare(propOp1Symbol, domainToType(domain));
-
-    const def = ce.lookupDefinition(propOp1Symbol);
-    if (isValueDef(def)) {
-      if (def.value.type && !isSubtype(type, def.value.type.type))
-        return 'contradiction';
-      def.value.type = new BoxedType(type, ce._typeResolver);
+  // Case 2: compound lhs
+  // Note: this is not 'unknowns' because proposition is not canonical (so
+  // all symbols are "unknowns")
+  const undefs = undefinedIdentifiers(propOp1);
+  if (undefs.length === 1) {
+    const type = domainToType(dom);
+    if (type !== 'unknown') {
+      ce.declare(undefs[0], type);
       return 'ok';
     }
-    if (isOperatorDef(def)) {
-      if (!isSubtype(type, functionResult(def.operator.signature.type)!))
-        return 'contradiction';
-
-      return 'ok';
-    }
-    return 'not-a-predicate';
+    // The domain does not map to a type: fall through to storing the
+    // assumption verbatim (used to throw "Invalid domain")
   }
-
-  // Case 3
   if (undefs.length > 0) {
     ce.context.assumptions.set(proposition, true);
     return 'ok';
   }
 
-  // Case 4
+  // Case 3
   const val = proposition.evaluate();
   if (isSymbol(val, 'True')) return 'tautology';
   if (isSymbol(val, 'False')) return 'contradiction';
   return 'not-a-predicate';
+}
+
+/**
+ * Assume `symbol ∈ setExpr`, decomposing structured sets into independent
+ * stored facts plus type refinements ("shallow saturation", design §3.2):
+ *
+ * | Set shape | Action |
+ * |---|---|
+ * | primitive number set (ℂ, ℝ, ℤ…) | type refinement (historical behavior) |
+ * | `Range(a, b)` | `integer` refinement + bound facts `a ≤ x ≤ b` |
+ * | `Interval(a, b)` (with `Open` markers) | `real` refinement + bound facts |
+ * | `SetMinus(S, Set(e1…en))` | recurse on `S` + `NotEqual(x, ei)` facts |
+ * | `SetMinus(S, T)`, non-finite `T` | recurse on `S` + `NotElement(x, T)` fact |
+ * | inert/unknown set | stored membership fact (used to throw) |
+ *
+ * Infinite or non-numeric interval endpoints are skipped (no bound fact).
+ */
+function assumeElementOfSet(
+  ce: ComputeEngine,
+  symbol: string,
+  setExpr: Expression
+): AssumeResult {
+  // 1. Primitive number sets → pure type refinement
+  const type = domainToType(setExpr);
+  if (type !== 'unknown') return refineSymbolType(ce, symbol, type);
+
+  // 2. Range(lo, hi[, step]): integer-valued (`ZZGreaterEqual(1)`
+  //    translates to Range(1, +∞))
+  if (isFunction(setExpr, 'Range') && setExpr.ops.length >= 2) {
+    const result = refineSymbolType(ce, symbol, 'integer');
+    if (result === 'contradiction') return result;
+
+    let [lo, hi] = setExpr.ops;
+    const step = setExpr.ops[2];
+    if (step !== undefined && step.isSame(-1)) [lo, hi] = [hi, lo];
+    // For non-unit steps only the type refinement is kept
+    if (step !== undefined && !step.isSame(1) && !step.isSame(-1))
+      return 'ok';
+
+    if (assumeBound(ce, symbol, 'GreaterEqual', lo) === 'contradiction')
+      return 'contradiction';
+    if (assumeBound(ce, symbol, 'LessEqual', hi) === 'contradiction')
+      return 'contradiction';
+    return 'ok';
+  }
+
+  // 3. Interval(lo, hi), endpoints possibly wrapped in `Open`
+  if (isFunction(setExpr, 'Interval') && setExpr.ops.length === 2) {
+    const result = refineSymbolType(ce, symbol, 'real');
+    if (result === 'contradiction') return result;
+
+    let [lo, hi] = setExpr.ops;
+    let loStrict = false;
+    let hiStrict = false;
+    if (isFunction(lo, 'Open')) {
+      loStrict = true;
+      lo = lo.op1;
+    }
+    if (isFunction(hi, 'Open')) {
+      hiStrict = true;
+      hi = hi.op1;
+    }
+
+    if (
+      assumeBound(ce, symbol, loStrict ? 'Greater' : 'GreaterEqual', lo) ===
+      'contradiction'
+    )
+      return 'contradiction';
+    if (
+      assumeBound(ce, symbol, hiStrict ? 'Less' : 'LessEqual', hi) ===
+      'contradiction'
+    )
+      return 'contradiction';
+    return 'ok';
+  }
+
+  // 4. SetMinus(S, T): recurse on S, then store exclusions
+  if (isFunction(setExpr, 'SetMinus') && setExpr.ops.length === 2) {
+    const [base, excluded] = setExpr.ops;
+    const result = assumeElementOfSet(ce, symbol, base.evaluate());
+    if (result === 'contradiction' || result === 'internal-error')
+      return result;
+
+    if (isFunction(excluded, 'Set')) {
+      // Finite exclusion set: store a disequality per element
+      for (const e of excluded.ops) {
+        if (storeNotEqual(ce, ce.symbol(symbol), e) === 'contradiction')
+          return 'contradiction';
+      }
+      return 'ok';
+    }
+    // Non-finite exclusion: store a NotElement fact
+    const r = storeNotElement(ce, ce.symbol(symbol), excluded);
+    return r === 'tautology' ? 'ok' : r;
+  }
+
+  // 5. Union of intervals/ranges: refine the type only; the membership
+  //    fact is stored verbatim (a union yields a disjunction of bounds,
+  //    which the fact layer does not represent)
+  if (isFunction(setExpr, 'Union') && setExpr.ops.length > 0) {
+    if (setExpr.ops.every((s) => isFunction(s, 'Range'))) {
+      if (refineSymbolType(ce, symbol, 'integer') === 'contradiction')
+        return 'contradiction';
+    } else if (
+      setExpr.ops.every(
+        (s) => isFunction(s, 'Interval') || isFunction(s, 'Range')
+      )
+    ) {
+      if (refineSymbolType(ce, symbol, 'real') === 'contradiction')
+        return 'contradiction';
+    }
+    // ...fall through to store the membership fact
+  }
+
+  // 6. Inert/unknown set: store a membership fact (design §4.1 — this used
+  //    to throw "Invalid domain")
+  if (isNumber(setExpr) || isString(setExpr)) return 'not-a-predicate';
+  const fact = ce.function('Element', [ce.symbol(symbol), setExpr]);
+  if (!fact.isValid) return 'not-a-predicate';
+  ce.context.assumptions.set(fact, true);
+  return 'ok';
+}
+
+/**
+ * Narrow the declared type of `symbol` to `type` from an `Element`
+ * assumption (historical cases 1 & 2 of `assumeElement`, merged).
+ */
+function refineSymbolType(
+  ce: ComputeEngine,
+  symbol: string,
+  type: Type
+): AssumeResult {
+  if (!hasDef(ce, symbol)) {
+    ce.declare(symbol, type);
+    return 'ok';
+  }
+
+  // Shadow a parent-scope declaration in the current scope so the
+  // assumption is reverted when the scope is popped.
+  if (!ce.context?.lexicalScope?.bindings.has(symbol))
+    ce.declare(symbol, type);
+
+  const def = ce.lookupDefinition(symbol);
+  if (isValueDef(def)) {
+    if (
+      def.value.type &&
+      !def.value.type.isUnknown &&
+      !def.value.inferredType &&
+      !isSubtype(type, def.value.type.type)
+    )
+      return 'contradiction';
+    def.value.type = new BoxedType(type, ce._typeResolver);
+    // The type was explicitly asserted: it is no longer an inferred type
+    // (so a subsequent bare-symbol inequality won't widen it to 'real')
+    def.value.inferredType = false;
+    return 'ok';
+  }
+  if (isOperatorDef(def)) {
+    if (!isSubtype(type, functionResult(def.operator.signature.type)!))
+      return 'contradiction';
+    return 'ok';
+  }
+  return 'not-a-predicate';
+}
+
+/**
+ * Assume `symbol <op> bound` by delegating to `assumeInequality` (which
+ * performs the §4.3 consistency checks and stores the normalized fact).
+ *
+ * Non-numeric or infinite bounds are skipped: membership in
+ * `Range(1, +∞)` yields only the lower bound fact.
+ */
+function assumeBound(
+  ce: ComputeEngine,
+  symbol: string,
+  op: 'Less' | 'LessEqual' | 'Greater' | 'GreaterEqual',
+  bound: Expression
+): AssumeResult {
+  if (!isNumber(bound) || bound.isFinite !== true) return 'ok';
+  // Canonical boxing normalizes the operator to Less/LessEqual (possibly
+  // swapping the operands), which `assumeInequality` handles directly.
+  return assumeInequality(ce.function(op, [ce.symbol(symbol), bound]));
+}
+
+/**
+ * Recognize a normalized-inequality lhs of the form `±Part(x) + k` where
+ * `Part ∈ {Real, Imaginary, Abs, Argument}` and `k` is an optional numeric
+ * constant. Returns the (non-self) subject, or `undefined`.
+ *
+ * Deliberately stricter than `boundsFromNormalizedInequality`: an lhs with
+ * a non-numeric extra term (e.g. `Re(s) + Im(s)`) is *not* a part-bound and
+ * is stored opaque instead.
+ */
+function partBoundSubject(lhs: Expression): Subject | undefined {
+  const partOf = (term: Expression): Subject | undefined => {
+    const inner =
+      isFunction(term, 'Negate') && term.ops.length === 1 ? term.op1 : term;
+    const s = subjectOf(inner);
+    return s !== undefined && s.part !== 'self' ? s : undefined;
+  };
+
+  const direct = partOf(lhs);
+  if (direct !== undefined) return direct;
+
+  if (!isFunction(lhs, 'Add')) return undefined;
+  let subject: Subject | undefined = undefined;
+  for (const term of lhs.ops) {
+    const s = partOf(term);
+    if (s !== undefined) {
+      if (subject !== undefined) return undefined; // more than one part term
+      subject = s;
+    } else if (!isNumber(term)) {
+      return undefined; // non-numeric extra term
+    }
+  }
+  return subject;
+}
+
+/** True if `expr` contains a part term (`Real/Imaginary/Abs/Argument` of a
+ * bare symbol) anywhere. */
+function containsPartTerm(expr: Expression): boolean {
+  if (!isFunction(expr)) return false;
+  const s = subjectOf(expr);
+  if (s !== undefined && s.part !== 'self') return true;
+  return expr.ops.some(containsPartTerm);
+}
+
+/** The numeric (finite, real) value of a bound expression, or undefined. */
+function numericBoundValue(b: Expression | undefined): number | undefined {
+  if (b === undefined || !isNumber(b)) return undefined;
+  const v = b.numericValue;
+  const n = typeof v === 'number' ? v : v?.re;
+  return typeof n === 'number' && isFinite(n) ? n : undefined;
+}
+
+/**
+ * Check a candidate bound against the existing bounds for the same subject
+ * (design §4.3 — bounds-level consistency only, per subject).
+ *
+ * Returns `'tautology'` if the new bound is already implied,
+ * `'contradiction'` if it is incompatible, `undefined` otherwise (store it).
+ */
+function checkBoundsAgainst(
+  existing: IntervalBounds,
+  candidate: IntervalBounds
+): 'tautology' | 'contradiction' | undefined {
+  // New lower bound: subject > k (strict) or subject >= k
+  const newLower = numericBoundValue(candidate.lower);
+  if (newLower !== undefined) {
+    const strict = candidate.lowerStrict === true;
+    const upper = numericBoundValue(existing.upper);
+    if (upper !== undefined) {
+      if (upper < newLower) return 'contradiction';
+      if (upper === newLower && (strict || existing.upperStrict === true))
+        return 'contradiction';
+    }
+    const lower = numericBoundValue(existing.lower);
+    if (lower !== undefined) {
+      if (lower > newLower) return 'tautology';
+      if (lower === newLower && (existing.lowerStrict === true || !strict))
+        return 'tautology';
+    }
+  }
+
+  // New upper bound: subject < k (strict) or subject <= k
+  const newUpper = numericBoundValue(candidate.upper);
+  if (newUpper !== undefined) {
+    const strict = candidate.upperStrict === true;
+    const lower = numericBoundValue(existing.lower);
+    if (lower !== undefined) {
+      if (lower > newUpper) return 'contradiction';
+      if (lower === newUpper && (strict || existing.lowerStrict === true))
+        return 'contradiction';
+    }
+    const upper = numericBoundValue(existing.upper);
+    if (upper !== undefined) {
+      if (upper < newUpper) return 'tautology';
+      if (upper === newUpper && (existing.upperStrict === true || !strict))
+        return 'tautology';
+    }
+  }
+
+  return undefined;
+}
+
+/** True if the bounds imply the subject is non-zero (e.g. `Im(x) > 0`). */
+function boundsExcludeZero(bounds: IntervalBounds): boolean {
+  const lower = numericBoundValue(bounds.lower);
+  if (
+    lower !== undefined &&
+    (lower > 0 || (lower === 0 && bounds.lowerStrict === true))
+  )
+    return true;
+  const upper = numericBoundValue(bounds.upper);
+  if (
+    upper !== undefined &&
+    (upper < 0 || (upper === 0 && bounds.upperStrict === true))
+  )
+    return true;
+  return false;
+}
+
+/**
+ * Narrow the type of `symbol` to `type` only when its current type is
+ * unknown, or inferred and `type` actually narrows it. Never widens, and
+ * never overrides an explicit declaration (design §3.3).
+ */
+function refineTypeIfUnknown(
+  ce: ComputeEngine,
+  symbol: string,
+  type: Type
+): void {
+  const def = ce.lookupDefinition(symbol);
+  if (!def) {
+    ce.declare(symbol, type);
+    return;
+  }
+  if (!isValueDef(def) || def.value.isConstant) return;
+  const current = def.value.type;
+  if (!current || current.isUnknown) {
+    def.value.type = ce.type(type);
+    return;
+  }
+  if (def.value.inferredType && isSubtype(type, current.type))
+    def.value.type = ce.type(type);
 }
 
 function hasDef(ce: ComputeEngine, s: string): boolean {
@@ -513,26 +1021,34 @@ function hasValue(ce: ComputeEngine, s: string): boolean {
 }
 
 /**
- * Query assumptions to determine the sign of a symbol.
+ * Query assumptions to determine the sign of a subject.
+ *
+ * The subject may be a bare symbol (pass the symbol name, or a `Subject`
+ * with `part: 'self'`) or a part-extractor of a symbol, e.g.
+ * `{ symbol: 's', part: 're' }` for facts about `Real(s)` (see
+ * `boxed-expression/constraint-subject.ts`).
  *
  * Examines inequality assumptions in the current context to determine
- * if a symbol's sign can be inferred. Assumptions are stored in normalized
- * form (Less or LessEqual with lhs-rhs compared to 0), so:
+ * if the subject's sign can be inferred. Assumptions are stored in
+ * normalized form (Less or LessEqual with lhs-rhs compared to 0), so:
  * - `x > 0` is stored as `Less(-x, 0)` meaning `-x < 0`
  * - `x >= 0` is stored as `LessEqual(-x, 0)` meaning `-x <= 0`
  * - `x < 0` is stored as `Less(x, 0)` meaning `x < 0`
  * - `x <= 0` is stored as `LessEqual(x, 0)` meaning `x <= 0`
+ * - `Re(s) > 1` is stored as `Less(Add(Negate(Real(s)), 1), 0)`
  *
  * @param ce - The compute engine instance
- * @param symbol - The symbol name to query
+ * @param subject - The symbol name or `Subject` to query
  * @returns The inferred sign, or undefined if no relevant assumptions found
  */
 export function getSignFromAssumptions(
   ce: ComputeEngine,
-  symbol: string
+  subject: string | Subject
 ): Sign | undefined {
   const assumptions = ce.context?.assumptions;
   if (!assumptions) return undefined;
+
+  const subj = toSubject(subject);
 
   for (const [assumption, _] of assumptions.entries()) {
     const op = assumption.operator;
@@ -550,34 +1066,34 @@ export function getSignFromAssumptions(
     // Check if RHS is 0 (normalized form: expr < 0 or expr <= 0)
     if (!rhs.isSame(0)) continue;
 
-    // Case 1: Direct symbol comparison
+    // Case 1: Direct subject comparison
     // x < 0 means x is negative
     // x <= 0 means x is non-positive
-    if (isSymbol(lhs, symbol)) {
+    if (matchesSubject(lhs, subj)) {
       if (op === 'Less') return 'negative';
       if (op === 'LessEqual') return 'non-positive';
     }
 
-    // Case 2: Negated symbol comparison
+    // Case 2: Negated subject comparison
     // -x < 0 means x > 0 (positive)
     // -x <= 0 means x >= 0 (non-negative)
-    if (isFunction(lhs, 'Negate') && isSymbol(lhs.op1, symbol)) {
+    if (isFunction(lhs, 'Negate') && matchesSubject(lhs.op1, subj)) {
       if (op === 'Less') return 'positive';
       if (op === 'LessEqual') return 'non-negative';
     }
 
-    // Case 3: Symbol with subtraction from constant
+    // Case 3: Subject with subtraction from constant
     // a - x < 0 means x > a, so if a >= 0, x is positive
     // x - a < 0 means x < a, so if a <= 0, x is negative
     if (isFunction(lhs, 'Subtract')) {
       const [a, b] = lhs.ops;
       if (a && b) {
         // a - x < 0 => x > a
-        if (isSymbol(b, symbol) && a.isNonNegative === true) {
+        if (matchesSubject(b, subj) && a.isNonNegative === true) {
           if (op === 'Less') return 'positive';
         }
         // x - a < 0 => x < a
-        if (isSymbol(a, symbol) && b.isNonPositive === true) {
+        if (matchesSubject(a, subj) && b.isNonPositive === true) {
           if (op === 'Less') return 'negative';
         }
       }
@@ -588,8 +1104,8 @@ export function getSignFromAssumptions(
     // -x + a < 0 means -x < -a means x > a, so if a >= 0, x is positive
     if (isFunction(lhs, 'Add')) {
       for (const term of lhs.ops) {
-        // Direct symbol in sum: check if other terms give us bounds
-        if (isSymbol(term, symbol)) {
+        // Direct subject in sum: check if other terms give us bounds
+        if (matchesSubject(term, subj)) {
           // x + ... < 0, check if other terms are all non-negative
           // That would mean x < -(sum of others), so x < non-positive = negative
           const otherTerms = lhs.ops.filter((t) => t !== term);
@@ -601,13 +1117,14 @@ export function getSignFromAssumptions(
             if (op === 'LessEqual') return 'non-positive';
           }
         }
-        // Negated symbol in sum: -x + ... < 0
-        if (isFunction(term, 'Negate') && isSymbol(term.op1, symbol)) {
-          // -x + ... < 0 means x > ...
+        // Negated subject in sum: -x + ... < 0
+        if (isFunction(term, 'Negate') && matchesSubject(term.op1, subj)) {
+          // -x + ... < 0 means x > (sum of others), so if the other terms
+          // are all non-negative, x > non-negative = positive
           const otherTerms = lhs.ops.filter((t) => t !== term);
           if (
             otherTerms.length > 0 &&
-            otherTerms.every((t) => t.isNonPositive === true)
+            otherTerms.every((t) => t.isNonNegative === true)
           ) {
             if (op === 'Less') return 'positive';
             if (op === 'LessEqual') return 'non-negative';

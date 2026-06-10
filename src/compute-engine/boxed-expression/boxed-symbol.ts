@@ -59,6 +59,7 @@ import {
 } from './sgn';
 import { matchesSymbol } from '../../math-json/utils';
 import { getSignFromAssumptions } from '../assume';
+import { getFactIndex, hasAssumptions } from './constraint-subject';
 import { isSymbol } from './type-guards';
 
 /**
@@ -599,7 +600,14 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   }
 
   get isFinite(): boolean | undefined {
-    return this.value?.isFinite;
+    const fromValue = this.value?.isFinite;
+    if (fromValue !== undefined) return fromValue;
+    // Type fallback (FUNGRIM-PLAN-3-ASSUMPTIONS.md §5.1e): a
+    // `finite_number` refinement — e.g. from `assume(|q| < 1)` — entails
+    // finiteness even without a value.
+    const t = this.type;
+    if (!t.isUnknown && t.matches('finite_number')) return true;
+    return undefined;
   }
 
   get isInfinity(): boolean | undefined {
@@ -654,7 +662,22 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   get isReal(): boolean | undefined {
     const t = this.type;
     if (t.isUnknown) return undefined;
-    return t.matches('real');
+    if (t.matches('real')) return true;
+
+    // The type cannot prove real-ness. A stored `NotElement(x, RealNumbers)`
+    // fact — e.g. derived from `assume(Im(x) > 0)` — refutes it
+    // (FUNGRIM-PLAN-3-ASSUMPTIONS.md §5.1e): types cannot express negation.
+    if (hasAssumptions(this.engine)) {
+      const facts = getFactIndex(this.engine).membership.get(this._id);
+      if (facts?.notIn.some((s) => isSymbol(s, 'RealNumbers'))) return false;
+    }
+
+    // `complex`/`imaginary`-typed symbols keep the historical definitive
+    // `false`. Other number types (`number`, `finite_number`, ...) overlap
+    // `real`, so without a refuting fact the answer is indeterminate
+    // (three-valued discipline, design §5.2).
+    if (t.matches('number') && !t.matches('complex')) return undefined;
+    return false;
   }
 
   get re(): number {

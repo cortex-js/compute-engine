@@ -9,6 +9,13 @@ import { flatten } from '../boxed-expression/flatten';
 import { isFunction, isNumber, sym } from '../boxed-expression/type-guards';
 import { validateArguments } from '../boxed-expression/validate';
 import {
+  getFactIndex,
+  hasAssumptions,
+  subjectKey,
+  subjectOf,
+} from '../boxed-expression/constraint-subject';
+import { domainToType } from '../boxed-expression/utils';
+import {
   isFiniteIndexedCollection,
   MAX_SIZE_EAGER_COLLECTION,
 } from '../collection-utils';
@@ -644,32 +651,10 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     evaluate: ([value, collection, _condition], { engine: ce }) => {
       // Note: condition is only used during Sum/Product iteration,
       // not for standalone Element evaluation
-
-      // Check if collection has a contains method before calling it
-      if (collection && typeof collection.contains === 'function') {
-        const result = collection.contains(value);
-        if (result === true) return ce.True;
-        if (result === false) return ce.False;
-      }
-
-      // Support type-style membership checks, e.g. Element(x, finite_real) or
-      // Element(x, Integers). Try to interpret the collection as a type.
-      const typeName = sym(collection);
-      if (typeName) {
-        try {
-          const type = ce.type(typeName);
-          if (!type.isUnknown) {
-            const valueType = value.type;
-            if (valueType.matches(type)) return ce.True;
-            if (typeIntersection(valueType.type, type.type) === 'nothing')
-              return ce.False;
-          }
-        } catch {
-          // If type parsing fails (e.g., "Booleans" is not a valid type),
-          // fall through and return undefined
-        }
-      }
-
+      if (!collection) return undefined;
+      const result = membershipKleene(ce, value, collection);
+      if (result === true) return ce.True;
+      if (result === false) return ce.False;
       return undefined;
     },
   },
@@ -679,22 +664,10 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     signature: '(value, collection) -> boolean',
     description: 'Test whether a value is not an element of a collection.',
     evaluate: ([value, collection], { engine: ce }) => {
-      const result = collection.contains(value);
+      if (!collection) return undefined;
+      const result = membershipKleene(ce, value, collection);
       if (result === true) return ce.False;
       if (result === false) return ce.True;
-
-      // Support type-style membership checks, e.g. NotElement(x, real).
-      const typeName = sym(collection);
-      if (typeName) {
-        const type = ce.type(typeName);
-        if (!type.isUnknown) {
-          const valueType = value.type;
-          if (valueType.matches(type)) return ce.False;
-          if (typeIntersection(valueType.type, type.type) === 'nothing')
-            return ce.True;
-        }
-      }
-
       return undefined;
     },
   },
@@ -946,14 +919,15 @@ export const SETS_LIBRARY: SymbolDefinitions = {
         if (!isFunction(expr)) return false;
         const [col, ...values] = expr.ops;
         return (
-          (col.contains(x) ?? false) && !values.some((val) => val.isSame(x))
+          (col.contains(x) ?? false) &&
+          !values.some((val) => isExcludedBy(val, x))
         );
       },
       count: (expr) => {
         if (!isFunction(expr)) return 0;
         return countMatchingElements(expr, (elem) => {
           const [_col, ...values] = expr.ops;
-          return !values.some((val) => val.isSame(elem));
+          return !values.some((val) => isExcludedBy(val, elem));
         });
       },
       iterator: setMinusIterator,
@@ -1050,11 +1024,169 @@ function intersection(
   return ce._fn('Set', elements);
 }
 
+/** A trailing SetMinus operand excludes its *members* when it is itself a
+ * set/collection, and excludes itself as a value otherwise. */
+function isExcludedBy(val: Expression, x: Expression): boolean {
+  if (val.isCollection) return val.contains(x) === true;
+  return val.isSame(x);
+}
+
+/**
+ * Three-valued disequality `x ≠ e`, used by the `SetMinus` query
+ * decomposition (FUNGRIM-PLAN-3-ASSUMPTIONS.md §5.1c/§5.1d).
+ *
+ * - `false` when `x` is (structurally or as a concrete number) equal to `e`;
+ * - `true` when concrete numbers differ, or when a `NotEqual(x, e)` fact is
+ *   stored in the assumptions DB (read directly from the fact index, so it
+ *   works inside `verify()`);
+ * - `undefined` otherwise (never a definitive answer for an unconstrained
+ *   symbol — design §5.2 invariant).
+ */
+function notEqualKleene(
+  ce: ComputeEngine,
+  x: Expression,
+  e: Expression
+): boolean | undefined {
+  if (x.isSame(e)) return false;
+
+  // Concrete numbers decide definitively
+  if (isNumber(x) && isNumber(e)) {
+    const r = x.isEqual(e);
+    if (r !== undefined) return !r;
+    return undefined;
+  }
+
+  // Stored disequality facts for the subject (bare symbol or part term)
+  if (hasAssumptions(ce)) {
+    const subject = subjectOf(x);
+    if (subject !== undefined) {
+      const facts = getFactIndex(ce).bySubject.get(subjectKey(subject));
+      if (facts?.notEqual.some((v) => v.isSame(e))) return true;
+    }
+  }
+
+  return undefined;
+}
+
+/**
+ * Three-valued set membership `x ∈ collection`, shared by the
+ * `Element`/`NotElement` evaluate handlers (design §5.1c).
+ *
+ * In order:
+ * 1. `SetMinus` queries are decomposed exactly like `SetMinus` assumptions —
+ *    `x ∈ SetMinus(S, T)` ⇔ `x ∈ S ∧ x ∉ T` with Kleene combination — instead
+ *    of using the generic `contains` handler, which collapses an unknown
+ *    base membership to a definitive `false` for symbolic elements.
+ * 2. The collection's `contains` handler (concrete membership, unchanged).
+ * 3. Type-style membership for type names (e.g. `Element(x, finite_real)`).
+ * 4. Primitive number-set symbols mapped to types via `domainToType` — the
+ *    query-side mirror of the assume-side type refinement, so
+ *    `Element(z, ComplexNumbers)` verifies after the same assumption.
+ * 5. Stored membership/exclusion facts, matched exactly (`isSame`).
+ *
+ * Returns `undefined` when membership is indeterminate (design §5.2).
+ */
+function membershipKleene(
+  ce: ComputeEngine,
+  x: Expression,
+  collection: Expression,
+  depth = 0
+): boolean | undefined {
+  if (depth > 4) return undefined;
+
+  // 1. SetMinus query decomposition (signature is `(set, value*)`: trailing
+  //    operands exclude their members when they are collections, themselves
+  //    otherwise — mirroring `isExcludedBy`)
+  if (isFunction(collection, 'SetMinus') && collection.nops >= 1) {
+    const [base, ...excluded] = collection.ops;
+    let result = membershipKleene(ce, x, base, depth + 1);
+    if (result === false) return false;
+    for (const val of excluded) {
+      let conjunct: boolean | undefined;
+      if (isFunction(val, 'Set')) {
+        // Finite exclusion set: a disequality conjunct per element
+        conjunct = true;
+        for (const e of val.ops) {
+          const ne = notEqualKleene(ce, x, e);
+          if (ne === false) return false;
+          if (ne === undefined) conjunct = undefined;
+        }
+      } else if (val.isCollection) {
+        // Non-finite exclusion: `x ∉ val`
+        const m = membershipKleene(ce, x, val, depth + 1);
+        conjunct = m === undefined ? undefined : !m;
+      } else {
+        conjunct = notEqualKleene(ce, x, val);
+      }
+      if (conjunct === false) return false;
+      if (conjunct === undefined) result = undefined;
+    }
+    return result;
+  }
+
+  // 2. The collection's `contains` handler
+  if (typeof collection.contains === 'function') {
+    const result = collection.contains(x);
+    if (result === true) return true;
+    if (result === false) return false;
+  }
+
+  const typeName = sym(collection);
+  if (typeName) {
+    // 3. Type-style membership, e.g. Element(x, finite_real)
+    try {
+      const type = ce.type(typeName);
+      if (!type.isUnknown) {
+        const valueType = x.type;
+        if (valueType.matches(type)) return true;
+        if (typeIntersection(valueType.type, type.type) === 'nothing')
+          return false;
+      }
+    } catch {
+      // If type parsing fails (e.g., "Booleans" is not a valid type),
+      // fall through
+    }
+
+    // 4. Primitive number-set symbols map to types (query-side mirror of
+    //    the assume-side refinement)
+    const domType = domainToType(collection);
+    if (domType !== 'unknown') {
+      const r = typeMembership(x, domType);
+      if (r !== undefined) return r;
+    }
+  }
+
+  // 5. Stored membership/exclusion facts, matched exactly (design §5.1c)
+  if (hasAssumptions(ce)) {
+    const xSymbol = sym(x);
+    if (xSymbol) {
+      const facts = getFactIndex(ce).membership.get(xSymbol);
+      if (facts) {
+        if (facts.in.some((s) => s.isSame(collection))) return true;
+        if (facts.notIn.some((s) => s.isSame(collection))) return false;
+      }
+    }
+  }
+
+  return undefined;
+}
+
 function setMinus(
-  _ops: Expression[],
+  ops: Expression[],
   { engine: ce }: { engine: ComputeEngine }
-): Expression {
-  return ce.symbol('EmptySet');
+): Expression | undefined {
+  // Compute the difference only when the source collection is finite and
+  // enumerable; otherwise stay symbolic — the `contains`/iterator handlers
+  // provide the semantics for infinite sets (e.g. SetMinus(ComplexNumbers, {0})).
+  const [col, ...values] = ops;
+  if (!col || col.isFiniteCollection !== true) return undefined;
+
+  const elements = [...col.each()].filter(
+    (element) => !values.some((val) => isExcludedBy(val, element))
+  );
+
+  if (elements.length === 0) return ce.symbol('EmptySet');
+  return ce._fn('Set', elements);
 }
 
 function imaginaryIterator(
@@ -1150,7 +1282,7 @@ function* setMinusIterator(
   if (!isFunction(expr)) return;
   const [col, ...values] = expr.ops;
   for (const elem of col.each()) {
-    if (!values.some((val) => val.isSame(elem))) {
+    if (!values.some((val) => isExcludedBy(val, elem))) {
       yield elem;
     }
   }

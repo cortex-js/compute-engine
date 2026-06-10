@@ -94,6 +94,7 @@ import type {
 } from '../global-types';
 import { isNumber, isFunction } from '../boxed-expression/type-guards';
 import { canonical } from '../boxed-expression/canonical-utils';
+import { signFromAssumedPart } from './complex';
 
 // When processing an arithmetic expression, the following are the core
 // canonical arithmetic operations to account for:
@@ -191,9 +192,14 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       idempotent: true,
       complexity: 1200,
       signature: '(number) -> real',
-      sgn: ([x]) => {
+      sgn: ([x], { engine: ce }) => {
         if (x.isSame(0)) return 'zero';
         if (isNumber(x)) return 'positive';
+        // Symbol with no value: assumed bounds on `abs:x` may sharpen the
+        // sign, e.g. `assume(|x| > 2)` entails 'positive'
+        // (FUNGRIM-PLAN-3-ASSUMPTIONS.md §5.1b)
+        const assumed = signFromAssumedPart(ce, x, 'abs');
+        if (assumed !== undefined) return assumed;
         return 'non-negative'; //|x^2+1| fails
       },
       evaluate: ([x]) => evaluateAbs(x),
