@@ -9,6 +9,7 @@ import type { MathJsonSymbol } from '../math-json/types';
 
 import { isWildcard, wildcardName } from './boxed-expression/pattern-utils';
 import { isSymbol, isFunction } from './boxed-expression/type-guards';
+import { subjectOf } from './boxed-expression/constraint-subject';
 import { isValueDef } from './boxed-expression/utils';
 
 import {
@@ -136,10 +137,15 @@ export function ask(
         pat.operator === 'Greater' || pat.operator === 'GreaterEqual';
       const isStrict = pat.operator === 'Greater' || pat.operator === 'Less';
 
-      // Symbol on LHS: Greater(x, _k)
+      // Subject on LHS: a bare symbol — Greater(x, _k) — or a part
+      // extractor of one (FUNGRIM-PLAN-3-ASSUMPTIONS.md §2):
+      // Greater(Real(s), _k), Greater(Imaginary(tau), _k), Less(Abs(q), _k),
+      // Less(Argument(z), _k). The bare-symbol case behaves exactly as
+      // before (subjectOf maps it to the 'self' part).
       const patOp1B2 = pat.op1;
-      if (isSymbol(patOp1B2)) {
-        const bounds = getInequalityBoundsFromAssumptions(ce, patOp1B2.symbol);
+      const subject = subjectOf(patOp1B2);
+      if (subject !== undefined) {
+        const bounds = getInequalityBoundsFromAssumptions(ce, subject);
         const bound = isLower ? bounds.lower : bounds.upper;
         const strictOk = isLower ? bounds.lowerStrict : bounds.upperStrict;
         if (bound !== undefined && (!isStrict || strictOk === true))
