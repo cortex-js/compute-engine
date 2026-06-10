@@ -107,6 +107,28 @@ describe('LATEX SERIALIZING', () => {
       `1-x`
     );
   });
+  test('Multiply by a digit-leading power (issue #302)', () => {
+    // After a non-canonical substitution, `Multiply(3, Power(2, 2))` keeps
+    // its structure (prettify renders the power as `Square(2)` -> `2^2`).
+    // The factors must be separated by an explicit multiplication sign,
+    // otherwise `3` and `2^2` merge into the single number `32^2`.
+    const expr = ce
+      .box(
+        ['Add', ['Multiply', 3, ['Power', 'x', 2]], ['Multiply', 5, 'x'], 3],
+        { canonical: false }
+      )
+      .subs({ x: 2 }, { canonical: false });
+    expect(expr.toLatex()).toMatchInlineSnapshot(`3\\times2^2+5\\times2+3`);
+
+    const term = (sym: string, val: number) =>
+      ce
+        .box(['Multiply', 3, ['Power', sym, 2]], { canonical: false })
+        .subs({ [sym]: val }, { canonical: false })
+        .toLatex();
+    // A numeric base that prettifies to a square still needs an explicit sign
+    expect(term('x', 2)).toMatchInlineSnapshot(`3\\times2^2`);
+    expect(term('x', 10)).toMatchInlineSnapshot(`3\\times10^2`);
+  });
   test('Power', () => {
     expect(latex(['Power', 'x', -2])).toMatchInlineSnapshot(`\\frac{1}{x^2}`);
     expect(latex(['Power', -2, 2])).toMatchInlineSnapshot(`4`);

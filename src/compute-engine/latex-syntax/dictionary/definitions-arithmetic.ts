@@ -383,6 +383,17 @@ function serializeMultiply(
         // multiplied by a fraction
         result = latexTemplate(serializer.options.multiply, result, term);
       }
+      // Can't use an invisible multiply if the term serializes starting
+      // with a digit: juxtaposing it would merge it with a preceding
+      // number into a single, different number. This happens with a
+      // prettified power of a numeric base, e.g. `Square(2)` -> `2^2`,
+      // where `Multiply(3, Square(2))` would otherwise serialize as
+      // `32^2` instead of `3\times2^2`. (A `Power` with a numeric base is
+      // already handled explicitly above, but prettify rewrites
+      // `Power(n, 2)` to `Square(n)`, which bypasses that branch.)
+      else if (/^\d/.test(term)) {
+        result = latexTemplate(serializer.options.multiply, result, term);
+      }
       // Not first term, use invisible multiply
       else if (!serializer.options.invisibleMultiply) {
         // Replace, joining the terms correctly
