@@ -1172,7 +1172,11 @@ export class _Parser implements Parser {
     const start = this.index;
     let result = '';
     let level = 0;
-    while (!this.atBoundary || level > 0) {
+    // Stop at end of input even with unbalanced braces (level > 0): otherwise
+    // `nextToken()` returns `undefined` past the end and `token[0]` throws.
+    // The caller (`parseStringGroup`) then fails its boundary match and the
+    // malformed group degrades to an Error expression.
+    while (!this.atEnd && (!this.atBoundary || level > 0)) {
       const token = this.nextToken();
       if (token === '<$>' || token === '<$$>') {
         this.index = start;

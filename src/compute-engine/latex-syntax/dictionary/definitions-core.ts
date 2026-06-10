@@ -1969,7 +1969,7 @@ function parseTextRun(
   if (runs.length === 1) body = runs[0];
   else {
     if (runs.every((x) => stringValue(x) !== null))
-      body = "'" + runs.map((x) => stringValue(x)).join() + "'";
+      body = "'" + runs.map((x) => stringValue(x)).join('') + "'";
     else body = ['Text', ...runs];
   }
 

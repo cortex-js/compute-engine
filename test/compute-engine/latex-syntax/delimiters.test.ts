@@ -120,3 +120,17 @@ describe('DELIMITERS', () => {
     `);
   });
 });
+
+describe('Delimiter scale styles (REVIEW.md C1)', () => {
+  // wrapString appended a stray `}` for the 'scaled' style and a stray `)`
+  // for 'big', producing invalid LaTeX.
+  test("'scaled' wraps with \\left…\\right and no trailing brace", () =>
+    expect(
+      ce.box(['f', 'x', 'y']).toLatex({ applyFunctionStyle: () => 'scaled' })
+    ).toEqual('f\\left(x, y\\right)'));
+
+  test("'big' wraps with \\Bigl…\\Bigr and no trailing paren", () =>
+    expect(
+      ce.box(['f', 'x', 'y']).toLatex({ applyFunctionStyle: () => 'big' })
+    ).toEqual('f\\Bigl(x, y\\Bigr)'));
+});

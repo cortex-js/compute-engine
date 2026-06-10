@@ -19,6 +19,15 @@ describe('ADVANCED PARSING', () => {
     expect(parse('\\frac{x}{} \\text{ cm}')).toMatchInlineSnapshot(
       `["Tuple", ["Divide", "x", ["Error", "'missing'"]], "cm"]`
     ));
+
+  // REVIEW.md C4: parseTextRun joined nested-brace runs with Array.join()
+  // (default ',' separator), so `\text{hello {world}}` became 'hello ,world'.
+  test('\\text with nested braces joins without a stray comma', () => {
+    expect((parse('\\text{hello {world}}') as any).string).toEqual(
+      'hello world'
+    );
+    expect((parse('\\text{a {b} c}') as any).string).toEqual('a b c');
+  });
 });
 
 describe('FUNCTIONS', () => {

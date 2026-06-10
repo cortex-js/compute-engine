@@ -119,10 +119,10 @@ findings there are edge cases. The areas with the most serious problems are:
 
 | # | Sev | Location | Issue |
 |---|-----|----------|-------|
-| C1 | HIGH | `latex-syntax/serializer.ts:240,243` | `wrapString` emits a stray `}` for 'scaled' group style and a stray `)` for 'big' — invalid LaTeX. **✓ verified.** |
-| C2 | HIGH | `latex-syntax/serializer.ts:450` | Spelled-out-digit lookup uses `startsWith` instead of whole-prefix equality: symbols are corrupted on serialization. **✓ verified:** `tensor` → `\mathrm{10sor}`, `onesie` → `\mathrm{1sie}`. |
-| C3 | HIGH | `latex-syntax/parse.ts:1175` | `parseStringGroupContent` crashes (TypeError on `undefined[0]`) on unbalanced brace at end of input instead of producing an Error expression. **✓ verified:** `\begin{ca{ses`. |
-| C4 | HIGH | `dictionary/definitions-core.ts:1972` | `parseTextRun` joins runs with `Array.join()` — default `,` separator. **✓ verified:** `\text{hello {world}}` → `'hello ,world'`. Use `.join('')`. |
+| ✅ C1 | HIGH | `latex-syntax/serializer.ts:240,243` | `wrapString` emits a stray `}` for 'scaled' group style and a stray `)` for 'big' — invalid LaTeX. **✓ verified.** Fixed: removed the stray trailing characters. Regression test in `latex-syntax/delimiters.test.ts`. |
+| ✅ C2 | HIGH | `latex-syntax/serializer.ts:450` | Spelled-out-digit lookup uses `startsWith` instead of whole-prefix equality: symbols are corrupted on serialization. **✓ verified:** `tensor` → `\mathrm{10sor}`, `onesie` → `\mathrm{1sie}`. Fixed: match against the whole prefix (`prefix === x`). Regression test in `latex-syntax/symbols.test.ts`. |
+| ✅ C3 | HIGH | `latex-syntax/parse.ts:1175` | `parseStringGroupContent` crashes (TypeError on `undefined[0]`) on unbalanced brace at end of input instead of producing an Error expression. **✓ verified:** `\begin{ca{ses`. Fixed: loop also stops at end of input (`!this.atEnd`). Regression test in `latex-syntax/errors.test.ts`. |
+| ✅ C4 | HIGH | `dictionary/definitions-core.ts:1972` | `parseTextRun` joins runs with `Array.join()` — default `,` separator. **✓ verified:** `\text{hello {world}}` → `'hello ,world'`. Use `.join('')`. Fixed. Regression test in `latex-syntax/parsing.test.ts`. |
 | C5 | MED | `latex-syntax/parse-symbol.ts:253` | `body += parseSymbolBody(parser)` coerces `null` to the string `"null"`. **✓ verified:** `\mathrm{\vec}` parses as the symbol `"null"`. |
 | C6 | MED | `latex-syntax/parse-number.ts:172` | Typo `'\\wideparent'` (extra `t`) breaks repeating-decimal detection after a leading decimal separator (`.\wideparen{3}` fails; `0.\wideparen{3}` works). **✓ verified.** |
 | C7 | MED | `latex-syntax/serialize-number.ts:552` | `deserializeHexFloat`: tautological guard `value[index] !== '0' || value[index] !== 'x'` means it always returns NaN; the body has further bugs; no callers anywhere. Delete or rewrite with tests. |

@@ -96,6 +96,24 @@
     unknown, so distinct multi-unknown equations compared equal (e.g.
     `x + y = 0` vs `2x = 0`). Each unknown now gets an independent value.
 
+- **LaTeX serialization and parsing fixes**:
+  - The `'scaled'` and `'big'` delimiter styles emitted a stray trailing `}` /
+    `)` (e.g. `f\left(x, y\right)}`), producing invalid LaTeX.
+  - A symbol whose name merely *begins* with a spelled-out digit was corrupted
+    on serialization (`tensor` → `\mathrm{10sor}`, `onesie` → `\mathrm{1sie}`):
+    the lookup used `startsWith` instead of whole-prefix equality.
+  - An unbalanced brace in an environment name at end of input (e.g.
+    `\begin{ca{ses`) threw a `TypeError` instead of producing an Error
+    expression.
+  - `\text{…}` with nested braces joined its runs with the default `,` separator
+    (`\text{hello {world}}` → `hello ,world`); it now joins with no separator.
+  - `Multiply` dropped the sign before a factor that serializes starting with a
+    digit, merging two numbers into one — e.g. `Multiply(3, Power(2, 2))`
+    serialized as `32^2` instead of `3\times2^2`. This surfaced after a
+    non-canonical substitution, where prettify renders `Power(2, 2)` as the
+    digit-leading `2^2`. Such factors now get an explicit multiplication sign;
+    unambiguous juxtaposition (e.g. `3\sqrt{2}`) is unchanged. (#302)
+
 - **Matrix (tensor) linear-algebra fixes** — operations were broken beyond the
   hardcoded 2×2 cases:
   - `Determinant` no longer throws for 4×4 and larger matrices, and now returns

@@ -237,10 +237,10 @@ export class Serializer {
       style = 'scaled';
 
     if (style === 'scaled')
-      return `\\left${openFence}${s}\\right${closeFence}}`;
+      return `\\left${openFence}${s}\\right${closeFence}`;
 
     if (style === 'big')
-      return `${`\\Bigl${openFence}`}${s}${`\\Bigr${closeFence}`})`;
+      return `\\Bigl${openFence}${s}\\Bigr${closeFence}`;
 
     return openFence + s + closeFence;
   }
@@ -447,7 +447,10 @@ function specialName(s: string): [result: string, rest: string] {
     nine: '9',
     ten: '10',
   };
-  i = Object.keys(DIGITS).findIndex((x) => s.startsWith(x));
+  // Match against the whole prefix (up to a subscript), like the SYMBOLS
+  // branch above — not `startsWith`, which corrupted symbols such as
+  // `tensor` → `10sor` and `onesie` → `1sie`.
+  i = Object.keys(DIGITS).findIndex((x) => prefix === x);
   if (i >= 0) {
     const key = Object.keys(DIGITS)[i];
     return [DIGITS[key], s.substring(key.length)];

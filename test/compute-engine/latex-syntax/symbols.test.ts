@@ -704,3 +704,19 @@ describe('SYMBOLS', () => {
     });
   });
 });
+
+describe('Spelled-out-digit symbol prefix (REVIEW.md C2)', () => {
+  // The digit lookup in specialName() used `startsWith`, corrupting symbols
+  // that merely begin with a digit word (e.g. `tensor` → `\mathrm{10sor}`).
+  // It now matches against the whole prefix, like the SYMBOLS branch above it.
+  test('symbols beginning with a digit word are not corrupted', () => {
+    expect(ce.box('tensor').toLatex()).toEqual('\\mathrm{tensor}');
+    expect(ce.box('onesie').toLatex()).toEqual('\\mathrm{onesie}');
+    expect(ce.box('twofold').toLatex()).toEqual('\\mathrm{twofold}');
+    expect(ce.box('sixty').toLatex()).toEqual('\\mathrm{sixty}');
+  });
+
+  test('a symbol that IS a spelled-out digit still maps to the digit', () => {
+    expect(ce.box('one').toLatex()).toEqual('1');
+  });
+});

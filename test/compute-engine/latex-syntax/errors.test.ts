@@ -111,6 +111,14 @@ check('Unbalanced environment, \\begin without \\end', () =>
   )
 );
 
+// REVIEW.md C3: an unbalanced brace in an environment name at end of input
+// threw a TypeError (parseStringGroupContent read past the end). It must
+// degrade to an Error expression instead.
+check('Unbalanced brace in environment name does not crash', () => {
+  expect(() => engine.parse('\\begin{ca{ses')).not.toThrow();
+  expect(engine.parse('\\begin{ca{ses').toString()).toContain('Error');
+});
+
 check('Environment without name', () =>
   expect(engine.parse('1 + \\begin +2')).toMatchInlineSnapshot(`
     [
