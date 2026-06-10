@@ -154,6 +154,10 @@ export type Rule<Expr = unknown, SemiExpr = unknown, CE = unknown> =
         | RuleFunction<Expr>;
       condition?: LatexString | RuleConditionFunction<Expr, CE>;
       useVariations?: boolean;
+      /** Dispatch hint: this rule can only ever apply to expressions whose
+       *  operator is one of these. Used to index the rule; semantics are
+       *  unchanged (the rule is simply never tried on other operators). */
+      operators?: ReadonlyArray<string>;
       id?: string;
       onBeforeMatch?: (rule: Rule<Expr, SemiExpr, CE>, expr: Expr) => void;
       onMatch?: (
@@ -174,6 +178,10 @@ export type BoxedRule<Expr = unknown, CE = unknown> = {
   condition: undefined | RuleConditionFunction<Expr, CE>;
 
   useVariations?: boolean;
+  /** Dispatch hint: this rule can only ever apply to expressions whose
+   *  operator is one of these. Used to index the rule; semantics are
+   *  unchanged (the rule is simply never tried on other operators). */
+  operators?: ReadonlyArray<string>;
   id?: string;
   onBeforeMatch?: (rule: Rule<Expr, unknown, CE>, expr: Expr) => void;
   onMatch?: (

@@ -28,6 +28,7 @@ import { LATEX_DICTIONARY } from '../latex-syntax/dictionary/default-dictionary'
 
 import { isPrime } from './predicates';
 import { isString, isNumber, isSymbol, isFunction } from './type-guards';
+import { getRuleIndex, candidateRules } from './rule-index';
 // @todo:
 // export function fixPoint(rule: Rule);
 // export function chain(rules: RuleSet);
@@ -618,7 +619,8 @@ function boxRule(
     };
 
   // eslint-disable-next-line prefer-const
-  let { match, replace, condition, id, onMatch, onBeforeMatch } = rule;
+  let { match, replace, condition, id, onMatch, onBeforeMatch, operators } =
+    rule;
 
   if (replace === undefined)
     throw new Error(
@@ -730,6 +732,7 @@ function boxRule(
     replace: replaceExpr ?? (replace as RuleReplaceFunction | RuleFunction),
     condition: condFn,
     useVariations: rule.useVariations,
+    operators,
     id,
     onMatch,
     onBeforeMatch,
@@ -787,6 +790,27 @@ export function boxRules(
   return { rules };
 }
 
+/**
+ * Memoized "the canonical form of the match pattern loses wildcards" check.
+ *
+ * The result depends only on the (immutable) match pattern, so it is
+ * computed once per pattern rather than on every `applyRule()` call.
+ * Keyed on the boxed pattern itself: patterns are shared through the boxed
+ * rule, so the cache hits for every application of the same rule.
+ */
+const _canonicalMatchLosesWildcards = new WeakMap<Expression, boolean>();
+
+function canonicalMatchLosesWildcards(match: Expression): boolean {
+  let result = _canonicalMatchLosesWildcards.get(match);
+  if (result === undefined) {
+    const awc = getWildcards(match);
+    const bwc = getWildcards(match.canonical);
+    result = !awc.every((x) => bwc.includes(x));
+    _canonicalMatchLosesWildcards.set(match, result);
+  }
+  return result;
+}
+
 function normalizeReplaceForm(
   options?: Readonly<Partial<ReplaceOptions>>
 ): FormOption | undefined {
@@ -832,13 +856,10 @@ export function applyRule(
     requestedForm !== 'raw' &&
     requestedForm !== 'structural';
 
+  // If the canonical form of the match loses wildcards, this rule cannot match
+  // canonical expressions (they would already be simplified). Skip this rule.
   if ((canonicalRequested || expr.isCanonical) && match) {
-    const awc = getWildcards(match);
-    const canonicalMatch = match.canonical;
-    const bwc = getWildcards(canonicalMatch);
-    // If the canonical form of the match loses wildcards, this rule cannot match
-    // canonical expressions (they would already be simplified). Skip this rule.
-    if (!awc.every((x) => bwc.includes(x))) return null;
+    if (canonicalMatchLosesWildcards(match)) return null;
   }
 
   let operandsMatched = false;
@@ -1029,32 +1050,86 @@ export function replace(
     ).rules;
   }
 
+  // Operator-indexed dispatch (see rule-index.ts): skip rules whose match
+  // pattern can never apply to `expr`'s operator. With `recursive`,
+  // `applyRule` visits operands of any head, so top-level head dispatch is
+  // unsound — bypass the index and keep the linear scan. Small rule sets
+  // (below the index threshold) also use the linear scan.
+  const index = options?.recursive
+    ? undefined
+    : getRuleIndex(ruleSet, options?.useVariations === true);
+
+  // Returns the step if the rule applied AND changed the expression,
+  // `null` otherwise. Exceptions from `applyRule` propagate to the caller.
+  const stepOf = (rule: BoxedRule): RuleStep | null => {
+    const result = applyRule(rule, expr, {}, options);
+    if (
+      result !== null &&
+      result.value !== expr &&
+      (!result.value.isSame(expr) || varyingForm(expr, result.value))
+    )
+      return result;
+    return null;
+  };
+
   let done = false;
   const steps: RuleStep[] = [];
   while (!done && iterationCount < iterationLimit) {
     done = true;
-    for (const rule of ruleSet) {
-      try {
-        const result = applyRule(rule, expr, {}, options);
-        if (
-          result !== null &&
-          result.value !== expr &&
-          (!result.value.isSame(expr) || varyingForm(expr, result.value))
-        ) {
-          // If `once` flag is set, bail on first matching rule
-          if (once) return [result];
+    if (index === undefined) {
+      //
+      // Linear scan over every rule, in declaration order
+      //
+      for (const rule of ruleSet) {
+        try {
+          const result = stepOf(rule);
+          if (result !== null) {
+            // If `once` flag is set, bail on first matching rule
+            if (once) return [result];
 
-          // If we have detected a loop, exit
-          if (steps.some((x) => x.value.isSame(result.value))) return steps;
+            // If we have detected a loop, exit
+            if (steps.some((x) => x.value.isSame(result.value))) return steps;
 
-          steps.push(result);
+            steps.push(result);
 
-          // We have a rule apply, so we'll want to continue iterating
-          done = false;
-          expr = result.value;
+            // We have a rule apply, so we'll want to continue iterating
+            done = false;
+            expr = result.value;
+          }
+        } catch {
+          return steps;
         }
-      } catch {
-        return steps;
+      }
+    } else {
+      //
+      // Indexed scan: only candidate rules for `expr`, in declaration order
+      //
+      let it = candidateRules(index, expr, -1);
+      let next = it.next();
+      while (!next.done) {
+        const { rule, ordinal } = next.value;
+        try {
+          const result = stepOf(rule);
+          if (result !== null) {
+            if (once) return [result];
+
+            if (steps.some((x) => x.value.isSame(result.value))) return steps;
+
+            steps.push(result);
+
+            done = false;
+            expr = result.value;
+
+            // Mid-pass re-seed: the linear scan keeps scanning the
+            // *remaining* rules (ordinal > the firing rule's) against the
+            // NEW expression. Reproduce that exactly: restart candidate
+            // enumeration for the new expression from this rule's ordinal.
+            it = candidateRules(index, expr, ordinal);
+          }
+        } catch {
+          return steps;
+        }
+        next = it.next();
       }
     }
     iterationCount += 1;
@@ -1129,13 +1204,25 @@ export function matchAnyRules(
   options?: Partial<ReplaceOptions>
 ): Expression[] {
   const results: Expression[] = [];
-  for (const rule of rules.rules) {
+
+  const collect = (rule: BoxedRule): void => {
     const r = applyRule(rule, expr, sub, options);
 
     // Verify that the results are unique
     if (r !== null && !results.some((x) => x.isSame(r.value)))
       results.push(r.value);
-  }
+  };
+
+  // Operator-indexed dispatch (see rule-index.ts). `expr` never changes
+  // during the scan, so a single candidate pass preserves the declaration
+  // order (and thus the dedup behavior) of the linear scan. With
+  // `recursive`, head dispatch is unsound — keep the linear scan.
+  const index = options?.recursive
+    ? undefined
+    : getRuleIndex(rules.rules, options?.useVariations === true);
+
+  if (index === undefined) for (const rule of rules.rules) collect(rule);
+  else for (const { rule } of candidateRules(index, expr, -1)) collect(rule);
 
   return results;
 }
