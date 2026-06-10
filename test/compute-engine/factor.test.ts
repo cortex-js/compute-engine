@@ -216,6 +216,79 @@ describe('Polynomial Factoring (general)', () => {
   });
 });
 
+describe('Issue #309: infer variable when none specified', () => {
+  // `Factor(x^2 + 5x + 6)` with no variable argument should still factor
+  // the univariate polynomial by inferring the single unknown, instead of
+  // returning the expanded form unchanged.
+
+  test('factorPolynomial infers variable for a quadratic', () => {
+    const expr = parse('x^2 + 5x + 6');
+    const factored = factorPolynomial(expr);
+    expect(factored.operator).toBe('Multiply');
+    expect(factored.latex).toBe('(x+2)(x+3)');
+  });
+
+  test('Factor() with no variable factors a quadratic (#309)', () => {
+    const expr = parse('x^2 + 5x + 6');
+    const factored = ce.box(['Factor', expr]).evaluate();
+    expect(factored.latex).toBe('(x+2)(x+3)');
+  });
+
+  test('Factor() with no variable does content extraction + quadratic', () => {
+    const expr = parse('2x^2 + 10x + 12');
+    const factored = ce.box(['Factor', expr]).evaluate();
+    expect(factored.latex).toBe('2(x+2)(x+3)');
+  });
+
+  test('linear content is kept in factored form', () => {
+    // The numeric content must not be distributed back over the primitive:
+    // `Factor(6x + 9)` is `3(2x + 3)`, not the expanded `6x + 9`.
+    expect(ce.box(['Factor', parse('6x + 9')]).evaluate().latex).toBe(
+      '3(2x+3)'
+    );
+    expect(ce.box(['Factor', parse('2x + 4')]).evaluate().latex).toBe(
+      '2(x+2)'
+    );
+    expect(ce.box(['Factor', parse('10x - 15')]).evaluate().latex).toBe(
+      '5(2x-3)'
+    );
+  });
+
+  test('Factor() with no variable factors a cubic via rational roots', () => {
+    const expr = parse('x^3 - 6x^2 + 11x - 6');
+    const factored = ce.box(['Factor', expr]).evaluate();
+    expect(factored.operator).toBe('Multiply');
+    for (const val of [0, 1, 2, 3, -1, 5]) {
+      const v = ce.number(val);
+      expect(factored.subs({ x: v }).N().re).toBeCloseTo(
+        expr.subs({ x: v }).N().re
+      );
+    }
+  });
+
+  test('inferred and explicit variable give the same result', () => {
+    const expr = parse('x^2 + 5x + 6');
+    const inferred = factorPolynomial(expr);
+    const explicit = factorPolynomial(expr, 'x');
+    expect(inferred.isSame(explicit)).toBe(true);
+  });
+
+  test('irreducible quadratic is left unchanged', () => {
+    const expr = parse('x^2 + 1');
+    const factored = ce.box(['Factor', expr]).evaluate();
+    expect(factored.latex).toBe('x^2+1');
+  });
+
+  test('multivariate expression is not mis-factored', () => {
+    // Two unknowns: cannot infer a single variable, so the variable-aware
+    // strategies are skipped (the variable-agnostic perfect-square strategy
+    // still applies here).
+    const expr = parse('x^2 + 2xy + y^2');
+    const factored = ce.box(['Factor', expr]).evaluate();
+    expect(factored.operator).toBe('Power');
+  });
+});
+
 describe('Integration with sqrt simplification', () => {
   test('sqrt(x² + 2x + 1) → |x+1|', () => {
     const expr = parse('\\sqrt{x^2 + 2x + 1}');
