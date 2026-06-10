@@ -2176,8 +2176,11 @@ function evaluateGcdLcm(
     let result: BigDecimal | null = null;
     for (const op of ops) {
       if (result === null) {
-        result = asBignum(op);
-        if (result === null || !result.isInteger()) rest.push(op);
+        // Seed the accumulator with the first integer operand; defer the rest.
+        // GCD/LCM are non-negative, so seed with the magnitude.
+        const d = asBignum(op);
+        if (d !== null && d.isInteger()) result = d.abs();
+        else rest.push(op);
       } else {
         const d = asBignum(op);
         if (d && d.isInteger()) result = bigFn(result, d);
@@ -2194,7 +2197,8 @@ function evaluateGcdLcm(
   for (const op of ops) {
     if (result === null) {
       // Seed the accumulator with the first integer operand; defer the rest.
-      if (op.isInteger) result = op.re;
+      // GCD/LCM are non-negative, so seed with the magnitude.
+      if (op.isInteger) result = Math.abs(op.re);
       else rest.push(op);
     } else {
       if (op.isInteger) result = fn(result, op.re);

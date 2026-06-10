@@ -163,7 +163,10 @@ var gcd = function (a, b) {
 
 export function lcm(a: number, b: number): number {
   if (a === 0 || b === 0) return 0;
-  const res = (BigInt(a) * BigInt(b)) / BigInt(gcd(a, b));
+  // The least common multiple is non-negative by convention, regardless of the
+  // signs of the operands.
+  let res = (BigInt(a) * BigInt(b)) / BigInt(gcd(a, b));
+  if (res < 0n) res = -res;
   return Number(res);
 }
 

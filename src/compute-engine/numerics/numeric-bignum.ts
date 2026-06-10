@@ -9,7 +9,8 @@ export function gcd(a: BigNum, b: BigNum): BigNum {
 }
 
 export function lcm(a: BigNum, b: BigNum): BigNum {
-  return a.mul(b).div(gcd(a, b));
+  // The least common multiple is non-negative by convention.
+  return a.mul(b).div(gcd(a, b)).abs();
 }
 
 export function* factorial2(n: BigNum): Generator<BigNum, BigNum> {

@@ -1451,6 +1451,18 @@ describe('GCD/LCM', () => {
     );
   });
 
+  // Regression for G9: LCM is non-negative regardless of operand signs (it was
+  // carrying the sign, e.g. LCM(-2, 3) → -6).
+  it('LCM is non-negative for negative operands (REVIEW.md G9)', () => {
+    expect(ce.expr(['LCM', -2, 3]).evaluate().toString()).toBe('6');
+    expect(ce.expr(['LCM', 2, -3]).evaluate().toString()).toBe('6');
+    expect(ce.expr(['LCM', -2, -3]).evaluate().toString()).toBe('6');
+    expect(ce.expr(['LCM', -2, 3, 4]).evaluate().toString()).toBe('12');
+    // Single negative operand: |n|.
+    expect(ce.expr(['LCM', -7]).evaluate().toString()).toBe('7');
+    expect(ce.expr(['GCD', -8]).evaluate().toString()).toBe('8');
+  });
+
   it('should compute the GCD of some integers and other stuff', () =>
     expect(
       ce.expr(['GCD', 60, 'foo', 12]).evaluate().toString()
