@@ -127,6 +127,22 @@
     digit-leading `2^2`. Such factors now get an explicit multiplication sign;
     unambiguous juxtaposition (e.g. `3\sqrt{2}`) is unchanged. (#302)
 
+- **Type-string dimension parsing and round-trip fixes**:
+  - The documented matrix/list dimension syntaxes now parse: `matrix<?x3>`,
+    `matrix<2x?>`, `matrix<2 x 3>` (spaces), and the parenthesized form the
+    serializer emits, `matrix<integer^(2x3)>` / `list<integer^(2x3)>`.
+    Previously only the bare `2x3` form worked, so `typeToString → parseType`
+    did not round-trip for dimensioned element types.
+  - A single `^N` dimension was silently dropped (`parseType('list<number^2>')`
+    lost the `2`); it is now preserved. **As a result, a fixed-size numeric
+    list or matrix now infers a *dimensioned* type** — e.g. `[1, 2, 3]` is
+    `vector<3>` (was `list<number>`) and a 3×3 of numbers is `matrix<3x3>`.
+    This restores the dimensions that `BoxedTensor` already attaches but the
+    parser was discarding.
+  - A non-integer number literal type (e.g. `value 3.5`) is now a subtype of
+    `real` (and `number`), not just `number`. Previously `value 3.5 <: real`
+    wrongly failed because the literal mapped to `number`, and `number ⊄ real`.
+
 - **Matrix (tensor) linear-algebra fixes** — operations were broken beyond the
   hardcoded 2×2 cases:
   - `Determinant` no longer throws for 4×4 and larger matrices, and now returns

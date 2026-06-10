@@ -667,7 +667,7 @@ describe('CONTINUATION PLACEHOLDER', () => {
       [
         "Map",
         ["List", 1, 1, 2, 2, 3, 4, 7, 8, 9, 10, 11, 12, 14],
-        ["Function", ["Square", "_1"]]
+        ["Function", ["Block", ["Power", "_1", 2]], "_1"]
       ]
     `);
     expect(finite_list.evaluate({ materialization: true }))

@@ -565,12 +565,8 @@ export class Parser {
     let dimensions: DimensionNode[] | undefined;
 
     if (this.match('<')) {
-      // Try dimensions first (including "x" pattern like "2x3")
-      dimensions = this.parseDimensionWithX();
-
-      if (!dimensions) {
-        dimensions = this.parseDimensions();
-      }
+      // Try leading dimensions first (e.g. `list<2x3>`)
+      dimensions = this.parseDimensions();
 
       if (!dimensions) {
         // Parse element type
@@ -578,13 +574,9 @@ export class Parser {
         if (type) {
           elementType = type;
 
-          // Check for dimensions after type
+          // Dimensions after the element type (e.g. `list<integer^2x3>`)
           if (this.match('^')) {
-            dimensions = this.parseDimensionWithX();
-
-            if (!dimensions) {
-              dimensions = this.parseDimensions();
-            }
+            dimensions = this.parseCaretDimensions();
           }
         }
       }
@@ -637,12 +629,8 @@ export class Parser {
     let dimensions: DimensionNode[] | undefined;
 
     if (this.match('<')) {
-      // Try to parse dimensions first (for matrix<2x3>)
-      dimensions = this.parseDimensionWithX();
-
-      if (!dimensions) {
-        dimensions = this.parseDimensions();
-      }
+      // Try to parse leading dimensions first (e.g. `matrix<2x3>`)
+      dimensions = this.parseDimensions();
 
       if (!dimensions) {
         // If no dimensions, try to parse a type
@@ -650,12 +638,9 @@ export class Parser {
         if (type) {
           elementType = type;
 
+          // Dimensions after the element type (e.g. `matrix<integer^(2x3)>`)
           if (this.match('^')) {
-            dimensions = this.parseDimensionWithX();
-
-            if (!dimensions) {
-              dimensions = this.parseDimensions();
-            }
+            dimensions = this.parseCaretDimensions();
           }
         }
       }
@@ -693,19 +678,37 @@ export class Parser {
   }
 
   private parseDimensions(): DimensionNode[] | undefined {
-    const dimensions: DimensionNode[] = [];
-
     const firstDim = this.parseDimension();
     if (!firstDim) return undefined;
 
-    dimensions.push(firstDim);
+    const dimensions: DimensionNode[] = [firstDim];
 
-    while (this.match('x')) {
-      const dim = this.parseDimension();
-      if (!dim) {
-        this.error('Expected dimension after x');
+    // Subsequent dimensions are `x`-separated. The lexer folds `x` into
+    // identifiers, so the separator surfaces in two shapes:
+    //   - fused with the following sizes:  IDENTIFIER `x3`, `x3x4`
+    //   - standalone:                      IDENTIFIER `x`  (e.g. `2x?`, `2 x 3`)
+    for (;;) {
+      const tok = this.current;
+      if (tok.type === 'IDENTIFIER' && /^(x\d+)+$/.test(tok.value)) {
+        this.advance();
+        for (const m of tok.value.match(/x(\d+)/g)!)
+          dimensions.push(
+            this.createNode<DimensionNode>('dimension', {
+              size: parseInt(m.slice(1)),
+            })
+          );
+      } else if (tok.type === 'IDENTIFIER' && tok.value === 'x') {
+        // Standalone separator: a positive integer or `?` must follow.
+        const next = this.lexer.peekToken();
+        if (next.type !== 'NUMBER_LITERAL' && next.type !== '?')
+          this.error(
+            'Expected a positive integer literal or `?` after x. For example: `2x3` or `2x?`'
+          );
+        this.advance(); // consume the `x` separator
+        dimensions.push(this.parseDimension()!);
+      } else {
+        break;
       }
-      dimensions.push(dim);
     }
 
     return dimensions;
@@ -724,49 +727,14 @@ export class Parser {
     return undefined;
   }
 
-  private parseDimensionWithX(): DimensionNode[] | undefined {
-    // Handle patterns like "2x3", "2x3x4", etc. where "x3x4" is tokenized as one identifier
-    if (this.current.type === 'NUMBER_LITERAL') {
-      const dimensions: DimensionNode[] = [];
-      const firstDim = parseInt(this.advance().value);
-      dimensions.push(
-        this.createNode<DimensionNode>('dimension', { size: firstDim })
-      );
-
-      // Check if next token is an identifier with 'x' pattern like "x3", "x3x4", etc.
-      // After advance(), current token type has changed
-      if (
-        (this.current as Token).type === 'IDENTIFIER' &&
-        this.current.value.startsWith('x')
-      ) {
-        const dimString = this.current.value; // don't consume yet
-
-        // Parse all dimensions from the string like "x3", "x3x4", "x3x4x5", etc.
-        const matches = dimString.match(/x(\d+)/g);
-        if (matches && matches.join('') === dimString) {
-          // Only accept if the entire string consists of valid xN patterns
-          this.advance(); // consume the valid "xN" token
-          for (const match of matches) {
-            const dimValue = parseInt(match.substring(1)); // remove 'x' prefix
-            dimensions.push(
-              this.createNode<DimensionNode>('dimension', { size: dimValue })
-            );
-          }
-        } else if (dimString === 'x' || dimString.startsWith('x')) {
-          // Invalid dimension pattern like "x" without number
-          this.error(
-            'Expected a positive integer literal or `?` after x. For example: `2x3` or `2x?`'
-          );
-        }
-      }
-
-      // Only return if we found at least one x dimension
-      if (dimensions.length > 1) {
-        return dimensions;
-      }
-    }
-
-    return undefined;
+  private parseCaretDimensions(): DimensionNode[] | undefined {
+    // Dimensions following `^`. The serializer parenthesizes multi-dimensional
+    // element types, e.g. `matrix<integer^(2x3)>` and `list<integer^(2x3)>`,
+    // so accept an optional surrounding `( … )`.
+    const paren = this.match('(');
+    const dimensions = this.parseDimensions();
+    if (paren) this.expect(')');
+    return dimensions;
   }
 
   private parseTupleType(): TupleTypeNode | undefined {

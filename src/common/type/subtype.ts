@@ -151,7 +151,10 @@ export function isSubtype(
       if (typeof lhs.value === 'number') {
         if (Number.isInteger(lhs.value))
           return isPrimitiveSubtype('integer', rhs as PrimitiveType);
-        return isPrimitiveSubtype('number', rhs as PrimitiveType);
+        // A non-integer number literal (e.g. 3.5) is a real number, not just
+        // `number` — `number ⊄ real`, so the old `'number'` made it fail
+        // `value 3.5 <: real`. Matches the symmetric path below.
+        return isPrimitiveSubtype('real', rhs as PrimitiveType);
       }
       if (typeof lhs.value === 'boolean')
         return isPrimitiveSubtype('boolean', rhs as PrimitiveType);

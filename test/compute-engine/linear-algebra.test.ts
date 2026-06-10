@@ -546,7 +546,7 @@ describe('Determinant', () => {
     const result = ce.expr(['Determinant', v7_n]).evaluate();
     // Type checking rejects vector (not a matrix)
     expect(result.toString()).toMatchInlineSnapshot(
-      `Determinant(Error(ErrorCode("incompatible-type", "matrix", "list<number>")))`
+      `Determinant(Error(ErrorCode("incompatible-type", "matrix", "vector<7>")))`
     );
   });
 
@@ -718,7 +718,7 @@ describe('Inverse', () => {
     const result = ce.expr(['Inverse', v7_n]).evaluate();
     // Type checking rejects vector (not a matrix)
     expect(result.toString()).toMatchInlineSnapshot(
-      `Inverse(Error(ErrorCode("incompatible-type", "matrix", "list<number>")))`
+      `Inverse(Error(ErrorCode("incompatible-type", "matrix", "vector<7>")))`
     );
   });
 
@@ -763,7 +763,7 @@ describe('PseudoInverse', () => {
     const result = ce.expr(['PseudoInverse', v7_n]).evaluate();
     // Type checking rejects vector (not a matrix)
     expect(result.toString()).toMatchInlineSnapshot(
-      `PseudoInverse(Error(ErrorCode("incompatible-type", "matrix", "list<number>")))`
+      `PseudoInverse(Error(ErrorCode("incompatible-type", "matrix", "vector<7>")))`
     );
   });
 

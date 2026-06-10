@@ -1,4 +1,5 @@
 import { parseType } from '../../src/common/type/parse';
+import { typeToString } from '../../src/common/type/serialize';
 
 import { isSubtype } from '../../src/common/type/subtype';
 import { reduceType } from '../../src/common/type/reduce';
@@ -247,6 +248,49 @@ describe('Collection Type Parser', () => {
         "kind": "list",
       }
     `);
+  });
+
+  // REVIEW.md F5–F7: the documented dimension syntaxes (`?`, spaces, and the
+  // parenthesized `^(…)` form the serializer emits) all failed, and a single
+  // `^N` dimension was silently dropped. The dimension parser now handles the
+  // various `x`-separator tokenizations and the `^(…)` form.
+  it('parses dimensions with ? and spaces (F5)', () => {
+    // `?` is the unknown-size marker (stored as -1).
+    expect(parseType('matrix<?x3>')).toMatchObject({ dimensions: [-1, 3] });
+    expect(parseType('matrix<2x?>')).toMatchObject({ dimensions: [2, -1] });
+    expect(parseType('matrix<2 x 3>')).toMatchObject({ dimensions: [2, 3] });
+  });
+
+  it('parses the parenthesized ^(…) dimension form (F5/F6)', () => {
+    expect(parseType('matrix<integer^(2x3)>')).toMatchObject({
+      dimensions: [2, 3],
+      elements: 'integer',
+    });
+  });
+
+  it('does not drop a single ^N dimension (F7)', () => {
+    expect(parseType('list<number^2>')).toMatchObject({
+      dimensions: [2],
+      elements: 'number',
+    });
+    expect(parseType('list<integer^3>')).toMatchObject({
+      dimensions: [3],
+      elements: 'integer',
+    });
+  });
+
+  it('round-trips dimensioned types through typeToString → parseType (F6)', () => {
+    for (const s of [
+      'matrix<2x3>',
+      'matrix<integer^(2x3)>',
+      'matrix<?x3>',
+      'list<number^2>',
+      'list<integer^(2x3)>',
+    ]) {
+      const once = typeToString(parseType(s));
+      const twice = typeToString(parseType(once));
+      expect(twice).toEqual(once);
+    }
   });
 
   it('should parse a set expression', () => {
@@ -619,6 +663,17 @@ describe('isSubtype POSITIVE', () => {
     expect(isSubtype('symbol', 'symbol<True>')).toBe(false);
     expect(isSubtype('symbol<True>', 'expression')).toBe(true);
     expect(isSubtype('symbol<True>', 'expression<Symbol>')).toBe(true);
+  });
+
+  it('should treat a non-integer number literal as real (REVIEW.md F8)', () => {
+    // `value 3.5` is a real number: a subtype of `real` (and `number`), but
+    // not of `integer`. The buggy path mapped it to `number`, which is not a
+    // subtype of `real`, so `value 3.5 <: real` wrongly failed.
+    expect(isSubtype('3.5', 'real')).toBe(true);
+    expect(isSubtype('3.5', 'number')).toBe(true);
+    expect(isSubtype('3.5', 'integer')).toBe(false);
+    expect(isSubtype('3', 'integer')).toBe(true);
+    expect(isSubtype('3', 'real')).toBe(true);
   });
 
   it('should match refined expression types', () => {
