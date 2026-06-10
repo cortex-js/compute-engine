@@ -169,7 +169,7 @@ function mayBeRepeatingDigits(parser: Parser): boolean {
   const peek = parser.peek;
   if (peek === '\\overline') return true;
   if (peek === '\\overset') return true;
-  if (peek === '\\wideparent' || peek === '\\overarc') return true;
+  if (peek === '\\wideparen' || peek === '\\overarc') return true;
   if (peek === '(') return true;
   if (peek === '\\left') return true;
 

@@ -250,11 +250,15 @@ function matchPrefixedSymbol(parser: Parser): string | null {
       parser.nextToken();
     }
 
-    body += parseSymbolBody(parser);
-    if (body === null || !parser.match('<}>')) {
+    // Check the body for `null` *before* concatenating: `body += null` would
+    // coerce to the string "null" (so `\mathrm{\vec}` parsed as the symbol
+    // "null"), and the `body === null` test below could never catch it.
+    const rest = parseSymbolBody(parser);
+    if (rest === null || !parser.match('<}>')) {
       parser.index = start;
       return null;
     }
+    body += rest;
     // Multi-character symbols do not need a prefix
     // if they are upright (that's their default presentation)
     if (prefix === '_upright' && body.length > 1) return body;

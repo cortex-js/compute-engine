@@ -342,6 +342,24 @@
     non-canonical substitution, where prettify renders `Power(2, 2)` as the
     digit-leading `2^2`. Such factors now get an explicit multiplication sign;
     unambiguous juxtaposition (e.g. `3\sqrt{2}`) is unchanged. (#302)
+  - A prefixed symbol with an unparseable body (e.g. `\mathrm{\vec}`) parsed as
+    the literal symbol `"null"` (`body += null` coerced to the string); it now
+    produces an error expression.
+  - The repeating-decimal arc `\wideparen{…}` after a *leading* decimal
+    separator failed (`.\wideparen{3}`) due to a typo (`\wideparent`) in the
+    lookahead; it now parses like `0.\wideparen{3}`.
+  - `dictionaryFromExpression` dropped the first entry of a `Dictionary`
+    expression (it iterated from index 1 over the 0-based operands) and returned
+    an unwrapped shape for the single key-value-pair case.
+  - The `Parser.addSymbol` type-conflict check was inverted: re-declaring a
+    symbol with the *same* type threw, while a *different* type silently
+    overwrote. It now only conflicts on a different type.
+  - A matchfix dictionary-entry validation checked a property on a function
+    reference instead of the entry, so a `symbolTrigger` on a matchfix operator
+    was never flagged.
+  - Removed a dead `deserializeHexFloat` function (a tautological guard made it
+    always return `NaN`; it had no callers) and dead `\csname` parameter-/space
+    handling in the tokenizer.
 
 - **Type-string dimension parsing and round-trip fixes**:
   - The documented matrix/list dimension syntaxes now parse: `matrix<?x3>`,

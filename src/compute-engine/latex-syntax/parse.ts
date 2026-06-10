@@ -224,7 +224,10 @@ export class _Parser implements Parser {
 
   addSymbol(id: string, type: BoxedType | TypeString): void {
     if (typeof type === 'string') type = new BoxedType(type);
-    if (id in this.symbolTable.ids && this.symbolTable.ids[id].is(type.type))
+    // Conflict only when re-declaring with a *different* type. The check was
+    // inverted (`.is()` is type-equality), so re-declaring with the same type
+    // threw while a genuinely different type silently overwrote.
+    if (id in this.symbolTable.ids && !this.symbolTable.ids[id].is(type.type))
       throw new Error(`Symbol ${id} already declared as a different type`);
     this.symbolTable.ids[id] = type;
   }

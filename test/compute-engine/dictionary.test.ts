@@ -1,6 +1,7 @@
 import { Expression } from '../../src/math-json/types.ts';
 import { engine, exprToString } from '../utils';
 import { isDictionary } from '../../src/compute-engine/boxed-expression/utils';
+import { dictionaryFromExpression } from '../../src/math-json/utils';
 
 function evaluate(expr: Expression) {
   return exprToString(
@@ -454,5 +455,23 @@ describe('Dictionary', () => {
         ])
       ).toThrow();
     });
+  });
+});
+
+// REVIEW.md C8: dictionaryFromExpression looped from index 1 over the 0-based,
+// head-stripped operands (dropping the first entry) and returned an unwrapped
+// shape for the KeyValuePair branch.
+describe('dictionaryFromExpression (REVIEW.md C8)', () => {
+  it('keeps the first entry of a Dictionary expression', () => {
+    const d = dictionaryFromExpression([
+      'Dictionary',
+      ['Tuple', { str: 'a' }, 1],
+      ['Tuple', { str: 'b' }, 2],
+    ] as any);
+    expect(d).toEqual({ dict: { a: 1, b: 2 } });
+  });
+  it('wraps the KeyValuePair branch in a { dict } object', () => {
+    const d = dictionaryFromExpression(['Tuple', { str: 'k' }, 9] as any);
+    expect(d).toEqual({ dict: { k: 9 } });
   });
 });

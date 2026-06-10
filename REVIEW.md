@@ -142,6 +142,19 @@ were reproduced at runtime against the live engine, not just inferred from readi
   failures — `ascii-math`, `rule-dispatch-regression`, 3 `@fixme` matrix tests —
   are unchanged; a trial global `eq` fix for B19's Boole broke the user's
   `assume-extended.test.ts` and was reverted.)
+- C5–C11 (rest of the LaTeX-syntax cluster: parse/serialize/tokenizer) fixed +
+  regression-tested. C5 `\mathrm{\vec}`→error (was the symbol "null"); C6
+  `.\wideparen{3}` repeating-decimal typo (`\wideparent`→`\wideparen`); C7
+  deleted the dead always-NaN `deserializeHexFloat` (no callers); C8
+  `dictionaryFromExpression` keeps the first entry + wraps the KeyValuePair
+  branch; C9 `Parser.addSymbol` type-conflict check un-inverted; C10
+  `isValidEntry` matchfix check (`isPrefixEntry`→`entry`); C11 removed dead
+  `\csname` space-skip/param-expansion (`peek()` is one grapheme). Tests in
+  `latex-syntax/{symbols,numbers,tokenizer}.test.ts` + `dictionary.test.ts`; C9
+  and C10 are inspection-verified (private/internal `_Parser`/`isValidEntry`
+  APIs, not isolably constructible). (`compile-performance` flakes under
+  parallel load — passes in isolation; the C changes don't touch compilation.
+  Baseline failures unchanged: `ascii-math` + 3 `@fixme` matrix.)
 
 ---
 
@@ -229,13 +242,13 @@ findings there are edge cases. The areas with the most serious problems are:
 | ✅ C2 | HIGH | `latex-syntax/serializer.ts:450` | Spelled-out-digit lookup uses `startsWith` instead of whole-prefix equality: symbols are corrupted on serialization. **✓ verified:** `tensor` → `\mathrm{10sor}`, `onesie` → `\mathrm{1sie}`. Fixed: match against the whole prefix (`prefix === x`). Regression test in `latex-syntax/symbols.test.ts`. |
 | ✅ C3 | HIGH | `latex-syntax/parse.ts:1175` | `parseStringGroupContent` crashes (TypeError on `undefined[0]`) on unbalanced brace at end of input instead of producing an Error expression. **✓ verified:** `\begin{ca{ses`. Fixed: loop also stops at end of input (`!this.atEnd`). Regression test in `latex-syntax/errors.test.ts`. |
 | ✅ C4 | HIGH | `dictionary/definitions-core.ts:1972` | `parseTextRun` joins runs with `Array.join()` — default `,` separator. **✓ verified:** `\text{hello {world}}` → `'hello ,world'`. Use `.join('')`. Fixed. Regression test in `latex-syntax/parsing.test.ts`. |
-| C5 | MED | `latex-syntax/parse-symbol.ts:253` | `body += parseSymbolBody(parser)` coerces `null` to the string `"null"`. **✓ verified:** `\mathrm{\vec}` parses as the symbol `"null"`. |
-| C6 | MED | `latex-syntax/parse-number.ts:172` | Typo `'\\wideparent'` (extra `t`) breaks repeating-decimal detection after a leading decimal separator (`.\wideparen{3}` fails; `0.\wideparen{3}` works). **✓ verified.** |
-| C7 | MED | `latex-syntax/serialize-number.ts:552` | `deserializeHexFloat`: tautological guard `value[index] !== '0' || value[index] !== 'x'` means it always returns NaN; the body has further bugs; no callers anywhere. Delete or rewrite with tests. |
-| C8 | MED | `math-json/utils.ts:233` | `dictionaryFromExpression` skips `ops[0]` (loop starts at 1 over a 0-based, head-stripped array) and returns an unwrapped shape for the KeyValuePair branch. **✓ verified:** first dictionary entry silently dropped. |
-| C9 | MED | `latex-syntax/parse.ts:227` | `addSymbol` (public `Parser` API) has an inverted type-conflict check — re-declaring with the *same* type throws; a different type silently overwrites. |
-| C10 | LOW | `dictionary/definitions.ts:959` | `isValidEntry` matchfix check tests `'symbolTrigger' in isPrefixEntry` (a function) instead of `in entry` — always false. |
-| C11 | LOW | `latex-syntax/tokenizer.ts:289-307` | `\csname` parameter expansion and space-skipping are dead code (`lex.peek()` returns one grapheme, can never equal multi-char tokens). |
+| ✅ C5 | MED | `latex-syntax/parse-symbol.ts:253` | `body += parseSymbolBody(parser)` coerces `null` to the string `"null"`. **✓ verified:** `\mathrm{\vec}` parses as the symbol `"null"`. **Fixed (2026-06-10):** check the body for `null` *before* concatenating (`body === null` could never fire once coerced); `\mathrm{\vec}` now returns an error. Test in `latex-syntax/symbols.test.ts` → "Prefixed symbol with invalid body (C5)". |
+| ✅ C6 | MED | `latex-syntax/parse-number.ts:172` | Typo `'\\wideparent'` (extra `t`) breaks repeating-decimal detection after a leading decimal separator (`.\wideparen{3}` fails; `0.\wideparen{3}` works). **✓ verified + fixed (2026-06-10):** corrected to `\wideparen` (matching line 222 + the serializer). `.\wideparen{3}` now parses like `0.\wideparen{3}`. Test in `latex-syntax/numbers.test.ts`. |
+| ✅ C7 | MED | `latex-syntax/serialize-number.ts:552` | `deserializeHexFloat`: tautological guard `value[index] !== '0' || value[index] !== 'x'` means it always returns NaN; the body has further bugs; no callers anywhere. Delete or rewrite with tests. **✓ verified + fixed (2026-06-10):** **deleted** — confirmed no callers (only `serializeHexFloat` is used, by cortex) and not in the public API; the body was thoroughly broken (always-NaN guard, fractional loop incrementing `degree` instead of decrementing). Also clears the matching (b) dead-code item. |
+| ✅ C8 | MED | `math-json/utils.ts:233` | `dictionaryFromExpression` skips `ops[0]` (loop starts at 1 over a 0-based, head-stripped array) and returns an unwrapped shape for the KeyValuePair branch. **✓ verified + fixed (2026-06-10):** iterate from the first operand (`for (const op of operands(expr))`) and wrap the KeyValuePair branch in `{ dict: {…} }` (with value normalization). First entry kept → `{a:1,b:2}`. Test in `dictionary.test.ts` → "dictionaryFromExpression (C8)". |
+| ✅ C9 | MED | `latex-syntax/parse.ts:227` | `addSymbol` (public `Parser` API) has an inverted type-conflict check — re-declaring with the *same* type throws; a different type silently overwrites. **✓ verified + fixed (2026-06-10):** `.is()` is type-equality (mutual subtype), so the guard threw on a same-type re-declaration; changed to `!…is(type.type)` (conflict only on a *different* type). Inspection-verified — `addSymbol` is on the internal `_Parser` (constructing one needs a full indexed dictionary + options), so no isolated unit test; the fix is a one-token logic inversion. |
+| ✅ C10 | LOW | `dictionary/definitions.ts:959` | `isValidEntry` matchfix check tests `'symbolTrigger' in isPrefixEntry` (a function) instead of `in entry` — always false. **✓ verified + fixed (2026-06-10):** `in isPrefixEntry` → `in entry`, so a matchfix operator with a forbidden `symbolTrigger` is flagged. Inspection-verified (`isValidEntry` is private; reached only through dictionary loading). |
+| ✅ C11 | LOW | `latex-syntax/tokenizer.ts:289-307` | `\csname` parameter expansion and space-skipping are dead code (`lex.peek()` returns one grapheme, can never equal multi-char tokens). **✓ verified + fixed (2026-06-10):** confirmed `peek()`/`get()` return a single grapheme, so the `<space>` skip loop and the `/^#[0-9?]$/` parameter branch never executed; removed both (the live `lex.next()` path already skips the inter-token space). Behavior-preserving — `\csname foo\endcsname`→`['\\foo']` etc. unchanged. New test in `latex-syntax/tokenizer.test.ts`. |
 
 ### Numerics / numeric-value / big-decimal
 

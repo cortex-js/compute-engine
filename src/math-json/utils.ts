@@ -224,14 +224,19 @@ export function dictionaryFromExpression(
 
   // Is it a KeyValuePair or Tuple expression?
   const kv = keyValuePair(expr);
-  if (kv) return { [kv[0]]: kv[1] } as unknown as MathJsonDictionaryObject;
+  if (kv)
+    return {
+      dict: { [kv[0]]: expressionToDictionaryValue(kv[1]) ?? 'Nothing' },
+    } as unknown as MathJsonDictionaryObject;
 
   // Is it a Dictionary expression?
   if (operator(expr) === 'Dictionary') {
     const dict = {};
-    const ops = operands(expr);
-    for (let i = 1; i < nops(expr); i++) {
-      const kv = keyValuePair(ops[i]);
+    // `operands()` is already 0-based and head-stripped — iterate from the
+    // first operand (the loop used to start at 1, silently dropping the first
+    // dictionary entry).
+    for (const op of operands(expr)) {
+      const kv = keyValuePair(op);
       if (kv) {
         dict[kv[0]] = expressionToDictionaryValue(kv[1]) ?? 'Nothing';
       }

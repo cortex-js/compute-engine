@@ -956,7 +956,7 @@ function isValidEntry(
   // Checks specific to `matchfix`
   //
   if (isMatchfixEntry(entry)) {
-    if ('latexTrigger' in entry || 'symbolTrigger' in isPrefixEntry) {
+    if ('latexTrigger' in entry || 'symbolTrigger' in entry) {
       onError({
         severity: 'warning',
         message: [

@@ -720,3 +720,17 @@ describe('Spelled-out-digit symbol prefix (REVIEW.md C2)', () => {
     expect(ce.box('one').toLatex()).toEqual('1');
   });
 });
+
+// REVIEW.md C5: a `\mathrm{...}` whose body fails to parse coerced the `null`
+// body to the string "null" (`body += null`), so `\mathrm{\vec}` parsed as the
+// symbol "null". It now produces an error expression instead.
+describe('Prefixed symbol with invalid body (REVIEW.md C5)', () => {
+  test('\\mathrm{\\vec} does not parse as the symbol "null"', () => {
+    const json = JSON.stringify(parse('\\mathrm{\\vec}').json);
+    expect(json).not.toContain('"null"');
+    expect(json).toContain('Error');
+  });
+  test('valid \\mathrm body still parses', () => {
+    expect(exprToString(parse('\\mathrm{abc}'))).toBe('abc');
+  });
+});

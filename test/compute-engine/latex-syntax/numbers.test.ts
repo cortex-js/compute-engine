@@ -565,3 +565,15 @@ describe('SERIALIZATION OF NUMBERS', () => {
     );
   });
 });
+
+// REVIEW.md C6: a typo (`\wideparent`) in the repeating-decimal lookahead broke
+// the arc notation after a *leading* decimal separator — `.\wideparen{3}`
+// failed while `0.\wideparen{3}` worked.
+describe('Repeating decimal arc after a leading separator (REVIEW.md C6)', () => {
+  test('.\\wideparen{3} parses like 0.\\wideparen{3}', () => {
+    const withLeadingZero = exprToString(parse('0.\\wideparen{3}'));
+    const withoutLeadingZero = exprToString(parse('.\\wideparen{3}'));
+    expect(withoutLeadingZero).toBe(withLeadingZero);
+    expect(withoutLeadingZero).toContain('(3)');
+  });
+});

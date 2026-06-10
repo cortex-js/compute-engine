@@ -292,29 +292,19 @@ function expand(lex: Tokenizer, args: string[]): Token[] {
       }
     }
   } else if (token === '\\csname') {
-    // Turn the next tokens, until `\endcsname`, into a command
-    while (lex.peek() === '<space>') {
-      lex.next();
-    }
-
+    // Turn the next tokens, until `\endcsname`, into a command.
+    // (`lex.next()` already skips the inter-token space after `\csname`. The
+    // former leading space-skip loop and `#`-parameter expansion here were
+    // dead: `lex.peek()`/`lex.get()` return a single grapheme, which can never
+    // equal a multi-character token such as `<space>` or `#1`.)
     let command = '';
     let done = false;
     let tokens: string[] = [];
     do {
       if (tokens.length === 0) {
         // We're out of tokens to look at, get some more
-        if (/^#[0-9?]$/.test(lex.peek())) {
-          // Expand parameters (but not commands)
-          const param = lex.get().slice(1);
-          tokens = tokenize(
-            args?.[param] ?? args?.['?'] ?? '\\placeholder{}',
-            args
-          );
-          token = tokens[0];
-        } else {
-          token = lex.next();
-          tokens = token ? [token] : [];
-        }
+        token = lex.next();
+        tokens = token ? [token] : [];
       }
       done = tokens.length === 0;
       if (!done && token === '\\endcsname') {
