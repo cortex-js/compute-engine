@@ -63,6 +63,13 @@
     losing digits beyond 2⁵³; they now compute exactly with bigints.
   - `BigDecimal.mod` gave a wrong remainder when the quotient exceeded the
     working precision (e.g. `1e60 mod 3`); the truncated quotient is now exact.
+  - `BigDecimal.exp`/`ln` bridged through an *absolute*-precision fixed-point
+    kernel, so a large-magnitude argument fell off the grid: `exp(-200)` rounded
+    to `0` (true ≈ 1.38e-87), `exp(-80)` kept only ~17 of 50 digits, and `ln` of
+    a tiny value underflowed its input to 0 — returning `-∞` (and previously
+    looping forever in the `fpsqrt(0) = 0` reduction). Both now range-reduce the
+    decimal exponent via `ln(10)` (`exp(x) = exp(r)·10^k`, `ln(x) = ln(m) +
+    e·ln 10`) so the kernel only ever sees an O(1) value.
   - Skewness and kurtosis used incorrect central-moment formulas; a symmetric
     sample now has skewness 0 and `[1,2,3,4,5]` has (non-excess) kurtosis 1.7.
 

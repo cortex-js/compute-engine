@@ -268,6 +268,33 @@ describe('BigDecimal exp', () => {
     expect(diff.lt(new BigDecimal('1e-40'))).toBe(true);
   });
 
+  // REVIEW.md D6: the fixed-point bridge used absolute precision, so a very
+  // negative argument produced a result below the grid and rounded to 0.
+  // Range reduction (factor out the decimal exponent via ln 10) recovers it.
+  test('exp of large-magnitude negative does not underflow to 0 (D6)', () => {
+    // e^-80 ≈ 1.804851387845415e-35
+    const e80 = new BigDecimal('-80').exp();
+    expect(e80.isZero()).toBe(false);
+    expect(e80.toString()).toMatch(/^1\.8048513878454151/);
+
+    // e^-200 ≈ 1.383896526736737e-87
+    const e200 = new BigDecimal('-200').exp();
+    expect(e200.isZero()).toBe(false);
+    expect(e200.toString()).toMatch(/^1\.383896526736737/);
+
+    // Round-trip: exp then ln recovers the argument to full precision.
+    const back = e200.ln();
+    expect(back.sub(new BigDecimal('-200')).abs().lt(new BigDecimal('1e-45'))).toBe(
+      true
+    );
+  });
+
+  test('exp of large-magnitude positive keeps full precision (D6)', () => {
+    // e^200 ≈ 7.225973768125749e86
+    const result = new BigDecimal('200').exp();
+    expect(result.toString()).toMatch(/^7\.225973768125749/);
+  });
+
   test('high precision exp(1)', () => {
     BigDecimal.precision = 200;
     const result = new BigDecimal('1').exp();
@@ -321,6 +348,26 @@ describe('BigDecimal ln', () => {
   test('ln(10) ≈ 2.302585...', () => {
     const result = new BigDecimal('10').ln();
     expect(result.toString()).toMatch(/^2\.302585092994/);
+  });
+
+  // REVIEW.md D6: a very small input underflowed its fixed-point representation
+  // to 0, which returned -Infinity (and previously hung forever in the
+  // sqrt-reduction loop, since `fpsqrt(0) = 0`). Range reduction keeps the
+  // kernel input in [1, 10).
+  test('ln of a tiny value terminates with the correct value (D6)', () => {
+    // ln(1e-100) = -230.2585092994046...
+    const result = new BigDecimal('1e-100').ln();
+    expect(result.isFinite()).toBe(true);
+    expect(result.toString()).toMatch(/^-230\.2585092994045684/);
+
+    // Symmetric large input.
+    expect(new BigDecimal('1e100').ln().toString()).toMatch(
+      /^230\.2585092994045684/
+    );
+
+    // ln(1e-100) = -100 · ln(10).
+    const expected = new BigDecimal('10').ln().mul(-100);
+    expect(result.sub(expected).abs().lt(new BigDecimal('1e-45'))).toBe(true);
   });
 
   test('ln(0) = -Infinity', () => {

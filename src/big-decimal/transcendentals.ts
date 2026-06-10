@@ -147,6 +147,23 @@ function fromFixedPoint(
   return fromRaw(sig, resultExp);
 }
 
+// ---------- Range-reduction constant: ln(10) in fixed-point ----------
+
+// `exp`/`ln` factor the decimal exponent out of their argument using ln(10).
+// Cache its fixed-point value, keyed by the scale (working precision), so the
+// Newton iteration in `fpln` runs at most once per precision change.
+let _ln10Fp: bigint | null = null;
+let _ln10Scale: bigint | null = null;
+function ln10Fixed(scale: bigint): bigint {
+  if (_ln10Scale !== scale) {
+    // ln(10·scale / scale) · scale = ln(10) · scale. 10 is O(1), so this is
+    // well-conditioned and never hits the underflow path it exists to fix.
+    _ln10Fp = fpln(10n * scale, scale);
+    _ln10Scale = scale;
+  }
+  return _ln10Fp!;
+}
+
 // ---------- sqrt ----------
 
 BigDecimal.prototype.sqrt = function (): BigDecimal {
@@ -287,16 +304,35 @@ BigDecimal.prototype.exp = function (): BigDecimal {
   // exp(0) = 1
   if (this.isZero()) return BigDecimal.ONE;
 
-  // Working precision with guard digits
   const targetPrec = BigDecimal.precision;
-  const workingPrec = targetPrec + 15;
 
-  const [fp, scale] = toFixedPoint(this, workingPrec);
+  // Range reduction: exp(x) = exp(r) · 10^k with x = k·ln(10) + r and
+  // r ∈ [0, ln(10)). This keeps the value handed to the fixed-point kernel
+  // O(1), so the *result* never underflows the absolute-precision grid —
+  // exp(-200) ≈ 1.38e-87 is recovered as exp(0.32)·10⁻⁸⁷ instead of rounding
+  // to 0. The reduction is done in exact bigint fixed-point (no cancellation).
+  const absSig = this.significand < 0n ? -this.significand : this.significand;
+  const magnitude = Math.max(0, this.exponent + bigintDigits(absSig));
+  const workingPrec = targetPrec + 20 + magnitude;
 
-  // Compute fixed-point exp
-  const expFp = fpexp(fp, scale);
+  const [xFp, scale] = toFixedPoint(this, workingPrec);
+  const l10 = ln10Fixed(scale);
 
-  return fromFixedPoint(expFp, scale, targetPrec);
+  // k = floor(x / ln(10)); r = x − k·ln(10) ∈ [0, ln(10)).
+  let k = xFp / l10;
+  let rFp = xFp - k * l10;
+  if (rFp < 0n) {
+    k -= 1n;
+    rFp += l10;
+  }
+
+  const expR = fromFixedPoint(fpexp(rFp, scale), scale, targetPrec);
+
+  // Multiply by 10^k by shifting the decimal exponent.
+  const newExp = expR.exponent + Number(k);
+  if (!Number.isFinite(newExp))
+    return k > 0n ? BigDecimal.POSITIVE_INFINITY : BigDecimal.ZERO;
+  return fromRaw(expR.significand, newExp);
 };
 
 // ---------- ln ----------
@@ -320,16 +356,27 @@ BigDecimal.prototype.ln = function (): BigDecimal {
   // ln(1) = 0
   if (this.eq(1)) return BigDecimal.ZERO;
 
-  // Working precision with guard digits
   const targetPrec = BigDecimal.precision;
-  const workingPrec = targetPrec + 15;
 
-  const [fp, scale] = toFixedPoint(this, workingPrec);
+  // Range reduction: write x = m · 10^e with m ∈ [1, 10) and
+  // ln(x) = ln(m) + e·ln(10). The fixed-point kernel only ever sees m, an
+  // O(1) value, so a tiny x (e.g. 1e-100) no longer underflows its
+  // fixed-point input to 0 — which used to return −∞ (and previously hung in
+  // the sqrt-reduction loop, `fpsqrt(0) = 0`).
+  const sig = this.significand; // positive and finite here
+  const digits = bigintDigits(sig);
+  const e = this.exponent + digits - 1;
+  const m = fromRaw(sig, -(digits - 1)); // m ∈ [1, 10)
 
-  // Compute fixed-point ln
-  const lnFp = fpln(fp, scale);
+  const eDigits = Math.abs(e).toString().length;
+  const workingPrec = targetPrec + 20 + eDigits;
 
-  return fromFixedPoint(lnFp, scale, targetPrec);
+  const [mFp, scale] = toFixedPoint(m, workingPrec);
+  const l10 = ln10Fixed(scale);
+
+  // ln(x)·scale = ln(m)·scale + e·ln(10)·scale (exact bigint arithmetic).
+  const resultFp = fpln(mFp, scale) + BigInt(e) * l10;
+  return fromFixedPoint(resultFp, scale, targetPrec);
 };
 
 // ---------- log(base) ----------
