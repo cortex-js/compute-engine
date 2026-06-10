@@ -22,11 +22,64 @@ import {
 import type { Expression, SymbolDefinitions } from '../global-types';
 import { bignumPreferred } from '../boxed-expression/utils';
 import { toInteger } from '../boxed-expression/numerics';
-import { isFunction } from '../boxed-expression/type-guards';
 import { deterministicRandom, nextSeed } from '../numerics/random';
 
 // Geometric mean:
 // Harmonic mean:
+
+/**
+ * Shared binning for `Histogram`/`BinCounts`. Returns the bin edges and the
+ * count in each bin, or `undefined` if the input is not a usable finite
+ * numeric collection.
+ *
+ * The final bin is *closed* on both ends (`[edge, lastEdge]`) so the dataset
+ * maximum is counted — every interior bin is half-open `[edge, next)`.
+ * (Previously every bin was half-open, so the max value, which equals the
+ * last edge, was never counted.)
+ */
+function computeBinning(
+  xs: Expression,
+  binsArg: Expression
+): { binEdges: number[]; counts: number[] } | undefined {
+  if (!xs.isFiniteCollection) return undefined;
+
+  const data = (Array.from(xs.each()) as Expression[])
+    .map((x) => x.re)
+    .filter(Number.isFinite);
+  if (data.length === 0) return undefined;
+
+  const min = Math.min(...data);
+  const max = Math.max(...data);
+
+  let binEdges: number[];
+  if (binsArg.isCollection) {
+    binEdges = [...binsArg.each()].map((op) => op.re);
+  } else {
+    const binCount = toInteger(binsArg);
+    if (binCount === null || binCount <= 0) return undefined;
+    const binWidth = (max - min) / binCount;
+    binEdges = Array.from(
+      { length: binCount + 1 },
+      (_, i) => min + i * binWidth
+    );
+  }
+  if (binEdges.length < 2) return undefined;
+
+  const counts = Array(binEdges.length - 1).fill(0);
+  const lastBin = binEdges.length - 2;
+  for (const x of data) {
+    for (let i = 0; i <= lastBin; i++) {
+      const inBin =
+        x >= binEdges[i] &&
+        (x < binEdges[i + 1] || (i === lastBin && x <= binEdges[i + 1]));
+      if (inBin) {
+        counts[i]++;
+        break;
+      }
+    }
+  }
+  return { binEdges, counts };
+}
 
 export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
   {
@@ -261,39 +314,9 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         'Histogram([1, 2, 2, 3], 3)  // Returns [(1,1), (1.6667,2), (2.3333,1)]',
       ],
       evaluate: ([xs, binsArg], { engine: ce }) => {
-        if (!xs.isFiniteCollection) return undefined;
-
-        const data = (Array.from(xs.each()) as Expression[])
-          .map((x) => x.re)
-          .filter(Number.isFinite);
-        if (data.length === 0) return undefined;
-
-        const min = Math.min(...data);
-        const max = Math.max(...data);
-
-        // Determine bins
-        let binEdges: number[];
-        if (isFunction(binsArg, 'List')) {
-          binEdges = binsArg.ops.map((op) => op.re);
-        } else {
-          const binCount = toInteger(binsArg);
-          if (binCount === null || binCount <= 0) return undefined;
-          const binWidth = (max - min) / binCount;
-          binEdges = Array.from(
-            { length: binCount + 1 },
-            (_, i) => min + i * binWidth
-          );
-        }
-
-        const counts = Array(binEdges.length - 1).fill(0);
-        for (const x of data) {
-          for (let i = 0; i < binEdges.length - 1; i++) {
-            if (x >= binEdges[i] && x < binEdges[i + 1]) {
-              counts[i]++;
-              break;
-            }
-          }
-        }
+        const binning = computeBinning(xs, binsArg);
+        if (!binning) return undefined;
+        const { binEdges, counts } = binning;
 
         return ce.function(
           'List',
@@ -310,43 +333,12 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       signature: '(collection, integer | list<number>) -> list<number>',
       examples: ['BinCounts([1, 2, 2, 3], 3)  // Returns [1, 2, 1]'],
       evaluate: ([xs, binsArg], { engine: ce }) => {
-        if (!xs.isFiniteCollection) return undefined;
-
-        const data = (Array.from(xs.each()) as Expression[])
-          .map((x) => x.re)
-          .filter(Number.isFinite);
-        if (data.length === 0) return undefined;
-
-        const min = Math.min(...data);
-        const max = Math.max(...data);
-
-        // Determine bins
-        let binEdges: number[];
-        if (binsArg.isCollection) {
-          binEdges = [...binsArg.each()].map((op) => op.re);
-        } else {
-          const binCount = toInteger(binsArg);
-          if (binCount === null || binCount <= 0) return undefined;
-          const binWidth = (max - min) / binCount;
-          binEdges = Array.from(
-            { length: binCount + 1 },
-            (_, i) => min + i * binWidth
-          );
-        }
-
-        const counts = Array(binEdges.length - 1).fill(0);
-        for (const x of data) {
-          for (let i = 0; i < binEdges.length - 1; i++) {
-            if (x >= binEdges[i] && x < binEdges[i + 1]) {
-              counts[i]++;
-              break;
-            }
-          }
-        }
+        const binning = computeBinning(xs, binsArg);
+        if (!binning) return undefined;
 
         return ce.function(
           'List',
-          counts.map((c) => ce.number(c))
+          binning.counts.map((c) => ce.number(c))
         );
       },
     },

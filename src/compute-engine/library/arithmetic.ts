@@ -440,6 +440,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           if (x.isInteger) return ce.ComplexInfinity;
           return ce.number(gamma(1 + x.re));
         }
+        // A positive *non-integer* real is `Γ(x+1)`, not the rounded-integer
+        // factorial — `Factorial(2.5)` is Γ(3.5) ≈ 3.323, not `2`.
+        if (!x.isInteger) return ce.number(gamma(1 + x.re));
         try {
           return ce.number(
             run(
@@ -472,6 +475,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           if (x.isInteger) return ce.ComplexInfinity;
           return ce.number(gamma(1 + x.re));
         }
+        // A positive non-integer real is `Γ(x+1)`, not the rounded factorial.
+        if (!x.isInteger) return ce.number(gamma(1 + x.re));
 
         try {
           return ce.number(

@@ -209,13 +209,33 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     evaluate: (args, { engine: ce }) => {
       if (args.length === 1) return sym(args[0]) === 'True' ? ce.One : ce.Zero;
 
-      if (args.length === 2) return args[0].isEqual(args[1]) ? ce.One : ce.Zero;
+      // Three-valued equality of two arguments: 1 if equal, 0 if their
+      // difference is a non-zero *constant*, and symbolic if the difference
+      // still contains free variables (undetermined). Using `isEqual` directly
+      // is wrong here: it reports two distinct free symbols as *unequal* even
+      // though `x = y` is undetermined.
+      const kron = (a: Expression, b: Expression): 0 | 1 | undefined => {
+        if (a.isSame(b)) return 1;
+        const diff = a.sub(b).simplify();
+        if (diff.isSame(0)) return 1;
+        if (diff.unknowns.length === 0) return 0; // non-zero constant
+        return undefined; // depends on free variables → stay symbolic
+      };
 
-      // More than two arguments: they should all be equal
-      for (let i = 1; i < args.length; i++) {
-        if (!args[i].isEqual(args[0])) return ce.Zero;
+      if (args.length === 2) {
+        const r = kron(args[0], args[1]);
+        return r === undefined ? undefined : r === 1 ? ce.One : ce.Zero;
       }
-      return ce.One;
+
+      // More than two arguments: they should all be equal. A definite
+      // inequality gives 0; an undetermined comparison keeps it symbolic.
+      let undetermined = false;
+      for (let i = 1; i < args.length; i++) {
+        const r = kron(args[0], args[i]);
+        if (r === 0) return ce.Zero;
+        if (r === undefined) undetermined = true;
+      }
+      return undetermined ? undefined : ce.One;
     },
   },
 
@@ -224,8 +244,14 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     description:
       'Return 1 if the argument is true, 0 otherwise. Also known as the Iverson bracket',
     signature: '(boolean) -> integer',
-    evaluate: (args, { engine: ce }) =>
-      sym(args[0]) === 'True' ? ce.One : ce.Zero,
+    evaluate: (args, { engine: ce }) => {
+      // Only a definite truth value resolves; an undetermined predicate
+      // (e.g. `Equal(x, y)` with free symbols) stays symbolic instead of 0.
+      const s = sym(args[0]);
+      if (s === 'True') return ce.One;
+      if (s === 'False') return ce.Zero;
+      return undefined;
+    },
   },
 };
 

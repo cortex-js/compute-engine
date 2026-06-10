@@ -492,9 +492,9 @@ describe('Logic Simplification Rules', () => {
     });
 
     it('should simplify complex absorption A ∨ B ∨ (A ∧ C) → A ∨ B', () => {
-      expect(simplify(['Or', 'A', 'B', ['And', 'A', 'C']])).toMatchInlineSnapshot(
-        `A || B`
-      );
+      expect(
+        simplify(['Or', 'A', 'B', ['And', 'A', 'C']])
+      ).toMatchInlineSnapshot(`A || B`);
     });
   });
 
@@ -721,11 +721,7 @@ describe('Prime Implicants and Minimal Forms', () => {
     const result = ce
       .expr([
         'MinimalDNF',
-        [
-          'Or',
-          ['And', 'A', 'B', 'C'],
-          ['And', 'A', 'B', ['Not', 'C']],
-        ],
+        ['Or', ['And', 'A', 'B', 'C'], ['And', 'A', 'B', ['Not', 'C']]],
       ])
       .evaluate();
     expect(result.toString()).toMatchInlineSnapshot(`A && B`);
@@ -735,5 +731,31 @@ describe('Prime Implicants and Minimal Forms', () => {
     // A XOR B = (A ∧ ¬B) ∨ (¬A ∧ B) - two prime implicants
     const result = ce.expr(['PrimeImplicants', ['Xor', 'A', 'B']]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(`[!A && B,A && !B]`);
+  });
+});
+
+// REVIEW.md B19: KroneckerDelta/Boole mapped *undetermined* comparisons to 0;
+// they must stay symbolic when equality/truth cannot be decided.
+describe('KroneckerDelta / Boole stay symbolic when undetermined (REVIEW.md B19)', () => {
+  it('KroneckerDelta of free symbols is symbolic', () => {
+    expect(box(['KroneckerDelta', 'x', 'y'])).toMatchInlineSnapshot(
+      `KroneckerDelta(x, y)`
+    );
+    expect(box(['KroneckerDelta', 'x', 'y', 'z'])).toMatchInlineSnapshot(
+      `KroneckerDelta(x, y, z)`
+    );
+  });
+  it('KroneckerDelta still resolves decidable cases', () => {
+    expect(box(['KroneckerDelta', 'x', 'x'])).toBe('1');
+    expect(box(['KroneckerDelta', 'x', ['Add', 'x', 1]])).toBe('0');
+    expect(box(['KroneckerDelta', 2, 2])).toBe('1');
+    expect(box(['KroneckerDelta', 2, 3])).toBe('0');
+  });
+  it('Boole of an undetermined predicate is symbolic', () => {
+    expect(box(['Boole', ['Greater', 'x', 3]])).toMatchInlineSnapshot(
+      `Boole(3 < x)`
+    );
+    expect(box(['Boole', 'True'])).toBe('1');
+    expect(box(['Boole', 'False'])).toBe('0');
   });
 });

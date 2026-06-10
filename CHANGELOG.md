@@ -216,6 +216,38 @@
     and the arbitrary-precision path no longer mishandles a non-integer leading
     operand.
 
+- **More library-function correctness fixes**:
+  - `Congruent(a, b, m)` used a JavaScript remainder (wrong for negatives,
+    `-1 ≢ 6 (mod 7)`) and read its operands as JS numbers, so it bailed under
+    the default (bignum) precision. It now reduces with a floored bigint modulo.
+  - `Histogram`/`BinCounts` never counted the dataset maximum: every bin was
+    half-open, so the last bin excluded its upper edge. The final bin is now
+    closed (`BinCounts([1,2,2,3], 3) → [1,2,1]`).
+  - `Factorial` of a positive non-integer real rounded to an integer factorial
+    (`Factorial(2.5) → 2`); it now returns `Γ(x+1)` (≈ 3.323).
+  - `Reduce` with an explicit initial value overwrote it with the first element
+    on the compiled fast path, and returned unevaluated on a compile failure
+    instead of falling through to the interpreted path.
+  - `Filter` reported an `Infinity` count even for a finite source, so
+    `Sum(Filter([1,2,3], _ > 1))` stayed unevaluated; it now counts the matching
+    elements. `Zip` is now correctly empty/finite when *any* input is
+    empty/finite (the shortest input bounds the result), not only when *every*
+    input is.
+  - `KroneckerDelta` and `Boole` mapped an *undetermined* comparison to `0`;
+    they now stay symbolic when equality/truth cannot be decided
+    (`KroneckerDelta(x, y)`, `Boole(x > 3)`), while still resolving decidable
+    cases.
+  - `Degrees` is now a faithful linear conversion (`d·π/180`) in both the
+    canonical and evaluate paths. The canonical handler used to reduce literal
+    angles mod 360 while evaluate did not, so `Degrees(390)` canonicalized to
+    `π/6` but a symbolic argument resolving to 390 evaluated to `13π/6`. (Range
+    normalization remains available at serialization via `angleNormalization`.)
+  - `IsHappy` threw on negative input (`BigInt('-')`); non-positive integers are
+    now `False`.
+  - `Multinomial` and `BellNumber` used machine floats (rounding error and
+    overflow — `Multinomial(20,20)` was `…820.00003`); both now use exact
+    bigint arithmetic.
+
 - **Combinatorics, number-theory, and equation fixes** — several library
   functions returned wrong results:
   - `Subfactorial(n)` (derangements) returned 0 for every `n ≥ 1`: the float

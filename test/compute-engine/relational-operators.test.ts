@@ -265,3 +265,18 @@ describe('LaTeX round-trip', () => {
     expect(expr.evaluate().json).toBe('True');
   });
 });
+
+// REVIEW.md B14: Congruent used JS `%` (wrong for negatives) and read `.value`
+// as a JS number, so it bailed under the bignum-preferred default precision.
+describe('Congruent modular arithmetic (REVIEW.md B14)', () => {
+  it('evaluates under the default (bignum) precision', () => {
+    expect(ce.box(['Congruent', 8, 1, 7]).evaluate().json).toBe('True');
+    expect(ce.box(['Congruent', 2, 3, 7]).evaluate().json).toBe('False');
+  });
+  it('handles negative operands with a floored modulo', () => {
+    // -1 ≡ 6 (mod 7); -8 ≡ 6 (mod 7)
+    expect(ce.box(['Congruent', -1, 6, 7]).evaluate().json).toBe('True');
+    expect(ce.box(['Congruent', -8, 6, 7]).evaluate().json).toBe('True');
+    expect(ce.box(['Congruent', -1, 13, 7]).evaluate().json).toBe('True');
+  });
+});

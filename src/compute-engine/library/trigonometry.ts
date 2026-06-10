@@ -67,15 +67,17 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         const arg = ops[0];
         if (!isNumber(arg) || !arg.isValid) return ce._fn('Degrees', ops);
 
-        let fArg = arg.re;
+        const fArg = arg.re;
 
         if (Number.isNaN(fArg)) return arg.mul(ce.Pi).div(180);
 
-        // Constrain fArg to [0, 360]
-        fArg = fArg % 360;
-        if (fArg < 0) fArg += 360;
-
-        // Convert fArg to radians
+        // `Degrees(d)` is the faithful linear conversion `d·π/180` — it does
+        // NOT reduce `d` mod 360. (Reducing here made the canonical form
+        // disagree with the `evaluate` handler — `Degrees(390)` canonicalized
+        // to `π/6` but a symbolic arg resolving to 390 evaluated to `13π/6` —
+        // and corrupted faithful values such as `Degrees(-45.5)`. Angle
+        // normalization to a range is a *serialization* concern, controlled by
+        // the `angleNormalization` option.)
         if (Number.isInteger(fArg)) {
           const fRadians = reducedRational([fArg, 180]);
           if (fRadians[0] === 0) return ce.Zero;
@@ -87,6 +89,8 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       },
       evaluate: (ops, options) => {
         if (options.engine.angularUnit === 'deg') return ops[0];
+        // Faithful `d·π/180` conversion, matching the canonical handler (no
+        // mod-360 reduction — see the note there).
         return ops[0].mul(options.engine.Pi.div(180)).evaluate(options);
       },
     },

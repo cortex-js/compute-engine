@@ -36,3 +36,15 @@ describe('IsOctahedral — REVIEW.md B11', () => {
     expect(isOctahedral(o + 1n)).toEqual('False');
   });
 });
+
+// REVIEW.md B21: IsHappy threw on negative input (`BigInt('-')`).
+describe('IsHappy on non-positive input (REVIEW.md B21)', () => {
+  it('returns False for negative/zero instead of throwing', () => {
+    expect(ce.box(['IsHappy', -7]).evaluate().json).toBe('False');
+    expect(ce.box(['IsHappy', 0]).evaluate().json).toBe('False');
+  });
+  it('still identifies positive happy numbers', () => {
+    expect(ce.box(['IsHappy', 7]).evaluate().json).toBe('True');
+    expect(ce.box(['IsHappy', 4]).evaluate().json).toBe('False');
+  });
+});

@@ -203,15 +203,16 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
         if (ks.some((k) => k === null || k < 0)) return undefined;
         const n = ks.reduce((a, b) => a! + (b ?? 0), 0)!;
 
-        let result = 1;
-        for (let i = 1; i <= n; i++) {
-          result *= i;
-        }
-        for (const k of ks) {
-          for (let i = 1; i <= k!; i++) {
-            result /= i;
-          }
-        }
+        // Use exact bigint arithmetic — the float version overflowed past
+        // n ≈ 170 and lost precision (`Multinomial(20,20)` → …820.00003).
+        // n! / (k1! · k2! · …) is always an integer, so the divisions are exact.
+        const factorial = (m: number): bigint => {
+          let r = 1n;
+          for (let i = 2n; i <= BigInt(m); i++) r *= i;
+          return r;
+        };
+        let result = factorial(n);
+        for (const k of ks) result /= factorial(k!);
         return ce.number(result);
       },
     },
@@ -248,15 +249,16 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
         const k = toInteger(n);
         if (k === null || k < 0) return undefined;
 
-        const bell: number[] = [1];
+        // Bell triangle (Aitken's array) in exact bigint — the float
+        // recurrence lost precision past n ≈ 25 (`BellNumber(25)` was
+        // …9000 instead of …9353). B(n) is the first entry of row n.
+        let row: bigint[] = [1n];
         for (let i = 1; i <= k; i++) {
-          let b = 0;
-          for (let j = 0; j < i; j++) {
-            b += binomial(i - 1, j) * bell[j];
-          }
-          bell[i] = b;
+          const next: bigint[] = [row[row.length - 1]];
+          for (let j = 0; j < row.length; j++) next.push(next[j] + row[j]);
+          row = next;
         }
-        return ce.number(bell[k]);
+        return ce.number(row[0]);
       },
     },
   },
@@ -308,13 +310,3 @@ function* powerSetIterator(
   }
 }
 
-function binomial(n: number, k: number): number {
-  if (k < 0 || k > n) return 0;
-  if (k === 0 || k === n) return 1;
-  let result = 1;
-  for (let i = 1; i <= k; i++) {
-    result *= n - (k - i);
-    result /= i;
-  }
-  return result;
-}

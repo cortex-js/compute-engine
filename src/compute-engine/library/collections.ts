@@ -17,7 +17,7 @@ import {
   functionResult,
   widen,
 } from '../../common/type/utils';
-import { interval } from '../numerics/interval';
+import { interval, intervalContains } from '../numerics/interval';
 import { deterministicRandom, nextSeed } from '../numerics/random';
 import { CancellationError, run } from '../../common/interruptible';
 import type {
@@ -32,10 +32,12 @@ import { typeToString } from '../../common/type/serialize';
 import { canonical } from '../boxed-expression/canonical-utils';
 import {
   isFunction,
+  isNumber,
   isString,
   isSymbol,
   sym,
 } from '../boxed-expression/type-guards';
+import { typeMembership } from './sets';
 
 // From NumPy:
 export const DEFAULT_LINSPACE_COUNT = 50;
@@ -112,6 +114,28 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // A set is not indexable
       at: undefined,
       indexWhere: undefined,
+      // Three-valued membership: `true` when an element matches, `false`
+      // only when every element is definitively different from `target`
+      // (concrete values), `undefined` otherwise — e.g. a symbolic target
+      // (`Element(ω, {-1, 1})`) is indeterminate, not refuted.
+      contains: (expr, target) => {
+        if (!isFunction(expr)) return undefined;
+        let indeterminate = false;
+        for (const op of expr.ops) {
+          if (target.isSame(op)) return true;
+          if (isNumber(target) && isNumber(op)) {
+            // Concrete numbers decide definitively
+            const eq = target.isEqual(op);
+            if (eq === true) return true;
+            if (eq !== false) indeterminate = true;
+          } else if (isString(target) && isString(op)) {
+            // Two distinct string literals (isSame was false): refuted
+          } else {
+            indeterminate = true;
+          }
+        }
+        return indeterminate ? undefined : false;
+      },
     },
   } as OperatorDefinition,
 
@@ -242,7 +266,22 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
       contains: (expr, target) => {
         const t = target.re;
+        // Symbolic target (no concrete numeric value): membership is
+        // indeterminate unless the target's type rules it out entirely.
+        // (Refute against `'number'`, not `'finite_real'`: the type
+        // intersection treats incomparable numeric primitives — e.g.
+        // `integer` vs `finite_real` — as disjoint, which would unsoundly
+        // refute symbols of extended numeric type.)
+        if (Number.isNaN(t))
+          return typeMembership(target, 'number') === false
+            ? false
+            : undefined;
+        // A non-real number (imaginary part ≠ 0) is never in a Range
+        if (target.im !== 0) return false;
         if (!isFinite(t)) return false;
+        // Symbolic bounds (e.g. Range(1, n)) cannot be decided structurally
+        if (isFunction(expr) && expr.ops.some((op) => Number.isNaN(op.re)))
+          return undefined;
         const [lower, upper, step] = range(expr);
         if (step === 0) return false;
         // Directional bounds check: t must lie between lower and upper in
@@ -345,13 +384,29 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     signature: '(number, number) -> set<real>',
     canonical: ([lo, hi], { engine }) => {
       if (!lo || !hi) return null;
+      // Endpoints may be wrapped in `Open`/`Closed` markers and may be
+      // infinite: `Interval(Open(-oo), 0)` is the ray (-∞, 0]. Unwrap the
+      // markers so the endpoint values can be type-checked, then restore
+      // the `Open` markers (`Closed` is the default and is normalized away).
+      const unwrap = (
+        op: Expression
+      ): [endpoint: Expression, open: boolean] => {
+        if (isFunction(op, 'Open')) return [op.op1, true];
+        if (isFunction(op, 'Closed')) return [op.op1, false];
+        return [op, false];
+      };
+      const [loVal, loOpen] = unwrap(lo);
+      const [hiVal, hiOpen] = unwrap(hi);
       const [lower, upper] = checkTypes(
         engine,
-        [lo.canonical, hi.canonical],
+        [loVal.canonical, hiVal.canonical],
         ['number', 'number']
       );
       if (!lower.isValid || !upper.isValid) return null;
-      return engine._fn('Interval', [lower, upper]);
+      return engine._fn('Interval', [
+        loOpen ? engine._fn('Open', [lower]) : lower,
+        hiOpen ? engine._fn('Open', [upper]) : upper,
+      ]);
     },
     eq: (a: Expression, b: Expression) => {
       const intervalA = interval(a);
@@ -408,7 +463,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       isEmpty: (_expr) => {
         // An interval is empty if the start is greater or equal to the end
         const int = interval(_expr);
-        if (!int) return false;
+        // Symbolic endpoints: emptiness is indeterminate
+        if (!int) return undefined;
         // Should account for open intervals???
         if (int.openStart && int.start === int.end) return true;
         if (int.openEnd && int.start === int.end) return true;
@@ -416,13 +472,44 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         return int.start >= int.end;
       },
       isFinite: (_expr) => false,
+      // Three-valued membership: `true` only when both bound checks are
+      // entailed, `false` when a bound check (or the type of the target)
+      // refutes membership, `undefined` otherwise (e.g. symbolic target
+      // with unknown bounds). Endpoints may be ±Infinity.
       contains: (expr, target) => {
         const int = interval(expr);
-        if (!int) return false;
+        // Symbolic endpoints: membership is indeterminate
+        if (!int) return undefined;
 
-        if (int.openStart && target.isLessEqual(int.start)) return false;
-        if (int.openEnd && target.isGreaterEqual(int.end)) return false;
-        return target.isGreaterEqual(int.start) && target.isLessEqual(int.end);
+        // An interval only contains (real) numbers: refute non-numbers
+        // (strings, booleans, …) on type alone. Note: `'number'` rather
+        // than `'real'` — the type-intersection reduction treats
+        // incomparable numeric primitives (e.g. `finite_number` vs `real`)
+        // as disjoint, which would unsoundly refute compound expressions
+        // of indeterminate numeric type.
+        if (typeMembership(target, 'number') === false) return false;
+
+        // Concrete numeric target: decide by direct numeric comparison
+        // (the symbolic comparisons below mishandle infinite endpoints,
+        // e.g. `-∞ > -∞`)
+        const t = target.re;
+        if (!Number.isNaN(t)) {
+          if (target.im !== 0) return false;
+          return intervalContains(int, t);
+        }
+
+        const aboveLower = int.openStart
+          ? target.isGreater(int.start)
+          : target.isGreaterEqual(int.start);
+        if (aboveLower === false) return false;
+        const belowUpper = int.openEnd
+          ? target.isLess(int.end)
+          : target.isLessEqual(int.end);
+        if (belowUpper === false) return false;
+        // A target that is provably within both bounds is comparable,
+        // hence real: membership is entailed.
+        if (aboveLower === true && belowUpper === true) return true;
+        return undefined;
       },
 
       eltsgn: (expr) => {
@@ -527,11 +614,20 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         };
       },
       contains: (expr, target) => {
-        if (!target.type.matches('finite_real')) return false;
-        if (!isFunction(expr)) return false;
         const t = target.re;
+        // Symbolic target: indeterminate unless the type refutes membership
+        // (`'number'`, not `'finite_real'` — see the Range.contains note)
+        if (Number.isNaN(t))
+          return typeMembership(target, 'number') === false
+            ? false
+            : undefined;
+        if (target.im !== 0) return false;
+        if (!isFinite(t)) return false;
+        if (!isFunction(expr)) return undefined;
         const lower = expr.op1.re;
         const upper = expr.op2.re;
+        // Symbolic bounds cannot be decided structurally
+        if (Number.isNaN(lower) || Number.isNaN(upper)) return undefined;
         if (t < lower || t > upper) return false;
         let count = expr.op3.re;
         if (!isFinite(count)) count = DEFAULT_LINSPACE_COUNT;
@@ -695,7 +791,17 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     },
     collection: {
       isLazy: (_expr) => true,
-      count: (_expr) => Infinity,
+      count: (expr) => {
+        // The filtered count is unknown without testing the predicate. For a
+        // finite source, count the matching elements (so e.g.
+        // `Sum(Filter([1,2,3], _ > 1))` can evaluate instead of bailing on an
+        // `Infinity` count); an infinite source stays `Infinity`.
+        if (!isFunction(expr)) return undefined;
+        if (!expr.op1.isFiniteCollection) return Infinity;
+        let n = 0;
+        for (const _ of expr.each()) n++;
+        return n;
+      },
       contains: (expr, target) => {
         // True if target is in the collection and the predicate returns True
         // for that target.
@@ -823,6 +929,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
     evaluate: ([collection, fn, initial], { engine: ce }) => {
       if (!collection.isFiniteCollection) return undefined;
+      const hasInitial = initial !== undefined;
       initial ??= ce.Nothing;
 
       if (
@@ -831,22 +938,28 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       ) {
         // If we're dealing with real numbers, we can compile.
         const compiled = ce._compile(fn);
-        if (compiled.calling !== 'lambda' || !compiled.run) return undefined;
-
-        return run(
-          (function* () {
-            let accumulator = initial.re;
-            let first = true;
-            for (const item of collection.each()) {
-              if (first) accumulator = item.re;
-              else accumulator = compiled.run!(accumulator, item.re) as number;
-              first = false;
-              yield;
-            }
-            return ce.expr(accumulator);
-          })(),
-          ce._timeRemaining
-        );
+        // Only take the compiled fast path if the function actually compiled
+        // to a lambda; otherwise fall through to the interpreted path below
+        // (previously this returned `undefined`, leaving Reduce unevaluated).
+        if (compiled.calling === 'lambda' && compiled.run) {
+          return run(
+            (function* () {
+              // With an explicit initial value, fold it in from the start; do
+              // not overwrite it with the first element (that is only the seed
+              // when no initial value was supplied).
+              let accumulator = hasInitial ? initial.re : NaN;
+              let first = true;
+              for (const item of collection.each()) {
+                if (first && !hasInitial) accumulator = item.re;
+                else accumulator = compiled.run!(accumulator, item.re) as number;
+                first = false;
+                yield;
+              }
+              return ce.expr(accumulator);
+            })(),
+            ce._timeRemaining
+          );
+        }
       }
       // We don't have a compiled function, so we need to use the
       // interpreted version.
@@ -1940,11 +2053,30 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       count: zipCount,
       isFinite: (expr) => {
         if (!isFunction(expr)) return undefined;
-        return expr.ops.every((x) => x.isFiniteCollection);
+        if (expr.nops === 0) return true;
+        // Zip has the length of its *shortest* input, so it is finite as soon
+        // as *any* input is finite (was `every`, which wrongly called
+        // `Zip([1,2,3], <infinite>)` infinite).
+        let anyUnknown = false;
+        for (const x of expr.ops) {
+          const f = x.isFiniteCollection;
+          if (f === true) return true;
+          if (f === undefined) anyUnknown = true;
+        }
+        return anyUnknown ? undefined : false;
       },
       isEmpty: (expr) => {
         if (!isFunction(expr)) return undefined;
-        return expr.nops === 0 || expr.ops.every((x) => x.isEmptyCollection);
+        if (expr.nops === 0) return true;
+        // Zip is empty as soon as *any* input is empty (the shortest input
+        // bounds the result), not only when *every* input is empty.
+        let anyUnknown = false;
+        for (const x of expr.ops) {
+          const e = x.isEmptyCollection;
+          if (e === true) return true;
+          if (e === undefined) anyUnknown = true;
+        }
+        return anyUnknown ? undefined : false;
       },
       iterator: (expr) => {
         if (!isFunction(expr))

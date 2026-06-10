@@ -56,3 +56,16 @@ describe('Fibonacci with negative index — REVIEW.md B10', () => {
     expect(evalN(['Fibonacci', 10])).toEqual('55');
   });
 });
+
+// REVIEW.md B22: Multinomial/BellNumber used machine floats (rounding error +
+// overflow); both now use exact bigint arithmetic.
+describe('Exact Multinomial and BellNumber (REVIEW.md B22)', () => {
+  it('Multinomial is exact', () => {
+    expect(evalN(['Multinomial', 20, 20])).toEqual('137846528820');
+    expect(evalN(['Multinomial', 2, 3, 4])).toEqual('1260'); // 9!/(2!3!4!)
+  });
+  it('BellNumber is exact (was lossy past n≈25)', () => {
+    expect(evalN(['BellNumber', 5])).toEqual('52');
+    expect(evalN(['BellNumber', 25])).toEqual('4638590332229999353');
+  });
+});

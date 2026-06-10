@@ -9,6 +9,7 @@ import { isRelationalOperator } from '../latex-syntax/utils';
 import { flatten } from '../boxed-expression/flatten';
 import { eq } from '../boxed-expression/compare';
 import { isNumber, isFunction } from '../boxed-expression/type-guards';
+import { toBigint } from '../boxed-expression/numerics';
 import {
   subjectOf,
   finiteNumericValue,
@@ -120,13 +121,16 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     evaluate: (ops, { engine: ce }) => {
       if (ops.length < 3) return undefined;
       const [lhs, rhs, modulo] = ops;
-      const nLhs = lhs.value;
-      const nRhs = rhs.value;
-      const nModulo = modulo.value;
-      if (typeof nLhs !== 'number') return undefined;
-      if (typeof nRhs !== 'number') return undefined;
-      if (typeof nModulo !== 'number') return undefined;
-      return nLhs % nModulo === nRhs % nModulo ? ce.True : ce.False;
+      // Congruence is integer arithmetic. Use bigint so it works under the
+      // bignum-preferred default precision (where `.value` is not a JS
+      // number), and reduce with a floored modulo so negatives are handled
+      // correctly (JS `%` is a remainder: `-1 % 7 === -1`, not `6`).
+      const a = toBigint(lhs);
+      const b = toBigint(rhs);
+      const m = toBigint(modulo);
+      if (a === null || b === null || m === null || m === 0n) return undefined;
+      const reduce = (x: bigint) => ((x % m) + m) % m;
+      return reduce(a) === reduce(b) ? ce.True : ce.False;
     },
   },
 

@@ -878,3 +878,38 @@ describe('Collection handler regressions (REVIEW.md B3–B8)', () => {
     ).toMatchInlineSnapshot(`["List", 3, 4, 5]`);
   });
 });
+
+// REVIEW.md B15/B17/B18: statistics binning, Reduce initial value, Filter count.
+describe('Binning, Reduce, Filter, Zip (REVIEW.md B15/B17/B18)', () => {
+  it('B15: BinCounts counts the dataset maximum in the (closed) last bin', () => {
+    expect(evaluate(['BinCounts', ['List', 1, 2, 2, 3], 3])).toMatchInlineSnapshot(
+      `["List", 1, 2, 1]`
+    );
+  });
+  it('B17: Reduce honors an explicit initial value', () => {
+    expect(
+      evaluate([
+        'Reduce',
+        ['List', 1, 2, 3],
+        ['Function', ['Add', 'acc', 'x'], 'acc', 'x'],
+        100,
+      ])
+    ).toBe('106');
+  });
+  it('B18: Filter has a finite count over a finite source, so Sum evaluates', () => {
+    expect(
+      evaluate([
+        'Sum',
+        ['Filter', ['List', 1, 2, 3], ['Function', ['Greater', '_', 1], '_']],
+      ])
+    ).toBe('5');
+  });
+  it('B18: Zip is empty as soon as any input is empty', () => {
+    expect(
+      engine.box(['Zip', ['List', 1, 2], ['List']]).isEmptyCollection
+    ).toBe(true);
+    expect(
+      engine.box(['Zip', ['List', 1, 2], ['List', 3, 4]]).isEmptyCollection
+    ).toBe(false);
+  });
+});

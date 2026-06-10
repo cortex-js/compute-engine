@@ -1863,3 +1863,14 @@ describe('Core arithmetic correctness (REVIEW.md A6–A12)', () => {
     );
   });
 });
+
+// REVIEW.md B16: Factorial rounded positive non-integer reals to an integer
+// factorial instead of using Γ(x+1).
+describe('Factorial of non-integer reals (REVIEW.md B16)', () => {
+  it('uses Γ(x+1) for a positive non-integer (not rounding to 2)', () => {
+    expect(ce.box(['Factorial', 2.5]).N().re).toBeCloseTo(3.323350970447843, 6);
+  });
+  it('integer factorials are unchanged', () => {
+    expect(ce.box(['Factorial', 5]).evaluate().json).toBe(120);
+  });
+});

@@ -213,7 +213,9 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       evaluate: ([n], { engine: ce }) => {
         const seen = new Set<bigint>();
         let k = toBigint(n);
-        if (k === null) return ce.False;
+        // Happy numbers are positive integers; a negative `k` would also make
+        // `sumSquareDigits` throw on the "-" sign.
+        if (k === null || k < 1n) return ce.False;
         while (!seen.has(k)) {
           if (k === 1n) return ce.True;
           seen.add(k);

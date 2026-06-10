@@ -1,4 +1,5 @@
 import { engine } from '../utils';
+import { ComputeEngine } from '../../src/compute-engine';
 
 describe('TRIGONOMETRY constructible values', () => {
   for (const h of ['Sin', 'Cos', 'Tan', 'Csc', 'Sec', 'Cot']) {
@@ -124,5 +125,21 @@ describe('Arctan2 quadrant correction (REVIEW.md B1)', () => {
     expect(engine.box(['Arctan2', 'a', 'b']).evaluate().operator).toBe(
       'Arctan2'
     );
+  });
+});
+
+// REVIEW.md B20: the Degrees canonical handler reduced literals mod 360 while
+// the evaluate handler did not, so the same operator denoted different values.
+// Degrees is now a faithful linear conversion (no reduction) in both paths;
+// range normalization is a serialization concern (`angleNormalization`).
+describe('Degrees is a faithful conversion (REVIEW.md B20)', () => {
+  it('literal and symbolic args agree (no mod-360 reduction)', () => {
+    const ce = new ComputeEngine();
+    ce.assign('b20', 390);
+    const symbolic = ce.box(['Degrees', 'b20']).evaluate().N().re;
+    const literal = ce.box(['Degrees', 390]).N().re;
+    const faithful = (390 * Math.PI) / 180; // 13π/6 ≈ 6.807, NOT π/6
+    expect(literal).toBeCloseTo(faithful, 10);
+    expect(symbolic).toBeCloseTo(literal, 10);
   });
 });
