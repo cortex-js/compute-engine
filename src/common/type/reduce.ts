@@ -111,9 +111,13 @@ function reduceUnionType(type: AlgebraicType): Type {
   return decorate(
     reducedTypes
       .reduce<Type[]>((acc, current) => {
-        if (!acc.some((t) => isSubtype(current, t) || isSubtype(t, current)))
-          acc.push(current);
-
+        // A union keeps the *supertype* of any subtype-related pair, e.g.
+        // `integer | number` reduces to `number`. If `current` is already
+        // covered by an existing (super)type, drop it; otherwise drop any
+        // existing types that `current` subsumes, then add `current`.
+        if (acc.some((t) => isSubtype(current, t))) return acc;
+        acc = acc.filter((t) => !isSubtype(t, current));
+        acc.push(current);
         return acc;
       }, [])
       .reduce((acc, cur, idx, arr) =>
@@ -200,7 +204,11 @@ function reduceListType(type: ListType): Type {
 
   let dimensions = type.dimensions;
   if (dimensions) {
-    dimensions = dimensions.filter((dim) => dim >= 1);
+    // `-1` means "any size" — a valid, non-degenerate dimension (e.g. a bare
+    // `matrix` is `list<list<...>^-1>^-1`). Only a literal `0` makes the list
+    // empty; dropping `-1` here turned `matrix` into `nothing`, annihilating
+    // any intersection it appeared in.
+    dimensions = dimensions.filter((dim) => dim >= 1 || dim === -1);
     if (dimensions.length === 0) return 'nothing';
   }
 

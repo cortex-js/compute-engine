@@ -108,6 +108,22 @@ were reproduced at runtime against the live engine, not just inferred from readi
   concurrent assumptions/constraint WIP, not this batch: both still fail with
   the G6 change reverted while the 6 LaTeX suites go green, proving the
   attribution.)
+- F9–F17 (type-system reduction/subtyping + tensor-helper cluster; the rest of
+  the F-cluster) fixed + regression-tested (`common/types.test.ts` →
+  "Type-system correctness (F11–F17)" + the updated F10 union tests;
+  `linear-algebra.test.ts` → "Tensor helpers (F9, F15, F16)"). **Type system:**
+  F10 union keeps the supertype (`integer|number`→`number`); F11 a bare
+  `matrix` no longer reduces to `nothing` (`-1` any-size dims preserved); F12
+  `isValidType` accepts value/symbol/expression/numeric kinds (dropped the
+  bogus `function` kind); F13 `never` is now a true bottom type (subtype of
+  everything incl. itself); F14 `narrow` of disjoint types is `never` (was a
+  widening to `superType`); F17 the parser rejects `integer<10..0>` /
+  `integer<nan..10>` again. **Tensor helpers (latent — engine guards upstream):**
+  F9 `broadcast` throws on incompatible shapes (was `null`-padded garbage); F15
+  `diagonal` honors its axis args via strides (rank-2 unchanged); F16 dtype join
+  `float64`+`complex64`→`complex128`. The 2 `reduceType` union tests encoded the
+  old F10 result and were corrected. (`ascii-math`/`rule-dispatch-regression`
+  remain baseline — unchanged by this type/tensor batch.)
 
 ---
 
@@ -261,15 +277,15 @@ findings there are edge cases. The areas with the most serious problems are:
 | ✅ F6 | HIGH | `common/type/serialize.ts:115,126` | `typeToString → parseType` round-trip broken: the serializer emits `matrix<integer^(2x3)>`, which the parser rejects (see F5). **✓ verified.** Risky because the codebase routinely round-trips types through strings. Fixed via F5 (parser now accepts the serializer's output); round-trip regression test added. |
 | ✅ F7 | HIGH | `common/type/parser.ts:727-770` | `list<number^2>` silently drops the dimension: `parseDimensionWithX` consumes the number token and returns `undefined` without restoring it. **✓ verified:** no error, wrong type. Fixed by removing the buggy `parseDimensionWithX`. **Note:** preserving dimensions corrected engine-wide tensor type inference — a fixed-size numeric list/matrix now infers `vector<N>`/`matrix<NxM>` (was the dimension-dropped `list<number>`); 5 tests that encoded the old types were updated (3 linear-algebra error messages, A3.4, 1 collection function-form). |
 | ✅ F8 | HIGH | `common/type/subtype.ts:151-155` | Non-integer literal value types are not subtypes of `real`: falls back to `isPrimitiveSubtype('number', rhs)` and `number ⊄ real`. **✓ verified:** `value 3.5` is not a subtype of `real`. The symmetric path at 518-521 does it correctly. Fixed: non-integer literal maps to `real`. Regression test in `common/types.test.ts`. |
-| F9 | MED | `tensor/tensors.ts:34-99` | `broadcast()`/`align()` perform no shape check despite the documented contract. **✓ verified:** [2,2] + [3] returns `[11,22,33,null]` with shape [2,2] — silent garbage. Affects all elementwise ops. |
-| F10 | MED | `common/type/reduce.ts:111-122` | Union reduction is order-dependent: keeps the **first** of a subtype-related pair, so `integer \| number` reduces to `integer`. **✓ verified.** Keep the supertype. |
-| F11 | MED | `common/type/reduce.ts:201-204` | `reduceListType` filters out −1 ("any size") dimensions and returns `'nothing'` — a bare `matrix` type annihilates any intersection. **✓ verified.** |
-| F12 | MED | `common/type/primitive.ts:68-88` | `isValidType` is missing kinds `value`, `expression`, `symbol`, `numeric` (and lists a nonexistent `function` kind) — `parseType(TypeObject)` returns `undefined` for those, violating its overload. **✓ verified.** |
-| F13 | MED | `common/type/subtype.ts:124-125` | `never` is not bottom: `isSubtype('never','never')` is false (reflexivity violated) and `never ⊄ list<integer>`. Add an early `if (lhs === 'never') return true`. |
-| F14 | MED | `common/type/subtype.ts:610-628` | `narrow2` falls back to `superType` — a *narrowing* operation returning a **wider** type (`narrow('integer','string')` → `scalar`). Should be `never` for disjoint types. |
-| F15 | MED | `tensor/tensors.ts:322-334` | `diagonal()` validates its axis arguments then ignores them — always computes `data[i*n+i]`, wrong for rank>2 or non-default axes. |
-| F16 | LOW | `tensor/tensor-fields.ts:488-491` | `getSupertype('float64','complex64')` → `complex64` (32-bit components, precision loss); correct join is `complex128`. |
-| F17 | LOW | `common/type/parser.ts:1001-1033` | New parser accepts `integer<10..0>` and `integer<nan..10>` without the old parser's bound validation. |
+| ✅ F9 | MED | `tensor/tensors.ts:34-99` | `broadcast()`/`align()` perform no shape check despite the documented contract. **✓ verified:** [2,2] + [3] returns `[11,22,33,null]` with shape [2,2] — silent garbage. Affects all elementwise ops. **Fixed (2026-06-10):** `broadcast()` now throws on incompatible shapes (it does element-wise, not NumPy broadcasting); `align`'s misleading "reshapes" doc corrected (it harmonizes dtype only). Defensive — the `Add`/`Multiply` handlers already reject mismatched dims upstream (`Error("incompatible-dimensions")`). Test in `linear-algebra.test.ts` → "Tensor helpers (F9, F15, F16)". |
+| ✅ F10 | MED | `common/type/reduce.ts:111-122` | Union reduction is order-dependent: keeps the **first** of a subtype-related pair, so `integer \| number` reduces to `integer`. **✓ verified.** Keep the supertype. **Fixed (2026-06-10):** the union reducer now drops `current` if covered by an existing supertype, else removes any subtypes it subsumes and adds it → `integer \| number` = `number` (both orders). 2 tests in `common/types.test.ts` that encoded the old result updated. |
+| ✅ F11 | MED | `common/type/reduce.ts:201-204` | `reduceListType` filters out −1 ("any size") dimensions and returns `'nothing'` — a bare `matrix` type annihilates any intersection. **✓ verified.** **Fixed (2026-06-10):** the dim filter keeps `-1` (`dim >= 1 \|\| dim === -1`); only a literal `0` makes the list empty. `reduce(matrix)`=`matrix`. Test in `common/types.test.ts` → "Type-system correctness (F11–F17)". |
+| ✅ F12 | MED | `common/type/primitive.ts:68-88` | `isValidType` is missing kinds `value`, `expression`, `symbol`, `numeric` (and lists a nonexistent `function` kind) — `parseType(TypeObject)` returns `undefined` for those, violating its overload. **✓ verified.** **Fixed (2026-06-10):** added the four kinds, removed the bogus `function` kind. |
+| ✅ F13 | MED | `common/type/subtype.ts:124-125` | `never` is not bottom: `isSubtype('never','never')` is false (reflexivity violated) and `never ⊄ list<integer>`. Add an early `if (lhs === 'never') return true`. **✓ verified + fixed (2026-06-10):** added `if (lhs === 'never') return true` before the `rhs === 'never'` check — `never` is now a subtype of every type (the primitive path already handled it; the object-rhs path didn't). |
+| ✅ F14 | MED | `common/type/subtype.ts:610-628` | `narrow2` falls back to `superType` — a *narrowing* operation returning a **wider** type (`narrow('integer','string')` → `scalar`). Should be `never` for disjoint types. **✓ verified + fixed (2026-06-10):** the disjoint fallback now returns `'never'`. Subtype-related pairs still return the narrower type. |
+| ✅ F15 | MED | `tensor/tensors.ts:322-334` | `diagonal()` validates its axis arguments then ignores them — always computes `data[i*n+i]`, wrong for rank>2 or non-default axes. **✓ verified + fixed (2026-06-10):** steps along `strides[ax1]+strides[ax2]` (so axes are honored; rank-2 unchanged), and now validates `axis2` too. Defensive — the `Diagonal` operator rejects rank>2 upstream (`Error("expected-square-matrix")`). |
+| ✅ F16 | LOW | `tensor/tensor-fields.ts:488-491` | `getSupertype('float64','complex64')` → `complex64` (32-bit components, precision loss); correct join is `complex128`. **✓ verified + fixed (2026-06-10):** joining a `float64` with a `complex64` now returns `complex128`; `float32`+`complex64` stays `complex64`. |
+| ✅ F17 | LOW | `common/type/parser.ts:1001-1033` | New parser accepts `integer<10..0>` and `integer<nan..10>` without the old parser's bound validation. **✓ verified + fixed (2026-06-10):** `parseNumericType` now validates the bounds (NaN → error, lower > upper → error), matching the old parser; valid ranges still parse. |
 
 ---
 

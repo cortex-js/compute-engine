@@ -986,6 +986,21 @@ export class Parser {
           const upperBound = this.parseValue();
           this.expect('>');
 
+          // Validate the bounds (the old parser did; the new one silently
+          // accepted `integer<10..0>` and `integer<nan..10>`).
+          const lower = (lowerBound?.value as number) ?? -Infinity;
+          const upper = (upperBound?.value as number) ?? Infinity;
+          if (Number.isNaN(lower) || Number.isNaN(upper))
+            this.error(
+              'Invalid numeric type',
+              'Lower and upper bounds must be valid numbers'
+            );
+          if (lower > upper)
+            this.error(
+              `Invalid range: ${lower}..${upper}`,
+              'The lower bound must be less than the upper bound'
+            );
+
           return this.createNode<NumericTypeNode>('numeric', {
             baseType,
             lowerBound,

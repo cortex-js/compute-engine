@@ -75,12 +75,15 @@ export function isValidType(t: any): t is Readonly<Type> {
     t.kind === 'union' ||
     t.kind === 'intersection' ||
     t.kind === 'negation' ||
+    t.kind === 'value' ||
     t.kind === 'tuple' ||
     t.kind === 'list' ||
     t.kind === 'record' ||
     t.kind === 'dictionary' ||
     t.kind === 'set' ||
-    t.kind === 'function' ||
+    t.kind === 'symbol' ||
+    t.kind === 'expression' ||
+    t.kind === 'numeric' ||
     t.kind === 'collection' ||
     t.kind === 'indexed_collection' ||
     t.kind === 'reference'

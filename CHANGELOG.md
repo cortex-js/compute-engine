@@ -327,6 +327,26 @@
     `real` (and `number`), not just `number`. Previously `value 3.5 <: real`
     wrongly failed because the literal mapped to `number`, and `number ⊄ real`.
 
+- **Type-system reduction, subtyping, and tensor-helper fixes**:
+  - Union reduction now keeps the **supertype** of a subtype-related pair:
+    `integer | number` reduces to `number` (was the order-dependent `integer`).
+  - A bare `matrix` type no longer reduces to `nothing` (its `-1` "any size"
+    dimensions were being dropped), so it no longer annihilates intersections.
+  - `isValidType` accepts the `value`, `symbol`, `expression`, and `numeric`
+    object kinds (and no longer lists a non-existent `function` kind), so
+    `parseType` of those type objects round-trips.
+  - `never` is now correctly the bottom type: `never` is a subtype of every
+    type (including itself and structured types like `list<integer>`).
+  - Narrowing two disjoint types now yields `never` instead of *widening* to a
+    common supertype (`narrow('integer', 'string')` was `scalar`).
+  - The type parser rejects invalid numeric ranges again — `integer<10..0>`
+    (inverted) and `integer<nan..10>` (NaN bound) now error.
+  - Tensor dtype join: combining a 64-bit real (`float64`) with `complex64`
+    now yields `complex128` (was `complex64`, losing 32 bits of precision).
+  - Element-wise tensor broadcasting throws on incompatible shapes instead of
+    producing silent garbage (`null`-padded data), and `diagonal()` respects
+    its axis arguments (it always read the main 2-D diagonal before).
+
 - **Matrix (tensor) linear-algebra fixes** — operations were broken beyond the
   hardcoded 2×2 cases:
   - `Determinant` no longer throws for 4×4 and larger matrices, and now returns

@@ -1,6 +1,8 @@
 import { MathJsonExpression as Expression } from '../../src/math-json/types';
 import { engine as ce } from '../utils';
 import { isTensor } from '../../src/compute-engine/boxed-expression/type-guards';
+import { makeTensor } from '../../src/compute-engine/tensor/tensors';
+import { getSupertype } from '../../src/compute-engine/tensor/tensor-fields';
 
 const v2_n: Expression = ['List', 7, 11];
 
@@ -1793,5 +1795,48 @@ describe('Tensor linear algebra regressions (REVIEW.md F1–F4)', () => {
     expect(diag?.isTriangular).toBe(true);
     expect(full?.isTriangular).toBe(false);
     expect(full?.isDiagonal).toBe(false);
+  });
+});
+
+// Tensor-helper correctness fixes from REVIEW.md (F9, F15, F16). These guard
+// the low-level helpers directly: the engine's Add/Diagonal handlers already
+// reject incompatible shapes / rank > 2 upstream, so the bugs were latent.
+describe('Tensor helpers (REVIEW.md F9, F15, F16)', () => {
+  // F16: the dtype join of a 64-bit real with a 32-bit complex must be
+  // complex128 (64-bit components), not complex64 (precision loss).
+  it('F16: getSupertype(float64, complex64) is complex128', () => {
+    expect(getSupertype('float64', 'complex64')).toBe('complex128');
+    expect(getSupertype('complex64', 'float64')).toBe('complex128');
+    // A 32-bit real stays in complex64.
+    expect(getSupertype('float32', 'complex64')).toBe('complex64');
+  });
+
+  // F9: element-wise broadcast over incompatible shapes produced silent
+  // garbage (`[…, null]`); it now throws.
+  it('F9: broadcasting incompatible shapes throws (was silent garbage)', () => {
+    const m = makeTensor(ce, { dtype: 'float64', shape: [2, 2], data: [1, 2, 3, 4] });
+    const v = makeTensor(ce, { dtype: 'float64', shape: [3], data: [10, 20, 30] });
+    expect(() => (m as any).add(v)).toThrow(/incompatible shapes/);
+    // Equal shapes still work.
+    const m2 = makeTensor(ce, { dtype: 'float64', shape: [2, 2], data: [10, 20, 30, 40] });
+    expect((m as any).add(m2).data).toEqual([11, 22, 33, 44]);
+  });
+
+  // F15: diagonal() ignored its axis arguments (always `data[i*n+i]`); it now
+  // steps along the strides of the two requested axes.
+  it('F15: diagonal respects the requested axes', () => {
+    const m = makeTensor(ce, { dtype: 'float64', shape: [2, 2], data: [1, 2, 3, 4] });
+    expect((m as any).diagonal()).toEqual([1, 4]); // rank-2 unchanged
+
+    const r3 = makeTensor(ce, {
+      dtype: 'float64',
+      shape: [2, 2, 2],
+      data: [1, 2, 3, 4, 5, 6, 7, 8],
+    });
+    // Different axis pairs now give different diagonals (were both [1,4]).
+    expect((r3 as any).diagonal(1, 2)).toEqual([1, 7]);
+    expect((r3 as any).diagonal(2, 3)).toEqual([1, 4]);
+    // Out-of-range / non-square axes return undefined.
+    expect((r3 as any).diagonal(1, 4)).toBeUndefined();
   });
 });

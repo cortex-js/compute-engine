@@ -1,8 +1,9 @@
 import { parseType } from '../../src/common/type/parse';
 import { typeToString } from '../../src/common/type/serialize';
 
-import { isSubtype } from '../../src/common/type/subtype';
+import { isSubtype, narrow } from '../../src/common/type/subtype';
 import { reduceType } from '../../src/common/type/reduce';
+import { isValidType } from '../../src/common/type/primitive';
 import { TypeReference } from '../../src/common/type/types';
 
 describe('Primitive Type Parser', () => {
@@ -939,13 +940,16 @@ describe('reduceType Tests', () => {
     expect(reduce('boolean | boolean')).toMatch('boolean');
   });
 
-  it('should reduce a union type with a subtype', () => {
-    expect(reduce('integer | number')).toMatch('integer');
+  it('should reduce a union type to its supertype (REVIEW.md F10)', () => {
+    // A union keeps the supertype: integer ⊆ number, so the union is number.
+    expect(reduce('integer | number')).toMatch('number');
+    expect(reduce('number | integer')).toMatch('number');
   });
 
   it('should reduce a union type with complex nested structures', () => {
+    // (integer & real) → integer; integer | number → number.
     expect(reduce('(integer & real) | number')).toMatchInlineSnapshot(
-      `"integer"`
+      `"number"`
     );
   });
 
@@ -1344,5 +1348,56 @@ describe('Paren disambiguation (grouped type vs function signature)', () => {
         "result": "string",
       }
     `);
+  });
+});
+
+// Type-system correctness fixes from REVIEW.md (F11–F17).
+describe('Type-system correctness (REVIEW.md F11–F17)', () => {
+  const ts = (t: any) => typeToString(t);
+
+  // F11: reduceListType dropped `-1` ("any size") dimensions and returned
+  // `nothing`, so a bare `matrix` annihilated any intersection.
+  it('F11: a bare `matrix` reduces to `matrix`, not `nothing`', () => {
+    expect(ts(reduceType(parseType('matrix')!))).toBe('matrix');
+    expect(ts(reduceType(parseType('matrix<integer>')!))).toBe(
+      'matrix<integer>'
+    );
+  });
+
+  // F12: isValidType was missing the value/symbol/expression/numeric object
+  // kinds and listed a non-existent `function` kind.
+  it('F12: isValidType accepts value/symbol/expression/numeric kinds', () => {
+    expect(isValidType({ kind: 'value', value: 3 } as any)).toBe(true);
+    expect(isValidType({ kind: 'symbol' } as any)).toBe(true);
+    expect(isValidType({ kind: 'expression' } as any)).toBe(true);
+    expect(isValidType({ kind: 'numeric', baseType: 'integer' } as any)).toBe(
+      true
+    );
+  });
+
+  // F13: `never` is the bottom type — a subtype of every type, including
+  // itself (reflexivity) and structured types.
+  it('F13: `never` is a subtype of every type', () => {
+    expect(isSubtype('never', 'never')).toBe(true);
+    expect(isSubtype('never', 'integer')).toBe(true);
+    expect(isSubtype('never', parseType('list<integer>')!)).toBe(true);
+  });
+
+  // F14: `narrow` of two disjoint types is `never` (it must not *widen* to a
+  // common supertype).
+  it('F14: narrow of disjoint types is `never`', () => {
+    expect(ts(narrow('integer', 'string'))).toBe('never');
+    expect(ts(narrow('integer', 'boolean'))).toBe('never');
+    // A genuine subtype relation is preserved (narrowest of the two).
+    expect(ts(narrow('integer', 'real'))).toBe('integer');
+  });
+
+  // F17: the parser must reject invalid numeric ranges (inverted or NaN
+  // bounds), like the previous parser did.
+  it('F17: invalid numeric ranges are rejected', () => {
+    expect(() => parseType('integer<10..0>')).toThrow();
+    expect(() => parseType('integer<nan..10>')).toThrow();
+    // Valid ranges still parse.
+    expect(ts(parseType('integer<0..10>')!)).toBe('integer<0..10>');
   });
 });

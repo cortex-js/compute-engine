@@ -486,7 +486,12 @@ export function getSupertype(
   if (t1 === 'expression' || t2 === 'expression') return 'expression';
   // if (t1 === 'string' || t2 === 'string') return 'expression';
   if (t1 === 'complex128' || t2 === 'complex128') return 'complex128';
-  if (t1 === 'complex64' || t2 === 'complex64') return 'complex64';
+  if (t1 === 'complex64' || t2 === 'complex64') {
+    // complex64 has 32-bit components; joining with a 64-bit real (float64)
+    // needs 64-bit components to avoid precision loss → complex128.
+    if (t1 === 'float64' || t2 === 'float64') return 'complex128';
+    return 'complex64';
+  }
   if (t1 === 'float64' || t2 === 'float64') return 'float64';
   if (t1 === 'float32' || t2 === 'float32') return 'float32';
   if (t1 === 'int32' || t2 === 'int32') return 'int32';

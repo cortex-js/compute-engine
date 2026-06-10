@@ -35,8 +35,8 @@ export abstract class AbstractTensor<
    * Return a tuple of tensors that have the same dtype.
    * If necessary, one of the two input tensors is upcast.
    *
-   * The shape of the tensors is reshaped to a compatible
-   * shape. If the shape is not compatible, `undefined` is returned.
+   * This harmonizes only the *dtype*; it does not reshape. Element-wise
+   * callers (see `broadcast`) must ensure the shapes are compatible.
    *
    * @param lhs
    * @param rhs
@@ -85,8 +85,23 @@ export abstract class AbstractTensor<
     // If the rhs is a scalar, broadcast it to a tensor
     if (!(rhs instanceof AbstractTensor)) return lhs.map1(fn, rhs);
 
-    // Harmonize the data types and shapes of the two tensors
+    // Harmonize the data types of the two tensors
     const [lhs_, rhs_] = AbstractTensor.align(lhs, rhs);
+
+    // This helper performs an element-wise operation; it requires identical
+    // shapes (it does not implement NumPy-style shape broadcasting). Mismatched
+    // shapes previously produced silent garbage (e.g. `[2,2]` op `[3]` →
+    // `[…, null]` with shape `[2,2]`); fail loudly instead. (Callers such as
+    // the `Add`/`Multiply` handlers already reject incompatible dimensions
+    // upstream, so this is a defensive guard.)
+    if (
+      lhs_.shape.length !== rhs_.shape.length ||
+      lhs_.shape.some((d, i) => d !== rhs_.shape[i])
+    ) {
+      throw new Error(
+        `Cannot broadcast tensors of incompatible shapes [${lhs_.shape}] and [${rhs_.shape}]`
+      );
+    }
 
     // Broadcast the data
     const data = lhs_.data.map((v, i) => fn(v, rhs_.data[i]));
@@ -309,14 +324,26 @@ export abstract class AbstractTensor<
   diagonal(axis1?: number, axis2?: number): undefined | DataTypeMap[DT][] {
     axis1 ??= 1;
     axis2 ??= 2;
+    const rank = this.shape.length;
     if (axis1 === axis2) return undefined;
-    if (axis1 <= 0 || axis1 > this.shape.length) return undefined;
-    if (this.shape[axis1 - 1] !== this.shape[axis2 - 1]) return undefined;
+    if (axis1 <= 0 || axis1 > rank) return undefined;
+    if (axis2 <= 0 || axis2 > rank) return undefined;
 
-    const diag: DataTypeMap[DT][] = new Array(this.shape[axis1 - 1]);
+    const ax1 = axis1 - 1;
+    const ax2 = axis2 - 1;
+    if (this.shape[ax1] !== this.shape[ax2]) return undefined;
+
+    // Step along the diagonal using the strides of the two requested axes
+    // (the previous `data[i*n+i]` hard-coded a 2D, axes-(1,2) layout and gave
+    // wrong values for rank > 2 or non-default axes). For rank > 2 this
+    // returns the diagonal of the (axis1, axis2) plane at the origin of the
+    // other axes.
+    const n = this.shape[ax1];
+    const strides = getStrides(this.shape);
+    const step = strides[ax1] + strides[ax2];
+    const diag: DataTypeMap[DT][] = new Array(n);
     const data = this.data;
-    const n = this.shape[axis1 - 1];
-    for (let i = 0; i < n; i++) diag[i] = data[i * n + i];
+    for (let i = 0; i < n; i++) diag[i] = data[i * step];
     return diag;
   }
 

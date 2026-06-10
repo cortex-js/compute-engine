@@ -121,7 +121,12 @@ export function isSubtype(
   // Every type is a subtype of `any`, the top type
   if (rhs === 'any') return true;
 
-  // `never` is the bottom type, no type is a subtype of `never`
+  // `never` is the bottom type — a subtype of every type (including itself).
+  // This must precede the `rhs === 'never'` check below so `never <: never`
+  // is true (reflexivity).
+  if (lhs === 'never') return true;
+
+  // `never` is the bottom type, no other type is a subtype of `never`
   if (rhs === 'never') return false;
 
   // No type is a subtype of `error`, except itself
@@ -627,7 +632,10 @@ function narrow2(a: Readonly<Type>, b: Readonly<Type>): Readonly<Type> {
   if (isSubtype(a, b)) return a;
   if (isSubtype(b, a)) return b;
 
-  return superType(a, b);
+  // Disjoint types have no common subtype: the narrowest common type is the
+  // bottom type `never`. (Returning `superType` would *widen* — the opposite
+  // of narrowing, e.g. `narrow('integer', 'string')` → `scalar`.)
+  return 'never';
 }
 
 /** Given two types, return the broadest  */
