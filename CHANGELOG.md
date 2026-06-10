@@ -58,6 +58,23 @@
   - Skewness and kurtosis used incorrect central-moment formulas; a symmetric
     sample now has skewness 0 and `[1,2,3,4,5]` has (non-excess) kurtosis 1.7.
 
+- **More arithmetic correctness fixes** — additional operations produced
+  silently-wrong results:
+  - `ln` of a `Root(a, b)` returned the reciprocal `b / ln(a)` instead of
+    `ln(a) / b` (so `ln(\sqrt[3]{x})` now gives `(1/3)·ln(x)`).
+  - Boxing a rational with an infinite numerator (`ce.number([-∞, n])`) returned
+    `+∞` regardless of sign and ignored the denominator's sign; the result sign
+    is now the product of the numerator and denominator signs (`-∞/5 → -∞`,
+    `-∞/-5 → +∞`).
+  - `Arctan2(y, x)` evaluated exactly (without numeric approximation) ignored the
+    quadrant, returning `arctan(y/x)` with no `±π` correction — so
+    `Arctan2(1, -1)` gave `−π/4` instead of `3π/4`, disagreeing with its own
+    numeric evaluation. The principal value is now shifted by `±π` for `x < 0`,
+    and arguments of indeterminate sign are left unevaluated.
+  - `GCD`/`LCM` under machine precision never seeded its accumulator, so it stayed
+    unevaluated (`GCD(4, 6)` returned `gcd(4, 6)`); a leading non-integer operand
+    was also silently dropped. Both are now handled.
+
 - **Matrix (tensor) linear-algebra fixes** — operations were broken beyond the
   hardcoded 2×2 cases:
   - `Determinant` no longer throws for 4×4 and larger matrices, and now returns

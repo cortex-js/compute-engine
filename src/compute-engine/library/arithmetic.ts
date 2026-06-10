@@ -2180,10 +2180,12 @@ function evaluateGcdLcm(
   let result: number | null = null;
   for (const op of ops) {
     if (result === null) {
-      if (op.isInteger) rest.push(op);
+      // Seed the accumulator with the first integer operand; defer the rest.
+      if (op.isInteger) result = op.re;
+      else rest.push(op);
     } else {
-      if (!op.isInteger) rest.push(op);
-      else result = fn(result, op.re);
+      if (op.isInteger) result = fn(result, op.re);
+      else rest.push(op);
     }
   }
   if (rest.length === 0) return result === null ? ce.One : ce.number(result);

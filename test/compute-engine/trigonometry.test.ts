@@ -94,3 +94,35 @@ describe('TRIGONOMETRY other values', () => {
       `1.470628905633336822885798512187058123529908727457923369096448441117505529492241947660079548311554079`
     ));
 });
+
+describe('Arctan2 quadrant correction (REVIEW.md B1)', () => {
+  // Before the fix, the exact (non-numericApproximation) evaluate path
+  // returned Arctan(y/x) with no ±π quadrant correction, so evaluate()
+  // disagreed with .N() for x < 0 — e.g. Arctan2(1, -1) evaluated to −π/4
+  // instead of 3π/4.
+  for (const [y, x] of [
+    [1, 1],
+    [1, -1],
+    [-1, -1],
+    [-1, 1],
+    [0, 1],
+    [0, -1],
+    [1, 0],
+    [-1, 0],
+    [0, 0],
+    [3, -4],
+    [-3, -4],
+  ] as [number, number][]) {
+    test(`Arctan2(${y}, ${x}) matches Math.atan2`, () => {
+      const evaluated = engine.box(['Arctan2', y, x]).evaluate();
+      expect(evaluated.N().re).toBeCloseTo(Math.atan2(y, x), 12);
+    });
+  }
+
+  test('indeterminate-sign arguments stay unevaluated', () => {
+    // Symbols of unknown sign cannot be assigned a quadrant.
+    expect(engine.box(['Arctan2', 'a', 'b']).evaluate().operator).toBe(
+      'Arctan2'
+    );
+  });
+});

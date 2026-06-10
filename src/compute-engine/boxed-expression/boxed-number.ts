@@ -782,12 +782,13 @@ export function canonicalNumber(
     if (!Number.isFinite(value[0])) return NaN;
     return 0;
   }
-  // // ±oo/a
+  // ±oo/a  (the denominator is finite and non-zero here)
   if (typeof value[0] === 'number' && !Number.isFinite(value[0])) {
-    const sign = value[0] > 0 ? +1 : -1;
-    if (value[0] > 0) return sign > 0 ? +Infinity : -Infinity;
-    if (value[0] < 0) return sign > 0 ? -Infinity : +Infinity;
-    return NaN;
+    if (Number.isNaN(value[0])) return NaN;
+    // The sign of the result is the product of the numerator and
+    // denominator signs.
+    const positive = value[0] > 0 === value[1] > 0;
+    return positive ? +Infinity : -Infinity;
   }
 
   return ce._numericValue(value);

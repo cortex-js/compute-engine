@@ -1,4 +1,6 @@
 import { check, checkJson, engine } from '../utils';
+import { ComputeEngine } from '../../src/compute-engine';
+import { BigDecimal } from '../../src/big-decimal';
 
 const ce = engine;
 
@@ -643,6 +645,21 @@ describe('LN', () => {
   test(`Ln 'Pi'`, () => expect(checkJson(['Ln', 'Pi'])).toMatchSnapshot());
   test(`Ln ['Complex', 1.1, 1.1]`, () =>
     expect(checkJson(['Ln', ['Complex', 1.1, 1.1]])).toMatchSnapshot());
+});
+
+describe('Ln of Root (REVIEW.md A2)', () => {
+  // ln_c(root(a, b)) = (1/b)·ln_c(a). The buggy code returned the
+  // reciprocal b / ln_c(a).
+  test('ln(Root(x, 3)) = ln(x)/3 via .ln() API', () =>
+    expect(ce.box(['Root', 'x', 3]).ln().toString()).toEqual('1/3 * ln(x)'));
+
+  test('Ln(Root(x, 3)) = ln(x)/3 via expression evaluation', () =>
+    expect(ce.box(['Ln', ['Root', 'x', 3]]).evaluate().toString()).toEqual(
+      '1/3 * ln(x)'
+    ));
+
+  test('ln(Root(8, 3)) is numerically ln(2)', () =>
+    expect(ce.box(['Root', 8, 3]).ln().N().re).toBeCloseTo(Math.log(2), 12));
 });
 
 describe('LB', () => {
@@ -1489,6 +1506,47 @@ describe('GCD/LCM', () => {
         .evaluate()
         .toString()
     ).toMatchInlineSnapshot(`lcm([60,12,3.1415])`));
+});
+
+describe('GCD/LCM machine-precision path (REVIEW.md B2)', () => {
+  // The machine-number path of evaluateGcdLcm never seeded the accumulator
+  // (the first integer operand was pushed to `rest` instead of starting
+  // `result`), so GCD/LCM stayed unevaluated under machine precision. A
+  // leading non-integer was also silently dropped.
+  //
+  // `precision = 'machine'` mutates the GLOBAL BigDecimal.precision static,
+  // so we snapshot and restore it to avoid polluting other suites.
+  let savedPrecision: number;
+  let ceMachine: ComputeEngine;
+
+  beforeAll(() => {
+    savedPrecision = BigDecimal.precision;
+    ceMachine = new ComputeEngine();
+    ceMachine.precision = 'machine';
+  });
+
+  afterAll(() => {
+    BigDecimal.precision = savedPrecision;
+  });
+
+  it('computes GCD of two integers', () =>
+    expect(ceMachine.box(['GCD', 4, 6]).evaluate().toString()).toEqual('2'));
+
+  it('computes LCM of two integers', () =>
+    expect(ceMachine.box(['LCM', 4, 6]).evaluate().toString()).toEqual('12'));
+
+  it('folds integers and defers non-integers', () =>
+    expect(ceMachine.box(['GCD', 60, 12, 3.1415]).evaluate().toString()).toEqual(
+      'gcd(12, 3.1415)'
+    ));
+
+  it('seeds the accumulator after a leading non-integer', () =>
+    expect(ceMachine.box(['GCD', 3.5, 4, 6]).evaluate().toString()).toEqual(
+      'gcd(2, 3.5)'
+    ));
+
+  it('returns a single integer unchanged', () =>
+    expect(ceMachine.box(['GCD', 42]).evaluate().toString()).toEqual('42'));
 });
 
 describe('FACTOR', () => {

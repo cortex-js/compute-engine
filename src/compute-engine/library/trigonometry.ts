@@ -171,8 +171,31 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         if (x.isFinite === false) return x.isPositive ? ce.Zero : ce.Pi;
         if (y.isFinite === false)
           return y.isPositive ? ce.Pi.div(2) : ce.Pi.div(-2);
-        if (y.isSame(0)) return x.isPositive ? ce.Zero : ce.Pi;
-        return ce.function('Arctan', [y.div(x)]).evaluate();
+        if (y.isSame(0)) {
+          if (x.isPositive) return ce.Zero;
+          if (x.isNegative) return ce.Pi;
+          return undefined;
+        }
+        // x = 0 (and y ≠ 0): the angle is ±π/2
+        if (x.isSame(0)) {
+          if (y.isPositive) return ce.Pi.div(2);
+          if (y.isNegative) return ce.Pi.div(-2);
+          return undefined;
+        }
+
+        // General case: apply the quadrant correction to the principal value.
+        //   atan2(y, x) = atan(y/x)        if x > 0
+        //               = atan(y/x) + π    if x < 0 and y ≥ 0
+        //               = atan(y/x) − π    if x < 0 and y < 0
+        if (x.isPositive)
+          return ce.function('Arctan', [y.div(x)]).evaluate();
+        if (x.isNegative) {
+          const principal = ce.function('Arctan', [y.div(x)]).evaluate();
+          if (y.isNonNegative) return principal.add(ce.Pi);
+          if (y.isNegative) return principal.sub(ce.Pi);
+        }
+        // Sign of x (or of y, when x < 0) is indeterminate: leave unevaluated.
+        return undefined;
       },
     },
 

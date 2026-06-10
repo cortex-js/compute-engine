@@ -479,3 +479,25 @@ describe('OPERATOR PROPERTY RETURNS SPECIFIC NUMERIC TYPE', () => {
     expect(ce.parse('\\sqrt{2}').evaluate().operator).toBe('Real');
   });
 });
+
+describe('Rational with an infinite numerator/denominator (REVIEW.md A4)', () => {
+  // canonicalNumber returned +∞ for a −∞ numerator (the sign logic was
+  // inverted and ignored the denominator sign). The result sign is the
+  // product of the numerator and denominator signs; ±∞/±∞ is NaN.
+  test('-∞ / 5 = -∞', () =>
+    expect(ce.number([-Infinity, 5]).toString()).toEqual('-oo'));
+  test('+∞ / 5 = +∞', () =>
+    expect(ce.number([Infinity, 5]).toString()).toEqual('+oo'));
+  test('-∞ / -5 = +∞', () =>
+    expect(ce.number([-Infinity, -5]).toString()).toEqual('+oo'));
+  test('+∞ / -5 = -∞', () =>
+    expect(ce.number([Infinity, -5]).toString()).toEqual('-oo'));
+  test('5 / ±∞ = 0', () => {
+    expect(ce.number([5, Infinity]).toString()).toEqual('0');
+    expect(ce.number([5, -Infinity]).toString()).toEqual('0');
+  });
+  test('±∞ / ±∞ = NaN', () => {
+    expect(ce.number([Infinity, Infinity]).toString()).toEqual('NaN');
+    expect(ce.number([-Infinity, Infinity]).toString()).toEqual('NaN');
+  });
+});

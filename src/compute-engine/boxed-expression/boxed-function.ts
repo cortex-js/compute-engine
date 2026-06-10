@@ -853,7 +853,7 @@ export class BoxedFunction
     // ln_c(a^(1/b)) = ln_c(root(a, b)) = 1/b ln_c(a)
     if (this.operator === 'Root') {
       const [a, b] = this.ops;
-      return b.div(a.ln(base));
+      return a.ln(base).div(b);
     }
 
     // ln_c(√a) = 1/2 ln_c(a)
