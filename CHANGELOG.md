@@ -93,6 +93,37 @@
     result. `factor()` now leaves sums with complex coefficients unfactored, and
     the division yields `(1+i)/2` (= `0.5 + 0.5i`).
 
+- **More numeric-value correctness fixes**:
+  - **`NumericValue` n-th root lost precision** — `root(n)` computed `pow(1/n)`
+    with a machine-precision reciprocal, so the result had only ~17 correct
+    digits regardless of working precision (`2^(1/7)` at precision 50). It now
+    computes `exp(ln(x)/n)` in full precision.
+  - **`NaN · 0` returned `0`** (BigNumericValue) — the zero branches omitted the
+    NaN check; it is now `NaN`.
+  - **`Infinity.eq(Infinity)` returned `false`** (machine precision) — `eq` used
+    a subtraction (`∞ − ∞ = NaN`) instead of `===`; this disagreed with
+    BigNumericValue.
+  - **`bigint()` of a large integer double returned `null`** — the fast-path
+    guard `a >= MAX && a <= MAX` was only true at exactly `MAX_SAFE_INTEGER`, so
+    every other integer took a string path that rejected scientific notation
+    (`(2.46e100).toString()` is `"2.46e+100"`). `BigInt(a)` is exact for any
+    integer double and is now used directly.
+  - **Exact `inv()` threw on `NaN`/`±Infinity`** — `1/NaN` and `1/∞` ran into an
+    unguarded `BigInt(...)` (RangeError). They now return `NaN` / `0`.
+  - **`gammaln` was inaccurate for small arguments** — bare Stirling asymptotics
+    gave `gammaln(0.5)` off by ~1.6e-2 (inherited by `beta()`). It now shifts
+    the argument upward by the recurrence before applying Stirling.
+  - **Division by zero dropped the sign** (BigNumericValue) — `a/0` always
+    returned `+Infinity`; it is now sign-aware (`−5.5/0 → −Infinity`), matching
+    ExactNumericValue, with complex numerators giving unsigned infinity.
+  - **Complex-exponent `pow` was wrong for non-positive-real bases** — `z^(re +
+    i·im)` used `ln(Re z)` instead of `ln|z|` and dropped the `exp(−im·arg z)`
+    magnitude factor (machine and arbitrary precision). It now evaluates the
+    principal value `exp(w·Ln z)` — e.g. `i^i = e^(−π/2)`, `(1+i)^(1+i)` correct.
+  - **`intervalContains`/`intervalSubset`** (assumption domains) had inverted
+    comparisons (`intervalContains` rejected every interior point) and a
+    non-strict open/open `intervalSubset` bound.
+
 - **Numeric correctness fixes** — several arithmetic operations produced
   silently-wrong results:
   - Complex `pow` (machine precision) used `arg ** n` instead of `arg · n` in

@@ -342,11 +342,22 @@ export class MachineNumericValue extends NumericValue {
         if (this.isNegativeInfinity) return this.clone(0);
         if (this.isPositiveInfinity) return this.clone({ im: Infinity });
 
-        const zRe = this.pow(re).re;
-        const zArg = Math.log(this.decimal) * im;
+        // z^(re + i·im) = exp((re + i·im) · Ln z), Ln z = ln|z| + i·arg(z):
+        //   |z^w| = exp(re·ln|z| − im·arg z),  arg(z^w) = re·arg z + im·ln|z|.
+        // The previous code used ln(Re z) and only the real part of z^re,
+        // dropping both the imaginary part of the base and the magnitude
+        // factor — correct only for positive real z.
+        if (this.isZero) return re > 0 ? this.clone(0) : this.clone(NaN);
+        const a = this.decimal;
+        const b = this.im;
+        const lnMod = 0.5 * Math.log(a * a + b * b);
+        const arg = Math.atan2(b, a);
+        const realExp = re * lnMod - im * arg;
+        const imagExp = re * arg + im * lnMod;
+        const mag = Math.exp(realExp);
         return this.clone({
-          re: chop(zRe * Math.cos(zArg)),
-          im: chop(zRe * Math.sin(zArg)),
+          re: chop(mag * Math.cos(imagExp)),
+          im: chop(mag * Math.sin(imagExp)),
         });
       }
     }
@@ -546,11 +557,14 @@ export class MachineNumericValue extends NumericValue {
 
   eq(other: number | NumericValue): boolean {
     if (this.isNaN) return false;
+    // Compare with `===`, not subtraction: `Infinity - Infinity` is `NaN`, so
+    // a subtraction-based check made `Infinity.eq(Infinity)` false (and
+    // disagreed with BigNumericValue).
     if (typeof other === 'number')
-      return this.im === 0 && this.decimal - other === 0;
+      return this.im === 0 && this.decimal === other;
     if (other.isNaN) return false;
     if (!Number.isFinite(this.im)) return !Number.isFinite(other.im);
-    return this.decimal - other.re === 0 && this.im - other.im === 0;
+    return this.decimal === other.re && this.im === other.im;
   }
 
   lt(other: number | NumericValue): boolean | undefined {

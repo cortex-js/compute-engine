@@ -70,6 +70,16 @@ were reproduced at runtime against the live engine, not just inferred from readi
   extraction), destroying `(1+i)/2`; guarded against complex coefficients. (A5,
   the last open HIGH, stays deferred — it's in `index.ts`, part of the suspended
   Fungrim WIP.)
+- D11–D19 (numeric-value / big-decimal / numerics MED cluster) fixed +
+  regression-tested (`internals/numeric-value.test.ts` → "REVIEW.md D11–D19").
+  D11: `root` used a machine-precision reciprocal → now full-precision
+  `exp(ln x / n)`. D12: `NaN·0`→`NaN`. D13: machine `eq` used subtraction →
+  `Infinity.eq(Infinity)` now true. D14: `bigint` of a large integer double no
+  longer `null`. D15: exact `inv()` of NaN/∞ no longer throws. D16: `gammaln`
+  shifts small z up by recurrence (was off 1.6e-2 at 0.5). D17: `a/0` sign-aware.
+  D18: complex-exponent `pow` now the principal value `exp(w·Ln z)` (was correct
+  only for positive real bases; `i^i`, `(1+i)^(1+i)` now correct). D19: the
+  (dead) `intervalContains`/`intervalSubset` predicates corrected.
 
 ---
 
@@ -179,15 +189,15 @@ findings there are edge cases. The areas with the most serious problems are:
 | ✅ D8 | HIGH | `numerics/numeric.ts:101,114` | `canonicalInteger` radical table has wrong entries: 8 → `[1,8]` (should be `[2,2]`) and 20 → `[1,20]` (should be `[2,5]`). **✓ verified + fixed:** corrected both entries (all others checked). `√8`→`2√2`, `√20`→`2√5`, `isSame(2√2)`→true; `solve(2x²−16=0)`→`±2√2` (inline snapshot updated — real improvement, was un-normalized). Tests in `numeric.test.ts` "NUMERIC radical normalization (D8)". |
 | ✅ D9 | HIGH | `big-decimal/big-decimal.ts:703-711` | `pow` overflow estimate overestimates log10 by up to 1 order of magnitude: `BigDecimal(1).pow(1e16)` → `Infinity` (should be 1). **✓ verified + fixed:** the guard used `bigintDigits` (=`floor(log10)+1`) as log10; now estimates an accurate float log10 from the leading ~15 digits. `1^1e16`→1, `2^1e16`→finite (also fixed — was falsely Infinity); genuine overflows (`10^1e16`, `1e100^1e15`) still return Infinity. Tests in `big-decimal.test.ts`. |
 | ✅ D10 | MED | `machine-numeric-value.ts:376` | Negative exponent path uses only `this.decimal`, dropping the imaginary part. **✓ verified:** `(1+i)^{-2}` → `1` (correct: `−0.5i`). |
-| D11 | MED | `big-numeric-value.ts:456,470` | `root(n)` computed as `pow(1/n)` with a machine-precision reciprocal — only ~17 digits correct at precision 50. **✓ verified** for `root(2,7)`. |
-| D12 | MED | `big-numeric-value.ts:256-263,294-301` | `NaN · 0` returns `0` (zero branches omit the `isNaN` check that ExactNumericValue has). **✓ verified.** |
-| D13 | MED | `machine-numeric-value.ts:543-546` | `eq` uses subtraction, so `Infinity.eq(Infinity)` → false (Inf−Inf = NaN), inconsistent with BigNumericValue. **✓ verified.** |
-| D14 | MED | `numerics/bigint.ts:13` | Fast-path guard reads `a >= MAX_SAFE_INTEGER && a <= MAX_SAFE_INTEGER` — only true at exactly that value. Every safe integer takes the slow path, and `bigint(2.46e100)` (the doc comment's own motivating case) returns `null`. **✓ verified.** |
-| D15 | MED | `exact-numeric-value.ts:354-360` | `inv()` throws RangeError on ±Infinity/NaN (unguarded `BigInt(Infinity)`). **✓ verified.** |
-| D16 | MED | `numerics/special-functions.ts:21-36` | `gammaln` applies bare Stirling asymptotics for all z — `gammaln(0.5)` off by 1.6e-2; inherited by `beta()` for large args. Shift z upward by recurrence first. |
-| D17 | MED | `big-numeric-value.ts:326` | Division by zero always returns +Infinity, losing the sign (ExactNumericValue returns sign-aware infinity). |
-| D18 | MED | `big-numeric-value.ts:389-395`, `machine-numeric-value.ts:344-349` | Complex-exponent pow uses ln of the real part only and drops the `exp(−d·arg z)` magnitude factor — correct only for positive real bases. |
-| D19 | MED | `numerics/interval.ts:97-138` | `intervalContains` comparisons are inverted (rejects every interior point); `intervalSubset` open/open case wrong. Both functions are dead code — fix or delete. **✓ verified.** |
+| ✅ D11 | MED | `big-numeric-value.ts:456,470` | `root(n)` computed as `pow(1/n)` with a machine-precision reciprocal — only ~17 digits correct at precision 50. **✓ verified** for `root(2,7)`. **✓ verified + fixed:** now computes `exp(ln(x)/n)` in full precision — `root(7,3)` matches `cbrt()` to ~49 digits at precision 50. |
+| ✅ D12 | MED | `big-numeric-value.ts:256-263,294-301` | `NaN · 0` returns `0` (zero branches omit the `isNaN` check that ExactNumericValue has). **✓ verified.** **✓ verified + fixed:** both zero branches now check `isNaN` → `NaN·0 = NaN`. |
+| ✅ D13 | MED | `machine-numeric-value.ts:543-546` | `eq` uses subtraction, so `Infinity.eq(Infinity)` → false (Inf−Inf = NaN), inconsistent with BigNumericValue. **✓ verified.** **✓ verified + fixed:** `eq` now compares with `===` (both the number and NumericValue paths) → `Infinity.eq(Infinity) = true`. |
+| ✅ D14 | MED | `numerics/bigint.ts:13` | Fast-path guard reads `a >= MAX_SAFE_INTEGER && a <= MAX_SAFE_INTEGER` — only true at exactly that value. Every safe integer takes the slow path, and `bigint(2.46e100)` (the doc comment's own motivating case) returns `null`. **✓ verified.** **✓ verified + fixed:** integer-valued doubles now use `BigInt(a)` directly (exact for any integer double); `bigint(2.46e100)` returns the exact value, non-integers still `null`. |
+| ✅ D15 | MED | `exact-numeric-value.ts:354-360` | `inv()` throws RangeError on ±Infinity/NaN (unguarded `BigInt(Infinity)`). **✓ verified.** **✓ verified + fixed:** `inv()` guards NaN (→NaN), ±Infinity (→0), zero (→Infinity) before the bigint conversions. |
+| ✅ D16 | MED | `numerics/special-functions.ts:21-36` | `gammaln` applies bare Stirling asymptotics for all z — `gammaln(0.5)` off by 1.6e-2; inherited by `beta()` for large args. Shift z upward by recurrence first. **✓ verified + fixed:** `gammaln` shifts z up by the recurrence `ln Γ(z)=ln Γ(z+n)−Σln(z+k)` until z+n≥10, then applies Stirling. `gammaln(0.5)=ln√π`. |
+| ✅ D17 | MED | `big-numeric-value.ts:326` | Division by zero always returns +Infinity, losing the sign (ExactNumericValue returns sign-aware infinity). **✓ verified + fixed:** `a/0` now sign-aware (`−5.5/0=−Infinity`), complex numerator → unsigned infinity, `0/0`/`NaN/0`→NaN — matching ExactNumericValue. |
+| ✅ D18 | MED | `big-numeric-value.ts:389-395`, `machine-numeric-value.ts:344-349` | Complex-exponent pow uses ln of the real part only and drops the `exp(−d·arg z)` magnitude factor — correct only for positive real bases. **✓ verified + fixed:** both paths now evaluate the principal value `exp(w·Ln z)` with `Ln z = ln|z|+i·arg z`. `i^i=e^(−π/2)`, `(1+i)^(1+i)` correct. |
+| ✅ D19 | MED | `numerics/interval.ts:97-138` | `intervalContains` comparisons are inverted (rejects every interior point); `intervalSubset` open/open case wrong. Both functions are dead code — fix or delete. **✓ verified.** **✓ verified + fixed:** `intervalContains` rewritten (accepts interior + boundary); `intervalSubset` open/open now uses a strict comparison. Dead code retained (corrected) rather than deleted. Tests in `internals/numeric-value.test.ts`. |
 | D20 | LOW | `numerics/statistics.ts:273-281` | `interquartileRange` inconsistent with `quartiles` (`slice(mid+1)` vs `slice(mid)`); duplicated in the bignum version. **✓ verified.** |
 
 ### Compilation / symbolic / interval

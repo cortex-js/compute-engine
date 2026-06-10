@@ -1,5 +1,11 @@
 import { engine as ce } from '../../utils';
 import { ComputeEngine } from '../../../src/compute-engine';
+import { bigint } from '../../../src/compute-engine/numerics/bigint';
+import { gammaln } from '../../../src/compute-engine/numerics/special-functions';
+import {
+  intervalContains,
+  intervalSubset,
+} from '../../../src/compute-engine/numerics/interval';
 
 describe('constructor', () => {
   it('should create from an integer', () => {
@@ -250,5 +256,120 @@ describe('Numeric-value correctness (REVIEW.md D1–D4)', () => {
     expect(ce._numericValue([-7, 2]).ceil().toString()).toEqual('-3');
     expect(ce._numericValue([5, 2]).round().toString()).toEqual('3');
     expect(ce._numericValue([-5, 2]).round().toString()).toEqual('-2');
+  });
+});
+
+describe('Numeric-value correctness (REVIEW.md D11–D19)', () => {
+  // `ce` runs at high precision, so `ce._numericValue(...)` is a BigNumericValue
+  // (or ExactNumericValue for exact values). A machine engine is created lazily.
+  let machine: ComputeEngine;
+  let savedPrecision: number;
+  beforeAll(() => {
+    savedPrecision = ce.precision;
+    machine = new ComputeEngine({ precision: 'machine' });
+  });
+  afterAll(() => {
+    ce.precision = savedPrecision;
+  });
+
+  // D11: root used a machine-precision reciprocal `pow(1 / n)`, so the result
+  // had only ~17 correct digits regardless of working precision.
+  it('D11: nth root is full precision (matches raising back to the power)', () => {
+    const big = new ComputeEngine();
+    big.precision = 50;
+    const r = big._numericValue(7).root(3); // 7^(1/3)
+    // Full-precision result has ~50 digits, not the old ~17.
+    expect(r.toString().replace(/[^0-9]/g, '').length).toBeGreaterThan(40);
+    // Matches the dedicated full-precision cbrt.
+    expect(r.toString()).toEqual(big.bignum(7).cbrt().toString());
+  });
+
+  // D12: NaN·0 returned 0 (the zero branches omitted the isNaN check).
+  it('D12: NaN · 0 = NaN (BigNumericValue)', () => {
+    const nan = ce._numericValue(ce.bignum(NaN));
+    expect(nan.mul(0).isNaN).toBe(true);
+    expect(nan.mul(ce._numericValue(0)).isNaN).toBe(true);
+  });
+
+  // D13: machine `eq` used subtraction (Inf − Inf = NaN).
+  it('D13: Infinity.eq(Infinity) = true (machine)', () => {
+    const inf = machine._numericValue(Infinity);
+    expect(inf.eq(machine._numericValue(Infinity))).toBe(true);
+    expect(inf.eq(Infinity)).toBe(true);
+    expect(inf.eq(machine._numericValue(-Infinity))).toBe(false);
+  });
+
+  // D14: the fast-path guard was only true at exactly MAX_SAFE_INTEGER, so
+  // large integer doubles fell through to a string path that rejected them.
+  it('D14: bigint of a large integer double is exact, not null', () => {
+    expect(bigint(2.46e100)).toBe(BigInt(2.46e100));
+    expect(bigint(5)).toBe(5n);
+    expect(bigint(1e21)).toBe(10n ** 21n);
+    expect(bigint(2.5)).toBe(null); // non-integers still rejected
+  });
+
+  // D15: exact inv() threw RangeError on NaN/±Infinity (unguarded BigInt).
+  it('D15: exact inv() of NaN/Infinity does not throw', () => {
+    const nan = ce._numericValue(0).div(ce._numericValue(0)); // exact NaN
+    expect(nan.isNaN).toBe(true);
+    expect(() => nan.inv()).not.toThrow();
+    expect(nan.inv().isNaN).toBe(true);
+  });
+
+  // D16: gammaln used bare Stirling for all z; gammaln(0.5) was off by ~1.6e-2.
+  it('D16: gammaln(0.5) = ln(√π) accurately', () => {
+    expect(gammaln(0.5)).toBeCloseTo(Math.log(Math.sqrt(Math.PI)), 8);
+    expect(gammaln(1)).toBeCloseTo(0, 8); // Γ(1) = 1
+    expect(gammaln(5)).toBeCloseTo(Math.log(24), 8); // Γ(5) = 24
+  });
+
+  // D17: a/0 (NumericValue zero) always returned +Infinity, dropping the sign.
+  it('D17: division by zero is sign-aware (BigNumericValue)', () => {
+    const big = new ComputeEngine();
+    big.precision = 50;
+    const zero = big._numericValue(big.bignum('0'));
+    expect(big._numericValue(big.bignum('-5.5')).div(zero).toString()).toBe(
+      '-Infinity'
+    );
+    expect(big._numericValue(big.bignum('5.5')).div(zero).toString()).toBe(
+      'Infinity'
+    );
+  });
+
+  // D18: complex-exponent pow used ln(Re z) and dropped the exp(−im·arg z)
+  // magnitude factor — correct only for positive real bases.
+  it('D18: complex-exponent pow (i^i and (1+i)^(1+i))', () => {
+    const ii = machine._numericValue(machine.complex(0, 1)).pow({ re: 0, im: 1 });
+    expect(ii.re).toBeCloseTo(Math.exp(-Math.PI / 2), 12); // 0.20787957635
+    expect(ii.im).toBeCloseTo(0, 12);
+
+    const z = machine._numericValue(machine.complex(1, 1)).pow({ re: 1, im: 1 });
+    expect(z.re).toBeCloseTo(0.2739572538301211, 10);
+    expect(z.im).toBeCloseTo(0.5837007587586147, 10);
+  });
+
+  // D19: intervalContains comparisons were inverted; intervalSubset open/open
+  // used a non-strict comparison.
+  it('D19: intervalContains accepts interior and boundary points', () => {
+    const closed = { start: 0, end: 10, openStart: false, openEnd: false };
+    expect(intervalContains(closed, 5)).toBe(true);
+    expect(intervalContains(closed, 0)).toBe(true);
+    expect(intervalContains(closed, 10)).toBe(true);
+    expect(intervalContains(closed, -1)).toBe(false);
+    expect(intervalContains(closed, 11)).toBe(false);
+    const open = { start: 0, end: 10, openStart: true, openEnd: true };
+    expect(intervalContains(open, 0)).toBe(false);
+    expect(intervalContains(open, 5)).toBe(true);
+  });
+
+  it('D19: intervalSubset handles open/open equal bounds', () => {
+    const a = { start: 2, end: 3, openStart: false, openEnd: false };
+    const b = { start: 0, end: 10, openStart: false, openEnd: false };
+    expect(intervalSubset(a, b)).toBe(true);
+    expect(intervalSubset(b, a)).toBe(false);
+    // Equal open starts: (0,5] ⊆ (0,10] is a subset.
+    const o1 = { start: 0, end: 5, openStart: true, openEnd: false };
+    const o2 = { start: 0, end: 10, openStart: true, openEnd: false };
+    expect(intervalSubset(o1, o2)).toBe(true);
   });
 });

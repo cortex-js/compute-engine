@@ -19,10 +19,21 @@ const lanczos_7_c = [
 // ];
 
 export function gammaln(z: number): number {
+  // Stirling's asymptotic series (below) is only accurate for large z — at
+  // z = 0.5 it is off by ~1.6e-2. For small z, shift upward via the recurrence
+  //   ln Γ(z) = ln Γ(z + n) − Σ_{k=0}^{n-1} ln(z + k)
+  // until the argument is large enough (z + n ≥ 10) for Stirling to be
+  // accurate to full machine precision.
+  if (z < 0) return NaN;
+
+  let shift = 0;
+  while (z < 10) {
+    shift += Math.log(z);
+    z += 1;
+  }
+
   // From WikiPedia:
   // \ln \Gamma (z)=z\ln z-z-{\tfrac {1}{2}}\ln z+{\tfrac {1}{2}}\ln 2\pi +{\frac {1}{12z}}-{\frac {1}{360z^{3}}}+{\frac {1}{1260z^{5}}}+o\left({\frac {1}{z^{5}}}\right)
-
-  if (z < 0) return NaN;
   const pi = Math.PI;
   const z3 = z * z * z;
   return (
@@ -32,7 +43,8 @@ export function gammaln(z: number): number {
     0.5 * Math.log(2 * pi) +
     1 / (12 * z) -
     1 / (360 * z3) +
-    1 / (1260 * z3 * z * z)
+    1 / (1260 * z3 * z * z) -
+    shift
   );
 
   // Spouge approximation (suitable for large arguments)

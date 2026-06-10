@@ -346,6 +346,13 @@ export class ExactNumericValue extends NumericValue {
   }
 
   inv(): NumericValue {
+    // Guard non-finite values before the bigint conversions below — otherwise
+    // `BigInt(NaN)` / `BigInt(Infinity)` throw a RangeError.
+    if (this.isNaN) return this;
+    if (this.isPositiveInfinity || this.isNegativeInfinity)
+      return this.clone(0); // 1/±∞ = 0
+    if (this.isZero) return this.clone(Infinity); // 1/0 = ∞
+
     if (this.isOne) return this;
     if (this.isNegativeOne) return this;
 

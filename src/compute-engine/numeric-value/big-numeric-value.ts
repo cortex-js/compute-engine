@@ -253,6 +253,7 @@ export class BigNumericValue extends NumericValue {
     if (other === -1) return this.neg();
     if (other === 0) {
       if (
+        this.isNaN ||
         this.isPositiveInfinity ||
         this.isNegativeInfinity ||
         this.isComplexInfinity
@@ -291,6 +292,7 @@ export class BigNumericValue extends NumericValue {
     if (other.isNegativeOne) return this.neg();
     if (other.isZero) {
       if (
+        this.isNaN ||
         this.isPositiveInfinity ||
         this.isNegativeInfinity ||
         this.isComplexInfinity
@@ -321,7 +323,14 @@ export class BigNumericValue extends NumericValue {
 
     if (other.isOne) return this;
     if (other.isNegativeOne) return this.neg();
-    if (other.isZero) return this.clone(this.isZero ? NaN : Infinity);
+    if (other.isZero) {
+      // a/0: 0/0 and NaN/0 are NaN; otherwise a signed (or, for a complex
+      // numerator, an unsigned) infinity — the previous code always returned
+      // +Infinity, dropping the sign (ExactNumericValue is sign-aware).
+      if (this.isZero || this.isNaN) return this.clone(NaN);
+      if (this.im !== 0) return this.clone({ im: Infinity });
+      return this.clone(this.decimal.isNegative() ? -Infinity : Infinity);
+    }
 
     if (this.im === 0 && other.im === 0)
       return this.clone(this.decimal.div(other.bignumRe ?? other.re));
@@ -384,13 +393,27 @@ export class BigNumericValue extends NumericValue {
         if (this.isNegativeInfinity) return this.clone(0);
         if (this.isPositiveInfinity) return this.clone({ im: Infinity });
 
-        const zRe = this.pow(re);
-        const zArg = this.decimal.ln().mul(im);
-        const zIm = this.clone({
-          re: zArg.cos(),
-          im: chop(zArg.sin().toNumber()),
+        // z^(re + i·im) = exp((re + i·im) · Ln z), with Ln z = ln|z| + i·arg(z):
+        //   |z^w|     = exp(re·ln|z| − im·arg z)
+        //   arg(z^w)  = re·arg z + im·ln|z|
+        // The previous code used ln(Re z) instead of ln|z| and dropped the
+        // exp(−im·arg z) magnitude factor — correct only for positive real z.
+        if (this.isZero) return re > 0 ? this.clone(0) : this.clone(NaN);
+        const a = this.decimal;
+        const b = this.im;
+        const lnMod = a
+          .mul(a)
+          .add(b * b)
+          .sqrt()
+          .ln();
+        const arg = BigDecimal.atan2(b, a);
+        const realExp = lnMod.mul(re).sub(arg.mul(im));
+        const imagExp = arg.mul(re).add(lnMod.mul(im));
+        const mag = realExp.exp();
+        return this.clone({
+          re: mag.mul(imagExp.cos()),
+          im: chop(mag.mul(imagExp.sin()).toNumber()),
         });
-        return zRe.mul(zIm);
       }
     }
 
@@ -451,7 +474,10 @@ export class BigNumericValue extends NumericValue {
       if (this.decimal.isNegative()) return this._makeExact(NaN);
       if (exp === 2) return this.clone(this.decimal.sqrt());
       if (exp === 3) return this.clone(this.decimal.cbrt());
-      return this.clone(this.decimal.pow(1 / exp));
+      // x^(1/n) as exp(ln(x)/n), computed in full precision. The previous
+      // `pow(1 / exp)` rounded the reciprocal to a machine double first, so the
+      // result had only ~17 correct digits regardless of working precision.
+      return this.clone(this.decimal.ln().div(exp).exp());
     }
 
     // Complex root:
@@ -465,7 +491,9 @@ export class BigNumericValue extends NumericValue {
       .add(b * b)
       .sqrt();
     const argument = BigDecimal.atan2(b, a);
-    const newModulus = modulus.pow(1 / exp);
+    // Full-precision modulus^(1/exp) = exp(ln(modulus)/exp); `pow(1/exp)`
+    // rounded the reciprocal to machine precision first.
+    const newModulus = modulus.ln().div(exp).exp();
     const newArgument = argument.div(exp);
 
     // Return the principal root

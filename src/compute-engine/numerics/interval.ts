@@ -95,44 +95,29 @@ export function interval(expr: Expression): Interval | undefined {
 }
 
 export function intervalContains(int: Interval, val: number): boolean {
-  if (int.openStart) {
-    if (int.start <= val) return false;
-  }
-  if (int.start < val) return false;
-  if (int.openEnd) {
-    if (int.end >= val) return false;
-  }
-  if (int.end > val) return false;
+  // Lower bound: reject values below `start` (or at it, if the start is open).
+  if (int.openStart ? val <= int.start : val < int.start) return false;
+  // Upper bound: reject values above `end` (or at it, if the end is open).
+  if (int.openEnd ? val >= int.end : val > int.end) return false;
   return true;
 }
 
 /** Return true if int1 is a subset of int2 */
 export function intervalSubset(int1: Interval, int2: Interval): boolean {
-  if (int1.openStart) {
-    if (int2.openStart) {
-      if (int1.start <= int2.start) return false;
-    } else {
-      if (int1.start < int2.start) return false;
-    }
+  // Start side: int2's lower bound must be at or below int1's. The only case
+  // needing a strict comparison is when int1 is closed but int2 is open — then
+  // int1.start must be strictly greater (int2 excludes its own start point).
+  // When both are open, equal starts are fine (same excluded point).
+  if (!int1.openStart && int2.openStart) {
+    if (int1.start <= int2.start) return false;
   } else {
-    if (int2.openStart) {
-      if (int1.start <= int2.start) return false;
-    } else {
-      if (int1.start < int2.start) return false;
-    }
+    if (int1.start < int2.start) return false;
   }
-  if (int1.openEnd) {
-    if (int2.openEnd) {
-      if (int1.end >= int2.end) return false;
-    } else {
-      if (int1.end > int2.end) return false;
-    }
+  // End side: symmetric.
+  if (!int1.openEnd && int2.openEnd) {
+    if (int1.end >= int2.end) return false;
   } else {
-    if (int2.openEnd) {
-      if (int1.end >= int2.end) return false;
-    } else {
-      if (int1.end > int2.end) return false;
-    }
+    if (int1.end > int2.end) return false;
   }
   return true;
 }

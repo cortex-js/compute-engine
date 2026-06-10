@@ -7,13 +7,13 @@ export function bigint(
 
   if (typeof a === 'number') {
     if (!Number.isInteger(a)) return null;
-
-    // The BigInt constructor does not deal well with large numbers in scientific notation
-    // For example `BigInt(2.46e+100)` returns `24600000000000001673372590169075170759012447570827870602850579566471767405735327837277964400645373952n`
-    if (a >= Number.MAX_SAFE_INTEGER && a <= Number.MAX_SAFE_INTEGER)
-      return BigInt(a);
-    // Convert to string and try again...
-    return bigint(a.toString());
+    // `BigInt(a)` is exact for any integer-valued double, including those
+    // beyond MAX_SAFE_INTEGER (it returns the exact integer the double stores).
+    // The previous guard `a >= MAX && a <= MAX` was only true at exactly MAX,
+    // so every other integer fell through to `bigint(a.toString())` — which
+    // fails for large values, since `(2.46e100).toString()` is `"2.46e+100"`
+    // (a decimal mantissa the string parser rejects) → `null`.
+    return BigInt(a);
   }
 
   if (a instanceof BigDecimal) {
