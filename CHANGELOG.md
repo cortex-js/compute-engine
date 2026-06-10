@@ -1,4 +1,4 @@
-### [Unreleased]
+### 0.59.0 _2026-06-10_
 
 - **New: curated mathematical identities loader (`loadIdentities()`)** — an
   opt-in library of 558 curated identities and special values (gamma, zeta,
