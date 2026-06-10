@@ -747,6 +747,13 @@ rules(rules, options?): BoxedRuleSet
 
 `boolean`
 
+####### purpose?
+
+[`RulePurpose`](#rulepurpose)
+
+Default purpose applied to any rule in the set that doesn't carry
+ its own `purpose` tag (a per-rule tag takes precedence).
+
 </MemberCard>
 
 <MemberCard>
@@ -918,7 +925,7 @@ declare(id, def, scope?): IComputeEngine
 \| (`ce`) => [`Expression`](#expression-3);
 `eq`: (`a`) => `boolean`;
 `neq`: (`a`) => `boolean`;
-`cmp`: (`a`) => `">"` \| `"<"` \| `"="`;
+`cmp`: (`a`) => `"<"` \| `">"` \| `"="`;
 `collection`: [`CollectionHandlers`](#collectionhandlers);
 `subscriptEvaluate`: (`subscript`, `options`) => [`Expression`](#expression-3);
 \} & `Partial`\<[`BaseDefinition`](#basedefinition)\> & `Partial`\<[`OperatorDefinitionFlags`](#operatordefinitionflags)\> & \{
@@ -994,7 +1001,7 @@ declare(id, def, scope?): IComputeEngine
 \| (`ce`) => [`Expression`](#expression-3);
 `eq`: (`a`) => `boolean`;
 `neq`: (`a`) => `boolean`;
-`cmp`: (`a`) => `">"` \| `"<"` \| `"="`;
+`cmp`: (`a`) => `"<"` \| `">"` \| `"="`;
 `collection`: [`CollectionHandlers`](#collectionhandlers);
 `subscriptEvaluate`: (`subscript`, `options`) => [`Expression`](#expression-3);
 \} & `Partial`\<[`BaseDefinition`](#basedefinition)\> & `Partial`\<[`OperatorDefinitionFlags`](#operatordefinitionflags)\> & \{
@@ -1088,7 +1095,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
 \| (`ce`) => [`Expression`](#expression-3);
 `eq`: (`a`) => `boolean`;
 `neq`: (`a`) => `boolean`;
-`cmp`: (`a`) => `">"` \| `"<"` \| `"="`;
+`cmp`: (`a`) => `"<"` \| `">"` \| `"="`;
 `collection`: [`CollectionHandlers`](#collectionhandlers);
 `subscriptEvaluate`: (`subscript`, `options`) => [`Expression`](#expression-3);
 \} & `Partial`\<[`BaseDefinition`](#basedefinition)\> & `Partial`\<[`OperatorDefinitionFlags`](#operatordefinitionflags)\> & \{
@@ -1164,7 +1171,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
 \| (`ce`) => [`Expression`](#expression-3);
 `eq`: (`a`) => `boolean`;
 `neq`: (`a`) => `boolean`;
-`cmp`: (`a`) => `">"` \| `"<"` \| `"="`;
+`cmp`: (`a`) => `"<"` \| `">"` \| `"="`;
 `collection`: [`CollectionHandlers`](#collectionhandlers);
 `subscriptEvaluate`: (`subscript`, `options`) => [`Expression`](#expression-3);
 \} & `Partial`\<[`BaseDefinition`](#basedefinition)\> & `Partial`\<[`OperatorDefinitionFlags`](#operatordefinitionflags)\> & \{
@@ -2191,6 +2198,26 @@ type Rule = KernelRule<Expression, ExpressionInput, ComputeEngine>;
 ```
 
 Rule declaration specialized to boxed expression and compute engine types.
+
+</MemberCard>
+
+<MemberCard>
+
+### RulePurpose
+
+```ts
+type RulePurpose = "simplify" | "transform" | "expand";
+```
+
+The purpose of a rule determines how its result is treated by
+the simplification cost policy:
+
+- `'simplify'`: the result must pass the cost gate (the default;
+  today's behavior — results that grow the expression are discarded).
+- `'transform'`: a mathematically-preferred rewrite; exempt from the
+  cost gate (accepted by `simplify()` even if structurally larger).
+- `'expand'`: growth-by-design (series, argument expansion); skipped by
+  `simplify()`, but reachable via `expr.replace()` and future expand APIs.
 
 </MemberCard>
 
@@ -3439,7 +3466,7 @@ optional neq: (a) => boolean;
 ##### BoxedValueDefinition.cmp()?
 
 ```ts
-optional cmp: (a) => ">" | "<" | "=";
+optional cmp: (a) => "<" | ">" | "=";
 ```
 
 </MemberCard>

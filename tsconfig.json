@@ -11,6 +11,9 @@
     "module": "es2022",
     "target": "es2022",
     "moduleResolution": "node",
+    // The identities entry imports the compiled rule artifact
+    // (src/compute-engine/fungrim/fungrim-core-data.json)
+    "resolveJsonModule": true,
     // "newLine": "lf",
     "noImplicitAny": false,
     "noLib": false,
