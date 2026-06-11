@@ -1,3 +1,20 @@
+## [Unreleased]
+
+### Improvements
+
+- **Identities Library: corpus updated with verified upstream corrections**
+  (1,350 → 1,376 rules). Machine validation of the
+  [Fungrim](https://fungrim.org) source uncovered two bug families upstream: a
+  misplaced parenthesis turning two formulas into products of a Boolean
+  (entries `6c2b31`, `e54e61`), and an `Element(w, tau)` typo repeated in 24
+  Jacobi theta entries (the intended assumption is `w ∈ ℂ`). Both were
+  reported and fixed upstream (PRs to `fredrik-johansson/fungrim`), each
+  correction verified numerically to 30 digits, and the fixes merged into the
+  corpus source fork ([`arnog/fungrim`](https://github.com/arnog/fungrim)).
+  The regenerated corpus recovers the two formulas as usable identities and
+  adds 24 theta identities whose corrected side conditions now compile as
+  guarded rules.
+
 ## 0.59.0 _2026-06-10_
 
 This is a significant update to the Compute Engine.
@@ -41,7 +58,7 @@ This release includes some breaking changes.
 ### Features
 
 - **Curated mathematical identities**: the new opt-in `loadIdentities()` API
-  loads 558 guarded simplification rules and special values derived from
+  loads over 1,300 guarded simplification rules and special values derived from
   [Fungrim](https://fungrim.org). Identities can be selected by topic, class, or
   purpose, and rules apply only when their side conditions can be proven.
 

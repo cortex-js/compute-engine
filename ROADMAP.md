@@ -3,7 +3,7 @@
 **Last updated:** 2026-06-10, following the identities/assumptions release.
 
 Context: the 2026-06 release shipped the Fungrim-derived identities library
-(`@cortex-js/compute-engine/identities`, 1,350 rules), the complex-domain
+(`@cortex-js/compute-engine/identities`, 1,376 rules), the complex-domain
 assumptions extension (constraint subjects over `Re/Im/Abs/Arg`, set-membership
 facts, fail-closed guard discharge), the operator-indexed rule dispatcher with
 purpose tags, `ce.solveRules`/`ce.harmonizationRules`, exact `Zeta` evaluation,
@@ -115,7 +115,7 @@ established bignum-kernel pattern from the B23 work
 
 ### 5. Per-head aggregated rule dispatch
 
-**What:** close the loaded-simplify benchmark gap: with the 1,350-rule
+**What:** close the loaded-simplify benchmark gap: with the 1,376-rule
 artifact, `simplify()` over the reference corpus runs at ~1.58× the unloaded
 baseline (target ≤1.5×; Phase 1's 558 rules ran at 1.16×). The residual cost
 is per-rule `applyRule`/`candidateRules` scaffolding for the ~60 wrapper
@@ -132,25 +132,25 @@ sets, WeakMap-memoized per-expression feature sets in
 
 **Effort:** ~3–5 days once the observability design is settled.
 
-### 6. Corpus refresh from live fungrim.org + upstream contributions
+### 6. ~~Corpus refresh from live fungrim.org + upstream contributions~~ — ✅ done / moot (2026-06-10)
 
-**What:** the corpus source (the published fork
-[`arnog/fungrim`](https://github.com/arnog/fungrim), pinned by commit in
-`data/fungrim/MANIFEST.json`; its `master` tracks upstream) mirrors an
-upstream state from ~2019–2021. The live fungrim.org has more entries and —
-important for shell quality — more `SymbolDefinition` domain tables (only 48
-of 228 in the pinned tree have them; signature inference covers the rest).
-Refresh = `git pull upstream master` in the fork, rebase `grim2mathjson`,
-re-run the translator (seconds, deterministic), review the corpus diff,
-re-validate.
+**Outcome:** the premise was refuted — upstream `fredrik-johansson/fungrim`
+has not moved since the original snapshot (verified by recursive diff during
+fork setup), so there is nothing newer to refresh from. What was done instead:
 
-**Status:** the two malformed upstream entries (`6c2b31`/`e54e61`
-Equal-times-expression; plus the `Element(w, tau)` ×24 typo in
-jacobi_theta.py) have been reported upstream. Offering the `grim2mathjson`
-translator as an upstream PR remains open — goodwill, and a sync path for
-future refreshes.
+- Translator published in the fork [`arnog/fungrim`](https://github.com/arnog/fungrim)
+  (default branch `grim2mathjson`; `master` tracks upstream).
+- The two upstream bug families reported as issues **and** fixed via PRs
+  (Equal-paren in `6c2b31`/`e54e61` — duplicating the author's own forgotten
+  2022 PR #29 — and `Element(w, tau)` ×24 in `jacobi_theta.py`), each fix
+  numerically verified at 30 digits.
+- Fix commits merged into the fork's `grim2mathjson` branch; corpus
+  regenerated (26 entries improved, Stage-1 99.80%, artifact 1,350 → 1,376
+  rules); `MANIFEST.json` records the patched-fork provenance.
 
-**Effort:** ~2–3 days for the refresh + re-validation cycle.
+**Residual (maintenance, not roadmap):** if upstream ever merges the PRs or
+revives, rebase the fork and regenerate — the workflow is documented in
+`data/fungrim/README.md`.
 
 ---
 
