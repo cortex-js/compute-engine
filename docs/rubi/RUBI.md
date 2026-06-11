@@ -1,0 +1,297 @@
+# Rubi → Compute Engine: Feasibility Analysis
+
+**Date:** 2026-06-10. **Status:** Phase 0 (corpus snapshot, survey, baseline
+harness) — this document.
+
+Rubi (Rule-Based Integration, [rulebasedintegration.org](https://rulebasedintegration.org/))
+is Albert Rich's corpus of **7,439 symbolic integration rules** organized as a
+specificity-ordered rewrite system, plus a **72,678-problem test suite**. Both
+are MIT-licensed. Rubi is frozen at release 4.17.3.0 (Dec 2023, posthumous —
+Albert Rich died Aug 2023; the Rubi 5 decision-tree restructuring was
+abandoned in 2021). Like the Fungrim snapshot, this makes it a one-time corpus
+import with no upstream-sync burden.
+
+This project follows the Fungrim playbook (`docs/fungrim/FUNGRIM.md`):
+translate a third-party corpus to MathJSON offline, compile to a checked-in
+artifact, load through a dedicated opt-in entry point. The critical difference:
+**Fungrim is a corpus of facts; Rubi is a corpus that encodes an algorithm.**
+Rule ordering, recursion into `Int`/`Subst`, and a utility-function layer
+defining "simpler" are load-bearing. Porting rules without the dispatch
+discipline produces a slow, wrong integrator (that is what happened to SymPy's
+port, removed in 2022); porting them with it works (Symja; the 2025 Julia
+SymbolicIntegration.jl GSoC port, ~3,400 rules — our closest playbook).
+
+## Verdict
+
+Feasible, in phases, with Chapter 1 (algebraic integrands) as the target of
+the first real milestone. The numbers below say Chapter 1 is much more
+self-contained than Rubi's reputation suggests: 2,648 rules (36% of the
+corpus) needing only 71 of Rubi's 328 utility functions, most of which are
+trivial predicates that map directly onto CE's assumptions/type machinery.
+The current CE integrator solves a meaningful fraction of easy Chapter-1
+problems already (see baseline below); Rubi Chapter 1 alone would put CE's
+algebraic integration at near-CAS-grade coverage (25,876 test problems).
+
+## 1. What Rubi Contains
+
+Snapshot at `~/dev/rubi/Rubi-4.17.3.0/` (from the 4.17.3.0 release tarball)
+and `~/dev/rubi/MathematicaSyntaxTestSuite-master/`.
+
+**Rules** (`Rubi/IntegrationRules/`, 200 `.m` files, auto-generated from the
+source notebooks; superseded rules are kept as comments and must be skipped —
+`grep '^Int\['` counts only live rules):
+
+| Chapter | Rules | Test problems |
+| --- | ---: | ---: |
+| 1 Algebraic functions | 2,648 | 25,876 |
+| 2 Exponentials | 125 | 965 |
+| 3 Logarithms | 337 | 3,088 |
+| 4 Trig functions | 2,126 | 22,634 |
+| 5 Inverse trig functions | 669 | 4,630 |
+| 6 Hyperbolic functions | 390 | 5,079 |
+| 7 Inverse hyperbolic functions | 718 | 6,581 |
+| 8 Special functions | 310 | 1,949 |
+| 9 Miscellaneous | 116 | — |
+| 0 Independent suites (tests only) | — | 1,876 |
+| **Total** | **7,439** | **72,678** |
+
+**Rule anatomy** — a Wolfram-Language rewrite rule with a side condition:
+
+```mathematica
+Int[(a_. + b_.*x_)^m_, x_Symbol] :=
+  (a + b*x)^(m + 1)/(b*(m + 1)) /;
+FreeQ[{a, b, m}, x] && NeQ[m, -1]
+
+Int[(a_. + b_.*u_)^m_, x_Symbol] :=
+  1/Coefficient[u, x, 1]*Subst[Int[(a + b*x)^m, x], x, u] /;
+FreeQ[{a, b, m}, x] && LinearQ[u, x] && NeQ[u, x]
+```
+
+Three structural features matter:
+
+1. **Optional-default patterns**: `a_. + b_.*x_` must also match bare `x`
+   (with `a → 0, b → 1`), `b*x` (with `a → 0`), `a + x` (with `b → 1`).
+   Combined with orderless `Plus`/`Times` matching, this is the main
+   pattern-semantics gap vs. CE's matcher.
+2. **Side conditions** built from predicates: `FreeQ`, `EqQ`/`NeQ`,
+   `IntegerQ`/`IGtQ`/`ILtQ`, `GtQ`/`LtQ`/`GeQ`/`LeQ` (numeric-symbolic
+   comparison), `PolyQ`/`LinearQ`/`BinomialQ` (structure tests), plus
+   "judgment" predicates (`SimplerQ`, `SumSimplerQ`) encoding the
+   termination order.
+3. **Recursive RHSs**: rules rewrite `Int` to expressions containing `Int`
+   (reduction formulas) and use `Subst` (change of variable, with
+   back-substitution). Termination relies on rule ordering + the judgment
+   predicates — there is no global termination proof.
+
+**The utility layer** (`IntegrationUtilityFunctions.m`): 759 definitions over
+328 distinct names. Only **127 names are referenced by rules at all**; the
+rest are internal helpers. Per-chapter cut (from the Phase-0 survey):
+
+- **Chapter 1 needs 71 utility names.** By call count, the top of the list is
+  dominated by trivial predicates: `FreeQ` (2,633 call sites), `EqQ` (1,607),
+  `NeQ` (1,240), `IntegerQ` (1,170), `GtQ`/`LtQ`/`IGtQ`/`ILtQ` (~2,460
+  combined) — all directly expressible over CE types/assumptions/`isSame`.
+- The genuinely algorithmic utilities needed by Chapter 1 are a short list:
+  `Rt`/`RtAux` (n-th root normal form, ~1.8K chars of WL), `Simp`/
+  `FixSimplify`/`SimpFixFactor` (Rubi's local simplifier, ~6.5K),
+  `ExpandIntegrand` (partial fractions + expansion, ~9.5K — the single
+  hairiest), `ExpandToSum`, `Subst` (with `Defer`-like substitution
+  semantics), `Coeff`/`Expon` (polynomial accessors), `FracPart`/`IntPart`,
+  `PosQ`/`NegQ` (sign heuristics), `PolyQ`/`LinearQ`/`BinomialQ`,
+  `SimplerQ`/`SumSimplerQ` (the termination order). Realistic estimate:
+  ~2–3K lines of carefully tested TypeScript.
+- 56 utility names are needed only by later chapters (mostly the inert-trig
+  machinery: `UnifyInertTrigFunction`, `FixInertTrigFunction`,
+  `TrigSimplifyAux` — irrelevant until Chapter 4).
+
+**Special-function heads emitted by Chapter-1 RHSs** (call sites, not rules):
+`Hypergeometric2F1` (17), `AppellF1` (8), `EllipticE` (30), `EllipticF` (33),
+`EllipticPi` (9) — i.e. ~100 of 2,648 rules produce non-elementary results.
+All five heads already exist in CE as Fungrim shell declarations; they need
+numeric kernels (ROADMAP item 4) only for *numeric verification* of those
+rules, not for the port itself.
+
+**Test suite**: one-line WL lists `{integrand, variable, step-count,
+optimal-antiderivative}`, 99.15% parseable with the small InputForm parser in
+`scripts/rubi/wl-parser.ts` (the 617 rejects are version-conditional answers
+like `If[$VersionNumber<9, …]` and annotated entries in the independent
+suites). Verification is self-checking: differentiate the candidate and
+compare numerically with the integrand — no need to match Rubi's preferred
+antiderivative form.
+
+## 2. Lessons from prior ports (design constraints)
+
+- **SymPy (failed, removed 2022)**: auto-translated all rules into a flat
+  general-purpose matcher; hour-long module loads, timeouts, wrong results;
+  the utility layer was never faithfully reproduced. *Constraint: do not load
+  Rubi rules into `simplify()`'s rule list; do not ship without indexed
+  dispatch.*
+- **Symja (succeeded)**: dumped `DownValues` from Mathematica in FullForm to
+  sidestep parsing ambiguity, generated Java rule classes, priority = rule
+  order. Enabler: a WL-compatible pattern matcher. *Takeaway: rule order is
+  the priority; preserve it exactly. Symja's pre-extracted
+  `RubiRules4.16.0_FullLHS.m` exists if our own `.m` parsing proves
+  ambiguous.*
+- **Julia SymbolicIntegration.jl (succeeded, 2025)**: semi-automated pattern
+  translation + *hand-written* utility layer + chapter-by-chapter,
+  validated per-chapter against the test suite. ~3,400 rules in one focused
+  summer. *This is the playbook.*
+
+## 3. What CE Already Has Going For It
+
+- **The Fungrim pipeline as architecture**: offline translator → corpus with
+  MANIFEST provenance (`data/rubi/`) → compile-time rule artifact with
+  fire-self-tests → opt-in loader entry point (à la
+  `@cortex-js/compute-engine/identities`, e.g.
+  `@cortex-js/compute-engine/integration`, `loadIntegrationRules(ce)`),
+  keeping the main bundle untouched.
+- **Operator-indexed rule dispatch + pre-screen machinery** (Track 2): the
+  required-feature-set pre-screening in `src/compute-engine/fungrim/loader.ts`
+  carries over. Note all Rubi rules share one head, so the *existing* head
+  index discriminates nothing — Rubi needs its own second-level index (see
+  §4B).
+- **The assumptions system** (Track 3): `IntegerQ`, `GtQ`, `NeQ` etc. over
+  symbolic parameters are exactly guard-discharge queries; the three-valued
+  fail-closed discharge semantics is the right behavior for side conditions.
+- **A working baseline integrator** (`symbolic/antiderivative.ts`: LIATE
+  by-parts, u-substitution, linear substitution, a hand-rolled rule table) —
+  useful as the fallback when Rubi rules don't fire, and as the baseline the
+  benchmark measures against.
+- **Existing heads** for every special function Chapter 1 emits (Fungrim
+  shells).
+
+## 4. New CE Features Required
+
+### A. Pattern-matcher extensions — **required, the first technical risk**
+
+1. **Optional-default operands**: support `a_. + b_.*x_`-style patterns.
+   Options: (i) extend the matcher with default-value wildcards
+   (MathJSON rules already have `_a` wildcards; needs a "match-absent →
+   default" variant); (ii) **compile-time expansion** of each Rubi pattern
+   into its 2^k explicit variants (absent/present per optional), preserving
+   relative order. Option (ii) needs zero matcher changes and is the planned
+   starting point; measure the blow-up (k ≤ 3 for most rules) before
+   considering (i).
+2. **Head-typed wildcards** (`x_Symbol`): the integration variable slot —
+   trivial, the driver always knows the variable.
+3. **AC matching discipline**: Rubi patterns lean on orderless `Plus`/`Times`
+   with sequence defaults (`u_.*(v_+w_)^p_.`). CE's matcher does commutative
+   matching; the spike (Phase R1) must establish whether its backtracking
+   handles Rubi's pattern shapes at acceptable cost.
+
+### B. A dedicated `Int` driver — **required**
+
+A fixed-point rewriter, **completely separate from `simplify()`** (CLAUDE.md
+recursion constraints apply: Rubi rules recurse by construction):
+
+- **Second-level dispatch index** keyed on integrand skeleton (operator
+  multiset / leading structure: `Power(linear, _)`, `Multiply(Power(linear),
+  Power(linear))`, …), built at artifact-compile time. Within a bucket,
+  strict rule-order priority (= Rubi's specificity order).
+- **Recursion budget + memoization**: depth cap, an `Int`-subproblem cache,
+  and a step counter analogous to `simplify.ts`'s guards. Subproblems that
+  fail fall back to `antiderivative.ts`, then to inert `Integrate`.
+- **Deadline checks**: every driver iteration checks `ce._timeRemaining` —
+  which is ROADMAP item 2 territory; see §6.
+
+### C. The utility layer — **required, hand-written**
+
+`src/compute-engine/rubi/utils.ts` (or similar): the Chapter-1 cut of ~71
+names. Trivial predicates map to existing CE machinery; the ~15 algorithmic
+ones (§1) are hand-ported with unit tests derived from their WL definitions.
+Every port (Symja, Julia) reports this as the real cost center — budget
+accordingly and port *lazily*: only what the currently-ported chapter
+references.
+
+### D. Numeric kernels for emitted heads — **deferred to verification time**
+
+`Hypergeometric2F1`, `EllipticE/F/Pi`, `AppellF1` (ROADMAP item 4 covers the
+first four). Without them, the ~100 affected Chapter-1 rules can still be
+*ported* (results stay symbolic) but their test problems report
+`not-evaluable` instead of `solved-correct`.
+
+## 5. Proposed Phasing
+
+- **Phase 0 (done, 2026-06-10)**: corpus snapshot at `~/dev/rubi/`;
+  survey (the numbers in §1); test-suite parser + loader + baseline
+  benchmark harness (`scripts/rubi/`). **Baseline** (seeded 500-problem
+  random sample over Chapter 1, `scripts/rubi/baseline-ch1-500.json`):
+  the current integrator scores **13 solved-correct (2.6%)**, 478 unsolved,
+  **3 solved-wrong**, 6 stack-overflow errors, and one problem ran 156 s
+  uninterruptibly (ROADMAP item 2 in action). The solved-wrong cases are
+  pre-existing `antiderivative.ts` bugs surfaced by the suite — e.g.
+  `∫(a + b·x⁴)/x⁶ dx` returns `−b/x`, silently dropping the `a/x⁶` term,
+  and `∫x⁶/(1−x⁶) dx` returns an incomplete partial-fraction result —
+  worth fixing independently of the port (validation-by-corpus strikes
+  again).
+- **Phase R1 — feasibility spike (~1–2 weeks)**: translator skeleton
+  (`.m` → WL AST → MathJSON rule corpus with provenance manifest, optional-
+  pattern expansion); port section 1.1.1 *end to end* (linear binomials,
+  ~250 rules, the simplest utility cut) with a minimal driver; validate
+  against the 5,501 section-1.1.1 test problems. **Exit criterion:** ≥95%
+  solved-correct on 1.1.1 with acceptable performance, or a written
+  diagnosis of why the matcher/driver approach can't get there.
+- **Phase R2 — Chapter 1 (~4–8 weeks, the real bet)**: full 2,648-rule port,
+  71-utility layer, compile-time dispatch index, artifact + loader packaging
+  (`loadIntegrationRules`), CI gate reusing the Fungrim pattern (ROADMAP
+  item 3). Target: ≥90% solved-correct over the 25,876 Chapter-1 problems
+  (Rubi itself scores ~99%; the gap budget covers missing kernels and
+  not-evaluable verification).
+- **Phase R3+ — chapters by value**: 2 (exponentials, 125 rules — small) and
+  3 (logarithms, 337) first; 5/6/7 (inverse trig/hyperbolic) next; Chapter 4
+  (trig, 2,126 rules + the inert-trig utility machinery) is its own project;
+  Chapter 8 last (needs many special-function heads/kernels).
+
+## 6. Roadmap Coupling (what to prioritize and why)
+
+- **ROADMAP item 2 (interruptible evaluation) — do before R2 mass
+  validation.** The driver itself gets deadline checks from day one, but the
+  *harness* runs 25K problems against an engine whose evaluation is otherwise
+  non-interruptible; without item 2 the benchmark needs the Fungrim-era
+  watchdog hacks (the baseline harness already ships a `RUBI_SKIP` denylist
+  and incremental `.partial` reports for exactly this reason).
+- **ROADMAP item 4 (₂F₁ + elliptic kernels) — do during/alongside R2.**
+  Converts the ~100 special-head Chapter-1 rules from `not-evaluable` to
+  verifiable, and is independently valuable (567 Fungrim entries wait on the
+  same kernels).
+- **ROADMAP item 5 (per-head aggregated dispatch) — not blocking.** Rubi
+  lives in its own driver with its own index; item 5 remains a
+  simplify()-side concern.
+
+## 7. Risks & Open Questions
+
+1. **Matcher fit (highest risk, addressed first in R1)**: if CE's AC matching
+   + expanded optional-variants can't express/perform Rubi's pattern shapes,
+   the fallback is compiling patterns into discrimination code (the Rubi-5
+   idea, but generated mechanically per-bucket) rather than data patterns.
+   The abandoned Rubi-5 repo (MIT) has manually-compiled if-then-else
+   fragments usable as a cross-check.
+2. **Termination**: `SimplerQ`-family predicates encode Rubi's well-founded
+   order; subtle porting bugs → rewrite loops. Mitigations: depth/step caps
+   in the driver (never trust the order), per-rule fire-self-tests in the
+   artifact compiler (the Fungrim pattern), differential testing against the
+   test suite per section.
+3. **`Simp`/`ExpandIntegrand` fidelity**: rules assume Rubi's normal forms;
+   CE's canonicalization differs (e.g. `Power(x, 1/3)` → `Root`). The
+   structural-mode boxing (`{ structural: true }`) and the Fungrim
+   compile-to-canonical-form lesson (store patterns in CE-canonical form)
+   both apply.
+4. **Performance**: 2,648 rules even bucketed may make `Int` slow per call.
+   Budget: artifact-compile-time bucketing + lazy loading per chapter;
+   acceptance benchmarks in the harness from R1 on.
+5. **Translation source**: parse our own `.m` files (current plan, parser
+   exists) vs. consume Symja's FullForm dump (less ambiguity, but a
+   second-hand artifact pinned to 4.16.0). Decide in R1 when the first
+   pattern-precedence ambiguity shows up — or doesn't.
+6. **Where results live**: `Integrate`'s `evaluate` should consult the Rubi
+   driver when loaded (a registration hook, like `solveRules`), falling back
+   to `antiderivative.ts`. The exact hook shape is an R1 deliverable.
+
+## 8. Bottom Line
+
+Chapter 1 is a self-contained, MIT-licensed, frozen corpus of 2,648 rules
+with a 71-function utility cut, a 25,876-problem self-checking test suite,
+and two successful prior ports to crib from. It is the single highest-value
+capability jump available to CE after Fungrim — and unlike Fungrim it
+directly upgrades a user-facing verb (`Integrate`). The phased plan keeps an
+abort option after the R1 spike at ~2 weeks of sunk cost.

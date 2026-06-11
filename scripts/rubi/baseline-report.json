@@ -1,0 +1,179 @@
+{
+  "summary": {
+    "suite": "/Users/arno/dev/rubi/MathematicaSyntaxTestSuite-master",
+    "chapter": "1 Algebraic functions/1.1 Binomial products/1.1.1 Linear",
+    "seed": 42,
+    "total": 20,
+    "counts": {
+      "solved-correct": 20,
+      "solved-wrong": 0,
+      "inconclusive": 0,
+      "unsolved": 0,
+      "not-evaluable": 0,
+      "error": 0
+    },
+    "solvedCorrectRate": "1.0000"
+  },
+  "results": [
+    {
+      "file": "1 Algebraic functions/1.1 Binomial products/1.1.1 Linear/1.1.1.2 (a+b x)^m (c+d x)^n.m",
+      "index": 1,
+      "source": "{0, x, 1, 0}",
+      "outcome": "solved-correct",
+      "ms": 33,
+      "result": "0"
+    },
+    {
+      "file": "1 Algebraic functions/1.1 Binomial products/1.1.1 Linear/1.1.1.2 (a+b x)^m (c+d x)^n.m",
+      "index": 2,
+      "source": "{1, x, 1, x}",
+      "outcome": "solved-correct",
+      "ms": 11,
+      "result": "x"
+    },
+    {
+      "file": "1 Algebraic functions/1.1 Binomial products/1.1.1 Linear/1.1.1.2 (a+b x)^m (c+d x)^n.m",
+      "index": 3,
+      "source": "{5, x, 1, 5*x}",
+      "outcome": "solved-correct",
+      "ms": 12,
+      "result": "5x"
+    },
+    {
+      "file": "1 Algebraic functions/1.1 Binomial products/1.1.1 Linear/1.1.1.2 (a+b x)^m (c+d x)^n.m",
+      "index": 4,
+      "source": "{-2, x, 1, -2*x}",
+      "outcome": "solved-correct",
+      "ms": 9,
+      "result": "-2x"
+    },
+    {
+      "file": "1 Algebraic functions/1.1 Binomial products/1.1.1 Linear/1.1.1.2 (a+b x)^m (c+d x)^n.m",
+      "index": 5,
+      "source": "{-3/2, x, 1, -3/2*x}",
+      "outcome": "solved-correct",
+      "ms": 9,
+      "result": "-3/2 * x"
+    },
+    {
+      "file": "1 Algebraic functions/1.1 Binomial products/1.1.1 Linear/1.1.1.2 (a+b x)^m (c+d x)^n.m",
+      "index": 6,
+      "source": "{Pi, x, 1, Pi*x}",
+      "outcome": "solved-correct",
+      "ms": 8,
+      "result": "pi * x"
+    },
+    {
+      "file": "1 Algebraic functions/1.1 Binomial products/1.1.1 Linear/1.1.1.2 (a+b x)^m (c+d x)^n.m",
+      "index": 7,
+      "source": "{a, x, 1, a*x}",
+      "outcome": "solved-correct",
+      "ms": 8,
+      "result": "a * x"
+    },
+    {
+      "file": "1 Algebraic functions/1.1 Binomial products/1.1.1 Linear/1.1.1.2 (a+b x)^m (c+d x)^n.m",
+      "index": 8,
+      "source": "{3*a, x, 1, 3*a*x}",
+      "outcome": "solved-correct",
+      "ms": 10,
+      "result": "3a * x"
+    },
+    {
+      "file": "1 Algebraic functions/1.1 Binomial products/1.1.1 Linear/1.1.1.2 (a+b x)^m (c+d x)^n.m",
+      "index": 9,
+      "source": "{Pi/Sqrt[16 - E^2], x, 1, (Pi*x)/Sqrt[16 - E^2]}",
+      "outcome": "solved-correct",
+      "ms": 19,
+      "result": "(pi * x) / sqrt(16 - e^2)"
+    },
+    {
+      "file": "1 Algebraic functions/1.1 Binomial products/1.1.1 Linear/1.1.1.2 (a+b x)^m (c+d x)^n.m",
+      "index": 10,
+      "source": "{x^100, x, 1, x^101/101}",
+      "outcome": "solved-correct",
+      "ms": 9,
+      "result": "1/101 * x^(101)"
+    },
+    {
+      "file": "1 Algebraic functions/1.1 Binomial products/1.1.1 Linear/1.1.1.2 (a+b x)^m (c+d x)^n.m",
+      "index": 11,
+      "source": "{x^3, x, 1, x^4/4}",
+      "outcome": "solved-correct",
+      "ms": 9,
+      "result": "1/4 * x^4"
+    },
+    {
+      "file": "1 Algebraic functions/1.1 Binomial products/1.1.1 Linear/1.1.1.2 (a+b x)^m (c+d x)^n.m",
+      "index": 12,
+      "source": "{x^2, x, 1, x^3/3}",
+      "outcome": "solved-correct",
+      "ms": 8,
+      "result": "1/3 * x^3"
+    },
+    {
+      "file": "1 Algebraic functions/1.1 Binomial products/1.1.1 Linear/1.1.1.2 (a+b x)^m (c+d x)^n.m",
+      "index": 13,
+      "source": "{x^1, x, 1, x^2/2}",
+      "outcome": "solved-correct",
+      "ms": 8,
+      "result": "1/2 * x^2"
+    },
+    {
+      "file": "1 Algebraic functions/1.1 Binomial products/1.1.1 Linear/1.1.1.2 (a+b x)^m (c+d x)^n.m",
+      "index": 14,
+      "source": "{x^0, x, 1, x}",
+      "outcome": "solved-correct",
+      "ms": 7,
+      "result": "x"
+    },
+    {
+      "file": "1 Algebraic functions/1.1 Binomial products/1.1.1 Linear/1.1.1.2 (a+b x)^m (c+d x)^n.m",
+      "index": 15,
+      "source": "{1/x^1, x, 1, Log[x]}",
+      "outcome": "solved-correct",
+      "ms": 10,
+      "result": "ln(|x|)"
+    },
+    {
+      "file": "1 Algebraic functions/1.1 Binomial products/1.1.1 Linear/1.1.1.2 (a+b x)^m (c+d x)^n.m",
+      "index": 16,
+      "source": "{1/x^2, x, 1, -(1/x)}",
+      "outcome": "solved-correct",
+      "ms": 8,
+      "result": "-1 / x"
+    },
+    {
+      "file": "1 Algebraic functions/1.1 Binomial products/1.1.1 Linear/1.1.1.2 (a+b x)^m (c+d x)^n.m",
+      "index": 17,
+      "source": "{1/x^3, x, 1, -(1/(2*x^2))}",
+      "outcome": "solved-correct",
+      "ms": 9,
+      "result": "-1/2 * x^(-2)"
+    },
+    {
+      "file": "1 Algebraic functions/1.1 Binomial products/1.1.1 Linear/1.1.1.2 (a+b x)^m (c+d x)^n.m",
+      "index": 18,
+      "source": "{1/x^4, x, 1, -(1/(3*x^3))}",
+      "outcome": "solved-correct",
+      "ms": 7,
+      "result": "-1/3 * x^(-3)"
+    },
+    {
+      "file": "1 Algebraic functions/1.1 Binomial products/1.1.1 Linear/1.1.1.2 (a+b x)^m (c+d x)^n.m",
+      "index": 19,
+      "source": "{1/x^100, x, 1, -1/(99*x^99)}",
+      "outcome": "solved-correct",
+      "ms": 7,
+      "result": "-1/99 * x^(-99)"
+    },
+    {
+      "file": "1 Algebraic functions/1.1 Binomial products/1.1.1 Linear/1.1.1.2 (a+b x)^m (c+d x)^n.m",
+      "index": 20,
+      "source": "{x^(5/2), x, 1, 2*x^(7/2)/7}",
+      "outcome": "solved-correct",
+      "ms": 9,
+      "result": "2/7 * x^(7/2)"
+    }
+  ]
+}
