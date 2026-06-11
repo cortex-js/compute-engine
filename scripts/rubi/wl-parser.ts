@@ -15,8 +15,34 @@ export type Json = number | string | Json[];
 
 type Token =
   | { kind: 'number'; value: string; spaceBefore: boolean }
+  | { kind: 'string'; value: string; spaceBefore: boolean }
   | { kind: 'symbol'; value: string; spaceBefore: boolean }
+  | {
+      kind: 'pattern';
+      /** pattern name; '' for anonymous `_` */
+      name: string;
+      /** head constraint, e.g. 'Symbol' in `x_Symbol` */
+      head?: string;
+      /** `_.` — optional with operator-derived default */
+      optional: boolean;
+      spaceBefore: boolean;
+    }
   | { kind: 'punct'; value: string; spaceBefore: boolean };
+
+// Multi-character operators, longest first.
+const MULTI_PUNCT = [
+  '=!=',
+  '===',
+  ':=',
+  '/;',
+  '&&',
+  '||',
+  '==',
+  '!=',
+  '<=',
+  '>=',
+  '->',
+];
 
 class Tokenizer {
   private pos = 0;
@@ -26,36 +52,98 @@ class Tokenizer {
     this.tokenize();
   }
 
+  // WL comments nest: (* a (* b *) c *)
+  private skipComment(): void {
+    let depth = 0;
+    const s = this.src;
+    do {
+      if (s.startsWith('(*', this.pos)) {
+        depth++;
+        this.pos += 2;
+      } else if (s.startsWith('*)', this.pos)) {
+        depth--;
+        this.pos += 2;
+      } else if (this.pos >= s.length) {
+        throw new Error('unterminated comment');
+      } else this.pos++;
+    } while (depth > 0);
+  }
+
   private tokenize(): void {
     const s = this.src;
     while (this.pos < s.length) {
       let spaceBefore = false;
-      while (this.pos < s.length && /\s/.test(s[this.pos])) {
-        spaceBefore = true;
-        this.pos++;
+      for (;;) {
+        if (this.pos < s.length && /\s/.test(s[this.pos])) {
+          spaceBefore = true;
+          this.pos++;
+        } else if (s.startsWith('(*', this.pos)) {
+          spaceBefore = true;
+          this.skipComment();
+        } else break;
       }
       if (this.pos >= s.length) break;
       const c = s[this.pos];
-      // Comments (* ... *) — skip (no nesting in the test suite)
-      if (c === '(' && s[this.pos + 1] === '*') {
-        const end = s.indexOf('*)', this.pos + 2);
-        if (end < 0) throw new Error('unterminated comment');
-        this.pos = end + 2;
-        continue;
+      // \[Star] is Times (Rubi uses it for display-deferred multiplication);
+      // any other \[…] escape is unsupported — fail loudly.
+      if (c === '\\' && s[this.pos + 1] === '[') {
+        const m = /^\\\[([A-Za-z]+)\]/.exec(s.slice(this.pos));
+        if (m?.[1] === 'Star') {
+          this.tokens.push({ kind: 'punct', value: '*', spaceBefore });
+          this.pos += m[0].length;
+          continue;
+        }
+        throw new Error(`unsupported escape ${m?.[0] ?? '\\['} at ${this.pos}`);
       }
       if (/[0-9]/.test(c) || (c === '.' && /[0-9]/.test(s[this.pos + 1]))) {
-        const m = /^[0-9]*\.?[0-9]+(`[0-9.]*)?/.exec(s.slice(this.pos))!;
+        // includes trailing-dot reals (`x_^2.` in some Rubi patterns)
+        const m = /^(?:[0-9]+\.?[0-9]*|\.[0-9]+)(`[0-9.]*)?/.exec(
+          s.slice(this.pos)
+        )!;
         this.tokens.push({ kind: 'number', value: m[0], spaceBefore });
         this.pos += m[0].length;
         continue;
       }
-      if (/[A-Za-z$]/.test(c)) {
-        const m = /^[A-Za-z$][A-Za-z0-9$]*/.exec(s.slice(this.pos))!;
-        this.tokens.push({ kind: 'symbol', value: m[0], spaceBefore });
+      if (c === '"') {
+        const m = /^"((?:[^"\\]|\\.)*)"/.exec(s.slice(this.pos));
+        if (!m) throw new Error(`unterminated string at ${this.pos}`);
+        this.tokens.push({ kind: 'string', value: m[1], spaceBefore });
         this.pos += m[0].length;
         continue;
       }
-      if ('[](){},^*/+-!'.includes(c)) {
+      if (/[A-Za-z$_]/.test(c)) {
+        const m =
+          /^([A-Za-z$][A-Za-z0-9$]*)?(_(?:[A-Za-z][A-Za-z0-9$]*)?)?/.exec(
+            s.slice(this.pos)
+          )!;
+        const [, name, blank] = m;
+        this.pos += m[0].length;
+        if (blank !== undefined) {
+          // `a_`, `a_Symbol`, `_`, `_Head` — plus optional trailing `.`
+          let optional = false;
+          if (s[this.pos] === '.' && !/[0-9]/.test(s[this.pos + 1])) {
+            optional = true;
+            this.pos++;
+          }
+          this.tokens.push({
+            kind: 'pattern',
+            name: name ?? '',
+            head: blank.length > 1 ? blank.slice(1) : undefined,
+            optional,
+            spaceBefore,
+          });
+        } else {
+          this.tokens.push({ kind: 'symbol', value: name!, spaceBefore });
+        }
+        continue;
+      }
+      const multi = MULTI_PUNCT.find((op) => s.startsWith(op, this.pos));
+      if (multi) {
+        this.tokens.push({ kind: 'punct', value: multi, spaceBefore });
+        this.pos += multi.length;
+        continue;
+      }
+      if ("[](){},^*/+-!=<>;'".includes(c)) {
         this.tokens.push({ kind: 'punct', value: c, spaceBefore });
         this.pos++;
         continue;
@@ -65,13 +153,40 @@ class Tokenizer {
   }
 }
 
-// WL precedence (subset): Plus 10 < Times 20 < unary-minus 15 (looser than
-// Power) < Power 30 (right-assoc) < Factorial 40.
+// WL precedence (subset), loosest to tightest:
+// CompoundExpression 1 < Set/SetDelayed 2 < Rule 3 < Condition 4 <
+// Or 6 < And 7 < Not (prefix) 8 < comparisons 9 < Plus 10 <
+// Times 20 (and unary minus 15, looser than Power) < Power 30 (right-assoc)
+// < Factorial 40.
 const PREC_PLUS = 10;
 const PREC_TIMES = 20;
 const PREC_UNARY_MINUS = 15;
 const PREC_POWER = 30;
 const PREC_FACTORIAL = 40;
+const PREC_NOT = 8;
+
+// Binary operators handled uniformly: token → [operator, precedence,
+// right-assoc?, flatten?]
+const BINARY_OPS: Record<
+  string,
+  { op: string; prec: number; right?: boolean; flat?: boolean }
+> = {
+  ';': { op: 'CompoundExpression', prec: 1, flat: true },
+  ':=': { op: 'SetDelayed', prec: 2, right: true },
+  '=': { op: 'Set', prec: 2, right: true },
+  '->': { op: 'Rule', prec: 3, right: true },
+  '/;': { op: 'Condition', prec: 4 },
+  '||': { op: 'Or', prec: 6, flat: true },
+  '&&': { op: 'And', prec: 7, flat: true },
+  '==': { op: 'Equal', prec: 9 },
+  '!=': { op: 'Unequal', prec: 9 },
+  '===': { op: 'SameQ', prec: 9 },
+  '=!=': { op: 'UnsameQ', prec: 9 },
+  '<': { op: 'Less', prec: 9 },
+  '<=': { op: 'LessEqual', prec: 9 },
+  '>': { op: 'Greater', prec: 9 },
+  '>=': { op: 'GreaterEqual', prec: 9 },
+};
 
 class Parser {
   private i = 0;
@@ -101,6 +216,13 @@ class Parser {
       const t = this.peek();
       if (!t) break;
       if (t.kind === 'punct') {
+        const bin = BINARY_OPS[t.value];
+        if (bin && bin.prec >= minPrec) {
+          this.next();
+          const rhs = this.parseExpression(bin.right ? bin.prec : bin.prec + 1);
+          lhs = bin.flat ? flatBinaryOp(bin.op, lhs, rhs) : [bin.op, lhs, rhs];
+          continue;
+        }
         if (t.value === '+' && PREC_PLUS >= minPrec) {
           this.next();
           lhs = flatBinary('Add', lhs, this.parseExpression(PREC_PLUS + 1));
@@ -143,6 +265,7 @@ class Parser {
         PREC_TIMES >= minPrec &&
         (t.kind === 'number' ||
           t.kind === 'symbol' ||
+          t.kind === 'pattern' ||
           (t.kind === 'punct' && t.value === '('))
       ) {
         lhs = flatBinary('Multiply', lhs, this.parseExpression(PREC_TIMES + 1));
@@ -155,12 +278,23 @@ class Parser {
 
   private parsePrefix(): Json {
     const t = this.next();
+    if (t.kind === 'pattern') {
+      // `a_` → ["Blank","a"], `x_Symbol` → ["Blank","x","Symbol"],
+      // `b_.` → ["BlankOptional","b"], `_` → ["Blank",""]
+      const node: Json[] = [
+        t.optional ? 'BlankOptional' : 'Blank',
+        mapSymbol(t.name),
+      ];
+      if (t.head) node.push(t.head);
+      return this.parsePostfix(node);
+    }
     if (t.kind === 'punct') {
       if (t.value === '-') {
         const arg = this.parseExpression(PREC_UNARY_MINUS + 1);
         return negate(arg);
       }
       if (t.value === '+') return this.parseExpression(PREC_UNARY_MINUS + 1);
+      if (t.value === '!') return ['Not', this.parseExpression(PREC_NOT + 1)];
       if (t.value === '(') {
         const e = this.parseExpression(0);
         this.expect(')');
@@ -185,18 +319,44 @@ class Parser {
       const v = t.value.split('`')[0];
       return this.parsePostfix(v.includes('.') ? parseFloat(v) : parseInt(v));
     }
+    if (t.kind === 'string') return ['Str', t.value];
     // symbol — possibly a function call F[...]
     return this.parsePostfix(mapSymbol(t.value), t.value);
   }
 
-  // Handles call brackets after a head: F[a, b][c]…
+  // Handles postfix forms after a head: calls F[a, b][c]…, Part
+  // `lst[[1]]`, and derivative marks `F'[x]`.
   private parsePostfix(expr: Json, wlHead?: string): Json {
-    while (
-      this.peek()?.kind === 'punct' &&
-      this.peek()!.value === '[' &&
-      !this.peek()!.spaceBefore
-    ) {
+    for (;;) {
+      const t = this.peek();
+      if (!t || t.kind !== 'punct') break;
+      if (t.value === "'") {
+        // F' → Derivative[1][F]; chain for F''
+        let order = 0;
+        while (this.peek()?.kind === 'punct' && this.peek()!.value === "'") {
+          this.next();
+          order++;
+        }
+        expr = [['Derivative', order], wlHead ? mapSymbol(wlHead) : expr];
+        wlHead = undefined;
+        continue;
+      }
+      if (t.value !== '[' || t.spaceBefore) break;
       this.next();
+      // Part: lst[[i, j]]
+      if (this.peek()?.kind === 'punct' && this.peek()!.value === '[') {
+        this.next();
+        const indices: Json[] = [this.parseExpression(0)];
+        while (this.peek()?.kind === 'punct' && this.peek()!.value === ',') {
+          this.next();
+          indices.push(this.parseExpression(0));
+        }
+        this.expect(']');
+        this.expect(']');
+        expr = ['Part', wlHead ? mapSymbol(wlHead) : expr, ...indices];
+        wlHead = undefined;
+        continue;
+      }
       const args: Json[] = [];
       if (!(this.peek()?.kind === 'punct' && this.peek()!.value === ']')) {
         args.push(this.parseExpression(0));
@@ -206,22 +366,24 @@ class Parser {
         }
       }
       this.expect(']');
-      expr = wlHead
-        ? mapCall(wlHead, args)
-        : ([expr, ...args] as Json[]);
+      expr = wlHead ? mapCall(wlHead, args) : ([expr, ...args] as Json[]);
       wlHead = undefined;
     }
     return expr;
   }
 }
 
-function flatBinary(op: 'Add' | 'Multiply', a: Json, b: Json): Json {
+function flatBinaryOp(op: string, a: Json, b: Json): Json {
   const ops: Json[] = [];
   for (const x of [a, b]) {
     if (Array.isArray(x) && x[0] === op) ops.push(...(x as Json[]).slice(1));
     else ops.push(x);
   }
   return [op, ...ops];
+}
+
+function flatBinary(op: 'Add' | 'Multiply', a: Json, b: Json): Json {
+  return flatBinaryOp(op, a, b);
 }
 
 function negate(x: Json): Json {

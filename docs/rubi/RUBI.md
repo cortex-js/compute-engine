@@ -231,6 +231,15 @@ first four). Without them, the ~100 affected Chapter-1 rules can still be
   against the 5,501 section-1.1.1 test problems. **Exit criterion:** ≥95%
   solved-correct on 1.1.1 with acceptable performance, or a written
   diagnosis of why the matcher/driver approach can't get there.
+  - *Translator: DONE (2026-06-10).* `scripts/rubi/translate.ts` +
+    `extract-rules.ts` + the extended `wl-parser.ts` extract **100% of the
+    corpus** (7,413/7,413 rules; count verified file-by-file against
+    comment-stripped sources; `$LoadShowSteps` display variants dropped in
+    favor of the plain definitions). Checked-in corpus at `data/rubi/`
+    (Chapter 1 scope, 2,647 rules, 3.7 MB). Regression tests:
+    `test/compute-engine/rubi-translator.test.ts`. Remaining R1 work:
+    optional-pattern expansion, predicate/utility mapping for 1.1.1,
+    minimal driver, 1.1.1 validation run.
 - **Phase R2 — Chapter 1 (~4–8 weeks, the real bet)**: full 2,648-rule port,
   71-utility layer, compile-time dispatch index, artifact + loader packaging
   (`loadIntegrationRules`), CI gate reusing the Fungrim pattern (ROADMAP

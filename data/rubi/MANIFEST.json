@@ -1,0 +1,360 @@
+{
+ "schemaVersion": 1,
+ "generated": "2026-06-11",
+ "generator": "scripts/rubi/translate.ts",
+ "upstream": {
+  "name": "Rubi",
+  "repository": "https://github.com/RuleBasedIntegration/Rubi",
+  "version": "4.17.3.0",
+  "note": "extracted from the release tarball; rule order within each file is Rubi’s match-priority order",
+  "pin": {
+   "sha256": "d8aa494ee73b40962c388839d8172d6f131d9ddf729fa0908800f5ecfc7bde04",
+   "method": "sha256 over the translated IntegrationRules/**/*.m files, sorted, concatenated",
+   "fileCount": 67
+  },
+  "license": "MIT, Copyright (c) 2018 Rule-based Integration Organization"
+ },
+ "scope": "1 Algebraic functions",
+ "counts": {
+  "files": 67,
+  "rules": 2647,
+  "skipped": 0
+ },
+ "files": [
+  {
+   "file": "1 Algebraic functions/1.1 Binomial products/1.1.1 Linear/1.1.1.1 (a+b x)^m.m",
+   "rules": 34,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.1 Binomial products/1.1.1 Linear/1.1.1.2 (a+b x)^m (c+d x)^n.m",
+   "rules": 47,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.1 Binomial products/1.1.1 Linear/1.1.1.3 (a+b x)^m (c+d x)^n (e+f x)^p.m",
+   "rules": 77,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.1 Binomial products/1.1.1 Linear/1.1.1.4 (a+b x)^m (c+d x)^n (e+f x)^p (g+h x)^q.m",
+   "rules": 48,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.1 Binomial products/1.1.1 Linear/1.1.1.5 P(x) (a+b x)^m (c+d x)^n.m",
+   "rules": 7,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.1 Binomial products/1.1.1 Linear/1.1.1.6 P(x) (a+b x)^m (c+d x)^n (e+f x)^p.m",
+   "rules": 7,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.1 Binomial products/1.1.1 Linear/1.1.1.7 P(x) (a+b x)^m (c+d x)^n (e+f x)^p (g+h x)^q.m",
+   "rules": 15,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.1 Binomial products/1.1.2 Quadratic/1.1.2.1 (a+b x^2)^p.m",
+   "rules": 33,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.1 Binomial products/1.1.2 Quadratic/1.1.2.10 P(x) (a+b x^2)^p.m",
+   "rules": 6,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.1 Binomial products/1.1.2 Quadratic/1.1.2.11 P(x) (c x)^m (a+b x^2)^p.m",
+   "rules": 10,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.1 Binomial products/1.1.2 Quadratic/1.1.2.12 P(x) (c+d x)^n (a+b x^2)^p.m",
+   "rules": 16,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.1 Binomial products/1.1.2 Quadratic/1.1.2.13 P(x) (e x)^m (c+d x)^n (a+b x^2)^p.m",
+   "rules": 6,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.1 Binomial products/1.1.2 Quadratic/1.1.2.14 P(x) (c+d x)^m (e+f x)^n (a+b x^2)^p.m",
+   "rules": 3,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.1 Binomial products/1.1.2 Quadratic/1.1.2.2 (c x)^m (a+b x^2)^p.m",
+   "rules": 40,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.1 Binomial products/1.1.2 Quadratic/1.1.2.3 (a+b x^2)^p (c+d x^2)^q.m",
+   "rules": 55,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.1 Binomial products/1.1.2 Quadratic/1.1.2.4 (e x)^m (a+b x^2)^p (c+d x^2)^q.m",
+   "rules": 67,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.1 Binomial products/1.1.2 Quadratic/1.1.2.5 (a+b x^2)^p (c+d x^2)^q (e+f x^2)^r.m",
+   "rules": 39,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.1 Binomial products/1.1.2 Quadratic/1.1.2.6 (g x)^m (a+b x^2)^p (c+d x^2)^q (e+f x^2)^r.m",
+   "rules": 20,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.1 Binomial products/1.1.2 Quadratic/1.1.2.7 (c+d x)^n (a+b x^2)^p.m",
+   "rules": 65,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.1 Binomial products/1.1.2 Quadratic/1.1.2.8 (e x)^m (c+d x)^n (a+b x^2)^p.m",
+   "rules": 123,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.1 Binomial products/1.1.2 Quadratic/1.1.2.9 (c+d x)^m (e+f x)^n (a+b x^2)^p.m",
+   "rules": 108,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.1 Binomial products/1.1.3 General/1.1.3.1 (a+b x^n)^p.m",
+   "rules": 47,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.1 Binomial products/1.1.3 General/1.1.3.2 (c x)^m (a+b x^n)^p.m",
+   "rules": 106,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.1 Binomial products/1.1.3 General/1.1.3.3 (a+b x^n)^p (c+d x^n)^q.m",
+   "rules": 67,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.1 Binomial products/1.1.3 General/1.1.3.4 (e x)^m (a+b x^n)^p (c+d x^n)^q.m",
+   "rules": 78,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.1 Binomial products/1.1.3 General/1.1.3.5 (a+b x^n)^p (c+d x^n)^q (e+f x^n)^r.m",
+   "rules": 19,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.1 Binomial products/1.1.3 General/1.1.3.6 (g x)^m (a+b x^n)^p (c+d x^n)^q (e+f x^n)^r.m",
+   "rules": 40,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.1 Binomial products/1.1.3 General/1.1.3.7 P(x) (a+b x^n)^p.m",
+   "rules": 52,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.1 Binomial products/1.1.3 General/1.1.3.8 P(x) (c x)^m (a+b x^n)^p.m",
+   "rules": 33,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.1 Binomial products/1.1.4 Improper/1.1.4.1 (a x^j+b x^n)^p.m",
+   "rules": 13,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.1 Binomial products/1.1.4 Improper/1.1.4.2 (c x)^m (a x^j+b x^n)^p.m",
+   "rules": 21,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.1 Binomial products/1.1.4 Improper/1.1.4.3 (e x)^m (a x^j+b x^k)^p (c+d x^n)^q.m",
+   "rules": 9,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.1 Binomial products/1.1.4 Improper/1.1.4.4 P(x) (c x)^m (a x^j+b x^n)^p.m",
+   "rules": 11,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.2 Trinomial products/1.2.1 Quadratic/1.2.1.1 (a+b x+c x^2)^p.m",
+   "rules": 21,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.2 Trinomial products/1.2.1 Quadratic/1.2.1.2 (d+e x)^m (a+b x+c x^2)^p.m",
+   "rules": 83,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.2 Trinomial products/1.2.1 Quadratic/1.2.1.3 (d+e x)^m (f+g x)^n (a+b x+c x^2)^p.m",
+   "rules": 113,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.2 Trinomial products/1.2.1 Quadratic/1.2.1.4 (a+b x+c x^2)^p (d+e x+f x^2)^q.m",
+   "rules": 35,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.2 Trinomial products/1.2.1 Quadratic/1.2.1.5 (g+h x)^m (a+b x+c x^2)^p (d+e x+f x^2)^q.m",
+   "rules": 50,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.2 Trinomial products/1.2.1 Quadratic/1.2.1.6 P(x) (a+b x+c x^2)^p.m",
+   "rules": 5,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.2 Trinomial products/1.2.1 Quadratic/1.2.1.7 P(x) (d+e x)^m (a+b x+c x^2)^p.m",
+   "rules": 33,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.2 Trinomial products/1.2.1 Quadratic/1.2.1.8 P(x) (d+e x)^m (f+g x)^n (a+b x+c x^2)^p.m",
+   "rules": 3,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.2 Trinomial products/1.2.1 Quadratic/1.2.1.9 P(x) (a+b x+c x^2)^p (d+e x+f x^2)^q.m",
+   "rules": 26,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.2 Trinomial products/1.2.2 Quartic/1.2.2.1 (a+b x^2+c x^4)^p.m",
+   "rules": 40,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.2 Trinomial products/1.2.2 Quartic/1.2.2.2 (d x)^m (a+b x^2+c x^4)^p.m",
+   "rules": 44,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.2 Trinomial products/1.2.2 Quartic/1.2.2.3 (d+e x^2)^q (a+b x^2+c x^4)^p.m",
+   "rules": 109,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.2 Trinomial products/1.2.2 Quartic/1.2.2.4 (f x)^m (d+e x^2)^q (a+b x^2+c x^4)^p.m",
+   "rules": 107,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.2 Trinomial products/1.2.2 Quartic/1.2.2.5 P(x) (a+b x^2+c x^4)^p.m",
+   "rules": 8,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.2 Trinomial products/1.2.2 Quartic/1.2.2.6 P(x) (d x)^m (a+b x^2+c x^4)^p.m",
+   "rules": 7,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.2 Trinomial products/1.2.2 Quartic/1.2.2.7 P(x) (d+e x^2)^q (a+b x^2+c x^4)^p.m",
+   "rules": 54,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.2 Trinomial products/1.2.2 Quartic/1.2.2.8 P(x) (d+e x)^q (a+b x^2+c x^4)^p.m",
+   "rules": 21,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.2 Trinomial products/1.2.3 General/1.2.3.1 (a+b x^n+c x^(2 n))^p.m",
+   "rules": 11,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.2 Trinomial products/1.2.3 General/1.2.3.2 (d x)^m (a+b x^n+c x^(2 n))^p.m",
+   "rules": 37,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.2 Trinomial products/1.2.3 General/1.2.3.3 (d+e x^n)^q (a+b x^n+c x^(2 n))^p.m",
+   "rules": 65,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.2 Trinomial products/1.2.3 General/1.2.3.4 (f x)^m (d+e x^n)^q (a+b x^n+c x^(2 n))^p.m",
+   "rules": 114,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.2 Trinomial products/1.2.3 General/1.2.3.5 P(x) (a+b x^n+c x^(2 n))^p.m",
+   "rules": 23,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.2 Trinomial products/1.2.3 General/1.2.3.6 P(x) (d x)^m (a+b x^n+c x^(2 n))^p.m",
+   "rules": 25,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.2 Trinomial products/1.2.4 Improper/1.2.4.1 (a x^q+b x^n+c x^(2 n-q))^p.m",
+   "rules": 9,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.2 Trinomial products/1.2.4 Improper/1.2.4.2 (d x)^m (a x^q+b x^n+c x^(2 n-q))^p.m",
+   "rules": 21,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.2 Trinomial products/1.2.4 Improper/1.2.4.3 (d+e x^(n-q)) (a x^q+b x^n+c x^(2 n-q))^p.m",
+   "rules": 8,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.2 Trinomial products/1.2.4 Improper/1.2.4.4 (f x)^m (d+e x^(n-q)) (a x^q+b x^n+c x^(2 n-q))^p.m",
+   "rules": 16,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.3 Polynomial products/1.3.1 u (a+b x+c x^2+d x^3)^p.m",
+   "rules": 20,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.3 Polynomial products/1.3.2 u (a+b x+c x^2+d x^3+e x^4)^p.m",
+   "rules": 18,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.3 Polynomial products/1.3.3 P(x)^p.m",
+   "rules": 20,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.3 Polynomial products/1.3.4 P(x) Q(x)^p.m",
+   "rules": 21,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.4 Miscellaneous/1.4.1 Algebraic function simplification.m",
+   "rules": 69,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.4 Miscellaneous/1.4.2 Algebraic function normalization.m",
+   "rules": 29,
+   "errors": 0
+  },
+  {
+   "file": "1 Algebraic functions/1.4 Miscellaneous/1.4.3 Miscellaneous algebraic functions.m",
+   "rules": 60,
+   "errors": 0
+  }
+ ]
+}
