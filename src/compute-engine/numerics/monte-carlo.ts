@@ -16,6 +16,8 @@
  * - https://64.github.io/monte-carlo/
  *
  */
+import { checkDeadline } from '../../common/interruptible';
+
 /**
  * Rounds the error to 2 significant digits, and rounds the estimate
  * to the same decimal place as the error.
@@ -45,56 +47,64 @@ export function monteCarloEstimate(
   f: (x: number) => number,
   a: number,
   b: number,
-  n = 1e5
+  n = 1e5,
+  deadline?: number
 ): { estimate: number; error: number } {
-  let sum = 0;
-  let sumSq = 0;
-
+  let sampler: () => number;
   if (a === -Infinity && b === Infinity) {
     // Transform: x = tan(π(u - 1/2)), u ∈ (0,1) → x ∈ (-∞, +∞)
     // |dx/du| = π(1 + x²)
     // Estimator: f(x) * |dx/du| = f(x) * π(1 + x²)
-    for (let i = 0; i < n; i++) {
+    sampler = () => {
       const u = Math.random();
       const x = Math.tan(Math.PI * (u - 0.5));
-      const val = f(x) * Math.PI * (1 + x * x);
-      sum += val;
-      sumSq += val * val;
-    }
+      return f(x) * Math.PI * (1 + x * x);
+    };
   } else if (a === -Infinity) {
     // Transform: x = b + ln(u), u ∈ (0,1) → x ∈ (-∞, b]
     // |dx/du| = 1/u
     // Estimator: f(x) * |dx/du| = f(x) / u
-    for (let i = 0; i < n; i++) {
+    sampler = () => {
       const u = Math.random();
-      const x = b + Math.log(u);
-      const val = f(x) / u;
-      sum += val;
-      sumSq += val * val;
-    }
+      return f(b + Math.log(u)) / u;
+    };
   } else if (b === Infinity) {
     // Transform: x = a - ln(u), u ∈ (0,1) → x ∈ [a, +∞)
     // |dx/du| = 1/u
     // Estimator: f(x) * |dx/du| = f(x) / u
-    for (let i = 0; i < n; i++) {
+    sampler = () => {
       const u = Math.random();
-      const x = a - Math.log(u);
-      const val = f(x) / u;
-      sum += val;
-      sumSq += val * val;
-    }
+      return f(a - Math.log(u)) / u;
+    };
   } else {
     // Finite interval [a, b]: standard uniform sampling
-    for (let i = 0; i < n; i++) {
-      const val = f(a + Math.random() * (b - a));
-      sum += val;
-      sumSq += val * val;
-    }
+    sampler = () => f(a + Math.random() * (b - a));
   }
 
-  const mean = sum / n;
-  const variance = (sumSq - n * mean * mean) / (n - 1);
-  const stdError = Math.sqrt(variance / n);
+  let sum = 0;
+  let sumSq = 0;
+  let taken = 0;
+  for (let i = 0; i < n; i++) {
+    if (
+      (i & 0x3ff) === 0 &&
+      deadline !== undefined &&
+      Date.now() >= deadline
+    ) {
+      // Out of time. Monte Carlo degrades gracefully: an estimate from
+      // the samples taken so far (with its larger error) is more useful
+      // than an error — but with no samples at all, give up.
+      if (i === 0) checkDeadline(deadline);
+      break;
+    }
+    const val = sampler();
+    sum += val;
+    sumSq += val * val;
+    taken++;
+  }
+
+  const mean = sum / taken;
+  const variance = (sumSq - taken * mean * mean) / (taken - 1);
+  const stdError = Math.sqrt(variance / taken);
 
   // Only the finite-interval case needs (b - a) scaling.
   // The transformed cases already incorporate the measure via Jacobian.

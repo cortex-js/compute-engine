@@ -1,6 +1,7 @@
 import type { IComputeEngine as ComputeEngine } from '../global-types';
 import type { BigNum } from './types';
 import { BigDecimal } from '../../big-decimal';
+import { checkDeadline } from '../../common/interruptible';
 
 const gammaG = 7;
 const lanczos_7_c = [
@@ -1983,4 +1984,435 @@ export function bigFresnelS(x: BigNum): BigNum {
  */
 export function bigFresnelC(x: BigNum): BigNum {
   return bigFresnel(x, 'c');
+}
+
+//
+// ---------------- Arithmetic-geometric mean ----------------
+//
+
+/**
+ * Arithmetic-geometric mean of two non-negative reals.
+ * Quadratic convergence: ~6 iterations at machine precision.
+ */
+export function agm(a: number, b: number): number {
+  if (Number.isNaN(a) || Number.isNaN(b)) return NaN;
+  if (a < 0 || b < 0) return NaN;
+  if (a === 0 || b === 0) return 0;
+  if (!isFinite(a) || !isFinite(b)) return Infinity;
+  for (let i = 0; i < 64 && Math.abs(a - b) > 1e-17 * Math.abs(a); i++) {
+    const an = 0.5 * (a + b);
+    b = Math.sqrt(a * b);
+    a = an;
+  }
+  return 0.5 * (a + b);
+}
+
+/**
+ * Bignum arithmetic-geometric mean of two non-negative reals, at the
+ * current `BigDecimal.precision` (callers should raise precision around
+ * this for guard digits).
+ */
+export function bigAgm(a: BigNum, b: BigNum): BigNum {
+  if (a.isNaN() || b.isNaN() || a.isNegative() || b.isNegative())
+    return BigDecimal.NAN;
+  if (a.isZero() || b.isZero()) return BigDecimal.ZERO;
+  const tol = new BigDecimal(10).pow(-(BigDecimal.precision - 2));
+  for (let i = 0; i < 200 && a.sub(b).abs().gt(tol.mul(a.abs())); i++) {
+    const an = a.add(b).div(BigDecimal.TWO);
+    b = a.mul(b).sqrt();
+    a = an;
+  }
+  return a.add(b).div(BigDecimal.TWO);
+}
+
+//
+// ---------------- Complete elliptic integrals (parameter m = k²) ----------------
+//
+// Convention: K(m) = ∫₀^{π/2} dθ/√(1 − m·sin²θ) (Legendre/Fungrim parameter
+// convention, m = k², matching `EllipticK(m)` in the Fungrim corpus).
+//
+
+/**
+ * Complete elliptic integral of the first kind K(m), parameter convention.
+ * Valid for m ≤ 1 (K(1) = ∞; for m > 1 the value is complex — handled by
+ * the complex kernel).
+ */
+export function ellipticK(m: number): number {
+  if (Number.isNaN(m)) return NaN;
+  if (m === 1) return Infinity;
+  if (m > 1) return NaN; // complex value: route to the complex kernel
+  // K(m) = π / (2·agm(1, √(1−m)))  [Fungrim e15f43]
+  return Math.PI / (2 * agm(1, Math.sqrt(1 - m)));
+}
+
+/**
+ * Complete elliptic integral of the second kind E(m), parameter convention.
+ * Valid for m ≤ 1 (for m > 1 the value is complex — handled by the complex
+ * kernel). Uses the AGM with the cₙ-sum (Abramowitz & Stegun 17.6.3/17.6.4):
+ * E = K·(1 − Σₙ 2^{n−1}·cₙ²) with c₀² = m, cₙ = (aₙ₋₁ − bₙ₋₁)/2.
+ */
+export function ellipticE(m: number): number {
+  if (Number.isNaN(m)) return NaN;
+  if (m === 1) return 1;
+  if (m > 1) return NaN; // complex value: route to the complex kernel
+  let a = 1;
+  let b = Math.sqrt(1 - m);
+  let sum = 0.5 * m; // 2^{−1}·c₀²
+  let pow2 = 0.5;
+  for (let i = 0; i < 64 && Math.abs(a - b) > 1e-17 * a; i++) {
+    const c = 0.5 * (a - b);
+    const an = 0.5 * (a + b);
+    b = Math.sqrt(a * b);
+    a = an;
+    pow2 *= 2;
+    sum += pow2 * c * c;
+  }
+  const K = Math.PI / (2 * a);
+  return K * (1 - sum);
+}
+
+/** Bignum K(m) for m < 1 (parameter convention). */
+export function bigEllipticK(ce: ComputeEngine, m: BigNum): BigNum {
+  if (m.isNaN() || m.gte(BigDecimal.ONE)) return BigDecimal.NAN;
+  const p = BigDecimal.precision;
+  const guard = 10;
+  return withExtraPrecision(guard, () =>
+    BigDecimal.PI.div(
+      BigDecimal.TWO.mul(bigAgm(BigDecimal.ONE, BigDecimal.ONE.sub(m).sqrt()))
+    )
+  ).toPrecision(p);
+}
+
+/** Bignum E(m) for m < 1 (parameter convention). */
+export function bigEllipticE(ce: ComputeEngine, m: BigNum): BigNum {
+  if (m.isNaN() || m.gt(BigDecimal.ONE)) return BigDecimal.NAN;
+  if (m.eq(BigDecimal.ONE)) return BigDecimal.ONE;
+  const p = BigDecimal.precision;
+  const guard = 10;
+  return withExtraPrecision(guard, () => {
+    const tol = new BigDecimal(10).pow(-(BigDecimal.precision - 2));
+    let a = BigDecimal.ONE;
+    let b = BigDecimal.ONE.sub(m).sqrt();
+    let sum = m.div(BigDecimal.TWO); // 2^{−1}·c₀²
+    let pow2 = BigDecimal.HALF;
+    for (let i = 0; i < 200 && a.sub(b).abs().gt(tol.mul(a)); i++) {
+      const c = a.sub(b).div(BigDecimal.TWO);
+      const an = a.add(b).div(BigDecimal.TWO);
+      b = a.mul(b).sqrt();
+      a = an;
+      pow2 = pow2.mul(BigDecimal.TWO);
+      sum = sum.add(pow2.mul(c).mul(c));
+    }
+    const K = BigDecimal.PI.div(BigDecimal.TWO.mul(a));
+    return K.mul(BigDecimal.ONE.sub(sum));
+  }).toPrecision(p);
+}
+
+//
+// ---------------- Hypergeometric functions ----------------
+//
+
+function isNonPositiveInteger(x: number): boolean {
+  return Number.isInteger(x) && x <= 0;
+}
+
+/**
+ * Direct Gauss series Σ (a)ₙ(b)ₙ/((c)ₙ n!) zⁿ. Assumes the caller has
+ * established convergence (|z| < 1, or a terminating parameter).
+ */
+function gauss2F1Series(
+  a: number,
+  b: number,
+  c: number,
+  z: number,
+  maxTerms = 10_000
+): number {
+  let term = 1;
+  let sum = 1;
+  for (let n = 0; n < maxTerms; n++) {
+    term *= ((a + n) * (b + n) * z) / ((c + n) * (n + 1));
+    if (term === 0) return sum; // terminating (polynomial) case
+    sum += term;
+    if (n > 2 && Math.abs(term) <= Number.EPSILON * Math.abs(sum)) return sum;
+  }
+  return sum;
+}
+
+/**
+ * Gauss hypergeometric function ₂F₁(a, b; c; z) for real arguments and
+ * z < 1 (plus the Gauss summation point z = 1 when it converges).
+ *
+ * - a or b a non-positive integer: terminating polynomial, any z.
+ * - z < 0: Pfaff transformation z → z/(z−1).
+ * - 0.5 < z < 1: linear connection at 1−z (generic case; for integer
+ *   c−a−b falls back to the direct series, which converges for z < 1).
+ * - z > 1: on/over the branch cut — complex value, returns NaN (the
+ *   complex kernel handles it when applicable).
+ */
+export function hypergeometric2F1(
+  a: number,
+  b: number,
+  c: number,
+  z: number
+): number {
+  if ([a, b, c, z].some(Number.isNaN)) return NaN;
+
+  // Terminating cases: a or b ∈ {0, −1, −2, …} → polynomial of degree −a/−b
+  const aTerm = isNonPositiveInteger(a) ? -a : Infinity;
+  const bTerm = isNonPositiveInteger(b) ? -b : Infinity;
+  const nTerms = Math.min(aTerm, bTerm);
+  if (isNonPositiveInteger(c)) {
+    // Pole at c unless the series terminates before reaching it
+    if (nTerms === Infinity || nTerms > -c) return NaN;
+  }
+  if (nTerms !== Infinity) return gauss2F1Series(a, b, c, z, nTerms + 1);
+
+  if (z === 0) return 1;
+  if (z === 1) {
+    // Gauss summation: Γ(c)Γ(c−a−b)/(Γ(c−a)Γ(c−b)), requires c−a−b > 0
+    const s = c - a - b;
+    if (s <= 0) return s === 0 ? Infinity : NaN;
+    return (gamma(c) * gamma(s)) / (gamma(c - a) * gamma(c - b));
+  }
+  if (z > 1) return NaN; // complex value (branch cut [1, ∞))
+
+  if (z < 0) {
+    // Pfaff: ₂F₁(a,b;c;z) = (1−z)^{−a}·₂F₁(a, c−b; c; z/(z−1)), maps z<0 → (0,1)
+    return Math.pow(1 - z, -a) * hypergeometric2F1(a, c - b, c, z / (z - 1));
+  }
+
+  if (z <= 0.5) return gauss2F1Series(a, b, c, z);
+
+  // z ∈ (0.5, 1): connection formula at 1−z (DLMF 15.8.4), generic case
+  const s = c - a - b;
+  if (Number.isInteger(s)) {
+    // Degenerate case (the connection formula needs a limit): the direct
+    // series still converges for z < 1, just slowly near 1.
+    if (z <= 0.95) return gauss2F1Series(a, b, c, z, 1_000_000);
+    return NaN;
+  }
+  const t1 =
+    ((gamma(c) * gamma(s)) / (gamma(c - a) * gamma(c - b))) *
+    gauss2F1Series(a, b, 1 - s, 1 - z);
+  const t2 =
+    ((gamma(c) * gamma(-s)) / (gamma(a) * gamma(b))) *
+    Math.pow(1 - z, s) *
+    gauss2F1Series(c - a, c - b, 1 + s, 1 - z);
+  return t1 + t2;
+}
+
+/** Direct Kummer series Σ (a)ₙ/((b)ₙ n!) zⁿ — converges for all z. */
+function kummer1F1Series(
+  a: number,
+  b: number,
+  z: number,
+  maxTerms = 20_000
+): number {
+  let term = 1;
+  let sum = 1;
+  for (let n = 0; n < maxTerms; n++) {
+    term *= ((a + n) * z) / ((b + n) * (n + 1));
+    if (term === 0) return sum;
+    sum += term;
+    if (n > 2 && Math.abs(term) <= Number.EPSILON * Math.abs(sum)) return sum;
+  }
+  return sum;
+}
+
+/**
+ * Kummer confluent hypergeometric function ₁F₁(a; b; z) for real arguments.
+ * Entire in z; uses the Kummer transformation e^z·₁F₁(b−a; b; −z) for z < 0
+ * to avoid catastrophic cancellation in the alternating series.
+ */
+export function hypergeometric1F1(a: number, b: number, z: number): number {
+  if ([a, b, z].some(Number.isNaN)) return NaN;
+  const aTerm = isNonPositiveInteger(a) ? -a : Infinity;
+  if (isNonPositiveInteger(b)) {
+    // Pole at b unless the series terminates before reaching it
+    if (aTerm === Infinity || aTerm > -b) return NaN;
+  }
+  if (aTerm !== Infinity) return kummer1F1Series(a, b, z, aTerm + 1);
+  if (z < 0) return Math.exp(z) * hypergeometric1F1(b - a, b, -z);
+  return kummer1F1Series(a, b, z);
+}
+
+function bigIsNonPositiveInteger(x: BigNum): boolean {
+  return x.isInteger() && !x.isPositive();
+}
+
+/** Bignum Gauss series at current precision; tolerance from precision. */
+function bigGauss2F1Series(
+  ce: ComputeEngine,
+  a: BigNum,
+  b: BigNum,
+  c: BigNum,
+  z: BigNum,
+  maxTerms: number
+): BigNum {
+  const tol = new BigDecimal(10).pow(-(BigDecimal.precision + 2));
+  let term: BigNum = BigDecimal.ONE;
+  let sum: BigNum = BigDecimal.ONE;
+  for (let n = 0; n < maxTerms; n++) {
+    if ((n & 0xff) === 0) checkDeadline(ce._deadline);
+    const nn = new BigDecimal(n);
+    term = term
+      .mul(a.add(nn))
+      .mul(b.add(nn))
+      .mul(z)
+      .div(c.add(nn).mul(new BigDecimal(n + 1)));
+    if (term.isZero()) return sum;
+    sum = sum.add(term);
+    if (n > 2 && term.abs().lt(tol.mul(sum.abs().add(BigDecimal.ONE))))
+      return sum;
+  }
+  return sum;
+}
+
+/**
+ * Bignum ₂F₁(a, b; c; z) for real arguments, z < 1. Same algorithm as the
+ * machine kernel; the degenerate integer-c−a−b connection case returns NaN
+ * (stays symbolic) rather than computing the logarithmic limit.
+ */
+export function bigHypergeometric2F1(
+  ce: ComputeEngine,
+  a: BigNum,
+  b: BigNum,
+  c: BigNum,
+  z: BigNum
+): BigNum {
+  if (a.isNaN() || b.isNaN() || c.isNaN() || z.isNaN()) return BigDecimal.NAN;
+
+  const p = BigDecimal.precision;
+  const guard = 10;
+  const maxTerms = Math.max(10_000, 40 * (p + guard));
+
+  const aTerm = bigIsNonPositiveInteger(a) ? -a.toNumber() : Infinity;
+  const bTerm = bigIsNonPositiveInteger(b) ? -b.toNumber() : Infinity;
+  const nTerms = Math.min(aTerm, bTerm);
+  if (bigIsNonPositiveInteger(c)) {
+    if (nTerms === Infinity || nTerms > -c.toNumber()) return BigDecimal.NAN;
+  }
+  if (nTerms !== Infinity && nTerms < maxTerms) {
+    return withExtraPrecision(guard, () =>
+      bigGauss2F1Series(ce, a, b, c, z, nTerms + 1)
+    ).toPrecision(p);
+  }
+
+  if (z.isZero()) return BigDecimal.ONE;
+  const one = BigDecimal.ONE;
+  if (z.eq(one)) {
+    const s = c.sub(a).sub(b);
+    if (!s.isPositive()) return BigDecimal.NAN; // divergent (or pole at s = 0)
+    return withExtraPrecision(guard, () =>
+      bigGamma(ce, c)
+        .mul(bigGamma(ce, s))
+        .div(bigGamma(ce, c.sub(a)).mul(bigGamma(ce, c.sub(b))))
+    ).toPrecision(p);
+  }
+  if (z.gt(one)) return BigDecimal.NAN; // complex value
+
+  if (z.isNegative()) {
+    // Pfaff: (1−z)^{−a}·₂F₁(a, c−b; c; z/(z−1))
+    return withExtraPrecision(guard, () => {
+      const oneMinusZ = one.sub(z);
+      const factor = a.neg().mul(oneMinusZ.ln()).exp(); // (1−z)^{−a}
+      return factor.mul(
+        bigHypergeometric2F1(ce, a, c.sub(b), c, z.div(z.sub(one)))
+      );
+    }).toPrecision(p);
+  }
+
+  if (z.lte(BigDecimal.HALF)) {
+    return withExtraPrecision(guard, () =>
+      bigGauss2F1Series(ce, a, b, c, z, maxTerms)
+    ).toPrecision(p);
+  }
+
+  // z ∈ (0.5, 1): connection formula at 1−z, generic case
+  const s = c.sub(a).sub(b);
+  if (s.isInteger()) {
+    // Degenerate case (the connection formula needs a logarithmic limit):
+    // the direct series still converges for z < 1, just slowly near 1.
+    const zNum = z.toNumber();
+    if (zNum > 0.95) return BigDecimal.NAN; // too slow: stays symbolic
+    const slowMax =
+      Math.ceil((p + guard + 2) / -Math.log10(zNum)) + 100;
+    return withExtraPrecision(guard, () =>
+      bigGauss2F1Series(ce, a, b, c, z, slowMax)
+    ).toPrecision(p);
+  }
+  return withExtraPrecision(guard, () => {
+    const oneMinusZ = one.sub(z);
+    const t1 = bigGamma(ce, c)
+      .mul(bigGamma(ce, s))
+      .div(bigGamma(ce, c.sub(a)).mul(bigGamma(ce, c.sub(b))))
+      .mul(bigGauss2F1Series(ce, a, b, one.sub(s), oneMinusZ, maxTerms));
+    const t2 = bigGamma(ce, c)
+      .mul(bigGamma(ce, s.neg()))
+      .div(bigGamma(ce, a).mul(bigGamma(ce, b)))
+      .mul(s.mul(oneMinusZ.ln()).exp()) // (1−z)^s
+      .mul(
+        bigGauss2F1Series(ce, c.sub(a), c.sub(b), one.add(s), oneMinusZ, maxTerms)
+      );
+    return t1.add(t2);
+  }).toPrecision(p);
+}
+
+/** Bignum Kummer series at current precision. */
+function bigKummer1F1Series(
+  ce: ComputeEngine,
+  a: BigNum,
+  b: BigNum,
+  z: BigNum,
+  maxTerms: number
+): BigNum {
+  const tol = new BigDecimal(10).pow(-(BigDecimal.precision + 2));
+  let term: BigNum = BigDecimal.ONE;
+  let sum: BigNum = BigDecimal.ONE;
+  for (let n = 0; n < maxTerms; n++) {
+    if ((n & 0xff) === 0) checkDeadline(ce._deadline);
+    const nn = new BigDecimal(n);
+    term = term
+      .mul(a.add(nn))
+      .mul(z)
+      .div(b.add(nn).mul(new BigDecimal(n + 1)));
+    if (term.isZero()) return sum;
+    sum = sum.add(term);
+    if (n > 2 && term.abs().lt(tol.mul(sum.abs().add(BigDecimal.ONE))))
+      return sum;
+  }
+  return sum;
+}
+
+/** Bignum ₁F₁(a; b; z) for real arguments. */
+export function bigHypergeometric1F1(
+  ce: ComputeEngine,
+  a: BigNum,
+  b: BigNum,
+  z: BigNum
+): BigNum {
+  if (a.isNaN() || b.isNaN() || z.isNaN()) return BigDecimal.NAN;
+
+  const p = BigDecimal.precision;
+  const guard = 10;
+  const maxTerms = Math.max(20_000, 40 * (p + guard));
+
+  const aTerm = bigIsNonPositiveInteger(a) ? -a.toNumber() : Infinity;
+  if (bigIsNonPositiveInteger(b)) {
+    if (aTerm === Infinity || aTerm > -b.toNumber()) return BigDecimal.NAN;
+  }
+  if (aTerm !== Infinity && aTerm < maxTerms) {
+    return withExtraPrecision(guard, () =>
+      bigKummer1F1Series(ce, a, b, z, aTerm + 1)
+    ).toPrecision(p);
+  }
+  if (z.isNegative()) {
+    // Kummer transformation: e^z·₁F₁(b−a; b; −z) — all-positive series
+    return withExtraPrecision(guard, () =>
+      z.exp().mul(bigHypergeometric1F1(ce, b.sub(a), b, z.neg()))
+    ).toPrecision(p);
+  }
+  return withExtraPrecision(guard, () =>
+    bigKummer1F1Series(ce, a, b, z, maxTerms)
+  ).toPrecision(p);
 }

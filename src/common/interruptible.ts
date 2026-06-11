@@ -15,6 +15,25 @@ export class CancellationError<T = unknown> extends Error {
 }
 
 /**
+ * Throw a `CancellationError` if `deadline` (an absolute timestamp in
+ * milliseconds, i.e. `engine._deadline`) has passed.
+ *
+ * Call this periodically from long-running loops that cannot be expressed
+ * as generators (where `run()`/`runAsync()` would apply). In tight loops,
+ * amortize the `Date.now()` cost with a stride counter:
+ *
+ *    if ((++count & 0x3ff) === 0) checkDeadline(ce._deadline);
+ */
+export function checkDeadline(deadline: number | undefined): void {
+  if (deadline !== undefined && Date.now() >= deadline) {
+    throw new CancellationError({
+      cause: 'timeout',
+      message: 'Timeout exceeded',
+    });
+  }
+}
+
+/**
  * Executes a generator asynchronously with timeout and abort signal support.
  *
  * @param gen - The generator to execute.

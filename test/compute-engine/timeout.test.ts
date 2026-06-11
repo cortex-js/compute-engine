@@ -1,5 +1,7 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { CancellationError } from '../../src/common/interruptible';
+import { extrapolate } from '../../src/compute-engine/numerics/richardson';
+import { monteCarloEstimate } from '../../src/compute-engine/numerics/monte-carlo';
 
 // Use a dedicated engine with a short timeout for all tests
 let ce: ComputeEngine;
@@ -113,6 +115,118 @@ describe('TIMEOUT', () => {
           ])
           .evaluate()
       ).toThrow(CancellationError);
+    });
+  });
+
+  describe('Number theory divisor loops', () => {
+    it('small Totient completes within timeout', () => {
+      const result = ce.expr(['Totient', 100]).evaluate();
+      expect(result.re).toBe(40);
+    });
+
+    it('huge Totient throws CancellationError', () => {
+      expect(() => ce.expr(['Totient', 1_000_000_000]).evaluate()).toThrow(
+        CancellationError
+      );
+    });
+
+    it('huge Sigma0 throws CancellationError', () => {
+      expect(() => ce.expr(['Sigma0', 10_000_000_000]).evaluate()).toThrow(
+        CancellationError
+      );
+    });
+
+    it('huge Sigma1 throws CancellationError', () => {
+      expect(() => ce.expr(['Sigma1', 10_000_000_000]).evaluate()).toThrow(
+        CancellationError
+      );
+    });
+
+    it('huge IsPerfect throws CancellationError', () => {
+      expect(() => ce.expr(['IsPerfect', 10_000_000_000]).evaluate()).toThrow(
+        CancellationError
+      );
+    });
+
+    it('exponential Eulerian recursion throws CancellationError', () => {
+      expect(() => ce.expr(['Eulerian', 60, 30]).evaluate()).toThrow(
+        CancellationError
+      );
+    });
+  });
+
+  describe('Collection enumeration', () => {
+    it('small collection enumeration completes within timeout', () => {
+      const result = ce
+        .expr(['CountIf', ['Range', 100], ['Function', 'True']])
+        .evaluate();
+      expect(result.re).toBe(100);
+    });
+
+    it('enumeration of a huge Range throws CancellationError', () => {
+      expect(() =>
+        ce
+          .expr(['CountIf', ['Range', 100_000_000], ['Function', 'True']])
+          .evaluate()
+      ).toThrow(CancellationError);
+    });
+  });
+
+  describe('Numeric limit (Richardson extrapolation)', () => {
+    it('extrapolate aborts when the deadline has passed', () => {
+      expect(() =>
+        extrapolate((x) => Math.sin(x) / x, 0, { deadline: Date.now() - 1 })
+      ).toThrow(CancellationError);
+    });
+
+    it('extrapolate aborts mid-run with a slow integrand', () => {
+      const deadline = Date.now() + 20;
+      const slow = (x: number) => {
+        const end = Date.now() + 5;
+        while (Date.now() < end) {
+          /* busy-wait to simulate an expensive function evaluation */
+        }
+        // A function with no limit at 0, so extrapolation cannot
+        // converge and exit early
+        return Math.sin(1 / x);
+      };
+      expect(() =>
+        extrapolate(slow, 0, { deadline, breaktol: Infinity })
+      ).toThrow(CancellationError);
+    });
+
+    it('NLimit completes within timeout for a well-behaved function', () => {
+      const result = ce
+        .expr(['NLimit', ['Function', ['Divide', ['Sin', 'x'], 'x'], 'x'], 0])
+        .evaluate();
+      expect(result.re).toBeCloseTo(1, 6);
+    });
+  });
+
+  describe('Monte Carlo quadrature', () => {
+    it('throws when the deadline passed before any sample was taken', () => {
+      expect(() =>
+        monteCarloEstimate((x) => x * x, 0, 1, 1e5, Date.now() - 1)
+      ).toThrow(CancellationError);
+    });
+
+    it('returns a partial estimate when the deadline passes mid-run', () => {
+      // 1e8 samples take well over 20ms: the deadline passes mid-run and
+      // the estimate from the samples taken so far is still returned.
+      const deadline = Date.now() + 20;
+      const { estimate } = monteCarloEstimate(
+        (x) => x * x,
+        0,
+        1,
+        1e8,
+        deadline
+      );
+      expect(estimate).toBeCloseTo(1 / 3, 1);
+    });
+
+    it('completes without a deadline', () => {
+      const { estimate } = monteCarloEstimate((x) => x * x, 0, 1, 1e5);
+      expect(estimate).toBeCloseTo(1 / 3, 1);
     });
   });
 

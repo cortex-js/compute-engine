@@ -61,6 +61,7 @@ import { matchesSymbol } from '../../math-json/utils';
 import { getSignFromAssumptions } from '../assume';
 import { getFactIndex, hasAssumptions } from './constraint-subject';
 import { isSymbol } from './type-guards';
+import { checkDeadline } from '../../common/interruptible';
 
 /**
  * ### BoxedSymbol
@@ -823,14 +824,19 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
 
   each(): Generator<Expression> {
     const iter = this._asCollection?.iterator?.(this._value ?? this);
-    if (iter)
+    if (iter) {
+      const engine = this.engine;
       return (function* () {
         let result = iter.next();
+        let i = 0;
         while (!result.done) {
+          // Enumeration can be unbounded: respect the evaluation deadline.
+          if ((++i & 0xff) === 0) checkDeadline(engine._deadline);
           yield result.value;
           result = iter.next();
         }
       })();
+    }
     return this._value?.each() ?? (function* () {})();
   }
 

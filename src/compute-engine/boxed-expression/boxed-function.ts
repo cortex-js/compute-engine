@@ -74,6 +74,7 @@ import {
 } from './sgn';
 import { cachedValue, CachedValue } from './cache';
 import { apply, lookup } from '../function-utils';
+import { checkDeadline } from '../../common/interruptible';
 
 /** When `materialization` is true, display 10 items if the collection is
  * infinite, otherwise 5 from the head and 5 from the tail
@@ -1049,13 +1050,14 @@ export class BoxedFunction
     // Return an empty generator if no iterator is defined
     if (!iter) return (function* () {})();
 
+    const engine = this.engine;
     return (function* () {
       let result = iter.next();
-      // let i = 0;
+      let i = 0;
       while (!result.done) {
-        // i += 1;
-        //     if (i++ > limit)
-        //       throw new CancellationError({ cause: 'iteration-limit-exceeded' });
+        // Enumeration can be unbounded (infinite or very large lazy
+        // collections): respect the engine evaluation deadline.
+        if ((++i & 0xff) === 0) checkDeadline(engine._deadline);
         yield result.value;
         result = iter.next();
       }

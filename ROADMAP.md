@@ -1,6 +1,8 @@
 # Compute Engine — Roadmap
 
-**Last updated:** 2026-06-10, following the identities/assumptions release.
+**Last updated:** 2026-06-10. Items 2 (interruptible evaluation) and 4
+(Tier-2 numeric kernels) completed — both prerequisites for the Rubi
+integration (`docs/rubi/RUBI.md`).
 
 Context: the 2026-06 release shipped the Fungrim-derived identities library
 (`@cortex-js/compute-engine/identities`, 1,376 rules), the complex-domain
@@ -47,32 +49,33 @@ inverse-composition shape; acceptance via `solve-rules.test.ts` extensions
 
 **Effort:** ~1 week. **Dependencies:** none — everything is landed.
 
-### 2. Interruptible evaluation
+### 2. ~~Interruptible evaluation~~ — ✅ done (2026-06-10)
 
-**What:** make long-running evaluation loops respect the engine deadline
-(`ce._timeRemaining`) — specifically collection enumeration, numeric `Limit`
-extraction, numeric quadrature (`Integrate`), infinite-`Sum` numeric
-summation, and the number-theory divisor loops.
+**Outcome:** long-running evaluation loops now respect the engine deadline
+(throwing `CancellationError`, same contract as `Factorial`/`Sum`):
 
-**Why:** this is the single biggest *robustness* gap left. During corpus
-validation we hit it repeatedly: entry `4099d2` (a `Limit` over a cartesian
-power of `Range`) ran 11+ CPU-minutes uninterruptibly; the Stage-2 numeric
-harness had to grow an external stall watchdog, a hang denylist
-(`FUNGRIM_SKIP_IDS`), and structural skips for 202 representation-class +
-33 Derivative-containing entries. Any user can trigger the same hangs with
-ordinary-looking input.
+- **Shared helper:** `checkDeadline(deadline)` in `src/common/interruptible.ts`
+  (takes the absolute `ce._deadline`; strided in tight loops to amortize
+  `Date.now()`).
+- **Collection enumeration:** `BoxedFunction.each()` and `BoxedSymbol.each()`
+  check every 256 items — one choke point covers Filter/Select/CountIf/
+  Position/GroupBy, the set iterators, and cartesian-power enumeration
+  (the `4099d2` hang class).
+- **Number theory:** `Totient`, `Sigma0/1/−1`, `IsPerfect`, `IsAbundant`
+  divisor loops, plus the `Eulerian`/`Stirling`/`NPartition` recursions.
+- **Numeric `Limit`:** `extrapolate()` (Richardson) takes a `deadline`
+  option, checked between function evaluations; `limit()` threads it;
+  `Limit`/`NLimit` pass `engine._deadline`.
+- **Quadrature:** `monteCarloEstimate()` checks every 1024 samples and
+  *degrades gracefully* — it returns the estimate from the samples taken
+  so far (with its larger error) rather than throwing, unless no samples
+  were taken at all.
 
-**How:** thread deadline checks into the iteration hot loops (the engine
-already has the `_timeRemaining` machinery — e.g. `Factorial` wraps `run()`;
-the gap is that collection iterators, `limit()`, quadrature, and
-`Totient`/`Sigma*`-style `for (1n..k)` loops never check it). Acceptance: the
-Stage-2 harness runs the representation/derivative slices without the
-watchdog; `scripts/fungrim/validate.ts --numeric` completes with the
-structural skips removed.
-
-**Effort:** ~1–2 weeks (the checks are simple; finding all the loops and
-testing timeout behavior is the work). **Unlocks:** item 5's validation reach,
-plus retiring `/tmp`-watchdog patterns everywhere.
+Coverage in `test/compute-engine/timeout.test.ts` (hang regression tests for
+each family). **Residual:** the Stage-2 harness watchdog/denylist
+(`FUNGRIM_SKIP_IDS`) can now be retired — re-run
+`scripts/fungrim/validate.ts --numeric` with the structural skips removed to
+confirm reach (harness-side change, not engine-side).
 
 ### 3. CI for the corpus pipeline
 
@@ -93,25 +96,42 @@ continuous.
 
 ## Medium-term
 
-### 4. Tier-2 numeric kernels for special functions
+### 4. ~~Tier-2 numeric kernels for special functions~~ — ✅ done (2026-06-10)
 
-**What:** numeric `evaluate`/`N()` implementations for the highest-value shell
-heads: Gauss hypergeometric ₂F₁ (and ₁F₁), elliptic integrals K/E via the
-AGM (the AGM gives both nearly free), and `JacobiTheta` (q-series converge
-extremely fast; theta gives Dedekind eta and the modular functions almost
-free).
+**Outcome:** seven shell heads are now engine built-ins with numeric kernels,
+in a new `special-functions` library (`library/special-functions.ts`),
+following the B23 kernel pattern and the Fungrim conventions:
 
-**Why:** 567 corpus entries are skipped in numeric validation because their
-heads have no kernel ("not-evaluable"); each kernel converts a family of
-shells into computable functions *and* turns a swath of shipped identities
-into verifiable, numerically-usable knowledge. Fungrim's own corpus documents
-the implementations (series and AGM representations are entries in
-`data/fungrim/corpus/`).
+- **`EllipticK(m)` / `EllipticE(m)`** (parameter m = k², Fungrim
+  `e8ae42`/`723fd0`): machine + bignum via the AGM (E via the cₙ-sum,
+  A&S 17.6.4), complex kernels via the optimal-branch complex AGM (so
+  K(m>1) returns the correct complex value). K(1) = +∞, E(1) = 1 exact.
+- **`AGM(a, b)`** (and the 1-arg Fungrim shorthand `AGM(z)` = AGM(1, z)):
+  machine + bignum + complex.
+- **`Hypergeometric2F1(a,b,c,z)`**: terminating/polynomial cases, direct
+  series, Pfaff z→z/(z−1), 1−z connection formula (generic case), Gauss
+  summation at z = 1; machine + bignum (50-digit verified) + complex
+  (|z| ≤ 0.8 ∪ Pfaff region).
+- **`Hypergeometric1F1(a,b,z)`**: entire series + Kummer transformation
+  for z < 0; machine + bignum + complex.
+- **`JacobiTheta(j, z, τ)`** (Fungrim `f96eac`: q = e^{iπτ}, period 1 in z)
+  and **`DedekindEta(τ)`** (`1dc520`): machine-complex q-series/products
+  (envelope-based truncation; derivative order r > 0 stays symbolic).
 
-**Effort:** ~1 week per family, independent of each other. Follow the
-established bignum-kernel pattern from the B23 work
-(`numerics/special-functions.ts`: machine + bignum kernels, guard digits,
-`numericApproximation` gating).
+Supporting work: `applyN()` dispatcher in `boxed-expression/apply.ts` with a
+bignum → machine → complex NaN-cascade (a kernel returning NaN means
+"outside my implemented domain", and the expression stays symbolic if all
+kernels pass). Bignum series loops are deadline-checked (item 2). The
+artifact loader skips its shells for these heads ("never widen"); the
+declarations table re-prunes at the next artifact regen. ~60 reference-value
+tests in `special-functions.test.ts`; Stage-1 corpus validation unchanged at
+99.80%, all 1,376 rules load.
+
+**Residual:** bignum kernels are real-argument only (complex falls back to
+machine precision); ₂F₁ outside |z|<1 ∪ Pfaff region for complex z, the
+degenerate integer-(c−a−b) connection case at z > 0.95, and theta
+derivatives (r ≥ 1) stay symbolic. The 567 "not-evaluable" Stage-2 skips
+should now be re-measured (harness side).
 
 ### 5. Per-head aggregated rule dispatch
 

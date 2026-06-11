@@ -280,7 +280,8 @@ volumes
             jsf,
             lower,
             upper,
-            compiled.success ? 1e7 : 1e4
+            compiled.success ? 1e7 : 1e4,
+            ce._deadline
           );
           return ce.expr([
             'PlusMinus',
@@ -370,8 +371,13 @@ volumes
         const jsf = (compiled.run as (x: number) => number) ?? applicableN1(f);
         return new BoxedNumber(
           engine,
-          monteCarloEstimate(jsf, lower, upper, compiled.success ? 1e7 : 1e4)
-            .estimate
+          monteCarloEstimate(
+            jsf,
+            lower,
+            upper,
+            compiled.success ? 1e7 : 1e4,
+            engine._deadline
+          ).estimate
         );
       },
     },
@@ -415,7 +421,10 @@ volumes
           if (Number.isNaN(target)) return undefined;
           const compiled = engine._compile(f);
           const fn = (compiled.run as (x: number) => number) ?? applicableN1(f);
-          return new BoxedNumber(engine, limit(fn, target, dir ? dir.re : 1));
+          return new BoxedNumber(
+            engine,
+            limit(fn, target, dir ? dir.re : 1, engine._deadline)
+          );
         }
         return undefined;
       },
@@ -439,7 +448,10 @@ volumes
         if (Number.isNaN(target)) return undefined;
         const compiled = engine._compile(f);
         const fn = (compiled.run as (x: number) => number) ?? applicableN1(f);
-        return new BoxedNumber(engine, limit(fn, target, dir ? dir.re : 1));
+        return new BoxedNumber(
+          engine,
+          limit(fn, target, dir ? dir.re : 1, engine._deadline)
+        );
       },
     },
   },

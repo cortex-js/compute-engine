@@ -12,6 +12,7 @@ import { NUMBER_THEORY_LIBRARY } from './number-theory';
 import { POLYNOMIALS_LIBRARY } from './polynomials';
 import { RELOP_LIBRARY } from './relational-operator';
 import { SETS_LIBRARY } from './sets';
+import { SPECIAL_FUNCTIONS_LIBRARY } from './special-functions';
 import { STATISTICS_LIBRARY } from './statistics';
 import { TRIGONOMETRY_LIBRARY } from './trigonometry';
 import { UNITS_LIBRARY } from './units';
@@ -101,6 +102,11 @@ export const STANDARD_LIBRARIES: LibraryDefinition[] = [
     name: 'number-theory',
     requires: ['arithmetic'],
     definitions: NUMBER_THEORY_LIBRARY,
+  },
+  {
+    name: 'special-functions',
+    requires: ['arithmetic'],
+    definitions: SPECIAL_FUNCTIONS_LIBRARY,
   },
   {
     name: 'linear-algebra',

@@ -34,6 +34,76 @@ export function apply(
   return ce.number(result);
 }
 
+/**
+ * N-ary kernel dispatcher for special functions.
+ *
+ * Routing:
+ * - any complex operand → `complexFn`
+ * - bignum preferred and `bigFn` available → `bigFn`
+ * - otherwise → machine `fn`; if `fn` returns NaN on finite inputs and a
+ *   `complexFn` is available, retry it (the value may be complex for real
+ *   inputs, e.g. EllipticK(m) for m > 1).
+ *
+ * A NaN result on finite inputs yields `undefined` (the expression stays
+ * symbolic) rather than a NaN literal: the kernels use NaN to signal
+ * "outside the implemented domain", not a mathematical result.
+ */
+export function applyN(
+  ops: ReadonlyArray<Expression>,
+  fn: (...xs: number[]) => number | Complex,
+  bigFn?: (...xs: BigDecimal[]) => BigDecimal | Complex | number,
+  complexFn?: (...xs: Complex[]) => Complex
+): Expression | undefined {
+  if (!ops.every((op) => isNumber(op))) return undefined;
+  const ce = ops[0].engine;
+
+  if (ops.some((op) => Number.isNaN(op.re) || Number.isNaN(op.im)))
+    return ce.NaN;
+
+  let result: number | Complex | BigDecimal | undefined = undefined;
+
+  const isNaNResult = (r: typeof result): boolean =>
+    r === undefined ||
+    (typeof r === 'number'
+      ? Number.isNaN(r)
+      : r instanceof Complex
+        ? r.isNaN()
+        : r.isNaN());
+
+  if (ops.some((op) => op.im !== 0)) {
+    result = complexFn?.(...ops.map((op) => ce.complex(op.re, op.im)));
+  } else {
+    // Cascade: bignum (if preferred) → machine → complex. A NaN from a
+    // kernel means "outside this kernel's implemented domain", so a
+    // lower-precision or complex-valued answer is better than none.
+    if (bignumPreferred(ce) && bigFn)
+      result = bigFn(...ops.map((op) => op.bignumRe ?? ce.bignum(op.re)));
+    if (isNaNResult(result)) result = fn(...ops.map((op) => op.re));
+    if (
+      isNaNResult(result) &&
+      complexFn &&
+      ops.every((op) => Number.isFinite(op.re))
+    ) {
+      // The value may be complex for real arguments
+      result = complexFn(...ops.map((op) => ce.complex(op.re, 0)));
+    }
+  }
+
+  if (result === undefined) return undefined;
+  if (result instanceof Complex) {
+    if (Number.isNaN(result.re) || Number.isNaN(result.im)) return undefined;
+    return ce.number(
+      ce._numericValue({ re: ce.chop(result.re), im: ce.chop(result.im) })
+    );
+  }
+  if (typeof result === 'number') {
+    if (Number.isNaN(result)) return undefined;
+    return ce.number(result);
+  }
+  if (result.isNaN()) return undefined;
+  return ce.number(result);
+}
+
 export function apply2(
   expr1: Expression,
   expr2: Expression,

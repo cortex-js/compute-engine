@@ -1,6 +1,7 @@
 import type { SymbolDefinitions } from '../global-types';
 import { toBigint } from '../boxed-expression/numerics';
 import { gcd } from '../numerics/numeric-bigint';
+import { checkDeadline } from '../../common/interruptible';
 
 export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
   {
@@ -14,7 +15,9 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         const k = toBigint(n);
         if (k === null || k < 1) return undefined;
         let result = 1n;
+        let count = 0;
         for (let i = 2n; i < k; i++) {
+          if ((++count & 0x3ff) === 0) checkDeadline(ce._deadline);
           if (gcd(i, k) === 1n) result++;
         }
         return ce.number(result);
@@ -29,7 +32,9 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         const k = toBigint(n);
         if (k === null || k < 1) return undefined;
         let count = 0;
+        let steps = 0;
         for (let i = 1n; i <= k; i++) {
+          if ((++steps & 0xfff) === 0) checkDeadline(ce._deadline);
           if (k % i === 0n) count++;
         }
         return ce.number(count);
@@ -44,7 +49,9 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         const k = toBigint(n);
         if (k === null || k < 1) return undefined;
         let sum = ce.bignum(0);
+        let steps = 0;
         for (let i = 1n; i <= k; i++) {
+          if ((++steps & 0xfff) === 0) checkDeadline(ce._deadline);
           if (k % i === 0n) sum = sum.add(ce.bignum(i));
         }
         return ce.number(sum);
@@ -59,7 +66,9 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         const k = toBigint(n);
         if (k === null || k < 1) return undefined;
         let sum = ce.bignum(0);
+        let steps = 0;
         for (let i = 1n; i <= k; i++) {
+          if ((++steps & 0xfff) === 0) checkDeadline(ce._deadline);
           if (k % i === 0n) sum = sum.add(ce.bignum(1).div(ce.bignum(i)));
         }
         return ce.number(sum);
@@ -75,7 +84,9 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         const k = toBigint(n);
         if (k === null || k < 1) return undefined;
         let sum = 0n;
+        let steps = 0;
         for (let i = 1n; i < k; i++) {
+          if ((++steps & 0xfff) === 0) checkDeadline(ce._deadline);
           if (k % i === 0n) sum += i;
         }
         return ce.symbol(sum === k ? 'True' : 'False');
@@ -92,7 +103,9 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         const mm = toBigint(m);
         if (nn === null || mm === null || nn < 0n || mm < 0n || mm >= nn)
           return undefined;
+        let steps = 0;
         const A = (n: bigint, k: bigint): bigint => {
+          if ((++steps & 0xfff) === 0) checkDeadline(ce._deadline);
           if (k === 0n) return 1n;
           if (k >= n) return 0n;
           return (k + 1n) * A(n - 1n, k) + (n - k) * A(n - 1n, k - 1n);
@@ -111,7 +124,9 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         const mm = toBigint(m);
         if (nn === null || mm === null || nn < 0n || mm < 0n || mm > nn)
           return undefined;
+        let steps = 0;
         const S = (n: bigint, k: bigint): bigint => {
+          if ((++steps & 0xfff) === 0) checkDeadline(ce._deadline);
           if (n === 0n && k === 0n) return 1n;
           if (n === 0n || k === 0n) return 0n;
           return S(n - 1n, k - 1n) + k * S(n - 1n, k);
@@ -128,7 +143,9 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         const nn = toBigint(n);
         if (nn === null || nn < 0n) return undefined;
         const memo = new Map<bigint, bigint>();
+        let steps = 0;
         const P = (n: bigint): bigint => {
+          if ((++steps & 0xfff) === 0) checkDeadline(ce._deadline);
           if (n === 0n) return 1n;
           if (n < 0n) return 0n;
           if (memo.has(n)) return memo.get(n)!;
@@ -237,7 +254,9 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         const k = toBigint(n);
         if (k === null || k < 1n) return ce.False;
         let sum = 1n;
+        let steps = 0;
         for (let i = 2n; i * i <= k; i++) {
+          if ((++steps & 0xfff) === 0) checkDeadline(ce._deadline);
           if (k % i === 0n) {
             sum += i;
             const j = k / i;

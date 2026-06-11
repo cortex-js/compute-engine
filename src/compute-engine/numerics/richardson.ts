@@ -17,6 +17,8 @@
     series in `h`.
 */
 
+import { checkDeadline } from '../../common/interruptible';
+
 export interface ExtrapolateOptions {
   contract?: number; // contract the step size by this factor on each step
   step?: number; // initial step size
@@ -25,6 +27,7 @@ export interface ExtrapolateOptions {
   rtol?: number; // relative tolerance
   maxeval?: number; // maximum number of function evaluations
   breaktol?: number; // break if error increases by more than this factor
+  deadline?: number; // absolute timestamp (ms): abort with CancellationError when reached
 }
 
 // function norm(arr: NumberArray): number {
@@ -96,6 +99,7 @@ export function extrapolate(
     rtol = atol > 0 ? 0 : Math.sqrt(Number.EPSILON),
     maxeval = 1e6, // Number.MAX_SAFE_INTEGER
     breaktol = 2,
+    deadline,
   } = options;
 
   if (!isFinite(x0)) {
@@ -107,6 +111,7 @@ export function extrapolate(
       contract: Math.abs(contract) > 1 ? 1 / contract : contract,
       step: 1 / step,
       power,
+      deadline,
     });
   }
 
@@ -118,6 +123,9 @@ export function extrapolate(
   let numeval = 1;
 
   while (numeval < maxeval) {
+    // Each iteration costs a function evaluation, which may itself be
+    // expensive: check the evaluation deadline between evaluations.
+    checkDeadline(deadline);
     numeval += 1;
     h *= contract;
     neville.push(f(x0 + h));

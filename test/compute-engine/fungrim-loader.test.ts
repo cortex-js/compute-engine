@@ -45,7 +45,10 @@ describe('importing the loader module', () => {
           r.id.startsWith('fungrim:')
       )
     ).toBe(false);
-    expect(ce.lookupDefinition('JacobiTheta')).toBeUndefined();
+    // CarlsonRF is still a shell-only head (JacobiTheta, DedekindEta,
+    // EllipticK/E, AGM and the hypergeometrics became engine built-ins
+    // with the Tier-2 numeric kernels)
+    expect(ce.lookupDefinition('CarlsonRF')).toBeUndefined();
     expect(ce.box(['Gamma', ['Rational', 1, 2]]).simplify().toString()).toBe(
       'Gamma(1/2)'
     );
@@ -113,15 +116,31 @@ describe('loadIdentities (full artifact)', () => {
   });
 
   it('declares shell heads in the current scope', () => {
-    expect(report.declared).toContain('JacobiTheta');
     expect(report.declared).toContain('CarlsonRF');
-    expect(report.declared).toContain('DedekindEta');
-    // The artifact declarations table is already pruned of CE built-ins
-    // (Gamma, Digamma, LambertW, … are not shells); a full load declares
-    // exactly the pruned table
+    // The artifact declarations table is pruned of CE built-ins at compile
+    // time (Gamma, Digamma, LambertW, …). Heads promoted to built-ins
+    // AFTER the artifact was compiled (the Tier-2 kernels: JacobiTheta,
+    // DedekindEta, EllipticK/E, AGM, Hypergeometric2F1/1F1) are skipped at
+    // load time instead ("never widen"), until the next artifact regen
+    // re-prunes the table.
+    const TIER2_BUILTINS = [
+      'AGM',
+      'DedekindEta',
+      'EllipticE',
+      'EllipticK',
+      'Hypergeometric1F1',
+      'Hypergeometric2F1',
+      'JacobiTheta',
+    ];
+    for (const name of TIER2_BUILTINS) {
+      expect(report.declared).not.toContain(name);
+      expect(ce.lookupDefinition(name)).toBeDefined();
+    }
     expect(report.declared).not.toContain('Gamma');
     expect(report.declared).toEqual(
-      Object.keys(FUNGRIM_CORE.declarations).sort()
+      Object.keys(FUNGRIM_CORE.declarations)
+        .filter((n) => !TIER2_BUILTINS.includes(n))
+        .sort()
     );
     expect(ce.lookupDefinition('JacobiTheta')).toBeDefined();
   });
@@ -428,7 +447,8 @@ describe('per-engine isolation', () => {
           r.id.startsWith('fungrim:')
       )
     ).toBe(false);
-    expect(ceB.lookupDefinition('JacobiTheta')).toBeUndefined();
+    // (CarlsonRF is still shell-only; JacobiTheta is now an engine built-in)
+    expect(ceB.lookupDefinition('CarlsonRF')).toBeUndefined();
     const g = ceB.box(['Gamma', ['Rational', 1, 2]]);
     expect(g.simplify().isSame(g)).toBe(true);
 

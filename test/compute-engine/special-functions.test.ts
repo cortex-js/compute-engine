@@ -526,3 +526,276 @@ describe('ERROR FUNCTION (REVIEW.md G1)', () => {
     expect(ce.box(['Erfc', 0]).N().re).toBe(1);
   });
 });
+
+//
+// ---------------- Tier-2 kernels (ROADMAP item 4) ----------------
+// Reference values computed independently (Simpson quadrature for K/E,
+// direct series for ₂F₁/₁F₁/θ/η, closed forms where available).
+//
+
+describe('ELLIPTIC INTEGRALS (parameter convention m = k²)', () => {
+  test('K(0) = π/2', () => {
+    expectApprox(ce.expr(['EllipticK', 0]), Math.PI / 2, 1e-14);
+  });
+
+  test('K(0.5) ≈ 1.8540746773013719', () => {
+    expectApprox(ce.expr(['EllipticK', 0.5]), 1.8540746773013719, 1e-13);
+  });
+
+  test('E(0.5) ≈ 1.3506438810476755', () => {
+    expectApprox(ce.expr(['EllipticE', 0.5]), 1.3506438810476755, 1e-13);
+  });
+
+  test('K(−1) ≈ 1.3110287771460598 (negative parameter)', () => {
+    expectApprox(ce.expr(['EllipticK', -1]), 1.3110287771460598, 1e-13);
+  });
+
+  test('E(−1) ≈ 1.9100988945138560 (negative parameter)', () => {
+    expectApprox(ce.expr(['EllipticE', -1]), 1.910098894513856, 1e-13);
+  });
+
+  test('K(0.99) ≈ 3.6956373629898747 (near the singularity)', () => {
+    expectApprox(ce.expr(['EllipticK', 0.99]), 3.6956373629898747, 1e-12);
+  });
+
+  test('K(1) = +∞ exactly (Fungrim 45b157)', () => {
+    expect(ce.expr(['EllipticK', 1]).evaluate().toString()).toBe('+oo');
+  });
+
+  test('E(1) = 1 exactly', () => {
+    expect(ce.expr(['EllipticE', 1]).evaluate().re).toBe(1);
+  });
+
+  test('K(2) is complex: ≈ 1.3110287771 − 1.3110287771i (m > 1)', () => {
+    const r = ce.expr(['EllipticK', 2]).N();
+    expect(Math.abs(r.re - 1.3110287771460598)).toBeLessThan(1e-12);
+    expect(Math.abs(r.im + 1.3110287771460598)).toBeLessThan(1e-12);
+  });
+
+  test('Legendre relation: E(m)K(1−m) + E(1−m)K(m) − K(m)K(1−m) = π/2', () => {
+    const m = 0.3;
+    const K = (x: number) => ce.expr(['EllipticK', x]).N().re;
+    const E = (x: number) => ce.expr(['EllipticE', x]).N().re;
+    const lhs = E(m) * K(1 - m) + E(1 - m) * K(m) - K(m) * K(1 - m);
+    expect(Math.abs(lhs - Math.PI / 2)).toBeLessThan(1e-13);
+  });
+
+  test('AGM relation: K(m) = π/(2·AGM(1, √(1−m))) (Fungrim e15f43)', () => {
+    const m = 0.7;
+    const agmVal = ce.expr(['AGM', 1, Math.sqrt(1 - m)]).N().re;
+    expectApprox(ce.expr(['EllipticK', m]), Math.PI / (2 * agmVal), 1e-13);
+  });
+
+  test('AGM(1, 2) ≈ 1.4567910310469068', () => {
+    expectApprox(ce.expr(['AGM', 1, 2]), 1.4567910310469068, 1e-14);
+  });
+
+  test('AGM(z) is shorthand for AGM(1, z)', () => {
+    expectApprox(ce.expr(['AGM', 2]), 1.4567910310469068, 1e-14);
+  });
+});
+
+describe('GAUSS HYPERGEOMETRIC ₂F₁', () => {
+  test('₂F₁(a,b;c;0) = 1 exactly', () => {
+    expect(ce.expr(['Hypergeometric2F1', 0.3, 1.7, 2.1, 0]).evaluate().re).toBe(
+      1
+    );
+  });
+
+  test('₂F₁(1,1;2;z) = −ln(1−z)/z at z = 0.3', () => {
+    expectApprox(
+      ce.expr(['Hypergeometric2F1', 1, 1, 2, 0.3]),
+      -Math.log(0.7) / 0.3,
+      1e-14
+    );
+  });
+
+  test('₂F₁(½,½;1;m) = 2K(m)/π at m = 0.5', () => {
+    expectApprox(
+      ce.expr(['Hypergeometric2F1', 0.5, 0.5, 1, 0.5]),
+      (2 * 1.8540746773013719) / Math.PI,
+      1e-12
+    );
+  });
+
+  test('connection formula region: ₂F₁(0.3,0.7;1.5;0.75)', () => {
+    expectApprox(
+      ce.expr(['Hypergeometric2F1', 0.3, 0.7, 1.5, 0.75]),
+      1.1741475518454894,
+      1e-12
+    );
+  });
+
+  test('Pfaff region z < 0: ₂F₁(½,½;1;−3) = 2K(−3)/π', () => {
+    expectApprox(
+      ce.expr(['Hypergeometric2F1', 0.5, 0.5, 1, -3]),
+      0.6864402503091752,
+      1e-12
+    );
+  });
+
+  test('terminating polynomial: ₂F₁(−3,2;0.5;7) = −3297.4', () => {
+    expectApprox(
+      ce.expr(['Hypergeometric2F1', -3, 2, 0.5, 7]),
+      -3297.4,
+      1e-12
+    );
+  });
+
+  test('Gauss summation at z = 1: ₂F₁(1,2;4;1) = Γ(4)Γ(1)/(Γ(3)Γ(2)) = 3', () => {
+    expectApprox(ce.expr(['Hypergeometric2F1', 1, 2, 4, 1]), 3, 1e-12);
+  });
+
+  test('complex z inside the unit disk: ₂F₁(1,1;2;0.3+0.4i)', () => {
+    // −ln(1−z)/z at z = 0.3+0.4i = 1.0891035324499092 + 0.2783490042218641i
+    const r = ce.expr(['Hypergeometric2F1', 1, 1, 2, ['Complex', 0.3, 0.4]]).N();
+    expect(Math.abs(r.re - 1.0891035324499092)).toBeLessThan(1e-12);
+    expect(Math.abs(r.im - 0.2783490042218641)).toBeLessThan(1e-12);
+  });
+});
+
+describe('KUMMER CONFLUENT HYPERGEOMETRIC ₁F₁', () => {
+  test('₁F₁(a;b;0) = 1 exactly', () => {
+    expect(ce.expr(['Hypergeometric1F1', 0.3, 1.7, 0]).evaluate().re).toBe(1);
+  });
+
+  test('₁F₁(1;2;z) = (eᶻ−1)/z at z = 2', () => {
+    expectApprox(
+      ce.expr(['Hypergeometric1F1', 1, 2, 2]),
+      (Math.exp(2) - 1) / 2,
+      1e-14
+    );
+  });
+
+  test('Kummer transformation region z < 0: ₁F₁(½;3/2;−4) = √π·erf(2)/4', () => {
+    expectApprox(
+      ce.expr(['Hypergeometric1F1', 0.5, 1.5, -4]),
+      0.44104069538121077,
+      1e-13
+    );
+  });
+
+  test('generic parameters: ₁F₁(2.5;1.2;3.7) ≈ 235.41539872666385', () => {
+    expectApprox(
+      ce.expr(['Hypergeometric1F1', 2.5, 1.2, 3.7]),
+      235.41539872666385,
+      1e-12
+    );
+  });
+});
+
+describe('JACOBI THETA FUNCTIONS (Fungrim convention, q = e^{iπτ})', () => {
+  test('θ₃(0, i) = π^{1/4}/Γ(3/4) ≈ 1.0864348112133080', () => {
+    expectApprox(
+      ce.expr(['JacobiTheta', 3, 0, 'ImaginaryUnit']),
+      1.086434811213308,
+      1e-13
+    );
+  });
+
+  test('θ₁(0, τ) = 0 (odd function)', () => {
+    const r = ce.expr(['JacobiTheta', 1, 0, 'ImaginaryUnit']).N();
+    expect(Math.abs(r.re)).toBeLessThan(1e-15);
+  });
+
+  test('θ₁(0.2, 0.3+0.5i) ≈ 0.80085043984 + 0.13798118531i', () => {
+    const r = ce
+      .expr(['JacobiTheta', 1, 0.2, ['Complex', 0.3, 0.5]])
+      .N();
+    expect(Math.abs(r.re - 0.8008504398413848)).toBeLessThan(1e-12);
+    expect(Math.abs(r.im - 0.13798118530588993)).toBeLessThan(1e-12);
+  });
+
+  test('Jacobi identity: θ₂⁴(0,τ) + θ₄⁴(0,τ) = θ₃⁴(0,τ)', () => {
+    const th = (j: number) =>
+      ce.expr(['JacobiTheta', j, 0, ['Complex', 0.1, 1.2]]).N();
+    const p4 = (c: any) => {
+      // (re+im·i)⁴ via complex arithmetic on the boxed result
+      const re = c.re;
+      const im = c.im;
+      const r2 = re * re - im * im;
+      const i2 = 2 * re * im;
+      return [r2 * r2 - i2 * i2, 2 * r2 * i2];
+    };
+    const [t2r, t2i] = p4(th(2));
+    const [t3r, t3i] = p4(th(3));
+    const [t4r, t4i] = p4(th(4));
+    expect(Math.abs(t2r + t4r - t3r)).toBeLessThan(1e-12);
+    expect(Math.abs(t2i + t4i - t3i)).toBeLessThan(1e-12);
+  });
+
+  test('derivative order r > 0 stays symbolic', () => {
+    const r = ce.expr(['JacobiTheta', 3, 0, 'ImaginaryUnit', 1]).N();
+    expect(r.operator).toBe('JacobiTheta');
+  });
+
+  test('Im(τ) ≤ 0 stays symbolic', () => {
+    const r = ce.expr(['JacobiTheta', 3, 0, 0.5]).N();
+    expect(r.operator).toBe('JacobiTheta');
+  });
+});
+
+describe('DEDEKIND ETA FUNCTION', () => {
+  test('η(i) = Γ(1/4)/(2π^{3/4}) ≈ 0.7682254223260566', () => {
+    expectApprox(
+      ce.expr(['DedekindEta', 'ImaginaryUnit']),
+      0.7682254223260566,
+      1e-13
+    );
+  });
+
+  test('η(0.25+0.75i) ≈ 0.82051454510 + 0.04638173129i', () => {
+    const r = ce.expr(['DedekindEta', ['Complex', 0.25, 0.75]]).N();
+    expect(Math.abs(r.re - 0.8205145451012408)).toBeLessThan(1e-12);
+    expect(Math.abs(r.im - 0.04638173128620445)).toBeLessThan(1e-12);
+  });
+
+  test('η(τ+1) = e^{iπ/12}·η(τ) (modular transformation)', () => {
+    const a = ce.expr(['DedekindEta', ['Complex', 1.3, 0.8]]).N();
+    const b = ce.expr(['DedekindEta', ['Complex', 0.3, 0.8]]).N();
+    const phase = Math.PI / 12;
+    const expectedRe = b.re * Math.cos(phase) - b.im * Math.sin(phase);
+    const expectedIm = b.re * Math.sin(phase) + b.im * Math.cos(phase);
+    expect(Math.abs(a.re - expectedRe)).toBeLessThan(1e-13);
+    expect(Math.abs(a.im - expectedIm)).toBeLessThan(1e-13);
+  });
+
+  test('real τ stays symbolic (needs Im(τ) > 0)', () => {
+    const r = ce.expr(['DedekindEta', 0.5]).N();
+    expect(r.operator).toBe('DedekindEta');
+  });
+});
+
+describe('TIER-2 KERNELS: BIGNUM PRECISION', () => {
+  // `ce.precision` mutates the GLOBAL BigDecimal.precision static:
+  // use a dedicated engine and restore precision afterwards.
+  let bigCe: ComputeEngine;
+  beforeAll(() => {
+    bigCe = new ComputeEngine();
+    bigCe.precision = 50;
+  });
+  afterAll(() => {
+    bigCe.precision = 21;
+  });
+
+  test('K(0.5) to 50 digits', () => {
+    // mpmath: 1.8540746773013719184338503471952600462175988235217
+    expect(bigCe.expr(['EllipticK', 0.5]).N().toString()).toMatch(
+      /^1\.854074677301371918433850347195260046217598823521/
+    );
+  });
+
+  test('₂F₁(1,1;2;0.5) = 2·ln 2 to 50 digits', () => {
+    // 2ln2 = 1.3862943611198906188344642429163531361510002687205
+    expect(
+      bigCe.expr(['Hypergeometric2F1', 1, 1, 2, 0.5]).N().toString()
+    ).toMatch(/^1\.386294361119890618834464242916353136151000268720/);
+  });
+
+  test('₁F₁(1;2;2) = (e²−1)/2 to 50 digits', () => {
+    // (e^2-1)/2 = 3.1945280494653251136152137302875039065901577852759
+    expect(
+      bigCe.expr(['Hypergeometric1F1', 1, 2, 2]).N().toString()
+    ).toMatch(/^3\.194528049465325113615213730287503906590157785275/);
+  });
+});
