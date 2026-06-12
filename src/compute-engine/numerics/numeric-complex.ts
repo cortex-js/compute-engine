@@ -162,16 +162,71 @@ function gauss2F1SeriesC(
   return sum;
 }
 
+/** Distance from a complex number to the nearest (real) integer. */
+function distToIntegerC(x: Complex): number {
+  if (Number.isNaN(x.re) || Number.isNaN(x.im)) return NaN;
+  return Math.hypot(x.re - Math.round(x.re), x.im);
+}
+
 /**
- * Complex Gauss hypergeometric ₂F₁(a, b; c; z): direct series for |z| ≤ 0.8,
- * Pfaff transformation when |z/(z−1)| ≤ 0.8. Outside that region returns
- * NaN (the expression stays symbolic).
+ * Product of Γ over `num` divided by the product of Γ over `den`, with
+ * explicit pole handling: a Γ-pole (non-positive integer argument) in the
+ * denominator makes the whole coefficient 0; a pole in the numerator means
+ * the connection formula degenerates (callers gate on that — NaN here is
+ * defensive).
+ */
+function gammaRatioC(
+  num: ReadonlyArray<Complex>,
+  den: ReadonlyArray<Complex>
+): Complex {
+  const numPole = num.some(isNonPositiveIntegerC);
+  if (den.some(isNonPositiveIntegerC))
+    return numPole ? C_NAN : new Complex(0, 0);
+  if (numPole) return C_NAN;
+  let r: Complex = C_ONE;
+  for (const x of num) r = r.mul(gamma(x));
+  for (const x of den) r = r.div(gamma(x));
+  return r;
+}
+
+// Treat a parameter difference within this distance of an integer as
+// degenerate: the two-term connection formulas have Γ-factors that blow up
+// like 1/dist, so closer than this the cancellation destroys the result.
+// Such cases are routed to another transformation, or evaluated by averaging
+// two parameter-perturbed evaluations (±1e-6), accurate to ~1e-9.
+const DEGENERATE_TOL = 1e-7;
+
+// |w| bounds for the transformed series argument. Below W_PREFERRED the
+// series converges in well under 10k terms; up to W_MAX it still converges
+// (≈250k-term budget, |0.99|ⁿ needs ~3700 terms for 1e-16). The only region
+// where no transformation reaches W_MAX is a thin sliver around the two
+// points z = e^{±iπ/3} (where all six Kummer maps have |w| = 1).
+const W_PREFERRED = 0.92;
+const W_MAX = 0.99;
+
+/**
+ * Complex Gauss hypergeometric ₂F₁(a, b; c; z), analytic continuation over
+ * (almost) the whole plane.
+ *
+ * Picks among the six Kummer transformations the one with the smallest
+ * transformed argument |w| (A&S 15.3.4–15.3.9): direct series, Pfaff
+ * z/(z−1), and the two-term Γ-connection formulas in 1−z, 1/z, 1/(1−z),
+ * and 1−1/z. Degenerate parameter differences (a−b ∈ ℤ for the 1/z and
+ * 1/(1−z) maps, c−a−b ∈ ℤ for the 1−z and 1−1/z maps) are routed to a
+ * non-degenerate map when one converges, otherwise handled by symmetric
+ * parameter perturbation (~9 significant digits).
+ *
+ * On the branch cut z ∈ (1, ∞) the principal branch is the limit from
+ * below (the standard z − i0 convention).
+ *
+ * Returns NaN only near z = e^{±iπ/3} (all maps have |w| ≈ 1 there).
  */
 export function hypergeometric2F1Complex(
   a: Complex,
   b: Complex,
   c: Complex,
-  z: Complex
+  z: Complex,
+  depth = 0
 ): Complex {
   if (a.isNaN() || b.isNaN() || c.isNaN() || z.isNaN()) return C_NAN;
 
@@ -184,16 +239,158 @@ export function hypergeometric2F1Complex(
   if (nTerms !== Infinity) return gauss2F1SeriesC(a, b, c, z, nTerms + 1);
 
   if (z.isZero()) return C_ONE;
-  if (z.abs() <= 0.8) return gauss2F1SeriesC(a, b, c, z);
 
-  // Pfaff: (1−z)^{−a}·₂F₁(a, c−b; c; z/(z−1))
-  const w = z.div(z.sub(C_ONE));
-  if (w.abs() <= 0.8) {
-    const factor = C_ONE.sub(z).pow(a.neg());
-    return factor.mul(gauss2F1SeriesC(a, c.sub(b), c, w));
+  const one = C_ONE;
+  const s = c.sub(a).sub(b); // c − a − b
+  const d = b.sub(a); // b − a
+
+  if (z.equals(one)) {
+    // Gauss summation: Γ(c)Γ(c−a−b)/(Γ(c−a)Γ(c−b)), requires Re(c−a−b) > 0
+    if (s.re <= 0) return C_NAN; // divergent (or log-divergent at s = 0)
+    return gammaRatioC([c, s], [c.sub(a), c.sub(b)]);
   }
 
-  return C_NAN; // outside the implemented convergence region
+  // Principal branch on the cut [1, ∞): the z − i0 convention (limit from
+  // below). Forcing im = −0 makes atan2 yield Arg(1−z) = Arg(−z) = +π for
+  // real z > 1, which is exactly the z − i0 limit.
+  if (z.im === 0) z = new Complex(z.re, -0);
+
+  const sIsDegenerate = distToIntegerC(s) <= DEGENERATE_TOL;
+  const dIsDegenerate = distToIntegerC(d) <= DEGENERATE_TOL;
+
+  // The six Kummer maps, by transformed argument. `degenerate` marks maps
+  // whose connection formula breaks down for the current parameters.
+  const candidates: {
+    kind: 'direct' | 'pfaff' | 'one-minus-z' | 'inv-z' | 'inv-one-minus-z' | 'one-minus-inv-z';
+    w: Complex;
+    degenerate: boolean;
+  }[] = [
+    { kind: 'direct', w: z, degenerate: false },
+    { kind: 'pfaff', w: z.div(z.sub(1)), degenerate: false },
+    { kind: 'one-minus-z', w: one.sub(z), degenerate: sIsDegenerate },
+    { kind: 'inv-z', w: one.div(z), degenerate: dIsDegenerate },
+    { kind: 'inv-one-minus-z', w: one.div(one.sub(z)), degenerate: dIsDegenerate },
+    { kind: 'one-minus-inv-z', w: one.sub(one.div(z)), degenerate: sIsDegenerate },
+  ];
+  candidates.sort((p, q) => p.w.abs() - q.w.abs());
+
+  let sawDegenerateCandidate = false;
+  for (const cand of candidates) {
+    const { kind, w } = cand;
+    if (w.abs() > W_MAX) break; // sorted: no further candidate fits
+    if (cand.degenerate) {
+      sawDegenerateCandidate = true;
+      continue;
+    }
+    const maxTerms = w.abs() <= W_PREFERRED ? 10_000 : 250_000;
+
+    switch (kind) {
+      case 'direct':
+        return gauss2F1SeriesC(a, b, c, z, maxTerms);
+
+      case 'pfaff':
+        // A&S 15.3.4: (1−z)^{−a}·₂F₁(a, c−b; c; z/(z−1))
+        return one
+          .sub(z)
+          .pow(a.neg())
+          .mul(gauss2F1SeriesC(a, c.sub(b), c, w, maxTerms));
+
+      case 'one-minus-z': {
+        // A&S 15.3.6, w = 1−z, s = c−a−b ∉ ℤ
+        const t1 = gammaRatioC([c, s], [c.sub(a), c.sub(b)]).mul(
+          gauss2F1SeriesC(a, b, one.sub(s), w, maxTerms)
+        );
+        const t2 = gammaRatioC([c, s.neg()], [a, b])
+          .mul(w.pow(s))
+          .mul(gauss2F1SeriesC(c.sub(a), c.sub(b), one.add(s), w, maxTerms));
+        return t1.add(t2);
+      }
+
+      case 'inv-z': {
+        // A&S 15.3.7, w = 1/z, b−a ∉ ℤ
+        const t1 = gammaRatioC([c, d], [b, c.sub(a)])
+          .mul(z.neg().pow(a.neg()))
+          .mul(
+            gauss2F1SeriesC(
+              a,
+              one.sub(c).add(a),
+              one.sub(b).add(a),
+              w,
+              maxTerms
+            )
+          );
+        const t2 = gammaRatioC([c, d.neg()], [a, c.sub(b)])
+          .mul(z.neg().pow(b.neg()))
+          .mul(
+            gauss2F1SeriesC(
+              b,
+              one.sub(c).add(b),
+              one.sub(a).add(b),
+              w,
+              maxTerms
+            )
+          );
+        return t1.add(t2);
+      }
+
+      case 'inv-one-minus-z': {
+        // A&S 15.3.8, w = 1/(1−z), b−a ∉ ℤ
+        const oneMinusZ = one.sub(z);
+        const t1 = gammaRatioC([c, d], [b, c.sub(a)])
+          .mul(oneMinusZ.pow(a.neg()))
+          .mul(gauss2F1SeriesC(a, c.sub(b), a.sub(b).add(1), w, maxTerms));
+        const t2 = gammaRatioC([c, d.neg()], [a, c.sub(b)])
+          .mul(oneMinusZ.pow(b.neg()))
+          .mul(gauss2F1SeriesC(b, c.sub(a), b.sub(a).add(1), w, maxTerms));
+        return t1.add(t2);
+      }
+
+      case 'one-minus-inv-z': {
+        // A&S 15.3.9, w = 1 − 1/z, s = c−a−b ∉ ℤ
+        const t1 = gammaRatioC([c, s], [c.sub(a), c.sub(b)])
+          .mul(z.pow(a.neg()))
+          .mul(
+            gauss2F1SeriesC(
+              a,
+              a.sub(c).add(1),
+              a.add(b).sub(c).add(1),
+              w,
+              maxTerms
+            )
+          );
+        const t2 = gammaRatioC([c, s.neg()], [a, b])
+          .mul(one.sub(z).pow(s))
+          .mul(z.pow(a.sub(c)))
+          .mul(gauss2F1SeriesC(c.sub(a), one.sub(a), s.add(1), w, maxTerms));
+        return t1.add(t2);
+      }
+    }
+  }
+
+  // Only degenerate maps converge: evaluate at symmetrically perturbed
+  // parameters and average. The perturbation (±ε on a, ±ε√2 on c) breaks
+  // both a−b ∈ ℤ and c−a−b ∈ ℤ; averaging cancels the O(ε) error, leaving
+  // O(ε²) + Γ-cancellation ≈ 1e-9 relative accuracy.
+  if (depth === 0 && sawDegenerateCandidate) {
+    const EPS = 1e-6;
+    const f1 = hypergeometric2F1Complex(
+      a.add(EPS),
+      b,
+      c.add(EPS * Math.SQRT2),
+      z,
+      1
+    );
+    const f2 = hypergeometric2F1Complex(
+      a.sub(EPS),
+      b,
+      c.sub(EPS * Math.SQRT2),
+      z,
+      1
+    );
+    return f1.add(f2).mul(0.5);
+  }
+
+  return C_NAN; // near z = e^{±iπ/3}: no implemented map converges
 }
 
 function kummer1F1SeriesC(
@@ -231,6 +428,59 @@ export function hypergeometric1F1Complex(
   if (z.re < 0)
     return z.exp().mul(hypergeometric1F1Complex(b.sub(a), b, z.neg()));
   return kummer1F1SeriesC(a, b, z);
+}
+
+/**
+ * Complex Appell F₁(a; b₁, b₂; c; x, y) by the double Pochhammer series.
+ * Converges for |x| < 1 and |y| < 1 (or when the corresponding index
+ * terminates); outside returns NaN (the expression stays symbolic).
+ */
+export function appellF1Complex(
+  a: Complex,
+  b1: Complex,
+  b2: Complex,
+  c: Complex,
+  x: Complex,
+  y: Complex
+): Complex {
+  if ([a, b1, b2, c, x, y].some((v) => v.isNaN())) return C_NAN;
+  if (isNonPositiveIntegerC(c)) return C_NAN;
+
+  const xConverges = x.abs() < 1 || isNonPositiveIntegerC(b1);
+  const yConverges = y.abs() < 1 || isNonPositiveIntegerC(b2);
+  if (!xConverges || !yConverges) return C_NAN;
+
+  const MAX_ROWS = 10_000;
+  const MAX_COLS = 10_000;
+  let sum = new Complex(0, 0);
+  let rowLead: Complex = C_ONE; // (a)ₘ(b₁)ₘ/((c)ₘ m!) xᵐ
+  let negligibleRows = 0;
+  for (let m = 0; m < MAX_ROWS; m++) {
+    let term = rowLead;
+    let rowSum = term;
+    for (let n = 0; n < MAX_COLS; n++) {
+      term = term
+        .mul(a.add(m + n))
+        .mul(b2.add(n))
+        .mul(y)
+        .div(c.add(m + n).mul(n + 1));
+      if (term.isZero()) break;
+      rowSum = rowSum.add(term);
+      if (term.abs() <= Number.EPSILON * (1 + rowSum.abs())) break;
+    }
+    sum = sum.add(rowSum);
+    if (rowSum.abs() <= Number.EPSILON * (1 + sum.abs())) {
+      if (++negligibleRows >= 3) return sum;
+    } else negligibleRows = 0;
+
+    rowLead = rowLead
+      .mul(a.add(m))
+      .mul(b1.add(m))
+      .mul(x)
+      .div(c.add(m).mul(m + 1));
+    if (rowLead.isZero()) return sum;
+  }
+  return sum;
 }
 
 //

@@ -393,6 +393,94 @@ describe('INDEFINITE INTEGRATION', () => {
     ));
 });
 
+describe('INTEGRATION REGRESSIONS (Rubi Phase-0 findings)', () => {
+  // Helper: check ∫f dx by differentiating the result and comparing
+  // numerically against f at sample points.
+  function checkAntiderivative(
+    integrand: any,
+    points: Record<string, number>[]
+  ) {
+    const F = engine.box(['Integrate', integrand, 'x']).evaluate();
+    expect(F.has('Integrate')).toBe(false);
+    const dF = engine.box(['D', F.json as any, 'x']).evaluate();
+    const f = engine.box(integrand);
+    for (const pt of points) {
+      const got = dF.subs(pt).N().re;
+      const want = f.subs(pt).N().re;
+      expect(Math.abs(got - want)).toBeLessThanOrEqual(
+        1e-7 * (1 + Math.abs(want))
+      );
+    }
+  }
+
+  test('∫(a + b·x⁴)/x⁶ does not drop the a-term', () =>
+    checkAntiderivative(
+      ['Divide', ['Add', 'a', ['Multiply', 'b', ['Power', 'x', 4]]], ['Power', 'x', 6]],
+      [
+        { a: 2, b: 3, x: 1.7 },
+        { a: -1, b: 0.5, x: -2.3 },
+      ]
+    ));
+
+  test('∫(a + b·x⁴)/x⁷ does not drop the a-term', () =>
+    checkAntiderivative(
+      ['Divide', ['Add', 'a', ['Multiply', 'b', ['Power', 'x', 4]]], ['Power', 'x', 7]],
+      [{ a: 2, b: 3, x: 1.7 }]
+    ));
+
+  test('∫x⁶/(1−x⁶) includes the arctan/quadratic-log terms', () =>
+    checkAntiderivative(
+      ['Divide', ['Power', 'x', 6], ['Subtract', 1, ['Power', 'x', 6]]],
+      [{ x: 0.3 }, { x: 2.5 }, { x: -1.7 }]
+    ));
+
+  test('∫1/(2x²−2) accounts for the leading coefficient', () =>
+    checkAntiderivative(
+      ['Divide', 1, ['Subtract', ['Multiply', 2, ['Power', 'x', 2]], 2]],
+      [{ x: 0.3 }, { x: 2.5 }]
+    ));
+
+  test('∫1/(x⁴+1) (full numeric partial fractions)', () =>
+    checkAntiderivative(
+      ['Divide', 1, ['Add', ['Power', 'x', 4], 1]],
+      [{ x: 0.3 }, { x: 2.5 }, { x: -1.7 }]
+    ));
+
+  test('∫1/(x²−2x+1) (expanded repeated linear root)', () =>
+    checkAntiderivative(
+      ['Divide', 1, ['Add', ['Power', 'x', 2], ['Multiply', -2, 'x'], 1]],
+      [{ x: 0.3 }, { x: 2.5 }]
+    ));
+
+  test('trinomial quotients terminate instead of overflowing the stack', () => {
+    // These six shapes previously threw RangeError (runaway recursion
+    // between the polynomial-division and term-splitting strategies).
+    const cases: any[] = [
+      ['Divide', ['Power', 'x', 11], ['Power', ['Add', 'a', ['Multiply', 'b', ['Power', 'x', 2]]], 2]],
+      ['Divide', ['Power', 'x', 11], ['Add', ['Power', 'a', 2], ['Multiply', 2, 'a', 'b', ['Power', 'x', 2]], ['Multiply', ['Power', 'b', 2], ['Power', 'x', 4]]]],
+      ['Divide', ['Multiply', ['Power', ['Add', 'd', ['Multiply', 'e', 'x']], 3], ['Power', ['Add', 'f', ['Multiply', 'g', 'x']], 2]], ['Subtract', ['Power', 'd', 2], ['Multiply', ['Power', 'e', 2], ['Power', 'x', 2]]]],
+    ];
+    for (const c of cases) {
+      // Must not throw RangeError — inert results are acceptable
+      expect(() =>
+        engine.box(['Integrate', c, 'x']).evaluate()
+      ).not.toThrow();
+    }
+  });
+
+  test('cancelCommonFactors does not cancel with a bogus GCD', () => {
+    // gcd(a + bx⁴, x⁶) incorrectly returned x⁴ + a/b when the Euclid
+    // remainder had parameter-divided coefficients
+    const e = engine.box([
+      'Divide',
+      ['Add', 'a', ['Multiply', 'b', ['Power', 'x', 4]]],
+      ['Power', 'x', 6],
+    ]);
+    const f = e.subs({ a: 2, b: 3, x: 1.3 }).N().re;
+    expect(Math.abs(f - (2 + 3 * 1.3 ** 4) / 1.3 ** 6)).toBeLessThan(1e-10);
+  });
+});
+
 /** These resolve symbolically the integrals, then applies the limits. */
 describe('DEFINITE INTEGRATION', () => {
   test('basic integration', () =>

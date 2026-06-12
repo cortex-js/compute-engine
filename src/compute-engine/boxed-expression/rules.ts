@@ -1,5 +1,6 @@
 import type { MathJsonExpression } from '../../math-json/types';
 
+import { CancellationError } from '../../common/interruptible';
 import { _BoxedExpression } from './abstract-boxed-expression';
 import type {
   BoxedRule,
@@ -953,6 +954,9 @@ export function applyRule(
       if (!condition(conditionSub, ce))
         return operandsMatched ? stepOf(expr) : null;
     } catch (e) {
+      // Propagate deadline cancellations: timeouts must not be swallowed
+      // as "the condition failed".
+      if (e instanceof CancellationError) throw e;
       console.error(
         `\n|   Rule "${rule.id}"\n|   Error while checking condition\n|    ${e.message}`
       );
@@ -1118,7 +1122,10 @@ export function replace(
             done = false;
             expr = result.value;
           }
-        } catch {
+        } catch (e) {
+          // Propagate deadline cancellations: timeouts must not be
+          // swallowed as "this rule failed".
+          if (e instanceof CancellationError) throw e;
           return steps;
         }
       }
@@ -1148,7 +1155,10 @@ export function replace(
             // enumeration for the new expression from this rule's ordinal.
             it = candidateRules(index, expr, ordinal);
           }
-        } catch {
+        } catch (e) {
+          // Propagate deadline cancellations: timeouts must not be
+          // swallowed as "this rule failed".
+          if (e instanceof CancellationError) throw e;
           return steps;
         }
         next = it.next();

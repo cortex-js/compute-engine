@@ -447,12 +447,15 @@ const HEAD_MAP: Record<string, string> = {
   ArcCot: 'Arccot',
   ArcSec: 'Arcsec',
   ArcCsc: 'Arccsc',
-  ArcSinh: 'Arcsinh',
-  ArcCosh: 'Arccosh',
-  ArcTanh: 'Arctanh',
-  ArcCoth: 'Arccoth',
-  ArcSech: 'Arcsech',
-  ArcCsch: 'Arccsch',
+  // Compute Engine canonical names for the inverse hyperbolic functions
+  // drop the 'c' (Arsinh, not Arcsinh) — the Arc* spellings are undefined
+  // symbols in the engine and silently fail to evaluate numerically.
+  ArcSinh: 'Arsinh',
+  ArcCosh: 'Arcosh',
+  ArcTanh: 'Artanh',
+  ArcCoth: 'Arcoth',
+  ArcSech: 'Arsech',
+  ArcCsch: 'Arcsch',
   Gamma: 'Gamma',
   LogGamma: 'LogGamma',
   Erf: 'Erf',

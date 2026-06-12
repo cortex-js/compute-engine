@@ -12,6 +12,7 @@ import {
   hypergeometric1F1,
   bigHypergeometric2F1,
   bigHypergeometric1F1,
+  appellF1,
   agm,
   bigAgm,
 } from '../numerics/special-functions';
@@ -20,6 +21,7 @@ import {
   ellipticEComplex,
   hypergeometric2F1Complex,
   hypergeometric1F1Complex,
+  appellF1Complex,
   jacobiTheta,
   dedekindEta,
   agmComplex,
@@ -118,6 +120,31 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
               (a, b, c, z) => bigHypergeometric2F1(engine, a, b, c, z),
               hypergeometric2F1Complex
             )
+          : undefined;
+      },
+    },
+
+    AppellF1: {
+      description:
+        'Appell hypergeometric function F₁(a; b₁, b₂; c; x, y), double series for |x|, |y| < 1.',
+      wikidata: 'Q2701540',
+      complexity: 8800,
+      signature: '(number, number, number, number, number, number) -> number',
+      type: (ops) => numericTypeHandler(ops),
+      evaluate: (ops, { numericApproximation, engine }) => {
+        // F₁(a; b₁, b₂; c; 0, 0) = 1 exactly
+        const [, , , , x, y] = ops;
+        if (
+          isNumber(x) &&
+          x.im === 0 &&
+          x.isSame(0) &&
+          isNumber(y) &&
+          y.im === 0 &&
+          y.isSame(0)
+        )
+          return engine.One;
+        return numericApproximation
+          ? applyN(ops, appellF1, undefined, appellF1Complex)
           : undefined;
       },
     },

@@ -952,7 +952,13 @@ export class BoxedFunction
   }
 
   simplify(options?: Partial<SimplifyOptions>): Expression {
-    return simplify(this, options).at(-1)?.value ?? this;
+    // Arm the evaluation deadline (like evaluate()): simplification of
+    // large expressions (e.g. radical towers) can run unboundedly, and the
+    // simplify main loop checks `engine._deadline`.
+    return withDeadline(
+      this.engine,
+      () => simplify(this, options).at(-1)?.value ?? this
+    )();
   }
 
   evaluate(options?: Partial<EvaluateOptions>): Expression {

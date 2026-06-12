@@ -1972,6 +1972,12 @@ export interface Expression {
   /**
    * If this is a collection, return the number of elements in the collection.
    *
+   * Only top-level elements are counted: for a nested collection (e.g. a
+   * matrix represented as a list of lists), this is the number of immediate
+   * elements (the rows), not the total number of scalar entries. For example
+   * the count of `[[2, 3, 4], [6, 7, 9]]` is 2, not 6. This is consistent
+   * with `each()` and `at()`, which iterate over and index the same elements.
+   *
    * If the collection is infinite, return `Infinity`.
    *
    * If the number of elements cannot be determined, return `undefined`, for

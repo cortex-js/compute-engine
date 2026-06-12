@@ -290,6 +290,59 @@ describe('TIMEOUT', () => {
     });
   });
 
+  describe('Simplify', () => {
+    it('fast simplify completes within timeout', () => {
+      const result = ce.parse('\\frac{x^2-1}{x-1}').simplify();
+      expect(result.toString()).toBe('x + 1');
+    });
+
+    it('runaway polynomial cancellation throws CancellationError', () => {
+      // Divide of two expanded radical-coefficient polynomials: the
+      // cancel-common-factors rule runs a Euclidean polynomialGCD whose
+      // remainder coefficients (exact radicals) grow without bound —
+      // observed running for minutes before the deadline check.
+      const num = ce
+        .box([
+          'Expand',
+          ['Power', ['Add', ['Multiply', ['Sqrt', 2], 'x'], ['Sqrt', 3]], 9],
+        ])
+        .evaluate();
+      const den = ce
+        .box([
+          'Expand',
+          ['Power', ['Add', ['Multiply', ['Sqrt', 2], 'x'], ['Sqrt', 5]], 8],
+        ])
+        .evaluate();
+      const start = Date.now();
+      expect(() => ce.function('Divide', [num, den]).simplify()).toThrow(
+        CancellationError
+      );
+      // Interrupted near the 200ms time limit, not after minutes
+      expect(Date.now() - start).toBeLessThan(5000);
+    });
+
+    it('deadline is reset after simplify timeout', () => {
+      const num = ce
+        .box([
+          'Expand',
+          ['Power', ['Add', ['Multiply', ['Sqrt', 2], 'x'], ['Sqrt', 3]], 9],
+        ])
+        .evaluate();
+      const den = ce
+        .box([
+          'Expand',
+          ['Power', ['Add', ['Multiply', ['Sqrt', 2], 'x'], ['Sqrt', 5]], 8],
+        ])
+        .evaluate();
+      expect(() => ce.function('Divide', [num, den]).simplify()).toThrow(
+        CancellationError
+      );
+      expect(ce._deadline).toBeUndefined();
+      // Subsequent simplify still works
+      expect(ce.parse('x+x').simplify().toString()).toBe('2x');
+    });
+  });
+
   describe('deadline cleanup', () => {
     it('deadline is reset after timeout so subsequent evaluations work', () => {
       // First: trigger a timeout

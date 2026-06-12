@@ -1,8 +1,10 @@
 # Compute Engine — Roadmap
 
-**Last updated:** 2026-06-10. Items 2 (interruptible evaluation) and 4
-(Tier-2 numeric kernels) completed — both prerequisites for the Rubi
-integration (`docs/rubi/RUBI.md`).
+**Last updated:** 2026-06-12. Items 2 (interruptible evaluation), 4
+(Tier-2 numeric kernels), 9 (₂F₁ analytic continuation), 10 (x/√(x²)
+soundness), 11 (deadline checks in simplify), 12 (antiderivative
+correctness), and 13 (small engine follow-ups) completed — prerequisites
+for the Rubi integration (`docs/rubi/RUBI.md`).
 
 Context: the 2026-06 release shipped the Fungrim-derived identities library
 (`@cortex-js/compute-engine/identities`, 1,376 rules), the complex-domain
@@ -149,110 +151,136 @@ canonicalized to `1` (exact-power fold ignored the imaginary part) and
 `BoxedSymbol.N()` inverted `holdUntil: 'never'` (i/e/∞ never resolved
 under `N()`).
 
-### 10. Unsound `x/√(x²) → 1` simplify rewrite — SOUNDNESS
+### 10. ~~Unsound `x/√(x²) → 1` simplify rewrite~~ — ✅ done (2026-06-12)
 
-**What:** `simplify()` rewrites `x/√(x²)` to `1`, silently dropping
-`sign(x)` (sound only for x > 0). Repro:
-`ce.box(['Divide', 'x', ['Sqrt', ['Power', 'x', 2]]]).simplify()` → `1`
-(same for `['Multiply', 'x', ['Power', ['Power','x',2], ['Rational',-1,2]]]`).
-Note `√(x²)` *alone* simplifies soundly to `|x|`, so the culprit is a
-quotient/product power-combination rule, not the radical rule. The `D`
-evaluate handler simplifies its output, so the unsoundness propagates:
-`D(√(x²)).evaluate()` → `1` and `D(1/√(c·x²)).evaluate()` → `−1/(x²√c)`
-(sign-wrong for x < 0).
+**Outcome:** the culprit was `Product.mul()`
+(`boxed-expression/arithmetic-mul-div.ts`): it folded
+`(base^r)^e → base^(r·e)` unconditionally, so `x · (x²)^{−1/2}` collapsed
+to `x⁰ = 1`. The fold is now gated by the same soundness conditions
+`canonicalPower()`/`pow()` already used: outer exponent an integer, inner
+exponent an odd integer (sign-preserving), or base known non-negative.
 
-**Why:** found by the Rubi harness as a cluster of *false* "solved-wrong"
-verdicts — driver antiderivatives identical to Rubi's reference answers
-failed verification because the checker's symbolic derivative was wrong on
-x < 0. The harness now uses numeric central differences as a workaround
-(`scripts/rubi/benchmark.ts`); any other derivative-dependent code path is
-still exposed. **Snapshot-gated:** measure blast radius before landing
-(established canonical outputs may rely on the unsound form).
+- Repro now stays sign-correct: `x/√(x²)` no longer simplifies to `1`
+  (and still folds to `1` for a symbol assumed positive);
+  `D(√(x²)).evaluate()` → `x/√(x²)` (= sign(x)).
+- **Blast radius: zero** — the full suite shows no snapshot churn from
+  this change (regression tests in `simplify.test.ts`, "SIGN-PRESERVING
+  POWER FOLDING").
+- Note: `√(x²) → |x|` still only fires at top level (simplify
+  deliberately does not recurse into Divide/Multiply operands), so the
+  repro keeps the `√(x²)` form rather than rewriting to `x/|x|`.
 
-**Acceptance:** repro returns `sign(x)`-correct form (e.g. `x/|x|` or
-`sign(x)`); `D(√(x²))` evaluates to a sign-correct derivative; snapshot
-churn reviewed; the Rubi benchmark can optionally re-enable symbolic-D
-verification as a cross-check.
+### 9. ~~₂F₁ analytic continuation for z ≥ 1~~ — ✅ done (2026-06-12)
 
-### 9. ₂F₁ analytic continuation for z ≥ 1 — follow-on to item 4
+**Outcome:** `hypergeometric2F1Complex` (`numerics/numeric-complex.ts`)
+now covers (almost) the whole plane: it picks among the six Kummer maps
+(direct, Pfaff z/(z−1), and the Γ-connection formulas in 1−z, 1/z,
+1/(1−z), 1−1/z — A&S 15.3.4–15.3.9) the one with the smallest |w|,
+accepting |w| ≤ 0.99 with a scaled term budget. Degenerate parameter
+differences (a−b ∈ ℤ, c−a−b ∈ ℤ) route to a non-degenerate map when one
+converges, else are handled by symmetric ±1e−6 parameter perturbation
+(~1e−9 accuracy). On the cut z ∈ (1, ∞) the principal branch is the limit
+from below (z − i0, matching mpmath/Mathematica) — implemented by forcing
+`im = −0` so `atan2` lands on the right side. Real z > 1 reaches the
+complex kernel through the existing applyN NaN-cascade; this also rescued
+the old z ∈ (0.95, 1) degenerate-gap NaN. Machine precision against
+mpmath on generic/degenerate/near-degenerate/cut/far-cut points
+(`special-functions.test.ts`, "ANALYTIC CONTINUATION z ≥ 1").
 
-**What:** extend `hypergeometric2F1` (`numerics/special-functions.ts`,
-~line 2120) past the z = 1 branch point: the real-axis cut z > 1 (where
-₂F₁ is complex-valued; principal branch = limit from below, the standard
-z − i0 convention) and the complex region outside |z| ≤ 0.8 ∪ Pfaff. The
-standard ladder slots into the existing transformation chain: the 1/z and
-1/(1−z) Γ-connection formulas (A&S 15.3.7/15.3.8, with the same
-degenerate-integer-parameter caveat the 1−z branch already documents),
-composed with the Pfaff/Euler maps already implemented.
+**Residual:** a thin sliver around z = e^{±iπ/3} (all six maps have
+|w| ≈ 1) stays NaN; doubly-degenerate near-singular points (e.g.
+₂F₁(½,2;3/2;1.0001)) get ~1e−8 via the perturbation path; bignum kernel
+remains real-axis z < 1 only.
 
-**Why now:** this is the single biggest verification blocker for the Rubi
-integration (docs/rubi/RUBI.md): Rubi rule RHSs emit
-`Hypergeometric2F1(…, 1 + d·x/c)` — argument > 1 for positive x and
-parameters — so the antiderivative-vs-integrand check has no evaluable
-sample points. **35 of 200 problems (17.5%) in the section-1.1.1 benchmark
-are "not-evaluable" for exactly this reason**, and the share grows in later
-chapters. It also closes part of the 567 Fungrim Stage-2 "not-evaluable"
-entries (item 4 residual).
+**Benchmark note:** the 35 "not-evaluable" problems in the 1.1.1 sample
+turned out to be mostly mistranslated inverse-hyperbolic names
+(`Arcsinh`/`Artanh`… vs the engine's `Arsinh`/`Artanh` — fixed in
+`scripts/rubi/wl-parser.ts`, corpus regenerated) plus incomplete elliptic
+integrals, not ₂F₁; after the fixes the sample stands at **146 correct /
+16 not-evaluable / 25 unsolved** (was 128/35/24). The remaining 16 are
+EllipticF/EllipticPi (no kernels — future work) and 2 AppellF1 (item 13).
 
-**Acceptance:** (a) reference values against mpmath/Mathematica for
-z ∈ {1.5, 3, −2+4i, 10} on generic and near-degenerate parameters, added
-to `special-functions.test.ts`; (b) re-run
-`npx tsx scripts/rubi/benchmark.ts --rubi "data/rubi/corpus/1 Algebraic functions/1.1 Binomial products" --chapter "1 Algebraic functions/1.1 Binomial products/1.1.1 Linear" --sample 200`
-and confirm the `not-evaluable` bucket drops substantially (current
-standing in `scripts/rubi/rubi-111-s200.json`: 128 correct / 35
-not-evaluable / 24 unsolved).
+### 11. ~~Deadline checks in `simplify()`~~ — ✅ done (2026-06-12)
 
-**Effort:** ~2–4 days (the formulas are standard; the work is branch
-conventions and the degenerate-parameter cases).
+**Outcome:** `BoxedFunction.simplify()` now arms the engine deadline (same
+`withDeadline` wrapper as `evaluate()`); `simplifyExpression()` (the
+per-node choke point) and `polynomialDivide()` (the actual hot loop —
+the cancel-common-factors rule's Euclidean `polynomialGCD` on
+radical-coefficient polynomials ran minutes per call) check it. The rule
+engine's catch-all handlers in `rules.ts` rethrow `CancellationError`
+instead of swallowing timeouts as "rule failed". A previously-minutes-long
+`Divide` of two expanded `(√2·x+√c)ⁿ` polynomials now throws
+`CancellationError` at `ce.timeLimit` (coverage in `timeout.test.ts`,
+"Simplify"). Rubi-side: `SIMPLIFY_LEAF_CAP` raised 120 → 500 and
+`safeSimplify` catches the cancellation (fail-closed, unsimplified), so
+predicates no longer trade correctness for time.
 
-### 11. Deadline checks in `simplify()` — follow-on to item 2
+### 12. ~~`antiderivative.ts` correctness fixes~~ — ✅ done (2026-06-12)
 
-**What:** item 2 made *evaluation* loops deadline-aware; `simplify()` never
-checks `ce._deadline`, and single calls on radical-tower expressions (~100
-leaves) were observed running for minutes during Rubi rule-condition
-evaluation. The Rubi layer works around it with a leaf-count cap
-(`SIMPLIFY_LEAF_CAP = 120` in `scripts/rubi/rubi-utils.ts`), which trades
-correctness (predicates go fail-closed on big expressions).
+**Outcome (regression tests in `calculus.test.ts`, "INTEGRATION
+REGRESSIONS"):**
 
-**How:** arm/check the deadline in the simplify main loop
-(`boxed-expression/simplify.ts` already counts steps — add a strided
-`checkDeadline`), mirroring the item-2 pattern. Acceptance: a
-`timeout.test.ts` case for simplify; remove or raise the Rubi-side cap.
+- **a-term drop:** root cause was an *engine* bug, not just integration:
+  `polynomialGCD` treated a null coefficient extraction (Euclid remainders
+  with parameter-divided coefficients like `(a/b)x²`) as "zero polynomial",
+  returning a non-divisor as the GCD (gcd(a+bx⁴, x⁶) → `x⁴ + a/b`);
+  `cancelCommonFactors` then cancelled with it, silently dropping terms.
+  Fixed both (null → gcd 1; cancel now verifies zero remainders), and
+  added a last-resort term-wise numerator split in the `Divide` branch
+  (only accepted when every sub-integral resolves). `∫(a+b·x⁴)/x⁶` →
+  `−a/(5x⁵) − b/x`.
+- **Incomplete partial fractions:** the simple-poles branch applied the
+  cover-up formula even when the real roots didn't account for the full
+  denominator degree (1−x⁶: dropped both irreducible quadratics) and
+  ignored the leading coefficient (∫1/(2x²−2) was ×2 off). Now gated on
+  full degree and uses residues Aᵢ = 1/Q′(rᵢ). A new
+  `numericPartialFractions` fallback (Durand–Kerner roots over
+  numeric-coefficient denominators; conjugate pairs → log + arctan; the
+  decomposition is verified a-posteriori at off-root test points)
+  completes `∫x⁶/(1−x⁶)`, `∫1/(x⁴+1)`, and expanded repeated-root
+  denominators like `1/(x²−2x+1)`.
+- **Stack overflows:** two runaway recursions fixed — Case A
+  "divide first" looped when the denominator was x-free (quotient
+  re-canonicalizes to the same `Divide(P, c)` shape), and when symbolic
+  cancellation left the remainder's degree structurally unreduced
+  (coefficients algebraically zero but not structurally). All six
+  `RangeError` problems from the ch1-500 baseline now terminate (inert).
+- **156 s problem:** gone — re-run of the seed-42 ch1-500 baseline:
+  max problem time 156 s → 3.6 s, errors 6 → 4 (1 RangeError remains on a
+  *symbolic-exponent* integrand `x^m(a+bx^(2+2m))²` — different bug class;
+  3 are `CancellationError` timeouts, i.e. bounded by design), correct
+  13 → 18, wrong 3 → 2 (both residual "wrong" are verification artifacts:
+  `1/x¹⁰⁰` central-difference overflow near 0, and one correct-but-
+  unverifiable form).
 
-### 12. `antiderivative.ts` correctness fixes (Rubi Phase-0 findings)
+### 13. ~~Small engine follow-ups (batch)~~ — ✅ done (2026-06-12)
 
-**What:** the built-in integrator — still the user-facing `Integrate` path
-and the Rubi driver's fallback — has reproducible bugs surfaced by the Rubi
-test-suite baseline (`scripts/rubi/baseline-ch1-500.json`, seed 42):
+- **`ce.number()` malformed input** — ✅: a malformed *array* argument
+  (anything but a 2-element number/bigint pair, e.g. the MathJSON
+  expression `['Rational', 1, 2]`) now throws with a pointer to
+  `ce.box()`. Non-array objects (`{re, im}`, `{rational}` shapes) still
+  fall through to `_numericValue` as before. Tests in
+  `expression-api.test.ts`.
+- **`AppellF1` numeric kernel** — ✅: machine + complex double-Pochhammer
+  series (`appellF1` in `numerics/special-functions.ts`,
+  `appellF1Complex` in `numerics/numeric-complex.ts`), |x|,|y| < 1 plus
+  terminating-index extensions; declared in `library/special-functions.ts`
+  with the applyN cascade; mpmath-validated tests in
+  `special-functions.test.ts`.
+- **Polynomial helpers / parameter-divided coefficients** — deferred
+  (optional, snapshot-review risk). The dangerous interaction — Euclid
+  remainders with such coefficients corrupting `polynomialGCD` — is fixed
+  by the item-12 null-guard; migrating the Rubi layer's x-aware versions
+  into `polynomials.ts` remains available if a consumer needs the
+  tolerance.
 
-- `∫(a + b·x⁴)/x⁶ dx` returns `−b/x`, silently **dropping the a-term**
-  (same family: `/x⁷`). Term-splitting bug.
-- `∫x⁶/(1−x⁶) dx` returns an incomplete partial-fraction result (missing
-  arctan/log terms).
-- 6 stack overflows (`RangeError`) on quadratic/quartic trinomial products
-  — runaway recursion between integration heuristics.
-- one problem ran 156 s uninterruptibly (pre-item-2 measurement; re-check).
-
-**Why:** silent wrong answers from a shipping code path outrank missing
-features. The 72k-problem Rubi suite + `scripts/rubi/benchmark.ts` (without
-`--rubi`) is now a ready-made regression harness for any fix.
-
-### 13. Small engine follow-ups (batch)
-
-- **`ce.number()` hangs on malformed input:** passing a MathJSON array
-  (e.g. `['Rational', 1, 2]`) makes it spin forever — cost a long debugging
-  hunt in the Rubi driver. Guard the argument type and throw. (~1 h)
-- **`AppellF1` numeric kernel:** Rubi Chapter-1 RHSs emit it (4/200 sample
-  problems not-evaluable solely for this); two-variable hypergeometric,
-  simple double-series for |x|,|y| < 1 would cover verification sampling.
-  Natural companion to item 9, lower priority. (~1–2 days)
-- **Polynomial helpers reject parameter-divided coefficients:**
-  `polynomialDegree`/`getPolynomialCoefficients` return −1/null for
-  `d²/b·x²`-style coefficients. The Rubi layer has its own x-aware versions
-  (`polyDegreeX` etc. in `scripts/rubi/rubi-utils.ts`) that could migrate
-  into `boxed-expression/polynomials.ts` if engine consumers
-  (`antiderivative.ts` partial fractions, item 12) want the tolerance.
-  Optional. (~1 day + snapshot review)
+**Discovered along the way (Rubi scripts layer):** the WL translator
+mapped the inverse hyperbolic heads to nonexistent engine symbols
+(`ArcSinh → Arcsinh` instead of `Arsinh`, etc.), which silently never
+evaluated — this, not ₂F₁, was most of the 1.1.1 "not-evaluable" bucket.
+Fixed in `scripts/rubi/wl-parser.ts`; chapter-1 corpus regenerated
+(name-only diff). Remaining not-evaluable results are incomplete elliptic
+integrals (`EllipticF`/`EllipticPi` kernels — candidate next item).
 
 ### 5. Per-head aggregated rule dispatch
 

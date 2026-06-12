@@ -1,5 +1,8 @@
+import { Complex } from 'complex-esm';
+
 import type { Expression, BoxedSubstitution, Rule } from '../global-types';
 
+import { checkDeadline } from '../../common/interruptible';
 import { mul } from '../boxed-expression/arithmetic-mul-div';
 import { add } from '../boxed-expression/arithmetic-add';
 import { matchAnyRules } from '../boxed-expression/rules';
@@ -8,6 +11,7 @@ import { differentiate } from './derivative';
 import { findUnivariateRoots } from '../boxed-expression/solve';
 import {
   cancelCommonFactors,
+  getPolynomialCoefficients,
   polynomialDegree,
   polynomialDivide,
 } from '../boxed-expression/polynomials';
@@ -1597,6 +1601,192 @@ function getQuadraticCoefficients(
 }
 
 /** Calculate the antiderivative of fn, as an expression (not a function) */
+/**
+ * All (complex) roots of a polynomial with machine-number coefficients,
+ * via the Durand–Kerner (Weierstrass) iteration. `coeffs` are ascending
+ * (a₀ … aₙ), aₙ ≠ 0. Returns null when the iteration does not converge.
+ */
+function durandKernerRoots(
+  coeffs: number[],
+  deadline?: number
+): Complex[] | null {
+  const n = coeffs.length - 1;
+  const an = coeffs[n];
+  const c = coeffs.map((x) => x / an); // monic, ascending
+
+  const evalP = (z: Complex): Complex => {
+    // Horner on the monic polynomial, descending
+    let r = new Complex(1, 0);
+    for (let i = n - 1; i >= 0; i--) r = r.mul(z).add(c[i]);
+    return r;
+  };
+
+  // Standard initial guesses: powers of a non-real point off the unit circle
+  const seed = new Complex(0.4, 0.9);
+  let roots: Complex[] = [];
+  let p = new Complex(1, 0);
+  for (let k = 0; k < n; k++) {
+    p = p.mul(seed);
+    roots.push(p);
+  }
+
+  for (let iter = 0; iter < 500; iter++) {
+    checkDeadline(deadline);
+    let maxDelta = 0;
+    const next: Complex[] = [];
+    for (let i = 0; i < n; i++) {
+      let denom = new Complex(1, 0);
+      for (let j = 0; j < n; j++)
+        if (j !== i) denom = denom.mul(roots[i].sub(roots[j]));
+      const delta = evalP(roots[i]).div(denom);
+      next.push(roots[i].sub(delta));
+      maxDelta = Math.max(maxDelta, delta.abs() / (1 + roots[i].abs()));
+    }
+    roots = next;
+    if (maxDelta < 1e-14) return roots;
+  }
+  return null; // did not converge (e.g. badly clustered roots)
+}
+
+/**
+ * ∫ 1/Q(x) dx for a denominator with machine-number coefficients and
+ * distinct roots, by full partial fractions over ℂ:
+ *
+ *    1/Q = Σ Aᵢ/(x − rᵢ),  Aᵢ = 1/Q′(rᵢ)
+ *
+ * Real roots contribute Aᵢ·ln|x − rᵢ|; conjugate pairs r = α ± βi combine
+ * into Re(A)·ln((x−α)² + β²) − 2·Im(A)·arctan((x−α)/β), keeping the
+ * result real. Returns null when the coefficients are not all numeric,
+ * the degree is < 2, or roots are repeated/non-converged.
+ */
+function numericPartialFractions(
+  denominator: Expression,
+  index: string
+): Expression | null {
+  const ce = denominator.engine;
+
+  const coeffExprs = getPolynomialCoefficients(denominator, index);
+  if (!coeffExprs || coeffExprs.length < 3) return null; // degree < 2
+
+  const coeffs: number[] = [];
+  for (const cf of coeffExprs) {
+    const v = cf.N();
+    if (!isNumber(v) || v.im !== 0 || !Number.isFinite(v.re)) return null;
+    coeffs.push(v.re);
+  }
+  if (coeffs[coeffs.length - 1] === 0) return null;
+
+  const roots = durandKernerRoots(coeffs, ce._deadline);
+  if (!roots) return null;
+
+  // All roots equal a real r: Q = aₙ(x−r)ⁿ, so
+  // ∫1/Q dx = −1/(aₙ·(n−1)·(x−r)^(n−1)). Handles expanded perfect powers
+  // like x²−2x+1 that the Power-shaped repeated-linear-root case misses.
+  {
+    const n = roots.length;
+    const mean = roots
+      .reduce((s, r) => s.add(r), new Complex(0, 0))
+      .div(n);
+    const allEqual =
+      Math.abs(mean.im) <= 1e-7 * (1 + mean.abs()) &&
+      roots.every((r) => r.sub(mean).abs() <= 1e-5 * (1 + mean.abs()));
+    if (allEqual && n >= 2) {
+      const an = coeffs[coeffs.length - 1];
+      const r0 = mean.re;
+      // Verify Q(z) ≈ aₙ(z−r₀)ⁿ at an off-root test point
+      const z = new Complex(r0 + 1.7239, 0.41937);
+      let qApprox = new Complex(an, 0);
+      for (let k = 0; k < n; k++) qApprox = qApprox.mul(z.sub(r0));
+      const qz = (() => {
+        let acc = new Complex(coeffs[coeffs.length - 1], 0);
+        for (let i = coeffs.length - 2; i >= 0; i--)
+          acc = acc.mul(z).add(coeffs[i]);
+        return acc;
+      })();
+      if (qz.sub(qApprox).abs() <= 1e-8 * (1 + qz.abs())) {
+        const x = ce.symbol(index);
+        const shifted = x.sub(ce.number(r0));
+        return ce
+          .number(-1 / (an * (n - 1)))
+          .div(shifted.pow(ce.number(n - 1)))
+          .evaluate();
+      }
+      return null;
+    }
+  }
+
+  // Distinct roots only (repeated roots need a different decomposition).
+  // Durand–Kerner splits a double root into a pair ~√ε apart, so use a
+  // loose tolerance here; the residual check below is the real gate.
+  for (let i = 0; i < roots.length; i++)
+    for (let j = i + 1; j < roots.length; j++)
+      if (roots[i].sub(roots[j]).abs() < 1e-6 * (1 + roots[i].abs()))
+        return null;
+
+  // Q′ with numeric coefficients, for the residues Aᵢ = 1/Q′(rᵢ)
+  const derivCoeffs = coeffs.slice(1).map((a, i) => a * (i + 1));
+  const evalDeriv = (z: Complex): Complex => {
+    let r = new Complex(derivCoeffs[derivCoeffs.length - 1], 0);
+    for (let i = derivCoeffs.length - 2; i >= 0; i--)
+      r = r.mul(z).add(derivCoeffs[i]);
+    return r;
+  };
+
+  // A-posteriori check: the decomposition 1/Q = Σ 1/(Q′(rᵢ)·(x−rᵢ)) only
+  // holds for simple roots. Verify it numerically at test points away from
+  // the roots — this rejects near-repeated roots that slipped past the
+  // distance check (e.g. (1−x⁴)², whose paired roots produced ~1e8-sized
+  // spurious residues), as well as poorly converged root sets.
+  const evalQ = (z: Complex): Complex => {
+    let r = new Complex(coeffs[coeffs.length - 1], 0);
+    for (let i = coeffs.length - 2; i >= 0; i--) r = r.mul(z).add(coeffs[i]);
+    return r;
+  };
+  for (const t of [0.53719, -1.29137, 3.41259]) {
+    const z = new Complex(t, 0.31407); // off-axis: avoids real roots too
+    if (roots.some((r) => z.sub(r).abs() < 1e-3)) continue;
+    const lhs = new Complex(1, 0).div(evalQ(z));
+    let rhs = new Complex(0, 0);
+    for (const r of roots)
+      rhs = rhs.add(new Complex(1, 0).div(evalDeriv(r).mul(z.sub(r))));
+    if (lhs.sub(rhs).abs() > 1e-8 * (1 + lhs.abs())) return null;
+  }
+
+  const REAL_TOL = 1e-9;
+  const x = ce.symbol(index);
+  const terms: Expression[] = [];
+
+  for (const r of roots) {
+    if (Math.abs(r.im) <= REAL_TOL * (1 + r.abs())) {
+      // Real root: A·ln|x − r|
+      const A = new Complex(1, 0).div(evalDeriv(new Complex(r.re, 0)));
+      if (Math.abs(A.im) > 1e-9 * (1 + A.abs())) return null; // inconsistent
+      terms.push(
+        ce
+          .number(A.re)
+          .mul(ce.expr(['Ln', ['Abs', x.sub(ce.number(r.re)).json as any]]))
+      );
+    } else if (r.im > 0) {
+      // One representative per conjugate pair (α + βi, β > 0):
+      // Re(A)·ln((x−α)² + β²) − 2·Im(A)·arctan((x−α)/β)
+      const A = new Complex(1, 0).div(evalDeriv(r));
+      const alpha = r.re;
+      const beta = r.im;
+      const shifted = x.sub(ce.number(alpha));
+      const quad = shifted.mul(shifted).add(ce.number(beta * beta));
+      terms.push(ce.number(A.re).mul(ce.expr(['Ln', quad.json as any])));
+      terms.push(
+        ce
+          .number(-2 * A.im)
+          .mul(ce.expr(['Arctan', shifted.div(ce.number(beta)).json as any]))
+      );
+    }
+    // r.im < 0: handled by its conjugate
+  }
+
+  return add(...terms).evaluate();
+}
+
 export function antiderivative(fn: Expression, index: string): Expression {
   if (isFunction(fn, 'Function')) return antiderivative(fn.op1, index);
   if (isFunction(fn, 'Block')) return antiderivative(fn.op1, index);
@@ -1688,20 +1878,36 @@ export function antiderivative(fn: Expression, index: string): Expression {
 
     // Case A: If deg(numerator) >= deg(denominator), divide first
     // ∫ P(x)/Q(x) dx where deg(P) >= deg(Q) becomes ∫ (quotient + remainder/Q) dx
+    // Requires deg(Q) ≥ 1: an x-free denominator is handled by the constant
+    // branch below — "dividing" by it here loops forever, because the
+    // quotient re-canonicalizes to the same Divide(P, c) shape
+    // (∫x¹¹/(a+bx²)² overflowed the stack this way: the polynomial quotient
+    // is Divide(…, b⁴), whose integration re-entered this case).
     const numDeg = polynomialDegree(fn.op1, index);
     const denDeg = polynomialDegree(fn.op2, index);
-    if (numDeg >= 0 && denDeg >= 0 && numDeg >= denDeg) {
+    if (numDeg >= 0 && denDeg >= 1 && numDeg >= denDeg) {
       const divResult = polynomialDivide(fn.op1, fn.op2, index);
       if (divResult) {
         const [quotient, remainder] = divResult;
-        // ∫ P/Q dx = ∫ quotient dx + ∫ remainder/Q dx
-        const quotientIntegral = antiderivative(quotient, index);
-        if (!remainder.isSame(0)) {
-          const remainderFraction = remainder.div(fn.op2);
-          const remainderIntegral = antiderivative(remainderFraction, index);
-          return add(quotientIntegral, remainderIntegral);
+        // Guard: with symbolic coefficients the remainder's leading terms
+        // can be algebraically zero without being structurally zero, so the
+        // division may not actually reduce the degree. Recursing then loops
+        // forever on same-degree fractions with ever-growing coefficients
+        // (stack overflow on e.g. (d+ex)³(f+gx)²/(d²−e²x²)). Require an
+        // actual degree decrease before recursing on the remainder.
+        const remDeg = polynomialDegree(remainder, index);
+        if (remainder.isSame(0) || (remDeg >= 0 && remDeg < denDeg)) {
+          // ∫ P/Q dx = ∫ quotient dx + ∫ remainder/Q dx
+          const quotientIntegral = antiderivative(quotient, index);
+          if (!remainder.isSame(0)) {
+            const remainderFraction = remainder.div(fn.op2);
+            const remainderIntegral = antiderivative(remainderFraction, index);
+            return add(quotientIntegral, remainderIntegral);
+          }
+          return quotientIntegral;
         }
-        return quotientIntegral;
+        // Division did not reduce the degree: fall through to the other
+        // strategies (or the inert integral).
       }
     }
 
@@ -2067,7 +2273,12 @@ export function antiderivative(fn: Expression, index: string): Expression {
       // Try to find roots of the denominator
       const roots = findUnivariateRoots(denominator, index);
 
-      if (roots.length >= 2) {
+      // Simple poles: only valid when the real roots account for the FULL
+      // degree of the denominator. With fewer roots (e.g. 1−x⁶: two real
+      // roots, two irreducible quadratic factors) the cover-up formula
+      // silently drops the missing factors' contributions.
+      const denomDegree = polynomialDegree(denominator, index);
+      if (roots.length >= 2 && roots.length === denomDegree) {
         // Check that all roots are distinct and numeric
         const numericRoots = roots.map((r) => r.N().re);
         const allDistinct = numericRoots.every(
@@ -2078,41 +2289,40 @@ export function antiderivative(fn: Expression, index: string): Expression {
         );
 
         if (allDistinct) {
-          // Use partial fraction decomposition
-          // For 1/((x-r1)(x-r2)...(x-rn)), each coefficient Ai = 1/∏(ri-rj) for j≠i
-          // Then ∫1/((x-r1)...(x-rn)) dx = Σ Ai * ln|x-ri|
-          const resultTerms: Expression[] = [];
+          // Partial fraction decomposition over distinct simple poles:
+          // 1/Q = Σ Ai/(x−ri) with Ai = 1/Q′(ri) — the residue form also
+          // accounts for Q's leading coefficient, which the bare cover-up
+          // product ∏(ri−rj) does not (∫1/(2x²−2) was off by ×2).
+          const denomDeriv = differentiate(denominator, index);
+          if (denomDeriv && !denomDeriv.isSame(0)) {
+            const resultTerms: Expression[] = [];
 
-          for (let i = 0; i < roots.length; i++) {
-            // Compute coefficient Ai using cover-up method
-            // Ai = 1 / product of (ri - rj) for all j != i
-            let productOfDiffs = ce.One;
-            for (let j = 0; j < roots.length; j++) {
-              if (i !== j) {
-                productOfDiffs = productOfDiffs.mul(roots[i].sub(roots[j]));
-              }
+            for (let i = 0; i < roots.length; i++) {
+              const coefficient = ce.One.div(
+                denomDeriv.subs({ [index]: roots[i] }).evaluate()
+              );
+
+              // The partial fraction term integrates to Ai * ln|x - ri|
+              const lnTerm = ce.expr([
+                'Ln',
+                ['Abs', ['Add', ce.symbol(index), roots[i].neg()]],
+              ]);
+              resultTerms.push(coefficient.mul(lnTerm));
             }
-            const coefficient = ce.One.div(productOfDiffs);
 
-            // The partial fraction term integrates to coefficient * ln|x - ri|
-            const lnTerm = ce.expr([
-              'Ln',
-              ['Abs', ['Add', ce.symbol(index), roots[i].neg()]],
-            ]);
-            resultTerms.push(coefficient.mul(lnTerm));
+            // Sum all partial fraction integrals
+            let result = add(...resultTerms);
+
+            // If numerator is not 1, multiply
+            if (!numerator.isSame(1)) {
+              result = numerator.mul(result);
+            }
+
+            return result.simplify();
           }
-
-          // Sum all partial fraction integrals
-          let result = add(...resultTerms);
-
-          // If numerator is not 1, multiply
-          if (!numerator.isSame(1)) {
-            result = numerator.mul(result);
-          }
-
-          return result.simplify();
         }
       }
+
 
       // Case F: Mixed partial fractions - one real root and one irreducible quadratic
       // ∫ 1/((x-r)(x²+bx+c)) dx where x²+bx+c has no real roots
@@ -2195,6 +2405,30 @@ export function antiderivative(fn: Expression, index: string): Expression {
           }
         }
       }
+
+      // Full numeric partial fractions: denominator with numeric
+      // coefficients and distinct (possibly complex) roots — produces the
+      // log + arctan terms the symbolic paths above cannot (e.g. 1−x⁶,
+      // whose factorization mixes two real roots with two irreducible
+      // quadratics).
+      const numericPF = numericPartialFractions(denominator, index);
+      if (numericPF) {
+        if (numerator.isSame(1)) return numericPF;
+        return numerator.mul(numericPF);
+      }
+    }
+
+    // Last resort: term-wise split of a sum numerator.
+    // ∫ (u₁ + u₂ + …)/Q dx = Σ ∫ uᵢ/Q dx — exposes forms the strategies
+    // above handle (e.g. (a + b·x⁴)/x⁶ → a/x⁶ + b·x⁴/x⁶, both power
+    // rules). Only used when every sub-integral resolves; otherwise fall
+    // through to the single inert integral.
+    if (isFunction(fn.op1, 'Add')) {
+      const integrals = fn.op1.ops.map((t) =>
+        antiderivative(t.div(fn.op2), index)
+      );
+      if (integrals.every((r) => !r.has('Integrate')))
+        return add(...integrals).evaluate();
     }
 
     return integrate(fn, index);

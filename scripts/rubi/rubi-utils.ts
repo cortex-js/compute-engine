@@ -287,9 +287,11 @@ export function polyDivideX(
   return [toExpr(q), toExpr(pc)];
 }
 
-// simplify() can take seconds on large radical towers; predicates skip
-// it above this size (fail-closed / unsimplified instead)
-const SIMPLIFY_LEAF_CAP = 120;
+// simplify() now respects the engine deadline (ce.timeLimit), so runaway
+// cases (radical-tower polynomial GCD) get interrupted instead of running
+// for minutes. The cap is kept only as a fast-path skip for clearly
+// oversized expressions (raised from the old correctness-trading 120).
+const SIMPLIFY_LEAF_CAP = 500;
 
 // module-level cache hooks, installed per top-level int() call by the
 // driver (see installCaches); fall back to uncached when absent
@@ -305,7 +307,14 @@ function safeSimplify(e: Expression): Expression {
   const cached = activeCaches?.simplify.get(key);
   if (cached !== undefined) return cached;
   const t0 = Date.now();
-  const r = e.simplify();
+  let r: Expression;
+  try {
+    r = e.simplify();
+  } catch {
+    // Deadline exceeded (CancellationError): fall back to the
+    // unsimplified expression — same fail-closed behavior as the leaf cap.
+    r = e;
+  }
   const ms = Date.now() - t0;
   if (ms > 1000 && process.env.RUBI_DEBUG)
     console.error(`slow simplify ${ms}ms: ${e.toString().slice(0, 120)}`);
@@ -439,9 +448,9 @@ const PRED_FNS: Record<string, PredFn> = {
   ILeQ: (args, ctx) => intCmp(args, ctx, (a, b) => a <= b),
 
   // PosQ/NegQ — sign heuristics (Rubi PosAux); symbols count as positive
-  PosQ: (args, ctx) => posAux(build(args[0], ctx).simplify()),
+  PosQ: (args, ctx) => posAux(safeSimplify(build(args[0], ctx))),
   NegQ: (args, ctx) => {
-    const u = build(args[0], ctx).simplify();
+    const u = safeSimplify(build(args[0], ctx));
     return !posAux(u) && !zeroQ(u);
   },
 
@@ -665,7 +674,7 @@ const VALUE_FNS: Record<string, ValueFn> = {
   // Rt[u, n] := RtAux[TogetherSimplify[u], n] — canonical n-th root;
   // approximated by simplify + exact Power fold
   Rt: (args, ctx) => {
-    const u = build(args[0], ctx).simplify();
+    const u = safeSimplify(build(args[0], ctx));
     const n = build(args[1], ctx);
     return u.pow(ctx.ce.One.div(n)).evaluate();
   },

@@ -2236,6 +2236,61 @@ export function hypergeometric1F1(a: number, b: number, z: number): number {
   return kummer1F1Series(a, b, z);
 }
 
+/**
+ * Appell hypergeometric function F₁(a; b₁, b₂; c; x, y) by the double
+ * Pochhammer series
+ *
+ *   F₁ = Σₘ Σₙ (a)ₘ₊ₙ (b₁)ₘ (b₂)ₙ / ((c)ₘ₊ₙ m! n!) xᵐ yⁿ
+ *
+ * Convergence domain |x| < 1 and |y| < 1, except a series that terminates
+ * in an index (b₁ or b₂ a non-positive integer) converges for any value of
+ * the corresponding variable. Outside the domain returns NaN (the
+ * expression stays symbolic).
+ */
+export function appellF1(
+  a: number,
+  b1: number,
+  b2: number,
+  c: number,
+  x: number,
+  y: number
+): number {
+  if ([a, b1, b2, c, x, y].some(Number.isNaN)) return NaN;
+  if (isNonPositiveInteger(c)) return NaN; // pole (ignoring the terminating nuance)
+
+  const xConverges = Math.abs(x) < 1 || isNonPositiveInteger(b1);
+  const yConverges = Math.abs(y) < 1 || isNonPositiveInteger(b2);
+  if (!xConverges || !yConverges) return NaN;
+
+  const MAX_ROWS = 10_000;
+  const MAX_COLS = 10_000;
+  let sum = 0;
+  // rowLead = (a)ₘ (b₁)ₘ / ((c)ₘ m!) xᵐ — the n = 0 term of row m
+  let rowLead = 1;
+  let negligibleRows = 0;
+  for (let m = 0; m < MAX_ROWS; m++) {
+    // Inner sum over n with term ratio ((a+m+n)(b₂+n) / ((c+m+n)(n+1))) y
+    let term = rowLead;
+    let rowSum = term;
+    for (let n = 0; n < MAX_COLS; n++) {
+      term *= ((a + m + n) * (b2 + n) * y) / ((c + m + n) * (n + 1));
+      if (term === 0) break; // terminated in n
+      rowSum += term;
+      if (Math.abs(term) <= Number.EPSILON * (1 + Math.abs(rowSum))) break;
+    }
+    sum += rowSum;
+    if (Math.abs(rowSum) <= Number.EPSILON * (1 + Math.abs(sum))) {
+      // Require a few consecutive negligible rows: with alternating signs
+      // a single small row does not imply convergence
+      if (++negligibleRows >= 3) return sum;
+    } else negligibleRows = 0;
+
+    rowLead *= ((a + m) * (b1 + m) * x) / ((c + m) * (m + 1));
+    if (rowLead === 0) return sum; // terminated in m
+  }
+  return sum;
+}
+
 function bigIsNonPositiveInteger(x: BigNum): boolean {
   return x.isInteger() && !x.isPositive();
 }

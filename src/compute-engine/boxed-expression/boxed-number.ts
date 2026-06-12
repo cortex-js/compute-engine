@@ -772,8 +772,25 @@ export function canonicalNumber(
   if (typeof value === 'string') return canonicalNumberString(ce, value);
 
   //
-  // It's a rational
+  // It's a rational (or a `{re, im}`/`{rational}`-style object that the
+  // `_numericValue()` fall-through below understands)
   //
+  // Guard: an array must be a [numerator, denominator] pair of numbers or
+  // bigints. Anything else (e.g. the MathJSON expression
+  // `['Rational', 1, 2]`, a common mixup) used to spin forever downstream.
+  if (
+    Array.isArray(value) &&
+    (value.length !== 2 ||
+      !(typeof value[0] === 'number' || typeof value[0] === 'bigint') ||
+      !(typeof value[1] === 'number' || typeof value[1] === 'bigint'))
+  ) {
+    throw new Error(
+      `ce.number(): expected a number, bigint, string, Complex, BigDecimal, NumericValue, MathJSON number object or [numerator, denominator] pair, but got ${JSON.stringify(
+        value
+      )}. To box a MathJSON expression, use ce.box() instead.`
+    );
+  }
+
   // a/0 -> NaN
   if (value[1] == 0) return NaN;
   // a/±oo

@@ -654,6 +654,142 @@ describe('GAUSS HYPERGEOMETRIC ₂F₁', () => {
   });
 });
 
+describe('GAUSS HYPERGEOMETRIC ₂F₁: ANALYTIC CONTINUATION z ≥ 1', () => {
+  // Reference values from mpmath 1.4.1 (mp.dps = 30). Principal branch on
+  // the cut z ∈ (1, ∞) is the limit from below (z − i0 convention),
+  // matching mpmath and Mathematica.
+
+  const check2F1 = (
+    args: (number | unknown[])[],
+    re: number,
+    im: number,
+    tol = 1e-12
+  ) => {
+    const r = ce.expr(['Hypergeometric2F1', ...args] as any).N();
+    expect(Math.abs(r.re - re)).toBeLessThan(tol * Math.max(1, Math.abs(re)));
+    expect(Math.abs(r.im - im)).toBeLessThan(tol * Math.max(1, Math.abs(im)));
+  };
+
+  test('generic parameters, z = 1.5', () =>
+    check2F1(
+      [0.3, 0.7, 1.9, 1.5],
+      1.26275036536263559882960164948,
+      -0.286877976158431065167345248105
+    ));
+
+  test('generic parameters, z = 3', () =>
+    check2F1(
+      [0.3, 0.7, 1.9, 3],
+      1.03684144495064269226671491587,
+      -0.485809692269339686052848039296
+    ));
+
+  test('generic parameters, z = 10', () =>
+    check2F1(
+      [0.3, 0.7, 1.9, 10],
+      0.676634666573655551748265963152,
+      -0.514792555149136754326091983874
+    ));
+
+  test('complex z outside Pfaff region: z = −2+4i', () =>
+    check2F1(
+      [0.3, 0.7, 1.9, ['Complex', -2, 4]],
+      0.798048453819626480568708748294,
+      0.129766092851309196142030013979
+    ));
+
+  test('degenerate c−a−b ∈ ℤ: ₂F₁(½,1;3/2;2)', () =>
+    check2F1(
+      [0.5, 1, 1.5, 2],
+      0.623225240140230513394020080251,
+      -1.11072073453959156175397024752
+    ));
+
+  test('degenerate a−b ∈ ℤ: ₂F₁(½,½;3/2;3)', () =>
+    check2F1(
+      [0.5, 0.5, 1.5, 3],
+      0.906899682117108925297039128821,
+      -0.661768020759984578967052612674
+    ));
+
+  test('doubly degenerate ₂F₁(1,1;2;4) = −ln(1−z)/z (perturbed path, ~1e-9)', () =>
+    check2F1(
+      [1, 1, 2, 4],
+      -0.274653072167027422848811309231,
+      -0.78539816339744830961566084582,
+      1e-8
+    ));
+
+  test('near-degenerate parameters: ₂F₁(2.5,1.5;4.001;2.5)', () =>
+    check2F1(
+      [2.5, 1.5, 4.001, 2.5],
+      -1.7292523919101244716764712394,
+      0.224706399221015210639347904464,
+      1e-12
+    ));
+
+  test('far along the cut: ₂F₁(½,1;3/2;1000)', () =>
+    check2F1(
+      [0.5, 1, 1.5, 1000],
+      0.001000333533673446908569856316,
+      -0.049672941327234008204255470241,
+      1e-11
+    ));
+
+  test('degenerate slow-convergence gap z → 1⁻: ₂F₁(½,½;2;0.99)', () =>
+    check2F1([0.5, 0.5, 2, 0.99], 1.25914024483453058004986685984, 0, 1e-12));
+
+  test('just above/below the cut are conjugates', () => {
+    const above = ce
+      .expr(['Hypergeometric2F1', 0.7, 1.3, 2.1, ['Complex', 2, 1e-8]])
+      .N();
+    const below = ce
+      .expr(['Hypergeometric2F1', 0.7, 1.3, 2.1, ['Complex', 2, -1e-8]])
+      .N();
+    expect(Math.abs(above.re - below.re)).toBeLessThan(1e-6);
+    expect(Math.abs(above.im + below.im)).toBeLessThan(1e-6);
+    // On-cut value matches the limit from below
+    const onCut = ce.expr(['Hypergeometric2F1', 0.7, 1.3, 2.1, 2]).N();
+    expect(Math.abs(onCut.im - below.im)).toBeLessThan(1e-6);
+    expect(onCut.im).toBeLessThan(0);
+  });
+});
+
+describe('APPELL F₁', () => {
+  // Reference values from mpmath 1.4.1 appellf1 (mp.dps = 25)
+  test('F₁(a; b₁, b₂; c; 0, 0) = 1 exactly', () => {
+    expect(
+      ce.expr(['AppellF1', 0.5, 0.3, 0.7, 1.5, 0, 0]).evaluate().re
+    ).toBe(1);
+  });
+
+  test('generic arguments in the unit bidisk', () => {
+    expectApprox(
+      ce.expr(['AppellF1', 0.5, 0.3, 0.7, 1.5, 0.4, -0.6]),
+      0.9300535584584346754744453,
+      1e-13
+    );
+    expectApprox(
+      ce.expr(['AppellF1', 2, 0.5, 1.5, 3.5, -0.8, 0.9]),
+      3.774476419098384890015794,
+      1e-12
+    );
+  });
+
+  test('terminating b₁ index allows |x| > 1', () => {
+    expectApprox(
+      ce.expr(['AppellF1', 0.5, -2, 0.5, 1.5, 3, 0.2]),
+      0.847918058054131974583958,
+      1e-13
+    );
+  });
+
+  test('outside the convergence domain stays symbolic', () => {
+    const r = ce.expr(['AppellF1', 0.5, 0.3, 0.7, 1.5, 2, 3]).N();
+    expect(r.operator).toBe('AppellF1');
+  });
+});
+
 describe('KUMMER CONFLUENT HYPERGEOMETRIC ₁F₁', () => {
   test('₁F₁(a;b;0) = 1 exactly', () => {
     expect(ce.expr(['Hypergeometric1F1', 0.3, 1.7, 0]).evaluate().re).toBe(1);

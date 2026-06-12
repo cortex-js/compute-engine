@@ -1,6 +1,6 @@
 {
  "schemaVersion": 1,
- "generated": "2026-06-11",
+ "generated": "2026-06-12",
  "generator": "scripts/rubi/translate.ts",
  "upstream": {
   "name": "Rubi",

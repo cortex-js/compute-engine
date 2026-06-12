@@ -1108,6 +1108,59 @@ describe('POWER DISTRIBUTION GUARDS', () => {
     ));
 });
 
+describe('SIGN-PRESERVING POWER FOLDING (x/√(x²) ≠ 1)', () => {
+  // Regression: folding (base^r)^e → base^(r·e) in products dropped the
+  // sign of the base when r is even and e is fractional: x/√(x²)
+  // canonicalized to 1, losing sign(x) (wrong for x < 0).
+
+  test('x/sqrt(x^2) does not collapse to 1', () => {
+    const e = ce
+      .box(['Divide', 'x', ['Sqrt', ['Power', 'x', 2]]])
+      .simplify();
+    expect(e.isSame(1)).toBe(false);
+    // Sign-correct: at x = -2 the value is -1
+    expect(e.subs({ x: -2 }).N().re).toBeCloseTo(-1, 10);
+    expect(e.subs({ x: 3 }).N().re).toBeCloseTo(1, 10);
+  });
+
+  test('x·(x²)^(-1/2) does not collapse to 1', () => {
+    const e = ce
+      .box(['Multiply', 'x', ['Power', ['Power', 'x', 2], ['Rational', -1, 2]]])
+      .simplify();
+    expect(e.isSame(1)).toBe(false);
+  });
+
+  test('sqrt(x^2) still simplifies to |x|', () =>
+    expect(simplify('\\sqrt{x^2}')).toMatchInlineSnapshot(`["Abs", "x"]`));
+
+  test('p/sqrt(p^2) = 1 for p > 0', () => {
+    ce.pushScope();
+    ce.assume(ce.expr(['Greater', 'p', 0]));
+    const e = ce.box(['Divide', 'p', ['Sqrt', ['Power', 'p', 2]]]).simplify();
+    ce.popScope();
+    expect(e.isSame(1)).toBe(true);
+  });
+
+  test('D(sqrt(x^2)) is sign-correct', () => {
+    const d = ce.box(['D', ['Sqrt', ['Power', 'x', 2]], 'x']).evaluate();
+    // d/dx |x| = x/|x| = sign(x): -1 at x = -2, +1 at x = 2
+    expect(d.subs({ x: -2 }).N().re).toBeCloseTo(-1, 10);
+    expect(d.subs({ x: 2 }).N().re).toBeCloseTo(1, 10);
+  });
+
+  test('integer outer exponents still fold: (x^2)^3 = x^6', () =>
+    expect(simplify('(x^2)^3 \\cdot x')).toMatchInlineSnapshot(
+      `["Power", "x", 7]`
+    ));
+
+  test('odd inner exponents still fold: x·(x^3)^(1/3) = x^2', () => {
+    const e = ce
+      .box(['Multiply', 'x', ['Power', ['Power', 'x', 3], ['Rational', 1, 3]]])
+      .simplify();
+    expect(e.isSame(ce.box(['Power', 'x', 2]))).toBe(true);
+  });
+});
+
 describe('SQRT AND ROOT POWER SIMPLIFICATION', () => {
   test('sqrt(x^4) = x^2', () =>
     expect(simplify('\\sqrt{x^4}')).toMatchInlineSnapshot(`["Square", "x"]`));

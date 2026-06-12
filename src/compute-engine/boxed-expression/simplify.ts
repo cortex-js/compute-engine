@@ -1,3 +1,4 @@
+import { checkDeadline } from '../../common/interruptible';
 import { replace } from './rules';
 import { holdMap } from './hold';
 import type {
@@ -336,6 +337,11 @@ function simplifyExpression(
   options: SimplifyOptions,
   steps: RuleSteps
 ): RuleSteps {
+  // Respect the engine deadline (`ce.timeLimit`): simplifyExpression is the
+  // per-node choke point of the simplification recursion, and each call does
+  // a full rule scan, so an unstrided check is cheap relative to the work.
+  checkDeadline(expr.engine._deadline);
+
   //
   // 1/ If a number or a string, no simplification to do
   //

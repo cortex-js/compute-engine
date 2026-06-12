@@ -1,3 +1,4 @@
+import { checkDeadline } from '../../common/interruptible';
 import type { Expression } from '../global-types';
 import { asSmallInteger } from './numerics';
 import { add } from './arithmetic-add';
@@ -387,6 +388,13 @@ export function polynomialDivide(
   divisor: Expression,
   variable: string
 ): [Expression, Expression] | null {
+  // Respect the engine deadline: the Euclidean loop in polynomialGCD (via
+  // the cancel-common-factors simplify rule) calls this repeatedly, and on
+  // polynomials with exact radical coefficients the remainder coefficients
+  // grow without bound — single simplify() calls were observed running for
+  // minutes. Each division is ms-scale, so an unstrided check is cheap.
+  checkDeadline(dividend.engine._deadline);
+
   const ce = dividend.engine;
 
   // Get coefficients
@@ -492,9 +500,13 @@ export function polynomialGCD(
 
   while (true) {
     const qCoeffs = getPolynomialCoefficients(q, variable);
-    if (!qCoeffs || qCoeffs.every((c) => c.isSame(0))) {
-      break;
-    }
+    // `null` means the coefficients could not be extracted (e.g. they
+    // contain parameter divisions like (a/b)·x², which Euclid remainders
+    // routinely produce) — NOT that q is zero. Conflating the two returned
+    // a non-divisor as the "GCD" (e.g. gcd(a + bx⁴, x⁶) → x⁴ + a/b), which
+    // cancelCommonFactors then used to silently drop terms.
+    if (!qCoeffs) return ce.One; // cannot continue: no provable common factor
+    if (qCoeffs.every((c) => c.isSame(0))) break;
 
     const divResult = polynomialDivide(p, q, variable);
     if (!divResult) {
@@ -572,8 +584,13 @@ export function cancelCommonFactors(
 
   if (!numDivResult || !denDivResult) return expr;
 
-  const [newNumerator] = numDivResult;
-  const [newDenominator] = denDivResult;
+  const [newNumerator, numRemainder] = numDivResult;
+  const [newDenominator, denRemainder] = denDivResult;
+
+  // Defense in depth: a true GCD divides both exactly. If either division
+  // leaves a remainder, the "GCD" was wrong — cancelling with it would
+  // silently change the value of the expression.
+  if (!numRemainder.isSame(0) || !denRemainder.isSame(0)) return expr;
 
   // Check if denominator became 1
   const denCoeffs = getPolynomialCoefficients(newDenominator, variable);

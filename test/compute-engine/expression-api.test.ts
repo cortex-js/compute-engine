@@ -149,3 +149,20 @@ describe('costFunction setter (REVIEW.md A5)', () => {
     expect(engine.costFunction).toBe(defaultCost);
   });
 });
+
+describe('ce.number() argument validation', () => {
+  test('valid rational pair', () => {
+    expect(ce.number([1, 2]).toString()).toBe('1/2');
+  });
+
+  test('MathJSON expression array throws instead of hanging', () => {
+    // ['Rational', 1, 2] is a MathJSON expression, not a rational pair —
+    // it previously made ce.number() spin forever
+    expect(() => ce.number(['Rational', 1, 2] as any)).toThrow(/ce\.box/);
+  });
+
+  test('wrong-length array throws', () => {
+    expect(() => ce.number([1, 2, 3] as any)).toThrow();
+    expect(() => ce.number([1] as any)).toThrow();
+  });
+});
