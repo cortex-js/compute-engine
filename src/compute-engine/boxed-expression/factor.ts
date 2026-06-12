@@ -463,6 +463,15 @@ function extractContent(expr: Expression, variable: string): Expression | null {
 
   if (content <= 1) return null;
 
+  // If the leading coefficient is negative, extract a negative content so
+  // the primitive part leads with a positive coefficient:
+  // -2x - 4 → -2(x + 2), not 2(-x - 2)
+  // (the top slot can be 0 if leading terms canceled during expansion, so
+  // scan back to the last non-zero coefficient)
+  let i = intCoeffs.length - 1;
+  while (i >= 0 && intCoeffs[i] === 0) i -= 1;
+  if (i >= 0 && intCoeffs[i] < 0) content = -content;
+
   // Divide all coefficients by the content to get the primitive part
   const primitiveCoeffs = coeffs.map((c) => {
     const n = asSmallInteger(c)!;
@@ -480,9 +489,10 @@ function extractContent(expr: Expression, variable: string): Expression | null {
   // bare sum — e.g. `3 · (2x + 3)` collapses back to `6x + 9`, undoing the
   // content extraction for a primitive that doesn't factor further (such as
   // a linear polynomial). Canonical `Multiply` does not distribute, so the
-  // factored form is preserved. `content` is always ≥ 2 here (we returned
-  // null for content ≤ 1), so the coefficient-±1 canonical edge cases (which
-  // would fold into a Negate or drop the factor) don't apply.
+  // factored form is preserved. `|content|` is always ≥ 2 here (we returned
+  // null for content ≤ 1 before applying the sign), so the coefficient-±1
+  // canonical edge cases (which would fold into a Negate or drop the factor)
+  // don't apply.
   return ce.function('Multiply', [ce.number(content), factoredPrimitive]);
 }
 
