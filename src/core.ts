@@ -6,6 +6,9 @@ export const version = '{{SDK_VERSION}}';
 
 export { ComputeEngine } from './compute-engine/index';
 
+// Thrown when an evaluation exceeds `ce.timeLimit` or `ce.iterationLimit`
+export { CancellationError } from './common/interruptible';
+
 export type * from './compute-engine/types';
 
 export type {

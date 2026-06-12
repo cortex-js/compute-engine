@@ -48,6 +48,10 @@ export {
 // ── Arbitrary-precision arithmetic ──────────────────────────────────
 export { BigDecimal } from './big-decimal';
 
+// ── Execution constraints ───────────────────────────────────────────
+// Thrown when an evaluation exceeds `ce.timeLimit` or `ce.iterationLimit`
+export { CancellationError } from './common/interruptible';
+
 // ── Compilation targets ─────────────────────────────────────────────
 export type {
   CompileTarget,

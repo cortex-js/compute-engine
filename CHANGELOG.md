@@ -1,6 +1,34 @@
 ## [Unreleased]
 
+### Features
+
+- **Numeric evaluation of special functions**: `EllipticK(m)` and
+  `EllipticE(m)` (complete elliptic integrals, parameter convention m = k²,
+  computed via the arithmetic-geometric mean), `AGM(a, b)` (and the
+  shorthand `AGM(z)` = AGM(1, z)), the Gauss hypergeometric function
+  `Hypergeometric2F1(a, b, c, z)`, the Kummer confluent hypergeometric
+  function `Hypergeometric1F1(a, b, z)`, the Jacobi theta functions
+  `JacobiTheta(j, z, tau)` (j ∈ 1…4, nome q = e^{iπτ}), and the Dedekind
+  eta function `DedekindEta(tau)`. The elliptic integrals and
+  hypergeometric functions support machine, arbitrary-precision, and
+  complex evaluation (including K(m) for m > 1, which is complex); the
+  theta and eta functions evaluate for complex arguments with Im(τ) > 0.
+  Identities referencing these functions in the Identities Library are now
+  numerically verifiable.
+
 ### Improvements
+
+- **Interruptible evaluation**: long-running operations now respect the
+  engine time limit (`ce.timeLimit`, default 2s) and throw a
+  `CancellationError` instead of hanging: collection enumeration (`Filter`,
+  `Select`, `CountIf`, `Position`, `GroupBy`, set operations, and iteration
+  over large or infinite collections), the number-theory functions
+  (`Totient`, `Sigma0`/`Sigma1`/`SigmaMinus1`, `IsPerfect`, `IsAbundant`,
+  `Eulerian`, `Stirling`, `NPartition`), and numeric `Limit`/`NLimit`
+  extraction. Numeric integration (`NIntegrate`, Monte Carlo) degrades
+  gracefully instead: when the time limit is reached it returns the
+  estimate computed from the samples taken so far, with a correspondingly
+  larger error bound.
 
 - **Identities Library: corpus updated with verified upstream corrections**
   (1,350 → 1,376 rules). Machine validation of the
