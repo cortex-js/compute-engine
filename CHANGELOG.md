@@ -168,6 +168,35 @@
   quantity epsilon-negative, and a `NaN` imaginary part now coherently
   makes the whole numeric value `NaN`.
 
+- **Odd roots of negative reals evaluated to `NaN`.** `Root(-8, 3)` and
+  `(-8)^(1/3)` returned `NaN` from `evaluate()` while `.N()` returned `−2`
+  — the exact and arbitrary-precision evaluation paths rejected all
+  negative bases instead of applying the real-root convention used
+  everywhere else for odd roots. `(-8)^(1/3)` now evaluates exactly to
+  `−2` (and `(-32)^(1/5)` to `−2`, etc.); odd roots of negative
+  non-perfect powers evaluate numerically (`root(3)(-2) ≈ −1.26`) instead
+  of `NaN`. Even roots of negative reals are unchanged.
+
+- **`1/√u` was rewritten to `√(1/u)`, changing the principal branch.** The
+  inversion of a square root silently used the identity `1/√u = √(1/u)`,
+  which fails off the nonnegative reals: `1/√(−0.23)` evaluated to
+  `+2.085i` instead of the principal value `−2.085i`. The rewrite is now
+  gated on the radicand being known nonnegative; for other operands the
+  expression stays structural (`1/√u`) and evaluates on the correct
+  branch.
+
+- **Crash factoring a sum whose terms all have zero coefficients.**
+  `factor()` on a (non-canonical) sum like `0·u + 0·v` crashed with
+  `TypeError: Cannot read properties of undefined (reading 'engine')`
+  after filtering out every term; it now returns `0`.
+
+- **`RangeError: The number NaN cannot be converted to a BigInt`.** Rational
+  arithmetic promoted machine rationals to `bigint` without checking for
+  the `NaN` encoding (`[NaN, 1]`, or `[1, NaN]` after inversion), so an
+  expression mixing a NaN-valued exact rational with a bigint rational
+  threw instead of propagating `NaN`. Non-finite machine rationals now
+  propagate `NaN`, and dividing an already-NaN exact value short-circuits.
+
 - **#309** The public `factor()` function was incorrectly factoring polynomials.
   Now `factor(x^2 + 5x + 6)` correctly returns `(x + 2)(x + 3)` instead of
   `x^2 + 5x + 6` (the previous behavior was a no-op).

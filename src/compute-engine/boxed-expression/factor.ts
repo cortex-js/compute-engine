@@ -608,6 +608,11 @@ export function factor(expr: Expression): Expression {
       if (!coeff.isZero) terms.push({ coeff, term });
     }
 
+    // Every coefficient was zero (possible with non-canonical input,
+    // e.g. synthetic `0·u + 0·v` sums): the sum is zero, and add() below
+    // cannot be called with no terms.
+    if (terms.length === 0) return ce.Zero;
+
     if (!common || common.isOne) return expr;
 
     const newTerms = terms.map(({ coeff, term }) =>

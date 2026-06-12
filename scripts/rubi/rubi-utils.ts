@@ -434,7 +434,7 @@ function safeSimplify(e: Expression): Expression {
 }
 
 /** Rubi PossibleZeroQ: canonical zero, simplified zero, or numerically ~0 */
-function zeroQ(d: Expression): boolean {
+export function zeroQ(d: Expression): boolean {
   if (d.isSame(0)) return true;
   const key = activeCaches ? d.toString() : '';
   const cached = activeCaches?.zeroQ.get(key);
@@ -465,6 +465,58 @@ function ratParts(e: Expression): [number, number] | null {
   const den = e.denominator.re;
   if (typeof num !== 'number' || typeof den !== 'number') return null;
   return [num, den];
+}
+
+/** Rubi NumericFactor/NonnumericFactors split of a term: the leading
+ * rational coefficient and the remaining (non-numeric) factors. */
+function splitNumericFactor(u: Expression): {
+  coef: number;
+  rest: Expression;
+} {
+  const ce = u.engine;
+  const r = ratParts(u);
+  if (r) return { coef: r[0] / r[1], rest: ce.One };
+  if (u.operator === 'Negate' && u.ops) {
+    const inner = splitNumericFactor(u.ops[0]);
+    return { coef: -inner.coef, rest: inner.rest };
+  }
+  if (u.operator === 'Multiply' && u.ops) {
+    let coef = 1;
+    const rest: Expression[] = [];
+    for (const f of u.ops) {
+      const fr = ratParts(f);
+      if (fr) coef *= fr[0] / fr[1];
+      else rest.push(f);
+    }
+    return {
+      coef,
+      rest:
+        rest.length === 0
+          ? ce.One
+          : rest.length === 1
+            ? rest[0]
+            : ce.function('Multiply', rest),
+    };
+  }
+  return { coef: 1, rest: u };
+}
+
+/** Rubi SumSimplerAuxQ — recursion over (expanded) sum terms:
+ * - v a sum: every term of v is rational or aux-simpler wrt u
+ * - u a sum: some term of u is aux-simpler wrt v
+ * - both terms: v ≠ 0, same non-numeric factors, and the numeric-factor
+ *   ratio nf(u)/nf(v) < −1/2 (or = −1/2 with nf(u) < 0) */
+function sumSimplerAuxQ(u: Expression, v: Expression): boolean {
+  if (v.operator === 'Add' && v.ops)
+    return v.ops.every((t) => isLiteralRational(t) || sumSimplerAuxQ(u, t));
+  if (u.operator === 'Add' && u.ops)
+    return u.ops.some((t) => sumSimplerAuxQ(t, v));
+  if (v.isSame(0)) return false;
+  const su = splitNumericFactor(u);
+  const sv = splitNumericFactor(v);
+  if (!su.rest.isSame(sv.rest)) return false;
+  const q = su.coef / sv.coef;
+  return q < -0.5 || (q === -0.5 && su.coef < 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -589,7 +641,9 @@ const PRED_FNS: Record<string, PredFn> = {
     simplerQ(build(args[0], ctx).evaluate(), build(args[1], ctx).evaluate()),
 
   // SumSimplerQ[u, v] — is u+v simpler than u (reduction direction);
-  // exact transcription of the rational case, false otherwise
+  // exact transcription of Rubi's definition (rational case + the
+  // SumSimplerAuxQ recursion over expanded sum terms), so symbolic
+  // reductions like SumSimplerQ[-m-2, 1] hold (−m−1 is simpler)
   SumSimplerQ: (args, ctx) => {
     const u = build(args[0], ctx).evaluate();
     const v = build(args[1], ctx).evaluate();
@@ -602,9 +656,9 @@ const PRED_FNS: Record<string, PredFn> = {
       isLiteralRational(v)
     ) {
       if (vr === 0) return false;
-      return vr > 0 ? ur < -1 : ur >= -1;
+      return vr > 0 ? ur < -1 : ur >= -vr;
     }
-    return false;
+    return sumSimplerAuxQ(expand(u), expand(v));
   },
 
   // IntLinearQ[a,b,c,d,m,n,x] — gate for (a+bx)^m(c+dx)^n reductions:
@@ -889,10 +943,28 @@ const VALUE_FNS: Record<string, ValueFn> = {
   FracPart: (args, ctx) =>
     intFracPart(build(args[0], ctx).evaluate(), ctx.ce, 'frac'),
 
-  // ExpandToSum[u, x] — expand to a sum of monomials
+  // ExpandToSum[u, x] — expand to a sum of monomials with COLLECTED
+  // coefficients (Mathematica: Σ Coeff[u,x,k]·x^k). The collection matters:
+  // normalization rules like Int[u_^m_] := Int[ExpandToSum[u,x]^m,x] rely
+  // on the result matching a_.+b_.*x_ afterwards, and rule RHSs emit
+  // Divide-wrapped linear forms (e.g. (b·d·a²·x+d·a³)/b − a·b·c·x − c·a²)
+  // that plain expansion leaves structurally unmatchable.
   // ExpandToSum[u, v, x] — distribute u over the expansion of v
   ExpandToSum: (args, ctx) => {
-    if (args.length === 2) return expand(build(args[0], ctx));
+    if (args.length === 2) {
+      const u = build(args[0], ctx);
+      const coeffs = polyCoeffsX(u, ctx.x);
+      if (coeffs !== null) {
+        const X = ctx.ce.symbol(ctx.x);
+        const terms: Expression[] = [];
+        coeffs.forEach((c, k) => {
+          if (!c.isSame(0)) terms.push(k === 0 ? c : c.mul(X.pow(k)));
+        });
+        if (terms.length === 0) return ctx.ce.Zero;
+        return terms.length === 1 ? terms[0] : ctx.ce.function('Add', terms);
+      }
+      return expand(u);
+    }
     const u = build(args[0], ctx);
     const v = expand(build(args[1], ctx));
     if (v.operator === 'Add' && v.ops)
@@ -958,6 +1030,11 @@ const VALUE_FNS: Record<string, ValueFn> = {
   // Rubi gives up explicitly — fail the rule; the driver then returns
   // its own inert form
   CannotIntegrate: () => fail('CannotIntegrate'),
+  // Unintegrable[u, x] is Rubi's other give-up head (the integral is known
+  // to have no closed form in terms of the supported functions). Letting it
+  // through as an ordinary function node produces huge pseudo-results that
+  // blow up verification — fail the rule instead.
+  Unintegrable: () => fail('Unintegrable'),
 };
 
 function intFracPart(
@@ -996,15 +1073,19 @@ function expandPolyOverLinear(u: Expression, ctx: Ctx): Expression {
   let n: Expression | null = null;
   const polyParts: Expression[] = [];
   for (const f of factors) {
-    // expandable divisor: L^e with literal rational e that is NOT a
-    // non-negative integer (negative integer, or any fraction)
+    // expandable divisor: L^e with e either a literal rational that is NOT
+    // a non-negative integer (negative integer, or any fraction), or a
+    // symbolic exponent free of x (Rubi's ExpandLinearProduct shape:
+    // P(x)·(a+bx)^n expands by the same repeated division, with the
+    // exponents n, n+1, … kept symbolic)
     const e = f.operator === 'Power' && f.ops ? f.ops[1] : null;
     const isExpandableBase =
       e !== null &&
-      isNumber(e) &&
-      e.isRational === true &&
-      !(e.isInteger === true && (realNum(e) ?? 0) >= 0) &&
-      polyDegreeX(f.ops![0], x) >= 1;
+      polyDegreeX(f.ops![0], x) >= 1 &&
+      (isNumber(e)
+        ? e.isRational === true &&
+          !(e.isInteger === true && (realNum(e) ?? 0) >= 0)
+        : !e.has(x));
     if (isExpandableBase) {
       if (divisor !== null) {
         // multiple denominators → partial fractions over linear factors

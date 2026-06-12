@@ -431,6 +431,25 @@ describe('ROOT', () => {
 
   test(`Root of negative number with odd exponent`, () =>
     expect(ce.expr(['Root', -2, 3]).N()).toMatchSnapshot());
+
+  // Odd roots of negative reals follow the real-root convention and must
+  // agree between evaluate() and N() (evaluate() used to return NaN)
+  test(`Root of negative perfect cube evaluates exactly`, () => {
+    expect(ce.expr(['Root', -8, 3]).evaluate().json).toEqual(-2);
+    expect(
+      ce.expr(['Power', -8, ['Rational', 1, 3]]).evaluate().json
+    ).toEqual(-2);
+    expect(
+      ce.expr(['Power', -32, ['Rational', 1, 5]]).evaluate().json
+    ).toEqual(-2);
+  });
+
+  test(`Odd root of negative non-perfect cube N() is real`, () => {
+    expect(ce.expr(['Root', -2, 3]).evaluate().isNaN).not.toBe(true);
+    const n = ce.expr(['Power', ['Rational', -1, 8], ['Rational', 1, 3]]).N();
+    expect(n.re).toBeCloseTo(-0.5, 12);
+    expect(n.im).toBe(0);
+  });
 });
 
 describe('INVALID ROOT', () => {

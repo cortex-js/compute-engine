@@ -477,7 +477,14 @@ export class BigNumericValue extends NumericValue {
     if (this.isNegativeOne) return this;
 
     if (this.im === 0) {
-      if (this.decimal.isNegative()) return this._makeExact(NaN);
+      if (this.decimal.isNegative()) {
+        // Odd root of a negative real: real-root convention, matching
+        // MachineNumericValue.root (e.g. (-8)^(1/3) = -2). Even roots of
+        // negative reals are not real: NaN, also matching the machine path.
+        if (exp % 2 === 0) return this._makeExact(NaN);
+        if (exp === 3) return this.clone(this.decimal.cbrt());
+        return this.clone(this.decimal.neg().ln().div(exp).exp().neg());
+      }
       if (exp === 2) return this.clone(this.decimal.sqrt());
       if (exp === 3) return this.clone(this.decimal.cbrt());
       // x^(1/n) as exp(ln(x)/n), computed in full precision. The previous

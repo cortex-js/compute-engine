@@ -105,6 +105,20 @@ export function add(lhs: Rational, rhs: Rational): Rational {
 }
 
 export function mul(lhs: Rational, rhs: Rational): Rational {
+  // A non-finite machine rational ([NaN, 1] is the NaN encoding, and
+  // inverse() can produce [1, NaN]) cannot be promoted to bigint:
+  // BigInt(NaN) throws. Propagate NaN instead.
+  if (
+    isMachineRational(lhs) &&
+    (!Number.isFinite(lhs[0]) || !Number.isFinite(lhs[1]))
+  )
+    return [NaN, 1];
+  if (
+    isMachineRational(rhs) &&
+    (!Number.isFinite(rhs[0]) || !Number.isFinite(rhs[1]))
+  )
+    return [NaN, 1];
+
   if (isMachineRational(lhs) && isMachineRational(rhs)) {
     const n = lhs[0] * rhs[0];
     const d = lhs[1] * rhs[1];

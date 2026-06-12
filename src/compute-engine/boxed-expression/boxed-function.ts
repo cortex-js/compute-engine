@@ -684,7 +684,10 @@ export class BoxedFunction
     if (this.isOne) return this;
     if (this.isNegativeOne) return this;
 
-    if (this.operator === 'Sqrt') return this.op1.inv().sqrt();
+    // 1/√u = √(1/u) only holds for u ≥ 0: on the negative real axis the
+    // principal branch gives 1/√(-a) = -i/√a but √(-1/a) = +i/√a
+    if (this.operator === 'Sqrt' && this.op1.isNonNegative === true)
+      return this.op1.inv().sqrt();
     if (this.operator === 'Divide') return this.op2.div(this.op1);
     if (this.operator === 'Power') {
       const neg = this.op2.neg();

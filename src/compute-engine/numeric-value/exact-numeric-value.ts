@@ -462,6 +462,7 @@ export class ExactNumericValue extends NumericValue {
       });
     }
 
+    if (this.isNaN) return this;
     if (other.isOne) return this;
     if (other.isNegativeOne) return this.neg();
     if (this.isZero) {
@@ -617,6 +618,11 @@ export class ExactNumericValue extends NumericValue {
     // Is it a multiple of square root?
     // Decompose to try to preserve the rational part
     if (exponent % 1 === 0.5) return this.root(Math.floor(exponent)).sqrt();
+
+    // Odd root of a negative value: real-root convention,
+    // (-x)^(1/n) = -(x^(1/n)), preserving exactness (e.g. (-8)^(1/3) = -2)
+    if (this.sign < 0 && Number.isInteger(exponent) && exponent % 2 === 1)
+      return this.neg().root(exponent).neg();
 
     if (this.radical === 1) {
       if (this.sign > 0) {

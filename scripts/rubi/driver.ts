@@ -21,10 +21,13 @@ import {
   evalCondition,
   findFailingConjunct,
   installCaches,
+  polyCoeffsX,
+  zeroQ,
   RuleFail,
   Ctx,
   Hooks,
 } from './rubi-utils';
+import { isNumber } from '../../src/compute-engine/boxed-expression/type-guards';
 import { toTimesPower, recanonicalize } from './normal-form';
 
 const MAX_DEPTH = 40;
@@ -155,54 +158,101 @@ export class RubiDriver {
     const trace = (id: string, stage: string): void => {
       if (this.options.trace) this.stats.trace.push({ id, stage, depth });
     };
-    for (const rule of this.rules) {
-      if (Date.now() > this.deadline) return null;
-      // dispatch pre-screen on the root operator
-      if (rule.rootOp !== null && rule.rootOp !== integrand.operator)
-        continue;
-      // conditions participate in matching: enumerate alternative
-      // assignments (factor-role swaps etc.) and try conditions per env
-      const envs = matchAll(rule.pat, integrand, x);
-      for (const env of envs) {
-        // bindings may hold synthetic normal-form subtrees —
-        // re-canonicalize before conditions and RHS construction
-        for (const [k, v] of env) env.set(k, recanonicalize(ce, v));
-        const ctx: Ctx = { ce, env, x: variable, hooks };
-        try {
-          if (rule.condition && !evalCondition(rule.condition, ctx)) {
-            trace(
-              rule.id,
-              this.options.trace
-                ? `condition: ${findFailingConjunct(rule.condition, ctx)}`
-                : 'condition'
-            );
-            continue;
+    const dispatch = (envCap: number): Expression | null => {
+      for (const rule of this.rules) {
+        if (Date.now() > this.deadline) return null;
+        // dispatch pre-screen on the root operator
+        if (rule.rootOp !== null && rule.rootOp !== integrand.operator)
+          continue;
+        // conditions participate in matching: enumerate alternative
+        // assignments (factor-role swaps etc.) and try conditions per env
+        const envs = matchAll(rule.pat, integrand, x, envCap);
+        for (const env of envs) {
+          // bindings may hold synthetic normal-form subtrees —
+          // re-canonicalize before conditions and RHS construction
+          for (const [k, v] of env) env.set(k, recanonicalize(ce, v));
+          const ctx: Ctx = { ce, env, x: variable, hooks };
+          try {
+            if (rule.condition && !evalCondition(rule.condition, ctx)) {
+              trace(
+                rule.id,
+                this.options.trace
+                  ? `condition: ${findFailingConjunct(rule.condition, ctx)}`
+                  : 'condition'
+              );
+              continue;
+            }
+            // With-bindings (evaluated after the outer condition, like Rubi)
+            for (const b of rule.bindings) {
+              if (b.value === null) throw new RuleFail('bare Module local');
+              env.set(b.name, build(b.value, ctx).evaluate());
+            }
+            if (
+              rule.innerCondition &&
+              !evalCondition(rule.innerCondition, ctx)
+            ) {
+              trace(rule.id, 'inner-condition');
+              continue;
+            }
+            const result = build(rule.rhs, ctx);
+            // A result that is exactly an inert integral made no progress
+            // (e.g. a normalization rule like Int[u^m] := Int[ExpandToSum…]
+            // whose rewritten subproblem immediately failed): fail the rule
+            // so lower-priority rules and the collected-coefficient
+            // fallback below get their chance.
+            if (result.operator === 'Integrate') {
+              trace(rule.id, 'rule-fail: no progress (inert result)');
+              continue;
+            }
+            this.stats.ruleFirings[rule.id] =
+              (this.stats.ruleFirings[rule.id] ?? 0) + 1;
+            return result;
+          } catch (e) {
+            if (e instanceof RuleFail) {
+              trace(rule.id, `rule-fail: ${e.message}`);
+              continue; // try next assignment / rule
+            }
+            throw e;
           }
-          // With-bindings (evaluated after the outer condition, like Rubi)
-          for (const b of rule.bindings) {
-            if (b.value === null) throw new RuleFail('bare Module local');
-            env.set(b.name, build(b.value, ctx).evaluate());
-          }
-          if (
-            rule.innerCondition &&
-            !evalCondition(rule.innerCondition, ctx)
-          ) {
-            trace(rule.id, 'inner-condition');
-            continue;
-          }
-          const result = build(rule.rhs, ctx);
-          this.stats.ruleFirings[rule.id] =
-            (this.stats.ruleFirings[rule.id] ?? 0) + 1;
-          return result;
-        } catch (e) {
-          if (e instanceof RuleFail) {
-            trace(rule.id, `rule-fail: ${e.message}`);
-            continue; // try next assignment / rule
-          }
-          throw e;
+        }
+      }
+      return null;
+    };
+    // First pass with the default assignment cap; if nothing fires at all,
+    // retry with a wider cap — multi-factor integrands (e.g. P(x)·(a+bx)^m
+    // ·(c+dx)^n with m in the coefficients) can need more than 8 candidate
+    // assignments before conditions accept one. The widened pass runs only
+    // on otherwise-unsolved problems, so solved paths are unaffected.
+    {
+      const result = dispatch(8) ?? dispatch(32);
+      if (result !== null) return result;
+    }
+
+    // ---- collected-coefficient fallback -------------------------------
+    // ∫ (α+βx)^n dx with literal rational n and a base that is linear in
+    // x only after collecting coefficients (rule RHSs emit Divide-wrapped
+    // linear forms, e.g. (b·d·a²·x + d·a³)/b − a·b·c·x − c·a², that the
+    // structural matcher cannot see as a_+b_.x_). Same semantics as rules
+    // 1.1.1.1 #14–#18; runs only when no structural rule matched.
+    if (integrand.operator === 'Power' && integrand.ops) {
+      const [base, expo] = integrand.ops;
+      if (
+        isNumber(expo) &&
+        expo.isRational === true &&
+        base.operator === 'Add'
+      ) {
+        const coeffs = polyCoeffsX(recanonicalize(ce, base), variable);
+        if (coeffs !== null && coeffs.length === 2 && !zeroQ(coeffs[1])) {
+          const [alpha, beta] = coeffs;
+          const u = alpha.add(beta.mul(x));
+          this.stats.preludeFirings++;
+          if (expo.isSame(-1)) return u.ln().div(beta);
+          const n1 = expo.add(1);
+          return u.pow(n1).div(beta.mul(n1));
         }
       }
     }
+
     return null;
   }
 }
