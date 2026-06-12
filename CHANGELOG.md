@@ -37,6 +37,24 @@
 
 ### Bug Fixes
 
+- **`Take`, `Drop`, `Slice`, and `Count` returned garbage on matrices.** A
+  list of lists (e.g. `[[2,3,4],[6,7,9],[11,12,13]]`) is represented internally
+  as a tensor, and the tensor's element accessors were inconsistent with its
+  iterator: `count` returned the total number of scalar entries (9 for a 3×3
+  matrix) instead of the number of rows, and accessing element *i* returned the
+  first scalar of row *i* instead of the row itself. As a result
+  `Take(matrix, 1)` returned `["List", 6]` instead of the first row, and
+  `Drop`/`Slice` produced `Error("missing")` elements. Element access on a
+  matrix now yields whole rows (with negative-index and bounds handling
+  consistent with `List`), and `Count(matrix)` returns the number of rows.
+  Multi-index access (`At(matrix, i, j)`) is unchanged.
+
+- **`Join` of lists returned a truncated `Set`.** `Join` had no element-access
+  handler, so the engine treated the result as a non-indexed collection:
+  joining two lists materialized as a `Set` (dropping duplicates and showing
+  only the first few elements). `Join` on lists now produces a `List` with all
+  elements in order; joining sets still produces a deduplicated `Set`.
+
 - **Doubly-infinite sums evaluated to 0.** A `Sum` or `Product` with limits
   `n = −∞…∞` produced an empty iteration range, so e.g.
   `Σ_{n=−∞}^{∞} sinc³(n)` evaluated to `0` instead of `3π/4`. Infinite

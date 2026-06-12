@@ -1113,6 +1113,34 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           },
         };
       },
+      at: (
+        expr: Expression,
+        index: number | string
+      ): undefined | Expression => {
+        if (typeof index !== 'number' || !isFunction(expr)) return undefined;
+
+        // A negative index counts from the end of the joined collection
+        if (index < 0) {
+          let total = 0;
+          for (const op of expr.ops) {
+            const count = op.count;
+            if (count === undefined || !Number.isFinite(count))
+              return undefined;
+            total += count;
+          }
+          index = total + index + 1;
+        }
+        if (index < 1) return undefined;
+
+        // Walk the sources, skipping over each one's elements
+        for (const op of expr.ops) {
+          const count = op.count;
+          if (count === undefined) return undefined;
+          if (index <= count) return op.at(index);
+          index -= count;
+        }
+        return undefined;
+      },
     },
   },
 

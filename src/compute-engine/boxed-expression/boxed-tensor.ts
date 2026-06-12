@@ -279,10 +279,28 @@ export class BoxedTensor<T extends TensorDataType>
     );
   }
 
+  /**
+   * The number of elements along the **first axis** — e.g. the number of rows
+   * of a matrix — NOT the total number of scalar entries. A 3×3 matrix has a
+   * count of 3, not 9.
+   *
+   * This is consistent with `each()` and `at()`, which iterate over and index
+   * first-axis slices, and with the count of the equivalent nested `List`.
+   *
+   * For the total number of scalar entries, use
+   * `tensor.shape.reduce((a, b) => a * b, 1)` (or `Flatten` at the expression
+   * level).
+   */
   get count(): number {
-    return this.tensor.shape.reduce((a, b) => a * b, 1);
+    if (this.tensor.rank === 0) return 1;
+    return this.tensor.shape[0];
   }
 
+  /**
+   * Iterate over the slices along the **first axis** — e.g. the rows of a
+   * matrix — consistent with `count` and `at()`. A rank-0 (scalar) tensor
+   * yields itself once.
+   */
   each(): Generator<Expression> {
     const shape = this.tensor.shape;
     const rank = this.tensor.rank;
@@ -326,26 +344,38 @@ export class BoxedTensor<T extends TensorDataType>
     })(this);
   }
 
+  /**
+   * Return the nth slice along the **first axis** — e.g. the nth row of a
+   * matrix, as a rank n-1 tensor — consistent with `each()` and `count`.
+   *
+   * The index is 1-based; a negative index counts from the end (like
+   * `List.at()`). Out-of-bounds indices return `undefined`.
+   *
+   * For scalar element access into a matrix, index twice (or use
+   * `At(matrix, i, j)` at the expression level).
+   */
   at(index: number): Expression | undefined {
-    // Return the nth row of the tensor
+    if (this.tensor.rank === 0)
+      return index === 1 || index === -1 ? this : undefined;
+
+    // Negative indices count from the end (like List.at())
+    const len = this.tensor.shape[0];
+    if (index < 0) index = len + index + 1;
+    if (index < 1 || index > len) return undefined;
+
     const row = this.tensor.slice(index);
     if (row.rank === 0) {
-      // Scalar tensor: return itself
+      // Element of a vector: return it as a boxed expression
       return this.engine.expr(row.data[0]);
-    } else if (row.rank === 1) {
-      // 1D tensor: return the boxed expression of the element
-      return this.engine.expr(row.data[0]);
-    } else if (row.rank > 1) {
-      // Higher rank tensor: return a new boxed tensor
-      const rowExpr = row.expression;
-      const rowOps = isFunction(rowExpr) ? rowExpr.ops : [];
-      return new BoxedTensor(this.engine, {
-        ops: rowOps,
-        shape: row.shape,
-        dtype: row.dtype,
-      });
     }
-    return undefined;
+    // Higher rank slice (row of a matrix, etc.): return it as a tensor
+    const rowExpr = row.expression;
+    const rowOps = isFunction(rowExpr) ? rowExpr.ops : [];
+    return new BoxedTensor(this.engine, {
+      ops: rowOps,
+      shape: row.shape,
+      dtype: row.dtype,
+    });
   }
 
   match(

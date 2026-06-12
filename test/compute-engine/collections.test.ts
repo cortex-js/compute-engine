@@ -62,7 +62,7 @@ describe('COUNT', () => {
     expect(evaluate(['Count', list])).toMatchInlineSnapshot(`7`));
 
   test('Count matrix', () =>
-    expect(evaluate(['Count', matrix])).toMatchInlineSnapshot(`9`));
+    expect(evaluate(['Count', matrix])).toMatchInlineSnapshot(`3`));
 
   test('Count range', () =>
     expect(evaluate(['Count', range])).toMatchInlineSnapshot(`9`));
@@ -118,7 +118,9 @@ describe('TAKE', () => {
   });
 
   test('matrix', () =>
-    expect(evaluate(['Take', matrix, 1])).toMatchInlineSnapshot(`["List", 6]`)); // @fixme: should be the first row `["List", 2, 3, 4]`
+    expect(evaluate(['Take', matrix, 1])).toMatchInlineSnapshot(
+      `["List", ["List", 2, 3, 4]]`
+    )); // The first element of a matrix is its first row
 
   test('range', () => {
     expect(evaluate(['Take', range, 1])).toMatchInlineSnapshot(`["List", 2]`);
@@ -212,18 +214,9 @@ describe('DROP 2', () => {
     ));
 
   test('matrix', () =>
-    expect(evaluate(['Drop', matrix, 2])).toMatchInlineSnapshot(`
-      [
-        "List",
-        ["Error", "'missing'"],
-        ["Error", "'missing'"],
-        ["Error", "'missing'"],
-        ["Error", "'missing'"],
-        ["Error", "'missing'"],
-        ["Error", "'missing'"],
-        ["Error", "'missing'"]
-      ]
-    `)); // @fixme should be `["List", ["List", 11, 12, 13]]`
+    expect(evaluate(['Drop', matrix, 2])).toMatchInlineSnapshot(
+      `["List", ["List", 11, 12, 13]]`
+    ));
 
   test('range', () => {
     expect(evaluate(['Drop', range, 2])).toMatchInlineSnapshot(
@@ -332,8 +325,8 @@ describe('SLICE (2,3)', () => {
 
   test('matrix', () =>
     expect(evaluate(['Slice', matrix, 2, 3])).toMatchInlineSnapshot(
-      `["List", 11, ["Error", "'missing'"]]`
-    )); // @fixme.
+      `["List", ["List", 6, 7, 9], ["List", 11, 12, 13]]`
+    ));
 
   test('range', () =>
     expect(evaluate(['Slice', range, 2, 3])).toMatchInlineSnapshot(
@@ -426,7 +419,7 @@ describe('SLICE -1,1', () => {
   test('linspace', () =>
     expect(evaluate(['Slice', linspace, -1, 1])).toMatchInlineSnapshot(
       `["List"]`
-    )); // @fixme
+    )); // Reversed bounds (last to first) yield an empty slice, like other collections
 
   test('expression', () =>
     expect(evaluate(['Slice', expression, -1, 1])).toMatchInlineSnapshot(`
@@ -520,7 +513,7 @@ describe('OPERATIONS ON INDEXED COLLECTIONS', () => {
   test('Most', () =>
     expect(evaluate(['Most', list])).toMatchInlineSnapshot(
       `["List", 7, 13, 5, 19, 2, 3]`
-    )); // @fixme should be `["List", 7, 13, 5, 19, 2, 3]`
+    ));
 
   test('RotateLeft', () =>
     expect(evaluate(['RotateLeft', list1, 2])).toMatchInlineSnapshot(
@@ -610,8 +603,8 @@ describe('OPERATIONS ON NON-INDEXED COLLECTIONS', () => {
 
   test('Join', () =>
     expect(evaluate(['Join', list1, list2])).toMatchInlineSnapshot(
-      `["Set", 100, 4, 2, 62, 34, "ContinuationPlaceholder"]`
-    )); // @fixme should be `["List", 100, 4, 2, 62, 34, 16, 8, 9, 7, 24]`
+      `["List", 100, 4, 2, 62, 34, "ContinuationPlaceholder", 8, 9, 7, 2, 24]`
+    )); // 11 elements: default materialization shows a 5-element head and tail
 });
 
 // describe('NON-ITERABLE OPERATIONS', () => {
@@ -882,9 +875,9 @@ describe('Collection handler regressions (REVIEW.md B3–B8)', () => {
 // REVIEW.md B15/B17/B18: statistics binning, Reduce initial value, Filter count.
 describe('Binning, Reduce, Filter, Zip (REVIEW.md B15/B17/B18)', () => {
   it('B15: BinCounts counts the dataset maximum in the (closed) last bin', () => {
-    expect(evaluate(['BinCounts', ['List', 1, 2, 2, 3], 3])).toMatchInlineSnapshot(
-      `["List", 1, 2, 1]`
-    );
+    expect(
+      evaluate(['BinCounts', ['List', 1, 2, 2, 3], 3])
+    ).toMatchInlineSnapshot(`["List", 1, 2, 1]`);
   });
   it('B17: Reduce honors an explicit initial value', () => {
     expect(
