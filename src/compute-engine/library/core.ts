@@ -475,7 +475,18 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         if (s) return ce.function(s, args.slice(1));
         return ce._fn('Apply', args);
       },
-      evaluate: (ops) => apply(ops[0], ops.slice(1)),
+      evaluate: (ops, { numericApproximation }) => {
+        const result = apply(ops[0], ops.slice(1));
+        if (!numericApproximation) return result;
+        // N(f(x)) = N of the applied result: without this, e.g.
+        // `Apply(Derivative(LambertW), 0.5).N()` returned the symbolic
+        // derivative with `LambertW(0.5)` unevaluated. Guard: when the
+        // application stayed symbolic (unresolved symbolic derivative,
+        // returned as an `Apply` expression), re-entering N() here would
+        // recurse forever.
+        if (isFunction(result, 'Apply')) return result;
+        return result.N();
+      },
     },
 
     Assign: {

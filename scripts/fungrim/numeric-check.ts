@@ -46,6 +46,11 @@ import { generateAssignments, hashString, Assignment, Json } from './sample';
 export type InstanceOutcome = 'True' | 'False' | 'Unknown' | 'not-evaluable';
 
 const REL_TOL = 1e-10;
+// Tolerance for sides computed by approximation: Monte Carlo quadrature
+// (error ~3e-4 at 10⁷ samples), Richardson limit extraction, and infinite
+// series truncated at MAX_ITERATION (tail ~1e-4 for Σ1/n²). Comparing
+// those at REL_TOL produces false "False" outcomes.
+const APPROX_REL_TOL = 2e-3;
 const PRECISION = 30;
 const MAX_INSTANCES = 5;
 const MAX_CANDIDATES = 24;
@@ -92,9 +97,23 @@ function absC(z: Complex): number {
 }
 
 /** |a-b| <= tol * max(|a|, |b|, 1) */
-function approxEqual(a: Complex, b: Complex): boolean {
+function approxEqual(a: Complex, b: Complex, tol = REL_TOL): boolean {
   const d = Math.hypot(a.re - b.re, a.im - b.im);
-  return d <= REL_TOL * Math.max(absC(a), absC(b), 1);
+  return d <= tol * Math.max(absC(a), absC(b), 1);
+}
+
+/**
+ * Does this formula instance involve an *approximating* numeric operation —
+ * quadrature, numeric limit extraction, or an infinite series truncated at
+ * MAX_ITERATION? Their results carry approximation error far above REL_TOL.
+ */
+function isApproximateInstance(formula: unknown): boolean {
+  const s = JSON.stringify(formula);
+  if (/"(Limit|NLimit|Integrate|NIntegrate)"/.test(s)) return true;
+  return (
+    /"(Sum|Product)"/.test(s) &&
+    /"(PositiveInfinity|NegativeInfinity)"/.test(s)
+  );
 }
 
 const RELATIONS = new Set([
@@ -111,6 +130,7 @@ function checkInstance(expr: BoxedExpression): {
   detail?: string;
 } {
   const op = expr.operator;
+  const tol = isApproximateInstance(expr.json) ? APPROX_REL_TOL : REL_TOL;
 
   if (op === 'Equal' && isFunction(expr) && expr.ops.length >= 2) {
     const vals: (Complex | null)[] = expr.ops.map((o) => {
@@ -125,7 +145,7 @@ function checkInstance(expr: BoxedExpression): {
     if (vals.some((v) => !Number.isFinite(v!.re) || !Number.isFinite(v!.im)))
       return { outcome: 'Unknown', detail: 'non-finite side' };
     for (let i = 0; i + 1 < vals.length; i++) {
-      if (!approxEqual(vals[i]!, vals[i + 1]!)) {
+      if (!approxEqual(vals[i]!, vals[i + 1]!, tol)) {
         const fmt = (z: Complex) => `${z.re}${z.im ? `+${z.im}i` : ''}`;
         return {
           outcome: 'False',

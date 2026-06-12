@@ -496,4 +496,46 @@ describe('LIMIT', () => {
     expect(expr.operator).toBe('Limit');
     expect(expr.latex).toMatchInlineSnapshot(`\\lim_{x\\to0}x^{x}`);
   });
+
+  test('low-confidence numeric limits return NaN (oscillatory function)', () => {
+    // sinc oscillates at ∞: Richardson extrapolation cannot converge and
+    // previously returned a small meaningless value (≈ −1.5e-4)
+    const r = engine
+      .expr(['NLimit', ['Function', ['Sinc', 'x'], 'x'], 'NegativeInfinity'])
+      .evaluate();
+    expect(r.re).toBeNaN();
+  });
+});
+
+describe('DOUBLY-INFINITE SUMS', () => {
+  // Regression: limits of n = −∞…∞ produced an empty iteration range, so
+  // these sums evaluated to 0
+  test('Σ 2^−|n| over all integers = 3', () => {
+    const r = engine
+      .expr([
+        'Sum',
+        ['Power', 2, ['Negate', ['Abs', 'n']]],
+        ['Limits', 'n', 'NegativeInfinity', 'PositiveInfinity'],
+      ])
+      .N();
+    expect(r.re).toBeCloseTo(3, 10);
+  });
+
+  test('Σ sinc³(n) over all integers = 3π/4', () => {
+    const r = engine
+      .expr([
+        'Sum',
+        ['Power', ['Sinc', 'n'], 3],
+        ['Limits', 'n', 'NegativeInfinity', 'PositiveInfinity'],
+      ])
+      .N();
+    expect(r.re).toBeCloseTo((3 * Math.PI) / 4, 8);
+  });
+
+  test('Σ 2^n for n = −∞…−1 = 1 (infinite lower bound, finite upper)', () => {
+    const r = engine
+      .expr(['Sum', ['Power', 2, 'n'], ['Limits', 'n', 'NegativeInfinity', -1]])
+      .N();
+    expect(r.re).toBeCloseTo(1, 10);
+  });
 });

@@ -33,10 +33,11 @@ export class BigNumericValue extends NumericValue {
       this.im = value.im ?? 0;
     }
 
+    // NaN-ness must be coherent: a value with a NaN component is NaN.
+    // (e.g. `sqrt()` of a NaN value produces im = √(−NaN) = NaN with a
+    // valid decimal — coerce rather than carry an incoherent value)
     if (this.decimal.isNaN()) this.im = NaN;
-
-    // If the decimal is NaN, the imaginary part should be NaN
-    console.assert(this.decimal.isNaN() === isNaN(this.im));
+    else if (isNaN(this.im)) this.decimal = BigDecimal.NAN;
   }
 
   get type(): NumericPrimitiveType {
@@ -516,9 +517,14 @@ export class BigNumericValue extends NumericValue {
         .add(b * b)
         .sqrt();
 
-      const realPart = a.add(modulus).div(2).sqrt();
+      // Both a + |z| and |z| − a are mathematically ≥ 0, but either can
+      // round epsilon-negative when |b| ≪ |a| — clamp to avoid a NaN from
+      // sqrt(−ε)
+      const reSq = a.add(modulus).div(2);
+      const imSq = modulus.sub(a).div(2);
+      const realPart = reSq.isNegative() ? BigDecimal.ZERO : reSq.sqrt();
       const imaginaryPart = chop(
-        Math.sign(b) * modulus.sub(a).div(2).sqrt().toNumber()
+        Math.sign(b) * (imSq.isNegative() ? 0 : imSq.sqrt().toNumber())
       );
       return this.clone({ re: realPart, im: imaginaryPart });
     }

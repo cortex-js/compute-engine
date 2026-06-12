@@ -226,7 +226,22 @@ export class Product {
         // Only extract when: base is not a number, or exponent is an integer
         const baseIsNumeric = isNumber(term.op1);
         const expIsInteger = r[1] === 1 || r[1] === -1; // denominator is ±1
-        if (!baseIsNumeric || expIsInteger) {
+
+        // Folding `(base^r)^exponent` → `base^(r·exponent)` can lose the
+        // sign of the base: (x²)^(-1/2) is 1/|x|, not 1/x. Mirror the
+        // canonicalPower()/pow() gate: fold only when the outer exponent is
+        // an integer, the inner exponent is an odd integer (sign-preserving),
+        // or the base is known non-negative.
+        const outer = reducedRational(exponent);
+        const numeratorIsOdd =
+          typeof r[0] === 'bigint' ? r[0] % 2n !== 0n : r[0] % 2 !== 0;
+        const foldIsSound =
+          outer[1] == 1 ||
+          outer[1] == -1 ||
+          (expIsInteger && numeratorIsOdd) ||
+          term.op1.isNonNegative === true;
+
+        if (foldIsSound && (!baseIsNumeric || expIsInteger)) {
           this.mul(term.op1, rationalMul(exponent, r));
           return;
         }
@@ -683,11 +698,15 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
 
   // Exact numeric values in operands are now pre-folded by canonicalMultiply,
   // so toNumericValue here just extracts the remaining coefficient+term.
+  // A ZERO coefficient is still possible: machine-float zeros (`0.0·x`) are
+  // deliberately excluded from canonical folding.
   const [c1, t1] = op1.toNumericValue();
-  console.assert(!c1.isZero); // zeros already filtered above
-
   const [c2, t2] = op2.toNumericValue();
-  console.assert(!c2.isZero); // zeros already filtered above
+
+  // A zero-coefficient numerator factors out fine (0·(t1/t2)), but a
+  // zero-coefficient denominator must NOT: c1/0 = ±∞ would assume a sign
+  // for `x/(0.0·y)`. Keep the division structural.
+  if (c2.isZero) return ce._fn('Divide', [op1, op2]);
 
   const c = c1.div(c2);
 

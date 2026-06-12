@@ -37,6 +37,34 @@
 
 ### Bug Fixes
 
+- **Doubly-infinite sums evaluated to 0.** A `Sum` or `Product` with limits
+  `n = −∞…∞` produced an empty iteration range, so e.g.
+  `Σ_{n=−∞}^{∞} sinc³(n)` evaluated to `0` instead of `3π/4`. Infinite
+  ranges are now truncated to a finite iteration window on the correct
+  side: `(−∞, b]` iterates up to `b`, and `(−∞, ∞)` iterates a symmetric
+  window around 0.
+
+- **Numeric limits of oscillatory functions returned meaningless values.**
+  `NLimit` of a non-convergent function (e.g. `sinc` at `−∞`) returned a
+  small spurious number from Richardson extrapolation. The extrapolation's
+  own error estimate is now checked: low-confidence results return `NaN`
+  instead.
+
+- **`x/(0.0·y)` canonicalized to `(+∞·x)/y`.** A machine-float zero
+  coefficient in a denominator (deliberately not folded at
+  canonicalization) was factored out as `1/0 = +∞`, assuming a sign. The
+  division is now kept structural.
+
+- **`N()` did not apply to the result of `Apply`.** For example
+  `Apply(Derivative(LambertW), 0.5).N()` returned the symbolic derivative
+  with `LambertW(0.5)` unevaluated; a second evaluation pass was needed.
+  `N(f(x))` now numerically evaluates the applied result.
+
+- Complex square roots of arbitrary-precision values no longer produce
+  incoherent NaN components when a rounding error makes an intermediate
+  quantity epsilon-negative, and a `NaN` imaginary part now coherently
+  makes the whole numeric value `NaN`.
+
 - **#309** The public `factor()` function was incorrectly factoring polynomials.
   Now `factor(x^2 + 5x + 6)` correctly returns `(x + 2)(x + 3)` instead of
   `x^2 + 5x + 6` (the previous behavior was a no-op).

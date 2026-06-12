@@ -253,7 +253,13 @@ export function limit(
     return (left + right) / 2;
   }
 
-  const [val, _err] = extrapolate(f, x, { step: dir > 0 ? 1 : -1, deadline });
+  const [val, err] = extrapolate(f, x, { step: dir > 0 ? 1 : -1, deadline });
+  // Reject low-confidence estimates: for an oscillatory or non-convergent
+  // function (e.g. sinc at ∞) Richardson extrapolation returns a small but
+  // meaningless value with an error estimate of the same order. Converged
+  // limits report err ≲ 1e-10 relative; require 1e-6.
+  if (Number.isFinite(val) && err > 1e-6 * Math.max(1, Math.abs(val)))
+    return NaN;
   return val;
 }
 

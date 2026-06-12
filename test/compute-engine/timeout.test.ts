@@ -238,7 +238,6 @@ describe('TIMEOUT', () => {
           ['Derivative', ['Function', ['LambertW', 'z'], 'z'], 1],
           0.5,
         ])
-        .evaluate()
         .N();
       // W'(x) = W(x)/(x(1+W(x))): at 0.5, ≈ 0.5204186421068739
       expect(r.re).toBeCloseTo(0.5204186421068739, 8);

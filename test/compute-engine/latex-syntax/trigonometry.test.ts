@@ -39,6 +39,9 @@ describe('TRIGONOMETRIC FUNCTIONS inverse, prime', () => {
       box       = ["Apply", ["Derivative", ["InverseFunction", "Cos"], 2], "x"]
       canonical = ["Apply", ["Derivative", "Arccos", 2], "x"]
       eval-auto = -x / (1 - x^2)^(3/2)
+      eval-mach = -x / (1 - x^2)^(3/2)
+      N-auto    = -x / (1 - x^2)^(1.5)
+      N-mach    = -x / (1 - x^2)^(1.5)
     `));
   test(`\\cos^{-1}\\doubleprime(x)`, () =>
     expect(check('\\cos^{-1}\\doubleprime(x)')).toMatchInlineSnapshot(`

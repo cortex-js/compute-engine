@@ -92,11 +92,28 @@ export function normalizeIndexingSet(indexingSet: Expression): IndexingSet {
   const op3Sym = isSymbol(op3) ? op3.symbol : undefined;
   if (op3Sym === 'Nothing' || op3.isInfinity) {
     isFinite = false;
+    upper = Infinity;
   } else {
     if (!isNaN(op3.re)) upper = Math.floor(op3.re ?? upper);
     if (!Number.isFinite(upper)) isFinite = false;
   }
-  if (!isFinite && Number.isFinite(lower)) upper = lower + MAX_ITERATION;
+
+  // Truncate infinite ranges to a finite iteration window so `lower` and
+  // `upper` are always usable as loop bounds:
+  // - (lower..∞)  → lower .. lower + MAX_ITERATION
+  // - (−∞..upper) → upper − MAX_ITERATION .. upper
+  // - (−∞..∞)    → symmetric window around 0 (previously this produced an
+  //   empty range, so e.g. Σ_{n=−∞}^{∞} sinc³(n) evaluated to 0)
+  if (!isFinite) {
+    if (!Number.isFinite(lower) && !Number.isFinite(upper)) {
+      lower = -MAX_ITERATION / 2;
+      upper = lower + MAX_ITERATION;
+    } else if (!Number.isFinite(lower)) {
+      lower = upper - MAX_ITERATION;
+    } else {
+      upper = lower + MAX_ITERATION;
+    }
+  }
 
   return { index, lower, upper, isFinite };
 }
