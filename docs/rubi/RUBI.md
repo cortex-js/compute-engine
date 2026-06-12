@@ -237,9 +237,66 @@ first four). Without them, the ~100 affected Chapter-1 rules can still be
     comment-stripped sources; `$LoadShowSteps` display variants dropped in
     favor of the plain definitions). Checked-in corpus at `data/rubi/`
     (Chapter 1 scope, 2,647 rules, 3.7 MB). Regression tests:
-    `test/compute-engine/rubi-translator.test.ts`. Remaining R1 work:
-    optional-pattern expansion, predicate/utility mapping for 1.1.1,
-    minimal driver, 1.1.1 validation run.
+    `test/compute-engine/rubi-translator.test.ts`.
+  - *Driver pipeline: WORKING END-TO-END (2026-06-11, first iteration).*
+    `compile.ts` (skeleton-boxing → matcher IR; optionals NOT expanded —
+    handled natively by the matcher), `match.ts` (backtracking AC matcher
+    with optslot defaults, node collapse, final-slot rest-absorption),
+    `normal-form.ts` (Times/Power normal form bridging CE's canonical
+    Divide/Negate/Sqrt/Root vocabulary to Rubi's — applied to both
+    patterns and integrands; `recanonicalize` scrubs synthetic nodes out
+    of bindings), `rubi-utils.ts` (~30 predicates with Rubi semantics,
+    fail-closed; value utilities incl. an ExpandIntegrand that expands
+    P(x)·Lⁿ by repeated polynomial division for any literal exponent),
+    `driver.ts` (priority dispatch, linearity prelude, memo/cycle guard,
+    depth cap, wall-clock deadline — the engine deadline only arms inside
+    evaluate()). All 235 section-1.1.1 rules compile, zero skips.
+    **Standing on the seeded 200-problem 1.1.1 sample: ~23% solved-correct,
+    ~48% unsolved, ~24% not-evaluable** (run
+    `scripts/rubi/benchmark.ts --rubi <section-corpus-dir>`).
+  - *Iteration 2 (2026-06-12): 64% solved-correct (128/200; 24 unsolved,
+    35 not-evaluable, 4 wrong, 9 inconclusive).* What moved the needle:
+    (a) **condition-driven backtracking** (`matchAll`): Mathematica retries
+    alternative AC assignments when a condition rejects — (a+bx)^m/(c+dx)^n
+    factor roles are interchangeable and conditions often hold for one
+    orientation only; (b) **multi-factor partial fractions** in
+    ExpandIntegrand (Heaviside derivative formula over distinct linear
+    factors); (c) an **x-aware polynomial toolkit** (degree/monomials/long
+    division treating x-free subtrees as coefficients — CE's polynomial
+    fns reject `d²/b·x²`-style coefficients that reduction RHSs produce);
+    (d) **loading all of chapter 1.1** (1,322 rules, 0 compile skips):
+    1.1.1 chains legitimately route through 1.1.2 (e.g.
+    (1−x)(1+x) → 1−x²); (e) **verification switched to numeric central
+    difference** — symbolic D was poisoned by an engine unsoundness (below).
+    Perf: zeroQ/simplify caches per int() call + root-operator dispatch
+    pre-screen; 200 problems ≈ 7 min wall.
+  - **ENGINE BUG (to fix separately, snapshot-gated):** `simplify()`
+    rewrites `x/√(x²) → 1`, losing `sign(x)` (sound only for x>0), and the
+    `D` evaluate handler simplifies its output, so
+    `D(√(x²)).evaluate() → 1` and `D(1/√(c·x²)).evaluate() → −1/(x²√c)`
+    (sign-wrong for x<0). Surfaced as a false "solved-wrong" cluster:
+    driver results matching Rubi's expected antiderivatives exactly were
+    flagged because the *checker's* derivative was unsound. `simplify()`
+    of `√(x²)` alone is sound (`|x|`), so the bug is in a quotient/product
+    power-combination rule. Repro:
+    `ce.box(['Divide','x',['Sqrt',['Power','x',2]]]).simplify()` → `1`.
+    Known buckets (trace census via `RubiDriver({trace:true})` +
+    `findFailingConjunct`):
+    (a) unsolved concentrates in 1.1.1.3/.4/.6/.7 (3–4-linear products,
+    P(x) forms) — conditions reject; needs per-problem comparison against
+    Rubi's expected rule chain (likely Simp/SimplerQ fidelity + more
+    ExpandIntegrand modes);
+    (b) not-evaluable = verification can't find 3 evaluable sample points
+    (₂F₁ args outside |z|<1 kernel domain, radicals at negative x) — an
+    fp-verification problem, not necessarily wrong results;
+    (c) 7 solved-wrong cluster on `(c·x²)^(3/2)` shapes (FracPart rules) —
+    one representative re-verified correct after the binding-
+    recanonicalization fix, needs re-measurement;
+    (d) 1 error: NaN→BigInt in Rt on `(1−x)^(1/3)/(1+x)`.
+    Debugging lessons hard-won: never `evaluate()` the integrand (expands
+    products, destroys rule structure); `ce.number()` does not accept
+    MathJSON arrays (spins — use `ce.box`); collapse matching requires ≥1
+    defaulted optional or `Int[-Fx_]` matches everything.
 - **Phase R2 — Chapter 1 (~4–8 weeks, the real bet)**: full 2,648-rule port,
   71-utility layer, compile-time dispatch index, artifact + loader packaging
   (`loadIntegrationRules`), CI gate reusing the Fungrim pattern (ROADMAP

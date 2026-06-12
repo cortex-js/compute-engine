@@ -81,6 +81,9 @@ export function listTestFiles(root: string, subdir = ''): string[] {
 }
 
 export function loadTests(root: string, subdir = ''): LoadResult {
+  // allow a single .m file as the subdir
+  if (subdir.endsWith('.m') && fs.statSync(path.join(root, subdir)).isFile())
+    return loadTestFile(root, subdir);
   const problems: Problem[] = [];
   const errors: LoadResult['errors'] = [];
   for (const file of listTestFiles(root, subdir)) {

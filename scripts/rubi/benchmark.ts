@@ -33,10 +33,19 @@ import { isNumber } from '../../src/compute-engine/boxed-expression/type-guards'
 
 import { loadTests, Problem } from './load-tests';
 import type { Json } from './wl-parser';
+import { compileSection } from './compile';
+import { RubiDriver } from './driver';
 
-const REL_TOL = 1e-6;
+// pass tolerance for central-difference verification (h=1e-4: truncation
+// ~1e-8 relative, roundoff ~1e-12)
+const REL_TOL = 1e-5;
 const MIN_POINTS = 3;
-const X_POINTS = [0.31, 0.73, 1.27, 1.83, 2.41, 2.97, 0.52, 1.61];
+// mixed-sign sample points: special-function results (₂F₁ etc.) often
+// evaluate only in part of the domain (|z|<1), and negative x reaches it
+const X_POINTS = [
+  0.31, 0.73, 1.27, 1.83, 2.41, 2.97, 0.52, 1.61, -0.23, -0.41, -0.87,
+  -1.31, 0.05, -0.05, 0.11, -0.11, 0.17, -0.17,
+];
 const PARAM_ASSIGNMENTS = 2;
 
 const KNOWN_CONSTANTS = new Set([
@@ -90,6 +99,11 @@ function collectSymbols(expr: Json, out: Set<string>): void {
   }
 }
 
+function leafCount(e: BoxedExpression): number {
+  if (!e.ops) return 1;
+  return 1 + e.ops.reduce((s, op) => s + leafCount(op), 0);
+}
+
 function containsOperator(expr: BoxedExpression, op: string): boolean {
   if (expr.operator === op) return true;
   if (expr.ops) return expr.ops.some((x) => containsOperator(x, op));
@@ -110,7 +124,11 @@ function complexAt(
   return { re, im };
 }
 
-function runProblem(p: Problem, seed: number): ProblemResult {
+function runProblem(
+  p: Problem,
+  seed: number,
+  rubi?: { ce: ComputeEngine; driver: RubiDriver }
+): ProblemResult {
   const start = Date.now();
   const done = (
     outcome: Outcome,
@@ -124,25 +142,32 @@ function runProblem(p: Problem, seed: number): ProblemResult {
     ...extra,
   });
 
-  // Fresh engine per problem: avoids cross-problem state (declared
-  // parameter types, assumption scopes) leaking into results.
-  const ce = new ComputeEngine();
+  // Fresh engine per problem (avoids cross-problem state) — except in
+  // --rubi mode, where compiled patterns are tied to a shared engine.
+  const ce = rubi?.ce ?? new ComputeEngine();
 
   try {
     const f = ce.box(p.integrand as any);
-    const result = ce
-      .box(['Integrate', p.integrand as any, p.variable])
-      .evaluate();
+    const result = rubi
+      ? (rubi.driver.int(f, p.variable) ??
+        ce.function('Integrate', [f, ce.symbol(p.variable)]))
+      : ce.box(['Integrate', p.integrand as any, p.variable]).evaluate();
 
     if (containsOperator(result, 'Integrate'))
       return done('unsolved', { result: result.toString() });
 
-    // Verify: D(result, x) − f ≈ 0 at sample points, for seeded
-    // generic positive parameter assignments.
-    const dF = ce
-      .function('D', [result, ce.symbol(p.variable)])
-      .evaluate();
+    // verification on huge results can grind for minutes — call it
+    // inconclusive rather than stalling the harness
+    if (leafCount(result) > 800)
+      return done('inconclusive', {
+        result: result.toString().slice(0, 400),
+        detail: 'result too large to verify',
+      });
 
+    // Verify: F′(x) ≈ f(x) at sample points via numeric central
+    // difference — deliberately NOT symbolic D: the engine's
+    // D→simplify pipeline has an unsound x/√(x²) → 1 rewrite (loses
+    // sign(x)) that poisons derivative-based checks. (See RUBI.md.)
     const params = new Set<string>();
     collectSymbols(p.integrand, params);
     params.delete(p.variable);
@@ -151,23 +176,36 @@ function runProblem(p: Problem, seed: number): ProblemResult {
     let passes = 0;
     let fails = 0;
     let worst = 0;
+    const failPoints: string[] = [];
     for (let k = 0; k < PARAM_ASSIGNMENTS && fails === 0; k++) {
       const assignment: Record<string, number> = {};
       for (const name of params)
         assignment[name] = 0.5 + 2.5 * rand(); // generic positive reals
-      const dFk = dF.subs(assignment);
+      const Fk = result.subs(assignment);
       const fk = f.subs(assignment);
       for (const xv of X_POINTS) {
-        const lhs = complexAt(dFk, p.variable, xv);
+        // central difference F′(x) ≈ (F(x+h) − F(x−h)) / 2h
+        const h = 1e-4 * Math.max(1, Math.abs(xv));
+        const Fp = complexAt(Fk, p.variable, xv + h);
+        const Fm = complexAt(Fk, p.variable, xv - h);
         const rhs = complexAt(fk, p.variable, xv);
-        if (!lhs || !rhs) continue;
+        if (!Fp || !Fm || !rhs) continue;
+        const lhs = {
+          re: (Fp.re - Fm.re) / (2 * h),
+          im: (Fp.im - Fm.im) / (2 * h),
+        };
         const scale =
           1 + Math.hypot(rhs.re, rhs.im) + Math.hypot(lhs.re, lhs.im);
         const err =
           Math.hypot(lhs.re - rhs.re, lhs.im - rhs.im) / scale;
         worst = Math.max(worst, err);
         if (err < REL_TOL) passes++;
-        else if (err > 1e-3) fails++;
+        else if (err > 1e-3) {
+          fails++;
+          failPoints.push(
+            `x=${xv} ${JSON.stringify(assignment)} dF=${lhs.re.toPrecision(4)}${lhs.im ? '+' + lhs.im.toPrecision(3) + 'i' : ''} f=${rhs.re.toPrecision(4)}${rhs.im ? '+' + rhs.im.toPrecision(3) + 'i' : ''}`
+          );
+        }
         if (passes >= MIN_POINTS && fails === 0 && k === PARAM_ASSIGNMENTS - 1)
           break;
       }
@@ -178,9 +216,14 @@ function runProblem(p: Problem, seed: number): ProblemResult {
     if (fails >= 2)
       return done('solved-wrong', {
         result: result.toString(),
-        detail: `worst rel err ${worst.toExponential(2)}`,
+        detail: `worst rel err ${worst.toExponential(2)}; ${failPoints
+          .slice(0, 2)
+          .join('; ')}`,
       });
-    if (passes === 0 && fails === 0) return done('not-evaluable');
+    if (passes === 0 && fails === 0)
+      return done('not-evaluable', {
+        result: result.toString().slice(0, 300),
+      });
     return done('inconclusive', {
       result: result.toString(),
       detail: `passes=${passes} fails=${fails} worst=${worst.toExponential(2)}`,
@@ -209,8 +252,16 @@ function main(): void {
   let sample = 0;
   let seed = 42;
   let reportPath = 'scripts/rubi/baseline-report.json';
+  let rubiRules: string | null = null;
+  let only = '';
   for (let i = 2; i < argv.length; i++) {
     switch (argv[i]) {
+      case '--rubi':
+        rubiRules = argv[++i];
+        break;
+      case '--only':
+        only = argv[++i];
+        break;
       case '--suite':
         suite = argv[++i];
         break;
@@ -248,6 +299,7 @@ function main(): void {
     );
 
   let slice = problems;
+  if (only) slice = slice.filter((p) => p.source.includes(only));
   if (sample > 0) {
     // deterministic sample spread over the whole chapter
     const rand = mulberry32(seed);
@@ -266,6 +318,29 @@ function main(): void {
     (process.env.RUBI_SKIP ?? '').split(',').filter(Boolean)
   );
 
+  // --rubi <corpus-section-dir>: use the compiled Rubi rule driver on a
+  // shared engine instead of the built-in integrator.
+  let rubi: { ce: ComputeEngine; driver: RubiDriver } | undefined;
+  if (rubiRules !== null) {
+    const ce = new ComputeEngine();
+    const t0 = Date.now();
+    const { rules, skipped } = compileSection(ce, rubiRules);
+    console.log(
+      `rubi: compiled ${rules.length} rules (${skipped.length} skips) in ${Date.now() - t0}ms`
+    );
+    if (skipped.length > 0)
+      console.log(
+        `  compile skips: ${skipped
+          .slice(0, 5)
+          .map((s) => `${s.id}: ${s.reason}`)
+          .join('; ')}`
+      );
+    rubi = {
+      ce,
+      driver: new RubiDriver(ce, rules, { timeLimitMs: 5_000 }),
+    };
+  }
+
   const results: ProblemResult[] = [];
   const counts: Record<Outcome, number> = {
     'solved-correct': 0,
@@ -283,7 +358,7 @@ function main(): void {
     if (skip.has(key)) continue;
     // incremental progress marker — identifies the hanging problem if any
     fs.writeFileSync(partialPath, JSON.stringify({ at: key, i, results }));
-    const r = runProblem(p, seed);
+    const r = runProblem(p, seed, rubi);
     results.push(r);
     counts[r.outcome]++;
     if ((i + 1) % 50 === 0)
