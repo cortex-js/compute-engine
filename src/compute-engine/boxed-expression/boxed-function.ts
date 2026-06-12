@@ -430,6 +430,13 @@ export class BoxedFunction
       if (isNaN(exp) || expr.op2.im !== 0) return [ce._numericValue(1), this];
 
       const [coef, rest] = expr.op1.toNumericValue();
+      // An even root of a negative coefficient cannot be extracted with
+      // real arithmetic: NumericValue.root uses the real-root convention,
+      // so (−u)^(1/4) would become −u^(1/4), which is not a 4th root of
+      // −u (the −1 is the complex phase e^{iπ/4}). Sqrt is exempt:
+      // NumericValue.sqrt returns the principal imaginary value.
+      if (exp !== 2 && exp % 2 === 0 && coef.sgn() === -1)
+        return [ce._numericValue(1), this];
       if (exp === 2) return [coef.sqrt(), ce.function('Sqrt', [rest])];
       return [coef.root(exp), ce.function('Root', [rest, expr.op2])];
     }

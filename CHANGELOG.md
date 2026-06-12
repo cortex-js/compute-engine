@@ -81,6 +81,23 @@
   instead of `sign(x)`. Exact powers of even powers now only cancel when the
   base is known nonnegative.
 
+- **Negative factors moved across fractional powers, changing the principal
+  branch.** Several product rewrites silently treated `(−u)^(1/4)` as
+  `−u^(1/4)` — which is not a 4th root of `−u` at all (the correct factor is
+  the complex phase `e^{iπ/4}`). The affected rewrites: extracting a `Negate`
+  base regardless of the exponent (also sign-incorrect for *even integer*
+  exponents), factoring a negative numeric coefficient out of an even root
+  (`Root`/`Power` with even fractional exponents — the extraction used the
+  real-root convention), distributing a fractional power over a quotient
+  `(u/v)^r → u^r·v^(−r)` (conjugates the phase when `v < 0`), and merging
+  same-exponent factors `u^r·v^r → (u·v)^r` for fractional `r` with
+  unknown-sign bases. All are now gated on soundness (integer exponents, odd
+  roots, or known-nonnegative operands); e.g.
+  `(−16)^(1/4) · 81^(1/4)` now evaluates to the principal value
+  `3√2 + 3√2·i` no matter how the product is assembled. Exact numeric
+  radicals (`√2·√3 → √6`) and same-base combinations (`√x·√x → x`) are
+  unaffected.
+
 - **`isEqual()` could declare two equal complex constants unequal.** The
   tolerance comparison rejected any nonzero imaginary part, so two
   expressions for the same complex number differing by a 1-ulp imaginary

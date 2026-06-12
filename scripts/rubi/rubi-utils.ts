@@ -79,7 +79,10 @@ export function build(json: Json, ctx: Ctx): Expression {
       if (Array.isArray(args[0]) && args[0][0] === 'Int') {
         const f = build((args[0] as Json[])[1], ctx);
         const F = ctx.hooks.int(f);
-        if (F === null) return fail('Subst: inner Int unsolved');
+        // a residual inert Integrate inside F would have its integration
+        // variable substituted too, producing a malformed integral
+        if (F === null || F.has('Integrate'))
+          return fail('Subst: inner Int unsolved');
         u = F;
       } else u = build(args[0], ctx);
       const v = build(args[2], ctx);
@@ -114,6 +117,114 @@ function realNum(e: Expression): number | null {
   if (typeof re !== 'number' || typeof im !== 'number') return null;
   if (!Number.isFinite(re) || im !== 0) return null;
   return re;
+}
+
+// ---------------------------------------------------------------------------
+// rational collapse
+//
+// Several Rubi normalization rules (e.g. 1.1.1.2 #46) rewrite coefficients
+// into nested rationals like c′ = b·c/(b·c−a·d) and rely on Mathematica's
+// automatic Together to collapse follow-up guards (b/(b·c′−a·d′) = 1) so
+// the terminating rule fires. CE's simplify has no multivariate rational
+// cancellation, so without this the normalization rule refires on its own
+// output until the cycle guard kills it.
+// ---------------------------------------------------------------------------
+
+function asNumDen(e: Expression): { num: Expression; den: Expression } {
+  const ce = e.engine;
+  const ops = e.ops;
+  switch (e.operator) {
+    case 'Divide': {
+      const u = asNumDen(ops![0]);
+      const v = asNumDen(ops![1]);
+      return { num: u.num.mul(v.den), den: u.den.mul(v.num) };
+    }
+    case 'Negate': {
+      const u = asNumDen(ops![0]);
+      return { num: u.num.neg(), den: u.den };
+    }
+    case 'Multiply': {
+      let num = ce.One;
+      let den = ce.One;
+      for (const op of ops!) {
+        const r = asNumDen(op);
+        num = num.mul(r.num);
+        den = den.mul(r.den);
+      }
+      return { num, den };
+    }
+    case 'Add': {
+      const rs = ops!.map(asNumDen);
+      let den = ce.One;
+      for (const r of rs) den = den.mul(r.den);
+      let num = ce.Zero;
+      for (let i = 0; i < rs.length; i++) {
+        let t = rs[i].num;
+        for (let j = 0; j < rs.length; j++) if (j !== i) t = t.mul(rs[j].den);
+        num = num.add(t);
+      }
+      return { num, den };
+    }
+    case 'Subtract': {
+      const u = asNumDen(ops![0]);
+      const v = asNumDen(ops![1]);
+      return {
+        num: u.num.mul(v.den).sub(v.num.mul(u.den)),
+        den: u.den.mul(v.den),
+      };
+    }
+    case 'Power': {
+      const k = ops![1].re;
+      if (
+        ops![1].isInteger &&
+        typeof k === 'number' &&
+        Number.isInteger(k) &&
+        k !== 0 &&
+        Math.abs(k) <= 6
+      ) {
+        const r = asNumDen(ops![0]);
+        if (k > 0) return { num: r.num.pow(k), den: r.den.pow(k) };
+        return { num: r.den.pow(-k), den: r.num.pow(-k) };
+      }
+      return { num: e, den: ce.One };
+    }
+    default:
+      return { num: e, den: ce.One };
+  }
+}
+
+/** If e is identically a rational constant p/q (a multivariate rational
+ * identity, e.g. b/(b·(bc/(bc−ad)) − a·(bd/(bc−ad))) = 1), return that
+ * constant; else null. Sample-then-verify: a numeric sample guesses the
+ * constant, polynomial expansion verifies the identity exactly. */
+function ratConstant(e: Expression): number | null {
+  if (e.isNumberLiteral || leafCount(e) > 300) return null;
+  const ce = e.engine;
+  const { num, den } = asNumDen(e);
+  if (den.isSame(ce.One)) return null;
+  const n = expand(num);
+  const d = expand(den);
+  if (n.isSame(d)) return 1;
+  // guess the ratio at a fixed generic assignment of the free symbols
+  const assign: Record<string, number> = {};
+  let i = 0;
+  const POINTS = [1.37, 2.11, 0.59, 3.23, 1.93, 0.83, 2.71, 1.13];
+  for (const s of new Set([...n.symbols, ...d.symbols]))
+    assign[s] = POINTS[i++ % POINTS.length];
+  const nv = realNum(n.subs(assign));
+  const dv = realNum(d.subs(assign));
+  if (nv === null || dv === null || dv === 0) return null;
+  const c = nv / dv;
+  // accept only small rationals (Rubi guard collapses are simple ratios)
+  for (let q = 1; q <= 12; q++) {
+    const p = Math.round(c * q);
+    if (Math.abs(p) > 1000 || Math.abs(c - p / q) > 1e-9 * Math.max(1, Math.abs(c)))
+      continue;
+    const diff = expand(n.mul(q).sub(d.mul(p)));
+    if (diff.isSame(0)) return p / q;
+    break;
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -448,10 +559,10 @@ const PRED_FNS: Record<string, PredFn> = {
   ILeQ: (args, ctx) => intCmp(args, ctx, (a, b) => a <= b),
 
   // PosQ/NegQ — sign heuristics (Rubi PosAux); symbols count as positive
-  PosQ: (args, ctx) => posAux(safeSimplify(build(args[0], ctx))),
+  PosQ: (args, ctx) => posQ(safeSimplify(build(args[0], ctx))),
   NegQ: (args, ctx) => {
     const u = safeSimplify(build(args[0], ctx));
-    return !posAux(u) && !zeroQ(u);
+    return !posQ(u) && !zeroQ(u);
   },
 
   // PolyQ[u, x] / PolyQ[u, x, n]
@@ -531,10 +642,12 @@ function cmpChain(
 ): boolean {
   // numeric first; fall back to simplification (symbolic ratios like
   // b/(b·c−a·d) after a normalization step can simplify to a number —
-  // several Rubi guards rely on this to stop rule refiring)
+  // several Rubi guards rely on this to stop rule refiring), then to
+  // multivariate rational collapse (nested-rational identities that
+  // Mathematica's automatic Together would have flattened)
   const vals = args.map((a) => {
     const e = build(a, ctx);
-    return realNum(e) ?? realNum(safeSimplify(e));
+    return realNum(e) ?? realNum(safeSimplify(e)) ?? ratConstant(e);
   });
   for (let i = 0; i + 1 < vals.length; i++) {
     const a = vals[i];
@@ -584,8 +697,85 @@ function posAux(u: Expression): boolean {
   if (u.operator === 'Divide' && u.ops)
     return posAux(u.ops[0]) === posAux(u.ops[1]);
   if (u.operator === 'Negate' && u.ops) return !posAux(u.ops[0]);
-  if (u.operator === 'Add' && u.ops) return posAux(u.ops[0]);
+  // Rubi: PosAux[u_ + v_] := PosAux[First[u]] — but First[] under
+  // MATHEMATICA's Plus ordering: terms compare by their sorted symbol
+  // sequence read from the END (reverse-lexicographic), constants first,
+  // numeric coefficients ignored. Examples that pin this down: x + y + x·y
+  // (y before x·y), and b·c − a·d ≡ Plus[b·c, −a·d] (b·c first, because
+  // c < d at the last position) — which is why Rubi sources write the
+  // discriminant as b·c − a·d and treat it as having "positive form".
+  // CE's canonical order differs, which mis-routed branch-sensitive
+  // rules (∫1/√(a+b·x⁴) NegQ vs PosQ chains).
+  if (u.operator === 'Add' && u.ops) return posAux(mmaFirstTerm(u.ops));
   return true;
+}
+
+/** Rubi PosQ[u] := PosAux[TogetherSimplify[u]] — the Together step is
+ * semantic, not cosmetic: PosAux[a − bc/d] has First = a (positive form)
+ * while the together'd (a·d − b·c)/d has First = −b·c (negative form).
+ * Emulated with the asNumDen/expand rational normalizer. */
+function posQ(e: Expression): boolean {
+  try {
+    const { num, den } = asNumDen(e);
+    if (den.isSame(e.engine.One)) return posAux(expand(num));
+    return posAux(expand(num)) === posAux(expand(den));
+  } catch {
+    return posAux(e);
+  }
+}
+
+function mmaFirstTerm(ops: readonly Expression[]): Expression {
+  let best: Expression | null = null;
+  let bestKey: string[] = [];
+  for (const op of ops) {
+    const key = mmaTermKey(op);
+    if (best === null || mmaKeyLess(key, bestKey)) {
+      best = op;
+      bestKey = key;
+    }
+  }
+  return best!;
+}
+
+/** sorted symbol leaves of a term, reversed (MMA compares monomials from
+ * their trailing factor) */
+function mmaTermKey(e: Expression): string[] {
+  const syms: string[] = [];
+  collectSymbolLeaves(e, syms);
+  syms.sort();
+  syms.reverse();
+  return syms;
+}
+
+function mmaKeyLess(a: string[], b: string[]): boolean {
+  const n = Math.min(a.length, b.length);
+  for (let i = 0; i < n; i++)
+    if (a[i] !== b[i]) return a[i] < b[i];
+  return a.length < b.length;
+}
+
+function collectSymbolLeaves(e: Expression, out: string[]): void {
+  if (e.symbol) {
+    out.push(e.symbol);
+    return;
+  }
+  // monomial degree matters: a·d² keys as [a,d,d] (else it compares
+  // equal-prefix-shorter against b·c·d and steals First[] from it)
+  if (e.operator === 'Power' && e.ops) {
+    const k = e.ops[1].re;
+    if (
+      e.ops[1].isInteger &&
+      typeof k === 'number' &&
+      k > 1 &&
+      k <= 16
+    ) {
+      const inner: string[] = [];
+      collectSymbolLeaves(e.ops[0], inner);
+      for (let i = 0; i < k; i++) out.push(...inner);
+      return;
+    }
+  }
+  if (e.ops) for (const op of e.ops) collectSymbolLeaves(op, out);
 }
 
 function mapList(
@@ -684,7 +874,12 @@ const VALUE_FNS: Record<string, ValueFn> = {
   Rt: (args, ctx) => {
     const u = safeSimplify(build(args[0], ctx));
     const n = build(args[1], ctx);
-    return u.pow(ctx.ce.One.div(n)).evaluate();
+    const r = u.pow(ctx.ce.One.div(n)).evaluate();
+    if (process.env.RUBI_DEBUG_RT)
+      console.error(
+        `Rt[${u.toString().slice(0, 90)}, ${n.toString()}] -> ${r.toString().slice(0, 90)}`
+      );
+    return r;
   },
 
   // IntPart/FracPart: rational → integer/fractional part (toward zero);

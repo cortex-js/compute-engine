@@ -14,6 +14,7 @@ import {
   asMachineRational,
   inverse,
   isOne,
+  isInteger as isIntegerRational,
   neg,
   rationalGcd,
   reducedRational,
@@ -104,8 +105,22 @@ export class Product {
     }
 
     if (isFunction(term, 'Negate')) {
+      const e = exp ? reducedRational(exp) : ([1, 1] as Rational);
+      if (!isIntegerRational(e)) {
+        // (−u)^(p/q): the −1 cannot be split off — (−1)^(p/q) is a complex
+        // phase, not ±1 (e.g. (−u)^(1/4) ≠ −u^(1/4)). Tally opaquely.
+        for (const x of this.terms) {
+          if (x.term.isSame(term)) {
+            x.exponent = rationalAdd(x.exponent, e);
+            return;
+          }
+        }
+        this.terms.push({ term, exponent: e });
+        return;
+      }
       this.mul(term.op1, exp);
-      this.coefficient = this.coefficient.neg();
+      // (−u)^k = (−1)^k·u^k: sign only flips for odd integer exponents
+      if (Number(e[0]) % 2 !== 0) this.coefficient = this.coefficient.neg();
       return;
     }
 
@@ -196,11 +211,24 @@ export class Product {
 
         if (!isSymbolicRadical) {
           // If possible, factor out a rational coefficient
-          let coef: NumericValue;
-          [coef, term] = term.toNumericValue();
-          if (exp && !isOne(exp))
-            coef = coef.pow(this.engine._numericValue(exp));
-          this.coefficient = this.coefficient.mul(coef);
+          const [coef, rest] = term.toNumericValue();
+          // ...but not a negative one under an even fractional power:
+          // (−1)^(p/q) with q even is a complex phase (e.g. e^{iπ/4}),
+          // and NumericValue.pow would apply the real-root convention,
+          // silently turning (−u)^(1/4) into −u^(1/4)
+          const e = exp ? reducedRational(exp) : ([1, 1] as Rational);
+          const evenRootOfNegative =
+            !isIntegerRational(e) &&
+            Number(e[1]) % 2 === 0 &&
+            coef.sgn() === -1;
+          if (!evenRootOfNegative) {
+            this.coefficient = this.coefficient.mul(
+              exp && !isOne(exp)
+                ? coef.pow(this.engine._numericValue(exp))
+                : coef
+            );
+            term = rest;
+          }
         }
       }
     }
@@ -282,10 +310,17 @@ export class Product {
       // `a^(-2)` to the product, not `1/a^2`. The former will get the exponent
       // extracted, while the latter will consider the denominator as a
       // separate term.
-
-      this.mul(term.op1, exponent);
-      this.mul(term.op2, neg(exponent));
-      return;
+      //
+      // For a FRACTIONAL exponent the split (u/v)^r → u^r·v^(−r) flips
+      // the principal branch when v < 0 ((u/v)^(1/4) vs u^(1/4)·v^(−1/4)
+      // differ by a phase) — only split when sound.
+      const e = reducedRational(exponent);
+      if (isIntegerRational(e) || term.op2.isNonNegative === true) {
+        this.mul(term.op1, exponent);
+        this.mul(term.op2, neg(exponent));
+        return;
+      }
+      // fall through: tally the Divide expression as an opaque term
     }
 
     // Look for the base, and add the exponent if already in the list of terms
@@ -370,19 +405,38 @@ export class Product {
     //
     // Other terms
     //
+    // groups created by a non-mergeable fractional-power term: other
+    // terms with the same exponent must not join them
+    const sealed = new Set<number>();
     for (const t of this.terms) {
       // Exponent of 0 indicate a term that has been simplified, i.e. `x/x`
       const exponent = reducedRational(t.exponent);
       if (exponent[0] === 0) continue;
+      // Grouping same-exponent terms renders them as (u·v)^r. For
+      // fractional r that merge is only sound when the term is known
+      // non-negative: (−u)^(1/4)·v^(1/4) ≠ (−u·v)^(1/4) in general (the
+      // principal-branch phases differ).
+      const mergeable =
+        isIntegerRational(exponent) || t.term.isNonNegative === true;
       let found = false;
-      for (const x of xs) {
-        if (exponent[0] === x.exponent[0] && exponent[1] === x.exponent[1]) {
-          x.terms.push(t.term);
-          found = true;
-          break;
+      if (mergeable) {
+        for (let i = 0; i < xs.length; i++) {
+          const x = xs[i];
+          if (
+            !sealed.has(i) &&
+            exponent[0] === x.exponent[0] &&
+            exponent[1] === x.exponent[1]
+          ) {
+            x.terms.push(t.term);
+            found = true;
+            break;
+          }
         }
       }
-      if (!found) xs.push({ exponent, terms: [t.term] });
+      if (!found) {
+        if (!mergeable) sealed.add(xs.length);
+        xs.push({ exponent, terms: [t.term] });
+      }
     }
     return xs;
   }

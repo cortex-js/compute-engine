@@ -1161,6 +1161,51 @@ describe('SIGN-PRESERVING POWER FOLDING (x/√(x²) ≠ 1)', () => {
   });
 });
 
+describe('PRINCIPAL-BRANCH FRACTIONAL POWERS (ROADMAP item 15)', () => {
+  // Regression family: Product/toNumericValue moved negative signs and
+  // factors across fractional powers — each move is a complex phase
+  // error: (−u)^(1/4) = e^{iπ/4}·u^(1/4), NOT −u^(1/4) (which is not a
+  // 4th root of −u at all).
+
+  test('(−u)^(1/4)·v^(1/4): the −1 stays under the root', () => {
+    const rt = ce.box(['Power', ['Negate', 'u'], ['Rational', 1, 4]]);
+    const v = ce.box(['Power', 'v', ['Rational', 1, 4]]);
+    const p = rt.mul(v);
+    // numeric principal-branch check at u = 16, v = 81:
+    // (−16)^(1/4)·81^(1/4) = 3·2^(3/4)·e^{iπ/4} = 3√2 + 3√2·i
+    const n = p.subs({ u: 16, v: 81 }).N();
+    expect(n.re).toBeCloseTo(3 * Math.SQRT2, 10);
+    expect(n.im).toBeCloseTo(3 * Math.SQRT2, 10);
+  });
+
+  test('(−u/w)^(1/4) does not split across the fraction', () => {
+    // (u/w)^(1/4) ≠ u^(1/4)/w^(1/4) when w < 0 (conjugate phase)
+    const e = ce
+      .box(['Power', ['Negate', ['Divide', 'u', 'w']], ['Rational', 1, 4]])
+      .evaluate();
+    // principal value at u = 1, w = −1: (−1/−1)^(1/4) = 1
+    expect(e.subs({ u: 1, w: -1 }).N().re).toBeCloseTo(1, 10);
+    expect(e.subs({ u: 1, w: -1 }).N().im).toBeCloseTo(0, 10);
+  });
+
+  test('(−u)² keeps even-power sign (no stray negation)', () => {
+    const sq = ce.box(['Negate', 'u']).pow(2);
+    expect(sq.subs({ u: 3 }).N().re).toBeCloseTo(9, 10);
+  });
+
+  test('exact numeric radicals still merge: √2·√3 = √6', () =>
+    expect(ce.box(['Multiply', ['Sqrt', 2], ['Sqrt', 3]]).toString()).toBe(
+      'sqrt(6)'
+    ));
+
+  test('same-base fractional powers still combine: √x·√x = x', () => {
+    const e = ce
+      .box(['Multiply', ['Sqrt', 'x'], ['Sqrt', 'x']])
+      .evaluate();
+    expect(e.isSame(ce.symbol('x'))).toBe(true);
+  });
+});
+
 describe('SQRT AND ROOT POWER SIMPLIFICATION', () => {
   test('sqrt(x^4) = x^2', () =>
     expect(simplify('\\sqrt{x^4}')).toMatchInlineSnapshot(`["Square", "x"]`));

@@ -1,10 +1,11 @@
 # Compute Engine — Roadmap
 
-**Last updated:** 2026-06-12. Items 2 (interruptible evaluation), 4
+**Last updated:** 2026-06-12 (b). Items 2 (interruptible evaluation), 4
 (Tier-2 numeric kernels), 9 (₂F₁ analytic continuation), 10 (x/√(x²)
 soundness), 11 (deadline checks in simplify), 12 (antiderivative
-correctness), and 13 (small engine follow-ups) completed — prerequisites
-for the Rubi integration (`docs/rubi/RUBI.md`).
+correctness), 13 (small engine follow-ups), 14 (incomplete elliptic
+integrals), and 15 (fractional-power principal-branch soundness)
+completed — prerequisites for the Rubi integration (`docs/rubi/RUBI.md`).
 
 Context: the 2026-06 release shipped the Fungrim-derived identities library
 (`@cortex-js/compute-engine/identities`, 1,376 rules), the complex-domain
@@ -330,6 +331,42 @@ verification artifact — the antiderivative is correct).
 for real |x| > 1 instead of continuing to the complex value, so
 `EllipticF(ArcSin(1.2), m)` only evaluates where the amplitude is real.
 The kernels themselves handle complex amplitudes (validated directly).
+
+### 15. ~~Fractional-power principal-branch soundness in `Product`~~ — ✅ done (2026-06-12)
+
+**What:** the Rubi 1.1.1 benchmark (quartic-root elliptic chains,
+`∫1/(√(a+bx)·(c+dx)^(3/4))`) exposed a family of unsound rewrites in
+`Product` (`boxed-expression/arithmetic-mul-div.ts`) that silently move
+negative signs and factors across fractional powers — each one a complex
+phase error (`(−u)^(1/4) ≠ −u^(1/4)`; the −1 is `e^{iπ/4}`):
+
+- **`Product.mul` Negate branch** extracted `−1` from `(−u)^exp`
+  regardless of `exp` (also wrong for even integer exponents). Now: odd
+  integer → sign flip, even integer → no flip, fractional → the `Negate`
+  term is tallied opaquely.
+- **Coefficient extraction** (`toNumericValue` + `coef.pow(exp)`)
+  applied NumericValue's real-root convention to negative coefficients
+  under even fractional powers. Now gated (`evenRootOfNegative`).
+- **`toNumericValue` Root branch** (`boxed-function.ts`): same
+  real-root-convention extraction for even roots of negative
+  coefficients — now returns the expression unsplit. (`Sqrt` is exempt:
+  `NumericValue.sqrt` returns the principal imaginary value.)
+- **`Product.mul` Divide branch** split `(u/v)^r → u^r·v^(−r)` for
+  fractional `r` with unknown-sign `v` (phase conjugation when `v < 0`).
+  Now split only for integer `r` or known non-negative `v`.
+- **`groupedByDegrees`** merged same-exponent terms `u^r·v^r → (uv)^r`
+  for fractional `r` regardless of signs. Now merged only for integer
+  exponents or known non-negative terms (groups created by an
+  unmergeable term are sealed).
+
+**Blast radius: zero** — full suite green, no snapshot churn, numeric
+checks like `(−16)^(1/4)·81^(1/4)` now return the principal complex
+value consistently.
+
+**Found via** per-problem rule-chain triage (`scripts/rubi/triage.ts`,
+new) of the 1.1.1 sample's solved-wrong bucket. The remaining Rubi-side
+elliptic phase mismatches (3 problems/200) are a Rubi-layer follow-on
+(`docs/rubi/RUBI.md`), not an engine soundness issue.
 
 ### 5. Per-head aggregated rule dispatch
 

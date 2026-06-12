@@ -44,7 +44,17 @@ const MIN_POINTS = 3;
 // evaluate only in part of the domain (|z|<1), and negative x reaches it
 const X_POINTS = [
   0.31, 0.73, 1.27, 1.83, 2.41, 2.97, 0.52, 1.61, -0.23, -0.41, -0.87,
-  -1.31, 0.05, -0.05, 0.11, -0.11, 0.17, -0.17,
+  -1.31, 0.05, -0.05, 0.11, -0.11, 0.17, -0.17, -2.17, -3.61,
+];
+// fallback for integrands with an empty real domain: generic complex
+// points (off the real axis, away from small-radius branch points)
+const COMPLEX_POINTS: { re: number; im: number }[] = [
+  { re: 0.37, im: 0.59 },
+  { re: -0.43, im: 0.91 },
+  { re: 1.21, im: -0.33 },
+  { re: 0.83, im: 1.47 },
+  { re: -1.57, im: -0.71 },
+  { re: 2.23, im: 0.41 },
 ];
 const PARAM_ASSIGNMENTS = 2;
 
@@ -110,18 +120,59 @@ function containsOperator(expr: BoxedExpression, op: string): boolean {
   return false;
 }
 
+type C = { re: number; im: number };
+
 function complexAt(
   expr: BoxedExpression,
   x: string,
-  value: number
-): { re: number; im: number } | null {
-  const v = expr.subs({ [x]: value }).N();
+  value: number | C
+): C | null {
+  const xv =
+    typeof value === 'number' ? value : expr.engine.number(value);
+  const v = expr.subs({ [x]: xv as any }).N();
   if (!isNumber(v)) return null;
   const re = v.re;
   const im = v.im;
   if (typeof re !== 'number' || typeof im !== 'number') return null;
   if (!Number.isFinite(re) || !Number.isFinite(im)) return null;
   return { re, im };
+}
+
+/** Richardson-extrapolated central difference F′(x) at a (possibly
+ * complex) point, differencing along the real axis: combines steps h and
+ * h/2 for O(h⁴) truncation — high-order poles like x⁻¹⁰⁰ and degree-20
+ * polynomial antiderivatives are far outside plain central-difference
+ * accuracy at REL_TOL. */
+function dF(
+  F: BoxedExpression,
+  x: string,
+  xv: number | C,
+  h: number
+): C | null {
+  const at = (d: number): C | null =>
+    complexAt(
+      F,
+      x,
+      typeof xv === 'number' ? xv + d : { re: xv.re + d, im: xv.im }
+    );
+  const Fp = at(h);
+  const Fm = at(-h);
+  if (!Fp || !Fm) return null;
+  // catastrophic-cancellation guard: when F(x±h) agree to ~9+ digits the
+  // difference is double-precision noise (degree-20 expanded polynomial
+  // antiderivatives evaluated near a root of the integrand) — no usable
+  // derivative signal at this point
+  const fMag = Math.max(
+    Math.hypot(Fp.re, Fp.im),
+    Math.hypot(Fm.re, Fm.im)
+  );
+  if (Math.hypot(Fp.re - Fm.re, Fp.im - Fm.im) < 1e-9 * fMag) return null;
+  const d1 = { re: (Fp.re - Fm.re) / (2 * h), im: (Fp.im - Fm.im) / (2 * h) };
+  const Fp2 = at(h / 2);
+  const Fm2 = at(-h / 2);
+  if (!Fp2 || !Fm2) return d1;
+  const d2 = { re: (Fp2.re - Fm2.re) / h, im: (Fp2.im - Fm2.im) / h };
+  return { re: (4 * d2.re - d1.re) / 3, im: (4 * d2.im - d1.im) / 3 };
 }
 
 function runProblem(
@@ -157,8 +208,9 @@ function runProblem(
       return done('unsolved', { result: result.toString() });
 
     // verification on huge results can grind for minutes — call it
-    // inconclusive rather than stalling the harness
-    if (leafCount(result) > 800)
+    // inconclusive rather than stalling the harness (numeric
+    // central-difference is per-point subs+N, so the budget is generous)
+    if (leafCount(result) > 10_000)
       return done('inconclusive', {
         result: result.toString().slice(0, 400),
         detail: 'result too large to verify',
@@ -177,37 +229,67 @@ function runProblem(
     let fails = 0;
     let worst = 0;
     const failPoints: string[] = [];
-    for (let k = 0; k < PARAM_ASSIGNMENTS && fails === 0; k++) {
+    // checks one sample point; returns true when enough evidence gathered
+    const checkPoint = (
+      Fk: BoxedExpression,
+      fk: BoxedExpression,
+      assignment: Record<string, number>,
+      xv: number | C
+    ): void => {
+      const mag =
+        typeof xv === 'number' ? Math.abs(xv) : Math.hypot(xv.re, xv.im);
+      const h = 1e-4 * Math.max(0.01, mag);
+      const lhs = dF(Fk, p.variable, xv, h);
+      const rhs = complexAt(fk, p.variable, xv);
+      if (!lhs || !rhs) return;
+      const scale =
+        1 + Math.hypot(rhs.re, rhs.im) + Math.hypot(lhs.re, lhs.im);
+      const err = Math.hypot(lhs.re - rhs.re, lhs.im - rhs.im) / scale;
+      worst = Math.max(worst, err);
+      if (err < REL_TOL) passes++;
+      else if (err > 1e-3) {
+        fails++;
+        failPoints.push(
+          `x=${JSON.stringify(xv)} ${JSON.stringify(assignment)} dF=${lhs.re.toPrecision(4)}${lhs.im ? '+' + lhs.im.toPrecision(3) + 'i' : ''} f=${rhs.re.toPrecision(4)}${rhs.im ? '+' + rhs.im.toPrecision(3) + 'i' : ''}`
+        );
+      }
+    };
+
+    // run PARAM_ASSIGNMENTS assignments always; keep drawing fresh ones
+    // (up to 8) while the sample points haven't hit the domain enough
+    // times (restricted-domain integrands like √(−2−bx)·√(2−bx))
+    for (let k = 0; k < 8 && fails === 0; k++) {
+      if (k >= PARAM_ASSIGNMENTS && passes >= MIN_POINTS) break;
       const assignment: Record<string, number> = {};
       for (const name of params)
         assignment[name] = 0.5 + 2.5 * rand(); // generic positive reals
       const Fk = result.subs(assignment);
       const fk = f.subs(assignment);
       for (const xv of X_POINTS) {
-        // central difference F′(x) ≈ (F(x+h) − F(x−h)) / 2h
-        const h = 1e-4 * Math.max(1, Math.abs(xv));
-        const Fp = complexAt(Fk, p.variable, xv + h);
-        const Fm = complexAt(Fk, p.variable, xv - h);
-        const rhs = complexAt(fk, p.variable, xv);
-        if (!Fp || !Fm || !rhs) continue;
-        const lhs = {
-          re: (Fp.re - Fm.re) / (2 * h),
-          im: (Fp.im - Fm.im) / (2 * h),
-        };
-        const scale =
-          1 + Math.hypot(rhs.re, rhs.im) + Math.hypot(lhs.re, lhs.im);
-        const err =
-          Math.hypot(lhs.re - rhs.re, lhs.im - rhs.im) / scale;
-        worst = Math.max(worst, err);
-        if (err < REL_TOL) passes++;
-        else if (err > 1e-3) {
-          fails++;
-          failPoints.push(
-            `x=${xv} ${JSON.stringify(assignment)} dF=${lhs.re.toPrecision(4)}${lhs.im ? '+' + lhs.im.toPrecision(3) + 'i' : ''} f=${rhs.re.toPrecision(4)}${rhs.im ? '+' + rhs.im.toPrecision(3) + 'i' : ''}`
-          );
-        }
-        if (passes >= MIN_POINTS && fails === 0 && k === PARAM_ASSIGNMENTS - 1)
+        checkPoint(Fk, fk, assignment, xv);
+        if (passes >= MIN_POINTS && fails === 0 && k >= PARAM_ASSIGNMENTS - 1)
           break;
+      }
+    }
+
+    // empty real domain (e.g. √(2−3x)·√(−5+2x)): differentiate along the
+    // real axis at generic complex points instead — D(F) = f is an
+    // identity of analytic functions, valid off the branch cuts
+    if (passes === 0 && fails === 0) {
+      for (let k = 0; k < PARAM_ASSIGNMENTS; k++) {
+        const assignment: Record<string, number> = {};
+        for (const name of params) assignment[name] = 0.5 + 2.5 * rand();
+        const Fk = result.subs(assignment);
+        const fk = f.subs(assignment);
+        for (const xv of COMPLEX_POINTS) checkPoint(Fk, fk, assignment, xv);
+      }
+      // a lone borderline complex point is weak evidence either way
+      if (passes > 0 || fails > 0) {
+        if (fails === 0 && passes < MIN_POINTS)
+          return done('inconclusive', {
+            result: result.toString(),
+            detail: `complex-point verification: passes=${passes} worst=${worst.toExponential(2)}`,
+          });
       }
     }
 

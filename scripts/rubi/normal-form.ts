@@ -62,10 +62,57 @@ function factors(e: Expression): Expression[] {
 }
 
 function mul(ce: ComputeEngine, fs: Expression[]): Expression {
-  const flat = fs.flatMap(factors).filter((f) => !f.isSame(1));
+  let flat = fs.flatMap(factors).filter((f) => !f.isSame(1));
+  // WL Times auto-evaluation, which the Rubi corpus assumes:
+  // 0·u → 0, and same-base power collection (d·d → d², u^a·u^b → u^(a+b))
+  if (flat.some((f) => f.isSame(0))) return ce.Zero;
+  flat = collectPowers(ce, flat);
   if (flat.length === 0) return ce.One;
   if (flat.length === 1) return flat[0];
   return ce._fn('Multiply', flat);
+}
+
+/** fuse factors sharing a base: d·d → d², u^(1/2)·u^(1/2) → u. Bases are
+ * compared structurally; rule skeletons never carry duplicate-base
+ * factors (WL already collected them at source), so this only fires on
+ * runtime integrands. */
+function collectPowers(
+  ce: ComputeEngine,
+  flat: Expression[]
+): Expression[] {
+  const groups = new Map<string, { base: Expression; exps: Expression[] }>();
+  const order: string[] = [];
+  for (const f of flat) {
+    const isPow = f.operator === 'Power' && f.ops;
+    const base = isPow ? f.ops![0] : f;
+    const exp = isPow ? f.ops![1] : ce.One;
+    const key = base.toString();
+    if (!groups.has(key)) {
+      groups.set(key, { base, exps: [] });
+      order.push(key);
+    }
+    groups.get(key)!.exps.push(exp);
+  }
+  if ([...groups.values()].every((g) => g.exps.length === 1)) return flat;
+  const out: Expression[] = [];
+  for (const key of order) {
+    const { base, exps } = groups.get(key)!;
+    if (exps.length === 1) {
+      out.push(exps[0].isSame(1) ? base : pow(ce, base, exps[0]));
+      continue;
+    }
+    try {
+      let sum = exps[0];
+      for (let i = 1; i < exps.length; i++) sum = sum.add(exps[i]);
+      const total = sum.evaluate();
+      const p = pow(ce, base, total);
+      if (!p.isSame(1)) out.push(p);
+    } catch {
+      // non-canonical exponent arithmetic: keep the factors unfused
+      for (const e of exps) out.push(e.isSame(1) ? base : pow(ce, base, e));
+    }
+  }
+  return out;
 }
 
 /** factors of 1/e in Times/Power form */
@@ -80,12 +127,24 @@ function invert(ce: ComputeEngine, e: Expression): Expression[] {
 }
 
 /** Power constructor: merges (B^k)^e → B^(k·e) when sound (k = ±1 or
- * e an integer), drops exponent 1. */
+ * e an integer), drops exponent 1. Also emulates Mathematica's input
+ * auto-evaluation, which the Rubi corpus assumes: compound numeric-linear
+ * exponents collapse (1+2n−2(1+n) → −1) and u^0 → 1 unconditionally (CE
+ * soundly refuses this for unknown u; WL applies it on input). */
 function pow(
   ce: ComputeEngine,
   base: Expression,
   exp: Expression
 ): Expression {
+  if (exp.operator === 'Add' && leafCountOf(exp) <= 24) {
+    try {
+      const collapsed = exp.simplify();
+      if (collapsed.isNumberLiteral) exp = collapsed;
+    } catch {
+      // deadline during exponent simplify: keep the original exponent
+    }
+  }
+  if (exp.isSame(0)) return ce.One;
   if (exp.isSame(1)) return base;
   if (base.operator === 'Power' && base.ops) {
     const inner = base.ops[1];
@@ -117,6 +176,13 @@ export function recanonicalize(
     e.operator,
     e.ops.map((o) => recanonicalize(ce, o))
   );
+}
+
+function leafCountOf(e: Expression): number {
+  if (!e.ops) return 1;
+  let n = 1;
+  for (const op of e.ops) n += leafCountOf(op);
+  return n;
 }
 
 function negate(ce: ComputeEngine, e: Expression): Expression {
