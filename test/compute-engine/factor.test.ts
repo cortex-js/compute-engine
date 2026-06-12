@@ -1,4 +1,8 @@
-import { Expression, ComputeEngine } from '../../src/compute-engine';
+import {
+  Expression,
+  ComputeEngine,
+  factor as factorFn,
+} from '../../src/compute-engine';
 import {
   factor,
   factorPerfectSquare,
@@ -515,5 +519,29 @@ describe('CONTENT EXTRACTION (coefficient GCD)', () => {
         expr.subs({ x: v }).N().re
       );
     }
+  });
+});
+
+// The public free function must do full polynomial factoring, like the
+// `Factor` operator — not just the internal GCD content extraction. It used
+// to bind the internal factor() helper, so factor('x^2 + 5x + 6') returned
+// its input unchanged.
+describe('factor() free function (public API)', () => {
+  test('factors a quadratic from LaTeX', () => {
+    const factored = factorFn('x^2 + 5x + 6');
+    expect(factored.operator).toBe('Multiply');
+    expect(factored.latex).toBe('(x+2)(x+3)');
+  });
+
+  test('still simplifies relational operators', () => {
+    expect(factorFn('2x < 4').latex).toBe('x\\lt2');
+  });
+
+  test('still combines products', () => {
+    expect(factorFn('(2x)(2y)').latex).toBe('4xy');
+  });
+
+  test('leaves irreducible polynomials unchanged', () => {
+    expect(factorFn('x^2 + x + 1').latex).toBe('x^2+x+1');
   });
 });

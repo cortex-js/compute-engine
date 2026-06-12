@@ -15,7 +15,7 @@ import {
   expand as expandExpr,
   expandAll as expandAllExpr,
 } from './boxed-expression/expand';
-import { factor as factorExpr } from './boxed-expression/factor';
+import { factorPolynomial as factorExpr } from './boxed-expression/factor';
 import { compile as compileExpr } from './compilation/compile-expression';
 
 let _defaultEngine: IComputeEngine | null = null;
