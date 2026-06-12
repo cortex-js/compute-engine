@@ -2109,6 +2109,268 @@ export function bigEllipticE(ce: ComputeEngine, m: BigNum): BigNum {
 }
 
 //
+// ---------------- Carlson symmetric elliptic integrals (machine real) ----------------
+//
+// Duplication-theorem algorithms (Carlson 1995; same series tails as
+// mpmath's elliprf/elliprc/elliprj). Real domains:
+//   RF(x,y,z): x,y,z ≥ 0, at most one zero
+//   RC(x,y):   x ≥ 0; y < 0 returns the Cauchy principal value
+//   RJ(x,y,z,p): x,y,z ≥ 0, at most one zero; p ≠ 0 (p < 0 returns the
+//                Cauchy principal value via DLMF 19.20.14)
+//   RD(x,y,z) = RJ(x,y,z,z)
+// Outside these domains the kernels return NaN so `applyN` cascades to the
+// complex implementations.
+//
+
+// Relative error target for the duplication loops. The series tail is
+// O(r): pushing well below double epsilon makes the truncation error
+// negligible against roundoff (each factor-of-10⁶ here costs one extra
+// duplication step).
+const CARLSON_TOL = 1e-24;
+
+/** Carlson R_C(x, y) = R_F(x, y, y), machine real, PV for y < 0. */
+export function carlsonRC(x: number, y: number): number {
+  if (Number.isNaN(x) || Number.isNaN(y) || x < 0) return NaN;
+  if (y === 0) return Infinity;
+  if (x === 0) return Math.PI / (2 * Math.sqrt(y));
+  // Cauchy principal value for y < 0 (DLMF 19.2.20)
+  if (y < 0) return Math.sqrt(x / (x - y)) * carlsonRC(x - y, -y);
+  if (x === y) return 1 / Math.sqrt(x);
+  // Near-degenerate y ≈ x: the acos/acosh forms below lose half the
+  // digits (the inverse functions are evaluated at arguments → 1, where
+  // they are infinitely steep; mpmath compensates with extra working
+  // precision). Use RC(x, x(1+e)) = x^{−1/2}·Σₖ (−e)ᵏ/(2k+1) instead —
+  // this path is hot in R_J, whose duplication sum evaluates RC(1, 1+em)
+  // with em → 0.
+  const e = (y - x) / x;
+  if (Math.abs(e) < 0.01) {
+    let sum = 0;
+    let term = 1;
+    for (let k = 0; k < 10; k++) {
+      sum += term / (2 * k + 1);
+      term *= -e;
+    }
+    return sum / Math.sqrt(x);
+  }
+  const a = Math.sqrt(x / y);
+  return x < y
+    ? Math.acos(a) / Math.sqrt(y - x)
+    : Math.acosh(a) / Math.sqrt(x - y);
+}
+
+/** Carlson R_F(x, y, z), machine real. */
+export function carlsonRF(x: number, y: number, z: number): number {
+  if (Number.isNaN(x) || Number.isNaN(y) || Number.isNaN(z)) return NaN;
+  if (x < 0 || y < 0 || z < 0) return NaN;
+  if ((x === 0 ? 1 : 0) + (y === 0 ? 1 : 0) + (z === 0 ? 1 : 0) > 1)
+    return Infinity;
+  // Degenerate cases reduce to R_C
+  if (y === z) return carlsonRC(x, y);
+  if (x === z) return carlsonRC(y, x);
+  if (x === y) return carlsonRC(z, x);
+
+  const A0 = (x + y + z) / 3;
+  const Q =
+    Math.pow(3 * CARLSON_TOL, -1 / 6) *
+    Math.max(Math.abs(A0 - x), Math.abs(A0 - y), Math.abs(A0 - z));
+  // The correction terms use the ORIGINAL x,y,z — iterate on copies
+  let [xm, ym, zm] = [x, y, z];
+  let A = A0;
+  let pow4 = 1;
+  for (let i = 0; i < 64 && pow4 * Q >= Math.abs(A); i++) {
+    const sx = Math.sqrt(xm);
+    const sy = Math.sqrt(ym);
+    const sz = Math.sqrt(zm);
+    const lm = sx * sy + sx * sz + sy * sz;
+    A = (A + lm) / 4;
+    xm = (xm + lm) / 4;
+    ym = (ym + lm) / 4;
+    zm = (zm + lm) / 4;
+    pow4 /= 4;
+  }
+  // Series correction terms: X = (A0 − x)·4^{−m}/Aₘ (mpmath RF_calc)
+  const t = pow4 / A;
+  const Xc = (A0 - x) * t;
+  const Yc = (A0 - y) * t;
+  const Zc = -Xc - Yc;
+  const E2 = Xc * Yc - Zc * Zc;
+  const E3 = Xc * Yc * Zc;
+  return (
+    (Math.pow(A, -0.5) *
+      (9240 - 924 * E2 + 385 * E2 * E2 + 660 * E3 - 630 * E2 * E3)) /
+    9240
+  );
+}
+
+/**
+ * Carlson R_J(x, y, z, p), machine real. For p < 0 returns the Cauchy
+ * principal value (DLMF 19.20.14, as in Boost's ellint_rj).
+ */
+export function carlsonRJ(x: number, y: number, z: number, p: number): number {
+  if (Number.isNaN(x) || Number.isNaN(y) || Number.isNaN(z) || Number.isNaN(p))
+    return NaN;
+  if (x < 0 || y < 0 || z < 0) return NaN;
+  if (p === 0) return Infinity;
+  if ((x === 0 ? 1 : 0) + (y === 0 ? 1 : 0) + (z === 0 ? 1 : 0) > 1)
+    return Infinity;
+
+  if (p < 0) {
+    // Cauchy principal value, DLMF 19.20.14. Requires x ≤ y ≤ z.
+    const [a, b, c] = [x, y, z].sort((u, v) => u - v);
+    const q = -p;
+    const pn = (c * (a + b + q) - a * b) / (c + q);
+    let v = (pn - c) * carlsonRJ(a, b, c, pn);
+    v -= 3 * carlsonRF(a, b, c);
+    v +=
+      3 *
+      Math.sqrt((a * b * c) / (a * b + pn * q)) *
+      carlsonRC(a * b + pn * q, pn * q);
+    return v / (c + q);
+  }
+
+  const A0 = (x + y + z + 2 * p) / 5;
+  const delta = (p - x) * (p - y) * (p - z);
+  const Q =
+    Math.pow(0.25 * CARLSON_TOL, -1 / 6) *
+    Math.max(
+      Math.abs(A0 - x),
+      Math.abs(A0 - y),
+      Math.abs(A0 - z),
+      Math.abs(A0 - p)
+    );
+  // The correction terms use the ORIGINAL x,y,z — iterate on copies
+  let [xm, ym, zm, pm] = [x, y, z, p];
+  let A = A0;
+  let pow4 = 1;
+  let S = 0;
+  for (let i = 0; i < 64; i++) {
+    const sx = Math.sqrt(xm);
+    const sy = Math.sqrt(ym);
+    const sz = Math.sqrt(zm);
+    const sp = Math.sqrt(pm);
+    const lm = sx * sy + sx * sz + sy * sz;
+    const A1 = (A + lm) / 4;
+    xm = (xm + lm) / 4;
+    ym = (ym + lm) / 4;
+    zm = (zm + lm) / 4;
+    pm = (pm + lm) / 4;
+    const dm = (sp + sx) * (sp + sy) * (sp + sz);
+    const em = (delta * pow4 * pow4 * pow4) / (dm * dm);
+    if (pow4 * Q < Math.abs(A)) break;
+    S += (carlsonRC(1, 1 + em) * pow4) / dm;
+    pow4 /= 4;
+    A = A1;
+  }
+  const t = pow4 / A;
+  const X = (A0 - x) * t;
+  const Y = (A0 - y) * t;
+  const Z = (A0 - z) * t;
+  const P = (-X - Y - Z) / 2;
+  const E2 = X * Y + X * Z + Y * Z - 3 * P * P;
+  const E3 = X * Y * Z + 2 * E2 * P + 4 * P * P * P;
+  const E4 = (2 * X * Y * Z + E2 * P + 3 * P * P * P) * P;
+  const E5 = X * Y * Z * P * P;
+  const series =
+    (24024 -
+      5148 * E2 +
+      2457 * E2 * E2 +
+      4004 * E3 -
+      4158 * E2 * E3 -
+      3276 * E4 +
+      2772 * E5) /
+    24024;
+  return pow4 * Math.pow(A, -1.5) * series + 6 * S;
+}
+
+/** Carlson R_D(x, y, z) = R_J(x, y, z, z), machine real. */
+export function carlsonRD(x: number, y: number, z: number): number {
+  return carlsonRJ(x, y, z, z);
+}
+
+//
+// ---------------- Incomplete elliptic integrals (machine real) ----------------
+//
+// Legendre forms in the Mathematica/parameter convention (second argument
+// is the PARAMETER m = k²):
+//   F(φ|m) = ∫₀^φ dθ/√(1 − m sin²θ)
+//   E(φ|m) = ∫₀^φ √(1 − m sin²θ) dθ
+//   Π(n; φ|m) = ∫₀^φ dθ/((1 − n sin²θ)·√(1 − m sin²θ))
+// computed through the Carlson forms (DLMF 19.25.5, 19.25.9, 19.25.14),
+// with the quasi-periodic extension for |φ| > π/2. When 1 − m sin²φ < 0
+// the value is complex: return NaN so `applyN` cascades to the complex
+// kernel.
+//
+
+/** Incomplete elliptic integral of the first kind F(φ|m). */
+export function ellipticF(phi: number, m: number): number {
+  if (Number.isNaN(phi) || Number.isNaN(m)) return NaN;
+  if (Math.abs(phi) > Math.PI / 2) {
+    // F(φ + kπ|m) = F(φ|m) + 2k·K(m)
+    const k = Math.round(phi / Math.PI);
+    const K = ellipticK(m);
+    if (!Number.isFinite(K)) return NaN;
+    return 2 * k * K + ellipticF(phi - k * Math.PI, m);
+  }
+  const s = Math.sin(phi);
+  const y = 1 - m * s * s;
+  if (y < 0) return NaN; // complex value
+  const c = Math.cos(phi);
+  return s * carlsonRF(c * c, y, 1);
+}
+
+/** Incomplete elliptic integral of the second kind E(φ|m). */
+export function ellipticEIncomplete(phi: number, m: number): number {
+  if (Number.isNaN(phi) || Number.isNaN(m)) return NaN;
+  if (Math.abs(phi) > Math.PI / 2) {
+    // E(φ + kπ|m) = E(φ|m) + 2k·E(m)
+    const k = Math.round(phi / Math.PI);
+    const E = ellipticE(m);
+    if (!Number.isFinite(E)) return NaN;
+    return 2 * k * E + ellipticEIncomplete(phi - k * Math.PI, m);
+  }
+  const s = Math.sin(phi);
+  const y = 1 - m * s * s;
+  if (y < 0) return NaN; // complex value
+  const c = Math.cos(phi);
+  const s3 = s * s * s;
+  return s * carlsonRF(c * c, y, 1) - (m / 3) * s3 * carlsonRD(c * c, y, 1);
+}
+
+/** Complete elliptic integral of the third kind Π(n|m). */
+export function ellipticPiComplete(n: number, m: number): number {
+  if (Number.isNaN(n) || Number.isNaN(m)) return NaN;
+  if (n === 1 || m === 1) return Infinity;
+  if (m > 1) return NaN; // complex value
+  // Π(n|m) = R_F(0, 1−m, 1) + (n/3)·R_J(0, 1−m, 1, 1−n)
+  return carlsonRF(0, 1 - m, 1) + (n / 3) * carlsonRJ(0, 1 - m, 1, 1 - n);
+}
+
+/** Incomplete elliptic integral of the third kind Π(n; φ|m). */
+export function ellipticPiIncomplete(
+  n: number,
+  phi: number,
+  m: number
+): number {
+  if (Number.isNaN(n) || Number.isNaN(phi) || Number.isNaN(m)) return NaN;
+  if (Math.abs(phi) > Math.PI / 2) {
+    // Π(n; φ + kπ|m) = Π(n; φ|m) + 2k·Π(n|m)
+    const k = Math.round(phi / Math.PI);
+    const P = ellipticPiComplete(n, m);
+    if (!Number.isFinite(P)) return NaN;
+    return 2 * k * P + ellipticPiIncomplete(n, phi - k * Math.PI, m);
+  }
+  const s = Math.sin(phi);
+  const y = 1 - m * s * s;
+  if (y < 0) return NaN; // complex value
+  const c = Math.cos(phi);
+  const s3 = s * s * s;
+  // 1 − n sin²φ < 0 → R_J returns the Cauchy principal value; = 0 → pole
+  const p = 1 - n * s * s;
+  if (p === 0) return Infinity;
+  return s * carlsonRF(c * c, y, 1) + (n / 3) * s3 * carlsonRJ(c * c, y, 1, p);
+}
+
+//
 // ---------------- Hypergeometric functions ----------------
 //
 
@@ -2390,8 +2652,7 @@ export function bigHypergeometric2F1(
     // the direct series still converges for z < 1, just slowly near 1.
     const zNum = z.toNumber();
     if (zNum > 0.95) return BigDecimal.NAN; // too slow: stays symbolic
-    const slowMax =
-      Math.ceil((p + guard + 2) / -Math.log10(zNum)) + 100;
+    const slowMax = Math.ceil((p + guard + 2) / -Math.log10(zNum)) + 100;
     return withExtraPrecision(guard, () =>
       bigGauss2F1Series(ce, a, b, c, z, slowMax)
     ).toPrecision(p);
@@ -2407,7 +2668,14 @@ export function bigHypergeometric2F1(
       .div(bigGamma(ce, a).mul(bigGamma(ce, b)))
       .mul(s.mul(oneMinusZ.ln()).exp()) // (1−z)^s
       .mul(
-        bigGauss2F1Series(ce, c.sub(a), c.sub(b), one.add(s), oneMinusZ, maxTerms)
+        bigGauss2F1Series(
+          ce,
+          c.sub(a),
+          c.sub(b),
+          one.add(s),
+          oneMinusZ,
+          maxTerms
+        )
       );
     return t1.add(t2);
   }).toPrecision(p);

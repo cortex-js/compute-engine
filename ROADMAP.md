@@ -85,20 +85,23 @@ width blow-up (`8e8a59`, r-th derivative of LambertW, REVIEW.md G8 — fixed
 by a strided deadline check in `differentiate()`). Entries with instances
 380 → 622; True instances 1,089 → 1,363.
 
-### 3. CI for the corpus pipeline
+### 3. ~~CI for the corpus pipeline~~ — ✅ done (2026-06-12)
 
-**What:** two cheap CI jobs: (a) Stage-1 box-check of the full corpus
-(`npx tsx scripts/fungrim/validate.ts --corpus data/fungrim`, ~7 s, exit code
-already gates on ≥99%); (b) an artifact-freshness smoke test — re-run the
-rule compiler's self-test on a deterministic ~25-rule sample and assert they
-still fire (catches engine canonicalization drift against the checked-in
-artifact, the highest-rated risk in the loader design).
+**Outcome:** `corpus-pipeline` job in `.github/workflows/test.yml` with two
+steps: (a) the Stage-1 box-check (`scripts/fungrim/validate.ts`, ~2 s, exit
+gates on ≥99%); (b) `scripts/fungrim/artifact-freshness.ts` — recompiles a
+deterministic 25-rule stride sample of the checked-in artifact through the
+full compiler pipeline (guards, orientation, scratch-engine self-test) and
+fails on any skip or field drift.
 
-**Effort:** ~1 day. **Why:** the artifact stores canonical-form patterns;
-canonicalization changes elsewhere in the engine can silently break matching.
-This happened once already during development (raw-form patterns no-fired
-~123 entries) — the self-test caught it then; CI makes that protection
-continuous.
+**Found on first wide run (150-sample):** `fungrim:7ea1ad`
+(CarlsonRC(−1,1) specific value) failed self-test — the rule fired but
+`isEqual` declared two *equal* complex constants unequal. Root cause:
+`NumericValue.isZeroWithTolerance` hard-rejected any nonzero imaginary
+part (`im !== 0 → false`), so a 1-ulp imaginary residue in the difference
+made `eq()` return a definitive (unsound) `false`. Fixed in both
+machine/big numeric values (tolerance now applies to the imaginary part
+too); the 150-sample freshness run is clean.
 
 ---
 
@@ -252,6 +255,18 @@ REGRESSIONS"):**
   13 → 18, wrong 3 → 2 (both residual "wrong" are verification artifacts:
   `1/x¹⁰⁰` central-difference overflow near 0, and one correct-but-
   unverifiable form).
+- **Symbolic-exponent RangeError (residual, fixed 2026-06-12):** the
+  by-parts depth cap was defeated because `antiderivativeWithByParts`
+  falls back into the full `antiderivative()`, re-entering by-parts with
+  a fresh depth of 0 — and symbolic exponents provide no shrinking
+  measure along that cycle. Three fixes: a module-level cap on TOTAL
+  by-parts stack frames; folding products of index powers with symbolic
+  exponents (`x^m·x^(2m+2) → x^(3m+2)` — canonicalization only folds
+  numeric ones); and an expand-and-integrate fallback tried AFTER
+  by-parts (so existing antiderivative forms are unchanged).
+  `∫x^m(a+bx^(2+2m))² dx` now solves and D-verifies. ch1-500 re-run:
+  correct 13 → 37, wrong → 1, errors → 3 (all `CancellationError`
+  timeouts — zero RangeErrors).
 
 ### 13. ~~Small engine follow-ups (batch)~~ — ✅ done (2026-06-12)
 
@@ -281,6 +296,40 @@ evaluated — this, not ₂F₁, was most of the 1.1.1 "not-evaluable" bucket.
 Fixed in `scripts/rubi/wl-parser.ts`; chapter-1 corpus regenerated
 (name-only diff). Remaining not-evaluable results are incomplete elliptic
 integrals (`EllipticF`/`EllipticPi` kernels — candidate next item).
+
+### 14. ~~Incomplete elliptic integrals via Carlson symmetric forms~~ — ✅ done (2026-06-12)
+
+**Outcome:** machine-real + complex Carlson kernels
+`carlsonRF/RC/RD/RJ` (`numerics/special-functions.ts`,
+`numerics/numeric-complex.ts`) — duplication-theorem algorithms with
+mpmath's series tails; RC gets a small-|y−x| series fast path (the
+acos/acosh forms lose half the digits near degeneracy, which capped R_J
+at ~4e-11; now ~1e-15); real R_J/R_C return Cauchy principal values for
+negative `p`/`y` (DLMF 19.20.14 / 19.2.20); complex R_J only evaluates
+the configurations where duplication is valid (mpmath's criterion), NaN
+otherwise. On top of these: `EllipticF(φ,m)` (new head),
+`EllipticE(φ,m)` (second optional argument on the existing head),
+`EllipticPi(n,m)` / `EllipticPi(n,φ,m)` (new head) — Mathematica
+argument conventions, parameter m = k², quasi-periodic extension beyond
+|Re φ| > π/2, applyN machine→complex cascade. Validated against mpmath
+1.4 (worst rel. err. ~1e-15 machine, ~7e-16 complex, including the Rubi
+corpus shapes: m > 1, m < 0, complex amplitudes from ArcSin(s>1));
+mpmath-derived tests in `special-functions.test.ts`. The Fungrim
+artifact was regenerated (EllipticPi shell pruned now that it is a
+built-in; rule set byte-identical otherwise).
+
+**Measured effect (Rubi 1.1.1 seed-42 200-sample, with the scripts-layer
+`posAux` Divide fix in the same session):** solved-correct 146 → 161
+(73% → 80.5%), not-evaluable 16 → 4 (remaining: one AppellF1 outside the
+|y| < 1 kernel domain, two integrands with an empty real domain that the
+sampling verifier cannot evaluate anywhere, one ArcTanh real-domain
+gap), solved-wrong 4 → 1 (the survivor is the `1/x¹⁰⁰` central-difference
+verification artifact — the antiderivative is correct).
+
+**Known gap (pre-existing, separate):** CE's `Arcsin(x).N()` returns NaN
+for real |x| > 1 instead of continuing to the complex value, so
+`EllipticF(ArcSin(1.2), m)` only evaluates where the amplitude is real.
+The kernels themselves handle complex amplitudes (validated directly).
 
 ### 5. Per-head aggregated rule dispatch
 

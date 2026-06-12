@@ -177,7 +177,12 @@ export class BigNumericValue extends NumericValue {
   }
 
   isZeroWithTolerance(tolerance: number | BigDecimal): boolean {
-    if (this.im !== 0) return false;
+    // The imaginary part (always a machine number) is compared against the
+    // tolerance too: a residual imaginary epsilon must not make the
+    // difference "provably non-zero".
+    const tolNum =
+      typeof tolerance === 'number' ? tolerance : tolerance.toNumber();
+    if (Math.abs(this.im) > tolNum) return false;
     const tol =
       typeof tolerance === 'number' ? new BigDecimal(tolerance) : tolerance;
     return this.decimal.abs().lte(tol);

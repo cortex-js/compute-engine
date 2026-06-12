@@ -143,10 +143,12 @@ export class MachineNumericValue extends NumericValue {
   }
 
   isZeroWithTolerance(tolerance: number | BigDecimal): boolean {
-    if (this.im !== 0) return false;
     const tol =
       tolerance instanceof BigDecimal ? tolerance.toNumber() : tolerance;
-    return Math.abs(this.decimal) < tol;
+    // The imaginary part is compared against the tolerance too: a residual
+    // imaginary epsilon (e.g. from subtracting two equal complex constants)
+    // must not make the difference "provably non-zero".
+    return Math.abs(this.im) <= tol && Math.abs(this.decimal) < tol;
   }
 
   get isOne(): boolean {

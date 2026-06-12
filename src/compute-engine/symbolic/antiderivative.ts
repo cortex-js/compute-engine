@@ -96,41 +96,56 @@ function liatePriority(expr: Expression, index: string): number {
  * Returns the result if successful, or null if integration by parts
  * doesn't apply or leads to a more complex integral.
  */
+// `tryIntegrationByParts` → `antiderivativeWithByParts` can fall back into
+// the full `antiderivative()`, which re-enters by-parts with a fresh
+// `depth` of 0 — the threaded depth cap alone does not terminate. For
+// integrands with symbolic exponents there is no shrinking measure along
+// that cycle (x^m·(a+b·x^(2+2m))² overflowed the stack this way), so the
+// TOTAL number of by-parts frames on the stack is capped as well.
+let byPartsFrames = 0;
+const MAX_BY_PARTS_FRAMES = 8;
+
 function tryIntegrationByParts(
   factors: ReadonlyArray<Expression>,
   index: string,
   depth: number = 0
 ): Expression | null {
   if (factors.length < 2 || depth > 2) return null; // Limit recursion depth
+  if (byPartsFrames >= MAX_BY_PARTS_FRAMES) return null;
 
-  // Sort factors by LIATE priority (descending)
-  const sorted = [...factors].sort(
-    (a, b) => liatePriority(b, index) - liatePriority(a, index)
-  );
+  byPartsFrames += 1;
+  try {
+    // Sort factors by LIATE priority (descending)
+    const sorted = [...factors].sort(
+      (a, b) => liatePriority(b, index) - liatePriority(a, index)
+    );
 
-  // Choose u (highest LIATE priority) and dv (rest)
-  const u = sorted[0];
-  const dvFactors = sorted.slice(1);
-  const dv = dvFactors.length === 1 ? dvFactors[0] : mul(...dvFactors);
+    // Choose u (highest LIATE priority) and dv (rest)
+    const u = sorted[0];
+    const dvFactors = sorted.slice(1);
+    const dv = dvFactors.length === 1 ? dvFactors[0] : mul(...dvFactors);
 
-  // Compute du = derivative of u
-  const du = differentiate(u, index);
-  if (!du) return null;
+    // Compute du = derivative of u
+    const du = differentiate(u, index);
+    if (!du) return null;
 
-  // Compute v = antiderivative of dv
-  // Use a simple check to avoid infinite recursion
-  const v = antiderivativeSimple(dv, index);
-  if (!v || v.operator === 'Integrate') return null; // Couldn't integrate dv
+    // Compute v = antiderivative of dv
+    // Use a simple check to avoid infinite recursion
+    const v = antiderivativeSimple(dv, index);
+    if (!v || v.operator === 'Integrate') return null; // Couldn't integrate dv
 
-  // Integration by parts: u·v - ∫v·du
-  const uv = u.mul(v);
-  const vdu = v.mul(du);
+    // Integration by parts: u·v - ∫v·du
+    const uv = u.mul(v);
+    const vdu = v.mul(du);
 
-  // Try to integrate v·du
-  const integralVdu = antiderivativeWithByParts(vdu, index, depth + 1);
-  if (!integralVdu || integralVdu.operator === 'Integrate') return null;
+    // Try to integrate v·du
+    const integralVdu = antiderivativeWithByParts(vdu, index, depth + 1);
+    if (!integralVdu || integralVdu.operator === 'Integrate') return null;
 
-  return uv.sub(integralVdu).simplify();
+    return uv.sub(integralVdu).simplify();
+  } finally {
+    byPartsFrames -= 1;
+  }
 }
 
 /**
@@ -180,6 +195,41 @@ function antiderivativeSimple(
   }
 
   return null;
+}
+
+/**
+ * If every factor is the index or a power of the index with an index-free
+ * exponent, fold the product into a single power x^(Σα).
+ *
+ * Canonicalization only combines same-base powers with numeric exponents,
+ * so symbolic-exponent products (x^m·x^(2m+2), typical after expanding a
+ * binomial with symbolic powers) stay as products — and integration by
+ * parts has no shrinking measure for them.
+ *
+ * Returns null when a factor has another shape or when all exponents are
+ * numeric (those products are already folded by canonicalization).
+ */
+function foldIndexPowers(
+  factors: ReadonlyArray<Expression>,
+  index: string
+): Expression | null {
+  if (factors.length < 2) return null;
+  const ce = factors[0].engine;
+  const exponents: Expression[] = [];
+  let symbolic = false;
+  for (const f of factors) {
+    if (sym(f) === index) exponents.push(ce.One);
+    else if (
+      isFunction(f, 'Power') &&
+      sym(f.op1) === index &&
+      !f.op2.has(index)
+    ) {
+      exponents.push(f.op2);
+      if (!isNumber(f.op2)) symbolic = true;
+    } else return null;
+  }
+  if (!symbolic) return null;
+  return ce.function('Power', [ce.symbol(index), add(...exponents).evaluate()]);
 }
 
 /**
@@ -1684,9 +1734,7 @@ function numericPartialFractions(
   // like x²−2x+1 that the Power-shaped repeated-linear-root case misses.
   {
     const n = roots.length;
-    const mean = roots
-      .reduce((s, r) => s.add(r), new Complex(0, 0))
-      .div(n);
+    const mean = roots.reduce((s, r) => s.add(r), new Complex(0, 0)).div(n);
     const allEqual =
       Math.abs(mean.im) <= 1e-7 * (1 + mean.abs()) &&
       roots.every((r) => r.sub(mean).abs() <= 1e-5 * (1 + mean.abs()));
@@ -1859,11 +1907,25 @@ export function antiderivative(fn: Expression, index: string): Expression {
     const cyclicResult = tryCyclicExpTrigIntegral(fn.ops, index);
     if (cyclicResult) return cyclicResult;
 
+    // Products of powers of the index fold to a single power:
+    // x^m·x^(2m+2) → x^(3m+2), which the power rule integrates directly
+    const folded = foldIndexPowers(fn.ops, index);
+    if (folded !== null) return antiderivative(folded, index);
+
     // Then try integration by parts for products of variable terms
     if (fn.ops.length >= 2) {
       const result = tryIntegrationByParts(fn.ops, index, 0);
       if (result) return result;
     }
+
+    // Expanding can reduce the product to a sum of power-rule terms —
+    // e.g. x^m·(a+b·x^(2+2m))²: the symbolic exponents defeat both
+    // u-substitution and by-parts, but every expanded term is a constant
+    // times powers of x. Tried AFTER by-parts so integrands that by-parts
+    // already solves keep their current (unexpanded) antiderivative form.
+    const expanded = expandAll(fn);
+    if (isFunction(expanded, 'Add')) return antiderivative(expanded, index);
+
     // Fall through to rule-based matching
   }
 
@@ -2322,7 +2384,6 @@ export function antiderivative(fn: Expression, index: string): Expression {
           }
         }
       }
-
 
       // Case F: Mixed partial fractions - one real root and one irreducible quadratic
       // ∫ 1/((x-r)(x²+bx+c)) dx where x²+bx+c has no real roots

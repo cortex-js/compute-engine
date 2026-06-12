@@ -25,6 +25,31 @@ jobs:
       - name: Run tests
         run: npm test
 
+  corpus-pipeline:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Stage-1 box-check of the full Fungrim corpus (exit gates on >= 99%)
+      - name: Corpus box-check
+        run: npx --yes tsx scripts/fungrim/validate.ts --corpus data/fungrim
+
+      # Recompile a deterministic rule sample and assert the checked-in
+      # artifact is still in sync with the engine (catches canonicalization
+      # drift that silently stops compiled patterns from firing)
+      - name: Artifact freshness
+        run: npx --yes tsx scripts/fungrim/artifact-freshness.ts
+
   lint:
     runs-on: ubuntu-latest
 

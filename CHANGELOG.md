@@ -15,6 +15,22 @@
   referencing these functions in the Identities Library are now numerically
   verifiable.
 
+- **Incomplete elliptic integrals**: `EllipticF(phi, m)` (first kind), a
+  two-argument `EllipticE(phi, m)` (second kind — the existing `EllipticE(m)`
+  gains an optional amplitude argument), and `EllipticPi(n, m)` /
+  `EllipticPi(n, phi, m)` (complete and incomplete third kind). Argument
+  conventions follow Mathematica (amplitude before the parameter, parameter
+  m = k² last). Evaluation goes through the Carlson symmetric integrals
+  R_F/R_C/R_D/R_J (duplication-theorem algorithms) with machine-real and
+  complex kernels: parameters m > 1 and m < 0, complex amplitudes, and
+  amplitudes beyond ±π/2 (quasi-periodic extension) are all supported.
+  Values validated against mpmath to ~10⁻¹⁵.
+
+- **`AppellF1(a, b₁, b₂, c, x, y)` numeric evaluation**: the Appell
+  hypergeometric function F₁ now evaluates numerically (machine and complex)
+  via its double series for |x|, |y| < 1, including the terminating
+  (polynomial) parameter cases.
+
 ### Improvements
 
 - **Interruptible evaluation**: long-running operations now respect the engine
@@ -35,7 +51,59 @@
   terminates at the time limit instead of running unbounded (previously ~10¹⁴
   sample evaluations and an eventual out-of-memory crash).
 
+- **₂F₁ analytic continuation on the whole complex plane**:
+  `Hypergeometric2F1` previously only evaluated where its defining series
+  converges (|z| < 1). It now uses the six Kummer connection maps to evaluate
+  for any z, with the standard z − i0 branch-cut convention on [1, ∞)
+  (matching mpmath and Mathematica). Degenerate parameter combinations
+  (integer parameter differences, where the connection formulas have
+  cancelling Γ poles) are handled by parameter perturbation (~10⁻⁹ accuracy).
+  The only remaining gap is a thin sliver near z = e^{±iπ/3}, where no
+  transformation converges.
+
+- **`simplify()` respects the engine time limit**: pathological
+  simplifications (e.g. polynomial division over very large quotients) now
+  throw `CancellationError` at the deadline instead of running unbounded.
+
+- **`Integrate` solves more, faster**: products of powers with symbolic
+  exponents fold and integrate (`∫xᵐ(a+bx^(2+2m))² dx` previously overflowed
+  the call stack — integration by parts had no termination measure for
+  symbolic exponents), and an expand-and-integrate fallback handles products
+  whose expansion is a sum of power-rule terms. On a 500-problem sample of
+  the Rubi test suite, the worst single-problem time dropped from 156 s to
+  under 4 s, with no stack overflows remaining.
+
 ### Bug Fixes
+
+- **Unsound `x/√(x²) → 1` simplification.** Simplifying `x/√(x²)` (and the
+  equivalent product `x·(x²)^(−1/2)`) produced `1`, losing the sign of `x` —
+  and since derivatives are simplified, `D(√(x²), x)` evaluated to `1`
+  instead of `sign(x)`. Exact powers of even powers now only cancel when the
+  base is known nonnegative.
+
+- **`isEqual()` could declare two equal complex constants unequal.** The
+  tolerance comparison rejected any nonzero imaginary part, so two
+  expressions for the same complex number differing by a 1-ulp imaginary
+  residue (e.g. two orderings of `π√2/4 − (√2/2)ln(1+√2)·i`) compared as
+  definitively not equal. The tolerance now applies to both the real and
+  imaginary parts of the difference.
+
+- **`Integrate` dropped terms or returned incomplete decompositions.**
+  `∫(a+b·x⁴)/x⁶ dx` returned `−b/x`, silently dropping the `a`-term — the
+  root cause was `polynomialGCD` treating a failed coefficient extraction as
+  a zero polynomial and returning a non-divisor as the GCD, which then
+  cancelled incorrectly. Partial-fraction integration also applied the
+  cover-up formula when the real roots did not account for the full
+  denominator degree (`∫x⁶/(1−x⁶) dx` lost the irreducible quadratic
+  factors) and ignored the leading coefficient (`∫1/(2x²−2) dx` was off by
+  ×2). A numeric partial-fraction fallback (with a-posteriori residual
+  verification) now completes denominators with no rational roots, e.g.
+  `∫1/(x⁴+1) dx`.
+
+- **`ce.number()` with a MathJSON expression array now throws.** Passing an
+  expression like `["Rational", 1, 2]` to `ce.number()` (which expects a
+  number, bigint, string, or `{re, im}`-shaped object) previously produced
+  an engine hang; it now throws with a pointer to `ce.box()`.
 
 - **`Take`, `Drop`, `Slice`, and `Count` returned garbage on matrices.** A
   list of lists (e.g. `[[2,3,4],[6,7,9],[11,12,13]]`) is represented internally

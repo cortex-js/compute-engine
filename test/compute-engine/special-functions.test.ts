@@ -595,6 +595,99 @@ describe('ELLIPTIC INTEGRALS (parameter convention m = k²)', () => {
   });
 });
 
+//
+// ---------------- Incomplete elliptic integrals (Carlson kernels) ----------------
+// Reference values from mpmath 1.4 (ellipf/ellipe/ellippi, which share the
+// Mathematica argument conventions: amplitude first, parameter m = k² last).
+//
+
+describe('INCOMPLETE ELLIPTIC INTEGRALS', () => {
+  test('F(0|m) = 0 exactly', () => {
+    expect(ce.expr(['EllipticF', 0, 0.7]).evaluate().re).toBe(0);
+  });
+
+  test('F(0.5|0.3) ≈ 0.5061402119623553', () => {
+    expectApprox(ce.expr(['EllipticF', 0.5, 0.3]), 0.5061402119623553, 1e-13);
+  });
+
+  test('F(π/2|m) = K(m)', () => {
+    const F = ce.expr(['EllipticF', ['Divide', 'Pi', 2], 0.6]).N().re;
+    const K = ce.expr(['EllipticK', 0.6]).N().re;
+    expect(Math.abs(F - K)).toBeLessThan(1e-13);
+  });
+
+  test('F(0.7|35/33) ≈ 0.7705379731043967 (parameter > 1)', () => {
+    expectApprox(
+      ce.expr(['EllipticF', 0.7, ['Rational', 35, 33]]),
+      0.7705379731043967,
+      1e-13
+    );
+  });
+
+  test('F(2.5|0.4) ≈ 2.8960580511047858 (quasi-periodic extension)', () => {
+    expectApprox(ce.expr(['EllipticF', 2.5, 0.4]), 2.8960580511047858, 1e-13);
+  });
+
+  test('F(−1.1|0.7) is odd in the amplitude', () => {
+    expectApprox(ce.expr(['EllipticF', -1.1, 0.7]), -1.2745510218519169, 1e-13);
+  });
+
+  test('F(1.2|1.5) is complex when m·sin²φ > 1', () => {
+    // mpmath: ellipf(1.2, 1.5) ≈ 1.6566381702 − 0.8479746002i
+    const r = ce.expr(['EllipticF', 1.2, 1.5]).N();
+    expect(Math.abs(r.re - 1.6566381702365942)).toBeLessThan(1e-12);
+    expect(Math.abs(r.im - -0.8479746001827331)).toBeLessThan(1e-12);
+  });
+
+  test('E(0|m) = 0 exactly (two-argument form)', () => {
+    expect(ce.expr(['EllipticE', 0, 0.7]).evaluate().re).toBe(0);
+  });
+
+  test('E(1.2|0.9) ≈ 0.9670376602886750 (incomplete, 2-arg)', () => {
+    expectApprox(ce.expr(['EllipticE', 1.2, 0.9]), 0.967037660288675, 1e-13);
+  });
+
+  test('E(π/2|m) = E(m) (incomplete at π/2 is the complete integral)', () => {
+    const Einc = ce.expr(['EllipticE', ['Divide', 'Pi', 2], 0.6]).N().re;
+    const E = ce.expr(['EllipticE', 0.6]).N().re;
+    expect(Math.abs(Einc - E)).toBeLessThan(1e-13);
+  });
+
+  test('E(0.9|−23/39) ≈ 0.9578110789725323 (negative parameter)', () => {
+    expectApprox(
+      ce.expr(['EllipticE', 0.9, ['Rational', -23, 39]]),
+      0.9578110789725323,
+      1e-13
+    );
+  });
+
+  test('Π(0.3; 0.5|0.2) ≈ 0.5166436894954441 (incomplete, 3-arg)', () => {
+    expectApprox(
+      ce.expr(['EllipticPi', 0.3, 0.5, 0.2]),
+      0.5166436894954441,
+      1e-13
+    );
+  });
+
+  test('Π(0.5; 2.2|0.3) ≈ 3.7827124221245074 (quasi-periodic extension)', () => {
+    expectApprox(
+      ce.expr(['EllipticPi', 0.5, 2.2, 0.3]),
+      3.7827124221245074,
+      1e-12
+    );
+  });
+
+  test('Π(0.3|0.2) ≈ 1.9935011581986862 (complete, 2-arg)', () => {
+    expectApprox(ce.expr(['EllipticPi', 0.3, 0.2]), 1.9935011581986862, 1e-13);
+  });
+
+  test('Π(0; φ|m) = F(φ|m) (zero characteristic)', () => {
+    const P = ce.expr(['EllipticPi', 0, 0.8, 0.4]).N().re;
+    const F = ce.expr(['EllipticF', 0.8, 0.4]).N().re;
+    expect(Math.abs(P - F)).toBeLessThan(1e-13);
+  });
+});
+
 describe('GAUSS HYPERGEOMETRIC ₂F₁', () => {
   test('₂F₁(a,b;c;0) = 1 exactly', () => {
     expect(ce.expr(['Hypergeometric2F1', 0.3, 1.7, 2.1, 0]).evaluate().re).toBe(

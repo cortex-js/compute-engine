@@ -72,6 +72,7 @@ export function gammaln(c: Complex): Complex {
 
 const C_NAN = new Complex(NaN, NaN);
 const C_ONE = new Complex(1, 0);
+const C_ZERO = new Complex(0, 0);
 
 //
 // ---------------- Arithmetic-geometric mean (complex) ----------------
@@ -103,7 +104,9 @@ export function agmComplex(a: Complex, b: Complex): Complex {
 export function ellipticKComplex(m: Complex): Complex {
   if (m.isNaN()) return C_NAN;
   if (m.equals(C_ONE)) return new Complex(Infinity, 0);
-  return new Complex(Math.PI / 2, 0).div(agmComplex(C_ONE, C_ONE.sub(m).sqrt()));
+  return new Complex(Math.PI / 2, 0).div(
+    agmComplex(C_ONE, C_ONE.sub(m).sqrt())
+  );
 }
 
 /**
@@ -130,6 +133,284 @@ export function ellipticEComplex(m: Complex): Complex {
   }
   const K = new Complex(Math.PI / 2, 0).div(a);
   return K.mul(C_ONE.sub(sum));
+}
+
+//
+// ---------------- Carlson symmetric elliptic integrals (complex) ----------------
+//
+// Duplication-theorem algorithms (Carlson 1995, same series tails as the
+// machine-real kernels in numerics/special-functions.ts and as mpmath).
+// With principal-branch square roots the duplication theorem is valid for
+// arguments in the cut plane C ∖ (−∞, 0); arguments ON the negative real
+// axis are evaluated as their boundary value from above (Im → 0⁺), which
+// matches the mpmath/Mathematica convention for the incomplete elliptic
+// integrals built on them.
+//
+
+const CARLSON_TOL_C = 1e-24;
+
+/** Carlson R_C(x, y), complex, principal value for y on (−∞, 0). */
+export function carlsonRCComplex(x: Complex, y: Complex): Complex {
+  if (x.isNaN() || y.isNaN()) return C_NAN;
+  if (y.isZero()) return new Complex(Infinity, 0);
+  if (x.isZero()) return new Complex(Math.PI / 2, 0).div(y.sqrt());
+  // Cauchy principal value for real y < 0 (DLMF 19.2.20)
+  if (y.im === 0 && y.re < 0)
+    return x
+      .div(x.sub(y))
+      .sqrt()
+      .mul(carlsonRCComplex(x.sub(y), y.neg()));
+  if (x.equals(y)) return x.sqrt().inverse();
+  // Near-degenerate y ≈ x: series Σₖ (−e)ᵏ/(2k+1) (same conditioning
+  // issue as the real kernel: acos at arguments → 1)
+  const e = y.sub(x).div(x);
+  if (e.abs() < 0.01) {
+    let sum = C_ZERO;
+    let term = C_ONE;
+    for (let k = 0; k < 10; k++) {
+      sum = sum.add(term.div(2 * k + 1));
+      term = term.mul(e).neg();
+    }
+    return sum.div(x.sqrt());
+  }
+  // v = acos(√x/√y) / (√(1 − x/y)·√y)
+  const sx = x.sqrt();
+  const sy = y.sqrt();
+  return sx
+    .div(sy)
+    .acos()
+    .div(C_ONE.sub(x.div(y)).sqrt().mul(sy));
+}
+
+/** Carlson R_F(x, y, z), complex (cut plane). */
+export function carlsonRFComplex(x: Complex, y: Complex, z: Complex): Complex {
+  if (x.isNaN() || y.isNaN() || z.isNaN()) return C_NAN;
+  if (y.equals(z)) return carlsonRCComplex(x, y);
+  if (x.equals(z)) return carlsonRCComplex(y, x);
+  if (x.equals(y)) return carlsonRCComplex(z, x);
+  if ((x.isZero() ? 1 : 0) + (y.isZero() ? 1 : 0) + (z.isZero() ? 1 : 0) > 1)
+    return new Complex(Infinity, 0);
+
+  const A0 = x.add(y).add(z).div(3);
+  const Q =
+    Math.pow(3 * CARLSON_TOL_C, -1 / 6) *
+    Math.max(A0.sub(x).abs(), A0.sub(y).abs(), A0.sub(z).abs());
+  let xm = x;
+  let ym = y;
+  let zm = z;
+  let A = A0;
+  let pow4 = 1;
+  for (let i = 0; i < 64 && pow4 * Q >= A.abs(); i++) {
+    const sx = xm.sqrt();
+    const sy = ym.sqrt();
+    const sz = zm.sqrt();
+    const lm = sx.mul(sy).add(sx.mul(sz)).add(sy.mul(sz));
+    A = A.add(lm).div(4);
+    xm = xm.add(lm).div(4);
+    ym = ym.add(lm).div(4);
+    zm = zm.add(lm).div(4);
+    pow4 /= 4;
+  }
+  const t = A.inverse().mul(pow4);
+  const X = A0.sub(x).mul(t);
+  const Y = A0.sub(y).mul(t);
+  const Z = X.add(Y).neg();
+  const E2 = X.mul(Y).sub(Z.mul(Z));
+  const E3 = X.mul(Y).mul(Z);
+  // (9240 − 924·E2 + 385·E2² + 660·E3 − 630·E2·E3)/9240 / √A
+  const series = new Complex(9240, 0)
+    .sub(E2.mul(924))
+    .add(E2.mul(E2).mul(385))
+    .add(E3.mul(660))
+    .sub(E2.mul(E3).mul(630))
+    .div(9240);
+  return series.div(A.sqrt());
+}
+
+/**
+ * Carlson R_J(x, y, z, p), complex, via the duplication theorem. Only the
+ * argument configurations for which the duplication theorem is known to be
+ * valid are evaluated (mpmath's criterion): Re x, Re y, Re z ≥ 0 with
+ * Re p > 0; or p equal to one of x, y, z; or one argument nonnegative real
+ * with the other two complex conjugates and p not on (−∞, 0]. Other
+ * configurations return NaN (mpmath falls back to contour integration
+ * there; we do not).
+ */
+export function carlsonRJComplex(
+  x: Complex,
+  y: Complex,
+  z: Complex,
+  p: Complex
+): Complex {
+  if (x.isNaN() || y.isNaN() || z.isNaN() || p.isNaN()) return C_NAN;
+  if (p.isZero()) return new Complex(Infinity, 0);
+  if ((x.isZero() ? 1 : 0) + (y.isZero() ? 1 : 0) + (z.isZero() ? 1 : 0) > 1)
+    return new Complex(Infinity, 0);
+
+  let ok = x.re >= 0 && y.re >= 0 && z.re >= 0 && p.re > 0;
+  if (!ok && (x.equals(p) || y.equals(p) || z.equals(p))) ok = true;
+  if (!ok && (p.im !== 0 || p.re >= 0)) {
+    const conj = (a: Complex, b: Complex): boolean =>
+      a.re === b.re && a.im === -b.im;
+    if (x.im === 0 && x.re >= 0 && conj(y, z)) ok = true;
+    else if (y.im === 0 && y.re >= 0 && conj(x, z)) ok = true;
+    else if (z.im === 0 && z.re >= 0 && conj(x, y)) ok = true;
+  }
+  if (!ok) return C_NAN;
+
+  const A0 = x.add(y).add(z).add(p.mul(2)).div(5);
+  const delta = p.sub(x).mul(p.sub(y)).mul(p.sub(z));
+  const Q =
+    Math.pow(0.25 * CARLSON_TOL_C, -1 / 6) *
+    Math.max(
+      A0.sub(x).abs(),
+      A0.sub(y).abs(),
+      A0.sub(z).abs(),
+      A0.sub(p).abs()
+    );
+  let xm = x;
+  let ym = y;
+  let zm = z;
+  let pm = p;
+  let A = A0;
+  let pow4 = 1;
+  let S = C_ZERO;
+  for (let i = 0; i < 64; i++) {
+    const sx = xm.sqrt();
+    const sy = ym.sqrt();
+    const sz = zm.sqrt();
+    const sp = pm.sqrt();
+    const lm = sx.mul(sy).add(sx.mul(sz)).add(sy.mul(sz));
+    const A1 = A.add(lm).div(4);
+    xm = xm.add(lm).div(4);
+    ym = ym.add(lm).div(4);
+    zm = zm.add(lm).div(4);
+    pm = pm.add(lm).div(4);
+    const dm = sp.add(sx).mul(sp.add(sy)).mul(sp.add(sz));
+    const em = delta.mul(pow4 * pow4 * pow4).div(dm.mul(dm));
+    if (pow4 * Q < A.abs()) break;
+    S = S.add(carlsonRCComplex(C_ONE, C_ONE.add(em)).mul(pow4).div(dm));
+    pow4 /= 4;
+    A = A1;
+  }
+  const t = A.inverse().mul(pow4);
+  const X = A0.sub(x).mul(t);
+  const Y = A0.sub(y).mul(t);
+  const Z = A0.sub(z).mul(t);
+  const P = X.add(Y).add(Z).div(-2);
+  const E2 = X.mul(Y).add(X.mul(Z)).add(Y.mul(Z)).sub(P.mul(P).mul(3));
+  const E3 = X.mul(Y).mul(Z).add(E2.mul(P).mul(2)).add(P.mul(P).mul(P).mul(4));
+  const E4 = X.mul(Y)
+    .mul(Z)
+    .mul(2)
+    .add(E2.mul(P))
+    .add(P.mul(P).mul(P).mul(3))
+    .mul(P);
+  const E5 = X.mul(Y).mul(Z).mul(P).mul(P);
+  const series = new Complex(24024, 0)
+    .sub(E2.mul(5148))
+    .add(E2.mul(E2).mul(2457))
+    .add(E3.mul(4004))
+    .sub(E2.mul(E3).mul(4158))
+    .sub(E4.mul(3276))
+    .add(E5.mul(2772))
+    .div(24024);
+  return series.mul(pow4).div(A.pow(1.5)).add(S.mul(6));
+}
+
+/** Carlson R_D(x, y, z) = R_J(x, y, z, z), complex. */
+export function carlsonRDComplex(x: Complex, y: Complex, z: Complex): Complex {
+  return carlsonRJComplex(x, y, z, z);
+}
+
+//
+// ---------------- Incomplete elliptic integrals (complex) ----------------
+//
+// Same Legendre/parameter conventions as the machine-real kernels
+// (numerics/special-functions.ts): the last argument is the PARAMETER
+// m = k². Reductions: DLMF 19.25.5 / 19.25.9 / 19.25.14, with the
+// quasi-periodic extension for |Re φ| > π/2.
+//
+
+/** Incomplete elliptic integral of the first kind F(φ|m), complex. */
+export function ellipticFComplex(phi: Complex, m: Complex): Complex {
+  if (phi.isNaN() || m.isNaN()) return C_NAN;
+  if (Math.abs(phi.re) > Math.PI / 2) {
+    // F(φ + kπ|m) = F(φ|m) + 2k·K(m)
+    const k = Math.round(phi.re / Math.PI);
+    const K = ellipticKComplex(m);
+    if (K.isNaN() || !Number.isFinite(K.re)) return C_NAN;
+    return K.mul(2 * k).add(ellipticFComplex(phi.sub(k * Math.PI), m));
+  }
+  const s = phi.sin();
+  const c = phi.cos();
+  const y = C_ONE.sub(m.mul(s).mul(s));
+  return s.mul(carlsonRFComplex(c.mul(c), y, C_ONE));
+}
+
+/** Incomplete elliptic integral of the second kind E(φ|m), complex. */
+export function ellipticEIncompleteComplex(phi: Complex, m: Complex): Complex {
+  if (phi.isNaN() || m.isNaN()) return C_NAN;
+  if (Math.abs(phi.re) > Math.PI / 2) {
+    // E(φ + kπ|m) = E(φ|m) + 2k·E(m)
+    const k = Math.round(phi.re / Math.PI);
+    const E = ellipticEComplex(m);
+    if (E.isNaN() || !Number.isFinite(E.re)) return C_NAN;
+    return E.mul(2 * k).add(
+      ellipticEIncompleteComplex(phi.sub(k * Math.PI), m)
+    );
+  }
+  const s = phi.sin();
+  const c = phi.cos();
+  const cc = c.mul(c);
+  const y = C_ONE.sub(m.mul(s).mul(s));
+  return s.mul(carlsonRFComplex(cc, y, C_ONE)).sub(
+    m
+      .div(3)
+      .mul(s.pow(3))
+      .mul(carlsonRDComplex(cc, y, C_ONE))
+  );
+}
+
+/** Complete elliptic integral of the third kind Π(n|m), complex. */
+export function ellipticPiCompleteComplex(n: Complex, m: Complex): Complex {
+  if (n.isNaN() || m.isNaN()) return C_NAN;
+  if (n.equals(C_ONE) || m.equals(C_ONE)) return new Complex(Infinity, 0);
+  // Π(n|m) = R_F(0, 1−m, 1) + (n/3)·R_J(0, 1−m, 1, 1−n)
+  return carlsonRFComplex(C_ZERO, C_ONE.sub(m), C_ONE).add(
+    n.div(3).mul(carlsonRJComplex(C_ZERO, C_ONE.sub(m), C_ONE, C_ONE.sub(n)))
+  );
+}
+
+/** Incomplete elliptic integral of the third kind Π(n; φ|m), complex. */
+export function ellipticPiIncompleteComplex(
+  n: Complex,
+  phi: Complex,
+  m: Complex
+): Complex {
+  if (n.isNaN() || phi.isNaN() || m.isNaN()) return C_NAN;
+  if (Math.abs(phi.re) > Math.PI / 2) {
+    // Π(n; φ + kπ|m) = Π(n; φ|m) + 2k·Π(n|m)
+    const k = Math.round(phi.re / Math.PI);
+    const P = ellipticPiCompleteComplex(n, m);
+    if (P.isNaN() || !Number.isFinite(P.re)) return C_NAN;
+    return P.mul(2 * k).add(
+      ellipticPiIncompleteComplex(n, phi.sub(k * Math.PI), m)
+    );
+  }
+  const s = phi.sin();
+  const c = phi.cos();
+  const cc = c.mul(c);
+  const ss = s.mul(s);
+  const y = C_ONE.sub(m.mul(ss));
+  const p = C_ONE.sub(n.mul(ss));
+  if (p.isZero()) return new Complex(Infinity, 0);
+  return s.mul(carlsonRFComplex(cc, y, C_ONE)).add(
+    n
+      .div(3)
+      .mul(s.pow(3))
+      .mul(carlsonRJComplex(cc, y, C_ONE, p))
+  );
 }
 
 //
@@ -261,7 +542,13 @@ export function hypergeometric2F1Complex(
   // The six Kummer maps, by transformed argument. `degenerate` marks maps
   // whose connection formula breaks down for the current parameters.
   const candidates: {
-    kind: 'direct' | 'pfaff' | 'one-minus-z' | 'inv-z' | 'inv-one-minus-z' | 'one-minus-inv-z';
+    kind:
+      | 'direct'
+      | 'pfaff'
+      | 'one-minus-z'
+      | 'inv-z'
+      | 'inv-one-minus-z'
+      | 'one-minus-inv-z';
     w: Complex;
     degenerate: boolean;
   }[] = [
@@ -269,8 +556,16 @@ export function hypergeometric2F1Complex(
     { kind: 'pfaff', w: z.div(z.sub(1)), degenerate: false },
     { kind: 'one-minus-z', w: one.sub(z), degenerate: sIsDegenerate },
     { kind: 'inv-z', w: one.div(z), degenerate: dIsDegenerate },
-    { kind: 'inv-one-minus-z', w: one.div(one.sub(z)), degenerate: dIsDegenerate },
-    { kind: 'one-minus-inv-z', w: one.sub(one.div(z)), degenerate: sIsDegenerate },
+    {
+      kind: 'inv-one-minus-z',
+      w: one.div(one.sub(z)),
+      degenerate: dIsDegenerate,
+    },
+    {
+      kind: 'one-minus-inv-z',
+      w: one.sub(one.div(z)),
+      degenerate: sIsDegenerate,
+    },
   ];
   candidates.sort((p, q) => p.w.abs() - q.w.abs());
 
@@ -402,7 +697,10 @@ function kummer1F1SeriesC(
   let term: Complex = C_ONE;
   let sum: Complex = C_ONE;
   for (let n = 0; n < maxTerms; n++) {
-    term = term.mul(a.add(n)).mul(z).div(b.add(n).mul(n + 1));
+    term = term
+      .mul(a.add(n))
+      .mul(z)
+      .div(b.add(n).mul(n + 1));
     if (term.isZero()) return sum;
     sum = sum.add(term);
     if (n > 2 && term.abs() <= Number.EPSILON * sum.abs()) return sum;
@@ -530,8 +828,7 @@ export function jacobiTheta(
       if (j === 1 && n % 2 === 1) term = term.neg();
       sum = sum.add(term);
       const env = Math.exp(
-        -Math.PI * imTau * (n + 0.5) * (n + 0.5) +
-          (2 * n + 1) * Math.PI * imZ
+        -Math.PI * imTau * (n + 0.5) * (n + 0.5) + (2 * n + 1) * Math.PI * imZ
       );
       if (n > 1 && env <= 1e-18 * (1 + sum.abs())) break;
       if (n === maxTerms - 1) return C_NAN; // did not converge

@@ -8,6 +8,10 @@ import {
   ellipticE,
   bigEllipticK,
   bigEllipticE,
+  ellipticF,
+  ellipticEIncomplete,
+  ellipticPiComplete,
+  ellipticPiIncomplete,
   hypergeometric2F1,
   hypergeometric1F1,
   bigHypergeometric2F1,
@@ -19,6 +23,10 @@ import {
 import {
   ellipticKComplex,
   ellipticEComplex,
+  ellipticFComplex,
+  ellipticEIncompleteComplex,
+  ellipticPiCompleteComplex,
+  ellipticPiIncompleteComplex,
   hypergeometric2F1Complex,
   hypergeometric1F1Complex,
   appellF1Complex,
@@ -69,13 +77,30 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
 
     EllipticE: {
       description:
-        'Complete elliptic integral of the second kind E(m), parameter convention m = k².',
+        'Elliptic integral of the second kind: complete E(m) with one ' +
+        'argument, incomplete E(φ|m) with two (amplitude first, parameter ' +
+        'convention m = k², as in Mathematica).',
       wikidata: 'Q1375529',
       complexity: 8600,
       broadcastable: true,
-      signature: '(number) -> number',
+      signature: '(number, number?) -> number',
       type: (ops) => numericTypeHandler(ops),
-      evaluate: ([m], { numericApproximation, engine }) => {
+      evaluate: (ops, { numericApproximation, engine }) => {
+        if (ops.length === 2) {
+          // Incomplete E(φ|m): E(0|m) = 0 exactly
+          const [phi, m] = ops;
+          if (isNumber(phi) && phi.im === 0 && phi.isSame(0))
+            return engine.Zero;
+          return numericApproximation
+            ? applyN(
+                [phi, m],
+                ellipticEIncomplete,
+                undefined,
+                ellipticEIncompleteComplex
+              )
+            : undefined;
+        }
+        const m = ops[0];
         // E(1) = 1 exactly
         if (isNumber(m) && m.im === 0 && m.isSame(1)) return engine.One;
         return numericApproximation
@@ -84,6 +109,61 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
               ellipticE,
               (m) => bigEllipticE(engine, m),
               ellipticEComplex
+            )
+          : undefined;
+      },
+    },
+
+    EllipticF: {
+      description:
+        'Incomplete elliptic integral of the first kind F(φ|m) (amplitude ' +
+        'first, parameter convention m = k², as in Mathematica). ' +
+        'F(π/2|m) = K(m).',
+      wikidata: 'Q1062952',
+      complexity: 8600,
+      broadcastable: true,
+      signature: '(number, number) -> number',
+      type: (ops) => numericTypeHandler(ops),
+      evaluate: ([phi, m], { numericApproximation, engine }) => {
+        // F(0|m) = 0 exactly
+        if (isNumber(phi) && phi.im === 0 && phi.isSame(0)) return engine.Zero;
+        return numericApproximation
+          ? applyN([phi, m], ellipticF, undefined, ellipticFComplex)
+          : undefined;
+      },
+    },
+
+    EllipticPi: {
+      description:
+        'Elliptic integral of the third kind: complete Π(n|m) with two ' +
+        'arguments, incomplete Π(n; φ|m) with three (characteristic first, ' +
+        'amplitude second, parameter convention m = k², as in Mathematica).',
+      wikidata: 'Q1123360',
+      complexity: 8600,
+      broadcastable: true,
+      signature: '(number, number, number?) -> number',
+      type: (ops) => numericTypeHandler(ops),
+      evaluate: (ops, { numericApproximation, engine }) => {
+        if (ops.length === 3) {
+          const [n, phi, m] = ops;
+          // Π(n; 0|m) = 0 exactly
+          if (isNumber(phi) && phi.im === 0 && phi.isSame(0))
+            return engine.Zero;
+          return numericApproximation
+            ? applyN(
+                [n, phi, m],
+                ellipticPiIncomplete,
+                undefined,
+                ellipticPiIncompleteComplex
+              )
+            : undefined;
+        }
+        return numericApproximation
+          ? applyN(
+              ops,
+              ellipticPiComplete,
+              undefined,
+              ellipticPiCompleteComplex
             )
           : undefined;
       },
@@ -188,7 +268,12 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         if (ops[3] !== undefined && !ops[3].isSame(0)) return undefined;
         return applyN(
           [ops[1], ops[2]],
-          (z, tau) => jacobiTheta(j as 1 | 2 | 3 | 4, ops[1].engine.complex(z, 0), ops[1].engine.complex(tau, 0)),
+          (z, tau) =>
+            jacobiTheta(
+              j as 1 | 2 | 3 | 4,
+              ops[1].engine.complex(z, 0),
+              ops[1].engine.complex(tau, 0)
+            ),
           undefined,
           (z, tau) => jacobiTheta(j as 1 | 2 | 3 | 4, z, tau)
         );

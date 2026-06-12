@@ -576,6 +576,14 @@ function posAux(u: Expression): boolean {
   }
   if (u.operator === 'Multiply' && u.ops)
     return u.ops.reduce((sign, op) => (posAux(op) ? sign : !sign), true);
+  // Quotients follow the same sign algebra as products. Without this case
+  // −1/b (canonical ["Divide", -1, "b"]) fell through to the default
+  // `true`, so PosQ[a/b] mis-routed ∫1/(a+b·x²) to the ArcTan rule where
+  // the ArcTanh rule applies — a SIGN-FLIPPED antiderivative (3 of the 4
+  // "solved-wrong" results in the 1.1.1 sample).
+  if (u.operator === 'Divide' && u.ops)
+    return posAux(u.ops[0]) === posAux(u.ops[1]);
+  if (u.operator === 'Negate' && u.ops) return !posAux(u.ops[0]);
   if (u.operator === 'Add' && u.ops) return posAux(u.ops[0]);
   return true;
 }

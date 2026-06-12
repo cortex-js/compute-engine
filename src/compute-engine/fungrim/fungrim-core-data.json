@@ -84,7 +84,6 @@
 "Divisors": {"signature":"(integer) -> set<integer>","description":null,"arity":1},
 "EisensteinE": {"signature":"(integer, complex) -> complex","description":"Normalized Eisenstein series","arity":2},
 "EisensteinG": {"signature":"(integer, complex) -> complex","description":"Eisenstein series","arity":2},
-"EllipticPi": {"signature":"(complex, complex) -> complex","description":"Legendre complete elliptic integral of the third kind","arity":2},
 "EllipticRootE": {"signature":"(integer, complex) -> complex","description":null,"arity":2},
 "Erfi": {"signature":"(complex) -> complex","description":"Imaginary error function","arity":1},
 "EulerQSeries": {"signature":"(complex) -> complex","description":"Euler's q-series","arity":1},
