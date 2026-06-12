@@ -13,10 +13,13 @@ import {
   isFunction,
   expr,
   expand,
+  factor,
 } from '../src/compute-engine';
 
 const ce = new ComputeEngine();
 const engine = ce;
+
+console.info(factor('x^2 + 5x + 6').latex);
 
 console.log(parse('\\lim_{x\\to 0}\\left(x\\right)^x').toMathJson());
 

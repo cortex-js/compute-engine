@@ -106,11 +106,29 @@ function setify(signature: string): string {
 }
 
 /**
+ * Names from the declarations table that are NOT engine built-ins — the
+ * true shells. The table is generated when the translator runs; heads
+ * promoted to engine built-ins since then (e.g. the Tier-2 special-function
+ * kernels: EllipticK/E, AGM, Hypergeometric2F1/1F1, JacobiTheta,
+ * DedekindEta) must not be re-declared, or the signature-only shell would
+ * shadow the built-in and hide its numeric evaluator.
+ */
+export function shellOnlyNames(declarations: Declarations): Set<string> {
+  const probe = new ComputeEngine();
+  const out = new Set<string>();
+  for (const name of Object.keys(declarations.declarations))
+    if (probe.lookupDefinition(name) === undefined) out.add(name);
+  return out;
+}
+
+/**
  * Create a ComputeEngine with every shell declared in a dedicated child
  * scope. With `compat` (default true, used by Stage 1), the
  * COMPAT_OVERRIDES widenings are applied; Stage 2 passes `compat: false`
- * to keep the built-ins' numeric evaluators. Entry-specific variable
- * declarations go in a further nested scope (see `withEntryScope`).
+ * to keep the built-ins' numeric evaluators. Names already defined by the
+ * engine are never shadowed (except the deliberate compat widenings).
+ * Entry-specific variable declarations go in a further nested scope (see
+ * `withEntryScope`).
  */
 export function createEngine(
   declarations: Declarations,
@@ -118,13 +136,15 @@ export function createEngine(
 ): ComputeEngine {
   const compat = options?.compat ?? true;
   const ce = new ComputeEngine();
+  const shells = shellOnlyNames(declarations);
   ce.pushScope(undefined, 'fungrim-shells');
   for (const [name, rec] of Object.entries(declarations.declarations)) {
-    const sig =
-      compat && COMPAT_OVERRIDES[name]
-        ? COMPAT_OVERRIDES[name]
-        : setify(rec.signature);
-    ce.declare(name, sig);
+    if (compat && COMPAT_OVERRIDES[name]) {
+      ce.declare(name, COMPAT_OVERRIDES[name]);
+      continue;
+    }
+    if (!shells.has(name)) continue; // built-in: never widen or shadow
+    ce.declare(name, setify(rec.signature));
   }
   if (compat)
     for (const [name, sig] of Object.entries(COMPAT_OVERRIDES))

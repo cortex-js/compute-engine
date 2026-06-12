@@ -17,6 +17,13 @@
 // widenings shadow built-in numeric evaluators, which would turn evaluable
 // entries into not-evaluable ones. Entries that need the widenings simply
 // come out `not-evaluable` here.
+//
+// Evaluation is interruptible (ROADMAP item 2): each N()/evaluate() is
+// bounded by ce.timeLimit and throws CancellationError when exceeded, so
+// representation entries (series/integral/product/limit) and
+// Derivative-containing formulas run like any others. The former external
+// stall watchdog, FUNGRIM_SKIP_IDS denylist, and structural skips for those
+// classes have been retired.
 
 import type { ComputeEngine } from '../../src/compute-engine';
 import type { BoxedExpression } from '../../src/compute-engine/global-types';
@@ -30,6 +37,7 @@ import {
   Entry,
   Corpus,
   createEngine,
+  shellOnlyNames,
   withEntryScope,
   variableDomains,
 } from './load';
@@ -42,6 +50,12 @@ const PRECISION = 30;
 const MAX_INSTANCES = 5;
 const MAX_CANDIDATES = 24;
 const ENTRY_BUDGET_MS = 5000;
+// Per-evaluation deadline (ce.timeLimit). Evaluation is interruptible
+// (ROADMAP item 2): a slow N() throws CancellationError, recorded as
+// not-evaluable, instead of stalling the harness. This replaced the
+// external stall watchdog, the FUNGRIM_SKIP_IDS hang denylist, and the
+// structural representation/derivative skips.
+const EVAL_TIME_LIMIT_MS = 1000;
 
 export type Instance = {
   assignment: Assignment;
@@ -56,14 +70,7 @@ export type EntryNumericResult = {
   class: string;
   guardLevel: string;
   /** entry-level shortcut reasons (no instances were attempted) */
-  skipped?:
-    | 'shell-head'
-    | 'directed-infinity'
-    | 'box-error'
-    | 'timeout'
-    | 'hang-denylist'
-    | 'representation'
-    | 'derivative';
+  skipped?: 'shell-head' | 'directed-infinity' | 'box-error' | 'timeout';
   instances: Instance[];
   elapsedMs: number;
 };
@@ -312,13 +319,16 @@ export function runStage2(
 ): Stage2Report {
   const t0 = Date.now();
   const slice = ['none', 'real-simple'];
-  const shellNames = new Set(Object.keys(corpus.declarations.declarations));
+  // Only true shells (no engine definition) are not-evaluable by
+  // construction; heads with built-in kernels are checked numerically.
+  const shellNames = shellOnlyNames(corpus.declarations);
   const entries = corpus.entries.filter(
     (e) => slice.includes(e.guardLevel) && filter(e)
   );
 
   const ce = createEngine(corpus.declarations, { compat: false });
   ce.precision = PRECISION;
+  ce.timeLimit = EVAL_TIME_LIMIT_MS;
 
   const report: Stage2Report = {
     seed,
@@ -333,58 +343,12 @@ export function runStage2(
     elapsedMs: 0,
   };
 
-  // Entries whose N() never returns (e.g. non-interruptible number-theory
-  // loops — REVIEW.md) cannot be timed out in-process; they are identified
-  // by the external stall watchdog and excluded via FUNGRIM_SKIP_IDS.
-  const denylist = new Set(
-    (process.env.FUNGRIM_SKIP_IDS ?? '')
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean)
-  );
   const trace = !!process.env.FUNGRIM_TRACE;
 
   let done = 0;
   for (const e of entries) {
     if (trace) console.error(`entry: ${e.id} (${e.topic})`);
     let r: EntryNumericResult;
-    // Representations (series/integral/product/limit) require numeric
-    // quadrature / limit extraction / infinite summation — hang-prone with
-    // CE's non-interruptible evaluation (REVIEW.md). Excluded from Stage 2
-    // until evaluation is interruptible; re-enable per-subclass then.
-    if (e.class === 'representation') {
-      report.entriesSkipped['representation'] =
-        (report.entriesSkipped['representation'] ?? 0) + 1;
-      done++;
-      if (onProgress && done % 100 === 0) onProgress(done, entries.length);
-      continue;
-    }
-    // Symbolic/n-th derivative evaluation hangs or overflows (REVIEW.md G8,
-    // e.g. entry 8e8a59: r-th derivative of LambertW). Skip any
-    // Derivative-containing formula until G8 is fixed.
-    if (JSON.stringify(e.formula).includes('"Derivative"')) {
-      report.entriesSkipped['derivative'] =
-        (report.entriesSkipped['derivative'] ?? 0) + 1;
-      done++;
-      if (onProgress && done % 100 === 0) onProgress(done, entries.length);
-      continue;
-    }
-    if (denylist.has(e.id)) {
-      r = {
-        id: e.id,
-        topic: e.topic,
-        class: e.class,
-        guardLevel: e.guardLevel,
-        skipped: 'hang-denylist',
-        instances: [],
-        elapsedMs: 0,
-      };
-      report.entriesSkipped['hang-denylist'] =
-        (report.entriesSkipped['hang-denylist'] ?? 0) + 1;
-      done++;
-      if (onProgress && done % 100 === 0) onProgress(done, entries.length);
-      continue;
-    }
     try {
       r = numericCheckEntry(ce, e, shellNames, seed);
     } catch (err: any) {

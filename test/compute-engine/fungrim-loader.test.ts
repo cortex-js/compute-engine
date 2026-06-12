@@ -118,31 +118,18 @@ describe('loadIdentities (full artifact)', () => {
   it('declares shell heads in the current scope', () => {
     expect(report.declared).toContain('CarlsonRF');
     // The artifact declarations table is pruned of CE built-ins at compile
-    // time (Gamma, Digamma, LambertW, …). Heads promoted to built-ins
-    // AFTER the artifact was compiled (the Tier-2 kernels: JacobiTheta,
-    // DedekindEta, EllipticK/E, AGM, Hypergeometric2F1/1F1) are skipped at
-    // load time instead ("never widen"), until the next artifact regen
-    // re-prunes the table.
-    const TIER2_BUILTINS = [
-      'AGM',
-      'DedekindEta',
-      'EllipticE',
-      'EllipticK',
-      'Hypergeometric1F1',
-      'Hypergeometric2F1',
-      'JacobiTheta',
-    ];
-    for (const name of TIER2_BUILTINS) {
-      expect(report.declared).not.toContain(name);
-      expect(ce.lookupDefinition(name)).toBeDefined();
-    }
+    // time, against a live engine (Gamma, Digamma, LambertW, … and the
+    // Tier-2 kernel heads: JacobiTheta, DedekindEta, EllipticK/E, AGM,
+    // Hypergeometric2F1/1F1); a full load declares exactly the pruned table
     expect(report.declared).not.toContain('Gamma');
+    expect(report.declared).not.toContain('JacobiTheta');
+    expect(report.declared).not.toContain('EllipticK');
     expect(report.declared).toEqual(
-      Object.keys(FUNGRIM_CORE.declarations)
-        .filter((n) => !TIER2_BUILTINS.includes(n))
-        .sort()
+      Object.keys(FUNGRIM_CORE.declarations).sort()
     );
+    // The Tier-2 heads are usable as built-ins, not shells
     expect(ce.lookupDefinition('JacobiTheta')).toBeDefined();
+    expect(ce.lookupDefinition('DedekindEta')).toBeDefined();
   });
 
   it('never overwrites an already-defined name (user symbols are not shadowed)', () => {

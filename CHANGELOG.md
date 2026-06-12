@@ -2,46 +2,69 @@
 
 ### Features
 
-- **Numeric evaluation of special functions**: `EllipticK(m)` and
-  `EllipticE(m)` (complete elliptic integrals, parameter convention m = k²,
-  computed via the arithmetic-geometric mean), `AGM(a, b)` (and the
-  shorthand `AGM(z)` = AGM(1, z)), the Gauss hypergeometric function
-  `Hypergeometric2F1(a, b, c, z)`, the Kummer confluent hypergeometric
-  function `Hypergeometric1F1(a, b, z)`, the Jacobi theta functions
-  `JacobiTheta(j, z, tau)` (j ∈ 1…4, nome q = e^{iπτ}), and the Dedekind
-  eta function `DedekindEta(tau)`. The elliptic integrals and
-  hypergeometric functions support machine, arbitrary-precision, and
-  complex evaluation (including K(m) for m > 1, which is complex); the
-  theta and eta functions evaluate for complex arguments with Im(τ) > 0.
-  Identities referencing these functions in the Identities Library are now
-  numerically verifiable.
+- **Numeric evaluation of special functions**: `EllipticK(m)` and `EllipticE(m)`
+  (complete elliptic integrals, parameter convention m = k², computed via the
+  arithmetic-geometric mean), `AGM(a, b)` (and the shorthand `AGM(z)` = AGM(1,
+  z)), the Gauss hypergeometric function `Hypergeometric2F1(a, b, c, z)`, the
+  Kummer confluent hypergeometric function `Hypergeometric1F1(a, b, z)`, the
+  Jacobi theta functions `JacobiTheta(j, z, tau)` (j ∈ 1…4, nome q = e^{iπτ}),
+  and the Dedekind eta function `DedekindEta(tau)`. The elliptic integrals and
+  hypergeometric functions support machine, arbitrary-precision, and complex
+  evaluation (including K(m) for m > 1, which is complex); the theta and eta
+  functions evaluate for complex arguments with Im(τ) > 0. Identities
+  referencing these functions in the Identities Library are now numerically
+  verifiable.
 
 ### Improvements
 
-- **Interruptible evaluation**: long-running operations now respect the
-  engine time limit (`ce.timeLimit`, default 2s) and throw a
-  `CancellationError` instead of hanging: collection enumeration (`Filter`,
-  `Select`, `CountIf`, `Position`, `GroupBy`, set operations, and iteration
-  over large or infinite collections), the number-theory functions
-  (`Totient`, `Sigma0`/`Sigma1`/`SigmaMinus1`, `IsPerfect`, `IsAbundant`,
-  `Eulerian`, `Stirling`, `NPartition`), and numeric `Limit`/`NLimit`
-  extraction. Numeric integration (`NIntegrate`, Monte Carlo) degrades
-  gracefully instead: when the time limit is reached it returns the
-  estimate computed from the samples taken so far, with a correspondingly
-  larger error bound.
+- **Interruptible evaluation**: long-running operations now respect the engine
+  time limit (`ce.timeLimit`, default 2s) and throw a `CancellationError`
+  instead of hanging: collection enumeration (`Filter`, `Select`, `CountIf`,
+  `Position`, `GroupBy`, set operations, and iteration over large or infinite
+  collections), the number-theory functions (`Totient`,
+  `Sigma0`/`Sigma1`/`SigmaMinus1`, `IsPerfect`, `IsAbundant`, `Eulerian`,
+  `Stirling`, `NPartition`), numeric `Limit`/`NLimit` extraction, and symbolic
+  differentiation (high-order derivatives can grow combinatorially in
+  expression size — e.g. the r-th derivative of `LambertW` — and now abort at
+  the time limit instead of exhausting memory). Numeric integration
+  (`NIntegrate`, Monte Carlo) degrades gracefully instead: when the
+  time limit is reached it returns the estimate computed from the samples taken
+  so far, with a correspondingly larger error bound. Nested numeric routines —
+  e.g. the inner integral of a double integral, reached through compiled code —
+  inherit the enclosing routine's deadline, so a nested `∫∫ 1/(1+x²y²) dx dy`
+  terminates at the time limit instead of running unbounded (previously ~10¹⁴
+  sample evaluations and an eventual out-of-memory crash).
+
+### Bug Fixes
+
+- **#309** The public `factor()` function was incorrectly factoring polynomials.
+  Now `factor(x^2 + 5x + 6)` correctly returns `(x + 2)(x + 3)` instead of
+  `x^2 + 5x + 6` (the previous behavior was a no-op).
+
+- **`2^i` no longer evaluates to `1`.** The exact-power canonicalization fold
+  read only the real part of the exponent, so any power with an exact base and a
+  pure-imaginary literal exponent folded to `base^re` (e.g.
+  `["Power", 2, ["Complex", 0, 1]]` → `2^0` → `1`). The fold now requires a real
+  integer exponent.
+
+- **`N()` on constants declared with `holdUntil: "never"` was a no-op.**
+  `BoxedSymbol.N()` misread `holdUntil: "never"` ("substitute as early as
+  possible") as "never substitute", so `ImaginaryUnit`, `e`, `i`, and the
+  infinity constants did not resolve under `N()` when the symbol survived
+  canonicalization. In particular, products like `0.25·i` and Euler-form
+  exponentials like `e^{iπ/12}` now evaluate numerically to complex literals.
 
 - **Identities Library: corpus updated with verified upstream corrections**
   (1,350 → 1,376 rules). Machine validation of the
   [Fungrim](https://fungrim.org) source uncovered two bug families upstream: a
-  misplaced parenthesis turning two formulas into products of a Boolean
-  (entries `6c2b31`, `e54e61`), and an `Element(w, tau)` typo repeated in 24
-  Jacobi theta entries (the intended assumption is `w ∈ ℂ`). Both were
-  reported and fixed upstream (PRs to `fredrik-johansson/fungrim`), each
-  correction verified numerically to 30 digits, and the fixes merged into the
-  corpus source fork ([`arnog/fungrim`](https://github.com/arnog/fungrim)).
-  The regenerated corpus recovers the two formulas as usable identities and
-  adds 24 theta identities whose corrected side conditions now compile as
-  guarded rules.
+  misplaced parenthesis turning two formulas into products of a Boolean (entries
+  `6c2b31`, `e54e61`), and an `Element(w, tau)` typo repeated in 24 Jacobi theta
+  entries (the intended assumption is `w ∈ ℂ`). Both were reported and fixed
+  upstream (PRs to `fredrik-johansson/fungrim`), each correction verified
+  numerically to 30 digits, and the fixes merged into the corpus source fork
+  ([`arnog/fungrim`](https://github.com/arnog/fungrim)). The regenerated corpus
+  recovers the two formulas as usable identities and adds 24 theta identities
+  whose corrected side conditions now compile as guarded rules.
 
 ## 0.59.0 _2026-06-10_
 

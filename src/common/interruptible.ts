@@ -34,6 +34,36 @@ export function checkDeadline(deadline: number | undefined): void {
 }
 
 /**
+ * Ambient deadline for nested numeric routines.
+ *
+ * Compiled functions (`_SYS.integrate`, `_SYS.limit`, …) have no access to
+ * the engine, so a deadline cannot be threaded through them explicitly. A
+ * deadline-bounded numeric routine (Monte Carlo quadrature, Richardson
+ * extrapolation) publishes its deadline here while it runs; a nested call
+ * reached through compiled code inherits it. Single-threaded execution
+ * makes the save/restore discipline safe.
+ */
+let ambientDeadline: number | undefined = undefined;
+
+export function getAmbientDeadline(): number | undefined {
+  return ambientDeadline;
+}
+
+/** Run `fn` with the ambient deadline set to `deadline`. */
+export function withAmbientDeadline<T>(
+  deadline: number | undefined,
+  fn: () => T
+): T {
+  const saved = ambientDeadline;
+  ambientDeadline = deadline;
+  try {
+    return fn();
+  } finally {
+    ambientDeadline = saved;
+  }
+}
+
+/**
  * Executes a generator asynchronously with timeout and abort signal support.
  *
  * @param gen - The generator to execute.

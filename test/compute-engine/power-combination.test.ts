@@ -180,3 +180,47 @@ describe('Power Combination (#176)', () => {
     );
   });
 });
+
+describe('Complex exponents (regression)', () => {
+  test('Power(2, i) does not fold to 1 at canonicalization', () => {
+    // Regression: the exact-power fold read only the real part of the
+    // exponent, so 2^i canonicalized as 2^0 = 1
+    const expr = engine.expr(['Power', 2, ['Complex', 0, 1]]);
+    expect(expr.toString()).toBe('2^i');
+    const v = expr.N();
+    // 2^i = cos(ln 2) + i·sin(ln 2)
+    expect(v.re).toBeCloseTo(0.7692389013639721, 14);
+    expect(v.im).toBeCloseTo(0.6389612763136348, 14);
+  });
+
+  test('Power with mixed complex exponent evaluates numerically', () => {
+    const v = engine.expr(['Power', 2, ['Complex', 1, 1]]).N();
+    expect(v.re).toBeCloseTo(1.5384778027279442, 14);
+    expect(v.im).toBeCloseTo(1.2779225526272695, 14);
+  });
+
+  test('integer exact-power folding still applies', () => {
+    expect(engine.expr(['Power', 2, 3]).toString()).toBe('8');
+    expect(engine.expr(['Power', ['Rational', 1, 2], 2]).toString()).toBe(
+      '1/4'
+    );
+  });
+
+  test('ImaginaryUnit.N() resolves to the imaginary literal', () => {
+    // Regression: holdUntil 'never' was misread as "never substitute" in
+    // BoxedSymbol.N(), leaving products like 0.25·i unfolded under N()
+    const i = engine.symbol('ImaginaryUnit');
+    expect(i.N().im).toBe(1);
+    const v = engine.expr(['Multiply', 0.25, 'ImaginaryUnit']).N();
+    expect(v.re).toBe(0);
+    expect(v.im).toBe(0.25);
+  });
+
+  test('e^{iπ/12} evaluates numerically (Euler form)', () => {
+    const v = engine
+      .expr(['Exp', ['Divide', ['Multiply', 'ImaginaryUnit', 'Pi'], 12]])
+      .N();
+    expect(v.re).toBeCloseTo(Math.cos(Math.PI / 12), 14);
+    expect(v.im).toBeCloseTo(Math.sin(Math.PI / 12), 14);
+  });
+});

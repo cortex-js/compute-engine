@@ -230,6 +230,67 @@ describe('TIMEOUT', () => {
     });
   });
 
+  describe('Symbolic differentiation', () => {
+    it('first derivative of LambertW completes within timeout', () => {
+      const r = ce
+        .expr([
+          'Apply',
+          ['Derivative', ['Function', ['LambertW', 'z'], 'z'], 1],
+          0.5,
+        ])
+        .evaluate()
+        .N();
+      // W'(x) = W(x)/(x(1+W(x))): at 0.5, ≈ 0.5204186421068739
+      expect(r.re).toBeCloseTo(0.5204186421068739, 8);
+    });
+
+    it('high-order derivative is bounded (width blow-up, REVIEW.md G8)', () => {
+      // The r-th symbolic derivative of LambertW grows combinatorially in
+      // width (Fungrim 8e8a59 wedged Stage-2 at 100% CPU toward OOM).
+      // It must either complete or throw CancellationError — within a
+      // bounded multiple of the time limit, never unbounded.
+      const start = Date.now();
+      try {
+        ce.expr([
+          'Apply',
+          ['Derivative', ['Function', ['LambertW', 'z'], 'z'], 9],
+          0,
+        ]).evaluate();
+      } catch (e) {
+        expect(e).toBeInstanceOf(CancellationError);
+      }
+      expect(Date.now() - start).toBeLessThan(5000);
+    });
+  });
+
+  describe('Nested numeric integration', () => {
+    it('double integral is bounded by the ambient deadline', () => {
+      // ∫₀¹∫₀¹ 1/(1+x²y²) dx dy (= Catalan) — the inner integral runs via
+      // compiled code with no engine access and previously sampled
+      // unbounded (10⁷ × 10⁷ evaluations → OOM). It now inherits the outer
+      // deadline. (Fungrim 5b31ee)
+      const start = Date.now();
+      try {
+        ce.expr([
+          'Integrate',
+          [
+            'Integrate',
+            [
+              'Divide',
+              1,
+              ['Add', 1, ['Multiply', ['Power', 'x', 2], ['Power', 'y', 2]]],
+            ],
+            ['Limits', 'x', 0, 1],
+          ],
+          ['Limits', 'y', 0, 1],
+        ]).N();
+      } catch (e) {
+        expect(e).toBeInstanceOf(CancellationError);
+      }
+      expect(Date.now() - start).toBeLessThan(5000);
+    });
+  });
+
   describe('deadline cleanup', () => {
     it('deadline is reset after timeout so subsequent evaluations work', () => {
       // First: trigger a timeout

@@ -544,4 +544,9 @@ describe('factor() free function (public API)', () => {
   test('leaves irreducible polynomials unchanged', () => {
     expect(factorFn('x^2 + x + 1').latex).toBe('x^2+x+1');
   });
+
+  test('negative leading coefficient extracts a negative content', () => {
+    expect(factorFn('-(2x + 4)').latex).toBe('-2(x+2)');
+    expect(factorFn('-2x^2 - 10x - 12').latex).toBe('-2(x+2)(x+3)');
+  });
 });

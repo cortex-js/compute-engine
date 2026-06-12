@@ -17,7 +17,11 @@
     series in `h`.
 */
 
-import { checkDeadline } from '../../common/interruptible';
+import {
+  checkDeadline,
+  getAmbientDeadline,
+  withAmbientDeadline,
+} from '../../common/interruptible';
 
 export interface ExtrapolateOptions {
   contract?: number; // contract the step size by this factor on each step
@@ -99,7 +103,9 @@ export function extrapolate(
     rtol = atol > 0 ? 0 : Math.sqrt(Number.EPSILON),
     maxeval = 1e6, // Number.MAX_SAFE_INTEGER
     breaktol = 2,
-    deadline,
+    // A call reached through compiled code (`_SYS.limit`) has no deadline
+    // of its own: inherit the ambient one (see interruptible.ts)
+    deadline = getAmbientDeadline(),
   } = options;
 
   if (!isFinite(x0)) {
@@ -115,39 +121,41 @@ export function extrapolate(
     });
   }
 
-  let h = step;
-  const invcontract = Math.pow(1 / contract, power);
-  let f0 = f(x0 + h);
-  const neville: number[] = [f0]; // The current diagonal of the Neville tableau
-  let err = Infinity;
-  let numeval = 1;
+  return withAmbientDeadline(deadline, () => {
+    let h = step;
+    const invcontract = Math.pow(1 / contract, power);
+    let f0 = f(x0 + h);
+    const neville: number[] = [f0]; // The current diagonal of the Neville tableau
+    let err = Infinity;
+    let numeval = 1;
 
-  while (numeval < maxeval) {
-    // Each iteration costs a function evaluation, which may itself be
-    // expensive: check the evaluation deadline between evaluations.
-    checkDeadline(deadline);
-    numeval += 1;
-    h *= contract;
-    neville.push(f(x0 + h));
-    let c = invcontract;
-    let minerr = Infinity;
+    while (numeval < maxeval) {
+      // Each iteration costs a function evaluation, which may itself be
+      // expensive: check the evaluation deadline between evaluations.
+      checkDeadline(deadline);
+      numeval += 1;
+      h *= contract;
+      neville.push(f(x0 + h));
+      let c = invcontract;
+      let minerr = Infinity;
 
-    for (let i = neville.length - 2; i >= 0; i--) {
-      const old = neville[i];
-      neville[i] = neville[i + 1] + (neville[i + 1] - neville[i]) / (c - 1);
-      const err_ = Math.abs(neville[i] - old);
-      minerr = Math.min(minerr, err_);
+      for (let i = neville.length - 2; i >= 0; i--) {
+        const old = neville[i];
+        neville[i] = neville[i + 1] + (neville[i + 1] - neville[i]) / (c - 1);
+        const err_ = Math.abs(neville[i] - old);
+        minerr = Math.min(minerr, err_);
 
-      if (err_ < err) {
-        f0 = neville[i];
-        err = err_;
+        if (err_ < err) {
+          f0 = neville[i];
+          err = err_;
+        }
+        c *= invcontract;
       }
-      c *= invcontract;
+
+      if (minerr > breaktol * err || !isFinite(minerr)) break;
+      if (err <= Math.max(rtol * Math.abs(f0), atol)) break;
     }
 
-    if (minerr > breaktol * err || !isFinite(minerr)) break;
-    if (err <= Math.max(rtol * Math.abs(f0), atol)) break;
-  }
-
-  return [f0, err];
+    return [f0, err] as [number, number];
+  });
 }

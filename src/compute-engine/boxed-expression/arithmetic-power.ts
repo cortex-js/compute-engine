@@ -315,8 +315,10 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
       : ce._fn('Root', [a, ce.number(r[1])], { canonical: false });
 
   // Fold exact numeric powers: Power(2, 3) → 8, Power(1/2, 2) → 1/4
-  // Only when both base and exponent are exact, and exponent is integer
-  if (isNumber(a) && isNumber(b)) {
+  // Only when both base and exponent are exact, and exponent is a real
+  // integer (a pure-imaginary exponent like `i` has re = 0, which must NOT
+  // fold as a^0)
+  if (isNumber(a) && isNumber(b) && b.im === 0) {
     const e = b.re;
     if (typeof e === 'number' && Number.isInteger(e) && Math.abs(e) <= 64) {
       const n = a.numericValue;

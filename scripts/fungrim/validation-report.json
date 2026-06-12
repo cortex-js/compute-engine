@@ -1,5 +1,5 @@
 {
-  "generated": "2026-06-11T05:10:49.403Z",
+  "generated": "2026-06-12T14:34:10.250Z",
   "corpus": "/Users/arno/dev/compute-engine/data/fungrim",
   "stage1": {
     "total": 2551,
@@ -8,7 +8,7 @@
     "unknownSymbol": 0,
     "timeout": 0,
     "passRate": 0.998,
-    "elapsedMs": 1160,
+    "elapsedMs": 1564,
     "failureBuckets": [
       {
         "error": "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"'integer'\",\"'number'\"]]",
@@ -431,5 +431,46 @@
         ]
       }
     ]
+  },
+  "stage2": {
+    "seed": 42,
+    "slice": [
+      "none",
+      "real-simple"
+    ],
+    "entries": 1227,
+    "entriesWithInstances": 622,
+    "entriesSkipped": {
+      "shell-head": 546,
+      "box-error": 35,
+      "directed-infinity": 17
+    },
+    "entriesNoAcceptedAssignment": 7,
+    "instances": 1754,
+    "outcomes": {
+      "True": 1363,
+      "False": 16,
+      "Unknown": 19,
+      "not-evaluable": 356
+    },
+    "falseEntries": [
+      "0c847f",
+      "11302a",
+      "1f9beb",
+      "33aa62",
+      "49514d",
+      "4a1b00",
+      "4d5410",
+      "5e0c58",
+      "79d6ba",
+      "8814ad",
+      "8dff72",
+      "9d5c86",
+      "a1f1ec",
+      "a2f5a9",
+      "b894a3",
+      "fbc53d"
+    ],
+    "elapsedMs": 128842
   }
 }

@@ -1,472 +1,201 @@
 {
-  "generated": "2026-06-10T00:58:57.091Z",
+  "generated": "2026-06-12T14:34:10.249Z",
   "seed": 42,
   "slice": [
     "none",
     "real-simple"
   ],
-  "falseEntryCount": 18,
+  "falseEntryCount": 16,
   "entries": [
     {
-      "id": "157c33",
-      "topic": "gcd",
-      "class": "identity",
-      "guardLevel": "real-simple",
-      "instances": [
-        {
-          "assignment": {
-            "a": -2
-          },
-          "detail": "sides differ: -2 vs 2"
-        }
-      ]
-    },
-    {
-      "id": "250a45",
-      "topic": "gcd",
-      "class": "identity",
-      "guardLevel": "real-simple",
-      "instances": [
-        {
-          "assignment": {
-            "r": 3,
-            "s": -1
-          },
-          "detail": "sides differ: -3 vs 3"
-        },
-        {
-          "assignment": {
-            "r": -3,
-            "s": 4
-          },
-          "detail": "sides differ: -12 vs 12"
-        }
-      ]
-    },
-    {
-      "id": "332721",
-      "topic": "factorials",
-      "class": "identity",
-      "guardLevel": "real-simple",
-      "instances": [
-        {
-          "assignment": {
-            "k": 10,
-            "n": 4
-          },
-          "detail": "sides differ: 0 vs -9.185773074661963e-9"
-        },
-        {
-          "assignment": {
-            "k": 3,
-            "n": 1
-          },
-          "detail": "sides differ: 0 vs -0.08333333333333333"
-        },
-        {
-          "assignment": {
-            "k": 5,
-            "n": 4
-          },
-          "detail": "sides differ: 0 vs -0.2"
-        },
-        {
-          "assignment": {
-            "k": 4,
-            "n": 0
-          },
-          "detail": "sides differ: 0 vs -0.001736111111111111"
-        }
-      ]
-    },
-    {
-      "id": "4a2ac8",
-      "topic": "gamma",
-      "class": "inequality",
-      "guardLevel": "real-simple",
-      "instances": [
-        {
-          "assignment": {
-            "x": [
-              "Sqrt",
-              2
-            ],
-            "y": [
-              "Rational",
-              3,
-              2
-            ]
-          },
-          "detail": "LessEqual(2.0615528128088303, 0.8865814287192592)"
-        },
-        {
-          "assignment": {
-            "x": "Pi",
-            "y": [
-              "Negate",
-              [
-                "Sqrt",
-                2
-              ]
-            ]
-          },
-          "detail": "LessEqual(3.4452292233013115, 2.2880377953400326)"
-        },
-        {
-          "assignment": {
-            "x": [
-              "Negate",
-              "Pi"
-            ],
-            "y": 2
-          },
-          "detail": "LessEqual(3.724191778237173, 1.0156971444602183)"
-        },
-        {
-          "assignment": {
-            "x": "Pi",
-            "y": "Pi"
-          },
-          "detail": "LessEqual(4.442882938158366, 2.2880377953400326)"
-        }
-      ]
-    },
-    {
-      "id": "4d3127",
-      "topic": "gcd",
-      "class": "identity",
-      "guardLevel": "real-simple",
-      "instances": [
-        {
-          "assignment": {
-            "a": -3,
-            "b": 2
-          },
-          "detail": "sides differ: -6 vs 6"
-        },
-        {
-          "assignment": {
-            "a": 2,
-            "b": -1
-          },
-          "detail": "sides differ: -2 vs 2"
-        }
-      ]
-    },
-    {
-      "id": "4fd123",
-      "topic": "numbers",
-      "class": "logical",
+      "id": "0c847f",
+      "topic": "sinc",
+      "class": "representation",
       "guardLevel": "none",
       "instances": [
         {
           "assignment": {},
-          "detail": "evaluates to False"
+          "detail": "sides differ: 0 vs 1.8816830998063865"
         }
       ]
     },
     {
-      "id": "6572c5",
-      "topic": "gcd",
-      "class": "identity",
-      "guardLevel": "real-simple",
-      "instances": [
-        {
-          "assignment": {
-            "a": 2,
-            "b": -2
-          },
-          "detail": "sides differ: 2 vs -2"
-        },
-        {
-          "assignment": {
-            "a": 1,
-            "b": -3
-          },
-          "detail": "sides differ: 1 vs -1"
-        }
-      ]
-    },
-    {
-      "id": "7b27cd",
-      "topic": "gcd",
-      "class": "identity",
-      "guardLevel": "real-simple",
-      "instances": [
-        {
-          "assignment": {
-            "n": 2
-          },
-          "detail": "sides differ: 2 vs 1"
-        },
-        {
-          "assignment": {
-            "n": 1
-          },
-          "detail": "sides differ: 2 vs 1"
-        },
-        {
-          "assignment": {
-            "n": 5
-          },
-          "detail": "sides differ: 2 vs 4"
-        }
-      ]
-    },
-    {
-      "id": "8d90e9",
-      "topic": "gcd",
-      "class": "identity",
-      "guardLevel": "real-simple",
-      "instances": [
-        {
-          "assignment": {
-            "a": -3
-          },
-          "detail": "sides differ: -3 vs 3"
-        }
-      ]
-    },
-    {
-      "id": "9c93bb",
-      "topic": "imaginary_unit",
-      "class": "specific-value",
+      "id": "11302a",
+      "topic": "pi",
+      "class": "representation",
       "guardLevel": "none",
       "instances": [
         {
           "assignment": {},
-          "detail": "sides differ: 1 vs 0.5215640468649398"
+          "detail": "sides differ: 0.8224670334241132 vs 0.8224670384226135"
         }
       ]
     },
     {
-      "id": "a0206a",
-      "topic": "fibonacci",
-      "class": "logical",
-      "guardLevel": "real-simple",
-      "instances": [
-        {
-          "assignment": {
-            "x": 3
-          },
-          "detail": "evaluates to False"
-        },
-        {
-          "assignment": {
-            "x": 1
-          },
-          "detail": "evaluates to False"
-        },
-        {
-          "assignment": {
-            "x": 0
-          },
-          "detail": "evaluates to False"
-        },
-        {
-          "assignment": {
-            "x": 2
-          },
-          "detail": "evaluates to False"
-        }
-      ]
-    },
-    {
-      "id": "c19cd6",
-      "topic": "totient",
-      "class": "identity",
-      "guardLevel": "real-simple",
-      "instances": [
-        {
-          "assignment": {
-            "n": 5
-          },
-          "detail": "sides differ: 4 vs 2"
-        },
-        {
-          "assignment": {
-            "n": 2
-          },
-          "detail": "sides differ: 1 vs 2"
-        }
-      ]
-    },
-    {
-      "id": "c4a892",
-      "topic": "gcd",
-      "class": "identity",
-      "guardLevel": "real-simple",
-      "instances": [
-        {
-          "assignment": {
-            "a": -2,
-            "b": -2,
-            "c": 1
-          },
-          "detail": "sides differ: -2 vs 2"
-        },
-        {
-          "assignment": {
-            "a": -1,
-            "b": 2,
-            "c": 0
-          },
-          "detail": "sides differ: -2 vs 2"
-        }
-      ]
-    },
-    {
-      "id": "c7b921",
-      "topic": "gamma",
-      "class": "identity",
-      "guardLevel": "real-simple",
-      "instances": [
-        {
-          "assignment": {
-            "y": "Pi"
-          },
-          "detail": "sides differ: 3.181132565783664 vs 0.01802737814344824"
-        },
-        {
-          "assignment": {
-            "y": 2
-          },
-          "detail": "sides differ: 2.0615528128088303 vs 0.10832104050145287"
-        },
-        {
-          "assignment": {
-            "y": [
-              "Rational",
-              -1,
-              2
-            ]
-          },
-          "detail": "sides differ: 0.7071067811865476 vs 1.1189460805830402"
-        },
-        {
-          "assignment": {
-            "y": [
-              "Sqrt",
-              2
-            ]
-          },
-          "detail": "sides differ: 1.5000000000000002 vs 0.2718317138655203"
-        },
-        {
-          "assignment": {
-            "y": -1
-          },
-          "detail": "sides differ: 1.118033988749895 vs 0.520590963616752"
-        }
-      ]
-    },
-    {
-      "id": "ca8b0a",
-      "topic": "exp",
-      "class": "logical",
-      "guardLevel": "none",
-      "instances": [
-        {
-          "assignment": {
-            "z": [
-              "Negate",
-              "ImaginaryUnit"
-            ]
-          },
-          "detail": "evaluates to False"
-        },
-        {
-          "assignment": {
-            "z": [
-              "Rational",
-              -1,
-              2
-            ]
-          },
-          "detail": "evaluates to False"
-        },
-        {
-          "assignment": {
-            "z": -1
-          },
-          "detail": "evaluates to False"
-        },
-        {
-          "assignment": {
-            "z": [
-              "Subtract",
-              [
-                "Multiply",
-                2,
-                "ImaginaryUnit"
-              ],
-              1
-            ]
-          },
-          "detail": "evaluates to False"
-        },
-        {
-          "assignment": {
-            "z": "ImaginaryUnit"
-          },
-          "detail": "evaluates to False"
-        }
-      ]
-    },
-    {
-      "id": "dc0823",
-      "topic": "gcd",
-      "class": "identity",
-      "guardLevel": "real-simple",
-      "instances": [
-        {
-          "assignment": {
-            "a": 5,
-            "b": 2
-          },
-          "detail": "sides differ: 10 vs -10 vs -10 vs 10"
-        },
-        {
-          "assignment": {
-            "a": 2,
-            "b": 3
-          },
-          "detail": "sides differ: 6 vs -6 vs -6 vs 6"
-        },
-        {
-          "assignment": {
-            "a": 4,
-            "b": 1
-          },
-          "detail": "sides differ: 4 vs -4 vs -4 vs 4"
-        }
-      ]
-    },
-    {
-      "id": "e5a04c",
-      "topic": "numbers",
-      "class": "logical",
+      "id": "1f9beb",
+      "topic": "sinc",
+      "class": "representation",
       "guardLevel": "none",
       "instances": [
         {
           "assignment": {},
-          "detail": "evaluates to False"
+          "detail": "sides differ: 0 vs 3.141592653589793"
         }
       ]
     },
     {
-      "id": "fbe121",
-      "topic": "gcd",
-      "class": "identity",
-      "guardLevel": "real-simple",
+      "id": "33aa62",
+      "topic": "const_catalan",
+      "class": "representation",
+      "guardLevel": "none",
       "instances": [
         {
-          "assignment": {
-            "c": -2,
-            "r": 1,
-            "s": 1
-          },
-          "detail": "sides differ: -2 vs 2"
+          "assignment": {},
+          "detail": "sides differ: 0.915965594177219 vs 0.9159655954269691"
+        }
+      ]
+    },
+    {
+      "id": "49514d",
+      "topic": "sinc",
+      "class": "representation",
+      "guardLevel": "none",
+      "instances": [
+        {
+          "assignment": {},
+          "detail": "sides differ: 0 vs 2.0943951023931957"
+        }
+      ]
+    },
+    {
+      "id": "4a1b00",
+      "topic": "sinc",
+      "class": "representation",
+      "guardLevel": "none",
+      "instances": [
+        {
+          "assignment": {},
+          "detail": "sides differ: 0 vs 1.6054487014583059"
+        }
+      ]
+    },
+    {
+      "id": "4d5410",
+      "topic": "sinc",
+      "class": "representation",
+      "guardLevel": "none",
+      "instances": [
+        {
+          "assignment": {},
+          "detail": "sides differ: 0 vs 3.141592653589793"
+        }
+      ]
+    },
+    {
+      "id": "5e0c58",
+      "topic": "sinc",
+      "class": "representation",
+      "guardLevel": "none",
+      "instances": [
+        {
+          "assignment": {},
+          "detail": "sides differ: 0 vs -0.00014996560257830461 vs 0"
+        }
+      ]
+    },
+    {
+      "id": "79d6ba",
+      "topic": "const_gamma",
+      "class": "representation",
+      "guardLevel": "none",
+      "instances": [
+        {
+          "assignment": {},
+          "detail": "sides differ: 0.5772156649015329 vs 0.5772156270444133"
+        }
+      ]
+    },
+    {
+      "id": "8814ad",
+      "topic": "sinc",
+      "class": "representation",
+      "guardLevel": "none",
+      "instances": [
+        {
+          "assignment": {},
+          "detail": "sides differ: 0 vs 2.356194490192345"
+        }
+      ]
+    },
+    {
+      "id": "8dff72",
+      "topic": "pi",
+      "class": "representation",
+      "guardLevel": "none",
+      "instances": [
+        {
+          "assignment": {},
+          "detail": "sides differ: 3.141592653589793 vs 3.14139267358846"
+        }
+      ]
+    },
+    {
+      "id": "9d5c86",
+      "topic": "const_gamma",
+      "class": "representation",
+      "guardLevel": "none",
+      "instances": [
+        {
+          "assignment": {},
+          "detail": "sides differ: 0.5772156649015329 vs 0.5772156429356894"
+        }
+      ]
+    },
+    {
+      "id": "a1f1ec",
+      "topic": "const_gamma",
+      "class": "representation",
+      "guardLevel": "none",
+      "instances": [
+        {
+          "assignment": {},
+          "detail": "sides differ: 0.5772156649015329 vs 0.5771716913296858"
+        }
+      ]
+    },
+    {
+      "id": "a2f5a9",
+      "topic": "sinc",
+      "class": "representation",
+      "guardLevel": "none",
+      "instances": [
+        {
+          "assignment": {},
+          "detail": "sides differ: 0 vs -0.00014996560257830461 vs 0"
+        }
+      ]
+    },
+    {
+      "id": "b894a3",
+      "topic": "sinc",
+      "class": "representation",
+      "guardLevel": "none",
+      "instances": [
+        {
+          "assignment": {},
+          "detail": "sides differ: 0 vs 1.7278759594743862"
+        }
+      ]
+    },
+    {
+      "id": "fbc53d",
+      "topic": "pi",
+      "class": "representation",
+      "guardLevel": "none",
+      "instances": [
+        {
+          "assignment": {},
+          "detail": "sides differ: 1.6449340668482264 vs 1.64483408184606"
         }
       ]
     }

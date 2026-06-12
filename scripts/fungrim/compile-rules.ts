@@ -1311,10 +1311,16 @@ export function createScratchEngine(
   }
   for (const name of Object.keys(declarations.declarations).sort()) {
     if (!referenced.has(name)) continue;
+    // Never shadow an engine built-in: a shell declaration in this scope
+    // would hide the built-in's numeric evaluator and signature, making the
+    // self-test environment diverge from the loader's (which skips shells
+    // for already-defined names). Heads promoted to built-ins after the
+    // corpus declarations table was generated are caught here.
+    if (ce.lookupDefinition(name) !== undefined) continue;
     try {
       ce.declare(name, setify(declarations.declarations[name].signature));
     } catch {
-      /* already defined (built-in) — never widen */
+      /* unable to declare (e.g. reserved name) */
     }
   }
   return ce;
@@ -1498,8 +1504,15 @@ export function compileEntries(
   rules.sort((a, b) => a.id.localeCompare(b.id));
   skips.sort((a, b) => a.id.localeCompare(b.id));
 
-  // Pruned shell-declaration table: heads referenced by emitted rules
+  // Pruned shell-declaration table: heads referenced by emitted rules,
+  // excluding engine built-ins. The corpus declarations table was pruned of
+  // built-ins when the translator ran; heads promoted to built-ins SINCE
+  // then (e.g. the Tier-2 special-function kernels) are pruned here against
+  // a live stock engine, so the artifact stays in sync with the engine it
+  // ships with. (The loader also skips already-defined names at load time —
+  // this keeps the artifact, not just the load, accurate.)
   const pruned: CompileResult['declarations'] = {};
+  const builtinProbe = new ComputeEngine();
   const usedShells = new Set<string>();
   for (const r of rules) {
     collectSymbols(r.match, usedShells);
@@ -1508,6 +1521,7 @@ export function compileEntries(
   }
   for (const name of Object.keys(declarations.declarations).sort()) {
     if (!usedShells.has(name)) continue;
+    if (builtinProbe.lookupDefinition(name) !== undefined) continue;
     const rec = declarations.declarations[name];
     pruned[name] = {
       signature: setify(rec.signature),

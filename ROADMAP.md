@@ -72,10 +72,16 @@ inverse-composition shape; acceptance via `solve-rules.test.ts` extensions
   were taken at all.
 
 Coverage in `test/compute-engine/timeout.test.ts` (hang regression tests for
-each family). **Residual:** the Stage-2 harness watchdog/denylist
-(`FUNGRIM_SKIP_IDS`) can now be retired — re-run
-`scripts/fungrim/validate.ts --numeric` with the structural skips removed to
-confirm reach (harness-side change, not engine-side).
+each family). **Residual — ✅ done (2026-06-12):** the Stage-2 watchdog,
+`FUNGRIM_SKIP_IDS` denylist, and the structural representation/derivative
+skips are retired; the harness runs the full {none, real-simple} slice
+unattended (1,227 entries, 129 s, `ce.timeLimit = 1000` per evaluation).
+Doing so exposed and fixed two more unbounded paths: nested numeric
+integration through compiled code (`5b31ee`, ∫∫-Catalan — fixed by ambient
+deadline inheritance in `interruptible.ts`) and symbolic differentiation
+width blow-up (`8e8a59`, r-th derivative of LambertW, REVIEW.md G8 — fixed
+by a strided deadline check in `differentiate()`). Entries with instances
+380 → 622; True instances 1,089 → 1,363.
 
 ### 3. CI for the corpus pipeline
 
@@ -130,8 +136,123 @@ tests in `special-functions.test.ts`; Stage-1 corpus validation unchanged at
 **Residual:** bignum kernels are real-argument only (complex falls back to
 machine precision); ₂F₁ outside |z|<1 ∪ Pfaff region for complex z, the
 degenerate integer-(c−a−b) connection case at z > 0.95, and theta
-derivatives (r ≥ 1) stay symbolic. The 567 "not-evaluable" Stage-2 skips
-should now be re-measured (harness side).
+derivatives (r ≥ 1) stay symbolic. The z ≥ 1 part of this residual
+is now a concrete blocker — see item 9.
+
+**Payoff measured (2026-06-12):** of the 130 kernel-head entries in the
+Stage-2 {none, real-simple} slice (all previously shell-head-skipped,
+not-evaluable by construction), 117 now run and 115 instances verify True,
+0 False (49 instances remain not-evaluable: other shell heads inside,
+∫/lim representations beyond quadrature reach, theta derivative orders).
+Measuring this also surfaced two real engine bugs, both fixed: `2^i`
+canonicalized to `1` (exact-power fold ignored the imaginary part) and
+`BoxedSymbol.N()` inverted `holdUntil: 'never'` (i/e/∞ never resolved
+under `N()`).
+
+### 10. Unsound `x/√(x²) → 1` simplify rewrite — SOUNDNESS
+
+**What:** `simplify()` rewrites `x/√(x²)` to `1`, silently dropping
+`sign(x)` (sound only for x > 0). Repro:
+`ce.box(['Divide', 'x', ['Sqrt', ['Power', 'x', 2]]]).simplify()` → `1`
+(same for `['Multiply', 'x', ['Power', ['Power','x',2], ['Rational',-1,2]]]`).
+Note `√(x²)` *alone* simplifies soundly to `|x|`, so the culprit is a
+quotient/product power-combination rule, not the radical rule. The `D`
+evaluate handler simplifies its output, so the unsoundness propagates:
+`D(√(x²)).evaluate()` → `1` and `D(1/√(c·x²)).evaluate()` → `−1/(x²√c)`
+(sign-wrong for x < 0).
+
+**Why:** found by the Rubi harness as a cluster of *false* "solved-wrong"
+verdicts — driver antiderivatives identical to Rubi's reference answers
+failed verification because the checker's symbolic derivative was wrong on
+x < 0. The harness now uses numeric central differences as a workaround
+(`scripts/rubi/benchmark.ts`); any other derivative-dependent code path is
+still exposed. **Snapshot-gated:** measure blast radius before landing
+(established canonical outputs may rely on the unsound form).
+
+**Acceptance:** repro returns `sign(x)`-correct form (e.g. `x/|x|` or
+`sign(x)`); `D(√(x²))` evaluates to a sign-correct derivative; snapshot
+churn reviewed; the Rubi benchmark can optionally re-enable symbolic-D
+verification as a cross-check.
+
+### 9. ₂F₁ analytic continuation for z ≥ 1 — follow-on to item 4
+
+**What:** extend `hypergeometric2F1` (`numerics/special-functions.ts`,
+~line 2120) past the z = 1 branch point: the real-axis cut z > 1 (where
+₂F₁ is complex-valued; principal branch = limit from below, the standard
+z − i0 convention) and the complex region outside |z| ≤ 0.8 ∪ Pfaff. The
+standard ladder slots into the existing transformation chain: the 1/z and
+1/(1−z) Γ-connection formulas (A&S 15.3.7/15.3.8, with the same
+degenerate-integer-parameter caveat the 1−z branch already documents),
+composed with the Pfaff/Euler maps already implemented.
+
+**Why now:** this is the single biggest verification blocker for the Rubi
+integration (docs/rubi/RUBI.md): Rubi rule RHSs emit
+`Hypergeometric2F1(…, 1 + d·x/c)` — argument > 1 for positive x and
+parameters — so the antiderivative-vs-integrand check has no evaluable
+sample points. **35 of 200 problems (17.5%) in the section-1.1.1 benchmark
+are "not-evaluable" for exactly this reason**, and the share grows in later
+chapters. It also closes part of the 567 Fungrim Stage-2 "not-evaluable"
+entries (item 4 residual).
+
+**Acceptance:** (a) reference values against mpmath/Mathematica for
+z ∈ {1.5, 3, −2+4i, 10} on generic and near-degenerate parameters, added
+to `special-functions.test.ts`; (b) re-run
+`npx tsx scripts/rubi/benchmark.ts --rubi "data/rubi/corpus/1 Algebraic functions/1.1 Binomial products" --chapter "1 Algebraic functions/1.1 Binomial products/1.1.1 Linear" --sample 200`
+and confirm the `not-evaluable` bucket drops substantially (current
+standing in `scripts/rubi/rubi-111-s200.json`: 128 correct / 35
+not-evaluable / 24 unsolved).
+
+**Effort:** ~2–4 days (the formulas are standard; the work is branch
+conventions and the degenerate-parameter cases).
+
+### 11. Deadline checks in `simplify()` — follow-on to item 2
+
+**What:** item 2 made *evaluation* loops deadline-aware; `simplify()` never
+checks `ce._deadline`, and single calls on radical-tower expressions (~100
+leaves) were observed running for minutes during Rubi rule-condition
+evaluation. The Rubi layer works around it with a leaf-count cap
+(`SIMPLIFY_LEAF_CAP = 120` in `scripts/rubi/rubi-utils.ts`), which trades
+correctness (predicates go fail-closed on big expressions).
+
+**How:** arm/check the deadline in the simplify main loop
+(`boxed-expression/simplify.ts` already counts steps — add a strided
+`checkDeadline`), mirroring the item-2 pattern. Acceptance: a
+`timeout.test.ts` case for simplify; remove or raise the Rubi-side cap.
+
+### 12. `antiderivative.ts` correctness fixes (Rubi Phase-0 findings)
+
+**What:** the built-in integrator — still the user-facing `Integrate` path
+and the Rubi driver's fallback — has reproducible bugs surfaced by the Rubi
+test-suite baseline (`scripts/rubi/baseline-ch1-500.json`, seed 42):
+
+- `∫(a + b·x⁴)/x⁶ dx` returns `−b/x`, silently **dropping the a-term**
+  (same family: `/x⁷`). Term-splitting bug.
+- `∫x⁶/(1−x⁶) dx` returns an incomplete partial-fraction result (missing
+  arctan/log terms).
+- 6 stack overflows (`RangeError`) on quadratic/quartic trinomial products
+  — runaway recursion between integration heuristics.
+- one problem ran 156 s uninterruptibly (pre-item-2 measurement; re-check).
+
+**Why:** silent wrong answers from a shipping code path outrank missing
+features. The 72k-problem Rubi suite + `scripts/rubi/benchmark.ts` (without
+`--rubi`) is now a ready-made regression harness for any fix.
+
+### 13. Small engine follow-ups (batch)
+
+- **`ce.number()` hangs on malformed input:** passing a MathJSON array
+  (e.g. `['Rational', 1, 2]`) makes it spin forever — cost a long debugging
+  hunt in the Rubi driver. Guard the argument type and throw. (~1 h)
+- **`AppellF1` numeric kernel:** Rubi Chapter-1 RHSs emit it (4/200 sample
+  problems not-evaluable solely for this); two-variable hypergeometric,
+  simple double-series for |x|,|y| < 1 would cover verification sampling.
+  Natural companion to item 9, lower priority. (~1–2 days)
+- **Polynomial helpers reject parameter-divided coefficients:**
+  `polynomialDegree`/`getPolynomialCoefficients` return −1/null for
+  `d²/b·x²`-style coefficients. The Rubi layer has its own x-aware versions
+  (`polyDegreeX` etc. in `scripts/rubi/rubi-utils.ts`) that could migrate
+  into `boxed-expression/polynomials.ts` if engine consumers
+  (`antiderivative.ts` partial fractions, item 12) want the tolerance.
+  Optional. (~1 day + snapshot review)
 
 ### 5. Per-head aggregated rule dispatch
 

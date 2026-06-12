@@ -1,4 +1,5 @@
 import { apply } from '../function-utils';
+import { checkDeadline } from '../../common/interruptible';
 import { mul } from '../boxed-expression/arithmetic-mul-div';
 import type { Expression } from '../global-types';
 import { add } from '../boxed-expression/arithmetic-add';
@@ -18,6 +19,13 @@ import {
  * should never approach this limit.
  */
 const MAX_DIFFERENTIATION_DEPTH = 100;
+
+// Differentiation can blow up in WIDTH, not just depth: the product/chain
+// rules square the expression size at each order, so an r-th symbolic
+// derivative (e.g. of LambertW — REVIEW.md G8, Fungrim 8e8a59) can allocate
+// gigabytes building one expression while staying well under the depth
+// limit. Check the engine deadline periodically across recursive calls.
+let differentiateCallCount = 0;
 
 /**
  * Return a derivative result without simplification.
@@ -230,6 +238,10 @@ export function differentiate(
     );
     return undefined;
   }
+
+  // Guard against runaway expression growth (see differentiateCallCount)
+  if ((++differentiateCallCount & 0xff) === 0)
+    checkDeadline(expr.engine._deadline);
 
   const ce = expr.engine;
 

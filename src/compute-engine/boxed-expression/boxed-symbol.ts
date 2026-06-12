@@ -736,7 +736,10 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
 
   N(): Expression {
     const def = this.valueDefinition;
-    if (def && def.holdUntil === 'never') return this;
+    // Note: `holdUntil: 'never'` means "substitute as early as possible" —
+    // it never *prevents* numeric evaluation. (A previous version returned
+    // `this` for 'never', which made `ImaginaryUnit.N()` a no-op and left
+    // products like `0.25 * i` unfolded under N().)
     // For non-constants, check the scope-chain value first
     if (def && !def.isConstant) {
       const contextValue = this.engine._getSymbolValue(this._id);
