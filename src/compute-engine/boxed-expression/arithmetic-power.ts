@@ -321,8 +321,8 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
   // Divide(1, Sqrt(x)) form that 1/Sqrt(x), Sqrt(x)^{-1} and 1/x^{1/2} all
   // canonicalize to — so e.g. D(arcsin x) = (1-x^2)^{-1/2} would not cancel
   // against the integrand 1/Sqrt(1-x^2), breaking antiderivative checks.
-  if (r !== undefined && r[0] === -1 && Math.abs(r[1]) !== 1) {
-    const root = canonicalRoot(a, ce.number(Math.abs(r[1])));
+  if (r !== undefined && r[0] === -1 && Math.abs(Number(r[1])) !== 1) {
+    const root = canonicalRoot(a, ce.number(Math.abs(Number(r[1]))));
     return a.isCanonical || a.isStructural
       ? ce.function('Divide', [ce.One, root])
       : ce._fn('Divide', [ce.One, root], { canonical: false });
