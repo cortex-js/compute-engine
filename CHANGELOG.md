@@ -84,6 +84,19 @@
 
 ### Bug Fixes
 
+- **`Factor` produced non-polynomial, branch-dependent factors for `xⁿ − 1`.**
+  A difference-of-even-powers heuristic took `√(xⁿ)`, injecting `x·√x` (odd `n`)
+  or `|x|^(n/2)` (even `n`) — e.g. `Factor(x³ − 1)` returned
+  `(x·√x − 1)(x·√x + 1)` and `Factor(x⁶ − 1)` returned `(|x|³ − 1)(|x|³ + 1)`,
+  which are value-equal to the input only for `x > 0`. The square-root
+  extraction is now gated to genuine polynomial perfect squares (it strips `Abs`
+  and rejects any `Sqrt`/`Abs`/`Root` or fractional-power root), and the
+  difference-of-squares result is recursively factored. `Factor` now returns the
+  full polynomial (cyclotomic) factorization: `x³ − 1 → (x − 1)(x² + x + 1)`,
+  `x⁴ − 1 → (x − 1)(x + 1)(x² + 1)`,
+  `x⁶ − 1 → (x − 1)(x + 1)(x² + x + 1)(x² − x + 1)`,
+  `x⁸ − 1 → (x − 1)(x + 1)(x² + 1)(x⁴ + 1)`.
+
 - **Unsound `x/√(x²) → 1` simplification.** Simplifying `x/√(x²)` (and the
   equivalent product `x·(x²)^(−1/2)`) produced `1`, losing the sign of `x` —
   and since derivatives are simplified, `D(√(x²), x)` evaluated to `1`

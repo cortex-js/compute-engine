@@ -594,3 +594,61 @@ describe('factor() free function (public API)', () => {
     expect(factorFn('-2x^2 - 10x - 12').latex).toBe('-2(x+2)(x+3)');
   });
 });
+
+// ROADMAP B4: `Factor` applied a difference-of-even-powers trick that took
+// √(xⁿ), injecting `x·√x` (odd n) or `|x|^(n/2)` (even n) — factorizations that
+// are value-equal only on x > 0 and are NOT polynomial. The square-root
+// extraction is now gated to genuine polynomial perfect squares, and the
+// difference-of-squares result is recursively factored to the full
+// (cyclotomic) factorization.
+describe('Factor(xⁿ − 1) returns polynomial factors (ROADMAP B4)', () => {
+  const factored = (s: string) =>
+    ce.box(['Factor', parse(s)]).evaluate();
+
+  // The defining regression: no factor may contain Sqrt/Abs/Root, and the
+  // factorization must be value-equal to the input everywhere (not just x > 0,
+  // which is where the old radical forms agreed).
+  for (const n of [2, 3, 4, 5, 6, 7, 8]) {
+    const input = `x^${n}-1`;
+    test(`Factor(${input}) is polynomial and value-equal`, () => {
+      const f = factored(input);
+      expect(f.has(['Sqrt', 'Abs', 'Root'])).toBe(false);
+      const orig = parse(input);
+      // Check at points including negatives, where the old √x/|x| forms diverged.
+      for (const xv of [-3, -2, 2, 3, 5]) {
+        const v = ce.number(xv);
+        expect(f.subs({ x: v }).N().re).toBeCloseTo(orig.subs({ x: v }).N().re);
+      }
+    });
+  }
+
+  test('odd powers factor fully via rational roots (x³ − 1)', () => {
+    const f = factored('x^3-1');
+    // (x − 1)(x² + x + 1)
+    expect(f.operator).toBe('Multiply');
+    expect(f.has('Sqrt')).toBe(false);
+    expect(f.subs({ x: ce.number(1) }).N().re).toBeCloseTo(0);
+  });
+
+  test('x⁶ − 1 fully factors into the four cyclotomic factors', () => {
+    const f = factored('x^6-1');
+    // (x − 1)(x + 1)(x² + x + 1)(x² − x + 1) — four irreducible factors
+    expect(f.operator).toBe('Multiply');
+    expect(f.ops!.length).toBe(4);
+    expect(f.has(['Sqrt', 'Abs'])).toBe(false);
+  });
+
+  test('x⁴ − 1 → (x − 1)(x + 1)(x² + 1) (no longer stops at (x²−1)(x²+1))', () => {
+    const f = factored('x^4-1');
+    expect(f.operator).toBe('Multiply');
+    expect(f.ops!.length).toBe(3);
+  });
+
+  // A genuine even perfect power must still factor as a difference of squares,
+  // now using the polynomial root x³ instead of |x|³.
+  test('perfect-square trinomial with x⁶ uses x³, not |x|³', () => {
+    const f = factored('x^6 + 2x^3 + 1');
+    expect(f.has('Abs')).toBe(false);
+    expect(f.toString()).toBe('(x^3 + 1)^2');
+  });
+});

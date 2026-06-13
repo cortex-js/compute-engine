@@ -1,7 +1,4 @@
-import type {
-  Expression,
-  IComputeEngine as ComputeEngine,
-} from '../global-types';
+import type { Expression } from '../global-types';
 
 import { isRelationalOperator } from '../latex-syntax/utils';
 import { isNumber, isFunction } from './type-guards';
@@ -96,8 +93,8 @@ export function factorPerfectSquare(expr: Expression): Expression | null {
       const crossTerm = terms[crossIdx];
 
       // Try to extract square roots of term1 and term2
-      const sqrt1 = extractSquareRoot(term1, ce);
-      const sqrt2 = extractSquareRoot(term2, ce);
+      const sqrt1 = extractSquareRoot(term1);
+      const sqrt2 = extractSquareRoot(term2);
 
       if (sqrt1 === null || sqrt2 === null) continue;
 
@@ -119,15 +116,48 @@ export function factorPerfectSquare(expr: Expression): Expression | null {
 }
 
 /**
- * Helper function to extract the square root of a term if it's a perfect square.
- * Returns null if the term is not a perfect square.
+ * Replace every `Abs(u)` subexpression with its argument `u`, recursively
+ * (including inside powers and products). `|u|` and `u` have the same square,
+ * so for a polynomial factorization we want the bare polynomial representative
+ * — e.g. `√(x⁶)` simplifies to `|x|³`, and we want `x³`.
+ */
+function stripAbs(expr: Expression): Expression {
+  if (!isFunction(expr)) return expr;
+  if (expr.operator === 'Abs') return stripAbs(expr.op1);
+  return expr.engine.function(expr.operator, expr.ops.map(stripAbs));
+}
+
+/**
+ * Is `expr` a polynomial (no radicals, and every power has a non-negative
+ * integer exponent)? Used to gate the square-root extraction so it never
+ * introduces `Sqrt`/`Abs`/`Root` or fractional powers — e.g. `√(x³) = x·√x`
+ * is rejected (ROADMAP B4).
+ */
+function isPolynomialForm(expr: Expression): boolean {
+  if (!isFunction(expr)) return true;
+  const op = expr.operator;
+  if (op === 'Sqrt' || op === 'Root' || op === 'Abs') return false;
+  if (op === 'Power') {
+    const exp = expr.op2;
+    if (exp.isInteger !== true || exp.isNegative === true) return false;
+  }
+  return expr.ops.every(isPolynomialForm);
+}
+
+/**
+ * Helper function to extract the polynomial square root of a term if it is a
+ * perfect square. Returns null otherwise — crucially, it never returns an
+ * expression containing `Sqrt`, `Abs`, `Root`, or a fractional power, so the
+ * difference-of-squares / perfect-square factorings it feeds stay polynomial.
  *
  * Examples:
- * - x² → x (or |x| if we can't determine sign)
- * - 4x² → 2|x|
+ * - x² → x      (√(x²) = |x|, reduced to the polynomial root x)
+ * - x⁶ → x³     (√(x⁶) = |x|³, reduced to x³)
+ * - 4x² → 2x
  * - 9 → 3
- * - 8 → null (not a perfect square, would be √8)
- * - 2x → null (not a perfect square)
+ * - x³ → null   (√(x³) = x·√x is not a polynomial — odd exponent)
+ * - 8 → null    (not a perfect square, would be √8)
+ * - 2x → null   (not a perfect square)
  *
  * IMPORTANT: This function calls .simplify() on the sqrt result to extract
  * the square root properly. This is safe because:
@@ -135,10 +165,7 @@ export function factorPerfectSquare(expr: Expression): Expression | null {
  * 2. The sqrt simplification doesn't call factoring on Add expressions
  * 3. We're not in a simplification loop yet - we're in the factoring phase
  */
-function extractSquareRoot(
-  term: Expression,
-  ce: ComputeEngine
-): Expression | null {
+function extractSquareRoot(term: Expression): Expression | null {
   // Try taking the square root and simplifying it
   // Using .simplify() here is safe - see comment above
   const sqrt = term.sqrt().simplify();
@@ -152,24 +179,16 @@ function extractSquareRoot(
     if (hasNonTrivialRadical(sqrt.numericValue)) return null;
   }
 
-  // For expressions with Abs, extract the inner value since we're looking for
-  // the algebraic base (we'll check signs separately)
-  // e.g., 2|x| → 2x for matching purposes
-  if (isFunction(sqrt, 'Abs')) return sqrt.op1;
+  // `√(u²) = |u|`, but the polynomial factorization wants the bare polynomial
+  // root `u` (the identity `a² − b² = (a−b)(a+b)` holds for either sign).
+  const stripped = stripAbs(sqrt);
 
-  // Handle Multiply(coefficient, Abs(...))
-  if (isFunction(sqrt, 'Multiply')) {
-    const absFactors = sqrt.ops.filter((op) => op.operator === 'Abs');
-    if (absFactors.length > 0) {
-      // Replace Abs with its inner value
-      const newOps = sqrt.ops.map((op) =>
-        isFunction(op, 'Abs') ? op.op1 : op
-      );
-      return ce.expr(['Multiply', ...newOps.map((op) => op.json)]);
-    }
-  }
+  // Gate to actual perfect-power exponents: a genuine polynomial perfect square
+  // has only non-negative integer exponents. Reject odd powers (`√(x³) = x·√x`)
+  // and any other non-polynomial root so factoring never emits radicals/Abs.
+  if (!isPolynomialForm(stripped)) return null;
 
-  return sqrt;
+  return stripped;
 }
 
 /**
@@ -219,7 +238,7 @@ export function factorDifferenceOfSquares(expr: Expression): Expression | null {
       }
     }
 
-    const sqrt = extractSquareRoot(absTerm, ce);
+    const sqrt = extractSquareRoot(absTerm);
     if (sqrt === null) return null;
 
     results.push({ sqrt, isNegative: isNeg });
@@ -533,9 +552,12 @@ export function factorPolynomial(
   const perfectSquare = factorPerfectSquare(expr);
   if (perfectSquare !== null) return perfectSquare;
 
-  // Try difference of squares
+  // Try difference of squares. A difference of squares only peels off a single
+  // layer (e.g. x⁶−1 → (x³−1)(x³+1)); recursively factor each half so the
+  // result is fully factored (→ (x−1)(x²+x+1)(x+1)(x²−x+1)). Recursion
+  // terminates because each layer strictly halves the degree.
   const diffSquares = factorDifferenceOfSquares(expr);
-  if (diffSquares !== null) return diffSquares;
+  if (diffSquares !== null) return refactorProductFactors(diffSquares, variable);
 
   if (variable !== undefined) {
     // Try quadratic factoring
@@ -549,6 +571,25 @@ export function factorPolynomial(
 
   // Fall back to existing factor function (GCD-based)
   return factor(expr);
+}
+
+/**
+ * Recursively factor each operand of a product. Used to fully factor the
+ * result of a single difference-of-squares split, whose halves may themselves
+ * be factorable (e.g. (x³−1)(x³+1)). Non-product inputs are returned
+ * unchanged. Recursion is bounded: each call factors strictly lower-degree
+ * factors.
+ */
+function refactorProductFactors(
+  product: Expression,
+  variable: string | undefined
+): Expression {
+  if (!isFunction(product, 'Multiply')) return product;
+  const factors = product.ops.map((f) => factorPolynomial(f, variable));
+  return product.engine.function(
+    'Multiply',
+    factors.map((f) => f.json)
+  );
 }
 
 /**

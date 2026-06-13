@@ -614,7 +614,7 @@ kernels (cf. item 4) honoring `ce.precision` with guard digits. Overlaps item 7'
 substitution, with endpoint-limit handling for improper bounds) before the
 quadrature fallback; harden the oscillatory quadrature.
 
-### B4. `Factor` emits non-polynomial radical/abs forms for `xⁿ − 1`
+### B4. ~~`Factor` emits non-polynomial radical/abs forms for `xⁿ − 1`~~ — ✅ done (2026-06-13)
 
 `Factor` applies a difference-of-even-powers trick that injects `√x`/`|x|` for
 odd exponents, producing factorizations that are value-equal on `x > 0` but are
@@ -630,7 +630,17 @@ odd exponents, producing factorizations that are value-equal on `x > 0` but are
 return polynomial factors (cyclotomic for `xⁿ − 1`); the even-power heuristic
 must be gated to actual perfect-power exponents and not introduce `Sqrt`/`Abs`.
 
-### B5. No public polynomial GCD
+**Resolved:** the square-root extraction in `factor.ts` (`extractSquareRoot`,
+used by the difference-of-squares and perfect-square strategies) is now gated to
+genuine polynomial perfect squares — it strips `Abs` (so `√(x⁶) = |x|³` → `x³`)
+and rejects any root containing `Sqrt`/`Abs`/`Root` or a fractional power (so
+odd powers like `√(x³) = x·√x` no longer factor by this trick). In addition, the
+difference-of-squares result is recursively factored, yielding the full
+factorization: `x³−1 → (x−1)(x²+x+1)`, `x⁶−1 → (x−1)(x+1)(x²+x+1)(x²−x+1)`,
+`x⁴−1 → (x−1)(x+1)(x²+1)`, `x⁸−1 → (x−1)(x+1)(x²+1)(x⁴+1)`. No `Sqrt`/`Abs`
+appears in any factor; all results are value-equal to the input for every `x`.
+
+### B5. ~~No public polynomial GCD~~ — ✅ done (2026-06-13)
 
 `["GCD", p, q]` on polynomials returns **unevaluated** (`gcd(x²+3x+2, x²+4x+3)`;
 the answer is `x + 1`). The engine has an internal `polynomialGCD` (used by
