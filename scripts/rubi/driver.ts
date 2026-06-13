@@ -68,7 +68,16 @@ export class RubiDriver {
     // fresh predicate caches per top-level call (zeroQ/simplify results
     // recur heavily across the rule scan)
     installCaches({ zeroQ: new Map(), simplify: new Map() });
-    return this.intRec(integrand, variable, 0);
+    try {
+      return this.intRec(integrand, variable, 0);
+    } catch (e) {
+      // An engine deadline firing inside evaluate()/simplify() surfaces as
+      // a CancellationError — that is deadline exhaustion, not a crash:
+      // report "no rule chain applied" like any other timeout.
+      if (e instanceof Error && e.constructor.name === 'CancellationError')
+        return null;
+      throw e;
+    }
   }
 
   private intRec(
