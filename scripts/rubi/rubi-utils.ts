@@ -537,6 +537,10 @@ export function evalCondition(json: Json, ctx: Ctx): boolean {
   if (head === 'And') return args.every((a) => evalCondition(a, ctx));
   if (head === 'Or') return args.some((a) => evalCondition(a, ctx));
   if (head === 'Not') return !evalCondition(args[0], ctx);
+  if (head === 'If') {
+    const branch = evalCondition(args[0], ctx) ? args[1] : args[2];
+    return branch === undefined ? false : evalCondition(branch, ctx);
+  }
   const f = PRED_FNS[head as string];
   if (!f) return fail(`unimplemented predicate ${head}`);
   return f(args, ctx);
@@ -617,15 +621,44 @@ const PRED_FNS: Record<string, PredFn> = {
     return !posQ(u) && !zeroQ(u);
   },
 
-  // PolyQ[u, x] / PolyQ[u, x, n]
+  // PolyQ[u, x] / PolyQ[u, x, n] / PolyQ[u, x^k] — the x^k form means
+  // "polynomial in x^k": only exponents divisible by k. (Treating it as
+  // plain poly-in-x made 1.1.2.11#4 fire on −2b−K·x, whose tail the
+  // PolynomialQuotient by x² then silently discarded — dropped ArcTanh
+  // terms in the 1.1.1.6 #19/#38/#39 family.)
   PolyQ: (args, ctx) => {
     const u = build(args[0], ctx);
-    const deg = polyDegreeX(u, ctx.x);
-    if (args.length === 2) return deg >= 0;
-    const n = realNum(build(args[2], ctx));
-    if (n === null || deg !== n) return false;
-    const coeffs = polyCoeffsX(u, ctx.x);
-    return coeffs !== null && !coeffs[deg].evaluate().isSame(0);
+    const v = build(args[1], ctx);
+    if (v.symbol === ctx.x) {
+      const deg = polyDegreeX(u, ctx.x);
+      if (args.length === 2) return deg >= 0;
+      const n = realNum(build(args[2], ctx));
+      if (n === null || deg !== n) return false;
+      const coeffs = polyCoeffsX(u, ctx.x);
+      return coeffs !== null && !coeffs[deg].evaluate().isSame(0);
+    }
+    if (
+      v.operator === 'Power' &&
+      v.ops &&
+      v.ops[0].symbol === ctx.x
+    ) {
+      const k = realNum(v.ops[1]);
+      if (k === null || !Number.isInteger(k) || k < 1) return false;
+      const coeffs = polyCoeffsX(u, ctx.x);
+      if (coeffs === null) return false;
+      if (
+        !coeffs.every(
+          (c, i) => i % k === 0 || c.isSame(0) || zeroQ(c)
+        )
+      )
+        return false;
+      if (args.length === 2) return true;
+      const n = realNum(build(args[2], ctx));
+      const t = trimZeros(coeffs);
+      return n !== null && t.length - 1 === k * n;
+    }
+    // PolyQ[u, v] for an arbitrary expression v — unsupported, fail closed
+    return false;
   },
   LinearQ: (args, ctx) => mapList(args[0], ctx, (u) => linearQ(u, ctx)),
   // LinearMatchQ: matches the *literal* form a. + b.*x (stricter than
@@ -687,7 +720,264 @@ const PRED_FNS: Record<string, PredFn> = {
     if (u.operator !== 'Multiply' || !u.ops) return false;
     return u.ops.some((op) => !op.has(ctx.x));
   },
+
+  // --- binomial/trinomial form predicates (BinomialParts et al.) ---
+
+  // BinomialQ[u, x] / BinomialQ[u, x, n] (first arg may be a List)
+  BinomialQ: (args, ctx) =>
+    mapList(args[0], ctx, (u) => {
+      const p = binomialPartsX(u, ctx.x);
+      if (p === null) return false;
+      if (args.length < 3) return true;
+      return zeroQ(p.n.sub(build(args[2], ctx)));
+    }),
+  TrinomialQ: (args, ctx) =>
+    mapList(args[0], ctx, (u) => {
+      if (trinomialPartsX(u, ctx.x) === null) return false;
+      if (quadraticQX(u, ctx.x)) return false;
+      // Not[MatchQ[u, w_^2 /; BinomialQ[w,x]]]
+      if (
+        u.operator === 'Power' &&
+        u.ops &&
+        realNum(u.ops[1]) === 2 &&
+        binomialPartsX(u.ops[0], ctx.x) !== null
+      )
+        return false;
+      return true;
+    }),
+  GeneralizedBinomialQ: (args, ctx) =>
+    mapList(args[0], ctx, (u) => genBinomialPartsX(u, ctx.x) !== null),
+  GeneralizedTrinomialQ: (args, ctx) =>
+    mapList(args[0], ctx, (u) => genTrinomialPartsX(u, ctx.x) !== null),
+  QuadraticQ: (args, ctx) =>
+    mapList(args[0], ctx, (u) => quadraticQX(u, ctx.x)),
+  PolynomialQ: (args, ctx) =>
+    mapList(args[0], ctx, (u) => polyDegreeX(u, ctx.x) >= 0),
+
+  BinomialMatchQ: (args, ctx) =>
+    mapList(args[0], ctx, (u) => binomialMatchQ(u, ctx.x)),
+  QuadraticMatchQ: (args, ctx) =>
+    mapList(args[0], ctx, (u) => quadraticMatchQ(u, ctx.x)),
+  TrinomialMatchQ: (args, ctx) =>
+    mapList(args[0], ctx, (u) => trinomialMatchQ(u, ctx.x)),
+  GeneralizedBinomialMatchQ: (args, ctx) =>
+    mapList(args[0], ctx, (u) => genBinomialMatchQ(u, ctx.x)),
+  GeneralizedTrinomialMatchQ: (args, ctx) =>
+    mapList(args[0], ctx, (u) => genTrinomialMatchQ(u, ctx.x)),
+
+  // LinearPairQ[u,v,x] — u,v linear, u ≠ x, u/v constant in x
+  LinearPairQ: (args, ctx) => {
+    const x = ctx.x;
+    const u = build(args[0], ctx);
+    const v = build(args[1], ctx);
+    if (polyDegreeX(u, x) !== 1 || polyDegreeX(v, x) !== 1) return false;
+    if (zeroQ(u.sub(ctx.ce.symbol(x)))) return false;
+    const uc = polyCoeffsX(u, x);
+    const vc = polyCoeffsX(v, x);
+    if (uc === null || vc === null) return false;
+    return zeroQ(uc[0].mul(vc[1]).sub(uc[1].mul(vc[0])));
+  },
+
+  PseudoBinomialQ: (args, ctx) =>
+    pseudoBinomialPartsX(build(args[0], ctx), ctx.x) !== null,
+  PseudoBinomialPairQ: (args, ctx) => {
+    const p1 = pseudoBinomialPartsX(build(args[0], ctx), ctx.x);
+    if (p1 === null) return false;
+    const p2 = pseudoBinomialPartsX(build(args[1], ctx), ctx.x);
+    if (p2 === null) return false;
+    return (
+      p1.n === p2.n &&
+      (p1.c.isSame(p2.c) || zeroQ(p1.c.sub(p2.c))) &&
+      (p1.d.isSame(p2.d) || zeroQ(p1.d.sub(p2.d)))
+    );
+  },
+
+  // --- integrability gates (defined in the Rubi rule files) ---
+
+  // IntBinomialQ — 3 arities: [a,b,c,n,m,p,x], [a,b,c,d,n,p,q,x],
+  // [a,b,c,d,e,m,n,p,q,x]
+  IntBinomialQ: (args, ctx) => {
+    const ce = ctx.ce;
+    const v = args.map((a) => build(a, ctx));
+    const third = ce.box(['Rational', 1, 3]) as Expression;
+    const half = ce.box(['Rational', 1, 2]) as Expression;
+    if (args.length === 7) {
+      const [, , , n, m, p] = v;
+      return (
+        igtQE(p, 0) ||
+        (isLiteralRational(m.evaluate()) && intsQE(n, p.mul(2))) ||
+        intQE(safeSimplify(m.add(1).div(n).add(p))) ||
+        ((eqNum(n, 2) || eqNum(n, 4)) && intsQE(m.mul(2), p.mul(4))) ||
+        (eqNum(n, 2) && intQE(p.mul(6)) && (intQE(m) || intQE(m.sub(p)))) ||
+        (eqNum(n, 3) && intQE(m) && intQE(safeSimplify(m.add(1).div(n).add(p))))
+      );
+    }
+    if (args.length === 8) {
+      const [a, b, c, d, n, p, q] = v;
+      return (
+        intsQE(p, q) ||
+        igtQE(p, 0) ||
+        igtQE(q, 0) ||
+        ((eqNum(n, 2) || eqNum(n, 4)) &&
+          (intsQE(p, q.mul(4)) || intsQE(p.mul(4), q))) ||
+        (eqNum(n, 2) &&
+          (intsQE(p.mul(2), q.mul(2)) ||
+            (intsQE(p.mul(3), q) && zeroQ(b.mul(c).add(a.mul(d).mul(3)))) ||
+            (intsQE(p, q.mul(3)) && zeroQ(b.mul(c).mul(3).add(a.mul(d)))))) ||
+        (eqNum(n, 3) &&
+          (intsQE(p.add(third), q) || intsQE(q.add(third), p))) ||
+        (eqNum(n, 3) &&
+          (intsQE(p.add(third.mul(2)), q) || intsQE(q.add(third.mul(2)), p)) &&
+          zeroQ(b.mul(c).add(a.mul(d))))
+      );
+    }
+    if (args.length === 10) {
+      const [a, b, c, d, , m, n, p, q] = v;
+      const bc = b.mul(c);
+      const ad = a.mul(d);
+      return (
+        intsQE(p, q) ||
+        igtQE(p, 0) ||
+        igtQE(q, 0) ||
+        (eqNum(n, 2) &&
+          (intsQE(m, p.mul(2), q.mul(2)) ||
+            intsQE(m.mul(2), p, q.mul(2)) ||
+            intsQE(m.mul(2), p.mul(2), q))) ||
+        (eqNum(n, 4) &&
+          (intsQE(m, p, q.mul(2)) || intsQE(m, p.mul(2), q))) ||
+        (eqNum(n, 2) &&
+          intsQE(m.div(2), p.add(third), q) &&
+          (zeroQ(bc.add(ad.mul(3))) || zeroQ(bc.sub(ad.mul(9))))) ||
+        (eqNum(n, 2) &&
+          intsQE(m.div(2), q.add(third), p) &&
+          (zeroQ(ad.add(bc.mul(3))) || zeroQ(ad.sub(bc.mul(9))))) ||
+        (eqNum(n, 3) &&
+          intsQE(m.add(-1).div(3), q, p.sub(half)) &&
+          (zeroQ(bc.sub(ad.mul(4))) ||
+            zeroQ(bc.add(ad.mul(8))) ||
+            zeroQ(
+              bc.pow(2)
+                .sub(a.mul(b).mul(c).mul(d).mul(20))
+                .sub(a.pow(2).mul(d.pow(2)).mul(8))
+            ))) ||
+        (eqNum(n, 3) &&
+          intsQE(m.add(-1).div(3), p, q.sub(half)) &&
+          (zeroQ(bc.mul(4).sub(ad)) ||
+            zeroQ(bc.mul(8).add(ad)) ||
+            zeroQ(
+              bc.pow(2).mul(8)
+                .add(a.mul(b).mul(c).mul(d).mul(20))
+                .sub(a.pow(2).mul(d.pow(2)))
+            ))) ||
+        (eqNum(n, 3) &&
+          (intsQE(m, q, p.mul(3)) || intsQE(m, p, q.mul(3))) &&
+          zeroQ(bc.add(ad))) ||
+        (eqNum(n, 3) &&
+          (intsQE(m.add(2).div(3), p.add(third.mul(2)), q) ||
+            intsQE(m.add(2).div(3), q.add(third.mul(2)), p))) ||
+        (eqNum(n, 3) &&
+          (intsQE(m.div(3), p.add(third), q) ||
+            intsQE(m.div(3), q.add(third), p)))
+      );
+    }
+    return false;
+  },
+
+  // IntQuadraticQ[a,b,c,d,e,m,p,x] — (d+e·x)^m (a+b·x+c·x²)^p gate
+  IntQuadraticQ: (args, ctx) => {
+    const v = args.map((a) => build(a, ctx));
+    const [a, b, c, d, e, m, p] = v;
+    const third = ctx.ce.box(['Rational', 1, 3]) as Expression;
+    const k = (j: number, l: number, r: number) =>
+      c.pow(2).mul(d.pow(2))
+        .add(b.mul(c).mul(d).mul(e).mul(j))
+        .add(b.pow(2).mul(e.pow(2)).mul(l))
+        .add(a.mul(c).mul(e.pow(2)).mul(r));
+    return (
+      intQE(p) ||
+      igtQE(m, 0) ||
+      intsQE(m.mul(2), p.mul(2)) ||
+      intsQE(m, p.mul(4)) ||
+      (intsQE(m, p.add(third)) &&
+        (zeroQ(k(-1, 1, -3)) || zeroQ(k(-1, -2, 9))))
+    );
+  },
+
+  // --- sqrt-form predicates ---
+
+  NiceSqrtQ: (args, ctx) => {
+    const u = build(args[0], ctx).evaluate();
+    if (isLiteralRational(u)) return (realNum(u) ?? 0) > 0;
+    return niceSqrtAux(u);
+  },
+  FractionalPowerFactorQ: (args, ctx) =>
+    fracPowerFactorQ(build(args[0], ctx)),
+  SimplerSqrtQ: (args, ctx) =>
+    simplerSqrtQ(build(args[0], ctx).evaluate(), build(args[1], ctx).evaluate()),
+
+  // --- function-class predicates ---
+
+  RationalFunctionQ: (args, ctx) =>
+    rationalFnQ(build(args[0], ctx), ctx.x),
+  AlgebraicFunctionQ: (args, ctx) =>
+    algebraicFnQ(
+      build(args[0], ctx),
+      ctx.x,
+      args.length > 2 ? evalCondition(args[2], ctx) : false
+    ),
+
+  // --- WL structural/numeric builtins used in rule conditions ---
+
+  SumQ: (args, ctx) => {
+    const u = build(args[0], ctx);
+    return u.operator === 'Add' || u.operator === 'Subtract';
+  },
+  NonsumQ: (args, ctx) => {
+    const u = build(args[0], ctx);
+    return u.operator !== 'Add' && u.operator !== 'Subtract';
+  },
+  AtomQ: (args, ctx) => !build(args[0], ctx).ops,
+  OddQ: (args, ctx) => {
+    const r = realNum(build(args[0], ctx).evaluate());
+    return r !== null && Number.isInteger(r) && Math.abs(r % 2) === 1;
+  },
+  EvenQ: (args, ctx) => {
+    const r = realNum(build(args[0], ctx).evaluate());
+    return r !== null && Number.isInteger(r) && r % 2 === 0;
+  },
+  // raw relational heads (older Rubi guards; symbolic operands ⇒ false)
+  Less: (args, ctx) => cmpChain(args, ctx, (a, b) => a < b),
+  Greater: (args, ctx) => cmpChain(args, ctx, (a, b) => a > b),
+  LessEqual: (args, ctx) => cmpChain(args, ctx, (a, b) => a <= b),
+  GreaterEqual: (args, ctx) => cmpChain(args, ctx, (a, b) => a >= b),
+  Equal: (args, ctx) => cmpChain(args, ctx, (a, b) => a === b),
+  Unequal: (args, ctx) => cmpChain(args, ctx, (a, b) => a !== b),
 };
+
+// IntegerQ-style helpers over built expressions (IntBinomialQ/IntQuadraticQ)
+function intQE(e: Expression): boolean {
+  return isLiteralInteger(e.evaluate());
+}
+function intsQE(...es: Expression[]): boolean {
+  return es.every(intQE);
+}
+function igtQE(e: Expression, k: number): boolean {
+  const ev = e.evaluate();
+  return isLiteralInteger(ev) && (realNum(ev) ?? -Infinity) > k;
+}
+function eqNum(e: Expression, k: number): boolean {
+  const r = realNum(e.evaluate());
+  return r !== null ? r === k : zeroQ(e.sub(e.engine.number(k)));
+}
+
+/** Rubi QuadraticQ (scalar case): PolyQ[u,x,2] and not a pure c·x² */
+function quadraticQX(u: Expression, x: string): boolean {
+  const c = polyCoeffsX(u, x);
+  if (c === null) return false;
+  const t = trimZeros(c);
+  if (t.length !== 3) return false;
+  return !(t[0].isSame(0) && t[1].isSame(0));
+}
 
 function cmpChain(
   args: Json[],
@@ -912,6 +1202,964 @@ function leafCount(e: Expression): number {
 }
 
 // ---------------------------------------------------------------------------
+// Binomial/trinomial decomposition (Rubi BinomialParts/TrinomialParts and
+// the generalized/pseudo variants) — see IntegrationUtilityFunctions.m.
+// All return null where Rubi returns False (fail-closed).
+// ---------------------------------------------------------------------------
+
+/** Rt[u, n] = RtAux[TogetherSimplify[u], n] — Rubi's canonical n-th root.
+ * RtAux DISTRIBUTES the root over products/quotients and pairs sign flips
+ * with negative-form sum factors. This composition is branch-unsound in
+ * general; it is exactly Mathematica's principal-branch rendering, which
+ * Rubi's rules rely on so that paired complex factors cancel phases (the
+ * elliptic branch-phase cluster: e^{iπ/4} errors came from taking the root
+ * of the whole quotient instead of the split). */
+function rtExpr(u: Expression, n: number | Expression): Expression {
+  const ce = u.engine;
+  const nn = typeof n === 'number' ? ce.number(n) : n;
+  const nv = realNum(nn);
+  const v = safeSimplify(u); // ≈ TogetherSimplify
+  if (nv === null || !Number.isInteger(nv) || nv < 1)
+    return v.pow(ce.One.div(nn)).evaluate();
+  return rtAux(v, nv);
+}
+
+/** literal principal root u^(1/n) (Rubi NthRoot) */
+function nthRoot(u: Expression, n: number): Expression {
+  const ce = u.engine;
+  if (n === 1) return u;
+  return u.pow(ce.box(['Rational', 1, n]) as Expression).evaluate();
+}
+
+/** flatten Multiply/Divide/Negate into a factor list (denominator factors
+ * become synthetic Power(f, −1) so the RtAux power/odd-exponent logic
+ * sees them) */
+function rtFactors(u: Expression): Expression[] {
+  const ce = u.engine;
+  const out: Expression[] = [];
+  const walk = (e: Expression, inv: boolean): void => {
+    if (e.operator === 'Multiply' && e.ops) {
+      for (const f of e.ops) walk(f, inv);
+      return;
+    }
+    if (e.operator === 'Divide' && e.ops) {
+      walk(e.ops[0], inv);
+      walk(e.ops[1], !inv);
+      return;
+    }
+    if (e.operator === 'Negate' && e.ops) {
+      out.push(ce.NegativeOne);
+      walk(e.ops[0], inv);
+      return;
+    }
+    // unit factors regenerate the same product after canonical mul
+    // (1/(d·w) → [1, d⁻¹, w⁻¹] → pull 1 → rest re-canonicalizes to u) —
+    // skip them in either position
+    if (e.isSame(1)) return;
+    if (!inv) {
+      out.push(e);
+      return;
+    }
+    if (e.operator === 'Power' && e.ops)
+      out.push(ce._fn('Power', [e.ops[0], e.ops[1].neg()]));
+    else out.push(ce._fn('Power', [e, ce.NegativeOne]));
+  };
+  walk(u, false);
+  return out;
+}
+
+const productOf = (ce: ComputeEngine, fs: Expression[]): Expression =>
+  fs.length === 0
+    ? ce.One
+    : fs.length === 1
+      ? fs[0]
+      : fs.reduce((p, f) => p.mul(f));
+
+// Rubi NegQ[u] over a term (negative form per the PosAux heuristics)
+function negFormQ(u: Expression): boolean {
+  return !posQ(u) && !zeroQ(u);
+}
+
+/** sum terms of a base (Add/Subtract), through odd literal powers
+ * (Rubi SumBaseQ companions); null when not a sum base */
+function sumBaseTerms(u: Expression): Expression[] | null {
+  if (u.operator === 'Add' || u.operator === 'Subtract')
+    return sumTermsX(u);
+  if (u.operator === 'Power' && u.ops) {
+    const k = realNum(u.ops[1]);
+    if (k !== null && Number.isInteger(k) && Math.abs(k % 2) === 1)
+      return sumBaseTerms(u.ops[0]);
+  }
+  return null;
+}
+const sumBaseQ = (u: Expression): boolean => sumBaseTerms(u) !== null;
+const negSumBaseQ = (u: Expression): boolean => {
+  const ts = sumBaseTerms(u);
+  return ts !== null && negFormQ(mmaFirstTerm(ts));
+};
+const allNegTermQ = (u: Expression): boolean => {
+  const ts = sumBaseTerms(u);
+  if (ts !== null) return ts.every(negFormQ);
+  return negFormQ(u);
+};
+const someNegTermQ = (u: Expression): boolean => {
+  const ts = sumBaseTerms(u);
+  if (ts !== null) return ts.some(negFormQ);
+  return negFormQ(u);
+};
+const atomBaseQ = (u: Expression): boolean => {
+  if (!u.ops) return true;
+  if (u.operator === 'Power' && u.ops) {
+    const k = realNum(u.ops[1]);
+    if (k !== null && Number.isInteger(k) && Math.abs(k % 2) === 1)
+      return atomBaseQ(u.ops[0]);
+  }
+  return false;
+};
+
+/** Rubi RtAux[u, n] (TrigSquare and the complex-integer basis case
+ * omitted — not exercised by Chapter 1) */
+let rtAuxDepth = 0;
+function rtAux(u: Expression, n: number): Expression {
+  // recursion backstop: the WL definition recurses through rewritten
+  // forms whose CE canonicalizations can re-create each other — fall
+  // back to the literal principal root rather than overflow
+  if (rtAuxDepth > 40) {
+    if (process.env.RUBI_DEBUG_RT)
+      console.error(`rtAux depth cap: ${u.toString().slice(0, 120)}`);
+    return nthRoot(u, n);
+  }
+  rtAuxDepth++;
+  try {
+    return rtAuxBody(u, n);
+  } finally {
+    rtAuxDepth--;
+  }
+}
+
+function rtAuxBody(u: Expression, n: number): Expression {
+  const ce = u.engine;
+  // PowerQ: base^(exp/n)
+  if (u.operator === 'Power' && u.ops)
+    return u.ops[0].pow(u.ops[1].div(n)).evaluate();
+  if (u.operator === 'Sqrt' && u.ops)
+    return u.ops[0]
+      .pow((ce.box(['Rational', 1, 2]) as Expression).div(n))
+      .evaluate();
+  if (u.operator === 'Root' && u.ops && realNum(u.ops[1]) !== null)
+    return u.ops[0].pow(ce.One.div(u.ops[1]).div(n)).evaluate();
+
+  const fs = rtFactors(u);
+  if (fs.length > 1) {
+    // GtQ/LtQ-style numeric value (covers exact irrationals like √2)
+    const numVal = (f: Expression): number | null => {
+      const r = realNum(f.evaluate());
+      if (r !== null) return Number.isFinite(r) ? r : null;
+      const nv = f.N();
+      if (isNumber(nv) && typeof nv.re === 'number' && nv.im === 0)
+        return Number.isFinite(nv.re) ? nv.re : null;
+      return null;
+    };
+    // 1. pull a provably-positive factor out
+    const iPos = fs.findIndex((f) => {
+      const r = numVal(f);
+      return r !== null && r > 0;
+    });
+    if (iPos >= 0)
+      return rtAux(fs[iPos], n).mul(
+        rtAux(productOf(ce, fs.filter((_, i) => i !== iPos)), n)
+      );
+    // 2. a numeric-negative factor
+    const iNeg = fs.findIndex((f) => {
+      const r = numVal(f);
+      return r !== null && r < 0;
+    });
+    if (iNeg >= 0) {
+      const c = fs[iNeg];
+      const rest = fs.filter((_, i) => i !== iNeg);
+      if (c.isSame(-1)) {
+        // single inverted power: -1/w^k → 1/RtAux[-w^(-k)] — push the
+        // sign inside the inversion
+        if (
+          rest.length === 1 &&
+          rest[0].operator === 'Power' &&
+          rest[0].ops
+        ) {
+          const [w, k] = rest[0].ops;
+          const kv = realNum(k);
+          if (kv !== null && kv < 0)
+            return ce.One.div(rtAux(w.neg().pow(-kv).evaluate(), n));
+        }
+        if (rest.length > 1) {
+          // pair the -1 with the best sum-base factor
+          const pickBy = (
+            ...preds: ((f: Expression) => boolean)[]
+          ): number => {
+            for (const p of preds) {
+              const i = rest.findIndex(p);
+              if (i >= 0) return i;
+            }
+            return -1;
+          };
+          let i = -1;
+          if (rest.some(sumBaseQ))
+            i = pickBy(
+              (f) => sumBaseQ(f) && allNegTermQ(f),
+              (f) => negSumBaseQ(f),
+              (f) => sumBaseQ(f) && someNegTermQ(f),
+              sumBaseQ
+            );
+          if (i < 0) i = pickBy(atomBaseQ);
+          if (i < 0) i = 0;
+          return rtAux(rest[i].neg().evaluate(), n).mul(
+            rtAux(productOf(ce, rest.filter((_, j) => j !== i)), n)
+          );
+        }
+        // -1 · single non-power factor
+        if (n % 2 === 1) return rtAux(productOf(ce, rest), n).neg();
+        return nthRoot(u, n);
+      }
+      // c < 0, c ≠ -1: RtAux[-c]·RtAux[-rest]
+      return rtAux(c.neg().evaluate(), n).mul(
+        rtAux(productOf(ce, rest).neg().evaluate(), n)
+      );
+    }
+    // 3./4. double sign-flip pairings across two sum-base factors
+    const iAll = fs.findIndex((f) => sumBaseQ(f) && allNegTermQ(f));
+    if (iAll >= 0 && fs.some((f, i) => i !== iAll && sumBaseQ(f))) {
+      const rest = productOf(ce, fs.filter((_, i) => i !== iAll));
+      return rtAux(fs[iAll].neg().evaluate(), n).mul(
+        rtAux(rest.neg().evaluate(), n)
+      );
+    }
+    const iNegSum = fs.findIndex(negSumBaseQ);
+    if (
+      iNegSum >= 0 &&
+      fs.some((f, i) => i !== iNegSum && negSumBaseQ(f))
+    ) {
+      const rest = productOf(ce, fs.filter((_, i) => i !== iNegSum));
+      return rtAux(fs[iNegSum].neg().evaluate(), n).mul(
+        rtAux(rest.neg().evaluate(), n)
+      );
+    }
+    // 5. distribute the root over every factor
+    return productOf(ce, fs.map((f) => rtAux(f, n)));
+  }
+
+  // non-product
+  const r = realNum(u);
+  if (n % 2 === 1 && r !== null && r < 0)
+    return rtAux(u.neg().evaluate(), n).neg();
+  if (n % 2 === 1 && negFormQ(u) && posQ(safeSimplify(u.neg())))
+    return rtAux(safeSimplify(u.neg()), n).neg();
+  return nthRoot(u, n);
+}
+
+/** structural monomial split u = coef·x^exp (coef and exp x-free; exp may
+ * be symbolic). No expansion — mirrors Mathematica's literal matching of
+ * a_.*x_^n_. terms over CE canonical form (Divide/Negate/Sqrt present). */
+function monoPartsX(
+  u: Expression,
+  x: string
+): { coef: Expression; exp: Expression } | null {
+  const ce = u.engine;
+  if (!u.has(x)) return { coef: u, exp: ce.Zero };
+  if (u.symbol === x) return { coef: ce.One, exp: ce.One };
+  const ops = u.ops;
+  if (!ops) return null;
+  switch (u.operator) {
+    case 'Power': {
+      if (ops[1].has(x)) return null;
+      if (ops[0].symbol === x) return { coef: ce.One, exp: ops[1] };
+      const k = realNum(ops[1]);
+      if (k !== null && Number.isInteger(k)) {
+        const m = monoPartsX(ops[0], x);
+        if (m !== null)
+          return {
+            coef: m.coef.pow(k).evaluate(),
+            exp: m.exp.mul(k).evaluate(),
+          };
+      }
+      return null;
+    }
+    case 'Sqrt':
+      if (ops[0].symbol === x)
+        return { coef: ce.One, exp: ce.box(['Rational', 1, 2]) };
+      return null;
+    case 'Root': {
+      if (ops[0].symbol === x && !ops[1].has(x))
+        return { coef: ce.One, exp: ce.One.div(ops[1]).evaluate() };
+      return null;
+    }
+    case 'Negate': {
+      const m = monoPartsX(ops[0], x);
+      return m === null ? null : { coef: m.coef.neg(), exp: m.exp };
+    }
+    case 'Multiply': {
+      let coef = ce.One;
+      let exp: Expression = ce.Zero;
+      for (const f of ops) {
+        if (!f.has(x)) {
+          coef = coef.mul(f);
+          continue;
+        }
+        const m = monoPartsX(f, x);
+        if (m === null) return null;
+        coef = coef.mul(m.coef);
+        exp = exp.add(m.exp);
+      }
+      return { coef: coef.evaluate(), exp: exp.evaluate() };
+    }
+    case 'Divide': {
+      const mn = monoPartsX(ops[0], x);
+      const md = monoPartsX(ops[1], x);
+      if (mn === null || md === null) return null;
+      return {
+        coef: mn.coef.div(md.coef).evaluate(),
+        exp: mn.exp.sub(md.exp).evaluate(),
+      };
+    }
+  }
+  return null;
+}
+
+/** flatten a sum into its terms (Add/Subtract/Negate normalized) */
+function sumTermsX(u: Expression): Expression[] {
+  if (u.operator === 'Add' && u.ops) return u.ops.flatMap(sumTermsX);
+  if (u.operator === 'Subtract' && u.ops)
+    return [...sumTermsX(u.ops[0]), ...sumTermsX(u.ops[1]).map((t) => t.neg())];
+  if (u.operator === 'Negate' && u.ops)
+    return sumTermsX(u.ops[0]).map((t) => t.neg());
+  return [u];
+}
+
+/** group the structural sum terms of u into (exponent → summed coefficient)
+ * classes; null when some term is not a structural monomial in x */
+function monoClassesX(
+  u: Expression,
+  x: string
+): { exp: Expression; coef: Expression }[] | null {
+  const classes: { exp: Expression; coef: Expression }[] = [];
+  for (const t of sumTermsX(u)) {
+    const m = monoPartsX(t, x);
+    if (m === null) return null;
+    const cls = classes.find(
+      (c) => c.exp.isSame(m.exp) || zeroQ(c.exp.sub(m.exp))
+    );
+    if (cls) cls.coef = cls.coef.add(m.coef).evaluate();
+    else classes.push({ exp: m.exp, coef: m.coef });
+  }
+  return classes.filter((c) => !c.coef.isSame(0));
+}
+
+type BinParts = { a: Expression; b: Expression; n: Expression };
+type TriParts = {
+  a: Expression;
+  b: Expression;
+  c: Expression;
+  n: Expression;
+};
+
+/** Rubi BinomialParts[u,x] → {a,b,n} with u ≡ a + b·x^n (n ≠ 0, b ≠ 0) */
+function binomialPartsX(u: Expression, x: string): BinParts | null {
+  const ce = u.engine;
+  if (!u.has(x)) return null;
+
+  // polynomial branch (Rubi: Exponent/Coefficient, auto-expands; on
+  // failure does NOT fall through to the structural branches)
+  const coeffs = polyCoeffsX(u, x);
+  if (coeffs !== null) {
+    const nz: number[] = [];
+    for (let i = 1; i < coeffs.length; i++)
+      if (!coeffs[i].isSame(0) && !zeroQ(coeffs[i])) nz.push(i);
+    if (nz.length !== 1) return null;
+    return { a: coeffs[0], b: coeffs[nz[0]], n: ce.number(nz[0]) };
+  }
+
+  // structural monomial b·x^n (symbolic/fractional exponent)
+  const m = monoPartsX(u, x);
+  if (m !== null)
+    return m.exp.isSame(0) ? null : { a: ce.Zero, b: m.coef, n: m.exp };
+
+  const ops = u.ops;
+  if (!ops) return null;
+  switch (u.operator) {
+    case 'Negate': {
+      const p = binomialPartsX(ops[0], x);
+      return p === null
+        ? null
+        : { a: p.a.neg().evaluate(), b: p.b.neg().evaluate(), n: p.n };
+    }
+    case 'Divide': {
+      if (ops[1].has(x)) return null;
+      const p = binomialPartsX(ops[0], x);
+      return p === null
+        ? null
+        : {
+            a: p.a.div(ops[1]).evaluate(),
+            b: p.b.div(ops[1]).evaluate(),
+            n: p.n,
+          };
+    }
+    case 'Multiply': {
+      let scale = ce.One;
+      const parts: BinParts[] = [];
+      for (const f of ops) {
+        if (!f.has(x)) {
+          scale = scale.mul(f);
+          continue;
+        }
+        const p = binomialPartsX(f, x);
+        if (p === null) return null;
+        parts.push(p);
+      }
+      if (parts.length === 0) return null;
+      let acc: BinParts | null = parts[0];
+      for (let i = 1; i < parts.length && acc !== null; i++)
+        acc = combineBinProduct(acc, parts[i]);
+      if (acc === null) return null;
+      return {
+        a: scale.mul(acc.a).evaluate(),
+        b: scale.mul(acc.b).evaluate(),
+        n: acc.n,
+      };
+    }
+    case 'Add':
+    case 'Subtract': {
+      let constA = ce.Zero;
+      let acc: BinParts | null = null;
+      for (const t of sumTermsX(u)) {
+        if (!t.has(x)) {
+          constA = constA.add(t);
+          continue;
+        }
+        const p = binomialPartsX(t, x);
+        if (p === null) return null;
+        if (acc === null) acc = p;
+        else if (zeroQ(acc.n.sub(p.n)))
+          acc = {
+            a: acc.a.add(p.a).evaluate(),
+            b: acc.b.add(p.b).evaluate(),
+            n: acc.n,
+          };
+        else return null;
+      }
+      if (acc === null) return null;
+      return { a: acc.a.add(constA).evaluate(), b: acc.b, n: acc.n };
+    }
+  }
+  return null;
+}
+
+/** Rubi BinomialParts product combination: (a+b·x^m)·(c+d·x^n) */
+function combineBinProduct(p: BinParts, q: BinParts): BinParts | null {
+  const aZ = p.a.isSame(0) || zeroQ(p.a);
+  const cZ = q.a.isSame(0) || zeroQ(q.a);
+  const { b, n: m } = p;
+  const { b: d, n } = q;
+  if (aZ && cZ)
+    return { a: p.a.engine.Zero, b: b.mul(d).evaluate(), n: m.add(n).evaluate() };
+  if (aZ && zeroQ(m.add(n)))
+    return { a: b.mul(d).evaluate(), b: b.mul(q.a).evaluate(), n: m };
+  if (cZ && zeroQ(m.add(n)))
+    return { a: b.mul(d).evaluate(), b: p.a.mul(d).evaluate(), n };
+  if (zeroQ(m.sub(n)) && zeroQ(p.a.mul(d).add(b.mul(q.a))))
+    return {
+      a: p.a.mul(q.a).evaluate(),
+      b: b.mul(d).evaluate(),
+      n: m.mul(2).evaluate(),
+    };
+  return null;
+}
+
+/** Rubi TrinomialParts[u,x] → {a,b,c,n} with u ≡ a + b·x^n + c·x^(2n) */
+function trinomialPartsX(u: Expression, x: string): TriParts | null {
+  const ce = u.engine;
+  if (!u.has(x)) return null;
+
+  const coeffs0 = polyCoeffsX(u, x);
+  if (coeffs0 !== null) {
+    const coeffs = trimZeros(coeffs0);
+    const L = coeffs.length;
+    if (L < 3 || L % 2 === 0) return null;
+    const mid = (L - 1) / 2;
+    if (coeffs[mid].isSame(0) || zeroQ(coeffs[mid])) return null;
+    for (let i = 1; i < L - 1; i++)
+      if (i !== mid && !(coeffs[i].isSame(0) || zeroQ(coeffs[i]))) return null;
+    return { a: coeffs[0], b: coeffs[mid], c: coeffs[L - 1], n: ce.number(mid) };
+  }
+
+  const ops = u.ops;
+  if (!ops) return null;
+  const scaleTri = (s: Expression, t: TriParts): TriParts => ({
+    a: s.mul(t.a).evaluate(),
+    b: s.mul(t.b).evaluate(),
+    c: s.mul(t.c).evaluate(),
+    n: t.n,
+  });
+  switch (u.operator) {
+    case 'Power': {
+      // w^2 with w a binomial (a ≠ 0) → (a + b·x^n)² trinomial
+      if (realNum(ops[1]) !== 2) return null;
+      const p = binomialPartsX(ops[0], x);
+      if (p === null || p.a.isSame(0) || zeroQ(p.a)) return null;
+      return {
+        a: p.a.pow(2).evaluate(),
+        b: p.a.mul(p.b).mul(2).evaluate(),
+        c: p.b.pow(2).evaluate(),
+        n: p.n,
+      };
+    }
+    case 'Negate': {
+      const t = trinomialPartsX(ops[0], x);
+      return t === null ? null : scaleTri(ce.NegativeOne, t);
+    }
+    case 'Divide': {
+      if (ops[1].has(x)) return null;
+      const t = trinomialPartsX(ops[0], x);
+      return t === null ? null : scaleTri(ce.One.div(ops[1]), t);
+    }
+    case 'Multiply': {
+      let scale = ce.One;
+      const dep: Expression[] = [];
+      for (const f of ops) {
+        if (!f.has(x)) scale = scale.mul(f);
+        else dep.push(f);
+      }
+      if (dep.length === 1) {
+        const t = trinomialPartsX(dep[0], x);
+        return t === null ? null : scaleTri(scale, t);
+      }
+      if (dep.length === 2) {
+        const p1 = binomialPartsX(dep[0], x);
+        const p2 = binomialPartsX(dep[1], x);
+        if (p1 === null || p2 === null || !zeroQ(p1.n.sub(p2.n))) return null;
+        const mid = p1.a.mul(p2.b).add(p1.b.mul(p2.a)).evaluate();
+        if (zeroQ(mid)) return null;
+        return scaleTri(scale, {
+          a: p1.a.mul(p2.a).evaluate(),
+          b: mid,
+          c: p1.b.mul(p2.b).evaluate(),
+          n: p1.n,
+        });
+      }
+      return null;
+    }
+    case 'Add':
+    case 'Subtract': {
+      // fold terms through a mixed binomial/trinomial accumulator,
+      // transcribing the Rubi sum cases
+      let constA = ce.Zero;
+      type Acc =
+        | { kind: 'bin'; p: BinParts }
+        | { kind: 'tri'; p: TriParts }
+        | null;
+      let acc: Acc = null;
+      for (const t of sumTermsX(u)) {
+        if (!t.has(x)) {
+          constA = constA.add(t);
+          continue;
+        }
+        const tri = trinomialPartsX(t, x);
+        const next: Acc = tri
+          ? { kind: 'tri', p: tri }
+          : ((): Acc => {
+              const bin = binomialPartsX(t, x);
+              return bin ? { kind: 'bin', p: bin } : null;
+            })();
+        if (next === null) return null;
+        if (acc === null) {
+          acc = next;
+          continue;
+        }
+        acc = combineTriSum(acc, next);
+        if (acc === null) return null;
+      }
+      if (acc === null || acc.kind !== 'tri') return null;
+      return {
+        a: acc.p.a.add(constA).evaluate(),
+        b: acc.p.b,
+        c: acc.p.c,
+        n: acc.p.n,
+      };
+    }
+  }
+  return null;
+}
+
+function combineTriSum(
+  u: { kind: 'bin'; p: BinParts } | { kind: 'tri'; p: TriParts },
+  v: { kind: 'bin'; p: BinParts } | { kind: 'tri'; p: TriParts }
+):
+  | { kind: 'bin'; p: BinParts }
+  | { kind: 'tri'; p: TriParts }
+  | null {
+  // bin + bin → trinomial when one exponent doubles the other
+  if (u.kind === 'bin' && v.kind === 'bin') {
+    const { a: a3, b: b3, n: m } = u.p;
+    const { a: a4, b: b4, n: k } = v.p;
+    if (zeroQ(m.sub(k.mul(2))))
+      return {
+        kind: 'tri',
+        p: { a: a3.add(a4).evaluate(), b: b4, c: b3, n: k },
+      };
+    if (zeroQ(k.sub(m.mul(2))))
+      return {
+        kind: 'tri',
+        p: { a: a3.add(a4).evaluate(), b: b3, c: b4, n: m },
+      };
+    // same exponent merges to a binomial accumulator
+    if (zeroQ(m.sub(k)))
+      return {
+        kind: 'bin',
+        p: { a: a3.add(a4).evaluate(), b: b3.add(b4).evaluate(), n: m },
+      };
+    return null;
+  }
+  if (u.kind === 'bin' && v.kind === 'tri') return combineTriSum(v, u);
+  if (u.kind === 'tri' && v.kind === 'bin') {
+    const { a: a1, b: b1, c: c1, n } = u.p;
+    const { a: a4, b: b4, n: k } = v.p;
+    if (zeroQ(k.sub(n))) {
+      const b = b1.add(b4).evaluate();
+      if (zeroQ(b)) return null;
+      return { kind: 'tri', p: { a: a1.add(a4).evaluate(), b, c: c1, n } };
+    }
+    if (zeroQ(k.sub(n.mul(2)))) {
+      const c = c1.add(b4).evaluate();
+      if (zeroQ(c)) return null;
+      return { kind: 'tri', p: { a: a1.add(a4).evaluate(), b: b1, c, n } };
+    }
+    return null;
+  }
+  // tri + tri
+  if (u.kind === 'tri' && v.kind === 'tri') {
+    if (!zeroQ(u.p.n.sub(v.p.n))) return null;
+    const b = u.p.b.add(v.p.b).evaluate();
+    const c = u.p.c.add(v.p.c).evaluate();
+    if (zeroQ(b) || zeroQ(c)) return null;
+    return {
+      kind: 'tri',
+      p: { a: u.p.a.add(v.p.a).evaluate(), b, c, n: u.p.n },
+    };
+  }
+  return null;
+}
+
+type GenBinParts = {
+  a: Expression;
+  b: Expression;
+  n: Expression;
+  q: Expression;
+};
+type GenTriParts = {
+  a: Expression;
+  b: Expression;
+  c: Expression;
+  n: Expression;
+  q: Expression;
+};
+
+/** Rubi GeneralizedBinomialParts → {a,b,n,q}: u ≡ a·x^q + b·x^n, PosQ[n−q] */
+function genBinomialPartsX(u: Expression, x: string): GenBinParts | null {
+  if (!u.has(x)) return null;
+  const classes = monoClassesX(u, x);
+  if (classes !== null) {
+    if (classes.length !== 2) return null;
+    const [c1, c2] = classes;
+    if (c1.exp.isSame(0) || c2.exp.isSame(0)) return null;
+    // n is the "larger" exponent (PosQ[n−q])
+    const nFirst = posQ(safeSimplify(c1.exp.sub(c2.exp)));
+    const [qc, nc] = nFirst ? [c2, c1] : [c1, c2];
+    return { a: qc.coef, b: nc.coef, n: nc.exp, q: qc.exp };
+  }
+  // unexpanded product s·x^m·v with v (generalized) binomial
+  const split = splitMonoFactor(u, x);
+  if (split === null) return null;
+  const { scale, exp: mExp, rest } = split;
+  if (rest === null) return null;
+  const gp = genBinomialPartsX(rest, x);
+  if (gp !== null) {
+    const n = mExp.add(gp.n).evaluate();
+    const q = mExp.add(gp.q).evaluate();
+    if (zeroQ(n) || zeroQ(q)) return null;
+    return {
+      a: scale.mul(gp.a).evaluate(),
+      b: scale.mul(gp.b).evaluate(),
+      n,
+      q,
+    };
+  }
+  const bp = binomialPartsX(rest, x);
+  if (bp !== null && !mExp.isSame(0)) {
+    if (bp.a.isSame(0) || zeroQ(bp.a)) return null;
+    const n = mExp.add(bp.n).evaluate();
+    if (zeroQ(n)) return null;
+    return {
+      a: scale.mul(bp.a).evaluate(),
+      b: scale.mul(bp.b).evaluate(),
+      n,
+      q: mExp,
+    };
+  }
+  return null;
+}
+
+/** Rubi GeneralizedTrinomialParts → {a,b,c,n,q}:
+ * u ≡ a·x^q + b·x^n + c·x^(2n−q) */
+function genTrinomialPartsX(u: Expression, x: string): GenTriParts | null {
+  if (!u.has(x)) return null;
+  const classes = monoClassesX(u, x);
+  if (classes !== null) {
+    if (classes.length !== 3) return null;
+    if (classes.some((c) => c.exp.isSame(0))) return null;
+    // find the middle exponent n with 2n = q + r
+    for (let i = 0; i < 3; i++) {
+      const [j, k] = [0, 1, 2].filter((idx) => idx !== i);
+      const ei = classes[i].exp;
+      const ej = classes[j].exp;
+      const ek = classes[k].exp;
+      if (!zeroQ(ei.mul(2).sub(ej.add(ek)))) continue;
+      // q is the smaller of the two outer exponents (Plus ordering)
+      const jNum = realNum(ej);
+      const kNum = realNum(ek);
+      const jIsQ =
+        jNum !== null && kNum !== null
+          ? jNum < kNum
+          : !posQ(safeSimplify(ej.sub(ek)));
+      const [qc, rc] = jIsQ ? [classes[j], classes[k]] : [classes[k], classes[j]];
+      return { a: qc.coef, b: classes[i].coef, c: rc.coef, n: ei, q: qc.exp };
+    }
+    return null;
+  }
+  const split = splitMonoFactor(u, x);
+  if (split === null || split.rest === null) return null;
+  const { scale, exp: mExp, rest } = split;
+  const gt = genTrinomialPartsX(rest, x);
+  if (gt !== null) {
+    return {
+      a: scale.mul(gt.a).evaluate(),
+      b: scale.mul(gt.b).evaluate(),
+      c: scale.mul(gt.c).evaluate(),
+      n: mExp.add(gt.n).evaluate(),
+      q: mExp.add(gt.q).evaluate(),
+    };
+  }
+  const tp = trinomialPartsX(rest, x);
+  if (tp !== null && !mExp.isSame(0)) {
+    if (tp.a.isSame(0) || zeroQ(tp.a)) return null;
+    return {
+      a: scale.mul(tp.a).evaluate(),
+      b: scale.mul(tp.b).evaluate(),
+      c: scale.mul(tp.c).evaluate(),
+      n: mExp.add(tp.n).evaluate(),
+      q: mExp,
+    };
+  }
+  return null;
+}
+
+/** split u = scale·x^m·rest where scale and m are x-free and rest is the
+ * single non-monomial x-dependent factor (null when u has no such shape) */
+function splitMonoFactor(
+  u: Expression,
+  x: string
+): { scale: Expression; exp: Expression; rest: Expression | null } | null {
+  const ce = u.engine;
+  if (u.operator !== 'Multiply' || !u.ops) return null;
+  let scale = ce.One;
+  let exp: Expression = ce.Zero;
+  let rest: Expression | null = null;
+  for (const f of u.ops) {
+    if (!f.has(x)) {
+      scale = scale.mul(f);
+      continue;
+    }
+    const m = monoPartsX(f, x);
+    if (m !== null) {
+      scale = scale.mul(m.coef);
+      exp = exp.add(m.exp);
+      continue;
+    }
+    if (rest !== null) return null;
+    rest = f;
+  }
+  return { scale: scale.evaluate(), exp: exp.evaluate(), rest };
+}
+
+type PseudoBinParts = {
+  a: Expression;
+  b: Expression;
+  c: Expression;
+  d: Expression;
+  n: number;
+};
+
+/** Rubi PseudoBinomialParts → {a,1,c,d,n}: u ≡ a + (c+d·x)^n, n > 2 */
+function pseudoBinomialPartsX(u: Expression, x: string): PseudoBinParts | null {
+  const ce = u.engine;
+  const coeffs0 = polyCoeffsX(u, x);
+  if (coeffs0 === null) return null;
+  const coeffs = trimZeros(coeffs0);
+  const n = coeffs.length - 1;
+  if (n <= 2) return null;
+  const d = rtExpr(coeffs[n], n);
+  const c = coeffs[n - 1].div(ce.number(n).mul(d.pow(n - 1))).evaluate();
+  const X = ce.symbol(x);
+  const a = safeSimplify(u.sub(c.add(d.mul(X)).pow(n)));
+  if (zeroQ(a) || a.has(x)) return null;
+  return { a, b: ce.One, c, d, n };
+}
+
+/** Rubi FractionalPowerFactorQ: a factor of u is a complex constant or a
+ * fractional power */
+function fracPowerFactorQ(u: Expression): boolean {
+  if (!u.ops) return isNumber(u) && typeof u.im === 'number' && u.im !== 0;
+  switch (u.operator) {
+    case 'Power': {
+      const e = u.ops[1];
+      return isLiteralRational(e) && e.isInteger === false;
+    }
+    case 'Sqrt':
+      return true;
+    case 'Root':
+      return true;
+    case 'Negate':
+      return fracPowerFactorQ(u.ops[0]);
+    case 'Multiply':
+    case 'Divide':
+      return u.ops.some(fracPowerFactorQ);
+  }
+  return false;
+}
+
+/** NiceSqrtQ body for non-rational u: would Rt[u,2] be free of fractional
+ * powers and complex factors? Mathematica's RtAux extracts even powers
+ * (Rt[b²,2] = b); CE's sound Power fold keeps √(b²), so test the even-power
+ * structure directly instead of inspecting the folded root. */
+function niceSqrtAux(u: Expression): boolean {
+  if (isLiteralRational(u))
+    return (realNum(u) ?? -1) > 0 && isLiteralRational(rtExpr(u, 2));
+  if (u.operator === 'Power' && u.ops) {
+    const k = realNum(u.ops[1]);
+    return k !== null && Number.isInteger(k) && k % 2 === 0;
+  }
+  if (u.operator === 'Multiply' && u.ops) return u.ops.every(niceSqrtAux);
+  return !fracPowerFactorQ(rtExpr(u, 2));
+}
+
+/** Rubi SimplerSqrtQ[u,v] — is √u simpler than √v */
+function simplerSqrtQ(u: Expression, v: Expression): boolean {
+  const ltZero = (e: Expression): boolean => {
+    const r = realNum(e) ?? realNum(safeSimplify(e));
+    return r !== null && r < 0;
+  };
+  if (ltZero(v) && !ltZero(u)) return true;
+  if (ltZero(u) && !ltZero(v)) return false;
+  const su = rtExpr(u, 2);
+  const sv = rtExpr(v, 2);
+  if (isLiteralInteger(su))
+    return isLiteralInteger(sv) ? realNum(su)! < realNum(sv)! : true;
+  if (isLiteralInteger(sv)) return false;
+  if (isLiteralRational(su))
+    return isLiteralRational(sv) ? realNum(su)! < realNum(sv)! : true;
+  if (isLiteralRational(sv)) return false;
+  if (posQ(u)) return posQ(v) ? leafCount(su) < leafCount(sv) : true;
+  if (posQ(v)) return false;
+  if (leafCount(su) < leafCount(sv)) return true;
+  if (leafCount(sv) < leafCount(su)) return false;
+  // ~ Not[OrderedQ[{v,u}]] — canonical-order tiebreak
+  return u.toString() < v.toString();
+}
+
+/** Rubi RationalFunctionQ — u is a rational function of x */
+function rationalFnQ(u: Expression, x: string): boolean {
+  if (!u.ops || !u.has(x)) return true;
+  switch (u.operator) {
+    case 'Power':
+      return isLiteralInteger(u.ops[1]) && rationalFnQ(u.ops[0], x);
+    case 'Add':
+    case 'Subtract':
+    case 'Negate':
+    case 'Multiply':
+    case 'Divide':
+      return u.ops.every((o) => rationalFnQ(o, x));
+  }
+  return false;
+}
+
+/** Rubi AlgebraicFunctionQ — u is an algebraic function of x */
+function algebraicFnQ(u: Expression, x: string, flag: boolean): boolean {
+  if (!u.ops || !u.has(x)) return true;
+  switch (u.operator) {
+    case 'Power': {
+      const e = u.ops[1];
+      if (isLiteralRational(e.evaluate()) || (flag && !e.has(x)))
+        return algebraicFnQ(u.ops[0], x, flag);
+      return false;
+    }
+    case 'Sqrt':
+      return algebraicFnQ(u.ops[0], x, flag);
+    case 'Root':
+      return !u.ops[1].has(x) && algebraicFnQ(u.ops[0], x, flag);
+    case 'Add':
+    case 'Subtract':
+    case 'Negate':
+    case 'Multiply':
+    case 'Divide':
+      return u.ops.every((o) => algebraicFnQ(o, x, flag));
+  }
+  return false;
+}
+
+// --- structural (MatchQ-style) form predicates: literal shape, no
+// Together/expansion — these gate Rubi's normalization rules, whose point
+// is exactly "equivalent to the form but not already in it"
+
+function binomialMatchQ(u: Expression, x: string): boolean {
+  const cls = monoClassesX(u, x);
+  if (cls === null) return false;
+  const nz = cls.filter((c) => !c.exp.isSame(0));
+  return nz.length === 1 && cls.length <= 2;
+}
+
+function quadraticMatchQ(u: Expression, x: string): boolean {
+  const cls = monoClassesX(u, x);
+  if (cls === null) return false;
+  const exps = cls.map((c) => realNum(c.exp));
+  return (
+    exps.every((e) => e === 0 || e === 1 || e === 2) && exps.includes(2)
+  );
+}
+
+function trinomialMatchQ(u: Expression, x: string): boolean {
+  const cls = monoClassesX(u, x);
+  if (cls === null) return false;
+  const nz = cls.filter((c) => !c.exp.isSame(0));
+  if (nz.length !== 2 || cls.length - nz.length > 1) return false;
+  const [e1, e2] = [nz[0].exp, nz[1].exp];
+  return zeroQ(e2.sub(e1.mul(2))) || zeroQ(e1.sub(e2.mul(2)));
+}
+
+function genBinomialMatchQ(u: Expression, x: string): boolean {
+  const cls = monoClassesX(u, x);
+  return (
+    cls !== null && cls.length === 2 && cls.every((c) => !c.exp.isSame(0))
+  );
+}
+
+function genTrinomialMatchQ(u: Expression, x: string): boolean {
+  const cls = monoClassesX(u, x);
+  if (cls === null || cls.length !== 3) return false;
+  if (cls.some((c) => c.exp.isSame(0))) return false;
+  for (let i = 0; i < 3; i++) {
+    const [j, k] = [0, 1, 2].filter((idx) => idx !== i);
+    if (zeroQ(cls[i].exp.mul(2).sub(cls[j].exp.add(cls[k].exp)))) return true;
+  }
+  return false;
+}
+
+// ---------------------------------------------------------------------------
 // Value utilities
 // ---------------------------------------------------------------------------
 
@@ -926,9 +2174,9 @@ const VALUE_FNS: Record<string, ValueFn> = {
   // Rt[u, n] := RtAux[TogetherSimplify[u], n] — canonical n-th root;
   // approximated by simplify + exact Power fold
   Rt: (args, ctx) => {
-    const u = safeSimplify(build(args[0], ctx));
+    const u = build(args[0], ctx);
     const n = build(args[1], ctx);
-    const r = u.pow(ctx.ce.One.div(n)).evaluate();
+    const r = rtExpr(u, n);
     if (process.env.RUBI_DEBUG_RT)
       console.error(
         `Rt[${u.toString().slice(0, 90)}, ${n.toString()}] -> ${r.toString().slice(0, 90)}`
@@ -1026,6 +2274,40 @@ const VALUE_FNS: Record<string, ValueFn> = {
     if (r === null) return fail('FractionalPart: not numeric');
     return ctx.ce.number(r - Math.trunc(r));
   },
+
+  // degree accessors over the parts decompositions — failing the rule
+  // when the form does not apply (Rubi would have returned False[[k]])
+  BinomialDegree: (args, ctx) => {
+    const p = binomialPartsX(build(args[0], ctx), ctx.x);
+    return p === null ? fail('BinomialDegree: not a binomial') : p.n;
+  },
+  TrinomialDegree: (args, ctx) => {
+    const p = trinomialPartsX(build(args[0], ctx), ctx.x);
+    return p === null ? fail('TrinomialDegree: not a trinomial') : p.n;
+  },
+  GeneralizedBinomialDegree: (args, ctx) => {
+    const p = genBinomialPartsX(build(args[0], ctx), ctx.x);
+    if (p === null) return fail('GeneralizedBinomialDegree: no parts');
+    return p.n.sub(p.q).evaluate();
+  },
+  GeneralizedTrinomialDegree: (args, ctx) => {
+    const p = genTrinomialPartsX(build(args[0], ctx), ctx.x);
+    if (p === null) return fail('GeneralizedTrinomialDegree: no parts');
+    return p.n.sub(p.q).evaluate();
+  },
+  NormalizePseudoBinomial: (args, ctx) => {
+    const u = build(args[0], ctx);
+    const p = pseudoBinomialPartsX(u, ctx.x);
+    if (p === null) return fail('NormalizePseudoBinomial: no parts');
+    const X = ctx.ce.symbol(ctx.x);
+    return p.a.add(p.b.mul(p.c.add(p.d.mul(X)).pow(p.n)));
+  },
+  If: (args, ctx) =>
+    evalCondition(args[0], ctx)
+      ? build(args[1], ctx)
+      : args[2] !== undefined
+        ? build(args[2], ctx)
+        : fail('If: no else branch'),
 
   // Rubi gives up explicitly — fail the rule; the driver then returns
   // its own inert form

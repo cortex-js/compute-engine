@@ -86,6 +86,15 @@ export class RubiDriver {
     // Rubi rules match against the Times/Power normal form
     integrand = toTimesPower(ce, integrand);
 
+    // Collect uncollected polynomial factors (Σ Coeff·x^k with x-free
+    // coefficients). Rule RHSs emit these as huge distributed sums — CE's
+    // canonical mul re-distributes (Σ)·x during RHS construction, undoing
+    // ExpandToSum — and the structural matcher cannot bind (g_.+h_.*x_)
+    // against them (neither could Mathematica's: Rubi relies on Simp's
+    // coefficient collection, which safeSimplify's leaf cap skips).
+    const collected = collectPolyFactors(ce, integrand, variable);
+    if (collected !== null) integrand = toTimesPower(ce, collected);
+
     const key = variable + '§' + integrand.toString();
     if (this.memo.has(key)) return this.memo.get(key)!;
     this.memo.set(key, null); // cycle guard: a recursive identical subproblem fails
@@ -255,4 +264,59 @@ export class RubiDriver {
 
     return null;
   }
+}
+
+/** Rewrite uncollected polynomial Add factors of a (normal-form) integrand
+ * as Σ Coeff·x^k with x-free coefficients; null when nothing changes. */
+function collectPolyFactors(
+  ce: ComputeEngine,
+  integrand: Expression,
+  variable: string
+): Expression | null {
+  const X = ce.symbol(variable);
+  const collect = (u: Expression): Expression | null => {
+    if (u.operator !== 'Add' || !u.ops || u.ops.length < 2) return null;
+    const coeffs = polyCoeffsX(recanonicalize(ce, u), variable);
+    if (coeffs === null) return null;
+    const terms: Expression[] = [];
+    coeffs.forEach((c, k) => {
+      if (c.isSame(0)) return;
+      terms.push(
+        k === 0
+          ? c
+          : ce._fn('Multiply', [
+              c,
+              k === 1 ? X : ce._fn('Power', [X, ce.number(k)]),
+            ])
+      );
+    });
+    if (terms.length === 0) return ce.Zero;
+    const out = terms.length === 1 ? terms[0] : ce._fn('Add', terms);
+    // adopt only when structurally different (loop safety; the memo in
+    // intRec is the backstop)
+    return out.toString() === u.toString() ? null : out;
+  };
+
+  const factors =
+    integrand.operator === 'Multiply' && integrand.ops
+      ? [...integrand.ops]
+      : [integrand];
+  let changed = false;
+  const out = factors.map((f) => {
+    const direct = collect(f);
+    if (direct !== null) {
+      changed = true;
+      return direct;
+    }
+    if (f.operator === 'Power' && f.ops) {
+      const base = collect(f.ops[0]);
+      if (base !== null) {
+        changed = true;
+        return ce._fn('Power', [base, f.ops[1]]);
+      }
+    }
+    return f;
+  });
+  if (!changed) return null;
+  return out.length === 1 ? out[0] : ce._fn('Multiply', out);
 }

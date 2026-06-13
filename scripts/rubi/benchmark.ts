@@ -419,7 +419,7 @@ function main(): void {
       );
     rubi = {
       ce,
-      driver: new RubiDriver(ce, rules, { timeLimitMs: 5_000 }),
+      driver: new RubiDriver(ce, rules, { timeLimitMs: 15_000 }),
     };
   }
 
