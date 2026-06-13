@@ -623,12 +623,7 @@ export function factor(expr: Expression): Expression {
     // `mul(k, sum)` distributes `k` back over the sum (expandProduct),
     // re-expanding `2(x+2)` into `2x+4` and undoing the factoring. A
     // canonical Multiply node preserves the factored form.
-    // Only do this for a rational content factor: extracting a radical
-    // content (e.g. √3 from √6x+√3x) changes simplification forms in a
-    // debatable direction, so leave those to the existing behavior.
-    if (!hasNonTrivialRadical(common))
-      return ce.function('Multiply', [ce.number(common), add(...newTerms)]);
-    return mul(ce.number(common), add(...newTerms));
+    return ce.function('Multiply', [ce.number(common), add(...newTerms)]);
   }
 
   return Product.from(together(expr)).asExpression();

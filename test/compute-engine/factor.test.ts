@@ -526,12 +526,10 @@ describe('CONTENT EXTRACTION (coefficient GCD)', () => {
 // helper, which distributes the content right back over the sum
 // (mul(2, u+v) -> 2u+2v) — so `2x + 4` came back unchanged and
 // toNumericValue() could not extract the coefficient. The factored form must
-// be preserved (a canonical Multiply node, which does not distribute).
-// Extraction is scoped to a RATIONAL gcd: a radical content (e.g. √2) is
-// deliberately left distributed, to avoid changing simplification forms
-// (cf. the `√3(√2x + x)` case in simplify.test.ts).
+// be preserved (a canonical Multiply node, which does not distribute). The
+// gcd content is factored out whether it is rational (2) or radical (√2).
 describe('Linear content extraction (factor + toNumericValue)', () => {
-  test('factor keeps the rational content factored, not re-distributed', () => {
+  test('factor keeps the content factored, not re-distributed', () => {
     expect(factor(parse('2x + 4')).operator).toBe('Multiply');
     expect(factor(parse('2x + 4')).latex).toBe('2(x+2)');
     expect(
@@ -542,7 +540,7 @@ describe('Linear content extraction (factor + toNumericValue)', () => {
     ).toBe('3(2u+3v)');
   });
 
-  test('toNumericValue extracts the rational content from a sum', () => {
+  test('toNumericValue extracts the content from a sum', () => {
     const [c1, r1] = parse('2x + 4').toNumericValue();
     expect(c1.eq(2)).toBe(true);
     expect(r1.isSame(parse('x + 2'))).toBe(true);
@@ -554,17 +552,17 @@ describe('Linear content extraction (factor + toNumericValue)', () => {
     expect(r2.isSame(ce.box(['Add', 'u', 'v']))).toBe(true);
   });
 
-  test('radical content is left distributed (scoped to rational gcd)', () => {
+  test('a radical gcd is factored out too', () => {
     const sum = ce.box([
       'Add',
       ['Multiply', ['Sqrt', 2], 'u'],
       ['Multiply', ['Sqrt', 2], 'v'],
     ]);
-    // Not factored into √2(u + v): the radical stays distributed.
-    expect(factor(sum).operator).toBe('Add');
+    // √2·u + √2·v → √2(u + v)
+    expect(factor(sum).operator).toBe('Multiply');
     const [c, r] = sum.toNumericValue();
-    expect(c.eq(1)).toBe(true);
-    expect(r.isSame(sum)).toBe(true);
+    expect(c.eq(ce._numericValue(2).sqrt())).toBe(true);
+    expect(r.isSame(ce.box(['Add', 'u', 'v']))).toBe(true);
   });
 });
 

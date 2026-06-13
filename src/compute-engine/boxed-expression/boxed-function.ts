@@ -376,12 +376,12 @@ export class BoxedFunction
       let coef = ce._numericValue(1);
       for (const arg of expr.ops) {
         const [c, r] = arg.toNumericValue();
-        coef = coef.mul(c);
+        if (!c.isOne) coef = coef.mul(c);
         if (!r.isSame(1)) rest.push(r);
       }
       if (rest.length === 0) return [coef, ce.One];
       if (rest.length === 1) return [coef, rest[0]];
-      return [coef, canonicalMultiply(this.engine, rest)];
+      return [coef, canonicalMultiply(ce, rest)];
     }
 
     //
@@ -402,20 +402,14 @@ export class BoxedFunction
       // We can only extract a coef if the exponent is a literal
       if (!isNumber(expr.op2)) return [ce._numericValue(1), this];
 
-      // eslint-disable-next-line prefer-const
-      let [coef, base] = expr.op1.toNumericValue();
+      const [coef, base] = expr.op1.toNumericValue();
       if (coef.isOne) return [coef, this];
 
+      // A canonical/structural Power never has a ½ exponent (it canonicalizes
+      // to Sqrt), so only an integer exponent is extractable here.
       const exponent = asSmallInteger(expr.op2);
       if (exponent !== null)
         return [coef.pow(exponent), ce.function('Power', [base, expr.op2])];
-
-      if (expr.op2.isSame(0.5)) {
-        // Same branch-soundness constraint as the Sqrt case below.
-        if (coef.sgn() === -1)
-          return [coef.neg().sqrt(), ce.function('Sqrt', [base.neg()])];
-        return [coef.sqrt(), ce.function('Sqrt', [base])];
-      }
 
       return [ce._numericValue(1), this];
     }
@@ -444,17 +438,21 @@ export class BoxedFunction
       // An even root of a negative coefficient cannot be extracted with
       // real arithmetic: NumericValue.root uses the real-root convention,
       // so (−u)^(1/4) would become −u^(1/4), which is not a 4th root of
-      // −u (the −1 is the complex phase e^{iπ/4}). Sqrt is exempt:
-      // NumericValue.sqrt returns the principal imaginary value.
-      if (exp !== 2 && exp % 2 === 0 && coef.sgn() === -1)
-        return [ce._numericValue(1), this];
-      if (exp === 2) {
-        // Same branch-soundness constraint as the Sqrt case above.
-        if (coef.sgn() === -1)
-          return [coef.neg().sqrt(), ce.function('Sqrt', [rest.neg()])];
-        return [coef.sqrt(), ce.function('Sqrt', [rest])];
-      }
-      return [coef.root(exp), ce.function('Root', [rest, expr.op2])];
+      // −u (the −1 is the complex phase e^{iπ/4}). (A canonical Root never
+      // has index 2 — that becomes Sqrt — so the Sqrt-style imaginary
+      // extraction is not needed here.) This must run before the exactness
+      // check below: NumericValue.root returns NaN here, and NaN reports as
+      // exact.
+      if (exp % 2 === 0 && coef.sgn() === -1) return [ce._numericValue(1), this];
+
+      // Extracting an inexact root would strand a symbolic remainder beside a
+      // float coefficient (e.g. Root(2x,3) → ∛2·Root(x,3)), contrary to the
+      // radical-preservation policy in Product.mulOp. Keep the whole radical
+      // symbolic in that case. A pure-number radicand (rest = 1) has nothing
+      // stranded, so its numeric root is still returned.
+      const root = coef.root(exp);
+      if (!root.isExact && !rest.isSame(1)) return [ce._numericValue(1), this];
+      return [root, ce.function('Root', [rest, expr.op2])];
     }
 
     //

@@ -117,11 +117,11 @@
   (e.g. `(2x + 4).toNumericValue()` gave `[1, 2x + 4]` instead of
   `[2, x + 2]`). The internal factoring step it relies on built the factored
   product with an expanding multiply that immediately re-distributed the
-  coefficient back over the sum, undoing the work. Sums with a common rational
-  factor are now returned factored (`[2, x + 2]`, `[3, 2u + 3v]`). The
-  extraction is scoped to a rational content factor — a common radical (e.g.
-  `√2` in `√2·u + √2·v`) is intentionally left distributed — so canonical
-  forms, `simplify()`, and the `Factor` operator are unaffected.
+  coefficient back over the sum, undoing the work. The common factor — whether
+  rational (`[2, x + 2]`, `[3, 2u + 3v]`) or radical (`√2·u + √2·v` →
+  `[√2, u + v]`) — is now factored out. As a consequence a few `simplify()`
+  results involving content under a radical are returned in a more-factored
+  form (e.g. `√3(√2·x + x)` as `√3·x·(1 + √2)`); the values are unchanged.
 
 - **`isEqual()` could declare two equal complex constants unequal.** The
   tolerance comparison rejected any nonzero imaginary part, so two

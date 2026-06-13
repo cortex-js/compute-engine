@@ -1082,6 +1082,12 @@ function unnegate(op: Expression): [Expression, sign: number] {
 }
 
 // Moved from expand.ts to break expand ↔ arithmetic-mul-div cycle
+/**
+ * Multiply two expressions, distributing over any `Add` operand:
+ * `expandProduct(k, a + b)` → `k·a + k·b`. This is the distribution step
+ * behind {@link mul}; it is what makes `mul()` expand rather than preserve a
+ * factored product.
+ */
 function expandProduct(
   lhs: Readonly<Expression>,
   rhs: Readonly<Expression>
@@ -1132,6 +1138,24 @@ export function expandProducts(
   return rhs === null ? null : expandProduct(ops[0], rhs);
 }
 
+/**
+ * Multiply expressions, **expanding** products over sums.
+ *
+ * Unlike a canonical `Multiply` node (built via `ce.function('Multiply', …)`
+ * or `ce.box(['Multiply', …])`, which leaves `k·(a + b)` as-is), `mul()` runs
+ * {@link expandProducts} first, so a factor is distributed across any sum
+ * operand:
+ *
+ * ```
+ * mul(2, ce.box(['Add', 'a', 'b']))            // => 2a + 2b   (an Add)
+ * ce.box(['Multiply', 2, ['Add', 'a', 'b']])   // => 2(a + b)  (a Multiply)
+ * ```
+ *
+ * Use `mul()` when you want the expanded/normalized product (the usual case in
+ * canonicalization). Do **not** use it to build a deliberately *factored*
+ * result — the distribution will undo the factoring. Use a canonical
+ * `Multiply` node instead (see `factor()`'s Add case).
+ */
 export function mul(...xs: ReadonlyArray<Expression>): Expression {
   console.assert(xs.length > 0);
   if (xs.length === 1) return xs[0];
