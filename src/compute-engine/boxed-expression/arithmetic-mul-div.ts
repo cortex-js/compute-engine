@@ -100,6 +100,26 @@ export class Product {
     }
 
     if (isFunction(term, 'Multiply')) {
+      const e = exp ? reducedRational(exp) : ([1, 1] as Rational);
+      if (
+        !isIntegerRational(e) &&
+        Number(e[1]) % 2 === 0 &&
+        term.ops.some((o) => isNumber(o) && o.isNegative === true)
+      ) {
+        // (k·u)^(p/q) with k < 0 and q even: k^(p/q) is a complex phase,
+        // and splitting it off is only sound when the cofactor is ≥ 0 —
+        // √(k·u)/√u would collapse to the CONSTANT √k, but the true value
+        // is region-dependent (±√k across u = 0). Tally opaquely, like
+        // (−u)^(p/q) above.
+        for (const x of this.terms) {
+          if (x.term.isSame(term)) {
+            x.exponent = rationalAdd(x.exponent, e);
+            return;
+          }
+        }
+        this.terms.push({ term, exponent: e });
+        return;
+      }
       for (const t of term.ops) this.mul(t, exp);
       return;
     }
@@ -969,7 +989,9 @@ export function canonicalMultiply(
         let radical: number | NumericValue = next.op1.numericValue;
         if (typeof radical !== 'number') radical = radical.re;
 
-        if (radical >= SMALL_INTEGER) {
+        // An ExactNumericValue radical must be a positive small integer:
+        // √(negative) is an imaginary value that can't be promoted here.
+        if (radical >= SMALL_INTEGER || radical < 1) {
           ys.push(x);
           continue;
         }

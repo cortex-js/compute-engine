@@ -409,8 +409,12 @@ export class BoxedFunction
       if (exponent !== null)
         return [coef.pow(exponent), ce.function('Power', [base, expr.op2])];
 
-      if (expr.op2.isSame(0.5))
+      if (expr.op2.isSame(0.5)) {
+        // Same branch-soundness constraint as the Sqrt case below.
+        if (coef.sgn() === -1)
+          return [coef.neg().sqrt(), ce.function('Sqrt', [base.neg()])];
         return [coef.sqrt(), ce.function('Sqrt', [base])];
+      }
 
       return [ce._numericValue(1), this];
     }
@@ -422,6 +426,12 @@ export class BoxedFunction
         if (coef.isOne || coef.isZero) return [coef, rest];
         return [coef.sqrt(), rest];
       }
+      // √(k·u) = √k·√u only holds for k ≥ 0: for k < 0 it splits off a
+      // constant imaginary phase, but the true value is region-dependent
+      // (±i·√|k|·√|u| across u = 0). Fold the sign into the radicand
+      // instead: √(k·u) = √|k|·√(−u).
+      if (coef.sgn() === -1)
+        return [coef.neg().sqrt(), ce.function('Sqrt', [rest.neg()])];
       return [coef.sqrt(), ce.function('Sqrt', [rest])];
     }
 
@@ -437,7 +447,12 @@ export class BoxedFunction
       // NumericValue.sqrt returns the principal imaginary value.
       if (exp !== 2 && exp % 2 === 0 && coef.sgn() === -1)
         return [ce._numericValue(1), this];
-      if (exp === 2) return [coef.sqrt(), ce.function('Sqrt', [rest])];
+      if (exp === 2) {
+        // Same branch-soundness constraint as the Sqrt case above.
+        if (coef.sgn() === -1)
+          return [coef.neg().sqrt(), ce.function('Sqrt', [rest.neg()])];
+        return [coef.sqrt(), ce.function('Sqrt', [rest])];
+      }
       return [coef.root(exp), ce.function('Root', [rest, expr.op2])];
     }
 

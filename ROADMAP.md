@@ -1,11 +1,19 @@
 # Compute Engine — Roadmap
 
-**Last updated:** 2026-06-12 (b). Items 2 (interruptible evaluation), 4
+**Last updated:** 2026-06-13. Items 2 (interruptible evaluation), 4
 (Tier-2 numeric kernels), 9 (₂F₁ analytic continuation), 10 (x/√(x²)
 soundness), 11 (deadline checks in simplify), 12 (antiderivative
 correctness), 13 (small engine follow-ups), 14 (incomplete elliptic
 integrals), and 15 (fractional-power principal-branch soundness)
 completed — prerequisites for the Rubi integration (`docs/rubi/RUBI.md`).
+
+**Rubi status (the consumer driving items 2/4/10/15):** R1 cleared
+(section 1.1.1 at 98.28%) and **R2 gate cleared** (full-Chapter-1 seeded
+sample = 94.0%, ≥90% target). The one engine-adjacent open item is the Rubi
+*driver's* own interruptibility gap — see the scope note under item 2 below
+and `docs/rubi/RUBI.md` §5. Engine-side, the next genuinely new capability
+remains item 7 (analytic-property metadata store); items 1/5 are the
+near-term Fungrim/dispatch follow-ons.
 
 Context: the 2026-06 release shipped the Fungrim-derived identities library
 (`@cortex-js/compute-engine/identities`, 1,376 rules), the complex-domain
@@ -85,6 +93,16 @@ deadline inheritance in `interruptible.ts`) and symbolic differentiation
 width blow-up (`8e8a59`, r-th derivative of LambertW, REVIEW.md G8 — fixed
 by a strided deadline check in `differentiate()`). Entries with instances
 380 → 622; True instances 1,089 → 1,363.
+
+**Scope note — this item is the ENGINE evaluation loops only.** The Rubi
+integration *driver* (`scripts/rubi/driver.ts`, `match.ts`) has its OWN
+unbounded path that this item does NOT cover: `RubiDriver.int` ignores its
+`timeLimitMs` because `matchAll` and the dispatch `for (const env of envs)`
+loop have no deadline check (confirmed pure-JS-bound — a problem runs >50 s
+with `timeLimitMs=5000` and `ce.timeLimit=300`). This blocks the exhaustive
+Rubi Chapter-1 run (R2). **Tracked as the top next-step in
+`docs/rubi/RUBI.md` §5 (Phase R2).** Fix = thread the driver deadline into
+`matchAll` + the env loop.
 
 ### 3. ~~CI for the corpus pipeline~~ — ✅ done (2026-06-12)
 

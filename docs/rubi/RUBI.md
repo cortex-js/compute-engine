@@ -1,7 +1,13 @@
 # Rubi → Compute Engine: Feasibility Analysis
 
-**Date:** 2026-06-10. **Status:** Phase 0 (corpus snapshot, survey, baseline
-harness) — this document.
+**Date:** 2026-06-10 (feasibility); last status update 2026-06-13.
+**Status:** **R1 cleared** (section 1.1.1 at 98.28% solved-correct) and
+**R2 gate cleared** (full-Chapter-1 seeded sample = 94.0%, ≥90% target met).
+Top open item: the **driver-overrun bug** (`RubiDriver.int` ignores its own
+`timeLimitMs`) blocks the exhaustive 25,854-problem run — see Phase R2 in §5.
+The §1–§4 analysis below is the original feasibility study (still accurate);
+§5 carries the current phasing status, and the project memory
+(`project_rubi.md`) has the session-by-session log.
 
 Rubi (Rule-Based Integration, [rulebasedintegration.org](https://rulebasedintegration.org/))
 is Albert Rich's corpus of **7,439 symbolic integration rules** organized as a
@@ -297,12 +303,41 @@ first four). Without them, the ~100 affected Chapter-1 rules can still be
     products, destroys rule structure); `ce.number()` does not accept
     MathJSON arrays (spins — use `ce.box`); collapse matching requires ≥1
     defaulted optional or `Int[-Fx_]` matches everything.
-- **Phase R2 — Chapter 1 (~4–8 weeks, the real bet)**: full 2,648-rule port,
-  71-utility layer, compile-time dispatch index, artifact + loader packaging
-  (`loadIntegrationRules`), CI gate reusing the Fungrim pattern (ROADMAP
-  item 3). Target: ≥90% solved-correct over the 25,876 Chapter-1 problems
-  (Rubi itself scores ~99%; the gap budget covers missing kernels and
-  not-evaluable verification).
+  - **R1 EXIT — CLEARED (2026-06-12).** After iteration 2, sessions b–f
+    pushed the full 5,509-problem section-1.1.1 run to **96.30%** at the
+    exit gate, then **97.93%** after the predicate batch + collection +
+    PolyQ fix, and item-4 (the elliptic branch-phase cluster) brought
+    1.1.1 to **98.28%** once RtAux principal-branch rendering + the
+    `√(k·u), k<0` branch-soundness fix landed. Net levers across R1:
+    ~25 transcribed predicates (BinomialParts/IntBinomialQ families etc.),
+    eager polynomial-factor collection in the driver, `PolyQ[u, x^k]`
+    semantics, `RtAux` root distribution, the region-phase `solved-formal`
+    verification acceptance, and a batch of engine branch-soundness fixes
+    (ROADMAP items 10/15). Full blow-by-blow in the project memory
+    (`project_rubi.md`).
+- **Phase R2 — Chapter 1: GATE CLEARED (2026-06-13).** Seeded stratified
+  sample of **1,935 problems across all of Chapter 1 = 94.0% solved-correct**
+  (≥90% target met). By section: 1.1.1 = 98.5%, 1.1.2 = 95.7%,
+  **1.1.3 = 84.9% (the weak spot — 41 unsolved, symbolic-exponent
+  `(a+b·xⁿ)^p` chains)**, 1.1.4 = 94.4%, 1.2.1 = 95.8%. Only 0.8% wrong and
+  0 errors — the residue is now *unsolved*-dominated (coverage gaps), not
+  *wrong*-dominated (correctness). Report: `/tmp/rubi-ch1-sample-final.json`.
+  - **Why a SAMPLE, not the exhaustive 25,854 run:** the exhaustive run is
+    blocked by a **driver-overrun bug — `RubiDriver.int` ignores its own
+    `timeLimitMs`** (matchAll / the dispatch env-loop have no deadline check;
+    confirmed pure-JS-bound, not engine-eval-bound: a problem runs >50 s even
+    with `timeLimitMs=5000` and `ce.timeLimit=300`). A handful of 1.1.2/1.1.3
+    problems hang for 2–12 minutes each (worst measured: 736 s). This is
+    **the top next-step** — it unblocks the exhaustive run and likely
+    converts a chunk of 1.1.3's unsolved (some are hangs, not true gaps).
+    Fix = thread the driver deadline into `match.ts`'s `matchAll` + the
+    `for (const env of envs)` loop. (Harness side already mitigated:
+    `benchmark.ts` has a verification wall-clock budget and `complexAt`
+    swallows `CancellationError`; `driver.int` catches it → null.)
+  - **Still open for R2 completion:** (1) driver-overrun fix (above);
+    (2) 1.1.3 symbolic-n coverage once hangs are off the table;
+    (3) artifact + loader packaging (`loadIntegrationRules`) and the CI gate
+    reusing the Fungrim pattern (ROADMAP item 3) — not yet built.
 - **Phase R3+ — chapters by value**: 2 (exponentials, 125 rules — small) and
   3 (logarithms, 337) first; 5/6/7 (inverse trig/hyperbolic) next; Chapter 4
   (trig, 2,126 rules + the inert-trig utility machinery) is its own project;

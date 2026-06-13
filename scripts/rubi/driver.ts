@@ -32,6 +32,18 @@ import { toTimesPower, recanonicalize } from './normal-form';
 
 const MAX_DEPTH = 40;
 
+// RUBI_DEBUG_FLOAT: report the first rule whose result contains an inexact
+// machine-float literal while its integrand was float-free (i.e. the rule
+// that INTRODUCES the float, not one that propagates it).
+const DEBUG_FLOAT = process.env.RUBI_DEBUG_FLOAT !== undefined;
+// RUBI_DEBUG_FIRE=<id-substring>: print integrand/bindings/result of every
+// firing of rules whose id contains the substring.
+const DEBUG_FIRE = process.env.RUBI_DEBUG_FIRE;
+function hasInexactFloat(e: Expression): boolean {
+  if (e.isNumberLiteral) return (e as any).isExact === false;
+  return e.ops?.some(hasInexactFloat) ?? false;
+}
+
 export type DriverStats = {
   calls: number;
   ruleFirings: Record<string, number>;
@@ -224,6 +236,29 @@ export class RubiDriver {
             }
             this.stats.ruleFirings[rule.id] =
               (this.stats.ruleFirings[rule.id] ?? 0) + 1;
+            if (DEBUG_FIRE && rule.id.includes(DEBUG_FIRE)) {
+              console.error(
+                `[fire] ${rule.id}\n  integrand: ${integrand}\n` +
+                  [...env.entries()]
+                    .map(([k, v]) => `  ${k} = ${v}`)
+                    .join('\n') +
+                  `\n  result: ${result}`
+              );
+            }
+            if (
+              DEBUG_FLOAT &&
+              hasInexactFloat(result) &&
+              !hasInexactFloat(integrand)
+            ) {
+              const fb = [...env.entries()].find(([, v]) =>
+                hasInexactFloat(v)
+              );
+              console.error(
+                `[float] rule ${rule.id}\n  integrand: ${integrand}\n` +
+                  (fb ? `  binding ${fb[0]}: ${fb[1]}\n` : '') +
+                  `  result: ${result}`
+              );
+            }
             return result;
           } catch (e) {
             if (e instanceof RuleFail) {

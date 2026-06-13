@@ -98,6 +98,18 @@
   radicals (`√2·√3 → √6`) and same-base combinations (`√x·√x → x`) are
   unaffected.
 
+- **`√(k·u)` split off a constant `√k` for negative `k`, baking in a fixed
+  phase.** A square root of a product with a negative numeric coefficient
+  (e.g. `√(−2·u)`) factored the coefficient's root out as a constant —
+  effectively `√(−2)·√u` — even though `√k` for `k < 0` is imaginary and the
+  sign of the result is region-dependent. The paired ratio `√(−c·u)/√u` then
+  collapsed to the constant `i√c` instead of the correct `±i√c` (which flips
+  across `u = 0`). The coefficient's sign is now folded into the radicand
+  (`√(k·u) = √|k|·√(−u)`) so the value evaluates on the correct branch in
+  every region; the positive-coefficient case (`√(2·u)/√u → √2`) is
+  unaffected. A related assertion failure / `NaN` when a rational multiplied
+  a `√(negative)` (e.g. `11·√(−3)`) is also fixed.
+
 - **`isEqual()` could declare two equal complex constants unequal.** The
   tolerance comparison rejected any nonzero imaginary part, so two
   expressions for the same complex number differing by a 1-ulp imaginary

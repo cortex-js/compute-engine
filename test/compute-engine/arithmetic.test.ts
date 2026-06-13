@@ -1883,6 +1883,55 @@ describe('Core arithmetic correctness (REVIEW.md A6–A12)', () => {
   });
 });
 
+// Paired-radical branch soundness: √(k·u) must NOT split off a constant
+// √k when k < 0 (the sign is a region-dependent phase, not a constant).
+// Surfaced by Rubi 1.1.1.4 #39, where √(−5+2x)/√(5−2x) was collapsed to a
+// constant +i (correct value flips to −i across x = 5/2), baking an
+// untraced machine-float phase into elliptic antiderivatives.
+describe('Paired-radical branch soundness (Rubi 1.1.1.4 #39)', () => {
+  it('√(−c·u)/√(u) keeps the region-dependent sign (not a constant phase)', () => {
+    // u = 2x − 5 changes sign at x = 5/2; the ratio √(−2/11·u)/√(u) is
+    // −0.4264i for u < 0 and +0.4264i for u > 0 — it must NOT fold to a
+    // constant.
+    const u = ['Subtract', ['Multiply', 2, 'x'], 5];
+    const a = ce.box(['Sqrt', ['Multiply', ['Rational', -2, 11], u]]);
+    const b = ce.box(['Sqrt', u]);
+    const q = a.div(b);
+    // The two regions must produce opposite-sign imaginary parts.
+    const below = q.subs({ x: 1 }).N(); // u = −3 < 0
+    const above = q.subs({ x: 3 }).N(); // u = +1 > 0
+    expect(below.im).toBeCloseTo(-0.4264014327, 6);
+    expect(above.im).toBeCloseTo(0.4264014327, 6);
+    expect(below.im).toBeCloseTo(-above.im, 6);
+  });
+
+  it('√(positive·u)/√(u) DOES fold to a constant', () => {
+    // The positive-coefficient case is sound to collapse.
+    const u = ['Subtract', ['Multiply', 2, 'x'], 5];
+    const a = ce.box(['Sqrt', ['Multiply', ['Rational', 2, 11], u]]);
+    const b = ce.box(['Sqrt', u]);
+    expect(a.div(b).toString()).toBe('sqrt(22)/11');
+  });
+
+  it('√(k·u) with k < 0 evaluates to the correct branch in each region', () => {
+    // √(−4·x) is +2i√x for x > 0 and 2√|x| for x < 0.
+    const e = ce.box(['Sqrt', ['Multiply', -4, 'x']]);
+    expect(e.subs({ x: 1 }).N().im).toBeCloseTo(2, 10); // 2i
+    expect(e.subs({ x: -1 }).N().re).toBeCloseTo(2, 10); // 2
+    // and squaring recovers the radicand
+    expect(ce.box(['Power', ['Sqrt', ['Multiply', -4, 'x']], 2]).N).toBeDefined();
+  });
+
+  it('a rational followed by √(negative) does not crash canonicalization', () => {
+    // 11·√(−3): the radical promotion path must not assert on a negative
+    // radicand (it would have asserted radical ≥ 1).
+    expect(ce.box(['Multiply', 11, ['Sqrt', -3]]).N().im).toBeCloseTo(
+      11 * Math.sqrt(3),
+      8
+    );
+  });
+});
+
 // REVIEW.md B16: Factorial rounded positive non-integer reals to an integer
 // factorial instead of using Γ(x+1).
 describe('Factorial of non-integer reals (REVIEW.md B16)', () => {
