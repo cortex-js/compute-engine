@@ -1505,13 +1505,19 @@ function getLinearCoefficients(
   let a: Expression | null = null;
   let b: Expression = ce.Zero;
 
-  for (const op of ops) {
+  for (const rawOp of ops) {
+    // Unwrap a leading Negate into a −1 sign (the −x in `2 − x` is
+    // `Negate(x)`, not `Multiply(-1, x)`).
+    const neg = isFunction(rawOp, 'Negate');
+    const op = neg ? rawOp.op1 : rawOp;
+    const sign = neg ? ce.NegativeOne : ce.One;
+
     if (!op.has(index)) {
       // Constant term
-      b = b.add(op);
+      b = b.add(sign.mul(op));
     } else if (sym(op) === index) {
       // Just x (coefficient 1)
-      a = a ? a.add(ce.One) : ce.One;
+      a = a ? a.add(sign) : sign;
     } else if (isFunction(op, 'Multiply')) {
       // Check for c*x form
       const factors = op.ops;
@@ -1521,7 +1527,8 @@ function getLinearCoefficients(
         if (constFactors.every((f) => !f.has(index))) {
           const coeff =
             constFactors.length === 1 ? constFactors[0] : mul(...constFactors);
-          a = a ? a.add(coeff) : coeff;
+          const signedCoeff = sign.mul(coeff);
+          a = a ? a.add(signedCoeff) : signedCoeff;
         } else {
           // Not a linear term
           return null;
@@ -1588,20 +1595,29 @@ function getQuadraticCoefficients(
   let b: Expression = ce.Zero; // coefficient of x
   let c: Expression = ce.Zero; // constant term
 
-  for (const op of ops) {
+  for (const rawOp of ops) {
+    // Unwrap a leading Negate into a −1 sign on the term. The canonical form
+    // of e.g. `x² − x + 1` represents the −x term as `Negate(x)` (not
+    // `Multiply(-1, x)`), which the cases below would otherwise reject —
+    // sending rational integrands like 1/(x³+1) to the numeric fallback and
+    // leaking float coefficients.
+    const neg = isFunction(rawOp, 'Negate');
+    const op = neg ? rawOp.op1 : rawOp;
+    const sign = neg ? ce.NegativeOne : ce.One;
+
     if (!op.has(index)) {
       // Constant term
-      c = c.add(op);
+      c = c.add(sign.mul(op));
     } else if (sym(op) === index) {
       // Just x (coefficient 1 for linear term)
-      b = b.add(ce.One);
+      b = b.add(sign);
     } else if (
       isFunction(op, 'Power') &&
       sym(op.op1) === index &&
       op.op2.isSame(2)
     ) {
       // x² term
-      a = a.add(ce.One);
+      a = a.add(sign);
     } else if (isFunction(op, 'Multiply')) {
       const factors = op.ops;
       // Check for c*x² form
@@ -1617,7 +1633,7 @@ function getQuadraticCoefficients(
               : constFactors.length === 1
                 ? constFactors[0]
                 : ce.expr(['Multiply', ...constFactors]);
-          a = a.add(coeff);
+          a = a.add(sign.mul(coeff));
           continue;
         }
       }
@@ -1632,7 +1648,7 @@ function getQuadraticCoefficients(
               : constFactors.length === 1
                 ? constFactors[0]
                 : ce.expr(['Multiply', ...constFactors]);
-          b = b.add(coeff);
+          b = b.add(sign.mul(coeff));
           continue;
         }
       }
@@ -1835,6 +1851,19 @@ function numericPartialFractions(
   return add(...terms).evaluate();
 }
 
+/**
+ * Apply the power rule ∫xⁿ dx = xⁿ⁺¹/(n+1) (n ≠ −1). `index` is the variable
+ * name and `exponent` is n as a boxed number.
+ */
+function integrateIndexPower(index: string, exponent: Expression): Expression {
+  const ce = exponent.engine;
+  const newExp = exponent.add(ce.One);
+  return ce.function('Divide', [
+    ce.function('Power', [ce.symbol(index), newExp]),
+    newExp,
+  ]);
+}
+
 export function antiderivative(fn: Expression, index: string): Expression {
   if (isFunction(fn, 'Function')) return antiderivative(fn.op1, index);
   if (isFunction(fn, 'Block')) return antiderivative(fn.op1, index);
@@ -1847,6 +1876,20 @@ export function antiderivative(fn: Expression, index: string): Expression {
 
   // Is it a constant?
   if (!fn.has(index)) return ce.expr(['Multiply', fn, ce.symbol(index)]);
+
+  // ∫√x dx and ∫1/√x dx. `√x` and `x^(−1/2)` canonicalize to `Sqrt(x)` and
+  // `Divide(1, Sqrt(x))` — not `Power` nodes — so the Power-based power rule
+  // further below never matches them. Handle them here with exponent ±1/2.
+  // (Bare index only; compound radicals like √(1−x²) are handled separately.)
+  if (isFunction(fn, 'Sqrt') && sym(fn.op1) === index)
+    return integrateIndexPower(index, ce.Half);
+  if (
+    isFunction(fn, 'Divide') &&
+    fn.op1.isSame(1) &&
+    isFunction(fn.op2, 'Sqrt') &&
+    sym(fn.op2.op1) === index
+  )
+    return integrateIndexPower(index, ce.Half.neg());
 
   // Apply the chain rule
   if (isFunction(fn, 'Add')) {

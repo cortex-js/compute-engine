@@ -393,6 +393,49 @@ describe('INDEFINITE INTEGRATION', () => {
     ));
 });
 
+// ROADMAP B2: indefinite-integration coverage gaps.
+describe('ROADMAP B2: fractional powers and exact partial-fraction coefficients', () => {
+  // (a) √x and 1/√x canonicalize to Sqrt(x) and Divide(1, Sqrt(x)) — not Power
+  // nodes — so the power rule never saw them and they returned unevaluated.
+  test('∫√x dx = (2/3) x^(3/2)', () =>
+    expect(evaluate('\\int \\sqrt{x} dx')).toMatchInlineSnapshot(
+      `2/3 * x^(3/2)`
+    ));
+
+  test('∫1/√x dx = 2√x', () =>
+    expect(evaluate('\\int \\frac{1}{\\sqrt{x}} dx')).toMatchInlineSnapshot(
+      `2sqrt(x)`
+    ));
+
+  test('∫x^(-1/2) dx = 2√x', () =>
+    expect(evaluate('\\int x^{-1/2} dx')).toMatchInlineSnapshot(`2sqrt(x)`));
+
+  // (b) The irreducible quadratic x²−x+1 represents its −x term as Negate(x),
+  // which the local quadratic/linear coefficient extractors rejected — sending
+  // these to the numeric fallback, which leaked float coefficients. They now
+  // take the symbolic path and return exact rationals/radicals.
+  const noFloats = (s: string) => {
+    // Reject any standalone decimal like 0.333… (an exact result has none).
+    expect(s).not.toMatch(/\d\.\d/);
+    return s;
+  };
+
+  test('∫1/(x³+1) dx is exact (no float coefficients)', () =>
+    expect(noFloats(evaluate('\\int \\frac{1}{x^3+1} dx'))).toMatchInlineSnapshot(
+      `1/3 * ln(|x + 1|) + sqrt(3)/3 * arctan(2/3sqrt(3) * x - sqrt(3)/3) - 1/6 * ln(|x^2 - x + 1|)`
+    ));
+
+  test('∫1/(x²−x+1) dx is exact (irreducible quadratic with Negate term)', () =>
+    expect(
+      noFloats(evaluate('\\int \\frac{1}{x^2-x+1} dx'))
+    ).toMatchInlineSnapshot(`2/3sqrt(3) * arctan(2/3sqrt(3) * x - sqrt(3)/3)`));
+
+  test('∫1/(2−x) dx = −ln|2−x| (linear factor with Negate term)', () =>
+    expect(evaluate('\\int \\frac{1}{2-x} dx')).toMatchInlineSnapshot(
+      `-ln(|2 - x|)`
+    ));
+});
+
 describe('INTEGRATION REGRESSIONS (Rubi Phase-0 findings)', () => {
   // Helper: check ∫f dx by differentiating the result and comparing
   // numerically against f at sample points.

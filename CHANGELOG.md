@@ -84,6 +84,21 @@
 
 ### Bug Fixes
 
+- **`∫√x dx` and `∫1/√x dx` returned unevaluated.** `√x` and `x^(−1/2)`
+  canonicalize to `Sqrt(x)` and `Divide(1, Sqrt(x))` rather than `Power` nodes,
+  so the integrator's power rule never matched them. They now integrate via the
+  power rule: `∫√x dx → (2/3)x^(3/2)`, `∫1/√x dx → 2√x`.
+
+- **Float coefficients leaked into exact rational-function integrals.**
+  `∫1/(x³+1) dx` returned `0.333…·ln|x+1| + 0.577…·arctan(…) − …` instead of the
+  exact `⅓·ln|x+1| − ⅙·ln(x²−x+1) + (√3/3)·arctan(…)`. The symbolic
+  partial-fraction path was bailing to a numeric (Durand–Kerner) fallback
+  because the quadratic/linear coefficient extractors rejected an irreducible
+  quadratic whose `−x` term is a `Negate(x)` node (they only recognized
+  `Multiply(-1, x)`). Both extractors now handle `Negate`, so these integrals —
+  and the broader class (`∫1/(x²−x+1)`, `∫1/(2−x)`, …) — return exact
+  rationals/radicals.
+
 - **`Factor` produced non-polynomial, branch-dependent factors for `xⁿ − 1`.**
   A difference-of-even-powers heuristic took `√(xⁿ)`, injecting `x·√x` (odd `n`)
   or `|x|^(n/2)` (even `n`) — e.g. `Factor(x³ − 1)` returned

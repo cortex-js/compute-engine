@@ -583,21 +583,31 @@ regressions vs `0.59.0`; they are pre-existing gaps the suite made visible.
 kernels (cf. item 4) honoring `ce.precision` with guard digits. Overlaps item 7's
 "pole-aware `N()`" — worth doing together when touching these heads.
 
-### B2. Symbolic (indefinite) integration coverage gaps
+### B2. Symbolic (indefinite) integration coverage gaps — partially resolved (2026-06-13)
 
 - **Fractional-power / radical integrands return unevaluated** — `∫1/√x`, `∫√x`,
   `∫x²/√(1−x²)`, `∫x/√(1−x²)`: the power rule isn't applied to fractional
   exponents and radical substitutions are missing. All are solved by the
   experimental Rubi path **and** by SymPy, so the `CE·cur` vs `CE+R/F` gap in the
   report quantifies exactly what's missing from the built-in integrator.
+  - ✅ **Done:** `∫√x` → `⅔x^(3/2)` and `∫1/√x` → `2√x`. Root cause: `√x` and
+    `x^(−1/2)` canonicalize to `Sqrt(x)` / `Divide(1, Sqrt(x))` (not `Power`
+    nodes), so the power rule never matched them; `antiderivative()` now handles
+    those two bare-index forms via the power rule with exponent ±½.
+  - ⬜ **Remaining:** `∫x²/√(1−x²)`, `∫x/√(1−x²)` — these need radical/trig
+    substitution, a larger feature still missing.
 - **Non-elementary results not produced** — `∫e^(−x²)` (erf), `∫sin x/x` (Si),
-  `∫sec³x` come back unevaluated; SymPy returns erf/Si.
-- **Machine floats leak into otherwise-correct symbolic results** — `∫1/(x³+1)`
-  → `0.333…·ln|x+1| + 0.577…·…` instead of exact `⅓` and `√3/3`. The value is
-  right but the form has float coefficients where exact rationals/radicals
-  belong. (`antiderivative.ts` — likely the partial-fraction coefficient path.)
+  `∫sec³x` come back unevaluated; SymPy returns erf/Si. *(Still open.)*
+- ✅ **Machine floats leak into otherwise-correct symbolic results — done.**
+  `∫1/(x³+1)` now returns exact `⅓·ln|x+1| − ⅙·ln(x²−x+1) + (√3/3)·arctan(…)`.
+  Root cause: the irreducible quadratic `x²−x+1` represents its `−x` term as
+  `Negate(x)`, which the local `getQuadraticCoefficients`/`getLinearCoefficients`
+  extractors rejected (they only handled `Multiply(-1, x)`) — so the symbolic
+  partial-fraction path bailed to the numeric Durand–Kerner fallback, which
+  emits float residues. Both extractors now unwrap a leading `Negate` into a
+  −1 sign. This also fixed the whole class (`∫1/(x²−x+1)`, `∫1/(2−x)`, …).
 - **Nested radicals not denested** — `√(3+2√2)` stays as-is; SymPy gives `1+√2`
-  (`sqrtdenest`). Lower priority.
+  (`sqrtdenest`). Lower priority. *(Still open.)*
 
 ### B3. Definite / improper integrals are numerical-only
 
@@ -655,12 +665,44 @@ a non-trivial common factor (variable inferred), e.g. `GCD(x²+3x+2, x²+4x+3)`
 reading of a bare symbol — `GCD(x, 6)` stays unevaluated; use `PolynomialGCD`
 for the coprime → 1 answer. Multivariate GCD remains out of scope (see B6).
 
-### B6. (next) Multi-operation audit vs SymPy
+### B6. ~~Multi-operation audit vs SymPy~~ — ✅ built (2026-06-13)
 
-Planned: a broad CE-vs-SymPy audit covering **integration** (Bondarenko 35 +
-the other independent suites, ingested via `scripts/rubi/wl-parser.ts`),
-**factoring**, **polynomial GCD** (with the Fateman benchmark as the headline
-perf case — Symbolica 4 s / Mathematica 89 s / SymPy 61 min), **simplification**
-and **expansion**, graded for correctness + performance and ranked by where CE
-trails. A full broad-correctness pass will also fold in the Wester test suite
-(being sourced separately, in Maxima form). Expected to expand B1–B5.
+A CE-vs-SymPy issue-finder lives in `benchmarks/audit/`, graded by operation
+invariant (no reference answers needed):
+- `audit.ts` — hand-authored cases across factor / GCD / expand / simplify /
+  integrate / limit → `REPORT-audit.md`.
+- `wester.ts` — ingests **Michael Wester's CAS-review suite** (the Mathematica
+  form in `benchmarks/wester/`, parsed by `scripts/rubi/wl-parser.ts`),
+  auto-categorizes by head, and runs **base CE / CE+Rubi+Fungrim / SymPy** →
+  `REPORT-wester.md`. Heads covered: factor, expand, simplify, derivative,
+  limit, indefinite & definite integration.
+
+It confirmed B4/B5 fixed (factor & GCD now at parity with SymPy) and surfaced
+B7/B8 below. **Next:** add `Solve`, `PolynomialGCD`, `Resultant` heads and the
+Bondarenko integration set; translate more Rubi rule sections (the audit's
+`CE+R/F` column recovers only algebraic integrals today — 1 of 8 hard Wester
+indefinite integrals).
+
+### B7. `Limit` returns a wrong value on some forms
+
+CE's `Limit` is evaluated numerically (`.N()`); on certain Wester limits it
+returns **`0` instead of the true value** — a silent wrong answer, worse than
+failing. Examples (point `x → ∞`):
+
+| limit | CE | correct (SymPy) |
+|---|---|---|
+| `(−eˣ + e^{x·e^{−x}}/(eˣ−1)) …` | `0` | `−e²` |
+| `x·ln(x)·ln(−x² + x·e^{…}) …` | `0` | `1/3` |
+
+The numeric limit machinery should return a not-evaluable signal (or the correct
+value), never a spurious `0`. Surfaced by `benchmarks/audit/wester.ts` (the
+"CE ≠ SymPy disagreements" section).
+
+### B8. `Limit` is numerical-only with low coverage
+
+Like definite integrals (B3), CE evaluates limits **numerically** (`Limit[…].N()`),
+never to a symbolic closed form, and gives up (`∅`) on many — e.g.
+`lim_{x→∞} (3ˣ+5ˣ)^{1/x} = 5` and `lim_{x→∞} ln x/(sin x + ln x) = 1`, both of
+which SymPy solves. On the Wester limit sample CE returned a value for 2/6 vs
+SymPy's 4/6. A symbolic limit path (and/or more robust extrapolation, cf. item 2's
+`extrapolate()`) would close the gap.
