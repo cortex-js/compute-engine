@@ -6,6 +6,7 @@ import {
   checkNumericArgs,
 } from '../boxed-expression/validate';
 import { bignumPreferred } from '../boxed-expression/utils';
+import { polynomialGCDMulti } from '../boxed-expression/polynomials';
 import {
   asSmallInteger,
   asRational,
@@ -1720,10 +1721,22 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 1200,
       broadcastable: false, // The function take a variable number of arguments,
       // including collections
-      signature: '(any*) -> integer',
-      type: () => 'finite_integer',
-      sgn: () => 'positive',
-      evaluate: (xs) => evaluateGcdLcm(xs, 'GCD'),
+      signature: '(any*) -> number',
+      // Integer operands → a positive integer; polynomial operands → a
+      // (monic) polynomial whose type and sign aren't known statically.
+      type: (ops) => (ops.every((x) => x.isInteger) ? 'finite_integer' : 'number'),
+      sgn: (ops) => (ops.every((x) => x.isInteger) ? 'positive' : undefined),
+      evaluate: (xs) => {
+        // Integer operands take the fast numeric path. Otherwise, attempt a
+        // univariate polynomial GCD (e.g. GCD(x²+3x+2, x²+4x+3) → x+1),
+        // falling back to the numeric path — which folds any integer operands
+        // and leaves the rest as an unevaluated GCD.
+        if (!xs.every((x) => x.isInteger)) {
+          const poly = polynomialGCDMulti(xs);
+          if (poly !== undefined) return poly;
+        }
+        return evaluateGcdLcm(xs, 'GCD');
+      },
     },
     LCM: {
       description: 'Least Common Multiple',

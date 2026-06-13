@@ -73,6 +73,15 @@
   the Rubi test suite, the worst single-problem time dropped from 156 s to
   under 4 s, with no stack overflows remaining.
 
+- **`GCD` of polynomials**: the variadic `GCD` operator now computes a
+  univariate polynomial GCD when its operands share a non-trivial common
+  factor, inferring the variable — e.g. `GCD(x²+3x+2, x²+4x+3)` → `x+1` and
+  `GCD((x+1)(x+2), (x+1)(x+3))` → `x+1` (previously returned unevaluated).
+  Integer operands keep the existing numeric behavior, and a trivial (constant)
+  polynomial GCD is deferred so a bare symbol still reads as an unknown integer
+  (`GCD(x, 6)` stays unevaluated); use `PolynomialGCD(p, q, x)` for the explicit
+  coprime → 1 answer. Multivariate GCD is not yet supported.
+
 ### Bug Fixes
 
 - **Unsound `x/√(x²) → 1` simplification.** Simplifying `x/√(x²)` (and the

@@ -614,9 +614,43 @@ kernels (cf. item 4) honoring `ce.precision` with guard digits. Overlaps item 7'
 substitution, with endpoint-limit handling for improper bounds) before the
 quadrature fallback; harden the oscillatory quadrature.
 
-### B4. (next) Depth audit vs SymPy — Bondarenko suite
+### B4. `Factor` emits non-polynomial radical/abs forms for `xⁿ − 1`
 
-Planned: run CE vs SymPy over the Bondarenko integration suite (from
-[12000.org](https://www.12000.org/my_notes/CAS_integration_tests/), ingested via
-`scripts/rubi/wl-parser.ts`), graded by derivative-check + leaf-count quality +
-timing, to systematically rank where CE trails SymPy. Expected to expand B2/B3.
+`Factor` applies a difference-of-even-powers trick that injects `√x`/`|x|` for
+odd exponents, producing factorizations that are value-equal on `x > 0` but are
+**not polynomial** and are branch-dependent:
+
+| input | CE | correct (SymPy) |
+|---|---|---|
+| `x³ − 1` | `(x·√x − 1)(x·√x + 1)` | `(x − 1)(x² + x + 1)` |
+| `x⁶ − 1` | `(\|x\|³ − 1)(\|x\|³ + 1)` | `(x − 1)(x + 1)(x² − x + 1)(x² + x + 1)` |
+| `x⁷ − 1` | `(√x·\|x\|³ − 1)(√x·\|x\|³ + 1)` | `(x − 1)(x⁶ + x⁵ + … + 1)` |
+
+`x² − 1`, `x⁴ − 1` and perfect squares are fine. `Factor` of a polynomial should
+return polynomial factors (cyclotomic for `xⁿ − 1`); the even-power heuristic
+must be gated to actual perfect-power exponents and not introduce `Sqrt`/`Abs`.
+
+### B5. No public polynomial GCD
+
+`["GCD", p, q]` on polynomials returns **unevaluated** (`gcd(x²+3x+2, x²+4x+3)`;
+the answer is `x + 1`). The engine has an internal `polynomialGCD` (used by
+cancellation) but nothing surfaces it as an operator — so polynomial GCD, and
+benchmarks that rely on it (e.g. the Fateman GCD benchmark), can't run on CE.
+Expose `GCD`/`PolynomialGCD` over polynomials.
+
+**Resolved:** `PolynomialGCD(p, q, x)` was already exposed; the variadic `GCD`
+operator now also computes a univariate polynomial GCD when the operands share
+a non-trivial common factor (variable inferred), e.g. `GCD(x²+3x+2, x²+4x+3)`
+→ `x+1`. A trivial (constant) GCD is deferred to preserve the integer-GCD
+reading of a bare symbol — `GCD(x, 6)` stays unevaluated; use `PolynomialGCD`
+for the coprime → 1 answer. Multivariate GCD remains out of scope (see B6).
+
+### B6. (next) Multi-operation audit vs SymPy
+
+Planned: a broad CE-vs-SymPy audit covering **integration** (Bondarenko 35 +
+the other independent suites, ingested via `scripts/rubi/wl-parser.ts`),
+**factoring**, **polynomial GCD** (with the Fateman benchmark as the headline
+perf case — Symbolica 4 s / Mathematica 89 s / SymPy 61 min), **simplification**
+and **expansion**, graded for correctness + performance and ranked by where CE
+trails. A full broad-correctness pass will also fold in the Wester test suite
+(being sourced separately, in Maxima form). Expected to expand B1–B5.

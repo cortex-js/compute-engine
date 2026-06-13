@@ -523,6 +523,54 @@ export function polynomialGCD(
 }
 
 /**
+ * Compute the GCD of two or more univariate polynomials — the polynomial
+ * counterpart of the variadic `GCD` operator applied to polynomial operands.
+ *
+ * The common variable is inferred from the operands: every operand must be a
+ * polynomial in the same single variable. Returns a monic polynomial,
+ * consistent with `polynomialGCD` and the `PolynomialGCD` operator.
+ *
+ * Returns `undefined` when the operands are not all univariate polynomials in
+ * one shared variable (multivariate, non-polynomial, or fewer than two
+ * operands), OR when the polynomial GCD is trivial (a constant, degree 0).
+ * The trivial case is deferred so the caller can keep the existing
+ * integer-GCD-with-symbolic-operands behavior: a bare symbol may stand for an
+ * unknown integer (where `GCD(x, 6)` should stay unevaluated) rather than a
+ * polynomial indeterminate over ℚ (where it would be 1). Callers wanting the
+ * coprime → 1 answer should use the explicit `PolynomialGCD(p, q, x)`.
+ *
+ * Examples:
+ * - `polynomialGCDMulti([x²-1, x²+2x+1])` → x+1
+ * - `polynomialGCDMulti([x³-1, x²-1])` → x-1
+ * - `polynomialGCDMulti([x, 6])` → undefined (trivial gcd, deferred)
+ */
+export function polynomialGCDMulti(
+  ops: ReadonlyArray<Expression>
+): Expression | undefined {
+  if (ops.length < 2) return undefined;
+
+  // Infer the single common variable across all operands.
+  const vars = new Set<string>();
+  for (const op of ops) for (const v of op.unknowns) vars.add(v);
+  if (vars.size !== 1) return undefined; // not univariate
+  const variable = [...vars][0];
+
+  // Every operand must be a polynomial in `variable`.
+  for (const op of ops)
+    if (polynomialDegree(op, variable) < 0) return undefined;
+
+  // Reduce: gcd(p₁, p₂, …, pₙ) = gcd(gcd(p₁, p₂), p₃) …
+  let result = polynomialGCD(ops[0], ops[1], variable);
+  for (let i = 2; i < ops.length; i++)
+    result = polynomialGCD(result, ops[i], variable);
+
+  // Only surface a non-trivial common factor (degree ≥ 1). A constant GCD is
+  // deferred (see above).
+  if (polynomialDegree(result, variable) < 1) return undefined;
+  return result;
+}
+
+/**
  * Make a polynomial monic (leading coefficient = 1).
  */
 function makeMonic(poly: Expression, variable: string): Expression {

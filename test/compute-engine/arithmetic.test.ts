@@ -1537,6 +1537,48 @@ describe('GCD/LCM', () => {
         .evaluate()
         .toString()
     ).toMatchInlineSnapshot(`lcm([60,12,3.1415])`));
+
+  // ROADMAP B5: the variadic GCD operator computes a univariate polynomial GCD
+  // when the operands share a non-trivial common factor (the variable is
+  // inferred). Mirrors the explicit `PolynomialGCD(p, q, x)` operator.
+  describe('polynomial GCD (ROADMAP B5)', () => {
+    const poly = (s: string) => ce.parse(s).canonical;
+    const gcd = (...ops: ReturnType<typeof ce.parse>[]) =>
+      ce.box(['GCD', ...ops]).evaluate().toString();
+
+    it('gcd((x+1)(x+2), (x+1)(x+3)) → x + 1', () =>
+      expect(gcd(poly('(x+1)(x+2)'), poly('(x+1)(x+3)'))).toBe('x + 1'));
+
+    it('gcd(x² − 1, x² + 2x + 1) → x + 1', () =>
+      expect(gcd(poly('x^2-1'), poly('x^2+2x+1'))).toBe('x + 1'));
+
+    it('gcd(x³ − 1, x² − 1) → x − 1', () =>
+      expect(gcd(poly('x^3-1'), poly('x^2-1'))).toBe('x - 1'));
+
+    it('gcd(x² + 3x + 2, x² + 4x + 3) → x + 1', () =>
+      expect(gcd(poly('x^2+3x+2'), poly('x^2+4x+3'))).toBe('x + 1'));
+
+    it('reduces a variadic polynomial GCD', () =>
+      // gcd(x²−1, x³−1) = x−1, which divides x²+x (x(x+1)? no): use a common
+      // factor that survives. (x−1) divides all three below.
+      expect(
+        gcd(poly('x^2-1'), poly('x^3-1'), poly('x^2-3x+2'))
+      ).toBe('x - 1'));
+
+    it('parses and evaluates \\gcd over polynomials', () =>
+      expect(ce.parse('\\gcd(x^2-1, x-1)').evaluate().toString()).toBe(
+        'x - 1'
+      ));
+
+    // A trivial (constant) polynomial GCD is deferred, preserving the
+    // integer-GCD interpretation of a bare symbol (it may stand for an
+    // unknown integer). Use PolynomialGCD(p, q, x) for the coprime → 1 answer.
+    it('defers a trivial GCD: gcd(x, 6) stays unevaluated', () =>
+      expect(gcd(poly('x'), ce.box(6))).toBe('gcd(6, x)'));
+
+    it('defers multivariate GCD: gcd(xy, x) stays unevaluated', () =>
+      expect(gcd(poly('x y'), poly('x'))).toBe('gcd(x * y, x)'));
+  });
 });
 
 describe('GCD/LCM machine-precision path (REVIEW.md B2)', () => {
