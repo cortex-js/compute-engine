@@ -54,7 +54,7 @@ describe('D', () => {
     const expr = D('\\sin(\\frac{1}{x}) + \\ln(x^2+2x)', 'x');
     const result = expr.evaluate();
     expect(result.latex).toMatchInlineSnapshot(
-      `\\frac{2x+2}{x^2+2x}-\\frac{\\cos(\\frac{1}{x})}{x^2}`
+      `\\frac{2(x+1)}{x^2+2x}-\\frac{\\cos(\\frac{1}{x})}{x^2}`
     );
   });
 });
@@ -175,7 +175,7 @@ describe('Inverse trigonometric derivatives', () => {
 
   it('d/dx arccos(x) = -1/sqrt(1-x^2)', () => {
     expect(D('\\arccos(x)', 'x').evaluate().toString()).toMatchInlineSnapshot(
-      `-(1 / sqrt(1 - x^2))`
+      `-1 / sqrt(1 - x^2)`
     );
   });
 
@@ -638,9 +638,7 @@ describe('Derivative of a function with no derivative table (G8)', () => {
   });
 
   it('re-evaluating the symbolic result is stable (no recursion)', () => {
-    const r = engine
-      .box(['Apply', ['Derivative', 'AiryAi', 1], 0])
-      .evaluate();
+    const r = engine.box(['Apply', ['Derivative', 'AiryAi', 1], 0]).evaluate();
     expect(r.evaluate().isSame(r)).toBe(true);
   });
 

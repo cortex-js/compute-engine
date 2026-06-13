@@ -4,16 +4,19 @@
 (Tier-2 numeric kernels), 9 (₂F₁ analytic continuation), 10 (x/√(x²)
 soundness), 11 (deadline checks in simplify), 12 (antiderivative
 correctness), 13 (small engine follow-ups), 14 (incomplete elliptic
-integrals), and 15 (fractional-power principal-branch soundness)
+integrals), 15 (fractional-power principal-branch soundness), and 16
+(factor()↔mul canonicalization loop + `x^(-1/2)` unification)
 completed — prerequisites for the Rubi integration (`docs/rubi/RUBI.md`).
 
 **Rubi status (the consumer driving items 2/4/10/15):** R1 cleared
 (section 1.1.1 at 98.28%) and **R2 gate cleared** (full-Chapter-1 seeded
-sample = 94.0%, ≥90% target). The one engine-adjacent open item is the Rubi
-*driver's* own interruptibility gap — see the scope note under item 2 below
-and `docs/rubi/RUBI.md` §5. Engine-side, the next genuinely new capability
-remains item 7 (analytic-property metadata store); items 1/5 are the
-near-term Fungrim/dispatch follow-ons.
+sample = 94.0%, ≥90% target). The driver hangs that had blocked the
+exhaustive run are **resolved** (an engine `factor()`↔canonical-`mul`
+infinite loop — fixed in `factor.ts`; see the scope note under item 2 and
+`docs/rubi/RUBI.md` §5). Rubi's own top next step is the exhaustive
+25,854-problem run (now feasible). Engine-side, the next genuinely new
+capability remains item 7 (analytic-property metadata store); items 1/5 are
+the near-term Fungrim/dispatch follow-ons.
 
 Context: the 2026-06 release shipped the Fungrim-derived identities library
 (`@cortex-js/compute-engine/identities`, 1,376 rules), the complex-domain
@@ -95,21 +98,25 @@ by a strided deadline check in `differentiate()`). Entries with instances
 380 → 622; True instances 1,089 → 1,363.
 
 **Scope note — this item is the ENGINE evaluation loops only.** The Rubi
-integration driver had its own unbounded paths this item does not cover.
-The matcher (`scripts/rubi/match.ts`) is now deadline-threaded (done
-2026-06-13). The *remaining* unbounded path is a sibling gap in THIS item's
-spirit: **canonical CONSTRUCTION** (`ce.function`/`.mul`/`.pow`) is not
-deadline-checked, only evaluation is — so a single `ce.function('Power',
-hugeExpr)` on a large reduction binding runs for minutes uninterruptibly.
-This blocks the exhaustive Rubi Chapter-1 run (R2). Measured on 1.1.2.2#425:
-a single `ce.function('Add', …)` canonicalizes for MINUTES on operands that
-are each under ~2000 leaves — i.e. **super-linear canonical construction on
-small deeply-nested forms**, not large operands (a driver-side `leafCount`
-cap was tried and does not fire — see `docs/rubi/RUBI.md` §5). The fix is
-engine-side: a strided `checkDeadline` in the canonical Multiply/Add/Power
-construction loops would bound it (interruptible canonicalization, the
-sibling of this item); separately, the super-linearity itself looks worth
-profiling (a 2000-leaf Add should not take minutes).
+integration driver had its own unbounded paths this item does not cover; both
+are now resolved (2026-06-13):
+- The matcher (`scripts/rubi/match.ts`) is deadline-threaded (strided
+  `checkDeadline` in `m()`; defensive — rarely blows up in practice).
+- The minutes-long hangs (1.1.2.2#425 ran 422 s) were NOT a deadline gap but
+  an **engine canonicalization infinite loop**: `factor()` → `mul(common,
+  add(...))` → canonical `mul` re-distributes `common` → `toNumericValue` →
+  `factor()` → … forever, on sums with irrational terms. `factor`
+  (un-distribute) and canonical `mul` (distribute) are inverse operations
+  with no fixed point on those forms. **Fixed** in `factor.ts`: build the
+  factored product with a non-distributing `ce.function('Multiply', …)`
+  instead of the expanding `mul()`. General engine fix (#425 422 s → 51 ms;
+  full 1.1.2.2 section 1018/1071, slowest 9.5 s). Consequence: `factor()`
+  now keeps radical content factored (`√3(√2x+x)` → `√3·x·(1+√2)`); affected
+  simplify tests updated. Details in `docs/rubi/RUBI.md` §5.
+- Related engine canonicalization fix the same day: `Power(u,-1/2)` now
+  canonicalizes to `Divide(1, Sqrt(u))` (was a Power node, not unifying with
+  `1/√u`), plus the `antiderivative()` recognizer matches the current
+  `Divide(1,Sqrt(q))` form — recovers ∫1/√(1-x²)→arcsin and family.
 
 ### 3. ~~CI for the corpus pipeline~~ — ✅ done (2026-06-12)
 
@@ -392,6 +399,44 @@ value consistently.
 new) of the 1.1.1 sample's solved-wrong bucket. The remaining Rubi-side
 elliptic phase mismatches (3 problems/200) are a Rubi-layer follow-on
 (`docs/rubi/RUBI.md`), not an engine soundness issue.
+
+### 16. ~~`factor()`↔`mul` canonicalization loop + `x^(-1/2)` unification~~ — ✅ done (2026-06-13)
+
+**What:** the Rubi exhaustive-run blockers (1.1.2/1.1.3 problems hanging
+2–12 min, worst 736 s) and the broken ∫1/√(1-x²)→arcsin family turned out to
+be two general engine canonicalization bugs:
+
+- **Infinite loop between `factor()` and canonical `mul`.** `Product.mul` →
+  `toNumericValue()` on an `Add` → `factor()` (to pull out common factors) →
+  `factor` returned `mul(common, add(newTerms))`, but canonical `mul`
+  **re-distributed** `common` back over the sum, reproducing the original
+  `Add` → `toNumericValue` → `factor` → … forever, on sums with irrational
+  terms (e.g. `½·x·√(a+bx²) + a·artanh(…)/(2√b)`). `factor` (un-distribute)
+  and `mul` (distribute) are inverses with no fixed point. **Fix:** `factor()`
+  builds the factored product with a non-distributing
+  `ce.function('Multiply', …)` instead of the expanding `mul()`. Found via
+  engine-primitive probing + a deep-recursion stack dump (the "current op"
+  flipped between `canonicalMultiply`/`canonicalAdd` every run — the tell of
+  mutual recursion). **Effect: 1.1.2.2#425 422 s → 51 ms; full 1.1.2.2
+  section 1018/1071, 0 errors, slowest 9.5 s.** Consequence: `factor()` now
+  also keeps radical content factored (`√3(√2x+x)` → `√3·x·(1+√2)`, not
+  `(√3+√6)x`) — a deliberate direction change (aligns with the `factor()`
+  test.todo); affected simplify snapshots/assertions updated.
+- **`x^(-1/2)` did not unify with `1/√x`.** `Power(u,-1/2)` stayed a Power
+  node while `1/√u`, `√u^(-1)`, `1/u^(1/2)` all canonicalized to
+  `Divide(1, Sqrt(u))`, so `D(arcsin x) = (1-x²)^(-1/2)` did not match the
+  integrand `1/√(1-x²)`, and `antiderivative()` returned it unevaluated.
+  **Fix:** `arithmetic-power.ts` canonicalizes negative unit-fraction
+  exponents `a^(-1/n) → 1/Root(a, n)` (branch-safe on the principal branch),
+  and `antiderivative.ts`'s ∫1/√(quadratic) recognizer now matches the
+  current `Divide(1, Sqrt(q))` form (it only knew the old `Sqrt(1/q)` form
+  the `1/√u → √(1/u)` fold used to produce before that fold was gated for
+  soundness — item 15 family). Recovers arcsin/arsinh/arcosh.
+
+**Blast radius:** small — full suite green apart from the deliberately-updated
+radical-simplify snapshots/assertions and one unrelated OEIS network test.
+Both bugs were general (any consumer constructing such expressions hit them),
+surfaced by Rubi. Details in `docs/rubi/RUBI.md` §5.
 
 ### 5. Per-head aggregated rule dispatch
 

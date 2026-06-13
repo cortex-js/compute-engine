@@ -117,7 +117,12 @@
   (e.g. `(2x + 4).toNumericValue()` gave `[1, 2x + 4]` instead of
   `[2, x + 2]`). The internal factoring step it relies on built the factored
   product with an expanding multiply that immediately re-distributed the
-  coefficient back over the sum, undoing the work. The common factor — whether
+  coefficient back over the sum, undoing the work. For sums whose terms have
+  irrational coefficients this re-distribution did worse than undo the
+  factoring — it formed a non-terminating `factor → multiply → factor` cycle,
+  so simplifying or evaluating certain algebraic expressions (including some
+  symbolic integration results) could hang; the factored product is now built
+  without re-distributing, which also resolves the hang. The common factor — whether
   rational (`[2, x + 2]`, `[3, 2u + 3v]`) or radical (`√2·u + √2·v` →
   `[√2, u + v]`) — is now factored out. As a consequence a few `simplify()`
   results involving content under a radical are returned in a more-factored
@@ -209,6 +214,21 @@
   gated on the radicand being known nonnegative; for other operands the
   expression stays structural (`1/√u`) and evaluates on the correct
   branch.
+
+- **`x^(−1/2)` did not match `1/√x`, and `∫1/√(1−x²) dx` stopped
+  evaluating.** Negative unit-fraction powers were inconsistent: `1/√x`,
+  `√x^(−1)`, and `1/x^(1/2)` all canonicalized to `Divide(1, Sqrt(x))`, but
+  `x^(−1/2)` stayed a `Power` node, so the two forms were not structurally
+  equal and `x^(−1/2) + (−1/√x)` would not cancel. As a knock-on effect of
+  the `1/√u → √(1/u)` gating above, `∫1/√(1−x²) dx` (and the `1/√(x²±1)`
+  family) returned unevaluated: the integrator recognized the integrand only
+  in its former `√(1/(1−x²))` form, while it now canonicalizes to
+  `1/√(1−x²)`, and the derivative check `D(arcsin x) = (1−x²)^(−1/2)` no
+  longer matched the integrand. Negative unit-fraction exponents now
+  canonicalize to `1/Root(u, n)` (`x^(−1/2) → 1/√x`, branch-safe on the
+  principal branch), and the integrator recognizes the `1/√(quadratic)`
+  form, so `∫1/√(1−x²) dx → arcsin(x)`, `∫1/√(x²+1) dx → arsinh(x)`, and
+  `∫1/√(x²−1) dx → arcosh(x)` again.
 
 - **Crash factoring a sum whose terms all have zero coefficients.**
   `factor()` on a (non-canonical) sum like `0·u + 0·v` crashed with

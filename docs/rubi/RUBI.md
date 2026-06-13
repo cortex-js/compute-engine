@@ -3,11 +3,13 @@
 **Date:** 2026-06-10 (feasibility); last status update 2026-06-13.
 **Status:** **R1 cleared** (section 1.1.1 at 98.28% solved-correct) and
 **R2 gate cleared** (full-Chapter-1 seeded sample = 94.0%, ≥90% target met).
-Top open item: the **driver-overrun bug** (`RubiDriver.int` ignores its own
-`timeLimitMs`) blocks the exhaustive 25,854-problem run — see Phase R2 in §5.
-The §1–§4 analysis below is the original feasibility study (still accurate);
-§5 carries the current phasing status, and the project memory
-(`project_rubi.md`) has the session-by-session log.
+The driver hangs that had blocked the exhaustive run are **RESOLVED** — root
+cause was an engine `factor()`↔canonical-`mul` infinite loop, now fixed
+(see Phase R2 in §5). **Top next item: run the exhaustive 25,854-problem
+benchmark** (now feasible), then close the 1.1.3 symbolic-n weak spot and the
+item-4 branch-phase residue. The §1–§4 analysis below is the original
+feasibility study (still accurate); §5 carries the current phasing status,
+and the project memory (`project_rubi.md`) has the session-by-session log.
 
 Rubi (Rule-Based Integration, [rulebasedintegration.org](https://rulebasedintegration.org/))
 is Albert Rich's corpus of **7,439 symbolic integration rules** organized as a
@@ -322,71 +324,71 @@ first four). Without them, the ~100 affected Chapter-1 rules can still be
   `(a+b·xⁿ)^p` chains)**, 1.1.4 = 94.4%, 1.2.1 = 95.8%. Only 0.8% wrong and
   0 errors — the residue is now *unsolved*-dominated (coverage gaps), not
   *wrong*-dominated (correctness). Report: `/tmp/rubi-ch1-sample-final.json`.
-  - **Why a SAMPLE, not the exhaustive 25,854 run:** the exhaustive run is
-    blocked by **driver overruns — `RubiDriver.int` exceeding its own
-    `timeLimitMs`** (pure-JS-bound, not engine-eval-bound: a problem runs
-    >50 s even with `timeLimitMs=5000` and `ce.timeLimit=300`). A handful of
-    1.1.2/1.1.3 problems hang for 2–12 minutes each (worst measured: 736 s).
-    - **`matchAll` deadline — DONE (2026-06-13).** The backtracking AC
-      matcher now threads the driver deadline (`match.ts`, strided
-      `checkDeadline` in `m()`) and aborts via `CancellationError`, which
-      `int()` catches → bounded `unsolved`. Regression test in
-      `test/compute-engine/rubi-match.test.ts`. **But investigation showed
-      the matcher's deterministic-first ordering rarely blows up — this was
-      NOT the actual overrun source** (it's cheap defensive insurance).
-    - **THE actual overrun (still open) is core-engine canonical
-      construction inside `build()`** — a single `ce.function('Add'/…)`
-      call that canonicalizes for MINUTES, uninterruptibly. Traced on
-      1.1.2.2#425 (`x^6(a+bx²)^(9/2)`, was 422 s) to one
-      `ce.function('Add', [ (x·(b·x²+a)^(11/2))/(12b),
-      1/(12b)·(-9/10·(7/8·a·(5/6·a·(3/4·… ]))` deep in the reduction. KEY
-      MEASUREMENT: both operands are UNDER ~2000 leaves, yet the call runs
-      minutes — so it is **super-linear canonicalization on a small but
-      deeply-nested reduction accumulator**, NOT operand size.
-    - **Option B (driver-side `leafCount` cap on `build` operands) was
-      tried and DOES NOT WORK** — the operands aren't leaf-large, so no
-      size cap fires. Reverted. The cost is intrinsic to the engine's
-      canonical Add/Multiply combine on these nested forms.
-    - **ROOT CAUSE (found 2026-06-13 via engine-primitive probing + a
-      deep-recursion stack dump):** it is NOT a size/super-linearity issue
-      — it is an **infinite loop in canonicalization** between `factor()`
-      and canonical `mul`. The cycle (captured from the live stack):
-      `Product.mul` → `term.toNumericValue()` on an `Add` term →
-      `toNumericValue` (boxed-function.ts:351) calls `factor(this)` to pull
-      out common factors → `factor` (factor.ts:622) extracts the rational
-      GCD `common` and returns `mul(common, add(newTerms))` → canonical
-      `mul(common, sum)` **re-distributes** `common` back into the sum,
-      reproducing the original `Add` → `toNumericValue` → `factor` → …
-      forever. `factor` (un-distribute) and canonical `mul` (distribute)
-      are inverse operations that never reach a fixed point on sums with
-      irrational terms (the Rubi antiderivative
-      `½·x·√(a+bx²) + a·artanh(x√b/√(a+bx²))/(2√b)`). On rational sums it
-      converges; this specific structural form does not.
-    - **This is a general ENGINE bug, not Rubi-specific** — any consumer
-      that constructs such a sum hits it. Fix options: (A1) a re-entrancy
-      guard so `factor()` is not invoked from within its own result's
-      canonicalization (break the `toNumericValue→factor→mul→toNumericValue`
-      edge); or (A2) make `factor()`'s content extraction idempotent so
-      re-application is a no-op. Either is a focused fix in the
-      canonicalization hot path (needs full snapshot/perf validation).
-      A minimal standalone repro is still elusive (the exact coefficient
-      structure — `½` as an extractable factor vs `/2` in a denominator —
-      determines whether it loops); the driver-level repro is
-      1.1.2.2#425 (`x^6(a+bx²)^(9/2)`). Decision pending: fix the engine
-      bug (converts the hang to a correct fast solve) vs. band-aid.
-    - Harness already mitigates the *verification* tail: `benchmark.ts` has
-      a wall-clock verify budget and `complexAt` swallows
-      `CancellationError`; `driver.int` catches it → null.
-  - **Still open for R2 completion:** (1) driver-overrun fix (above);
-    (2) 1.1.3 symbolic-n coverage once hangs are off the table;
-    (3) artifact + loader packaging (`loadIntegrationRules`) and the CI gate
-    reusing the Fungrim pattern (ROADMAP item 3) — not yet built.
+  - **Driver hangs RESOLVED (2026-06-13) — root cause was an engine
+    canonicalization infinite loop, now fixed.** The exhaustive run had been
+    blocked by a handful of 1.1.2/1.1.3 problems hanging 2–12 min (worst
+    736 s). Root cause (found via engine-primitive probing + a deep-recursion
+    stack dump): a non-terminating cycle between `factor()` and canonical
+    `mul`. `Product.mul` → `term.toNumericValue()` on an `Add` →
+    `toNumericValue` (boxed-function.ts) calls `factor()` → `factor`
+    (factor.ts) extracts the rational/radical GCD `common` and returned
+    `mul(common, add(newTerms))`, but canonical `mul` **re-distributed**
+    `common` back into the sum, reproducing the original `Add` → … forever,
+    for sums with irrational terms (the antiderivative
+    `½·x·√(a+bx²) + a·artanh(…)/(2√b)`). `factor` (un-distribute) and
+    canonical `mul` (distribute) are inverse operations that never reach a
+    fixed point on these forms. **Fix (committed): `factor()` now builds the
+    factored product with a non-distributing `ce.function('Multiply', …)`
+    instead of the expanding `mul()`, so the GCD stays factored and the cycle
+    terminates.** General engine fix (any consumer constructing such a sum
+    was affected). **Effect: 1.1.2.2#425 422 s → 51 ms; the full 1.1.2.2
+    section (1071 problems) now 1018 solved / 0 errors / slowest 9.5 s.**
+    A consequence of dropping the radical guard: `factor()` now also pulls
+    radical content out of sums (`√3(√2x+x)` simplifies to `√3·x·(1+√2)`,
+    not `(√3+√6)x`) — a deliberate direction change; affected simplify
+    snapshots/assertions were updated.
+  - **`matchAll` deadline — DONE (2026-06-13), kept as defensive insurance.**
+    The matcher threads the driver deadline (`match.ts`, strided
+    `checkDeadline` in `m()`; regression test `rubi-match.test.ts`). It was
+    NOT the actual overrun source (the matcher's deterministic-first ordering
+    rarely blows up) but bounds any pathological match.
+  - **Engine canonicalization fix — `x^(-1/2)` vs `1/√x` (2026-06-13).**
+    Separate bug surfaced while reviewing the suite: `Power(u,-1/2)` stayed a
+    Power node while `1/√u`, `√u^(-1)`, `1/u^(1/2)` all canonicalized to
+    `Divide(1, Sqrt(u))`, so `D(arcsin x) = (1-x²)^(-1/2)` did not unify with
+    the integrand `1/√(1-x²)` → ∫1/√(1-x²) returned unevaluated. Fixed in
+    `arithmetic-power.ts` (negative unit-fraction exponents → `1/Root(u,n)`,
+    branch-safe) + the `antiderivative()` recognizer now also matches the
+    current `Divide(1,Sqrt(q))` form (it only knew the old `Sqrt(1/q)` form
+    the `1/√u→√(1/u)` fold used to produce). Recovers the
+    arcsin/arsinh/arcosh integral family; full suite green (one unrelated
+    OEIS network test aside).
+  - **Latest measurement (post-fix):** full 1.1.2.2 = **1018/1071 (95.0%),
+    0 errors, no hangs**; Ch.1-wide 400-sample (seed 7) = **354/400 (88.5%),
+    0 errors, slowest 52 s (1 straggler)**. The seed-42 stratified
+    1,935-sample is **94.0%**; cross-seed variance is largely **verification
+    flakiness** on fractional-power/₂F₁ antiderivatives (the benchmark uses
+    central-difference D-check with random real parameters, which lands on
+    different radical branches → false-wrongs — NOT a quality drop; not Monte
+    Carlo).
+  - **Still open for R2 completion:** (1) **run the exhaustive 25,854-problem
+    benchmark** — now feasible (hangs gone); (2) 1.1.3 symbolic-n coverage
+    (the 84.9% weak spot); (3) item-4 branch-phase residue (quad-√ elliptic
+    — the bulk of the remaining wrongs); (4) verification robustness for
+    radical/₂F₁ results (branch-robust comparison to kill false-wrongs);
+    (5) the lone ~52 s straggler (1.2.2.4-class); (6) artifact + loader
+    packaging (`loadIntegrationRules`) + CI gate (ROADMAP item 3) — not
+    built.
 - **Phase R3+ — chapters by value**: 2 (exponentials, 125 rules — small) and
   3 (logarithms, 337) first; 5/6/7 (inverse trig/hyperbolic) next; Chapter 4
   (trig, 2,126 rules + the inert-trig utility machinery) is its own project;
   Chapter 8 last (needs many special-function heads/kernels).
 
 ## 6. Roadmap Coupling (what to prioritize and why)
+
+> Status (2026-06-13): items 2, 4, 10, 14, 15, and 16 are all **done** (see
+> ROADMAP.md). The prioritization rationale below is kept as the original
+> planning context.
 
 - **ROADMAP item 2 (interruptible evaluation) — do before R2 mass
   validation.** The driver itself gets deadline checks from day one, but the

@@ -2040,6 +2040,35 @@ export function antiderivative(fn: Expression, index: string): Expression {
       }
     }
 
+    // Handle ∫ 1/√(1-x²) dx = arcsin(x), ∫ 1/√(x²+1) dx = arsinh(x),
+    // ∫ 1/√(x²-1) dx = arcosh(x).  Canonical form here is Divide(1, Sqrt(q))
+    // — the current form of 1/√q. (Before the 1/√u → √(1/u) fold was gated
+    // for branch safety, these reached the integrator as Sqrt(1/q), matched
+    // by the Sqrt branch further below; that path is kept for such inputs.)
+    if (fn.op1.isSame(1) && isFunction(fn.op2, 'Sqrt')) {
+      const q = fn.op2.op1;
+      if (isFunction(q, 'Add') && q.nops === 2) {
+        const qOps = q.ops;
+        const oneTerm = qOps.find((op) => op.isSame(1));
+        const negX2Term = qOps.find(
+          (op) =>
+            isFunction(op, 'Negate') &&
+            op.op1.operator === 'Power' &&
+            isFunction(op.op1) &&
+            sym(op.op1.op1) === index &&
+            op.op1.op2.isSame(2)
+        );
+        const x2Term = qOps.find(
+          (op) =>
+            isFunction(op, 'Power') && sym(op.op1) === index && op.op2.isSame(2)
+        );
+        const negOneTerm = qOps.find((op) => op.isSame(-1));
+        if (oneTerm && negX2Term) return ce.expr(['Arcsin', index]);
+        if (oneTerm && x2Term) return ce.expr(['Arsinh', index]);
+        if (negOneTerm && x2Term) return ce.expr(['Arcosh', index]);
+      }
+    }
+
     // Case D: Recognize ∫ f'(x)/f(x) dx = ln|f(x)|
     // Check if numerator is a constant multiple of the derivative of denominator
     if (fn.op1.has(index)) {

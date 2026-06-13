@@ -39,7 +39,8 @@ function NToJson(latex: string): Expression {
 function customCanonical(expr) {
   if (typeof expr.value === 'number') {
     if (expr.head === 'Divide' || expr.head === 'Rational') {
-      if (expr.engine.expr(['GCD', expr.op1, expr.op2]).value !== 1) return expr;
+      if (expr.engine.expr(['GCD', expr.op1, expr.op2]).value !== 1)
+        return expr;
     }
     return expr.engine.number(expr.value);
   }
@@ -474,10 +475,7 @@ describe('CANONICALIZATION invisible operators', () => {
       ]
     `));
   test(`2f'(x) // expression-type operand should produce Multiply, not Tuple`, () => {
-    engine.assign(
-      'f',
-      engine.expr(['Function', ['Multiply', 'x', 2], 'x'])
-    );
+    engine.assign('f', engine.expr(['Function', ['Multiply', 'x', 2], 'x']));
     expect(canonicalToJson("2f'(x)")).toMatchObject([
       'Multiply',
       2,
@@ -571,18 +569,24 @@ describe('SIMPLIFICATION sqrt', () => {
         [
           Multiply,
           [
-            Rational,
-            -1,
-            15,
+            Negate,
+            [
+              Divide,
+              [
+                Sqrt,
+                2,
+              ],
+              15,
+            ],
           ],
           [
             Sqrt,
             [
               Add,
-              28,
+              14,
               [
                 Multiply,
-                10,
+                5,
                 [
                   Sqrt,
                   3,
@@ -594,22 +598,21 @@ describe('SIMPLIFICATION sqrt', () => {
         [
           Multiply,
           [
-            Rational,
-            1,
+            Divide,
+            [
+              Sqrt,
+              2,
+            ],
             15,
           ],
           [
             Sqrt,
             [
               Add,
-              4,
+              2,
               [
-                Multiply,
-                2,
-                [
-                  Sqrt,
-                  3,
-                ],
+                Sqrt,
+                3,
               ],
             ],
           ],

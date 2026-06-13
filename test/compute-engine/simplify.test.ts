@@ -103,7 +103,7 @@ describe('Canonicalization: Others', () => {
   test('2(13.1+x)-(26.2+2x) = 0', () =>
     checkSimplify('2\\left(13.1+x\\right)-\\left(26.2+2x\\right)', 0));
   test('sqrt(3)(sqrt(2)x+x)', () =>
-    checkSimplify('\\sqrt{3}(\\sqrt2x + x)', '(\\sqrt3+\\sqrt6)x'));
+    checkSimplify('\\sqrt{3}(\\sqrt2x + x)', '\\sqrt{3}x(1+\\sqrt2)'));
   test('Add(1,2,1.0001) = 4.0001', () =>
     checkSimplify(['Add', 1, 2, 1.0001], 4.0001));
   test('2a < 4b simplifies to a < 2b', () =>

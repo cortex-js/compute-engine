@@ -314,6 +314,20 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
       ? canonicalRoot(a, ce.number(r[1]))
       : ce._fn('Root', [a, ce.number(r[1])], { canonical: false });
 
+  // Negative unit fractions: a^{-1/n} -> 1/Root(a, n) (1/Sqrt(a) for n=2).
+  // a^{-1/n} = 1/a^{1/n} is exact on the principal branch (no sign info
+  // lost — unlike the unsound 1/√u -> √(1/u)), so this is branch-safe.
+  // Without it, x^{-1/2} stayed a Power node and did NOT unify with the
+  // Divide(1, Sqrt(x)) form that 1/Sqrt(x), Sqrt(x)^{-1} and 1/x^{1/2} all
+  // canonicalize to — so e.g. D(arcsin x) = (1-x^2)^{-1/2} would not cancel
+  // against the integrand 1/Sqrt(1-x^2), breaking antiderivative checks.
+  if (r !== undefined && r[0] === -1 && Math.abs(r[1]) !== 1) {
+    const root = canonicalRoot(a, ce.number(Math.abs(r[1])));
+    return a.isCanonical || a.isStructural
+      ? ce.function('Divide', [ce.One, root])
+      : ce._fn('Divide', [ce.One, root], { canonical: false });
+  }
+
   // Fold exact numeric powers: Power(2, 3) → 8, Power(1/2, 2) → 1/4
   // Only when both base and exponent are exact, and exponent is a real
   // integer (a pure-imaginary exponent like `i` has re = 0, which must NOT
