@@ -392,7 +392,12 @@ function assumeInequality(proposition: Expression): AssumeResult {
     op = '<=';
   }
   if (!op) return 'internal-error';
-  const p = lhs!.sub(rhs!);
+  // The proposition is boxed `{ form: 'raw' }` (engine-assumptions.ts), so its
+  // operands are non-canonical. Arithmetic (`.sub()`, and the `.neg()` it calls)
+  // must run on canonical operands — otherwise a canonical `Negate` ends up
+  // wrapping a non-canonical symbol, tripping the `isCanonical` assert in
+  // `BoxedSymbol.toNumericValue` once the difference is numerically compared.
+  const p = lhs!.canonical.sub(rhs!.canonical);
 
   // Case 2
   const result = ce.expr([op === '<' ? 'Less' : 'LessEqual', p, 0]).evaluate();
