@@ -83,9 +83,10 @@ export class RubiDriver {
     try {
       return this.intRec(integrand, variable, 0);
     } catch (e) {
-      // An engine deadline firing inside evaluate()/simplify() surfaces as
-      // a CancellationError — that is deadline exhaustion, not a crash:
-      // report "no rule chain applied" like any other timeout.
+      // An engine deadline firing inside evaluate()/simplify(), or the
+      // matcher's own deadline (see match.ts), surfaces as a
+      // CancellationError — deadline exhaustion, not a crash: report "no
+      // rule chain applied" like any other timeout.
       if (e instanceof Error && e.constructor.name === 'CancellationError')
         return null;
       throw e;
@@ -195,8 +196,11 @@ export class RubiDriver {
         if (rule.rootOp !== null && rule.rootOp !== integrand.operator)
           continue;
         // conditions participate in matching: enumerate alternative
-        // assignments (factor-role swaps etc.) and try conditions per env
-        const envs = matchAll(rule.pat, integrand, x, envCap);
+        // assignments (factor-role swaps etc.) and try conditions per env.
+        // Pass the driver deadline so a single rule's combinatorial match
+        // (multi-factor products) can't overrun timeLimitMs — matchAll
+        // throws CancellationError, which int() catches → bounded unsolved.
+        const envs = matchAll(rule.pat, integrand, x, envCap, this.deadline);
         for (const env of envs) {
           // bindings may hold synthetic normal-form subtrees —
           // re-canonicalize before conditions and RHS construction

@@ -323,17 +323,60 @@ first four). Without them, the ~100 affected Chapter-1 rules can still be
   0 errors — the residue is now *unsolved*-dominated (coverage gaps), not
   *wrong*-dominated (correctness). Report: `/tmp/rubi-ch1-sample-final.json`.
   - **Why a SAMPLE, not the exhaustive 25,854 run:** the exhaustive run is
-    blocked by a **driver-overrun bug — `RubiDriver.int` ignores its own
-    `timeLimitMs`** (matchAll / the dispatch env-loop have no deadline check;
-    confirmed pure-JS-bound, not engine-eval-bound: a problem runs >50 s even
-    with `timeLimitMs=5000` and `ce.timeLimit=300`). A handful of 1.1.2/1.1.3
-    problems hang for 2–12 minutes each (worst measured: 736 s). This is
-    **the top next-step** — it unblocks the exhaustive run and likely
-    converts a chunk of 1.1.3's unsolved (some are hangs, not true gaps).
-    Fix = thread the driver deadline into `match.ts`'s `matchAll` + the
-    `for (const env of envs)` loop. (Harness side already mitigated:
-    `benchmark.ts` has a verification wall-clock budget and `complexAt`
-    swallows `CancellationError`; `driver.int` catches it → null.)
+    blocked by **driver overruns — `RubiDriver.int` exceeding its own
+    `timeLimitMs`** (pure-JS-bound, not engine-eval-bound: a problem runs
+    >50 s even with `timeLimitMs=5000` and `ce.timeLimit=300`). A handful of
+    1.1.2/1.1.3 problems hang for 2–12 minutes each (worst measured: 736 s).
+    - **`matchAll` deadline — DONE (2026-06-13).** The backtracking AC
+      matcher now threads the driver deadline (`match.ts`, strided
+      `checkDeadline` in `m()`) and aborts via `CancellationError`, which
+      `int()` catches → bounded `unsolved`. Regression test in
+      `test/compute-engine/rubi-match.test.ts`. **But investigation showed
+      the matcher's deterministic-first ordering rarely blows up — this was
+      NOT the actual overrun source** (it's cheap defensive insurance).
+    - **THE actual overrun (still open) is core-engine canonical
+      construction inside `build()`** — a single `ce.function('Add'/…)`
+      call that canonicalizes for MINUTES, uninterruptibly. Traced on
+      1.1.2.2#425 (`x^6(a+bx²)^(9/2)`, was 422 s) to one
+      `ce.function('Add', [ (x·(b·x²+a)^(11/2))/(12b),
+      1/(12b)·(-9/10·(7/8·a·(5/6·a·(3/4·… ]))` deep in the reduction. KEY
+      MEASUREMENT: both operands are UNDER ~2000 leaves, yet the call runs
+      minutes — so it is **super-linear canonicalization on a small but
+      deeply-nested reduction accumulator**, NOT operand size.
+    - **Option B (driver-side `leafCount` cap on `build` operands) was
+      tried and DOES NOT WORK** — the operands aren't leaf-large, so no
+      size cap fires. Reverted. The cost is intrinsic to the engine's
+      canonical Add/Multiply combine on these nested forms.
+    - **ROOT CAUSE (found 2026-06-13 via engine-primitive probing + a
+      deep-recursion stack dump):** it is NOT a size/super-linearity issue
+      — it is an **infinite loop in canonicalization** between `factor()`
+      and canonical `mul`. The cycle (captured from the live stack):
+      `Product.mul` → `term.toNumericValue()` on an `Add` term →
+      `toNumericValue` (boxed-function.ts:351) calls `factor(this)` to pull
+      out common factors → `factor` (factor.ts:622) extracts the rational
+      GCD `common` and returns `mul(common, add(newTerms))` → canonical
+      `mul(common, sum)` **re-distributes** `common` back into the sum,
+      reproducing the original `Add` → `toNumericValue` → `factor` → …
+      forever. `factor` (un-distribute) and canonical `mul` (distribute)
+      are inverse operations that never reach a fixed point on sums with
+      irrational terms (the Rubi antiderivative
+      `½·x·√(a+bx²) + a·artanh(x√b/√(a+bx²))/(2√b)`). On rational sums it
+      converges; this specific structural form does not.
+    - **This is a general ENGINE bug, not Rubi-specific** — any consumer
+      that constructs such a sum hits it. Fix options: (A1) a re-entrancy
+      guard so `factor()` is not invoked from within its own result's
+      canonicalization (break the `toNumericValue→factor→mul→toNumericValue`
+      edge); or (A2) make `factor()`'s content extraction idempotent so
+      re-application is a no-op. Either is a focused fix in the
+      canonicalization hot path (needs full snapshot/perf validation).
+      A minimal standalone repro is still elusive (the exact coefficient
+      structure — `½` as an extractable factor vs `/2` in a denominator —
+      determines whether it loops); the driver-level repro is
+      1.1.2.2#425 (`x^6(a+bx²)^(9/2)`). Decision pending: fix the engine
+      bug (converts the hang to a correct fast solve) vs. band-aid.
+    - Harness already mitigates the *verification* tail: `benchmark.ts` has
+      a wall-clock verify budget and `complexAt` swallows
+      `CancellationError`; `driver.int` catches it → null.
   - **Still open for R2 completion:** (1) driver-overrun fix (above);
     (2) 1.1.3 symbolic-n coverage once hangs are off the table;
     (3) artifact + loader packaging (`loadIntegrationRules`) and the CI gate

@@ -18,6 +18,24 @@
 // optionals — this is how `(a_.+b_.*x_)^m_.` matches bare `x`.
 
 import type { Expression } from '../../src/compute-engine/global-types';
+import { checkDeadline } from '../../src/common/interruptible';
+
+// Deadline plumbing. The backtracking AC matcher (mAC) can blow up
+// combinatorially on products with many factors — this is the dominant
+// source of RubiDriver.int overrunning its timeLimitMs (the dispatch loop
+// only checks the deadline between rules, not inside a single rule's match).
+// matchAll publishes an absolute deadline (ms) here; every match step
+// strided-checks it and throws CancellationError when exceeded, which the
+// driver's int() catches → the problem becomes a bounded `unsolved`.
+// Module-level state is safe: the matcher is single-threaded and each
+// matchAll call runs to completion (or throws) before the next, and the
+// previous value is restored in a finally.
+let _matchDeadline: number | undefined = undefined;
+let _matchTick = 0;
+function tickDeadline(): void {
+  // amortize Date.now() over 1024 steps (same stride as the engine loops)
+  if ((++_matchTick & 0x3ff) === 0) checkDeadline(_matchDeadline);
+}
 
 export type Pat =
   | { kind: 'var' }
@@ -52,14 +70,21 @@ export function matchAll(
   pat: Pat,
   expr: Expression,
   x: Expression,
-  cap = 8
+  cap = 8,
+  deadline?: number
 ): Env[] {
   const envs: Env[] = [];
   const env: Env = new Map();
-  m(pat, expr, x, env, () => {
-    envs.push(new Map(env));
-    return envs.length >= cap; // false ⇒ keep backtracking for more
-  });
+  const saved = _matchDeadline;
+  _matchDeadline = deadline;
+  try {
+    m(pat, expr, x, env, () => {
+      envs.push(new Map(env));
+      return envs.length >= cap; // false ⇒ keep backtracking for more
+    });
+  } finally {
+    _matchDeadline = saved;
+  }
   return envs;
 }
 
@@ -84,6 +109,7 @@ function m(
   env: Env,
   k: () => boolean
 ): boolean {
+  tickDeadline(); // every backtracking step funnels through here
   switch (pat.kind) {
     case 'var':
       return expr.isSame(x) && k();

@@ -95,14 +95,21 @@ by a strided deadline check in `differentiate()`). Entries with instances
 380 → 622; True instances 1,089 → 1,363.
 
 **Scope note — this item is the ENGINE evaluation loops only.** The Rubi
-integration *driver* (`scripts/rubi/driver.ts`, `match.ts`) has its OWN
-unbounded path that this item does NOT cover: `RubiDriver.int` ignores its
-`timeLimitMs` because `matchAll` and the dispatch `for (const env of envs)`
-loop have no deadline check (confirmed pure-JS-bound — a problem runs >50 s
-with `timeLimitMs=5000` and `ce.timeLimit=300`). This blocks the exhaustive
-Rubi Chapter-1 run (R2). **Tracked as the top next-step in
-`docs/rubi/RUBI.md` §5 (Phase R2).** Fix = thread the driver deadline into
-`matchAll` + the env loop.
+integration driver had its own unbounded paths this item does not cover.
+The matcher (`scripts/rubi/match.ts`) is now deadline-threaded (done
+2026-06-13). The *remaining* unbounded path is a sibling gap in THIS item's
+spirit: **canonical CONSTRUCTION** (`ce.function`/`.mul`/`.pow`) is not
+deadline-checked, only evaluation is — so a single `ce.function('Power',
+hugeExpr)` on a large reduction binding runs for minutes uninterruptibly.
+This blocks the exhaustive Rubi Chapter-1 run (R2). Measured on 1.1.2.2#425:
+a single `ce.function('Add', …)` canonicalizes for MINUTES on operands that
+are each under ~2000 leaves — i.e. **super-linear canonical construction on
+small deeply-nested forms**, not large operands (a driver-side `leafCount`
+cap was tried and does not fire — see `docs/rubi/RUBI.md` §5). The fix is
+engine-side: a strided `checkDeadline` in the canonical Multiply/Add/Power
+construction loops would bound it (interruptible canonicalization, the
+sibling of this item); separately, the super-linearity itself looks worth
+profiling (a 2000-leaf Add should not take minutes).
 
 ### 3. ~~CI for the corpus pipeline~~ — ✅ done (2026-06-12)
 
