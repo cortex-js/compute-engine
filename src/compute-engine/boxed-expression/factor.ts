@@ -588,9 +588,9 @@ export function factor(expr: Expression): Expression {
     return expr.engine.function(h, [lhs.asExpression(), rhs.asExpression()]);
   }
 
-  if (isFunction(expr) && h === 'Negate') return factor(expr.ops[0]).neg();
+  if (isFunction(expr, 'Negate')) return factor(expr.op1).neg();
 
-  if (isFunction(expr) && h === 'Add') {
+  if (isFunction(expr, 'Add')) {
     const ce = expr.engine;
     let common: NumericValue | undefined = undefined;
 
@@ -619,6 +619,15 @@ export function factor(expr: Expression): Expression {
       mul(term, ce.expr(coeff.div(common)))
     );
 
+    // Build the factored product WITHOUT the expanding `mul()` helper:
+    // `mul(k, sum)` distributes `k` back over the sum (expandProduct),
+    // re-expanding `2(x+2)` into `2x+4` and undoing the factoring. A
+    // canonical Multiply node preserves the factored form.
+    // Only do this for a rational content factor: extracting a radical
+    // content (e.g. √3 from √6x+√3x) changes simplification forms in a
+    // debatable direction, so leave those to the existing behavior.
+    if (!hasNonTrivialRadical(common))
+      return ce.function('Multiply', [ce.number(common), add(...newTerms)]);
     return mul(ce.number(common), add(...newTerms));
   }
 

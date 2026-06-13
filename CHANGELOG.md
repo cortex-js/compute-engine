@@ -110,6 +110,19 @@
   unaffected. A related assertion failure / `NaN` when a rational multiplied
   a `√(negative)` (e.g. `11·√(−3)`) is also fixed.
 
+- **`toNumericValue()` did not factor a common coefficient out of a sum.**
+  `BoxedExpression.toNumericValue()` returns a `[coefficient, rest]` pair whose
+  product equals the original expression, with the numeric coefficient pulled
+  out — but for a sum it returned the whole sum with a coefficient of `1`
+  (e.g. `(2x + 4).toNumericValue()` gave `[1, 2x + 4]` instead of
+  `[2, x + 2]`). The internal factoring step it relies on built the factored
+  product with an expanding multiply that immediately re-distributed the
+  coefficient back over the sum, undoing the work. Sums with a common rational
+  factor are now returned factored (`[2, x + 2]`, `[3, 2u + 3v]`). The
+  extraction is scoped to a rational content factor — a common radical (e.g.
+  `√2` in `√2·u + √2·v`) is intentionally left distributed — so canonical
+  forms, `simplify()`, and the `Factor` operator are unaffected.
+
 - **`isEqual()` could declare two equal complex constants unequal.** The
   tolerance comparison rejected any nonzero imaginary part, so two
   expressions for the same complex number differing by a 1-ulp imaginary

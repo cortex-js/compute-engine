@@ -522,6 +522,52 @@ describe('CONTENT EXTRACTION (coefficient GCD)', () => {
   });
 });
 
+// factor()'s Add case built the factored product with the expanding mul()
+// helper, which distributes the content right back over the sum
+// (mul(2, u+v) -> 2u+2v) — so `2x + 4` came back unchanged and
+// toNumericValue() could not extract the coefficient. The factored form must
+// be preserved (a canonical Multiply node, which does not distribute).
+// Extraction is scoped to a RATIONAL gcd: a radical content (e.g. √2) is
+// deliberately left distributed, to avoid changing simplification forms
+// (cf. the `√3(√2x + x)` case in simplify.test.ts).
+describe('Linear content extraction (factor + toNumericValue)', () => {
+  test('factor keeps the rational content factored, not re-distributed', () => {
+    expect(factor(parse('2x + 4')).operator).toBe('Multiply');
+    expect(factor(parse('2x + 4')).latex).toBe('2(x+2)');
+    expect(
+      factor(ce.box(['Add', ['Multiply', 2, 'u'], ['Multiply', 2, 'v']])).latex
+    ).toBe('2(u+v)');
+    expect(
+      factor(ce.box(['Add', ['Multiply', 6, 'u'], ['Multiply', 9, 'v']])).latex
+    ).toBe('3(2u+3v)');
+  });
+
+  test('toNumericValue extracts the rational content from a sum', () => {
+    const [c1, r1] = parse('2x + 4').toNumericValue();
+    expect(c1.eq(2)).toBe(true);
+    expect(r1.isSame(parse('x + 2'))).toBe(true);
+
+    const [c2, r2] = ce
+      .box(['Add', ['Multiply', 2, 'u'], ['Multiply', 2, 'v']])
+      .toNumericValue();
+    expect(c2.eq(2)).toBe(true);
+    expect(r2.isSame(ce.box(['Add', 'u', 'v']))).toBe(true);
+  });
+
+  test('radical content is left distributed (scoped to rational gcd)', () => {
+    const sum = ce.box([
+      'Add',
+      ['Multiply', ['Sqrt', 2], 'u'],
+      ['Multiply', ['Sqrt', 2], 'v'],
+    ]);
+    // Not factored into √2(u + v): the radical stays distributed.
+    expect(factor(sum).operator).toBe('Add');
+    const [c, r] = sum.toNumericValue();
+    expect(c.eq(1)).toBe(true);
+    expect(r.isSame(sum)).toBe(true);
+  });
+});
+
 // The public free function must do full polynomial factoring, like the
 // `Factor` operator — not just the internal GCD content extraction. It used
 // to bind the internal factor() helper, so factor('x^2 + 5x + 6') returned

@@ -341,14 +341,15 @@ export class BoxedFunction
       return [ce._numericValue({ re: this.op1.re, im: this.op2.re }), ce.One];
     }
 
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
+    let expr: Expression = this;
+
     //
     // Add
     //
-    //  use factor() to factor out common factors
-    // eslint-disable-next-line @typescript-eslint/no-this-alias
-    let expr: Expression = this;
     if (expr.operator === 'Add') {
-      expr = factor(this);
+      //  use factor() to factor out common factors
+      expr = factor(expr);
       if (isNumber(expr)) {
         if (typeof expr.numericValue === 'number') {
           if (Number.isInteger(expr.numericValue))
