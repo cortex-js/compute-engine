@@ -15,3 +15,10 @@ ENV/
 # OS
 .DS_Store
 Thumbs.db
+
+# Downloaded competitor packages (math.js install + packed CE releases)
+.competitors/
+
+# Generated benchmark data (REPORT.md is kept under version control; the raw
+# machine-readable dump is regenerated on every run)
+results.json

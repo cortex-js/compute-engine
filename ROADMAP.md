@@ -559,3 +559,64 @@ CLAUDE.md): the `undefined → false` collapse in three-valued predicates was
 the single most recurring bug class (A3, G3, the sets/Union/Range contains
 family, NaN comparisons); validation-by-corpus (the Fungrim harness) found
 15 engine bugs that targeted review missed — keep running it.
+
+---
+
+## Benchmark findings (June 2026)
+
+Surfaced by the cross-library benchmark in [`benchmarks/`](./benchmarks/)
+(CE vs SymPy / math.js / NumPy — see `benchmarks/REPORT.md`). Each is reproduced
+against the current build and verified numerically with `mpmath`. None are
+regressions vs `0.59.0`; they are pre-existing gaps the suite made visible.
+
+### B1. Special-function `N()` does not honor requested precision
+
+- **`Zeta` — the worst case.** `ζ(3)` at `ce.precision = 40` is correct to only
+  **~16 digits** then diverges (CE `…159594223…` vs true `…159594285…`); at
+  precision 60 it reaches only ~22. The numeric path is effectively
+  double-precision regardless of `ce.precision`.
+- **`Gamma` — milder but real.** `Γ(1/3)` delivers ~38 of 40 requested digits
+  (~50 of 60), and is **~10× slower than SymPy** per call (the one numeric case
+  in the suite where a competitor beats CE on speed).
+
+**Fix direction:** route `Zeta`/`Gamma` `N()` through arbitrary-precision
+kernels (cf. item 4) honoring `ce.precision` with guard digits. Overlaps item 7's
+"pole-aware `N()`" — worth doing together when touching these heads.
+
+### B2. Symbolic (indefinite) integration coverage gaps
+
+- **Fractional-power / radical integrands return unevaluated** — `∫1/√x`, `∫√x`,
+  `∫x²/√(1−x²)`, `∫x/√(1−x²)`: the power rule isn't applied to fractional
+  exponents and radical substitutions are missing. All are solved by the
+  experimental Rubi path **and** by SymPy, so the `CE·cur` vs `CE+R/F` gap in the
+  report quantifies exactly what's missing from the built-in integrator.
+- **Non-elementary results not produced** — `∫e^(−x²)` (erf), `∫sin x/x` (Si),
+  `∫sec³x` come back unevaluated; SymPy returns erf/Si.
+- **Machine floats leak into otherwise-correct symbolic results** — `∫1/(x³+1)`
+  → `0.333…·ln|x+1| + 0.577…·…` instead of exact `⅓` and `√3/3`. The value is
+  right but the form has float coefficients where exact rationals/radicals
+  belong. (`antiderivative.ts` — likely the partial-fraction coefficient path.)
+- **Nested radicals not denested** — `√(3+2√2)` stays as-is; SymPy gives `1+√2`
+  (`sqrtdenest`). Lower priority.
+
+### B3. Definite / improper integrals are numerical-only
+
+- Even elementary definite integrals return a **numerical** value with an error
+  estimate rather than the exact closed form: `∫₀¹ x² dx → 0.333157 ± 9e-5`
+  (not `1/3`). There is no symbolic definite path (antiderivative + bound
+  substitution).
+- **Oscillatory improper integrals diverge** — `∫₀^∞ cos(x²) dx → −1.6 ± 1.8`
+  (true `√(π/8) ≈ 0.627`); the numerical quadrature mishandles conditionally-
+  convergent oscillatory integrands. `∫₀^∞ e^(−x²)` lands at `0.886 ± …`
+  (~4-digit) — close, but still numerical.
+
+**Fix direction:** add a symbolic definite path (antiderivative + bound
+substitution, with endpoint-limit handling for improper bounds) before the
+quadrature fallback; harden the oscillatory quadrature.
+
+### B4. (next) Depth audit vs SymPy — Bondarenko suite
+
+Planned: run CE vs SymPy over the Bondarenko integration suite (from
+[12000.org](https://www.12000.org/my_notes/CAS_integration_tests/), ingested via
+`scripts/rubi/wl-parser.ts`), graded by derivative-check + leaf-count quality +
+timing, to systematically rank where CE trails SymPy. Expected to expand B2/B3.
