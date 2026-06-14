@@ -371,14 +371,55 @@ first four). Without them, the ~100 affected Chapter-1 rules can still be
     central-difference D-check with random real parameters, which lands on
     different radical branches → false-wrongs — NOT a quality drop; not Monte
     Carlo).
-  - **Still open for R2 completion:** (1) **run the exhaustive 25,854-problem
-    benchmark** — now feasible (hangs gone); (2) 1.1.3 symbolic-n coverage
-    (the 84.9% weak spot); (3) item-4 branch-phase residue (quad-√ elliptic
-    — the bulk of the remaining wrongs); (4) verification robustness for
-    radical/₂F₁ results (branch-robust comparison to kill false-wrongs);
-    (5) the lone ~52 s straggler (1.2.2.4-class); (6) artifact + loader
-    packaging (`loadIntegrationRules`) + CI gate (ROADMAP item 3) — not
-    built.
+  - **Exhaustive run — DONE (2026-06-13), the authoritative R2 number.** All
+    **25,854 Chapter-1 problems ran end-to-end in ~1 h, 0 hangs, 0 skips**
+    (first time feasible — the `factor()`/`mul` fix removed the multi-minute
+    stalls). **Result: 90.0% solved** (correct + region-phase formal):
+    23,230 correct + 35 formal / 263 wrong (1.0%) / 1,617 unsolved (6.3%) /
+    514 inconclusive / 168 not-evaluable / 27 error. **R2 gate (≥90%) cleared
+    on the full run** (the 94% seeded sample was optimistic — the full run
+    carries the complete weight of the weak 1.1.3 and 1.3 tails). By section:
+    1.1.1 97.9%, 1.1.2 94.3%, **1.1.3 85.7%**, 1.1.4 96.3%, 1.2.1 92.6%,
+    1.2.2 85.9%, 1.2.3 80.3%, 1.2.4 78.6%, 1.3.1 72.3%, **1.3.2 56.3%**
+    (worst rate). Report `/tmp/rubi-ch1-exhaustive.json`.
+  - **Error cluster — FIXED (committed `6ceb8990`).** All 27 errors were one
+    bug: the corpus uses Rubi's unary predicate forms `EqQ[u]`/`NeQ[u]`
+    (compare to 0), which our `PRED_FNS` only handled binary, so
+    `build(args[1])` hit `undefined` (`json is not iterable`). Fixed with an
+    `eqDelta` helper; the 27 → 24 correct / 2 unsolved / 1 wrong, 0 regressions.
+    Added a `benchmark --keys <file>` option for targeted cluster re-validation.
+  - **1.1.3 coverage — `Numer`/`Denom` fix (committed `6ceb8990`): +138
+    solved-correct.** The cube/sixth-root elliptic rules (e.g. 1.1.3.1#14
+    `∫1/√(a+b·x³)`) bind `r=Numer[Rt[b/a,3]]` using Rubi's own
+    radical-splitting abbreviations `Numer`/`Denom`; `rubi-utils` only had
+    `Numerator`/`Denominator`, so those bindings stayed inert `Numer(…)` heads
+    that blocked closure. Aliased `Numer`→`.numerator`, `Denom`→`.denominator`
+    (CE already splits radicals the same way). Re-run of the 429 1.1.3 unsolved:
+    **138 → solved-correct, 30 → wrong, 18 inconclusive, 243 still unsolved.**
+  - **1.1.3.4 two-binomial wrongs — FIXED: an UPSTREAM RUBI BUG.** The 30
+    `∫x^m·(c+d·x³)^(k/2)/(8c−d·x³)` wrongs traced to **Rubi 4.17.3.0 rule
+    1.1.3.6 #19/#20**: splitting `(e+f·xⁿ)` out of `(g·x)^m` gives
+    `f·xⁿ·(g·x)^m = (f/gⁿ)·(g·x)^(m+n)`, so the second term's coefficient is
+    `f/gⁿ` — but the Rubi source writes `f/eⁿ` (`e` = the constant of the third
+    binomial, not the coefficient `g` of `(g·x)^m`). With the common default
+    `g=1` it should be just `f`; `f/eⁿ` instead divides by `eⁿ` (= the spurious
+    `(16c²)³` factor seen as `29.5cd → 59cd/8192c⁶`). Every other rule in the
+    chain (#28/#38/#43/#48) is provably correct in isolation; a *linearity*
+    test (`driver.int(∫(k0·x+k1·x⁴)/…)` ≠ `k0·∫x/… + k1·∫x⁴/…`) isolated the
+    mis-routing to the 3-binomial rule #19. **It is genuinely upstream** (raw
+    vendored source confirmed); it survives in Rubi because that rule rarely
+    fires under Mathematica's dispatch. **Fix:** `f/eⁿ → f/gⁿ` in the corpus
+    (rules #19/#20) + a durable `applyUpstreamCorrections()` patch in
+    `extract-rules.ts` (so regeneration preserves it). All 30 → solved-correct,
+    0 regressions.
+  - **Still open for R2 completion:** (1) remaining 1.1.3 coverage —
+    quartic-denominator `∫(c+d·x²)/(a+b·x⁴)` closing (cluster 2, ~203 unsolved)
+    + 1.1.3.8 two-binomial tails; (2) 1.3.2 (56% — worst section) and 1.3.1;
+    (3) item-4 branch-phase residue (quad-√ elliptic — the bulk of the 263
+    wrongs are root-of-unity phase, the *expected* Rubi forms also fail
+    principal-branch verification → consider a global-unimodular-phase
+    verification acceptance, debatable); (4) artifact + loader packaging
+    (`loadIntegrationRules`) + CI gate (ROADMAP item 3).
 - **Phase R3+ — chapters by value**: 2 (exponentials, 125 rules — small) and
   3 (logarithms, 337) first; 5/6/7 (inverse trig/hyperbolic) next; Chapter 4
   (trig, 2,126 rules + the inert-trig utility machinery) is its own project;

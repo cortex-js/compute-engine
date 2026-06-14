@@ -123,7 +123,42 @@ export function extractRules(filePath: string): ExtractResult {
       errors.push({ index, error: String(e), source: cell });
     }
   });
+  applyUpstreamCorrections(filePath, rules);
   return { rules, errors };
+}
+
+/**
+ * Corrections for verified bugs in the frozen Rubi 4.17.3.0 source. Each entry
+ * is keyed by a path substring + rule index and rewrites the rule's `rhs`.
+ * Kept here (not hand-edited into the corpus JSON) so a regeneration preserves
+ * the fix. Every correction must cite the math and stay minimal.
+ */
+function applyUpstreamCorrections(filePath: string, rules: RubiRule[]): void {
+  // 1.1.3.6 (rules #19/#20): splitting (e+f·x^n) out of (g·x)^m gives
+  //   f·x^n·(g·x)^m = (f/g^n)·(g·x)^(m+n)  — the second term's coefficient is
+  // f/g^n, but the Rubi source writes f/e^n (e is the *constant* of the third
+  // binomial, not the coefficient g of (g·x)^m). With the common default g=1
+  // this should be just f, yet f/e^n divides by e^n. Surfaced as a wrong
+  // antiderivative for ∫x^m·(c+d·x³)^(k/2)/(8c−d·x³) (1.1.3.4 two-binomial
+  // family). Matched by content, not index (f/e^n is never a correct split
+  // coefficient, and only these rules carry the pattern). Fix: f/e^n → f/g^n.
+  if (filePath.includes('1.1.3.6 (g x)^m')) {
+    const fix = (node: Json): Json => {
+      if (Array.isArray(node)) {
+        if (
+          node[0] === 'Divide' &&
+          node[1] === 'f' &&
+          Array.isArray(node[2]) &&
+          node[2][0] === 'Power' &&
+          node[2][1] === 'e_var'
+        )
+          return ['Divide', 'f', ['Power', 'g', node[2][2]]];
+        return node.map(fix);
+      }
+      return node;
+    };
+    for (const r of rules) r.rhs = fix(r.rhs);
+  }
 }
 
 function normalizeRule(index: number, expr: Json, source: string): RubiRule {

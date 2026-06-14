@@ -139,6 +139,33 @@ FreeQ[{a,b},x] && PosQ[a/b]
     expect(r.condition?.[0]).toBe('And');
   });
 
+  test('upstream correction: 1.1.3.6 f/e^n → f/g^n', () => {
+    // Rubi 4.17.3.0 rule 1.1.3.6 #19/#20 write the split coefficient as f/e^n,
+    // but the math is f/g^n (g is the coefficient of (g·x)^m). The corpus is
+    // corrected in extract-rules.ts/applyUpstreamCorrections — keyed by the
+    // file path, so the temp file must carry the 1.1.3.6 name.
+    const dir = mkdtempSync(join(tmpdir(), 'rubi-test-'));
+    const file = join(dir, '1.1.3.6 (g x)^m (a+b x^n)^p (c+d x^n)^q (e+f x^n)^r.m');
+    writeFileSync(
+      file,
+      `
+Int[(g_.*x_)^m_.*(a_+b_.*x_^n_)^p_.*(c_+d_.*x_^n_)^q_.*(e_+f_.*x_^n_),x_Symbol] :=
+  e \\[Star] Int[(g*x)^m*(a+b*x^n)^p*(c+d*x^n)^q,x] +
+  f/e^n \\[Star] Int[(g*x)^(m+n)*(a+b*x^n)^p*(c+d*x^n)^q,x] /;
+FreeQ[{a,b,c,d,e,f,g,m,p,q},x] && IGtQ[n,0]
+`
+    );
+    try {
+      const { rules } = extractRules(file);
+      const rhs = JSON.stringify(rules[0].rhs);
+      // corrected to f/g^n, no residual f/e^n
+      expect(rhs).toContain('["Divide","f",["Power","g","n"]]');
+      expect(rhs).not.toContain('e_var","n"');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test('commented-out rules are dropped; order is preserved', () => {
     const { rules } = extractFromSource(`
 Int[1/x_,x_Symbol] := Log[x]
