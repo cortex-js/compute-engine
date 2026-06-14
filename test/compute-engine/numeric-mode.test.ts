@@ -68,8 +68,10 @@ describe('NUMERIC MODE', () => {
     expect(check('\\cos(555555^{-1})')).toMatchInlineSnapshot(`
       box       = ["Cos", ["Power", 555555, -1]]
       canonical = ["Cos", ["Rational", 1, 555555]]
-      eval-auto = 0.99999999999837999676
-      eval-mach = 0.99999999999838
+      eval-auto = cos(1/555555)
+      eval-mach = cos(1/555555)
+      N-auto    = 0.99999999999837999676
+      N-mach    = 0.99999999999838
     `));
 
   test(`\\cos(3+4i)`, () =>

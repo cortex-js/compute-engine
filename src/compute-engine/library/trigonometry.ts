@@ -159,10 +159,16 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       signature: '(number) -> finite_real',
       type: (ops) => numericTypeHandler(ops),
       sgn: ([x]) => trigSign('Arctan', x),
-      evaluate: ([x], { numericApproximation }) =>
-        numericApproximation
-          ? evalTrig('Arctan', x)
-          : (constructibleValues('Arctan', x) ?? evalTrig('Arctan', x)),
+      evaluate: ([x], { numericApproximation, engine }) => {
+        if (numericApproximation) return evalTrig('Arctan', x);
+        const a = constructibleValues('Arctan', x);
+        if (a) return a;
+        // Keep arctan of an EXACT numeric argument symbolic (only .N()
+        // numericizes); an inexact float falls through to evalTrig and
+        // numericizes; evalTrig also handles symbolic arguments.
+        if (isNumber(x) && x.isExact) return engine._fn('Arctan', [x]);
+        return evalTrig('Arctan', x);
+      },
     },
 
     Arctan2: {
@@ -444,10 +450,18 @@ function trigFunction(
       ops = checkArity(ce, ops, 1);
       return ce._fn(operator, ops);
     },
-    evaluate: ([x], { numericApproximation }) => {
+    evaluate: ([x], { numericApproximation, engine }) => {
       if (numericApproximation) return evalTrig(operator, x);
       const a = constructibleValues(operator, x);
-      return a ?? evalTrig(operator, x);
+      if (a) return a;
+      // No constructible value: keep the function of an EXACT numeric argument
+      // symbolic — `sin(2)` is an exact constant, so `evaluate()` returns
+      // `sin(2)` and only `.N()` numericizes. An INEXACT (float) argument has
+      // no exactness to preserve, so it falls through to `evalTrig` and
+      // numericizes (`sin(2.5) → 0.598…`); `evalTrig` also handles symbolic
+      // arguments (returning undefined, leaving the expression unevaluated).
+      if (isNumber(x) && x.isExact) return engine._fn(operator, [x]);
+      return evalTrig(operator, x);
     },
   };
 }

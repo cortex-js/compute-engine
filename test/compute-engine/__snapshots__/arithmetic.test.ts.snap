@@ -201,15 +201,19 @@ eval-mach = 5.3818192885643805
 
 exports[`EXACT EVALUATION Cos: Exact integer 1`] = `
 box       = ["Cos", 5]
-eval-auto = 0.283662185463226264467
-eval-mach = 0.28366218546322625
+eval-auto = cos(5)
+eval-mach = cos(5)
+N-auto    = 0.283662185463226264467
+N-mach    = 0.28366218546322625
 `;
 
 exports[`EXACT EVALUATION Cos: Exact rational 1`] = `
 box       = ["Cos", ["Divide", 5, 7]]
 canonical = ["Cos", ["Rational", 5, 7]]
-eval-auto = 0.755561346700696598469
-eval-mach = 0.7555613467006967
+eval-auto = cos(5/7)
+eval-mach = cos(5/7)
+N-auto    = 0.755561346700696598469
+N-mach    = 0.7555613467006967
 `;
 
 exports[`EXACT EVALUATION Cos: Inexact Fractional part 1`] = `
@@ -345,10 +349,10 @@ invalid   =[
 exports[`INVALID LOG Ln with two numeric arguments 1`] = `
 box       = ["Ln", 3, 4]
 canonical = ["Log", 3, 4]
-simplify  = 0.792481250360578
-eval-auto = 0.792481250360578
-eval-mach = 0.792481250360578
+eval-auto = log(3, 4)
+eval-mach = log(3, 4)
 N-auto    = 0.792481250360578090733
+N-mach    = 0.792481250360578
 `;
 
 exports[`INVALID NEGATE INVALID Negate 1`] = `["Negate", 2.5, ["Error", "unexpected-argument", "'1.1'"]]`;
@@ -388,13 +392,19 @@ N-mach    = (0.637503523749935 + 1.1330900354567985i)
 exports[`LB Lb -1 1`] = `
 box       = ["Lb", -1]
 canonical = ["Log", -1, 2]
-simplify  = NaN
+eval-auto = log(-1, 2)
+eval-mach = log(-1, 2)
+N-auto    = NaN
+N-mach    = NaN
 `;
 
 exports[`LB Lb -2 1`] = `
 box       = ["Lb", -2]
 canonical = ["Log", -2, 2]
-simplify  = NaN
+eval-auto = log(-2, 2)
+eval-mach = log(-2, 2)
+N-auto    = NaN
+N-mach    = NaN
 `;
 
 exports[`LB Lb 0 1`] = `
@@ -439,9 +449,9 @@ N-mach    = (0.19190768299021566 + 0.3410940884604603i)
 exports[`LG LG -1 1`] = `
 box       = ["Lg", -1]
 canonical = ["Log", -1]
-simplify  = NaN
-eval-auto = NaN
-eval-mach = NaN
+simplify  = log(-1, 10)
+eval-auto = log(-1, 10)
+eval-mach = log(-1, 10)
 N-auto    = 1.3643763538418412i
 N-mach    = 1.3643763538418412i
 `;
@@ -485,18 +495,16 @@ N-mach    = (0.4418837700842976 + 0.7853981633974483i)
 
 exports[`LN Ln -1 1`] = `
 box       = ["Ln", -1]
-simplify  = NaN
-eval-auto = NaN
-eval-mach = NaN
+eval-auto = ln(-1)
+eval-mach = ln(-1)
 N-auto    = 3.141592653589793i
 N-mach    = 3.141592653589793i
 `;
 
 exports[`LN Ln -2 1`] = `
 box       = ["Ln", -2]
-simplify  = NaN
-eval-auto = NaN
-eval-mach = NaN
+eval-auto = ln(-2)
+eval-mach = ln(-2)
 N-auto    = (0.6931471805599453 + 3.141592653589793i)
 N-mach    = (0.6931471805599453 + 3.141592653589793i)
 `;
@@ -537,7 +545,10 @@ N-mach    = (0.2745578233682816 + 0.48799531645779287i)
 
 exports[`LOG(a,b) Log -1, 5 1`] = `
 box       = ["Log", -1, 5]
-simplify  = NaN
+eval-auto = log(-1, 5)
+eval-mach = log(-1, 5)
+N-auto    = NaN
+N-mach    = NaN
 `;
 
 exports[`LOG(a,b) Log 0, 5 1`] = `
@@ -576,18 +587,18 @@ N-mach    = (0.19190768299021566 + 0.3410940884604603i)
 
 exports[`Log Log -1 1`] = `
 box       = ["Log", -1]
-simplify  = NaN
-eval-auto = NaN
-eval-mach = NaN
+simplify  = log(-1, 10)
+eval-auto = log(-1, 10)
+eval-mach = log(-1, 10)
 N-auto    = 1.3643763538418412i
 N-mach    = 1.3643763538418412i
 `;
 
 exports[`Log Log -2 1`] = `
 box       = ["Log", -2]
-simplify  = NaN
-eval-auto = NaN
-eval-mach = NaN
+simplify  = log(-2, 10)
+eval-auto = log(-2, 10)
+eval-mach = log(-2, 10)
 N-auto    = (0.30102999566398114 + 1.3643763538418412i)
 N-mach    = (0.30102999566398114 + 1.3643763538418412i)
 `;

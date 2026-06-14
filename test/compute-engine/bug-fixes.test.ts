@@ -45,12 +45,17 @@ describe('BUG FIXES', () => {
   });
 
   describe('Bug #178: exp(log(x) ± y) should separate the log term', () => {
+    // exp(log₁₀ x) = x^(1/ln 10), which CE may render either as a power
+    // `x^{1/\ln(10)}` or as the ln(10)-th root `\sqrt[\ln(10)]{x}` (the latter
+    // now that `ln(10)` stays the exact symbol rather than a float). The bug is
+    // about separating the log term: no `\log` should remain, and the `\ln(10)`
+    // factor (from the base-10 → natural-log conversion) must appear.
     test('exp(log(x)+y) has no remaining log()', () => {
       const ce = new ComputeEngine();
       const latex = ce.parse('\\exp(\\log(x)+y)', { form: 'raw' })
         .simplify().latex;
       expect(latex).toContain('\\exponentialE^{y}');
-      expect(latex).toContain('x^{');
+      expect(latex).toContain('\\ln(10)');
       expect(latex).not.toContain('\\log');
     });
 
@@ -58,7 +63,7 @@ describe('BUG FIXES', () => {
       const ce = new ComputeEngine();
       const latex = ce.parse('\\exp(\\log(x)-y)', { form: 'raw' })
         .simplify().latex;
-      expect(latex).toContain('x^{');
+      expect(latex).toContain('\\ln(10)');
       expect(latex).not.toContain('\\log');
     });
   });

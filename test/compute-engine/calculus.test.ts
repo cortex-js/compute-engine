@@ -421,7 +421,9 @@ describe('ROADMAP B2: fractional powers and exact partial-fraction coefficients'
   };
 
   test('∫1/(x³+1) dx is exact (no float coefficients)', () =>
-    expect(noFloats(evaluate('\\int \\frac{1}{x^3+1} dx'))).toMatchInlineSnapshot(
+    expect(
+      noFloats(evaluate('\\int \\frac{1}{x^3+1} dx'))
+    ).toMatchInlineSnapshot(
       `1/3 * ln(|x + 1|) + sqrt(3)/3 * arctan(2/3sqrt(3) * x - sqrt(3)/3) - 1/6 * ln(|x^2 - x + 1|)`
     ));
 
@@ -458,7 +460,11 @@ describe('INTEGRATION REGRESSIONS (Rubi Phase-0 findings)', () => {
 
   test('∫(a + b·x⁴)/x⁶ does not drop the a-term', () =>
     checkAntiderivative(
-      ['Divide', ['Add', 'a', ['Multiply', 'b', ['Power', 'x', 4]]], ['Power', 'x', 6]],
+      [
+        'Divide',
+        ['Add', 'a', ['Multiply', 'b', ['Power', 'x', 4]]],
+        ['Power', 'x', 6],
+      ],
       [
         { a: 2, b: 3, x: 1.7 },
         { a: -1, b: 0.5, x: -2.3 },
@@ -467,7 +473,11 @@ describe('INTEGRATION REGRESSIONS (Rubi Phase-0 findings)', () => {
 
   test('∫(a + b·x⁴)/x⁷ does not drop the a-term', () =>
     checkAntiderivative(
-      ['Divide', ['Add', 'a', ['Multiply', 'b', ['Power', 'x', 4]]], ['Power', 'x', 7]],
+      [
+        'Divide',
+        ['Add', 'a', ['Multiply', 'b', ['Power', 'x', 4]]],
+        ['Power', 'x', 7],
+      ],
       [{ a: 2, b: 3, x: 1.7 }]
     ));
 
@@ -499,15 +509,38 @@ describe('INTEGRATION REGRESSIONS (Rubi Phase-0 findings)', () => {
     // These six shapes previously threw RangeError (runaway recursion
     // between the polynomial-division and term-splitting strategies).
     const cases: any[] = [
-      ['Divide', ['Power', 'x', 11], ['Power', ['Add', 'a', ['Multiply', 'b', ['Power', 'x', 2]]], 2]],
-      ['Divide', ['Power', 'x', 11], ['Add', ['Power', 'a', 2], ['Multiply', 2, 'a', 'b', ['Power', 'x', 2]], ['Multiply', ['Power', 'b', 2], ['Power', 'x', 4]]]],
-      ['Divide', ['Multiply', ['Power', ['Add', 'd', ['Multiply', 'e', 'x']], 3], ['Power', ['Add', 'f', ['Multiply', 'g', 'x']], 2]], ['Subtract', ['Power', 'd', 2], ['Multiply', ['Power', 'e', 2], ['Power', 'x', 2]]]],
+      [
+        'Divide',
+        ['Power', 'x', 11],
+        ['Power', ['Add', 'a', ['Multiply', 'b', ['Power', 'x', 2]]], 2],
+      ],
+      [
+        'Divide',
+        ['Power', 'x', 11],
+        [
+          'Add',
+          ['Power', 'a', 2],
+          ['Multiply', 2, 'a', 'b', ['Power', 'x', 2]],
+          ['Multiply', ['Power', 'b', 2], ['Power', 'x', 4]],
+        ],
+      ],
+      [
+        'Divide',
+        [
+          'Multiply',
+          ['Power', ['Add', 'd', ['Multiply', 'e', 'x']], 3],
+          ['Power', ['Add', 'f', ['Multiply', 'g', 'x']], 2],
+        ],
+        [
+          'Subtract',
+          ['Power', 'd', 2],
+          ['Multiply', ['Power', 'e', 2], ['Power', 'x', 2]],
+        ],
+      ],
     ];
     for (const c of cases) {
       // Must not throw RangeError — inert results are acceptable
-      expect(() =>
-        engine.box(['Integrate', c, 'x']).evaluate()
-      ).not.toThrow();
+      expect(() => engine.box(['Integrate', c, 'x']).evaluate()).not.toThrow();
     }
   });
 
@@ -539,13 +572,26 @@ describe('DEFINITE INTEGRATION', () => {
 
   test('sin', () =>
     expect(evaluate('\\int_0^1 \\sin x dx')).toMatchInlineSnapshot(
-      `0.4596976941318602825990633925570233962676895793820777723299027446188996052255282354820481439128169107`
+      `1 - cos(1)`
     ));
   test('exp', () =>
     expect(evaluate('\\int_0^1 e^x dx')).toMatchInlineSnapshot(`-1 + e`));
   test('ln', () =>
     expect(evaluate('\\int_1^2 \\ln x dx')).toMatchInlineSnapshot(
-      `0.3862943611198906`
+      `-1 + 2ln(2)`
+    ));
+
+  // ROADMAP B3: definite integrals whose closed form is a transcendental
+  // constant are now exact (the antiderivative + bound substitution no longer
+  // numericizes ln/arctan). Previously these returned floats (≈0.693, ≈0.785).
+  test('1/x → ln(2)', () =>
+    expect(evaluate('\\int_1^2 \\frac{1}{x} dx')).toMatchInlineSnapshot(
+      `ln(2)`
+    ));
+
+  test('1/(x²+1) → π/4', () =>
+    expect(evaluate('\\int_0^1 \\frac{1}{x^2+1} dx')).toMatchInlineSnapshot(
+      `1/4 * pi`
     ));
 });
 

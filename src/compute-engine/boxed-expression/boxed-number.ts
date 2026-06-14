@@ -365,21 +365,26 @@ export class BoxedNumber
   }
 
   ln(semiBase?: number | Expression): Expression {
-    const base = semiBase ? this.engine.expr(semiBase) : undefined;
+    const ce = this.engine;
+    const base = semiBase ? ce.expr(semiBase) : undefined;
 
     // Mathematica returns `Log[0]` as `-∞`
-    if (this.isSame(0)) return this.engine.NegativeInfinity;
+    if (this.isSame(0)) return ce.NegativeInfinity;
 
-    if (base && this.isSame(base)) return this.engine.One;
+    // log_b(1) = 0 and ln(1) = 0. (Previously this fell through to the numeric
+    // path, which returned an exact 0 only by accident; the exact reduction
+    // must be explicit now that the fallback stays symbolic.)
+    if (this.isSame(1)) return ce.Zero;
+
+    if (base && this.isSame(base)) return ce.One;
     if (
       (!base || isSymbol(base, 'ExponentialE')) &&
       this.symbol === 'ExponentialE'
     )
-      return this.engine.One;
+      return ce.One;
 
     const f = this.re;
     if (Number.isInteger(f) && f > 0) {
-      const ce = this.engine;
       let [factor, root] = canonicalInteger(f, 3);
       if (factor !== 1)
         return ce.number(factor).ln(base).mul(3).add(ce.number(root).ln(base));
@@ -388,19 +393,30 @@ export class BoxedNumber
         return ce.number(factor).ln(base).mul(2).add(ce.number(root).ln(base));
     }
 
-    // log_base(x) for any base (the previous code only handled an integer
-    // base and silently dropped a non-integer one, e.g. `(8).ln(2.5)` returned
-    // ln(8) instead of log_2.5(8)).
-    if (base !== undefined) {
-      if (typeof this._value === 'number')
-        return this.engine.number(Math.log(this._value) / Math.log(base.re));
-      return this.engine.number(this._value.ln(base.re));
+    // No exact closed form. When BOTH the argument and the base are exact, stay
+    // symbolic: `ln(2)` is an exact constant just like `√2`, so `evaluate()`
+    // keeps it as `Ln(2)`/`Log(2, b)` and only `.N()` produces a float. If
+    // either the argument or the base is INEXACT (a float, e.g. `log_2.5(8)`)
+    // there is no exactness to preserve, so numericize — mirroring `√2.5 →
+    // 1.58…`.
+    const baseExact =
+      base === undefined ||
+      isSymbol(base, 'ExponentialE') ||
+      (isNumber(base) && base.isExact);
+    if (this.isExact && baseExact) {
+      if (base === undefined || isSymbol(base, 'ExponentialE'))
+        return ce._fn('Ln', [this]);
+      return ce._fn('Log', [this, base]);
     }
 
-    // Natural log (base undefined).
-    if (typeof this._value === 'number')
-      return this.engine.number(Math.log(this._value));
-    return this.engine.number(this._value.ln());
+    // Inexact argument or base: numericize.
+    if (base !== undefined) {
+      if (typeof this._value === 'number')
+        return ce.number(Math.log(this._value) / Math.log(base.re));
+      return ce.number(this._value.ln(base.re));
+    }
+    if (typeof this._value === 'number') return ce.number(Math.log(this._value));
+    return ce.number(this._value.ln());
   }
 
   get value(): Expression {

@@ -86,7 +86,7 @@ exports[`simplify: logarithms and exponentials 2\\ln(x) - \\ln(x) 1`] = `["Ln", 
 
 exports[`simplify: logarithms and exponentials 10^{\\log_{10}(x)} 1`] = `["Power", 10, ["Log", "x"]]`;
 
-exports[`simplify: logarithms and exponentials e^{\\ln(2)} 1`] = `["Exp", 0.6931471805599453]`;
+exports[`simplify: logarithms and exponentials e^{\\ln(2)} 1`] = `2`;
 
 exports[`simplify: logarithms and exponentials e^{2\\ln(x)} 1`] = `["Square", "x"]`;
 
@@ -352,7 +352,7 @@ exports[`solve for x \\sqrt{x} - 2 = 0 1`] = `
 
 exports[`solve for x \\tan(x) - 1 = 0 1`] = `
 [
-  0.785398163397448309615660845819875721049292349843776455243736148076954101571552249657008706335529267,
+  ["Multiply", ["Rational", 1, 4], "Pi"],
 ]
 `;
 
@@ -389,7 +389,7 @@ exports[`solve for x ax + b = 0 1`] = `
 
 exports[`solve for x e^{2x} - 4 = 0 1`] = `
 [
-  0.6931471805599453,
+  ["Ln", 2],
 ]
 `;
 

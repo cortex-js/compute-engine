@@ -438,6 +438,82 @@ radical-simplify snapshots/assertions and one unrelated OEIS network test.
 Both bugs were general (any consumer constructing such expressions hit them),
 surfaced by Rubi. Details in `docs/rubi/RUBI.md` §5.
 
+### 17. `big-decimal` performance & completeness (mpmath-inspired)
+
+**What:** a backlog of improvements to the arbitrary-precision decimal core
+(`src/big-decimal/`), drawn from a study of [mpmath](https://github.com/mpmath/mpmath)
+(the arbitrary-precision library SymPy uses). mpmath is base-2 throughout and
+gets most of its breadth by composing a hypergeometric engine + gamma; CE's
+`big-decimal` is base-10 (a deliberate decimal.js-replacement choice) and the
+special-function breadth correctly lives one layer up in
+`numerics/special-functions.ts`. The lessons split cleanly into kernel-level
+performance and elementary-completeness items. Standing list of next steps
+(ranked by ROI), extending the README's "Potential Future Improvements"
+(`src/big-decimal/README.md`):
+
+1. **Base-2 internal transcendental kernel** — ✅ *prototyped & validated
+   2026-06-13* (see below). Promote from experiment to `src/`.
+2. **AGM-based `ln`** at high precision (current Newton calls `fpexp` each step,
+   making `ln` the slowest transcendental). Precision-gated switch; `fppi`
+   already exists. (Also on the README list.)
+3. **Binary splitting** for `exp`/trig series and for constants (one deferred
+   division instead of one per term). Caveat: V8 `bigint` has Karatsuba/Toom but
+   **no FFT**, so the asymptotic win is real but caps in the low-thousands of
+   digits. (Also on the README list.)
+4. **`giant_steps` precision-doubling** audit of the existing Newton loops
+   (`fpsqrt`/`fpln`/cbrt) + a division-free reciprocal to speed `div`.
+5. **On-demand π via Chudnovsky** + "compute-high, downshift-low" constant cache
+   (today π is a hardcoded 2370-digit literal → hard ceiling at ~2350 digits).
+   Same cache pattern for `ln10`, and new cached `e`/`ln2`. (π note on README.)
+6. **Elementary completeness gaps** that belong at this layer: `expm1`/`log1p`
+   (accuracy near 0 — the highest-value gap), `asinh`/`acosh`/`atanh`, `log2`,
+   general `nthRoot`.
+7. **Directed rounding modes** (round-toward-floor / -ceiling) on the inexact
+   ops — low cost now, and the enabling primitive for a future rigorous
+   **interval-arithmetic mode** (mpmath's `iv` context = outward-rounded
+   endpoint pairs), useful for principled sign/zero determination in
+   `isEqual`/simplification.
+
+**Why now:** items are independent and individually small; #1 is done and is a
+large, free win. The rest are opportunistic — pick by demand.
+
+**17.1 Base-2 kernel — experiment result (2026-06-13).** The base-10
+fixed-point kernel scales by `10^p`, so every Taylor term and every squaring
+does a full-width `bigint` *division* by `scale`. Porting the grid to base-2
+(`scale = 2^bits`) turns each into a bit-**shift** (`>> bits`) plus, for series
+terms, a small-divisor division by the term index. A/B benchmark
+(`benchmarks/big-decimal/kernel-base2-experiment.ts`, faithful base-2 ports of
+`fpexp`/`fpsincos` vs the live base-10 kernels, verified bit-identical to a
+high-precision `BigDecimal` reference — **0 ULP difference at every precision**):
+
+| precision | exp kernel | exp end-to-end | sin kernel | sin end-to-end |
+|---|---|---|---|---|
+| 25  | ~2.3× | ~2.3× | ~2.7× | ~2.8× |
+| 100 | ~2.3× | ~2.6× | ~2.4× | ~2.8× |
+| 500 | ~2.6× | ~2.1× | ~2.7× | ~3.5× |
+| 2000 | ~4.1× | ~3.5× | ~2.9× | ~2.7× |
+
+(speedup = base-10 time / base-2 time; >1 means base-2 is faster). The win
+**includes** decimal↔binary conversion at the API boundary and holds even at
+p=25 — refuting the worry that conversion overhead would cancel it at low
+precision — and **grows with precision** (~4× at p=2000). "end-to-end" times
+the full `decimal → binary → kernel → decimal` round-trip.
+
+**How to promote (#1):** add a base-2 fixed-point grid alongside the base-10
+helpers in `utils.ts`, switch the `transcendentals.ts` bridge
+(`toFixedPoint`/`fromFixedPoint`) to convert decimal↔binary, and port
+`fpexp`/`fpsincos`/`fpatan`/`fpsqrt`/`fpln` (the experiment already has exact
+`fpexp`/`fpsincos` ports). Keep the user-facing `significand · 10^exponent`
+representation unchanged — base-2 is internal to the kernel only. Guard with the
+existing `transcendentals`/cross-validation tests plus the experiment's
+agreement check; expect snapshot churn only if last-digit rounding shifts (the
+experiment shows none).
+
+**Effort:** #1 promotion ~2–3 days incl. tests; #2–#7 each ~0.5–2 days.
+**Dependencies:** none. **References:** `src/big-decimal/README.md`
+(§ Algorithms, § Potential Future Improvements); experiment at
+`benchmarks/big-decimal/kernel-base2-experiment.ts`.
+
 ### 5. Per-head aggregated rule dispatch
 
 **What:** close the loaded-simplify benchmark gap: with the 1,376-rule
@@ -609,20 +685,29 @@ kernels (cf. item 4) honoring `ce.precision` with guard digits. Overlaps item 7'
 - **Nested radicals not denested** — `√(3+2√2)` stays as-is; SymPy gives `1+√2`
   (`sqrtdenest`). Lower priority. *(Still open.)*
 
-### B3. Definite / improper integrals are numerical-only
+### B3. Definite / improper integrals are numerical-only — partially resolved (2026-06-13)
 
-- Even elementary definite integrals return a **numerical** value with an error
-  estimate rather than the exact closed form: `∫₀¹ x² dx → 0.333157 ± 9e-5`
-  (not `1/3`). There is no symbolic definite path (antiderivative + bound
-  substitution).
-- **Oscillatory improper integrals diverge** — `∫₀^∞ cos(x²) dx → −1.6 ± 1.8`
-  (true `√(π/8) ≈ 0.627`); the numerical quadrature mishandles conditionally-
-  convergent oscillatory integrands. `∫₀^∞ e^(−x²)` lands at `0.886 ± …`
-  (~4-digit) — close, but still numerical.
+- ✅ **Finite-bound elementary definite integrals are exact.** The symbolic
+  definite path (antiderivative + bound substitution) already landed (item 12);
+  `∫₀¹ x² dx → 1/3`. The remaining gap was that a transcendental closed form
+  collapsed to a float — `∫₁² (1/x) dx → 0.693…` not `ln 2`. **Root cause was
+  engine-wide, not in the integrator:** `evaluate()` numericized `ln(2)`,
+  `arctan(1)`, etc. (unlike `√2`, which stays symbolic). Fixed by keeping
+  transcendental functions of *exact* arguments symbolic under `evaluate()`
+  (numericizing only under `.N()` and for *inexact* float arguments); see the
+  CHANGELOG. This also wired up the inverse-trig `constructibleValues` dispatch
+  (previously unreachable dead code), so `arctan 1 → π/4`, `arcsin ½ → π/6`.
+  Result: `∫₁² (1/x) dx → ln(2)`, `∫₀¹ 1/(x²+1) dx → π/4`,
+  `∫₀¹ sin x dx → 1 − cos(1)`, `∫₁² ln x dx → 2ln(2) − 1`.
+- ⬜ **Improper / infinite bounds still numerical-only.** `∫₀^∞ …` returns an
+  unevaluated `EvaluateAt`; needs endpoint-limit handling. The roadmap's
+  headline examples are also blocked elsewhere: `∫₀^∞ e^(−x²)` needs `erf` (B2)
+  and `∫₀^∞ cos(x²)` needs the Fresnel functions; the oscillatory quadrature
+  still mishandles those conditionally-convergent integrands.
 
-**Fix direction:** add a symbolic definite path (antiderivative + bound
-substitution, with endpoint-limit handling for improper bounds) before the
-quadrature fallback; harden the oscillatory quadrature.
+**Remaining fix direction:** add endpoint-limit handling for improper bounds
+(works today for elementary cases like `∫₁^∞ 1/x²`, `∫₀^∞ e^(−x)`); harden the
+oscillatory quadrature; produce the non-elementary antiderivatives (B2).
 
 ### B4. ~~`Factor` emits non-polynomial radical/abs forms for `xⁿ − 1`~~ — ✅ done (2026-06-13)
 

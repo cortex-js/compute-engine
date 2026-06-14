@@ -644,7 +644,13 @@ export function constructibleValues(
   operator: string,
   x: Expression | undefined
 ): undefined | Expression {
-  if (!x || !isConstructible(operator)) return undefined;
+  // Forward trig (Sin/Cos/…) reduces special angles; inverse trig
+  // (Arcsin/Arccos/Arctan/…) reduces special arguments via the dispatch to
+  // `constructibleValuesInverse` below. Without allowing inverse operators
+  // here, that dispatch was unreachable dead code and `arcsin(0)`, `arctan(1)`,
+  // etc. never reduced.
+  if (!x || (!isConstructible(operator) && !isInverseTrigFunc(operator)))
+    return undefined;
   const ce = x.engine;
 
   x = x.N();

@@ -2009,3 +2009,53 @@ describe('InterquartileRange consistent with Quartiles (REVIEW.md D20)', () => {
     expect(iqr).toBeCloseTo(4.5, 10);
   });
 });
+
+// A transcendental function of an EXACT argument is itself an exact constant
+// (like √2), so `evaluate()` keeps it symbolic and only `.N()` numericizes.
+// An INEXACT (float) argument has no exactness to preserve, so it numericizes.
+describe('Transcendentals stay symbolic under evaluate (ROADMAP B3)', () => {
+  const ev = (s: string) => ce.parse(s).evaluate().toString();
+
+  it('ln/sin/cos/tan of an exact argument stay symbolic', () => {
+    expect(ev('\\ln 2')).toBe('ln(2)');
+    expect(ev('\\sin 2')).toBe('sin(2)');
+    expect(ev('\\cos(5/7)')).toBe('cos(5/7)');
+    expect(ev('\\arctan 2')).toBe('arctan(2)');
+    expect(ev('\\log_2 3')).toBe('log(3, 2)');
+  });
+
+  it('.N() still numericizes', () => {
+    expect(ce.parse('\\ln 2').N().re).toBeCloseTo(Math.log(2), 12);
+    expect(ce.parse('\\sin 2').N().re).toBeCloseTo(Math.sin(2), 12);
+  });
+
+  it('an inexact (float) argument numericizes', () => {
+    expect(ce.parse('\\cos(5.1)').evaluate().re).toBeCloseTo(Math.cos(5.1), 12);
+    expect(ce.parse('\\ln(1.1)').evaluate().re).toBeCloseTo(Math.log(1.1), 12);
+    // Inexact BASE also numericizes (REVIEW.md A7).
+    expect((ce.number(8).ln(2.5) as { re: number }).re).toBeCloseTo(
+      Math.log(8) / Math.log(2.5),
+      12
+    );
+  });
+
+  it('exact closed forms still reduce', () => {
+    expect(ev('\\ln 1')).toBe('0');
+    expect(ev('\\ln(e)')).toBe('1');
+    expect(ev('\\log_2 8')).toBe('3');
+    expect(ev('\\log 100')).toBe('2');
+    expect(ev('\\log_2 1')).toBe('0');
+    expect(ev('e^{\\ln 2}')).toBe('2');
+    expect(ev('\\cos(\\pi)')).toBe('-1');
+  });
+
+  it('inverse-trig special values reduce (the dispatch was dead code)', () => {
+    expect(ev('\\arcsin 0')).toBe('0');
+    expect(ev('\\arccos 1')).toBe('0');
+    expect(ev('\\arctan 0')).toBe('0');
+    expect(ev('\\arctan 1')).toBe('1/4 * pi');
+    expect(ev('\\arcsin(1/2)')).toBe('1/6 * pi');
+    // A non-special argument must NOT snap to a wrong value.
+    expect(ev('\\arcsin(1/3)')).toBe('arcsin(1/3)');
+  });
+});

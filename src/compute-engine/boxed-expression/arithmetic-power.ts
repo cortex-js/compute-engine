@@ -444,6 +444,11 @@ export function pow(
   if (isSymbol(x, 'ComplexInfinity')) return ce.NaN;
 
   if (isSymbol(x, 'ExponentialE')) {
+    // e^(ln(y)) = y. (Previously this only reduced because `ln(y)` of a
+    // numeric `y` evaluated to a float and `e^float` was computed; now that
+    // `ln(2)` stays the exact symbol `Ln(2)`, reduce the inverse pair here.)
+    if (typeof exp !== 'number' && isFunction(exp, 'Ln')) return exp.op1;
+
     // Is the argument an imaginary or complex number?
     let theta = getImaginaryFactor(exp);
     if (theta !== undefined) {
