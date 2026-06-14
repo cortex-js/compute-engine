@@ -205,15 +205,14 @@ for (const cat of CATS) {
 }
 
 w('---');
-w('_Context: CE now has a public `PolynomialGCD`, but it is **univariate** — it ' +
-  'works in one chosen variable and carries any other variables along as ' +
-  'symbolic coefficients (Euclid over ℚ(rest)). The 7-variable Fateman GCD ' +
-  'benchmark (Symbolica 4 s / Mathematica 89 s / SymPy 61 min) still can\'t ' +
-  'run: even at power 2 — the benchmark uses power 7 — the GCD step hits CE\'s ' +
-  '~10 s evaluation deadline as the carried coefficients blow up. A sparse ' +
-  'multivariate GCD (modular / Zippel–Brown over a finite field) is the ' +
-  'missing capability. Reproduce: `python benchmarks/audit/gen.py && npx tsx ' +
-  'benchmarks/audit/audit.ts`._');
+w('_Context: CE now computes **multivariate** polynomial GCDs (any number of ' +
+  'variables) via Brown\'s dense modular algorithm over ℤ_p, verified by exact ' +
+  'division (ROADMAP B11). The 7-variable Fateman GCD benchmark ' +
+  '(Symbolica 4 s / Mathematica 89 s / SymPy 61 min) is still out of reach: it ' +
+  'exceeds the dense algorithm\'s complexity cap and defers (the benchmark uses ' +
+  'degree-7 forms in 7 variables). Closing it needs sparse interpolation ' +
+  '(Zippel) + multi-prime CRT. Reproduce: `python benchmarks/audit/gen.py && ' +
+  'npx tsx benchmarks/audit/audit.ts`._');
 
 writeFileSync(join(__dirname, 'REPORT-audit.md'), md);
 console.error('Wrote benchmarks/audit/REPORT-audit.md');

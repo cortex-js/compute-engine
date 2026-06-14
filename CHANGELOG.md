@@ -225,13 +225,19 @@
   with no stack overflows remaining.
 
 - **`GCD` of polynomials**: the variadic `GCD` operator now computes a
-  univariate polynomial GCD when its operands share a non-trivial common factor,
-  inferring the variable — e.g. `GCD(x²+3x+2, x²+4x+3)` → `x+1` and
-  `GCD((x+1)(x+2), (x+1)(x+3))` → `x+1` (previously returned unevaluated).
+  polynomial GCD when its operands share a non-trivial common factor, inferring
+  the variables. Univariate — e.g. `GCD(x²+3x+2, x²+4x+3)` → `x+1` and
+  `GCD((x+1)(x+2), (x+1)(x+3))` → `x+1` (previously returned unevaluated). And
+  **multivariate**, via Brown's dense modular GCD over a finite field with every
+  result verified by exact division (so it returns a correct GCD or defers,
+  never a wrong answer): `GCD(x²−y², x²+3xy+2y²)` → `x+y`,
+  `GCD((2x+3y)(x+y), (2x+3y)(x−y))` → `2x+3y`,
+  `GCD((x+y+z)(x−z), (x+y+z)(y+2z))` → `x+y+z`. Very large multivariate inputs
+  (such as the 7-variable Fateman benchmark) exceed a complexity cap and defer.
   Integer operands keep the existing numeric behavior, and a trivial (constant)
   polynomial GCD is deferred so a bare symbol still reads as an unknown integer
   (`GCD(x, 6)` stays unevaluated); use `PolynomialGCD(p, q, x)` for the explicit
-  coprime → 1 answer. Multivariate GCD is not yet supported.
+  coprime → 1 answer.
 
 - **Faster arbitrary-precision transcendentals (`BigDecimal`).** The internal
   fixed-point kernel that powers `sqrt`, `cbrt`, `exp`, `ln`, `sin`, `cos`,

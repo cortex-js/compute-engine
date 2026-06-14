@@ -1576,8 +1576,73 @@ describe('GCD/LCM', () => {
     it('defers a trivial GCD: gcd(x, 6) stays unevaluated', () =>
       expect(gcd(poly('x'), ce.box(6))).toBe('gcd(6, x)'));
 
-    it('defers multivariate GCD: gcd(xy, x) stays unevaluated', () =>
-      expect(gcd(poly('x y'), poly('x'))).toBe('gcd(x * y, x)'));
+    // ROADMAP B11 "Stage B": the variadic GCD operator computes a *multivariate*
+    // polynomial GCD via Brown's dense modular algorithm, verified by exact
+    // division. gcd(xy, x) = x (true under both the polynomial and the
+    // integer-symbol reading, where gcd(xy, x) = |x|).
+    it('computes a bivariate GCD: gcd(xy, x) → x', () =>
+      expect(gcd(poly('x y'), poly('x'))).toBe('x'));
+
+    it('gcd(x² − y², x² + 3xy + 2y²) → x + y', () =>
+      expect(gcd(poly('x^2-y^2'), poly('x^2+3x y+2y^2'))).toBe('x + y'));
+
+    it('gcd(x³ − y³, x² − y²) → x − y', () =>
+      expect(gcd(poly('x^3-y^3'), poly('x^2-y^2'))).toBe('x - y'));
+
+    // A repeated factor (Brown handles where a carried-coefficient Euclid bailed).
+    it('gcd((x+y+1)², (x+y+1)(x−y+2)) → x + y + 1', () =>
+      expect(gcd(poly('(x+y+1)^2'), poly('(x+y+1)(x-y+2)'))).toBe('x + y + 1'));
+
+    // Non-monic leading coefficient (integer content of the lc is restored).
+    it('gcd((2x+3y)(x+y), (2x+3y)(x−y)) → 2x + 3y', () =>
+      expect(gcd(poly('(2x+3y)(x+y)'), poly('(2x+3y)(x-y)'))).toBe('2x + 3y'));
+
+    // Three and four variables (the gap Stage B closes). NB: in this file `z`
+    // is assigned i and `b` is an integer, so use other free variables (u,v,w).
+    it('gcd((u+v+w)(u−w), (u+v+w)(v+2w)) → u + v + w', () =>
+      expect(gcd(poly('(u+v+w)(u-w)'), poly('(u+v+w)(v+2w)'))).toBe(
+        'u + v + w'
+      ));
+
+    it('gcd((uv+w)(u+v+w), (uv+w)(u−w)) → uv + w', () =>
+      expect(gcd(poly('(u v+w)(u+v+w)'), poly('(u v+w)(u-w)'))).toBe(
+        'u * v + w'
+      ));
+
+    it('gcd((t+u+v+w)(t−u), (t+u+v+w)(v−w)) → t + u + v + w', () =>
+      expect(gcd(poly('(t+u+v+w)(t-u)'), poly('(t+u+v+w)(v-w)'))).toBe(
+        't + u + v + w'
+      ));
+
+    // Coprime multivariate operands: trivial (constant) GCD is deferred,
+    // matching the univariate convention.
+    it('defers a coprime multivariate GCD', () => {
+      const r = gcd(poly('x+y'), poly('x+2y'));
+      expect(r.startsWith('gcd(')).toBe(true);
+    });
+
+    // Large inputs (the 7-variable Fateman products) exceed the cheap
+    // complexity cap and defer instantly rather than churn — verified-or-defer,
+    // never wrong (Fateman-scale needs sparse interpolation; see ROADMAP B11).
+    it('defers a large multivariate GCD instead of churning', () => {
+      const lin = (c: number[]) =>
+        ce.box([
+          'Add',
+          1,
+          ...c.map((k, i) => ce.box(['Multiply', k, `x${i + 1}`])),
+        ]);
+      const pow2 = (b: ReturnType<typeof ce.box>) =>
+        ce.box(['Expand', ce.box(['Power', b, 2])]).evaluate();
+      const g = pow2(lin([2, 4, 6, 8, 10, 12, 14]));
+      const a = ce
+        .box(['Expand', ce.box(['Multiply', pow2(lin([3, 5, 7, 9, 11, 13, 15])), g])])
+        .evaluate();
+      const b = ce
+        .box(['Expand', ce.box(['Multiply', pow2(lin([15, 13, 11, 9, 7, 5, 3])), g])])
+        .evaluate();
+      const r = ce.box(['GCD', a, b]).evaluate().toString();
+      expect(r.startsWith('gcd(')).toBe(true);
+    });
   });
 });
 

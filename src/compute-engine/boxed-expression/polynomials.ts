@@ -3,6 +3,7 @@ import type { Expression } from '../global-types';
 import { asSmallInteger } from './numerics';
 import { add } from './arithmetic-add';
 import { expand } from './expand';
+import { multivariateGCD } from './multivariate-gcd';
 import { isNumber, isFunction, isSymbol } from './type-guards';
 
 // Re-export degree functions from leaf module (no circular deps)
@@ -530,18 +531,26 @@ export function polynomialGCD(
  * polynomial in the same single variable. Returns a monic polynomial,
  * consistent with `polynomialGCD` and the `PolynomialGCD` operator.
  *
- * Returns `undefined` when the operands are not all univariate polynomials in
- * one shared variable (multivariate, non-polynomial, or fewer than two
- * operands), OR when the polynomial GCD is trivial (a constant, degree 0).
- * The trivial case is deferred so the caller can keep the existing
- * integer-GCD-with-symbolic-operands behavior: a bare symbol may stand for an
- * unknown integer (where `GCD(x, 6)` should stay unevaluated) rather than a
- * polynomial indeterminate over ℚ (where it would be 1). Callers wanting the
- * coprime → 1 answer should use the explicit `PolynomialGCD(p, q, x)`.
+ * Returns `undefined` when the operands are not polynomials in one or two
+ * shared variables (≥3 variables, non-polynomial, or fewer than two operands),
+ * OR when the polynomial GCD is trivial (a constant, degree 0). The trivial
+ * case is deferred so the caller can keep the existing integer-GCD-with-
+ * symbolic-operands behavior: a bare symbol may stand for an unknown integer
+ * (where `GCD(x, 6)` should stay unevaluated) rather than a polynomial
+ * indeterminate over ℚ (where it would be 1). Callers wanting the coprime → 1
+ * answer should use the explicit `PolynomialGCD(p, q, x)`.
+ *
+ * Multivariate operands (≥2 variables) take a "Stage B" path (see
+ * `multivariateBinaryGCD`): Brown's dense modular GCD over ℤ_p, with the result
+ * **verified** by exact division. Large inputs (e.g. the 7-variable Fateman
+ * products) are deferred via a cheap term-count cap; sparse interpolation
+ * (Zippel) for that scale is future work (ROADMAP B11).
  *
  * Examples:
  * - `polynomialGCDMulti([x²-1, x²+2x+1])` → x+1
  * - `polynomialGCDMulti([x³-1, x²-1])` → x-1
+ * - `polynomialGCDMulti([x²-y², x²+3xy+2y²])` → x+y  (bivariate)
+ * - `polynomialGCDMulti([(x+y+z)(x-z), (x+y+z)(y+2z)])` → x+y+z  (trivariate)
  * - `polynomialGCDMulti([x, 6])` → undefined (trivial gcd, deferred)
  */
 export function polynomialGCDMulti(
@@ -549,25 +558,74 @@ export function polynomialGCDMulti(
 ): Expression | undefined {
   if (ops.length < 2) return undefined;
 
-  // Infer the single common variable across all operands.
+  // Infer the common variables across all operands.
   const vars = new Set<string>();
   for (const op of ops) for (const v of op.unknowns) vars.add(v);
-  if (vars.size !== 1) return undefined; // not univariate
-  const variable = [...vars][0];
 
-  // Every operand must be a polynomial in `variable`.
-  for (const op of ops)
-    if (polynomialDegree(op, variable) < 0) return undefined;
+  if (vars.size === 1) {
+    const variable = [...vars][0];
 
-  // Reduce: gcd(p₁, p₂, …, pₙ) = gcd(gcd(p₁, p₂), p₃) …
-  let result = polynomialGCD(ops[0], ops[1], variable);
-  for (let i = 2; i < ops.length; i++)
-    result = polynomialGCD(result, ops[i], variable);
+    // Every operand must be a polynomial in `variable`.
+    for (const op of ops)
+      if (polynomialDegree(op, variable) < 0) return undefined;
 
-  // Only surface a non-trivial common factor (degree ≥ 1). A constant GCD is
-  // deferred (see above).
-  if (polynomialDegree(result, variable) < 1) return undefined;
-  return result;
+    // Reduce: gcd(p₁, p₂, …, pₙ) = gcd(gcd(p₁, p₂), p₃) …
+    let result = polynomialGCD(ops[0], ops[1], variable);
+    for (let i = 2; i < ops.length; i++)
+      result = polynomialGCD(result, ops[i], variable);
+
+    // Only surface a non-trivial common factor (degree ≥ 1). A constant GCD is
+    // deferred (see above).
+    if (polynomialDegree(result, variable) < 1) return undefined;
+    return result;
+  }
+
+  if (vars.size >= 2) {
+    // Stage B multivariate GCD (Brown's modular algorithm). Reduce pairwise;
+    // any failed pair (trivial, unverifiable, or too complex) defers the whole
+    // result.
+    let result: Expression | undefined = multivariateBinaryGCD(ops[0], ops[1]);
+    for (let i = 2; i < ops.length && result !== undefined; i++)
+      result = multivariateBinaryGCD(result, ops[i]);
+    return result;
+  }
+
+  return undefined;
+}
+
+/**
+ * Multivariate polynomial GCD (≥2 variables) via Brown's dense modular
+ * algorithm (`multivariate-gcd.ts`, ROADMAP B11 Stage B): the GCD is computed
+ * over ℤ_p and **verified by exact division** before being returned. Yields the
+ * integer-primitive GCD, or `undefined` for a trivial (constant) GCD, a
+ * non-divisor / failed reconstruction, or an input above a cheap term-count cap
+ * (so the `GCD` operator never churns on large inputs like the 7-variable
+ * Fateman products — those defer instantly; Brown also self-bounds via an
+ * internal work budget).
+ *
+ * IMPORTANT: does not call `.simplify()` — only `Expand` and the pure kernel —
+ * so it is safe even if reached during evaluation.
+ */
+function multivariateBinaryGCD(
+  a: Expression,
+  b: Expression
+): Expression | undefined {
+  const ce = a.engine;
+  const ae = ce.box(['Expand', a]).evaluate();
+  const be = ce.box(['Expand', b]).evaluate();
+
+  const termCount = (e: Expression) => (isFunction(e, 'Add') ? e.ops.length : 1);
+  if (termCount(ae) > 80 || termCount(be) > 80) return undefined;
+
+  const vars = [...new Set<string>([...ae.unknowns, ...be.unknowns])];
+  if (vars.length < 2) return undefined;
+
+  const g = multivariateGCD(ce, ae, be, vars);
+  if (g === null) return undefined;
+  // A constant (degree-0) GCD is deferred, matching the univariate path's
+  // treatment of a coprime/trivial result.
+  if (g.unknowns.length === 0) return undefined;
+  return g;
 }
 
 /**
