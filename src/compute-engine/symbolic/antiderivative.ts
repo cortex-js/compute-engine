@@ -732,23 +732,31 @@ const INTEGRATION_RULES: Rule[] = [
     ],
     condition: filter,
   },
-  // \sin^2(ax + b) -> \frac{1}{2} \left( x - \frac{\sin(2(ax + b))}{2a} \right)
+  // ∫sin²(ax + b) dx = x/2 − sin(2(ax + b))/(4a)
   {
     match: ['Power', ['Sin', ['Add', ['Multiply', '_a', '_x'], '__b']], 2],
     replace: [
-      'Divide',
-      ['Add', '_x', ['Divide', ['Sin', ['Multiply', 2, '_a', '_x']], 2]],
-      2,
+      'Subtract',
+      ['Divide', '_x', 2],
+      [
+        'Divide',
+        ['Sin', ['Multiply', 2, ['Add', ['Multiply', '_a', '_x'], '__b']]],
+        ['Multiply', 4, '_a'],
+      ],
     ],
     condition: filter,
   },
-  // \cos^2(ax + b) -> \frac{1}{2} \left( x + \frac{\sin(2(ax + b))}{2a} \right)
+  // ∫cos²(ax + b) dx = x/2 + sin(2(ax + b))/(4a)
   {
     match: ['Power', ['Cos', ['Add', ['Multiply', '_a', '_x'], '__b']], 2],
     replace: [
-      'Divide',
-      ['Add', '_x', ['Divide', ['Sin', ['Multiply', 2, '_a', '_x']], 2]],
-      2,
+      'Add',
+      ['Divide', '_x', 2],
+      [
+        'Divide',
+        ['Sin', ['Multiply', 2, ['Add', ['Multiply', '_a', '_x'], '__b']]],
+        ['Multiply', 4, '_a'],
+      ],
     ],
     condition: filter,
   },
@@ -1982,6 +1990,95 @@ function integrateSecCscPower(
 }
 
 /**
+ * ∫ tanⁿx dx / ∫ cotⁿx dx for integer n ≥ 0 via the reduction formulas,
+ * terminating at the ∫tan x / ∫cot x logarithmic base cases.
+ *   ∫tanⁿx dx = tanⁿ⁻¹x/(n−1) − ∫tanⁿ⁻²x dx
+ *   ∫cotⁿx dx = −cotⁿ⁻¹x/(n−1) − ∫cotⁿ⁻²x dx
+ * Base cases: ∫tan x = ln|sec x|, ∫cot x = ln|sin x|, ∫tan⁰ = ∫cot⁰ = x.
+ */
+function integrateTanCotPower(
+  op: 'Tan' | 'Cot',
+  n: number,
+  index: string,
+  ce: Expression['engine']
+): Expression {
+  const x = ce.symbol(index);
+  if (n === 0) return x;
+  if (op === 'Tan') {
+    if (n === 1)
+      return ce.function('Ln', [ce.function('Abs', [ce.function('Sec', [x])])]);
+    const term1 = ce.function('Tan', [x]).pow(ce.number(n - 1)).div(ce.number(n - 1));
+    const rest = integrateTanCotPower('Tan', n - 2, index, ce);
+    return add(term1, rest.neg());
+  }
+  if (n === 1)
+    return ce.function('Ln', [ce.function('Abs', [ce.function('Sin', [x])])]);
+  const term1 = ce
+    .function('Cot', [x])
+    .pow(ce.number(n - 1))
+    .div(ce.number(n - 1))
+    .neg();
+  const rest = integrateTanCotPower('Cot', n - 2, index, ce);
+  return add(term1, rest.neg());
+}
+
+/**
+ * Reverse power-chain rule: ∫ c·u'(x)·u(x)ⁿ dx = c·u(x)ⁿ⁺¹/(n+1) for a
+ * constant `c` and exponent n ≠ −1 (the n = −1 case is ∫u'/u = ln|u|, handled
+ * separately). Recognizes the pattern by decomposing the integrand into
+ * (base, exponent) factor terms and, for each base u that depends on the
+ * index, checking whether the remaining factors equal a constant multiple of
+ * u′. Catches e.g. ∫ln(x)/x → ½ln²x (u = ln x, n = 1).
+ *
+ * Tried late (only when the other strategies leave the integral unevaluated),
+ * so it does not change results that already resolve another way.
+ */
+function tryReversePowerChain(
+  fn: Expression,
+  index: string
+): Expression | null {
+  const ce = fn.engine;
+
+  const terms: { base: Expression; exp: Expression }[] = [];
+  const pushFactor = (f: Expression, sign: 1 | -1) => {
+    if (isFunction(f, 'Power'))
+      terms.push({ base: f.op1, exp: sign === 1 ? f.op2 : f.op2.neg() });
+    else terms.push({ base: f, exp: sign === 1 ? ce.One : ce.NegativeOne });
+  };
+  if (isFunction(fn, 'Multiply')) fn.ops.forEach((f) => pushFactor(f, 1));
+  else if (isFunction(fn, 'Divide')) {
+    const num = fn.op1;
+    const den = fn.op2;
+    (isFunction(num, 'Multiply') ? num.ops : [num]).forEach((f) =>
+      pushFactor(f, 1)
+    );
+    (isFunction(den, 'Multiply') ? den.ops : [den]).forEach((f) =>
+      pushFactor(f, -1)
+    );
+  } else return null;
+
+  for (const { base: u, exp: n } of terms) {
+    // Skip constants, the bare index (ordinary power rule), n = −1 (the ln
+    // case), and symbolic exponents.
+    if (!u.has(index) || sym(u) === index) continue;
+    if (n.isSame(-1) || n.has(index)) continue;
+    const uPrime = differentiate(u, index);
+    if (!uPrime || uPrime.isSame(0)) continue;
+
+    // The remaining factors (integrand ÷ uⁿ) must be a constant multiple of u′.
+    const rest = fn.div(u.pow(n)).simplify();
+    const ratio = tryGetConstantRatio(rest, uPrime, index);
+    if (ratio === null) continue;
+
+    const np1 = n.add(1);
+    let result = u.pow(np1).div(np1);
+    if (!ratio.isSame(1)) result = ratio.mul(result);
+    return result;
+  }
+  return null;
+}
+
+/**
  * ∫ 1/√(c + d·x²) dx as a closed form (no linear term), for numeric c, d.
  *   d > 0, c > 0:  (1/√d)·arsinh(x·√(d/c))
  *   d > 0, c < 0:  (1/√d)·arcosh(x·√(d/(−c)))
@@ -2060,7 +2157,8 @@ function tryRadicalQuadratic(
   const qDeg = polynomialDegree(radicand, index);
   if (qDeg < 1 || qDeg > 2) return null;
 
-  // Case (a): numerator is a constant multiple of Q′(x).
+  // Case (a): numerator is a constant multiple of Q′(x) → c·2√Q. Also covers
+  // a degree-1 radicand (e.g. ∫1/√(2x+1) → √(2x+1)).
   const qPrime = differentiate(radicand, index);
   if (qPrime && !qPrime.isSame(0)) {
     const ratio = num.div(qPrime).simplify();
@@ -2070,21 +2168,53 @@ function tryRadicalQuadratic(
     }
   }
 
-  // Case (b): xᵐ over √(c + d·x²) via reduction (needs no linear term).
   const coeffs = getPolynomialCoefficients(radicand, index);
   if (!coeffs || coeffs.length !== 3) return null;
-  const [c, b, d] = coeffs;
-  if (!b.isSame(0)) return null;
+  const [cC, bC, aC] = coeffs; // radicand = aC·x² + bC·x + cC
 
-  let m: number | null = null;
-  if (sym(num) === index) m = 1;
-  else if (isFunction(num, 'Power') && sym(num.op1) === index) {
-    const ev = num.op2.re;
-    if (ev !== null && Number.isInteger(ev) && ev >= 1) m = ev;
+  // Case (b): linear (or constant) numerator px+q over √(Ax²+Bx+C), via
+  // completing the square. With Q = A(x + B/2A)² + (C − B²/4A),
+  //   ∫(px+q)/√Q dx = (p/A)·√Q + (q − pB/(2A))·∫1/√Q dx,
+  // and ∫1/√Q comes from the shifted no-linear-term form. Handles the linear
+  // term the older reduction couldn't, e.g. ∫1/√(x²+x+1) → arsinh((2x+1)/√3),
+  // ∫x/√(x²+x+1) → √(x²+x+1) − ½·arsinh((2x+1)/√3).
+  let p: Expression | null = null;
+  let q: Expression | null = null;
+  if (!num.has(index)) {
+    p = ce.Zero;
+    q = num;
+  } else {
+    const lin = getLinearCoefficients(num, index);
+    if (lin) {
+      p = lin.a;
+      q = lin.b;
+    }
   }
-  if (m === null || m < 1) return null;
+  if (p !== null && q !== null) {
+    const twoA = ce.number(2).mul(aC);
+    const shift = bC.div(twoA); // B/(2A)
+    const cPrime = cC.sub(bC.mul(bC).div(ce.number(4).mul(aC))); // C − B²/(4A)
+    const f0 = integrateInvSqrtQuadratic(cPrime, aC, index);
+    if (f0) {
+      const f0Shifted = f0.subs({ [index]: ce.symbol(index).add(shift) });
+      const sqrtQ = ce.function('Sqrt', [radicand]);
+      const term1 = p.div(aC).mul(sqrtQ); // (p/A)·√Q
+      const coef0 = q.sub(p.mul(bC).div(twoA)); // q − pB/(2A)
+      return add(term1, coef0.mul(f0Shifted));
+    }
+    // f0 null (no real closed form) — fall through.
+  }
 
-  return reduceMonomialOverSqrtQuadratic(m, c, d, radicand, index);
+  // Case (c): xᵐ (m ≥ 2) over √(c + d·x²) (no linear term) via reduction.
+  if (!bC.isSame(0)) return null;
+  let m: number | null = null;
+  if (isFunction(num, 'Power') && sym(num.op1) === index) {
+    const ev = num.op2.re;
+    if (ev !== null && Number.isInteger(ev) && ev >= 2) m = ev;
+  }
+  if (m === null) return null;
+
+  return reduceMonomialOverSqrtQuadratic(m, cC, aC, radicand, index);
 }
 
 export function antiderivative(fn: Expression, index: string): Expression {
@@ -2820,6 +2950,10 @@ export function antiderivative(fn: Expression, index: string): Expression {
         return add(...integrals).evaluate();
     }
 
+    // Reverse power-chain rule, e.g. ∫ln(x)/x → ½ln²x.
+    const rpc = tryReversePowerChain(fn, index);
+    if (rpc) return rpc;
+
     return integrate(fn, index);
   }
 
@@ -2993,6 +3127,21 @@ export function antiderivative(fn: Expression, index: string): Expression {
         );
     }
 
+    // ∫tanⁿx dx / ∫cotⁿx dx (bare index, integer n ≥ 2) via reduction.
+    if (
+      (isFunction(fn.op1, 'Tan') || isFunction(fn.op1, 'Cot')) &&
+      sym(fn.op1.op1) === index
+    ) {
+      const nVal = fn.op2.re;
+      if (nVal !== null && Number.isInteger(nVal) && nVal >= 2)
+        return integrateTanCotPower(
+          isFunction(fn.op1, 'Tan') ? 'Tan' : 'Cot',
+          nVal,
+          index,
+          ce
+        );
+    }
+
     // ∫x^n dx
     if (sym(fn.op1) === index) {
       const exponent = fn.op2;
@@ -3077,6 +3226,11 @@ export function antiderivative(fn: Expression, index: string): Expression {
   );
 
   if (result && result[0]) return result[0].subs({ _x: index });
+
+  // Reverse power-chain rule for products the strategies above left
+  // unevaluated (e.g. ∫ u'·uⁿ forms not caught by u-substitution).
+  const rpc = tryReversePowerChain(fn, index);
+  if (rpc) return rpc;
 
   return integrate(fn, index);
 }

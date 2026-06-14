@@ -546,6 +546,39 @@ suites (arithmetic/trig/numeric-mode/special-functions, ~2119 tests) pass with
 (§ Algorithms, § Potential Future Improvements); `src/big-decimal/utils.ts`
 header; experiment at `benchmarks/big-decimal/kernel-base2-experiment.ts`.
 
+**17.8 SymPy / mpmath comparison (2026-06-13)** — full report at
+`benchmarks/big-decimal/BIGNUM-COMPARISON.md` (CE current vs 0.59.0 vs SymPy
+`.evalf` vs raw mpmath, high-precision transcendentals). Headline: CE **leads**
+SymPy broadly at ≤100 digits and leads/ties raw mpmath on `sin`/`cos`/`tan`/`atan`
+at all precisions; it **trails** on three fronts, which become the prioritized
+follow-ups (the "still open" work):
+
+**17.9 `exp` root-cause (2026-06-13) — rectangular splitting was the WRONG
+hypothesis.** Investigating the `exp` gap disproved it: the `fpexp` kernel is
+~0.65ms at 1000 digits (≈ mpmath 0.44ms), so the kernel is not the bottleneck —
+the cost was in higher layers. Two causes found:
+
+- **`ln10` cache thrash — ✅ FIXED.** `ln()` and `exp()` reduce at slightly
+  different working precisions; `ln10Fixed` keyed its cache by *exact* bits, so
+  the two evicted each other and recomputed `ln(10)` (a full Newton) every call
+  — ~6ms of waste inside `pow`. `ln10Fixed` now uses compute-high/downshift-low
+  caching (like `fppi`/`ln2`): `BigDecimal.pow(base, non-int)` 9.6 → **4.1ms**,
+  `Exp(rational).N()` 6.95 → **~3.4–4.3ms**. (`transcendentals.ts`.)
+- **`Exp(x)` → `Power(E, x)` → `exp(x·ln(E))` recomputes `ln(e)≈1`** — remaining
+  gap. Recognize `base = E` in the numeric `Power` path and call `exp(x)`
+  directly. Lives in `boxed-expression/arithmetic-power.ts` (CE-evaluation, not
+  big-decimal). **Top remaining `exp` item.**
+
+Lower-priority remaining items (the kernel/algorithm fronts):
+- **17.10 Tune the AGM `ln` threshold / faster AGM** — `ln` trails mpmath ~0.6×
+  at 500–1000 digits because CE's AGM only engages above ~1250 digits
+  (`LN_AGM_MIN_BITS`) while mpmath is on AGM earlier.
+- **17.11 Division-free `isqrt_fast` for `sqrt`** — revisits 17.4's "leave
+  `fpsqrt` as-is": mpmath's reciprocal-sqrt Newton is ~2× faster; lifts `asin`.
+- **17.12 r-step / rectangular splitting in `fpexp`** — real but small kernel
+  win (~3×); the kernel is <10% of `exp(.N())` time, so low user-facing impact
+  until the `Exp`-direct item lands. Lowest priority.
+
 ### 5. Per-head aggregated rule dispatch
 
 **What:** close the loaded-simplify benchmark gap: with the 1,376-rule
@@ -739,22 +772,32 @@ kernels (cf. item 4) honoring `ce.precision` with guard digits. Overlaps item 7'
 (20 cases, CE graded by differentiate-back) after the B2 fixes — CE 14/20 vs
 SymPy 20/20 — surfaced the next gaps, in priority order:
 
-- ❗ **Correctness bug: `∫sin²x` is wrong.** Returns `x/2 + sin(2x)/4`, whose
-  derivative is `cos²x`, not `sin²x` (it computes `∫cos²x`). Pre-existing — not
-  in any of the new handlers; comes from the rule matcher / a half-angle rule
-  with a sign or sin↔cos slip. A *wrong* answer (worse than unevaluated), so
-  highest priority. Check `∫cos²x`, `∫sin²(ax)` and the `Sin²/Cos²` simplify
-  rules together.
+- ✅ **Correctness bug: `∫sin²x` was wrong — fixed.** Returned `x/2 + sin(2x)/4`
+  (the `cos²` antiderivative). Root cause: the `∫sin²(ax+b)` rule in
+  `INTEGRATION_RULES` used `Add` instead of `Subtract` (so it was identical to
+  the `cos²` rule); *both* rules additionally dropped the `1/a` factor and the
+  phase `b`. Corrected to `∫sin²(ax+b) = x/2 − sin(2(ax+b))/(4a)` and
+  `∫cos²(ax+b) = x/2 + sin(2(ax+b))/(4a)`, so the whole family is now exact
+  (`∫sin²(2x) → x/2 − sin(4x)/8`, `∫sin²(x+1) → x/2 − sin(2x+2)/4`). Regression
+  tests in `calculus.test.ts`.
 - 🟡 **Float leakage in `∫1/(x⁴+1)` and `∫x·arctan(x)`.** Value-correct but the
   form has float coefficients (`0.3535… = 1/(2√2)`, `1.414… = √2`, `0.5`). Same
   class as the `x³+1` leak fixed above, but for an all-irreducible-quadratic
   quartic (the `numericPartialFractions` fallback) and the by-parts path. Make
   the quartic/biquadratic partial-fraction path exact (factor `x⁴+1` into
   `(x²−√2x+1)(x²+√2x+1)`) and keep by-parts coefficients rational.
-- ⬜ **Missing-but-elementary:** `∫ln(x)/x = ½ln²x` (the `∫h·h′ = ½h²` /
-  `∫hⁿh′` u-sub is not recognized); `∫tanⁿx`/`∫cotⁿx` (only `secⁿ`/`cscⁿ`
-  reductions were added); `∫1/√(x²+x+1)` and the radical family with a **linear
-  term** (the radical handler needs completing-the-square: `x²+x+1 = (x+½)²+¾`).
+- ✅ **`∫ln(x)/x → ½ln²x` and `∫tanⁿx`/`∫cotⁿx` — done.** Added a
+  reverse-power-chain recognizer (`∫c·u′·uⁿ = c·uⁿ⁺¹/(n+1)`, tried late so it
+  only catches otherwise-unevaluated integrands — e.g. `∫ln(x)/x → ½ln²x`,
+  `∫ln²(x)/x → ⅓ln³x`) and `tanⁿ`/`cotⁿ` reduction formulas alongside the
+  `secⁿ`/`cscⁿ` ones (`∫tan²x → tan x − x`, `∫tan³x → ½tan²x − ln|sec x|`).
+- ✅ **Radical family with a linear term — done.** The radical handler now
+  completes the square for a linear/constant numerator over a degree-2
+  radicand: `∫(px+q)/√(Ax²+Bx+C) = (p/A)√Q + (q − pB/(2A))·∫1/√Q`, with the
+  `∫1/√Q` term from the shifted no-linear-term form. So
+  `∫1/√(x²+x+1) → arsinh((2x+1)/√3)`, `∫x/√(x²+x+1) → √(x²+x+1) −
+  ½·arsinh((2x+1)/√3)`, `∫1/√(2−x²) → arcsin(x/√2)`. (`∫xᵐ/√(c+dx²)` with no
+  linear term, m ≥ 2, still uses the earlier reduction.)
 - ⬜ **Missing non-elementary:** `∫eˣ/x` needs an `Ei`/`ExpIntegralEi` operator
   (and `∫1/ln x` → `li`), parallel to the new `Si`/`Ci`.
 - ⬜ **Harder:** `∫x·eˣ·sin x` (by-parts composed with the cyclic e·trig

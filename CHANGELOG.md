@@ -69,11 +69,18 @@
     `∫sin(ax²) → FresnelS`.
   - **Sine/cosine integrals**: `∫sin(kx)/x → Si(kx)`, `∫cos(kx)/x → Ci(kx)`.
   - **Radical integrands**: `∫x/√(1−x²) → −√(1−x²)`,
-    `∫x²/√(1−x²) → ½(arcsin x − x√(1−x²))`, and the general `∫xⁿ/√(c+dx²)`
-    family via a reduction formula, plus `∫c·Q′/√Q → 2c√Q` for any quadratic
-    `Q`.
-  - **Odd powers of secant/cosecant**: `∫secⁿx`, `∫cscⁿx` (n ≥ 2) via the
-    reduction formulas, e.g. `∫sec³x → ½(sec x·tan x + ln|sec x + tan x|)`.
+    `∫x²/√(1−x²) → ½(arcsin x − x√(1−x²))`, the general `∫xⁿ/√(c+dx²)` family
+    via a reduction formula, `∫c·Q′/√Q → 2c√Q` for any quadratic `Q`, and — by
+    completing the square — a linear/constant numerator over a radicand **with a
+    linear term**: `∫1/√(x²+x+1) → arsinh((2x+1)/√3)`,
+    `∫x/√(x²+x+1) → √(x²+x+1) − ½·arsinh((2x+1)/√3)`,
+    `∫1/√(2−x²) → arcsin(x/√2)`.
+  - **Powers of secant/cosecant/tangent/cotangent**: `∫secⁿx`, `∫cscⁿx`,
+    `∫tanⁿx`, `∫cotⁿx` (n ≥ 2) via the reduction formulas, e.g.
+    `∫sec³x → ½(sec x·tan x + ln|sec x + tan x|)`,
+    `∫tan³x → ½tan²x − ln|sec x|`.
+  - **Reverse power-chain rule** `∫c·u′(x)·u(x)ⁿ dx = c·u(x)ⁿ⁺¹/(n+1)`, e.g.
+    `∫ln(x)/x → ½ln²x`, `∫ln²(x)/x → ⅓ln³x`.
 
 - **Nested radicals are denested during simplification** (`sqrtdenest`).
   `simplify()` now rewrites `√(a+b√c) → √x + √y` when `a²−b²c` is a perfect
@@ -81,9 +88,17 @@
   `√(3−2√2) → √2−1`. Radicands that do not denest over the rationals are left
   unchanged.
 
-- **More improper integrals are exact** (ROADMAP B3). `arctan(±∞)` now reduces
-  to `±π/2`, so — combined with the new antiderivatives and `Erf(∞) = 1` —
-  infinite-bound integrals evaluate by bound substitution: `∫₀^∞ e^(−x²) → √π/2`,
+- **Fixed: `∫sin²x` returned the wrong antiderivative.** It gave
+  `x/2 + sin(2x)/4` (the integral of `cos²x`) because the `∫sin²(ax+b)` rule
+  used `+` instead of `−`; both the `sin²` and `cos²` rules also dropped the
+  `1/a` factor and the phase `b`. Now exact for all `a, b`:
+  `∫sin²(ax+b) dx = x/2 − sin(2(ax+b))/(4a)`,
+  `∫cos²(ax+b) dx = x/2 + sin(2(ax+b))/(4a)` — e.g. `∫sin²x → x/2 − sin(2x)/4`,
+  `∫sin²(2x) → x/2 − sin(4x)/8`.
+
+- **More improper integrals are exact**. `arctan(±∞)` now reduces to `±π/2`, so
+  — combined with the new antiderivatives and `Erf(∞) = 1` — infinite-bound
+  integrals evaluate by bound substitution: `∫₀^∞ e^(−x²) → √π/2`,
   `∫_{−∞}^∞ e^(−x²) → √π`, `∫₀^∞ 1/(1+x²) → π/2`, `∫_{−∞}^∞ 1/(1+x²) → π`,
   `∫₀^∞ 1/(x²+4) → π/4` (alongside the elementary `∫₀^∞ e^(−x) → 1`,
   `∫₁^∞ 1/x² → 1`).
@@ -145,13 +160,13 @@
   grows with precision) with bit-identical results — no change to accuracy or to
   the public `significand · 10^exponent` representation.
 
-- **Arbitrary-precision π, trigonometry and logarithm beyond ~2350 digits.**
-  The trig and `BigDecimal.PI` paths previously capped out (returning `NaN`)
-  past the ~2370-digit hardcoded π table; π is now computed on demand via
-  Chudnovsky binary splitting, so high-precision `sin`/`cos`/`tan` and
-  inverse-trig values are correct at any precision. High-precision `ln` is also
-  faster — a `giant_steps` Newton iteration plus an arithmetic-geometric-mean
-  (AGM) algorithm above ~1250 digits (~2.3× faster at 4000 digits).
+- **Arbitrary-precision π, trigonometry and logarithm beyond ~2350 digits.** The
+  trig and `BigDecimal.PI` paths previously capped out (returning `NaN`) past
+  the ~2370-digit hardcoded π table; π is now computed on demand via Chudnovsky
+  binary splitting, so high-precision `sin`/`cos`/`tan` and inverse-trig values
+  are correct at any precision. High-precision `ln` is also faster — a
+  `giant_steps` Newton iteration plus an arithmetic-geometric-mean (AGM)
+  algorithm above ~1250 digits (~2.3× faster at 4000 digits).
 
 - **More `BigDecimal` elementary functions** (the internal arbitrary-precision
   core): `expm1`, `log1p`, `log2`, `asinh`, `acosh`, `atanh`, `nthRoot`, and
@@ -162,13 +177,13 @@
   Speedup of high-precision numeric evaluation (`.N()`) versus 0.59.0, by
   working precision (median time; higher is faster):
 
-  | Function          | 100 digits | 500 digits | 1000 digits |
-  | ----------------- | ---------- | ---------- | ----------- |
-  | `ln`              | 3.4×       | 8.3×       | 10.5×       |
-  | `exp`             | 4.1×       | 8.1×       | 9.9×        |
-  | `sin` / `cos` / `tan` | 2.3×   | 3.4×       | 3.5×        |
-  | `atan`            | 1.8×       | 4.2×       | 4.4×        |
-  | `asin`            | 1.9×       | 4.2×       | 4.5×        |
+  | Function              | 100 digits | 500 digits | 1000 digits |
+  | --------------------- | ---------- | ---------- | ----------- |
+  | `ln`                  | 3.4×       | 8.3×       | 10.5×       |
+  | `exp`                 | 4.1×       | 8.1×       | 9.9×        |
+  | `sin` / `cos` / `tan` | 2.3×       | 3.4×       | 3.5×        |
+  | `atan`                | 1.8×       | 4.2×       | 4.4×        |
+  | `asin`                | 1.9×       | 4.2×       | 4.5×        |
 
   (≈90% less time for `ln`/`exp` at 1000 digits.) `sqrt` and the exact
   operations `+` `−` `×` `÷` are unchanged. Beyond ~2350 digits, 0.59.0 returned
@@ -177,18 +192,18 @@
 
 ### Bug Fixes
 
-- **`Limit` returned a spurious `0` for some hard limits.** Numerically-evaluated
-  limits whose function overflows the floating-point range — e.g.
-  `lim_{x→∞} (e^{x·e^{−x}/…} − eˣ)/x` (two `eˣ` terms cancel to exactly 0, then
-  overflow to `NaN`) or limits with a doubly/triply-exponential subexpression —
-  collapsed to a run of identical `0`s on the Richardson sample ladder, which the
-  extrapolator read as a confident convergence and returned a wrong `0`. The
-  limit machinery now detects this floating-point "trust horizon" (a non-finite
-  sample, or a magnitude that grows then catastrophically cancels to ~0, with a
-  denser probe to catch a skipped window) and returns not-evaluable (`NaN` from
-  `.N()`, staying symbolic under `evaluate()`) instead of a spurious value.
-  Genuine limits — including fp-fragile ones such as `(1+1/x)^x → e` and
-  `√(x²+x) − x → ½` — are unaffected.
+- **`Limit` returned a spurious `0` for some hard limits.**
+  Numerically-evaluated limits whose function overflows the floating-point range
+  — e.g. `lim_{x→∞} (e^{x·e^{−x}/…} − eˣ)/x` (two `eˣ` terms cancel to exactly
+  0, then overflow to `NaN`) or limits with a doubly/triply-exponential
+  subexpression — collapsed to a run of identical `0`s on the Richardson sample
+  ladder, which the extrapolator read as a confident convergence and returned a
+  wrong `0`. The limit machinery now detects this floating-point "trust horizon"
+  (a non-finite sample, or a magnitude that grows then catastrophically cancels
+  to ~0, with a denser probe to catch a skipped window) and returns
+  not-evaluable (`NaN` from `.N()`, staying symbolic under `evaluate()`) instead
+  of a spurious value. Genuine limits — including fp-fragile ones such as
+  `(1+1/x)^x → e` and `√(x²+x) − x → ½` — are unaffected.
 
 - **`solve` returned wrong or missing roots for absolute-value equations.** The
   two direct `|ax + b| + c = 0` root rules were broken: the first had its

@@ -149,6 +149,25 @@ describe('INDEFINITE INTEGRATION', () => {
   test('csc^2(x)', () =>
     expect(evaluate('\\int \\csc^2 x dx')).toMatchInlineSnapshot(`-cot(x)`));
 
+  // Regression: ∫sin²x had a sign bug (returned the cos² antiderivative
+  // x/2 + sin(2x)/4); both rules also dropped the 1/a factor and the phase b.
+  test('sin^2(x) → x/2 − sin(2x)/4 (was wrong: +sin(2x)/4)', () =>
+    expect(evaluate('\\int \\sin^2 x dx')).toMatchInlineSnapshot(
+      `1/2 * x - 1/4 * sin(2x)`
+    ));
+  test('cos^2(x) → x/2 + sin(2x)/4', () =>
+    expect(evaluate('\\int \\cos^2 x dx')).toMatchInlineSnapshot(
+      `1/2 * x + 1/4 * sin(2x)`
+    ));
+  test('sin^2(2x) → x/2 − sin(4x)/8 (1/a factor)', () =>
+    expect(evaluate('\\int \\sin^2(2x) dx')).toMatchInlineSnapshot(
+      `1/2 * x - 1/8 * sin(4x)`
+    ));
+  test('sin^2(x+1) → x/2 − sin(2x+2)/4 (phase b retained)', () =>
+    expect(evaluate('\\int \\sin^2(x+1) dx')).toMatchInlineSnapshot(
+      `1/2 * x - 1/4 * sin(2x + 2)`
+    ));
+
   // Inverse trig producing integrals
   test('1/(1+x^2) -> arctan', () =>
     expect(evaluate('\\int \\frac{1}{1+x^2} dx')).toMatchInlineSnapshot(
@@ -537,6 +556,41 @@ describe('ROADMAP B2: non-elementary & radical integrals (leftovers)', () => {
       `-1/2 * csc(x) * cot(x) - 1/2 * ln(|csc(x) + cot(x)|)`
     ));
 
+  // Powers of tangent/cotangent via the reduction formulas.
+  test('∫tan²x dx → tan x − x', () => {
+    expect(evaluate('\\int \\tan^2 x dx')).toMatchInlineSnapshot(
+      `-x + tan(x)`
+    );
+    checkDeriv('\\tan^2 x', '\\tan x - x');
+  });
+
+  test('∫tan³x dx → ½tan²x − ln|sec x|', () => {
+    expect(evaluate('\\int \\tan^3 x dx')).toMatchInlineSnapshot(
+      `1/2 * tan(x)^2 - ln(|sec(x)|)`
+    );
+    checkDeriv('\\tan^3 x', '\\frac12\\tan^2 x - \\ln|\\sec x|');
+  });
+
+  test('∫cot³x dx', () => {
+    expect(evaluate('\\int \\cot^3 x dx')).toMatchInlineSnapshot(
+      `-1/2 * cot(x)^2 - ln(sin(|x|))`
+    );
+    checkDeriv('\\cot^3 x', '-\\frac12\\cot^2 x - \\ln|\\sin x|');
+  });
+
+  // Reverse power-chain rule: ∫c·u′·uⁿ = c·uⁿ⁺¹/(n+1).
+  test('∫ln(x)/x dx → ½ln²x', () => {
+    expect(evaluate('\\int \\frac{\\ln x}{x} dx')).toMatchInlineSnapshot(
+      `1/2 * ln(x)^2`
+    );
+    checkDeriv('\\frac{\\ln x}{x}', '\\frac12 (\\ln x)^2');
+  });
+
+  test('∫ln²(x)/x dx → ⅓ln³x', () =>
+    expect(
+      evaluate('\\int \\frac{(\\ln x)^2}{x} dx')
+    ).toMatchInlineSnapshot(`1/3 * ln(x)^3`));
+
   // Radical / trig-substitution families: xⁿ/√(1−x²).
   test('∫x/√(1−x²) dx → −√(1−x²) (derivative-in-numerator)', () => {
     expect(evaluate('\\int \\frac{x}{\\sqrt{1-x^2}} dx')).toMatchInlineSnapshot(
@@ -568,6 +622,31 @@ describe('ROADMAP B2: non-elementary & radical integrals (leftovers)', () => {
     expect(
       evaluate('\\int \\frac{2x+1}{\\sqrt{x^2+x+1}} dx')
     ).toMatchInlineSnapshot(`2sqrt(x^2 + x + 1)`));
+
+  // Radicand with a linear term: completing the square in the radical handler.
+  test('∫1/√(x²+x+1) dx → arsinh((2x+1)/√3)', () => {
+    expect(
+      evaluate('\\int \\frac{1}{\\sqrt{x^2+x+1}} dx')
+    ).toMatchInlineSnapshot(`arsinh(2/3sqrt(3) * x + sqrt(3)/3)`);
+    checkDeriv('\\frac{1}{\\sqrt{x^2+x+1}}', '\\operatorname{arsinh}(\\frac{2x+1}{\\sqrt3})');
+  });
+
+  test('∫x/√(x²+x+1) dx (linear numerator + linear term)', () => {
+    expect(
+      evaluate('\\int \\frac{x}{\\sqrt{x^2+x+1}} dx')
+    ).toMatchInlineSnapshot(
+      `-1/2 * arsinh(2/3sqrt(3) * (x + 1/2)) + sqrt(x^2 + x + 1)`
+    );
+    checkDeriv(
+      '\\frac{x}{\\sqrt{x^2+x+1}}',
+      '\\sqrt{x^2+x+1} - \\frac12\\operatorname{arsinh}(\\frac{2x+1}{\\sqrt3})'
+    );
+  });
+
+  test('∫1/√(2−x²) dx → arcsin(x/√2) (non-unit constant)', () =>
+    expect(
+      evaluate('\\int \\frac{1}{\\sqrt{2-x^2}} dx')
+    ).toMatchInlineSnapshot(`arcsin(sqrt(2)/2 * x)`));
 });
 
 describe('INTEGRATION REGRESSIONS (Rubi Phase-0 findings)', () => {

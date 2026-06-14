@@ -68,4 +68,4 @@ _None on this suite._
 | lim_{x→0} (x²−1)/(x−1)... @1 | ✅ <sub>numeric</sub> 0.11 | ✅ 5.35 |
 
 ---
-_Context: CE has no public polynomial GCD, so the Fateman GCD benchmark (Symbolica 4 s / Mathematica 89 s / SymPy 61 min) can't run on CE today. Reproduce: `python benchmarks/audit/gen.py && npx tsx benchmarks/audit/audit.ts`._
+_Context: CE now has a public `PolynomialGCD`, but it is **univariate** — it works in one chosen variable and carries any other variables along as symbolic coefficients (Euclid over ℚ(rest)). The 7-variable Fateman GCD benchmark (Symbolica 4 s / Mathematica 89 s / SymPy 61 min) still can't run: even at power 2 — the benchmark uses power 7 — the GCD step hits CE's ~10 s evaluation deadline as the carried coefficients blow up. A sparse multivariate GCD (modular / Zippel–Brown over a finite field) is the missing capability. Reproduce: `python benchmarks/audit/gen.py && npx tsx benchmarks/audit/audit.ts`._
