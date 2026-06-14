@@ -438,6 +438,138 @@ describe('ROADMAP B2: fractional powers and exact partial-fraction coefficients'
     ));
 });
 
+describe('ROADMAP B2: non-elementary & radical integrals (leftovers)', () => {
+  // Each antiderivative is checked by differentiating it back to the
+  // integrand (numerically, at machine precision) in addition to the
+  // snapshot of its closed form.
+  const sample = [0.1, 0.37, -0.42, 0.63];
+  const checkDeriv = (integrandLatex: string, antiderivLatex: string) => {
+    const ce = engine;
+    const saved = ce.precision;
+    ce.precision = 'machine';
+    try {
+      const integrand = ce.parse(integrandLatex);
+      const dAnti = ce
+        .box(['D', ce.parse(antiderivLatex), 'x'])
+        .evaluate();
+      for (const xv of sample) {
+        const a = dAnti.subs({ x: xv }).N().re;
+        const b = integrand.subs({ x: xv }).N().re;
+        if (a === null || b === null) continue;
+        if (!isFinite(a) || !isFinite(b)) continue;
+        expect(Math.abs(a - b)).toBeLessThan(1e-7 * (1 + Math.abs(b)));
+      }
+    } finally {
+      ce.precision = saved;
+    }
+  };
+
+  // Gaussian → error functions (completing the square selects Erf vs Erfi).
+  test('∫e^(−x²) dx → (√π/2)·Erf(x)', () => {
+    expect(evaluate('\\int e^{-x^2} dx')).toMatchInlineSnapshot(
+      `1/2 * Erf(x) * sqrt(pi)`
+    );
+    checkDeriv('e^{-x^2}', '\\frac{\\sqrt{\\pi}}{2}\\mathrm{Erf}(x)');
+  });
+
+  test('∫e^(x²) dx → (√π/2)·Erfi(x)', () =>
+    expect(evaluate('\\int e^{x^2} dx')).toMatchInlineSnapshot(
+      `1/2 * Erfi(x) * sqrt(pi)`
+    ));
+
+  test('∫e^(−2x²) dx (constant in exponent)', () =>
+    expect(evaluate('\\int e^{-2x^2} dx')).toMatchInlineSnapshot(
+      `sqrt(2)/4 * Erf(sqrt(2) * x) * sqrt(pi)`
+    ));
+
+  test('∫e^(−x²+3x−1) dx (completing the square)', () =>
+    expect(evaluate('\\int e^{-x^2+3x-1} dx')).toMatchInlineSnapshot(
+      `1/2 * Erf(x - 3/2) * e^(5/4) * sqrt(pi)`
+    ));
+
+  // Fresnel integrals.
+  test('∫cos(x²) dx → Fresnel C', () => {
+    expect(evaluate('\\int \\cos(x^2) dx')).toMatchInlineSnapshot(
+      `sqrt(2)/2 * FresnelC((sqrt(2) * x) / sqrt(pi)) * sqrt(pi)`
+    );
+    checkDeriv(
+      '\\cos(x^2)',
+      '\\sqrt{\\frac{\\pi}{2}}\\mathrm{FresnelC}\\left(\\sqrt{\\frac{2}{\\pi}}x\\right)'
+    );
+  });
+
+  test('∫sin(x²) dx → Fresnel S', () =>
+    expect(evaluate('\\int \\sin(x^2) dx')).toMatchInlineSnapshot(
+      `sqrt(2)/2 * FresnelS((sqrt(2) * x) / sqrt(pi)) * sqrt(pi)`
+    ));
+
+  // Sine/cosine integrals.
+  test('∫sin(x)/x dx → Si(x)', () => {
+    expect(evaluate('\\int \\frac{\\sin x}{x} dx')).toMatchInlineSnapshot(
+      `SinIntegral(x)`
+    );
+    checkDeriv('\\frac{\\sin x}{x}', '\\mathrm{SinIntegral}(x)');
+  });
+
+  test('∫cos(x)/x dx → Ci(x)', () =>
+    expect(evaluate('\\int \\frac{\\cos x}{x} dx')).toMatchInlineSnapshot(
+      `CosIntegral(x)`
+    ));
+
+  test('∫sin(2x)/x dx → Si(2x)', () =>
+    expect(evaluate('\\int \\frac{\\sin(2x)}{x} dx')).toMatchInlineSnapshot(
+      `SinIntegral(2x)`
+    ));
+
+  // Odd powers of secant via the reduction formula.
+  test('∫sec³x dx → ½(sec x·tan x + ln|sec x + tan x|)', () => {
+    expect(evaluate('\\int \\sec^3 x dx')).toMatchInlineSnapshot(
+      `1/2 * tan(x) * sec(x) + 1/2 * ln(|tan(x) + sec(x)|)`
+    );
+    checkDeriv(
+      '\\sec^3 x',
+      '\\frac12\\sec x\\tan x + \\frac12\\ln|\\sec x + \\tan x|'
+    );
+  });
+
+  test('∫csc³x dx → −½(csc x·cot x + ln|csc x + cot x|)', () =>
+    expect(evaluate('\\int \\csc^3 x dx')).toMatchInlineSnapshot(
+      `-1/2 * csc(x) * cot(x) - 1/2 * ln(|csc(x) + cot(x)|)`
+    ));
+
+  // Radical / trig-substitution families: xⁿ/√(1−x²).
+  test('∫x/√(1−x²) dx → −√(1−x²) (derivative-in-numerator)', () => {
+    expect(evaluate('\\int \\frac{x}{\\sqrt{1-x^2}} dx')).toMatchInlineSnapshot(
+      `-sqrt(1 - x^2)`
+    );
+    checkDeriv('\\frac{x}{\\sqrt{1-x^2}}', '-\\sqrt{1-x^2}');
+  });
+
+  test('∫x²/√(1−x²) dx → ½(arcsin x − x√(1−x²))', () => {
+    expect(
+      evaluate('\\int \\frac{x^2}{\\sqrt{1-x^2}} dx')
+    ).toMatchInlineSnapshot(
+      `-1/2 * x * sqrt(1 - x^2) + 1/2 * arcsin(x)`
+    );
+    checkDeriv(
+      '\\frac{x^2}{\\sqrt{1-x^2}}',
+      '\\frac12\\arcsin(x) - \\frac12 x\\sqrt{1-x^2}'
+    );
+  });
+
+  test('∫x³/√(1−x²) dx (reduction, m=3)', () =>
+    expect(
+      evaluate('\\int \\frac{x^3}{\\sqrt{1-x^2}} dx')
+    ).toMatchInlineSnapshot(
+      `-1/3 * x^2 * sqrt(1 - x^2) - 2/3 * sqrt(1 - x^2)`
+    ));
+
+  test('∫(2x+1)/√(x²+x+1) dx → 2√(x²+x+1)', () =>
+    expect(
+      evaluate('\\int \\frac{2x+1}{\\sqrt{x^2+x+1}} dx')
+    ).toMatchInlineSnapshot(`2sqrt(x^2 + x + 1)`));
+});
+
 describe('INTEGRATION REGRESSIONS (Rubi Phase-0 findings)', () => {
   // Helper: check ∫f dx by differentiating the result and comparing
   // numerically against f at sample points.

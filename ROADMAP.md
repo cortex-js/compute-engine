@@ -451,31 +451,58 @@ performance and elementary-completeness items. Standing list of next steps
 (ranked by ROI), extending the README's "Potential Future Improvements"
 (`src/big-decimal/README.md`):
 
-1. **Base-2 internal transcendental kernel** — ✅ *prototyped & validated
-   2026-06-13* (see below). Promote from experiment to `src/`.
-2. **AGM-based `ln`** at high precision (current Newton calls `fpexp` each step,
-   making `ln` the slowest transcendental). Precision-gated switch; `fppi`
-   already exists. (Also on the README list.)
-3. **Binary splitting** for `exp`/trig series and for constants (one deferred
-   division instead of one per term). Caveat: V8 `bigint` has Karatsuba/Toom but
-   **no FFT**, so the asymptotic win is real but caps in the low-thousands of
-   digits. (Also on the README list.)
-4. **`giant_steps` precision-doubling** audit of the existing Newton loops
-   (`fpsqrt`/`fpln`/cbrt) + a division-free reciprocal to speed `div`.
-5. **On-demand π via Chudnovsky** + "compute-high, downshift-low" constant cache
-   (today π is a hardcoded 2370-digit literal → hard ceiling at ~2350 digits).
-   Same cache pattern for `ln10`, and new cached `e`/`ln2`. (π note on README.)
-6. **Elementary completeness gaps** that belong at this layer: `expm1`/`log1p`
-   (accuracy near 0 — the highest-value gap), `asinh`/`acosh`/`atanh`, `log2`,
-   general `nthRoot`.
-7. **Directed rounding modes** (round-toward-floor / -ceiling) on the inexact
-   ops — low cost now, and the enabling primitive for a future rigorous
-   **interval-arithmetic mode** (mpmath's `iv` context = outward-rounded
-   endpoint pairs), useful for principled sign/zero determination in
-   `isEqual`/simplification.
+All seven items below landed 2026-06-13 (full big-decimal suite 736 tests +
+9017 engine tests green; typecheck clean). Details after the list.
 
-**Why now:** items are independent and individually small; #1 is done and is a
-large, free win. The rest are opportunistic — pick by demand.
+1. **Base-2 internal transcendental kernel** — ✅ *done* — promoted to `src/`
+   (see 17.1). 2–4× faster transcendentals at identical accuracy.
+2. **AGM-based `ln`** at high precision — ✅ *done* (17.2). Sasaki–Kanada AGM,
+   precision-gated above ≈1250 digits; ~2.3× faster ln at 4000 digits.
+3. **Binary splitting** for constants — ✅ *done* (17.3). Binary-split `ln 2`
+   (lifts the AGM precision cap). **Finding:** binary splitting does **not**
+   apply to `exp`/trig of *irrational* arguments (the BS products blow up to
+   `N·bits` bits); that needs *rectangular splitting* (Smith's method),
+   deferred as a separate larger item.
+4. **`giant_steps` precision-doubling** — ✅ *done* (17.4) for the `fpln` Newton
+   (1.4–3.9× faster ln). **Findings (benchmarked):** the division-free
+   reciprocal is **not** worth it — V8's Burnikel-Ziegler `bigint` division is
+   already the fastest primitive (1–53µs vs sqrt's 1.5–548µs); and `fpsqrt` is
+   already fast and well-seeded, so `giant_steps` there gives diminishing
+   returns — left as-is.
+5. **On-demand π via Chudnovsky** + downshift cache — ✅ *done* (17.5). Removes
+   the ~2350-digit π ceiling (binary-splitting Chudnovsky beyond the table),
+   for both `fppi` (trig kernel) and `BigDecimal.PI`. Cached `e`/`ln2` as public
+   constants deferred (no consumer + load-order hazard; `ln 2` exists internally
+   via table + binary splitting).
+6. **Elementary completeness gaps** — ✅ *done* (17.6): `expm1`, `log1p`, `log2`,
+   `asinh`, `acosh` (stable near 1 via `2·asinh(√((x−1)/2))`), `atanh`,
+   `nthRoot`. Small-argument accuracy handled by precision compensation.
+7. **Directed rounding modes** — ✅ *done* (17.7): `divToward`/`sqrtToward`
+   (`'floor'`/`'ceiling'`), rigorous outward-rounded bounds. The enabling
+   primitive for a future interval-arithmetic mode (`+`/`−`/`×` are exact in
+   BigDecimal, so only div/sqrt need directed variants). The `iv` layer itself
+   remains deferred until a consumer needs it.
+
+**17.x outcomes (2026-06-13).**
+
+**17.2 AGM ln** — `fplnAGM` (`utils.ts`) uses ln(s) = π/(2·AGM(1, 4/s)) with
+`s = value·2^m` large. Critical fix: compute `AGM(1, L)` with `L = s/4` *large*
+(via homogeneity `AGM(1,4/s) = AGM(1,L)/L`) — the naïve tiny `4/s` argument
+carries only ~bits/2 significant bits at the fixed-point scale and halved the
+accuracy. Gated at `LN_AGM_MIN_BITS = 4200` (measured crossover ≈1250 digits;
+below it the giant_steps Newton wins).
+
+**17.3 binary-split ln 2** — `ln2ChudnovskyBits` sums `2·atanh(1/3) =
+(2/3)·Σ (1/9)^k/(2k+1)` by binary splitting (rational terms). Makes ln 2 cheap
+at any precision, so the AGM has no upper precision bound (one-shot high-precision
+ln no longer regresses bootstrapping ln 2).
+
+**17.4 giant_steps `fpln`** — the Newton ramp runs each step at scale `2^wp`
+with `wp` doubling from the seed accuracy toward `bits`, so the dominant `fpexp`
+is cheap early and full only at the end (~2 full `fpexp` instead of ~6).
+
+**17.6 `acosh` near 1** — uses `acosh(x) = 2·asinh(√((x−1)/2))` to avoid the
+catastrophic cancellation of the naïve `ln(x+√(x²−1))` near `x = 1`.
 
 **17.1 Base-2 kernel — experiment result (2026-06-13).** The base-10
 fixed-point kernel scales by `10^p`, so every Taylor term and every squaring
@@ -499,20 +526,25 @@ p=25 — refuting the worry that conversion overhead would cancel it at low
 precision — and **grows with precision** (~4× at p=2000). "end-to-end" times
 the full `decimal → binary → kernel → decimal` round-trip.
 
-**How to promote (#1):** add a base-2 fixed-point grid alongside the base-10
-helpers in `utils.ts`, switch the `transcendentals.ts` bridge
-(`toFixedPoint`/`fromFixedPoint`) to convert decimal↔binary, and port
-`fpexp`/`fpsincos`/`fpatan`/`fpsqrt`/`fpln` (the experiment already has exact
-`fpexp`/`fpsincos` ports). Keep the user-facing `significand · 10^exponent`
-representation unchanged — base-2 is internal to the kernel only. Guard with the
-existing `transcendentals`/cross-validation tests plus the experiment's
-agreement check; expect snapshot churn only if last-digit rounding shifts (the
-experiment shows none).
+**Promotion (landed 2026-06-13).** All kernels in `utils.ts`
+(`fpmul`/`fpdiv`/`fpsqrt`/`fpexp`/`fpln`/`fpsincos`/`fpatan` + `fppi`, plus a
+new `bitLength` and bit-based `estimateLnSeed`/`bigSqrtSeed`/`cbrtSeed`) now
+take `bits` and operate on the binary grid `scale = 1n << bits`; the
+`transcendentals.ts` bridge (`toFixedPoint`/`fromFixedPoint`) converts
+decimal↔binary once at the boundary, and every caller (sqrt/cbrt/exp/ln/
+sin/cos/tan/atan/asin + `ln10Fixed`) threads `bits`. The user-facing
+`significand · 10^exponent` representation is unchanged — base-2 is internal to
+the kernel. Validation: the full big-decimal suite (667 tests, incl. decimal.js
+cross-validation and 100-digit precision-comparison) and the engine numeric
+suites (arithmetic/trig/numeric-mode/special-functions, ~2119 tests) pass with
+**no snapshot churn**; typecheck clean, no new circular deps. The A/B harness
+(`benchmarks/big-decimal/kernel-base2-experiment.ts`) is now self-contained
+(carries its own base-10 + base-2 copies) so it stays runnable as a record.
 
-**Effort:** #1 promotion ~2–3 days incl. tests; #2–#7 each ~0.5–2 days.
+**Remaining items #2–#7 effort:** each ~0.5–2 days.
 **Dependencies:** none. **References:** `src/big-decimal/README.md`
-(§ Algorithms, § Potential Future Improvements); experiment at
-`benchmarks/big-decimal/kernel-base2-experiment.ts`.
+(§ Algorithms, § Potential Future Improvements); `src/big-decimal/utils.ts`
+header; experiment at `benchmarks/big-decimal/kernel-base2-experiment.ts`.
 
 ### 5. Per-head aggregated rule dispatch
 
@@ -659,21 +691,36 @@ regressions vs `0.59.0`; they are pre-existing gaps the suite made visible.
 kernels (cf. item 4) honoring `ce.precision` with guard digits. Overlaps item 7's
 "pole-aware `N()`" — worth doing together when touching these heads.
 
-### B2. Symbolic (indefinite) integration coverage gaps — partially resolved (2026-06-13)
+### B2. Symbolic (indefinite) integration coverage gaps — ✅ leftovers resolved (2026-06-13)
 
 - **Fractional-power / radical integrands return unevaluated** — `∫1/√x`, `∫√x`,
   `∫x²/√(1−x²)`, `∫x/√(1−x²)`: the power rule isn't applied to fractional
-  exponents and radical substitutions are missing. All are solved by the
-  experimental Rubi path **and** by SymPy, so the `CE·cur` vs `CE+R/F` gap in the
-  report quantifies exactly what's missing from the built-in integrator.
+  exponents and radical substitutions are missing.
   - ✅ **Done:** `∫√x` → `⅔x^(3/2)` and `∫1/√x` → `2√x`. Root cause: `√x` and
     `x^(−1/2)` canonicalize to `Sqrt(x)` / `Divide(1, Sqrt(x))` (not `Power`
     nodes), so the power rule never matched them; `antiderivative()` now handles
     those two bare-index forms via the power rule with exponent ±½.
-  - ⬜ **Remaining:** `∫x²/√(1−x²)`, `∫x/√(1−x²)` — these need radical/trig
-    substitution, a larger feature still missing.
-- **Non-elementary results not produced** — `∫e^(−x²)` (erf), `∫sin x/x` (Si),
-  `∫sec³x` come back unevaluated; SymPy returns erf/Si. *(Still open.)*
+  - ✅ **Done:** `∫x/√(1−x²)` → `−√(1−x²)` and `∫x²/√(1−x²)` →
+    `½(arcsin x − x√(1−x²))`. A new radical handler in `antiderivative()` (Divide
+    branch) covers `∫N(x)/√Q(x)` for `Q` of degree ≤ 2: (a) when the numerator
+    is a constant multiple of `Q′`, `∫ c·Q′/√Q = 2c√Q`; (b) for a monomial `xᵐ`
+    over `√(c+dx²)`, a reduction `Iₘ = xᵐ⁻¹√Q/(md) − ((m−1)c/(md))·Iₘ₋₂` down to
+    the `arcsin`/`arsinh`/`arcosh` base case. So `∫(2x+1)/√(x²+x+1) → 2√(x²+x+1)`
+    and the whole `∫xⁿ/√(c+dx²)` family now evaluate.
+- ✅ **Non-elementary results now produced.**
+  - `∫e^(−x²)` → `(√π/2)·Erf(x)`, and the general Gaussian
+    `∫e^(ax²+bx+c)` via completing the square → `Erf` (a < 0) or `Erfi` (a > 0).
+    `Erfi` was promoted from a derivative-table-only name to a full operator
+    (machine + bignum kernels in `special-functions.ts`, registered in
+    `statistics.ts`).
+  - `∫cos(ax²)` → `√(π/2a)·FresnelC(√(2a/π)·x)` and `∫sin(ax²)` → Fresnel S
+    (reusing the existing `FresnelS`/`FresnelC`).
+  - `∫sin(kx)/x` → `Si(kx)` and `∫cos(kx)/x` → `Ci(kx)`. New `SinIntegral` /
+    `CosIntegral` operators (machine-precision numeric kernel via the Numerical
+    Recipes `cisi` continued fraction, derivatives `sin x/x` / `cos x/x`).
+    Bignum precision for Si/Ci is not yet wired (shares the B1 limitation).
+  - `∫secⁿx` / `∫cscⁿx` for integer n ≥ 2 via the reduction formulas, e.g.
+    `∫sec³x → ½(sec x·tan x + ln|sec x + tan x|)`.
 - ✅ **Machine floats leak into otherwise-correct symbolic results — done.**
   `∫1/(x³+1)` now returns exact `⅓·ln|x+1| − ⅙·ln(x²−x+1) + (√3/3)·arctan(…)`.
   Root cause: the irreducible quadratic `x²−x+1` represents its `−x` term as
@@ -682,8 +729,11 @@ kernels (cf. item 4) honoring `ce.precision` with guard digits. Overlaps item 7'
   partial-fraction path bailed to the numeric Durand–Kerner fallback, which
   emits float residues. Both extractors now unwrap a leading `Negate` into a
   −1 sign. This also fixed the whole class (`∫1/(x²−x+1)`, `∫1/(2−x)`, …).
-- **Nested radicals not denested** — `√(3+2√2)` stays as-is; SymPy gives `1+√2`
-  (`sqrtdenest`). Lower priority. *(Still open.)*
+- ✅ **Nested radicals now denested** — `√(3+2√2) → 1+√2`, `√(7+4√3) → 2+√3`,
+  `√(5+2√6) → √2+√3` (`sqrtdenest`). A `denestSqrt` step in `simplifyPower`
+  rewrites `√(a+b√c) → √x + sign(b)·√y` (with `x,y = (a±√(a²−b²c))/2`) when
+  `a²−b²c` is a perfect square; a pure-float safety check guards the branch.
+  Radicands that do not denest over the rationals stay as-is.
 
 ### B3. Definite / improper integrals are numerical-only — partially resolved (2026-06-13)
 
@@ -700,10 +750,12 @@ kernels (cf. item 4) honoring `ce.precision` with guard digits. Overlaps item 7'
   Result: `∫₁² (1/x) dx → ln(2)`, `∫₀¹ 1/(x²+1) dx → π/4`,
   `∫₀¹ sin x dx → 1 − cos(1)`, `∫₁² ln x dx → 2ln(2) − 1`.
 - ⬜ **Improper / infinite bounds still numerical-only.** `∫₀^∞ …` returns an
-  unevaluated `EvaluateAt`; needs endpoint-limit handling. The roadmap's
-  headline examples are also blocked elsewhere: `∫₀^∞ e^(−x²)` needs `erf` (B2)
-  and `∫₀^∞ cos(x²)` needs the Fresnel functions; the oscillatory quadrature
-  still mishandles those conditionally-convergent integrands.
+  unevaluated `EvaluateAt`; needs endpoint-limit handling. The non-elementary
+  *antiderivatives* the headline examples need now exist (B2): `∫e^(−x²) → erf`
+  and `∫cos(x²) → Fresnel C`. What remains is the improper-bound machinery —
+  taking the `x → ∞` limit of those antiderivatives (`erf(∞) = 1`,
+  `FresnelC(∞) = ½`) — plus hardening the oscillatory quadrature for the
+  conditionally-convergent cases.
 
 **Remaining fix direction:** add endpoint-limit handling for improper bounds
 (works today for elementary cases like `∫₁^∞ 1/x²`, `∫₀^∞ e^(−x)`); harden the
@@ -791,3 +843,49 @@ never to a symbolic closed form, and gives up (`∅`) on many — e.g.
 which SymPy solves. On the Wester limit sample CE returned a value for 2/6 vs
 SymPy's 4/6. A symbolic limit path (and/or more robust extrapolation, cf. item 2's
 `extrapolate()`) would close the gap.
+
+### B9. `Solve` coverage gaps (higher-degree polynomials, Abs, transcendental)
+
+(Correction: an earlier draft reported "0/21 — non-functional"; that was a
+benchmark bug — it called the `Solve` *operator*, which doesn't auto-evaluate,
+instead of the `.solve()` *method*.) With `expr.solve('x')`, base CE solves
+**7/21** of the Wester equations (SymPy 16/21): quadratics and factorable
+polynomials (real roots), `tan x = 1`, `sin x = 1/2`, `x + √x = 2`. Completeness
+is judged over **real** roots, so e.g. `x⁷ − 1` (CE returns `[1]`) counts as
+solved. The real gaps, where CE returns `[]`:
+
+- **General multi-term cubics/quartics with no rational root** — `3x³ − 18x² +
+  33x − 19 → []`. (Pure powers `xⁿ = c → ⁿ√c`, rational-root polynomials
+  `x³−6x²+11x−6 → [1,2,3]`, and quadratics all *do* solve; the gap is the
+  general case, which needs Cardano/Ferrari or a numeric-root fallback —
+  `solve.ts:1320` only tries the rational-root theorem for degree ≥ 3.)
+- ~~**Absolute-value equations**~~ ✅ **Fixed (2026-06-13).** Root cause was two
+  buggy direct `|ax+b|+c` root rules in `UNIVARIATE_ROOTS` (`solve.ts`): the
+  first branch had the subtraction reversed (`(b−c)/a` instead of `(c−b)/a`) and
+  the second was structurally malformed (`Divide(Negate(Add(b,c), a))` — the
+  `/--4`-style garbage), so they returned a wrong or partial root that the
+  validator then dropped. Fixes: corrected both branches; generalized the
+  single-`Abs` harmonization from `|ax+b|` to a uniform `|f(x)|+c` case-split
+  (now handles bare `|x| = 2`, unit coefficients, and **non-linear** inner forms
+  like `|x²−3| = 1 → ±2, ±√2`); and added a `|f| = |g|` squaring rule
+  (`|2x+5| = |x−2| → −7, −1`). Covered by `test/compute-engine/solve.test.ts`
+  ("SOLVING ABSOLUTE VALUE EQUATIONS"). (The Wester `equations` file has no
+  `Abs` cases, so this fix is verified by unit tests rather than the Wester
+  score.)
+- **Transcendental / mixed** — `xˣ = x`, `e^{−x} = e^{2−x²}`, and several
+  trig/radical/log forms (`sin x = cos x`, `2√x + 3⁴√x = 2`, `√(ln x) = ln√x`).
+
+Enabling the solve templates (`{solve: true}`, item 1) doesn't change this set
+(still 7/21) — they target LambertW / Ln-Exp / Tan-Arctan inverse forms; the
+baseline gaps above are complementary. **Secondary:** the `Solve[…]` *operator*
+form (e.g. from parsed Mathematica/LaTeX) returns unevaluated and lets its
+`Equal` arg collapse to `False` — it should dispatch to the same machinery as
+`.solve()`. Surfaced by `benchmarks/audit/wester.ts` (the `Solve` rows).
+
+### B10. No `Resultant` operator
+
+`Resultant[p, q, x]` returns unevaluated (CE has no implementation); SymPy
+computes it. Univariate polynomial resultant (e.g. via the Sylvester matrix
+determinant or the subresultant PRS the GCD path already uses, cf. B5) would
+add it. Low-frequency but cheap once polynomial GCD/PRS infrastructure exists.
+Surfaced by `benchmarks/audit/wester.ts`.

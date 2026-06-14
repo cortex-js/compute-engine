@@ -25,9 +25,11 @@ import {
   bigFresnelC,
   bigFresnelS,
   bigSinc,
+  cosIntegral,
   fresnelC,
   fresnelS,
   sinc,
+  sinIntegral,
 } from '../numerics/special-functions';
 
 //
@@ -369,6 +371,53 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
           (x) => fresnelC(x),
           (x) => bigFresnelC(x)
         );
+      },
+    },
+
+    /**
+     * SinIntegral(x) = ∫₀ˣ sin t / t dt — odd function, Si(±∞) = ±π/2.
+     * Numeric evaluation is machine-precision only (no bignum kernel); like
+     * the other special functions it does not yet honor `ce.precision` beyond
+     * machine precision (ROADMAP B1).
+     */
+    SinIntegral: {
+      description: 'Sine integral: ∫₀ˣ sin(t)/t dt.',
+      complexity: 5200,
+      broadcastable: true,
+      signature: '(number) -> real',
+      type: () => 'finite_real',
+      evaluate: ([x], { numericApproximation, engine: ce }) => {
+        if (!isNumber(x) || x.im !== 0) return undefined;
+        // Exact special values, regardless of numericApproximation
+        if (x.isSame(0)) return ce.Zero;
+        if (x.isInfinity) {
+          const v = x.isPositive ? ce.Pi.div(2) : ce.Pi.div(-2);
+          return numericApproximation ? v.N() : v;
+        }
+        if (!numericApproximation) return undefined;
+        return apply(x, (x) => sinIntegral(x));
+      },
+    },
+
+    /**
+     * CosIntegral(x) = γ + ln x + ∫₀ˣ (cos t − 1)/t dt — Ci(0⁺) = −∞,
+     * Ci(∞) = 0. For x < 0 the function is complex; the real part Ci(|x|) is
+     * returned. Machine-precision only (no bignum kernel; ROADMAP B1).
+     */
+    CosIntegral: {
+      description: 'Cosine integral: γ + ln(x) + ∫₀ˣ (cos(t)−1)/t dt.',
+      complexity: 5200,
+      broadcastable: true,
+      signature: '(number) -> real',
+      // Not finite_real: Ci(0) = −∞
+      type: () => 'real',
+      evaluate: ([x], { numericApproximation, engine: ce }) => {
+        if (!isNumber(x) || x.im !== 0) return undefined;
+        // Exact special values, regardless of numericApproximation
+        if (x.isSame(0)) return ce.NegativeInfinity;
+        if (x.isInfinity && x.isPositive) return ce.Zero;
+        if (!numericApproximation) return undefined;
+        return apply(x, (x) => cosIntegral(x));
       },
     },
 

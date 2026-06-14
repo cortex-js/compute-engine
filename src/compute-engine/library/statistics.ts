@@ -1,9 +1,11 @@
 import {
   bigErf,
   bigErfc,
+  bigErfi,
   bigErfInv,
   erf,
   erfc,
+  erfi,
   erfInv,
 } from '../numerics/special-functions';
 import { apply } from '../boxed-expression/apply';
@@ -158,6 +160,27 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           x,
           (x) => erfInv(x),
           (x) => bigErfInv(ce, x)
+        );
+      },
+    },
+
+    Erfi: {
+      description: 'Imaginary error function: -i·Erf(i·x)',
+      complexity: 7500,
+      signature: '(number) -> number',
+      // Not finite_real: Erfi(±∞) = ±∞
+      type: () => 'real',
+      evaluate: ([x], { numericApproximation, engine: ce }) => {
+        if (!isNumber(x) || x.im !== 0) return undefined;
+        // Exact special values, regardless of numericApproximation
+        if (x.isSame(0)) return ce.Zero;
+        if (x.isInfinity)
+          return x.isPositive ? ce.PositiveInfinity : ce.NegativeInfinity;
+        if (!numericApproximation) return undefined;
+        return apply(
+          x,
+          (x) => erfi(x),
+          (x) => bigErfi(ce, x)
         );
       },
     },

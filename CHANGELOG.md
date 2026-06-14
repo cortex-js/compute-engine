@@ -138,6 +138,20 @@
   grows with precision) with bit-identical results — no change to accuracy or to
   the public `significand · 10^exponent` representation.
 
+- **Arbitrary-precision π, trigonometry and logarithm beyond ~2350 digits.**
+  The trig and `BigDecimal.PI` paths previously capped out (returning `NaN`)
+  past the ~2370-digit hardcoded π table; π is now computed on demand via
+  Chudnovsky binary splitting, so high-precision `sin`/`cos`/`tan` and
+  inverse-trig values are correct at any precision. High-precision `ln` is also
+  faster — a `giant_steps` Newton iteration plus an arithmetic-geometric-mean
+  (AGM) algorithm above ~1250 digits (~2.3× faster at 4000 digits).
+
+- **More `BigDecimal` elementary functions** (the internal arbitrary-precision
+  core): `expm1`, `log1p`, `log2`, `asinh`, `acosh`, `atanh`, `nthRoot`, and
+  directed-rounding `divToward`/`sqrtToward` (toward −∞ / +∞ — the rigorous
+  primitive for interval arithmetic). `expm1`/`log1p` and the inverse
+  hyperbolics keep full relative accuracy for small arguments.
+
 ### Bug Fixes
 
 - **`solve` returned wrong or missing roots for absolute-value equations.** The

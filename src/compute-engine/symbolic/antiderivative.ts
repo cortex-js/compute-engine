@@ -1864,6 +1864,229 @@ function integrateIndexPower(index: string, exponent: Expression): Expression {
   ]);
 }
 
+/**
+ * ∫ e^(a·x² + b·x + c) dx for a numeric, a ≠ 0 (the Gaussian integral).
+ *
+ * Complete the square: a·x²+b·x+c = a·(x − q)² + r, with q = −b/(2a),
+ * r = c − b²/(4a). Then, with u = x − q,
+ *   a < 0:  ∫ = e^r · ½·√(π/(−a)) · Erf(√(−a)·u)
+ *   a > 0:  ∫ = e^r · ½·√(π/a)   · Erfi(√a·u)
+ *
+ * Returns null unless the exponent is a numeric quadratic in `index`.
+ */
+function tryGaussianIntegral(
+  fn: Expression,
+  index: string
+): Expression | null {
+  const ce = fn.engine;
+
+  // Identify e^(arg): either Exp(arg) or Power(ExponentialE, arg).
+  let arg: Expression | null = null;
+  if (isFunction(fn, 'Exp')) arg = fn.op1;
+  else if (isFunction(fn, 'Power') && sym(fn.op1) === 'ExponentialE')
+    arg = fn.op2;
+  if (!arg || !arg.has(index)) return null;
+
+  const coeffs = getPolynomialCoefficients(arg, index);
+  if (!coeffs || coeffs.length !== 3) return null; // need exact degree 2
+  const [c, b, a] = coeffs;
+  if (a.has(index) || b.has(index) || c.has(index)) return null;
+
+  // The sign of `a` selects Erf vs Erfi, so we need a known numeric value.
+  const aVal = a.N().re;
+  if (aVal === null || aVal === 0 || !Number.isFinite(aVal)) return null;
+
+  const q = b.neg().div(ce.number(2).mul(a)); // −b/(2a)
+  const r = c.sub(b.mul(b).div(ce.number(4).mul(a))); // c − b²/(4a)
+  const eR = ce.function('Exp', [r]);
+  const u = ce.symbol(index).sub(q);
+
+  const p = aVal < 0 ? a.neg() : a; // |a| > 0
+  const sqrtP = ce.function('Sqrt', [p]);
+  const coef = ce.function('Sqrt', [ce.Pi.div(p)]).div(ce.number(2));
+  const special = ce.function(aVal < 0 ? 'Erf' : 'Erfi', [sqrtP.mul(u)]);
+  return eR.mul(coef).mul(special);
+}
+
+/**
+ * ∫ cos(a·x²) dx = √(π/(2a))·FresnelC(√(2a/π)·x) and
+ * ∫ sin(a·x²) dx = √(π/(2a))·FresnelS(√(2a/π)·x), for numeric a > 0.
+ *
+ * cos is even, so a < 0 uses |a|; sin is odd, so a < 0 negates the result.
+ * Restricted to a pure quadratic argument (no linear or constant term).
+ */
+function tryFresnelIntegral(
+  fn: Expression,
+  index: string
+): Expression | null {
+  if (!isFunction(fn, 'Cos') && !isFunction(fn, 'Sin')) return null;
+  const ce = fn.engine;
+  const isCos = isFunction(fn, 'Cos');
+  const arg = fn.op1;
+  if (!arg.has(index)) return null;
+
+  const coeffs = getPolynomialCoefficients(arg, index);
+  if (!coeffs || coeffs.length !== 3) return null;
+  const [c, b, a] = coeffs;
+  if (!c.isSame(0) || !b.isSame(0)) return null; // pure a·x² only
+
+  const aVal = a.N().re;
+  if (aVal === null || aVal === 0 || !Number.isFinite(aVal)) return null;
+
+  const aAbs = aVal < 0 ? a.neg() : a;
+  const twoA = ce.number(2).mul(aAbs);
+  const scale = ce.function('Sqrt', [twoA.div(ce.Pi)]); // √(2a/π)
+  const coef = ce.function('Sqrt', [ce.Pi.div(twoA)]); // √(π/(2a))
+  const fres = ce.function(isCos ? 'FresnelC' : 'FresnelS', [
+    scale.mul(ce.symbol(index)),
+  ]);
+  let result = coef.mul(fres);
+  if (!isCos && aVal < 0) result = result.neg(); // sin is odd
+  return result;
+}
+
+/**
+ * ∫ secⁿx dx / ∫ cscⁿx dx for integer n ≥ 0 via the standard reduction
+ * formulas, terminating at the ∫sec x / ∫csc x logarithmic base cases.
+ *   ∫secⁿx dx = secⁿ⁻²x·tan x/(n−1) + (n−2)/(n−1)·∫secⁿ⁻²x dx
+ *   ∫cscⁿx dx = −cscⁿ⁻²x·cot x/(n−1) + (n−2)/(n−1)·∫cscⁿ⁻²x dx
+ */
+function integrateSecCscPower(
+  op: 'Sec' | 'Csc',
+  n: number,
+  index: string,
+  ce: Expression['engine']
+): Expression {
+  const x = ce.symbol(index);
+  if (n === 0) return x;
+  if (op === 'Sec') {
+    const sec = ce.function('Sec', [x]);
+    const tan = ce.function('Tan', [x]);
+    if (n === 1)
+      return ce.function('Ln', [ce.function('Abs', [sec.add(tan)])]);
+    const term1 = sec.pow(ce.number(n - 2)).mul(tan).div(ce.number(n - 1));
+    const rest = integrateSecCscPower('Sec', n - 2, index, ce);
+    return add(term1, ce.number(n - 2).div(ce.number(n - 1)).mul(rest));
+  }
+  const csc = ce.function('Csc', [x]);
+  const cot = ce.function('Cot', [x]);
+  if (n === 1)
+    return ce.function('Ln', [ce.function('Abs', [csc.add(cot)])]).neg();
+  const term1 = csc
+    .pow(ce.number(n - 2))
+    .mul(cot)
+    .div(ce.number(n - 1))
+    .neg();
+  const rest = integrateSecCscPower('Csc', n - 2, index, ce);
+  return add(term1, ce.number(n - 2).div(ce.number(n - 1)).mul(rest));
+}
+
+/**
+ * ∫ 1/√(c + d·x²) dx as a closed form (no linear term), for numeric c, d.
+ *   d > 0, c > 0:  (1/√d)·arsinh(x·√(d/c))
+ *   d > 0, c < 0:  (1/√d)·arcosh(x·√(d/(−c)))
+ *   d < 0, c > 0:  (1/√(−d))·arcsin(x·√(−d/c))
+ * Returns null for the non-real case (d < 0, c ≤ 0) or symbolic c/d.
+ */
+function integrateInvSqrtQuadratic(
+  c: Expression,
+  d: Expression,
+  index: string
+): Expression | null {
+  const ce = c.engine;
+  const cVal = c.N().re;
+  const dVal = d.N().re;
+  if (cVal === null || dVal === null || dVal === 0) return null;
+  const x = ce.symbol(index);
+
+  if (dVal > 0) {
+    const sqrtD = ce.function('Sqrt', [d]);
+    if (cVal > 0) {
+      const u = x.mul(ce.function('Sqrt', [d.div(c)]));
+      return ce.function('Arsinh', [u]).div(sqrtD);
+    }
+    if (cVal < 0) {
+      const u = x.mul(ce.function('Sqrt', [d.div(c.neg())]));
+      return ce.function('Arcosh', [u]).div(sqrtD);
+    }
+    return null; // c == 0: ∫1/√(d x²) = ln-of-x form, not handled here
+  }
+  // dVal < 0
+  if (cVal <= 0) return null; // √(c + d x²) not real on a relevant interval
+  const sqrtNegD = ce.function('Sqrt', [d.neg()]);
+  const u = x.mul(ce.function('Sqrt', [d.neg().div(c)]));
+  return ce.function('Arcsin', [u]).div(sqrtNegD);
+}
+
+/**
+ * ∫ xᵐ/√(c + d·x²) dx (no linear term) via the reduction
+ *   Iₘ = xᵐ⁻¹·√Q/(m·d) − ((m−1)·c/(m·d))·Iₘ₋₂,
+ * with base cases I₀ = ∫1/√Q (closed form) and I₁ = √Q/d.
+ * Returns null when the base case has no real closed form.
+ */
+function reduceMonomialOverSqrtQuadratic(
+  m: number,
+  c: Expression,
+  d: Expression,
+  Q: Expression,
+  index: string
+): Expression | null {
+  const ce = Q.engine;
+  const x = ce.symbol(index);
+  const sqrtQ = ce.function('Sqrt', [Q]);
+  if (m === 0) return integrateInvSqrtQuadratic(c, d, index);
+  if (m === 1) return sqrtQ.div(d);
+  const lower = reduceMonomialOverSqrtQuadratic(m - 2, c, d, Q, index);
+  if (lower === null) return null;
+  const md = ce.number(m).mul(d);
+  const term1 = x.pow(ce.number(m - 1)).mul(sqrtQ).div(md);
+  const coef2 = ce.number(m - 1).mul(c).div(md).neg();
+  return add(term1, coef2.mul(lower));
+}
+
+/**
+ * ∫ N(x)/√Q(x) dx where Q is a polynomial of degree 1 or 2. Two cases:
+ *   (a) N = const·Q′  →  const·2·√Q   (works for any such Q).
+ *   (b) Q = c + d·x² (no linear term) and N = xᵐ (m ≥ 1 integer) → reduction.
+ * Returns null otherwise. m = 0 (plain 1/√Q) is left to the dedicated
+ * arcsin/arsinh/arcosh handlers earlier in the Divide branch.
+ */
+function tryRadicalQuadratic(
+  num: Expression,
+  radicand: Expression,
+  index: string
+): Expression | null {
+  const ce = num.engine;
+  const qDeg = polynomialDegree(radicand, index);
+  if (qDeg < 1 || qDeg > 2) return null;
+
+  // Case (a): numerator is a constant multiple of Q′(x).
+  const qPrime = differentiate(radicand, index);
+  if (qPrime && !qPrime.isSame(0)) {
+    const ratio = num.div(qPrime).simplify();
+    if (!ratio.has(index)) {
+      const sqrtQ = ce.function('Sqrt', [radicand]);
+      return ratio.mul(ce.number(2)).mul(sqrtQ);
+    }
+  }
+
+  // Case (b): xᵐ over √(c + d·x²) via reduction (needs no linear term).
+  const coeffs = getPolynomialCoefficients(radicand, index);
+  if (!coeffs || coeffs.length !== 3) return null;
+  const [c, b, d] = coeffs;
+  if (!b.isSame(0)) return null;
+
+  let m: number | null = null;
+  if (sym(num) === index) m = 1;
+  else if (isFunction(num, 'Power') && sym(num.op1) === index) {
+    const ev = num.op2.re;
+    if (ev !== null && Number.isInteger(ev) && ev >= 1) m = ev;
+  }
+  if (m === null || m < 1) return null;
+
+  return reduceMonomialOverSqrtQuadratic(m, c, d, radicand, index);
+}
+
 export function antiderivative(fn: Expression, index: string): Expression {
   if (isFunction(fn, 'Function')) return antiderivative(fn.op1, index);
   if (isFunction(fn, 'Block')) return antiderivative(fn.op1, index);
@@ -1890,6 +2113,16 @@ export function antiderivative(fn: Expression, index: string): Expression {
     sym(fn.op2.op1) === index
   )
     return integrateIndexPower(index, ce.Half.neg());
+
+  // Non-elementary closed forms: ∫e^(quadratic) → Erf/Erfi (Gaussian) and
+  // ∫cos(a x²)/∫sin(a x²) → Fresnel C/S. Checked here (before the Add /
+  // Multiply / Divide branches) so the bare integrand reaches them; a
+  // constant-scaled integrand like ∫3·e^(−x²) is reduced by the Multiply
+  // branch and recurses back to these.
+  const gaussian = tryGaussianIntegral(fn, index);
+  if (gaussian) return gaussian;
+  const fresnel = tryFresnelIntegral(fn, index);
+  if (fresnel) return fresnel;
 
   // Apply the chain rule
   if (isFunction(fn, 'Add')) {
@@ -2109,6 +2342,29 @@ export function antiderivative(fn: Expression, index: string): Expression {
         if (oneTerm && negX2Term) return ce.expr(['Arcsin', index]);
         if (oneTerm && x2Term) return ce.expr(['Arsinh', index]);
         if (negOneTerm && x2Term) return ce.expr(['Arcosh', index]);
+      }
+    }
+
+    // ∫ N(x)/√Q(x) dx with Q a degree-1/2 polynomial: derivative-in-numerator
+    // (∫x/√(1−x²) → −√(1−x²)) and the xᵐ/√(c+dx²) reduction
+    // (∫x²/√(1−x²) → ½(arcsin x − x√(1−x²))).
+    if (isFunction(fn.op2, 'Sqrt')) {
+      const radResult = tryRadicalQuadratic(fn.op1, fn.op2.op1, index);
+      if (radResult) return radResult;
+    }
+
+    // Non-elementary ∫ sin(k·x)/x dx = Si(k·x) and ∫ cos(k·x)/x dx = Ci(k·x)
+    // (denominator is the bare index, argument linear through the origin, i.e.
+    // arg/x is a non-zero constant — covers both `x` and `k·x`).
+    if (
+      sym(fn.op2) === index &&
+      (isFunction(fn.op1, 'Sin') || isFunction(fn.op1, 'Cos'))
+    ) {
+      const arg = fn.op1.op1;
+      const ratio = arg.div(ce.symbol(index)).simplify();
+      if (arg.has(index) && !ratio.has(index) && !ratio.isSame(0)) {
+        const op = isFunction(fn.op1, 'Sin') ? 'SinIntegral' : 'CosIntegral';
+        return ce.function(op, [arg]);
       }
     }
 
@@ -2719,6 +2975,22 @@ export function antiderivative(fn: Expression, index: string): Expression {
     // ∫e^x dx = e^x (e^x is parsed as ['Power', 'ExponentialE', 'x'])
     if (sym(fn.op1) === 'ExponentialE' && sym(fn.op2) === index) {
       return fn;
+    }
+
+    // ∫secⁿx dx / ∫cscⁿx dx (bare index, integer n ≥ 2) via reduction.
+    // e.g. ∫sec³x → ½(sec x·tan x + ln|sec x + tan x|).
+    if (
+      (isFunction(fn.op1, 'Sec') || isFunction(fn.op1, 'Csc')) &&
+      sym(fn.op1.op1) === index
+    ) {
+      const nVal = fn.op2.re;
+      if (nVal !== null && Number.isInteger(nVal) && nVal >= 2)
+        return integrateSecCscPower(
+          isFunction(fn.op1, 'Sec') ? 'Sec' : 'Csc',
+          nVal,
+          index,
+          ce
+        );
     }
 
     // ∫x^n dx

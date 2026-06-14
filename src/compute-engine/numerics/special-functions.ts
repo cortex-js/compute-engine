@@ -1759,6 +1759,186 @@ export function bigErf(ce: ComputeEngine, x: BigNum): BigNum {
 }
 
 /**
+ * Imaginary error function erfi(x) = −i·erf(i·x) = (2/√π)∫₀ˣ e^{t²} dt.
+ *
+ * Maclaurin series (all-positive, no subtractive cancellation):
+ *    erfi(x) = (2/√π) Σ_{n≥0} x^{2n+1} / (n!·(2n+1))
+ * with the term recurrence tₙ = tₙ₋₁ · x²·(2n−1) / (n·(2n+1)).
+ * Odd function. Grows like e^{x²}, so it overflows to ±∞ for large |x|.
+ */
+export function erfi(x: number): number {
+  if (Number.isNaN(x)) return NaN;
+  if (x === 0) return 0;
+  if (!Number.isFinite(x)) return x > 0 ? Infinity : -Infinity;
+
+  const sign = x < 0 ? -1 : 1;
+  const ax = Math.abs(x);
+  const x2 = ax * ax;
+  let term = ax; // n = 0 term: x
+  let sum = ax;
+  for (let n = 1; n < 1000; n++) {
+    term *= (x2 * (2 * n - 1)) / (n * (2 * n + 1));
+    sum += term;
+    if (term < sum * 1e-18) break;
+  }
+  return (sign * (2 / Math.sqrt(Math.PI))) * sum;
+}
+
+/**
+ * Bignum imaginary error function. The Maclaurin series above has only
+ * positive terms (no cancellation), so the relative error tracks the working
+ * precision. Precision scales with `BigDecimal.precision`.
+ */
+function bigErfiSeries(x: BigNum, tolDigits: number): BigNum {
+  const x2 = x.mul(x);
+  let term = x; // n = 0
+  let sum = x;
+  const tol = new BigDecimal(10).pow(-tolDigits);
+  const maxTerms = 1000 + 10 * Math.ceil(x2.toNumber()) + 10 * tolDigits;
+  for (let n = 1; n <= maxTerms; n++) {
+    // tₙ = tₙ₋₁ · x²·(2n−1) / (n·(2n+1))
+    term = term
+      .mul(x2)
+      .mul(2 * n - 1)
+      .div(n * (2 * n + 1));
+    sum = sum.add(term);
+    if (term.lt(sum.mul(tol))) break;
+  }
+  return sum.mul(2).div(BigDecimal.PI.sqrt());
+}
+
+export function bigErfi(ce: ComputeEngine, x: BigNum): BigNum {
+  if (x.isNaN()) return BigDecimal.NAN;
+  if (!x.isFinite())
+    return x.isNegative()
+      ? BigDecimal.NEGATIVE_INFINITY
+      : BigDecimal.POSITIVE_INFINITY;
+  if (x.isZero()) return BigDecimal.ZERO;
+  if (x.isNegative()) return bigErfi(ce, x.neg()).neg();
+
+  const p = BigDecimal.precision;
+  const guard = 10;
+  return withExtraPrecision(guard, () =>
+    bigErfiSeries(x, p + guard)
+  ).toPrecision(p);
+}
+
+const EULER_GAMMA = 0.5772156649015328606; // Euler–Mascheroni constant γ
+
+/**
+ * Sine and cosine integrals computed together:
+ *   Si(x) = ∫₀ˣ sin t / t dt          (odd, Si(±∞) = ±π/2)
+ *   Ci(x) = γ + ln x + ∫₀ˣ (cos t − 1)/t dt   (Ci(0⁺) = −∞, Ci(∞) = 0)
+ *
+ * Method (Numerical Recipes §6.8 `cisi`): the Maclaurin series for |x| ≤ 2
+ * (negligible cancellation), and Lentz's modified continued fraction for the
+ * complex exponential integral E₁(ix) for |x| > 2 — evaluated here with
+ * explicit real/imaginary parts so no Complex type is needed. Full double
+ * precision across the whole range.
+ *
+ * Ci(x) for x < 0 is complex; this returns its real part, Ci(|x|).
+ */
+function cisi(x: number): { si: number; ci: number } {
+  const EPS = 1e-16;
+  const TMIN = 2.0;
+  const BIG = 1e30;
+  const t = Math.abs(x);
+
+  if (t === 0) return { si: 0, ci: -Infinity };
+  if (!Number.isFinite(t))
+    return { si: x > 0 ? Math.PI / 2 : -Math.PI / 2, ci: 0 };
+
+  let si: number;
+  let ci: number;
+
+  if (t > TMIN) {
+    // Continued fraction for ∫_t^∞ e^{iu}/u du via Lentz's algorithm.
+    // b = 1 + i·t; c = BIG; d = h = 1/b.
+    let br = 1;
+    const bi = t; // imaginary part of b is constant
+    let cr = BIG;
+    let cim = 0;
+    let denom = br * br + bi * bi;
+    let dr = br / denom;
+    let di = -bi / denom;
+    let hr = dr;
+    let hi = di;
+    for (let i = 1; i < 100; i++) {
+      const a = -i * i;
+      br += 2; // b += 2
+      // d = 1/(a·d + b)
+      let tr = a * dr + br;
+      let ti = a * di + bi;
+      denom = tr * tr + ti * ti;
+      dr = tr / denom;
+      di = -ti / denom;
+      // c = b + a/c
+      denom = cr * cr + cim * cim;
+      cr = br + (a * cr) / denom;
+      cim = bi - (a * cim) / denom;
+      // del = c·d
+      const delr = cr * dr - cim * di;
+      const deli = cr * di + cim * dr;
+      // h = h·del
+      tr = hr * delr - hi * deli;
+      ti = hr * deli + hi * delr;
+      hr = tr;
+      hi = ti;
+      if (Math.abs(delr - 1) + Math.abs(deli) <= EPS) break;
+    }
+    // h = (cos t − i·sin t)·h ; then ci = −Re(h), si = π/2 + Im(h)
+    const ct = Math.cos(t);
+    const st = Math.sin(t);
+    const reH = ct * hr + st * hi;
+    const imH = ct * hi - st * hr;
+    ci = -reH;
+    si = Math.PI / 2 + imH;
+  } else {
+    // Maclaurin series, accumulating the odd-power (Si) and even-power (Ci)
+    // partial sums in lockstep.
+    let sum = 0;
+    let sums = 0;
+    let sumc = 0;
+    let sign = 1;
+    let fact = 1;
+    let odd = true;
+    for (let k = 1; k <= 100; k++) {
+      fact *= t / k;
+      const term = fact / k;
+      sum += sign * term;
+      const err = term / Math.abs(sum);
+      if (odd) {
+        sign = -sign;
+        sums = sum;
+        sum = sumc;
+      } else {
+        sumc = sum;
+        sum = sums;
+      }
+      if (err < EPS) break;
+      odd = !odd;
+    }
+    si = sums;
+    ci = sumc + Math.log(t) + EULER_GAMMA;
+  }
+
+  if (x < 0) si = -si; // Si is odd
+  return { si, ci };
+}
+
+/** Sine integral Si(x) = ∫₀ˣ sin t / t dt. */
+export function sinIntegral(x: number): number {
+  if (Number.isNaN(x)) return NaN;
+  return cisi(x).si;
+}
+
+/** Cosine integral Ci(x) = γ + ln x + ∫₀ˣ (cos t − 1)/t dt (real part). */
+export function cosIntegral(x: number): number {
+  if (Number.isNaN(x)) return NaN;
+  return cisi(x).ci;
+}
+
+/**
  * Bignum complementary error function.
  * Precision scales with `BigDecimal.precision`.
  *

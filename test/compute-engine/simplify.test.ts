@@ -1454,3 +1454,24 @@ describe('CUSTOM RULES APPLY TO OPERANDS OF REWRITTEN EXPRESSIONS', () => {
     expect(result.json).toEqual(['G', 'x']);
   });
 });
+
+describe('Denest nested radicals: √(a+b√c) → √x+√y (ROADMAP B2)', () => {
+  test('√(3+2√2) = 1+√2', () =>
+    checkSimplify('\\sqrt{3+2\\sqrt2}', '1+\\sqrt2'));
+  test('√(7+4√3) = 2+√3', () =>
+    checkSimplify('\\sqrt{7+4\\sqrt3}', '2+\\sqrt3'));
+  test('√(5+2√6) = √2+√3', () =>
+    checkSimplify('\\sqrt{5+2\\sqrt6}', '\\sqrt2+\\sqrt3'));
+  test('√(11+6√2) = 3+√2', () =>
+    checkSimplify('\\sqrt{11+6\\sqrt2}', '3+\\sqrt2'));
+  test('√(3−2√2) = √2−1', () =>
+    checkSimplify('\\sqrt{3-2\\sqrt2}', '\\sqrt2-1'));
+  test('√(2+√3) = √2/2 + √6/2', () =>
+    checkSimplify('\\sqrt{2+\\sqrt3}', '\\frac{\\sqrt2}{2}+\\frac{\\sqrt6}{2}'));
+
+  // Non-denestable (a²−b²c not a perfect square, or radicand < a) — stay nested.
+  test('√(1+√2) stays nested (a²−b²c < 0)', () =>
+    checkSimplify('\\sqrt{1+\\sqrt2}', '\\sqrt{1+\\sqrt2}'));
+  test('√(5+√2) stays nested (D not a perfect square)', () =>
+    checkSimplify('\\sqrt{5+\\sqrt2}', '\\sqrt{5+\\sqrt2}'));
+});

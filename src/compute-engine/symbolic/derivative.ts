@@ -164,6 +164,10 @@ const DERIVATIVES_TABLE = {
   FresnelC: ['Cos', ['Multiply', ['Divide', 'Pi', 2], ['Square', '_']]],
   // d/dx erfi(x) = (2/√π)·e^(x²) where erfi is the imaginary error function
   Erfi: ['Multiply', ['Divide', 2, ['Sqrt', 'Pi']], ['Exp', ['Square', '_']]],
+  // d/dx Si(x) = sin(x)/x where Si is the sine integral
+  SinIntegral: ['Divide', ['Sin', '_'], '_'],
+  // d/dx Ci(x) = cos(x)/x where Ci is the cosine integral
+  CosIntegral: ['Divide', ['Cos', '_'], '_'],
   // Note: Bessel functions (BesselJ, BesselY, BesselI, BesselK) and Airy functions
   // (AiryAi, AiryBi) have been omitted because their derivatives involve functions
   // of different orders or related derivative functions that are not in the standard

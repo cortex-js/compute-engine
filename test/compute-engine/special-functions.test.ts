@@ -527,6 +527,76 @@ describe('ERROR FUNCTION (REVIEW.md G1)', () => {
   });
 });
 
+// Imaginary error function erfi(x) = −i·erf(i·x) (ROADMAP B2 Gaussian
+// antiderivative ∫e^(x²) → (√π/2)·Erfi(x)).
+describe('IMAGINARY ERROR FUNCTION (Erfi)', () => {
+  test('Erfi(1) ≈ 1.6504257587975428', () =>
+    expectApprox(ce.box(['Erfi', 1]), 1.6504257587975428, 1e-13));
+
+  test('Erfi(0.5) ≈ 0.6149520946965109', () =>
+    expectApprox(ce.box(['Erfi', 0.5]), 0.6149520946965109, 1e-13));
+
+  test('Erfi is odd: Erfi(−1) = −Erfi(1)', () =>
+    expectApprox(ce.box(['Erfi', -1]), -1.6504257587975428, 1e-13));
+
+  test('Erfi(0) = 0, Erfi(±∞) = ±∞', () => {
+    expect(ce.box(['Erfi', 0]).N().re).toBe(0);
+    expect(ce.box(['Erfi', ce.PositiveInfinity]).evaluate().re).toBe(Infinity);
+    expect(ce.box(['Erfi', ce.NegativeInfinity]).evaluate().re).toBe(-Infinity);
+  });
+
+  test("d/dx Erfi(x) = (2/√π)·e^(x²)", () =>
+    expect(ce.box(['D', ['Erfi', 'x'], 'x']).evaluate().toString()).toEqual(
+      '(2e^(x^2)) / sqrt(pi)'
+    ));
+});
+
+// Sine and cosine integrals (ROADMAP B2: ∫sin x/x → Si, ∫cos x/x → Ci).
+// Numeric evaluation is machine-precision only (no bignum kernel; ROADMAP B1).
+describe('SINE & COSINE INTEGRALS (Si, Ci)', () => {
+  test('Si(1) ≈ 0.9460830703671830', () =>
+    expectApprox(ce.box(['SinIntegral', 1]), 0.946083070367183, 1e-12));
+
+  test('Si(2) ≈ 1.6054129768026948', () =>
+    expectApprox(ce.box(['SinIntegral', 2]), 1.6054129768026948, 1e-12));
+
+  test('Si(10) ≈ 1.6583475942188740 (continued-fraction regime)', () =>
+    expectApprox(ce.box(['SinIntegral', 10]), 1.658347594218874, 1e-12));
+
+  test('Si is odd: Si(−1) = −Si(1)', () =>
+    expectApprox(ce.box(['SinIntegral', -1]), -0.946083070367183, 1e-12));
+
+  test('Si(0) = 0, Si(∞) = π/2', () => {
+    expect(ce.box(['SinIntegral', 0]).N().re).toBe(0);
+    expectApprox(
+      ce.box(['SinIntegral', ce.PositiveInfinity]),
+      Math.PI / 2,
+      1e-12
+    );
+  });
+
+  test('Ci(1) ≈ 0.3374039229009681', () =>
+    expectApprox(ce.box(['CosIntegral', 1]), 0.3374039229009681, 1e-12));
+
+  test('Ci(2) ≈ 0.4229808287748649', () =>
+    expectApprox(ce.box(['CosIntegral', 2]), 0.4229808287748649, 1e-12));
+
+  test('Ci(10) ≈ −0.04545643300445537', () =>
+    expectApprox(ce.box(['CosIntegral', 10]), -0.04545643300445537, 1e-12));
+
+  test('Ci(0) = −∞', () =>
+    expect(ce.box(['CosIntegral', 0]).evaluate().re).toBe(-Infinity));
+
+  test('d/dx Si(x) = sin(x)/x, d/dx Ci(x) = cos(x)/x', () => {
+    expect(
+      ce.box(['D', ['SinIntegral', 'x'], 'x']).evaluate().toString()
+    ).toEqual('sin(x) / x');
+    expect(
+      ce.box(['D', ['CosIntegral', 'x'], 'x']).evaluate().toString()
+    ).toEqual('cos(x) / x');
+  });
+});
+
 //
 // ---------------- Tier-2 kernels (ROADMAP item 4) ----------------
 // Reference values computed independently (Simpson quadrature for K/E,

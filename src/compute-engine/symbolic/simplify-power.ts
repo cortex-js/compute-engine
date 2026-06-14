@@ -5,6 +5,86 @@ import {
   factorDifferenceOfSquares,
 } from '../boxed-expression/factor';
 import { isFunction, isNumber } from '../boxed-expression/type-guards';
+import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
+
+/**
+ * Denest a nested square root √(a + b√c) → √x + sign(b)·√y.
+ *
+ * With x + y = a and 2√(xy) = |b|√c, the values x, y are the roots of
+ * t² − a·t + b²c/4, i.e. x,y = (a ± √(a²−b²c))/2. The denesting is exact
+ * (over the rationals) exactly when a²−b²c is a perfect square, in which case
+ *   √(a + b√c) = √x + sign(b)·√y       (x ≥ y ≥ 0, principal root, a > 0).
+ *
+ * `arg` is the radicand: an Add of a rational term `a` and a single surd term
+ * `b√c` (a real exact number with integer radical c > 1). Returns the denested
+ * expression, or undefined when it does not denest over the rationals.
+ *
+ * Examples: √(3+2√2) → 1+√2, √(7+4√3) → 2+√3, √(5+2√6) → √2+√3,
+ *           √(3−2√2) → √2−1.
+ */
+function denestSqrt(arg: Expression): Expression | undefined {
+  if (!isFunction(arg, 'Add') || arg.nops !== 2) return undefined;
+  const ce = arg.engine;
+  const [t0, t1] = arg.ops!;
+  if (!isNumber(t0) || !isNumber(t1)) return undefined;
+
+  // Exactly one term must be a pure rational `a`, the other a surd `b√c`.
+  const r0 = asRational(t0);
+  const r1 = asRational(t1);
+  const aIsT0 = !!r0 && !r1;
+  const aIsT1 = !!r1 && !r0;
+  if (!aIsT0 && !aIsT1) return undefined;
+  const aTerm = aIsT0 ? t0 : t1;
+  const surd = aIsT0 ? t1 : t0;
+
+  // Extract the surd b·√c (exact, real, with an integer radical c > 1).
+  const snv = surd.numericValue;
+  if (!(snv instanceof ExactNumericValue) || snv.im !== 0) return undefined;
+  const c = snv.radical;
+  if (!Number.isInteger(c) || c <= 1) return undefined;
+  const bn = Number(snv.rational[0]);
+  const bd = Number(snv.rational[1]);
+
+  const aRat = asRational(aTerm)!;
+  const aVal = Number(aRat[0]) / Number(aRat[1]);
+  if (!(aVal > 0)) return undefined; // principal root: a + b√c with a > 0
+
+  // D = a² − b²c must be a non-negative perfect square (over the rationals).
+  const bSqC = ce.number([bn * bn * c, bd * bd]); // b²·c
+  const dExpr = aTerm.mul(aTerm).sub(bSqC);
+  const dVal = dExpr.re;
+  if (dVal === null || dVal < 0) return undefined;
+  const qExpr = dExpr.sqrt();
+  if (!asRational(qExpr)) return undefined; // D not a perfect square
+
+  // x = (a + q)/2, y = (a − q)/2 (rationals, x ≥ y ≥ 0).
+  const half = ce.number([1, 2]);
+  const x = aTerm.add(qExpr).mul(half);
+  const y = aTerm.sub(qExpr).mul(half);
+  const xN = x.re;
+  const yN = y.re;
+  if (xN === null || yN === null || xN < 0 || yN < 0) return undefined;
+
+  // Build the result with ce.function so √x + √y stays symbolic (the `.add`
+  // method would fold √2 + 1 to a numeric approximation).
+  const sign = bn * bd < 0 ? -1 : 1;
+  const sqrtX = ce.function('Sqrt', [x]);
+  const sqrtY = ce.function('Sqrt', [y]);
+  const result = ce.function('Add', [
+    sqrtX,
+    sign < 0 ? ce.function('Negate', [sqrtY]) : sqrtY,
+  ]);
+
+  // Safety gate (pure machine floats, no bignum): the denested form must be
+  // the positive principal root of the radicand.
+  const argN = aVal + (bn / bd) * Math.sqrt(c);
+  const resN = Math.sqrt(xN) + sign * Math.sqrt(yN);
+  if (!(resN >= 0)) return undefined;
+  if (Math.abs(resN * resN - argN) > 1e-9 * (1 + Math.abs(argN)))
+    return undefined;
+
+  return result;
+}
 
 /**
  * Power simplification rules consolidated from simplify-rules.ts.
@@ -255,6 +335,13 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
           value: ce._fn('Sqrt', [diffSquares]),
           because: 'sqrt(a²-b²) -> sqrt((a-b)(a+b))',
         };
+      }
+
+      // Denest a nested radical: √(a + b√c) → √x + √y when a²−b²c is a
+      // perfect square (e.g. √(3+2√2) → 1+√2).
+      const denested = denestSqrt(arg);
+      if (denested !== undefined) {
+        return { value: denested, because: 'denest √(a+b√c) -> √x+√y' };
       }
     }
 
