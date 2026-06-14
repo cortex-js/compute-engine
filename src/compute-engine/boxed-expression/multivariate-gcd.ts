@@ -2,12 +2,7 @@ import type {
   IComputeEngine as ComputeEngine,
   Expression,
 } from '../global-types';
-import {
-  MPoly,
-  igcd,
-  mpolyFromBoxed,
-  mpolyToBoxed,
-} from './multivariate-poly';
+import { MPoly, igcd, mpolyFromBoxed, mpolyToBoxed } from './multivariate-poly';
 
 /**
  * Multivariate polynomial GCD over ℤ via **Brown's dense modular algorithm**
@@ -261,11 +256,7 @@ function mgcdScaledModP(
 }
 
 /** Fold a list of polynomials (over `vars`) into their GCD mod p. */
-function foldGcdModP(
-  polys: MPoly[],
-  vars: string[],
-  p: bigint
-): MPoly | null {
+function foldGcdModP(polys: MPoly[], vars: string[], p: bigint): MPoly | null {
   const nz = polys.filter((q) => !q.isZero());
   if (nz.length === 0) return MPoly.zero(vars);
   let g = nz[0];
@@ -337,7 +328,8 @@ function remDenseModP(a: bigint[], b: bigint[], p: bigint): bigint[] {
   for (let i = r.length - 1; i >= db; i--) {
     if (r[i] === 0n) continue;
     const factor = mod(r[i] * invLeadB, p);
-    for (let j = 0; j <= db; j++) r[i - db + j] = mod(r[i - db + j] - factor * b[j], p);
+    for (let j = 0; j <= db; j++)
+      r[i - db + j] = mod(r[i - db + j] - factor * b[j], p);
   }
   return trimDense(r);
 }
@@ -370,7 +362,9 @@ function newtonInterpolateModP(
   let H = liftToVars(dd[m - 1], interpIdx, fullVars);
   for (let k = m - 2; k >= 0; k--) {
     const xMinus = xMinusAlpha(interpIdx, points[k], fullVars, p);
-    H = mulModP(H, xMinus, p).add(liftToVars(dd[k], interpIdx, fullVars)).modP(p);
+    H = mulModP(H, xMinus, p)
+      .add(liftToVars(dd[k], interpIdx, fullVars))
+      .modP(p);
   }
   return H.modP(p);
 }
@@ -386,7 +380,8 @@ function xMinusAlpha(
   const e1 = fullVars.map((_, i) => (i === interpIdx ? 1 : 0));
   r.terms.set(MPoly.key(e1), 1n);
   const a = mod(-alpha, p);
-  if (a !== 0n) r.terms.set(MPoly.key(fullVars.map(() => 0)), a > p / 2n ? a - p : a);
+  if (a !== 0n)
+    r.terms.set(MPoly.key(fullVars.map(() => 0)), a > p / 2n ? a - p : a);
   return r;
 }
 

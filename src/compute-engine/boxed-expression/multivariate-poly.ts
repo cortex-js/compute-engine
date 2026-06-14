@@ -176,7 +176,10 @@ export class MPoly {
   totalDegree(): number {
     let d = 0;
     for (const k of this.terms.keys())
-      d = Math.max(d, MPoly.exp(k).reduce((a, b) => a + b, 0));
+      d = Math.max(
+        d,
+        MPoly.exp(k).reduce((a, b) => a + b, 0)
+      );
     return d;
   }
 

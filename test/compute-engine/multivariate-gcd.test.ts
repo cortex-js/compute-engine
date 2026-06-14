@@ -35,9 +35,9 @@ describe('MPoly kernel', () => {
   test('content and primitive part', () => {
     const p = P('6x^2 y + 9 x y - 3 y', ['x', 'y']);
     expect(p.contentInteger()).toBe(3n);
-    expect(same(mpolyToBoxed(ce, p.primitivePartInteger()), '2x^2 y + 3x y - y')).toBe(
-      true
-    );
+    expect(
+      same(mpolyToBoxed(ce, p.primitivePartInteger()), '2x^2 y + 3x y - y')
+    ).toBe(true);
   });
 
   test('exact division (and rejection of a non-divisor)', () => {
@@ -50,7 +50,9 @@ describe('MPoly kernel', () => {
   test('evaluation and coefficient views round-trip', () => {
     const p = P('x^2 y + 3 x y^2 - x + 5', ['x', 'y']);
     // y = 3 → 3x² + 27x − x + 5 = 3x² + 26x + 5
-    expect(same(mpolyToBoxed(ce, p.evalVar(1, 3n)), '3x^2 + 26x + 5')).toBe(true);
+    expect(same(mpolyToBoxed(ce, p.evalVar(1, 3n)), '3x^2 + 26x + 5')).toBe(
+      true
+    );
     const cs = p.coeffsInVar(0);
     expect(MPoly.fromVarCoeffs(cs, 0, ['x', 'y']).equals(p)).toBe(true);
   });

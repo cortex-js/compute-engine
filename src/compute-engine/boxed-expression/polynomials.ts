@@ -614,7 +614,8 @@ function multivariateBinaryGCD(
   const ae = ce.box(['Expand', a]).evaluate();
   const be = ce.box(['Expand', b]).evaluate();
 
-  const termCount = (e: Expression) => (isFunction(e, 'Add') ? e.ops.length : 1);
+  const termCount = (e: Expression) =>
+    isFunction(e, 'Add') ? e.ops.length : 1;
   if (termCount(ae) > 80 || termCount(be) > 80) return undefined;
 
   const vars = [...new Set<string>([...ae.unknowns, ...be.unknowns])];
