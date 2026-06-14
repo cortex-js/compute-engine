@@ -557,7 +557,8 @@ export function factorPolynomial(
   // result is fully factored (→ (x−1)(x²+x+1)(x+1)(x²−x+1)). Recursion
   // terminates because each layer strictly halves the degree.
   const diffSquares = factorDifferenceOfSquares(expr);
-  if (diffSquares !== null) return refactorProductFactors(diffSquares, variable);
+  if (diffSquares !== null)
+    return refactorProductFactors(diffSquares, variable);
 
   if (variable !== undefined) {
     // Try quadratic factoring

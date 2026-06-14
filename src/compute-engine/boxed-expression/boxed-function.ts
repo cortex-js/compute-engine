@@ -443,7 +443,8 @@ export class BoxedFunction
       // extraction is not needed here.) This must run before the exactness
       // check below: NumericValue.root returns NaN here, and NaN reports as
       // exact.
-      if (exp % 2 === 0 && coef.sgn() === -1) return [ce._numericValue(1), this];
+      if (exp % 2 === 0 && coef.sgn() === -1)
+        return [ce._numericValue(1), this];
 
       // Extracting an inexact root would strand a symbolic remainder beside a
       // float coefficient (e.g. Root(2x,3) → ∛2·Root(x,3)), contrary to the

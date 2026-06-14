@@ -83,7 +83,8 @@ function nextSignChange(
   // Scan in small steps relative to the local oscillation scale. Lobes can
   // shrink (sin x²) or stay constant (sin x), so scan a fraction of the hint
   // and allow up to a few hint-widths before giving up.
-  let h = hint !== undefined ? hint / 16 : Math.max(1e-3, Math.abs(x) * 1e-3, 0.01);
+  let h =
+    hint !== undefined ? hint / 16 : Math.max(1e-3, Math.abs(x) * 1e-3, 0.01);
   const maxScan = hint !== undefined ? hint * 6 : Infinity;
 
   let px = x;
@@ -102,8 +103,10 @@ function nextSignChange(
     const nf = f(nx);
     if (!Number.isFinite(nf)) return null;
     const ns = Math.sign(nf);
-    if (refSign === 0) refSign = ns; // first non-zero sample sets the lobe sign
-    else if (ns !== 0 && ns !== refSign) return bisectZero(f, px, pf, nx, nf, deadline);
+    if (refSign === 0)
+      refSign = ns; // first non-zero sample sets the lobe sign
+    else if (ns !== 0 && ns !== refSign)
+      return bisectZero(f, px, pf, nx, nf, deadline);
 
     px = nx;
     pf = nf;
@@ -176,7 +179,8 @@ function recurse(
   const left = ((m - a) / 6) * (fa + 4 * flm + fm);
   const right = ((b - m) / 6) * (fm + 4 * frm + fb);
   const delta = left + right - whole;
-  if (depth <= 0 || Math.abs(delta) <= 15 * tol) return left + right + delta / 15;
+  if (depth <= 0 || Math.abs(delta) <= 15 * tol)
+    return left + right + delta / 15;
   if ((depth & 0x7) === 0) checkDeadline(deadline);
   return (
     recurse(f, a, m, fa, flm, fm, left, tol / 2, depth - 1, deadline) +
@@ -199,7 +203,9 @@ function acceleratedEstimate(
   // Error: spread between the last two accelerated estimates.
   const estPrev = epsilonAlgorithm(s.slice(0, -1));
   const error =
-    estPrev === null ? Math.abs(s[s.length - 1] - s[s.length - 2]) : Math.abs(est - estPrev);
+    estPrev === null
+      ? Math.abs(s[s.length - 1] - s[s.length - 2])
+      : Math.abs(est - estPrev);
   return { estimate: est, error };
 }
 

@@ -311,8 +311,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         // Real argument only (machine-precision kernel); stay symbolic otherwise.
         if (!isNumber(x) || x.im !== 0) return undefined;
         if (x.isSame(0)) return ce.NegativeInfinity;
-        if (x.isInfinity)
-          return x.isPositive ? ce.PositiveInfinity : ce.Zero;
+        if (x.isInfinity) return x.isPositive ? ce.PositiveInfinity : ce.Zero;
         if (!numericApproximation) return undefined;
         return applyN([x], expIntegralEi);
       },

@@ -288,7 +288,11 @@ volumes
           if (aInf !== bInf) {
             const osc = bInf
               ? integrateSemiInfiniteOscillatory(jsf, lower, ce._deadline)
-              : integrateSemiInfiniteOscillatory((t) => jsf(-t), -upper, ce._deadline);
+              : integrateSemiInfiniteOscillatory(
+                  (t) => jsf(-t),
+                  -upper,
+                  ce._deadline
+                );
             if (osc)
               return ce.expr([
                 'PlusMinus',
@@ -398,7 +402,11 @@ volumes
         if (aInf !== bInf) {
           const osc = bInf
             ? integrateSemiInfiniteOscillatory(jsf, lower, engine._deadline)
-            : integrateSemiInfiniteOscillatory((t) => jsf(-t), -upper, engine._deadline);
+            : integrateSemiInfiniteOscillatory(
+                (t) => jsf(-t),
+                -upper,
+                engine._deadline
+              );
           if (osc) return new BoxedNumber(engine, osc.estimate);
         }
 
@@ -457,7 +465,13 @@ volumes
           if (varName) {
             const direction =
               dir && Number.isFinite(dir.re) ? dir.re : undefined;
-            const symbolic = symbolicLimit(f.op1, varName, x, direction, engine);
+            const symbolic = symbolicLimit(
+              f.op1,
+              varName,
+              x,
+              direction,
+              engine
+            );
             if (symbolic !== undefined)
               return numericApproximation ? symbolic.N() : symbolic;
           }

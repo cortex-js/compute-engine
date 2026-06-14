@@ -126,8 +126,7 @@ function toFixedPoint(x: BigDecimal, precision: number): [bigint, number] {
   const bits = Math.ceil(precision * LOG2_10) + GUARD_BITS;
   const B = BigInt(bits);
   // value · 2^bits = significand · 10^exponent · 2^bits
-  if (x.exponent >= 0)
-    return [(x.significand * pow10(x.exponent)) << B, bits];
+  if (x.exponent >= 0) return [(x.significand * pow10(x.exponent)) << B, bits];
   // exponent < 0: divide by 10^(-exponent) after shifting in the binary scale
   // (loses digits below the precision window, as before).
   return [(x.significand << B) / pow10(-x.exponent), bits];
@@ -955,7 +954,9 @@ BigDecimal.prototype.log1p = function (): BigDecimal {
   // ln(1 + this), accurate for small arguments (where 1 + x ≈ 1).
   if (this.isNaN()) return BigDecimal.NAN;
   if (!this.isFinite())
-    return this.significand > 0n ? BigDecimal.POSITIVE_INFINITY : BigDecimal.NAN;
+    return this.significand > 0n
+      ? BigDecimal.POSITIVE_INFINITY
+      : BigDecimal.NAN;
   if (this.isZero()) return BigDecimal.ZERO;
 
   // 1 + x ≤ 0 → outside the domain.
@@ -1031,7 +1032,9 @@ BigDecimal.prototype.acosh = function (): BigDecimal {
   // own small/large-argument handling.
   if (this.isNaN()) return BigDecimal.NAN;
   if (!this.isFinite())
-    return this.significand > 0n ? BigDecimal.POSITIVE_INFINITY : BigDecimal.NAN;
+    return this.significand > 0n
+      ? BigDecimal.POSITIVE_INFINITY
+      : BigDecimal.NAN;
 
   // Domain: x ≥ 1.
   if (this.lt(BigDecimal.ONE)) return BigDecimal.NAN;

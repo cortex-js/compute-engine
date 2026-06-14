@@ -1781,7 +1781,7 @@ export function erfi(x: number): number {
     sum += term;
     if (term < sum * 1e-18) break;
   }
-  return (sign * (2 / Math.sqrt(Math.PI))) * sum;
+  return sign * (2 / Math.sqrt(Math.PI)) * sum;
 }
 
 /**

@@ -685,7 +685,9 @@ export class BigDecimal {
     if (this.significand === 0n)
       return this.exponent !== this.exponent ? this : BigDecimal.ZERO; // NaN | 0
     if (!Number.isFinite(this.exponent))
-      return this.significand > 0n ? BigDecimal.POSITIVE_INFINITY : BigDecimal.NAN;
+      return this.significand > 0n
+        ? BigDecimal.POSITIVE_INFINITY
+        : BigDecimal.NAN;
     if (this.significand < 0n) return BigDecimal.NAN;
 
     const prec = BigDecimal.precision;

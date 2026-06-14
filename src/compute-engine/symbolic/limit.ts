@@ -4,15 +4,20 @@ import type {
 } from '../global-types';
 
 import { differentiate } from './derivative';
-import { polynomialDegree, getPolynomialCoefficients } from '../boxed-expression/polynomials';
+import {
+  polynomialDegree,
+  getPolynomialCoefficients,
+} from '../boxed-expression/polynomials';
 import { limit as numericLimit } from '../numerics/numeric';
 
 // The base `Expression` type exposes operands only after a type-guard narrows it
 // to a function (`isFunction`). Internally we always hold real boxed expressions
 // whose `op1`/`op2`/`op3`/`ops` getters are always present (returning `Nothing`
 // / `[]` for non-functions), so read them through these thin typed accessors.
-const o1 = (e: Expression): Expression => (e as unknown as { op1: Expression }).op1;
-const o2 = (e: Expression): Expression => (e as unknown as { op2: Expression }).op2;
+const o1 = (e: Expression): Expression =>
+  (e as unknown as { op1: Expression }).op1;
+const o2 = (e: Expression): Expression =>
+  (e as unknown as { op2: Expression }).op2;
 const oo = (e: Expression): ReadonlyArray<Expression> =>
   (e as unknown as { ops: ReadonlyArray<Expression> | null }).ops ?? [];
 
@@ -77,7 +82,8 @@ function limitDispatch(
 
   if (point.isInfinity === true) {
     // Map x → −∞ onto x → +∞ via the substitution x ↦ −x.
-    const g = point.isNegative === true ? e.subs({ [x]: ce.symbol(x).neg() }) : e;
+    const g =
+      point.isNegative === true ? e.subs({ [x]: ce.symbol(x).neg() }) : e;
     // Bail *before* simplify (which can distribute and mangle the structure) if
     // any subexpression cancels catastrophically or overflows at the probes —
     // the symbolic pass can't rank such a form, so defer to the numeric limit.
@@ -130,7 +136,13 @@ function limitAtFinite(
       }
     }
     // Determinate quotient: n0 / d0 when d0 ≠ 0 and both finite.
-    if (n0 && d0 && !d0.is(0) && isDefiniteValue(n0, x) && isDefiniteValue(d0, x))
+    if (
+      n0 &&
+      d0 &&
+      !d0.is(0) &&
+      isDefiniteValue(n0, x) &&
+      isDefiniteValue(d0, x)
+    )
       return n0.div(d0).evaluate();
   }
 
@@ -158,7 +170,10 @@ function limitAtPosInf(
   if (deg > 0) {
     const coeffs = getPolynomialCoefficients(e, x);
     const lead = coeffs?.[deg];
-    if (lead) return lead.isNegative === true ? ce.NegativeInfinity : ce.PositiveInfinity;
+    if (lead)
+      return lead.isNegative === true
+        ? ce.NegativeInfinity
+        : ce.PositiveInfinity;
   }
 
   const op = e.operator;
@@ -213,20 +228,24 @@ function limitAtPosInf(
     const inner = limitAtPosInf(o1(e), x, ce, depth + 1);
     if (inner?.isInfinity === true)
       return inner.isNegative === true ? ce.Pi.div(-2) : ce.Pi.div(2);
-    if (inner && isDefiniteValue(inner)) return ce.function('Arctan', [inner]).evaluate();
+    if (inner && isDefiniteValue(inner))
+      return ce.function('Arctan', [inner]).evaluate();
     return undefined;
   }
 
   if (op === 'Sin' || op === 'Cos' || op === 'Tan') {
     const inner = limitAtPosInf(o1(e), x, ce, depth + 1);
-    if (inner && isDefiniteValue(inner)) return ce.function(op, [inner]).evaluate();
+    if (inner && isDefiniteValue(inner))
+      return ce.function(op, [inner]).evaluate();
     return undefined; // oscillatory
   }
 
   if (op === 'Tanh') {
     const inner = limitAtPosInf(o1(e), x, ce, depth + 1);
-    if (inner?.isInfinity === true) return inner.isNegative === true ? ce.number(-1) : ce.One;
-    if (inner && isDefiniteValue(inner)) return ce.function('Tanh', [inner]).evaluate();
+    if (inner?.isInfinity === true)
+      return inner.isNegative === true ? ce.number(-1) : ce.One;
+    if (inner && isDefiniteValue(inner))
+      return ce.function('Tanh', [inner]).evaluate();
     return undefined;
   }
 
@@ -244,7 +263,8 @@ function limitRatioAtPosInf(
   // overflow at the probe points (e.g. e^stuff − eˣ, whose huge terms cancel to
   // a far smaller value): neither the asymptotic nor the numeric pass can rank
   // it reliably, so defer to the numeric limit (which has its own guard).
-  if (hasCancellation(num, x, ce) || hasCancellation(den, x, ce)) return undefined;
+  if (hasCancellation(num, x, ce) || hasCancellation(den, x, ce))
+    return undefined;
 
   const n = leadingOrder(num, x, ce, depth).simplify();
   const d = leadingOrder(den, x, ce, depth).simplify();
@@ -311,7 +331,11 @@ function limitPowerAtPosInf(
   }
 
   // General fᵍ → exp(g · ln f), provided the base is eventually positive.
-  if (base.isNonNegative === true || base.isPositive === true || baseEventuallyPositive(base, x, ce)) {
+  if (
+    base.isNonNegative === true ||
+    base.isPositive === true ||
+    baseEventuallyPositive(base, x, ce)
+  ) {
     const g = expo.mul(ce.function('Ln', [base]));
     const inner = limitAtPosInf(g, x, ce, depth + 1);
     const r = expOfLimit(inner, ce);
@@ -338,7 +362,11 @@ function limitProductAtPosInf(
   }
   if (denom.length > 0) {
     const num =
-      numer.length === 0 ? ce.One : numer.length === 1 ? numer[0] : ce.function('Multiply', numer);
+      numer.length === 0
+        ? ce.One
+        : numer.length === 1
+          ? numer[0]
+          : ce.function('Multiply', numer);
     const den = denom.length === 1 ? denom[0] : ce.function('Multiply', denom);
     return limitRatioAtPosInf(num, den, x, ce, depth + 1);
   }
@@ -384,7 +412,10 @@ function leadingOrder(
     // Only drop dominated terms when the dominant one is *unbounded*. If the sum
     // tends to a finite constant (1 + 1/x → 1), the vanishing terms are
     // essential to any function applied to it — ln(1+1/x) ~ 1/x, not ln(1) = 0.
-    if (dom.length < terms.length && dom.some((t) => tendsToInfinity(t, x, ce) === true))
+    if (
+      dom.length < terms.length &&
+      dom.some((t) => tendsToInfinity(t, x, ce) === true)
+    )
       return dom.length === 1 ? dom[0] : ce.function('Add', dom);
     return terms.length === 1 ? terms[0] : ce.function('Add', terms);
   }
@@ -431,7 +462,8 @@ function compareGrowth(
 ): number | undefined {
   const la = growthLevel(a, x, ce, 0);
   const lb = growthLevel(b, x, ce, 0);
-  if (la !== undefined && lb !== undefined && la !== lb) return la < lb ? -1 : 1;
+  if (la !== undefined && lb !== undefined && la !== lb)
+    return la < lb ? -1 : 1;
   return numericGrowthCompare(a, b, x, ce);
 }
 
@@ -451,7 +483,13 @@ function growthLevel(
   if (!e.has(x)) return 0;
   const op = e.operator;
 
-  if (op === 'Sin' || op === 'Cos' || op === 'Arctan' || op === 'Arccot' || op === 'Tanh')
+  if (
+    op === 'Sin' ||
+    op === 'Cos' ||
+    op === 'Arctan' ||
+    op === 'Arccot' ||
+    op === 'Tanh'
+  )
     return 0;
 
   const deg = polynomialDegree(e, x);
@@ -532,7 +570,13 @@ function tendsToInfinity(
   const op = e.operator;
 
   // Bounded functions, regardless of argument.
-  if (op === 'Sin' || op === 'Cos' || op === 'Arctan' || op === 'Arccot' || op === 'Tanh')
+  if (
+    op === 'Sin' ||
+    op === 'Cos' ||
+    op === 'Arctan' ||
+    op === 'Arccot' ||
+    op === 'Tanh'
+  )
     return false;
 
   const deg = polynomialDegree(e, x);
@@ -555,8 +599,13 @@ function tendsToInfinity(
       if (expo.isNegative === true) return false;
     }
     if (!base.has(x)) {
-      if (base.isGreater?.(ce.One) === true) return tendsToInfinity(expo, x, ce) === true && leadingSignAtInf(expo, x, ce) > 0;
-      if (base.isPositive === true && base.isLess?.(ce.One) === true) return false;
+      if (base.isGreater?.(ce.One) === true)
+        return (
+          tendsToInfinity(expo, x, ce) === true &&
+          leadingSignAtInf(expo, x, ce) > 0
+        );
+      if (base.isPositive === true && base.isLess?.(ce.One) === true)
+        return false;
     }
     // fᵍ via numeric fallback
     return numericTendsToInfinity(e, x, ce);
@@ -566,14 +615,17 @@ function tendsToInfinity(
     // → ∞ if at least one term → ∞ and the dominant term(s) don't cancel.
     const dom = dominantTerms(oo(e), x, ce);
     if (dom.some((t) => tendsToInfinity(t, x, ce) === true)) {
-      const reduced = (dom.length === 1 ? dom[0] : ce.function('Add', dom)).simplify();
+      const reduced = (
+        dom.length === 1 ? dom[0] : ce.function('Add', dom)
+      ).simplify();
       if (reduced.has(x)) return numericTendsToInfinity(reduced, x, ce);
       return false;
     }
     return false;
   }
 
-  if (op === 'Multiply' || op === 'Divide') return numericTendsToInfinity(e, x, ce);
+  if (op === 'Multiply' || op === 'Divide')
+    return numericTendsToInfinity(e, x, ce);
 
   return numericTendsToInfinity(e, x, ce);
 }
@@ -585,7 +637,12 @@ function tendsToInfinity(
 
 const PROBES = [8, 30, 120];
 
-function numericAt(e: Expression, x: string, xv: number, ce: ComputeEngine): number {
+function numericAt(
+  e: Expression,
+  x: string,
+  xv: number,
+  ce: ComputeEngine
+): number {
   try {
     return e.subs({ [x]: ce.number(xv) }).N().re;
   } catch {
@@ -602,9 +659,11 @@ function numericTendsToInfinity(
   if (v.some((y) => Number.isNaN(y))) return undefined;
   if (v[2] === Infinity) return true;
   // Growing strongly and unbounded.
-  if (v[2] > v[1] && v[1] > v[0] && v[2] > 1e3 && v[2] > 100 * v[0]) return true;
+  if (v[2] > v[1] && v[1] > v[0] && v[2] > 1e3 && v[2] > 100 * v[0])
+    return true;
   // Clearly settling to a finite value.
-  if (v[2] < 1e3 && Math.abs(v[2] - v[1]) <= 0.01 * Math.max(1, v[2])) return false;
+  if (v[2] < 1e3 && Math.abs(v[2] - v[1]) <= 0.01 * Math.max(1, v[2]))
+    return false;
   return undefined;
 }
 
@@ -657,7 +716,12 @@ function asRatio(
     }
     if (den.length > 0) {
       return {
-        num: num.length === 0 ? ce.One : num.length === 1 ? num[0] : ce.function('Multiply', num),
+        num:
+          num.length === 0
+            ? ce.One
+            : num.length === 1
+              ? num[0]
+              : ce.function('Multiply', num),
         den: den.length === 1 ? den[0] : ce.function('Multiply', den),
       };
     }
@@ -684,7 +748,10 @@ function isDefiniteValue(e: Expression, x?: string): boolean {
   return true;
 }
 
-function expOfLimit(inner: Expression | undefined, ce: ComputeEngine): Expression | undefined {
+function expOfLimit(
+  inner: Expression | undefined,
+  ce: ComputeEngine
+): Expression | undefined {
   if (!inner) return undefined;
   if (inner.isInfinity === true)
     return inner.isNegative === true ? ce.Zero : ce.PositiveInfinity;
@@ -692,9 +759,13 @@ function expOfLimit(inner: Expression | undefined, ce: ComputeEngine): Expressio
   return undefined;
 }
 
-function lnOfLimit(inner: Expression | undefined, ce: ComputeEngine): Expression | undefined {
+function lnOfLimit(
+  inner: Expression | undefined,
+  ce: ComputeEngine
+): Expression | undefined {
   if (!inner) return undefined;
-  if (inner.isInfinity === true && inner.isNegative !== true) return ce.PositiveInfinity;
+  if (inner.isInfinity === true && inner.isNegative !== true)
+    return ce.PositiveInfinity;
   if (inner.is(0)) return ce.NegativeInfinity; // ln 0⁺
   if (inner.isPositive === true && isDefiniteValue(inner))
     return ce.function('Ln', [inner]).evaluate();
@@ -737,7 +808,11 @@ function leadingCoefficientRatio(
   return ce.number(v);
 }
 
-function baseEventuallyPositive(base: Expression, x: string, ce: ComputeEngine): boolean {
+function baseEventuallyPositive(
+  base: Expression,
+  x: string,
+  ce: ComputeEngine
+): boolean {
   return numericAt(base, x, 120, ce) > 0;
 }
 
@@ -771,6 +846,8 @@ function numericallyUnstable(
 ): boolean {
   if (depth > MAX_DEPTH || !e.has(x)) return false;
   if (hasCancellation(e, x, ce)) return true;
-  if (oo(e)) for (const o of oo(e)) if (numericallyUnstable(o, x, ce, depth + 1)) return true;
+  if (oo(e))
+    for (const o of oo(e))
+      if (numericallyUnstable(o, x, ce, depth + 1)) return true;
   return false;
 }

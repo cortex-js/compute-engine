@@ -1724,7 +1724,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       signature: '(any*) -> number',
       // Integer operands → a positive integer; polynomial operands → a
       // (monic) polynomial whose type and sign aren't known statically.
-      type: (ops) => (ops.every((x) => x.isInteger) ? 'finite_integer' : 'number'),
+      type: (ops) =>
+        ops.every((x) => x.isInteger) ? 'finite_integer' : 'number',
       sgn: (ops) => (ops.every((x) => x.isInteger) ? 'positive' : undefined),
       evaluate: (xs) => {
         // Integer operands take the fast numeric path. Otherwise, attempt a

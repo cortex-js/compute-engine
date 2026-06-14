@@ -478,8 +478,7 @@ export function pow(
         const xv = ce._numericValue(exp.numericValue);
         if (xv.im === 0) return ce.number(xv.exp());
         const eNv = numericValue(ce.E.N());
-        if (eNv !== undefined)
-          return ce.number(ce._numericValue(eNv).pow(xv));
+        if (eNv !== undefined) return ce.number(ce._numericValue(eNv).pow(xv));
       }
     }
   }

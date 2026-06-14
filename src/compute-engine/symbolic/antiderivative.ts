@@ -2040,7 +2040,10 @@ function trySymbolicPartialFractions(
     if (!div || !div[1].isSame(0)) return null;
     const cofactorAtR = div[0].subs({ [index]: r }).evaluate();
     if (cofactorAtR.isSame(0)) return null; // repeated root
-    const A = numerator.subs({ [index]: r }).evaluate().div(cofactorAtR);
+    const A = numerator
+      .subs({ [index]: r })
+      .evaluate()
+      .div(cofactorAtR);
     terms.push(A.mul(ce.function('Ln', [ce.function('Abs', [divisor])])));
   }
 
@@ -2239,10 +2242,7 @@ function integrateIndexPower(index: string, exponent: Expression): Expression {
  *
  * Returns null unless the exponent is a numeric quadratic in `index`.
  */
-function tryGaussianIntegral(
-  fn: Expression,
-  index: string
-): Expression | null {
+function tryGaussianIntegral(fn: Expression, index: string): Expression | null {
   const ce = fn.engine;
 
   // Identify e^(arg): either Exp(arg) or Power(ExponentialE, arg).
@@ -2280,10 +2280,7 @@ function tryGaussianIntegral(
  * cos is even, so a < 0 uses |a|; sin is odd, so a < 0 negates the result.
  * Restricted to a pure quadratic argument (no linear or constant term).
  */
-function tryFresnelIntegral(
-  fn: Expression,
-  index: string
-): Expression | null {
+function tryFresnelIntegral(fn: Expression, index: string): Expression | null {
   if (!isFunction(fn, 'Cos') && !isFunction(fn, 'Sin')) return null;
   const ce = fn.engine;
   const isCos = isFunction(fn, 'Cos');
@@ -2327,11 +2324,19 @@ function integrateSecCscPower(
   if (op === 'Sec') {
     const sec = ce.function('Sec', [x]);
     const tan = ce.function('Tan', [x]);
-    if (n === 1)
-      return ce.function('Ln', [ce.function('Abs', [sec.add(tan)])]);
-    const term1 = sec.pow(ce.number(n - 2)).mul(tan).div(ce.number(n - 1));
+    if (n === 1) return ce.function('Ln', [ce.function('Abs', [sec.add(tan)])]);
+    const term1 = sec
+      .pow(ce.number(n - 2))
+      .mul(tan)
+      .div(ce.number(n - 1));
     const rest = integrateSecCscPower('Sec', n - 2, index, ce);
-    return add(term1, ce.number(n - 2).div(ce.number(n - 1)).mul(rest));
+    return add(
+      term1,
+      ce
+        .number(n - 2)
+        .div(ce.number(n - 1))
+        .mul(rest)
+    );
   }
   const csc = ce.function('Csc', [x]);
   const cot = ce.function('Cot', [x]);
@@ -2343,7 +2348,13 @@ function integrateSecCscPower(
     .div(ce.number(n - 1))
     .neg();
   const rest = integrateSecCscPower('Csc', n - 2, index, ce);
-  return add(term1, ce.number(n - 2).div(ce.number(n - 1)).mul(rest));
+  return add(
+    term1,
+    ce
+      .number(n - 2)
+      .div(ce.number(n - 1))
+      .mul(rest)
+  );
 }
 
 /**
@@ -2364,7 +2375,10 @@ function integrateTanCotPower(
   if (op === 'Tan') {
     if (n === 1)
       return ce.function('Ln', [ce.function('Abs', [ce.function('Sec', [x])])]);
-    const term1 = ce.function('Tan', [x]).pow(ce.number(n - 1)).div(ce.number(n - 1));
+    const term1 = ce
+      .function('Tan', [x])
+      .pow(ce.number(n - 1))
+      .div(ce.number(n - 1));
     const rest = integrateTanCotPower('Tan', n - 2, index, ce);
     return add(term1, rest.neg());
   }
@@ -2493,8 +2507,15 @@ function reduceMonomialOverSqrtQuadratic(
   const lower = reduceMonomialOverSqrtQuadratic(m - 2, c, d, Q, index);
   if (lower === null) return null;
   const md = ce.number(m).mul(d);
-  const term1 = x.pow(ce.number(m - 1)).mul(sqrtQ).div(md);
-  const coef2 = ce.number(m - 1).mul(c).div(md).neg();
+  const term1 = x
+    .pow(ce.number(m - 1))
+    .mul(sqrtQ)
+    .div(md);
+  const coef2 = ce
+    .number(m - 1)
+    .mul(c)
+    .div(md)
+    .neg();
   return add(term1, coef2.mul(lower));
 }
 
@@ -2904,7 +2925,10 @@ export function antiderivative(fn: Expression, index: string): Expression {
     if (sym(fn.op2) === index) {
       let expArg: Expression | null = null;
       if (isFunction(fn.op1, 'Exp')) expArg = fn.op1.op1;
-      else if (isFunction(fn.op1, 'Power') && sym(fn.op1.op1) === 'ExponentialE')
+      else if (
+        isFunction(fn.op1, 'Power') &&
+        sym(fn.op1.op1) === 'ExponentialE'
+      )
         expArg = fn.op1.op2;
       if (expArg && expArg.has(index)) {
         const ratio = expArg.div(ce.symbol(index)).simplify();

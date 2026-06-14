@@ -101,7 +101,11 @@ export function monteCarloEstimate(
       // sample; expensive integrands (e.g. nested integrals) overshoot the
       // deadline by at most 64 samples — and a nested deadline-aware call
       // aborts the very next sample anyway via the ambient deadline.
-      if ((i & 0x3f) === 0 && deadline !== undefined && Date.now() >= deadline) {
+      if (
+        (i & 0x3f) === 0 &&
+        deadline !== undefined &&
+        Date.now() >= deadline
+      ) {
         // Out of time. Monte Carlo degrades gracefully: an estimate from
         // the samples taken so far (with its larger error) is more useful
         // than an error — but with no samples at all, give up.

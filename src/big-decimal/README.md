@@ -31,12 +31,12 @@ Special values use sentinel exponents:
 
 ## Module Structure
 
-| File                 | Purpose                                                                                                                                                                 |
-| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `big-decimal.ts`     | Core class: construction, arithmetic, comparison, conversion, formatting, directed-rounding `divToward`/`sqrtToward`                                                     |
+| File                 | Purpose                                                                                                                                                                                                                                        |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `big-decimal.ts`     | Core class: construction, arithmetic, comparison, conversion, formatting, directed-rounding `divToward`/`sqrtToward`                                                                                                                           |
 | `transcendentals.ts` | `sqrt`, `cbrt`, `nthRoot`, `exp`, `expm1`, `ln`, `log`, `log2`, `log1p`, `sin`, `cos`, `tan`, `atan`, `asin`, `acos`, `atan2`, `sinh`, `cosh`, `tanh`, `asinh`, `acosh`, `atanh` -- attached to `BigDecimal.prototype` via declaration merging |
 | `utils.ts`           | Fixed-point bigint primitives (`fpsqrt`, `fpexp`, `fpln` [giant_steps Newton + AGM], `fpsincos`, `fpatan`), `pow10` cache, `bigintDigits`/`bitLength`, `bigintSqrt`, Chudnovsky π / binary-split ln 2, PI table (2370 digits)                  |
-| `index.ts`           | Barrel export; imports `transcendentals.ts` for side effects                                                                                                            |
+| `index.ts`           | Barrel export; imports `transcendentals.ts` for side effects                                                                                                                                                                                   |
 
 ## Precision Model
 
@@ -180,9 +180,9 @@ every tested precision (verified via cross-validation tests).
 Still open:
 
 - **Rectangular splitting (Smith's method) for `exp`/trig**: binary splitting
-  does *not* help these for irrational arguments (the BS products grow to
-  `N·bits` bits). Rectangular splitting evaluates the Taylor series with
-  `O(√N)` full-size multiplications instead of `O(N)`, the right high-precision
+  does _not_ help these for irrational arguments (the BS products grow to
+  `N·bits` bits). Rectangular splitting evaluates the Taylor series with `O(√N)`
+  full-size multiplications instead of `O(N)`, the right high-precision
   technique for an irrational argument.
 
 - **Interval-arithmetic (`iv`) mode**: the directed-rounding primitives

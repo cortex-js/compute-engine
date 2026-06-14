@@ -415,7 +415,8 @@ export class BoxedNumber
         return ce.number(Math.log(this._value) / Math.log(base.re));
       return ce.number(this._value.ln(base.re));
     }
-    if (typeof this._value === 'number') return ce.number(Math.log(this._value));
+    if (typeof this._value === 'number')
+      return ce.number(Math.log(this._value));
     return ce.number(this._value.ln());
   }
 
