@@ -643,6 +643,22 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
   // a/∞ = 0, ∞/∞ = NaN (check before a/a = 1 rule)
   if (op2.isInfinity) return op1.isInfinity ? ce.NaN : ce.Zero;
 
+  // ∞/a = ±∞ for a finite and definitely nonzero (with a known sign). Mirrors
+  // the a/∞ = 0 rule above and the Multiply path, which already reduces
+  // ∞·√π → +∞. Without this, bound substitution into antiderivatives such as
+  // √(π/2)·FresnelC(√(2/π)·x) collapsed to NaN at x = ∞: the FresnelC argument
+  // is Divide(√2·∞, √π), and √π — a finite, positive constant whose isFinite
+  // is undefined (finiteness is not propagated through Sqrt) — sent the
+  // division to NaN. Requiring a definite sign on op2 keeps could-be-zero
+  // constants (e.g. sin(π)) out; the sign of op1 (incl. complex ∞) is carried
+  // by op1 / op1.neg().
+  if (
+    op1.isInfinity &&
+    op2.isFinite !== false &&
+    (op2.isPositive === true || op2.isNegative === true)
+  )
+    return op2.isPositive === true ? op1 : op1.neg();
+
   // a/a = 1 (if a ≠ 0 and a is finite)
   if (op2.isSame(0) === false && op2.isFinite !== false) {
     if (
@@ -852,6 +868,20 @@ export function div(num: Expression, denom: number | Expression): Expression {
     // a/0 = ~∞ (a≠0) — ComplexInfinity, consistent with the JS-number path
     // above (the boxed-zero case previously returned NaN).
     if (denom.isSame(0)) return ce.ComplexInfinity;
+
+    // ∞/a = ±∞ for a finite and definitely nonzero (a known sign). The Product
+    // path below returns NaN for an infinite numerator over a symbolic finite
+    // denominator (asNumeratorDenominator bails when the coefficient is ∞ and
+    // any terms remain), which blocked Fresnel improper integrals: the bound
+    // substitution into √(π/2)·FresnelC(√(2/π)·x) forms Divide(√2·∞, √π), and
+    // √π is a finite positive constant whose isFinite is undefined. Requiring a
+    // definite sign on `denom` keeps could-be-zero constants (e.g. sin(π)) out.
+    if (
+      num.isInfinity &&
+      denom.isFinite !== false &&
+      (denom.isPositive === true || denom.isNegative === true)
+    )
+      return denom.isPositive === true ? num : num.neg();
 
     if (isNumber(num) && isNumber(denom)) {
       const numV = num.numericValue;

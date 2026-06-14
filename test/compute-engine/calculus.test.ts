@@ -531,6 +531,49 @@ describe('ROADMAP B2: fractional powers and exact partial-fraction coefficients'
     expect(
       noFloats(evaluate('\\int \\frac{1}{2(1+x^2)} dx'))
     ).toMatchInlineSnapshot(`1/2 * arctan(x)`));
+
+  // (e) Denominators that factor over ℚ into distinct linear + irreducible
+  // quadratic factors (x⁴−1, x⁶−1, mixed products) previously fell to the
+  // numeric partial-fraction fallback and leaked floats. An exact symbolic
+  // partial-fraction path (residues for linear factors, ℚ[x]/(F) field
+  // arithmetic for the quadratics) now returns the exact closed form. A
+  // genuinely ℚ-irreducible quartic (x⁴+x+1) still defers to the numeric path.
+  test('∫1/(x⁴−1) dx is exact (two linear + one quadratic factor)', () =>
+    expect(noFloats(evaluate('\\int \\frac{1}{x^4-1} dx'))).toMatchInlineSnapshot(
+      `-1/2 * arctan(x) - 1/4 * ln(|x + 1|) + 1/4 * ln(|x - 1|)`
+    ));
+
+  test('∫x/(x⁴−1) dx is exact (numerator with the index; was unevaluated)', () =>
+    expect(noFloats(evaluate('\\int \\frac{x}{x^4-1} dx'))).toMatchInlineSnapshot(
+      `-1/4 * ln(x^2 + 1) + 1/4 * ln(|x - 1|) + 1/4 * ln(|x + 1|)`
+    ));
+
+  test('∫1/(x⁶−1) dx is exact (two linear + two quadratic factors)', () =>
+    expect(noFloats(evaluate('\\int \\frac{1}{x^6-1} dx'))).toMatchInlineSnapshot(
+      `-1/6 * ln(|x + 1|) + 1/6 * ln(|x - 1|) - sqrt(3)/6 * arctan(sqrt(3)/3 * (2x - 1)) - sqrt(3)/6 * arctan(sqrt(3)/3 * (2x + 1)) - 1/12 * ln(x^2 + x + 1) + 1/12 * ln(x^2 - x + 1)`
+    ));
+
+  test('∫1/((x−1)(x−2)(x²+1)) dx is exact (mixed factored denominator)', () =>
+    expect(
+      noFloats(evaluate('\\int \\frac{1}{(x-1)(x-2)(x^2+1)} dx'))
+    ).toMatchInlineSnapshot(
+      `-1/2 * ln(|x - 1|) + 1/10 * arctan(x) + 3/20 * ln(x^2 + 1) + 1/5 * ln(|x - 2|)`
+    ));
+
+  // A ℚ-irreducible quartic has no rational/real-quadratic factorization (its
+  // resolvent cubic needs casus-irreducibilis radicals), so it stays on the
+  // numeric fallback — value-correct, just not in exact radical form.
+  test('∫1/(x⁴+x+1) dx stays on the numeric fallback (still value-correct)', () => {
+    const F = engine.box(['Integrate', engine.parse('\\frac{1}{x^4+x+1}'), 'x']);
+    const result = F.evaluate();
+    expect(result.has('Integrate')).toBe(false);
+    const dF = engine.box(['D', result.json as any, 'x']).evaluate();
+    for (const xv of [0.3, 2.5, -1.7]) {
+      const got = dF.subs({ x: xv }).N().re;
+      const want = engine.parse('\\frac{1}{x^4+x+1}').subs({ x: xv }).N().re;
+      expect(Math.abs(got! - want!)).toBeLessThan(1e-7);
+    }
+  });
 });
 
 describe('ROADMAP B2: non-elementary & radical integrals (leftovers)', () => {
@@ -914,9 +957,8 @@ describe('DEFINITE INTEGRATION', () => {
 
 describe('IMPROPER INTEGRATION (ROADMAP B3)', () => {
   // The new B2 antiderivatives + special values at ±∞ (Erf(∞)=1,
-  // arctan(±∞)=±π/2) make these exact via bound substitution — no separate
-  // limit machinery needed. (Fresnel-family improper integrals like
-  // ∫₀^∞ cos(x²) are still blocked by ∞·(Pi-derived constant) → NaN.)
+  // arctan(±∞)=±π/2, FresnelC/S(∞)=½) make these exact via bound
+  // substitution — no separate limit machinery needed.
   test('∫₀^∞ e^(−x²) → √π/2 (Gaussian, via Erf(∞)=1)', () =>
     expect(evaluate('\\int_0^\\infty e^{-x^2} dx')).toMatchInlineSnapshot(
       `1/2 * sqrt(pi)`
@@ -949,6 +991,49 @@ describe('IMPROPER INTEGRATION (ROADMAP B3)', () => {
     expect(
       evaluate('\\int_0^\\infty \\frac{1}{x^2+4} dx')
     ).toMatchInlineSnapshot(`1/4 * pi`));
+
+  // Fresnel-family improper integrals: ∫₀^∞ cos(x²) = ∫₀^∞ sin(x²) = √(π/8).
+  // Previously blocked by ∞ / (Pi-derived finite constant) → NaN in the bound
+  // substitution (the FresnelC argument is Divide(√2·∞, √π), and √π reports
+  // isFinite = undefined). Now exact via the ∞/finite-nonzero divide rule.
+  test('∫₀^∞ cos(x²) → √(π/8) (Fresnel C, via FresnelC(∞)=½)', () => {
+    const F = engine.parse('\\int_0^\\infty \\cos(x^2) dx').evaluate();
+    expect(F.toString()).toMatchInlineSnapshot(`sqrt(2)/4 * sqrt(pi)`);
+    // Numericize the exact closed form (not numeric re-integration).
+    expect(F.N().re).toBeCloseTo(Math.sqrt(Math.PI / 8), 12);
+  });
+
+  test('∫₀^∞ sin(x²) → √(π/8) (Fresnel S, via FresnelS(∞)=½)', () =>
+    expect(evaluate('\\int_0^\\infty \\sin(x^2) dx')).toMatchInlineSnapshot(
+      `sqrt(2)/4 * sqrt(pi)`
+    ));
+});
+
+describe('∞ / finite-nonzero divide (B3 Fresnel unblock)', () => {
+  // The Divide path returned NaN for an infinite numerator over a finite but
+  // symbolic denominator (√π, π, 1/√π — all report isFinite = undefined),
+  // while Multiply already handled ∞·√π → +∞. These keep the two consistent.
+  test('∞ / π = +∞, ∞ / √π = +∞', () => {
+    expect(engine.PositiveInfinity.div(engine.Pi).toString()).toBe('+oo');
+    expect(
+      engine.PositiveInfinity.div(engine.parse('\\sqrt{\\pi}')).toString()
+    ).toBe('+oo');
+  });
+
+  test('sign is carried correctly through the divide', () => {
+    const sqrtPi = engine.parse('\\sqrt{\\pi}');
+    expect(engine.NegativeInfinity.div(sqrtPi).toString()).toBe('-oo');
+    expect(engine.PositiveInfinity.div(sqrtPi.neg()).toString()).toBe('-oo');
+  });
+
+  test('indeterminate / undefined-sign cases are unchanged', () => {
+    // ∞/∞ = NaN, ∞/0 = ~∞, and a could-be-zero constant denominator is left
+    // alone (no definite sign ⇒ rule does not fire).
+    expect(engine.PositiveInfinity.div(engine.PositiveInfinity).isNaN).toBe(true);
+    expect(
+      engine.PositiveInfinity.div(engine.Zero).toString()
+    ).toBe('~oo');
+  });
 });
 
 /** These apply a numerical approximation. These could potentially be functions that do not have a symbolic form. */
@@ -981,6 +1066,45 @@ describe('NUMERICAL INTEGRATION', () => {
     const result = N('\\int_0^1 \\sin x dx');
 
     expect(Math.round(result * 100)).toMatchInlineSnapshot(`46`);
+  });
+
+  // ROADMAP B3: conditionally-convergent oscillatory improper integrals.
+  // Monte-Carlo importance sampling gave garbage here (e.g. ∫₀^∞ sin(x²) was
+  // −0.36 ± 0.53); a dedicated lobe-integration + ε-acceleration quadrature now
+  // handles them deterministically to ~1e-8. (`toBeCloseTo(v, 6)` ⟹ |Δ|<5e-7.)
+  describe('oscillatory improper integrals', () => {
+    test('∫₀^∞ sin(x)/x = π/2 (Dirichlet)', () =>
+      expect(N('\\int_0^{\\infty} \\frac{\\sin x}{x} dx')).toBeCloseTo(
+        Math.PI / 2,
+        6
+      ));
+
+    test('∫₀^∞ sin(x²) = √(π/8) (Fresnel)', () =>
+      expect(N('\\int_0^{\\infty} \\sin(x^2) dx')).toBeCloseTo(
+        Math.sqrt(Math.PI / 8),
+        6
+      ));
+
+    test('∫₀^∞ cos(x²) = √(π/8) (Fresnel)', () =>
+      expect(N('\\int_0^{\\infty} \\cos(x^2) dx')).toBeCloseTo(
+        Math.sqrt(Math.PI / 8),
+        6
+      ));
+
+    test('∫₀^∞ sin(2x)/x = π/2', () =>
+      expect(N('\\int_0^{\\infty} \\frac{\\sin(2x)}{x} dx')).toBeCloseTo(
+        Math.PI / 2,
+        6
+      ));
+
+    test('∫₀^∞ e^{-x} sin(x) = 1/2 (decaying oscillator, exact)', () =>
+      expect(N('\\int_0^{\\infty} e^{-x} \\sin x dx')).toBeCloseTo(0.5, 6));
+
+    test('∫₀^∞ cos(x)/(1+x²) = π/(2e)', () =>
+      expect(N('\\int_0^{\\infty} \\frac{\\cos x}{1+x^2} dx')).toBeCloseTo(
+        Math.PI / (2 * Math.E),
+        6
+      ));
   });
 });
 

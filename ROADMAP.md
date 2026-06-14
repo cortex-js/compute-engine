@@ -828,6 +828,20 @@ SymPy 20/20 — surfaced the next gaps, in priority order:
   ½arctan x`, `∫x·arctan x → ½x²arctan x − ½x + ½arctan x`).
 
   Regression tests for both (with float-free assertions) in `calculus.test.ts`.
+- ✅ **Exact partial fractions for any ℚ-factorable denominator — done
+  (follow-up).** Extending the biquadratic fix, `trySymbolicPartialFractions`
+  handles a denominator that `Factor` splits over ℚ into *distinct* linear and
+  irreducible-quadratic factors (a squarefree rational denominator), which the
+  earlier symbolic paths missed (all-real-roots cover-up; one linear × one
+  quadratic in Case F) — so `∫1/(x⁴−1)`, `∫1/(x⁶−1)`, `∫x/(x⁴−1)` (was
+  unevaluated), `∫1/((x−1)(x−2)(x²+1))` all leaked floats via the numeric
+  fallback. Now exact: linear factors contribute residues `A·ln|x−r|`
+  (A = P(r)/[Q/(x−r)]ᵣ); each irreducible quadratic gets its numerator from
+  `P·(Q/F)⁻¹` reduced in the field ℚ[x]/(F) (conjugate-based inverse, all
+  rational), integrated by the shared `integrateLinearOverIrreducibleQuadratic`.
+  A genuinely ℚ-irreducible quartic (`x⁴+x+1`, whose real factorization needs
+  casus-irreducibilis radicals — `Factor` leaves it whole) stays on the numeric
+  fallback, value-correct. Tests in `calculus.test.ts`.
 - ✅ **`∫ln(x)/x → ½ln²x` and `∫tanⁿx`/`∫cotⁿx` — done.** Added a
   reverse-power-chain recognizer (`∫c·u′·uⁿ = c·uⁿ⁺¹/(n+1)`, tried late so it
   only catches otherwise-unevaluated integrands — e.g. `∫ln(x)/x → ½ln²x`,
@@ -900,15 +914,28 @@ SymPy 20/20 — surfaced the next gaps, in priority order:
   `Sqrt`/`Power`/`Divide` of finite operands; (b) relax the `∞ × x` guard to treat
   a no-unknowns non-infinite factor as finite. Core-arithmetic change — measure
   snapshot blast radius first.
-- ⬜ **Genuinely oscillatory / divergent endpoints.** Substitution correctly
-  yields `∞` for monotone-divergent and an unevaluated/NaN for oscillatory
-  (`sin(∞)`); hardening the oscillatory quadrature for conditionally-convergent
-  integrands remains.
-
-**Remaining fix direction:** unblock the Fresnel family (the `isFinite`
-propagation bug above), then harden the oscillatory quadrature. The
-substitution-based path already covers the elementary, Gaussian, and arctan
-families exactly.
+- ✅ **Oscillatory improper integrals — done (2026-06-13).** The numeric
+  definite path used Monte-Carlo importance sampling, which has unbounded
+  variance on a conditionally-convergent oscillatory integrand and returned
+  garbage: `∫₀^∞ sin(x²) → −0.36 ± 0.53`, `∫₀^∞ cos(x²) → 1.8 ± 1.2`,
+  `∫₀^∞ sin x/x → 1.595 ± 0.03`. A dedicated **`integrateSemiInfiniteOscillatory`**
+  (`numerics/oscillatory-quadrature.ts`) integrates `f` over each lobe (the
+  interval between consecutive sign changes, found by scan + bisection) with
+  adaptive Simpson, then accelerates the resulting alternating partial sums with
+  **Wynn's ε-algorithm** (Longman's method). Wired ahead of Monte Carlo in the
+  `Integrate`/`NIntegrate` numeric paths for a single ±∞ bound; it returns
+  `null` (→ Monte Carlo) for non-oscillatory integrands and rejects divergent
+  ones (a `∑ lobes` that doesn't shrink — `∫₀^∞ sin x` → `null`, not the Abel
+  sum). Now: `∫₀^∞ sin x/x → π/2`, `∫₀^∞ sin(x²) = ∫₀^∞ cos(x²) → √(π/8)`,
+  `∫₀^∞ sin(2x)/x → π/2`, `∫₀^∞ e^{−x}sin x → ½`, `∫₀^∞ cos x/(1+x²) → π/(2e)`,
+  all to ~1e-8 (and deterministic — no Monte-Carlo flake). It's purely additive:
+  non-oscillatory and finite-interval integrals keep the Monte-Carlo path
+  unchanged. Tests: `calculus.test.ts` "oscillatory improper integrals".
+- ⬜ **Fresnel via the *antiderivative* path still blocked** by the `isFinite`
+  propagation bug above — `∫₀^∞ cos(x²)` now evaluates **numerically** (√(π/8)
+  via the new quadrature), but the exact closed form `½√(π/2)` via
+  `FresnelC(∞) = ½` still collapses to `FresnelC(NaN)`. That's the remaining B3
+  item (a core-arithmetic `isFinite`-propagation fix).
 
 ### B4. ~~`Factor` emits non-polynomial radical/abs forms for `xⁿ − 1`~~ — ✅ done (2026-06-13)
 
@@ -1095,51 +1122,47 @@ determinant or the subresultant PRS the GCD path already uses, cf. B5) would
 add it. Low-frequency but cheap once polynomial GCD/PRS infrastructure exists.
 Surfaced by `benchmarks/audit/wester.ts`.
 
-### B11. Multivariate polynomial GCD — Stage A done (2026-06-13), Stage B open
+### B11. Multivariate polynomial GCD — Stage B (Brown) done (2026-06-13)
 
-`GCD`/`PolynomialGCD` are fundamentally **univariate**: they work in one chosen
-variable, carrying any others along as symbolic coefficients (Euclid over
-ℚ(rest)). Correct for one variable — and now (Stage A) for two — but it does not
-scale. The 7-variable **Fateman GCD benchmark**
+The variadic `GCD` operator now computes a **multivariate** polynomial GCD for
+any number of variables (it was univariate-only — carrying other variables as
+symbolic coefficients, which deferred for ≥3 variables and silently bailed to
+`1` on harder bivariate inputs). The 7-variable **Fateman GCD benchmark**
 ([gist](https://gist.github.com/benruijl/3c53b1b0aea88b978ae609e73693fdbc);
-Symbolica 4 s / Mathematica 89 s / SymPy 61 min) times out at CE's ~10 s
-evaluation deadline **even at power 2** — the carried rational-function
-coefficients explode — and the bare `GCD` operator defers (unevaluated) for ≥3
-variables.
+Symbolica 4 s / Mathematica 89 s / SymPy 61 min) remains out of reach — it
+exceeds the dense algorithm's complexity cap and defers — but textbook
+multivariate GCDs (2–4+ variables, moderate degree) now work.
 
-Empirical notes (2026-06-13), to start Stage B cold:
-- The carried-coefficient univariate Euclid is correct on most textbook
-  bivariate inputs but, when a remainder's coefficients turn non-polynomial,
-  bails to `1` — *incomplete*, never a wrong **divisor** (the item-12 `ce.One`
-  guard). It silently returned `1` for gcd((x+y+1)², (x+y+1)(x−y+2)) — which is
-  why Stage A verifies (below).
-- A throwaway **verified-GCDHEU** prototype (sparse bigint `MPoly` + evaluation /
-  symmetric ξ-adic reconstruction + exact-division verification) **cracked
-  Fateman power 2 in ~7 s** — evidence the evaluation-homomorphism route is the
-  right one. But naïve GCDHEU is fragile: a spurious integer factor at the
-  evaluation point (e.g. gcd(16−y², 64−y³) at y=10 → 12 = 6·2) corrupts
-  reconstruction unless each recursion level strips content / primitive parts.
-  The prototype is the seed of Stage B's kernel, not production code.
+**Done — the kernel + Brown's dense modular GCD.** Two new files:
+- `boxed-expression/multivariate-poly.ts` — `MPoly`, a sparse distributed
+  polynomial over ℤ (`bigint` exponent-vector → coefficient map): ring ops,
+  content/primitive part, exact division, evaluation, per-variable coefficient
+  views, modular reduction, and robust boxed↔MPoly conversion (clears rational
+  coefficients; unit-tested in `multivariate-gcd.test.ts`).
+- `boxed-expression/multivariate-gcd.ts` — `multivariateGCD`, Brown's recursive
+  evaluation/interpolation over ℤ_p (univariate Euclid at the base, Newton
+  interpolation to climb back up, leading-coefficient scaling Γ — including the
+  **integer content of the leading coefficient**, which the field-monic gcd
+  drops, so `gcd((2x+3y)(x+y),(2x+3y)(x−y)) = 2x+3y`). Single large prime with
+  retry-on-verification-failure instead of CRT; an internal op-budget bounds
+  the work. Every result is **verified by exact division** before return, so a
+  hard input only ever defers — never a wrong answer.
 
-**Stage A — verified bivariate GCD (done, 2026-06-13).** `polynomialGCDMulti`
-now handles **exactly two variables**: choose the lowest-combined-degree shared
-variable as main, run the existing univariate `polynomialGCD` carrying the other
-as a coefficient, then **verify the candidate by exact division** before
-returning it — defer (`undefined`) on any failure, so it is never wrong. Gated
-to two variables and a cheap term-count cap so the operator never churns to its
-deadline (Fateman, 7 vars, defers instantly). `GCD(x²−y², x²+3xy+2y²) → x+y`.
-Code: `boxed-expression/polynomials.ts` (`bivariatePolynomialGCD`); tests:
-`arithmetic.test.ts` (ROADMAP B11 block).
+`polynomialGCDMulti` (`polynomials.ts`) dispatches ≥2-variable operands here
+(behind a cheap term-count cap so Fateman-scale inputs defer instantly). Wired
+through the public `GCD` operator; tests in `arithmetic.test.ts` (ROADMAP B11
+block) and `multivariate-gcd.test.ts`.
 
-**Stage B — sparse multivariate GCD kernel (the real fix).** A distributed
-sparse polynomial representation (exponent-vector → coefficient) with modular
-arithmetic, plus **Zippel** sparse interpolation (or **Brown** for dense) over
-ℤ_p: evaluate down to univariate GCDs at random points, sparse-interpolate, then
-CRT + rational reconstruction to ℚ, with content/primitive-part handling and
-unlucky-prime/point retries. This unlocks Fateman-scale and ≥3 variables.
-Substantial (Rubi-port-scale), but justified because the kernel is **shared
-infrastructure**: multivariate factorization, `Cancel`/`Together`, partial
-fractions, and `Resultant` (B10) all want the same representation.
+A throwaway **verified-GCDHEU** prototype (the same `MPoly` + symmetric ξ-adic
+reconstruction) cracked Fateman power 2 in ~7 s and seeded the kernel, but naïve
+GCDHEU is fragile (spurious integer factors at the evaluation point corrupt
+reconstruction); Brown's content/Γ handling is the robust replacement.
 
-Surfaced by the Fateman GCD benchmark; the `benchmarks/audit/` footnote tracks
-the external comparison.
+**Next (Stage C — Fateman-scale).** Brown is dense and single-prime; the gaps to
+close for Fateman-power-7-scale: **Zippel** sparse interpolation (the dense
+interpolation is the bottleneck at 7 variables), **multi-prime CRT + rational
+reconstruction** (single large prime caps the coefficient size), and faster
+`MPoly` arithmetic (the `Map`-keyed leading-term scan is O(terms) per call).
+The kernel is **shared infrastructure** — multivariate factorization,
+`Cancel`/`Together`, partial fractions, and `Resultant` (B10) all want the same
+representation. Tracked against the `benchmarks/audit/` Fateman footnote.

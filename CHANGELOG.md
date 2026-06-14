@@ -171,7 +171,19 @@
   integrals evaluate by bound substitution: `∫₀^∞ e^(−x²) → √π/2`,
   `∫_{−∞}^∞ e^(−x²) → √π`, `∫₀^∞ 1/(1+x²) → π/2`, `∫_{−∞}^∞ 1/(1+x²) → π`,
   `∫₀^∞ 1/(x²+4) → π/4` (alongside the elementary `∫₀^∞ e^(−x) → 1`,
-  `∫₁^∞ 1/x² → 1`).
+  `∫₁^∞ 1/x² → 1`). The **Fresnel** improper integrals
+  `∫₀^∞ cos(x²) = ∫₀^∞ sin(x²) = √(π/8)` are now exact too (via
+  `FresnelC/S(∞) = ½`).
+
+- **Fixed: `∞ / (finite nonzero) → ±∞` instead of `NaN`.** Division of an
+  infinity by a finite, definitely-nonzero denominator was returning `NaN` when
+  the denominator was symbolic with `isFinite` undefined (`√π`, `π`, `1/√π` —
+  finiteness is not propagated through `Sqrt`/`Power`/`Divide`), even though the
+  Multiply path already handled `∞ · √π → +∞`. Now `∞/π → +∞`, `∞/√π → +∞`,
+  `−∞/√π → −∞`, with the sign carried from both operands; `∞/∞` (NaN) and `∞/0`
+  (`~∞`) are unchanged, and a could-be-zero constant denominator (no definite
+  sign) is left untouched. This unblocks the Fresnel improper integrals above,
+  whose bound substitution forms `Divide(√2·∞, √π)`.
 
 - **Interruptible evaluation**: long-running operations now respect the engine
   time limit (`ce.timeLimit`, default 2s) and throw a `CancellationError`

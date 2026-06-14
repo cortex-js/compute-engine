@@ -1802,11 +1802,12 @@ function integrateLinearOverIrreducibleQuadratic(
 ): Expression {
   const ce = B.engine;
   const x = ce.symbol(index);
-  const quad = ce.function('Add', [
-    ce.function('Power', [x, ce.number(2)]),
-    ce.function('Multiply', [b, x]),
-    c,
-  ]);
+  // Omit the b·x term when b = 0: canonical Multiply(0, x) stays `0·x` (since
+  // 0·∞ = NaN), which would surface as `x² + 0x + c` inside the Ln.
+  const quadTerms = [ce.function('Power', [x, ce.number(2)])];
+  if (!b.isSame(0)) quadTerms.push(ce.function('Multiply', [b, x]));
+  quadTerms.push(c);
+  const quad = ce.function('Add', quadTerms);
   // (B/2)·ln(x²+bx+c)
   const lnTerm = B.div(ce.number(2)).mul(ce.function('Ln', [quad]));
   // (C − B·b/2)·(2/√(4c−b²))·arctan((2x+b)/√(4c−b²))
@@ -1940,6 +1941,140 @@ function tryBiquadraticPartialFractions(
 
   // Fail safe: if any radical combination folded to a float, defer to the
   // numeric fallback rather than emit a leaked coefficient.
+  if (hasInexactNumber(result)) return null;
+  return result;
+}
+
+/**
+ * Reduce a polynomial (ascending coefficients) modulo the monic quadratic
+ * x² + b·x + c, returning [C, B] for the remainder C + B·x. Horner in the
+ * field ℚ[x]/(x²+bx+c): each ·x step sends u + v·x ↦ −v·c + (u − v·b)·x
+ * (since x² ≡ −b·x − c). All arithmetic stays exact-rational.
+ */
+function reduceModMonicQuadratic(
+  coeffs: ReadonlyArray<Expression>,
+  b: Expression,
+  c: Expression
+): [Expression, Expression] {
+  const ce = b.engine;
+  let u: Expression = ce.Zero; // constant part
+  let v: Expression = ce.Zero; // x-coefficient part
+  for (let i = coeffs.length - 1; i >= 0; i--) {
+    // (u + v·x)·x ≡ −v·c + (u − v·b)·x
+    const mu = v.mul(c).neg();
+    const mv = u.sub(v.mul(b));
+    u = mu.add(coeffs[i]);
+    v = mv;
+  }
+  return [u, v];
+}
+
+/**
+ * ∫ P(x)/Q(x) dx by exact symbolic partial fractions when Q factors over ℚ
+ * into *distinct* linear and irreducible-quadratic factors (a squarefree
+ * rational denominator). `Factor` already splits e.g. x⁴−1 → (x−1)(x+1)(x²+1)
+ * and x⁶−1 → (x−1)(x+1)(x²+x+1)(x²−x+1), but the existing symbolic paths only
+ * cover narrow shapes (all-real-roots cover-up; one linear × one quadratic in
+ * Case F), so mixed factorisations fell to the numeric fallback and leaked
+ * floats. This recovers the exact closed form.
+ *
+ *   • Linear factor (x − r): residue A = P(r)/[Q/(x−r)]ᵣ, contributing
+ *     A·ln|x − r|.
+ *   • Irreducible quadratic factor F = x²+b·x+c: the numerator N (deg ≤ 1) is
+ *     P·(Q/F)⁻¹ reduced in the field ℚ[x]/(F) (conjugate-based inverse, all
+ *     rational), integrated by `integrateLinearOverIrreducibleQuadratic`.
+ *
+ * Returns null when Q does not fully split into distinct linear/quadratic
+ * factors (e.g. a genuinely ℚ-irreducible quartic like x⁴+x+1, which `Factor`
+ * leaves whole — that needs casus-irreducibilis radicals and stays on the
+ * numeric path), when a factor is repeated, or when any float leaks.
+ */
+function trySymbolicPartialFractions(
+  numerator: Expression,
+  denominator: Expression,
+  index: string
+): Expression | null {
+  const ce = denominator.engine;
+  const x = ce.symbol(index);
+
+  const denDeg = polynomialDegree(denominator, index);
+  if (denDeg < 2) return null;
+  const numDeg = polynomialDegree(numerator, index);
+  if (numDeg < 0 || numDeg >= denDeg) return null; // need a proper fraction
+
+  // Factor Q over ℚ. A denominator that does not split stays whole (degree ≥ 3
+  // factor) — the numeric fallback handles it.
+  const factored = ce.box(['Factor', denominator]).evaluate();
+  const factorList = isFunction(factored, 'Multiply')
+    ? [...factored.ops]
+    : [factored];
+
+  const linearRoots: Expression[] = [];
+  const quadFactors: { b: Expression; c: Expression }[] = [];
+  for (const f of factorList) {
+    if (!f.has(index)) continue; // numeric (constant) factor — part of Q
+    if (isFunction(f, 'Power')) return null; // repeated factor — not squarefree
+    const deg = polynomialDegree(f, index);
+    if (deg === 1) {
+      const lin = getLinearCoefficients(f, index);
+      if (!lin) return null;
+      linearRoots.push(lin.b.div(lin.a).neg()); // root r = −b/a
+    } else if (deg === 2) {
+      const quad = getQuadraticCoefficients(f, index);
+      if (!quad) return null;
+      const b = quad.b.div(quad.a); // monic b
+      const c = quad.c.div(quad.a); // monic c
+      const disc = b.mul(b).sub(ce.number(4).mul(c)).N().re;
+      if (disc === null || disc >= 0) return null; // must be irreducible
+      quadFactors.push({ b, c });
+    } else return null; // degree ≥ 3 factor — did not split over ℚ
+  }
+  if (linearRoots.length + quadFactors.length < 1) return null;
+
+  const terms: Expression[] = [];
+
+  // Linear factors: residue A = P(r) / [Q/(x−r)](r).
+  for (const r of linearRoots) {
+    const divisor = ce.function('Subtract', [x, r]); // x − r
+    const div = polynomialDivide(denominator, divisor, index);
+    if (!div || !div[1].isSame(0)) return null;
+    const cofactorAtR = div[0].subs({ [index]: r }).evaluate();
+    if (cofactorAtR.isSame(0)) return null; // repeated root
+    const A = numerator.subs({ [index]: r }).evaluate().div(cofactorAtR);
+    terms.push(A.mul(ce.function('Ln', [ce.function('Abs', [divisor])])));
+  }
+
+  // Irreducible quadratic factors: numerator N = P·(Q/F)⁻¹ in ℚ[x]/(F).
+  for (const { b, c } of quadFactors) {
+    const F = ce.function('Add', [
+      ce.function('Power', [x, ce.number(2)]),
+      ce.function('Multiply', [b, x]),
+      c,
+    ]);
+    const div = polynomialDivide(denominator, F, index);
+    if (!div || !div[1].isSame(0)) return null;
+    const cofCoeffs = getPolynomialCoefficients(div[0], index);
+    const numCoeffs = getPolynomialCoefficients(numerator, index);
+    if (!cofCoeffs || !numCoeffs) return null;
+
+    // Reduce cofactor and numerator into ℚ[x]/(F): p + q·x and a + a'·x.
+    const [p, qq] = reduceModMonicQuadratic(cofCoeffs, b, c);
+    const [a0, a1] = reduceModMonicQuadratic(numCoeffs, b, c);
+
+    // (p + q·x)⁻¹ = ((p − q·b) − q·x)/D with D = p² − p·q·b + q²·c.
+    const D = p.mul(p).sub(p.mul(qq).mul(b)).add(qq.mul(qq).mul(c));
+    if (D.isSame(0)) return null;
+    const s0 = p.sub(qq.mul(b)).div(D); // inverse constant part
+    const s1 = qq.neg().div(D); // inverse x-coefficient
+
+    // N = (a0 + a1·x)·(s0 + s1·x) reduced mod F (x² ≡ −b·x − c):
+    //   const = a0·s0 − a1·s1·c,  x-coeff = a0·s1 + a1·s0 − a1·s1·b.
+    const Bn = a0.mul(s1).add(a1.mul(s0)).sub(a1.mul(s1).mul(b));
+    const Cn = a0.mul(s0).sub(a1.mul(s1).mul(c));
+    terms.push(integrateLinearOverIrreducibleQuadratic(Bn, Cn, b, c, index));
+  }
+
+  const result = add(...terms).simplify();
   if (hasInexactNumber(result)) return null;
   return result;
 }
@@ -3217,16 +3352,33 @@ export function antiderivative(fn: Expression, index: string): Expression {
         }
       }
 
+      // Exact symbolic partial fractions when Q splits over ℚ into distinct
+      // linear + irreducible-quadratic factors (e.g. x⁴−1, x⁶−1). Tried before
+      // the numeric fallback so these stay exact instead of leaking floats.
+      const symbolicPF = trySymbolicPartialFractions(
+        numerator,
+        denominator,
+        index
+      );
+      if (symbolicPF) return symbolicPF;
+
       // Full numeric partial fractions: denominator with numeric
       // coefficients and distinct (possibly complex) roots — produces the
-      // log + arctan terms the symbolic paths above cannot (e.g. 1−x⁶,
-      // whose factorization mixes two real roots with two irreducible
-      // quadratics).
+      // log + arctan terms the symbolic paths above cannot (e.g. a
+      // ℚ-irreducible quartic like x⁴+x+1, factored only over ℝ/ℂ).
       const numericPF = numericPartialFractions(denominator, index);
       if (numericPF) {
         if (numerator.isSame(1)) return numericPF;
         return numerator.mul(numericPF);
       }
+    }
+
+    // Exact symbolic partial fractions for a numerator that contains the
+    // index (the constant-numerator block above is skipped for it), e.g.
+    // ∫x/(x⁴−1). Q must split over ℚ into distinct linear/quadratic factors.
+    if (fn.op1.has(index)) {
+      const symbolicPF = trySymbolicPartialFractions(fn.op1, fn.op2, index);
+      if (symbolicPF) return symbolicPF;
     }
 
     // Last resort: term-wise split of a sum numerator.
