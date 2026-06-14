@@ -15,8 +15,8 @@
 import type {
   ComputeEngine,
   Expression,
-} from '../../src/compute-engine/global-types';
-import { isNumber } from '../../src/compute-engine/boxed-expression/type-guards';
+} from '../global-types';
+import { isNumber } from '../boxed-expression/type-guards';
 
 export function toTimesPower(ce: ComputeEngine, e: Expression): Expression {
   if (e.symbol || !e.ops) return e;

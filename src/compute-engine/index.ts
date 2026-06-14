@@ -35,6 +35,7 @@ import type {
   EvalContext,
   ExpressionInput,
   IComputeEngine,
+  IntegrationProvider,
   ILatexSyntax,
   BoxedDefinition,
   SymbolDefinition,
@@ -287,6 +288,11 @@ export class ComputeEngine implements IComputeEngine {
 
   /** @internal */
   private _cost?: (expr: Expression) => number;
+
+  /** @internal Optional symbolic-integration provider consulted by the
+   * `Integrate` evaluator before the built-in antiderivative. Registered by
+   * the opt-in `loadIntegrationRules()` (Rubi rule driver). */
+  _integrationProvider?: IntegrationProvider;
 
   /** @internal Backing state for simplificationRules */
   private _simplificationRules = new SimplificationRuleStore([

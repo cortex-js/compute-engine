@@ -13,12 +13,12 @@
 import type {
   ComputeEngine,
   Expression,
-} from '../../src/compute-engine/global-types';
-import { isNumber } from '../../src/compute-engine/boxed-expression/type-guards';
+} from '../global-types';
+import { isNumber } from '../boxed-expression/type-guards';
 
-import { expand } from '../../src/compute-engine/boxed-expression/expand';
+import { expand } from '../boxed-expression/expand';
 
-import type { Json } from './wl-parser';
+import type { Json } from './types';
 import type { Env } from './match';
 import { toTimesPower } from './normal-form';
 

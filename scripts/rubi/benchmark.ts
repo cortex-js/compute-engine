@@ -34,7 +34,7 @@ import { isNumber } from '../../src/compute-engine/boxed-expression/type-guards'
 import { loadTests, Problem } from './load-tests';
 import type { Json } from './wl-parser';
 import { compileSection } from './compile';
-import { RubiDriver } from './driver';
+import { RubiDriver } from '../../src/compute-engine/rubi/driver';
 
 // pass tolerance for central-difference verification (h=1e-4: truncation
 // ~1e-8 relative, roundoff ~1e-12)

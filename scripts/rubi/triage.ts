@@ -17,7 +17,7 @@ import { ComputeEngine } from '../../src/compute-engine';
 
 import { loadTests } from './load-tests';
 import { compileSection } from './compile';
-import { RubiDriver } from './driver';
+import { RubiDriver } from '../../src/compute-engine/rubi/driver';
 
 const argv = process.argv.slice(2);
 const keys: string[] = [];

@@ -85,6 +85,14 @@ export type SymbolInfo = {
 };
 
 /** @internal */
+/** A symbolic-integration provider: given an integrand and the integration
+ * variable, returns a closed-form antiderivative (an expression in `variable`),
+ * or `null` when it cannot integrate it. See `IComputeEngine._integrationProvider`. */
+export type IntegrationProvider = (
+  integrand: Expression,
+  variable: string
+) => Expression | null;
+
 export interface IComputeEngine {
   /** The LatexSyntax instance used for LaTeX parsing/serialization.
    *  `undefined` when no LatexSyntax was provided to the constructor.
@@ -93,6 +101,14 @@ export interface IComputeEngine {
 
   /** @internal Returns the LatexSyntax instance or throws if unavailable. */
   _requireLatexSyntax(): ILatexSyntax;
+
+  /** @internal An optional symbolic-integration provider. When set, the
+   * `Integrate` evaluator consults it for an indefinite antiderivative before
+   * falling back to the built-in `antiderivative()`. Returns a closed-form
+   * antiderivative (an expression in `variable`), or `null`/an inert
+   * `Integrate` when it cannot integrate the integrand. This is the slot the
+   * opt-in `loadIntegrationRules()` (Rubi rule driver) registers into. */
+  _integrationProvider?: IntegrationProvider;
 
   /** Engine-wide LaTeX parse/serialize options (e.g. `decimalSeparator`).
    *  Merged into every `parse()` and `toLatex()` call between LatexSyntax

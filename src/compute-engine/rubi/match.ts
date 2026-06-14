@@ -17,8 +17,8 @@
 // optional except one may match a non-node expression by defaulting the
 // optionals — this is how `(a_.+b_.*x_)^m_.` matches bare `x`.
 
-import type { Expression } from '../../src/compute-engine/global-types';
-import { checkDeadline } from '../../src/common/interruptible';
+import type { Expression } from '../global-types';
+import { checkDeadline } from '../../common/interruptible';
 
 // Deadline plumbing. The backtracking AC matcher (mAC) can blow up
 // combinatorially on products with many factors — this is the dominant

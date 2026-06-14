@@ -12,7 +12,7 @@
 import type {
   ComputeEngine,
   Expression,
-} from '../../src/compute-engine/global-types';
+} from '../global-types';
 
 import { matchAll } from './match';
 import type { CompiledRule } from './compile';
@@ -28,7 +28,7 @@ import {
   Ctx,
   Hooks,
 } from './rubi-utils';
-import { isNumber } from '../../src/compute-engine/boxed-expression/type-guards';
+import { isNumber } from '../boxed-expression/type-guards';
 import { toTimesPower, recanonicalize } from './normal-form';
 
 const MAX_DEPTH = 40;

@@ -340,7 +340,21 @@ volumes
             variable = argNames[i];
           if (!variable) variable = 'x';
 
-          const antideriv = antiderivative(expr, variable);
+          // An opt-in integration provider (e.g. the Rubi rule driver loaded
+          // via `loadIntegrationRules`) is consulted first; it returns null or
+          // an inert `Integrate` when it can't close the integrand, in which
+          // case we fall back to the built-in antiderivative. With no provider
+          // registered (the default), behavior is unchanged.
+          let antideriv: Expression | null = null;
+          if (ce._integrationProvider) {
+            try {
+              antideriv = ce._integrationProvider(expr, variable);
+            } catch {
+              antideriv = null;
+            }
+          }
+          if (!antideriv || antideriv.operator === 'Integrate')
+            antideriv = antiderivative(expr, variable);
 
           if (antideriv.operator !== 'Integrate') {
             const fAntideriv = antideriv; // ce.expr(['Function', antideriv.op1, variable]);
