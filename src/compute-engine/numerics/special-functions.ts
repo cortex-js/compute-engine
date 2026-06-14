@@ -292,10 +292,16 @@ function gammalnCore(ce: ComputeEngine, z: BigNum): BigNum {
   // ln Γ(z) = ln Γ(z+m) − ln∏_{i=0}^{m-1}(z+i). Accumulate the shift as a single
   // product and take ONE logarithm of it, rather than summing m separate (and
   // expensive) ln(z+i).
+  // NB: `BigDecimal.mul` returns the *full* product (it does not round to the
+  // working precision), so an accumulating product grows its significand by ~p
+  // digits every step — making each successive multiply more expensive and the
+  // whole loop O(m²·…). Rounding back to p digits after each step keeps every
+  // operand at p digits (O(m) multiplies of bounded size). This single change is
+  // the dominant high-precision speedup.
   let shiftProduct = BigDecimal.ONE;
   let w = z;
   for (let i = 0; i < m; i++) {
-    shiftProduct = shiftProduct.mul(w);
+    shiftProduct = shiftProduct.mul(w).toPrecision(p);
     w = w.add(BigDecimal.ONE);
   }
   const logProduct = m > 0 ? shiftProduct.ln() : BigDecimal.ZERO;
@@ -313,20 +319,27 @@ function gammalnCore(ce: ComputeEngine, z: BigNum): BigNum {
     .sub(w)
     .add(BigDecimal.PI.mul(BigDecimal.TWO).ln().div(BigDecimal.TWO));
 
-  const w2 = w.mul(w);
-  let wPow = w; // w^1 -> w^3 -> w^5 -> ...
+  // Evaluate Σ B_{2k}/(2k(2k-1)) · w^{-(2k-1)} forward, multiplying by a
+  // precomputed u = 1/w² each step instead of dividing by the growing w^{2k-1}
+  // (the Bernoulli coefficient's only division is then by its *small* integer
+  // denominator). As above, round each running power/term back to p digits so
+  // significands stay bounded.
+  const inv = BigDecimal.ONE.div(w); // 1/w
+  const u = inv.mul(inv).toPrecision(p); // 1/w²
+  let pw = inv; // w^{-(2k-1)}, starting at w^{-1}
   const tol = new BigDecimal(10).pow(-(p + guard));
   const nTerms = Math.min(maxTerms, bernoulliRationals.length);
   for (let k = 0; k < nTerms; k++) {
     const twoK = 2 * (k + 1);
     const [bNum, bDen] = bernoulliRationals[k];
     const denom = BigInt(twoK) * BigInt(twoK - 1);
-    const coeffNum = new BigDecimal(bNum.toString());
-    const coeffDen = new BigDecimal((bDen * denom).toString());
-    const term = coeffNum.div(coeffDen.mul(wPow));
+    const coeff = new BigDecimal(bNum.toString()).div(
+      new BigDecimal((bDen * denom).toString())
+    );
+    const term = coeff.mul(pw).toPrecision(p);
     if (k > 0 && term.abs().lt(tol)) break;
     result = result.add(term);
-    wPow = wPow.mul(w2);
+    pw = pw.mul(u).toPrecision(p);
   }
 
   return result.sub(logProduct);
@@ -499,9 +512,12 @@ function digammaCore(ce: ComputeEngine, z: BigNum): BigNum {
   const maxTerms = Math.max(20, Math.ceil(0.6 * p) + 20);
   const bernoulli = getBernoulliRationals(ce, maxTerms);
 
-  // Asymptotic expansion: ψ(w) ~ ln(w) - 1/(2w) - Σ B_{2k}/(2k·w^{2k})
+  // Asymptotic expansion: ψ(w) ~ ln(w) - 1/(2w) - Σ B_{2k}/(2k·w^{2k}).
+  // Round the running power w^{2k} each step: `mul` keeps the full product, so an
+  // un-rounded accumulator grows ~p digits per step and the loop becomes
+  // quadratic (see `gammalnCore`).
   result = result.add(w.ln()).sub(BigDecimal.ONE.div(w.mul(2)));
-  let w2k = w.mul(w); // w^2
+  let w2k = w.mul(w).toPrecision(p); // w^2
   const w2 = w2k;
   const tol = new BigDecimal(10).pow(-(p + guard));
   const nTerms = Math.min(maxTerms, bernoulli.length);
@@ -513,7 +529,7 @@ function digammaCore(ce: ComputeEngine, z: BigNum): BigNum {
     );
     if (k > 0 && term.abs().lt(tol)) break;
     result = result.sub(term);
-    w2k = w2k.mul(w2);
+    w2k = w2k.mul(w2).toPrecision(p);
   }
 
   return result;
@@ -559,11 +575,12 @@ function trigammaCore(ce: ComputeEngine, z: BigNum): BigNum {
   const maxTerms = Math.max(20, Math.ceil(0.6 * p) + 20);
   const bernoulli = getBernoulliRationals(ce, maxTerms);
 
-  // Asymptotic: ψ₁(w) ~ 1/w + 1/(2w²) + Σ B_{2k}/w^{2k+1}
+  // Asymptotic: ψ₁(w) ~ 1/w + 1/(2w²) + Σ B_{2k}/w^{2k+1}. Round the running
+  // power each step (un-rounded `mul` grows the significand; see `gammalnCore`).
   result = result.add(BigDecimal.ONE.div(w));
   result = result.add(BigDecimal.ONE.div(w.mul(w).mul(2)));
-  let w2kp1 = w.mul(w).mul(w); // w^3
-  const w2 = w.mul(w);
+  let w2kp1 = w.mul(w).mul(w).toPrecision(p); // w^3
+  const w2 = w.mul(w).toPrecision(p);
   const tol = new BigDecimal(10).pow(-(p + guard));
   const nTerms = Math.min(maxTerms, bernoulli.length);
   for (let k = 0; k < nTerms; k++) {
@@ -573,7 +590,7 @@ function trigammaCore(ce: ComputeEngine, z: BigNum): BigNum {
     );
     if (k > 0 && term.abs().lt(tol)) break;
     result = result.add(term);
-    w2kp1 = w2kp1.mul(w2);
+    w2kp1 = w2kp1.mul(w2).toPrecision(p);
   }
 
   return result;
@@ -643,9 +660,10 @@ function polygammaCore(ce: ComputeEngine, nNum: number, z: BigNum): BigNum {
     new BigDecimal(signA).mul(bigFactorial(nNum)).div(w.pow(nNum + 1).mul(2))
   );
 
-  // Higher-order terms using Bernoulli numbers
-  let wPow = w.pow(nNum + 2);
-  const w2 = w.mul(w);
+  // Higher-order terms using Bernoulli numbers. Round the running power each
+  // step (un-rounded `mul` grows the significand; see `gammalnCore`).
+  let wPow = w.pow(nNum + 2).toPrecision(p);
+  const w2 = w.mul(w).toPrecision(p);
   const tol = new BigDecimal(10).pow(-(p + guard));
   const nTerms = Math.min(maxTerms, bernoulli.length);
   for (let k = 0; k < nTerms; k++) {
@@ -663,7 +681,7 @@ function polygammaCore(ce: ComputeEngine, nNum: number, z: BigNum): BigNum {
     );
     if (k > 0 && term.abs().lt(tol)) break;
     result = result.add(term);
-    wPow = wPow.mul(w2);
+    wPow = wPow.mul(w2).toPrecision(p);
   }
 
   return result;

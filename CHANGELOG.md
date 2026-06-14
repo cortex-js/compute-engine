@@ -119,11 +119,14 @@
   Cohen–Villegas–Zagier acceleration, and all of these kernels compute with
   guard digits.
 
-- **`Gamma` and the polygamma family are much faster at high precision**
-  (≈11–12× at 300 digits). The Stirling-series kernels (`Gamma`, `GammaLn`,
-  `Digamma`, `Trigamma`, `PolyGamma`) were shifting their argument just short of
-  where the asymptotic series converges, so the series ran far more terms than
-  necessary; the shift and term count are now chosen so it converges quickly.
+- **`Gamma` and the polygamma family are dramatically faster at high precision**
+  (~340× at 300 digits — `Gamma(1/3)` ≈1.9 s → ≈5 ms; ~130× at 1000 digits). The
+  Stirling-series kernels (`Gamma`, `GammaLn`, `Digamma`, `Trigamma`,
+  `PolyGamma`) were both shifting their argument just short of where the series
+  converges (running far more terms than needed) and letting intermediate
+  products grow in size without bound; the shift, term count, and per-step
+  rounding are now chosen so the series converges quickly with bounded-size
+  arithmetic. Results are unchanged to full precision.
 
 - The Identities Library has been updated from 1,350 to 1,376 verified rules,
   including corrected Jacobi theta identities.

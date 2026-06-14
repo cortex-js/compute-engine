@@ -166,7 +166,7 @@ export function compileRule(
       condition: rule.condition,
       innerCondition: rule.innerCondition,
       rhs: rule.rhs,
-      source: rule.source,
+      source: rule.source ?? '', // stripped from the shipped bundle
     },
   };
 }

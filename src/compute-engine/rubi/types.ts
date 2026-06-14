@@ -25,8 +25,10 @@ export type RubiRule = {
   scoped: 'with' | 'module' | null;
   /** `/;` condition inside the With/Module scope (may reference bindings) */
   innerCondition: Json | null;
-  /** original cell text */
-  source: string;
+  /** Original WL cell text. Optional: kept by the build-time tooling (used by
+   * the benchmark/triage `RUBI_DEBUG_FIRE` traces) but stripped from the
+   * shipped bundle, where it is runtime-dead. */
+  source?: string;
 };
 
 /** One corpus file's worth of translated rules (the unit the compiler

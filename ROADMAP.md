@@ -773,11 +773,26 @@ Stirling-with-shift `gammalnCore` (and the shared `digamma`/`trigamma`/
 - **Redundant logarithms.** The shift loop summed `m ≈ 0.37·p` separate `ln(z+i)`
   calls; replaced by one `ln(∏(z+i))` (m cheap mults + 1 log).
 
-Result: `Γ(1/3)`, `ψ`, `ψ₁`, `ψ₂` at p=300 all ~1.8 s → ~0.15 s, full precision
-preserved (verified to 1000 digits via reflection / `ζ(2)` / `−γ` identities;
-zero snapshot movement). **Remaining:** still ~O(p³) at very high precision
-(p=1000 ≈ 8.5 s) — a binary-splitting / rectangular-splitting series evaluation
-would help there, but that is a larger kernel rewrite.
+- **Unbounded significand growth (the real high-precision killer) — fixed
+  2026-06-14.** `BigDecimal.mul` returns the *full* product (it does **not**
+  round to the working precision — only `div` does). So every accumulating
+  multiply — the shift product `∏(z+i)` and the series' running power `w^{2k}` —
+  grew its significand by ~p digits each step, making each successive multiply
+  more expensive and the whole kernel ~O(p³). Rounding each running
+  product/power back to p digits (`.toPrecision(p)`) keeps all operands at p
+  digits. Measured in isolation: the p≈1000 Stirling series dropped from ~6.3 s
+  to **33 ms** (≈190×). Applied to all four kernels.
+
+Combined result: `Γ(1/3)` warm at **p=300 ≈ 5 ms** (was ~1.9 s — ~340×) and
+**p=1000 ≈ 66 ms** (was ~8.5 s — ~130×); scaling is now ~O(p²·³) (p=2000 ≈
+0.32 s). `ψ`, `ψ₁`, `ψ₂` track the same. Full precision preserved — verified to
+1000 digits via the reflection formula, `ψ(1/3)−ψ(2/3)=π/tan(π/3)` (a γ-free
+digamma identity), and `ζ(2)=π²/6`; zero snapshot movement.
+
+**Separate issue surfaced:** CE's `EulerGamma` constant is only accurate to
+~858 digits at p=1000 (a γ-vs-γ self-compare diverges there), so `ψ(1)=−γ`
+appears to lose precision although digamma itself is exact — a high-precision
+`EulerGamma` computation is a distinct follow-up.
 
 ### B2. Symbolic (indefinite) integration coverage gaps — ✅ resolved (2026-06-13)
 
