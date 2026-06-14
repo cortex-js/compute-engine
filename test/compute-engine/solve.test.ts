@@ -717,6 +717,51 @@ describe('SOLVING TRIGONOMETRIC EQUATIONS', () => {
   });
 });
 
+// Tests for absolute-value equations
+describe('SOLVING ABSOLUTE VALUE EQUATIONS', () => {
+  const roots = (s: string) =>
+    expr(s)
+      .solve('x')
+      ?.map((x) => x.N().re)
+      .sort((a: number, b: number) => a - b);
+
+  test('should solve |x| = 2 (both roots)', () => {
+    // Regression: the |ax+b|+c root rule had a sign error and a malformed
+    // second branch, so this returned only [2] (or garbage).
+    expect(roots('|x| = 2')).toEqual([-2, 2]);
+  });
+
+  test('should solve |x - 1| = 2 (unit coefficient)', () => {
+    expect(roots('|x - 1| = 2')).toEqual([-1, 3]);
+  });
+
+  test('should solve |2x - 1| = 3', () => {
+    expect(roots('|2x - 1| = 3')).toEqual([-1, 2]);
+  });
+
+  test('should return empty for |x| = -1 (no real solution)', () => {
+    expect(expr('|x| = -1').solve('x')).toEqual([]);
+  });
+
+  test('should solve |x^2 - 3| = 1 (non-linear inner)', () => {
+    const r = roots('|x^2 - 3| = 1') as number[];
+    // x² = 4 or x² = 2  ->  ±2, ±√2
+    expect(r?.length).toBe(4);
+    expect(r?.[0]).toBeCloseTo(-2, 10);
+    expect(r?.[1]).toBeCloseTo(-Math.SQRT2, 10);
+    expect(r?.[2]).toBeCloseTo(Math.SQRT2, 10);
+    expect(r?.[3]).toBeCloseTo(2, 10);
+  });
+
+  test('should solve |2x + 5| = |x - 2| (two absolute values)', () => {
+    expect(roots('|2x + 5| = |x - 2|')).toEqual([-7, -1]);
+  });
+
+  test('should solve |x - 1| = |x + 1| (two absolute values)', () => {
+    expect(roots('|x - 1| = |x + 1|')).toEqual([0]);
+  });
+});
+
 // Tests for systems of linear equations
 describe('SOLVING SYSTEMS OF LINEAR EQUATIONS', () => {
   test('should solve 2x2 system: x+y=70, 2x-4y=80', () => {

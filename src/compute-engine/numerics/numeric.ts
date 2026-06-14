@@ -238,6 +238,94 @@ export function centeredDiff8thOrder(
  * @param dir Direction of approach: > 0 for right, < 0 for left, 0 for both
  * @returns
  */
+/**
+ * Probe the geometric sample ladder that `extrapolate()` uses for a numeric
+ * limit and report how many leading samples are *trustworthy*.
+ *
+ * Returns `Infinity` when the ladder is well-behaved (the common case — no cap
+ * needed), or a finite count when the function crosses a floating-point
+ * "horizon" before the samples settle:
+ *  - a non-finite sample (overflow / `Inf − Inf`), or
+ *  - catastrophic cancellation: the magnitude grows to an interior peak and
+ *    then collapses to ~0.
+ *
+ * Beyond that horizon the samples are floating-point garbage. Left unchecked,
+ * a collapse to a run of identical `0`s makes `extrapolate` report `err = 0`
+ * (perfect "convergence") and return a spurious value — e.g.
+ * `lim_{x→∞} (e^{x·e^{−x}/…} − eˣ)/x = −e²`, whose two `eˣ` terms cancel to 0
+ * around x ≈ 40 and overflow to `NaN` past x ≈ 710, yielding a wrong `0`.
+ * Capping `extrapolate`'s `maxeval` to the clean prefix makes it report
+ * non-convergence instead, so `limit()` returns `NaN` (not-evaluable).
+ *
+ * The schedule here must mirror `extrapolate()` (default `contract = 0.125`,
+ * and the `x = 1/u` change of variables for an infinite target).
+ */
+function reliableLimitSamples(
+  f: (x: number) => number,
+  x0: number,
+  step: number
+): number {
+  const CONTRACT = 0.125; // must match extrapolate()'s default contract
+  const MAX = 60;
+  const inf = !Number.isFinite(x0);
+  // The actual argument passed to `f` for a given step `h` (with the `x = 1/u`
+  // change of variables for an infinite target, matching extrapolate()).
+  const arg = (h: number) => (inf ? 1 / h : x0 + h);
+
+  // A run of (nearly) identical samples can be a real limit, or a
+  // floating-point artifact: a function whose numerically-meaningful window is
+  // narrower than the ladder spacing reads as a constant because every ladder
+  // point lands in an overflow/underflow region (e.g. a denominator with a
+  // triple exponential overflows for all x ≳ 2, so f ≈ 0 at x = 1, 8, 64 …
+  // while the true value lives near x ≈ 1.5). Corroborate by probing a few
+  // points *between* the two ladder steps; the settle is real only if they all
+  // match.
+  const settleIsReal = (hA: number, hB: number, v: number): boolean => {
+    // A generous tolerance: we are separating real fp noise (a converging
+    // sequence such as (1+1/x)^x is noisy to ~x·ε near its limit) from a
+    // genuinely skipped window (an overflow artifact's true value differs by an
+    // O(1) amount, not a few ulps).
+    const tol = 1e-2 * Math.max(1, Math.abs(v));
+    for (let i = 1; i <= 5; i++) {
+      const y = f(arg(hA * Math.pow(hB / hA, i / 6)));
+      if (!Number.isFinite(y) || Math.abs(y - v) > tol) return false;
+    }
+    return true;
+  };
+
+  let h = inf ? 1 / step : step;
+  let peak = 0;
+  let grew = false;
+  let prev = NaN;
+  let prevH = NaN;
+  for (let k = 1; k <= MAX; k++) {
+    const y = f(arg(h));
+    if (!Number.isFinite(y)) return k - 1; // overflow / NaN horizon
+    const a = Math.abs(y);
+    if (k === 1) {
+      peak = a;
+      prev = a;
+      prevH = h;
+      h *= CONTRACT;
+      continue;
+    }
+    // Settled onto a stable value: trust extrapolate only if a denser probe
+    // agrees; otherwise the ladder skipped a narrow window -> not-evaluable.
+    if (Math.abs(a - prev) <= 1e-10 * Math.max(1, a))
+      return settleIsReal(prevH, h, y) ? Infinity : 0;
+    // Grew to an interior peak, then collapsed to ~0: catastrophic cancellation.
+    if (grew && peak > 1e-6 && a < 1e-8 * peak) return k - 1;
+    if (a > peak) {
+      grew = true;
+      peak = a;
+    }
+    prev = a;
+    prevH = h;
+    h *= CONTRACT;
+  }
+  return Infinity;
+}
+
 export function limit(
   f: (x: number) => number,
   x: number,
@@ -253,7 +341,17 @@ export function limit(
     return (left + right) / 2;
   }
 
-  const [val, err] = extrapolate(f, x, { step: dir > 0 ? 1 : -1, deadline });
+  const step = dir > 0 ? 1 : -1;
+  // Don't let floating-point overflow/cancellation past the numeric horizon
+  // feed `extrapolate` garbage that masquerades as convergence (see
+  // `reliableLimitSamples`).
+  const clean = reliableLimitSamples(f, x, step);
+  if (clean === 0) return NaN; // no trustworthy samples -> not-evaluable
+  const [val, err] = extrapolate(f, x, {
+    step,
+    deadline,
+    ...(Number.isFinite(clean) ? { maxeval: clean } : {}),
+  });
   // Reject low-confidence estimates: for an oscillatory or non-convergent
   // function (e.g. sinc at ∞) Richardson extrapolation returns a small but
   // meaningless value with an error estimate of the same order. Converged
