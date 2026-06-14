@@ -34,6 +34,12 @@
   - Powers of secant, cosecant, tangent, and cotangent
   - Reverse power-chain forms such as `∫ln(x)/x dx = ½ln²(x)`
   - Products with symbolic exponents that previously failed or timed out
+  - Powers and radicals of a linear function, e.g. `∫√(1+x) dx`, `∫x√(1+2x) dx`,
+    and `∫(a+bx)^p dx`
+  - Radical powers of a polynomial via the reverse chain rule, e.g.
+    `∫x√(1−x²) dx = −⅓(1−x²)^{3/2}`
+  - Quotients by a sum of two square roots, e.g.
+    `∫1/(√(a+bx)+√(c+bx)) dx`, by conjugate rationalization
 
 - **Rational-function integration is more exact and complete.** Partial
   fractions now preserve rational and radical coefficients for a wider range of

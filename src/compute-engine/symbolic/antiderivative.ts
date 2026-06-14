@@ -1608,6 +1608,17 @@ function getLinearCoefficients(
     return { a: ce.One, b: ce.Zero };
   }
 
+  // A bare c·x with no constant term (e.g. 2x) — linear with intercept 0.
+  if (isFunction(expr, 'Multiply')) {
+    const varFactor = expr.ops.find((f) => sym(f) === index);
+    const rest = expr.ops.filter((f) => sym(f) !== index);
+    if (varFactor && rest.every((f) => !f.has(index))) {
+      const coeff =
+        rest.length === 0 ? ce.One : rest.length === 1 ? rest[0] : mul(...rest);
+      return { a: coeff, b: ce.Zero };
+    }
+  }
+
   // Must be an Add expression
   if (!isFunction(expr, 'Add')) return null;
 
@@ -2605,6 +2616,219 @@ function tryRadicalQuadratic(
   return reduceMonomialOverSqrtQuadratic(m, cC, aC, radicand, index);
 }
 
+/** Binomial coefficient C(n, k) for small non-negative integers. */
+function binomialCoefficient(n: number, k: number): number {
+  if (k < 0 || k > n) return 0;
+  let r = 1;
+  for (let i = 0; i < k; i++) r = (r * (n - i)) / (i + 1);
+  return Math.round(r);
+}
+
+/**
+ * ∫ c·xᵐ·(a+b·x)^p dx for an integer m ≥ 0 and a rational exponent p, covering
+ * both the canonical `Sqrt(a+b·x)` form and the `Power(a+b·x, p)` form, with a
+ * bare or explicit x-coefficient. Substituting u = a+b·x (so x = (u−a)/b):
+ *
+ *   ∫ c·xᵐ·u^p dx = (c / b^{m+1}) · Σ_{k=0}^m C(m,k)·(−a)^{m−k} · ∫ u^{k+p} du
+ *
+ * with ∫u^t du = u^{t+1}/(t+1), or ln|u| when t = −1.
+ *
+ * This is exactly the case the `INTEGRATION_RULES` patterns miss: canonical √
+ * is a `Sqrt` node (not `Power(_, 1/2)`) and the patterns also require an
+ * explicit `Multiply(a, x)` (so a bare coefficient like `1+x` never matches).
+ * As a result ∫√(1+x), ∫√(2x), ∫x·√(1+x), ∫(1+2x)^{3/2} all landed inert.
+ */
+function tryLinearPower(fn: Expression, index: string): Expression | null {
+  const ce = fn.engine;
+  let coeff: Expression = ce.One;
+  let m = 0;
+  let base: Expression | null = null;
+  let p: Expression | null = null;
+
+  const factors = isFunction(fn, 'Multiply') ? fn.ops : [fn];
+  for (const f of factors) {
+    if (!f.has(index)) {
+      coeff = coeff.mul(f);
+      continue;
+    }
+    // Monomial xᵏ (k a non-negative integer)
+    if (sym(f) === index) {
+      m += 1;
+      continue;
+    }
+    if (
+      isFunction(f, 'Power') &&
+      sym(f.op1) === index &&
+      isNumber(f.op2) &&
+      f.op2.isInteger === true &&
+      (f.op2.re ?? -1) >= 0
+    ) {
+      m += f.op2.re!;
+      continue;
+    }
+    // A radical/power of a linear function of x
+    let L: Expression | null = null;
+    let pp: Expression | null = null;
+    if (isFunction(f, 'Sqrt')) {
+      L = f.op1;
+      pp = ce.Half;
+    } else if (
+      isFunction(f, 'Power') &&
+      isNumber(f.op2) &&
+      f.op2.isRational === true &&
+      !f.op2.has(index)
+    ) {
+      L = f.op1;
+      pp = f.op2;
+    }
+    if (L === null || pp === null) return null;
+    if (base !== null) return null; // only one linear-power factor handled
+    if (polynomialDegree(L, index) !== 1) return null;
+    base = L;
+    p = pp;
+  }
+
+  if (base === null || p === null) return null;
+
+  const lin = getLinearCoefficients(base, index);
+  if (!lin) return null;
+  const b = lin.a; // x-coefficient (slope)
+  const a = lin.b; // constant term (intercept)
+  if (b.is(0)) return null;
+
+  const u = base; // u = a + b·x
+  const terms: Expression[] = [];
+  for (let k = 0; k <= m; k++) {
+    const binom = ce.number(binomialCoefficient(m, k));
+    // (−a)^{m−k}; the exponent-0 case is 1 even when a = 0 (avoid 0^0 → NaN)
+    const aPow = m - k === 0 ? ce.One : a.neg().pow(ce.number(m - k));
+    const tp1 = p.add(ce.number(k + 1)); // (k + p) + 1
+    const inner = tp1.is(0)
+      ? ce.function('Ln', [ce.function('Abs', [u])])
+      : u.pow(tp1).div(tp1);
+    terms.push(binom.mul(aPow).mul(inner));
+  }
+  const sum = terms.length === 1 ? terms[0] : add(...terms);
+  return coeff
+    .mul(sum)
+    .div(b.pow(ce.number(m + 1)))
+    .evaluate();
+}
+
+/**
+ * ∫ c·Q′(x)·Q(x)^p dx = c·Q(x)^{p+1}/(p+1), the reverse chain rule for a
+ * (radical) power of a polynomial Q of degree ≥ 1. Recognizes one `Sqrt(Q)`
+ * or `Power(Q, p)` factor (rational p ≠ −1) whose remaining cofactor is a
+ * constant multiple of Q′. Handles e.g. ∫x·√(1−x²) (x = −½·(1−x²)′ →
+ * −⅓(1−x²)^{3/2}) and ∫(2x+3)·√(x²+3x+1), which the linear-power handler and
+ * the √(quadratic)-in-denominator reductions don't cover.
+ */
+function tryRadicalDerivative(
+  fn: Expression,
+  index: string
+): Expression | null {
+  const ce = fn.engine;
+  const factors = isFunction(fn, 'Multiply') ? [...fn.ops] : [fn];
+
+  for (let i = 0; i < factors.length; i++) {
+    const f = factors[i];
+    let Q: Expression | null = null;
+    let p: Expression | null = null;
+    if (isFunction(f, 'Sqrt')) {
+      Q = f.op1;
+      p = ce.Half;
+    } else if (
+      isFunction(f, 'Power') &&
+      isNumber(f.op2) &&
+      f.op2.isRational === true &&
+      !f.op2.has(index) &&
+      !f.op2.isSame(-1)
+    ) {
+      Q = f.op1;
+      p = f.op2;
+    }
+    if (Q === null || p === null) continue;
+    if (polynomialDegree(Q, index) < 1) continue;
+
+    const qPrime = differentiate(Q, index);
+    if (!qPrime || qPrime.isSame(0)) continue;
+
+    const rest = factors.filter((_, j) => j !== i);
+    const N =
+      rest.length === 0
+        ? ce.One
+        : rest.length === 1
+          ? rest[0]
+          : ce.function('Multiply', rest);
+
+    const ratio = N.div(qPrime).simplify();
+    if (ratio.has(index) || ratio.isNaN === true || ratio.isFinite === false)
+      continue;
+
+    const p1 = p.add(1);
+    return ratio.mul(Q.pow(p1)).div(p1).evaluate();
+  }
+  return null;
+}
+
+/**
+ * ∫ N/(√u ± √v)^k dx by rationalizing with the conjugate: multiplying by
+ * (√u ∓ √v)^k clears the radical sum, since (√u+√v)(√u−√v) = u−v is a
+ * polynomial (a constant when u, v share their leading coefficient, e.g.
+ * a+b·x and c+b·x). The rationalized integrand is then integrated term by
+ * term by the linear-power / radical handlers.
+ *
+ * Cleanly closes the k = 1 cases (`1/(√(a+bx)+√(c+bx))` → ⅔(…)^{3/2} terms);
+ * for k ≥ 2 the expansion introduces √(u·v) cross terms, so it returns only
+ * when every resulting term integrates (the `closes` guard) and otherwise
+ * defers.
+ */
+function tryRationalizeRadicalSum(
+  fn: Expression,
+  index: string
+): Expression | null {
+  const ce = fn.engine;
+  if (!isFunction(fn, 'Divide')) return null;
+
+  const N = fn.op1;
+  let D = fn.op2;
+  let k = 1;
+  if (
+    isFunction(D, 'Power') &&
+    isNumber(D.op2) &&
+    D.op2.isInteger === true &&
+    (D.op2.re ?? 0) >= 1
+  ) {
+    k = D.op2.re!;
+    D = D.op1;
+  }
+  if (!isFunction(D, 'Add') || D.nops !== 2) return null;
+
+  const [t1, t2] = D.ops;
+  const hasSqrt = (e: Expression): boolean =>
+    e.operator === 'Sqrt' || (isFunction(e) ? e.ops.some(hasSqrt) : false);
+  // Both denominator terms must be radicals whose square is a polynomial — the
+  // genuine √u ± √v shape (not e.g. x + √Q, a different Euler-substitution case).
+  if (!hasSqrt(t1) || !hasSqrt(t2)) return null;
+  const sq1 = t1.pow(2).evaluate();
+  const sq2 = t2.pow(2).evaluate();
+  if (polynomialDegree(sq1, index) < 0 || polynomialDegree(sq2, index) < 0)
+    return null;
+
+  const denomPoly = sq1.sub(sq2).evaluate(); // (√u)² − (√v)² = u − v
+  if (denomPoly.is(0)) return null;
+
+  const conj = t1.sub(t2); // √u − √v
+  const conjPow =
+    k === 1 ? conj : ce.box(['Expand', conj.pow(ce.number(k))]).evaluate();
+  const rationalized = ce
+    .box(['Expand', N.mul(conjPow).div(denomPoly.pow(ce.number(k)))])
+    .evaluate();
+
+  const F = antiderivative(rationalized, index);
+  return F.has('Integrate') ? null : F;
+}
+
 export function antiderivative(fn: Expression, index: string): Expression {
   if (isFunction(fn, 'Function')) return antiderivative(fn.op1, index);
   if (isFunction(fn, 'Block')) return antiderivative(fn.op1, index);
@@ -2641,6 +2865,25 @@ export function antiderivative(fn: Expression, index: string): Expression {
   if (gaussian) return gaussian;
   const fresnel = tryFresnelIntegral(fn, index);
   if (fresnel) return fresnel;
+
+  // ∫ c·xᵐ·(a+b·x)^p (rational p, Sqrt or Power form, bare or explicit
+  // coefficient) — the canonical-√ / bare-coefficient case the pattern rules
+  // miss. Tried before the Add/Multiply branches so the whole product reaches
+  // it intact (e.g. x·√(1+x)).
+  const linPow = tryLinearPower(fn, index);
+  if (linPow) return linPow;
+
+  // ∫ c·Q′·Q^p (reverse chain rule for a radical power of a polynomial),
+  // e.g. ∫x·√(1−x²). Tried before the Multiply branch so the whole product is
+  // examined as a unit.
+  const radDeriv = tryRadicalDerivative(fn, index);
+  if (radDeriv) return radDeriv;
+
+  // ∫ N/(√u ± √v)^k — rationalize with the conjugate (√u∓√v clears the radical
+  // sum). Tried before the generic Divide branch, which would otherwise route
+  // the radical-sum denominator to the inert path.
+  const radSum = tryRationalizeRadicalSum(fn, index);
+  if (radSum) return radSum;
 
   // Apply the chain rule
   if (isFunction(fn, 'Add')) {

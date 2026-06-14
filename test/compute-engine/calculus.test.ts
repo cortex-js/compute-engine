@@ -456,6 +456,65 @@ describe('INDEFINITE INTEGRATION', () => {
     test('∫(1+x²+x³)/((x-1)x(1+x²)²(1+x+x²)) dx (was wrongly 0)', () =>
       verify('\\frac{1+x^2+x^3}{(x-1)x(1+x^2)^2(1+x+x^2)}'));
   });
+
+  // ∫xᵐ·(a+bx)^p — a radical or power of a linear function (Sqrt and Power
+  // forms, bare or explicit x-coefficient). Canonical √ is a `Sqrt` node, which
+  // the pattern rules (matching `Power(_,1/2)`) missed, so ∫√(1+x), ∫√(2x),
+  // ∫x√(1+x) were all inert.
+  describe('powers and radicals of a linear function', () => {
+    const verify = (latex: string) => {
+      const integrand = engine.parse(latex);
+      const F = engine.box(['Integrate', integrand, 'x']).evaluate();
+      expect(F.has('Integrate')).toBe(false);
+      const dF = engine.box(['D', F, 'x']).evaluate();
+      for (const x of [0.21, 0.53, 1.34, 2.07]) {
+        const a = dF.subs({ x }).N().re;
+        const b = integrand.subs({ x }).N().re;
+        if (a === undefined || b === undefined) continue;
+        expect(a).toBeCloseTo(b, 6);
+      }
+    };
+    test('∫√(1+x) dx', () => verify('\\sqrt{1+x}'));
+    test('∫√(2x) dx', () => verify('\\sqrt{2x}'));
+    test('∫(1+2x)^{3/2} dx', () => verify('(1+2x)^{3/2}'));
+    test('∫x√(1+x) dx', () => verify('x\\sqrt{1+x}'));
+    test('∫x²√(1+2x) dx', () => verify('x^2\\sqrt{1+2x}'));
+  });
+
+  // ∫c·Q′·Q^p → c·Q^{p+1}/(p+1) (reverse chain rule for a radical power of a
+  // polynomial), and ∫N/(√u±√v) by conjugate rationalization. Both previously
+  // inert.
+  describe('radical reverse-chain and radical-sum rationalization', () => {
+    const verify = (latex: string) => {
+      const integrand = engine.parse(latex);
+      const F = engine.box(['Integrate', integrand, 'x']).evaluate();
+      expect(F.has('Integrate')).toBe(false);
+      const dF = engine.box(['D', F, 'x']).evaluate();
+      for (const x of [0.21, 0.43, 0.84, 1.27]) {
+        const a = dF.subs({ x }).N().re;
+        const b = integrand.subs({ x }).N().re;
+        if (a === undefined || b === undefined) continue;
+        expect(a).toBeCloseTo(b, 6);
+      }
+    };
+    // reverse chain rule  ∫c·Q′·Q^p
+    test('∫x√(1-x²) dx', () => verify('x\\sqrt{1-x^2}'));
+    test('∫(2x+3)√(x²+3x+1) dx', () => verify('(2x+3)\\sqrt{x^2+3x+1}'));
+    test('∫x²√(1-x³) dx', () => verify('x^2\\sqrt{1-x^3}'));
+    // conjugate rationalization of a radical sum (k = 1)
+    test('∫1/(√(1+x)+√(3+x)) dx', () =>
+      verify('\\frac{1}{\\sqrt{1+x}+\\sqrt{3+x}}'));
+    test('∫x/(√(1+x)+√(3+x)) dx', () =>
+      verify('\\frac{x}{\\sqrt{1+x}+\\sqrt{3+x}}'));
+
+    // Symbolic radical sum matches the closed form (no numeric verification).
+    test('∫1/(√(a+bx)+√(c+bx)) dx is closed', () => {
+      const F = engine
+        .box(['Integrate', engine.parse('\\frac{1}{\\sqrt{a+bx}+\\sqrt{c+bx}}'), 'x'])
+        .evaluate();
+      expect(F.has('Integrate')).toBe(false);
+    });
+  });
 });
 
 // ROADMAP B2: indefinite-integration coverage gaps.

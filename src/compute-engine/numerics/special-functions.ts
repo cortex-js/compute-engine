@@ -274,21 +274,36 @@ function gammalnCore(ce: ComputeEngine, z: BigNum): BigNum {
       .sub(new BigDecimal(factN.toString()).ln());
   }
 
-  // General: Stirling series with upward shift
+  // General: Stirling series with upward shift.
+  //
+  // The Stirling asymptotic series for ln Γ(w) reaches its smallest term near
+  // k ≈ π·w, of size ≈ e^{−2πw}. Shifting only to w ≈ 0.37·p puts that floor
+  // right at the target tolerance, so the series never converges early and runs
+  // its full ≈π·w terms — each an expensive division by a large Bernoulli
+  // rational. Shifting to w ≈ p instead drops the floor far below tolerance, so
+  // the tol break fires after only ≈0.4·p terms (a measured 3–5× fewer), at the
+  // cost of more — but cheap — shift multiplications. (See ROADMAP B1.)
   const p = BigDecimal.precision;
   const guard = 10;
-  const shiftTarget = Math.ceil(0.37 * p);
+  const shiftTarget = Math.ceil(p);
   const zNum = z.toNumber();
   const m = Math.max(0, Math.ceil(shiftTarget - zNum));
 
-  let logProduct = BigDecimal.ZERO;
+  // ln Γ(z) = ln Γ(z+m) − ln∏_{i=0}^{m-1}(z+i). Accumulate the shift as a single
+  // product and take ONE logarithm of it, rather than summing m separate (and
+  // expensive) ln(z+i).
+  let shiftProduct = BigDecimal.ONE;
   let w = z;
   for (let i = 0; i < m; i++) {
-    logProduct = logProduct.add(w.ln());
+    shiftProduct = shiftProduct.mul(w);
     w = w.add(BigDecimal.ONE);
   }
+  const logProduct = m > 0 ? shiftProduct.ln() : BigDecimal.ZERO;
 
-  const maxTerms = Math.ceil(Math.PI * w.toNumber()) + 10;
+  // The series converges (tol break) in ≈0.4·p terms at this shift; bound the
+  // Bernoulli table generously above that rather than at the old π·w (which,
+  // with the larger shift, would needlessly compute ~8× more Bernoulli numbers).
+  const maxTerms = Math.max(20, Math.ceil(0.6 * p) + 20);
   const bernoulliRationals = getBernoulliRationals(ce, maxTerms);
 
   // Stirling: (w - 1/2)*ln(w) - w + ln(2*pi)/2 + sum B_{2k}/(2k*(2k-1)*w^{2k-1})
@@ -468,7 +483,10 @@ function digammaCore(ce: ComputeEngine, z: BigNum): BigNum {
 
   const p = BigDecimal.precision;
   const guard = 10;
-  const shift = Math.max(7, Math.ceil(0.37 * p));
+  // Shift to w ≈ p (not the old 0.37·p, which left the asymptotic series' floor
+  // at the target tolerance, forcing it to run its full ≈π·w terms). The larger
+  // shift converges the series in ≈0.4·p terms; see the note in `gammalnCore`.
+  const shift = Math.max(7, Math.ceil(p));
 
   // Recurrence: ψ(z+1) = ψ(z) + 1/z — shift z up until z > shift
   let result = new BigDecimal(0);
@@ -478,7 +496,7 @@ function digammaCore(ce: ComputeEngine, z: BigNum): BigNum {
     w = w.add(BigDecimal.ONE);
   }
 
-  const maxTerms = Math.ceil(Math.PI * w.toNumber()) + 10;
+  const maxTerms = Math.max(20, Math.ceil(0.6 * p) + 20);
   const bernoulli = getBernoulliRationals(ce, maxTerms);
 
   // Asymptotic expansion: ψ(w) ~ ln(w) - 1/(2w) - Σ B_{2k}/(2k·w^{2k})
@@ -526,7 +544,9 @@ function trigammaCore(ce: ComputeEngine, z: BigNum): BigNum {
 
   const p = BigDecimal.precision;
   const guard = 10;
-  const shift = Math.max(7, Math.ceil(0.37 * p));
+  // Shift to w ≈ p so the asymptotic series converges in ≈0.4·p terms rather
+  // than running its full ≈π·w (see `gammalnCore`).
+  const shift = Math.max(7, Math.ceil(p));
 
   // Recurrence: ψ₁(z+1) = ψ₁(z) - 1/z²
   let result = new BigDecimal(0);
@@ -536,7 +556,7 @@ function trigammaCore(ce: ComputeEngine, z: BigNum): BigNum {
     w = w.add(BigDecimal.ONE);
   }
 
-  const maxTerms = Math.ceil(Math.PI * w.toNumber()) + 10;
+  const maxTerms = Math.max(20, Math.ceil(0.6 * p) + 20);
   const bernoulli = getBernoulliRationals(ce, maxTerms);
 
   // Asymptotic: ψ₁(w) ~ 1/w + 1/(2w²) + Σ B_{2k}/w^{2k+1}
@@ -583,7 +603,9 @@ function polygammaCore(ce: ComputeEngine, nNum: number, z: BigNum): BigNum {
 
   const p = BigDecimal.precision;
   const guard = 10;
-  const shift = Math.max(7, Math.ceil(0.37 * p));
+  // Shift to w ≈ p so the asymptotic series converges in ≈0.4·p terms rather
+  // than running its full ≈π·w (see `gammalnCore`).
+  const shift = Math.max(7, Math.ceil(p));
 
   // Handle negative z via recurrence shift
   let w = z;
@@ -609,7 +631,7 @@ function polygammaCore(ce: ComputeEngine, nNum: number, z: BigNum): BigNum {
     w = w.add(BigDecimal.ONE);
   }
 
-  const maxTerms = Math.ceil(Math.PI * w.toNumber()) + 10;
+  const maxTerms = Math.max(20, Math.ceil(0.6 * p) + 20);
   const bernoulli = getBernoulliRationals(ce, maxTerms);
 
   // Asymptotic: ψₙ(w) ~ (-1)^{n+1} [(n-1)!/w^n + n!/(2w^{n+1}) + Σ ...]
