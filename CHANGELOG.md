@@ -31,6 +31,14 @@
   its double series for |x|, |y| < 1, including the terminating (polynomial)
   parameter cases.
 
+- **New special functions `Erfi`, `SinIntegral` (Si), and `CosIntegral` (Ci)**.
+  `Erfi(x) = −i·Erf(ix)` is the imaginary error function (machine + arbitrary
+  precision); `SinIntegral(x) = ∫₀ˣ sin t/t dt` and
+  `CosIntegral(x) = γ + ln x + ∫₀ˣ (cos t − 1)/t dt` evaluate at machine
+  precision (Numerical Recipes `cisi` continued fraction). Each has its
+  derivative registered (`Erfi′ = (2/√π)e^{x²}`, `Si′ = sin x/x`,
+  `Ci′ = cos x/x`). These back the new non-elementary antiderivatives below.
+
 ### Improvements
 
 - **Exact transcendentals stay symbolic under `evaluate()`.** A transcendental
@@ -52,6 +60,26 @@
   collapses to a float: `∫₁² (1/x) dx → ln(2)`, `∫₀¹ 1/(x²+1) dx → π/4`,
   `∫₀¹ sin x dx → 1 − cos(1)`, `∫₁² ln x dx → 2ln(2) − 1` (previously `0.693…`,
   `0.785…`, `0.460…`, `0.386…`).
+
+- **More indefinite integrals evaluate.** The symbolic integrator now produces:
+  - **Gaussian → error functions**: `∫e^(−x²) → (√π/2)·Erf(x)`, and the general
+    `∫e^(ax²+bx+c)` via completing the square, selecting `Erf` (a < 0) or `Erfi`
+    (a > 0).
+  - **Fresnel**: `∫cos(ax²) → √(π/2a)·FresnelC(√(2a/π)·x)` and the corresponding
+    `∫sin(ax²) → FresnelS`.
+  - **Sine/cosine integrals**: `∫sin(kx)/x → Si(kx)`, `∫cos(kx)/x → Ci(kx)`.
+  - **Radical integrands**: `∫x/√(1−x²) → −√(1−x²)`,
+    `∫x²/√(1−x²) → ½(arcsin x − x√(1−x²))`, and the general `∫xⁿ/√(c+dx²)`
+    family via a reduction formula, plus `∫c·Q′/√Q → 2c√Q` for any quadratic
+    `Q`.
+  - **Odd powers of secant/cosecant**: `∫secⁿx`, `∫cscⁿx` (n ≥ 2) via the
+    reduction formulas, e.g. `∫sec³x → ½(sec x·tan x + ln|sec x + tan x|)`.
+
+- **Nested radicals are denested during simplification** (`sqrtdenest`).
+  `simplify()` now rewrites `√(a+b√c) → √x + √y` when `a²−b²c` is a perfect
+  square: `√(3+2√2) → 1+√2`, `√(7+4√3) → 2+√3`, `√(5+2√6) → √2+√3`,
+  `√(3−2√2) → √2−1`. Radicands that do not denest over the rationals are left
+  unchanged.
 
 - **Interruptible evaluation**: long-running operations now respect the engine
   time limit (`ce.timeLimit`, default 2s) and throw a `CancellationError`
@@ -103,14 +131,25 @@
 
 - **Faster arbitrary-precision transcendentals (`BigDecimal`).** The internal
   fixed-point kernel that powers `sqrt`, `cbrt`, `exp`, `ln`, `sin`, `cos`,
-  `tan`, `atan`, `asin`, and the hyperbolic functions now works on a binary
-  grid (`2^bits`) instead of a decimal one (`10^p`), so the per-term rescaling
-  in the Taylor/Newton inner loops is a bit-shift rather than a full-width
-  division. This makes those functions **~2–4× faster** at high precision (the
-  speedup grows with precision) with bit-identical results — no change to
-  accuracy or to the public `significand · 10^exponent` representation.
+  `tan`, `atan`, `asin`, and the hyperbolic functions now works on a binary grid
+  (`2^bits`) instead of a decimal one (`10^p`), so the per-term rescaling in the
+  Taylor/Newton inner loops is a bit-shift rather than a full-width division.
+  This makes those functions **~2–4× faster** at high precision (the speedup
+  grows with precision) with bit-identical results — no change to accuracy or to
+  the public `significand · 10^exponent` representation.
 
 ### Bug Fixes
+
+- **`solve` returned wrong or missing roots for absolute-value equations.** The
+  two direct `|ax + b| + c = 0` root rules were broken: the first had its
+  subtraction reversed (`(b − c)/a` instead of `(c − b)/a`), and the second was
+  structurally malformed (a `Negate`/`Divide` with misplaced arguments), so
+  `|x| = 2` solved to `[2]` and `|x − 1| = 2`, `|2x − 1| = 3` returned `[]`.
+  Both branches are corrected, and the absolute-value handling is now more
+  general: the case-split harmonization works for any inner expression — bare
+  `|x| = 2`, unit coefficients, and non-linear arguments
+  (`|x² − 3| = 1 → ±2, ±√2`) — and a new squaring rule solves equations of two
+  absolute values (`|2x + 5| = |x − 2| → −7, −1`).
 
 - **`∫√x dx` and `∫1/√x dx` returned unevaluated.** `√x` and `x^(−1/2)`
   canonicalize to `Sqrt(x)` and `Divide(1, Sqrt(x))` rather than `Power` nodes,

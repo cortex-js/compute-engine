@@ -266,15 +266,17 @@ export const UNIVARIATE_ROOTS: Rule[] = [
       (filter(sub) && !sub.__a.isSame(0) && sub.__b.isPositive) ?? false,
   },
 
-  // |ax + b| + c = 0
+  // |ax + b| + c = 0  ⟹  |ax+b| = -c  ⟹  ax+b = c  or  ax+b = -c
+  // ⟹  x = (c-b)/a  or  x = -(b+c)/a   (validateRoots drops the spurious
+  // branch when -c < 0 and |ax+b| = -c has no solution).
   {
     match: ['Add', ['Abs', ['Add', ['Multiply', '__a', '_x'], '__b']], '__c'],
-    replace: ['Divide', ['Subtract', '__b', '__c'], '__a'],
+    replace: ['Divide', ['Subtract', '__c', '__b'], '__a'],
     condition: filter,
   },
   {
     match: ['Add', ['Abs', ['Add', ['Multiply', '__a', '_x'], '__b']], '__c'],
-    replace: ['Divide', ['Negate', ['Add', '__b', '__c'], '__a']],
+    replace: ['Divide', ['Negate', ['Add', '__b', '__c']], '__a'],
     condition: filter,
   },
 
@@ -1351,19 +1353,26 @@ export function findUnivariateRoots(
 /** Harmonization rules transform an expr into one or more equivalent
  * expressions that are easier to solve */
 export const HARMONIZATION_RULES: Rule[] = [
-  // |ax + b| + c -> ax+b+c, -ax-b+c
+  // |f(x)| + c -> f(x)+c, -f(x)+c.  A case-split: a branch root that isn't a
+  // genuine solution (|f| = -c when -c < 0) is dropped by `validateRoots`. The
+  // single `_f` capture handles any inner form uniformly — bare `x` (`|x| = 2`),
+  // unit coefficients (`|x-1| = 2`), and `|ax+b|` alike.
   {
-    match: ['Add', ['Abs', ['Add', ['Multiply', '__a', '_x'], '__b']], '__c'],
-    replace: ['Add', ['Multiply', '__a', '_x'], '__b', '__c'],
+    match: ['Add', ['Abs', '_f'], '__c'],
+    replace: ['Add', '_f', '__c'],
+    condition: ({ _f }) => _f.has('_x'),
   },
   {
-    match: ['Add', ['Abs', ['Add', ['Multiply', '__a', '_x'], '__b']], '__c'],
-    replace: [
-      'Add',
-      ['Negate', ['Multiply', '__a', '_x']],
-      ['Negate', '__b'],
-      '__c',
-    ],
+    match: ['Add', ['Abs', '_f'], '__c'],
+    replace: ['Add', ['Negate', '_f'], '__c'],
+    condition: ({ _f }) => _f.has('_x'),
+  },
+  // |f(x)| = |g(x)|  (i.e. |f| - |g| = 0)  ->  f² - g² = 0.  Exact: |f| = |g|
+  // iff f² = g², so squaring introduces no extraneous roots here.
+  {
+    match: ['Add', ['Abs', '_f'], ['Negate', ['Abs', '_g']]],
+    replace: ['Subtract', ['Square', '_f'], ['Square', '_g']],
+    condition: ({ _f, _g }) => (_f?.has('_x') && _g?.has('_x')) ?? false,
   },
   // a(b^n) -> a
   {
