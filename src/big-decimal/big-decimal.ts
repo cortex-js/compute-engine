@@ -12,7 +12,16 @@
  *  - -Infinity: { significand: -1n, exponent: Infinity }
  */
 
-import { bigintDigits, pow10, PI_DIGITS } from './utils';
+import {
+  bigintDigits,
+  pow10,
+  PI_DIGITS,
+  piChudnovskyDecimal,
+  bigintSqrt,
+} from './utils';
+
+/** Directed rounding direction: toward −∞ (`floor`) or +∞ (`ceiling`). */
+export type RoundDir = 'floor' | 'ceiling';
 
 export { PI_DIGITS };
 
@@ -83,18 +92,29 @@ export class BigDecimal {
 
   /** PI to current working precision. */
   static get PI(): BigDecimal {
-    if (BigDecimal._piFullPrecision === null) {
-      BigDecimal._piFullPrecision = new BigDecimal(
-        PI_DIGITS[0] + '.' + PI_DIGITS.slice(1)
-      );
-    }
-    // Return PI with guard digits for intermediate computation accuracy
+    // Return PI with guard digits for intermediate computation accuracy.
     const prec = BigDecimal.precision;
-    if (BigDecimal._piCache === null || BigDecimal._piCachePrecision !== prec) {
-      BigDecimal._piCache = BigDecimal._piFullPrecision.toPrecision(prec + 4);
-      BigDecimal._piCachePrecision = prec;
+    if (BigDecimal._piCache !== null && BigDecimal._piCachePrecision === prec)
+      return BigDecimal._piCache;
+
+    const need = prec + 4; // guard digits
+    let pi: BigDecimal;
+    if (need + 1 <= PI_DIGITS.length) {
+      // Fast path: the hardcoded table covers this precision.
+      if (BigDecimal._piFullPrecision === null) {
+        BigDecimal._piFullPrecision = new BigDecimal(
+          PI_DIGITS[0] + '.' + PI_DIGITS.slice(1)
+        );
+      }
+      pi = BigDecimal._piFullPrecision.toPrecision(need);
+    } else {
+      // Beyond the table: compute on demand via Chudnovsky binary splitting.
+      const extra = need + 4;
+      pi = fromRaw(piChudnovskyDecimal(extra), -extra).toPrecision(need);
     }
-    return BigDecimal._piCache;
+    BigDecimal._piCache = pi;
+    BigDecimal._piCachePrecision = prec;
+    return pi;
   }
 
   readonly significand: bigint;
@@ -613,6 +633,87 @@ export class BigDecimal {
   }
 
   /**
+   * Division with **directed rounding** to `BigDecimal.precision` significant
+   * digits: `'floor'` rounds toward −∞, `'ceiling'` toward +∞. This is the
+   * rigorous primitive for interval arithmetic — `[a.divToward(b,'floor'),
+   * a.divToward(b,'ceiling')]` brackets the true quotient. (`+`, `−`, `×` are
+   * exact in BigDecimal, so they need no directed variant.)
+   */
+  divToward(other: BigDecimal | number, direction: RoundDir): BigDecimal {
+    if (typeof other === 'number') other = new BigDecimal(other);
+    const thisExp = this.exponent;
+    const otherExp = other.exponent;
+    const thisSig = this.significand;
+    const otherSig = other.significand;
+
+    // Non-finite / zero cases carry no rounding — defer to `div`.
+    if (
+      !Number.isFinite(thisExp) ||
+      !Number.isFinite(otherExp) ||
+      otherSig === 0n ||
+      thisSig === 0n
+    )
+      return this.div(other);
+
+    const negative = thisSig < 0n !== otherSig < 0n;
+    const absDividend = thisSig < 0n ? -thisSig : thisSig;
+    const absDivisor = otherSig < 0n ? -otherSig : otherSig;
+    const prec = BigDecimal.precision;
+    const guard = 10;
+    const totalScale =
+      prec +
+      guard +
+      Math.max(0, bigintDigits(absDivisor) - bigintDigits(absDividend));
+    const num = absDividend * pow10(totalScale);
+    const q = num / absDivisor; // ≥ 1 given the guard digits
+    const inexact = num % absDivisor !== 0n;
+    const resultExp = thisExp - otherExp - totalScale;
+
+    // 'floor' rounds the true value toward −∞: round the magnitude away from
+    // zero for negatives, toward zero for positives. 'ceiling' is the mirror.
+    const up = negative ? direction === 'floor' : direction === 'ceiling';
+    const [m, e] = roundMagnitudeToward(q, inexact, resultExp, prec, up);
+    return fromRaw(negative ? -m : m, e);
+  }
+
+  /**
+   * Square root with **directed rounding** to `BigDecimal.precision` significant
+   * digits (`'floor'` ≤ true ≤ `'ceiling'`). Computed from an exact integer
+   * `bigintSqrt`, so the bracket is rigorous. Returns NaN for negatives.
+   */
+  sqrtToward(direction: RoundDir): BigDecimal {
+    if (this.significand === 0n)
+      return this.exponent !== this.exponent ? this : BigDecimal.ZERO; // NaN | 0
+    if (!Number.isFinite(this.exponent))
+      return this.significand > 0n ? BigDecimal.POSITIVE_INFINITY : BigDecimal.NAN;
+    if (this.significand < 0n) return BigDecimal.NAN;
+
+    const prec = BigDecimal.precision;
+    const guard = 4;
+    const sig = this.significand;
+    const exp = this.exponent;
+    const decExp = exp + bigintDigits(sig) - 1; // ⌊log10 v⌋
+    const halfExp = Math.floor(decExp / 2);
+    // Scale v to an integer V = sig·10^(exp+2·shift) whose floor sqrt carries
+    // ~prec+guard significant digits; sqrt(v) = isqrt(V)·10^(−shift).
+    let shift = prec + guard - halfExp;
+    if (exp + 2 * shift < 0) shift = Math.ceil(-exp / 2) + 1; // keep V integral
+    const vexp = exp + 2 * shift;
+    const V = vexp >= 0 ? sig * pow10(vexp) : sig / pow10(-vexp);
+    const r = bigintSqrt(V);
+    const inexact = r * r !== V;
+    // sqrt ≥ 0: 'ceiling' rounds the magnitude up, 'floor' down.
+    const [m, e] = roundMagnitudeToward(
+      r,
+      inexact,
+      -shift,
+      prec,
+      direction === 'ceiling'
+    );
+    return fromRaw(m, e);
+  }
+
+  /**
    * Modulo (remainder after truncating division).
    * Defined as: this - trunc(this / other) * other
    *
@@ -1012,6 +1113,30 @@ export function fromRaw(sig: bigint, exp: number): BigDecimal {
   (bd as { significand: bigint }).significand = normSig;
   (bd as { exponent: number }).exponent = normExp;
   return bd;
+}
+
+/**
+ * Round a magnitude `mant · 10^exp` (mant ≥ 0) to `prec` significant digits.
+ * `inexact` flags a nonzero discarded tail below mant's last digit. `up` rounds
+ * the magnitude away from zero (otherwise toward zero / truncate). Returns the
+ * rounded [mantissa, exponent]. Used by the directed-rounding div/sqrt.
+ */
+function roundMagnitudeToward(
+  mant: bigint,
+  inexact: boolean,
+  exp: number,
+  prec: number,
+  up: boolean
+): [bigint, number] {
+  if (mant === 0n) return [up && inexact ? 1n : 0n, exp];
+  const digits = bigintDigits(mant);
+  if (digits <= prec) return [up && inexact ? mant + 1n : mant, exp];
+  const drop = digits - prec;
+  const divisor = pow10(drop);
+  let q = mant / divisor;
+  const hasTail = inexact || mant % divisor !== 0n;
+  if (up && hasTail) q += 1n;
+  return [q, exp + drop];
 }
 
 /**

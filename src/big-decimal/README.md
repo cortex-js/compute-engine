@@ -33,9 +33,9 @@ Special values use sentinel exponents:
 
 | File                 | Purpose                                                                                                                                                                 |
 | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `big-decimal.ts`     | Core class: construction, arithmetic, comparison, conversion, formatting                                                                                                |
-| `transcendentals.ts` | `sqrt`, `cbrt`, `exp`, `ln`, `sin`, `cos`, `tan`, `atan`, `asin`, `acos`, `sinh`, `cosh`, `tanh`, `atan2` -- attached to `BigDecimal.prototype` via declaration merging |
-| `utils.ts`           | Fixed-point bigint primitives (`fpsqrt`, `fpexp`, `fpln`, `fpsincos`, `fpatan`), `pow10` cache, `bigintDigits`, PI constant (2370 digits)                               |
+| `big-decimal.ts`     | Core class: construction, arithmetic, comparison, conversion, formatting, directed-rounding `divToward`/`sqrtToward`                                                     |
+| `transcendentals.ts` | `sqrt`, `cbrt`, `nthRoot`, `exp`, `expm1`, `ln`, `log`, `log2`, `log1p`, `sin`, `cos`, `tan`, `atan`, `asin`, `acos`, `atan2`, `sinh`, `cosh`, `tanh`, `asinh`, `acosh`, `atanh` -- attached to `BigDecimal.prototype` via declaration merging |
+| `utils.ts`           | Fixed-point bigint primitives (`fpsqrt`, `fpexp`, `fpln` [giant_steps Newton + AGM], `fpsincos`, `fpatan`), `pow10` cache, `bigintDigits`/`bitLength`, `bigintSqrt`, Chudnovsky π / binary-split ln 2, PI table (2370 digits)                  |
 | `index.ts`           | Barrel export; imports `transcendentals.ts` for side effects                                                                                                            |
 
 ## Precision Model
@@ -165,22 +165,30 @@ every tested precision (verified via cross-validation tests).
 ## Potential Future Improvements
 
 > Tracked as ROADMAP item 17 (`../../ROADMAP.md`), with mpmath-derived lessons
-> ranked by ROI. **Done 2026-06-13:** the **base-2 internal kernel** (scale
-> `2^bits` instead of `10^p`, turning the per-term `/scale` division into a
-> bit-shift) is now the implementation — **2–4× faster** for the transcendentals
-> at identical accuracy (0 ULP difference), end-to-end including decimal↔binary
-> conversion, with the win growing with precision. A/B record:
-> `benchmarks/big-decimal/kernel-base2-experiment.ts`. The items below remain.
+> ranked by ROI. **Landed 2026-06-13** (items 1–7 there):
+>
+> - **Base-2 internal kernel** — the per-term `/scale` is now a bit-shift;
+>   **2–4× faster** transcendentals at identical accuracy. A/B record:
+>   `benchmarks/big-decimal/kernel-base2-experiment.ts`.
+> - **AGM logarithm** above ~1250 digits + **`giant_steps`** Newton below it —
+>   faster `ln` (no longer the slow outlier).
+> - **On-demand Chudnovsky π** + **binary-split `ln 2`** — no precision ceiling
+>   for π / trig / inverse-trig / `BigDecimal.PI` (was ~2350 digits).
+> - **Elementary functions** `expm1`, `log1p`, `log2`, `asinh`, `acosh`,
+>   `atanh`, `nthRoot`; **directed rounding** `divToward`/`sqrtToward`.
 
-- **AGM-based logarithm**: The current Newton iteration calls `fpexp` at each
-  step, making `ln` the slowest transcendental. An arithmetic-geometric mean
-  (AGM) algorithm would compute `ln` in `O(log(p) * M(p))` time without needing
-  `exp` at all.
+Still open:
 
-- **Binary splitting for exp/sin/cos**: The Taylor series evaluate one term at a
-  time, each requiring a full-precision division. Binary splitting computes the
-  series as a rational `P/Q` via a divide-and-conquer tree, deferring the single
-  final division. This is asymptotically faster for high precision.
+- **Rectangular splitting (Smith's method) for `exp`/trig**: binary splitting
+  does *not* help these for irrational arguments (the BS products grow to
+  `N·bits` bits). Rectangular splitting evaluates the Taylor series with
+  `O(√N)` full-size multiplications instead of `O(N)`, the right high-precision
+  technique for an irrational argument.
+
+- **Interval-arithmetic (`iv`) mode**: the directed-rounding primitives
+  (`divToward`/`sqrtToward`) are in place; a full `[lo, hi]` interval type on
+  top (mpmath's `iv` context) would give rigorous sign/zero determination. Build
+  when a consumer needs it.
 
 - **Lazy normalization**: `add` and `sub` normalize on every call (strip
   trailing zeros). Deferring normalization to "observation points" (toString,
@@ -190,8 +198,5 @@ every tested precision (verified via cross-validation tests).
 - **Subquadratic multiplication threshold**: For very high precisions (p >
   10000), the native bigint multiply becomes the bottleneck. A Number-Theoretic
   Transform (NTT) based multiplication could help, though V8 already uses
-  Karatsuba/Toom-Cook internally.
-
-- **PI computation**: The hardcoded 2370-digit constant limits working precision
-  to ~2350 digits. For higher precisions, a Chudnovsky or Machin-like formula
-  could compute PI on demand.
+  Karatsuba/Toom-Cook internally (it has no FFT, which caps the binary-splitting
+  and AGM asymptotic wins in the low-thousands of digits).

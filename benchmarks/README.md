@@ -6,18 +6,24 @@
 
 Four benchmark harnesses live here:
 
-0. **Kernel microbenchmarks** (`big-decimal/`) — narrow A/B experiments on the
+0. **Kernel microbenchmarks** (`big-decimal/`) — narrow experiments on the
    arbitrary-precision `src/big-decimal/` core itself (not the whole CE
-   pipeline), to validate low-level optimizations before promoting them. Run a
-   file directly with `npx tsx`. Current:
-   `big-decimal/kernel-base2-experiment.ts` — base-2 vs base-10 fixed-point
-   transcendental kernel (ROADMAP item 17.1); self-verifies bit-identical
-   output against a high-precision `BigDecimal` reference, then prints
-   kernel-only and end-to-end speedup tables. (These sit below the capability
-   harness because they measure a component, not a user-facing capability;
-   once an optimization lands in `src/`, the capability benchmark's
-   arbitrary-precision-numeric column reflects it vs the published CE build and
-   SymPy/mpmath.)
+   pipeline). These sit below the capability harness because they measure a
+   component, not a user-facing capability. Contents:
+   - `kernel-base2-experiment.ts` — base-2 vs base-10 fixed-point transcendental
+     kernel A/B (ROADMAP item 17.1); self-verifies bit-identical output against a
+     high-precision `BigDecimal` reference, then prints kernel-only and
+     end-to-end speedup tables. Run with `npx tsx`.
+   - `cell.mjs` (a CE bundle) + `cell.py` (SymPy / mpmath) — time **one**
+     `(op, precision)` per process. Driven in a fresh-process-per-cell loop they
+     feed **[`BIGNUM-COMPARISON.md`](./big-decimal/BIGNUM-COMPARISON.md)**, the
+     honest internal CE-vs-0.59.0-vs-SymPy-vs-mpmath report (where the bignum
+     core leads and where it trails — pointing at ROADMAP item 17 follow-ups).
+     The per-cell method avoids the cross-precision constant-cache thrash that a
+     single multi-precision process suffers. Reproduce steps are in that file.
+   - `bignum-compare.mjs` / `bignum-compare.py` — the quicker whole-table variant
+     (one process); convenient but its `exp`/`ln` cells are inflated by that
+     cache thrash, so prefer `cell.*` for reportable numbers.
 
 1. **Capability benchmark** (`report.mjs`) — the main report. Compares three
    Compute Engine configurations — the current build, the current build with
@@ -146,8 +152,10 @@ check additionally flags value-correct-but-malformed results (e.g. `√x`/`|x|`)
 The Wester files are GPL (Michael Wester's CAS-review suite); `benchmarks/wester/`
 holds the Mathematica form (parseable by `wl-parser`). The Maxima variant in
 `benchmarks/wester_problems/` is **not** used (no parser, stateful format).
-Heads covered so far: factor, expand, simplify, derivative, limit, indefinite &
-definite integration; `Solve` / `PolynomialGCD` / `Resultant` are the next to add.
+Heads covered: factor, expand, simplify, derivative, limit, indefinite &
+definite integration, `Solve` and `Resultant`. (`PolynomialGCD` problems in the
+Wester files reference stateful symbols / are multivariate, so they're skipped
+here — polynomial GCD is covered concretely by the hand-authored `audit.ts`.)
 
 ---
 

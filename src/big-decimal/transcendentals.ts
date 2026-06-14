@@ -18,7 +18,6 @@ import {
   fpatan,
   bigintDigits,
   pow10,
-  PI_DIGITS,
 } from './utils';
 
 // ---------- Declaration merging ----------
@@ -53,6 +52,18 @@ declare module './big-decimal' {
     cosh(): BigDecimal;
     /** Hyperbolic tangent. */
     tanh(): BigDecimal;
+    /** Inverse hyperbolic sine. */
+    asinh(): BigDecimal;
+    /** Inverse hyperbolic cosine. Returns NaN for values < 1. */
+    acosh(): BigDecimal;
+    /** Inverse hyperbolic tangent. Returns NaN for |x| > 1, ±Infinity at ±1. */
+    atanh(): BigDecimal;
+    /** exp(this) − 1, accurate for small arguments. */
+    expm1(): BigDecimal;
+    /** ln(1 + this), accurate for small arguments. */
+    log1p(): BigDecimal;
+    /** nth root. Supports negative values for odd n. */
+    nthRoot(n: number): BigDecimal;
   }
 
   // eslint-disable-next-line @typescript-eslint/no-namespace
@@ -62,6 +73,7 @@ declare module './big-decimal' {
     function exp(x: BigDecimal): BigDecimal;
     function ln(x: BigDecimal): BigDecimal;
     function log10(x: BigDecimal): BigDecimal;
+    function log2(x: BigDecimal): BigDecimal;
     function sin(x: BigDecimal): BigDecimal;
     function cos(x: BigDecimal): BigDecimal;
     function tan(x: BigDecimal): BigDecimal;
@@ -72,6 +84,12 @@ declare module './big-decimal' {
     function sinh(x: BigDecimal): BigDecimal;
     function cosh(x: BigDecimal): BigDecimal;
     function tanh(x: BigDecimal): BigDecimal;
+    function asinh(x: BigDecimal): BigDecimal;
+    function acosh(x: BigDecimal): BigDecimal;
+    function atanh(x: BigDecimal): BigDecimal;
+    function expm1(x: BigDecimal): BigDecimal;
+    function log1p(x: BigDecimal): BigDecimal;
+    function nthRoot(x: BigDecimal, n: number): BigDecimal;
   }
 }
 
@@ -87,6 +105,15 @@ const LOG2_10 = Math.log2(10); // ≈ 3.321928
 const LOG10_2 = Math.log10(2); // ≈ 0.30103
 /** Extra binary guard beyond the requested decimal working precision. */
 const GUARD_BITS = 16;
+
+/**
+ * Safety cap on the number of π digits the trig mod-2π reduction will compute
+ * on demand (via Chudnovsky in `fppi`). The hardcoded table is ~2370 digits;
+ * beyond that π is computed on the fly, so the only limit is this cap, which
+ * exists to keep an absurd argument (e.g. sin(1e2000000)) from triggering an
+ * unbounded computation. Returns NaN past it.
+ */
+const MAX_PI_DIGITS = 1_000_000;
 
 /**
  * Convert a BigDecimal to a base-2 fixed-point bigint.
@@ -185,17 +212,24 @@ const MAX_SAFE_EXPONENT = BigInt(Number.MAX_SAFE_INTEGER);
 // `exp`/`ln` factor the decimal exponent out of their argument using ln(10).
 // Cache its fixed-point value, keyed by the scale (working precision), so the
 // Newton iteration in `fpln` runs at most once per precision change.
-let _ln10Fp: bigint | null = null;
-let _ln10Bits: number | null = null;
+let _ln10Cache: { bits: number; value: bigint } | null = null;
 function ln10Fixed(bits: number): bigint {
-  if (_ln10Bits !== bits) {
-    // ln(10) · 2^bits, computed from the fixed-point value 10·2^bits = 10 << bits.
-    // 10 is O(1), so this is well-conditioned and never hits the underflow path
-    // it exists to fix.
-    _ln10Fp = fpln(10n << BigInt(bits), bits);
-    _ln10Bits = bits;
+  // "Compute high, downshift for lower." ln() and exp() reduce at slightly
+  // different working precisions (targetPrec + 20 + eDigits vs + magnitude), so
+  // a cache keyed by exact bits would thrash when both run (e.g. inside pow =
+  // ln then exp), recomputing this full ln each call. Caching the highest bits
+  // seen and right-shifting for any lower request avoids that.
+  if (_ln10Cache !== null) {
+    if (_ln10Cache.bits === bits) return _ln10Cache.value;
+    if (_ln10Cache.bits > bits)
+      return _ln10Cache.value >> BigInt(_ln10Cache.bits - bits);
   }
-  return _ln10Fp!;
+  // ln(10) · 2^bits, computed from the fixed-point value 10·2^bits = 10 << bits.
+  // 10 is O(1), so this is well-conditioned and never hits the underflow path
+  // it exists to fix.
+  const value = fpln(10n << BigInt(bits), bits);
+  _ln10Cache = { bits, value };
+  return value;
 }
 
 // ---------- sqrt ----------
@@ -476,6 +510,11 @@ BigDecimal.prototype.log = function (base: BigDecimal | number): BigDecimal {
     return x.log(10);
   };
 
+(BigDecimal as unknown as { log2: (x: BigDecimal) => BigDecimal }).log2 =
+  function (x: BigDecimal): BigDecimal {
+    return x.log(2);
+  };
+
 // ---------- sin ----------
 
 BigDecimal.prototype.sin = function (): BigDecimal {
@@ -498,9 +537,9 @@ BigDecimal.prototype.sin = function (): BigDecimal {
   const workingPrec = targetPrec + 15 + (e < 0 ? -e : 0);
 
   // Huge arguments are reduced mod 2π inside fpsincos at extended precision,
-  // which needs ~e extra digits of π. We only store ~2370 digits of π:
-  // beyond that the reduction would be silently wrong — report NaN instead.
-  if (e > PI_DIGITS.length - workingPrec - 30) return BigDecimal.NAN;
+  // which needs ~e extra digits of π. π is computed on demand (Chudnovsky)
+  // beyond the stored table, so this only caps truly absurd magnitudes.
+  if (e + workingPrec + 30 > MAX_PI_DIGITS) return BigDecimal.NAN;
 
   const [fp, bits] = toFixedPoint(this, workingPrec);
   const [sinFp] = fpsincos(fp, bits);
@@ -522,7 +561,7 @@ BigDecimal.prototype.cos = function (): BigDecimal {
   // (Tiny arguments are fine here: the result is O(1), and a fixed-point
   // input that truncates to 0 yields cos = 1, the correctly rounded value.)
   const e = decimalExponent(this);
-  if (e > PI_DIGITS.length - workingPrec - 30) return BigDecimal.NAN;
+  if (e + workingPrec + 30 > MAX_PI_DIGITS) return BigDecimal.NAN;
 
   const [fp, bits] = toFixedPoint(this, workingPrec);
   const [, cosFp] = fpsincos(fp, bits);
@@ -545,7 +584,7 @@ BigDecimal.prototype.tan = function (): BigDecimal {
 
   // Compensate small arguments; cap huge ones by the π-digit budget (see sin).
   const workingPrec = targetPrec + 15 + (e < 0 ? -e : 0);
-  if (e > PI_DIGITS.length - workingPrec - 30) return BigDecimal.NAN;
+  if (e + workingPrec + 30 > MAX_PI_DIGITS) return BigDecimal.NAN;
 
   const [fp, bits] = toFixedPoint(this, workingPrec);
   const [sinFp, cosFp] = fpsincos(fp, bits);
@@ -875,6 +914,232 @@ BigDecimal.prototype.tanh = function (): BigDecimal {
   function (x: BigDecimal): BigDecimal {
     return x.tanh();
   };
+
+// ---------- expm1 ----------
+
+BigDecimal.prototype.expm1 = function (): BigDecimal {
+  // exp(this) − 1, accurate for small arguments (where exp(x) − 1 would lose
+  // the leading digits to cancellation with 1).
+  if (this.isNaN()) return BigDecimal.NAN;
+  if (!this.isFinite())
+    return this.significand > 0n
+      ? BigDecimal.POSITIVE_INFINITY
+      : BigDecimal.NEGATIVE_ONE; // expm1(−∞) = −1
+  if (this.isZero()) return BigDecimal.ZERO;
+
+  const targetPrec = BigDecimal.precision;
+  const e = decimalExponent(this);
+
+  // expm1(x) = x + x²/2 + …: tiny x rounds to x (relative error ~x/2 ~ 10^e).
+  if (e < 0 && -e >= targetPrec + 2) return this.toPrecision(targetPrec);
+
+  if (e < 0) {
+    // Small x: exp(x) ≈ 1 + x, so exp(x) − 1 cancels ~−e leading digits.
+    // Raise the precision to compensate, then round back.
+    const saved = BigDecimal.precision;
+    BigDecimal.precision = targetPrec - e + 5;
+    try {
+      return this.exp().sub(BigDecimal.ONE).toPrecision(targetPrec);
+    } finally {
+      BigDecimal.precision = saved;
+    }
+  }
+
+  // |x| ≳ 1: the result is O(1) or larger, no cancellation.
+  return this.exp().sub(BigDecimal.ONE);
+};
+
+// ---------- log1p ----------
+
+BigDecimal.prototype.log1p = function (): BigDecimal {
+  // ln(1 + this), accurate for small arguments (where 1 + x ≈ 1).
+  if (this.isNaN()) return BigDecimal.NAN;
+  if (!this.isFinite())
+    return this.significand > 0n ? BigDecimal.POSITIVE_INFINITY : BigDecimal.NAN;
+  if (this.isZero()) return BigDecimal.ZERO;
+
+  // 1 + x ≤ 0 → outside the domain.
+  const onePlus = BigDecimal.ONE.add(this);
+  if (onePlus.isZero()) return BigDecimal.NEGATIVE_INFINITY; // x = −1
+  if (onePlus.significand < 0n) return BigDecimal.NAN; // x < −1
+
+  const targetPrec = BigDecimal.precision;
+  const e = decimalExponent(this);
+
+  // log1p(x) = x − x²/2 + …: tiny x rounds to x.
+  if (e < 0 && -e >= targetPrec + 2) return this.toPrecision(targetPrec);
+
+  if (e < 0) {
+    // Small x: ln(1 + x) ≈ x but 1 + x ≈ 1, so ln loses ~−e leading digits.
+    // (Forming 1 + x is exact; the loss is in resolving ln near 1.) Compensate.
+    const saved = BigDecimal.precision;
+    BigDecimal.precision = targetPrec - e + 5;
+    try {
+      return BigDecimal.ONE.add(this).ln().toPrecision(targetPrec);
+    } finally {
+      BigDecimal.precision = saved;
+    }
+  }
+
+  return BigDecimal.ONE.add(this).ln();
+};
+
+// ---------- asinh ----------
+
+BigDecimal.prototype.asinh = function (): BigDecimal {
+  // asinh(x) = sign(x) · ln(|x| + sqrt(x² + 1)). Odd function; |x| keeps the
+  // logarithm's argument ≥ 1 so the sum never cancels.
+  if (this.isNaN()) return BigDecimal.NAN;
+  if (this.isZero()) return BigDecimal.ZERO;
+  if (!this.isFinite())
+    return this.significand > 0n
+      ? BigDecimal.POSITIVE_INFINITY
+      : BigDecimal.NEGATIVE_INFINITY;
+
+  const negative = this.significand < 0n;
+  const t = this.abs();
+  const targetPrec = BigDecimal.precision;
+  const e = decimalExponent(this);
+
+  // asinh(x) = x − x³/6 + …: tiny x rounds to x.
+  if (e < 0 && -2 * e >= targetPrec + 4) return this.toPrecision(targetPrec);
+
+  const compute = (): BigDecimal =>
+    t.add(t.mul(t).add(BigDecimal.ONE).sqrt()).ln();
+
+  let result: BigDecimal;
+  if (e < 0) {
+    // Small x: ln(|x| + sqrt(x²+1)) = ln(1 + x + …) ≈ x near 1 — compensate.
+    const saved = BigDecimal.precision;
+    BigDecimal.precision = targetPrec - e + 5;
+    try {
+      result = compute().toPrecision(targetPrec);
+    } finally {
+      BigDecimal.precision = saved;
+    }
+  } else {
+    result = compute();
+  }
+  return negative ? result.neg() : result;
+};
+
+// ---------- acosh ----------
+
+BigDecimal.prototype.acosh = function (): BigDecimal {
+  // acosh(x) = 2·asinh(sqrt((x−1)/2)) for x ≥ 1. This form is stable near x = 1
+  // (the naive ln(x + sqrt(x²−1)) loses precision there); asinh supplies its
+  // own small/large-argument handling.
+  if (this.isNaN()) return BigDecimal.NAN;
+  if (!this.isFinite())
+    return this.significand > 0n ? BigDecimal.POSITIVE_INFINITY : BigDecimal.NAN;
+
+  // Domain: x ≥ 1.
+  if (this.lt(BigDecimal.ONE)) return BigDecimal.NAN;
+  if (this.eq(1)) return BigDecimal.ZERO;
+
+  const t = this.sub(BigDecimal.ONE).div(BigDecimal.TWO).sqrt();
+  return BigDecimal.TWO.mul(t.asinh());
+};
+
+// ---------- atanh ----------
+
+BigDecimal.prototype.atanh = function (): BigDecimal {
+  // atanh(x) = ½·ln((1+x)/(1−x)) for |x| < 1.
+  if (this.isNaN()) return BigDecimal.NAN;
+  if (!this.isFinite()) return BigDecimal.NAN; // |±∞| > 1
+  if (this.isZero()) return BigDecimal.ZERO;
+
+  const abs = this.abs();
+  if (abs.eq(1))
+    return this.significand > 0n
+      ? BigDecimal.POSITIVE_INFINITY
+      : BigDecimal.NEGATIVE_INFINITY;
+  if (abs.gt(BigDecimal.ONE)) return BigDecimal.NAN;
+
+  const targetPrec = BigDecimal.precision;
+  const e = decimalExponent(this); // < 0 since |x| < 1
+
+  // atanh(x) = x + x³/3 + …: tiny x rounds to x.
+  if (-2 * e >= targetPrec + 4) return this.toPrecision(targetPrec);
+
+  // ln((1+x)/(1−x)) ≈ 2x near 1 for small x — compensate the cancellation.
+  const saved = BigDecimal.precision;
+  BigDecimal.precision = targetPrec - e + 5;
+  try {
+    const ratio = BigDecimal.ONE.add(this).div(BigDecimal.ONE.sub(this));
+    return ratio.ln().div(BigDecimal.TWO).toPrecision(targetPrec);
+  } finally {
+    BigDecimal.precision = saved;
+  }
+};
+
+// ---------- nthRoot ----------
+
+BigDecimal.prototype.nthRoot = function (n: number): BigDecimal {
+  // x^(1/n) for integer n. Negative x is allowed when n is odd.
+  if (this.isNaN() || !Number.isInteger(n) || n === 0) return BigDecimal.NAN;
+  if (n === 1) return this;
+  if (n === 2) return this.sqrt();
+  if (n === 3) return this.cbrt();
+  if (n < 0) return this.nthRoot(-n).inv();
+
+  // n ≥ 4 (positive integer)
+  if (this.isZero()) return BigDecimal.ZERO;
+  if (!this.isFinite()) {
+    if (this.significand > 0n) return BigDecimal.POSITIVE_INFINITY;
+    return n % 2 === 0 ? BigDecimal.NAN : BigDecimal.NEGATIVE_INFINITY;
+  }
+  if (this.significand < 0n) {
+    if (n % 2 === 0) return BigDecimal.NAN; // even root of a negative
+    return this.neg().nthRoot(n).neg();
+  }
+
+  // Positive base: x^(1/n) = exp(ln(x)/n), with a few guard digits.
+  const targetPrec = BigDecimal.precision;
+  const saved = BigDecimal.precision;
+  BigDecimal.precision = targetPrec + 8;
+  try {
+    const r = BigDecimal.exp(this.ln().div(new BigDecimal(n)));
+    return r.toPrecision(targetPrec);
+  } finally {
+    BigDecimal.precision = saved;
+  }
+};
+
+// ---------- Static methods: asinh, acosh, atanh, expm1, log1p, nthRoot ----------
+
+(BigDecimal as unknown as { asinh: (x: BigDecimal) => BigDecimal }).asinh =
+  function (x: BigDecimal): BigDecimal {
+    return x.asinh();
+  };
+
+(BigDecimal as unknown as { acosh: (x: BigDecimal) => BigDecimal }).acosh =
+  function (x: BigDecimal): BigDecimal {
+    return x.acosh();
+  };
+
+(BigDecimal as unknown as { atanh: (x: BigDecimal) => BigDecimal }).atanh =
+  function (x: BigDecimal): BigDecimal {
+    return x.atanh();
+  };
+
+(BigDecimal as unknown as { expm1: (x: BigDecimal) => BigDecimal }).expm1 =
+  function (x: BigDecimal): BigDecimal {
+    return x.expm1();
+  };
+
+(BigDecimal as unknown as { log1p: (x: BigDecimal) => BigDecimal }).log1p =
+  function (x: BigDecimal): BigDecimal {
+    return x.log1p();
+  };
+
+(
+  BigDecimal as unknown as {
+    nthRoot: (x: BigDecimal, n: number) => BigDecimal;
+  }
+).nthRoot = function (x: BigDecimal, n: number): BigDecimal {
+  return x.nthRoot(n);
+};
 
 // ---------- Internal helpers ----------
 

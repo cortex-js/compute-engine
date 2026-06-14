@@ -468,14 +468,18 @@ export function pow(
         //   return ce._fn('Power', [ce.E, radiansToAngle(theta)!.mul(ce.I)]);
       }
     } else if (numericApproximation) {
-      const eN = ce.E.N();
-      const eNv = numericValue(eN);
-      if (eNv !== undefined) {
-        if (typeof exp === 'number') {
-          return ce.number(ce._numericValue(eNv).pow(exp));
-        } else if (isNumber(exp)) {
-          return ce.number(ce._numericValue(eNv).pow(exp.numericValue));
-        }
+      // e^x = exp(x): evaluate exp directly. Going through e.pow(x) would
+      // compute exp(x·ln(e)) — recomputing ln(e) ≈ 1, a full high-precision
+      // logarithm per call. (Real exponents take the direct path; a general
+      // complex exponent keeps the e.pow(x) path, unchanged.)
+      if (typeof exp === 'number') {
+        return ce.number(ce._numericValue(exp).exp());
+      } else if (isNumber(exp)) {
+        const xv = ce._numericValue(exp.numericValue);
+        if (xv.im === 0) return ce.number(xv.exp());
+        const eNv = numericValue(ce.E.N());
+        if (eNv !== undefined)
+          return ce.number(ce._numericValue(eNv).pow(xv));
       }
     }
   }

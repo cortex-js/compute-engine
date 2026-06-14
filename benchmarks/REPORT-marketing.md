@@ -1,6 +1,6 @@
 # Compute Engine — how it compares
 
-_A quick, like-for-like comparison of Compute Engine against widely-used open-source math libraries. 2026-06-13._
+_A quick, like-for-like comparison of Compute Engine against widely-used open-source math libraries. 2026-06-14._
 
 **Compute Engine is the only library here that combines symbolic computation (simplify, differentiate, integrate) with arbitrary-precision numerics — and runs natively in the browser and Node.js at JavaScript speed.** SymPy matches it on symbolic breadth but needs a Python runtime and is markedly slower per call; math.js runs in JavaScript but has no symbolic integration and only light simplification; NumPy is numeric-only and limited to ~16 digits.
 
@@ -68,19 +68,19 @@ Median time per call (warm). Lower is better. Compute Engine and math.js run in 
 
 | Operation | Example | Compute Engine | SymPy | math.js |
 |---|---|--:|--:|--:|
-| Evaluate | $\pi$ <sub>(200 digits)</sub> | <0.01 ms | 0.25 ms | 0.06 ms |
-| Evaluate | $100!$ <sub>(exact)</sub> | 0.02 ms | 0.41 ms | 0.54 ms |
-| Evaluate | $\Gamma(\tfrac13)$ <sub>(40 digits)</sub> | 4.3 ms | 0.42 ms | — |
-| Simplify | $\frac{x^2-1}{x-1}$ | 0.61 ms | 13.4 ms | 2.9 ms |
-| Simplify | $\sin^2 x+\cos^2 x$ | 0.45 ms | 16.7 ms | 2.2 ms |
-| Simplify | $\frac{x^3-1}{x-1}$ | 0.68 ms | 15.9 ms | 2.7 ms |
-| Differentiate | $\tfrac{d}{dx}x^x$ | 0.26 ms | 2.8 ms | 3.8 ms |
-| Differentiate | $\tfrac{d}{dx}x^2\sin x$ | 0.81 ms | 3.9 ms | 6.0 ms |
-| Integrate | $\int x e^x\,dx$ | 0.75 ms | 13.2 ms | — |
-| Integrate | $\int\frac{1}{1+x^2}\,dx$ | 0.39 ms | 53.4 ms | — |
-| Integrate | $\int\frac{1}{x^3+1}\,dx$ | 13.2 ms | 57.1 ms | — |
+| Evaluate | $\pi$ <sub>(200 digits)</sub> | <0.01 ms | 0.29 ms | 0.03 ms |
+| Evaluate | $100!$ <sub>(exact)</sub> | 0.02 ms | 0.54 ms | 0.32 ms |
+| Evaluate | $\Gamma(\tfrac13)$ <sub>(40 digits)</sub> | 3.3 ms | 0.38 ms | — |
+| Simplify | $\frac{x^2-1}{x-1}$ | 0.59 ms | 13.6 ms | 2.7 ms |
+| Simplify | $\sin^2 x+\cos^2 x$ | 0.37 ms | 18.6 ms | 4.1 ms |
+| Simplify | $\frac{x^3-1}{x-1}$ | 0.90 ms | 19.6 ms | 5.0 ms |
+| Differentiate | $\tfrac{d}{dx}x^x$ | 0.29 ms | 2.9 ms | 4.5 ms |
+| Differentiate | $\tfrac{d}{dx}x^2\sin x$ | 0.94 ms | 3.9 ms | 5.1 ms |
+| Integrate | $\int x e^x\,dx$ | 0.78 ms | 12.9 ms | — |
+| Integrate | $\int\frac{1}{1+x^2}\,dx$ | 0.47 ms | 18.6 ms | — |
+| Integrate | $\int\frac{1}{x^3+1}\,dx$ | 10.4 ms | 56.6 ms | — |
 
-On the symbolic operations shared with SymPy above, **Compute Engine is roughly 23× faster per call** (median 0.68 ms vs 15.9 ms) — while running in the browser rather than requiring a Python backend.
+On the symbolic operations shared with SymPy above, **Compute Engine is roughly 24× faster per call** (median 0.78 ms vs 18.6 ms) — while running in the browser rather than requiring a Python backend.
 
 ## The bottom line
 

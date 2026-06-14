@@ -9,6 +9,7 @@ import type {
 import { isNumber, isFunction, isSymbol, numericValue } from './type-guards';
 import { polynomialDegree, getPolynomialCoefficients } from './polynomials';
 import { asSmallInteger } from './numerics';
+import { realPolynomialRoots } from '../numerics/polynomial-roots';
 
 function numericApproximation(value: unknown): number | undefined {
   if (typeof value === 'number') return value;
@@ -1320,9 +1321,24 @@ export function findUnivariateRoots(
         const quadraticRoots = solveQuadraticByCoefficients(originalExpr, x);
         if (quadraticRoots.length > 0) result = quadraticRoots;
       } else if (deg >= 3) {
-        // Fallback: try rational root theorem for degree 3+ polynomials
+        // Exact rational roots first (rational-root theorem)…
         const rationalRoots = findRationalRoots(originalExpr, x, ce);
-        if (rationalRoots.length > 0) result = rationalRoots;
+        result = [...rationalRoots];
+        // …then a numeric Durand–Kerner fallback for the general case (a cubic
+        // or quartic with irrational roots, e.g. `3x³−18x²+33x−19`, otherwise
+        // returns nothing). Real roots not already found exactly are added as
+        // numeric approximations; `validateRoots` discards any spurious ones.
+        if (rationalRoots.length < deg) {
+          for (const nr of numericRealRoots(originalExpr, x, ce)) {
+            const v = nr.re;
+            if (
+              !result.some(
+                (r) => Math.abs(r.N().re - v) <= 1e-7 * (1 + Math.abs(v))
+              )
+            )
+              result.push(nr);
+          }
+        }
       }
     }
 
@@ -1663,4 +1679,33 @@ function findRationalRoots(
     if (value.isSame(0)) roots.push(root);
   }
   return roots;
+}
+
+/**
+ * Numeric **real** roots of a univariate polynomial with numeric coefficients,
+ * via Durand–Kerner. Used as a last-resort fallback for general cubics/quartics
+ * (and higher) that have no rational root, so `solve` returns approximate real
+ * roots instead of nothing. Returns `[]` when the coefficients aren't all
+ * numeric, the degree is impractically large, or the iteration fails to
+ * converge — leaving the (exact) symbolic paths untouched.
+ */
+function numericRealRoots(
+  expr: Expression,
+  variable: string,
+  ce: ComputeEngine
+): Expression[] {
+  const coeffs = getPolynomialCoefficients(expr, variable);
+  if (!coeffs) return [];
+  if (coeffs.length - 1 > 12) return []; // degree cap
+
+  const nums: number[] = [];
+  for (const c of coeffs) {
+    const v = c.N().re;
+    if (!Number.isFinite(v)) return []; // a symbolic/parametric coefficient
+    nums.push(v);
+  }
+
+  const roots = realPolynomialRoots(nums, ce._deadline);
+  if (roots === null) return [];
+  return roots.map((r) => ce.number(r));
 }

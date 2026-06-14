@@ -217,9 +217,15 @@ export function fpexp(x: bigint, bits: number): bigint {
  * @param bits  The base-2 scale exponent
  * @returns  ln(x/2^bits) * 2^bits as a bigint
  */
+// AGM-vs-Newton crossover, in bits. Below LN_AGM_MIN_BITS the float-seeded
+// giant_steps Newton converges in a few steps and wins; above it AGM's
+// O(M(p)·log p) cost (≈ log₂p square roots) pulls ahead — measured crossover
+// ≈ 1250 decimal digits. (ln 2, which AGM needs, comes from the LN2_DIGITS
+// table or binary splitting, so there is no upper bound.)
+const LN_AGM_MIN_BITS = 4200; // ≈ 1250 decimal digits
+
 export function fpln(x: bigint, bits: number): bigint {
-  const B = BigInt(bits);
-  const scale = 1n << B;
+  const scale = 1n << BigInt(bits);
   // Defense in depth: a non-positive input is a caller bug (callers
   // range-reduce so the kernel only sees O(1) positive values). A zero
   // input used to hang forever in the sqrt-reduction loop (fpsqrt(0) = 0).
@@ -228,12 +234,24 @@ export function fpln(x: bigint, bits: number): bigint {
   // ln(1) = 0
   if (x === scale) return 0n;
 
+  return bits >= LN_AGM_MIN_BITS ? fplnAGM(x, bits) : fplnNewton(x, bits);
+}
+
+/**
+ * Newton logarithm with giant_steps precision doubling: solves exp(y) = x for
+ * y = ln(x), seeded from a float64 log. Fast at low/medium precision.
+ */
+function fplnNewton(x: bigint, bits: number): bigint {
+  const B = BigInt(bits);
+  const scale = 1n << B;
+
   // Try direct floating-point seed first (fast path for bits <= ~1000)
   const xNum = Number(x);
   const scaleNum = Number(scale);
   let y: bigint;
   let target = x; // the value we compute ln of (may be reduced)
   let k = 0; // number of sqrt halvings applied
+  let seedAcc = 2; // bits of accuracy in the seed (crude estimate by default)
 
   if (
     Number.isFinite(xNum) &&
@@ -247,6 +265,7 @@ export function fpln(x: bigint, bits: number): bigint {
       if (Number.isFinite(approx)) {
         // Good ~15-digit seed from floating-point
         y = BigInt(Math.round(approx * scaleNum));
+        seedAcc = 48; // ~48 bits of accuracy from a float64 log
       } else {
         y = estimateLnSeed(x, bits);
       }
@@ -274,8 +293,31 @@ export function fpln(x: bigint, bits: number): bigint {
   }
 
   // Newton iteration: y_{n+1} = y + x/exp(y) - 1 in fixed-point:
-  // y_{n+1} = y + (target * scale / ey) - scale
+  // y_{n+1} = y + (target * scale / ey) - scale, where ey = exp(y).
   //
+  // giant_steps (precision doubling): exp(y) is the dominant cost and Newton
+  // doubles the correct bits each step, so the early steps only need low
+  // working precision. Run the ramp-up steps entirely at scale 2^wp (cheap
+  // fpexp + small division), doubling wp from the seed accuracy toward `bits`;
+  // the final full-precision steps below settle the last bits. This turns ~log p
+  // full-precision fpexp calls into ~2 (each halving of wp ~quarters the cost),
+  // which is the difference between ln being ~6× and ~2× the cost of one fpexp.
+  for (let wp = Math.min(bits, Math.max(8, 2 * seedAcc)); wp < bits; ) {
+    const wB = BigInt(wp);
+    const sh = BigInt(bits - wp);
+    const yW = y >> sh; // y at scale 2^wp
+    const eyW = fpexp(yW, wp);
+    if (eyW === 0n) {
+      y = y / 2n; // exp underflow: y too negative, back off and retry
+      continue;
+    }
+    const targetW = target >> sh; // target at scale 2^wp
+    const ynW = yW + (targetW << wB) / eyW - (1n << wB);
+    y = ynW << sh; // back to full scale (low bits below wp are not yet valid)
+    wp = Math.min(bits, 2 * wp);
+  }
+
+  // Full-precision settling.
   // Convergence note: fpexp has O(1) ULP truncation error and the
   // subsequent division adds another O(1) ULP, so the smallest
   // achievable |delta| can be tens of ULPs rather than 0–1. A tight
@@ -318,6 +360,69 @@ export function fpln(x: bigint, bits: number): bigint {
   return y;
 }
 
+/**
+ * ln(2) · 2^bits, cached. Computed once via the Newton path (NOT the AGM path,
+ * which depends on ln 2). "Compute high, downshift for lower."
+ */
+let _ln2Cache: { bits: number; value: bigint } | null = null;
+function lnTwoFixed(bits: number): bigint {
+  if (_ln2Cache !== null) {
+    if (_ln2Cache.bits === bits) return _ln2Cache.value;
+    if (_ln2Cache.bits > bits)
+      return _ln2Cache.value >> BigInt(_ln2Cache.bits - bits);
+  }
+  const neededDigits = Math.ceil(bits * LOG10_2) + 12;
+  let value: bigint;
+  if (neededDigits <= LN2_DIGITS.length) {
+    // Table path: ln2 = 0.<digits>, value = ln2·2^bits = (digits)·2^bits / 10^len
+    const ds = LN2_DIGITS.slice(0, neededDigits);
+    value = (BigInt(ds) << BigInt(bits)) / pow10(ds.length);
+  } else {
+    // Beyond the table: binary splitting (cheap at any precision).
+    value = ln2ChudnovskyBits(bits);
+  }
+  _ln2Cache = { bits, value };
+  return value;
+}
+
+/**
+ * AGM logarithm (Sasaki–Kanada): for s large, ln(s) = π / (2·AGM(1, 4/s)).
+ * We pick m so s = (x/2^bits)·2^m is large enough (≥ 2^(bits/2+4)), compute
+ * ln(s) via the arithmetic-geometric mean, then ln(x/2^bits) = ln(s) − m·ln2.
+ *
+ * The AGM converges quadratically (≈ log₂(bits) iterations, each one sqrt), so
+ * this is O(M(p)·log p) — far cheaper than Newton's repeated exp at high
+ * precision. ln 2 is computed once via Newton and cached.
+ */
+function fplnAGM(x: bigint, bits: number): bigint {
+  const B = BigInt(bits);
+  // Choose m so that s = value·2^m is large: L = s/4 ≥ 2^(bits/2 + 2), making
+  // the asymptotic error O(1/L²) < 2^(−bits).
+  const log2v = bitLength(x) - bits; // ≈ log2(value)
+  const m = Math.max(2, Math.ceil(bits / 2 + 4 - log2v));
+
+  // Work with L = s/4 (LARGE) rather than 4/s (tiny) — a tiny argument at scale
+  // 2^bits would carry only ~bits/2 significant bits and halve the accuracy.
+  // By AGM homogeneity AGM(1, 4/s) = AGM(1, L)/L, so
+  //   ln(s) = π/(2·AGM(1,4/s)) = π·L/(2·AGM(1,L)).
+  // In fixed point (scale 2^bits): L_fp = L·2^bits = x << (m−2).
+  const Lfp = x << BigInt(m - 2);
+
+  // AGM(1, L): a = 1 = 2^bits, b = L_fp; a' = (a+b)/2, b' = sqrt(a·b).
+  let a = 1n << B;
+  let b = Lfp;
+  while (bigintAbs(a - b) > 1n) {
+    const an = (a + b) >> 1n;
+    b = bigintSqrt(a * b);
+    a = an;
+  }
+
+  // ln(s) = π·L/(2·AGM(1,L)); in fp: (π_fp · L_fp) / (2·agm_fp).
+  const lnS = (fppi(bits) * Lfp) / (2n * a);
+  // ln(value) = ln(s) − m·ln2.
+  return lnS - BigInt(m) * lnTwoFixed(bits);
+}
+
 /** round(ln(2) · 2^53), for a base-2 ln seed without float overflow. */
 const LN2_Q53 = 6243314768165359n;
 
@@ -352,33 +457,155 @@ export const PI_DIGITS =
   '3809525720106548586327886593615338182796823030195203530185296899577362259941389124972177528347913151' +
   '557485724245415069595082953311686172785588907509838175463746493931925506040092770167113900984882401285836160356370766010471018194295559619894676783744944825537977472684710404753464620804668425906949129331367702898915210475216205696602405803815019351125338243003558764024749647326391419927260426992279678235478163600934172164121992458631503028618297455570674983850549458858692699569092721079750930295532116534498720275596023648066549911988183479775356636980742654252786255181841757467289097777279380008164706001614524919217321721477235014144197356854816136115735255213347574184946843852332390739414333454776241686251898356948556209921922218427255025425688767179049460165346680498862723279178608578438382796797668145410095388378636095068006422512520511739298489608412848862694560424196528502221066118630674427862203919494504712371378696095636437191728746776465757396241389086583264599581339047802759009946576407895126946839835259570982582262052248940772671947826848260147699090264013639443745530506820349625245174939965143142980919065925093722169646151570985838741059788595977297549893016175392846813826868386894277415599185592524595395943104997252468084598727364469584865383673622262609912460805124388439045124413654976278079771569143599770012961608944169486855584840635';
 
-/**
- * Return PI as a base-2 fixed-point bigint at the given scale.
- *
- * The result satisfies: fppi / 2^bits ≈ π
- */
 const LOG10_2 = Math.log10(2); // ≈ 0.30103
 
+/**
+ * Fractional digits of ln(2) (2400 digits, no leading "0."). Lets the AGM
+ * logarithm obtain ln 2 instantly instead of bootstrapping it with a full
+ * Newton evaluation (which would make a one-shot high-precision ln regress).
+ * Beyond this table `lnTwoFixed` falls back to Newton.
+ */
+const LN2_DIGITS =
+  '693147180559945309417232121458176568075500134360255254120680009493393621969694715605863326996418687542001481020570685733685520235758130557032670751635075961930727570828371435190307038623891673471123350115364497955239120475172681574932065155524734139525882950453007095326366642654104239157814952043740430385500801944170641671518644712839968171784546957026271631064546150257207402481637773389638550695260668341137273873722928956493547025762652098859693201965058554764703306793654432547632744951250406069438147104689946506220167720424524529612687946546193165174681392672504103802546259656869144192871608' +
+  '293803172714367782654877566485085674077648451464439940461422603193096735402574446070308096085047486638523138181676751438667476647890881437141985494231519973548803751658612753529166100071053558249879414729509293113897155998205654392871700072180857610252368892132449713893203784393530887748259701715591070882368362758984258918535302436342143670611892367891923723146723217205340164925687274778234453534764811494186423867767744060695626573796008670762571991847340226514628379048830620330611446300737194890027436439650025809365194430411911506080948793067865158870900605203468429736193841289652556539686022' +
+  '194122924207574321757489097706752687115817051137009158942665478595964890653058460258668382940022833005382074005677053046787001841624044188332327983863490015631218895606505531512721993983320307514084260914790012651682434438935724727882054862715527418772430024897945401961872339808608316648114909306675193393128904316413706813977764981769748689038877899912965036192707108892641052309247839173735012298424204995689359922066022046549415106139187885744245577510206837030866619480896412186807790208181588580001688115973056186676199187395200766719214592236720602539595436541655311295175989940056000366513567' +
+  '569051245926825743946483168332624901803824240824231452306140963805700702551387702681785163069025513703234053802145019015374029509942262995779647427138157363801729873940704242179972266962979939312706935747240493386530879758721699645129446491883771156701678598804981838896784134938314014073166472765327635919233511233389338709513209059272185471328975470797891384445466676192702885533423429899321803769154973340267546758873236778342916191810430116091695265547859732891763545556742863877463987101912431754255888301206779210280341206879759143081283307230300883494705792496591005860012341561757413272465943';
+
+// ================================================================
+// PI via Chudnovsky binary splitting (for precision beyond the table)
+// ================================================================
+
+// 1/π = 12 Σ (−1)^k (6k)!(A + Bk) / ((3k)!(k!)³ C^(3k+3/2)), C = 640320.
+// Computed by binary splitting: bs(a,b) returns (P, Q, T) with the partial
+// sum over [a,b) equal to T/Q (the per-term constants folded in), so the whole
+// series needs a single final big division. ~14.18 decimal digits per term.
+const CHUD_A = 13591409n;
+const CHUD_B = 545140134n;
+const CHUD_C3_OVER_24 = 10939058860032000n; // 640320³ / 24
+const CHUD_BITS_PER_TERM = 47.11; // 14.18 · log2(10)
+
+function chudBS(a: number, b: number): [bigint, bigint, bigint] {
+  if (b - a === 1) {
+    let Pab: bigint;
+    let Qab: bigint;
+    if (a === 0) {
+      Pab = 1n;
+      Qab = 1n;
+    } else {
+      // factors are < 2^53 for any realistic term count, so Number is exact
+      Pab = BigInt(6 * a - 5) * BigInt(2 * a - 1) * BigInt(6 * a - 1);
+      const A = BigInt(a);
+      Qab = A * A * A * CHUD_C3_OVER_24;
+    }
+    let Tab = Pab * (CHUD_A + CHUD_B * BigInt(a));
+    if (a & 1) Tab = -Tab;
+    return [Pab, Qab, Tab];
+  }
+  const m = (a + b) >> 1;
+  const [Pam, Qam, Tam] = chudBS(a, m);
+  const [Pmb, Qmb, Tmb] = chudBS(m, b);
+  return [Pam * Pmb, Qam * Qmb, Qmb * Tam + Pam * Tmb];
+}
+
+/** Number of terms to reach `bits` of precision (with a small guard). */
+function chudTerms(bits: number): number {
+  return Math.max(2, Math.floor(bits / CHUD_BITS_PER_TERM) + 3);
+}
+
+/** π · 2^bits via Chudnovsky (no table-size ceiling). */
+export function piChudnovskyBits(bits: number): bigint {
+  const [, Q, T] = chudBS(0, chudTerms(bits));
+  // 12/C^(3/2) = 1/(426880·√10005); one = 2^bits; sqrtC = isqrt(10005·one²).
+  const one = 1n << BigInt(bits);
+  const sqrtC = bigintSqrt(10005n * one * one);
+  return (Q * 426880n * sqrtC) / T;
+}
+
+/** floor(π · 10^digits) via Chudnovsky. */
+export function piChudnovskyDecimal(digits: number): bigint {
+  const [, Q, T] = chudBS(0, chudTerms(Math.ceil(digits / LOG10_2)));
+  const one = pow10(digits);
+  const sqrtC = bigintSqrt(10005n * one * one);
+  return (Q * 426880n * sqrtC) / T;
+}
+
+// ----------------------------------------------------------------
+// ln(2) via binary splitting of the atanh series (no table ceiling)
+// ----------------------------------------------------------------
+
+// ln 2 = 2·atanh(1/3) = (2/3)·Σ_{k≥0} (1/9)^k / (2k+1).  Each term shrinks by
+// 9× (≈ log2(9) = 3.17 bits/term). Binary splitting sums the rational terms as
+// a single fraction T/Q (the per-term ratio is (2k−1)/(9(2k+1))), so only one
+// big division is needed — quasi-linear with fast bigint multiplication.
+function ln2BS(a: number, b: number): [bigint, bigint, bigint] {
+  if (b - a === 1) {
+    const P = a === 0 ? 1n : BigInt(2 * a - 1);
+    const Q = a === 0 ? 1n : 9n * BigInt(2 * a + 1);
+    return [P, Q, P]; // term factor is 1, so T = P
+  }
+  const m = (a + b) >> 1;
+  const [Pam, Qam, Tam] = ln2BS(a, m);
+  const [Pmb, Qmb, Tmb] = ln2BS(m, b);
+  return [Pam * Pmb, Qam * Qmb, Qmb * Tam + Pam * Tmb];
+}
+
+/** ln(2) · 2^bits via binary splitting (accurate at any precision). */
+export function ln2ChudnovskyBits(bits: number): bigint {
+  const n = Math.max(2, Math.ceil(bits / 3.169925) + 5); // log2(9) ≈ 3.17 bits/term
+  const [, Q, T] = ln2BS(0, n);
+  // ln2 = (2/3)·(T/Q) → ln2·2^bits = (T << (bits+1)) / (3·Q)
+  return (T << BigInt(bits + 1)) / (3n * Q);
+}
+
+/** Floor integer square root of a non-negative bigint. */
+export function bigintSqrt(n: bigint): bigint {
+  if (n < 0n) throw new RangeError('bigintSqrt: negative input');
+  if (n === 0n) return 0n;
+  let x = bigSqrtSeed(n);
+  let prev: bigint;
+  do {
+    prev = x;
+    x = (x + n / x) / 2n;
+  } while (bigintAbs(x - prev) > 1n);
+  // Settle on the exact floor (Heron can leave x one above or below).
+  while (x * x > n) x -= 1n;
+  while ((x + 1n) * (x + 1n) <= n) x += 1n;
+  return x;
+}
+
+/**
+ * Return PI as a base-2 fixed-point bigint at the given scale: fppi / 2^bits ≈ π.
+ *
+ * Uses the hardcoded PI_DIGITS table while it suffices (instant), and falls
+ * back to on-demand Chudnovsky binary splitting beyond it — so there is no
+ * precision ceiling. The cache keeps π at the highest `bits` requested and
+ * serves any lower request by an exact right-shift ("compute high, downshift
+ * for lower", base-2 making the downshift free).
+ */
 let _fppiCache: { bits: number; value: bigint } | null = null;
 
 function fppi(bits: number): bigint {
-  if (_fppiCache !== null && _fppiCache.bits === bits) return _fppiCache.value;
-
-  // Compute PI * 2^bits using the shared PI_DIGITS constant.
-  // We need ~bits·log10(2) decimal digits of PI, plus guard digits.
-  const neededDigits = Math.ceil(bits * LOG10_2) + 12;
-
-  // Take only what we need (slice is clamped to the available digits; callers
-  // guard against requesting beyond the ~2370-digit table — see sin/cos).
-  const digits = PI_DIGITS.slice(0, neededDigits + 1); // +1 for the "3"
-
-  // PI ≈ piInt · 10^(-fracDigits) where fracDigits = digits.length - 1.
-  // result = π · 2^bits = (piInt << bits) / 10^fracDigits
-  const piInt = BigInt(digits);
-  const fracDigits = digits.length - 1;
-  const value = (piInt << BigInt(bits)) / pow10(fracDigits);
+  if (_fppiCache !== null) {
+    if (_fppiCache.bits === bits) return _fppiCache.value;
+    if (_fppiCache.bits > bits)
+      return _fppiCache.value >> BigInt(_fppiCache.bits - bits);
+  }
+  const value = computeFppi(bits);
   _fppiCache = { bits, value };
   return value;
+}
+
+function computeFppi(bits: number): bigint {
+  // We need ~bits·log10(2) decimal digits of PI, plus guard digits.
+  const neededDigits = Math.ceil(bits * LOG10_2) + 12;
+  if (neededDigits + 1 <= PI_DIGITS.length) {
+    // Table path: PI ≈ piInt · 10^(-fracDigits), result = (piInt << bits)/10^frac
+    const digits = PI_DIGITS.slice(0, neededDigits + 1); // +1 for the "3"
+    const piInt = BigInt(digits);
+    return (piInt << BigInt(bits)) / pow10(digits.length - 1);
+  }
+  // Beyond the table: compute on demand.
+  return piChudnovskyBits(bits);
 }
 
 // ================================================================

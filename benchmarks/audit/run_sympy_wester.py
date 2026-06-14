@@ -20,8 +20,8 @@ import time
 
 from sympy import (
     sympify, factor, expand, simplify, together, apart, integrate, diff, limit,
-    N, symbols, sqrt, Abs, sin, cos, tan, cot, sec, csc, exp, log, asin, acos,
-    atan, sinh, cosh, tanh, pi, E, Rational, Integral, oo,
+    solve, gcd, resultant, N, symbols, sqrt, Abs, sin, cos, tan, cot, sec, csc,
+    exp, log, asin, acos, atan, sinh, cosh, tanh, pi, E, Rational, Integral, oo,
 )
 
 NS = {
@@ -88,6 +88,31 @@ def main():
                     print(json.dumps({"id": cid, "status": "ok", "text": str(L), "values": [val], "timeMs": ms}))
                 except Exception:
                     print(json.dumps({"id": cid, "status": "unsolved", "text": str(L), "values": [], "timeMs": ms}))
+            elif op == "solve":
+                roots = solve(e, v); ms = (time.perf_counter() - t0) * 1000  # e = residual
+                real_roots, mags = [], []
+                for r in roots:
+                    try:
+                        z = complex(N(r, 25))
+                        if abs(z.imag) > 1e-9:
+                            continue  # keep real roots only
+                        real_roots.append(z.real)
+                        mags.append(abs(complex(N(e.subs(v, r), 25))))
+                    except Exception:
+                        pass
+                if not real_roots:
+                    print(json.dumps({"id": cid, "status": "unsolved", "text": str(roots), "values": [], "roots": [], "timeMs": ms}))
+                else:
+                    print(json.dumps({"id": cid, "status": "ok", "text": str(roots), "values": mags, "roots": real_roots, "timeMs": ms}))
+            elif op == "gcd":
+                g = gcd(e, sympify(t["expr2"], locals=ns)); ms = (time.perf_counter() - t0) * 1000
+                print(json.dumps({"id": cid, "status": "ok", "text": str(g), "values": sample(g, var, pts), "timeMs": ms}))
+            elif op == "resultant":
+                res = resultant(e, sympify(t["expr2"], locals=ns), v); ms = (time.perf_counter() - t0) * 1000
+                try:
+                    print(json.dumps({"id": cid, "status": "ok", "text": str(res), "values": [float(N(res, 25))], "timeMs": ms}))
+                except Exception:
+                    print(json.dumps({"id": cid, "status": "unsolved", "text": str(res), "values": [], "timeMs": ms}))
             elif op in TRANSFORMS:
                 r = TRANSFORMS[op](e); ms = (time.perf_counter() - t0) * 1000
                 print(json.dumps({"id": cid, "status": "ok", "text": str(r), "values": sample(r, var, pts), "timeMs": ms}))

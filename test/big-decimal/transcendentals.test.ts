@@ -1348,12 +1348,31 @@ describe('D6: trig/hyperbolic large arguments', () => {
     ).toBe(true);
   });
 
-  test('trig beyond the stored π budget reports NaN, not a wrong value', () => {
-    // mod-2π reduction of 10^3000 needs ~3000 digits of π; only ~2370 are
-    // stored, so an accurate reduction is impossible — report NaN.
-    expect(new BigDecimal('1e3000').sin().isNaN()).toBe(true);
-    expect(new BigDecimal('1e3000').cos().isNaN()).toBe(true);
-    expect(new BigDecimal('1e3000').tan().isNaN()).toBe(true);
+  test('trig of huge arguments reduces via on-demand π (no longer NaN)', () => {
+    // mod-2π reduction of 10^3000 needs ~3000 digits of π. Beyond the ~2370
+    // stored digits, π is now computed on demand (Chudnovsky), so the result
+    // is the correct value rather than NaN. Validated against an independent
+    // reduction (1e3000 − ⌊1e3000/2π⌋·2π) computed at 3200 digits.
+    BigDecimal.precision = 50;
+    const x = new BigDecimal('1e3000');
+    expect(x.sin().isNaN()).toBe(false);
+    expect(x.cos().isNaN()).toBe(false);
+
+    BigDecimal.precision = 3200;
+    const twoPi = BigDecimal.PI.mul(2);
+    const k = x.div(twoPi).floor();
+    const r = x.sub(k.mul(twoPi));
+    const refSin = r.sin().toPrecision(50).toString();
+    const refCos = r.cos().toPrecision(50).toString();
+    BigDecimal.precision = 50;
+    expect(x.sin().toString()).toBe(refSin);
+    expect(x.cos().toString()).toBe(refCos);
+  });
+
+  test('trig past the on-demand π cap still reports NaN', () => {
+    // An absurd magnitude would need >1e6 digits of π to reduce — capped.
+    expect(new BigDecimal('1e2000000').sin().isNaN()).toBe(true);
+    expect(new BigDecimal('1e2000000').cos().isNaN()).toBe(true);
   });
 
   test('tanh of huge arguments rounds to ±1 (and terminates)', () => {

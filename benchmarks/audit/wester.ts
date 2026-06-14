@@ -41,7 +41,7 @@ const FILES = [
   'test_algebra', 'test_calculus', 'test_indefinite_integrals',
   'test_definite_integrals', 'test_limits', 'test_trigonometry',
   'test_zero_equivalence', 'test_numbers', 'test_special_functions',
-  'test_series', 'test_sums',
+  'test_series', 'test_sums', 'test_equations', 'test_number_theory',
 ];
 const SIMPLIFY_HEADS = new Set(['Simplify', 'FullSimplify', 'Together', 'Apart', 'TrigExpand', 'TrigReduce', 'PowerExpand']);
 const CONSTS: Record<string, string> = { Pi: 'pi', ExponentialE: 'E', ImaginaryUnit: 'I', EulerGamma: 'EulerGamma' };
@@ -52,7 +52,7 @@ const ce = new ComputeEngine(); // base engine — no Rubi, no Fungrim
 let ceRF: any = null, driver: any = null;
 try {
   ceRF = new ComputeEngine();
-  try { loadIdentities(ceRF); } catch { /* best-effort */ }
+  try { loadIdentities(ceRF, { solve: true }); } catch { try { loadIdentities(ceRF); } catch { /* best-effort */ } }
   const { rules } = compileSection(ceRF, join(ROOT, 'data', 'rubi', 'corpus', '1 Algebraic functions'));
   driver = new RubiDriver(ceRF, rules, { timeLimitMs: 8000 });
 } catch (e: any) { console.error('Rubi/Fungrim setup failed (column dropped):', e?.message); ceRF = null; }
@@ -110,7 +110,7 @@ function timeit(fn: () => void) {
 }
 
 // --- load + categorize runnable cases --------------------------------------
-type Case = { id: string; file: string; cat: string; op: string; arg: any; varName: string; sympyExpr: string; point?: any; a?: any; b?: any; tol: number };
+type Case = { id: string; file: string; cat: string; op: string; arg: any; varName: string; sympyExpr: string; arg2?: any; sympyExpr2?: string; point?: any; a?: any; b?: any; tol: number };
 const cases: Case[] = [];
 const skip = { parseFail: 0, otherHead: 0, multivar: 0, definiteIter: 0, untranslatable: 0, boxFail: 0 };
 let stmtCount = 0;
@@ -148,6 +148,28 @@ for (const f of FILES) {
     } else if (SIMPLIFY_HEADS.has(head)) {
       op = 'simplify'; arg = j[1];
       const vs = [...symbolsOf(arg)]; if (vs.length !== 1) { skip.multivar++; continue; } varName = vs[0];
+    } else if (head === 'Solve') {
+      // Solve[a==b, x] (or Solve[expr, x] meaning expr = 0). Pass the *residual*
+      // a−b so the Equal doesn't pre-evaluate to False; systems (List var) skipped.
+      const eq = j[1], v = j[2];
+      if (typeof v !== 'string') { skip.multivar++; continue; }
+      if (Array.isArray(eq) && eq[0] === 'Equal' && eq.length === 3) arg = ['Subtract', eq[1], eq[2]];
+      else if (Array.isArray(eq) || typeof eq === 'string' || typeof eq === 'number') arg = eq;
+      else { skip.otherHead++; continue; }
+      op = 'solve'; varName = v;
+    } else if (head === 'PolynomialGCD' || head === 'Resultant') {
+      // binary, two-polynomial ops: PolynomialGCD[p,q] / Resultant[p,q,x]
+      const p = j[1], q = j[2];
+      const isRes = head === 'Resultant';
+      if (isRes ? (j.length !== 4 || typeof j[3] !== 'string') : j.length !== 3) { skip.otherHead++; continue; }
+      const vs = [...new Set([...symbolsOf(p), ...symbolsOf(q)])];
+      const vn = isRes ? j[3] : (vs.length === 1 ? vs[0] : null);
+      if (!vn || vs.some((s) => s !== vn)) { skip.multivar++; continue; }
+      let s1: string, s2: string;
+      try { s1 = mjToSympy(p); s2 = mjToSympy(q); } catch { skip.untranslatable++; continue; }
+      try { if (/Error\(/.test(ce.box(p).toString()) || /Error\(/.test(ce.box(q).toString())) { skip.boxFail++; continue; } } catch { skip.boxFail++; continue; }
+      cases.push({ id: `${f}#${cases.length}`, file: f.replace('test_', ''), cat: isRes ? 'resultant' : 'gcd', op: isRes ? 'resultant' : 'gcd', arg: p, arg2: q, varName: vn, sympyExpr: s1, sympyExpr2: s2, tol: isRes ? 1e-4 : 1e-6 });
+      continue;
     } else { skip.otherHead++; continue; }
 
     // single free variable only (so we can evaluate numerically)
@@ -159,12 +181,13 @@ for (const f of FILES) {
   }
 }
 // de-duplicate (the Wester files list some statements twice)
-{ const seen = new Set<string>(); const uniq = cases.filter((c) => { const k = `${c.op}|${c.sympyExpr}|${c.point}|${c.a}|${c.b}`; if (seen.has(k)) return false; seen.add(k); return true; }); cases.length = 0; cases.push(...uniq); }
+{ const seen = new Set<string>(); const uniq = cases.filter((c) => { const k = `${c.op}|${c.sympyExpr}|${c.sympyExpr2}|${c.point}|${c.a}|${c.b}`; if (seen.has(k)) return false; seen.add(k); return true; }); cases.length = 0; cases.push(...uniq); }
 if (process.env.WONLY) { const keep = process.env.WONLY.split(','); for (let i = cases.length - 1; i >= 0; i--) if (!keep.includes(cases[i].op)) cases.splice(i, 1); }
 console.error('Wester: %d statements, %d runnable cases (skips: %o)', stmtCount, cases.length, skip);
 
 // --- numeric reference (the invariant target) ------------------------------
 function refSamples(c: Case): (number | null)[] {
+  if (c.op === 'solve' || c.op === 'gcd' || c.op === 'resultant') return []; // custom-graded below
   const f = ce.box(c.arg);
   if (c.op === 'integrate') return POINTS.map((p) => numAt(ce, f, c.varName, p));           // integrand
   if (c.op === 'diff') return POINTS.map((p) => {                                            // central difference
@@ -220,6 +243,39 @@ function runOn(engine: any, c: Case, useRubi: boolean) {
       const v = numOf(build());
       return v == null ? { status: 'unsolved', text: build().evaluate().toString(), values: [], timeMs } : { status: 'ok', text: build().N().toString(), values: [v], timeMs };
     }
+    if (c.op === 'solve') {
+      // The public API is the `.solve()` method (the `Solve` operator doesn't
+      // auto-evaluate). It returns the *real* roots.
+      const build = () => engine.box(c.arg).solve(c.varName);
+      const timeMs = timeit(() => build());
+      const roots: any[] = build() || [];
+      if (!roots.length) return { status: 'unsolved', text: '[]', values: [], roots: [], timeMs };
+      const resid = engine.box(c.arg);
+      const realRoots: number[] = [], resid_mag: number[] = [];
+      for (const root of roots) {
+        try {
+          const rv = root.N(); const im = typeof rv.im === 'number' ? rv.im : 0;
+          if (Math.abs(im) > 1e-9) continue;           // keep real roots
+          const z = resid.subs({ [c.varName]: root }).N();
+          realRoots.push(typeof rv.re === 'number' ? rv.re : NaN);
+          resid_mag.push(Math.hypot(typeof z.re === 'number' ? z.re : 0, typeof z.im === 'number' ? z.im : 0));
+        } catch { /* skip unevaluable root */ }
+      }
+      return { status: 'ok', text: roots.map((r) => r.toString()).join(', '), values: resid_mag, roots: realRoots, timeMs };
+    }
+    if (c.op === 'gcd') {
+      const build = () => engine.box(['PolynomialGCD', c.arg, c.arg2, c.varName]).evaluate();
+      const timeMs = timeit(build); const r = build();
+      if (r.operator === 'PolynomialGCD' || /Error/.test(r.toString())) return { status: 'unsolved', text: r.toString(), values: [], timeMs };
+      return { status: 'ok', text: r.toString(), values: POINTS.map((p) => numAt(engine, r, c.varName, p)), timeMs };
+    }
+    if (c.op === 'resultant') {
+      const build = () => engine.box(['Resultant', c.arg, c.arg2, c.varName]).evaluate();
+      const timeMs = timeit(build); const r = build();
+      if (r.operator === 'Resultant') return { status: 'unsolved', text: r.toString(), values: [], timeMs };
+      const v = numOf(r);
+      return v == null ? { status: 'unsolved', text: r.toString(), values: [], timeMs } : { status: 'ok', text: r.toString(), values: [v], timeMs };
+    }
     const head = c.op === 'factor' ? 'Factor' : c.op === 'expand' ? 'Expand' : null;
     const build = () => head ? engine.box([head, c.arg]).evaluate() : engine.box(c.arg).simplify();
     const timeMs = timeit(build); const r = build();
@@ -229,7 +285,7 @@ function runOn(engine: any, c: Case, useRubi: boolean) {
 
 // --- SymPy (batch) ----------------------------------------------------------
 function runSymPy(): Record<string, any> {
-  const tasks = cases.map((c) => ({ id: c.id, op: c.op, expr: c.sympyExpr, var: c.varName, points: POINTS, point: c.point ?? null, a: c.a ?? null, b: c.b ?? null }));
+  const tasks = cases.map((c) => ({ id: c.id, op: c.op, expr: c.sympyExpr, expr2: c.sympyExpr2 ?? null, var: c.varName, points: POINTS, point: c.point ?? null, a: c.a ?? null, b: c.b ?? null }));
   const tmp = join(mkdtempSync(join(tmpdir(), 'wester-')), 'tasks.json');
   writeFileSync(tmp, JSON.stringify(tasks));
   const by: Record<string, any> = {};
@@ -264,15 +320,42 @@ const sympyById = runSymPy();
 // unreliable at ∞ / for oscillatory or domain-tricky integrands), so they are
 // graded by *solved status* + a CE-vs-SymPy cross-check rather than against a
 // reference. The other ops keep robust invariant grading.
-const AGREE = new Set(['limit', 'defint']);
+const AGREE = new Set(['limit', 'defint', 'resultant']); // single-value CE-vs-SymPy agreement
 const solved = (res: any) => res && res.status === 'ok' && res.values && res.values[0] != null && isFinite(res.values[0]);
+// Solve: each returned root must be sound (residual ≈ 0); a config is **correct**
+// only if it's also complete — it covers every real root SymPy finds — else
+// **partial** (sound but incomplete, with an "n/m roots" note).
+const solveSound = (res: any) => !res ? { v: 'na' } : res.status === 'error' ? { v: 'error', note: res.error }
+  : (res.status === 'unsolved' || !res.roots || res.roots.length === 0) ? { v: 'unsolved' }
+    : res.values.every((v: any) => v != null && Math.abs(v) < 1e-6) ? { v: 'solved' } : { v: 'wrong' };
+const covers = (a: number[], b: number[]) => b.every((br) => a.some((ar) => Math.abs(ar - br) <= 1e-6 * (1 + Math.abs(br))));
+// GCD is defined up to a constant, so two gcds agree iff one is a scalar multiple
+// of the other (constant ratio across sample points).
+const gcdSolved = (res: any) => res && res.status === 'ok' && res.values && res.values.length >= 2 && res.values.every((v: any) => v != null && isFinite(v));
+const scalarMultiple = (a: number[], b: number[]) => {
+  const ratios: number[] = [];
+  for (let i = 0; i < a.length; i++) if (a[i] != null && b[i] != null && b[i] !== 0) ratios.push(a[i] / b[i]);
+  return ratios.length >= 2 && ratios.every((r) => Math.abs(r - ratios[0]) <= 1e-6 * (1 + Math.abs(ratios[0])));
+};
 const rows = cases.map((c) => {
   const ref = refSamples(c);
   const ceRes = runOn(ce, c, false);
   const rfRes = ceRF ? runOn(ceRF, c, true) : null;
   const syRes = sympyById[c.id] || { status: 'error', error: 'no result' };
   let ceV: any, rfV: any, syV: any;
-  if (AGREE.has(c.op)) {
+  if (c.op === 'solve') {
+    const syRoots = (syRes && syRes.roots) || [];
+    const finalize = (v: any, res: any) => v.v !== 'solved' ? v
+      : (syRoots.length && !covers(res.roots || [], syRoots)) ? { v: 'partial', note: `${(res.roots || []).length}/${syRoots.length} roots` }
+        : { v: 'correct' };
+    ceV = finalize(solveSound(ceRes), ceRes); rfV = finalize(solveSound(rfRes), rfRes);
+    syV = solveSound(syRes); if (syV.v === 'solved') syV = { v: 'correct' };
+  } else if (c.op === 'gcd') {
+    const st = (res: any) => !res ? { v: 'na' } : res.status === 'error' ? { v: 'error', note: res.error } : gcdSolved(res) ? { v: 'correct' } : { v: 'unsolved' };
+    ceV = st(ceRes); rfV = st(rfRes); syV = st(syRes);
+    if (gcdSolved(ceRes) && gcdSolved(syRes) && !scalarMultiple(ceRes.values, syRes.values)) { ceV = { v: 'disagree' }; syV = { v: 'disagree' }; }
+    if (gcdSolved(rfRes) && gcdSolved(syRes) && !scalarMultiple(rfRes!.values, syRes.values)) rfV = { v: 'disagree' };
+  } else if (AGREE.has(c.op)) {
     const sg = (res: any) => !res ? { v: 'na' } : res.status === 'error' ? { v: 'error', note: res.error } : solved(res) ? { v: 'correct' } : { v: 'unsolved' };
     ceV = sg(ceRes); rfV = sg(rfRes); syV = sg(syRes);
     const disagree = (a: any, b: any) => solved(a) && solved(b) && Math.abs(a.values[0] - b.values[0]) > c.tol * (1 + Math.abs(b.values[0]));
@@ -293,7 +376,8 @@ let md = '';
 const w = (s = '') => { md += s + '\n'; };
 const CATS: [string, string][] = [
   ['integrate', 'Indefinite ∫'], ['defint', 'Definite ∫'], ['diff', 'Derivative'],
-  ['limit', 'Limit'], ['factor', 'Factoring'], ['expand', 'Expansion'], ['simplify', 'Simplification'],
+  ['limit', 'Limit'], ['solve', 'Solve'], ['gcd', 'Polynomial GCD'], ['resultant', 'Resultant'],
+  ['factor', 'Factoring'], ['expand', 'Expansion'], ['simplify', 'Simplification'],
 ];
 const count = (pred: (r: any) => boolean) => rows.filter(pred).length;
 

@@ -762,6 +762,75 @@ describe('SOLVING ABSOLUTE VALUE EQUATIONS', () => {
   });
 });
 
+// Tests for higher-degree polynomials (ROADMAP B9)
+describe('SOLVING CUBIC AND QUARTIC EQUATIONS', () => {
+  const ce = engine;
+  // Real roots (sorted), as machine numbers.
+  const roots = (mj: any) =>
+    ce
+      .box(mj)
+      .solve('x')
+      ?.map((x) => x.N().re)
+      .sort((a: number, b: number) => a - b);
+  // Maximum |residual| of the polynomial evaluated at the returned roots.
+  const maxResidual = (mj: any) => {
+    const e = ce.box(mj);
+    const rs = e.solve('x') ?? [];
+    return Math.max(
+      0,
+      ...rs.map((r) => Math.abs(e.subs({ x: r }).N().re))
+    );
+  };
+
+  test('general cubic with irrational roots: 3x³−18x²+33x−19', () => {
+    // Was [] before B9 (no rational root). Three real roots.
+    const mj = ['Add', ['Multiply', 3, ['Power', 'x', 3]],
+      ['Multiply', -18, ['Power', 'x', 2]], ['Multiply', 33, 'x'], -19];
+    expect(roots(mj)?.length).toBe(3);
+    expect(maxResidual(mj)).toBeLessThan(1e-6);
+  });
+
+  test('cubic with one real root: x³−2x−5 (Newton’s example)', () => {
+    const mj = ['Subtract', ['Subtract', ['Power', 'x', 3], ['Multiply', 2, 'x']], 5];
+    const r = roots(mj)!;
+    expect(r.length).toBe(1);
+    expect(r[0]).toBeCloseTo(2.0945514815, 6);
+  });
+
+  test('casus irreducibilis (three real roots): x³−3x+1', () => {
+    const mj = ['Add', ['Subtract', ['Power', 'x', 3], ['Multiply', 3, 'x']], 1];
+    expect(roots(mj)?.length).toBe(3);
+    expect(maxResidual(mj)).toBeLessThan(1e-6);
+  });
+
+  test('quartic: x⁴−10x²+1 (four real roots)', () => {
+    const mj = ['Add', ['Subtract', ['Power', 'x', 4], ['Multiply', 10, ['Power', 'x', 2]]], 1];
+    expect(roots(mj)?.length).toBe(4);
+    expect(maxResidual(mj)).toBeLessThan(1e-6);
+  });
+
+  test('biquadratic stays exact when roots are rational: x⁴−5x²+4', () => {
+    const mj = ['Add', ['Subtract', ['Power', 'x', 4], ['Multiply', 5, ['Power', 'x', 2]]], 4];
+    const rs = ce.box(mj).solve('x')!;
+    // Exact integers, not floats (the numeric fallback must not shadow them).
+    expect(rs.every((r) => Number.isInteger(r.json))).toBe(true);
+    expect(rs.map((r) => r.N().re).sort((a, b) => a - b)).toEqual([-2, -1, 1, 2]);
+  });
+
+  test('exact paths are preserved (no numeric leakage)', () => {
+    // pure power → exact radical
+    expect(
+      ce.box(['Subtract', ['Power', 'x', 3], 2]).solve('x')?.[0].json
+    ).toEqual(['Root', 2, 3]);
+    // factorable rational roots → exact integers
+    const c = ['Add', ['Power', 'x', 3], ['Multiply', -6, ['Power', 'x', 2]],
+      ['Multiply', 11, 'x'], -6];
+    expect(
+      ce.box(c).solve('x')?.map((x) => x.N().re).sort((a, b) => a - b)
+    ).toEqual([1, 2, 3]);
+  });
+});
+
 // Tests for systems of linear equations
 describe('SOLVING SYSTEMS OF LINEAR EQUATIONS', () => {
   test('should solve 2x2 system: x+y=70, 2x-4y=80', () => {
