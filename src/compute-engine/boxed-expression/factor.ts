@@ -802,6 +802,23 @@ function solveLinearSystem(
     currentRow++;
   }
 
+  // Consistency check: after elimination, a row whose coefficient entries are
+  // all zero but whose RHS is nonzero encodes 0 = c ≠ 0 — the system has no
+  // solution. Without this the back-substitution below silently ignores such
+  // rows and returns a spurious (often all-zero) "solution", which made
+  // partialFraction collapse e.g. 1/(x·(x²+x)) to 0 (the factors x and x²+x
+  // share the root 0, so the irreducible-factor template is inconsistent).
+  for (let row = 0; row < rows; row++) {
+    let allZero = true;
+    for (let col = 0; col < numVars; col++) {
+      if (m[row][col] !== 0) {
+        allZero = false;
+        break;
+      }
+    }
+    if (allZero && m[row][cols - 1] !== 0) return null; // inconsistent
+  }
+
   // Back substitution: extract solutions as [numerator, denominator]
   const solution: [number, number][] = new Array(numVars);
   for (let col = 0; col < numVars; col++) {
@@ -1092,7 +1109,12 @@ export function partialFraction(
     partialTerms.push(termNumer.div(termDenom));
   }
 
-  if (partialTerms.length === 0) return ce.Zero;
+  // An empty term list means every solved coefficient was zero. We only reach
+  // here with a nonzero remainder (the zero-remainder case returned the
+  // quotient in Step 3), and a nonzero proper fraction never decomposes to 0 —
+  // so this signals a degenerate solve. Return the input unchanged rather than
+  // a spurious 0.
+  if (partialTerms.length === 0) return expr;
   if (partialTerms.length === 1) return partialTerms[0];
   return add(...partialTerms);
 }

@@ -1434,6 +1434,29 @@ describe('AUTO PARTIAL FRACTION IN SIMPLIFY', () => {
       );
     }
   });
+
+  // Regression: a denominator whose given factors are NOT coprime (here x and
+  // x²+x both vanish at 0) made the partial-fraction template inconsistent;
+  // solveLinearSystem ignored the 0 = 1 row and returned an all-zero solution,
+  // so simplify() collapsed the whole fraction to 0. Must stay value-preserving
+  // (the integral ∫(1+x²+x³)/((x−1)x(1+x²)²(1+x+x²)) was returning 0 from this).
+  test('1/(x·(x²+x)) must not collapse to 0 (non-coprime factors)', () => {
+    for (const latex of [
+      '\\frac{1}{x(x^2+x)}',
+      '\\frac{1}{x^2(3x^2+2x)}',
+      '\\frac{1}{x(x^2+x)(x-1)}',
+    ]) {
+      const expr = engine.parse(latex);
+      const simplified = expr.simplify();
+      expect(simplified.is(0)).toBe(false);
+      for (const val of [0.7, 1.5, -0.4, 2.3]) {
+        const v = engine.number(val);
+        expect(simplified.subs({ x: v }).N().re).toBeCloseTo(
+          expr.subs({ x: v }).N().re
+        );
+      }
+    }
+  });
 });
 
 // Regression test for PR #307: simplify() must dispatch its options

@@ -2439,7 +2439,7 @@ function tryReversePowerChain(
     // The remaining factors (integrand ÷ uⁿ) must be a constant multiple of u′.
     const rest = fn.div(u.pow(n)).simplify();
     const ratio = tryGetConstantRatio(rest, uPrime, index);
-    if (ratio === null) continue;
+    if (ratio === null || ratio.isSame(0)) continue; // 0 ⇒ degenerate, not a match
 
     const np1 = n.add(1);
     let result = u.pow(np1).div(np1);
