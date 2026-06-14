@@ -2,6 +2,21 @@
 
 ### Features
 
+- **Symbolic limits**: `Limit` now evaluates to an **exact closed form** instead
+  of only a numeric approximation. `ce.parse('\\lim_{x\\to 0}\\frac{\\sin
+  x}{x}').evaluate()` is `1` (was an unevaluated `Limit`), and likewise
+  `lim_{x→∞} arctan x = π/2`, `lim_{x→∞} (1+1/x)^x = e`,
+  `lim_{x→∞} (3ˣ+5ˣ)^{1/x} = 5`, `lim_{x→∞} ln x/(sin x + ln x) = 1`. The
+  symbolic engine covers direct substitution, L'Hôpital for 0/0 and ∞/∞
+  (iterated), rational functions at infinity, an order-of-growth analysis
+  (bounded < log < polynomial < exponential < iterated-exponential) with
+  dominant-term extraction and bounded-function handling, and `f^g` forms via
+  `exp(g·ln f)`. It runs ahead of the numeric path and falls back to it whenever
+  a limit can't be determined symbolically, so coverage never regresses; limits
+  it cannot resolve (e.g. catastrophic-cancellation Gruntz limits) defer to the
+  numeric path rather than returning a spurious value. `NLimit` remains purely
+  numeric.
+
 - **Numeric evaluation of special functions**: `EllipticK(m)` and `EllipticE(m)`
   (complete elliptic integrals, parameter convention m = k², computed via the
   arithmetic-geometric mean), `AGM(a, b)` (and the shorthand `AGM(z)` = AGM(1,
@@ -174,23 +189,32 @@
   primitive for interval arithmetic). `expm1`/`log1p` and the inverse
   hyperbolics keep full relative accuracy for small arguments.
 
+- **Faster high-precision `exp` and `pow`.** Two fixes: (1) `eˣ` (i.e.
+  `Power(E, x)`) now evaluates `exp(x)` directly instead of `exp(x·ln(e))`,
+  which had been recomputing `ln(e) ≈ 1` (a full high-precision logarithm) on
+  every call; (2) the cached `ln(10)` used by the `exp`/`ln` argument reduction
+  no longer thrashes when both run at slightly different working precisions (it
+  now caches the highest precision and downshifts). Together: `xʸ` for a
+  non-integer `y` is ~2.3× faster and `eˣ` ~2.5× faster at 1000 digits, with no
+  change in results.
+
   Speedup of high-precision numeric evaluation (`.N()`) versus 0.59.0, by
   working precision (median time; higher is faster):
 
   | Function              | 100 digits | 500 digits | 1000 digits |
   | --------------------- | ---------- | ---------- | ----------- |
-  | `ln`                  | 3.4×       | 8.3×       | 10.5×       |
-  | `exp`                 | 4.1×       | 8.1×       | 9.9×        |
+  | `ln`                  | 3.6×       | 6.6×       | 10.6×       |
+  | `exp`                 | 7×         | 18×        | 22×         |
   | `sin` / `cos` / `tan` | 2.3×       | 3.4×       | 3.5×        |
   | `atan`                | 1.8×       | 4.2×       | 4.4×        |
   | `asin`                | 1.9×       | 4.2×       | 4.5×        |
 
-  (≈90% less time for `ln`/`exp` at 1000 digits.) `sqrt` and the exact
-  operations `+` `−` `×` `÷` are unchanged. Beyond ~2350 digits, 0.59.0 returned
-  `NaN` for `sin`/`cos`/`tan` and `π` (the hardcoded π table ran out); these now
-  compute correctly at any precision.
+  (`exp` reflects the direct-evaluation fix above; the figure is conservative.)
+  `sqrt` and the exact operations `+` `−` `×` `÷` are unchanged. Beyond ~2350
+  digits, 0.59.0 returned `NaN` for `sin`/`cos`/`tan` and `π` (the hardcoded π
+  table ran out); these now compute correctly at any precision.
 
-### Bug Fixes
+### Resolved Issues
 
 - **`Limit` returned a spurious `0` for some hard limits.**
   Numerically-evaluated limits whose function overflows the floating-point range
@@ -2430,7 +2454,7 @@ ce.simplificationRules.push({
   suffixes for internal vec2f-parameter implementations (e.g., `ia_add_v`),
   while the public API (`ia_add`, `ia_sin`, etc.) takes `IntervalResult` values.
 
-### Bug Fixes
+### Resolved Issues
 
 - **`Sequence` type inference now returns a proper tuple type**: Multi-argument
   `Sequence` expressions previously returned `'any'` as their inferred type,
@@ -2524,7 +2548,7 @@ ce.simplificationRules.push({
 
 ## 0.35.6 _2026-02-07_
 
-### Bug Fixes
+### Resolved Issues
 
 - **Monte Carlo improper integrals**: Fixed two bugs in `monteCarloEstimate()`
   that produced incorrect results (typically `NaN` or `Infinity`) for improper
@@ -2557,7 +2581,7 @@ ce.simplificationRules.push({
 
 ## 0.35.5 _2026-02-06_
 
-### Bug Fixes
+### Resolved Issues
 
 - **Compilation Target Function Name Mismatches**: Fixed several function keys
   in compilation targets that did not match their canonical library operator
@@ -2615,7 +2639,7 @@ ce.simplificationRules.push({
 
 ## 0.35.2 _2026-02-05_
 
-### Bug Fixes
+### Resolved Issues
 
 - **Decimal Number Representation**: Numbers written with a decimal point (e.g.,
   `6.02e23`) are now correctly treated as approximate decimal values
@@ -2659,7 +2683,7 @@ ce.simplificationRules.push({
 
 ## 0.35.1 _2026-02-03_
 
-### Bug Fixes
+### Resolved Issues
 
 - **Interval Arithmetic (JS/GLSL)**: Fixed interval evaluation of compound
   arguments (e.g. `sin(2x)`, `sin(x+x)`, `sin(x^2)`, `cos(2x)`) by propagating
@@ -3717,7 +3741,7 @@ ce.simplificationRules.push({
 
 ## 0.33.0 _2026-01-30_
 
-### Bug Fixes
+### Resolved Issues
 
 #### Arithmetic and Infinity
 
@@ -4156,7 +4180,7 @@ ce.simplificationRules.push({
   - Example: Matching `a + b + c + 1` against `x + y + z` now rejects
     immediately (arity mismatch: 4 vs 3) instead of trying 24 permutations
 
-### Bug Fixes
+### Resolved Issues
 
 #### Arithmetic
 
@@ -4279,7 +4303,7 @@ ce.simplificationRules.push({
 
 ## 0.32.0 _2026-01-28_
 
-### Bug Fixes
+### Resolved Issues
 
 #### Calculus
 
@@ -4659,7 +4683,7 @@ ce.simplificationRules.push({
   areas on a hyperbola, not arc lengths. Both LaTeX spellings (`\arsinh` and
   `\arcsinh`) are accepted as input (Postel's law).
 
-### Bug Fixes
+### Resolved Issues
 
 #### LaTeX Parsing
 

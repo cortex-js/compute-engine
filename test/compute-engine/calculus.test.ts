@@ -1011,6 +1011,84 @@ describe('LIMIT', () => {
     ]);
     expect(f2.N().re).toBeNaN();
   });
+
+  describe('ROADMAP B8: symbolic limits (exact closed forms)', () => {
+    const INF = 'PositiveInfinity';
+    // Build Limit[ body, x -> point ] and return its symbolic evaluate() result.
+    const lim = (body: any, point: any) =>
+      engine.expr(['Limit', ['Function', body, 'x'], point]).evaluate();
+
+    test('finite point: removable singularity via L’Hôpital', () => {
+      expect(lim(['Divide', ['Sin', 'x'], 'x'], 0).re).toBe(1);
+      expect(
+        lim(['Divide', ['Subtract', ['Exp', 'x'], 1], 'x'], 0).re
+      ).toBe(1);
+      // two L’Hôpital steps
+      expect(
+        lim(['Divide', ['Subtract', 1, ['Cos', 'x']], ['Power', 'x', 2]], 0).re
+      ).toBe(0.5);
+    });
+
+    test('finite point: exact polynomial / factored value', () => {
+      expect(lim(['Add', ['Power', 'x', 2], 1], 2).re).toBe(5);
+      expect(
+        lim(
+          ['Divide', ['Subtract', ['Power', 'x', 3], 8], ['Subtract', 'x', 2]],
+          2
+        ).re
+      ).toBe(12);
+    });
+
+    test('at infinity: rational functions', () => {
+      const r = ['Divide', ['Add', ['Multiply', 2, ['Power', 'x', 2]], 3],
+        ['Subtract', ['Power', 'x', 2], 1]];
+      expect(lim(r, INF).re).toBe(2);
+      expect(
+        lim(['Divide', ['Add', 'x', 1], ['Power', 'x', 2]], INF).re
+      ).toBe(0);
+      expect(
+        lim(['Divide', ['Power', 'x', 2], ['Add', 'x', 1]], INF).isInfinity
+      ).toBe(true);
+    });
+
+    test('at infinity: growth-order (poly vs exp vs log)', () => {
+      // eˣ overtakes x¹⁰⁰ only near x≈700 — numeric probing alone gets this wrong
+      expect(
+        lim(['Divide', ['Exp', 'x'], ['Power', 'x', 100]], INF).isInfinity
+      ).toBe(true);
+      expect(
+        lim(['Divide', ['Power', 'x', 100], ['Exp', 'x']], INF).re
+      ).toBe(0);
+      expect(lim(['Divide', ['Ln', 'x'], 'x'], INF).re).toBe(0);
+    });
+
+    test('at infinity: 1^∞ exponentials → e^a', () => {
+      const e = lim(['Power', ['Add', 1, ['Divide', 1, 'x']], 'x'], INF);
+      expect(e.N().re).toBeCloseTo(Math.E, 10);
+      const e2 = lim(['Power', ['Add', 1, ['Divide', 2, 'x']], 'x'], INF);
+      expect(e2.N().re).toBeCloseTo(Math.exp(2), 10);
+    });
+
+    test('Wester B8: dominant-term cases SymPy solves', () => {
+      // (3ˣ+5ˣ)^{1/x} → 5 (dominant exponential base)
+      expect(
+        lim(
+          ['Power', ['Add', ['Power', 3, 'x'], ['Power', 5, 'x']],
+            ['Divide', 1, 'x']],
+          INF
+        ).re
+      ).toBe(5);
+      // ln x/(sin x + ln x) → 1 (bounded sin x is negligible)
+      expect(
+        lim(['Divide', ['Ln', 'x'], ['Add', ['Sin', 'x'], ['Ln', 'x']]], INF).re
+      ).toBe(1);
+    });
+
+    test('oscillatory / non-evaluable stays out of the way (numeric NaN)', () => {
+      // sin x at ∞ has no limit; symbolic returns undefined, numeric → NaN.
+      expect(engine.expr(['Limit', ['Function', ['Sin', 'x'], 'x'], INF]).N().re).toBeNaN();
+    });
+  });
 });
 
 describe('DOUBLY-INFINITE SUMS', () => {

@@ -564,20 +564,34 @@ the cost was in higher layers. Two causes found:
   — ~6ms of waste inside `pow`. `ln10Fixed` now uses compute-high/downshift-low
   caching (like `fppi`/`ln2`): `BigDecimal.pow(base, non-int)` 9.6 → **4.1ms**,
   `Exp(rational).N()` 6.95 → **~3.4–4.3ms**. (`transcendentals.ts`.)
-- **`Exp(x)` → `Power(E, x)` → `exp(x·ln(E))` recomputes `ln(e)≈1`** — remaining
-  gap. Recognize `base = E` in the numeric `Power` path and call `exp(x)`
-  directly. Lives in `boxed-expression/arithmetic-power.ts` (CE-evaluation, not
-  big-decimal). **Top remaining `exp` item.**
+- **`Exp(x)` → `Power(E, x)` → `exp(x·ln(E))` recomputed `ln(e)≈1` — ✅ FIXED.**
+  The numeric `Power(E, x)` path (`boxed-expression/arithmetic-power.ts`) now
+  calls `exp(x)` directly for real exponents (complex unchanged). With the
+  `ln10` fix, `Exp(rational).N()` 6.95 → **2.74ms** at 1000 digits; `exp(1)`
+  reproduces `e` exactly. The residual ~2.7ms is generic CE `Power`/`.N()`
+  dispatch overhead, not the bignum kernel (`fpexp` ≈ 0.65ms).
 
-Lower-priority remaining items (the kernel/algorithm fronts):
+Remaining items:
+- **17.13 Trim CE `Power`/`.N()` dispatch overhead** — after the two fixes,
+  `Exp(x).N()` is ~2.7ms at 1000 digits vs the bare kernel's ~0.65ms; the gap is
+  generic boxed-evaluation machinery (`Power` runs its full special-case
+  cascade, plus argument boxing), shared by all operators — **not** the bignum
+  core. This is the largest remaining `exp`-vs-mpmath gap and is a CE-evaluation
+  optimization (e.g. a fast numeric pre-dispatch), not a big-decimal one.
 - **17.10 Tune the AGM `ln` threshold / faster AGM** — `ln` trails mpmath ~0.6×
   at 500–1000 digits because CE's AGM only engages above ~1250 digits
   (`LN_AGM_MIN_BITS`) while mpmath is on AGM earlier.
 - **17.11 Division-free `isqrt_fast` for `sqrt`** — revisits 17.4's "leave
   `fpsqrt` as-is": mpmath's reciprocal-sqrt Newton is ~2× faster; lifts `asin`.
 - **17.12 r-step / rectangular splitting in `fpexp`** — real but small kernel
-  win (~3×); the kernel is <10% of `exp(.N())` time, so low user-facing impact
-  until the `Exp`-direct item lands. Lowest priority.
+  win (~3×); the kernel is <10% of `exp(.N())` time, so low user-facing impact.
+  Lowest priority.
+
+**Next up (priority order for the bignum/numeric track):**
+1. **17.13** — trim `Power`/`.N()` dispatch (biggest remaining `exp` win, ~2ms;
+   CE-eval layer). 2. **17.10** — AGM `ln` threshold (closes the `ln` gap).
+3. **17.11** — `isqrt_fast` (`sqrt`/`asin`). 4. **17.12** — `fpexp` r-step
+   (kernel polish, lowest impact). Each is independent; none blocks the others.
 
 ### 5. Per-head aggregated rule dispatch
 
@@ -780,12 +794,40 @@ SymPy 20/20 — surfaced the next gaps, in priority order:
   `∫cos²(ax+b) = x/2 + sin(2(ax+b))/(4a)`, so the whole family is now exact
   (`∫sin²(2x) → x/2 − sin(4x)/8`, `∫sin²(x+1) → x/2 − sin(2x+2)/4`). Regression
   tests in `calculus.test.ts`.
-- 🟡 **Float leakage in `∫1/(x⁴+1)` and `∫x·arctan(x)`.** Value-correct but the
-  form has float coefficients (`0.3535… = 1/(2√2)`, `1.414… = √2`, `0.5`). Same
-  class as the `x³+1` leak fixed above, but for an all-irreducible-quadratic
-  quartic (the `numericPartialFractions` fallback) and the by-parts path. Make
-  the quartic/biquadratic partial-fraction path exact (factor `x⁴+1` into
-  `(x²−√2x+1)(x²+√2x+1)`) and keep by-parts coefficients rational.
+- 🟡 **Float leakage in `∫1/(x⁴+1)` and `∫x·arctan(x)` — scoped 2026-06-13, two
+  independent causes (next session).** Both are value-correct (differentiate-back
+  passes) but emit float coefficients instead of exact radicals/rationals.
+
+  **(1) `∫1/(x⁴+1)` — partial fractions over two irreducible quadratics.**
+  Current output: `0.3535·arctan(1.414x−1.0) + 0.3535·arctan(1.414x+1.0) −
+  0.1767·ln(x²−1.414x+1) + 0.1767·ln(x²+1.414x+1)` — the right *shape*, all
+  floats (`0.3535 = 1/(2√2)`, `0.1767 = 1/(4√2)`, `1.414 = √2`).
+  - Root cause: `x⁴+1` has **no real roots** (`findUnivariateRoots` returns `[]`)
+    and `Factor(x⁴+1)` leaves it unfactored (the factorer works over ℚ, but the
+    real factors `(x²−√2x+1)(x²+√2x+1)` need irrational √2 coefficients). So the
+    Divide branch's symbolic paths (cover-up simple poles; Case F at
+    `antiderivative.ts:2712`/`2846` handles only **one** linear × **one**
+    irreducible quadratic) all miss, and it falls to `numericPartialFractions`
+    (`antiderivative.ts:1736`) → Durand–Kerner numeric roots → float residues.
+  - Fix direction: add a symbolic partial-fraction path for a denominator that
+    is a **product of two (or more) irreducible quadratics**. Either (a) a
+    real-quadratic factorizer for biquadratics/palindromic quartics that yields
+    the √2 quadratics, then per-quadratic `(Bx+C)/(x²+bx+c)` integration (reuse
+    the `ln|quad| + arctan` machinery already in Case F); or (b) a
+    Hermite/Ostrogradsky-style decomposition over the symbolic factorization.
+    Option (a) is narrower and likely enough for the common biquadratic cases.
+    Acceptance: `∫1/(x⁴+1)` exact (`(1/(4√2))[ln((x²+√2x+1)/(x²−√2x+1)) +
+    2arctan(√2x+1) + 2arctan(√2x−1)]` or equivalent), verified by
+    differentiate-back; keep `numericPartialFractions` as the final fallback.
+
+  **(2) `∫x·arctan(x)` — by-parts coefficient leak.** Output
+  `½x²arctan x − ½x + 0.5·arctan x`: the recovered `arctan` term's coefficient
+  leaks as a float `0.5` while the other halves stay exact `1/2`. The inner
+  integrals are exact (`∫x²/(1+x²) → x − arctan x`, `∫1/(1+x²) → arctan x`) and
+  `½·arctan x` stays exact, so the float is introduced in the **by-parts
+  assembly** in `tryIntegrationByParts` (`antiderivative.ts:108`) when scaling
+  the recovered sub-integral by the `v = x²/2` constant — look for a `.N()` or a
+  `ce.number(0.5)`/float division there. Small, localized, independent of (1).
 - ✅ **`∫ln(x)/x → ½ln²x` and `∫tanⁿx`/`∫cotⁿx` — done.** Added a
   reverse-power-chain recognizer (`∫c·u′·uⁿ = c·uⁿ⁺¹/(n+1)`, tried late so it
   only catches otherwise-unevaluated integrands — e.g. `∫ln(x)/x → ½ln²x`,
@@ -887,7 +929,8 @@ operator now also computes a univariate polynomial GCD when the operands share
 a non-trivial common factor (variable inferred), e.g. `GCD(x²+3x+2, x²+4x+3)`
 → `x+1`. A trivial (constant) GCD is deferred to preserve the integer-GCD
 reading of a bare symbol — `GCD(x, 6)` stays unevaluated; use `PolynomialGCD`
-for the coprime → 1 answer. Multivariate GCD remains out of scope (see B6).
+for the coprime → 1 answer. Bivariate GCD now works too (B11 Stage A); general
+multivariate GCD remains future work (see B11).
 
 ### B6. ~~Multi-operation audit vs SymPy~~ — ✅ built (2026-06-13)
 
@@ -940,14 +983,35 @@ instead of a spurious value. Genuine limits — including fp-fragile ones like
 Regression: `calculus.test.ts` "ROADMAP B7"; the Wester limit disagreements
 (`≠`) section is now empty (both cases report `∅` not a wrong value).
 
-### B8. `Limit` is numerical-only with low coverage
+### B8. ~~`Limit` is numerical-only with low coverage~~ — ✅ done (2026-06-13)
 
-Like definite integrals (B3), CE evaluates limits **numerically** (`Limit[…].N()`),
-never to a symbolic closed form, and gives up (`∅`) on many — e.g.
-`lim_{x→∞} (3ˣ+5ˣ)^{1/x} = 5` and `lim_{x→∞} ln x/(sin x + ln x) = 1`, both of
-which SymPy solves. On the Wester limit sample CE returned a value for 2/6 vs
-SymPy's 4/6. A symbolic limit path (and/or more robust extrapolation, cf. item 2's
-`extrapolate()`) would close the gap.
+Like definite integrals (B3), CE evaluated limits **only numerically**
+(`Limit[…].N()`), never to a symbolic closed form, and gave up (`∅`) on many —
+e.g. `lim_{x→∞} (3ˣ+5ˣ)^{1/x} = 5` and `lim_{x→∞} ln x/(sin x + ln x) = 1`, both
+of which SymPy solves. On the Wester limit sample CE returned a value for 2/6 vs
+SymPy's 4/6.
+
+**Resolved** with a symbolic limit engine (`symbolic/limit.ts`, `symbolicLimit`)
+wired into `Limit.evaluate` **ahead of** the numeric path — it produces exact
+closed forms (`evaluate()` now returns `1`, `π/2`, `5`, `e`, … instead of an
+unevaluated `Limit`), and returns `undefined` (deferring to the numeric path)
+whenever it can't decide, so it never regresses coverage. Strategies:
+- **finite point** — direct substitution, then L'Hôpital for 0/0 and ∞/∞
+  (reusing `differentiate`), iterated (`(1−cos x)/x² → ½`);
+- **at infinity** — a "leading-order" (Gruntz-lite) rewrite that drops
+  asymptotically-negligible sum terms, a coarse **growth-order** classifier
+  (bounded < log < poly < exp < iterated-exp) that settles cross-class
+  comparisons numeric probing gets wrong (`eˣ` overtakes `x¹⁰⁰` only near
+  x≈700), dominant-term extraction (`3ˣ+5ˣ → 5ˣ`), bounded-function handling
+  (`sin`/`cos`/`arctan` negligible vs an unbounded term), `f^g` via
+  `exp(g·ln f)` (`(1+a/x)^x → e^a`), and rational-at-∞ by leading coefficients.
+
+A **cancellation/overflow guard** makes the symbolic pass defer (rather than
+return a confident wrong value) when probes hit catastrophic cancellation or the
+fp horizon — so the two hard Gruntz cases that motivated B7 still resolve to
+not-evaluable, never a spurious value. Wester limit coverage **2/6 → 4/6** (the
+two B8 cases above now solved; the remaining two are the B7 cancellation limits,
+correctly `∅`). Tests: `calculus.test.ts` "ROADMAP B8".
 
 ### B9. `Solve` coverage gaps (higher-degree polynomials, Abs, transcendental)
 
@@ -994,3 +1058,52 @@ computes it. Univariate polynomial resultant (e.g. via the Sylvester matrix
 determinant or the subresultant PRS the GCD path already uses, cf. B5) would
 add it. Low-frequency but cheap once polynomial GCD/PRS infrastructure exists.
 Surfaced by `benchmarks/audit/wester.ts`.
+
+### B11. Multivariate polynomial GCD — Stage A done (2026-06-13), Stage B open
+
+`GCD`/`PolynomialGCD` are fundamentally **univariate**: they work in one chosen
+variable, carrying any others along as symbolic coefficients (Euclid over
+ℚ(rest)). Correct for one variable — and now (Stage A) for two — but it does not
+scale. The 7-variable **Fateman GCD benchmark**
+([gist](https://gist.github.com/benruijl/3c53b1b0aea88b978ae609e73693fdbc);
+Symbolica 4 s / Mathematica 89 s / SymPy 61 min) times out at CE's ~10 s
+evaluation deadline **even at power 2** — the carried rational-function
+coefficients explode — and the bare `GCD` operator defers (unevaluated) for ≥3
+variables.
+
+Empirical notes (2026-06-13), to start Stage B cold:
+- The carried-coefficient univariate Euclid is correct on most textbook
+  bivariate inputs but, when a remainder's coefficients turn non-polynomial,
+  bails to `1` — *incomplete*, never a wrong **divisor** (the item-12 `ce.One`
+  guard). It silently returned `1` for gcd((x+y+1)², (x+y+1)(x−y+2)) — which is
+  why Stage A verifies (below).
+- A throwaway **verified-GCDHEU** prototype (sparse bigint `MPoly` + evaluation /
+  symmetric ξ-adic reconstruction + exact-division verification) **cracked
+  Fateman power 2 in ~7 s** — evidence the evaluation-homomorphism route is the
+  right one. But naïve GCDHEU is fragile: a spurious integer factor at the
+  evaluation point (e.g. gcd(16−y², 64−y³) at y=10 → 12 = 6·2) corrupts
+  reconstruction unless each recursion level strips content / primitive parts.
+  The prototype is the seed of Stage B's kernel, not production code.
+
+**Stage A — verified bivariate GCD (done, 2026-06-13).** `polynomialGCDMulti`
+now handles **exactly two variables**: choose the lowest-combined-degree shared
+variable as main, run the existing univariate `polynomialGCD` carrying the other
+as a coefficient, then **verify the candidate by exact division** before
+returning it — defer (`undefined`) on any failure, so it is never wrong. Gated
+to two variables and a cheap term-count cap so the operator never churns to its
+deadline (Fateman, 7 vars, defers instantly). `GCD(x²−y², x²+3xy+2y²) → x+y`.
+Code: `boxed-expression/polynomials.ts` (`bivariatePolynomialGCD`); tests:
+`arithmetic.test.ts` (ROADMAP B11 block).
+
+**Stage B — sparse multivariate GCD kernel (the real fix).** A distributed
+sparse polynomial representation (exponent-vector → coefficient) with modular
+arithmetic, plus **Zippel** sparse interpolation (or **Brown** for dense) over
+ℤ_p: evaluate down to univariate GCDs at random points, sparse-interpolate, then
+CRT + rational reconstruction to ℚ, with content/primitive-part handling and
+unlucky-prime/point retries. This unlocks Fateman-scale and ≥3 variables.
+Substantial (Rubi-port-scale), but justified because the kernel is **shared
+infrastructure**: multivariate factorization, `Cancel`/`Together`, partial
+fractions, and `Resultant` (B10) all want the same representation.
+
+Surfaced by the Fateman GCD benchmark; the `benchmarks/audit/` footnote tracks
+the external comparison.

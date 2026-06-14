@@ -14,6 +14,7 @@ import { monteCarloEstimate } from '../numerics/monte-carlo';
 import { centeredDiff8thOrder, limit } from '../numerics/numeric';
 import { derivative, differentiate } from '../symbolic/derivative';
 import { antiderivative } from '../symbolic/antiderivative';
+import { symbolicLimit } from '../symbolic/limit';
 import { canonicalLimits, canonicalLimitsSequence } from './utils';
 
 export const CALCULUS_LIBRARY: SymbolDefinitions[] = [
@@ -415,7 +416,22 @@ volumes
         return engine._fn('Limit', [fn, x.canonical, dir.canonical]);
       },
       evaluate: ([f, x, dir], { engine, numericApproximation }) => {
-        // Uses compiled JS functions (machine arithmetic)
+        // Symbolic path first: it produces an exact closed form (`sin x/x → 1`,
+        // `(3ˣ+5ˣ)^{1/x} → 5`) and is the only path under a non-numeric
+        // `evaluate()`. It returns `undefined` when it can't determine the
+        // limit, so the numeric machinery below still covers everything it did.
+        if (isFunction(f)) {
+          const varName = sym(f.op2);
+          if (varName) {
+            const direction =
+              dir && Number.isFinite(dir.re) ? dir.re : undefined;
+            const symbolic = symbolicLimit(f.op1, varName, x, direction, engine);
+            if (symbolic !== undefined)
+              return numericApproximation ? symbolic.N() : symbolic;
+          }
+        }
+
+        // Numeric fallback: compiled JS functions (machine arithmetic).
         if (numericApproximation) {
           const target = x.N().re;
           if (Number.isNaN(target)) return undefined;
