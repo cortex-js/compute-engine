@@ -63,8 +63,10 @@
 - **`solve` handles more transcendental and substitution equations.** Equations
   with equal exponential bases reduce by their exponents (`e^{2-x²} = e^{-x} →
   -1, 2`; `2^x = 2^3 → 3`); `a·sin(x) + b·cos(x) = 0` solves via the tangent
-  (`sin x = cos x → π/4`); and equations that are polynomials in a root of the
-  unknown solve by substitution (`2√x + 3·⁴√x = 2 → 1/16`).
+  (`sin x = cos x → π/4`); equations that are polynomials in a root of the
+  unknown solve by substitution (`2√x + 3·⁴√x = 2 → 1/16`); and a single square
+  root with a non-constant coefficient is eliminated by squaring
+  (`x = 1/√(x²+1)`).
 
 - **`GCD` now finds common polynomial factors** for univariate and multivariate
   polynomials. Integer operands retain their existing behavior; use
@@ -176,6 +178,16 @@
   `x³+x² → x²(x+1)`, `3x⁴+2x³ → x³(3x+2)`) and fully factors already-factored
   products and powers, so partial-fraction decomposition sees irreducible
   factors with correct multiplicities.
+
+- Partial-fraction decomposition now uses exact arbitrary-precision integer
+  arithmetic, so decompositions of higher-degree denominators no longer lose
+  precision (the previous machine-integer solver overflowed past 2⁵³ and could
+  return wrong coefficients).
+
+- Rational functions with **repeated** linear or irreducible-quadratic factors
+  now integrate to a closed form via full partial-fraction decomposition — e.g.
+  `∫1/(x²(x+1)) dx` and `∫1/(x(1+x²)²) dx`, which previously returned an
+  unevaluated integral.
 
 ## 0.59.0 _2026-06-10_
 

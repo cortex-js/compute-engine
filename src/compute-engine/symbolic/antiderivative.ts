@@ -15,6 +15,7 @@ import {
   polynomialDegree,
   polynomialDivide,
 } from '../boxed-expression/polynomials';
+import { partialFraction } from '../boxed-expression/factor';
 import {
   isFunction,
   isNumber,
@@ -3430,6 +3431,21 @@ export function antiderivative(fn: Expression, index: string): Expression {
     // Reverse power-chain rule, e.g. ∫ln(x)/x → ½ln²x.
     const rpc = tryReversePowerChain(fn, index);
     if (rpc) return rpc;
+
+    // Last resort for a rational function: a full partial-fraction
+    // decomposition (handles repeated linear AND irreducible-quadratic
+    // factors and monomial content, on an exact bigint solve) integrated
+    // term by term. The earlier symbolic/numeric PF paths bail on repeated
+    // factors; this closes e.g. ∫1/(x²(x+1)) and ∫P(x)/((x−1)x(1+x²)²(…)).
+    // Adopted only when every resulting term integrates to a closed form.
+    {
+      const pf = partialFraction(fn, index);
+      if (!pf.isSame(fn) && isFunction(pf, 'Add')) {
+        const parts = pf.ops.map((t) => antiderivative(t, index));
+        if (parts.every((p) => !p.has('Integrate')))
+          return add(...parts).evaluate();
+      }
+    }
 
     return integrate(fn, index);
   }

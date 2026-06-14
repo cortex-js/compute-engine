@@ -809,39 +809,44 @@ function collectFactorsRaw(
 }
 
 /**
- * Solve a linear system using Gaussian elimination with integer arithmetic.
- * The matrix is an augmented matrix [A|b] with dimensions rows x (numVars+1).
- * Returns [numerator, denominator] pairs for each unknown, or null if inconsistent.
+ * Solve a linear system by fraction-free Gaussian elimination in EXACT integer
+ * arithmetic (`bigint`). The matrix is an augmented matrix [A|b] with
+ * dimensions rows × (numVars+1) and safe-integer entries. Returns reduced
+ * [numerator, denominator] `bigint` pairs per unknown, or null if inconsistent.
  *
- * IMPORTANT: Uses integer arithmetic throughout to avoid floating point issues.
+ * `bigint` avoids the ~2⁵³ overflow of native-number elimination: the
+ * fraction-free updates grow entries multiplicatively, so even a moderate
+ * partial-fraction system (e.g. a degree-8 denominator) reaches values past
+ * the safe-integer limit — which previously produced silently wrong
+ * decompositions whose coefficients only *looked* right.
  */
 function solveLinearSystem(
   matrix: number[][],
   numVars: number
-): [number, number][] | null {
+): [bigint, bigint][] | null {
   const rows = matrix.length;
   const cols = numVars + 1; // augmented
 
-  // Clone the matrix to avoid mutation
-  const m = matrix.map((row) => [...row]);
+  // Clone into bigint to avoid mutation and overflow.
+  const m: bigint[][] = matrix.map((row) => row.map((v) => BigInt(v)));
 
   const pivotRow: number[] = new Array(numVars).fill(-1);
 
   // Forward elimination
   let currentRow = 0;
   for (let col = 0; col < numVars && currentRow < rows; col++) {
-    // Find pivot: largest absolute value in this column
-    let maxVal = 0;
+    // Find pivot: largest absolute value in this column (keeps growth down).
+    let maxVal = 0n;
     let maxRow = -1;
     for (let row = currentRow; row < rows; row++) {
-      const absVal = Math.abs(m[row][col]);
+      const absVal = m[row][col] < 0n ? -m[row][col] : m[row][col];
       if (absVal > maxVal) {
         maxVal = absVal;
         maxRow = row;
       }
     }
 
-    if (maxVal === 0) continue; // Skip zero column
+    if (maxVal === 0n) continue; // Skip zero column
 
     // Swap rows
     if (maxRow !== currentRow) {
@@ -850,13 +855,12 @@ function solveLinearSystem(
 
     pivotRow[col] = currentRow;
 
-    // Eliminate below
+    // Eliminate in all other rows
+    const pivotVal = m[currentRow][col];
     for (let row = 0; row < rows; row++) {
       if (row === currentRow) continue;
-      if (m[row][col] === 0) continue;
-
       const factor = m[row][col];
-      const pivotVal = m[currentRow][col];
+      if (factor === 0n) continue;
 
       for (let j = 0; j < cols; j++) {
         m[row][j] = m[row][j] * pivotVal - factor * m[currentRow][j];
@@ -875,45 +879,46 @@ function solveLinearSystem(
   for (let row = 0; row < rows; row++) {
     let allZero = true;
     for (let col = 0; col < numVars; col++) {
-      if (m[row][col] !== 0) {
+      if (m[row][col] !== 0n) {
         allZero = false;
         break;
       }
     }
-    if (allZero && m[row][cols - 1] !== 0) return null; // inconsistent
+    if (allZero && m[row][cols - 1] !== 0n) return null; // inconsistent
   }
 
-  // Back substitution: extract solutions as [numerator, denominator]
-  const solution: [number, number][] = new Array(numVars);
+  // Back substitution: extract solutions as reduced [numerator, denominator]
+  const solution: [bigint, bigint][] = new Array(numVars);
   for (let col = 0; col < numVars; col++) {
     const pr = pivotRow[col];
     if (pr === -1) {
       // Free variable — set to 0
-      solution[col] = [0, 1];
+      solution[col] = [0n, 1n];
       continue;
     }
 
-    const num = m[pr][cols - 1];
-    const den = m[pr][col];
-    if (den === 0) return null; // Inconsistent
+    let num = m[pr][cols - 1];
+    let den = m[pr][col];
+    if (den === 0n) return null; // Inconsistent
 
-    // Reduce the fraction
-    const g = gcd(Math.abs(num), Math.abs(den));
-    const sign = den < 0 ? -1 : 1;
-    solution[col] = [(sign * num) / g, (sign * den) / g];
+    // Normalize sign onto the numerator and reduce the fraction
+    if (den < 0n) {
+      num = -num;
+      den = -den;
+    }
+    const g = gcd(num < 0n ? -num : num, den);
+    solution[col] = [num / g, den / g];
   }
 
   return solution;
 }
 
-/** GCD of two non-negative integers */
-function gcd(a: number, b: number): number {
-  a = Math.abs(a);
-  b = Math.abs(b);
+/** GCD of two non-negative bigints (1 for gcd(0, 0), to avoid /0). */
+function gcd(a: bigint, b: bigint): bigint {
   while (b) {
     [a, b] = [b, a % b];
   }
-  return a || 1; // Avoid division by zero
+  return a || 1n;
 }
 
 /**
@@ -1146,24 +1151,24 @@ export function partialFraction(
     let termNumer: Expression;
     if (t.isLinear) {
       const [num, den] = solution[t.unknownIndex];
-      if (num === 0) continue; // Skip zero terms
+      if (num === 0n) continue; // Skip zero terms
       termNumer =
-        den === 1 ? ce.number(num) : ce.number(num).div(ce.number(den));
+        den === 1n ? ce.number(num) : ce.number(num).div(ce.number(den));
     } else {
       // Quadratic: A*x + B
       const [aNum, aDen] = solution[t.unknownIndex];
       const [bNum, bDen] = solution[t.unknownIndex + 1];
-      if (aNum === 0 && bNum === 0) continue; // Skip zero terms
+      if (aNum === 0n && bNum === 0n) continue; // Skip zero terms
 
       const terms: Expression[] = [];
-      if (aNum !== 0) {
+      if (aNum !== 0n) {
         const aCoeff =
-          aDen === 1 ? ce.number(aNum) : ce.number(aNum).div(ce.number(aDen));
+          aDen === 1n ? ce.number(aNum) : ce.number(aNum).div(ce.number(aDen));
         terms.push(aCoeff.mul(x));
       }
-      if (bNum !== 0) {
+      if (bNum !== 0n) {
         const bCoeff =
-          bDen === 1 ? ce.number(bNum) : ce.number(bNum).div(ce.number(bDen));
+          bDen === 1n ? ce.number(bNum) : ce.number(bNum).div(ce.number(bDen));
         terms.push(bCoeff);
       }
 

@@ -412,6 +412,17 @@ first four). Without them, the ~100 affected Chapter-1 rules can still be
     (rules #19/#20) + a durable `applyUpstreamCorrections()` patch in
     `extract-rules.ts` (so regeneration preserves it). All 30 → solved-correct,
     0 regressions.
+  - **1.3.1 Rational functions — native-integrator fallback (kept).** When the
+    Rubi rule chain does not close a *numeric* rational integrand, the driver
+    now falls back to CE's native `antiderivative()` (bounded by the driver
+    deadline; gated by `RUBI_NO_NATIVE_RATIONAL`). This recovered +12 of the
+    117 1.3.1 unsolved with no wrongs/regressions. It is the rules+native
+    coexistence `loadIntegrationRules` ships with. Symbolic-coefficient and
+    high-degree numeric rationals still need polynomial factoring (a shared
+    capability gap); 1.3.2 is ~92% algebraic (Euler-substitution), out of this
+    fallback's scope. Separately, the native partial-fraction path it relies on
+    was made sound and exact (repeated-factor `0`-bug fixed, monomial-content
+    factoring, exact bigint solve) so repeated-factor rationals now integrate.
   - **Still open for R2 completion:** (1) remaining 1.1.3 coverage —
     quartic-denominator `∫(c+d·x²)/(a+b·x⁴)` closing (cluster 2, ~203 unsolved)
     + 1.1.3.8 two-binomial tails; (2) 1.3.2 (56% — worst section) and 1.3.1;
