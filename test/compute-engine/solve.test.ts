@@ -1539,4 +1539,23 @@ describe('TRANSCENDENTAL AND SUBSTITUTION EQUATIONS (B9)', () => {
       ?.map((x) => x.json);
     expect(result?.sort()).toEqual([4, 9]);
   });
+
+  // Single square root with a non-constant coefficient: A·√R + B = 0 → A²R = B².
+  test('x = 1/√(x²+1) → x ≈ 0.786 (positive root only)', () => {
+    // x·√(x²+1) = 1 squares to x⁴+x²-1 = 0; the negative root is extraneous
+    // (the right-hand side is always positive).
+    const result = expr('x=\\frac{1}{\\sqrt{x^2+1}}')
+      .solve('x')
+      ?.map((x) => x.N().re);
+    expect(result?.length).toBe(1);
+    expect(result![0]).toBeCloseTo(0.7861513777574233, 8);
+  });
+
+  test('x·√(x+1) = 2 → x ≈ 1.315', () => {
+    const result = expr('x\\sqrt{x+1}=2')
+      .solve('x')
+      ?.map((x) => x.N().re);
+    expect(result?.length).toBe(1);
+    expect(result![0]).toBeCloseTo(1.314596212276752, 8);
+  });
 });

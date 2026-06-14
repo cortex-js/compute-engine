@@ -1126,11 +1126,32 @@ roots, so e.g. `x⁷ − 1` (CE returns `[1]`) counts as solved. The gaps:
     preferred (reuses existing code, matches `.solve()`'s existing mixed
     exact/float behavior, far smaller surface). Revisit if exact radical output
     is needed.
-- **Transcendental / substitution equations remain** (the other 7 Wester
-  trails): `eˣ = e^{2−x²}`, `xˣ = x`, `sin x = cos x`, `sin x = tan x`,
-  `2√x + 3⁴√x = 2` (a hidden quartic under `u = ⁴√x`), `x = 1/√(x²+1)`,
-  `√(ln x) = ln√x`. These need inverse-function templates (Fungrim solve seeds,
-  item 1) and a substitution heuristic, not polynomial root-finding.
+- **Transcendental / substitution equations — partially done (2026-06-14).**
+  Of the 7 Wester trails, **4 now solve** (`solve.ts`):
+  - ✅ `e^{2−x²} = e^{−x} → −1, 2` — **same-base power equality**: `cᵃ = cᵇ ⟺
+    a = b` when `x ↦ cˣ` is injective (positive constant base ≠ 1). `eˣ` is
+    `Power(ExponentialE, ·)`, so this also covers `2ˣ = 2³ → 3`. Added to the
+    injective-peeling step.
+  - ✅ `sin x = cos x → π/4` — new `a·sin x + b·cos x = 0 → arctan(−b/a)` rule
+    in `UNIVARIATE_ROOTS`.
+  - ✅ `2√x + 3·⁴√x = 2 → 1/16` — **homogenization** heuristic
+    (`solveByRationalPowerSubstitution`): an equation that is a polynomial in
+    `x^{1/d}` is solved via `u = x^{1/d}`, then `x = uᵈ`, with extraneous roots
+    dropped by validation. Generalizes to any sum of rational powers
+    (`x²ᐟ³ + x¹ᐟ³ − 2`, `x − 5√x + 6`, …).
+  - ✅ `x = 1/√(x²+1) → ≈0.786` — **single-sqrt elimination**
+    (`solveSingleSqrtEquation`): an equation with one x-dependent square root and
+    a non-constant coefficient, `A(x)·√R(x) + B(x) = 0`, is isolated and squared
+    to `A²R − B² = 0` (generalizing `transformSqrtLinearEquation`, which only
+    handles a bare `√f = g`). The negative root is dropped by validation.
+    Result is numeric for the irrational biquadratic (exact biquadratic-via-`u=x²`
+    is a possible follow-up).
+  - **Still open (3):** `xˣ = x` (factors as `ln x·(x−1) = 0` after a log
+    transform, but needs general transcendental factoring CE lacks — no `factor`
+    for `x·ln x − ln x`), `sin x = tan x` (factor `sin x·(1 − sec x)`),
+    `√(ln x) = ln√x` (two related generators `√(ln x)` and `ln x` — needs
+    `unrad`-style multi-generator substitution). Tests: `solve.test.ts`
+    "TRANSCENDENTAL AND SUBSTITUTION EQUATIONS (B9)".
 - ~~**Absolute-value equations**~~ ✅ **Fixed (2026-06-13).** Root cause was two
   buggy direct `|ax+b|+c` root rules in `UNIVARIATE_ROOTS` (`solve.ts`): the
   first branch had the subtraction reversed (`(b−c)/a` instead of `(c−b)/a`) and
@@ -1144,12 +1165,11 @@ roots, so e.g. `x⁷ − 1` (CE returns `[1]`) counts as solved. The gaps:
   ("SOLVING ABSOLUTE VALUE EQUATIONS"). (The Wester `equations` file has no
   `Abs` cases, so this fix is verified by unit tests rather than the Wester
   score.)
-- **Transcendental / mixed** — `xˣ = x`, `e^{−x} = e^{2−x²}`, and several
-  trig/radical/log forms (`sin x = cos x`, `2√x + 3⁴√x = 2`, `√(ln x) = ln√x`).
+  (See the consolidated transcendental bullet above for the per-case status.)
 
-Enabling the solve templates (`{solve: true}`, item 1) doesn't change this set
-(still 7/21) — they target LambertW / Ln-Exp / Tan-Arctan inverse forms; the
-baseline gaps above are complementary. **Secondary:** the `Solve[…]` *operator*
+Enabling the solve templates (`{solve: true}`, item 1) targets the remaining
+LambertW / Ln-Exp inverse forms (`xˣ = x` etc.); the baseline gaps above are
+complementary. **Secondary:** the `Solve[…]` *operator*
 form (e.g. from parsed Mathematica/LaTeX) returns unevaluated and lets its
 `Equal` arg collapse to `False` — it should dispatch to the same machinery as
 `.solve()`. Surfaced by `benchmarks/audit/wester.ts` (the `Solve` rows).

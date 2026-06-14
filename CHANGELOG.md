@@ -172,6 +172,11 @@
   common root. The partial-fraction solver now detects the inconsistent system
   instead of returning a spurious all-zero decomposition.
 
+- `Factor` is more complete: it now extracts a common monomial factor (e.g.
+  `x³+x² → x²(x+1)`, `3x⁴+2x³ → x³(3x+2)`) and fully factors already-factored
+  products and powers, so partial-fraction decomposition sees irreducible
+  factors with correct multiplicities.
+
 ## 0.59.0 _2026-06-10_
 
 This is a significant update to the Compute Engine.

@@ -2439,7 +2439,16 @@ function tryReversePowerChain(
     // The remaining factors (integrand ÷ uⁿ) must be a constant multiple of u′.
     const rest = fn.div(u.pow(n)).simplify();
     const ratio = tryGetConstantRatio(rest, uPrime, index);
-    if (ratio === null || ratio.isSame(0)) continue; // 0 ⇒ degenerate, not a match
+    // A genuine match needs `rest = c·u′` for a finite, nonzero constant c.
+    // 0 / NaN / ∞ all signal a degenerate `rest` (or a simplification that
+    // collapsed), not a reverse-power-chain form.
+    if (
+      ratio === null ||
+      ratio.isSame(0) ||
+      ratio.isNaN === true ||
+      ratio.isFinite === false
+    )
+      continue;
 
     const np1 = n.add(1);
     let result = u.pow(np1).div(np1);

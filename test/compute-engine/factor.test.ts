@@ -259,6 +259,60 @@ describe('Polynomial Factoring (general)', () => {
   });
 });
 
+describe('Full factorization: monomial content and pre-factored products', () => {
+  // factorPolynomial must return a fully-factored, prime-power form so that
+  // partial-fraction decomposition sees irreducible factors. extractContent
+  // only handled the numeric GCD, and pre-factored Multiply/Power inputs were
+  // never recursed into — so x³+x² and x·(x²+x) came back unfactored.
+  const sameValue = (a: Expression, b: Expression) => {
+    for (const xv of [2, -3, 5, 0.7]) {
+      expect(a.subs({ x: xv }).N().re).toBeCloseTo(b.subs({ x: xv }).N().re);
+    }
+  };
+
+  test('pulls monomial content x^k: x³+x² → x²(x+1)', () => {
+    const input = parse('x^3+x^2');
+    const f = factorPolynomial(input, 'x');
+    expect(f.operator).toBe('Multiply');
+    expect(f.isSame(parse('x^2(x+1)'))).toBe(true);
+    sameValue(f, input);
+  });
+
+  test('monomial content with leading coefficient: 3x⁴+2x³ → x³(3x+2)', () => {
+    const input = parse('3x^4+2x^3');
+    const f = factorPolynomial(input, 'x');
+    expect(f.isSame(parse('x^3(3x+2)'))).toBe(true);
+    sameValue(f, input);
+  });
+
+  test('re-factors a pre-factored product with shared factor: x(x²+x) = x²(x+1)', () => {
+    const input = parse('x(x^2+x)');
+    const f = factorPolynomial(input, 'x');
+    // x·(x²+x) = x²·(x+1) by value. CE keeps the repeated factor as x·x rather
+    // than collapsing to x² (collectFactors merges it), so assert value
+    // equivalence + that it factored further and is now idempotent.
+    sameValue(f, input);
+    sameValue(f, parse('x^2(x+1)'));
+    expect(f.isSame(input)).toBe(false);
+    expect(f.isSame(factorPolynomial(f, 'x'))).toBe(true);
+  });
+
+  test('fully factors a pre-factored denominator, preserving irreducible quadratics', () => {
+    // (x−1)·x·(1+x²)²·(1+x+x²) — already factored; must stay fully factored
+    // with (x²+1) carrying multiplicity 2, not be expanded and lost.
+    const input = parse('(x-1)x(1+x^2)^2(1+x+x^2)');
+    const f = factorPolynomial(input, 'x');
+    sameValue(f, input);
+    expect(f.toString()).toContain('(x^2 + 1)^2');
+  });
+
+  test('leaves an irreducible repeated quadratic intact: (x²+1)²', () => {
+    const input = parse('(x^2+1)^2');
+    const f = factorPolynomial(input, 'x');
+    expect(f.isSame(input)).toBe(true);
+  });
+});
+
 describe('Issue #309: infer variable when none specified', () => {
   // `Factor(x^2 + 5x + 6)` with no variable argument should still factor
   // the univariate polynomial by inferring the single unknown, instead of

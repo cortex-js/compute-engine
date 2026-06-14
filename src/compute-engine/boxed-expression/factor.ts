@@ -542,10 +542,26 @@ export function factorPolynomial(
   if (variable === undefined && expr.unknowns.length === 1)
     variable = expr.unknowns[0];
 
+  // A pre-factored product or power must be fully factored factor-by-factor
+  // and merged into prime-power form — e.g. x·(x²+x) → x²·(x+1), and (x²+1)²
+  // stays (x²+1)². Expanding it first would lose already-given irreducible
+  // factors (a product of irreducible quadratics can't be re-derived by the
+  // strategies below), so recurse into the structure instead.
+  if (isFunction(expr, 'Multiply') || isFunction(expr, 'Power'))
+    return refactorProductFactors(expr, variable);
+
   // Try content extraction first (requires variable)
   if (variable !== undefined) {
     const contentFactored = extractContent(expr, variable);
     if (contentFactored !== null) return contentFactored;
+
+    // Pull a common monomial factor xᵏ. extractContent only removes the
+    // numeric coefficient GCD, so a polynomial whose terms share a power of
+    // the variable but have integer content 1 — e.g. x³+x² or 3x⁴+2x³ —
+    // would otherwise stay unfactored, leaving rationals like 1/(x³+x²)
+    // without a usable factorization for partial fractions.
+    const monomialFactored = extractMonomialContent(expr, variable);
+    if (monomialFactored !== null) return monomialFactored;
   }
 
   // Try perfect square trinomial
@@ -585,12 +601,60 @@ function refactorProductFactors(
   product: Expression,
   variable: string | undefined
 ): Expression {
+  const ce = product.engine;
+
+  // Power: factor the base, then distribute a positive-integer exponent over
+  // the factored base so each prime factor carries the multiplicity —
+  // (x²+x)² → x²·(x+1)², while an irreducible base such as (x²+1)² is left
+  // intact. collectFactors/partial fractions need irreducible factors, not
+  // (f·g)^n.
+  if (isFunction(product, 'Power')) {
+    const exp = asSmallInteger(product.op2);
+    if (exp === null || exp <= 0) return product;
+    const factoredBase = factorPolynomial(product.op1, variable);
+    if (factoredBase.isSame(product.op1)) return product; // base irreducible
+    const baseFactors = isFunction(factoredBase, 'Multiply')
+      ? factoredBase.ops
+      : [factoredBase];
+    return ce.function(
+      'Multiply',
+      baseFactors.map((f) => ce.function('Power', [f.json, product.op2.json]).json)
+    );
+  }
+
   if (!isFunction(product, 'Multiply')) return product;
   const factors = product.ops.map((f) => factorPolynomial(f, variable));
-  return product.engine.function(
+  return ce.function(
     'Multiply',
     factors.map((f) => f.json)
   );
+}
+
+/**
+ * Pull a common monomial factor xᵏ out of a polynomial: x³+x² → x²·(x+1),
+ * 3x⁴+2x³ → x³·(3x+2). The cofactor is recursively factored. Returns null
+ * when the constant term is nonzero (no monomial content) or the input is not
+ * a polynomial in `variable`.
+ */
+function extractMonomialContent(
+  expr: Expression,
+  variable: string
+): Expression | null {
+  const coeffs = getPolynomialCoefficients(expr, variable);
+  if (!coeffs || coeffs.length === 0) return null;
+
+  // Lowest index with a nonzero coefficient = the shared power of x.
+  let k = 0;
+  while (k < coeffs.length && coeffs[k].isSame(0)) k += 1;
+  if (k <= 0 || k >= coeffs.length) return null; // no monomial content / zero poly
+
+  const ce = expr.engine;
+  const cofactor = fromCoefficients(coeffs.slice(k), variable);
+  const factoredCofactor = factorPolynomial(cofactor, variable);
+  return ce.function('Multiply', [
+    ce.function('Power', [ce.symbol(variable).json, ce.number(k).json]),
+    factoredCofactor,
+  ]);
 }
 
 /**

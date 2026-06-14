@@ -790,6 +790,98 @@ function transformSqrtLinearEquation(
 }
 
 /**
+ * Eliminate a single square root with an arbitrary (possibly non-constant)
+ * coefficient. Writes the equation `expr = 0` as `A(x)·√R(x) + B(x) = 0` — where
+ * `√R` is the unique x-dependent square root — and squares the isolated radical
+ * to the sqrt-free equation `A(x)²·R(x) − B(x)² = 0`.
+ *
+ * This generalizes `transformSqrtLinearEquation` (which only handles a bare
+ * `√f + g`) to forms like `x·√(x²+1) − 1 = 0 → x²(x²+1) − 1 = 0`. Squaring can
+ * introduce extraneous roots; those are removed by `validateRoots()` against the
+ * original equation.
+ *
+ * Returns the roots of the resulting sqrt-free equation (to be validated by the
+ * caller against the original), or `null` when `expr` does not contain exactly
+ * one distinct x-dependent square root, contains another radical of x, or is not
+ * a polynomial in that root.
+ */
+function solveSingleSqrtEquation(
+  expr: Expression,
+  variable: string
+): ReadonlyArray<Expression> | null {
+  const ce = expr.engine;
+
+  // Collect the distinct x-dependent radicals. Bail on anything other than a
+  // single `Sqrt` (a second sqrt is the two-sqrt case; `Root` is unhandled).
+  const sqrtKeys = new Set<string>();
+  let sqrtTerm: Expression | undefined;
+  let radicand: Expression | undefined;
+  let otherRadical = false;
+  const scan = (node: Expression): void => {
+    if (!node.has(variable)) return;
+    if (isFunction(node, 'Sqrt')) {
+      const key = node.toString();
+      if (!sqrtKeys.has(key)) {
+        sqrtKeys.add(key);
+        sqrtTerm = node;
+        radicand = node.op1;
+      }
+      return; // the radicand's inner variable is fine — don't recurse
+    }
+    if (isFunction(node, 'Root')) {
+      otherRadical = true;
+      return;
+    }
+    if (isFunction(node)) for (const op of node.ops!) scan(op);
+  };
+  scan(expr);
+  if (
+    otherRadical ||
+    sqrtKeys.size !== 1 ||
+    sqrtTerm === undefined ||
+    radicand === undefined
+  )
+    return null;
+
+  // Substitute a fresh symbol t for √R, then read off the polynomial in t.
+  const tName = ['t', 'u', 'w', 's', 'v', 'y', 'z'].find(
+    (n) => n !== variable && !expr.unknowns.includes(n)
+  );
+  if (tName === undefined) return null;
+  const t = ce.symbol(tName);
+
+  const substitute = (node: Expression): Expression => {
+    if (node.isSame(sqrtTerm)) return t;
+    if (isFunction(node))
+      return ce.function(node.operator, node.ops!.map(substitute));
+    return node;
+  };
+  const exprT = substitute(expr);
+  const coeffs = getPolynomialCoefficients(exprT, tName);
+  if (coeffs === null) return null;
+
+  // Split into the part multiplying √R (odd powers of t) and the rest (even
+  // powers), reducing t² → R: A = Σ c_{2k+1}·Rᵏ, B = Σ c_{2k}·Rᵏ.
+  let a: Expression = ce.Zero;
+  let b: Expression = ce.Zero;
+  let rPow: Expression = ce.One; // Rᵏ
+  for (let k = 0; 2 * k < coeffs.length; k++) {
+    b = b.add(coeffs[2 * k].mul(rPow));
+    if (2 * k + 1 < coeffs.length)
+      a = a.add(coeffs[2 * k + 1].mul(rPow));
+    rPow = rPow.mul(radicand);
+  }
+
+  // A·√R + B = 0  ⟹  A²·R = B²  ⟹  A²·R − B² = 0
+  const squared = a.mul(a).mul(radicand).sub(b.mul(b));
+  if (squared.has(tName)) return null; // safety: substitution incomplete
+  if (squared.has(variable) === false) return null;
+  // Solve the sqrt-free polynomial; extraneous roots from squaring are removed
+  // by the caller's validation against the original equation.
+  return findUnivariateRoots(squared.simplify(), variable);
+}
+
+/**
  * Detect and solve equations with two sqrt terms: √(f(x)) + √(g(x)) = e
  *
  * Pattern 3: √(ax + b) + √(cx + d) = e
@@ -1486,6 +1578,14 @@ export function findUnivariateRoots(
           }
         }
       }
+    }
+
+    // Single-sqrt elimination: A(x)·√R(x) + B(x) = 0 → A²R - B² = 0 (a √ term
+    // with a non-constant coefficient, e.g. x·√(x²+1) = 1), which the
+    // sqrt-linear transform above intentionally skips.
+    if (result.length === 0) {
+      const sqrtRoots = solveSingleSqrtEquation(expr, x);
+      if (sqrtRoots) result = [...sqrtRoots];
     }
 
     // Homogenization: equations that are polynomials in a rational power of the
