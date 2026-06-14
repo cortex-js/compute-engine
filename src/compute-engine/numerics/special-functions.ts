@@ -1939,6 +1939,102 @@ export function cosIntegral(x: number): number {
 }
 
 /**
+ * E₁(x) = ∫ₓ^∞ e^{−t}/t dt for x > 0 (Numerical Recipes §6.3 `expint`,
+ * specialised to n = 1): the power series for x ≤ 1, Lentz's continued
+ * fraction for x > 1. Used to extend Ei to negative arguments via
+ * Ei(−x) = −E₁(x).
+ */
+function expInt1(x: number): number {
+  const EPS = 1e-16;
+  const MAXIT = 200;
+  if (x <= 0) return NaN;
+  if (x <= 1) {
+    // E₁(x) = −γ − ln x − Σ_{n≥1} (−x)ⁿ/(n·n!)
+    let sum = -Math.log(x) - EULER_GAMMA;
+    let fact = 1;
+    for (let n = 1; n <= MAXIT; n++) {
+      fact *= -x / n;
+      const del = -fact / n;
+      sum += del;
+      if (Math.abs(del) < Math.abs(sum) * EPS) break;
+    }
+    return sum;
+  }
+  // Lentz continued fraction: E₁(x) = e^{−x}·(1/(x+1−) 1²/(x+3−) 2²/(x+5−) …)
+  const BIG = 1e30;
+  let b = x + 1;
+  let c = BIG;
+  let d = 1 / b;
+  let h = d;
+  for (let i = 1; i <= MAXIT; i++) {
+    const a = -i * i;
+    b += 2;
+    d = 1 / (a * d + b);
+    c = b + a / c;
+    const del = c * d;
+    h *= del;
+    if (Math.abs(del - 1) <= EPS) break;
+  }
+  return h * Math.exp(-x);
+}
+
+/**
+ * Exponential integral Ei(x) = PV ∫_{−∞}^x e^t/t dt, for real x ≠ 0.
+ *   Ei(0) = −∞, Ei(+∞) = +∞, Ei(−∞) = 0.
+ * For x > 0: power series Ei(x) = γ + ln x + Σ_{n≥1} xⁿ/(n·n!) for moderate x,
+ * the asymptotic series e^x/x·(1 + 1/x + 2!/x² + …) for large x (Numerical
+ * Recipes §6.3 `ei`). For x < 0: Ei(x) = −E₁(−x).
+ */
+export function expIntegralEi(x: number): number {
+  if (Number.isNaN(x)) return NaN;
+  if (x === 0) return -Infinity;
+  if (!Number.isFinite(x)) return x > 0 ? Infinity : 0;
+  if (x < 0) return -expInt1(-x);
+
+  const EPS = 1e-16;
+  const MAXIT = 200;
+  const SWITCH = -Math.log(EPS); // ≈ 36.8 — series below, asymptotic above
+  if (x <= SWITCH) {
+    // Power series (all terms positive for x > 0 — no cancellation).
+    let sum = 0;
+    let fact = 1;
+    for (let k = 1; k <= MAXIT; k++) {
+      fact *= x / k;
+      const term = fact / k;
+      sum += term;
+      if (term < EPS * sum) break;
+    }
+    return sum + Math.log(x) + EULER_GAMMA;
+  }
+  // Asymptotic series (divergent — stop once terms start growing).
+  let sum = 0;
+  let term = 1;
+  for (let k = 1; k <= MAXIT; k++) {
+    const prev = term;
+    term *= k / x;
+    if (term < EPS) break;
+    if (term < prev) sum += term;
+    else {
+      sum -= prev; // last reliable term, then halt
+      break;
+    }
+  }
+  return (Math.exp(x) * (1 + sum)) / x;
+}
+
+/**
+ * Logarithmic integral li(x) = PV ∫₀ˣ dt/ln t, for x > 0, x ≠ 1.
+ * Equivalent to Ei(ln x). li(0) = 0, li(1) = −∞.
+ */
+export function logIntegral(x: number): number {
+  if (Number.isNaN(x)) return NaN;
+  if (x === 0) return 0;
+  if (x === 1) return -Infinity;
+  if (x < 0) return NaN; // li is real only for x ≥ 0
+  return expIntegralEi(Math.log(x));
+}
+
+/**
  * Bignum complementary error function.
  * Precision scales with `BigDecimal.precision`.
  *

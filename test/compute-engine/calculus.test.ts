@@ -271,6 +271,28 @@ describe('INDEFINITE INTEGRATION', () => {
       `1/5 * cos(2x) * e^x + 2/5 * sin(2x) * e^x`
     ));
 
+  // Polynomial × eˣ × trig: by-parts composed with the cyclic solver, solved
+  // in closed form with exact rational coefficients (ROADMAP B2 leftover).
+  test('x*e^x*sin(x) (poly × eˣ × trig)', () =>
+    expect(evaluate('\\int x e^x \\sin(x) dx')).toMatchInlineSnapshot(
+      `-1/2 * x * cos(x) * e^x + 1/2 * x * sin(x) * e^x + 1/2 * cos(x) * e^x`
+    ));
+
+  test('x*e^x*cos(x) (poly × eˣ × trig)', () =>
+    expect(evaluate('\\int x e^x \\cos(x) dx')).toMatchInlineSnapshot(
+      `1/2 * x * sin(x) * e^x + 1/2 * x * cos(x) * e^x - 1/2 * sin(x) * e^x`
+    ));
+
+  test('x²*e^x*sin(x) (degree-2 poly × eˣ × trig)', () =>
+    expect(evaluate('\\int x^2 e^x \\sin(x) dx')).toMatchInlineSnapshot(
+      `-1/2 * cos(x) * x^2 * e^x + 1/2 * sin(x) * x^2 * e^x + x * cos(x) * e^x - 1/2 * sin(x) * e^x - 1/2 * cos(x) * e^x`
+    ));
+
+  test('x*e^x*sin(2x) (poly × eˣ × trig, frequency 2)', () =>
+    expect(evaluate('\\int x e^x \\sin(2x) dx')).toMatchInlineSnapshot(
+      `-2/5 * x * cos(2x) * e^x + 1/5 * x * sin(2x) * e^x + 3/25 * sin(2x) * e^x + 4/25 * cos(2x) * e^x`
+    ));
+
   // Additional integration patterns from TODO.md
   test('x^2*e^x (integration by parts twice)', () =>
     expect(evaluate('\\int x^2 e^x dx')).toMatchInlineSnapshot(
@@ -592,6 +614,33 @@ describe('ROADMAP B2: non-elementary & radical integrals (leftovers)', () => {
   test('∫sin(2x)/x dx → Si(2x)', () =>
     expect(evaluate('\\int \\frac{\\sin(2x)}{x} dx')).toMatchInlineSnapshot(
       `SinIntegral(2x)`
+    ));
+
+  // Exponential / logarithmic integrals.
+  test('∫eˣ/x dx → Ei(x)', () => {
+    expect(evaluate('\\int \\frac{e^x}{x} dx')).toMatchInlineSnapshot(
+      `ExpIntegralEi(x)`
+    );
+    checkDeriv('\\frac{e^x}{x}', '\\mathrm{ExpIntegralEi}(x)');
+  });
+
+  test('∫e^(2x)/x dx → Ei(2x)', () => {
+    expect(evaluate('\\int \\frac{e^{2x}}{x} dx')).toMatchInlineSnapshot(
+      `ExpIntegralEi(2x)`
+    );
+    checkDeriv('\\frac{e^{2x}}{x}', '\\mathrm{ExpIntegralEi}(2x)');
+  });
+
+  test('∫1/ln(x) dx → li(x)', () => {
+    expect(evaluate('\\int \\frac{1}{\\ln x} dx')).toMatchInlineSnapshot(
+      `LogIntegral(x)`
+    );
+    checkDeriv('\\frac{1}{\\ln x}', '\\mathrm{LogIntegral}(x)');
+  });
+
+  test('∫1/ln(2x) dx → ½·li(2x)', () =>
+    expect(evaluate('\\int \\frac{1}{\\ln(2x)} dx')).toMatchInlineSnapshot(
+      `1/2 * LogIntegral(2x)`
     ));
 
   // Odd powers of secant via the reduction formula.

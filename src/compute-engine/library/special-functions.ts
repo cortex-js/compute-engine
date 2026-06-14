@@ -19,6 +19,8 @@ import {
   appellF1,
   agm,
   bigAgm,
+  expIntegralEi,
+  logIntegral,
 } from '../numerics/special-functions';
 import {
   ellipticKComplex,
@@ -295,6 +297,44 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
               dedekindEta
             )
           : undefined,
+    },
+
+    ExpIntegralEi: {
+      description: 'Exponential integral Ei(x) = PV ∫_{−∞}^x eᵗ/t dt.',
+      wikidata: 'Q1361401',
+      complexity: 7500,
+      broadcastable: true,
+      signature: '(number) -> real',
+      // Not finite_real: Ei(0) = −∞, Ei(±∞) = ±∞/0.
+      type: () => 'real',
+      evaluate: ([x], { numericApproximation, engine: ce }) => {
+        // Real argument only (machine-precision kernel); stay symbolic otherwise.
+        if (!isNumber(x) || x.im !== 0) return undefined;
+        if (x.isSame(0)) return ce.NegativeInfinity;
+        if (x.isInfinity)
+          return x.isPositive ? ce.PositiveInfinity : ce.Zero;
+        if (!numericApproximation) return undefined;
+        return applyN([x], expIntegralEi);
+      },
+    },
+
+    LogIntegral: {
+      description: 'Logarithmic integral li(x) = PV ∫₀ˣ dt/ln t = Ei(ln x).',
+      wikidata: 'Q853513',
+      complexity: 7500,
+      broadcastable: true,
+      signature: '(number) -> real',
+      // Not finite_real: li(1) = −∞.
+      type: () => 'real',
+      evaluate: ([x], { numericApproximation, engine: ce }) => {
+        // li is real only for x ≥ 0; stay symbolic for complex/negative.
+        if (!isNumber(x) || x.im !== 0 || x.isNegative) return undefined;
+        if (x.isSame(0)) return ce.Zero;
+        if (x.isSame(1)) return ce.NegativeInfinity;
+        if (x.isInfinity && x.isPositive) return ce.PositiveInfinity;
+        if (!numericApproximation) return undefined;
+        return applyN([x], logIntegral);
+      },
     },
   },
 ];

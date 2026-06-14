@@ -738,7 +738,7 @@ regressions vs `0.59.0`; they are pre-existing gaps the suite made visible.
 kernels (cf. item 4) honoring `ce.precision` with guard digits. Overlaps item 7's
 "pole-aware `N()`" — worth doing together when touching these heads.
 
-### B2. Symbolic (indefinite) integration coverage gaps — ✅ leftovers resolved (2026-06-13)
+### B2. Symbolic (indefinite) integration coverage gaps — ✅ resolved (2026-06-13)
 
 - **Fractional-power / radical integrands return unevaluated** — `∫1/√x`, `∫√x`,
   `∫x²/√(1−x²)`, `∫x/√(1−x²)`: the power rule isn't applied to fractional
@@ -794,40 +794,40 @@ SymPy 20/20 — surfaced the next gaps, in priority order:
   `∫cos²(ax+b) = x/2 + sin(2(ax+b))/(4a)`, so the whole family is now exact
   (`∫sin²(2x) → x/2 − sin(4x)/8`, `∫sin²(x+1) → x/2 − sin(2x+2)/4`). Regression
   tests in `calculus.test.ts`.
-- 🟡 **Float leakage in `∫1/(x⁴+1)` and `∫x·arctan(x)` — scoped 2026-06-13, two
-  independent causes (next session).** Both are value-correct (differentiate-back
-  passes) but emit float coefficients instead of exact radicals/rationals.
+- ✅ **Float leakage in `∫1/(x⁴+1)` and `∫x·arctan(x)` — fixed 2026-06-13.** Both
+  were value-correct (differentiate-back passed) but emitted float coefficients;
+  the two causes were independent, and both turned out to be more general than
+  the original scoping guessed.
 
-  **(1) `∫1/(x⁴+1)` — partial fractions over two irreducible quadratics.**
-  Current output: `0.3535·arctan(1.414x−1.0) + 0.3535·arctan(1.414x+1.0) −
-  0.1767·ln(x²−1.414x+1) + 0.1767·ln(x²+1.414x+1)` — the right *shape*, all
-  floats (`0.3535 = 1/(2√2)`, `0.1767 = 1/(4√2)`, `1.414 = √2`).
-  - Root cause: `x⁴+1` has **no real roots** (`findUnivariateRoots` returns `[]`)
-    and `Factor(x⁴+1)` leaves it unfactored (the factorer works over ℚ, but the
-    real factors `(x²−√2x+1)(x²+√2x+1)` need irrational √2 coefficients). So the
-    Divide branch's symbolic paths (cover-up simple poles; Case F at
-    `antiderivative.ts:2712`/`2846` handles only **one** linear × **one**
-    irreducible quadratic) all miss, and it falls to `numericPartialFractions`
-    (`antiderivative.ts:1736`) → Durand–Kerner numeric roots → float residues.
-  - Fix direction: add a symbolic partial-fraction path for a denominator that
-    is a **product of two (or more) irreducible quadratics**. Either (a) a
-    real-quadratic factorizer for biquadratics/palindromic quartics that yields
-    the √2 quadratics, then per-quadratic `(Bx+C)/(x²+bx+c)` integration (reuse
-    the `ln|quad| + arctan` machinery already in Case F); or (b) a
-    Hermite/Ostrogradsky-style decomposition over the symbolic factorization.
-    Option (a) is narrower and likely enough for the common biquadratic cases.
-    Acceptance: `∫1/(x⁴+1)` exact (`(1/(4√2))[ln((x²+√2x+1)/(x²−√2x+1)) +
-    2arctan(√2x+1) + 2arctan(√2x−1)]` or equivalent), verified by
-    differentiate-back; keep `numericPartialFractions` as the final fallback.
+  **(1) `∫1/(x⁴+1)` — symbolic biquadratic partial fractions.** A new
+  `tryBiquadraticPartialFractions` (`antiderivative.ts`) handles a biquadratic
+  denominator `A·x⁴ + B·x² + C` with no real roots (`q = C/A > 0`) by factoring
+  it into two real irreducible quadratics (substitute `z = x²`, discriminant
+  `Δ = p²−4q`, `p = B/A`): `Δ < 0` → conjugate quadratics
+  `(x²+s·x+t)(x²−s·x+t)` with `t = √q`, `s = √(2t−p)` (e.g. `x⁴+1 →
+  (x²+√2x+1)(x²−√2x+1)`); `Δ ≥ 0, p>0` → `(x²+f₁)(x²+f₂)` with
+  `f₁,₂ = (p±√Δ)/2` (e.g. `x⁴+5x²+4 → (x²+1)(x²+4)`). The exact partial-fraction
+  numerators are solved in closed form (no float-introducing numeric solve) and
+  each `(βx+γ)/(x²+bx+c)` piece is integrated by a shared
+  `integrateLinearOverIrreducibleQuadratic` helper. A `hasInexactNumber` guard
+  defers to `numericPartialFractions` if any radical combination folds to a
+  float (CE's `.add`/`.sub` fold irrational number-literal results), so messy
+  biquadratics fail safe. Result: `∫1/(x⁴+1)`, `∫1/(x⁴+4)`, `∫x²/(x⁴+1)` (was
+  inert), and `∫1/(x⁴+5x²+4)` (was float + numeric noise) are all exact.
+  Verified by differentiate-back; `numericPartialFractions` stays the final
+  fallback (e.g. `x⁴−1`, real roots + one quadratic, is a separate path).
 
-  **(2) `∫x·arctan(x)` — by-parts coefficient leak.** Output
-  `½x²arctan x − ½x + 0.5·arctan x`: the recovered `arctan` term's coefficient
-  leaks as a float `0.5` while the other halves stay exact `1/2`. The inner
-  integrals are exact (`∫x²/(1+x²) → x − arctan x`, `∫1/(1+x²) → arctan x`) and
-  `½·arctan x` stays exact, so the float is introduced in the **by-parts
-  assembly** in `tryIntegrationByParts` (`antiderivative.ts:108`) when scaling
-  the recovered sub-integral by the `v = x²/2` constant — look for a `.N()` or a
-  `ce.number(0.5)`/float division there. Small, localized, independent of (1).
+  **(2) `∫x·arctan(x)` — constant factor in a Multiply denominator.** The leak
+  was *not* in the by-parts assembly (the original guess); the by-parts inner
+  integral is `∫x²/(2(1+x²))`, whose denominator canonicalizes to
+  `Multiply(2, Add(x², 1))` — a `Multiply`, not an `Add`, so
+  `getQuadraticCoefficients` (which looks for a bare `x²` factor) missed it and
+  it fell to the numeric fallback. The Divide branch now pulls a constant
+  (index-free) factor out of a `Multiply` denominator first
+  (`∫ N/(c·D) = (1/c)·∫ N/D`), fixing the whole class (`∫1/(2(1+x²)) →
+  ½arctan x`, `∫x·arctan x → ½x²arctan x − ½x + ½arctan x`).
+
+  Regression tests for both (with float-free assertions) in `calculus.test.ts`.
 - ✅ **`∫ln(x)/x → ½ln²x` and `∫tanⁿx`/`∫cotⁿx` — done.** Added a
   reverse-power-chain recognizer (`∫c·u′·uⁿ = c·uⁿ⁺¹/(n+1)`, tried late so it
   only catches otherwise-unevaluated integrands — e.g. `∫ln(x)/x → ½ln²x`,
@@ -840,10 +840,30 @@ SymPy 20/20 — surfaced the next gaps, in priority order:
   `∫1/√(x²+x+1) → arsinh((2x+1)/√3)`, `∫x/√(x²+x+1) → √(x²+x+1) −
   ½·arsinh((2x+1)/√3)`, `∫1/√(2−x²) → arcsin(x/√2)`. (`∫xᵐ/√(c+dx²)` with no
   linear term, m ≥ 2, still uses the earlier reduction.)
-- ⬜ **Missing non-elementary:** `∫eˣ/x` needs an `Ei`/`ExpIntegralEi` operator
-  (and `∫1/ln x` → `li`), parallel to the new `Si`/`Ci`.
-- ⬜ **Harder:** `∫x·eˣ·sin x` (by-parts composed with the cyclic e·trig
-  solver). Lower priority.
+- ✅ **Non-elementary `∫eˣ/x` → Ei, `∫1/ln x` → li — done.** Added the
+  `ExpIntegralEi` (Ei) and `LogIntegral` (li) operators, parallel to `Si`/`Ci`:
+  machine-precision kernels in `numerics/special-functions.ts` (Ei via the
+  Numerical Recipes §6.3 power/asymptotic series, extended to x < 0 through
+  Ei(−x) = −E₁(x); li(x) = Ei(ln x)), registered in
+  `library/special-functions.ts` with special values (Ei(0)=−∞, Ei(±∞)=±∞/0,
+  li(0)=0, li(1)=−∞), derivatives (Ei′=eˣ/x, li′=1/ln x) in the derivative
+  table, and antiderivative wiring: `∫e^(k·x)/x → Ei(k·x)`,
+  `∫1/ln(k·x) → (1/k)·li(k·x)`. Exact arguments stay symbolic under `evaluate()`
+  (only `.N()` numericizes), per the exactness contract. Bignum precision shares
+  the B1 limitation (machine-only, like Si/Ci). Tests in
+  `special-functions.test.ts` (numeric values verified against references and
+  the Ramanujan–Soldner constant li(μ)=0) and `calculus.test.ts`.
+- ✅ **`∫x·eˣ·sin x` (poly × eˣ × trig) — done.** A new
+  `tryPolyExpTrigIntegral` handles `∫ P(x)·eˣ·{sin,cos}(b·x) dx` for any
+  polynomial P and constant frequency b. Rather than recurse by-parts into the
+  cyclic solver (which has no shrinking measure and would not terminate), it
+  uses the closed form `eˣ·(A(x)·sin(b·x) + B(x)·cos(b·x))` and solves for the
+  polynomials A, B degree-by-degree from the top (each step a 2×2 system with
+  determinant 1 + b²), keeping every coefficient exact — no complex arithmetic,
+  no float leakage. The pure cyclic solver is the P = constant instance.
+  `∫x·eˣ·sin x → (eˣ/2)(x sin x − x cos x + cos x)`, and `x²·eˣ·sin x`,
+  `x·eˣ·sin 2x`, etc. all evaluate exactly (verified by differentiate-back).
+  Tests in `calculus.test.ts`.
 
 ### B3. Definite / improper integrals are numerical-only — partially resolved (2026-06-13)
 
@@ -1013,21 +1033,37 @@ not-evaluable, never a spurious value. Wester limit coverage **2/6 → 4/6** (th
 two B8 cases above now solved; the remaining two are the B7 cancellation limits,
 correctly `∅`). Tests: `calculus.test.ts` "ROADMAP B8".
 
-### B9. `Solve` coverage gaps (higher-degree polynomials, Abs, transcendental)
+### B9. `Solve` coverage gaps (~~higher-degree polynomials~~ ✅, ~~Abs~~ ✅, transcendental)
 
 (Correction: an earlier draft reported "0/21 — non-functional"; that was a
 benchmark bug — it called the `Solve` *operator*, which doesn't auto-evaluate,
-instead of the `.solve()` *method*.) With `expr.solve('x')`, base CE solves
-**7/21** of the Wester equations (SymPy 16/21): quadratics and factorable
-polynomials (real roots), `tan x = 1`, `sin x = 1/2`, `x + √x = 2`. Completeness
-is judged over **real** roots, so e.g. `x⁷ − 1` (CE returns `[1]`) counts as
-solved. The real gaps, where CE returns `[]`:
+instead of the `.solve()` *method*.) With `expr.solve('x')`, base CE now solves
+**9/21** of the Wester equations (SymPy 16/21; was 5/21 before the Abs and
+higher-degree-polynomial fixes below). Completeness is judged over **real**
+roots, so e.g. `x⁷ − 1` (CE returns `[1]`) counts as solved. The gaps:
 
-- **General multi-term cubics/quartics with no rational root** — `3x³ − 18x² +
-  33x − 19 → []`. (Pure powers `xⁿ = c → ⁿ√c`, rational-root polynomials
-  `x³−6x²+11x−6 → [1,2,3]`, and quadratics all *do* solve; the gap is the
-  general case, which needs Cardano/Ferrari or a numeric-root fallback —
-  `solve.ts:1320` only tries the rational-root theorem for degree ≥ 3.)
+- ~~**General multi-term cubics/quartics with no rational root**~~ ✅ **Fixed
+  (2026-06-13).** `3x³ − 18x² + 33x − 19 → []` before; now returns its three
+  real roots. The degree-≥3 fallback (`solve.ts`) tried only the rational-root
+  theorem; it now also runs a **numeric Durand–Kerner** real-root finder
+  (`numerics/polynomial-roots.ts`, `realPolynomialRoots`, shared with the
+  antiderivative partial-fraction path) when the coefficients are numeric.
+  Returns approximate real roots (`validateRoots` checks the residual); the
+  exact paths are untouched and take precedence, so pure powers
+  (`x³−2 → ∛2`), rational-root polynomials (`x³−6x²+11x−6 → [1,2,3]`) and
+  rational biquadratics (`x⁴−5x²+4 → ±1, ±2`) still return **exact** roots —
+  the numeric fallback only fills in the genuinely-irrational cases. Tests:
+  `solve.test.ts` "SOLVING CUBIC AND QUARTIC EQUATIONS".
+  - *Not covered:* a chosen design — closed-form Cardano/Ferrari (exact nested
+    radicals / casus-irreducibilis trig form). The numeric fallback was
+    preferred (reuses existing code, matches `.solve()`'s existing mixed
+    exact/float behavior, far smaller surface). Revisit if exact radical output
+    is needed.
+- **Transcendental / substitution equations remain** (the other 7 Wester
+  trails): `eˣ = e^{2−x²}`, `xˣ = x`, `sin x = cos x`, `sin x = tan x`,
+  `2√x + 3⁴√x = 2` (a hidden quartic under `u = ⁴√x`), `x = 1/√(x²+1)`,
+  `√(ln x) = ln√x`. These need inverse-function templates (Fungrim solve seeds,
+  item 1) and a substitution heuristic, not polynomial root-finding.
 - ~~**Absolute-value equations**~~ ✅ **Fixed (2026-06-13).** Root cause was two
   buggy direct `|ax+b|+c` root rules in `UNIVARIATE_ROOTS` (`solve.ts`): the
   first branch had the subtraction reversed (`(b−c)/a` instead of `(c−b)/a`) and

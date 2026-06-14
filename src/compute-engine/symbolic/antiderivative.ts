@@ -2,7 +2,7 @@ import { Complex } from 'complex-esm';
 
 import type { Expression, BoxedSubstitution, Rule } from '../global-types';
 
-import { checkDeadline } from '../../common/interruptible';
+import { durandKernerRoots } from '../numerics/polynomial-roots';
 import { mul } from '../boxed-expression/arithmetic-mul-div';
 import { add } from '../boxed-expression/arithmetic-add';
 import { matchAnyRules } from '../boxed-expression/rules';
@@ -615,6 +615,107 @@ function tryCyclicExpTrigIntegral(
   }
 
   return null;
+}
+
+/**
+ * ∫ P(x)·eˣ·sin(b·x) dx and ∫ P(x)·eˣ·cos(b·x) dx for a polynomial P and a
+ * constant b ≠ 0 (no additive phase). The antiderivative has the closed form
+ * eˣ·(A(x)·sin(b·x) + B(x)·cos(b·x)) with A, B polynomials of the same degree
+ * as P. Differentiating that form and matching gives, for the sin integrand,
+ *   A + A′ − b·B = P,   b·A + B + B′ = 0,
+ * and for cos the right-hand sides swap (0 and P). Solving degree-by-degree
+ * from the top — each step a 2×2 system with determinant 1 + b² — keeps every
+ * coefficient exact, with no complex arithmetic and no float leakage.
+ *
+ * This is the "by-parts composed with the cyclic e·trig solver" case: the pure
+ * cyclic solver (`tryCyclicExpTrigIntegral`) is the P = constant instance.
+ * Returns null unless the factors are exactly one eˣ, one sin/cos(b·x), and a
+ * non-constant polynomial remainder (or if any coefficient is not exact).
+ */
+function tryPolyExpTrigIntegral(
+  factors: ReadonlyArray<Expression>,
+  index: string
+): Expression | null {
+  if (factors.length < 2) return null;
+  const ce = factors[0].engine;
+  const x = ce.symbol(index);
+
+  let expFactor: Expression | null = null;
+  let trigFactor: Expression | null = null;
+  const polyFactors: Expression[] = [];
+  for (const f of factors) {
+    if (
+      !expFactor &&
+      ((isFunction(f, 'Exp') && sym(f.op1) === index) ||
+        (isFunction(f, 'Power') &&
+          sym(f.op1) === 'ExponentialE' &&
+          sym(f.op2) === index))
+    )
+      expFactor = f;
+    else if (!trigFactor && (isFunction(f, 'Sin') || isFunction(f, 'Cos')))
+      trigFactor = f;
+    else polyFactors.push(f);
+  }
+  if (!expFactor || !isFunction(trigFactor) || polyFactors.length === 0)
+    return null;
+
+  // The trig argument must be b·x with b a non-zero constant (no phase).
+  const trigArg = trigFactor.op1;
+  const b = trigArg.div(x).simplify();
+  if (b.has(index) || b.isSame(0)) return null;
+
+  // The remaining factors must multiply to a polynomial P(x).
+  const polyProduct =
+    polyFactors.length === 1 ? polyFactors[0] : mul(...polyFactors);
+  const pCoeffs = getPolynomialCoefficients(polyProduct, index);
+  if (!pCoeffs) return null;
+  const n = pCoeffs.length - 1;
+  const isSin = trigFactor.operator === 'Sin';
+
+  // Solve for A, B (coefficients aC, bC ascending) descending from degree n.
+  const aC: Expression[] = new Array(n + 1).fill(ce.Zero);
+  const bC: Expression[] = new Array(n + 1).fill(ce.Zero);
+  const det = ce.One.add(b.mul(b)); // 1 + b²
+  const p = (i: number): Expression => pCoeffs[i] ?? ce.Zero;
+  for (let i = n; i >= 0; i--) {
+    const aHi = i + 1 <= n ? aC[i + 1] : ce.Zero;
+    const bHi = i + 1 <= n ? bC[i + 1] : ce.Zero;
+    // r1 = (sin ? pᵢ : 0) − (i+1)·a₍ᵢ₊₁₎;  r2 = (sin ? 0 : pᵢ) − (i+1)·b₍ᵢ₊₁₎
+    const r1 = (isSin ? p(i) : ce.Zero).sub(ce.number(i + 1).mul(aHi));
+    const r2 = (isSin ? ce.Zero : p(i)).sub(ce.number(i + 1).mul(bHi));
+    // [1, −b; b, 1]·[aᵢ; bᵢ] = [r1; r2]  ⇒  solve with determinant 1 + b²
+    aC[i] = r1.add(b.mul(r2)).div(det);
+    bC[i] = r2.sub(b.mul(r1)).div(det);
+  }
+
+  const buildPoly = (coeffs: Expression[]): Expression => {
+    const terms: Expression[] = [];
+    for (let i = 0; i <= n; i++) {
+      if (coeffs[i].isSame(0)) continue;
+      terms.push(
+        i === 0
+          ? coeffs[i]
+          : ce.function('Multiply', [
+              coeffs[i],
+              ce.function('Power', [x, ce.number(i)]),
+            ])
+      );
+    }
+    return terms.length === 0 ? ce.Zero : add(...terms);
+  };
+
+  const result = ce
+    .function('Exp', [x])
+    .mul(
+      add(
+        buildPoly(aC).mul(ce.function('Sin', [trigArg])),
+        buildPoly(bC).mul(ce.function('Cos', [trigArg]))
+      )
+    )
+    .simplify();
+
+  if (hasInexactNumber(result)) return null;
+  return result;
 }
 
 function filter(sub: BoxedSubstitution): boolean {
@@ -1675,53 +1776,6 @@ function getQuadraticCoefficients(
 }
 
 /** Calculate the antiderivative of fn, as an expression (not a function) */
-/**
- * All (complex) roots of a polynomial with machine-number coefficients,
- * via the Durand–Kerner (Weierstrass) iteration. `coeffs` are ascending
- * (a₀ … aₙ), aₙ ≠ 0. Returns null when the iteration does not converge.
- */
-function durandKernerRoots(
-  coeffs: number[],
-  deadline?: number
-): Complex[] | null {
-  const n = coeffs.length - 1;
-  const an = coeffs[n];
-  const c = coeffs.map((x) => x / an); // monic, ascending
-
-  const evalP = (z: Complex): Complex => {
-    // Horner on the monic polynomial, descending
-    let r = new Complex(1, 0);
-    for (let i = n - 1; i >= 0; i--) r = r.mul(z).add(c[i]);
-    return r;
-  };
-
-  // Standard initial guesses: powers of a non-real point off the unit circle
-  const seed = new Complex(0.4, 0.9);
-  let roots: Complex[] = [];
-  let p = new Complex(1, 0);
-  for (let k = 0; k < n; k++) {
-    p = p.mul(seed);
-    roots.push(p);
-  }
-
-  for (let iter = 0; iter < 500; iter++) {
-    checkDeadline(deadline);
-    let maxDelta = 0;
-    const next: Complex[] = [];
-    for (let i = 0; i < n; i++) {
-      let denom = new Complex(1, 0);
-      for (let j = 0; j < n; j++)
-        if (j !== i) denom = denom.mul(roots[i].sub(roots[j]));
-      const delta = evalP(roots[i]).div(denom);
-      next.push(roots[i].sub(delta));
-      maxDelta = Math.max(maxDelta, delta.abs() / (1 + roots[i].abs()));
-    }
-    roots = next;
-    if (maxDelta < 1e-14) return roots;
-  }
-  return null; // did not converge (e.g. badly clustered roots)
-}
-
 /** True if any number literal in the expression tree is inexact (a float). */
 function hasInexactNumber(expr: Expression): boolean {
   if (isNumber(expr) && !expr.isExact) return true;
@@ -2467,6 +2521,10 @@ export function antiderivative(fn: Expression, index: string): Expression {
         if (cyclicResult) return constantProduct.mul(cyclicResult).evaluate();
       }
 
+      // Polynomial × eˣ × trig (the cyclic solver composed with by-parts)
+      const polyExpTrig = tryPolyExpTrigIntegral(variableFactors, index);
+      if (polyExpTrig) return constantProduct.mul(polyExpTrig).evaluate();
+
       const antideriv = antiderivative(variableProduct, index);
       return constantProduct.mul(antideriv).evaluate();
     }
@@ -2480,6 +2538,12 @@ export function antiderivative(fn: Expression, index: string): Expression {
     // These patterns would cause infinite recursion with standard integration by parts
     const cyclicResult = tryCyclicExpTrigIntegral(fn.ops, index);
     if (cyclicResult) return cyclicResult;
+
+    // Polynomial × eˣ × trig — by-parts composed with the cyclic solver, but
+    // solved in closed form (exact polynomial coefficients) to avoid the
+    // unbounded by-parts/cyclic recursion. Must precede integration by parts.
+    const polyExpTrig = tryPolyExpTrigIntegral(fn.ops, index);
+    if (polyExpTrig) return polyExpTrig;
 
     // Products of powers of the index fold to a single power:
     // x^m·x^(2m+2) → x^(3m+2), which the power rule integrates directly
@@ -2696,6 +2760,33 @@ export function antiderivative(fn: Expression, index: string): Expression {
       if (arg.has(index) && !ratio.has(index) && !ratio.isSame(0)) {
         const op = isFunction(fn.op1, 'Sin') ? 'SinIntegral' : 'CosIntegral';
         return ce.function(op, [arg]);
+      }
+    }
+
+    // Non-elementary ∫ e^(k·x)/x dx = Ei(k·x) (exponential integral). The
+    // numerator is e to a linear-through-origin power (arg/x a non-zero
+    // constant), the denominator the bare index. d/dx Ei(k·x) = e^(k·x)/x.
+    if (sym(fn.op2) === index) {
+      let expArg: Expression | null = null;
+      if (isFunction(fn.op1, 'Exp')) expArg = fn.op1.op1;
+      else if (isFunction(fn.op1, 'Power') && sym(fn.op1.op1) === 'ExponentialE')
+        expArg = fn.op1.op2;
+      if (expArg && expArg.has(index)) {
+        const ratio = expArg.div(ce.symbol(index)).simplify();
+        if (!ratio.has(index) && !ratio.isSame(0))
+          return ce.function('ExpIntegralEi', [expArg]);
+      }
+    }
+
+    // Non-elementary ∫ 1/ln(k·x) dx = (1/k)·li(k·x) (logarithmic integral).
+    // d/dx (1/k)·li(k·x) = (1/k)·k/ln(k·x) = 1/ln(k·x). For the bare index
+    // (k = 1) this is just li(x).
+    if (fn.op1.isSame(1) && isFunction(fn.op2, 'Ln') && fn.op2.op1.has(index)) {
+      const arg = fn.op2.op1;
+      const ratio = arg.div(ce.symbol(index)).simplify();
+      if (!ratio.has(index) && !ratio.isSame(0)) {
+        const li = ce.function('LogIntegral', [arg]);
+        return ratio.isSame(1) ? li : li.div(ratio);
       }
     }
 

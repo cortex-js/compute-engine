@@ -168,6 +168,10 @@ const DERIVATIVES_TABLE = {
   SinIntegral: ['Divide', ['Sin', '_'], '_'],
   // d/dx Ci(x) = cos(x)/x where Ci is the cosine integral
   CosIntegral: ['Divide', ['Cos', '_'], '_'],
+  // d/dx Ei(x) = e^x/x where Ei is the exponential integral
+  ExpIntegralEi: ['Divide', ['Exp', '_'], '_'],
+  // d/dx li(x) = 1/ln(x) where li is the logarithmic integral
+  LogIntegral: ['Divide', 1, ['Ln', '_']],
   // Note: Bessel functions (BesselJ, BesselY, BesselI, BesselK) and Airy functions
   // (AiryAi, AiryBi) have been omitted because their derivatives involve functions
   // of different orders or related derivative functions that are not in the standard

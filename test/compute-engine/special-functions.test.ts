@@ -597,6 +597,70 @@ describe('SINE & COSINE INTEGRALS (Si, Ci)', () => {
   });
 });
 
+// Exponential and logarithmic integrals (ROADMAP B2: ∫eˣ/x → Ei,
+// ∫1/ln x → li). Machine-precision only (no bignum kernel; ROADMAP B1).
+describe('EXPONENTIAL & LOGARITHMIC INTEGRALS (Ei, li)', () => {
+  test('Ei(1) ≈ 1.8951178163559368', () =>
+    expectApprox(ce.box(['ExpIntegralEi', 1]), 1.8951178163559368, 1e-12));
+
+  test('Ei(2) ≈ 4.954234356001890 (asymptotic-free regime)', () =>
+    expectApprox(ce.box(['ExpIntegralEi', 2]), 4.95423435600189, 1e-12));
+
+  test('Ei(10) ≈ 2492.2289762418777', () =>
+    expectApprox(ce.box(['ExpIntegralEi', 10]), 2492.2289762418777, 1e-9));
+
+  test('Ei(40) ≈ 6.0397182636112e15 (asymptotic-series regime)', () =>
+    expectApprox(ce.box(['ExpIntegralEi', 40]), 6.0397182636112e15, 1e-12));
+
+  test('Ei is not odd: Ei(−1) ≈ −0.21938393439552029', () =>
+    expectApprox(ce.box(['ExpIntegralEi', -1]), -0.21938393439552029, 1e-12));
+
+  test('Ei(0) = −∞, Ei(+∞) = +∞, Ei(−∞) = 0', () => {
+    expect(ce.box(['ExpIntegralEi', 0]).evaluate().re).toBe(-Infinity);
+    expect(
+      ce.box(['ExpIntegralEi', ce.PositiveInfinity]).evaluate().re
+    ).toBe(Infinity);
+    expect(
+      ce.box(['ExpIntegralEi', ce.NegativeInfinity]).evaluate().re
+    ).toBe(0);
+  });
+
+  // Exactness contract: a transcendental of an exact argument stays symbolic
+  // under evaluate(); only .N() numericizes.
+  test('Ei(2) stays symbolic under evaluate(), numericizes under N()', () => {
+    expect(ce.box(['ExpIntegralEi', 2]).evaluate().toString()).toEqual(
+      'ExpIntegralEi(2)'
+    );
+    expectApprox(ce.box(['ExpIntegralEi', 2]).N(), 4.95423435600189, 1e-12);
+  });
+
+  test('li(2) ≈ 1.0451637801174927', () =>
+    expectApprox(ce.box(['LogIntegral', 2]), 1.0451637801174927, 1e-12));
+
+  test('li(10) ≈ 6.165599504787297', () =>
+    expectApprox(ce.box(['LogIntegral', 10]), 6.165599504787297, 1e-11));
+
+  // Ramanujan–Soldner constant μ: li(μ) = 0.
+  test('li(μ) = 0 at the Ramanujan–Soldner constant', () =>
+    expect(
+      Math.abs(ce.box(['LogIntegral', 1.4513692348833810502]).N().re!)
+    ).toBeLessThan(1e-12));
+
+  test('li(0) = 0, li(1) = −∞', () => {
+    expect(ce.box(['LogIntegral', 0]).evaluate().re).toBe(0);
+    expect(ce.box(['LogIntegral', 1]).evaluate().re).toBe(-Infinity);
+  });
+
+  test('d/dx Ei(x) = e^x/x, d/dx li(x) = 1/ln x', () => {
+    expect(
+      ce.box(['D', ['ExpIntegralEi', 'x'], 'x']).evaluate().toString()
+    ).toEqual('e^x / x');
+    expect(
+      ce.box(['D', ['LogIntegral', 'x'], 'x']).evaluate().toString()
+    ).toEqual('1 / ln(x)');
+  });
+});
+
 //
 // ---------------- Tier-2 kernels (ROADMAP item 4) ----------------
 // Reference values computed independently (Simpson quadrature for K/E,

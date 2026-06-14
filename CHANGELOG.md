@@ -17,6 +17,15 @@
   numeric path rather than returning a spurious value. `NLimit` remains purely
   numeric.
 
+- **`solve` handles general cubics, quartics, and higher-degree polynomials.**
+  Previously a polynomial of degree ≥ 3 with no rational root returned nothing
+  (`3x³ − 18x² + 33x − 19 → []`); it now returns its real roots as numeric
+  approximations via a Durand–Kerner solver. Exact paths still take precedence,
+  so pure powers (`x³ − 2 → ∛2`), rational-root polynomials
+  (`x³ − 6x² + 11x − 6 → [1, 2, 3]`), and rational biquadratics
+  (`x⁴ − 5x² + 4 → ±1, ±2`) keep returning exact roots — the numeric fallback
+  only fills in the genuinely-irrational cases.
+
 - **Numeric evaluation of special functions**: `EllipticK(m)` and `EllipticE(m)`
   (complete elliptic integrals, parameter convention m = k², computed via the
   arithmetic-geometric mean), `AGM(a, b)` (and the shorthand `AGM(z)` = AGM(1,
@@ -54,6 +63,15 @@
   derivative registered (`Erfi′ = (2/√π)e^{x²}`, `Si′ = sin x/x`,
   `Ci′ = cos x/x`). These back the new non-elementary antiderivatives below.
 
+- **New special functions `ExpIntegralEi` (Ei) and `LogIntegral` (li)**.
+  `ExpIntegralEi(x) = PV ∫_{−∞}^x eᵗ/t dt` and `LogIntegral(x) = PV ∫₀ˣ dt/ln t
+  = Ei(ln x)` evaluate at machine precision (Numerical Recipes §6.3 power /
+  asymptotic series, with Ei extended to negative arguments via Ei(−x) =
+  −E₁(x)). Special values `Ei(0) = −∞`, `Ei(±∞) = ±∞/0`, `li(0) = 0`,
+  `li(1) = −∞` are exact; derivatives `Ei′ = eˣ/x` and `li′ = 1/ln x` are
+  registered. Like Si/Ci, these are machine-precision only. They back the new
+  `∫eˣ/x` / `∫1/ln x` antiderivatives below.
+
 ### Improvements
 
 - **Exact transcendentals stay symbolic under `evaluate()`.** A transcendental
@@ -83,6 +101,14 @@
   - **Fresnel**: `∫cos(ax²) → √(π/2a)·FresnelC(√(2a/π)·x)` and the corresponding
     `∫sin(ax²) → FresnelS`.
   - **Sine/cosine integrals**: `∫sin(kx)/x → Si(kx)`, `∫cos(kx)/x → Ci(kx)`.
+  - **Exponential/logarithmic integrals**: `∫e^(kx)/x → Ei(kx)` and
+    `∫1/ln(kx) → (1/k)·li(kx)` (the new `ExpIntegralEi`/`LogIntegral`).
+  - **Polynomial × eˣ × trig**: `∫P(x)·eˣ·sin(bx)` and `∫P(x)·eˣ·cos(bx)` for a
+    polynomial P and constant frequency b, in exact closed form — e.g.
+    `∫x·eˣ·sin x → (eˣ/2)(x sin x − x cos x + cos x)`, `∫x²·eˣ·sin x`,
+    `∫x·eˣ·sin 2x`. Solved as `eˣ(A(x)sin bx + B(x)cos bx)` with A, B found
+    degree-by-degree (exact rational coefficients), generalising the cyclic
+    `∫eˣ·trig` solver.
   - **Radical integrands**: `∫x/√(1−x²) → −√(1−x²)`,
     `∫x²/√(1−x²) → ½(arcsin x − x√(1−x²))`, the general `∫xⁿ/√(c+dx²)` family
     via a reduction formula, `∫c·Q′/√Q → 2c√Q` for any quadratic `Q`, and — by
