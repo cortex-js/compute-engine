@@ -1,545 +1,145 @@
 ## [Unreleased]
 
-### Features
+### Behavior Changes
 
-- **Symbolic limits**: `Limit` now evaluates to an **exact closed form** instead
-  of only a numeric approximation. `ce.parse('\\lim_{x\\to 0}\\frac{\\sin
-  x}{x}').evaluate()` is `1` (was an unevaluated `Limit`), and likewise
-  `lim_{x→∞} arctan x = π/2`, `lim_{x→∞} (1+1/x)^x = e`,
-  `lim_{x→∞} (3ˣ+5ˣ)^{1/x} = 5`, `lim_{x→∞} ln x/(sin x + ln x) = 1`. The
-  symbolic engine covers direct substitution, L'Hôpital for 0/0 and ∞/∞
-  (iterated), rational functions at infinity, an order-of-growth analysis
-  (bounded < log < polynomial < exponential < iterated-exponential) with
-  dominant-term extraction and bounded-function handling, and `f^g` forms via
-  `exp(g·ln f)`. It runs ahead of the numeric path and falls back to it whenever
-  a limit can't be determined symbolically, so coverage never regresses; limits
-  it cannot resolve (e.g. catastrophic-cancellation Gruntz limits) defer to the
-  numeric path rather than returning a spurious value. `NLimit` remains purely
-  numeric.
+- **Exact transcendental expressions now remain symbolic under `evaluate()`.**
+  For example, `ln(2)` remains `ln(2)` instead of becoming `0.693…`. Use `.N()`
+  or `{ numericApproximation: true }` when a numeric approximation is wanted.
+  Inexact inputs still evaluate numerically, and known exact values such as
+  `cos(π) = -1` and `arctan(1) = π/4` still simplify. As a result, definite
+  integrals also preserve exact results, such as `∫₁² 1/x dx = ln(2)` and
+  `∫₀¹ 1/(1+x²) dx = π/4`.
 
-- **`solve` handles general cubics, quartics, and higher-degree polynomials.**
-  Previously a polynomial of degree ≥ 3 with no rational root returned nothing
-  (`3x³ − 18x² + 33x − 19 → []`); it now returns its real roots as numeric
-  approximations via a Durand–Kerner solver. Exact paths still take precedence,
-  so pure powers (`x³ − 2 → ∛2`), rational-root polynomials
-  (`x³ − 6x² + 11x − 6 → [1, 2, 3]`), and rational biquadratics
-  (`x⁴ − 5x² + 4 → ±1, ±2`) keep returning exact roots — the numeric fallback
-  only fills in the genuinely-irrational cases.
+### Calculus
 
-- **Numeric evaluation of special functions**: `EllipticK(m)` and `EllipticE(m)`
-  (complete elliptic integrals, parameter convention m = k², computed via the
-  arithmetic-geometric mean), `AGM(a, b)` (and the shorthand `AGM(z)` = AGM(1,
-  z)), the Gauss hypergeometric function `Hypergeometric2F1(a, b, c, z)`, the
-  Kummer confluent hypergeometric function `Hypergeometric1F1(a, b, z)`, the
-  Jacobi theta functions `JacobiTheta(j, z, tau)` (j ∈ 1…4, nome q = e^{iπτ}),
-  and the Dedekind eta function `DedekindEta(tau)`. The elliptic integrals and
-  hypergeometric functions support machine, arbitrary-precision, and complex
-  evaluation (including K(m) for m > 1, which is complex); the theta and eta
-  functions evaluate for complex arguments with Im(τ) > 0. Identities
-  referencing these functions in the Identities Library are now numerically
-  verifiable.
+- **`Limit` can now return exact symbolic results.** This includes direct
+  substitution, indeterminate quotients, rational functions at infinity,
+  dominant-term analysis, and exponential forms. Examples include
+  `lim(x→0) sin(x)/x = 1`, `lim(x→∞) (1+1/x)^x = e`, and
+  `lim(x→∞) arctan(x) = π/2`. Limits that cannot be determined reliably fall
+  back to numeric evaluation or remain unevaluated. `NLimit` remains numeric.
 
-- **Incomplete elliptic integrals**: `EllipticF(phi, m)` (first kind), a
-  two-argument `EllipticE(phi, m)` (second kind — the existing `EllipticE(m)`
-  gains an optional amplitude argument), and `EllipticPi(n, m)` /
-  `EllipticPi(n, phi, m)` (complete and incomplete third kind). Argument
-  conventions follow Mathematica (amplitude before the parameter, parameter m =
-  k² last). Evaluation goes through the Carlson symmetric integrals
-  R_F/R_C/R_D/R_J (duplication-theorem algorithms) with machine-real and complex
-  kernels: parameters m > 1 and m < 0, complex amplitudes, and amplitudes beyond
-  ±π/2 (quasi-periodic extension) are all supported. Values validated against
-  mpmath to ~10⁻¹⁵.
+- **Symbolic integration supports many more integrands**, including:
+  - Gaussian integrals and quadratic exponentials using `Erf` and `Erfi`
+  - Fresnel integrals
+  - Sine, cosine, exponential, and logarithmic integrals
+  - Products of polynomials, exponentials, and trigonometric functions
+  - More radical and quadratic-root integrands
+  - Powers of secant, cosecant, tangent, and cotangent
+  - Reverse power-chain forms such as `∫ln(x)/x dx = ½ln²(x)`
+  - Products with symbolic exponents that previously failed or timed out
 
-- **`AppellF1(a, b₁, b₂, c, x, y)` numeric evaluation**: the Appell
-  hypergeometric function F₁ now evaluates numerically (machine and complex) via
-  its double series for |x|, |y| < 1, including the terminating (polynomial)
-  parameter cases.
+- **Rational-function integration is more exact and complete.** Partial
+  fractions now preserve rational and radical coefficients for a wider range of
+  denominators, including `x³+1`, `x⁴+1`, `x⁴-1`, and biquadratic polynomials.
+  Several cases that previously returned incomplete results, floating-point
+  coefficients, or no result now return exact antiderivatives.
 
-- **New special functions `Erfi`, `SinIntegral` (Si), and `CosIntegral` (Ci)**.
-  `Erfi(x) = −i·Erf(ix)` is the imaginary error function (machine + arbitrary
-  precision); `SinIntegral(x) = ∫₀ˣ sin t/t dt` and
-  `CosIntegral(x) = γ + ln x + ∫₀ˣ (cos t − 1)/t dt` evaluate at machine
-  precision (Numerical Recipes `cisi` continued fraction). Each has its
-  derivative registered (`Erfi′ = (2/√π)e^{x²}`, `Si′ = sin x/x`,
-  `Ci′ = cos x/x`). These back the new non-elementary antiderivatives below.
+- **More improper integrals evaluate correctly.** Exact results now include
+  Gaussian, rational, and Fresnel integrals over infinite intervals. Numeric
+  integration of convergent oscillatory integrals is also more reliable, while
+  divergent or low-confidence cases remain unevaluated instead of returning a
+  misleading finite value.
 
-- **New special functions `ExpIntegralEi` (Ei) and `LogIntegral` (li)**.
-  `ExpIntegralEi(x) = PV ∫_{−∞}^x eᵗ/t dt` and `LogIntegral(x) = PV ∫₀ˣ dt/ln t
-  = Ei(ln x)` evaluate at machine precision (Numerical Recipes §6.3 power /
-  asymptotic series, with Ei extended to negative arguments via Ei(−x) =
-  −E₁(x)). Special values `Ei(0) = −∞`, `Ei(±∞) = ±∞/0`, `li(0) = 0`,
-  `li(1) = −∞` are exact; derivatives `Ei′ = eˣ/x` and `li′ = 1/ln x` are
-  registered. Like Si/Ci, these are machine-precision only. They back the new
-  `∫eˣ/x` / `∫1/ln x` antiderivatives below.
+- Fixed incorrect or missing antiderivatives for `sin²(ax+b)`, `cos²(ax+b)`,
+  `√x`, `1/√x`, `1/√(1-x²)`, and related forms.
 
-### Improvements
+### Algebra and Solving
 
-- **Exact transcendentals stay symbolic under `evaluate()`.** A transcendental
-  function of an exact argument is itself an exact constant — like `√2` — so
-  `evaluate()` now keeps it symbolic and only `.N()` produces a float:
-  `ce.parse('\\ln 2').evaluate()` is `ln(2)` (was `0.693…`), and likewise for
-  `log`, `sin`, `cos`, `tan`, the inverse-trig and hyperbolic functions. An
-  **inexact** (float) argument still numericizes (`cos(5.1) → 0.377…`,
-  `log_2.5(8) → 2.269…`), mirroring `√2.5`. Exact closed forms continue to
-  reduce (`ln 1 → 0`, `ln e → 1`, `log₂ 8 → 3`, `cos π → −1`, `e^{ln 2} → 2`).
-  As part of this, inverse-trig special values now reduce — `arcsin 0 → 0`,
-  `arctan 1 → π/4`, `arcsin ½ → π/6` (the dispatch to `constructibleValues` for
-  inverse functions had been unreachable dead code). **Behavior change:** code
-  that relied on `evaluate()` numericizing a transcendental of an exact argument
-  should call `.N()` (or pass `{ numericApproximation: true }`) instead.
+- **`solve` now handles general cubic, quartic, and higher-degree polynomials.**
+  Exact roots are still preferred; when no supported exact form is available,
+  real roots are returned as numeric approximations.
 
-- **Definite integrals with a transcendental closed form are now exact**.
-  Following the change above, the antiderivative + bound substitution no longer
-  collapses to a float: `∫₁² (1/x) dx → ln(2)`, `∫₀¹ 1/(x²+1) dx → π/4`,
-  `∫₀¹ sin x dx → 1 − cos(1)`, `∫₁² ln x dx → 2ln(2) − 1` (previously `0.693…`,
-  `0.785…`, `0.460…`, `0.386…`).
+- **Absolute-value equations solve more reliably.** This includes equations such
+  as `|x| = 2`, `|x-1| = 2`, non-linear arguments such as `|x²-3| = 1`, and
+  equations with an absolute value on both sides.
 
-- **More indefinite integrals evaluate.** The symbolic integrator now produces:
-  - **Gaussian → error functions**: `∫e^(−x²) → (√π/2)·Erf(x)`, and the general
-    `∫e^(ax²+bx+c)` via completing the square, selecting `Erf` (a < 0) or `Erfi`
-    (a > 0).
-  - **Fresnel**: `∫cos(ax²) → √(π/2a)·FresnelC(√(2a/π)·x)` and the corresponding
-    `∫sin(ax²) → FresnelS`.
-  - **Sine/cosine integrals**: `∫sin(kx)/x → Si(kx)`, `∫cos(kx)/x → Ci(kx)`.
-  - **Exponential/logarithmic integrals**: `∫e^(kx)/x → Ei(kx)` and
-    `∫1/ln(kx) → (1/k)·li(kx)` (the new `ExpIntegralEi`/`LogIntegral`).
-  - **Polynomial × eˣ × trig**: `∫P(x)·eˣ·sin(bx)` and `∫P(x)·eˣ·cos(bx)` for a
-    polynomial P and constant frequency b, in exact closed form — e.g.
-    `∫x·eˣ·sin x → (eˣ/2)(x sin x − x cos x + cos x)`, `∫x²·eˣ·sin x`,
-    `∫x·eˣ·sin 2x`. Solved as `eˣ(A(x)sin bx + B(x)cos bx)` with A, B found
-    degree-by-degree (exact rational coefficients), generalising the cyclic
-    `∫eˣ·trig` solver.
-  - **Radical integrands**: `∫x/√(1−x²) → −√(1−x²)`,
-    `∫x²/√(1−x²) → ½(arcsin x − x√(1−x²))`, the general `∫xⁿ/√(c+dx²)` family
-    via a reduction formula, `∫c·Q′/√Q → 2c√Q` for any quadratic `Q`, and — by
-    completing the square — a linear/constant numerator over a radicand **with a
-    linear term**: `∫1/√(x²+x+1) → arsinh((2x+1)/√3)`,
-    `∫x/√(x²+x+1) → √(x²+x+1) − ½·arsinh((2x+1)/√3)`,
-    `∫1/√(2−x²) → arcsin(x/√2)`.
-  - **Powers of secant/cosecant/tangent/cotangent**: `∫secⁿx`, `∫cscⁿx`,
-    `∫tanⁿx`, `∫cotⁿx` (n ≥ 2) via the reduction formulas, e.g.
-    `∫sec³x → ½(sec x·tan x + ln|sec x + tan x|)`,
-    `∫tan³x → ½tan²x − ln|sec x|`.
-  - **Reverse power-chain rule** `∫c·u′(x)·u(x)ⁿ dx = c·u(x)ⁿ⁺¹/(n+1)`, e.g.
-    `∫ln(x)/x → ½ln²x`, `∫ln²(x)/x → ⅓ln³x`.
+- **`GCD` now finds common polynomial factors** for univariate and multivariate
+  polynomials. Integer operands retain their existing behavior; use
+  `PolynomialGCD()` when an explicit polynomial result of `1` is needed for
+  coprime inputs.
 
-- **Nested radicals are denested during simplification** (`sqrtdenest`).
-  `simplify()` now rewrites `√(a+b√c) → √x + √y` when `a²−b²c` is a perfect
-  square: `√(3+2√2) → 1+√2`, `√(7+4√3) → 2+√3`, `√(5+2√6) → √2+√3`,
-  `√(3−2√2) → √2−1`. Radicands that do not denest over the rationals are left
-  unchanged.
+- **Polynomial factorization is more complete and reliable.** In particular,
+  `Factor(xⁿ-1)` now returns polynomial factors without introducing
+  branch-dependent radicals, and the public `factor()` function once again
+  factors expressions such as `x²+5x+6`.
 
-- **Exact antiderivatives for biquadratic denominators.** `∫1/(x⁴+1)` and
-  related integrals over `A·x⁴ + B·x² + C` with no real roots are now exact
-  instead of leaking float coefficients. The integrator factors the biquadratic
-  into two real irreducible quadratics — `x⁴+1 → (x²+√2x+1)(x²−√2x+1)`,
-  `x⁴+5x²+4 → (x²+1)(x²+4)` — and integrates each `(βx+γ)/(x²+bx+c)` piece
-  symbolically: `∫1/(x⁴+1) → (√2/8)·ln((x²+√2x+1)/(x²−√2x+1)) +
-  (√2/4)·(arctan(√2x+1) + arctan(√2x−1))`, `∫1/(x⁴+4)`, `∫x²/(x⁴+1)` (was
-  unevaluated), and `∫1/(x⁴+5x²+4) → −⅙arctan(x/2) + ⅓arctan x` all exact. The
-  numeric partial-fraction path remains the fallback for denominators this does
-  not cover.
+- **Nested radicals are simplified when possible**, for example
+  `√(3+2√2) = 1+√2`.
 
-- **Exact partial fractions for ℚ-factorable rational denominators.** Rational
-  integrands whose denominator factors over ℚ into distinct linear and
-  irreducible-quadratic factors are now integrated exactly instead of leaking
-  float coefficients via the numeric fallback: `∫1/(x⁴−1)`, `∫x/(x⁴−1)` (was
-  unevaluated), `∫1/(x⁶−1)`, `∫1/((x−1)(x−2)(x²+1))`, etc. Linear factors
-  contribute exact residues `A·ln|x−r|`; each irreducible quadratic's numerator
-  is recovered by exact arithmetic in the field ℚ[x]/(x²+bx+c). A genuinely
-  ℚ-irreducible quartic such as `x⁴+x+1` (no rational/real-quadratic
-  factorization) still uses the numeric fallback.
+### Special Functions
 
-- **Fixed: float leak in `∫x·arctan(x)` and `∫N/(c·(1+x²))`.** A constant factor
-  inside a product denominator (e.g. `2·(1+x²)`, which canonicalizes to a
-  `Multiply`, not an `Add`) was not pulled out, so the quadratic/arctan rules
-  missed it and the integral fell to the numeric fallback. The constant is now
-  extracted first (`∫ N/(c·D) = (1/c)·∫ N/D`): `∫1/(2(1+x²)) → ½arctan x` and
-  `∫x·arctan x → ½x²arctan x − ½x + ½arctan x` (the `½arctan x` term previously
-  leaked as `0.5·arctan x`).
+- Added numeric evaluation for:
+  - Complete and incomplete elliptic integrals: `EllipticK`, `EllipticE`,
+    `EllipticF`, and `EllipticPi`
+  - The arithmetic-geometric mean `AGM`
+  - `Hypergeometric2F1`, `Hypergeometric1F1`, and `AppellF1`
+  - Jacobi theta functions and the Dedekind eta function
+  - `Erfi`, `SinIntegral`, `CosIntegral`, `ExpIntegralEi`, and `LogIntegral`
 
-- **Fixed: `∫sin²x` returned the wrong antiderivative.** It gave
-  `x/2 + sin(2x)/4` (the integral of `cos²x`) because the `∫sin²(ax+b)` rule
-  used `+` instead of `−`; both the `sin²` and `cos²` rules also dropped the
-  `1/a` factor and the phase `b`. Now exact for all `a, b`:
-  `∫sin²(ax+b) dx = x/2 − sin(2(ax+b))/(4a)`,
-  `∫cos²(ax+b) dx = x/2 + sin(2(ax+b))/(4a)` — e.g. `∫sin²x → x/2 − sin(2x)/4`,
-  `∫sin²(2x) → x/2 − sin(4x)/8`.
+- **`Hypergeometric2F1` now supports analytic continuation across most of the
+  complex plane**, rather than being limited to its defining power series.
 
-- **More improper integrals are exact**. `arctan(±∞)` now reduces to `±π/2`, so
-  — combined with the new antiderivatives and `Erf(∞) = 1` — infinite-bound
-  integrals evaluate by bound substitution: `∫₀^∞ e^(−x²) → √π/2`,
-  `∫_{−∞}^∞ e^(−x²) → √π`, `∫₀^∞ 1/(1+x²) → π/2`, `∫_{−∞}^∞ 1/(1+x²) → π`,
-  `∫₀^∞ 1/(x²+4) → π/4` (alongside the elementary `∫₀^∞ e^(−x) → 1`,
-  `∫₁^∞ 1/x² → 1`). The **Fresnel** improper integrals
-  `∫₀^∞ cos(x²) = ∫₀^∞ sin(x²) = √(π/8)` are now exact too (via
-  `FresnelC/S(∞) = ½`).
+- The Identities Library has been updated from 1,350 to 1,376 verified rules,
+  including corrected Jacobi theta identities.
 
-- **Fixed: `∞ / (finite nonzero) → ±∞` instead of `NaN`.** Division of an
-  infinity by a finite, definitely-nonzero denominator was returning `NaN` when
-  the denominator was symbolic with `isFinite` undefined (`√π`, `π`, `1/√π` —
-  finiteness is not propagated through `Sqrt`/`Power`/`Divide`), even though the
-  Multiply path already handled `∞ · √π → +∞`. Now `∞/π → +∞`, `∞/√π → +∞`,
-  `−∞/√π → −∞`, with the sign carried from both operands; `∞/∞` (NaN) and `∞/0`
-  (`~∞`) are unchanged, and a could-be-zero constant denominator (no definite
-  sign) is left untouched. This unblocks the Fresnel improper integrals above,
-  whose bound substitution forms `Divide(√2·∞, √π)`.
+### Numeric Evaluation
 
-- **Interruptible evaluation**: long-running operations now respect the engine
-  time limit (`ce.timeLimit`, default 2s) and throw a `CancellationError`
-  instead of hanging: collection enumeration (`Filter`, `Select`, `CountIf`,
-  `Position`, `GroupBy`, set operations, and iteration over large or infinite
-  collections), the number-theory functions (`Totient`,
-  `Sigma0`/`Sigma1`/`SigmaMinus1`, `IsPerfect`, `IsAbundant`, `Eulerian`,
-  `Stirling`, `NPartition`), numeric `Limit`/`NLimit` extraction, and symbolic
-  differentiation (high-order derivatives can grow combinatorially in expression
-  size — e.g. the r-th derivative of `LambertW` — and now abort at the time
-  limit instead of exhausting memory). Numeric integration (`NIntegrate`, Monte
-  Carlo) degrades gracefully instead: when the time limit is reached it returns
-  the estimate computed from the samples taken so far, with a correspondingly
-  larger error bound. Nested numeric routines — e.g. the inner integral of a
-  double integral, reached through compiled code — inherit the enclosing
-  routine's deadline, so a nested `∫∫ 1/(1+x²y²) dx dy` terminates at the time
-  limit instead of running unbounded (previously ~10¹⁴ sample evaluations and an
-  eventual out-of-memory crash).
+- **Arbitrary-precision elementary and transcendental functions are
+  substantially faster**, especially at hundreds or thousands of digits.
+  High-precision `π` and trigonometric functions are no longer limited to about
+  2,350 digits.
 
-- **₂F₁ analytic continuation on the whole complex plane**: `Hypergeometric2F1`
-  previously only evaluated where its defining series converges (|z| < 1). It
-  now uses the six Kummer connection maps to evaluate for any z, with the
-  standard z − i0 branch-cut convention on [1, ∞) (matching mpmath and
-  Mathematica). Degenerate parameter combinations (integer parameter
-  differences, where the connection formulas have cancelling Γ poles) are
-  handled by parameter perturbation (~10⁻⁹ accuracy). The only remaining gap is
-  a thin sliver near z = e^{±iπ/3}, where no transformation converges.
+- Odd roots of negative real numbers now use the real-root convention, so
+  `Root(-8, 3)` and `(-8)^(1/3)` evaluate to `-2`.
 
-- **`simplify()` respects the engine time limit**: pathological simplifications
-  (e.g. polynomial division over very large quotients) now throw
-  `CancellationError` at the deadline instead of running unbounded.
+- `N()` now fully evaluates applied functions and constants such as `e`, `i`,
+  and expressions in Euler form.
 
-- **`Integrate` solves more, faster**: products of powers with symbolic
-  exponents fold and integrate (`∫xᵐ(a+bx^(2+2m))² dx` previously overflowed the
-  call stack — integration by parts had no termination measure for symbolic
-  exponents), and an expand-and-integrate fallback handles products whose
-  expansion is a sum of power-rule terms. On a 500-problem sample of the Rubi
-  test suite, the worst single-problem time dropped from 156 s to under 4 s,
-  with no stack overflows remaining.
+- Complex equality and arbitrary-precision complex square roots are more robust
+  in the presence of small rounding errors.
 
-- **`GCD` of polynomials**: the variadic `GCD` operator now computes a
-  polynomial GCD when its operands share a non-trivial common factor, inferring
-  the variables. Univariate — e.g. `GCD(x²+3x+2, x²+4x+3)` → `x+1` and
-  `GCD((x+1)(x+2), (x+1)(x+3))` → `x+1` (previously returned unevaluated). And
-  **multivariate**, via Brown's dense modular GCD over a finite field with every
-  result verified by exact division (so it returns a correct GCD or defers,
-  never a wrong answer): `GCD(x²−y², x²+3xy+2y²)` → `x+y`,
-  `GCD((2x+3y)(x+y), (2x+3y)(x−y))` → `2x+3y`,
-  `GCD((x+y+z)(x−z), (x+y+z)(y+2z))` → `x+y+z`. Very large multivariate inputs
-  (such as the 7-variable Fateman benchmark) exceed a complexity cap and defer.
-  Integer operands keep the existing numeric behavior, and a trivial (constant)
-  polynomial GCD is deferred so a bare symbol still reads as an unknown integer
-  (`GCD(x, 6)` stays unevaluated); use `PolynomialGCD(p, q, x)` for the explicit
-  coprime → 1 answer.
+### Collections and Matrices
 
-- **Faster arbitrary-precision transcendentals (`BigDecimal`).** The internal
-  fixed-point kernel that powers `sqrt`, `cbrt`, `exp`, `ln`, `sin`, `cos`,
-  `tan`, `atan`, `asin`, and the hyperbolic functions now works on a binary grid
-  (`2^bits`) instead of a decimal one (`10^p`), so the per-term rescaling in the
-  Taylor/Newton inner loops is a bit-shift rather than a full-width division.
-  This makes those functions **~2–4× faster** at high precision (the speedup
-  grows with precision) with bit-identical results — no change to accuracy or to
-  the public `significand · 10^exponent` representation.
+- `Take`, `Drop`, `Slice`, and `Count` now operate on matrix rows consistently.
+  For example, `Count(matrix)` returns the number of rows.
 
-- **Arbitrary-precision π, trigonometry and logarithm beyond ~2350 digits.** The
-  trig and `BigDecimal.PI` paths previously capped out (returning `NaN`) past
-  the ~2370-digit hardcoded π table; π is now computed on demand via Chudnovsky
-  binary splitting, so high-precision `sin`/`cos`/`tan` and inverse-trig values
-  are correct at any precision. High-precision `ln` is also faster — a
-  `giant_steps` Newton iteration plus an arithmetic-geometric-mean (AGM)
-  algorithm above ~1250 digits (~2.3× faster at 4000 digits).
+- `Join` now preserves list order, duplicates, and all elements when joining
+  lists. Joining sets continues to produce a deduplicated set.
 
-- **More `BigDecimal` elementary functions** (the internal arbitrary-precision
-  core): `expm1`, `log1p`, `log2`, `asinh`, `acosh`, `atanh`, `nthRoot`, and
-  directed-rounding `divToward`/`sqrtToward` (toward −∞ / +∞ — the rigorous
-  primitive for interval arithmetic). `expm1`/`log1p` and the inverse
-  hyperbolics keep full relative accuracy for small arguments.
-
-- **Faster high-precision `exp` and `pow`.** Two fixes: (1) `eˣ` (i.e.
-  `Power(E, x)`) now evaluates `exp(x)` directly instead of `exp(x·ln(e))`,
-  which had been recomputing `ln(e) ≈ 1` (a full high-precision logarithm) on
-  every call; (2) the cached `ln(10)` used by the `exp`/`ln` argument reduction
-  no longer thrashes when both run at slightly different working precisions (it
-  now caches the highest precision and downshifts). Together: `xʸ` for a
-  non-integer `y` is ~2.3× faster and `eˣ` ~2.5× faster at 1000 digits, with no
-  change in results.
-
-  Speedup of high-precision numeric evaluation (`.N()`) versus 0.59.0, by
-  working precision (median time; higher is faster):
-
-  | Function              | 100 digits | 500 digits | 1000 digits |
-  | --------------------- | ---------- | ---------- | ----------- |
-  | `ln`                  | 3.4×       | 8.8×       | 11×         |
-  | `exp`                 | 8×         | 18×        | 26×         |
-  | `sin` / `cos` / `tan` | 2.2×       | 3.3×       | 3.3×        |
-  | `atan`                | 1.6×       | 4.2×       | 4.4×        |
-  | `asin`                | 1.9×       | 4.1×       | 4.8×        |
-
-  `sqrt` and the exact operations `+` `−` `×` `÷` are unchanged. Beyond ~2350
-  digits, 0.59.0 returned `NaN` for `sin`/`cos`/`tan` and `π` (the hardcoded π
-  table ran out); these now compute correctly at any precision.
+- Sums and products over ranges from `-∞` to a finite bound, or from `-∞` to
+  `∞`, now iterate over an appropriate finite approximation instead of an empty
+  range.
 
 ### Resolved Issues
 
-- **Numeric oscillatory improper integrals returned garbage.** A
-  conditionally-convergent oscillatory integrand over a semi-infinite interval
-  defeated the Monte-Carlo numeric integrator (unbounded variance): `∫₀^∞ sin(x²)`
-  came out `−0.36 ± 0.53` and `∫₀^∞ cos(x²)` as `1.8 ± 1.2` (true value √(π/8) ≈
-  0.627), and `∫₀^∞ sin x/x` as `1.595 ± 0.03`. These now use a dedicated
-  lobe-integration + ε-acceleration quadrature (Longman's method) and evaluate
-  deterministically to ~1e-8: `∫₀^∞ sin x/x → π/2`, `∫₀^∞ sin(x²) =
-  ∫₀^∞ cos(x²) → √(π/8)`, `∫₀^∞ e^{−x} sin x → ½`, `∫₀^∞ cos x/(1+x²) → π/(2e)`.
-  Divergent oscillatory integrals (`∫₀^∞ sin x`) report not-evaluable instead of
-  a spurious finite value; non-oscillatory and finite-interval integrals are
-  unchanged.
+- **Long-running evaluation is interruptible.** Collection operations,
+  number-theory functions, limits, differentiation, simplification, and
+  integration now respect `ce.timeLimit` more consistently. Operations that
+  cannot finish in time either throw `CancellationError` or return the best
+  numeric estimate available, as appropriate.
 
-- **`Limit` returned a spurious `0` for some hard limits.**
-  Numerically-evaluated limits whose function overflows the floating-point range
-  — e.g. `lim_{x→∞} (e^{x·e^{−x}/…} − eˣ)/x` (two `eˣ` terms cancel to exactly
-  0, then overflow to `NaN`) or limits with a doubly/triply-exponential
-  subexpression — collapsed to a run of identical `0`s on the Richardson sample
-  ladder, which the extrapolator read as a confident convergence and returned a
-  wrong `0`. The limit machinery now detects this floating-point "trust horizon"
-  (a non-finite sample, or a magnitude that grows then catastrophically cancels
-  to ~0, with a denser probe to catch a skipped window) and returns
-  not-evaluable (`NaN` from `.N()`, staying symbolic under `evaluate()`) instead
-  of a spurious value. Genuine limits — including fp-fragile ones such as
-  `(1+1/x)^x → e` and `√(x²+x) − x → ½` — are unaffected.
+- **Fractional powers and radicals now preserve the correct principal complex
+  branch.** This fixes several unsafe transformations involving negative or
+  unknown-sign values, including `x/√(x²)`, negative factors under roots,
+  products and quotients raised to fractional powers, and `1/√u`.
 
-- **`solve` returned wrong or missing roots for absolute-value equations.** The
-  two direct `|ax + b| + c = 0` root rules were broken: the first had its
-  subtraction reversed (`(b − c)/a` instead of `(c − b)/a`), and the second was
-  structurally malformed (a `Negate`/`Divide` with misplaced arguments), so
-  `|x| = 2` solved to `[2]` and `|x − 1| = 2`, `|2x − 1| = 3` returned `[]`.
-  Both branches are corrected, and the absolute-value handling is now more
-  general: the case-split harmonization works for any inner expression — bare
-  `|x| = 2`, unit coefficients, and non-linear arguments
-  (`|x² − 3| = 1 → ±2, ±√2`) — and a new squaring rule solves equations of two
-  absolute values (`|2x + 5| = |x − 2| → −7, −1`).
+- Infinity arithmetic is more reliable for finite symbolic denominators, while
+  indeterminate forms such as `∞/∞` remain indeterminate.
 
-- **`∫√x dx` and `∫1/√x dx` returned unevaluated.** `√x` and `x^(−1/2)`
-  canonicalize to `Sqrt(x)` and `Divide(1, Sqrt(x))` rather than `Power` nodes,
-  so the integrator's power rule never matched them. They now integrate via the
-  power rule: `∫√x dx → (2/3)x^(3/2)`, `∫1/√x dx → 2√x`.
+- Numeric limits now reject overflow, catastrophic cancellation, oscillation,
+  and other low-confidence results instead of returning spurious values.
 
-- **Float coefficients leaked into exact rational-function integrals.**
-  `∫1/(x³+1) dx` returned `0.333…·ln|x+1| + 0.577…·arctan(…) − …` instead of the
-  exact `⅓·ln|x+1| − ⅙·ln(x²−x+1) + (√3/3)·arctan(…)`. The symbolic
-  partial-fraction path was bailing to a numeric (Durand–Kerner) fallback
-  because the quadratic/linear coefficient extractors rejected an irreducible
-  quadratic whose `−x` term is a `Negate(x)` node (they only recognized
-  `Multiply(-1, x)`). Both extractors now handle `Negate`, so these integrals —
-  and the broader class (`∫1/(x²−x+1)`, `∫1/(2−x)`, …) — return exact
-  rationals/radicals.
+- Fixed hangs and crashes when factoring certain sums, simplifying expressions
+  with radical coefficients, or mixing non-finite rational values with
+  arbitrary-precision integers.
 
-- **`Factor` produced non-polynomial, branch-dependent factors for `xⁿ − 1`.** A
-  difference-of-even-powers heuristic took `√(xⁿ)`, injecting `x·√x` (odd `n`)
-  or `|x|^(n/2)` (even `n`) — e.g. `Factor(x³ − 1)` returned
-  `(x·√x − 1)(x·√x + 1)` and `Factor(x⁶ − 1)` returned `(|x|³ − 1)(|x|³ + 1)`,
-  which are value-equal to the input only for `x > 0`. The square-root
-  extraction is now gated to genuine polynomial perfect squares (it strips `Abs`
-  and rejects any `Sqrt`/`Abs`/`Root` or fractional-power root), and the
-  difference-of-squares result is recursively factored. `Factor` now returns the
-  full polynomial (cyclotomic) factorization: `x³ − 1 → (x − 1)(x² + x + 1)`,
-  `x⁴ − 1 → (x − 1)(x + 1)(x² + 1)`,
-  `x⁶ − 1 → (x − 1)(x + 1)(x² + x + 1)(x² − x + 1)`,
-  `x⁸ − 1 → (x − 1)(x + 1)(x² + 1)(x⁴ + 1)`.
+- `ce.number()` now throws a helpful error when passed a MathJSON expression
+  array; use `ce.box()` for expressions.
 
-- **Unsound `x/√(x²) → 1` simplification.** Simplifying `x/√(x²)` (and the
-  equivalent product `x·(x²)^(−1/2)`) produced `1`, losing the sign of `x` — and
-  since derivatives are simplified, `D(√(x²), x)` evaluated to `1` instead of
-  `sign(x)`. Exact powers of even powers now only cancel when the base is known
-  nonnegative.
-
-- **Negative factors moved across fractional powers, changing the principal
-  branch.** Several product rewrites silently treated `(−u)^(1/4)` as `−u^(1/4)`
-  — which is not a 4th root of `−u` at all (the correct factor is the complex
-  phase `e^{iπ/4}`). The affected rewrites: extracting a `Negate` base
-  regardless of the exponent (also sign-incorrect for _even integer_ exponents),
-  factoring a negative numeric coefficient out of an even root (`Root`/`Power`
-  with even fractional exponents — the extraction used the real-root
-  convention), distributing a fractional power over a quotient
-  `(u/v)^r → u^r·v^(−r)` (conjugates the phase when `v < 0`), and merging
-  same-exponent factors `u^r·v^r → (u·v)^r` for fractional `r` with unknown-sign
-  bases. All are now gated on soundness (integer exponents, odd roots, or
-  known-nonnegative operands); e.g. `(−16)^(1/4) · 81^(1/4)` now evaluates to
-  the principal value `3√2 + 3√2·i` no matter how the product is assembled.
-  Exact numeric radicals (`√2·√3 → √6`) and same-base combinations (`√x·√x → x`)
-  are unaffected.
-
-- **`√(k·u)` split off a constant `√k` for negative `k`, baking in a fixed
-  phase.** A square root of a product with a negative numeric coefficient (e.g.
-  `√(−2·u)`) factored the coefficient's root out as a constant — effectively
-  `√(−2)·√u` — even though `√k` for `k < 0` is imaginary and the sign of the
-  result is region-dependent. The paired ratio `√(−c·u)/√u` then collapsed to
-  the constant `i√c` instead of the correct `±i√c` (which flips across `u = 0`).
-  The coefficient's sign is now folded into the radicand (`√(k·u) = √|k|·√(−u)`)
-  so the value evaluates on the correct branch in every region; the
-  positive-coefficient case (`√(2·u)/√u → √2`) is unaffected. A related
-  assertion failure / `NaN` when a rational multiplied a `√(negative)` (e.g.
-  `11·√(−3)`) is also fixed.
-
-- **`toNumericValue()` did not factor a common coefficient out of a sum.**
-  `BoxedExpression.toNumericValue()` returns a `[coefficient, rest]` pair whose
-  product equals the original expression, with the numeric coefficient pulled
-  out — but for a sum it returned the whole sum with a coefficient of `1` (e.g.
-  `(2x + 4).toNumericValue()` gave `[1, 2x + 4]` instead of `[2, x + 2]`). The
-  internal factoring step it relies on built the factored product with an
-  expanding multiply that immediately re-distributed the coefficient back over
-  the sum, undoing the work. For sums whose terms have irrational coefficients
-  this re-distribution did worse than undo the factoring — it formed a
-  non-terminating `factor → multiply → factor` cycle, so simplifying or
-  evaluating certain algebraic expressions (including some symbolic integration
-  results) could hang; the factored product is now built without
-  re-distributing, which also resolves the hang. The common factor — whether
-  rational (`[2, x + 2]`, `[3, 2u + 3v]`) or radical (`√2·u + √2·v` →
-  `[√2, u + v]`) — is now factored out. As a consequence a few `simplify()`
-  results involving content under a radical are returned in a more-factored form
-  (e.g. `√3(√2·x + x)` as `√3·x·(1 + √2)`); the values are unchanged.
-
-- **`isEqual()` could declare two equal complex constants unequal.** The
-  tolerance comparison rejected any nonzero imaginary part, so two expressions
-  for the same complex number differing by a 1-ulp imaginary residue (e.g. two
-  orderings of `π√2/4 − (√2/2)ln(1+√2)·i`) compared as definitively not equal.
-  The tolerance now applies to both the real and imaginary parts of the
-  difference.
-
-- **`Integrate` dropped terms or returned incomplete decompositions.**
-  `∫(a+b·x⁴)/x⁶ dx` returned `−b/x`, silently dropping the `a`-term — the root
-  cause was `polynomialGCD` treating a failed coefficient extraction as a zero
-  polynomial and returning a non-divisor as the GCD, which then cancelled
-  incorrectly. Partial-fraction integration also applied the cover-up formula
-  when the real roots did not account for the full denominator degree
-  (`∫x⁶/(1−x⁶) dx` lost the irreducible quadratic factors) and ignored the
-  leading coefficient (`∫1/(2x²−2) dx` was off by ×2). A numeric
-  partial-fraction fallback (with a-posteriori residual verification) now
-  completes denominators with no rational roots, e.g. `∫1/(x⁴+1) dx`.
-
-- **`ce.number()` with a MathJSON expression array now throws.** Passing an
-  expression like `["Rational", 1, 2]` to `ce.number()` (which expects a number,
-  bigint, string, or `{re, im}`-shaped object) previously produced an engine
-  hang; it now throws with a pointer to `ce.box()`.
-
-- **`Take`, `Drop`, `Slice`, and `Count` returned garbage on matrices.** A list
-  of lists (e.g. `[[2,3,4],[6,7,9],[11,12,13]]`) is represented internally as a
-  tensor, and the tensor's element accessors were inconsistent with its
-  iterator: `count` returned the total number of scalar entries (9 for a 3×3
-  matrix) instead of the number of rows, and accessing element _i_ returned the
-  first scalar of row _i_ instead of the row itself. As a result
-  `Take(matrix, 1)` returned `["List", 6]` instead of the first row, and
-  `Drop`/`Slice` produced `Error("missing")` elements. Element access on a
-  matrix now yields whole rows (with negative-index and bounds handling
-  consistent with `List`), and `Count(matrix)` returns the number of rows.
-  Multi-index access (`At(matrix, i, j)`) is unchanged.
-
-- **`Join` of lists returned a truncated `Set`.** `Join` had no element-access
-  handler, so the engine treated the result as a non-indexed collection: joining
-  two lists materialized as a `Set` (dropping duplicates and showing only the
-  first few elements). `Join` on lists now produces a `List` with all elements
-  in order; joining sets still produces a deduplicated `Set`.
-
-- **Doubly-infinite sums evaluated to 0.** A `Sum` or `Product` with limits
-  `n = −∞…∞` produced an empty iteration range, so e.g. `Σ_{n=−∞}^{∞} sinc³(n)`
-  evaluated to `0` instead of `3π/4`. Infinite ranges are now truncated to a
-  finite iteration window on the correct side: `(−∞, b]` iterates up to `b`, and
-  `(−∞, ∞)` iterates a symmetric window around 0.
-
-- **Numeric limits of oscillatory functions returned meaningless values.**
-  `NLimit` of a non-convergent function (e.g. `sinc` at `−∞`) returned a small
-  spurious number from Richardson extrapolation. The extrapolation's own error
-  estimate is now checked: low-confidence results return `NaN` instead.
-
-- **`x/(0.0·y)` canonicalized to `(+∞·x)/y`.** A machine-float zero coefficient
-  in a denominator (deliberately not folded at canonicalization) was factored
-  out as `1/0 = +∞`, assuming a sign. The division is now kept structural.
-
-- **`N()` did not apply to the result of `Apply`.** For example
-  `Apply(Derivative(LambertW), 0.5).N()` returned the symbolic derivative with
-  `LambertW(0.5)` unevaluated; a second evaluation pass was needed. `N(f(x))`
-  now numerically evaluates the applied result.
-
-- Complex square roots of arbitrary-precision values no longer produce
-  incoherent NaN components when a rounding error makes an intermediate quantity
-  epsilon-negative, and a `NaN` imaginary part now coherently makes the whole
-  numeric value `NaN`.
-
-- **Odd roots of negative reals evaluated to `NaN`.** `Root(-8, 3)` and
-  `(-8)^(1/3)` returned `NaN` from `evaluate()` while `.N()` returned `−2` — the
-  exact and arbitrary-precision evaluation paths rejected all negative bases
-  instead of applying the real-root convention used everywhere else for odd
-  roots. `(-8)^(1/3)` now evaluates exactly to `−2` (and `(-32)^(1/5)` to `−2`,
-  etc.); odd roots of negative non-perfect powers evaluate numerically
-  (`root(3)(-2) ≈ −1.26`) instead of `NaN`. Even roots of negative reals are
-  unchanged.
-
-- **`1/√u` was rewritten to `√(1/u)`, changing the principal branch.** The
-  inversion of a square root silently used the identity `1/√u = √(1/u)`, which
-  fails off the nonnegative reals: `1/√(−0.23)` evaluated to `+2.085i` instead
-  of the principal value `−2.085i`. The rewrite is now gated on the radicand
-  being known nonnegative; for other operands the expression stays structural
-  (`1/√u`) and evaluates on the correct branch.
-
-- **`x^(−1/2)` did not match `1/√x`, and `∫1/√(1−x²) dx` stopped evaluating.**
-  Negative unit-fraction powers were inconsistent: `1/√x`, `√x^(−1)`, and
-  `1/x^(1/2)` all canonicalized to `Divide(1, Sqrt(x))`, but `x^(−1/2)` stayed a
-  `Power` node, so the two forms were not structurally equal and
-  `x^(−1/2) + (−1/√x)` would not cancel. As a knock-on effect of the
-  `1/√u → √(1/u)` gating above, `∫1/√(1−x²) dx` (and the `1/√(x²±1)` family)
-  returned unevaluated: the integrator recognized the integrand only in its
-  former `√(1/(1−x²))` form, while it now canonicalizes to `1/√(1−x²)`, and the
-  derivative check `D(arcsin x) = (1−x²)^(−1/2)` no longer matched the
-  integrand. Negative unit-fraction exponents now canonicalize to `1/Root(u, n)`
-  (`x^(−1/2) → 1/√x`, branch-safe on the principal branch), and the integrator
-  recognizes the `1/√(quadratic)` form, so `∫1/√(1−x²) dx → arcsin(x)`,
-  `∫1/√(x²+1) dx → arsinh(x)`, and `∫1/√(x²−1) dx → arcosh(x)` again.
-
-- **Crash factoring a sum whose terms all have zero coefficients.** `factor()`
-  on a (non-canonical) sum like `0·u + 0·v` crashed with
-  `TypeError: Cannot read properties of undefined (reading 'engine')` after
-  filtering out every term; it now returns `0`.
-
-- **`RangeError: The number NaN cannot be converted to a BigInt`.** Rational
-  arithmetic promoted machine rationals to `bigint` without checking for the
-  `NaN` encoding (`[NaN, 1]`, or `[1, NaN]` after inversion), so an expression
-  mixing a NaN-valued exact rational with a bigint rational threw instead of
-  propagating `NaN`. Non-finite machine rationals now propagate `NaN`, and
-  dividing an already-NaN exact value short-circuits.
-
-- **#309** The public `factor()` function was incorrectly factoring polynomials.
-  Now `factor(x^2 + 5x + 6)` correctly returns `(x + 2)(x + 3)` instead of
-  `x^2 + 5x + 6` (the previous behavior was a no-op).
-
-- **`2^i` no longer evaluates to `1`.** The exact-power canonicalization fold
-  read only the real part of the exponent, so any power with an exact base and a
-  pure-imaginary literal exponent folded to `base^re` (e.g.
-  `["Power", 2, ["Complex", 0, 1]]` → `2^0` → `1`). The fold now requires a real
-  integer exponent.
-
-- **`N()` on constants declared with `holdUntil: "never"` was a no-op.**
-  `BoxedSymbol.N()` misread `holdUntil: "never"` ("substitute as early as
-  possible") as "never substitute", so `ImaginaryUnit`, `e`, `i`, and the
-  infinity constants did not resolve under `N()` when the symbol survived
-  canonicalization. In particular, products like `0.25·i` and Euler-form
-  exponentials like `e^{iπ/12}` now evaluate numerically to complex literals.
-
-- **Identities Library: corpus updated with verified upstream corrections**
-  (1,350 → 1,376 rules). Machine validation of the
-  [Fungrim](https://fungrim.org) source uncovered two bug families upstream: a
-  misplaced parenthesis turning two formulas into products of a Boolean (entries
-  `6c2b31`, `e54e61`), and an `Element(w, tau)` typo repeated in 24 Jacobi theta
-  entries (the intended assumption is `w ∈ ℂ`). Both were reported and fixed
-  upstream (PRs to `fredrik-johansson/fungrim`), each correction verified
-  numerically to 30 digits, and the fixes merged into the corpus source fork
-  ([`arnog/fungrim`](https://github.com/arnog/fungrim)). The regenerated corpus
-  recovers the two formulas as usable identities and adds 24 theta identities
-  whose corrected side conditions now compile as guarded rules.
+- Fixed incorrect simplification or evaluation of `2^i`, division by a
+  floating-point zero coefficient, and several exact expressions involving
+  negative radicals.
 
 ## 0.59.0 _2026-06-10_
 
