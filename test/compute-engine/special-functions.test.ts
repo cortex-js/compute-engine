@@ -421,6 +421,88 @@ describe('BIGNUM SPECIAL FUNCTIONS', () => {
   });
 });
 
+describe('B1: special functions honor requested precision', () => {
+  // Regression for ROADMAP B1. The bignum Gamma/Zeta kernels (and the
+  // digamma/trigamma/polygamma siblings) were effectively limited to ~machine
+  // precision regardless of ce.precision: ζ(3) at p=40 diverged after ~16
+  // digits because the Dirichlet-eta acceleration converged only as 2^{-n}
+  // while using a (3+√8)-sized term budget, and Gamma lost its last few digits
+  // to rounding. They now run with working-precision guard digits, and ζ uses
+  // the genuine Cohen–Villegas–Zagier acceleration. The existing high-precision
+  // tests above only checked the first 20 digits, which masked the shortfall.
+
+  // Count leading significant digits shared by two decimal strings (ignoring
+  // sign and decimal point). Both operands have the same magnitude here, so the
+  // significand digits line up.
+  function matchingSigDigits(a: string, b: string): number {
+    const da = a.replace('-', '').replace('.', '');
+    const db = b.replace('-', '').replace('.', '');
+    let m = 0;
+    while (m < da.length && m < db.length && da[m] === db[m]) m++;
+    return m;
+  }
+
+  // Verify an exact mathematical identity holds to (p − 2) significant digits.
+  // Self-checking — no external reference value to get wrong.
+  function identity(name: string, lhs: string, rhs: string, p = 60) {
+    test(`${name} to full precision (p=${p})`, () => {
+      const ce = new ComputeEngine();
+      ce.precision = p;
+      const a = ce.parse(lhs).N().toString();
+      const b = ce.parse(rhs).N().toString();
+      expect(matchingSigDigits(a, b)).toBeGreaterThanOrEqual(p - 2);
+    });
+  }
+
+  identity('Γ(1/2) = √π', '\\Gamma(1/2)', '\\sqrt{\\pi}');
+  identity('Γ(5/2) = 3√π/4', '\\Gamma(5/2)', '\\frac{3\\sqrt{\\pi}}{4}');
+  // Reflection Γ(s)Γ(1−s) = π/sin(πs): exercises the general Stirling path.
+  identity(
+    'Γ(1/3)Γ(2/3) = π/sin(π/3)',
+    '\\Gamma(1/3)\\Gamma(2/3)',
+    '\\frac{\\pi}{\\sin(\\pi/3)}'
+  );
+  identity(
+    'Γ(1/7)Γ(6/7) = π/sin(π/7)',
+    '\\Gamma(1/7)\\Gamma(6/7)',
+    '\\frac{\\pi}{\\sin(\\pi/7)}'
+  );
+  // ζ even integers (exact Bernoulli path) and negative (functional equation).
+  identity('ζ(2) = π²/6', '\\zeta(2)', '\\frac{\\pi^2}{6}');
+  identity('ζ(4) = π⁴/90', '\\zeta(4)', '\\frac{\\pi^4}{90}');
+  identity('ζ(-1) = -1/12', '\\zeta(-1)', '-1/12');
+  identity('ζ(-3) = 1/120', '\\zeta(-3)', '\\frac{1}{120}');
+  // ψ and ψ₂ at 1 in terms of γ and ζ(3).
+  identity('ψ(1) = -γ', '\\operatorname{Digamma}(1)', '-\\gamma');
+  identity('ψ₁(1) = π²/6', '\\operatorname{Trigamma}(1)', '\\frac{\\pi^2}{6}');
+  identity(
+    'ψ₂(1) = -2ζ(3)',
+    '\\operatorname{PolyGamma}(2,1)',
+    '-2\\zeta(3)'
+  );
+
+  // Trusted external constant: Apéry's ζ(3). This is the CVZ general path (odd
+  // s, no closed form). 56-digit prefix avoids any last-digit rounding noise.
+  test('ζ(3) matches Apéry constant at p=60', () => {
+    const ce = new ComputeEngine();
+    ce.precision = 60;
+    const apery = '1.2020569031595942853997381615114499907649862923404988817922';
+    const z3 = ce.parse('\\zeta(3)').N().toString();
+    expect(z3.startsWith(apery.slice(0, 58))).toBe(true);
+  });
+
+  // The headline B1 symptom: ζ(3) at p=40 used to diverge after ~16 digits.
+  test('ζ(3) is correct past 16 digits at p=40 (B1 symptom)', () => {
+    const ce = new ComputeEngine();
+    ce.precision = 40;
+    const z3 = ce.parse('\\zeta(3)').N().toString();
+    // Digits 17–40 were wrong before the fix.
+    expect(z3.startsWith('1.20205690315959428539973816151144999076')).toBe(
+      true
+    );
+  });
+});
+
 describe('GAMMA FUNCTION', () => {
   // Regression for G11: complex Gamma was an unimplemented stub that returned
   // its argument unchanged (e.g. Gamma(i).N() → i).

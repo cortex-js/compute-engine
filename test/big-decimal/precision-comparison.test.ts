@@ -497,7 +497,7 @@ describe('Precision: Gamma (vs exact values)', () => {
     ).toMatchInlineSnapshot(`
       "Gamma(1/2) = sqrt(pi)
         prec=50: 49 matching digits — got 1.772453850905516027298167483341145182797549456122...
-        prec=100: 99 matching digits — got 1.772453850905516027298167483341145182797549456122..."
+        prec=100: 100 matching digits — got 1.772453850905516027298167483341145182797549456122..."
     `);
   });
 
@@ -512,8 +512,8 @@ describe('Precision: Gamma (vs exact values)', () => {
       })
     ).toMatchInlineSnapshot(`
       "Gamma(3/2) = sqrt(pi)/2
-        prec=50: 48 matching digits — got 0.886226925452758013649083741670572591398774728061...
-        prec=100: 99 matching digits — got 0.886226925452758013649083741670572591398774728061..."
+        prec=50: 50 matching digits — got 0.886226925452758013649083741670572591398774728061...
+        prec=100: 100 matching digits — got 0.886226925452758013649083741670572591398774728061..."
     `);
   });
 

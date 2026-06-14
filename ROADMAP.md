@@ -724,19 +724,41 @@ Surfaced by the cross-library benchmark in [`benchmarks/`](./benchmarks/)
 against the current build and verified numerically with `mpmath`. None are
 regressions vs `0.59.0`; they are pre-existing gaps the suite made visible.
 
-### B1. Special-function `N()` does not honor requested precision
+### B1. ~~Special-function `N()` does not honor requested precision~~ — ✅ done (2026-06-13)
 
-- **`Zeta` — the worst case.** `ζ(3)` at `ce.precision = 40` is correct to only
-  **~16 digits** then diverges (CE `…159594223…` vs true `…159594285…`); at
-  precision 60 it reaches only ~22. The numeric path is effectively
-  double-precision regardless of `ce.precision`.
-- **`Gamma` — milder but real.** `Γ(1/3)` delivers ~38 of 40 requested digits
-  (~50 of 60), and is **~10× slower than SymPy** per call (the one numeric case
-  in the suite where a competitor beats CE on speed).
+`Zeta`/`Gamma` already routed `N()` through bignum kernels (item 4), but the
+kernels themselves were buggy and effectively capped near double precision:
 
-**Fix direction:** route `Zeta`/`Gamma` `N()` through arbitrary-precision
-kernels (cf. item 4) honoring `ce.precision` with guard digits. Overlaps item 7's
-"pole-aware `N()`" — worth doing together when touching these heads.
+- **`Zeta` — the worst case.** `ζ(3)` at `ce.precision = 40` was correct to only
+  ~16 digits then diverged. **Root cause:** the Dirichlet-eta acceleration used
+  binomial partial-sum coefficients (`d[k] = ΣC(n,i)`, `d[n] = 2ⁿ`) — a *rate-2*
+  Euler transform with error `~2⁻ⁿ` — but the term budget `n = 1.3·p` was sized
+  for the much faster `(3+√8)⁻ⁿ` Cohen–Villegas–Zagier rate. So `n = 52` at
+  p = 40 gave only `2⁻⁵² ≈ 10⁻¹⁶` accuracy.
+- **`Gamma` — milder.** `Γ(1/3)` lost its last ~2 digits to rounding accumulated
+  across the Stirling series (computed at exactly `p`, no working-precision
+  guard).
+
+**Resolved** (`numerics/special-functions.ts`):
+- Replaced the eta sum with the **genuine Cohen–Villegas–Zagier Algorithm 1**
+  (`(3+√8)⁻ⁿ` convergence, `~0.77` digits/term, numerically stable), so `~1.3·p`
+  terms now actually deliver `p` digits.
+- Added a `withGuardDigits` wrapper that raises the global `BigDecimal.precision`
+  by `SPECIAL_FN_GUARD = 24` digits for the duration of the kernel and rounds
+  the (correct) result back to the requested precision. Applied to `bigGamma`,
+  `bigGammaln`, `bigZeta`, `bigBeta`, and — opportunistically, same root cause —
+  `bigDigamma`/`bigTrigamma`/`bigPolygamma`. Each public kernel is now a guarded
+  wrapper over an unguarded `…Core` so internal cross-calls don't compound the
+  guard.
+
+Now `ζ(3)`, `ζ(5)`, `ζ(½)`, `Γ(1/3)`, `Γ(1/7)`, `ψ(1)=−γ`, `ψ₂(1)=−2ζ(3)` are
+all correct to the full requested precision (verified to 100 digits and via
+exact identities — reflection, `ζ(2)=π²/6`, `ζ(−1)=−1/12`). Blast radius: 2
+precision-comparison snapshots (Gamma now hits full precision; both updated).
+Tests: `special-functions.test.ts` "B1: special functions honor requested
+precision". **Residual:** the `Γ` *speed* gap (~10× slower than SymPy per call)
+is unaddressed — a separate performance item (cf. item 7's pole-aware `N()` and
+item 17.13's `.N()` dispatch overhead), not a precision bug.
 
 ### B2. Symbolic (indefinite) integration coverage gaps — ✅ resolved (2026-06-13)
 

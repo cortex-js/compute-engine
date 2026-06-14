@@ -192,6 +192,33 @@ export function erf(x: number): number {
 }
 
 /**
+ * Run `fn` with the global `BigDecimal.precision` raised by `guard` extra
+ * digits, then restore it. The returned value carries the extra correct
+ * digits; the engine rounds to the active precision for display.
+ *
+ * Series/acceleration kernels below accumulate rounding error across many
+ * operations (and, for ζ, work with intermediates far larger than the result).
+ * Computing at exactly the requested precision therefore loses the last
+ * several digits. Evaluating with guard digits and rounding once at the end
+ * restores a fully-accurate result. (`BigDecimal.precision` is process-global,
+ * so this must always restore it — hence the `try/finally`.)
+ */
+function withGuardDigits(guard: number, fn: () => BigNum): BigNum {
+  const saved = BigDecimal.precision;
+  BigDecimal.precision = saved + guard;
+  try {
+    // Compute with guard digits, then round the (correct) result back to the
+    // requested precision so the kernel returns exactly `saved` good digits.
+    return fn().toPrecision(saved);
+  } finally {
+    BigDecimal.precision = saved;
+  }
+}
+
+/** Working-precision guard (extra digits) for the bignum Gamma/Zeta kernels. */
+const SPECIAL_FN_GUARD = 24;
+
+/**
  * Bignum log-Gamma via Stirling asymptotic series with runtime-computed
  * Bernoulli numbers.  Precision scales with BigDecimal.precision.
  *
@@ -200,6 +227,11 @@ export function erf(x: number): number {
  * series converges rapidly.
  */
 export function bigGammaln(ce: ComputeEngine, z: BigNum): BigNum {
+  if (!z.isFinite()) return BigDecimal.NAN;
+  return withGuardDigits(SPECIAL_FN_GUARD, () => gammalnCore(ce, z));
+}
+
+function gammalnCore(ce: ComputeEngine, z: BigNum): BigNum {
   if (!z.isFinite()) return BigDecimal.NAN;
 
   // Reflection: ln(Gamma(z)) = ln(pi) - ln(|sin(pi*z)|) - ln(Gamma(1-z))
@@ -210,7 +242,7 @@ export function bigGammaln(ce: ComputeEngine, z: BigNum): BigNum {
     return pi
       .ln()
       .sub(sinPiZ.ln())
-      .sub(bigGammaln(ce, BigDecimal.ONE.sub(z)));
+      .sub(gammalnCore(ce, BigDecimal.ONE.sub(z)));
   }
 
   // Exact: positive integer z -> ln((z-1)!)
@@ -293,24 +325,27 @@ export function bigGammaln(ce: ComputeEngine, z: BigNum): BigNum {
  * bigGamma goes through exp(ln(...)) so the result is a full-precision float.
  */
 export function bigGamma(ce: ComputeEngine, z: BigNum): BigNum {
-  // Exact: positive integer → (z-1)!
+  // Exact: positive integer → (z-1)! (precision-independent, skip the guard).
   if (z.isInteger() && z.isPositive()) {
     const n = z.toNumber();
     let fact = 1n;
     for (let i = 2; i < n; i++) fact *= BigInt(i);
     return new BigDecimal(fact.toString());
   }
+  return withGuardDigits(SPECIAL_FN_GUARD, () => gammaCore(ce, z));
+}
 
+function gammaCore(ce: ComputeEngine, z: BigNum): BigNum {
   // Reflection for z < 0.5: Gamma(z) = pi / (sin(pi*z) * Gamma(1-z))
   if (z.lt(BigDecimal.HALF)) {
     const pi = BigDecimal.PI;
     const sinPiZ = pi.mul(z).sin();
     if (sinPiZ.isZero()) return BigDecimal.NAN;
-    return pi.div(sinPiZ.mul(bigGamma(ce, BigDecimal.ONE.sub(z))));
+    return pi.div(sinPiZ.mul(gammaCore(ce, BigDecimal.ONE.sub(z))));
   }
 
   // General case
-  return bigGammaln(ce, z).exp();
+  return gammalnCore(ce, z).exp();
 }
 
 function gcdBigint(a: bigint, b: bigint): bigint {
@@ -416,14 +451,17 @@ function getBernoulliRationals(
  */
 export function bigDigamma(ce: ComputeEngine, z: BigNum): BigNum {
   if (!z.isFinite()) return BigDecimal.NAN;
+  return withGuardDigits(SPECIAL_FN_GUARD, () => digammaCore(ce, z));
+}
 
+function digammaCore(ce: ComputeEngine, z: BigNum): BigNum {
   // Reflection formula for negative values: ψ(1-z) = ψ(z) + π·cot(πz)
   if (z.isNegative()) {
     if (z.isInteger()) return BigDecimal.NAN; // poles at non-positive integers
     const pi = BigDecimal.PI;
     const piZ = pi.mul(z);
     const cotPiZ = piZ.cos().div(piZ.sin());
-    return bigDigamma(ce, BigDecimal.ONE.sub(z)).sub(pi.mul(cotPiZ));
+    return digammaCore(ce, BigDecimal.ONE.sub(z)).sub(pi.mul(cotPiZ));
   }
 
   if (z.isZero()) return BigDecimal.NAN; // pole
@@ -469,7 +507,10 @@ export function bigDigamma(ce: ComputeEngine, z: BigNum): BigNum {
  */
 export function bigTrigamma(ce: ComputeEngine, z: BigNum): BigNum {
   if (!z.isFinite()) return BigDecimal.NAN;
+  return withGuardDigits(SPECIAL_FN_GUARD, () => trigammaCore(ce, z));
+}
 
+function trigammaCore(ce: ComputeEngine, z: BigNum): BigNum {
   // Reflection formula: ψ₁(1-z) + ψ₁(z) = π²/sin²(πz)
   if (z.isNegative()) {
     if (z.isInteger()) return BigDecimal.NAN;
@@ -478,7 +519,7 @@ export function bigTrigamma(ce: ComputeEngine, z: BigNum): BigNum {
     return pi
       .mul(pi)
       .div(s.mul(s))
-      .sub(bigTrigamma(ce, BigDecimal.ONE.sub(z)));
+      .sub(trigammaCore(ce, BigDecimal.ONE.sub(z)));
   }
 
   if (z.isZero()) return BigDecimal.NAN; // pole
@@ -526,10 +567,13 @@ export function bigTrigamma(ce: ComputeEngine, z: BigNum): BigNum {
 export function bigPolygamma(ce: ComputeEngine, n: BigNum, z: BigNum): BigNum {
   const nNum = n.toNumber();
   if (!Number.isInteger(nNum) || nNum < 0) return BigDecimal.NAN;
-  if (nNum === 0) return bigDigamma(ce, z);
-  if (nNum === 1) return bigTrigamma(ce, z);
+  if (nNum === 0) return bigDigamma(ce, z); // already guarded
+  if (nNum === 1) return bigTrigamma(ce, z); // already guarded
   if (!z.isFinite() || z.isZero()) return BigDecimal.NAN;
+  return withGuardDigits(SPECIAL_FN_GUARD, () => polygammaCore(ce, nNum, z));
+}
 
+function polygammaCore(ce: ComputeEngine, nNum: number, z: BigNum): BigNum {
   // Bignum factorial helper (small n, simple loop)
   const bigFactorial = (m: number): BigNum => {
     let r: BigNum = BigDecimal.ONE;
@@ -608,19 +652,26 @@ export function bigPolygamma(ce: ComputeEngine, n: BigNum, z: BigNum): BigNum {
  * Uses bigGamma directly.
  */
 export function bigBeta(ce: ComputeEngine, a: BigNum, b: BigNum): BigNum {
-  return bigGamma(ce, a)
-    .mul(bigGamma(ce, b))
-    .div(bigGamma(ce, a.add(b)));
+  return withGuardDigits(SPECIAL_FN_GUARD, () =>
+    gammaCore(ce, a).mul(gammaCore(ce, b)).div(gammaCore(ce, a.add(b)))
+  );
 }
 
 /**
- * Bignum Riemann zeta function ζ(s)
- * Uses Cohen-Villegas-Zagier acceleration (same algorithm as machine version).
+ * Bignum Riemann zeta function ζ(s).
+ *
+ * The general case uses the Cohen–Villegas–Zagier acceleration of the
+ * alternating Dirichlet eta series (error ~(3+√8)^{−n}, so ~1.3 digits of
+ * accuracy per term); the kernel runs with working-precision guard digits so
+ * the result is accurate to the full requested precision.
  */
 export function bigZeta(ce: ComputeEngine, s: BigNum): BigNum {
   if (!s.isFinite()) return BigDecimal.NAN;
   if (s.eq(1)) return new BigDecimal(Infinity); // pole
+  return withGuardDigits(SPECIAL_FN_GUARD, () => zetaCore(ce, s));
+}
 
+function zetaCore(ce: ComputeEngine, s: BigNum): BigNum {
   const pi = BigDecimal.PI;
 
   // Special value: ζ(0) = -1/2
@@ -650,37 +701,37 @@ export function bigZeta(ce: ComputeEngine, s: BigNum): BigNum {
       .pow(s)
       .mul(pi.pow(s.sub(1)))
       .mul(pi.mul(s).div(2).sin())
-      .mul(bigGamma(ce, BigDecimal.ONE.sub(s)))
-      .mul(bigZeta(ce, BigDecimal.ONE.sub(s)));
+      .mul(gammaCore(ce, BigDecimal.ONE.sub(s)))
+      .mul(zetaCore(ce, BigDecimal.ONE.sub(s)));
   }
 
-  // Cohen-Villegas-Zagier acceleration for the Dirichlet eta function
-  // Use more terms for higher precision
-  const n = Math.max(22, Math.ceil(ce.precision * 1.3));
-  const d = bigZetaCoefficients(ce, n);
-  const dn = d[n];
-  let sum = new BigDecimal(0);
-  for (let k = 0; k <= n; k++) {
-    const sign = k % 2 === 0 ? 1 : -1;
-    sum = sum.add(
-      new BigDecimal(sign).mul(d[k].sub(dn)).div(new BigDecimal(k + 1).pow(s))
-    );
+  // General case (Re(s) > 0, s ≠ 1): Cohen–Villegas–Zagier Algorithm 1.
+  // Accelerates the Dirichlet eta series η(s) = Σ_{k≥0} (−1)^k/(k+1)^s with
+  // error bounded by (3+√8)^{−n} ≈ 5.83^{−n} (≈0.766 digits/term), then
+  // ζ(s) = η(s)/(1−2^{1−s}). The recurrence is numerically stable — partial
+  // sums stay O(d) without catastrophic cancellation — so the caller's
+  // working-precision guard alone secures the full requested precision.
+  // (The earlier binomial-partial-sum form converged only as 2^{−n}, so the
+  // 1.3·p term budget delivered only ~0.4·p correct digits.)
+  const wp = BigDecimal.precision;
+  const n = Math.max(22, Math.ceil(1.32 * wp) + 3);
+  const alpha = new BigDecimal(3).add(new BigDecimal(8).sqrt()); // 3 + √8
+  const alphaN = alpha.pow(n);
+  const d = alphaN.add(BigDecimal.ONE.div(alphaN)).div(2); // ½((3+√8)ⁿ+(3−√8)ⁿ)
+  let b = BigDecimal.NEGATIVE_ONE;
+  let c = d.neg();
+  let sum = BigDecimal.ZERO;
+  for (let k = 0; k < n; k++) {
+    if ((k & 0xff) === 0) checkDeadline(ce._deadline);
+    c = b.sub(c);
+    sum = sum.add(c.div(new BigDecimal(k + 1).pow(s)));
+    // b_{k+1} = (k+n)(k−n) / ((k+½)(k+1)) · b_k
+    b = b
+      .mul(new BigDecimal(k + n).mul(k - n))
+      .div(new BigDecimal(k).add(BigDecimal.HALF).mul(k + 1));
   }
-  const eta = BigDecimal.ONE.sub(new BigDecimal(2).pow(BigDecimal.ONE.sub(s)));
-  return sum.div(dn.mul(eta)).neg();
-}
-
-/** Bignum Cohen-Villegas-Zagier coefficients */
-function bigZetaCoefficients(_ce: ComputeEngine, n: number): BigNum[] {
-  const d = new Array<BigNum>(n + 1);
-  d[0] = BigDecimal.ONE;
-  // Compute d[k] = d[k-1] + C(n, k) using bignum binomial coefficients
-  let binom: BigNum = BigDecimal.ONE; // C(n, 0)
-  for (let i = 1; i <= n; i++) {
-    binom = binom.mul(n - i + 1).div(i);
-    d[i] = d[i - 1].add(binom);
-  }
-  return d;
+  const eta = sum.div(d);
+  return eta.div(BigDecimal.ONE.sub(new BigDecimal(2).pow(BigDecimal.ONE.sub(s))));
 }
 
 /**

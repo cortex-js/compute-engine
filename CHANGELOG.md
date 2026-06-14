@@ -92,6 +92,14 @@
 - **`Hypergeometric2F1` now supports analytic continuation across most of the
   complex plane**, rather than being limited to its defining power series.
 
+- **`Zeta` and `Gamma` now honor the requested precision.** At high
+  `ce.precision`, numeric evaluation of `Zeta`, `Gamma`, `GammaLn`, `Beta`,
+  `Digamma`, `Trigamma`, and `PolyGamma` previously stalled near machine
+  precision (e.g. `Zeta(3)` was correct to only ~16 digits regardless of
+  precision). They now return the full requested precision — `Zeta` uses the
+  Cohen–Villegas–Zagier acceleration, and all of these kernels compute with
+  guard digits.
+
 - The Identities Library has been updated from 1,350 to 1,376 verified rules,
   including corrected Jacobi theta identities.
 
@@ -152,6 +160,11 @@
 - Fixed incorrect simplification or evaluation of `2^i`, division by a
   floating-point zero coefficient, and several exact expressions involving
   negative radicals.
+
+- Fixed a rational function such as `1/(x(x²+x))` wrongly simplifying (and
+  integrating) to `0` when its factored denominator contained factors sharing a
+  common root. The partial-fraction solver now detects the inconsistent system
+  instead of returning a spurious all-zero decomposition.
 
 ## 0.59.0 _2026-06-10_
 

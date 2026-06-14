@@ -22,6 +22,7 @@ import {
   findFailingConjunct,
   installCaches,
   polyCoeffsX,
+  rationalFnQ,
   zeroQ,
   RuleFail,
   Ctx,
@@ -39,9 +40,18 @@ const DEBUG_FLOAT = process.env.RUBI_DEBUG_FLOAT !== undefined;
 // RUBI_DEBUG_FIRE=<id-substring>: print integrand/bindings/result of every
 // firing of rules whose id contains the substring.
 const DEBUG_FIRE = process.env.RUBI_DEBUG_FIRE;
+// RUBI_NO_NATIVE_RATIONAL: disable the engine-native rational-function
+// fallback (see int()) — for measuring the Rubi rules in isolation.
+const NO_NATIVE_RATIONAL =
+  process.env.RUBI_NO_NATIVE_RATIONAL !== undefined;
 function hasInexactFloat(e: Expression): boolean {
   if (e.isNumberLiteral) return (e as any).isExact === false;
   return e.ops?.some(hasInexactFloat) ?? false;
+}
+
+function containsIntegrate(e: Expression): boolean {
+  if (e.operator === 'Integrate') return true;
+  return e.ops?.some(containsIntegrate) ?? false;
 }
 
 export type DriverStats = {
@@ -81,7 +91,16 @@ export class RubiDriver {
     // recur heavily across the rule scan)
     installCaches({ zeroQ: new Map(), simplify: new Map() });
     try {
-      return this.intRec(integrand, variable, 0);
+      const result = this.intRec(integrand, variable, 0);
+      if (result !== null) return result;
+      // No Rubi rule chain closed it. For a rational function of x, fall
+      // back to the engine's native antiderivative: it does complete
+      // partial-fraction integration (factor Q over ℚ, then linear and
+      // irreducible-quadratic decomposition) that the ported Rubi rational
+      // rules don't yet cover. Bounded by the same wall-clock budget. This
+      // rules+native coexistence is exactly how `loadIntegrationRules` is
+      // meant to ship.
+      return this.nativeRationalFallback(integrand, variable);
     } catch (e) {
       // An engine deadline firing inside evaluate()/simplify(), or the
       // matcher's own deadline (see match.ts), surfaces as a
@@ -90,6 +109,52 @@ export class RubiDriver {
       if (e instanceof Error && e.constructor.name === 'CancellationError')
         return null;
       throw e;
+    }
+  }
+
+  /** Engine-native antiderivative fallback for a rational integrand the Rubi
+   * rule set didn't close (see int()). Returns null when the integrand is
+   * not a rational function of `variable`, the wall-clock budget is spent,
+   * or the native integrator can't close it either (result still inert). */
+  private nativeRationalFallback(
+    integrand: Expression,
+    variable: string
+  ): Expression | null {
+    if (NO_NATIVE_RATIONAL) return null;
+    if (!rationalFnQ(integrand, variable)) return null;
+    // Numeric-coefficient integrands only. Symbolic-parameter rationals
+    // (e.g. 1/((a+b·x)(c+d·x)(e+f·x))) need symbolic polynomial factoring
+    // the native integrator can't do — it can't close them, and its
+    // factoring path doesn't poll the deadline, so it overruns the budget
+    // badly (observed 80 s+). Restricting to free-of-parameters integrands
+    // keeps the wins and bounds the cost.
+    if (integrand.unknowns.some((u) => u !== variable)) return null;
+    const ce = this.ce;
+    const remainingMs = this.deadline - Date.now();
+    if (remainingMs <= 0) return null;
+    const x = ce.symbol(variable);
+    const savedLimit = ce.timeLimit;
+    // bound the native evaluation — N()/evaluate() self-arm a
+    // CancellationError from ce.timeLimit. A native success on a rational
+    // is sub-second; the long runs are failures (high-degree numeric
+    // denominators it can't factor), so cap well under the driver budget
+    // to avoid burning the full window on a dead end.
+    ce.timeLimit = Math.max(1, Math.min(remainingMs, 5000));
+    try {
+      const F = ce.function('Integrate', [integrand, x]).evaluate();
+      if (containsIntegrate(F)) return null;
+      // An antiderivative of a nonzero rational function always contains
+      // the variable; a constant result is a native miscomputation (e.g.
+      // the repeated-irreducible-quadratic partial-fraction bug that
+      // returns 0). Reject it rather than emit a wrong answer.
+      if (!F.has(variable)) return null;
+      return F;
+    } catch (e) {
+      if (e instanceof Error && e.constructor.name === 'CancellationError')
+        return null;
+      throw e;
+    } finally {
+      ce.timeLimit = savedLimit;
     }
   }
 

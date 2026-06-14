@@ -2082,7 +2082,7 @@ function simplerSqrtQ(u: Expression, v: Expression): boolean {
 }
 
 /** Rubi RationalFunctionQ — u is a rational function of x */
-function rationalFnQ(u: Expression, x: string): boolean {
+export function rationalFnQ(u: Expression, x: string): boolean {
   if (!u.ops || !u.has(x)) return true;
   switch (u.operator) {
     case 'Power':

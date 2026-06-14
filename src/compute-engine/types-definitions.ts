@@ -414,7 +414,7 @@ export type OperatorDefinition = Partial<BaseDefinition> &
      * a `holdUntil` attribute of `"never"`.
      *
      * The handler should not consider the value or any assumptions about any
-     * of the arguments that are symbols or functions (i.e. `arg.isZero`,
+     * of the arguments that are symbols or functions (i.e. `arg.is(0)`,
      * `arg.isInteger`, etc...) since those may change over time.
      *
      * The result of the handler should be a canonical expression.
