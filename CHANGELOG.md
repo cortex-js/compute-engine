@@ -65,6 +65,12 @@
   `PolynomialGCD()` when an explicit polynomial result of `1` is needed for
   coprime inputs.
 
+- **New `Resultant(a, b, x)` operator** computes the resultant of two
+  polynomials with respect to a variable (the Sylvester-matrix determinant). It
+  is zero exactly when the polynomials share a common factor, e.g.
+  `Resultant(x² - 1, x - 1, x) → 0` and `Resultant(x² + 1, x² - 1, x) → 4`.
+  Symbolic coefficients are supported: `Resultant(x² + a, x + b, x) → a + b²`.
+
 - **Polynomial factorization is more complete and reliable.** In particular,
   `Factor(xⁿ-1)` now returns polynomial factors without introducing
   branch-dependent radicals, and the public `factor()` function once again

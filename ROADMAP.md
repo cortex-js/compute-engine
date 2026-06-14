@@ -1132,13 +1132,25 @@ form (e.g. from parsed Mathematica/LaTeX) returns unevaluated and lets its
 `Equal` arg collapse to `False` — it should dispatch to the same machinery as
 `.solve()`. Surfaced by `benchmarks/audit/wester.ts` (the `Solve` rows).
 
-### B10. No `Resultant` operator
+### B10. ~~No `Resultant` operator~~ — ✅ done (2026-06-13)
 
-`Resultant[p, q, x]` returns unevaluated (CE has no implementation); SymPy
-computes it. Univariate polynomial resultant (e.g. via the Sylvester matrix
-determinant or the subresultant PRS the GCD path already uses, cf. B5) would
-add it. Low-frequency but cheap once polynomial GCD/PRS infrastructure exists.
-Surfaced by `benchmarks/audit/wester.ts`.
+`Resultant[p, q, x]` returned unevaluated (CE had no implementation); SymPy
+computes it. The resultant is the Sylvester-matrix determinant, zero iff the
+polynomials share a common factor.
+
+**Resolved:** added `Resultant(a, b, variable)` (`library/polynomials.ts` →
+`polynomialResultant` in `boxed-expression/polynomials.ts`). Rather than build
+an explicit Sylvester determinant, it uses the Euclidean recursion over the
+coefficient field — `Res(a,b) = (−1)^(m·n)·lc(b)^(m−r)·Res(b, a mod b)`, with
+base cases `Res(a, c)=c^deg(a)` and `Res(const,const)=1` — reusing the existing
+exact `polynomialDivide` (rationals/radicals, no floating point). Verified
+against an independent Sylvester-determinant computation, plus multiplicativity
+(`Res(A·B,C)=Res(A,C)·Res(B,C)`) and the `(−1)^(m·n)` argument-swap symmetry.
+Examples: `Res(x²−1, x−1) → 0`, `Res(x²+1, x²−1) → 4`, `Res(x²+a, x+b) → a+b²`,
+and the Wester case `Res(3x⁴+3x³+x²−x−2, x³−3x²+x+5) → 0` (shared `x+1`).
+Non-polynomial arguments stay unevaluated. The `benchmarks/audit/wester.ts`
+`Resultant` rows now dispatch to it. Blast radius zero. Tests:
+`latex-syntax/polynomials.test.ts` "RESULTANT".
 
 ### B11. Multivariate polynomial GCD — Stage B (Brown) done (2026-06-13)
 

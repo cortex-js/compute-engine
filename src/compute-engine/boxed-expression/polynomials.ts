@@ -523,6 +523,98 @@ export function polynomialGCD(
   return makeMonic(p, variable);
 }
 
+/** Index of the leading (highest-degree) non-zero coefficient, or -1 if the
+ * coefficient array represents the zero polynomial. */
+function leadingIndex(coeffs: Expression[]): number {
+  for (let i = coeffs.length - 1; i >= 0; i--)
+    if (!coeffs[i].isSame(0)) return i;
+  return -1;
+}
+
+/**
+ * Compute the resultant of two univariate polynomials `a` and `b` in
+ * `variable`. The resultant is the determinant of the Sylvester matrix; it is
+ * zero iff the polynomials share a common (non-constant) factor.
+ *
+ * Computed by the Euclidean recursion over the coefficient field (exact
+ * rationals / radicals — no floating point), avoiding an explicit Sylvester
+ * determinant. With `m = deg a`, `n = deg b`, and `R = a mod b` of degree `r`:
+ *
+ *   Res(a, b) = (-1)^(m·n) · lc(b)^(m - r) · Res(b, R)
+ *
+ * with base cases Res(a, const c) = c^deg(a) and Res(const, const) = 1.
+ *
+ * Returns `undefined` if either argument is not a polynomial in `variable`.
+ *
+ * Examples:
+ * - `polynomialResultant(x² - 1, x - 1, 'x')` → 0 (common factor x - 1)
+ * - `polynomialResultant(x² + 1, x² - 1, 'x')` → 4
+ * - `polynomialResultant(x² + a, x + b, 'x')` → a + b²
+ */
+export function polynomialResultant(
+  a: Expression,
+  b: Expression,
+  variable: string
+): Expression | undefined {
+  const result = resultantRec(a, b, variable);
+  return result ?? undefined;
+}
+
+/** Recursive core of {@link polynomialResultant}. Returns `null` (not a
+ * polynomial) so the public wrapper can map it to `undefined`. */
+function resultantRec(
+  a: Expression,
+  b: Expression,
+  variable: string
+): Expression | null {
+  const ce = a.engine;
+  checkDeadline(ce._deadline);
+
+  const aCoeffs = getPolynomialCoefficients(a, variable);
+  const bCoeffs = getPolynomialCoefficients(b, variable);
+  if (!aCoeffs || !bCoeffs) return null;
+
+  const m = leadingIndex(aCoeffs);
+  const n = leadingIndex(bCoeffs);
+
+  // Degenerate: the resultant with a zero polynomial is 0.
+  if (m < 0 || n < 0) return ce.Zero;
+
+  // Res(const, const) = 1 (empty Sylvester matrix).
+  if (m === 0 && n === 0) return ce.One;
+
+  // Res(a, c) = c^deg(a) for a constant c (and the symmetric case).
+  if (n === 0) return bCoeffs[0].pow(m);
+  if (m === 0) return aCoeffs[0].pow(n);
+
+  // Keep the higher-degree operand first; the swap costs a sign (-1)^(m·n).
+  if (m < n) {
+    const sub = resultantRec(b, a, variable);
+    if (sub === null) return null;
+    return (m * n) % 2 === 0 ? sub : sub.neg();
+  }
+
+  // m ≥ n ≥ 1: reduce by one ordinary (field) division step.
+  const divResult = polynomialDivide(a, b, variable);
+  if (!divResult) return null;
+  const remainder = divResult[1];
+
+  const remCoeffs = getPolynomialCoefficients(remainder, variable);
+  if (!remCoeffs) return null;
+  const r = leadingIndex(remCoeffs);
+
+  // A zero remainder means b divides a — they share a factor, so Res = 0.
+  if (r < 0) return ce.Zero;
+
+  const sub = resultantRec(b, remainder, variable);
+  if (sub === null) return null;
+
+  // Res(a, b) = (-1)^(m·n) · lc(b)^(m - r) · Res(b, R)
+  let result = bCoeffs[n].pow(m - r).mul(sub);
+  if ((m * n) % 2 !== 0) result = result.neg();
+  return result;
+}
+
 /**
  * Compute the GCD of two or more univariate polynomials — the polynomial
  * counterpart of the variadic `GCD` operator applied to polynomial operands.

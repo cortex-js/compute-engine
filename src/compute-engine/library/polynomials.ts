@@ -10,6 +10,7 @@ import {
   getPolynomialCoefficients,
   polynomialDivide,
   polynomialGCD,
+  polynomialResultant,
   cancelCommonFactors,
   fromCoefficients,
 } from '../boxed-expression/polynomials';
@@ -149,6 +150,21 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
         const variable = sym(varExpr.canonical);
         if (!variable) return undefined;
         return polynomialGCD(a.canonical, b.canonical, variable);
+      },
+    },
+
+    Resultant: {
+      description:
+        'Return the resultant of two polynomials with respect to a variable. ' +
+        'It is zero iff the polynomials share a common factor. ' +
+        'Example: Resultant(x² - 1, x - 1, x) → 0',
+      lazy: true,
+      signature: '(a: value, b: value, variable: symbol) -> value',
+      evaluate: ([a, b, varExpr]) => {
+        if (!a || !b || !varExpr) return undefined;
+        const variable = sym(varExpr.canonical);
+        if (!variable) return undefined;
+        return polynomialResultant(a.canonical, b.canonical, variable);
       },
     },
 

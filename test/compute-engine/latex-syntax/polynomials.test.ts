@@ -94,6 +94,84 @@ describe('POLYNOMIAL GCD', () => {
     ).toMatchInlineSnapshot(`x + 1`));
 });
 
+describe('RESULTANT', () => {
+  test('common factor → 0 (x² - 1, x - 1)', () =>
+    expect(
+      evaluate('\\operatorname{Resultant}(x^2 - 1, x - 1, x)')
+    ).toMatchInlineSnapshot(`0`));
+
+  test('coprime linear factors (x - 2, x - 3)', () =>
+    expect(
+      evaluate('\\operatorname{Resultant}(x - 2, x - 3, x)')
+    ).toMatchInlineSnapshot(`-1`));
+
+  test('x² + 1 and x² - 1 → 4', () =>
+    expect(
+      evaluate('\\operatorname{Resultant}(x^2 + 1, x^2 - 1, x)')
+    ).toMatchInlineSnapshot(`4`));
+
+  test('against a constant: Res(x² + 1, 7) → 7² = 49', () =>
+    expect(
+      evaluate('\\operatorname{Resultant}(x^2 + 1, 7, x)')
+    ).toMatchInlineSnapshot(`49`));
+
+  test('two constants → 1', () =>
+    expect(
+      evaluate('\\operatorname{Resultant}(5, 3, x)')
+    ).toMatchInlineSnapshot(`1`));
+
+  test('Wester: shared (x + 1) factor → 0', () =>
+    expect(
+      evaluate(
+        '\\operatorname{Resultant}(3x^4 + 3x^3 + x^2 - x - 2, x^3 - 3x^2 + x + 5, x)'
+      )
+    ).toMatchInlineSnapshot(`0`));
+
+  test('symbolic coefficients: Res(x² + a, x + b) → a + b²', () =>
+    expect(
+      evaluate('\\operatorname{Resultant}(x^2 + a, x + b, x)')
+    ).toMatchInlineSnapshot(`b^2 + a`));
+
+  test('swap carries the (-1)^(mn) sign for odd m·n', () => {
+    // Res(x³ - 2, x - 1) = (x³-2 at x=1) = -1 ... times (-1)^3 = 1
+    expect(
+      evaluate('\\operatorname{Resultant}(x^3 - 2, x - 1, x)')
+    ).toMatchInlineSnapshot(`1`);
+    // Reversing the arguments flips the sign (m·n = 3 is odd).
+    expect(
+      evaluate('\\operatorname{Resultant}(x - 1, x^3 - 2, x)')
+    ).toMatchInlineSnapshot(`-1`);
+  });
+
+  test('multiplicativity: Res(A·B, C) = Res(A,C)·Res(B,C)', () => {
+    const A = 'x^2 + 1';
+    const B = 'x - 3';
+    const C = '2x^2 - x + 4';
+    const lhs = engine
+      .box([
+        'Resultant',
+        engine.parse(`(${A})(${B})`).evaluate(),
+        engine.parse(C),
+        'x',
+      ])
+      .evaluate();
+    const rhs = engine
+      .box(['Resultant', engine.parse(A), engine.parse(C), 'x'])
+      .evaluate()
+      .mul(
+        engine.box(['Resultant', engine.parse(B), engine.parse(C), 'x']).evaluate()
+      );
+    expect(lhs.isSame(rhs)).toBe(true);
+  });
+
+  test('non-polynomial argument stays unevaluated', () => {
+    const result = engine
+      .parse('\\operatorname{Resultant}(\\sin x, x - 1, x)')
+      .evaluate();
+    expect(result.toString()).toContain('Resultant');
+  });
+});
+
 describe('CANCEL COMMON FACTORS', () => {
   test('(x² - 1)/(x - 1)', () =>
     expect(
