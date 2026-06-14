@@ -615,6 +615,18 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     useVariations: true,
     condition: filter,
   },
+
+  // a·sin(x) + b·cos(x) = 0  =>  tan(x) = -b/a  =>  x = arctan(-b/a)
+  // Handles e.g. sin(x) = cos(x) (a = 1, b = -1 → arctan(1) = π/4). The two
+  // standalone sin/cos rules above don't fire here because their constant term
+  // `__b` would capture the other trig term, which contains `_x` (rejected by
+  // `filter`).
+  {
+    match: ['Add', ['Multiply', '__a', ['Sin', '_x']], ['Multiply', '__b', ['Cos', '_x']]],
+    replace: ['Arctan', ['Divide', ['Negate', '__b'], '__a']],
+    useVariations: true,
+    condition: (sub) => filter(sub) && !sub.__a.isSame(0),
+  },
 ];
 
 /**
@@ -1168,6 +1180,124 @@ const INJECTIVE_UNARY_OPERATORS = new Set([
   'Arctan',
 ]);
 
+function gcd2(a: number, b: number): number {
+  a = Math.abs(a);
+  b = Math.abs(b);
+  while (b) [a, b] = [b, a % b];
+  return a;
+}
+
+function lcm2(a: number, b: number): number {
+  return (a / gcd2(a, b)) * b;
+}
+
+/** If `e` is a rational constant, return it as `[numerator, denominator]`
+ * (denominator > 0); otherwise `null`. */
+function rationalExponent(e: Expression): [number, number] | null {
+  const k = asSmallInteger(e);
+  if (k !== null) return [k, 1];
+  if (e.isNumber && e.isRational) {
+    const p = asSmallInteger(e.numerator);
+    const q = asSmallInteger(e.denominator);
+    if (p !== null && q !== null && q > 0) return [p, q];
+  }
+  return null;
+}
+
+/**
+ * Solve an equation that is a polynomial in `x^{1/d}` (d > 1) by the
+ * substitution `u = x^{1/d}` — i.e. equations mixing several rational powers
+ * (roots) of the unknown. For example `2√x + 3·⁴√x − 2 = 0` becomes
+ * `2u² + 3u − 2 = 0` with `u = ⁴√x`; its roots `u = ½, −2` give `x = u⁴`, and
+ * the extraneous `x = 16` (from `u = −2`, while `⁴√x ≥ 0`) is removed by the
+ * caller's root validation against the original equation.
+ *
+ * This is the "homogenization" heuristic: replace a function of the unknown by
+ * a new variable, solve, then invert. Returns `null` when `x` occurs outside a
+ * rational power `x^{p/q}` (so it does not apply to `√(x²+1)`, `sin x`, …), or
+ * when every power is already an integer (a plain polynomial, handled by the
+ * polynomial fallback).
+ */
+function solveByRationalPowerSubstitution(
+  expr: Expression,
+  x: string
+): ReadonlyArray<Expression> | null {
+  const ce = expr.engine;
+
+  // First pass: collect the denominators of every rational exponent of x,
+  // failing if x appears in any non-rational-power context.
+  const dens = new Set<number>();
+  const collect = (node: Expression): boolean => {
+    if (isSymbol(node, x)) {
+      dens.add(1);
+      return true;
+    }
+    if (!node.has(x)) return true; // x-free subtree
+    if (isFunction(node, 'Sqrt') && isSymbol(node.op1, x)) {
+      dens.add(2);
+      return true;
+    }
+    if (isFunction(node, 'Root') && isSymbol(node.op1, x)) {
+      const n = asSmallInteger(node.op2);
+      if (n === null || n <= 0) return false;
+      dens.add(n);
+      return true;
+    }
+    if (isFunction(node, 'Power') && isSymbol(node.op1, x)) {
+      const r = rationalExponent(node.op2);
+      if (r === null) return false;
+      dens.add(r[1]);
+      return true;
+    }
+    if (
+      isFunction(node, 'Add') ||
+      isFunction(node, 'Multiply') ||
+      isFunction(node, 'Negate')
+    )
+      return node.ops!.every(collect);
+    return false; // any other head containing x: not a rational-power polynomial
+  };
+  if (!collect(expr) || dens.size === 0) return null;
+
+  let d = 1;
+  for (const q of dens) d = lcm2(d, q);
+  if (d <= 1) return null; // already a plain polynomial in x
+
+  // Pick a fresh substitution variable not used in the expression.
+  const uName = ['u', 't', 'w', 's', 'v', 'y', 'z'].find(
+    (n) => n !== x && !expr.unknowns.includes(n)
+  );
+  if (uName === undefined) return null;
+  const u = ce.symbol(uName);
+
+  // Second pass: rewrite each x^{p/q} as u^{p·d/q} (an integer power of u, since
+  // d is a multiple of every denominator).
+  const rewrite = (node: Expression): Expression => {
+    if (isSymbol(node, x)) return u.pow(d);
+    if (!node.has(x)) return node;
+    if (isFunction(node, 'Sqrt') && isSymbol(node.op1, x)) return u.pow(d / 2);
+    if (isFunction(node, 'Root') && isSymbol(node.op1, x))
+      return u.pow(d / asSmallInteger(node.op2)!);
+    if (isFunction(node, 'Power') && isSymbol(node.op1, x)) {
+      const [p, q] = rationalExponent(node.op2)!;
+      return u.pow((p * d) / q);
+    }
+    if (isFunction(node, 'Negate')) return rewrite(node.op1).neg();
+    if (isFunction(node, 'Add'))
+      return ce.function('Add', node.ops!.map(rewrite));
+    if (isFunction(node, 'Multiply'))
+      return ce.function('Multiply', node.ops!.map(rewrite));
+    return node;
+  };
+
+  const uRoots = findUnivariateRoots(rewrite(expr), uName);
+  if (uRoots.length === 0) return null;
+
+  // Back-substitute x = uᵈ; extraneous roots are dropped by the caller's
+  // validation against the original equation.
+  return uRoots.map((ur) => ur.pow(d));
+}
+
 /**
  * MathJsonExpression is a function of a single variable (`x`) or an Equality
  *
@@ -1208,6 +1338,22 @@ export function findUnivariateRoots(
     ) {
       lhs = lhs.op1;
       rhs = rhs.op1;
+    }
+
+    // Same-base power equality: cᵃ = cᵇ ⟺ a = b when x ↦ cˣ is injective,
+    // i.e. the base c is a positive constant ≠ 1 not involving the unknown.
+    // (`eᵃ` is represented as `Power(ExponentialE, a)`, so this also covers
+    // `eᵃ = eᵇ`.)
+    if (
+      isFunction(lhs, 'Power') &&
+      isFunction(rhs, 'Power') &&
+      lhs.op1.isSame(rhs.op1) &&
+      !lhs.op1.has(x) &&
+      lhs.op1.isPositive === true &&
+      !lhs.op1.isSame(1)
+    ) {
+      lhs = lhs.op2;
+      rhs = rhs.op2;
     }
 
     expr = expand(lhs).sub(expand(rhs)).simplify();
@@ -1340,6 +1486,13 @@ export function findUnivariateRoots(
           }
         }
       }
+    }
+
+    // Homogenization: equations that are polynomials in a rational power of the
+    // unknown (e.g. 2√x + 3·⁴√x = 2) — substitute u = x^{1/d}, solve, invert.
+    if (result.length === 0) {
+      const substRoots = solveByRationalPowerSubstitution(originalExpr, x);
+      if (substRoots) result = [...substRoots];
     }
 
     // A root may reference the `_x` wildcard symbol (e.g. when produced by a

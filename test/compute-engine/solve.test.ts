@@ -1452,3 +1452,91 @@ describe('PARAMETRIC SOLUTION TYPE FILTERING', () => {
     expect(result).not.toBeNull();
   });
 });
+
+describe('TRANSCENDENTAL AND SUBSTITUTION EQUATIONS (B9)', () => {
+  // Same-base power equality: cᵃ = cᵇ ⟺ a = b (x ↦ cˣ injective).
+  test('e^{2-x²} = e^{-x} → x = -1, 2', () => {
+    const result = expr('e^{2-x^2}=e^{-x}')
+      .solve('x')
+      ?.map((x) => x.json);
+    expect(result).toMatchInlineSnapshot(`
+      [
+        -1,
+        2,
+      ]
+    `);
+  });
+
+  test('2^x = 2^3 → x = 3 (general base)', () => {
+    expect(expr('2^x=2^3').solve('x')?.map((x) => x.json)).toMatchInlineSnapshot(`
+      [
+        3,
+      ]
+    `);
+  });
+
+  // a·sin(x) + b·cos(x) = 0 → x = arctan(-b/a).
+  test('sin(x) = cos(x) → π/4', () => {
+    const result = expr('\\sin x = \\cos x')
+      .solve('x')
+      ?.map((x) => x.json);
+    expect(result).toMatchInlineSnapshot(`
+      [
+        [
+          Multiply,
+          [
+            Rational,
+            1,
+            4,
+          ],
+          Pi,
+        ],
+      ]
+    `);
+  });
+
+  test('√3·sin(x) + cos(x) = 0 → -π/6', () => {
+    const result = expr('\\sqrt{3}\\sin x + \\cos x = 0')
+      .solve('x')
+      ?.map((x) => x.N().re);
+    expect(result?.length).toBe(1);
+    expect(result![0]).toBeCloseTo(-Math.PI / 6, 8);
+  });
+
+  // Homogenization: polynomial in a rational power of x (u = x^{1/d}).
+  test('2√x + 3·⁴√x = 2 → x = 1/16', () => {
+    const result = expr('2\\sqrt{x}+3x^{1/4}=2')
+      .solve('x')
+      ?.map((x) => x.json);
+    // u = ⁴√x solves 2u²+3u-2=0 → u = ½ (u = -2 gives x = 16, extraneous).
+    expect(result).toMatchInlineSnapshot(`
+      [
+        [
+          Rational,
+          1,
+          16,
+        ],
+      ]
+    `);
+  });
+
+  test('x^{2/3} + x^{1/3} - 2 = 0 → x = 1 (principal branch)', () => {
+    // u = x^{1/3} solves u²+u-2=0 → u = 1, -2. x = -8 (from u = -2) is dropped:
+    // the engine uses the principal branch, where (-8)^{2/3} is not real.
+    const result = expr('x^{2/3}+x^{1/3}-2=0')
+      .solve('x')
+      ?.map((x) => x.json);
+    expect(result).toMatchInlineSnapshot(`
+      [
+        1,
+      ]
+    `);
+  });
+
+  test('x - 5√x + 6 = 0 → x = 4, 9', () => {
+    const result = expr('x-5\\sqrt{x}+6=0')
+      .solve('x')
+      ?.map((x) => x.json);
+    expect(result?.sort()).toEqual([4, 9]);
+  });
+});

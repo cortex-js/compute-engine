@@ -60,6 +60,12 @@
   as `|x| = 2`, `|x-1| = 2`, non-linear arguments such as `|x²-3| = 1`, and
   equations with an absolute value on both sides.
 
+- **`solve` handles more transcendental and substitution equations.** Equations
+  with equal exponential bases reduce by their exponents (`e^{2-x²} = e^{-x} →
+  -1, 2`; `2^x = 2^3 → 3`); `a·sin(x) + b·cos(x) = 0` solves via the tangent
+  (`sin x = cos x → π/4`); and equations that are polynomials in a root of the
+  unknown solve by substitution (`2√x + 3·⁴√x = 2 → 1/16`).
+
 - **`GCD` now finds common polynomial factors** for univariate and multivariate
   polynomials. Integer operands retain their existing behavior; use
   `PolynomialGCD()` when an explicit polynomial result of `1` is needed for
