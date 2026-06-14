@@ -2,6 +2,12 @@
 
 ### Behavior Changes
 
+- **`isFinite` is now known for finite symbolic constants.** Expressions such as
+  `√π`, `1/π`, and `π^π` report `expr.isFinite === true` (previously
+  `undefined`), because finiteness is propagated through `Sqrt`, `Root`,
+  `Power`, and `Divide` of finite operands. Cases that are genuinely
+  indeterminate (e.g. `1/x` for an unconstrained `x`) still report `undefined`.
+
 - **Exact transcendental expressions now remain symbolic under `evaluate()`.**
   For example, `ln(2)` remains `ln(2)` instead of becoming `0.693…`. Use `.N()`
   or `{ numericApproximation: true }` when a numeric approximation is wanted.

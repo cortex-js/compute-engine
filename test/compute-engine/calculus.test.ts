@@ -994,8 +994,9 @@ describe('IMPROPER INTEGRATION (ROADMAP B3)', () => {
 
   // Fresnel-family improper integrals: ∫₀^∞ cos(x²) = ∫₀^∞ sin(x²) = √(π/8).
   // Previously blocked by ∞ / (Pi-derived finite constant) → NaN in the bound
-  // substitution (the FresnelC argument is Divide(√2·∞, √π), and √π reports
-  // isFinite = undefined). Now exact via the ∞/finite-nonzero divide rule.
+  // substitution (the FresnelC argument is Divide(√2·∞, √π)). Exact via the
+  // ∞/finite-nonzero divide rule; finiteness now also propagates structurally
+  // so √π reports isFinite = true (see the 'isFinite propagation' block).
   test('∫₀^∞ cos(x²) → √(π/8) (Fresnel C, via FresnelC(∞)=½)', () => {
     const F = engine.parse('\\int_0^\\infty \\cos(x^2) dx').evaluate();
     expect(F.toString()).toMatchInlineSnapshot(`sqrt(2)/4 * sqrt(pi)`);
@@ -1011,8 +1012,9 @@ describe('IMPROPER INTEGRATION (ROADMAP B3)', () => {
 
 describe('∞ / finite-nonzero divide (B3 Fresnel unblock)', () => {
   // The Divide path returned NaN for an infinite numerator over a finite but
-  // symbolic denominator (√π, π, 1/√π — all report isFinite = undefined),
-  // while Multiply already handled ∞·√π → +∞. These keep the two consistent.
+  // symbolic denominator (√π, π, 1/√π), while Multiply already handled
+  // ∞·√π → +∞. These keep the two consistent. (Finiteness of those symbolic
+  // constants now propagates too — see the 'isFinite propagation' block.)
   test('∞ / π = +∞, ∞ / √π = +∞', () => {
     expect(engine.PositiveInfinity.div(engine.Pi).toString()).toBe('+oo');
     expect(
@@ -1033,6 +1035,36 @@ describe('∞ / finite-nonzero divide (B3 Fresnel unblock)', () => {
     expect(
       engine.PositiveInfinity.div(engine.Zero).toString()
     ).toBe('~oo');
+  });
+});
+
+describe('isFinite propagation (B3 latent finiteness gap)', () => {
+  // Finiteness is now propagated structurally through Sqrt/Root/Power/Divide of
+  // finite operands, so finite symbolic constants report isFinite = true before
+  // being evaluated to a number (previously undefined). "Definitely nonzero" is
+  // established via a known sign (BoxedExpression has no isZero getter).
+  test('finite symbolic constants are known finite', () => {
+    expect(engine.parse('\\sqrt{\\pi}').isFinite).toBe(true);
+    expect(engine.parse('\\frac{1}{\\pi}').isFinite).toBe(true);
+    expect(engine.box(['Power', 'Pi', ['Rational', 1, 3]]).isFinite).toBe(true);
+    expect(engine.box(['Power', 'Pi', 2]).isFinite).toBe(true);
+    expect(engine.box(['Power', 'Pi', 'Pi']).isFinite).toBe(true);
+    expect(engine.box(['Power', 2, 1000]).isFinite).toBe(true);
+  });
+
+  test('non-finite operands are not reported finite', () => {
+    expect(engine.box(['Sqrt', engine.PositiveInfinity]).isFinite).toBe(false);
+    // ∞/π is +∞ (handled by the divide rule), hence not finite.
+    expect(
+      engine.box(['Divide', engine.PositiveInfinity, 'Pi']).isFinite
+    ).toBe(false);
+  });
+
+  test('cases without a definite verdict stay undefined (conservative)', () => {
+    // Free variable x: could be infinite, zero, etc. — finiteness unknown.
+    expect(engine.box(['Divide', 1, 'x']).isFinite).toBeUndefined();
+    expect(engine.box(['Power', 'x', 2]).isFinite).toBeUndefined();
+    expect(engine.box(['Power', 'Pi', 'x']).isFinite).toBeUndefined();
   });
 });
 

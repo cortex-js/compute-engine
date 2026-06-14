@@ -879,7 +879,7 @@ SymPy 20/20 — surfaced the next gaps, in priority order:
   `x·eˣ·sin 2x`, etc. all evaluate exactly (verified by differentiate-back).
   Tests in `calculus.test.ts`.
 
-### B3. Definite / improper integrals are numerical-only — partially resolved (2026-06-13)
+### B3. Definite / improper integrals are numerical-only — ✅ resolved (2026-06-13)
 
 - ✅ **Finite-bound elementary definite integrals are exact.** The symbolic
   definite path (antiderivative + bound substitution) already landed (item 12);
@@ -903,17 +903,35 @@ SymPy 20/20 — surfaced the next gaps, in priority order:
   - **New: `arctan(±∞) = ±π/2`** (added to the `Arctan` evaluate handler) →
     `∫₀^∞ 1/(1+x²) = π/2`, `∫_{−∞}^∞ 1/(1+x²) = π`, `∫₀^∞ 1/(x²+4) = π/4`.
   - Elementary monotone cases keep working: `∫₀^∞ e^(−x) = 1`, `∫₁^∞ 1/x² = 1`.
-- ⬜ **Fresnel-family improper integrals blocked by an arithmetic bug, not the
-  integrator.** `∫₀^∞ cos(x²)` should be `√(π/8)` via `FresnelC(∞) = ½`, but the
-  scaled argument `√(2/π)·∞` collapses to **NaN**. Root cause: `∞ × c → NaN`
-  when `c` is a *finite but symbolic* constant whose `isFinite` is `undefined` —
-  `Sqrt(Pi)`, `Pi^(−1)`, `1/√π` all report `isFinite: undefined` (finiteness is
-  not propagated through `Sqrt`/`Power`/`Divide` of a finite constant like `Pi`),
-  so the multiply/divide infinity guard bails to NaN (`Divide(+∞, π) → NaN`,
-  `Divide(+∞, 2) → +∞`). Fix options: (a) propagate `isFinite` through
-  `Sqrt`/`Power`/`Divide` of finite operands; (b) relax the `∞ × x` guard to treat
-  a no-unknowns non-infinite factor as finite. Core-arithmetic change — measure
-  snapshot blast radius first.
+- ✅ **Fresnel-family improper integrals — fixed (arithmetic bug, not the
+  integrator).** `∫₀^∞ cos(x²)` should be `√(π/8)` via `FresnelC(∞) = ½`, but the
+  bound substitution collapsed to **NaN**. Root cause was an asymmetry in the
+  **divide** path (not multiply: `∞ × √π → +∞` already worked). The FresnelC
+  argument is `Divide(√2·∞, √π)`, and `Product.asNumeratorDenominator()` bailed
+  to `[NaN, NaN]` whenever the coefficient is `±∞` and any symbolic term remains
+  — so `∞/√π`, `∞/π` → NaN (while `∞/2 → +∞`). `Sqrt(Pi)`, `Pi^(−1)`, `1/√π` all
+  report `isFinite: undefined` (finiteness is *not* propagated through
+  `Sqrt`/`Power`/`Divide`), so they were treated as not-known-finite. Fix: added
+  an `∞ / (finite, definitely-nonzero) → ±∞` rule (guarded on a definite sign, so
+  could-be-zero constants like `sin π` are left alone; the sign of the infinity
+  is carried) to **both** division entry points — the `div` helper and
+  `canonicalDivide` (`boxed-expression/arithmetic-mul-div.ts`). `∞/∞` (NaN) and
+  `∞/0` (`~∞`) are unchanged. Blast radius zero (full snapshot suite unmoved).
+  Now `∫₀^∞ cos(x²) = ∫₀^∞ sin(x²) = √2/4·√π = √(π/8)` exactly. See CHANGELOG.
+  - ✅ **Latent finiteness gap — closed (2026-06-13).** `isFinite` is now
+    propagated structurally through `Sqrt`/`Root`/`Power`/`Divide` of finite
+    operands in `BoxedFunction.isFinite` (`boxed-expression/boxed-function.ts`),
+    so finite symbolic constants report `isFinite === true` *before* numeric
+    evaluation: `√π`, `1/π`, `π^(1/3)`, `π²`, `π^π`, `2^1000`. Guards keep it
+    conservative — `Divide`/`Root` require a denominator/index with a **definite
+    sign** (BoxedExpression has no `isZero` getter; a known sign entails
+    nonzero), `Power` requires a definitely-nonzero base *or* a definitely-
+    positive exponent (so `0^0`/`0^−n` aren't claimed finite), and any operand
+    with unknown finiteness leaves the verdict `undefined`. Non-finite operands
+    stay correct (`√∞`, `∞/π` → not finite). The ∞/finite-nonzero divide rule is
+    retained (it produces the right `∞/√π → +∞` value directly). **Blast radius
+    zero** (full suite: 10074 tests pass, 3704 snapshots unmoved). Regression:
+    `calculus.test.ts` "isFinite propagation (B3 latent finiteness gap)".
 - ✅ **Oscillatory improper integrals — done (2026-06-13).** The numeric
   definite path used Monte-Carlo importance sampling, which has unbounded
   variance on a conditionally-convergent oscillatory integrand and returned
@@ -931,11 +949,11 @@ SymPy 20/20 — surfaced the next gaps, in priority order:
   all to ~1e-8 (and deterministic — no Monte-Carlo flake). It's purely additive:
   non-oscillatory and finite-interval integrals keep the Monte-Carlo path
   unchanged. Tests: `calculus.test.ts` "oscillatory improper integrals".
-- ⬜ **Fresnel via the *antiderivative* path still blocked** by the `isFinite`
-  propagation bug above — `∫₀^∞ cos(x²)` now evaluates **numerically** (√(π/8)
-  via the new quadrature), but the exact closed form `½√(π/2)` via
-  `FresnelC(∞) = ½` still collapses to `FresnelC(NaN)`. That's the remaining B3
-  item (a core-arithmetic `isFinite`-propagation fix).
+- ✅ **Fresnel via the *antiderivative* path — now exact.** With the divide-path
+  fix above, the symbolic route also delivers the exact closed form:
+  `∫₀^∞ cos(x²) → √2/4·√π` under `evaluate()` (was `FresnelC(NaN)`), independent
+  of the numeric oscillatory quadrature. So Fresnel improper integrals are exact
+  symbolically *and* numerically.
 
 ### B4. ~~`Factor` emits non-polynomial radical/abs forms for `xⁿ − 1`~~ — ✅ done (2026-06-13)
 

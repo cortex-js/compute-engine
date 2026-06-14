@@ -558,7 +558,53 @@ export class BoxedFunction
   // Not +- Infinity, not NaN
   get isFinite(): boolean | undefined {
     if (this.isNumber !== true) return false;
-    if (this.isNaN || this.isInfinity) return false;
+    if (this.isNaN === true || this.isInfinity === true) return false;
+
+    // Propagate finiteness structurally through arithmetic heads of finite
+    // operands. This lets finite symbolic constants like √π or 1/π report
+    // `isFinite === true` before the expression is evaluated to a number,
+    // rather than the conservative `undefined` returned by the fallthrough.
+    // "Definitely nonzero" is established via a known sign, mirroring the
+    // ∞/finite divide rule. (BoxedExpression has no `isZero` getter; the
+    // public expression surface exposes the sign predicates, and a definite
+    // sign — e.g. π is positive — entails nonzero.)
+    const isNonZero = (x: Expression): boolean =>
+      x.isPositive === true || x.isNegative === true;
+    switch (this.operator) {
+      case 'Sqrt':
+        // √x is finite iff x is finite (real or complex).
+        return this.op1.isFinite;
+      case 'Root': {
+        // ⁿ√x is finite iff x is finite and the index n is finite & nonzero.
+        const radicand = this.op1.isFinite;
+        const index = this.op2.isFinite;
+        if (radicand === false || index === false) return undefined;
+        if (radicand === true && index === true && isNonZero(this.op2))
+          return true;
+        break;
+      }
+      case 'Power': {
+        const base = this.op1.isFinite;
+        const exp = this.op2.isFinite;
+        // bᵉ of finite base and exponent is finite, except 0 to a non-positive
+        // exponent (0⁰ indeterminate, 0⁻ⁿ infinite). Require either a
+        // definitely-nonzero base or a definitely-positive exponent.
+        if (base === true && exp === true) {
+          if (isNonZero(this.op1)) return true;
+          if (this.op2.isPositive === true) return true;
+        }
+        break;
+      }
+      case 'Divide': {
+        // n/d is finite iff both are finite and the denominator is definitely
+        // nonzero (could-be-zero denominators are left unknown).
+        const num = this.op1.isFinite;
+        const den = this.op2.isFinite;
+        if (num === true && den === true && isNonZero(this.op2)) return true;
+        break;
+      }
+    }
+
     if (this.isNaN === undefined || this.isInfinity === undefined)
       return undefined;
     return true;
