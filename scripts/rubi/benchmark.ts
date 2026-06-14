@@ -461,6 +461,7 @@ function main(): void {
   let reportPath = 'scripts/rubi/baseline-report.json';
   let rubiRules: string | null = null;
   let only = '';
+  let keysFile = '';
   for (let i = 2; i < argv.length; i++) {
     switch (argv[i]) {
       case '--rubi':
@@ -468,6 +469,11 @@ function main(): void {
         break;
       case '--only':
         only = argv[++i];
+        break;
+      case '--keys':
+        // file with one `<file>#<index>` key per line — re-validate an
+        // explicit set of problems (e.g. a cluster from a prior report)
+        keysFile = argv[++i];
         break;
       case '--suite':
         suite = argv[++i];
@@ -507,6 +513,17 @@ function main(): void {
 
   let slice = problems;
   if (only) slice = slice.filter((p) => p.source.includes(only));
+  if (keysFile) {
+    const wanted = new Set(
+      fs
+        .readFileSync(keysFile, 'utf8')
+        .split('\n')
+        .map((s) => s.trim())
+        .filter(Boolean)
+    );
+    slice = slice.filter((p) => wanted.has(`${p.file}#${p.index}`));
+    console.log(`--keys: matched ${slice.length}/${wanted.size} keys`);
+  }
   if (sample > 0) {
     // deterministic sample spread over the whole chapter
     const rand = mulberry32(seed);

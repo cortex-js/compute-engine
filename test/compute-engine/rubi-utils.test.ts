@@ -125,6 +125,28 @@ describe('integrability gates', () => {
   });
 });
 
+describe('EqQ/NeQ arity', () => {
+  // Rubi defines both the binary form EqQ[u,v] := PossibleZeroQ[u-v] and the
+  // unary form EqQ[u] := PossibleZeroQ[u]. The unary form appears in the
+  // corpus (1.2.1.4#11 NeQ[e²−4df], 1.2.4.2#4 EqQ[m+1/2]) and previously
+  // crashed the driver with "json is not iterable" (build(undefined)).
+  test('binary EqQ/NeQ compare two operands', () => {
+    expect(cond(['EqQ', 2, 2])).toBe(true);
+    expect(cond(['EqQ', 2, 3])).toBe(false);
+    expect(cond(['NeQ', 2, 3])).toBe(true);
+    expect(cond(['NeQ', 2, 2])).toBe(false);
+  });
+
+  test('unary EqQ/NeQ compare against zero', () => {
+    expect(cond(['EqQ', ['Subtract', 4, 4]])).toBe(true);
+    expect(cond(['EqQ', ['Subtract', 4, 3]])).toBe(false);
+    expect(cond(['NeQ', ['Subtract', 4, 3]])).toBe(true);
+    expect(cond(['NeQ', ['Subtract', 4, 4]])).toBe(false);
+    // does not throw on the single-argument shape
+    expect(() => cond(['NeQ', ['Power', 'e_var', 2]])).not.toThrow();
+  });
+});
+
 describe('sqrt-form predicates', () => {
   test('NiceSqrtQ tests even-power structure, not the folded root', () => {
     // CE soundly keeps √(b²) unfolded; NiceSqrtQ must still see "nice"

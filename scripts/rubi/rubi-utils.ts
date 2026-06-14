@@ -574,6 +574,12 @@ export function findFailingConjunct(json: Json, ctx: Ctx): string {
   }
 }
 
+/** u − v for binary EqQ/NeQ, or just u for the unary form (compare to 0). */
+function eqDelta(args: Json[], ctx: Ctx): Expression {
+  const u = build(args[0], ctx);
+  return args.length >= 2 ? u.sub(build(args[1], ctx)) : u;
+}
+
 const PRED_FNS: Record<string, PredFn> = {
   // FreeQ[u, x] / FreeQ[{u1, u2, …}, x]
   FreeQ: (args, ctx) => {
@@ -584,9 +590,12 @@ const PRED_FNS: Record<string, PredFn> = {
     return targets.every((t) => !build(t, ctx).has(ctx.x));
   },
 
-  // EqQ[u, v] := PossibleZeroQ[u - v]; NeQ is its negation
-  EqQ: (args, ctx) => zeroQ(build(args[0], ctx).sub(build(args[1], ctx))),
-  NeQ: (args, ctx) => !zeroQ(build(args[0], ctx).sub(build(args[1], ctx))),
+  // EqQ[u, v] := PossibleZeroQ[u - v]; NeQ is its negation. Rubi also
+  // defines the unary forms EqQ[u] := PossibleZeroQ[u] (test u == 0) and
+  // NeQ[u] := !PossibleZeroQ[u], used e.g. by 1.2.1.4#11 (NeQ[e²−4df]) and
+  // 1.2.4.2#4 (EqQ[m+1/2]) — handle the missing second operand as 0.
+  EqQ: (args, ctx) => zeroQ(eqDelta(args, ctx)),
+  NeQ: (args, ctx) => !zeroQ(eqDelta(args, ctx)),
 
   // GtQ/LtQ/GeQ/LeQ: real-number comparisons (2- and 3-arg chained);
   // symbolic operands ⇒ false (Rubi's RealNumberQ gate, Refine omitted)
@@ -2258,6 +2267,15 @@ const VALUE_FNS: Record<string, ValueFn> = {
   PolynomialRemainder: (args, ctx) => polyDiv(args, ctx)[1],
   Denominator: (args, ctx) => build(args[0], ctx).denominator,
   Numerator: (args, ctx) => build(args[0], ctx).numerator,
+  // Rubi's own abbreviations (IntegrationUtilityFunctions.m): Numer[u]/Denom[u]
+  // are numerator/denominator that DISTRIBUTE over radicals
+  // (Numer[(b/a)^(1/3)] = b^(1/3)). CE's .numerator/.denominator already split
+  // radicals the same way, so these alias directly. The cube/sixth-root Int
+  // rules (e.g. 1.1.3.1#14 ∫1/√(a+b·x³)) bind r=Numer[Rt[b/a,3]],
+  // s=Denom[Rt[b/a,3]]; without these the bindings stayed inert `Numer(…)`
+  // heads that poisoned the residual integrand and blocked closure.
+  Numer: (args, ctx) => build(args[0], ctx).numerator,
+  Denom: (args, ctx) => build(args[0], ctx).denominator,
 
   D: (args, ctx) =>
     ctx.ce
