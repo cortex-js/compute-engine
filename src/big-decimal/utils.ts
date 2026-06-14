@@ -1,9 +1,18 @@
 /**
  * Fixed-point BigInt utilities for internal use by transcendental functions.
  *
- * A "fixed-point BigInt" represents a real number as `value = n / scale`,
- * where `scale = 10^p` for some working precision p. All arithmetic
- * stays in BigInt to preserve arbitrary precision.
+ * A "fixed-point BigInt" represents a real number as `value = n / 2^bits`
+ * (a *binary* grid). Scaling by the radix is therefore a bit-shift
+ * (`>> bits` / `<< bits`) rather than a division by `10^p` — the dominant
+ * cost in the Taylor/Newton inner loops. Benchmarks show this is 2–4× faster
+ * than an equivalent base-10 grid at identical accuracy (ROADMAP item 17.1;
+ * A/B harness in `benchmarks/big-decimal/kernel-base2-experiment.ts`). The
+ * decimal<->binary conversion happens once at the BigDecimal boundary in
+ * `transcendentals.ts` (`toFixedPoint`/`fromFixedPoint`); everything here is
+ * binary. All arithmetic stays in BigInt to preserve arbitrary precision.
+ *
+ * Kernels take `bits` (the base-2 exponent of the scale) and internally use
+ * `scale = 1n << BigInt(bits)` for value representation.
  */
 
 // ================================================================
@@ -25,107 +34,87 @@ export function pow10(n: number): bigint {
   return 10n ** BigInt(n);
 }
 
-/** Fixed-point multiply: (a * b) / scale */
-export function fpmul(a: bigint, b: bigint, scale: bigint): bigint {
-  return (a * b) / scale;
+/** Bit length of |n| (the number of bits in its binary representation). */
+export function bitLength(n: bigint): number {
+  if (n < 0n) n = -n;
+  if (n === 0n) return 0;
+  let bits = 0;
+  // Doubling search to bracket the bit length.
+  let high = 1;
+  while (n >> BigInt(high) > 0n) high *= 2;
+  // Binary search within [0, high].
+  for (let shift = high >> 1; shift >= 1; shift >>= 1) {
+    if (n >> BigInt(shift) > 0n) {
+      bits += shift;
+      n >>= BigInt(shift);
+    }
+  }
+  return bits + 1;
 }
 
-/** Fixed-point divide: (a * scale) / b */
-export function fpdiv(a: bigint, b: bigint, scale: bigint): bigint {
-  return (a * scale) / b;
+/** Fixed-point multiply on the base-2 grid: (a * b) >> bits */
+export function fpmul(a: bigint, b: bigint, bits: number): bigint {
+  return (a * b) >> BigInt(bits);
+}
+
+/** Fixed-point divide on the base-2 grid: (a << bits) / b */
+export function fpdiv(a: bigint, b: bigint, bits: number): bigint {
+  return (a << BigInt(bits)) / b;
 }
 
 /**
- * Fixed-point square root via Newton/Heron iteration.
+ * Fixed-point square root via Newton/Heron iteration on the base-2 grid.
  *
- * Input:  `a` is a fixed-point value representing `a / scale`.
- * Output: `sqrt(a / scale) * scale` as a bigint.
+ * Input:  `a` is a fixed-point value representing `a / 2^bits`.
+ * Output: `sqrt(a / 2^bits) * 2^bits` as a bigint.
+ *
+ * Note `sqrt(a/scale)·scale = sqrt(a·scale) = isqrt(a << bits)`, so the kernel
+ * is just an integer square root of `a << bits`.
  *
  * Algorithm:
- *   x_{n+1} = (x + a * scale / x) / 2
- * Converge until |x_{n+1} - x_n| <= 1 (one ULP in the fixed-point representation).
+ *   x_{n+1} = (x + (a << bits) / x) / 2
+ * Converge until |x_{n+1} - x_n| <= 1 (one ULP in the fixed-point grid).
  */
-export function fpsqrt(a: bigint, scale: bigint): bigint {
+export function fpsqrt(a: bigint, bits: number): bigint {
   if (a === 0n) return 0n;
   if (a < 0n) throw new RangeError('fpsqrt: negative input');
 
-  // Compute seed.
-  // We need sqrt(a / scale) * scale.
-  // Use Number approximation if values are small enough,
-  // otherwise use a digit-count-based estimate.
-  let x: bigint;
+  // as = a * scale = a << bits; the result is isqrt(as).
+  const as = a << BigInt(bits);
+  let x = bigSqrtSeed(as);
 
-  const aNum = Number(a);
-  const scaleNum = Number(scale);
-
-  if (
-    Number.isFinite(aNum) &&
-    Number.isFinite(scaleNum) &&
-    aNum > 0 &&
-    scaleNum > 0
-  ) {
-    // Safe to use floating-point seed
-    const approx = Math.sqrt(aNum / scaleNum) * scaleNum;
-    if (Number.isFinite(approx) && approx > 0) {
-      x = BigInt(Math.floor(approx));
-      if (x === 0n) x = 1n;
-    } else {
-      x = digitBasedSeed(a, scale);
-    }
-  } else {
-    x = digitBasedSeed(a, scale);
-  }
-
-  // Newton iteration: x_{n+1} = (x + a * scale / x) / 2
-  // The product a * scale is the key fixed-point operation.
-  const as = a * scale; // precompute a * scale
-
+  // Newton iteration: x_{n+1} = (x + as / x) / 2
   let prev: bigint;
   do {
     prev = x;
     x = (x + as / x) / 2n;
   } while (bigintAbs(x - prev) > 1n);
 
-  // One more iteration to ensure we are as close as possible
+  // One more iteration, then pick whichever of {x, next} has x²
+  // closest to `as` (the true floor-root or one above it).
   const next = (x + as / x) / 2n;
-  // Return the value closest to the true root
-  // by comparing x^2 and next^2 to a*scale
   const diffX = bigintAbs(x * x - as);
   const diffNext = bigintAbs(next * next - as);
   return diffNext < diffX ? next : x;
 }
 
 /**
- * Compute a seed for fpsqrt when the values are too large for Number.
- *
- * Strategy: extract ~15 leading digits from both `a` and `scale`, compute
- * sqrt(leadA * leadScale) in float64, then scale back to the correct
- * magnitude. This gives a seed accurate to ~7-8 significant digits
- * (half of float64 precision due to sqrt), cutting Newton iterations
- * roughly in half vs a magnitude-only seed.
+ * Seed for an integer square root of `n`: a value within a few bits of
+ * sqrt(n). Uses a float64 sqrt directly when `n` fits in a double, else
+ * extracts the top ~52 bits and scales the float result back by 2^(shift/2).
  */
-function digitBasedSeed(a: bigint, scale: bigint): bigint {
-  // We want sqrt(a * scale) as a bigint.
-  // Factor: a ≈ leadA * 10^shiftA, scale ≈ leadScale * 10^shiftScale
-  // sqrt(a * scale) ≈ sqrt(leadA * leadScale) * 10^((shiftA + shiftScale) / 2)
-  const LEAD = 15; // digits to extract for float64 arithmetic
-
-  const digA = bigintDigits(a);
-  const shiftA = Math.max(0, digA - LEAD);
-  const leadA = Number(shiftA > 0 ? a / pow10(shiftA) : a);
-
-  const digS = bigintDigits(scale);
-  const shiftS = Math.max(0, digS - LEAD);
-  const leadS = Number(shiftS > 0 ? scale / pow10(shiftS) : scale);
-
-  const totalShift = shiftA + shiftS;
-  const halfShift = Math.floor(totalShift / 2);
-
-  let floatSeed = Math.sqrt(leadA * leadS);
-  // When totalShift is odd, absorb the extra factor of sqrt(10)
-  if (totalShift % 2 !== 0) floatSeed *= 3.1622776601683795; // sqrt(10)
-
-  const seed = BigInt(Math.round(floatSeed)) * pow10(halfShift);
+function bigSqrtSeed(n: bigint): bigint {
+  const bl = bitLength(n);
+  if (bl <= 1023) {
+    const s = Math.sqrt(Number(n));
+    if (Number.isFinite(s) && s >= 1) return BigInt(Math.floor(s));
+  }
+  // n ≈ lead · 2^shift with lead ~52-bit. sqrt(n) ≈ sqrt(lead) · 2^(shift/2).
+  const shift = bl - 52; // > 0 here
+  const lead = Number(n >> BigInt(shift));
+  let fs = Math.sqrt(lead);
+  if (shift & 1) fs *= Math.SQRT2; // odd shift: absorb one factor of √2
+  const seed = BigInt(Math.round(fs)) << BigInt(shift >> 1);
   return seed > 0n ? seed : 1n;
 }
 
@@ -169,23 +158,25 @@ export function bigintDigits(n: bigint): number {
 }
 
 /**
- * Fixed-point exponential: compute exp(x/scale) * scale.
+ * Fixed-point exponential: compute exp(x/2^bits) * 2^bits.
  *
  * Uses Taylor series with argument reduction (halving) and
  * repeated squaring to reconstruct the full result.
  *
- * @param x  Fixed-point input (represents x/scale)
- * @param scale  The fixed-point scale (10^precision)
- * @returns  exp(x/scale) * scale as a bigint
+ * @param x  Fixed-point input (represents x/2^bits)
+ * @param bits  The base-2 scale exponent
+ * @returns  exp(x/2^bits) * 2^bits as a bigint
  */
-export function fpexp(x: bigint, scale: bigint): bigint {
+export function fpexp(x: bigint, bits: number): bigint {
+  const B = BigInt(bits);
+  const scale = 1n << B;
   // exp(0) = 1
   if (x === 0n) return scale;
 
-  // Argument reduction: divide x by 2^k until |r| < scale/2 (i.e., |r/scale| < 0.5)
+  // Argument reduction: halve x until |r| < scale/2 (i.e., |r/scale| < 0.5).
   let k = 0;
   let r = x;
-  const half = scale / 2n;
+  const half = scale >> 1n;
   while (bigintAbs(r) > half) {
     r = r / 2n;
     k++;
@@ -194,19 +185,21 @@ export function fpexp(x: bigint, scale: bigint): bigint {
   // Taylor series: exp(r/scale) = 1 + r/scale + r²/(2!·scale²) + ...
   // In fixed-point: sum = scale + r + r²/(2·scale) + r³/(6·scale²) + ...
   // Incremental: term_n = term_{n-1} * r / (n * scale)
+  //   base-10:  (term * r) / (n * 10^p)    — one full-width division
+  //   base-2:   ((term * r) >> bits) / n   — shift + small-divisor division
   let sum = scale; // 1.0
   let term = r; // r/scale in fixed-point
   sum += term;
 
   for (let n = 2; ; n++) {
-    term = (term * r) / (BigInt(n) * scale);
-    if (bigintAbs(term) === 0n) break;
+    term = ((term * r) >> B) / BigInt(n);
+    if (term === 0n) break;
     sum += term;
   }
 
   // Squaring phase: exp(x/scale) = exp(r/scale)^(2^k)
   for (let i = 0; i < k; i++) {
-    sum = (sum * sum) / scale;
+    sum = (sum * sum) >> B;
   }
 
   return sum;
@@ -220,11 +213,13 @@ export function fpexp(x: bigint, scale: bigint): bigint {
  *
  * Converges quadratically from a double-precision seed.
  *
- * @param x  Fixed-point input (represents x/scale), must be positive
- * @param scale  The fixed-point scale (10^precision)
- * @returns  ln(x/scale) * scale as a bigint
+ * @param x  Fixed-point input (represents x/2^bits), must be positive
+ * @param bits  The base-2 scale exponent
+ * @returns  ln(x/2^bits) * 2^bits as a bigint
  */
-export function fpln(x: bigint, scale: bigint): bigint {
+export function fpln(x: bigint, bits: number): bigint {
+  const B = BigInt(bits);
+  const scale = 1n << B;
   // Defense in depth: a non-positive input is a caller bug (callers
   // range-reduce so the kernel only sees O(1) positive values). A zero
   // input used to hang forever in the sqrt-reduction loop (fpsqrt(0) = 0).
@@ -233,7 +228,7 @@ export function fpln(x: bigint, scale: bigint): bigint {
   // ln(1) = 0
   if (x === scale) return 0n;
 
-  // Try direct floating-point seed first (fast path for precision <= ~300)
+  // Try direct floating-point seed first (fast path for bits <= ~1000)
   const xNum = Number(x);
   const scaleNum = Number(scale);
   let y: bigint;
@@ -253,10 +248,10 @@ export function fpln(x: bigint, scale: bigint): bigint {
         // Good ~15-digit seed from floating-point
         y = BigInt(Math.round(approx * scaleNum));
       } else {
-        y = estimateLnSeed(x, scale);
+        y = estimateLnSeed(x, bits);
       }
     } else {
-      y = estimateLnSeed(x, scale);
+      y = estimateLnSeed(x, bits);
     }
   } else {
     // Floating-point overflows at this precision.
@@ -264,18 +259,18 @@ export function fpln(x: bigint, scale: bigint): bigint {
     // ln(x) = 2^k * ln(x^(1/2^k))
     // This ensures Number(reduced)/Number(scale) gives a good ~15-digit seed.
     target = x;
-    const twoScale = 2n * scale;
-    const halfScale = scale / 2n;
+    const twoScale = scale << 1n;
+    const halfScale = scale >> 1n;
 
     while (target > twoScale || target < halfScale) {
-      target = fpsqrt(target, scale);
+      target = fpsqrt(target, bits);
       k++;
     }
 
-    // Now target/scale is in [0.5, 2] — use digit-count seed
+    // Now target/scale is in [0.5, 2] — use a bit-count seed
     // (Number(target) is still Infinity at this precision, but the
-    // digit-based estimate is accurate for values near 1)
-    y = estimateLnSeed(target, scale);
+    // estimate is accurate for values near 1)
+    y = estimateLnSeed(target, bits);
   }
 
   // Newton iteration: y_{n+1} = y + x/exp(y) - 1 in fixed-point:
@@ -294,13 +289,13 @@ export function fpln(x: bigint, scale: bigint): bigint {
   // (100000 ULP) leaves 10 digits of margin.
   let prevAbsDelta = 0n;
   for (let i = 0; i < 100; i++) {
-    const ey = fpexp(y, scale);
+    const ey = fpexp(y, bits);
     if (ey === 0n) {
       // exp(y) underflowed to zero, y is too negative — adjust
       y = y / 2n;
       continue;
     }
-    const yn = y + (target * scale) / ey - scale;
+    const yn = y + (target << B) / ey - scale;
     const absDelta = bigintAbs(yn - y);
     if (absDelta <= 1n) break;
     // Detect limit cycle: both deltas are small and convergence stalled
@@ -323,15 +318,18 @@ export function fpln(x: bigint, scale: bigint): bigint {
   return y;
 }
 
+/** round(ln(2) · 2^53), for a base-2 ln seed without float overflow. */
+const LN2_Q53 = 6243314768165359n;
+
 /**
  * Estimate a seed for ln when floating-point conversion overflows.
- * Uses digit counting: ln(x/scale) ≈ (digits(x) - digits(scale)) * ln(10)
+ * Uses bit counting: ln(x/2^bits) ≈ (bitLength(x) - bits) · ln(2).
+ * In fixed-point: seed = bitDiff · ln(2) · 2^bits = bitDiff · LN2_Q53 · 2^(bits-53).
  */
-function estimateLnSeed(x: bigint, scale: bigint): bigint {
-  const xDigits = bigintDigits(x);
-  const scaleDigits = bigintDigits(scale);
-  const digitDiff = BigInt(xDigits - scaleDigits);
-  return (digitDiff * 2302585n * scale) / 1000000n;
+function estimateLnSeed(x: bigint, bits: number): bigint {
+  const bitDiff = BigInt(bitLength(x) - bits);
+  if (bits >= 53) return (bitDiff * LN2_Q53) << BigInt(bits - 53);
+  return (bitDiff * LN2_Q53) >> BigInt(53 - bits);
 }
 
 // ================================================================
@@ -355,31 +353,31 @@ export const PI_DIGITS =
   '557485724245415069595082953311686172785588907509838175463746493931925506040092770167113900984882401285836160356370766010471018194295559619894676783744944825537977472684710404753464620804668425906949129331367702898915210475216205696602405803815019351125338243003558764024749647326391419927260426992279678235478163600934172164121992458631503028618297455570674983850549458858692699569092721079750930295532116534498720275596023648066549911988183479775356636980742654252786255181841757467289097777279380008164706001614524919217321721477235014144197356854816136115735255213347574184946843852332390739414333454776241686251898356948556209921922218427255025425688767179049460165346680498862723279178608578438382796797668145410095388378636095068006422512520511739298489608412848862694560424196528502221066118630674427862203919494504712371378696095636437191728746776465757396241389086583264599581339047802759009946576407895126946839835259570982582262052248940772671947826848260147699090264013639443745530506820349625245174939965143142980919065925093722169646151570985838741059788595977297549893016175392846813826868386894277415599185592524595395943104997252468084598727364469584865383673622262609912460805124388439045124413654976278079771569143599770012961608944169486855584840635';
 
 /**
- * Return PI as a fixed-point bigint at the given scale.
+ * Return PI as a base-2 fixed-point bigint at the given scale.
  *
- * The result satisfies: fppi / scale ≈ π
+ * The result satisfies: fppi / 2^bits ≈ π
  */
-let _fppiCache: { scale: bigint; value: bigint } | null = null;
+const LOG10_2 = Math.log10(2); // ≈ 0.30103
 
-function fppi(scale: bigint): bigint {
-  if (_fppiCache !== null && _fppiCache.scale === scale)
-    return _fppiCache.value;
+let _fppiCache: { bits: number; value: bigint } | null = null;
 
-  // Compute PI * scale using the shared PI_DIGITS constant.
-  // scale = 10^p, so we need ~p+10 digits of PI.
-  const p = bigintDigits(scale) - 1; // scale = 10^p
-  const neededDigits = p + 10; // extra guard digits
+function fppi(bits: number): bigint {
+  if (_fppiCache !== null && _fppiCache.bits === bits) return _fppiCache.value;
 
-  // Take only what we need
+  // Compute PI * 2^bits using the shared PI_DIGITS constant.
+  // We need ~bits·log10(2) decimal digits of PI, plus guard digits.
+  const neededDigits = Math.ceil(bits * LOG10_2) + 12;
+
+  // Take only what we need (slice is clamped to the available digits; callers
+  // guard against requesting beyond the ~2370-digit table — see sin/cos).
   const digits = PI_DIGITS.slice(0, neededDigits + 1); // +1 for the "3"
 
-  // PI ≈ digits * 10^(-fracDigits) where fracDigits = digits.length - 1
+  // PI ≈ piInt · 10^(-fracDigits) where fracDigits = digits.length - 1.
+  // result = π · 2^bits = (piInt << bits) / 10^fracDigits
   const piInt = BigInt(digits);
   const fracDigits = digits.length - 1;
-
-  // result = piInt * scale / 10^fracDigits
-  const value = (piInt * scale) / pow10(fracDigits);
-  _fppiCache = { scale, value };
+  const value = (piInt << BigInt(bits)) / pow10(fracDigits);
+  _fppiCache = { bits, value };
   return value;
 }
 
@@ -388,8 +386,8 @@ function fppi(scale: bigint): bigint {
 // ================================================================
 
 /**
- * Compute sin(x/scale) and cos(x/scale) simultaneously, returning
- * [sin * scale, cos * scale] as fixed-point bigints.
+ * Compute sin(x/2^bits) and cos(x/2^bits) simultaneously, returning
+ * [sin * 2^bits, cos * 2^bits] as base-2 fixed-point bigints.
  *
  * Algorithm:
  * 1. Reduce x mod 2π
@@ -398,40 +396,39 @@ function fppi(scale: bigint): bigint {
  * 4. Taylor series for small arg
  * 5. Reconstruct via double-angle formulas
  *
- * @param x  Fixed-point input (represents x/scale)
- * @param scale  The fixed-point scale (10^precision)
- * @returns  [sin(x/scale)*scale, cos(x/scale)*scale]
+ * @param x  Fixed-point input (represents x/2^bits)
+ * @param bits  The base-2 scale exponent
+ * @returns  [sin(x/2^bits)*2^bits, cos(x/2^bits)*2^bits]
  */
-export function fpsincos(x: bigint, scale: bigint): [bigint, bigint] {
+export function fpsincos(x: bigint, bits: number): [bigint, bigint] {
+  const B = BigInt(bits);
+  const scale = 1n << B;
   // sin(0) = 0, cos(0) = 1
   if (x === 0n) return [0n, scale];
 
-  const pi = fppi(scale);
+  const pi = fppi(bits);
   const twoPi = 2n * pi;
   const halfPi = pi / 2n;
 
   // Step 1: Reduce modulo 2π to [0, 2π)
   // For large arguments, x % twoPi loses precision because x has many
-  // more digits than twoPi. Use extended precision for the reduction.
+  // more bits than twoPi. Use extended precision for the reduction.
   let r: bigint;
   const absX = bigintAbs(x);
-  if (absX > scale * (1n << 30n)) {
-    // Large argument: compute at extended precision
-    // Extra guard digits: log10(|x/scale|) + 20
-    const extraDigits = bigintDigits(absX) - bigintDigits(scale) + 20;
-    const extScale = scale * pow10(extraDigits);
-    const extX = x * pow10(extraDigits);
-    const extPi = fppi(extScale);
+  if (absX > scale << 30n) {
+    // Large argument: compute at extended precision.
+    // Extra guard bits: bitLength(|x/scale|) + 64.
+    const extraBits = bitLength(absX) - bits + 64;
+    const extBits = bits + extraBits;
+    const extX = x << BigInt(extraBits);
+    const extPi = fppi(extBits);
     const extTwoPi = 2n * extPi;
 
-    // Compute n = round(extX / extPi) using Clenshaw reduction:
-    // r = x - n*pi (not 2pi, to get better precision)
-    // This gives r in [-pi, pi]
     let extR = extX % extTwoPi;
     if (extR < 0n) extR += extTwoPi;
 
     // Scale back
-    r = extR / pow10(extraDigits);
+    r = extR >> BigInt(extraBits);
   } else {
     r = x % twoPi;
   }
@@ -467,7 +464,7 @@ export function fpsincos(x: bigint, scale: bigint): [bigint, bigint] {
   // With k halvings, r/scale ≈ 0.5/2^(k-1), and Taylor needs ~p/(k·1.33) terms.
   // Choose k to minimize k + p/(k·1.33): optimal k ≈ √(p/1.33) ≈ 0.87·√p,
   // capped at 18 for error safety.
-  const p = bigintDigits(scale) - 1;
+  const p = Math.round(bits * LOG10_2); // ≈ decimal precision
   const targetK = Math.min(18, Math.max(2, Math.ceil(0.87 * Math.sqrt(p))));
   let k = 0;
   // Halve until r < scale / 2^targetK (roughly)
@@ -492,15 +489,15 @@ export function fpsincos(x: bigint, scale: bigint): [bigint, bigint] {
   let cosTerm = scale;
 
   const r2 = r * r; // r²
-  const scale2 = scale * scale; // hoisted: saves one bigint multiply per term
+  const B2 = 2n * B; // dividing by scale² is a >> (2·bits) shift
 
   for (let n = 2; ; n += 2) {
     // cos term: cosTerm = cosTerm * (-r²) / (n*(n-1)*scale²)
-    // But we compute sign explicitly
-    cosTerm = (cosTerm * r2) / (BigInt(n) * BigInt(n - 1) * scale2);
+    // base-2: ((cosTerm * r²) >> 2·bits) / (n*(n-1)); sign applied explicitly
+    cosTerm = ((cosTerm * r2) >> B2) / (BigInt(n) * BigInt(n - 1));
     if (cosTerm === 0n) {
       // Also check sin at next step
-      sinTerm = (sinTerm * r2) / (BigInt(n + 1) * BigInt(n) * scale2);
+      sinTerm = ((sinTerm * r2) >> B2) / (BigInt(n + 1) * BigInt(n));
       if (sinTerm !== 0n) {
         if (n % 4 === 2) {
           cosVal -= cosTerm;
@@ -514,7 +511,7 @@ export function fpsincos(x: bigint, scale: bigint): [bigint, bigint] {
     }
 
     // sin term at n+1: sinTerm = sinTerm * r² / ((n+1)*n*scale²)
-    sinTerm = (sinTerm * r2) / (BigInt(n + 1) * BigInt(n) * scale2);
+    sinTerm = ((sinTerm * r2) >> B2) / (BigInt(n + 1) * BigInt(n));
 
     if (n % 4 === 2) {
       // n=2: subtract for cos (term 2: -r²/2!), subtract for sin (term 3: -r³/3!)
@@ -533,8 +530,8 @@ export function fpsincos(x: bigint, scale: bigint): [bigint, bigint] {
   // sin(2θ) = 2·sin(θ)·cos(θ)
   // cos(2θ) = 2·cos²(θ) - 1
   for (let i = 0; i < k; i++) {
-    const newSin = (2n * sinVal * cosVal) / scale;
-    const newCos = (2n * cosVal * cosVal) / scale - scale;
+    const newSin = (2n * sinVal * cosVal) >> B;
+    const newCos = ((2n * cosVal * cosVal) >> B) - scale;
     sinVal = newSin;
     cosVal = newCos;
   }
@@ -547,7 +544,7 @@ export function fpsincos(x: bigint, scale: bigint): [bigint, bigint] {
 // ================================================================
 
 /**
- * Compute atan(x/scale) * scale as a fixed-point bigint.
+ * Compute atan(x/2^bits) * 2^bits as a base-2 fixed-point bigint.
  *
  * Algorithm:
  * 1. Handle sign: atan(-x) = -atan(x)
@@ -555,24 +552,26 @@ export function fpsincos(x: bigint, scale: bigint): [bigint, bigint] {
  * 3. Halving: if |x| > 0.4*scale, use atan(x) = 2·atan(x / (1 + sqrt(scale² + x²)))
  * 4. Taylor series: atan(r) = r - r³/3 + r⁵/5 - ...
  *
- * @param x  Fixed-point input (represents x/scale)
- * @param scale  The fixed-point scale (10^precision)
- * @returns  atan(x/scale) * scale
+ * @param x  Fixed-point input (represents x/2^bits)
+ * @param bits  The base-2 scale exponent
+ * @returns  atan(x/2^bits) * 2^bits
  */
-export function fpatan(x: bigint, scale: bigint): bigint {
+export function fpatan(x: bigint, bits: number): bigint {
   if (x === 0n) return 0n;
 
   // Handle sign
-  if (x < 0n) return -fpatan(-x, scale);
+  if (x < 0n) return -fpatan(-x, bits);
 
-  const pi = fppi(scale);
+  const B = BigInt(bits);
+  const scale = 1n << B;
+  const pi = fppi(bits);
   const halfPi = pi / 2n;
 
   // If x/scale > 1, use atan(x/scale) = π/2 - atan(scale/x)
-  // In fixed-point: atan(x, scale) = halfPi - atan(scale² / x, scale)
+  // In fixed-point: atan(x) = halfPi - atan(scale² / x); scale² = scale << bits.
   if (x > scale) {
-    const reciprocal = (scale * scale) / x; // scale²/x represents scale/x in fp
-    return halfPi - fpatan(reciprocal, scale);
+    const reciprocal = (scale << B) / x; // scale²/x represents scale/x in fp
+    return halfPi - fpatan(reciprocal, bits);
   }
 
   // Halving: if x > 0.4 * scale, use atan(x) = 2*atan(x / (1 + sqrt(1 + x²)))
@@ -583,27 +582,24 @@ export function fpatan(x: bigint, scale: bigint): bigint {
 
   while (r > threshold) {
     // We want r_new/scale = (r/scale) / (1 + sqrt(1 + (r/scale)²))
-    // fpsqrt(a, scale) = sqrt(a/scale) * scale
-    // We need sqrt(1 + (r/scale)²) * scale = fpsqrt(val, scale)
-    // where val/scale = 1 + (r/scale)² = (scale² + r²)/scale²
-    // so val = (scale² + r²) / scale
+    // val/scale = 1 + (r/scale)² = (scale² + r²)/scale², so val = (scale² + r²) >> bits
     const r2 = r * r;
-    const val = (scale * scale + r2) / scale;
-    const sqrtVal = fpsqrt(val, scale); // sqrt(1 + t²) * scale
-    r = (r * scale) / (scale + sqrtVal);
+    const val = ((scale << B) + r2) >> B;
+    const sqrtVal = fpsqrt(val, bits); // sqrt(1 + t²) * scale
+    r = (r << B) / (scale + sqrtVal);
     halvings++;
   }
 
   // Taylor series: atan(t) = t - t³/3 + t⁵/5 - t⁷/7 + ...
   // In fixed-point: result = r - r³/(3·scale²) + r⁵/(5·scale⁴) - ...
-  // Incremental: term_n = term_{n-2} * (-r²) / scale²  and divide by odd number
+  // Incremental: term_n = term_{n-2} * (-r²) >> 2·bits  and divide by odd number
   let sum = r;
   let term = r;
   const r2 = r * r;
-  const scale2 = scale * scale; // hoisted: saves one bigint multiply per term
+  const B2 = 2n * B; // dividing by scale² is a >> (2·bits) shift
 
   for (let n = 3; ; n += 2) {
-    term = (term * r2) / scale2;
+    term = (term * r2) >> B2;
     if (term === 0n) break;
     // Late division by n: the per-term truncation error is < 1 ULP each,
     // so total error is bounded by ~nTerms/2 ULP — well within the 15 guard digits.

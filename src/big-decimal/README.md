@@ -54,11 +54,15 @@ precision and round the final result to the target precision.
 
 ### Fixed-point kernel
 
-All transcendental functions work in a **fixed-point bigint** representation:
-`fp / scale` where `scale = 10^p`. This avoids repeated normalization and
-`BigDecimal` object allocation in inner loops. The `toFixedPoint` /
-`fromFixedPoint` helpers in `transcendentals.ts` convert between the two
-representations.
+All transcendental functions work in a **base-2 fixed-point bigint**
+representation: `fp / 2^bits`. Scaling by the radix is then a bit-shift
+(`>> bits` / `<< bits`) rather than a division by `10^p`, which is the dominant
+cost in the Taylor/Newton inner loops — 2–4× faster at identical accuracy (see
+the kernel header in `utils.ts` and ROADMAP item 17.1). The fixed-point grid
+also avoids repeated normalization and `BigDecimal` object allocation in inner
+loops. The `toFixedPoint` / `fromFixedPoint` helpers in `transcendentals.ts`
+convert decimal↔binary once at the boundary; the user-facing
+`significand · 10^exponent` representation is unchanged.
 
 ### Square root
 
@@ -120,7 +124,12 @@ Built on `exp`:
 
 ## Performance vs Decimal.js
 
-Benchmarked at precisions 50, 100, and 500. Representative speedups:
+Benchmarked at precisions 50, 100, and 500. Representative speedups.
+
+> Note: these numbers predate the base-2 kernel (ROADMAP 17.1, June 2026). The
+> transcendental rows (`sqrt`, `cbrt`, `exp`, `ln`, `sin`, `cos`, `atan`,
+> `asin`) are now an additional ~2–4× faster than shown; the arithmetic rows
+> (`add`/`sub`/`mul`/`div`/`eq`) are unchanged.
 
 | Operation | p=50 | p=100 | p=500 |
 | --------- | ---- | ----- | ----- |
@@ -154,6 +163,14 @@ every tested precision (verified via cross-validation tests).
   constant).
 
 ## Potential Future Improvements
+
+> Tracked as ROADMAP item 17 (`../../ROADMAP.md`), with mpmath-derived lessons
+> ranked by ROI. **Done 2026-06-13:** the **base-2 internal kernel** (scale
+> `2^bits` instead of `10^p`, turning the per-term `/scale` division into a
+> bit-shift) is now the implementation — **2–4× faster** for the transcendentals
+> at identical accuracy (0 ULP difference), end-to-end including decimal↔binary
+> conversion, with the win growing with precision. A/B record:
+> `benchmarks/big-decimal/kernel-base2-experiment.ts`. The items below remain.
 
 - **AGM-based logarithm**: The current Newton iteration calls `fpexp` at each
   step, making `ln` the slowest transcendental. An arithmetic-geometric mean

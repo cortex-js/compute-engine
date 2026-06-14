@@ -8,6 +8,7 @@
 import { BigDecimal, fromRaw } from './big-decimal';
 import {
   bigintAbs,
+  bitLength,
   fpmul,
   fpdiv,
   fpsqrt,
@@ -76,76 +77,84 @@ declare module './big-decimal' {
 
 // ---------- Helpers: BigDecimal <-> fixed-point ----------
 
+// The internal fixed-point kernel works on a *binary* grid (scale = 2^bits)
+// because rescaling by the radix is then a bit-shift rather than a division —
+// 2–4× faster than a base-10 grid at identical accuracy (see
+// `utils.ts` header and ROADMAP item 17.1). The decimal<->binary conversion
+// is paid once here, at the boundary; the cost is dominated by the kernel's
+// inner-loop savings (validated end-to-end in the kernel benchmark).
+const LOG2_10 = Math.log2(10); // ≈ 3.321928
+const LOG10_2 = Math.log10(2); // ≈ 0.30103
+/** Extra binary guard beyond the requested decimal working precision. */
+const GUARD_BITS = 16;
+
 /**
- * Convert a BigDecimal to a fixed-point bigint at the given precision.
+ * Convert a BigDecimal to a base-2 fixed-point bigint.
  *
- * Returns [fp, scale] where fp/scale represents the same value.
- * `precision` is the number of significant decimal digits in the
- * fixed-point representation.
+ * Returns [fp, bits] where fp / 2^bits represents the same value.
+ * `precision` is the requested number of significant *decimal* digits; the
+ * binary grid is sized to hold them with a small guard.
  */
-function toFixedPoint(x: BigDecimal, precision: number): [bigint, bigint] {
-  const scale = pow10(precision);
-  // value = significand * 10^exponent
-  // fixed-point = value * scale = significand * 10^(exponent + precision)
-  const exp = x.exponent + precision;
-  if (exp >= 0) {
-    return [x.significand * pow10(exp), scale];
-  }
-  // exp < 0: shift right (loses digits beyond the precision window)
-  return [x.significand / pow10(-exp), scale];
+function toFixedPoint(x: BigDecimal, precision: number): [bigint, number] {
+  const bits = Math.ceil(precision * LOG2_10) + GUARD_BITS;
+  const B = BigInt(bits);
+  // value · 2^bits = significand · 10^exponent · 2^bits
+  if (x.exponent >= 0)
+    return [(x.significand * pow10(x.exponent)) << B, bits];
+  // exponent < 0: divide by 10^(-exponent) after shifting in the binary scale
+  // (loses digits below the precision window, as before).
+  return [(x.significand << B) / pow10(-x.exponent), bits];
 }
 
 /**
- * Convert a fixed-point bigint back to a BigDecimal, rounding to
- * `targetPrecision` significant digits.
- *
- * `fp / scale` is the value; we express it as a BigDecimal.
+ * Convert a base-2 fixed-point bigint (value = fp / 2^bits) back to a
+ * BigDecimal, rounding to `targetPrecision` significant decimal digits.
  */
 function fromFixedPoint(
   fp: bigint,
-  scale: bigint,
+  bits: number,
   targetPrecision: number
 ): BigDecimal {
   if (fp === 0n) return BigDecimal.ZERO;
 
   const negative = fp < 0n;
-  let absFp = negative ? -fp : fp;
+  const absFp = negative ? -fp : fp;
+  const B = BigInt(bits);
 
-  // Determine how many digits absFp has
-  const fpDigits = bigintDigits(absFp);
+  // Step 1: render value = absFp / 2^bits as an integer N ≈ value · 10^P,
+  // carrying a few more than targetPrecision significant digits. The decimal
+  // exponent is estimated from the bit length (±1 is absorbed by the
+  // significant-digit rounding in step 2, which has ≥4 guard digits).
+  const valueBits = bitLength(absFp) - bits; // ≈ log2(value)
+  const decExp = Math.floor(valueBits * LOG10_2); // ≈ floor(log10 value)
+  const P = targetPrecision + 4 - decExp; // decimal places to keep
 
-  // We want targetPrecision significant digits.
-  // The value is absFp / scale = absFp * 10^(-scaleDigits + 1)
-  // where scaleDigits is the number of digits of scale.
-  //
-  // Strategy: round absFp to targetPrecision significant digits,
-  // then compute the exponent.
+  let N: bigint;
+  let valueExp: number; // value ≈ N · 10^valueExp
+  if (P >= 0) {
+    const num = absFp * pow10(P);
+    N = (num + (1n << (B - 1n))) >> B; // round(num / 2^bits)
+    valueExp = -P;
+  } else {
+    const denom = pow10(-P) << B; // 2^bits · 10^(-P)
+    N = (absFp + denom / 2n) / denom; // round(absFp / denom)
+    valueExp = -P;
+  }
+  if (N === 0n) return BigDecimal.ZERO;
 
-  if (fpDigits > targetPrecision) {
-    // Need to round: remove (fpDigits - targetPrecision) trailing digits
-    const drop = fpDigits - targetPrecision;
+  // Step 2: round N to targetPrecision significant digits.
+  const nDigits = bigintDigits(N);
+  if (nDigits > targetPrecision) {
+    const drop = nDigits - targetPrecision;
     const divisor = pow10(drop);
     const half = divisor / 2n;
-    const remainder = absFp % divisor;
-    absFp = absFp / divisor;
-    if (remainder >= half) absFp += 1n;
-
-    // The value is now absFp * 10^drop / scale
-    // = absFp * 10^(drop - scaleExp)
-    // where scale = 10^scaleExp
-    const scaleExp = bigintDigits(scale) - 1; // 10^N has N+1 digits, so exponent = N
-    const resultExp = drop - scaleExp;
-
-    const sig = negative ? -absFp : absFp;
-    return fromRaw(sig, resultExp);
+    const remainder = N % divisor;
+    N = N / divisor;
+    if (remainder >= half) N += 1n;
+    valueExp += drop;
   }
 
-  // fpDigits <= targetPrecision: no rounding needed
-  const scaleExp = bigintDigits(scale) - 1;
-  const resultExp = -scaleExp;
-
-  const sig = negative ? -absFp : absFp;
-  return fromRaw(sig, resultExp);
+  return fromRaw(negative ? -N : N, valueExp);
 }
 
 // ---------- Range-reduction helpers ----------
@@ -177,13 +186,14 @@ const MAX_SAFE_EXPONENT = BigInt(Number.MAX_SAFE_INTEGER);
 // Cache its fixed-point value, keyed by the scale (working precision), so the
 // Newton iteration in `fpln` runs at most once per precision change.
 let _ln10Fp: bigint | null = null;
-let _ln10Scale: bigint | null = null;
-function ln10Fixed(scale: bigint): bigint {
-  if (_ln10Scale !== scale) {
-    // ln(10·scale / scale) · scale = ln(10) · scale. 10 is O(1), so this is
-    // well-conditioned and never hits the underflow path it exists to fix.
-    _ln10Fp = fpln(10n * scale, scale);
-    _ln10Scale = scale;
+let _ln10Bits: number | null = null;
+function ln10Fixed(bits: number): bigint {
+  if (_ln10Bits !== bits) {
+    // ln(10) · 2^bits, computed from the fixed-point value 10·2^bits = 10 << bits.
+    // 10 is O(1), so this is well-conditioned and never hits the underflow path
+    // it exists to fix.
+    _ln10Fp = fpln(10n << BigInt(bits), bits);
+    _ln10Bits = bits;
   }
   return _ln10Fp!;
 }
@@ -217,13 +227,13 @@ BigDecimal.prototype.sqrt = function (): BigDecimal {
   const k = Math.floor(e / 2);
   const m = fromRaw(this.significand, this.exponent - 2 * k); // m ∈ [1, 100)
 
-  const [fp, scale] = toFixedPoint(m, workingPrec);
+  const [fp, bits] = toFixedPoint(m, workingPrec);
 
   // Compute fixed-point sqrt
-  const sqrtFp = fpsqrt(fp, scale);
+  const sqrtFp = fpsqrt(fp, bits);
 
   // Reattach the decimal exponent: sqrt(m)·10^k.
-  const root = fromFixedPoint(sqrtFp, scale, targetPrec);
+  const root = fromFixedPoint(sqrtFp, bits, targetPrec);
   return fromRaw(root.significand, root.exponent + k);
 };
 
@@ -257,15 +267,13 @@ BigDecimal.prototype.cbrt = function (): BigDecimal {
   const k = Math.floor(e / 3);
   const m = fromRaw(this.significand, this.exponent - 3 * k); // m ∈ [1, 1000)
 
-  const [fp, scale] = toFixedPoint(m, workingPrec);
+  const [fp, bits] = toFixedPoint(m, workingPrec);
 
   // Newton iteration for cube root in fixed-point:
-  // We want cbrt(v) where v = fp / scale.
-  // Let y = cbrt(v) * scale (the fixed-point result).
-  // Then y^3 = v^3 * scale^3 = (fp/scale)^3 * scale^3 = fp^3 * scale^0... no.
+  // We want cbrt(v) where v = fp / scale (scale = 2^bits).
   //
-  // Better approach: work with the recurrence directly.
-  // x_{n+1} = (2 * x + fp * scale^2 / x^2) / 3
+  // Work with the recurrence directly:
+  // x_{n+1} = (2 * x + C / x^2) / 3
   //
   // where x represents cbrt(fp/scale) * scale.
   // Derivation:
@@ -275,25 +283,26 @@ BigDecimal.prototype.cbrt = function (): BigDecimal {
   //   Newton on f(y) = y^3 - fp*scale^2:
   //   y_{n+1} = y - f(y)/f'(y) = y - (y^3 - C) / (3*y^2)
   //           = (2*y + C / y^2) / 3
-  //   where C = fp * scale^2
+  //   where C = fp * scale^2 = fp << (2·bits)
 
-  const C = fp * scale * scale;
+  const C = fp << BigInt(2 * bits);
 
-  // Seed from floating-point approximation (m ∈ [1, 1000) is always finite)
+  // Seed from floating-point approximation (m ∈ [1, 1000) is always finite).
+  // Number(2^bits) overflows beyond ~1023 bits, so use the bit-based seed there.
   let x: bigint;
   const numVal = m.toNumber();
-  const scaleNum = Number(scale);
-  if (Number.isFinite(numVal) && numVal > 0 && Number.isFinite(scaleNum)) {
+  if (bits <= 1000 && Number.isFinite(numVal) && numVal > 0) {
+    const scaleNum = Number(1n << BigInt(bits));
     const approx = Math.cbrt(numVal);
     if (Number.isFinite(approx) && approx > 0) {
       // Convert to fixed-point
       x = BigInt(Math.floor(approx * scaleNum));
       if (x === 0n) x = 1n;
     } else {
-      x = cbrtSeed(fp, scale);
+      x = cbrtSeed(C);
     }
   } else {
-    x = cbrtSeed(fp, scale);
+    x = cbrtSeed(C);
   }
 
   // Newton iteration: x_{n+1} = (2*x + C / x^2) / 3
@@ -318,7 +327,7 @@ BigDecimal.prototype.cbrt = function (): BigDecimal {
   }
 
   // Reattach the decimal exponent: cbrt(m)·10^k.
-  const root = fromFixedPoint(x, scale, targetPrec);
+  const root = fromFixedPoint(x, bits, targetPrec);
   return fromRaw(root.significand, root.exponent + k);
 };
 
@@ -369,8 +378,8 @@ BigDecimal.prototype.exp = function (): BigDecimal {
   const magnitude = Math.max(0, this.exponent + bigintDigits(absSig));
   const workingPrec = targetPrec + 20 + magnitude;
 
-  const [xFp, scale] = toFixedPoint(this, workingPrec);
-  const l10 = ln10Fixed(scale);
+  const [xFp, bits] = toFixedPoint(this, workingPrec);
+  const l10 = ln10Fixed(bits);
 
   // k = floor(x / ln(10)); r = x − k·ln(10) ∈ [0, ln(10)).
   let k = xFp / l10;
@@ -388,7 +397,7 @@ BigDecimal.prototype.exp = function (): BigDecimal {
   if (k > MAX_SAFE_EXPONENT || k < -MAX_SAFE_EXPONENT)
     return k > 0n ? BigDecimal.POSITIVE_INFINITY : BigDecimal.ZERO;
 
-  const expR = fromFixedPoint(fpexp(rFp, scale), scale, targetPrec);
+  const expR = fromFixedPoint(fpexp(rFp, bits), bits, targetPrec);
 
   // Multiply by 10^k by shifting the decimal exponent.
   const newExp = expR.exponent + Number(k);
@@ -433,12 +442,12 @@ BigDecimal.prototype.ln = function (): BigDecimal {
   const eDigits = Math.abs(e).toString().length;
   const workingPrec = targetPrec + 20 + eDigits;
 
-  const [mFp, scale] = toFixedPoint(m, workingPrec);
-  const l10 = ln10Fixed(scale);
+  const [mFp, bits] = toFixedPoint(m, workingPrec);
+  const l10 = ln10Fixed(bits);
 
   // ln(x)·scale = ln(m)·scale + e·ln(10)·scale (exact bigint arithmetic).
-  const resultFp = fpln(mFp, scale) + BigInt(e) * l10;
-  return fromFixedPoint(resultFp, scale, targetPrec);
+  const resultFp = fpln(mFp, bits) + BigInt(e) * l10;
+  return fromFixedPoint(resultFp, bits, targetPrec);
 };
 
 // ---------- log(base) ----------
@@ -493,9 +502,9 @@ BigDecimal.prototype.sin = function (): BigDecimal {
   // beyond that the reduction would be silently wrong — report NaN instead.
   if (e > PI_DIGITS.length - workingPrec - 30) return BigDecimal.NAN;
 
-  const [fp, scale] = toFixedPoint(this, workingPrec);
-  const [sinFp] = fpsincos(fp, scale);
-  return fromFixedPoint(sinFp, scale, targetPrec);
+  const [fp, bits] = toFixedPoint(this, workingPrec);
+  const [sinFp] = fpsincos(fp, bits);
+  return fromFixedPoint(sinFp, bits, targetPrec);
 };
 
 // ---------- cos ----------
@@ -515,9 +524,9 @@ BigDecimal.prototype.cos = function (): BigDecimal {
   const e = decimalExponent(this);
   if (e > PI_DIGITS.length - workingPrec - 30) return BigDecimal.NAN;
 
-  const [fp, scale] = toFixedPoint(this, workingPrec);
-  const [, cosFp] = fpsincos(fp, scale);
-  return fromFixedPoint(cosFp, scale, targetPrec);
+  const [fp, bits] = toFixedPoint(this, workingPrec);
+  const [, cosFp] = fpsincos(fp, bits);
+  return fromFixedPoint(cosFp, bits, targetPrec);
 };
 
 // ---------- tan ----------
@@ -538,8 +547,8 @@ BigDecimal.prototype.tan = function (): BigDecimal {
   const workingPrec = targetPrec + 15 + (e < 0 ? -e : 0);
   if (e > PI_DIGITS.length - workingPrec - 30) return BigDecimal.NAN;
 
-  const [fp, scale] = toFixedPoint(this, workingPrec);
-  const [sinFp, cosFp] = fpsincos(fp, scale);
+  const [fp, bits] = toFixedPoint(this, workingPrec);
+  const [sinFp, cosFp] = fpsincos(fp, bits);
 
   // tan = sin / cos
   if (cosFp === 0n) {
@@ -549,9 +558,9 @@ BigDecimal.prototype.tan = function (): BigDecimal {
       : BigDecimal.NEGATIVE_INFINITY;
   }
 
-  // Fixed-point division: (sinFp * scale) / cosFp
-  const tanFp = (sinFp * scale) / cosFp;
-  return fromFixedPoint(tanFp, scale, targetPrec);
+  // Fixed-point division: (sinFp << bits) / cosFp
+  const tanFp = (sinFp << BigInt(bits)) / cosFp;
+  return fromFixedPoint(tanFp, bits, targetPrec);
 };
 
 // ---------- atan ----------
@@ -578,9 +587,9 @@ BigDecimal.prototype.atan = function (): BigDecimal {
   // (Huge arguments are fine: fpatan reduces via atan(x) = π/2 − atan(1/x).)
   const workingPrec = targetPrec + 15 + (e < 0 ? -e : 0);
 
-  const [fp, scale] = toFixedPoint(this, workingPrec);
-  const atanFp = fpatan(fp, scale);
-  return fromFixedPoint(atanFp, scale, targetPrec);
+  const [fp, bits] = toFixedPoint(this, workingPrec);
+  const atanFp = fpatan(fp, bits);
+  return fromFixedPoint(atanFp, bits, targetPrec);
 };
 
 // ---------- asin ----------
@@ -614,24 +623,25 @@ BigDecimal.prototype.asin = function (): BigDecimal {
   // −e leading digits crossing the bridge: compensate.
   const workingPrec = targetPrec + 20 + (e < 0 ? -e : 0);
 
-  const [xFp, scale] = toFixedPoint(this, workingPrec);
+  const [xFp, bits] = toFixedPoint(this, workingPrec);
+  const scale = 1n << BigInt(bits); // 1.0 on the binary grid
 
   // x² in fixed-point
-  const x2 = fpmul(xFp, xFp, scale);
+  const x2 = fpmul(xFp, xFp, bits);
 
   // 1 - x² in fixed-point
   const oneMinusX2 = scale - x2;
 
   // sqrt(1 - x²) in fixed-point
-  const sqrtVal = fpsqrt(oneMinusX2, scale);
+  const sqrtVal = fpsqrt(oneMinusX2, bits);
 
   // x / sqrt(1 - x²) in fixed-point
-  const ratio = fpdiv(xFp, sqrtVal, scale);
+  const ratio = fpdiv(xFp, sqrtVal, bits);
 
   // atan(ratio) in fixed-point
-  const result = fpatan(ratio, scale);
+  const result = fpatan(ratio, bits);
 
-  return fromFixedPoint(result, scale, targetPrec);
+  return fromFixedPoint(result, bits, targetPrec);
 };
 
 // ---------- acos ----------
@@ -869,32 +879,26 @@ BigDecimal.prototype.tanh = function (): BigDecimal {
 // ---------- Internal helpers ----------
 
 /**
- * Digit-based seed for cbrt when Number(scale) overflows to Infinity.
+ * Bit-based seed for cbrt: approximate the integer cube root of `C`
+ * (= fp · scale², the Newton target) when Number(C) overflows to Infinity.
  *
- * We want cbrt(fp/scale) * scale = cbrt(fp * scale²).
- * Extract ~15 leading digits from fp and scale, compute in float64,
- * then scale back to the correct magnitude.
+ * Extract the top ~51 bits of C, compute cbrt in float64, then scale the
+ * result back by 2^(shift/3).
  */
-function cbrtSeed(fp: bigint, scale: bigint): bigint {
-  const LEAD = 15;
-
-  const digFp = bigintDigits(fp);
-  const shiftFp = Math.max(0, digFp - LEAD);
-  const leadFp = Number(shiftFp > 0 ? fp / pow10(shiftFp) : fp);
-
-  const digS = bigintDigits(scale);
-  const shiftS = Math.max(0, digS - LEAD);
-  const leadS = Number(shiftS > 0 ? scale / pow10(shiftS) : scale);
-
-  // cbrt(fp * scale²) ≈ cbrt(leadFp * leadS²) * 10^((shiftFp + 2·shiftS) / 3)
-  const totalShift = shiftFp + 2 * shiftS;
-  const thirdShift = Math.floor(totalShift / 3);
-  const remainder = totalShift % 3;
-
-  let floatSeed = Math.cbrt(leadFp * leadS * leadS);
-  if (remainder === 1) floatSeed *= 2.154434690031882; // cbrt(10)
-  if (remainder === 2) floatSeed *= 4.641588833612779; // cbrt(100)
-
-  const seed = BigInt(Math.round(floatSeed)) * pow10(thirdShift);
+function cbrtSeed(C: bigint): bigint {
+  const bl = bitLength(C);
+  if (bl <= 1023) {
+    const s = Math.cbrt(Number(C));
+    if (Number.isFinite(s) && s >= 1) return BigInt(Math.floor(s));
+  }
+  // C ≈ lead · 2^shift with lead ~51-bit. cbrt(C) ≈ cbrt(lead) · 2^(shift/3).
+  const shift = bl - 51; // > 0 here
+  const lead = Number(C >> BigInt(shift));
+  let fs = Math.cbrt(lead);
+  const third = Math.floor(shift / 3);
+  const remainder = shift % 3;
+  if (remainder === 1) fs *= 1.2599210498948732; // 2^(1/3)
+  if (remainder === 2) fs *= 1.5874010519681994; // 2^(2/3)
+  const seed = BigInt(Math.round(fs)) << BigInt(third);
   return seed > 0n ? seed : 1n;
 }

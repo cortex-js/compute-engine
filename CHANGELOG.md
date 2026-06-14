@@ -101,6 +101,15 @@
   (`GCD(x, 6)` stays unevaluated); use `PolynomialGCD(p, q, x)` for the explicit
   coprime → 1 answer. Multivariate GCD is not yet supported.
 
+- **Faster arbitrary-precision transcendentals (`BigDecimal`).** The internal
+  fixed-point kernel that powers `sqrt`, `cbrt`, `exp`, `ln`, `sin`, `cos`,
+  `tan`, `atan`, `asin`, and the hyperbolic functions now works on a binary
+  grid (`2^bits`) instead of a decimal one (`10^p`), so the per-term rescaling
+  in the Taylor/Newton inner loops is a bit-shift rather than a full-width
+  division. This makes those functions **~2–4× faster** at high precision (the
+  speedup grows with precision) with bit-identical results — no change to
+  accuracy or to the public `significand · 10^exponent` representation.
+
 ### Bug Fixes
 
 - **`∫√x dx` and `∫1/√x dx` returned unevaluated.** `√x` and `x^(−1/2)`
