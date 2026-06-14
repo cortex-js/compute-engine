@@ -756,9 +756,28 @@ all correct to the full requested precision (verified to 100 digits and via
 exact identities — reflection, `ζ(2)=π²/6`, `ζ(−1)=−1/12`). Blast radius: 2
 precision-comparison snapshots (Gamma now hits full precision; both updated).
 Tests: `special-functions.test.ts` "B1: special functions honor requested
-precision". **Residual:** the `Γ` *speed* gap (~10× slower than SymPy per call)
-is unaddressed — a separate performance item (cf. item 7's pole-aware `N()` and
-item 17.13's `.N()` dispatch overhead), not a precision bug.
+precision".
+
+**`Γ` speed (the B1 residual) — ✅ fixed (2026-06-14), ~11–12× at p=300.**
+Profiling showed the gap was **kernel-bound**, not dispatch overhead (unlike
+`exp`/item 17.13): `bigGamma` at p=300 was ~1.9 s. Two root causes in the
+Stirling-with-shift `gammalnCore` (and the shared `digamma`/`trigamma`/
+`polygamma` kernels):
+- **Shift undershoot.** The asymptotic Stirling series' smallest term (≈e^{−2πw}
+  near k≈πw) sat *right at* the target tolerance when shifting only to
+  `w ≈ 0.37·p`, so the series never converged early and ran its full ≈π·w terms,
+  each an expensive division by a large Bernoulli rational. Shifting to `w ≈ p`
+  drops the floor far below tolerance → the tol break fires after ≈0.4·p terms (a
+  measured 3–5× fewer), and `maxTerms` (the Bernoulli table size) was decoupled
+  from `π·w` down to ≈0.6·p (≈8× fewer Bernoulli numbers computed).
+- **Redundant logarithms.** The shift loop summed `m ≈ 0.37·p` separate `ln(z+i)`
+  calls; replaced by one `ln(∏(z+i))` (m cheap mults + 1 log).
+
+Result: `Γ(1/3)`, `ψ`, `ψ₁`, `ψ₂` at p=300 all ~1.8 s → ~0.15 s, full precision
+preserved (verified to 1000 digits via reflection / `ζ(2)` / `−γ` identities;
+zero snapshot movement). **Remaining:** still ~O(p³) at very high precision
+(p=1000 ≈ 8.5 s) — a binary-splitting / rectangular-splitting series evaluation
+would help there, but that is a larger kernel rewrite.
 
 ### B2. Symbolic (indefinite) integration coverage gaps — ✅ resolved (2026-06-13)
 
