@@ -7,7 +7,11 @@ import type {
   Rule,
 } from '../global-types';
 import { isNumber, isFunction, isSymbol, numericValue } from './type-guards';
-import { polynomialDegree, getPolynomialCoefficients } from './polynomials';
+import {
+  polynomialDegree,
+  getPolynomialCoefficients,
+  fromCoefficients,
+} from './polynomials';
 import { asSmallInteger } from './numerics';
 import { realPolynomialRoots } from '../numerics/polynomial-roots';
 
@@ -1391,6 +1395,114 @@ function solveByRationalPowerSubstitution(
 }
 
 /**
+ * Exact reduction of a "sparse" polynomial whose x-exponents share a common
+ * factor g > 1 — e.g. a biquadratic `x⁴ + bx² + c` (g = 2) — via the
+ * substitution `u = xᵍ`. Solves the reduced polynomial (degree maxExp/g)
+ * exactly, then takes the **real** g-th roots, yielding exact radical roots
+ * where the numeric fallback only approximates: `x⁴ + x² − 1 → ±√((√5−1)/2)`.
+ *
+ * Only fires when the reduced degree is ≥ 2, so it never recurses on a pure
+ * power `xᵍ − c` (already solved exactly by the `a·xⁿ + b` rule). Returns `null`
+ * when `expr` is not a polynomial in x, or the exponent gcd is 1, or no real
+ * root results.
+ */
+function solveByPowerGcdSubstitution(
+  expr: Expression,
+  x: string
+): ReadonlyArray<Expression> | null {
+  const ce = expr.engine;
+  const coeffs = getPolynomialCoefficients(expr, x); // ascending [c₀, c₁, …]
+  if (coeffs === null) return null;
+
+  const nonzeroExps: number[] = [];
+  for (let i = 1; i < coeffs.length; i++)
+    if (!coeffs[i].isSame(0)) nonzeroExps.push(i);
+  if (nonzeroExps.length === 0) return null;
+
+  let g = nonzeroExps[0];
+  for (const e of nonzeroExps) g = gcd2(g, e);
+  if (g <= 1) return null;
+
+  const maxExp = nonzeroExps[nonzeroExps.length - 1];
+  if (maxExp / g < 2) return null; // reduced degree < 2 → pure power; skip
+
+  // Reduced polynomial Q(u) with Q[k] = coeffs[k·g] (u = xᵍ).
+  const uName = ['u', 't', 'w', 's', 'v', 'y', 'z'].find(
+    (n) => n !== x && !expr.unknowns.includes(n)
+  );
+  if (uName === undefined) return null;
+  const reduced: Expression[] = [];
+  for (let k = 0; k * g < coeffs.length; k++) reduced.push(coeffs[k * g]);
+
+  const uRoots = findUnivariateRoots(fromCoefficients(reduced, uName), uName);
+  if (uRoots.length === 0) return null;
+
+  const xRoots: Expression[] = [];
+  for (const uRoot of uRoots) {
+    // Solve xᵍ = uRoot, keeping only the real branches (matching the engine's
+    // real-only convention for higher-degree polynomial roots).
+    const branch = findUnivariateRoots(ce.symbol(x).pow(g).sub(uRoot), x);
+    for (const r of branch) if (Math.abs(r.N().im ?? 0) < 1e-12) xRoots.push(r);
+  }
+  return xRoots.length > 0 ? xRoots : null;
+}
+
+/** Parse a term as ±cᵉ: returns `[sign, base, exp]` when the term is a power,
+ * optionally negated or carrying a ±1 coefficient; otherwise `null`. */
+function asSignedPower(
+  term: Expression
+): [number, Expression, Expression] | null {
+  if (isFunction(term, 'Power')) return [1, term.op1, term.op2];
+  if (isFunction(term, 'Negate')) {
+    const inner = asSignedPower(term.op1);
+    return inner ? [-inner[0], inner[1], inner[2]] : null;
+  }
+  if (isFunction(term, 'Multiply')) {
+    let sign = 1;
+    let base: Expression | undefined;
+    let exp: Expression | undefined;
+    for (const f of term.ops!) {
+      if (isFunction(f, 'Power') && base === undefined) {
+        base = f.op1;
+        exp = f.op2;
+      } else if (f.isSame(-1)) sign = -sign;
+      else if (f.isSame(1)) {
+        /* unit coefficient: ignore */
+      } else return null; // a non-±1 coefficient or extra factor
+    }
+    return base !== undefined && exp !== undefined ? [sign, base, exp] : null;
+  }
+  return null;
+}
+
+/**
+ * Reduce a same-base power difference `cᵃ − cᵇ = 0` to `a − b = 0`: the
+ * exponents must be equal because `x ↦ cˣ` is injective for a positive constant
+ * base `c ≠ 1`. This complements the `Equal`-form peeling for the `f = 0` input
+ * form the `Solve` operator / audit path produces (e.g. `e^{2−x²} − e^{−x}`,
+ * an `Add` rather than an `Equal`).
+ *
+ * Returns the reduced expression, or `null` if `expr` is not a two-term
+ * difference of powers of the same valid base.
+ */
+function reduceSameBasePower(
+  expr: Expression,
+  variable: string
+): Expression | null {
+  if (!isFunction(expr, 'Add') || expr.nops !== 2) return null;
+  const p0 = asSignedPower(expr.op1);
+  const p1 = asSignedPower(expr.op2);
+  if (p0 === null || p1 === null) return null;
+  const [s0, c0, e0] = p0;
+  const [s1, c1, e1] = p1;
+  if (s0 === s1) return null; // need a genuine difference cᵃ − cᵇ
+  if (!c0.isSame(c1)) return null;
+  if (c0.has(variable) || c0.isPositive !== true || c0.isSame(1)) return null;
+  const [plusExp, minusExp] = s0 > 0 ? [e0, e1] : [e1, e0];
+  return plusExp.sub(minusExp);
+}
+
+/**
  * MathJsonExpression is a function of a single variable (`x`) or an Equality
  *
  * Return the roots of that variable
@@ -1459,6 +1571,10 @@ export function findUnivariateRoots(
     originalExpr = expr;
     expr = expand(expr).simplify();
   }
+
+  // Same-base power difference cᵃ − cᵇ = 0 ⟹ a − b = 0 (handles the f = 0 input
+  // form, complementing the Equal-form peeling above).
+  expr = reduceSameBasePower(expr, x) ?? expr;
 
   // Clear denominators to enable matching of expressions like F - 3x/h = 0
   expr = clearDenominators(expr);
@@ -1562,13 +1678,17 @@ export function findUnivariateRoots(
         // Exact rational roots first (rational-root theorem)…
         const rationalRoots = findRationalRoots(originalExpr, x, ce);
         result = [...rationalRoots];
-        // …then a numeric Durand–Kerner fallback for the general case (a cubic
-        // or quartic with irrational roots, e.g. `3x³−18x²+33x−19`, otherwise
-        // returns nothing). Real roots not already found exactly are added as
-        // numeric approximations; `validateRoots` discards any spurious ones.
+        // For the remaining (irrational) roots, prefer an exact reduction of a
+        // sparse polynomial (gcd of exponents > 1, e.g. a biquadratic via
+        // u = x²) over the numeric Durand–Kerner fallback (a general cubic or
+        // quartic, e.g. `3x³−18x²+33x−19`). Real roots not already found are
+        // added; `validateRoots` discards any spurious ones.
         if (rationalRoots.length < deg) {
-          for (const nr of numericRealRoots(originalExpr, x, ce)) {
-            const v = nr.re;
+          const extra =
+            solveByPowerGcdSubstitution(originalExpr, x) ??
+            numericRealRoots(originalExpr, x, ce);
+          for (const nr of extra) {
+            const v = nr.N().re;
             if (
               !result.some(
                 (r) => Math.abs(r.N().re - v) <= 1e-7 * (1 + Math.abs(v))

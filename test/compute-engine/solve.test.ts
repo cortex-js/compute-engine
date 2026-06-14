@@ -817,6 +817,37 @@ describe('SOLVING CUBIC AND QUARTIC EQUATIONS', () => {
     expect(rs.map((r) => r.N().re).sort((a, b) => a - b)).toEqual([-2, -1, 1, 2]);
   });
 
+  test('biquadratic with irrational roots is exact: x⁴+x²−1', () => {
+    // u = x² → u²+u−1 = 0 → u = (√5−1)/2 (the negative u is complex, dropped).
+    // x = ±√((√5−1)/2), exact radicals rather than the numeric fallback.
+    const mj = ['Subtract', ['Add', ['Power', 'x', 4], ['Power', 'x', 2]], 1];
+    const rs = ce.box(mj).solve('x')!;
+    expect(rs.length).toBe(2);
+    // Exact radical form (contains a √), not a floating-point approximation.
+    expect(rs.some((r) => r.toString().includes('sqrt'))).toBe(true);
+    expect(
+      rs.map((r) => r.N().re).sort((a, b) => a - b)
+    ).toEqual([
+      -0.7861513777574233, 0.7861513777574233,
+    ]);
+    // Residual ≈ 0.
+    const e = ce.box(mj);
+    expect(
+      Math.max(...rs.map((r) => Math.abs(e.subs({ x: r }).N().re)))
+    ).toBeLessThan(1e-12);
+  });
+
+  test('higher gcd reduction is exact: x⁶+x³−1 via u=x³', () => {
+    const mj = ['Subtract', ['Add', ['Power', 'x', 6], ['Power', 'x', 3]], 1];
+    const rs = ce.box(mj).solve('x')!;
+    expect(rs.length).toBe(2); // two real roots, both exact cube roots
+    expect(rs.some((r) => r.toString().includes('root'))).toBe(true);
+    const e = ce.box(mj);
+    expect(
+      Math.max(...rs.map((r) => Math.abs(e.subs({ x: r }).N().re)))
+    ).toBeLessThan(1e-12);
+  });
+
   test('exact paths are preserved (no numeric leakage)', () => {
     // pure power → exact radical
     expect(
@@ -1475,6 +1506,20 @@ describe('TRANSCENDENTAL AND SUBSTITUTION EQUATIONS (B9)', () => {
     `);
   });
 
+  test('e^{2-x²} - e^{-x} = 0 (f=0 / Add form) → x = -1, 2', () => {
+    // The Solve-operator / audit path passes the subtracted f = 0 form (an Add),
+    // not an Equal; same-base reduction must fire here too.
+    const result = expr('e^{2-x^2}-e^{-x}')
+      .solve('x')
+      ?.map((x) => x.json);
+    expect(result).toMatchInlineSnapshot(`
+      [
+        -1,
+        2,
+      ]
+    `);
+  });
+
   // a·sin(x) + b·cos(x) = 0 → x = arctan(-b/a).
   test('sin(x) = cos(x) → π/4', () => {
     const result = expr('\\sin x = \\cos x')
@@ -1541,14 +1586,14 @@ describe('TRANSCENDENTAL AND SUBSTITUTION EQUATIONS (B9)', () => {
   });
 
   // Single square root with a non-constant coefficient: A·√R + B = 0 → A²R = B².
-  test('x = 1/√(x²+1) → x ≈ 0.786 (positive root only)', () => {
-    // x·√(x²+1) = 1 squares to x⁴+x²-1 = 0; the negative root is extraneous
-    // (the right-hand side is always positive).
-    const result = expr('x=\\frac{1}{\\sqrt{x^2+1}}')
-      .solve('x')
-      ?.map((x) => x.N().re);
+  test('x = 1/√(x²+1) → √((√5−1)/2) exact (positive root only)', () => {
+    // x·√(x²+1) = 1 squares to x⁴+x²-1 = 0, solved exactly via u = x²; the
+    // negative root is extraneous (the right-hand side is always positive).
+    const result = expr('x=\\frac{1}{\\sqrt{x^2+1}}').solve('x');
     expect(result?.length).toBe(1);
-    expect(result![0]).toBeCloseTo(0.7861513777574233, 8);
+    // Exact radical, not numeric.
+    expect(result![0].toString()).toContain('sqrt');
+    expect(result![0].N().re).toBeCloseTo(0.7861513777574233, 8);
   });
 
   test('x·√(x+1) = 2 → x ≈ 1.315', () => {

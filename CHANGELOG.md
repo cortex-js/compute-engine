@@ -68,6 +68,11 @@
   root with a non-constant coefficient is eliminated by squaring
   (`x = 1/√(x²+1)`).
 
+- **Biquadratic and sparse-power equations return exact roots.** Polynomials
+  whose exponents share a common factor — such as `x⁴ + x² − 1` — are solved by
+  substituting `u = x²` (or `x³`, …), so the roots are exact radicals
+  (`±√((√5−1)/2)`) instead of numeric approximations.
+
 - **`GCD` now finds common polynomial factors** for univariate and multivariate
   polynomials. Integer operands retain their existing behavior; use
   `PolynomialGCD()` when an explicit polynomial result of `1` is needed for

@@ -19,53 +19,53 @@ _None on this suite._
 
 | Case | CE | SymPy |
 |---|---|---|
-| x² − 1 | ✅ 0.54 | ✅ 0.52 |
-| x³ − 1 | ✅ 0.69 | ✅ 0.51 |
-| x⁴ − 1 | ✅ 0.77 | ✅ 0.55 |
-| x⁶ − 1 | ✅ 1.38 | ✅ 0.61 |
-| x⁷ − 1 | ✅ 0.64 | ✅ 0.55 |
+| x² − 1 | ✅ 0.59 | ✅ 0.53 |
+| x³ − 1 | ✅ 0.76 | ✅ 0.53 |
+| x⁴ − 1 | ✅ 0.97 | ✅ 0.56 |
+| x⁶ − 1 | ✅ 1.46 | ✅ 0.62 |
+| x⁷ − 1 | ✅ 0.70 | ✅ 0.58 |
 
 ### Polynomial GCD — CE 3/3, SymPy 3/3
 
 | Case | CE | SymPy |
 |---|---|---|
-| gcd((x+1)(x+2), (x+1)(x+3)) | ✅ 0.57 | ✅ 1.34 |
-| gcd(x²−1, x²+2x+1) | ✅ 0.45 | ✅ 0.92 |
-| gcd(x³−1, x²−1) | ✅ 0.11 | ✅ 0.79 |
+| gcd((x+1)(x+2), (x+1)(x+3)) | ✅ 0.64 | ✅ 1.24 |
+| gcd(x²−1, x²+2x+1) | ✅ 0.50 | ✅ 0.91 |
+| gcd(x³−1, x²−1) | ✅ 0.12 | ✅ 0.76 |
 
 ### Expansion — CE 3/3, SymPy 3/3
 
 | Case | CE | SymPy |
 |---|---|---|
-| (x+1)⁵ | ✅ 0.27 | ✅ 0.77 |
-| (x+2)⁴ | ✅ 0.20 | ✅ 0.72 |
-| (x−1)⁶ | ✅ 0.33 | ✅ 1.02 |
+| (x+1)⁵ | ✅ 0.30 | ✅ 0.78 |
+| (x+2)⁴ | ✅ 0.23 | ✅ 0.71 |
+| (x−1)⁶ | ✅ 0.39 | ✅ 1.00 |
 
 ### Simplification — CE 3/3, SymPy 3/3
 
 | Case | CE | SymPy |
 |---|---|---|
-| (x²−1)/(x−1) | ✅ 0.17 | ✅ 5.03 |
-| (x³−1)/(x−1) | ✅ 0.19 | ✅ 4.73 |
-| x^(−1/2) − 1/√x | ✅ 0.12 | ✅ 0.22 |
+| (x²−1)/(x−1) | ✅ 0.19 | ✅ 4.42 |
+| (x³−1)/(x−1) | ✅ 0.20 | ✅ 4.81 |
+| x^(−1/2) − 1/√x | ✅ 0.14 | ✅ 0.22 |
 
 ### Integration — CE 5/5, SymPy 5/5
 
 | Case | CE | SymPy |
 |---|---|---|
-| ∫ x² dx | ✅ 0.17 | ✅ 0.50 |
-| ∫ 1/(1+x²) dx | ✅ 0.14 | ✅ 9.53 |
-| ∫ 1/√x dx | ✅ 0.18 | ✅ 0.82 |
-| ∫ e^(−x²) dx | ✅ 0.51 | ✅ 25.7 |
-| ∫ 1/(x³+1) dx | ✅ 4.26 | ✅ 23.0 |
+| ∫ x² dx | ✅ 0.18 | ✅ 0.49 |
+| ∫ 1/(1+x²) dx | ✅ 0.15 | ✅ 9.85 |
+| ∫ 1/√x dx | ✅ 0.18 | ✅ 0.86 |
+| ∫ e^(−x²) dx | ✅ 0.57 | ✅ 26.5 |
+| ∫ 1/(x³+1) dx | ✅ 4.76 | ✅ 25.2 |
 
 ### Limits — CE 3/3, SymPy 3/3
 
 | Case | CE | SymPy |
 |---|---|---|
-| lim_{x→0} sin x / x | ✅ <sub>numeric</sub> 0.08 | ✅ 0.60 |
-| lim_{x→0} (1−cos x)/x² | ✅ <sub>numeric</sub> 0.10 | ✅ 9.05 |
-| lim_{x→0} (x²−1)/(x−1)... @1 | ✅ <sub>numeric</sub> 0.11 | ✅ 5.35 |
+| lim_{x→0} sin x / x | ✅ <sub>numeric</sub> 0.43 | ✅ 0.61 |
+| lim_{x→0} (1−cos x)/x² | ✅ <sub>numeric</sub> 0.94 | ✅ 10.1 |
+| lim_{x→0} (x²−1)/(x−1)... @1 | ✅ <sub>numeric</sub> 0.31 | ✅ 6.24 |
 
 ---
 _Context: CE now computes **multivariate** polynomial GCDs (any number of variables) via Brown's dense modular algorithm over ℤ_p, verified by exact division (ROADMAP B11). The 7-variable Fateman GCD benchmark (Symbolica 4 s / Mathematica 89 s / SymPy 61 min) is still out of reach: it exceeds the dense algorithm's complexity cap and defers (the benchmark uses degree-7 forms in 7 variables). Closing it needs sparse interpolation (Zippel) + multi-prime CRT. Reproduce: `python benchmarks/audit/gen.py && npx tsx benchmarks/audit/audit.ts`._

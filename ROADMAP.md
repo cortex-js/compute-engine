@@ -1130,8 +1130,10 @@ roots, so e.g. `x⁷ − 1` (CE returns `[1]`) counts as solved. The gaps:
   Of the 7 Wester trails, **4 now solve** (`solve.ts`):
   - ✅ `e^{2−x²} = e^{−x} → −1, 2` — **same-base power equality**: `cᵃ = cᵇ ⟺
     a = b` when `x ↦ cˣ` is injective (positive constant base ≠ 1). `eˣ` is
-    `Power(ExponentialE, ·)`, so this also covers `2ˣ = 2³ → 3`. Added to the
-    injective-peeling step.
+    `Power(ExponentialE, ·)`, so this also covers `2ˣ = 2³ → 3`. Handled in both
+    the `Equal` form (injective-peeling step) and the subtracted `f = 0` form
+    `cᵃ − cᵇ` (`reduceSameBasePower`), the latter being what the `Solve` operator
+    / audit path passes.
   - ✅ `sin x = cos x → π/4` — new `a·sin x + b·cos x = 0 → arctan(−b/a)` rule
     in `UNIVARIATE_ROOTS`.
   - ✅ `2√x + 3·⁴√x = 2 → 1/16` — **homogenization** heuristic
@@ -1139,13 +1141,20 @@ roots, so e.g. `x⁷ − 1` (CE returns `[1]`) counts as solved. The gaps:
     `x^{1/d}` is solved via `u = x^{1/d}`, then `x = uᵈ`, with extraneous roots
     dropped by validation. Generalizes to any sum of rational powers
     (`x²ᐟ³ + x¹ᐟ³ − 2`, `x − 5√x + 6`, …).
-  - ✅ `x = 1/√(x²+1) → ≈0.786` — **single-sqrt elimination**
+  - ✅ `x = 1/√(x²+1) → √((√5−1)/2)` (exact) — **single-sqrt elimination**
     (`solveSingleSqrtEquation`): an equation with one x-dependent square root and
     a non-constant coefficient, `A(x)·√R(x) + B(x) = 0`, is isolated and squared
     to `A²R − B² = 0` (generalizing `transformSqrtLinearEquation`, which only
     handles a bare `√f = g`). The negative root is dropped by validation.
-    Result is numeric for the irrational biquadratic (exact biquadratic-via-`u=x²`
-    is a possible follow-up).
+  - ✅ **Exact biquadratic / sparse-power reduction** (2026-06-14,
+    `solveByPowerGcdSubstitution`): a polynomial whose x-exponents share a common
+    factor `g > 1` is reduced via `u = xᵍ`, solved exactly, and the real g-th
+    roots taken — so `x⁴+x²−1 → ±√((√5−1)/2)` (and case 6 above) return exact
+    radicals instead of the numeric Durand–Kerner fallback. Generalizes beyond
+    biquadratics (`x⁶+x³−1` via `u=x³`). Gated to reduced degree ≥ 2 (so it never
+    recurses on a pure power `xᵍ−c`, already handled by the `a·xⁿ+b` rule) and to
+    real roots (matching the engine's real-only convention for ≥3-degree
+    polynomials; rational-root biquadratics like `x⁴−5x²+4` are unaffected).
   - **Still open (3):** `xˣ = x` (factors as `ln x·(x−1) = 0` after a log
     transform, but needs general transcendental factoring CE lacks — no `factor`
     for `x·ln x − ln x`), `sin x = tan x` (factor `sin x·(1 − sec x)`),
