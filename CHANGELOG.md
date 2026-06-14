@@ -140,6 +140,16 @@
   numeric partial-fraction path remains the fallback for denominators this does
   not cover.
 
+- **Exact partial fractions for ℚ-factorable rational denominators.** Rational
+  integrands whose denominator factors over ℚ into distinct linear and
+  irreducible-quadratic factors are now integrated exactly instead of leaking
+  float coefficients via the numeric fallback: `∫1/(x⁴−1)`, `∫x/(x⁴−1)` (was
+  unevaluated), `∫1/(x⁶−1)`, `∫1/((x−1)(x−2)(x²+1))`, etc. Linear factors
+  contribute exact residues `A·ln|x−r|`; each irreducible quadratic's numerator
+  is recovered by exact arithmetic in the field ℚ[x]/(x²+bx+c). A genuinely
+  ℚ-irreducible quartic such as `x⁴+x+1` (no rational/real-quadratic
+  factorization) still uses the numeric fallback.
+
 - **Fixed: float leak in `∫x·arctan(x)` and `∫N/(c·(1+x²))`.** A constant factor
   inside a product denominator (e.g. `2·(1+x²)`, which canonicalizes to a
   `Multiply`, not an `Add`) was not pulled out, so the quadratic/arctan rules
@@ -248,18 +258,29 @@
 
   | Function              | 100 digits | 500 digits | 1000 digits |
   | --------------------- | ---------- | ---------- | ----------- |
-  | `ln`                  | 3.6×       | 6.6×       | 10.6×       |
-  | `exp`                 | 7×         | 18×        | 22×         |
-  | `sin` / `cos` / `tan` | 2.3×       | 3.4×       | 3.5×        |
-  | `atan`                | 1.8×       | 4.2×       | 4.4×        |
-  | `asin`                | 1.9×       | 4.2×       | 4.5×        |
+  | `ln`                  | 3.4×       | 8.8×       | 11×         |
+  | `exp`                 | 8×         | 18×        | 26×         |
+  | `sin` / `cos` / `tan` | 2.2×       | 3.3×       | 3.3×        |
+  | `atan`                | 1.6×       | 4.2×       | 4.4×        |
+  | `asin`                | 1.9×       | 4.1×       | 4.8×        |
 
-  (`exp` reflects the direct-evaluation fix above; the figure is conservative.)
   `sqrt` and the exact operations `+` `−` `×` `÷` are unchanged. Beyond ~2350
   digits, 0.59.0 returned `NaN` for `sin`/`cos`/`tan` and `π` (the hardcoded π
   table ran out); these now compute correctly at any precision.
 
 ### Resolved Issues
+
+- **Numeric oscillatory improper integrals returned garbage.** A
+  conditionally-convergent oscillatory integrand over a semi-infinite interval
+  defeated the Monte-Carlo numeric integrator (unbounded variance): `∫₀^∞ sin(x²)`
+  came out `−0.36 ± 0.53` and `∫₀^∞ cos(x²)` as `1.8 ± 1.2` (true value √(π/8) ≈
+  0.627), and `∫₀^∞ sin x/x` as `1.595 ± 0.03`. These now use a dedicated
+  lobe-integration + ε-acceleration quadrature (Longman's method) and evaluate
+  deterministically to ~1e-8: `∫₀^∞ sin x/x → π/2`, `∫₀^∞ sin(x²) =
+  ∫₀^∞ cos(x²) → √(π/8)`, `∫₀^∞ e^{−x} sin x → ½`, `∫₀^∞ cos x/(1+x²) → π/(2e)`.
+  Divergent oscillatory integrals (`∫₀^∞ sin x`) report not-evaluable instead of
+  a spurious finite value; non-oscillatory and finite-interval integrals are
+  unchanged.
 
 - **`Limit` returned a spurious `0` for some hard limits.**
   Numerically-evaluated limits whose function overflows the floating-point range

@@ -11,6 +11,7 @@ import {
   canonicalFunctionLiteralArguments,
 } from '../function-utils';
 import { monteCarloEstimate } from '../numerics/monte-carlo';
+import { integrateSemiInfiniteOscillatory } from '../numerics/oscillatory-quadrature';
 import { centeredDiff8thOrder, limit } from '../numerics/numeric';
 import { derivative, differentiate } from '../symbolic/derivative';
 import { antiderivative } from '../symbolic/antiderivative';
@@ -277,6 +278,25 @@ volumes
           const jsf =
             (compiled.run as (x: number) => number) ?? applicableN1(fnExpr);
 
+          // Semi-infinite interval: a conditionally-convergent oscillatory
+          // integrand (∫₀^∞ sin x/x, ∫₀^∞ sin(x²)) defeats Monte-Carlo
+          // importance sampling. Try the dedicated lobe-integration +
+          // ε-acceleration quadrature first; it returns null (→ Monte Carlo)
+          // for non-oscillatory or divergent integrands.
+          const aInf = !isFinite(lower);
+          const bInf = !isFinite(upper);
+          if (aInf !== bInf) {
+            const osc = bInf
+              ? integrateSemiInfiniteOscillatory(jsf, lower, ce._deadline)
+              : integrateSemiInfiniteOscillatory((t) => jsf(-t), -upper, ce._deadline);
+            if (osc)
+              return ce.expr([
+                'PlusMinus',
+                ce.number(osc.estimate),
+                ce.number(osc.error),
+              ]);
+          }
+
           const mce = monteCarloEstimate(
             jsf,
             lower,
@@ -370,6 +390,18 @@ volumes
         if (isNaN(lower) || isNaN(upper)) return undefined;
         const compiled = engine._compile(f);
         const jsf = (compiled.run as (x: number) => number) ?? applicableN1(f);
+
+        // Dedicated oscillatory quadrature for semi-infinite intervals (see
+        // the `Integrate` numeric path); null → fall back to Monte Carlo.
+        const aInf = !isFinite(lower);
+        const bInf = !isFinite(upper);
+        if (aInf !== bInf) {
+          const osc = bInf
+            ? integrateSemiInfiniteOscillatory(jsf, lower, engine._deadline)
+            : integrateSemiInfiniteOscillatory((t) => jsf(-t), -upper, engine._deadline);
+          if (osc) return new BoxedNumber(engine, osc.estimate);
+        }
+
         return new BoxedNumber(
           engine,
           monteCarloEstimate(
