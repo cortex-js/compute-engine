@@ -455,6 +455,60 @@ describe('ROADMAP B2: fractional powers and exact partial-fraction coefficients'
     expect(evaluate('\\int \\frac{1}{2-x} dx')).toMatchInlineSnapshot(
       `-ln(|2 - x|)`
     ));
+
+  // (c) Biquadratic denominators with no real roots (x⁴+1, …) factor into two
+  // real irreducible quadratics whose coefficients are irrational (√2). The
+  // rational factorizer and findUnivariateRoots both miss them, so they
+  // previously fell to the numeric fallback and leaked float coefficients
+  // (0.3535·arctan(1.414x±1) …). A symbolic biquadratic partial-fraction path
+  // now returns the exact radical closed form.
+  test('∫1/(x⁴+1) dx is exact (conjugate-quadratic factorization)', () =>
+    expect(
+      noFloats(evaluate('\\int \\frac{1}{x^4+1} dx'))
+    ).toMatchInlineSnapshot(
+      `sqrt(2)/4 * arctan(sqrt(2)/2 * (2x - sqrt(2))) + sqrt(2)/4 * arctan(sqrt(2)/2 * (2x + sqrt(2))) - sqrt(2)/8 * ln(x^2 - sqrt(2) * x + 1) + sqrt(2)/8 * ln(x^2 + sqrt(2) * x + 1)`
+    ));
+
+  test('∫x²/(x⁴+1) dx is exact (numerator with the index)', () =>
+    expect(
+      noFloats(evaluate('\\int \\frac{x^2}{x^4+1} dx'))
+    ).toMatchInlineSnapshot(
+      `sqrt(2)/4 * arctan(sqrt(2)/2 * (2x - sqrt(2))) + sqrt(2)/4 * arctan(sqrt(2)/2 * (2x + sqrt(2))) - sqrt(2)/8 * ln(x^2 + sqrt(2) * x + 1) + sqrt(2)/8 * ln(x^2 - sqrt(2) * x + 1)`
+    ));
+
+  test('∫1/(x⁴+4) dx is exact (rational quadratic factors)', () =>
+    expect(
+      noFloats(evaluate('\\int \\frac{1}{x^4+4} dx'))
+    ).toMatchInlineSnapshot(
+      `1/8 * arctan(x - 1) + 1/8 * arctan(x + 1) - 1/16 * ln(x^2 - 2x + 2) + 1/16 * ln(x^2 + 2x + 2)`
+    ));
+
+  // Real positive z-roots (Δ = p²−4q ≥ 0, p > 0): (x²+1)(x²+4). This one even
+  // factors over ℚ, but the numeric fallback was still leaking float + noise.
+  test('∫1/(x⁴+5x²+4) dx is exact (real z-root factorization)', () =>
+    expect(
+      noFloats(evaluate('\\int \\frac{1}{x^4+5x^2+4} dx'))
+    ).toMatchInlineSnapshot(`-1/6 * arctan(1/2 * x) + 1/3 * arctan(x)`));
+
+  // (d) Integration-by-parts coefficient leak: ∫x·arctan(x). The recovered
+  // arctan term's coefficient leaked as a float 0.5. Root cause was the inner
+  // integral ∫x²/(2(1+x²)): a constant factor inside a Multiply denominator
+  // (2·(1+x²)) was not pulled out, so the quadratic/arctan rules missed and it
+  // hit the numeric fallback. The Divide branch now extracts it.
+  test('∫x·arctan(x) dx is exact (by-parts coefficient no longer leaks)', () =>
+    expect(
+      noFloats(evaluate('\\int x \\arctan(x) dx'))
+    ).toMatchInlineSnapshot(`1/2 * arctan(x) * x^2 - 1/2 * x + 1/2 * arctan(x)`));
+
+  test('∫x²/(2(1+x²)) dx is exact (constant factor in Multiply denominator)', () =>
+    expect(
+      noFloats(evaluate('\\int \\frac{x^2}{2(1+x^2)} dx'))
+    ).toMatchInlineSnapshot(`1/2 * x - 1/2 * arctan(x)`));
+
+  test('∫1/(2(1+x²)) dx = ½arctan(x) (constant factor pulled out)', () =>
+    expect(
+      noFloats(evaluate('\\int \\frac{1}{2(1+x^2)} dx'))
+    ).toMatchInlineSnapshot(`1/2 * arctan(x)`));
 });
 
 describe('ROADMAP B2: non-elementary & radical integrals (leftovers)', () => {
@@ -704,11 +758,14 @@ describe('INTEGRATION REGRESSIONS (Rubi Phase-0 findings)', () => {
       [{ x: 0.3 }, { x: 2.5 }]
     ));
 
-  test('∫1/(x⁴+1) (full numeric partial fractions)', () =>
+  test('∫1/(x⁴+1) (exact biquadratic partial fractions)', () => {
+    // Now exact (√2 radicals) via the biquadratic path, not the numeric
+    // fallback — see the ROADMAP B2 block below for the float-free assertion.
     checkAntiderivative(
       ['Divide', 1, ['Add', ['Power', 'x', 4], 1]],
       [{ x: 0.3 }, { x: 2.5 }, { x: -1.7 }]
-    ));
+    );
+  });
 
   test('∫1/(x²−2x+1) (expanded repeated linear root)', () =>
     checkAntiderivative(

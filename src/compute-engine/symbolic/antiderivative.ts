@@ -1722,6 +1722,174 @@ function durandKernerRoots(
   return null; // did not converge (e.g. badly clustered roots)
 }
 
+/** True if any number literal in the expression tree is inexact (a float). */
+function hasInexactNumber(expr: Expression): boolean {
+  if (isNumber(expr) && !expr.isExact) return true;
+  if (isFunction(expr)) return expr.ops.some(hasInexactNumber);
+  return false;
+}
+
+/**
+ * ∫ (B·x + C)/(x² + b·x + c) dx for an irreducible quadratic (4c − b² > 0):
+ *
+ *   (B/2)·ln(x²+bx+c) + (C − B·b/2)·(2/√(4c−b²))·arctan((2x+b)/√(4c−b²))
+ *
+ * The quadratic is positive-definite when irreducible, so no Abs is needed.
+ * For b = 0 the first term vanishes when B = 0 (the pure-arctan case).
+ * Coefficients are kept symbolic; the biquadratic caller guards against
+ * float leakage in the assembled result.
+ */
+function integrateLinearOverIrreducibleQuadratic(
+  B: Expression,
+  C: Expression,
+  b: Expression,
+  c: Expression,
+  index: string
+): Expression {
+  const ce = B.engine;
+  const x = ce.symbol(index);
+  const quad = ce.function('Add', [
+    ce.function('Power', [x, ce.number(2)]),
+    ce.function('Multiply', [b, x]),
+    c,
+  ]);
+  // (B/2)·ln(x²+bx+c)
+  const lnTerm = B.div(ce.number(2)).mul(ce.function('Ln', [quad]));
+  // (C − B·b/2)·(2/√(4c−b²))·arctan((2x+b)/√(4c−b²))
+  const fourCMinusB2 = ce.number(4).mul(c).sub(b.mul(b)).simplify();
+  const sqrtDisc = ce.function('Sqrt', [fourCMinusB2]).simplify();
+  const arctanArg = ce
+    .function('Add', [ce.function('Multiply', [ce.number(2), x]), b])
+    .div(sqrtDisc);
+  const arctanCoeff = C.sub(B.mul(b).div(ce.number(2))).mul(
+    ce.number(2).div(sqrtDisc)
+  );
+  const arctanTerm = arctanCoeff.mul(ce.function('Arctan', [arctanArg]));
+  return add(lnTerm, arctanTerm);
+}
+
+/**
+ * ∫ N(x)/(A·x⁴ + B·x² + C) dx for a biquadratic denominator (only even
+ * powers) with no real roots (q = C/A > 0), by factoring it into two real
+ * irreducible quadratics and integrating each (β·x + γ)/(x²+b·x+c) piece.
+ *
+ * Substituting z = x² gives z² + p·z + q (p = B/A, q = C/A), discriminant
+ * Δ = p² − 4q. Two real factorizations arise:
+ *   • Δ < 0 → conjugate complex z-roots → (x²+s·x+t)(x²−s·x+t), with
+ *     t = √q and s = √(2t − p).   [e.g. x⁴+1 → (x²+√2x+1)(x²−√2x+1)]
+ *   • Δ ≥ 0, p > 0 → real positive z-roots → (x²+f₁)(x²+f₂), with
+ *     f₁,f₂ = (p ± √Δ)/2.   [e.g. x⁴+5x²+4 → (x²+1)(x²+4)]
+ * (Δ ≥ 0 with p ≤ 0 means real linear roots — handled by the root paths.)
+ *
+ * `Factor`/`findUnivariateRoots` leave x⁴+1 unfactored (the real factors
+ * need the irrational √2 coefficient), so without this it falls to the
+ * numeric partial-fraction fallback and leaks float coefficients. The exact
+ * partial-fraction numerators (b₁x+c₁ over x²+e₁x+f₁, b₂x+c₂ over x²+e₂x+f₂)
+ * follow from matching M = N/A = (b₁x+c₁)(x²+e₂x+f₂) + (b₂x+c₂)(x²+e₁x+f₁).
+ *
+ * Returns null when the denominator is not a suitable biquadratic, the
+ * factorization is not real, or any float leaks into the result (then the
+ * numeric fallback takes over).
+ */
+function tryBiquadraticPartialFractions(
+  numerator: Expression,
+  denominator: Expression,
+  index: string
+): Expression | null {
+  const ce = denominator.engine;
+  if (polynomialDegree(denominator, index) !== 4) return null;
+  if (polynomialDegree(numerator, index) > 3) return null;
+
+  const dCoeffs = getPolynomialCoefficients(denominator, index);
+  if (!dCoeffs || dCoeffs.length !== 5) return null;
+  const [Cc, d1, Bc, d3, A] = dCoeffs;
+  // Biquadratic: no odd-power terms.
+  if (!d1.isSame(0) || !d3.isSame(0) || A.isSame(0)) return null;
+
+  // Coefficients must be real numbers to factor.
+  const aN = A.N().re;
+  const bN = Bc.N().re;
+  const cN = Cc.N().re;
+  if (aN === null || bN === null || cN === null) return null;
+
+  const p = Bc.div(A); // B/A
+  const q = Cc.div(A); // C/A
+  const pN = bN / aN;
+  const qN = cN / aN;
+  if (qN <= 0) return null; // q ≤ 0 ⇒ real linear roots — not this path
+  const deltaN = pN * pN - 4 * qN; // discriminant of z² + p·z + q
+
+  // The two real quadratic factors x² + eᵢ·x + fᵢ.
+  let e1: Expression, f1: Expression, e2: Expression, f2: Expression;
+  if (deltaN < 0) {
+    // Case (ii): conjugate complex z-roots.
+    const t = q.sqrt(); // √q
+    const s = ce.number(2).mul(t).sub(p).sqrt(); // √(2t − p)
+    e1 = s;
+    f1 = t;
+    e2 = s.neg();
+    f2 = t;
+  } else {
+    // Case (i): real z-roots; both must be positive (p > 0) for the factors
+    // to be irreducible quadratics with no real x-roots.
+    if (pN <= 0) return null;
+    const sqrtDelta = p.mul(p).sub(ce.number(4).mul(q)).sqrt(); // √(p²−4q)
+    f1 = p.add(sqrtDelta).div(ce.number(2)); // (p+√Δ)/2
+    f2 = p.sub(sqrtDelta).div(ce.number(2)); // (p−√Δ)/2
+    e1 = ce.Zero;
+    e2 = ce.Zero;
+    // A repeated quadratic (f₁ = f₂) is a square denominator — handled
+    // elsewhere; the partial-fraction solve below would divide by zero.
+    const diffN = f1.sub(f2).N().re;
+    if (diffN === null || diffN === 0) return null;
+  }
+
+  // Partial-fraction numerators b₁x+c₁ (over x²+e₁x+f₁) and b₂x+c₂ (over
+  // x²+e₂x+f₂), from M = N/A with coefficients mₖ (ascending, padded).
+  const M = numerator.div(A);
+  const mCoeffs = getPolynomialCoefficients(M, index);
+  if (!mCoeffs) return null;
+  const m = (k: number): Expression => mCoeffs[k] ?? ce.Zero;
+  const m0 = m(0);
+  const m1 = m(1);
+  const m2 = m(2);
+  const m3 = m(3);
+
+  let b1: Expression, c1: Expression, b2: Expression, c2: Expression;
+  if (deltaN < 0) {
+    // Symmetric factors (e₂ = −e₁ = −s, f₁ = f₂ = t): work with sums and
+    // differences. Bsum = b₁+b₂, Csum = c₁+c₂, etc.
+    const s = e1;
+    const t = f1;
+    const bSum = m3; // b₁ + b₂
+    const cSum = m0.div(t); // c₁ + c₂  (from t·(c₁+c₂) = m₀)
+    const bDiff = m2.sub(cSum).div(s); // b₂ − b₁
+    const cDiff = m1.sub(t.mul(m3)).div(s); // c₂ − c₁
+    b1 = bSum.sub(bDiff).div(ce.number(2));
+    b2 = bSum.add(bDiff).div(ce.number(2));
+    c1 = cSum.sub(cDiff).div(ce.number(2));
+    c2 = cSum.add(cDiff).div(ce.number(2));
+  } else {
+    // Distinct constant factors (e₁ = e₂ = 0, f₁ ≠ f₂): the b's and c's
+    // decouple. f₂·b₁ + f₁·b₂ = m₁ with b₁+b₂ = m₃, etc.
+    const den = f2.sub(f1);
+    b1 = m1.sub(f1.mul(m3)).div(den);
+    b2 = f2.mul(m3).sub(m1).div(den);
+    c1 = m0.sub(f1.mul(m2)).div(den);
+    c2 = f2.mul(m2).sub(m0).div(den);
+  }
+
+  const result = add(
+    integrateLinearOverIrreducibleQuadratic(b1, c1, e1, f1, index),
+    integrateLinearOverIrreducibleQuadratic(b2, c2, e2, f2, index)
+  ).simplify();
+
+  // Fail safe: if any radical combination folded to a float, defer to the
+  // numeric fallback rather than emit a leaked coefficient.
+  if (hasInexactNumber(result)) return null;
+  return result;
+}
+
 /**
  * ∫ 1/Q(x) dx for a denominator with machine-number coefficients and
  * distinct roots, by full partial fractions over ℂ:
@@ -2344,6 +2512,29 @@ export function antiderivative(fn: Expression, index: string): Expression {
       return antiderivative(cancelled, index);
     }
 
+    // Pull a constant (index-free) factor out of a Multiply denominator:
+    // ∫ N/(c·D) dx = (1/c)·∫ N/D dx. Without this, denominators that
+    // canonicalize to a Multiply rather than an Add — e.g. 2(1+x²) stays
+    // Multiply(2, Add(x², 1)) — miss the quadratic/arctan rules below
+    // (getQuadraticCoefficients looks for a bare x² factor, not 2·(…)) and
+    // fall to the numeric partial-fraction fallback, leaking floats
+    // (∫1/(2(1+x²)) → 0.5·arctan x instead of the exact ½·arctan x). This is
+    // the root cause of the ∫x·arctan x by-parts coefficient leak, whose
+    // inner integral is ∫x²/(2(1+x²)).
+    if (isFunction(fn.op2, 'Multiply')) {
+      const denomFactors = fn.op2.ops;
+      const constFactors = denomFactors.filter((f) => !f.has(index));
+      const varFactors = denomFactors.filter((f) => f.has(index));
+      if (constFactors.length > 0 && varFactors.length > 0) {
+        const constProduct = mul(...constFactors);
+        const newDenom =
+          varFactors.length === 1 ? varFactors[0] : mul(...varFactors);
+        const inner = antiderivative(fn.op1.div(newDenom), index);
+        if (inner.operator !== 'Integrate')
+          return inner.div(constProduct).evaluate();
+      }
+    }
+
     // Case A: If deg(numerator) >= deg(denominator), divide first
     // ∫ P(x)/Q(x) dx where deg(P) >= deg(Q) becomes ∫ (quotient + remainder/Q) dx
     // Requires deg(Q) ≥ 1: an x-free denominator is handled by the constant
@@ -2377,6 +2568,16 @@ export function antiderivative(fn: Expression, index: string): Expression {
         // Division did not reduce the degree: fall through to the other
         // strategies (or the inert integral).
       }
+    }
+
+    // Biquadratic denominators with no real roots (e.g. x⁴+1) factor into
+    // two real irreducible quadratics with irrational coefficients, which the
+    // rational factorizer and findUnivariateRoots both miss — without this
+    // they leak floats via the numeric fallback. Tried here (proper fractions
+    // only; polynomial division above already reduced deg(num) ≥ deg(den)).
+    {
+      const biquad = tryBiquadraticPartialFractions(fn.op1, fn.op2, index);
+      if (biquad) return biquad;
     }
 
     if (!fn.op2.has(index)) {

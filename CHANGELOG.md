@@ -103,6 +103,25 @@
   `√(3−2√2) → √2−1`. Radicands that do not denest over the rationals are left
   unchanged.
 
+- **Exact antiderivatives for biquadratic denominators.** `∫1/(x⁴+1)` and
+  related integrals over `A·x⁴ + B·x² + C` with no real roots are now exact
+  instead of leaking float coefficients. The integrator factors the biquadratic
+  into two real irreducible quadratics — `x⁴+1 → (x²+√2x+1)(x²−√2x+1)`,
+  `x⁴+5x²+4 → (x²+1)(x²+4)` — and integrates each `(βx+γ)/(x²+bx+c)` piece
+  symbolically: `∫1/(x⁴+1) → (√2/8)·ln((x²+√2x+1)/(x²−√2x+1)) +
+  (√2/4)·(arctan(√2x+1) + arctan(√2x−1))`, `∫1/(x⁴+4)`, `∫x²/(x⁴+1)` (was
+  unevaluated), and `∫1/(x⁴+5x²+4) → −⅙arctan(x/2) + ⅓arctan x` all exact. The
+  numeric partial-fraction path remains the fallback for denominators this does
+  not cover.
+
+- **Fixed: float leak in `∫x·arctan(x)` and `∫N/(c·(1+x²))`.** A constant factor
+  inside a product denominator (e.g. `2·(1+x²)`, which canonicalizes to a
+  `Multiply`, not an `Add`) was not pulled out, so the quadratic/arctan rules
+  missed it and the integral fell to the numeric fallback. The constant is now
+  extracted first (`∫ N/(c·D) = (1/c)·∫ N/D`): `∫1/(2(1+x²)) → ½arctan x` and
+  `∫x·arctan x → ½x²arctan x − ½x + ½arctan x` (the `½arctan x` term previously
+  leaked as `0.5·arctan x`).
+
 - **Fixed: `∫sin²x` returned the wrong antiderivative.** It gave
   `x/2 + sin(2x)/4` (the integral of `cos²x`) because the `∫sin²(ax+b)` rule
   used `+` instead of `−`; both the `sin²` and `cos²` rules also dropped the
