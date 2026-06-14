@@ -4,16 +4,14 @@ _Issue-finder: CE (current build) vs SymPy across 6 operations, 22 cases. Both g
 
 ## Summary
 
-- **CE 21/22** fully correct vs **SymPy 22/22**. CE trails on **1** cases (below); none where SymPy trails CE.
-- **CE issues found:** `Factor` emits non-polynomial radical/abs forms for `xⁿ−1` (odd factors); integration misses fractional-power/erf integrands; limits are **numerical-only** (correct value, no symbolic form). (Polynomial **GCD** now works — ROADMAP B5 fixed.)
+- **CE 22/22** fully correct vs **SymPy 22/22**. CE trails on **0** cases (below); none where SymPy trails CE.
+- **CE issues found:** limits are **numerical-only** (correct value, no symbolic closed form — ROADMAP B8). Previously-flagged gaps are now fixed: polynomial **GCD** (B5), `Factor` of `xⁿ−1` returns polynomial factors (B4), and indefinite integration of fractional-power / erf / Fresnel / Si–Ci / radical integrands (B2).
 - **Where CE leads:** it solves GCD, expansion, simplification and (numeric) limits, and is **markedly faster** than SymPy there — e.g. simplification ~0.5 ms vs ~10 ms.
 - **Scope:** hand-authored cases across operations. The **Wester** suite is wired in separately (`wester.ts` → `REPORT-wester.md`, via the Mathematica files + `wl-parser`); the **Bondarenko** integration set (35, local) is the next integration-depth source.
 
 ## Where CE trails SymPy
 
-| Case | Operation | CE | SymPy | CE result |
-|---|---|---|---|---|
-| ∫ e^(−x²) dx | integrate | ∅ | ✅ | `int(e^(-(x^2)) dx)` |
+_None on this suite._
 
 ## By operation
 
@@ -21,53 +19,53 @@ _Issue-finder: CE (current build) vs SymPy across 6 operations, 22 cases. Both g
 
 | Case | CE | SymPy |
 |---|---|---|
-| x² − 1 | ✅ 0.85 | ✅ 0.86 |
-| x³ − 1 | ✅ 1.20 | ✅ 0.74 |
-| x⁴ − 1 | ✅ 1.49 | ✅ 0.77 |
-| x⁶ − 1 | ✅ 2.45 | ✅ 0.91 |
-| x⁷ − 1 | ✅ 1.18 | ✅ 0.83 |
+| x² − 1 | ✅ 0.54 | ✅ 0.52 |
+| x³ − 1 | ✅ 0.69 | ✅ 0.51 |
+| x⁴ − 1 | ✅ 0.77 | ✅ 0.55 |
+| x⁶ − 1 | ✅ 1.38 | ✅ 0.61 |
+| x⁷ − 1 | ✅ 0.64 | ✅ 0.55 |
 
 ### Polynomial GCD — CE 3/3, SymPy 3/3
 
 | Case | CE | SymPy |
 |---|---|---|
-| gcd((x+1)(x+2), (x+1)(x+3)) | ✅ 1.02 | ✅ 1.89 |
-| gcd(x²−1, x²+2x+1) | ✅ 0.83 | ✅ 1.26 |
-| gcd(x³−1, x²−1) | ✅ 0.20 | ✅ 1.15 |
+| gcd((x+1)(x+2), (x+1)(x+3)) | ✅ 0.57 | ✅ 1.34 |
+| gcd(x²−1, x²+2x+1) | ✅ 0.45 | ✅ 0.92 |
+| gcd(x³−1, x²−1) | ✅ 0.11 | ✅ 0.79 |
 
 ### Expansion — CE 3/3, SymPy 3/3
 
 | Case | CE | SymPy |
 |---|---|---|
-| (x+1)⁵ | ✅ 0.49 | ✅ 1.15 |
-| (x+2)⁴ | ✅ 0.42 | ✅ 1.02 |
-| (x−1)⁶ | ✅ 0.64 | ✅ 1.49 |
+| (x+1)⁵ | ✅ 0.27 | ✅ 0.77 |
+| (x+2)⁴ | ✅ 0.20 | ✅ 0.72 |
+| (x−1)⁶ | ✅ 0.33 | ✅ 1.02 |
 
 ### Simplification — CE 3/3, SymPy 3/3
 
 | Case | CE | SymPy |
 |---|---|---|
-| (x²−1)/(x−1) | ✅ 0.61 | ✅ 6.27 |
-| (x³−1)/(x−1) | ✅ 0.37 | ✅ 7.03 |
-| x^(−1/2) − 1/√x | ✅ 0.26 | ✅ 0.33 |
+| (x²−1)/(x−1) | ✅ 0.17 | ✅ 5.03 |
+| (x³−1)/(x−1) | ✅ 0.19 | ✅ 4.73 |
+| x^(−1/2) − 1/√x | ✅ 0.12 | ✅ 0.22 |
 
-### Integration — CE 4/5, SymPy 5/5
+### Integration — CE 5/5, SymPy 5/5
 
 | Case | CE | SymPy |
 |---|---|---|
-| ∫ x² dx | ✅ 0.31 | ✅ 0.62 |
-| ∫ 1/(1+x²) dx | ✅ 0.24 | ✅ 15.1 |
-| ∫ 1/√x dx | ✅ 0.31 | ✅ 1.13 |
-| ∫ e^(−x²) dx | ∅ | ✅ 39.4 |
-| ∫ 1/(x³+1) dx | ✅ 9.78 | ✅ 36.0 |
+| ∫ x² dx | ✅ 0.17 | ✅ 0.50 |
+| ∫ 1/(1+x²) dx | ✅ 0.14 | ✅ 9.53 |
+| ∫ 1/√x dx | ✅ 0.18 | ✅ 0.82 |
+| ∫ e^(−x²) dx | ✅ 0.51 | ✅ 25.7 |
+| ∫ 1/(x³+1) dx | ✅ 4.26 | ✅ 23.0 |
 
 ### Limits — CE 3/3, SymPy 3/3
 
 | Case | CE | SymPy |
 |---|---|---|
-| lim_{x→0} sin x / x | ✅ <sub>numeric</sub> 0.15 | ✅ 0.86 |
-| lim_{x→0} (1−cos x)/x² | ✅ <sub>numeric</sub> 0.18 | ✅ 14.1 |
-| lim_{x→0} (x²−1)/(x−1)... @1 | ✅ <sub>numeric</sub> 0.19 | ✅ 8.71 |
+| lim_{x→0} sin x / x | ✅ <sub>numeric</sub> 0.08 | ✅ 0.60 |
+| lim_{x→0} (1−cos x)/x² | ✅ <sub>numeric</sub> 0.10 | ✅ 9.05 |
+| lim_{x→0} (x²−1)/(x−1)... @1 | ✅ <sub>numeric</sub> 0.11 | ✅ 5.35 |
 
 ---
 _Context: CE has no public polynomial GCD, so the Fateman GCD benchmark (Symbolica 4 s / Mathematica 89 s / SymPy 61 min) can't run on CE today. Reproduce: `python benchmarks/audit/gen.py && npx tsx benchmarks/audit/audit.ts`._

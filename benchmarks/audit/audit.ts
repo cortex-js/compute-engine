@@ -168,9 +168,9 @@ w('## Summary');
 w();
 w(`- **CE ${ceCorrect}/${suite.cases.length}** fully correct vs **SymPy ${syCorrect}/${suite.cases.length}**. ` +
   `CE trails on **${trails.length}** cases (below); none where SymPy trails CE.`);
-w('- **CE issues found:** `Factor` emits non-polynomial radical/abs forms for `xⁿ−1` (odd factors); ' +
-  'integration misses fractional-power/erf integrands; limits are **numerical-only** (correct value, no symbolic form). ' +
-  '(Polynomial **GCD** now works — ROADMAP B5 fixed.)');
+w('- **CE issues found:** limits are **numerical-only** (correct value, no symbolic closed form — ROADMAP B8). ' +
+  'Previously-flagged gaps are now fixed: polynomial **GCD** (B5), `Factor` of `xⁿ−1` returns polynomial factors (B4), ' +
+  'and indefinite integration of fractional-power / erf / Fresnel / Si–Ci / radical integrands (B2).');
 w('- **Where CE leads:** it solves GCD, expansion, simplification and (numeric) limits, and is **markedly faster** ' +
   'than SymPy there — e.g. simplification ~0.5 ms vs ~10 ms.');
 w('- **Scope:** hand-authored cases across operations. The **Wester** suite is wired in separately ' +

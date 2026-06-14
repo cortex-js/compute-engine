@@ -727,6 +727,45 @@ describe('DEFINITE INTEGRATION', () => {
     ));
 });
 
+describe('IMPROPER INTEGRATION (ROADMAP B3)', () => {
+  // The new B2 antiderivatives + special values at ±∞ (Erf(∞)=1,
+  // arctan(±∞)=±π/2) make these exact via bound substitution — no separate
+  // limit machinery needed. (Fresnel-family improper integrals like
+  // ∫₀^∞ cos(x²) are still blocked by ∞·(Pi-derived constant) → NaN.)
+  test('∫₀^∞ e^(−x²) → √π/2 (Gaussian, via Erf(∞)=1)', () =>
+    expect(evaluate('\\int_0^\\infty e^{-x^2} dx')).toMatchInlineSnapshot(
+      `1/2 * sqrt(pi)`
+    ));
+
+  test('∫_{−∞}^∞ e^(−x²) → √π', () =>
+    expect(
+      evaluate('\\int_{-\\infty}^\\infty e^{-x^2} dx')
+    ).toMatchInlineSnapshot(`sqrt(pi)`));
+
+  test('∫₀^∞ e^(−x) → 1', () =>
+    expect(evaluate('\\int_0^\\infty e^{-x} dx')).toMatchInlineSnapshot(`1`));
+
+  test('∫₁^∞ 1/x² → 1', () =>
+    expect(evaluate('\\int_1^\\infty \\frac{1}{x^2} dx')).toMatchInlineSnapshot(
+      `1`
+    ));
+
+  test('∫₀^∞ 1/(1+x²) → π/2 (via arctan(∞)=π/2)', () =>
+    expect(
+      evaluate('\\int_0^\\infty \\frac{1}{1+x^2} dx')
+    ).toMatchInlineSnapshot(`1/2 * pi`));
+
+  test('∫_{−∞}^∞ 1/(1+x²) → π', () =>
+    expect(
+      evaluate('\\int_{-\\infty}^\\infty \\frac{1}{1+x^2} dx')
+    ).toMatchInlineSnapshot(`pi`));
+
+  test('∫₀^∞ 1/(x²+4) → π/4', () =>
+    expect(
+      evaluate('\\int_0^\\infty \\frac{1}{x^2+4} dx')
+    ).toMatchInlineSnapshot(`1/4 * pi`));
+});
+
 /** These apply a numerical approximation. These could potentially be functions that do not have a symbolic form. */
 describe('NUMERICAL INTEGRATION', () => {
   test('basic', () =>
@@ -813,6 +852,85 @@ describe('LIMIT', () => {
       .expr(['NLimit', ['Function', ['Sinc', 'x'], 'x'], 'NegativeInfinity'])
       .evaluate();
     expect(r.re).toBeNaN();
+  });
+
+  test('ROADMAP B7: catastrophic cancellation returns NaN, never spurious 0', () => {
+    // lim_{x→∞} (e^(x·e^(−x)/(e^(−x)+e^(−2x²/(x+1)))) − eˣ)/x = −e² (Gruntz).
+    // The two eˣ terms cancel to exactly 0 around x≈40 and overflow to NaN past
+    // x≈710, so naive Richardson sampling used to report a confident `0`.
+    const f1 = engine.expr([
+      'Limit',
+      [
+        'Function',
+        [
+          'Divide',
+          [
+            'Subtract',
+            [
+              'Exp',
+              [
+                'Divide',
+                ['Multiply', 'x', ['Exp', ['Negate', 'x']]],
+                [
+                  'Add',
+                  ['Exp', ['Negate', 'x']],
+                  [
+                    'Exp',
+                    [
+                      'Divide',
+                      ['Multiply', -2, ['Square', 'x']],
+                      ['Add', 'x', 1],
+                    ],
+                  ],
+                ],
+              ],
+            ],
+            ['Exp', 'x'],
+          ],
+          'x',
+        ],
+        'x',
+      ],
+      'PositiveInfinity',
+    ]);
+    expect(f1.N().re).toBeNaN();
+
+    // lim_{x→∞} x·ln(x)·ln(x·eˣ−x²)²/ln(ln(x²+2·e^(e^(3x³·ln x)))) = 1/e. The
+    // triple exponential overflows for any x≳2, so every sample on the
+    // geometric ladder reads 0 while the true value lives near x≈1.5.
+    const f2 = engine.expr([
+      'Limit',
+      [
+        'Function',
+        [
+          'Divide',
+          [
+            'Multiply',
+            'x',
+            ['Ln', 'x'],
+            ['Square', ['Ln', ['Subtract', ['Multiply', 'x', ['Exp', 'x']], ['Square', 'x']]]],
+          ],
+          [
+            'Ln',
+            [
+              'Ln',
+              [
+                'Add',
+                ['Square', 'x'],
+                [
+                  'Multiply',
+                  2,
+                  ['Exp', ['Exp', ['Multiply', 3, ['Power', 'x', 3], ['Ln', 'x']]]],
+                ],
+              ],
+            ],
+          ],
+        ],
+        'x',
+      ],
+      'PositiveInfinity',
+    ]);
+    expect(f2.N().re).toBeNaN();
   });
 });
 

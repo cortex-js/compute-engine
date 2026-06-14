@@ -81,6 +81,13 @@
   `√(3−2√2) → √2−1`. Radicands that do not denest over the rationals are left
   unchanged.
 
+- **More improper integrals are exact** (ROADMAP B3). `arctan(±∞)` now reduces
+  to `±π/2`, so — combined with the new antiderivatives and `Erf(∞) = 1` —
+  infinite-bound integrals evaluate by bound substitution: `∫₀^∞ e^(−x²) → √π/2`,
+  `∫_{−∞}^∞ e^(−x²) → √π`, `∫₀^∞ 1/(1+x²) → π/2`, `∫_{−∞}^∞ 1/(1+x²) → π`,
+  `∫₀^∞ 1/(x²+4) → π/4` (alongside the elementary `∫₀^∞ e^(−x) → 1`,
+  `∫₁^∞ 1/x² → 1`).
+
 - **Interruptible evaluation**: long-running operations now respect the engine
   time limit (`ce.timeLimit`, default 2s) and throw a `CancellationError`
   instead of hanging: collection enumeration (`Filter`, `Select`, `CountIf`,
@@ -152,7 +159,36 @@
   primitive for interval arithmetic). `expm1`/`log1p` and the inverse
   hyperbolics keep full relative accuracy for small arguments.
 
+  Speedup of high-precision numeric evaluation (`.N()`) versus 0.59.0, by
+  working precision (median time; higher is faster):
+
+  | Function          | 100 digits | 500 digits | 1000 digits |
+  | ----------------- | ---------- | ---------- | ----------- |
+  | `ln`              | 3.4×       | 8.3×       | 10.5×       |
+  | `exp`             | 4.1×       | 8.1×       | 9.9×        |
+  | `sin` / `cos` / `tan` | 2.3×   | 3.4×       | 3.5×        |
+  | `atan`            | 1.8×       | 4.2×       | 4.4×        |
+  | `asin`            | 1.9×       | 4.2×       | 4.5×        |
+
+  (≈90% less time for `ln`/`exp` at 1000 digits.) `sqrt` and the exact
+  operations `+` `−` `×` `÷` are unchanged. Beyond ~2350 digits, 0.59.0 returned
+  `NaN` for `sin`/`cos`/`tan` and `π` (the hardcoded π table ran out); these now
+  compute correctly at any precision.
+
 ### Bug Fixes
+
+- **`Limit` returned a spurious `0` for some hard limits.** Numerically-evaluated
+  limits whose function overflows the floating-point range — e.g.
+  `lim_{x→∞} (e^{x·e^{−x}/…} − eˣ)/x` (two `eˣ` terms cancel to exactly 0, then
+  overflow to `NaN`) or limits with a doubly/triply-exponential subexpression —
+  collapsed to a run of identical `0`s on the Richardson sample ladder, which the
+  extrapolator read as a confident convergence and returned a wrong `0`. The
+  limit machinery now detects this floating-point "trust horizon" (a non-finite
+  sample, or a magnitude that grows then catastrophically cancels to ~0, with a
+  denser probe to catch a skipped window) and returns not-evaluable (`NaN` from
+  `.N()`, staying symbolic under `evaluate()`) instead of a spurious value.
+  Genuine limits — including fp-fragile ones such as `(1+1/x)^x → e` and
+  `√(x²+x) − x → ½` — are unaffected.
 
 - **`solve` returned wrong or missing roots for absolute-value equations.** The
   two direct `|ax + b| + c = 0` root rules were broken: the first had its

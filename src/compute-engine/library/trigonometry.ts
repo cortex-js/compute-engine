@@ -162,6 +162,12 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       type: (ops) => numericTypeHandler(ops),
       sgn: ([x]) => trigSign('Arctan', x),
       evaluate: ([x], { numericApproximation, engine }) => {
+        // arctan(±∞) = ±π/2 (the horizontal asymptotes). Needed for improper
+        // integrals: ∫₀^∞ 1/(1+x²) = arctan(∞) − arctan(0) = π/2.
+        if (x.isInfinity && (x.isPositive || x.isNegative)) {
+          const v = x.isPositive ? engine.Pi.div(2) : engine.Pi.div(-2);
+          return numericApproximation ? v.N() : v;
+        }
         if (numericApproximation) return evalTrig('Arctan', x);
         const a = constructibleValues('Arctan', x);
         if (a) return a;

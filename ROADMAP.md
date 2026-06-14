@@ -735,6 +735,31 @@ kernels (cf. item 4) honoring `ce.precision` with guard digits. Overlaps item 7'
   `a²−b²c` is a perfect square; a pure-float safety check guards the branch.
   Radicands that do not denest over the rationals stay as-is.
 
+**Audit follow-ups (2026-06-13).** A focused CE-vs-SymPy integration probe
+(20 cases, CE graded by differentiate-back) after the B2 fixes — CE 14/20 vs
+SymPy 20/20 — surfaced the next gaps, in priority order:
+
+- ❗ **Correctness bug: `∫sin²x` is wrong.** Returns `x/2 + sin(2x)/4`, whose
+  derivative is `cos²x`, not `sin²x` (it computes `∫cos²x`). Pre-existing — not
+  in any of the new handlers; comes from the rule matcher / a half-angle rule
+  with a sign or sin↔cos slip. A *wrong* answer (worse than unevaluated), so
+  highest priority. Check `∫cos²x`, `∫sin²(ax)` and the `Sin²/Cos²` simplify
+  rules together.
+- 🟡 **Float leakage in `∫1/(x⁴+1)` and `∫x·arctan(x)`.** Value-correct but the
+  form has float coefficients (`0.3535… = 1/(2√2)`, `1.414… = √2`, `0.5`). Same
+  class as the `x³+1` leak fixed above, but for an all-irreducible-quadratic
+  quartic (the `numericPartialFractions` fallback) and the by-parts path. Make
+  the quartic/biquadratic partial-fraction path exact (factor `x⁴+1` into
+  `(x²−√2x+1)(x²+√2x+1)`) and keep by-parts coefficients rational.
+- ⬜ **Missing-but-elementary:** `∫ln(x)/x = ½ln²x` (the `∫h·h′ = ½h²` /
+  `∫hⁿh′` u-sub is not recognized); `∫tanⁿx`/`∫cotⁿx` (only `secⁿ`/`cscⁿ`
+  reductions were added); `∫1/√(x²+x+1)` and the radical family with a **linear
+  term** (the radical handler needs completing-the-square: `x²+x+1 = (x+½)²+¾`).
+- ⬜ **Missing non-elementary:** `∫eˣ/x` needs an `Ei`/`ExpIntegralEi` operator
+  (and `∫1/ln x` → `li`), parallel to the new `Si`/`Ci`.
+- ⬜ **Harder:** `∫x·eˣ·sin x` (by-parts composed with the cyclic e·trig
+  solver). Lower priority.
+
 ### B3. Definite / improper integrals are numerical-only — partially resolved (2026-06-13)
 
 - ✅ **Finite-bound elementary definite integrals are exact.** The symbolic
@@ -749,17 +774,36 @@ kernels (cf. item 4) honoring `ce.precision` with guard digits. Overlaps item 7'
   (previously unreachable dead code), so `arctan 1 → π/4`, `arcsin ½ → π/6`.
   Result: `∫₁² (1/x) dx → ln(2)`, `∫₀¹ 1/(x²+1) dx → π/4`,
   `∫₀¹ sin x dx → 1 − cos(1)`, `∫₁² ln x dx → 2ln(2) − 1`.
-- ⬜ **Improper / infinite bounds still numerical-only.** `∫₀^∞ …` returns an
-  unevaluated `EvaluateAt`; needs endpoint-limit handling. The non-elementary
-  *antiderivatives* the headline examples need now exist (B2): `∫e^(−x²) → erf`
-  and `∫cos(x²) → Fresnel C`. What remains is the improper-bound machinery —
-  taking the `x → ∞` limit of those antiderivatives (`erf(∞) = 1`,
-  `FresnelC(∞) = ½`) — plus hardening the oscillatory quadrature for the
-  conditionally-convergent cases.
+- ✅ **Many improper integrals now exact — for free, via bound substitution.**
+  No separate limit machinery was needed: `EvaluateAt` substitutes the bound
+  into the antiderivative, so once the antiderivative head reduces at `±∞`, the
+  improper integral is exact. The B2 antiderivatives plus the relevant special
+  values deliver:
+  - `Erf(∞) = 1` (already defined) → `∫₀^∞ e^(−x²) = √π/2`,
+    `∫_{−∞}^∞ e^(−x²) = √π`.
+  - **New: `arctan(±∞) = ±π/2`** (added to the `Arctan` evaluate handler) →
+    `∫₀^∞ 1/(1+x²) = π/2`, `∫_{−∞}^∞ 1/(1+x²) = π`, `∫₀^∞ 1/(x²+4) = π/4`.
+  - Elementary monotone cases keep working: `∫₀^∞ e^(−x) = 1`, `∫₁^∞ 1/x² = 1`.
+- ⬜ **Fresnel-family improper integrals blocked by an arithmetic bug, not the
+  integrator.** `∫₀^∞ cos(x²)` should be `√(π/8)` via `FresnelC(∞) = ½`, but the
+  scaled argument `√(2/π)·∞` collapses to **NaN**. Root cause: `∞ × c → NaN`
+  when `c` is a *finite but symbolic* constant whose `isFinite` is `undefined` —
+  `Sqrt(Pi)`, `Pi^(−1)`, `1/√π` all report `isFinite: undefined` (finiteness is
+  not propagated through `Sqrt`/`Power`/`Divide` of a finite constant like `Pi`),
+  so the multiply/divide infinity guard bails to NaN (`Divide(+∞, π) → NaN`,
+  `Divide(+∞, 2) → +∞`). Fix options: (a) propagate `isFinite` through
+  `Sqrt`/`Power`/`Divide` of finite operands; (b) relax the `∞ × x` guard to treat
+  a no-unknowns non-infinite factor as finite. Core-arithmetic change — measure
+  snapshot blast radius first.
+- ⬜ **Genuinely oscillatory / divergent endpoints.** Substitution correctly
+  yields `∞` for monotone-divergent and an unevaluated/NaN for oscillatory
+  (`sin(∞)`); hardening the oscillatory quadrature for conditionally-convergent
+  integrands remains.
 
-**Remaining fix direction:** add endpoint-limit handling for improper bounds
-(works today for elementary cases like `∫₁^∞ 1/x²`, `∫₀^∞ e^(−x)`); harden the
-oscillatory quadrature; produce the non-elementary antiderivatives (B2).
+**Remaining fix direction:** unblock the Fresnel family (the `isFinite`
+propagation bug above), then harden the oscillatory quadrature. The
+substitution-based path already covers the elementary, Gaussian, and arctan
+families exactly.
 
 ### B4. ~~`Factor` emits non-polynomial radical/abs forms for `xⁿ − 1`~~ — ✅ done (2026-06-13)
 
@@ -820,20 +864,38 @@ Bondarenko integration set; translate more Rubi rule sections (the audit's
 `CE+R/F` column recovers only algebraic integrals today — 1 of 8 hard Wester
 indefinite integrals).
 
-### B7. `Limit` returns a wrong value on some forms
+### B7. ~~`Limit` returns a wrong value on some forms~~ — ✅ done (2026-06-13)
 
 CE's `Limit` is evaluated numerically (`.N()`); on certain Wester limits it
-returns **`0` instead of the true value** — a silent wrong answer, worse than
+returned **`0` instead of the true value** — a silent wrong answer, worse than
 failing. Examples (point `x → ∞`):
 
-| limit | CE | correct (SymPy) |
+| limit | CE (before) | correct (SymPy) |
 |---|---|---|
-| `(−eˣ + e^{x·e^{−x}}/(eˣ−1)) …` | `0` | `−e²` |
-| `x·ln(x)·ln(−x² + x·e^{…}) …` | `0` | `1/3` |
+| `(−eˣ + e^{x·e^{−x}/…}) / x` | `0` | `−e²` |
+| `x·ln(x)·ln(x·eˣ−x²)² / ln(ln(x²+2·e^{e^{…}}))` | `0` | `1/e` |
 
-The numeric limit machinery should return a not-evaluable signal (or the correct
-value), never a spurious `0`. Surfaced by `benchmarks/audit/wester.ts` (the
-"CE ≠ SymPy disagreements" section).
+**Root cause:** these are Gruntz-class limits that overflow the floating-point
+range. In the first, two `eˣ` terms cancel to *exactly* `0` around x ≈ 40 (the
+true difference is below the ulp of `eˣ`) and overflow to `NaN` past x ≈ 710; in
+the second, a triple exponential overflows for any x ≳ 2, so every point on
+Richardson's geometric sample ladder (x = 1, 8, 64 …) reads `0` while the true
+value lives near x ≈ 1.5. The collapse to a run of identical `0`s made
+`extrapolate()` report `err = 0` ("perfect convergence"), which sailed through
+the confidence guard.
+
+**Resolved** in `numerics/numeric.ts` (`reliableLimitSamples`, called by
+`limit()`): before trusting `extrapolate`, probe the same sample ladder for a
+floating-point "trust horizon" — a non-finite sample (overflow), or a magnitude
+that grows to an interior peak and then collapses to ~0 (catastrophic
+cancellation). When a run of identical samples *looks* converged, corroborate it
+with denser intermediate probes so a narrow skipped window (the triple-exp case)
+is caught. Past the horizon, `extrapolate`'s `maxeval` is capped to the clean
+prefix (or the limit is declared not-evaluable), so the machinery reports `NaN`
+instead of a spurious value. Genuine limits — including fp-fragile ones like
+`(1+1/x)^x → e`, `√(x²+x)−x → ½`, `(cos x)^{1/x²} → e^{−½}` — are unaffected.
+Regression: `calculus.test.ts` "ROADMAP B7"; the Wester limit disagreements
+(`≠`) section is now empty (both cases report `∅` not a wrong value).
 
 ### B8. `Limit` is numerical-only with low coverage
 

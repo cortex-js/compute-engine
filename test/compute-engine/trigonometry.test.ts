@@ -128,6 +128,26 @@ describe('Arctan2 quadrant correction (REVIEW.md B1)', () => {
   });
 });
 
+// ROADMAP B3: arctan's horizontal asymptotes, needed so improper integrals
+// of the 1/(a²+x²) family evaluate (∫₀^∞ 1/(1+x²) = arctan(∞) = π/2).
+describe('Arctan at ±∞', () => {
+  test('arctan(+∞) = π/2 (exact under evaluate)', () =>
+    expect(engine.box(['Arctan', engine.PositiveInfinity]).evaluate().json).toEqual([
+      'Multiply',
+      ['Rational', 1, 2],
+      'Pi',
+    ]));
+  test('arctan(−∞) = −π/2', () =>
+    expect(
+      engine.box(['Arctan', engine.NegativeInfinity]).evaluate().json
+    ).toEqual(['Multiply', ['Rational', -1, 2], 'Pi']));
+  test('arctan(+∞).N() = 1.5707…', () =>
+    expect(engine.box(['Arctan', engine.PositiveInfinity]).N().re).toBeCloseTo(
+      Math.PI / 2,
+      10
+    ));
+});
+
 // REVIEW.md B20: the Degrees canonical handler reduced literals mod 360 while
 // the evaluate handler did not, so the same operator denoted different values.
 // Degrees is now a faithful linear conversion (no reduction) in both paths;
