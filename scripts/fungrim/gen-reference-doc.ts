@@ -197,6 +197,21 @@ function loadInjected(): Map<string, Entry> {
   return out;
 }
 
+/**
+ * Render the upper half-plane membership `Element(x, HH)` as the explicit part
+ * predicate `Im(x) > 0` — the form the engine actually guards on and that the
+ * assumptions guide documents — rather than the orphan `\mathrm{HH}` glyph.
+ * Only the 2-operand membership is rewritten; the 3-operand set-builder form
+ * (`Element(τ, HH, …)` in the ModularLambdaFundamentalDomain definition) is
+ * left untouched.
+ */
+function rewriteUpperHalfPlane(node: unknown): unknown {
+  if (!Array.isArray(node)) return node;
+  if (node.length === 3 && node[0] === 'Element' && node[2] === 'HH')
+    return ['Greater', ['Imaginary', rewriteUpperHalfPlane(node[1])], 0];
+  return node.map(rewriteUpperHalfPlane);
+}
+
 function mathjsonToLatex(
   ce: ReturnType<typeof createEngine>,
   e: Entry,
@@ -204,7 +219,7 @@ function mathjsonToLatex(
 ): string | null {
   try {
     const latex = withEntryScope(ce, e, () =>
-      ce.box(node as any, { canonical: false }).latex
+      ce.box(rewriteUpperHalfPlane(node) as any, { canonical: false }).latex
     );
     // The serializer emits literal newlines after `\\` row separators inside
     // matrix environments (e.g. `pmatrix`). A `$$…$$` (or inline `$…$`) block
