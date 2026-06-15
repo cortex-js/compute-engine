@@ -5,7 +5,7 @@ import { SMALL_INTEGER } from '../numerics/numeric';
 import type { Rational } from '../numerics/types';
 
 import { asRational } from './numerics';
-import { canonicalAngle, getImaginaryFactor } from './utils';
+import { bignumPreferred, canonicalAngle, getImaginaryFactor } from './utils';
 import { apply, apply2 } from './apply';
 import { isNumber, isFunction, isSymbol, numericValue } from './type-guards';
 
@@ -405,6 +405,24 @@ export function pow(
   //
   if (numericApproximation) {
     if (isNumber(x)) {
+      // e^exp, fast path. Exp(x) canonicalizes to Power(E, x), and under N()
+      // the E base is numericized to e *before* reaching pow(). Evaluating
+      // e^exp through the generic base.pow(exp) = exp(exp·ln(base)) would
+      // recompute ln(e) ≈ 1 — a full high-precision logarithm — on every call,
+      // which is the bulk of Exp(x).N()'s cost at high precision. The base is
+      // the interned numeric value of the E constant, so an O(1) reference
+      // check against the cached `E.N()` detects it; compute exp(exp) directly.
+      // Gated to bignum: at machine precision the generic path is a single
+      // `Math.pow(e, x)` (no separate ln, so nothing to save) and `exp(x)`
+      // would differ by 1 ULP. (A complex exponent falls through to the
+      // e^(a+bi) handling below.)
+      const ce = x.engine;
+      if (bignumPreferred(ce) && x === ce.E.N()) {
+        if (typeof exp === 'number')
+          return ce.number(ce._numericValue(exp).exp());
+        if (isNumber(exp) && exp.im === 0)
+          return ce.number(ce._numericValue(exp.numericValue).exp());
+      }
       if (typeof exp === 'number') {
         return (
           apply(

@@ -81,14 +81,25 @@ export function fpsqrt(a: bigint, bits: number): bigint {
 
   // as = a * scale = a << bits; the result is isqrt(as).
   const as = a << BigInt(bits);
-  let x = bigSqrtSeed(as);
 
-  // Newton iteration: x_{n+1} = (x + as / x) / 2
-  let prev: bigint;
-  do {
-    prev = x;
-    x = (x + as / x) / 2n;
-  } while (bigintAbs(x - prev) > 1n);
+  // Seed the final refinement. At low/medium precision the float-seeded Heron
+  // converges in a few full-width divisions and wins outright; at high
+  // precision a recursive giant-steps isqrt (root the top half, then refine)
+  // does ~3× fewer full-width divisions. Dispatch on `bits` (a plain number
+  // compare, no bitLength) so the hot low-precision path is unchanged — fpsqrt
+  // callers pass a ≈ O(1)·2^bits, so as ≈ 2^(2·bits) and bits ≥ FP_SQRT_GIANT_BITS
+  // ⇒ as ≳ SQRT_GIANT_MIN_BITS (and isqrtGiant falls back to flat Heron if not).
+  let x: bigint;
+  if (bits < FP_SQRT_GIANT_BITS) {
+    x = bigSqrtSeed(as);
+    let prev: bigint;
+    do {
+      prev = x;
+      x = (x + as / x) / 2n;
+    } while (bigintAbs(x - prev) > 1n);
+  } else {
+    x = isqrtGiant(as, bitLength(as));
+  }
 
   // One more iteration, then pick whichever of {x, next} has x²
   // closest to `as` (the true floor-root or one above it).
@@ -116,6 +127,50 @@ function bigSqrtSeed(n: bigint): bigint {
   if (shift & 1) fs *= Math.SQRT2; // odd shift: absorb one factor of √2
   const seed = BigInt(Math.round(fs)) << BigInt(shift >> 1);
   return seed > 0n ? seed : 1n;
+}
+
+// Below this bit length the float-seeded Heron converges in a few full-width
+// divisions and wins outright; above it, recursing on the top half (a smaller,
+// cheaper division) and refining cuts the number of full-width divisions ~3×
+// — measured ~1.5× faster at 500 digits, rising to ~2× at 1000+ digits.
+const SQRT_GIANT_MIN_BITS = 1024;
+
+// fpsqrt dispatches on `bits` (a plain number compare, no bitLength) so its hot
+// low-precision path is untouched. Callers pass a ≈ O(1)·2^bits, so the radicand
+// as = a·2^bits has ≈ 2·bits bits; 640 ⇒ as ≈ 1280 ≳ SQRT_GIANT_MIN_BITS.
+const FP_SQRT_GIANT_BITS = 640;
+
+/**
+ * Floor integer square root of `N` (with bit length `n`) via recursive
+ * giant-steps: root the top ~half of the bits — a smaller, cheaper isqrt —
+ * scale that up to a seed accurate to ~n/2 bits, then refine with one
+ * full-width Heron pass and settle the exact floor. The full-width division
+ * runs ≈ once per recursion level (vs ≈ log₂(n/52) times for flat Heron), so
+ * ~3× fewer at high precision. `n` (= bitLength(N)) is threaded so it is never
+ * recomputed down the recursion. Bit-identical to the flat Heron floor.
+ */
+function isqrtGiant(N: bigint, n: number): bigint {
+  if (n < SQRT_GIANT_MIN_BITS) {
+    let x = bigSqrtSeed(N);
+    let prev: bigint;
+    do {
+      prev = x;
+      x = (x + N / x) / 2n;
+    } while (bigintAbs(x - prev) > 1n);
+    while (x * x > N) x -= 1n;
+    while ((x + 1n) * (x + 1n) <= N) x += 1n;
+    return x;
+  }
+  const h = (n >> 2) << 1; // even number of low bits to drop (≈ n/2)
+  let x = isqrtGiant(N >> BigInt(h), n - h) << BigInt(h >> 1);
+  let prev: bigint;
+  do {
+    prev = x;
+    x = (x + N / x) / 2n;
+  } while (bigintAbs(x - prev) > 1n);
+  while (x * x > N) x -= 1n;
+  while ((x + 1n) * (x + 1n) <= N) x += 1n;
+  return x;
 }
 
 /** Absolute value of a bigint. */
@@ -219,10 +274,15 @@ export function fpexp(x: bigint, bits: number): bigint {
  */
 // AGM-vs-Newton crossover, in bits. Below LN_AGM_MIN_BITS the float-seeded
 // giant_steps Newton converges in a few steps and wins; above it AGM's
-// O(M(p)·log p) cost (≈ log₂p square roots) pulls ahead — measured crossover
-// ≈ 1250 decimal digits. (ln 2, which AGM needs, comes from the LN2_DIGITS
-// table or binary splitting, so there is no upper bound.)
-const LN_AGM_MIN_BITS = 4200; // ≈ 1250 decimal digits
+// O(M(p)·log p) cost (≈ log₂p square roots) pulls ahead. The crossover dropped
+// from ≈1250 to ≈700 decimal digits once `bigintSqrt` (the AGM inner loop) got
+// its giant-steps speedup (ROADMAP 17.11) — each AGM iteration is a sqrt, so a
+// ~2× faster sqrt shifts the balance. Measured (best-of-3): AGM wins reliably
+// and growingly from ~700 digits (1.3× at 700, 1.6× at 1000, 4.8× at 3000); the
+// 550–690-digit zone is mixed (Newton's giant_steps ladder is non-monotonic
+// there), so the threshold stays above it. (ln 2, which AGM needs, comes from
+// the LN2_DIGITS table or binary splitting, so there is no upper bound.)
+const LN_AGM_MIN_BITS = 2300; // ≈ 700 decimal digits
 
 export function fpln(x: bigint, bits: number): bigint {
   const scale = 1n << BigInt(bits);
@@ -561,6 +621,9 @@ export function ln2ChudnovskyBits(bits: number): bigint {
 export function bigintSqrt(n: bigint): bigint {
   if (n < 0n) throw new RangeError('bigintSqrt: negative input');
   if (n === 0n) return 0n;
+  // Large inputs (the AGM/Chudnovsky callers) take the giant-steps path.
+  const bl = bitLength(n);
+  if (bl >= SQRT_GIANT_MIN_BITS) return isqrtGiant(n, bl);
   let x = bigSqrtSeed(n);
   let prev: bigint;
   do {

@@ -141,7 +141,11 @@
 - **Arbitrary-precision elementary and transcendental functions are
   substantially faster**, especially at hundreds or thousands of digits.
   High-precision `π` and trigonometric functions are no longer limited to about
-  2,350 digits.
+  2,350 digits. Square root is roughly twice as fast at 1,000+ digits (a
+  giant-steps integer square root), the natural logarithm switches to the faster
+  arithmetic–geometric-mean method from around 700 digits (previously ~1,250),
+  and `Exp(x).N()` no longer recomputes `ln(e)` on every call — at 1,000 digits
+  it is about three times faster. Results are unchanged.
 
 - Odd roots of negative real numbers now use the real-root convention, so
   `Root(-8, 3)` and `(-8)^(1/3)` evaluate to `-2`.
