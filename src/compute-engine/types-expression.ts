@@ -174,7 +174,7 @@ type BoxedRuleSet = KernelBoxedRuleSet<Expression, ExpressionComputeEngine>;
 type SimplifyOptions = {
   rules?: null | Rule | ReadonlyArray<BoxedRule | Rule> | BoxedRuleSet;
   costFunction?: (expr: Expression) => number;
-  strategy?: 'default' | 'fu';
+  strategy?: 'default' | 'fu' | 'trig';
 };
 
 //

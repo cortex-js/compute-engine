@@ -224,3 +224,47 @@ describe('Complex exponents (regression)', () => {
     expect(v.im).toBeCloseTo(Math.sin(Math.PI / 12), 14);
   });
 });
+
+describe('Exponential of an imaginary argument stays symbolic', () => {
+  const eToTheI = (theta: Expression): Expression => [
+    'Power',
+    'ExponentialE',
+    ['Multiply', 'ImaginaryUnit', theta],
+  ];
+
+  test('e^{ix} (symbolic angle) is NOT Euler-expanded by evaluate()', () => {
+    // A basis change, not an evaluation — keep the compact exponential.
+    expect(engine.expr(eToTheI('x')).evaluate().toString()).toBe('e^(i * x)');
+  });
+
+  test('(e^{ix})^2 = e^{2ix} — consistent with bare e^{ix}', () => {
+    // Regression: the power path used to Euler-expand the square while the
+    // base stayed exponential.
+    const sq = engine.expr(['Power', eToTheI('x'), 2]);
+    expect(sq.toString()).toBe('e^(2i * x)');
+    expect(sq.evaluate().toString()).toBe('e^(2i * x)');
+  });
+
+  test('constant angles still reduce', () => {
+    expect(engine.expr(eToTheI(['Divide', 'Pi', 2])).evaluate().toString()).toBe(
+      'i'
+    );
+    expect(engine.expr(eToTheI('Pi')).evaluate().toString()).toBe('-1');
+  });
+
+  test('e^{ln y} still reduces to y', () => {
+    expect(
+      engine.expr(['Power', 'ExponentialE', ['Ln', 'y']]).evaluate().toString()
+    ).toBe('y');
+  });
+
+  test('simplify({strategy:"trig"}) converts to trigonometric form', () => {
+    const f = (theta: Expression) =>
+      engine
+        .expr(eToTheI(theta))
+        .simplify({ strategy: 'trig' })
+        .toString();
+    expect(f('x')).toBe('i * sin(x) + cos(x)');
+    expect(f(['Multiply', 2, 'x'])).toBe('i * sin(2x) + cos(2x)');
+  });
+});

@@ -1,6 +1,7 @@
 import { checkDeadline } from '../../common/interruptible';
 import { replace } from './rules';
 import { holdMap } from './hold';
+import { expToTrig } from './exp-to-trig';
 import type {
   Expression,
   SimplifyOptions,
@@ -159,6 +160,21 @@ export function simplify(
     }
 
     return steps as RuleSteps;
+  }
+
+  //
+  // 2b/ If the 'trig' strategy is requested, rewrite exponentials of an
+  // imaginary argument to trigonometric form (e^{iθ} → cos θ + i·sin θ) before
+  // the standard simplification. This is the opt-in inverse of the default
+  // evaluate() behavior, which keeps e^{iθ} symbolic for a symbolic angle.
+  //
+  if (options?.strategy === 'trig') {
+    const converted = expToTrig(expr);
+    if (!converted.isSame(expr)) {
+      expr = converted;
+      steps.push({ value: expr, because: 'exp-to-trig' });
+    }
+    // fall through to the standard rule loop to simplify the trig form
   }
 
   // Rules tagged `purpose: 'expand'` grow expressions by design: they are

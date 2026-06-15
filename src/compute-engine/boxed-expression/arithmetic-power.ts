@@ -533,22 +533,25 @@ export function pow(
     if (typeof exp !== 'number' && isFunction(exp, 'Ln')) return exp.op1;
 
     // Is the argument an imaginary or complex number?
-    let theta = getImaginaryFactor(exp);
-    if (theta !== undefined) {
+    const imagFactor = getImaginaryFactor(exp);
+    if (imagFactor !== undefined) {
       // We have an expression of the form `e^(i theta)`
-      theta = canonicalAngle(theta);
-      if (theta !== undefined) {
-        // Use Euler's formula: e^{i*theta} = cos(theta) + i*sin(theta)
+      const theta = canonicalAngle(imagFactor);
+      // Euler's formula e^{iθ} = cos θ + i·sin θ — but only adopt it for a
+      // CONSTANT angle (`e^{iπ/2}→i`, `e^{iπ}→-1`): there the trig reduces to a
+      // closed-form value and this is a genuine evaluation. For a SYMBOLIC
+      // angle (`e^{ix}`) the rewrite is just a basis change that discards the
+      // compact exponential form and loses no information, so keep `e^{iθ}`
+      // symbolic (convert on demand with `simplify({ strategy: 'trig' })`).
+      // This also removes the inconsistency where `(e^{ix})^2` expanded (it
+      // recurses here as `pow(e, 2ix)` with symbolic θ=2x) while `e^{ix}` did
+      // not.
+      if (theta !== undefined && theta.unknowns.length === 0) {
         // IMPORTANT: Use .evaluate() not .simplify() to avoid infinite
         // recursion when pow() is called from simplification rules.
-        // canonicalAngle always returns a numeric angle, so evaluate
-        // will compute the trig values directly.
         const cosVal = ce.function('Cos', [theta]).evaluate();
         const sinVal = ce.function('Sin', [theta]).evaluate();
         return cosVal.add(sinVal.mul(ce.I));
-        // } else if (theta) {
-        //   // Return simplify angle
-        //   return ce._fn('Power', [ce.E, radiansToAngle(theta)!.mul(ce.I)]);
       }
     } else if (numericApproximation) {
       // e^x = exp(x): evaluate exp directly. Going through e.pow(x) would

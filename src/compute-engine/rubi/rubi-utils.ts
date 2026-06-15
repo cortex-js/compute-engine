@@ -593,6 +593,20 @@ const PRED_FNS: Record<string, PredFn> = {
     return targets.every((t) => !build(t, ctx).has(ctx.x));
   },
 
+  // InertTrigFreeQ[u] := FreeQ of every inert trig head (sin/cos/…). Gates the
+  // Chapter-4 dispatch rules that must only fire on a fully inert working form.
+  InertTrigFreeQ: (args, ctx) => !hasInertTrig(build(args[0], ctx)),
+
+  // FalseQ[u] := u === False. A predicate sub-expression collapses to the
+  // True/False symbol when built (build() dispatches PRED_FNS that way), so a
+  // structural identity check suffices.
+  FalseQ: (args, ctx) => build(args[0], ctx).symbol === 'False',
+
+  // InverseFunctionFreeQ[u, x] := u contains no inverse function, logarithm,
+  // hypergeometric, or calculus head involving x.
+  InverseFunctionFreeQ: (args, ctx) =>
+    inverseFunctionFreeQ(build(args[0], ctx), ctx.x),
+
   // EqQ[u, v] := PossibleZeroQ[u - v]; NeQ is its negation. Rubi also
   // defines the unary forms EqQ[u] := PossibleZeroQ[u] (test u == 0) and
   // NeQ[u] := !PossibleZeroQ[u], used e.g. by 1.2.1.4#11 (NeQ[e²−4df]) and
@@ -2208,6 +2222,54 @@ export function hasActiveTrig(e: Expression): boolean {
   return e.ops?.some(hasActiveTrig) ?? false;
 }
 
+/** True if any node carries an INERT trig head (`sin`/`cos`/…). Underlies
+ * Rubi's `InertTrigFreeQ` (the working-form purity test that gates many
+ * Chapter-4 dispatch rules). */
+function hasInertTrig(e: Expression): boolean {
+  if (TO_ACTIVE[e.operator] !== undefined) return true;
+  return e.ops?.some(hasInertTrig) ?? false;
+}
+
+// Inverse functions (CE names: inverse trig `Arcsin…`, inverse hyperbolic
+// `Arsinh…`, logarithms) + calculus heads. `InverseFunctionFreeQ[u, x]` is
+// True when none of these appear with `x` inside — a guard Rubi uses to keep
+// reduction rules from firing on already-integrated-looking subexpressions.
+const INVERSE_FNS = new Set([
+  'Arcsin',
+  'Arccos',
+  'Arctan',
+  'Arccot',
+  'Arcsec',
+  'Arccsc',
+  'Arsinh',
+  'Arcosh',
+  'Artanh',
+  'Arcoth',
+  'Arsech',
+  'Arcsch',
+  'Ln',
+  'Log',
+]);
+const CALCULUS_FNS = new Set([
+  'Integrate',
+  'D',
+  'Derivative',
+  'Sum',
+  'Product',
+  'Limit',
+]);
+function inverseFunctionFreeQ(u: Expression, x: string): boolean {
+  const op = u.operator;
+  if (
+    INVERSE_FNS.has(op) ||
+    CALCULUS_FNS.has(op) ||
+    op === 'Hypergeometric2F1' ||
+    op === 'AppellF1'
+  )
+    return !u.has(x);
+  return u.ops?.every((o) => inverseFunctionFreeQ(o, x)) ?? true;
+}
+
 /** Rewrite trig heads through `map`, preserving object identity wherever no
  * descendant changed (so trig-free subtrees pass through untouched and the
  * non-trig case is a true no-op). Rebuilt nodes are re-canonicalized, which
@@ -2351,6 +2413,28 @@ const VALUE_FNS: Record<string, ValueFn> = {
     selectFactors(build(args[0], ctx), ctx.x, ctx.ce, true),
   NonfreeFactors: (args, ctx) =>
     selectFactors(build(args[0], ctx), ctx.x, ctx.ce, false),
+
+  // ExpandTrig[u, x] := ActivateTrig[ExpandIntegrand[u, x]] — expand a
+  // (polynomial-in-trig) integrand so each trig power integrates via a
+  // reduction rule. The 3-arg form ExpandTrig[u, v, x] distributes
+  // ActivateTrig[u] over ExpandTrig[v, x] (IntegrationUtilityFunctions.m).
+  ExpandTrig: (args, ctx) => {
+    const ce = ctx.ce;
+    if (args.length === 3) {
+      const w = activateTrig(
+        ce,
+        build(['ExpandIntegrand', args[1], args[2]], ctx)
+      );
+      const z = activateTrig(ce, build(args[0], ctx));
+      if (w.operator === 'Add' && w.ops)
+        return ce.function(
+          'Add',
+          w.ops.map((t) => z.mul(t))
+        );
+      return z.mul(w);
+    }
+    return activateTrig(ce, build(['ExpandIntegrand', args[0], args[1]], ctx));
+  },
 
   Coefficient: (args, ctx) => coeff(args, ctx),
   Coeff: (args, ctx) => coeff(args, ctx),

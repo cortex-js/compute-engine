@@ -549,8 +549,12 @@ export type SimplifyOptions = {
    *   function that prioritizes minimizing the number of trigonometric
    *   functions. Standard simplification is applied before and after the
    *   Fu transformations using the engine's default rules.
+   * - `'trig'`: Rewrite exponentials of an imaginary argument to
+   *   trigonometric form via Euler's formula (`e^{iθ} → cos θ + i·sin θ`),
+   *   then simplify. This is the opt-in inverse of the default behavior, which
+   *   keeps `e^{iθ}` in exponential form for a symbolic angle `θ`.
    */
-  strategy?: 'default' | 'fu';
+  strategy?: 'default' | 'fu' | 'trig';
 };
 
 /**
