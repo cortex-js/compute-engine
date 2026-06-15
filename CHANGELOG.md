@@ -25,6 +25,13 @@
   integer. (Roots are unaffected: `(x³)^{1/3} = x` still holds, since odd-index
   roots use the real-root convention.)
 
+- **`N()` at a known pole now returns `ComplexInfinity` instead of `NaN`.** When
+  a function is evaluated numerically at a pole recorded in the new
+  analytic-property metadata store (see Special Functions), the result is
+  `ComplexInfinity` rather than `NaN` or an unevaluated expression — for example
+  `Digamma(0).N()` and `Digamma(-2).N()`. Functions whose kernels already
+  returned an infinity at their poles (such as `Gamma`) are unchanged.
+
 ### Calculus
 
 - **`Limit` can now return exact symbolic results.** This includes direct
@@ -144,6 +151,15 @@
 
 - The Identities Library has been updated from 1,350 to 1,376 verified rules,
   including corrected Jacobi theta identities.
+
+- **New analytic-property metadata store.** `ce.functionProperties(name)`
+  exposes per-operator analytic properties drawn from the Fungrim corpus —
+  poles, zeros, branch points and cuts, residues, and holomorphic/meromorphic
+  domains. For example `ce.functionProperties('Gamma')?.poles` is the set
+  `NonPositiveIntegers`. Convenience accessors (`poles`, `zeros`, `branchCuts`,
+  `holomorphicDomain`, …) return the unconditional record of each kind;
+  parametric records (such as residues that depend on parameters) are available
+  via `entries`. This also powers pole-aware `N()` (see Behavior Changes).
 
 ### Numeric Evaluation
 
