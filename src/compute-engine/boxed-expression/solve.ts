@@ -626,7 +626,11 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   // `__b` would capture the other trig term, which contains `_x` (rejected by
   // `filter`).
   {
-    match: ['Add', ['Multiply', '__a', ['Sin', '_x']], ['Multiply', '__b', ['Cos', '_x']]],
+    match: [
+      'Add',
+      ['Multiply', '__a', ['Sin', '_x']],
+      ['Multiply', '__b', ['Cos', '_x']],
+    ],
     replace: ['Arctan', ['Divide', ['Negate', '__b'], '__a']],
     useVariations: true,
     condition: (sub) => filter(sub) && !sub.__a.isSame(0),
@@ -871,8 +875,7 @@ function solveSingleSqrtEquation(
   let rPow: Expression = ce.One; // Rᵏ
   for (let k = 0; 2 * k < coeffs.length; k++) {
     b = b.add(coeffs[2 * k].mul(rPow));
-    if (2 * k + 1 < coeffs.length)
-      a = a.add(coeffs[2 * k + 1].mul(rPow));
+    if (2 * k + 1 < coeffs.length) a = a.add(coeffs[2 * k + 1].mul(rPow));
     rPow = rPow.mul(radicand);
   }
 

@@ -214,9 +214,7 @@ function mAC(
     if (isLast && (p.kind === 'slot' || p.kind === 'optslot')) {
       const rest = exprOps.filter((_, j) => !used[j]);
       if (rest.length === 0)
-        return p.kind === 'optslot'
-          ? bindIn(env, p.name, p.default, k)
-          : false;
+        return p.kind === 'optslot' ? bindIn(env, p.name, p.default, k) : false;
       const value =
         rest.length === 1 ? rest[0] : ce.function(pat.op, [...rest]);
       if (bindIn(env, p.name, value, k)) return true;

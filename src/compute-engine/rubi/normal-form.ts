@@ -74,10 +74,7 @@ function mul(ce: ComputeEngine, fs: Expression[]): Expression {
  * compared structurally; rule skeletons never carry duplicate-base
  * factors (WL already collected them at source), so this only fires on
  * runtime integrands. */
-function collectPowers(
-  ce: ComputeEngine,
-  flat: Expression[]
-): Expression[] {
+function collectPowers(ce: ComputeEngine, flat: Expression[]): Expression[] {
   const groups = new Map<string, { base: Expression; exps: Expression[] }>();
   const order: string[] = [];
   for (const f of flat) {
@@ -119,8 +116,7 @@ function invert(ce: ComputeEngine, e: Expression): Expression[] {
     return e.ops.flatMap((o) => invert(ce, o));
   if (e.operator === 'Power' && e.ops)
     return [pow(ce, e.ops[0], negate(ce, e.ops[1]))];
-  if (isNumber(e) && e.isRational === true)
-    return [ce.One.div(e).evaluate()];
+  if (isNumber(e) && e.isRational === true) return [ce.One.div(e).evaluate()];
   return [ce._fn('Power', [e, ce.NegativeOne])];
 }
 
@@ -129,11 +125,7 @@ function invert(ce: ComputeEngine, e: Expression): Expression[] {
  * auto-evaluation, which the Rubi corpus assumes: compound numeric-linear
  * exponents collapse (1+2n−2(1+n) → −1) and u^0 → 1 unconditionally (CE
  * soundly refuses this for unknown u; WL applies it on input). */
-function pow(
-  ce: ComputeEngine,
-  base: Expression,
-  exp: Expression
-): Expression {
+function pow(ce: ComputeEngine, base: Expression, exp: Expression): Expression {
   if (exp.operator === 'Add' && leafCountOf(exp) <= 24) {
     try {
       const collapsed: Expression = exp.simplify();
@@ -165,10 +157,7 @@ function pow(
  * flowing into conditions or rule RHSs must be re-canonicalized first or
  * arithmetic produces unfolded artifacts (e.g. `a + 0·b`).
  */
-export function recanonicalize(
-  ce: ComputeEngine,
-  e: Expression
-): Expression {
+export function recanonicalize(ce: ComputeEngine, e: Expression): Expression {
   if (e.symbol || !e.ops) return e;
   return ce.function(
     e.operator,
@@ -186,9 +175,6 @@ function leafCountOf(e: Expression): number {
 function negate(ce: ComputeEngine, e: Expression): Expression {
   if (isNumber(e)) return e.neg().evaluate();
   if (e.operator === 'Multiply' && e.ops && isNumber(e.ops[0]))
-    return ce._fn('Multiply', [
-      e.ops[0].neg().evaluate(),
-      ...e.ops.slice(1),
-    ]);
+    return ce._fn('Multiply', [e.ops[0].neg().evaluate(), ...e.ops.slice(1)]);
   return ce._fn('Multiply', [ce.NegativeOne, e]);
 }

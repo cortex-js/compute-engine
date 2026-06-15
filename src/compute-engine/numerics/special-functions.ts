@@ -693,7 +693,9 @@ function polygammaCore(ce: ComputeEngine, nNum: number, z: BigNum): BigNum {
  */
 export function bigBeta(ce: ComputeEngine, a: BigNum, b: BigNum): BigNum {
   return withGuardDigits(SPECIAL_FN_GUARD, () =>
-    gammaCore(ce, a).mul(gammaCore(ce, b)).div(gammaCore(ce, a.add(b)))
+    gammaCore(ce, a)
+      .mul(gammaCore(ce, b))
+      .div(gammaCore(ce, a.add(b)))
   );
 }
 
@@ -771,7 +773,9 @@ function zetaCore(ce: ComputeEngine, s: BigNum): BigNum {
       .div(new BigDecimal(k).add(BigDecimal.HALF).mul(k + 1));
   }
   const eta = sum.div(d);
-  return eta.div(BigDecimal.ONE.sub(new BigDecimal(2).pow(BigDecimal.ONE.sub(s))));
+  return eta.div(
+    BigDecimal.ONE.sub(new BigDecimal(2).pow(BigDecimal.ONE.sub(s)))
+  );
 }
 
 /**

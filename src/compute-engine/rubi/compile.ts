@@ -16,9 +16,8 @@
 // from the placeholder's parent in the *canonical* skeleton.
 
 import type { IComputeEngine as ComputeEngine } from '../global-types';
-import type { Expr as Expression } from './types';
+import type { Expr as Expression, Json, RubiRule, RubiRuleDoc } from './types';
 
-import type { Json, RubiRule, RubiRuleDoc } from './types';
 import { Pat, slotNames } from './match';
 import { toTimesPower } from './normal-form';
 
@@ -58,9 +57,7 @@ function skeletonize(expr: Json, variable: string): Json {
     return (expr[0] === 'BlankOptional' ? OPT : SLOT) + name;
   }
   if (Array.isArray(expr))
-    return expr.map((a, i) =>
-      i === 0 ? a : skeletonize(a, variable)
-    ) as Json;
+    return expr.map((a, i) => (i === 0 ? a : skeletonize(a, variable))) as Json;
   return expr;
 }
 
@@ -72,7 +69,7 @@ function toPat(
   ce: ComputeEngine,
   expr: Expression,
   parentOp: string | null,
-  argIndex: number
+  _argIndex: number
 ): Pat {
   if (expr.symbol) {
     if (expr.symbol === VAR) return { kind: 'var' };
@@ -110,7 +107,11 @@ function hasPlaceholder(expr: Expression): boolean {
 }
 
 /** Pattern-variable names appearing in a rule LHS (excluding the variable). */
-function lhsNames(lhs: Json, variable: string, out = new Set<string>()): Set<string> {
+function lhsNames(
+  lhs: Json,
+  variable: string,
+  out = new Set<string>()
+): Set<string> {
   if (
     (isCall(lhs, 'Blank') || isCall(lhs, 'BlankOptional')) &&
     typeof lhs[1] === 'string'
@@ -134,7 +135,8 @@ export function compileRule(
   } catch (e) {
     return { rule: null, reason: `box error: ${e}` };
   }
-  if (!boxed.isValid) return { rule: null, reason: 'boxes to invalid expression' };
+  if (!boxed.isValid)
+    return { rule: null, reason: 'boxes to invalid expression' };
 
   const pat = toPat(ce, toTimesPower(ce, boxed), null, 1);
   const expected = lhsNames(rule.lhs, rule.variable);
@@ -151,8 +153,7 @@ export function compileRule(
   let rootOp: string | null = null;
   if (pat.kind === 'node') {
     const optionals = pat.ops.filter((p) => p.kind === 'optslot').length;
-    const collapsible =
-      optionals >= 1 && pat.ops.length - optionals === 1;
+    const collapsible = optionals >= 1 && pat.ops.length - optionals === 1;
     if (!collapsible) rootOp = pat.op;
   }
 

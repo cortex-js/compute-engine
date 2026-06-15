@@ -618,7 +618,9 @@ function refactorProductFactors(
       : [factoredBase];
     return ce.function(
       'Multiply',
-      baseFactors.map((f) => ce.function('Power', [f.json, product.op2.json]).json)
+      baseFactors.map(
+        (f) => ce.function('Power', [f.json, product.op2.json]).json
+      )
     );
   }
 

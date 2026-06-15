@@ -10,13 +10,12 @@
 //                               RuleFail when a utility can't apply, which
 //                               makes the driver try the next rule.
 
-import type { Expr as Expression } from './types';
+import type { Expr as Expression, Json } from './types';
 import type { IComputeEngine as ComputeEngine } from '../types-engine';
 import { isNumber } from '../boxed-expression/type-guards';
 
 import { expand } from '../boxed-expression/expand';
 
-import type { Json } from './types';
 import type { Env } from './match';
 import { toTimesPower } from './normal-form';
 
@@ -90,7 +89,10 @@ export function build(json: Json, ctx: Ctx): Expression {
       // NOTE: ce.number() does not accept a MathJSON array (spins) — box
       return ce.box(json as any);
     case 'List':
-      return ce.function('List', args.map((a) => build(a, ctx)));
+      return ce.function(
+        'List',
+        args.map((a) => build(a, ctx))
+      );
   }
 
   const valueFn = VALUE_FNS[head];
@@ -99,7 +101,10 @@ export function build(json: Json, ctx: Ctx): Expression {
     return ce.symbol(evalCondition(json, ctx) ? 'True' : 'False');
 
   // ordinary mathematical head (already CE-named by the translator)
-  return ce.function(head, args.map((a) => build(a, ctx)));
+  return ce.function(
+    head,
+    args.map((a) => build(a, ctx))
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -216,7 +221,10 @@ function ratConstant(e: Expression): number | null {
   // accept only small rationals (Rubi guard collapses are simple ratios)
   for (let q = 1; q <= 12; q++) {
     const p = Math.round(c * q);
-    if (Math.abs(p) > 1000 || Math.abs(c - p / q) > 1e-9 * Math.max(1, Math.abs(c)))
+    if (
+      Math.abs(p) > 1000 ||
+      Math.abs(c - p / q) > 1e-9 * Math.max(1, Math.abs(c))
+    )
       continue;
     const diff = expand(n.mul(q).sub(d.mul(p)));
     if (diff.isSame(0)) return p / q;
@@ -279,10 +287,7 @@ export function polyDegreeX(u: Expression, x: string): number {
 
 /** monomial decomposition: u = Σ coeff·x^deg, coefficients x-free.
  * Returns null when u is not a polynomial in x. */
-function monomialsX(
-  u: Expression,
-  x: string
-): [Expression, number][] | null {
+function monomialsX(u: Expression, x: string): [Expression, number][] | null {
   const ce = u.engine;
   if (!u.has(x)) return [[u, 0]];
   if (u.symbol === x) return [[ce.One, 1]];
@@ -306,7 +311,10 @@ function monomialsX(
       const m0 = monomialsX(ops[0], x);
       const m1 = monomialsX(ops[1], x);
       if (m0 === null || m1 === null) return null;
-      return [...m0, ...m1.map(([c, d]) => [c.neg(), d] as [Expression, number])];
+      return [
+        ...m0,
+        ...m1.map(([c, d]) => [c.neg(), d] as [Expression, number]),
+      ];
     }
     case 'Divide': {
       if (ops[1].has(x)) return null;
@@ -340,10 +348,7 @@ function monomialsX(
 }
 
 /** ascending coefficient array, or null if not a polynomial in x */
-export function polyCoeffsX(
-  u: Expression,
-  x: string
-): Expression[] | null {
+export function polyCoeffsX(u: Expression, x: string): Expression[] | null {
   const ce = u.engine;
   const ms = monomialsX(u, x);
   if (ms === null) return null;
@@ -644,20 +649,12 @@ const PRED_FNS: Record<string, PredFn> = {
       const coeffs = polyCoeffsX(u, ctx.x);
       return coeffs !== null && !coeffs[deg].evaluate().isSame(0);
     }
-    if (
-      v.operator === 'Power' &&
-      v.ops &&
-      v.ops[0].symbol === ctx.x
-    ) {
+    if (v.operator === 'Power' && v.ops && v.ops[0].symbol === ctx.x) {
       const k = realNum(v.ops[1]);
       if (k === null || !Number.isInteger(k) || k < 1) return false;
       const coeffs = polyCoeffsX(u, ctx.x);
       if (coeffs === null) return false;
-      if (
-        !coeffs.every(
-          (c, i) => i % k === 0 || c.isSame(0) || zeroQ(c)
-        )
-      )
+      if (!coeffs.every((c, i) => i % k === 0 || c.isSame(0) || zeroQ(c)))
         return false;
       if (args.length === 2) return true;
       const n = realNum(build(args[2], ctx));
@@ -672,8 +669,7 @@ const PRED_FNS: Record<string, PredFn> = {
   // LinearQ, which allows anything that simplifies to linear)
   LinearMatchQ: (args, ctx) =>
     mapList(args[0], ctx, (u) => linearMatchQ(u, ctx)),
-  MonomialQ: (args, ctx) =>
-    mapList(args[0], ctx, (u) => monomialQ(u, ctx)),
+  MonomialQ: (args, ctx) => mapList(args[0], ctx, (u) => monomialQ(u, ctx)),
 
   // SimplerQ[u, v] — is u simpler than v (drives canonical swaps);
   // transcribed integer/fraction cases, leaf-count fallback
@@ -831,8 +827,7 @@ const PRED_FNS: Record<string, PredFn> = {
           (intsQE(p.mul(2), q.mul(2)) ||
             (intsQE(p.mul(3), q) && zeroQ(b.mul(c).add(a.mul(d).mul(3)))) ||
             (intsQE(p, q.mul(3)) && zeroQ(b.mul(c).mul(3).add(a.mul(d)))))) ||
-        (eqNum(n, 3) &&
-          (intsQE(p.add(third), q) || intsQE(q.add(third), p))) ||
+        (eqNum(n, 3) && (intsQE(p.add(third), q) || intsQE(q.add(third), p))) ||
         (eqNum(n, 3) &&
           (intsQE(p.add(third.mul(2)), q) || intsQE(q.add(third.mul(2)), p)) &&
           zeroQ(b.mul(c).add(a.mul(d))))
@@ -850,8 +845,7 @@ const PRED_FNS: Record<string, PredFn> = {
           (intsQE(m, p.mul(2), q.mul(2)) ||
             intsQE(m.mul(2), p, q.mul(2)) ||
             intsQE(m.mul(2), p.mul(2), q))) ||
-        (eqNum(n, 4) &&
-          (intsQE(m, p, q.mul(2)) || intsQE(m, p.mul(2), q))) ||
+        (eqNum(n, 4) && (intsQE(m, p, q.mul(2)) || intsQE(m, p.mul(2), q))) ||
         (eqNum(n, 2) &&
           intsQE(m.div(2), p.add(third), q) &&
           (zeroQ(bc.add(ad.mul(3))) || zeroQ(bc.sub(ad.mul(9))))) ||
@@ -863,7 +857,8 @@ const PRED_FNS: Record<string, PredFn> = {
           (zeroQ(bc.sub(ad.mul(4))) ||
             zeroQ(bc.add(ad.mul(8))) ||
             zeroQ(
-              bc.pow(2)
+              bc
+                .pow(2)
                 .sub(a.mul(b).mul(c).mul(d).mul(20))
                 .sub(a.pow(2).mul(d.pow(2)).mul(8))
             ))) ||
@@ -872,7 +867,9 @@ const PRED_FNS: Record<string, PredFn> = {
           (zeroQ(bc.mul(4).sub(ad)) ||
             zeroQ(bc.mul(8).add(ad)) ||
             zeroQ(
-              bc.pow(2).mul(8)
+              bc
+                .pow(2)
+                .mul(8)
                 .add(a.mul(b).mul(c).mul(d).mul(20))
                 .sub(a.pow(2).mul(d.pow(2)))
             ))) ||
@@ -896,7 +893,9 @@ const PRED_FNS: Record<string, PredFn> = {
     const [a, b, c, d, e, m, p] = v;
     const third = ctx.ce.box(['Rational', 1, 3]) as Expression;
     const k = (j: number, l: number, r: number) =>
-      c.pow(2).mul(d.pow(2))
+      c
+        .pow(2)
+        .mul(d.pow(2))
         .add(b.mul(c).mul(d).mul(e).mul(j))
         .add(b.pow(2).mul(e.pow(2)).mul(l))
         .add(a.mul(c).mul(e.pow(2)).mul(r));
@@ -905,8 +904,7 @@ const PRED_FNS: Record<string, PredFn> = {
       igtQE(m, 0) ||
       intsQE(m.mul(2), p.mul(2)) ||
       intsQE(m, p.mul(4)) ||
-      (intsQE(m, p.add(third)) &&
-        (zeroQ(k(-1, 1, -3)) || zeroQ(k(-1, -2, 9))))
+      (intsQE(m, p.add(third)) && (zeroQ(k(-1, 1, -3)) || zeroQ(k(-1, -2, 9))))
     );
   },
 
@@ -917,15 +915,16 @@ const PRED_FNS: Record<string, PredFn> = {
     if (isLiteralRational(u)) return (realNum(u) ?? 0) > 0;
     return niceSqrtAux(u);
   },
-  FractionalPowerFactorQ: (args, ctx) =>
-    fracPowerFactorQ(build(args[0], ctx)),
+  FractionalPowerFactorQ: (args, ctx) => fracPowerFactorQ(build(args[0], ctx)),
   SimplerSqrtQ: (args, ctx) =>
-    simplerSqrtQ(build(args[0], ctx).evaluate(), build(args[1], ctx).evaluate()),
+    simplerSqrtQ(
+      build(args[0], ctx).evaluate(),
+      build(args[1], ctx).evaluate()
+    ),
 
   // --- function-class predicates ---
 
-  RationalFunctionQ: (args, ctx) =>
-    rationalFnQ(build(args[0], ctx), ctx.x),
+  RationalFunctionQ: (args, ctx) => rationalFnQ(build(args[0], ctx), ctx.x),
   AlgebraicFunctionQ: (args, ctx) =>
     algebraicFnQ(
       build(args[0], ctx),
@@ -1100,8 +1099,7 @@ function mmaTermKey(e: Expression): string[] {
 
 function mmaKeyLess(a: string[], b: string[]): boolean {
   const n = Math.min(a.length, b.length);
-  for (let i = 0; i < n; i++)
-    if (a[i] !== b[i]) return a[i] < b[i];
+  for (let i = 0; i < n; i++) if (a[i] !== b[i]) return a[i] < b[i];
   return a.length < b.length;
 }
 
@@ -1114,12 +1112,7 @@ function collectSymbolLeaves(e: Expression, out: string[]): void {
   // equal-prefix-shorter against b·c·d and steals First[] from it)
   if (e.operator === 'Power' && e.ops) {
     const k = e.ops[1].re;
-    if (
-      e.ops[1].isInteger &&
-      typeof k === 'number' &&
-      k > 1 &&
-      k <= 16
-    ) {
+    if (e.ops[1].isInteger && typeof k === 'number' && k > 1 && k <= 16) {
       const inner: string[] = [];
       collectSymbolLeaves(e.ops[0], inner);
       for (let i = 0; i < k; i++) out.push(...inner);
@@ -1129,15 +1122,9 @@ function collectSymbolLeaves(e: Expression, out: string[]): void {
   if (e.ops) for (const op of e.ops) collectSymbolLeaves(op, out);
 }
 
-function mapList(
-  arg: Json,
-  ctx: Ctx,
-  f: (u: Expression) => boolean
-): boolean {
+function mapList(arg: Json, ctx: Ctx, f: (u: Expression) => boolean): boolean {
   const items =
-    Array.isArray(arg) && arg[0] === 'List'
-      ? (arg as Json[]).slice(1)
-      : [arg];
+    Array.isArray(arg) && arg[0] === 'List' ? (arg as Json[]).slice(1) : [arg];
   return items.every((a) => f(build(a, ctx)));
 }
 
@@ -1290,8 +1277,7 @@ function negFormQ(u: Expression): boolean {
 /** sum terms of a base (Add/Subtract), through odd literal powers
  * (Rubi SumBaseQ companions); null when not a sum base */
 function sumBaseTerms(u: Expression): Expression[] | null {
-  if (u.operator === 'Add' || u.operator === 'Subtract')
-    return sumTermsX(u);
+  if (u.operator === 'Add' || u.operator === 'Subtract') return sumTermsX(u);
   if (u.operator === 'Power' && u.ops) {
     const k = realNum(u.ops[1]);
     if (k !== null && Number.isInteger(k) && Math.abs(k % 2) === 1)
@@ -1374,7 +1360,13 @@ function rtAuxBody(u: Expression, n: number): Expression {
     });
     if (iPos >= 0)
       return rtAux(fs[iPos], n).mul(
-        rtAux(productOf(ce, fs.filter((_, i) => i !== iPos)), n)
+        rtAux(
+          productOf(
+            ce,
+            fs.filter((_, i) => i !== iPos)
+          ),
+          n
+        )
       );
     // 2. a numeric-negative factor
     const iNeg = fs.findIndex((f) => {
@@ -1387,11 +1379,7 @@ function rtAuxBody(u: Expression, n: number): Expression {
       if (c.isSame(-1)) {
         // single inverted power: -1/w^k → 1/RtAux[-w^(-k)] — push the
         // sign inside the inversion
-        if (
-          rest.length === 1 &&
-          rest[0].operator === 'Power' &&
-          rest[0].ops
-        ) {
+        if (rest.length === 1 && rest[0].operator === 'Power' && rest[0].ops) {
           const [w, k] = rest[0].ops;
           const kv = realNum(k);
           if (kv !== null && kv < 0)
@@ -1399,9 +1387,7 @@ function rtAuxBody(u: Expression, n: number): Expression {
         }
         if (rest.length > 1) {
           // pair the -1 with the best sum-base factor
-          const pickBy = (
-            ...preds: ((f: Expression) => boolean)[]
-          ): number => {
+          const pickBy = (...preds: ((f: Expression) => boolean)[]): number => {
             for (const p of preds) {
               const i = rest.findIndex(p);
               if (i >= 0) return i;
@@ -1419,7 +1405,13 @@ function rtAuxBody(u: Expression, n: number): Expression {
           if (i < 0) i = pickBy(atomBaseQ);
           if (i < 0) i = 0;
           return rtAux(rest[i].neg().evaluate(), n).mul(
-            rtAux(productOf(ce, rest.filter((_, j) => j !== i)), n)
+            rtAux(
+              productOf(
+                ce,
+                rest.filter((_, j) => j !== i)
+              ),
+              n
+            )
           );
         }
         // -1 · single non-power factor
@@ -1434,23 +1426,29 @@ function rtAuxBody(u: Expression, n: number): Expression {
     // 3./4. double sign-flip pairings across two sum-base factors
     const iAll = fs.findIndex((f) => sumBaseQ(f) && allNegTermQ(f));
     if (iAll >= 0 && fs.some((f, i) => i !== iAll && sumBaseQ(f))) {
-      const rest = productOf(ce, fs.filter((_, i) => i !== iAll));
+      const rest = productOf(
+        ce,
+        fs.filter((_, i) => i !== iAll)
+      );
       return rtAux(fs[iAll].neg().evaluate(), n).mul(
         rtAux(rest.neg().evaluate(), n)
       );
     }
     const iNegSum = fs.findIndex(negSumBaseQ);
-    if (
-      iNegSum >= 0 &&
-      fs.some((f, i) => i !== iNegSum && negSumBaseQ(f))
-    ) {
-      const rest = productOf(ce, fs.filter((_, i) => i !== iNegSum));
+    if (iNegSum >= 0 && fs.some((f, i) => i !== iNegSum && negSumBaseQ(f))) {
+      const rest = productOf(
+        ce,
+        fs.filter((_, i) => i !== iNegSum)
+      );
       return rtAux(fs[iNegSum].neg().evaluate(), n).mul(
         rtAux(rest.neg().evaluate(), n)
       );
     }
     // 5. distribute the root over every factor
-    return productOf(ce, fs.map((f) => rtAux(f, n)));
+    return productOf(
+      ce,
+      fs.map((f) => rtAux(f, n))
+    );
   }
 
   // non-product
@@ -1665,7 +1663,11 @@ function combineBinProduct(p: BinParts, q: BinParts): BinParts | null {
   const { b, n: m } = p;
   const { b: d, n } = q;
   if (aZ && cZ)
-    return { a: p.a.engine.Zero, b: b.mul(d).evaluate(), n: m.add(n).evaluate() };
+    return {
+      a: p.a.engine.Zero,
+      b: b.mul(d).evaluate(),
+      n: m.add(n).evaluate(),
+    };
   if (aZ && zeroQ(m.add(n)))
     return { a: b.mul(d).evaluate(), b: b.mul(q.a).evaluate(), n: m };
   if (cZ && zeroQ(m.add(n)))
@@ -1693,7 +1695,12 @@ function trinomialPartsX(u: Expression, x: string): TriParts | null {
     if (coeffs[mid].isSame(0) || zeroQ(coeffs[mid])) return null;
     for (let i = 1; i < L - 1; i++)
       if (i !== mid && !(coeffs[i].isSame(0) || zeroQ(coeffs[i]))) return null;
-    return { a: coeffs[0], b: coeffs[mid], c: coeffs[L - 1], n: ce.number(mid) };
+    return {
+      a: coeffs[0],
+      b: coeffs[mid],
+      c: coeffs[L - 1],
+      n: ce.number(mid),
+    };
   }
 
   const ops = u.ops;
@@ -1797,10 +1804,7 @@ function trinomialPartsX(u: Expression, x: string): TriParts | null {
 function combineTriSum(
   u: { kind: 'bin'; p: BinParts } | { kind: 'tri'; p: TriParts },
   v: { kind: 'bin'; p: BinParts } | { kind: 'tri'; p: TriParts }
-):
-  | { kind: 'bin'; p: BinParts }
-  | { kind: 'tri'; p: TriParts }
-  | null {
+): { kind: 'bin'; p: BinParts } | { kind: 'tri'; p: TriParts } | null {
   // bin + bin → trinomial when one exponent doubles the other
   if (u.kind === 'bin' && v.kind === 'bin') {
     const { a: a3, b: b3, n: m } = u.p;
@@ -1934,7 +1938,9 @@ function genTrinomialPartsX(u: Expression, x: string): GenTriParts | null {
         jNum !== null && kNum !== null
           ? jNum < kNum
           : !posQ(safeSimplify(ej.sub(ek)));
-      const [qc, rc] = jIsQ ? [classes[j], classes[k]] : [classes[k], classes[j]];
+      const [qc, rc] = jIsQ
+        ? [classes[j], classes[k]]
+        : [classes[k], classes[j]];
       return { a: qc.coef, b: classes[i].coef, c: rc.coef, n: ei, q: qc.exp };
     }
     return null;
@@ -2134,9 +2140,7 @@ function quadraticMatchQ(u: Expression, x: string): boolean {
   const cls = monoClassesX(u, x);
   if (cls === null) return false;
   const exps = cls.map((c) => realNum(c.exp));
-  return (
-    exps.every((e) => e === 0 || e === 1 || e === 2) && exps.includes(2)
-  );
+  return exps.every((e) => e === 0 || e === 1 || e === 2) && exps.includes(2);
 }
 
 function trinomialMatchQ(u: Expression, x: string): boolean {
@@ -2150,9 +2154,7 @@ function trinomialMatchQ(u: Expression, x: string): boolean {
 
 function genBinomialMatchQ(u: Expression, x: string): boolean {
   const cls = monoClassesX(u, x);
-  return (
-    cls !== null && cls.length === 2 && cls.every((c) => !c.exp.isSame(0))
-  );
+  return cls !== null && cls.length === 2 && cls.every((c) => !c.exp.isSame(0));
 }
 
 function genTrinomialMatchQ(u: Expression, x: string): boolean {
@@ -2521,7 +2523,10 @@ function expandPartialFractions(u: Expression, ctx: Ctx): Expression {
     for (let m = 0; m < di.k; m++) {
       const j = di.k - m; // power of Lᵢ in this term
       const c = safeSimplify(
-        g.subs({ [x]: root }).evaluate().div(fact)
+        g
+          .subs({ [x]: root })
+          .evaluate()
+          .div(fact)
       );
       if (!c.isSame(0))
         terms.push(c.mul(di.b.pow(j)).mul(powOrOne(di.L, ce.number(-j))));
@@ -2538,8 +2543,7 @@ function expandPartialFractions(u: Expression, ctx: Ctx): Expression {
 
 function coeff(args: Json[], ctx: Ctx): Expression {
   const u = build(args[0], ctx);
-  const n =
-    args.length >= 3 ? (realNum(build(args[2], ctx)) ?? NaN) : 1;
+  const n = args.length >= 3 ? (realNum(build(args[2], ctx)) ?? NaN) : 1;
   if (!Number.isInteger(n)) return fail('Coefficient: non-integer degree');
   const coeffs = polyCoeffsX(u, ctx.x);
   if (coeffs === null) return fail('Coefficient: not a polynomial');
@@ -2547,11 +2551,7 @@ function coeff(args: Json[], ctx: Ctx): Expression {
 }
 
 function polyDiv(args: Json[], ctx: Ctx): [Expression, Expression] {
-  const q = polyDivideX(
-    build(args[0], ctx),
-    build(args[1], ctx),
-    ctx.x
-  );
+  const q = polyDivideX(build(args[0], ctx), build(args[1], ctx), ctx.x);
   if (q === null) return fail('PolynomialQuotient: division failed');
   return q;
 }

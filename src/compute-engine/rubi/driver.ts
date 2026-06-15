@@ -40,8 +40,7 @@ const DEBUG_FLOAT = process.env.RUBI_DEBUG_FLOAT !== undefined;
 const DEBUG_FIRE = process.env.RUBI_DEBUG_FIRE;
 // RUBI_NO_NATIVE_RATIONAL: disable the engine-native rational-function
 // fallback (see int()) — for measuring the Rubi rules in isolation.
-const NO_NATIVE_RATIONAL =
-  process.env.RUBI_NO_NATIVE_RATIONAL !== undefined;
+const NO_NATIVE_RATIONAL = process.env.RUBI_NO_NATIVE_RATIONAL !== undefined;
 function hasInexactFloat(e: Expression): boolean {
   if (e.isNumberLiteral) return (e as any).isExact === false;
   return e.ops?.some(hasInexactFloat) ?? false;
@@ -201,8 +200,7 @@ export class RubiDriver {
       this.intRec(e, variable, depth + 1);
     // inert unsolved subproblem — _fn to avoid the canonical Integrate
     // handler wrapping the integrand in a multi-variable Function literal
-    const inert = (e: Expression): Expression =>
-      ce._fn('Integrate', [e, x]);
+    const inert = (e: Expression): Expression => ce._fn('Integrate', [e, x]);
 
     // ---- structural prelude -------------------------------------------
     // The integrand here is in (synthetic) Times/Power normal form;
@@ -317,9 +315,7 @@ export class RubiDriver {
               hasInexactFloat(result) &&
               !hasInexactFloat(integrand)
             ) {
-              const fb = [...env.entries()].find(([, v]) =>
-                hasInexactFloat(v)
-              );
+              const fb = [...env.entries()].find(([, v]) => hasInexactFloat(v));
               console.error(
                 `[float] rule ${rule.id}\n  integrand: ${integrand}\n` +
                   (fb ? `  binding ${fb[0]}: ${fb[1]}\n` : '') +
