@@ -170,11 +170,19 @@ and `function-properties.test.ts` cover it. See the completed log.
 - **(a) branch-cut-safe simplification guards** — consult
   `branchCuts`/`holomorphicDomain` before applying an identity so a rewrite
   never crosses a branch cut.
-- **(c) symbolic limits & residues** — feed the pole/residue records into the
-  symbolic limit engine (B8) and a future `Residue` operator.
+- **(c) symbolic residues & limits** — a `Residue(f, x, a)` operator **landed
+  (2026-06-15)**: pole-order detection + the limit-based formula
+  (`symbolic/residue.ts`), with store-gated closed forms for `Gamma`/`Digamma`/
+  `Zeta` residues, including in products/quotients with an analytic cofactor
+  (`c·Gamma(x)`, `Gamma(x)/(x−5)`, `x²·Digamma(x)`) via the `Res[h·s] = h(a)·ρ`
+  factorization. *Remaining:* teach the symbolic limit engine (B8) special-
+  function pole asymptotics (so the generic path resolves them directly, and a
+  cofactor that is itself an unreduced special function — e.g. `Gamma·Zeta` at 1
+  — stops deferring), residue at infinity, and a "sum of residues in a region"
+  helper.
 
-**Effort:** open-ended; each is a design item in its own right, now startable
-from the populated store (`ce.functionProperties`).
+**Effort:** open-ended; (a) is a design item in its own right, startable from the
+populated store (`ce.functionProperties`).
 
 #### 8. Disjunctive guards (`Or`) in the assumptions system
 

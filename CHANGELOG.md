@@ -78,7 +78,9 @@
   `Residue(1/(x²-1), x, 1) → 1/2`, `Residue(eˣ/(x-1)², x, 1) → e`, and
   `Residue(cot(x), x, 0) → 1`. Residues of `Gamma`, `Digamma`, and `Zeta` at
   their poles use closed forms gated by the analytic-property store, e.g.
-  `Residue(Gamma(x), x, -2) → 1/2` and `Residue(Zeta(s), s, 1) → 1`.
+  `Residue(Gamma(x), x, -2) → 1/2` and `Residue(Zeta(s), s, 1) → 1` — including
+  in a product or quotient with an analytic cofactor, such as
+  `Residue(Gamma(x)/(x-5), x, -2) → -1/14`.
 
 ### Algebra and Solving
 

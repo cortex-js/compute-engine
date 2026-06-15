@@ -107,20 +107,18 @@ export function residue(
   return ce.function('Divide', [L, ce.number(factorialBig(order - 1))]);
 }
 
-// Closed-form residues for special functions whose pole structure the generic
-// limit method can't expand. Only fires when the metadata store confirms
-// `point` is a recorded pole of a bare application `Op(varName)`.
-function specialFunctionResidue(
-  body: Expression,
-  varName: string,
+// Special functions with simple poles whose closed-form residues the generic
+// limit method can't reach (it can't see the pole and would return a wrong 0).
+const SPECIAL_POLE_FNS = ['Gamma', 'Digamma', 'Zeta'] as const;
+
+// Residue ρ of the special function `op` at its simple pole `point`, gated by
+// the analytic-property store; `undefined` if `point` is not a recorded simple
+// pole of `op`.
+function simplePoleResidue(
+  op: string,
   point: Expression,
   ce: ComputeEngine
 ): Expression | undefined {
-  const op = body.operator;
-  if (!op) return undefined;
-
-  const ops = oo(body);
-  if (ops.length !== 1 || sym(ops[0]) !== varName) return undefined;
   if (point.im !== 0) return undefined;
   const re = point.re;
 
@@ -148,6 +146,39 @@ function specialFunctionResidue(
       // Simple pole at s = 1: residue = 1.
       if (re !== 1) return undefined;
       return ce.number(1);
+  }
+  return undefined;
+}
+
+// Residue of an expression whose only singularity at `point` is a simple pole
+// of a recognized special function `s = Op(varName)`. Factor `f = h · s` with
+// `h` analytic, so `Res[h·s] = h(point)·ρ` (ρ the residue of `s`). This handles
+// bare `Op(x)` (`h = 1`) and composite forms (`c·Gamma(x)`, `Gamma(x)/(x−5)`,
+// `x²·Digamma(x)`, …). It is gated on the body actually containing `Op(varName)`
+// — otherwise a point that happens to be a recorded pole of some special
+// function (e.g. `Zeta` at 1) would spuriously divide an unrelated body by it.
+function specialFunctionResidue(
+  body: Expression,
+  varName: string,
+  point: Expression,
+  ce: ComputeEngine
+): Expression | undefined {
+  const x = ce.symbol(varName);
+  for (const op of SPECIAL_POLE_FNS) {
+    if (!body.getSubexpressions(op).some((e) => sym(oo(e)[0]) === varName))
+      continue;
+    const rho = simplePoleResidue(op, point, ce);
+    if (rho === undefined) continue;
+
+    // Cofactor h = f / Op(x), which must be analytic at the point. If the body
+    // had another singularity there (e.g. Op(x)² or Op(x)/(x−a)), h stays
+    // singular → h(point) is not finite → skip (deferred), keeping the result
+    // sound rather than wrong. (A cofactor that is itself an unreduced special
+    // function — e.g. the Gamma·Zeta product at 1 — also defers.)
+    const h = ce.function('Divide', [body, ce.function(op, [x])]).simplify();
+    const hAtPoint = symbolicLimit(h, varName, point, undefined, ce);
+    if (hAtPoint !== undefined && hAtPoint.isFinite === true)
+      return ce.function('Multiply', [hAtPoint, rho]);
   }
   return undefined;
 }
