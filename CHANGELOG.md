@@ -95,6 +95,17 @@
   substituting `u = x²` (or `x³`, …), so the roots are exact radicals
   (`±√((√5−1)/2)`) instead of numeric approximations.
 
+- **`solve` handles equations that are polynomials in a single nonlinear
+  generator**, by substituting `u = g(x)` for a logarithmic, exponential,
+  trigonometric, or radical generator `g`, solving for `u`, and inverting. For
+  example `(ln x)² = 4 → e², e⁻²`, `e^{2x} − 3eˣ + 2 = 0 → 0, ln 2`, and
+  `√(ln x) = ln√x → 1, e⁴`.
+
+- **`solve` factors a zero product.** When an equation is a product whose
+  factors each involve the unknown — such as `ln(x)·(x − 1) = 0`, or an
+  already-factored `(x + 1)·cos³(3x) = 0` — its roots are the union of the roots
+  of each factor.
+
 - **`GCD` now finds common polynomial factors** for univariate and multivariate
   polynomials. Integer operands retain their existing behavior; use
   `PolynomialGCD()` when an explicit polynomial result of `1` is needed for
