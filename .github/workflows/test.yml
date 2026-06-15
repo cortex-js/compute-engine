@@ -65,6 +65,13 @@ jobs:
       - name: Recompile drift
         run: npx --yes tsx scripts/fungrim/recompile-drift.ts
 
+      # Re-derive the bundled analytic-property store (poles/zeros/branch
+      # cuts/... that back `ce.functionProperties` and pole-aware `N()`) from
+      # data/fungrim/properties.json and assert it matches the checked-in
+      # artifact (catches corpus or grouping drift).
+      - name: Analytic-property store freshness
+        run: npx --yes tsx scripts/fungrim/compile-properties.ts --check
+
       # Regenerate the bundled Rubi integration corpus and assert the
       # checked-in artifact is still in sync with data/rubi (catches corpus or
       # bundler drift that would ship stale/mis-prioritized integration rules).

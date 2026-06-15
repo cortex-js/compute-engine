@@ -100,6 +100,9 @@ import { SIMPLIFY_RULES } from './symbolic/simplify-rules';
 import { bigint } from './numerics/bigint';
 import { isValidSymbol } from '../math-json/symbols';
 
+import { getFunctionProperties } from './function-properties';
+import type { FunctionProperties } from './function-properties';
+
 import {
   lookupDefinition as lookupDefinitionImpl,
   declareSymbolValue as declareSymbolValueImpl,
@@ -1148,6 +1151,23 @@ export class ComputeEngine implements IComputeEngine {
       kind: v.isConstant ? 'constant' : 'variable',
       type: v.type,
     };
+  }
+
+  /**
+   * Return the known analytic properties of an operator — poles, zeros, branch
+   * points/cuts, residues, holomorphic/meromorphic domains — drawn from the
+   * Fungrim-derived metadata store, or `undefined` if none are recorded.
+   *
+   * ```ts
+   * ce.functionProperties('Gamma')?.poles?.toString(); // 'NonPositiveIntegers'
+   * ```
+   *
+   * The set-valued accessors (`poles`, `zeros`, ...) return a boxed set for the
+   * unconditional record of that kind; parametric / conditional records (e.g.
+   * residues that depend on parameters) are available via `entries`.
+   */
+  functionProperties(name: string): FunctionProperties | undefined {
+    return getFunctionProperties(this, name);
   }
 
   /**

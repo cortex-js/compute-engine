@@ -122,6 +122,11 @@ export type { BoxedFunction } from './compute-engine/boxed-expression/boxed-func
 export type { BoxedString } from './compute-engine/boxed-expression/boxed-string';
 export type { BoxedTensor } from './compute-engine/boxed-expression/boxed-tensor';
 
+export type {
+  FunctionProperties,
+  FunctionPropertyRecord,
+} from './compute-engine/function-properties';
+
 // ── Global registration ─────────────────────────────────────────────
 (globalThis as Record<symbol, unknown>)[
   Symbol.for('io.cortexjs.compute-engine')

@@ -75,6 +75,7 @@ import {
 import { cachedValue, CachedValue } from './cache';
 import { apply, lookup } from '../function-utils';
 import { checkDeadline } from '../../common/interruptible';
+import { applyPoleOverride } from '../function-properties';
 
 /** When `materialization` is true, display 10 items if the collection is
  * infinite, otherwise 5 from the head and 5 from the tail
@@ -1281,7 +1282,13 @@ export class BoxedFunction
       }
 
       // Fallback to a symbolic result if we could not evaluate
-      return evalResult ?? this.engine.function(this._operator, tail);
+      const result = evalResult ?? this.engine.function(this._operator, tail);
+
+      // 6b/ Pole-aware numeric evaluation: at a known pole, N() yields
+      // ComplexInfinity rather than NaN/garbage (analytic-property store).
+      if (numericApproximation)
+        return applyPoleOverride(this.engine, this._operator, tail, result);
+      return result;
     };
   }
 
@@ -1402,9 +1409,13 @@ export class BoxedFunction
         if (isScoped) this.engine._popEvalContext();
       }
 
-      return Promise.resolve(evaluateFn).then(
-        (result) => result ?? engine.function(this._operator, tail)
-      );
+      return Promise.resolve(evaluateFn).then((value) => {
+        const result = value ?? engine.function(this._operator, tail);
+        // 5b/ Pole-aware numeric evaluation (see the sync path).
+        if (numericApproximation)
+          return applyPoleOverride(engine, this._operator, tail, result);
+        return result;
+      });
     };
   }
 }
