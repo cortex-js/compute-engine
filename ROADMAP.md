@@ -43,72 +43,46 @@ not here.
 
 ### Symbolic capability gaps
 
-#### B9. `Solve` — remaining transcendental cases
+#### B9. `Solve` — beyond the Wester ceiling
 
-Base CE solves **14/21** of the Wester equations (SymPy 16/21). Higher-degree
-polynomials, `Abs`, same-base powers, sqrt-elimination, rational-power
-homogenization, **single-generator substitution** (`u = g(x)` for a logarithm,
-exponential, trig function, or radical generator — e.g. `(ln x)² = 4`,
-`e^{2x} − 3eˣ + 2 = 0`), and **zero-product factoring** (`f(x)·g(x) = 0`)
-all landed (see the completed log). The third historically-open case,
-`√(ln x) = ln√x → {1, e⁴}`, now solves: the generator substitution rewrites
-`ln√x → ½ ln x` and solves the resulting polynomial in `√(ln x)`.
+Base CE solves 14/21 of the Wester equations (the landed substitution and
+factoring work is in the completed log). The last two Wester gaps (`xˣ = x`,
+`sin x = tan x`) are harness artifacts — the harness grades SymPy's arbitrary
+finite root-slices, not a CE capability gap — so the Wester `Solve` score is
+saturated at our principled ceiling. Remaining work, judged on its own merits
+rather than by Wester:
 
-**The remaining 2 gaps to SymPy are harness artifacts, not capability gaps:**
-
-- `xˣ = x` — SymPy returns `{−1, 1}`. The principal solution `x = 1` would need
-  a logarithmic transform (`x ln x − ln x = 0` → `ln x·(x−1) = 0`, then
-  zero-product) — the LambertW / log-transform path. The second root `x = −1`
-  is an isolated negative-base branch (`(−1)⁻¹ = −1`) SymPy special-cases; it is
-  unreachable by real-domain solving.
-- `sin x = tan x` — the honest answer is the infinite family `x = nπ`. SymPy
-  returns an arbitrary finite slice `{0, −π, π, 2π}`, and the harness grades by
-  covering *those specific* roots, which no principled finite enumeration
-  matches. A factor-and-clear path (`tan → sin/cos`, clear denominators, factor
-  `sin x·(cos x − 1)`) reaches `{0, π}` at best — still a partial cover.
-
-**Opportunity to *exceed* SymPy:** `arcsin x = arctan x` (→ `{0}`) and
-`arccos x = arctan x` (→ `√((√5−1)/2)`) are cases where SymPy itself *errors*;
-CE currently also returns nothing (two independent inverse-trig generators), so
-solving either would move CE ahead of SymPy on that row.
-
-Enabling the solve templates (`loadIdentities(ce, { solve: true })`) targets
-the remaining LambertW / Ln-Exp inverse forms; the baseline gaps above are
-complementary. **Secondary:** the `Solve[…]` *operator* form (e.g. from parsed
-Mathematica/LaTeX) returns unevaluated and lets its `Equal` arg collapse to
-`False` — it should dispatch to the same machinery as `.solve()`. Surfaced by
-`benchmarks/audit/wester.ts` (the `Solve` rows). Tests: `solve.test.ts`
-"GENERATOR SUBSTITUTION (B9)" / "ZERO-PRODUCT FACTORING (B9)" / "TRANSCENDENTAL
-AND SUBSTITUTION EQUATIONS (B9)".
+- **Exceed SymPy on two inverse-trig equations** — `arcsin x = arctan x → {0}`
+  and `arccos x = arctan x → √((√5−1)/2)` *error out* in SymPy; CE also returns
+  nothing today (two independent inverse-trig generators). Solving either moves
+  CE ahead of SymPy.
+- **Dispatch the `Solve[…]` operator form to `.solve()`** — a parsed
+  `Solve[eq, x]` returns unevaluated and lets its `Equal` argument collapse to
+  `False` instead of solving (surfaced by `benchmarks/audit/wester.ts`).
+- **LambertW / Ln-Exp inverse forms** via the solve templates
+  (`loadIdentities(ce, { solve: true })`) — see the Fungrim coverage track.
 
 #### B11. Multivariate polynomial GCD — Stage C (Fateman-scale)
 
-Stage B (Brown's dense modular GCD) landed: the variadic `GCD` operator handles
-textbook multivariate GCDs (2–4+ variables, moderate degree), every result
-verified by exact division before return (a hard input only ever defers).
-The 7-variable **Fateman GCD benchmark** (Symbolica 4 s / Mathematica 89 s /
-SymPy 61 min) remains out of reach — it exceeds the dense algorithm's
-complexity cap and defers.
-
-**Next:** Brown is dense and single-prime; the gaps to close for
-Fateman-power-7-scale are **Zippel** sparse interpolation (dense interpolation
-is the bottleneck at 7 variables), **multi-prime CRT + rational reconstruction**
-(single large prime caps coefficient size), and faster `MPoly` arithmetic (the
-`Map`-keyed leading-term scan is O(terms) per call). The kernel
-(`boxed-expression/multivariate-poly.ts` + `multivariate-gcd.ts`) is **shared
-infrastructure** — multivariate factorization, `Cancel`/`Together`, partial
-fractions, and `Resultant` all want the same representation. Tracked against
-the `benchmarks/audit/` Fateman footnote.
+The variadic `GCD` handles textbook multivariate cases (Brown's dense modular
+GCD; completed log), but the 7-variable **Fateman GCD benchmark** (Symbolica 4 s
+/ Mathematica 89 s / SymPy 61 min) exceeds the dense algorithm's complexity cap
+and defers. To reach Fateman scale: **Zippel** sparse interpolation (dense
+interpolation is the bottleneck at 7 variables), **multi-prime CRT + rational
+reconstruction** (a single large prime caps coefficient size), and faster
+`MPoly` arithmetic (the `Map`-keyed leading-term scan is O(terms) per call). The
+kernel (`boxed-expression/multivariate-poly.ts` + `multivariate-gcd.ts`) is
+shared infrastructure — multivariate factorization, `Cancel`/`Together`, partial
+fractions, and `Resultant` all want the same representation. Tracked against the
+`benchmarks/audit/` Fateman footnote.
 
 #### B6. Audit-harness expansion
 
-The CE-vs-SymPy issue-finder (`benchmarks/audit/` — `audit.ts` + the Wester CAS
-suite in `wester.ts`) is built and graded by operation invariant; `wester.ts`
-already grades the `Solve`/`Resultant`/`GCD` heads and runs its `CE+R/F` engine
-through the real opt-in loaders (`loadIdentities` + `loadIntegrationRules`).
-**Next:** add the Bondarenko integration set. Rubi chapter translation — the
-lever for the indefinite-∫ gap (the `CE+R/F` column recovers only algebraic
-integrals today, 1 of 8) — is its own track now: see **Coverage tracks → Rubi**.
+The CE-vs-SymPy audit (`benchmarks/audit/`; completed log) already grades the
+`Solve`/`Resultant`/`GCD` heads through the real opt-in loaders. **Next:** add
+the Bondarenko integration set. (Rubi chapter translation — the lever for the
+indefinite-∫ gap, where `CE+R/F` recovers only 1 of 8 hard Wester integrals
+today — is its own track: see **Coverage tracks → Rubi**.)
 
 ### Coverage tracks
 
@@ -187,43 +161,28 @@ The item-17 / B-series performance pass is largely complete (`ln`, `exp`, `kˣ`,
 
 ### Strategic
 
-#### 7. Fungrim Phase 4 — branch-cut-safe simplify & symbolic residues
+#### 7. Fungrim Phase 4 — branch-cut-safe simplify & exact pole asymptotics
 
-**Done (2026-06-15) — the store, query API, and pole-aware `N()`:**
-`data/fungrim/properties.json` (poles, zeros, branch points/cuts, residues,
-holomorphic/meromorphic domains) is compiled by
-`scripts/fungrim/compile-properties.ts` into a core-bundled artifact (115
-records / 25 operators) and exposed via `ce.functionProperties(name)` — boxed
-accessors (`poles`, `zeros`, `branchCuts`, `holomorphicDomain`, …) for the
-unconditional records plus raw `entries` for parametric ones. The numeric
-evaluator now consults the pole records: at a known pole `f(z).N()` yields
-`ComplexInfinity` instead of NaN/garbage (fixes `Digamma(0)`/`Digamma(-2)`;
-leaves Gamma's `~oo` and Zeta's `+oo` untouched). A `--check` CI freshness gate
-and `function-properties.test.ts` cover it. See the completed log.
+The analytic-property store (`ce.functionProperties`, pole-aware `N()`), the
+`Residue` operator, and the `onBranchCut` guard are in place (completed log).
+Two consumers of the store are only partially built:
 
-**Remaining (open-ended design) — the two consumers the store was built to feed:**
-- **(a) branch-cut-safe simplification guards** — consult
-  `branchCuts`/`holomorphicDomain` before applying an identity so a rewrite
-  never crosses a branch cut.
-- **(c) symbolic residues & limits** — a `Residue(f, x, a)` operator **landed
-  (2026-06-15)**: pole-order detection + the limit-based formula
-  (`symbolic/residue.ts`), with store-gated closed forms for `Gamma`/`Digamma`/
-  `Zeta` residues, including in products/quotients with an analytic cofactor
-  (`c·Gamma(x)`, `Gamma(x)/(x−5)`, `x²·Digamma(x)`) via the `Res[h·s] = h(a)·ρ`
-  factorization. The symbolic limit engine also got a **soundness guard
-  (2026-06-15)**: it no longer returns a wrong finite value when a special
-  function sits at one of its poles (`lim_{x→-1}(x+1)·Digamma(x)` was a confident
-  `0`; it now defers — `symbolic/limit.ts`, detection via the pole-aware `N()`
-  store). *Remaining:* the harder half — **exact** asymptotic (Laurent) expansion
-  of special functions at poles, so the limit engine *computes* these (e.g.
-  `→ -1`) instead of deferring, and the generic residue path then handles
-  composite forms whose cofactor is itself an unreduced special function
-  (`Gamma·Zeta` at 1). A leading-term rewrite is unsound here
-  (`lim_{x→0} Gamma(x)−1/x = −γ`, not 0), so it needs real series machinery.
-  Also: residue at infinity, and a "sum of residues in a region" helper.
+- **(a) Branch-cut-safe simplification — extend beyond logarithms.** The guard
+  today protects only `ln(a) + ln(b) → ln(ab)` (`simplify-log.ts`). Apply the
+  same fail-closed `onBranchCut` membership check to the other identities that
+  can cross a cut: power/root products (`√a·√b → √(ab)`, `(ab)^p`), inverse-trig,
+  and the complex-domain Fungrim rules.
 
-**Effort:** open-ended; (a) is a design item in its own right, startable from the
-populated store (`ce.functionProperties`).
+- **(c) Exact asymptotics at special-function poles.** `Residue` and the limit
+  engine currently *defer* when a gamma/zeta-family function sits at a pole:
+  `lim_{x→-1}(x+1)·Digamma(x)` stays unevaluated instead of computing `-1`, and a
+  residue whose cofactor is itself an unreduced special function (`Gamma·Zeta` at
+  1) is not handled. Both need real Laurent-series asymptotics for these
+  functions — a leading-term rewrite is unsound (`lim_{x→0} Gamma(x) − 1/x = −γ`,
+  not 0). Smaller adjacent gaps: residue at infinity, and a "sum of residues in a
+  region" helper.
+
+**Effort:** open-ended; each is a design item in its own right.
 
 #### 8. Disjunctive guards (`Or`) in the assumptions system
 
@@ -247,8 +206,9 @@ dischargeable) quantifies exactly what it would buy. Let demand justify it.
 - **`doc/15-guide-patterns-and-rules.md`** — document the `Rule.purpose` tags
   (`simplify`/`transform`/`expand`), the `operators` dispatch hint, and
   `ce.solveRules`/`ce.harmonizationRules`.
-- **`doc/15b-guide-extended-rules.md`** — revisit the performance numbers if the
-  dispatch work (item 5) lands.
+- **`doc/15b-guide-extended-rules.md`** — refresh the performance numbers now
+  that per-head dispatch landed (item 5; loaded-simplify is now ~1.3× the
+  unloaded baseline).
 - If Tycho/GP consumes this release: add a `loadIdentities` section to the
   importer guide in the Tycho repo (consumer-facing docs live with the
   consumer).
@@ -336,6 +296,16 @@ Full detail for each is in git history, `CHANGELOG.md`, the linked source, and
 - **6. Corpus refresh** (2026-06-10, moot): upstream `fungrim` unchanged since
   the snapshot; instead published the translator fork and reported+fixed two
   upstream bug families via PRs; corpus regenerated (1,350 → 1,376 rules).
+- **7. Fungrim Phase 4 — store + first consumers** (2026-06-15): the
+  analytic-property metadata store (`data/fungrim/properties.json` → core
+  artifact via `compile-properties.ts`, queried by `ce.functionProperties`, with
+  a `--check` freshness gate) and pole-aware `N()` (`Digamma(0).N()` → `~oo`, not
+  NaN); the `Residue(f, x, a)` operator (pole-order detection + limit formula +
+  store-gated `Gamma`/`Digamma`/`Zeta` closed forms, incl. composite cofactors
+  like `Gamma(x)/(x−5)`); a special-function-pole soundness guard in the symbolic
+  limit engine (no wrong value at a pole); and the `onBranchCut` guard wired into
+  `ln(a)+ln(b)` simplification. The remaining branch-cut and exact-asymptotics
+  work is **Strategic item 7**.
 
 ### Bignum / numeric performance (item 17 + B1/B12/B13)
 
