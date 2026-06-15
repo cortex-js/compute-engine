@@ -144,8 +144,9 @@
   2,350 digits. Square root is roughly twice as fast at 1,000+ digits (a
   giant-steps integer square root), the natural logarithm switches to the faster
   arithmetic–geometric-mean method from around 700 digits (previously ~1,250),
-  and `Exp(x).N()` no longer recomputes `ln(e)` on every call — at 1,000 digits
-  it is about three times faster. Results are unchanged.
+  and a power no longer recomputes the logarithm of its base on every call — at
+  1,000 digits `Exp(x).N()` is about three times faster, and a repeated base such
+  as `2^x` or `10^x` about 2.8 times faster. Results are unchanged.
 
 - Odd roots of negative real numbers now use the real-root convention, so
   `Root(-8, 3)` and `(-8)^(1/3)` evaluate to `-2`.

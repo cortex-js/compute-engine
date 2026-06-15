@@ -656,9 +656,10 @@ Remaining items:
 
 **Bignum/numeric track status:** 17.13, 17.10, 17.11 all landed 2026-06-14
 (together: `Exp(x).N()` and `ln` at 1000 digits now beat mpmath; `sqrt` kernel
-~2× faster); 17.14 landed 2026-06-15. `BIGNUM-COMPARISON.md` and the CHANGELOG
-benchmark tables were regenerated 2026-06-15. Open: **17.12** (kernel polish,
-lowest impact) and **17.15** (base-2 special-function kernels, larger, deferred).
+~2× faster); 17.14 and 17.16 landed 2026-06-15. `BIGNUM-COMPARISON.md` and the
+CHANGELOG benchmark tables were regenerated 2026-06-15. Open: **17.12** (kernel
+polish, lowest impact) and **17.15** (base-2 special-function kernels, larger,
+deferred).
 
 ### 17.14 `BigDecimal.toPrecision` base-10 rounding tax — ✅ done (2026-06-15)
 
@@ -705,6 +706,26 @@ half that in mpmath, and is **not** closable without a different bigint backend,
 e.g. WASM GMP). Lower priority: the special functions are already 130–170×
 faster than the last release (0.59.0) and competitive for typical use; this is a
 "catch mpmath" item, not a correctness or capability gap.
+
+### 17.16 `kˣ` recomputes `ln(k)` per call — ✅ done (2026-06-15)
+
+**What:** the sibling of 17.13. `Power(k, x).N()` for a non-integer exponent and
+a base `k ≠ e` goes through `BigDecimal.pow` → `exp(x·ln k)`, recomputing `ln(k)`
+(a full high-precision logarithm, ~0.9ms at 1000 digits) on every call — so a
+loop over `2ˣ` / `10ˣ` paid it each time. (17.13 only special-cased the `e` base.)
+
+**Fix** (`big-decimal.ts`): memoize `ln(base)` in `pow`'s non-integer branch with
+a small most-recent cache (`cachedBaseLn`, 8 entries, oldest-evicted) keyed by the
+**exact** `(significand, exponent, working precision)`. A hit returns the identical
+value a fresh `base.ln()` would — **byte-identical** (verified: `2^(1/2)` ≡ `√2`;
+full suite green, zero churn) — and only a same-base, same-precision repeat hits,
+so a never-repeating base just cycles through with negligible overhead. **`2ˣ` /
+`10ˣ` at 1000 digits: ~1.4 → ~0.50ms (~2.8×)**, now level with `eˣ`.
+
+**Note:** the cache key includes the working precision, which depends on the
+*exponent magnitude* (the guard-digit `extra`), so `2^1.7` and `2^0.5` key
+separately — fine in practice (a loop varies the exponent within a similar range,
+so `ln 2` is computed once and reused).
 
 ### 5. Per-head aggregated rule dispatch
 

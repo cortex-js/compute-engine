@@ -936,7 +936,10 @@ export class BigDecimal {
     const savedPrec = BigDecimal.precision;
     BigDecimal.precision = savedPrec + extra;
     try {
-      return n.mul(this.ln()).exp().toPrecision(savedPrec);
+      // ln(base) is memoized: kˣ with a repeated base (e.g. 2ˣ, 10ˣ in a loop)
+      // would otherwise recompute a full high-precision logarithm every call.
+      const lnBase = cachedBaseLn(this, savedPrec + extra);
+      return n.mul(lnBase).exp().toPrecision(savedPrec);
     } finally {
       BigDecimal.precision = savedPrec;
     }
@@ -1145,6 +1148,31 @@ export class BigDecimal {
 // ================================================================
 // Internal helpers
 // ================================================================
+
+// Most-recent ln cache for `pow`'s non-integer branch (`exp(n·ln base)`). A
+// repeated base — kˣ with a constant k, e.g. 2ˣ / 10ˣ evaluated in a loop —
+// would otherwise recompute ln(k), a full high-precision logarithm, on every
+// call. Keyed by the exact significand, exponent, and working precision, so a
+// hit returns the identical value a fresh `base.ln()` would (byte-identical);
+// only a same-base, same-precision repeat hits. Fixed small size, oldest
+// evicted — bounded memory, and a never-repeating base just cycles through.
+const POW_LN_CACHE_SIZE = 8;
+const _powLnCache: { sig: bigint; exp: number; prec: number; ln: BigDecimal }[] =
+  [];
+
+function cachedBaseLn(base: BigDecimal, prec: number): BigDecimal {
+  const sig = base.significand;
+  const exp = base.exponent;
+  // Scan most-recent-first: the hot repeated base is the last inserted.
+  for (let i = _powLnCache.length - 1; i >= 0; i--) {
+    const e = _powLnCache[i];
+    if (e.prec === prec && e.exp === exp && e.sig === sig) return e.ln;
+  }
+  const ln = base.ln();
+  _powLnCache.push({ sig, exp, prec, ln });
+  if (_powLnCache.length > POW_LN_CACHE_SIZE) _powLnCache.shift();
+  return ln;
+}
 
 /**
  * Compute the Euler–Mascheroni constant γ to `digits` significant decimal
