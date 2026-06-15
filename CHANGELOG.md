@@ -160,6 +160,15 @@
 - Odd roots of negative real numbers now use the real-root convention, so
   `Root(-8, 3)` and `(-8)^(1/3)` evaluate to `-2`.
 
+- **`N()` of a non-unit rational power of a negative base no longer returns
+  `NaN`.** Previously only unit fractions worked (they route through
+  `Sqrt`/`Root`); `(-4)^{3/2}`, `(-8)^{2/3}`, and similar fell through to
+  `Math.pow(negative, non-integer) = NaN`. They now follow the same branch
+  conventions as the roots above: an even denominator takes the principal
+  complex value (`(-4)^{3/2} = -8i`, consistent with `Sqrt(-4) = 2i`), and an
+  odd denominator the real root (`(-8)^{2/3} = 4`, `(-8)^{5/3} = -32`,
+  consistent with `(-8)^{1/3} = -2`).
+
 - `N()` now fully evaluates applied functions and constants such as `e`, `i`,
   and expressions in Euler form.
 

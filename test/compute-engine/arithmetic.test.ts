@@ -450,6 +450,41 @@ describe('ROOT', () => {
     expect(n.re).toBeCloseTo(-0.5, 12);
     expect(n.im).toBe(0);
   });
+
+  // Non-unit rational powers of a negative base used to return NaN under N()
+  // (Math.pow(negative, non-integer) = NaN). They now compute the right value:
+  // an even denominator takes the principal complex branch, an odd denominator
+  // the real root (consistent with the unit-fraction cases above).
+  test(`Even-denominator rational power of a negative base is complex`, () => {
+    const a = ce.expr(['Power', -4, ['Rational', 3, 2]]).N(); // (-4)^{3/2} = -8i
+    expect(a.re).toBe(0);
+    expect(a.im).toBeCloseTo(-8, 12);
+
+    const b = ce.expr(['Power', -4, ['Rational', 5, 2]]).N(); // 32i
+    expect(b.re).toBe(0);
+    expect(b.im).toBeCloseTo(32, 12);
+
+    const c = ce.expr(['Power', -4, ['Rational', -3, 2]]).N(); // i/8
+    expect(c.re).toBe(0);
+    expect(c.im).toBeCloseTo(0.125, 12);
+  });
+
+  test(`Odd-denominator rational power of a negative base is the real root`, () => {
+    expect(ce.expr(['Power', -8, ['Rational', 2, 3]]).N().re).toBeCloseTo(4, 12);
+    expect(ce.expr(['Power', -8, ['Rational', 2, 3]]).N().im).toBe(0);
+    expect(ce.expr(['Power', -8, ['Rational', 5, 3]]).N().re).toBeCloseTo(
+      -32,
+      12
+    );
+    expect(ce.expr(['Power', -8, ['Rational', -2, 3]]).N().re).toBeCloseTo(
+      0.25,
+      12
+    );
+    // Consistent with ((-8)^{1/3})^2 = (-2)^2 = 4 (no branch non-confluence).
+    expect(
+      ce.expr(['Power', ['Power', -8, ['Rational', 1, 3]], 2]).N().re
+    ).toBeCloseTo(4, 12);
+  });
 });
 
 describe('INVALID ROOT', () => {

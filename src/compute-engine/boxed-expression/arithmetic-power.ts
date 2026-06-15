@@ -2,6 +2,7 @@ import type { NumericPrimitiveType, Type } from '../../common/type/types';
 import { BoxedType } from '../../common/type/boxed-type';
 import type { Expression } from '../global-types';
 import { SMALL_INTEGER } from '../numerics/numeric';
+import { rationalize } from '../numerics/rationals';
 import type { Rational } from '../numerics/types';
 
 import { asRational } from './numerics';
@@ -427,6 +428,66 @@ export function pow(
         if (isNumber(exp) && exp.im === 0)
           return ce.number(ce._numericValue(exp.numericValue).exp());
       }
+
+      // Negative real base with a non-integer real exponent. `Math.pow` (and
+      // the bignum path) return NaN here, so compute the value explicitly. We
+      // honor CE's branch conventions: an exact rational p/q with an *odd*
+      // denominator uses the real root (e.g. (-8)^{2/3} = 4, (-8)^{5/3} = -32),
+      // matching `Root(-8, 3) = -2`; everything else (even denominator, or an
+      // inexact exponent) takes the principal complex value, x = |x|·e^{iπ},
+      // so (x^e) = |x|^e·e^{iπe} (e.g. (-4)^{3/2} = -8i, consistent with
+      // Sqrt(-4) = 2i). Unit fractions never reach here — they canonicalize to
+      // Sqrt/Root, which already handle negative radicands.
+      {
+        const eVal =
+          typeof exp === 'number'
+            ? exp
+            : isNumber(exp) && exp.im === 0
+              ? exp.re
+              : undefined;
+        if (
+          x.isNegative === true &&
+          x.im === 0 &&
+          eVal !== undefined &&
+          !Number.isInteger(eVal)
+        ) {
+          // |x|^e, computed on the positive base (no re-entry: base > 0).
+          const absPow = pow(x.neg(), exp, { numericApproximation: true });
+          // Recover the exponent's rational p/q. Under .N() the exponent
+          // reaches here already numericized to a float, so asRational sees no
+          // exact value — reconstruct p/q from the float via continued
+          // fractions (faithful for the rationals that produced it).
+          const exact = typeof exp === 'number' ? undefined : asRational(exp);
+          let p: number | undefined;
+          let q: number | undefined;
+          if (exact !== undefined) {
+            p = Number(exact[0]);
+            q = Number(exact[1]);
+          } else {
+            const rr = rationalize(eVal);
+            if (Array.isArray(rr)) [p, q] = rr;
+          }
+          if (
+            q !== undefined &&
+            q % 2 !== 0 &&
+            Math.abs((p as number) / q - eVal) < 1e-12
+          ) {
+            // Odd denominator: real root. Sign from the numerator's parity.
+            return (p as number) % 2 !== 0 ? absPow.neg() : absPow;
+          }
+          // Even denominator or inexact exponent: principal complex value.
+          const angle = eVal * Math.PI;
+          let re = Math.cos(angle);
+          let im = Math.sin(angle);
+          // Snap the phase's exact zeros (e.g. half-integer e ⇒ ±i) so the
+          // result is clean: cos/sin of pπ/q is exactly 0 only at odd
+          // multiples of π/2, never merely small for a genuine value.
+          if (Math.abs(re) < 1e-12) re = 0;
+          if (Math.abs(im) < 1e-12) im = 0;
+          return absPow.mul(ce.number(ce.complex(re, im)));
+        }
+      }
+
       if (typeof exp === 'number') {
         return (
           apply(
