@@ -417,4 +417,22 @@ if (
   /apply-solve-templates\.(ts|js|mjs|cjs)$/.test(process.argv[1])
 ) {
   main();
+  // Refresh the derived user-facing reference (doc/98-reference-fungrim-
+  // identities.md) so it never goes stale relative to the artifact this step
+  // just finalized. Skipped on --check (CI gate; no write). Loaded via a
+  // dynamic import inside this script-only guard so gen-reference-doc's
+  // `import.meta` never reaches the CJS/jest path (this module is imported by
+  // tests, which must stay free of import.meta).
+  if (!process.argv.includes('--check')) {
+    void import('./gen-reference-doc')
+      .then((m) => m.generateReferenceDoc())
+      .catch((err) =>
+        // Best-effort: the artifact is already written; a doc-refresh failure
+        // is a warning, not a reason to fail the regen.
+        console.error(
+          '  (warning) reference doc refresh failed:',
+          err?.message ?? err
+        )
+      );
+  }
 }
