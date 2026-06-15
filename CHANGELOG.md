@@ -71,6 +71,8 @@
     `∫x√(1−x²) dx = −⅓(1−x²)^{3/2}`
   - Quotients by a sum of two square roots, e.g.
     `∫1/(√(a+bx)+√(c+bx)) dx`, by conjugate rationalization
+  - Absolute value of a linear argument, e.g. `∫|x| dx = x|x|/2` and
+    `∫|ax+b| dx = (ax+b)|ax+b|/(2a)` (valid for all `x`)
 
 - **Rational-function integration is more exact and complete.** Partial
   fractions now preserve rational and radical coefficients for a wider range of
