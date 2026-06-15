@@ -48,6 +48,12 @@ describe('OPERATOR oprel', () => {
       box       = ["GreaterEqual", ["Add", "x", "y"], ["Add", 1, 1]]
       canonical = ["LessEqual", 2, ["Add", "x", "y"]]
     `));
+
+  // `\ne` and `\neq` both parse to NotEqual (`\neq` is a parse-only alias).
+  test('x \\ne 1', () =>
+    expect(ce.parse('x \\ne 1').json).toEqual(['NotEqual', 'x', 1]));
+  test('x \\neq 1', () =>
+    expect(ce.parse('x \\neq 1').json).toEqual(['NotEqual', 'x', 1]));
 });
 
 describe('OPERATOR add/subtract', () => {

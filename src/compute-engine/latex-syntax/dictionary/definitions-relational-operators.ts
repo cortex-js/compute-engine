@@ -192,6 +192,15 @@ export const DEFINITIONS_INEQUALITIES: LatexDictionaryEntry[] = [
     precedence: 255,
   },
   {
+    // `\neq` is the more common spelling of `\ne` (≠); parse-only alias
+    // (serialization stays `\ne`).
+    latexTrigger: ['\\neq'],
+    kind: 'infix',
+    associativity: 'right',
+    precedence: 255,
+    parse: 'NotEqual',
+  },
+  {
     name: 'Unequal',
     latexTrigger: ['!', '='],
     kind: 'infix',
