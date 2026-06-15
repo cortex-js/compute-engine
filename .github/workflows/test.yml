@@ -50,6 +50,16 @@ jobs:
       - name: Artifact freshness
         run: npx --yes tsx scripts/fungrim/artifact-freshness.ts
 
+      # Regenerate the bundled Rubi integration corpus and assert the
+      # checked-in artifact is still in sync with data/rubi (catches corpus or
+      # bundler drift that would ship stale/mis-prioritized integration rules).
+      # The functional gate (loadIntegrationRules compiles the bundle and
+      # integrates a verified set of integrands) runs in the `test` job.
+      - name: Integration-rules bundle freshness
+        run: |
+          npx --yes tsx scripts/rubi/bundle-corpus.ts
+          git diff --exit-code -- src/compute-engine/rubi/rubi-rules-data.json
+
   lint:
     runs-on: ubuntu-latest
 
