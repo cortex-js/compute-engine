@@ -171,21 +171,22 @@ returned no usable result at that precision.
 
 | Expression | CE (current) | CE 0.59.0 | SymPy | math.js |
 | --- | --: | --: | --: | --: |
-| $\pi^2$ | 0.02 | 0.02 | 0.18 | 0.10 |
-| $\sin 1$ | 0.03 | 0.06 | 0.22 | 0.45 |
-| $\cos 1$ | 0.03 | 0.06 | 0.22 | 0.57 |
-| $\ln 2$ | 0.09 | 0.32 | 0.36 | 4.5 |
-| $e^{\pi}$ | 0.11 | 0.41 | 0.22 | 4.8 |
+| $\pi^2$ | 0.02 | 0.02 | 0.18 | 0.11 |
+| $\sin 1$ | 0.02 | 0.06 | 0.22 | 0.46 |
+| $\cos 1$ | 0.03 | 0.06 | 0.23 | 0.55 |
+| $\ln 2$ | 0.09 | 0.32 | 0.36 | 4.4 |
+| $e^{\pi}$ | 0.03 | 0.40 | 0.21 | 4.8 |
 | $\zeta(3)$ | 4.6 | — | 0.28 | — |
-| $\Gamma(\tfrac13)$ | 2.7 | 438 | 0.35 | — |
-| $\psi(\tfrac13)$ | 2.6 | 413 | 2.9 | — |
+| $\Gamma(\tfrac13)$ | 2.6 | 439 | 0.35 | — |
+| $\psi(\tfrac13)$ | 2.5 | 414 | 2.8 | — |
 
-Biggest gains over `0.59.0`: $\psi(\tfrac13)$ **161× faster**,
-$\Gamma(\tfrac13)$ **160× faster**, $e^{\pi}$ **3.7× faster**, $\ln 2$
-**3.4× faster**, $\sin 1$ / $\cos 1$ **2.0× faster**. The elementary functions
-widen further at 1000+ digits (e.g. $\ln 2$ ≈ 13× faster). `0.59.0` could not
-reach 200 digits for $\zeta(3)$ (it was capped near machine precision); math.js
-has no arbitrary-precision ζ/Γ/ψ.
+Biggest gains over `0.59.0`: $\Gamma(\tfrac13)$ **168× faster**,
+$\psi(\tfrac13)$ **166× faster**, $e^{\pi}$ **12× faster** (it no longer
+recomputes $\ln e$ on every call), $\ln 2$ **3.4× faster**, $\sin 1$ / $\cos 1$
+**~2.5× faster**. The elementary functions widen further at 1000+ digits (e.g.
+$\ln 2$ ≈ 21× faster, where it now also leads SymPy and mpmath). `0.59.0` could
+not reach 200 digits for $\zeta(3)$ (it was capped near machine precision);
+math.js has no arbitrary-precision ζ/Γ/ψ.
 
 #### Symbolic capability & performance
 
@@ -201,28 +202,28 @@ minified bundle.
 | Operation | CE (current) | CE + R/F | CE 0.59.0 | SymPy | math.js |
 | --- | :--: | :--: | :--: | :--: | :--: |
 | **Antiderivatives** |  |  |  |  |  |
-| $\int\frac{1}{\sqrt x}\,dx$ | 2.5× | 1.7× | — | 1× | — |
-| $\int\frac{x}{\sqrt{1-x^2}}\,dx$ | 29× | 22× | — | 1× | — |
-| $\int\frac{1}{x^3+1}\,dx$ | 6.0× | 23× | — | 1× | — |
+| $\int\frac{1}{\sqrt x}\,dx$ | 2.1× | 2.0× | — | 1× | — |
+| $\int\frac{x}{\sqrt{1-x^2}}\,dx$ | 28× | 20× | — | 1× | — |
+| $\int\frac{1}{x^3+1}\,dx$ | 3.0× | 23× | — | 1× | — |
 | $\int\frac{\sqrt x}{1+x}\,dx$ | — | 32× | — | 1× | — |
-| $\int\frac{x}{(1+x)^{1/3}}\,dx$ | — | 192× | — | 1× | — |
-| $\int\frac{x^2}{(1+x)^{1/3}}\,dx$ | — | 313× | — | 1× | — |
+| $\int\frac{x}{(1+x)^{1/3}}\,dx$ | — | 202× | — | 1× | — |
+| $\int\frac{x^2}{(1+x)^{1/3}}\,dx$ | — | 309× | — | 1× | — |
 | **Derivatives** |  |  |  |  |  |
-| $\tfrac{d}{dx}\sqrt{1-x^2}$ | 7.7× | 14× | 11× | 1× | 3.5× |
+| $\tfrac{d}{dx}\sqrt{1-x^2}$ | 7.2× | 13× | 10.0× | 1× | 2.7× |
 | **Simplification** |  |  |  |  |  |
 | $\sqrt{3+2\sqrt2}$ | ✓ | ✓ | — | — | — |
-| $\sqrt6\,x+\sqrt2\,x$ | 9.5× | 13× | 9.0× | 1× | 5.0× |
+| $\sqrt6\,x+\sqrt2\,x$ | 10× | 15× | 10.0× | 1× | 5.4× |
 | **Evaluation** |  |  |  |  |  |
-| $\lim_{x\to0}\tfrac{\sin x}{x}$ | 2.8× | 1.4× | — | 1× | — |
-| $\lim_{x\to\infty}(1+\tfrac1x)^x$ | 0.8× | 0.7× | — | 1× | — |
-| $\int_1^2\tfrac1x\,dx$ | 13× | 2.2× | — | 1× | — |
-| $\int_{-\infty}^{\infty} e^{-x^2}\,dx$ | 29× | 16× | — | 1× | — |
+| $\lim_{x\to0}\tfrac{\sin x}{x}$ | 2.7× | 1.4× | — | 1× | — |
+| $\lim_{x\to\infty}(1+\tfrac1x)^x$ | 0.7× | 0.7× | — | 1× | — |
+| $\int_1^2\tfrac1x\,dx$ | 15× | 2.6× | — | 1× | — |
+| $\int_{-\infty}^{\infty} e^{-x^2}\,dx$ | 35× | 17× | — | 1× | — |
 | **Solving** |  |  |  |  |  |
-| $x^4+x^2-1=0$ | 1.0× | 0.8× | — | 1× | — |
+| $x^4+x^2-1=0$ | 1.0× | 0.9× | — | 1× | — |
 | $x^3-x-1=0$ | 1.8× | 3.3× | — | 1× | — |
 
-Across the cases both solve, Compute Engine is a **median 9.5× faster than
-SymPy** (up to 313×), in the browser rather than a Python backend. The `—`
+Across the cases both solve, Compute Engine is a **median 10× faster than
+SymPy** (up to 309×), in the browser rather than a Python backend. The `—`
 entries under `0.59.0` show what is new this release: limits, exact
 definite/improper integrals, and polynomial solving. The bottom three
 antiderivative rows are integrals the base engine still leaves unevaluated but
