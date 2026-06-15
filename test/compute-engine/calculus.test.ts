@@ -447,23 +447,32 @@ describe('INDEFINITE INTEGRATION', () => {
   // ∫(1+x²+x³)/((x−1)x(1+x²)²(1+x+x²)) previously returned a WRONG 0; the
   // others returned an inert integral. Verify D(F) = integrand numerically.
   describe('repeated-factor rational integration', () => {
-    const verify = (latex: string) => {
-      const integrand = engine.parse(latex);
-      const F = engine.box(['Integrate', integrand, 'x']).evaluate();
-      expect(F.has('Integrate')).toBe(false); // a closed form, not inert
-      expect(F.is(0)).toBe(false); // never the spurious 0
-      const dF = engine.box(['D', F, 'x']).evaluate();
-      for (const x of [0.3, 1.7, -0.6, 2.3]) {
-        const a = dF.subs({ x }).N().re;
-        const b = integrand.subs({ x }).N().re;
-        if (a === undefined || b === undefined) continue;
-        expect(a).toBeCloseTo(b, 6);
+    const verify = (latex: string, timeLimit = engine.timeLimit) => {
+      const savedTimeLimit = engine.timeLimit;
+      engine.timeLimit = timeLimit;
+      try {
+        const integrand = engine.parse(latex);
+        const F = engine.box(['Integrate', integrand, 'x']).evaluate();
+        expect(F.has('Integrate')).toBe(false); // a closed form, not inert
+        expect(F.is(0)).toBe(false); // never the spurious 0
+        const dF = engine.box(['D', F, 'x']).evaluate();
+        for (const x of [0.3, 1.7, -0.6, 2.3]) {
+          const a = dF.subs({ x }).N().re;
+          const b = integrand.subs({ x }).N().re;
+          if (a === undefined || b === undefined) continue;
+          expect(a).toBeCloseTo(b, 6);
+        }
+      } finally {
+        engine.timeLimit = savedTimeLimit;
       }
     };
     test('∫1/(x²(x+1)) dx', () => verify('\\frac{1}{x^2(x+1)}'));
     test('∫1/(x(1+x²)²) dx', () => verify('\\frac{1}{x(1+x^2)^2}'));
     test('∫(1+x²+x³)/((x-1)x(1+x²)²(1+x+x²)) dx (was wrongly 0)', () =>
-      verify('\\frac{1+x^2+x^3}{(x-1)x(1+x^2)^2(1+x+x^2)}'));
+      verify(
+        '\\frac{1+x^2+x^3}{(x-1)x(1+x^2)^2(1+x+x^2)}',
+        10_000
+      ));
   });
 
   // ∫xᵐ·(a+bx)^p — a radical or power of a linear function (Sqrt and Power

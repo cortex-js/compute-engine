@@ -334,8 +334,10 @@ describe('COMPILATION PERFORMANCE', () => {
       log(`  Custom op execution: ${customExec.toFixed(2)}ms`);
       log(`  Overhead: ${(customExec - baselineExec).toFixed(2)}ms`);
 
-      // Should be comparable (function call overhead is small)
-      expect(customExec).toBeLessThan(baselineExec * 2);
+      // The baseline is only a few milliseconds, so a ratio is overly
+      // sensitive to timer and scheduler noise. Keep the added overhead below
+      // 2ms across 10,000 calls (0.2 microseconds per call).
+      expect(customExec - baselineExec).toBeLessThan(2);
     });
   });
 
