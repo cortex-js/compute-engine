@@ -8,8 +8,8 @@ Configs: **CE** = base shipping engine (no Rubi/Fungrim); **CE+R/F** = with the 
 
 Grading: factor/expand/simplify (value-equal to input), indefinite ∫ (`d/dx` ≈ integrand), and derivatives (≈ central difference) are **invariant-verified**. Limits and definite ∫ have no cheap reliable numeric oracle, so for those **correct = the tool returned a finite value**, with CE-vs-SymPy disagreements flagged (`≠`) separately.
 
-- **CE 25/48** · **CE+R/F 26/48** · **SymPy 37/48** correct.
-- Base CE trails SymPy on **12** cases; **1** of those recovered by Rubi/Fungrim.
+- **CE 26/48** · **CE+R/F 27/48** · **SymPy 37/48** correct.
+- Base CE trails SymPy on **11** cases; **1** of those recovered by Rubi/Fungrim.
 
 | Operation | CE | CE+R/F | SymPy |
 |---|--:|--:|--:|
@@ -17,12 +17,12 @@ Grading: factor/expand/simplify (value-equal to input), indefinite ∫ (`d/dx` �
 | Definite ∫ | 0/5 | 0/5 | 0/5 |
 | Derivative | 1/1 | 1/1 | 1/1 |
 | Limit | 4/6 | 4/6 | 6/6 |
-| Solve | 13/21 | 13/21 | 16/21 |
+| Solve | 14/21 | 14/21 | 16/21 |
 | Resultant | 1/1 | 1/1 | 1/1 |
 | Factoring | 4/4 | 4/4 | 4/4 |
 | Simplification | 2/2 | 2/2 | 2/2 |
 
-## Where CE trails SymPy (12)
+## Where CE trails SymPy (11)
 
 | File | Op | Input | CE | CE+R/F | CE result |
 |---|---|---|---|---|---|
@@ -37,7 +37,6 @@ Grading: factor/expand/simplify (value-equal to input), indefinite ∫ (`d/dx` �
 | limits | limit | `(x * ln(x) * ln(-x^2 + x * e` | ∅ | ∅ | `lim_(+oo) {(x * ln(x) * ln` |
 | equations | solve | `-x + x^x` | ∅ | ∅ | `[]` |
 | equations | solve | `-tan(x) + sin(x)` | ∅ | ∅ | `[]` |
-| equations | solve | `-ln(sqrt(x)) + sqrt(ln(x))` | ∅ | ∅ | `[]` |
 
 ---
 _Reproduce: `npx tsx benchmarks/audit/wester.ts`. Heads covered: indefinite & definite integration, derivatives, limits, factor/expand/simplify. Next: `Solve`, `PolynomialGCD`, `Resultant`, and improper/multivariate cases._
