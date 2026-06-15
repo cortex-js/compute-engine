@@ -58,6 +58,25 @@ export function symbolicLimit(
     // it so the structural strategies see the actual operator (Divide, Power…).
     let b = body;
     while (b.operator === 'Block' && oo(b)?.length === 1) b = o1(b);
+
+    // Soundness guard for special-function poles. The structural strategies
+    // (notably direct substitution) don't model the poles of Gamma/Digamma/…,
+    // so `(x+1)·Digamma(x)` at -1 substitutes `Digamma(-1)` as a finite symbol
+    // and returns a WRONG 0. If a special function provably blows up at a finite
+    // limit point, defer (return undefined) so the caller falls back to the
+    // numeric path rather than risk a wrong value. (Exact asymptotic expansion
+    // of these is future work — a leading-term rewrite is unsound, e.g.
+    // `lim_{x→0} Gamma(x) − 1/x = −γ`, not 0.) Detection uses the pole-aware
+    // `N()` store (item 7), so it covers any argument that lands on a pole.
+    if (point.isFinite === true && b.has(SPECIAL_POLE_FNS)) {
+      for (const fn of SPECIAL_POLE_FNS) {
+        for (const s of b.getSubexpressions(fn)) {
+          const at = s.subs({ [x]: point }).N();
+          if (at.isNaN === true || at.isFinite !== true) return undefined;
+        }
+      }
+    }
+
     const r = limitDispatch(b, x, point, dir ?? 0, ce, 0);
     if (r === undefined) return undefined;
     if (r.isNaN === true) return undefined;
@@ -66,6 +85,19 @@ export function symbolicLimit(
     return undefined;
   }
 }
+
+// Special functions whose poles the structural limit strategies don't model.
+// Elementary functions (ln, sin, …) are handled by the dispatch and excluded —
+// listing them here would needlessly defer limits like `lim x·ln x`.
+const SPECIAL_POLE_FNS = [
+  'Gamma',
+  'Digamma',
+  'Trigamma',
+  'PolyGamma',
+  'Zeta',
+  'Beta',
+  'GammaLn',
+];
 
 const MAX_DEPTH = 14;
 
