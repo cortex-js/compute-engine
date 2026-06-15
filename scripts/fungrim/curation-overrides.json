@@ -66,18 +66,8 @@
   }
  },
  "recompileDivergence": {
-  "$comment": "Allowlist for scripts/fungrim/recompile-drift.ts -- the 'no silent drops' gate. The checked-in simplify rules diverge from a clean compile-rules.ts run by exactly the entries below; the gate FAILS on any divergence NOT listed here, so a future silent drop/add is impossible. Root cause: the offline self-test validates each rule in ISOLATION (expr.replace(singleRule)), but some rules only fire as part of the FULL loaded rule set (other rules normalize first). The isolated self-test cannot reproduce that, so it reports a false no-fire and a recompile would drop a working rule. Each `dropped` entry is either a self-test FALSE-NEGATIVE (verified to fire at runtime -- keep) or a genuinely DEAD rule (safe to drop on the next regenerate). `added` entries are rules a fresh recompile emits that the artifact lacks. Keyed by bare entry id.",
-  "dropped": {
-   "5ada5f": "FALSE-NEGATIVE (keep). Which(...)->CarlsonRC(x,y) recognition; fires at runtime with the full rule set and x>0,y>0 guards (verified), but the isolated self-test no-fires it (multi-rule interaction it cannot reproduce).",
-   "718f3a": "FALSE-NEGATIVE (keep). Which(...)->CarlsonRC(x,y) (arccos/arcosh branch); same multi-rule-interaction false no-fire as 5ada5f; verified to fire at runtime.",
-   "a839d5": "FALSE-NEGATIVE (keep). CarlsonRC homogeneity lambda^(-1/2)*RC(x,y)->RC(lambda*x,lambda*y); an EXPANDING rule that fires via replace() (cost-gated out of simplify, like the other big-closed-form rules); isolated self-test no-fires.",
-   "2e0d99": "DEAD (safe to drop on regenerate). z^(-1/2) canonicalizes to 1/sqrt(z) = the replace side, so the rule is a structural no-op. Superseded by the live d0a331 (see `added`).",
-   "47f4ba": "DEAD (safe to drop on regenerate). JacobiTheta modular recognition whose match no longer reaches its target form under current canonicalization; does not usefully fire.",
-   "00cdb7": "DEAD (safe to drop on regenerate). CarlsonRC(x,-y) recognition with a stale 1/sqrt(x+y)*(artanh - i*pi/2) match pattern that no longer matches the canonical form; does not fire.",
-   "bc2f88": "DEAD (safe to drop on regenerate). CarlsonRC(-x,y) recognition, same stale-pattern non-firing as 00cdb7."
-  },
-  "added": {
-   "d0a331": "sqrt(1/z)->1/sqrt(z); a live rule a fresh recompile emits, currently absent from the artifact. It is the canonicalization-correct counterpart of the dead 2e0d99 and would be added on the next regenerate."
-  }
+  "$comment": "Allowlist for scripts/fungrim/recompile-drift.ts -- the 'no silent drops' gate. The gate full-recompiles the slice and FAILS if any committed simplify rule would be dropped (or any new rule added) without an entry here, so a future silent drop/add is impossible. The artifact is currently FULLY REPRODUCIBLE from compile-rules.ts (the self-test's sign-neutral fallback recovers the rules that only fire within the full rule set), so both lists are EMPTY -- any nonzero divergence is a real signal to investigate (a self-test false-negative to keep, a dead rule to drop, or a missing rule to add). Keyed by bare entry id.",
+  "dropped": {},
+  "added": {}
  }
 }

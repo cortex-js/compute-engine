@@ -80,7 +80,7 @@ describe('loadIdentities (full artifact)', () => {
       (r) => r.target === 'simplify'
     ).length;
     expect(report.loaded).toBe(simplifyCount);
-    expect(report.loaded).toBe(1376);
+    expect(report.loaded).toBe(1380);
     // The only default-load skips are the solve templates (solve-disabled).
     expect(report.skipped.every((s) => s.reason === 'solve-disabled')).toBe(
       true
@@ -98,14 +98,14 @@ describe('loadIdentities (full artifact)', () => {
 
   it('reports byTarget and byPurpose consistent with the artifact manifest', () => {
     expect(report.byTarget).toEqual({
-      simplify: 1376,
+      simplify: 1380,
       solve: 0,
       harmonization: 0,
     });
     expect(report.byPurpose).toEqual({
-      simplify: 1267,
+      simplify: 1269,
       transform: 0,
-      expand: 109,
+      expand: 111,
     });
     expect(
       report.byPurpose.simplify +

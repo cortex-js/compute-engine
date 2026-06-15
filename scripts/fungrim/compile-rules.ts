@@ -1223,10 +1223,61 @@ function selfTestScoped(
     }
     const r = fireTest(dewild);
     if (r.ok) return { ok: true, sampleKind: 'numeric' };
-    return { ok: false, reason: 'no-fire', detail: r.detail ?? symbolicDetail };
+    symbolicDetail = r.detail ?? symbolicDetail;
   } finally {
     ce.popScope();
   }
+
+  // 3d. Sign-neutral fallback (recovers self-test false-negatives). The
+  //     numeric/valued seeds (3b/3c) satisfy the guards by making a variable
+  //     KNOWN (a positive literal/value), but that knowledge triggers
+  //     sign-gated canonical folds (e.g. `Sqrt(1/x) → 1/Sqrt(x)` for x ≥ 0)
+  //     that diverge from the rule's sign-UNKNOWN wildcard pattern, so the
+  //     isolated single-rule match fails — even though the rule fires within
+  //     the full loaded rule set at runtime (other rules reconcile the two
+  //     √-forms). The guards are already known satisfiable (3b found a numeric
+  //     seed), so re-test the mechanical rewrite on a SIGN-NEUTRAL instance
+  //     (seed symbols carry only their guard-implied TYPE — no value, no
+  //     inequality assumption) with a CONDITION-FREE rule: guard SOUNDNESS is
+  //     enforced at runtime by the compiled guards, not by the self-test,
+  //     which only verifies the match→replace rewrite mechanics. This branch
+  //     is reached ONLY after 3a–3c fail, so it can only RECOVER a dropped
+  //     rule, never change a rule that already passes.
+  if (numeric !== null) {
+    ce.pushScope();
+    try {
+      const dewild: Record<string, MathJSON> = {};
+      for (const v of e.variables) {
+        dewild['_' + v] = v;
+        try {
+          ce.declare(v, seedTypes[v]);
+        } catch {
+          /* tolerate */
+        }
+      }
+      const unconditioned = ce.rules(
+        [
+          {
+            match: ce.box(matchW as never) as never,
+            replace: ce.box(replaceW as never) as never,
+            id: 'fungrim:' + e.id,
+          },
+        ],
+        { canonical: true }
+      );
+      const inst = ce.box(substituteWildcards(matchW, dewild) as never);
+      const expected = ce.box(substituteWildcards(replaceW, dewild) as never);
+      if (inst.isValid && expected.isValid) {
+        const r = inst.replace(unconditioned);
+        if (r !== null && (r.isSame(expected) || r.isEqual(expected) === true))
+          return { ok: true, sampleKind: 'symbolic' };
+      }
+    } finally {
+      ce.popScope();
+    }
+  }
+
+  return { ok: false, reason: 'no-fire', detail: symbolicDetail };
 }
 
 function findNumericSeed(

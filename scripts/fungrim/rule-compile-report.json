@@ -1,43 +1,43 @@
 {
   "generator": "scripts/fungrim/compile-rules.ts",
   "sliceEntries": 1650,
-  "emitted": 1376,
+  "emitted": 1380,
   "ledger": {
     "box-error": 16,
-    "compat-signature": 42,
+    "compat-signature": 41,
     "curated-exclude": 4,
     "duplicate-undirected": 14,
     "guard-uncompilable": 64,
     "lhs-not-value-form": 94,
-    "no-fire": 32,
+    "no-fire": 29,
     "not-equation": 8
   },
   "byPurpose": {
-    "expand": 109,
-    "simplify": 1267
+    "expand": 111,
+    "simplify": 1269
   },
   "byClass": {
-    "identity": 1051,
+    "identity": 1055,
     "specific-value": 325
   },
   "byTarget": {
-    "simplify": 1376
+    "simplify": 1380
   },
   "sampleKinds": {
     "numeric": 41,
-    "symbolic": 1335
+    "symbolic": 1339
   },
   "headBuckets": {
-    "Multiply": 270,
-    "Add": 213,
-    "Divide": 92,
+    "Multiply": 271,
+    "Add": 215,
+    "Divide": 93,
     "JacobiTheta": 62,
     "Apply": 60,
     "Which": 44,
     "CarlsonRJ": 36,
     "Negate": 35,
     "CarlsonRF": 25,
-    "GCD": 24,
+    "GCD": 25,
     "CarlsonRD": 20,
     "HurwitzZeta": 20,
     "Power": 20,
@@ -49,13 +49,13 @@
     "ModularJ": 16,
     "CarlsonRG": 14,
     "Digamma": 14,
+    "LCM": 14,
     "ChebyshevT": 13,
     "EllipticK": 13,
-    "LCM": 13,
-    "CarlsonRC": 12,
     "DedekindEta": 12,
     "ModularLambda": 12,
-    "Sqrt": 12,
+    "CarlsonRC": 11,
+    "Sqrt": 11,
     "Conjugate": 9,
     "Imaginary": 9,
     "Abs": 8,
@@ -125,7 +125,7 @@
     "WeierstrassSigma": 1,
     "WeierstrassZeta": 1
   },
-  "declaredShells": 104,
+  "declaredShells": 103,
   "injected": [
     "zeta-trivial-zeros"
   ],
@@ -384,6 +384,11 @@
       "detail": "symbol"
     },
     {
+      "id": "2e0d99",
+      "reason": "no-fire",
+      "detail": "rule did not fire"
+    },
+    {
       "id": "2f4f74",
       "reason": "no-fire",
       "detail": "rule did not fire"
@@ -442,11 +447,6 @@
       "id": "3fc797",
       "reason": "lhs-not-value-form",
       "detail": "symbol"
-    },
-    {
-      "id": "3fe553",
-      "reason": "compat-signature",
-      "detail": "no-fire: rule did not fire"
     },
     {
       "id": "3ff35f",
@@ -609,11 +609,6 @@
       "detail": "same equality as 61f98d"
     },
     {
-      "id": "646745",
-      "reason": "no-fire",
-      "detail": "rule did not fire"
-    },
-    {
       "id": "649dc0",
       "reason": "guard-uncompilable",
       "detail": "unsupported conjunct \"Or\""
@@ -742,11 +737,6 @@
       "id": "791c44",
       "reason": "guard-uncompilable",
       "detail": "unsupported conjunct \"Or\""
-    },
-    {
-      "id": "792f7b",
-      "reason": "no-fire",
-      "detail": "rule did not fire"
     },
     {
       "id": "7b5755",
@@ -1174,11 +1164,6 @@
       "detail": "Apply"
     },
     {
-      "id": "cb9f61",
-      "reason": "no-fire",
-      "detail": "rule did not fire"
-    },
-    {
       "id": "cbf396",
       "reason": "lhs-not-value-form",
       "detail": "symbol"
@@ -1202,11 +1187,6 @@
       "id": "d09380",
       "reason": "compat-signature",
       "detail": "2-arg LambertW/Digamma"
-    },
-    {
-      "id": "d0a331",
-      "reason": "no-fire",
-      "detail": "rule did not fire"
     },
     {
       "id": "d17d0b",

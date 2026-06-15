@@ -61,28 +61,37 @@ completeness.
   `solve()`'s `validateRoots` confirms each candidate. Domain guards are
   dropped; the loader attaches the no-capture filter + `useVariations` for
   `target:'solve'` rules.
-- **A dedicated post-step, not a recompile.** Activation lives in
+- **Activation as a post-step.** The solve overlay lives in
   `scripts/fungrim/apply-solve-templates.ts` (idempotent, `--check` CI gate),
-  a surgical overlay on the existing simplify rules — `compile-rules.ts` was
-  left untouched. This was a deliberate call: a full slice recompile against
-  the current engine drops 7 stale simplify rules, 3 of which are CarlsonRC
-  recognition rules that fire at runtime but trip the offline self-test — i.e.
-  a full resync would silently lose working rules. The artifact gained exactly
-  +5 solve rules with zero churn to existing rules.
-- **Self-test isolation + the "no silent drops" gate (the real fix).** Root
-  cause of the 7-rule recompile drift: the offline self-test validates each
-  rule in ISOLATION (`expr.replace(singleRule)`), but several rules only fire
-  within the FULL loaded rule set (other rules normalize first), so the
-  isolated test false-no-fires them — a faithful isolated self-test is not
-  achievable. Rather than chase the self-test, `scripts/fungrim/recompile-drift.ts`
-  (new CI gate) does a full recompile and FAILS if any committed simplify rule
-  would be silently dropped (or any new rule silently added) unless it is
-  allowlisted in `curation-overrides.json` `recompileDivergence` with a
-  justification. The current 8 divergences (3 firing false-negatives kept,
-  4 dead, + the live `d0a331` a recompile would add) are documented there;
-  any FUTURE drift is now a loud, attributed failure. A clean regenerate
-  (drop the 4 dead, add `d0a331`, keep the 3 via the gate's guidance) remains
-  available but is held until the bignum-track WIP settles.
+  derived from the existing simplify rules and re-applied after any
+  `compile-rules.ts` run. Loaded only under `loadIdentities(ce, { solve: true })`.
+- **Self-test root-cause fix + the "no silent drops" gate.** A clean
+  `compile-rules.ts` recompile used to drop 10 simplify rules that fire at
+  runtime — a self-test false-negative. ROOT CAUSE: the offline self-test
+  satisfies a rule's guard condition by ASSUMING its guards (`x>0`) on the
+  seed symbols, but that assumption activates the sign-gated `√` fold
+  (`Sqrt(1/x) → 1/Sqrt(x)`, valid only for known-nonnegative `x`), which
+  re-canonicalizes the seeded instance away from the rule's sign-unknown
+  wildcard pattern, so the isolated single-pass `replace()` no longer matches.
+  At runtime the full rule set reconciles the two `√`-forms, so the rule fires.
+  FIX (`selfTest` phase 3d in `compile-rules.ts`): on the no-fire path only —
+  after the guards are already known satisfiable — re-test the rewrite on a
+  SIGN-NEUTRAL instance (seed symbols carry their guard *type* but no
+  inequality assumption) with a condition-free rule (guard soundness is
+  enforced at runtime by the compiled guards). Additive and safe by
+  construction (cannot change a rule that already passes); deterministic;
+  recovers 10 genuine false-negatives (CarlsonRC/RF recognition + homogeneity,
+  a JacobiTheta modular identity, the Gauss digamma `3fe553`, a Zeta series,
+  GCD/LCM scaling) and drops only the genuine no-op `2e0d99` (superseded by the
+  live `d0a331`). The artifact was then **regenerated and is now fully
+  reproducible** (1380 simplify + 5 solve = 1385). `scripts/fungrim/recompile-drift.ts`
+  (new CI gate) full-recompiles and FAILS on any drop/add not allowlisted in
+  `curation-overrides.json` `recompileDivergence` — currently **empty** (zero
+  divergence), so any future drift is a loud, attributed failure.
+  (The deepest cause — non-confluent `√` canonicalization across
+  assumption contexts — is an engine matter left for the bignum/power-canon
+  track; its only observed impact is on single-rule application, which the
+  full rule set and now the self-test both handle.)
 - **Mining audit.** The post-step scans every identity rule for the
   inverse-composition shape and reports candidates not yet curated; the
   current corpus surfaces only degenerate (`f(z)=z`), two-variable (`Re(x+iy)`),
