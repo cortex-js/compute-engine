@@ -1,4 +1,5 @@
 import { Complex } from 'complex-esm';
+import './complex-esm-augment'; // adds the 1-arg `Complex.equals` overload
 
 // Lanczos approximation coefficients (g = 7, n = 9), accurate to ~15 digits
 // for the principal branch. See Numerical Recipes / mathjs gamma().

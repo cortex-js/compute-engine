@@ -375,7 +375,7 @@ function matchVariations(
   const ce = expr.engine;
   const varOptions = { ...options, acceptVariants: false };
 
-  const matchVariation = (op, ops) =>
+  const matchVariation = (op: string, ops: ReadonlyArray<ExpressionInput>) =>
     matchOnce(
       ce.function(op, ops, { form: 'raw' }),
       pattern,

@@ -1,5 +1,11 @@
 {
   "extends": "./tsconfig.json",
+  "compilerOptions": {
+    // This config also lints test/ and tutorials/, which live outside ./src
+    // and rely on jest globals.
+    "rootDir": ".",
+    "types": ["node", "jest"]
+  },
   "include": [
     ".eslintrc.js",
     "./src",

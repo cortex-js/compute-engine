@@ -654,13 +654,14 @@ function serializeJsonNumber(
 
       // Note: implement same logic as in ExactNumericValue.toJSON()
 
+      const exactValue = value;
       const rationalExpr = (r: Rational) => {
         if (isInteger(r))
-          return serializeJsonNumber(ce, value.rational[0], options);
+          return serializeJsonNumber(ce, exactValue.rational[0], options);
         return [
           'Rational',
-          serializeJsonNumber(ce, value.rational[0], options),
-          serializeJsonNumber(ce, value.rational[1], options),
+          serializeJsonNumber(ce, exactValue.rational[0], options),
+          serializeJsonNumber(ce, exactValue.rational[1], options),
         ] as MathJsonExpression;
       };
 

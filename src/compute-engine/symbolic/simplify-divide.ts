@@ -162,7 +162,7 @@ export function simplifyDivide(x: Expression): RuleStep | undefined {
         let result = 1n;
         for (let i = aVal + 1n; i <= bVal; i++) result *= i;
         return {
-          value: ce.number([1, result]),
+          value: ce.number([1n, result]),
           because: 'n!/k! -> 1/(partial product)',
         };
       }

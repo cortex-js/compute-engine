@@ -74,7 +74,7 @@ export function loadIntegrationRules(
       f.operator === 'Block' ||
       f.operator === 'Delimiter'
     )
-      f = f.op1;
+      f = f.op1!; // Function/Block/Delimiter always have a first operand
     const result = driver.int(f, variable);
     // Only a fully-closed antiderivative is usable; a residual inert
     // `Integrate` means the rules couldn't finish — defer to the built-in

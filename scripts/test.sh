@@ -14,7 +14,9 @@ export TEST="true"
 
 run_declaration_type_tests() {
     echo -e "\n🧐 Running Declaration Type test suite..."
-    npx tsc --noEmit --baseUrl ./dist/types ./test/public-ts-declarations/main.ts
+    # TS 6.0.3: --ignoreConfig avoids TS5112 (tsconfig present + files on CLI);
+    # --ignoreDeprecations silences the baseUrl deprecation (TS5101).
+    npx tsc --noEmit --ignoreConfig --ignoreDeprecations 6.0 --baseUrl ./dist/types ./test/public-ts-declarations/main.ts
     echo -e "\033[2K\033[80D\033[32m✔ \033[0m Declaration Type test suite complete"
 }
 

@@ -78,7 +78,7 @@ export abstract class NumericValue {
    *
    * Can be negative, zero or positive.
    */
-  im: number;
+  im!: number; // Assigned by every concrete subclass constructor.
 
   get bignumIm(): BigDecimal | undefined {
     return undefined;

@@ -76,7 +76,7 @@ function trySerializeDotNotation(
   return `${lhs}${suffix}`;
 }
 
-const ACCENT_MODIFIERS = {
+const ACCENT_MODIFIERS: Record<string, (s: string) => string> = {
   deg: (s: string) => `${s}\\degree`,
   prime: (s: string) => `${s}^{\\prime}`,
   dprime: (s: string) => `${s}^{\\doubleprime}`,
@@ -98,20 +98,20 @@ const ACCENT_MODIFIERS = {
   check: (s: string) => `\\check{${s}}`,
 };
 
-const STYLE_MODIFIERS = {
-  upright: (s) => `\\mathrm{${s}}`,
-  italic: (s) => `\\mathit{${s}}`,
-  bold: (s) => `\\mathbf{${s}}`,
-  script: (s) => `\\mathscr{${s}}`,
-  fraktur: (s) => `\\mathfrak{${s}}`, // Note Unicode uses 'fraktur' for 'gothic'
-  doublestruck: (s) => `\\mathbb{${s}}`, // Unicode uses 'double-struck' for 'blackboard'
+const STYLE_MODIFIERS: Record<string, (s: string) => string> = {
+  upright: (s: string) => `\\mathrm{${s}}`,
+  italic: (s: string) => `\\mathit{${s}}`,
+  bold: (s: string) => `\\mathbf{${s}}`,
+  script: (s: string) => `\\mathscr{${s}}`,
+  fraktur: (s: string) => `\\mathfrak{${s}}`, // Note Unicode uses 'fraktur' for 'gothic'
+  doublestruck: (s: string) => `\\mathbb{${s}}`, // Unicode uses 'double-struck' for 'blackboard'
 
   // Supplemental
-  blackboard: (s) => `\\mathbb{${s}}`,
-  calligraphic: (s) => `\\mathcal{${s}}`,
-  gothic: (s) => `\\mathfrak{${s}}`,
-  sansserif: (s) => `\\mathsf{${s}}`,
-  monospace: (s) => `\\mathtt{${s}}`,
+  blackboard: (s: string) => `\\mathbb{${s}}`,
+  calligraphic: (s: string) => `\\mathcal{${s}}`,
+  gothic: (s: string) => `\\mathfrak{${s}}`,
+  sansserif: (s: string) => `\\mathsf{${s}}`,
+  monospace: (s: string) => `\\mathtt{${s}}`,
 };
 
 export class Serializer {
@@ -123,9 +123,9 @@ export class Serializer {
     options: SerializeLatexOptions
   ) {
     this.dictionary = dictionary;
-    // Ensure all required properties are present with defaults
+    // Ensure all optional properties are present with defaults
+    // (`dotNotation` is required on `options`, so no default is needed for it)
     this.options = {
-      dotNotation: false,
       dmsFormat: false,
       angleNormalization: 'none',
       ...options,
@@ -225,11 +225,17 @@ export class Serializer {
     // Map Unicode characters to LaTeX commands
     if (openFence === '"') openFence = '``';
     else if (openFence === '|') openFence = '\\lvert';
-    else openFence = DELIMITERS_SHORTHAND[openFence] ?? openFence;
+    else
+      openFence =
+        DELIMITERS_SHORTHAND[openFence as keyof typeof DELIMITERS_SHORTHAND] ??
+        openFence;
 
     if (closeFence === '"') closeFence = "''";
     else if (closeFence === '|') closeFence = '\\rvert';
-    else closeFence = DELIMITERS_SHORTHAND[closeFence] ?? closeFence;
+    else
+      closeFence =
+        DELIMITERS_SHORTHAND[closeFence as keyof typeof DELIMITERS_SHORTHAND] ??
+        closeFence;
 
     if (openFence === '.' && closeFence === '.') return s;
 

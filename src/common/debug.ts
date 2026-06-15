@@ -5,8 +5,8 @@ const LINEBREAK = /\r\n|[\n\r\u2028\u2029]/;
 export class Origin {
   url: string;
   source: string;
-  _lines: string[];
-  _lineOffsets: number[];
+  _lines?: string[];
+  _lineOffsets?: number[];
 
   constructor(source: string, url?: string) {
     this.source = source;

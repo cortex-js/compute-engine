@@ -134,7 +134,7 @@ const COLOR_PALETTE = {
 };
 
 function rgbAnsi(color: string): number[] {
-  const hexCode = COLOR_PALETTE[color];
+  const hexCode = (COLOR_PALETTE as Record<string, string | undefined>)[color];
 
   if (hexCode === undefined) return [];
 
@@ -145,7 +145,7 @@ function rgbAnsi(color: string): number[] {
     rgb = rgbArray.slice(1).map((x) => parseInt(x, 16));
   } else {
     rgbArray = hexCode.match(/#([\da-f])([\da-f])([\da-f])/i);
-    rgb = rgbArray.slice(1).map((x) => 16 * parseInt(x, 16));
+    rgb = rgbArray!.slice(1).map((x) => 16 * parseInt(x, 16));
   }
 
   return rgb;
@@ -158,7 +158,10 @@ export function ansiFgColor(
   if (mode === 'none') return [];
   if (color === 'default') return [39];
   if (mode === 'basic') {
-    const code = typeof color === 'string' ? TERMINAL_COLORS[color] : color;
+    const code =
+      typeof color === 'string'
+        ? (TERMINAL_COLORS as Record<string, number | undefined>)[color]
+        : color;
     if (code === undefined) return [];
     if (code < 8) return [30 + code];
     return [90 + code - 8];
@@ -181,7 +184,7 @@ export function ansiBgColor(
 
   if (color === 'default') return [49];
   if (mode === 'basic') {
-    const code = TERMINAL_COLORS[color];
+    const code = (TERMINAL_COLORS as Record<string, number | undefined>)[color];
     if (code === undefined) return [];
     if (code < 8) return [40 + code];
     return [100 + code - 8];

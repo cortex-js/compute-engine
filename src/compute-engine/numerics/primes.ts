@@ -90,7 +90,7 @@ export function primeFactors(n: number): { [factor: number]: number } {
   );
   //https:rosettacode.org/wiki/Prime_decomposition#JavaScript
   if (n <= 3) return { [n]: 1 };
-  const result = {};
+  const result: { [factor: number]: number } = {};
   // Wheel factorization
   let count = 0;
   while (n % 2 === 0) {
@@ -296,7 +296,8 @@ export function bigPrimeFactors(d: bigint): Map<bigint, number> {
   if (d < Number.MAX_SAFE_INTEGER) {
     const factors = primeFactors(Number(d));
     const result = new Map<bigint, number>();
-    for (const f of Object.keys(factors)) result.set(bigint(f)!, factors[f]);
+    for (const f of Object.keys(factors))
+      result.set(bigint(f)!, factors[Number(f)]);
     return result;
   }
 

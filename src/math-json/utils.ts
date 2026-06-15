@@ -231,7 +231,7 @@ export function dictionaryFromExpression(
 
   // Is it a Dictionary expression?
   if (operator(expr) === 'Dictionary') {
-    const dict = {};
+    const dict: Record<string, DictionaryValue> = {};
     // `operands()` is already 0-based and head-stripped — iterate from the
     // first operand (the loop used to start at 1, silently dropping the first
     // dictionary entry).
@@ -481,11 +481,15 @@ export function countLeaves(expr: MathJsonExpression | null): number {
 
   const dict = dictionaryFromExpression(expr);
   if (dict) {
-    const keys = Object.keys(dict);
+    const dictRecord = dict as unknown as Record<
+      string,
+      MathJsonExpression | null
+    >;
+    const keys = Object.keys(dictRecord);
     return (
       1 +
       keys.length +
-      keys.reduce<number>((acc, x) => acc + countLeaves(dict[x]), 0)
+      keys.reduce<number>((acc, x) => acc + countLeaves(dictRecord[x]), 0)
     );
   }
 

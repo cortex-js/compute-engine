@@ -217,7 +217,7 @@ const DELIMITER_SHORTHAND: { [key: string]: LatexToken[] } = {
  * closing commands.
  */
 
-const OPEN_DELIMITER_PREFIX = {
+const OPEN_DELIMITER_PREFIX: Record<string, string> = {
   '\\left': '\\right',
   '\\bigl': '\\bigr',
   '\\Bigl': '\\Bigr',
@@ -247,7 +247,7 @@ const OPEN_DELIMITER_PREFIX = {
 /**
  * Map open delimiters to a matching close delimiter
  */
-const CLOSE_DELIMITER = {
+const CLOSE_DELIMITER: Record<string, string> = {
   '(': ')',
   '[': ']',
   '|': '|',
@@ -1115,15 +1115,17 @@ export class _Parser implements Parser {
     }
 
     // If we are using a shorthand delimiter, we need to add the
-    // corresponding close delimiter.
-    close = CLOSE_DELIMITER[open] ?? close;
+    // corresponding close delimiter. (`close` is a single `Delimiter` here, as
+    // asserted above.)
+    const closeToken: LatexToken =
+      CLOSE_DELIMITER[open] ?? (close as Delimiter);
 
     // Build the close boundary: for braced form, expect \mathclose{)}
     const closeBoundary = closePrefix
       ? hasBracedDelimiter
-        ? [closePrefix, '<{>', close, '<}>']
-        : [closePrefix, close]
-      : [close];
+        ? [closePrefix, '<{>', closeToken, '<}>']
+        : [closePrefix, closeToken]
+      : [closeToken];
     this.addBoundary(closeBoundary);
     return true;
   }

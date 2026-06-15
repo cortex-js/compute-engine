@@ -1,4 +1,4 @@
-const JSON_ESCAPE_CHARS = {
+const JSON_ESCAPE_CHARS: Record<number, string> = {
   0x00: '\\u0000',
   0x01: '\\u0001',
   0x02: '\\u0002',

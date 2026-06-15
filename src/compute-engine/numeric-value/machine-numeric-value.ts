@@ -8,7 +8,7 @@ import { NumericPrimitiveType } from '../../common/type/types';
 import { ExactNumericValue } from './exact-numeric-value';
 
 export class MachineNumericValue extends NumericValue {
-  __brand: 'MachineNumericValue';
+  declare __brand: 'MachineNumericValue';
 
   // synonymous with 're'; the JavasScript number representation of the 'real' part.
   decimal: number;

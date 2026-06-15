@@ -10,7 +10,10 @@ import { BaseCompiler } from './base-compiler';
  * and syntax: `inverseSqrt`, `%` for mod, and `vec2f`/`vec3f`/`vec4f`
  * constructors.
  */
-function compileWGSLList(args, compile) {
+function compileWGSLList(
+  args: ReadonlyArray<Expression>,
+  compile: (expr: Expression) => string
+) {
   if (args.length === 2)
     return `vec2f(${args.map((x) => compile(x)).join(', ')})`;
   if (args.length === 3)

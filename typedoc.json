@@ -14,13 +14,12 @@
   ],
 
   "out": "./temp-docs",
-  "compilerOptions": {
-    // "esModuleInterop": true,
-
-    // More lenient...
-    "noImplicitAny": false,
-    "strictNullChecks": false
-  },
+  // Inherit the project's strict compiler settings from tsconfig.json. This
+  // block previously forced noImplicitAny:false / strictNullChecks:false, but
+  // under TS 6 the codebase is fully strict, and those lenient overrides now
+  // strip contextual typing from operator `evaluate` handlers, producing
+  // spurious "[any, any] is not assignable to readonly Expression[]" errors.
+  "compilerOptions": {},
   // "includes": "./src/compute-engine/**/*",
   "externalPattern": ["**/node_modules/**", "./cortex/**"],
   "excludeInternal": true,

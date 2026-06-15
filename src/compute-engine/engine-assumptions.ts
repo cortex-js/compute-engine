@@ -277,7 +277,7 @@ export function assumeFn(
 
     return assumeImpl(pred);
   } catch (e) {
-    console.error(e.message.toString());
+    console.error(e instanceof Error ? e.message : String(e));
     throw e;
   }
 }

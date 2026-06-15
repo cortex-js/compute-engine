@@ -87,7 +87,7 @@ export function serialize(expr: Expression): string {
   try {
     return serializeExpression(expr);
   } catch (e) {
-    console.error(e.message);
+    console.error(e instanceof Error ? e.message : String(e));
   }
   return '';
 }

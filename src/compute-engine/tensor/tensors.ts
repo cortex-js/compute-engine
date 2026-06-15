@@ -812,7 +812,12 @@ export abstract class AbstractTensor<
   }
 
   power(rhs: AbstractTensor<DT> | DataTypeMap[DT]): AbstractTensor<DT> {
-    return AbstractTensor.broadcast(this.field.pow.bind(this.field), this, rhs);
+    // `field.pow` takes the exponent as a `number`, while `broadcast` supplies
+    // it as a tensor element (`DataTypeMap[DT]`). The exponent is numeric for
+    // the tensor dtypes that support `power`, so adapt the signature here.
+    const pow = (lhs: DataTypeMap[DT], exp: DataTypeMap[DT]): DataTypeMap[DT] =>
+      this.field.pow(lhs, exp as number);
+    return AbstractTensor.broadcast(pow, this, rhs);
   }
 
   // // aka inner product
@@ -845,7 +850,11 @@ export abstract class AbstractTensor<
     const dtype = this.dtype;
     if (this.dtype !== rhs.dtype) {
       // Use cast if the types do not match
-      if (!this.data.every((x, i) => eq(x, cast(rhs.data[i], dtype))))
+      if (
+        !this.data.every((x, i) =>
+          eq(x, cast(rhs.data[i], dtype) as DataTypeMap[DT])
+        )
+      )
         return false;
 
       return true;

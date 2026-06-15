@@ -38,7 +38,7 @@ export type AsciiMathOptions = {
   >;
 };
 
-const SYMBOLS = {
+const SYMBOLS: Record<string, string> = {
   PositiveInfinity: '+oo',
   NegativeInfinity: '-oo',
   ComplexInfinity: '~oo',
@@ -91,7 +91,7 @@ const SYMBOLS = {
 const OPERATORS: Record<
   string,
   [
-    string | ((x: Expression, AsciiMathSerializer) => string),
+    string | ((x: Expression, serialize: AsciiMathSerializer) => string),
     precedence: number,
   ]
 > = {

@@ -5,7 +5,7 @@
 import { symbol } from '../math-json';
 import type { MathJsonExpression as Expression } from './types';
 
-const DIGITS = {
+const DIGITS: Record<string, number> = {
   '0': 0,
   '1': 1,
   '2': 2,
@@ -386,7 +386,7 @@ export function parse(s: string): Expression {
 
     return result ?? 'Nothing';
   } catch (e) {
-    console.error(e.message);
+    console.error(e instanceof Error ? e.message : String(e));
   }
   return 'Nothing';
 }

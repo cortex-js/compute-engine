@@ -530,7 +530,7 @@ function expressionAsTensor<T extends TensorDataType = 'expression'>(
       if (!isValid) return;
       if (isFunction(item, operator)) visit(item.ops, axis + 1);
       else {
-        const v = cast(item, dtype);
+        const v = cast(item, dtype) as DataTypeMap[T] | undefined;
         if (v === undefined) {
           isValid = false;
           return;

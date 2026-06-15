@@ -44,13 +44,15 @@ function formatFractionalPart(
             return insertFractionalGroupSeparator(offset, options);
           }
           // There is what looks like a true repeating pattern...
+          const repeatingDecimalPatterns: Record<string, string> = {
+            vinculum: '\\overline{#}',
+            parentheses: '(#)',
+            dots: '\\overset{\\cdots}{#1}#2\\overset{\\cdots}{#3}',
+            arc: '\\wideparen{#}',
+          };
           let pattern =
-            {
-              vinculum: '\\overline{#}',
-              parentheses: '(#)',
-              dots: '\\overset{\\cdots}{#1}#2\\overset{\\cdots}{#3}',
-              arc: '\\wideparen{#}',
-            }[options.repeatingDecimal] ?? '\\overline{#}';
+            repeatingDecimalPatterns[options.repeatingDecimal] ??
+            '\\overline{#}';
           pattern = pattern
             .replace(/#1/g, cycle[0])
             .replace(/#2/g, cycle.slice(1))

@@ -9,7 +9,10 @@ import { BaseCompiler } from './base-compiler';
  * These override or extend the shared GPU functions for GLSL-specific naming
  * and syntax: `inversesqrt`, `mod()`, and `vec2`/`vec3`/`vec4` constructors.
  */
-function compileGLSLList(args, compile) {
+function compileGLSLList(
+  args: ReadonlyArray<Expression>,
+  compile: (expr: Expression) => string
+) {
   if (args.length === 2)
     return `vec2(${args.map((x) => compile(x)).join(', ')})`;
   if (args.length === 3)

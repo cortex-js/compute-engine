@@ -75,50 +75,57 @@ mkdir -p dist
 printf "$BASENAME$DOT Building TypeScript declaration files (.d.ts)"
 # Even though we only generate declaration file, the target must be set high-enough
 # to prevent tsc from complaining (!)
+#
+# TS 6 notes: passing a file argument makes tsc ignore tsconfig.json (error
+# TS5112), so the full option set is supplied here with --ignoreConfig.
+# "bundler" replaces the removed node10 resolution and --types node restores
+# @types/node (no longer auto-discovered). Keep these flags in sync with
+# scripts/typecheck.sh.
+DTS_FLAGS="--target es2022 --module es2022 --moduleResolution bundler --types node --skipLibCheck -d --allowImportingTsExtensions true --ignoreConfig"
 if [[ "$TARGETS" == *math-json* ]]; then
-  npx tsc --target "es2022" -d --moduleResolution "node" --allowImportingTsExtensions "true" \
+  npx tsc $DTS_FLAGS \
     --emitDeclarationOnly --outDir ./dist/types ./src/math-json.ts
 fi
 if [[ "$TARGETS" == *compute-engine* ]]; then
-  npx tsc --target "es2022" -d --moduleResolution "node" --allowImportingTsExtensions "true" \
+  npx tsc $DTS_FLAGS \
     --emitDeclarationOnly --outDir ./dist/types ./src/compute-engine.ts 
 fi
 if [[ "$TARGETS" == *cortex* ]]; then
-  npx tsc --target "es2022" -d --moduleResolution "node" --allowImportingTsExtensions "true" \
+  npx tsc $DTS_FLAGS \
     --emitDeclarationOnly --outDir ./dist/types ./src/cortex.ts
 fi
 if [[ "$TARGETS" == *latex-syntax* ]]; then
-  npx tsc --target "es2022" -d --moduleResolution "node" --allowImportingTsExtensions "true" \
+  npx tsc $DTS_FLAGS \
     --emitDeclarationOnly --outDir ./dist/types ./src/latex-syntax.ts
 fi
 if [[ "$TARGETS" == *interval* ]]; then
-  npx tsc --target "es2022" -d --moduleResolution "node" --allowImportingTsExtensions "true" \
+  npx tsc $DTS_FLAGS \
     --emitDeclarationOnly --outDir ./dist/types ./src/interval.ts
 fi
 if [[ "$TARGETS" == *numerics* ]]; then
-  npx tsc --target "es2022" -d --moduleResolution "node" --allowImportingTsExtensions "true" \
+  npx tsc $DTS_FLAGS \
     --emitDeclarationOnly --outDir ./dist/types ./src/numerics.ts
 fi
 if [[ "$TARGETS" == *core* ]]; then
-  npx tsc --target "es2022" -d --moduleResolution "node" --allowImportingTsExtensions "true" \
+  npx tsc $DTS_FLAGS \
     --emitDeclarationOnly --outDir ./dist/types ./src/core.ts
 fi
 if [[ "$TARGETS" == *compile* ]]; then
-  npx tsc --target "es2022" -d --moduleResolution "node" --allowImportingTsExtensions "true" \
+  npx tsc $DTS_FLAGS \
     --emitDeclarationOnly --outDir ./dist/types ./src/compile.ts
 fi
 if [[ "$TARGETS" == *identities* ]]; then
   # --resolveJsonModule/--esModuleInterop: the identities entry imports the
   # compiled rule artifact (fungrim-core-data.json); these flags are not in
   # the root tsconfig and CLI invocations ignore tsconfig.
-  npx tsc --target "es2022" -d --moduleResolution "node" --allowImportingTsExtensions "true" \
+  npx tsc $DTS_FLAGS \
     --resolveJsonModule --esModuleInterop \
     --emitDeclarationOnly --outDir ./dist/types ./src/identities.ts
 fi
 if [[ "$TARGETS" == *integration-rules* ]]; then
   # --resolveJsonModule/--esModuleInterop: the integration-rules entry imports
   # the bundled Rubi corpus (rubi-rules-data.json).
-  npx tsc --target "es2022" -d --moduleResolution "node" --allowImportingTsExtensions "true" \
+  npx tsc $DTS_FLAGS \
     --resolveJsonModule --esModuleInterop \
     --emitDeclarationOnly --outDir ./dist/types ./src/integration-rules.ts
 fi

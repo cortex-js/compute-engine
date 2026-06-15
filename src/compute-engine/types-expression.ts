@@ -147,15 +147,15 @@ interface BoxedOperatorDefinition
   ) => Expression | null;
   evaluate?: (
     ops: ReadonlyArray<Expression>,
-    options: Partial<EvaluateOptions> & { engine?: ExpressionComputeEngine }
+    options: Partial<EvaluateOptions> & { engine: ExpressionComputeEngine }
   ) => Expression | undefined;
   evaluateAsync?: (
     ops: ReadonlyArray<Expression>,
-    options?: Partial<EvaluateOptions> & { engine?: ExpressionComputeEngine }
+    options: Partial<EvaluateOptions> & { engine: ExpressionComputeEngine }
   ) => Promise<Expression | undefined>;
   evalDimension?: (
     ops: ReadonlyArray<Expression>,
-    options: { engine: ExpressionComputeEngine }
+    options: Partial<EvaluateOptions> & { engine: ExpressionComputeEngine }
   ) => Expression;
   compile?: (expr: Expression) => CompiledExpression;
   update(def: unknown): void;
@@ -299,7 +299,7 @@ export interface Tensor<DT extends TensorDataType> extends TensorData<DT> {
   rank: number;
   data: DataTypeMap[DT][];
 
-  readonly field: TensorField<DT>;
+  readonly field: TensorField<DataTypeMap[DT]>;
   readonly expression: Expression;
   readonly array: NestedArray<DataTypeMap[DT]>;
   readonly isSquare: boolean;
@@ -2136,8 +2136,10 @@ export interface IndexedCollectionInterface extends CollectionInterface {
 export type ExpressionInput =
   | number
   | bigint
+  | boolean
   | string
   | BigNum
+  | Complex
   | MathJsonNumberObject
   | MathJsonStringObject
   | MathJsonSymbolObject

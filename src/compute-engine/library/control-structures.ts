@@ -167,7 +167,7 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
 
 function evaluateWhich(
   args: ReadonlyArray<Expression>,
-  options: EvaluateOptions & { engine: ComputeEngine }
+  options: Partial<EvaluateOptions> & { engine: ComputeEngine }
 ): Expression {
   let i = 0;
   while (i < args.length - 1) {
@@ -191,7 +191,7 @@ function evaluateWhich(
 /** Evaluate a Block expression. */
 function evaluateBlock(
   ops: ReadonlyArray<Expression>,
-  { engine: ce }
+  { engine: ce }: Partial<EvaluateOptions> & { engine: ComputeEngine }
 ): Expression {
   if (ops.length === 0) return ce.Nothing;
   return evaluateStatements(ce, ops);

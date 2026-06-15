@@ -313,7 +313,7 @@ export class Result<IR = any> {
    */
   error(
     value: IR,
-    msg: DiagnosticMessage | ((Parser) => DiagnosticMessage),
+    msg: DiagnosticMessage | ((parser: Parser) => DiagnosticMessage),
     fixits?: Fixit[]
   ): Result<IR> {
     this._value = value;
@@ -322,14 +322,14 @@ export class Result<IR = any> {
     this._diagnostics.push({
       severity: 'error',
       range: [this._range[0], this._range[1]],
-      message: typeof msg === 'function' ? msg(this) : msg,
+      message: typeof msg === 'function' ? msg(this.parser) : msg,
       fixits,
     });
     return this;
   }
   errorAt(
     value: IR | null,
-    msg: DiagnosticMessage | ((Parser) => DiagnosticMessage),
+    msg: DiagnosticMessage | ((parser: Parser) => DiagnosticMessage),
     pos: number,
     fixits?: Fixit[]
   ): Result<IR> {
@@ -339,7 +339,7 @@ export class Result<IR = any> {
     this._diagnostics.push({
       severity: 'error',
       range: [this._range[0], this._range[1], pos],
-      message: typeof msg === 'function' ? msg(this) : msg,
+      message: typeof msg === 'function' ? msg(this.parser) : msg,
       fixits,
     });
     return this;

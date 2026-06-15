@@ -224,13 +224,21 @@ const CONSTRUCTIBLE_VALUES: [
 
 function applyAngle(
   angle: Expression,
-  fn: (x: number) => number | Complex,
-  bigFn?: (x: BigDecimal) => BigDecimal | Complex | number,
+  fn: (x: number) => number | Complex | Expression,
+  bigFn?: (x: BigDecimal) => BigDecimal | Complex | number | Expression,
   complexFn?: (x: Complex) => number | Complex
 ): Expression | undefined {
   const theta = canonicalAngle(angle)?.N();
   if (theta === undefined) return undefined;
-  return apply(theta, fn, bigFn, complexFn);
+  // `apply`'s machine/bignum handlers can also yield an already-boxed
+  // expression (e.g. `ce.ComplexInfinity` for a `Tan` pole), which it boxes
+  // through `ce.number`; its public signature is narrower, so cast here.
+  return apply(
+    theta,
+    fn as (x: number) => number | Complex,
+    bigFn as ((x: BigDecimal) => BigDecimal | Complex | number) | undefined,
+    complexFn
+  );
 }
 
 /** Assuming x in an expression in radians, convert to current angular unit. */
@@ -469,13 +477,13 @@ export function evalTrig(
     case 'Tan': {
       const result = applyAngle(
         op,
-        (x) => {
+        (x): number | Complex | Expression => {
           const y = Math.tan(x);
           if (y > 1e6 || y < -1e6) return ce.ComplexInfinity;
           return y;
         },
 
-        (x) => {
+        (x): BigDecimal | Complex | number | Expression => {
           const y = x.tan();
           if (y.gt(1e6) || y.lt(-1e6)) return ce.ComplexInfinity;
           return y;

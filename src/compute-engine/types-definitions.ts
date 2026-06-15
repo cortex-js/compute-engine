@@ -449,7 +449,7 @@ export type OperatorDefinition = Partial<BaseDefinition> &
     evaluate?:
       | ((
           ops: ReadonlyArray<Expression>,
-          options: EvaluateOptions & { engine: ComputeEngine }
+          options: Partial<EvaluateOptions> & { engine: ComputeEngine }
         ) => Expression | undefined)
       | Expression;
 
@@ -459,7 +459,7 @@ export type OperatorDefinition = Partial<BaseDefinition> &
      */
     evaluateAsync?: (
       ops: ReadonlyArray<Expression>,
-      options: EvaluateOptions & { engine: ComputeEngine }
+      options: Partial<EvaluateOptions> & { engine: ComputeEngine }
     ) => Promise<Expression | undefined>;
 
     /** Dimensional analysis
@@ -467,7 +467,7 @@ export type OperatorDefinition = Partial<BaseDefinition> &
      */
     evalDimension?: (
       args: ReadonlyArray<Expression>,
-      options: EvaluateOptions & { engine: ComputeEngine }
+      options: Partial<EvaluateOptions> & { engine: ComputeEngine }
     ) => Expression;
 
     /** Return a compiled (optimized) expression. */
@@ -1030,17 +1030,17 @@ export interface BoxedOperatorDefinition
 
   evaluate?: (
     ops: ReadonlyArray<Expression>,
-    options: Partial<EvaluateOptions> & { engine?: ComputeEngine }
+    options: Partial<EvaluateOptions> & { engine: ComputeEngine }
   ) => Expression | undefined;
 
   evaluateAsync?: (
     ops: ReadonlyArray<Expression>,
-    options?: Partial<EvaluateOptions> & { engine?: ComputeEngine }
+    options: Partial<EvaluateOptions> & { engine: ComputeEngine }
   ) => Promise<Expression | undefined>;
 
   evalDimension?: (
     ops: ReadonlyArray<Expression>,
-    options: { engine: ComputeEngine }
+    options: Partial<EvaluateOptions> & { engine: ComputeEngine }
   ) => Expression;
 
   compile?: (expr: Expression) => CompiledExpression;

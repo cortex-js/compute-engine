@@ -1426,7 +1426,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     name: 'Superminus',
     latexTrigger: ['^', '-'],
     kind: 'postfix',
-    parse: (parser, lhs) => {
+    parse: (parser: Parser, lhs: MathJsonExpression) => {
       // In non-strict mode, ^-digits should be Power(x, -n), not Superminus
       if (parser.options.strict === false && /^[0-9]$/.test(parser.peek))
         return null;
@@ -1437,20 +1437,23 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   {
     latexTrigger: ['^', '*'],
     kind: 'postfix',
-    parse: (_parser, lhs) => ['Superstar', lhs] as MathJsonExpression,
+    parse: (_parser: Parser, lhs: MathJsonExpression) =>
+      ['Superstar', lhs] as MathJsonExpression,
   },
   // { name: 'Superstar', latexTrigger: ['^', '\\star'], kind: 'postfix' },
   {
     latexTrigger: ['_', '*'],
     kind: 'postfix',
-    parse: (_parser, lhs) => ['Substar', lhs] as MathJsonExpression,
+    parse: (_parser: Parser, lhs: MathJsonExpression) =>
+      ['Substar', lhs] as MathJsonExpression,
   },
   { name: 'Substar', latexTrigger: ['_', '\\star'], kind: 'postfix' },
   { name: 'Superdagger', latexTrigger: ['^', '\\dagger'], kind: 'postfix' },
   {
     latexTrigger: ['^', '\\dag'],
     kind: 'postfix',
-    parse: (_parser, lhs) => ['Superdagger', lhs] as MathJsonExpression,
+    parse: (_parser: Parser, lhs: MathJsonExpression) =>
+      ['Superdagger', lhs] as MathJsonExpression,
   },
   {
     name: 'Prime',
@@ -2325,7 +2328,8 @@ export const DELIMITERS_SHORTHAND = {
 
 export function latexToDelimiterShorthand(s: string): string | undefined {
   for (const key in DELIMITERS_SHORTHAND)
-    if (DELIMITERS_SHORTHAND[key] === s) return key;
+    if (DELIMITERS_SHORTHAND[key as keyof typeof DELIMITERS_SHORTHAND] === s)
+      return key;
 
   return undefined;
 }
@@ -2875,7 +2879,7 @@ function normalizeLocalAssign(expr: MathJsonExpression): MathJsonExpression {
 
 function parseAt(
   ...close: string[]
-): (parser, lhs) => MathJsonExpression | null {
+): (parser: Parser, lhs: MathJsonExpression) => MathJsonExpression | null {
   // @todo: if there are no `close` symbols, parse as a subscript: either
   // a single symbol, or a group.
   return (

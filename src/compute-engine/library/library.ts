@@ -403,7 +403,7 @@ export function setSymbolDefinitions(
               `\nError in operator definition`,
               JSON.stringify(entry, undefined, 4),
               '',
-              e.message,
+              e instanceof Error ? e.message : String(e),
             ].join('\n|   ') + '\n'
           );
         }
@@ -422,7 +422,7 @@ export function setSymbolDefinitions(
               '',
               JSON.stringify(entry, undefined, 4),
               '',
-              e.message,
+              e instanceof Error ? e.message : String(e),
             ].join('\n|   ')
           );
         }
@@ -439,7 +439,7 @@ export function setSymbolDefinitions(
           '',
           JSON.stringify(entry, undefined, 4),
           '',
-          e.message,
+          e instanceof Error ? e.message : String(e),
         ].join('\n|   ') + '\n'
       );
     }

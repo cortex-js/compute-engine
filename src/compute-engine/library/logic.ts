@@ -85,7 +85,7 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     broadcastable: true,
     complexity: 10200,
     signature: '(boolean, boolean) -> boolean',
-    canonical: (args: Expression[], { engine: ce }) => {
+    canonical: (args: ReadonlyArray<Expression>, { engine: ce }) => {
       const lhs = sym(args[0]);
       const rhs = sym(args[1]);
       if (

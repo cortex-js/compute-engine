@@ -1,6 +1,7 @@
 // Set operations:
 // https://query.wikidata.org/#PREFIX%20wd%3A%20%3Chttp%3A%2F%2Fwww.wikidata.org%2Fentity%2F%3E%0APREFIX%20wdt%3A%20%3Chttp%3A%2F%2Fwww.wikidata.org%2Fprop%2Fdirect%2F%3E%0A%0ASELECT%20DISTINCT%20%3Fitem%0AWHERE%20%7B%0A%20%20%20%20%3Fitem%20wdt%3AP31%2a%20wd%3AQ1964995%0A%7D%0A
 
+import { Complex } from 'complex-esm';
 import { BoxedType } from '../../common/type/boxed-type';
 import { parseType } from '../../common/type/parse';
 import { reduceType } from '../../common/type/reduce';
@@ -162,7 +163,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     isConstant: true,
     wikidata: 'Q226183',
     description: 'The empty set, a set containing no elements.',
-    eq: (b) => b.type.matches('set') && b.isEmptyCollection,
+    eq: (b: Expression) => b.type.matches('set') && b.isEmptyCollection,
     collection: {
       iterator: () => ({
         next: () => ({ value: undefined, done: true }),
@@ -1347,7 +1348,7 @@ function membershipKleene(
 }
 
 function setMinus(
-  ops: Expression[],
+  ops: ReadonlyArray<Expression>,
   { engine: ce }: { engine: ComputeEngine }
 ): Expression | undefined {
   // Compute the difference only when the source collection is finite and
@@ -1374,7 +1375,7 @@ function imaginaryIterator(
       if (done) return { value: undefined, done: true };
       const [n, d] = value;
       return {
-        value: self.engine.number({ re: 0, im: n / d }),
+        value: self.engine.number(new Complex(0, n / d)),
         done: false,
       };
     },
@@ -1390,7 +1391,10 @@ function complexIterator(
       const { value, done } = iterator.next();
       if (done) return { value: undefined, done: true };
       const [re, im] = value;
-      return { value: self.engine.number({ re, im }), done: false };
+      return {
+        value: self.engine.number(new Complex(re, im)),
+        done: false,
+      };
     },
   };
 }

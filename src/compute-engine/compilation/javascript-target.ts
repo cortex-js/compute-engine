@@ -82,6 +82,8 @@ import type {
   CompilationOptions,
   CompilationResult,
   CompiledRunner,
+  ComplexResult,
+  TargetSource,
 } from './types';
 
 /**
@@ -1272,7 +1274,8 @@ const SYS_HELPERS = {
   gamma,
   gcd,
   heaviside: (x: number) => (x < 0 ? 0 : x === 0 ? 0.5 : 1),
-  integrate: (f, a, b) => monteCarloEstimate(f, a, b, 10e6).estimate,
+  integrate: (f: (x: number) => number, a: number, b: number) =>
+    monteCarloEstimate(f, a, b, 10e6).estimate,
   lcm,
   lngamma: gammaln,
   limit,
@@ -1348,41 +1351,41 @@ const SYS_HELPERS = {
   binomial: choose,
   fibonacci,
   // Complex helpers
-  csin: (z) => toRI(new Complex(z.re, z.im).sin()),
-  ccos: (z) => toRI(new Complex(z.re, z.im).cos()),
-  ctan: (z) => toRI(new Complex(z.re, z.im).tan()),
-  casin: (z) => toRI(new Complex(z.re, z.im).asin()),
-  cacos: (z) => toRI(new Complex(z.re, z.im).acos()),
-  catan: (z) => toRI(new Complex(z.re, z.im).atan()),
-  csinh: (z) => toRI(new Complex(z.re, z.im).sinh()),
-  ccosh: (z) => toRI(new Complex(z.re, z.im).cosh()),
-  ctanh: (z) => toRI(new Complex(z.re, z.im).tanh()),
-  csqrt: (z) => toRI(new Complex(z.re, z.im).sqrt()),
-  cexp: (z) => toRI(new Complex(z.re, z.im).exp()),
-  cln: (z) => toRI(new Complex(z.re, z.im).log()),
-  cpow: (z, w) => {
+  csin: (z: ComplexResult) => toRI(new Complex(z.re, z.im).sin()),
+  ccos: (z: ComplexResult) => toRI(new Complex(z.re, z.im).cos()),
+  ctan: (z: ComplexResult) => toRI(new Complex(z.re, z.im).tan()),
+  casin: (z: ComplexResult) => toRI(new Complex(z.re, z.im).asin()),
+  cacos: (z: ComplexResult) => toRI(new Complex(z.re, z.im).acos()),
+  catan: (z: ComplexResult) => toRI(new Complex(z.re, z.im).atan()),
+  csinh: (z: ComplexResult) => toRI(new Complex(z.re, z.im).sinh()),
+  ccosh: (z: ComplexResult) => toRI(new Complex(z.re, z.im).cosh()),
+  ctanh: (z: ComplexResult) => toRI(new Complex(z.re, z.im).tanh()),
+  csqrt: (z: ComplexResult) => toRI(new Complex(z.re, z.im).sqrt()),
+  cexp: (z: ComplexResult) => toRI(new Complex(z.re, z.im).exp()),
+  cln: (z: ComplexResult) => toRI(new Complex(z.re, z.im).log()),
+  cpow: (z: number | ComplexResult, w: number | ComplexResult) => {
     const zz =
       typeof z === 'number' ? new Complex(z, 0) : new Complex(z.re, z.im);
     const ww =
       typeof w === 'number' ? new Complex(w, 0) : new Complex(w.re, w.im);
     return toRI(zz.pow(ww));
   },
-  ccot: (z) => toRI(new Complex(z.re, z.im).cot()),
-  csec: (z) => toRI(new Complex(z.re, z.im).sec()),
-  ccsc: (z) => toRI(new Complex(z.re, z.im).csc()),
-  ccoth: (z) => toRI(new Complex(z.re, z.im).coth()),
-  csech: (z) => toRI(new Complex(z.re, z.im).sech()),
-  ccsch: (z) => toRI(new Complex(z.re, z.im).csch()),
-  cacot: (z) => toRI(new Complex(z.re, z.im).acot()),
-  casec: (z) => toRI(new Complex(z.re, z.im).asec()),
-  cacsc: (z) => toRI(new Complex(z.re, z.im).acsc()),
-  cacoth: (z) => toRI(new Complex(z.re, z.im).acoth()),
-  casech: (z) => toRI(new Complex(z.re, z.im).asech()),
-  cacsch: (z) => toRI(new Complex(z.re, z.im).acsch()),
-  cabs: (z) => new Complex(z.re, z.im).abs(),
-  carg: (z) => new Complex(z.re, z.im).arg(),
-  cconj: (z) => toRI(new Complex(z.re, z.im).conjugate()),
-  cneg: (z) => ({ re: -z.re, im: -z.im }),
+  ccot: (z: ComplexResult) => toRI(new Complex(z.re, z.im).cot()),
+  csec: (z: ComplexResult) => toRI(new Complex(z.re, z.im).sec()),
+  ccsc: (z: ComplexResult) => toRI(new Complex(z.re, z.im).csc()),
+  ccoth: (z: ComplexResult) => toRI(new Complex(z.re, z.im).coth()),
+  csech: (z: ComplexResult) => toRI(new Complex(z.re, z.im).sech()),
+  ccsch: (z: ComplexResult) => toRI(new Complex(z.re, z.im).csch()),
+  cacot: (z: ComplexResult) => toRI(new Complex(z.re, z.im).acot()),
+  casec: (z: ComplexResult) => toRI(new Complex(z.re, z.im).asec()),
+  cacsc: (z: ComplexResult) => toRI(new Complex(z.re, z.im).acsc()),
+  cacoth: (z: ComplexResult) => toRI(new Complex(z.re, z.im).acoth()),
+  casech: (z: ComplexResult) => toRI(new Complex(z.re, z.im).asech()),
+  cacsch: (z: ComplexResult) => toRI(new Complex(z.re, z.im).acsch()),
+  cabs: (z: ComplexResult) => new Complex(z.re, z.im).abs(),
+  carg: (z: ComplexResult) => new Complex(z.re, z.im).arg(),
+  cconj: (z: ComplexResult) => toRI(new Complex(z.re, z.im).conjugate()),
+  cneg: (z: ComplexResult) => ({ re: -z.re, im: -z.im }),
   // Color helpers
   ...colorHelpers,
 };
@@ -1405,7 +1408,7 @@ export class ComputeEngineFunction extends Function {
       get: (target, prop) => {
         if (prop === 'toString') return (): string => body;
         if (prop === 'isCompiled') return true;
-        return target[prop];
+        return Reflect.get(target, prop);
       },
     });
   }
@@ -1426,7 +1429,7 @@ export class ComputeEngineFunctionLiteral extends Function {
         if (prop === 'toString')
           return (): string => `(${args.join(', ')}) => ${body}`;
         if (prop === 'isCompiled') return true;
-        return target[prop];
+        return Reflect.get(target, prop);
       },
     });
   }
@@ -1788,7 +1791,11 @@ function compileSumProduct(
  * `test/compute-engine/a1-c1-compile-parity.test.ts` ("Integrate compiles
  * in JS") for the verify-only test that locks in current behavior.
  */
-function compileIntegrate(args, _, target: CompileTarget<Expression>): string {
+function compileIntegrate(
+  args: ReadonlyArray<Expression>,
+  _: (expr: Expression) => TargetSource,
+  target: CompileTarget<Expression>
+): string {
   const { index, lowerExpr, upperExpr, lowerNum, upperNum } = extractLimits(
     args[1]
   );

@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 // eslint-disable-next-line import/no-unresolved
 import { getStandardLibrary } from '../../compute-engine/library/library.js';
 
-const CATEGORY = {
+const CATEGORY: Record<string, string> = {
   'core': 'Core',
   'control-structures': 'Control Structures',
   'logic': 'Logic',
@@ -26,7 +26,7 @@ const CATEGORY = {
   'physics': 'Physics',
 };
 
-const CATEGORY_DESCRIPTION = {
+const CATEGORY_DESCRIPTION: Record<string, string> = {
   'Core': 'Foundational language and expression constructs.',
   'Control Structures': 'Conditionals and structural evaluation forms.',
   'Logic': 'Boolean logic and logical predicates.',
@@ -46,11 +46,13 @@ const CATEGORY_DESCRIPTION = {
   'Physics': 'Physical constants and physics-specific functions.',
 };
 
-function isObj(x) {
+type DefRecord = Record<string, unknown>;
+
+function isObj(x: unknown): x is DefRecord {
   return x !== null && typeof x === 'object' && !Array.isArray(x);
 }
 
-function isOperatorDef(d) {
+function isOperatorDef(d: unknown): boolean {
   return (
     isObj(d) &&
     ('evaluate' in d ||
@@ -61,7 +63,7 @@ function isOperatorDef(d) {
   );
 }
 
-function isValueDef(d) {
+function isValueDef(d: unknown): boolean {
   return (
     isObj(d) &&
     ('value' in d ||
@@ -72,7 +74,7 @@ function isValueDef(d) {
   );
 }
 
-function arityFromSignature(sig) {
+function arityFromSignature(sig: unknown): string {
   if (!sig || typeof sig !== 'string') return 'unknown';
   const match = sig.trim().match(/^\((.*)\)\s*->/);
   if (!match) return 'unknown';
@@ -88,7 +90,7 @@ function arityFromSignature(sig) {
   );
 }
 
-function asDescription(def) {
+function asDescription(def: DefRecord): string | undefined {
   const description = def.description;
   if (Array.isArray(description)) {
     const text = description.join('\n\n').trim();
@@ -101,15 +103,15 @@ function asDescription(def) {
   return undefined;
 }
 
-function asExamples(def) {
+function asExamples(def: DefRecord): string[] | undefined {
   const examples = def.examples;
   if (!examples) return undefined;
-  if (Array.isArray(examples)) return examples.map((x) => String(x));
+  if (Array.isArray(examples)) return examples.map((x: unknown) => String(x));
   return [String(examples)];
 }
 
 function buildPayload() {
-  const definitions = [];
+  const definitions: { library: string; name: string; def: DefRecord }[] = [];
 
   for (const lib of getStandardLibrary()) {
     const tables = lib.definitions
@@ -208,7 +210,7 @@ function buildPayload() {
   return { operators, constants };
 }
 
-function buildCategories(payload) {
+function buildCategories(payload: ReturnType<typeof buildPayload>) {
   const allCategories = new Set([
     ...Object.values(CATEGORY),
     ...payload.operators.map((x) => x.category),
@@ -218,7 +220,10 @@ function buildCategories(payload) {
     a.localeCompare(b)
   );
 
-  const categories = {};
+  const categories: Record<
+    string,
+    { description: string; operators: string[]; constants: string[] }
+  > = {};
   for (const category of categoryNames) {
     categories[category] = {
       description: CATEGORY_DESCRIPTION[category] ?? '',

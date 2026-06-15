@@ -39,7 +39,7 @@ import { isSubtype } from '../../common/type/subtype';
  *
  */
 export class ExactNumericValue extends NumericValue {
-  __brand: 'ExactNumericValue';
+  declare __brand: 'ExactNumericValue';
 
   rational: Rational;
   radical: number; // An integer > 0

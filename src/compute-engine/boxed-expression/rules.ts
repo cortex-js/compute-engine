@@ -25,7 +25,7 @@ import {
   isRelationalOperator,
 } from '../latex-syntax/utils';
 
-import type { Parser } from '../latex-syntax/types';
+import type { Parser, Terminator } from '../latex-syntax/types';
 import { LATEX_DICTIONARY } from '../latex-syntax/dictionary/default-dictionary';
 
 import { isPrime } from './predicates';
@@ -236,7 +236,8 @@ export const CONDITIONS = {
 
 export function checkConditions(x: Expression, conditions: string[]): boolean {
   // Check for !== true, because result could also be undefined
-  for (const cond of conditions) if (CONDITIONS[cond](x) !== true) return false;
+  for (const cond of conditions)
+    if (CONDITIONS[cond as keyof typeof CONDITIONS](x) !== true) return false;
 
   return true;
 }
@@ -301,7 +302,7 @@ function parseModifier(parser: Parser): string | null {
     };
     for (const shortcut in shortcuts) {
       if (parser.matchAll(tokenizeLaTeX(shortcut))) {
-        modifier = shortcuts[shortcut];
+        modifier = shortcuts[shortcut as keyof typeof shortcuts];
         break;
       }
     }
@@ -393,7 +394,7 @@ function parseRule(
       kind: 'symbol',
       latexTrigger: x,
       // domain: { kind: 'Any' },
-      parse: (parser, _until) => {
+      parse: (parser: Parser, _until?: Readonly<Terminator>) => {
         if (!wildcards[x]) wildcards[x] = `_${x}`;
         // conditions are `:condition` or `:condition1,condition2,...`
         // or `:\mathrm{condition}`
@@ -424,7 +425,7 @@ function parseRule(
       kind: 'prefix',
       precedence: 100,
       latexTrigger: '...',
-      parse: (parser, _until) => {
+      parse: (parser: Parser, _until?: Readonly<Terminator>) => {
         const id = parser.nextToken();
         if (!'abcfghjklmnopqrstuvwxyz'.includes(id)) return null;
         let prefix = '__';
@@ -450,7 +451,7 @@ function parseRule(
       kind: 'infix',
       precedence: 100,
       latexTrigger: '->',
-      parse: (parser, lhs, until) => {
+      parse: (parser: Parser, lhs: MathJsonExpression, until: Readonly<Terminator>) => {
         const rhs = parser.parseExpression({ ...until, minPrec: 20 });
         if (rhs === null) return null;
 
@@ -747,8 +748,8 @@ function boxRule(
     operators,
     purpose,
     id,
-    onMatch,
-    onBeforeMatch,
+    onMatch: onMatch as BoxedRule['onMatch'],
+    onBeforeMatch: onBeforeMatch as BoxedRule['onBeforeMatch'],
   };
 }
 
@@ -792,7 +793,7 @@ export function boxRules(
     } catch (e) {
       // There was a problem with a rule, skip it and continue
       throw new Error(
-        `\n${e.message}\n|   Skipping rule ${JSON.stringify(
+        `\n${e instanceof Error ? e.message : e}\n|   Skipping rule ${JSON.stringify(
           rule,
           undefined,
           4
@@ -958,7 +959,9 @@ export function applyRule(
       // as "the condition failed".
       if (e instanceof CancellationError) throw e;
       console.error(
-        `\n|   Rule "${rule.id}"\n|   Error while checking condition\n|    ${e.message}`
+        `\n|   Rule "${rule.id}"\n|   Error while checking condition\n|    ${
+          e instanceof Error ? e.message : e
+        }`
       );
       return null;
     }

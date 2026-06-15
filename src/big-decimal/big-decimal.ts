@@ -434,7 +434,19 @@ export class BigDecimal {
 
   /**
    * Multiply this value by another.
-   * Multiplies significands, adds exponents. The result is exact.
+   * Multiplies significands, adds exponents. The result is exact: unlike
+   * `div`/`sqrt`, `mul` does NOT round to `BigDecimal.precision`, so the
+   * product's significand is as wide as the sum of the operands' significands.
+   *
+   * This exactness is relied upon by the integer/rational/polynomial paths
+   * (e.g. `factorial2`, the `MPoly` resultant/GCD work) and must not change.
+   *
+   * Footgun: an *accumulating* product or running power in a
+   * precision-bounded loop (`acc = acc.mul(x)`, `pw = pw.mul(x)`) grows its
+   * significand ~p digits per step, turning an O(n) loop into O(n²). Such
+   * loops MUST round each step with `.toPrecision(p)` (see the Gamma/digamma
+   * series kernels in `numerics/special-functions.ts`). Series whose term
+   * recurrence already ends in `.div()`/`.sqrt()` are rounded for free.
    */
   mul(other: BigDecimal | number): BigDecimal {
     if (typeof other === 'number') other = new BigDecimal(other);

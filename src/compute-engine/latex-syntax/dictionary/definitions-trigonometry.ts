@@ -16,7 +16,7 @@ import {
 function parseTrig(op: string): ExpressionParseHandler {
   return (parser: Parser, until?: Terminator): MathJsonExpression | null => {
     // Note: names as per NIST-DLMF
-    const trigCommands = {
+    const trigCommands: Record<string, MathJsonExpression> = {
       '\\arcsin': 'Arcsin',
       '\\arccos': 'Arccos',
       '\\arctan': 'Arctan',
@@ -99,7 +99,8 @@ function parseTrig(op: string): ExpressionParseHandler {
     const args = parser.parseArguments('implicit', {
       minPrec: MULTIPLICATION_PRECEDENCE,
       condition: (parser) =>
-        trigCommands[parser.peek] || (until?.condition?.(parser) ?? false),
+        trigCommands[parser.peek] !== undefined ||
+        (until?.condition?.(parser) ?? false),
     });
 
     // Desmos compatibility: `\arctan(y, x)` and `\tan^{-1}(y, x)` are

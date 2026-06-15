@@ -427,7 +427,7 @@ export class ComputeEngineIntervalFunction extends Function {
       get: (target, prop) => {
         if (prop === 'toString') return (): string => body;
         if (prop === 'isCompiled') return true;
-        return target[prop];
+        return Reflect.get(target, prop);
       },
     });
   }

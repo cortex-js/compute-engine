@@ -1,6 +1,6 @@
 export class CancellationError<T = unknown> extends Error {
   cause: unknown;
-  value: T;
+  value?: T;
 
   constructor({
     message,

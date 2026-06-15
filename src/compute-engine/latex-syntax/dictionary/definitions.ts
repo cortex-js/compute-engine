@@ -15,10 +15,12 @@ import { ErrorSignal, WarningSignal } from '../../../common/signals';
 import { countTokens, joinLatex, tokenize, tokensToString } from '../tokenizer';
 
 import {
+  Delimiter,
   LatexDictionaryEntry,
   LatexString,
   LatexToken,
   Parser,
+  Precedence,
   Serializer,
   SerializeHandler,
   Terminator,
@@ -57,6 +59,27 @@ import type {
   IndexedLatexDictionaryEntry,
   IndexedLatexDictionary,
 } from './indexed-types';
+
+/**
+ * The optional fields that may appear on some (but not all) members of the
+ * `LatexDictionaryEntry` union. Used as a typed view to read these fields
+ * without narrowing on `kind` first. All fields are optional and read-only.
+ */
+type LatexDictionaryEntryFields = {
+  readonly kind?: string;
+  readonly precedence?: Precedence;
+  readonly associativity?: 'right' | 'left' | 'none' | 'any';
+  readonly latexTrigger?: LatexString | LatexToken[];
+  readonly symbolTrigger?: string;
+  readonly openTrigger?: Delimiter | LatexToken[];
+};
+
+/** Read optional union-member fields off an entry without narrowing on `kind`. */
+function entryFields(
+  entry: LatexDictionaryEntry
+): LatexDictionaryEntryFields {
+  return entry as LatexDictionaryEntryFields;
+}
 
 /** Delimiter shorthands and their token variants for matchfix indexing */
 const DELIMITER_SHORTHAND: { [key: string]: LatexToken[] } = {
@@ -165,7 +188,7 @@ function prependIndexedEntry<T>(
 function addEntry(
   result: IndexedLatexDictionary,
   entry: LatexDictionaryEntry,
-  onError: (sig: WarningSignal) => void
+  onError: (sig: ErrorSignal | WarningSignal) => void
 ) {
   //
   // 1. Create a validated indexed entry
@@ -202,7 +225,8 @@ function addEntry(
     let parse = entry.parse;
     if (!parse && entry.name) {
       if (kind === 'postfix' || kind === 'prefix')
-        parse = (_parser, expr) => [entry.name!, expr] as MathJsonExpression;
+        parse = (_parser: Parser, expr: MathJsonExpression) =>
+          [entry.name!, expr] as MathJsonExpression;
       else parse = entry.name;
     }
 
@@ -340,7 +364,7 @@ function addEntry(
 
 export function indexLatexDictionary(
   dic: Readonly<Partial<LatexDictionaryEntry>[]>,
-  onError: (sig: WarningSignal) => void
+  onError: (sig: ErrorSignal | WarningSignal) => void
 ): IndexedLatexDictionary {
   const result: IndexedLatexDictionary = {
     lookahead: 1,
@@ -608,10 +632,11 @@ function makeSerializeHandler(
 ): SerializeHandler | undefined {
   if (typeof entry.serialize === 'function') return entry.serialize;
 
-  const kind = entry['kind'] ?? 'expression';
+  const fields = entryFields(entry);
+  const kind = fields.kind ?? 'expression';
 
   if (kind === 'environment') {
-    const envName = entry['symbolTrigger'] ?? entry.name ?? 'unknown';
+    const envName = fields.symbolTrigger ?? entry.name ?? 'unknown';
     return (serializer, expr) => {
       const body = operand(expr, 1);
       return joinLatex([
@@ -650,7 +675,7 @@ function makeSerializeHandler(
   // We have a LaTeX version of the symbol
   //
   if (latex) {
-    const prec = entry['precedence'] ?? 10000;
+    const prec = fields.precedence ?? 10000;
 
     if (kind === 'postfix')
       return (serializer, expr) =>
@@ -664,7 +689,7 @@ function makeSerializeHandler(
       return (serializer, expr) => {
         const n = nops(expr);
         if (n === 0) return '';
-        const prec = entry['precedence'] ?? 10000;
+        const prec = fields.precedence ?? 10000;
         // Insert the operator (latex) between each argument
         return joinLatex(
           operands(expr).flatMap((val, i) => {
@@ -689,7 +714,7 @@ function makeSerializeHandler(
   // We do not have a LaTeX version of the symbol. Use a string symbol
   //
   const id = idTrigger ?? entry.name ?? 'unknown';
-  const prec = entry['precedence'] ?? 10000;
+  const prec = fields.precedence ?? 10000;
 
   if (kind === 'postfix')
     return (serializer, expr) =>
@@ -734,6 +759,7 @@ function makeParseHandler(
   // If there is a custom parser function, always use it.
   if ('parse' in entry && typeof entry.parse === 'function') return entry.parse;
 
+  const fields = entryFields(entry);
   const kind = ('kind' in entry ? entry.kind : 'expression') ?? 'expression';
 
   // If there is a parse handler as an MathJsonExpression , use the
@@ -746,7 +772,7 @@ function makeParseHandler(
     // Assume we'll parse a tabular body
     const envName = entry.parse ?? entry.name ?? idTrigger;
     if (envName)
-      return (parser: Parser, _until) => {
+      return (parser: Parser, _until?: Readonly<Terminator>) => {
         const array = parser.parseTabular();
         if (array === null) return null;
         return [envName, ['List', array.map((row) => ['List', ...row])]];
@@ -772,7 +798,8 @@ function makeParseHandler(
   //
   if (kind === 'symbol') {
     const symName = entry.parse ?? entry.name ?? idTrigger;
-    if (symName) return (_parser, _terminator) => symName;
+    if (symName)
+      return (_parser: Parser, _terminator?: Readonly<Terminator>) => symName;
   }
 
   //
@@ -781,8 +808,8 @@ function makeParseHandler(
   if (kind === 'prefix') {
     const h = entry.parse ?? entry.name ?? idTrigger;
     if (h) {
-      const prec = entry['precedence'] ?? 10000;
-      return (parser, until) => {
+      const prec = fields.precedence ?? 10000;
+      return (parser: Parser, until?: Readonly<Terminator>) => {
         const rhs = parser.parseExpression({
           ...(until ?? []),
           minPrec: prec,
@@ -797,7 +824,9 @@ function makeParseHandler(
   //
   if (kind === 'postfix') {
     const h = entry.parse ?? entry.name;
-    if (h) return (_parser, lhs) => (lhs === null ? null : [h, lhs]);
+    if (h)
+      return (_parser: Parser, lhs: MathJsonExpression) =>
+        lhs === null ? null : [h, lhs];
   }
 
   //
@@ -808,7 +837,7 @@ function makeParseHandler(
     //
     if (/[_^]/.test(latexTrigger?.[0] ?? '')) {
       const h = entry.name ?? entry.parse;
-      return (_parser, arg) => [
+      return (_parser: Parser, arg: MathJsonExpression) => [
         h,
         missingIfEmpty(operand(arg, 1)),
         missingIfEmpty(operand(arg, 2)),
@@ -816,8 +845,8 @@ function makeParseHandler(
     }
     const h = entry.parse ?? entry.name ?? idTrigger;
     if (h) {
-      const prec = entry['precedence'] ?? 10000;
-      const associativity = entry['associativity'] ?? 'none';
+      const prec = fields.precedence ?? 10000;
+      const associativity = fields.associativity ?? 'none';
 
       // Note: for infix operators, we are lenient and tolerate
       // a missing rhs.
@@ -826,7 +855,11 @@ function makeParseHandler(
       // capture as `['Add', 'x', ['Error', "'missing'"]`.
 
       if (associativity === 'none') {
-        return (parser, lhs, until) => {
+        return (
+          parser: Parser,
+          lhs: MathJsonExpression,
+          until: Readonly<Terminator>
+        ) => {
           if (lhs === null) return null;
           const rhs = missingIfEmpty(
             parser.parseExpression({ ...until, minPrec: prec })
@@ -835,7 +868,11 @@ function makeParseHandler(
         };
       }
       if (associativity === 'left') {
-        return (parser, lhs, until) => {
+        return (
+          parser: Parser,
+          lhs: MathJsonExpression,
+          until: Readonly<Terminator>
+        ) => {
           if (lhs === null) return null;
           const rhs = missingIfEmpty(
             parser.parseExpression({ ...until, minPrec: prec + 1 })
@@ -845,7 +882,11 @@ function makeParseHandler(
         };
       }
       if (associativity === 'right') {
-        return (parser, lhs, until) => {
+        return (
+          parser: Parser,
+          lhs: MathJsonExpression,
+          until: Readonly<Terminator>
+        ) => {
           if (lhs === null) return null;
           const rhs = missingIfEmpty(
             parser.parseExpression({ ...until, minPrec: prec })
@@ -855,7 +896,11 @@ function makeParseHandler(
         };
       }
       // "both"-associative: fold identical operators
-      return (parser, lhs, until) => {
+      return (
+        parser: Parser,
+        lhs: MathJsonExpression,
+        until: Readonly<Terminator>
+      ) => {
         if (lhs === null) return null;
         const rhs = missingIfEmpty(
           parser.parseExpression({ ...until, minPrec: prec })
@@ -872,7 +917,7 @@ function makeParseHandler(
   if (kind === 'matchfix') {
     const h = entry.parse ?? entry.name;
     if (h)
-      return (_parser, body) => {
+      return (_parser: Parser, body: MathJsonExpression) => {
         if (isEmptySequence(body)) return null;
         return [h, body];
       };
@@ -902,11 +947,12 @@ function isValidEntry(
   entry: LatexDictionaryEntry,
   onError: (sig: ErrorSignal | WarningSignal) => void
 ): boolean {
+  const fields = entryFields(entry);
   let subject =
     entry.name ??
-    entry['latexTrigger'] ??
-    entry['symbolTrigger'] ??
-    entry['openTrigger'];
+    fields.latexTrigger ??
+    fields.symbolTrigger ??
+    fields.openTrigger;
   if (!subject) {
     try {
       subject = JSON.stringify(entry);
@@ -1049,10 +1095,7 @@ function isValidEntry(
         (entry.latexTrigger.startsWith('^') ||
           entry.latexTrigger.startsWith('_')))
     ) {
-      if (
-        entry.precedence !== undefined ||
-        entry['associativity'] !== undefined
-      ) {
+      if (entry.precedence !== undefined || fields.associativity !== undefined) {
         onError({
           severity: 'warning',
           message: [
@@ -1079,7 +1122,7 @@ function isValidEntry(
     // Check for symbols
     //
     // Note symbols can have a precedence (used for wrapping, e.g. 'Complex')
-    if (entry['associativity'] !== undefined) {
+    if (fields.associativity !== undefined) {
       onError({
         severity: 'warning',
         message: [

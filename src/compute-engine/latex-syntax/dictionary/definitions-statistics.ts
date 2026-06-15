@@ -1,3 +1,4 @@
+import type { MathJsonExpression } from '../../../math-json/types';
 import { symbol } from '../../../math-json/utils';
 import type { LatexDictionary, Parser, Terminator } from '../types';
 
@@ -20,10 +21,10 @@ export const DEFINITIONS_STATISTICS: LatexDictionary = [
   {
     latexTrigger: ['\\bar'],
     kind: 'expression',
-    parse: (parser: Parser, _until: Terminator) => {
+    parse: (parser: Parser, _until?: Readonly<Terminator>) => {
       const expr = parser.parseGroup() ?? parser.parseToken();
       if (!expr || !symbol(expr)) return null;
-      return ['Mean', expr];
+      return ['Mean', expr] as MathJsonExpression;
     },
   },
   // Function-style alias: `\operatorname{var}(...)`

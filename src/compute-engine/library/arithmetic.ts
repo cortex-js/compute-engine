@@ -1,3 +1,4 @@
+import { Complex } from 'complex-esm';
 import { BigDecimal } from '../../big-decimal';
 
 import {
@@ -1278,7 +1279,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           if (nVal !== undefined && nVal !== 0)
             return quantityPower(engine, evalX, engine.number(1 / nVal));
         }
-        return root(x, n, { numericApproximation });
+        return root(x, n, { numericApproximation: numericApproximation ?? false });
       },
     },
 
@@ -1487,7 +1488,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           x,
           Math.trunc,
           (x) => x.trunc(),
-          (z) => z.trunc(0)
+          (z) => new Complex(Math.trunc(z.re), Math.trunc(z.im))
         ),
     },
   },

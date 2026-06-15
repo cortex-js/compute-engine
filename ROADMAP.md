@@ -1305,17 +1305,32 @@ machine-precision constant (or whatever the bignum path uses) should fall back
 to it above ~50 digits. Cheap to verify (the γ-vs-γ self-compare above is the
 regression test).
 
-### B13. Latent: `BigDecimal.mul` does not round to working precision
+### B13. ~~Latent: `BigDecimal.mul` does not round to working precision~~ — ✅ audited / closed (2026-06-14)
 
 Also surfaced by B1: `BigDecimal.mul` returns the **full** product (its
 significand is the sum of the operands' significand lengths) while `div` rounds
 to `BigDecimal.precision`. Any *accumulating* product therefore grows its
 significand ~p digits per step, turning an O(n) loop into O(n²) (this was the
 dominant high-precision cost in the Gamma/polygamma kernels until each running
-product was explicitly `.toPrecision(p)`-rounded — see B1). The Gamma family is
-now guarded, but **other iterative-product code in the engine may have the same
-latent quadratic blow-up**. Audit the numeric kernels (`numerics/`, the
-special-function and quadrature loops) for un-rounded accumulating `mul`s;
-consider whether `mul` should round by default (large API blast radius — exact
-products are relied on elsewhere, e.g. integer/rational paths) or whether a
-documented `mulRounded`/`mul(...).toPrecision()` convention suffices.
+product was explicitly `.toPrecision(p)`-rounded — see B1).
+
+**Audit result — no remaining sites.** Swept every `BigDecimal`/`BigNum`
+arithmetic path in the numeric kernels (the only files that touch it are
+`numerics/special-functions.ts`, `numeric-bignum.ts`, `bernoulli.ts`,
+`statistics.ts`; the quadrature loops — `monte-carlo`, `oscillatory-quadrature`,
+`richardson`, `numeric` — are machine-precision `number`/`Complex` and cannot
+blow up). Every accumulating `BigDecimal.mul` is in one of three safe buckets:
+(a) the Gamma/ψ/ψ₁/ψ₂ running products & powers, already rounded each step via
+`.toPrecision(p)` (the B1 fix); (b) series whose term recurrence ends in
+`.div()`/`.sqrt()`/`.pow()`, which round for free (Erf/Erfi, Fresnel, Si/Ci,
+the Zeta CVZ recurrence); (c) intentional **exact** integer/rational products
+where the full width *is* the answer (`factorial2`, the `factVal` in the ζ(2k)
+closed form, the AGM `pow2 ×= 2` which grows ~log₁₀2 digits over ~log₂p steps).
+
+**Design question resolved — `mul` stays exact (default unchanged).** Its
+exactness is a relied-upon contract: the exact integer/rational/polynomial
+paths (`factorial2`, the `MPoly` resultant/GCD work — B10/B11) would break if
+the default rounded. The right pattern is the inline `.mul(...).toPrecision(p)`
+convention the B1 kernels already use (~15 sites); no `mulRounded` helper was
+added (the inline form reads fine and is established). The convention is now
+documented as a footgun note on `BigDecimal.mul` (`src/big-decimal/big-decimal.ts`).

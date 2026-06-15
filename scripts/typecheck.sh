@@ -2,8 +2,14 @@
 set -e
 
 # TypeScript type checking
+# TS 6: a file argument makes tsc ignore tsconfig.json (error TS5112), so the
+# full option set is passed on the CLI with --ignoreConfig. "bundler" replaces
+# the removed node10 resolution; --types node restores @types/node (no longer
+# auto-discovered); strict is on by default.
 echo "Running TypeScript type check..."
-tsc --target es2022 -d --moduleResolution node --allowImportingTsExtensions true --emitDeclarationOnly --outDir /tmp/typecheck ./src/compute-engine.ts
+tsc --target es2022 --module es2022 --moduleResolution bundler --types node \
+  --skipLibCheck -d --allowImportingTsExtensions true --emitDeclarationOnly \
+  --ignoreConfig --outDir /tmp/typecheck ./src/compute-engine.ts
 
 # Circular dependency check
 MAX_CYCLES=0

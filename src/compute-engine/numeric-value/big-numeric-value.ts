@@ -10,7 +10,7 @@ import { bigint } from '../numerics/bigint';
 import { NumericPrimitiveType } from '../../common/type/types';
 
 export class BigNumericValue extends NumericValue {
-  __brand: 'BigNumericValue';
+  declare __brand: 'BigNumericValue';
 
   decimal: BigDecimal;
 

@@ -474,7 +474,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     if (typeof value === 'string') value = ce.string(value);
     if (typeof value === 'object') {
       if ('re' in value && 'im' in value)
-        value = ce.complex(value.re ?? 0, value.im);
+        value = ce.number(ce.complex(value.re ?? 0, value.im));
       else if ('num' in value && 'denom' in value)
         value = ce.number([value.num!, value.denom!]);
       else if (Array.isArray(value))

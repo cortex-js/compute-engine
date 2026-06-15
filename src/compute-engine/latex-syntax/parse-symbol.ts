@@ -16,7 +16,7 @@ function getSymbolNameByLatex(): Map<string, string> {
   return _symbolNameByLatex;
 }
 
-const SYMBOL_PREFIX = {
+const SYMBOL_PREFIX: Record<string, string> = {
   // Those are "grouping" prefix that also specify spacing
   // around the symbol. We ignore the spacing, though.
   '\\mathord': '',
@@ -53,7 +53,7 @@ const SYMBOL_PREFIX = {
 };
 
 // These commands can be used inside the body of a symbol.
-const SYMBOL_MODIFIER = {
+const SYMBOL_MODIFIER: Record<string, string> = {
   '\\mathring': '_ring',
   '\\hat': '_hat',
   '\\tilde': '_tilde',

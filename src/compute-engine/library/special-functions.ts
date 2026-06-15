@@ -200,7 +200,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
               ops,
               hypergeometric2F1,
               (a, b, c, z) => bigHypergeometric2F1(engine, a, b, c, z),
-              hypergeometric2F1Complex
+              (a, b, c, z) => hypergeometric2F1Complex(a, b, c, z)
             )
           : undefined;
       },

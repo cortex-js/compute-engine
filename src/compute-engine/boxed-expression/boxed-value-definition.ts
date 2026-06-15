@@ -69,7 +69,7 @@ export class _BoxedValueDefinition
   private _type: BoxedType | undefined | null;
 
   // If true, the `_type` is inferred
-  inferredType: boolean;
+  inferredType = false;
 
   // If `true`, the value or type cannot be changed
   _isConstant = false;

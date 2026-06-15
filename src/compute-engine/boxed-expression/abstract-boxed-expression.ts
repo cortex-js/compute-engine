@@ -172,7 +172,7 @@ export abstract class _BoxedExpression implements Expression {
         const msg = e.message ?? '<canceled>';
         return e.cause ? `${msg}: ${e.cause}` : `${msg}`;
       }
-      if (e.message) return e.message;
+      if (e instanceof Error && e.message) return e.message;
       return '<error>';
     }
   }
@@ -204,7 +204,7 @@ export abstract class _BoxedExpression implements Expression {
         const msg = e.message ?? '<canceled>';
         return e.cause ? `${msg}: ${e.cause}` : `${msg}`;
       }
-      if (e.message) return e.message;
+      if (e instanceof Error && e.message) return e.message;
       return '<error>';
     }
   }

@@ -417,7 +417,7 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
     //   const args = ops(expr);
     //   return `[${serializer.serialize(arg)}]`;
     // },
-    parse: (_parser, body) => {
+    parse: (_parser: Parser, body: MathJsonExpression) => {
       const h = operator(body);
       if (!h) return null;
       if (!DEFINITIONS_INEQUALITIES.some((x) => x.name === h)) return null;
@@ -429,7 +429,7 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
     kind: 'matchfix',
     openTrigger: '\\llbracket',
     closeTrigger: '\\rrbracket',
-    parse: (_parser, body) => {
+    parse: (_parser: Parser, body: MathJsonExpression) => {
       const h = operator(body);
       if (!h) return null;
       if (!DEFINITIONS_INEQUALITIES.some((x) => x.name === h)) return null;
@@ -473,7 +473,7 @@ function serializeQuantifier(
 // Condition function for tight quantifier binding - stops at logical connectives
 function tightBindingCondition(
   p: Parser,
-  terminator: Readonly<Terminator>
+  terminator?: Readonly<Terminator>
 ): boolean {
   return (
     p.peek === '\\to' ||
@@ -486,7 +486,7 @@ function tightBindingCondition(
     p.peek === '\\wedge' ||
     p.peek === '\\lor' ||
     p.peek === '\\vee' ||
-    (terminator.condition?.(p) ?? false)
+    (terminator?.condition?.(p) ?? false)
   );
 }
 
@@ -494,7 +494,7 @@ export function parseQuantifier(
   kind: 'NotForAll' | 'NotExists' | 'ForAll' | 'Exists' | 'ExistsUnique'
 ): (
   parser: Parser,
-  terminator: Readonly<Terminator>
+  terminator?: Readonly<Terminator>
 ) => MathJsonExpression | null {
   return (parser, terminator) => {
     const index = parser.index;
@@ -562,7 +562,7 @@ export function parseQuantifier(
       condition: (p: Parser) =>
         p.peek === ':' ||
         p.peek === '\\colon' ||
-        (terminator.condition?.(p) ?? false),
+        (terminator?.condition?.(p) ?? false),
     };
     const condition = parser.parseExpression(condTerminator);
     if (condition === null) return null;

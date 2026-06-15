@@ -27,7 +27,11 @@ module.exports = {
         useESM: true,
         tsconfig: {
           allowJs: true,
-          module: 'system',
+          // TS 6: 'system' module is deprecated; tests run as ESM.
+          module: 'esnext',
+          // TS 6 dropped @types auto-discovery; the base tsconfig restricts
+          // `types` to ["node"], so re-add jest for the test program.
+          types: ['node', 'jest'],
         },
       },
     ],

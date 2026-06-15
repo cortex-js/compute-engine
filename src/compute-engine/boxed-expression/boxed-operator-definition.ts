@@ -113,7 +113,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
 
   canonical?: (
     ops: ReadonlyArray<Expression>,
-    options: { engine: ComputeEngine }
+    options: { engine: ComputeEngine; scope: Scope | undefined }
   ) => Expression | null;
 
   evaluate?: (
@@ -123,12 +123,12 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
 
   evaluateAsync?: (
     ops: ReadonlyArray<Expression>,
-    options?: Partial<EvaluateOptions> & { engine?: ComputeEngine }
+    options: Partial<EvaluateOptions> & { engine: ComputeEngine }
   ) => Promise<Expression | undefined>;
 
   evalDimension?: (
     ops: ReadonlyArray<Expression>,
-    options: { engine: ComputeEngine }
+    options: Partial<EvaluateOptions> & { engine: ComputeEngine }
   ) => Expression;
 
   compile?: (expr: Expression) => CompiledExpression;

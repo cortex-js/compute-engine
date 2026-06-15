@@ -1,4 +1,5 @@
 import { Complex } from 'complex-esm';
+import '../numerics/complex-esm-augment'; // adds the 1-arg `Complex.equals` overload
 import {
   Expression,
   IComputeEngine as ComputeEngine,

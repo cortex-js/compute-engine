@@ -97,7 +97,7 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
     latexTrigger: ['+', '+'],
     kind: 'postfix',
     precedence: 880,
-    parse: (_parser, lhs) => {
+    parse: (_parser: Parser, lhs: MathJsonExpression) => {
       // If lhs is not a symbol, ignore it, i.e. "5++"
       if (symbol(lhs) === null) return null;
       return ['Increment', lhs] as MathJsonExpression;
@@ -108,7 +108,7 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
     latexTrigger: ['-', '-'],
     kind: 'postfix',
     precedence: 880,
-    parse: (_parser, lhs) => {
+    parse: (_parser: Parser, lhs: MathJsonExpression) => {
       // If lhs is not a symbol, ignore it, i.e. "5--"
       if (symbol(lhs) === null) return null;
       return ['Decrement', lhs] as MathJsonExpression;
@@ -526,7 +526,7 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
   },
   {
     latexTrigger: ['\\hspace'],
-    parse: (parser): MathJsonExpression => {
+    parse: (parser: Parser): MathJsonExpression => {
       if (parser.peek === '*') parser.nextToken();
       parser.parseStringGroup(); // consume the braced dimension argument
       return ['HorizontalSpacing', 0];
@@ -534,60 +534,60 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
   },
   {
     latexTrigger: ['\\hskip'],
-    parse: (parser): MathJsonExpression => {
+    parse: (parser: Parser): MathJsonExpression => {
       skipTexDimension(parser);
       return ['HorizontalSpacing', 0];
     },
   },
   {
     latexTrigger: ['\\kern'],
-    parse: (parser): MathJsonExpression => {
+    parse: (parser: Parser): MathJsonExpression => {
       skipTexDimension(parser);
       return ['HorizontalSpacing', 0];
     },
   },
   {
     latexTrigger: ['\\phantom'],
-    parse: (parser) => {
+    parse: (parser: Parser) => {
       parser.parseGroup();
       return 'Nothing';
     },
   },
   {
     latexTrigger: ['\\vphantom'],
-    parse: (parser) => {
+    parse: (parser: Parser) => {
       parser.parseGroup();
       return 'Nothing';
     },
   },
   {
     latexTrigger: ['\\hphantom'],
-    parse: (parser) => {
+    parse: (parser: Parser) => {
       parser.parseGroup();
       return 'Nothing';
     },
   },
   {
     latexTrigger: ['\\placeholder'],
-    parse: (parser) => {
+    parse: (parser: Parser) => {
       parser.parseOptionalGroup();
       return parser.parseGroup() ?? 'Nothing';
     },
   },
   {
     latexTrigger: ['\\smash'],
-    parse: (parser) => {
+    parse: (parser: Parser) => {
       parser.parseGroup();
       return 'Nothing';
     },
   },
   {
     latexTrigger: ['\\strut'],
-    parse: (_parser) => 'Nothing',
+    parse: (_parser: Parser) => 'Nothing',
   },
   {
     latexTrigger: ['\\mathstrut'],
-    parse: (_parser) => 'Nothing',
+    parse: (_parser: Parser) => 'Nothing',
   },
   {
     name: 'HorizontalSpacing',

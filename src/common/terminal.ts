@@ -277,11 +277,12 @@ function _consoleSupportsStyles() {
 //       basic: new ColorTerminal({ mode: 'basic' }),
 //       full: new ColorTerminal({ mode: 'full' }),
 //     }[terminalColorSupport()];
-export const terminal: Terminal = {
+const TERMINALS: Partial<Record<TerminalCapabilities, Terminal>> = {
   none: new TextTerminal(),
   basic: new ColorTerminal({ mode: 'basic' }),
   full: new ColorTerminal({ mode: 'full' }),
-}[terminalColorSupport()];
+};
+export const terminal: Terminal = TERMINALS[terminalColorSupport()]!;
 
 /** Word-wrap a string that contains ANSI escape sequences.
  *  ANSI escape sequences do not add to the string length.
@@ -346,12 +347,19 @@ export const wrapAnsiString = (
 // From https://github.com/chalk/supports-color
 function terminalColorSupport(): TerminalCapabilities {
   if (typeof process === 'undefined') {
-    if (globalThis.navigator['userAgentData']) {
-      // eslint-disable-next-line no-restricted-globals
-      const brand = navigator['userAgentData'].brands.find(
-        ({ brand }) => brand === 'Chromium'
+    // `userAgentData` is a non-standard (Chromium) Navigator property not
+    // present in the lib.dom.d.ts `Navigator` type.
+    type UserAgentBrand = { brand: string; version: string };
+    const userAgentData = (
+      globalThis.navigator as Navigator & {
+        userAgentData?: { brands: UserAgentBrand[] };
+      }
+    ).userAgentData;
+    if (userAgentData) {
+      const brand = userAgentData.brands.find(
+        (b: UserAgentBrand) => b.brand === 'Chromium'
       );
-      if (brand?.version > 93) return 'full';
+      if (brand !== undefined && Number(brand.version) > 93) return 'full';
     }
 
     return 'none';

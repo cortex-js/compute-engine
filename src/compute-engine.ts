@@ -123,7 +123,9 @@ export type { BoxedString } from './compute-engine/boxed-expression/boxed-string
 export type { BoxedTensor } from './compute-engine/boxed-expression/boxed-tensor';
 
 // ── Global registration ─────────────────────────────────────────────
-globalThis[Symbol.for('io.cortexjs.compute-engine')] = {
+(globalThis as Record<symbol, unknown>)[
+  Symbol.for('io.cortexjs.compute-engine')
+] = {
   ComputeEngine: ComputeEngine.prototype.constructor,
   version: '{{SDK_VERSION}}',
 };

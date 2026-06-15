@@ -5,8 +5,8 @@
 
 import { ComputeEngine } from '../../src/compute-engine';
 import type { Expression } from '../../src/compute-engine/global-types';
-import { evalCondition, build } from '../../scripts/rubi/rubi-utils';
-import type { Ctx } from '../../scripts/rubi/rubi-utils';
+import { evalCondition, build } from '../../src/compute-engine/rubi/rubi-utils';
+import type { Ctx } from '../../src/compute-engine/rubi/rubi-utils';
 import type { Json } from '../../scripts/rubi/wl-parser';
 
 let ce: ComputeEngine;

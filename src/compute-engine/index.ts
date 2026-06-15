@@ -926,8 +926,9 @@ export class ComputeEngine implements IComputeEngine {
 
     const makeNumericValue =
       this._numericConfiguration.precision > MACHINE_PRECISION
-        ? (x) => new BigNumericValue(x)
-        : (x) => new MachineNumericValue(x);
+        ? (x: number | BigDecimal | NumericValueData) => new BigNumericValue(x)
+        : (x: number | BigDecimal | NumericValueData) =>
+            new MachineNumericValue(x);
 
     if (typeof value === 'number') {
       if (Number.isInteger(value))
@@ -1001,7 +1002,7 @@ export class ComputeEngine implements IComputeEngine {
             !Number.isInteger(value.rational[1])
           )
             // @fixme: this may never happen
-            return makeNumericValue(value);
+            return makeNumericValue(value as unknown as NumericValueData);
         }
       }
 

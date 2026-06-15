@@ -5,8 +5,8 @@
 // docs/rubi/RUBI.md §5 (Phase R2, driver-overrun).
 
 import { ComputeEngine } from '../../src/compute-engine';
-import { matchAll } from '../../scripts/rubi/match';
-import type { Pat } from '../../scripts/rubi/match';
+import { matchAll } from '../../src/compute-engine/rubi/match';
+import type { Pat } from '../../src/compute-engine/rubi/match';
 
 let ce: ComputeEngine;
 

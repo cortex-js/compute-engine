@@ -29,6 +29,8 @@ import type {
   OperatorDefinition,
   ExpressionInput,
   SymbolDefinitions,
+  IComputeEngine as ComputeEngine,
+  Scope,
 } from '../global-types';
 import { BoxedType } from '../types';
 import { typeToString } from '../../common/type/serialize';
@@ -149,7 +151,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       if (!isFunction(a) || !isFunction(b)) return false;
       if (a.nops !== b.nops) return false;
       // The elements are not indexed
-      const has: (x) => boolean = (x) => b.ops.some((y) => x.isSame(y));
+      const has: (x: Expression) => boolean = (x) =>
+        b.ops.some((y) => x.isSame(y));
       return a.ops.every(has);
     },
     collection: {
@@ -249,7 +252,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     eq: defaultCollectionEq,
     collection: {
       ...basicIndexedCollectionHandlers(),
-      keys: (_expr) => {
+      keys: (_expr: Expression) => {
         return ['first', 'second', 'last'];
       },
     },
@@ -2711,7 +2714,10 @@ function _indexRangeArg(
   return [lower, upper, step];
 }
 
-function canonicalList(ops: Expression[], { engine: ce }): Expression {
+function canonicalList(
+  ops: ReadonlyArray<Expression>,
+  { engine: ce }: { engine: ComputeEngine; scope: Scope | undefined }
+): Expression {
   // Do we have a matrix with a custom delimiter, i.e.
   // \left\lbrack \begin{array}...\end{array} \right\rbrack
 
@@ -2726,7 +2732,7 @@ function canonicalList(ops: Expression[], { engine: ce }): Expression {
     }
   }
 
-  ops = ops.map((op) => {
+  const canonicalOps = ops.map((op) => {
     if (isFunction(op, 'Delimiter')) {
       if (isFunction(op.op1, 'Sequence'))
         return ce._fn('List', canonical(ce, op.op1.ops));
@@ -2734,10 +2740,13 @@ function canonicalList(ops: Expression[], { engine: ce }): Expression {
     }
     return op.canonical;
   });
-  return ce._fn('List', ops);
+  return ce._fn('List', canonicalOps);
 }
 
-function canonicalSet(ops: ReadonlyArray<Expression>, { engine }): Expression {
+function canonicalSet(
+  ops: ReadonlyArray<Expression>,
+  { engine }: { engine: ComputeEngine; scope: Scope | undefined }
+): Expression {
   // Since the `Set` operator is `lazy`, the canonical handler receives raw
   // operands: canonicalize them first
   ops = ops.map((op) => op.canonical);
@@ -2748,7 +2757,7 @@ function canonicalSet(ops: ReadonlyArray<Expression>, { engine }): Expression {
 
   // Check that each element is only present once
   const set: Expression[] = [];
-  const has = (x) => set.some((y) => y.isSame(x));
+  const has = (x: Expression) => set.some((y) => y.isSame(x));
 
   for (const op of ops) if (!has(op)) set.push(op);
 

@@ -47,7 +47,7 @@ export function bigint(
   try {
     return BigInt(s);
   } catch (e) {
-    console.error(e.message);
+    console.error(e instanceof Error ? e.message : String(e));
     return null;
   }
 }

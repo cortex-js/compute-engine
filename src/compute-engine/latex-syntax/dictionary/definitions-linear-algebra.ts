@@ -223,7 +223,7 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
   {
     kind: 'postfix',
     latexTrigger: ['^', '\\dagger'],
-    parse: (_parser: Parser, lhs): MathJsonExpression => {
+    parse: (_parser: Parser, lhs: MathJsonExpression): MathJsonExpression => {
       return ['ConjugateTranspose', lhs];
     },
   },
@@ -231,7 +231,7 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
   {
     kind: 'postfix',
     latexTrigger: ['^', '\\ast'],
-    parse: (_parser: Parser, lhs): MathJsonExpression => {
+    parse: (_parser: Parser, lhs: MathJsonExpression): MathJsonExpression => {
       return ['ConjugateTranspose', lhs];
     },
   },
@@ -513,13 +513,13 @@ function serializeTabular(
   if (columns || open !== '.' || close !== '.') {
     return joinLatex([
       '\\left',
-      DELIMITERS_SHORTHAND[open] ?? open,
+      DELIMITERS_SHORTHAND[open as keyof typeof DELIMITERS_SHORTHAND] ?? open,
       '\\begin{array}',
       `{${columns}}`,
       tabular,
       '\\end{array}',
       '\\right',
-      DELIMITERS_SHORTHAND[close] ?? close,
+      DELIMITERS_SHORTHAND[close as keyof typeof DELIMITERS_SHORTHAND] ?? close,
     ]);
   }
 

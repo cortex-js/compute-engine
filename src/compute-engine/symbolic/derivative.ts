@@ -1,7 +1,7 @@
 import { apply } from '../function-utils';
 import { checkDeadline } from '../../common/interruptible';
 import { mul } from '../boxed-expression/arithmetic-mul-div';
-import type { Expression } from '../global-types';
+import type { Expression, ExpressionInput } from '../global-types';
 import { add } from '../boxed-expression/arithmetic-add';
 import {
   isNumber,
@@ -486,7 +486,9 @@ export function differentiate(
     return simplifyDerivative(derivative.mul(xPrime));
   }
 
-  const h = DERIVATIVES_TABLE[expr.operator];
+  const h = DERIVATIVES_TABLE[
+    expr.operator as keyof typeof DERIVATIVES_TABLE
+  ] as ExpressionInput | undefined;
   if (h === undefined) {
     // Try resolving user-defined function calls before falling back to
     // symbolic chain rule. Apply the function to wildcards, evaluate to

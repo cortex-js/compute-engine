@@ -228,7 +228,7 @@ export const DEFINITIONS_SETS: LatexDictionary = [
   {
     latexTrigger: ['^', '\\complement'],
     kind: 'postfix',
-    parse: (_parser, lhs) => {
+    parse: (_parser: Parser, lhs: MathJsonExpression) => {
       return ['Complement', lhs] as MathJsonExpression;
     },
     // precedence: 240,

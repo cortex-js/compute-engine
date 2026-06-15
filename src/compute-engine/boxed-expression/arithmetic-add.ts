@@ -15,7 +15,10 @@ import { isTensor } from './boxed-tensor';
 import { isNumber, isFunction, isSymbol } from './type-guards';
 
 import { MACHINE_PRECISION } from '../numerics/numeric';
-import type { NumericValue } from '../numeric-value/types';
+import type {
+  NumericValue,
+  NumericValueFactory,
+} from '../numeric-value/types';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
 import { BigNumericValue } from '../numeric-value/big-numeric-value';
 import { MachineNumericValue } from '../numeric-value/machine-numeric-value';
@@ -444,7 +447,7 @@ function nvSum(
   ce: ComputeEngine,
   numericValues: NumericValue[]
 ): NumericValue[] {
-  const factory =
+  const factory: NumericValueFactory =
     ce.precision > MACHINE_PRECISION
       ? (x) => new BigNumericValue(x)
       : (x) => new MachineNumericValue(x);
@@ -455,8 +458,9 @@ function nvSumN(
   ce: ComputeEngine,
   numericValues: NumericValue[]
 ): NumericValue {
-  const makeExact = (x) => new ExactNumericValue(x, factory);
-  const factory =
+  const makeExact = (x: ConstructorParameters<typeof ExactNumericValue>[0]) =>
+    new ExactNumericValue(x, factory);
+  const factory: NumericValueFactory =
     ce.precision > MACHINE_PRECISION
       ? (x) => new BigNumericValue(x)
       : (x) => new MachineNumericValue(x);

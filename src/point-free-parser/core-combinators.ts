@@ -94,7 +94,7 @@ export function combine<T>(
   f: (...results: Result[]) => T,
   results: Result[],
   errors?: Result[],
-  msg?: DiagnosticMessage | ((Parser) => DiagnosticMessage)
+  msg?: DiagnosticMessage | ((parser: Parser) => DiagnosticMessage)
 ): Result<T> {
   const result = new Result<T>(parser);
 
@@ -402,7 +402,7 @@ export function maybe<T>(something: Combinator<T> | string): Combinator<T> {
  */
 export function must<T>(
   something: string | Combinator<T>,
-  inMsg?: DiagnosticMessage | ((Parser) => DiagnosticMessage)
+  inMsg?: DiagnosticMessage | ((parser: Parser) => DiagnosticMessage)
 ): Combinator<T> {
   return [
     `(${description(something)})!`,

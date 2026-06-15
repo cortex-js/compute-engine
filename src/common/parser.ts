@@ -141,7 +141,7 @@ export function parseEscapeSequence<T>(parser: Parser<T>): string | undefined {
   // If we have a `\` at the end of the line, we treat it as a line continuation
   if (char === '\\' && parser.atLineEnd) return parseEscapeSequence(parser);
 
-  const REVERSED_ESCAPED_CHARS = {
+  const REVERSED_ESCAPED_CHARS: Record<string, string> = {
     '0': '\0', // Not allowed in JSON
     '\\': '\\',
     "'": "'",

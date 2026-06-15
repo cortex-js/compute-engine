@@ -1,7 +1,7 @@
 function fromRoman(roman: string): [result: number, rest: string] {
   if (roman === 'N') return [0, ''];
 
-  const romanMap = {
+  const romanMap: Record<string, number | undefined> = {
     I: 1,
     V: 5,
     X: 10,

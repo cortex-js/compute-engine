@@ -91,7 +91,7 @@ export function canonicalForm(
  *
  * This function is recursive.
  */
-function flattenForm(expr: Expression) {
+function flattenForm(expr: Expression): Expression {
   if (!expr.operator) return expr;
 
   if (!isFunction(expr) || expr.nops === 0) return expr;
@@ -124,7 +124,7 @@ function flattenForm(expr: Expression) {
   return ce._fn(expr.operator, newOps, { canonical: false });
 }
 
-function invisibleOperatorForm(expr: Expression) {
+function invisibleOperatorForm(expr: Expression): Expression {
   if (!isFunction(expr)) return expr;
 
   if (expr.operator === 'InvisibleOperator') {
@@ -266,7 +266,7 @@ function numberForm(expr: Expression): Expression {
  * `.canonical` on them, consistent with `addForm` and `powerForm`.
  * `canonicalMultiply` documents that "The input ops may not be canonical."
  */
-function multiplyForm(expr: Expression) {
+function multiplyForm(expr: Expression): Expression {
   // Recursively visit all sub-expressions
   if (!isFunction(expr)) return expr;
   const ops = expr.ops.map(multiplyForm);
@@ -280,7 +280,7 @@ function multiplyForm(expr: Expression) {
   return expr;
 }
 
-function addForm(expr: Expression) {
+function addForm(expr: Expression): Expression {
   // Recursively visit all sub-expressions
   if (!isFunction(expr)) return expr;
   const ops = expr.ops.map(addForm);
@@ -302,7 +302,7 @@ function addForm(expr: Expression) {
  * passing them to `canonicalDivide`, since division canonicalization benefits
  * from normalized power expressions.
  */
-function powerForm(expr: Expression) {
+function powerForm(expr: Expression): Expression {
   if (!isFunction(expr)) return expr;
 
   const ops = expr.ops.map((expr) => powerForm(expr));
@@ -338,7 +338,7 @@ function symbolForm(expr: Expression): Expression {
  * This is the only form that internally applies another form (`Power`) to
  * its operands.
  */
-function divideForm(expr: Expression) {
+function divideForm(expr: Expression): Expression {
   // If this is a divide, canonicalize it
   if (isFunction(expr, 'Divide'))
     return canonicalDivide(powerForm(expr.op1), powerForm(expr.op2));

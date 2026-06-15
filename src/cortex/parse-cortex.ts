@@ -183,7 +183,9 @@ grammar.rule(
         if ('navigator' in globalThis) {
           return {
             // eslint-disable-next-line no-restricted-globals
-            str: navigator[expressionToString(operand(args.value!, 1))],
+            str: (navigator as unknown as Record<string, string>)[
+              expressionToString(operand(args.value!, 1))
+            ],
           };
         }
       }
@@ -344,8 +346,8 @@ grammar.rule(
     'primary',
     (
       op: string,
-      lhs: MathJsonExpression,
-      rhs: MathJsonExpression
+      lhs?: MathJsonExpression,
+      rhs?: MathJsonExpression
     ): MathJsonExpression => {
       if (!lhs && rhs) {
         if (op === 'Negate') {
@@ -356,7 +358,7 @@ grammar.rule(
         }
         return { fn: [op, rhs] };
       }
-      return lhs;
+      return lhs!;
     }
   )
 );

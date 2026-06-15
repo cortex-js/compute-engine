@@ -89,7 +89,7 @@ export function serializeCortex(
   function serializeExpression(
     expr: MathJsonExpression | null
   ): FormattingBlock {
-    if (expr === null) return new EmptyBlock(this);
+    if (expr === null) return new EmptyBlock(fmt);
     // Is this a string literal?
     if (typeof expr === 'string' && matchesString(expr)) {
       const s = stringValue(expr);
@@ -122,11 +122,15 @@ export function serializeCortex(
     if (!body) {
       const dict = dictionaryFromExpression(expr);
       if (dict !== null) {
+        const dictEntries = dict as unknown as Record<
+          string,
+          MathJsonExpression
+        >;
         const keyValues = Object.keys(dict).map((key) =>
           fmt.line(
             escapeString(key),
             fmt.relationalOperator('->'),
-            serializeExpression(dict[key])
+            serializeExpression(dictEntries[key])
           )
         );
 

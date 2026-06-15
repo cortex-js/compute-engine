@@ -2,7 +2,7 @@ import { Combinator, Parser, Result, Rules } from './parsers';
 import { parseShebang } from './whitespace-parsers';
 
 export class Grammar<IR> implements Rules {
-  private rules: { [name: string]: (Parser) => Result } = {};
+  private rules: { [name: string]: (parser: Parser) => Result } = {};
   private ruleDescription: { [name: string]: string } = {};
   constructor() {
     this.rule(
@@ -97,7 +97,7 @@ export class Grammar<IR> implements Rules {
   /** Define a new rule or a rule description */
   rule<T = IR>(
     name: string,
-    def: ((Parser) => Result<T>) | string | Combinator<T>
+    def: ((parser: Parser) => Result<T>) | string | Combinator<T>
   ): void {
     if (typeof def === 'string') {
       this.ruleDescription[name] = def;
@@ -136,7 +136,7 @@ export class Grammar<IR> implements Rules {
   has(rule: string): boolean {
     return typeof this.rules[rule] === 'function';
   }
-  get(rule: string): (Parser) => Result<IR> {
+  get(rule: string): (parser: Parser) => Result<IR> {
     return this.rules[rule];
   }
 }

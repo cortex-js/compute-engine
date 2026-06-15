@@ -565,7 +565,7 @@ function makeCanonicalFunction(
         result = opDef.canonical(xs, { engine: ce, scope });
         if (result) return result;
       } catch (e) {
-        console.error(e.message);
+        console.error(e instanceof Error ? e.message : e);
       }
       // The canonical handler gave up, return a non-canonical expression
       result = new BoxedFunction(ce, name, xs, {
@@ -610,7 +610,7 @@ function makeCanonicalFunction(
       const result = opDef.canonical(xs, { engine: ce, scope });
       if (result) return result;
     } catch (e) {
-      console.error(e.message);
+      console.error(e instanceof Error ? e.message : e);
     }
 
     // The canonical handler gave up, return a non-canonical expression

@@ -116,7 +116,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     ],
 
     useVariations: true,
-    condition: (sub: { _n }) =>
+    condition: (sub: BoxedSubstitution) =>
       filter(sub) && !sub._n.isSame(0) && (sub._n.isEven ?? false),
   },
 
@@ -858,8 +858,9 @@ function solveSingleSqrtEquation(
   if (tName === undefined) return null;
   const t = ce.symbol(tName);
 
+  const sqrtTermNode: Expression = sqrtTerm;
   const substitute = (node: Expression): Expression => {
-    if (node.isSame(sqrtTerm)) return t;
+    if (node.isSame(sqrtTermNode)) return t;
     if (isFunction(node))
       return ce.function(node.operator, node.ops!.map(substitute));
     return node;

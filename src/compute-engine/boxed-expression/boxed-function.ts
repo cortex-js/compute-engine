@@ -115,7 +115,7 @@ export class BoxedFunction
    */
   private _localScope: Scope | undefined;
 
-  private _isPure: boolean;
+  private _isPure: boolean | undefined;
 
   private _isStructural: boolean;
 
@@ -1385,9 +1385,12 @@ export class BoxedFunction
       //
       const engine = this.engine;
 
-      let evaluateFn: Expression | Promise<Expression> | undefined;
+      let evaluateFn:
+        | Expression
+        | Promise<Expression | undefined>
+        | undefined;
       try {
-        const opts: Partial<EvaluateOptions> & { engine?: ComputeEngine } = {
+        const opts: Partial<EvaluateOptions> & { engine: ComputeEngine } = {
           numericApproximation,
           engine,
           signal: options?.signal,

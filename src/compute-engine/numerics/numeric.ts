@@ -122,8 +122,8 @@ export function canonicalInteger(
   for (const k of Object.keys(factors)) {
     const v = BigInt(parseInt(k));
     const exponentBase = BigInt(exponent);
-    f = f * v ** (BigInt(factors[k]) / exponentBase);
-    r = r * v ** (BigInt(factors[k]) % exponentBase);
+    f = f * v ** (BigInt(factors[Number(k)]) / exponentBase);
+    r = r * v ** (BigInt(factors[Number(k)]) % exponentBase);
   }
   return [Number(f), Number(r)];
 }
@@ -214,7 +214,7 @@ export function chop(n: number, tolerance = DEFAULT_TOLERANCE): 0 | number {
  * See https://en.wikipedia.org/wiki/Finite_difference_coefficient
  */
 export function centeredDiff8thOrder(
-  f: (number) => number,
+  f: (x: number) => number,
   x: number,
   h = 0.1
 ) {

@@ -380,8 +380,11 @@ function expand(lex: Tokenizer, args: string[]): Token[] {
   } else if (token.length > 1 && token[0] === '#') {
     // It's a parameter to expand
     const param = token.slice(1);
+    // `args` is a positional list of macro arguments (indexed by the digit in
+    // `#1`, `#2`, …) that may also carry a `'?'` default-placeholder property.
+    const argMap = args as unknown as Record<string, string | undefined>;
     result = result.concat(
-      tokenize(args?.[param] ?? args?.['?'] ?? '\\placeholder{}', args)
+      tokenize(argMap?.[param] ?? argMap?.['?'] ?? '\\placeholder{}', args)
     );
   } else {
     result.push(token);

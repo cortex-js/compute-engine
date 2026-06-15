@@ -10,16 +10,21 @@
     "lib": ["es2022", "dom", "dom.iterable", "scripthost"],
     "module": "es2022",
     "target": "es2022",
-    "moduleResolution": "node",
+    // TS 6: "node" (node10) is deprecated/removed; "bundler" matches the
+    // esbuild build pipeline and our extensionless relative imports.
+    "moduleResolution": "bundler",
     // The identities entry imports the compiled rule artifact
     // (src/compute-engine/fungrim/fungrim-core-data.json)
     "resolveJsonModule": true,
+    // TS 6 no longer auto-discovers @types/*; src uses `process.env`.
+    "types": ["node"],
+    "rootDir": "./src",
     // "newLine": "lf",
-    "noImplicitAny": false,
     "noLib": false,
     "removeComments": false,
     "sourceMap": true,
-    "strictNullChecks": true,
+    // TS 6 enables strict by default; declared explicitly for clarity.
+    "strict": true,
     "isolatedModules": true,
     "skipLibCheck": true // Skip type checking of declaration files (faster)
     // "isolatedDeclarations": true
