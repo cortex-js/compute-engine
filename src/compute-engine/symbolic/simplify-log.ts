@@ -70,11 +70,14 @@ export function simplifyLog(x: Expression): RuleStep | undefined {
       const base = arg.op1;
       const exp = arg.op2;
       if (base && exp) {
-        // ln(x^n) -> n*ln(x) when x is non-negative or n is odd or n is irrational
+        // ln(x^n) -> n*ln(x) when x is non-negative, or (n odd / irrational and
+        // x is off Ln's branch cut). For x on the negative real axis the odd /
+        // irrational cases differ by a multiple of 2πi (e.g. ln(x³) = 3ln(x) is
+        // wrong at x = -3), so they stay symbolic there (ROADMAP 7a).
         if (
           base.isNonNegative === true ||
-          exp.isOdd === true ||
-          exp.isRational === false
+          ((exp.isOdd === true || exp.isRational === false) &&
+            !onBranchCut(ce, 'Ln', base))
         ) {
           return {
             value: exp.mul(ce._fn('Ln', [base])),

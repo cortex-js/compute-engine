@@ -75,7 +75,7 @@ import {
 import { cachedValue, CachedValue } from './cache';
 import { apply, lookup } from '../function-utils';
 import { checkDeadline } from '../../common/interruptible';
-import { applyPoleOverride } from '../function-properties';
+import { applyPoleOverride, onBranchCut } from '../function-properties';
 
 /** When `materialization` is true, display 10 items if the collection is
  * infinite, otherwise 5 from the head and 5 from the tail
@@ -920,21 +920,36 @@ export class BoxedFunction
         if (!base) return exp; // natural log: ln(e^x) = x
         return exp.div(base.ln()); // log_c(e^x) = x / ln(c)
       }
-      return exp.mul(b.ln(base));
+      // ln(b^n) = n·ln(b) only when b is off Ln's branch cut. On the negative
+      // real axis the principal values differ by a multiple of 2πi (e.g. for
+      // b < 0, ln(b²) = 2·ln|b| ≠ 2·ln(b)); leave it symbolic there so the
+      // guarded simplify-log rule can pick the correct form (ROADMAP 7a).
+      if (b.isNonNegative === true || !onBranchCut(this.engine, 'Ln', b))
+        return exp.mul(b.ln(base));
     }
 
-    // ln_c(a^(1/b)) = ln_c(root(a, b)) = 1/b ln_c(a)
+    // ln_c(a^(1/b)) = ln_c(root(a, b)) = 1/b ln_c(a) — only off the cut.
     if (this.operator === 'Root') {
       const [a, b] = this.ops;
-      return a.ln(base).div(b);
+      if (a.isNonNegative === true || !onBranchCut(this.engine, 'Ln', a))
+        return a.ln(base).div(b);
     }
 
-    // ln_c(√a) = 1/2 ln_c(a)
+    // ln_c(√a) = 1/2 ln_c(a) — sound on the whole plane (√ shares Ln's
+    // principal branch, so ln(√a) and ½ln(a) agree even for a < 0).
     if (this.operator === 'Sqrt') return this.op1.ln(base).div(2);
 
-    // ln_c(a/b) = ln_c(a) - ln_c(b)
-    if (this.operator === 'Divide')
-      return this.op1.ln(base).sub(this.op2.ln(base));
+    // ln_c(a/b) = ln_c(a) - ln_c(b) — only when neither operand is on the cut.
+    if (this.operator === 'Divide') {
+      const num = this.op1;
+      const den = this.op2;
+      if (
+        (num.isNonNegative === true ||
+          !onBranchCut(this.engine, 'Ln', num)) &&
+        (den.isNonNegative === true || !onBranchCut(this.engine, 'Ln', den))
+      )
+        return num.ln(base).sub(den.ln(base));
+    }
 
     // log_base(x) for any base — keep the base instead of dropping it (a
     // non-integer base previously fell through to a base-less `Ln`).

@@ -96,3 +96,52 @@ describe('sound and symbolic combinations are unaffected (no churn)', () => {
     expect(close(nv('\\ln(2)+\\ln(3)'), trueNv('\\ln(2)+\\ln(3)'))).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// log-power / quotient expansion: ln(b^n) → n·ln(b), ln(a/b) → ln(a) − ln(b)
+//
+// Done by the `.ln()` method (boxed-function.ts) and simplify-log.ts; both are
+// now gated on `onBranchCut`. `ln(√a)` is exempt — √ shares Ln's principal
+// branch, so `ln(√a) = ½ln(a)` holds on the whole plane.
+// ---------------------------------------------------------------------------
+
+/** [re, im] of `expr` simplified then evaluated at x = v, and of the exact
+ *  (un-simplified) expression — used to assert the rewrite is faithful. */
+function soundAt(engine: ComputeEngine, src: string, v: number): boolean {
+  const e = engine.parse(src);
+  const s = e.simplify();
+  const o = e.subs({ x: v, a: v }).N();
+  const w = s.subs({ x: v, a: v }).N();
+  return (
+    Math.abs((o.re ?? NaN) - (w.re ?? NaN)) < 1e-9 &&
+    Math.abs((o.im ?? 0) - (w.im ?? 0)) < 1e-9
+  );
+}
+
+describe('log-power expansion is blocked across a branch cut', () => {
+  it('ln(x^n) with x provably negative stays numerically sound', () => {
+    const neg = new ComputeEngine();
+    neg.assume(neg.parse('x<0'));
+    for (const src of ['\\ln(x^2)', '\\ln(x^3)', '\\ln(x^4)', '\\ln(x^5)'])
+      expect(soundAt(neg, src, -3)).toBe(true);
+    // odd powers cannot use a |x| form, so they stay symbolic (not 3ln(x))
+    expect(neg.parse('\\ln(x^3)').simplify().toString()).toBe('ln(x^3)');
+    // even powers take the sound |x| form (printed as -x since x < 0)
+    expect(neg.parse('\\ln(x^2)').simplify().toString()).toBe('2ln(-x)');
+  });
+
+  it('ln(x^n) with x unconstrained keeps the optimistic n·ln(x) (no churn)', () => {
+    const u = new ComputeEngine();
+    expect(u.parse('\\ln(x^2)').simplify().toString()).toBe('2ln(x)');
+    expect(u.parse('\\ln(x^3)').simplify().toString()).toBe('3ln(x)');
+  });
+
+  it('ln(√a) stays ½ln(a) and is sound even for a < 0', () => {
+    const neg = new ComputeEngine();
+    neg.assume(neg.parse('a<0'));
+    expect(neg.parse('\\ln(\\sqrt{a})').simplify().toString()).toBe(
+      '1/2 * ln(a)'
+    );
+    expect(soundAt(neg, '\\ln(\\sqrt{a})', -3)).toBe(true);
+  });
+});
