@@ -16,6 +16,7 @@ import { centeredDiff8thOrder, limit } from '../numerics/numeric';
 import { derivative, differentiate } from '../symbolic/derivative';
 import { antiderivative } from '../symbolic/antiderivative';
 import { symbolicLimit } from '../symbolic/limit';
+import { residue } from '../symbolic/residue';
 import { canonicalLimits, canonicalLimitsSequence } from './utils';
 
 export const CALCULUS_LIBRARY: SymbolDefinitions[] = [
@@ -503,6 +504,26 @@ volumes
           );
         }
         return undefined;
+      },
+    },
+    Residue: {
+      description:
+        'Residue of a function at a point (the coefficient of (x-a)⁻¹ in its Laurent expansion)',
+      complexity: 5000,
+      broadcastable: false,
+
+      lazy: true,
+      signature: '(expression, variable:symbol, point:value) -> number',
+      canonical: ([f, x, a], { engine }) => {
+        if (!f || !x || !a || !isSymbol(x)) return null;
+        return engine._fn('Residue', [f.canonical, x, a.canonical]);
+      },
+      evaluate: ([f, x, a], { engine, numericApproximation }) => {
+        const varName = sym(x);
+        if (!varName) return undefined;
+        const r = residue(f, varName, a, engine);
+        if (r === undefined) return undefined;
+        return numericApproximation ? r.N() : r;
       },
     },
     NLimit: {

@@ -72,6 +72,14 @@
 - Fixed incorrect or missing antiderivatives for `sin²(ax+b)`, `cos²(ax+b)`,
   `√x`, `1/√x`, `1/√(1-x²)`, and related forms.
 
+- **New `Residue(f, x, a)` operator** computes the residue of `f` at `x = a` (the
+  coefficient of `(x-a)⁻¹` in its Laurent expansion). It detects the pole order
+  and evaluates exactly via the symbolic limit engine, e.g.
+  `Residue(1/(x²-1), x, 1) → 1/2`, `Residue(eˣ/(x-1)², x, 1) → e`, and
+  `Residue(cot(x), x, 0) → 1`. Residues of `Gamma`, `Digamma`, and `Zeta` at
+  their poles use closed forms gated by the analytic-property store, e.g.
+  `Residue(Gamma(x), x, -2) → 1/2` and `Residue(Zeta(s), s, 1) → 1`.
+
 ### Algebra and Solving
 
 - **`solve` now handles general cubic, quartic, and higher-degree polynomials.**
