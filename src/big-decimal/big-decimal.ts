@@ -1104,7 +1104,10 @@ export class BigDecimal {
     const shift = digits - n;
     const divisor = pow10(shift);
     let rounded = absSig / divisor;
-    const remainder = absSig % divisor;
+    // remainder = absSig % divisor, but reuse the quotient (a multiply, ~0.1µs)
+    // instead of a second full-width bigint division (~0.45µs). Both operands
+    // are non-negative, so this equals the modulo exactly.
+    const remainder = absSig - rounded * divisor;
 
     // Round half-to-even
     const half = divisor / 2n;

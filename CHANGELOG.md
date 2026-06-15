@@ -171,18 +171,18 @@ returned no usable result at that precision.
 
 | Expression | CE (current) | CE 0.59.0 | SymPy | math.js |
 | --- | --: | --: | --: | --: |
-| $\pi^2$ | 0.02 | 0.02 | 0.18 | 0.11 |
-| $\sin 1$ | 0.02 | 0.06 | 0.22 | 0.46 |
-| $\cos 1$ | 0.03 | 0.06 | 0.23 | 0.55 |
-| $\ln 2$ | 0.09 | 0.32 | 0.36 | 4.4 |
-| $e^{\pi}$ | 0.03 | 0.40 | 0.21 | 4.8 |
-| $\zeta(3)$ | 4.6 | — | 0.28 | — |
-| $\Gamma(\tfrac13)$ | 2.6 | 439 | 0.35 | — |
-| $\psi(\tfrac13)$ | 2.5 | 414 | 2.8 | — |
+| $\pi^2$ | 0.02 | 0.02 | 0.18 | 0.10 |
+| $\sin 1$ | 0.02 | 0.06 | 0.23 | 0.43 |
+| $\cos 1$ | 0.03 | 0.06 | 0.23 | 0.48 |
+| $\ln 2$ | 0.10 | 0.31 | 0.34 | 4.4 |
+| $e^{\pi}$ | 0.03 | 0.41 | 0.22 | 4.8 |
+| $\zeta(3)$ | 3.5 | — | 0.27 | — |
+| $\Gamma(\tfrac13)$ | 1.9 | 438 | 0.35 | — |
+| $\psi(\tfrac13)$ | 1.7 | 412 | 2.9 | — |
 
-Biggest gains over `0.59.0`: $\Gamma(\tfrac13)$ **168× faster**,
-$\psi(\tfrac13)$ **166× faster**, $e^{\pi}$ **12× faster** (it no longer
-recomputes $\ln e$ on every call), $\ln 2$ **3.4× faster**, $\sin 1$ / $\cos 1$
+Biggest gains over `0.59.0`: $\psi(\tfrac13)$ **247× faster**,
+$\Gamma(\tfrac13)$ **229× faster**, $e^{\pi}$ **13× faster** (it no longer
+recomputes $\ln e$ on every call), $\ln 2$ **3.2× faster**, $\sin 1$ / $\cos 1$
 **~2.5× faster**. The elementary functions widen further at 1000+ digits (e.g.
 $\ln 2$ ≈ 21× faster, where it now also leads SymPy and mpmath). `0.59.0` could
 not reach 200 digits for $\zeta(3)$ (it was capped near machine precision);

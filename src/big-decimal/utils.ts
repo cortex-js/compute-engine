@@ -21,9 +21,18 @@
 
 const _pow10Cache: Map<number, bigint> = new Map();
 
-/** Return 10^n as a bigint, caching values for n <= 100. */
+// Cache 10^n up to this many digits. `toPrecision` and `bigintDigits` call
+// pow10 with `n` ≈ the working precision on *every* high-precision rounding
+// (the hot path for gamma/polygamma/zeta and any BigDecimal-level loop), so the
+// old 100-digit cap meant recomputing `10n ** BigInt(n)` each time. `n` clusters
+// around a handful of precision-derived values, so the entry count stays tiny;
+// the cap only bounds the worst-case single-entry size (10^100000 ≈ 40 KB) and
+// stops truly pathological exponents (e.g. from `toBigInt` of a huge value).
+const POW10_CACHE_MAX = 100_000;
+
+/** Return 10^n as a bigint, memoized for n <= POW10_CACHE_MAX. */
 export function pow10(n: number): bigint {
-  if (n <= 100) {
+  if (n <= POW10_CACHE_MAX) {
     let v = _pow10Cache.get(n);
     if (v === undefined) {
       v = 10n ** BigInt(n);

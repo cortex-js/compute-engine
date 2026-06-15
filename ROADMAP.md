@@ -1,6 +1,6 @@
 # Compute Engine — Roadmap
 
-**Last updated:** 2026-06-14. Items 1 (Fungrim Phase 2 — solve templates),
+**Last updated:** 2026-06-15. Items 1 (Fungrim Phase 2 — solve templates),
 2 (interruptible evaluation), 4 (Tier-2 numeric kernels), 9 (₂F₁ analytic
 continuation), 10 (x/√(x²) soundness), 11 (deadline checks in simplify),
 12 (antiderivative correctness), 13 (small engine follow-ups), 14 (incomplete
@@ -647,9 +647,55 @@ Remaining items:
 
 **Bignum/numeric track status:** 17.13, 17.10, 17.11 all landed 2026-06-14
 (together: `Exp(x).N()` and `ln` at 1000 digits now beat mpmath; `sqrt` kernel
-~2× faster). Only **17.12** remains (kernel polish, lowest impact). The
-`benchmarks/big-decimal/BIGNUM-COMPARISON.md` tables predate these and should be
-regenerated to reflect them.
+~2× faster); 17.14 landed 2026-06-15. `BIGNUM-COMPARISON.md` and the CHANGELOG
+benchmark tables were regenerated 2026-06-15. Open: **17.12** (kernel polish,
+lowest impact) and **17.15** (base-2 special-function kernels, larger, deferred).
+
+### 17.14 `BigDecimal.toPrecision` base-10 rounding tax — ✅ done (2026-06-15)
+
+**What:** the special-function family (`Gamma`/`Digamma`/`PolyGamma`/`Zeta`/
+`Beta`, and the `EulerGamma` Brent–McMillan loop) runs its Stirling/shift/series
+arithmetic at the **base-10 `BigDecimal`** level, so every step ends in
+`.toPrecision(p)` to bound significand growth (the B1/B13 convention). Profiling
+`Γ(1/3).N()` at 200 digits (~414 mul + 92 div + 311 add) found the cost is *not*
+the arithmetic — a raw `bigint` multiply is ~0.67µs — but `toPrecision` itself
+(**2.85µs, ~4× the multiply**), called ~500× per call. Within it: `pow10(shift)`
+with `shift ≈ p` was **uncached** (the `pow10` table capped at 100, so
+`10n ** BigInt(p)` was rebuilt every call, and again ×2 inside `bigintDigits`),
+and the remainder used a second full-width division (`% divisor`).
+
+**Fix:** raise the `pow10` memo cap to 100 000 digits (`utils.ts` — `n` clusters
+around a few precision-derived values, so the entry count stays tiny), and
+compute `toPrecision`'s remainder as `absSig − ⌊absSig/d⌋·d` (one divmod, a
+multiply instead of a second division). Both are **byte-identical** (the divmod
+identity holds for non-negative operands; the cache returns the same values) —
+full suite green, zero snapshot churn.
+
+**Measured:** `toPrecision(224)` 2.85 → **1.93µs** (~32%); `Γ(1/3)` @200d
+2.6 → **1.84ms** (~29%), `ψ(1/3)` 2.5 → **1.62ms** (~35%). Broad win — it speeds
+every BigDecimal-level high-precision loop, not just gamma.
+
+### 17.15 Base-2 special-function kernels (`gammaln` et al.) — deferred
+
+**What:** the deeper half of the `Γ`-vs-mpmath gap (still ~5–7× at 200 digits
+after 17.14). The *elementary* kernels (`exp`/`ln`/`sin`/…) were ported to a
+base-2 fixed-point grid in **17.1** (`utils.ts`), where "round to p bits" is a
+bit-shift (`>> n`) — essentially free — vs base-10's division-per-round. The
+**special functions** (`gammalnCore`, the Stirling series + Bernoulli machinery,
+`digamma`/`trigamma`/`polygamma`, `zeta`, `beta`) still run at the base-10
+`BigDecimal` level, so they pay the rounding tax on every operation even after
+17.14 trims it. mpmath (base-2 + GMP) rounds for free and computes ~5–7× faster.
+
+**Why deferred / how big:** porting `gammalnCore` to the base-2 grid is a
+substantial undertaking — the argument-shift product, the Bernoulli-rational
+Stirling series, the reflection formula, and the `exp`/`ln` glue all move onto
+`bits`-scaled `bigint`s (like the elementary kernels). Expected to close most of
+the remaining gap (the residual being V8 `BigInt` vs GMP, ~2×, which even the
+existing base-2 elementary kernels show — `ln`@224d is ~119µs in CE vs roughly
+half that in mpmath, and is **not** closable without a different bigint backend,
+e.g. WASM GMP). Lower priority: the special functions are already 130–170×
+faster than the last release (0.59.0) and competitive for typical use; this is a
+"catch mpmath" item, not a correctness or capability gap.
 
 ### 5. Per-head aggregated rule dispatch
 

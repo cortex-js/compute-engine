@@ -16,7 +16,7 @@ This report compares the **current Compute Engine build** against the **last pub
 
 | Tool | Version | Runtime |
 |---|---|---|
-| Compute Engine — current build | `0.59.0` @ `cc27aea0` (freshly built from `src/`) | Node v22.13.1 |
+| Compute Engine — current build | `0.59.0` @ `04eb5bdc` (freshly built from `src/`) | Node v22.13.1 |
 | Compute Engine — current + Rubi + Fungrim | same minified bundle + published `integration-rules` (Rubi) + `identities` (Fungrim) packs | Node v22.13.1 |
 | Compute Engine — published | `0.59.0` (npm) | Node v22.13.1 |
 | SymPy | `1.14.0` | Python 3.14.2 |
@@ -57,71 +57,71 @@ Correct (✅) results per category (count varies by category). Cells in parenthe
 | # | Case | CE·cur | CE+R/F | CE·0.59.0 | SymPy | math.js | NumPy |
 |---|---|---|---|---|---|---|---|
 | | **Core tier** |  |  |  |  |  |  |
-| N01 | $\pi$ <sub>(50d)</sub> | 0.00 | 0.00 | 0.00 | 0.17 | 0.04 | 🟡 <sub>16 digits</sub> 0.00 |
+| N01 | $\pi$ <sub>(50d)</sub> | 0.00 | 0.00 | 0.00 | 0.16 | 0.02 | 🟡 <sub>16 digits</sub> 0.00 |
 | N02 | $e$ <sub>(50d)</sub> | 0.00 | 0.00 | 0.00 | 0.16 | 0.01 | 🟡 <sub>16 digits</sub> 0.00 |
-| N03 | $\sqrt2$ <sub>(50d)</sub> | 0.01 | 0.00 | 0.01 | 0.24 | 0.07 | 🟡 <sub>17 digits</sub> 0.00 |
-| N04 | $100!$ <sub>(exact)</sub> | 0.00 | 0.00 | 0.00 | 0.26 | 0.15 | ❌ <sub>inexact</sub> 0.01 |
-| N05 | $e^{\pi}$ <sub>(40d)</sub> | 0.02 | 0.01 | 0.08 | 0.20 | 0.39 | 🟡 <sub>17 digits</sub> 0.00 |
+| N03 | $\sqrt2$ <sub>(50d)</sub> | 0.01 | 0.00 | 0.01 | 0.23 | 0.07 | 🟡 <sub>17 digits</sub> 0.00 |
+| N04 | $100!$ <sub>(exact)</sub> | 0.00 | 0.00 | 0.01 | 0.27 | 0.11 | ❌ <sub>inexact</sub> 0.01 |
+| N05 | $e^{\pi}$ <sub>(40d)</sub> | 0.02 | 0.01 | 0.08 | 0.19 | 0.35 | 🟡 <sub>17 digits</sub> 0.00 |
 | | **Hard tier** |  |  |  |  |  |  |
 | N06 | $\pi$ <sub>(200d)</sub> | 0.00 | 0.00 | 0.00 | 0.16 | 0.01 | 🟡 <sub>16 digits</sub> 0.00 |
-| N07 | $\zeta(3)$ <sub>(40d)</sub> | 0.55 | 0.53 | 🟡 <sub>17 digits</sub> 0.22 | 0.28 | ❌ <sub>8 digits</sub> 5.73 | — |
-| N08 | $\Gamma(\tfrac13)$ <sub>(40d)</sub> | 0.43 | 0.36 | 2.24 | 0.25 | ⚠️ | — |
-| N09 | $W(1)$ <sub>(40d)</sub> | 0.12 | 0.09 | 0.22 | 0.71 | — | — |
-|  | **median ms** | **0.01** | **0.00** | **0.01** | **0.24** | **0.07** | **0.00** |
+| N07 | $\zeta(3)$ <sub>(40d)</sub> | 0.50 | 0.47 | 🟡 <sub>17 digits</sub> 0.22 | 0.27 | ❌ <sub>8 digits</sub> 3.59 | — |
+| N08 | $\Gamma(\tfrac13)$ <sub>(40d)</sub> | 0.33 | 0.30 | 2.21 | 0.24 | ⚠️ | — |
+| N09 | $W(1)$ <sub>(40d)</sub> | 0.11 | 0.08 | 0.21 | 0.68 | — | — |
+|  | **median ms** | **0.01** | **0.00** | **0.01** | **0.23** | **0.07** | **0.00** |
 
 ### Simplification
 
 | # | Case | CE·cur | CE+R/F | CE·0.59.0 | SymPy | math.js |
 |---|---|---|---|---|---|---|
 | | **Core tier** |  |  |  |  |  |
-| S01 | $\frac{x^2-1}{x-1}$ | 0.28 | 0.33 | 0.29 | 8.34 | 🟡 <sub>not simplified</sub> 1.16 |
-| S02 | $\sin^2 x+\cos^2 x$ | 0.21 | 0.31 | 0.21 | 8.79 | 🟡 <sub>not simplified</sub> 1.07 |
-| S03 | $(x+1)^2-(x-1)^2$ | 0.50 | 0.35 | 0.51 | 6.00 | 🟡 <sub>not simplified</sub> 1.07 |
-| S04 | $\frac{x^3-x}{x}$ | 0.28 | 0.14 | 0.28 | 4.17 | 1.22 |
-| S05 | $x^{-1/2}-\frac{1}{\sqrt x}$ | 0.25 | 0.08 | 🟡 <sub>not simplified</sub> 0.29 | 0.24 | 🟡 <sub>not simplified</sub> 1.48 |
+| S01 | $\frac{x^2-1}{x-1}$ | 0.30 | 0.33 | 0.28 | 7.85 | 🟡 <sub>not simplified</sub> 1.10 |
+| S02 | $\sin^2 x+\cos^2 x$ | 0.20 | 0.31 | 0.21 | 8.55 | 🟡 <sub>not simplified</sub> 1.03 |
+| S03 | $(x+1)^2-(x-1)^2$ | 0.50 | 0.35 | 0.50 | 5.92 | 🟡 <sub>not simplified</sub> 1.25 |
+| S04 | $\frac{x^3-x}{x}$ | 0.28 | 0.15 | 0.28 | 4.38 | 1.33 |
+| S05 | $x^{-1/2}-\frac{1}{\sqrt x}$ | 0.25 | 0.08 | 🟡 <sub>not simplified</sub> 0.21 | 0.24 | 🟡 <sub>not simplified</sub> 1.28 |
 | | **Hard tier** |  |  |  |  |  |
-| S06 | $\sqrt6\,x+\sqrt2\,x$ | 0.61 | 0.42 | 0.64 | 6.36 | 1.18 |
-| S07 | $\ln x+\ln(x+1)$ | 0.40 | 0.43 | 0.40 | 6.37 | 🟡 <sub>not simplified</sub> 1.64 |
-| S08 | $\sqrt{3+2\sqrt2}$ | 0.40 | 0.21 | 🟡 <sub>not simplified</sub> 0.53 | 🟡 <sub>not simplified</sub> 4.08 | 🟡 <sub>numeric only</sub> 2.25 |
-| S09 | $\frac{x^3-1}{x-1}$ | 0.37 | 0.13 | 0.40 | 8.92 | 🟡 <sub>not simplified</sub> 0.91 |
-|  | **median ms** | **0.37** | **0.31** | **0.40** | **6.36** | **1.18** |
+| S06 | $\sqrt6\,x+\sqrt2\,x$ | 0.62 | 0.44 | 0.63 | 5.55 | 1.26 |
+| S07 | $\ln x+\ln(x+1)$ | 0.39 | 0.41 | 0.36 | 6.14 | 🟡 <sub>not simplified</sub> 0.83 |
+| S08 | $\sqrt{3+2\sqrt2}$ | 0.30 | 0.19 | 🟡 <sub>not simplified</sub> 0.20 | 🟡 <sub>not simplified</sub> 4.24 | 🟡 <sub>numeric only</sub> 0.89 |
+| S09 | $\frac{x^3-1}{x-1}$ | 0.32 | 0.13 | 0.33 | 9.41 | 🟡 <sub>not simplified</sub> 1.18 |
+|  | **median ms** | **0.30** | **0.31** | **0.28** | **5.92** | **1.18** |
 
 ### Differentiation
 
 | # | Case | CE·cur | CE+R/F | CE·0.59.0 | SymPy | math.js |
 |---|---|---|---|---|---|---|
 | | **Core tier** |  |  |  |  |  |
-| D01 | $\tfrac{d}{dx}\sin x$ | 0.04 | 0.26 | 0.04 | 0.34 | 0.64 |
-| D02 | $\tfrac{d}{dx}x^5$ | 0.15 | 0.05 | 0.15 | 0.51 | 1.56 |
-| D03 | $\tfrac{d}{dx}\tan x$ | 0.09 | 0.28 | 0.09 | 2.39 | 1.05 |
-| D04 | $\tfrac{d}{dx}x^2\sin x$ | 0.50 | 0.36 | 0.40 | 2.22 | 2.93 |
-| D05 | $\tfrac{d}{dx}\sin(x^2)$ | 0.20 | 0.32 | 0.19 | 1.45 | 1.49 |
+| D01 | $\tfrac{d}{dx}\sin x$ | 0.04 | 0.23 | 0.04 | 0.33 | 0.64 |
+| D02 | $\tfrac{d}{dx}x^5$ | 0.15 | 0.05 | 0.15 | 0.50 | 0.78 |
+| D03 | $\tfrac{d}{dx}\tan x$ | 0.08 | 0.25 | 0.08 | 2.20 | 0.81 |
+| D04 | $\tfrac{d}{dx}x^2\sin x$ | 0.40 | 0.36 | 0.39 | 2.07 | 2.02 |
+| D05 | $\tfrac{d}{dx}\sin(x^2)$ | 0.19 | 0.32 | 0.19 | 1.46 | 1.46 |
 | | **Hard tier** |  |  |  |  |  |
-| D06 | $\tfrac{d}{dx}x^x$ | 0.14 | 0.04 | 0.18 | 1.86 | 1.89 |
-| D07 | $\tfrac{d}{dx}\arcsin x$ | 0.49 | 0.38 | 0.20 | 3.29 | 1.67 |
-| D08 | $\tfrac{d}{dx}\ln(\sin x)$ | 0.13 | 0.30 | 0.12 | 1.20 | 1.22 |
-| D09 | $\tfrac{d}{dx}\sqrt{1-x^2}$ | 0.97 | 0.54 | 0.70 | 6.97 | 2.57 |
-|  | **median ms** | **0.15** | **0.30** | **0.18** | **1.86** | **1.56** |
+| D06 | $\tfrac{d}{dx}x^x$ | 0.13 | 0.05 | 0.14 | 1.76 | 1.59 |
+| D07 | $\tfrac{d}{dx}\arcsin x$ | 0.44 | 0.36 | 0.18 | 3.05 | 1.21 |
+| D08 | $\tfrac{d}{dx}\ln(\sin x)$ | 0.12 | 0.32 | 0.11 | 1.13 | 1.04 |
+| D09 | $\tfrac{d}{dx}\sqrt{1-x^2}$ | 0.89 | 0.53 | 0.75 | 5.86 | 2.24 |
+|  | **median ms** | **0.15** | **0.32** | **0.15** | **1.76** | **1.21** |
 
 ### Antiderivation (symbolic integration)
 
 | # | Case | CE·cur | CE+R/F | CE·0.59.0 | SymPy |
 |---|---|---|---|---|---|
 | | **Core tier** |  |  |  |  |
-| A01 | $\int x^2\,dx$ | 0.35 | 0.37 | 0.24 | 0.39 |
-| A02 | $\int\sin x\,dx$ | 0.11 | 0.36 | 0.10 | 1.22 |
-| A03 | $\int x e^x\,dx$ | 0.46 | 0.65 | 0.52 | 7.51 |
-| A04 | $\int\frac{1}{1+x^2}\,dx$ | 0.24 | 0.36 | 0.25 | 12.8 |
-| A05 | $\int\frac{x}{x^2+1}\,dx$ | 0.82 | 0.63 | 1.04 | 8.01 |
+| A01 | $\int x^2\,dx$ | 0.32 | 0.40 | 0.23 | 0.37 |
+| A02 | $\int\sin x\,dx$ | 0.11 | 0.38 | 0.10 | 1.29 |
+| A03 | $\int x e^x\,dx$ | 0.42 | 0.57 | 0.35 | 6.72 |
+| A04 | $\int\frac{1}{1+x^2}\,dx$ | 0.24 | 0.36 | 0.24 | 9.77 |
+| A05 | $\int\frac{x}{x^2+1}\,dx$ | 0.62 | 0.60 | 0.65 | 7.08 |
 | | **Hard tier** |  |  |  |  |
-| A06 | $\int\frac{1}{x^3+1}\,dx$ | 8.84 | 1.14 | ∅ | 26.4 |
-| A07 | $\int\frac{1}{\sqrt x}\,dx$ | 0.41 | 0.43 | ∅ | 0.87 |
-| A08 | $\int e^{-x^2}\,dx$ | 0.80 | 0.73 | ∅ | 29.7 |
-| A09 | $\int\frac{x}{\sqrt{1-x^2}}\,dx$ | 0.87 | 1.24 | ∅ | 24.3 |
-| CR1 | $\int\frac{\sqrt x}{1+x}\,dx$ | **∅** | 0.70 | ∅ | 22.4 |
-| CR2 | $\int\frac{x}{(1+x)^{1/3}}\,dx$ | **∅** | 0.59 | ∅ | 119 |
-| CR3 | $\int\frac{x^2}{(1+x)^{1/3}}\,dx$ | **∅** | 0.70 | ∅ | 215 |
-|  | **median ms** | **0.46** | **0.65** | **0.25** | **22.4** |
+| A06 | $\int\frac{1}{x^3+1}\,dx$ | 5.73 | 1.08 | ∅ | 24.8 |
+| A07 | $\int\frac{1}{\sqrt x}\,dx$ | 0.28 | 0.42 | ∅ | 0.72 |
+| A08 | $\int e^{-x^2}\,dx$ | 0.81 | 0.72 | ∅ | 25.0 |
+| A09 | $\int\frac{x}{\sqrt{1-x^2}}\,dx$ | 0.89 | 1.16 | ∅ | 24.4 |
+| CR1 | $\int\frac{\sqrt x}{1+x}\,dx$ | **∅** | 0.68 | ∅ | 22.1 |
+| CR2 | $\int\frac{x}{(1+x)^{1/3}}\,dx$ | **∅** | 0.62 | ∅ | 118 |
+| CR3 | $\int\frac{x^2}{(1+x)^{1/3}}\,dx$ | **∅** | 0.69 | ∅ | 208 |
+|  | **median ms** | **0.42** | **0.62** | **0.24** | **22.1** |
 
 ## Current build vs published `0.59.0`
 
