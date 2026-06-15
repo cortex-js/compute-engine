@@ -1710,6 +1710,64 @@ function solveByZeroProduct(
 }
 
 /**
+ * `tan(f(arg))` as an algebraic expression in `arg`, for a real-principal-branch
+ * inverse-trig function `f`; `null` for anything else. Used to clear two
+ * *different* inverse-trig functions from an equation `g(x) = h(x)` by applying
+ * `tan` to both sides (ROADMAP B9).
+ */
+function tanOfInverseTrig(op: string, arg: Expression): Expression | null {
+  const ce = arg.engine;
+  const sqrt1mSq = () => ce.function('Sqrt', [ce.One.sub(arg.pow(2))]);
+  switch (op) {
+    case 'Arctan':
+      return arg; // tan(arctan x) = x
+    case 'Arcsin':
+      return arg.div(sqrt1mSq()); // tan(arcsin x) = x / √(1−x²)
+    case 'Arccos':
+      return sqrt1mSq().div(arg); // tan(arccos x) = √(1−x²) / x
+    default:
+      return null;
+  }
+}
+
+/**
+ * Solve `g(x) = h(x)` where `g` and `h` are two *different* inverse-trig
+ * functions of the unknown (e.g. `arcsin x = arctan x`, `arccos x = arctan x`),
+ * by applying `tan` to both sides to clear the inverse functions, then solving
+ * the resulting algebraic equation. SymPy errors on these; CE returned nothing.
+ *
+ * `tan` is periodic, so this can introduce roots where the two angles differ by
+ * a multiple of π — the caller validates every candidate against the original
+ * equation, which removes them. Returns `null` when the pattern does not apply.
+ */
+function solveInverseTrigEquation(
+  lhs: Expression,
+  rhs: Expression,
+  x: string,
+  depth: number
+): Expression[] | null {
+  if (depth >= 3) return null; // recursion backstop
+  if (!isFunction(lhs) || !isFunction(rhs)) return null;
+  if (lhs.nops !== 1 || rhs.nops !== 1) return null;
+  // The same-function case `f(u) = f(v)` is already handled by the injective
+  // peel; this strategy is for two *different* inverse-trig heads.
+  if (lhs.operator === rhs.operator) return null;
+  if (!lhs.op1.has(x) || !rhs.op1.has(x)) return null;
+
+  const tanL = tanOfInverseTrig(lhs.operator, lhs.op1);
+  const tanR = tanOfInverseTrig(rhs.operator, rhs.op1);
+  if (tanL === null || tanR === null) return null;
+
+  const ce = lhs.engine;
+  const roots = findUnivariateRoots(
+    ce.function('Equal', [tanL, tanR]),
+    x,
+    depth + 1
+  );
+  return roots.length > 0 ? [...roots] : null;
+}
+
+/**
  * MathJsonExpression is a function of a single variable (`x`) or an Equality
  *
  * Return the roots of that variable
@@ -1766,6 +1824,15 @@ export function findUnivariateRoots(
     ) {
       lhs = lhs.op2;
       rhs = rhs.op2;
+    }
+
+    // Two *different* inverse-trig functions of the unknown (e.g.
+    // `arcsin x = arctan x`): clear them by applying `tan` to both sides, solve
+    // the algebraic result, and validate against the original (B9).
+    const invTrigRoots = solveInverseTrigEquation(lhs, rhs, x, depth);
+    if (invTrigRoots !== null) {
+      const validated = validateRoots(lhs0.sub(rhs0), x, invTrigRoots);
+      if (validated.length > 0) return validated;
     }
 
     expr = expand(lhs).sub(expand(rhs)).simplify();
@@ -1873,18 +1940,28 @@ export function findUnivariateRoots(
     // Fallback: solve polynomials via coefficient extraction when the
     // rule-based matching above didn't fire.
     if (result.length === 0) {
-      const deg = polynomialDegree(originalExpr, x);
+      // Prefer the original (clean) equation; but when radical-clearing above
+      // turned a non-polynomial original into a sqrt-free polynomial (e.g.
+      // `√(1−x²) = x²` → `1 − x² − x⁴`), solve that instead. `validateRoots`
+      // against the original drops any roots the squaring introduced.
+      const polyExpr =
+        polynomialDegree(originalExpr, x) >= 0
+          ? originalExpr
+          : polynomialDegree(expr, x) >= 0
+            ? expr
+            : originalExpr;
+      const deg = polynomialDegree(polyExpr, x);
       if (deg === 2) {
         // The quadratic rules match the surface form `Multiply(__b, _x)` for
         // the middle term, but a negated symbolic/unit coefficient
         // canonicalizes to `Negate(Multiply(b, x))` (or `Negate(x)`), which
         // that pattern misses — so e.g. `x^2 - a x + 1 = 0` found no roots.
         // Coefficient extraction handles every sign form uniformly (#300).
-        const quadraticRoots = solveQuadraticByCoefficients(originalExpr, x);
+        const quadraticRoots = solveQuadraticByCoefficients(polyExpr, x);
         if (quadraticRoots.length > 0) result = quadraticRoots;
       } else if (deg >= 3) {
         // Exact rational roots first (rational-root theorem)…
-        const rationalRoots = findRationalRoots(originalExpr, x, ce);
+        const rationalRoots = findRationalRoots(polyExpr, x, ce);
         result = [...rationalRoots];
         // For the remaining (irrational) roots, prefer an exact reduction of a
         // sparse polynomial (gcd of exponents > 1, e.g. a biquadratic via
@@ -1893,8 +1970,8 @@ export function findUnivariateRoots(
         // added; `validateRoots` discards any spurious ones.
         if (rationalRoots.length < deg) {
           const extra =
-            solveByPowerGcdSubstitution(originalExpr, x) ??
-            numericRealRoots(originalExpr, x, ce);
+            solveByPowerGcdSubstitution(polyExpr, x) ??
+            numericRealRoots(polyExpr, x, ce);
           for (const nr of extra) {
             const v = nr.N().re;
             if (

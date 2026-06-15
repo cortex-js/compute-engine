@@ -865,6 +865,30 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       evaluate: ([x]) => x.simplify() ?? undefined,
     },
 
+    Solve: {
+      description: [
+        'Solve(equation, unknown): the list of solutions of an equation for the',
+        'unknown. The equation may be an `Equal` expression or a bare expression',
+        '(read as `= 0`), e.g. `Solve(x^2 - 1 == 0, x)` or `Solve(x^2 - 1, x)`.',
+      ],
+      // Hold the arguments: the equation must NOT be pre-evaluated, or an
+      // `Equal` collapses to a boolean (`x^2 = 1` → `False`) before solving.
+      lazy: true,
+      signature: '(any, symbol) -> list',
+      canonical: (ops, { engine: ce }) =>
+        ce._fn('Solve', checkArity(ce, ops, 2)),
+      evaluate: (ops, { engine: ce }) => {
+        const unknown = sym(ops[1]);
+        if (unknown === undefined) return undefined;
+        // Dispatch to the same machinery as `.solve()`.
+        // A single (string) unknown always yields the univariate root list
+        // (`Expression[]`), never the system-solve `Record` shapes.
+        const roots = ops[0].solve(unknown) as ReadonlyArray<Expression> | null;
+        if (roots === null) return ce.function('List', []);
+        return ce.function('List', [...roots]);
+      },
+    },
+
     CanonicalForm: {
       description: [
         'Return the canonical form of an expression',

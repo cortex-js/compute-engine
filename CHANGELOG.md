@@ -33,6 +33,15 @@
   applies to positive and unconstrained-symbolic arguments. The guard consults
   the analytic-property store's branch-cut records (see Special Functions).
 
+- **`e^{iθ}` stays in exponential form under `evaluate()` for a symbolic angle.**
+  Euler's formula `e^{iθ} → cos θ + i·sin θ` is now applied only when `θ` is a
+  constant that reduces to a closed form (`e^{iπ/2} = i`, `e^{iπ} = -1`,
+  `e^{ln y} = y` are unchanged); for a symbolic angle, `e^{ix}` stays `e^{ix}` —
+  a basis change is not an evaluation, and it no longer differs from the previous
+  inconsistency where `(e^{ix})²` expanded while `e^{ix}` did not. Convert to
+  trigonometric form on demand with the new strategy
+  `expr.simplify({ strategy: 'trig' })`.
+
 - **`N()` at a known pole now returns `ComplexInfinity` instead of `NaN`.** When
   a function is evaluated numerically at a pole recorded in the new
   analytic-property metadata store (see Special Functions), the result is
@@ -100,6 +109,19 @@
   `Residue(Gamma(x)/(x-5), x, -2) → -1/14`.
 
 ### Algebra and Solving
+
+- **`solve` handles equations between two different inverse-trigonometric
+  functions** by applying `tan` to both sides to clear them, then solving the
+  resulting algebraic equation. For example `arcsin(x) = arctan(x) → 0` and
+  `arccos(x) = arctan(x) → √((√5−1)/2)`. As part of this, `√(f(x)) = g(x)` with a
+  non-linear right-hand side now solves too (e.g. `√(1−x²) = x²`).
+
+- **New `Solve` operator.** `Solve(equation, unknown)` returns the list of
+  solutions of an equation for an unknown, using the same solver as the
+  `expr.solve()` method — for example `["Solve", ["Equal", "x^2", 1], "x"]`
+  returns `["List", 1, -1]`. The equation may be an `Equal` expression or a bare
+  expression read as `= 0`; the arguments are held, so the equation is no longer
+  prematurely reduced to a boolean.
 
 - **`solve` now handles general cubic, quartic, and higher-degree polynomials.**
   Exact roots are still preferred; when no supported exact form is available,

@@ -49,16 +49,13 @@ Base CE solves 14/21 of the Wester equations (substitution and zero-product
 factoring already landed). The last two Wester gaps (`xˣ = x`,
 `sin x = tan x`) are harness artifacts — the harness grades SymPy's arbitrary
 finite root-slices, not a CE capability gap — so the Wester `Solve` score is
-saturated at our principled ceiling. Remaining work, judged on its own merits
+saturated at our principled ceiling. CE now *exceeds* SymPy on the two
+inverse-trig equations SymPy errors on — `arcsin x = arctan x → {0}` and
+`arccos x = arctan x → √((√5−1)/2)` (solved by applying `tan` to both sides) —
+and the `Solve(eq, x)` operator now dispatches to `.solve()` instead of letting
+its `Equal` collapse to `False` (both landed). What remains, on its own merits
 rather than by Wester:
 
-- **Exceed SymPy on two inverse-trig equations** — `arcsin x = arctan x → {0}`
-  and `arccos x = arctan x → √((√5−1)/2)` *error out* in SymPy; CE also returns
-  nothing today (two independent inverse-trig generators). Solving either moves
-  CE ahead of SymPy.
-- **Dispatch the `Solve[…]` operator form to `.solve()`** — a parsed
-  `Solve[eq, x]` returns unevaluated and lets its `Equal` argument collapse to
-  `False` instead of solving (surfaced by `benchmarks/audit/wester.ts`).
 - **LambertW / Ln-Exp inverse forms** via the solve templates
   (`loadIdentities(ce, { solve: true })`) — see the Fungrim coverage track.
 

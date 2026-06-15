@@ -1679,3 +1679,98 @@ describe('ZERO-PRODUCT FACTORING (B9)', () => {
     expect(result?.some((v) => Math.abs(v - Math.PI / 6) < 1e-8)).toBe(true);
   });
 });
+
+describe('INVERSE-TRIG EQUATIONS (B9)', () => {
+  // Two *different* inverse-trig functions of x: apply tan to both sides to
+  // clear them, solve the algebraic result, validate against the original.
+  // SymPy errors on both of these; CE returned nothing before B9.
+
+  // tan: x/√(1−x²) = x → x·(1/√(1−x²) − 1) = 0 → x = 0.
+  test('arcsin x = arctan x → {0} (exceeds SymPy)', () => {
+    expect(expr('\\arcsin x = \\arctan x').solve('x')?.map((x) => x.json)).toEqual([
+      0,
+    ]);
+  });
+
+  // Symmetric in the two sides.
+  test('arctan x = arcsin x → {0}', () => {
+    expect(expr('\\arctan x = \\arcsin x').solve('x')?.map((x) => x.json)).toEqual([
+      0,
+    ]);
+  });
+
+  // tan: √(1−x²)/x = x → √(1−x²) = x² → x⁴ + x² − 1 = 0 → x = √((√5−1)/2).
+  // The negative root satisfies the squared equation but not arccos = arctan,
+  // so validation against the original keeps only the positive one.
+  test('arccos x = arctan x → √((√5−1)/2) (exceeds SymPy)', () => {
+    const result = expr('\\arccos x = \\arctan x').solve('x');
+    expect(result?.length).toBe(1);
+    expect(result![0].N().re).toBeCloseTo(Math.sqrt((Math.sqrt(5) - 1) / 2), 10);
+  });
+
+  // The downstream √(f) = g(nonlinear) → biquadratic path now solves too (the
+  // polynomial fallback uses the sqrt-free transformed form).
+  test('√(1−x²) = x² → ±√((√5−1)/2)', () => {
+    const result = expr('\\sqrt{1-x^2} = x^2').solve('x');
+    const v = Math.sqrt((Math.sqrt(5) - 1) / 2);
+    const reals = result!.map((r) => r.N().re).sort((a, b) => a - b);
+    expect(reals).toHaveLength(2);
+    expect(reals[0]).toBeCloseTo(-v, 10);
+    expect(reals[1]).toBeCloseTo(v, 10);
+  });
+
+  // Same inverse-trig function on both sides still goes through the injective
+  // peel, not this strategy.
+  test('arcsin x = arcsin(1/2) → {1/2}', () => {
+    expect(
+      expr('\\arcsin x = \\arcsin(1/2)').solve('x')?.map((x) => x.json)
+    ).toEqual([['Rational', 1, 2]]);
+  });
+});
+
+describe('SOLVE OPERATOR (B9)', () => {
+  // `Solve(equation, unknown)` dispatches to the same machinery as `.solve()`
+  // and returns the roots as a List. It holds its arguments, so an `Equal`
+  // equation is NOT pre-evaluated to a boolean (`x² = 1` → `False`) first.
+  const ce = engine;
+
+  test('Solve(x² − 1 == 0, x) → [1, -1]', () => {
+    const r = ce
+      .box(['Solve', ['Equal', ['Subtract', ['Power', 'x', 2], 1], 0], 'x'])
+      .evaluate();
+    expect(r.operator).toBe('List');
+    expect(r.json).toEqual(['List', 1, -1]);
+  });
+
+  test('Solve(x² − 1, x) — a bare expression is read as = 0', () => {
+    expect(
+      ce
+        .box(['Solve', ['Subtract', ['Power', 'x', 2], 1], 'x'])
+        .evaluate().json
+    ).toEqual(['List', 1, -1]);
+  });
+
+  test('the Equal argument is not collapsed to a boolean', () => {
+    const r = ce
+      .box(['Solve', ['Equal', 'x', ['Power', 'x', 2]], 'x'])
+      .evaluate();
+    expect(r.operator).toBe('List');
+    expect(r.json).toEqual(['List', 0, 1]);
+  });
+
+  test('Solve also reaches the inverse-trig strategy', () => {
+    expect(
+      ce
+        .box(['Solve', ['Equal', ['Arctan', 'x'], ['Arcsin', 'x']], 'x'])
+        .evaluate().json
+    ).toEqual(['List', 0]);
+  });
+
+  test('parsed \\mathrm{Solve}(x^2 = 1, x) → [1, -1]', () => {
+    expect(ce.parse('\\mathrm{Solve}(x^2 = 1, x)').evaluate().json).toEqual([
+      'List',
+      1,
+      -1,
+    ]);
+  });
+});
