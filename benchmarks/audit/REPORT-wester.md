@@ -8,12 +8,12 @@ Configs: **CE** = base shipping engine (no Rubi/Fungrim); **CE+R/F** = with the 
 
 Grading: factor/expand/simplify (value-equal to input), indefinite ∫ (`d/dx` ≈ integrand), and derivatives (≈ central difference) are **invariant-verified**. Limits and definite ∫ have no cheap reliable numeric oracle, so for those **correct = the tool returned a finite value**, with CE-vs-SymPy disagreements flagged (`≠`) separately.
 
-- **CE 26/48** · **CE+R/F 27/48** · **SymPy 37/48** correct.
-- Base CE trails SymPy on **11** cases; **1** of those recovered by Rubi/Fungrim.
+- **CE 27/48** · **CE+R/F 28/48** · **SymPy 37/48** correct.
+- Base CE trails SymPy on **10** cases; **1** of those recovered by Rubi/Fungrim.
 
 | Operation | CE | CE+R/F | SymPy |
 |---|--:|--:|--:|
-| Indefinite ∫ | 0/8 | 1/8 | 7/8 |
+| Indefinite ∫ | 1/8 | 2/8 | 7/8 |
 | Definite ∫ | 0/5 | 0/5 | 0/5 |
 | Derivative | 1/1 | 1/1 | 1/1 |
 | Limit | 4/6 | 4/6 | 6/6 |
@@ -22,11 +22,10 @@ Grading: factor/expand/simplify (value-equal to input), indefinite ∫ (`d/dx` �
 | Factoring | 4/4 | 4/4 | 4/4 |
 | Simplification | 2/2 | 2/2 | 2/2 |
 
-## Where CE trails SymPy (11)
+## Where CE trails SymPy (10)
 
 | File | Op | Input | CE | CE+R/F | CE result |
 |---|---|---|---|---|---|
-| indefinite_integrals | integrate | `|x|` | ∅ | ∅ | `int(|x| dx)` |
 | indefinite_integrals | integrate | `2^x / sqrt(4^x + 1)` | ∅ | ∅ | `int(2^x / sqrt(4^x + 1) dx` |
 | indefinite_integrals | integrate | `(3x - 5)^2 / (2x - 1)^(7/2)` | ∅ | ✅ | `int((3x - 5)^2 / (2x - 1)^` |
 | indefinite_integrals | integrate | `sinh(x)^4 / cosh(x)^2` | ∅ | ∅ | `int(sinh(x)^4 / cosh(x)^2 ` |

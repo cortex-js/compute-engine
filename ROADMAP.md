@@ -82,8 +82,8 @@ fractions, and `Resultant` all want the same representation. Tracked against the
 The CE-vs-SymPy audit (`benchmarks/audit/`) already grades the
 `Solve`/`Resultant`/`GCD` heads through the real opt-in loaders. **Next:** add
 the Bondarenko integration set. (Rubi chapter translation — the lever for the
-indefinite-∫ gap, where `CE+R/F` recovers only 1 of 8 hard Wester integrals
-today — is its own track: see **Coverage tracks → Rubi**.)
+indefinite-∫ gap, where Rubi recovers only 1 of 8 hard Wester integrals today —
+is its own track: see **Coverage tracks → Rubi**.)
 
 ### Coverage tracks
 
@@ -100,17 +100,17 @@ not the scoreboard. The two tracks are independent and should not gate each othe
 → ~2.6k compiled rules, bundled in
 `src/compute-engine/rubi/rubi-rules-data.json`, exposed via
 `@cortex-js/compute-engine/integration-rules`). Chapter 1 has already paid out
-everything Wester asks of it: of the 8 hard Wester indefinite integrals, `CE+R/F`
-closes the single *algebraic* one (`(3x−5)²/(2x−1)^(7/2)`).
+everything Wester asks of it: of the 8 hard Wester indefinite integrals, Rubi
+recovers only the single *algebraic* one (`(3x−5)²/(2x−1)^(7/2)`). (`CE+R/F`
+closes 2/8 — that one plus `|x|`, which the core antiderivative now handles.)
 
-**The 6 open Wester indefinite-∫ gaps live entirely in untranslated chapters**,
-so closing them *is* chapter translation (not tuning what we have), and it lines
-up with broad everyday payoff:
+**The 5 remaining Wester indefinite-∫ gaps live entirely in untranslated
+chapters**, so closing them *is* chapter translation (not tuning what we have),
+and it lines up with broad everyday payoff:
 
 - **Trig** — the three `1/(3cos x + 4sin x + k)` (Weierstrass / tangent-half-angle).
 - **Exponential** — `2^x/√(4^x+1)` (`u = 2^x → arcsinh`).
 - **Hyperbolic** — `sinh⁴x / cosh²x`.
-- (`|x|` is piecewise, not a Rubi-owned rule — see the core carve-out below.)
 
 **Plan:** translate chapters in gap-priority order, **trig first** — the biggest
 single Wester cluster *and* the broadest general payoff, and a de-risking

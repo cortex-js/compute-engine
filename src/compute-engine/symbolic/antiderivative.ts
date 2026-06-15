@@ -767,6 +767,40 @@ const INTEGRATION_RULES: Rule[] = [
     condition: (sub) => filter(sub) && !sub._a.has('_x'),
   },
 
+  // |ax + b| -> (ax + b)|ax + b| / (2a).  Valid for all x: differentiating gives
+  // (a|ax+b| + a(ax+b)·sign(ax+b)) / (2a) = |ax+b| (since u·sign(u) = |u|).
+  {
+    match: ['Abs', ['Add', ['Multiply', '_a', '_x'], '__b']],
+    replace: [
+      'Divide',
+      [
+        'Multiply',
+        ['Add', ['Multiply', '_a', '_x'], '__b'],
+        ['Abs', ['Add', ['Multiply', '_a', '_x'], '__b']],
+      ],
+      ['Multiply', 2, '_a'],
+    ],
+    condition: filter,
+  },
+
+  // |x + b| -> (x + b)|x + b| / 2 (coefficient of x is implicitly 1)
+  {
+    match: ['Abs', ['Add', '_x', '__b']],
+    replace: [
+      'Divide',
+      ['Multiply', ['Add', '_x', '__b'], ['Abs', ['Add', '_x', '__b']]],
+      2,
+    ],
+    condition: (sub) => filter(sub) && isSymbol(sub._x),
+  },
+
+  // |x| -> x|x| / 2
+  {
+    match: ['Abs', '_x'],
+    replace: ['Divide', ['Multiply', '_x', ['Abs', '_x']], 2],
+    condition: (sub) => filter(sub) && isSymbol(sub._x),
+  },
+
   // (ax+b)^{-1} -> \ln(ax + b) / a
   {
     match: ['Power', ['Add', ['Multiply', '_a', '_x'], '__b'], -1],

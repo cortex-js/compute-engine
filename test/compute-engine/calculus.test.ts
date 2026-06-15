@@ -139,6 +139,15 @@ describe('INDEFINITE INTEGRATION', () => {
   test('linear function with coefficient', () =>
     expect(evaluate('\\int 3x dx')).toMatchInlineSnapshot(`3/2 * x^2`));
 
+  // Absolute value: ∫|ax+b| dx = (ax+b)|ax+b|/(2a), valid for all x.
+  test('|x|', () =>
+    expect(evaluate('\\int |x| dx')).toMatchInlineSnapshot(`1/2 * x * |x|`));
+
+  test('|2x+1| (linear argument)', () =>
+    expect(evaluate('\\int |2x+1| dx')).toMatchInlineSnapshot(
+      `1/4 * (2x + 1) * |2x + 1|`
+    ));
+
   test('exponential base a', () =>
     expect(evaluate('\\int 2^x dx')).toMatchInlineSnapshot(`2^x / ln(2)`));
 
