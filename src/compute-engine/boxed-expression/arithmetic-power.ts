@@ -671,6 +671,33 @@ export function pow(
     }
   }
 
+  // Real base with an exact non-integer rational exponent p/q: reduce via the
+  // root, x^{p/q} = root(x, q)^p, but only when root(x, q) is itself an exact
+  // value (a perfect power) — otherwise the power stays symbolic (e.g.
+  // 2^{2/3}). This extends the unit-fraction reduction (8^{1/3} = 2,
+  // (-8)^{1/3} = -2) to non-unit numerators (8^{2/3} = 4, (-8)^{2/3} = 4,
+  // (-8)^{5/3} = -32) and agrees with what N() computes. For a negative base
+  // only an odd denominator is admitted: an even root is complex (e.g.
+  // (-4)^{3/2} = -8i), whose exact value only arises through dusty complex
+  // arithmetic, so it is left symbolic here and evaluated by N().
+  if (isNumber(x) && x.im === 0 && typeof exp !== 'number' && isNumber(exp)) {
+    const r = asRational(exp);
+    if (r !== undefined) {
+      const p = Number(r[0]);
+      const q = Number(r[1]);
+      const realRootExists = x.isNegative !== true || q % 2 !== 0;
+      if (
+        Number.isInteger(p) &&
+        Number.isInteger(q) &&
+        q > 1 &&
+        realRootExists
+      ) {
+        const rt = root(x, ce.number(q), { numericApproximation: false });
+        if (isNumber(rt)) return pow(rt, p, { numericApproximation: false });
+      }
+    }
+  }
+
   return ce._fn('Power', [x, ce.expr(exp)]);
 }
 

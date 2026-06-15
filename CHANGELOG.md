@@ -169,6 +169,14 @@
   odd denominator the real root (`(-8)^{2/3} = 4`, `(-8)^{5/3} = -32`,
   consistent with `(-8)^{1/3} = -2`).
 
+- **Exact `evaluate()` of a non-unit rational power of a perfect power now
+  reduces.** When `x^{p/q}` has a real base and its `q`-th root is an exact
+  perfect power, it reduces to an exact value (`8^{2/3} = 4`, `27^{2/3} = 9`,
+  `(-8)^{5/3} = -32`), extending the unit-fraction behavior (`8^{1/3} = 2`) to
+  non-unit numerators and matching `N()`. Non-perfect powers (`2^{2/3}`) and
+  the negative even-root branch (`(-4)^{3/2}`, complex) stay symbolic under
+  `evaluate()`.
+
 - `N()` now fully evaluates applied functions and constants such as `e`, `i`,
   and expressions in Euler form.
 

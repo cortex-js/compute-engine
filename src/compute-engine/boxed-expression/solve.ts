@@ -1506,6 +1506,209 @@ function reduceSameBasePower(
   return plusExp.sub(minusExp);
 }
 
+/** Substitute the fresh symbol `u` for the generator `g` throughout `node`.
+ *
+ * Besides exact structural matches (`g → u`), an *exponential* generator
+ * `g = bᵉ⁰` (constant base `b`) also absorbs every integer power sharing that
+ * base: `bᵏ·ᵉ⁰ → uᵏ` (so `e^{2x}` becomes `u²` when `u = e^x`). This is done
+ * directly — materializing `(eˣ)²` would be canonicalized straight back to
+ * `e^{2x}`, undoing the substitution. */
+function substituteGenerator(
+  node: Expression,
+  g: Expression,
+  u: Expression
+): Expression {
+  const ce = node.engine;
+  if (node.isSame(g)) return u;
+  if (
+    isFunction(g, 'Power') &&
+    isFunction(node, 'Power') &&
+    node.op1.isSame(g.op1)
+  ) {
+    const k = asSmallInteger(node.op2.div(g.op2).simplify());
+    if (k !== null && k >= 1) return ce.function('Power', [u, ce.number(k)]);
+  }
+  if (isFunction(node))
+    return ce.function(
+      node.operator,
+      node.ops!.map((o) => substituteGenerator(o, g, u))
+    );
+  return node;
+}
+
+/**
+ * "PowerExpand" for logarithms, restricted to the solver: rewrite
+ * `ln(fᶜ) → c·ln f` and `ln(√f) → ½·ln f` (likewise `log_b(fᶜ) → c·log_b f`),
+ * so an equation mixing `ln f` and `ln(fᶜ)` becomes a polynomial in the single
+ * generator `ln f` — e.g. `√(ln x) − ln√x` becomes `√(ln x) − ½·ln x`.
+ *
+ * Valid on the principal (positive) domain. Because every candidate root is
+ * validated by `validateRoots()` against the *untransformed* equation, this
+ * rewrite can only ever drop roots where `f ≤ 0` (already outside `ln`'s real
+ * domain), never introduce spurious ones.
+ */
+function expandLogPowers(node: Expression): Expression {
+  if (!isFunction(node)) return node;
+  const ce = node.engine;
+  const rebuilt = ce.function(node.operator, node.ops!.map(expandLogPowers));
+  if (isFunction(rebuilt, 'Ln')) {
+    const a = rebuilt.op1;
+    if (isFunction(a, 'Power'))
+      return ce.function('Multiply', [a.op2, ce.function('Ln', [a.op1])]);
+    if (isFunction(a, 'Sqrt'))
+      return ce.function('Multiply', [ce.Half, ce.function('Ln', [a.op1])]);
+  }
+  if (isFunction(rebuilt, 'Log') && rebuilt.nops === 2) {
+    const a = rebuilt.op1;
+    const b = rebuilt.op2;
+    if (isFunction(a, 'Power'))
+      return ce.function('Multiply', [a.op2, ce.function('Log', [a.op1, b])]);
+    if (isFunction(a, 'Sqrt'))
+      return ce.function('Multiply', [ce.Half, ce.function('Log', [a.op1, b])]);
+  }
+  return rebuilt;
+}
+
+/** Operators that, applied to the unknown, form a candidate "generator" `g(x)`
+ * for substitution solving (a power `bˣ` with a constant base is also one). */
+const GENERATOR_OPERATORS = new Set([
+  'Ln',
+  'Log',
+  'Exp',
+  'Sin',
+  'Cos',
+  'Tan',
+  'Cot',
+  'Sec',
+  'Csc',
+  'Sinh',
+  'Cosh',
+  'Tanh',
+  'Coth',
+  'Sech',
+  'Csch',
+  'Arcsin',
+  'Arccos',
+  'Arctan',
+  'Arccot',
+  'Arsinh',
+  'Arcosh',
+  'Artanh',
+  'Sqrt',
+]);
+
+/** Collect the distinct candidate generators `g(x)` occurring in `expr`,
+ * innermost (shortest) first — so `ln x` is tried before `√(ln x)`. */
+function collectGenerators(expr: Expression, x: string): Expression[] {
+  const found = new Map<string, Expression>();
+  const walk = (node: Expression): void => {
+    if (!isFunction(node) || !node.has(x)) return;
+    const isGen =
+      GENERATOR_OPERATORS.has(node.operator) ||
+      (node.operator === 'Power' && !node.op1.has(x) && node.op2.has(x)); // bˣ
+    if (isGen) found.set(node.toString(), node);
+    for (const o of node.ops!) walk(o);
+  };
+  walk(expr);
+  return [...found.values()].sort(
+    (a, b) => a.toString().length - b.toString().length
+  );
+}
+
+/**
+ * Solve an equation that is a polynomial in a single nonlinear *generator*
+ * `g(x)` — a logarithm, exponential, trig function, radical, or a nested
+ * combination — by the substitution `u = g(x)`. After normalizing (so
+ * `ln(√x)`/`e^{2x}`-style forms share a generator), each candidate generator
+ * is replaced by a fresh `u`; if that removes every occurrence of `x`, the
+ * equation in `u` is solved recursively, and each `u`-root is inverted by
+ * solving `g(x) = u` for `x`. Extraneous roots from the substitution are
+ * dropped by the caller's validation against the original equation.
+ *
+ * Examples: `(ln x)² − 4 → ln x = ±2 → {e², e⁻²}`,
+ * `√(ln x) = ln√x → {1, e⁴}`, `e^{2x} − 3e^x + 2 → {0, ln 2}`.
+ *
+ * Returns `null` when no single generator captures every occurrence of `x`
+ * (e.g. `sin x − tan x`, which has two independent generators), or when the
+ * reduced equation has no roots.
+ */
+function solveByGeneratorSubstitution(
+  expr: Expression,
+  x: string,
+  depth: number
+): ReadonlyArray<Expression> | null {
+  if (depth >= 3) return null; // recursion backstop
+  const ce = expr.engine;
+
+  const normalized = expandLogPowers(expr);
+  for (const g of collectGenerators(normalized, x)) {
+    const uName = ['u', 't', 'w', 's', 'v', 'y', 'z'].find(
+      (n) => n !== x && !normalized.unknowns.includes(n) && !g.has(n)
+    );
+    if (uName === undefined) continue;
+    const u = ce.symbol(uName);
+
+    // The generator must capture *every* occurrence of x for the substitution
+    // to yield an equation purely in u.
+    const exprU = substituteGenerator(normalized, g, u);
+    if (exprU.has(x) || !exprU.has(uName) || exprU.isSame(u)) continue;
+
+    ce.pushScope();
+    let uRoots: ReadonlyArray<Expression> = [];
+    try {
+      ce.declare(uName, 'real');
+      uRoots = findUnivariateRoots(exprU, uName, depth + 1);
+    } finally {
+      ce.popScope();
+    }
+    if (uRoots.length === 0) continue;
+
+    // Invert: for each u-root, solve g(x) = u for x.
+    const xRoots: Expression[] = [];
+    for (const ur of uRoots)
+      for (const r of findUnivariateRoots(g.sub(ur), x, depth + 1))
+        xRoots.push(r);
+
+    if (xRoots.length > 0) return xRoots;
+  }
+  return null;
+}
+
+/**
+ * Zero-product solving: the real roots of a product are the union of the roots
+ * of its factors (a product is zero iff one factor is). Handles equations that
+ * factor into several x-containing factors — e.g. `ln(x)·(x − 1) = 0` or the
+ * already-factored `(x + 1)·(sin²x + 1)²·cos³(3x) = 0`. A factor `fⁿ` (n a
+ * positive constant) contributes the roots of `f`; constant and x-free factors
+ * contribute none.
+ *
+ * Operates on the product form directly — CE's polynomial `Factor` does not
+ * factor transcendental products — so it complements the polynomial paths.
+ * Returns `null` unless `expr` is a `Multiply` of at least two x-containing
+ * factors.
+ */
+function solveByZeroProduct(
+  expr: Expression,
+  x: string,
+  depth: number
+): ReadonlyArray<Expression> | null {
+  if (depth >= 3) return null; // recursion backstop
+  if (!isFunction(expr, 'Multiply')) return null;
+  const factors = expr.ops!.filter((f) => f.has(x));
+  if (factors.length < 2) return null;
+
+  const roots: Expression[] = [];
+  for (const f of factors) {
+    let base = f;
+    if (isFunction(f, 'Power') && f.op1.has(x) && !f.op2.has(x)) {
+      if (f.op2.isPositive !== true) continue; // fⁿ with n ≤ 0: no extra roots
+      base = f.op1;
+    }
+    for (const r of findUnivariateRoots(base, x, depth + 1)) roots.push(r);
+  }
+  return roots.length > 0 ? roots : null;
+}
+
 /**
  * MathJsonExpression is a function of a single variable (`x`) or an Equality
  *
@@ -1514,7 +1717,8 @@ function reduceSameBasePower(
  */
 export function findUnivariateRoots(
   expr: Expression,
-  x: string
+  x: string,
+  depth = 0
 ): ReadonlyArray<Expression> {
   const ce = expr.engine;
 
@@ -1717,6 +1921,21 @@ export function findUnivariateRoots(
     if (result.length === 0) {
       const substRoots = solveByRationalPowerSubstitution(originalExpr, x);
       if (substRoots) result = [...substRoots];
+    }
+
+    // Zero-product: a product of x-containing factors is zero iff one factor is
+    // (e.g. `ln(x)·(x − 1) = 0`, or an already-factored `(x+1)·cos³(3x) = 0`).
+    if (result.length === 0) {
+      const productRoots = solveByZeroProduct(originalExpr, x, depth);
+      if (productRoots) result = [...productRoots];
+    }
+
+    // Generator substitution: an equation that is a polynomial in a single
+    // nonlinear generator g(x) — `(ln x)² − 4`, `√(ln x) = ln√x`,
+    // `e^{2x} − 3e^x + 2` — via u = g(x), solve, invert.
+    if (result.length === 0) {
+      const genRoots = solveByGeneratorSubstitution(originalExpr, x, depth);
+      if (genRoots) result = [...genRoots];
     }
 
     // A root may reference the `_x` wildcard symbol (e.g. when produced by a

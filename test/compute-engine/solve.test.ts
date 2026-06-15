@@ -1607,3 +1607,75 @@ describe('TRANSCENDENTAL AND SUBSTITUTION EQUATIONS (B9)', () => {
     expect(result![0]).toBeCloseTo(1.314596212276752, 8);
   });
 });
+
+describe('GENERATOR SUBSTITUTION (B9)', () => {
+  // An equation that is a polynomial in a single nonlinear generator g(x) is
+  // solved by the substitution u = g(x): solve the polynomial in u, then invert
+  // g for each root.
+
+  // Generator g = ln x. (ln x)² = 4 → ln x = ±2 → x = e^{±2}.
+  test('(ln x)² = 4 → x = e², e⁻²', () => {
+    const result = expr('(\\ln x)^2 = 4')
+      .solve('x')
+      ?.map((x) => x.json);
+    expect(result).toEqual([
+      ['Power', 'ExponentialE', 2],
+      ['Power', 'ExponentialE', -2],
+    ]);
+  });
+
+  // Generator g = eˣ (with e^{2x} = (eˣ)²): u² − 3u + 2 = 0 → u = 1, 2.
+  test('e^{2x} − 3eˣ + 2 = 0 → x = 0, ln 2', () => {
+    const result = expr('e^{2x}-3e^x+2=0')
+      .solve('x')
+      ?.map((x) => x.json);
+    expect(result).toEqual([['Ln', 2], 0]);
+  });
+
+  // Wester: a two-generator log equation that becomes a polynomial in the
+  // single generator √(ln x) once ln√x is rewritten as ½·ln x. With u = √(ln x):
+  // u − ½u² = 0 → u = 0, 2 → ln x = 0, 4 → x = 1, e⁴.
+  test('√(ln x) = ln√x → x = 1, e⁴ (Wester)', () => {
+    const result = expr('\\sqrt{\\ln x} = \\ln\\sqrt{x}')
+      .solve('x')
+      ?.map((x) => x.json);
+    expect(result).toEqual([1, ['Power', 'ExponentialE', 4]]);
+  });
+
+  // An expression with two independent generators (sin x and tan x) has no
+  // single generator capturing every x, so the substitution does not apply.
+  test('sin x = tan x → no generator substitution (returns no roots)', () => {
+    const result = expr('\\sin x = \\tan x').solve('x');
+    expect(result ?? []).toEqual([]);
+  });
+});
+
+describe('ZERO-PRODUCT FACTORING (B9)', () => {
+  // The roots of a product are the union of the roots of its x-containing
+  // factors (a product is zero iff one factor is). CE's polynomial Factor does
+  // not factor transcendental products, so this is handled on the product form.
+
+  test('ln(x)·(x − 1) = 0 → x = 1', () => {
+    const result = engine
+      .box(['Multiply', ['Ln', 'x'], ['Subtract', 'x', 1]])
+      .solve('x')
+      ?.map((x) => x.json);
+    expect(result).toEqual([1]);
+  });
+
+  // Already-factored mixed polynomial/trig product (cf. Wester's
+  // (x+1)(sin²x+1)²cos³(3x) = 0). The (sin²x+1)² factor has no real root.
+  test('(x + 1)·cos³(3x) = 0 → x = −1, π/6, …', () => {
+    const result = engine
+      .box([
+        'Multiply',
+        ['Add', 'x', 1],
+        ['Power', ['Cos', ['Multiply', 3, 'x']], 3],
+      ])
+      .solve('x')
+      ?.map((x) => x.N().re);
+    expect(result).toContain(-1);
+    // cos(3x) = 0 → 3x = π/2 → x = π/6 (principal value).
+    expect(result?.some((v) => Math.abs(v - Math.PI / 6) < 1e-8)).toBe(true);
+  });
+});

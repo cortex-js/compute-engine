@@ -203,9 +203,16 @@ function mathjsonToLatex(
   node: unknown
 ): string | null {
   try {
-    return withEntryScope(ce, e, () =>
+    const latex = withEntryScope(ce, e, () =>
       ce.box(node as any, { canonical: false }).latex
     );
+    // The serializer emits literal newlines after `\\` row separators inside
+    // matrix environments (e.g. `pmatrix`). A `$$…$$` (or inline `$…$`) block
+    // must stay on a single physical line, otherwise the markdown/KaTeX
+    // renderer splits the math span and the tail renders as raw LaTeX. Collapse
+    // any embedded newline to a space — whitespace is token-equivalent in LaTeX,
+    // so `\\ ` renders identically to `\\\n`.
+    return latex.replace(/\s*\r?\n\s*/g, ' ');
   } catch {
     return null;
   }

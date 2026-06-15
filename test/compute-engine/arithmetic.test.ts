@@ -485,6 +485,37 @@ describe('ROOT', () => {
       ce.expr(['Power', ['Power', -8, ['Rational', 1, 3]], 2]).N().re
     ).toBeCloseTo(4, 12);
   });
+
+  // exact evaluate() of a non-unit rational power reduces to an exact value
+  // when the root is a perfect power — extending the unit-fraction reduction
+  // above (8^{1/3} = 2, (-8)^{1/3} = -2) and matching what N() computes.
+  test(`Non-unit rational power of a perfect power evaluates exactly`, () => {
+    // Positive base — any denominator
+    expect(ce.expr(['Power', 8, ['Rational', 2, 3]]).evaluate().json).toEqual(4);
+    expect(ce.expr(['Power', 4, ['Rational', 3, 2]]).evaluate().json).toEqual(8);
+    expect(
+      ce.expr(['Power', 27, ['Rational', 2, 3]]).evaluate().json
+    ).toEqual(9);
+    // Negative base — odd denominator (real root)
+    expect(
+      ce.expr(['Power', -8, ['Rational', 2, 3]]).evaluate().json
+    ).toEqual(4);
+    expect(
+      ce.expr(['Power', -8, ['Rational', 5, 3]]).evaluate().json
+    ).toEqual(-32);
+  });
+
+  test(`Non-perfect or complex rational powers stay symbolic under evaluate()`, () => {
+    // Not a perfect power → symbolic
+    expect(ce.expr(['Power', 2, ['Rational', 2, 3]]).evaluate().operator).toBe(
+      'Power'
+    );
+    // Negative base, even denominator (complex) → symbolic under evaluate()
+    // (N() still gives the principal complex value)
+    expect(ce.expr(['Power', -4, ['Rational', 3, 2]]).evaluate().operator).toBe(
+      'Power'
+    );
+  });
 });
 
 describe('INVALID ROOT', () => {
