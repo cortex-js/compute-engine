@@ -255,12 +255,6 @@ export const PART_TO_OPERATOR: Record<'re' | 'im' | 'abs' | 'arg', string> = {
   arg: 'Argument',
 };
 
-/** Inert corpus set shells with NO `contains` evaluator: membership guards
- *  on these discharge only via the Track-3 stored-membership exact-match
- *  path (assume `Element(tau, HH)`), never on literals. The corpus encodes
- *  `["Element", "tau", "HH"]` VERBATIM (HH is a `set<complex>` shell). */
-const INERT_SET_DOMAINS = new Set(['HH']);
-
 /** `[PartHead, v]` for an entry variable `v` → the part tag, else null. */
 function partOfVariable(
   x: MathJSON,
@@ -372,13 +366,18 @@ export function compileGuards(
           guards.push({ k: 'type', wc: wc(v), t: 'integer' });
           guards.push({ k: 'eval', pred: ['IsPrime', wc(v)] });
           return null;
+        case 'HH':
+          // Fungrim's HH is the open upper half-plane {z : Im z > 0}. Compile
+          // membership directly to the part-predicate Im(v) > 0 so it
+          // discharges through the part-cmp machinery (e.g. assume Im(v) > 0),
+          // rather than an opaque stored-membership exact match. This keeps HH
+          // off the guard/discharge surface entirely: the 249 modular/theta
+          // guards now fire under a plain `assume(Im(tau) > 0)`. (HH survives
+          // only as a set literal in the ModularLambdaFundamentalDomain
+          // definition, where it is structural, not a guard.)
+          guards.push({ k: 'part-cmp', wc: wc(v), part: 'im', op: 'gt', bound: 0 });
+          return null;
         default:
-          // Inert set shells (HH): membership guard, dischargeable only via
-          // the Track-3 stored-membership fact path (assume Element(v, HH)).
-          if (INERT_SET_DOMAINS.has(dom)) {
-            guards.push({ k: 'member', wc: wc(v), set: dom });
-            return null;
-          }
           return `unsupported domain "${dom}"`;
       }
     }

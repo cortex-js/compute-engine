@@ -251,3 +251,38 @@ describe('SUBSET', () => {
     ).toMatchInlineSnapshot(`False`);
   });
 });
+
+describe('UPPER HALF-PLANE (\\mathbb{C}^+)', () => {
+  test('parses and canonicalizes membership to Im(z) > 0', () => {
+    // `z \in \mathbb{C}^+` is input shorthand for the part predicate Im(z) > 0;
+    // the membership is canonicalized away (no standalone UpperHalfPlane set).
+    expect(ce.parse('z \\in \\mathbb{C}^+').json).toEqual([
+      'Less',
+      0,
+      ['Imaginary', 'z'],
+    ]);
+    // Braced superscript parses identically
+    expect(ce.parse('z \\in \\mathbb{C}^{+}').json).toEqual([
+      'Less',
+      0,
+      ['Imaginary', 'z'],
+    ]);
+  });
+
+  test('literal membership evaluates (open upper half-plane)', () => {
+    expect(
+      ce.parse('\\imaginaryI \\in \\mathbb{C}^+').evaluate()
+    ).toMatchInlineSnapshot(`True`);
+    expect(
+      ce.expr(['Element', ['Negate', 'ImaginaryUnit'], 'UpperHalfPlane']).evaluate()
+    ).toMatchInlineSnapshot(`False`);
+    // The real axis (Im = 0) is excluded from the OPEN upper half-plane
+    expect(
+      ce.expr(['Element', 2, 'UpperHalfPlane']).evaluate()
+    ).toMatchInlineSnapshot(`False`);
+  });
+
+  test('the symbol serializes back to \\mathbb{C}^+', () => {
+    expect(ce.box('UpperHalfPlane').latex).toMatchInlineSnapshot(`\\mathbb{C}^+`);
+  });
+});

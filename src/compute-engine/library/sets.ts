@@ -655,6 +655,18 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       // Transform List/Tuple with 2 elements to Interval in set context
       const canonicalCollection = listToIntervalInSetContext(ce, collection);
 
+      // `\mathbb{C}^+` sugar: the open upper half-plane is the part predicate
+      // Im(value) > 0. Canonicalize membership away so assume()/verify(),
+      // literal evaluation, and the modular/theta guards all see the
+      // inequality directly. There is no standalone UpperHalfPlane set — it is
+      // pure LaTeX input shorthand for the constraint.
+      if (sym(canonicalCollection) === 'UpperHalfPlane' && !condition) {
+        return ce.function('Greater', [
+          ce.function('Imaginary', [value]),
+          ce.Zero,
+        ]);
+      }
+
       // Validate collection type
       if (
         !canonicalCollection.type.matches('collection') &&

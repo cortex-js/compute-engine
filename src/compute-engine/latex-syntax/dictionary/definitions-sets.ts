@@ -90,6 +90,15 @@ export const DEFINITIONS_SETS: LatexDictionary = [
   { latexTrigger: '\\bar\\Q', parse: 'AlgebraicNumbers' },
   { name: 'ComplexNumbers', latexTrigger: ['\\C'] },
   { latexTrigger: '\\mathbb{C}', parse: 'ComplexNumbers' },
+  // `\mathbb{C}^+` is input shorthand for the open upper half-plane. In a
+  // membership (`z \in \mathbb{C}^+`) it canonicalizes to `Im(z) > 0` (see the
+  // Element handler in library/sets.ts); the longer trigger wins over the
+  // `\mathbb{C}` + `^+` (PseudoInverse) parse.
+  { name: 'UpperHalfPlane', latexTrigger: '\\mathbb{C}^+' },
+  { latexTrigger: '\\mathbb{C}^{+}', parse: 'UpperHalfPlane' },
+  // Terse aliases (parse only): `\C^+` mirrors `\C` for `\mathbb{C}`.
+  { latexTrigger: '\\C^+', parse: 'UpperHalfPlane' },
+  { latexTrigger: '\\C^{+}', parse: 'UpperHalfPlane' },
   { name: 'ImaginaryNumbers', latexTrigger: ['\\imaginaryI', '\\R'] },
   { name: 'EmptySet', latexTrigger: ['\\emptyset'] },
   { latexTrigger: ['\\varnothing'], parse: 'EmptySet' }, // Parsing only

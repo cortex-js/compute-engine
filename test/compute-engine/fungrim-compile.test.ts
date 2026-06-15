@@ -247,9 +247,12 @@ describe('compileGuards: complex-domain mapping table (Phase 3)', () => {
     ]);
   });
 
-  it('Element(tau, HH) → member (verbatim inert-set membership)', () => {
+  it('Element(tau, HH) → part-cmp Im(tau) > 0 (upper half-plane)', () => {
+    // HH (open upper half-plane) compiles directly to the part-predicate
+    // Im(tau) > 0 so the guard discharges through the part-cmp machinery
+    // (assume Im(tau) > 0), not an opaque stored-membership exact match.
     expect(guards(['Element', 'tau', 'HH'], ['tau'])).toEqual([
-      { k: 'member', wc: '_tau', set: 'HH' },
+      { k: 'part-cmp', wc: '_tau', part: 'im', op: 'gt', bound: 0 },
     ]);
   });
 
@@ -551,9 +554,9 @@ describe('compileEntries: complex-domain entries (Phase 3)', () => {
   let result: CompileResult;
 
   const FIXTURES: Entry[] = [
-    // (a) HH-guarded identity: the literal path can never discharge an
-    //     inert-set membership; the self-test must seed it through the
-    //     Track-3 assumption path (declare tau + assume Element(tau, HH))
+    // (a) HH-guarded identity: HH (upper half-plane) compiles to the part
+    //     predicate Im(tau) > 0; the self-test seeds it through the part-cmp
+    //     assumption path (declare tau + assume Im(tau) > 0)
     {
       ...entry(
         'cplx01',
@@ -615,7 +618,9 @@ describe('compileEntries: complex-domain entries (Phase 3)', () => {
   it('HH-guarded identities self-test through the assumption path', () => {
     const r = ruleOf('cplx01')!;
     expect(r).toBeDefined();
-    expect(r.guards).toEqual([{ k: 'member', wc: '_tau', set: 'HH' }]);
+    expect(r.guards).toEqual([
+      { k: 'part-cmp', wc: '_tau', part: 'im', op: 'gt', bound: 0 },
+    ]);
     // …and the seeding was symbolic (assumption path), not numeric
     expect(result.sampleKinds['fungrim:cplx01']).toBe('symbolic');
   });

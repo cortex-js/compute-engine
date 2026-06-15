@@ -80,7 +80,7 @@ describe('loadIdentities (full artifact)', () => {
       (r) => r.target === 'simplify'
     ).length;
     expect(report.loaded).toBe(simplifyCount);
-    expect(report.loaded).toBe(1380);
+    expect(report.loaded).toBe(1383);
     // The only default-load skips are the solve templates (solve-disabled).
     expect(report.skipped.every((s) => s.reason === 'solve-disabled')).toBe(
       true
@@ -98,12 +98,12 @@ describe('loadIdentities (full artifact)', () => {
 
   it('reports byTarget and byPurpose consistent with the artifact manifest', () => {
     expect(report.byTarget).toEqual({
-      simplify: 1380,
+      simplify: 1383,
       solve: 0,
       harmonization: 0,
     });
     expect(report.byPurpose).toEqual({
-      simplify: 1269,
+      simplify: 1272,
       transform: 0,
       expand: 111,
     });
@@ -1283,16 +1283,16 @@ describe('Phase 3: guard-closure semantics (synthetic artifact)', () => {
   });
 });
 
-describe('Phase 3: theta/modular acceptance (real corpus, HH assumptions)', () => {
+describe('Phase 3: theta/modular acceptance (real corpus, Im(τ) > 0 assumptions)', () => {
   let ce: ComputeEngine;
 
   beforeAll(() => {
     ce = new ComputeEngine();
     loadIdentities(ce);
     ce.declare('tau', 'complex');
-    // The corpus encodes Element(tau, HH) VERBATIM; discharge goes through
-    // the Track-3 stored-membership exact-match path
-    ce.assume(ce.box(['Element', 'tau', 'HH'], { canonical: false }));
+    // HH (upper half-plane) guards compile to Im(τ) > 0; discharge goes
+    // through the part-cmp machinery, so seed the part inequality directly.
+    ce.assume(ce.box(['Greater', ['Imaginary', 'tau'], 0], { canonical: false }));
     ce.declare('z', 'complex');
     ce.declare('m', 'integer');
   });

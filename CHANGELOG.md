@@ -190,6 +190,16 @@
 - The Identities Library has been updated from 1,350 to 1,376 verified rules,
   including corrected Jacobi theta identities.
 
+- **Modular and theta-function identities now discharge under `Im(τ) > 0`.** The
+  upper-half-plane condition guarding these identities is expressed as the part
+  inequality `Im(τ) > 0`, so they apply once you `assume(Im(τ) > 0)` (previously
+  an opaque `τ ∈ HH` set membership was required). A new LaTeX shorthand,
+  `\mathbb{C}^+` (also `\C^+`), denotes the open upper half-plane:
+  `z \in \mathbb{C}^+` canonicalizes to `Im(z) > 0`. As a side effect three
+  further identities became available — the derivative of the modular
+  j-function and the θ₁/θ₂ logarithmic derivatives — recovered because the
+  inequality form is verifiable where the opaque set was not.
+
 - **New analytic-property metadata store.** `ce.functionProperties(name)`
   exposes per-operator analytic properties drawn from the Fungrim corpus —
   poles, zeros, branch points and cuts, residues, and holomorphic/meromorphic

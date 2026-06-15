@@ -1,7 +1,7 @@
 {
   "generator": "scripts/fungrim/compile-rules.ts",
   "sliceEntries": 1650,
-  "emitted": 1380,
+  "emitted": 1383,
   "ledger": {
     "box-error": 16,
     "compat-signature": 41,
@@ -9,33 +9,33 @@
     "duplicate-undirected": 14,
     "guard-uncompilable": 64,
     "lhs-not-value-form": 94,
-    "no-fire": 29,
+    "no-fire": 26,
     "not-equation": 8
   },
   "byPurpose": {
     "expand": 111,
-    "simplify": 1269
+    "simplify": 1272
   },
   "byClass": {
-    "identity": 1055,
+    "identity": 1058,
     "specific-value": 325
   },
   "byTarget": {
-    "simplify": 1380
+    "simplify": 1383
   },
   "sampleKinds": {
-    "numeric": 41,
-    "symbolic": 1339
+    "numeric": 42,
+    "symbolic": 1341
   },
   "headBuckets": {
     "Multiply": 271,
-    "Add": 215,
+    "Add": 217,
     "Divide": 93,
     "JacobiTheta": 62,
     "Apply": 60,
     "Which": 44,
     "CarlsonRJ": 36,
-    "Negate": 35,
+    "Negate": 36,
     "CarlsonRF": 25,
     "GCD": 25,
     "CarlsonRD": 20,
@@ -412,11 +412,6 @@
       "id": "33139b",
       "reason": "box-error",
       "detail": "invalid lhs: SequenceLimitInferior((n) |-> Totient(Error(ErrorCode(\"incompatible-type\", \"integer\", \"number\"))) / Totient(Error(ErrorCode(\"incompatible-type\", \"integer\", \"number\"))), +oo)"
-    },
-    {
-      "id": "348b26",
-      "reason": "no-fire",
-      "detail": "no seed satisfying the guards"
     },
     {
       "id": "34fafa",
@@ -1149,11 +1144,6 @@
       "detail": "ComplexIndefiniteIntegralEqual"
     },
     {
-      "id": "c7f7a5",
-      "reason": "no-fire",
-      "detail": "no seed satisfying the guards"
-    },
-    {
       "id": "c7f885",
       "reason": "guard-uncompilable",
       "detail": "unsupported conjunct \"Or\""
@@ -1287,11 +1277,6 @@
       "id": "df52fc",
       "reason": "guard-uncompilable",
       "detail": "unsupported conjunct \"Not\""
-    },
-    {
-      "id": "dfbddd",
-      "reason": "no-fire",
-      "detail": "no seed satisfying the guards"
     },
     {
       "id": "e103e7",
