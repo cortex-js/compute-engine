@@ -26,9 +26,8 @@ import { tmpdir } from 'node:os';
 
 import { parseWL } from '../../scripts/rubi/wl-parser.ts';
 import { ComputeEngine } from '../../src/compute-engine.ts';
-import { compileSection } from '../../scripts/rubi/compile.ts';
-import { RubiDriver } from '../../scripts/rubi/driver.ts';
 import { loadIdentities } from '../../src/identities.ts';
+import { loadIntegrationRules } from '../../src/integration-rules.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..', '..');
@@ -48,13 +47,15 @@ const CONSTS: Record<string, string> = { Pi: 'pi', ExponentialE: 'E', ImaginaryU
 
 const ce = new ComputeEngine(); // base engine — no Rubi, no Fungrim
 
-// Second engine with the experimental Rubi integrator + Fungrim identities.
-let ceRF: any = null, driver: any = null;
+// Second engine configured the way a consumer enables the optional libraries:
+// the Fungrim identities (simplify + solve rules) and the Rubi integrator. The
+// latter registers an integration provider that `Integrate` consults
+// automatically before the built-in antiderivative — no explicit driver call.
+let ceRF: any = null;
 try {
   ceRF = new ComputeEngine();
-  try { loadIdentities(ceRF, { solve: true }); } catch { try { loadIdentities(ceRF); } catch { /* best-effort */ } }
-  const { rules } = compileSection(ceRF, join(ROOT, 'data', 'rubi', 'corpus', '1 Algebraic functions'));
-  driver = new RubiDriver(ceRF, rules, { timeLimitMs: 8000 });
+  loadIdentities(ceRF, { solve: true });
+  loadIntegrationRules(ceRF, { timeLimitMs: 8000 });
 } catch (e: any) { console.error('Rubi/Fungrim setup failed (column dropped):', e?.message); ceRF = null; }
 
 const numAt = (engine: any, boxed: any, v: string, p: number): number | null => {
@@ -216,12 +217,15 @@ function refSamples(c: Case): (number | null)[] {
 }
 
 // --- run one configuration --------------------------------------------------
-function runOn(engine: any, c: Case, useRubi: boolean) {
+// When `engine` has the Rubi rules loaded (the CE+R/F engine), `Integrate`
+// consults them automatically, so every op runs through the same code path on
+// every engine.
+function runOn(engine: any, c: Case) {
   try {
     if (c.op === 'integrate') {
-      let F: any = null, timeMs = 0;
-      if (useRubi) { try { const r = driver.int(engine.box(c.arg), c.varName); if (r != null) F = engine.box(r); } catch {} }
-      if (F == null || F.operator === 'Integrate') { const build = () => engine.box(['Integrate', c.arg, ['Tuple', c.varName]]).evaluate(); timeMs = timeit(build); F = build(); }
+      const build = () => engine.box(['Integrate', c.arg, ['Tuple', c.varName]]).evaluate();
+      const timeMs = timeit(build);
+      const F = build();
       if (F == null || F.operator === 'Integrate' || /\bint\(/.test(F.toString())) return { status: 'unsolved', text: F ? F.toString() : 'null', values: [], timeMs };
       const dF = engine.box(['D', F, c.varName]).evaluate();
       return { status: 'ok', text: F.toString(), values: POINTS.map((p) => numAt(engine, dF, c.varName, p)), timeMs };
@@ -339,8 +343,8 @@ const scalarMultiple = (a: number[], b: number[]) => {
 };
 const rows = cases.map((c) => {
   const ref = refSamples(c);
-  const ceRes = runOn(ce, c, false);
-  const rfRes = ceRF ? runOn(ceRF, c, true) : null;
+  const ceRes = runOn(ce, c);
+  const rfRes = ceRF ? runOn(ceRF, c) : null;
   const syRes = sympyById[c.id] || { status: 'error', error: 'no result' };
   let ceV: any, rfV: any, syV: any;
   if (c.op === 'solve') {
