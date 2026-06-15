@@ -15,7 +15,8 @@
 // default value (0 in Add, 1 in Multiply / as Power exponent) is derived
 // from the placeholder's parent in the *canonical* skeleton.
 
-import type { ComputeEngine, Expression } from '../global-types';
+import type { IComputeEngine as ComputeEngine } from '../global-types';
+import type { Expr as Expression } from './types';
 
 import type { Json, RubiRule, RubiRuleDoc } from './types';
 import { Pat, slotNames } from './match';

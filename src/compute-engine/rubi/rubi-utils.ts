@@ -10,10 +10,8 @@
 //                               RuleFail when a utility can't apply, which
 //                               makes the driver try the next rule.
 
-import type {
-  ComputeEngine,
-  Expression,
-} from '../global-types';
+import type { Expr as Expression } from './types';
+import type { IComputeEngine as ComputeEngine } from '../types-engine';
 import { isNumber } from '../boxed-expression/type-guards';
 
 import { expand } from '../boxed-expression/expand';
@@ -320,7 +318,7 @@ function monomialsX(
       if (e === null || !Number.isInteger(e) || e < 0) return null;
       if (ops[0].symbol === x) return [[ce.One, e]];
       // expand (base)^e and retry, guarding against non-expansion
-      const ex = expand(u);
+      const ex: Expression = expand(u);
       if (ex.operator === 'Power' && ex.ops?.[0].isSame(ops[0])) return null;
       return monomialsX(ex, x);
     }
@@ -2223,7 +2221,7 @@ const VALUE_FNS: Record<string, ValueFn> = {
       return expand(u);
     }
     const u = build(args[0], ctx);
-    const v = expand(build(args[1], ctx));
+    const v: Expression = expand(build(args[1], ctx));
     if (v.operator === 'Add' && v.ops)
       return ctx.ce.function(
         'Add',
@@ -2500,7 +2498,7 @@ function expandPartialFractions(u: Expression, ctx: Ctx): Expression {
     const qr = polyDivideX(P, expand(den), x);
     if (qr === null) return fail('ExpandIntegrand: pf division failed');
     const [q, r] = qr;
-    const qx = expand(q.evaluate());
+    const qx: Expression = expand(q.evaluate());
     if (qx.operator === 'Add' && qx.ops) terms.push(...qx.ops);
     else if (!qx.isSame(0)) terms.push(qx);
     P = r.evaluate();

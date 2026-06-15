@@ -9,10 +9,8 @@
 // sums. Recursion is bounded by depth and by the engine deadline; failed
 // subproblems stay as inert `Integrate` expressions.
 
-import type {
-  ComputeEngine,
-  Expression,
-} from '../global-types';
+import type { IComputeEngine as ComputeEngine } from '../global-types';
+import type { Expr as Expression } from './types';
 
 import { matchAll } from './match';
 import type { CompiledRule } from './compile';

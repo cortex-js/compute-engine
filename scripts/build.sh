@@ -47,7 +47,7 @@ fi
 export BUILD="${1-production}"
 
 # export TARGETS="math-json cortex compute-engine"
-export TARGETS="math-json latex-syntax interval numerics core compile identities compute-engine"
+export TARGETS="math-json latex-syntax interval numerics core compile identities integration-rules compute-engine"
 
 # export GIT_VERSION=`git describe --long --dirty`
 
@@ -114,6 +114,13 @@ if [[ "$TARGETS" == *identities* ]]; then
   npx tsc --target "es2022" -d --moduleResolution "node" --allowImportingTsExtensions "true" \
     --resolveJsonModule --esModuleInterop \
     --emitDeclarationOnly --outDir ./dist/types ./src/identities.ts
+fi
+if [[ "$TARGETS" == *integration-rules* ]]; then
+  # --resolveJsonModule/--esModuleInterop: the integration-rules entry imports
+  # the bundled Rubi corpus (rubi-rules-data.json).
+  npx tsc --target "es2022" -d --moduleResolution "node" --allowImportingTsExtensions "true" \
+    --resolveJsonModule --esModuleInterop \
+    --emitDeclarationOnly --outDir ./dist/types ./src/integration-rules.ts
 fi
 echo -e $LINECLEAR$BASENAME$CHECK$DIM" Building TypeScript declaration files$RESET"
 

@@ -16,7 +16,8 @@
 
 import RUBI_RULES_DATA from './rubi-rules-data.json';
 
-import type { ComputeEngine, Expression } from '../global-types';
+import type { IComputeEngine as ComputeEngine } from '../global-types';
+import type { Expr as Expression } from './types';
 import type { RubiRuleDoc } from './types';
 import { compileRuleDocs, type CompiledRule } from './compile';
 import { RubiDriver } from './driver';

@@ -90,6 +90,12 @@
       "import": "./dist/identities.min.esm.js",
       "require": "./dist/identities.min.umd.cjs",
       "default": "./dist/identities.min.esm.js"
+    },
+    "./integration-rules": {
+      "types": "./dist/types/integration-rules.d.ts",
+      "import": "./dist/integration-rules.min.esm.js",
+      "require": "./dist/integration-rules.min.umd.cjs",
+      "default": "./dist/integration-rules.min.esm.js"
     }
   },
   "main": "./dist/compute-engine.min.esm.js",

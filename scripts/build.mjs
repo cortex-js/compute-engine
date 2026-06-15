@@ -105,6 +105,18 @@ const IDENTITIES_UMD_OPTIONS = {
   },
 };
 
+const INTEGRATION_RULES_UMD_OPTIONS = {
+  banner: {
+    js: `/** IntegrationRules ${SDK_VERSION} ${
+      process.env.GIT_VERSION ? ' -- ' + process.env.GIT_VERSION : ''
+    }*/
+    (function(global,factory){typeof exports === 'object' && typeof module !== 'undefined' ? factory(exports) : typeof define === 'function' && define.amd ? define(['exports'],factory):(global = typeof globalThis !== 'undefined' ? globalThis : global || self, factory(global.IntegrationRules = {}));})(this, (function (exports) { 'use strict';`,
+  },
+  footer: {
+    js: `Object.assign(exports, IntegrationRules); Object.defineProperty(exports, '__esModule', { value: true });}));`,
+  },
+};
+
 const BUILD_OPTIONS = {
   banner: {
     js: `/** Compute Engine ${SDK_VERSION} ${
@@ -445,5 +457,45 @@ await Promise.all([
     format: 'iife',
     ...IDENTITIES_UMD_OPTIONS,
     globalName: 'Identities',
+  }),
+
+  // integration-rules (non-minified)
+  esbuild.build({
+    ...BUILD_OPTIONS,
+    entryPoints: ['./src/integration-rules.ts'],
+    outfile: './dist/integration-rules.esm.js',
+    format: 'esm',
+  }),
+
+  esbuild.build({
+    ...BUILD_OPTIONS,
+    entryPoints: ['./src/integration-rules.ts'],
+    outfile: './dist/integration-rules.umd.cjs',
+    format: 'iife',
+    ...INTEGRATION_RULES_UMD_OPTIONS,
+    globalName: 'IntegrationRules',
+  }),
+
+  // integration-rules (minified)
+  esbuild.build({
+    ...BUILD_OPTIONS,
+    drop: ['debugger'],
+    pure: ['console.assert', 'console.log'],
+    minify: true,
+    entryPoints: ['./src/integration-rules.ts'],
+    outfile: './dist/integration-rules.min.esm.js',
+    format: 'esm',
+  }),
+
+  esbuild.build({
+    ...BUILD_OPTIONS,
+    drop: ['debugger'],
+    pure: ['console.assert', 'console.log'],
+    minify: true,
+    entryPoints: ['./src/integration-rules.ts'],
+    outfile: './dist/integration-rules.min.umd.cjs',
+    format: 'iife',
+    ...INTEGRATION_RULES_UMD_OPTIONS,
+    globalName: 'IntegrationRules',
   }),
 ]);

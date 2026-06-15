@@ -12,10 +12,8 @@
 // matching; anything that flows into rule RHSs is rebuilt canonically by
 // the builder.
 
-import type {
-  ComputeEngine,
-  Expression,
-} from '../global-types';
+import type { IComputeEngine as ComputeEngine } from '../global-types';
+import type { Expr as Expression } from './types';
 import { isNumber } from '../boxed-expression/type-guards';
 
 export function toTimesPower(ce: ComputeEngine, e: Expression): Expression {
@@ -138,7 +136,7 @@ function pow(
 ): Expression {
   if (exp.operator === 'Add' && leafCountOf(exp) <= 24) {
     try {
-      const collapsed = exp.simplify();
+      const collapsed: Expression = exp.simplify();
       if (collapsed.isNumberLiteral) exp = collapsed;
     } catch {
       // deadline during exponent simplify: keep the original exponent
