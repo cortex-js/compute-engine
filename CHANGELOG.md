@@ -16,6 +16,15 @@
   integrals also preserve exact results, such as `∫₁² 1/x dx = ln(2)` and
   `∫₀¹ 1/(1+x²) dx = π/4`.
 
+- **`(aⁿ)ᵐ` no longer folds to `aⁿᵐ` based solely on an odd inner exponent.**
+  This combine was unsound on the principal branch: when `a < 0` and `m` is not
+  an integer, the two sides differ by a phase. For example `(x³)^{1/2}` now
+  stays `√(x³)` (which is `8i` at `x = -4`) instead of becoming the inequivalent
+  `x^{3/2}` (`-8i`), and it is again confluent with the `√(x³)` form. The fold
+  still applies when the base is non-negative or the outer exponent is an
+  integer. (Roots are unaffected: `(x³)^{1/3} = x` still holds, since odd-index
+  roots use the real-root convention.)
+
 ### Calculus
 
 - **`Limit` can now return exact symbolic results.** This includes direct
@@ -296,6 +305,11 @@ benchmarks/report_changelog.mjs`.</sub>
   now integrate to a closed form via full partial-fraction decomposition — e.g.
   `∫1/(x²(x+1)) dx` and `∫1/(x(1+x²)²) dx`, which previously returned an
   unevaluated integral.
+
+- **Nested powers serialize to LaTeX and round-trip correctly.** A `Power`
+  whose base is itself a `Power` — i.e. `(aᵇ)ᶜ` — was serialized as `a^{bᶜ}`,
+  which re-parses as `a^(bᶜ)`, a different expression. It now serializes as
+  `{aᵇ}^ᶜ`, so e.g. `(x³)^{2/5}` round-trips instead of becoming `x^{3^{2/5}}`.
 
 ## 0.59.0 _2026-06-10_
 

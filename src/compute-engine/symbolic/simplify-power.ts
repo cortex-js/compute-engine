@@ -658,15 +658,16 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
 
       if (innerBase && innerExp) {
         // (a^n)^m -> a^{n*m} only when mathematically safe:
-        // - base is non-negative (no sign info to lose)
-        // - outer exponent m is integer (repeated multiplication is safe)
-        // - inner exponent n is odd integer (sign-preserving bijection)
+        // - base is non-negative (no sign info to lose), or
+        // - outer exponent m is integer (repeated multiplication is safe).
+        // An odd inner exponent n is NOT sufficient: on the principal branch
+        // (a^n)^m differs from a^{nm} by a phase factor when a < 0 and m is
+        // non-integer (e.g. (x^3)^{1/2} = √(x^3), not x^{3/2}). See the note
+        // in canonicalPower (arithmetic-power.ts).
         const baseNonNeg = innerBase.isNonNegative === true;
         const outerIsInteger = exp.isInteger === true;
-        const innerIsOddInteger =
-          innerExp.isInteger === true && innerExp.isOdd === true;
 
-        if (baseNonNeg || outerIsInteger || innerIsOddInteger) {
+        if (baseNonNeg || outerIsInteger) {
           return {
             value: innerBase.pow(innerExp.mul(exp)),
             because: '(x^n)^m -> x^{n*m}',

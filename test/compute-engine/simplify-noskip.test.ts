@@ -138,10 +138,14 @@ describe('Canonicalization: Double Powers', () => {
     checkSimplify('(x^4)^{-2}', 'x^{-8}'));
   test('(x^{-2})^{-2} = x^4', () =>
     checkSimplify('(x^{-2})^{-2}', 'x^4'));
-  test('(x^3)^{2/5} = x^{6/5}', () =>
-    checkSimplify('(x^3)^{2/5}', 'x^{6/5}'));
+  // (x^3)^{2/5} must NOT combine to x^{6/5}: an odd inner exponent does not
+  // make (a^n)^m = a^{nm} hold on the principal branch when m is non-integer
+  // (at x=-4 the two differ by a phase). It stays a nested power.
+  test('(x^3)^{2/5} stays (x^3)^{2/5}', () =>
+    checkSimplify('(x^3)^{2/5}', '(x^3)^{2/5}'));
   test('(x^2)^{1/2} = |x|', () =>
     checkSimplify('(x^2)^{1/2}', '|x|'));
+  // Sound: parses to Root(x^3, 3), and odd-index Root uses the real root.
   test('(x^3)^{1/3} = x', () => checkSimplify('(x^3)^{1/3}', 'x'));
 });
 

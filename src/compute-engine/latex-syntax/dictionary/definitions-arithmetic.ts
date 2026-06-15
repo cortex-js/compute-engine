@@ -630,19 +630,10 @@ function serializePower(
   const wrapNegativeBase = (latex: string): string =>
     latex.startsWith('-') ? serializer.wrapString(latex, 'normal') : latex;
 
-  // For improved typography, serialize 2^2^2 as 2^{2^2} rather than {2^2}^2. Note that 2^2^2 is invalid LaTeX.
-  if (operator(base) === 'Power') {
-    const baseBody = operand(base, 1);
-    const baseExponent = operand(base, 2);
-    const baseBodyLatex = wrapNegativeBase(serializer.wrapShort(baseBody));
-    const baseExponentLatex = serializer.wrapShort(baseExponent);
-    return `
-      ${baseBodyLatex}^{${supsub(
-        '^',
-        baseExponentLatex,
-        serializer.serialize(exp)
-      )}}`;
-  }
+  // A Power base means (a^b)^c. It must serialize as {a^b}^c — NOT a^{b^c},
+  // which reads as a^(b^c), a different expression (e.g. (x^3)^{2/5} would
+  // become x^{3^{2/5}} and fail to round-trip). `supsub` braces the base
+  // because it contains '^', producing the correct {a^b}^c.
 
   return supsub(
     '^',

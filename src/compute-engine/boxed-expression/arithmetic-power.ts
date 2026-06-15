@@ -69,14 +69,18 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
   if (isFunction(a, 'Power')) {
     const [base, aPow] = a.ops;
     // (a^n)^m -> a^{n*m} only when mathematically safe:
-    // - base is non-negative (no sign info to lose)
-    // - outer exponent m is integer (repeated multiplication is safe)
-    // - inner exponent n is odd integer (sign-preserving bijection)
+    // - base is non-negative (no sign info to lose), or
+    // - outer exponent m is integer (repeated multiplication is safe).
+    // An odd inner exponent n is NOT sufficient: on the principal branch
+    // (a^n)^m = a^{nm}·e^{-2πi·m·k}, where k is how many times arg(a^n) wraps
+    // out of (-π, π]. For odd n and a < 0, k != 0 (e.g. n=3 ⇒ k=1), so the
+    // phase factor e^{-2πi·m·k} != 1 unless m is an integer. Concretely
+    // (x^3)^{1/2} = √(x^3) (= 8i at x=-4), not x^{3/2} (= -8i) — combining
+    // here is unsound and breaks confluence with the Sqrt(x^3) form.
     const outerIsInteger = b.isInteger === true;
-    const innerIsOddInteger = aPow.isInteger === true && aPow.isOdd === true;
     const baseNonNeg = base.isNonNegative === true;
 
-    if (baseNonNeg || outerIsInteger || innerIsOddInteger) {
+    if (baseNonNeg || outerIsInteger) {
       return ce._fn('Power', [
         base,
         ce.expr(['Multiply', aPow, b], {
@@ -501,16 +505,17 @@ export function pow(
     }
   }
 
-  // (a^b)^c -> a^(b*c) only when mathematically safe
+  // (a^b)^c -> a^(b*c) only when mathematically safe: base non-negative, or
+  // outer exponent c integer. An odd inner exponent is NOT sufficient — see
+  // the matching note in canonicalPower for why (principal-branch phase).
   if (isFunction(x, 'Power')) {
     const [base, power] = x.ops;
     const expExpr = typeof exp === 'number' ? ce.number(exp) : exp;
     const outerIsInteger =
       typeof exp === 'number' ? Number.isInteger(exp) : exp.isInteger === true;
-    const innerIsOddInteger = power.isInteger === true && power.isOdd === true;
     const baseNonNeg = base.isNonNegative === true;
 
-    if (baseNonNeg || outerIsInteger || innerIsOddInteger) {
+    if (baseNonNeg || outerIsInteger) {
       return pow(base, power.mul(expExpr), { numericApproximation });
     }
   }
