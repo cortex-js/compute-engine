@@ -423,14 +423,30 @@ first four). Without them, the ~100 affected Chapter-1 rules can still be
     fallback's scope. Separately, the native partial-fraction path it relies on
     was made sound and exact (repeated-factor `0`-bug fixed, monomial-content
     factoring, exact bigint solve) so repeated-factor rationals now integrate.
+  - **Packaging — DONE (2026-06-14): opt-in `loadIntegrationRules`.** Shipped
+    the `@cortex-js/compute-engine/integration-rules` sub-path in four phases:
+    (1) engine `_integrationProvider` hook on `Integrate.evaluate` + moved the
+    runtime driver into `src/compute-engine/rubi/` + loader (`9c7e593e`);
+    (2) bundle compaction 3.73 → 2.92 MB (strip runtime-dead `source`);
+    (3) build/exports wiring + clean `.d.ts` (`2e4870fb`); (4) CI
+    bundle-freshness gate in `corpus-pipeline` (`06ce9f75`).
+    `loadIntegrationRules(ce)` compiles the bundled Chapter-1 corpus (2647
+    rules) and registers the rule driver, which the `Integrate` evaluator
+    consults before the built-in antiderivative (which still covers
+    Gaussian/Fresnel/etc.). Loader test: 8 cases, D-verified.
   - **Still open for R2 completion:** (1) remaining 1.1.3 coverage —
     quartic-denominator `∫(c+d·x²)/(a+b·x⁴)` closing (cluster 2, ~203 unsolved)
     + 1.1.3.8 two-binomial tails; (2) 1.3.2 (56% — worst section) and 1.3.1;
     (3) item-4 branch-phase residue (quad-√ elliptic — the bulk of the 263
     wrongs are root-of-unity phase, the *expected* Rubi forms also fail
     principal-branch verification → consider a global-unimodular-phase
-    verification acceptance, debatable); (4) artifact + loader packaging
-    (`loadIntegrationRules`) + CI gate (ROADMAP item 3).
+    verification acceptance, debatable).
+  - **Packaging follow-ups (post-R2, optional):** (a) a consumer how-to /
+    integration guide for `loadIntegrationRules` (mirror the importer-guide
+    pattern); (b) larger bundle compaction — the 2.92 MB is mostly rule
+    patterns, so tokenizing repeated MathJSON heads (`Power`, `Multiply`,
+    `Blank`, …) would shrink it materially; (c) extend the bundled corpus
+    beyond Chapter 1 (couples to Phase R3+).
 - **Phase R3+ — chapters by value**: 2 (exponentials, 125 rules — small) and
   3 (logarithms, 337) first; 5/6/7 (inverse trig/hyperbolic) next; Chapter 4
   (trig, 2,126 rules + the inert-trig utility machinery) is its own project;

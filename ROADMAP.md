@@ -1,6 +1,6 @@
 # Compute Engine — Roadmap
 
-**Last updated:** 2026-06-13. Items 2 (interruptible evaluation), 4
+**Last updated:** 2026-06-14. Items 2 (interruptible evaluation), 4
 (Tier-2 numeric kernels), 9 (₂F₁ analytic continuation), 10 (x/√(x²)
 soundness), 11 (deadline checks in simplify), 12 (antiderivative
 correctness), 13 (small engine follow-ups), 14 (incomplete elliptic
@@ -9,12 +9,18 @@ integrals), 15 (fractional-power principal-branch soundness), and 16
 completed — prerequisites for the Rubi integration (`docs/rubi/RUBI.md`).
 
 **Rubi status (the consumer driving items 2/4/10/15):** R1 cleared
-(section 1.1.1 at 98.28%) and **R2 gate cleared** (full-Chapter-1 seeded
-sample = 94.0%, ≥90% target). The driver hangs that had blocked the
-exhaustive run are **resolved** (an engine `factor()`↔canonical-`mul`
-infinite loop — fixed in `factor.ts`; see the scope note under item 2 and
-`docs/rubi/RUBI.md` §5). Rubi's own top next step is the exhaustive
-25,854-problem run (now feasible). Engine-side, the next genuinely new
+(section 1.1.1 ~98%) and **R2 gate cleared** — the authoritative full-Chapter-1
+exhaustive run measured 90.0% (the committed `Numer/Denom` + upstream-1.1.3.6
+fixes lift 1.1.3 from 85.7% to 92.5%, ≈91.3% overall). Since then: native
+symbolic-integration coverage (exact partial fractions incl. repeated factors,
+radical / √-of-linear integration) and a 1.3.1 rational native-fallback in the
+driver. **The Rubi rule driver is now packaged as an opt-in entry point** —
+`@cortex-js/compute-engine/integration-rules` exposing `loadIntegrationRules(ce)`,
+which the `Integrate` evaluator consults before the built-in antiderivative
+(shipped in four phases: engine hook + module move, bundle compaction,
+build/exports, CI freshness gate). Remaining coverage gaps and packaging
+follow-ups (consumer guide, larger bundle compaction, corpus beyond Chapter 1)
+are tracked in `docs/rubi/RUBI.md` §5. Engine-side, the next genuinely new
 capability remains item 7 (analytic-property metadata store); items 1/5 are
 the near-term Fungrim/dispatch follow-ons.
 
@@ -789,10 +795,9 @@ Combined result: `Γ(1/3)` warm at **p=300 ≈ 5 ms** (was ~1.9 s — ~340×) an
 1000 digits via the reflection formula, `ψ(1/3)−ψ(2/3)=π/tan(π/3)` (a γ-free
 digamma identity), and `ζ(2)=π²/6`; zero snapshot movement.
 
-**Separate issue surfaced:** CE's `EulerGamma` constant is only accurate to
-~858 digits at p=1000 (a γ-vs-γ self-compare diverges there), so `ψ(1)=−γ`
-appears to lose precision although digamma itself is exact — a high-precision
-`EulerGamma` computation is a distinct follow-up.
+**Two follow-ups surfaced here, tracked separately:** the `EulerGamma` constant
+caps at ~858 digits (**B12**), and the unrounded-`mul` significand growth that
+caused this is a latent footgun elsewhere in the numeric kernels (**B13**).
 
 ### B2. Symbolic (indefinite) integration coverage gaps — ✅ resolved (2026-06-13)
 
@@ -1281,3 +1286,36 @@ reconstruction** (single large prime caps the coefficient size), and faster
 The kernel is **shared infrastructure** — multivariate factorization,
 `Cancel`/`Together`, partial fractions, and `Resultant` (B10) all want the same
 representation. Tracked against the `benchmarks/audit/` Fateman footnote.
+
+### B12. `EulerGamma` constant caps out at ~858 digits
+
+Surfaced while validating the B1 Gamma-speed work (2026-06-14): at
+`ce.precision = 1000`, evaluating `\gamma` (`EulerGamma`) twice and comparing the
+two results diverges after ~858 digits — i.e. the constant is only computed to
+~858 correct digits regardless of the requested precision. This makes
+γ-dependent checks misleadingly fail (`Digamma(1) = −γ` looks wrong to ~858
+digits even though `Digamma` itself is exact to the full precision — verified via
+the γ-free identity `ψ(1/3) − ψ(2/3) = π/tan(π/3)`).
+
+**Fix direction:** route the high-precision `EulerGamma` constant through a
+convergent algorithm that honors `ce.precision` — the Brent–McMillan AGM method
+(`γ = A(n)/B(n) − ln n` with Bessel-function series, doubling `n` with the
+working precision) is the standard choice; mpmath uses it. The current
+machine-precision constant (or whatever the bignum path uses) should fall back
+to it above ~50 digits. Cheap to verify (the γ-vs-γ self-compare above is the
+regression test).
+
+### B13. Latent: `BigDecimal.mul` does not round to working precision
+
+Also surfaced by B1: `BigDecimal.mul` returns the **full** product (its
+significand is the sum of the operands' significand lengths) while `div` rounds
+to `BigDecimal.precision`. Any *accumulating* product therefore grows its
+significand ~p digits per step, turning an O(n) loop into O(n²) (this was the
+dominant high-precision cost in the Gamma/polygamma kernels until each running
+product was explicitly `.toPrecision(p)`-rounded — see B1). The Gamma family is
+now guarded, but **other iterative-product code in the engine may have the same
+latent quadratic blow-up**. Audit the numeric kernels (`numerics/`, the
+special-function and quadrature loops) for un-rounded accumulating `mul`s;
+consider whether `mul` should round by default (large API blast radius — exact
+products are relied on elsewhere, e.g. integer/rational paths) or whether a
+documented `mulRounded`/`mul(...).toPrecision()` convention suffices.
