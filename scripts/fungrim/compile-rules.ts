@@ -118,6 +118,18 @@ export type CurationOverrides = {
    */
   inject?: Entry[];
   solveSeeds?: Record<string, { target: 'solve'; note: string }>;
+  /**
+   * Allowlist for the recompile-drift gate (`scripts/fungrim/recompile-drift.ts`).
+   * Entries the checked-in artifact's simplify rules diverge from a clean
+   * recompile by — each a self-test false-negative (keep) or a dead rule
+   * (drop on regenerate) under `dropped`, or a rule a recompile would add
+   * under `added`. Not consumed by `compile-rules.ts` itself. Keyed by bare
+   * entry id → justification note.
+   */
+  recompileDivergence?: {
+    dropped?: Record<string, string>;
+    added?: Record<string, string>;
+  };
 };
 
 export type CompileResult = {

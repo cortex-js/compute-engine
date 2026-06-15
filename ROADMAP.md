@@ -1,10 +1,10 @@
 # Compute Engine — Roadmap
 
-**Last updated:** 2026-06-14. Items 2 (interruptible evaluation), 4
-(Tier-2 numeric kernels), 9 (₂F₁ analytic continuation), 10 (x/√(x²)
-soundness), 11 (deadline checks in simplify), 12 (antiderivative
-correctness), 13 (small engine follow-ups), 14 (incomplete elliptic
-integrals), 15 (fractional-power principal-branch soundness), and 16
+**Last updated:** 2026-06-14. Items 1 (Fungrim Phase 2 — solve templates),
+2 (interruptible evaluation), 4 (Tier-2 numeric kernels), 9 (₂F₁ analytic
+continuation), 10 (x/√(x²) soundness), 11 (deadline checks in simplify),
+12 (antiderivative correctness), 13 (small engine follow-ups), 14 (incomplete
+elliptic integrals), 15 (fractional-power principal-branch soundness), and 16
 (factor()↔mul canonicalization loop + `x^(-1/2)` unification)
 completed — prerequisites for the Rubi integration (`docs/rubi/RUBI.md`).
 
@@ -44,30 +44,58 @@ rule compiler, validation harness, guard census).
 
 ## Near-term
 
-### 1. Fungrim Phase 2 — activate solve templates
+### 1. ~~Fungrim Phase 2 — activate solve templates~~ — ✅ done (2026-06-14)
 
-**What:** promote the curated solve-template seeds (currently staged in
-`scripts/fungrim/curation-overrides.json` behind `loadIdentities(ce, {solve:
-true})`, off by default) into a supported capability, and mine the corpus's
-inverse-composition entries (`f(g(x)) = x`) for more templates.
+**Outcome:** the five curated solve seeds now ship in the artifact as
+`target:'solve'` rules and load under `loadIdentities(ce, { solve: true })`
+(off by default). New capability: `x·eˣ = 3 → W(3)` (LambertW) and
+`arctan(x) = c → tan(c)` were previously unsolvable; the Ln/Exp/Tan seeds were
+already covered by the built-in solver and harmonization, so they ship for
+completeness.
 
-**Why now:** the G2 harmonization fix changed the economics. Before it, solve's
-harmonization pass was provably inert (the `_x` binding mismatch); now
-harmonization rules chain (depth 4), injective wrappers peel off `Equal`, and
-`validateRoots` checks every candidate against the original equation — so an
-over-eager template degrades to a no-op, never a wrong answer. Solve templates
-compose with all of that.
+- **Derivation.** From an inverse-composition simplify rule `f(A(_w)) → _w`
+  (the corpus shape `f(A(x)) = x`), split the topmost node and emit the
+  `UNIVARIATE_ROOTS`-style template `match: Add(A(_x), __b)`,
+  `replace: f(Negate(__b))`. Sound for ANY such identity — it is just function
+  application; a non-injective `A` finds fewer roots, never a wrong one, and
+  `solve()`'s `validateRoots` confirms each candidate. Domain guards are
+  dropped; the loader attaches the no-capture filter + `useVariations` for
+  `target:'solve'` rules.
+- **A dedicated post-step, not a recompile.** Activation lives in
+  `scripts/fungrim/apply-solve-templates.ts` (idempotent, `--check` CI gate),
+  a surgical overlay on the existing simplify rules — `compile-rules.ts` was
+  left untouched. This was a deliberate call: a full slice recompile against
+  the current engine drops 7 stale simplify rules, 3 of which are CarlsonRC
+  recognition rules that fire at runtime but trip the offline self-test — i.e.
+  a full resync would silently lose working rules. The artifact gained exactly
+  +5 solve rules with zero churn to existing rules.
+- **Self-test isolation + the "no silent drops" gate (the real fix).** Root
+  cause of the 7-rule recompile drift: the offline self-test validates each
+  rule in ISOLATION (`expr.replace(singleRule)`), but several rules only fire
+  within the FULL loaded rule set (other rules normalize first), so the
+  isolated test false-no-fires them — a faithful isolated self-test is not
+  achievable. Rather than chase the self-test, `scripts/fungrim/recompile-drift.ts`
+  (new CI gate) does a full recompile and FAILS if any committed simplify rule
+  would be silently dropped (or any new rule silently added) unless it is
+  allowlisted in `curation-overrides.json` `recompileDivergence` with a
+  justification. The current 8 divergences (3 firing false-negatives kept,
+  4 dead, + the live `d0a331` a recompile would add) are documented there;
+  any FUTURE drift is now a loud, attributed failure. A clean regenerate
+  (drop the 4 dead, add `d0a331`, keep the 3 via the gate's guidance) remains
+  available but is held until the bignum-track WIP settles.
+- **Mining audit.** The post-step scans every identity rule for the
+  inverse-composition shape and reports candidates not yet curated; the
+  current corpus surfaces only degenerate (`f(z)=z`), two-variable (`Re(x+iy)`),
+  shell-headed (elliptic/modular), or built-in-redundant matches — so the
+  curated seed set is complete for now.
+- **Tests:** `fungrim-loader.test.ts` "Phase 2 — solve templates" (end-to-end
+  `solve()` under `{ solve: true }`, negative controls, validateRoots safety);
+  artifact-content + count assertions updated across the fungrim suites.
 
-**How:** flip the seed set (LambertW `8654a3`, Ln/Exp `4c1e1e`/`296627`,
-Tan/Arctan `1f026d`/`f516e3`) into the default artifact via the overrides
-`inject`/`target: 'solve'` path (the mechanism already exists in
-`compile-rules.ts`); add corpus mining for `class: identity` entries of the
-inverse-composition shape; acceptance via `solve-rules.test.ts` extensions
-(e.g. `x·eˣ = 3 → W(3)`). Consider the "general solution families" follow-on
-(`x = arctan(c) + πn`) separately — it needs a representation decision
-(solution sets vs principal values) that was deliberately deferred in Track 2.
+**Deferred:** general solution families (`x = arctan(c) + πn`) — needs the
+solution-set-vs-principal-value representation decision held over from Track 2.
 
-**Effort:** ~1 week. **Dependencies:** none — everything is landed.
+**Effort:** ~1 day. **Dependencies:** none — everything was landed.
 
 ### 2. ~~Interruptible evaluation~~ — ✅ done (2026-06-10)
 
@@ -578,26 +606,50 @@ the cost was in higher layers. Two causes found:
   dispatch overhead, not the bignum kernel (`fpexp` ≈ 0.65ms).
 
 Remaining items:
-- **17.13 Trim CE `Power`/`.N()` dispatch overhead** — after the two fixes,
-  `Exp(x).N()` is ~2.7ms at 1000 digits vs the bare kernel's ~0.65ms; the gap is
-  generic boxed-evaluation machinery (`Power` runs its full special-case
-  cascade, plus argument boxing), shared by all operators — **not** the bignum
-  core. This is the largest remaining `exp`-vs-mpmath gap and is a CE-evaluation
-  optimization (e.g. a fast numeric pre-dispatch), not a big-decimal one.
-- **17.10 Tune the AGM `ln` threshold / faster AGM** — `ln` trails mpmath ~0.6×
-  at 500–1000 digits because CE's AGM only engages above ~1250 digits
-  (`LN_AGM_MIN_BITS`) while mpmath is on AGM earlier.
-- **17.11 Division-free `isqrt_fast` for `sqrt`** — revisits 17.4's "leave
-  `fpsqrt` as-is": mpmath's reciprocal-sqrt Newton is ~2× faster; lifts `asin`.
+- **17.13 Trim CE `Power`/`.N()` dispatch overhead** — ✅ **done (2026-06-14).
+  The documented hypothesis (special-case cascade / argument boxing) was wrong.**
+  Profiling `Exp(1.7).N()` at 1000 digits (BigDecimal kernel-call counters)
+  showed `exp=1, ln=1, pow=1` — the cost was a *redundant* `ln(e)`: `Exp(x)`
+  canonicalizes to `Power(E, x)`, and under `N()` the `E` base is numericized to
+  `e` *before* `pow()` runs, so the symbolic `e^x` shortcut (the 17.9 fix) was
+  bypassed and `e_num^x` went through the generic `exp(x·ln(e_num))`, recomputing
+  `ln(e) ≈ 1` (a full ~0.9ms log) every call. (Confirmed by a fast-path that
+  skipped `canonicalPower` — *no* effect, ruling out the cascade.) **Fix**
+  (`arithmetic-power.ts`): the numericized base is the interned cached `E.N()`,
+  so an **O(1) reference check `x === ce.E.N()`** detects it and computes
+  `exp(x)` directly. Gated to `bignumPreferred` — at machine precision the
+  generic path is a single `Math.pow(e, x)` (nothing to save) and `exp(x)` would
+  differ by 1 ULP (the 3 machine `Exp` snapshots stay put). **`Exp(x).N()`
+  1.45 → 0.45ms at 1000 digits (~3.2×), now ≈ the bare `fpexp` kernel and faster
+  than mpmath (0.44ms).** Bignum output bit-identical (guard digits absorb it).
+- **17.10 Tune the AGM `ln` threshold / faster AGM** — ✅ **done (2026-06-14).**
+  Re-measured the AGM-vs-Newton crossover (best-of-3, head-to-head): it dropped
+  from ~1250 to **~700 digits** because 17.11 sped up `bigintSqrt`, the AGM inner
+  loop (each AGM iteration is a sqrt). Lowered `LN_AGM_MIN_BITS` 4200 → **2300**
+  (≈700 digits); the 550–690-digit zone is left to Newton (its giant_steps ladder
+  is non-monotonic there). AGM now wins 1.3× at 700, 1.6× at 1000, 4.8× at 3000;
+  end-to-end `ln` at 1000 digits **1.9 → 0.9ms**, beating mpmath (1.01ms). No
+  churn — `ln` carries ≥66 guard bits and rounds down, absorbing the ~11-bit
+  Newton↔AGM low-bit difference (verified: round-trip + `ln(x²)=2ln x` hold to
+  full precision at 700–1500 digits).
+- **17.11 Division-free `isqrt_fast` for `sqrt`** — ✅ **done (2026-06-14).**
+  Rather than mpmath's reciprocal-sqrt, a **recursive giant-steps floor isqrt**
+  (`isqrtGiant` in `utils.ts`): root the top ~half of the bits (a smaller,
+  cheaper division) for a seed good to ~n/2 bits, then one full-width Heron pass
+  + exact floor settle — ~3× fewer full-width divisions. `fpsqrt` dispatches on
+  `bits` (free) and `bigintSqrt` on bit length; both **byte-identical** to before
+  (`fpsqrt` nearest-rounding + `bigintSqrt` floor, verified over thousands of
+  random inputs). Kernel ~1.5× at 500 digits, ~1.9× at 1000, ~2× at 2000. Lifts
+  AGM `ln` (17.10) and `asin` (which calls `fpsqrt`).
 - **17.12 r-step / rectangular splitting in `fpexp`** — real but small kernel
   win (~3×); the kernel is <10% of `exp(.N())` time, so low user-facing impact.
-  Lowest priority.
+  **Still deferred** (lowest priority).
 
-**Next up (priority order for the bignum/numeric track):**
-1. **17.13** — trim `Power`/`.N()` dispatch (biggest remaining `exp` win, ~2ms;
-   CE-eval layer). 2. **17.10** — AGM `ln` threshold (closes the `ln` gap).
-3. **17.11** — `isqrt_fast` (`sqrt`/`asin`). 4. **17.12** — `fpexp` r-step
-   (kernel polish, lowest impact). Each is independent; none blocks the others.
+**Bignum/numeric track status:** 17.13, 17.10, 17.11 all landed 2026-06-14
+(together: `Exp(x).N()` and `ln` at 1000 digits now beat mpmath; `sqrt` kernel
+~2× faster). Only **17.12** remains (kernel polish, lowest impact). The
+`benchmarks/big-decimal/BIGNUM-COMPARISON.md` tables predate these and should be
+regenerated to reflect them.
 
 ### 5. Per-head aggregated rule dispatch
 
@@ -1287,23 +1339,40 @@ The kernel is **shared infrastructure** — multivariate factorization,
 `Cancel`/`Together`, partial fractions, and `Resultant` (B10) all want the same
 representation. Tracked against the `benchmarks/audit/` Fateman footnote.
 
-### B12. `EulerGamma` constant caps out at ~858 digits
+### B12. ~~`EulerGamma` constant caps out at ~858 digits~~ — ✅ done (2026-06-14)
 
 Surfaced while validating the B1 Gamma-speed work (2026-06-14): at
 `ce.precision = 1000`, evaluating `\gamma` (`EulerGamma`) twice and comparing the
-two results diverges after ~858 digits — i.e. the constant is only computed to
-~858 correct digits regardless of the requested precision. This makes
-γ-dependent checks misleadingly fail (`Digamma(1) = −γ` looks wrong to ~858
-digits even though `Digamma` itself is exact to the full precision — verified via
-the γ-free identity `ψ(1/3) − ψ(2/3) = π/tan(π/3)`).
+two results diverges after ~858 digits — i.e. the constant was only computed to
+~858 correct digits regardless of the requested precision (it was a hardcoded
+~858-digit `num` literal in `library/arithmetic.ts`). This made γ-dependent
+checks misleadingly fail (`Digamma(1) = −γ` looked wrong past ~858 digits even
+though `Digamma` itself is exact to the full precision).
 
-**Fix direction:** route the high-precision `EulerGamma` constant through a
-convergent algorithm that honors `ce.precision` — the Brent–McMillan AGM method
-(`γ = A(n)/B(n) − ln n` with Bessel-function series, doubling `n` with the
-working precision) is the standard choice; mpmath uses it. The current
-machine-precision constant (or whatever the bignum path uses) should fall back
-to it above ~50 digits. Cheap to verify (the γ-vs-γ self-compare above is the
-regression test).
+**Resolved:** γ is now computed **on demand to the working precision** via the
+(basic) Brent–McMillan algorithm `γ = A(n)/B(n) − ln(n)` (error < π·e^{−4n};
+`A`/`B` are the `Σ(nᵏ/k!)²·Hₖ` and `Σ(nᵏ/k!)²` Bessel-type series), exposed as
+a cached `BigDecimal.EULER_GAMMA` getter mirroring `BigDecimal.PI`
+(`src/big-decimal/big-decimal.ts`). The `EulerGamma` symbol now uses the
+function-value pattern (like `ExponentialE`): `BigDecimal.EULER_GAMMA` when
+`bignumPreferred`, else the machine double. The running term/`A`/`B` are rounded
+to working precision each step per the B13 convention (the only transcendental
+needed is `ln(n)`, so no `exp`/AGM). The hardcoded literal is removed.
+
+Verified four ways: matches a known γ reference to 100 digits; self-consistent
+at 1000 vs 1010→1000 digits; **independent cross-check** `ψ(1) = −γ` to 1000
+digits (the bignum `digammaCore` uses an unrelated Bernoulli asymptotic series —
+no γ constant, no `ψ(1)` special-case); default-precision value unchanged
+(`0.577215664901532860607`, matching the existing `arithmetic` snapshot — zero
+churn). One-time cost (cached): ~5 ms at 100 digits, ~216 ms at 1000. Tests:
+`big-decimal.test.ts` ("EULER_GAMMA (Brent–McMillan, ROADMAP B12)") and
+`special-functions.test.ts` ("ψ(1) = -γ to 1000 digits …"). (The
+non-runtime `src/math-json/OPERATORS.json` still carries the old literal as
+reference data — harmless; it is codegen output, not read at evaluation time.)
+
+**Refinement available (deferred):** the *refined* Brent–McMillan (error
+e^{−8n}) halves `n` and would roughly halve the one-time cost; not worth the
+added complexity for a cached constant.
 
 ### B13. ~~Latent: `BigDecimal.mul` does not round to working precision~~ — ✅ audited / closed (2026-06-14)
 

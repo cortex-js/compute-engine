@@ -7,7 +7,7 @@ This report compares the **current Compute Engine build** against the **last pub
 ## Highlights
 
 - **7 improvements over `0.59.0`** (the unpublished fixes surface on the hard tier): N07 ($\zeta(3)$), S05 ($x^{-1/2}-\frac{1}{\sqrt x}$), S08 ($\sqrt{3+2\sqrt2}$), A06 ($\int\frac{1}{x^3+1}\,dx$), A07 ($\int\frac{1}{\sqrt x}\,dx$), A08 ($\int e^{-x^2}\,dx$), A09 ($\int\frac{x}{\sqrt{1-x^2}}\,dx$) now produce a fully-evaluated result where the published build did not.
-- **2 more cases** changed *output form* vs `0.59.0` (value unchanged) — the coefficient-extraction fixes, e.g. N08 ($\Gamma(\tfrac13)$), S06 ($\sqrt6\,x+\sqrt2\,x$).
+- **3 more cases** changed *output form* vs `0.59.0` (value unchanged) — the coefficient-extraction fixes, e.g. N05 ($e^{\pi}$), N08 ($\Gamma(\tfrac13)$).
 - **No regressions** vs the published build across all 39 cases.
 - **Compute Engine answers 36/39** out of the box — the only library here delivering arbitrary-precision numerics (incl. ζ, Γ, Lambert W) *and* symbolic integration in one browser-native package. Its weak spot is integration coverage; **enabling the experimental Rubi + Fungrim rules lifts it to 39/39** (`∫1/√x`, `∫x/√(1−x²)` solve; `∫1/(x³+1)` gains exact coefficients).
 - **vs competitors**: matches SymPy on numerics, simplification and differentiation; trails it on integration breadth (SymPy does `∫e^(−x²)`→erf and radical denesting that CE doesn't). Beats **math.js** on simplification and integration, and beats **NumPy** on anything needing >16 digits, exact integers, or special functions.
@@ -16,7 +16,7 @@ This report compares the **current Compute Engine build** against the **last pub
 
 | Tool | Version | Runtime |
 |---|---|---|
-| Compute Engine — current build | `0.59.0` @ `91909b34` (freshly built from `src/`) | Node v22.13.1 |
+| Compute Engine — current build | `0.59.0` @ `cc27aea0` (freshly built from `src/`) | Node v22.13.1 |
 | Compute Engine — current + Rubi + Fungrim | same minified bundle + published `integration-rules` (Rubi) + `identities` (Fungrim) packs | Node v22.13.1 |
 | Compute Engine — published | `0.59.0` (npm) | Node v22.13.1 |
 | SymPy | `1.14.0` | Python 3.14.2 |
@@ -57,78 +57,79 @@ Correct (✅) results per category (count varies by category). Cells in parenthe
 | # | Case | CE·cur | CE+R/F | CE·0.59.0 | SymPy | math.js | NumPy |
 |---|---|---|---|---|---|---|---|
 | | **Core tier** |  |  |  |  |  |  |
-| N01 | $\pi$ <sub>(50d)</sub> | 0.00 | 0.00 | 0.00 | 0.16 | 0.01 | 🟡 <sub>16 digits</sub> 0.00 |
+| N01 | $\pi$ <sub>(50d)</sub> | 0.00 | 0.00 | 0.00 | 0.17 | 0.04 | 🟡 <sub>16 digits</sub> 0.00 |
 | N02 | $e$ <sub>(50d)</sub> | 0.00 | 0.00 | 0.00 | 0.16 | 0.01 | 🟡 <sub>16 digits</sub> 0.00 |
-| N03 | $\sqrt2$ <sub>(50d)</sub> | 0.01 | 0.00 | 0.01 | 0.23 | 0.08 | 🟡 <sub>17 digits</sub> 0.00 |
-| N04 | $100!$ <sub>(exact)</sub> | 0.00 | 0.00 | 0.01 | 0.25 | 0.11 | ❌ <sub>inexact</sub> 0.01 |
-| N05 | $e^{\pi}$ <sub>(40d)</sub> | 0.04 | 0.03 | 0.07 | 0.19 | 0.34 | 🟡 <sub>17 digits</sub> 0.00 |
+| N03 | $\sqrt2$ <sub>(50d)</sub> | 0.01 | 0.00 | 0.01 | 0.24 | 0.07 | 🟡 <sub>17 digits</sub> 0.00 |
+| N04 | $100!$ <sub>(exact)</sub> | 0.00 | 0.00 | 0.00 | 0.26 | 0.15 | ❌ <sub>inexact</sub> 0.01 |
+| N05 | $e^{\pi}$ <sub>(40d)</sub> | 0.02 | 0.01 | 0.08 | 0.20 | 0.39 | 🟡 <sub>17 digits</sub> 0.00 |
 | | **Hard tier** |  |  |  |  |  |  |
 | N06 | $\pi$ <sub>(200d)</sub> | 0.00 | 0.00 | 0.00 | 0.16 | 0.01 | 🟡 <sub>16 digits</sub> 0.00 |
-| N07 | $\zeta(3)$ <sub>(40d)</sub> | 0.54 | 0.52 | 🟡 <sub>17 digits</sub> 0.22 | 0.27 | ❌ <sub>8 digits</sub> 3.36 | — |
-| N08 | $\Gamma(\tfrac13)$ <sub>(40d)</sub> | 0.39 | 0.37 | 2.24 | 0.24 | ⚠️ | — |
-| N09 | $W(1)$ <sub>(40d)</sub> | 0.13 | 0.09 | 0.22 | 0.69 | — | — |
-|  | **median ms** | **0.01** | **0.00** | **0.01** | **0.23** | **0.08** | **0.00** |
+| N07 | $\zeta(3)$ <sub>(40d)</sub> | 0.55 | 0.53 | 🟡 <sub>17 digits</sub> 0.22 | 0.28 | ❌ <sub>8 digits</sub> 5.73 | — |
+| N08 | $\Gamma(\tfrac13)$ <sub>(40d)</sub> | 0.43 | 0.36 | 2.24 | 0.25 | ⚠️ | — |
+| N09 | $W(1)$ <sub>(40d)</sub> | 0.12 | 0.09 | 0.22 | 0.71 | — | — |
+|  | **median ms** | **0.01** | **0.00** | **0.01** | **0.24** | **0.07** | **0.00** |
 
 ### Simplification
 
 | # | Case | CE·cur | CE+R/F | CE·0.59.0 | SymPy | math.js |
 |---|---|---|---|---|---|---|
 | | **Core tier** |  |  |  |  |  |
-| S01 | $\frac{x^2-1}{x-1}$ | 0.26 | 0.32 | 0.28 | 8.90 | 🟡 <sub>not simplified</sub> 1.10 |
-| S02 | $\sin^2 x+\cos^2 x$ | 0.21 | 0.35 | 0.21 | 8.60 | 🟡 <sub>not simplified</sub> 0.82 |
-| S03 | $(x+1)^2-(x-1)^2$ | 0.50 | 0.38 | 0.49 | 5.79 | 🟡 <sub>not simplified</sub> 1.16 |
-| S04 | $\frac{x^3-x}{x}$ | 0.26 | 0.15 | 0.28 | 4.27 | 1.27 |
-| S05 | $x^{-1/2}-\frac{1}{\sqrt x}$ | 0.26 | 0.08 | 🟡 <sub>not simplified</sub> 0.24 | 0.23 | 🟡 <sub>not simplified</sub> 1.37 |
+| S01 | $\frac{x^2-1}{x-1}$ | 0.28 | 0.33 | 0.29 | 8.34 | 🟡 <sub>not simplified</sub> 1.16 |
+| S02 | $\sin^2 x+\cos^2 x$ | 0.21 | 0.31 | 0.21 | 8.79 | 🟡 <sub>not simplified</sub> 1.07 |
+| S03 | $(x+1)^2-(x-1)^2$ | 0.50 | 0.35 | 0.51 | 6.00 | 🟡 <sub>not simplified</sub> 1.07 |
+| S04 | $\frac{x^3-x}{x}$ | 0.28 | 0.14 | 0.28 | 4.17 | 1.22 |
+| S05 | $x^{-1/2}-\frac{1}{\sqrt x}$ | 0.25 | 0.08 | 🟡 <sub>not simplified</sub> 0.29 | 0.24 | 🟡 <sub>not simplified</sub> 1.48 |
 | | **Hard tier** |  |  |  |  |  |
-| S06 | $\sqrt6\,x+\sqrt2\,x$ | 0.59 | 0.44 | 0.63 | 5.65 | 1.14 |
-| S07 | $\ln x+\ln(x+1)$ | 0.37 | 0.43 | 0.38 | 6.13 | 🟡 <sub>not simplified</sub> 1.03 |
-| S08 | $\sqrt{3+2\sqrt2}$ | 0.29 | 0.20 | 🟡 <sub>not simplified</sub> 0.19 | 🟡 <sub>not simplified</sub> 3.49 | 🟡 <sub>numeric only</sub> 0.82 |
-| S09 | $\frac{x^3-1}{x-1}$ | 0.39 | 0.13 | 0.34 | 9.20 | 🟡 <sub>not simplified</sub> 1.06 |
-|  | **median ms** | **0.29** | **0.32** | **0.28** | **5.79** | **1.10** |
+| S06 | $\sqrt6\,x+\sqrt2\,x$ | 0.61 | 0.42 | 0.64 | 6.36 | 1.18 |
+| S07 | $\ln x+\ln(x+1)$ | 0.40 | 0.43 | 0.40 | 6.37 | 🟡 <sub>not simplified</sub> 1.64 |
+| S08 | $\sqrt{3+2\sqrt2}$ | 0.40 | 0.21 | 🟡 <sub>not simplified</sub> 0.53 | 🟡 <sub>not simplified</sub> 4.08 | 🟡 <sub>numeric only</sub> 2.25 |
+| S09 | $\frac{x^3-1}{x-1}$ | 0.37 | 0.13 | 0.40 | 8.92 | 🟡 <sub>not simplified</sub> 0.91 |
+|  | **median ms** | **0.37** | **0.31** | **0.40** | **6.36** | **1.18** |
 
 ### Differentiation
 
 | # | Case | CE·cur | CE+R/F | CE·0.59.0 | SymPy | math.js |
 |---|---|---|---|---|---|---|
 | | **Core tier** |  |  |  |  |  |
-| D01 | $\tfrac{d}{dx}\sin x$ | 0.05 | 0.24 | 0.05 | 0.34 | 0.68 |
-| D02 | $\tfrac{d}{dx}x^5$ | 0.16 | 0.05 | 0.14 | 0.50 | 1.38 |
-| D03 | $\tfrac{d}{dx}\tan x$ | 0.08 | 0.26 | 0.08 | 2.13 | 0.85 |
-| D04 | $\tfrac{d}{dx}x^2\sin x$ | 0.45 | 0.36 | 0.42 | 2.04 | 2.01 |
-| D05 | $\tfrac{d}{dx}\sin(x^2)$ | 0.20 | 0.33 | 0.18 | 1.45 | 1.08 |
+| D01 | $\tfrac{d}{dx}\sin x$ | 0.04 | 0.26 | 0.04 | 0.34 | 0.64 |
+| D02 | $\tfrac{d}{dx}x^5$ | 0.15 | 0.05 | 0.15 | 0.51 | 1.56 |
+| D03 | $\tfrac{d}{dx}\tan x$ | 0.09 | 0.28 | 0.09 | 2.39 | 1.05 |
+| D04 | $\tfrac{d}{dx}x^2\sin x$ | 0.50 | 0.36 | 0.40 | 2.22 | 2.93 |
+| D05 | $\tfrac{d}{dx}\sin(x^2)$ | 0.20 | 0.32 | 0.19 | 1.45 | 1.49 |
 | | **Hard tier** |  |  |  |  |  |
-| D06 | $\tfrac{d}{dx}x^x$ | 0.15 | 0.04 | 0.13 | 1.77 | 1.93 |
-| D07 | $\tfrac{d}{dx}\arcsin x$ | 0.39 | 0.37 | 0.19 | 3.00 | 0.98 |
-| D08 | $\tfrac{d}{dx}\ln(\sin x)$ | 0.12 | 0.30 | 0.12 | 1.16 | 1.09 |
-| D09 | $\tfrac{d}{dx}\sqrt{1-x^2}$ | 0.96 | 0.54 | 0.70 | 7.41 | 2.12 |
-|  | **median ms** | **0.16** | **0.30** | **0.14** | **1.77** | **1.09** |
+| D06 | $\tfrac{d}{dx}x^x$ | 0.14 | 0.04 | 0.18 | 1.86 | 1.89 |
+| D07 | $\tfrac{d}{dx}\arcsin x$ | 0.49 | 0.38 | 0.20 | 3.29 | 1.67 |
+| D08 | $\tfrac{d}{dx}\ln(\sin x)$ | 0.13 | 0.30 | 0.12 | 1.20 | 1.22 |
+| D09 | $\tfrac{d}{dx}\sqrt{1-x^2}$ | 0.97 | 0.54 | 0.70 | 6.97 | 2.57 |
+|  | **median ms** | **0.15** | **0.30** | **0.18** | **1.86** | **1.56** |
 
 ### Antiderivation (symbolic integration)
 
 | # | Case | CE·cur | CE+R/F | CE·0.59.0 | SymPy |
 |---|---|---|---|---|---|
 | | **Core tier** |  |  |  |  |
-| A01 | $\int x^2\,dx$ | 0.34 | 0.39 | 0.23 | 0.38 |
-| A02 | $\int\sin x\,dx$ | 0.12 | 0.39 | 0.10 | 1.26 |
-| A03 | $\int x e^x\,dx$ | 0.39 | 0.59 | 0.37 | 6.77 |
-| A04 | $\int\frac{1}{1+x^2}\,dx$ | 0.25 | 0.36 | 0.27 | 9.56 |
-| A05 | $\int\frac{x}{x^2+1}\,dx$ | 0.64 | 0.61 | 0.66 | 7.15 |
+| A01 | $\int x^2\,dx$ | 0.35 | 0.37 | 0.24 | 0.39 |
+| A02 | $\int\sin x\,dx$ | 0.11 | 0.36 | 0.10 | 1.22 |
+| A03 | $\int x e^x\,dx$ | 0.46 | 0.65 | 0.52 | 7.51 |
+| A04 | $\int\frac{1}{1+x^2}\,dx$ | 0.24 | 0.36 | 0.25 | 12.8 |
+| A05 | $\int\frac{x}{x^2+1}\,dx$ | 0.82 | 0.63 | 1.04 | 8.01 |
 | | **Hard tier** |  |  |  |  |
-| A06 | $\int\frac{1}{x^3+1}\,dx$ | 4.06 | 1.05 | ∅ | 24.6 |
-| A07 | $\int\frac{1}{\sqrt x}\,dx$ | 0.28 | 0.42 | ∅ | 0.70 |
-| A08 | $\int e^{-x^2}\,dx$ | 0.78 | 0.72 | ∅ | 26.0 |
-| A09 | $\int\frac{x}{\sqrt{1-x^2}}\,dx$ | 0.87 | 1.14 | ∅ | 25.0 |
-| CR1 | $\int\frac{\sqrt x}{1+x}\,dx$ | **∅** | 0.70 | ∅ | 22.2 |
-| CR2 | $\int\frac{x}{(1+x)^{1/3}}\,dx$ | **∅** | 0.62 | ∅ | 119 |
-| CR3 | $\int\frac{x^2}{(1+x)^{1/3}}\,dx$ | **∅** | 0.68 | ∅ | 212 |
-|  | **median ms** | **0.39** | **0.62** | **0.27** | **22.2** |
+| A06 | $\int\frac{1}{x^3+1}\,dx$ | 8.84 | 1.14 | ∅ | 26.4 |
+| A07 | $\int\frac{1}{\sqrt x}\,dx$ | 0.41 | 0.43 | ∅ | 0.87 |
+| A08 | $\int e^{-x^2}\,dx$ | 0.80 | 0.73 | ∅ | 29.7 |
+| A09 | $\int\frac{x}{\sqrt{1-x^2}}\,dx$ | 0.87 | 1.24 | ∅ | 24.3 |
+| CR1 | $\int\frac{\sqrt x}{1+x}\,dx$ | **∅** | 0.70 | ∅ | 22.4 |
+| CR2 | $\int\frac{x}{(1+x)^{1/3}}\,dx$ | **∅** | 0.59 | ∅ | 119 |
+| CR3 | $\int\frac{x^2}{(1+x)^{1/3}}\,dx$ | **∅** | 0.70 | ∅ | 215 |
+|  | **median ms** | **0.46** | **0.65** | **0.25** | **22.4** |
 
 ## Current build vs published `0.59.0`
 
-9 case(s) differ between the current build and `0.59.0`:
+10 case(s) differ between the current build and `0.59.0`:
 
 | # | Case | Current build | Published `0.59.0` | Change |
 |---|---|---|---|---|
+| N05 | $e^{\pi}$ | ✅ `23.1406926327792690057290863` | ✅ `23.1406926327792690057290863` | ↔︎ different output form |
 | N07 | $\zeta(3)$ | ✅ `1.20205690315959428539973816` | 🟡 `1.20205690315959422353510460` | 🟢 improved |
 | N08 | $\Gamma(\tfrac13)$ | ✅ `2.67893853470774763365569294` | ✅ `2.67893853470774763365569294` | ↔︎ different output form |
 | S05 | $x^{-1/2}-\frac{1}{\sqrt x}$ | ✅ `0` | 🟡 `-sqrt(1 / x) + 1 / sqrt(x)` | 🟢 improved |

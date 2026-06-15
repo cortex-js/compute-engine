@@ -1,5 +1,5 @@
 {
- "$comment": "Hand-maintained curation overrides for the Fungrim Phase-1 rule compiler (FUNGRIM-PLAN-5-LOADER.md \u00a72.3/\u00a72.6). Merged last by scripts/fungrim/compile-rules.ts. `overrides` entries ({ direction?, purpose?, target?, exclude?, note? }, keyed by corpus entry id) adjust or exclude compiled artifact rules. `transformAllowlist` promotes hand-vetted growth-neutral canonicalizations from 'expand' to 'transform' (the machine policy never emits 'transform'). `inject` is a list of hand-curated corpus-Entry-shaped synthetic entries appended to the slice and compiled through the FULL pipeline (guards, orientation, self-test) \u2014 for sound identities missing from the upstream corpus. `solveSeeds` is the \u00a72.6 hand-curated solve-template seed set: it is NOT compiled into the M1 artifact and does not affect default loading \u2014 the M2 runtime loader compiles these entries into UNIVARIATE_ROOTS-style templates behind loadFungrim(ce, { solve: true }) (off by default, Q7).",
+ "$comment": "Hand-maintained curation overrides for the Fungrim Phase-1 rule compiler (FUNGRIM-PLAN-5-LOADER.md \u00a72.3/\u00a72.6). Merged last by scripts/fungrim/compile-rules.ts. `overrides` entries ({ direction?, purpose?, target?, exclude?, note? }, keyed by corpus entry id) adjust or exclude compiled artifact rules. `transformAllowlist` promotes hand-vetted growth-neutral canonicalizations from 'expand' to 'transform' (the machine policy never emits 'transform'). `inject` is a list of hand-curated corpus-Entry-shaped synthetic entries appended to the slice and compiled through the FULL pipeline (guards, orientation, self-test) \u2014 for sound identities missing from the upstream corpus. `solveSeeds` is the \u00a72.6 hand-curated solve-template seed set: it is NOT compiled into the M1 artifact and does not affect default loading \u2014 the M2 runtime loader compiles these entries into UNIVARIATE_ROOTS-style templates behind loadIdentities(ce, { solve: true }) (off by default). PHASE 2 ACTIVATED: the separate post-step scripts/fungrim/apply-solve-templates.ts derives a UNIVARIATE_ROOTS-style root template from each seed's emitted inverse-composition simplify rule and appends it as a target:'solve' rule (id fungrim:<id>:solve); run it AFTER any compile-rules.ts run. recompileDivergence is the allowlist for scripts/fungrim/recompile-drift.ts (the no-silent-drops gate).",
  "overrides": {
   "304559": {
    "exclude": true,
@@ -50,7 +50,7 @@
   },
   "ed7dac": {
    "target": "solve",
-   "note": "LambertW branch -1 variant of 8654a3 (2-arg LambertW). Trips the compat-signature rule in M1 (CE's LambertW is 1-arg principal branch) and is therefore excluded from the artifact \u2014 revisit when branch support lands (Phase 2)."
+   "note": "LambertW branch -1 variant of 8654a3 (2-arg LambertW). Trips the compat-signature gate (CE's LambertW is 1-arg principal branch) so its simplify rule is excluded from the artifact; apply-solve-templates.ts therefore reports it as an UNAVAILABLE seed (no :solve rule emitted) \u2014 revisit when branch support lands (Phase 2)."
   },
   "4c1e1e": {
    "target": "solve",
@@ -63,6 +63,21 @@
   "f516e3": {
    "target": "solve",
    "note": "Arctan(Tan(theta)) = theta inverse composition (principal branch). complex-domain guard accepted for solve templates because validateRoots filters every candidate against the original equation."
+  }
+ },
+ "recompileDivergence": {
+  "$comment": "Allowlist for scripts/fungrim/recompile-drift.ts -- the 'no silent drops' gate. The checked-in simplify rules diverge from a clean compile-rules.ts run by exactly the entries below; the gate FAILS on any divergence NOT listed here, so a future silent drop/add is impossible. Root cause: the offline self-test validates each rule in ISOLATION (expr.replace(singleRule)), but some rules only fire as part of the FULL loaded rule set (other rules normalize first). The isolated self-test cannot reproduce that, so it reports a false no-fire and a recompile would drop a working rule. Each `dropped` entry is either a self-test FALSE-NEGATIVE (verified to fire at runtime -- keep) or a genuinely DEAD rule (safe to drop on the next regenerate). `added` entries are rules a fresh recompile emits that the artifact lacks. Keyed by bare entry id.",
+  "dropped": {
+   "5ada5f": "FALSE-NEGATIVE (keep). Which(...)->CarlsonRC(x,y) recognition; fires at runtime with the full rule set and x>0,y>0 guards (verified), but the isolated self-test no-fires it (multi-rule interaction it cannot reproduce).",
+   "718f3a": "FALSE-NEGATIVE (keep). Which(...)->CarlsonRC(x,y) (arccos/arcosh branch); same multi-rule-interaction false no-fire as 5ada5f; verified to fire at runtime.",
+   "a839d5": "FALSE-NEGATIVE (keep). CarlsonRC homogeneity lambda^(-1/2)*RC(x,y)->RC(lambda*x,lambda*y); an EXPANDING rule that fires via replace() (cost-gated out of simplify, like the other big-closed-form rules); isolated self-test no-fires.",
+   "2e0d99": "DEAD (safe to drop on regenerate). z^(-1/2) canonicalizes to 1/sqrt(z) = the replace side, so the rule is a structural no-op. Superseded by the live d0a331 (see `added`).",
+   "47f4ba": "DEAD (safe to drop on regenerate). JacobiTheta modular recognition whose match no longer reaches its target form under current canonicalization; does not usefully fire.",
+   "00cdb7": "DEAD (safe to drop on regenerate). CarlsonRC(x,-y) recognition with a stale 1/sqrt(x+y)*(artanh - i*pi/2) match pattern that no longer matches the canonical form; does not fire.",
+   "bc2f88": "DEAD (safe to drop on regenerate). CarlsonRC(-x,y) recognition, same stale-pattern non-firing as 00cdb7."
+  },
+  "added": {
+   "d0a331": "sqrt(1/z)->1/sqrt(z); a live rule a fresh recompile emits, currently absent from the artifact. It is the canonicalization-correct counterpart of the dead 2e0d99 and would be added on the next regenerate."
   }
  }
 }

@@ -88,12 +88,22 @@ function main(): void {
     process.exit(2);
   }
 
-  const sampled = strideSample(artifact.rules.length, args.sample).map(
-    (i) => artifact.rules[i]
+  // Solve-target rules are NOT produced by `compileEntries` (the slice→
+  // simplify compiler): they are a hand-managed overlay derived by
+  // `apply-solve-templates.ts` and validated by its own end-to-end self-test
+  // (and its `--check` gate). This freshness check only verifies that the
+  // primary simplify rules still recompile from their corpus entries, so it
+  // skips the `:solve` overlay.
+  const primaryRules = artifact.rules.filter((r) => r.target !== 'solve');
+  const solveCount = artifact.rules.length - primaryRules.length;
+
+  const sampled = strideSample(primaryRules.length, args.sample).map(
+    (i) => primaryRules[i]
   );
   console.log(
     `Artifact-freshness self-test: ${sampled.length} of ` +
-      `${artifact.rules.length} rules (deterministic stride sample)`
+      `${primaryRules.length} simplify rules (deterministic stride sample` +
+      `${solveCount > 0 ? `; ${solveCount} solve rules skipped — see apply-solve-templates --check` : ''})`
   );
 
   const corpus = loadCorpus(corpusDir);

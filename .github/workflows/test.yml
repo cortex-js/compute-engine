@@ -50,6 +50,21 @@ jobs:
       - name: Artifact freshness
         run: npx --yes tsx scripts/fungrim/artifact-freshness.ts
 
+      # Re-derive the curated solve templates (the `target:'solve'` overlay)
+      # and assert they match the checked-in artifact, ids and fields (catches
+      # drift between a seed's simplify rule and its derived root template)
+      - name: Solve-template freshness
+        run: npx --yes tsx scripts/fungrim/apply-solve-templates.ts --check
+
+      # Full-recompile drift gate: assert no committed simplify rule would be
+      # silently DROPPED (nor a new rule silently ADDED) by a fresh recompile.
+      # The self-test validates rules in isolation and can false-no-fire a rule
+      # that only fires within the full rule set; this gate makes any such
+      # divergence a loud failure unless allowlisted (curation-overrides.json
+      # `recompileDivergence`) with a justification.
+      - name: Recompile drift
+        run: npx --yes tsx scripts/fungrim/recompile-drift.ts
+
       # Regenerate the bundled Rubi integration corpus and assert the
       # checked-in artifact is still in sync with data/rubi (catches corpus or
       # bundler drift that would ship stale/mis-prioritized integration rules).

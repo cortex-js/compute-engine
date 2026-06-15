@@ -136,6 +136,23 @@ Layers, outermost first:
 
 ### 2.6 Solve templates in Phase 1
 
+> **Phase 2 status (ACTIVATED).** The seed set below now ships in the artifact.
+> A dedicated, idempotent post-step — `scripts/fungrim/apply-solve-templates.ts`
+> — derives a root template from each seed's emitted inverse-composition
+> simplify rule, end-to-end self-tests it (push to a scratch engine's
+> `solveRules`, solve a concrete instance, check the validated root), and
+> appends it to the artifact as a `target:'solve'` rule with id
+> `fungrim:<id>:solve`. The loader attaches the no-capture filter and
+> `useVariations` for `target:'solve'` rules; they load only under
+> `loadIdentities(ce, { solve: true })`. **The step is decoupled from
+> `compile-rules.ts`** (a surgical overlay on the existing simplify rules, not
+> part of the slice recompile) and exposes a `--check` CI gate. The five
+> emitted seeds are `8654a3` (LambertW), `296627`/`4c1e1e` (Exp/Ln),
+> `1f026d`/`f516e3` (Tan/Arctan); `ed7dac` stays unavailable (its 2-arg
+> LambertW simplify rule is compat-signature-gated). A mining audit over the
+> artifact's identity rules confirms no other inverse-composition entry is a
+> non-degenerate, non-redundant solve candidate.
+
 Honest scoping from the data: the slice contains **almost no solve-shaped entries** (the five `f(g(x))=x` inverse compositions are complex-domain). Phase 1 therefore ships the **mechanism + a seed set**, leaving volume to Phase 2:
 
 - **Mechanism:** `CompiledFungrimRule.target: 'solve' | 'harmonization'` routes rules to `ce.solveRules.push` / `ce.harmonizationRules.push`, behind `loadFungrim(ce, { solve: true })` (default **false** in Phase 1).
@@ -148,6 +165,7 @@ Honest scoping from the data: the slice contains **almost no solve-shaped entrie
 2. **Dispatch-oracle invariance:** `rule-dispatch-regression.test.ts` snapshots stay **byte-identical** when fungrim is not loaded; plus a test that merely *importing* the fungrim module has no side effects on a fresh engine.
 3. **Benchmark** (extend `benchmarks/rule-dispatch.benchmark.test.ts`): full Phase-1 slice loaded (~600+ rules), `simplify()` over the M0 corpus **≤ 1.5× the unloaded baseline**; index build amortization checked (first vs. second call).
 4. **No regression:** full jest suite + `npm run typecheck` green.
+5. **No silent drops (added Phase 2):** `scripts/fungrim/recompile-drift.ts` full-recompiles the slice and fails if any committed simplify rule would be dropped (or any new rule added) without an allowlist entry in `curation-overrides.json` `recompileDivergence`. This is the durable guard against the self-test's isolation limit — some rules only fire within the full rule set, so the per-rule isolated self-test can false-no-fire them and a recompile would otherwise lose them silently.
 
 ### 2.8 Failure visibility (docs/fungrim/FUNGRIM.md §6)
 

@@ -302,9 +302,23 @@ type BoxedRuleParts = {
   match: Expression;
   replace: Expression;
   condition?: (sub: BoxedSubstitution) => boolean;
+  useVariations?: boolean;
   id: string;
   purpose: RulePurpose;
 };
+
+/** Root-template filter (mirrors `solve.ts`'s `filter`): no wildcard other
+ *  than the unknown `_x` may capture `_x`, so `__b` is a genuine constant
+ *  offset free of the unknown. Required on every `target: 'solve'` rule —
+ *  the derived templates carry no domain guards (the upstream identity's
+ *  domain guards are intentionally dropped; `validateRoots` checks every
+ *  candidate against the original equation, so an over-broad template
+ *  degrades to a no-op rather than a wrong answer). */
+function solveNoCaptureFilter(sub: BoxedSubstitution): boolean {
+  for (const [k, v] of Object.entries(sub))
+    if (k !== '_x' && k !== 'x' && v.has('_x')) return false;
+  return true;
+}
 
 function boxCompiledRule(
   ce: IComputeEngine,
@@ -358,11 +372,26 @@ function boxCompiledRule(
       };
     }
 
+    // Solve-root templates (`target: 'solve'`) always carry the no-capture
+    // filter (AND-combined with any guard closures) and run with variations
+    // so the `__b` offset can be empty (`g(x) = 0`). The guard closures are
+    // typically empty for these (domain guards dropped; see
+    // `solveNoCaptureFilter`).
+    if (rule.target === 'solve') {
+      const guardCondition = condition;
+      condition =
+        guardCondition === undefined
+          ? solveNoCaptureFilter
+          : (sub: BoxedSubstitution): boolean =>
+              solveNoCaptureFilter(sub) && guardCondition(sub);
+    }
+
     return {
       rule: {
         match,
         replace,
         ...(condition !== undefined ? { condition } : {}),
+        ...(rule.target === 'solve' ? { useVariations: true } : {}),
         id: rule.id,
         purpose: rule.purpose,
       },

@@ -73,10 +73,21 @@ describe('loadIdentities (full artifact)', () => {
     loadTimeMs = Date.now() - t0;
   });
 
-  it('loads every rule of the artifact on a fresh engine', () => {
-    expect(report.loaded).toBe(FUNGRIM_CORE.rules.length);
+  it('loads every simplify rule of the artifact on a fresh engine', () => {
+    // Default load (solve: false) loads the simplify-target rules and skips
+    // the solve-target overlay (the §2.6 root templates).
+    const simplifyCount = FUNGRIM_CORE.rules.filter(
+      (r) => r.target === 'simplify'
+    ).length;
+    expect(report.loaded).toBe(simplifyCount);
     expect(report.loaded).toBe(1376);
-    expect(report.skipped).toEqual([]);
+    // The only default-load skips are the solve templates (solve-disabled).
+    expect(report.skipped.every((s) => s.reason === 'solve-disabled')).toBe(
+      true
+    );
+    expect(report.skipped.length).toBe(
+      FUNGRIM_CORE.rules.length - simplifyCount
+    );
     expect(ce.simplificationRules.length).toBe(rulesBefore + report.loaded);
   });
 
@@ -110,7 +121,12 @@ describe('loadIdentities (full artifact)', () => {
       (a, b) => a + b,
       0
     );
-    expect(FUNGRIM_CORE.rules.length + ledgerTotal).toBe(
+    // Solve-target rules are a derived overlay (apply-solve-templates.ts),
+    // not slice dispositions — exclude them from the corpus accounting.
+    const primaryCount = FUNGRIM_CORE.rules.filter(
+      (r) => r.target === 'simplify'
+    ).length;
+    expect(primaryCount + ledgerTotal).toBe(
       FUNGRIM_CORE.manifest.slice.entries
     );
   });
@@ -169,9 +185,14 @@ describe('loadIdentities (full artifact)', () => {
     expect(second.loaded).toBe(0);
     expect(second.declared).toEqual([]);
     expect(second.skipped.length).toBe(FUNGRIM_CORE.rules.length);
-    expect(second.skipped.every((s) => s.reason === 'already-loaded')).toBe(
-      true
-    );
+    // On a second default load the simplify rules are already-loaded; the
+    // solve overlay stays solve-disabled.
+    expect(
+      second.skipped.every(
+        (s) =>
+          s.reason === 'already-loaded' || s.reason === 'solve-disabled'
+      )
+    ).toBe(true);
     expect(ce.simplificationRules.length).toBe(countBefore);
   });
 
@@ -370,12 +391,17 @@ describe('selection filters', () => {
   it('classes: loads only the requested class', () => {
     const ce = new ComputeEngine();
     const report = loadIdentities(ce, { classes: ['identity'] });
+    // Solve templates are class 'identity' too, but solve:false skips them
+    // (solve-disabled) — so only the simplify-target identities load.
     const identityCount = FUNGRIM_CORE.rules.filter(
-      (r) => r.class === 'identity'
+      (r) => r.class === 'identity' && r.target === 'simplify'
     ).length;
     expect(report.loaded).toBe(identityCount);
     expect(
-      report.skipped.every((s) => s.reason === 'filtered-class')
+      report.skipped.every(
+        (s) =>
+          s.reason === 'filtered-class' || s.reason === 'solve-disabled'
+      )
     ).toBe(true);
     // a specific value is NOT loaded…
     const g = ce.box(['Gamma', ['Rational', 1, 2]]);
@@ -405,7 +431,10 @@ describe('selection filters', () => {
     const ce = new ComputeEngine();
     const first = loadIdentities(ce, { topics: ['gamma'] });
     const second = loadIdentities(ce); // everything else
-    expect(first.loaded + second.loaded).toBe(FUNGRIM_CORE.rules.length);
+    // Both loads are solve:false, so only the simplify rules ever load.
+    expect(first.loaded + second.loaded).toBe(
+      FUNGRIM_CORE.rules.filter((r) => r.target === 'simplify').length
+    );
     expect(
       second.skipped.filter((s) => s.reason === 'already-loaded').length
     ).toBe(first.loaded);
@@ -421,7 +450,9 @@ describe('per-engine isolation', () => {
     const ceA = new ComputeEngine();
     const ceB = new ComputeEngine();
     const reportA = loadIdentities(ceA);
-    expect(reportA.loaded).toBe(FUNGRIM_CORE.rules.length);
+    expect(reportA.loaded).toBe(
+      FUNGRIM_CORE.rules.filter((r) => r.target === 'simplify').length
+    );
 
     // ceB untouched: no fungrim rules, no shells, no simplification
     expect(
@@ -441,14 +472,17 @@ describe('per-engine isolation', () => {
 
     // …and ceB has its own idempotence tracking: a fresh load works fully
     const reportB = loadIdentities(ceB);
-    expect(reportB.loaded).toBe(FUNGRIM_CORE.rules.length);
+    expect(reportB.loaded).toBe(
+      FUNGRIM_CORE.rules.filter((r) => r.target === 'simplify').length
+    );
   });
 });
 
 // ---------------------------------------------------------------------------
-// Solve/harmonization routing (§2.6 mechanism; the Phase-1 artifact itself
-// contains no solve-target rules, so routing is exercised with a synthetic
-// artifact through the `data` option)
+// Solve/harmonization routing (§2.6 mechanism). The artifact ships the curated
+// solve seeds (Phase 2), but harmonization routing has no shipped rules, so
+// the routing plumbing is exercised with a synthetic artifact through the
+// `data` option.
 // ---------------------------------------------------------------------------
 
 describe('solve routing', () => {
@@ -553,12 +587,77 @@ describe('solve routing', () => {
     );
   });
 
-  it('the Phase-1 artifact itself contains no solve-target rules', () => {
-    expect(FUNGRIM_CORE.rules.every((r) => r.target === 'simplify')).toBe(true);
+  it('the artifact ships the curated solve templates (Phase 2)', () => {
+    // The §2.6 solve seeds are derived into `:solve` rules by
+    // apply-solve-templates.ts. They carry no domain guards (validateRoots is
+    // the safety net) and are skipped on a default load.
+    const solveRules = FUNGRIM_CORE.rules.filter((r) => r.target === 'solve');
+    expect(solveRules.length).toBeGreaterThanOrEqual(5);
+    for (const r of solveRules) {
+      expect(r.id).toMatch(/^fungrim:[0-9a-f]{6}:solve$/);
+      expect(r.guards).toEqual([]);
+      // Root-template shape: match is `Add(A(_x), __b)`, replace introduces __b.
+      expect(Array.isArray(r.match) && (r.match as unknown[])[0]).toBe('Add');
+    }
+    // Default load skips them; {solve:true} routes them to ce.solveRules.
+    const ceDefault = new ComputeEngine();
+    expect(loadIdentities(ceDefault).byTarget.solve).toBe(0);
+
     const ce = new ComputeEngine();
     const report = loadIdentities(ce, { solve: true });
-    expect(report.byTarget.solve).toBe(0);
+    expect(report.byTarget.solve).toBe(solveRules.length);
     expect(report.byTarget.harmonization).toBe(0);
+  });
+});
+
+// ===========================================================================
+// Phase 2 — solve-template acceptance (docs/fungrim/FUNGRIM-PLAN-5-LOADER.md
+// §2.6/§2.7). The curated seeds are derived into `:solve` rules by
+// scripts/fungrim/apply-solve-templates.ts; here we verify the end-to-end
+// solve() behavior with the real artifact loaded under { solve: true }.
+//
+// Each seed solves an equation `A(x) = c` to `x = f(c)` where the source
+// identity `f(A(x)) = x` makes `f` the inverse of `A`. validateRoots checks
+// every candidate against the original equation, so a root is returned only
+// when it is genuinely correct.
+// ===========================================================================
+
+describe('Phase 2 — solve templates (loadIdentities { solve: true })', () => {
+  function solved(eq: string, opts?: { solve: boolean }): number[] {
+    const ce = new ComputeEngine();
+    loadIdentities(ce, opts ?? { solve: true });
+    const roots = ce.parse(eq).solve('x') as ReturnType<
+      ComputeEngine['box']
+    >[];
+    return (roots ?? []).map((r) => r.N().re ?? NaN);
+  }
+
+  it('LambertW: x·eˣ = 3 → W(3)  [fungrim:8654a3:solve]', () => {
+    const r = solved('x e^x = 3');
+    expect(r.length).toBe(1);
+    expect(r[0]).toBeCloseTo(1.0499088949640398, 10); // W(3)
+  });
+
+  it('Arctan: arctan(x) = 0.5 → tan(0.5)  [fungrim:1f026d:solve]', () => {
+    const r = solved('\\arctan(x) = 0.5');
+    expect(r.length).toBe(1);
+    expect(r[0]).toBeCloseTo(Math.tan(0.5), 10);
+  });
+
+  it('Tan: tan(x) = 2 → arctan(2)  [fungrim:f516e3:solve]', () => {
+    const r = solved('\\tan(x) = 2');
+    expect(r.some((v) => Math.abs(v - Math.atan(2)) < 1e-9)).toBe(true);
+  });
+
+  it('these equations are NOT solvable without { solve: true }', () => {
+    expect(solved('x e^x = 3', { solve: false })).toEqual([]);
+    expect(solved('\\arctan(x) = 0.5', { solve: false })).toEqual([]);
+  });
+
+  it('a returned root is never wrong (validateRoots is the safety net)', () => {
+    // x·eˣ = 3 has a single real root; the template must not invent extras.
+    const r = solved('x e^x = 3');
+    for (const v of r) expect(v * Math.exp(v)).toBeCloseTo(3, 9);
   });
 });
 
@@ -925,7 +1024,10 @@ describe('hot-head pre-screened dispatch', () => {
         typeof r.id === 'string' &&
         r.id.startsWith('fungrim:')
     );
-    expect(fungrim.length).toBe(FUNGRIM_CORE.rules.length);
+    // Default load: only simplify-target rules are registered.
+    expect(fungrim.length).toBe(
+      FUNGRIM_CORE.rules.filter((r) => r.target === 'simplify').length
+    );
 
     // fungrim:4f20ff (n·(n−1)! → n!) has a Multiply match head: functional
     // wrapper with the dispatch hint, keeping its own id and purpose

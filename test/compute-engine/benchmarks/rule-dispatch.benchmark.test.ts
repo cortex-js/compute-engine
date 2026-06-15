@@ -216,7 +216,11 @@ describe('rule-dispatch real-corpus benchmark (M5, Fungrim Phase-1 artifact)', (
     const loadStart = globalThis.performance.now();
     const report = loadIdentities(ceLoaded);
     const loadMs = globalThis.performance.now() - loadStart;
-    expect(report.loaded).toBe(FUNGRIM_CORE.rules.length);
+    // Default load registers the simplify-target rules (the solve overlay is
+    // skipped without { solve: true }).
+    expect(report.loaded).toBe(
+      FUNGRIM_CORE.rules.filter((r) => r.target === 'simplify').length
+    );
 
     // First call after the load re-boxes the (now 558-rule larger) set —
     // measure the one-time amortization cost separately. Also captures the

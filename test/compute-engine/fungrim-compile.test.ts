@@ -750,7 +750,11 @@ describe('fungrim-core-data.json artifact', () => {
       (a, b) => a + b,
       0
     );
-    expect(artifact.rules.length + skipped).toBe(artifact.manifest.slice.entries);
+    // Solve-target rules are a derived overlay (apply-solve-templates.ts),
+    // NOT primary slice dispositions — exclude them from the
+    // one-disposition-per-slice-entry accounting.
+    const primary = artifact.rules.filter((r) => r.target !== 'solve').length;
+    expect(primary + skipped).toBe(artifact.manifest.slice.entries);
   });
 
   it('ledgers skips only under the enumerated reasons', () => {
@@ -776,8 +780,11 @@ describe('fungrim-core-data.json artifact', () => {
     expect([...ids].sort()).toEqual(ids);
     for (const r of artifact.rules) {
       // Corpus entries carry 6-hex Fungrim ids; curated injections
-      // (curation-overrides.json `inject`) carry kebab-case ids.
-      expect(r.id).toMatch(/^fungrim:([0-9a-f]{6}|[a-z][a-z0-9]*(-[a-z0-9]+)+)$/);
+      // (curation-overrides.json `inject`) carry kebab-case ids; derived
+      // solve templates (apply-solve-templates.ts) carry a `:solve` suffix.
+      expect(r.id).toMatch(
+        /^fungrim:([0-9a-f]{6}(:solve)?|[a-z][a-z0-9]*(-[a-z0-9]+)+)$/
+      );
       expect(Array.isArray(r.guards)).toBe(true);
       expect(['simplify', 'transform', 'expand']).toContain(r.purpose);
       expect(['simplify', 'solve', 'harmonization']).toContain(r.target);
