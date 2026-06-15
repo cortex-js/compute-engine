@@ -447,10 +447,55 @@ first four). Without them, the ~100 affected Chapter-1 rules can still be
     patterns, so tokenizing repeated MathJSON heads (`Power`, `Multiply`,
     `Blank`, …) would shrink it materially; (c) extend the bundled corpus
     beyond Chapter 1 (couples to Phase R3+).
+- **Phase R3 — Chapter-4 trig PILOT (DONE, 2026-06-15): de-risk + Wester
+  spot-check.** Goal was to calibrate the real per-chapter cost before
+  committing to the multi-chapter port, using the three Wester cases
+  `∫1/(3cos x+4sin x+k) dx` (k=3,4,5) as the target.
+  - **Extraction/compilation are free.** `translate.ts` (extended to accept
+    repeated `--section`) extracts all of Chapter 4 at **2,117/2,117 rules, 0
+    skipped**, and the corpus **compiles 0-skip** — CE boxes inert `cos[x]` as
+    a distinct `"cos"` head, so Rubi's inert/active split survives intact. The
+    whole difficulty is at RUNTIME.
+  - **The inert-trig layer is the gate.** 77% of ch4 rules (1,631/2,117) match
+    *inert* lowercase trig heads; real integrands carry *active* `Sin`/`Cos`,
+    so nothing fires until the integrand is "deactivated" on driver entry.
+    `ActivateTrig` (inert→active) is a 1-line head-swap; `DeactivateTrig`
+    (active→inert) is, in full, `UnifyInertTrigFunction`[75 clauses] ∘
+    `FixInertTrigFunction`[61] ∘ `DeactivateTrigAux`.
+  - **Minimal bridge shipped.** `rubi-utils.ts` gained `activateTrig` /
+    `deactivateTrig` (pure head-swap, NO argument-unification) + the
+    rule-invoked `ActivateTrig`/`DeactivateTrig` VALUE_FNs, plus
+    `FreeFactors`/`NonfreeFactors` (needed by the Weierstrass tan(x/2)
+    substitution). `driver.ts` deactivates per-`intRec` gated by a
+    `hasActiveTrig` flag set once in `int()` — a strict no-op for trig-free
+    integrands (zero algebraic regression, verified). **~140 lines, ZERO new
+    predicates: the entire ch1 utility layer (Simp/Subst/Rt/ExpandToSum/…) is
+    reused as-is.**
+  - **Result: all 3 Wester cases flip ∅→✅** (D-verified; the degenerate
+    `a²=b²+c²` k=5 case via the closed-form rule, k=3,4 via the general
+    tan(x/2) Weierstrass rule into a ch1 quadratic/linear sub-integral).
+    `REPORT-wester.md`: **CE+R/F 27→32/48, indefinite ∫ →6/8**, every other
+    column unchanged. Bundled `4.1.6 (a+b cos+c sin)^n` (57 rules) into the
+    shipped artifact (2,647→2,704 rules, 2.92→3.00 MB); loader + 3 new
+    regression tests green.
+  - **Calibration (the ROI deliverable).** The minimal bridge is **sound** —
+    across 240 sampled trig problems it produced **0 wrong / 0 error**; it just
+    fails-closed on what it can't yet do. Reach with head-swap alone: the bare
+    `(a+b cos+c sin)^n` family solves; broad **4.1 Sine 26/120 (~22%)**,
+    `(a trig+b trig)^n` **13/120 (~11%)**. The unsolved ~78% is blocked on
+    `ExpandTrig`(33×)/`ExpandTrigReduce`(14×)/`KnownSineIntegrandQ`(22×) +
+    the `FixInertTrigFunction`/`UnifyInertTrigFunction` argument-unification
+    layer (products/powers/shifted args). That layer is the bulk of the
+    full-Chapter-4 cost and remains "its own project."
+  - **Go/no-go.** GO on the cheap chapters first: **Ch2 (exp, 125 rules) and
+    Ch6 (hyperbolic, 390 rules) use ACTIVE heads in their LHS — zero inert
+    layer — so they are ≈ Chapter-1 difficulty** and should precede the full
+    ch4 inert-unification effort.
 - **Phase R3+ — chapters by value**: 2 (exponentials, 125 rules — small) and
   3 (logarithms, 337) first; 5/6/7 (inverse trig/hyperbolic) next; Chapter 4
-  (trig, 2,126 rules + the inert-trig utility machinery) is its own project;
-  Chapter 8 last (needs many special-function heads/kernels).
+  (trig, 2,126 rules + the inert-trig utility machinery) — the
+  argument-unification layer above is its own project, the head-swap bridge
+  already landed; Chapter 8 last (needs many special-function heads/kernels).
 
 ## 6. Roadmap Coupling (what to prioritize and why)
 

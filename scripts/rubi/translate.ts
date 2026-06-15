@@ -54,7 +54,11 @@ function main(): void {
   let rubi =
     process.env.RUBI_HOME ??
     path.join(os.homedir(), `dev/rubi/Rubi-${RUBI_VERSION}`);
-  let section = '';
+  // `--section` may be repeated to translate several chapters into one corpus
+  // (e.g. ch1 + ch4); the combined file list keeps each chapter's rules in
+  // their own files, so per-file rule order — Rubi's match priority — is
+  // preserved. No `--section` means the whole corpus.
+  const sections: string[] = [];
   let out = 'data/rubi';
   for (let i = 2; i < argv.length; i++) {
     switch (argv[i]) {
@@ -62,7 +66,7 @@ function main(): void {
         rubi = argv[++i];
         break;
       case '--section':
-        section = argv[++i];
+        sections.push(argv[++i]);
         break;
       case '--out':
         out = argv[++i];
@@ -74,7 +78,9 @@ function main(): void {
   }
 
   const rulesRoot = path.join(rubi, 'Rubi/IntegrationRules');
-  const files = listRuleFiles(rulesRoot, section);
+  const files = (sections.length ? sections : [''])
+    .flatMap((s) => listRuleFiles(rulesRoot, s))
+    .sort();
   console.log(`translating ${files.length} rule files from ${rulesRoot}`);
 
   let totalRules = 0;
@@ -128,7 +134,7 @@ function main(): void {
       },
       license: 'MIT, Copyright (c) 2018 Rule-based Integration Organization',
     },
-    scope: section || '(all)',
+    scope: sections.length === 0 ? '(all)' : sections.length === 1 ? sections[0] : sections,
     counts: {
       files: files.length,
       rules: totalRules,

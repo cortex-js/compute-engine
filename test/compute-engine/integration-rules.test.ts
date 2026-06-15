@@ -38,6 +38,31 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
     test('∫x/√(1+x) dx', () => verify('\\frac{x}{\\sqrt{1+x}}'));
   });
 
+  describe('integrates the (a+b cos+c sin) trig family (Chapter-4 pilot)', () => {
+    const ce = new ComputeEngine();
+    loadIntegrationRules(ce);
+    const verify = (latex: string) => {
+      const integrand = ce.parse(latex);
+      const F = ce.parse(`\\int ${latex} \\, dx`).evaluate();
+      expect(F.has('Integrate')).toBe(false); // a closed form, not inert
+      const dF = ce.box(['D', F, 'x']).evaluate();
+      for (const x of [0.31, 0.73, 1.42]) {
+        const a = dF.subs({ x }).N().re;
+        const b = integrand.subs({ x }).N().re;
+        if (a === undefined || b === undefined) continue;
+        expect(a).toBeCloseTo(b, 6);
+      }
+    };
+    // The three Wester CAS-review cases: a² − b² − c² < 0 (general
+    // Weierstrass) for k=3,4 and the degenerate a² = b² + c² for k=5.
+    test('∫1/(3cos x + 4sin x + 3) dx', () =>
+      verify('\\frac{1}{3\\cos x + 4\\sin x + 3}'));
+    test('∫1/(3cos x + 4sin x + 4) dx', () =>
+      verify('\\frac{1}{3\\cos x + 4\\sin x + 4}'));
+    test('∫1/(3cos x + 4sin x + 5) dx', () =>
+      verify('\\frac{1}{3\\cos x + 4\\sin x + 5}'));
+  });
+
   test('the built-in antiderivative still handles non-Rubi integrands', () => {
     // The provider returns null for a Gaussian (outside Chapter 1), so the
     // built-in antiderivative runs and produces Erf.

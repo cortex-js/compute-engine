@@ -162,13 +162,19 @@ The analytic-property store (`ce.functionProperties`, pole-aware `N()`), the
 `Residue` operator, and the `onBranchCut` guard are in place. Two consumers of
 the store are only partially built:
 
-- **(a) Branch-cut-safe simplification — extend beyond logarithms.** The guard
-  today protects only `ln(a) + ln(b) → ln(ab)` (`simplify-log.ts`). Apply the
-  same fail-closed `onBranchCut` membership check to the other identities that
-  can cross a cut: power/root products (`√a·√b → √(ab)`, `(ab)^p`), inverse-trig,
-  and the complex-domain Fungrim rules. `arithmetic-mul-div.ts` already gates the
-  related `(base^r)^e → base^(r·e)` fold on principal-branch soundness
-  (`foldIsSound`) — reuse that precedent rather than re-deriving the conditions.
+- **(a) Branch-cut-safe simplification — largely complete.** The logarithm
+  family is guarded: `ln(a) + ln(b) → ln(ab)` (`simplify-log.ts`) and the `.ln()`
+  expansions `ln(bⁿ) → n·ln(b)` / `ln(a/b)` / `ln(root)` (`boxed-function.ts`)
+  consult `onBranchCut` and stay symbolic when an operand is provably on the
+  negative-real cut. Power/root *products* (`√a·√b → √(ab)`, `(ab)^p`) were
+  already safe — gated on `isNonNegative` in `arithmetic-mul-div.ts` (see also the
+  `foldIsSound` `(base^r)^e → base^(r·e)` gate). What's left is **not** store-
+  driven: a guarded `arctan(x) + arctan(y)` addition would be a *new capability*
+  (CE doesn't combine inverse-trig today), and its validity region (`xy < 1`) is
+  an arithmetic condition, not an `onBranchCut` cut-membership test — so the store
+  doesn't serve it. Complex-domain Fungrim rules already carry their own loader
+  guards. *(Deferred, churn: unconstrained `ln(x²)` stays the optimistic `2ln(x)`
+  rather than the always-sound `2ln|x|`, matching `ln(x)+ln(y) → ln(xy)`.)*
 
 - **(c) Exact asymptotics at special-function poles.** `Residue` and the limit
   engine currently *defer* when a gamma/zeta-family function sits at a pole (the
@@ -197,15 +203,6 @@ census (`scripts/fungrim/guard-census.json`, currently 89.6% complex-domain
 dischargeable) quantifies exactly what it would buy. Let demand justify it.
 
 ### Documentation
-
-The three guide refreshes for the 2026-06 release have landed (verified against
-the running engine, 2026-06-15): `doc/14-guide-assumptions.md` (part-predicates,
-`NotEqual`/`SetMinus` domains, `And` conjunctions, the `'not-a-predicate'`
-result, three-valued discharge + like-with-like part-guard semantics);
-`doc/15-guide-patterns-and-rules.md` (`Rule.purpose` tags, the `operators`
-dispatch hint, `ce.solveRules`/`ce.harmonizationRules`); and
-`doc/15b-guide-extended-rules.md` (per-head dispatch perf refreshed to ~1.3× the
-unloaded baseline). Remaining:
 
 - If Tycho/GP consumes this release: add a `loadIdentities` section to the
   importer guide in the Tycho repo (consumer-facing docs live with the

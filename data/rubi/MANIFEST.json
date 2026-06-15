@@ -1,6 +1,6 @@
 {
  "schemaVersion": 1,
- "generated": "2026-06-12",
+ "generated": "2026-06-15",
  "generator": "scripts/rubi/translate.ts",
  "upstream": {
   "name": "Rubi",
@@ -8,16 +8,19 @@
   "version": "4.17.3.0",
   "note": "extracted from the release tarball; rule order within each file is Rubi’s match-priority order",
   "pin": {
-   "sha256": "d8aa494ee73b40962c388839d8172d6f131d9ddf729fa0908800f5ecfc7bde04",
+   "sha256": "c66e164bfcbcb322e85b13396ff01c91d5148144f15896088ecb2701dbb08c1a",
    "method": "sha256 over the translated IntegrationRules/**/*.m files, sorted, concatenated",
-   "fileCount": 67
+   "fileCount": 124
   },
   "license": "MIT, Copyright (c) 2018 Rule-based Integration Organization"
  },
- "scope": "1 Algebraic functions",
+ "scope": [
+  "1 Algebraic functions",
+  "4 Trig functions"
+ ],
  "counts": {
-  "files": 67,
-  "rules": 2647,
+  "files": 124,
+  "rules": 4764,
   "skipped": 0
  },
  "files": [
@@ -354,6 +357,291 @@
   {
    "file": "1 Algebraic functions/1.4 Miscellaneous/1.4.3 Miscellaneous algebraic functions.m",
    "rules": 60,
+   "errors": 0
+  },
+  {
+   "file": "4 Trig functions/4.1 Sine/4.1.0.1 (a sin)^m (b trg)^n.m",
+   "rules": 27,
+   "errors": 0
+  },
+  {
+   "file": "4 Trig functions/4.1 Sine/4.1.0.2 (a trg)^m (b tan)^n.m",
+   "rules": 30,
+   "errors": 0
+  },
+  {
+   "file": "4 Trig functions/4.1 Sine/4.1.0.3 (a csc)^m (b sec)^n.m",
+   "rules": 14,
+   "errors": 0
+  },
+  {
+   "file": "4 Trig functions/4.1 Sine/4.1.1.1 (a+b sin)^n.m",
+   "rules": 33,
+   "errors": 0
+  },
+  {
+   "file": "4 Trig functions/4.1 Sine/4.1.1.2 (g cos)^p (a+b sin)^m.m",
+   "rules": 39,
+   "errors": 0
+  },
+  {
+   "file": "4 Trig functions/4.1 Sine/4.1.1.3 (g tan)^p (a+b sin)^m.m",
+   "rules": 28,
+   "errors": 0
+  },
+  {
+   "file": "4 Trig functions/4.1 Sine/4.1.10 (c+d x)^m (a+b sin)^n.m",
+   "rules": 33,
+   "errors": 0
+  },
+  {
+   "file": "4 Trig functions/4.1 Sine/4.1.11 (e x)^m (a+b x^n)^p sin.m",
+   "rules": 22,
+   "errors": 0
+  },
+  {
+   "file": "4 Trig functions/4.1 Sine/4.1.12 (e x)^m (a+b sin(c+d x^n))^p.m",
+   "rules": 94,
+   "errors": 0
+  },
+  {
+   "file": "4 Trig functions/4.1 Sine/4.1.13 (d+e x)^m sin(a+b x+c x^2)^n.m",
+   "rules": 28,
+   "errors": 0
+  },
+  {
+   "file": "4 Trig functions/4.1 Sine/4.1.2.1 (a+b sin)^m (c+d sin)^n.m",
+   "rules": 99,
+   "errors": 0
+  },
+  {
+   "file": "4 Trig functions/4.1 Sine/4.1.2.2 (g cos)^p (a+b sin)^m (c+d sin)^n.m",
+   "rules": 95,
+   "errors": 0
+  },
+  {
+   "file": "4 Trig functions/4.1 Sine/4.1.2.3 (g sin)^p (a+b sin)^m (c+d sin)^n.m",
+   "rules": 38,
+   "errors": 0
+  },
+  {
+   "file": "4 Trig functions/4.1 Sine/4.1.3.1 (a+b sin)^m (c+d sin)^n (A+B sin).m",
+   "rules": 44,
+   "errors": 0
+  },
+  {
+   "file": "4 Trig functions/4.1 Sine/4.1.4.1 (a+b sin)^m (A+B sin+C sin^2).m",
+   "rules": 19,
+   "errors": 0
+  },
+  {
+   "file": "4 Trig functions/4.1 Sine/4.1.4.2 (a+b sin)^m (c+d sin)^n (A+B sin+C sin^2).m",
+   "rules": 42,
+   "errors": 0
+  },
+  {
+   "file": "4 Trig functions/4.1 Sine/4.1.5 trig^m (a cos+b sin)^n.m",
+   "rules": 43,
+   "errors": 0
+  },
+  {
+   "file": "4 Trig functions/4.1 Sine/4.1.6 (a+b cos+c sin)^n.m",
+   "rules": 57,
+   "errors": 0
+  },
+  {
+   "file": "4 Trig functions/4.1 Sine/4.1.7 (d trig)^m (a+b (c sin)^n)^p.m",
+   "rules": 73,
+   "errors": 0
+  },
+  {
+   "file": "4 Trig functions/4.1 Sine/4.1.8 trig^m (a+b cos^p+c sin^q)^n.m",
+   "rules": 8,
+   "errors": 0
+  },
+  {
+   "file": "4 Trig functions/4.1 Sine/4.1.9 trig^m (a+b sin^n+c sin^(2 n))^p.m",
+   "rules": 52,
+   "errors": 0
+  },
+  {
+   "file": "4 Trig functions/4.3 Tangent/4.3.1.1 (a+b tan)^n.m",
+   "rules": 13,
+   "errors": 0
+  },
+  {
+   "file": "4 Trig functions/4.3 Tangent/4.3.1.2 (d sec)^m (a+b tan)^n.m",
+   "rules": 32,
+   "errors": 0
+  },
+  {
+   "file": "4 Trig functions/4.3 Tangent/4.3.1.3 (d sin)^m (a+b tan)^n.m",
+   "rules": 6,
+   "errors": 0
+  },
+  {
+   "file": "4 Trig functions/4.3 Tangent/4.3.10 (c+d x)^m (a+b tan)^n.m",
+   "rules": 27,
+   "errors": 0
+  },
+  {
+   "file": "4 Trig functions/4.3 Tangent/4.3.11 (e x)^m (a+b tan(c+d x^n))^p.m",
+   "rules": 20,
+   "errors": 0
+  },
+  {
+   "file": "4 Trig functions/4.3 Tangent/4.3.12 (d+e x)^m tan(a+b x+c x^2)^n.m",
+   "rules": 8,
+   "errors": 0
+  },
+  {
+   "file": "4 Trig functions/4.3 Tangent/4.3.2.1 (a+b tan)^m (c+d tan)^n.m",
+   "rules": 58,
+   "errors": 0
+  },
+  {
+   "file": "4 Trig functions/4.3 Tangent/4.3.2.3 (g tan)^p (a+b tan)^m (c+d tan)^n.m",
+   "rules": 8,
+   "errors": 0
+  },
+  {
+   "file": "4 Trig functions/4.3 Tangent/4.3.3.1 (a+b tan)^m (c+d tan)^n (A+B tan).m",
+   "rules": 29,
+   "errors": 0
+  },
+  {
+   "file": "4 Trig functions/4.3 Tangent/4.3.4.1 (a+b tan)^m (A+B tan+C tan^2).m",
+   "rules": 15,
+   "errors": 0
+  },
+  {
+   "file": "4 Trig functions/4.3 Tangent/4.3.4.2 (a+b tan)^m (c+d tan)^n (A+B tan+C tan^2).m",
+   "rules": 25,
+   "errors": 0
+  },
+  {
+   "file": "4 Trig functions/4.3 Tangent/4.3.7 (d trig)^m (a+b (c tan)^n)^p.m",
+   "rules": 25,
+   "errors": 0
+  },
+  {
+   "file": "4 Trig functions/4.3 Tangent/4.3.9 trig^m (a+b tan^n+c tan^(2 n))^p.m",
+   "rules": 34,
+   "errors": 0
+  },
+  {
+   "file": "4 Trig functions/4.5 Secant/4.5.1.1 (a+b sec)^n.m",
+   "rules": 20,
+   "errors": 0
+  },
+  {
+   "file": "4 Trig functions/4.5 Secant/4.5.1.2 (d sec)^n (a+b sec)^m.m",
+   "rules": 85,
+   "errors": 0
+  },
+  {
+   "file": "4 Trig functions/4.5 Secant/4.5.1.3 (d sin)^n (a+b sec)^m.m",
+   "rules": 8,
+   "errors": 0
+  },
+  {
+   "file": "4 Trig functions/4.5 Secant/4.5.1.4 (d tan)^n (a+b sec)^m.m",
+   "rules": 24,
+   "errors": 0
+  },
+  {
+   "file": "4 Trig functions/4.5 Secant/4.5.10 (c+d x)^m (a+b sec)^n.m",
+   "rules": 16,
+   "errors": 0
+  },
+  {
+   "file": "4 Trig functions/4.5 Secant/4.5.11 (e x)^m (a+b sec(c+d x^n))^p.m",
+   "rules": 18,
+   "errors": 0
+  },
+  {
+   "file": "4 Trig functions/4.5 Secant/4.5.2.1 (a+b sec)^m (c+d sec)^n.m",
+   "rules": 47,
+   "errors": 0
+  },
+  {
+   "file": "4 Trig functions/4.5 Secant/4.5.2.2 (g sec)^p (a+b sec)^m (c+d sec)^n.m",
+   "rules": 46,
+   "errors": 0
+  },
+  {
+   "file": "4 Trig functions/4.5 Secant/4.5.3.1 (a+b sec)^m (d sec)^n (A+B sec).m",
+   "rules": 45,
+   "errors": 0
+  },
+  {
+   "file": "4 Trig functions/4.5 Secant/4.5.4.1 (a+b sec)^m (A+B sec+C sec^2).m",
+   "rules": 31,
+   "errors": 0
+  },
+  {
+   "file": "4 Trig functions/4.5 Secant/4.5.4.2 (a+b sec)^m (d sec)^n (A+B sec+C sec^2).m",
+   "rules": 48,
+   "errors": 0
+  },
+  {
+   "file": "4 Trig functions/4.5 Secant/4.5.7 (d trig)^m (a+b (c sec)^n)^p.m",
+   "rules": 32,
+   "errors": 0
+  },
+  {
+   "file": "4 Trig functions/4.5 Secant/4.5.9 trig^m (a+b sec^n+c sec^(2 n))^p.m",
+   "rules": 28,
+   "errors": 0
+  },
+  {
+   "file": "4 Trig functions/4.7 Miscellaneous/(a sin(m x) + b cos(n x))^p.m",
+   "rules": 22,
+   "errors": 0
+  },
+  {
+   "file": "4 Trig functions/4.7 Miscellaneous/4.7.1 Sine normalization rules.m",
+   "rules": 26,
+   "errors": 0
+  },
+  {
+   "file": "4 Trig functions/4.7 Miscellaneous/4.7.2 Tangent normalization rules.m",
+   "rules": 19,
+   "errors": 0
+  },
+  {
+   "file": "4 Trig functions/4.7 Miscellaneous/4.7.3 Secant normalization rules.m",
+   "rules": 24,
+   "errors": 0
+  },
+  {
+   "file": "4 Trig functions/4.7 Miscellaneous/4.7.4 (c trig)^m (d trig)^n.m",
+   "rules": 50,
+   "errors": 0
+  },
+  {
+   "file": "4 Trig functions/4.7 Miscellaneous/4.7.5 Inert trig functions.m",
+   "rules": 84,
+   "errors": 0
+  },
+  {
+   "file": "4 Trig functions/4.7 Miscellaneous/4.7.6 (c+d x)^m trig(a+b x)^n trig(a+b x)^p.m",
+   "rules": 28,
+   "errors": 0
+  },
+  {
+   "file": "4 Trig functions/4.7 Miscellaneous/4.7.7 F^(c (a+b x)) trig(d+e x)^n.m",
+   "rules": 46,
+   "errors": 0
+  },
+  {
+   "file": "4 Trig functions/4.7 Miscellaneous/4.7.8 u trig(a+b log(c x^n))^p.m",
+   "rules": 48,
+   "errors": 0
+  },
+  {
+   "file": "4 Trig functions/4.7 Miscellaneous/4.7.9 Active trig functions.m",
+   "rules": 104,
    "errors": 0
   }
  ]

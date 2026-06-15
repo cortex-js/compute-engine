@@ -2169,6 +2169,97 @@ function genTrinomialMatchQ(u: Expression, x: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Inert ↔ active trig bridge (docs/rubi/RUBI.md §1, the Chapter-4 "inert
+// trig" machinery). Rubi's trig rules match against INERT lowercase heads
+// (`sin`/`cos`/…) that its dispatcher produces from the user's ACTIVE
+// `Sin`/`Cos` via DeactivateTrig, and converts results back with
+// ActivateTrig[u] := ReplaceAll[u,{sin->Sin,…}]. CE preserves the
+// inert/active split (it boxes `cos[x]` as a distinct `"cos"` head), so the
+// bridge is a pure head-swap.
+//
+// This is the MINIMAL bridge: it swaps trig heads anywhere in the tree but
+// does NOT implement Rubi's FixInertTrigFunction / UnifyInertTrigFunction
+// argument-unification layer (needed for products/powers/shifted arguments
+// in the broader chapter, measured separately). It is exact for the
+// `(a+b cos+c sin)^n` family, whose trig arguments are already linear.
+// ---------------------------------------------------------------------------
+
+const TO_INERT: Record<string, string> = {
+  Sin: 'sin',
+  Cos: 'cos',
+  Tan: 'tan',
+  Cot: 'cot',
+  Sec: 'sec',
+  Csc: 'csc',
+};
+const TO_ACTIVE: Record<string, string> = {
+  sin: 'Sin',
+  cos: 'Cos',
+  tan: 'Tan',
+  cot: 'Cot',
+  sec: 'Sec',
+  csc: 'Csc',
+};
+
+/** True if any node carries an ACTIVE trig head (`Sin`/`Cos`/…). Lets the
+ * driver gate the bridge to a strict no-op for trig-free integrands. */
+export function hasActiveTrig(e: Expression): boolean {
+  if (TO_INERT[e.operator] !== undefined) return true;
+  return e.ops?.some(hasActiveTrig) ?? false;
+}
+
+/** Rewrite trig heads through `map`, preserving object identity wherever no
+ * descendant changed (so trig-free subtrees pass through untouched and the
+ * non-trig case is a true no-op). Rebuilt nodes are re-canonicalized, which
+ * is what aligns the deactivated integrand with the canonically-boxed
+ * inert-head patterns. */
+function mapTrigHeads(
+  ce: ComputeEngine,
+  e: Expression,
+  map: Record<string, string>
+): Expression {
+  const ops = e.ops;
+  if (!ops || ops.length === 0) return e;
+  const newOps = ops.map((o) => mapTrigHeads(ce, o, map));
+  const newHead = map[e.operator] ?? e.operator;
+  if (newHead === e.operator && newOps.every((o, i) => o === ops[i])) return e;
+  return ce.function(newHead, newOps);
+}
+
+/** Active → inert: `Cos[x]` → `cos[x]`. Applied to integrands on driver entry. */
+export function deactivateTrig(ce: ComputeEngine, e: Expression): Expression {
+  return mapTrigHeads(ce, e, TO_INERT);
+}
+
+/** Inert → active: `cos[x]` → `Cos[x]`. Applied to results (RHSs already emit
+ * active heads; this catches inert leaves carried over from the integrand). */
+export function activateTrig(ce: ComputeEngine, e: Expression): Expression {
+  return mapTrigHeads(ce, e, TO_ACTIVE);
+}
+
+// FreeFactors[u, x] / NonfreeFactors[u, x] (IntegrationUtilityFunctions.m):
+// the product of the factors of u that are free of x (resp. not free of x).
+// Rubi maps over a Product replacing the complementary factors with 1; a
+// non-product is u-or-1 by FreeQ. The (a+b cos+c sin) Weierstrass rules bind
+// f = FreeFactors[Tan[(d+e x)/2], x] to pull the constant out before Subst;
+// without it the inert FreeFactors(…) head poisons the substituted integrand
+// (the "linear" coefficient is no longer x-free) and the inner Int never closes.
+function selectFactors(
+  u: Expression,
+  x: string,
+  ce: ComputeEngine,
+  free: boolean
+): Expression {
+  if (u.operator === 'Multiply' && u.ops) {
+    const kept = u.ops.filter((f) => !f.has(x) === free);
+    if (kept.length === 0) return ce.One;
+    return kept.length === 1 ? kept[0] : ce.function('Multiply', kept);
+  }
+  if (!u.has(x)) return free ? u : ce.One;
+  return free ? ce.One : u;
+}
+
+// ---------------------------------------------------------------------------
 // Value utilities
 // ---------------------------------------------------------------------------
 
@@ -2247,6 +2338,19 @@ const VALUE_FNS: Record<string, ValueFn> = {
   // RemoveContent[u, x] — drops a constant content factor; returning u
   // unchanged is antiderivative-safe (differs by a constant)
   RemoveContent: (args, ctx) => build(args[0], ctx),
+
+  // ActivateTrig[u] / DeactivateTrig[u, x] — rule-invoked inert↔active trig
+  // bridge (127×/1× across Chapter 4). Some rule RHSs wrap their result in
+  // ActivateTrig[…] to turn the inert working form back into Sin/Cos.
+  ActivateTrig: (args, ctx) => activateTrig(ctx.ce, build(args[0], ctx)),
+  DeactivateTrig: (args, ctx) => deactivateTrig(ctx.ce, build(args[0], ctx)),
+
+  // FreeFactors[u, x] / NonfreeFactors[u, x] — the x-free (resp. x-dependent)
+  // factor product; needed by the Weierstrass tan(x/2) substitution rules.
+  FreeFactors: (args, ctx) =>
+    selectFactors(build(args[0], ctx), ctx.x, ctx.ce, true),
+  NonfreeFactors: (args, ctx) =>
+    selectFactors(build(args[0], ctx), ctx.x, ctx.ce, false),
 
   Coefficient: (args, ctx) => coeff(args, ctx),
   Coeff: (args, ctx) => coeff(args, ctx),

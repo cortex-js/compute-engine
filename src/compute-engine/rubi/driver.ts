@@ -22,6 +22,9 @@ import {
   polyCoeffsX,
   rationalFnQ,
   zeroQ,
+  hasActiveTrig,
+  deactivateTrig,
+  activateTrig,
   RuleFail,
   Ctx,
   Hooks,
@@ -63,6 +66,12 @@ export type DriverStats = {
 export class RubiDriver {
   private readonly memo = new Map<string, Expression | null>();
   private deadline = Infinity;
+  // Set once per top-level int() call: true iff the integrand contains an
+  // active trig head. When false, the trig bridge in intRec is never entered,
+  // so trig-free (algebraic) integrands behave exactly as before — the
+  // zero-regression gate. Sound because no algebraic rule emits trig, so a
+  // trig-free integrand stays trig-free through the whole recursion.
+  private trigActive = false;
   readonly stats: DriverStats = {
     calls: 0,
     ruleFirings: {},
@@ -87,9 +96,15 @@ export class RubiDriver {
     // fresh predicate caches per top-level call (zeroQ/simplify results
     // recur heavily across the rule scan)
     installCaches({ zeroQ: new Map(), simplify: new Map() });
+    // Chapter-4 rules match against inert trig (`cos`/`sin`); detect active
+    // trig once so intRec can deactivate the integrand (and its recursive
+    // subproblems). Results are re-activated on the way out.
+    this.trigActive = hasActiveTrig(integrand);
+    const activate = (e: Expression | null): Expression | null =>
+      e !== null && this.trigActive ? activateTrig(this.ce, e) : e;
     try {
       const result = this.intRec(integrand, variable, 0);
-      if (result !== null) return result;
+      if (result !== null) return activate(result);
       // No Rubi rule chain closed it. For a rational function of x, fall
       // back to the engine's native antiderivative: it does complete
       // partial-fraction integration (factor Q over ℚ, then linear and
@@ -166,6 +181,13 @@ export class RubiDriver {
     // the engine deadline is armed only inside evaluate(); the driver
     // keeps its own wall-clock budget per top-level int() call
     if (Date.now() > this.deadline || ce._timeRemaining <= 0) return null;
+
+    // Chapter-4 rules match against inert trig; deactivate active heads
+    // (Cos→cos) before normalizing. Reduction-rule RHSs re-introduce active
+    // trig in their recursive Int subproblems, so this must run per-intRec,
+    // not just at the top-level entry. Gated by trigActive so it is a strict
+    // no-op for algebraic integrands.
+    if (this.trigActive) integrand = deactivateTrig(ce, integrand);
 
     // Rubi rules match against the Times/Power normal form
     integrand = toTimesPower(ce, integrand);
