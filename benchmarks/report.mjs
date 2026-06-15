@@ -34,8 +34,6 @@ const PUBLISHED_VERSION = process.env.CE_PUBLISHED_VERSION || '0.59.0';
 
 const PYTHON = join(ROOT, 'venv', 'bin', 'python3');
 const NODE = process.execPath;
-// tsx isn't a project dependency; invoke it through npx (resolves from cache).
-const NPX = join(dirname(process.execPath), 'npx');
 const RUBI_BATCH_TIMEOUT_MS = 180000;
 const CE_CURRENT_BUNDLE = process.env.CE_CURRENT_BUNDLE || join(ROOT, 'dist', 'compute-engine.min.esm.js');
 const CE_PUBLISHED_BUNDLE = process.env.CE_PUBLISHED_BUNDLE ||
@@ -165,6 +163,31 @@ function classify(kase, res) {
   if (vr.kind === 'diff') {
     return allClose(res.values, [vr.value]) ? { v: 'correct' } : { v: 'wrong', note: 'value mismatch' };
   }
+  if (vr.kind === 'value') {
+    // Evaluate-to-closed-form: numerically correct AND symbolic (not a bare
+    // float). A many-digit decimal is a numeric fallback, not an exact result.
+    if (!allClose(res.values, [vr.value], 1e-9)) return { v: 'wrong', note: 'value mismatch' };
+    if (/^[+-]?\d+\.\d{4,}(e[+-]?\d+)?$/i.test(norm(res.text)))
+      return { v: 'partial', note: 'numeric, not exact' };
+    return { v: 'correct' };
+  }
+  if (vr.kind === 'roots') {
+    // Bijectively match the tool's returned real roots against the reference
+    // real-root set (order-independent), within a relative tolerance.
+    const got = (res.values || []).map(Number).filter(Number.isFinite);
+    const exp = vr.values.map(parseFloat);
+    const tol = 1e-6;
+    const used = new Array(got.length).fill(false);
+    let matched = 0;
+    for (const e of exp) {
+      const j = got.findIndex((g, k) => !used[k] && Math.abs(g - e) <= tol * (1 + Math.abs(e)));
+      if (j >= 0) { used[j] = true; matched++; }
+    }
+    const spurious = used.filter((u) => !u).length;
+    if (matched === exp.length && spurious === 0) return { v: 'correct', note: `${exp.length} roots` };
+    if (matched === 0) return { v: 'wrong', note: 'no roots' };
+    return { v: 'partial', note: `${matched}/${exp.length} roots` };
+  }
   return { v: 'error', note: 'unknown verify kind' };
 }
 
@@ -200,13 +223,16 @@ function getVersions() {
   return v;
 }
 
-// The "CE current + Rubi + Fungrim" column builds from source (the Rubi harness
-// isn't in the bundle), so it runs as one tsx process over all cases.
+// The "CE current + Rubi + Fungrim" column loads the published Rubi
+// (integration-rules) + Fungrim (identities) bundles onto the same minified
+// engine as `ce-current`, so it runs as ONE node process over all cases (the
+// rule load happens once) and its timings are directly comparable.
 function runRubiBatch() {
   const by = {};
   try {
-    const out = execFileSync(NPX, ['tsx', join(__dirname, 'runners', 'run_ce_rubi.ts')],
-      { timeout: RUBI_BATCH_TIMEOUT_MS, encoding: 'utf8', cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'] });
+    const out = execFileSync(NODE, [join(__dirname, 'runners', 'run_ce_rubi.mjs')],
+      { timeout: RUBI_BATCH_TIMEOUT_MS, encoding: 'utf8', cwd: ROOT,
+        env: { ...process.env, CE_CURRENT_BUNDLE }, stdio: ['ignore', 'pipe', 'pipe'] });
     for (const line of out.trim().split('\n')) {
       try { const o = JSON.parse(line); if (o.id) by[o.id] = o; } catch { /* skip non-JSON */ }
     }
@@ -217,7 +243,7 @@ function runRubiBatch() {
 }
 
 console.error('Running benchmark suite — %d cases…', suite.cases.length);
-console.error('  building CE+Rubi+Fungrim column (tsx, from source)…');
+console.error('  building CE+Rubi+Fungrim column (minified Rubi + Fungrim bundles)…');
 const rubiById = runRubiBatch();
 const matrix = {}; // matrix[caseId][toolKey] = { res, verdict }
 let done = 0;
@@ -245,8 +271,9 @@ writeFileSync(join(__dirname, 'results.json'),
 const SYM = { correct: '✅', partial: '🟡', wrong: '❌', unsupported: '—', unevaluated: '∅', timeout: '⏱', error: '⚠️' };
 // Short labels (ce-rubi isn't in TOOLS — it's the batch column).
 const LABELS = { 'ce-current': 'CE·cur', 'ce-rubi': 'CE+R/F', 'ce-pub': `CE·${PUBLISHED_VERSION}`, sympy: 'SymPy', mathjs: 'math.js', numpy: 'NumPy' };
-// `corr` = columns shown in correctness tables; `perf` = columns timed (the
-// ce-rubi column builds from source via tsx, so it's excluded from timings).
+// `corr` = columns shown in correctness tables; `perf` = columns whose median
+// is summarized in the footer row (ce-rubi is timed and comparable now, but
+// kept out of the footer median so it doesn't double-count the CE engine).
 const CATS = [
   { key: 'numeric', title: 'Arbitrary-precision numeric evaluation',
     corr: ['ce-current', 'ce-rubi', 'ce-pub', 'sympy', 'mathjs', 'numpy'], perf: ['ce-current', 'ce-pub', 'sympy', 'mathjs', 'numpy'] },
@@ -261,6 +288,13 @@ const toolLabel = (k) => LABELS[k] || k;
 const casesOf = (cat) => suite.cases.filter((c) => c.category === cat);
 const cell = (vd) => SYM[vd.v] + (vd.note ? ` <sub>${vd.note}</sub>` : '');
 
+// REPORT.md covers only the four engineering categories above. The suite also
+// carries curated `cl-numeric` / `evaluate` / `solve` cases (tagged
+// `changelog`) that feed report_changelog.mjs's release tables; they still get
+// run and scored into results.json, but are excluded from this report.
+const CAT_KEYS = new Set(CATS.map((c) => c.key));
+const REPORTED = suite.cases.filter((c) => CAT_KEYS.has(c.category));
+
 function fmtMs(ms) {
   if (ms == null) return '—';
   if (ms < 1) return ms.toFixed(3);
@@ -271,7 +305,7 @@ function fmtMs(ms) {
 // Precompute the current-vs-published differences and per-tool correct counts
 // so the Highlights section (rendered near the top) can reference them.
 const diffs = [];
-for (const c of suite.cases) {
+for (const c of REPORTED) {
   const a = matrix[c.id]['ce-current'], b = matrix[c.id]['ce-pub'];
   if (a.verdict.v !== b.verdict.v || norm(a.res?.text ?? '') !== norm(b.res?.text ?? '')) diffs.push({ c, a, b });
 }
@@ -279,7 +313,7 @@ const improvements = diffs.filter(({ a, b }) => a.verdict.v === 'correct' && b.v
 const regressions = diffs.filter(({ a, b }) => a.verdict.v !== 'correct' && b.verdict.v === 'correct');
 function correctCount(tk) {
   let ok = 0, tot = 0;
-  for (const c of suite.cases) {
+  for (const c of REPORTED) {
     if (!CATS.find((x) => x.key === c.category).corr.includes(tk)) continue;
     tot++;
     if (matrix[c.id][tk].verdict.v === 'correct') ok++;
@@ -292,7 +326,7 @@ const w = (s = '') => { md += s + '\n'; };
 
 w('# Compute Engine Benchmark Report');
 w();
-w(`_Generated ${generated.slice(0, 10)} · ${suite.cases.length} cases across ${CATS.length} capabilities._`);
+w(`_Generated ${generated.slice(0, 10)} · ${REPORTED.length} cases across ${CATS.length} capabilities._`);
 w();
 w('This report compares the **current Compute Engine build** against the **last published release** ' +
   `(\`${PUBLISHED_VERSION}\`) — plus an experimental **current + Rubi + Fungrim** configuration — and against three ` +
@@ -322,7 +356,7 @@ w();
     w(`- ⚠️ **${regressions.length} ${plural(regressions.length, 'regression', 'regressions')} vs \`${PUBLISHED_VERSION}\`**: ` +
       regressions.map(({ c }) => `${c.id} ($${c.latex}$)`).join(', ') + '.');
   } else {
-    w('- **No regressions** vs the published build across all 36 cases.');
+    w(`- **No regressions** vs the published build across all ${REPORTED.length} cases.`);
   }
   w(`- **Compute Engine answers ${cur.ok}/${cur.tot}** out of the box — the only library here delivering ` +
     'arbitrary-precision numerics (incl. ζ, Γ, Lambert W) *and* symbolic integration in one browser-native package. ' +
@@ -340,7 +374,7 @@ w();
 w('| Tool | Version | Runtime |');
 w('|---|---|---|');
 w(`| Compute Engine — current build | \`${versions.ceCurrent}\` @ \`${versions.ceCurrentSha || 'local'}\` (freshly built from \`src/\`) | Node ${versions.node} |`);
-w(`| Compute Engine — current + Rubi + Fungrim | same \`src/\` + experimental Rubi rules + Fungrim corpus | Node ${versions.node} via \`tsx\` |`);
+w(`| Compute Engine — current + Rubi + Fungrim | same minified bundle + published \`integration-rules\` (Rubi) + \`identities\` (Fungrim) packs | Node ${versions.node} |`);
 w(`| Compute Engine — published | \`${versions.cePublished}\` (npm) | Node ${versions.node} |`);
 w(`| SymPy | \`${versions.sympy || '?'}\` | Python ${versions.python || '?'} |`);
 w(`| math.js | \`${versions.mathjs || '?'}\` | Node ${versions.node} |`);
@@ -350,7 +384,7 @@ w();
 // Methodology
 w('## Methodology');
 w();
-w('- **Suite**: 9 cases in each of 4 categories (36 total), split into a **core** tier (5, textbook) and a **hard** tier (4, boundary-pushing), ' +
+w(`- **Suite**: ${REPORTED.length} cases across ${CATS.length} categories, split into a **core** tier (textbook) and a **hard** tier (boundary-pushing), ` +
   'defined once in [`cases.json`](./cases.json) with a per-tool input expression for each tool.');
 w('- **Columns**: the current build and published `' + PUBLISHED_VERSION + '` are compared as base engines; a third CE column (`CE+R/F`) ' +
   'is the current build with the experimental **Rubi** integrator and **Fungrim** identities enabled. SymPy, math.js and NumPy are the competitors.');
@@ -363,14 +397,14 @@ w('  - *Simplify*: the result is sampled at 3 points (chosen in the expression\'
 w('  - *Derivative*: the result is sampled and compared to `f\'(x)` (computed by `mpmath`).');
 w('  - *Antiderivative*: verified by the definite difference `F(b)−F(a)` over a per-case interval (inside the integrand\'s domain), ' +
   'which cancels the constant of integration and is compared to `∫f` (`mpmath` quadrature).');
-w('- **Performance**: each operation is built from its source representation and run repeatedly; we report the **median** wall-clock time per call (warm/steady-state, after warm-up), shown alongside the quality mark in each cell. Process start-up is excluded. The `CE+R/F` times come from a from-source (`tsx`) run and read a few× high — comparable within that column, not against the minified `CE·cur`.');
+w('- **Performance**: each operation is built from its source representation and run repeatedly; we report the **median** wall-clock time per call (warm/steady-state, after warm-up), shown alongside the quality mark in each cell. Process start-up is excluded. `CE+R/F` now runs on the same minified bundle as `CE·cur` (plus the Rubi + Fungrim rule packs), so its times are directly comparable; for integrals they include the Rubi rule-match attempt made before the built-in fallback.');
 w('- Each `(tool, case)` runs in its own subprocess with a ' + (PER_CASE_TIMEOUT_MS / 1000) + 's timeout, so a hang or crash is isolated to one cell.');
 w();
 
 // Scoreboard
 w('## Summary scoreboard');
 w();
-w('Correct (✅) results out of 9 per category. Cells in parentheses count 🟡 partials.');
+w('Correct (✅) results per category (count varies by category). Cells in parentheses count 🟡 partials.');
 w();
 const scoreTools = ['ce-current', 'ce-rubi', 'ce-pub', 'sympy', 'mathjs', 'numpy'];
 w('| Category | ' + scoreTools.map(toolLabel).join(' | ') + ' |');
@@ -380,11 +414,12 @@ for (const cat of CATS) {
   for (const tk of scoreTools) {
     if (!cat.corr.includes(tk)) { row.push('—'); continue; }
     let ok = 0, part = 0;
+    const total = casesOf(cat.key).length;
     for (const c of casesOf(cat.key)) {
       const v = matrix[c.id][tk].verdict.v;
       if (v === 'correct') ok++; else if (v === 'partial') part++;
     }
-    row.push(`${ok}/9` + (part ? ` (+${part}🟡)` : ''));
+    row.push(`${ok}/${total}` + (part ? ` (+${part}🟡)` : ''));
   }
   w('| ' + row.join(' | ') + ' |');
 }
@@ -443,9 +478,9 @@ w('**Correctness is assumed:** a correct result shows only its **median time per
   '**Bold** flags a Compute Engine outlier — the shipping `CE·cur` build being incorrect, or markedly slower than ' +
   'the fastest competitor on that row. Cases split into a **core** tier (textbook) and a **hard** tier (boundary-pushers).');
 w();
-w('> `CE+R/F` (current build + experimental Rubi + Fungrim) builds from source via `tsx`, and for integrals it **tries ' +
-  'matching ~2,647 Rubi rules** (compiled once, ~0.5 s) before falling back to the built-in integrator — so its times ' +
-  'include that match attempt even when no rule applies (e.g. `∫xeˣ`). Read this column for *coverage*, not head-to-head speed.');
+w('> `CE+R/F` (current minified bundle + the opt-in Rubi + Fungrim rule packs, loaded once via `loadIntegrationRules` / ' +
+  '`loadIdentities`) **tries matching ~2,647 Rubi rules** before falling back to the built-in integrator — so its integral ' +
+  'times include that match attempt even when no rule applies (e.g. `∫xeˣ`). Times are comparable to the other columns.');
 w();
 for (const cat of CATS) {
   w(`### ${cat.title}`);
@@ -482,7 +517,7 @@ for (const cat of CATS) {
 w('## Current build vs published `' + PUBLISHED_VERSION + '`');
 w();
 if (!diffs.length) {
-  w('No behavioural differences detected on this suite — the current build matches `' + PUBLISHED_VERSION + '` on all 36 cases (correctness and output form).');
+  w('No behavioural differences detected on this suite — the current build matches `' + PUBLISHED_VERSION + `\` on all ${REPORTED.length} cases (correctness and output form).`);
 } else {
   w(`${diffs.length} case(s) differ between the current build and \`${PUBLISHED_VERSION}\`:`);
   w();
@@ -512,12 +547,12 @@ w('| Special functions (ζ, Γ, W) | ✅ | ✅ | 🟡 some | 🟡 some | ❌ |')
 w('| Symbolic simplification | ✅ | ✅ | ✅ | 🟡 limited | — |');
 w('| Symbolic differentiation | ✅ | ✅ | ✅ | ✅ | — |');
 w('| Symbolic integration | 🟡 elementary | ✅ +algebraic (Rubi) | ✅ broad | — | — |');
-w('| Runtime | JS / browser + Node | JS (experimental, from source) | Python | JS / browser + Node | Python |');
+w('| Runtime | JS / browser + Node | JS / browser + Node (opt-in rule packs) | Python | JS / browser + Node | Python |');
 w();
 // auto-derived notes
 const noteFor = (tk) => {
   let ok = 0, tot = 0;
-  for (const c of suite.cases) {
+  for (const c of REPORTED) {
     if (!CATS.find((x) => x.key === c.category).corr.includes(tk)) continue;
     tot++;
     if (matrix[c.id][tk].verdict.v === 'correct') ok++;
@@ -531,8 +566,8 @@ w();
   w(`- **Compute Engine (current build)**: ${cur.ok}/${cur.tot} fully correct across applicable cases. ` +
     'The only browser-native engine here that does symbolic integration and arbitrary-precision numerics (incl. ζ, Γ, Lambert W) in one library. ' +
     'Its main gap is integration coverage — fractional-power and several radical integrands return unevaluated.');
-  w(`- **CE + Rubi + Fungrim (experimental)**: ${rf.ok}/${rf.tot} correct — enabling the Rubi algebraic-integration rules closes most of that gap ` +
-    '(`∫1/√x`, `∫x/√(1−x²)` now solve; `∫1/(x³+1)` returns *exact* coefficients), but it still can\'t do non-elementary integrals like `∫e^(−x²)` (no exp/trig rule sections loaded), and it currently runs only from source.');
+  w(`- **CE + Rubi + Fungrim**: ${rf.ok}/${rf.tot} correct — loading the opt-in Rubi algebraic-integration rules closes most of that gap ` +
+    '(fractional-power binomial products like `∫√x/(1+x)`, `∫x/(1+x)^⅓` now solve), but it still can\'t do non-elementary integrals like `∫e^(−x²)` (no exp/trig rule sections loaded). It runs on the minified bundle, so its times are comparable.');
   w(`- **SymPy**: ${sp.ok}/${sp.tot} correct — the broadest symbolic coverage (integrates \`1/√x\` and \`e^(−x²)\`→erf, denests radicals), at the cost of a Python runtime and higher per-call latency.`);
   w(`- **math.js**: ${mj.ok}/${mj.tot} correct across the categories it supports. Strong at numeric (BigNumber) and differentiation, and has a few special functions (ζ, Γ, erf); its \`simplify()\` frequently returns the input essentially unchanged (🟡), and it has no symbolic integration.`);
   w(`- **NumPy**: ${np.ok}/${np.tot} correct — numeric only and limited to ~15–16 significant digits (IEEE double); it cannot represent the high-precision results, overflows on \`100!\`, and has no ζ/Γ/W. The baseline for "numeric, but not arbitrary precision".`);

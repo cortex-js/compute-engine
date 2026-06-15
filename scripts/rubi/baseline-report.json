@@ -1,20 +1,20 @@
 {
   "summary": {
     "suite": "/Users/arno/dev/rubi/MathematicaSyntaxTestSuite-master",
-    "chapter": "1 Algebraic functions",
+    "chapter": "1 Algebraic functions/1.1 Binomial products/1.1.1 Linear",
     "seed": 42,
-    "total": 40,
+    "total": 12,
     "counts": {
-      "solved-correct": 38,
+      "solved-correct": 12,
       "solved-formal": 0,
       "solved-wrong": 0,
       "inconclusive": 0,
-      "unsolved": 2,
+      "unsolved": 0,
       "not-evaluable": 0,
       "error": 0
     },
-    "solvedCorrectRate": "0.9500",
-    "solvedRate": "0.9500"
+    "solvedCorrectRate": "1.0000",
+    "solvedRate": "1.0000"
   },
   "results": [
     {
@@ -22,7 +22,7 @@
       "index": 578,
       "source": "{1/(Sqrt[x]*Sqrt[a + b*x]), x, 3, (2*ArcTanh[(Sqrt[b]*Sqrt[x])/Sqrt[a + b*x]])/Sqrt[b]}",
       "outcome": "solved-correct",
-      "ms": 85,
+      "ms": 189,
       "result": "2artanh((sqrt(b) * sqrt(x)) / sqrt(b * x + a)) / sqrt(b)"
     },
     {
@@ -30,15 +30,47 @@
       "index": 582,
       "source": "{1/(x^(9/2)*Sqrt[a + b*x]), x, 4, -((2*Sqrt[a + b*x])/(7*a*x^(7/2))) + (12*b*Sqrt[a + b*x])/(35*a^2*x^(5/2)) - (16*b^2*Sqrt[a + b*x])/(35*a^3*x^(3/2)) + (32*b^3*Sqrt[a + b*x])/(35*a^4*Sqrt[x])}",
       "outcome": "solved-correct",
-      "ms": 316,
+      "ms": 388,
       "result": "-(6b) / (7(a + 0b)) * (-(4b) / (5(a + 0b)) * (-(2b) / (3(a + 0b)) * (-2 * 1 / sqrt(x) * sqrt(b * x + a)) / a + (-2x^(-3/2) * sqrt(b * x + a)) / (3(a + 0b))) + (-2x^(-5/2) * sqrt(b * x + a)) / (5(a + 0b))) + (-2x^(-7/2) * sqrt(b * x + a)) / (7(a + 0b))"
+    },
+    {
+      "file": "1 Algebraic functions/1.1 Binomial products/1.1.1 Linear/1.1.1.2 (a+b x)^m (c+d x)^n.m",
+      "index": 588,
+      "source": "{1/(x^(5/2)*(a + b*x)^(3/2)), x, 3, 2/(a*x^(3/2)*Sqrt[a + b*x]) - (8*Sqrt[a + b*x])/(3*a^2*x^(3/2)) + (16*b*Sqrt[a + b*x])/(3*a^3*Sqrt[x])}",
+      "outcome": "solved-correct",
+      "ms": 156,
+      "result": "--4 / a * (-(2b) / (3(a + 0b)) * (-2 * 1 / sqrt(x) * sqrt(b * x + a)) / a + (-2x^(-3/2) * sqrt(b * x + a)) / (3(a + 0b))) + (2 * 1 / sqrt(b * x + a) * x^(-3/2)) / a"
+    },
+    {
+      "file": "1 Algebraic functions/1.1 Binomial products/1.1.1 Linear/1.1.1.2 (a+b x)^m (c+d x)^n.m",
+      "index": 793,
+      "source": "{(a + b*x)/(x^4*Sqrt[c*x^2]), x, 3, -a/(4*x^3*Sqrt[c*x^2]) - b/(3*x^2*Sqrt[c*x^2])}",
+      "outcome": "solved-correct",
+      "ms": 66,
+      "result": "x * 1 / sqrt(c * x^2) * (-a / (4x^4) - b / (3x^3)) * c^0"
+    },
+    {
+      "file": "1 Algebraic functions/1.1 Binomial products/1.1.1 Linear/1.1.1.2 (a+b x)^m (c+d x)^n.m",
+      "index": 1036,
+      "source": "{(a + b*x)*(a*c - b*c*x)^1, x, 2, a^2*c*x - (1/3)*b^2*c*x^3}",
+      "outcome": "solved-correct",
+      "ms": 52,
+      "result": "-1/3 * c * x^3 * b^2 + c * x * a^2"
+    },
+    {
+      "file": "1 Algebraic functions/1.1 Binomial products/1.1.1 Linear/1.1.1.2 (a+b x)^m (c+d x)^n.m",
+      "index": 1958,
+      "source": "{x^(-5) + x + x^5, x, 1, -(1/(4*x^4)) + x^2/2 + x^6/6}",
+      "outcome": "solved-correct",
+      "ms": 14,
+      "result": "1/6 * x^6 + 1/2 * x^2 - 1/4 * x^(-4)"
     },
     {
       "file": "1 Algebraic functions/1.1 Binomial products/1.1.1 Linear/1.1.1.3 (a+b x)^m (c+d x)^n (e+f x)^p.m",
       "index": 538,
       "source": "{((a + b*x)^(5/2)*(A + B*x))/x^(5/2), x, 7, (5*b*(4*A*b + 3*a*B)*Sqrt[x]*Sqrt[a + b*x])/4 + (5*b*(4*A*b + 3*a*B)*Sqrt[x]*(a + b*x)^(3/2))/(6*a) - (2*(4*A*b + 3*a*B)*(a + b*x)^(5/2))/(3*a*Sqrt[x]) - (2*A*(a + b*x)^(7/2))/(3*a*x^(3/2)) + (5*a*Sqrt[b]*(4*A*b + 3*a*B)*ArcTanh[(Sqrt[b]*Sqrt[x])/Sqrt[a + b*x]])/4}",
       "outcome": "solved-correct",
-      "ms": 286,
+      "ms": 340,
       "result": "-(-3B * a - 4A * b) / (3(a + 0b)) * (5b * (3/4 * (a + 0b) * (artanh((sqrt(b) * sqrt(x)) / sqrt(b * x + a)) / sqrt(b) * (a + 0b) + sqrt(x) * sqrt(b * x + a)) + 1/2 * sqrt(x) * (b * x + a)^(3/2)) - 2 * 1 / sqrt(x) * (b * x + a)^(5/2)) - (2A * x^(-3/2) * (b * x + a)^(7/2)) / (3(a + 0b))"
     },
     {
@@ -46,7 +78,7 @@
       "index": 711,
       "source": "{(a + b*x)^(5/2)/(x^3*Sqrt[c + d*x]), x, 8, -((a*(7*b*c - 3*a*d)*Sqrt[a + b*x]*Sqrt[c + d*x])/(4*c^2*x)) - (a*(a + b*x)^(3/2)*Sqrt[c + d*x])/(2*c*x^2) - (Sqrt[a]*(15*b^2*c^2 - 10*a*b*c*d + 3*a^2*d^2)*ArcTanh[(Sqrt[c]*Sqrt[a + b*x])/(Sqrt[a]*Sqrt[c + d*x])])/(4*c^(5/2)) + (2*b^(5/2)*ArcTanh[(Sqrt[d]*Sqrt[a + b*x])/(Sqrt[b]*Sqrt[c + d*x])])/Sqrt[d]}",
       "outcome": "solved-correct",
-      "ms": 761,
+      "ms": 1086,
       "result": "1 / (-2(c + 0d)) * (-1 / (-c + 0d) * ((-2 * 1 / a * sqrt(b * x + a)) / (b * c - a * d)^0 * sqrt(d * x + c) * (-3/4 * a^3 * d^2 + 5/2 * b * c * d * a^2 - 15/4 * a * b^2 * c^2) * Hypergeometric2F1(1/2, 1, 3/2, -(-(c + 0d) * (b * x + a) / (a * (d * x + c)))) - 4artanh((sqrt(d) * sqrt(b * x + a)) / (sqrt(b) * sqrt(d * x + c))) / (sqrt(b) * sqrt(d)) * b^3 * c^2) - (1 / x * (3d * a^2 - 7a * b * c) * sqrt(b * x + a) * sqrt(d * x + c)) / (2c)) - (a + 0b) * x^(-2) * (b * x + a)^(3/2) * sqrt(d * x + c) / (2(c + 0d))"
     },
     {
@@ -54,7 +86,7 @@
       "index": 724,
       "source": "{(x*(a + b*x)^(5/2))/(c + d*x)^(5/2), x, 7, (-2*c*(a + b*x)^(7/2))/(3*d*(b*c - a*d)*(c + d*x)^(3/2)) - (2*(7*b*c - 3*a*d)*(a + b*x)^(5/2))/(3*d^2*(b*c - a*d)*Sqrt[c + d*x]) - (5*b*(7*b*c - 3*a*d)*Sqrt[a + b*x]*Sqrt[c + d*x])/(4*d^4) + (5*b*(7*b*c - 3*a*d)*(a + b*x)^(3/2)*Sqrt[c + d*x])/(6*d^3*(b*c - a*d)) + (5*Sqrt[b]*(7*b*c - 3*a*d)*(b*c - a*d)*ArcTanh[(Sqrt[d]*Sqrt[a + b*x])/(Sqrt[b]*Sqrt[c + d*x])])/(4*d^(9/2))}",
       "outcome": "solved-correct",
-      "ms": 240,
+      "ms": 330,
       "result": "-(7b * c - 3a * d) / (3d * (-b * c + a * d)) * (-(-5b) / d * (3(-b * c + a * d)) / (4d) * (2(-b * c + a * d) / (2d) * artanh((sqrt(d) * sqrt(b * x + a)) / (sqrt(b) * sqrt(d * x + c))) / (sqrt(b) * sqrt(d)) + (sqrt(b * x + a) * sqrt(d * x + c)) / d) + (b * x + a)^(3/2) * sqrt(d * x + c) / (2d) + (-2 * 1 / sqrt(d * x + c) * (b * x + a)^(5/2)) / d) - (-2(c + 0d) * (b * x + a)^(7/2) * (d * x + c)^(-3/2)) / (3d * (-b * c + a * d))"
     },
     {
@@ -62,7 +94,7 @@
       "index": 2869,
       "source": "{(3 + 5*x)^(5/2)/(Sqrt[1 - 2*x]*(2 + 3*x)^(7/2)), x, 6, (544*Sqrt[1 - 2*x]*Sqrt[3 + 5*x])/(6615*(2 + 3*x)^(3/2)) - (53194*Sqrt[1 - 2*x]*Sqrt[3 + 5*x])/(46305*Sqrt[2 + 3*x]) + (2*Sqrt[1 - 2*x]*(3 + 5*x)^(3/2))/(105*(2 + 3*x)^(5/2)) + (53194*Sqrt[11/3]*EllipticE[ArcSin[Sqrt[3/7]*Sqrt[1 - 2*x]], 35/33])/46305 - (34154*Sqrt[11/3]*EllipticF[ArcSin[Sqrt[3/7]*Sqrt[1 - 2*x]], 35/33])/46305}",
       "outcome": "solved-correct",
-      "ms": 552,
+      "ms": 829,
       "result": "2/105 * sqrt(-2x + 1) * (3x + 2)^(-5/2) * (5x + 3)^(3/2) - 2/105 * (-272/63 * sqrt(-2x + 1) * (3x + 2)^(-3/2) * sqrt(5x + 3) + 2/63 * (26597/14 * 1 / sqrt(3x + 2) * sqrt(-2x + 1) * sqrt(5x + 3) + 2/7 * (13090 * 2/3sqrt(6) / -sqrt(22) * EllipticF(arcsin(sqrt(21)/7 * sqrt(-2x + 1)), 35/33) - 2/105sqrt(231) * 132985/4 / -2 * (sqrt(7) * sqrt(-5x - 3) * sqrt(-2x + 1)) / (sqrt(-2x + 1) * sqrt(5x + 3)) * EllipticE(arcsin(sqrt(3) * sqrt(-5x - 3)), -2/33))))"
     },
     {
@@ -70,7 +102,7 @@
       "index": 2936,
       "source": "{(3 + 5*x)^(3/2)/((1 - 2*x)^(3/2)*(2 + 3*x)^(3/2)), x, 5, (11*Sqrt[3 + 5*x])/(7*Sqrt[1 - 2*x]*Sqrt[2 + 3*x]) - (31*Sqrt[1 - 2*x]*Sqrt[3 + 5*x])/(49*Sqrt[2 + 3*x]) + (31*Sqrt[11/3]*EllipticE[ArcSin[Sqrt[3/7]*Sqrt[1 - 2*x]], 35/33])/49 + (4*Sqrt[11/3]*EllipticF[ArcSin[Sqrt[3/7]*Sqrt[1 - 2*x]], 35/33])/49}",
       "outcome": "solved-correct",
-      "ms": 326,
+      "ms": 565,
       "result": "11/7 * 1 / sqrt(-2x + 1) * 1 / sqrt(3x + 2) * sqrt(5x + 3) - 1/7 * (31/7 * 1 / sqrt(3x + 2) * sqrt(-2x + 1) * sqrt(5x + 3) + 2/7 * (-385/2 / -2 * 2/3sqrt(6) / -sqrt(22) * EllipticF(arcsin(sqrt(21)/7 * sqrt(-2x + 1)), 35/33) - 2/105sqrt(231) * 155/2 / -2 * (sqrt(7) * sqrt(-5x - 3) * sqrt(-2x + 1)) / (sqrt(-2x + 1) * sqrt(5x + 3)) * EllipticE(arcsin(sqrt(3) * sqrt(-5x - 3)), -2/33)))"
     },
     {
@@ -78,264 +110,8 @@
       "index": 49,
       "source": "{Sqrt[2 - 3*x]*Sqrt[1 + 4*x]/((7 + 5*x)^2*Sqrt[-5 + 2*x]), x, 10, (Sqrt[2 - 3*x]*Sqrt[-5 + 2*x]*Sqrt[1 + 4*x])/(39*(7 + 5*x)) - (2*Sqrt[11]*Sqrt[-5 + 2*x]*EllipticE[ArcSin[(2*Sqrt[2 - 3*x])/Sqrt[11]], -(1/2)])/(195*Sqrt[5 - 2*x]) - (2*Sqrt[6/11]*Sqrt[5 - 2*x]*EllipticF[ArcSin[Sqrt[3/11]*Sqrt[1 + 4*x]], 1/3])/(25*Sqrt[-5 + 2*x]) - (6101*Sqrt[5 - 2*x]*EllipticPi[55/124, ArcSin[(2*Sqrt[2 - 3*x])/Sqrt[11]], -(1/2)])/(20150*Sqrt[11]*Sqrt[-5 + 2*x])}",
       "outcome": "solved-correct",
-      "ms": 604,
+      "ms": 952,
       "result": "1/39 * 1 / (5x + 7) * sqrt(-3x + 2) * sqrt(2x - 5) * sqrt(4x + 1) - 1/78 * (-121/3 * 2(3sqrt(11) * EllipticPi(55/124, arcsin(2/11sqrt(11) * sqrt(-3x + 2)), -1/2) * sqrt(-2x + 5)) / (682sqrt(2x - 5)) + (2sqrt(22) * EllipticE(arcsin(sqrt(11)/11 * sqrt(4x + 1)), 3) * sqrt(-2x + 5)) / (5sqrt(2x - 5)) - 688/15 * (-3/5 * sqrt(3) / -3 * (sqrt(33) * sqrt(-2x + 5)) / (11sqrt(2x - 5)) * EllipticF(arcsin(2/11sqrt(11) * sqrt(-3x + 2)), -1/2) - 31/5 * 2(3sqrt(11) * EllipticPi(55/124, arcsin(2/11sqrt(11) * sqrt(-3x + 2)), -1/2) * sqrt(-2x + 5)) / (682sqrt(2x - 5))))"
-    },
-    {
-      "file": "1 Algebraic functions/1.1 Binomial products/1.1.2 Quadratic/1.1.2.2 (c x)^m (a+b x^2)^p.m",
-      "index": 247,
-      "source": "{x^2/(a - b*x^2)^5, x, 5, x/(8*b*(a - b*x^2)^4) - x/(48*a*b*(a - b*x^2)^3) - (5*x)/(192*a^2*b*(a - b*x^2)^2) - (5*x)/(128*a^3*b*(a - b*x^2)) - (5*ArcTanh[(Sqrt[b]*x)/Sqrt[a]])/(128*a^(7/2)*b^(3/2))}",
-      "outcome": "solved-correct",
-      "ms": 289,
-      "result": "(b * x * a / b + 0a) * (-b * x^2 + a)^(-4) / (8a * b) + 1 / (-8a) * (x / (6b * (-b * x^2 + a)^3) + (5(3(x / (a * (-b * x^2 + a)) + artanh((x * sqrt(b)) / sqrt(a)) / (a^(3/2) * sqrt(b)))) / a + (2x) / (a * (-b * x^2 + a)^2)) / (48b))"
-    },
-    {
-      "file": "1 Algebraic functions/1.1 Binomial products/1.1.2 Quadratic/1.1.2.2 (c x)^m (a+b x^2)^p.m",
-      "index": 380,
-      "source": "{x^0*(a + b*x^2)^(3/2), x, 4, (3*a*x*Sqrt[a + b*x^2])/8 + (x*(a + b*x^2)^(3/2))/4 + (3*a^2*ArcTanh[(Sqrt[b]*x)/Sqrt[a + b*x^2]])/(8*Sqrt[b])}",
-      "outcome": "solved-correct",
-      "ms": 92,
-      "result": "3/4 * a * (1/2 * x * sqrt(b * x^2 + a) + 1/2 * a * artanh((x * sqrt(b)) / sqrt(b * x^2 + a)) / sqrt(b)) + 1/4 * x * (b * x^2 + a)^(3/2)"
-    },
-    {
-      "file": "1 Algebraic functions/1.1 Binomial products/1.1.2 Quadratic/1.1.2.4 (e x)^m (a+b x^2)^p (c+d x^2)^q.m",
-      "index": 982,
-      "source": "{x^1/((a + b*x^2)^(3/2)*Sqrt[c + d*x^2]), x, 2, -(Sqrt[c + d*x^2]/((b*c - a*d)*Sqrt[a + b*x^2]))}",
-      "outcome": "solved-correct",
-      "ms": 40,
-      "result": "1/2 * (2sqrt(d * x^2 + c)) / (-b * c + a * d) * sqrt(b * x^2 + a)"
-    },
-    {
-      "file": "1 Algebraic functions/1.1 Binomial products/1.1.2 Quadratic/1.1.2.5 (a+b x^2)^p (c+d x^2)^q (e+f x^2)^r.m",
-      "index": 49,
-      "source": "{(e + f*x^2)/(Sqrt[a - b*x^2]*(c + d*x^2)^(3/2)), x, 8, ((d*e - c*f)*x*Sqrt[a - b*x^2])/(c*(b*c + a*d)*Sqrt[c + d*x^2]) + (Sqrt[a]*Sqrt[b]*(d*e - c*f)*Sqrt[1 - (b*x^2)/a]*Sqrt[c + d*x^2]*EllipticE[ArcSin[(Sqrt[b]*x)/Sqrt[a]], -((a*d)/(b*c))])/(c*d*(b*c + a*d)*Sqrt[a - b*x^2]*Sqrt[1 + (d*x^2)/c]) + (Sqrt[a]*f*Sqrt[1 - (b*x^2)/a]*Sqrt[1 + (d*x^2)/c]*EllipticF[ArcSin[(Sqrt[b]*x)/Sqrt[a]], -((a*d)/(b*c))])/(Sqrt[b]*d*Sqrt[a - b*x^2]*Sqrt[c + d*x^2])}",
-      "outcome": "solved-correct",
-      "ms": 460,
-      "result": "-1 / (c * (b * c + a * d)) * (d * (-b * c * \"e_var\" - a * c * f) - c * (-b * d * \"e_var\" + b * c * f)) / d * sqrt(a) / sqrt(b) * sqrt(d / c * x^2 + 1) / sqrt(d * x^2 + c) * sqrt(-b / a * x^2 + 1) / sqrt(-b * x^2 + a) * EllipticF(arcsin(x * sqrt(b) / sqrt(a)), -(d * 1 / c) / (b * 1 / a)) + (-b * d * \"e_var\" + b * c * f) / d * sqrt(a) / sqrt(b) * sqrt(d * x^2 + c) / sqrt(d / c * x^2 + 1) * sqrt(-b / a * x^2 + 1) / sqrt(-b * x^2 + a) * EllipticE(arcsin(x * sqrt(b) / sqrt(a)), -(d * 1 / c) / (b * 1 / a)) + (x * 1 / sqrt(d * x^2 + c) * (d * \"e_var\" - c * f) * sqrt(-b * x^2 + a)) / (c * (b * c + a * d))"
-    },
-    {
-      "file": "1 Algebraic functions/1.1 Binomial products/1.1.3 General/1.1.3.2 (c x)^m (a+b x^n)^p.m",
-      "index": 218,
-      "source": "{x^4*(a + b*x^3)^2, x, 2, (a^2*x^5)/5 + (1/4)*a*b*x^8 + (b^2*x^11)/11}",
-      "outcome": "solved-correct",
-      "ms": 27,
-      "result": "1/11 * x^(11) * b^2 + 1/4 * a * b * x^8 + 1/5 * x^5 * a^2"
-    },
-    {
-      "file": "1 Algebraic functions/1.1 Binomial products/1.1.3 General/1.1.3.2 (c x)^m (a+b x^n)^p.m",
-      "index": 506,
-      "source": "{x^4/Sqrt[-1 - x^3], x, 4, (-(2/7))*x^2*Sqrt[-1 - x^3] + (8*Sqrt[-1 - x^3])/(7*(1 - Sqrt[3] + x)) - (4*3^(1/4)*Sqrt[2 + Sqrt[3]]*(1 + x)*Sqrt[(1 - x + x^2)/(1 - Sqrt[3] + x)^2]*EllipticE[ArcSin[(1 + Sqrt[3] + x)/(1 - Sqrt[3] + x)], -7 + 4*Sqrt[3]])/(7*Sqrt[-((1 + x)/(1 - Sqrt[3] + x)^2)]*Sqrt[-1 - x^3]) + (8*Sqrt[2]*(1 + x)*Sqrt[(1 - x + x^2)/(1 - Sqrt[3] + x)^2]*EllipticF[ArcSin[(1 + Sqrt[3] + x)/(1 - Sqrt[3] + x)], -7 + 4*Sqrt[3]])/(7*3^(1/4)*Sqrt[-((1 + x)/(1 - Sqrt[3] + x)^2)]*Sqrt[-1 - x^3])}",
-      "outcome": "unsolved",
-      "ms": 28,
-      "result": "-2/7 * x^2 * sqrt(-1 - x^3) + 2 / -7/2 * (-(2(x * Numer(1) + Denom(1)) * sqrt((x^2 * Numer(1)^2 - x * Numer(1) * Denom(1) + Denom(1)^2) / (x * Numer(1) + (1 - sqrt(3)) * Denom(1))^2) * sqrt(2 - sqrt(3))) / (Numer(1) * root(4)(3) * sqrt(-((x * Numer(1) + Denom(1)) * Denom(1) / (x * Numer(1) + (1 - sqrt(3)) * Denom(1))^2)) * sqrt(-1 - x^3)) * (1 + sqrt(3)) * Denom(1) / Numer(1) * EllipticF(arcsin((x * Numer(1) + (1 + sqrt(3)) * Denom(1)) / (x * Numer(1) + (1 - sqrt(3)) * Denom(1))), -7 + 4sqrt(3)) + 1 / Numer(1) * (2(x * Numer(1) + Denom(1)) * sqrt((x^2 * Numer(1)^2 - x * Numer(1) * Denom(1) + Denom(1)^2) / (x * Numer(1) + (1 - sqrt(3)) * Denom(1))^2) * sqrt(2 - sqrt(3))) / (Numer(1) * root(4)(3) * sqrt(-((x * Numer(1) + Denom(1)) * Denom(1) / (x * Numer(1) + (1 - sqrt(3)) * Denom(1))^2)) * sqrt(-1 - x^3)) * (1 + sqrt(3)) * Numer(1) * Denom(1) - (1 + sqrt(3)) * Numer(1) * Denom(1) / Numer(1) * EllipticF(arcsin((x * Numer(1) + (1 + sqrt(3)) * Denom(1)) / (x * Numer(1) + (1 - sqrt(3)) * Denom(1))), -7 + 4sqrt(3)) + Numer(1) / Numer(1) * int(x * Numer(1) + (1 + sqrt(3)) * Denom(1)) / sqrt(-1 - x^3))"
-    },
-    {
-      "file": "1 Algebraic functions/1.1 Binomial products/1.1.3 General/1.1.3.2 (c x)^m (a+b x^n)^p.m",
-      "index": 789,
-      "source": "{(a + c*x^4)^(3/2)/x^3, x, 5, (3*c*x^2*Sqrt[a + c*x^4])/4 - (a + c*x^4)^(3/2)/(2*x^2) + (3*a*Sqrt[c]*ArcTanh[(Sqrt[c]*x^2)/Sqrt[a + c*x^4]])/4}",
-      "outcome": "solved-correct",
-      "ms": 111,
-      "result": "1/2 * (3/2 * c * x^2 * sqrt(c * x^4 + a) + 3/2 * a * artanh((x^2 * sqrt(c)) / sqrt(c * x^4 + a)) * sqrt(c) - ((c * x^4 + a)^(3/2)) / x^2)"
-    },
-    {
-      "file": "1 Algebraic functions/1.1 Binomial products/1.1.3 General/1.1.3.2 (c x)^m (a+b x^n)^p.m",
-      "index": 2671,
-      "source": "{x^(3 + 2*n)/Sqrt[a + b*x^n], x, 2, (x^(2*(2 + n))*Sqrt[a + b*x^n]*Hypergeometric2F1[1, (1/2)*(5 + 8/n), 3 + 4/n, -((b*x^n)/a)])/(2*a*(2 + n)), (x^(2*(2 + n))*Sqrt[1 + (b*x^n)/a]*Hypergeometric2F1[1/2, 2*(1 + 2/n), 3 + 4/n, -((b*x^n)/a)])/(2*(2 + n)*Sqrt[a + b*x^n])}",
-      "outcome": "solved-correct",
-      "ms": 520,
-      "result": "1 / sqrt(a + b * x^n) * x^(2n + 4) / (2(n + 2)) * Hypergeometric2F1(1/2, (2(n + 2)) / n, (2(n + 2)) / n + 1, -(b * 1 / a * x^n)) * a^0 * sqrt((b * x^n) / a + 1)"
-    },
-    {
-      "file": "1 Algebraic functions/1.1 Binomial products/1.1.3 General/1.1.3.2 (c x)^m (a+b x^n)^p.m",
-      "index": 2781,
-      "source": "{(c*x)^(-7*n/2 - 1)/Sqrt[a + b*x^n], x, 4, -((2*Sqrt[a + b*x^n])/((c*x)^((7*n)/2)*(a*c*n))) + (4*(a + b*x^n)^(3/2))/((c*x)^((7*n)/2)*(a^2*c*n)) - (16*(a + b*x^n)^(5/2))/((c*x)^((7*n)/2)*(5*a^3*c*n)) + (32*(a + b*x^n)^(7/2))/((c*x)^((7*n)/2)*(35*a^4*c*n))}",
-      "outcome": "solved-correct",
-      "ms": 805,
-      "result": "(-6n) / (a * n) * (-4n) / (3a * n) * (-2n) / (5a * n) * (-2(c * x)^(-7/2 * n) * (a + b * x^n)^(7/2)) / (7a * c * n) - (2(c * x)^(-7/2 * n) * (a + b * x^n)^(5/2)) / (5a * c * n) - (2(c * x)^(-7/2 * n) * (a + b * x^n)^(3/2)) / (3a * c * n) - (2(c * x)^(-7/2 * n) * sqrt(a + b * x^n)) / (a * c * n)"
-    },
-    {
-      "file": "1 Algebraic functions/1.1 Binomial products/1.1.3 General/1.1.3.4 (e x)^m (a+b x^n)^p (c+d x^n)^q.m",
-      "index": 600,
-      "source": "{x^11/((a + b*x^4)*(c + d*x^4)), x, 3, x^4/(4*b*d) + (a^2*Log[a + b*x^4])/(4*b^2*(b*c - a*d)) - (c^2*Log[c + d*x^4])/(4*d^2*(b*c - a*d))}",
-      "outcome": "solved-correct",
-      "ms": 148,
-      "result": "1/4 * (x^4 / (b * d) + (ln(c * x^4 * b^3 - a * d * x^4 * b^2 - b * d * a^2 + a * c * b^2) * a^2) / (c * b^3 - a * d * b^2) + (ln(a * x^4 * d^3 - b * c * x^4 * d^2 - b * d * c^2 + a * c * d^2) * c^2) / (a * d^3 - b * c * d^2))"
-    },
-    {
-      "file": "1 Algebraic functions/1.1 Binomial products/1.1.3 General/1.1.3.4 (e x)^m (a+b x^n)^p (c+d x^n)^q.m",
-      "index": 711,
-      "source": "{1/(x^10*(a + b*x^6)^2*Sqrt[c + d*x^6]), x, 7, -(((5*b*c - 2*a*d)*Sqrt[c + d*x^6])/(18*a^2*c*(b*c - a*d)*x^9)) + ((15*b^2*c^2 - 8*a*b*c*d - 4*a^2*d^2)*Sqrt[c + d*x^6])/(18*a^3*c^2*(b*c - a*d)*x^3) + (b*Sqrt[c + d*x^6])/(6*a*(b*c - a*d)*x^9*(a + b*x^6)) + (b^2*(5*b*c - 6*a*d)*ArcTan[(Sqrt[b*c - a*d]*x^3)/(Sqrt[a]*Sqrt[c + d*x^6])])/(6*a^(7/2)*(b*c - a*d)^(3/2))}",
-      "outcome": "solved-correct",
-      "ms": 701,
-      "result": "1/3 * (3(-5arctan((x^3 * sqrt(b * c - a * d)) / (sqrt(a) * sqrt(d * x^6 + c))) * b^3 * c^3 + 6a * d * arctan((x^3 * sqrt(b * c - a * d)) / (sqrt(a) * sqrt(d * x^6 + c))) * b^2 * c^2)) / (c * a^(3/2) * sqrt(b * c - a * d)) + ((-15b^2 * c^2 * sqrt(d * x^6 + c)) / x^3 + (4a^2 * d^2 * sqrt(d * x^6 + c)) / x^3 + (8a * b * c * d * sqrt(d * x^6 + c)) / x^3) / (a * c) / (a * c) + ((5b * c * sqrt(d * x^6 + c)) / x^9 + (-2a * d * sqrt(d * x^6 + c)) / x^9) / (a * c) / (6(d * a^2 - a * b * c)) + (b * sqrt(d * x^6 + c)) / (2(b * x^6 + a) * (-d * a^2 + a * b * c) * x^9)"
-    },
-    {
-      "file": "1 Algebraic functions/1.1 Binomial products/1.1.4 Improper/1.1.4.3 (e x)^m (a x^j+b x^k)^p (c+d x^n)^q.m",
-      "index": 127,
-      "source": "{((A + B*x^2)*(b*x^2 + c*x^4)^(3/2))/x^12, x, 6, -((c*(8*b*B - 3*A*c)*Sqrt[b*x^2 + c*x^4])/(64*b*x^5)) - (c^2*(8*b*B - 3*A*c)*Sqrt[b*x^2 + c*x^4])/(128*b^2*x^3) - ((8*b*B - 3*A*c)*(b*x^2 + c*x^4)^(3/2))/(48*b*x^9) - (A*(b*x^2 + c*x^4)^(5/2))/(8*b*x^13) + (c^3*(8*b*B - 3*A*c)*ArcTanh[(Sqrt[b]*x)/Sqrt[b*x^2 + c*x^4]])/(128*b^(5/2))}",
-      "outcome": "solved-correct",
-      "ms": 336,
-      "result": "(8B * b - 3A * c) / (8b) * (1/2 * c * (1/4 * c * (-c / (2b) * (-artanh((x * sqrt(b)) / sqrt(c * x^4 + b * x^2)) / sqrt(b)) - (x^(-3) * sqrt(c * x^4 + b * x^2)) / (2b)) - 1/4 * x^(-5) * sqrt(c * x^4 + b * x^2)) - 1/6 * x^(-9) * (c * x^4 + b * x^2)^(3/2)) - (A * x^(-13) * (c * x^4 + b * x^2)^(5/2)) / (8b)"
-    },
-    {
-      "file": "1 Algebraic functions/1.2 Trinomial products/1.2.1 Quadratic/1.2.1.2 (d+e x)^m (a+b x+c x^2)^p.m",
-      "index": 1075,
-      "source": "{(d + e*x)^0/(c*d^2 + 2*c*d*e*x + c*e^2*x^2)^(3/2), x, 1, -1/(2*c*e*(d + e*x)*Sqrt[c*d^2 + 2*c*d*e*x + c*e^2*x^2])}",
-      "outcome": "solved-correct",
-      "ms": 43,
-      "result": "(-1 / sqrt(c * \"e_var\"^2 * x^2 + 2c * d * \"e_var\" * x + c * d^2)) / (2(c * x * \"e_var\"^2 + c * d * \"e_var\"))"
-    },
-    {
-      "file": "1 Algebraic functions/1.2 Trinomial products/1.2.1 Quadratic/1.2.1.2 (d+e x)^m (a+b x+c x^2)^p.m",
-      "index": 1321,
-      "source": "{(1 + 2*x)^(5/2)/(1 + x + x^2), x, 12, (4/3)*(1 + 2*x)^(3/2) + Sqrt[2]*3^(3/4)*ArcTan[1 - (Sqrt[2]*Sqrt[1 + 2*x])/3^(1/4)] - Sqrt[2]*3^(3/4)*ArcTan[1 + (Sqrt[2]*Sqrt[1 + 2*x])/3^(1/4)] - (3^(3/4)*Log[1 + Sqrt[3] + 2*x - Sqrt[2]*3^(1/4)*Sqrt[1 + 2*x]])/Sqrt[2] + (3^(3/4)*Log[1 + Sqrt[3] + 2*x + Sqrt[2]*3^(1/4)*Sqrt[1 + 2*x]])/Sqrt[2]}",
-      "outcome": "solved-correct",
-      "ms": 497,
-      "result": "4/9 * (-9/2 / 3/2) * Hypergeometric2F1(1, 3/4, 7/4, -1/3 * (2x + 1)^2) * (2x + 1)^(3/2) + 4/3 * (x^2 + x + 1)^0 * (2x + 1)^(3/2)"
-    },
-    {
-      "file": "1 Algebraic functions/1.2 Trinomial products/1.2.1 Quadratic/1.2.1.2 (d+e x)^m (a+b x+c x^2)^p.m",
-      "index": 1681,
-      "source": "{Sqrt[a^2 + 2*a*b*x + b^2*x^2]/(d + e*x)^(5/2), x, 3, (2*(b*d - a*e)*Sqrt[a^2 + 2*a*b*x + b^2*x^2])/(3*e^2*(a + b*x)*(d + e*x)^(3/2)) - (2*b*Sqrt[a^2 + 2*a*b*x + b^2*x^2])/(e^2*(a + b*x)*Sqrt[d + e*x])}",
-      "outcome": "solved-correct",
-      "ms": 163,
-      "result": "sqrt(b^2 * x^2 + 2a * b * x + a^2) / ((x * b^2 + a * b) * b^0) * (2d * b^2) / (3 * \"e_var\"^2 * (\"e_var\" * x + d)^(3/2)) + (-2b^2) / (\"e_var\"^2 * sqrt(\"e_var\" * x + d)) + (-2a * b) / (3 * \"e_var\" * (\"e_var\" * x + d)^(3/2))"
-    },
-    {
-      "file": "1 Algebraic functions/1.2 Trinomial products/1.2.1 Quadratic/1.2.1.3 (d+e x)^m (f+g x) (a+b x+c x^2)^p.m",
-      "index": 905,
-      "source": "{(4 + x)/(5 + 4*x + x^2)^2, x, 3, (3 + 2*x)/(2*(5 + 4*x + x^2)) + ArcTan[2 + x]}",
-      "outcome": "solved-correct",
-      "ms": 39,
-      "result": "1/2 * 1 / (x^2 + 4x + 5) * (2x + 3) + arctan(x + 2)"
-    },
-    {
-      "file": "1 Algebraic functions/1.2 Trinomial products/1.2.1 Quadratic/1.2.1.3 (d+e x)^m (f+g x) (a+b x+c x^2)^p.m",
-      "index": 1355,
-      "source": "{x^1*(1 + x)^2/(1 + x^2)^3, x, 3, -((1 + x)^2/(4*(1 + x^2)^2)) - (1 - x)/(4*(1 + x^2)) + ArcTan[x]/4}",
-      "outcome": "solved-correct",
-      "ms": 50,
-      "result": "-1/2 * x * (x^2 + 1)^(-2) - 1/4 * (-1 / (x^2 + 1) * (x - 2) - arctan(x))"
-    },
-    {
-      "file": "1 Algebraic functions/1.2 Trinomial products/1.2.1 Quadratic/1.2.1.3 (d+e x)^m (f+g x) (a+b x+c x^2)^p.m",
-      "index": 1379,
-      "source": "{((5 - x)*(2 + 3*x^2)^(3/2))/(3 + 2*x)^7, x, 6, -((9*(4 - 9*x)*Sqrt[2 + 3*x^2])/(17500*(3 + 2*x)^2)) - ((4 - 9*x)*(2 + 3*x^2)^(3/2))/(500*(3 + 2*x)^4) - (13*(2 + 3*x^2)^(5/2))/(210*(3 + 2*x)^6) - (29*(2 + 3*x^2)^(5/2))/(1750*(3 + 2*x)^5) - (27*ArcTanh[(4 - 9*x)/(Sqrt[35]*Sqrt[2 + 3*x^2])])/(8750*Sqrt[35])}",
-      "outcome": "solved-correct",
-      "ms": 349,
-      "result": "-1/210 * (-1/175 * (-189(-9x + 4) * sqrt(3x^2 + 2)) / (10(2x + 3)^2) + (-147(-9x + 4) * (3x^2 + 2)^(3/2)) / (2(2x + 3)^4) - 81/25sqrt(35) * artanh((sqrt(35) * (-9x + 4)) / (35sqrt(3x^2 + 2))) + 87/25 * (3x^2 + 2)^(5/2) * (2x + 3)^(-5)) - 13/210 * (3x^2 + 2)^(5/2) * (2x + 3)^(-6)"
-    },
-    {
-      "file": "1 Algebraic functions/1.2 Trinomial products/1.2.1 Quadratic/1.2.1.3 (d+e x)^m (f+g x) (a+b x+c x^2)^p.m",
-      "index": 2232,
-      "source": "{(f + g*x)/((d + e*x)^3*(c*d^2 - b*d*e - b*e^2*x - c*e^2*x^2)^(5/2)), x, 5, (32*c^2*(4*c*e*f + 2*c*d*g - 3*b*e*g)*(b + 2*c*x))/(63*e*(2*c*d - b*e)^5*(d*(c*d - b*e) - b*e^2*x - c*e^2*x^2)^(3/2)) - (2*(e*f - d*g))/(9*e^2*(2*c*d - b*e)*(d + e*x)^3*(d*(c*d - b*e) - b*e^2*x - c*e^2*x^2)^(3/2)) - (2*(4*c*e*f + 2*c*d*g - 3*b*e*g))/(21*e^2*(2*c*d - b*e)^2*(d + e*x)^2*(d*(c*d - b*e) - b*e^2*x - c*e^2*x^2)^(3/2)) - (4*c*(4*c*e*f + 2*c*d*g - 3*b*e*g))/(21*e^2*(2*c*d - b*e)^3*(d + e*x)*(d*(c*d - b*e) - b*e^2*x - c*e^2*x^2)^(3/2)) + (256*c^3*(4*c*e*f + 2*c*d*g - 3*b*e*g)*(b + 2*c*x))/(63*e*(2*c*d - b*e)^7*Sqrt[d*(c*d - b*e) - b*e^2*x - c*e^2*x^2])}",
-      "outcome": "solved-correct",
-      "ms": 813,
-      "result": "(2g * (\"e_var\" * b * \"e_var\"^2 - d * c * \"e_var\"^2) + \"e_var\" * (g * b * \"e_var\"^2 - 2f * c * \"e_var\"^2) - 2c * f * \"e_var\"^3) / (3 * \"e_var\" * (\"e_var\" * b * \"e_var\"^2 - 2d * c * \"e_var\"^2)) * (-10c * \"e_var\"^2) / (7(\"e_var\" * b * \"e_var\"^2 - 2d * c * \"e_var\"^2)) * (-8c * \"e_var\"^2) / (5(\"e_var\" * b * \"e_var\"^2 - 2d * c * \"e_var\"^2)) * (2(-2x * c * \"e_var\"^2 - b * \"e_var\"^2)) / (4c * \"e_var\"^2 * (c * d^2 - b * d * \"e_var\") + (-(b * \"e_var\"^2))^2) * sqrt(-c * \"e_var\"^2 * x^2 - x * b * \"e_var\"^2 + c * d^2 - b * d * \"e_var\") * (-8c * \"e_var\"^2) / (3(4c * \"e_var\"^2 * (c * d^2 - b * d * \"e_var\") + (-(b * \"e_var\"^2))^2)) + (-2(-2x * c * \"e_var\"^2 - b * \"e_var\"^2) * (-c * \"e_var\"^2 * x^2 - x * b * \"e_var\"^2 + c * d^2 - b * d * \"e_var\")^(-3/2)) / (3(4c * \"e_var\"^2 * (c * d^2 - b * d * \"e_var\") + (-(b * \"e_var\"^2))^2)) - (-2 * \"e_var\" * 1 / (\"e_var\" * x + d) * (-c * \"e_var\"^2 * x^2 - x * b * \"e_var\"^2 + c * d^2 - b * d * \"e_var\")^(-3/2)) / (5(\"e_var\" * b * \"e_var\"^2 - 2d * c * \"e_var\"^2)) - (-2 * \"e_var\" * (-c * \"e_var\"^2 * x^2 - x * b * \"e_var\"^2 + c * d^2 - b * d * \"e_var\")^(-3/2) * (\"e_var\" * x + d)^(-2)) / (7(\"e_var\" * b * \"e_var\"^2 - 2d * c * \"e_var\"^2)) + (-2(-\"e_var\" * f + d * g) * (-c * \"e_var\"^2 * x^2 - x * b * \"e_var\"^2 + c * d^2 - b * d * \"e_var\")^(-3/2) * (\"e_var\" * x + d)^(-3)) / (9(\"e_var\" * b * \"e_var\"^2 - 2d * c * \"e_var\"^2))"
-    },
-    {
-      "file": "1 Algebraic functions/1.2 Trinomial products/1.2.1 Quadratic/1.2.1.4 (d+e x)^m (f+g x)^n (a+b x+c x^2)^p.m",
-      "index": 65,
-      "source": "{(d + e*x)^3*(d^2 - e^2*x^2)^(5/2)*x^5, x, 12, (35*d^12*x*Sqrt[d^2 - e^2*x^2])/(2048*e^5) + (35*d^10*x*(d^2 - e^2*x^2)^(3/2))/(3072*e^5) + (7*d^8*x*(d^2 - e^2*x^2)^(5/2))/(768*e^5) - (124*d^5*x^2*(d^2 - e^2*x^2)^(7/2))/(1287*e^4) - (7*d^4*x^3*(d^2 - e^2*x^2)^(7/2))/(48*e^3) - (31*d^3*x^4*(d^2 - e^2*x^2)^(7/2))/(143*e^2) - (7*d^2*x^5*(d^2 - e^2*x^2)^(7/2))/(24*e) - (3/13)*d*x^6*(d^2 - e^2*x^2)^(7/2) - (1/14)*e*x^7*(d^2 - e^2*x^2)^(7/2) - (d^6*(31744*d + 63063*e*x)*(d^2 - e^2*x^2)^(7/2))/(1153152*e^6) + (35*d^14*ArcTan[(e*x)/Sqrt[d^2 - e^2*x^2]])/(2048*e^6)}",
-      "outcome": "solved-correct",
-      "ms": 1897,
-      "result": "1 / (-14 * \"e_var\"^2) * (1 / (-13 * \"e_var\"^2) * (1 / (-12 * \"e_var\"^2) * (1 / (-11 * \"e_var\"^2) * (1 / (-10 * \"e_var\"^2) * (1 / (-9 * \"e_var\"^2) * (1 / (-8 * \"e_var\"^2) * (1 / (-7 * \"e_var\"^2) * (11036025/16 * (3(arctan((\"e_var\" * x) / sqrt(-\"e_var\"^2 * x^2 + d^2)) * d^2) / \"e_var\" + x * sqrt(-\"e_var\"^2 * x^2 + d^2) * d^2 + 2x * (-\"e_var\"^2 * x^2 + d^2)^(3/2)) * \"e_var\"^(11) * d^(10) + 2207205/2 * x * \"e_var\"^(11) * d^8 * (-\"e_var\"^2 * x^2 + d^2)^(5/2)) + (476160 * \"e_var\"^(10) * d^7 * x^0 * (-\"e_var\"^2 * x^2 + d^2)^(7/2)) / \"e_var\"^2) + (-945945x * \"e_var\"^9 * d^6 * (-\"e_var\"^2 * x^2 + d^2)^(7/2)) / (8 * \"e_var\"^2)) + (69440 * \"e_var\"^8 * d^5 * x^2 * (-\"e_var\"^2 * x^2 + d^2)^(7/2)) / (3 * \"e_var\"^2)) + (-7007 * \"e_var\"^7 * d^4 * x^3 * (-\"e_var\"^2 * x^2 + d^2)^(7/2)) / (2 * \"e_var\"^2)) + (5208 * \"e_var\"^6 * x^4 * d^3 * (-\"e_var\"^2 * x^2 + d^2)^(7/2)) / (11 * \"e_var\"^2)) + (-637 * \"e_var\"^5 * x^5 * d^2 * (-\"e_var\"^2 * x^2 + d^2)^(7/2)) / (12 * \"e_var\"^2)) + (42d * x^6 * \"e_var\"^4 * (-\"e_var\"^2 * x^2 + d^2)^(7/2)) / (13 * \"e_var\"^2)) - (x^7 * \"e_var\"^3 * (-\"e_var\"^2 * x^2 + d^2)^(7/2)) / (14 * \"e_var\"^2)"
-    },
-    {
-      "file": "1 Algebraic functions/1.2 Trinomial products/1.2.1 Quadratic/1.2.1.6 (g+h x)^m (a+b x+c x^2)^p (d+e x+f x^2)^q.m",
-      "index": 140,
-      "source": "{(2 + 3*x)^(-1)*(30 + 31*x - 12*x^2)^(-1)*(6 + 17*x + 12*x^2)^(1/2), x, 3, (1/42)*ArcTanh[(206 + 291*x)/(84*Sqrt[6 + 17*x + 12*x^2])]}",
-      "outcome": "solved-correct",
-      "ms": 222,
-      "result": "-(1/42 * artanh((-291x - 206) / (84sqrt(12x^2 + 17x + 6))))"
-    },
-    {
-      "file": "1 Algebraic functions/1.2 Trinomial products/1.2.1 Quadratic/1.2.1.9 P(x) (d+e x)^m (a+b x+c x^2)^p.m",
-      "index": 168,
-      "source": "{(1 + x^2)/(1 + x + x^2), x, 6, x + ArcTan[(1 + 2*x)/Sqrt[3]]/Sqrt[3] - Log[1 + x + x^2]/2}",
-      "outcome": "solved-correct",
-      "ms": 63,
-      "result": "x - 1/2 * (-2/3sqrt(3) * arctan(2/3sqrt(3) * x + sqrt(3)/3)) - 1/2 * ln(x^2 + x + 1)"
-    },
-    {
-      "file": "1 Algebraic functions/1.2 Trinomial products/1.2.2 Quartic/1.2.2.2 (d x)^m (a+b x^2+c x^4)^p.m",
-      "index": 234,
-      "source": "{Sqrt[b*x^2 + c*x^4]/x^2, x, 3, Sqrt[b*x^2 + c*x^4]/x - Sqrt[b]*ArcTanh[(Sqrt[b]*x)/Sqrt[b*x^2 + c*x^4]]}",
-      "outcome": "solved-correct",
-      "ms": 65,
-      "result": "b * (-artanh((x * sqrt(b)) / sqrt(c * x^4 + b * x^2)) / sqrt(b)) + 1 / x * sqrt(c * x^4 + b * x^2)"
-    },
-    {
-      "file": "1 Algebraic functions/1.2 Trinomial products/1.2.2 Quartic/1.2.2.2 (d x)^m (a+b x^2+c x^4)^p.m",
-      "index": 864,
-      "source": "{x^1/(a + b*x^2 + c*x^4)^2, x, 4, -((b + 2*c*x^2)/(2*(b^2 - 4*a*c)*(a + b*x^2 + c*x^4))) + (2*c*ArcTanh[(b + 2*c*x^2)/Sqrt[b^2 - 4*a*c]])/(b^2 - 4*a*c)^(3/2)}",
-      "outcome": "solved-correct",
-      "ms": 135,
-      "result": "1/2 * (2c * x^2 + b) / (c * x^4 + b * x^2 + a) * (-b^2 + 4a * c) + (-4c * artanh((2c * x^2 + b) / sqrt(b^2 - 4a * c))) / (-b^2 * sqrt(b^2 - 4a * c) + 4a * c * sqrt(b^2 - 4a * c))"
-    },
-    {
-      "file": "1 Algebraic functions/1.2 Trinomial products/1.2.2 Quartic/1.2.2.3 (d+e x^2)^m (a+b x^2+c x^4)^p.m",
-      "index": 114,
-      "source": "{(3 - x^2)/Sqrt[3 + 2*x^2 - x^4], x, 5, -EllipticE[ArcSin[x/Sqrt[3]], -3] + 4*EllipticF[ArcSin[x/Sqrt[3]], -3]}",
-      "outcome": "solved-correct",
-      "ms": 52,
-      "result": "4EllipticF(arcsin(sqrt(3)/3 * x), -3) - EllipticE(arcsin(sqrt(3)/3 * x), -3)"
-    },
-    {
-      "file": "1 Algebraic functions/1.2 Trinomial products/1.2.3 General/1.2.3.4 (f x)^m (d+e x^n)^q (a+b x^n+c x^(2 n))^p.m",
-      "index": 85,
-      "source": "{Sqrt[d + e*x]*Sqrt[a + b/x + c/x^2]/x^2, x, 24, -(((b*d + c*e)*Sqrt[a + c/x^2 + b/x]*Sqrt[d + e*x])/(4*c*d)) - (Sqrt[a + c/x^2 + b/x]*Sqrt[d + e*x])/(2*x) + (Sqrt[b^2 - 4*a*c]*(b*d + c*e)*Sqrt[a + c/x^2 + b/x]*x*Sqrt[d + e*x]*Sqrt[-((a*(c + b*x + a*x^2))/(b^2 - 4*a*c))]*EllipticE[ArcSin[Sqrt[(b + Sqrt[b^2 - 4*a*c] + 2*a*x)/Sqrt[b^2 - 4*a*c]]/Sqrt[2]], -((2*Sqrt[b^2 - 4*a*c]*e)/(2*a*d - (b + Sqrt[b^2 - 4*a*c])*e))])/(4*Sqrt[2]*c*d*Sqrt[(a*(d + e*x))/(2*a*d - (b + Sqrt[b^2 - 4*a*c])*e)]*(c + b*x + a*x^2)) + (3*Sqrt[b^2 - 4*a*c]*e*Sqrt[a + c/x^2 + b/x]*x*Sqrt[(a*(d + e*x))/(2*a*d - (b + Sqrt[b^2 - 4*a*c])*e)]*Sqrt[-((a*(c + b*x + a*x^2))/(b^2 - 4*a*c))]*EllipticF[ArcSin[Sqrt[(b + Sqrt[b^2 - 4*a*c] + 2*a*x)/Sqrt[b^2 - 4*a*c]]/Sqrt[2]], -((2*Sqrt[b^2 - 4*a*c]*e)/(2*a*d - (b + Sqrt[b^2 - 4*a*c])*e))])/(Sqrt[2]*Sqrt[d + e*x]*(c + b*x + a*x^2)) - (Sqrt[b^2 - 4*a*c]*(b*d + c*e)*Sqrt[a + c/x^2 + b/x]*x*Sqrt[(a*(d + e*x))/(2*a*d - (b + Sqrt[b^2 - 4*a*c])*e)]*Sqrt[-((a*(c + b*x + a*x^2))/(b^2 - 4*a*c))]*EllipticF[ArcSin[Sqrt[(b + Sqrt[b^2 - 4*a*c] + 2*a*x)/Sqrt[b^2 - 4*a*c]]/Sqrt[2]], -((2*Sqrt[b^2 - 4*a*c]*e)/(2*a*d - (b + Sqrt[b^2 - 4*a*c])*e))])/(2*Sqrt[2]*c*Sqrt[d + e*x]*(c + b*x + a*x^2)) - ((a*d + b*e)*Sqrt[2*a*d - (b - Sqrt[b^2 - 4*a*c])*e]*Sqrt[a + c/x^2 + b/x]*x*Sqrt[1 - (2*a*(d + e*x))/(2*a*d - (b - Sqrt[b^2 - 4*a*c])*e)]*Sqrt[1 - (2*a*(d + e*x))/(2*a*d - (b + Sqrt[b^2 - 4*a*c])*e)]*EllipticPi[(2*a*d - b*e + Sqrt[b^2 - 4*a*c]*e)/(2*a*d), ArcSin[(Sqrt[2]*Sqrt[a]*Sqrt[d + e*x])/Sqrt[2*a*d - (b - Sqrt[b^2 - 4*a*c])*e]], (b - Sqrt[b^2 - 4*a*c] - (2*a*d)/e)/(b + Sqrt[b^2 - 4*a*c] - (2*a*d)/e)])/(Sqrt[2]*Sqrt[a]*d*(c + b*x + a*x^2)) + ((b*d + c*e)^2*Sqrt[2*a*d - (b - Sqrt[b^2 - 4*a*c])*e]*Sqrt[a + c/x^2 + b/x]*x*Sqrt[1 - (2*a*(d + e*x))/(2*a*d - (b - Sqrt[b^2 - 4*a*c])*e)]*Sqrt[1 - (2*a*(d + e*x))/(2*a*d - (b + Sqrt[b^2 - 4*a*c])*e)]*EllipticPi[(2*a*d - b*e + Sqrt[b^2 - 4*a*c]*e)/(2*a*d), ArcSin[(Sqrt[2]*Sqrt[a]*Sqrt[d + e*x])/Sqrt[2*a*d - (b - Sqrt[b^2 - 4*a*c])*e]], (b - Sqrt[b^2 - 4*a*c] - (2*a*d)/e)/(b + Sqrt[b^2 - 4*a*c] - (2*a*d)/e)])/(4*Sqrt[2]*Sqrt[a]*c*d^2*(c + b*x + a*x^2))}",
-      "outcome": "solved-correct",
-      "ms": 3623,
-      "result": "(x * sqrt(a + b * 1 / x + c * x^(-2))) / sqrt(a * x^2 + b * x + c) * (1/4 * (b * d + c * \"e_var\") * (1 / (-2(0a + 0b + c) * (d + 0 * \"e_var\")) * (-2(sqrt(2) * EllipticPi((2a * d - b * \"e_var\" + \"e_var\" * sqrt(b^2 - 4a * c)) / (2a * d), arcsin((sqrt(2) * sqrt(a) * sqrt(\"e_var\" * x + d)) / sqrt(2a * d - b * \"e_var\" + \"e_var\" * sqrt(b^2 - 4a * c))), (-2a * d + b * \"e_var\" - \"e_var\" * sqrt(b^2 - 4a * c)) / (-2a * d + b * \"e_var\" + \"e_var\" * sqrt(b^2 - 4a * c))) * sqrt(2a * d - b * \"e_var\" + \"e_var\" * sqrt(b^2 - 4a * c)) * sqrt((2(a * \"e_var\" * x + a * d)) / (\"e_var\" * (-2a * d) / \"e_var\" + b - sqrt(b^2 - 4a * c)) + 1) * sqrt((2(a * \"e_var\" * x + a * d)) / (\"e_var\" * (-2a * d) / \"e_var\" + b + sqrt(b^2 - 4a * c)) + 1)) / (2d * sqrt(a) * sqrt((2(a * \"e_var\" * x + a * d)) / \"e_var\" + (-2a * d) / \"e_var\" + b - sqrt(b^2 - 4a * c)) * sqrt((2(a * \"e_var\" * x + a * d)) / \"e_var\" + (-2a * d) / \"e_var\" + b + sqrt(b^2 - 4a * c))) * (sqrt(2a * x + b - sqrt(b^2 - 4a * c)) * sqrt(2a * x + b + sqrt(b^2 - 4a * c))) / sqrt(a * x^2 + b * x + c) * (b * d + c * \"e_var\") + (2sqrt(2) * d * EllipticF(arcsin(sqrt((2a * x + b + sqrt(b^2 - 4a * c)) / (2sqrt(b^2 - 4a * c)))), (-2 * \"e_var\" * sqrt(b^2 - 4a * c)) / (2a * d - b * \"e_var\" - \"e_var\" * sqrt(b^2 - 4a * c))) * sqrt(-(a * (a * x^2 + b * x + c)) / (b^2 - 4a * c)) * sqrt((a * (\"e_var\" * x + d)) / (2a * d - b * \"e_var\" - \"e_var\" * sqrt(b^2 - 4a * c))) * sqrt(b^2 - 4a * c)) / (sqrt(a * x^2 + b * x + c) * sqrt(\"e_var\" * x + d)) + (-sqrt(2) * EllipticE(arcsin(sqrt((2a * x + b + sqrt(b^2 - 4a * c)) / (2sqrt(b^2 - 4a * c)))), (-2 * \"e_var\" * sqrt(b^2 - 4a * c)) / (2a * d - b * \"e_var\" - \"e_var\" * sqrt(b^2 - 4a * c))) * sqrt(-(a * (a * x^2 + b * x + c)) / (b^2 - 4a * c)) * sqrt(\"e_var\" * x + d) * sqrt(b^2 - 4a * c)) / (sqrt((a * (\"e_var\" * x + d)) / (2a * d - b * \"e_var\" - \"e_var\" * sqrt(b^2 - 4a * c))) * sqrt(a * x^2 + b * x + c))) - (1 / x * sqrt(a * x^2 + b * x + c) * sqrt(\"e_var\" * x + d)) / (0a + 0b + c) * (d + 0 * \"e_var\")) - 2(sqrt(2) * EllipticPi((2a * d - b * \"e_var\" + \"e_var\" * sqrt(b^2 - 4a * c)) / (2a * d), arcsin((sqrt(2) * sqrt(a) * sqrt(\"e_var\" * x + d)) / sqrt(2a * d - b * \"e_var\" + \"e_var\" * sqrt(b^2 - 4a * c))), (-2a * d + b * \"e_var\" - \"e_var\" * sqrt(b^2 - 4a * c)) / (-2a * d + b * \"e_var\" + \"e_var\" * sqrt(b^2 - 4a * c))) * sqrt(2a * d - b * \"e_var\" + \"e_var\" * sqrt(b^2 - 4a * c)) * sqrt((2(a * \"e_var\" * x + a * d)) / (\"e_var\" * (-2a * d) / \"e_var\" + b - sqrt(b^2 - 4a * c)) + 1) * sqrt((2(a * \"e_var\" * x + a * d)) / (\"e_var\" * (-2a * d) / \"e_var\" + b + sqrt(b^2 - 4a * c)) + 1)) / (2d * sqrt(a) * sqrt((2(a * \"e_var\" * x + a * d)) / \"e_var\" + (-2a * d) / \"e_var\" + b - sqrt(b^2 - 4a * c)) * sqrt((2(a * \"e_var\" * x + a * d)) / \"e_var\" + (-2a * d) / \"e_var\" + b + sqrt(b^2 - 4a * c))) * (sqrt(2a * x + b - sqrt(b^2 - 4a * c)) * sqrt(2a * x + b + sqrt(b^2 - 4a * c))) / sqrt(a * x^2 + b * x + c) * (2a * d + 2b * \"e_var\") + (6sqrt(2) * \"e_var\" * EllipticF(arcsin(sqrt((2a * x + b + sqrt(b^2 - 4a * c)) / (2sqrt(b^2 - 4a * c)))), (-2 * \"e_var\" * sqrt(b^2 - 4a * c)) / (2a * d - b * \"e_var\" - \"e_var\" * sqrt(b^2 - 4a * c))) * sqrt(-(a * (a * x^2 + b * x + c)) / (b^2 - 4a * c)) * sqrt((a * (\"e_var\" * x + d)) / (2a * d - b * \"e_var\" - \"e_var\" * sqrt(b^2 - 4a * c))) * sqrt(b^2 - 4a * c)) / (sqrt(a * x^2 + b * x + c) * sqrt(\"e_var\" * x + d)) - 1/2 * x^(-2) * sqrt(a * x^2 + b * x + c) * sqrt(\"e_var\" * x + d))"
-    },
-    {
-      "file": "1 Algebraic functions/1.2 Trinomial products/1.2.3 General/1.2.3.4 (f x)^m (d+e x^n)^q (a+b x^n+c x^(2 n))^p.m",
-      "index": 114,
-      "source": "{x^1*(b + 2*c*x^2)/(-a + b*x^2 + c*x^4), x, 2, (1/2)*Log[a - b*x^2 - c*x^4]}",
-      "outcome": "solved-correct",
-      "ms": 65,
-      "result": "1/2 * ln(c * x^4 + b * x^2 - a)"
-    },
-    {
-      "file": "1 Algebraic functions/1.2 Trinomial products/1.2.3 General/1.2.3.4 (f x)^m (d+e x^n)^q (a+b x^n+c x^(2 n))^p.m",
-      "index": 141,
-      "source": "{(f*x)^m*(d + e*x^n)/(a + b*x^n + c*x^(2*n)), x, 4, ((e + (2*c*d - b*e)/Sqrt[b^2 - 4*a*c])*(f*x)^(1 + m)*Hypergeometric2F1[1, (1 + m)/n, (1 + m + n)/n, -((2*c*x^n)/(b - Sqrt[b^2 - 4*a*c]))])/((b - Sqrt[b^2 - 4*a*c])*f*(1 + m)) + ((e - (2*c*d - b*e)/Sqrt[b^2 - 4*a*c])*(f*x)^(1 + m)*Hypergeometric2F1[1, (1 + m)/n, (1 + m + n)/n, -((2*c*x^n)/(b + Sqrt[b^2 - 4*a*c]))])/((b + Sqrt[b^2 - 4*a*c])*f*(1 + m))}",
-      "outcome": "unsolved",
-      "ms": 143,
-      "result": "int(((d + \"e_var\" * x^n) * (f * x)^m) / (a + b * x^n + c * x^(2n)) da  db  dc  dd  d\"e_var\"  df  dm  dn  dx)"
-    },
-    {
-      "file": "1 Algebraic functions/1.3 Miscellaneous/1.3.1 Rational functions.m",
-      "index": 32,
-      "source": "{(a + 0*x + 0*x^2 + d*x^3)^n, x, 2, (x*(a + d*x^3)^(1 + n)*Hypergeometric2F1[1, 4/3 + n, 4/3, -((d*x^3)/a)])/a, (x*(a + d*x^3)^n*Hypergeometric2F1[1/3, -n, 4/3, -((d*x^3)/a)])/(1 + d*x^3/a)^n}",
-      "outcome": "solved-correct",
-      "ms": 406,
-      "result": "x * (a^0 * (d * x^3 + a)^n) / ((d * x^3) / a + 1)^n * Hypergeometric2F1(-n, 1/3, 4/3, -(d * 1 / a * x^3)) * 1^n"
-    },
-    {
-      "file": "1 Algebraic functions/1.3 Miscellaneous/1.3.1 Rational functions.m",
-      "index": 41,
-      "source": "{(8*a*e^2 - d^3*x + 8*d*e^2*x^3 + 8*e^3*x^4)^2, x, 2, 64*a^2*e^4*x - 8*a*d^3*e^2*x^2 + (d^6*x^3)/3 + 32*a*d*e^4*x^4 - (16/5)*e^2*(d^4 - 8*a*e^3)*x^5 - (8/3)*d^3*e^3*x^6 + (64/7)*d^2*e^4*x^7 + 16*d*e^5*x^8 + (64*e^6*x^9)/9}",
-      "outcome": "solved-correct",
-      "ms": 115,
-      "result": "64/9 * x^9 * \"e_var\"^6 + 16d * x^8 * \"e_var\"^5 + 64/7 * x^7 * \"e_var\"^4 * d^2 - 8/3 * x^6 * d^3 * \"e_var\"^3 - 16/5 * x^5 * d^4 * \"e_var\"^2 + 128/5 * a * \"e_var\"^5 * x^5 + 32a * d * \"e_var\"^4 * x^4 + 1/3 * d^6 * x^3 - 8a * d^3 * \"e_var\"^2 * x^2 + 64x * \"e_var\"^4 * a^2"
-    },
-    {
-      "file": "1 Algebraic functions/1.3 Miscellaneous/1.3.2 Algebraic functions.m",
-      "index": 161,
-      "source": "{(a + b*x)^n*(c + d*x^3)^3, x, 2, ((b^3*c - a^3*d)^3*(a + b*x)^(1 + n))/(b^10*(1 + n)) + (9*a^2*d*(b^3*c - a^3*d)^2*(a + b*x)^(2 + n))/(b^10*(2 + n)) - (9*a*d*(b^3*c - 4*a^3*d)*(b^3*c - a^3*d)*(a + b*x)^(3 + n))/(b^10*(3 + n)) + (3*d*(b^6*c^2 - 20*a^3*b^3*c*d + 28*a^6*d^2)*(a + b*x)^(4 + n))/(b^10*(4 + n)) + (9*a^2*d^2*(5*b^3*c - 14*a^3*d)*(a + b*x)^(5 + n))/(b^10*(5 + n)) - (18*a*d^2*(b^3*c - 7*a^3*d)*(a + b*x)^(6 + n))/(b^10*(6 + n)) + (3*d^2*(b^3*c - 28*a^3*d)*(a + b*x)^(7 + n))/(b^10*(7 + n)) + (36*a^2*d^3*(a + b*x)^(8 + n))/(b^10*(8 + n)) - (9*a*d^3*(a + b*x)^(9 + n))/(b^10*(9 + n)) + (d^3*(a + b*x)^(10 + n))/(b^10*(10 + n))}",
-      "outcome": "solved-correct",
-      "ms": 756,
-      "result": "-(a^9 * d^3 * (b * x + a)^(n + 1)) / (n + 1) * b^(10) + (9a^8 * d^3 * (b * x + a)^(n + 2)) / (n + 2) * b^(10) + (-36a^7 * d^3 * (b * x + a)^(n + 3)) / (n + 3) * b^(10) + (84a^6 * d^3 * (b * x + a)^(n + 4)) / (n + 4) * b^(10) + (3c * a^6 * d^2 * (b * x + a)^(n + 1)) / ((n + 1) * b^7) + (-126a^5 * d^3 * (b * x + a)^(n + 5)) / (n + 5) * b^(10) + (-18c * a^5 * d^2 * (b * x + a)^(n + 2)) / ((n + 2) * b^7) + (126a^4 * d^3 * (b * x + a)^(n + 6)) / (n + 6) * b^(10) + (45c * a^4 * d^2 * (b * x + a)^(n + 3)) / ((n + 3) * b^7) + (-3d * a^3 * c^2 * (b * x + a)^(n + 1)) / ((n + 1) * b^4) + (-84a^3 * d^3 * (b * x + a)^(n + 7)) / (n + 7) * b^(10) + (-60c * a^3 * d^2 * (b * x + a)^(n + 4)) / ((n + 4) * b^7) + (36d^3 * a^2 * (b * x + a)^(n + 8)) / (n + 8) * b^(10) + (9d * a^2 * c^2 * (b * x + a)^(n + 2)) / ((n + 2) * b^4) + (45c * a^2 * d^2 * (b * x + a)^(n + 5)) / ((n + 5) * b^7) + (-9a * d * c^2 * (b * x + a)^(n + 3)) / ((n + 3) * b^4) + (-9a * d^3 * (b * x + a)^(n + 9)) / (n + 9) * b^(10) + (-18a * c * d^2 * (b * x + a)^(n + 6)) / ((n + 6) * b^7) + (3d * c^2 * (b * x + a)^(n + 4)) / ((n + 4) * b^4) + (d^3 * (b * x + a)^(n + 10)) / (n + 10) * b^(10) + (3c * d^2 * (b * x + a)^(n + 7)) / ((n + 7) * b^7) + (c^3 * (b * x + a)^(n + 1)) / (b * (n + 1))"
-    },
-    {
-      "file": "1 Algebraic functions/1.3 Miscellaneous/1.3.2 Algebraic functions.m",
-      "index": 399,
-      "source": "{1/(x^3*(a*c + b*c*x^3 + d*Sqrt[a + b*x^3])), x, 10, -(c/(2*(a*c^2 - d^2)*x^2)) + (d*Sqrt[1 + (b*x^3)/a]*AppellF1[-(2/3), 1/2, 1, 1/3, -((b*x^3)/a), -((b*c^2*x^3)/(a*c^2 - d^2))])/(2*(a*c^2 - d^2)*x^2*Sqrt[a + b*x^3]) + (b^(2/3)*c^(7/3)*ArcTan[(1 - (2*b^(1/3)*c^(2/3)*x)/(a*c^2 - d^2)^(1/3))/Sqrt[3]])/(Sqrt[3]*(a*c^2 - d^2)^(5/3)) - (b^(2/3)*c^(7/3)*Log[(a*c^2 - d^2)^(1/3) + b^(1/3)*c^(2/3)*x])/(3*(a*c^2 - d^2)^(5/3)) + (b^(2/3)*c^(7/3)*Log[(a*c^2 - d^2)^(2/3) - b^(1/3)*c^(2/3)*(a*c^2 - d^2)^(1/3)*x + b^(2/3)*c^(4/3)*x^2])/(6*(a*c^2 - d^2)^(5/3))}",
-      "outcome": "solved-correct",
-      "ms": 3663,
-      "result": "a * c * (-(a * b * c^2) / (a^2 * c^2 - a * d^2) * (1 / (3root(3)(a^2 * c^2 - a * d^2)^2) * (root(3)(a) * root(3)(b) * c^(2/3) * root(3)(a^2 * c^2 - a * d^2) * ln(x^2 * a^(2/3) * b^(2/3) * c^(4/3) - x * root(3)(a) * root(3)(b) * c^(2/3) * root(3)(a^2 * c^2 - a * d^2) + (a^2 * c^2 - a * d^2)^(2/3))) / (root(3)(a) * root(3)(b) * c^(2/3) * root(3)(a^2 * c^2 - a * d^2)) * (-(root(3)(a) * root(3)(b) * c^(2/3)) / (2a^(2/3) * b^(2/3) * c^(4/3))) + sqrt(3)/3 * (-2 / (root(3)(a) * root(3)(b) * c^(2/3) * root(3)(a^2 * c^2 - a * d^2))) * arctan((-2sqrt(3) * x * root(3)(a) * root(3)(b) * c^(2/3)) / (3root(3)(a^2 * c^2 - a * d^2)) + sqrt(3)/3) * (-root(3)(a) * root(3)(b) * c^(2/3) * root(3)(a^2 * c^2 - a * d^2) * root(3)(a) * root(3)(b) * c^(2/3) + 4a^(2/3) * b^(2/3) * c^(4/3) * root(3)(a^2 * c^2 - a * d^2)) / (2a^(2/3) * b^(2/3) * c^(4/3)) + 1 / (3root(3)(a^2 * c^2 - a * d^2)^2) * ln(x * root(3)(a) * root(3)(b) * c^(2/3) + root(3)(a^2 * c^2 - a * d^2)) / (root(3)(a) * root(3)(b) * c^(2/3))) - (x^(-2) * (a * b * x^3 * c^2 + a^2 * c^2 - a * d^2)^0) / (2(a^2 * c^2 - a * d^2))) + 1/2 * a * d * 1 / (a^2 * c^2 - a * d^2) * 1 / sqrt(b * x^3 + a) * AppellF1(-2/3, 1, 1/2, 1/3, -(a * b * x^3 * c^2) / (a^2 * c^2 - a * d^2), -(b * 1 / a * x^3)) * a^0 * x^(-2) * sqrt((b * x^3) / a + 1)"
     }
   ]
 }

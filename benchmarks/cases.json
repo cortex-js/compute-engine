@@ -5,7 +5,10 @@
     "numeric",
     "simplify",
     "derivative",
-    "antiderivative"
+    "antiderivative",
+    "cl-numeric",
+    "evaluate",
+    "solve"
   ],
   "tiers": [
     "core",
@@ -635,6 +638,11 @@
           "op": "simplify"
         },
         "numpy": null
+      },
+      "changelog": {
+        "table": "symbolic",
+        "group": "simplify",
+        "order": 2
       }
     },
     {
@@ -735,6 +743,11 @@
           "op": "simplify"
         },
         "numpy": null
+      },
+      "changelog": {
+        "table": "symbolic",
+        "group": "simplify",
+        "order": 1
       }
     },
     {
@@ -1190,6 +1203,11 @@
           "var": "x"
         },
         "numpy": null
+      },
+      "changelog": {
+        "table": "symbolic",
+        "group": "derivative",
+        "order": 1
       }
     },
     {
@@ -1409,6 +1427,11 @@
         },
         "mathjs": null,
         "numpy": null
+      },
+      "changelog": {
+        "table": "symbolic",
+        "group": "antiderivative",
+        "order": 3
       }
     },
     {
@@ -1444,6 +1467,11 @@
         },
         "mathjs": null,
         "numpy": null
+      },
+      "changelog": {
+        "table": "symbolic",
+        "group": "antiderivative",
+        "order": 1
       }
     },
     {
@@ -1526,6 +1554,719 @@
         },
         "mathjs": null,
         "numpy": null
+      },
+      "changelog": {
+        "table": "symbolic",
+        "group": "antiderivative",
+        "order": 2
+      }
+    },
+    {
+      "id": "CR1",
+      "category": "antiderivative",
+      "tier": "hard",
+      "title": "\u222b \u221ax/(1+x) dx",
+      "latex": "\\int\\frac{\\sqrt x}{1+x}\\,dx",
+      "verify": {
+        "kind": "diff",
+        "var": "x",
+        "a": "0.50000000000000000000000000000000000000000000000000",
+        "b": "2.3000000000000000000000000000000000000000000000000",
+        "value": "0.87418605630532330815678976347136701204894129573553"
+      },
+      "inputs": {
+        "ce": {
+          "mathjson": [
+            "Divide",
+            [
+              "Sqrt",
+              "x"
+            ],
+            [
+              "Add",
+              1,
+              "x"
+            ]
+          ],
+          "op": "integrate",
+          "var": "x"
+        },
+        "sympy": {
+          "expr": "sqrt(x)/(1 + x)",
+          "op": "integrate",
+          "var": "x"
+        },
+        "mathjs": null,
+        "numpy": null
+      },
+      "changelog": {
+        "table": "symbolic",
+        "group": "antiderivative",
+        "order": 4
+      }
+    },
+    {
+      "id": "CR2",
+      "category": "antiderivative",
+      "tier": "hard",
+      "title": "\u222b x/(1+x)^(1/3) dx",
+      "latex": "\\int\\frac{x}{(1+x)^{1/3}}\\,dx",
+      "verify": {
+        "kind": "diff",
+        "var": "x",
+        "a": "0.50000000000000000000000000000000000000000000000000",
+        "b": "2.3000000000000000000000000000000000000000000000000",
+        "value": "1.8501625660256218989135524108069271226714677164913"
+      },
+      "inputs": {
+        "ce": {
+          "mathjson": [
+            "Divide",
+            "x",
+            [
+              "Power",
+              [
+                "Add",
+                1,
+                "x"
+              ],
+              [
+                "Divide",
+                1,
+                3
+              ]
+            ]
+          ],
+          "op": "integrate",
+          "var": "x"
+        },
+        "sympy": {
+          "expr": "x/(1 + x)**Rational(1,3)",
+          "op": "integrate",
+          "var": "x"
+        },
+        "mathjs": null,
+        "numpy": null
+      },
+      "changelog": {
+        "table": "symbolic",
+        "group": "antiderivative",
+        "order": 5
+      }
+    },
+    {
+      "id": "CR3",
+      "category": "antiderivative",
+      "tier": "hard",
+      "title": "\u222b x\u00b2/(1+x)^(1/3) dx",
+      "latex": "\\int\\frac{x^2}{(1+x)^{1/3}}\\,dx",
+      "verify": {
+        "kind": "diff",
+        "var": "x",
+        "a": "0.50000000000000000000000000000000000000000000000000",
+        "b": "2.3000000000000000000000000000000000000000000000000",
+        "value": "2.8865959645538203986979420389890832688149358436723"
+      },
+      "inputs": {
+        "ce": {
+          "mathjson": [
+            "Divide",
+            [
+              "Power",
+              "x",
+              2
+            ],
+            [
+              "Power",
+              [
+                "Add",
+                1,
+                "x"
+              ],
+              [
+                "Divide",
+                1,
+                3
+              ]
+            ]
+          ],
+          "op": "integrate",
+          "var": "x"
+        },
+        "sympy": {
+          "expr": "x**2/(1 + x)**Rational(1,3)",
+          "op": "integrate",
+          "var": "x"
+        },
+        "mathjs": null,
+        "numpy": null
+      },
+      "changelog": {
+        "table": "symbolic",
+        "group": "antiderivative",
+        "order": 6
+      }
+    },
+    {
+      "id": "CN1",
+      "category": "cl-numeric",
+      "tier": "hard",
+      "title": "\u03c0\u00b2",
+      "latex": "\\pi^2",
+      "verify": {
+        "kind": "decimal",
+        "sigdigits": 200,
+        "value": "9.8696044010893586188344909998761511353136994072407906264133493762200448224192052430017734037185522318240259137740231440777723481220300467276106176779851976609903998562065756305715060412328403287808693527693421649"
+      },
+      "inputs": {
+        "ce": {
+          "mathjson": [
+            "Power",
+            "Pi",
+            2
+          ],
+          "op": "N",
+          "precision": 200
+        },
+        "sympy": {
+          "expr": "pi**2",
+          "op": "N",
+          "precision": 200
+        },
+        "mathjs": {
+          "expr": "pi^2",
+          "op": "N",
+          "precision": 200
+        },
+        "numpy": null
+      },
+      "changelog": {
+        "table": "numeric",
+        "order": 1
+      }
+    },
+    {
+      "id": "CN9",
+      "category": "cl-numeric",
+      "tier": "hard",
+      "title": "sin 1",
+      "latex": "\\sin 1",
+      "verify": {
+        "kind": "decimal",
+        "sigdigits": 200,
+        "value": "0.84147098480789650665250232163029899962256306079837106567275170999191040439123966894863974354305269585434903790792067429325911892099189888119341032772921240948079195582676660699990776401197840878273256634748480287"
+      },
+      "inputs": {
+        "ce": {
+          "mathjson": [
+            "Sin",
+            1
+          ],
+          "op": "N",
+          "precision": 200
+        },
+        "sympy": {
+          "expr": "sin(1)",
+          "op": "N",
+          "precision": 200
+        },
+        "mathjs": {
+          "expr": "sin(1)",
+          "op": "N",
+          "precision": 200
+        },
+        "numpy": null
+      },
+      "changelog": {
+        "table": "numeric",
+        "order": 2
+      }
+    },
+    {
+      "id": "CN10",
+      "category": "cl-numeric",
+      "tier": "hard",
+      "title": "cos 1",
+      "latex": "\\cos 1",
+      "verify": {
+        "kind": "decimal",
+        "sigdigits": 200,
+        "value": "0.54030230586813971740093660744297660373231042061792222767009725538110039477447176451795185608718308934357173116003008909786063376002166345640651226541731858471797116447447949423311792455139325433594351775670289260"
+      },
+      "inputs": {
+        "ce": {
+          "mathjson": [
+            "Cos",
+            1
+          ],
+          "op": "N",
+          "precision": 200
+        },
+        "sympy": {
+          "expr": "cos(1)",
+          "op": "N",
+          "precision": 200
+        },
+        "mathjs": {
+          "expr": "cos(1)",
+          "op": "N",
+          "precision": 200
+        },
+        "numpy": null
+      },
+      "changelog": {
+        "table": "numeric",
+        "order": 3
+      }
+    },
+    {
+      "id": "CN11",
+      "category": "cl-numeric",
+      "tier": "hard",
+      "title": "ln 2",
+      "latex": "\\ln 2",
+      "verify": {
+        "kind": "decimal",
+        "sigdigits": 200,
+        "value": "0.69314718055994530941723212145817656807550013436025525412068000949339362196969471560586332699641868754200148102057068573368552023575813055703267075163507596193072757082837143519030703862389167347112335011536449796"
+      },
+      "inputs": {
+        "ce": {
+          "mathjson": [
+            "Ln",
+            2
+          ],
+          "op": "N",
+          "precision": 200
+        },
+        "sympy": {
+          "expr": "log(2)",
+          "op": "N",
+          "precision": 200
+        },
+        "mathjs": {
+          "expr": "log(2)",
+          "op": "N",
+          "precision": 200
+        },
+        "numpy": null
+      },
+      "changelog": {
+        "table": "numeric",
+        "order": 4
+      }
+    },
+    {
+      "id": "CN3",
+      "category": "cl-numeric",
+      "tier": "hard",
+      "title": "e\u1d56\u2071",
+      "latex": "e^{\\pi}",
+      "verify": {
+        "kind": "decimal",
+        "sigdigits": 200,
+        "value": "23.140692632779269005729086367948547380266106242600211993445046409524342350690452783516971997067549219675952704801087773144428044414693835844717445879609849365327965863669242230268991013741764684401410395183868477"
+      },
+      "inputs": {
+        "ce": {
+          "mathjson": [
+            "Power",
+            "ExponentialE",
+            "Pi"
+          ],
+          "op": "N",
+          "precision": 200
+        },
+        "sympy": {
+          "expr": "exp(pi)",
+          "op": "N",
+          "precision": 200
+        },
+        "mathjs": {
+          "expr": "exp(pi)",
+          "op": "N",
+          "precision": 200
+        },
+        "numpy": null
+      },
+      "changelog": {
+        "table": "numeric",
+        "order": 5
+      }
+    },
+    {
+      "id": "CN5",
+      "category": "cl-numeric",
+      "tier": "hard",
+      "title": "\u03b6(3)",
+      "latex": "\\zeta(3)",
+      "verify": {
+        "kind": "decimal",
+        "sigdigits": 200,
+        "value": "1.2020569031595942853997381615114499907649862923404988817922715553418382057863130901864558736093352581461991577952607194184919959986732832137763968372079001614539417829493600667191915755222424942439615639096641033"
+      },
+      "inputs": {
+        "ce": {
+          "mathjson": [
+            "Zeta",
+            3
+          ],
+          "op": "N",
+          "precision": 200
+        },
+        "sympy": {
+          "expr": "zeta(3)",
+          "op": "N",
+          "precision": 200
+        },
+        "mathjs": null,
+        "numpy": null
+      },
+      "changelog": {
+        "table": "numeric",
+        "order": 6
+      }
+    },
+    {
+      "id": "CN7",
+      "category": "cl-numeric",
+      "tier": "hard",
+      "title": "\u0393(1/3)",
+      "latex": "\\Gamma(\\tfrac13)",
+      "verify": {
+        "kind": "decimal",
+        "sigdigits": 200,
+        "value": "2.6789385347077476336556929409746776441286893779573011009504283275904176101677438195409828890411887894191590492000722633357190845695044722599777133677084697681672898230500032183425503222471569418175554499527287844"
+      },
+      "inputs": {
+        "ce": {
+          "mathjson": [
+            "Gamma",
+            [
+              "Divide",
+              1,
+              3
+            ]
+          ],
+          "op": "N",
+          "precision": 200
+        },
+        "sympy": {
+          "expr": "gamma(Rational(1,3))",
+          "op": "N",
+          "precision": 200
+        },
+        "mathjs": {
+          "expr": "gamma(1/3)",
+          "op": "N",
+          "precision": 200
+        },
+        "numpy": null
+      },
+      "changelog": {
+        "table": "numeric",
+        "order": 7
+      }
+    },
+    {
+      "id": "CN8",
+      "category": "cl-numeric",
+      "tier": "hard",
+      "title": "\u03c8(1/3)",
+      "latex": "\\psi(\\tfrac13)",
+      "verify": {
+        "kind": "decimal",
+        "sigdigits": 200,
+        "value": "-3.1320337800208063229964190742872688541554282967204180641927512030351707571687550630894331896183749671246976980892771438799105366003995266427025028195273705879673161910203962575042814017468438664447154193669427959"
+      },
+      "inputs": {
+        "ce": {
+          "mathjson": [
+            "Digamma",
+            [
+              "Divide",
+              1,
+              3
+            ]
+          ],
+          "op": "N",
+          "precision": 200
+        },
+        "sympy": {
+          "expr": "digamma(Rational(1,3))",
+          "op": "N",
+          "precision": 200
+        },
+        "mathjs": null,
+        "numpy": null
+      },
+      "changelog": {
+        "table": "numeric",
+        "order": 8
+      }
+    },
+    {
+      "id": "CE1",
+      "category": "evaluate",
+      "tier": "core",
+      "title": "lim_{x\u21920} sin x / x",
+      "latex": "\\lim_{x\\to0}\\tfrac{\\sin x}{x}",
+      "verify": {
+        "kind": "value",
+        "value": "1.0000000000000000000000000000000000000000000000000"
+      },
+      "inputs": {
+        "ce": {
+          "mathjson": [
+            "Limit",
+            [
+              "Divide",
+              [
+                "Sin",
+                "x"
+              ],
+              "x"
+            ],
+            0
+          ],
+          "op": "evaluate"
+        },
+        "sympy": {
+          "expr": "limit(sin(x)/x, x, 0)",
+          "op": "evaluate"
+        },
+        "mathjs": null,
+        "numpy": null
+      },
+      "changelog": {
+        "table": "symbolic",
+        "group": "evaluate",
+        "order": 1
+      }
+    },
+    {
+      "id": "CE2",
+      "category": "evaluate",
+      "tier": "core",
+      "title": "lim_{x\u2192\u221e} (1+1/x)^x",
+      "latex": "\\lim_{x\\to\\infty}(1+\\tfrac1x)^x",
+      "verify": {
+        "kind": "value",
+        "value": "2.7182818284590452353602874713526624977572470937000"
+      },
+      "inputs": {
+        "ce": {
+          "mathjson": [
+            "Limit",
+            [
+              "Power",
+              [
+                "Add",
+                1,
+                [
+                  "Divide",
+                  1,
+                  "x"
+                ]
+              ],
+              "x"
+            ],
+            "PositiveInfinity"
+          ],
+          "op": "evaluate"
+        },
+        "sympy": {
+          "expr": "limit((1 + 1/x)**x, x, oo)",
+          "op": "evaluate"
+        },
+        "mathjs": null,
+        "numpy": null
+      },
+      "changelog": {
+        "table": "symbolic",
+        "group": "evaluate",
+        "order": 2
+      }
+    },
+    {
+      "id": "CE3",
+      "category": "evaluate",
+      "tier": "core",
+      "title": "\u222b\u2081\u00b2 1/x dx",
+      "latex": "\\int_1^2\\tfrac1x\\,dx",
+      "verify": {
+        "kind": "value",
+        "value": "0.69314718055994530941723212145817656807550013436026"
+      },
+      "inputs": {
+        "ce": {
+          "mathjson": [
+            "Integrate",
+            [
+              "Divide",
+              1,
+              "x"
+            ],
+            [
+              "Tuple",
+              "x",
+              1,
+              2
+            ]
+          ],
+          "op": "evaluate"
+        },
+        "sympy": {
+          "expr": "integrate(1/x, (x, 1, 2))",
+          "op": "evaluate"
+        },
+        "mathjs": null,
+        "numpy": null
+      },
+      "changelog": {
+        "table": "symbolic",
+        "group": "evaluate",
+        "order": 3
+      }
+    },
+    {
+      "id": "CE4",
+      "category": "evaluate",
+      "tier": "core",
+      "title": "\u222b_{\u2212\u221e}^{\u221e} e^(\u2212x\u00b2) dx",
+      "latex": "\\int_{-\\infty}^{\\infty} e^{-x^2}\\,dx",
+      "verify": {
+        "kind": "value",
+        "value": "1.7724538509055160272981674833411451827975494561224"
+      },
+      "inputs": {
+        "ce": {
+          "mathjson": [
+            "Integrate",
+            [
+              "Power",
+              "ExponentialE",
+              [
+                "Negate",
+                [
+                  "Power",
+                  "x",
+                  2
+                ]
+              ]
+            ],
+            [
+              "Tuple",
+              "x",
+              "NegativeInfinity",
+              "PositiveInfinity"
+            ]
+          ],
+          "op": "evaluate"
+        },
+        "sympy": {
+          "expr": "integrate(exp(-x**2), (x, -oo, oo))",
+          "op": "evaluate"
+        },
+        "mathjs": null,
+        "numpy": null
+      },
+      "changelog": {
+        "table": "symbolic",
+        "group": "evaluate",
+        "order": 4
+      }
+    },
+    {
+      "id": "CS1",
+      "category": "solve",
+      "tier": "core",
+      "title": "solve x\u2074+x\u00b2\u22121=0",
+      "latex": "x^4+x^2-1=0",
+      "verify": {
+        "kind": "roots",
+        "var": "x",
+        "values": [
+          "-0.7861513777574232860695585858429589295231",
+          "0.7861513777574232860695585858429589295231"
+        ]
+      },
+      "inputs": {
+        "ce": {
+          "mathjson": [
+            "Add",
+            [
+              "Power",
+              "x",
+              4
+            ],
+            [
+              "Power",
+              "x",
+              2
+            ],
+            -1
+          ],
+          "op": "solve",
+          "var": "x"
+        },
+        "sympy": {
+          "expr": "x**4 + x**2 - 1",
+          "op": "solve",
+          "var": "x"
+        },
+        "mathjs": null,
+        "numpy": null
+      },
+      "changelog": {
+        "table": "symbolic",
+        "group": "solve",
+        "order": 1
+      }
+    },
+    {
+      "id": "CS2",
+      "category": "solve",
+      "tier": "core",
+      "title": "solve x\u00b3\u2212x\u22121=0",
+      "latex": "x^3-x-1=0",
+      "verify": {
+        "kind": "roots",
+        "var": "x",
+        "values": [
+          "1.324717957244746025960908854478097340734"
+        ]
+      },
+      "inputs": {
+        "ce": {
+          "mathjson": [
+            "Subtract",
+            [
+              "Subtract",
+              [
+                "Power",
+                "x",
+                3
+              ],
+              "x"
+            ],
+            1
+          ],
+          "op": "solve",
+          "var": "x"
+        },
+        "sympy": {
+          "expr": "x**3 - x - 1",
+          "op": "solve",
+          "var": "x"
+        },
+        "mathjs": null,
+        "numpy": null
+      },
+      "changelog": {
+        "table": "symbolic",
+        "group": "solve",
+        "order": 2
       }
     }
   ]

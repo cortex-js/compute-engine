@@ -62,6 +62,25 @@ const num = (boxed) => {
   return typeof v.re === 'number' ? v.re : Number(v.toString());
 };
 
+// Numeric real parts of a list of boxed roots, keeping only the (near-)real
+// ones. A complex root's `.N()` exposes `.im`; we drop |im| above a tolerance.
+function realRootValues(roots) {
+  const out = [];
+  for (const r of roots ?? []) {
+    const v = r.N();
+    const re = typeof v.re === 'number' ? v.re : Number(v.toString());
+    const im = typeof v.im === 'number' ? v.im : 0;
+    if (Number.isFinite(re) && Math.abs(im) < 1e-7) out.push(re);
+  }
+  return out;
+}
+
+// An `evaluate` result is "unevaluated" if it still carries the operator head
+// (Limit/Integrate/Sum) or prints one — i.e. no closed form was found.
+const UNEVAL = /^(Limit|Integrate|Sum|Product)$/;
+const isUnevaluated = (r) =>
+  UNEVAL.test(r.operator ?? '') || /\b(int|lim|sum)\(/.test(r.toString());
+
 try {
   if (input.op === 'N') {
     // Arbitrary-precision numeric / exact-integer evaluation.
@@ -109,6 +128,27 @@ try {
       const fa = num(result.subs({ [input.var]: ce.number(a) }));
       emit({ status: 'ok', text: result.toString(), values: [fb - fa], ...timing });
     }
+  } else if (input.op === 'evaluate') {
+    // Evaluate to an exact closed form (limit / definite or improper integral).
+    const build = () => ce.box(input.mathjson).evaluate();
+    const timing = timeit(build);
+    const result = build();
+    if (isUnevaluated(result)) {
+      emit({ status: 'unevaluated', text: result.toString(), values: [], ...timing });
+    } else {
+      emit({ status: 'ok', text: result.toString(), values: [num(result)], ...timing });
+    }
+  } else if (input.op === 'solve') {
+    const build = () => ce.box(input.mathjson).solve(input.var);
+    const timing = timeit(build);
+    const roots = build();
+    const values = realRootValues(roots);
+    emit({
+      status: values.length ? 'ok' : 'unevaluated',
+      text: (roots ?? []).map((r) => r.toString()).join(', '),
+      values,
+      ...timing,
+    });
   } else {
     emit({ status: 'error', error: `unknown op ${input.op}` });
   }

@@ -76,6 +76,7 @@ def run_sympy():
         symbols, sympify, simplify, diff, integrate, Integral, N,
         sqrt, log, exp, sin, cos, tan, atan, asin, pi, E, factorial, root,
         Rational, zeta, gamma, LambertW,
+        limit, Limit, Sum, oo, digamma, solve,
     )
     from sympy.core.cache import clear_cache
 
@@ -88,6 +89,7 @@ def run_sympy():
         "tan": tan, "atan": atan, "asin": asin, "pi": pi, "E": E,
         "factorial": factorial, "root": root, "Rational": Rational,
         "zeta": zeta, "gamma": gamma, "LambertW": LambertW,
+        "limit": limit, "integrate": integrate, "oo": oo, "digamma": digamma,
     }
     inp = KASE["inputs"]["sympy"]
     if inp is None:
@@ -142,6 +144,34 @@ def run_sympy():
             fb = float(result.subs(x, b).evalf(30))
             fa = float(result.subs(x, a).evalf(30))
             emit(status="ok", text=str(result), values=[fb - fa], **timing)
+
+    elif op == "evaluate":
+        # Limits / definite & improper integrals. Use an unrestricted symbol
+        # (the module-level x is declared positive for simplify domains, which
+        # would be wrong for an integral over (-oo, oo)).
+        xg = symbols("x")
+        nsg = {**ns, "x": xg}
+        parse_g = lambda: sympify(src, locals=nsg)
+        timing = timeit(parse_g, reset=clear_cache)
+        result = parse_g()
+        if result.has(Integral) or result.has(Limit) or result.has(Sum):
+            emit(status="unevaluated", text=str(result), values=[], **timing)
+        else:
+            emit(status="ok", text=str(result), values=[float(N(result, 30))], **timing)
+
+    elif op == "solve":
+        xg = symbols("x")
+        nsg = {**ns, "x": xg}
+        solve_g = lambda: solve(sympify(src, locals=nsg), xg)
+        timing = timeit(solve_g, reset=clear_cache)
+        sols = solve_g()
+        reals = []
+        for s in sols:
+            v = complex(N(s, 30))
+            if abs(v.imag) < 1e-9:
+                reals.append(v.real)
+        emit(status="ok" if reals else "unevaluated", text=str(sols), values=reals, **timing)
+
     else:
         emit(status="error", error="unknown op " + op)
 

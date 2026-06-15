@@ -22,3 +22,7 @@ Thumbs.db
 # Generated benchmark data (REPORT.md is kept under version control; the raw
 # machine-readable dump is regenerated on every run)
 results.json
+
+# Generated CHANGELOG tables (the content lands in the top-level CHANGELOG.md;
+# this stdout-mirror file is just the latest run's output)
+CHANGELOG-TABLES.md
