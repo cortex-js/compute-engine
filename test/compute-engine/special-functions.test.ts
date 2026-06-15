@@ -351,6 +351,20 @@ describe('BIGNUM SPECIAL FUNCTIONS', () => {
     );
   });
 
+  test('ψ(1) = -γ to 1000 digits — EulerGamma honors precision (ROADMAP B12)', () => {
+    // EulerGamma is computed on demand (Brent–McMillan), not read from a fixed
+    // ~858-digit literal. ψ(1), computed by an independent asymptotic series,
+    // must agree with -γ to the full working precision.
+    const ce = new ComputeEngine();
+    ce.precision = 1000;
+    // γ is delivered to the full requested precision (was capped at ~858).
+    expect(ce.box('EulerGamma').N().toString().length).toBe(1002);
+    const diff = ce
+      .box(['Subtract', ['Digamma', 1], ['Negate', 'EulerGamma']])
+      .N();
+    expect(diff.isSame(0)).toBe(true);
+  });
+
   test('high-precision ψ(0.5) = -γ - 2ln(2)', () => {
     // ψ(0.5) = -γ - 2ln(2) ≈ -1.96351002602142347...
     expectBignum(

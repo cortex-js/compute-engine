@@ -2047,6 +2047,43 @@ describe('Static constants', () => {
     expect(BigDecimal.PI.toString()).toMatch(/^3\.14159265358979323846/);
   });
 
+  describe('EULER_GAMMA (Brent–McMillan, ROADMAP B12)', () => {
+    // γ to 130 digits (reference).
+    const GAMMA_REF =
+      '0.5772156649015328606065120900824024310421593359399235988057672348848677267776646709369470632917467495146314472498070824809605';
+
+    test('matches the reference value to 100 digits', () => {
+      const saved = BigDecimal.precision;
+      try {
+        // Work above the compared width so the boundary digit is not the one
+        // being rounded (the reference is truncated, not rounded).
+        BigDecimal.precision = 130;
+        expect(BigDecimal.EULER_GAMMA.toString().slice(0, 102)).toBe(
+          GAMMA_REF.slice(0, 102)
+        );
+      } finally {
+        BigDecimal.precision = saved;
+      }
+    });
+
+    test('honors precision past the old ~858-digit cap (consistent at 1000 digits)', () => {
+      const saved = BigDecimal.precision;
+      try {
+        // The prior hardcoded ~858-digit literal produced only ~858 correct
+        // digits at precision 1000; a computed γ yields the full 1000.
+        BigDecimal.precision = 1000;
+        const g1000 = BigDecimal.EULER_GAMMA.toString();
+        expect(g1000.length).toBe(1002); // "0." + 1000 digits
+        // A higher-precision recompute, rounded back to 1000, must agree.
+        BigDecimal.precision = 1010;
+        const g1010to1000 = BigDecimal.EULER_GAMMA.toPrecision(1000).toString();
+        expect(g1010to1000).toBe(g1000);
+      } finally {
+        BigDecimal.precision = saved;
+      }
+    });
+  });
+
   test('constants are frozen (immutable)', () => {
     expect(Object.isFrozen(BigDecimal.ZERO)).toBe(true);
     expect(Object.isFrozen(BigDecimal.ONE)).toBe(true);

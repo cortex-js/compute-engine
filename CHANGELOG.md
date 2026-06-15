@@ -119,6 +119,11 @@
   Cohen–Villegas–Zagier acceleration, and all of these kernels compute with
   guard digits.
 
+- **`EulerGamma` (γ) now honors the requested precision.** It was previously a
+  fixed ~858-digit constant, so at higher `ce.precision` it silently stopped at
+  ~858 correct digits (making identities such as `Digamma(1) = -γ` appear wrong
+  past that point). It is now computed on demand to the full working precision.
+
 - **`Gamma` and the polygamma family are dramatically faster at high precision**
   (~340× at 300 digits — `Gamma(1/3)` ≈1.9 s → ≈5 ms; ~130× at 1000 digits). The
   Stirling-series kernels (`Gamma`, `GammaLn`, `Digamma`, `Trigamma`,

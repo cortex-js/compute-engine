@@ -90,6 +90,10 @@ export class BigDecimal {
   private static _piCache: BigDecimal | null = null;
   private static _piCachePrecision: number = 0;
 
+  /** Euler–Mascheroni constant γ, computed on demand (see EULER_GAMMA). */
+  private static _eulerGammaCache: BigDecimal | null = null;
+  private static _eulerGammaCachePrecision: number = 0;
+
   /** PI to current working precision. */
   static get PI(): BigDecimal {
     // Return PI with guard digits for intermediate computation accuracy.
@@ -115,6 +119,29 @@ export class BigDecimal {
     BigDecimal._piCache = pi;
     BigDecimal._piCachePrecision = prec;
     return pi;
+  }
+
+  /**
+   * The Euler–Mascheroni constant γ to current working precision.
+   *
+   * Computed on demand via the Brent–McMillan algorithm (see
+   * `computeEulerGamma`) and cached at the highest precision requested; lower
+   * requests round the cached value down. Unlike a hardcoded digit literal,
+   * this honors any `BigDecimal.precision` (the prior 858-digit literal capped
+   * γ-dependent results — see ROADMAP B12).
+   */
+  static get EULER_GAMMA(): BigDecimal {
+    const prec = BigDecimal.precision;
+    if (
+      BigDecimal._eulerGammaCache !== null &&
+      BigDecimal._eulerGammaCachePrecision >= prec
+    )
+      return BigDecimal._eulerGammaCache.toPrecision(prec);
+
+    const g = computeEulerGamma(prec);
+    BigDecimal._eulerGammaCache = g;
+    BigDecimal._eulerGammaCachePrecision = prec;
+    return g;
   }
 
   readonly significand: bigint;
@@ -1115,6 +1142,60 @@ export class BigDecimal {
 // ================================================================
 // Internal helpers
 // ================================================================
+
+/**
+ * Compute the Euler–Mascheroni constant γ to `digits` significant decimal
+ * digits via the (basic) Brent–McMillan algorithm:
+ *
+ *     γ = A(n)/B(n) − ln(n),     with truncation error  < π·e^{−4n}
+ *
+ * where, with H₀ = 0 and Hₖ = Hₖ₋₁ + 1/k,
+ *     B(n) = Σ_{k≥0} (nᵏ/k!)²            (= I₀(2n), a modified Bessel value)
+ *     A(n) = Σ_{k≥0} (nᵏ/k!)² · Hₖ
+ *
+ * n is chosen so the truncation error sits below the working tolerance:
+ * π·e^{−4n} < 10^{−work} ⇒ n ≳ work·ln10/4. The running term, A and B are each
+ * rounded back to `work` significant digits per step (the accumulating-product
+ * convention — see `mul`); A and B are individually ~e^{2n} but their ratio is
+ * O(1), so `work` relative digits on each suffices for A/B. The only
+ * transcendental needed is ln(n).
+ */
+function computeEulerGamma(digits: number): BigDecimal {
+  const work = digits + 20 + Math.ceil(Math.log10(digits + 10));
+  const savedPrec = BigDecimal.precision;
+  BigDecimal.precision = work;
+  try {
+    // Truncation bound π·e^{−4n} < 10^{−work} ⇒ n ≥ (work·ln10 + lnπ)/4, plus a
+    // small margin.
+    const n = Math.ceil((work * Math.LN10) / 4) + 5;
+    const nBig = new BigDecimal(n);
+    const n2 = nBig.mul(nBig); // n² (exact small integer)
+
+    let term = BigDecimal.ONE; // (nᵏ/k!)² at k = 0
+    let B = BigDecimal.ONE; // Σ term
+    let A = BigDecimal.ZERO; // Σ term·Hₖ  (k = 0 contributes 0 since H₀ = 0)
+    let H = BigDecimal.ZERO; // Hₖ
+
+    // A term no longer affects the work-digit A/B once it is ~10^{−work} below
+    // B. The term grows until k ≈ n then decreases monotonically, so this
+    // terminates (near k ≈ 4n in practice); maxK is only a safety backstop.
+    const relTol = BigDecimal.ONE.div(new BigDecimal(10).pow(work));
+    const maxK = 6 * n + 100;
+
+    for (let k = 1; k <= maxK; k++) {
+      const k2 = new BigDecimal(k).mul(k);
+      term = term.mul(n2).div(k2).toPrecision(work); // ·(n/k)²  (.div rounds)
+      H = H.add(BigDecimal.ONE.div(k)).toPrecision(work);
+      B = B.add(term).toPrecision(work);
+      A = A.add(term.mul(H)).toPrecision(work);
+      if (k > n && term.lt(B.mul(relTol))) break;
+    }
+
+    return A.div(B).sub(nBig.ln()).toPrecision(digits);
+  } finally {
+    BigDecimal.precision = savedPrec;
+  }
+}
 
 /**
  * Create a BigDecimal directly from significand + exponent, normalizing.
