@@ -2,9 +2,9 @@
 
 **Last updated:** 2026-06-15.
 
-This document tracks **remaining** work. Completed work is summarized in the
-condensed log at the bottom (full detail lives in git history, `CHANGELOG.md`,
-the linked source files, and `docs/rubi/RUBI.md` / `docs/fungrim/`).
+This document tracks **remaining** work; an item leaves this file once it
+lands. Detail on completed work lives in git history, `CHANGELOG.md`, the
+linked source files, and `docs/rubi/RUBI.md` / `docs/fungrim/`.
 
 ## Current state
 
@@ -45,8 +45,8 @@ not here.
 
 #### B9. `Solve` — beyond the Wester ceiling
 
-Base CE solves 14/21 of the Wester equations (the landed substitution and
-factoring work is in the completed log). The last two Wester gaps (`xˣ = x`,
+Base CE solves 14/21 of the Wester equations (substitution and zero-product
+factoring already landed). The last two Wester gaps (`xˣ = x`,
 `sin x = tan x`) are harness artifacts — the harness grades SymPy's arbitrary
 finite root-slices, not a CE capability gap — so the Wester `Solve` score is
 saturated at our principled ceiling. Remaining work, judged on its own merits
@@ -65,7 +65,8 @@ rather than by Wester:
 #### B11. Multivariate polynomial GCD — Stage C (Fateman-scale)
 
 The variadic `GCD` handles textbook multivariate cases (Brown's dense modular
-GCD; completed log), but the 7-variable **Fateman GCD benchmark** (Symbolica 4 s
+GCD in `multivariate-gcd.ts` — the baseline Zippel extends), but the 7-variable
+**Fateman GCD benchmark** (Symbolica 4 s
 / Mathematica 89 s / SymPy 61 min) exceeds the dense algorithm's complexity cap
 and defers. To reach Fateman scale: **Zippel** sparse interpolation (dense
 interpolation is the bottleneck at 7 variables), **multi-prime CRT + rational
@@ -78,7 +79,7 @@ fractions, and `Resultant` all want the same representation. Tracked against the
 
 #### B6. Audit-harness expansion
 
-The CE-vs-SymPy audit (`benchmarks/audit/`; completed log) already grades the
+The CE-vs-SymPy audit (`benchmarks/audit/`) already grades the
 `Solve`/`Resultant`/`GCD` heads through the real opt-in loaders. **Next:** add
 the Bondarenko integration set. (Rubi chapter translation — the lever for the
 indefinite-∫ gap, where `CE+R/F` recovers only 1 of 8 hard Wester integrals
@@ -129,8 +130,8 @@ number — the Wester `Solve` rows are saturated at our principled ceiling
 inverse forms beyond the current 5 solve seeds, via
 `loadIdentities(ce, { solve: true })` — but it needs **its own solving
 benchmark** distinct from Wester: pick or build one before investing, so progress
-is measurable. (Fungrim's *simplify*-side work is separate again — see item 5 and
-Strategic item 7, Fungrim Phase 4.)
+is measurable. (Fungrim's *simplify*-side work is separate again — see Strategic
+item 7, Fungrim Phase 4.)
 
 ### Bignum / numeric track
 
@@ -158,17 +159,21 @@ The item-17 / B-series performance pass is largely complete (`ln`, `exp`, `kˣ`,
 #### 7. Fungrim Phase 4 — branch-cut-safe simplify & exact pole asymptotics
 
 The analytic-property store (`ce.functionProperties`, pole-aware `N()`), the
-`Residue` operator, and the `onBranchCut` guard are in place (completed log).
-Two consumers of the store are only partially built:
+`Residue` operator, and the `onBranchCut` guard are in place. Two consumers of
+the store are only partially built:
 
 - **(a) Branch-cut-safe simplification — extend beyond logarithms.** The guard
   today protects only `ln(a) + ln(b) → ln(ab)` (`simplify-log.ts`). Apply the
   same fail-closed `onBranchCut` membership check to the other identities that
   can cross a cut: power/root products (`√a·√b → √(ab)`, `(ab)^p`), inverse-trig,
-  and the complex-domain Fungrim rules.
+  and the complex-domain Fungrim rules. `arithmetic-mul-div.ts` already gates the
+  related `(base^r)^e → base^(r·e)` fold on principal-branch soundness
+  (`foldIsSound`) — reuse that precedent rather than re-deriving the conditions.
 
 - **(c) Exact asymptotics at special-function poles.** `Residue` and the limit
-  engine currently *defer* when a gamma/zeta-family function sits at a pole:
+  engine currently *defer* when a gamma/zeta-family function sits at a pole (the
+  limit-side deferral is the pole soundness guard in `symbolic/limit.ts`, where
+  the exact asymptotic would slot in):
   `lim_{x→-1}(x+1)·Digamma(x)` stays unevaluated instead of computing `-1`, and a
   residue whose cofactor is itself an unreduced special function (`Gamma·Zeta` at
   1) is not handled. Both need real Laurent-series asymptotics for these
@@ -193,16 +198,15 @@ dischargeable) quantifies exactly what it would buy. Let demand justify it.
 
 ### Documentation
 
-- **`doc/14-guide-assumptions.md`** predates the Track-3 extension — document
-  part-predicates (`assume(Re(s) > 1)`, `Im(τ) > 0`, `|q| < 1`),
-  `NotEqual`/`SetMinus` domains, `And` conjunctions, the `'not-a-predicate'`
-  result, and the three-valued discharge semantics.
-- **`doc/15-guide-patterns-and-rules.md`** — document the `Rule.purpose` tags
-  (`simplify`/`transform`/`expand`), the `operators` dispatch hint, and
-  `ce.solveRules`/`ce.harmonizationRules`.
-- **`doc/15b-guide-extended-rules.md`** — refresh the performance numbers now
-  that per-head dispatch landed (item 5; loaded-simplify is now ~1.3× the
-  unloaded baseline).
+The three guide refreshes for the 2026-06 release have landed (verified against
+the running engine, 2026-06-15): `doc/14-guide-assumptions.md` (part-predicates,
+`NotEqual`/`SetMinus` domains, `And` conjunctions, the `'not-a-predicate'`
+result, three-valued discharge + like-with-like part-guard semantics);
+`doc/15-guide-patterns-and-rules.md` (`Rule.purpose` tags, the `operators`
+dispatch hint, `ce.solveRules`/`ce.harmonizationRules`); and
+`doc/15b-guide-extended-rules.md` (per-head dispatch perf refreshed to ~1.3× the
+unloaded baseline). Remaining:
+
 - If Tycho/GP consumes this release: add a `loadIdentities` section to the
   importer guide in the Tycho repo (consumer-facing docs live with the
   consumer).
@@ -233,129 +237,3 @@ is in git history. The only items deliberately left open:
 recurring bug class (A3, G3, the sets/Union/Range contains family, NaN
 comparisons); validation-by-corpus (the Fungrim harness) found 15 engine bugs
 that targeted review missed — keep running it.
-
----
-
-## Completed (condensed log)
-
-Full detail for each is in git history, `CHANGELOG.md`, the linked source, and
-`docs/rubi/RUBI.md` / `docs/fungrim/`.
-
-### Integration & evaluation prerequisites (Rubi-driven track)
-
-- **1. Fungrim Phase 2 — solve templates** (2026-06-14): 5 curated solve seeds
-  ship under `loadIdentities(ce, { solve: true })`; `compile-rules.ts`
-  self-test fix + `recompile-drift.ts` zero-divergence gate; artifact fully
-  reproducible (1380 simplify + 5 solve).
-- **5. Per-head aggregated rule dispatch** (2026-06-15): closed the
-  loaded-simplify gap — `simplify()` over the reference corpus went from ~1.6×
-  the unloaded baseline to ~1.3× (target ≤1.5×). `aggregateHotHeadDispatch`
-  (`boxed-expression/rule-index.ts`) folds each hot head's loader-registered
-  functional rules into ONE per-head dispatcher, in the engine's *cached*
-  simplification set only — so the per-rule `applyRule`/`candidateRules`
-  scaffolding is paid once per head per node instead of ~60×. Both pinned
-  contracts hold unchanged: the public `ce.simplificationRules` array still
-  carries every rule (count + per-rule `fungrim:` id), and the dispatcher
-  surfaces the firing inner rule's own `because`/`purpose`. Equivalence is
-  pinned by `rule-aggregation.test.ts` (synthetic multi-fire/ordering oracle +
-  a byte-identical aggregated-vs-reference corpus differential, incl. real
-  hot-head fires) and the unchanged `rule-dispatch-regression` snapshots.
-- **2. Interruptible evaluation** (2026-06-10, residuals 2026-06-12): engine
-  loops respect `ce._deadline` via `checkDeadline` (collections, number theory,
-  `Limit`/`extrapolate`, Monte-Carlo); Stage-2 watchdog/denylist retired,
-  full {none, real-simple} slice runs unattended.
-- **3. CI for the corpus pipeline** (2026-06-12): `corpus-pipeline` job —
-  Stage-1 box-check + `artifact-freshness.ts` stride-sample recompile.
-- **4. Tier-2 numeric kernels** (2026-06-10): `EllipticK/E`, `AGM`,
-  `Hypergeometric2F1`/`1F1`, `JacobiTheta`, `DedekindEta` as built-ins with
-  machine/bignum/complex kernels (`library/special-functions.ts`) + the
-  `applyN` NaN-cascade dispatcher.
-- **9. ₂F₁ analytic continuation for z ≥ 1** (2026-06-12): six Kummer maps by
-  smallest |w|, principal branch as the limit from below on the cut.
-- **10. `x/√(x²) → 1`** (2026-06-12): gated the `Product.mul`
-  `(base^r)^e → base^(r·e)` fold on the existing soundness conditions.
-- **11. Deadline checks in `simplify()`** (2026-06-12): `simplifyExpression` +
-  `polynomialDivide` armed; rule engine rethrows `CancellationError`.
-- **12. `antiderivative.ts` correctness** (2026-06-12): a-term drop
-  (`polynomialGCD` null-coeff bug), incomplete partial fractions, stack
-  overflows, symbolic-exponent RangeError — all fixed.
-- **13. Small engine follow-ups** (2026-06-12): `ce.number()` malformed-array
-  validation; `AppellF1` numeric kernel.
-- **14. Incomplete elliptic integrals** (2026-06-12): Carlson `RF/RC/RD/RJ`
-  kernels → `EllipticF`/`EllipticE(φ,m)`/`EllipticPi`.
-- **15. Fractional-power principal-branch soundness in `Product`** (2026-06-12):
-  five unsound sign/factor moves across fractional powers gated.
-- **16. `factor()`↔`mul` canonicalization loop + `x^(-1/2)` unification**
-  (2026-06-13): non-distributing factored product; `a^(-1/n) → 1/Root(a, n)`.
-- **6. Corpus refresh** (2026-06-10, moot): upstream `fungrim` unchanged since
-  the snapshot; instead published the translator fork and reported+fixed two
-  upstream bug families via PRs; corpus regenerated (1,350 → 1,376 rules).
-- **7. Fungrim Phase 4 — store + first consumers** (2026-06-15): the
-  analytic-property metadata store (`data/fungrim/properties.json` → core
-  artifact via `compile-properties.ts`, queried by `ce.functionProperties`, with
-  a `--check` freshness gate) and pole-aware `N()` (`Digamma(0).N()` → `~oo`, not
-  NaN); the `Residue(f, x, a)` operator (pole-order detection + limit formula +
-  store-gated `Gamma`/`Digamma`/`Zeta` closed forms, incl. composite cofactors
-  like `Gamma(x)/(x−5)`); a special-function-pole soundness guard in the symbolic
-  limit engine (no wrong value at a pole); and the `onBranchCut` guard wired into
-  `ln(a)+ln(b)` simplification. The remaining branch-cut and exact-asymptotics
-  work is **Strategic item 7**.
-
-### Bignum / numeric performance (item 17 + B1/B12/B13)
-
-- **17.1–17.7** (2026-06-13): base-2 transcendental kernel promoted to `src/`
-  (2–4× faster, 0 ULP); AGM `ln`; binary-split `ln 2`; `giant_steps` `fpln`;
-  on-demand π (Chudnovsky); elementary completeness
-  (`expm1`/`log1p`/`log2`/`asinh`/`acosh`/`atanh`/`nthRoot`); directed rounding.
-- **17.8–17.9** (2026-06-13): SymPy/mpmath comparison report
-  (`BIGNUM-COMPARISON.md`); `exp` `ln10`-cache-thrash + `Exp→Power(E,·)` fixes.
-- **17.10/17.11/17.13** (2026-06-14): AGM-`ln` threshold retune (4200 → 2300
-  bits); recursive giant-steps floor `isqrt` (~2× sqrt); `eˣ` redundant-`ln(e)`
-  fix (`Exp(x).N()` ~3.2×).
-- **17.14/17.16** (2026-06-15): `toPrecision` base-10 rounding tax (~32%);
-  `kˣ` memoizes `ln(k)` (2ˣ/10ˣ ~2.8×).
-- **B1** (2026-06-13/14): special-function `N()` honors requested precision
-  (Cohen–Villegas–Zagier ζ, guard digits); `Γ` speed ~130–340× (Stirling shift,
-  unbounded-significand fix).
-- **B12** (2026-06-14): `EulerGamma` computed on demand to working precision
-  (Brent–McMillan), removing the ~858-digit cap.
-- **B13** (2026-06-14, audit/closed): swept every accumulating `BigDecimal.mul`
-  — no remaining unrounded sites; `mul` stays exact by contract, convention
-  documented.
-
-### Symbolic capability (benchmark-surfaced)
-
-- **B2** (2026-06-13): symbolic integration coverage — radicals/fractional
-  powers, Gaussian → `Erf`/`Erfi`, Fresnel, `Si`/`Ci`/`Ei`/`li`, exact partial
-  fractions (incl. biquadratic + any ℚ-factorable denominator), `secⁿ`/`tanⁿ`,
-  poly×eˣ×trig, nested-radical denesting.
-- **B3** (2026-06-13): definite/improper integrals exact (bound substitution +
-  transcendental-of-exact-stays-symbolic; oscillatory via Wynn's ε-algorithm;
-  `isFinite` structural propagation).
-- **B4** (2026-06-13): `Factor` returns polynomial (cyclotomic) factors for
-  `xⁿ − 1` — gated the difference-of-even-powers `√`/`Abs` heuristic.
-- **B5** (2026-06-13): public polynomial `GCD` operator (univariate).
-- **B6** (2026-06-13): CE-vs-SymPy audit + Wester CAS suite harness
-  (`benchmarks/audit/`) — *expansion still open above*.
-- **B7** (2026-06-13): `Limit` overflow/cancellation guard — no more silent
-  wrong values on Gruntz-class limits.
-- **B8** (2026-06-13): symbolic limit engine (`symbolic/limit.ts`) — L'Hôpital,
-  growth-order classifier, dominant-term extraction; Wester 2/6 → 4/6.
-- **B9 (partial)** (2026-06-13/15): higher-degree polynomials (numeric
-  Durand–Kerner), `Abs`, same-base powers, sqrt-elimination, rational-power
-  homogenization, exact biquadratic reduction, single-generator substitution
-  (`u = g(x)`), zero-product factoring — Wester Solve 13/21 → **14/21**
-  (`√(ln x) = ln√x` now solved); *2 cases remain, both harness artifacts
-  (see above)*.
-- **B10** (2026-06-13): `Resultant` operator (Euclidean recursion).
-- **B11 (Stage B)** (2026-06-13): multivariate GCD via Brown's dense modular
-  algorithm — *Stage C (Fateman-scale) still open above*.
-- **∫|ax+b|** (2026-06-15): absolute-value-of-a-linear-argument antiderivative
-  in the core engine — `∫|x| dx = x|x|/2`, `∫|ax+b| dx = (ax+b)|ax+b|/(2a)`
-  (valid for all x); closes the one Wester indefinite-∫ gap not owned by Rubi.
-
-### Review
-
-The June 2026 codebase review (REVIEW.md, ~120 findings + 15 follow-on
-discoveries) is fully dispositioned — open low-priority items are listed under
-*Review residue* above.
