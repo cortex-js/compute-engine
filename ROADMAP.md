@@ -103,10 +103,66 @@ the `benchmarks/audit/` Fateman footnote.
 #### B6. Audit-harness expansion
 
 The CE-vs-SymPy issue-finder (`benchmarks/audit/` — `audit.ts` + the Wester CAS
-suite in `wester.ts`) is built and graded by operation invariant. **Next:** add
-`Solve`, `PolynomialGCD`, `Resultant` heads and the Bondarenko integration set;
-translate more Rubi rule sections (the audit's `CE+R/F` column recovers only
-algebraic integrals today — 1 of 8 hard Wester indefinite integrals).
+suite in `wester.ts`) is built and graded by operation invariant; `wester.ts`
+already grades the `Solve`/`Resultant`/`GCD` heads and runs its `CE+R/F` engine
+through the real opt-in loaders (`loadIdentities` + `loadIntegrationRules`).
+**Next:** add the Bondarenko integration set. Rubi chapter translation — the
+lever for the indefinite-∫ gap (the `CE+R/F` column recovers only algebraic
+integrals today, 1 of 8) — is its own track now: see **Coverage tracks → Rubi**.
+
+### Coverage tracks
+
+Two opt-in libraries extend coverage **without touching the core engine**:
+**Rubi** (integration rules, `loadIntegrationRules(ce)`) and **Fungrim**
+(identities, `loadIdentities(ce, { solve: true })`). The remaining Wester gap to
+SymPy is concentrated and maps cleanly onto these, so each is a self-contained
+track measured by **its own suite** — the 48-case Wester harness is a spot-check,
+not the scoreboard. The two tracks are independent and should not gate each other.
+
+#### R. Rubi — integration coverage by chapter
+
+**State:** only **Chapter 1 (Algebraic functions)** is translated (67 rule-docs
+→ ~2.6k compiled rules, bundled in
+`src/compute-engine/rubi/rubi-rules-data.json`, exposed via
+`@cortex-js/compute-engine/integration-rules`). Chapter 1 has already paid out
+everything Wester asks of it: of the 8 hard Wester indefinite integrals, `CE+R/F`
+closes the single *algebraic* one (`(3x−5)²/(2x−1)^(7/2)`).
+
+**The 6 open Wester indefinite-∫ gaps live entirely in untranslated chapters**,
+so closing them *is* chapter translation (not tuning what we have), and it lines
+up with broad everyday payoff:
+
+- **Trig** — the three `1/(3cos x + 4sin x + k)` (Weierstrass / tangent-half-angle).
+- **Exponential** — `2^x/√(4^x+1)` (`u = 2^x → arcsinh`).
+- **Hyperbolic** — `sinh⁴x / cosh²x`.
+- (`|x|` is piecewise, not a Rubi-owned rule — see the core carve-out below.)
+
+**Plan:** translate chapters in gap-priority order, **trig first** — the biggest
+single Wester cluster *and* the broadest general payoff, and a de-risking
+**pilot** that calibrates the real cost/ROI per chapter before committing to the
+full multi-chapter port (Julia-port playbook in `docs/rubi/RUBI.md`). Then
+exponential, then hyperbolic. Measure each chapter against the **Rubi test
+suite** (the real metric), re-running Wester incrementally as a spot-check after
+each — not once at the end. Per-chapter coverage + packaging tracked in
+`docs/rubi/RUBI.md` §5.
+
+#### F. Fungrim — solving coverage
+
+**Decoupled from Wester.** The two remaining Wester `Solve` gaps are harness
+artifacts (B9), so additional Fungrim solve rules will **not** move that
+number — the Wester `Solve` rows are saturated at our principled ceiling
+(14/21). This track is worth pursuing on its own merits — LambertW / Ln–Exp
+inverse forms beyond the current 5 solve seeds, via
+`loadIdentities(ce, { solve: true })` — but it needs **its own solving
+benchmark** distinct from Wester: pick or build one before investing, so progress
+is measurable. (Fungrim's *simplify*-side work is separate again — see item 5 and
+Strategic item 7, Fungrim Phase 4.)
+
+#### Core carve-out — `∫|x| dx`
+
+The one indefinite-∫ gap worth fixing in the **core** antiderivative rather than
+via Rubi: `∫|x| dx` is a piecewise / sign-split, not an integration *rule* Rubi
+owns well. Cheap, real, and outside the chapter-translation cadence above.
 
 ### Bignum / numeric track
 
@@ -154,11 +210,17 @@ and `function-properties.test.ts` cover it. See the completed log.
   (`symbolic/residue.ts`), with store-gated closed forms for `Gamma`/`Digamma`/
   `Zeta` residues, including in products/quotients with an analytic cofactor
   (`c·Gamma(x)`, `Gamma(x)/(x−5)`, `x²·Digamma(x)`) via the `Res[h·s] = h(a)·ρ`
-  factorization. *Remaining:* teach the symbolic limit engine (B8) special-
-  function pole asymptotics (so the generic path resolves them directly, and a
-  cofactor that is itself an unreduced special function — e.g. `Gamma·Zeta` at 1
-  — stops deferring), residue at infinity, and a "sum of residues in a region"
-  helper.
+  factorization. The symbolic limit engine also got a **soundness guard
+  (2026-06-15)**: it no longer returns a wrong finite value when a special
+  function sits at one of its poles (`lim_{x→-1}(x+1)·Digamma(x)` was a confident
+  `0`; it now defers — `symbolic/limit.ts`, detection via the pole-aware `N()`
+  store). *Remaining:* the harder half — **exact** asymptotic (Laurent) expansion
+  of special functions at poles, so the limit engine *computes* these (e.g.
+  `→ -1`) instead of deferring, and the generic residue path then handles
+  composite forms whose cofactor is itself an unreduced special function
+  (`Gamma·Zeta` at 1). A leading-term rewrite is unsound here
+  (`lim_{x→0} Gamma(x)−1/x = −γ`, not 0), so it needs real series machinery.
+  Also: residue at infinity, and a "sum of residues in a region" helper.
 
 **Effort:** open-ended; (a) is a design item in its own right, startable from the
 populated store (`ce.functionProperties`).

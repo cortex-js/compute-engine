@@ -25,6 +25,14 @@
   integer. (Roots are unaffected: `(x³)^{1/3} = x` still holds, since odd-index
   roots use the real-root convention.)
 
+- **Logarithms are no longer combined across a branch cut.** `ln(a) + ln(b) →
+  ln(ab)` (and the `log` and subtraction variants) is only valid on the
+  principal branch; for arguments on the negative real axis the two sides differ
+  by a multiple of `2πi`. For example `ln(-2) + ln(-3)` no longer simplifies to
+  the inequivalent `ln(6)` (its true value is `ln(6) + 2πi`). The combine still
+  applies to positive and unconstrained-symbolic arguments. The guard consults
+  the analytic-property store's branch-cut records (see Special Functions).
+
 - **`N()` at a known pole now returns `ComplexInfinity` instead of `NaN`.** When
   a function is evaluated numerically at a pole recorded in the new
   analytic-property metadata store (see Special Functions), the result is
@@ -40,6 +48,13 @@
   `lim(x→0) sin(x)/x = 1`, `lim(x→∞) (1+1/x)^x = e`, and
   `lim(x→∞) arctan(x) = π/2`. Limits that cannot be determined reliably fall
   back to numeric evaluation or remain unevaluated. `NLimit` remains numeric.
+
+- **Limits no longer return a wrong value at a special-function pole.** A limit
+  whose expression contains a special function (`Gamma`, `Digamma`, `PolyGamma`,
+  `Zeta`, …) evaluated at one of its poles — e.g. `lim(x→-1) (x+1)·Digamma(x)` —
+  previously substituted the pole as a finite value and returned a confident
+  wrong result (`0`). Such limits now stay unevaluated (or are recovered
+  numerically where sampling allows) rather than reporting a false value.
 
 - **Symbolic integration supports many more integrands**, including:
   - Gaussian integrals and quadratic exponentials using `Erf` and `Erfi`

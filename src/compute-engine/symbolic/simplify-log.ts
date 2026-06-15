@@ -1,5 +1,6 @@
 import type { Expression, RuleStep } from '../global-types';
 import { isFunction, sym } from '../boxed-expression/type-guards';
+import { onBranchCut } from '../function-properties';
 
 /**
  * Logarithm simplification rules consolidated from simplify-rules.ts.
@@ -662,7 +663,16 @@ export function simplifyLog(x: Expression): RuleStep | undefined {
     }
 
     // Combine Ln terms: ln(a) + ln(b) -> ln(ab), ln(a) - ln(b) -> ln(a/b)
-    if (lnTerms.length >= 2) {
+    //
+    // Branch-cut guard (ROADMAP item 7a): the combine is unsound when an
+    // operand lies on Ln's branch cut (the negative real axis): the principal
+    // values differ by a multiple of 2πi (e.g. ln(-2) + ln(-3) = ln(6) + 2πi,
+    // not ln(6)). Skip the combine when any participating argument is provably
+    // on the cut; positive and unconstrained-symbolic arguments are unaffected.
+    if (
+      lnTerms.length >= 2 &&
+      !lnTerms.some((t) => onBranchCut(ce, 'Ln', t.arg))
+    ) {
       // Combine all Ln terms: multiply positives, divide negatives
       // Result is ln(product of positives / product of negatives)
       let numerator = ce.One;
@@ -694,8 +704,11 @@ export function simplifyLog(x: Expression): RuleStep | undefined {
     }
 
     // Combine Log terms with same base: log_c(a) + log_c(b) -> log_c(ab)
+    // Same branch-cut guard as the Ln combine above: the logarithm's
+    // principal-branch cut on its argument is the negative real axis for any
+    // real base, so the argument is checked against Ln's cut record.
     for (const [, terms] of logTerms) {
-      if (terms.length >= 2) {
+      if (terms.length >= 2 && !terms.some((t) => onBranchCut(ce, 'Ln', t.arg))) {
         let numerator = ce.One;
         let denominator = ce.One;
         for (const t of terms) {

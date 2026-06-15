@@ -164,6 +164,52 @@ export function getFunctionProperties(
   return props;
 }
 
+// Operators that carry at least one BranchCuts record — a cheap gate so
+// `onBranchCut` only does membership work for functions that have branch cuts.
+const BRANCH_CUT_OPERATORS: ReadonlySet<string> = new Set(
+  Object.keys(DATA.operators).filter((op) =>
+    DATA.operators[op].some((r) => r.property === 'BranchCuts')
+  )
+);
+
+/**
+ * True when `arg` provably lies on a branch cut of `operator`, per the store's
+ * `BranchCuts` record (ROADMAP item 7a). Used to block simplification rewrites
+ * that would cross a branch cut — e.g. `ln(a) + ln(b) → ln(ab)` is unsound when
+ * an operand is on the negative real axis (`ln(-2) + ln(-3) ≠ ln(6)`, they
+ * differ by `2πi`).
+ *
+ * A `BranchCuts` value is a `Set` of cut regions (e.g. `Ln` ⇒
+ * `Set(Interval(Open(-oo), 0))`); `arg` is on a cut when it is a member of any
+ * region. Fail-closed: an undecidable / symbolic membership returns `false`
+ * (treated as "not provably on the cut"), so the guard never blocks a rewrite
+ * it cannot justify — it only ever stops a provably-unsound one.
+ */
+export function onBranchCut(
+  ce: IComputeEngine,
+  operator: string,
+  arg: Expression
+): boolean {
+  if (!BRANCH_CUT_OPERATORS.has(operator)) return false;
+  const cuts = getFunctionProperties(ce, operator)?.branchCuts;
+  if (cuts === undefined) return false;
+
+  // The value is a Set of cut regions; test membership in each region. (A bare
+  // region — not wrapped in a Set — is treated as a single region.)
+  const setOps = (cuts as { ops?: ReadonlyArray<Expression> }).ops;
+  const regions =
+    cuts.operator === 'Set' && setOps !== undefined ? setOps : [cuts];
+  for (const region of regions) {
+    try {
+      if (ce.function('Element', [arg, region]).evaluate().valueOf() === true)
+        return true;
+    } catch {
+      /* undecidable region: fall through (fail-closed) */
+    }
+  }
+  return false;
+}
+
 // Operators that carry at least one Poles record — a cheap gate so the numeric
 // evaluator only does membership work for functions that can have poles.
 const POLE_OPERATORS: ReadonlySet<string> = new Set(
