@@ -1565,15 +1565,18 @@ describe('TRANSCENDENTAL AND SUBSTITUTION EQUATIONS (B9)', () => {
     `);
   });
 
-  test('x^{2/3} + x^{1/3} - 2 = 0 → x = 1 (principal branch)', () => {
-    // u = x^{1/3} solves u²+u-2=0 → u = 1, -2. x = -8 (from u = -2) is dropped:
-    // the engine uses the principal branch, where (-8)^{2/3} is not real.
+  test('x^{2/3} + x^{1/3} - 2 = 0 → x = 1, -8 (real-root convention)', () => {
+    // u = x^{1/3} solves u²+u-2=0 → u = 1, -2, so x = u³ = 1, -8. Both are
+    // real solutions under CE's real-root convention for odd roots: at x = -8,
+    // x^{1/3} = -2 and x^{2/3} = (-2)² = 4, so 4 + (-2) - 2 = 0. (x = -8 was
+    // previously dropped only because (-8)^{2/3} numericized to NaN.)
     const result = expr('x^{2/3}+x^{1/3}-2=0')
       .solve('x')
       ?.map((x) => x.json);
     expect(result).toMatchInlineSnapshot(`
       [
         1,
+        -8,
       ]
     `);
   });
