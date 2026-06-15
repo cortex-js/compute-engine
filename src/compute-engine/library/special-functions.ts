@@ -34,6 +34,7 @@ import {
   appellF1Complex,
   jacobiTheta,
   dedekindEta,
+  eisensteinE,
   agmComplex,
 } from '../numerics/numeric-complex';
 
@@ -297,6 +298,28 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
               dedekindEta
             )
           : undefined,
+    },
+
+    EisensteinE: {
+      description:
+        'Normalized Eisenstein series Eₛ(τ) of even weight s ≥ 2, Im(τ) > 0.',
+      complexity: 8800,
+      // `s` is validated in the evaluate handler ('number' rather than
+      // 'integer' so that rule-pattern wildcards — typed 'complex' — box; see
+      // JacobiTheta).
+      signature: '(number, number) -> number',
+      type: () => 'finite_number',
+      evaluate: (ops, { numericApproximation, engine }) => {
+        if (!numericApproximation) return undefined;
+        const s = asSmallInteger(ops[0]);
+        if (s === null || s < 2 || s % 2 !== 0) return undefined;
+        return applyN(
+          [ops[1]],
+          (tau) => eisensteinE(s, engine.complex(tau, 0)),
+          undefined,
+          (tau) => eisensteinE(s, tau)
+        );
+      },
     },
 
     ExpIntegralEi: {

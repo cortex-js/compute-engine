@@ -83,7 +83,6 @@
 "Divides": {"signature":"(integer, integer) -> boolean","description":null,"arity":2},
 "DivisorSigma": {"signature":"(integer, integer) -> complex","description":null,"arity":2},
 "Divisors": {"signature":"(integer) -> set<integer>","description":null,"arity":1},
-"EisensteinE": {"signature":"(integer, complex) -> complex","description":"Normalized Eisenstein series","arity":2},
 "EisensteinG": {"signature":"(integer, complex) -> complex","description":"Eisenstein series","arity":2},
 "EllipticRootE": {"signature":"(integer, complex) -> complex","description":null,"arity":2},
 "EulerQSeries": {"signature":"(complex) -> complex","description":"Euler's q-series","arity":1},

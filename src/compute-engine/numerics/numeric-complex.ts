@@ -1,5 +1,6 @@
 import { Complex } from 'complex-esm';
 import './complex-esm-augment'; // adds the 1-arg `Complex.equals` overload
+import { bernoulliRational } from './bernoulli';
 
 // Lanczos approximation coefficients (g = 7, n = 9), accurate to ~15 digits
 // for the principal branch. See Numerical Recipes / mathjs gamma().
@@ -878,4 +879,47 @@ export function dedekindEta(tau: Complex): Complex {
     if (qk.abs() < 1e-18) break;
   }
   return nomePower(tau, 1 / 12).mul(prod);
+}
+
+/**
+ * Normalized Eisenstein series Eₛ(τ) of even weight `s ≥ 2`, for `Im(τ) > 0`.
+ *
+ *   Eₛ(τ) = 1 − (2s / Bₛ) · Σ_{m≥1} m^{s−1} · qᵐ/(1 − qᵐ),   q = e^{2πiτ}
+ *
+ * This is the Lambert-series form of `1 − (2s/Bₛ) Σ σ_{s−1}(n) qⁿ` (the
+ * divisor-sum q-expansion, e.g. Fungrim 10cdf4/f8dfaf/e20db0). The coefficient
+ * `2s/Bₛ` evaluates to the familiar 24, 240, 504, … for s = 2, 4, 6, …
+ *
+ * Returns NaN outside the upper half-plane, for non-even s, or when |q| is too
+ * close to 1 to converge at machine precision.
+ */
+export function eisensteinE(s: number, tau: Complex): Complex {
+  if (tau.isNaN()) return C_NAN;
+  if (!Number.isInteger(s) || s < 2 || s % 2 !== 0) return C_NAN;
+  if (tau.im <= 0) return C_NAN;
+
+  const q = tau.mul(new Complex(0, 2 * Math.PI)).exp(); // e^{2πiτ}
+  const absQ = q.abs();
+  if (absQ >= 1) return C_NAN;
+
+  // Coefficient 2s/Bₛ (an integer/rational; exact via the bigint Bernoulli).
+  const [bNum, bDen] = bernoulliRational(s);
+  if (bNum === 0n) return C_NAN;
+  const coeff = (2 * s * Number(bDen)) / Number(bNum);
+  if (!Number.isFinite(coeff)) return C_NAN; // weight too large for a float kernel
+
+  // Σ m^{s−1} qᵐ/(1 − qᵐ): exponential decay in |q|ᵐ dominates the m^{s−1}
+  // growth, so truncate once the (coefficient-amplified) term is negligible.
+  const mMax = Math.min(100_000, Math.ceil(-40 / Math.log10(absQ)) + 1);
+  if (mMax >= 100_000) return C_NAN; // |q| too close to 1
+
+  let sum: Complex = C_ZERO;
+  let qm: Complex = q; // qᵐ
+  for (let m = 1; m <= mMax; m++) {
+    const term = qm.div(C_ONE.sub(qm)).mul(new Complex(Math.pow(m, s - 1), 0));
+    sum = sum.add(term);
+    if (term.abs() * Math.abs(coeff) < 1e-18 && m > s) break;
+    qm = qm.mul(q);
+  }
+  return C_ONE.sub(sum.mul(new Complex(coeff, 0)));
 }

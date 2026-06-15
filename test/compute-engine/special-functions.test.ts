@@ -1225,6 +1225,57 @@ describe('DEDEKIND ETA FUNCTION', () => {
   });
 });
 
+describe('EISENSTEIN SERIES', () => {
+  test('E₂(i) = 3/π ≈ 0.954929658551372', () => {
+    expectApprox(
+      ce.expr(['EisensteinE', 2, 'ImaginaryUnit']),
+      3 / Math.PI,
+      1e-12
+    );
+  });
+
+  test('E₄(i) ≈ 1.4557628922687093', () => {
+    expectApprox(
+      ce.expr(['EisensteinE', 4, 'ImaginaryUnit']),
+      1.4557628922687093,
+      1e-12
+    );
+  });
+
+  test('E₆(i) = 0 (i is an elliptic fixed point)', () => {
+    const r = ce.expr(['EisensteinE', 6, 'ImaginaryUnit']).N();
+    expect(Math.hypot(r.re, r.im ?? 0)).toBeLessThan(1e-12);
+  });
+
+  test('E₄(e^{2πi/3}) = 0 (the other elliptic fixed point)', () => {
+    const r = ce
+      .expr(['EisensteinE', 4, ['Complex', -0.5, Math.sqrt(3) / 2]])
+      .N();
+    expect(Math.hypot(r.re, r.im ?? 0)).toBeLessThan(1e-11);
+  });
+
+  test('Eisenstein relation E₈ = E₄²: E₈(i) = E₄(i)²', () => {
+    const e4 = ce.expr(['EisensteinE', 4, 'ImaginaryUnit']).N().re;
+    expectApprox(ce.expr(['EisensteinE', 8, 'ImaginaryUnit']), e4 * e4, 1e-11);
+  });
+
+  test('real τ stays symbolic (needs Im(τ) > 0)', () => {
+    const r = ce.expr(['EisensteinE', 4, 0.5]).N();
+    expect(r.operator).toBe('EisensteinE');
+  });
+
+  test('odd weight stays symbolic', () => {
+    const r = ce.expr(['EisensteinE', 3, 'ImaginaryUnit']).N();
+    expect(r.operator).toBe('EisensteinE');
+  });
+
+  test('exact argument stays symbolic under evaluate()', () => {
+    expect(
+      ce.expr(['EisensteinE', 4, 'ImaginaryUnit']).evaluate().operator
+    ).toBe('EisensteinE');
+  });
+});
+
 describe('TIER-2 KERNELS: BIGNUM PRECISION', () => {
   // `ce.precision` mutates the GLOBAL BigDecimal.precision static:
   // use a dedicated engine and restore precision afterwards.

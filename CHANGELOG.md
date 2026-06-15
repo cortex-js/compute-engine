@@ -222,6 +222,13 @@
   j-function and the θ₁/θ₂ logarithmic derivatives — recovered because the
   inequality form is verifiable where the opaque set was not.
 
+- **`EisensteinE(s, τ)` now evaluates numerically.** The normalized Eisenstein
+  series of even weight `s ≥ 2` gets a numeric kernel (Lambert-series q-expansion
+  in the upper half-plane), joining `JacobiTheta`/`DedekindEta`. For example
+  `EisensteinE(4, i).N()` is `1.45576…`, `EisensteinE(2, i).N()` is `3/π`, and
+  `EisensteinE(6, i).N()` is `0` (an elliptic fixed point). Exact arguments stay
+  symbolic under `evaluate()`; the kernel requires `Im(τ) > 0`.
+
 - **New analytic-property metadata store.** `ce.functionProperties(name)`
   exposes per-operator analytic properties drawn from the Fungrim corpus —
   poles, zeros, branch points and cuts, residues, and holomorphic/meromorphic
