@@ -132,12 +132,6 @@ benchmark** distinct from Wester: pick or build one before investing, so progres
 is measurable. (Fungrim's *simplify*-side work is separate again — see item 5 and
 Strategic item 7, Fungrim Phase 4.)
 
-#### Core carve-out — `∫|x| dx`
-
-The one indefinite-∫ gap worth fixing in the **core** antiderivative rather than
-via Rubi: `∫|x| dx` is a piecewise / sign-split, not an integration *rule* Rubi
-owns well. Cheap, real, and outside the chapter-translation cadence above.
-
 ### Bignum / numeric track
 
 The item-17 / B-series performance pass is largely complete (`ln`, `exp`, `kˣ`,
@@ -356,6 +350,9 @@ Full detail for each is in git history, `CHANGELOG.md`, the linked source, and
 - **B10** (2026-06-13): `Resultant` operator (Euclidean recursion).
 - **B11 (Stage B)** (2026-06-13): multivariate GCD via Brown's dense modular
   algorithm — *Stage C (Fateman-scale) still open above*.
+- **∫|ax+b|** (2026-06-15): absolute-value-of-a-linear-argument antiderivative
+  in the core engine — `∫|x| dx = x|x|/2`, `∫|ax+b| dx = (ax+b)|ax+b|/(2a)`
+  (valid for all x); closes the one Wester indefinite-∫ gap not owned by Rubi.
 
 ### Review
 
