@@ -41,27 +41,6 @@ not here.
 
 ## Remaining work
 
-### Near-term
-
-#### 5. Per-head aggregated rule dispatch
-
-**What:** close the loaded-simplify benchmark gap: with the 1,376-rule
-artifact, `simplify()` over the reference corpus runs at ~1.58× the unloaded
-baseline (target ≤1.5×; Phase 1's 558 rules ran at 1.16×). The residual cost
-is per-rule `applyRule`/`candidateRules` scaffolding for the ~60 wrapper
-consultations per arithmetic node.
-
-**How:** aggregate hot-head rules into one dispatcher per head. This was
-deliberately not done in the loader because it conflicts with the pinned
-contract that `ce.simplificationRules.length` reflects per-rule registration
-and each rule's `fungrim:` id surfaces in simplify steps — so it needs a small
-design first (e.g. dispatcher-level step attribution, or relaxing the count
-contract). The loader's pre-screen machinery (rarity-ranked required-feature
-sets, WeakMap-memoized per-expression feature sets in
-`src/compute-engine/fungrim/loader.ts`) carries over unchanged.
-
-**Effort:** ~3–5 days once the observability design is settled.
-
 ### Symbolic capability gaps
 
 #### B9. `Solve` — remaining transcendental cases
@@ -252,6 +231,19 @@ Full detail for each is in git history, `CHANGELOG.md`, the linked source, and
   ship under `loadIdentities(ce, { solve: true })`; `compile-rules.ts`
   self-test fix + `recompile-drift.ts` zero-divergence gate; artifact fully
   reproducible (1380 simplify + 5 solve).
+- **5. Per-head aggregated rule dispatch** (2026-06-15): closed the
+  loaded-simplify gap — `simplify()` over the reference corpus went from ~1.6×
+  the unloaded baseline to ~1.3× (target ≤1.5×). `aggregateHotHeadDispatch`
+  (`boxed-expression/rule-index.ts`) folds each hot head's loader-registered
+  functional rules into ONE per-head dispatcher, in the engine's *cached*
+  simplification set only — so the per-rule `applyRule`/`candidateRules`
+  scaffolding is paid once per head per node instead of ~60×. Both pinned
+  contracts hold unchanged: the public `ce.simplificationRules` array still
+  carries every rule (count + per-rule `fungrim:` id), and the dispatcher
+  surfaces the firing inner rule's own `because`/`purpose`. Equivalence is
+  pinned by `rule-aggregation.test.ts` (synthetic multi-fire/ordering oracle +
+  a byte-identical aggregated-vs-reference corpus differential, incl. real
+  hot-head fires) and the unchanged `rule-dispatch-regression` snapshots.
 - **2. Interruptible evaluation** (2026-06-10, residuals 2026-06-12): engine
   loops respect `ce._deadline` via `checkDeadline` (collections, number theory,
   `Limit`/`extrapolate`, Monte-Carlo); Stage-2 watchdog/denylist retired,

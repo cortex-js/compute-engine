@@ -26,7 +26,7 @@
  * circular dependencies.
  */
 
-import type { BoxedRule, Expression } from '../global-types';
+import type { BoxedRule, Expression, RuleStep } from '../global-types';
 import { isFunction, isNumber } from './type-guards';
 
 /** A rule paired with its position in the original rule array. */
@@ -288,4 +288,162 @@ export function* candidateRules(
       yield entry;
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Per-head aggregated dispatch (ROADMAP item 5)
+// ---------------------------------------------------------------------------
+//
+// The Fungrim loader registers each hot-head identity rule (Multiply, Add,
+// Power, …) as a standalone FUNCTIONAL rule with a single-head `operators`
+// hint and a self-contained pre-screen (fungrim/loader.ts `wrapHotHeadRule`).
+// The M2 index above buckets these by head, but on a hot arithmetic node it
+// still yields all ~60 of a head's functional rules INDIVIDUALLY, so
+// `replace()` pays the per-rule `applyRule` body + candidate-merge + `stepOf`
+// scaffolding ~60× per node — the residual cost above the unloaded baseline.
+//
+// `aggregateHotHeadDispatch` collapses each head's functional rules into ONE
+// dispatcher rule whose body runs their pre-screens in a tight loop, paying
+// the per-rule `applyRule`/candidate scaffolding ONCE per head per node
+// instead of once per rule.
+//
+// SOUNDNESS — the dispatcher is observably equivalent to the sequence of
+// functional rules it replaces, on the engine's simplification channel
+// (`replace()` with `recursive: false`, `useVariations: false`, an empty
+// incoming substitution, canonical replacement):
+//
+//  - It applies its inner rules FORWARD (declaration order), threading each
+//    firing rule's canonical result into the next attempt. This mirrors
+//    `replace()`'s mid-pass re-seed (after a rule at ordinal k fires, only
+//    rules with ordinal > k are retried, against the new expression).
+//  - It returns the LAST firing inner rule's own `RuleStep` (its `because` id
+//    and `purpose`) with the net value — exactly what `simplify()` consumes
+//    from a multi-rule `replace()` pass (`result.at(-1)`), so step
+//    attribution and the `purpose` cost-gate are preserved.
+//  - The per-rule `id` still surfaces in `because` (the dispatcher carries no
+//    id of its own into steps), and the public `ce.simplificationRules` array
+//    is untouched — only the engine's internal cached rule set is aggregated,
+//    so the rule-count and per-rule-id contracts both hold.
+//
+// The one behavior NOT bit-reproduced is the relative firing order of two
+// DIFFERENT-head functional rules on a single node in a single pass (only
+// reachable via the cross-head Multiply→Divide / Divide→Power consultations,
+// and only when both actually fire and their order changes the result). No
+// snapshot pins it; the differential equivalence test guards against a real
+// divergence.
+
+/** A boxed rule the per-head dispatcher can fold: a functional rule with no
+ *  match pattern, no top-level condition, no variations, and exactly one
+ *  `operators` head — i.e. dispatch fully described by that head, with all
+ *  matching/guard logic inside the `replace` function. `wrapHotHeadRule` is
+ *  the only producer of this shape (no built-in simplification rule sets
+ *  `operators`), so the structural test never folds a hand-written rule. */
+function isFoldableHotHeadRule(rule: BoxedRule): boolean {
+  return (
+    rule.match === undefined &&
+    typeof rule.replace === 'function' &&
+    rule.condition === undefined &&
+    rule.useVariations !== true &&
+    rule.operators !== undefined &&
+    rule.operators.length === 1
+  );
+}
+
+/** The inner `replace` of a foldable rule: a self-contained pre-screen +
+ *  match + guard + canonical-subs that returns a firing `RuleStep` or a
+ *  non-step (`undefined`/`null`) when it does not apply. */
+type HotHeadReplace = (
+  expr: Expression,
+  sub: Record<string, Expression>
+) => RuleStep | Expression | undefined | null;
+
+const EMPTY_SUB: Record<string, Expression> = {};
+
+/** Build the single dispatcher rule for a head's foldable rules. */
+function makeHeadDispatcher(
+  head: string,
+  inner: ReadonlyArray<BoxedRule>
+): BoxedRule {
+  const fns = inner.map((r) => r.replace as HotHeadReplace);
+  const n = fns.length;
+
+  const replace = (expr: Expression): RuleStep | undefined => {
+    let current = expr;
+    let last: RuleStep | undefined;
+    for (let i = 0; i < n; i++) {
+      const step = fns[i](current, EMPTY_SUB);
+      // Foldable rules always return a RuleStep (with a `because`) or nothing;
+      // a bare Expression is not part of `wrapHotHeadRule`'s contract.
+      if (step !== undefined && step !== null && 'because' in (step as object)) {
+        const ruleStep = step as RuleStep;
+        current = ruleStep.value;
+        last = ruleStep;
+      }
+    }
+    // Invariant: when `last` is set, `last.value === current` (current only
+    // advances together with `last`), so the last step already carries the
+    // net value, `because`, and `purpose`.
+    return last;
+  };
+
+  return {
+    _tag: 'boxed-rule',
+    match: undefined,
+    replace,
+    condition: undefined,
+    operators: [head],
+    id: `hot-head-dispatch:${head}`,
+  };
+}
+
+/**
+ * Collapse each hot head's foldable functional rules into a single per-head
+ * dispatcher rule. Returns a new array; non-foldable rules and single-rule
+ * heads keep their position and order. Each folded head's dispatcher takes
+ * the array slot of that head's FIRST foldable rule, so any lower-ordinal
+ * built-in or pattern rule of the same head still fires ahead of it.
+ *
+ * If nothing is foldable (or every head has a single foldable rule, where
+ * folding saves no scaffolding), the input array is returned unchanged.
+ */
+export function aggregateHotHeadDispatch(
+  rules: ReadonlyArray<BoxedRule>
+): ReadonlyArray<BoxedRule> {
+  // Group foldable rules by their single head, preserving array order.
+  const groups = new Map<string, BoxedRule[]>();
+  for (const rule of rules) {
+    if (!isFoldableHotHeadRule(rule)) continue;
+    const head = rule.operators![0];
+    const g = groups.get(head);
+    if (g) g.push(rule);
+    else groups.set(head, [rule]);
+  }
+
+  // One dispatcher per head with at least two foldable rules (a single rule
+  // has no per-rule scaffolding to amortize — leave it in place).
+  const dispatcherFor = new Map<string, BoxedRule>();
+  for (const [head, g] of groups)
+    if (g.length >= 2) dispatcherFor.set(head, makeHeadDispatcher(head, g));
+
+  if (dispatcherFor.size === 0) return rules;
+
+  const emitted = new Set<string>();
+  const out: BoxedRule[] = [];
+  for (const rule of rules) {
+    if (isFoldableHotHeadRule(rule)) {
+      const head = rule.operators![0];
+      const dispatcher = dispatcherFor.get(head);
+      if (dispatcher !== undefined) {
+        // First occurrence becomes the dispatcher; later ones are dropped.
+        if (!emitted.has(head)) {
+          emitted.add(head);
+          out.push(dispatcher);
+        }
+        continue;
+      }
+      // Single-rule head: fall through and keep the rule as-is.
+    }
+    out.push(rule);
+  }
+  return out;
 }

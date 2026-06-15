@@ -424,6 +424,13 @@ This release includes some breaking changes.
   The loader is synchronous and idempotent per engine. Importing the identities
   subpath is required, so applications that do not use it incur no bundle cost.
 
+  Simplifying with the full Identities Library loaded is now substantially
+  faster: `simplify()` runs at roughly 1.2–1.3× the unloaded baseline
+  (previously ~1.6×). The many guarded rules that share a common arithmetic
+  head — `Multiply`, `Add`, `Divide`, … — are dispatched together per head
+  instead of one at a time, so the per-rule overhead on every arithmetic node
+  is paid once per head rather than once per rule. Results are unchanged.
+
 - **More control over replacements**:
   - `ReplaceOptions.form` controls the form of replacement expressions:
     `'canonical'`, `'structural'`, `'raw'`, or a specific canonical transform.

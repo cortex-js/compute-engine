@@ -75,6 +75,7 @@ import { MachineNumericValue } from './numeric-value/machine-numeric-value';
 import { box, boxFunction, formToInternal } from './boxed-expression/box';
 import type { FormOption } from './types-serialization';
 import { boxRules } from './boxed-expression/rules';
+import { aggregateHotHeadDispatch } from './boxed-expression/rule-index';
 import { validatePattern } from './boxed-expression/boxed-patterns';
 import { BoxedString } from './boxed-expression/boxed-string';
 import { BoxedFunction } from './boxed-expression/boxed-function';
@@ -1745,7 +1746,15 @@ export class ComputeEngine implements IComputeEngine {
         const boxed = boxRules(this, this._simplificationRules.rules, {
           canonical: true,
         });
-        return { rules: boxed.rules.filter((r) => r.purpose !== 'expand') };
+        const simplifyRules = boxed.rules.filter(
+          (r) => r.purpose !== 'expand'
+        );
+        // Collapse each hot head's loader-registered functional dispatch rules
+        // into one per-head dispatcher (ROADMAP item 5). No-op when no such
+        // rules are present (e.g. the Fungrim identities are not loaded). The
+        // public `ce.simplificationRules` array is untouched — only this
+        // internal cached set is aggregated.
+        return { rules: aggregateHotHeadDispatch(simplifyRules) };
       });
       this._simplificationRules.markCached();
       return result;

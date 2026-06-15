@@ -252,6 +252,7 @@ Files:
 Acceptance:
 - Before/after suite green; benchmark within budget; **full** jest suite green; `npm run typecheck` clean; `rule-dispatch-regression` snapshot untouched.
 - If the 1.5× budget fails and profiling blames value buckets → execute the §2.4 fallback (per-head functional dispatcher with `operators` hint) inside the loader; artifact unchanged.
+  - **Done (2026-06-15, ROADMAP item 5):** the residual gap (~1.6×) was the per-rule `applyRule`/candidate scaffolding on the *hot arithmetic* buckets (Multiply/Add/Divide), not value buckets. `aggregateHotHeadDispatch` (`boxed-expression/rule-index.ts`) folds each hot head's M5 functional rules into one per-head dispatcher in the engine's **cached** simplification set — so the public `ce.simplificationRules` array (and the count + per-rule-id contracts) is untouched, no artifact/loader change. Steady-state ~1.3×. Equivalence pinned by `rule-aggregation.test.ts`.
 
 ### M6 (stretch, gated on a human call — Q7) — Solve seed activation
 **Effort: 1–2 days.** Flip the curated solve templates from overrides into the default artifact, document `{ solve: true }`, add `solve()` examples (`x·eˣ = 3`, `ln f(x)` harmonization variant). Acceptance: `solve.test.ts` unchanged; new equations solvable; `validateRoots` filtering demonstrated with a deliberately over-broad template.

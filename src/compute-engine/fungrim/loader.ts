@@ -449,6 +449,15 @@ function boxCompiledRule(
 // `simplify()` and the 'transform' cost-gate exemption is preserved), same
 // guard-condition closures (incl. the `onGuardUndecided` hook payload), and
 // the same canonical replacement values.
+//
+// FURTHER FOLD (ROADMAP item 5): each functional rule registered here is still
+// a SEPARATE entry in `ce.simplificationRules`, so on a hot node the M2 index
+// yields all ~60 of a head's wrappers individually. The engine's cached
+// simplification set collapses each head's wrappers into one per-head
+// dispatcher (`aggregateHotHeadDispatch`, boxed-expression/rule-index.ts),
+// paying the per-rule `applyRule`/candidate scaffolding once per head per node.
+// That fold lives in the engine cache, NOT here — the public array keeps every
+// per-rule entry, so the count + per-rule-id contracts above still hold.
 
 /** Heads whose buckets are consulted on high-traffic nodes (tuned by
  *  measurement over the M5 benchmark corpus). `Multiply`, `Add`, `Divide`,

@@ -181,13 +181,15 @@ describe('rule-dispatch scale benchmark (M0 baseline)', () => {
 // loaded ≤ 1.5× the unloaded baseline. The hard assertion below is a
 // generous CI budget (same never-flake style as the M0 scenario's <1000);
 // the measured ratio is reported via console.info so the 1.5× target is
-// auditable in the run log. Idle dev-laptop measurement: ~3-3.5x — ABOVE the
-// 1.5x target. The overhead concentrates in identity-recognition rules whose
+// auditable in the run log. Idle dev-laptop measurement: ~1.25-1.35x — at or
+// below the 1.5x target since ROADMAP item 5 (per-head aggregated dispatch)
+// landed. The overhead had concentrated in identity-recognition rules whose
 // match heads are core arithmetic operators (Multiply/Add/Divide bucket
-// collisions on every node), not in specific-value buckets; if the target is
-// to be met, the §2.4 fallback (per-head functional dispatcher with the
-// `operators` hint) or an arithmetic-head pre-filter in the loader is the
-// designated fix.
+// collisions on every node); `aggregateHotHeadDispatch` (rule-index.ts) now
+// folds each hot head's loader-registered functional rules into one per-head
+// dispatcher in the engine's cached simplification set, paying the per-rule
+// applyRule/candidate scaffolding once per head per node instead of ~60×.
+// (Before item 5 the steady-state ratio was ~1.6x.)
 //
 // Unlike the synthetic-inert scenario, fungrim rules CAN legitimately fire
 // (that is their purpose), so before/after results are not asserted equal —
