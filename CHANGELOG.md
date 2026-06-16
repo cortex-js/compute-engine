@@ -184,6 +184,14 @@
   - Jacobi theta functions and the Dedekind eta function
   - `Erfi`, `SinIntegral`, `CosIntegral`, `ExpIntegralEi`, and `LogIntegral`
 
+- **`Gamma` now accepts a second argument, the upper incomplete gamma
+  function** `Γ(s, z) = ∫_z^∞ tˢ⁻¹ e⁻ᵗ dt` (e.g. `["Gamma", s, z]`). It is
+  evaluated numerically for real and complex arguments, including
+  negative and fractional orders `s` (`Gamma(-4, 2)`, `Gamma(1/2, -1)`), and
+  honors the exactness contract: it stays symbolic under `evaluate()` and
+  reduces `Γ(s, 0)` to the ordinary `Γ(s)`. Use `.N()` for a numeric value.
+  The one-argument `Γ(z)` is unchanged.
+
 - **`Hypergeometric2F1` now supports analytic continuation across most of the
   complex plane**, rather than being limited to its defining power series.
 
