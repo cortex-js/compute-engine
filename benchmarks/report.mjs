@@ -15,6 +15,7 @@
 //   sympy        SymPy + mpmath        (Python, symbolic + arbitrary precision)
 //   mathjs       math.js               (JavaScript, numeric + light symbolic)
 //   numpy        NumPy                 (Python, numeric only, double precision)
+//   wolfram      Wolfram / Mathematica (system `wolframscript` kernel, all categories)
 //
 // Override versions / paths via env:
 //   CE_CURRENT_BUNDLE   path to the current-build ESM bundle
@@ -54,6 +55,12 @@ const TOOLS = [
     spawn: (k) => [NODE, [join(__dirname, 'runners', 'run_mathjs.mjs'), k.id]] },
   { key: 'numpy', label: 'NumPy', short: 'NumPy', inputKey: 'numpy',
     spawn: (k) => [PYTHON, [join(__dirname, 'runners', 'run_py.py'), 'numpy', k.id]] },
+  // Wolfram has no native source dialect in cases.json — run_wolfram.mjs
+  // translates the structured `ce` MathJSON into Wolfram Language, so it keys
+  // off the `ce` input and covers every category (N / FullSimplify / D /
+  // Integrate / Limit / Solve).
+  { key: 'wolfram', label: 'Wolfram', short: 'WL', inputKey: 'ce',
+    spawn: (k) => [NODE, [join(__dirname, 'runners', 'run_wolfram.mjs'), k.id]] },
 ];
 const CE_TOOLS = ['ce-current', 'ce-pub'];
 
@@ -220,6 +227,8 @@ function getVersions() {
       `import * as m from '${join(__dirname, '.competitors', 'mathjs-host', 'node_modules', 'mathjs', 'lib', 'esm', 'index.js')}';process.stdout.write(m.version)`],
       { encoding: 'utf8' }).trim();
   } catch {}
+  // Wolfram Language kernel version ($VersionNumber side); one kernel launch.
+  try { v.wolfram = execFileSync('wolframscript', ['-code', '$Version'], { encoding: 'utf8' }).trim().replace(/\s*\(.*$/, ''); } catch {}
   return v;
 }
 
@@ -270,19 +279,19 @@ writeFileSync(join(__dirname, 'results.json'),
 
 const SYM = { correct: '✅', partial: '🟡', wrong: '❌', unsupported: '—', unevaluated: '∅', timeout: '⏱', error: '⚠️' };
 // Short labels (ce-rubi isn't in TOOLS — it's the batch column).
-const LABELS = { 'ce-current': 'CE·cur', 'ce-rubi': 'CE+R/F', 'ce-pub': `CE·${PUBLISHED_VERSION}`, sympy: 'SymPy', mathjs: 'math.js', numpy: 'NumPy' };
+const LABELS = { 'ce-current': 'CE·cur', 'ce-rubi': 'CE+R/F', 'ce-pub': `CE·${PUBLISHED_VERSION}`, sympy: 'SymPy', mathjs: 'math.js', numpy: 'NumPy', wolfram: 'Wolfram' };
 // `corr` = columns shown in correctness tables; `perf` = columns whose median
 // is summarized in the footer row (ce-rubi is timed and comparable now, but
 // kept out of the footer median so it doesn't double-count the CE engine).
 const CATS = [
-  { key: 'numeric', title: 'Arbitrary-precision numeric evaluation',
-    corr: ['ce-current', 'ce-rubi', 'ce-pub', 'sympy', 'mathjs', 'numpy'], perf: ['ce-current', 'ce-pub', 'sympy', 'mathjs', 'numpy'] },
+  { key: 'numeric', title: 'Arbitrary-precision numeric evaluation', unit: 'µs',
+    corr: ['ce-current', 'ce-rubi', 'ce-pub', 'sympy', 'mathjs', 'numpy', 'wolfram'], perf: ['ce-current', 'ce-pub', 'sympy', 'mathjs', 'numpy', 'wolfram'] },
   { key: 'simplify', title: 'Simplification',
-    corr: ['ce-current', 'ce-rubi', 'ce-pub', 'sympy', 'mathjs'], perf: ['ce-current', 'ce-pub', 'sympy', 'mathjs'] },
+    corr: ['ce-current', 'ce-rubi', 'ce-pub', 'sympy', 'mathjs', 'wolfram'], perf: ['ce-current', 'ce-pub', 'sympy', 'mathjs', 'wolfram'] },
   { key: 'derivative', title: 'Differentiation',
-    corr: ['ce-current', 'ce-rubi', 'ce-pub', 'sympy', 'mathjs'], perf: ['ce-current', 'ce-pub', 'sympy', 'mathjs'] },
+    corr: ['ce-current', 'ce-rubi', 'ce-pub', 'sympy', 'mathjs', 'wolfram'], perf: ['ce-current', 'ce-pub', 'sympy', 'mathjs', 'wolfram'] },
   { key: 'antiderivative', title: 'Antiderivation (symbolic integration)',
-    corr: ['ce-current', 'ce-rubi', 'ce-pub', 'sympy'], perf: ['ce-current', 'ce-pub', 'sympy'] },
+    corr: ['ce-current', 'ce-rubi', 'ce-pub', 'sympy', 'wolfram'], perf: ['ce-current', 'ce-pub', 'sympy', 'wolfram'] },
 ];
 const toolLabel = (k) => LABELS[k] || k;
 const casesOf = (cat) => suite.cases.filter((c) => c.category === cat);
@@ -330,8 +339,8 @@ w(`_Generated ${generated.slice(0, 10)} · ${REPORTED.length} cases across ${CAT
 w();
 w('This report compares the **current Compute Engine build** against the **last published release** ' +
   `(\`${PUBLISHED_VERSION}\`) — plus an experimental **current + Rubi + Fungrim** configuration — and against three ` +
-  'widely-used open-source tools (SymPy, math.js, NumPy), along two axes: ' +
-  '**correctness / usefulness** of the result and **performance**.');
+  'widely-used open-source tools (SymPy, math.js, NumPy) and the commercial **Wolfram** (Mathematica) kernel, ' +
+  'along two axes: **correctness / usefulness** of the result and **performance**.');
 w();
 
 // Highlights
@@ -364,7 +373,9 @@ w();
     '(`∫1/√x`, `∫x/√(1−x²)` solve; `∫1/(x³+1)` gains exact coefficients).');
   w('- **vs competitors**: matches SymPy on numerics, simplification and differentiation; trails it on integration breadth ' +
     '(SymPy does `∫e^(−x²)`→erf and radical denesting that CE doesn\'t). Beats **math.js** on simplification and integration, ' +
-    'and beats **NumPy** on anything needing >16 digits, exact integers, or special functions.');
+    'and beats **NumPy** on anything needing >16 digits, exact integers, or special functions. **Wolfram** is the capability ' +
+    'ceiling here — it answers every category, including the integrals CE needs Rubi for — but ships as a proprietary, ' +
+    'non-embeddable kernel; CE\'s pitch against it is open-source, browser-native delivery at competitive per-call speed.');
   w();
 }
 
@@ -379,6 +390,7 @@ w(`| Compute Engine — published | \`${versions.cePublished}\` (npm) | Node ${v
 w(`| SymPy | \`${versions.sympy || '?'}\` | Python ${versions.python || '?'} |`);
 w(`| math.js | \`${versions.mathjs || '?'}\` | Node ${versions.node} |`);
 w(`| NumPy | \`${versions.numpy || '?'}\` | Python ${versions.python || '?'} |`);
+w(`| Wolfram (Mathematica) | \`${versions.wolfram || '?'}\` | \`wolframscript\` kernel |`);
 w();
 
 // Methodology
@@ -387,7 +399,16 @@ w();
 w(`- **Suite**: ${REPORTED.length} cases across ${CATS.length} categories, split into a **core** tier (textbook) and a **hard** tier (boundary-pushing), ` +
   'defined once in [`cases.json`](./cases.json) with a per-tool input expression for each tool.');
 w('- **Columns**: the current build and published `' + PUBLISHED_VERSION + '` are compared as base engines; a third CE column (`CE+R/F`) ' +
-  'is the current build with the experimental **Rubi** integrator and **Fungrim** identities enabled. SymPy, math.js and NumPy are the competitors.');
+  'is the current build with the experimental **Rubi** integrator and **Fungrim** identities enabled. SymPy, math.js, NumPy and Wolfram are the competitors.');
+w('- **Wolfram** has no source dialect in `cases.json`; its runner translates the structural `ce` MathJSON into a Wolfram Language ' +
+  'string (`["Power","x",2]`→`x^2`, `["Ln",2]`→`Log[2]`), which it **parses each call** (`ToExpression`) before driving the system ' +
+  '`wolframscript` kernel (`N`, `FullSimplify`, `D`, `Integrate`, `Limit`, `Solve`) — so, like the other string-based tools, the ' +
+  'per-call parse is included (see the Performance note). Timing is measured **inside** the kernel (warm median, same protocol as the ' +
+  'other tools), so the multi-second kernel start-up is excluded. Wolfram memoizes the result of every evaluation, which would ' +
+  'otherwise make a repeat-loop measure ~25ns cache hits; the runner **disables the result caches** (`SetSystemOptions`) so each call ' +
+  'does real work. Fundamental constants (π, e, factorials) are *stored* by the kernel — their lookup is ~0.1µs even uncached (genuinely ' +
+  'how fast Wolfram is on them), so their reported time (~3µs) is dominated by parsing the source; Γ/ζ and the symbolic ops show their ' +
+  'true compute cost, parse included but negligible.');
 w('- **Correctness is verified numerically against an independent reference.** ' +
   'Reference values are computed with `mpmath` at high precision ' +
   '([`gen_cases.py`](./gen_cases.py)) — *not* taken from any tool under test:');
@@ -397,7 +418,7 @@ w('  - *Simplify*: the result is sampled at 3 points (chosen in the expression\'
 w('  - *Derivative*: the result is sampled and compared to `f\'(x)` (computed by `mpmath`).');
 w('  - *Antiderivative*: verified by the definite difference `F(b)−F(a)` over a per-case interval (inside the integrand\'s domain), ' +
   'which cancels the constant of integration and is compared to `∫f` (`mpmath` quadrature).');
-w('- **Performance**: each operation is built from its source representation and run repeatedly; we report the **median** wall-clock time per call (warm/steady-state, after warm-up), shown alongside the quality mark in each cell. Process start-up is excluded. `CE+R/F` now runs on the same minified bundle as `CE·cur` (plus the Rubi + Fungrim rule packs), so its times are directly comparable; for integrals they include the Rubi rule-match attempt made before the built-in fallback.');
+w('- **Performance**: each operation is built **from its own source representation each call** and run repeatedly; we report the **median** wall-clock time per call (warm/steady-state, after warm-up), shown alongside the quality mark in each cell. Process start-up is excluded. The source form differs per tool — CE re-boxes its **MathJSON**, SymPy/NumPy re-parse a **Python** string (`sympify`/`eval`), math.js and Wolfram re-parse their own **language string** — so the per-call cost includes each tool\'s native build/parse. That structured-vs-text gap is real (boxing MathJSON or compiling a NumPy expression is cheaper than a full CAS text-parse) and is why the µs-scale numeric column should be read as *end-to-end per-call from source*, not pure kernel compute; at the fastest end (a stored constant) the number is parse-dominated. `CE+R/F` runs on the same minified bundle as `CE·cur` (plus the Rubi + Fungrim rule packs), so its times are directly comparable; for integrals they include the Rubi rule-match attempt made before the built-in fallback.');
 w('- Each `(tool, case)` runs in its own subprocess with a ' + (PER_CASE_TIMEOUT_MS / 1000) + 's timeout, so a hang or crash is isolated to one cell.');
 w();
 
@@ -406,7 +427,7 @@ w('## Summary scoreboard');
 w();
 w('Correct (✅) results per category (count varies by category). Cells in parentheses count 🟡 partials.');
 w();
-const scoreTools = ['ce-current', 'ce-rubi', 'ce-pub', 'sympy', 'mathjs', 'numpy'];
+const scoreTools = ['ce-current', 'ce-rubi', 'ce-pub', 'sympy', 'mathjs', 'numpy', 'wolfram'];
 w('| Category | ' + scoreTools.map(toolLabel).join(' | ') + ' |');
 w('|---|' + scoreTools.map(() => '---').join('|') + '|');
 for (const cat of CATS) {
@@ -428,14 +449,40 @@ w();
 // Combined quality + speed tables per category. Each cell shows the verdict
 // and the median per-call time, so a table is informative even when every tool
 // is correct (the times still differ).
-const fmtT = (ms) => ms == null ? null : (ms < 0.01 ? '0.00' : ms < 10 ? ms.toFixed(2) : ms < 100 ? ms.toFixed(1) : String(Math.round(ms)));
+// Format a per-call time (ms). At/above 0.01ms the historical bands apply
+// (2dp <10, 1dp <100, integer otherwise). Below 0.01ms — the fast numeric /
+// differentiation ops — fixed 2dp would collapse everything to "0.00", hiding a
+// real 5–200× spread, so show 2 significant figures instead (e.g. 0.00079 vs
+// 0.0033 vs 0.16). Sub-microsecond constants are genuinely this fast warm.
+const fmtT = (ms) => {
+  if (ms == null) return null;
+  if (ms >= 0.01) return ms < 10 ? ms.toFixed(2) : ms < 100 ? ms.toFixed(1) : String(Math.round(ms));
+  if (!(ms > 0)) return '0';
+  let s = ms.toPrecision(2);                                  // 2 sig figs
+  if (s.includes('.')) s = s.replace(/0+$/, '').replace(/\.$/, '');
+  return s;
+};
+// Microsecond formatter for the numeric category, whose per-call times span
+// ~0.1µs (a stored constant) to ~500µs — far cleaner read as µs than as
+// 0.0001–0.5 ms. 2 sig figs at the low end, whole µs once ≥10.
+const fmtUs = (ms) => {
+  if (ms == null) return null;
+  const us = ms * 1000;
+  if (!(us > 0)) return '0';
+  if (us >= 10) return String(Math.round(us));
+  if (us >= 1) return us.toFixed(1);
+  let s = us.toPrecision(2);
+  if (s.includes('.')) s = s.replace(/0+$/, '').replace(/\.$/, '');
+  return s;
+};
+const fmtBy = (ms, unit) => (unit === 'µs' ? fmtUs(ms) : fmtT(ms));
 const abbrev = (n) => !n ? '' : String(n)
   .replace('value ok, not simplified', 'not simplified')
   .replace('numeric, not symbolic', 'numeric only')
   .replace(/^~?(\d+) digits.*/, '$1 digits');
 // Correctness is assumed by default: a correct cell shows only its time, and a
 // quality mark appears only when the result is NOT fully correct.
-function combinedCell(tk, c) {
+function combinedCell(tk, c, unit) {
   const m = matrix[c.id][tk];
   if (!m) return '—';
   const vd = m.verdict, r = m.res;
@@ -443,7 +490,7 @@ function combinedCell(tk, c) {
   if (vd.v === 'unevaluated') return '∅';
   if (vd.v === 'timeout') return '⏱';
   if (vd.v === 'error') return '⚠️';
-  const t = (r && r.status === 'ok' && typeof r.timeMs === 'number') ? fmtT(r.timeMs) : null;
+  const t = (r && r.status === 'ok' && typeof r.timeMs === 'number') ? fmtBy(r.timeMs, unit) : null;
   if (vd.v === 'correct') return t ?? '✓';
   const note = abbrev(vd.note);
   return SYM[vd.v] + (note ? ` <sub>${note}</sub>` : '') + (t ? ` ${t}` : '');
@@ -472,7 +519,8 @@ const caseLabel = (c) => `$${c.latex}$` +
 
 w('## Results — quality & speed');
 w();
-w('**Correctness is assumed:** a correct result shows only its **median time per call** (in **ms**, warm). ' +
+w('**Correctness is assumed:** a correct result shows only its **median time per call** (warm) — in **ms**, except the ' +
+  'numeric table which is in **µs** (its per-call times run from ~0.1µs for a stored constant to a few hundred µs). ' +
   'A mark appears *only when a result is not fully correct*: 🟡 partial (limited precision, or value-correct but ' +
   'not simplified) · ❌ incorrect · ∅ returned unevaluated · — not supported · ⏱ timeout. ' +
   '**Bold** flags a Compute Engine outlier — the shipping `CE·cur` build being incorrect, or markedly slower than ' +
@@ -483,7 +531,7 @@ w('> `CE+R/F` (current minified bundle + the opt-in Rubi + Fungrim rule packs, l
   'times include that match attempt even when no rule applies (e.g. `∫xeˣ`). Times are comparable to the other columns.');
 w();
 for (const cat of CATS) {
-  w(`### ${cat.title}`);
+  w(`### ${cat.title}${cat.unit === 'µs' ? ' — times in **µs**' : ''}`);
   w();
   w('| # | Case | ' + cat.corr.map(toolLabel).join(' | ') + ' |');
   w('|---|---|' + cat.corr.map(() => '---').join('|') + '|');
@@ -496,7 +544,7 @@ for (const cat of CATS) {
     }
     const row = [c.id, caseLabel(c)];
     for (const tk of cat.corr) {
-      let content = combinedCell(tk, c);
+      let content = combinedCell(tk, c, cat.unit);
       if (tk === 'ce-current' && ceOutlier(c)) content = `**${content}**`; // flag CE outliers
       row.push(content);
       const r = matrix[c.id][tk].res;
@@ -504,10 +552,10 @@ for (const cat of CATS) {
     }
     w('| ' + row.join(' | ') + ' |');
   }
-  const medRow = ['', '**median ms**'];
+  const medRow = ['', `**median ${cat.unit || 'ms'}**`];
   for (const tk of cat.corr) {
     const xs = sums[tk].sort((a, b) => a - b);
-    medRow.push(xs.length ? `**${fmtT(xs[Math.floor(xs.length / 2)])}**` : '—');
+    medRow.push(xs.length ? `**${fmtBy(xs[Math.floor(xs.length / 2)], cat.unit)}**` : '—');
   }
   w('| ' + medRow.join(' | ') + ' |');
   w();
@@ -539,15 +587,16 @@ w('## Competitive analysis');
 w();
 w('### Capability & precision matrix');
 w();
-w('| | CE | CE + Rubi/Fungrim | SymPy | math.js | NumPy |');
-w('|---|---|---|---|---|---|');
-w('| Arbitrary-precision numerics | ✅ | ✅ | ✅ | ✅ (BigNumber) | ❌ double only |');
-w('| Exact big-integer arithmetic | ✅ | ✅ | ✅ | ✅ (with precision) | ❌ overflow |');
-w('| Special functions (ζ, Γ, W) | ✅ | ✅ | 🟡 some | 🟡 some | ❌ |');
-w('| Symbolic simplification | ✅ | ✅ | ✅ | 🟡 limited | — |');
-w('| Symbolic differentiation | ✅ | ✅ | ✅ | ✅ | — |');
-w('| Symbolic integration | 🟡 elementary | ✅ +algebraic (Rubi) | ✅ broad | — | — |');
-w('| Runtime | JS / browser + Node | JS / browser + Node (opt-in rule packs) | Python | JS / browser + Node | Python |');
+w('| | CE | CE + Rubi/Fungrim | SymPy | math.js | NumPy | Wolfram |');
+w('|---|---|---|---|---|---|---|');
+w('| Arbitrary-precision numerics | ✅ | ✅ | ✅ | ✅ (BigNumber) | ❌ double only | ✅ |');
+w('| Exact big-integer arithmetic | ✅ | ✅ | ✅ | ✅ (with precision) | ❌ overflow | ✅ |');
+w('| Special functions (ζ, Γ, W) | ✅ | ✅ | 🟡 some | 🟡 some | ❌ | ✅ |');
+w('| Symbolic simplification | ✅ | ✅ | ✅ | 🟡 limited | — | ✅ |');
+w('| Symbolic differentiation | ✅ | ✅ | ✅ | ✅ | — | ✅ |');
+w('| Symbolic integration | 🟡 elementary | ✅ +algebraic (Rubi) | ✅ broad | — | — | ✅ broadest |');
+w('| Runtime | JS / browser + Node | JS / browser + Node (opt-in rule packs) | Python | JS / browser + Node | Python | Proprietary kernel |');
+w('| License | MIT | MIT | BSD | Apache-2.0 | BSD | Commercial |');
 w();
 // auto-derived notes
 const noteFor = (tk) => {
@@ -562,7 +611,7 @@ const noteFor = (tk) => {
 w('### Observations');
 w();
 {
-  const cur = noteFor('ce-current'), rf = noteFor('ce-rubi'), sp = noteFor('sympy'), mj = noteFor('mathjs'), np = noteFor('numpy');
+  const cur = noteFor('ce-current'), rf = noteFor('ce-rubi'), sp = noteFor('sympy'), mj = noteFor('mathjs'), np = noteFor('numpy'), wl = noteFor('wolfram');
   w(`- **Compute Engine (current build)**: ${cur.ok}/${cur.tot} fully correct across applicable cases. ` +
     'The only browser-native engine here that does symbolic integration and arbitrary-precision numerics (incl. ζ, Γ, Lambert W) in one library. ' +
     'Its main gap is integration coverage — fractional-power and several radical integrands return unevaluated.');
@@ -571,6 +620,7 @@ w();
   w(`- **SymPy**: ${sp.ok}/${sp.tot} correct — the broadest symbolic coverage (integrates \`1/√x\` and \`e^(−x²)\`→erf, denests radicals), at the cost of a Python runtime and higher per-call latency.`);
   w(`- **math.js**: ${mj.ok}/${mj.tot} correct across the categories it supports. Strong at numeric (BigNumber) and differentiation, and has a few special functions (ζ, Γ, erf); its \`simplify()\` frequently returns the input essentially unchanged (🟡), and it has no symbolic integration.`);
   w(`- **NumPy**: ${np.ok}/${np.tot} correct — numeric only and limited to ~15–16 significant digits (IEEE double); it cannot represent the high-precision results, overflows on \`100!\`, and has no ζ/Γ/W. The baseline for "numeric, but not arbitrary precision".`);
+  w(`- **Wolfram (Mathematica)**: ${wl.ok}/${wl.tot} correct — the broadest coverage in the field, and the reference point for "what a mature commercial CAS does". It is the one competitor that, like CE, spans *all* four capabilities: arbitrary-precision numerics (incl. ζ, Γ, W), simplification, differentiation, and the widest symbolic integration (denests radicals, does \`∫e^(−x²)\`→erf and the algebraic-radical integrands that need Rubi on the CE side). The trade-offs are non-technical: a proprietary kernel with a multi-second start-up per process (excluded from the warm per-call times here) and a commercial licence — versus CE's MIT-licensed, browser-native single package.`);
 }
 w();
 w('---');

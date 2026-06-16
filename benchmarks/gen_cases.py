@@ -57,8 +57,10 @@ def dec(x, n):
 # per-tool expression; `None` means the tool can't express/do it.
 CASES = [
     # ---------------- NUMERIC · core ----------------
-    dict(id="N01", cat="numeric", tier="core", title="π", latex=r"\pi", prec=50,
-         f=lambda: pi, ce="Pi", sympy="pi", mathjs="pi", numpy="np.pi"),
+    # π² rather than bare π: forces an arbitrary-precision multiply, so the cell
+    # times a real computation instead of a stored-constant fetch.
+    dict(id="N01", cat="numeric", tier="core", title="π²", latex=r"\pi^2", prec=50,
+         f=lambda: pi**2, ce=["Power", "Pi", 2], sympy="pi**2", mathjs="pi^2", numpy="np.pi**2"),
     dict(id="N02", cat="numeric", tier="core", title="e", latex="e", prec=50,
          f=lambda: e, ce="ExponentialE", sympy="E", mathjs="e", numpy="np.e"),
     dict(id="N03", cat="numeric", tier="core", title="√2", latex=r"\sqrt2", prec=50,

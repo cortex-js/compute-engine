@@ -28,11 +28,12 @@ Four benchmark harnesses live here:
 1. **Capability benchmark** (`report.mjs`) — the main report. Compares three
    Compute Engine configurations — the current build, the current build with
    the experimental **Rubi + Fungrim** rules enabled, and the last published
-   release — **and** SymPy, math.js and NumPy, on **correctness/usefulness**
-   and **performance**, across four capabilities: arbitrary-precision numeric
-   evaluation, simplification, differentiation and antiderivation. Each
-   category has a **core** tier (textbook) and a **hard** tier (boundary-pushers
-   chosen to separate the libraries and exercise recently-fixed CE paths).
+   release — **and** SymPy, math.js, NumPy and **Wolfram (Mathematica)**, on
+   **correctness/usefulness** and **performance**, across four capabilities:
+   arbitrary-precision numeric evaluation, simplification, differentiation and
+   antiderivation. Each category has a **core** tier (textbook) and a **hard**
+   tier (boundary-pushers chosen to separate the libraries and exercise
+   recently-fixed CE paths).
 2. **Operation audit** (`audit/`) — a deeper, narrower **CE-vs-SymPy**
    issue-finder across more operations (factor, GCD, expand, simplify, derivative,
    limit, indefinite & definite integration), ranked by where CE trails. Includes
@@ -82,7 +83,7 @@ part of the per-release baseline.
 
 - **[`REPORT.md`](./REPORT.md)** — the full engineering report: a scoreboard,
   per-tier tables (CE current / CE+Rubi+Fungrim / CE published / SymPy / math.js
-  / NumPy) where each cell combines correctness with median time, a
+  / NumPy / Wolfram) where each cell combines correctness with median time, a
   current-vs-published diff, and a competitive-analysis matrix.
 - **[`REPORT-marketing.md`](./REPORT-marketing.md)** — a short, curated product
   comparison (CE vs SymPy / math.js / NumPy) for positioning: a capability
@@ -108,6 +109,7 @@ part of the per-release baseline.
 | `runners/run_ce_rubi.mjs` | The `CE+R/F` column: loads the published `integration-rules` (Rubi) + `identities` (Fungrim) bundles onto the same minified engine as `ce-current`, runs **all** cases in one process. Times are comparable to the other columns. |
 | `runners/run_mathjs.mjs` | Runs one case on math.js. |
 | `runners/run_py.py` | Runs one case on SymPy or NumPy. |
+| `runners/run_wolfram.mjs` | Runs one case on Wolfram (Mathematica): translates the structural `ce` MathJSON into Wolfram Language and drives the system `wolframscript` kernel. Times warm inside the kernel; no per-case `wolfram` input needed in `cases.json`. |
 | `report.mjs` | Orchestrates: spawns each `(tool, case)` in its own timed subprocess (plus the one-shot Rubi batch), scores results against the references, writes `REPORT.md` + `results.json`. Renders only the four engineering categories; the changelog-only categories still run and land in `results.json`. |
 | `report_changelog.mjs` | Renders the two CHANGELOG tables from `results.json` + the `changelog`-tagged cases. Writes `CHANGELOG-TABLES.md` (and stdout). |
 
@@ -143,6 +145,13 @@ mkdir -p benchmarks/.competitors/mathjs-host
 ( cd benchmarks/.competitors && npm pack @cortex-js/compute-engine@0.59.0 \
   && mkdir -p ce-0.59.0 && tar xzf cortex-js-compute-engine-0.59.0.tgz -C ce-0.59.0 --strip-components=1 )
 ```
+
+The **Wolfram** column needs `wolframscript` (a licensed Mathematica / Wolfram
+Engine) on `PATH` — nothing is vendored under `.competitors`. If `wolframscript`
+is absent or unlicensed, every Wolfram cell simply reports `⚠️`/`⏱` and the rest
+of the report is unaffected. Its runner translates each case's structural `ce`
+MathJSON into Wolfram Language, so — unlike SymPy/math.js — no `wolfram` input
+needs to be added to `cases.json` when cases change.
 
 The **current build** is read from `dist/compute-engine.min.esm.js`, so build it
 first (`npm run build production`). Then:
