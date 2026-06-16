@@ -21,8 +21,8 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { ComputeEngine } from '../../src/compute-engine/index';
-import { loadIdentities } from '../../src/compute-engine/fungrim/loader';
+import { ComputeEngine } from '../../src/compute-engine.ts';
+import { loadIdentities } from '../../src/identities.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TOL = 1e-6;
@@ -65,12 +65,12 @@ const covers = (got: number[], ref: number[]) =>
 function runCE(engine: ComputeEngine, c: Case): { v: Verdict; note?: string } {
   let roots: any[] | null;
   try {
-    roots = engine.box(c.ce.mathjson).solve(c.ce.var);
+    roots = engine.expr(c.ce.mathjson).solve(c.ce.var);
   } catch (e: any) {
     return { v: 'error', note: e?.message };
   }
   roots = roots || [];
-  const resid = engine.box(c.ce.mathjson);
+  const resid = engine.expr(c.ce.mathjson);
 
   // Keep real roots; check each is sound by substitution.
   const sound: number[] = [];
