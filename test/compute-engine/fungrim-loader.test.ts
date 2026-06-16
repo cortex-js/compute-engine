@@ -49,7 +49,7 @@ describe('importing the loader module', () => {
     // EllipticK/E, AGM and the hypergeometrics became engine built-ins
     // with the Tier-2 numeric kernels)
     expect(ce.lookupDefinition('CarlsonRF')).toBeUndefined();
-    expect(ce.box(['Gamma', ['Rational', 1, 2]]).simplify().toString()).toBe(
+    expect(ce.expr(['Gamma', ['Rational', 1, 2]]).simplify().toString()).toBe(
       'Gamma(1/2)'
     );
   });
@@ -156,11 +156,11 @@ describe('loadIdentities (full artifact)', () => {
     expect(r.declared).not.toContain('JacobiTheta');
     expect(r.declared).toContain('CarlsonRF');
     // The user definition is untouched (still a plain real-valued symbol)
-    expect(ce2.box('JacobiTheta').type.toString()).toBe('real');
+    expect(ce2.expr('JacobiTheta').type.toString()).toBe('real');
   });
 
   it('makes shell heads usable (JacobiTheta boxes validly and its value rule fires)', () => {
-    const theta = ce.box(['JacobiTheta', 3, 0, 'ImaginaryUnit']);
+    const theta = ce.expr(['JacobiTheta', 3, 0, 'ImaginaryUnit']);
     expect(theta.isValid).toBe(true);
     // fungrim:1403b5 — θ₃(0, i) = Γ(1/4) / (√2 π^(3/4)). The closed form is
     // structurally larger, so simplify()'s cost gate rejects it; it remains
@@ -170,7 +170,7 @@ describe('loadIdentities (full artifact)', () => {
     expect(closed).not.toBeNull();
     expect(
       closed!.isEqual(
-        ce.box([
+        ce.expr([
           'Divide',
           ['Gamma', ['Divide', 1, 4]],
           ['Multiply', ['Sqrt', 2], ['Power', 'Pi', ['Divide', 3, 4]]],
@@ -200,33 +200,33 @@ describe('loadIdentities (full artifact)', () => {
 
   it('Gamma(1/2) → √π  [fungrim:f826a6]', () => {
     expect(
-      ce.box(['Gamma', ['Rational', 1, 2]]).simplify().isSame(
-        ce.box(['Sqrt', 'Pi'])
+      ce.expr(['Gamma', ['Rational', 1, 2]]).simplify().isSame(
+        ce.expr(['Sqrt', 'Pi'])
       )
     ).toBe(true);
   });
 
   it('Gamma(3/2) → √π/2  [fungrim:48ac55]', () => {
     expect(
-      ce.box(['Gamma', ['Rational', 3, 2]]).simplify().isSame(
-        ce.box(['Divide', ['Sqrt', 'Pi'], 2])
+      ce.expr(['Gamma', ['Rational', 3, 2]]).simplify().isSame(
+        ce.expr(['Divide', ['Sqrt', 'Pi'], 2])
       )
     ).toBe(true);
   });
 
   it('Gamma(2) → 1  [fungrim:19d480]', () => {
-    expect(ce.box(['Gamma', 2]).simplify().isSame(1)).toBe(true);
+    expect(ce.expr(['Gamma', 2]).simplify().isSame(1)).toBe(true);
   });
 
   it('Digamma(1) → -EulerGamma  [fungrim:ea2482]', () => {
     expect(
-      ce.box(['Digamma', 1]).simplify().isSame(ce.box(['Negate', 'EulerGamma']))
+      ce.expr(['Digamma', 1]).simplify().isSame(ce.expr(['Negate', 'EulerGamma']))
     ).toBe(true);
   });
 
   it('Digamma(1/2) → -2 ln 2 - EulerGamma  [fungrim:89bed3]', () => {
-    const result = ce.box(['Digamma', ['Rational', 1, 2]]).simplify();
-    const expected = ce.box([
+    const result = ce.expr(['Digamma', ['Rational', 1, 2]]).simplify();
+    const expected = ce.expr([
       'Subtract',
       ['Negate', ['Multiply', 2, ['Ln', 2]]],
       'EulerGamma',
@@ -238,20 +238,20 @@ describe('loadIdentities (full artifact)', () => {
 
   it('Arctan(1 + √2) → 3π/8  [fungrim:c6c92a]', () => {
     expect(
-      ce.box(['Arctan', ['Add', 1, ['Sqrt', 2]]]).simplify().isSame(
-        ce.box(['Divide', ['Multiply', 3, 'Pi'], 8])
+      ce.expr(['Arctan', ['Add', 1, ['Sqrt', 2]]]).simplify().isSame(
+        ce.expr(['Divide', ['Multiply', 3, 'Pi'], 8])
       )
     ).toBe(true);
   });
 
   it('LambertW(e) → 1  [fungrim:c95c4f]', () => {
-    expect(ce.box(['LambertW', 'ExponentialE']).simplify().isSame(1)).toBe(
+    expect(ce.expr(['LambertW', 'ExponentialE']).simplify().isSame(1)).toBe(
       true
     );
   });
 
   it('AGM(1, √2) → 2√2 π^(3/2)/Γ(1/4)² via replace() (cost-gated in simplify)  [fungrim:0d9352]', () => {
-    const agm = ce.box(['AGM', 1, ['Sqrt', 2]]);
+    const agm = ce.expr(['AGM', 1, ['Sqrt', 2]]);
     // The closed form is larger: simplify()'s 1.3× cost gate rejects it…
     expect(agm.simplify().isSame(agm)).toBe(true);
     // …but the loaded rule fires through replace()
@@ -259,7 +259,7 @@ describe('loadIdentities (full artifact)', () => {
     expect(closed).not.toBeNull();
     expect(
       closed!.isEqual(
-        ce.box([
+        ce.expr([
           'Divide',
           ['Multiply', 2, ['Sqrt', 2], ['Power', 'Pi', ['Divide', 3, 2]]],
           ['Power', ['Gamma', ['Divide', 1, 4]], 2],
@@ -284,37 +284,37 @@ describe('guard controls', () => {
   it('positive: Sin(πk) → 0 for an integer-typed symbol  [fungrim:c62afa]', () => {
     ce.declare('k', 'integer');
     expect(
-      ce.box(['Sin', ['Multiply', 'Pi', 'k']]).simplify().isSame(0)
+      ce.expr(['Sin', ['Multiply', 'Pi', 'k']]).simplify().isSame(0)
     ).toBe(true);
   });
 
   it('positive: Gamma(n+1) → n! with integer n ≥ 0 assumed  [fungrim:62c6c9]', () => {
     ce.declare('n', 'integer');
-    ce.assume(ce.box(['GreaterEqual', 'n', 0]));
+    ce.assume(ce.expr(['GreaterEqual', 'n', 0]));
     expect(
-      ce.box(['Gamma', ['Add', 'n', 1]]).simplify().isSame(
-        ce.box(['Factorial', 'n'])
+      ce.expr(['Gamma', ['Add', 'n', 1]]).simplify().isSame(
+        ce.expr(['Factorial', 'n'])
       )
     ).toBe(true);
   });
 
   it('positive: ne guard provable on a literal — Conjugate(ζ₀(3)) → ζ₀(-3)  [fungrim:60c2ec]', () => {
     expect(
-      ce.box(['Conjugate', ['RiemannZetaZero', 3]]).simplify().isSame(
-        ce.box(['RiemannZetaZero', -3])
+      ce.expr(['Conjugate', ['RiemannZetaZero', 3]]).simplify().isSame(
+        ce.expr(['RiemannZetaZero', -3])
       )
     ).toBe(true);
   });
 
   it('negative: Sin(πx) does NOT rewrite for a real (non-integer-typed) symbol', () => {
     ce.declare('x', 'real');
-    const expr = ce.box(['Sin', ['Multiply', 'Pi', 'x']]);
+    const expr = ce.expr(['Sin', ['Multiply', 'Pi', 'x']]);
     expect(expr.simplify().isSame(expr)).toBe(true);
   });
 
   it('negative: Gamma(y+1) does NOT rewrite to a factorial for a real symbol', () => {
     ce.declare('y', 'real');
-    const result = ce.box(['Gamma', ['Add', 'y', 1]]).simplify();
+    const result = ce.expr(['Gamma', ['Add', 'y', 1]]).simplify();
     expect(result.operator).toBe('Gamma');
   });
 
@@ -322,7 +322,7 @@ describe('guard controls', () => {
     // isEqual(m, 0) is undefined for a plain integer symbol, so the
     // fail-closed condition blocks the rule (fungrim:60c2ec).
     ce.declare('m', 'integer');
-    const result = ce.box(['Conjugate', ['RiemannZetaZero', 'm']]).simplify();
+    const result = ce.expr(['Conjugate', ['RiemannZetaZero', 'm']]).simplify();
     expect(result.operator).toBe('Conjugate');
   });
 });
@@ -342,14 +342,14 @@ describe('onGuardUndecided hook', () => {
 
     // Provable case: guard decides definitively, hook must not fire for
     // this rule
-    ce.box(['Conjugate', ['RiemannZetaZero', 3]]).simplify();
+    ce.expr(['Conjugate', ['RiemannZetaZero', 3]]).simplify();
     expect(undecided.some((u) => u.id === 'fungrim:60c2ec')).toBe(false);
 
     // Undecidable case: `m ≠ 0` is unknown for a plain integer symbol —
     // the rule does not fire and the hook reports it, with the captured
     // wildcard substitution
     ce.declare('m', 'integer');
-    ce.box(['Conjugate', ['RiemannZetaZero', 'm']]).simplify();
+    ce.expr(['Conjugate', ['RiemannZetaZero', 'm']]).simplify();
     const hit = undecided.find((u) => u.id === 'fungrim:60c2ec');
     expect(hit).toBeDefined();
     expect(hit!.wildcards).toContain('_n');
@@ -379,12 +379,12 @@ describe('selection filters', () => {
 
     // a gamma rule fires…
     expect(
-      ce.box(['Gamma', ['Rational', 1, 2]]).simplify().isSame(
-        ce.box(['Sqrt', 'Pi'])
+      ce.expr(['Gamma', ['Rational', 1, 2]]).simplify().isSame(
+        ce.expr(['Sqrt', 'Pi'])
       )
     ).toBe(true);
     // …an atan rule was not loaded
-    const atan = ce.box(['Arctan', ['Add', 1, ['Sqrt', 2]]]);
+    const atan = ce.expr(['Arctan', ['Add', 1, ['Sqrt', 2]]]);
     expect(atan.simplify().isSame(atan)).toBe(true);
   });
 
@@ -404,12 +404,12 @@ describe('selection filters', () => {
       )
     ).toBe(true);
     // a specific value is NOT loaded…
-    const g = ce.box(['Gamma', ['Rational', 1, 2]]);
+    const g = ce.expr(['Gamma', ['Rational', 1, 2]]);
     expect(g.simplify().isSame(g)).toBe(true);
     // …but an identity is
     ce.declare('k', 'integer');
     expect(
-      ce.box(['Sin', ['Multiply', 'Pi', 'k']]).simplify().isSame(0)
+      ce.expr(['Sin', ['Multiply', 'Pi', 'k']]).simplify().isSame(0)
     ).toBe(true);
   });
 
@@ -467,7 +467,7 @@ describe('per-engine isolation', () => {
     ).toBe(false);
     // (CarlsonRF is still shell-only; JacobiTheta is now an engine built-in)
     expect(ceB.lookupDefinition('CarlsonRF')).toBeUndefined();
-    const g = ceB.box(['Gamma', ['Rational', 1, 2]]);
+    const g = ceB.expr(['Gamma', ['Rational', 1, 2]]);
     expect(g.simplify().isSame(g)).toBe(true);
 
     // …and ceB has its own idempotence tracking: a fresh load works fully
@@ -694,8 +694,8 @@ describe('M5 before/after: unguarded specific values via simplify()', () => {
   });
 
   const simplifiesTo = (input: unknown, expected: unknown) => {
-    const result = ce.box(input as Parameters<ComputeEngine['box']>[0]).simplify();
-    const want = ce.box(expected as Parameters<ComputeEngine['box']>[0]);
+    const result = ce.expr(input as Parameters<ComputeEngine['box']>[0]).simplify();
+    const want = ce.expr(expected as Parameters<ComputeEngine['box']>[0]);
     expect(result.isSame(want) || result.isEqual(want) === true).toBe(true);
     // and specifically the *structural* target, not just numeric equality
     expect(result.isSame(want)).toBe(true);
@@ -781,22 +781,22 @@ describe('M5 before/after: guarded identities via simplify()', () => {
     loadIdentities(ce);
     // n: positive integer (⇒ n ≥ 0, n > 0 and integer guards all decidable)
     ce.declare('n', 'integer');
-    ce.assume(ce.box(['Greater', 'n', 0]));
+    ce.assume(ce.expr(['Greater', 'n', 0]));
     // k: plain integer (type guard only)
     ce.declare('k', 'integer');
     // p: positive real (⇒ p ≥ −1 decidable)
     ce.declare('p', 'real');
-    ce.assume(ce.box(['Greater', 'p', 0]));
+    ce.assume(ce.expr(['Greater', 'p', 0]));
     // q: real > 1 (⇒ q ≥ 1/e decidable — composite bound, exercises the
     // numeric-retry path of the cmp guard closure)
     ce.declare('q', 'real');
-    ce.assume(ce.box(['Greater', 'q', 1]));
+    ce.assume(ce.expr(['Greater', 'q', 1]));
   });
 
   const simplifiesTo = (input: unknown, expected: unknown) => {
-    const result = ce.box(input as Parameters<ComputeEngine['box']>[0]).simplify();
+    const result = ce.expr(input as Parameters<ComputeEngine['box']>[0]).simplify();
     expect(
-      result.isSame(ce.box(expected as Parameters<ComputeEngine['box']>[0]))
+      result.isSame(ce.expr(expected as Parameters<ComputeEngine['box']>[0]))
     ).toBe(true);
   };
 
@@ -881,11 +881,11 @@ describe('M5 before/after: cost-gated closed forms via replace()', () => {
 
   const replacesTo = (input: unknown, expected: unknown) => {
     const result = ce
-      .box(input as Parameters<ComputeEngine['box']>[0])
+      .expr(input as Parameters<ComputeEngine['box']>[0])
       .replace(rs);
     expect(result).not.toBeNull();
     expect(
-      result!.isEqual(ce.box(expected as Parameters<ComputeEngine['box']>[0]))
+      result!.isEqual(ce.expr(expected as Parameters<ComputeEngine['box']>[0]))
     ).toBe(true);
   };
 
@@ -960,14 +960,14 @@ describe("M5 before/after: purpose 'expand' rules", () => {
     ce = new ComputeEngine();
     loadIdentities(ce);
     ce.declare('n', 'integer');
-    ce.assume(ce.box(['Greater', 'n', 0]));
+    ce.assume(ce.expr(['Greater', 'n', 0]));
     // Box the FULL simplification store — including the 17 'expand' rules
     // that getRuleSet('standard-simplification') filters out
     allRules = ce.rules(ce.simplificationRules);
   });
 
   const expandsTo = (input: unknown, expected: unknown) => {
-    const boxed = ce.box(input as Parameters<ComputeEngine['box']>[0]);
+    const boxed = ce.expr(input as Parameters<ComputeEngine['box']>[0]);
     // not via simplify() …
     expect(boxed.simplify().isSame(boxed)).toBe(true);
     // … and not via the standard (expand-filtered) rule set …
@@ -976,7 +976,7 @@ describe("M5 before/after: purpose 'expand' rules", () => {
     const result = boxed.replace(allRules);
     expect(result).not.toBeNull();
     expect(
-      result!.isSame(ce.box(expected as Parameters<ComputeEngine['box']>[0]))
+      result!.isSame(ce.expr(expected as Parameters<ComputeEngine['box']>[0]))
     ).toBe(true);
   };
 
@@ -1046,11 +1046,11 @@ describe('hot-head pre-screened dispatch', () => {
 
   it('wrapped rules fire through simplify() (Multiply head)  [fungrim:4f20ff]', () => {
     ce.declare('n', 'integer');
-    ce.assume(ce.box(['Greater', 'n', 0]));
+    ce.assume(ce.expr(['Greater', 'n', 0]));
     expect(
-      ce.box(['Multiply', 'n', ['Factorial', ['Add', 'n', -1]]])
+      ce.expr(['Multiply', 'n', ['Factorial', ['Add', 'n', -1]]])
         .simplify()
-        .isSame(ce.box(['Factorial', 'n']))
+        .isSame(ce.expr(['Factorial', 'n']))
     ).toBe(true);
   });
 
@@ -1060,10 +1060,10 @@ describe('hot-head pre-screened dispatch', () => {
     // wrappers must fire there too.
     const allRules = ce.rules(ce.simplificationRules);
     const result = ce
-      .box(['Multiply', 'n', ['Factorial', ['Add', 'n', -1]]])
+      .expr(['Multiply', 'n', ['Factorial', ['Add', 'n', -1]]])
       .replace(allRules);
     expect(result).not.toBeNull();
-    expect(result!.isSame(ce.box(['Factorial', 'n']))).toBe(true);
+    expect(result!.isSame(ce.expr(['Factorial', 'n']))).toBe(true);
   });
 
   it('wrapped rules honor guards fail-closed and the onGuardUndecided hook', () => {
@@ -1077,7 +1077,7 @@ describe('hot-head pre-screened dispatch', () => {
     // m: integer of unknown sign — the `m > 0` cmp guard of fungrim:4f20ff
     // (a wrapped Multiply-head rule) is undecided: no rewrite, hook fires
     ce2.declare('m', 'integer');
-    const expr = ce2.box(['Multiply', 'm', ['Factorial', ['Add', 'm', -1]]]);
+    const expr = ce2.expr(['Multiply', 'm', ['Factorial', ['Add', 'm', -1]]]);
     expect(expr.simplify().isSame(expr)).toBe(true);
     const hit = undecided.find((u) => u.id === 'fungrim:4f20ff');
     expect(hit).toBeDefined();
@@ -1089,13 +1089,13 @@ describe('hot-head pre-screened dispatch', () => {
     // discriminating features are the symbols ExponentialE/ImaginaryUnit/Pi
     expect(
       ce
-        .box([
+        .expr([
           'Power',
           'ExponentialE',
           ['Divide', ['Multiply', 'ImaginaryUnit', 'Pi'], 2],
         ])
         .simplify()
-        .isSame(ce.box('ImaginaryUnit'))
+        .isSame(ce.expr('ImaginaryUnit'))
     ).toBe(true);
   });
 
@@ -1221,21 +1221,21 @@ describe('Phase 3: guard-closure semantics (synthetic artifact)', () => {
     const ce = load();
     // Re(2 + 3i) = 2 > 0: fires
     expect(
-      ce.box(['PartCmpF', ['Complex', 2, 3]]).simplify().isSame(0)
+      ce.expr(['PartCmpF', ['Complex', 2, 3]]).simplify().isSame(0)
     ).toBe(true);
     // Re(−1) = −1: definitively violated, no fire
-    const neg = ce.box(['PartCmpF', -1]);
+    const neg = ce.expr(['PartCmpF', -1]);
     expect(neg.simplify().isSame(neg)).toBe(true);
   });
 
   it('part-cmp: symbol substitutions consult the Track-3 part-bound facts', () => {
     const ce = load();
     ce.declare('s', 'complex');
-    ce.assume(ce.box(['Greater', ['Real', 's'], 1], { canonical: false }));
-    expect(ce.box(['PartCmpF', 's']).simplify().isSame(0)).toBe(true);
+    ce.assume(ce.expr(['Greater', ['Real', 's'], 1], { canonical: false }));
+    expect(ce.expr(['PartCmpF', 's']).simplify().isSame(0)).toBe(true);
     // unconstrained symbol: undecided, fail-closed
     ce.declare('v', 'complex');
-    const expr = ce.box(['PartCmpF', 'v']);
+    const expr = ce.expr(['PartCmpF', 'v']);
     expect(expr.simplify().isSame(expr)).toBe(true);
   });
 
@@ -1243,28 +1243,28 @@ describe('Phase 3: guard-closure semantics (synthetic artifact)', () => {
     const undecided: string[] = [];
     const ce = load((id) => undecided.push(id));
     ce.declare('v', 'complex');
-    ce.box(['PartCmpF', 'v']).simplify(); // Re(v) > 0 unknown
+    ce.expr(['PartCmpF', 'v']).simplify(); // Re(v) > 0 unknown
     expect(undecided).toContain('fungrim:test-part-cmp');
     undecided.length = 0;
-    ce.box(['PartCmpF', -1]).simplify(); // Re(−1) > 0 definitively false
+    ce.expr(['PartCmpF', -1]).simplify(); // Re(−1) > 0 definitively false
     expect(undecided).not.toContain('fungrim:test-part-cmp');
   });
 
   it('member: discharges via the stored-membership exact match, NOT via literals', () => {
     const ce = load();
     ce.declare('tau', 'complex');
-    ce.assume(ce.box(['Element', 'tau', 'HH'], { canonical: false }));
-    expect(ce.box(['MemberF', 'tau']).simplify().isSame(0)).toBe(true);
+    ce.assume(ce.expr(['Element', 'tau', 'HH'], { canonical: false }));
+    expect(ce.expr(['MemberF', 'tau']).simplify().isSame(0)).toBe(true);
     // KEY ENCODING FACT: HH is an inert shell with NO contains handler —
     // a literal (even i, which IS in the upper half-plane) stays undecided
-    const lit = ce.box(['MemberF', 'ImaginaryUnit']);
+    const lit = ce.expr(['MemberF', 'ImaginaryUnit']);
     expect(lit.simplify().isSame(lit)).toBe(true);
   });
 
   it('member: onGuardUndecided fires for the inert-set literal', () => {
     const undecided: string[] = [];
     const ce = load((id) => undecided.push(id));
-    ce.box(['MemberF', 'ImaginaryUnit']).simplify();
+    ce.expr(['MemberF', 'ImaginaryUnit']).simplify();
     expect(undecided).toContain('fungrim:test-member');
   });
 
@@ -1272,13 +1272,13 @@ describe('Phase 3: guard-closure semantics (synthetic artifact)', () => {
     const ce = load();
     // finite complex literal
     expect(
-      ce.box(['ComplexF', ['Complex', 1, 2]]).simplify().isSame(0)
+      ce.expr(['ComplexF', ['Complex', 1, 2]]).simplify().isSame(0)
     ).toBe(true);
     // declared complex symbol
     ce.declare('z', 'complex');
-    expect(ce.box(['ComplexF', 'z']).simplify().isSame(0)).toBe(true);
+    expect(ce.expr(['ComplexF', 'z']).simplify().isSame(0)).toBe(true);
     // infinity is NOT a finite complex number
-    const inf = ce.box(['ComplexF', 'PositiveInfinity']);
+    const inf = ce.expr(['ComplexF', 'PositiveInfinity']);
     expect(inf.simplify().isSame(inf)).toBe(true);
   });
 });
@@ -1292,7 +1292,7 @@ describe('Phase 3: theta/modular acceptance (real corpus, Im(τ) > 0 assumptions
     ce.declare('tau', 'complex');
     // HH (upper half-plane) guards compile to Im(τ) > 0; discharge goes
     // through the part-cmp machinery, so seed the part inequality directly.
-    ce.assume(ce.box(['Greater', ['Imaginary', 'tau'], 0], { canonical: false }));
+    ce.assume(ce.expr(['Greater', ['Imaginary', 'tau'], 0], { canonical: false }));
     ce.declare('z', 'complex');
     ce.declare('m', 'integer');
   });
@@ -1300,29 +1300,29 @@ describe('Phase 3: theta/modular acceptance (real corpus, Im(τ) > 0 assumptions
   it('Jacobi identity: θ₂(0,τ)⁴ + θ₄(0,τ)⁴ → θ₃(0,τ)⁴  [fungrim:1fbc09]', () => {
     expect(
       ce
-        .box([
+        .expr([
           'Add',
           ['Power', ['JacobiTheta', 2, 0, 'tau'], 4],
           ['Power', ['JacobiTheta', 4, 0, 'tau'], 4],
         ])
         .simplify()
-        .isSame(ce.box(['Power', ['JacobiTheta', 3, 0, 'tau'], 4]))
+        .isSame(ce.expr(['Power', ['JacobiTheta', 3, 0, 'tau'], 4]))
     ).toBe(true);
   });
 
   it('theta periodicity: θ₄(z, 2m + τ) → θ₄(z, τ)  [fungrim:19acd8]', () => {
     expect(
       ce
-        .box(['JacobiTheta', 4, 'z', ['Add', ['Multiply', 2, 'm'], 'tau']])
+        .expr(['JacobiTheta', 4, 'z', ['Add', ['Multiply', 2, 'm'], 'tau']])
         .simplify()
-        .isSame(ce.box(['JacobiTheta', 4, 'z', 'tau']))
+        .isSame(ce.expr(['JacobiTheta', 4, 'z', 'tau']))
     ).toBe(true);
   });
 
   it('modular j periodicity: j(τ + 1) → j(τ)  [fungrim:42a909]', () => {
     expect(
-      ce.box(['ModularJ', ['Add', 'tau', 1]]).simplify().isSame(
-        ce.box(['ModularJ', 'tau'])
+      ce.expr(['ModularJ', ['Add', 'tau', 1]]).simplify().isSame(
+        ce.expr(['ModularJ', 'tau'])
       )
     ).toBe(true);
   });
@@ -1331,18 +1331,18 @@ describe('Phase 3: theta/modular acceptance (real corpus, Im(τ) > 0 assumptions
     // Slightly larger RHS: cost-gated in simplify(), reachable via replace()
     const rs = ce.getRuleSet('standard-simplification')!;
     const result = ce
-      .box(['ModularLambda', ['Negate', ['Divide', 1, 'tau']]])
+      .expr(['ModularLambda', ['Negate', ['Divide', 1, 'tau']]])
       .replace(rs);
     expect(result).not.toBeNull();
     expect(
-      result!.isSame(ce.box(['Subtract', 1, ['ModularLambda', 'tau']]))
+      result!.isSame(ce.expr(['Subtract', 1, ['ModularLambda', 'tau']]))
     ).toBe(true);
   });
 
   it('definitional expansions are exiled to expand: ModularJ(τ) does not explode in simplify()', () => {
     // fungrim:664b4c (j(τ) → Dedekind-eta quotient) is a bare-generic-match
     // definitional expansion: purpose 'expand', out of simplify()'s scan
-    const j = ce.box(['ModularJ', 'tau']);
+    const j = ce.expr(['ModularJ', 'tau']);
     expect(j.simplify().isSame(j)).toBe(true);
     const rule = FUNGRIM_CORE.rules.find((r) => r.id === 'fungrim:664b4c')!;
     expect(rule.purpose).toBe('expand');
@@ -1352,13 +1352,13 @@ describe('Phase 3: theta/modular acceptance (real corpus, Im(τ) > 0 assumptions
     const ce2 = new ComputeEngine();
     loadIdentities(ce2);
     ce2.declare('sigma', 'complex');
-    const theta = ce2.box([
+    const theta = ce2.expr([
       'Add',
       ['Power', ['JacobiTheta', 2, 0, 'sigma'], 4],
       ['Power', ['JacobiTheta', 4, 0, 'sigma'], 4],
     ]);
     expect(theta.simplify().isSame(theta)).toBe(true);
-    const j = ce2.box(['ModularJ', ['Add', 'sigma', 1]]);
+    const j = ce2.expr(['ModularJ', ['Add', 'sigma', 1]]);
     expect(j.simplify().isSame(j)).toBe(true);
   });
 
@@ -1368,14 +1368,14 @@ describe('Phase 3: theta/modular acceptance (real corpus, Im(τ) > 0 assumptions
     const allRules = ce2.rules(ce2.simplificationRules); // 'expand' purpose
     // Im(1 + i) = 1 ∈ (−π, π]: fires
     const inBand = ce2
-      .box(['Argument', ['Power', 'ExponentialE', ['Add', 1, 'ImaginaryUnit']]])
+      .expr(['Argument', ['Power', 'ExponentialE', ['Add', 1, 'ImaginaryUnit']]])
       .replace(allRules);
     expect(inBand).not.toBeNull();
-    expect(inBand!.isEqual(ce2.box(1))).toBe(true);
+    expect(inBand!.isEqual(ce2.expr(1))).toBe(true);
     // Im(4i) = 4 > π: guard definitively violated, no fire
     expect(
       ce2
-        .box([
+        .expr([
           'Argument',
           ['Power', 'ExponentialE', ['Multiply', 4, 'ImaginaryUnit']],
         ])
@@ -1398,7 +1398,7 @@ describe('M5 negative controls: guards fail closed without assumptions', () => {
   });
 
   const staysPut = (input: unknown) => {
-    const boxed = ce.box(input as Parameters<ComputeEngine['box']>[0]);
+    const boxed = ce.expr(input as Parameters<ComputeEngine['box']>[0]);
     expect(boxed.simplify().isSame(boxed)).toBe(true);
   };
 
@@ -1424,12 +1424,12 @@ describe('M5 negative controls: guards fail closed without assumptions', () => {
     // z ∈ ℂ) legitimately does, since πt is finite complex.
     ce.declare('t', 'real');
     const result = ce
-      .box([
+      .expr([
         'Sin',
         ['Add', ['Multiply', 'Pi', 't'], ['Multiply', ['Rational', 1, 2], 'Pi']],
       ])
       .simplify();
-    expect(result.isSame(ce.box(['Cos', ['Multiply', 'Pi', 't']]))).toBe(true);
+    expect(result.isSame(ce.expr(['Cos', ['Multiply', 'Pi', 't']]))).toBe(true);
     // …and specifically NOT the integer rule's (−1)^t
     expect(JSON.stringify(result.json)).not.toContain('"Power"');
   });
@@ -1437,7 +1437,7 @@ describe('M5 negative controls: guards fail closed without assumptions', () => {
   it('type(complex) undecided on an unknown-type symbol: Sin(u + π/2) does NOT rewrite', () => {
     // u has no declared type and no assumptions: Element(u, ℂ) is
     // indeterminate, so the fail-closed complex guard blocks fungrim:bae475
-    const expr = ce.box([
+    const expr = ce.expr([
       'Sin',
       ['Add', 'u', ['Multiply', ['Rational', 1, 2], 'Pi']],
     ]);

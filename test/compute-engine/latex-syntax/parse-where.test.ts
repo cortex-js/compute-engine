@@ -102,7 +102,7 @@ describe('WHERE - EVALUATION', () => {
         ce.parse('x \\operatorname{where} x \\coloneq 7').evaluate().re
       ).toEqual(7);
       // After the clause, outer x is unchanged.
-      expect(ce.box('x').evaluate().re).toEqual(100);
+      expect(ce.expr('x').evaluate().re).toEqual(100);
     } finally {
       ce.popScope();
     }

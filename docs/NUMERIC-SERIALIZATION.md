@@ -41,7 +41,7 @@ digits beyond the working precision.
 **Rationale**: `.json` is the data interchange format. It must be lossless so
 that:
 
-- Round-tripping (`ce.box(expr.json)`) preserves the exact internal state
+- Round-tripping (`ce.expr(expr.json)`) preserves the exact internal state
 - Downstream consumers can apply their own precision policy
 - No information is silently discarded
 
@@ -122,7 +122,7 @@ We considered rounding `.json` to the working precision but decided against it:
 
 - **Data fidelity**: `.json` is the interchange format. Silent truncation
   violates the principle of least surprise for data serialization.
-- **Round-trip safety**: `ce.box(expr.json)` must reconstruct the original
+- **Round-trip safety**: `ce.expr(expr.json)` must reconstruct the original
   internal state. Rounding `.json` would make this impossible.
 - **Consumer choice**: Different consumers may want different precision. The raw
   data lets them decide.

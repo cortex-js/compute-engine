@@ -91,7 +91,7 @@ function classifyEntry(
     for (const c of conjuncts) {
       let result: string;
       try {
-        result = ce.assume(ce.box(c as any, { canonical: !hasPartHead(c) }));
+        result = ce.assume(ce.expr(c as any, { canonical: !hasPartHead(c) }));
       } catch {
         assumable = false;
         failure ??= 'assume-threw';
@@ -112,7 +112,7 @@ function classifyEntry(
     // MathJSON unbound.
     let verified: boolean | undefined;
     try {
-      verified = ce.verify(ce.box(e.assumptions as any));
+      verified = ce.verify(ce.expr(e.assumptions as any));
     } catch {
       return 'verify-threw';
     }

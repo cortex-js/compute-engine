@@ -193,7 +193,7 @@ describe('PR #301 cherry-picked fixes', () => {
       match: ['Add', '_a', '_b'],
       replace: (_e, { _a, _b }) => {
         if (_a.symbol === 'x') return undefined;
-        return ce.box(['Multiply', _a, _b]);
+        return ce.expr(['Multiply', _a, _b]);
       },
     };
 
@@ -208,7 +208,7 @@ describe('PR #301 cherry-picked fixes', () => {
   it('object-rule condition string without $ delimiters is honored', () => {
     // Before the '$'-delimiter fix: the condition string was silently dropped,
     // so the rule applied unconditionally.
-    const expr = ce.box(['Add', 3, 'x']);
+    const expr = ce.expr(['Add', 3, 'x']);
 
     const ruleAccept = {
       match: ['Add', '_a', 'x'],
@@ -229,7 +229,7 @@ describe('PR #301 cherry-picked fixes', () => {
   it('object-rule condition string is canonicalized so it can evaluate', () => {
     // Before the canonicalization fix: a non-trivial condition (e.g. 'a^2 > 0')
     // was parsed as 'raw' and could not evaluate, so the rule never applied.
-    const expr = ce.box(['Add', 4, 'x']);
+    const expr = ce.expr(['Add', 4, 'x']);
 
     const rule = {
       match: ['Add', '_a', 'x'],

@@ -33,8 +33,8 @@ const report = loadIdentities(ce);
 check('loadIdentities returns a report with loaded > 0', report.loaded > 0);
 console.log(`  loaded: ${report.loaded}, byTarget: ${JSON.stringify(report.byTarget)}`);
 
-const result = ce.box(['Gamma', ['Rational', 1, 2]]).simplify();
-const sqrtPi = ce.box(['Sqrt', 'Pi']);
+const result = ce.expr(['Gamma', ['Rational', 1, 2]]).simplify();
+const sqrtPi = ce.expr(['Sqrt', 'Pi']);
 console.log(`  Gamma(1/2).simplify() → ${result.toString()}`);
 check('Gamma(1/2).simplify() is √π', result.isSame(sqrtPi));
 

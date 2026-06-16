@@ -736,15 +736,15 @@ describe('Ln of Root (REVIEW.md A2)', () => {
   // ln_c(root(a, b)) = (1/b)·ln_c(a). The buggy code returned the
   // reciprocal b / ln_c(a).
   test('ln(Root(x, 3)) = ln(x)/3 via .ln() API', () =>
-    expect(ce.box(['Root', 'x', 3]).ln().toString()).toEqual('1/3 * ln(x)'));
+    expect(ce.expr(['Root', 'x', 3]).ln().toString()).toEqual('1/3 * ln(x)'));
 
   test('Ln(Root(x, 3)) = ln(x)/3 via expression evaluation', () =>
-    expect(ce.box(['Ln', ['Root', 'x', 3]]).evaluate().toString()).toEqual(
+    expect(ce.expr(['Ln', ['Root', 'x', 3]]).evaluate().toString()).toEqual(
       '1/3 * ln(x)'
     ));
 
   test('ln(Root(8, 3)) is numerically ln(2)', () =>
-    expect(ce.box(['Root', 8, 3]).ln().N().re).toBeCloseTo(Math.log(2), 12));
+    expect(ce.expr(['Root', 8, 3]).ln().N().re).toBeCloseTo(Math.log(2), 12));
 });
 
 describe('LB', () => {
@@ -1610,7 +1610,7 @@ describe('GCD/LCM', () => {
   describe('polynomial GCD (ROADMAP B5)', () => {
     const poly = (s: string) => ce.parse(s).canonical;
     const gcd = (...ops: ReturnType<typeof ce.parse>[]) =>
-      ce.box(['GCD', ...ops]).evaluate().toString();
+      ce.expr(['GCD', ...ops]).evaluate().toString();
 
     it('gcd((x+1)(x+2), (x+1)(x+3)) → x + 1', () =>
       expect(gcd(poly('(x+1)(x+2)'), poly('(x+1)(x+3)'))).toBe('x + 1'));
@@ -1640,7 +1640,7 @@ describe('GCD/LCM', () => {
     // integer-GCD interpretation of a bare symbol (it may stand for an
     // unknown integer). Use PolynomialGCD(p, q, x) for the coprime → 1 answer.
     it('defers a trivial GCD: gcd(x, 6) stays unevaluated', () =>
-      expect(gcd(poly('x'), ce.box(6))).toBe('gcd(6, x)'));
+      expect(gcd(poly('x'), ce.expr(6))).toBe('gcd(6, x)'));
 
     // ROADMAP B11 "Stage B": the variadic GCD operator computes a *multivariate*
     // polynomial GCD via Brown's dense modular algorithm, verified by exact
@@ -1692,21 +1692,21 @@ describe('GCD/LCM', () => {
     // never wrong (Fateman-scale needs sparse interpolation; see ROADMAP B11).
     it('defers a large multivariate GCD instead of churning', () => {
       const lin = (c: number[]) =>
-        ce.box([
+        ce.expr([
           'Add',
           1,
-          ...c.map((k, i) => ce.box(['Multiply', k, `x${i + 1}`])),
+          ...c.map((k, i) => ce.expr(['Multiply', k, `x${i + 1}`])),
         ]);
-      const pow2 = (b: ReturnType<typeof ce.box>) =>
-        ce.box(['Expand', ce.box(['Power', b, 2])]).evaluate();
+      const pow2 = (b: ReturnType<typeof ce.expr>) =>
+        ce.expr(['Expand', ce.expr(['Power', b, 2])]).evaluate();
       const g = pow2(lin([2, 4, 6, 8, 10, 12, 14]));
       const a = ce
-        .box(['Expand', ce.box(['Multiply', pow2(lin([3, 5, 7, 9, 11, 13, 15])), g])])
+        .expr(['Expand', ce.expr(['Multiply', pow2(lin([3, 5, 7, 9, 11, 13, 15])), g])])
         .evaluate();
       const b = ce
-        .box(['Expand', ce.box(['Multiply', pow2(lin([15, 13, 11, 9, 7, 5, 3])), g])])
+        .expr(['Expand', ce.expr(['Multiply', pow2(lin([15, 13, 11, 9, 7, 5, 3])), g])])
         .evaluate();
-      const r = ce.box(['GCD', a, b]).evaluate().toString();
+      const r = ce.expr(['GCD', a, b]).evaluate().toString();
       expect(r.startsWith('gcd(')).toBe(true);
     });
   });
@@ -1734,23 +1734,23 @@ describe('GCD/LCM machine-precision path (REVIEW.md B2)', () => {
   });
 
   it('computes GCD of two integers', () =>
-    expect(ceMachine.box(['GCD', 4, 6]).evaluate().toString()).toEqual('2'));
+    expect(ceMachine.expr(['GCD', 4, 6]).evaluate().toString()).toEqual('2'));
 
   it('computes LCM of two integers', () =>
-    expect(ceMachine.box(['LCM', 4, 6]).evaluate().toString()).toEqual('12'));
+    expect(ceMachine.expr(['LCM', 4, 6]).evaluate().toString()).toEqual('12'));
 
   it('folds integers and defers non-integers', () =>
-    expect(ceMachine.box(['GCD', 60, 12, 3.1415]).evaluate().toString()).toEqual(
+    expect(ceMachine.expr(['GCD', 60, 12, 3.1415]).evaluate().toString()).toEqual(
       'gcd(12, 3.1415)'
     ));
 
   it('seeds the accumulator after a leading non-integer', () =>
-    expect(ceMachine.box(['GCD', 3.5, 4, 6]).evaluate().toString()).toEqual(
+    expect(ceMachine.expr(['GCD', 3.5, 4, 6]).evaluate().toString()).toEqual(
       'gcd(2, 3.5)'
     ));
 
   it('returns a single integer unchanged', () =>
-    expect(ceMachine.box(['GCD', 42]).evaluate().toString()).toEqual('42'));
+    expect(ceMachine.expr(['GCD', 42]).evaluate().toString()).toEqual('42'));
 });
 
 describe('FACTOR', () => {
@@ -2009,11 +2009,11 @@ describe('Core arithmetic correctness (REVIEW.md A6–A12)', () => {
   // A6: an even root of a negative real returned the real root of |a| (a wrong
   // real) instead of the complex principal root.
   it('A6: Root(-16, 4) is the complex principal root, not 2', () => {
-    const r = ce.box(['Root', -16, 4]).N();
+    const r = ce.expr(['Root', -16, 4]).N();
     expect(r.re).toBeCloseTo(Math.SQRT2, 10); // √2
     expect(r.im).toBeCloseTo(Math.SQRT2, 10);
     // Consistent with Sqrt of a negative.
-    expect(ce.box(['Sqrt', -4]).N().im).toBeCloseTo(2, 10);
+    expect(ce.expr(['Sqrt', -4]).N().im).toBeCloseTo(2, 10);
   });
 
   // A7: ln with a non-integer base silently dropped the base (→ natural log).
@@ -2036,8 +2036,8 @@ describe('Core arithmetic correctness (REVIEW.md A6–A12)', () => {
   // A9: function-difference comparison used an exact === 0 (no tolerance).
   it('A9: function comparison uses tolerance', () => {
     // (0.1 + 0.2 + x) − (0.3 + x) = 5.55e-17 (within tolerance) → equal.
-    const a = ce.box(['Add', 0.1, 0.2, 'x']);
-    const b = ce.box(['Add', 0.3, 'x']);
+    const a = ce.expr(['Add', 0.1, 0.2, 'x']);
+    const b = ce.expr(['Add', 0.3, 'x']);
     expect(a.isEqual(b)).toBe(true);
   });
 
@@ -2050,8 +2050,8 @@ describe('Core arithmetic correctness (REVIEW.md A6–A12)', () => {
 
   // A12: negate of a product still produces the correct value.
   it('A12: negate of a product is correct', () => {
-    expect(ce.box(['Negate', ['Multiply', 3, 'x', 'y']]).N().toString()).toBe(
-      ce.box(['Multiply', -3, 'x', 'y']).N().toString()
+    expect(ce.expr(['Negate', ['Multiply', 3, 'x', 'y']]).N().toString()).toBe(
+      ce.expr(['Multiply', -3, 'x', 'y']).N().toString()
     );
   });
 });
@@ -2067,8 +2067,8 @@ describe('Paired-radical branch soundness (Rubi 1.1.1.4 #39)', () => {
     // −0.4264i for u < 0 and +0.4264i for u > 0 — it must NOT fold to a
     // constant.
     const u = ['Subtract', ['Multiply', 2, 'x'], 5];
-    const a = ce.box(['Sqrt', ['Multiply', ['Rational', -2, 11], u]]);
-    const b = ce.box(['Sqrt', u]);
+    const a = ce.expr(['Sqrt', ['Multiply', ['Rational', -2, 11], u]]);
+    const b = ce.expr(['Sqrt', u]);
     const q = a.div(b);
     // The two regions must produce opposite-sign imaginary parts.
     const below = q.subs({ x: 1 }).N(); // u = −3 < 0
@@ -2081,24 +2081,24 @@ describe('Paired-radical branch soundness (Rubi 1.1.1.4 #39)', () => {
   it('√(positive·u)/√(u) DOES fold to a constant', () => {
     // The positive-coefficient case is sound to collapse.
     const u = ['Subtract', ['Multiply', 2, 'x'], 5];
-    const a = ce.box(['Sqrt', ['Multiply', ['Rational', 2, 11], u]]);
-    const b = ce.box(['Sqrt', u]);
+    const a = ce.expr(['Sqrt', ['Multiply', ['Rational', 2, 11], u]]);
+    const b = ce.expr(['Sqrt', u]);
     expect(a.div(b).toString()).toBe('sqrt(22)/11');
   });
 
   it('√(k·u) with k < 0 evaluates to the correct branch in each region', () => {
     // √(−4·x) is +2i√x for x > 0 and 2√|x| for x < 0.
-    const e = ce.box(['Sqrt', ['Multiply', -4, 'x']]);
+    const e = ce.expr(['Sqrt', ['Multiply', -4, 'x']]);
     expect(e.subs({ x: 1 }).N().im).toBeCloseTo(2, 10); // 2i
     expect(e.subs({ x: -1 }).N().re).toBeCloseTo(2, 10); // 2
     // and squaring recovers the radicand
-    expect(ce.box(['Power', ['Sqrt', ['Multiply', -4, 'x']], 2]).N).toBeDefined();
+    expect(ce.expr(['Power', ['Sqrt', ['Multiply', -4, 'x']], 2]).N).toBeDefined();
   });
 
   it('a rational followed by √(negative) does not crash canonicalization', () => {
     // 11·√(−3): the radical promotion path must not assert on a negative
     // radicand (it would have asserted radical ≥ 1).
-    expect(ce.box(['Multiply', 11, ['Sqrt', -3]]).N().im).toBeCloseTo(
+    expect(ce.expr(['Multiply', 11, ['Sqrt', -3]]).N().im).toBeCloseTo(
       11 * Math.sqrt(3),
       8
     );
@@ -2109,10 +2109,10 @@ describe('Paired-radical branch soundness (Rubi 1.1.1.4 #39)', () => {
 // factorial instead of using Γ(x+1).
 describe('Factorial of non-integer reals (REVIEW.md B16)', () => {
   it('uses Γ(x+1) for a positive non-integer (not rounding to 2)', () => {
-    expect(ce.box(['Factorial', 2.5]).N().re).toBeCloseTo(3.323350970447843, 6);
+    expect(ce.expr(['Factorial', 2.5]).N().re).toBeCloseTo(3.323350970447843, 6);
   });
   it('integer factorials are unchanged', () => {
-    expect(ce.box(['Factorial', 5]).evaluate().json).toBe(120);
+    expect(ce.expr(['Factorial', 5]).evaluate().json).toBe(120);
   });
 });
 
@@ -2122,11 +2122,11 @@ describe('Infinite-symbol times zero (REVIEW.md A13)', () => {
   it('∞·0 = NaN for a symbol with an infinite value', () => {
     const e = new ComputeEngine();
     e.assign('bigval', e.PositiveInfinity);
-    expect(e.box('bigval').mul(0).toString()).toBe('NaN');
+    expect(e.expr('bigval').mul(0).toString()).toBe('NaN');
   });
   it('a free symbol keeps the conventional ·0 → 0', () => {
     const e = new ComputeEngine();
-    expect(e.box('freeSym').mul(0).toString()).toBe('0');
+    expect(e.expr('freeSym').mul(0).toString()).toBe('0');
   });
 });
 
@@ -2135,7 +2135,7 @@ describe('Infinite-symbol times zero (REVIEW.md A13)', () => {
 describe('InterquartileRange consistent with Quartiles (REVIEW.md D20)', () => {
   it('IQR equals Q3 − Q1', () => {
     const data = ['List', 1, 2, 3, 4, 5, 6, 7, 8, 9];
-    const iqr = ce.box(['InterquartileRange', data]).evaluate().re;
+    const iqr = ce.expr(['InterquartileRange', data]).evaluate().re;
     // Quartiles of [1..9] are (2.5, 5, 7) → Q3 − Q1 = 4.5
     expect(iqr).toBeCloseTo(4.5, 10);
   });

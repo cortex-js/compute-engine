@@ -219,7 +219,7 @@ function mathjsonToLatex(
 ): string | null {
   try {
     const latex = withEntryScope(ce, e, () =>
-      ce.box(rewriteUpperHalfPlane(node) as any, { canonical: false }).latex
+      ce.expr(rewriteUpperHalfPlane(node) as any, { canonical: false }).latex
     );
     // The serializer emits literal newlines after `\\` row separators inside
     // matrix environments (e.g. `pmatrix`). A `$$…$$` (or inline `$…$`) block

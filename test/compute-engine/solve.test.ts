@@ -768,13 +768,13 @@ describe('SOLVING CUBIC AND QUARTIC EQUATIONS', () => {
   // Real roots (sorted), as machine numbers.
   const roots = (mj: any) =>
     ce
-      .box(mj)
+      .expr(mj)
       .solve('x')
       ?.map((x) => x.N().re)
       .sort((a: number, b: number) => a - b);
   // Maximum |residual| of the polynomial evaluated at the returned roots.
   const maxResidual = (mj: any) => {
-    const e = ce.box(mj);
+    const e = ce.expr(mj);
     const rs = e.solve('x') ?? [];
     return Math.max(
       0,
@@ -811,7 +811,7 @@ describe('SOLVING CUBIC AND QUARTIC EQUATIONS', () => {
 
   test('biquadratic stays exact when roots are rational: x⁴−5x²+4', () => {
     const mj = ['Add', ['Subtract', ['Power', 'x', 4], ['Multiply', 5, ['Power', 'x', 2]]], 4];
-    const rs = ce.box(mj).solve('x')!;
+    const rs = ce.expr(mj).solve('x')!;
     // Exact integers, not floats (the numeric fallback must not shadow them).
     expect(rs.every((r) => Number.isInteger(r.json))).toBe(true);
     expect(rs.map((r) => r.N().re).sort((a, b) => a - b)).toEqual([-2, -1, 1, 2]);
@@ -821,7 +821,7 @@ describe('SOLVING CUBIC AND QUARTIC EQUATIONS', () => {
     // u = x² → u²+u−1 = 0 → u = (√5−1)/2 (the negative u is complex, dropped).
     // x = ±√((√5−1)/2), exact radicals rather than the numeric fallback.
     const mj = ['Subtract', ['Add', ['Power', 'x', 4], ['Power', 'x', 2]], 1];
-    const rs = ce.box(mj).solve('x')!;
+    const rs = ce.expr(mj).solve('x')!;
     expect(rs.length).toBe(2);
     // Exact radical form (contains a √), not a floating-point approximation.
     expect(rs.some((r) => r.toString().includes('sqrt'))).toBe(true);
@@ -831,7 +831,7 @@ describe('SOLVING CUBIC AND QUARTIC EQUATIONS', () => {
       -0.7861513777574233, 0.7861513777574233,
     ]);
     // Residual ≈ 0.
-    const e = ce.box(mj);
+    const e = ce.expr(mj);
     expect(
       Math.max(...rs.map((r) => Math.abs(e.subs({ x: r }).N().re)))
     ).toBeLessThan(1e-12);
@@ -839,10 +839,10 @@ describe('SOLVING CUBIC AND QUARTIC EQUATIONS', () => {
 
   test('higher gcd reduction is exact: x⁶+x³−1 via u=x³', () => {
     const mj = ['Subtract', ['Add', ['Power', 'x', 6], ['Power', 'x', 3]], 1];
-    const rs = ce.box(mj).solve('x')!;
+    const rs = ce.expr(mj).solve('x')!;
     expect(rs.length).toBe(2); // two real roots, both exact cube roots
     expect(rs.some((r) => r.toString().includes('root'))).toBe(true);
-    const e = ce.box(mj);
+    const e = ce.expr(mj);
     expect(
       Math.max(...rs.map((r) => Math.abs(e.subs({ x: r }).N().re)))
     ).toBeLessThan(1e-12);
@@ -851,13 +851,13 @@ describe('SOLVING CUBIC AND QUARTIC EQUATIONS', () => {
   test('exact paths are preserved (no numeric leakage)', () => {
     // pure power → exact radical
     expect(
-      ce.box(['Subtract', ['Power', 'x', 3], 2]).solve('x')?.[0].json
+      ce.expr(['Subtract', ['Power', 'x', 3], 2]).solve('x')?.[0].json
     ).toEqual(['Root', 2, 3]);
     // factorable rational roots → exact integers
     const c = ['Add', ['Power', 'x', 3], ['Multiply', -6, ['Power', 'x', 2]],
       ['Multiply', 11, 'x'], -6];
     expect(
-      ce.box(c).solve('x')?.map((x) => x.N().re).sort((a, b) => a - b)
+      ce.expr(c).solve('x')?.map((x) => x.N().re).sort((a, b) => a - b)
     ).toEqual([1, 2, 3]);
   });
 });
@@ -1657,7 +1657,7 @@ describe('ZERO-PRODUCT FACTORING (B9)', () => {
 
   test('ln(x)·(x − 1) = 0 → x = 1', () => {
     const result = engine
-      .box(['Multiply', ['Ln', 'x'], ['Subtract', 'x', 1]])
+      .expr(['Multiply', ['Ln', 'x'], ['Subtract', 'x', 1]])
       .solve('x')
       ?.map((x) => x.json);
     expect(result).toEqual([1]);
@@ -1667,7 +1667,7 @@ describe('ZERO-PRODUCT FACTORING (B9)', () => {
   // (x+1)(sin²x+1)²cos³(3x) = 0). The (sin²x+1)² factor has no real root.
   test('(x + 1)·cos³(3x) = 0 → x = −1, π/6, …', () => {
     const result = engine
-      .box([
+      .expr([
         'Multiply',
         ['Add', 'x', 1],
         ['Power', ['Cos', ['Multiply', 3, 'x']], 3],
@@ -1736,7 +1736,7 @@ describe('SOLVE OPERATOR (B9)', () => {
 
   test('Solve(x² − 1 == 0, x) → [1, -1]', () => {
     const r = ce
-      .box(['Solve', ['Equal', ['Subtract', ['Power', 'x', 2], 1], 0], 'x'])
+      .expr(['Solve', ['Equal', ['Subtract', ['Power', 'x', 2], 1], 0], 'x'])
       .evaluate();
     expect(r.operator).toBe('List');
     expect(r.json).toEqual(['List', 1, -1]);
@@ -1745,14 +1745,14 @@ describe('SOLVE OPERATOR (B9)', () => {
   test('Solve(x² − 1, x) — a bare expression is read as = 0', () => {
     expect(
       ce
-        .box(['Solve', ['Subtract', ['Power', 'x', 2], 1], 'x'])
+        .expr(['Solve', ['Subtract', ['Power', 'x', 2], 1], 'x'])
         .evaluate().json
     ).toEqual(['List', 1, -1]);
   });
 
   test('the Equal argument is not collapsed to a boolean', () => {
     const r = ce
-      .box(['Solve', ['Equal', 'x', ['Power', 'x', 2]], 'x'])
+      .expr(['Solve', ['Equal', 'x', ['Power', 'x', 2]], 'x'])
       .evaluate();
     expect(r.operator).toBe('List');
     expect(r.json).toEqual(['List', 0, 1]);
@@ -1761,7 +1761,7 @@ describe('SOLVE OPERATOR (B9)', () => {
   test('Solve also reaches the inverse-trig strategy', () => {
     expect(
       ce
-        .box(['Solve', ['Equal', ['Arctan', 'x'], ['Arcsin', 'x']], 'x'])
+        .expr(['Solve', ['Equal', ['Arctan', 'x'], ['Arcsin', 'x']], 'x'])
         .evaluate().json
     ).toEqual(['List', 0]);
   });

@@ -75,7 +75,7 @@ describe('A5 — where+for composition (scope hygiene)', () => {
         .evaluate();
       expect(result.json).toEqual(['List', 1, 2, 3]);
       // After the clause, outer n is unchanged.
-      expect(ce.box('n').evaluate().re).toEqual(100);
+      expect(ce.expr('n').evaluate().re).toEqual(100);
     } finally {
       ce.popScope();
     }

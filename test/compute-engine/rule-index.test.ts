@@ -184,11 +184,11 @@ describe('cross-head compatibility through the indexed path', () => {
   });
 
   test('Divide pattern fires on a rational number literal (match.ts:142-156)', () => {
-    const expr = ce.box(['Rational', 3, 2]);
+    const expr = ce.expr(['Rational', 3, 2]);
     const steps = replaceRules(expr, divSet);
     expect(steps.length).toBe(1);
     expect(steps[0].because).toBe('div-rule');
-    expect(steps[0].value.isSame(ce.box(['Tuple', 3, 2]))).toBe(true);
+    expect(steps[0].value.isSame(ce.expr(['Tuple', 3, 2]))).toBe(true);
   });
 
   test('Divide pattern fires on Multiply(1/2, x) (match.ts:158-197)', () => {
@@ -197,7 +197,7 @@ describe('cross-head compatibility through the indexed path', () => {
     const steps = replaceRules(expr, divSet);
     expect(steps.length).toBe(1);
     expect(steps[0].because).toBe('div-rule');
-    expect(steps[0].value.isSame(ce.box(['Tuple', 'x', 2]))).toBe(true);
+    expect(steps[0].value.isSame(ce.expr(['Tuple', 'x', 2]))).toBe(true);
   });
 
   test('Power pattern fires on Divide(1, x) (match.ts:199-218)', () => {
@@ -206,7 +206,7 @@ describe('cross-head compatibility through the indexed path', () => {
     const steps = replaceRules(expr, powSet);
     expect(steps.length).toBe(1);
     expect(steps[0].because).toBe('pow-rule');
-    expect(steps[0].value.isSame(ce.box(['Pair', 'x', -1]))).toBe(true);
+    expect(steps[0].value.isSame(ce.expr(['Pair', 'x', -1]))).toBe(true);
   });
 
   test('Power pattern fires on Root(x, 3) (match.ts:220-236)', () => {
@@ -215,7 +215,7 @@ describe('cross-head compatibility through the indexed path', () => {
     const steps = replaceRules(expr, powSet);
     expect(steps.length).toBe(1);
     expect(steps[0].because).toBe('pow-rule');
-    expect(steps[0].value.isSame(ce.box(['Pair', 'x', ['Divide', 1, 3]]))).toBe(
+    expect(steps[0].value.isSame(ce.expr(['Pair', 'x', ['Divide', 1, 3]]))).toBe(
       true
     );
   });
@@ -250,7 +250,7 @@ describe('declaration-order semantics', () => {
       ...pads(3, 'Qad'),
       { match: ['Foo', '_a'], replace: 2, id: 'second' },
     ]);
-    const expr = ce.box(['Foo', 'x']);
+    const expr = ce.expr(['Foo', 'x']);
     const steps = replaceRules(expr, set, { once: true });
     expect(steps.length).toBe(1);
     expect(steps[0].because).toBe('first');
@@ -265,13 +265,13 @@ describe('declaration-order semantics', () => {
         // Functional rule (alwaysTry), after 'foo->bar' in declaration order
         replace: (expr) =>
           expr.operator === 'Bar'
-            ? expr.engine.box(['Baz', expr.ops![0]])
+            ? expr.engine.expr(['Baz', expr.ops![0]])
             : undefined,
         id: 'bar->baz',
       },
       { match: ['Baz', '_a'], replace: 99, id: 'baz->99' },
     ]);
-    const steps = replaceRules(ce.box(['Foo', 'x']), set);
+    const steps = replaceRules(ce.expr(['Foo', 'x']), set);
     expect(steps.map((s) => s.because)).toEqual([
       'foo->bar',
       'bar->baz',
@@ -367,11 +367,11 @@ describe('once / iterationLimit / loop-detection parity', () => {
     const linear = ce.rules([...pads(6), inc]);
 
     for (const set of [indexed, linear]) {
-      const steps = replaceRules(ce.box(['G', 'x']), set, {
+      const steps = replaceRules(ce.expr(['G', 'x']), set, {
         iterationLimit: 3,
       });
       expect(steps.map((s) => s.because)).toEqual(['inc', 'inc', 'inc']);
-      expect(steps.at(-1)!.value.isSame(ce.box(['G', ['Add', 'x', 3]]))).toBe(
+      expect(steps.at(-1)!.value.isSame(ce.expr(['G', ['Add', 'x', 3]]))).toBe(
         true
       );
     }

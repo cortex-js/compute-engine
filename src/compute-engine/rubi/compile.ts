@@ -131,7 +131,7 @@ export function compileRule(
   const skeleton = skeletonize(rule.lhs, rule.variable);
   let boxed: Expression;
   try {
-    boxed = ce.box(skeleton as any);
+    boxed = ce.expr(skeleton as any);
   } catch (e) {
     return { rule: null, reason: `box error: ${e}` };
   }

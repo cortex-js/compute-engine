@@ -358,9 +358,9 @@ describe('BIGNUM SPECIAL FUNCTIONS', () => {
     const ce = new ComputeEngine();
     ce.precision = 1000;
     // γ is delivered to the full requested precision (was capped at ~858).
-    expect(ce.box('EulerGamma').N().toString().length).toBe(1002);
+    expect(ce.expr('EulerGamma').N().toString().length).toBe(1002);
     const diff = ce
-      .box(['Subtract', ['Digamma', 1], ['Negate', 'EulerGamma']])
+      .expr(['Subtract', ['Digamma', 1], ['Negate', 'EulerGamma']])
       .N();
     expect(diff.isSame(0)).toBe(true);
   });
@@ -532,31 +532,31 @@ describe('GAMMA FUNCTION', () => {
   }
 
   test('Γ(4) = 6 (real)', () => {
-    expectApprox(ce.box(['Gamma', 4]), 6);
+    expectApprox(ce.expr(['Gamma', 4]), 6);
   });
 
   test('Γ(1/2) = √π (real)', () => {
-    expectApprox(ce.box(['Gamma', ['Rational', 1, 2]]), Math.sqrt(Math.PI));
+    expectApprox(ce.expr(['Gamma', ['Rational', 1, 2]]), Math.sqrt(Math.PI));
   });
 
   test('Γ(i) ≈ -0.15495 - 0.49802i (complex)', () => {
-    expectComplex(ce.box(['Gamma', 'ImaginaryUnit']), -0.1549498283, -0.4980156681);
+    expectComplex(ce.expr(['Gamma', 'ImaginaryUnit']), -0.1549498283, -0.4980156681);
   });
 
   test('Γ(1+i) ≈ 0.49802 - 0.15495i (complex)', () => {
-    expectComplex(ce.box(['Gamma', ['Complex', 1, 1]]), 0.4980156681, -0.1549498283);
+    expectComplex(ce.expr(['Gamma', ['Complex', 1, 1]]), 0.4980156681, -0.1549498283);
   });
 
   test('Γ at non-positive integers is ComplexInfinity (poles)', () => {
-    expect(ce.box(['Gamma', 0]).evaluate().json).toBe('ComplexInfinity');
-    expect(ce.box(['Gamma', -1]).evaluate().json).toBe('ComplexInfinity');
-    expect(ce.box(['Gamma', -2]).evaluate().json).toBe('ComplexInfinity');
+    expect(ce.expr(['Gamma', 0]).evaluate().json).toBe('ComplexInfinity');
+    expect(ce.expr(['Gamma', -1]).evaluate().json).toBe('ComplexInfinity');
+    expect(ce.expr(['Gamma', -2]).evaluate().json).toBe('ComplexInfinity');
   });
 
   test('GammaLn(1+i): exp(logΓ) matches Γ', () => {
-    const g = ce.box(['Gamma', ['Complex', 1, 1]]).N();
-    const lg = ce.box(['GammaLn', ['Complex', 1, 1]]).N();
-    const back = ce.box(['Exp', lg]).N();
+    const g = ce.expr(['Gamma', ['Complex', 1, 1]]).N();
+    const lg = ce.expr(['GammaLn', ['Complex', 1, 1]]).N();
+    const back = ce.expr(['Exp', lg]).N();
     expect(Math.abs(back.re - g.re)).toBeLessThan(1e-8);
     expect(Math.abs(back.im - g.im)).toBeLessThan(1e-8);
   });
@@ -564,19 +564,19 @@ describe('GAMMA FUNCTION', () => {
 
 describe('FACTORIAL', () => {
   test('5! = 120', () => {
-    expect(ce.box(['Factorial', 5]).evaluate().toString()).toBe('120');
+    expect(ce.expr(['Factorial', 5]).evaluate().toString()).toBe('120');
   });
 
   // Regression for G11: explicit Factorial(-2) was canonicalized to -(2!) = -2.
   // n! = Γ(n+1), and Γ has poles at the non-positive integers, so the
   // factorial of a negative integer is ComplexInfinity.
   test('(-2)! is ComplexInfinity (Γ pole)', () => {
-    expect(ce.box(['Factorial', -2]).evaluate().json).toBe('ComplexInfinity');
-    expect(ce.box(['Factorial', -3]).evaluate().json).toBe('ComplexInfinity');
+    expect(ce.expr(['Factorial', -2]).evaluate().json).toBe('ComplexInfinity');
+    expect(ce.expr(['Factorial', -3]).evaluate().json).toBe('ComplexInfinity');
   });
 
   test('(-1/2)! = √π (negative non-integer via Gamma)', () => {
-    expectApprox(ce.box(['Factorial', -0.5]), Math.sqrt(Math.PI), 1e-12);
+    expectApprox(ce.expr(['Factorial', -0.5]), Math.sqrt(Math.PI), 1e-12);
   });
 
   // The unary-minus precedence convention `-3! = -(3!)` is handled by the LaTeX
@@ -592,34 +592,34 @@ describe('FACTORIAL', () => {
 // series (erf) and continued fraction (erfc, for large |x|).
 describe('ERROR FUNCTION (REVIEW.md G1)', () => {
   test('Erf(1) full precision ≈ 0.84270079294971...', () => {
-    expectApprox(ce.box(['Erf', 1]), 0.8427007929497149, 1e-14);
+    expectApprox(ce.expr(['Erf', 1]), 0.8427007929497149, 1e-14);
   });
 
   test('Erf(0.5) full precision', () => {
-    expectApprox(ce.box(['Erf', 0.5]), 0.5204998778130465, 1e-14);
+    expectApprox(ce.expr(['Erf', 0.5]), 0.5204998778130465, 1e-14);
   });
 
   test('Erf is odd: Erf(-1) = -Erf(1)', () => {
-    expectApprox(ce.box(['Erf', -1]), -0.8427007929497149, 1e-14);
+    expectApprox(ce.expr(['Erf', -1]), -0.8427007929497149, 1e-14);
   });
 
   test('Erfc(0.5) full precision ≈ 0.47950012218695...', () => {
-    expectApprox(ce.box(['Erfc', 0.5]), 0.4795001221869534, 1e-14);
+    expectApprox(ce.expr(['Erfc', 0.5]), 0.4795001221869534, 1e-14);
   });
 
   // For large x, the old `1 - erf(x)` lost all precision (erf ≈ 1). The
   // continued-fraction path keeps these accurate.
   test('Erfc(5) ≈ 1.5374597944e-12 (no 1-erf cancellation)', () => {
-    expectApprox(ce.box(['Erfc', 5]), 1.5374597944280349e-12, 1e-12);
+    expectApprox(ce.expr(['Erfc', 5]), 1.5374597944280349e-12, 1e-12);
   });
 
   test('Erfc(10) ≈ 2.0884875838e-45', () => {
-    expectApprox(ce.box(['Erfc', 10]), 2.0884875837625448e-45, 1e-12);
+    expectApprox(ce.expr(['Erfc', 10]), 2.0884875837625448e-45, 1e-12);
   });
 
   test('Erf(0) = 0, Erfc(0) = 1', () => {
-    expect(ce.box(['Erf', 0]).N().re).toBe(0);
-    expect(ce.box(['Erfc', 0]).N().re).toBe(1);
+    expect(ce.expr(['Erf', 0]).N().re).toBe(0);
+    expect(ce.expr(['Erfc', 0]).N().re).toBe(1);
   });
 });
 
@@ -627,22 +627,22 @@ describe('ERROR FUNCTION (REVIEW.md G1)', () => {
 // antiderivative ∫e^(x²) → (√π/2)·Erfi(x)).
 describe('IMAGINARY ERROR FUNCTION (Erfi)', () => {
   test('Erfi(1) ≈ 1.6504257587975428', () =>
-    expectApprox(ce.box(['Erfi', 1]), 1.6504257587975428, 1e-13));
+    expectApprox(ce.expr(['Erfi', 1]), 1.6504257587975428, 1e-13));
 
   test('Erfi(0.5) ≈ 0.6149520946965109', () =>
-    expectApprox(ce.box(['Erfi', 0.5]), 0.6149520946965109, 1e-13));
+    expectApprox(ce.expr(['Erfi', 0.5]), 0.6149520946965109, 1e-13));
 
   test('Erfi is odd: Erfi(−1) = −Erfi(1)', () =>
-    expectApprox(ce.box(['Erfi', -1]), -1.6504257587975428, 1e-13));
+    expectApprox(ce.expr(['Erfi', -1]), -1.6504257587975428, 1e-13));
 
   test('Erfi(0) = 0, Erfi(±∞) = ±∞', () => {
-    expect(ce.box(['Erfi', 0]).N().re).toBe(0);
-    expect(ce.box(['Erfi', ce.PositiveInfinity]).evaluate().re).toBe(Infinity);
-    expect(ce.box(['Erfi', ce.NegativeInfinity]).evaluate().re).toBe(-Infinity);
+    expect(ce.expr(['Erfi', 0]).N().re).toBe(0);
+    expect(ce.expr(['Erfi', ce.PositiveInfinity]).evaluate().re).toBe(Infinity);
+    expect(ce.expr(['Erfi', ce.NegativeInfinity]).evaluate().re).toBe(-Infinity);
   });
 
   test("d/dx Erfi(x) = (2/√π)·e^(x²)", () =>
-    expect(ce.box(['D', ['Erfi', 'x'], 'x']).evaluate().toString()).toEqual(
+    expect(ce.expr(['D', ['Erfi', 'x'], 'x']).evaluate().toString()).toEqual(
       '(2e^(x^2)) / sqrt(pi)'
     ));
 });
@@ -651,44 +651,44 @@ describe('IMAGINARY ERROR FUNCTION (Erfi)', () => {
 // Numeric evaluation is machine-precision only (no bignum kernel; ROADMAP B1).
 describe('SINE & COSINE INTEGRALS (Si, Ci)', () => {
   test('Si(1) ≈ 0.9460830703671830', () =>
-    expectApprox(ce.box(['SinIntegral', 1]), 0.946083070367183, 1e-12));
+    expectApprox(ce.expr(['SinIntegral', 1]), 0.946083070367183, 1e-12));
 
   test('Si(2) ≈ 1.6054129768026948', () =>
-    expectApprox(ce.box(['SinIntegral', 2]), 1.6054129768026948, 1e-12));
+    expectApprox(ce.expr(['SinIntegral', 2]), 1.6054129768026948, 1e-12));
 
   test('Si(10) ≈ 1.6583475942188740 (continued-fraction regime)', () =>
-    expectApprox(ce.box(['SinIntegral', 10]), 1.658347594218874, 1e-12));
+    expectApprox(ce.expr(['SinIntegral', 10]), 1.658347594218874, 1e-12));
 
   test('Si is odd: Si(−1) = −Si(1)', () =>
-    expectApprox(ce.box(['SinIntegral', -1]), -0.946083070367183, 1e-12));
+    expectApprox(ce.expr(['SinIntegral', -1]), -0.946083070367183, 1e-12));
 
   test('Si(0) = 0, Si(∞) = π/2', () => {
-    expect(ce.box(['SinIntegral', 0]).N().re).toBe(0);
+    expect(ce.expr(['SinIntegral', 0]).N().re).toBe(0);
     expectApprox(
-      ce.box(['SinIntegral', ce.PositiveInfinity]),
+      ce.expr(['SinIntegral', ce.PositiveInfinity]),
       Math.PI / 2,
       1e-12
     );
   });
 
   test('Ci(1) ≈ 0.3374039229009681', () =>
-    expectApprox(ce.box(['CosIntegral', 1]), 0.3374039229009681, 1e-12));
+    expectApprox(ce.expr(['CosIntegral', 1]), 0.3374039229009681, 1e-12));
 
   test('Ci(2) ≈ 0.4229808287748649', () =>
-    expectApprox(ce.box(['CosIntegral', 2]), 0.4229808287748649, 1e-12));
+    expectApprox(ce.expr(['CosIntegral', 2]), 0.4229808287748649, 1e-12));
 
   test('Ci(10) ≈ −0.04545643300445537', () =>
-    expectApprox(ce.box(['CosIntegral', 10]), -0.04545643300445537, 1e-12));
+    expectApprox(ce.expr(['CosIntegral', 10]), -0.04545643300445537, 1e-12));
 
   test('Ci(0) = −∞', () =>
-    expect(ce.box(['CosIntegral', 0]).evaluate().re).toBe(-Infinity));
+    expect(ce.expr(['CosIntegral', 0]).evaluate().re).toBe(-Infinity));
 
   test('d/dx Si(x) = sin(x)/x, d/dx Ci(x) = cos(x)/x', () => {
     expect(
-      ce.box(['D', ['SinIntegral', 'x'], 'x']).evaluate().toString()
+      ce.expr(['D', ['SinIntegral', 'x'], 'x']).evaluate().toString()
     ).toEqual('sin(x) / x');
     expect(
-      ce.box(['D', ['CosIntegral', 'x'], 'x']).evaluate().toString()
+      ce.expr(['D', ['CosIntegral', 'x'], 'x']).evaluate().toString()
     ).toEqual('cos(x) / x');
   });
 });
@@ -697,62 +697,62 @@ describe('SINE & COSINE INTEGRALS (Si, Ci)', () => {
 // ∫1/ln x → li). Machine-precision only (no bignum kernel; ROADMAP B1).
 describe('EXPONENTIAL & LOGARITHMIC INTEGRALS (Ei, li)', () => {
   test('Ei(1) ≈ 1.8951178163559368', () =>
-    expectApprox(ce.box(['ExpIntegralEi', 1]), 1.8951178163559368, 1e-12));
+    expectApprox(ce.expr(['ExpIntegralEi', 1]), 1.8951178163559368, 1e-12));
 
   test('Ei(2) ≈ 4.954234356001890 (asymptotic-free regime)', () =>
-    expectApprox(ce.box(['ExpIntegralEi', 2]), 4.95423435600189, 1e-12));
+    expectApprox(ce.expr(['ExpIntegralEi', 2]), 4.95423435600189, 1e-12));
 
   test('Ei(10) ≈ 2492.2289762418777', () =>
-    expectApprox(ce.box(['ExpIntegralEi', 10]), 2492.2289762418777, 1e-9));
+    expectApprox(ce.expr(['ExpIntegralEi', 10]), 2492.2289762418777, 1e-9));
 
   test('Ei(40) ≈ 6.0397182636112e15 (asymptotic-series regime)', () =>
-    expectApprox(ce.box(['ExpIntegralEi', 40]), 6.0397182636112e15, 1e-12));
+    expectApprox(ce.expr(['ExpIntegralEi', 40]), 6.0397182636112e15, 1e-12));
 
   test('Ei is not odd: Ei(−1) ≈ −0.21938393439552029', () =>
-    expectApprox(ce.box(['ExpIntegralEi', -1]), -0.21938393439552029, 1e-12));
+    expectApprox(ce.expr(['ExpIntegralEi', -1]), -0.21938393439552029, 1e-12));
 
   test('Ei(0) = −∞, Ei(+∞) = +∞, Ei(−∞) = 0', () => {
-    expect(ce.box(['ExpIntegralEi', 0]).evaluate().re).toBe(-Infinity);
+    expect(ce.expr(['ExpIntegralEi', 0]).evaluate().re).toBe(-Infinity);
     expect(
-      ce.box(['ExpIntegralEi', ce.PositiveInfinity]).evaluate().re
+      ce.expr(['ExpIntegralEi', ce.PositiveInfinity]).evaluate().re
     ).toBe(Infinity);
     expect(
-      ce.box(['ExpIntegralEi', ce.NegativeInfinity]).evaluate().re
+      ce.expr(['ExpIntegralEi', ce.NegativeInfinity]).evaluate().re
     ).toBe(0);
   });
 
   // Exactness contract: a transcendental of an exact argument stays symbolic
   // under evaluate(); only .N() numericizes.
   test('Ei(2) stays symbolic under evaluate(), numericizes under N()', () => {
-    expect(ce.box(['ExpIntegralEi', 2]).evaluate().toString()).toEqual(
+    expect(ce.expr(['ExpIntegralEi', 2]).evaluate().toString()).toEqual(
       'ExpIntegralEi(2)'
     );
-    expectApprox(ce.box(['ExpIntegralEi', 2]).N(), 4.95423435600189, 1e-12);
+    expectApprox(ce.expr(['ExpIntegralEi', 2]).N(), 4.95423435600189, 1e-12);
   });
 
   test('li(2) ≈ 1.0451637801174927', () =>
-    expectApprox(ce.box(['LogIntegral', 2]), 1.0451637801174927, 1e-12));
+    expectApprox(ce.expr(['LogIntegral', 2]), 1.0451637801174927, 1e-12));
 
   test('li(10) ≈ 6.165599504787297', () =>
-    expectApprox(ce.box(['LogIntegral', 10]), 6.165599504787297, 1e-11));
+    expectApprox(ce.expr(['LogIntegral', 10]), 6.165599504787297, 1e-11));
 
   // Ramanujan–Soldner constant μ: li(μ) = 0.
   test('li(μ) = 0 at the Ramanujan–Soldner constant', () =>
     expect(
-      Math.abs(ce.box(['LogIntegral', 1.4513692348833810502]).N().re!)
+      Math.abs(ce.expr(['LogIntegral', 1.4513692348833810502]).N().re!)
     ).toBeLessThan(1e-12));
 
   test('li(0) = 0, li(1) = −∞', () => {
-    expect(ce.box(['LogIntegral', 0]).evaluate().re).toBe(0);
-    expect(ce.box(['LogIntegral', 1]).evaluate().re).toBe(-Infinity);
+    expect(ce.expr(['LogIntegral', 0]).evaluate().re).toBe(0);
+    expect(ce.expr(['LogIntegral', 1]).evaluate().re).toBe(-Infinity);
   });
 
   test('d/dx Ei(x) = e^x/x, d/dx li(x) = 1/ln x', () => {
     expect(
-      ce.box(['D', ['ExpIntegralEi', 'x'], 'x']).evaluate().toString()
+      ce.expr(['D', ['ExpIntegralEi', 'x'], 'x']).evaluate().toString()
     ).toEqual('e^x / x');
     expect(
-      ce.box(['D', ['LogIntegral', 'x'], 'x']).evaluate().toString()
+      ce.expr(['D', ['LogIntegral', 'x'], 'x']).evaluate().toString()
     ).toEqual('1 / ln(x)');
   });
 });

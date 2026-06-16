@@ -804,7 +804,7 @@ export function canonicalNumber(
     throw new Error(
       `ce.number(): expected a number, bigint, string, Complex, BigDecimal, NumericValue, MathJSON number object or [numerator, denominator] pair, but got ${JSON.stringify(
         value
-      )}. To box a MathJSON expression, use ce.box() instead.`
+      )}. To box a MathJSON expression, use ce.expr() instead.`
     );
   }
 

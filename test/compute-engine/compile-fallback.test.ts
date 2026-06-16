@@ -25,21 +25,21 @@ describe('Compilation fallback — lambda calling convention', () => {
   afterAll(() => warn.mockRestore());
 
   test('0-arg lambda', () => {
-    const r = compile(ce.box(['Function', 42]), FORCE);
+    const r = compile(ce.expr(['Function', 42]), FORCE);
     expect(r.success).toBe(false);
     expect(r.calling).toBe('lambda');
     expect(r.run!()).toBe(42);
   });
 
   test('1-arg lambda binds its argument', () => {
-    const r = compile(ce.box(['Function', ['Multiply', 'x', 'x'], 'x']), FORCE);
+    const r = compile(ce.expr(['Function', ['Multiply', 'x', 'x'], 'x']), FORCE);
     expect(r.calling).toBe('lambda');
     expect(r.run!(4)).toBe(16);
   });
 
   test('2-arg lambda binds both arguments', () => {
     const r = compile(
-      ce.box(['Function', ['Add', 'x', ['Multiply', 2, 'y']], 'x', 'y']),
+      ce.expr(['Function', ['Add', 'x', ['Multiply', 2, 'y']], 'x', 'y']),
       FORCE
     );
     expect(r.calling).toBe('lambda');
@@ -48,7 +48,7 @@ describe('Compilation fallback — lambda calling convention', () => {
 
   test('3-arg lambda binds all arguments', () => {
     const r = compile(
-      ce.box(['Function', ['Add', 'x', 'y', 'z'], 'x', 'y', 'z']),
+      ce.expr(['Function', ['Add', 'x', 'y', 'z'], 'x', 'y', 'z']),
       FORCE
     );
     expect(r.calling).toBe('lambda');
@@ -60,7 +60,7 @@ describe('Compilation fallback — lambda calling convention', () => {
     // the interpreter evaluates it — so this genuinely exercises the fallback
     // without relying on an unregistered target. Totient(9) = 6.
     const r = compile(
-      ce.box(['Function', ['Add', ['Totient', 'x'], 'y'], 'x', 'y'])
+      ce.expr(['Function', ['Add', ['Totient', 'x'], 'y'], 'x', 'y'])
     );
     expect(r.success).toBe(false);
     expect(r.calling).toBe('lambda');
@@ -68,14 +68,14 @@ describe('Compilation fallback — lambda calling convention', () => {
   });
 
   test('non-lambda expression keeps the expression calling convention', () => {
-    const r = compile(ce.box(['Add', ['Multiply', 'x', 'x'], 1]), FORCE);
+    const r = compile(ce.expr(['Add', ['Multiply', 'x', 'x'], 1]), FORCE);
     expect(r.calling).toBe('expression');
     expect(r.run!({ x: 5 })).toBe(26);
   });
 
   test('fallback:false still throws instead of falling back', () => {
     expect(() =>
-      compile(ce.box(['Function', ['Add', 'x', 'y'], 'x', 'y']), {
+      compile(ce.expr(['Function', ['Add', 'x', 'y'], 'x', 'y']), {
         to: 'no-such-target',
         fallback: false,
       })
@@ -84,7 +84,7 @@ describe('Compilation fallback — lambda calling convention', () => {
 
   test('successful lambda compilation is unaffected', () => {
     const r = compile(
-      ce.box(['Function', ['Add', 'x', ['Multiply', 2, 'y']], 'x', 'y'])
+      ce.expr(['Function', ['Add', 'x', ['Multiply', 2, 'y']], 'x', 'y'])
     );
     expect(r.success).toBe(true);
     expect(r.calling).toBe('lambda');

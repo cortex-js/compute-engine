@@ -69,8 +69,8 @@ describe('aggregateHotHeadDispatch — synthetic firing path', () => {
   ce.declare('TestF', '(number) -> number');
   ce.declare('TestG', '(number) -> number');
 
-  const F = (n: number) => ce.box(['TestF', n]);
-  const G = (n: number) => ce.box(['TestG', n]);
+  const F = (n: number) => ce.expr(['TestF', n]);
+  const G = (n: number) => ce.expr(['TestG', n]);
 
   // A chain over head TestF: F(0)→F(1)→F(2)→G(99) (head change on the last),
   // plus a never-firing rule and a rule that would only fire on G (so it is a
@@ -147,8 +147,8 @@ describe('aggregateHotHeadDispatch — synthetic firing path', () => {
   it('returns the input array unchanged when nothing is foldable', () => {
     const patternRule = {
       _tag: 'boxed-rule',
-      match: ce.box(['TestF', '_x']),
-      replace: ce.box('_x'),
+      match: ce.expr(['TestF', '_x']),
+      replace: ce.expr('_x'),
       condition: undefined,
     } as unknown as BoxedRule;
     const input = [patternRule];

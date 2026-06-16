@@ -113,7 +113,7 @@ describe('LATEX SERIALIZING', () => {
     // The factors must be separated by an explicit multiplication sign,
     // otherwise `3` and `2^2` merge into the single number `32^2`.
     const expr = ce
-      .box(
+      .expr(
         ['Add', ['Multiply', 3, ['Power', 'x', 2]], ['Multiply', 5, 'x'], 3],
         { canonical: false }
       )
@@ -122,7 +122,7 @@ describe('LATEX SERIALIZING', () => {
 
     const term = (sym: string, val: number) =>
       ce
-        .box(['Multiply', 3, ['Power', sym, 2]], { canonical: false })
+        .expr(['Multiply', 3, ['Power', sym, 2]], { canonical: false })
         .subs({ [sym]: val }, { canonical: false })
         .toLatex();
     // A numeric base that prettifies to a square still needs an explicit sign
@@ -134,7 +134,7 @@ describe('LATEX SERIALIZING', () => {
     // `3\times\sqrt{2}`. The rule keys on a digit-leading term, not on the
     // operator, so radicals are unaffected.
     const radical = ce
-      .box(['Multiply', 3, ['Sqrt', 'x']], { canonical: false })
+      .expr(['Multiply', 3, ['Sqrt', 'x']], { canonical: false })
       .subs({ x: 2 }, { canonical: false });
     expect(radical.toLatex()).toMatchInlineSnapshot(`3\\sqrt{2}`);
   });

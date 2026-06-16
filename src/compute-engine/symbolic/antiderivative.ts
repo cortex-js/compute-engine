@@ -2050,7 +2050,7 @@ function trySymbolicPartialFractions(
 
   // Factor Q over ℚ. A denominator that does not split stays whole (degree ≥ 3
   // factor) — the numeric fallback handles it.
-  const factored = ce.box(['Factor', denominator]).evaluate();
+  const factored = ce.expr(['Factor', denominator]).evaluate();
   const factorList = isFunction(factored, 'Multiply')
     ? [...factored.ops]
     : [factored];
@@ -2854,9 +2854,9 @@ function tryRationalizeRadicalSum(
 
   const conj = t1.sub(t2); // √u − √v
   const conjPow =
-    k === 1 ? conj : ce.box(['Expand', conj.pow(ce.number(k))]).evaluate();
+    k === 1 ? conj : ce.expr(['Expand', conj.pow(ce.number(k))]).evaluate();
   const rationalized = ce
-    .box(['Expand', N.mul(conjPow).div(denomPoly.pow(ce.number(k)))])
+    .expr(['Expand', N.mul(conjPow).div(denomPoly.pow(ce.number(k)))])
     .evaluate();
 
   const F = antiderivative(rationalized, index);

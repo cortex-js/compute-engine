@@ -287,7 +287,7 @@ first four). Without them, the ~100 affected Chapter-1 rules can still be
     flagged because the *checker's* derivative was unsound. `simplify()`
     of `√(x²)` alone is sound (`|x|`), so the bug is in a quotient/product
     power-combination rule. Repro:
-    `ce.box(['Divide','x',['Sqrt',['Power','x',2]]]).simplify()` → `1`.
+    `ce.expr(['Divide','x',['Sqrt',['Power','x',2]]]).simplify()` → `1`.
     Known buckets (trace census via `RubiDriver({trace:true})` +
     `findFailingConjunct`):
     (a) unsolved concentrates in 1.1.1.3/.4/.6/.7 (3–4-linear products,
@@ -303,7 +303,7 @@ first four). Without them, the ~100 affected Chapter-1 rules can still be
     (d) 1 error: NaN→BigInt in Rt on `(1−x)^(1/3)/(1+x)`.
     Debugging lessons hard-won: never `evaluate()` the integrand (expands
     products, destroys rule structure); `ce.number()` does not accept
-    MathJSON arrays (spins — use `ce.box`); collapse matching requires ≥1
+    MathJSON arrays (spins — use `ce.expr`); collapse matching requires ≥1
     defaulted optional or `Int[-Fx_]` matches everything.
   - **R1 EXIT — CLEARED (2026-06-12).** After iteration 2, sessions b–f
     pushed the full 5,509-problem section-1.1.1 run to **96.30%** at the

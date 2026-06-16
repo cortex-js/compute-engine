@@ -1123,7 +1123,7 @@ describe('SIGN-PRESERVING POWER FOLDING (x/√(x²) ≠ 1)', () => {
 
   test('x/sqrt(x^2) does not collapse to 1', () => {
     const e = ce
-      .box(['Divide', 'x', ['Sqrt', ['Power', 'x', 2]]])
+      .expr(['Divide', 'x', ['Sqrt', ['Power', 'x', 2]]])
       .simplify();
     expect(e.isSame(1)).toBe(false);
     // Sign-correct: at x = -2 the value is -1
@@ -1133,7 +1133,7 @@ describe('SIGN-PRESERVING POWER FOLDING (x/√(x²) ≠ 1)', () => {
 
   test('x·(x²)^(-1/2) does not collapse to 1', () => {
     const e = ce
-      .box(['Multiply', 'x', ['Power', ['Power', 'x', 2], ['Rational', -1, 2]]])
+      .expr(['Multiply', 'x', ['Power', ['Power', 'x', 2], ['Rational', -1, 2]]])
       .simplify();
     expect(e.isSame(1)).toBe(false);
   });
@@ -1144,13 +1144,13 @@ describe('SIGN-PRESERVING POWER FOLDING (x/√(x²) ≠ 1)', () => {
   test('p/sqrt(p^2) = 1 for p > 0', () => {
     ce.pushScope();
     ce.assume(ce.expr(['Greater', 'p', 0]));
-    const e = ce.box(['Divide', 'p', ['Sqrt', ['Power', 'p', 2]]]).simplify();
+    const e = ce.expr(['Divide', 'p', ['Sqrt', ['Power', 'p', 2]]]).simplify();
     ce.popScope();
     expect(e.isSame(1)).toBe(true);
   });
 
   test('D(sqrt(x^2)) is sign-correct', () => {
-    const d = ce.box(['D', ['Sqrt', ['Power', 'x', 2]], 'x']).evaluate();
+    const d = ce.expr(['D', ['Sqrt', ['Power', 'x', 2]], 'x']).evaluate();
     // d/dx |x| = x/|x| = sign(x): -1 at x = -2, +1 at x = 2
     expect(d.subs({ x: -2 }).N().re).toBeCloseTo(-1, 10);
     expect(d.subs({ x: 2 }).N().re).toBeCloseTo(1, 10);
@@ -1163,9 +1163,9 @@ describe('SIGN-PRESERVING POWER FOLDING (x/√(x²) ≠ 1)', () => {
 
   test('odd inner exponents still fold: x·(x^3)^(1/3) = x^2', () => {
     const e = ce
-      .box(['Multiply', 'x', ['Power', ['Power', 'x', 3], ['Rational', 1, 3]]])
+      .expr(['Multiply', 'x', ['Power', ['Power', 'x', 3], ['Rational', 1, 3]]])
       .simplify();
-    expect(e.isSame(ce.box(['Power', 'x', 2]))).toBe(true);
+    expect(e.isSame(ce.expr(['Power', 'x', 2]))).toBe(true);
   });
 });
 
@@ -1176,8 +1176,8 @@ describe('PRINCIPAL-BRANCH FRACTIONAL POWERS (ROADMAP item 15)', () => {
   // 4th root of −u at all).
 
   test('(−u)^(1/4)·v^(1/4): the −1 stays under the root', () => {
-    const rt = ce.box(['Power', ['Negate', 'u'], ['Rational', 1, 4]]);
-    const v = ce.box(['Power', 'v', ['Rational', 1, 4]]);
+    const rt = ce.expr(['Power', ['Negate', 'u'], ['Rational', 1, 4]]);
+    const v = ce.expr(['Power', 'v', ['Rational', 1, 4]]);
     const p = rt.mul(v);
     // numeric principal-branch check at u = 16, v = 81:
     // (−16)^(1/4)·81^(1/4) = 3·2^(3/4)·e^{iπ/4} = 3√2 + 3√2·i
@@ -1189,7 +1189,7 @@ describe('PRINCIPAL-BRANCH FRACTIONAL POWERS (ROADMAP item 15)', () => {
   test('(−u/w)^(1/4) does not split across the fraction', () => {
     // (u/w)^(1/4) ≠ u^(1/4)/w^(1/4) when w < 0 (conjugate phase)
     const e = ce
-      .box(['Power', ['Negate', ['Divide', 'u', 'w']], ['Rational', 1, 4]])
+      .expr(['Power', ['Negate', ['Divide', 'u', 'w']], ['Rational', 1, 4]])
       .evaluate();
     // principal value at u = 1, w = −1: (−1/−1)^(1/4) = 1
     expect(e.subs({ u: 1, w: -1 }).N().re).toBeCloseTo(1, 10);
@@ -1197,18 +1197,18 @@ describe('PRINCIPAL-BRANCH FRACTIONAL POWERS (ROADMAP item 15)', () => {
   });
 
   test('(−u)² keeps even-power sign (no stray negation)', () => {
-    const sq = ce.box(['Negate', 'u']).pow(2);
+    const sq = ce.expr(['Negate', 'u']).pow(2);
     expect(sq.subs({ u: 3 }).N().re).toBeCloseTo(9, 10);
   });
 
   test('exact numeric radicals still merge: √2·√3 = √6', () =>
-    expect(ce.box(['Multiply', ['Sqrt', 2], ['Sqrt', 3]]).toString()).toBe(
+    expect(ce.expr(['Multiply', ['Sqrt', 2], ['Sqrt', 3]]).toString()).toBe(
       'sqrt(6)'
     ));
 
   test('same-base fractional powers still combine: √x·√x = x', () => {
     const e = ce
-      .box(['Multiply', ['Sqrt', 'x'], ['Sqrt', 'x']])
+      .expr(['Multiply', ['Sqrt', 'x'], ['Sqrt', 'x']])
       .evaluate();
     expect(e.isSame(ce.symbol('x'))).toBe(true);
   });
@@ -1481,7 +1481,7 @@ describe('CUSTOM RULES APPLY TO OPERANDS OF REWRITTEN EXPRESSIONS', () => {
       // (the replacement must be boxed: a string would be parsed as LaTeX)
       { match: ['H', '_a'], replace: ce.symbol('_a') },
     ];
-    const result = ce.box(['F', 'x']).simplify({ rules });
+    const result = ce.expr(['F', 'x']).simplify({ rules });
     expect(result.json).toEqual(['G', 'x']);
   });
 });

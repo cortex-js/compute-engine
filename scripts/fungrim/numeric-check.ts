@@ -261,9 +261,9 @@ export function numericCheckEntry(
     let formula: BoxedExpression;
     let assumptions: BoxedExpression | null = null;
     try {
-      formula = ce.box(e.formula as any).canonical;
+      formula = ce.expr(e.formula as any).canonical;
       if (e.assumptions != null)
-        assumptions = ce.box(e.assumptions as any).canonical;
+        assumptions = ce.expr(e.assumptions as any).canonical;
       // Without the Stage-1 compat widenings some entries don't box here
       if (hasErrorExpr(formula) || (assumptions && hasErrorExpr(assumptions))) {
         base.skipped = 'box-error';
@@ -293,7 +293,7 @@ export function numericCheckEntry(
       try {
         const sub: Record<string, BoxedExpression> = {};
         for (const [k, v] of Object.entries(assignment))
-          sub[k] = ce.box(v as any);
+          sub[k] = ce.expr(v as any);
 
         // Assumption filter: only a definitive True accepts the assignment
         if (assumptions) {

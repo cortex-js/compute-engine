@@ -162,12 +162,12 @@ export function selfTestSolveTemplate(
     useVariations: true,
   };
   for (const x0 of SOLVE_SELFTEST_PROBES) {
-    const c = ce.box(substituteSymbol(innerA, '_x', x0) as never).N();
+    const c = ce.expr(substituteSymbol(innerA, '_x', x0) as never).N();
     const cre = (c as unknown as { re?: number }).re;
     const cim = (c as unknown as { im?: number }).im ?? 0;
     if (typeof cre !== 'number' || !Number.isFinite(cre) || Math.abs(cim) > 1e-12)
       continue; // probe lands outside the real domain of A
-    const eq = ce.box([
+    const eq = ce.expr([
       'Subtract',
       substituteSymbol(innerA, '_x', 'x'),
       c.json,
@@ -264,8 +264,8 @@ export function buildSolveRules(
         } catch {
           /* tolerate */
         }
-      const mc = ce.box(derived.match as never);
-      const rc = ce.box(derived.replace as never);
+      const mc = ce.expr(derived.match as never);
+      const rc = ce.expr(derived.replace as never);
       if (!mc.isValid || !rc.isValid)
         throw new Error(
           `solve seed ${seedId}: invalid canonical ${mc.isValid ? 'replace' : 'match'}`

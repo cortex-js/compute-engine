@@ -158,7 +158,7 @@ describe('ce.number() argument validation', () => {
   test('MathJSON expression array throws instead of hanging', () => {
     // ['Rational', 1, 2] is a MathJSON expression, not a rational pair —
     // it previously made ce.number() spin forever
-    expect(() => ce.number(['Rational', 1, 2] as any)).toThrow(/ce\.box/);
+    expect(() => ce.number(['Rational', 1, 2] as any)).toThrow(/ce\.expr/);
   });
 
   test('wrong-length array throws', () => {

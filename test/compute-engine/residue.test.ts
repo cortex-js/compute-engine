@@ -4,11 +4,11 @@ const ce = new ComputeEngine();
 
 // Residue of `f` (function of `v`) at `v = a`, evaluated exactly.
 function res(f: any, v: string, a: any) {
-  return ce.box(['Residue', f, v, a]).evaluate();
+  return ce.expr(['Residue', f, v, a]).evaluate();
 }
 // Numeric value of the residue (re + i·im).
 function resN(f: any, v: string, a: any) {
-  const r = ce.box(['Residue', f, v, a]).N();
+  const r = ce.expr(['Residue', f, v, a]).N();
   return { re: r.re, im: r.im };
 }
 
@@ -88,7 +88,7 @@ describe('RESIDUE (ROADMAP item 7c)', () => {
       expect(res(['Gamma', 'x'], 'x', 2).re).toBe(0);
     });
     test('numeric evaluation', () => {
-      expect(ce.box(['Residue', ['Gamma', 'x'], 'x', -2]).N().re).toBeCloseTo(
+      expect(ce.expr(['Residue', ['Gamma', 'x'], 'x', -2]).N().re).toBeCloseTo(
         0.5,
         12
       );
@@ -127,7 +127,7 @@ describe('RESIDUE (ROADMAP item 7c)', () => {
 
   describe('deferral', () => {
     test('residue at infinity stays unevaluated', () => {
-      const r = ce.box([
+      const r = ce.expr([
         'Residue',
         ['Divide', 1, 'x'],
         'x',

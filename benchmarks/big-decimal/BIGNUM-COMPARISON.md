@@ -11,7 +11,7 @@ confirm the remaining work (→ [ROADMAP](../../ROADMAP.md) item 17)._
 Per-call wall time to **numerically evaluate** a transcendental at a fixed
 working precision, for four implementations:
 
-- **CE (current)** — `ce.box([op, …]).N()` at `ce.precision = p`, current build.
+- **CE (current)** — `ce.expr([op, …]).N()` at `ce.precision = p`, current build.
 - **CE 0.59.0** — same, the last published release (the kernel before this
   release's base-2 / `giant_steps` / AGM / Chudnovsky work).
 - **SymPy** — `expr.evalf(p)` (SymPy 1.14, what a SymPy user runs).

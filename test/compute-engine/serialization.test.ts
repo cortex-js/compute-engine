@@ -339,7 +339,7 @@ describe('String round-trip (REVIEW.md G6)', () => {
   for (const s of ['world', 'hello', 'hello world', '123', '']) {
     test(`ce.string(${JSON.stringify(s)}) round-trips as a string`, () => {
       const str = ce.string(s);
-      const reboxed = ce.box(str.json as any);
+      const reboxed = ce.expr(str.json as any);
       expect(reboxed.type.toString()).toBe('string');
       expect(reboxed.string).toBe(s);
       expect(str.isSame(reboxed)).toBe(true);

@@ -50,18 +50,18 @@ describe('Parser: restriction braces', () => {
 
   describe('evaluation', () => {
     test('When(5, True) evaluates to 5', () => {
-      const result = ce.box(['When', 5, 'True']).evaluate();
+      const result = ce.expr(['When', 5, 'True']).evaluate();
       expect(result.json).toBe(5);
     });
 
     test('When(5, False) evaluates to Undefined', () => {
-      const result = ce.box(['When', 5, 'False']).evaluate();
+      const result = ce.expr(['When', 5, 'False']).evaluate();
       expect(result.json).toBe('Undefined');
     });
 
     test('When(5, x > 0) holds when x has no value', () => {
       const ce2 = new ComputeEngine();
-      const result = ce2.box(['When', 5, ['Greater', 'x', 0]]).evaluate();
+      const result = ce2.expr(['When', 5, ['Greater', 'x', 0]]).evaluate();
       expect(result.operator).toBe('When');
     });
   });
@@ -82,7 +82,7 @@ describe('Parser: restriction braces', () => {
 
   describe('round-trip serialization', () => {
     test('When(e, And(c1, c2)) serializes to stacked braces', () => {
-      const expr = ce.box([
+      const expr = ce.expr([
         'When',
         'x',
         ['And', ['Greater', 'x', 0], ['Less', 'x', 10]],

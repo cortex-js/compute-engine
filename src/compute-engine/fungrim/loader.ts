@@ -134,12 +134,12 @@ function buildGuardClosures(
 ): GuardClosure[] {
   const boxGuardExpr = (x: FungrimMathJson): Expression => {
     try {
-      const b = ce.box(x as ExpressionInput);
+      const b = ce.expr(x as ExpressionInput);
       if (b.isValid) return b;
     } catch {
       /* fall through to raw boxing */
     }
-    return ce.box(x as ExpressionInput, { form: 'raw' });
+    return ce.expr(x as ExpressionInput, { form: 'raw' });
   };
 
   return guards.map((g): GuardClosure => {
@@ -347,10 +347,10 @@ function boxCompiledRule(
     // CANONICALLY (raw boxing leaves ['Rational',1,2] as a structural
     // function expression and loses literal matches; a bare-string side
     // ('_x') passed unboxed to ce.rules would be parsed as LaTeX).
-    const match = ce.box(rule.match as ExpressionInput);
+    const match = ce.expr(rule.match as ExpressionInput);
     if (!match.isValid)
       return { error: `invalid match: ${match.toString()}`.slice(0, 160) };
-    const replace = ce.box(rule.replace as ExpressionInput);
+    const replace = ce.expr(rule.replace as ExpressionInput);
     if (!replace.isValid)
       return { error: `invalid replace: ${replace.toString()}`.slice(0, 160) };
 

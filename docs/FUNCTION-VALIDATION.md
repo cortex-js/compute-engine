@@ -175,13 +175,13 @@ Always add tests for invalid arguments:
 
 ```typescript
 test('INVALID', () => {
-  expect(ce.box(['MyFunction']).evaluate()).toMatchInlineSnapshot(
+  expect(ce.expr(['MyFunction']).evaluate()).toMatchInlineSnapshot(
     `["MyFunction", ["Error", "'missing'"], ["Error", "'missing'"]]`
   );
-  expect(ce.box(['MyFunction', 2]).evaluate()).toMatchInlineSnapshot(
+  expect(ce.expr(['MyFunction', 2]).evaluate()).toMatchInlineSnapshot(
     `["MyFunction", 2, ["Error", "'missing'"]]`
   );
-  expect(ce.box(['MyFunction', 2, 'wrongType']).evaluate()).toMatchInlineSnapshot(
+  expect(ce.expr(['MyFunction', 2, 'wrongType']).evaluate()).toMatchInlineSnapshot(
     `["MyFunction", 2, ["Error", ["ErrorCode", "incompatible-type", ...]]]`
   );
 });

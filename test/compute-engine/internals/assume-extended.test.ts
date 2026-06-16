@@ -28,14 +28,14 @@ function freshEngine(): ComputeEngine {
 describe('Element(n, Range(1, +oo))', () => {
   const ce = freshEngine();
   const result = ce.assume(
-    ce.box(['Element', 'n', ['Range', 1, 'PositiveInfinity']])
+    ce.expr(['Element', 'n', ['Range', 1, 'PositiveInfinity']])
   );
 
   it('returns ok', () => expect(result).toBe('ok'));
 
   it('refines n to integer', () => {
-    expect(ce.box('n').isInteger).toBe(true);
-    expect(ce.box('n').type.toString()).toBe('integer');
+    expect(ce.expr('n').isInteger).toBe(true);
+    expect(ce.expr('n').type.toString()).toBe('integer');
   });
 
   it('stores the lower bound n >= 1', () => {
@@ -48,14 +48,14 @@ describe('Element(n, Range(1, +oo))', () => {
 
   // enabled in P3 (relational-operator subject-bounds query hook)
   it('verifies n >= 1 and n > 0', () => {
-    expect(ce.verify(ce.box(['GreaterEqual', 'n', 1]))).toBe(true);
-    expect(ce.verify(ce.box(['Greater', 'n', 0]))).toBe(true);
+    expect(ce.verify(ce.expr(['GreaterEqual', 'n', 1]))).toBe(true);
+    expect(ce.verify(ce.expr(['Greater', 'n', 0]))).toBe(true);
   });
 
   it('stores both bounds for a finite Range', () => {
     const ce2 = freshEngine();
     expect(
-      ce2.assume(ce2.box(['Element', 'k', ['Range', 1, 10]]))
+      ce2.assume(ce2.expr(['Element', 'k', ['Range', 1, 10]]))
     ).toBe('ok');
     const bounds = getInequalityBoundsFromAssumptions(ce2, 'k');
     expect(bounds.lower?.isSame(1)).toBe(true);
@@ -72,15 +72,15 @@ describe('Element(n, Range(1, +oo))', () => {
 describe('Greater(Imaginary(tau), 0)', () => {
   const ce = freshEngine();
   const result = ce.assume(
-    ce.box(['Greater', ['Imaginary', 'tau'], 0], { canonical: false })
+    ce.expr(['Greater', ['Imaginary', 'tau'], 0], { canonical: false })
   );
 
   it('returns ok', () => expect(result).toBe('ok'));
 
   it('does NOT retype tau as real', () => {
-    expect(ce.box('tau').isReal).not.toBe(true);
+    expect(ce.expr('tau').isReal).not.toBe(true);
     // The only refinement allowed for a part-predicate is `number`
-    expect(ce.box('tau').type.toString()).toBe('number');
+    expect(ce.expr('tau').type.toString()).toBe('number');
   });
 
   it('stores the bound on the im:tau subject in the fact index', () => {
@@ -107,15 +107,15 @@ describe('Greater(Imaginary(tau), 0)', () => {
 
   // enabled in P3 (Imaginary sgn fallback + relational query hooks)
   it('verifies Im(tau) > 0 and tau != 0', () => {
-    expect(ce.verify(ce.box(['Greater', ['Imaginary', 'tau'], 0]))).toBe(true);
-    expect(ce.verify(ce.box(['NotEqual', 'tau', 0]))).toBe(true);
+    expect(ce.verify(ce.expr(['Greater', ['Imaginary', 'tau'], 0]))).toBe(true);
+    expect(ce.verify(ce.expr(['NotEqual', 'tau', 0]))).toBe(true);
   });
 
   it('does not store derived facts when the bound does not exclude 0', () => {
     const ce2 = freshEngine();
     expect(
       ce2.assume(
-        ce2.box(['GreaterEqual', ['Imaginary', 'w'], 0], { canonical: false })
+        ce2.expr(['GreaterEqual', ['Imaginary', 'w'], 0], { canonical: false })
       )
     ).toBe('ok');
     // Im(w) >= 0 does not imply w != 0 or w not real
@@ -131,14 +131,14 @@ describe('Greater(Imaginary(tau), 0)', () => {
 describe('Greater(Real(s), 1)', () => {
   const ce = freshEngine();
   const result = ce.assume(
-    ce.box(['Greater', ['Real', 's'], 1], { canonical: false })
+    ce.expr(['Greater', ['Real', 's'], 1], { canonical: false })
   );
 
   it('returns ok', () => expect(result).toBe('ok'));
 
   it('does NOT retype s as real (the destructive-retype bug)', () => {
-    expect(ce.box('s').isReal).not.toBe(true);
-    expect(ce.box('s').type.toString()).toBe('number');
+    expect(ce.expr('s').isReal).not.toBe(true);
+    expect(ce.expr('s').type.toString()).toBe('number');
   });
 
   it('stores the bound on the re:s subject', () => {
@@ -154,22 +154,22 @@ describe('Greater(Real(s), 1)', () => {
 
   it('detects an implied part-bound as a tautology', () => {
     expect(
-      ce.assume(ce.box(['Greater', ['Real', 's'], 0], { canonical: false }))
+      ce.assume(ce.expr(['Greater', ['Real', 's'], 0], { canonical: false }))
     ).toBe('tautology');
   });
 
   it('detects a conflicting part-bound as a contradiction', () => {
     expect(
-      ce.assume(ce.box(['Less', ['Real', 's'], 0], { canonical: false }))
+      ce.assume(ce.expr(['Less', ['Real', 's'], 0], { canonical: false }))
     ).toBe('contradiction');
   });
 
   // enabled in P3 (relational-operator subject-bounds query hook)
   it('verifies Re(s) > 1 and the implied Re(s) > 0', () => {
-    expect(ce.verify(ce.box(['Greater', ['Real', 's'], 1]))).toBe(true);
-    expect(ce.verify(ce.box(['Greater', ['Real', 's'], 0]))).toBe(true);
+    expect(ce.verify(ce.expr(['Greater', ['Real', 's'], 1]))).toBe(true);
+    expect(ce.verify(ce.expr(['Greater', ['Real', 's'], 0]))).toBe(true);
     // Negative control (§11.9): not decidable, must stay undefined
-    expect(ce.verify(ce.box(['Greater', ['Real', 's'], 2]))).toBeUndefined();
+    expect(ce.verify(ce.expr(['Greater', ['Real', 's'], 2]))).toBeUndefined();
   });
 });
 
@@ -180,7 +180,7 @@ describe('Greater(Real(s), 1)', () => {
 describe('Less(Abs(q), 1)', () => {
   const ce = freshEngine();
   const result = ce.assume(
-    ce.box(['Less', ['Abs', 'q'], 1], { canonical: false })
+    ce.expr(['Less', ['Abs', 'q'], 1], { canonical: false })
   );
 
   it('returns ok', () => expect(result).toBe('ok'));
@@ -195,23 +195,23 @@ describe('Less(Abs(q), 1)', () => {
   });
 
   it('refines q to finite_number (|q| bounded => finite)', () => {
-    expect(ce.box('q').type.toString()).toBe('finite_number');
-    expect(ce.box('q').isReal).not.toBe(true);
+    expect(ce.expr('q').type.toString()).toBe('finite_number');
+    expect(ce.expr('q').isReal).not.toBe(true);
   });
 
   // enabled in P3 (isFinite type fallback + relational query hooks)
   it('verifies |q| < 1 and q.isFinite', () => {
-    expect(ce.verify(ce.box(['Less', ['Abs', 'q'], 1]))).toBe(true);
-    expect(ce.box('q').isFinite).toBe(true);
+    expect(ce.verify(ce.expr(['Less', ['Abs', 'q'], 1]))).toBe(true);
+    expect(ce.expr('q').isFinite).toBe(true);
   });
 
   it('a lower bound on Abs does not refine to finite_number', () => {
     const ce2 = freshEngine();
     expect(
-      ce2.assume(ce2.box(['Greater', ['Abs', 'r'], 2], { canonical: false }))
+      ce2.assume(ce2.expr(['Greater', ['Abs', 'r'], 2], { canonical: false }))
     ).toBe('ok');
     // |r| > 2 says nothing about finiteness: only `number`
-    expect(ce2.box('r').type.toString()).toBe('number');
+    expect(ce2.expr('r').type.toString()).toBe('number');
   });
 });
 
@@ -222,7 +222,7 @@ describe('Less(Abs(q), 1)', () => {
 describe('Element(z, SetMinus(ComplexNumbers, Set(i, -i)))', () => {
   const ce = freshEngine();
   const result = ce.assume(
-    ce.box(
+    ce.expr(
       [
         'Element',
         'z',
@@ -239,7 +239,7 @@ describe('Element(z, SetMinus(ComplexNumbers, Set(i, -i)))', () => {
   it('returns ok', () => expect(result).toBe('ok'));
 
   it('refines z to complex', () => {
-    expect(ce.box('z').type.matches('complex')).toBe(true);
+    expect(ce.expr('z').type.matches('complex')).toBe(true);
   });
 
   it('stores NotEqual facts for both exclusions', () => {
@@ -253,15 +253,15 @@ describe('Element(z, SetMinus(ComplexNumbers, Set(i, -i)))', () => {
   // decomposition; eq() consults the stored NotEqual fact via the ask()
   // assumption-matching loop, which is not suppressed inside verify())
   it('verifies z != i (and z = i is false)', () => {
-    expect(ce.verify(ce.box(['NotEqual', 'z', 'ImaginaryUnit']))).toBe(true);
-    expect(ce.verify(ce.box(['Equal', 'z', 'ImaginaryUnit']))).toBe(false);
+    expect(ce.verify(ce.expr(['NotEqual', 'z', 'ImaginaryUnit']))).toBe(true);
+    expect(ce.verify(ce.expr(['Equal', 'z', 'ImaginaryUnit']))).toBe(false);
   });
 });
 
 describe('Element(z, SetMinus(ComplexNumbers, NonPositiveIntegers))', () => {
   const ce = freshEngine();
   const result = ce.assume(
-    ce.box(['Element', 'z', ['SetMinus', 'ComplexNumbers', 'NonPositiveIntegers']], {
+    ce.expr(['Element', 'z', ['SetMinus', 'ComplexNumbers', 'NonPositiveIntegers']], {
       canonical: false,
     })
   );
@@ -269,7 +269,7 @@ describe('Element(z, SetMinus(ComplexNumbers, NonPositiveIntegers))', () => {
   it('returns ok', () => expect(result).toBe('ok'));
 
   it('refines z to complex and stores a NotElement fact', () => {
-    expect(ce.box('z').type.matches('complex')).toBe(true);
+    expect(ce.expr('z').type.matches('complex')).toBe(true);
     const m = getFactIndex(ce).membership.get('z');
     expect(m?.notIn).toHaveLength(1);
     expect(m?.notIn[0].symbol).toBe('NonPositiveIntegers');
@@ -277,7 +277,7 @@ describe('Element(z, SetMinus(ComplexNumbers, NonPositiveIntegers))', () => {
 
   // enabled in P3 (NotElement fact lookup)
   it('verifies NotElement(z, NonPositiveIntegers)', () => {
-    expect(ce.verify(ce.box(['NotElement', 'z', 'NonPositiveIntegers']))).toBe(
+    expect(ce.verify(ce.expr(['NotElement', 'z', 'NonPositiveIntegers']))).toBe(
       true
     );
   });
@@ -291,7 +291,7 @@ describe('Element(x, <inert/unknown set symbol>)', () => {
   it('stores a membership fact instead of throwing', () => {
     const ce = freshEngine();
     expect(
-      ce.assume(ce.box(['Element', 'x', 'MyInertSet'], { canonical: false }))
+      ce.assume(ce.expr(['Element', 'x', 'MyInertSet'], { canonical: false }))
     ).toBe('ok');
     const m = getFactIndex(ce).membership.get('x');
     expect(m?.in).toHaveLength(1);
@@ -302,7 +302,7 @@ describe('Element(x, <inert/unknown set symbol>)', () => {
     const ce = freshEngine();
     expect(
       ce.assume(
-        ce.box(['NotElement', 'x', 'AlgebraicNumbers'], { canonical: false })
+        ce.expr(['NotElement', 'x', 'AlgebraicNumbers'], { canonical: false })
       )
     ).toBe('ok');
     const m = getFactIndex(ce).membership.get('x');
@@ -320,12 +320,12 @@ describe('Element(x, Interval(...))', () => {
     const ce = freshEngine();
     expect(
       ce.assume(
-        ce.box(['Element', 'x', ['Interval', ['Open', 0], 10]], {
+        ce.expr(['Element', 'x', ['Interval', ['Open', 0], 10]], {
           canonical: false,
         })
       )
     ).toBe('ok');
-    expect(ce.box('x').type.toString()).toBe('real');
+    expect(ce.expr('x').type.toString()).toBe('real');
     const bounds = getInequalityBoundsFromAssumptions(ce, 'x');
     expect(bounds.lower?.isSame(0)).toBe(true);
     expect(bounds.lowerStrict).toBe(true);
@@ -337,7 +337,7 @@ describe('Element(x, Interval(...))', () => {
     const ce = freshEngine();
     expect(
       ce.assume(
-        ce.box(
+        ce.expr(
           ['Element', 'y', ['Interval', ['Open', 1], 'PositiveInfinity']],
           { canonical: false }
         )
@@ -357,7 +357,7 @@ describe('Element(x, Interval(...))', () => {
 describe('NotEqual assumptions', () => {
   it('stores a disequality fact for a symbol', () => {
     const ce = freshEngine();
-    expect(ce.assume(ce.box(['NotEqual', 'v', 3], { canonical: false }))).toBe(
+    expect(ce.assume(ce.expr(['NotEqual', 'v', 3], { canonical: false }))).toBe(
       'ok'
     );
     const facts = getFactIndex(ce).bySubject.get('self:v');
@@ -368,7 +368,7 @@ describe('NotEqual assumptions', () => {
   it('stores a disequality fact for a part subject', () => {
     const ce = freshEngine();
     expect(
-      ce.assume(ce.box(['NotEqual', ['Real', 's'], 1], { canonical: false }))
+      ce.assume(ce.expr(['NotEqual', ['Real', 's'], 1], { canonical: false }))
     ).toBe('ok');
     const facts = getFactIndex(ce).bySubject.get('re:s');
     expect(facts?.notEqual).toHaveLength(1);
@@ -377,16 +377,16 @@ describe('NotEqual assumptions', () => {
 
   it('contradicts an assigned value (§4.3)', () => {
     const ce = freshEngine();
-    ce.assume(ce.box(['Equal', 'w', 5]));
-    expect(ce.assume(ce.box(['NotEqual', 'w', 5], { canonical: false }))).toBe(
+    ce.assume(ce.expr(['Equal', 'w', 5]));
+    expect(ce.assume(ce.expr(['NotEqual', 'w', 5], { canonical: false }))).toBe(
       'contradiction'
     );
   });
 
   it('is a tautology when the values are known to differ', () => {
     const ce = freshEngine();
-    ce.assume(ce.box(['Equal', 'w', 5]));
-    expect(ce.assume(ce.box(['NotEqual', 'w', 4], { canonical: false }))).toBe(
+    ce.assume(ce.expr(['Equal', 'w', 5]));
+    expect(ce.assume(ce.expr(['NotEqual', 'w', 4], { canonical: false }))).toBe(
       'tautology'
     );
   });
@@ -400,24 +400,24 @@ describe('And(...) assumptions', () => {
   it('assumes each conjunct', () => {
     const ce = freshEngine();
     const result = ce.assume(
-      ce.box(
+      ce.expr(
         ['And', ['Element', 'z', 'ComplexNumbers'], ['NotEqual', 'z', 0]],
         { canonical: false }
       )
     );
     expect(result).toBe('ok');
-    expect(ce.box('z').type.matches('complex')).toBe(true);
+    expect(ce.expr('z').type.matches('complex')).toBe(true);
     const facts = getFactIndex(ce).bySubject.get('self:z');
     expect(facts?.notEqual).toHaveLength(1);
     expect(facts?.notEqual[0].isSame(0)).toBe(true);
     // eq(z, 0) is decided false from the stored disequality (§5.1.d)
-    expect(ce.box(['Equal', 'z', 0]).evaluate().symbol).toBe('False');
+    expect(ce.expr(['Equal', 'z', 0]).evaluate().symbol).toBe('False');
   });
 
   it('splits conjuncts across symbols (§11.8)', () => {
     const ce = freshEngine();
     const result = ce.assume(
-      ce.box(
+      ce.expr(
         [
           'And',
           ['Greater', ['Real', 'a'], 0],
@@ -440,7 +440,7 @@ describe('And(...) assumptions', () => {
   it('reports a contradiction if any conjunct contradicts', () => {
     const ce = freshEngine();
     const result = ce.assume(
-      ce.box(['And', ['Greater', 'x', 2], ['Less', 'x', 1]], {
+      ce.expr(['And', ['Greater', 'x', 2], ['Less', 'x', 1]], {
         canonical: false,
       })
     );
@@ -455,17 +455,17 @@ describe('And(...) assumptions', () => {
 describe('contradiction detection', () => {
   it('x > 2 then x < 1 is a contradiction (bare symbol, unchanged)', () => {
     const ce = freshEngine();
-    expect(ce.assume(ce.box(['Greater', 'x', 2]))).toBe('ok');
-    expect(ce.assume(ce.box(['Less', 'x', 1]))).toBe('contradiction');
+    expect(ce.assume(ce.expr(['Greater', 'x', 2]))).toBe('ok');
+    expect(ce.assume(ce.expr(['Less', 'x', 1]))).toBe('contradiction');
   });
 
   it('Re(s) > 1 then Re(s) < 0 is a contradiction (part subject)', () => {
     const ce = freshEngine();
     expect(
-      ce.assume(ce.box(['Greater', ['Real', 's'], 1], { canonical: false }))
+      ce.assume(ce.expr(['Greater', ['Real', 's'], 1], { canonical: false }))
     ).toBe('ok');
     expect(
-      ce.assume(ce.box(['Less', ['Real', 's'], 0], { canonical: false }))
+      ce.assume(ce.expr(['Less', ['Real', 's'], 0], { canonical: false }))
     ).toBe('contradiction');
   });
 
@@ -473,11 +473,11 @@ describe('contradiction detection', () => {
     const ce = freshEngine();
     expect(
       ce.assume(
-        ce.box(['Greater', ['Imaginary', 't'], 0], { canonical: false })
+        ce.expr(['Greater', ['Imaginary', 't'], 0], { canonical: false })
       )
     ).toBe('ok');
     expect(
-      ce.assume(ce.box(['Less', ['Imaginary', 't'], 0], { canonical: false }))
+      ce.assume(ce.expr(['Less', ['Imaginary', 't'], 0], { canonical: false }))
     ).toBe('contradiction');
   });
 });
@@ -491,7 +491,7 @@ describe('unsupported predicate shapes', () => {
     const ce = freshEngine();
     expect(
       ce.assume(
-        ce.box(['Or', ['Greater', 'x', 0], ['Less', 'x', 0]], {
+        ce.expr(['Or', ['Greater', 'x', 0], ['Less', 'x', 0]], {
           canonical: false,
         })
       )
@@ -501,7 +501,7 @@ describe('unsupported predicate shapes', () => {
   it('Not(...) returns not-a-predicate', () => {
     const ce = freshEngine();
     expect(
-      ce.assume(ce.box(['Not', ['Greater', 'x', 0]], { canonical: false }))
+      ce.assume(ce.expr(['Not', ['Greater', 'x', 0]], { canonical: false }))
     ).toBe('not-a-predicate');
   });
 });
@@ -516,7 +516,7 @@ describe('scope behavior', () => {
     ce.pushScope();
     expect(
       ce.assume(
-        ce.box(['Greater', ['Imaginary', 'tau'], 0], { canonical: false })
+        ce.expr(['Greater', ['Imaginary', 'tau'], 0], { canonical: false })
       )
     ).toBe('ok');
     expect(
@@ -536,7 +536,7 @@ describe('scope behavior', () => {
     const ce = freshEngine();
     expect(
       ce.assume(
-        ce.box(['Greater', ['Imaginary', 'tau'], 0], { canonical: false })
+        ce.expr(['Greater', ['Imaginary', 'tau'], 0], { canonical: false })
       )
     ).toBe('ok');
     // The bound, the derived NotEqual and the derived NotElement are present
@@ -562,14 +562,14 @@ describe('regression: bare-symbol inequalities keep historical behavior', () => 
   it('assume(x > 0) still implies x.isPositive and x.isReal', () => {
     const ce = freshEngine();
     expect(ce.assume(ce.parse('x > 0'))).toBe('ok');
-    expect(ce.box('x').isPositive).toBe(true);
-    expect(ce.box('x').isReal).toBe(true);
+    expect(ce.expr('x').isPositive).toBe(true);
+    expect(ce.expr('x').isReal).toBe(true);
   });
 
   it('assume(x > 4) declares x real and stores the bound', () => {
     const ce = freshEngine();
-    expect(ce.assume(ce.box(['Greater', 'x', 4]))).toBe('ok');
-    expect(ce.box('x').type.toString()).toBe('real');
+    expect(ce.assume(ce.expr(['Greater', 'x', 4]))).toBe('ok');
+    expect(ce.expr('x').type.toString()).toBe('real');
     const bounds = getInequalityBoundsFromAssumptions(ce, 'x');
     expect(bounds.lower?.isSame(4)).toBe(true);
     expect(bounds.lowerStrict).toBe(true);
@@ -577,14 +577,14 @@ describe('regression: bare-symbol inequalities keep historical behavior', () => 
 
   it('redundant and conflicting bare-symbol assumptions are detected', () => {
     const ce = freshEngine();
-    expect(ce.assume(ce.box(['Greater', 'x', 4]))).toBe('ok');
-    expect(ce.assume(ce.box(['Greater', 'x', 0]))).toBe('tautology');
-    expect(ce.assume(ce.box(['Less', 'x', 0]))).toBe('contradiction');
+    expect(ce.assume(ce.expr(['Greater', 'x', 4]))).toBe('ok');
+    expect(ce.assume(ce.expr(['Greater', 'x', 0]))).toBe('tautology');
+    expect(ce.assume(ce.expr(['Less', 'x', 0]))).toBe('contradiction');
   });
 
   it('Element with a primitive number set still refines the type', () => {
     const ce = freshEngine();
-    expect(ce.assume(ce.box(['Element', 'm', 'Integers']))).toBe('ok');
-    expect(ce.box('m').isInteger).toBe(true);
+    expect(ce.assume(ce.expr(['Element', 'm', 'Integers']))).toBe('ok');
+    expect(ce.expr('m').isInteger).toBe(true);
   });
 });

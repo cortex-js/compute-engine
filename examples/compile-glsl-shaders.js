@@ -45,14 +45,14 @@ console.log('Example 2: Vector Operations');
 console.log('-'.repeat(70));
 
 // Compile a vec3
-const vec3 = ce.box(['List', 1, 2, 3]);
+const vec3 = ce.expr(['List', 1, 2, 3]);
 const glslVec = glsl.compile(vec3);
 console.log('Vector [1, 2, 3]:');
 console.log('GLSL Code:', glslVec);
 console.log();
 
 // Vector addition
-const vecAdd = ce.box(['Add', ['List', 'r', 'g', 'b'], ['List', 0.1, 0.1, 0.1]]);
+const vecAdd = ce.expr(['Add', ['List', 'r', 'g', 'b'], ['List', 0.1, 0.1, 0.1]]);
 const glslVecAdd = glsl.compile(vecAdd);
 console.log('Vector Addition (color brighten):');
 console.log('GLSL Code:', glslVecAdd);
@@ -99,7 +99,7 @@ console.log('Example 4: Fragment Shader - Simple Color');
 console.log('-'.repeat(70));
 
 // Create a simple red color output
-const redColor = ce.box(['List', 1, 0, 0, 1]);
+const redColor = ce.expr(['List', 1, 0, 0, 1]);
 
 const colorShader = glsl.compileShader({
   type: 'fragment',
@@ -131,7 +131,7 @@ const uniformShader = glsl.compileShader({
   body: [
     {
       variable: 'fragColor',
-      expression: ce.box(['List', 'scale', 'scale', 'scale', 1]),
+      expression: ce.expr(['List', 'scale', 'scale', 'scale', 1]),
     },
   ],
 });
@@ -154,7 +154,7 @@ const vertexShader = glsl.compileShader({
   body: [
     {
       variable: 'vCol',
-      expression: ce.box(['List', 1, 1, 1]),
+      expression: ce.expr(['List', 1, 1, 1]),
     },
   ],
 });
@@ -170,19 +170,19 @@ console.log('Example 7: Mathematical Functions');
 console.log('-'.repeat(70));
 
 // Use direct function calls instead of LaTeX
-const absExpr = ce.box(['Abs', 'x']);
+const absExpr = ce.expr(['Abs', 'x']);
 console.log('Absolute value: abs(x) →', glsl.compile(absExpr));
 
-const sqrtExpr = ce.box(['Sqrt', 'x']);
+const sqrtExpr = ce.expr(['Sqrt', 'x']);
 console.log('Square root: sqrt(x) →', glsl.compile(sqrtExpr));
 
-const powExpr = ce.box(['Power', 'x', 2]);
+const powExpr = ce.expr(['Power', 'x', 2]);
 console.log('Power: pow(x, 2) →', glsl.compile(powExpr));
 
-const minExpr = ce.box(['Min', 'a', 'b']);
+const minExpr = ce.expr(['Min', 'a', 'b']);
 console.log('Minimum: min(a, b) →', glsl.compile(minExpr));
 
-const maxExpr = ce.box(['Max', 'a', 'b']);
+const maxExpr = ce.expr(['Max', 'a', 'b']);
 console.log('Maximum: max(a, b) →', glsl.compile(maxExpr));
 
 console.log();

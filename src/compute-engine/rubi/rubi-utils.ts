@@ -87,7 +87,7 @@ export function build(json: Json, ctx: Ctx): Expression {
     }
     case 'Rational':
       // NOTE: ce.number() does not accept a MathJSON array (spins) — box
-      return ce.box(json as any);
+      return ce.expr(json as any);
     case 'List':
       return ce.function(
         'List',
@@ -816,8 +816,8 @@ const PRED_FNS: Record<string, PredFn> = {
   IntBinomialQ: (args, ctx) => {
     const ce = ctx.ce;
     const v = args.map((a) => build(a, ctx));
-    const third = ce.box(['Rational', 1, 3]) as Expression;
-    const half = ce.box(['Rational', 1, 2]) as Expression;
+    const third = ce.expr(['Rational', 1, 3]) as Expression;
+    const half = ce.expr(['Rational', 1, 2]) as Expression;
     if (args.length === 7) {
       const [, , , n, m, p] = v;
       return (
@@ -905,7 +905,7 @@ const PRED_FNS: Record<string, PredFn> = {
   IntQuadraticQ: (args, ctx) => {
     const v = args.map((a) => build(a, ctx));
     const [a, b, c, d, e, m, p] = v;
-    const third = ctx.ce.box(['Rational', 1, 3]) as Expression;
+    const third = ctx.ce.expr(['Rational', 1, 3]) as Expression;
     const k = (j: number, l: number, r: number) =>
       c
         .pow(2)
@@ -1236,7 +1236,7 @@ function rtExpr(u: Expression, n: number | Expression): Expression {
 function nthRoot(u: Expression, n: number): Expression {
   const ce = u.engine;
   if (n === 1) return u;
-  return u.pow(ce.box(['Rational', 1, n]) as Expression).evaluate();
+  return u.pow(ce.expr(['Rational', 1, n]) as Expression).evaluate();
 }
 
 /** flatten Multiply/Divide/Negate into a factor list (denominator factors
@@ -1351,7 +1351,7 @@ function rtAuxBody(u: Expression, n: number): Expression {
     return u.ops[0].pow(u.ops[1].div(n)).evaluate();
   if (u.operator === 'Sqrt' && u.ops)
     return u.ops[0]
-      .pow((ce.box(['Rational', 1, 2]) as Expression).div(n))
+      .pow((ce.expr(['Rational', 1, 2]) as Expression).div(n))
       .evaluate();
   if (u.operator === 'Root' && u.ops && realNum(u.ops[1]) !== null)
     return u.ops[0].pow(ce.One.div(u.ops[1]).div(n)).evaluate();
@@ -1503,7 +1503,7 @@ function monoPartsX(
     }
     case 'Sqrt':
       if (ops[0].symbol === x)
-        return { coef: ce.One, exp: ce.box(['Rational', 1, 2]) };
+        return { coef: ce.One, exp: ce.expr(['Rational', 1, 2]) };
       return null;
     case 'Root': {
       if (ops[0].symbol === x && !ops[1].has(x))
@@ -2536,7 +2536,7 @@ function intFracPart(
     const ip = Math.trunc(num / den);
     return part === 'int'
       ? ce.number(ip)
-      : ce.box(['Rational', num - ip * den, den] as any).evaluate();
+      : ce.expr(['Rational', num - ip * den, den] as any).evaluate();
   }
   if (u.operator === 'Add' && u.ops)
     return ce.function(

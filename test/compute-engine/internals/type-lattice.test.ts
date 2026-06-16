@@ -187,7 +187,7 @@ describe('Type-based membership refutation is sound (G15 ↔ G3)', () => {
   test('Element(x: finite_real, Integers) stays unevaluated', () => {
     ce.pushScope();
     ce.declare('x', 'finite_real');
-    const result = ce.box(['Element', 'x', 'Integers']).evaluate();
+    const result = ce.expr(['Element', 'x', 'Integers']).evaluate();
     // Indeterminate: a finite real may or may not be an integer
     expect(result.symbol).not.toBe('True');
     expect(result.symbol).not.toBe('False');
@@ -197,7 +197,7 @@ describe('Type-based membership refutation is sound (G15 ↔ G3)', () => {
   test('Element(s: string, Integers) is definitively False', () => {
     ce.pushScope();
     ce.declare('s', 'string');
-    const result = ce.box(['Element', 's', 'Integers']).evaluate();
+    const result = ce.expr(['Element', 's', 'Integers']).evaluate();
     expect(result.symbol).toBe('False');
     ce.popScope();
   });
@@ -205,7 +205,7 @@ describe('Type-based membership refutation is sound (G15 ↔ G3)', () => {
   test('Element(n: finite_integer, RealNumbers) is definitively True', () => {
     ce.pushScope();
     ce.declare('n', 'finite_integer');
-    const result = ce.box(['Element', 'n', 'RealNumbers']).evaluate();
+    const result = ce.expr(['Element', 'n', 'RealNumbers']).evaluate();
     expect(result.symbol).toBe('True');
     ce.popScope();
   });

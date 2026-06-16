@@ -25,18 +25,18 @@ function parse(latex: string): Expression {
 // boxing time (Divide((1+i), 2) → Multiply(1/2, NaN)).
 describe('Gaussian-integer sums (G13)', () => {
   it('factor(1 + i) is not NaN', () => {
-    const r = factor(ce.box(['Add', 1, 'ImaginaryUnit']));
+    const r = factor(ce.expr(['Add', 1, 'ImaginaryUnit']));
     expect(r.isNaN).not.toBe(true);
-    expect(r.isSame(ce.box(['Add', 1, 'ImaginaryUnit']))).toBe(true);
+    expect(r.isSame(ce.expr(['Add', 1, 'ImaginaryUnit']))).toBe(true);
   });
 
   it('factor(2 + 2i) is not NaN', () => {
-    const r = factor(ce.box(['Add', 2, ['Multiply', 2, 'ImaginaryUnit']]));
+    const r = factor(ce.expr(['Add', 2, ['Multiply', 2, 'ImaginaryUnit']]));
     expect(r.isNaN).not.toBe(true);
   });
 
   it('dividing a Gaussian integer by an integer preserves the value', () => {
-    const q = ce.box(['Divide', ['Add', 1, 'ImaginaryUnit'], 2]);
+    const q = ce.expr(['Divide', ['Add', 1, 'ImaginaryUnit'], 2]);
     expect(q.isNaN).not.toBe(true);
     const n = q.N();
     expect(n.re).toBeCloseTo(0.5, 12);
@@ -51,7 +51,7 @@ describe('Common symbolic factors (A10)', () => {
   it('factor cancels a positive symbolic common factor', () => {
     const e = new ComputeEngine();
     e.assume(['Greater', 'x', 0]);
-    const r = factor(e.box(['Less', ['Multiply', 'x', 'y'], ['Multiply', 'x', 'z']]));
+    const r = factor(e.expr(['Less', ['Multiply', 'x', 'y'], ['Multiply', 'x', 'z']]));
     expect(r.toString()).toBe('y < z');
   });
 });
@@ -327,33 +327,33 @@ describe('Issue #309: infer variable when none specified', () => {
 
   test('Factor() with no variable factors a quadratic (#309)', () => {
     const expr = parse('x^2 + 5x + 6');
-    const factored = ce.box(['Factor', expr]).evaluate();
+    const factored = ce.expr(['Factor', expr]).evaluate();
     expect(factored.latex).toBe('(x+2)(x+3)');
   });
 
   test('Factor() with no variable does content extraction + quadratic', () => {
     const expr = parse('2x^2 + 10x + 12');
-    const factored = ce.box(['Factor', expr]).evaluate();
+    const factored = ce.expr(['Factor', expr]).evaluate();
     expect(factored.latex).toBe('2(x+2)(x+3)');
   });
 
   test('linear content is kept in factored form', () => {
     // The numeric content must not be distributed back over the primitive:
     // `Factor(6x + 9)` is `3(2x + 3)`, not the expanded `6x + 9`.
-    expect(ce.box(['Factor', parse('6x + 9')]).evaluate().latex).toBe(
+    expect(ce.expr(['Factor', parse('6x + 9')]).evaluate().latex).toBe(
       '3(2x+3)'
     );
-    expect(ce.box(['Factor', parse('2x + 4')]).evaluate().latex).toBe(
+    expect(ce.expr(['Factor', parse('2x + 4')]).evaluate().latex).toBe(
       '2(x+2)'
     );
-    expect(ce.box(['Factor', parse('10x - 15')]).evaluate().latex).toBe(
+    expect(ce.expr(['Factor', parse('10x - 15')]).evaluate().latex).toBe(
       '5(2x-3)'
     );
   });
 
   test('Factor() with no variable factors a cubic via rational roots', () => {
     const expr = parse('x^3 - 6x^2 + 11x - 6');
-    const factored = ce.box(['Factor', expr]).evaluate();
+    const factored = ce.expr(['Factor', expr]).evaluate();
     expect(factored.operator).toBe('Multiply');
     for (const val of [0, 1, 2, 3, -1, 5]) {
       const v = ce.number(val);
@@ -372,7 +372,7 @@ describe('Issue #309: infer variable when none specified', () => {
 
   test('irreducible quadratic is left unchanged', () => {
     const expr = parse('x^2 + 1');
-    const factored = ce.box(['Factor', expr]).evaluate();
+    const factored = ce.expr(['Factor', expr]).evaluate();
     expect(factored.latex).toBe('x^2+1');
   });
 
@@ -381,7 +381,7 @@ describe('Issue #309: infer variable when none specified', () => {
     // strategies are skipped (the variable-agnostic perfect-square strategy
     // still applies here).
     const expr = parse('x^2 + 2xy + y^2');
-    const factored = ce.box(['Factor', expr]).evaluate();
+    const factored = ce.expr(['Factor', expr]).evaluate();
     expect(factored.operator).toBe('Power');
   });
 });
@@ -587,10 +587,10 @@ describe('Linear content extraction (factor + toNumericValue)', () => {
     expect(factor(parse('2x + 4')).operator).toBe('Multiply');
     expect(factor(parse('2x + 4')).latex).toBe('2(x+2)');
     expect(
-      factor(ce.box(['Add', ['Multiply', 2, 'u'], ['Multiply', 2, 'v']])).latex
+      factor(ce.expr(['Add', ['Multiply', 2, 'u'], ['Multiply', 2, 'v']])).latex
     ).toBe('2(u+v)');
     expect(
-      factor(ce.box(['Add', ['Multiply', 6, 'u'], ['Multiply', 9, 'v']])).latex
+      factor(ce.expr(['Add', ['Multiply', 6, 'u'], ['Multiply', 9, 'v']])).latex
     ).toBe('3(2u+3v)');
   });
 
@@ -600,14 +600,14 @@ describe('Linear content extraction (factor + toNumericValue)', () => {
     expect(r1.isSame(parse('x + 2'))).toBe(true);
 
     const [c2, r2] = ce
-      .box(['Add', ['Multiply', 2, 'u'], ['Multiply', 2, 'v']])
+      .expr(['Add', ['Multiply', 2, 'u'], ['Multiply', 2, 'v']])
       .toNumericValue();
     expect(c2.eq(2)).toBe(true);
-    expect(r2.isSame(ce.box(['Add', 'u', 'v']))).toBe(true);
+    expect(r2.isSame(ce.expr(['Add', 'u', 'v']))).toBe(true);
   });
 
   test('a radical gcd is factored out too', () => {
-    const sum = ce.box([
+    const sum = ce.expr([
       'Add',
       ['Multiply', ['Sqrt', 2], 'u'],
       ['Multiply', ['Sqrt', 2], 'v'],
@@ -616,7 +616,7 @@ describe('Linear content extraction (factor + toNumericValue)', () => {
     expect(factor(sum).operator).toBe('Multiply');
     const [c, r] = sum.toNumericValue();
     expect(c.eq(ce._numericValue(2).sqrt())).toBe(true);
-    expect(r.isSame(ce.box(['Add', 'u', 'v']))).toBe(true);
+    expect(r.isSame(ce.expr(['Add', 'u', 'v']))).toBe(true);
   });
 });
 
@@ -657,7 +657,7 @@ describe('factor() free function (public API)', () => {
 // (cyclotomic) factorization.
 describe('Factor(xⁿ − 1) returns polynomial factors (ROADMAP B4)', () => {
   const factored = (s: string) =>
-    ce.box(['Factor', parse(s)]).evaluate();
+    ce.expr(['Factor', parse(s)]).evaluate();
 
   // The defining regression: no factor may contain Sqrt/Abs/Root, and the
   // factorization must be value-equal to the input everywhere (not just x > 0,

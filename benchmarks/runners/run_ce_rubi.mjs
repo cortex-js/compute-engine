@@ -86,24 +86,24 @@ for (const kase of suite.cases) {
   try {
     if (input.op === 'N') {
       if (kase.verify.kind === 'integer') {
-        const timing = timeit(() => ce.box(input.mathjson).evaluate());
-        const r = ce.box(input.mathjson).evaluate();
+        const timing = timeit(() => ce.expr(input.mathjson).evaluate());
+        const r = ce.expr(input.mathjson).evaluate();
         emit({ id, status: 'ok', text: r.toString(), valueText: r.toString(), values: [], ...timing });
       } else {
         ce.precision = input.precision;
-        const timing = timeit(() => ce.box(input.mathjson).N());
-        const r = ce.box(input.mathjson).N();
+        const timing = timeit(() => ce.expr(input.mathjson).N());
+        const r = ce.expr(input.mathjson).N();
         emit({ id, status: 'ok', text: r.toString(), valueText: r.toString(), values: [], ...timing });
       }
     } else if (input.op === 'simplify') {
-      const timing = timeit(() => ce.box(input.mathjson).simplify());
-      const original = ce.box(input.mathjson);
+      const timing = timeit(() => ce.expr(input.mathjson).simplify());
+      const original = ce.expr(input.mathjson);
       const result = original.simplify();
       const pts = kase.verify.points.map(parseFloat);
       const values = pts.map((p) => num(result.subs({ [kase.verify.var]: ce.number(p) })));
       emit({ id, status: 'ok', text: result.toString(), inputText: original.toString(), values, ...timing });
     } else if (input.op === 'diff') {
-      const build = () => ce.box(['D', input.mathjson, input.var]).evaluate();
+      const build = () => ce.expr(['D', input.mathjson, input.var]).evaluate();
       const timing = timeit(build);
       const result = build();
       const pts = kase.verify.points.map(parseFloat);
@@ -112,7 +112,7 @@ for (const kase of suite.cases) {
     } else if (input.op === 'integrate') {
       // loadIntegrationRules routes Integrate through Rubi (then falls back to
       // the built-in integrator), so a plain evaluate() exercises the full stack.
-      const build = () => ce.box(['Integrate', input.mathjson, ['Tuple', input.var]]).evaluate();
+      const build = () => ce.expr(['Integrate', input.mathjson, ['Tuple', input.var]]).evaluate();
       const timing = timeit(build);
       const result = build();
       if (isUnevaluated(result)) {
@@ -125,7 +125,7 @@ for (const kase of suite.cases) {
         emit({ id, status: 'ok', text: result.toString(), values: [fb - fa], ...timing });
       }
     } else if (input.op === 'evaluate') {
-      const build = () => ce.box(input.mathjson).evaluate();
+      const build = () => ce.expr(input.mathjson).evaluate();
       const timing = timeit(build);
       const result = build();
       if (isUnevaluated(result)) {
@@ -134,7 +134,7 @@ for (const kase of suite.cases) {
         emit({ id, status: 'ok', text: result.toString(), values: [num(result)], ...timing });
       }
     } else if (input.op === 'solve') {
-      const build = () => ce.box(input.mathjson).solve(input.var);
+      const build = () => ce.expr(input.mathjson).solve(input.var);
       const timing = timeit(build);
       const roots = build();
       const values = realRootValues(roots);

@@ -48,34 +48,34 @@ function runCE(c: any) {
   try {
     if (op === 'factor' || op === 'expand') {
       const head = op === 'factor' ? 'Factor' : 'Expand';
-      const timing = timeit(() => ce.box([head, inp.mathjson]).evaluate());
-      const r = ce.box([head, inp.mathjson]).evaluate();
+      const timing = timeit(() => ce.expr([head, inp.mathjson]).evaluate());
+      const r = ce.expr([head, inp.mathjson]).evaluate();
       return { status: 'ok', text: r.toString(), values: sampleResult(r, pts), ...timing };
     }
     if (op === 'gcd') {
-      const timing = timeit(() => ce.box(inp.mathjson).evaluate());
-      const r = ce.box(inp.mathjson).evaluate();
+      const timing = timeit(() => ce.expr(inp.mathjson).evaluate());
+      const r = ce.expr(inp.mathjson).evaluate();
       // unevaluated GCD comes back as a gcd(...) function node
       const unsolved = r.operator === 'GCD' || /\bgcd\(/i.test(r.toString());
       return { status: unsolved ? 'unsolved' : 'ok', text: r.toString(), values: sampleResult(r, pts), ...timing };
     }
     if (op === 'simplify') {
-      const timing = timeit(() => ce.box(inp.mathjson).simplify());
-      const r = ce.box(inp.mathjson).simplify();
+      const timing = timeit(() => ce.expr(inp.mathjson).simplify());
+      const r = ce.expr(inp.mathjson).simplify();
       return { status: 'ok', text: r.toString(), values: sampleResult(r, pts), ...timing };
     }
     if (op === 'integrate') {
-      const build = () => ce.box(['Integrate', inp.mathjson, ['Tuple', inp.var]]).evaluate();
+      const build = () => ce.expr(['Integrate', inp.mathjson, ['Tuple', inp.var]]).evaluate();
       const timing = timeit(build);
       const F = build();
       if (F.operator === 'Integrate' || /\bint\(/.test(F.toString()))
         return { status: 'unsolved', text: F.toString(), values: [], ...timing };
-      const dF = ce.box(['D', F, inp.var]).evaluate();
+      const dF = ce.expr(['D', F, inp.var]).evaluate();
       return { status: 'ok', text: F.toString(), values: sampleResult(dF, pts), ...timing };
     }
     if (op === 'limit') {
       // CE evaluates limits numerically (.N()), not to a symbolic closed form.
-      const build = () => ce.box(['Limit', ['Function', inp.mathjson, inp.var], inp.point]);
+      const build = () => ce.expr(['Limit', ['Function', inp.mathjson, inp.var], inp.point]);
       const timing = timeit(() => build().N());
       const L = build();
       const val = num(L);

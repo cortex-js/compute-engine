@@ -802,7 +802,7 @@ describe('Collection handler regressions (REVIEW.md B3–B8)', () => {
   // B4: Slice.at computed bounds then fell off the end with no return (always
   // undefined); the count handler's negative-start formula was wrong.
   test('B4: Slice.at returns elements; count handles negative bounds', () => {
-    const sl = engine.box(['Slice', ['List', 10, 20, 30, 40], 2, 3]);
+    const sl = engine.expr(['Slice', ['List', 10, 20, 30, 40], 2, 3]);
     expect(sl.at(1)?.toString()).toEqual('20');
     expect(sl.at(2)?.toString()).toEqual('30');
     expect(
@@ -812,7 +812,7 @@ describe('Collection handler regressions (REVIEW.md B3–B8)', () => {
       evaluate(['Slice', ['List', 1, 2, 3, 4, 5], -2, -1])
     ).toMatchInlineSnapshot(`["List", 4, 5]`);
     expect(
-      engine.box(['Slice', ['List', 1, 2, 3, 4, 5], -2, -1]).count
+      engine.expr(['Slice', ['List', 1, 2, 3, 4, 5], -2, -1]).count
     ).toEqual(2);
   });
 
@@ -842,10 +842,10 @@ describe('Collection handler regressions (REVIEW.md B3–B8)', () => {
   // B7: Cycle isEmpty/isFinite self-recursed (stack overflow) and isFinite was
   // inverted; the iterator was also off-by-one (started at index 0).
   test('B7: Cycle reports infinite/empty correctly and cycles elements', () => {
-    expect(engine.box(['Cycle', ['List', 1, 2, 3]]).isFiniteCollection).toBe(
+    expect(engine.expr(['Cycle', ['List', 1, 2, 3]]).isFiniteCollection).toBe(
       false
     );
-    expect(engine.box(['Cycle', ['List']]).isEmptyCollection).toBe(true);
+    expect(engine.expr(['Cycle', ['List']]).isEmptyCollection).toBe(true);
     expect(
       evaluate(['Take', ['Cycle', ['List', 1, 2]], 5])
     ).toMatchInlineSnapshot(`["List", 1, 2, 1, 2, 1]`);
@@ -856,13 +856,13 @@ describe('Collection handler regressions (REVIEW.md B3–B8)', () => {
   test('B8: Drop handles n=0, negative indices, and materializes cleanly', () => {
     expect(
       engine
-        .box(['Drop', ['List', 1, 2, 3, 4, 5], 2])
+        .expr(['Drop', ['List', 1, 2, 3, 4, 5], 2])
         .at(-1)
         ?.toString()
     ).toEqual('5');
     expect(
       engine
-        .box(['Drop', ['List', 1, 2, 3], 0])
+        .expr(['Drop', ['List', 1, 2, 3], 0])
         .at(1)
         ?.toString()
     ).toEqual('1');
@@ -899,10 +899,10 @@ describe('Binning, Reduce, Filter, Zip (REVIEW.md B15/B17/B18)', () => {
   });
   it('B18: Zip is empty as soon as any input is empty', () => {
     expect(
-      engine.box(['Zip', ['List', 1, 2], ['List']]).isEmptyCollection
+      engine.expr(['Zip', ['List', 1, 2], ['List']]).isEmptyCollection
     ).toBe(true);
     expect(
-      engine.box(['Zip', ['List', 1, 2], ['List', 3, 4]]).isEmptyCollection
+      engine.expr(['Zip', ['List', 1, 2], ['List', 3, 4]]).isEmptyCollection
     ).toBe(false);
   });
 });

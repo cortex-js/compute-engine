@@ -626,7 +626,7 @@ export interface Expression {
    * Note that lazy collections are *not* eagerly evaluated.
    *
    * The output preserves the full raw `BigDecimal` value with no rounding,
-   * ensuring lossless round-tripping via `ce.box(expr.json)`. Digits beyond
+   * ensuring lossless round-tripping via `ce.expr(expr.json)`. Digits beyond
    * `ce.precision` may be present but are not guaranteed to be accurate.
    * Use `toMathJson({ fractionalDigits: 'auto' })` for precision-rounded
    * MathJSON output.
@@ -1635,7 +1635,7 @@ export interface Expression {
    *   than `GreaterEqual`/`Greater`. The signed-function semantics are
    *   preserved through the normalization. The `GreaterEqual`/`Greater`
    *   branches handle non-canonical expressions constructed via
-   *   `ce.box(['GreaterEqual', ...])`.
+   *   `ce.expr(['GreaterEqual', ...])`.
    * - For chained relations with more than two operands (e.g.
    *   `Less(a, b, c)` from `a < b < c`), only the first pair is used.
    *   The result is the signed function for the first sub-relation only;

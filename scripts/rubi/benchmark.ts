@@ -216,11 +216,11 @@ function runProblem(
   const ce = rubi?.ce ?? new ComputeEngine();
 
   try {
-    const f = ce.box(p.integrand as any);
+    const f = ce.expr(p.integrand as any);
     const result = rubi
       ? (rubi.driver.int(f, p.variable) ??
         ce.function('Integrate', [f, ce.symbol(p.variable)]))
-      : ce.box(['Integrate', p.integrand as any, p.variable]).evaluate();
+      : ce.expr(['Integrate', p.integrand as any, p.variable]).evaluate();
 
     if (containsOperator(result, 'Integrate'))
       return done('unsolved', { result: result.toString() });

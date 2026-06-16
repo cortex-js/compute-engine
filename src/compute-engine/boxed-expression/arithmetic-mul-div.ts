@@ -1172,13 +1172,13 @@ export function expandProducts(
  * Multiply expressions, **expanding** products over sums.
  *
  * Unlike a canonical `Multiply` node (built via `ce.function('Multiply', …)`
- * or `ce.box(['Multiply', …])`, which leaves `k·(a + b)` as-is), `mul()` runs
+ * or `ce.expr(['Multiply', …])`, which leaves `k·(a + b)` as-is), `mul()` runs
  * {@link expandProducts} first, so a factor is distributed across any sum
  * operand:
  *
  * ```
- * mul(2, ce.box(['Add', 'a', 'b']))            // => 2a + 2b   (an Add)
- * ce.box(['Multiply', 2, ['Add', 'a', 'b']])   // => 2(a + b)  (a Multiply)
+ * mul(2, ce.expr(['Add', 'a', 'b']))            // => 2a + 2b   (an Add)
+ * ce.expr(['Multiply', 2, ['Add', 'a', 'b']])   // => 2(a + b)  (a Multiply)
  * ```
  *
  * Use `mul()` when you want the expanded/normalized product (the usual case in

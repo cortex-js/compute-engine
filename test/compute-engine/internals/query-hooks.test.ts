@@ -34,19 +34,19 @@ describe('§11.1 Element(n, Range(1, +oo))', () => {
   it('verifies n >= 1 and n > 0 under the assumption', () => {
     const ce = freshEngine();
     expect(
-      ce.assume(ce.box(['Element', 'n', ['Range', 1, 'PositiveInfinity']]))
+      ce.assume(ce.expr(['Element', 'n', ['Range', 1, 'PositiveInfinity']]))
     ).toBe('ok');
-    expect(ce.box('n').isInteger).toBe(true);
-    expect(ce.verify(ce.box(['GreaterEqual', 'n', 1]))).toBe(true);
-    expect(ce.verify(ce.box(['Greater', 'n', 0]))).toBe(true);
+    expect(ce.expr('n').isInteger).toBe(true);
+    expect(ce.verify(ce.expr(['GreaterEqual', 'n', 1]))).toBe(true);
+    expect(ce.verify(ce.expr(['Greater', 'n', 0]))).toBe(true);
     // No destructive retype: only the integer refinement
-    expect(ce.box('n').type.toString()).toBe('integer');
+    expect(ce.expr('n').type.toString()).toBe('integer');
   });
 
   it('stays undefined without the assumption', () => {
     const ce = freshEngine();
-    expect(ce.verify(ce.box(['GreaterEqual', 'n', 1]))).toBeUndefined();
-    expect(ce.verify(ce.box(['Greater', 'n', 0]))).toBeUndefined();
+    expect(ce.verify(ce.expr(['GreaterEqual', 'n', 1]))).toBeUndefined();
+    expect(ce.verify(ce.expr(['Greater', 'n', 0]))).toBeUndefined();
   });
 });
 
@@ -58,26 +58,26 @@ describe('§11.2 Greater(Imaginary(tau), 0)', () => {
   it('verifies the guard, refutes isReal, discharges tau != 0', () => {
     const ce = freshEngine();
     expect(
-      ce.assume(ce.box(['Greater', ['Imaginary', 'tau'], 0], { canonical: false }))
+      ce.assume(ce.expr(['Greater', ['Imaginary', 'tau'], 0], { canonical: false }))
     ).toBe('ok');
 
-    expect(ce.verify(ce.box(['Greater', ['Imaginary', 'tau'], 0]))).toBe(true);
-    expect(ce.box('tau').isReal).toBe(false);
-    expect(ce.verify(ce.box(['NotEqual', 'tau', 0]))).toBe(true);
+    expect(ce.verify(ce.expr(['Greater', ['Imaginary', 'tau'], 0]))).toBe(true);
+    expect(ce.expr('tau').isReal).toBe(false);
+    expect(ce.verify(ce.expr(['NotEqual', 'tau', 0]))).toBe(true);
 
     // The sgn fallback flows through BoxedFunction.sgn into isPositive
-    expect(ce.box(['Imaginary', 'tau']).isPositive).toBe(true);
+    expect(ce.expr(['Imaginary', 'tau']).isPositive).toBe(true);
     // ...and only the `number` refinement occurred
-    expect(ce.box('tau').type.toString()).toBe('number');
+    expect(ce.expr('tau').type.toString()).toBe('number');
   });
 
   it('stays undefined without the assumption', () => {
     const ce = freshEngine();
     expect(
-      ce.verify(ce.box(['Greater', ['Imaginary', 'tau'], 0]))
+      ce.verify(ce.expr(['Greater', ['Imaginary', 'tau'], 0]))
     ).toBeUndefined();
-    expect(ce.box(['Imaginary', 'tau']).isPositive).toBeUndefined();
-    expect(ce.verify(ce.box(['NotEqual', 'tau', 0]))).toBeUndefined();
+    expect(ce.expr(['Imaginary', 'tau']).isPositive).toBeUndefined();
+    expect(ce.verify(ce.expr(['NotEqual', 'tau', 0]))).toBeUndefined();
   });
 });
 
@@ -88,26 +88,26 @@ describe('§11.2 Greater(Imaginary(tau), 0)', () => {
 describe('§11.3 Greater(Real(s), 1)', () => {
   const ce = freshEngine();
   const result = ce.assume(
-    ce.box(['Greater', ['Real', 's'], 1], { canonical: false })
+    ce.expr(['Greater', ['Real', 's'], 1], { canonical: false })
   );
 
   it('returns ok', () => expect(result).toBe('ok'));
 
   it('verifies Re(s) > 1 and the implied Re(s) > 0', () => {
-    expect(ce.verify(ce.box(['Greater', ['Real', 's'], 1]))).toBe(true);
+    expect(ce.verify(ce.expr(['Greater', ['Real', 's'], 1]))).toBe(true);
     // Bound implication: lower bound 1 entails > 0
-    expect(ce.verify(ce.box(['Greater', ['Real', 's'], 0]))).toBe(true);
+    expect(ce.verify(ce.expr(['Greater', ['Real', 's'], 0]))).toBe(true);
     // GreaterEqual is entailed too
-    expect(ce.verify(ce.box(['GreaterEqual', ['Real', 's'], 1]))).toBe(true);
+    expect(ce.verify(ce.expr(['GreaterEqual', ['Real', 's'], 1]))).toBe(true);
   });
 
   it('does not declare s real (no destructive retype)', () => {
-    expect(ce.box('s').isReal).not.toBe(true);
-    expect(ce.box('s').type.toString()).toBe('number');
+    expect(ce.expr('s').isReal).not.toBe(true);
+    expect(ce.expr('s').type.toString()).toBe('number');
   });
 
   it('Real(s).isPositive flows through the sgn fallback', () => {
-    expect(ce.box(['Real', 's']).isPositive).toBe(true);
+    expect(ce.expr(['Real', 's']).isPositive).toBe(true);
   });
 });
 
@@ -119,26 +119,26 @@ describe('§11.4 Less(Abs(q), 1)', () => {
   it('verifies the guard and q.isFinite', () => {
     const ce = freshEngine();
     expect(
-      ce.assume(ce.box(['Less', ['Abs', 'q'], 1], { canonical: false }))
+      ce.assume(ce.expr(['Less', ['Abs', 'q'], 1], { canonical: false }))
     ).toBe('ok');
-    expect(ce.verify(ce.box(['Less', ['Abs', 'q'], 1]))).toBe(true);
-    expect(ce.verify(ce.box(['LessEqual', ['Abs', 'q'], 1]))).toBe(true);
-    expect(ce.box('q').isFinite).toBe(true);
+    expect(ce.verify(ce.expr(['Less', ['Abs', 'q'], 1]))).toBe(true);
+    expect(ce.verify(ce.expr(['LessEqual', ['Abs', 'q'], 1]))).toBe(true);
+    expect(ce.expr('q').isFinite).toBe(true);
   });
 
   it('stays undefined without the assumption', () => {
     const ce = freshEngine();
-    expect(ce.verify(ce.box(['Less', ['Abs', 'q'], 1]))).toBeUndefined();
-    expect(ce.box('q').isFinite).toBeUndefined();
+    expect(ce.verify(ce.expr(['Less', ['Abs', 'q'], 1]))).toBeUndefined();
+    expect(ce.expr('q').isFinite).toBeUndefined();
   });
 
   it('a lower bound on Abs sharpens its sign to positive', () => {
     const ce = freshEngine();
     expect(
-      ce.assume(ce.box(['Greater', ['Abs', 'r'], 2], { canonical: false }))
+      ce.assume(ce.expr(['Greater', ['Abs', 'r'], 2], { canonical: false }))
     ).toBe('ok');
-    expect(ce.box(['Abs', 'r']).isPositive).toBe(true);
-    expect(ce.verify(ce.box(['Greater', ['Abs', 'r'], 1]))).toBe(true);
+    expect(ce.expr(['Abs', 'r']).isPositive).toBe(true);
+    expect(ce.verify(ce.expr(['Greater', ['Abs', 'r'], 1]))).toBe(true);
   });
 });
 
@@ -150,17 +150,17 @@ describe('§11.5 Element(z, SetMinus(ComplexNumbers, Set(i, -i)))', () => {
   it('the guard verifies true under the assumption', () => {
     const ce = freshEngine();
     expect(
-      ce.assume(ce.box(['Element', 'z', SETMINUS_BRANCH_POINTS], {
+      ce.assume(ce.expr(['Element', 'z', SETMINUS_BRANCH_POINTS], {
         canonical: false,
       }))
     ).toBe('ok');
-    expect(ce.verify(ce.box(['Element', 'z', SETMINUS_BRANCH_POINTS]))).toBe(
+    expect(ce.verify(ce.expr(['Element', 'z', SETMINUS_BRANCH_POINTS]))).toBe(
       true
     );
-    expect(ce.verify(ce.box(['Equal', 'z', 'ImaginaryUnit']))).toBe(false);
-    expect(ce.verify(ce.box(['NotEqual', 'z', 'ImaginaryUnit']))).toBe(true);
+    expect(ce.verify(ce.expr(['Equal', 'z', 'ImaginaryUnit']))).toBe(false);
+    expect(ce.verify(ce.expr(['NotEqual', 'z', 'ImaginaryUnit']))).toBe(true);
     expect(
-      ce.verify(ce.box(['NotEqual', 'z', ['Negate', 'ImaginaryUnit']]))
+      ce.verify(ce.expr(['NotEqual', 'z', ['Negate', 'ImaginaryUnit']]))
     ).toBe(true);
   });
 
@@ -171,17 +171,17 @@ describe('§11.5 Element(z, SetMinus(ComplexNumbers, Set(i, -i)))', () => {
     // membership to a definitive False (§5.2.2 bug class); the query-side
     // decomposition stays three-valued.
     expect(
-      ce.verify(ce.box(['Element', 'z', SETMINUS_BRANCH_POINTS]))
+      ce.verify(ce.expr(['Element', 'z', SETMINUS_BRANCH_POINTS]))
     ).toBeUndefined();
   });
 
   it('concrete elements are still decided', () => {
     const ce = freshEngine();
-    expect(ce.box(['Element', 0.5, SETMINUS_BRANCH_POINTS]).evaluate().symbol).toBe(
+    expect(ce.expr(['Element', 0.5, SETMINUS_BRANCH_POINTS]).evaluate().symbol).toBe(
       'True'
     );
     expect(
-      ce.box(['Element', 'ImaginaryUnit', SETMINUS_BRANCH_POINTS])
+      ce.expr(['Element', 'ImaginaryUnit', SETMINUS_BRANCH_POINTS])
         .evaluate()
         .symbol
     ).toBe('False');
@@ -197,13 +197,13 @@ describe('§11.6 Element(z, SetMinus(ComplexNumbers, NonPositiveIntegers))', () 
     const ce = freshEngine();
     expect(
       ce.assume(
-        ce.box(
+        ce.expr(
           ['Element', 'z', ['SetMinus', 'ComplexNumbers', 'NonPositiveIntegers']],
           { canonical: false }
         )
       )
     ).toBe('ok');
-    expect(ce.verify(ce.box(['NotElement', 'z', 'NonPositiveIntegers']))).toBe(
+    expect(ce.verify(ce.expr(['NotElement', 'z', 'NonPositiveIntegers']))).toBe(
       true
     );
   });
@@ -211,12 +211,12 @@ describe('§11.6 Element(z, SetMinus(ComplexNumbers, NonPositiveIntegers))', () 
   it('membership facts in inert sets answer exact-match queries', () => {
     const ce = freshEngine();
     expect(
-      ce.assume(ce.box(['Element', 'x', 'MyInertSet'], { canonical: false }))
+      ce.assume(ce.expr(['Element', 'x', 'MyInertSet'], { canonical: false }))
     ).toBe('ok');
-    expect(ce.verify(ce.box(['Element', 'x', 'MyInertSet']))).toBe(true);
+    expect(ce.verify(ce.expr(['Element', 'x', 'MyInertSet']))).toBe(true);
     // A different inert set is not entailed
     expect(
-      ce.verify(ce.box(['Element', 'x', 'MyOtherInertSet']))
+      ce.verify(ce.expr(['Element', 'x', 'MyOtherInertSet']))
     ).toBeUndefined();
   });
 
@@ -224,13 +224,13 @@ describe('§11.6 Element(z, SetMinus(ComplexNumbers, NonPositiveIntegers))', () 
     const ce = freshEngine();
     expect(
       ce.assume(
-        ce.box(['NotElement', 'x', 'AlgebraicNumbers'], { canonical: false })
+        ce.expr(['NotElement', 'x', 'AlgebraicNumbers'], { canonical: false })
       )
     ).toBe('ok');
-    expect(ce.verify(ce.box(['NotElement', 'x', 'AlgebraicNumbers']))).toBe(
+    expect(ce.verify(ce.expr(['NotElement', 'x', 'AlgebraicNumbers']))).toBe(
       true
     );
-    expect(ce.verify(ce.box(['Element', 'x', 'AlgebraicNumbers']))).toBe(false);
+    expect(ce.verify(ce.expr(['Element', 'x', 'AlgebraicNumbers']))).toBe(false);
   });
 });
 
@@ -243,23 +243,23 @@ describe('§11.7 And(Element(z, ComplexNumbers), NotEqual(z, 0))', () => {
     const ce = freshEngine();
     expect(
       ce.assume(
-        ce.box(
+        ce.expr(
           ['And', ['Element', 'z', 'ComplexNumbers'], ['NotEqual', 'z', 0]],
           { canonical: false }
         )
       )
     ).toBe('ok');
-    expect(ce.verify(ce.box(['Element', 'z', 'ComplexNumbers']))).toBe(true);
-    expect(ce.verify(ce.box(['NotEqual', 'z', 0]))).toBe(true);
+    expect(ce.verify(ce.expr(['Element', 'z', 'ComplexNumbers']))).toBe(true);
+    expect(ce.verify(ce.expr(['NotEqual', 'z', 0]))).toBe(true);
     expect(
       ce.verify(
-        ce.box(
+        ce.expr(
           ['And', ['Element', 'z', 'ComplexNumbers'], ['NotEqual', 'z', 0]]
         )
       )
     ).toBe(true);
     // eq() consults the stored disequality (design §5.1d)
-    expect(ce.box(['Equal', 'z', 0]).evaluate().symbol).toBe('False');
+    expect(ce.expr(['Equal', 'z', 0]).evaluate().symbol).toBe('False');
   });
 });
 
@@ -272,7 +272,7 @@ describe('§11.8 And(Greater(Re(a), 0), Greater(Re(b), 0))', () => {
     const ce = freshEngine();
     expect(
       ce.assume(
-        ce.box(
+        ce.expr(
           ['And', ['Greater', ['Real', 'a'], 0], ['Greater', ['Real', 'b'], 0]],
           { canonical: false }
         )
@@ -280,7 +280,7 @@ describe('§11.8 And(Greater(Re(a), 0), Greater(Re(b), 0))', () => {
     ).toBe('ok');
     expect(
       ce.verify(
-        ce.box([
+        ce.expr([
           'And',
           ['Greater', ['Real', 'a'], 0],
           ['Greater', ['Real', 'b'], 0],
@@ -290,7 +290,7 @@ describe('§11.8 And(Greater(Re(a), 0), Greater(Re(b), 0))', () => {
     // ...but a conjunct about an unconstrained symbol stays undefined
     expect(
       ce.verify(
-        ce.box([
+        ce.expr([
           'And',
           ['Greater', ['Real', 'a'], 0],
           ['Greater', ['Real', 'c'], 0],
@@ -306,10 +306,10 @@ describe('§11.8 And(Greater(Re(a), 0), Greater(Re(b), 0))', () => {
 
 describe('§11.9 negative control', () => {
   const ce = freshEngine();
-  ce.assume(ce.box(['Greater', ['Real', 's'], 1], { canonical: false }));
+  ce.assume(ce.expr(['Greater', ['Real', 's'], 1], { canonical: false }));
 
   it('verify(Re(s) > 2) is undefined — never false', () => {
-    expect(ce.verify(ce.box(['Greater', ['Real', 's'], 2]))).toBeUndefined();
+    expect(ce.verify(ce.expr(['Greater', ['Real', 's'], 2]))).toBeUndefined();
   });
 
   it('a rule guarded on Re(s) > 2 does NOT fire', () => {
@@ -319,11 +319,11 @@ describe('§11.9 negative control', () => {
         replace: ['Ceil', '_z'],
         condition: (sub) =>
           sub._z.engine
-            .box(['Greater', ['Real', sub._z], 2])
+            .expr(['Greater', ['Real', sub._z], 2])
             .evaluate().symbol === 'True',
       },
     ];
-    const expr = ce.box(['Floor', 's']);
+    const expr = ce.expr(['Floor', 's']);
     const result = expr.replace(rules);
     expect(result).toBeNull();
   });
@@ -335,11 +335,11 @@ describe('§11.9 negative control', () => {
         replace: ['Ceil', '_z'],
         condition: (sub) =>
           sub._z.engine
-            .box(['Greater', ['Real', sub._z], 0])
+            .expr(['Greater', ['Real', sub._z], 0])
             .evaluate().symbol === 'True',
       },
     ];
-    const expr = ce.box(['Floor', 's']);
+    const expr = ce.expr(['Floor', 's']);
     const result = expr.replace(rules);
     expect(result?.operator).toBe('Ceil');
   });
@@ -356,21 +356,21 @@ describe('closure-guarded rule on an Imaginary subject', () => {
       replace: ['Ceil', '_z'],
       // solve.ts-style closure condition (design §5.1, rules.ts CONDITIONS)
       condition: (sub) =>
-        sub._z.engine.box(['Imaginary', sub._z]).isPositive === true,
+        sub._z.engine.expr(['Imaginary', sub._z]).isPositive === true,
     },
   ];
 
   it('fires only under the assumption', () => {
     const ce = freshEngine();
     // Without the assumption: the condition is undefined, not true → no fire
-    expect(ce.box(['Floor', 'tau']).replace(rules)).toBeNull();
+    expect(ce.expr(['Floor', 'tau']).replace(rules)).toBeNull();
 
     expect(
       ce.assume(
-        ce.box(['Greater', ['Imaginary', 'tau'], 0], { canonical: false })
+        ce.expr(['Greater', ['Imaginary', 'tau'], 0], { canonical: false })
       )
     ).toBe('ok');
-    const result = ce.box(['Floor', 'tau']).replace(rules);
+    const result = ce.expr(['Floor', 'tau']).replace(rules);
     expect(result?.operator).toBe('Ceil');
   });
 });
@@ -383,10 +383,10 @@ describe('§11.10 regression: bare-symbol behavior unchanged', () => {
   it('assume(x > 0) still yields x.isPositive and x.isReal', () => {
     const ce = freshEngine();
     expect(ce.assume(ce.parse('x > 0'))).toBe('ok');
-    expect(ce.box('x').isPositive).toBe(true);
-    expect(ce.box('x').isReal).toBe(true);
-    expect(ce.verify(ce.box(['Greater', 'x', 0]))).toBe(true);
-    expect(ce.verify(ce.box(['Less', 'x', 0]))).toBe(false);
+    expect(ce.expr('x').isPositive).toBe(true);
+    expect(ce.expr('x').isReal).toBe(true);
+    expect(ce.verify(ce.expr(['Greater', 'x', 0]))).toBe(true);
+    expect(ce.verify(ce.expr(['Less', 'x', 0]))).toBe(false);
   });
 });
 
@@ -400,31 +400,31 @@ describe('§11.11 scope and forget', () => {
     ce.pushScope();
     expect(
       ce.assume(
-        ce.box(['Greater', ['Imaginary', 'tau'], 0], { canonical: false })
+        ce.expr(['Greater', ['Imaginary', 'tau'], 0], { canonical: false })
       )
     ).toBe('ok');
-    expect(ce.verify(ce.box(['Greater', ['Imaginary', 'tau'], 0]))).toBe(true);
-    expect(ce.box(['Imaginary', 'tau']).isPositive).toBe(true);
+    expect(ce.verify(ce.expr(['Greater', ['Imaginary', 'tau'], 0]))).toBe(true);
+    expect(ce.expr(['Imaginary', 'tau']).isPositive).toBe(true);
     ce.popScope();
     expect(
-      ce.verify(ce.box(['Greater', ['Imaginary', 'tau'], 0]))
+      ce.verify(ce.expr(['Greater', ['Imaginary', 'tau'], 0]))
     ).toBeUndefined();
-    expect(ce.box(['Imaginary', 'tau']).isPositive).toBeUndefined();
+    expect(ce.expr(['Imaginary', 'tau']).isPositive).toBeUndefined();
   });
 
   it('forget(tau) removes derived facts too', () => {
     const ce = freshEngine();
     expect(
       ce.assume(
-        ce.box(['Greater', ['Imaginary', 'tau'], 0], { canonical: false })
+        ce.expr(['Greater', ['Imaginary', 'tau'], 0], { canonical: false })
       )
     ).toBe('ok');
-    expect(ce.verify(ce.box(['NotEqual', 'tau', 0]))).toBe(true);
+    expect(ce.verify(ce.expr(['NotEqual', 'tau', 0]))).toBe(true);
 
     ce.forget('tau');
 
-    expect(ce.verify(ce.box(['Greater', ['Imaginary', 'tau'], 0]))).toBeUndefined();
-    expect(ce.verify(ce.box(['NotEqual', 'tau', 0]))).toBeUndefined();
+    expect(ce.verify(ce.expr(['Greater', ['Imaginary', 'tau'], 0]))).toBeUndefined();
+    expect(ce.verify(ce.expr(['NotEqual', 'tau', 0]))).toBeUndefined();
     expect(getFactIndex(ce).bySubject.get('im:tau')).toBeUndefined();
     expect(getFactIndex(ce).membership.get('tau')).toBeUndefined();
     expect(
@@ -440,33 +440,33 @@ describe('§11.11 scope and forget', () => {
 describe('§5.2 three-valued invariant', () => {
   it('predicates on an unconstrained symbol stay undefined', () => {
     const ce = freshEngine();
-    const u = ce.box('u');
+    const u = ce.expr('u');
     expect(u.isPositive).toBeUndefined();
     expect(u.isReal).toBeUndefined();
     expect(u.isFinite).toBeUndefined();
-    expect(ce.box(['Real', 'u']).isPositive).toBeUndefined();
-    expect(ce.box(['Imaginary', 'u']).isPositive).toBeUndefined();
-    expect(ce.box(['Argument', 'u']).isPositive).toBeUndefined();
-    expect(ce.verify(ce.box(['Greater', ['Real', 'u'], 0]))).toBeUndefined();
-    expect(ce.verify(ce.box(['Less', ['Abs', 'u'], 1]))).toBeUndefined();
-    expect(ce.verify(ce.box(['NotEqual', 'u', 1]))).toBeUndefined();
+    expect(ce.expr(['Real', 'u']).isPositive).toBeUndefined();
+    expect(ce.expr(['Imaginary', 'u']).isPositive).toBeUndefined();
+    expect(ce.expr(['Argument', 'u']).isPositive).toBeUndefined();
+    expect(ce.verify(ce.expr(['Greater', ['Real', 'u'], 0]))).toBeUndefined();
+    expect(ce.verify(ce.expr(['Less', ['Abs', 'u'], 1]))).toBeUndefined();
+    expect(ce.verify(ce.expr(['NotEqual', 'u', 1]))).toBeUndefined();
   });
 
   it('returns False only on refutation (bounds contradict the query)', () => {
     const ce = freshEngine();
-    ce.assume(ce.box(['Greater', ['Real', 's'], 1], { canonical: false }));
+    ce.assume(ce.expr(['Greater', ['Real', 's'], 1], { canonical: false }));
     // Re(s) < 1 is refuted by the strict lower bound
-    expect(ce.verify(ce.box(['Less', ['Real', 's'], 1]))).toBe(false);
-    expect(ce.verify(ce.box(['LessEqual', ['Real', 's'], 1]))).toBe(false);
-    expect(ce.verify(ce.box(['Less', ['Real', 's'], 0]))).toBe(false);
+    expect(ce.verify(ce.expr(['Less', ['Real', 's'], 1]))).toBe(false);
+    expect(ce.verify(ce.expr(['LessEqual', ['Real', 's'], 1]))).toBe(false);
+    expect(ce.verify(ce.expr(['Less', ['Real', 's'], 0]))).toBe(false);
     // Re(s) <= 2 is not refuted (and not entailed): undefined
-    expect(ce.verify(ce.box(['LessEqual', ['Real', 's'], 2]))).toBeUndefined();
+    expect(ce.verify(ce.expr(['LessEqual', ['Real', 's'], 2]))).toBeUndefined();
   });
 
   it('Abs sign never collapses to a definitive answer wrongly', () => {
     const ce = freshEngine();
     // Without assumptions: |u| is non-negative (structural), not positive
-    expect(ce.box(['Abs', 'u']).isNonNegative).toBe(true);
-    expect(ce.box(['Abs', 'u']).isPositive).toBeUndefined();
+    expect(ce.expr(['Abs', 'u']).isNonNegative).toBe(true);
+    expect(ce.expr(['Abs', 'u']).isPositive).toBeUndefined();
   });
 });

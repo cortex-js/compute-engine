@@ -27,7 +27,7 @@ describe('matchAll deadline', () => {
       name: 's' + i,
     })),
   });
-  const heavyExpr = () => ce.box(['Multiply', ...'abcdefghi'.split('')]);
+  const heavyExpr = () => ce.expr(['Multiply', ...'abcdefghi'.split('')]);
 
   test('without a deadline, enumeration runs to the cap', () => {
     const envs = matchAll(heavyPat(), heavyExpr(), ce.symbol('x'), 1000);
@@ -60,7 +60,7 @@ describe('matchAll deadline', () => {
     };
     const envs = matchAll(
       pat,
-      ce.box(['Multiply', 'p', 'q']),
+      ce.expr(['Multiply', 'p', 'q']),
       ce.symbol('x'),
       8,
       Date.now() + 60_000

@@ -59,7 +59,7 @@ describe('A3.2 — Empty-list validity', () => {
 
   test('parses [] (MathJSON literal) to an empty List', () => {
     const ce = new ComputeEngine();
-    const expr = ce.box(['List']);
+    const expr = ce.expr(['List']);
     expect(expr.operator).toEqual('List');
     expect(expr.nops).toEqual(0);
   });
@@ -80,18 +80,18 @@ describe('A3.2 — Empty-list validity', () => {
 
   test('Length([]) evaluates to 0', () => {
     const ce = new ComputeEngine();
-    expect(ce.box(['Length', ['List']]).evaluate().re).toEqual(0);
+    expect(ce.expr(['Length', ['List']]).evaluate().re).toEqual(0);
   });
 
   test('Count([]) evaluates to 0', () => {
     const ce = new ComputeEngine();
-    expect(ce.box(['Count', ['List']]).evaluate().re).toEqual(0);
+    expect(ce.expr(['Count', ['List']]).evaluate().re).toEqual(0);
   });
 
   test('an empty list is assignable to a symbol (corpus: j \\to [])', () => {
     const ce = new ComputeEngine();
     ce.assign('j', ce.parse('\\left[\\right]'));
-    const j = ce.box('j').evaluate();
+    const j = ce.expr('j').evaluate();
     expect(j.operator).toEqual('List');
     expect(j.nops).toEqual(0);
   });
@@ -108,17 +108,17 @@ describe('A3.2 — Empty-list validity', () => {
 describe('A3.3 — Reducer arity-1 forms', () => {
   test('Sum([1,2,3,4,5]) → 15', () => {
     const ce = new ComputeEngine();
-    expect(ce.box(['Sum', ['List', 1, 2, 3, 4, 5]]).evaluate().re).toEqual(15);
+    expect(ce.expr(['Sum', ['List', 1, 2, 3, 4, 5]]).evaluate().re).toEqual(15);
   });
 
   test('Sum([]) → 0', () => {
     const ce = new ComputeEngine();
-    expect(ce.box(['Sum', ['List']]).evaluate().re).toEqual(0);
+    expect(ce.expr(['Sum', ['List']]).evaluate().re).toEqual(0);
   });
 
   test('Sum(Range(1,10)) → 55', () => {
     const ce = new ComputeEngine();
-    expect(ce.box(['Sum', ['Range', 1, 10]]).evaluate().re).toEqual(55);
+    expect(ce.expr(['Sum', ['Range', 1, 10]]).evaluate().re).toEqual(55);
   });
 
   test('Sum still works in big-op form Sum(i, [i,1,10])', () => {
@@ -128,29 +128,29 @@ describe('A3.3 — Reducer arity-1 forms', () => {
 
   test('Max([3,1,4,1,5,9,2,6]) → 9', () => {
     const ce = new ComputeEngine();
-    expect(ce.box(['Max', ['List', 3, 1, 4, 1, 5, 9, 2, 6]]).evaluate().re).toEqual(9);
+    expect(ce.expr(['Max', ['List', 3, 1, 4, 1, 5, 9, 2, 6]]).evaluate().re).toEqual(9);
   });
 
   test('Min([3,1,4,1,5,9,2,6]) → 1', () => {
     const ce = new ComputeEngine();
-    expect(ce.box(['Min', ['List', 3, 1, 4, 1, 5, 9, 2, 6]]).evaluate().re).toEqual(1);
+    expect(ce.expr(['Min', ['List', 3, 1, 4, 1, 5, 9, 2, 6]]).evaluate().re).toEqual(1);
   });
 
   test('Count([10,20,30]) → 3', () => {
     const ce = new ComputeEngine();
-    expect(ce.box(['Count', ['List', 10, 20, 30]]).evaluate().re).toEqual(3);
+    expect(ce.expr(['Count', ['List', 10, 20, 30]]).evaluate().re).toEqual(3);
   });
 
   test('Sum dot-notation serializes to L.total', () => {
     const ce = new ComputeEngine();
     ce.latexOptions.dotNotation = true;
-    const expr = ce.box(['Sum', ['List', 1, 2, 3]]);
+    const expr = ce.expr(['Sum', ['List', 1, 2, 3]]);
     expect(expr.latex).toContain('\\operatorname{total}');
   });
 
   test('Sum of an infinite collection stays symbolic (does not hang)', () => {
     const ce = new ComputeEngine();
-    const expr = ce.box(['Sum', ['Repeat', 1]]).evaluate();
+    const expr = ce.expr(['Sum', ['Repeat', 1]]).evaluate();
     // Symbolic fallback: the reducer leaves the expression in its lazy form
     // when the collection has no finite count.
     expect(expr.operator).toEqual('Sum');
@@ -172,7 +172,7 @@ describe('A3.4 — Mixed-kind / mixed-dim list type', () => {
 
   test('mixed number/string list surfaces a detectable element type', () => {
     const ce = new ComputeEngine();
-    const expr = ce.box(['List', 1, "'hello'", 3]);
+    const expr = ce.expr(['List', 1, "'hello'", 3]);
     const t = expr.type.toString();
     // GP can detect heterogeneity by inspecting the element type. Either
     // union notation (number | string), or any/unknown.
@@ -181,7 +181,7 @@ describe('A3.4 — Mixed-kind / mixed-dim list type', () => {
 
   test('mixed-dim point list surfaces a tuple-union element type', () => {
     const ce = new ComputeEngine();
-    const expr = ce.box([
+    const expr = ce.expr([
       'List',
       ['Tuple', 1, 2],
       ['Tuple', 3, 4, 5],
@@ -196,7 +196,7 @@ describe('A3.4 — Mixed-kind / mixed-dim list type', () => {
   test('GP detection: mixed-kind list is distinguishable from homogeneous list', () => {
     const ce = new ComputeEngine();
     const homo = ce.parse('\\left[1, 2, 3\\right]');
-    const mixed = ce.box(['List', 1, "'hi'"]);
+    const mixed = ce.expr(['List', 1, "'hi'"]);
     expect(homo.type.toString()).not.toEqual(mixed.type.toString());
   });
 
@@ -211,13 +211,13 @@ describe('A3.4 — Mixed-kind / mixed-dim list type', () => {
 describe('A3.5 — Indexing extensions', () => {
   test('At(L, i) — integer index still works', () => {
     const ce = new ComputeEngine();
-    const expr = ce.box(['At', ['List', 10, 20, 30, 40], 2]).evaluate();
+    const expr = ce.expr(['At', ['List', 10, 20, 30, 40], 2]).evaluate();
     expect(expr.re).toEqual(20);
   });
 
   test('At(L, [i, j, k]) — list of indices returns picked sublist', () => {
     const ce = new ComputeEngine();
-    const expr = ce.box([
+    const expr = ce.expr([
       'At',
       ['List', 10, 20, 30, 40, 50],
       ['List', 1, 3, 5],
@@ -228,7 +228,7 @@ describe('A3.5 — Indexing extensions', () => {
 
   test('At(L, [bool, bool, bool, bool]) — boolean mask returns filtered sublist', () => {
     const ce = new ComputeEngine();
-    const expr = ce.box([
+    const expr = ce.expr([
       'At',
       ['List', 10, 20, 30, 40],
       ['List', 'True', 'False', 'True', 'False'],
@@ -239,7 +239,7 @@ describe('A3.5 — Indexing extensions', () => {
 
   test('boolean mask with mismatched length: takes min(len(L), len(mask))', () => {
     const ce = new ComputeEngine();
-    const expr = ce.box([
+    const expr = ce.expr([
       'At',
       ['List', 10, 20, 30, 40, 50],
       ['List', 'True', 'False', 'True'],
@@ -249,7 +249,7 @@ describe('A3.5 — Indexing extensions', () => {
 
   test('At with empty index list returns empty list', () => {
     const ce = new ComputeEngine();
-    const expr = ce.box([
+    const expr = ce.expr([
       'At',
       ['List', 10, 20, 30],
       ['List'],
@@ -260,7 +260,7 @@ describe('A3.5 — Indexing extensions', () => {
 
   test('At with out-of-range index in list: filters or yields Nothing for that slot', () => {
     const ce = new ComputeEngine();
-    const expr = ce.box([
+    const expr = ce.expr([
       'At',
       ['List', 10, 20, 30],
       ['List', 1, 99],
@@ -272,7 +272,7 @@ describe('A3.5 — Indexing extensions', () => {
 
   test('At with predicate-derived mask works (manual case)', () => {
     const ce = new ComputeEngine();
-    const expr = ce.box([
+    const expr = ce.expr([
       'At',
       ['List', 1, 2, 3, 4, 5],
       ['List', 'False', 'False', 'True', 'True', 'True'],
@@ -293,7 +293,7 @@ describe('A3.6 — Function-application broadcasting', () => {
   test('user function with scalar param + list arg broadcasts', () => {
     const ce = new ComputeEngine();
     ce.assign('g', ce.parse('x \\mapsto 2x'));
-    const result = ce.box(['g', ['List', 10, 20, 30]]).evaluate();
+    const result = ce.expr(['g', ['List', 10, 20, 30]]).evaluate();
     expect(result.operator).toEqual('List');
     expect(result.ops!.map((x) => x.re)).toEqual([20, 40, 60]);
   });
@@ -301,7 +301,7 @@ describe('A3.6 — Function-application broadcasting', () => {
   test('broadcasting an empty list yields an empty list', () => {
     const ce = new ComputeEngine();
     ce.assign('f', ce.parse('x \\mapsto x + 1'));
-    const result = ce.box(['f', ['List']]).evaluate();
+    const result = ce.expr(['f', ['List']]).evaluate();
     expect(result.operator).toEqual('List');
     expect(result.nops).toEqual(0);
   });
@@ -309,7 +309,7 @@ describe('A3.6 — Function-application broadcasting', () => {
   test('broadcasting over a Range works', () => {
     const ce = new ComputeEngine();
     ce.assign('f', ce.parse('x \\mapsto x^2'));
-    const result = ce.box(['f', ['Range', 1, 4]]).evaluate();
+    const result = ce.expr(['f', ['Range', 1, 4]]).evaluate();
     expect(result.operator).toEqual('List');
     expect(result.ops!.map((x) => x.re)).toEqual([1, 4, 9, 16]);
   });
@@ -317,7 +317,7 @@ describe('A3.6 — Function-application broadcasting', () => {
   test('multi-arg function broadcasts with zip semantics (list + scalar)', () => {
     const ce = new ComputeEngine();
     ce.assign('h', ce.parse('(x, y) \\mapsto x + y'));
-    const result = ce.box(['h', ['List', 1, 2, 3], 10]).evaluate();
+    const result = ce.expr(['h', ['List', 1, 2, 3], 10]).evaluate();
     expect(result.operator).toEqual('List');
     expect(result.ops!.map((x) => x.re)).toEqual([11, 12, 13]);
   });
@@ -325,7 +325,7 @@ describe('A3.6 — Function-application broadcasting', () => {
   test('multi-arg function broadcasts with zip semantics (list + list)', () => {
     const ce = new ComputeEngine();
     ce.assign('h', ce.parse('(x, y) \\mapsto x + y'));
-    const result = ce.box(['h', ['List', 1, 2, 3], ['List', 10, 20, 30]]).evaluate();
+    const result = ce.expr(['h', ['List', 1, 2, 3], ['List', 10, 20, 30]]).evaluate();
     expect(result.operator).toEqual('List');
     expect(result.ops!.map((x) => x.re)).toEqual([11, 22, 33]);
   });
@@ -339,7 +339,7 @@ describe('A3.6 — Function-application broadcasting', () => {
     // so any future narrowing of broadcasting must revisit it.
     const ce = new ComputeEngine();
     ce.assign('f', ce.parse('L \\mapsto \\operatorname{Sum}(L)'));
-    const result = ce.box(['f', ['List', 1, 2, 3]]).evaluate();
+    const result = ce.expr(['f', ['List', 1, 2, 3]]).evaluate();
     expect(result.operator).toEqual('List');
     // Pointwise: [Sum(1), Sum(2), Sum(3)]. Each Sum(scalar) stays symbolic
     // (scalar is not a collection) so we just check the broadcast shape.

@@ -283,6 +283,6 @@ describe('UPPER HALF-PLANE (\\mathbb{C}^+)', () => {
   });
 
   test('the symbol serializes back to \\mathbb{C}^+', () => {
-    expect(ce.box('UpperHalfPlane').latex).toMatchInlineSnapshot(`\\mathbb{C}^+`);
+    expect(ce.expr('UpperHalfPlane').latex).toMatchInlineSnapshot(`\\mathbb{C}^+`);
   });
 });

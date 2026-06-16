@@ -80,27 +80,27 @@ describe('B23: exact mode (evaluate) stays symbolic', () => {
   });
 
   test('Erf(1/3) stays symbolic', () => {
-    const result = ce.box(['Erf', ['Rational', 1, 3]]).evaluate();
+    const result = ce.expr(['Erf', ['Rational', 1, 3]]).evaluate();
     expect(result.operator).toBe('Erf');
   });
 
   test('Erfc(1/3), ErfInv(1/3) stay symbolic', () => {
-    expect(ce.box(['Erfc', ['Rational', 1, 3]]).evaluate().operator).toBe(
+    expect(ce.expr(['Erfc', ['Rational', 1, 3]]).evaluate().operator).toBe(
       'Erfc'
     );
-    expect(ce.box(['ErfInv', ['Rational', 1, 3]]).evaluate().operator).toBe(
+    expect(ce.expr(['ErfInv', ['Rational', 1, 3]]).evaluate().operator).toBe(
       'ErfInv'
     );
   });
 
   test('Sinc(2), FresnelS(2), FresnelC(2) stay symbolic', () => {
-    expect(ce.box(['Sinc', 2]).evaluate().operator).toBe('Sinc');
-    expect(ce.box(['FresnelS', 2]).evaluate().operator).toBe('FresnelS');
-    expect(ce.box(['FresnelC', 2]).evaluate().operator).toBe('FresnelC');
+    expect(ce.expr(['Sinc', 2]).evaluate().operator).toBe('Sinc');
+    expect(ce.expr(['FresnelS', 2]).evaluate().operator).toBe('FresnelS');
+    expect(ce.expr(['FresnelC', 2]).evaluate().operator).toBe('FresnelC');
   });
 
   test('N() still computes a numeric value', () => {
-    expect(ce.box(['Erf', ['Rational', 1, 3]]).N().re).toBeCloseTo(
+    expect(ce.expr(['Erf', ['Rational', 1, 3]]).N().re).toBeCloseTo(
       0.3626481117660629,
       14
     );
@@ -112,7 +112,7 @@ describe('B23: exact special values still fold in evaluate()', () => {
   beforeAll(() => {
     ce = new ComputeEngine();
   });
-  const ev = (expr: any) => ce.box(expr).evaluate();
+  const ev = (expr: any) => ce.expr(expr).evaluate();
 
   test('Erf: 0 → 0, ±∞ → ±1', () => {
     expect(ev(['Erf', 0]).isSame(0)).toBe(true);
@@ -185,36 +185,36 @@ describe('B23: bignum kernels at precision 40 (≥ 35 digits)', () => {
   ];
 
   test.each(cases)('%j matches reference to ≥ 35 digits', (expr, ref) => {
-    const result = ce.box(expr as any).N();
+    const result = ce.expr(expr as any).N();
     expect(digitsCorrect(result.toString(), ref)).toBeGreaterThanOrEqual(35);
   });
 
   test('Erf saturates to ±1 when erfc < 10^−(p+10)', () => {
     // At precision 40, x = 15: erfc(15) ≈ 7.2e-100 < 10^-50
-    expect(ce.box(['Erf', 15]).N().isSame(1)).toBe(true);
-    expect(ce.box(['Erf', -15]).N().isSame(-1)).toBe(true);
+    expect(ce.expr(['Erf', 15]).N().isSame(1)).toBe(true);
+    expect(ce.expr(['Erf', -15]).N().isSame(-1)).toBe(true);
   });
 
   test('odd symmetry at precision 40', () => {
-    const erf1 = ce.box(['Erf', 1]).N();
-    const erfm1 = ce.box(['Erf', -1]).N();
+    const erf1 = ce.expr(['Erf', 1]).N();
+    const erfm1 = ce.expr(['Erf', -1]).N();
     expect(erf1.add(erfm1).isSame(0)).toBe(true);
 
-    const s2 = ce.box(['FresnelS', 2]).N();
-    const sm2 = ce.box(['FresnelS', -2]).N();
+    const s2 = ce.expr(['FresnelS', 2]).N();
+    const sm2 = ce.expr(['FresnelS', -2]).N();
     expect(s2.add(sm2).isSame(0)).toBe(true);
 
-    const ei = ce.box(['ErfInv', ['Rational', 1, 2]]).N();
-    const eim = ce.box(['ErfInv', ['Rational', -1, 2]]).N();
+    const ei = ce.expr(['ErfInv', ['Rational', 1, 2]]).N();
+    const eim = ce.expr(['ErfInv', ['Rational', -1, 2]]).N();
     expect(ei.add(eim).isSame(0)).toBe(true);
   });
 
   test('ErfInv close to 1 round-trips through Erf', () => {
     // 1 − 10^−30: the bignum seed branch (1−x² underflows in double)
     const x = ce.parse('1 - 10^{-30}');
-    const y = ce.box(['ErfInv', x]).N();
+    const y = ce.expr(['ErfInv', x]).N();
     expect(y.re).toBeCloseTo(8.14861622316986, 10);
-    const roundtrip = ce.box(['Erf', y]).N();
+    const roundtrip = ce.expr(['Erf', y]).N();
     expect(
       digitsCorrect(roundtrip.toString(), '0.999999999999999999999999999999')
     ).toBeGreaterThanOrEqual(28);
@@ -267,7 +267,7 @@ describe('B23: bignum kernels at precision 100', () => {
   ];
 
   test.each(cases)('%j matches reference to ≥ 95 digits', (expr, ref) => {
-    const result = ce.box(expr as any).N();
+    const result = ce.expr(expr as any).N();
     expect(digitsCorrect(result.toString(), ref)).toBeGreaterThanOrEqual(95);
   });
 });
@@ -280,18 +280,18 @@ describe('B23: machine-precision engine still uses machine kernels', () => {
   });
 
   test('~15 digits at machine precision', () => {
-    expect(ce.box(['Erf', 1]).N().re).toBeCloseTo(0.8427007929497149, 15);
-    expect(ce.box(['Erfc', 2]).N().re).toBeCloseTo(0.004677734981047266, 15);
-    expect(ce.box(['ErfInv', 0.5]).N().re).toBeCloseTo(
+    expect(ce.expr(['Erf', 1]).N().re).toBeCloseTo(0.8427007929497149, 15);
+    expect(ce.expr(['Erfc', 2]).N().re).toBeCloseTo(0.004677734981047266, 15);
+    expect(ce.expr(['ErfInv', 0.5]).N().re).toBeCloseTo(
       0.4769362762044699,
       15
     );
-    expect(ce.box(['Sinc', 1]).N().re).toBeCloseTo(0.8414709848078965, 15);
-    expect(ce.box(['FresnelS', 1]).N().re).toBeCloseTo(
+    expect(ce.expr(['Sinc', 1]).N().re).toBeCloseTo(0.8414709848078965, 15);
+    expect(ce.expr(['FresnelS', 1]).N().re).toBeCloseTo(
       0.43825914739035477,
       14
     );
-    expect(ce.box(['FresnelC', 1]).N().re).toBeCloseTo(
+    expect(ce.expr(['FresnelC', 1]).N().re).toBeCloseTo(
       0.7798934003768228,
       14
     );
@@ -308,9 +308,9 @@ describe('B23: complex arguments stay symbolic (no complex kernel)', () => {
   // incorrect. There is no complex kernel, so the expression now stays
   // symbolic.
   test('Erf(1+i), Sinc(i), FresnelS(i) stay symbolic under N()', () => {
-    expect(ce.box(['Erf', ['Complex', 1, 1]]).N().operator).toBe('Erf');
-    expect(ce.box(['Sinc', ['Complex', 0, 1]]).N().operator).toBe('Sinc');
-    expect(ce.box(['FresnelS', ['Complex', 0, 1]]).N().operator).toBe(
+    expect(ce.expr(['Erf', ['Complex', 1, 1]]).N().operator).toBe('Erf');
+    expect(ce.expr(['Sinc', ['Complex', 0, 1]]).N().operator).toBe('Sinc');
+    expect(ce.expr(['FresnelS', ['Complex', 0, 1]]).N().operator).toBe(
       'FresnelS'
     );
   });

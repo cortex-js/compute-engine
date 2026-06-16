@@ -55,7 +55,7 @@ Key implementation choices:
 
 - **Walk `all_entries` directly.** Each `Entry` is an `Expr` with `ID`, `Formula`, `Variables`, `Assumptions`, `References` sub-args, retrievable via `entry.get_arg_with_head(...)` (`pygrim/expr.py:1286-1295`). Topic membership comes from `all_topics` (`Topic`/`Entries` IDs, `expr.py:1279-1295`); entries referenced from multiple topics are emitted once, into the topic of their defining source file (recoverable via `pygrim/formulas/__init__.py` module attribution), with a `topics: [...]` cross-reference list.
 - **Reuse, don't reimplement, binding semantics.** `Expr.free_variables()` (`expr.py:303-394`) gives the `variables` field directly (and validates the `Variables(...)` declaration against it — mismatches are flagged). `Expr.replace(..., semantic=True)` (`expr.py:396-490`) performs the capture-avoiding substitution needed for `Where` elimination, including destructuring `Def(Tuple(...))` and local-function `Def(f(x), ...)` cases — this is exactly the "nontrivial to reimplement" machinery the feasibility doc warned about.
-- **Emit non-canonical MathJSON.** The translator's output is *source form*: `["Subtract", a, b]`, `["Negate", x]`, raw `["Interval", ["Open", a], b]` etc. CE's `ce.box()` does canonicalization; the corpus should stay diff-stable and human-readable.
+- **Emit non-canonical MathJSON.** The translator's output is *source form*: `["Subtract", a, b]`, `["Negate", x]`, raw `["Interval", ["Open", a], b]` etc. CE's `ce.expr()` does canonicalization; the corpus should stay diff-stable and human-readable.
 - **Integers** emit as JSON numbers when within the IEEE-754 safe-integer range, else as `{"num": "<digits>"}` (per `MathJsonNumberObject`, `src/math-json/types.ts:100`). `Decimal("...")` literals emit as `{"num": "..."}` — lossless.
 - **Determinism:** stable key order, sorted entries by ID within topic, `\n` line endings, so regeneration produces byte-identical files when nothing changed.
 
@@ -215,18 +215,18 @@ Location: `/Users/arno/dev/compute-engine/scripts/fungrim/` (runner scripts, run
 scripts/fungrim/
   validate.ts        # CLI: --corpus <dir> [--numeric] [--topic t] [--id xxxxxx] [--seed n]
   load.ts            # read corpus JSON + declarations.json, ce.declare() shells
-  box-check.ts       # stage 1: ce.box() every formula & assumptions
+  box-check.ts       # stage 1: ce.expr() every formula & assumptions
   numeric-check.ts   # stage 2 (--numeric): random-instance spot checks
   sample.ts          # some_values port: value pools + assumption filtering
   report.ts          # JSON + console report, diffable across runs
 ```
 
-**Stage 1 — representability (always on):** for each entry, `ce.box(entry.formula)` and `ce.box(entry.assumptions)` with the shell declarations loaded; record per-entry outcome: `ok` / `box-error` (exception or `["Error", ...]` subexpression in the canonical form) / `unknown-symbol`. Also round-trip `boxed.json` and verify it re-boxes equal (catches canonicalization instability). Output `validation-report.json` with per-topic pass rates. This is the Phase-0 gate: **goal ≥ 99% of corpus entries box without errors.**
+**Stage 1 — representability (always on):** for each entry, `ce.expr(entry.formula)` and `ce.expr(entry.assumptions)` with the shell declarations loaded; record per-entry outcome: `ok` / `box-error` (exception or `["Error", ...]` subexpression in the canonical form) / `unknown-symbol`. Also round-trip `boxed.json` and verify it re-boxes equal (catches canonicalization instability). Output `validation-report.json` with per-topic pass rates. This is the Phase-0 gate: **goal ≥ 99% of corpus entries box without errors.**
 
 **Stage 2 — numeric spot checks (behind `--numeric`, since REVIEW.md numerics fixes are in flight):** a TypeScript port of the *strategy* of `Expr.test()` (`pygrim/expr.py:961-1039`) + `Brain.some_values()` (`pygrim/brain.py:5767-5862`):
 
 - Fixed value pools per base set, mirroring Fungrim's `some_integers`/`some_rationals`/`some_reals`/`some_complexes`/`some_upper_half_plane` (small integers, ±1/2, `Sqrt(2)`, `Pi`, `1/2 + i/2`, `i`, `2i−1`, `τ = i`, `τ = (1+i√3)/2`, …) — exact MathJSON constants, not floats.
-- For each entry with variables: derive each variable's base pool from its `Element` conjunct (the same dispatch as `some_values`, brain.py:5810-5841), iterate a seeded randomized cartesian product, keep assignments where `ce.box(assumptions).subs(assignment).evaluate()` is definitively `True` (three-valued: skip `Unknown`), cap candidates.
+- For each entry with variables: derive each variable's base pool from its `Element` conjunct (the same dispatch as `some_values`, brain.py:5810-5841), iterate a seeded randomized cartesian product, keep assignments where `ce.expr(assumptions).subs(assignment).evaluate()` is definitively `True` (three-valued: skip `Unknown`), cap candidates.
 - For each accepted assignment (default 5/entry): substitute into the formula; for `Equal` classes compare `N()` of both sides to relative tolerance 1e-10 at 30-digit precision; for inequalities check the relation numerically; record `True`/`False`/`Unknown` per instance, Fungrim-style.
 - **A `False` instance flags the entry (likely a translation bug or CE numeric bug) but does not fail the build initially** — failures land in `numeric-failures.json` for triage, since docs/fungrim/FUNGRIM.md §6 predicts this doubles as a CE fuzz corpus. Entries whose heads have no CE numeric kernel are reported `not-evaluable` (expected for most special functions until Tier-2 work).
 

@@ -72,7 +72,7 @@ for (const p of selected) {
     timeLimitMs: 10_000,
     trace: true,
   });
-  const f = ce.box(p.integrand as any);
+  const f = ce.expr(p.integrand as any);
   console.log(`integrand: ${f.toString()}`);
   const t = Date.now();
   let result: ReturnType<typeof driver.int> = null;

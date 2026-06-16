@@ -1,7 +1,7 @@
 // Stage 1 — representability check (docs/fungrim/FUNGRIM-PLAN-1-TRANSLATOR.md §5).
 //
 // For every corpus entry: declare its variables (typed from assumptions),
-// then ce.box(formula).canonical and ce.box(assumptions).canonical. An entry
+// then ce.expr(formula).canonical and ce.expr(assumptions).canonical. An entry
 // is `ok` iff neither throws nor contains an ["Error", ...] subexpression.
 // Outcomes:
 //   ok             — boxes cleanly
@@ -75,9 +75,9 @@ export function boxCheckEntry(
   return withEntryScope(ce, e, () => {
     const errors: string[] = [];
     try {
-      collectErrors(ce.box(e.formula as any).canonical, errors);
+      collectErrors(ce.expr(e.formula as any).canonical, errors);
       if (e.assumptions != null)
-        collectErrors(ce.box(e.assumptions as any).canonical, errors);
+        collectErrors(ce.expr(e.assumptions as any).canonical, errors);
     } catch (err: any) {
       errors.push(`THROW: ${String(err?.message ?? err).slice(0, 200)}`);
     }

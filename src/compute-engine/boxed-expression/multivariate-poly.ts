@@ -319,7 +319,7 @@ export function mpolyFromBoxed(
   expr: Expression,
   vars: string[]
 ): MPoly | null {
-  const e = ce.box(['Expand', expr]).evaluate();
+  const e = ce.expr(['Expand', expr]).evaluate();
   const index = new Map(vars.map((v, i) => [v, i]));
 
   // First pass: collect (exponent, numerator, denominator) per term.
@@ -388,7 +388,7 @@ export function mpolyFromBoxed(
 
 /** Convert an {@link MPoly} back to a canonical boxed expression. */
 export function mpolyToBoxed(ce: ComputeEngine, poly: MPoly): Expression {
-  if (poly.isZero()) return ce.box(0);
+  if (poly.isZero()) return ce.expr(0);
   const terms: Expression[] = [];
   for (const [k, c] of poly.terms) {
     const e = MPoly.exp(k);
@@ -396,7 +396,7 @@ export function mpolyToBoxed(ce: ComputeEngine, poly: MPoly): Expression {
     e.forEach((p, i) => {
       if (p === 1) factors.push(ce.symbol(poly.vars[i]));
       else if (p > 1)
-        factors.push(ce.box(['Power', ce.symbol(poly.vars[i]), p]));
+        factors.push(ce.expr(['Power', ce.symbol(poly.vars[i]), p]));
     });
     const coeff = ce.number(c);
     if (factors.length === 0) terms.push(coeff);

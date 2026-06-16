@@ -60,36 +60,36 @@ describe('ANALYTIC-PROPERTY METADATA STORE (ROADMAP item 7)', () => {
   describe('pole-aware N()', () => {
     test('fills in poles the kernel leaves as NaN (Digamma)', () => {
       // Before: Digamma(-2).N() and Digamma(0).N() returned NaN.
-      expect(ce.box(['Digamma', -2]).N().toString()).toBe('~oo');
-      expect(ce.box(['Digamma', 0]).N().toString()).toBe('~oo');
-      expect(ce.box(['Digamma', -5]).N().toString()).toBe('~oo');
+      expect(ce.expr(['Digamma', -2]).N().toString()).toBe('~oo');
+      expect(ce.expr(['Digamma', 0]).N().toString()).toBe('~oo');
+      expect(ce.expr(['Digamma', -5]).N().toString()).toBe('~oo');
     });
 
     test('does not override a finite value off the poles', () => {
       // Digamma(3) = -gamma + 1 + 1/2 ≈ 0.9227
-      const v = ce.box(['Digamma', 3]).N().re;
+      const v = ce.expr(['Digamma', 3]).N().re;
       expect(Math.abs(v - 0.9227843350984671)).toBeLessThan(1e-12);
     });
 
     test('preserves a kernel that already returns an infinity', () => {
       // Gamma already returns ComplexInfinity at its poles; unchanged.
-      expect(ce.box(['Gamma', -1]).N().toString()).toBe('~oo');
-      expect(ce.box(['Gamma', 0]).N().toString()).toBe('~oo');
+      expect(ce.expr(['Gamma', -1]).N().toString()).toBe('~oo');
+      expect(ce.expr(['Gamma', 0]).N().toString()).toBe('~oo');
       // Zeta returns a directed +oo at s = 1; the override must not touch it.
-      expect(ce.box(['Zeta', 1]).N().toString()).toBe('+oo');
+      expect(ce.expr(['Zeta', 1]).N().toString()).toBe('+oo');
     });
 
     test('non-pole arguments are unaffected', () => {
-      expect(ce.box(['Gamma', 5]).N().toString()).toBe('24');
+      expect(ce.expr(['Gamma', 5]).N().toString()).toBe('24');
       expect(
-        Math.abs(ce.box(['Zeta', 2]).N().re - 1.6449340668482264)
+        Math.abs(ce.expr(['Zeta', 2]).N().re - 1.6449340668482264)
       ).toBeLessThan(1e-12);
     });
 
     test('a symbolic (non-numeric) argument never triggers an override', () => {
       // Membership is fail-closed: Digamma(x) with x free stays symbolic.
       const x = ce.symbol('x');
-      const r = ce.box(['Digamma', x]).N();
+      const r = ce.expr(['Digamma', x]).N();
       expect(r.toString()).not.toBe('~oo');
     });
   });

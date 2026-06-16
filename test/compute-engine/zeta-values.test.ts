@@ -17,7 +17,7 @@ import {
 const ce = new ComputeEngine();
 
 function zeta(s: number) {
-  return ce.box(['Zeta', s]).evaluate();
+  return ce.expr(['Zeta', s]).evaluate();
 }
 
 describe('Bernoulli rationals (numerics/bernoulli.ts)', () => {
@@ -137,7 +137,7 @@ describe('Zeta N() consistency', () => {
   });
 
   test('non-integer arguments are untouched by the exact path', () => {
-    expect(ce.box(['Zeta', 2.5]).N().re).toBeCloseTo(1.3414872572509171, 8);
+    expect(ce.expr(['Zeta', 2.5]).N().re).toBeCloseTo(1.3414872572509171, 8);
   });
 });
 
@@ -146,9 +146,9 @@ describe('Symbolic trivial zeros (fungrim:zeta-trivial-zeros)', () => {
     const ce2 = new ComputeEngine();
     loadIdentities(ce2);
     ce2.declare('n', 'integer');
-    ce2.assume(ce2.box(['Greater', 'n', 0]));
+    ce2.assume(ce2.expr(['Greater', 'n', 0]));
     expect(
-      ce2.box(['Zeta', ['Multiply', -2, 'n']]).simplify().isSame(0)
+      ce2.expr(['Zeta', ['Multiply', -2, 'n']]).simplify().isSame(0)
     ).toBe(true);
   });
 
@@ -156,7 +156,7 @@ describe('Symbolic trivial zeros (fungrim:zeta-trivial-zeros)', () => {
     const ce2 = new ComputeEngine();
     loadIdentities(ce2);
     ce2.declare('m', 'integer');
-    const r = ce2.box(['Zeta', ['Multiply', -2, 'm']]).simplify();
+    const r = ce2.expr(['Zeta', ['Multiply', -2, 'm']]).simplify();
     expect(r.operator).toBe('Zeta');
   });
 });

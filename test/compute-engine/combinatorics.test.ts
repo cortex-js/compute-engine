@@ -1,6 +1,6 @@
 import { engine as ce } from '../utils';
 
-const evalN = (expr: any) => ce.box(expr).evaluate().toString();
+const evalN = (expr: any) => ce.expr(expr).evaluate().toString();
 
 describe('Subfactorial (derangements) — REVIEW.md B9', () => {
   // !n = n·!(n−1) + (−1)^n, with !0 = 1 (OEIS A000166). The previous
@@ -28,7 +28,7 @@ describe('Subfactorial (derangements) — REVIEW.md B9', () => {
     ));
 
   test('negative n is left undefined/unevaluated', () =>
-    expect(ce.box(['Subfactorial', -1]).evaluate().operator).toEqual(
+    expect(ce.expr(['Subfactorial', -1]).evaluate().operator).toEqual(
       'Subfactorial'
     ));
 });

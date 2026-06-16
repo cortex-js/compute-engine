@@ -85,18 +85,18 @@ try {
   if (input.op === 'N') {
     // Arbitrary-precision numeric / exact-integer evaluation.
     if (kase.verify.kind === 'integer') {
-      const timing = timeit(() => ce.box(input.mathjson).evaluate());
-      const r = ce.box(input.mathjson).evaluate();
+      const timing = timeit(() => ce.expr(input.mathjson).evaluate());
+      const r = ce.expr(input.mathjson).evaluate();
       emit({ status: 'ok', text: r.toString(), valueText: r.toString(), values: [], ...timing });
     } else {
       ce.precision = input.precision;
-      const timing = timeit(() => ce.box(input.mathjson).N());
-      const r = ce.box(input.mathjson).N();
+      const timing = timeit(() => ce.expr(input.mathjson).N());
+      const r = ce.expr(input.mathjson).N();
       emit({ status: 'ok', text: r.toString(), valueText: r.toString(), values: [], ...timing });
     }
   } else if (input.op === 'simplify') {
-    const timing = timeit(() => ce.box(input.mathjson).simplify());
-    const original = ce.box(input.mathjson);
+    const timing = timeit(() => ce.expr(input.mathjson).simplify());
+    const original = ce.expr(input.mathjson);
     const result = original.simplify();
     const pts = suite.cases.find((c) => c.id === caseId).verify.points.map(parseFloat);
     const values = pts.map((p) => num(result.subs({ [kase.verify.var]: ce.number(p) })));
@@ -108,14 +108,14 @@ try {
       ...timing,
     });
   } else if (input.op === 'diff') {
-    const build = () => ce.box(['D', input.mathjson, input.var]).evaluate();
+    const build = () => ce.expr(['D', input.mathjson, input.var]).evaluate();
     const timing = timeit(build);
     const result = build();
     const pts = kase.verify.points.map(parseFloat);
     const values = pts.map((p) => num(result.subs({ [input.var]: ce.number(p) })));
     emit({ status: 'ok', text: result.toString(), values, ...timing });
   } else if (input.op === 'integrate') {
-    const build = () => ce.box(['Integrate', input.mathjson, ['Tuple', input.var]]).evaluate();
+    const build = () => ce.expr(['Integrate', input.mathjson, ['Tuple', input.var]]).evaluate();
     const timing = timeit(build);
     const result = build();
     // An unevaluated integral comes back as an Integrate node.
@@ -130,7 +130,7 @@ try {
     }
   } else if (input.op === 'evaluate') {
     // Evaluate to an exact closed form (limit / definite or improper integral).
-    const build = () => ce.box(input.mathjson).evaluate();
+    const build = () => ce.expr(input.mathjson).evaluate();
     const timing = timeit(build);
     const result = build();
     if (isUnevaluated(result)) {
@@ -139,7 +139,7 @@ try {
       emit({ status: 'ok', text: result.toString(), values: [num(result)], ...timing });
     }
   } else if (input.op === 'solve') {
-    const build = () => ce.box(input.mathjson).solve(input.var);
+    const build = () => ce.expr(input.mathjson).solve(input.var);
     const timing = timeit(build);
     const roots = build();
     const values = realRootValues(roots);

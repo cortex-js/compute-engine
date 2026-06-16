@@ -4,7 +4,7 @@ describe('A4.1 — Block is sequential (regression)', () => {
   test('Assign sees prior Assign\'s value within the same Block', () => {
     const ce = new ComputeEngine();
     const r = ce
-      .box(['Block', ['Assign', 'a', 1], ['Assign', 'b', ['Add', 'a', 1]], 'b'])
+      .expr(['Block', ['Assign', 'a', 1], ['Assign', 'b', ['Add', 'a', 1]], 'b'])
       .evaluate();
     expect(r.re).toEqual(2);
   });
@@ -12,7 +12,7 @@ describe('A4.1 — Block is sequential (regression)', () => {
   test('Reassignment cascades sequentially (a=1; a=a+1; a=a+1 → 3)', () => {
     const ce = new ComputeEngine();
     const r = ce
-      .box([
+      .expr([
         'Block',
         ['Assign', 'a', 1],
         ['Assign', 'a', ['Add', 'a', 1]],
@@ -29,15 +29,15 @@ describe('A4.1 — Block is sequential (regression)', () => {
     const ce = new ComputeEngine();
     ce.assign('a', 10);
     ce.assign('b', 20);
-    ce.box([
+    ce.expr([
       'Block',
       ['Assign', '_t_a', 'b'],
       ['Assign', '_t_b', 'a'],
       ['Assign', 'a', '_t_a'],
       ['Assign', 'b', '_t_b'],
     ]).evaluate();
-    expect(ce.box('a').evaluate().re).toEqual(20);
-    expect(ce.box('b').evaluate().re).toEqual(10);
+    expect(ce.expr('a').evaluate().re).toEqual(20);
+    expect(ce.expr('b').evaluate().re).toEqual(10);
   });
 
   test('Naive sequential rewrite of a swap does NOT preserve simultaneous semantics', () => {
@@ -46,35 +46,35 @@ describe('A4.1 — Block is sequential (regression)', () => {
     const ce = new ComputeEngine();
     ce.assign('a', 10);
     ce.assign('b', 20);
-    ce.box([
+    ce.expr([
       'Block',
       ['Assign', 'a', 'b'], // a := b → a=20
       ['Assign', 'b', 'a'], // b := a → b=20 (NOT 10)
     ]).evaluate();
-    expect(ce.box('a').evaluate().re).toEqual(20);
-    expect(ce.box('b').evaluate().re).toEqual(20);
+    expect(ce.expr('a').evaluate().re).toEqual(20);
+    expect(ce.expr('b').evaluate().re).toEqual(20);
   });
 });
 
 describe('A4.2 — Random(seed) polymorphic dispatch', () => {
   test('Random() returns a float in [0,1)', () => {
     const ce = new ComputeEngine();
-    const v = ce.box(['Random']).evaluate().re!;
+    const v = ce.expr(['Random']).evaluate().re!;
     expect(v).toBeGreaterThanOrEqual(0);
     expect(v).toBeLessThan(1);
   });
 
   test('Random(seed) is deterministic — same seed → same value', () => {
     const ce = new ComputeEngine();
-    const v1 = ce.box(['Random', 0.5]).evaluate().re!;
-    const v2 = ce.box(['Random', 0.5]).evaluate().re!;
+    const v1 = ce.expr(['Random', 0.5]).evaluate().re!;
+    const v2 = ce.expr(['Random', 0.5]).evaluate().re!;
     expect(v1).toEqual(v2);
   });
 
   test('Random(seed) returns a float in [0,1)', () => {
     const ce = new ComputeEngine();
     for (const seed of [0.1, 1.5, 42.7, -3.2, 1e6 + 0.5]) {
-      const v = ce.box(['Random', seed]).evaluate().re!;
+      const v = ce.expr(['Random', seed]).evaluate().re!;
       expect(v).toBeGreaterThanOrEqual(0);
       expect(v).toBeLessThan(1);
     }
@@ -82,15 +82,15 @@ describe('A4.2 — Random(seed) polymorphic dispatch', () => {
 
   test('Random(seed) varies with seed', () => {
     const ce = new ComputeEngine();
-    const v1 = ce.box(['Random', 0.1]).evaluate().re!;
-    const v2 = ce.box(['Random', 0.2]).evaluate().re!;
+    const v1 = ce.expr(['Random', 0.1]).evaluate().re!;
+    const v2 = ce.expr(['Random', 0.2]).evaluate().re!;
     expect(v1).not.toEqual(v2);
   });
 
   test('Random(n) — integer arg — still returns integer in [0, n)', () => {
     const ce = new ComputeEngine();
     for (let i = 0; i < 30; i++) {
-      const v = ce.box(['Random', 5]).evaluate().re!;
+      const v = ce.expr(['Random', 5]).evaluate().re!;
       expect(Number.isInteger(v)).toBe(true);
       expect(v).toBeGreaterThanOrEqual(0);
       expect(v).toBeLessThan(5);
@@ -100,7 +100,7 @@ describe('A4.2 — Random(seed) polymorphic dispatch', () => {
   test('Random(m, n) — both integer — returns integer in [m, n)', () => {
     const ce = new ComputeEngine();
     for (let i = 0; i < 30; i++) {
-      const v = ce.box(['Random', 10, 20]).evaluate().re!;
+      const v = ce.expr(['Random', 10, 20]).evaluate().re!;
       expect(Number.isInteger(v)).toBe(true);
       expect(v).toBeGreaterThanOrEqual(10);
       expect(v).toBeLessThan(20);
@@ -114,7 +114,7 @@ describe('A4.2 — Random(seed) polymorphic dispatch', () => {
       const v = Math.sin(seed * 12.9898) * 43758.5453;
       return v - Math.floor(v);
     })();
-    const got = ce.box(['Random', 0.5]).evaluate().re!;
+    const got = ce.expr(['Random', 0.5]).evaluate().re!;
     expect(got).toBeCloseTo(expected, 12);
   });
 
@@ -142,7 +142,7 @@ describe('A4.2 — Random(seed) polymorphic dispatch', () => {
   test('Random(integer-typed-symbol) routes to integer-bound on GLSL', () => {
     const ce = new ComputeEngine();
     ce.declare('n', 'integer');
-    const expr = ce.box(['Random', 'n']);
+    const expr = ce.expr(['Random', 'n']);
     const compiled = compile(expr, { to: 'glsl' });
     expect(compiled.success).toBe(true);
     const glsl = compiled.code;
@@ -179,7 +179,7 @@ describe('A4.2 — Random(seed) polymorphic dispatch', () => {
 describe('A4.3 — Seeded Shuffle / Sample', () => {
   test('Shuffle without seed still works (non-deterministic)', () => {
     const ce = new ComputeEngine();
-    const r = ce.box(['Shuffle', ['List', 1, 2, 3, 4, 5]]).evaluate();
+    const r = ce.expr(['Shuffle', ['List', 1, 2, 3, 4, 5]]).evaluate();
     expect(r.operator).toEqual('List');
     expect(r.nops).toEqual(5);
     const elements = r.ops!.map((x) => x.re).sort();
@@ -188,15 +188,15 @@ describe('A4.3 — Seeded Shuffle / Sample', () => {
 
   test('Shuffle(L, seed) is deterministic', () => {
     const ce = new ComputeEngine();
-    const a = ce.box(['Shuffle', ['List', 1, 2, 3, 4, 5], 0.7]).evaluate();
-    const b = ce.box(['Shuffle', ['List', 1, 2, 3, 4, 5], 0.7]).evaluate();
+    const a = ce.expr(['Shuffle', ['List', 1, 2, 3, 4, 5], 0.7]).evaluate();
+    const b = ce.expr(['Shuffle', ['List', 1, 2, 3, 4, 5], 0.7]).evaluate();
     expect(a.ops!.map((x) => x.re)).toEqual(b.ops!.map((x) => x.re));
   });
 
   test('Shuffle(L, seed) varies with seed', () => {
     const ce = new ComputeEngine();
-    const a = ce.box(['Shuffle', ['List', 1, 2, 3, 4, 5], 0.1]).evaluate();
-    const b = ce.box(['Shuffle', ['List', 1, 2, 3, 4, 5], 0.9]).evaluate();
+    const a = ce.expr(['Shuffle', ['List', 1, 2, 3, 4, 5], 0.1]).evaluate();
+    const b = ce.expr(['Shuffle', ['List', 1, 2, 3, 4, 5], 0.9]).evaluate();
     // Almost certainly different orderings (P(equal) ≈ 1/120).
     expect(a.ops!.map((x) => x.re)).not.toEqual(b.ops!.map((x) => x.re));
   });
@@ -204,7 +204,7 @@ describe('A4.3 — Seeded Shuffle / Sample', () => {
   test('Shuffle(L, seed) preserves elements (permutation)', () => {
     const ce = new ComputeEngine();
     const r = ce
-      .box(['Shuffle', ['List', 1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 0.5])
+      .expr(['Shuffle', ['List', 1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 0.5])
       .evaluate();
     const elements = r.ops!.map((x) => x.re).sort((a, b) => a! - b!);
     expect(elements).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
@@ -212,7 +212,7 @@ describe('A4.3 — Seeded Shuffle / Sample', () => {
 
   test('Sample(L, k) without seed still works (non-deterministic)', () => {
     const ce = new ComputeEngine();
-    const r = ce.box(['Sample', ['List', 1, 2, 3, 4, 5], 3]).evaluate();
+    const r = ce.expr(['Sample', ['List', 1, 2, 3, 4, 5], 3]).evaluate();
     expect(r.operator).toEqual('List');
     expect(r.nops).toEqual(3);
   });
@@ -220,10 +220,10 @@ describe('A4.3 — Seeded Shuffle / Sample', () => {
   test('Sample(L, k, seed) is deterministic', () => {
     const ce = new ComputeEngine();
     const a = ce
-      .box(['Sample', ['List', 1, 2, 3, 4, 5, 6, 7, 8], 3, 0.4])
+      .expr(['Sample', ['List', 1, 2, 3, 4, 5, 6, 7, 8], 3, 0.4])
       .evaluate();
     const b = ce
-      .box(['Sample', ['List', 1, 2, 3, 4, 5, 6, 7, 8], 3, 0.4])
+      .expr(['Sample', ['List', 1, 2, 3, 4, 5, 6, 7, 8], 3, 0.4])
       .evaluate();
     expect(a.ops!.map((x) => x.re)).toEqual(b.ops!.map((x) => x.re));
   });
@@ -231,7 +231,7 @@ describe('A4.3 — Seeded Shuffle / Sample', () => {
   test('Sample(L, k, seed) returns k distinct elements from L', () => {
     const ce = new ComputeEngine();
     const r = ce
-      .box(['Sample', ['List', 1, 2, 3, 4, 5, 6, 7, 8], 3, 0.4])
+      .expr(['Sample', ['List', 1, 2, 3, 4, 5, 6, 7, 8], 3, 0.4])
       .evaluate();
     expect(r.nops).toEqual(3);
     const got = r.ops!.map((x) => x.re!);

@@ -6,7 +6,7 @@
 //       [--numeric] [--topic <t>] [--id <xxxxxx>] [--seed <n>]
 //
 // Stage 1 (always): declare the symbol shells from declarations.json, then
-// per entry declare its variables (typed from assumptions) and ce.box() the
+// per entry declare its variables (typed from assumptions) and ce.expr() the
 // formula + assumptions. Outcomes: ok / box-error / unknown-symbol /
 // timeout. Writes scripts/fungrim/validation-report.json.
 //

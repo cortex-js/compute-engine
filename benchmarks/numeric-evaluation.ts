@@ -15,22 +15,22 @@ console.log('--- Numerical Evaluation Benchmarks ---');
 
 // Large Sum
 benchmark('Sum(1/n, 1..10000).N()', () => {
-  ce.box(['Sum', ['Divide', 1, 'n'], ['Tuple', 'n', 1, 10000]]).N();
+  ce.expr(['Sum', ['Divide', 1, 'n'], ['Tuple', 'n', 1, 10000]]).N();
 }, 5);
 
 // Large Product
 benchmark('Product(1 + 1/n^2, 1..1000).N()', () => {
-  ce.box(['Product', ['Add', 1, ['Divide', 1, ['Power', 'n', 2]]], ['Tuple', 'n', 1, 1000]]).N();
+  ce.expr(['Product', ['Add', 1, ['Divide', 1, ['Power', 'n', 2]]], ['Tuple', 'n', 1, 1000]]).N();
 }, 5);
 
 // Statistical Mean
 const largeListData = Array.from({ length: 10000 }, (_, i) => i);
-const largeList = ce.box(['List', ...largeListData]);
+const largeList = ce.expr(['List', ...largeListData]);
 benchmark('Mean(largeList).N()', () => {
-  ce.box(['Mean', largeList]).N();
+  ce.expr(['Mean', largeList]).N();
 }, 50);
 
 // Integrate
 benchmark('Integrate(x, 0..1).N()', () => {
-  ce.box(['Integrate', 'x', ['Tuple', 'x', 0, 1]]).N();
+  ce.expr(['Integrate', 'x', ['Tuple', 'x', 0, 1]]).N();
 }, 5);

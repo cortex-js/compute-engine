@@ -216,17 +216,17 @@ describe('simplificationRules', () => {
     const ce = new ComputeEngine();
 
     it('Hypot still simplifies (driver handles the Sqrt rewrite)', () => {
-      expect(ce.box(['Hypot', 3, 4]).simplify().toString()).toBe('5');
-      expect(ce.box(['Hypot', 'x', 'y']).simplify().toString()).toBe(
+      expect(ce.expr(['Hypot', 3, 4]).simplify().toString()).toBe('5');
+      expect(ce.expr(['Hypot', 'x', 'y']).simplify().toString()).toBe(
         'sqrt(x^2 + y^2)'
       );
     });
 
     it('Derivative simplification is stable (idempotent)', () => {
-      const d = ce.box(['Derivative', 'Sin']).simplify();
+      const d = ce.expr(['Derivative', 'Sin']).simplify();
       expect(d.simplify().isSame(d)).toBe(true);
       const d2 = ce
-        .box(['Derivative', ['Function', ['Add', 'x', 'x'], 'x']])
+        .expr(['Derivative', ['Function', ['Add', 'x', 'x'], 'x']])
         .simplify();
       expect(d2.simplify().isSame(d2)).toBe(true);
     });

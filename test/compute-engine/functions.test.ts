@@ -240,15 +240,15 @@ describe('Changing type from function to non-function', () => {
 describe('Function-literal head application (G4)', () => {
   test('[[Function, x+1, x], 5] beta-reduces to 6', () =>
     expect(
-      engine.box([['Function', ['Add', 'x', 1], 'x'], 5]).evaluate().re
+      engine.expr([['Function', ['Add', 'x', 1], 'x'], 5]).evaluate().re
     ).toBe(6));
 
   test('parity with explicit Apply form', () => {
     const direct = engine
-      .box([['Function', ['Add', 'x', 1], 'x'], 5])
+      .expr([['Function', ['Add', 'x', 1], 'x'], 5])
       .evaluate();
     const viaApply = engine
-      .box(['Apply', ['Function', ['Add', 'x', 1], 'x'], 5])
+      .expr(['Apply', ['Function', ['Add', 'x', 1], 'x'], 5])
       .evaluate();
     expect(direct.isSame(viaApply)).toBe(true);
   });
@@ -256,7 +256,7 @@ describe('Function-literal head application (G4)', () => {
   test('multi-argument lambda head', () =>
     expect(
       engine
-        .box([['Function', ['Add', 'x', 'y'], 'x', 'y'], 3, 4])
+        .expr([['Function', ['Add', 'x', 'y'], 'x', 'y'], 3, 4])
         .evaluate().re
     ).toBe(7));
 });

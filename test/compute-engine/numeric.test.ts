@@ -40,12 +40,12 @@ describe('NUMERIC small magnitudes (REVIEW.md D6)', () => {
   bigCe.precision = 50;
 
   test('Power of a small value is not chopped to 0', () => {
-    expect(bigCe.box(['Power', 10, -100]).N().toString()).toBe('1e-100');
-    expect(bigCe.box(['Power', 2, -3]).N().toString()).toBe('0.125');
+    expect(bigCe.expr(['Power', 10, -100]).N().toString()).toBe('1e-100');
+    expect(bigCe.expr(['Power', 2, -3]).N().toString()).toBe('0.125');
   });
 
   test('exp of a large-magnitude negative is not 0', () => {
-    const r = bigCe.box(['Power', 'ExponentialE', -200]).N().re;
+    const r = bigCe.expr(['Power', 'ExponentialE', -200]).N().re;
     // e^-200 ≈ 1.3838965e-87 — nonzero, and the right order of magnitude.
     expect(r).toBeGreaterThan(1.3e-87);
     expect(r).toBeLessThan(1.4e-87);

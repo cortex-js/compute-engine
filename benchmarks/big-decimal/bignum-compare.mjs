@@ -28,13 +28,13 @@ const OPS = {
 function timeOp(ce, build, prec) {
   ce.precision = prec;
   let c = 0;
-  for (; c < 3; c++) ce.box(build(c)).N(); // warmup
+  for (; c < 3; c++) ce.expr(build(c)).N(); // warmup
   const lim = BigInt(budgetMs) * 1_000_000n;
   let calls = 0;
   const t0 = process.hrtime.bigint();
   let el = 0n;
   do {
-    ce.box(build(c++)).N();
+    ce.expr(build(c++)).N();
     calls++;
     if ((calls & 7) === 0) el = process.hrtime.bigint() - t0;
   } while (el < lim);
@@ -58,7 +58,7 @@ for (const [op, build] of Object.entries(OPS))
 let capability = 'error';
 try {
   ce.precision = 3000;
-  const s = ce.box(['Sin', 1]).N().toString();
+  const s = ce.expr(['Sin', 1]).N().toString();
   capability = s.includes('NaN') ? 'NaN' : s.slice(0, 12);
 } catch {
   capability = 'throw';

@@ -115,14 +115,14 @@ describe('Arctan2 quadrant correction (REVIEW.md B1)', () => {
     [-3, -4],
   ] as [number, number][]) {
     test(`Arctan2(${y}, ${x}) matches Math.atan2`, () => {
-      const evaluated = engine.box(['Arctan2', y, x]).evaluate();
+      const evaluated = engine.expr(['Arctan2', y, x]).evaluate();
       expect(evaluated.N().re).toBeCloseTo(Math.atan2(y, x), 12);
     });
   }
 
   test('indeterminate-sign arguments stay unevaluated', () => {
     // Symbols of unknown sign cannot be assigned a quadrant.
-    expect(engine.box(['Arctan2', 'a', 'b']).evaluate().operator).toBe(
+    expect(engine.expr(['Arctan2', 'a', 'b']).evaluate().operator).toBe(
       'Arctan2'
     );
   });
@@ -132,17 +132,17 @@ describe('Arctan2 quadrant correction (REVIEW.md B1)', () => {
 // of the 1/(a²+x²) family evaluate (∫₀^∞ 1/(1+x²) = arctan(∞) = π/2).
 describe('Arctan at ±∞', () => {
   test('arctan(+∞) = π/2 (exact under evaluate)', () =>
-    expect(engine.box(['Arctan', engine.PositiveInfinity]).evaluate().json).toEqual([
+    expect(engine.expr(['Arctan', engine.PositiveInfinity]).evaluate().json).toEqual([
       'Multiply',
       ['Rational', 1, 2],
       'Pi',
     ]));
   test('arctan(−∞) = −π/2', () =>
     expect(
-      engine.box(['Arctan', engine.NegativeInfinity]).evaluate().json
+      engine.expr(['Arctan', engine.NegativeInfinity]).evaluate().json
     ).toEqual(['Multiply', ['Rational', -1, 2], 'Pi']));
   test('arctan(+∞).N() = 1.5707…', () =>
-    expect(engine.box(['Arctan', engine.PositiveInfinity]).N().re).toBeCloseTo(
+    expect(engine.expr(['Arctan', engine.PositiveInfinity]).N().re).toBeCloseTo(
       Math.PI / 2,
       10
     ));
@@ -156,8 +156,8 @@ describe('Degrees is a faithful conversion (REVIEW.md B20)', () => {
   it('literal and symbolic args agree (no mod-360 reduction)', () => {
     const ce = new ComputeEngine();
     ce.assign('b20', 390);
-    const symbolic = ce.box(['Degrees', 'b20']).evaluate().N().re;
-    const literal = ce.box(['Degrees', 390]).N().re;
+    const symbolic = ce.expr(['Degrees', 'b20']).evaluate().N().re;
+    const literal = ce.expr(['Degrees', 390]).N().re;
     const faithful = (390 * Math.PI) / 180; // 13π/6 ≈ 6.807, NOT π/6
     expect(literal).toBeCloseTo(faithful, 10);
     expect(symbolic).toBeCloseTo(literal, 10);

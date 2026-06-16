@@ -192,7 +192,7 @@ There are three ways to create function expressions:
 
 | Method                    | Canonical     | Bound        | Structural | Notes                          |
 | ------------------------- | ------------- | ------------ | ---------- | ------------------------------ |
-| `ce.box(json)`            | yes (default) | yes          | via option | General-purpose                |
+| `ce.expr(json)`            | yes (default) | yes          | via option | General-purpose                |
 | `ce.function(name, args)` | yes (default) | yes          | via option | Sugar for function expressions |
 | `ce._fn(name, args)`      | configurable  | configurable | **no**     | Internal fast path             |
 
@@ -211,7 +211,7 @@ ce.expr(name, args, { form: 'raw' })
 ce.expr(name, args, { form: ['Number', 'Order'] }) // granular control
 ```
 
-Keep `ce.parse()` for LaTeX input and `ce.box()` for MathJSON input. Drop
+Keep `ce.parse()` for LaTeX input and `ce.expr()` for MathJSON input. Drop
 `ce.function()` and `ce._fn()` entirely. The `_fn` fast path can be an internal
 implementation detail that is not exposed in the public API.
 
@@ -484,7 +484,7 @@ immediately.
 
 5. **Unify expression creation** ✅ DONE
    - New `FormOption` type: `'canonical' | 'structural' | 'raw' | CanonicalForm | CanonicalForm[]`
-   - `ce.box()`, `ce.function()`, `ce.parse()` accept `{ form?: FormOption }`
+   - `ce.expr()`, `ce.function()`, `ce.parse()` accept `{ form?: FormOption }`
      replacing `{ canonical?, structural? }`
    - Internal `formToInternal()` helper translates to legacy `{ canonical, structural }`
      for `BoxedFunction` constructor and `ce._fn()` (unchanged internal API)

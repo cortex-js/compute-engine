@@ -168,7 +168,7 @@ for (const f of FILES) {
       if (!vn || vs.some((s) => s !== vn)) { skip.multivar++; continue; }
       let s1: string, s2: string;
       try { s1 = mjToSympy(p); s2 = mjToSympy(q); } catch { skip.untranslatable++; continue; }
-      try { if (/Error\(/.test(ce.box(p).toString()) || /Error\(/.test(ce.box(q).toString())) { skip.boxFail++; continue; } } catch { skip.boxFail++; continue; }
+      try { if (/Error\(/.test(ce.expr(p).toString()) || /Error\(/.test(ce.expr(q).toString())) { skip.boxFail++; continue; } } catch { skip.boxFail++; continue; }
       cases.push({ id: `${f}#${cases.length}`, file: f.replace('test_', ''), cat: isRes ? 'resultant' : 'gcd', op: isRes ? 'resultant' : 'gcd', arg: p, arg2: q, varName: vn, sympyExpr: s1, sympyExpr2: s2, tol: isRes ? 1e-4 : 1e-6 });
       continue;
     } else { skip.otherHead++; continue; }
@@ -177,7 +177,7 @@ for (const f of FILES) {
     if ([...symbolsOf(arg)].some((s) => s !== varName)) { skip.multivar++; continue; }
     let sympyExpr: string;
     try { sympyExpr = mjToSympy(arg); } catch { skip.untranslatable++; continue; }
-    try { if (/Error\(/.test(ce.box(arg).toString())) { skip.boxFail++; continue; } } catch { skip.boxFail++; continue; }
+    try { if (/Error\(/.test(ce.expr(arg).toString())) { skip.boxFail++; continue; } } catch { skip.boxFail++; continue; }
     cases.push({ id: `${f}#${cases.length}`, file: f.replace('test_', ''), cat: op, op, arg, varName, sympyExpr, point, a: aB, b: bB, tol });
   }
 }
@@ -189,7 +189,7 @@ console.error('Wester: %d statements, %d runnable cases (skips: %o)', stmtCount,
 // --- numeric reference (the invariant target) ------------------------------
 function refSamples(c: Case): (number | null)[] {
   if (c.op === 'solve' || c.op === 'gcd' || c.op === 'resultant') return []; // custom-graded below
-  const f = ce.box(c.arg);
+  const f = ce.expr(c.arg);
   if (c.op === 'integrate') return POINTS.map((p) => numAt(ce, f, c.varName, p));           // integrand
   if (c.op === 'diff') return POINTS.map((p) => {                                            // central difference
     const hi = numAt(ce, f, c.varName, p + H), lo = numAt(ce, f, c.varName, p - H);
@@ -223,26 +223,26 @@ function refSamples(c: Case): (number | null)[] {
 function runOn(engine: any, c: Case) {
   try {
     if (c.op === 'integrate') {
-      const build = () => engine.box(['Integrate', c.arg, ['Tuple', c.varName]]).evaluate();
+      const build = () => engine.expr(['Integrate', c.arg, ['Tuple', c.varName]]).evaluate();
       const timeMs = timeit(build);
       const F = build();
       if (F == null || F.operator === 'Integrate' || /\bint\(/.test(F.toString())) return { status: 'unsolved', text: F ? F.toString() : 'null', values: [], timeMs };
-      const dF = engine.box(['D', F, c.varName]).evaluate();
+      const dF = engine.expr(['D', F, c.varName]).evaluate();
       return { status: 'ok', text: F.toString(), values: POINTS.map((p) => numAt(engine, dF, c.varName, p)), timeMs };
     }
     if (c.op === 'defint') {
-      const build = () => engine.box(['Integrate', c.arg, ['Tuple', c.varName, c.a, c.b]]);
+      const build = () => engine.expr(['Integrate', c.arg, ['Tuple', c.varName, c.a, c.b]]);
       const timeMs = timeit(() => build().N());
       const v = numOf(build());
       return v == null ? { status: 'unsolved', text: build().toString(), values: [], timeMs } : { status: 'ok', text: build().N().toString(), values: [v], timeMs };
     }
     if (c.op === 'diff') {
-      const build = () => engine.box(['D', c.arg, c.varName]).evaluate();
+      const build = () => engine.expr(['D', c.arg, c.varName]).evaluate();
       const timeMs = timeit(build); const r = build();
       return { status: 'ok', text: r.toString(), values: POINTS.map((p) => numAt(engine, r, c.varName, p)), timeMs };
     }
     if (c.op === 'limit') {
-      const build = () => engine.box(['Limit', ['Function', c.arg, c.varName], c.point]);
+      const build = () => engine.expr(['Limit', ['Function', c.arg, c.varName], c.point]);
       const timeMs = timeit(() => build().N());
       const v = numOf(build());
       return v == null ? { status: 'unsolved', text: build().evaluate().toString(), values: [], timeMs } : { status: 'ok', text: build().N().toString(), values: [v], timeMs };
@@ -250,11 +250,11 @@ function runOn(engine: any, c: Case) {
     if (c.op === 'solve') {
       // The public API is the `.solve()` method (the `Solve` operator doesn't
       // auto-evaluate). It returns the *real* roots.
-      const build = () => engine.box(c.arg).solve(c.varName);
+      const build = () => engine.expr(c.arg).solve(c.varName);
       const timeMs = timeit(() => build());
       const roots: any[] = build() || [];
       if (!roots.length) return { status: 'unsolved', text: '[]', values: [], roots: [], timeMs };
-      const resid = engine.box(c.arg);
+      const resid = engine.expr(c.arg);
       const realRoots: number[] = [], resid_mag: number[] = [];
       for (const root of roots) {
         try {
@@ -268,20 +268,20 @@ function runOn(engine: any, c: Case) {
       return { status: 'ok', text: roots.map((r) => r.toString()).join(', '), values: resid_mag, roots: realRoots, timeMs };
     }
     if (c.op === 'gcd') {
-      const build = () => engine.box(['PolynomialGCD', c.arg, c.arg2, c.varName]).evaluate();
+      const build = () => engine.expr(['PolynomialGCD', c.arg, c.arg2, c.varName]).evaluate();
       const timeMs = timeit(build); const r = build();
       if (r.operator === 'PolynomialGCD' || /Error/.test(r.toString())) return { status: 'unsolved', text: r.toString(), values: [], timeMs };
       return { status: 'ok', text: r.toString(), values: POINTS.map((p) => numAt(engine, r, c.varName, p)), timeMs };
     }
     if (c.op === 'resultant') {
-      const build = () => engine.box(['Resultant', c.arg, c.arg2, c.varName]).evaluate();
+      const build = () => engine.expr(['Resultant', c.arg, c.arg2, c.varName]).evaluate();
       const timeMs = timeit(build); const r = build();
       if (r.operator === 'Resultant') return { status: 'unsolved', text: r.toString(), values: [], timeMs };
       const v = numOf(r);
       return v == null ? { status: 'unsolved', text: r.toString(), values: [], timeMs } : { status: 'ok', text: r.toString(), values: [v], timeMs };
     }
     const head = c.op === 'factor' ? 'Factor' : c.op === 'expand' ? 'Expand' : null;
-    const build = () => head ? engine.box([head, c.arg]).evaluate() : engine.box(c.arg).simplify();
+    const build = () => head ? engine.expr([head, c.arg]).evaluate() : engine.expr(c.arg).simplify();
     const timeMs = timeit(build); const r = build();
     return { status: 'ok', text: r.toString(), values: POINTS.map((p) => numAt(engine, r, c.varName, p)), timeMs };
   } catch (e: any) { return { status: 'error', error: String(e?.message ?? e).slice(0, 120) }; }
@@ -372,7 +372,7 @@ const rows = cases.map((c) => {
 });
 const hasRF = !!ceRF;
 if (process.env.WDEBUG) for (const r of rows)
-  console.error(`[${r.c.op}] ${r.c.id} arg=${ce.box(r.c.arg).toString().slice(0, 28)} | ref=${JSON.stringify(r.ref)} | CE ${r.ce.v.v} ${JSON.stringify(r.ce.res.values || [])} | SY ${r.sy.v.v} ${JSON.stringify(r.sy.res.values || [])}`);
+  console.error(`[${r.c.op}] ${r.c.id} arg=${ce.expr(r.c.arg).toString().slice(0, 28)} | ref=${JSON.stringify(r.ref)} | CE ${r.ce.v.v} ${JSON.stringify(r.ce.res.values || [])} | SY ${r.sy.v.v} ${JSON.stringify(r.sy.res.values || [])}`);
 
 // --- report -----------------------------------------------------------------
 const SYM: Record<string, string> = { correct: '✅', partial: '🟡', wrong: '❌', unsolved: '∅', error: '⚠️', inconclusive: '·', disagree: '≠', na: '—' };
@@ -422,7 +422,7 @@ w();
 w('| File | Op | Input | CE | ' + (hasRF ? 'CE+R/F | ' : '') + 'CE result |');
 w('|---|---|---|---|' + (hasRF ? '---|' : '') + '---|');
 for (const r of trails.slice(0, 60))
-  w(`| ${r.c.file} | ${r.c.cat} | \`${ce.box(r.c.arg).toString().slice(0, 28)}\` | ${SYM[r.ce.v.v]}${r.ce.v.note ? ' ' + r.ce.v.note : ''} | ` +
+  w(`| ${r.c.file} | ${r.c.cat} | \`${ce.expr(r.c.arg).toString().slice(0, 28)}\` | ${SYM[r.ce.v.v]}${r.ce.v.note ? ' ' + r.ce.v.note : ''} | ` +
     (hasRF ? `${SYM[r.rf.v.v] || '·'} | ` : '') + `\`${(r.ce.res.text || '').slice(0, 26)}\` |`);
 w();
 const disagrees = rows.filter((r) => r.ce.v.v === 'disagree');
@@ -434,7 +434,7 @@ if (disagrees.length) {
   w('| File | Op | Input | CE value | SymPy value |');
   w('|---|---|---|---|---|');
   for (const r of disagrees)
-    w(`| ${r.c.file} | ${r.c.cat} | \`${ce.box(r.c.arg).toString().slice(0, 26)}\` | ${r.ce.res.values?.[0]} | ${r.sy.res.values?.[0]} |`);
+    w(`| ${r.c.file} | ${r.c.cat} | \`${ce.expr(r.c.arg).toString().slice(0, 26)}\` | ${r.ce.res.values?.[0]} | ${r.sy.res.values?.[0]} |`);
   w();
 }
 w('---');

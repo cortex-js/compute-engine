@@ -8,10 +8,10 @@ import { multivariateGCD } from '../../src/compute-engine/boxed-expression/multi
 
 // A fresh engine: the shared test engine assigns single-letter symbols.
 const ce = new ComputeEngine();
-const expand = (s: string) => ce.box(['Expand', ce.parse(s)]).evaluate();
+const expand = (s: string) => ce.expr(['Expand', ce.parse(s)]).evaluate();
 const P = (s: string, vars: string[]) => mpolyFromBoxed(ce, ce.parse(s), vars)!;
 const same = (a: unknown, b: string) =>
-  (a as ReturnType<typeof ce.box>).isSame(expand(b));
+  (a as ReturnType<typeof ce.expr>).isSame(expand(b));
 
 describe('MPoly kernel', () => {
   test('round-trips a multivariate polynomial', () => {
@@ -64,7 +64,7 @@ describe("Brown's modular multivariate GCD", () => {
   // own soundness contract).
   const gcd = (a: string, b: string, vars: string[]) =>
     multivariateGCD(ce, expand(a), expand(b), vars);
-  const divides = (g: ReturnType<typeof ce.box>, s: string, vars: string[]) =>
+  const divides = (g: ReturnType<typeof ce.expr>, s: string, vars: string[]) =>
     MPoly.tryDivide(P(s, vars), mpolyFromBoxed(ce, g, vars)!) !== null;
 
   test.each([

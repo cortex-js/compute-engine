@@ -154,7 +154,7 @@ actually loads.
 
 **Validation:** port Fungrim's own strategy. `Expr.test()` validates entries by drawing
 random values satisfying the assumptions and checking numerically. The translator
-should round-trip every translated entry through CE (`ce.box(json)`) and spot-check a
+should round-trip every translated entry through CE (`ce.expr(json)`) and spot-check a
 numeric instance with `N()` where CE can evaluate it. This doubles as a giant fuzz
 corpus for CE itself — translating Fungrim will *find* CE bugs (the review already
 shows what that looks like).

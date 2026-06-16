@@ -1623,7 +1623,7 @@ describe('Tensor linear algebra regressions (REVIEW.md F1–F4)', () => {
     ...rows.map((r) => ['List', ...r] as Expression),
   ];
   const tensorOf = (m: Expression) => {
-    const e = ce.box(m).evaluate();
+    const e = ce.expr(m).evaluate();
     return isTensor(e) ? e.tensor : null;
   };
 
@@ -1634,7 +1634,7 @@ describe('Tensor linear algebra regressions (REVIEW.md F1–F4)', () => {
     test('3x3', () =>
       expect(
         ce
-          .box([
+          .expr([
             'Determinant',
             M([
               [1, 2, 3],
@@ -1648,7 +1648,7 @@ describe('Tensor linear algebra regressions (REVIEW.md F1–F4)', () => {
     test('4x4 block-diagonal stays exact (Bareiss, no float drift)', () =>
       expect(
         ce
-          .box([
+          .expr([
             'Determinant',
             M([
               [1, 2, 0, 0],
@@ -1663,7 +1663,7 @@ describe('Tensor linear algebra regressions (REVIEW.md F1–F4)', () => {
     test('4x4 general', () =>
       expect(
         ce
-          .box([
+          .expr([
             'Determinant',
             M([
               [3, 1, 1, 2],
@@ -1678,7 +1678,7 @@ describe('Tensor linear algebra regressions (REVIEW.md F1–F4)', () => {
     test('5x5 identity', () =>
       expect(
         ce
-          .box([
+          .expr([
             'Determinant',
             M([
               [1, 0, 0, 0, 0],
@@ -1694,7 +1694,7 @@ describe('Tensor linear algebra regressions (REVIEW.md F1–F4)', () => {
     test('singular 4x4 -> 0', () =>
       expect(
         ce
-          .box([
+          .expr([
             'Determinant',
             M([
               [1, 2, 3, 4],
@@ -1714,7 +1714,7 @@ describe('Tensor linear algebra regressions (REVIEW.md F1–F4)', () => {
     test('3x3', () =>
       expect(
         ce
-          .box([
+          .expr([
             'Inverse',
             M([
               [1, 2, 3],
@@ -1728,7 +1728,7 @@ describe('Tensor linear algebra regressions (REVIEW.md F1–F4)', () => {
     test('4x4 diagonal', () =>
       expect(
         ce
-          .box([
+          .expr([
             'Inverse',
             M([
               [2, 0, 0, 0],

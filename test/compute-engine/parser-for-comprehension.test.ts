@@ -88,7 +88,7 @@ describe('Parser: for-comprehensions', () => {
         ['Element', 'x', ['Range', 1, 2]],
         ['Element', 'y', ['Range', 3, 4]],
       ];
-      const expr = ce.box(ast);
+      const expr = ce.expr(ast);
       const latex = expr.toLatex();
       expect(latex).toContain('\\operatorname{for}');
       const reparsed = ce.parse(latex).json;
@@ -100,7 +100,7 @@ describe('Parser: for-comprehensions', () => {
       if (!ce.context.lexicalScope.bindings.has('L_1'))
         ce.declare('L_1', 'list<number>');
       const ast: any = ['Loop', ['Power', 'x', 2], ['Element', 'x', 'L_1']];
-      const expr = ce.box(ast);
+      const expr = ce.expr(ast);
       const latex = expr.toLatex();
       expect(latex).toContain('\\operatorname{for}');
       const reparsed = ce.parse(latex).json;

@@ -553,12 +553,12 @@ export function buildGuardClosures(
 ): ((sub: Sub) => boolean)[] {
   const boxGuardExpr = (x: MathJSON): Expression => {
     try {
-      const b = ce.box(x as never);
+      const b = ce.expr(x as never);
       if (b.isValid) return b;
     } catch {
       /* fall through to raw boxing */
     }
-    return ce.box(x as never, { form: 'raw' });
+    return ce.expr(x as never, { form: 'raw' });
   };
 
   return guards.map((g) => {
@@ -786,8 +786,8 @@ export function orientEntry(
         /* name collides with a CE built-in — tolerate (same as load.ts) */
       }
     }
-    const lhs = ce.box(sides.lhs as never);
-    const rhs = ce.box(sides.rhs as never);
+    const lhs = ce.expr(sides.lhs as never);
+    const rhs = ce.expr(sides.rhs as never);
     if (!lhs.isValid)
       return { error: 'box-error', detail: `invalid lhs: ${lhs.toString()}` };
     if (!rhs.isValid)
@@ -872,7 +872,7 @@ export function undirectedKey(
     // symbols, and those inferred types must not leak across entries.
     ce.pushScope();
     try {
-      const b = ce.box(s as never);
+      const b = ce.expr(s as never);
       return JSON.stringify(b.json);
     } catch {
       return JSON.stringify(s);
@@ -1008,7 +1008,7 @@ function selfTestScoped(
   //    — the M2 loader replicates this using the artifact's guard specs.
   let ruleSet: ReturnType<ComputeEngine['rules']>;
   try {
-    const replaceExpr = ce.box(replaceW as never);
+    const replaceExpr = ce.expr(replaceW as never);
     if (!replaceExpr.isValid)
       return {
         ok: false,
@@ -1025,7 +1025,7 @@ function selfTestScoped(
     ruleSet = ce.rules(
       [
         {
-          match: ce.box(matchW as never) as never,
+          match: ce.expr(matchW as never) as never,
           replace: replaceExpr as never,
           condition,
           id: 'fungrim:' + e.id,
@@ -1063,9 +1063,9 @@ function selfTestScoped(
 
   const fireTest = (subJson: Record<string, MathJSON>): { ok: boolean; detail?: string } => {
     try {
-      const inst = ce.box(substituteWildcards(matchW, subJson) as never);
+      const inst = ce.expr(substituteWildcards(matchW, subJson) as never);
       if (!inst.isValid) return { ok: false, detail: 'invalid instantiated match' };
-      const expected = ce.box(substituteWildcards(replaceW, subJson) as never);
+      const expected = ce.expr(substituteWildcards(replaceW, subJson) as never);
       if (!expected.isValid)
         return { ok: false, detail: 'invalid instantiated replace' };
       const result = inst.replace(ruleSet);
@@ -1110,7 +1110,7 @@ function selfTestScoped(
       try {
         if (g.k === 'cmp') {
           ce.assume(
-            ce.box([
+            ce.expr([
               CMP_TO_OPERATOR[g.op],
               substituteWildcards(g.wc, dewild),
               substituteWildcards(g.bound, dewild),
@@ -1121,7 +1121,7 @@ function selfTestScoped(
           // canonical boxing can collapse the part term (Re(s) → s for an
           // inferred-real s), destroying the constraint subject (Track-3).
           ce.assume(
-            ce.box(
+            ce.expr(
               [
                 CMP_TO_OPERATOR[g.op],
                 [PART_TO_OPERATOR[g.part], substituteWildcards(g.wc, dewild)],
@@ -1136,7 +1136,7 @@ function selfTestScoped(
           // assumption path (Track-3 stored-membership exact match) is the
           // self-test channel for these guards, by design.
           ce.assume(
-            ce.box(
+            ce.expr(
               [
                 'Element',
                 substituteWildcards(g.wc, dewild),
@@ -1148,7 +1148,7 @@ function selfTestScoped(
         } else if (g.k === 'ne') {
           // Track-3 disequality facts make isEqual definitively false
           ce.assume(
-            ce.box(
+            ce.expr(
               [
                 'NotEqual',
                 substituteWildcards(g.lhs, dewild),
@@ -1161,7 +1161,7 @@ function selfTestScoped(
           // Direct NotElement predicates (from SetMinus exclusions and
           // NotElement conjuncts) are assumable exclusion facts
           ce.assume(
-            ce.box(substituteWildcards(g.pred, dewild) as never, {
+            ce.expr(substituteWildcards(g.pred, dewild) as never, {
               canonical: false,
             })
           );
@@ -1171,7 +1171,7 @@ function selfTestScoped(
       }
     }
     const sub: Sub = {};
-    for (const v of e.variables) sub['_' + v] = ce.box(v);
+    for (const v of e.variables) sub['_' + v] = ce.expr(v);
     if (closures.every((f) => f(sub))) {
       const r = fireTest(dewild);
       if (r.ok) return { ok: true, sampleKind: 'symbolic' };
@@ -1215,7 +1215,7 @@ function selfTestScoped(
       }
       try {
         const value = numeric['_' + v];
-        if (value !== undefined) ce.assign(v, ce.box(value as never));
+        if (value !== undefined) ce.assign(v, ce.expr(value as never));
       } catch {
         /* unassignable — the guard check at match time decides */
       }
@@ -1257,15 +1257,15 @@ function selfTestScoped(
       const unconditioned = ce.rules(
         [
           {
-            match: ce.box(matchW as never) as never,
-            replace: ce.box(replaceW as never) as never,
+            match: ce.expr(matchW as never) as never,
+            replace: ce.expr(replaceW as never) as never,
             id: 'fungrim:' + e.id,
           },
         ],
         { canonical: true }
       );
-      const inst = ce.box(substituteWildcards(matchW, dewild) as never);
-      const expected = ce.box(substituteWildcards(replaceW, dewild) as never);
+      const inst = ce.expr(substituteWildcards(matchW, dewild) as never);
+      const expected = ce.expr(substituteWildcards(replaceW, dewild) as never);
       if (inst.isValid && expected.isValid) {
         const r = inst.replace(unconditioned);
         if (r !== null && (r.isSame(expected) || r.isEqual(expected) === true))
@@ -1310,7 +1310,7 @@ function findNumericSeed(
         ? COMPLEX_CANDIDATES
         : REAL_CANDIDATES
   );
-  const boxed = candidates.map((list) => list.map((c) => ce.box(c as never)));
+  const boxed = candidates.map((list) => list.map((c) => ce.expr(c as never)));
 
   let budget = 50_000; // guard-evaluation budget
   const seed: Record<string, MathJSON> = {};
@@ -1476,7 +1476,7 @@ export function compileEntries(
           /* tolerate */
         }
       }
-      const mc = ce.box(oriented.match as never);
+      const mc = ce.expr(oriented.match as never);
       if (!mc.isValid) {
         skip(e, 'box-error', `invalid canonical match: ${mc.toString()}`.slice(0, 160));
         continue;

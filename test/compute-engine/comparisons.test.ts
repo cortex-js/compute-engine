@@ -90,13 +90,13 @@ describe('Comparison correctness (REVIEW.md A1, A3)', () => {
   // equality, so unordered values like lists wrongly compared as <= / equal.
   test('A1: unordered lists do not compare as <= or equal', () => {
     const ce = new ComputeEngine();
-    const a = ce.box(['List', 1, 2]);
-    const b = ce.box(['List', 3, 4]);
+    const a = ce.expr(['List', 1, 2]);
+    const b = ce.expr(['List', 3, 4]);
     expect(a.isLessEqual(b)).toBeUndefined();
     expect(a.isLess(b)).toBeUndefined();
     expect(a.isEqual(b)).toBe(false);
     // identical lists are still equal
-    expect(ce.box(['List', 1, 2]).isEqual(['List', 1, 2])).toBe(true);
+    expect(ce.expr(['List', 1, 2]).isEqual(['List', 1, 2])).toBe(true);
   });
 
   // A3: strict/opposite predicates returned a definitive `false` for the
@@ -104,7 +104,7 @@ describe('Comparison correctness (REVIEW.md A1, A3)', () => {
   test('A3: indeterminate strict predicates return undefined', () => {
     const ce = new ComputeEngine();
     ce.assume(['GreaterEqual', 'y', 3]); // y >= 3
-    const y = ce.box('y');
+    const y = ce.expr('y');
     expect(y.isGreaterEqual(3)).toBe(true); // known: y >= 3
     expect(y.isLess(3)).toBe(false); // known false
     expect(y.isGreater(3)).toBeUndefined(); // y could be exactly 3
@@ -113,11 +113,11 @@ describe('Comparison correctness (REVIEW.md A1, A3)', () => {
 
   test('A3: definite orderings are unaffected', () => {
     const ce = new ComputeEngine();
-    expect(ce.box(5).isGreater(3)).toBe(true);
-    expect(ce.box(3).isGreater(5)).toBe(false);
-    expect(ce.box(3).isLessEqual(3)).toBe(true);
+    expect(ce.expr(5).isGreater(3)).toBe(true);
+    expect(ce.expr(3).isGreater(5)).toBe(false);
+    expect(ce.expr(3).isLessEqual(3)).toBe(true);
     ce.assume(['Greater', 'z', 10]); // z > 10
-    expect(ce.box('z').isGreater(3)).toBe(true);
+    expect(ce.expr('z').isGreater(3)).toBe(true);
   });
 
   // G14: cmp() derived '>' from "not equal and not less". For equal
@@ -129,9 +129,9 @@ describe('Comparison correctness (REVIEW.md A1, A3)', () => {
       describe(`at ${precision} precision`, () => {
         const ce = new ComputeEngine();
         ce.precision = precision;
-        const pinf = ce.box('PositiveInfinity');
-        const ninf = ce.box('NegativeInfinity');
-        const nan = ce.box('NaN');
+        const pinf = ce.expr('PositiveInfinity');
+        const ninf = ce.expr('NegativeInfinity');
+        const nan = ce.expr('NaN');
 
         test('strict self-comparison of equal infinities is false', () => {
           expect(ninf.isGreater(ninf)).toBe(false);
@@ -168,20 +168,20 @@ describe('Comparison correctness (REVIEW.md A1, A3)', () => {
           expect(nan.isLessEqual(nan)).toBeUndefined();
           expect(nan.isGreaterEqual(nan)).toBeUndefined();
           expect(pinf.isLess(nan)).toBeUndefined();
-          expect(ce.box(0).isGreater(nan)).toBeUndefined();
+          expect(ce.expr(0).isGreater(nan)).toBeUndefined();
         });
 
         test('infinity vs finite numbers', () => {
           expect(pinf.isGreater(1e308)).toBe(true);
           expect(ninf.isLess(-1e308)).toBe(true);
-          expect(ce.box(0).isLess(pinf)).toBe(true);
-          expect(ce.box(0).isGreater(ninf)).toBe(true);
+          expect(ce.expr(0).isLess(pinf)).toBe(true);
+          expect(ce.expr(0).isGreater(ninf)).toBe(true);
         });
 
         test('evaluated relational operators on equal infinities', () => {
           const ev = (op: string) =>
             ce
-              .box([op, 'NegativeInfinity', 'NegativeInfinity'])
+              .expr([op, 'NegativeInfinity', 'NegativeInfinity'])
               .evaluate()
               .symbol;
           expect(ev('Greater')).toBe('False');

@@ -23,7 +23,7 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
       const integrand = ce.parse(latex);
       const F = ce.parse(`\\int ${latex} \\, dx`).evaluate();
       expect(F.has('Integrate')).toBe(false); // a closed form, not inert
-      const dF = ce.box(['D', F, 'x']).evaluate();
+      const dF = ce.expr(['D', F, 'x']).evaluate();
       for (const x of [0.31, 0.73, 1.42]) {
         const a = dF.subs({ x }).N().re;
         const b = integrand.subs({ x }).N().re;
@@ -45,7 +45,7 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
       const integrand = ce.parse(latex);
       const F = ce.parse(`\\int ${latex} \\, dx`).evaluate();
       expect(F.has('Integrate')).toBe(false); // a closed form, not inert
-      const dF = ce.box(['D', F, 'x']).evaluate();
+      const dF = ce.expr(['D', F, 'x']).evaluate();
       for (const x of [0.31, 0.73, 1.42]) {
         const a = dF.subs({ x }).N().re;
         const b = integrand.subs({ x }).N().re;

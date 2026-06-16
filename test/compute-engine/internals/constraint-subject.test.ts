@@ -25,58 +25,58 @@ describe('subjectOf', () => {
   const ce = freshEngine();
 
   it('recognizes a bare symbol', () => {
-    expect(subjectOf(ce.box('x'))).toEqual({ symbol: 'x', part: 'self' });
+    expect(subjectOf(ce.expr('x'))).toEqual({ symbol: 'x', part: 'self' });
   });
 
   it('recognizes Real(z)', () => {
-    expect(subjectOf(ce.box(['Real', 'z']))).toEqual({
+    expect(subjectOf(ce.expr(['Real', 'z']))).toEqual({
       symbol: 'z',
       part: 're',
     });
   });
 
   it('recognizes Imaginary(tau)', () => {
-    expect(subjectOf(ce.box(['Imaginary', 'tau']))).toEqual({
+    expect(subjectOf(ce.expr(['Imaginary', 'tau']))).toEqual({
       symbol: 'tau',
       part: 'im',
     });
   });
 
   it('recognizes Abs(q)', () => {
-    expect(subjectOf(ce.box(['Abs', 'q']))).toEqual({
+    expect(subjectOf(ce.expr(['Abs', 'q']))).toEqual({
       symbol: 'q',
       part: 'abs',
     });
   });
 
   it('recognizes Argument(z)', () => {
-    expect(subjectOf(ce.box(['Argument', 'z']))).toEqual({
+    expect(subjectOf(ce.expr(['Argument', 'z']))).toEqual({
       symbol: 'z',
       part: 'arg',
     });
   });
 
   it('rejects Real of a compound expression', () => {
-    expect(subjectOf(ce.box(['Real', ['Add', 'z', 'w']]))).toBeUndefined();
+    expect(subjectOf(ce.expr(['Real', ['Add', 'z', 'w']]))).toBeUndefined();
   });
 
   it('rejects nested part extractors', () => {
-    expect(subjectOf(ce.box(['Abs', ['Real', 'z']]))).toBeUndefined();
+    expect(subjectOf(ce.expr(['Abs', ['Real', 'z']]))).toBeUndefined();
   });
 
   it('rejects Abs of a literal', () => {
     // Use a non-canonical box so Abs(-2) is not folded to 2
     expect(
-      subjectOf(ce.box(['Abs', -2], { canonical: false }))
+      subjectOf(ce.expr(['Abs', -2], { canonical: false }))
     ).toBeUndefined();
   });
 
   it('rejects a number literal', () => {
-    expect(subjectOf(ce.box(42))).toBeUndefined();
+    expect(subjectOf(ce.expr(42))).toBeUndefined();
   });
 
   it('rejects other function expressions', () => {
-    expect(subjectOf(ce.box(['Sin', 'x']))).toBeUndefined();
+    expect(subjectOf(ce.expr(['Sin', 'x']))).toBeUndefined();
   });
 });
 
@@ -91,10 +91,10 @@ describe('subjectKey', () => {
 
   it('round-trips through subjectOf', () => {
     const ce = freshEngine();
-    const s = subjectOf(ce.box(['Real', 's']))!;
+    const s = subjectOf(ce.expr(['Real', 's']))!;
     expect(subjectKey(s)).toBe('re:s');
     // Same expression boxed again yields the same key
-    expect(subjectKey(subjectOf(ce.box(['Real', 's']))!)).toBe('re:s');
+    expect(subjectKey(subjectOf(ce.expr(['Real', 's']))!)).toBe('re:s');
   });
 });
 
@@ -112,11 +112,11 @@ describe('toSubject / matchesSubject', () => {
 
   it('matchesSubject matches the exact subject term only', () => {
     const re_s = { symbol: 's', part: 're' } as const;
-    expect(matchesSubject(ce.box(['Real', 's']), re_s)).toBe(true);
-    expect(matchesSubject(ce.box(['Imaginary', 's']), re_s)).toBe(false);
-    expect(matchesSubject(ce.box(['Real', 't']), re_s)).toBe(false);
-    expect(matchesSubject(ce.box('s'), re_s)).toBe(false);
-    expect(matchesSubject(ce.box('s'), { symbol: 's', part: 'self' })).toBe(
+    expect(matchesSubject(ce.expr(['Real', 's']), re_s)).toBe(true);
+    expect(matchesSubject(ce.expr(['Imaginary', 's']), re_s)).toBe(false);
+    expect(matchesSubject(ce.expr(['Real', 't']), re_s)).toBe(false);
+    expect(matchesSubject(ce.expr('s'), re_s)).toBe(false);
+    expect(matchesSubject(ce.expr('s'), { symbol: 's', part: 'self' })).toBe(
       true
     );
   });
@@ -125,7 +125,7 @@ describe('toSubject / matchesSubject', () => {
 describe('getInequalityBoundsFromAssumptions (symbol overload, unchanged)', () => {
   it('extracts a lower bound from x > 4', () => {
     const ce = freshEngine();
-    ce.assume(ce.box(['Greater', 'x', 4]));
+    ce.assume(ce.expr(['Greater', 'x', 4]));
     const bounds = getInequalityBoundsFromAssumptions(ce, 'x');
     expect(bounds.lower?.isSame(4)).toBe(true);
     expect(bounds.lowerStrict).toBe(true);
@@ -134,7 +134,7 @@ describe('getInequalityBoundsFromAssumptions (symbol overload, unchanged)', () =
 
   it('extracts an upper bound from x <= 10', () => {
     const ce = freshEngine();
-    ce.assume(ce.box(['LessEqual', 'x', 10]));
+    ce.assume(ce.expr(['LessEqual', 'x', 10]));
     const bounds = getInequalityBoundsFromAssumptions(ce, 'x');
     expect(bounds.upper?.isSame(10)).toBe(true);
     expect(bounds.upperStrict).toBe(false);
@@ -143,7 +143,7 @@ describe('getInequalityBoundsFromAssumptions (symbol overload, unchanged)', () =
 
   it('extracts a zero lower bound from x > 0', () => {
     const ce = freshEngine();
-    ce.assume(ce.box(['Greater', 'x', 0]));
+    ce.assume(ce.expr(['Greater', 'x', 0]));
     const bounds = getInequalityBoundsFromAssumptions(ce, 'x');
     expect(bounds.lower?.isSame(0)).toBe(true);
     expect(bounds.lowerStrict).toBe(true);
@@ -151,8 +151,8 @@ describe('getInequalityBoundsFromAssumptions (symbol overload, unchanged)', () =
 
   it('keeps the tightest bound', () => {
     const ce = freshEngine();
-    ce.assume(ce.box(['Greater', 'x', 2]));
-    ce.assume(ce.box(['Greater', 'x', 5]));
+    ce.assume(ce.expr(['Greater', 'x', 2]));
+    ce.assume(ce.expr(['Greater', 'x', 5]));
     const bounds = getInequalityBoundsFromAssumptions(ce, 'x');
     expect(bounds.lower?.isSame(5)).toBe(true);
   });
@@ -168,7 +168,7 @@ describe('getInequalityBoundsFromAssumptions (subject overload)', () => {
     const ce = freshEngine();
     // Re(s) > 1, normalized as Less(1 - Real(s), 0)
     ce.context.assumptions.set(
-      ce.box(['Less', ['Subtract', 1, ['Real', 's']], 0]),
+      ce.expr(['Less', ['Subtract', 1, ['Real', 's']], 0]),
       true
     );
     const bounds = getInequalityBoundsFromAssumptions(ce, {
@@ -184,7 +184,7 @@ describe('getInequalityBoundsFromAssumptions (subject overload)', () => {
     const ce = freshEngine();
     // Abs(q) < 1, normalized as Less(Abs(q) - 1, 0)
     ce.context.assumptions.set(
-      ce.box(['Less', ['Subtract', ['Abs', 'q'], 1], 0]),
+      ce.expr(['Less', ['Subtract', ['Abs', 'q'], 1], 0]),
       true
     );
     const bounds = getInequalityBoundsFromAssumptions(ce, {
@@ -200,7 +200,7 @@ describe('getInequalityBoundsFromAssumptions (subject overload)', () => {
     const ce = freshEngine();
     // Im(tau) > 0, normalized as Less(Negate(Imaginary(tau)), 0)
     ce.context.assumptions.set(
-      ce.box(['Less', ['Negate', ['Imaginary', 'tau']], 0]),
+      ce.expr(['Less', ['Negate', ['Imaginary', 'tau']], 0]),
       true
     );
     const bounds = getInequalityBoundsFromAssumptions(ce, {
@@ -214,7 +214,7 @@ describe('getInequalityBoundsFromAssumptions (subject overload)', () => {
   it('part facts do not leak to the bare symbol (and vice versa)', () => {
     const ce = freshEngine();
     ce.context.assumptions.set(
-      ce.box(['Less', ['Subtract', 1, ['Real', 's']], 0]),
+      ce.expr(['Less', ['Subtract', 1, ['Real', 's']], 0]),
       true
     );
     // No facts about `s` itself
@@ -227,7 +227,7 @@ describe('getInequalityBoundsFromAssumptions (subject overload)', () => {
 
   it('a self subject behaves like the string overload', () => {
     const ce = freshEngine();
-    ce.assume(ce.box(['Greater', 'x', 4]));
+    ce.assume(ce.expr(['Greater', 'x', 4]));
     const viaString = getInequalityBoundsFromAssumptions(ce, 'x');
     const viaSubject = getInequalityBoundsFromAssumptions(ce, {
       symbol: 'x',
@@ -241,19 +241,19 @@ describe('getInequalityBoundsFromAssumptions (subject overload)', () => {
 describe('getSignFromAssumptions (symbol overload, unchanged)', () => {
   it('x > 0 implies positive', () => {
     const ce = freshEngine();
-    ce.assume(ce.box(['Greater', 'x', 0]));
+    ce.assume(ce.expr(['Greater', 'x', 0]));
     expect(getSignFromAssumptions(ce, 'x')).toBe('positive');
   });
 
   it('x <= 0 implies non-positive', () => {
     const ce = freshEngine();
-    ce.assume(ce.box(['LessEqual', 'x', 0]));
+    ce.assume(ce.expr(['LessEqual', 'x', 0]));
     expect(getSignFromAssumptions(ce, 'x')).toBe('non-positive');
   });
 
   it('x > 4 implies positive', () => {
     const ce = freshEngine();
-    ce.assume(ce.box(['Greater', 'x', 4]));
+    ce.assume(ce.expr(['Greater', 'x', 4]));
     expect(getSignFromAssumptions(ce, 'x')).toBe('positive');
   });
 
@@ -267,7 +267,7 @@ describe('getSignFromAssumptions (subject overload)', () => {
   it('Im(tau) > 0 implies Imaginary(tau) is positive', () => {
     const ce = freshEngine();
     ce.context.assumptions.set(
-      ce.box(['Less', ['Negate', ['Imaginary', 'tau']], 0]),
+      ce.expr(['Less', ['Negate', ['Imaginary', 'tau']], 0]),
       true
     );
     expect(getSignFromAssumptions(ce, { symbol: 'tau', part: 'im' })).toBe(
@@ -280,7 +280,7 @@ describe('getSignFromAssumptions (subject overload)', () => {
   it('Re(s) > 1 implies Real(s) is positive', () => {
     const ce = freshEngine();
     ce.context.assumptions.set(
-      ce.box(['Less', ['Subtract', 1, ['Real', 's']], 0]),
+      ce.expr(['Less', ['Subtract', 1, ['Real', 's']], 0]),
       true
     );
     expect(getSignFromAssumptions(ce, { symbol: 's', part: 're' })).toBe(
@@ -290,7 +290,7 @@ describe('getSignFromAssumptions (subject overload)', () => {
 
   it('Real(s) <= 0 implies Real(s) is non-positive', () => {
     const ce = freshEngine();
-    ce.context.assumptions.set(ce.box(['LessEqual', ['Real', 's'], 0]), true);
+    ce.context.assumptions.set(ce.expr(['LessEqual', ['Real', 's'], 0]), true);
     expect(getSignFromAssumptions(ce, { symbol: 's', part: 're' })).toBe(
       'non-positive'
     );
@@ -309,7 +309,7 @@ describe('fact index', () => {
 
   it('returns the same cached object when nothing changed', () => {
     const ce = freshEngine();
-    ce.assume(ce.box(['Greater', 'x', 4]));
+    ce.assume(ce.expr(['Greater', 'x', 4]));
     const idx1 = getFactIndex(ce);
     const idx2 = getFactIndex(ce);
     expect(idx2).toBe(idx1);
@@ -318,9 +318,9 @@ describe('fact index', () => {
 
   it('is rebuilt after a new assumption', () => {
     const ce = freshEngine();
-    ce.assume(ce.box(['Greater', 'x', 4]));
+    ce.assume(ce.expr(['Greater', 'x', 4]));
     const idx1 = getFactIndex(ce);
-    ce.assume(ce.box(['Less', 'y', 0]));
+    ce.assume(ce.expr(['Less', 'y', 0]));
     const idx2 = getFactIndex(ce);
     expect(idx2).not.toBe(idx1);
     expect(idx2.bySubject.get('self:y')?.bounds.upper?.isSame(0)).toBe(true);
@@ -330,12 +330,12 @@ describe('fact index', () => {
 
   it('is rebuilt after a direct insertion into the assumptions map', () => {
     const ce = freshEngine();
-    ce.assume(ce.box(['Greater', 'x', 4]));
+    ce.assume(ce.expr(['Greater', 'x', 4]));
     const idx1 = getFactIndex(ce);
     // Direct .set() does not bump the generation counter; the index relies
     // on the entry count to detect this kind of mutation.
     ce.context.assumptions.set(
-      ce.box(['Less', ['Subtract', 1, ['Real', 's']], 0]),
+      ce.expr(['Less', ['Subtract', 1, ['Real', 's']], 0]),
       true
     );
     const idx2 = getFactIndex(ce);
@@ -346,11 +346,11 @@ describe('fact index', () => {
   it('indexes NotEqual facts by subject', () => {
     const ce = freshEngine();
     ce.context.assumptions.set(
-      ce.box(['NotEqual', 'z', 0], { canonical: false }),
+      ce.expr(['NotEqual', 'z', 0], { canonical: false }),
       true
     );
     ce.context.assumptions.set(
-      ce.box(['NotEqual', ['Real', 's'], 1], { canonical: false }),
+      ce.expr(['NotEqual', ['Real', 's'], 1], { canonical: false }),
       true
     );
     const idx = getFactIndex(ce);
@@ -365,11 +365,11 @@ describe('fact index', () => {
   it('indexes Element/NotElement membership facts by symbol', () => {
     const ce = freshEngine();
     ce.context.assumptions.set(
-      ce.box(['Element', 'x', 'AlgebraicNumbers'], { canonical: false }),
+      ce.expr(['Element', 'x', 'AlgebraicNumbers'], { canonical: false }),
       true
     );
     ce.context.assumptions.set(
-      ce.box(['NotElement', 'x', 'RealNumbers'], { canonical: false }),
+      ce.expr(['NotElement', 'x', 'RealNumbers'], { canonical: false }),
       true
     );
     const idx = getFactIndex(ce);
@@ -383,11 +383,11 @@ describe('fact index', () => {
   it('merges bounds from multiple assumptions on the same subject', () => {
     const ce = freshEngine();
     ce.context.assumptions.set(
-      ce.box(['Less', ['Subtract', 1, ['Real', 's']], 0]),
+      ce.expr(['Less', ['Subtract', 1, ['Real', 's']], 0]),
       true
     );
     ce.context.assumptions.set(
-      ce.box(['Less', ['Subtract', ['Real', 's'], 10], 0]),
+      ce.expr(['Less', ['Subtract', ['Real', 's'], 10], 0]),
       true
     );
     const bounds = getInequalityBoundsFromAssumptions(ce, {
@@ -400,9 +400,9 @@ describe('fact index', () => {
 
   it('returns a fresh copy of bounds (no aliasing of the index)', () => {
     const ce = freshEngine();
-    ce.assume(ce.box(['Greater', 'x', 4]));
+    ce.assume(ce.expr(['Greater', 'x', 4]));
     const bounds = getInequalityBoundsFromAssumptions(ce, 'x');
-    bounds.lower = ce.box(99);
+    bounds.lower = ce.expr(99);
     const again = getInequalityBoundsFromAssumptions(ce, 'x');
     expect(again.lower?.isSame(4)).toBe(true);
   });
@@ -412,7 +412,7 @@ describe('scope behavior', () => {
   it('assumptions made in a pushed scope disappear on pop', () => {
     const ce = freshEngine();
     ce.pushScope();
-    ce.assume(ce.box(['Greater', 'q', 2]));
+    ce.assume(ce.expr(['Greater', 'q', 2]));
     expect(
       getInequalityBoundsFromAssumptions(ce, 'q').lower?.isSame(2)
     ).toBe(true);
@@ -424,7 +424,7 @@ describe('scope behavior', () => {
     const ce = freshEngine();
     ce.pushScope();
     ce.context.assumptions.set(
-      ce.box(['Less', ['Subtract', 1, ['Real', 's']], 0]),
+      ce.expr(['Less', ['Subtract', 1, ['Real', 's']], 0]),
       true
     );
     expect(
@@ -441,7 +441,7 @@ describe('scope behavior', () => {
 
   it('parent-scope assumptions are visible in a child scope', () => {
     const ce = freshEngine();
-    ce.assume(ce.box(['Greater', 'x', 4]));
+    ce.assume(ce.expr(['Greater', 'x', 4]));
     ce.pushScope();
     expect(
       getInequalityBoundsFromAssumptions(ce, 'x').lower?.isSame(4)
@@ -451,9 +451,9 @@ describe('scope behavior', () => {
 
   it('forget removes facts about a symbol, including part facts', () => {
     const ce = freshEngine();
-    ce.assume(ce.box(['Greater', 'x', 4]));
+    ce.assume(ce.expr(['Greater', 'x', 4]));
     ce.context.assumptions.set(
-      ce.box(['Less', ['Subtract', 1, ['Real', 'x']], 0]),
+      ce.expr(['Less', ['Subtract', 1, ['Real', 'x']], 0]),
       true
     );
     expect(
@@ -480,7 +480,7 @@ describe('scope behavior', () => {
     const ce = freshEngine();
     ce.pushScope();
     ce.context.assumptions.set(
-      ce.box(['Less', ['Negate', ['Imaginary', 'tau']], 0]),
+      ce.expr(['Less', ['Negate', ['Imaginary', 'tau']], 0]),
       true
     );
     expect(getSignFromAssumptions(ce, { symbol: 'tau', part: 'im' })).toBe(

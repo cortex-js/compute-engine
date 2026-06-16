@@ -5,7 +5,7 @@ const ce = new ComputeEngine();
 console.log('Testing the original playground expression...');
 
 // Test the original expression from playground
-const result = ce.box([
+const result = ce.expr([
   'Take',
   ['Filter', ['Range', 'PositiveInfinity'], ['GreaterThan', '_', 10]],
   5,

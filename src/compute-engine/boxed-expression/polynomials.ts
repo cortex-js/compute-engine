@@ -703,8 +703,8 @@ function multivariateBinaryGCD(
   b: Expression
 ): Expression | undefined {
   const ce = a.engine;
-  const ae = ce.box(['Expand', a]).evaluate();
-  const be = ce.box(['Expand', b]).evaluate();
+  const ae = ce.expr(['Expand', a]).evaluate();
+  const be = ce.expr(['Expand', b]).evaluate();
 
   const termCount = (e: Expression) =>
     isFunction(e, 'Add') ? e.ops.length : 1;

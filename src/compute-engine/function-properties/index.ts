@@ -22,7 +22,7 @@ import type { IComputeEngine } from '../types-engine';
 import type { Expression, ExpressionInput } from '../types-expression';
 
 /** A single analytic-property record for an operator. The MathJSON fields are
- * raw (as translated from Fungrim); box them with `ce.box` to query. */
+ * raw (as translated from Fungrim); box them with `ce.expr` to query. */
 export interface FunctionPropertyRecord {
   /** The Fungrim entry id (provenance). */
   readonly id: string;
@@ -101,7 +101,7 @@ class FunctionPropertiesImpl implements FunctionProperties {
     const raw = rec?.[field];
     if (raw != null) {
       try {
-        const b = this.ce.box(raw);
+        const b = this.ce.expr(raw);
         if (b.isValid) result = b;
       } catch {
         result = undefined;
@@ -227,7 +227,7 @@ function isOnPoleSet(
   // no poles): membership by structural equality.
   if (Array.isArray(value) && value[0] === 'Set') {
     for (let i = 1; i < value.length; i++)
-      if (arg.isSame(ce.box(value[i] as ExpressionInput))) return true;
+      if (arg.isSame(ce.expr(value[i] as ExpressionInput))) return true;
     return false;
   }
   // Named set / domain (e.g. `NonPositiveIntegers`): require a definitive
@@ -236,7 +236,7 @@ function isOnPoleSet(
   try {
     return (
       ce
-        .function('Element', [arg, ce.box(value)])
+        .function('Element', [arg, ce.expr(value)])
         .evaluate()
         .valueOf() === true
     );

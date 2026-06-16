@@ -73,7 +73,7 @@ describe('A6 polish — Repeat arity', () => {
 
   test('Repeat with large count stays unevaluated (lazy access still works)', () => {
     const ce = new ComputeEngine();
-    const expr = ce.box(['Repeat', 5, 100000]).evaluate();
+    const expr = ce.expr(['Repeat', 5, 100000]).evaluate();
     // Did not materialize a huge list.
     expect(expr.operator).toEqual('Repeat');
     expect(expr.ops?.length).toEqual(2);
@@ -81,7 +81,7 @@ describe('A6 polish — Repeat arity', () => {
 
   test('Repeat with count at the cap still materializes', () => {
     const ce = new ComputeEngine();
-    const expr = ce.box(['Repeat', 5, 10000]).evaluate();
+    const expr = ce.expr(['Repeat', 5, 10000]).evaluate();
     expect(expr.operator).toEqual('List');
     expect(expr.ops?.length).toEqual(10000);
   });
@@ -105,7 +105,7 @@ describe('A6 polish — operatorInfo gaps', () => {
 
   test('Length on a non-collection returns unevaluated', () => {
     const ce = new ComputeEngine();
-    const expr = ce.box(['Length', 5]).evaluate();
+    const expr = ce.expr(['Length', 5]).evaluate();
     // Either stays unevaluated as ['Length', 5], or is an error expression.
     // Critical: it must NOT be a finite integer result like 0 or NaN.
     expect(expr.operator === 'Length' || expr.operator === 'Error').toBe(true);
@@ -121,7 +121,7 @@ describe('A6 polish — operatorInfo gaps', () => {
     const ce = new ComputeEngine();
     ce.declare('L', 'list<number>');
     ce.assign('L', ['List', 1, 2, 3]);
-    const expr = ce.box(['Length', 'L']).evaluate();
+    const expr = ce.expr(['Length', 'L']).evaluate();
     expect(expr.json).toEqual(3);
   });
 });

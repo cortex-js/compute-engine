@@ -302,13 +302,13 @@ describe('TIMEOUT', () => {
       // remainder coefficients (exact radicals) grow without bound —
       // observed running for minutes before the deadline check.
       const num = ce
-        .box([
+        .expr([
           'Expand',
           ['Power', ['Add', ['Multiply', ['Sqrt', 2], 'x'], ['Sqrt', 3]], 9],
         ])
         .evaluate();
       const den = ce
-        .box([
+        .expr([
           'Expand',
           ['Power', ['Add', ['Multiply', ['Sqrt', 2], 'x'], ['Sqrt', 5]], 8],
         ])
@@ -323,13 +323,13 @@ describe('TIMEOUT', () => {
 
     it('deadline is reset after simplify timeout', () => {
       const num = ce
-        .box([
+        .expr([
           'Expand',
           ['Power', ['Add', ['Multiply', ['Sqrt', 2], 'x'], ['Sqrt', 3]], 9],
         ])
         .evaluate();
       const den = ce
-        .box([
+        .expr([
           'Expand',
           ['Power', ['Add', ['Multiply', ['Sqrt', 2], 'x'], ['Sqrt', 5]], 8],
         ])

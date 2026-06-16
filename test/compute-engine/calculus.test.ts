@@ -452,10 +452,10 @@ describe('INDEFINITE INTEGRATION', () => {
       engine.timeLimit = timeLimit;
       try {
         const integrand = engine.parse(latex);
-        const F = engine.box(['Integrate', integrand, 'x']).evaluate();
+        const F = engine.expr(['Integrate', integrand, 'x']).evaluate();
         expect(F.has('Integrate')).toBe(false); // a closed form, not inert
         expect(F.is(0)).toBe(false); // never the spurious 0
-        const dF = engine.box(['D', F, 'x']).evaluate();
+        const dF = engine.expr(['D', F, 'x']).evaluate();
         for (const x of [0.3, 1.7, -0.6, 2.3]) {
           const a = dF.subs({ x }).N().re;
           const b = integrand.subs({ x }).N().re;
@@ -482,9 +482,9 @@ describe('INDEFINITE INTEGRATION', () => {
   describe('powers and radicals of a linear function', () => {
     const verify = (latex: string) => {
       const integrand = engine.parse(latex);
-      const F = engine.box(['Integrate', integrand, 'x']).evaluate();
+      const F = engine.expr(['Integrate', integrand, 'x']).evaluate();
       expect(F.has('Integrate')).toBe(false);
-      const dF = engine.box(['D', F, 'x']).evaluate();
+      const dF = engine.expr(['D', F, 'x']).evaluate();
       for (const x of [0.21, 0.53, 1.34, 2.07]) {
         const a = dF.subs({ x }).N().re;
         const b = integrand.subs({ x }).N().re;
@@ -505,9 +505,9 @@ describe('INDEFINITE INTEGRATION', () => {
   describe('radical reverse-chain and radical-sum rationalization', () => {
     const verify = (latex: string) => {
       const integrand = engine.parse(latex);
-      const F = engine.box(['Integrate', integrand, 'x']).evaluate();
+      const F = engine.expr(['Integrate', integrand, 'x']).evaluate();
       expect(F.has('Integrate')).toBe(false);
-      const dF = engine.box(['D', F, 'x']).evaluate();
+      const dF = engine.expr(['D', F, 'x']).evaluate();
       for (const x of [0.21, 0.43, 0.84, 1.27]) {
         const a = dF.subs({ x }).N().re;
         const b = integrand.subs({ x }).N().re;
@@ -528,7 +528,7 @@ describe('INDEFINITE INTEGRATION', () => {
     // Symbolic radical sum matches the closed form (no numeric verification).
     test('∫1/(√(a+bx)+√(c+bx)) dx is closed', () => {
       const F = engine
-        .box(['Integrate', engine.parse('\\frac{1}{\\sqrt{a+bx}+\\sqrt{c+bx}}'), 'x'])
+        .expr(['Integrate', engine.parse('\\frac{1}{\\sqrt{a+bx}+\\sqrt{c+bx}}'), 'x'])
         .evaluate();
       expect(F.has('Integrate')).toBe(false);
     });
@@ -665,10 +665,10 @@ describe('ROADMAP B2: fractional powers and exact partial-fraction coefficients'
   // resolvent cubic needs casus-irreducibilis radicals), so it stays on the
   // numeric fallback — value-correct, just not in exact radical form.
   test('∫1/(x⁴+x+1) dx stays on the numeric fallback (still value-correct)', () => {
-    const F = engine.box(['Integrate', engine.parse('\\frac{1}{x^4+x+1}'), 'x']);
+    const F = engine.expr(['Integrate', engine.parse('\\frac{1}{x^4+x+1}'), 'x']);
     const result = F.evaluate();
     expect(result.has('Integrate')).toBe(false);
-    const dF = engine.box(['D', result.json as any, 'x']).evaluate();
+    const dF = engine.expr(['D', result.json as any, 'x']).evaluate();
     for (const xv of [0.3, 2.5, -1.7]) {
       const got = dF.subs({ x: xv }).N().re;
       const want = engine.parse('\\frac{1}{x^4+x+1}').subs({ x: xv }).N().re;
@@ -689,7 +689,7 @@ describe('ROADMAP B2: non-elementary & radical integrals (leftovers)', () => {
     try {
       const integrand = ce.parse(integrandLatex);
       const dAnti = ce
-        .box(['D', ce.parse(antiderivLatex), 'x'])
+        .expr(['D', ce.parse(antiderivLatex), 'x'])
         .evaluate();
       for (const xv of sample) {
         const a = dAnti.subs({ x: xv }).N().re;
@@ -903,10 +903,10 @@ describe('INTEGRATION REGRESSIONS (Rubi Phase-0 findings)', () => {
     integrand: any,
     points: Record<string, number>[]
   ) {
-    const F = engine.box(['Integrate', integrand, 'x']).evaluate();
+    const F = engine.expr(['Integrate', integrand, 'x']).evaluate();
     expect(F.has('Integrate')).toBe(false);
-    const dF = engine.box(['D', F.json as any, 'x']).evaluate();
-    const f = engine.box(integrand);
+    const dF = engine.expr(['D', F.json as any, 'x']).evaluate();
+    const f = engine.expr(integrand);
     for (const pt of points) {
       const got = dF.subs(pt).N().re;
       const want = f.subs(pt).N().re;
@@ -1001,14 +1001,14 @@ describe('INTEGRATION REGRESSIONS (Rubi Phase-0 findings)', () => {
     ];
     for (const c of cases) {
       // Must not throw RangeError — inert results are acceptable
-      expect(() => engine.box(['Integrate', c, 'x']).evaluate()).not.toThrow();
+      expect(() => engine.expr(['Integrate', c, 'x']).evaluate()).not.toThrow();
     }
   });
 
   test('cancelCommonFactors does not cancel with a bogus GCD', () => {
     // gcd(a + bx⁴, x⁶) incorrectly returned x⁴ + a/b when the Euclid
     // remainder had parameter-divided coefficients
-    const e = engine.box([
+    const e = engine.expr([
       'Divide',
       ['Add', 'a', ['Multiply', 'b', ['Power', 'x', 4]]],
       ['Power', 'x', 6],
@@ -1147,25 +1147,25 @@ describe('isFinite propagation (B3 latent finiteness gap)', () => {
   test('finite symbolic constants are known finite', () => {
     expect(engine.parse('\\sqrt{\\pi}').isFinite).toBe(true);
     expect(engine.parse('\\frac{1}{\\pi}').isFinite).toBe(true);
-    expect(engine.box(['Power', 'Pi', ['Rational', 1, 3]]).isFinite).toBe(true);
-    expect(engine.box(['Power', 'Pi', 2]).isFinite).toBe(true);
-    expect(engine.box(['Power', 'Pi', 'Pi']).isFinite).toBe(true);
-    expect(engine.box(['Power', 2, 1000]).isFinite).toBe(true);
+    expect(engine.expr(['Power', 'Pi', ['Rational', 1, 3]]).isFinite).toBe(true);
+    expect(engine.expr(['Power', 'Pi', 2]).isFinite).toBe(true);
+    expect(engine.expr(['Power', 'Pi', 'Pi']).isFinite).toBe(true);
+    expect(engine.expr(['Power', 2, 1000]).isFinite).toBe(true);
   });
 
   test('non-finite operands are not reported finite', () => {
-    expect(engine.box(['Sqrt', engine.PositiveInfinity]).isFinite).toBe(false);
+    expect(engine.expr(['Sqrt', engine.PositiveInfinity]).isFinite).toBe(false);
     // ∞/π is +∞ (handled by the divide rule), hence not finite.
     expect(
-      engine.box(['Divide', engine.PositiveInfinity, 'Pi']).isFinite
+      engine.expr(['Divide', engine.PositiveInfinity, 'Pi']).isFinite
     ).toBe(false);
   });
 
   test('cases without a definite verdict stay undefined (conservative)', () => {
     // Free variable x: could be infinite, zero, etc. — finiteness unknown.
-    expect(engine.box(['Divide', 1, 'x']).isFinite).toBeUndefined();
-    expect(engine.box(['Power', 'x', 2]).isFinite).toBeUndefined();
-    expect(engine.box(['Power', 'Pi', 'x']).isFinite).toBeUndefined();
+    expect(engine.expr(['Divide', 1, 'x']).isFinite).toBeUndefined();
+    expect(engine.expr(['Power', 'x', 2]).isFinite).toBeUndefined();
+    expect(engine.expr(['Power', 'Pi', 'x']).isFinite).toBeUndefined();
   });
 });
 

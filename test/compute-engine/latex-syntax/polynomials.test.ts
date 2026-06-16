@@ -148,7 +148,7 @@ describe('RESULTANT', () => {
     const B = 'x - 3';
     const C = '2x^2 - x + 4';
     const lhs = engine
-      .box([
+      .expr([
         'Resultant',
         engine.parse(`(${A})(${B})`).evaluate(),
         engine.parse(C),
@@ -156,10 +156,10 @@ describe('RESULTANT', () => {
       ])
       .evaluate();
     const rhs = engine
-      .box(['Resultant', engine.parse(A), engine.parse(C), 'x'])
+      .expr(['Resultant', engine.parse(A), engine.parse(C), 'x'])
       .evaluate()
       .mul(
-        engine.box(['Resultant', engine.parse(B), engine.parse(C), 'x']).evaluate()
+        engine.expr(['Resultant', engine.parse(B), engine.parse(C), 'x']).evaluate()
       );
     expect(lhs.isSame(rhs)).toBe(true);
   });

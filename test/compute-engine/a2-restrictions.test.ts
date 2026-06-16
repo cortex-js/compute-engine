@@ -177,20 +177,20 @@ describe('A2 — Multi-restriction GLSL verification', () => {
 describe('A2 — When(e, False) masking rule', () => {
   test('When(e, False) evaluates to Undefined', () => {
     const ce = new ComputeEngine();
-    const expr = ce.box(['When', 42, 'False']);
+    const expr = ce.expr(['When', 42, 'False']);
     expect(expr.evaluate().symbol).toEqual('Undefined');
   });
 
   test('When(e, True) evaluates to e', () => {
     const ce = new ComputeEngine();
-    const expr = ce.box(['When', 42, 'True']);
+    const expr = ce.expr(['When', 42, 'True']);
     expect(expr.evaluate().re).toEqual(42);
   });
 
   test('When(e, indeterminate) holds the form', () => {
     const ce = new ComputeEngine();
     ce.declare('x', 'real');
-    const expr = ce.box(['When', 'x', ['Less', 0, 'x']]);
+    const expr = ce.expr(['When', 'x', ['Less', 0, 'x']]);
     const result = expr.evaluate();
     expect(result.operator).toEqual('When');
   });

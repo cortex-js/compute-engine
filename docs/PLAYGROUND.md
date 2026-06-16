@@ -126,13 +126,13 @@ internal backlog.
 
 | Test                      | Line    | Behavior                    | Workaround                       |
 | ------------------------- | ------- | --------------------------- | -------------------------------- |
-| `D(\sin(x), x)` via LaTeX | 52-56   | Parses `D` as user symbol   | Use `ce.box(['D', ...])` instead |
+| `D(\sin(x), x)` via LaTeX | 52-56   | Parses `D` as user symbol   | Use `ce.expr(['D', ...])` instead |
 | Power `.value`            | 229-230 | `undefined` before evaluate | Use `.evaluate().value` instead  |
 
 **Notes:**
 
 - In LaTeX, `D` is parsed as a predicate/symbol. For derivatives, use
-  `ce.box(['D', expr, var])` or LaTeX notation like `\frac{d}{dx}`.
+  `ce.expr(['D', expr, var])` or LaTeX notation like `\frac{d}{dx}`.
 - `.value` returns the numeric value only for already-evaluated expressions. For
   symbolic expressions like `Power(2, 3)`, call `.evaluate()` first.
 - For simple variable substitution, use `.subs()` not `.replace()`. The
@@ -252,7 +252,7 @@ These tests verify error handling for malformed input:
    and complex patterns.
 
 5. **D operator syntax**: The `D` operator must be used via
-   `ce.box(['D', ...])`, not LaTeX parsing. In LaTeX, `D` is parsed as a user
+   `ce.expr(['D', ...])`, not LaTeX parsing. In LaTeX, `D` is parsed as a user
    symbol.
 
 6. **Trig periodicity**: Trigonometric functions now reduce arguments by their

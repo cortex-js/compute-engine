@@ -42,12 +42,12 @@ describe('verbatimLatex: invalidation', () => {
     expect(fn.verbatimLatex).toBeUndefined();
   });
 
-  test('ce.box() propagates verbatimLatex for atoms (sym/num/str)', () => {
+  test('ce.expr() propagates verbatimLatex for atoms (sym/num/str)', () => {
     const ce = new ComputeEngine();
-    expect(ce.box({ latex: 'auth-sym', sym: 'foo' }).verbatimLatex).toBe(
+    expect(ce.expr({ latex: 'auth-sym', sym: 'foo' }).verbatimLatex).toBe(
       'auth-sym'
     );
-    expect(ce.box({ latex: 'auth-num', num: '5' }).verbatimLatex).toBe(
+    expect(ce.expr({ latex: 'auth-num', num: '5' }).verbatimLatex).toBe(
       'auth-num'
     );
   });
@@ -131,7 +131,7 @@ describe('toLatex({ verbatim: true })', () => {
 
   test('falls back to re-serialization when no verbatim available', () => {
     const ce = new ComputeEngine();
-    const expr = ce.box(['Add', 'x', 1]); // no verbatim
+    const expr = ce.expr(['Add', 'x', 1]); // no verbatim
     const latex = expr.toLatex({ verbatim: true });
     expect(typeof latex).toBe('string');
     expect(latex).toContain('x');

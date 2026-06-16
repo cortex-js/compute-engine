@@ -60,7 +60,7 @@ function conjunctsOf(guard: unknown): unknown[] {
 
 function assumeGuard(ce: ComputeEngine, guard: unknown): string[] {
   return conjunctsOf(guard).map((c) =>
-    ce.assume(ce.box(c as any, { canonical: !hasPartHead(c) }))
+    ce.assume(ce.expr(c as any, { canonical: !hasPartHead(c) }))
   );
 }
 
@@ -385,13 +385,13 @@ describe('Fungrim complex-domain guard acceptance (design §11)', () => {
         const ce = makeEngine();
         ce.pushScope();
         assumeGuard(ce, guard);
-        expect(ce.verify(ce.box(guard as any))).toBe(true);
+        expect(ce.verify(ce.expr(guard as any))).toBe(true);
         ce.popScope();
       });
 
       it('negative control: undefined (not false) without assumptions', () => {
         const ce = makeEngine();
-        expect(ce.verify(ce.box(guard as any))).toBeUndefined();
+        expect(ce.verify(ce.expr(guard as any))).toBeUndefined();
       });
     }
   );
@@ -413,7 +413,7 @@ describe('Fungrim complex-domain guard acceptance (design §11)', () => {
         // Pinned current behavior: not dischargeable... but sound.
         // If this starts returning `true`, the entry can be promoted to
         // the dischargeable list above.
-        expect(ce.verify(ce.box(guard as any))).toBeUndefined();
+        expect(ce.verify(ce.expr(guard as any))).toBeUndefined();
         ce.popScope();
       });
     }
@@ -428,9 +428,9 @@ describe('Fungrim complex-domain guard acceptance (design §11)', () => {
     ];
     ce.pushScope();
     assumeGuard(ce, guard);
-    expect(ce.verify(ce.box(guard as any))).toBe(true);
+    expect(ce.verify(ce.expr(guard as any))).toBe(true);
     ce.popScope();
-    expect(ce.verify(ce.box(guard as any))).toBeUndefined();
+    expect(ce.verify(ce.expr(guard as any))).toBeUndefined();
   });
 });
 
@@ -441,7 +441,7 @@ describe('Fungrim complex-domain guard acceptance (design §11)', () => {
 describe('ask() inequality-bound queries over subjects', () => {
   it('answers Greater(Real(s), _val) from an assumed part bound', () => {
     const ce = new ComputeEngine();
-    ce.assume(ce.box(['Greater', ['Real', 's'], 1], { canonical: false }));
+    ce.assume(ce.expr(['Greater', ['Real', 's'], 1], { canonical: false }));
     const r = ce.ask(['Greater', ['Real', 's'], '_val']);
     expect(r.length).toBe(1);
     expect(r[0]!._val.json).toBe(1);
@@ -450,7 +450,7 @@ describe('ask() inequality-bound queries over subjects', () => {
   it('answers Greater(Imaginary(tau), _v) — the HH desugared form', () => {
     const ce = new ComputeEngine();
     ce.assume(
-      ce.box(['Greater', ['Imaginary', 'tau'], 0], { canonical: false })
+      ce.expr(['Greater', ['Imaginary', 'tau'], 0], { canonical: false })
     );
     const r = ce.ask(['Greater', ['Imaginary', 'tau'], '_v']);
     expect(r.length).toBe(1);
@@ -459,7 +459,7 @@ describe('ask() inequality-bound queries over subjects', () => {
 
   it('answers Less(Abs(q), _v) and stays empty for the opposite direction', () => {
     const ce = new ComputeEngine();
-    ce.assume(ce.box(['Less', ['Abs', 'q'], 1], { canonical: false }));
+    ce.assume(ce.expr(['Less', ['Abs', 'q'], 1], { canonical: false }));
     const r = ce.ask(['Less', ['Abs', 'q'], '_v']);
     expect(r.length).toBe(1);
     expect(r[0]!._v.json).toBe(1);
@@ -469,7 +469,7 @@ describe('ask() inequality-bound queries over subjects', () => {
 
   it('answers Less(Argument(z), _v) from an Argument bound', () => {
     const ce = new ComputeEngine();
-    ce.assume(ce.box(['Less', ['Argument', 'z'], 2], { canonical: false }));
+    ce.assume(ce.expr(['Less', ['Argument', 'z'], 2], { canonical: false }));
     const r = ce.ask(['Less', ['Argument', 'z'], '_v']);
     expect(r.length).toBe(1);
     expect(r[0]!._v.json).toBe(2);
@@ -478,7 +478,7 @@ describe('ask() inequality-bound queries over subjects', () => {
   it('is conservative about strictness for subjects', () => {
     const ce = new ComputeEngine();
     ce.assume(
-      ce.box(['GreaterEqual', ['Real', 's'], 1], { canonical: false })
+      ce.expr(['GreaterEqual', ['Real', 's'], 1], { canonical: false })
     );
     // Strict query from a non-strict bound: no answer
     expect(ce.ask(['Greater', ['Real', 's'], '_v'])).toEqual([]);
@@ -490,7 +490,7 @@ describe('ask() inequality-bound queries over subjects', () => {
 
   it('does not answer for non-subject compound lhs (Real(z + w))', () => {
     const ce = new ComputeEngine();
-    ce.assume(ce.box(['Greater', ['Real', 's'], 1], { canonical: false }));
+    ce.assume(ce.expr(['Greater', ['Real', 's'], 1], { canonical: false }));
     expect(ce.ask(['Greater', ['Real', ['Add', 'z', 'w']], '_v'])).toEqual(
       []
     );

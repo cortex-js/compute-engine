@@ -31,11 +31,11 @@ export function toTimesPower(ce: ComputeEngine, e: Expression): Expression {
     case 'Divide':
       return mul(ce, [...factors(ops[0]), ...invert(ce, ops[1])]);
     case 'Sqrt':
-      return pow(ce, ops[0], ce.box(['Rational', 1, 2] as any));
+      return pow(ce, ops[0], ce.expr(['Rational', 1, 2] as any));
     case 'Root': {
       const n = ops[1];
       if (isNumber(n) && n.isInteger)
-        return pow(ce, ops[0], ce.box(['Rational', 1, n.re as any] as any));
+        return pow(ce, ops[0], ce.expr(['Rational', 1, n.re as any] as any));
       break;
     }
     case 'Power':

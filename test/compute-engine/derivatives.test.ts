@@ -626,7 +626,7 @@ describe('Inverse secant/cosecant derivatives (E2)', () => {
 // regenerated the lambda. It must now stay symbolic.
 describe('Derivative of a function with no derivative table (G8)', () => {
   it('Apply(Derivative(Function(AiryAi(z), z), 1), 0) stays symbolic', () => {
-    const expr = engine.box([
+    const expr = engine.expr([
       'Apply',
       ['Derivative', ['Function', ['AiryAi', 'z'], 'z'], 1],
       0,
@@ -638,13 +638,13 @@ describe('Derivative of a function with no derivative table (G8)', () => {
   });
 
   it('re-evaluating the symbolic result is stable (no recursion)', () => {
-    const r = engine.box(['Apply', ['Derivative', 'AiryAi', 1], 0]).evaluate();
+    const r = engine.expr(['Apply', ['Derivative', 'AiryAi', 1], 0]).evaluate();
     expect(r.evaluate().isSame(r)).toBe(true);
   });
 
   it('chain rule factor is preserved: d/dz AiryAi(2z) at 0', () => {
     const result = engine
-      .box([
+      .expr([
         'Apply',
         ['Derivative', ['Function', ['AiryAi', ['Multiply', 2, 'z']], 'z'], 1],
         0,
@@ -657,7 +657,7 @@ describe('Derivative of a function with no derivative table (G8)', () => {
 
   it('functions with a derivative table are unaffected (Sin)', () => {
     const result = engine
-      .box(['Apply', ['Derivative', 'Sin', 1], 0])
+      .expr(['Apply', ['Derivative', 'Sin', 1], 0])
       .evaluate();
     expect(result.N().re).toBe(1);
   });

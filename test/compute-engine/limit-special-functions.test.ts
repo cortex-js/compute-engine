@@ -4,7 +4,7 @@ const ce = new ComputeEngine();
 
 // Build `lim_{x→a} body`.
 function lim(body: any, a: any) {
-  return ce.box(['Limit', ['Function', ce.box(body), 'x'], ce.box(a)]);
+  return ce.expr(['Limit', ['Function', ce.expr(body), 'x'], ce.expr(a)]);
 }
 
 describe('LIMITS AT SPECIAL-FUNCTION POLES (soundness)', () => {

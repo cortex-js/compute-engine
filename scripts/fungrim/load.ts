@@ -235,7 +235,7 @@ function refineTypesFromIntegerSlots(
     if (paramTypes.has(head)) return paramTypes.get(head)!;
     let params: string[] = [];
     try {
-      const t = ce.box(head).type.toString();
+      const t = ce.expr(head).type.toString();
       const m = t.match(/^\((.*)\)\s*->/);
       if (m) params = m[1].split(',').map((s) => s.trim());
     } catch {

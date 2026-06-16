@@ -23,7 +23,7 @@ beforeAll(() => {
 });
 
 const bind = (name: string, expr: Json): void => {
-  ctx.env.set(name, ce.box(expr as any));
+  ctx.env.set(name, ce.expr(expr as any));
 };
 const cond = (json: Json): boolean => evalCondition(json, ctx);
 
