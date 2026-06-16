@@ -63,6 +63,27 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
       verify('\\frac{1}{3\\cos x + 4\\sin x + 5}'));
   });
 
+  describe('bare trig-power reduction (cosine has no Rubi chapter)', () => {
+    const ce = new ComputeEngine();
+    loadIntegrationRules(ce);
+    const verify = (latex: string) => {
+      const integrand = ce.parse(latex);
+      const F = ce.parse(`\\int ${latex} \\, dx`).evaluate();
+      expect(F.has('Integrate')).toBe(false); // closed form, not inert
+      const dF = ce.expr(['D', F, 'x']).evaluate();
+      for (const x of [0.31, 0.73, 1.42]) {
+        const a = dF.subs({ x }).N().re;
+        const b = integrand.subs({ x }).N().re;
+        if (a === undefined || b === undefined) continue;
+        expect(a).toBeCloseTo(b, 6);
+      }
+    };
+    test('∫cos²x dx', () => verify('\\cos^2 x'));
+    test('∫cos⁴x dx (even)', () => verify('\\cos^4 x'));
+    test('∫cos⁵x dx (odd)', () => verify('\\cos^5 x'));
+    test('∫cos⁶x dx', () => verify('\\cos^6 x'));
+  });
+
   test('the built-in antiderivative still handles non-Rubi integrands', () => {
     // The provider returns null for a Gaussian (outside Chapter 1), so the
     // built-in antiderivative runs and produces Erf.

@@ -407,7 +407,74 @@ export class RubiDriver {
       }
     }
 
+    // ---- bare trig-power reduction (cofunction of sine rule 4.1.1.1#3) -
+    // ∫(g·cos[e+f·x])^n and ∫(g·sin[e+f·x])^n for a positive integer n. The
+    // corpus has a bare *sine* power rule (4.1.1.1#1/#3) but NO bare *cosine*
+    // one, so the (a+b·sin)^m·(g·cos)^p reduction chain (e.g. rule 4.1.1.2#3
+    // emits a·∫(g·cos)^p) leaves a residual ∫cos^p that never closes. This
+    // applies the standard reduction ∫t^n = ±t^(n-1)·cot/(f·n) + (n-1)/n·∫t^(n-2)
+    // recursively (terminating at ∫1 = x or ∫t = ±cot/f). Runs only after every
+    // rule declined, so it can't override a corpus rule.
+    {
+      const red = this.trigPowerReduction(integrand, variable, depth);
+      if (red !== null) return red;
+    }
+
     return null;
+  }
+
+  /** ∫(g·sin|cos[e+f·x])^n dx by the power-reduction recurrence; null when the
+   * integrand is not a bare integer power of an inert sin/cos of a linear
+   * argument. See the call site. */
+  private trigPowerReduction(
+    integrand: Expression,
+    variable: string,
+    depth: number
+  ): Expression | null {
+    const ce = this.ce;
+    // integrand is (base)^n, or a bare trig (n = 1)
+    let base = integrand;
+    let n = 1;
+    if (integrand.operator === 'Power' && integrand.ops) {
+      base = integrand.ops[0];
+      const e = integrand.ops[1].re;
+      if (typeof e !== 'number' || !Number.isInteger(e) || e < 1) return null;
+      n = e;
+    }
+    // base = (x-free g)·(inert sin|cos of a linear argument)
+    let g: Expression = ce.One;
+    let trig = base;
+    if (base.operator === 'Multiply' && base.ops) {
+      const free = base.ops.filter((o) => !o.has(variable));
+      const nonfree = base.ops.filter((o) => o.has(variable));
+      if (nonfree.length !== 1) return null;
+      trig = nonfree[0];
+      g = free.length === 0 ? ce.One : ce._fn('Multiply', free);
+    }
+    if ((trig.operator !== 'sin' && trig.operator !== 'cos') || !trig.ops)
+      return null;
+    const arg = trig.ops[0];
+    const ac = polyCoeffsX(recanonicalize(ce, arg), variable);
+    if (ac === null || ac.length !== 2 || zeroQ(ac[1])) return null; // need linear
+    const f = ac[1];
+    const isCos = trig.operator === 'cos';
+    const co = ce._fn(isCos ? 'sin' : 'cos', [arg]); // cofunction
+    const gco = recanonicalize(ce, g.mul(co)); // g·cofunction
+    const gt = recanonicalize(ce, base); // g·trig
+    this.stats.preludeFirings++;
+    // n = 1: ∫(g·cos) = g·sin/f ; ∫(g·sin) = −g·cos/f
+    if (n === 1) {
+      const t = gco.div(f);
+      return isCos ? t : t.neg();
+    }
+    // boundary term ±(g·trig)^(n-1)·(g·cofunction)/(f·n)
+    const lead = gt.pow(n - 1).mul(gco).div(f.mul(n));
+    const boundary = isCos ? lead : lead.neg();
+    // recursive term (n−1)·g²/n · ∫(g·trig)^(n−2) (the g² from factoring g^n)
+    const rec = this.intRec(recanonicalize(ce, gt.pow(n - 2)), variable, depth + 1);
+    if (rec === null) return null;
+    const coef = g.pow(2).mul(ce.number(n - 1)).div(n);
+    return boundary.add(rec.mul(coef));
   }
 }
 
