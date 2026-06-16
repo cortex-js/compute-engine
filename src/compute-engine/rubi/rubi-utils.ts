@@ -602,6 +602,14 @@ const PRED_FNS: Record<string, PredFn> = {
   // structural identity check suffices.
   FalseQ: (args, ctx) => build(args[0], ctx).symbol === 'False',
 
+  // TrueQ[u] := u === True (WL: True only when u is literally the symbol True).
+  // The Chapter-2 rules gate on TrueQ[$UseGamma]: $UseGamma is unset (a global
+  // defaulting to False), so TrueQ[$UseGamma] is False and the
+  // Not[TrueQ[$UseGamma]] ExpandIntegrand branch fires (the Gamma-form branch is
+  // its $UseGamma=True counterpart). Without this the whole Px·Fᵛ
+  // polynomial×exponential family fails closed on an unimplemented predicate.
+  TrueQ: (args, ctx) => build(args[0], ctx).symbol === 'True',
+
   // InverseFunctionFreeQ[u, x] := u contains no inverse function, logarithm,
   // hypergeometric, or calculus head involving x.
   InverseFunctionFreeQ: (args, ctx) =>
@@ -621,6 +629,17 @@ const PRED_FNS: Record<string, PredFn> = {
       pure
     );
   },
+
+  // FunctionOfExponentialQ[u, x] — u is a function of a single F^v (F constant,
+  // v linear in x) with an explicit exponential present. Gates the master
+  // exponential-substitution rule 2.3#97.
+  FunctionOfExponentialQ: (args, ctx) =>
+    functionOfExponentialQ(build(args[0], ctx), ctx.x),
+
+  // HyperbolicQ[u] — u's head is a hyperbolic function (Sinh/Cosh/…). Used by
+  // the Chapter-6 dispatch and the FunctionOfExponential hyperbolic branch.
+  HyperbolicQ: (args, ctx) =>
+    HYPERBOLIC_HEADS.has(build(args[0], ctx).operator),
 
   // EqQ[u, v] := PossibleZeroQ[u - v]; NeQ is its negation. Rubi also
   // defines the unary forms EqQ[u] := PossibleZeroQ[u] (test u == 0) and
@@ -2548,6 +2567,208 @@ function functionOfTrig(
 }
 
 // ---------------------------------------------------------------------------
+// FunctionOfExponential family (IntegrationUtilityFunctions.m): recognize when
+// an integrand u is a function of a single F^v (F constant, v linear in x) and
+// rewrite F^v → x, for the master exponential-substitution rule 2.3#97:
+//   Int[u] = v/D[v,x] · Subst[Int[FunctionOfExponentialFunction[u]/x, x], x, v]
+// Rubi threads fluid $base$/$expon$/$exponFlag$; here the state is explicit.
+// Hyperbolic heads count as exponentials (Sinh[w] ≡ (E^w−E^−w)/2), so the same
+// machinery serves the Chapter-6 active-hyperbolic integrands.
+// ---------------------------------------------------------------------------
+
+const HYPERBOLIC_HEADS = new Set([
+  'Sinh',
+  'Cosh',
+  'Tanh',
+  'Coth',
+  'Sech',
+  'Csch',
+]);
+
+type FoeState = {
+  base: Expression | null; // F (the common exponential base)
+  expon: Expression | null; // v (the linear exponent), reduced to primitive
+  flag: boolean; // an explicit exponential (Power) occurred
+};
+
+const linX = (u: Expression, x: string): boolean => polyDegreeX(u, x) === 1;
+
+/** Coefficient of xᵏ in a constant/linear expr (0 when absent). */
+function coeffX(u: Expression, x: string, k: number): Expression {
+  const c = polyCoeffsX(u, x);
+  return c && c[k] !== undefined ? c[k] : u.engine.Zero;
+}
+
+/** FunctionOfExponentialTestAux: register the first exponential, or
+ *  commensurate-check a later base^expon against the running state. */
+function foeTestAux(
+  base: Expression,
+  expon: Expression,
+  x: string,
+  st: FoeState
+): boolean {
+  const ce = base.engine;
+  if (st.base === null) {
+    st.base = base;
+    st.expon = expon;
+    return true;
+  }
+  // tmp = Log[base]·Coeff[expon,x,1] / (Log[$base$]·Coeff[$expon$,x,1]).
+  // The exponentials share a common base iff tmp is rational.
+  let tmp = safeSimplify(
+    base.ln().mul(coeffX(expon, x, 1)).div(st.base.ln().mul(coeffX(st.expon!, x, 1)))
+  );
+  if (!(tmp.isNumberLiteral && tmp.isRational === true)) return false;
+
+  // Do the constant terms share the same ratio? (skip when $expon$ has none)
+  const e0 = coeffX(st.expon!, x, 0);
+  let constCommensurate = false;
+  if (!zeroQ(e0)) {
+    const tmp0 = safeSimplify(
+      base.ln().mul(coeffX(expon, x, 0)).div(st.base.ln().mul(e0))
+    );
+    constCommensurate = tmp.isSame(tmp0);
+  }
+
+  // Base normalization for positive-integer bases (e.g. 2^x with 4^x): keep the
+  // smaller base, invert tmp.
+  if (
+    isLiteralInteger(base) &&
+    base.isPositive &&
+    isLiteralInteger(st.base) &&
+    st.base.isPositive &&
+    base.isLess(st.base) === true
+  ) {
+    st.base = base;
+    st.expon = expon;
+    tmp = safeSimplify(ce.One.div(tmp));
+  }
+
+  const denom = tmp.denominator;
+  if (!zeroQ(e0) && constCommensurate) {
+    // constant terms commensurate: keep the full exponent, reduced
+    st.expon = safeSimplify(st.expon!.div(denom));
+  } else {
+    // no/incommensurate constant: keep only the linear term, reduced
+    st.expon = safeSimplify(
+      coeffX(st.expon!, x, 1).mul(ce.symbol(x)).div(denom)
+    );
+  }
+  if (tmp.isNegative === true && coeffX(st.expon!, x, 1).isNegative === true)
+    st.expon = st.expon!.neg();
+  return true;
+}
+
+/** FunctionOfExponentialTest: walk u, registering exponential bases/exponents.
+ *  Returns true iff u is a function of a single common F^v. */
+function foeTest(u: Expression, x: string, st: FoeState): boolean {
+  const ce = u.engine;
+  if (!u.has(x)) return true; // FreeQ[u,x]
+  if (u.symbol === x || CALCULUS_FNS.has(u.operator)) return false;
+
+  if (u.operator === 'Power' && u.ops && !u.ops[0].has(x)) {
+    const exp = u.ops[1];
+    if (linX(exp, x)) {
+      st.flag = true;
+      return foeTestAux(u.ops[0], exp, x, st);
+    }
+    // F^(a+b+…) → F^a · F^b · … : test each summand
+    if (exp.operator === 'Add' && exp.ops) {
+      st.flag = true;
+      return exp.ops.every((t) =>
+        foeTest(ce.function('Power', [u.ops![0], t]), x, st)
+      );
+    }
+  }
+  if (HYPERBOLIC_HEADS.has(u.operator) && u.ops && linX(u.ops[0], x))
+    return foeTestAux(ce.E, u.ops[0], x, st);
+
+  for (const op of u.ops ?? []) if (!foeTest(op, x, st)) return false;
+  return true;
+}
+
+/** FunctionOfExponentialFunctionAux: u with F^v → x (the new integration
+ *  variable), using the registered $base$/$expon$. */
+function foeFunctionAux(u: Expression, x: string, st: FoeState): Expression {
+  const ce = u.engine;
+  if (!u.ops || u.ops.length === 0) return u; // atom
+
+  if (u.operator === 'Power' && !u.ops[0].has(x)) {
+    const G = u.ops[0];
+    const w = u.ops[1];
+    if (linX(w, x)) {
+      const p = safeSimplify(
+        G.ln()
+          .mul(coeffX(w, x, 1))
+          .div(st.base!.ln().mul(coeffX(st.expon!, x, 1)))
+      );
+      const xp = ce.symbol(x).pow(p);
+      // G^(const of w) · x^p when $expon$ has no constant term, else x^p
+      return zeroQ(coeffX(st.expon!, x, 0))
+        ? ce.function('Power', [G, coeffX(w, x, 0)]).mul(xp)
+        : xp;
+    }
+    if (w.operator === 'Add' && w.ops) {
+      return w.ops
+        .map((t) => foeFunctionAux(ce.function('Power', [G, t]), x, st))
+        .reduce((a, b) => a.mul(b));
+    }
+  }
+
+  if (HYPERBOLIC_HEADS.has(u.operator) && linX(u.ops[0], x)) {
+    const w = u.ops[0];
+    const p = safeSimplify(
+      coeffX(w, x, 1).div(st.base!.ln().mul(coeffX(st.expon!, x, 1)))
+    );
+    const t = ce.symbol(x).pow(p);
+    const inv = ce.One.div(t);
+    const two = ce.box(2);
+    switch (u.operator) {
+      case 'Sinh':
+        return t.sub(inv).div(two);
+      case 'Cosh':
+        return t.add(inv).div(two);
+      case 'Tanh':
+        return t.sub(inv).div(t.add(inv));
+      case 'Coth':
+        return t.add(inv).div(t.sub(inv));
+      case 'Sech':
+        return two.div(t.add(inv));
+      case 'Csch':
+        return two.div(t.sub(inv));
+    }
+  }
+
+  return ce.function(
+    u.operator,
+    u.ops.map((op) => foeFunctionAux(op, x, st))
+  );
+}
+
+/** FunctionOfExponentialQ[u,x] — u is a function of F^v with an explicit
+ *  exponential present (not merely a hyperbolic). */
+function functionOfExponentialQ(u: Expression, x: string): boolean {
+  const st: FoeState = { base: null, expon: null, flag: false };
+  return foeTest(u, x, st) && st.flag;
+}
+
+/** FunctionOfExponential[u,x] — the substitution exponential F^v. */
+function functionOfExponential(u: Expression, x: string): Expression {
+  const st: FoeState = { base: null, expon: null, flag: false };
+  foeTest(u, x, st);
+  if (st.base === null) return u.engine.symbol('False');
+  return u.engine.function('Power', [st.base, st.expon!]);
+}
+
+/** FunctionOfExponentialFunction[u,x] — u with F^v replaced by x. */
+function functionOfExponentialFunction(u: Expression, x: string): Expression {
+  const st: FoeState = { base: null, expon: null, flag: false };
+  foeTest(u, x, st);
+  if (st.base === null) return u;
+  return foeFunctionAux(u, x, st);
+}
+
+// ---------------------------------------------------------------------------
 // Pure-trig substitution: FunctionOfQ + SubstFor / SubstForTrig (4.7.5 #15–#34).
 //
 // These rules integrate `∫ u·F(c(a+b·x)) dx` where the explicit trig factor F
@@ -2770,6 +2991,22 @@ const VALUE_FNS: Record<string, ValueFn> = {
   // repeated polynomial division (P·Lⁿ = r·Lⁿ + q·Lⁿ⁺¹). Other shapes
   // fail the rule (coverage gap measured by the harness).
   ExpandIntegrand: (args, ctx) => {
+    const ce = ctx.ce;
+    if (args.length === 3) {
+      // ExpandIntegrand[u, v, x] := DistributeOverTerms[u, ExpandIntegrand[v, x], x]
+      // — expand v, then multiply every resulting term by u. Used by the
+      // Chapter-2 Px·Fᵛ rules (Px a polynomial, Fᵛ an exponential): the
+      // polynomial expands into monomials, each multiplied by Fᵛ, so the
+      // driver integrates Σ cₖ xᵏ Fᵛ term-by-term.
+      const w = build(['ExpandIntegrand', args[1], args[2]], ctx);
+      const z = build(args[0], ctx);
+      if (w.operator === 'Add' && w.ops)
+        return ce.function(
+          'Add',
+          w.ops.map((t) => z.mul(t))
+        );
+      return z.mul(w);
+    }
     if (args.length !== 2) return fail('ExpandIntegrand arity');
     const u = build(args[0], ctx);
     const e = expand(u);
@@ -2801,6 +3038,18 @@ const VALUE_FNS: Record<string, ValueFn> = {
   // integrands (which previously recursed via SubstFor to the depth cap).
   FunctionOfTrig: (args, ctx) =>
     functionOfTrig(ctx.ce, build(args[0], ctx), ctx.x),
+
+  // FunctionOfExponential[u, x] — the substitution exponential F^v; and
+  // FunctionOfExponentialFunction[u, x] — u with F^v replaced by x. Drive the
+  // master exponential-substitution rule 2.3#97.
+  FunctionOfExponential: (args, ctx) =>
+    functionOfExponential(build(args[0], ctx), ctx.x),
+  FunctionOfExponentialFunction: (args, ctx) =>
+    functionOfExponentialFunction(build(args[0], ctx), ctx.x),
+
+  // SimplifyIntegrand[u, x] — Rubi's integrand simplifier; map to the rubi-safe
+  // simplifier (referenced by the exponential/log rules).
+  SimplifyIntegrand: (args, ctx) => safeSimplify(build(args[0], ctx)),
 
   // SubstFor[w, v, u, x] / SubstFor[v, u, x] — substitute the trig
   // subexpression v by x in u (times w), for the trig-substitution rules
