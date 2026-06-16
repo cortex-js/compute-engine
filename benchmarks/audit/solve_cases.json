@@ -1,0 +1,1552 @@
+[
+ {
+  "id": "P1",
+  "cat": "poly",
+  "title": "3x \u2212 2 = 0",
+  "ce": {
+   "op": "solve",
+   "var": "x",
+   "mathjson": [
+    "Subtract",
+    [
+     "Multiply",
+     3,
+     "x"
+    ],
+    2
+   ]
+  },
+  "sympy": {
+   "expr": "3*x - 2",
+   "result": {
+    "status": "ok",
+    "roots": [
+     "0.666666666666666629659233"
+    ]
+   }
+  },
+  "verify": {
+   "kind": "roots",
+   "cardinality": "finite",
+   "roots": [
+    "0.666666666666666629659233"
+   ]
+  }
+ },
+ {
+  "id": "P2",
+  "cat": "poly",
+  "title": "x\u00b2 \u2212 1 = 0",
+  "ce": {
+   "op": "solve",
+   "var": "x",
+   "mathjson": [
+    "Subtract",
+    [
+     "Power",
+     "x",
+     2
+    ],
+    1
+   ]
+  },
+  "sympy": {
+   "expr": "x**2 - 1",
+   "result": {
+    "status": "ok",
+    "roots": [
+     "-1.0",
+     "1.0"
+    ]
+   }
+  },
+  "verify": {
+   "kind": "roots",
+   "cardinality": "finite",
+   "roots": [
+    "-1.0",
+    "1.0"
+   ]
+  }
+ },
+ {
+  "id": "P3",
+  "cat": "poly",
+  "title": "x\u00b2 \u2212 5x + 6 = 0",
+  "ce": {
+   "op": "solve",
+   "var": "x",
+   "mathjson": [
+    "Add",
+    [
+     "Subtract",
+     [
+      "Power",
+      "x",
+      2
+     ],
+     [
+      "Multiply",
+      5,
+      "x"
+     ]
+    ],
+    6
+   ]
+  },
+  "sympy": {
+   "expr": "x**2 - 5*x + 6",
+   "result": {
+    "status": "ok",
+    "roots": [
+     "2.0",
+     "3.0"
+    ]
+   }
+  },
+  "verify": {
+   "kind": "roots",
+   "cardinality": "finite",
+   "roots": [
+    "2.0",
+    "3.0"
+   ]
+  }
+ },
+ {
+  "id": "P4",
+  "cat": "poly",
+  "title": "x\u00b3 \u2212 6x\u00b2 + 11x \u2212 6 = 0",
+  "ce": {
+   "op": "solve",
+   "var": "x",
+   "mathjson": [
+    "Add",
+    [
+     "Subtract",
+     [
+      "Add",
+      [
+       "Power",
+       "x",
+       3
+      ],
+      [
+       "Multiply",
+       11,
+       "x"
+      ]
+     ],
+     [
+      "Multiply",
+      6,
+      [
+       "Power",
+       "x",
+       2
+      ]
+     ]
+    ],
+    -6
+   ]
+  },
+  "sympy": {
+   "expr": "x**3 - 6*x**2 + 11*x - 6",
+   "result": {
+    "status": "ok",
+    "roots": [
+     "1.0",
+     "2.0",
+     "3.0"
+    ]
+   }
+  },
+  "verify": {
+   "kind": "roots",
+   "cardinality": "finite",
+   "roots": [
+    "1.0",
+    "2.0",
+    "3.0"
+   ]
+  }
+ },
+ {
+  "id": "P5",
+  "cat": "poly",
+  "title": "x\u00b3 \u2212 15x \u2212 4 = 0",
+  "ce": {
+   "op": "solve",
+   "var": "x",
+   "mathjson": [
+    "Subtract",
+    [
+     "Subtract",
+     [
+      "Power",
+      "x",
+      3
+     ],
+     [
+      "Multiply",
+      15,
+      "x"
+     ]
+    ],
+    4
+   ]
+  },
+  "sympy": {
+   "expr": "x**3 - 15*x - 4",
+   "result": {
+    "status": "ok",
+    "roots": [
+     "-3.7320508075688771931766",
+     "-0.267949192431122695801093",
+     "4.0"
+    ]
+   }
+  },
+  "verify": {
+   "kind": "roots",
+   "cardinality": "finite",
+   "roots": [
+    "-3.7320508075688771931766",
+    "-0.267949192431122695801093",
+    "4.0"
+   ]
+  }
+ },
+ {
+  "id": "P6",
+  "cat": "poly",
+  "title": "x\u2074 \u2212 5x\u00b2 + 4 = 0",
+  "ce": {
+   "op": "solve",
+   "var": "x",
+   "mathjson": [
+    "Add",
+    [
+     "Subtract",
+     [
+      "Power",
+      "x",
+      4
+     ],
+     [
+      "Multiply",
+      5,
+      [
+       "Power",
+       "x",
+       2
+      ]
+     ]
+    ],
+    4
+   ]
+  },
+  "sympy": {
+   "expr": "x**4 - 5*x**2 + 4",
+   "result": {
+    "status": "ok",
+    "roots": [
+     "-2.0",
+     "-1.0",
+     "1.0",
+     "2.0"
+    ]
+   }
+  },
+  "verify": {
+   "kind": "roots",
+   "cardinality": "finite",
+   "roots": [
+    "-2.0",
+    "-1.0",
+    "1.0",
+    "2.0"
+   ]
+  }
+ },
+ {
+  "id": "P7",
+  "cat": "poly",
+  "title": "x\u2075 + x\u00b3 + 1 = 0",
+  "ce": {
+   "op": "solve",
+   "var": "x",
+   "mathjson": [
+    "Add",
+    [
+     "Add",
+     [
+      "Power",
+      "x",
+      5
+     ],
+     [
+      "Power",
+      "x",
+      3
+     ]
+    ],
+    1
+   ]
+  },
+  "sympy": {
+   "expr": "x**5 + x**3 + 1",
+   "result": {
+    "status": "ok",
+    "roots": [
+     "-0.83761977482696214902802"
+    ]
+   }
+  },
+  "verify": {
+   "kind": "roots",
+   "cardinality": "finite",
+   "roots": [
+    "-0.83761977482696214902802"
+   ]
+  }
+ },
+ {
+  "id": "R1",
+  "cat": "rational",
+  "title": "1/x + 1 = 0",
+  "ce": {
+   "op": "solve",
+   "var": "x",
+   "mathjson": [
+    "Add",
+    [
+     "Divide",
+     1,
+     "x"
+    ],
+    1
+   ]
+  },
+  "sympy": {
+   "expr": "1 + 1/x",
+   "result": {
+    "status": "ok",
+    "roots": [
+     "-1.0"
+    ]
+   }
+  },
+  "verify": {
+   "kind": "roots",
+   "cardinality": "finite",
+   "roots": [
+    "-1.0"
+   ]
+  }
+ },
+ {
+  "id": "R2",
+  "cat": "rational",
+  "title": "2x/(x+2) \u2212 1 = 0",
+  "ce": {
+   "op": "solve",
+   "var": "x",
+   "mathjson": [
+    "Subtract",
+    [
+     "Divide",
+     [
+      "Multiply",
+      2,
+      "x"
+     ],
+     [
+      "Add",
+      "x",
+      2
+     ]
+    ],
+    1
+   ]
+  },
+  "sympy": {
+   "expr": "2*x/(x + 2) - 1",
+   "result": {
+    "status": "ok",
+    "roots": [
+     "2.0"
+    ]
+   }
+  },
+  "verify": {
+   "kind": "roots",
+   "cardinality": "finite",
+   "roots": [
+    "2.0"
+   ]
+  }
+ },
+ {
+  "id": "R3",
+  "cat": "rational",
+  "title": "3/(x\u22122) \u2212 1 = 0",
+  "ce": {
+   "op": "solve",
+   "var": "x",
+   "mathjson": [
+    "Subtract",
+    [
+     "Divide",
+     3,
+     [
+      "Subtract",
+      "x",
+      2
+     ]
+    ],
+    1
+   ]
+  },
+  "sympy": {
+   "expr": "-1 + 3/(x - 2)",
+   "result": {
+    "status": "ok",
+    "roots": [
+     "5.0"
+    ]
+   }
+  },
+  "verify": {
+   "kind": "roots",
+   "cardinality": "finite",
+   "roots": [
+    "5.0"
+   ]
+  }
+ },
+ {
+  "id": "S1",
+  "cat": "radical",
+  "title": "\u221ax \u2212 2 = 0",
+  "ce": {
+   "op": "solve",
+   "var": "x",
+   "mathjson": [
+    "Subtract",
+    [
+     "Sqrt",
+     "x"
+    ],
+    2
+   ]
+  },
+  "sympy": {
+   "expr": "sqrt(x) - 2",
+   "result": {
+    "status": "ok",
+    "roots": [
+     "4.0"
+    ]
+   }
+  },
+  "verify": {
+   "kind": "roots",
+   "cardinality": "finite",
+   "roots": [
+    "4.0"
+   ]
+  }
+ },
+ {
+  "id": "S2",
+  "cat": "radical",
+  "title": "\u221a(5x+6) \u2212 2 \u2212 x = 0",
+  "ce": {
+   "op": "solve",
+   "var": "x",
+   "mathjson": [
+    "Subtract",
+    [
+     "Subtract",
+     [
+      "Sqrt",
+      [
+       "Add",
+       [
+        "Multiply",
+        5,
+        "x"
+       ],
+       6
+      ]
+     ],
+     2
+    ],
+    "x"
+   ]
+  },
+  "sympy": {
+   "expr": "-x + sqrt(5*x + 6) - 2",
+   "result": {
+    "status": "ok",
+    "roots": [
+     "-1.0",
+     "2.0"
+    ]
+   }
+  },
+  "verify": {
+   "kind": "roots",
+   "cardinality": "finite",
+   "roots": [
+    "-1.0",
+    "2.0"
+   ]
+  }
+ },
+ {
+  "id": "S3",
+  "cat": "radical",
+  "title": "\u221a(x\u22121) \u2212 x + 7 = 0",
+  "ce": {
+   "op": "solve",
+   "var": "x",
+   "mathjson": [
+    "Add",
+    [
+     "Subtract",
+     [
+      "Sqrt",
+      [
+       "Subtract",
+       "x",
+       1
+      ]
+     ],
+     "x"
+    ],
+    7
+   ]
+  },
+  "sympy": {
+   "expr": "-x + sqrt(x - 1) + 7",
+   "result": {
+    "status": "ok",
+    "roots": [
+     "10.0"
+    ]
+   }
+  },
+  "verify": {
+   "kind": "roots",
+   "cardinality": "finite",
+   "roots": [
+    "10.0"
+   ]
+  }
+ },
+ {
+  "id": "S4",
+  "cat": "radical",
+  "title": "\u221a(x\u22122) \u2212 5 = 0",
+  "ce": {
+   "op": "solve",
+   "var": "x",
+   "mathjson": [
+    "Subtract",
+    [
+     "Sqrt",
+     [
+      "Subtract",
+      "x",
+      2
+     ]
+    ],
+    5
+   ]
+  },
+  "sympy": {
+   "expr": "sqrt(x - 2) - 5",
+   "result": {
+    "status": "ok",
+    "roots": [
+     "27.0"
+    ]
+   }
+  },
+  "verify": {
+   "kind": "roots",
+   "cardinality": "finite",
+   "roots": [
+    "27.0"
+   ]
+  }
+ },
+ {
+  "id": "S5",
+  "cat": "radical",
+  "title": "\u221bx \u2212 3 = 0",
+  "ce": {
+   "op": "solve",
+   "var": "x",
+   "mathjson": [
+    "Subtract",
+    [
+     "Root",
+     "x",
+     3
+    ],
+    3
+   ]
+  },
+  "sympy": {
+   "expr": "x**(1/3) - 3",
+   "result": {
+    "status": "ok",
+    "roots": [
+     "27.0"
+    ]
+   }
+  },
+  "verify": {
+   "kind": "roots",
+   "cardinality": "finite",
+   "roots": [
+    "27.0"
+   ]
+  }
+ },
+ {
+  "id": "A1",
+  "cat": "abs",
+  "title": "|x| \u2212 2 = 0",
+  "ce": {
+   "op": "solve",
+   "var": "x",
+   "mathjson": [
+    "Subtract",
+    [
+     "Abs",
+     "x"
+    ],
+    2
+   ]
+  },
+  "sympy": {
+   "expr": "Abs(x) - 2",
+   "result": {
+    "status": "ok",
+    "roots": [
+     "-2.0",
+     "2.0"
+    ]
+   }
+  },
+  "verify": {
+   "kind": "roots",
+   "cardinality": "finite",
+   "roots": [
+    "-2.0",
+    "2.0"
+   ]
+  }
+ },
+ {
+  "id": "A2",
+  "cat": "abs",
+  "title": "|x+3| \u2212 2|x\u22123| = 0",
+  "ce": {
+   "op": "solve",
+   "var": "x",
+   "mathjson": [
+    "Subtract",
+    [
+     "Abs",
+     [
+      "Add",
+      "x",
+      3
+     ]
+    ],
+    [
+     "Multiply",
+     2,
+     [
+      "Abs",
+      [
+       "Subtract",
+       "x",
+       3
+      ]
+     ]
+    ]
+   ]
+  },
+  "sympy": {
+   "expr": "-2*Abs(x - 3) + Abs(x + 3)",
+   "result": {
+    "status": "ok",
+    "roots": [
+     "1.0",
+     "9.0"
+    ]
+   }
+  },
+  "verify": {
+   "kind": "roots",
+   "cardinality": "finite",
+   "roots": [
+    "1.0",
+    "9.0"
+   ]
+  }
+ },
+ {
+  "id": "A3",
+  "cat": "abs",
+  "title": "2|x| \u2212 |x\u22121| = 0",
+  "ce": {
+   "op": "solve",
+   "var": "x",
+   "mathjson": [
+    "Subtract",
+    [
+     "Multiply",
+     2,
+     [
+      "Abs",
+      "x"
+     ]
+    ],
+    [
+     "Abs",
+     [
+      "Subtract",
+      "x",
+      1
+     ]
+    ]
+   ]
+  },
+  "sympy": {
+   "expr": "2*Abs(x) - Abs(x - 1)",
+   "result": {
+    "status": "ok",
+    "roots": [
+     "-1.0",
+     "0.333333333333333314829616"
+    ]
+   }
+  },
+  "verify": {
+   "kind": "roots",
+   "cardinality": "finite",
+   "roots": [
+    "-1.0",
+    "0.333333333333333314829616"
+   ]
+  }
+ },
+ {
+  "id": "A4",
+  "cat": "abs",
+  "title": "|2x+1| \u2212 3 = 0",
+  "ce": {
+   "op": "solve",
+   "var": "x",
+   "mathjson": [
+    "Subtract",
+    [
+     "Abs",
+     [
+      "Add",
+      [
+       "Multiply",
+       2,
+       "x"
+      ],
+      1
+     ]
+    ],
+    3
+   ]
+  },
+  "sympy": {
+   "expr": "Abs(2*x + 1) - 3",
+   "result": {
+    "status": "ok",
+    "roots": [
+     "-2.0",
+     "1.0"
+    ]
+   }
+  },
+  "verify": {
+   "kind": "roots",
+   "cardinality": "finite",
+   "roots": [
+    "-2.0",
+    "1.0"
+   ]
+  }
+ },
+ {
+  "id": "E1",
+  "cat": "exp",
+  "title": "2\u02e3 \u2212 8 = 0",
+  "ce": {
+   "op": "solve",
+   "var": "x",
+   "mathjson": [
+    "Subtract",
+    [
+     "Power",
+     2,
+     "x"
+    ],
+    8
+   ]
+  },
+  "sympy": {
+   "expr": "2**x - 8",
+   "result": {
+    "status": "ok",
+    "roots": [
+     "3.0"
+    ]
+   }
+  },
+  "verify": {
+   "kind": "roots",
+   "cardinality": "finite",
+   "roots": [
+    "3.0"
+   ]
+  }
+ },
+ {
+  "id": "E2",
+  "cat": "exp",
+  "title": "e\u02e3 \u2212 5 = 0",
+  "ce": {
+   "op": "solve",
+   "var": "x",
+   "mathjson": [
+    "Subtract",
+    [
+     "Exp",
+     "x"
+    ],
+    5
+   ]
+  },
+  "sympy": {
+   "expr": "exp(x) - 5",
+   "result": {
+    "status": "ok",
+    "roots": [
+     "1.60943791243410028179994"
+    ]
+   }
+  },
+  "verify": {
+   "kind": "roots",
+   "cardinality": "finite",
+   "roots": [
+    "1.60943791243410028179994"
+   ]
+  }
+ },
+ {
+  "id": "E3",
+  "cat": "exp",
+  "title": "e\u02e3 + e\u207b\u02e3 \u2212 4 = 0",
+  "ce": {
+   "op": "solve",
+   "var": "x",
+   "mathjson": [
+    "Subtract",
+    [
+     "Add",
+     [
+      "Exp",
+      "x"
+     ],
+     [
+      "Exp",
+      [
+       "Negate",
+       "x"
+      ]
+     ]
+    ],
+    4
+   ]
+  },
+  "sympy": {
+   "expr": "exp(x) - 4 + exp(-x)",
+   "result": {
+    "status": "ok",
+    "roots": [
+     "-1.31695789692481679544755",
+     "1.31695789692481679544755"
+    ]
+   }
+  },
+  "verify": {
+   "kind": "roots",
+   "cardinality": "finite",
+   "roots": [
+    "-1.31695789692481679544755",
+    "1.31695789692481679544755"
+   ]
+  }
+ },
+ {
+  "id": "E4",
+  "cat": "exp",
+  "title": "3\u00b72\u02e3 \u2212 24 = 0",
+  "ce": {
+   "op": "solve",
+   "var": "x",
+   "mathjson": [
+    "Subtract",
+    [
+     "Multiply",
+     3,
+     [
+      "Power",
+      2,
+      "x"
+     ]
+    ],
+    24
+   ]
+  },
+  "sympy": {
+   "expr": "3*2**x - 24",
+   "result": {
+    "status": "ok",
+    "roots": [
+     "3.0"
+    ]
+   }
+  },
+  "verify": {
+   "kind": "roots",
+   "cardinality": "finite",
+   "roots": [
+    "3.0"
+   ]
+  }
+ },
+ {
+  "id": "L1",
+  "cat": "log",
+  "title": "ln x \u2212 2 = 0",
+  "ce": {
+   "op": "solve",
+   "var": "x",
+   "mathjson": [
+    "Subtract",
+    [
+     "Ln",
+     "x"
+    ],
+    2
+   ]
+  },
+  "sympy": {
+   "expr": "log(x) - 2",
+   "result": {
+    "status": "ok",
+    "roots": [
+     "7.38905609893065040694182"
+    ]
+   }
+  },
+  "verify": {
+   "kind": "roots",
+   "cardinality": "finite",
+   "roots": [
+    "7.38905609893065040694182"
+   ]
+  }
+ },
+ {
+  "id": "L2",
+  "cat": "log",
+  "title": "ln((x\u22121)(x+1)) = 0",
+  "ce": {
+   "op": "solve",
+   "var": "x",
+   "mathjson": [
+    "Ln",
+    [
+     "Multiply",
+     [
+      "Subtract",
+      "x",
+      1
+     ],
+     [
+      "Add",
+      "x",
+      1
+     ]
+    ]
+   ]
+  },
+  "sympy": {
+   "expr": "log((x - 1)*(x + 1))",
+   "result": {
+    "status": "ok",
+    "roots": [
+     "-1.41421356237309514547462",
+     "1.41421356237309514547462"
+    ]
+   }
+  },
+  "verify": {
+   "kind": "roots",
+   "cardinality": "finite",
+   "roots": [
+    "-1.41421356237309514547462",
+    "1.41421356237309514547462"
+   ]
+  }
+ },
+ {
+  "id": "L3",
+  "cat": "log",
+  "title": "log\u2082 x \u2212 3 = 0",
+  "ce": {
+   "op": "solve",
+   "var": "x",
+   "mathjson": [
+    "Subtract",
+    [
+     "Log",
+     "x",
+     2
+    ],
+    3
+   ]
+  },
+  "sympy": {
+   "expr": "log(x)/log(2) - 3",
+   "result": {
+    "status": "ok",
+    "roots": [
+     "8.0"
+    ]
+   }
+  },
+  "verify": {
+   "kind": "roots",
+   "cardinality": "finite",
+   "roots": [
+    "8.0"
+   ]
+  }
+ },
+ {
+  "id": "W1",
+  "cat": "lambert",
+  "title": "x\u00b7e\u02e3 \u2212 1 = 0",
+  "ce": {
+   "op": "solve",
+   "var": "x",
+   "mathjson": [
+    "Subtract",
+    [
+     "Multiply",
+     "x",
+     [
+      "Exp",
+      "x"
+     ]
+    ],
+    1
+   ]
+  },
+  "sympy": {
+   "expr": "x*exp(x) - 1",
+   "result": {
+    "status": "ok",
+    "roots": [
+     "0.567143290409783840111402"
+    ]
+   }
+  },
+  "verify": {
+   "kind": "roots",
+   "cardinality": "finite",
+   "roots": [
+    "0.567143290409783840111402"
+   ]
+  }
+ },
+ {
+  "id": "W2",
+  "cat": "lambert",
+  "title": "e\u02e3 + x = 0",
+  "ce": {
+   "op": "solve",
+   "var": "x",
+   "mathjson": [
+    "Add",
+    [
+     "Exp",
+     "x"
+    ],
+    "x"
+   ]
+  },
+  "sympy": {
+   "expr": "x + exp(x)",
+   "result": {
+    "status": "ok",
+    "roots": [
+     "-0.567143290409783840111402"
+    ]
+   }
+  },
+  "verify": {
+   "kind": "roots",
+   "cardinality": "finite",
+   "roots": [
+    "-0.567143290409783840111402"
+   ]
+  }
+ },
+ {
+  "id": "W3",
+  "cat": "lambert",
+  "title": "x + 2\u02e3 = 0",
+  "ce": {
+   "op": "solve",
+   "var": "x",
+   "mathjson": [
+    "Add",
+    "x",
+    [
+     "Power",
+     2,
+     "x"
+    ]
+   ]
+  },
+  "sympy": {
+   "expr": "2**x + x",
+   "result": {
+    "status": "ok",
+    "roots": [
+     "-0.641185744504985999370206"
+    ]
+   }
+  },
+  "verify": {
+   "kind": "roots",
+   "cardinality": "finite",
+   "roots": [
+    "-0.641185744504985999370206"
+   ]
+  }
+ },
+ {
+  "id": "W4",
+  "cat": "lambert",
+  "title": "x\u00b7e\u02e3 \u2212 3 = 0",
+  "ce": {
+   "op": "solve",
+   "var": "x",
+   "mathjson": [
+    "Subtract",
+    [
+     "Multiply",
+     "x",
+     [
+      "Exp",
+      "x"
+     ]
+    ],
+    3
+   ]
+  },
+  "sympy": {
+   "expr": "x*exp(x) - 3",
+   "result": {
+    "status": "ok",
+    "roots": [
+     "1.04990889496404005143404"
+    ]
+   }
+  },
+  "verify": {
+   "kind": "roots",
+   "cardinality": "finite",
+   "roots": [
+    "1.04990889496404005143404"
+   ]
+  }
+ },
+ {
+  "id": "T1",
+  "cat": "trig",
+  "title": "arctan x \u2212 1/2 = 0",
+  "ce": {
+   "op": "solve",
+   "var": "x",
+   "mathjson": [
+    "Subtract",
+    [
+     "Arctan",
+     "x"
+    ],
+    [
+     "Divide",
+     1,
+     2
+    ]
+   ]
+  },
+  "sympy": {
+   "expr": "atan(x) - 1/2",
+   "result": {
+    "status": "ok",
+    "roots": [
+     "0.546302489843790484158603"
+    ]
+   }
+  },
+  "verify": {
+   "kind": "roots",
+   "cardinality": "finite",
+   "roots": [
+    "0.546302489843790484158603"
+   ]
+  }
+ },
+ {
+  "id": "T2",
+  "cat": "trig",
+  "title": "arcsin x \u2212 1/3 = 0",
+  "ce": {
+   "op": "solve",
+   "var": "x",
+   "mathjson": [
+    "Subtract",
+    [
+     "Arcsin",
+     "x"
+    ],
+    [
+     "Divide",
+     1,
+     3
+    ]
+   ]
+  },
+  "sympy": {
+   "expr": "asin(x) - 1/3",
+   "result": {
+    "status": "ok",
+    "roots": [
+     "0.327194696796152262319168"
+    ]
+   }
+  },
+  "verify": {
+   "kind": "roots",
+   "cardinality": "finite",
+   "roots": [
+    "0.327194696796152262319168"
+   ]
+  }
+ },
+ {
+  "id": "T3",
+  "cat": "trig",
+  "title": "sin x \u2212 1/2 = 0 (infinite)",
+  "ce": {
+   "op": "solve",
+   "var": "x",
+   "mathjson": [
+    "Subtract",
+    [
+     "Sin",
+     "x"
+    ],
+    [
+     "Divide",
+     1,
+     2
+    ]
+   ]
+  },
+  "sympy": {
+   "expr": "sin(x) - 1/2",
+   "result": {
+    "status": "ok",
+    "roots": [
+     "0.523598775598298926681196",
+     "2.61799387799149441136137"
+    ]
+   }
+  },
+  "verify": {
+   "kind": "roots",
+   "cardinality": "infinite",
+   "roots": []
+  }
+ },
+ {
+  "id": "T4",
+  "cat": "trig",
+  "title": "2cos x \u2212 1 = 0 (infinite)",
+  "ce": {
+   "op": "solve",
+   "var": "x",
+   "mathjson": [
+    "Subtract",
+    [
+     "Multiply",
+     2,
+     [
+      "Cos",
+      "x"
+     ]
+    ],
+    1
+   ]
+  },
+  "sympy": {
+   "expr": "2*cos(x) - 1",
+   "result": {
+    "status": "ok",
+    "roots": [
+     "1.04719755119659785336239",
+     "5.23598775598298882272275"
+    ]
+   }
+  },
+  "verify": {
+   "kind": "roots",
+   "cardinality": "infinite",
+   "roots": []
+  }
+ },
+ {
+  "id": "H1",
+  "cat": "hyperbolic",
+  "title": "sinh x \u2212 1 = 0",
+  "ce": {
+   "op": "solve",
+   "var": "x",
+   "mathjson": [
+    "Subtract",
+    [
+     "Sinh",
+     "x"
+    ],
+    1
+   ]
+  },
+  "sympy": {
+   "expr": "sinh(x) - 1",
+   "result": {
+    "status": "ok",
+    "roots": [
+     "0.881373587019543047738068"
+    ]
+   }
+  },
+  "verify": {
+   "kind": "roots",
+   "cardinality": "finite",
+   "roots": [
+    "0.881373587019543047738068"
+   ]
+  }
+ },
+ {
+  "id": "H2",
+  "cat": "hyperbolic",
+  "title": "cosh x \u2212 2 = 0",
+  "ce": {
+   "op": "solve",
+   "var": "x",
+   "mathjson": [
+    "Subtract",
+    [
+     "Cosh",
+     "x"
+    ],
+    2
+   ]
+  },
+  "sympy": {
+   "expr": "cosh(x) - 2",
+   "result": {
+    "status": "ok",
+    "roots": [
+     "-1.31695789692481679544755",
+     "1.31695789692481679544755"
+    ]
+   }
+  },
+  "verify": {
+   "kind": "roots",
+   "cardinality": "finite",
+   "roots": [
+    "-1.31695789692481679544755",
+    "1.31695789692481679544755"
+   ]
+  }
+ },
+ {
+  "id": "H3",
+  "cat": "hyperbolic",
+  "title": "tanh x \u2212 1/2 = 0",
+  "ce": {
+   "op": "solve",
+   "var": "x",
+   "mathjson": [
+    "Subtract",
+    [
+     "Tanh",
+     "x"
+    ],
+    [
+     "Divide",
+     1,
+     2
+    ]
+   ]
+  },
+  "sympy": {
+   "expr": "tanh(x) - 1/2",
+   "result": {
+    "status": "ok",
+    "roots": [
+     "0.549306144334054891054109"
+    ]
+   }
+  },
+  "verify": {
+   "kind": "roots",
+   "cardinality": "finite",
+   "roots": [
+    "0.549306144334054891054109"
+   ]
+  }
+ },
+ {
+  "id": "FR1",
+  "cat": "frontier",
+  "title": "x \u2212 cos x = 0 (Dottie)",
+  "ce": {
+   "op": "solve",
+   "var": "x",
+   "mathjson": [
+    "Subtract",
+    "x",
+    [
+     "Cos",
+     "x"
+    ]
+   ]
+  },
+  "sympy": {
+   "expr": "x - cos(x)",
+   "result": {
+    "status": "unsolved",
+    "roots": []
+   }
+  },
+  "verify": {
+   "kind": "roots",
+   "cardinality": "finite",
+   "roots": [
+    "0.739085133215160641655312"
+   ]
+  }
+ },
+ {
+  "id": "FR2",
+  "cat": "frontier",
+  "title": "e\u02e3 \u2212 x \u2212 2 = 0",
+  "ce": {
+   "op": "solve",
+   "var": "x",
+   "mathjson": [
+    "Subtract",
+    [
+     "Subtract",
+     [
+      "Exp",
+      "x"
+     ],
+     "x"
+    ],
+    2
+   ]
+  },
+  "sympy": {
+   "expr": "-x + exp(x) - 2",
+   "result": {
+    "status": "ok",
+    "roots": [
+     "-1.8414056604369606340299",
+     "1.14619322062058248690164"
+    ]
+   }
+  },
+  "verify": {
+   "kind": "roots",
+   "cardinality": "finite",
+   "roots": [
+    "-1.8414056604369606378466",
+    "1.14619322062058258523706"
+   ]
+  }
+ },
+ {
+  "id": "FR3",
+  "cat": "frontier",
+  "title": "x\u00b2 \u2212 cos x = 0",
+  "ce": {
+   "op": "solve",
+   "var": "x",
+   "mathjson": [
+    "Subtract",
+    [
+     "Power",
+     "x",
+     2
+    ],
+    [
+     "Cos",
+     "x"
+    ]
+   ]
+  },
+  "sympy": {
+   "expr": "x**2 - cos(x)",
+   "result": {
+    "status": "unsolved",
+    "roots": []
+   }
+  },
+  "verify": {
+   "kind": "roots",
+   "cardinality": "finite",
+   "roots": [
+    "-0.824132312302522422960957",
+    "0.824132312302522422960957"
+   ]
+  }
+ }
+]

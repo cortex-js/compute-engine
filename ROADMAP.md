@@ -93,29 +93,42 @@ not the scoreboard. The two tracks are independent and should not gate each othe
 
 #### R. Rubi — integration coverage by chapter
 
-**State:** only **Chapter 1 (Algebraic functions)** is translated (67 rule-docs
-→ ~2.6k compiled rules, bundled in
-`src/compute-engine/rubi/rubi-rules-data.json`, exposed via
-`@cortex-js/compute-engine/integration-rules`). Chapter 1 has already paid out
-everything Wester asks of it: of the 8 hard Wester indefinite integrals, Rubi
-recovers only the single *algebraic* one (`(3x−5)²/(2x−1)^(7/2)`). (`CE+R/F`
-closes 2/8 — that one plus `|x|`, which the core antiderivative now handles.)
+**State:** **Chapter 1 (Algebraic functions)** is translated and bundled (67
+rule-docs → ~2.6k rules in `src/compute-engine/rubi/rubi-rules-data.json`,
+exposed via `@cortex-js/compute-engine/integration-rules`), **plus the
+Chapter-4 trig `(a+b cos+c sin)` Weierstrass family** (`4.1.6`, 57 rules) from
+the trig pilot. The pilot closed the **three `1/(3cos x + 4sin x + k)` Wester
+integrals** (∅→✅ under `CE+R/F`) via a minimal active↔inert trig head-swap
+bridge — Wester indefinite-∫ is now `CE+R/F` 6/8 (overall 32/48). The **2
+remaining Wester indefinite gaps** are **exponential** (`2^x/√(4^x+1)`,
+`u = 2^x → arcsinh`) and **hyperbolic** (`sinh⁴x/cosh²x`), both in untranslated
+chapters.
 
-**The 5 remaining Wester indefinite-∫ gaps live entirely in untranslated
-chapters**, so closing them *is* chapter translation (not tuning what we have),
-and it lines up with broad everyday payoff:
+**In progress — full Chapter 4 (trig).** The whole cost is the **inert-trig
+utility layer** (77% of the chapter's 2,117 rules match inert `cos`/`sin`;
+extraction + compilation are free — `docs/rubi/RUBI.md` §1/§5). The ch4 corpus
+is translated; the runtime utility port is incremental, validated per-section
+against the **Rubi test suite** (the real metric). Landed: `ExpandTrig` + the
+predicates `InertTrigFreeQ`/`FalseQ`/`InverseFunctionFreeQ`. The verified
+solve-rate climbs in steps — each utility unlocks the next; the current 4.1 Sine
+bottleneck chain is the ordered next-rung list:
 
-- **Trig** — the three `1/(3cos x + 4sin x + k)` (Weierstrass / tangent-half-angle).
-- **Exponential** — `2^x/√(4^x+1)` (`u = 2^x → arcsinh`).
-- **Hyperbolic** — `sinh⁴x / cosh²x`.
+1. **`match.ts` AC-split enumeration** for `u_*y_^m_.` shapes — the reverse-
+   chain-rule (`Int[u·y^m]`) rules can't reach the `u=cos, y=sin` split today,
+   which blocks `DerivativeDivides`.
+2. **`DerivativeDivides`** — *perf-careful* (the naive port stalls: it runs
+   `D`+`simplify` on every wrong AC-binding; gate hard, skip `simplify` unless
+   it can help) — and **`FunctionOfTrig`/`SubstFor`** (the tan / tan-half
+   substitution engine).
+3. **`TrigSimplify`/`TrigSimplifyQ`** (Pythagorean reductions).
+4. The **136 `FixInertTrigFunction`/`UnifyInertTrigFunction`** argument-
+   unification clauses.
+5. Bundle the full chapter + validate against the ~22k-problem trig suite;
+   re-run Wester as a spot-check.
 
-**Plan:** translate chapters in gap-priority order, **trig first** — the biggest
-single Wester cluster *and* the broadest general payoff, and a de-risking
-**pilot** that calibrates the real cost/ROI per chapter before committing to the
-full multi-chapter port (Julia-port playbook in `docs/rubi/RUBI.md`). Then
-exponential, then hyperbolic. Measure each chapter against the **Rubi test
-suite** (the real metric), re-running Wester incrementally as a spot-check after
-each — not once at the end. Per-chapter coverage + packaging tracked in
+Then **exponential** (Ch 2, 125 rules) and **hyperbolic** (Ch 6, 390 rules):
+both use ACTIVE heads in their LHS (no inert layer) → ≈ Chapter-1 difficulty,
+cheaper than the rest of Chapter 4. Per-chapter coverage + packaging tracked in
 `docs/rubi/RUBI.md` §5.
 
 #### F. Fungrim — solving coverage
