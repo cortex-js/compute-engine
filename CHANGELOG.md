@@ -390,7 +390,7 @@ benchmarks/report_changelog.mjs`.</sub>
   arbitrary-precision integers.
 
 - `ce.number()` now throws a helpful error when passed a MathJSON expression
-  array; use `ce.box()` for expressions.
+  array; use `ce.expr()` for expressions.
 
 - Fixed incorrect simplification or evaluation of `2^i`, division by a
   floating-point zero coefficient, and several exact expressions involving
@@ -429,6 +429,23 @@ benchmarks/report_changelog.mjs`.</sub>
   the always-float number literals and scalar shader math — and an explicit
   `["Declare", "r", "complex"]` type is honored. Complex locals still declare
   as `vec2`/`vec2f`.
+
+- **`Loop` now compiles to JavaScript that returns its collected values.** A
+  value loop such as `Loop(i², Element(i, Range(1, 5)))` compiled to a
+  `for`-loop IIFE with no `return`, so it evaluated to `undefined` at runtime
+  instead of the `[1, 4, 9, 16, 25]` the interpreter produces. The compiled
+  loop now collects each iteration's value and returns the array. Imperative
+  loops that mutate an outer accumulator or use `Break`/`Continue`/`Return` are
+  unchanged.
+
+- **`Integrate` now compiles to JavaScript that returns a numeric estimate.**
+  For the common `\int x^2 dx` parse shape (where the integrand is a `Function`
+  expression), the integrand was wrapped in a double lambda
+  (`(x) => ((x) => x*x)`), so the Monte-Carlo estimator never called the inner
+  function and returned `NaN`; it now compiles to a single lambda and returns
+  the estimate (e.g. `∫₀¹ x² dx ≈ 0.333`). Integration bounds are also no
+  longer floored, so non-integer limits such as `∫₀^0.5` integrate over the
+  correct interval.
 
 ## 0.59.0 _2026-06-10_
 
@@ -663,7 +680,7 @@ This release includes some breaking changes.
     (mixed dimension)
   - `[]` → `list<nothing>` (empty)
 
-- **`ce.box(true)` / `ce.box(false)`** — JS boolean primitives now box to the
+- **`ce.expr(true)` / `ce.expr(false)`** — JS boolean primitives now box to the
   `True` / `False` symbols (previously fell through to `Undefined`).
 
 - **`Length` operator definition** — `ce.operatorInfo('Length')` now returns a

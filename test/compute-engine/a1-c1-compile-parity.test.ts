@@ -212,7 +212,7 @@ describe('A1 — Random GPU compile (deterministic seed)', () => {
     // In GPU shaders the seed is typically a per-fragment integer expression.
     ce.declare('n', 'integer');
     const target = new GLSLTarget();
-    const expr = ce.box(['Random', 'n']);
+    const expr = ce.expr(['Random', 'n']);
     const result = target.compile(expr);
     expect(result.success).toBe(true);
     expect(result.code).toMatch(/_gpu_random|fract\(sin/);
@@ -221,7 +221,7 @@ describe('A1 — Random GPU compile (deterministic seed)', () => {
   test('Random() with no seed compiles to a fragment-coord-based fallback in GLSL', () => {
     const ce = new ComputeEngine();
     const target = new GLSLTarget();
-    const expr = ce.box(['Random']);
+    const expr = ce.expr(['Random']);
     const result = target.compile(expr);
     expect(result.success).toBe(true);
     expect(result.code).toMatch(/gl_FragCoord|_gpu_random/);
@@ -233,7 +233,7 @@ describe('A1 — Random GPU compile (deterministic seed)', () => {
     ce.declare('n2', 'integer');
     const target = new GLSLTarget();
     // Use Random twice in same expression — preamble should appear only once.
-    const expr = ce.box(['Add', ['Random', 'n1'], ['Random', 'n2']]);
+    const expr = ce.expr(['Add', ['Random', 'n1'], ['Random', 'n2']]);
     const result = target.compile(expr);
     expect(result.success).toBe(true);
     // The function definition should appear exactly once in the preamble.
@@ -259,43 +259,42 @@ describe('A1 — Random GPU compile (deterministic seed)', () => {
   });
 });
 
-describe('A1 — Loop / Integrate verify-only', () => {
-  // NOTE: Both JS cases below have known bugs filed as separate concerns.
-  // The tests lock in the *current* observed behavior, not the desired behavior.
-
-  test('Loop compiles in JS (current behavior: imperative for-loop, returns undefined)', () => {
-    // BUG (separate concern): Loop(i^2, Element(i, Range(1,5))) takes the legacy
-    // imperative for-loop path which has no return/collect value.
-    // The generated IIFE has no `return` statement, so run({}) === undefined.
-    // CE evaluates Loop to ["List",1,4,9,16,25]; JS compile should match.
+describe('A1 — Loop / Integrate JS compile', () => {
+  test('Loop compiles in JS to the List of body values', () => {
+    // Loop(i^2, Element(i, Range(1,5))) evaluates to ["List",1,4,9,16,25];
+    // the compiled JS now collects each iteration's value and returns it.
     const ce = new ComputeEngine();
     const expr = ce.parse(
       '\\operatorname{Loop}(i^2, \\operatorname{Element}(i, \\operatorname{Range}(1, 5)))'
     );
     const result = compile(expr);
-    // Compile itself succeeds (generates code without throwing)
     expect(result?.success).toBe(true);
-    // The generated code is a for-loop IIFE — imperative, no return value
+    // Still uses the efficient counter-loop form …
     expect(result?.code).toMatch(/for\s*\(let i/);
-    // run({}) returns undefined because the IIFE has no return statement
-    expect(result?.run?.({})).toBeUndefined();
+    // … but now returns the collected values rather than undefined.
+    expect(result?.run?.({})).toEqual([1, 4, 9, 16, 25]);
   });
 
-  test('Integrate compiles in JS (current behavior: double-lambda, returns NaN)', () => {
-    // BUG (separate concern): Integrate(Function(Block(Power(x,2)), x), Limits(x, 0, 1))
-    // has args[0] = Function[...] which BaseCompiler.compile turns into a lambda.
-    // compileIntegrate then wraps it again: (x) => ((x) => (x*x)).
-    // _SYS.integrate receives a function-returning function, not a number-returning
-    // function, so the Monte Carlo estimate returns NaN.
+  test('Integrate compiles in JS to a numeric estimate of the integral', () => {
+    // Integrate(Function(Block(Power(x,2)), x), Limits(x, 0, 1)). The integrand
+    // is now compiled to a single lambda (not a double-lambda), so the
+    // Monte-Carlo estimator returns ≈ 1/3 instead of NaN.
     const ce = new ComputeEngine();
     const expr = ce.parse('\\int_{0}^{1} x^2 \\, dx');
     const result = compile(expr);
-    // Compile itself succeeds (generates code without throwing)
     expect(result?.success).toBe(true);
-    // The generated code wraps the integrand in a double-lambda
     expect(result?.code).toMatch(/_SYS\.integrate/);
-    // run({}) returns NaN because of the double-lambda wrapping bug
-    expect(result?.run?.({})).toBeNaN();
+    expect(result?.run?.({})).toBeCloseTo(1 / 3, 2);
+  });
+
+  test('Integrate honors non-integer bounds (no flooring)', () => {
+    // Regression: extractLimits floors bounds, which collapsed ∫₀^0.5 to ∫₀^0.
+    // True value ∫₀^0.5 x² dx = 0.5³/3 ≈ 0.0417.
+    const ce = new ComputeEngine();
+    const expr = ce.parse('\\int_{0}^{0.5} x^2 \\, dx');
+    const result = compile(expr);
+    expect(result?.success).toBe(true);
+    expect(result?.run?.({})).toBeCloseTo(0.5 ** 3 / 3, 2);
   });
 
   test('Loop with runtime-bound range surfaces a diagnostic in GLSL', () => {

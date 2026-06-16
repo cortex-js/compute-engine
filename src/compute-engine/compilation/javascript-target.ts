@@ -1783,37 +1783,50 @@ function compileSumProduct(
 }
 
 /**
- * Compile integration function
+ * Compile integration to a call to the runtime Monte-Carlo estimator
+ * `_SYS.integrate(f, a, b)`.
  *
- * Known issue: when `args[0]` is a `Function` expression (the common LaTeX
- * `\int x^2 dx` parse shape), this produces a double-lambda wrapping
- * `(x) => ((x) => x*x)` that makes `_SYS.integrate` return NaN. See
- * `test/compute-engine/a1-c1-compile-parity.test.ts` ("Integrate compiles
- * in JS") for the verify-only test that locks in current behavior.
+ * The integrand (`args[0]`) is either a bare expression in the integration
+ * variable or — the common LaTeX `\int x^2 dx` parse shape — a `Function`
+ * expression `Function(body, param)`. We compile the *body* directly into a
+ * single-argument lambda: compiling the `Function` itself would already lower
+ * it to a lambda, and wrapping that again would produce a double-lambda
+ * `(x) => ((x) => x*x)` whose inner function is never called, so the estimator
+ * received a function-returning function and returned `NaN`.
+ *
+ * The bounds are passed through as their real values. `extractLimits` floors
+ * the bounds (correct for the discrete `Sum`/`Product` counters it also
+ * serves, wrong for a continuous integral — it collapsed e.g. `∫₀^0.5` to
+ * `∫₀^0`), so we compile the bound expressions directly instead.
  */
 function compileIntegrate(
   args: ReadonlyArray<Expression>,
   _: (expr: Expression) => TargetSource,
   target: CompileTarget<Expression>
 ): string {
-  const { index, lowerExpr, upperExpr, lowerNum, upperNum } = extractLimits(
-    args[1]
-  );
-  const f = BaseCompiler.compile(args[0], {
+  const { index, lowerExpr, upperExpr } = extractLimits(args[1]);
+
+  // Unwrap a `Function(body, param)` integrand to its body, binding the
+  // lambda to the function's own parameter; otherwise the integrand is a bare
+  // expression in the limits' index variable.
+  let lambdaVar = index;
+  let bodyExpr = args[0];
+  if (isFunction(args[0], 'Function')) {
+    const params = args[0].ops.slice(1).filter((x) => isSymbol(x));
+    if (params.length >= 1 && isSymbol(params[0]))
+      lambdaVar = params[0].symbol;
+    bodyExpr = args[0].ops[0];
+  }
+
+  const f = BaseCompiler.compile(bodyExpr, {
     ...target,
-    var: (id) => (id === index ? id : target.var(id)),
+    var: (id) => (id === lambdaVar ? id : target.var(id)),
   });
 
-  const lo =
-    lowerNum !== undefined
-      ? String(lowerNum)
-      : BaseCompiler.compile(lowerExpr, target);
-  const hi =
-    upperNum !== undefined
-      ? String(upperNum)
-      : BaseCompiler.compile(upperExpr, target);
+  const lo = BaseCompiler.compile(lowerExpr, target);
+  const hi = BaseCompiler.compile(upperExpr, target);
 
-  return `_SYS.integrate((${index}) => (${f}), ${lo}, ${hi})`;
+  return `_SYS.integrate((${lambdaVar}) => (${f}), ${lo}, ${hi})`;
 }
 
 /**
