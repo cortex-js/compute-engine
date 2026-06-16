@@ -2299,6 +2299,143 @@ export function activateTrig(ce: ComputeEngine, e: Expression): Expression {
   return mapTrigHeads(ce, e, TO_ACTIVE);
 }
 
+// Active trig single-node test (one of Sin/Cos/Tan/Cot/Sec/Csc), used by the
+// reverse-chain and FunctionOfTrig utilities below (which run on ACTIVE heads,
+// the rules pre-wrap their arguments in ActivateTrig).
+function activeTrigHeadQ(e: Expression): boolean {
+  return TO_INERT[e.operator] !== undefined;
+}
+
+// ---------------------------------------------------------------------------
+// Reverse chain rule: EasyDQ + DerivativeDivides (4.7.5 #64–#67).
+//
+// DerivativeDivides[y, u, x] (IntegrationUtilityFunctions.m): if d/dx(y)
+// divides u with an x-free quotient q, returns q — so ∫ u·y^m dx = q·y^(m+1)/
+// (m+1) (e.g. ∫cos·sin⁴ has y=sin, u=cos, q = cos/cos = 1). Otherwise returns
+// the symbol `False`. The 4.7.5 rules gate via `With[{q=DerivativeDivides[…]},
+// … /; Not[FalseQ[q]]]`, so the non-applicable branch MUST return the False
+// *symbol*, never RuleFail (a throw would abort the whole rule, not just this
+// binding).
+//
+// Performance (the naive port stalled the benchmark — it ran D+Simplify on
+// every wrong AC binding of every integrand): (1) `easyDQ` short-circuits any
+// y that is not cheap to differentiate before any D/Simplify; (2) the quotient
+// u/v is formed canonically first and only `safeSimplify`d when it still
+// carries x (the common trig case `cos/cos`, `sec²/sec²` reduces in canonical
+// form, so Simplify is skipped entirely).
+// ---------------------------------------------------------------------------
+
+/** Rubi EasyDQ — conservative: true iff y is cheap to differentiate wrt x.
+ * Fail-closed (unknown shapes → false), which only makes DerivativeDivides
+ * decline a binding; it never produces a wrong quotient. */
+function easyDQ(u: Expression, x: string): boolean {
+  if (!u.ops || u.ops.length === 0 || !u.has(x)) return true; // atom / x-free
+  const op = u.operator;
+  if (CALCULUS_FNS.has(op)) return false;
+  if (op === 'Power') return !u.ops[1].has(x) && easyDQ(u.ops[0], x);
+  if (op === 'Divide') return u.ops.every((o) => easyDQ(o, x));
+  if (u.ops.length === 1) return easyDQ(u.ops[0], x); // Sin[v], Cos[v], Negate…
+  if (op === 'Multiply') {
+    const nonfree = u.ops.filter((o) => o.has(x));
+    return nonfree.length <= 1 && nonfree.every((o) => easyDQ(o, x));
+  }
+  if (op === 'Add') return u.ops.every((o) => easyDQ(o, x));
+  return false;
+}
+
+/** DerivativeDivides[y, u, x] — see block comment. Returns the x-free quotient
+ * or the `False` symbol. */
+function derivativeDivides(
+  y: Expression,
+  u: Expression,
+  ctx: Ctx
+): Expression {
+  const ce = ctx.ce;
+  const x = ctx.x;
+  const FALSE = ce.symbol('False');
+  // Rubi: MatchQ[y, a_.*x /; FreeQ[a,x]] → False (degree-1 monomial, no
+  // constant term: the trivial linear case handled by polynomial rules).
+  const ydeg = polyDegreeX(y, x);
+  if (ydeg === 1) {
+    const yc = polyCoeffsX(y, x);
+    if (yc !== null && yc.length === 2 && zeroQ(yc[0])) return FALSE;
+  }
+  // Rubi: If[PolynomialQ[y], PolynomialQ[u] && Exponent[u]==Exponent[y]-1,
+  // EasyDQ[y]] — a hard gate before any differentiation.
+  if (ydeg >= 0) {
+    const udeg = polyDegreeX(u, x);
+    if (!(udeg >= 0 && udeg === ydeg - 1)) return FALSE;
+  } else if (!easyDQ(y, x)) {
+    return FALSE;
+  }
+  const v = ce.function('D', [y, ce.symbol(x)]).evaluate();
+  if (zeroQ(v)) return FALSE;
+  let q = u.div(v); // canonical quotient: cos/cos → 1, sin⁴/(−sin) → −sin³
+  if (!q.has(x)) return q;
+  q = safeSimplify(q);
+  if (!q.has(x)) return q;
+  return FALSE;
+}
+
+// ---------------------------------------------------------------------------
+// FunctionOfTrig[u, x] (IntegrationUtilityFunctions.m): returns the linear
+// argument v such that u is a function of trig functions all sharing v
+// (commensurate arguments), else the `False` symbol. It gates the universal
+// tan-half substitution rule 4.7.5#83. Without it, `Not[FalseQ[FunctionOfTrig
+// [u,x]]]` was vacuously true (the unimplemented head built an inert node, not
+// False), so #83 fired on EVERY integrand — even pure-algebraic ones like x⁴ —
+// and recursed via SubstFor to the depth cap, exhausting the driver budget
+// before earlier reverse-chain rules could fire. Implemented fail-closed: a
+// non-trig subterm of x (an unknown function, a bare x, a polynomial in x)
+// makes the whole thing False, matching Rubi.
+// ---------------------------------------------------------------------------
+
+// false = incompatible (Rubi False); null = no trig seen yet (Rubi Null);
+// Expression = the common argument found so far.
+type FotState = Expression | null | false;
+
+function fotAux(u: Expression, v: FotState, x: string): FotState {
+  if (v === false) return false;
+  if (!u.ops || u.ops.length === 0) {
+    // atom: a bare x kills it (not a function *of* trig); else propagate v
+    return u.symbol === x ? false : v;
+  }
+  if (activeTrigHeadQ(u) && polyDegreeX(u.ops[0], x) === 1) {
+    const arg = u.ops[0];
+    if (v === null) return arg;
+    if (arg.isSame(v)) return v; // fast path: identical arguments
+    // commensurate-argument check (Sin[x] with Sin[2x] etc.):
+    // v=a+b·x, arg=c+d·x; need a·d−b·c = 0 and b/d rational.
+    const vc = polyCoeffsX(v, x);
+    const ac = polyCoeffsX(arg, x);
+    if (vc === null || ac === null || vc.length > 2 || ac.length > 2)
+      return false;
+    const a = vc[0] ?? u.engine.Zero;
+    const b = vc[1] ?? u.engine.Zero;
+    const c = ac[0] ?? u.engine.Zero;
+    const d = ac[1] ?? u.engine.Zero;
+    if (!zeroQ(a.mul(d).sub(b.mul(c)))) return false;
+    const bd = safeSimplify(b.div(d));
+    if (!(bd.isNumberLiteral && bd.isRational === true)) return false;
+    const num = bd.numerator;
+    return a.div(num).add(b.div(num).mul(u.engine.symbol(x)));
+  }
+  if (CALCULUS_FNS.has(u.operator)) return false;
+  // recurse over operands, threading the argument state
+  let w: FotState = v;
+  for (const op of u.ops) {
+    w = fotAux(op, w, x);
+    if (w === false) return false;
+  }
+  return w;
+}
+
+/** FunctionOfTrig[u, x]: the common linear trig argument, or the False symbol. */
+function functionOfTrig(ce: ComputeEngine, u: Expression, x: string): Expression {
+  const r = fotAux(activateTrig(ce, u), null, x);
+  return r === null || r === false ? ce.symbol('False') : r;
+}
+
 // FreeFactors[u, x] / NonfreeFactors[u, x] (IntegrationUtilityFunctions.m):
 // the product of the factors of u that are free of x (resp. not free of x).
 // Rubi maps over a Product replacing the complementary factors with 1; a
@@ -2406,6 +2543,28 @@ const VALUE_FNS: Record<string, ValueFn> = {
   // ActivateTrig[…] to turn the inert working form back into Sin/Cos.
   ActivateTrig: (args, ctx) => activateTrig(ctx.ce, build(args[0], ctx)),
   DeactivateTrig: (args, ctx) => deactivateTrig(ctx.ce, build(args[0], ctx)),
+
+  // DerivativeDivides[y, u, x] — reverse chain rule (4.7.5 #64–#67). The rules
+  // bind it in `With[{q=…}, … /; Not[FalseQ[q]]]`, so it returns the x-free
+  // quotient on success or the `False` symbol otherwise (never RuleFail).
+  DerivativeDivides: (args, ctx) => {
+    if (args.length < 3) return fail('DerivativeDivides arity');
+    return derivativeDivides(build(args[0], ctx), build(args[1], ctx), ctx);
+  },
+
+  // FunctionOfTrig[u, x] — the common linear trig argument or the `False`
+  // symbol. Gates the universal tan-half substitution rule 4.7.5#83 (and
+  // FunctionOfTrigOfLinearQ); fail-closed so #83 cannot fire on non-trig
+  // integrands (which previously recursed via SubstFor to the depth cap).
+  FunctionOfTrig: (args, ctx) =>
+    functionOfTrig(ctx.ce, build(args[0], ctx), ctx.x),
+
+  // SubstFor[…] — the trig/hyperbolic universal-substitution engine
+  // (SubstForTrig with TrigExpand, half-angle machinery). Not yet ported:
+  // fail-closed so rule 4.7.5#83's `With`-binding fails fast instead of
+  // recursing on an inert `SubstFor(…)` node. (Implementing it is the
+  // remaining bulk of Chapter 4 — see docs/rubi/RUBI.md §5.)
+  SubstFor: () => fail('SubstFor not implemented'),
 
   // FreeFactors[u, x] / NonfreeFactors[u, x] — the x-free (resp. x-dependent)
   // factor product; needed by the Weierstrass tan(x/2) substitution rules.

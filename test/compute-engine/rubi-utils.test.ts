@@ -205,3 +205,48 @@ describe('Rt — RtAux principal-branch rendering', () => {
     expect(() => build(['Rt', 'cyc', 4] as Json, ctx)).not.toThrow();
   });
 });
+
+describe('reverse chain rule — DerivativeDivides (4.7.5 #64–#67)', () => {
+  // Rules pass ActivateTrig[y]/ActivateTrig[u]; pass active heads directly.
+  const dd = (y: Json, u: Json): Expression =>
+    build(['DerivativeDivides', y, u, 'x'] as Json, ctx);
+
+  test('D(sin)=cos divides cos → 1 (∫cos·sin^m)', () => {
+    expect(dd(['Sin', 'x'], ['Cos', 'x']).isSame(1)).toBe(true);
+  });
+
+  test('D(tan)=sec² divides sec² → 1 (∫sec²·tan^m)', () => {
+    expect(dd(['Tan', 'x'], ['Power', ['Sec', 'x'], 2]).isSame(1)).toBe(true);
+  });
+
+  test('the wrong AC split returns the False symbol (not RuleFail)', () => {
+    // y=cos, u=sin⁴: u/D(cos) = sin⁴/(−sin) = −sin³, not free of x
+    expect(dd(['Cos', 'x'], ['Power', ['Sin', 'x'], 4]).symbol).toBe('False');
+  });
+
+  test('a bare linear y (a·x) is declined → False', () => {
+    expect(dd(['Multiply', 2, 'x'], ['Cos', 'x']).symbol).toBe('False');
+  });
+});
+
+describe('FunctionOfTrig (gates the universal substitution rule 4.7.5#83)', () => {
+  const fot = (u: Json): Expression =>
+    build(['FunctionOfTrig', u, 'x'] as Json, ctx);
+
+  test('non-trig integrands are False (so #83 cannot fire on them)', () => {
+    expect(fot(['Power', 'x', 4]).symbol).toBe('False');
+    expect(fot(['Add', 1, ['Power', 'x', 2]]).symbol).toBe('False');
+  });
+
+  test('a function of trig of a single linear arg returns that argument', () => {
+    expect(fot(['Multiply', ['Cos', 'x'], ['Power', ['Sin', 'x'], 4]]).symbol)
+      .toBe('x');
+    expect(fot(['Power', ['Tan', 'x'], 3]).symbol).toBe('x');
+  });
+
+  test('trig mixed with a non-trig function of x is False', () => {
+    expect(fot(['Multiply', ['Sin', 'x'], ['Power', 'x', 2]]).symbol).toBe(
+      'False'
+    );
+  });
+});
