@@ -92,6 +92,28 @@ export function createSymbolExpression(
 
   if (!canonical) return new BoxedSymbol(engine, name, { metadata });
 
+  // A function parameter shadows any same-named constant (`i`, `e`, ...) within
+  // its body: while that body is being canonicalized, the parameter name is on
+  // the engine's shadowed-parameter stack. Resolve it as an ordinary local
+  // variable — use a closer non-constant binding if one exists, otherwise
+  // auto-declare it locally. This leaves the closure-capture machinery (which
+  // relies on free/captured variables auto-declaring in the innermost function
+  // scope) completely untouched.
+  if (engine._isShadowedParameter(name)) {
+    let pdef = engine.lookupDefinition(name);
+    if (!pdef || (isValueDef(pdef) && pdef.value.isConstant)) {
+      let autoScope = engine.context.lexicalScope;
+      while (autoScope.noAutoDeclare && autoScope.parent)
+        autoScope = autoScope.parent;
+      pdef = engine._declareSymbolValue(
+        name,
+        { type: 'unknown', inferred: true },
+        autoScope
+      );
+    }
+    return new BoxedSymbol(engine, name, { metadata, def: pdef });
+  }
+
   const result = commonSymbols[name];
   if (result) return result;
 

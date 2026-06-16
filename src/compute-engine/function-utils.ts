@@ -211,28 +211,36 @@ export function canonicalFunctionLiteralArguments(
 ): Expression | undefined {
   if (ops.length === 0) return undefined;
 
-  // If the body is not scoped, we need to create a new scope
-  // and add the parameters to it.
-  // `["Function", ["Add", "_", 1], "_"]`
-  // becomes `["Function", ["Block", ["Add", "_", 1]], "_"]`
-  // @fixme: the body is canonicalized here, *before* the parameters are
-  // declared in its scope. A parameter named like a constant (`e`, `i`, `pi`)
-  // is therefore rewritten to the constant within the body and the binding is
-  // lost — e.g. `Function(e·2, e)` becomes `(e) ↦ 2·ExponentialE`, so applying
-  // it returns `2e` instead of the argument doubled. Declaring the parameters
-  // before canonicalizing the body (mirroring `canonicalLoop`) fixes the
-  // shadowing but breaks nested-closure capture, which depends on the exact
-  // scope structure built here and re-parented at call time in `makeLambda`.
-  const block =
-    ops[0].operator === 'Block'
-      ? ops[0].canonical
-      : ce.function('Block', [ops[0]]);
-
   const params = ops
     .slice(1)
     .map((x) =>
       isSymbol(x) ? x : ce.error('expected-a-symbol', x.toString())
     );
+
+  // If the body is not scoped, we need to create a new scope
+  // and add the parameters to it.
+  // `["Function", ["Add", "_", 1], "_"]`
+  // becomes `["Function", ["Block", ["Add", "_", 1]], "_"]`
+  //
+  // The body is canonicalized here. While it is, the parameter names are pushed
+  // onto the engine's shadowed-parameter stack so a parameter named like a
+  // constant (`i`, `e`, ...) resolves to the parameter, not the constant —
+  // `Function(2·i, i)` stays `(i) ↦ 2·i` instead of becoming `(i) ↦ 2i`. The
+  // shadowing only blocks the constant substitution; the parameter is still
+  // auto-declared as an ordinary local in the body scope, so the closure-capture
+  // machinery is unaffected.
+  ce._pushShadowedParameters(
+    params.filter((p) => isSymbol(p)).map((p) => p.symbol)
+  );
+  let block: Expression;
+  try {
+    block =
+      ops[0].operator === 'Block'
+        ? ops[0].canonical
+        : ce.function('Block', [ops[0]]);
+  } finally {
+    ce._popShadowedParameters();
+  }
 
   console.assert(block.isScoped);
   // Declare the arguments in the scope of the body of the function.

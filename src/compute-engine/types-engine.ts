@@ -426,6 +426,17 @@ export interface IComputeEngine {
   ): BoxedDefinition;
 
   /**
+   * Push a set of parameter names that, while canonicalizing a function body,
+   * shadow any same-named constant (`i`, `e`, ...) so they resolve as ordinary
+   * local variables. Balanced with `_popShadowedParameters`.
+   * @internal */
+  _pushShadowedParameters(names: ReadonlyArray<string>): void;
+  /** @internal */
+  _popShadowedParameters(): void;
+  /** True if `name` is an active shadowed parameter (see above). @internal */
+  _isShadowedParameter(name: string): boolean;
+
+  /**
    * Use `ce.expr(id)` instead
    * @internal */
   _getSymbolValue(id: MathJsonSymbol): Expression | undefined;

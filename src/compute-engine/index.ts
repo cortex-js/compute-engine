@@ -1235,6 +1235,28 @@ export class ComputeEngine implements IComputeEngine {
     printStackImpl(this, options);
   }
 
+  /** Stack of parameter-name sets active while canonicalizing function bodies.
+   * @internal */
+  private _shadowedParameterStack: Set<string>[] = [];
+
+  /** @internal */
+  _pushShadowedParameters(names: ReadonlyArray<string>): void {
+    this._shadowedParameterStack.push(new Set(names));
+  }
+
+  /** @internal */
+  _popShadowedParameters(): void {
+    this._shadowedParameterStack.pop();
+  }
+
+  /** @internal */
+  _isShadowedParameter(name: string): boolean {
+    const stack = this._shadowedParameterStack;
+    for (let i = stack.length - 1; i >= 0; i--)
+      if (stack[i].has(name)) return true;
+    return false;
+  }
+
   /**
    * Use `ce.expr(name)` instead
    * @internal */

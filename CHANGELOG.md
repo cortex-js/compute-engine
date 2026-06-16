@@ -2,6 +2,16 @@
 
 ### Resolved Issues
 
+- **A function parameter now shadows a same-named constant.** A parameter named
+  like a constant (`i`, `e`, `Pi`/`\pi`, …) was rewritten to the constant while
+  the function body was canonicalized, so the binding was lost — `λi. 2i` applied
+  to `5` returned `2i` (the imaginary unit doubled) instead of `10`. Parameters
+  now shadow whatever their name means in the enclosing scope — a constant, an
+  assigned variable, or nothing — which is standard lexical scoping. A free
+  symbol that is *not* a parameter is unchanged (`i` outside a parameter is still
+  the imaginary unit), and closure capture is preserved (`λi. λz. (z + i)`
+  captures `i` correctly).
+
 - **`compile()` no longer emits a dangling reference to a symbol that has an
   assigned value (GLSL, WGSL, JavaScript, and interval-JS targets).** When an
   expression referenced a symbol with an assigned value in the engine
