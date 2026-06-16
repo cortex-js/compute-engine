@@ -77,6 +77,120 @@ export function gamma(z: number): number {
 }
 
 /**
+ * Exponential integral E₁(z) = Γ(0, z) = ∫_z^∞ e^{−t}/t dt, for real z > 0.
+ *
+ * Power series (DLMF 6.6.2) for small z, Legendre continued fraction
+ * (NR §6.3, the n = 1 case of Eₙ) for z ≳ 1.5. Returns NaN for z ≤ 0
+ * (E₁ is complex on the negative real axis — the complex kernel handles it).
+ */
+function e1Real(z: number): number {
+  if (z <= 0) return NaN;
+  if (z < 1.5) {
+    // E₁(z) = −γ − ln z − Σ_{k≥1} (−z)^k/(k·k!)
+    let sum = 0;
+    let term = 1; // (−z)^k/k!, updated in the loop
+    for (let k = 1; k < 200; k++) {
+      term *= -z / k;
+      const add = -term / k;
+      sum += add;
+      if (Math.abs(add) < 1e-18) break;
+    }
+    return -EULER_GAMMA - Math.log(z) + sum;
+  }
+  // E₁(z) = e^{−z}·CF,  CF = 1/(z+1 − 1²/(z+3 − 2²/(z+5 − …)))  (Lentz)
+  const tiny = 1e-300;
+  let b = z + 1;
+  let c = 1 / tiny;
+  let d = 1 / b;
+  let h = d;
+  for (let i = 1; i < 200; i++) {
+    const a = -i * i;
+    b += 2;
+    d = a * d + b;
+    if (Math.abs(d) < tiny) d = tiny;
+    c = b + a / c;
+    if (Math.abs(c) < tiny) c = tiny;
+    d = 1 / d;
+    const del = d * c;
+    h *= del;
+    if (Math.abs(del - 1) < 1e-16) break;
+  }
+  return h * Math.exp(-z);
+}
+
+/** Lower incomplete gamma γ(s, z), real, z > 0, s NOT a non-positive integer.
+ *  Tricomi series: γ(s,z) = z^s e^{−z} Σ_{k≥0} z^k / (s)_{k+1}. */
+function lowerGammaSeriesReal(s: number, z: number): number {
+  let term = 1 / s; // k = 0 term
+  let sum = term;
+  for (let k = 1; k < 1000; k++) {
+    term *= z / (s + k);
+    sum += term;
+    if (Math.abs(term) < Math.abs(sum) * 1e-17) break;
+  }
+  return Math.exp(s * Math.log(z) - z) * sum;
+}
+
+/** Upper incomplete gamma Γ(s, z), real, via the Legendre continued
+ *  fraction (NR §6.2 gcf); valid for z ≳ s and any real s. */
+function upperGammaCFReal(s: number, z: number): number {
+  const tiny = 1e-300;
+  // Γ(s,z) = z^s e^{−z} / (z+1−s − 1·(1−s)/(z+3−s − 2·(2−s)/(…)))
+  let b = z + 1 - s;
+  let c = 1 / tiny;
+  let d = 1 / b;
+  let h = d;
+  for (let i = 1; i < 1000; i++) {
+    const an = -i * (i - s);
+    b += 2;
+    d = an * d + b;
+    if (Math.abs(d) < tiny) d = tiny;
+    c = b + an / c;
+    if (Math.abs(c) < tiny) c = tiny;
+    d = 1 / d;
+    const del = d * c;
+    h *= del;
+    if (Math.abs(del - 1) < 1e-16) break;
+  }
+  return Math.exp(s * Math.log(z) - z) * h;
+}
+
+/** Upper incomplete gamma Γ(s, z) for s a non-positive integer, real z > 0,
+ *  via downward recurrence Γ(s−1,z) = (Γ(s,z) − z^{s−1} e^{−z})/(s−1) seeded
+ *  by Γ(0, z) = E₁(z). The Γ(s) − γ(s,z) split is unusable here (Γ(s) is a
+ *  pole), and the continued fraction converges slowly for small z. */
+function upperGammaNegIntReal(s: number, z: number): number {
+  let g = e1Real(z); // Γ(0, z)
+  const emz = Math.exp(-z);
+  for (let cur = 0; cur > s; cur--)
+    g = (g - Math.pow(z, cur - 1) * emz) / (cur - 1);
+  return g;
+}
+
+/**
+ * Upper incomplete gamma function Γ(s, z) = ∫_z^∞ t^{s−1} e^{−t} dt, for
+ * real s and real z ≥ 0. (This is Mathematica/Rubi's `Gamma[s, z]`.)
+ *
+ * Returns NaN for z < 0, where Γ(s, z) is generally complex (z^s with a
+ * non-integer s) — the caller's complex kernel handles that branch.
+ *
+ * Regime split (NR §6.2), plus an E₁-seeded recurrence for the
+ * non-positive-integer s where the Γ(s) − γ(s,z) decomposition is invalid:
+ *   - s a non-positive integer → downward recurrence from Γ(0,z) = E₁(z)
+ *   - z < s + 1                → Γ(s,z) = Γ(s) − γ(s,z) (lower Tricomi series)
+ *   - z ≥ s + 1                → Legendre continued fraction
+ */
+export function incompleteGammaUpper(s: number, z: number): number {
+  if (Number.isNaN(s) || Number.isNaN(z)) return NaN;
+  if (z < 0) return NaN; // complex result — defer to the complex kernel
+  if (z === 0) return gamma(s); // Γ(s,0) = Γ(s) (∞ at non-positive integer s)
+
+  if (Number.isInteger(s) && s <= 0) return upperGammaNegIntReal(s, z);
+  if (z < s + 1) return gamma(s) - lowerGammaSeriesReal(s, z);
+  return upperGammaCFReal(s, z);
+}
+
+/**
  * Winitzki's approximation for the inverse error function, accurate to
  * ~2e-3 relative over (-1, 1). Used as the Newton seed for `erfInv()` and
  * `bigErfInv()`.

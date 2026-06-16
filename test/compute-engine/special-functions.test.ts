@@ -83,6 +83,80 @@ describe('POLYGAMMA FUNCTION', () => {
   });
 });
 
+describe('INCOMPLETE GAMMA FUNCTION Γ(s, z)', () => {
+  // Reference values from mpmath `mp.gammainc(s, z)` (upper incomplete gamma,
+  // Mathematica/Rubi `Gamma[s, z]` convention).
+  test('Γ(2, 1) = 2/e', () => {
+    expectApprox(ce.expr(['Gamma', 2, 1]), 0.7357588823428847);
+  });
+
+  test('Γ(5, 3) (positive integer s)', () => {
+    expectApprox(ce.expr(['Gamma', 5, 3]), 19.56631786857053, 1e-9);
+  });
+
+  test('Γ(0, 1) = E₁(1)', () => {
+    expectApprox(ce.expr(['Gamma', 0, 1]), 0.21938393439552029);
+  });
+
+  test('Γ(1/2, 1) = √π·erfc(1)', () => {
+    expectApprox(
+      ce.expr(['Gamma', ['Rational', 1, 2], 1]),
+      0.27880558528066196
+    );
+  });
+
+  test('Γ(-1, 1) (negative-integer s, recurrence)', () => {
+    expectApprox(ce.expr(['Gamma', -1, 1]), 0.14849550677592205);
+  });
+
+  test('Γ(-4, 2) (negative-integer s, recurrence)', () => {
+    expectApprox(ce.expr(['Gamma', -4, 2]), 0.001332650012645189, 1e-9);
+  });
+
+  test('Γ(1/3, 2) (fractional s)', () => {
+    expectApprox(ce.expr(['Gamma', ['Rational', 1, 3], 2]), 0.0681364144414591);
+  });
+
+  test('Γ(s, 0) = Γ(s) reduction', () => {
+    expectApprox(ce.expr(['Gamma', 2.5, 0]), 1.3293403881791370); // Γ(2.5)
+  });
+
+  test('Γ(2, -1) = 0 (real, integer s, negative z)', () => {
+    const v = ce.expr(['Gamma', 2, -1]).N();
+    expect(Math.abs(v.re)).toBeLessThan(1e-12);
+  });
+
+  test('Γ(3, 40) large positive z = e⁻⁴⁰(40²+2·40+2)', () => {
+    // mpmath: 7.145731857400453e-15 — small but exact via CF
+    const v = ce.expr(['Gamma', 3, 40]).N();
+    expect(Math.abs(v.re - 7.145731857400453e-15) / 7.146e-15).toBeLessThan(
+      1e-9
+    );
+  });
+
+  test('Γ(2, -26) large negative z (asymptotic; was catastrophic cancellation)', () => {
+    // mpmath: -4893240235720.969 = e²⁶·(−25), exact for integer s
+    const v = ce.expr(['Gamma', 2, -26]).N();
+    expect(Math.abs(v.re - -4893240235720.969) / 4.893e12).toBeLessThan(1e-9);
+  });
+
+  test('Γ(1/2, -1) complex result', () => {
+    // mpmath: 1.77245385090552 - 2.92530349181436j
+    const v = ce.expr(['Gamma', ['Rational', 1, 2], -1]).N();
+    expect(Math.abs(v.re - 1.7724538509055)).toBeLessThan(1e-9);
+    expect(Math.abs(v.im - -2.9253034918144)).toBeLessThan(1e-9);
+  });
+
+  test('Γ(2, x) stays symbolic without numericApproximation', () => {
+    expect(ce.expr(['Gamma', 2, 'x']).evaluate().toString()).toBe('Gamma(2, x)');
+  });
+
+  test('1-argument Γ still works (Γ(5) = 24, Γ(0) = ~oo)', () => {
+    expectApprox(ce.expr(['Gamma', 5]), 24);
+    expect(ce.expr(['Gamma', 0]).N().toString()).toContain('oo');
+  });
+});
+
 describe('BETA FUNCTION', () => {
   test('B(1, 1) = 1', () => {
     expectApprox(ce.expr(['Beta', 1, 1]), 1);

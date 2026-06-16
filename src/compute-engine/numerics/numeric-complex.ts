@@ -76,6 +76,155 @@ const C_NAN = new Complex(NaN, NaN);
 const C_ONE = new Complex(1, 0);
 const C_ZERO = new Complex(0, 0);
 
+const EULER_GAMMA = 0.5772156649015329;
+
+//
+// ---------------- Upper incomplete gamma Γ(s, z) (complex) ----------------
+//
+// Γ(s, z) = ∫_z^∞ t^{s−1} e^{−t} dt, analytically continued over the complex
+// plane (principal branch of z^s). Mirrors the machine-real kernels in
+// numerics/special-functions.ts; this is the workhorse — the real kernel
+// returns NaN for z < 0 (a complex result) and applyN cascades here.
+//
+
+/** E₁(z) = Γ(0, z) for complex z ≠ 0 (principal branch). Entire series
+ *  (times −ln z) for modest |z|; Legendre continued fraction for large
+ *  Re(z) > 0. */
+function e1Complex(z: Complex): Complex {
+  if (z.abs() < 20 || z.re <= 0) {
+    // E₁(z) = −γ − ln z − Σ_{k≥1} (−z)^k/(k·k!)
+    let sum = C_ZERO;
+    let term = C_ONE; // (−z)^k/k!
+    for (let k = 1; k < 500; k++) {
+      term = term.mul(z.neg()).div(k);
+      const add = term.div(-k);
+      sum = sum.add(add);
+      if (add.abs() < 1e-18 * (1 + sum.abs())) break;
+    }
+    return new Complex(-EULER_GAMMA, 0).sub(z.log()).add(sum);
+  }
+  // E₁(z) = e^{−z}·CF,  CF = 1/(z+1 − 1²/(z+3 − 2²/(z+5 − …)))  (Lentz)
+  const tiny = new Complex(1e-300, 0);
+  let b = z.add(1);
+  let c = C_ONE.div(tiny);
+  let d = C_ONE.div(b);
+  let h = d;
+  for (let i = 1; i < 500; i++) {
+    const a = -i * i;
+    b = b.add(2);
+    d = d.mul(a).add(b);
+    if (d.abs() < 1e-300) d = tiny;
+    c = b.add(c.inverse().mul(a));
+    if (c.abs() < 1e-300) c = tiny;
+    d = d.inverse();
+    const del = d.mul(c);
+    h = h.mul(del);
+    if (del.sub(C_ONE).abs() < 1e-16) break;
+  }
+  return h.mul(z.neg().exp());
+}
+
+/** Lower incomplete gamma γ(s, z), complex (Tricomi series, s not a
+ *  non-positive integer). */
+function lowerGammaSeriesComplex(s: Complex, z: Complex): Complex {
+  let term = C_ONE.div(s); // k = 0 term
+  let sum = term;
+  for (let k = 1; k < 2000; k++) {
+    term = term.mul(z).div(s.add(k));
+    sum = sum.add(term);
+    if (term.abs() < 1e-17 * sum.abs()) break;
+  }
+  return z.pow(s).mul(z.neg().exp()).mul(sum);
+}
+
+/** Upper incomplete gamma Γ(s, z), complex, via the divergent asymptotic
+ *  series Γ(s,z) ~ z^{s−1} e^{−z} Σ_{k≥0} (s−1)(s−2)…(s−k)/z^k truncated at
+ *  its smallest term. This is the only method that avoids catastrophic
+ *  cancellation for large |z| with Re(z) < 0 (where the lower-series e^{−z}
+ *  prefactor and the alternating sum each blow up); accuracy ≈ the smallest
+ *  term, which falls with |z| relative to |s|. */
+function upperGammaAsymptoticComplex(s: Complex, z: Complex): Complex {
+  let term = C_ONE; // k = 0
+  let sum = C_ONE;
+  for (let k = 1; k < 1000; k++) {
+    const next = term.mul(s.sub(k)).div(z); // term_k = term_{k−1}·(s−k)/z
+    if (next.abs() > term.abs()) break; // smallest-term truncation
+    term = next;
+    sum = sum.add(term);
+    if (term.abs() < 1e-17 * sum.abs()) break;
+  }
+  return z.pow(s.sub(1)).mul(z.neg().exp()).mul(sum);
+}
+
+/** Upper incomplete gamma Γ(s, z), complex, Legendre continued fraction. */
+function upperGammaCFComplex(s: Complex, z: Complex): Complex {
+  const tiny = new Complex(1e-300, 0);
+  let b = z.add(1).sub(s); // z + 1 − s
+  let c = C_ONE.div(tiny);
+  let d = C_ONE.div(b);
+  let h = d;
+  for (let i = 1; i < 2000; i++) {
+    const an = s.sub(i).mul(i); // −i·(i − s) = i·(s − i)
+    b = b.add(2);
+    d = an.mul(d).add(b);
+    if (d.abs() < 1e-300) d = tiny;
+    c = b.add(an.div(c));
+    if (c.abs() < 1e-300) c = tiny;
+    d = d.inverse();
+    const del = d.mul(c);
+    h = h.mul(del);
+    if (del.sub(C_ONE).abs() < 1e-16) break;
+  }
+  return z.pow(s).mul(z.neg().exp()).mul(h);
+}
+
+/** Γ(s, z) for s a non-positive integer, complex z, via downward recurrence
+ *  Γ(s−1,z) = (Γ(s,z) − z^{s−1} e^{−z})/(s−1) seeded by Γ(0,z) = E₁(z). */
+function upperGammaNegIntComplex(sInt: number, z: Complex): Complex {
+  let g = e1Complex(z); // Γ(0, z)
+  const emz = z.neg().exp();
+  for (let cur = 0; cur > sInt; cur--)
+    g = g.sub(z.pow(cur - 1).mul(emz)).div(cur - 1);
+  return g;
+}
+
+/**
+ * Upper incomplete gamma Γ(s, z) for complex s and z (z ≠ 0). Region split:
+ *   - |z| large            → divergent asymptotic series (any s, any arg)
+ *   - s a non-positive integer → recurrence from Γ(0,z) = E₁(z)
+ *   - Re(z) > 0 and |z| ≥ |s|+1 → continued fraction
+ *   - otherwise                → Γ(s) − γ(s,z) (lower series, entire in z)
+ *
+ * Accurate to ~1e-10 across the plane EXCEPT a narrow band (Re(z) < 0, |z| ≈
+ * 15–25, s a negative non-integer) where neither the cancelling lower series
+ * nor the not-yet-converged asymptotic reaches full double precision — there
+ * the worst case is ~2e-3 relative. Closing that band needs Temme's uniform
+ * asymptotics or extended-precision summation (deferred — out of the Rubi-
+ * verification regime, which mostly lands at smaller |z|).
+ */
+export function incompleteGammaUpperComplex(s: Complex, z: Complex): Complex {
+  if (s.isNaN() || z.isNaN()) return C_NAN;
+  if (z.isZero()) return gamma(s);
+
+  const az = z.abs();
+  const sAbs = s.abs();
+
+  // Large |z| (any arg): the asymptotic series is the only cancellation-free
+  // method, and it works for every s (incl. non-positive integers, where the
+  // lower-series Γ(s) − γ split is invalid). The threshold keeps the smallest
+  // term small relative to |s|.
+  if (az > sAbs + 14 && az > 12) return upperGammaAsymptoticComplex(s, z);
+
+  if (s.im === 0 && Number.isInteger(s.re) && s.re <= 0)
+    return upperGammaNegIntComplex(s.re, z);
+
+  // Right half-plane, moderate |z|: continued fraction (no cancellation).
+  if (z.re > 0 && az >= sAbs + 1) return upperGammaCFComplex(s, z);
+
+  // Small/moderate |z|: Γ(s) − γ(s,z) (lower Tricomi series, entire in z).
+  return gamma(s).sub(lowerGammaSeriesComplex(s, z));
+}
+
 //
 // ---------------- Arithmetic-geometric mean (complex) ----------------
 //

@@ -17,12 +17,13 @@ import {
 } from '../boxed-expression/numerics';
 import { addOrder } from '../boxed-expression/order';
 
-import { apply, apply2 } from '../boxed-expression/apply';
+import { apply, apply2, applyN } from '../boxed-expression/apply';
 import { flatten } from '../boxed-expression/flatten';
 
 import {
   gamma as gammaComplex,
   gammaln as lngammaComplex,
+  incompleteGammaUpperComplex,
 } from '../numerics/numeric-complex';
 import {
   factorial2 as bigFactorial2,
@@ -37,6 +38,7 @@ import {
 import {
   gamma,
   gammaln,
+  incompleteGammaUpper,
   bigGamma,
   bigGammaln,
   digamma,
@@ -575,16 +577,43 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
 
     Gamma: {
-      description: 'Gamma function, extending factorial to complex numbers.',
+      description:
+        'Gamma function Γ(z); with two arguments, the upper incomplete gamma Γ(s, z) = ∫_z^∞ tˢ⁻¹ e⁻ᵗ dt.',
       wikidata: 'Q190573',
       complexity: 8000,
       broadcastable: true,
-      signature: '(number) -> number',
+      signature: '(number, number?) -> number',
       type: (ops) => numericTypeHandler(ops),
 
-      sgn: ([x]) =>
-        x.isPositive ? 'positive' : x.isSame(0) ? 'zero' : undefined,
-      evaluate: ([x], { numericApproximation, engine }) => {
+      sgn: (ops) =>
+        ops.length === 1
+          ? ops[0].isPositive
+            ? 'positive'
+            : ops[0].isSame(0)
+              ? 'zero'
+              : undefined
+          : undefined,
+      evaluate: (ops, { numericApproximation, engine }) => {
+        // Upper incomplete gamma Γ(s, z) (Mathematica/Rubi `Gamma[s, z]`).
+        if (ops.length === 2) {
+          const [s, z] = ops;
+          // Γ(s, 0) = Γ(s): reduce so the 1-arg exact paths (incl. poles)
+          // apply.
+          if (isNumber(z) && z.isSame(0))
+            return engine.function('Gamma', [s]).evaluate({
+              numericApproximation,
+            });
+          return numericApproximation
+            ? applyN(
+                [s, z],
+                (s, z) => incompleteGammaUpper(s, z),
+                undefined,
+                (s, z) => incompleteGammaUpperComplex(s, z)
+              )
+            : undefined;
+        }
+
+        const x = ops[0];
         // Gamma has poles at the non-positive integers (0, -1, -2, ...).
         // This is exact, so return it regardless of numericApproximation.
         if (isNumber(x) && x.im === 0 && x.isInteger && x.isNonPositive)
