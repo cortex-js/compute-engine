@@ -380,6 +380,50 @@ describe('WGSL COMPILATION', () => {
       expect(code).not.toContain('})()');
       expect(code).toContain('var tmp: f32');
     });
+
+    // Regression: a local bound to an integer-valued literal must declare as
+    // `f32`, not `i32` — the assignment is always emitted as a float literal
+    // (`r = 3.0;`) and the variable feeds float arithmetic, so an `i32`
+    // declaration produces non-compilable WGSL. (GP team bug report.)
+    it('should declare an integer-valued local as f32', () => {
+      const expr = ce.expr([
+        'Block',
+        ['Declare', 'r'],
+        ['Assign', 'r', 3],
+        ['Add', 'r', ['Multiply', 'x', 'x']],
+      ]);
+      const code = wgsl.compile(expr).code;
+      expect(code).toMatchInlineSnapshot(`
+        var r: f32;
+        r = 3.0;
+        return x * x + r;
+      `);
+      expect(code).not.toContain('i32');
+    });
+
+    it('should declare a float-literal-valued local as f32', () => {
+      const expr = ce.expr([
+        'Block',
+        ['Declare', 'r'],
+        ['Assign', 'r', 3.0],
+        ['Add', 'r', ['Multiply', 'x', 'x']],
+      ]);
+      const code = wgsl.compile(expr).code;
+      expect(code).not.toContain('i32');
+      expect(code).toContain('var r: f32');
+    });
+
+    it('should honor an explicit real-typed Declare as f32', () => {
+      const expr = ce.expr([
+        'Block',
+        ['Declare', 'r', 'real'],
+        ['Assign', 'r', 3],
+        ['Add', 'r', ['Multiply', 'x', 'x']],
+      ]);
+      const code = wgsl.compile(expr).code;
+      expect(code).not.toContain('i32');
+      expect(code).toContain('var r: f32');
+    });
   });
 
   describe('Relational and Logical Operators', () => {

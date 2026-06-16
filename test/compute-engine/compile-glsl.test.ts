@@ -332,6 +332,50 @@ describe('GLSL COMPILATION', () => {
       expect(code).not.toContain('})()');
       expect(code).toContain('float tmp');
     });
+
+    // Regression: a local bound to an integer-valued literal must declare as
+    // `float`, not `int` — the assignment is always emitted as a float literal
+    // (`r = 3.0;`) and the variable feeds float arithmetic, so an `int`
+    // declaration produces non-compilable GLSL. (GP team bug report.)
+    it('should declare an integer-valued local as float', () => {
+      const expr = ce.expr([
+        'Block',
+        ['Declare', 'r'],
+        ['Assign', 'r', 3],
+        ['Add', 'r', ['Multiply', 'x', 'x']],
+      ]);
+      const code = glsl.compile(expr).code;
+      expect(code).toMatchInlineSnapshot(`
+        float r;
+        r = 3.0;
+        return x * x + r;
+      `);
+      expect(code).not.toContain('int r');
+    });
+
+    it('should declare a float-literal-valued local as float', () => {
+      const expr = ce.expr([
+        'Block',
+        ['Declare', 'r'],
+        ['Assign', 'r', 3.0],
+        ['Add', 'r', ['Multiply', 'x', 'x']],
+      ]);
+      const code = glsl.compile(expr).code;
+      expect(code).not.toContain('int r');
+      expect(code).toContain('float r');
+    });
+
+    it('should honor an explicit real-typed Declare as float', () => {
+      const expr = ce.expr([
+        'Block',
+        ['Declare', 'r', 'real'],
+        ['Assign', 'r', 3],
+        ['Add', 'r', ['Multiply', 'x', 'x']],
+      ]);
+      const code = glsl.compile(expr).code;
+      expect(code).not.toContain('int r');
+      expect(code).toContain('float r');
+    });
   });
 
   describe('Relational and Logical Operators', () => {

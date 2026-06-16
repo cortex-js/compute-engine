@@ -341,19 +341,35 @@ export class BaseCompiler {
       return BaseCompiler.compile(args[0], target);
     }
 
-    // Infer GPU type hints for Declare+Assign pairs
+    // Infer GPU type hints for block locals.
+    //
+    // GPU shader scalars are always `float`/`f32`. We intentionally never
+    // infer `int`/`i32` for an integer-valued local: GPU number literals are
+    // always emitted with a decimal point (`3` → `3.0`, see formatGPUNumber)
+    // and scalar shader arithmetic is float, so an `int`-typed declaration
+    // would disagree with its own float assignment (`int r; r = 3.0;` — not
+    // valid GLSL) and poison every downstream use in float math. Only a
+    // complex-valued local needs a non-default hint (`vec2`/`vec2f`);
+    // everything else uses the `float` default in `target.declare`.
     const typeHints: Record<string, string | undefined> = {};
     if (target.declare && target.language) {
       const isWGSL = target.language === 'wgsl';
+      const vec2 = isWGSL ? 'vec2f' : 'vec2';
       for (const local of locals) {
         for (const arg of args) {
+          // Honor an explicit complex type on the `Declare` itself.
+          if (
+            isFunction(arg, 'Declare') &&
+            isSymbol(arg.ops[0], local) &&
+            isSymbol(arg.ops[1], 'complex')
+          ) {
+            typeHints[local] = vec2;
+            break;
+          }
+          // Otherwise infer from the assigned value (complex ⇒ vec2;
+          // all real/integer scalars fall through to the float default).
           if (isFunction(arg, 'Assign') && isSymbol(arg.ops[0], local)) {
-            const rhs = arg.ops[1];
-            if (BaseCompiler.isComplexValued(rhs)) {
-              typeHints[local] = isWGSL ? 'vec2f' : 'vec2';
-            } else if (BaseCompiler.isIntegerValued(rhs)) {
-              typeHints[local] = isWGSL ? 'i32' : 'int';
-            }
+            if (BaseCompiler.isComplexValued(arg.ops[1])) typeHints[local] = vec2;
             break;
           }
         }

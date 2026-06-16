@@ -421,6 +421,15 @@ benchmarks/report_changelog.mjs`.</sub>
   which re-parses as `a^(bᶜ)`, a different expression. It now serializes as
   `{aᵇ}^ᶜ`, so e.g. `(x³)^{2/5}` round-trips instead of becoming `x^{3^{2/5}}`.
 
+- **GLSL/WGSL compilation no longer declares `int`/`i32` for a `Block`'s local
+  bindings.** An integer-valued local (e.g. `["Assign", "r", 3]`) was declared
+  as `int r;` while its value was emitted as a float literal (`r = 3.0;`),
+  producing non-compilable shader code that also poisoned downstream float
+  arithmetic. Scalar locals are now declared as `float`/`f32` — consistent with
+  the always-float number literals and scalar shader math — and an explicit
+  `["Declare", "r", "complex"]` type is honored. Complex locals still declare
+  as `vec2`/`vec2f`.
+
 ## 0.59.0 _2026-06-10_
 
 This is a significant update to the Compute Engine.
