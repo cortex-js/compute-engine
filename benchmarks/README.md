@@ -141,7 +141,7 @@ of the report still builds.
 
 A deeper companion: **Compute Engine vs SymPy only** (the strongest symbolic
 competitor), across *several operations*, to **find where CE trails** and surface
-bugs. Two sources feed it, each writing a report ranked by CE shortfalls:
+bugs. Three sources feed it, each writing its own report:
 
 | File | Role |
 |---|---|
@@ -150,10 +150,13 @@ bugs. Two sources feed it, each writing a report ranked by CE shortfalls:
 | `audit/audit.ts` | Orchestrator (`npx tsx`): runs CE in-process, spawns SymPy, grades both identically → **`audit/REPORT-audit.md`**. |
 | `audit/wester.ts` | Ingests the **Wester** suite (`benchmarks/wester/*.m`, Mathematica) via `scripts/rubi/wl-parser.ts`, auto-categorizes by parsed head, runs **base CE / CE+Rubi+Fungrim / SymPy** → **`audit/REPORT-wester.md`**. |
 | `audit/run_sympy_wester.py` | SymPy side of the Wester run. |
+| `audit/gen_solve.py` | Adapts SymPy's `test_solveset.py` (univariate) → `audit/solve_cases.json`, with SymPy's `solve()` outcome and vetted reference roots per case. |
+| `audit/solve.ts` | The **univariate solving** benchmark: runs **base CE / CE+Fungrim solve templates / SymPy**, graded by a root-substitution oracle → **`audit/REPORT-solve.md`**. |
 
 ```bash
 python benchmarks/audit/gen.py && npx tsx benchmarks/audit/audit.ts   # hand-authored audit
 npx tsx benchmarks/audit/wester.ts                                     # Wester audit
+./venv/bin/python3 benchmarks/audit/gen_solve.py && npx tsx benchmarks/audit/solve.ts  # univariate solving
 ```
 
 **Grading** is by operation invariant, so no reference answers are needed:
@@ -163,6 +166,13 @@ equal the true gcd. Limits and definite integrals have no cheap reliable numeric
 oracle, so for those *correct = the tool returned a finite value*, with CE-vs-SymPy
 disagreements flagged separately (`≠` in `REPORT-wester.md`). A `Factor` form
 check additionally flags value-correct-but-malformed results (e.g. `√x`/`|x|`).
+
+The **solving** benchmark (`solve.ts`) is the exception that does use curated
+references: each returned root must be **sound** (substituted into the residual
+it gives `≈ 0`), and a `finite` solution set must also be **complete** (cover
+the reference root set), while an `infinite` (periodic trig) set asks only for
+one sound root — so CE is not penalized for declining to enumerate an unbounded
+root set (the artifact the Wester `Solve` grading suffered from).
 
 The Wester files are GPL (Michael Wester's CAS-review suite); `benchmarks/wester/`
 holds the Mathematica form (parseable by `wl-parser`). The Maxima variant in
