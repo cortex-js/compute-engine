@@ -1,6 +1,6 @@
 # Compute Engine — Roadmap
 
-**Last updated:** 2026-06-15.
+**Last updated:** 2026-06-16.
 
 This document tracks **remaining** work; an item leaves this file once it lands.
 Detail on completed work lives in git history, `CHANGELOG.md`, the linked source
@@ -225,38 +225,78 @@ The item-17 / B-series performance pass is largely complete (`ln`, `exp`, `kˣ`,
 
 ### Symbolic-evaluation performance
 
-#### P1. Differentiation — defer canonicalization to the end (exploration)
+#### P1. Differentiation performance (~1.8–3× available) — DEFERRED
+
+**Status (2026-06-16): deferred.** Verified, scoped, and a direction chosen, but
+not worth the churn right now. Picked up below for whoever resumes it.
 
 The cross-library benchmark (`benchmarks/REPORT.md`) puts CE's differentiation
-**~30× slower than Wolfram** (median 0.15 ms vs 0.0044 ms) — and, unlike
-simplification and integration where CE is ~2× _faster_, the gap **widens with
-expression size**: `d/dx sin x` is ~12× off, `d/dx x²·sin x` (product rule)
-~100×, `d/dx √(1−x²)` (chain rule) ~145×. Wolfram's `D` is essentially flat
-(~4 µs regardless of structure); CE grows 43 → 1146 µs across those cases. The
-differentiation _algorithm_ is a trivial syntactic recursion — the cost is
-**per-node canonicalization**: `symbolic/derivative.ts` assembles every result
-through the canonical arithmetic helpers (`.mul()`, `.add()`, `.div()`, `.pow()`,
-`.neg()`), so each intermediate node is reordered, flattened and number-folded as
-it is built, and a larger derivative tree pays that tax at every node.
+**~38× slower than Wolfram** (median 0.17 ms vs 0.0044 ms), and the gap **widens
+with expression size** (`d/dx sin x` ~6×, `d/dx x²·sin x` ~80×, `d/dx √(1−x²)`
+~114×); Wolfram's `D` is essentially flat (~4 µs regardless of structure).
 (`simplifyDerivative` is already a no-op, so simplification is _not_ the cost.)
 
-**Exploration:** build the derivative tree **structurally** (deferred /
-non-canonical construction — `{ structural: true }` / raw `_fn`), then
-canonicalize **once** at the outermost `differentiate()` call. Wolfram's flat
-profile suggests the algorithm itself is near-free, so this could close most of
-the gap.
+**Profiled 2026-06-16 (verified — `.perf-explore/profile-diff*.mjs`).** The
+original hypothesis (the cost is per-node canonicalization, and deferring it
+"closes most of the gap") is **only partly right**. Decomposing the per-call path
+(`ce.box(['D', …]).evaluate()`, warm; D09 √(1−x²) ≈ 0.35 ms) gives three cost
+centers:
 
-**Measure / de-risk before committing:**
+- **final `f.evaluate()` ≈ 60% — the largest, and largely redundant.** The
+  canonical derivative already equals the evaluated form for **8 of 9** benchmark
+  cases (only D09 changes, trivially: `-(x·1/√(1−x²))` → `-x/√(1−x²)`). Skipping
+  it is the single biggest lever.
+- **per-node canonicalization ≈ 20%** — real (it _is_ ~70–100% of
+  `differentiate()`'s own time), but a minority of the call. This is the helper
+  tax: `symbolic/derivative.ts` builds every node through `.mul()/.add()/.div()/
+  .pow()/.neg()`, each of which reorders/flattens/folds.
+- **recursion + node allocation/binding + box ≈ 20%** — fixed `BoxedExpression`
+  overhead deferral can't touch.
 
-- Spike one rule path (e.g. product or chain rule) built structurally and
-  re-measure, to confirm how much of the 30× is canonicalization vs. fixed
-  `BoxedExpression`/GC overhead that deferral can't touch.
-- Output must stay **identical** to today's canonical form — pin with the
-  calculus snapshots. Note `.mul()` _distributes_ over sums (`k·(a+b)→ka+kb`)
-  while a structural `Multiply` does not, so a naive swap can change result shape;
-  build factored products deliberately and canonicalize at the top.
-- `differentiate()` recurses — defer through the recursion and canonicalize only
-  at the outermost level, not at each step.
+**Measured ceilings** (true structural-diff spike, end-to-end, output checked):
+
+- Defer canonicalization, **keep** the final evaluate (output byte-identical to
+  today, all 9 cases): **~1.8× median** (1.0–3.3×). Much of what per-node canon
+  saved is paid back by the one mandatory top-level canonical pass.
+- Additionally **drop** the redundant final evaluate (return `f.canonical`):
+  **~5× median** (2.7–9.5×); output identical for 7/9, two differ only in
+  factoring (`(ln x+1)·xˣ` vs `xˣ+ln(x)·xˣ`).
+
+**Conclusion: this is a ~2–3× win, not Wolfram parity.** Even the most aggressive
+variant leaves CE ~8–20× slower than Wolfram — the residual is intrinsic to the
+boxed/bound representation (one canonical pass + node allocation/binding) and is
+not closable by deferral. Wolfram's flat profile is lightweight term-rewriting,
+not a canonicalization strategy CE can adopt without changing its representation.
+
+**Two levers, with the drop-evaluate one prototyped and measured:**
+
+- **Drop the redundant final `f.evaluate()`** (`library/calculus.ts` ~213, return
+  the canonical derivative) — the bigger win (~2–3.5×), but **it changes what `D`
+  returns** (canonical form, not fully-evaluated), so it is a semantic change, not
+  a pure optimization. Prototyped 2026-06-16; full `derivatives`+`calculus` suites
+  give a **12-snapshot blast radius**: _2 regressions_ — `ln(e)` no longer folds
+  to 1 (`d/dx eˣ → ln(e)·eˣ`, `d/dx log_e x → 1/(x·ln(e))`); these are
+  special-value folds `canonical` doesn't do and would need a source-level
+  `ln(e)→1` fix in the Power/Log rules. _2 improvements_ — the unknown-function
+  chain rule stops collapsing to a wrong `0` (`d/dx f(x²) → 2x·f′(x²)`). _8
+  cosmetic_ — factored/reordered but mathematically identical (Bessel ×7,
+  LambertW ×1). Notably the fraction-combining cases (`2(x+1)/(x²+2x)`) still pass,
+  so `evaluate`'s genuine work is narrower than feared — mostly `ln(e)`-style
+  special values. **Risk:** other untested derivatives may carry unfolded special
+  values; needs a full-suite run before adopting.
+
+- **Defer per-node canonicalization** (build the tree **structurally** in
+  `differentiate()` — `{ form: 'structural' }` — and canonicalize **once** at the
+  outermost call, keeping the final evaluate). **Chosen direction when resumed:**
+  output stays byte-identical (all snapshots pass), ~1.3–1.8× win, at the cost of
+  a careful rewrite of every rule path in `derivative.ts`. The spike confirmed the
+  `.mul()`-distributes-over-sums hazard (`k·(a+b)→ka+kb`) is real — it produced
+  factored result shapes — so the value returned must be the final canonical form,
+  not a raw structural tree. `differentiate()` recurses, so defer through the
+  recursion and canonicalize only at the top. (Could be combined with the
+  drop-evaluate lever later for the ~5× ceiling, in a separate reviewed step.)
+
+Scratch profiling/spike scripts: `.perf-explore/profile-diff*.mjs` (untracked).
 
 ### Strategic
 
@@ -306,12 +346,6 @@ decomposition deliberately drops.
 splitting or watched-disjunct propagation), not an incremental patch. The guard
 census (`scripts/fungrim/guard-census.json`, currently 89.6% complex-domain
 dischargeable) quantifies exactly what it would buy. Let demand justify it.
-
-### Documentation
-
-- If Tycho/GP consumes this release: add a `loadIdentities` section to the
-  importer guide in the Tycho repo (consumer-facing docs live with the
-  consumer).
 
 ### Review residue (open low-priority items)
 

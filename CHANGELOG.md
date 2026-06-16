@@ -50,6 +50,87 @@
   `Digamma(0).N()` and `Digamma(-2).N()`. Functions whose kernels already
   returned an infinity at their poles (such as `Gamma`) are unchanged.
 
+### Benchmarks
+
+The numeric and symbolic gains in this release are summarized below against the
+last release (`0.59.0`), SymPy, math.js, and **Mathematica** — the reference
+baseline, since it is the broadest engine in the field. The tables are generated
+by the harness in [`benchmarks/`](./benchmarks/)
+(`node benchmarks/report_changelog.mjs`); every result is verified numerically
+against an independent `mpmath` reference, never another tool. "CE 0.60.0" is
+this release.
+
+#### Numeric performance (200-digit precision)
+
+Median time per call, in **microseconds — lower is better**. `—` means the tool
+returned no usable result at that precision.
+
+| Expression         | CE 0.60.0 | CE 0.59.0 | SymPy | math.js | Mathematica |
+| ------------------ | --------: | --------: | ----: | ------: | ----------: |
+| $\pi^2$            |        15 |        20 |   174 |     107 |         3.9 |
+| $\sin 1$           |        25 |        61 |   220 |     429 |         5.2 |
+| $\cos 1$           |        24 |        60 |   222 |     455 |         7.1 |
+| $\ln 2$            |        87 |       302 |   339 |   4,374 |         3.7 |
+| $e^{\pi}$          |        31 |       398 |   214 |   4,771 |         4.6 |
+| $\zeta(3)$         |     3,419 |         — |   264 |       — |          49 |
+| $\Gamma(\tfrac13)$ |     1,867 |   427,938 |   341 |       — |         212 |
+| $\psi(\tfrac13)$   |     1,689 |   404,300 | 2,831 |       — |         169 |
+
+Biggest gains over `0.59.0`: $\psi(\tfrac13)$ **239× faster**,
+$\Gamma(\tfrac13)$ **229× faster**, $e^{\pi}$ **13× faster** (it no longer
+recomputes $\ln e$ on every call), $\ln 2$ **3.5× faster**, $\sin 1$ / $\cos 1$
+**~2.5× faster**. The elementary functions widen further at 1000+ digits (e.g.
+$\ln 2$ ≈ 21× faster, where it now also leads SymPy and mpmath). `0.59.0` could
+not reach 200 digits for $\zeta(3)$ (it was capped near machine precision);
+math.js has no arbitrary-precision ζ/Γ/ψ. Mathematica's native bignum kernel is
+faster still on these constants.
+
+#### Symbolic capability & performance
+
+Each cell is **how many times faster than Mathematica** that engine is on the
+case (`Mathematica ÷ engine`, so **higher is better**; Mathematica itself is
+`1×`). `—` means the engine can't do the case. Compare the **CE 0.60.0** and
+**CE 0.59.0** columns to see what is _new this release_ (a `—` under `0.59.0`
+next to a number under **CE 0.60.0**). The **CE + R/F** column is CE 0.60.0 with
+the opt-in Rubi integrator and Fungrim identities loaded (`loadIntegrationRules`
+/ `loadIdentities`), on the same minified bundle: sometimes it improves
+performance, sometimes it hurts it, but the overall effect is improved coverage.
+
+| Operation                              | CE 0.60.0 | CE + R/F | CE 0.59.0 | SymPy  | math.js | Mathematica |
+| -------------------------------------- | :-------: | :------: | :-------: | :----: | :-----: | :---------: |
+| **Antiderivatives**                    |           |          |           |        |         |             |
+| $\int\frac{1}{\sqrt x}\,dx$            |   1.5×    |   3.7×   |     —     |  0.5×  |    —    |     1×      |
+| $\int\frac{x}{\sqrt{1-x^2}}\,dx$       |   2.5×    |   2.6×   |     —     | 0.09×  |    —    |     1×      |
+| $\int\frac{1}{x^3+1}\,dx$              |   2.2×    |   11×    |     —     |  0.3×  |    —    |     1×      |
+| $\int\frac{\sqrt x}{1+x}\,dx$          |     —     |   3.7×   |     —     |  0.1×  |    —    |     1×      |
+| $\int\frac{x}{(1+x)^{1/3}}\,dx$        |     —     |   3.9×   |     —     | 0.01×  |    —    |     1×      |
+| $\int\frac{x^2}{(1+x)^{1/3}}\,dx$      |     —     |   4.1×   |     —     | 0.007× |    —    |     1×      |
+| **Derivatives**                        |           |          |           |        |         |             |
+| $\tfrac{d}{dx}\sqrt{1-x^2}$            |   0.01×   |  0.03×   |   0.01×   | 0.001× | 0.004×  |     1×      |
+| **Simplification**                     |           |          |           |        |         |             |
+| $\sqrt{3+2\sqrt2}$                     |    11×    |   20×    |     —     |   —    |    —    |     1×      |
+| $\sqrt6\,x+\sqrt2\,x$                  |    28×    |   65×    |    30×    |  3.3×  |   18×   |     1×      |
+| **Evaluation**                         |           |          |           |        |         |             |
+| $\lim_{x\to0}\tfrac{\sin x}{x}$        |   9.2×    |   23×    |     —     |  3.1×  |    —    |     1×      |
+| $\lim_{x\to\infty}(1+\tfrac1x)^x$      |   1.6×    |   1.6×   |     —     |  2.1×  |    —    |     1×      |
+| $\int_1^2\tfrac1x\,dx$                 |   1996×   |  1907×   |     —     |  92×   |    —    |     1×      |
+| $\int_{-\infty}^{\infty} e^{-x^2}\,dx$ |   106×    |   428×   |     —     |  2.5×  |    —    |     1×      |
+| **Solving**                            |           |          |           |        |         |             |
+| $x^4+x^2-1=0$                          |   0.07×   |  0.08×   |     —     | 0.06×  |    —    |     1×      |
+| $x^3-x-1=0$                            |   0.08×   |   0.1×   |     —     | 0.04×  |    —    |     1×      |
+
+Across the cases both solve, Compute Engine is a **median 3.7× faster than
+Mathematica** (up to 1996×). The `—` entries under `0.59.0` show what is new
+this release: limits, exact definite/improper integrals, and polynomial solving.
+The bottom three antiderivative rows are integrals the base engine still leaves
+unevaluated but the opt-in **Rubi** rules solve. Mathematica still leads on raw
+derivative and root-finding latency (the `<1×` rows), where its native kernel is
+hard to beat.
+
+<sub>Measured 2026-06-16 · SymPy 1.14.0 · math.js 15.2.0 · Mathematica 14.3.0 ·
+Node 22 · verified against `mpmath`. Reproduce:
+`npm run build production && ./venv/bin/python3 benchmarks/gen_cases.py && node benchmarks/report.mjs && node benchmarks/report_changelog.mjs`.</sub>
+
 ### Calculus
 
 - **`Limit` can now return exact symbolic results.** This includes direct
@@ -284,84 +365,6 @@
 
 - Complex equality and arbitrary-precision complex square roots are more robust
   in the presence of small rounding errors.
-
-### Benchmarks
-
-The numeric and symbolic gains in this release are summarized below against the
-last release (`0.59.0`), SymPy and math.js. The tables are generated by the
-harness in [`benchmarks/`](./benchmarks/)
-(`node benchmarks/report_changelog.mjs`); every result is verified numerically
-against an independent `mpmath` reference, never another tool. "CE (current)" is
-this release.
-
-#### Numeric performance (200-digit precision)
-
-Median time per call, in **milliseconds — lower is better**. `—` means the tool
-returned no usable result at that precision.
-
-| Expression         | CE (current) | CE 0.59.0 | SymPy | math.js |
-| ------------------ | -----------: | --------: | ----: | ------: |
-| $\pi^2$            |         0.02 |      0.02 |  0.18 |    0.10 |
-| $\sin 1$           |         0.02 |      0.06 |  0.23 |    0.43 |
-| $\cos 1$           |         0.03 |      0.06 |  0.23 |    0.48 |
-| $\ln 2$            |         0.10 |      0.31 |  0.34 |     4.4 |
-| $e^{\pi}$          |         0.03 |      0.41 |  0.22 |     4.8 |
-| $\zeta(3)$         |          3.5 |         — |  0.27 |       — |
-| $\Gamma(\tfrac13)$ |          1.9 |       438 |  0.35 |       — |
-| $\psi(\tfrac13)$   |          1.7 |       412 |   2.9 |       — |
-
-Biggest gains over `0.59.0`: $\psi(\tfrac13)$ **247× faster**,
-$\Gamma(\tfrac13)$ **229× faster**, $e^{\pi}$ **13× faster** (it no longer
-recomputes $\ln e$ on every call), $\ln 2$ **3.2× faster**, $\sin 1$ / $\cos 1$
-**~2.5× faster**. The elementary functions widen further at 1000+ digits (e.g.
-$\ln 2$ ≈ 21× faster, where it now also leads SymPy and mpmath). `0.59.0` could
-not reach 200 digits for $\zeta(3)$ (it was capped near machine precision);
-math.js has no arbitrary-precision ζ/Γ/ψ.
-
-#### Symbolic capability & performance
-
-Each cell is **how many times faster than SymPy** that engine is on the case
-(`SymPy ÷ engine`, so **higher is better**; SymPy itself is `1×`). `—` means the
-engine can't do the case; `✓` means it solves a case SymPy can't. Compare the
-**CE (current)** and **CE 0.59.0** columns to see what is _new this release_ (a
-`—` under `0.59.0` next to a number under the current build). The **CE + R/F**
-column is the current build with the opt-in Rubi integrator and Fungrim
-identities loaded (`loadIntegrationRules` / `loadIdentities`), on the same
-minified bundle.
-
-| Operation                              | CE (current) | CE + R/F | CE 0.59.0 | SymPy | math.js |
-| -------------------------------------- | :----------: | :------: | :-------: | :---: | :-----: |
-| **Antiderivatives**                    |              |          |           |       |         |
-| $\int\frac{1}{\sqrt x}\,dx$            |     2.1×     |   2.0×   |     —     |  1×   |    —    |
-| $\int\frac{x}{\sqrt{1-x^2}}\,dx$       |     28×      |   20×    |     —     |  1×   |    —    |
-| $\int\frac{1}{x^3+1}\,dx$              |     3.0×     |   23×    |     —     |  1×   |    —    |
-| $\int\frac{\sqrt x}{1+x}\,dx$          |      —       |   32×    |     —     |  1×   |    —    |
-| $\int\frac{x}{(1+x)^{1/3}}\,dx$        |      —       |   202×   |     —     |  1×   |    —    |
-| $\int\frac{x^2}{(1+x)^{1/3}}\,dx$      |      —       |   309×   |     —     |  1×   |    —    |
-| **Derivatives**                        |              |          |           |       |         |
-| $\tfrac{d}{dx}\sqrt{1-x^2}$            |     7.2×     |   13×    |   10.0×   |  1×   |  2.7×   |
-| **Simplification**                     |              |          |           |       |         |
-| $\sqrt{3+2\sqrt2}$                     |      ✓       |    ✓     |     —     |   —   |    —    |
-| $\sqrt6\,x+\sqrt2\,x$                  |     10×      |   15×    |   10.0×   |  1×   |  5.4×   |
-| **Evaluation**                         |              |          |           |       |         |
-| $\lim_{x\to0}\tfrac{\sin x}{x}$        |     2.7×     |   1.4×   |     —     |  1×   |    —    |
-| $\lim_{x\to\infty}(1+\tfrac1x)^x$      |     0.7×     |   0.7×   |     —     |  1×   |    —    |
-| $\int_1^2\tfrac1x\,dx$                 |     15×      |   2.6×   |     —     |  1×   |    —    |
-| $\int_{-\infty}^{\infty} e^{-x^2}\,dx$ |     35×      |   17×    |     —     |  1×   |    —    |
-| **Solving**                            |              |          |           |       |         |
-| $x^4+x^2-1=0$                          |     1.0×     |   0.9×   |     —     |  1×   |    —    |
-| $x^3-x-1=0$                            |     1.8×     |   3.3×   |     —     |  1×   |    —    |
-
-Across the cases both solve, Compute Engine is a **median 10× faster than
-SymPy** (up to 309×), in the browser rather than a Python backend. The `—`
-entries under `0.59.0` show what is new this release: limits, exact
-definite/improper integrals, and polynomial solving. The bottom three
-antiderivative rows are integrals the base engine still leaves unevaluated but
-the opt-in **Rubi** rules solve.
-
-<sub>Measured 2026-06-15 · SymPy 1.14.0 · math.js 15.2.0 · Node 22 · verified
-against `mpmath`. Reproduce:
-`npm run build production && ./venv/bin/python3 benchmarks/gen_cases.py && node benchmarks/report.mjs && node benchmarks/report_changelog.mjs`.</sub>
 
 ### Collections and Matrices
 

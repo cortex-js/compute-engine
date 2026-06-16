@@ -69,13 +69,18 @@ const timeOf = (id, tk) => {
   return r && r.status === 'ok' && typeof r.timeMs === 'number' ? r.timeMs : null;
 };
 
-// Absolute median ms per call (numeric table). Sub-ms keeps two decimals.
-function fmtMs(ms) {
+// Absolute median time per call in **microseconds** (numeric table; lower is
+// better). The 200-digit constants span ~4 µs (Mathematica) to ~400 ms (the old
+// published Γ/ψ kernels), so sub-10 µs keeps one decimal and larger values group
+// thousands with a comma — a single unit reads more honestly than ms, where the
+// fastest cells collapse to "0.00".
+function fmtUs(ms) {
   if (ms == null) return NONE;
-  if (ms < 1) return ms.toFixed(2);
-  if (ms < 10) return ms.toFixed(1);
-  if (ms < 1000) return String(Math.round(ms));
-  return (ms / 1000).toFixed(1) + ' s';
+  const us = ms * 1000;
+  if (us < 10) return us.toFixed(1);
+  return Math.round(us)
+    .toString()
+    .replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }
 
 // A speedup factor for the symbolic table (Mathematica time ÷ engine time).
@@ -116,14 +121,14 @@ const numCases = tagged('numeric');
 
 w('#### Numeric performance (200-digit precision)');
 w();
-w('Median time per call, in **milliseconds — lower is better**. ' +
+w('Median time per call, in **microseconds — lower is better**. ' +
   `\`${NONE}\` means the tool returned no usable result at that precision.`);
 w();
 w(row(['Expression', ...NUM_COLS.map((c) => c.label)]));
 w(row(['---', ...NUM_COLS.map(() => '--:')]));
 for (const c of numCases) {
   const cells = NUM_COLS.map((col) =>
-    isCorrect(c.id, col.key) ? fmtMs(timeOf(c.id, col.key)) : NONE
+    isCorrect(c.id, col.key) ? fmtUs(timeOf(c.id, col.key)) : NONE
   );
   w(row([`$${c.latex}$`, ...cells]));
 }
