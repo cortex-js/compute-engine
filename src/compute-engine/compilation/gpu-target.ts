@@ -12,7 +12,6 @@ import {
   tryGetComplexParts,
   formatFloat,
   parenthesizeFactor,
-  tryFoldKnownSymbol,
 } from './constant-folding';
 
 import type {
@@ -2901,6 +2900,15 @@ const GPU_CONSTANTS: Record<string, string> = {
  * Both GLSL and WGSL require float literals to have a decimal point.
  */
 function formatGPUNumber(n: number): string {
+  // GLSL and WGSL have no infinity or NaN literals (WGSL forbids them in
+  // const-expressions outright). Emitting `Infinity.0` / `NaN.0` produces a
+  // shader that silently fails to compile on the GPU, so reject it here — the
+  // error propagates to `compile()`, which surfaces a diagnostic / falls back
+  // to interpretation instead of returning broken code with `success: true`.
+  if (!Number.isFinite(n))
+    throw new Error(
+      `Cannot compile the non-finite value \`${n}\` to a GPU shader: GLSL/WGSL have no infinity or NaN literals.`
+    );
   const str = n.toString();
   if (!str.includes('.') && !str.includes('e') && !str.includes('E')) {
     return `${str}.0`;
@@ -2968,7 +2976,12 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       var: (id) => {
         if (id === 'ImaginaryUnit') return `${v2}(0.0, 1.0)`;
         if (id in constants) return constants[id];
-        return id;
+        // Returning `undefined` (rather than a bare `id`) lets BaseCompiler
+        // fold an assigned value / declared constant — including on the
+        // direct-target `compile(expr, { target })` path, which uses this raw
+        // target — and fall back to a bare (declarable) identifier only for a
+        // genuinely free symbol.
+        return undefined;
       },
       string: (str) => JSON.stringify(str),
       number: formatGPUNumber,
@@ -3015,15 +3028,14 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
         if (vars && id in vars) return vars[id] as string;
         if (id === 'ImaginaryUnit') return `${v2}(0.0, 1.0)`;
         if (id in constants) return constants[id];
-        // Fold an assigned value / user-declared constant the way evaluate()
-        // does. Without this, a symbol omitted from `expr.unknowns` (because
-        // the engine considers it known) would be emitted as a bare,
-        // undeclared identifier — a shader that fails to compile on the GPU.
-        // A genuinely free symbol has no value and falls through to the bare
-        // (vars-mappable, unknowns-listed) identifier below.
-        const folded = tryFoldKnownSymbol(expr.engine, id, target);
-        if (folded !== undefined) return folded;
-        return id;
+        // Returning `undefined` lets BaseCompiler fold an assigned value /
+        // declared constant the way evaluate() does — otherwise a symbol
+        // omitted from `expr.unknowns` (because the engine considers it known)
+        // would be emitted as a bare, undeclared identifier, i.e. a shader
+        // that fails to compile on the GPU. A genuinely free symbol has no
+        // value and falls back to the bare (vars-mappable, unknowns-listed)
+        // identifier.
+        return undefined;
       },
     });
 

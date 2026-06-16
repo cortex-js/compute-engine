@@ -42,7 +42,15 @@ export class BaseCompiler {
         // We're compiling something like "Add"
         return `(a,b) => a ${op[0]} b`;
       }
-      return target.var?.(s) ?? s;
+      const resolved = target.var?.(s);
+      if (resolved !== undefined) return resolved;
+      // The target did not resolve the symbol (no `vars` mapping, constant, or
+      // free-symbol plumbing). Before falling back to a bare reference — which
+      // is a dangling identifier for a symbol the engine actually knows — fold
+      // an assigned value / declared constant, matching `evaluate()`. This also
+      // covers the direct-target `compile(expr, { target })` path, where the
+      // raw target has no engine context of its own.
+      return BaseCompiler.tryFoldKnownSymbol(expr.engine, s, target) ?? s;
     }
 
     // Is it a number?
@@ -947,6 +955,38 @@ export class BaseCompiler {
   static isNonNegative(expr: Expression): boolean {
     if (isNumber(expr)) return expr.im === 0 && expr.re >= 0;
     return expr.isNonNegative === true;
+  }
+
+  /**
+   * If `id` names a symbol that is *known* to the engine — it has an assigned
+   * value (`ce.assign("a", 1.5)`) or is a declared constant — return the
+   * compiled target code for that value, i.e. **fold** the value into the
+   * generated code the way `evaluate()` does. Returns `undefined` for a
+   * genuinely free symbol (no value), so the caller falls back to its
+   * free-symbol plumbing (a `vars` mapping, a `_.id` argument lookup, or a
+   * declarable identifier).
+   *
+   * This keeps the compiled output consistent with `expr.unknowns` and
+   * `evaluate()`: a symbol they treat as known (folded / dropped) is also
+   * folded by `compile()`, instead of being emitted as a bare, dangling
+   * reference (an undeclared GLSL identifier, or a bare JS global that throws
+   * `ReferenceError` at run time).
+   *
+   * Callers MUST resolve any `vars` mapping for `id` **before** calling this,
+   * so an explicitly `vars`-mapped symbol is never folded — the GPU/JS live
+   * path relies on a mapped symbol staying a per-frame uniform / argument.
+   *
+   * `target` is the in-flight target: nested symbols inside the value resolve
+   * through the same `vars`/constant/fold rules as the top-level expression.
+   */
+  static tryFoldKnownSymbol(
+    engine: ComputeEngine,
+    id: string,
+    target: CompileTarget<Expression>
+  ): string | undefined {
+    const value = engine._getSymbolValue(id);
+    if (value === undefined) return undefined;
+    return BaseCompiler.compile(value, target);
   }
 
   /**

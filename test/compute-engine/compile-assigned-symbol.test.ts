@@ -11,10 +11,16 @@
  * mapped symbol stays a per-frame uniform / argument lookup (the GPU/JS live
  * path contract).
  *
+ * Also covers two adjacent issues in the same failure class:
+ *  - folding on the direct-target `compile(expr, { target })` path; and
+ *  - rejecting non-finite numbers (`∞`, `NaN`) on GPU targets, which have no
+ *    such literals, instead of emitting a non-compilable shader.
+ *
  * See `TYCHO_ISSUE.md` for the original report.
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
+import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 describe('COMPILE: assigned-symbol folding', () => {
   describe('JavaScript target', () => {
@@ -128,5 +134,61 @@ describe('COMPILE: assigned-symbol folding', () => {
     expect(ce.getCompilationTarget('javascript')!.compile(expr).code).toBe(
       'Math.sin(0.5 * Math.PI * _.x)'
     );
+  });
+
+  // The direct-target path — `compile(expr, { target })` with a raw target —
+  // bypasses each LanguageTarget's `compile()`; folding must still happen
+  // (BaseCompiler resolves it), while a free symbol stays bare.
+  describe('direct-target path: compile(expr, { target })', () => {
+    it('folds an assigned value (GLSL and JS raw targets)', () => {
+      const ce = new ComputeEngine();
+      ce.assign('a', 1.5);
+      const expr = ce.parse('\\sin(a x)');
+      const glslRaw = ce.getCompilationTarget('glsl')!.createTarget();
+      const jsRaw = ce.getCompilationTarget('javascript')!.createTarget();
+      expect(compile(expr, { target: glslRaw }).code).toBe('sin(1.5 * x)');
+      expect(compile(expr, { target: jsRaw }).code).toBe('Math.sin(1.5 * x)');
+    });
+
+    it('leaves a free symbol bare', () => {
+      const ce = new ComputeEngine();
+      const expr = ce.parse('\\sin(a x)');
+      const glslRaw = ce.getCompilationTarget('glsl')!.createTarget();
+      expect(compile(expr, { target: glslRaw }).code).toBe('sin(a * x)');
+    });
+  });
+});
+
+describe('COMPILE: non-finite numbers on GPU targets', () => {
+  // GLSL/WGSL have no infinity or NaN literals; emitting `Infinity.0` / `NaN.0`
+  // yields a shader that silently fails to compile. compile() must reject it.
+  for (const target of ['glsl', 'wgsl'] as const) {
+    describe(target, () => {
+      it('throws on +∞ from target.compile()', () => {
+        const ce = new ComputeEngine();
+        const t = ce.getCompilationTarget(target)!;
+        expect(() => t.compile(ce.parse('x + \\infty'))).toThrow(/non-finite/);
+      });
+
+      it('throws on NaN', () => {
+        const ce = new ComputeEngine();
+        const t = ce.getCompilationTarget(target)!;
+        expect(() => t.compile(ce.box('NaN'))).toThrow(/non-finite/);
+      });
+
+      it('the free compile() reports success:false (with fallback)', () => {
+        const ce = new ComputeEngine();
+        const r = compile(ce.parse('x + \\infty'), { to: target });
+        expect(r.success).toBe(false);
+      });
+    });
+  }
+
+  it('JavaScript still emits Infinity (a valid global)', () => {
+    const ce = new ComputeEngine();
+    const code = ce
+      .getCompilationTarget('javascript')!
+      .compile(ce.parse('x + \\infty')).code;
+    expect(code).toContain('Infinity');
   });
 });

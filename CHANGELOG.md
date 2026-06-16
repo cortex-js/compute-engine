@@ -11,10 +11,21 @@
   is omitted from `expr.unknowns` and folded by `evaluate()`. The value is now
   folded into the generated code (`sin(a·x)` → `sin(1.5 * x)`), making
   `compile()`, `evaluate()`, and `unknowns` consistent. This also folds
-  user-declared constants (`ce.declare("c", { value: 3 })`). A symbol supplied
+  user-declared constants (`ce.declare("c", { value: 3 })`), and applies on the
+  direct-target `compile(expr, { target })` path as well. A symbol supplied
   through the `compile()` `vars` option is never folded — the mapping always
   wins, so a per-frame GLSL uniform / JS argument keeps updating the result
   without recompiling — and a genuinely free symbol is unchanged.
+
+- **GPU compilation rejects non-finite numbers instead of emitting a
+  non-compilable shader.** GLSL and WGSL have no infinity or NaN literals, but
+  `compile()` emitted `Infinity.0` / `NaN.0` for a `±∞` or `NaN` value (e.g.
+  from a literal `\infty` or a constant-folded `1/0`) and reported
+  `success: true` — a shader that silently fails to compile on the GPU. Such
+  values now throw a clear error from the GLSL/WGSL targets (so the free
+  `compile()` falls back to `success: false` with a diagnostic), consistent with
+  how other GPU-unsupported constructs are handled. The JavaScript target is
+  unchanged (`Infinity` / `NaN` are valid there).
 
 ## 0.60.0 _2026-06-16_
 

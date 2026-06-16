@@ -6,7 +6,7 @@ import {
   isFunction,
 } from '../boxed-expression/type-guards';
 import { Complex } from 'complex-esm';
-import { tryGetConstant, tryFoldKnownSymbol } from './constant-folding';
+import { tryGetConstant } from './constant-folding';
 
 import {
   chop,
@@ -1552,13 +1552,11 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
           EulerGamma: '0.57721566490153286',
         }[id];
         if (result !== undefined) return result;
-        // Fold an assigned value / user-declared constant the way evaluate()
-        // does, so we never emit a bare `a` global (which throws
-        // `ReferenceError` at run time) for a symbol that is omitted from
-        // `expr.unknowns` because the engine considers it known.
-        const folded = tryFoldKnownSymbol(expr.engine, id, target);
-        if (folded !== undefined) return folded;
         if (unknowns.includes(id)) return `_.${id}`;
+        // Not mapped, not a constant, not free: an assigned value / declared
+        // constant. Returning `undefined` lets BaseCompiler fold it (the way
+        // evaluate() does) rather than emitting a bare `a` global, which would
+        // throw `ReferenceError` at run time.
         return undefined;
       },
       preamble: (preamble ?? '') + preambleImports,

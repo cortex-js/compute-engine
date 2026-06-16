@@ -6,18 +6,13 @@
  * expressions into real/imaginary parts for direct vec2 construction.
  */
 
-import type {
-  Expression,
-  IComputeEngine as ComputeEngine,
-} from '../global-types';
-import type { MathJsonSymbol } from '../../math-json/types';
+import type { Expression } from '../global-types';
 import {
   isNumber,
   isFunction,
   isSymbol,
 } from '../boxed-expression/type-guards';
 import { BaseCompiler } from './base-compiler';
-import type { CompileTarget } from './types';
 
 /**
  * Format a number as a GPU float literal, ensuring a decimal point.
@@ -25,6 +20,14 @@ import type { CompileTarget } from './types';
  * Examples: `5` → `"5.0"`, `3.14` → `"3.14"`, `-7` → `"-7.0"`.
  */
 export function formatFloat(n: number): string {
+  // GLSL/WGSL have no infinity or NaN literals; emitting `Infinity.0` / `NaN.0`
+  // yields a non-compilable shader. Reject non-finite values so `compile()`
+  // surfaces a diagnostic instead of silently returning broken code. (Mirrors
+  // `formatGPUNumber` in `gpu-target.ts`.)
+  if (!Number.isFinite(n))
+    throw new Error(
+      `Cannot compile the non-finite value \`${n}\` to a GPU shader: GLSL/WGSL have no infinity or NaN literals.`
+    );
   const str = n.toString();
   if (!str.includes('.') && !str.includes('e') && !str.includes('E')) {
     return `${str}.0`;
@@ -43,37 +46,6 @@ export function tryGetConstant(expr: Expression): number | undefined {
   const re = expr.re;
   if (!isFinite(re)) return undefined;
   return re;
-}
-
-/**
- * If `id` names a symbol that is *known* to the engine — it has an assigned
- * value (`ce.assign("a", 1.5)`) or is a user-declared constant — return the
- * compiled target code for that value, i.e. **fold** the value into the
- * generated code the way `evaluate()` does. Returns `undefined` for a genuinely
- * free symbol (no assigned value), so the caller falls back to its free-symbol
- * plumbing (a `vars` mapping, a `_.id` argument lookup, or a declarable
- * identifier).
- *
- * This keeps the three surfaces consistent: a symbol that `expr.unknowns` and
- * `evaluate()` treat as known (folded / dropped) is also folded by `compile()`,
- * instead of being emitted as a bare, dangling reference (an undeclared GLSL
- * identifier, or a bare JS global that throws `ReferenceError` at run time).
- *
- * Callers MUST resolve any `vars` mapping for `id` **before** calling this, so
- * an explicitly `vars`-mapped symbol is never folded — the GPU/JS live path
- * relies on a mapped symbol staying a per-frame uniform / argument lookup.
- *
- * `target` is the in-flight target: nested symbols inside the value resolve
- * through the same `vars`/constant/fold rules as the top-level expression.
- */
-export function tryFoldKnownSymbol(
-  engine: ComputeEngine,
-  id: MathJsonSymbol,
-  target: CompileTarget<Expression>
-): string | undefined {
-  const value = engine._getSymbolValue(id);
-  if (value === undefined) return undefined;
-  return BaseCompiler.compile(value, target);
 }
 
 // Regex for a numeric literal in compiled code: optional minus, digits,

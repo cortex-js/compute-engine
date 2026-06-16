@@ -11,7 +11,6 @@ import type { Expression } from '../global-types';
 import { isSymbol, isNumber } from '../boxed-expression/type-guards';
 
 import { BaseCompiler } from './base-compiler';
-import { tryFoldKnownSymbol } from './constant-folding';
 import type {
   CompileTarget,
   CompiledOperators,
@@ -564,12 +563,10 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
           EulerGamma: '_IA.point(0.57721566490153286)',
         };
         if (id in constants) return constants[id];
-        // Fold an assigned value / user-declared constant the way evaluate()
-        // does (see the JavaScript target), rather than emitting a bare,
-        // dangling reference for a symbol that `expr.unknowns` omits.
-        const folded = tryFoldKnownSymbol(expr.engine, id, target);
-        if (folded !== undefined) return folded;
         if (unknowns.includes(id)) return `_.${id}`;
+        // An assigned value / declared constant: returning `undefined` lets
+        // BaseCompiler fold it (see the JavaScript target) rather than emitting
+        // a bare, dangling reference for a symbol that `expr.unknowns` omits.
         return undefined;
       },
       preamble: (preamble ?? '') + preambleImports,

@@ -215,6 +215,14 @@ export function canonicalFunctionLiteralArguments(
   // and add the parameters to it.
   // `["Function", ["Add", "_", 1], "_"]`
   // becomes `["Function", ["Block", ["Add", "_", 1]], "_"]`
+  // @fixme: the body is canonicalized here, *before* the parameters are
+  // declared in its scope. A parameter named like a constant (`e`, `i`, `pi`)
+  // is therefore rewritten to the constant within the body and the binding is
+  // lost — e.g. `Function(e·2, e)` becomes `(e) ↦ 2·ExponentialE`, so applying
+  // it returns `2e` instead of the argument doubled. Declaring the parameters
+  // before canonicalizing the body (mirroring `canonicalLoop`) fixes the
+  // shadowing but breaks nested-closure capture, which depends on the exact
+  // scope structure built here and re-parented at call time in `makeLambda`.
   const block =
     ops[0].operator === 'Block'
       ? ops[0].canonical
