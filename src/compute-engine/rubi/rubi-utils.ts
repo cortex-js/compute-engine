@@ -2314,6 +2314,102 @@ export function activateTrig(ce: ComputeEngine, e: Expression): Expression {
   return mapTrigHeads(ce, e, TO_ACTIVE);
 }
 
+// ---------------------------------------------------------------------------
+// UnifyInertTrigFunction (cofunction-shift subset) — the last step of Rubi's
+// DeactivateTrig pipeline (IntegrationUtilityFunctions.m). Rubi has NO Cosine
+// chapter: a STANDALONE cosine is rewritten to a sine of a shifted argument so
+// it routes to the sine rules. The clause (verified against Rubi via
+// wolframscript, source line 6576):
+//
+//   (a + b·cos[e+f·x])^n  →  (a + b·sin[e + π/2 + f·x])^n   /; FreeQ[{a,b,e,f,n}]
+//
+// So bare `∫cos^n` becomes `∫sin[π/2+x]^n` → the bare-sine power rule 4.1.1.1#1,
+// and `∫(a+b·cos)^n` routes to the sine-binomial rules. It fires ONLY when
+// cosine is the sole x-dependent trig: a *mixed* sin·cos integrand keeps its
+// cosine (handled by the `(g cos)^p (a+b sin)^m` rules), exactly as Rubi's
+// `DeactivateTrig[(1+sin)·cos^4]` keeps `cos^4·(1+sin)`.
+// ---------------------------------------------------------------------------
+
+/** A term `(x-free coef)·cos[linear arg]` (or bare `cos[linear arg]`): returns
+ * `{coef, arg}`, else null. */
+function cosTermParts(
+  t: Expression,
+  x: string
+): { coef: Expression; arg: Expression } | null {
+  if (t.operator === 'cos' && t.ops) {
+    return polyDegreeX(t.ops[0], x) === 1
+      ? { coef: t.engine.One, arg: t.ops[0] }
+      : null;
+  }
+  if (t.operator === 'Multiply' && t.ops) {
+    const cosFactors = t.ops.filter((o) => o.operator === 'cos');
+    const rest = t.ops.filter((o) => o.operator !== 'cos');
+    if (cosFactors.length !== 1 || rest.some((o) => o.has(x))) return null;
+    const c = cosFactors[0];
+    if (!c.ops || polyDegreeX(c.ops[0], x) !== 1) return null;
+    const coef =
+      rest.length === 0
+        ? t.engine.One
+        : rest.length === 1
+          ? rest[0]
+          : t.engine.function('Multiply', rest);
+    return { coef, arg: c.ops[0] };
+  }
+  return null;
+}
+
+/** `a + b·cos[arg]` → `a + b·sin[arg + π/2]` when the base's only x-dependence
+ * is a single linear-argument cosine (the standalone-cosine clause); else null. */
+function cosBaseToSin(
+  ce: ComputeEngine,
+  base: Expression,
+  x: string
+): Expression | null {
+  const terms = base.operator === 'Add' && base.ops ? base.ops : [base];
+  let a = ce.Zero;
+  let cosCoef: Expression | null = null;
+  let cosArg: Expression | null = null;
+  for (const t of terms) {
+    if (!t.has(x)) {
+      a = a.add(t);
+      continue;
+    }
+    const parts = cosTermParts(t, x);
+    if (parts === null) return null; // an x-dependent non-cosine term ⇒ not standalone
+    if (cosArg === null) {
+      cosCoef = parts.coef;
+      cosArg = parts.arg;
+    } else {
+      if (!cosArg.isSame(parts.arg)) return null;
+      cosCoef = cosCoef!.add(parts.coef);
+    }
+  }
+  if (cosArg === null) return null; // no cosine present
+  const shifted = ce.function('sin', [cosArg.add(ce.Pi.div(2))]);
+  const sinTerm = cosCoef!.isSame(1) ? shifted : cosCoef!.mul(shifted);
+  return a.isSame(0) ? sinTerm : a.add(sinTerm);
+}
+
+/** UnifyInertTrigFunction[u, x] (cofunction-shift subset): rewrites a
+ * standalone inert cosine power/binomial `(a+b·cos)^n` to the sine cofunction
+ * `(a+b·sin[arg+π/2])^n`. A no-op otherwise (incl. mixed sin·cos integrands). */
+export function unifyInertTrig(
+  ce: ComputeEngine,
+  u: Expression,
+  x: string
+): Expression {
+  let base = u;
+  let n: Expression | null = null;
+  if (u.operator === 'Power' && u.ops) {
+    if (u.ops[1].has(x)) return u; // exponent must be x-free
+    base = u.ops[0];
+    n = u.ops[1];
+  }
+  const conv = cosBaseToSin(ce, base, x);
+  if (conv === null) return u;
+  return n === null ? conv : ce.function('Power', [conv, n]);
+}
+
 // Active trig single-node test (one of Sin/Cos/Tan/Cot/Sec/Csc), used by the
 // reverse-chain and FunctionOfTrig utilities below (which run on ACTIVE heads,
 // the rules pre-wrap their arguments in ActivateTrig).
@@ -2360,11 +2456,7 @@ function easyDQ(u: Expression, x: string): boolean {
 
 /** DerivativeDivides[y, u, x] — see block comment. Returns the x-free quotient
  * or the `False` symbol. */
-function derivativeDivides(
-  y: Expression,
-  u: Expression,
-  ctx: Ctx
-): Expression {
+function derivativeDivides(y: Expression, u: Expression, ctx: Ctx): Expression {
   const ce = ctx.ce;
   const x = ctx.x;
   const FALSE = ce.symbol('False');
@@ -2446,7 +2538,11 @@ function fotAux(u: Expression, v: FotState, x: string): FotState {
 }
 
 /** FunctionOfTrig[u, x]: the common linear trig argument, or the False symbol. */
-function functionOfTrig(ce: ComputeEngine, u: Expression, x: string): Expression {
+function functionOfTrig(
+  ce: ComputeEngine,
+  u: Expression,
+  x: string
+): Expression {
   const r = fotAux(activateTrig(ce, u), null, x);
   return r === null || r === false ? ce.symbol('False') : r;
 }
@@ -2559,11 +2655,7 @@ function substForTrig(
 
 /** SubstFor[v, u, x] — u with the trig subexpression `v` replaced by `x`
  * (u is a function of v). Returns null when v isn't a handled trig target. */
-function substFor3(
-  v: Expression,
-  u: Expression,
-  ctx: Ctx
-): Expression | null {
+function substFor3(v: Expression, u: Expression, ctx: Ctx): Expression | null {
   const ce = ctx.ce;
   const X = ce.symbol(ctx.x);
   const vt = substTrigNode(v, ctx.x, ce);
