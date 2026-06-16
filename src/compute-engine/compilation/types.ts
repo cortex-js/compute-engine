@@ -169,7 +169,21 @@ export interface CompilationOptions<Expr = unknown> {
   // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
   functions?: Record<MathJsonSymbol, TargetSource | Function>;
 
-  /** Variable bindings */
+  /**
+   * Map a symbol to the target-language source emitted for it (e.g. a GLSL
+   * uniform name `{ a: 'u_var_a' }`, or a JS literal `{ a: 5 }`).
+   *
+   * A `vars`-mapped symbol is **never constant-folded**, even when the symbol
+   * has an assigned value in the engine (`ce.assign('a', …)`). The mapping
+   * always wins, so the generated code keeps referencing the mapped
+   * identifier — a per-frame uniform / argument write updates the result
+   * without recompiling. This is a guaranteed contract.
+   *
+   * A symbol that is *not* mapped here but *is* known to the engine (an
+   * assigned value or a declared constant) is folded into the generated code,
+   * matching `evaluate()` and `expr.unknowns`. A genuinely free symbol (no
+   * mapping, no value) is emitted through the target's free-symbol plumbing.
+   */
   vars?: Record<MathJsonSymbol, TargetSource>;
 
   /** Additional imports/libraries to include */

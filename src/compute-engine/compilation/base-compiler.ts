@@ -519,15 +519,21 @@ export class BaseCompiler {
         )
       );
       const needsWrap = target.number(0) !== '0';
-      const bodyTarget: CompileTarget<Expression> = needsWrap
-        ? {
-            ...target,
-            var: (id: string) =>
-              loopVarSet.has(id)
-                ? target.number(0).replace('0', id)
-                : target.var(id),
-          }
-        : target;
+      // Always shadow the loop variables in the body's target: a loop variable
+      // is bound to the bare emitted identifier (wrapped only for wrapping
+      // targets like interval-js). Without this, a loop variable that collides
+      // with a symbol the engine knows (e.g. an index named `i`, which the
+      // engine resolves to the imaginary unit) would be folded to that value
+      // by `target.var` instead of referencing the loop binding.
+      const bodyTarget: CompileTarget<Expression> = {
+        ...target,
+        var: (id: string) =>
+          loopVarSet.has(id)
+            ? needsWrap
+              ? target.number(0).replace('0', id)
+              : id
+            : target.var(id),
+      };
 
       // Compile the body expression (the value pushed into the result array).
       const bodyCode = BaseCompiler.compile(body, bodyTarget);

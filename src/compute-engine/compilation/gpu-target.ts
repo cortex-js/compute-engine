@@ -12,6 +12,7 @@ import {
   tryGetComplexParts,
   formatFloat,
   parenthesizeFactor,
+  tryFoldKnownSymbol,
 } from './constant-folding';
 
 import type {
@@ -3014,6 +3015,14 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
         if (vars && id in vars) return vars[id] as string;
         if (id === 'ImaginaryUnit') return `${v2}(0.0, 1.0)`;
         if (id in constants) return constants[id];
+        // Fold an assigned value / user-declared constant the way evaluate()
+        // does. Without this, a symbol omitted from `expr.unknowns` (because
+        // the engine considers it known) would be emitted as a bare,
+        // undeclared identifier — a shader that fails to compile on the GPU.
+        // A genuinely free symbol has no value and falls through to the bare
+        // (vars-mappable, unknowns-listed) identifier below.
+        const folded = tryFoldKnownSymbol(expr.engine, id, target);
+        if (folded !== undefined) return folded;
         return id;
       },
     });

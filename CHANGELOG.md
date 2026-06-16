@@ -1,3 +1,21 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **`compile()` no longer emits a dangling reference to a symbol that has an
+  assigned value (GLSL, WGSL, JavaScript, and interval-JS targets).** When an
+  expression referenced a symbol with an assigned value in the engine
+  (`ce.assign("a", 1.5)`), `compile()` emitted a bare `a` — an undeclared GLSL
+  identifier (a shader that silently fails to compile) or a bare JS global (a
+  `ReferenceError` when the compiled function is called) — even though the symbol
+  is omitted from `expr.unknowns` and folded by `evaluate()`. The value is now
+  folded into the generated code (`sin(a·x)` → `sin(1.5 * x)`), making
+  `compile()`, `evaluate()`, and `unknowns` consistent. This also folds
+  user-declared constants (`ce.declare("c", { value: 3 })`). A symbol supplied
+  through the `compile()` `vars` option is never folded — the mapping always
+  wins, so a per-frame GLSL uniform / JS argument keeps updating the result
+  without recompiling — and a genuinely free symbol is unchanged.
+
 ## 0.60.0 _2026-06-16_
 
 ### Behavior Changes
