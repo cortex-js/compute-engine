@@ -2066,7 +2066,7 @@ export const HARMONIZATION_RULES: Rule[] = [
   // a(b^n) -> a
   {
     match: ['Multiply', '__a', ['Power', '_b', '_n']],
-    replace: '_b',
+    replace: (_x: Expression, sub: BoxedSubstitution) => sub._b,
     condition: ({ __a, _b, _n }) =>
       !__a.has('_x') && _b.has('_x') && !_n.isSame(0) && !_n.has('_x'),
   },
@@ -2079,7 +2079,7 @@ export const HARMONIZATION_RULES: Rule[] = [
   // a(x)/b -> a(x)
   {
     match: ['Divide', '_a', '_b'],
-    replace: '_a',
+    replace: (_x: Expression, sub: BoxedSubstitution) => sub._a,
     // @todo: check _b after the substitution
     condition: ({ _a, _b }) => _a.has('_x') && !_b.isSame(0),
   },
@@ -2087,7 +2087,7 @@ export const HARMONIZATION_RULES: Rule[] = [
   // The solution for a product are the solutions for each term,
   {
     match: ['Multiply', '__a', '_b'],
-    replace: '_b',
+    replace: (_x: Expression, sub: BoxedSubstitution) => sub._b,
     condition: ({ __a, _b }) => !__a.has('_x') && _b.has('_x'),
   },
   // ln(a(x))+ln(b(x))+c -> ln(a(x)b(x)) + c
@@ -2110,7 +2110,7 @@ export const HARMONIZATION_RULES: Rule[] = [
   // sin(f(x)) -> f(x)
   {
     match: ['Sin', '_a'],
-    replace: '_a',
+    replace: (_x: Expression, sub: BoxedSubstitution) => sub._a,
     condition: ({ _a }) => _a.has('_x'),
   },
   // cos(f(x)) -> f(x) - π/2
@@ -2122,7 +2122,7 @@ export const HARMONIZATION_RULES: Rule[] = [
   // tan(f(x)) -> f(x)
   {
     match: ['Tan', '_a'],
-    replace: '_a',
+    replace: (_x: Expression, sub: BoxedSubstitution) => sub._a,
     condition: ({ _a }) => _a.has('_x'),
   },
   // sin(a) + cos(a) -> 1
