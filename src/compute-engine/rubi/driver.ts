@@ -31,6 +31,7 @@ import {
   Hooks,
 } from './rubi-utils';
 import { isNumber } from '../boxed-expression/type-guards';
+import { simplifyTrig } from '../symbolic/simplify-trig';
 import { toTimesPower, recanonicalize } from './normal-form';
 
 const MAX_DEPTH = 40;
@@ -53,6 +54,19 @@ function hasInexactFloat(e: Expression): boolean {
 function containsIntegrate(e: Expression): boolean {
   if (e.operator === 'Integrate') return true;
   return e.ops?.some(containsIntegrate) ?? false;
+}
+
+/** Bottom-up application of the engine's trig simplifier — folds the
+ * `sin(θ+π/2) → cos(θ)` cofunction shifts the cosine→sine normalization
+ * introduces (and other sound trig identities) so results read cleanly. */
+function cleanTrig(ce: ComputeEngine, e: Expression): Expression {
+  if (!e.ops || e.ops.length === 0) return e;
+  const newOps = e.ops.map((o) => cleanTrig(ce, o));
+  const node = newOps.every((o, i) => o === e.ops![i])
+    ? e
+    : ce.function(e.operator, newOps);
+  const step = simplifyTrig(node as any);
+  return (step?.value as Expression) ?? node;
 }
 
 export type DriverStats = {
@@ -106,8 +120,15 @@ export class RubiDriver {
     // trig once so intRec can deactivate the integrand (and its recursive
     // subproblems). Results are re-activated on the way out.
     this.trigActive = hasActiveTrig(integrand);
+    // Re-activate inert heads on the way out, then normalize the trig form:
+    // the cosine→sine cofunction shift (unifyInertTrig) leaves `sin(θ+π/2)`
+    // etc. in the result; `simplifyTrig` folds those back to `cos(θ)` so the
+    // answer reads cleanly (Rubi relies on Mathematica's auto-simplification
+    // for the same step). Sound identities only — never changes the value.
     const activate = (e: Expression | null): Expression | null =>
-      e !== null && this.trigActive ? activateTrig(this.ce, e) : e;
+      e !== null && this.trigActive
+        ? cleanTrig(this.ce, activateTrig(this.ce, e))
+        : e;
     try {
       const result = this.intRec(integrand, variable, 0);
       if (result !== null) return activate(result);
