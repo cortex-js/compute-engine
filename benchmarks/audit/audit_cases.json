@@ -17,6 +17,7 @@
       "id": "F1",
       "cat": "factor",
       "title": "x\u00b2 \u2212 1",
+      "latex": "x^2 - 1",
       "ce": {
         "op": "factor",
         "mathjson": [
@@ -52,6 +53,7 @@
       "id": "F2",
       "cat": "factor",
       "title": "x\u00b3 \u2212 1",
+      "latex": "x^3 - 1",
       "ce": {
         "op": "factor",
         "mathjson": [
@@ -87,6 +89,7 @@
       "id": "F3",
       "cat": "factor",
       "title": "x\u2074 \u2212 1",
+      "latex": "x^4 - 1",
       "ce": {
         "op": "factor",
         "mathjson": [
@@ -122,6 +125,7 @@
       "id": "F4",
       "cat": "factor",
       "title": "x\u2076 \u2212 1",
+      "latex": "x^6 - 1",
       "ce": {
         "op": "factor",
         "mathjson": [
@@ -157,6 +161,7 @@
       "id": "F5",
       "cat": "factor",
       "title": "x\u2077 \u2212 1",
+      "latex": "x^7 - 1",
       "ce": {
         "op": "factor",
         "mathjson": [
@@ -192,6 +197,7 @@
       "id": "G1",
       "cat": "gcd",
       "title": "gcd((x+1)(x+2), (x+1)(x+3))",
+      "latex": "\\gcd\\bigl((x+1)(x+2),\\ (x+1)(x+3)\\bigr)",
       "ce": {
         "op": "gcd",
         "mathjson": [
@@ -247,6 +253,7 @@
       "id": "G2",
       "cat": "gcd",
       "title": "gcd(x\u00b2\u22121, x\u00b2+2x+1)",
+      "latex": "\\gcd(x^2-1,\\ x^2+2x+1)",
       "ce": {
         "op": "gcd",
         "mathjson": [
@@ -299,6 +306,7 @@
       "id": "G3",
       "cat": "gcd",
       "title": "gcd(x\u00b3\u22121, x\u00b2\u22121)",
+      "latex": "\\gcd(x^3-1,\\ x^2-1)",
       "ce": {
         "op": "gcd",
         "mathjson": [
@@ -346,6 +354,7 @@
       "id": "E1",
       "cat": "expand",
       "title": "(x+1)\u2075",
+      "latex": "(x+1)^5",
       "ce": {
         "op": "expand",
         "mathjson": [
@@ -381,6 +390,7 @@
       "id": "E2",
       "cat": "expand",
       "title": "(x+2)\u2074",
+      "latex": "(x+2)^4",
       "ce": {
         "op": "expand",
         "mathjson": [
@@ -416,6 +426,7 @@
       "id": "E3",
       "cat": "expand",
       "title": "(x\u22121)\u2076",
+      "latex": "(x-1)^6",
       "ce": {
         "op": "expand",
         "mathjson": [
@@ -451,6 +462,7 @@
       "id": "S1",
       "cat": "simplify",
       "title": "(x\u00b2\u22121)/(x\u22121)",
+      "latex": "\\frac{x^2-1}{x-1}",
       "ce": {
         "op": "simplify",
         "mathjson": [
@@ -494,6 +506,7 @@
       "id": "S2",
       "cat": "simplify",
       "title": "(x\u00b3\u22121)/(x\u22121)",
+      "latex": "\\frac{x^3-1}{x-1}",
       "ce": {
         "op": "simplify",
         "mathjson": [
@@ -537,6 +550,7 @@
       "id": "S3",
       "cat": "simplify",
       "title": "x^(\u22121/2) \u2212 1/\u221ax",
+      "latex": "x^{-1/2} - \\frac{1}{\\sqrt{x}}",
       "ce": {
         "op": "simplify",
         "mathjson": [
@@ -583,6 +597,7 @@
       "id": "I1",
       "cat": "integrate",
       "title": "\u222b x\u00b2 dx",
+      "latex": "\\int x^2\\,dx",
       "ce": {
         "op": "integrate",
         "mathjson": [
@@ -615,6 +630,7 @@
       "id": "I2",
       "cat": "integrate",
       "title": "\u222b 1/(1+x\u00b2) dx",
+      "latex": "\\int \\frac{1}{1+x^2}\\,dx",
       "ce": {
         "op": "integrate",
         "mathjson": [
@@ -655,6 +671,7 @@
       "id": "I3",
       "cat": "integrate",
       "title": "\u222b 1/\u221ax dx",
+      "latex": "\\int \\frac{1}{\\sqrt{x}}\\,dx",
       "ce": {
         "op": "integrate",
         "mathjson": [
@@ -690,6 +707,7 @@
       "id": "I4",
       "cat": "integrate",
       "title": "\u222b e^(\u2212x\u00b2) dx",
+      "latex": "\\int e^{-x^2}\\,dx",
       "ce": {
         "op": "integrate",
         "mathjson": [
@@ -729,6 +747,7 @@
       "id": "I5",
       "cat": "integrate",
       "title": "\u222b 1/(x\u00b3+1) dx",
+      "latex": "\\int \\frac{1}{x^3+1}\\,dx",
       "ce": {
         "op": "integrate",
         "mathjson": [
@@ -769,6 +788,7 @@
       "id": "L1",
       "cat": "limit",
       "title": "lim_{x\u21920} sin x / x",
+      "latex": "\\lim_{x \\to 0} \\frac{\\sin x}{x}",
       "ce": {
         "op": "limit",
         "mathjson": [
@@ -797,6 +817,7 @@
       "id": "L2",
       "cat": "limit",
       "title": "lim_{x\u21920} (1\u2212cos x)/x\u00b2",
+      "latex": "\\lim_{x \\to 0} \\frac{1-\\cos x}{x^2}",
       "ce": {
         "op": "limit",
         "mathjson": [
@@ -832,7 +853,8 @@
     {
       "id": "L3",
       "cat": "limit",
-      "title": "lim_{x\u21920} (x\u00b2\u22121)/(x\u22121)... @1",
+      "title": "lim_{x\u21921} (x\u00b2\u22121)/(x\u22121)",
+      "latex": "\\lim_{x \\to 1} \\frac{x^2-1}{x-1}",
       "ce": {
         "op": "limit",
         "mathjson": [

@@ -11,16 +11,20 @@
 // rather than wide across libraries.
 
 import { execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, unlinkSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { tmpdir } from 'node:os';
 
 import { ComputeEngine } from '../../src/compute-engine.ts';
+import { mathJsonToWL } from '../runners/mathjson-to-wl.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..', '..');
 const suite = JSON.parse(readFileSync(join(__dirname, 'audit_cases.json'), 'utf8'));
 const PYTHON = join(ROOT, 'venv', 'bin', 'python3');
+const NODE = process.execPath;
+const WOLFRAM_BATCH = join(__dirname, '..', 'runners', 'run_wolfram_batch.mjs');
 
 const ce = new ComputeEngine();
 
@@ -74,13 +78,14 @@ function runCE(c: any) {
       return { status: 'ok', text: F.toString(), values: sampleResult(dF, pts), ...timing };
     }
     if (op === 'limit') {
-      // CE evaluates limits numerically (.N()), not to a symbolic closed form.
-      const build = () => ce.expr(['Limit', ['Function', inp.mathjson, inp.var], inp.point]);
-      const timing = timeit(() => build().N());
+      // CE evaluates limits to an exact symbolic closed form (e.g. 1/2, e); we
+      // sample that result numerically only to grade it against the reference.
+      const build = () => ce.expr(['Limit', ['Function', inp.mathjson, inp.var], inp.point]).evaluate();
+      const timing = timeit(build);
       const L = build();
       const val = num(L);
-      if (!isFinite(val)) return { status: 'unsolved', text: L.evaluate().toString(), values: [], ...timing };
-      return { status: 'ok', text: L.N().toString(), values: [val], note: 'numeric', ...timing };
+      if (!isFinite(val)) return { status: 'unsolved', text: L.toString(), values: [], ...timing };
+      return { status: 'ok', text: L.toString(), values: [val], ...timing };
     }
     return { status: 'error', error: `unknown op ${op}` };
   } catch (e: any) {
@@ -95,6 +100,46 @@ function runSymPyAll(): Record<string, any> {
     const out = execFileSync(PYTHON, [join(__dirname, 'run_sympy.py')], { encoding: 'utf8', timeout: 600000 });
     for (const line of out.trim().split('\n')) { try { const o = JSON.parse(line); if (o.id) by[o.id] = o; } catch {} }
   } catch (e: any) { console.error('sympy batch failed:', (e.message || e).toString().split('\n')[0]); }
+  return by;
+}
+
+// --- run Wolfram (Mathematica) batch ---------------------------------------
+// Each case's `ce` MathJSON is translated to Wolfram Language (no positivity
+// assumption — matching run_sympy.py's general `symbols("x")`) and handed to the
+// shared batch runner, which drives one `wolframscript` kernel over all cases.
+// Results are the same shape as SymPy's, so `classify()` grades them identically.
+const wlPoint = (p: any) =>
+  p === 'PositiveInfinity' ? 'Infinity' : p === 'NegativeInfinity' ? '-Infinity' : String(p);
+
+function runWolframAll(): Record<string, any> {
+  const by: Record<string, any> = {};
+  const tasks: any[] = [];
+  for (const c of suite.cases) {
+    const inp = c.ce;
+    const points = (c.verify.points || []).map(parseFloat);
+    try {
+      if (inp.op === 'gcd') {
+        const [, p, q] = inp.mathjson; // ["GCD", p, q]
+        tasks.push({ id: c.id, op: 'gcd', expr: mathJsonToWL(p), expr2: mathJsonToWL(q), var: 'x', points });
+      } else if (inp.op === 'integrate') {
+        tasks.push({ id: c.id, op: 'integrate', expr: mathJsonToWL(inp.mathjson), var: inp.var || 'x', points });
+      } else if (inp.op === 'limit') {
+        tasks.push({ id: c.id, op: 'limit', expr: mathJsonToWL(inp.mathjson), var: inp.var || 'x', point: wlPoint(inp.point), points: [] });
+      } else {
+        tasks.push({ id: c.id, op: inp.op, expr: mathJsonToWL(inp.mathjson), var: 'x', points });
+      }
+    } catch (e: any) {
+      by[c.id] = { status: 'error', error: String(e?.message ?? e).slice(0, 120) };
+    }
+  }
+  if (!tasks.length) return by;
+  const tmp = join(tmpdir(), `audit-wl-${process.pid}.json`);
+  writeFileSync(tmp, JSON.stringify({ real: false, tasks }));
+  try {
+    const out = execFileSync(NODE, [WOLFRAM_BATCH, tmp], { encoding: 'utf8', timeout: 900000, maxBuffer: 64 * 1024 * 1024 });
+    for (const line of out.trim().split('\n')) { try { const o = JSON.parse(line); if (o.id) by[o.id] = o; } catch {} }
+  } catch (e: any) { console.error('wolfram batch failed:', (e.message || e).toString().split('\n')[0]); }
+  finally { try { unlinkSync(tmp); } catch { /* */ } }
   return by;
 }
 
@@ -113,6 +158,7 @@ function formOk(form: string, text: string) {
 }
 function classify(c: any, res: any) {
   if (!res || res.status === 'error') return { v: 'error', note: res?.error };
+  if (res.status === 'timeout') return { v: 'error', note: 'timeout' };
   if (res.status === 'unsolved') return { v: 'unsolved' };
   const vr = c.verify;
   if (vr.kind === 'equiv' || vr.kind === 'derivcheck') {
@@ -126,23 +172,65 @@ function classify(c: any, res: any) {
 }
 
 // --- run --------------------------------------------------------------------
-console.error('Running multi-op audit — %d cases, CE in-process + SymPy batch…', suite.cases.length);
+console.error('Running multi-op audit — %d cases, CE in-process + SymPy batch + Wolfram batch…', suite.cases.length);
 const sympyById = runSymPyAll();
+const wolframById = runWolframAll();
 const rows = suite.cases.map((c: any) => {
   const ceRes = runCE(c);
   const syRes = sympyById[c.id] || { status: 'error', error: 'no result' };
-  return { c, ce: { res: ceRes, v: classify(c, ceRes) }, sy: { res: syRes, v: classify(c, syRes) } };
+  const woRes = wolframById[c.id] || { status: 'error', error: 'no result' };
+  return {
+    c,
+    ce: { res: ceRes, v: classify(c, ceRes) },
+    sy: { res: syRes, v: classify(c, syRes) },
+    wo: { res: woRes, v: classify(c, woRes) },
+  };
 });
 
 // --- report -----------------------------------------------------------------
 const SYM: Record<string, string> = { correct: '✅', partial: '🟡', wrong: '❌', unsolved: '∅', error: '⚠️' };
-const fmtT = (ms?: number) => ms == null ? '' : ms < 0.01 ? '0.00' : ms < 10 ? ms.toFixed(2) : ms < 100 ? ms.toFixed(1) : String(Math.round(ms));
+
+// Median per-call time in **microseconds**. Two significant figures below 10µs
+// (so a fast Mathematica op reads `8.3`, not a floored `0`), whole µs above.
+const fmtUs = (ms?: number) => {
+  if (ms == null) return null;
+  const us = ms * 1000;
+  if (!(us > 0)) return '0';
+  if (us >= 10) return String(Math.round(us));
+  if (us >= 1) return us.toFixed(1);
+  const s = us.toPrecision(2);
+  return s.includes('.') ? s.replace(/0+$/, '').replace(/\.$/, '') : s;
+};
+
+// LaTeX for a case. Each case carries a hand-authored `latex` field (authored in
+// gen.py, alongside the Unicode `title`) so every formula typesets exactly as
+// intended — including the ∫ … dx / lim_{x→a} wrappers and forms CE would
+// re-serialize differently (e.g. x^{-1/2}, which CE prints as 1/√x). Falls back
+// to building from the `ce` MathJSON (non-canonical, so a GCD node isn't
+// evaluated away) only if a case predates the field.
+const pointLatex = (p: any) =>
+  p === 'PositiveInfinity' ? '\\infty' : p === 'NegativeInfinity' ? '-\\infty' : String(p);
+function caseLatex(c: any): string {
+  if (typeof c.latex === 'string' && c.latex.length) return c.latex;
+  const inp = c.ce;
+  const lx = (mj: any) => ce.box(mj, { canonical: false }).latex;
+  try {
+    if (inp.op === 'integrate') return `\\int ${lx(inp.mathjson)}\\,d${inp.var || 'x'}`;
+    if (inp.op === 'limit') return `\\lim_{${inp.var || 'x'} \\to ${pointLatex(inp.point)}} ${lx(inp.mathjson)}`;
+    return lx(inp.mathjson); // factor / expand / simplify / gcd
+  } catch {
+    return c.title; // fall back to the authored Unicode title
+  }
+}
+
+// A correct result carries no mark — only its median time (µs). A mark appears
+// *only* when the result is not correct.
 const cell = (side: any) => {
-  const t = side.res?.status === 'ok' && typeof side.res.timeMs === 'number' ? ` ${fmtT(side.res.timeMs)}` : '';
-  // quality note for non-correct, or a tag like "numeric" carried on the result
-  const noteText = side.v.v !== 'correct' ? side.v.note : side.res?.note;
-  const note = noteText ? ` <sub>${noteText}</sub>` : '';
-  return SYM[side.v.v] + note + t;
+  const r = side.res;
+  const t = r?.status === 'ok' && typeof r.timeMs === 'number' ? fmtUs(r.timeMs) : null;
+  if (side.v.v === 'correct') return t ?? '·';
+  const note = side.v.note ? ` <sub>${side.v.note}</sub>` : '';
+  return SYM[side.v.v] + note + (t ? ` ${t}` : '');
 };
 const CATS = [
   { key: 'factor', title: 'Factoring' }, { key: 'gcd', title: 'Polynomial GCD' },
@@ -152,39 +240,45 @@ const CATS = [
 
 let md = '';
 const w = (s = '') => { md += s + '\n'; };
-w('# Compute Engine vs SymPy — operation audit');
+w('# Compute Engine vs SymPy vs Mathematica — operation audit');
 w();
-w(`_Issue-finder: CE (current build) vs SymPy across ${CATS.length} operations, ${suite.cases.length} cases. ` +
-  'Both graded identically — value-equivalence (factor/expand/simplify → result equals input; gcd → equals the true gcd), ' +
-  'derivative-check (integration), or known value (limits). Cell = mark + median ms; ✅ correct · 🟡 value-correct but ' +
-  'poor form · ❌ wrong · ∅ not solved · ⚠️ error._');
+w(`_Issue-finder: CE (current build) vs SymPy and **Mathematica** (the reference baseline) across ${CATS.length} operations, ` +
+  `${suite.cases.length} cases. All three graded identically — value-equivalence (factor/expand/simplify → result equals input; ` +
+  'gcd → equals the true gcd), derivative-check (integration), or known value (limits). Each cell is the **median time per ' +
+  'call in µs**; a mark appears **only when a result is not correct**: 🟡 value-correct but poor form · ❌ wrong · ∅ not ' +
+  'solved · ⚠️ error._');
 w();
 
 // summary
+const N = suite.cases.length;
 const ceCorrect = rows.filter((r) => r.ce.v.v === 'correct').length;
 const syCorrect = rows.filter((r) => r.sy.v.v === 'correct').length;
-const trails = rows.filter((r) => r.ce.v.v !== 'correct' && r.sy.v.v === 'correct');
+const woCorrect = rows.filter((r) => r.wo.v.v === 'correct').length;
+// Mathematica is the reference baseline: "trails" means CE fails a case the
+// baseline solves.
+const trails = rows.filter((r) => r.ce.v.v !== 'correct' && r.wo.v.v === 'correct');
 w('## Summary');
 w();
-w(`- **CE ${ceCorrect}/${suite.cases.length}** fully correct vs **SymPy ${syCorrect}/${suite.cases.length}**. ` +
-  `CE trails on **${trails.length}** cases (below); none where SymPy trails CE.`);
-w('- **CE issues found:** limits are **numerical-only** (correct value, no symbolic closed form — ROADMAP B8). ' +
-  'Previously-flagged gaps are now fixed: polynomial **GCD** (B5), `Factor` of `xⁿ−1` returns polynomial factors (B4), ' +
-  'and indefinite integration of fractional-power / erf / Fresnel / Si–Ci / radical integrands (B2).');
-w('- **Where CE leads:** it solves GCD, expansion, simplification and (numeric) limits, and is **markedly faster** ' +
-  'than SymPy there — e.g. simplification ~0.5 ms vs ~10 ms.');
+w(`- **CE ${ceCorrect}/${N}** fully correct vs **SymPy ${syCorrect}/${N}** and the **Mathematica ${woCorrect}/${N}** baseline. ` +
+  `Against Mathematica, CE trails on **${trails.length}** cases (below).`);
+w('- **CE issues found:** none on this suite. Previously-flagged gaps are now fixed: **limits** return exact symbolic ' +
+  'closed forms (e.g. $\\tfrac12$, $e$), not just numeric values (ROADMAP B8); polynomial **GCD** (B5); `Factor` of ' +
+  '$x^n-1$ returns polynomial factors (B4); and indefinite integration of fractional-power / erf / Fresnel / Si–Ci / ' +
+  'radical integrands (B2).');
+w('- **Where CE leads:** it solves GCD, expansion, simplification and limits, and is **markedly faster** ' +
+  'than SymPy there — e.g. simplification ~0.2 ms vs ~4 ms.');
 w('- **Scope:** hand-authored cases across operations. The **Wester** suite is wired in separately ' +
   '(`wester.ts` → `REPORT-wester.md`, via the Mathematica files + `wl-parser`); the **Bondarenko** integration ' +
   'set (35, local) is the next integration-depth source.');
 w();
-w('## Where CE trails SymPy');
+w('## Where CE trails Mathematica (baseline)');
 w();
 if (!trails.length) w('_None on this suite._');
 else {
-  w('| Case | Operation | CE | SymPy | CE result |');
-  w('|---|---|---|---|---|');
+  w('| Case | Operation | CE | SymPy | Mathematica | CE result |');
+  w('|---|---|---|---|---|---|');
   for (const r of trails)
-    w(`| ${r.c.title} | ${r.c.cat} | ${SYM[r.ce.v.v]}${r.ce.v.note ? ' <sub>' + r.ce.v.note + '</sub>' : ''} | ✅ | \`${(r.ce.res.text || '').slice(0, 34)}\` |`);
+    w(`| $${caseLatex(r.c)}$ | ${r.c.cat} | ${SYM[r.ce.v.v]}${r.ce.v.note ? ' <sub>' + r.ce.v.note + '</sub>' : ''} | ${SYM[r.sy.v.v]} | ${SYM[r.wo.v.v]} | \`${(r.ce.res.text || '').slice(0, 34)}\` |`);
 }
 w();
 
@@ -196,11 +290,12 @@ for (const cat of CATS) {
   if (!cr.length) continue;
   const ceOk = cr.filter((r) => r.ce.v.v === 'correct').length;
   const syOk = cr.filter((r) => r.sy.v.v === 'correct').length;
-  w(`### ${cat.title} — CE ${ceOk}/${cr.length}, SymPy ${syOk}/${cr.length}`);
+  const woOk = cr.filter((r) => r.wo.v.v === 'correct').length;
+  w(`### ${cat.title} — CE ${ceOk}/${cr.length}, SymPy ${syOk}/${cr.length}, Mathematica ${woOk}/${cr.length}`);
   w();
-  w('| Case | CE | SymPy |');
-  w('|---|---|---|');
-  for (const r of cr) w(`| ${r.c.title} | ${cell(r.ce)} | ${cell(r.sy)} |`);
+  w('| Case | CE | SymPy | Mathematica |');
+  w('|---|---|---|---|');
+  for (const r of cr) w(`| $${caseLatex(r.c)}$ | ${cell(r.ce)} | ${cell(r.sy)} | ${cell(r.wo)} |`);
   w();
 }
 

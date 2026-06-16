@@ -10,18 +10,19 @@
 //
 //   1. Numeric — arbitrary-precision (200-digit) evaluation, absolute median
 //      ms per call (lower is better). Columns: CE current / CE published /
-//      SymPy / math.js. Highlights the bignum-kernel work (Γ, ψ at high
-//      precision) and arithmetic like π².
+//      SymPy / math.js / Mathematica. Highlights the bignum-kernel work (Γ, ψ at
+//      high precision) and arithmetic like π².
 //
 //   2. Symbolic — antiderivatives, derivatives, simplification, evaluation and
-//      solving, as **× faster than SymPy** (SymPy_time / engine_time, so higher
-//      is better; SymPy itself is `1×`). SymPy is the baseline because, versus
-//      the last RELEASE, most of these cases are new capabilities (the release
-//      simply fails), which would make a ratio-to-release table all `✓`/`—`.
-//      `—` marks a fail / no-result; `✓` marks a case an engine solves that
-//      SymPy can't. What is new this release is still visible: compare the
-//      current and published CE columns (a `—` under the release next to a
-//      number under the current build).
+//      solving, as **× faster than Mathematica** (Mathematica_time / engine_time,
+//      so higher is better; Mathematica itself is `1×`). Mathematica is the
+//      baseline because it is the capability ceiling — it solves essentially
+//      every case — and because, versus the last RELEASE, most of these cases are
+//      new capabilities (the release simply fails), which would make a
+//      ratio-to-release table all `✓`/`—`. `—` marks a fail / no-result; `✓`
+//      marks a case an engine solves that Mathematica can't. What is new this
+//      release is still visible: compare the current and published CE columns (a
+//      `—` under the release next to a number under the current build).
 //
 // The CE + Rubi/Fungrim column ("CE + R/F") loads the published Rubi
 // (integration-rules) and Fungrim (identities) bundles onto the same minified
@@ -77,13 +78,15 @@ function fmtMs(ms) {
   return (ms / 1000).toFixed(1) + ' s';
 }
 
-// A speedup factor for the symbolic table (SymPy time ÷ engine time). Higher is
-// better; SymPy itself is 1×. Values < 1 (engine slower than SymPy) keep a
-// decimal so they read honestly (e.g. 0.6×).
+// A speedup factor for the symbolic table (Mathematica time ÷ engine time).
+// Higher is better; Mathematica itself is 1×. Values < 1 (engine slower than
+// Mathematica) keep enough precision to read honestly: 0.1–0.9 to one decimal
+// (0.6×), and < 0.1 to two significant figures (0.04×) rather than a lossy 0.0×.
 function fmtSpeedup(r) {
   if (r == null || !isFinite(r) || r <= 0) return NONE;
   if (r >= 10) return Math.round(r) + '×';
-  return r.toFixed(1) + '×';
+  if (r >= 0.1) return r.toFixed(1) + '×';
+  return Number(r.toPrecision(1)) + '×';
 }
 
 const md = (s) => s;
@@ -106,6 +109,7 @@ const NUM_COLS = [
   { key: 'ce-pub', label: PUB_LABEL },
   { key: 'sympy', label: 'SymPy' },
   { key: 'mathjs', label: 'math.js' },
+  { key: 'wolfram', label: 'Mathematica' },
 ];
 
 const numCases = tagged('numeric');
@@ -153,6 +157,7 @@ const SYM_COLS = [
   { key: 'ce-pub', label: PUB_LABEL },
   { key: 'sympy', label: 'SymPy' },
   { key: 'mathjs', label: 'math.js' },
+  { key: 'wolfram', label: 'Mathematica' },
 ];
 
 const GROUP_ORDER = ['antiderivative', 'derivative', 'simplify', 'evaluate', 'solve'];
@@ -164,18 +169,19 @@ const GROUP_TITLE = {
   solve: 'Solving',
 };
 
-// The symbolic table is baselined on **SymPy** and reads as "× faster than
-// SymPy" (higher = better) — because vs the published release most of these
-// cases are *new capabilities* (the baseline simply fails), so a ratio to it
-// would be all `✓`/`—`. SymPy solves nearly everything here, which makes it the
-// useful speed reference. Coverage still shows through: a `—` is a fail, and a
-// column that solves a case SymPy *can't* shows `✓`.
+// The symbolic table is baselined on **Mathematica** and reads as "× faster
+// than Mathematica" (higher = better) — because vs the published release most of
+// these cases are *new capabilities* (the baseline simply fails), so a ratio to
+// it would be all `✓`/`—`. Mathematica is the capability ceiling and solves
+// essentially everything here, which makes it the natural speed reference.
+// Coverage still shows through: a `—` is a fail, and a column that solves a case
+// Mathematica *can't* shows `✓`.
 function symCell(id, tk, baseTime) {
   if (!isCorrect(id, tk)) return NONE;             // this engine can't do it
-  if (tk === 'sympy') return '1×';                 // the reference
-  if (baseTime == null) return '✓';                // solves it, SymPy doesn't
+  if (tk === 'wolfram') return '1×';               // the reference baseline
+  if (baseTime == null) return '✓';                // solves it, Mathematica doesn't
   const t = timeOf(id, tk);
-  return t == null ? '✓' : fmtSpeedup(baseTime / t); // higher = faster than SymPy
+  return t == null ? '✓' : fmtSpeedup(baseTime / t); // higher = faster than Mathematica
 }
 
 const symCases = tagged('symbolic');
@@ -184,9 +190,9 @@ for (const c of symCases) (byGroup[c.changelog.group] ??= []).push(c);
 
 w('#### Symbolic capability & performance');
 w();
-w('Each cell is **how many times faster than SymPy** that engine is on the case ' +
-  '(`SymPy ÷ engine`, so **higher is better**; SymPy itself is `1×`). ' +
-  `\`${NONE}\` means the engine can't do the case; \`✓\` means it solves a case SymPy can't. ` +
+w('Each cell is **how many times faster than Mathematica** that engine is on the case ' +
+  '(`Mathematica ÷ engine`, so **higher is better**; Mathematica itself is `1×`). ' +
+  `\`${NONE}\` means the engine can't do the case; \`✓\` means it solves a case Mathematica can't. ` +
   `Compare the **${CUR_LABEL}** and **${PUB_LABEL}** columns to see what is *new this release* ` +
   `(a \`${NONE}\` under \`${PUB_VERSION}\` next to a number under the current build). ` +
   'The **CE + R/F** column is the current build with the opt-in Rubi integrator + Fungrim ' +
@@ -200,30 +206,35 @@ for (const g of GROUP_ORDER) {
   if (!cases.length) continue;
   w(row([`**${GROUP_TITLE[g] || g}**`, ...blankRest]));
   for (const c of cases) {
-    const baseTime = isCorrect(c.id, 'sympy') ? timeOf(c.id, 'sympy') : null;
+    const baseTime = isCorrect(c.id, 'wolfram') ? timeOf(c.id, 'wolfram') : null;
     w(row([`$${c.latex}$`, ...SYM_COLS.map((col) => symCell(c.id, col.key, baseTime))]));
   }
 }
 w();
 
-// Median speedup vs SymPy across the cases the best CE configuration solves and
-// SymPy also solves — a single honest headline computed from the data.
+// Median speed of the best CE configuration relative to the Mathematica
+// baseline, across the cases both solve — a single honest headline from the data.
 const ceBest = (id) =>
   isCorrect(id, 'ce-current') ? timeOf(id, 'ce-current')
     : isCorrect(id, 'ce-rubi') ? timeOf(id, 'ce-rubi') : null;
 const symSpeedups = symCases
   .map((c) => {
     const ce = ceBest(c.id);
-    const sp = isCorrect(c.id, 'sympy') ? timeOf(c.id, 'sympy') : null;
-    return ce && sp ? sp / ce : null;
+    const wl = isCorrect(c.id, 'wolfram') ? timeOf(c.id, 'wolfram') : null;
+    return ce && wl ? wl / ce : null;
   })
   .filter((x) => x != null)
   .sort((a, b) => a - b);
 if (symSpeedups.length) {
   const median = symSpeedups[Math.floor(symSpeedups.length / 2)];
   const max = symSpeedups[symSpeedups.length - 1];
-  w(`Across the cases both solve, Compute Engine is a **median ${median >= 10 ? Math.round(median) : median.toFixed(1)}× ` +
-    `faster than SymPy** (up to ${Math.round(max)}×), in the browser rather than a Python backend.`);
+  const fmt = (x) => (x >= 10 ? Math.round(x) : x.toFixed(1));
+  if (median >= 1)
+    w(`Across the cases both solve, Compute Engine is a **median ${fmt(median)}× faster than Mathematica** ` +
+      `(up to ${Math.round(max)}×) — in the browser, not a proprietary kernel.`);
+  else
+    w(`Across the cases both solve, Compute Engine runs at a **median ${median.toFixed(1)}× the per-call speed of ` +
+      `Mathematica** (up to ${Math.round(max)}× faster on its best case) — in the browser, not a proprietary kernel.`);
   w();
 }
 
@@ -235,7 +246,7 @@ w('<sub>');
 w(`Measured ${(results.generated || '').slice(0, 10)} · ` +
   `Compute Engine \`${versions.ceCurrent || '?'}\`${versions.ceCurrentSha ? ` @ \`${versions.ceCurrentSha}\`` : ''} (current build) · ` +
   `published \`${PUB_VERSION}\` · ` +
-  `SymPy \`${versions.sympy || '?'}\` · math.js \`${versions.mathjs || '?'}\` · Node \`${versions.node || '?'}\`. ` +
+  `SymPy \`${versions.sympy || '?'}\` · math.js \`${versions.mathjs || '?'}\` · Mathematica \`${versions.wolfram || '?'}\` · Node \`${versions.node || '?'}\`. ` +
   'Correctness is verified numerically against an independent `mpmath` reference, never another tool. ' +
   'Reproduce with `npm run build production && ./venv/bin/python3 benchmarks/gen_cases.py && ' +
   'node benchmarks/report.mjs && node benchmarks/report_changelog.mjs`.');

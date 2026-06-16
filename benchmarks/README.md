@@ -4,43 +4,50 @@
 > `test/compute-engine/compile-python-generate.test.ts`, which overwrote it on
 > every test run — that generation step has been removed.)
 
-Four benchmark harnesses live here:
+This directory holds the benchmarks that compare Compute Engine against other
+computer-algebra systems and track its performance release over release.
+**Mathematica (the Wolfram kernel) is the reference baseline** throughout: it is
+the broadest engine in the field, so every report measures CE — and the
+open-source comparators — against what a mature commercial CAS does.
 
-0. **Kernel microbenchmarks** (`big-decimal/`) — narrow experiments on the
-   arbitrary-precision `src/big-decimal/` core itself (not the whole CE
-   pipeline). These sit below the capability harness because they measure a
-   component, not a user-facing capability. Contents:
-   - `kernel-base2-experiment.ts` — base-2 vs base-10 fixed-point transcendental
-     kernel A/B (ROADMAP item 17.1); self-verifies bit-identical output against a
-     high-precision `BigDecimal` reference, then prints kernel-only and
-     end-to-end speedup tables. Run with `npx tsx`.
-   - `cell.mjs` (a CE bundle) + `cell.py` (SymPy / mpmath) — time **one**
-     `(op, precision)` per process. Driven in a fresh-process-per-cell loop they
-     feed **[`BIGNUM-COMPARISON.md`](./big-decimal/BIGNUM-COMPARISON.md)**, the
-     honest internal CE-vs-0.59.0-vs-SymPy-vs-mpmath report (where the bignum
-     core leads and where it trails — pointing at ROADMAP item 17 follow-ups).
-     The per-cell method avoids the cross-precision constant-cache thrash that a
-     single multi-precision process suffers. Reproduce steps are in that file.
-   - `bignum-compare.mjs` / `bignum-compare.py` — the quicker whole-table variant
-     (one process); convenient but its `exp`/`ln` cells are inflated by that
-     cache thrash, so prefer `cell.*` for reportable numbers.
+## The harnesses at a glance
 
-1. **Capability benchmark** (`report.mjs`) — the main report. Compares three
-   Compute Engine configurations — the current build, the current build with
-   the experimental **Rubi + Fungrim** rules enabled, and the last published
-   release — **and** SymPy, math.js, NumPy and **Wolfram (Mathematica)**, on
-   **correctness/usefulness** and **performance**, across four capabilities:
-   arbitrary-precision numeric evaluation, simplification, differentiation and
-   antiderivation. Each category has a **core** tier (textbook) and a **hard**
-   tier (boundary-pushers chosen to separate the libraries and exercise
-   recently-fixed CE paths).
-2. **Operation audit** (`audit/`) — a deeper, narrower **CE-vs-SymPy**
-   issue-finder across more operations (factor, GCD, expand, simplify, derivative,
-   limit, indefinite & definite integration), ranked by where CE trails. Includes
-   an ingestion of Michael Wester's CAS-review suite. See "Operation audit" below.
-3. **Compilation/throughput benchmark** (`python-performance.py`,
-   `numeric-evaluation.ts`) — the older NumPy-vs-compiled-JS micro-benchmarks
-   (see "Compilation benchmark" below).
+| Harness | Script | Tools compared | Report |
+|---|---|---|---|
+| **Capability** | `report.mjs` | CE current · CE+Rubi/Fungrim · CE published · SymPy · math.js · NumPy · **Mathematica** | `REPORT.md` |
+| **Marketing** | `report_marketing.mjs` | CE · SymPy · math.js · NumPy · **Mathematica** | `REPORT-marketing.md` |
+| **Changelog tables** | `report_changelog.mjs` | CE current · CE+R/F · CE published · SymPy · math.js · **Mathematica** | `CHANGELOG-TABLES.md` |
+| **Operation audit** | `audit/audit.ts` | CE · SymPy · **Mathematica** | `audit/REPORT-audit.md` |
+| **Wester suite** | `audit/wester.ts` | CE · CE+R/F · SymPy · **Mathematica** | `audit/REPORT-wester.md` |
+| **Solving** | `audit/solve.ts` | CE · CE+Fungrim · SymPy · **Mathematica** | `audit/REPORT-solve.md` |
+| **Kernel microbench** | `big-decimal/*` | CE · CE published · SymPy · mpmath | `big-decimal/BIGNUM-COMPARISON.md` |
+| **Compilation (legacy)** | `python-performance.py` | compiled-JS · NumPy · Python | stdout |
+
+The first six are the **release baseline** (see below). The capability harness
+spawns each `(tool, case)` in its own timed subprocess; the audit harnesses run
+CE in-process and spawn one batch subprocess per other tool.
+
+### How Mathematica is driven
+
+No case carries a native Wolfram dialect — every case carries structured
+**MathJSON** (the `ce` input). A single translator,
+[`runners/mathjson-to-wl.mjs`](./runners/mathjson-to-wl.mjs), maps MathJSON onto
+Wolfram Language (`["Power","x",2]`→`x^2`, `["Ln",2]`→`Log[2]`), so a new case
+gets Mathematica coverage automatically. Two runners consume it:
+
+- [`runners/run_wolfram.mjs`](./runners/run_wolfram.mjs) — the **capability**
+  benchmark: one `wolframscript` kernel per case (fine for ~40 cases).
+- [`runners/run_wolfram_batch.mjs`](./runners/run_wolfram_batch.mjs) — the
+  **audit family**: one kernel processes a whole task list (a kernel launch
+  costs several seconds, and each audit harness has 20–50 cases). It emits the
+  same JSON shape as the SymPy batch runners, so each harness grades Mathematica
+  with the identical logic it uses for CE and SymPy.
+
+Timing is measured **inside** the kernel (warm median, caches disabled so each
+call does real work), so the multi-second start-up is excluded. **`wolframscript`
+(a licensed Mathematica / Wolfram Engine) must be on `PATH`.** If it is absent or
+unlicensed, every Mathematica cell degrades to `⚠️`/`⏱`/`—` and the rest of each
+report is unaffected — nothing is vendored under `.competitors`.
 
 ---
 
@@ -71,6 +78,10 @@ reports are measured against the **previous** one. Run, in order:
    (plus any `*cases.json` you regenerated). `results.json` and
    `CHANGELOG-TABLES.md` are gitignored and not part of the baseline.
 
+All six harnesses now drive Mathematica, so the full baseline needs
+`wolframscript` on `PATH` (it degrades gracefully if absent — the Mathematica
+columns just read `⚠️`/`—`).
+
 The kernel microbenchmarks (→ `big-decimal/BIGNUM-COMPARISON.md`) and the legacy
 compilation benchmark are perf-investigation tools, refreshed on demand — not
 part of the per-release baseline.
@@ -79,24 +90,37 @@ part of the per-release baseline.
 
 ## Capability benchmark
 
+The main report. It compares three Compute Engine configurations — the current
+build, the current build with the experimental **Rubi + Fungrim** rules enabled,
+and the last published release — **and** SymPy, math.js, NumPy and **Mathematica
+(the Wolfram kernel)**, on **correctness/usefulness** and **performance**, across
+four capabilities: arbitrary-precision numeric evaluation, simplification,
+differentiation and antiderivation. Each category has a **core** tier (textbook)
+and a **hard** tier (boundary-pushers chosen to separate the libraries and
+exercise recently-fixed CE paths).
+
 ### What it produces
 
 - **[`REPORT.md`](./REPORT.md)** — the full engineering report: a scoreboard,
   per-tier tables (CE current / CE+Rubi+Fungrim / CE published / SymPy / math.js
-  / NumPy / Wolfram) where each cell combines correctness with median time, a
+  / NumPy / Mathematica) where each cell combines correctness with median time, a
   current-vs-published diff, and a competitive-analysis matrix.
 - **[`REPORT-marketing.md`](./REPORT-marketing.md)** — a short, curated product
-  comparison (CE vs SymPy / math.js / NumPy) for positioning: a capability
-  matrix, only the cases that *differentiate* the tools, and a performance
-  summary. Generated by `report_marketing.mjs` from `results.json` (run
-  `report.mjs` first).
-- **`CHANGELOG-TABLES.md`** — two release-ready Markdown tables (a 200-digit
-  numeric ms/op table and a symbolic capability/speed table keyed to the
-  published baseline) for pasting into the top-level `CHANGELOG.md` when a
-  release lands meaningful gains. Generated by `report_changelog.mjs` from
-  `results.json` + the `changelog`-tagged cases (run `report.mjs` first). It
-  prints to stdout as well; override the "current" column label with
-  `CE_CURRENT_LABEL='CE 0.60.0'`.
+  comparison for positioning: a capability matrix, only the cases that
+  *differentiate* the tools, and a performance summary. It frames CE against the
+  open-source field (SymPy, math.js, NumPy) and shows **Mathematica** as the
+  commercial reference column. Generated by `report_marketing.mjs` from
+  `results.json` (run `report.mjs` first).
+- **`CHANGELOG-TABLES.md`** — two release-ready Markdown tables for pasting into
+  the top-level `CHANGELOG.md` when a release lands meaningful gains:
+  1. a 200-digit **numeric** table in absolute ms/op (lower is better), and
+  2. a **symbolic** capability/speed table expressed as **× faster than
+     Mathematica** (Mathematica is the `1×` baseline; higher is better) — see
+     *The Mathematica baseline* below.
+
+  Generated by `report_changelog.mjs` from `results.json` + the
+  `changelog`-tagged cases (run `report.mjs` first). It prints to stdout as well;
+  override the "current" column label with `CE_CURRENT_LABEL='CE 0.60.0'`.
 - **`results.json`** — the raw, machine-readable results + verdicts (gitignored).
 
 ### How it fits together
@@ -109,8 +133,10 @@ part of the per-release baseline.
 | `runners/run_ce_rubi.mjs` | The `CE+R/F` column: loads the published `integration-rules` (Rubi) + `identities` (Fungrim) bundles onto the same minified engine as `ce-current`, runs **all** cases in one process. Times are comparable to the other columns. |
 | `runners/run_mathjs.mjs` | Runs one case on math.js. |
 | `runners/run_py.py` | Runs one case on SymPy or NumPy. |
-| `runners/run_wolfram.mjs` | Runs one case on Wolfram (Mathematica): translates the structural `ce` MathJSON into Wolfram Language and drives the system `wolframscript` kernel. Times warm inside the kernel; no per-case `wolfram` input needed in `cases.json`. |
+| `runners/run_wolfram.mjs` | Runs one case on Mathematica: translates the structural `ce` MathJSON into Wolfram Language (via `mathjson-to-wl.mjs`) and drives the system `wolframscript` kernel. Times warm inside the kernel; no per-case `wolfram` input needed in `cases.json`. |
+| `runners/mathjson-to-wl.mjs` | The shared MathJSON → Wolfram Language translator, used by every Wolfram runner here. |
 | `report.mjs` | Orchestrates: spawns each `(tool, case)` in its own timed subprocess (plus the one-shot Rubi batch), scores results against the references, writes `REPORT.md` + `results.json`. Renders only the four engineering categories; the changelog-only categories still run and land in `results.json`. |
+| `report_marketing.mjs` | Renders `REPORT-marketing.md` from `results.json`. |
 | `report_changelog.mjs` | Renders the two CHANGELOG tables from `results.json` + the `changelog`-tagged cases. Writes `CHANGELOG-TABLES.md` (and stdout). |
 
 Each runner emits a single line of JSON with the same shape, so the
@@ -129,6 +155,18 @@ difference `F(b) − F(a)` (constant of integration cancels) vs `∫f`;
 *partial* — a numeric fallback, not an exact result); `solve` must return a real
 root set that bijectively matches the reference real roots within tolerance.
 
+### The Mathematica baseline
+
+The CHANGELOG **symbolic** table is normalized so each cell is "**× faster than
+Mathematica**" (`Mathematica_time ÷ engine_time`, higher is better; Mathematica
+is `1×`). Mathematica is the natural reference because it is the capability
+ceiling — it solves essentially every symbolic case — and because, versus the
+last *release*, most of these cases are new CE capabilities (the release simply
+fails), which would make a ratio-to-release table all `✓`/`—`. A `—` is a
+fail / no result; `✓` marks a case an engine solves that Mathematica can't.
+(The numeric CHANGELOG table and the per-category capability tables stay in
+**absolute ms** — only the symbolic ratio table is baselined.)
+
 ### Running it
 
 Prerequisites (installed in isolation, not into the project manifests):
@@ -144,14 +182,10 @@ mkdir -p benchmarks/.competitors/mathjs-host
 # the published Compute Engine release to compare against
 ( cd benchmarks/.competitors && npm pack @cortex-js/compute-engine@0.59.0 \
   && mkdir -p ce-0.59.0 && tar xzf cortex-js-compute-engine-0.59.0.tgz -C ce-0.59.0 --strip-components=1 )
-```
 
-The **Wolfram** column needs `wolframscript` (a licensed Mathematica / Wolfram
-Engine) on `PATH` — nothing is vendored under `.competitors`. If `wolframscript`
-is absent or unlicensed, every Wolfram cell simply reports `⚠️`/`⏱` and the rest
-of the report is unaffected. Its runner translates each case's structural `ce`
-MathJSON into Wolfram Language, so — unlike SymPy/math.js — no `wolfram` input
-needs to be added to `cases.json` when cases change.
+# Mathematica: a licensed `wolframscript` on PATH (nothing is vendored)
+wolframscript -version   # confirm it is available
+```
 
 The **current build** is read from `dist/compute-engine.min.esm.js`, so build it
 first (`npm run build production`). Then:
@@ -176,24 +210,36 @@ of the report still builds.
 | `CE_CURRENT_BUNDLE` | `dist/compute-engine.min.esm.js` | Path to the "current build" ESM bundle. |
 | `CE_PUBLISHED_VERSION` | `0.59.0` | Label for the published column. |
 | `CE_PUBLISHED_BUNDLE` | `.competitors/ce-<version>/dist/compute-engine.min.esm.js` | Path to the published bundle. |
+| `CE_CURRENT_LABEL` | `CE (current)` | Override the current column label in the CHANGELOG tables. |
 
 ---
 
-## Operation audit — CE vs SymPy (`audit/`)
+## Operation audit — CE vs SymPy vs Mathematica (`audit/`)
 
-A deeper companion: **Compute Engine vs SymPy only** (the strongest symbolic
-competitor), across *several operations*, to **find where CE trails** and surface
-bugs. Three sources feed it, each writing its own report:
+A deeper companion to the capability benchmark: it goes **narrow on tools, broad
+on operations** to **find where CE trails**. Each case runs on Compute Engine,
+SymPy (the strongest open-source symbolic competitor), and **Mathematica (the
+reference baseline)**, across factor / GCD / expand / simplify / derivative /
+limit / indefinite & definite integration / solve / resultant. Three sources
+feed it, each writing its own report:
 
 | File | Role |
 |---|---|
 | `audit/gen.py` | Hand-authored cases + mpmath references → `audit/audit_cases.json`. |
 | `audit/run_sympy.py` | SymPy side of the hand-authored audit. |
-| `audit/audit.ts` | Orchestrator (`npx tsx`): runs CE in-process, spawns SymPy, grades both identically → **`audit/REPORT-audit.md`**. |
-| `audit/wester.ts` | Ingests the **Wester** suite (`benchmarks/wester/*.m`, Mathematica) via `scripts/rubi/wl-parser.ts`, auto-categorizes by parsed head, runs **base CE / CE+Rubi+Fungrim / SymPy** → **`audit/REPORT-wester.md`**. |
+| `audit/audit.ts` | Orchestrator (`npx tsx`): runs CE in-process, spawns SymPy + Mathematica batches, grades all three identically → **`audit/REPORT-audit.md`**. "Where CE trails" is measured against the Mathematica baseline. |
+| `audit/wester.ts` | Ingests the **Wester** suite (`benchmarks/wester/*.m`, Mathematica) via `scripts/rubi/wl-parser.ts`, auto-categorizes by parsed head, runs **base CE / CE+Rubi+Fungrim / SymPy / Mathematica** → **`audit/REPORT-wester.md`**. |
 | `audit/run_sympy_wester.py` | SymPy side of the Wester run. |
 | `audit/gen_solve.py` | Adapts SymPy's `test_solveset.py` (univariate) → `audit/solve_cases.json`, with SymPy's `solve()` outcome and vetted reference roots per case. |
-| `audit/solve.ts` | The **univariate solving** benchmark: runs **base CE / CE+Fungrim solve templates / SymPy**, graded by a root-substitution oracle → **`audit/REPORT-solve.md`**. |
+| `audit/solve.ts` | The **univariate solving** benchmark: runs **base CE / CE+Fungrim solve templates / SymPy / Mathematica**, graded by a root-substitution oracle → **`audit/REPORT-solve.md`**. |
+
+The Mathematica side of all three is driven through the shared
+[`runners/run_wolfram_batch.mjs`](./runners/run_wolfram_batch.mjs) (one kernel
+per harness). For `solve.ts`, Mathematica runs `Solve[expr == 0, x]` live, and
+periodic / transcendental answers returned as parametric families
+(`ConditionalExpression[… + 2πi·C[1], …]`) are reduced to their principal member
+so a concrete sample root can be graded — the soundness check (`|residual| <
+1e-6`) still guards every root.
 
 ```bash
 python benchmarks/audit/gen.py && npx tsx benchmarks/audit/audit.ts   # hand-authored audit
@@ -208,6 +254,8 @@ equal the true gcd. Limits and definite integrals have no cheap reliable numeric
 oracle, so for those *correct = the tool returned a finite value*, with CE-vs-SymPy
 disagreements flagged separately (`≠` in `REPORT-wester.md`). A `Factor` form
 check additionally flags value-correct-but-malformed results (e.g. `√x`/`|x|`).
+All three tools (CE, SymPy, Mathematica) are graded by the **identical** logic in
+each harness.
 
 The **solving** benchmark (`solve.ts`) is the exception that does use curated
 references: each returned root must be **sound** (substituted into the residual
@@ -223,6 +271,29 @@ Heads covered: factor, expand, simplify, derivative, limit, indefinite &
 definite integration, `Solve` and `Resultant`. (`PolynomialGCD` problems in the
 Wester files reference stateful symbols / are multivariate, so they're skipped
 here — polynomial GCD is covered concretely by the hand-authored `audit.ts`.)
+
+---
+
+## Kernel microbenchmarks (`big-decimal/`)
+
+Narrow experiments on the arbitrary-precision `src/big-decimal/` core itself
+(not the whole CE pipeline) — they measure a component, not a user-facing
+capability:
+
+- `kernel-base2-experiment.ts` — base-2 vs base-10 fixed-point transcendental
+  kernel A/B (ROADMAP item 17.1); self-verifies bit-identical output against a
+  high-precision `BigDecimal` reference, then prints kernel-only and end-to-end
+  speedup tables. Run with `npx tsx`.
+- `cell.mjs` (a CE bundle) + `cell.py` (SymPy / mpmath) — time **one**
+  `(op, precision)` per process. Driven in a fresh-process-per-cell loop they
+  feed **[`BIGNUM-COMPARISON.md`](./big-decimal/BIGNUM-COMPARISON.md)**, the
+  honest internal CE-vs-0.59.0-vs-SymPy-vs-mpmath report (where the bignum core
+  leads and where it trails — pointing at ROADMAP item 17 follow-ups). The
+  per-cell method avoids the cross-precision constant-cache thrash that a single
+  multi-precision process suffers. Reproduce steps are in that file.
+- `bignum-compare.mjs` / `bignum-compare.py` — the quicker whole-table variant
+  (one process); convenient but its `exp`/`ln` cells are inflated by that cache
+  thrash, so prefer `cell.*` for reportable numbers.
 
 ---
 

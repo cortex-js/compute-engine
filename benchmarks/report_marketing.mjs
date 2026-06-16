@@ -3,8 +3,9 @@
 //   node benchmarks/report_marketing.mjs
 //
 // Reads the already-computed results.json (run report.mjs first) and emits a
-// short, readable product comparison: Compute Engine vs the shipping
-// competitors (SymPy, math.js, NumPy), on quality and performance.
+// short, readable product comparison: Compute Engine vs the shipping open-source
+// competitors (SymPy, math.js, NumPy) and Mathematica as the commercial
+// reference, on quality and performance.
 //
 // It is deliberately curated — only cases that *differentiate* the tools are
 // shown (anything every package solves identically and at similar speed adds
@@ -21,12 +22,14 @@ const data = JSON.parse(readFileSync(join(__dirname, 'results.json'), 'utf8'));
 const { matrix, versions } = data;
 const caseById = Object.fromEntries(suite.cases.map((c) => [c.id, c]));
 
-// Product columns (the shipping libraries). CE = the current build.
+// Product columns (the shipping libraries) plus Mathematica as the commercial
+// reference. CE = the current build.
 const COLS = [
   { key: 'ce-current', label: 'Compute Engine' },
   { key: 'sympy', label: 'SymPy' },
   { key: 'mathjs', label: 'math.js' },
   { key: 'numpy', label: 'NumPy' },
+  { key: 'wolfram', label: 'Mathematica' },
 ];
 
 // Curated, differentiating cases grouped by capability. Each row is here
@@ -95,27 +98,30 @@ w('# Compute Engine — how it compares');
 w();
 w(`_A quick, like-for-like comparison of Compute Engine against widely-used open-source math libraries. ${data.generated.slice(0, 10)}._`);
 w();
-w('**Compute Engine is the only library here that combines symbolic computation ' +
-  '(simplify, differentiate, integrate) with arbitrary-precision numerics — and runs ' +
-  'natively in the browser and Node.js at JavaScript speed.** SymPy matches it on ' +
+w('**Compute Engine is the only open-source, browser-native library here that combines ' +
+  'symbolic computation (simplify, differentiate, integrate) with arbitrary-precision ' +
+  'numerics — running in the browser and Node.js at JavaScript speed.** SymPy matches it on ' +
   'symbolic breadth but needs a Python runtime and is markedly slower per call; math.js ' +
   'runs in JavaScript but has no symbolic integration and only light simplification; ' +
-  'NumPy is numeric-only and limited to ~16 digits.');
+  'NumPy is numeric-only and limited to ~16 digits. **Mathematica** is the commercial ' +
+  'capability ceiling — the broadest coverage of all — but it is a proprietary kernel you ' +
+  'cannot embed in a web page, which is exactly the niche Compute Engine fills.');
 w();
 
 // Capability matrix
 w('## At a glance');
 w();
-w('| Capability | Compute Engine | SymPy | math.js | NumPy |');
-w('|---|:--:|:--:|:--:|:--:|');
-w('| Runs in the browser (JavaScript) | ✅ | ❌ Python | ✅ | ❌ Python |');
-w('| Arbitrary-precision numerics | ✅ | ✅ | ✅ | ❌ ~16 digits |');
-w('| Exact big-integer arithmetic | ✅ | ✅ | ✅ | ❌ overflow |');
-w('| Special functions (ζ, Γ, W) | ✅ | ✅ | partial | ❌ |');
-w('| Symbolic simplification | ✅ | ✅ | partial | ❌ |');
-w('| Symbolic differentiation | ✅ | ✅ | ✅ | ❌ |');
-w('| Symbolic integration | ✅ | ✅ | ❌ | ❌ |');
-w('| Typical speed per call | **sub-millisecond** | milliseconds–tens of ms | sub-ms–ms | sub-ms |');
+w('| Capability | Compute Engine | SymPy | math.js | NumPy | Mathematica |');
+w('|---|:--:|:--:|:--:|:--:|:--:|');
+w('| Runs in the browser (JavaScript) | ✅ | ❌ Python | ✅ | ❌ Python | ❌ kernel |');
+w('| Arbitrary-precision numerics | ✅ | ✅ | ✅ | ❌ ~16 digits | ✅ |');
+w('| Exact big-integer arithmetic | ✅ | ✅ | ✅ | ❌ overflow | ✅ |');
+w('| Special functions (ζ, Γ, W) | ✅ | ✅ | partial | ❌ | ✅ |');
+w('| Symbolic simplification | ✅ | ✅ | partial | ❌ | ✅ |');
+w('| Symbolic differentiation | ✅ | ✅ | ✅ | ❌ | ✅ |');
+w('| Symbolic integration | ✅ | ✅ | ❌ | ❌ | ✅ |');
+w('| Open-source licence | ✅ MIT | ✅ BSD | ✅ Apache-2.0 | ✅ BSD | ❌ commercial |');
+w('| Typical speed per call | **sub-millisecond** | milliseconds–tens of ms | sub-ms–ms | sub-ms | sub-ms–tens of ms (kernel) |');
 w();
 w('_Legend for the tables below: ✅ correct · 🟡 partial or not solved · ❌ incorrect · — capability not supported._');
 w();
@@ -150,13 +156,13 @@ w('Median time per call (warm). Lower is better. Compute Engine and math.js run 
 w();
 const OP_LABEL = { numeric: 'Evaluate', simplify: 'Simplify', derivative: 'Differentiate', antiderivative: 'Integrate' };
 const perfIds = GROUPS.flatMap((g) => g.ids);
-w('| Operation | Example | Compute Engine | SymPy | math.js |');
-w('|---|---|--:|--:|--:|');
+w('| Operation | Example | Compute Engine | SymPy | math.js | Mathematica |');
+w('|---|---|--:|--:|--:|--:|');
 const ceTimes = [], spTimes = [];
 for (const id of perfIds) {
   const c = caseById[id];
   if (!c) continue;
-  const ce = ms('ce-current', c), sp = ms('sympy', c), mj = ms('mathjs', c);
+  const ce = ms('ce-current', c), sp = ms('sympy', c), mj = ms('mathjs', c), wl = ms('wolfram', c);
   // The "Nx faster" headline is about symbolic ops, so only those feed the ratio.
   if (ce != null && sp != null && c.category !== 'numeric') { ceTimes.push(ce); spTimes.push(sp); }
   // For numeric evaluation, show the precision — the rows are at different
@@ -166,7 +172,7 @@ for (const id of perfIds) {
     const prec = c.verify.kind === 'integer' ? 'exact' : `${c.verify.sigdigits} digits`;
     example += ` <sub>(${prec})</sub>`;
   }
-  w(`| ${OP_LABEL[c.category]} | ${example} | ${fmtMs(ce)} | ${fmtMs(sp)} | ${fmtMs(mj)} |`);
+  w(`| ${OP_LABEL[c.category]} | ${example} | ${fmtMs(ce)} | ${fmtMs(sp)} | ${fmtMs(mj)} | ${fmtMs(wl)} |`);
 }
 w();
 if (ceTimes.length) {
@@ -191,10 +197,13 @@ w('- **math.js** is a capable JavaScript numerics library with arbitrary precisi
   'expressions.');
 w('- **NumPy** is the standard for fast numerical array computing, but it is double-precision ' +
   'only and does no symbolic math — a different tool for a different job.');
+w('- **Mathematica / Wolfram** is the broadest engine of all and the de-facto reference, but it is ' +
+  'a proprietary kernel with a commercial licence and multi-second start-up — it cannot run inside a ' +
+  'web page, which is exactly the gap Compute Engine fills.');
 w();
 w('---');
 w();
-w(`_Versions: Compute Engine ${versions.ceCurrent}, SymPy ${versions.sympy}, math.js ${versions.mathjs}, NumPy ${versions.numpy}. ` +
+w(`_Versions: Compute Engine ${versions.ceCurrent}, SymPy ${versions.sympy}, math.js ${versions.mathjs}, NumPy ${versions.numpy}, Mathematica ${versions.wolfram || '?'}. ` +
   'Methodology and the full case list: [REPORT.md](./REPORT.md). Reproduce: `node benchmarks/report.mjs && node benchmarks/report_marketing.mjs`._');
 
 writeFileSync(join(__dirname, 'REPORT-marketing.md'), md);

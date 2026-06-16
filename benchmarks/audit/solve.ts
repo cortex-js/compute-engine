@@ -18,14 +18,19 @@
 //
 // Run:  npx tsx benchmarks/audit/solve.ts
 
+import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { ComputeEngine } from '../../src/compute-engine.ts';
 import { loadIdentities } from '../../src/identities.ts';
+import { mathJsonToWL } from '../runners/mathjson-to-wl.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TOL = 1e-6;
+const NODE = process.execPath;
+const WOLFRAM_BATCH = join(__dirname, '..', 'runners', 'run_wolfram_batch.mjs');
 
 type Card = 'finite' | 'infinite' | 'empty';
 interface Case {
@@ -100,6 +105,52 @@ function runSymPy(c: Case): { v: Verdict } {
   return judge(c, got.length, got, 0);
 }
 
+// --- Wolfram / Mathematica (the reference baseline) ------------------------
+// One `wolframscript` kernel solves every case (`Solve[expr == 0, x]`), via the
+// shared batch runner. Each case's `ce` MathJSON becomes the Wolfram residual;
+// the runner returns the real roots and the |residual| at each, so we grade
+// soundness ourselves (like CE) rather than trusting the roots blind.
+function runWolframAll(): Record<string, any> {
+  const by: Record<string, any> = {};
+  const tasks = cases.map((c) => {
+    try {
+      return { id: c.id, op: 'solve', expr: mathJsonToWL(c.ce.mathjson), var: c.ce.var, points: [] };
+    } catch (e: any) {
+      by[c.id] = { status: 'error', error: String(e?.message ?? e).slice(0, 120) };
+      return null;
+    }
+  }).filter(Boolean);
+  if (!tasks.length) return by;
+  const tmp = join(tmpdir(), `solve-wl-${process.pid}.json`);
+  writeFileSync(tmp, JSON.stringify({ real: false, tasks }));
+  try {
+    const out = execFileSync(NODE, [WOLFRAM_BATCH, tmp], { encoding: 'utf8', timeout: 1800000, maxBuffer: 64 * 1024 * 1024 });
+    for (const line of out.trim().split('\n')) { try { const o = JSON.parse(line); if (o.id) by[o.id] = o; } catch {} }
+  } catch (e: any) { console.error('wolfram failed:', (e.message || e).toString().split('\n')[0]); }
+  return by;
+}
+
+/** Grade a Wolfram batch result with the same soundness+completeness oracle as
+ *  CE: a returned real root is sound iff |residual| < TOL. */
+function gradeWolfram(c: Case, res: any): { v: Verdict; note?: string } {
+  if (!res || res.status === 'error') return { v: 'error', note: res?.error };
+  if (res.status === 'timeout') return { v: 'error', note: 'timeout' };
+  const roots: any[] = res.roots || [];
+  const mags: any[] = res.values || [];
+  if (res.status !== 'ok' || roots.length === 0)
+    return { v: c.verify.cardinality === 'empty' ? 'correct' : 'unsolved' };
+  const sound: number[] = [];
+  let badReal = 0;
+  for (let i = 0; i < roots.length; i++) {
+    const rv = Number(roots[i]);
+    if (!isFinite(rv)) continue;
+    const m = Number(mags[i]);
+    if (isFinite(m) && m < TOL) sound.push(rv);
+    else badReal++;
+  }
+  return judge(c, roots.length, sound, badReal);
+}
+
 function judge(
   c: Case,
   returned: number,
@@ -128,11 +179,13 @@ const SYM: Record<Verdict, string> = {
   error: '⚠️',
 };
 
+const wolframById = runWolframAll();
 const rows = cases.map((c) => ({
   c,
   ce: runCE(ceBase, c),
   rf: runCE(ceRF, c),
   sy: runSymPy(c),
+  wo: gradeWolfram(c, wolframById[c.id]),
 }));
 
 // Per-category + overall tallies (count "correct" only).
@@ -147,7 +200,8 @@ md.push(
     'root is graded **sound** by substitution (`|residual| < 1e-6`); `finite` ' +
     'solution sets must also be **complete** (cover the reference set), while ' +
     '`infinite` (periodic trig) sets ask only for one sound root. SymPy’s ' +
-    'column is its `solve()` outcome.',
+    'column is its `solve()` outcome; **Mathematica** (the reference baseline) ' +
+    'runs `Solve[expr == 0, x]` live via `wolframscript`, graded by the same oracle.',
   ''
 );
 md.push(
@@ -156,32 +210,34 @@ md.push(
 );
 
 // Summary table
-md.push('| Category | n | CE | CE+Fungrim | SymPy |', '|---|--:|--:|--:|--:|');
+md.push('| Category | n | CE | CE+Fungrim | SymPy | Mathematica |', '|---|--:|--:|--:|--:|--:|');
 for (const cat of cats) {
   const n = cases.filter((c) => c.cat === cat).length;
   md.push(
     `| ${cat} | ${n} | ${tally((r) => r.ce.v, (c) => c.cat === cat)} | ` +
       `${tally((r) => r.rf.v, (c) => c.cat === cat)} | ` +
-      `${tally((r) => r.sy.v, (c) => c.cat === cat)} |`
+      `${tally((r) => r.sy.v, (c) => c.cat === cat)} | ` +
+      `${tally((r) => r.wo.v, (c) => c.cat === cat)} |`
   );
 }
 md.push(
   `| **all** | **${cases.length}** | ` +
     `**${tally((r) => r.ce.v, () => true)}** | ` +
     `**${tally((r) => r.rf.v, () => true)}** | ` +
-    `**${tally((r) => r.sy.v, () => true)}** |`,
+    `**${tally((r) => r.sy.v, () => true)}** | ` +
+    `**${tally((r) => r.wo.v, () => true)}** |`,
   ''
 );
 
 // Per-case detail
 md.push('## Cases', '');
-md.push('| id | equation | set | CE | CE+F | SymPy |', '|---|---|---|:-:|:-:|:-:|');
-for (const { c, ce, rf, sy } of rows) {
+md.push('| id | equation | set | CE | CE+F | SymPy | Mathematica |', '|---|---|---|:-:|:-:|:-:|:-:|');
+for (const { c, ce, rf, sy, wo } of rows) {
   const note = (x: { v: Verdict; note?: string }) =>
     SYM[x.v] + (x.note ? ` _(${x.note})_` : '');
   md.push(
     `| ${c.id} | ${c.title} | ${c.verify.cardinality} | ` +
-      `${note(ce)} | ${note(rf)} | ${SYM[sy.v]} |`
+      `${note(ce)} | ${note(rf)} | ${SYM[sy.v]} | ${note(wo)} |`
   );
 }
 md.push('');
@@ -194,3 +250,4 @@ console.error('Wrote benchmarks/audit/REPORT-solve.md (%d cases)', cases.length)
 console.error(line('CE', (r) => r.ce.v));
 console.error(line('CE+Fungrim', (r) => r.rf.v));
 console.error(line('SymPy', (r) => r.sy.v));
+console.error(line('Mathematica', (r) => r.wo.v));

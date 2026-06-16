@@ -28,11 +28,14 @@ import { parseWL } from '../../scripts/rubi/wl-parser.ts';
 import { ComputeEngine } from '../../src/compute-engine.ts';
 import { loadIdentities } from '../../src/identities.ts';
 import { loadIntegrationRules } from '../../src/integration-rules.ts';
+import { mathJsonToWL } from '../runners/mathjson-to-wl.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..', '..');
 const WESTER = join(ROOT, 'benchmarks', 'wester');
 const PYTHON = join(ROOT, 'venv', 'bin', 'python3');
+const NODE = process.execPath;
+const WOLFRAM_BATCH = join(__dirname, '..', 'runners', 'run_wolfram_batch.mjs');
 const POINTS = [0.7, 1.3, 2.1, 3.4];
 const H = 1e-5;
 
@@ -300,6 +303,40 @@ function runSymPy(): Record<string, any> {
   return by;
 }
 
+// --- Wolfram / Mathematica (batch) -----------------------------------------
+// The Wester files are *already* Mathematica, so Wolfram is the natural
+// reference baseline here. We translate the same parsed `arg` MathJSON the other
+// configs run (not the raw statement) into Wolfram Language and grade it with the
+// identical invariant logic. `real: true` mirrors run_sympy_wester.py's
+// `symbols(var, real=True)`.
+const wlPoint = (p: any) =>
+  p === 'PositiveInfinity' ? 'Infinity' : p === 'NegativeInfinity' ? '-Infinity' : String(p);
+
+function runWolfram(): Record<string, any> {
+  const by: Record<string, any> = {};
+  const tasks: any[] = [];
+  for (const c of cases) {
+    try {
+      const t: any = { id: c.id, op: c.op, expr: mathJsonToWL(c.arg), var: c.varName, points: POINTS };
+      if (c.arg2 !== undefined) t.expr2 = mathJsonToWL(c.arg2);
+      if (c.point !== undefined && c.point !== null) t.point = wlPoint(c.point);
+      if (c.a !== undefined) t.a = c.a;
+      if (c.b !== undefined) t.b = c.b;
+      tasks.push(t);
+    } catch (e: any) {
+      by[c.id] = { status: 'error', error: String(e?.message ?? e).slice(0, 120) };
+    }
+  }
+  if (!tasks.length) return by;
+  const tmp = join(mkdtempSync(join(tmpdir(), 'wester-wl-')), 'spec.json');
+  writeFileSync(tmp, JSON.stringify({ real: true, tasks }));
+  try {
+    const out = execFileSync(NODE, [WOLFRAM_BATCH, tmp], { encoding: 'utf8', timeout: 1800000, maxBuffer: 64 * 1024 * 1024 });
+    for (const line of out.trim().split('\n')) { try { const o = JSON.parse(line); if (o.id) by[o.id] = o; } catch {} }
+  } catch (e: any) { console.error('wolfram failed:', (e.message || e).toString().split('\n')[0]); }
+  return by;
+}
+
 // --- grading (identical for every config) ----------------------------------
 function grade(c: Case, ref: (number | null)[], res: any) {
   if (!res || res.status === 'error') return { v: 'error', note: res?.error };
@@ -318,8 +355,9 @@ function grade(c: Case, ref: (number | null)[], res: any) {
   return { v: 'correct' };
 }
 
-console.error('Running CE (base) + CE+Rubi/Fungrim + SymPy over %d cases…', cases.length);
+console.error('Running CE (base) + CE+Rubi/Fungrim + SymPy + Wolfram over %d cases…', cases.length);
 const sympyById = runSymPy();
+const wolframById = runWolfram();
 // limit/defint have no cheap, reliable numeric oracle (near-point estimates are
 // unreliable at ∞ / for oscillatory or domain-tricky integrands), so they are
 // graded by *solved status* + a CE-vs-SymPy cross-check rather than against a
@@ -346,33 +384,37 @@ const rows = cases.map((c) => {
   const ceRes = runOn(ce, c);
   const rfRes = ceRF ? runOn(ceRF, c) : null;
   const syRes = sympyById[c.id] || { status: 'error', error: 'no result' };
-  let ceV: any, rfV: any, syV: any;
+  const woRes = wolframById[c.id] || { status: 'error', error: 'no result' };
+  let ceV: any, rfV: any, syV: any, woV: any;
   if (c.op === 'solve') {
-    const syRoots = (syRes && syRes.roots) || [];
-    const finalize = (v: any, res: any) => v.v !== 'solved' ? v
-      : (syRoots.length && !covers(res.roots || [], syRoots)) ? { v: 'partial', note: `${(res.roots || []).length}/${syRoots.length} roots` }
+    // Completeness is judged against the reference root set; Mathematica is the
+    // baseline, so its real roots define "complete" when present, else SymPy's.
+    const refRoots = (woRes && woRes.roots && woRes.roots.length ? woRes.roots : (syRes && syRes.roots)) || [];
+    const finalize = (v: any, res: any, against: any[]) => v.v !== 'solved' ? v
+      : (against.length && !covers(res.roots || [], against)) ? { v: 'partial', note: `${(res.roots || []).length}/${against.length} roots` }
         : { v: 'correct' };
-    ceV = finalize(solveSound(ceRes), ceRes); rfV = finalize(solveSound(rfRes), rfRes);
-    syV = solveSound(syRes); if (syV.v === 'solved') syV = { v: 'correct' };
+    ceV = finalize(solveSound(ceRes), ceRes, refRoots); rfV = finalize(solveSound(rfRes), rfRes, refRoots);
+    syV = finalize(solveSound(syRes), syRes, refRoots);
+    woV = solveSound(woRes); if (woV.v === 'solved') woV = { v: 'correct' };
   } else if (c.op === 'gcd') {
     const st = (res: any) => !res ? { v: 'na' } : res.status === 'error' ? { v: 'error', note: res.error } : gcdSolved(res) ? { v: 'correct' } : { v: 'unsolved' };
-    ceV = st(ceRes); rfV = st(rfRes); syV = st(syRes);
+    ceV = st(ceRes); rfV = st(rfRes); syV = st(syRes); woV = st(woRes);
     if (gcdSolved(ceRes) && gcdSolved(syRes) && !scalarMultiple(ceRes.values, syRes.values)) { ceV = { v: 'disagree' }; syV = { v: 'disagree' }; }
     if (gcdSolved(rfRes) && gcdSolved(syRes) && !scalarMultiple(rfRes!.values, syRes.values)) rfV = { v: 'disagree' };
   } else if (AGREE.has(c.op)) {
     const sg = (res: any) => !res ? { v: 'na' } : res.status === 'error' ? { v: 'error', note: res.error } : solved(res) ? { v: 'correct' } : { v: 'unsolved' };
-    ceV = sg(ceRes); rfV = sg(rfRes); syV = sg(syRes);
+    ceV = sg(ceRes); rfV = sg(rfRes); syV = sg(syRes); woV = sg(woRes);
     const disagree = (a: any, b: any) => solved(a) && solved(b) && Math.abs(a.values[0] - b.values[0]) > c.tol * (1 + Math.abs(b.values[0]));
     if (disagree(ceRes, syRes)) { ceV = { v: 'disagree' }; syV = { v: 'disagree' }; }
     if (disagree(rfRes, syRes)) rfV = { v: 'disagree' };
   } else {
-    ceV = grade(c, ref, ceRes); rfV = rfRes ? grade(c, ref, rfRes) : { v: 'na' }; syV = grade(c, ref, syRes);
+    ceV = grade(c, ref, ceRes); rfV = rfRes ? grade(c, ref, rfRes) : { v: 'na' }; syV = grade(c, ref, syRes); woV = grade(c, ref, woRes);
   }
-  return { c, ref, ce: { res: ceRes, v: ceV }, rf: { res: rfRes, v: rfV }, sy: { res: syRes, v: syV } };
+  return { c, ref, ce: { res: ceRes, v: ceV }, rf: { res: rfRes, v: rfV }, sy: { res: syRes, v: syV }, wo: { res: woRes, v: woV } };
 });
 const hasRF = !!ceRF;
 if (process.env.WDEBUG) for (const r of rows)
-  console.error(`[${r.c.op}] ${r.c.id} arg=${ce.expr(r.c.arg).toString().slice(0, 28)} | ref=${JSON.stringify(r.ref)} | CE ${r.ce.v.v} ${JSON.stringify(r.ce.res.values || [])} | SY ${r.sy.v.v} ${JSON.stringify(r.sy.res.values || [])}`);
+  console.error(`[${r.c.op}] ${r.c.id} arg=${ce.expr(r.c.arg).toString().slice(0, 28)} | ref=${JSON.stringify(r.ref)} | CE ${r.ce.v.v} ${JSON.stringify(r.ce.res.values || [])} | SY ${r.sy.v.v} ${JSON.stringify(r.sy.res.values || [])} | WL ${r.wo.v.v} ${JSON.stringify(r.wo.res.values || [])}`);
 
 // --- report -----------------------------------------------------------------
 const SYM: Record<string, string> = { correct: '✅', partial: '🟡', wrong: '❌', unsolved: '∅', error: '⚠️', inconclusive: '·', disagree: '≠', na: '—' };
@@ -385,7 +427,7 @@ const CATS: [string, string][] = [
 ];
 const count = (pred: (r: any) => boolean) => rows.filter(pred).length;
 
-w("# Wester suite — Compute Engine vs SymPy");
+w("# Wester suite — Compute Engine vs SymPy vs Mathematica");
 w();
 w(`_Michael Wester's CAS-review test suite (Mathematica form, GPL — \`benchmarks/wester/\`), parsed with the project ` +
   `\`wl-parser\` and graded by operation invariant (no reference answers needed). ${cases.length} runnable cases ` +
@@ -394,7 +436,9 @@ w(`_Michael Wester's CAS-review test suite (Mathematica form, GPL — \`benchmar
 w();
 w('## Summary');
 w();
-w('Configs: **CE** = base shipping engine (no Rubi/Fungrim); **CE+R/F** = with the experimental Rubi integrator + Fungrim; **SymPy** = reference.');
+w('Configs: **CE** = base shipping engine (no Rubi/Fungrim); **CE+R/F** = with the experimental Rubi integrator + ' +
+  'Fungrim; **SymPy** = the open-source comparator; **Mathematica** = the reference baseline (the CAS these test ' +
+  'files are written in).');
 w();
 w('Grading: factor/expand/simplify (value-equal to input), indefinite ∫ (`d/dx` ≈ integrand), and derivatives ' +
   '(≈ central difference) are **invariant-verified**. Limits and definite ∫ have no cheap reliable numeric oracle, ' +
@@ -402,28 +446,29 @@ w('Grading: factor/expand/simplify (value-equal to input), indefinite ∫ (`d/dx
 w();
 w(`- **CE ${count((r) => r.ce.v.v === 'correct')}/${cases.length}**` +
   (hasRF ? ` · **CE+R/F ${count((r) => r.rf.v.v === 'correct')}/${cases.length}**` : '') +
-  ` · **SymPy ${count((r) => r.sy.v.v === 'correct')}/${cases.length}** correct.`);
-w(`- Base CE trails SymPy on **${count((r) => r.ce.v.v !== 'correct' && r.sy.v.v === 'correct')}** cases` +
-  (hasRF ? `; **${count((r) => r.ce.v.v !== 'correct' && r.rf.v.v === 'correct')}** of those recovered by Rubi/Fungrim` : '') + '.');
+  ` · **SymPy ${count((r) => r.sy.v.v === 'correct')}/${cases.length}**` +
+  ` · **Mathematica ${count((r) => r.wo.v.v === 'correct')}/${cases.length}** correct.`);
+w(`- Against the **Mathematica** baseline, base CE trails on **${count((r) => r.ce.v.v !== 'correct' && r.wo.v.v === 'correct')}** cases` +
+  (hasRF ? `; **${count((r) => r.ce.v.v !== 'correct' && r.wo.v.v === 'correct' && r.rf.v.v === 'correct')}** of those recovered by Rubi/Fungrim` : '') + '.');
 w();
-w('| Operation | CE | ' + (hasRF ? 'CE+R/F | ' : '') + 'SymPy |');
-w('|---|--:|' + (hasRF ? '--:|' : '') + '--:|');
+w('| Operation | CE | ' + (hasRF ? 'CE+R/F | ' : '') + 'SymPy | Mathematica |');
+w('|---|--:|' + (hasRF ? '--:|' : '') + '--:|--:|');
 for (const [key, title] of CATS) {
   const cr = rows.filter((r) => r.c.cat === key);
   if (!cr.length) continue;
   const ok = (sel: (r: any) => any) => cr.filter((r) => sel(r).v.v === 'correct').length;
-  w(`| ${title} | ${ok((r) => r.ce)}/${cr.length} | ` + (hasRF ? `${ok((r) => r.rf)}/${cr.length} | ` : '') + `${ok((r) => r.sy)}/${cr.length} |`);
+  w(`| ${title} | ${ok((r) => r.ce)}/${cr.length} | ` + (hasRF ? `${ok((r) => r.rf)}/${cr.length} | ` : '') + `${ok((r) => r.sy)}/${cr.length} | ${ok((r) => r.wo)}/${cr.length} |`);
 }
 w();
 
-const trails = rows.filter((r) => r.ce.v.v !== 'correct' && r.sy.v.v === 'correct');
-w(`## Where CE trails SymPy (${trails.length})`);
+const trails = rows.filter((r) => r.ce.v.v !== 'correct' && r.wo.v.v === 'correct');
+w(`## Where CE trails Mathematica (${trails.length})`);
 w();
-w('| File | Op | Input | CE | ' + (hasRF ? 'CE+R/F | ' : '') + 'CE result |');
-w('|---|---|---|---|' + (hasRF ? '---|' : '') + '---|');
+w('| File | Op | Input | CE | ' + (hasRF ? 'CE+R/F | ' : '') + 'SymPy | Mathematica | CE result |');
+w('|---|---|---|---|' + (hasRF ? '---|' : '') + '---|---|---|');
 for (const r of trails.slice(0, 60))
   w(`| ${r.c.file} | ${r.c.cat} | \`${ce.expr(r.c.arg).toString().slice(0, 28)}\` | ${SYM[r.ce.v.v]}${r.ce.v.note ? ' ' + r.ce.v.note : ''} | ` +
-    (hasRF ? `${SYM[r.rf.v.v] || '·'} | ` : '') + `\`${(r.ce.res.text || '').slice(0, 26)}\` |`);
+    (hasRF ? `${SYM[r.rf.v.v] || '·'} | ` : '') + `${SYM[r.sy.v.v] || '·'} | ${SYM[r.wo.v.v] || '·'} | \`${(r.ce.res.text || '').slice(0, 26)}\` |`);
 w();
 const disagrees = rows.filter((r) => r.ce.v.v === 'disagree');
 if (disagrees.length) {

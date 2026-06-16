@@ -25,6 +25,8 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 
+import { mathJsonToWL } from './mathjson-to-wl.mjs';
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const [, , caseId] = process.argv;
 
@@ -40,41 +42,8 @@ const input = kase.inputs.ce;
 if (!input) { emit({ status: 'unsupported' }); process.exit(0); }
 
 // --- MathJSON -> Wolfram Language ------------------------------------------
-// Symbols / constants. Anything not listed maps to itself (e.g. `x`).
-const SYM = {
-  Pi: 'Pi', ExponentialE: 'E',
-  PositiveInfinity: 'Infinity', NegativeInfinity: '-Infinity',
-};
-// Heads taking a single bracketed argument, MathJSON name -> WL name.
-const UNARY = {
-  Sqrt: 'Sqrt', Sin: 'Sin', Cos: 'Cos', Tan: 'Tan', Arcsin: 'ArcSin',
-  Zeta: 'Zeta', Gamma: 'Gamma', Factorial: 'Factorial',
-  Ln: 'Log',            // WL `Log` is the natural log
-  LambertW: 'ProductLog',
-  Digamma: 'PolyGamma',  // PolyGamma[z] == digamma
-};
-
-function wl(node) {
-  if (typeof node === 'number') return String(node);
-  if (typeof node === 'string') return SYM[node] ?? node;
-  if (!Array.isArray(node)) throw new Error('bad node ' + JSON.stringify(node));
-  const [head, ...args] = node;
-  const a = args.map(wl);
-  switch (head) {
-    case 'Add': return '(' + a.join(' + ') + ')';
-    case 'Subtract': return '(' + a[0] + ' - ' + a[1] + ')';
-    case 'Multiply': return '(' + a.join('*') + ')';
-    case 'Divide': return '((' + a[0] + ')/(' + a[1] + '))';
-    case 'Negate': return '(-(' + a[0] + '))';
-    case 'Power': return '((' + a[0] + ')^(' + a[1] + '))';
-    case 'Tuple': return '{' + a.join(', ') + '}';            // {x, lo, hi}
-    case 'Limit': return 'Limit[' + a[0] + ', x -> ' + a[1] + ']';
-    case 'Integrate': return 'Integrate[' + a[0] + ', ' + a[1] + ']';
-    default:
-      if (UNARY[head]) return UNARY[head] + '[' + a[0] + ']';
-      throw new Error('unknown MathJSON head: ' + head);
-  }
-}
+// The translation is shared with the audit-family batch runner; see
+// runners/mathjson-to-wl.mjs.
 
 // --- build the Wolfram program ---------------------------------------------
 // The kernel runs the operation `iters` times (warm), records millisecond
@@ -83,7 +52,7 @@ function wl(node) {
 // clears its cache for the same reason).
 
 let exprWL;
-try { exprWL = wl(input.mathjson); } catch (e) {
+try { exprWL = mathJsonToWL(input.mathjson); } catch (e) {
   emit({ status: 'error', error: String(e.message || e) }); process.exit(0);
 }
 
