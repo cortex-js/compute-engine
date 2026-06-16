@@ -32,8 +32,8 @@ describe('ADVANCED PARSING', () => {
 
 describe('FUNCTIONS', () => {
   test('Multiple arguments of known function that take a single arugment', () =>
-    expect(parse('\\Gamma(2, 1)')).toMatchInlineSnapshot(
-      `["Gamma", 2, ["Error", "unexpected-argument", "'1'"]]`
+    expect(parse('\\exp(2, 1)')).toMatchInlineSnapshot(
+      `["Exp", 2, ["Error", "unexpected-argument", "'1'"]]`
     ));
   test('Multiple arguments of known function that take multiple arguments', () =>
     expect(parse('\\operatorname{Binomial}(2, 1)')).toMatchInlineSnapshot(

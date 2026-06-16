@@ -477,11 +477,21 @@ export class RubiDriver {
       const t = gco.div(f); // ∫(g·cos)=g·sin/f ; ∫(g·sin)=−g·cos/f
       return isCos ? t : t.neg();
     }
-    const lead = gt.pow(n - 1).mul(gco).div(f.mul(n));
+    const lead = gt
+      .pow(n - 1)
+      .mul(gco)
+      .div(f.mul(n));
     const boundary = isCos ? lead : lead.neg();
-    const rec = this.intRec(recanonicalize(ce, gt.pow(n - 2)), variable, depth + 1);
+    const rec = this.intRec(
+      recanonicalize(ce, gt.pow(n - 2)),
+      variable,
+      depth + 1
+    );
     if (rec === null) return null;
-    const coef = g.pow(2).mul(ce.number(n - 1)).div(n); // g² from factoring g^n
+    const coef = g
+      .pow(2)
+      .mul(ce.number(n - 1))
+      .div(n); // g² from factoring g^n
     return boundary.add(rec.mul(coef));
   }
 }
