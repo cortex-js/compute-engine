@@ -607,6 +607,21 @@ const PRED_FNS: Record<string, PredFn> = {
   InverseFunctionFreeQ: (args, ctx) =>
     inverseFunctionFreeQ(build(args[0], ctx), ctx.x),
 
+  // FunctionOfQ[v, u, x, pure?] — gates the trig-substitution rules 4.7.5
+  // #15–#34: is u a (pure) function of the trig substitution variable v?
+  // Restricted to the pure sin/cos/tan/cot targets this slice handles (the
+  // 4-arg `…,True` form); declines (false) otherwise. See substFor below.
+  FunctionOfQ: (args, ctx) => {
+    const pure = args.length >= 4 && args[3] === 'True';
+    return functionOfQ(
+      ctx.ce,
+      build(args[0], ctx),
+      build(args[1], ctx),
+      ctx.x,
+      pure
+    );
+  },
+
   // EqQ[u, v] := PossibleZeroQ[u - v]; NeQ is its negation. Rubi also
   // defines the unary forms EqQ[u] := PossibleZeroQ[u] (test u == 0) and
   // NeQ[u] := !PossibleZeroQ[u], used e.g. by 1.2.1.4#11 (NeQ[e²−4df]) and
@@ -2436,6 +2451,142 @@ function functionOfTrig(ce: ComputeEngine, u: Expression, x: string): Expression
   return r === null || r === false ? ce.symbol('False') : r;
 }
 
+// ---------------------------------------------------------------------------
+// Pure-trig substitution: FunctionOfQ + SubstFor / SubstForTrig (4.7.5 #15–#34).
+//
+// These rules integrate `∫ u·F(c(a+b·x)) dx` where the explicit trig factor F
+// supplies the differential and the rest `u` is a function of one inner trig
+// (e.g. ∫cos·g(sin) dx → t=sin → ∫g(t) dt). `FunctionOfQ[t, u, x, True]` is the
+// gate (u is a *pure* function of t); `SubstFor[w, t, u, x]` performs t→x.
+//
+// SCOPE (this slice): the pure sin/cos/tan/cot substitution targets with the
+// inner trig arguments all *equal* to the substitution argument (the common
+// case). The commensurate-multiple branch (Sin[2v] in terms of Sin[v] via
+// TrigExpand) and the half-angle product special case are fail-closed
+// (RuleFail) — the rule then falls through, never produces a wrong result.
+// The substituted sub-integral is algebraic, so it relies on the driver's
+// (now recursive) native rational fallback to close.
+// ---------------------------------------------------------------------------
+
+const SIN_HEADS = new Set(['Sin', 'Csc']);
+const COS_HEADS = new Set(['Cos', 'Sec']);
+const TAN_HEADS = new Set(['Tan', 'Cot']);
+
+/** PureFunctionOf{Sin,Cos,Tan}Q: every trig subterm of argument `v` has a head
+ * in `allowed`, and no bare `x` appears (IntegrationUtilityFunctions.m). */
+function pureFunctionOfTrigQ(
+  u: Expression,
+  v: Expression,
+  x: string,
+  allowed: Set<string>
+): boolean {
+  if (!u.ops || u.ops.length === 0) return u.symbol !== x; // atom: not x
+  if (CALCULUS_FNS.has(u.operator)) return false;
+  if (activeTrigHeadQ(u) && u.ops[0].isSame(v)) return allowed.has(u.operator);
+  return u.ops.every((o) => pureFunctionOfTrigQ(o, v, x, allowed));
+}
+
+/** The substitution target trig node of `v` (the rule passes `trig(arg)/d`);
+ * returns the bare trig node after dropping x-free factors, or null. */
+function substTrigNode(
+  v: Expression,
+  x: string,
+  ce: ComputeEngine
+): Expression | null {
+  let vt = v;
+  if (v.operator === 'Multiply' || v.operator === 'Divide')
+    vt = selectFactors(v, x, ce, false); // NonfreeFactors[v, x]
+  return activeTrigHeadQ(vt) && vt.ops ? vt : null;
+}
+
+/** FunctionOfQ[v, u, x, pure] — restricted to the pure trig-substitution
+ * targets this slice handles; false (decline) otherwise. */
+function functionOfQ(
+  ce: ComputeEngine,
+  v: Expression,
+  u: Expression,
+  x: string,
+  pure: boolean
+): boolean {
+  if (!u.has(x)) return false; // FreeQ[u, x]
+  if (!v.ops || v.ops.length === 0) return true; // AtomQ[v]
+  if (!pure) return false; // non-pure dispatch not yet ported
+  const vt = substTrigNode(v, x, ce);
+  if (vt === null) return false;
+  const arg = vt.ops![0];
+  const au = activateTrig(ce, u);
+  const head = vt.operator;
+  if (SIN_HEADS.has(head)) return pureFunctionOfTrigQ(au, arg, x, SIN_HEADS);
+  if (COS_HEADS.has(head)) return pureFunctionOfTrigQ(au, arg, x, COS_HEADS);
+  if (TAN_HEADS.has(head)) return pureFunctionOfTrigQ(au, arg, x, TAN_HEADS);
+  return false;
+}
+
+/** SubstForTrig[u, sinE, cosE, v, x] — replace every trig of argument `v` by
+ * its image (Sin→sinE, Cos→cosE, Tan→sinE/cosE, …). Fail-closed on the
+ * commensurate-argument (TrigExpand) branch. */
+function substForTrig(
+  u: Expression,
+  sinE: Expression,
+  cosE: Expression,
+  v: Expression,
+  ce: ComputeEngine
+): Expression {
+  if (!u.ops || u.ops.length === 0) return u;
+  if (activeTrigHeadQ(u)) {
+    if (!u.ops[0].isSame(v))
+      throw new RuleFail('SubstForTrig: commensurate argument');
+    switch (u.operator) {
+      case 'Sin':
+        return sinE;
+      case 'Cos':
+        return cosE;
+      case 'Tan':
+        return sinE.div(cosE);
+      case 'Cot':
+        return cosE.div(sinE);
+      case 'Sec':
+        return ce.One.div(cosE);
+      case 'Csc':
+        return ce.One.div(sinE);
+    }
+  }
+  return ce.function(
+    u.operator,
+    u.ops.map((o) => substForTrig(o, sinE, cosE, v, ce))
+  );
+}
+
+/** SubstFor[v, u, x] — u with the trig subexpression `v` replaced by `x`
+ * (u is a function of v). Returns null when v isn't a handled trig target. */
+function substFor3(
+  v: Expression,
+  u: Expression,
+  ctx: Ctx
+): Expression | null {
+  const ce = ctx.ce;
+  const X = ce.symbol(ctx.x);
+  const vt = substTrigNode(v, ctx.x, ce);
+  if (vt === null) return null;
+  // d ≠ 1 (a free factor on the substitution variable) is not handled here.
+  if (!selectFactors(v, ctx.x, ce, true).isSame(1)) return null;
+  const arg = vt.ops![0];
+  const sqrt1m = ce.function('Sqrt', [ce.One.sub(X.pow(2))]); // √(1−x²)
+  const sqrt1p = ce.function('Sqrt', [ce.One.add(X.pow(2))]); // √(1+x²)
+  switch (vt.operator) {
+    case 'Sin':
+      return substForTrig(u, X, sqrt1m, arg, ce);
+    case 'Cos':
+      return substForTrig(u, sqrt1m, X, arg, ce);
+    case 'Tan':
+      return substForTrig(u, X.div(sqrt1p), ce.One.div(sqrt1p), arg, ce);
+    case 'Cot':
+      return substForTrig(u, ce.One.div(sqrt1p), X.div(sqrt1p), arg, ce);
+    default:
+      return null;
+  }
+}
+
 // FreeFactors[u, x] / NonfreeFactors[u, x] (IntegrationUtilityFunctions.m):
 // the product of the factors of u that are free of x (resp. not free of x).
 // Rubi maps over a Product replacing the complementary factors with 1; a
@@ -2559,12 +2710,29 @@ const VALUE_FNS: Record<string, ValueFn> = {
   FunctionOfTrig: (args, ctx) =>
     functionOfTrig(ctx.ce, build(args[0], ctx), ctx.x),
 
-  // SubstFor[…] — the trig/hyperbolic universal-substitution engine
-  // (SubstForTrig with TrigExpand, half-angle machinery). Not yet ported:
-  // fail-closed so rule 4.7.5#83's `With`-binding fails fast instead of
-  // recursing on an inert `SubstFor(…)` node. (Implementing it is the
-  // remaining bulk of Chapter 4 — see docs/rubi/RUBI.md §5.)
-  SubstFor: () => fail('SubstFor not implemented'),
+  // SubstFor[w, v, u, x] / SubstFor[v, u, x] — substitute the trig
+  // subexpression v by x in u (times w), for the trig-substitution rules
+  // 4.7.5 #15–#34. Handles the pure sin/cos/tan/cot targets with inner
+  // arguments equal to v's; the commensurate-argument (TrigExpand) and
+  // tan-half universal (#83) branches stay fail-closed (RuleFail → the rule
+  // falls through). See substFor3/substForTrig.
+  SubstFor: (args, ctx) => {
+    if (args.length >= 4) {
+      const w = build(args[0], ctx);
+      const v = build(args[1], ctx);
+      const u = activateTrig(ctx.ce, build(args[2], ctx));
+      const r = substFor3(v, u, ctx);
+      if (r === null) return fail('SubstFor: unhandled substitution');
+      return safeSimplify(w.mul(r));
+    }
+    if (args.length === 3) {
+      const v = build(args[0], ctx);
+      const u = activateTrig(ctx.ce, build(args[1], ctx));
+      const r = substFor3(v, u, ctx);
+      return r === null ? fail('SubstFor: unhandled substitution') : r;
+    }
+    return fail('SubstFor arity');
+  },
 
   // FreeFactors[u, x] / NonfreeFactors[u, x] — the x-free (resp. x-dependent)
   // factor product; needed by the Weierstrass tan(x/2) substitution rules.

@@ -66,6 +66,11 @@ export type DriverStats = {
 export class RubiDriver {
   private readonly memo = new Map<string, Expression | null>();
   private deadline = Infinity;
+  // Re-entry guard for the native rational fallback: it integrates via
+  // `ce.Integrate.evaluate()`, which (when the integration provider is the
+  // loader's driver) calls back into this driver — without this flag a rational
+  // the rules can't close would re-enter the fallback until the deadline.
+  private inNativeFallback = false;
   // Set once per top-level int() call: true iff the integrand contains an
   // active trig head. When false, the trig bridge in intRec is never entered,
   // so trig-free (algebraic) integrands behave exactly as before — the
@@ -133,6 +138,7 @@ export class RubiDriver {
     variable: string
   ): Expression | null {
     if (NO_NATIVE_RATIONAL) return null;
+    if (this.inNativeFallback) return null; // re-entry guard (see field)
     if (!rationalFnQ(integrand, variable)) return null;
     // Numeric-coefficient integrands only. Symbolic-parameter rationals
     // (e.g. 1/((a+b·x)(c+d·x)(e+f·x))) need symbolic polynomial factoring
@@ -152,6 +158,7 @@ export class RubiDriver {
     // denominators it can't factor), so cap well under the driver budget
     // to avoid burning the full window on a dead end.
     ce.timeLimit = Math.max(1, Math.min(remainingMs, 5000));
+    this.inNativeFallback = true;
     try {
       const F = ce.function('Integrate', [integrand, x]).evaluate();
       if (containsIntegrate(F)) return null;
@@ -167,6 +174,7 @@ export class RubiDriver {
       throw e;
     } finally {
       ce.timeLimit = savedLimit;
+      this.inNativeFallback = false;
     }
   }
 
@@ -205,7 +213,15 @@ export class RubiDriver {
     if (this.memo.has(key)) return this.memo.get(key)!;
     this.memo.set(key, null); // cycle guard: a recursive identical subproblem fails
 
-    const result = this.intUncached(integrand, variable, depth);
+    let result = this.intUncached(integrand, variable, depth);
+    // Recursive subproblems get the native rational fallback too (the
+    // top-level call in int() only covers depth 0). The trig-substitution
+    // rules (4.7.5 #15–#34) substitute a trig variable away and leave an
+    // ALGEBRAIC sub-integral (e.g. ∫cos·g(sin) → ∫g(t) dt) that no Chapter-4
+    // rule can close; this lets that sub-integral resolve. Bounded by the
+    // driver deadline and the re-entry guard; can only turn null → solved.
+    if (result === null && depth > 0)
+      result = this.nativeRationalFallback(integrand, variable);
     this.memo.set(key, result);
     if (result === null) this.stats.failures++;
     return result;

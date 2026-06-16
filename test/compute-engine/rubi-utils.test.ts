@@ -250,3 +250,37 @@ describe('FunctionOfTrig (gates the universal substitution rule 4.7.5#83)', () =
     );
   });
 });
+
+describe('pure-trig substitution — FunctionOfQ + SubstFor (4.7.5 #15–#34)', () => {
+  // The rules pass active trig substitution targets (Sin[x], Tan[x], …).
+  const foq = (v: Json, u: Json): boolean =>
+    cond(['FunctionOfQ', v, u, 'x', 'True'] as Json);
+
+  test('FunctionOfQ accepts a pure function of the substitution trig', () => {
+    expect(foq(['Sin', 'x'], ['Divide', 1, ['Add', 1, ['Power', ['Sin', 'x'], 2]]])).toBe(true);
+    expect(foq(['Tan', 'x'], ['Power', ['Tan', 'x'], 3])).toBe(true);
+  });
+
+  test('FunctionOfQ rejects an impure integrand (other trig present)', () => {
+    // 1/(1+cos²) is not a pure function of sin
+    expect(foq(['Sin', 'x'], ['Divide', 1, ['Add', 1, ['Power', ['Cos', 'x'], 2]]])).toBe(false);
+    // a bare x is not a function of the trig
+    expect(foq(['Sin', 'x'], ['Multiply', 'x', ['Sin', 'x']])).toBe(false);
+  });
+
+  test('SubstFor replaces the trig variable, leaving a function of x', () => {
+    // SubstFor[1, Sin[x], 1/(1+sin²), x] → 1/(1+x²)
+    const r = build(
+      ['SubstFor', 1, ['Sin', 'x'], ['Divide', 1, ['Add', 1, ['Power', ['Sin', 'x'], 2]]], 'x'] as Json,
+      ctx
+    );
+    expect(r.has('x')).toBe(true);
+    expect(r.isSame(ce.box(['Divide', 1, ['Add', 1, ['Power', 'x', 2]]]))).toBe(true);
+  });
+
+  test('SubstFor for the tangent target maps tan → x', () => {
+    // SubstFor[1, Tan[x], tan³, x] → x³
+    const r = build(['SubstFor', 1, ['Tan', 'x'], ['Power', ['Tan', 'x'], 3], 'x'] as Json, ctx);
+    expect(r.isSame(ce.box(['Power', 'x', 3]))).toBe(true);
+  });
+});
