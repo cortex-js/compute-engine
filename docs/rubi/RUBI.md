@@ -1,15 +1,18 @@
 # Rubi → Compute Engine: Feasibility Analysis
 
-**Date:** 2026-06-10 (feasibility); last status update 2026-06-13.
-**Status:** **R1 cleared** (section 1.1.1 at 98.28% solved-correct) and
-**R2 gate cleared** (full-Chapter-1 seeded sample = 94.0%, ≥90% target met).
-The driver hangs that had blocked the exhaustive run are **RESOLVED** — root
-cause was an engine `factor()`↔canonical-`mul` infinite loop, now fixed
-(see Phase R2 in §5). **Top next item: run the exhaustive 25,854-problem
-benchmark** (now feasible), then close the 1.1.3 symbolic-n weak spot and the
-item-4 branch-phase residue. The §1–§4 analysis below is the original
-feasibility study (still accurate); §5 carries the current phasing status,
-and the project memory (`project_rubi.md`) has the session-by-session log.
+**Date:** 2026-06-10 (feasibility); last status update 2026-06-15.
+**Status:** **R1 + R2 cleared** (full Chapter-1 exhaustive = 90.0% over all
+25,854 problems). **Chapter-4 trig pilot landed** (the `(a+b cos+c sin)`
+Weierstrass family + the active↔inert head-swap bridge). **Chapter 2
+(Exponentials) ported** — full 965-problem run **62.6% solved (≈72.4%
+effective), 0 errors** — on the back of a new 2-argument incomplete-gamma
+engine kernel `Γ(s,z)` and the `FunctionOfExponential` substitution family
+(see Phase R3+ in §5). **Next: Chapter 6 (Hyperbolic)** — reuses the
+`FunctionOfExponential` hyperbolic branch + the incomplete-Γ kernel; then
+bundle Ch2/Ch6 into the shipped artifact. The §1–§4 analysis below is the
+original feasibility study (still accurate); §5 carries the current phasing
+status, and the project memory (`project_rubi.md`) has the session-by-session
+log.
 
 Rubi (Rule-Based Integration, [rulebasedintegration.org](https://rulebasedintegration.org/))
 is Albert Rich's corpus of **7,439 symbolic integration rules** organized as a
@@ -491,6 +494,46 @@ first four). Without them, the ~100 affected Chapter-1 rules can still be
     Ch6 (hyperbolic, 390 rules) use ACTIVE heads in their LHS — zero inert
     layer — so they are ≈ Chapter-1 difficulty** and should precede the full
     ch4 inert-unification effort.
+- **Phase R3+ — Chapter 2 (Exponentials) PORTED (2026-06-15).** Full 965-problem
+  run: **604 solved / 965 (62.6%; 561 correct + 43 region-phase formal), 0
+  errors, 26 wrong (2.7%)**. Effective coverage **≈72.4%** once the 95
+  `Unintegrable`-expected problems (where "unsolved" *is* the correct answer)
+  and the ~36 correct-but-unverifiable special-function results (₂F₁ outside
+  |z|<1, incomplete-Γ at extreme points) are credited. From a ~34% pre-port
+  baseline. The 26 wrong are all the incomplete-Γ/`Erfi` **branch-phase
+  artifact class** (the driver forms match Rubi's own expected antiderivatives;
+  they fail principal-branch numeric verification, not correctness) — not logic
+  bugs. Levers, in order of impact:
+  1. **2-argument incomplete gamma `Γ(s,z)`** (engine, committed `3c53de54`) —
+     the upper incomplete gamma is the closed form for `∫xᵐ·Fᵃ⁺ᵇˣⁿ`; CE only had
+     the 1-arg `Γ`. Added real + complex kernels (lower Tricomi series /
+     Legendre continued fraction / E₁-seeded recurrence for non-positive-integer
+     `s`, plus a large-|z| asymptotic series to kill catastrophic cancellation
+     when `Re(z)<0`). mpmath-validated to ~1e-10 except a narrow band
+     (`Re(z)<0`, `|z|≈15–25`, negative non-integer `s`) that bottoms out at
+     ~2e-3 — a double-precision floor needing Temme's uniform asymptotics,
+     deferred. Flipped ~20% of Ch2 from `not-evaluable` (`Gamma(k, Error)`) to
+     correct. CHANGELOG + `doc/91` committed `2750ba17`.
+  2. **`TrueQ` + `$UseGamma`** (rubi-utils, committed `80be960f`) — the whole
+     `Px·Fᵛ` polynomial×exponential family died on the unimplemented `TrueQ`
+     predicate; `$UseGamma` is unset (→ `False`), so the `Not[TrueQ[$UseGamma]]`
+     `ExpandIntegrand` branch now fires.
+  3. **3-arg `ExpandIntegrand[u,v,x]`** = `DistributeOverTerms` (expand `v`,
+     multiply each term by `u`) — mirrors the existing 3-arg `ExpandTrig`.
+  4. **`FunctionOfExponential` family** (`…Q`/`…`/`…Function`) — the master
+     substitution rule 2.3#97 for rational/√ in `Eˣ`. Stateful port
+     (`FoeState{base,expon,flag}`) with **hyperbolic-head support** (`Sinh[w] ≡
+     (Eʷ−E⁻ʷ)/2`), so it also serves Chapter 6. Added `HyperbolicQ` +
+     `SimplifyIntegrand`.
+  5. **Same-exponent fusion** in the Rubi normal form (`normal-form.ts`,
+     staged): `aˣ·bˣ → (a·b)ˣ`, `aˣ/bˣ → (a/b)ˣ`, so a product of distinct-base
+     exponentials presents a single base to `FunctionOfExponential`. Restricted
+     to symbolic exponents (`x²·y²` untouched). +9 correct, 0 new wrong.
+  - **Residual tail (diminishing returns):** PolyLog/dilog (~51, really
+    Chapter-3 territory), exp-of-quadratic/cubic (~35, Erf/exponent-factoring),
+    `2.1/2.2` niche sub-shapes. **Not yet bundled** (`bundle-corpus.ts`
+    unchanged; measured from a `/tmp` translate of ch1+ch2+ch6) and the data/rubi
+    corpus is not yet re-translated — both fold into the Ch6 + packaging pass.
 - **Phase R3+ — chapters by value**: 2 (exponentials, 125 rules — small) and
   3 (logarithms, 337) first; 5/6/7 (inverse trig/hyperbolic) next; Chapter 4
   (trig, 2,126 rules + the inert-trig utility machinery) — the

@@ -107,28 +107,76 @@ indefinite gaps** are **exponential** (`2^x/√(4^x+1)`, `u = 2^x → arcsinh`) 
 utility layer** (77% of the chapter's 2,117 rules match inert `cos`/`sin`;
 extraction + compilation are free — `docs/rubi/RUBI.md` §1/§5). The ch4 corpus
 is translated; the runtime utility port is incremental, validated per-section
-against the **Rubi test suite** (the real metric). Landed: `ExpandTrig` + the
-predicates `InertTrigFreeQ`/`FalseQ`/`InverseFunctionFreeQ`. The verified
-solve-rate climbs in steps — each utility unlocks the next; the current 4.1 Sine
-bottleneck chain is the ordered next-rung list:
+against the **Rubi test suite** (the real metric):
+`scripts/rubi/benchmark.ts --rubi "data/rubi/corpus/4 Trig functions" --chapter
+"4 Trig functions/4.1 Sine" --sample 120 --seed 5 --report /tmp/x.json` (always
+pass `--report`; the default clobbers the committed baseline).
 
-1. **`match.ts` AC-split enumeration** for `u_*y_^m_.` shapes — the reverse-
-   chain-rule (`Int[u·y^m]`) rules can't reach the `u=cos, y=sin` split today,
-   which blocks `DerivativeDivides`.
-2. **`DerivativeDivides`** — _perf-careful_ (the naive port stalls: it runs
-   `D`+`simplify` on every wrong AC-binding; gate hard, skip `simplify` unless
-   it can help) — and **`FunctionOfTrig`/`SubstFor`** (the tan / tan-half
-   substitution engine).
-3. **`TrigSimplify`/`TrigSimplifyQ`** (Pythagorean reductions).
-4. The **136 `FixInertTrigFunction`/`UnifyInertTrigFunction`** argument-
-   unification clauses.
-5. Bundle the full chapter + validate against the ~22k-problem trig suite;
-   re-run Wester as a spot-check.
+**Landed (2026-06-15).** `ExpandTrig` + the predicates
+`InertTrigFreeQ`/`FalseQ`/`InverseFunctionFreeQ`; the reverse-chain rule
+(`DerivativeDivides` + `EasyDQ`, perf-gated); `FunctionOfTrig`; the pure
+substitution engine (`FunctionOfQ` + `SubstFor`/`SubstForTrig` for
+sin/cos/tan/cot); a **recursive native-rational fallback** in the driver (closes
+the *algebraic* sub-integrals the trig reductions emit — e.g. `∫cos·g(sin)` →
+`∫g(t)`); and the **`UnifyInertTrigFunction` cofunction shift**
+(`cos[θ] → sin[θ+π/2]`), which is how Rubi routes cosine to the sine rules — it
+has **no Cosine chapter** (confirmed by tracing Rubi under `wolframscript`).
+CE's `simplify` gained the matching `sin(θ+π/2) → cos(θ)` identity so results
+read cleanly. **4.1 Sine is now 47/120 (seed 5), 0 wrong / 0 not-evaluable**, up
+from the head-swap pilot's 26.
+
+**Method note (hard-won).** The "unimplemented-predicate" trace census is
+*misleading* for picking levers: the late catch-all rules
+(`FunctionOfTrigOfLinearQ`, `TrigSimplifyQ`) are checked on nearly every unsolved
+problem and dominate the tally without being the blocker. Diagnose instead by
+tallying the *actual* rule-fail/inner-condition reasons and tracing the residual
+integrand; and use **`wolframscript`** to see Rubi's real chain (load Rubi, then
+trace recursive `Int` calls, or probe `DeactivateTrig` directly):
+
+```mathematica
+Get["~/dev/rubi/Rubi-4.17.3.0/Rubi/Rubi.m"];
+Trace[Rubi`Int[Cos[x]^4, x], HoldPattern[Rubi`Int[_, _]]]
+Rubi`Private`DeactivateTrig[Cos[x]^4, x]   (* -> sin[Pi/2 + x]^4 *)
+```
+
+**Next rungs (priority order — start at R1).** Each is a self-contained work
+item: do the change, then verify with the benchmark command above (watch
+`solved-correct` climb while `wrong`/`not-evaluable` stay 0). Diagnose any stall
+per the Method note — trace the residual integrand, don't trust the predicate
+census.
+
+- **R1 — remaining `UnifyInertTrigFunction` cofunction clauses.** Extend
+  `unifyInertTrig` in `src/compute-engine/rubi/rubi-utils.ts` (the standalone
+  `(a+b cos)^n` clause is the template) with the product siblings from
+  `IntegrationUtilityFunctions.m` ~6551–6606: `(g sin)^p(a+b cos)^m`,
+  `(a cos)^m(b csc)^n`, `(a cos)^m(b sec)^n`, `(g csc)^p(a+b cos)^m`, and the
+  tangent/secant analogs further down. **Gotcha:** apply *after* `toTimesPower`
+  (the `sin^0→1` fold), exactly like the standalone clause — otherwise a spurious
+  `sin^0·cos^n` reads as a "mixed" product and the shift is skipped. Also feeds
+  4.3 Tangent / 4.5 Secant. _Done when:_ mixed cos/cofunction products in 4.1
+  Sine route to the sine rules and close.
+- **R2 — `(a+b sin)^m (c+d sin)^n` binomial-product chains** (4.1.2 / 4.1.3 /
+  4.1.4): the trig analog of Chapter 1's binomial products and the bulk of the
+  ~73 remaining 4.1 Sine unsolved. The rules are already translated; they stall
+  on a residual that doesn't close or a missing utility — trace the *residual
+  integrand* of a few unsolved 4.1.2 cases to find which, then fill that gap.
+- **R3 — `√(a+b sin)` half-integer powers** (4.1.7).
+- **R4 — bundle + validate (the "ship it" step; can run independently of R1–R3).**
+  Add the 4.1 sine families to the bundler allowlist
+  (`scripts/rubi/bundle-corpus.ts`, currently ch1 + `4.1.6` only) and regenerate
+  `src/compute-engine/rubi/rubi-rules-data.json` (CI has a bundle-freshness
+  gate — commit the regenerated file). The driver's self-contained bare-trig-
+  power fallback then becomes removable (it exists only because the bundle lacks
+  the sine rules). Validate against the ~22k-problem trig suite and re-run
+  `benchmarks/audit/wester.ts` (the three `1/(3cos+4sin+k)` cases must stay ✅).
+- **R5 — `TrigSimplify`/`TrigSimplifyQ`** (Pythagorean reductions). _Low value /
+  optional:_ the predicate census over-weights it (it's a late catch-all, not a
+  blocker). Only pursue if R1–R3 leave a concrete residual class that needs it.
 
 Then **exponential** (Ch 2, 125 rules) and **hyperbolic** (Ch 6, 390 rules):
 both use ACTIVE heads in their LHS (no inert layer) → ≈ Chapter-1 difficulty,
-cheaper than the rest of Chapter 4. Per-chapter coverage + packaging tracked in
-`docs/rubi/RUBI.md` §5.
+cheaper than the rest of Chapter 4. Per-chapter coverage + the blow-by-blow
+tracked in `docs/rubi/RUBI.md` §5.
 
 #### F. Fungrim — solving coverage
 
@@ -161,6 +209,41 @@ The item-17 / B-series performance pass is largely complete (`ln`, `exp`, `kˣ`,
   closable without a different bigint backend (e.g. WASM GMP). Lower priority:
   the special functions are already 130–170× faster than 0.59.0 and competitive
   for typical use — a "catch mpmath" item, not a correctness/capability gap.
+
+### Symbolic-evaluation performance
+
+#### P1. Differentiation — defer canonicalization to the end (exploration)
+
+The cross-library benchmark (`benchmarks/REPORT.md`) puts CE's differentiation
+**~30× slower than Wolfram** (median 0.15 ms vs 0.0044 ms) — and, unlike
+simplification and integration where CE is ~2× _faster_, the gap **widens with
+expression size**: `d/dx sin x` is ~12× off, `d/dx x²·sin x` (product rule)
+~100×, `d/dx √(1−x²)` (chain rule) ~145×. Wolfram's `D` is essentially flat
+(~4 µs regardless of structure); CE grows 43 → 1146 µs across those cases. The
+differentiation _algorithm_ is a trivial syntactic recursion — the cost is
+**per-node canonicalization**: `symbolic/derivative.ts` assembles every result
+through the canonical arithmetic helpers (`.mul()`, `.add()`, `.div()`, `.pow()`,
+`.neg()`), so each intermediate node is reordered, flattened and number-folded as
+it is built, and a larger derivative tree pays that tax at every node.
+(`simplifyDerivative` is already a no-op, so simplification is _not_ the cost.)
+
+**Exploration:** build the derivative tree **structurally** (deferred /
+non-canonical construction — `{ structural: true }` / raw `_fn`), then
+canonicalize **once** at the outermost `differentiate()` call. Wolfram's flat
+profile suggests the algorithm itself is near-free, so this could close most of
+the gap.
+
+**Measure / de-risk before committing:**
+
+- Spike one rule path (e.g. product or chain rule) built structurally and
+  re-measure, to confirm how much of the 30× is canonicalization vs. fixed
+  `BoxedExpression`/GC overhead that deferral can't touch.
+- Output must stay **identical** to today's canonical form — pin with the
+  calculus snapshots. Note `.mul()` _distributes_ over sums (`k·(a+b)→ka+kb`)
+  while a structural `Multiply` does not, so a naive swap can change result shape;
+  build factored products deliberately and canonicalize at the top.
+- `differentiate()` recurses — defer through the recursion and canonicalize only
+  at the outermost level, not at each step.
 
 ### Strategic
 

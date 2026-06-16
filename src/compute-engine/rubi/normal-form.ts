@@ -65,9 +65,77 @@ function mul(ce: ComputeEngine, fs: Expression[]): Expression {
   // 0·u → 0, and same-base power collection (d·d → d², u^a·u^b → u^(a+b))
   if (flat.some((f) => f.isSame(0))) return ce.Zero;
   flat = collectPowers(ce, flat);
+  flat = collectSameExponent(ce, flat);
   if (flat.length === 0) return ce.One;
   if (flat.length === 1) return flat[0];
   return ce._fn('Multiply', flat);
+}
+
+/** Fuse factors sharing a NON-NUMERIC exponent: aˣ·bˣ → (a·b)ˣ. Sound for the
+ * Rubi verification regime (positive-real parameters), and needed so a product
+ * of distinct-base exponentials (`aˣ·bˣ`, `aˣ/bˣ`) presents a single base to
+ * FunctionOfExponential. Restricted to symbolic exponents so numeric/algebraic
+ * factors (`√2·√3`, `x²·y²`) are left to CE's own canonicalization, keeping the
+ * blast radius to exponential integrands. */
+function collectSameExponent(
+  ce: ComputeEngine,
+  flat: Expression[]
+): Expression[] {
+  // Group powers by their SIGN-CANONICALIZED exponent (|exp|) so aˣ·bˣ → (ab)ˣ
+  // and aˣ/bˣ (= aˣ·b⁻ˣ) → (a/b)ˣ both fuse: positive-sign bases go to the
+  // numerator, negative-sign to the denominator.
+  const groups = new Map<
+    string,
+    { exp: Expression; items: { f: Expression; base: Expression; sign: 1 | -1 }[] }
+  >();
+  const order: string[] = [];
+  const passthrough: Expression[] = [];
+  for (const f of flat) {
+    const isPow = f.operator === 'Power' && f.ops;
+    const exp = isPow ? f.ops![1] : ce.One;
+    // only fuse genuine (symbolic-exponent) powers; everything else is kept
+    if (!isPow || isNumber(exp)) {
+      passthrough.push(f);
+      continue;
+    }
+    const [canon, sign] = splitSign(ce, exp);
+    const key = canon.toString();
+    if (!groups.has(key)) {
+      groups.set(key, { exp: canon, items: [] });
+      order.push(key);
+    }
+    groups.get(key)!.items.push({ f, base: f.ops![0], sign });
+  }
+  if ([...groups.values()].every((g) => g.items.length === 1)) return flat;
+  const out: Expression[] = [...passthrough];
+  for (const key of order) {
+    const { exp, items } = groups.get(key)!;
+    if (items.length === 1) {
+      out.push(items[0].f); // singleton: keep the original factor verbatim
+      continue;
+    }
+    const num = items.filter((i) => i.sign === 1).map((i) => i.base);
+    const den = items.filter((i) => i.sign === -1).map((i) => i.base);
+    let base: Expression = num.length ? mul(ce, num) : ce.One;
+    if (den.length) base = ce._fn('Divide', [base, mul(ce, den)]);
+    out.push(pow(ce, base, exp)); // exp is the canonical (positive) exponent
+  }
+  return out;
+}
+
+/** Split an exponent into (|exponent|, sign), canonicalizing through `mul` so
+ * `−1·x` keys identically to `x` (the raw `negate` leaves a `1·x` artifact). */
+function splitSign(ce: ComputeEngine, exp: Expression): [Expression, 1 | -1] {
+  if (isNumber(exp))
+    return exp.isNegative === true ? [exp.neg().evaluate(), -1] : [exp, 1];
+  if (
+    exp.operator === 'Multiply' &&
+    exp.ops &&
+    isNumber(exp.ops[0]) &&
+    exp.ops[0].isNegative === true
+  )
+    return [mul(ce, [exp.ops[0].neg().evaluate(), ...exp.ops.slice(1)]), -1];
+  return [exp, 1];
 }
 
 /** fuse factors sharing a base: d·d → d², u^(1/2)·u^(1/2) → u. Bases are
