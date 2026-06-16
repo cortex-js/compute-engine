@@ -81,6 +81,31 @@ const PI_HALF_PLUS: Record<string, { fn: string; sign: number }> = {
   Csc: { fn: 'Sec', sign: 1 },
 };
 
+/**
+ * If `arg` is a *provable integer* multiple of π — `c·π` with `c.isInteger` —
+ * return the symbolic coefficient `c`; otherwise null. Restricted to symbolic
+ * coefficients (`!isNumber(c)`): plain numeric multiples (e.g. `Cos(2π)`) are
+ * already reduced by constructible/numeric evaluation, so this fills only the
+ * symbolic gap (e.g. `Cos(πk)` for integer `k`).
+ */
+function integerPiCoefficient(
+  arg: Expression,
+  ce: ComputeEngine
+): Expression | null {
+  if (sym(arg) === 'Pi') return null; // bare π is the numeric case (c = 1)
+  if (isFunction(arg, 'Negate') && sym(arg.op1) === 'Pi') return null; // c = -1
+  if (isFunction(arg, 'Multiply')) {
+    const piIndex = arg.ops.findIndex((op) => sym(op) === 'Pi');
+    if (piIndex < 0) return null;
+    const others = arg.ops.filter((_, idx) => idx !== piIndex);
+    if (others.length === 0) return null;
+    const coeff =
+      others.length === 1 ? others[0] : ce._fn('Multiply', others);
+    if (coeff.isInteger === true && !isNumber(coeff)) return coeff;
+  }
+  return null;
+}
+
 /** True if `t` is the constant π/2 (canonical `(1/2)·Pi` or `Pi/2`). */
 function isPiOverTwo(t: Expression | undefined): boolean {
   if (!t) return false;
@@ -380,6 +405,20 @@ export function simplifyTrig(x: Expression): RuleStep | undefined {
             };
           }
         }
+      }
+    }
+
+    // Integer multiples of π: Sin(c·π) -> 0, Cos(c·π) -> (-1)^c for a
+    // provable (symbolic) integer c. This is the reduction the +π/2 cofunction
+    // shift above feeds into: Sin(πk + π/2) -> Cos(πk) -> (-1)^k.
+    if (op === 'Sin' || op === 'Cos') {
+      const c = integerPiCoefficient(arg, ce);
+      if (c) {
+        if (op === 'Sin') return { value: ce.Zero, because: 'Sin(c·π) -> 0' };
+        return {
+          value: ce._fn('Power', [ce.NegativeOne, c]),
+          because: 'Cos(c·π) -> (-1)^c',
+        };
       }
     }
 

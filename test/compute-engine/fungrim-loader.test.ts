@@ -1434,14 +1434,21 @@ describe('M5 negative controls: guards fail closed without assumptions', () => {
     expect(JSON.stringify(result.json)).not.toContain('"Power"');
   });
 
-  it('type(complex) undecided on an unknown-type symbol: Sin(u + π/2) does NOT rewrite', () => {
-    // u has no declared type and no assumptions: Element(u, ℂ) is
-    // indeterminate, so the fail-closed complex guard blocks fungrim:bae475
-    const expr = ce.expr([
-      'Sin',
-      ['Add', 'u', ['Multiply', ['Rational', 1, 2], 'Pi']],
-    ]);
-    expect(expr.simplify().isSame(expr)).toBe(true);
+  it('type guards undecided on an unknown-type symbol: Sin(u + π/2) rewrites via the built-in cofunction shift, not a guarded rule', () => {
+    // u has no declared type and no assumptions. The fail-closed complex
+    // guard still blocks the Fungrim rule fungrim:bae475, and the integer
+    // guard blocks fungrim:506d0c (no (−1)^u — asserted below). But appearing
+    // as Sin's argument forces u : number, and Sin(θ + π/2) = Cos(θ) is the
+    // universal quarter-period cofunction shift (sound for every number), so
+    // simplifyTrig's built-in shift legitimately fires — exactly as for the
+    // real-symbol sibling above. (The type(…)-undecided fail-closed path
+    // itself is covered by the ChebyshevT negative control above.)
+    const result = ce
+      .expr(['Sin', ['Add', 'u', ['Multiply', ['Rational', 1, 2], 'Pi']]])
+      .simplify();
+    expect(result.isSame(ce.expr(['Cos', 'u']))).toBe(true);
+    // …and specifically NOT the integer rule's (−1)^u
+    expect(JSON.stringify(result.json)).not.toContain('Power');
   });
 
   it('cmp(gt 0) undecided: m·(m−1)! does NOT rewrite for sign-unknown integer m', () => {
