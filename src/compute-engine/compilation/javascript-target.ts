@@ -1813,8 +1813,7 @@ function compileIntegrate(
   let bodyExpr = args[0];
   if (isFunction(args[0], 'Function')) {
     const params = args[0].ops.slice(1).filter((x) => isSymbol(x));
-    if (params.length >= 1 && isSymbol(params[0]))
-      lambdaVar = params[0].symbol;
+    if (params.length >= 1 && isSymbol(params[0])) lambdaVar = params[0].symbol;
     bodyExpr = args[0].ops[0];
   }
 

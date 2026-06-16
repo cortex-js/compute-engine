@@ -98,8 +98,9 @@ export function compile<T extends string = 'javascript'>(
       // the unbound lambda evaluates to nothing.
       if (isFunction(expr, 'Function')) {
         const lambdaRun = ((...args: number[]) =>
-          ce.function('Apply', [expr, ...args.map((a) => ce.expr(a))]).evaluate()
-            .re) as unknown as CompiledRunner;
+          ce
+            .function('Apply', [expr, ...args.map((a) => ce.expr(a))])
+            .evaluate().re) as unknown as CompiledRunner;
         return {
           target,
           success: false,

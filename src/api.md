@@ -1534,7 +1534,7 @@ are non-overlapping).
 type SimplifyOptions = {
   rules: null | Rule | ReadonlyArray<BoxedRule | Rule> | BoxedRuleSet;
   costFunction: (expr) => number;
-  strategy: "default" | "fu";
+  strategy: "default" | "fu" | "trig";
 };
 ```
 
@@ -9210,7 +9210,7 @@ Notes:
   canonicalized parsed expressions will see `LessEqual`/`Less` rather than
   `GreaterEqual`/`Greater`. The signed-function semantics are preserved through
   the normalization. The `GreaterEqual`/`Greater` branches handle non-canonical
-  expressions constructed via `ce.box(['GreaterEqual', ...])`.
+  expressions constructed via `ce.expr(['GreaterEqual', ...])`.
 - For chained relations with more than two operands (e.g. `Less(a, b, c)` from
   `a < b < c`), only the first pair is used. The result is the signed function
   for the first sub-relation only; 3D implicit rendering rarely uses chained
@@ -9754,7 +9754,7 @@ Based on `Object.toJSON()`.
 Note that lazy collections are _not_ eagerly evaluated.
 
 The output preserves the full raw `BigDecimal` value with no rounding, ensuring
-lossless round-tripping via `ce.box(expr.json)`. Digits beyond `ce.precision`
+lossless round-tripping via `ce.expr(expr.json)`. Digits beyond `ce.precision`
 may be present but are not guaranteed to be accurate. Use
 `toMathJson({ fractionalDigits: 'auto' })` for precision-rounded MathJSON
 output.

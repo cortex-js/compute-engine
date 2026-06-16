@@ -369,7 +369,8 @@ export class BaseCompiler {
           // Otherwise infer from the assigned value (complex ⇒ vec2;
           // all real/integer scalars fall through to the float default).
           if (isFunction(arg, 'Assign') && isSymbol(arg.ops[0], local)) {
-            if (BaseCompiler.isComplexValued(arg.ops[1])) typeHints[local] = vec2;
+            if (BaseCompiler.isComplexValued(arg.ops[1]))
+              typeHints[local] = vec2;
             break;
           }
         }
