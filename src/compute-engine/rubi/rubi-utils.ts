@@ -2623,7 +2623,10 @@ function foeTestAux(
   // tmp = Log[base]·Coeff[expon,x,1] / (Log[$base$]·Coeff[$expon$,x,1]).
   // The exponentials share a common base iff tmp is rational.
   let tmp = safeSimplify(
-    base.ln().mul(coeffX(expon, x, 1)).div(st.base.ln().mul(coeffX(st.expon!, x, 1)))
+    base
+      .ln()
+      .mul(coeffX(expon, x, 1))
+      .div(st.base.ln().mul(coeffX(st.expon!, x, 1)))
   );
   if (!(tmp.isNumberLiteral && tmp.isRational === true)) return false;
 
@@ -2632,7 +2635,10 @@ function foeTestAux(
   let constCommensurate = false;
   if (!zeroQ(e0)) {
     const tmp0 = safeSimplify(
-      base.ln().mul(coeffX(expon, x, 0)).div(st.base.ln().mul(e0))
+      base
+        .ln()
+        .mul(coeffX(expon, x, 0))
+        .div(st.base.ln().mul(e0))
     );
     constCommensurate = tmp.isSame(tmp0);
   }
@@ -3079,7 +3085,12 @@ function deepExpand(ce: ComputeEngine, e: Expression): Expression {
     const base = deepExpand(ce, e.ops[0]);
     const n = e.ops[1];
     const ni = n.re;
-    if (typeof ni === 'number' && Number.isInteger(ni) && ni >= 1 && n.isSame(ni)) {
+    if (
+      typeof ni === 'number' &&
+      Number.isInteger(ni) &&
+      ni >= 1 &&
+      n.isSame(ni)
+    ) {
       let acc = base;
       for (let i = 1; i < ni; i++) acc = distributeProduct(ce, [acc, base]);
       return acc;
@@ -3128,7 +3139,11 @@ export function foldLnExponentialE(
   )
     return ce.One;
   // E^(0·…) → 1 (the exponent canonicalizes to a literal 0 multiple)
-  if (op === 'Power' && e.ops?.length === 2 && e.ops[0].symbol === 'ExponentialE')
+  if (
+    op === 'Power' &&
+    e.ops?.length === 2 &&
+    e.ops[0].symbol === 'ExponentialE'
+  )
     if (e.ops[1].N().isSame(0)) return ce.One;
   if (!e.ops || e.ops.length === 0) return e;
   return ce.function(

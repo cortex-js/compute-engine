@@ -474,7 +474,11 @@ export class RubiDriver {
     ) {
       const expanded = expandHyperbolicToExp(ce, integrand);
       if (!containsHyperbolic(expanded)) {
-        const F = this.intRec(recanonicalize(ce, expanded), variable, depth + 1);
+        const F = this.intRec(
+          recanonicalize(ce, expanded),
+          variable,
+          depth + 1
+        );
         if (F !== null && !F.has('Integrate'))
           return this.cleanExpansionResult(F);
       }
@@ -526,7 +530,9 @@ export class RubiDriver {
       );
       if (inner === null || inner.has('Integrate')) return null;
       // ∫u dx = (v / v′) · (∫ g/x dx)[x → v]
-      return this.cleanExpansionResult(ratio.mul(inner.subs({ [variable]: v })));
+      return this.cleanExpansionResult(
+        ratio.mul(inner.subs({ [variable]: v }))
+      );
     } catch {
       return null;
     }

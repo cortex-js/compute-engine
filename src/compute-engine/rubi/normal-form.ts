@@ -86,7 +86,10 @@ function collectSameExponent(
   // numerator, negative-sign to the denominator.
   const groups = new Map<
     string,
-    { exp: Expression; items: { f: Expression; base: Expression; sign: 1 | -1 }[] }
+    {
+      exp: Expression;
+      items: { f: Expression; base: Expression; sign: 1 | -1 }[];
+    }
   >();
   const order: string[] = [];
   const passthrough: Expression[] = [];

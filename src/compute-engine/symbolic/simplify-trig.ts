@@ -99,8 +99,7 @@ function integerPiCoefficient(
     if (piIndex < 0) return null;
     const others = arg.ops.filter((_, idx) => idx !== piIndex);
     if (others.length === 0) return null;
-    const coeff =
-      others.length === 1 ? others[0] : ce._fn('Multiply', others);
+    const coeff = others.length === 1 ? others[0] : ce._fn('Multiply', others);
     if (coeff.isInteger === true && !isNumber(coeff)) return coeff;
   }
   return null;
@@ -112,7 +111,8 @@ function isPiOverTwo(t: Expression | undefined): boolean {
   if (isFunction(t, 'Divide') && sym(t.op1) === 'Pi' && t.op2?.isSame(2))
     return true;
   if (isFunction(t, 'Multiply') && t.nops === 2) {
-    const other = sym(t.op1) === 'Pi' ? t.op2 : sym(t.op2) === 'Pi' ? t.op1 : undefined;
+    const other =
+      sym(t.op1) === 'Pi' ? t.op2 : sym(t.op2) === 'Pi' ? t.op1 : undefined;
     const r = other?.re;
     return typeof r === 'number' && Math.abs(r - 0.5) < 1e-10;
   }
