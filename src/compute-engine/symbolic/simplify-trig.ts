@@ -66,6 +66,34 @@ const PI_MINUS_SIGN: Record<string, number> = {
   Csc: 1,
 };
 
+// Quarter-period cofunction shift: f(θ + π/2) = sign * g(θ).
+// - sin(θ+π/2) = cos(θ),   cos(θ+π/2) = -sin(θ)
+// - tan(θ+π/2) = -cot(θ),  cot(θ+π/2) = -tan(θ)
+// - sec(θ+π/2) = -csc(θ),  csc(θ+π/2) = sec(θ)
+// (CE already reduces π±x and the π/2−x reflection; this is the missing
+// +π/2 sibling — also the form Rubi's cosine→sine normalization emits.)
+const PI_HALF_PLUS: Record<string, { fn: string; sign: number }> = {
+  Sin: { fn: 'Cos', sign: 1 },
+  Cos: { fn: 'Sin', sign: -1 },
+  Tan: { fn: 'Cot', sign: -1 },
+  Cot: { fn: 'Tan', sign: -1 },
+  Sec: { fn: 'Csc', sign: -1 },
+  Csc: { fn: 'Sec', sign: 1 },
+};
+
+/** True if `t` is the constant π/2 (canonical `(1/2)·Pi` or `Pi/2`). */
+function isPiOverTwo(t: Expression | undefined): boolean {
+  if (!t) return false;
+  if (isFunction(t, 'Divide') && sym(t.op1) === 'Pi' && t.op2?.isSame(2))
+    return true;
+  if (isFunction(t, 'Multiply') && t.nops === 2) {
+    const other = sym(t.op1) === 'Pi' ? t.op2 : sym(t.op2) === 'Pi' ? t.op1 : undefined;
+    const r = other?.re;
+    return typeof r === 'number' && Math.abs(r - 0.5) < 1e-10;
+  }
+  return false;
+}
+
 // Inverse trig functions
 const INVERSE_TRIG = new Set([
   'Arcsin',
@@ -327,6 +355,30 @@ export function simplifyTrig(x: Expression): RuleStep | undefined {
             value: ce._fn(coFunc, [negatedTerm]),
             because: `${op}(π/2 - x) -> ${coFunc}(x)`,
           };
+        }
+      }
+    }
+
+    // θ + π/2 cofunction shift: f(θ + π/2) -> ±g(θ). Handles the canonical
+    // Add form (e.g. `x + (1/2)·Pi`). The π/2 − x reflection above already
+    // consumed the negated-term case; here the remaining term(s) are θ.
+    if (isFunction(arg, 'Add')) {
+      const piHalfIndex = arg.ops.findIndex((t) => isPiOverTwo(t));
+      if (piHalfIndex >= 0) {
+        const map = PI_HALF_PLUS[op];
+        if (map) {
+          const otherTerms = arg.ops.filter((_, idx) => idx !== piHalfIndex);
+          if (otherTerms.length > 0) {
+            const theta =
+              otherTerms.length === 1
+                ? otherTerms[0]
+                : ce._fn('Add', otherTerms);
+            const result = ce._fn(map.fn, [theta]);
+            return {
+              value: map.sign === 1 ? result : result.neg(),
+              because: `${op}(θ + π/2) -> ${map.sign === 1 ? '' : '-'}${map.fn}(θ)`,
+            };
+          }
         }
       }
     }
