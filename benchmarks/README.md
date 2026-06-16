@@ -43,6 +43,39 @@ Four benchmark harnesses live here:
 
 ---
 
+## Release baseline
+
+Before tagging a release, regenerate the committed baseline so the new release's
+reports are measured against the **previous** one. Run, in order:
+
+1. **Point the published column at the prior release.** Provision it (see
+   *Capability benchmark → Running it*) and export `CE_PUBLISHED_VERSION=<prior>`
+   (the release you are superseding). This is the only column that needs bumping.
+2. **Build the production bundles** — `npm run build production`. The capability
+   benchmark reads the minified `dist/` bundles (including `integration-rules` +
+   `identities` for the `CE+R/F` column). The `audit/` harnesses run CE from
+   **source** via `npx tsx` and need no build.
+3. **Run the capability benchmark, then the three `audit/` harnesses:**
+   ```bash
+   python benchmarks/gen_cases.py         # only if cases.json changed
+   node benchmarks/report.mjs             # → REPORT.md (+ results.json)
+   node benchmarks/report_marketing.mjs   # → REPORT-marketing.md
+   node benchmarks/report_changelog.mjs   # → CHANGELOG-TABLES.md (paste into CHANGELOG.md)
+   python benchmarks/audit/gen.py && npx tsx benchmarks/audit/audit.ts   # → REPORT-audit.md
+   npx tsx benchmarks/audit/wester.ts                                    # → REPORT-wester.md
+   ./venv/bin/python3 benchmarks/audit/gen_solve.py && npx tsx benchmarks/audit/solve.ts  # → REPORT-solve.md
+   ```
+4. **Commit the five baseline reports:** `REPORT.md`, `REPORT-marketing.md`,
+   `audit/REPORT-audit.md`, `audit/REPORT-wester.md`, `audit/REPORT-solve.md`
+   (plus any `*cases.json` you regenerated). `results.json` and
+   `CHANGELOG-TABLES.md` are gitignored and not part of the baseline.
+
+The kernel microbenchmarks (→ `big-decimal/BIGNUM-COMPARISON.md`) and the legacy
+compilation benchmark are perf-investigation tools, refreshed on demand — not
+part of the per-release baseline.
+
+---
+
 ## Capability benchmark
 
 ### What it produces
