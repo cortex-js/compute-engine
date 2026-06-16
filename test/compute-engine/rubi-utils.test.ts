@@ -5,7 +5,13 @@
 
 import { ComputeEngine } from '../../src/compute-engine';
 import type { Expression } from '../../src/compute-engine/global-types';
-import { evalCondition, build } from '../../src/compute-engine/rubi/rubi-utils';
+import {
+  evalCondition,
+  build,
+  containsHyperbolic,
+  expandHyperbolicToExp,
+  foldLnExponentialE,
+} from '../../src/compute-engine/rubi/rubi-utils';
 import type { Ctx } from '../../src/compute-engine/rubi/rubi-utils';
 import type { Json } from '../../scripts/rubi/wl-parser';
 
@@ -282,5 +288,61 @@ describe('pure-trig substitution — FunctionOfQ + SubstFor (4.7.5 #15–#34)', 
     // SubstFor[1, Tan[x], tan³, x] → x³
     const r = build(['SubstFor', 1, ['Tan', 'x'], ['Power', ['Tan', 'x'], 3], 'x'] as Json, ctx);
     expect(r.isSame(ce.box(['Power', 'x', 3]))).toBe(true);
+  });
+});
+
+describe('hyperbolic → exponential expansion (Chapter 6, ExpandTrigReduce)', () => {
+  // numeric equality at sample points (the expansion is an exact rewrite, so it
+  // must agree with the original everywhere it is defined)
+  const sameNumerically = (a: Expression, b: Expression): boolean => {
+    for (const xv of [0.3, 0.7, 1.2]) {
+      const av = a.subs({ x: xv }).N().re;
+      const bv = b.subs({ x: xv }).N().re;
+      if (av === undefined || bv === undefined) return false;
+      if (Math.abs(av - bv) > 1e-9 * Math.max(1, Math.abs(bv))) return false;
+    }
+    return true;
+  };
+
+  test('containsHyperbolic detects hyperbolic heads', () => {
+    expect(containsHyperbolic(ce.box(['Power', ['Sinh', 'x'], 3]))).toBe(true);
+    expect(containsHyperbolic(ce.box(['Multiply', 'x', ['Tanh', 'x']]))).toBe(true);
+    expect(containsHyperbolic(ce.box(['Power', 'x', 3]))).toBe(false);
+  });
+
+  test('expandHyperbolicToExp rewrites Sinh^3 to an exp sum (no hyperbolic head, value preserved)', () => {
+    const orig = ce.box(['Power', ['Sinh', 'x'], 3]);
+    const r = expandHyperbolicToExp(ce, orig);
+    expect(containsHyperbolic(r)).toBe(false);
+    expect(sameNumerically(r, orig)).toBe(true);
+  });
+
+  test('expandHyperbolicToExp distributes a polynomial coefficient over a Cosh power', () => {
+    const orig = ce.box(['Multiply', 'x', ['Power', ['Cosh', 'x'], 2]]);
+    const r = expandHyperbolicToExp(ce, orig);
+    expect(containsHyperbolic(r)).toBe(false);
+    expect(r.operator).toBe('Add'); // x·Cosh²x → x·(¼e^2x + ½ + ¼e^-2x)
+    expect(sameNumerically(r, orig)).toBe(true);
+  });
+
+  test('expandHyperbolicToExp leaves reciprocal hyperbolics (Tanh/Sech/…) as heads', () => {
+    // those convert to exp quotients the driver routes elsewhere; keeping the
+    // head lets the fallback skip them rather than grind on a rational-in-eˣ form
+    const r = expandHyperbolicToExp(ce, ce.box(['Power', ['Tanh', 'x'], 4]));
+    expect(containsHyperbolic(r)).toBe(true);
+  });
+
+  test('ExpandTrigReduce VALUE_FN matches the direct expansion (2-arg form)', () => {
+    const r = build(['ExpandTrigReduce', ['Power', ['Sinh', 'x'], 2], 'x'] as Json, ctx);
+    expect(containsHyperbolic(r)).toBe(false);
+    expect(sameNumerically(r, ce.box(['Power', ['Sinh', 'x'], 2]))).toBe(true);
+  });
+
+  test('foldLnExponentialE folds Ln(ExponentialE) → 1', () => {
+    const folded = foldLnExponentialE(
+      ce,
+      ce.box(['Divide', 'y', ['Multiply', 2, ['Ln', 'ExponentialE']]])
+    );
+    expect(folded.isSame(ce.box(['Divide', 'y', 2]))).toBe(true);
   });
 });

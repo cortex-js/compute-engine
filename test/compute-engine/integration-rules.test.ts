@@ -84,6 +84,56 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
     test('∫cos⁶x dx', () => verify('\\cos^6 x'));
   });
 
+  describe('integrates exponential integrands (Chapter 2)', () => {
+    const ce = new ComputeEngine();
+    loadIntegrationRules(ce);
+    const verify = (latex: string) => {
+      const integrand = ce.parse(latex);
+      const F = ce.parse(`\\int ${latex} \\, dx`).evaluate();
+      expect(F.has('Integrate')).toBe(false); // a closed form, not inert
+      const dF = ce.expr(['D', F, 'x']).evaluate();
+      for (const x of [0.31, 0.73, 1.42]) {
+        const a = dF.subs({ x }).N().re;
+        const b = integrand.subs({ x }).N().re;
+        if (a === undefined || b === undefined) continue;
+        expect(a).toBeCloseTo(b, 6);
+      }
+    };
+    // None of these are handled by the built-in antiderivative alone; they
+    // close through the Chapter-2 (c+d x)^m·(a+b·Fⁿ)^p / miscellaneous
+    // exponential rules.
+    test('∫x²/E^(4x) dx (polynomial × exponential)', () =>
+      verify('\\frac{x^2}{e^{4x}}'));
+    test('∫e^(2x)(1+e^(2x))³ dx (binomial in eˣ)', () =>
+      verify('e^{2x}(1+e^{2x})^3'));
+    test('∫1/(1+eˣ) dx (rational in eˣ)', () =>
+      verify('\\frac{1}{1+e^{x}}'));
+  });
+
+  describe('integrates hyperbolic integrands (Chapter 6)', () => {
+    const ce = new ComputeEngine();
+    loadIntegrationRules(ce);
+    const verify = (latex: string) => {
+      const integrand = ce.parse(latex);
+      const F = ce.parse(`\\int ${latex} \\, dx`).evaluate();
+      expect(F.has('Integrate')).toBe(false); // a closed form, not inert
+      const dF = ce.expr(['D', F, 'x']).evaluate();
+      for (const x of [0.31, 0.73, 1.18]) {
+        const a = dF.subs({ x }).N().re;
+        const b = integrand.subs({ x }).N().re;
+        if (a === undefined || b === undefined) continue;
+        expect(a).toBeCloseTo(b, 6);
+      }
+    };
+    // Sinh/Cosh powers/products close via the hyperbolic→exponential expansion;
+    // the reciprocals (Tanh/Csch/…) via the FunctionOfExponential substitution.
+    test('∫cosh⁴x dx (power reduction)', () => verify('\\cosh^4 x'));
+    test('∫sinh³x·cosh x dx (product)', () => verify('\\sinh^3 x \\cosh x'));
+    test('∫tanh²x dx (reciprocal → eˣ substitution)', () =>
+      verify('\\tanh^2 x'));
+    test('∫csch⁴x dx (reciprocal)', () => verify('\\csch^4 x'));
+  });
+
   test('the built-in antiderivative still handles non-Rubi integrands', () => {
     // The provider returns null for a Gaussian (outside Chapter 1), so the
     // built-in antiderivative runs and produces Erf.

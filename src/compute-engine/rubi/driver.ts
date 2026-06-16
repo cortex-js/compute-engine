@@ -26,6 +26,11 @@ import {
   deactivateTrig,
   unifyInertTrig,
   activateTrig,
+  containsHyperbolic,
+  expandHyperbolicToExp,
+  foldLnExponentialE,
+  functionOfExponentialSubstitution,
+  sinhCoshArgsPolynomialQ,
   RuleFail,
   Ctx,
   Hooks,
@@ -454,7 +459,107 @@ export class RubiDriver {
       if (red !== null) return red;
     }
 
+    // ---- hyperbolic → exponential fallback (self-contained) ------------
+    // Chapter 6's bare `(a+b·Sinh[linear])^n` / `(c+d·x)^m·Sinh^n` reductions
+    // are not standalone corpus rules (Rubi reduces them through shared
+    // machinery; only the nonlinear-argument families call ExpandTrigReduce
+    // directly). When no rule closes a hyperbolic integrand, rewrite it to
+    // exponential form and re-integrate: every term is then `poly·E^(k·arg)`,
+    // which the bundled Chapter-2 rules (incl. the incomplete-Γ / Erf kernels)
+    // close. Reached only after all rules + the other fallbacks decline; the
+    // expanded form has no hyperbolic heads, so it cannot re-enter here.
+    if (
+      containsHyperbolic(integrand) &&
+      sinhCoshArgsPolynomialQ(integrand, variable)
+    ) {
+      const expanded = expandHyperbolicToExp(ce, integrand);
+      if (!containsHyperbolic(expanded)) {
+        const F = this.intRec(recanonicalize(ce, expanded), variable, depth + 1);
+        if (F !== null && !F.has('Integrate'))
+          return this.cleanExpansionResult(F);
+      }
+    }
+
+    // ---- function-of-a-single-exponential fallback --------------------
+    // A pure hyperbolic of a LINEAR argument is a rational function of
+    // e^(linear) — including the reciprocals Tanh/Coth/Sech/Csch that the
+    // expansion fallback above deliberately leaves alone. This mirrors Rubi's
+    // master substitution rule 2.3#97 WITHOUT its explicit-exponential gate
+    // (FunctionOfExponentialQ requires an exponential to literally occur; the
+    // bare-hyperbolic reductions Rubi applies instead are not standalone corpus
+    // rules): substitute t = F^v, integrate the resulting rational function of t
+    // (the bundled rational rules / native fallback close it fast), then undo
+    // the substitution. Reached only after all rules + the expansion fallback.
+    if (containsHyperbolic(integrand)) {
+      const F = this.functionOfExponentialFallback(integrand, variable, depth);
+      if (F !== null) return F;
+    }
+
     return null;
+  }
+
+  /** ∫u dx where u is purely a function of a single exponential F^v (v linear in
+   * x) — Rubi rule 2.3#97's substitution, applied (ungated by `$exponFlag$`) as
+   * a Chapter-6 fallback for pure hyperbolics. Returns null when u is not such a
+   * function, the substituted rational integral does not close, or any step
+   * throws (a complex-coefficient rational sub-integrand can crash the native
+   * integrator — better to leave the problem unsolved than to error). */
+  private functionOfExponentialFallback(
+    integrand: Expression,
+    variable: string,
+    depth: number
+  ): Expression | null {
+    const ce = this.ce;
+    const x = ce.symbol(variable);
+    try {
+      const sub = functionOfExponentialSubstitution(integrand, variable);
+      if (sub === null) return null; // not purely a function of one exponential
+      const { v, g } = sub;
+      const dv = ce.function('D', [v, x]).evaluate();
+      // v = F^(linear) ⇒ v′ = (const)·v, so v/v′ is x-free; bail otherwise.
+      const ratio = v.div(dv);
+      if (dv.isSame(0) || ratio.has(variable)) return null;
+      const inner = this.intRec(
+        recanonicalize(ce, g.div(x)),
+        variable,
+        depth + 1
+      );
+      if (inner === null || inner.has('Integrate')) return null;
+      // ∫u dx = (v / v′) · (∫ g/x dx)[x → v]
+      return this.cleanExpansionResult(ratio.mul(inner.subs({ [variable]: v })));
+    } catch {
+      return null;
+    }
+  }
+
+  /** Clean the exponential-fallback antiderivative: collect like terms via a
+   * bounded simplify (the raw expansion repeats `c·x` once per exponential
+   * term, which otherwise bloats high-degree results past the verifier's leaf
+   * cap), then fold the stray `ln(e)` the Chapter-2 rules leave. The value is
+   * unchanged; this only tidies and shrinks the form. Order matters: simplify
+   * FIRST (it collapses the huge expansion to a handful of terms in ~ms),
+   * THEN fold `ln(e)` on the now-small result — the fold rebuilds (and so
+   * re-canonicalizes, dropping the `·1`) cheaply once the form is small.
+   * Bounded by a slice of the driver budget so a pathological simplify can't
+   * overrun. */
+  private cleanExpansionResult(F: Expression): Expression {
+    const ce = this.ce;
+    const remainingMs = this.deadline - Date.now();
+    let simplified = F;
+    if (remainingMs > 0) {
+      const savedLimit = ce.timeLimit;
+      ce.timeLimit = Math.max(1, Math.min(remainingMs, 5000));
+      try {
+        simplified = F.simplify();
+      } catch (e) {
+        if (!(e instanceof Error && e.constructor.name === 'CancellationError'))
+          throw e;
+        // deadline hit — keep the unsimplified form
+      } finally {
+        ce.timeLimit = savedLimit;
+      }
+    }
+    return foldLnExponentialE(ce, simplified);
   }
 
   /** ∫(g·sin|cos[e+f·x])^n dx by the power-reduction recurrence (cofunction of

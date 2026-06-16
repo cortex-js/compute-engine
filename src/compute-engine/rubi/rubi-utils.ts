@@ -2585,6 +2585,13 @@ const HYPERBOLIC_HEADS = new Set([
   'Csch',
 ]);
 
+/** Does u contain a hyperbolic function head anywhere in its tree? Used by the
+ *  driver's Chapter-6 exponential fallback to decide whether to attempt it. */
+export function containsHyperbolic(u: Expression): boolean {
+  if (HYPERBOLIC_HEADS.has(u.operator)) return true;
+  return (u.ops ?? []).some(containsHyperbolic);
+}
+
 type FoeState = {
   base: Expression | null; // F (the common exponential base)
   expon: Expression | null; // v (the linear exponent), reduced to primitive
@@ -2753,7 +2760,7 @@ function functionOfExponentialQ(u: Expression, x: string): boolean {
 }
 
 /** FunctionOfExponential[u,x] — the substitution exponential F^v. */
-function functionOfExponential(u: Expression, x: string): Expression {
+export function functionOfExponential(u: Expression, x: string): Expression {
   const st: FoeState = { base: null, expon: null, flag: false };
   foeTest(u, x, st);
   if (st.base === null) return u.engine.symbol('False');
@@ -2761,11 +2768,50 @@ function functionOfExponential(u: Expression, x: string): Expression {
 }
 
 /** FunctionOfExponentialFunction[u,x] — u with F^v replaced by x. */
-function functionOfExponentialFunction(u: Expression, x: string): Expression {
+export function functionOfExponentialFunction(
+  u: Expression,
+  x: string
+): Expression {
   const st: FoeState = { base: null, expon: null, flag: false };
   foeTest(u, x, st);
   if (st.base === null) return u;
   return foeFunctionAux(u, x, st);
+}
+
+/** If `u` is PURELY a function of a single exponential F^v with v linear in x
+ *  (Rubi's `FunctionOfExponentialTest` returning true), return `{ v: F^v,
+ *  g: u with F^v → x }` for the rule-2.3#97 substitution; otherwise null.
+ *
+ *  Unlike `functionOfExponential`, this REQUIRES the test to pass — so it
+ *  rejects integrands with a bare-x factor (e.g. `Tanh[x]/x²`) or a non-linear
+ *  hyperbolic argument (e.g. `Sech[c+d·x²]`), where the substitution would be
+ *  invalid. It also drops Rubi's `$exponFlag$` gate (which demands an explicit
+ *  exponential): the Chapter-6 fallback applies this to pure hyperbolics, whose
+ *  bare-power reductions are not standalone corpus rules. Both v and g come from
+ *  the SAME registered base/exponent, so they are consistent. */
+export function functionOfExponentialSubstitution(
+  u: Expression,
+  x: string
+): { v: Expression; g: Expression } | null {
+  const st: FoeState = { base: null, expon: null, flag: false };
+  if (!foeTest(u, x, st) || st.base === null || st.expon === null) return null;
+  const ce = u.engine;
+  return {
+    v: ce.function('Power', [st.base, st.expon]),
+    g: foeFunctionAux(u, x, st),
+  };
+}
+
+/** True iff every Sinh/Cosh subterm of `u` has an argument that is a polynomial
+ *  in x. The Chapter-6 exponential expansion is only a valid closed form when
+ *  the hyperbolic arguments are polynomial (so each `∫ poly·e^(poly)` resolves
+ *  via the Chapter-2 rules); a rational argument like `Sinh[(a+b·x)/(c+d·x)]`
+ *  integrates to a CoshIntegral the expansion cannot produce, so the fallback
+ *  must decline it. */
+export function sinhCoshArgsPolynomialQ(u: Expression, x: string): boolean {
+  if ((u.operator === 'Sinh' || u.operator === 'Cosh') && u.ops?.[0]?.has(x))
+    if (polyDegreeX(u.ops[0], x) < 0) return false;
+  return (u.ops ?? []).every((o) => sinhCoshArgsPolynomialQ(o, x));
 }
 
 // ---------------------------------------------------------------------------
@@ -2920,6 +2966,175 @@ function selectFactors(
   }
   if (!u.has(x)) return free ? u : ce.One;
   return free ? ce.One : u;
+}
+
+// ---------------------------------------------------------------------------
+// Hyperbolic product/power reduction (Chapter 6, ExpandTrigReduce /
+// ExpandTrigToExp).
+//
+// Rubi's `ExpandTrigReduce[u,x] = Expand[TrigReduce[u]]` uses Mathematica's
+// TrigReduce to turn products/powers of Sinh/Cosh into a linear combination of
+// multiple-angle hyperbolics. We instead expand the equivalent EXPONENTIAL
+// form: rewrite each Sinh/Cosh/… to E^(±w) (`hyperbolicToExp`) and multiply
+// out (`deepExpand`), so every resulting term is `coef·∏E^(kᵢ·argᵢ)`. The
+// already-ported Chapter-2 exponential rules (incl. the incomplete-Γ / Erf
+// kernels) then close each term, and the driver's `toTimesPower` normal form
+// folds same-base products E^p·E^q → E^(p+q) per sub-integral. The resulting
+// antiderivative is in exponential rather than hyperbolic form, but is
+// mathematically identical (verified numerically). Restricted to the heads
+// Rubi feeds ExpandTrigReduce — positive-integer powers of Sinh/Cosh and
+// (a+b·Sinh/Cosh)^p — leaving reciprocal/fractional powers untouched.
+// ---------------------------------------------------------------------------
+
+/** TrigToExp for Sinh/Cosh: rewrite Sinh/Cosh[w] → exp form in E^(±w), with the
+ *  ½ coefficient DISTRIBUTED into the two terms so a power base stays a pure Add
+ *  (CE's Expand will not pull a scalar out of a power base). The argument w is
+ *  kept symbolic; all other heads — including the reciprocal hyperbolics
+ *  Tanh/Coth/Sech/Csch — recurse UNCHANGED. Restricting to Sinh/Cosh is
+ *  deliberate: (1) Rubi only feeds Sinh/Cosh products to ExpandTrigReduce /
+ *  ExpandTrigToExp; (2) the reciprocals convert to exp *quotients* whose
+ *  positive-and-negative-power expansion is a hard rational-in-E^x form the
+ *  driver's exponential fallback would grind on (it is the FunctionOfExponential
+ *  rule's job, not this expander's) — leaving them as heads makes the fallback's
+ *  `containsHyperbolic` guard skip such integrands fast. */
+function hyperbolicToExp(ce: ComputeEngine, u: Expression): Expression {
+  const ops = u.ops;
+  if (ops?.length === 1 && (u.operator === 'Sinh' || u.operator === 'Cosh')) {
+    const w = hyperbolicToExp(ce, ops[0]);
+    const ew = ce.E.pow(w);
+    const en = ce.E.pow(w.neg());
+    const half = ce.number([1, 2]);
+    // Sinh: ½E^w − ½E^−w ;  Cosh: ½E^w + ½E^−w
+    return u.operator === 'Sinh'
+      ? half.mul(ew).add(half.neg().mul(en))
+      : half.mul(ew).add(half.mul(en));
+  }
+  if (!ops || ops.length === 0) return u;
+  return ce.function(
+    u.operator,
+    ops.map((op) => hyperbolicToExp(ce, op))
+  );
+}
+
+/** Collect same-base exponential factors of a product: E^p·E^q → E^(p+q). CE's
+ *  canonical Multiply does not fuse symbolic-exponent powers (it would change
+ *  `x²·y²`), so a raw product of `E^(±w)` factors stays unfused and bloats the
+ *  expansion. Folding here keeps each distributed term a single `c·E^(k·w)`, so
+ *  the canonical Add merges equal multiples and the expansion stays compact. */
+function foldEPowers(ce: ComputeEngine, term: Expression): Expression {
+  if (term.operator !== 'Multiply' || !term.ops) return term;
+  let eExp: Expression | null = null;
+  const others: Expression[] = [];
+  for (const f of term.ops) {
+    if (f.operator === 'Power' && f.ops && f.ops[0].symbol === 'ExponentialE')
+      eExp = eExp === null ? f.ops[1] : eExp.add(f.ops[1]);
+    else if (f.symbol === 'ExponentialE')
+      eExp = eExp === null ? ce.One : eExp.add(ce.One);
+    else others.push(f);
+  }
+  if (eExp === null) return term;
+  const epow = ce.E.pow(eExp);
+  return others.length === 0
+    ? epow
+    : ce.function('Multiply', [...others, epow]);
+}
+
+/** Distribute a product of factors across any Add operands → a flat sum (or a
+ *  single product if no factor is a sum). Factors are taken as-is (already
+ *  deep-expanded by the caller); each product term has its exponentials folded
+ *  (foldEPowers) so the running expansion does not blow up. */
+function distributeProduct(
+  ce: ComputeEngine,
+  factors: Expression[]
+): Expression {
+  let terms: Expression[] = [ce.One];
+  for (const f of factors) {
+    const fTerms = f.operator === 'Add' && f.ops ? f.ops : [f];
+    const next: Expression[] = [];
+    for (const t of terms)
+      for (const ft of fTerms) next.push(foldEPowers(ce, t.mul(ft)));
+    terms = next;
+  }
+  return terms.length === 1 ? terms[0] : ce.function('Add', terms);
+}
+
+/** Recursively expand products and positive-integer powers of sums into a flat
+ *  sum, treating every leaf (E^…, symbols, x-powers) as opaque. Used after
+ *  `hyperbolicToExp` because CE's `Expand` is shallow — it will not expand a
+ *  Power(Add, n) that sits as a factor inside a Multiply. Non-integer/symbolic
+ *  exponents are left as-is. */
+function deepExpand(ce: ComputeEngine, e: Expression): Expression {
+  const op = e.operator;
+  if (op === 'Add' && e.ops)
+    return ce.function(
+      'Add',
+      e.ops.map((t) => deepExpand(ce, t))
+    );
+  if (op === 'Multiply' && e.ops)
+    return distributeProduct(
+      ce,
+      e.ops.map((t) => deepExpand(ce, t))
+    );
+  if (op === 'Power' && e.ops) {
+    const base = deepExpand(ce, e.ops[0]);
+    const n = e.ops[1];
+    const ni = n.re;
+    if (typeof ni === 'number' && Number.isInteger(ni) && ni >= 1 && n.isSame(ni)) {
+      let acc = base;
+      for (let i = 1; i < ni; i++) acc = distributeProduct(ce, [acc, base]);
+      return acc;
+    }
+    return ce.function('Power', [base, n]);
+  }
+  return e;
+}
+
+/** ExpandTrigReduce[u,x] (2-arg) — the exponential-expansion of u (see the
+ *  section comment). Returns a sum the linearity prelude integrates termwise. */
+function expandTrigReduce(ce: ComputeEngine, u: Expression): Expression {
+  return deepExpand(ce, hyperbolicToExp(ce, u));
+}
+
+/** Driver Chapter-6 fallback: rewrite a hyperbolic integrand to exponential
+ *  form and expand it into a sum, so the bundled Chapter-2 exponential rules
+ *  close each term. Used only when no Rubi rule closed the integrand — Rubi's
+ *  bare `(a+b·Sinh[linear])^n` / `(c+d·x)^m·Sinh^n` recurrences live in shared
+ *  machinery that is not a standalone corpus rule, so this self-contained
+ *  reducer keeps those linear-argument families integrable. The antiderivative
+ *  is exponential-form but numerically identical to Rubi's hyperbolic form. */
+export function expandHyperbolicToExp(
+  ce: ComputeEngine,
+  u: Expression
+): Expression {
+  return deepExpand(ce, hyperbolicToExp(ce, u));
+}
+
+/** Tidy the residual exponential artifacts CE's in-context simplify leaves in
+ *  the Chapter-6 fallback results: `Ln(ExponentialE) → 1` (the Chapter-2 rules
+ *  emit `Log[F]` literally, and with base F = ExponentialE that is a stray
+ *  `ln(e)` in denominators) and `E^(0·…) → 1` (the exponential substitution can
+ *  leave a `e^(0·x)` constant term). Both fold to 1 in isolation but CE's
+ *  simplify does not always reach them in a large product/quotient. Sound,
+ *  structural, cheap. */
+export function foldLnExponentialE(
+  ce: ComputeEngine,
+  e: Expression
+): Expression {
+  const op = e.operator;
+  if (
+    (op === 'Ln' || op === 'Log') &&
+    e.ops?.length === 1 &&
+    e.ops[0].symbol === 'ExponentialE'
+  )
+    return ce.One;
+  // E^(0·…) → 1 (the exponent canonicalizes to a literal 0 multiple)
+  if (op === 'Power' && e.ops?.length === 2 && e.ops[0].symbol === 'ExponentialE')
+    if (e.ops[1].N().isSame(0)) return ce.One;
+  if (!e.ops || e.ops.length === 0) return e;
+  return ce.function(
+    op,
+    e.ops.map((o) => foldLnExponentialE(ce, o))
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -3102,6 +3317,39 @@ const VALUE_FNS: Record<string, ValueFn> = {
       return z.mul(w);
     }
     return activateTrig(ce, build(['ExpandIntegrand', args[0], args[1]], ctx));
+  },
+
+  // ExpandTrigReduce[u,x] = Expand[TrigReduce[u]] — product/power reduction of
+  // hyperbolic integrands (Chapter 6). The 3-arg form ExpandTrigReduce[u,v,x]
+  // reduces v then distributes the (polynomial) factor u over the result
+  // (IntegrationUtilityFunctions.m). See the hyperbolicToExp section comment.
+  ExpandTrigReduce: (args, ctx) => {
+    const ce = ctx.ce;
+    if (args.length === 3) {
+      const w = expandTrigReduce(ce, build(args[1], ctx));
+      const u = build(args[0], ctx);
+      if (w.operator === 'Add' && w.ops)
+        return ce.function(
+          'Add',
+          w.ops.map((t) => u.mul(t))
+        );
+      return u.mul(w);
+    }
+    return expandTrigReduce(ce, build(args[0], ctx));
+  },
+
+  // ExpandTrigToExp[u,v,x] — rewrite v to exponential form, multiply by u, and
+  // expand (IntegrationUtilityFunctions.m). The 2-arg ExpandTrigToExp[u,x] is
+  // ExpandTrigToExp[1,u,x]. Same exponential-expansion engine as
+  // ExpandTrigReduce; the distinction (multiple-angle vs raw exp) is moot once
+  // we route everything through exponentials.
+  ExpandTrigToExp: (args, ctx) => {
+    const ce = ctx.ce;
+    const [u, v] =
+      args.length === 3
+        ? [build(args[0], ctx), build(args[1], ctx)]
+        : [ce.One, build(args[0], ctx)];
+    return deepExpand(ce, u.mul(hyperbolicToExp(ce, v)));
   },
 
   Coefficient: (args, ctx) => coeff(args, ctx),

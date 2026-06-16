@@ -1,6 +1,6 @@
 {
  "schemaVersion": 1,
- "generated": "2026-06-15",
+ "generated": "2026-06-16",
  "generator": "scripts/rubi/translate.ts",
  "upstream": {
   "name": "Rubi",
@@ -8,19 +8,21 @@
   "version": "4.17.3.0",
   "note": "extracted from the release tarball; rule order within each file is Rubi’s match-priority order",
   "pin": {
-   "sha256": "c66e164bfcbcb322e85b13396ff01c91d5148144f15896088ecb2701dbb08c1a",
+   "sha256": "5aa4eaeae99957fadb68195f7c60c644bf3499bfb13cb4c4a6b8873fa9c0c84a",
    "method": "sha256 over the translated IntegrationRules/**/*.m files, sorted, concatenated",
-   "fileCount": 124
+   "fileCount": 140
   },
   "license": "MIT, Copyright (c) 2018 Rule-based Integration Organization"
  },
  "scope": [
   "1 Algebraic functions",
-  "4 Trig functions"
+  "2 Exponentials",
+  "4 Trig functions",
+  "6 Hyperbolic functions"
  ],
  "counts": {
-  "files": 124,
-  "rules": 4764,
+  "files": 140,
+  "rules": 5279,
   "skipped": 0
  },
  "files": [
@@ -360,6 +362,21 @@
    "errors": 0
   },
   {
+   "file": "2 Exponentials/2.1 (c+d x)^m (a+b (F^(g (e+f x)))^n)^p.m",
+   "rules": 13,
+   "errors": 0
+  },
+  {
+   "file": "2 Exponentials/2.2 (c+d x)^m (F^(g (e+f x)))^n (a+b (F^(g (e+f x)))^n)^p.m",
+   "rules": 4,
+   "errors": 0
+  },
+  {
+   "file": "2 Exponentials/2.3 Miscellaneous exponentials.m",
+   "rules": 108,
+   "errors": 0
+  },
+  {
    "file": "4 Trig functions/4.1 Sine/4.1.0.1 (a sin)^m (b trg)^n.m",
    "rules": 27,
    "errors": 0
@@ -642,6 +659,71 @@
   {
    "file": "4 Trig functions/4.7 Miscellaneous/4.7.9 Active trig functions.m",
    "rules": 104,
+   "errors": 0
+  },
+  {
+   "file": "6 Hyperbolic functions/6.1 Hyperbolic sine/6.1.10 (c+d x)^m (a+b sinh)^n.m",
+   "rules": 2,
+   "errors": 0
+  },
+  {
+   "file": "6 Hyperbolic functions/6.1 Hyperbolic sine/6.1.11 (e x)^m (a+b x^n)^p sinh.m",
+   "rules": 22,
+   "errors": 0
+  },
+  {
+   "file": "6 Hyperbolic functions/6.1 Hyperbolic sine/6.1.12 (e x)^m (a+b sinh(c+d x^n))^p.m",
+   "rules": 76,
+   "errors": 0
+  },
+  {
+   "file": "6 Hyperbolic functions/6.1 Hyperbolic sine/6.1.13 (d+e x)^m sinh(a+b x+c x^2)^n.m",
+   "rules": 24,
+   "errors": 0
+  },
+  {
+   "file": "6 Hyperbolic functions/6.3 Hyperbolic tangent/6.3.10 (c+d x)^m (a+b tanh)^n.m",
+   "rules": 2,
+   "errors": 0
+  },
+  {
+   "file": "6 Hyperbolic functions/6.3 Hyperbolic tangent/6.3.11 (e x)^m (a+b tanh(c+d x^n))^p.m",
+   "rules": 20,
+   "errors": 0
+  },
+  {
+   "file": "6 Hyperbolic functions/6.3 Hyperbolic tangent/6.3.12 (d+e x)^m tanh(a+b x+c x^2)^n.m",
+   "rules": 6,
+   "errors": 0
+  },
+  {
+   "file": "6 Hyperbolic functions/6.5 Hyperbolic secant/6.5.10 (c+d x)^m (a+b sech)^n.m",
+   "rules": 2,
+   "errors": 0
+  },
+  {
+   "file": "6 Hyperbolic functions/6.5 Hyperbolic secant/6.5.11 (e x)^m (a+b sech(c+d x^n))^p.m",
+   "rules": 18,
+   "errors": 0
+  },
+  {
+   "file": "6 Hyperbolic functions/6.7 Miscellaneous/6.7.6 (c+d x)^m hyper(a+b x)^n hyper(a+b x)^p.m",
+   "rules": 28,
+   "errors": 0
+  },
+  {
+   "file": "6 Hyperbolic functions/6.7 Miscellaneous/6.7.7 F^(c (a+b x)) hyper(d+e x)^n.m",
+   "rules": 44,
+   "errors": 0
+  },
+  {
+   "file": "6 Hyperbolic functions/6.7 Miscellaneous/6.7.8 u hyper(a+b log(c x^n))^p.m",
+   "rules": 50,
+   "errors": 0
+  },
+  {
+   "file": "6 Hyperbolic functions/6.7 Miscellaneous/6.7.9 Active hyperbolic functions.m",
+   "rules": 96,
    "errors": 0
   }
  ]

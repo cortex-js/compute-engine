@@ -93,15 +93,18 @@ gate each other.
 
 #### R. Rubi — integration coverage by chapter
 
-**State:** **Chapter 1 (Algebraic functions)** is translated and bundled (67
-rule-docs → ~2.6k rules in `src/compute-engine/rubi/rubi-rules-data.json`,
-exposed via `@cortex-js/compute-engine/integration-rules`), **plus the Chapter-4
-trig `(a+b cos+c sin)` Weierstrass family** (`4.1.6`, 57 rules) from the trig
-pilot. The pilot closed the **three `1/(3cos x + 4sin x + k)` Wester integrals**
-(∅→✅ under `CE+R/F`) via a minimal active↔inert trig head-swap bridge — Wester
-indefinite-∫ is now `CE+R/F` 6/8 (overall 32/48). The **2 remaining Wester
-indefinite gaps** are **exponential** (`2^x/√(4^x+1)`, `u = 2^x → arcsinh`) and
-**hyperbolic** (`sinh⁴x/cosh²x`), both in untranslated chapters.
+**State:** **Chapters 1 (Algebraic), 2 (Exponentials), and 6 (Hyperbolics)** are
+translated and bundled (84 rule-docs → ~3.2k rules in
+`src/compute-engine/rubi/rubi-rules-data.json`, exposed via
+`@cortex-js/compute-engine/integration-rules`), **plus the Chapter-4 trig
+`(a+b cos+c sin)` Weierstrass family** (`4.1.6`, 57 rules) from the trig pilot.
+The pilot closed the **three `1/(3cos x + 4sin x + k)` Wester integrals** (∅→✅
+under `CE+R/F`) via a minimal active↔inert trig head-swap bridge — Wester
+indefinite-∫ is now `CE+R/F` 6/8 (overall 32/48). Chapter 2 ≈72% effective,
+Chapter 6 ≈45% effective (sample, seed 42) — both reuse the Chapter-2
+exponential machinery (incl. the incomplete-Γ kernel); the Ch6 reciprocal/
+algebraic tail (below) is the residual. Per-chapter blow-by-blow in
+`docs/rubi/RUBI.md` §5.
 
 **In progress — full Chapter 4 (trig).** The whole cost is the **inert-trig
 utility layer** (77% of the chapter's 2,117 rules match inert `cos`/`sin`;
@@ -173,10 +176,20 @@ census.
   optional:_ the predicate census over-weights it (it's a late catch-all, not a
   blocker). Only pursue if R1–R3 leave a concrete residual class that needs it.
 
-Then **exponential** (Ch 2, 125 rules) and **hyperbolic** (Ch 6, 390 rules):
-both use ACTIVE heads in their LHS (no inert layer) → ≈ Chapter-1 difficulty,
-cheaper than the rest of Chapter 4. Per-chapter coverage + the blow-by-blow
-tracked in `docs/rubi/RUBI.md` §5.
+**Exponential** (Ch 2, 125 rules) and **hyperbolic** (Ch 6, 390 rules) are
+DONE and bundled (2026-06; both use ACTIVE heads → ≈ Chapter-1 difficulty). The
+Chapter-6 residual (no single lever; ≈55 of 100 in the sample) is the next Rubi
+coverage work, and most of it is shared capability rather than Ch6-specific:
+
+- **R6 — symbolic-coefficient rational integration.** Parametric reciprocal
+  denominators (`∫1/(a+b·Sinh x)`, etc.) substitute to a rational in `eˣ` with
+  free parameters, which the native rational fallback declines (it requires
+  numeric coefficients). This is the shared 1.3.2 gap too — symbolic polynomial
+  factoring/partial-fractions. Highest-value Ch6 lever.
+- **R7 — algebraic-in-hyperbolic → elliptic** (`(a+b·Sinh²)^(p/2)`,
+  `√(a+b·Tanh)`): needs the elliptic-integral route (the kernels exist).
+- **R8 — poly×reciprocal by-parts / CoshIntegral·SinhIntegral heads** for the
+  nonlinear-argument reciprocal families.
 
 #### F. Fungrim — solving coverage
 

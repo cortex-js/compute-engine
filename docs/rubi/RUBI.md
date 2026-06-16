@@ -531,9 +531,63 @@ first four). Without them, the ~100 affected Chapter-1 rules can still be
      to symbolic exponents (`x²·y²` untouched). +9 correct, 0 new wrong.
   - **Residual tail (diminishing returns):** PolyLog/dilog (~51, really
     Chapter-3 territory), exp-of-quadratic/cubic (~35, Erf/exponent-factoring),
-    `2.1/2.2` niche sub-shapes. **Not yet bundled** (`bundle-corpus.ts`
-    unchanged; measured from a `/tmp` translate of ch1+ch2+ch6) and the data/rubi
-    corpus is not yet re-translated — both fold into the Ch6 + packaging pass.
+    `2.1/2.2` niche sub-shapes.
+  - **BUNDLED (2026-06-16).** `data/rubi` re-translated to ch1+ch2+ch4, and
+    `bundle-corpus.ts` now walks the whole Chapter-2 directory (`ch2Dir`);
+    `loadIntegrationRules` ships the 125 Chapter-2 rules (bundle 2704→2829
+    rules). Loader regression tests added (`∫x²/E^(4x)`, `∫eˣ(1+eˣ)³`,
+    `∫1/(1+eˣ)`, all D-verified). Shipping Chapter 2 means consumers also get
+    its ~2.7% branch-phase wrongs (the incomplete-Γ/Erfi class — Rubi-parity
+    forms that fail principal-branch numeric verification, not logic bugs),
+    consistent with Chapter 1's ~1% residue.
+- **Phase R3+ — Chapter 6 (Hyperbolics) PORTED + BUNDLED (2026-06-16).** Sample
+  of 100 problems (`--seed 42`): **37 solved-correct (≈45% EFFECTIVE** crediting
+  the 7 `Unintegrable`-expected problems + 1 unverifiable CoshIntegral as
+  correctly-handled**), 2 wrong, 0 errors, ≈55 s, no timeouts.** Up from an ≈8%
+  baseline (4.6×). The 2 wrong are the same symbolic-exponent incomplete-Γ /
+  special-function **branch-phase artifact class** as Chapter 2 (driver forms
+  match Rubi's expected antiderivatives; they fail principal-branch numeric
+  verification). The levers (all reusing the already-bundled Chapter-2
+  exponential machinery — Rubi puts the *bare* hyperbolic-power reductions in
+  shared, non-standalone machinery, so the port substitutes equivalent
+  exponential routes):
+  1. **`ExpandTrigReduce` / `ExpandTrigToExp`** (rubi-utils) — the rule-invoked
+     product/power reduction. Implemented as `Expand[TrigToExp[u]]`: rewrite
+     Sinh/Cosh → exponential form (`hyperbolicToExp`, ½-distributed so the power
+     base stays a pure Add) and multiply out (`deepExpand` + `foldEPowers`,
+     which fuses `E^p·E^q` so the expansion stays compact). Each term is then
+     `poly·E^(k·arg)`, closed by the Chapter-2 rules (incl. the incomplete-Γ /
+     Erf kernels). Solves the nonlinear-argument families (`Sinh[a+b·xⁿ]ⁿ`,
+     `Sinh[quadratic]ⁿ`).
+  2. **Hyperbolic→exponential driver fallback** (driver.ts) — when no rule
+     closes a Sinh/Cosh integrand (gated to polynomial arguments), expand to
+     exponential form and re-integrate. Covers the bare/linear `(c+d·x)^m·Sinhⁿ`
+     / `(a+b·Sinh)ⁿ` families whose recurrences are not standalone corpus rules.
+  3. **`FunctionOfExponential` substitution fallback** (driver.ts) — a pure
+     hyperbolic of a LINEAR argument (incl. the reciprocals Tanh/Coth/Sech/Csch)
+     is rational in `e^(linear)`; mirror rule 2.3#97's `t = e^v` substitution
+     (ungated by `$exponFlag$`, which Rubi requires) → a rational integral the
+     bundled rational rules close → undo. This unlocked the whole reciprocal
+     chunk (chapters 6.3–6.6) **fast** (the brute exponential expansion grinds on
+     reciprocal quotients; the substitution does not). Gated on Rubi's
+     `FunctionOfExponentialTest` actually passing (rejects bare-x factors like
+     `Tanh/x²` and non-linear arguments) + a try/catch (complex-coefficient
+     rational sub-integrands can crash the native integrator).
+  - **Output cleanup:** the fallback antiderivatives are exponential-form, not
+    Rubi's hyperbolic form (numerically identical, D-verified); a bounded
+    `simplify` + `Ln(E)→1` / `E^(0·…)→1` fold (`foldLnExponentialE`) collects
+    like terms and tidies them.
+  - **Bundling:** `data/rubi` re-translated to ch1+ch2+ch4+ch6; `bundle-corpus`
+    walks `ch6Dir` (390 rules, 0 skips; bundle 2829→3219 rules, 3.44 MB).
+    Loader tests added (`∫cosh⁴`, `∫sinh³cosh`, `∫tanh²`, `∫csch⁴`). The driver
+    fallbacks ship with the runtime regardless; the corpus rules add the
+    rule-driven `ExpandTrigReduce` cases.
+  - **Remaining tail (no single lever; ≈55 unsolved):** algebraic-in-hyperbolic
+    `(a+b·Sinh²)^(p/2)` → elliptic; PARAMETRIC rational denominators
+    `1/(a+b·Sinh)` → symbolic-coefficient rational integration (a shared
+    capability gap); high-degree rationals (`1/(1−Sinh⁸)`); poly×reciprocal →
+    by-parts; CoshIntegral/SinhIntegral for nonlinear-argument reciprocals.
+    Each is a distinct, deeper effort — below the ≈72% Chapter-2 target.
 - **Phase R3+ — chapters by value**: 2 (exponentials, 125 rules — small) and
   3 (logarithms, 337) first; 5/6/7 (inverse trig/hyperbolic) next; Chapter 4
   (trig, 2,126 rules + the inert-trig utility machinery) — the
