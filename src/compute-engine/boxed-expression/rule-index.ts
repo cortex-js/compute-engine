@@ -374,7 +374,11 @@ function makeHeadDispatcher(
       const step = fns[i](current, EMPTY_SUB);
       // Foldable rules always return a RuleStep (with a `because`) or nothing;
       // a bare Expression is not part of `wrapHotHeadRule`'s contract.
-      if (step !== undefined && step !== null && 'because' in (step as object)) {
+      if (
+        step !== undefined &&
+        step !== null &&
+        'because' in (step as object)
+      ) {
         const ruleStep = step as RuleStep;
         current = ruleStep.value;
         last = ruleStep;

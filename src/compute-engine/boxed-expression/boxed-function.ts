@@ -944,8 +944,7 @@ export class BoxedFunction
       const num = this.op1;
       const den = this.op2;
       if (
-        (num.isNonNegative === true ||
-          !onBranchCut(this.engine, 'Ln', num)) &&
+        (num.isNonNegative === true || !onBranchCut(this.engine, 'Ln', num)) &&
         (den.isNonNegative === true || !onBranchCut(this.engine, 'Ln', den))
       )
         return num.ln(base).sub(den.ln(base));
@@ -1407,10 +1406,7 @@ export class BoxedFunction
       //
       const engine = this.engine;
 
-      let evaluateFn:
-        | Expression
-        | Promise<Expression | undefined>
-        | undefined;
+      let evaluateFn: Expression | Promise<Expression | undefined> | undefined;
       try {
         const opts: Partial<EvaluateOptions> & { engine: ComputeEngine } = {
           numericApproximation,

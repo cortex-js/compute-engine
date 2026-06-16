@@ -711,7 +711,10 @@ export function simplifyLog(x: Expression): RuleStep | undefined {
     // principal-branch cut on its argument is the negative real axis for any
     // real base, so the argument is checked against Ln's cut record.
     for (const [, terms] of logTerms) {
-      if (terms.length >= 2 && !terms.some((t) => onBranchCut(ce, 'Ln', t.arg))) {
+      if (
+        terms.length >= 2 &&
+        !terms.some((t) => onBranchCut(ce, 'Ln', t.arg))
+      ) {
         let numerator = ce.One;
         let denominator = ce.One;
         for (const t of terms) {

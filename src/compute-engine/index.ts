@@ -1746,9 +1746,7 @@ export class ComputeEngine implements IComputeEngine {
         const boxed = boxRules(this, this._simplificationRules.rules, {
           canonical: true,
         });
-        const simplifyRules = boxed.rules.filter(
-          (r) => r.purpose !== 'expand'
-        );
+        const simplifyRules = boxed.rules.filter((r) => r.purpose !== 'expand');
         // Collapse each hot head's loader-registered functional dispatch rules
         // into one per-head dispatcher (ROADMAP item 5). No-op when no such
         // rules are present (e.g. the Fungrim identities are not loaded). The

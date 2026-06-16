@@ -73,7 +73,10 @@ export function residue(
 
   const shifted = (n: number): Expression =>
     frac(
-      ce.function('Multiply', [ce.function('Power', [xMinusA, ce.number(n)]), body])
+      ce.function('Multiply', [
+        ce.function('Power', [xMinusA, ce.number(n)]),
+        body,
+      ])
     );
 
   // Pole order m = smallest n ≥ 1 with a finite lim (x−a)ⁿ·f. An analytic f

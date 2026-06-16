@@ -102,9 +102,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           if (isTensor(op1)) {
             // Return first element as scalar
             const flatData = op1.tensor.flatten();
-            return flatData.length > 0
-              ? ce.expr(flatData[0])
-              : ce.Zero;
+            return flatData.length > 0 ? ce.expr(flatData[0]) : ce.Zero;
           }
           return undefined;
         }
@@ -558,9 +556,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           for (let i = 0; i < n; i++) {
             const aVal = A.tensor.at(i + 1) ?? ce.Zero;
             const bVal = B.tensor.at(i + 1) ?? ce.Zero;
-            sum = sum.add(
-              ce.expr(aVal).mul(ce.expr(bVal))
-            );
+            sum = sum.add(ce.expr(aVal).mul(ce.expr(bVal)));
           }
           return sum.evaluate();
         }
@@ -577,9 +573,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
             for (let k = 0; k < n; k++) {
               const aVal = A.tensor.at(i + 1, k + 1) ?? ce.Zero;
               const bVal = B.tensor.at(k + 1) ?? ce.Zero;
-              sum = sum.add(
-              ce.expr(aVal).mul(ce.expr(bVal))
-            );
+              sum = sum.add(ce.expr(aVal).mul(ce.expr(bVal)));
             }
             result.push(sum.evaluate());
           }
@@ -599,9 +593,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
             for (let k = 0; k < m; k++) {
               const aVal = A.tensor.at(k + 1) ?? ce.Zero;
               const bVal = B.tensor.at(k + 1, j + 1) ?? ce.Zero;
-              sum = sum.add(
-              ce.expr(aVal).mul(ce.expr(bVal))
-            );
+              sum = sum.add(ce.expr(aVal).mul(ce.expr(bVal)));
             }
             result.push(sum.evaluate());
           }
@@ -624,9 +616,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
               for (let k = 0; k < n; k++) {
                 const aVal = A.tensor.at(i + 1, k + 1) ?? ce.Zero;
                 const bVal = B.tensor.at(k + 1, j + 1) ?? ce.Zero;
-                sum = sum.add(
-              ce.expr(aVal).mul(ce.expr(bVal))
-            );
+                sum = sum.add(ce.expr(aVal).mul(ce.expr(bVal)));
               }
               row.push(sum.evaluate());
             }
@@ -678,9 +668,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
             const minDim = Math.min(m, n);
             const diagonal: Expression[] = [];
             for (let i = 0; i < minDim; i++) {
-              diagonal.push(
-                ce.expr((op1.tensor.at(i + 1, i + 1) ?? ce.Zero))
-              );
+              diagonal.push(ce.expr(op1.tensor.at(i + 1, i + 1) ?? ce.Zero));
             }
             return ce.expr(['List', ...diagonal]);
           }

@@ -15,10 +15,7 @@ import { isTensor } from './boxed-tensor';
 import { isNumber, isFunction, isSymbol } from './type-guards';
 
 import { MACHINE_PRECISION } from '../numerics/numeric';
-import type {
-  NumericValue,
-  NumericValueFactory,
-} from '../numeric-value/types';
+import type { NumericValue, NumericValueFactory } from '../numeric-value/types';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value';
 import { BigNumericValue } from '../numeric-value/big-numeric-value';
 import { MachineNumericValue } from '../numeric-value/machine-numeric-value';

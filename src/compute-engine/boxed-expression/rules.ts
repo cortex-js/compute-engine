@@ -451,7 +451,11 @@ function parseRule(
       kind: 'infix',
       precedence: 100,
       latexTrigger: '->',
-      parse: (parser: Parser, lhs: MathJsonExpression, until: Readonly<Terminator>) => {
+      parse: (
+        parser: Parser,
+        lhs: MathJsonExpression,
+        until: Readonly<Terminator>
+      ) => {
         const rhs = parser.parseExpression({ ...until, minPrec: 20 });
         if (rhs === null) return null;
 

@@ -1279,7 +1279,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           if (nVal !== undefined && nVal !== 0)
             return quantityPower(engine, evalX, engine.number(1 / nVal));
         }
-        return root(x, n, { numericApproximation: numericApproximation ?? false });
+        return root(x, n, {
+          numericApproximation: numericApproximation ?? false,
+        });
       },
     },
 

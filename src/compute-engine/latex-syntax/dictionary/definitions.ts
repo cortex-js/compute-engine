@@ -75,9 +75,7 @@ type LatexDictionaryEntryFields = {
 };
 
 /** Read optional union-member fields off an entry without narrowing on `kind`. */
-function entryFields(
-  entry: LatexDictionaryEntry
-): LatexDictionaryEntryFields {
+function entryFields(entry: LatexDictionaryEntry): LatexDictionaryEntryFields {
   return entry as LatexDictionaryEntryFields;
 }
 
@@ -1095,7 +1093,10 @@ function isValidEntry(
         (entry.latexTrigger.startsWith('^') ||
           entry.latexTrigger.startsWith('_')))
     ) {
-      if (entry.precedence !== undefined || fields.associativity !== undefined) {
+      if (
+        entry.precedence !== undefined ||
+        fields.associativity !== undefined
+      ) {
         onError({
           severity: 'warning',
           message: [

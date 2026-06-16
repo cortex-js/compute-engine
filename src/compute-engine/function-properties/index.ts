@@ -235,7 +235,10 @@ function isOnPoleSet(
   // unresolved `Element(...)` has a string `valueOf`, never `true`).
   try {
     return (
-      ce.function('Element', [arg, ce.box(value)]).evaluate().valueOf() === true
+      ce
+        .function('Element', [arg, ce.box(value)])
+        .evaluate()
+        .valueOf() === true
     );
   } catch {
     return false;

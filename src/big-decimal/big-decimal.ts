@@ -1157,8 +1157,12 @@ export class BigDecimal {
 // only a same-base, same-precision repeat hits. Fixed small size, oldest
 // evicted — bounded memory, and a never-repeating base just cycles through.
 const POW_LN_CACHE_SIZE = 8;
-const _powLnCache: { sig: bigint; exp: number; prec: number; ln: BigDecimal }[] =
-  [];
+const _powLnCache: {
+  sig: bigint;
+  exp: number;
+  prec: number;
+  ln: BigDecimal;
+}[] = [];
 
 function cachedBaseLn(base: BigDecimal, prec: number): BigDecimal {
   const sig = base.significand;
