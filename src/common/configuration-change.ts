@@ -1,8 +1,18 @@
 // Tracks and notifies listeners when a configuration change occurs.
 // Uses WeakRef to avoid preventing garbage collection of listeners.
 export class ConfigurationChangeTracker {
-  // A list of weak references to registered listeners
-  private _listeners: WeakRef<ConfigurationChangeListener>[] = new Array(300);
+  // Weak references to registered listeners. WeakRef lets a listener be
+  // garbage-collected (and pruned on the next notification) even if it is
+  // never explicitly unsubscribed. The list must stay enumerable so that
+  // `notifyNow()` can walk it — a `WeakSet` alone would not work, as it is
+  // not iterable.
+  private _listeners: WeakRef<ConfigurationChangeListener>[] = [];
+  // Membership set for O(1) dedup. `listen()` runs on the object-construction
+  // path (every new definition subscribes), so a linear "already registered?"
+  // scan would make a burst of registrations O(n²). The WeakSet holds
+  // listeners weakly — it never keeps one alive, and a garbage-collected
+  // listener drops out of both structures.
+  private _registered = new WeakSet<ConfigurationChangeListener>();
   private _pending = false;
   private _version = 0;
 
@@ -13,23 +23,18 @@ export class ConfigurationChangeTracker {
    * returns the existing unsubscribe logic without adding a duplicate.
    */
   listen(listener: ConfigurationChangeListener): () => void {
-    // Check if the listener is already registered
-    for (const ref of this._listeners) {
-      const l = ref.deref();
-      if (l === listener) {
-        // Already registered, return the unsubscribe logic
-        return () => this._unsubscribe(listener);
-      }
+    // O(1) dedup: only add a listener that is not already registered.
+    if (!this._registered.has(listener)) {
+      this._registered.add(listener);
+      this._listeners.push(new WeakRef(listener));
     }
-
-    // Add new listener
-    const ref = new WeakRef(listener);
-    this._listeners.push(ref);
 
     return () => this._unsubscribe(listener);
   }
 
   private _unsubscribe(listener: ConfigurationChangeListener): void {
+    if (!this._registered.has(listener)) return;
+    this._registered.delete(listener);
     this._listeners = this._listeners.filter((r) => {
       const l = r.deref();
       return l !== undefined && l !== listener;

@@ -124,8 +124,6 @@ export class _BoxedValueDefinition
 
       this._type = new BoxedType(type, ce._typeResolver);
       this.inferredType = def.inferred ?? false;
-
-      ce.listenToConfigurationChange(this);
     }
 
     this._value = dynamicValue(this._engine, def.value);
@@ -174,6 +172,13 @@ export class _BoxedValueDefinition
           `The "holdUntil" property cannot be "never" for a non-constant symbol`,
         ].join('\n|   ')
       );
+
+    // Only constants need to react to configuration changes: their value may
+    // be precision-dependent (e.g. `Pi`, `EulerGamma`) and must be recomputed
+    // from `_defValue` when the precision or angular unit changes. See
+    // `onConfigurationChange()`. Non-constants and operator definitions don't
+    // listen, which keeps engine construction cheap.
+    if (this.isConstant) ce.listenToConfigurationChange(this);
   }
 
   /** For debugging */

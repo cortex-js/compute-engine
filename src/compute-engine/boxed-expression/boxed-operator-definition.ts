@@ -148,8 +148,6 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     } else this.signature = new BoxedType('(any*) -> unknown');
 
     this.update(def);
-
-    ce.listenToConfigurationChange(this);
   }
 
   /** For debugging */
@@ -360,9 +358,5 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     }
 
     this.evaluate = evaluate;
-  }
-
-  onConfigurationChange(): void {
-    return;
   }
 }
