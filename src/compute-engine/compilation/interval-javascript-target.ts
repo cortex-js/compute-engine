@@ -567,7 +567,11 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
         // An assigned value / declared constant: returning `undefined` lets
         // BaseCompiler fold it (see the JavaScript target) rather than emitting
         // a bare, dangling reference for a symbol that `expr.unknowns` omits.
-        return undefined;
+        if (expr.engine._getSymbolValue(id) !== undefined) return undefined;
+        // No value: a genuinely free symbol, possibly reachable only through a
+        // folded value (so absent from `unknowns`). Emit the vars-object lookup
+        // rather than a bare, dangling reference.
+        return `_.${id}`;
       },
       preamble: (preamble ?? '') + preambleImports,
     });

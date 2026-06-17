@@ -130,10 +130,56 @@ describe('COMPILE: assigned-symbol folding', () => {
     const ce = new ComputeEngine();
     ce.assign('a', ce.parse('\\pi/2'));
     const expr = ce.parse('\\sin(a x)');
-    // evaluate folds a → π/2; compile bakes the same value in.
+    // evaluate folds a → π/2; compile bakes the same value in. The folded
+    // compound value parenthesizes itself so it stays correct when spliced into
+    // a surrounding operator (the redundant parens here are harmless).
     expect(ce.getCompilationTarget('javascript')!.compile(expr).code).toBe(
-      'Math.sin(0.5 * Math.PI * _.x)'
+      'Math.sin((0.5 * Math.PI) * _.x)'
     );
+  });
+
+  // A symbol assigned a *symbolic* value whose value itself references a free
+  // symbol (`b = c + 1`, then compile `b·x`). Two failure modes the fold must
+  // avoid: (1) splicing the compound value in without parentheses
+  // (`c + 1 * x` ≠ `(c + 1) * x`) — a silently wrong result; and (2) emitting
+  // the inner free symbol `c` bare — `c` is hidden behind `b`'s value so it is
+  // absent from `expr.unknowns`, yet it must still route through the
+  // free-symbol plumbing (`_.c`), not a bare global that throws.
+  describe('transitive folding (assigned value references a free symbol)', () => {
+    const freshEngine = () => {
+      const ce = new ComputeEngine();
+      ce.assign('b', ce.parse('c + 1'));
+      return ce;
+    };
+
+    it('parenthesizes the compound value in a product', () => {
+      const ce = freshEngine();
+      const r = ce.getCompilationTarget('javascript')!.compile(ce.parse('b x'));
+      expect(r.code).toBe('(_.c + 1) * _.x');
+      expect(r.run!({ c: 2, x: 3 })).toBe(9); // (2+1)*3
+    });
+
+    it('parenthesizes the compound value under a coefficient and a power', () => {
+      const ce = freshEngine();
+      const js = ce.getCompilationTarget('javascript')!;
+      expect(js.compile(ce.parse('2 b')).run!({ c: 2 })).toBe(6); // 2*(2+1)
+      expect(js.compile(ce.parse('b^2')).run!({ c: 2 })).toBe(9); // (2+1)^2
+    });
+
+    it('routes the inner free symbol through the vars object (not a bare global)', () => {
+      const ce = freshEngine();
+      const r = ce.getCompilationTarget('javascript')!.compile(ce.parse('b x'));
+      expect(r.code).toContain('_.c');
+      expect(r.code).not.toMatch(/(^|[^.\w])c([^\w]|$)/); // no bare `c`
+      // freeSymbols surfaces the transitively-referenced input.
+      expect(r.freeSymbols!.sort()).toEqual(['c', 'x']);
+    });
+
+    it('keeps the GLSL precedence correct (free symbol stays a bare uniform there)', () => {
+      const ce = freshEngine();
+      const r = ce.getCompilationTarget('glsl')!.compile(ce.parse('b x'));
+      expect(r.code).toBe('(c + 1.0) * x');
+    });
   });
 
   // The direct-target path — `compile(expr, { target })` with a raw target —

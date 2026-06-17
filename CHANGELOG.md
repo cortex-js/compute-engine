@@ -27,6 +27,19 @@
   wins, so a per-frame GLSL uniform / JS argument keeps updating the result
   without recompiling — and a genuinely free symbol is unchanged.
 
+- **`compile()` folds a _symbolic_ assigned value correctly, parenthesizing it
+  and resolving the free symbols it references.** When a symbol was assigned an
+  expression rather than a number (`ce.assign("b", ce.parse("c + 1"))`), folding
+  `b` into a larger expression had two bugs: the compound value was spliced in
+  without parentheses, so `b · x` compiled to `c + 1 * x` (i.e. `c + x`) instead
+  of `(c + 1) * x` — a **silently wrong result** (`2·b` → `2 * c + 1`, `b²` →
+  `(c + 1 * c + 1)`); and the inner free symbol `c`, hidden behind `b`'s value
+  and therefore absent from `expr.unknowns`, was emitted as a bare global
+  (`ReferenceError` on the JS target). The folded value is now parenthesized for
+  its context, and a free symbol reachable only through a folded value routes
+  through the normal free-symbol plumbing (`_.c` on the JS / interval-JS
+  targets; a uniform on GPU) and is reported in the result's `freeSymbols`.
+
 - **GPU compilation rejects non-finite numbers instead of emitting a
   non-compilable shader.** GLSL and WGSL have no infinity or NaN literals, but
   `compile()` emitted `Infinity.0` / `NaN.0` for a `±∞` or `NaN` value (e.g.

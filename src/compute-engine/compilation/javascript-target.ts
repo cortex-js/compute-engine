@@ -1569,11 +1569,15 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
         }[id];
         if (result !== undefined) return result;
         if (unknowns.includes(id)) return `_.${id}`;
-        // Not mapped, not a constant, not free: an assigned value / declared
-        // constant. Returning `undefined` lets BaseCompiler fold it (the way
-        // evaluate() does) rather than emitting a bare `a` global, which would
-        // throw `ReferenceError` at run time.
-        return undefined;
+        // An assigned value / declared constant: returning `undefined` lets
+        // BaseCompiler fold it (the way evaluate() does) rather than emitting a
+        // bare `a` global, which would throw `ReferenceError` at run time.
+        if (expr.engine._getSymbolValue(id) !== undefined) return undefined;
+        // No value: a genuinely free symbol. It may be reachable only through a
+        // folded value (e.g. `c` in `b = c + 1`), so `unknowns` — computed on
+        // the surface expression — can miss it. Emit the vars-object lookup
+        // anyway, not a bare global. (`freeSymbols` on the result lists it.)
+        return `_.${id}`;
       },
       preamble: (preamble ?? '') + preambleImports,
     });

@@ -20,6 +20,14 @@ import type { CompileTarget, TargetSource } from './types';
  */
 export class BaseCompiler {
   /**
+   * Precedence used when compiling a folded symbol value. Higher than any
+   * target's infix operator precedence, so a compound value parenthesizes
+   * itself when spliced into a surrounding expression. See
+   * `tryFoldKnownSymbol`.
+   */
+  private static readonly FOLD_OPERAND_PREC = 1000;
+
+  /**
    * Compile an expression to target language source code
    */
   static compile(
@@ -978,6 +986,13 @@ export class BaseCompiler {
    *
    * `target` is the in-flight target: nested symbols inside the value resolve
    * through the same `vars`/constant/fold rules as the top-level expression.
+   *
+   * The value is compiled at a high precedence so a compound (operator) value
+   * self-parenthesizes: folding `b = c + 1` into `b * x` must yield
+   * `(c + 1) * x`, not `c + 1 * x`, and must stay safe when a handler splices
+   * the folded string into its own expression (e.g. `Power`'s `(code * code)`).
+   * An atomic value (number, symbol, function call) ignores the precedence, so
+   * no redundant parentheses are added in the common assigned-number case.
    */
   static tryFoldKnownSymbol(
     engine: ComputeEngine,
@@ -986,7 +1001,7 @@ export class BaseCompiler {
   ): string | undefined {
     const value = engine._getSymbolValue(id);
     if (value === undefined) return undefined;
-    return BaseCompiler.compile(value, target);
+    return BaseCompiler.compile(value, target, BaseCompiler.FOLD_OPERAND_PREC);
   }
 
   /**
