@@ -1122,12 +1122,7 @@ export class BaseCompiler {
         visit(ops[0], params.length ? union(bound, params) : bound);
         return;
       }
-      if (
-        h === 'Sum' ||
-        h === 'Product' ||
-        h === 'Integrate' ||
-        h === 'Loop'
-      ) {
+      if (h === 'Sum' || h === 'Product' || h === 'Integrate' || h === 'Loop') {
         const indices: string[] = [];
         const limitExprs: Expression[] = [];
         for (const clause of ops.slice(1)) {
@@ -1164,7 +1159,9 @@ export class BaseCompiler {
    * compilation result, returning the same object. Used by the built-in
    * targets to make every result carry its declarative reference analysis.
    */
-  static withReferences<R extends { freeSymbols?: string[]; unsupported?: string[] }>(
+  static withReferences<
+    R extends { freeSymbols?: string[]; unsupported?: string[] },
+  >(
     result: R,
     expr: Expression,
     target: CompileTarget<Expression>,

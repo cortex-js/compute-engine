@@ -421,7 +421,8 @@ const INTERVAL_GLSL_FUNCTIONS: CompiledFunctions<Expression> = {
     return r;
   },
   Power: ([base, exp], compile) => {
-    if (base === null || exp === null) throw new Error('Power: missing argument');
+    if (base === null || exp === null)
+      throw new Error('Power: missing argument');
     // e^x
     if (isSymbol(base, 'ExponentialE')) return `_iv_exp(${compile(exp)})`;
     if (isNumber(exp) && exp.im === 0) {
@@ -567,19 +568,25 @@ export class IntervalGLSLTarget extends GLSLTarget {
     const callArgs: string[] = [];
     if (axisX !== undefined) {
       main.push('  float _xlo = mix(u_domainX.x, u_domainX.y, _cell.x);');
-      main.push('  float _xhi = mix(u_domainX.x, u_domainX.y, _cell.x + _step.x);');
+      main.push(
+        '  float _xhi = mix(u_domainX.x, u_domainX.y, _cell.x + _step.x);'
+      );
       callArgs.push('vec2(_xlo, _xhi)');
     }
     if (axisY !== undefined) {
       main.push('  float _ylo = mix(u_domainY.x, u_domainY.y, _cell.y);');
-      main.push('  float _yhi = mix(u_domainY.x, u_domainY.y, _cell.y + _step.y);');
+      main.push(
+        '  float _yhi = mix(u_domainY.x, u_domainY.y, _cell.y + _step.y);'
+      );
       callArgs.push('vec2(_ylo, _yhi)');
     }
     main.push(`  vec2 _f = _implicit(${callArgs.join(', ')});`);
     // lo > 0 || hi < 0  ⇒  the curve cannot pass through this cell (also
     // excludes `empty`, whose lo is +IV_INF). Live cells are kept (white).
     main.push('  bool _excluded = (_f.x > 0.0 || _f.y < 0.0);');
-    main.push('  fragColor = _excluded ? vec4(0.0, 0.0, 0.0, 1.0) : vec4(1.0);');
+    main.push(
+      '  fragColor = _excluded ? vec4(0.0, 0.0, 0.0, 1.0) : vec4(1.0);'
+    );
     main.push('}');
 
     return [
