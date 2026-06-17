@@ -112,6 +112,22 @@ class CortexConsole extends CustomConsole {
     }
     this['_logError']('assert', msg);
   }
+  warn(...message) {
+    // `compile()` logs `console.warn('Compilation fallback for …')` whenever it
+    // falls back to interpretation. Many tests (and the benchmark corpora)
+    // deliberately compile expressions a target cannot lower — to assert the
+    // graceful fallback / `unsupported` reporting — so this is *expected* noise,
+    // not a problem, and it reads alarmingly in the output (e.g. "Unknown
+    // operator `SinIntegral`" even though SinIntegral compiles fine on the JS
+    // target). Drop just that category here; a genuine compile regression still
+    // fails its test's assertions. Every other warning passes through.
+    if (
+      typeof message[0] === 'string' &&
+      message[0].startsWith('Compilation fallback for')
+    )
+      return;
+    super.warn(...message);
+  }
 }
 
 function recursiveSerialize(x: unknown): string {
