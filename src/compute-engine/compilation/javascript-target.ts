@@ -60,6 +60,16 @@ import {
   cosIntegral,
   expIntegralEi,
   logIntegral,
+  erfi,
+  agm,
+  ellipticK,
+  ellipticE,
+  ellipticEIncomplete,
+  ellipticF,
+  ellipticPiComplete,
+  ellipticPiIncomplete,
+  hypergeometric2F1,
+  hypergeometric1F1,
 } from '../numerics/special-functions';
 import { choose } from '../boxed-expression/expand';
 import {
@@ -666,6 +676,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Erf: '_SYS.erf',
   Erfc: '_SYS.erfc',
   ErfInv: '_SYS.erfInv',
+  Erfi: '_SYS.erfi',
 
   // Special functions
   Beta: '_SYS.beta',
@@ -698,6 +709,37 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   ExpIntegralEi: '_SYS.expIntegralEi',
   LogIntegral: '_SYS.logIntegral',
 
+  // Arithmetic-geometric mean and elliptic integrals (parameter convention
+  // m = k², as in the library). `AGM`, `EllipticE`, and `EllipticPi` are
+  // arity-overloaded — the handlers mirror the library's evaluate dispatch.
+  AGM: (args, compile) =>
+    args.length === 1
+      ? `_SYS.agm(1, ${compile(args[0])})`
+      : `_SYS.agm(${compile(args[0])}, ${compile(args[1])})`,
+  EllipticK: '_SYS.ellipticK',
+  EllipticE: (args, compile) =>
+    args.length === 2
+      ? `_SYS.ellipticEIncomplete(${compile(args[0])}, ${compile(args[1])})`
+      : `_SYS.ellipticE(${compile(args[0])})`,
+  EllipticF: (args, compile) =>
+    `_SYS.ellipticF(${compile(args[0])}, ${compile(args[1])})`,
+  EllipticPi: (args, compile) =>
+    args.length === 3
+      ? `_SYS.ellipticPiIncomplete(${compile(args[0])}, ${compile(
+          args[1]
+        )}, ${compile(args[2])})`
+      : `_SYS.ellipticPiComplete(${compile(args[0])}, ${compile(args[1])})`,
+
+  // Hypergeometric functions.
+  Hypergeometric2F1: (args, compile) =>
+    `_SYS.hypergeometric2F1(${compile(args[0])}, ${compile(args[1])}, ${compile(
+      args[2]
+    )}, ${compile(args[3])})`,
+  Hypergeometric1F1: (args, compile) =>
+    `_SYS.hypergeometric1F1(${compile(args[0])}, ${compile(args[1])}, ${compile(
+      args[2]
+    )})`,
+
   // Combinatorics
   Mandelbrot: ([c, maxIter], compile) => {
     if (c === null || maxIter === null)
@@ -711,6 +753,9 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   },
 
   Binomial: (args, compile) =>
+    `_SYS.binomial(${compile(args[0])}, ${compile(args[1])})`,
+  // Choose(n, k) is the binomial coefficient — same runtime helper.
+  Choose: (args, compile) =>
     `_SYS.binomial(${compile(args[0])}, ${compile(args[1])})`,
   Fibonacci: '_SYS.fibonacci',
 
@@ -1324,6 +1369,16 @@ const SYS_HELPERS = {
   cosIntegral,
   expIntegralEi,
   logIntegral,
+  erfi,
+  agm,
+  ellipticK,
+  ellipticE,
+  ellipticEIncomplete,
+  ellipticF,
+  ellipticPiComplete,
+  ellipticPiIncomplete,
+  hypergeometric2F1,
+  hypergeometric1F1,
   mandelbrot: (c: number | { re: number; im: number }, maxIter: number) => {
     let zx = 0,
       zy = 0;

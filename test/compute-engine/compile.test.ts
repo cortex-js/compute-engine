@@ -751,3 +751,44 @@ describe('COMPILE integral special functions (Si/Ci/Ei/li)', () => {
     expect(result.run!({ x: 2 })).toBeCloseTo(ce.box(['SinIntegral', 2]).N().re, 10);
   });
 });
+
+// Tier-2 special-function kernels that `.N()` produces as real floats — the
+// elliptic integrals, AGM, hypergeometric functions, Erfi, and the Choose
+// binomial — must also lower to JS so an "evaluate then compile" pipeline can
+// plot a closed form (e.g. a pendulum period from an EllipticK closed form)
+// instead of falling back to numeric sampling.
+describe('COMPILE Tier-2 special functions (elliptic / AGM / hypergeometric / Erfi)', () => {
+  // Concrete numeric argument lists (no free variable) — verifies both the
+  // arity-overloaded dispatch and numeric agreement with N().
+  const cases: Array<[string, number[]]> = [
+    ['AGM', [1, 2]],
+    ['AGM', [2]], // one-arg form ⇒ AGM(1, 2)
+    ['EllipticK', [0.5]],
+    ['EllipticE', [0.5]], // complete
+    ['EllipticE', [0.7, 0.5]], // incomplete
+    ['EllipticF', [0.7, 0.5]],
+    ['EllipticPi', [0.3, 0.5]], // complete
+    ['EllipticPi', [0.3, 0.7, 0.5]], // incomplete
+    ['Erfi', [0.5]],
+    ['Hypergeometric2F1', [1, 1, 2, 0.5]],
+    ['Hypergeometric1F1', [1, 2, 0.5]],
+    ['Choose', [5, 2]],
+  ];
+
+  for (const [op, args] of cases) {
+    it(`${op}(${args.join(', ')}) compiles and matches N()`, () => {
+      const expr = ce.box([op, ...args]);
+      const result = compile(expr)!;
+      expect(result.success).toBe(true);
+      expect(result.code).toContain('_SYS.');
+      const want = expr.N().re;
+      expect(result.run!({}) as number).toBeCloseTo(want, 9);
+    });
+  }
+
+  it('lowers AGM and EllipticE with a free variable', () => {
+    const k = compile(ce.box(['EllipticK', 'm']))!;
+    expect(k.success).toBe(true);
+    expect(k.run!({ m: 0.5 })).toBeCloseTo(ce.box(['EllipticK', 0.5]).N().re, 9);
+  });
+});

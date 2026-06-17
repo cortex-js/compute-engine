@@ -60,6 +60,17 @@
   `Unknown operator` and falls back to numeric sampling. (GLSL/WGSL shader
   approximations of these are not yet provided.)
 
+- **The JavaScript compilation target now lowers the elliptic, AGM, and
+  hypergeometric kernels.** `AGM`, `EllipticK`, `EllipticE`, `EllipticF`,
+  `EllipticPi`, `Hypergeometric2F1`, `Hypergeometric1F1`, `Erfi`, and `Choose`
+  compile to `_SYS` runtime helpers. Like the integral functions above, these
+  are closed forms `evaluate()`/`.N()` produces (e.g. a pendulum period or an
+  arc length reduces to an elliptic integral), so they can now be plotted from
+  the closed form rather than re-sampled numerically. `EllipticE` and
+  `EllipticPi` keep their arity-overloaded complete/incomplete forms, and `AGM`
+  accepts the one-argument `AGM(z) = AGM(1, z)` shorthand. (Real-valued like the
+  other special functions on this target; GLSL/WGSL not provided.)
+
 ### Improvements
 
 - **`compile()` results now report their external references.** A
