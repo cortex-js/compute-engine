@@ -990,6 +990,178 @@ export class BaseCompiler {
   }
 
   /**
+   * Operator heads the compiler lowers directly in `compileExpr`, independent
+   * of any target operator/function mapping (control-flow, binding, and
+   * indexing-set forms). `analyzeReferences` never reports these as
+   * "unsupported".
+   */
+  private static readonly STRUCTURAL_HEADS: ReadonlySet<string> = new Set([
+    'Sequence',
+    'Sum',
+    'Product',
+    'Function',
+    'Declare',
+    'Assign',
+    'Return',
+    'Break',
+    'Continue',
+    'Loop',
+    'If',
+    'Which',
+    'When',
+    'Block',
+    // Indexing-set wrappers consumed by Sum/Product/Loop — never compiled
+    // standalone.
+    'Limits',
+    'Element',
+  ]);
+
+  /**
+   * Analyze — without compiling, and never throwing — which external references
+   * the generated code for `expr` would have on `target`:
+   *
+   * - `freeSymbols`: identifiers the caller must supply at run time. These are
+   *   the free symbols *as codegen sees them*: symbols with no value in the
+   *   engine, after descending into the values of folded (assigned / constant)
+   *   symbols — so `a = b + 1` surfaces `b`, which `expr.unknowns` misses — and
+   *   after excluding bound variables (lambda parameters, indices of
+   *   `Sum`/`Product`/`Integrate`/`Loop`, `Block` locals). A `vars`-mapped
+   *   symbol is always included: the mapping makes it an external input even
+   *   when it also has an assigned value.
+   *
+   * - `unsupported`: operator heads with no operator/function mapping in the
+   *   target and not one of the structural forms above.
+   *
+   * Lets a caller validate that a compiled result is self-contained
+   * (`freeSymbols` covered by its inputs, `unsupported` empty) declaratively,
+   * instead of executing or GPU-compiling the code to discover a dangling
+   * reference or an unlowerable operator.
+   */
+  static analyzeReferences(
+    expr: Expression,
+    target: CompileTarget<Expression>,
+    varsKeys?: ReadonlySet<string>
+  ): { freeSymbols: string[]; unsupported: string[] } {
+    const engine = expr.engine;
+    const free = new Set<string>();
+    const unsupported = new Set<string>();
+    // Guard against a symbol whose value (transitively) references itself.
+    const foldedSeen = new Set<string>();
+
+    const union = (a: ReadonlySet<string>, more: string[]): Set<string> => {
+      const s = new Set(a);
+      for (const m of more) s.add(m);
+      return s;
+    };
+
+    const visit = (e: Expression, bound: ReadonlySet<string>): void => {
+      if (isSymbol(e)) {
+        const s = e.symbol;
+        if (bound.has(s)) return;
+        // An operator used as a value (e.g. compiling a bare `Add`) is lowered
+        // to a lambda, not a free input.
+        if (target.operators?.(s) !== undefined) return;
+        // A `vars`-mapped symbol is an external input the caller supplies; the
+        // mapping wins over folding.
+        if (varsKeys?.has(s)) {
+          free.add(s);
+          return;
+        }
+        // A symbol with a value (assigned, or a constant like `Pi`) is folded
+        // into the code; descend into the value to surface any transitively
+        // referenced free symbols.
+        const value = engine._getSymbolValue(s);
+        if (value !== undefined) {
+          if (!foldedSeen.has(s)) {
+            foldedSeen.add(s);
+            visit(value, bound);
+          }
+          return;
+        }
+        // No mapping, no value, not a constant: a genuinely free symbol.
+        free.add(s);
+        return;
+      }
+
+      if (!isFunction(e)) return; // numbers, strings: nothing to collect
+
+      // Capture `ops`/`h` up front: narrowing `e` with `isFunction(e, 'X')`
+      // below would otherwise strip `.ops` from `e` in the fall-through.
+      const h = e.operator;
+      const ops: ReadonlyArray<Expression> = e.ops;
+      if (
+        h !== 'Error' &&
+        !BaseCompiler.STRUCTURAL_HEADS.has(h) &&
+        target.functions?.(h) === undefined &&
+        target.operators?.(h) === undefined
+      )
+        unsupported.add(h);
+
+      // Binding forms: shadow their bound variables in the body, but visit the
+      // bound expressions (limits / collections) in the outer scope.
+      if (h === 'Function') {
+        const params = ops
+          .slice(1)
+          .filter((p) => isSymbol(p))
+          .map((p) => (p as Expression & { symbol: string }).symbol);
+        visit(ops[0], params.length ? union(bound, params) : bound);
+        return;
+      }
+      if (
+        h === 'Sum' ||
+        h === 'Product' ||
+        h === 'Integrate' ||
+        h === 'Loop'
+      ) {
+        const indices: string[] = [];
+        const limitExprs: Expression[] = [];
+        for (const clause of ops.slice(1)) {
+          if (isFunction(clause)) {
+            if (isSymbol(clause.ops[0])) indices.push(clause.ops[0].symbol);
+            for (const sub of clause.ops.slice(1)) limitExprs.push(sub);
+          } else {
+            limitExprs.push(clause);
+          }
+        }
+        visit(ops[0], indices.length ? union(bound, indices) : bound);
+        for (const le of limitExprs) visit(le, bound);
+        return;
+      }
+      if (h === 'Block') {
+        const locals: string[] = [];
+        for (const stmt of ops)
+          if (isFunction(stmt, 'Declare') && isSymbol(stmt.ops[0]))
+            locals.push(stmt.ops[0].symbol);
+        const inner = locals.length ? union(bound, locals) : bound;
+        for (const op of ops) visit(op, inner);
+        return;
+      }
+
+      for (const op of ops) visit(op, bound);
+    };
+
+    visit(expr, new Set());
+    return { freeSymbols: [...free], unsupported: [...unsupported] };
+  }
+
+  /**
+   * Attach `freeSymbols` / `unsupported` (from `analyzeReferences`) to a
+   * compilation result, returning the same object. Used by the built-in
+   * targets to make every result carry its declarative reference analysis.
+   */
+  static withReferences<R extends { freeSymbols?: string[]; unsupported?: string[] }>(
+    result: R,
+    expr: Expression,
+    target: CompileTarget<Expression>,
+    varsKeys?: ReadonlySet<string>
+  ): R {
+    return Object.assign(
+      result,
+      BaseCompiler.analyzeReferences(expr, target, varsKeys)
+    );
+  }
+
+  /**
    * Generate a temporary variable name
    */
   static tempVar(): string {

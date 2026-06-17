@@ -298,6 +298,47 @@ export type CompilationResult<
   code: string;
 
   /**
+   * Identifiers the generated `code` references that the caller must supply at
+   * run time (JS vars-object keys / GLSL uniforms) for the result to be
+   * self-contained.
+   *
+   * These are the expression's free symbols *as the generated code sees them*:
+   * symbols with no value in the engine, after assigned values and declared
+   * constants are folded in (so an assigned symbol is **not** listed — its
+   * value is inlined, matching `evaluate()`), and after bound variables (lambda
+   * parameters, `Sum`/`Product`/`Integrate`/`Loop` indices, `Block` locals) are
+   * excluded. A symbol supplied through the `vars` option is always listed —
+   * the mapping makes it an external input.
+   *
+   * Populated by the built-in targets on a successful compile. Use it instead
+   * of `expr.unknowns` when building a uniforms / vars mapping: unlike
+   * `unknowns`, it is guaranteed consistent with what the code actually
+   * references (including symbols reachable only through a folded value).
+   */
+  freeSymbols?: string[];
+
+  /**
+   * Operator heads in the expression that this target cannot lower — they have
+   * no operator or function mapping and are not one of the structural forms the
+   * compiler handles directly. An empty array means every operator was
+   * lowerable.
+   *
+   * On the built-in `LanguageTarget.compile` paths a genuinely unsupported
+   * operator throws (so the engine-level `compile()` can fall back to
+   * interpretation); this field lets a caller detect the condition
+   * **declaratively** — it is populated on the engine-level `compile()` result
+   * (including its `success: false` fallback) and on successful direct-target
+   * compiles (where it is `[]`).
+   */
+  unsupported?: string[];
+
+  /**
+   * When `success` is `false`, a human-readable reason the expression could not
+   * be compiled to the target (e.g. `Unknown operator \`SinIntegral\``).
+   */
+  error?: string;
+
+  /**
    * Library/helper code that must be included before the compiled `code`.
    *
    * For targets like `interval-js`, this contains the interval arithmetic

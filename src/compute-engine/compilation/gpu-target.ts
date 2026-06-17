@@ -3122,7 +3122,12 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     }
     if (preamble) result.preamble = preamble;
 
-    return result;
+    return BaseCompiler.withReferences(
+      result,
+      expr,
+      target,
+      vars ? new Set(Object.keys(vars)) : undefined
+    );
   }
 
   compileToSource(

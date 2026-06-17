@@ -719,3 +719,35 @@ describe('COMPILE Range with symbolic bounds (E1)', () => {
     expect(fn.run!()).toEqual([1, 2, 3, 4, 5]);
   });
 });
+
+// The antiderivative engine emits the exponential/trigonometric/logarithmic
+// integrals as closed forms (e.g. ∫ sin x / x dx = SinIntegral(x)). They must
+// be lowerable to JS so an "evaluate then compile" plotting pipeline can use
+// the closed form instead of falling back to numeric sampling.
+describe('COMPILE integral special functions (Si/Ci/Ei/li)', () => {
+  const cases: Array<[string, number]> = [
+    ['SinIntegral', 2],
+    ['CosIntegral', 2],
+    ['ExpIntegralEi', 1.5],
+    ['LogIntegral', 3],
+  ];
+
+  for (const [op, x] of cases) {
+    it(`${op} compiles to a _SYS helper and matches N()`, () => {
+      const result = compile(ce.box([op, 'x']))!;
+      expect(result.success).toBe(true);
+      expect(result.code).toContain('_SYS.');
+      const got = result.run!({ x }) as number;
+      const want = ce.box([op, x]).N().re;
+      expect(got).toBeCloseTo(want, 10);
+    });
+  }
+
+  it('lowers an evaluated ∫ sin x / x dx closed form', () => {
+    const closedForm = ce.parse('\\int \\frac{\\sin x}{x} dx').evaluate();
+    expect(closedForm.operator).toBe('SinIntegral');
+    const result = compile(closedForm)!;
+    expect(result.success).toBe(true);
+    expect(result.run!({ x: 2 })).toBeCloseTo(ce.box(['SinIntegral', 2]).N().re, 10);
+  });
+});

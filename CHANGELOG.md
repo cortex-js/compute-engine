@@ -37,6 +37,45 @@
   how other GPU-unsupported constructs are handled. The JavaScript target is
   unchanged (`Infinity` / `NaN` are valid there).
 
+- **The JavaScript compilation target now lowers the exponential,
+  trigonometric, and logarithmic integrals.** `SinIntegral` (Si),
+  `CosIntegral` (Ci), `ExpIntegralEi` (Ei), and `LogIntegral` (li) compile to
+  `_SYS` runtime helpers, matching the existing support for `Erf`, `FresnelS`,
+  `Gamma`, `BesselJ`, etc. These are the closed forms the antiderivative engine
+  emits (e.g. `∫ sin x / x dx = SinIntegral(x)`), so an "evaluate then compile"
+  pipeline — such as plotting `∫ f dx` from its closed form — no longer throws
+  `Unknown operator` and falls back to numeric sampling. (GLSL/WGSL shader
+  approximations of these are not yet provided.)
+
+### Improvements
+
+- **`compile()` results now report their external references.** A
+  `CompilationResult` carries two new fields so a caller can check that a result
+  is self-contained _declaratively_, instead of executing or GPU-compiling the
+  code to discover a dangling reference:
+
+  - `freeSymbols` — the identifiers the generated code references that the
+    caller must supply at run time (JS vars-object keys / GLSL uniforms). These
+    are the free symbols _as codegen sees them_: assigned values and constants
+    are folded out, bound variables (lambda parameters, `Sum`/`Product`/
+    `Integrate`/`Loop` indices, `Block` locals) are excluded, and `vars`-mapped
+    symbols are always included. Unlike `expr.unknowns`, it also surfaces a free
+    symbol reachable only through a folded value (e.g. `b` assigned `c + 1`
+    exposes `c`). Use it to build a uniforms / vars mapping that is guaranteed
+    consistent with the emitted code.
+  - `unsupported` — operator heads the target cannot lower (no operator/function
+    mapping, not a structural form). On a failed `compile()` this is populated
+    alongside a human-readable `error`, so an unlowerable operator (e.g.
+    `SinIntegral` on the GLSL target) surfaces as `success: false` with a
+    machine-readable list rather than only a thrown exception.
+
+  Built-in targets populate `freeSymbols` (and an empty `unsupported`) on every
+  successful compile. The direct `getCompilationTarget(name).compile(expr)` path
+  still throws on a genuinely unsupported operator (so the engine-level
+  `compile()` can fall back to interpretation); the `unsupported` / `error`
+  fields are how the engine-level `compile()` reports that condition without a
+  throw.
+
 ## 0.60.0 _2026-06-16_
 
 ### Behavior Changes

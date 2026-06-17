@@ -56,6 +56,10 @@ import {
   fresnelS,
   fresnelC,
   sinc,
+  sinIntegral,
+  cosIntegral,
+  expIntegralEi,
+  logIntegral,
 } from '../numerics/special-functions';
 import { choose } from '../boxed-expression/expand';
 import {
@@ -686,6 +690,14 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   AiryAi: '_SYS.airyAi',
   AiryBi: '_SYS.airyBi',
 
+  // Exponential / trigonometric / logarithmic integrals. These are the closed
+  // forms the antiderivative engine emits (e.g. ∫sin x/x dx = SinIntegral(x)),
+  // so an "evaluate then compile" pipeline must be able to lower them.
+  SinIntegral: '_SYS.sinIntegral',
+  CosIntegral: '_SYS.cosIntegral',
+  ExpIntegralEi: '_SYS.expIntegralEi',
+  LogIntegral: '_SYS.logIntegral',
+
   // Combinatorics
   Mandelbrot: ([c, maxIter], compile) => {
     if (c === null || maxIter === null)
@@ -1308,6 +1320,10 @@ const SYS_HELPERS = {
   sinc,
   fresnelS,
   fresnelC,
+  sinIntegral,
+  cosIntegral,
+  expIntegralEi,
+  logIntegral,
   mandelbrot: (c: number | { re: number; im: number }, maxIter: number) => {
     let zx = 0,
       zy = 0;
@@ -1562,7 +1578,13 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       preamble: (preamble ?? '') + preambleImports,
     });
 
-    return compileToTarget(expr, target, realOnly);
+    const result = compileToTarget(expr, target, realOnly);
+    return BaseCompiler.withReferences(
+      result,
+      expr,
+      target,
+      vars ? new Set(Object.keys(vars)) : undefined
+    );
   }
 }
 

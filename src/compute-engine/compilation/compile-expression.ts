@@ -53,11 +53,16 @@ export function compile<T extends string = 'javascript'>(
     if (options?.target) {
       // Direct target override - use BaseCompiler
       const code = BaseCompiler.compile(expr, options.target);
-      return {
-        target: (options.target.language ?? 'custom') as T,
-        success: true,
-        code,
-      } as CompilationResult<T>;
+      return BaseCompiler.withReferences(
+        {
+          target: (options.target.language ?? 'custom') as T,
+          success: true,
+          code,
+        } as CompilationResult<T>,
+        expr,
+        options.target,
+        options.vars ? new Set(Object.keys(options.vars)) : undefined
+      );
     }
 
     const targetName = (options?.to ?? 'javascript') as T;
@@ -84,11 +89,35 @@ export function compile<T extends string = 'javascript'>(
     }) as CompilationResult<T>;
   } catch (e) {
     if (options?.fallback ?? true) {
+      const error = (e as Error).message;
       console.warn(
-        `Compilation fallback for "${expr.operator}" (target: ${options?.to ?? 'javascript'}): ${(e as Error).message}`
+        `Compilation fallback for "${expr.operator}" (target: ${options?.to ?? 'javascript'}): ${error}`
       );
       const ce = expr.engine;
       const target = (options?.to ?? 'javascript') as T;
+
+      // Compute the declarative reference analysis so the (success: false)
+      // result still tells the caller *why* it could not be compiled —
+      // `unsupported` lists the unlowerable operators, `freeSymbols` the
+      // referenced inputs — without them having to parse `error`. Never let the
+      // analysis itself break the fallback.
+      let refs: { freeSymbols: string[]; unsupported: string[] } = {
+        freeSymbols: [],
+        unsupported: [],
+      };
+      try {
+        const compileTarget =
+          options?.target ??
+          expr.engine.getCompilationTarget(target as string)?.createTarget();
+        if (compileTarget)
+          refs = BaseCompiler.analyzeReferences(
+            expr,
+            compileTarget,
+            options?.vars ? new Set(Object.keys(options.vars)) : undefined
+          );
+      } catch {
+        /* keep the empty analysis */
+      }
 
       // A function literal (lambda) compiles to the 'lambda' calling
       // convention — `run(a, b, ...)` with positional arguments (see
@@ -107,6 +136,8 @@ export function compile<T extends string = 'javascript'>(
           code: '',
           calling: 'lambda',
           run: lambdaRun,
+          error,
+          ...refs,
         } as CompilationResult<T>;
       }
 
@@ -129,6 +160,8 @@ export function compile<T extends string = 'javascript'>(
         code: '',
         calling: 'expression',
         run: fallbackRun,
+        error,
+        ...refs,
       } as CompilationResult<T>;
     }
     throw e;

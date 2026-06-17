@@ -572,7 +572,13 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
       preamble: (preamble ?? '') + preambleImports,
     });
 
-    return compileToIntervalTarget(expr, target);
+    const result = compileToIntervalTarget(expr, target);
+    return BaseCompiler.withReferences(
+      result,
+      expr,
+      target,
+      vars ? new Set(Object.keys(vars)) : undefined
+    );
   }
 }
 
