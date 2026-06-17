@@ -1,0 +1,606 @@
+import type { Expression } from '../global-types';
+import type {
+  CompiledFunctions,
+  CompiledOperators,
+  CompileTarget,
+  CompilationOptions,
+  CompilationResult,
+} from './types';
+import { BaseCompiler } from './base-compiler';
+import { GLSLTarget } from './glsl-target';
+import { formatGPUNumber } from './gpu-target';
+import { isNumber, isSymbol } from '../boxed-expression/type-guards';
+
+/**
+ * `interval-glsl` — a GPU compilation target that evaluates an expression with
+ * **interval arithmetic** in a GLSL fragment shader. Each value is a `vec2`
+ * `(lo, hi)`; the shader computes the interval of `f` over a screen cell's box
+ * so the renderer can decide whether the curve `f = 0` can pass through it.
+ *
+ * Design contract (Phase 0, see `INTERVAL_GLSL_PLAN.md` §8–§9):
+ *
+ * - **Exclusion oracle only.** The GPU computes the per-cell interval of `f`;
+ *   curve extraction and discontinuity classification stay on the CPU
+ *   (`interval-js`). So no tagged union, no `singular`/`partial`, no comparison
+ *   ops on this target — just arithmetic and elementary functions.
+ * - **Representation:** `vec2 (lo, hi)`. `empty` (domain-undefined) is the
+ *   inverted interval `vec2(IV_INF, -IV_INF)` (`lo > hi`); the renderer's
+ *   exclusion predicate `lo > 0 || hi < 0` excludes it for free. `empty`
+ *   propagates **exactly** through every op via a branchless guard.
+ * - **Sentinel:** a *finite* `IV_INF = 1e18`, small enough that a single op's
+ *   worst intermediate (`IV_INF²` in `mul`/`square`) stays below `FLT_MAX`, and
+ *   finite so `0 · IV_INF = 0` rather than `0 · inf = NaN`. Every op clamps its
+ *   output to `[-IV_INF, IV_INF]`.
+ *
+ * Phase 1 covers arithmetic + integer powers (polynomials / rationals). Other
+ * heads are intentionally absent: they surface in `result.unsupported`, and a
+ * curve using one falls back to CPU `interval-js` with no trial-compile.
+ */
+
+const IV_INF = '1e18';
+
+/**
+ * GLSL preamble: the `_iv_*` interval-arithmetic library. Injected whole when
+ * the compiled code references any `_iv_` helper. (A later phase can split this
+ * per-marker like the `_gpu_*` blocks to keep shaders lean.)
+ */
+export const INTERVAL_GLSL_PREAMBLE = `
+const float IV_INF = ${IV_INF};
+const vec2 IV_ENTIRE = vec2(-IV_INF, IV_INF);
+const vec2 IV_EMPTY = vec2(IV_INF, -IV_INF);
+
+bool _iv_is_empty(vec2 a) { return a.x > a.y; }
+
+// Clamp bounds to the finite sentinel range. Preserves IV_EMPTY (its components
+// already sit at the sentinels) and folds any overflowed intermediate back to
+// the sentinel (min(inf, IV_INF) = IV_INF), so a real \`inf\` never escapes an op.
+vec2 _iv_clamp(vec2 a) { return clamp(a, -IV_INF, IV_INF); }
+
+// Exact empty propagation: force empty if any operand is empty.
+vec2 _iv_guard1(vec2 r, vec2 a) { return _iv_is_empty(a) ? IV_EMPTY : r; }
+vec2 _iv_guard2(vec2 r, vec2 a, vec2 b) {
+  return (_iv_is_empty(a) || _iv_is_empty(b)) ? IV_EMPTY : r;
+}
+
+vec2 _iv_negate(vec2 a) { return _iv_guard1(_iv_clamp(vec2(-a.y, -a.x)), a); }
+
+vec2 _iv_add(vec2 a, vec2 b) {
+  return _iv_guard2(_iv_clamp(vec2(a.x + b.x, a.y + b.y)), a, b);
+}
+
+vec2 _iv_sub(vec2 a, vec2 b) {
+  return _iv_guard2(_iv_clamp(vec2(a.x - b.y, a.y - b.x)), a, b);
+}
+
+vec2 _iv_mul(vec2 a, vec2 b) {
+  float p1 = a.x * b.x, p2 = a.x * b.y, p3 = a.y * b.x, p4 = a.y * b.y;
+  vec2 r = vec2(min(min(p1, p2), min(p3, p4)), max(max(p1, p2), max(p3, p4)));
+  return _iv_guard2(_iv_clamp(r), a, b);
+}
+
+vec2 _iv_div(vec2 a, vec2 b) {
+  // Denominator spanning 0 → entire (wide, never narrow): the CPU pass turns
+  // the pole into a proper asymptote break.
+  bool spansZero = (b.x <= 0.0 && b.y >= 0.0);
+  float q1 = a.x / b.x, q2 = a.x / b.y, q3 = a.y / b.x, q4 = a.y / b.y;
+  vec2 r = vec2(min(min(q1, q2), min(q3, q4)), max(max(q1, q2), max(q3, q4)));
+  r = spansZero ? IV_ENTIRE : r;
+  return _iv_guard2(_iv_clamp(r), a, b);
+}
+
+vec2 _iv_square(vec2 a) {
+  float lo2 = a.x * a.x, hi2 = a.y * a.y;
+  // Straddles 0 ⇒ min is 0; otherwise the smaller endpoint² is the min.
+  float lo = (a.x <= 0.0 && a.y >= 0.0) ? 0.0 : min(lo2, hi2);
+  return _iv_guard1(_iv_clamp(vec2(lo, max(lo2, hi2))), a);
+}
+
+// Scalar integer power that is correct for negative bases (GLSL \`pow\` requires
+// a non-negative base): keep the sign for odd exponents, drop it for even.
+float _iv_powi_scalar(float x, float n) {
+  float a = pow(abs(x), n);
+  return (mod(n, 2.0) == 1.0 && x < 0.0) ? -a : a;
+}
+
+vec2 _iv_powi(vec2 a, float n) {
+  float pl = _iv_powi_scalar(a.x, n);
+  float ph = _iv_powi_scalar(a.y, n);
+  bool even = (mod(n, 2.0) == 0.0);
+  bool straddle = (a.x <= 0.0 && a.y >= 0.0);
+  float lo = even ? (straddle ? 0.0 : min(pl, ph)) : pl;
+  float hi = even ? max(pl, ph) : ph;
+  return _iv_guard1(_iv_clamp(vec2(lo, hi)), a);
+}
+
+// ── Phase 2: elementary functions ──────────────────────────────────────────
+
+vec2 _iv_abs(vec2 a) {
+  float al = abs(a.x), ah = abs(a.y);
+  bool straddle = (a.x <= 0.0 && a.y >= 0.0);
+  return _iv_guard1(_iv_clamp(vec2(straddle ? 0.0 : min(al, ah), max(al, ah))), a);
+}
+
+// Domain x ≥ 0: fully-negative box → empty; a box straddling 0 clamps lo to 0.
+vec2 _iv_sqrt(vec2 a) {
+  vec2 r = vec2(sqrt(max(a.x, 0.0)), sqrt(max(a.y, 0.0)));
+  r = (a.y < 0.0) ? IV_EMPTY : r;
+  return _iv_guard1(_iv_clamp(r), a);
+}
+
+vec2 _iv_exp(vec2 a) {
+  return _iv_guard1(_iv_clamp(vec2(exp(a.x), exp(a.y))), a);
+}
+
+// Domain x > 0: fully-≤0 box → empty; straddling box → lo clamped to −IV_INF
+// (ln → −∞ as x → 0⁺, never a real −inf).
+vec2 _iv_ln(vec2 a) {
+  vec2 r = vec2(a.x > 0.0 ? log(a.x) : -IV_INF, log(a.y));
+  r = (a.y <= 0.0) ? IV_EMPTY : r;
+  return _iv_guard1(_iv_clamp(r), a);
+}
+
+const float _IV_INV_LN10 = 0.43429448190325176;
+const float _IV_INV_LN2 = 1.4426950408889634;
+
+vec2 _iv_log10(vec2 a) {
+  vec2 r = vec2(a.x > 0.0 ? log(a.x) * _IV_INV_LN10 : -IV_INF, log(a.y) * _IV_INV_LN10);
+  r = (a.y <= 0.0) ? IV_EMPTY : r;
+  return _iv_guard1(_iv_clamp(r), a);
+}
+
+vec2 _iv_log2(vec2 a) {
+  vec2 r = vec2(a.x > 0.0 ? log(a.x) * _IV_INV_LN2 : -IV_INF, log(a.y) * _IV_INV_LN2);
+  r = (a.y <= 0.0) ? IV_EMPTY : r;
+  return _iv_guard1(_iv_clamp(r), a);
+}
+
+// Non-integer power. Real only for base ≥ 0: fully-negative box → empty; a box
+// straddling 0 clamps the base low end to 0. \`p\` is a compile-time constant, so
+// the \`p >= 0\` test is a constant branch.
+vec2 _iv_powf(vec2 a, float p) {
+  float lob = max(a.x, 0.0);
+  float e0 = pow(lob, p), e1 = pow(a.y, p);
+  vec2 r = (p >= 0.0) ? vec2(e0, e1) : vec2(e1, e0);
+  r = (a.y < 0.0) ? IV_EMPTY : r;
+  return _iv_guard1(_iv_clamp(r), a);
+}
+
+// ── Phase 3: trigonometric & inverse-trigonometric functions ───────────────
+// Mirrors interval-js (interval/trigonometric.ts): exact endpoints with
+// extremum snapping (no outward epsilon). Per the Option-A contract, a tan pole
+// yields \`entire\` (interval-js returns \`singular\`; entire ⊇ singular and the
+// CPU classifies the asymptote).
+
+const float _IV_PI = 3.141592653589793;
+const float _IV_TWO_PI = 6.283185307179586;
+const float _IV_HALF_PI = 1.5707963267948966;
+const float _IV_THREE_HALF_PI = 4.71238898038469;
+
+// True if [a] contains an extremum of the family { ext + n·period }.
+bool _iv_has_ext(vec2 a, float ext, float period) {
+  float n = ceil((a.x - ext) / period);
+  float cand = ext + n * period;
+  return cand >= a.x - 1e-15 && cand <= a.y + 1e-15;
+}
+
+vec2 _iv_sin(vec2 a) {
+  vec2 r;
+  if (a.y - a.x >= _IV_TWO_PI) r = vec2(-1.0, 1.0);
+  else {
+    float sl = sin(a.x), sh = sin(a.y);
+    float lo = min(sl, sh), hi = max(sl, sh);
+    if (_iv_has_ext(a, _IV_HALF_PI, _IV_TWO_PI)) hi = 1.0;
+    if (_iv_has_ext(a, _IV_THREE_HALF_PI, _IV_TWO_PI)) lo = -1.0;
+    r = vec2(lo, hi);
+  }
+  return _iv_guard1(_iv_clamp(r), a);
+}
+
+vec2 _iv_cos(vec2 a) {
+  vec2 r;
+  if (a.y - a.x >= _IV_TWO_PI) r = vec2(-1.0, 1.0);
+  else {
+    float cl = cos(a.x), ch = cos(a.y);
+    float lo = min(cl, ch), hi = max(cl, ch);
+    if (_iv_has_ext(a, 0.0, _IV_TWO_PI)) hi = 1.0;
+    if (_iv_has_ext(a, _IV_PI, _IV_TWO_PI)) lo = -1.0;
+    r = vec2(lo, hi);
+  }
+  return _iv_guard1(_iv_clamp(r), a);
+}
+
+vec2 _iv_tan(vec2 a) {
+  // A pole in the interval → entire (cannot exclude).
+  bool pole =
+    (a.y - a.x >= _IV_PI) || _iv_has_ext(a, _IV_HALF_PI, _IV_PI);
+  float tl = tan(a.x), th = tan(a.y);
+  // Floating-point branch-cross sanity (large opposite-sign endpoints).
+  bool crossed = (tl > 1e10 && th < -1e10) || (tl < -1e10 && th > 1e10);
+  vec2 r = (pole || crossed) ? IV_ENTIRE : vec2(tl, th);
+  return _iv_guard1(_iv_clamp(r), a);
+}
+
+// asin: domain [−1, 1]. Fully outside → empty; straddling clamps to the valid
+// sub-range. Monotonic increasing.
+vec2 _iv_asin(vec2 a) {
+  vec2 r = vec2(asin(max(a.x, -1.0)), asin(min(a.y, 1.0)));
+  r = (a.x > 1.0 || a.y < -1.0) ? IV_EMPTY : r;
+  return _iv_guard1(_iv_clamp(r), a);
+}
+
+// acos: domain [−1, 1], monotonic decreasing (bounds swap).
+vec2 _iv_acos(vec2 a) {
+  vec2 r = vec2(acos(min(a.y, 1.0)), acos(max(a.x, -1.0)));
+  r = (a.x > 1.0 || a.y < -1.0) ? IV_EMPTY : r;
+  return _iv_guard1(_iv_clamp(r), a);
+}
+
+vec2 _iv_atan(vec2 a) {
+  return _iv_guard1(_iv_clamp(vec2(atan(a.x), atan(a.y))), a);
+}
+
+// ── Discontinuous / step functions ─────────────────────────────────────────
+// Bounded jump-discontinuity functions return the TIGHT value-range enclosure
+// (sound, and excludable when the range misses 0) rather than \`entire\` — only
+// genuine poles are entire. Per the Option-A division of labor, the CPU still
+// classifies the discontinuity on the (kept) live cells; the GPU only needs a
+// sound bound for the exclusion test. These functions are monotone, so the
+// enclosure is just [f(lo), f(hi)] unless noted.
+
+vec2 _iv_floor(vec2 a) { return _iv_guard1(_iv_clamp(vec2(floor(a.x), floor(a.y))), a); }
+vec2 _iv_ceil(vec2 a) { return _iv_guard1(_iv_clamp(vec2(ceil(a.x), ceil(a.y))), a); }
+vec2 _iv_round(vec2 a) { return _iv_guard1(_iv_clamp(vec2(floor(a.x + 0.5), floor(a.y + 0.5))), a); }
+vec2 _iv_trunc(vec2 a) { return _iv_guard1(_iv_clamp(vec2(trunc(a.x), trunc(a.y))), a); }
+vec2 _iv_sign(vec2 a) { return _iv_guard1(vec2(sign(a.x), sign(a.y)), a); }
+
+vec2 _iv_heaviside(vec2 a) {
+  float hl = a.x < 0.0 ? 0.0 : (a.x > 0.0 ? 1.0 : 0.5);
+  float hh = a.y < 0.0 ? 0.0 : (a.y > 0.0 ? 1.0 : 0.5);
+  return _iv_guard1(vec2(hl, hh), a);
+}
+
+// fract(x) = x − floor(x): continuous within an integer cell, sawtooth across
+// one (→ full [0, 1] range).
+vec2 _iv_fract(vec2 a) {
+  float fl = floor(a.x);
+  vec2 r = (fl == floor(a.y)) ? vec2(a.x - fl, a.y - fl) : vec2(0.0, 1.0);
+  return _iv_guard1(_iv_clamp(r), a);
+}
+
+vec2 _iv_min(vec2 a, vec2 b) {
+  return _iv_guard2(_iv_clamp(vec2(min(a.x, b.x), min(a.y, b.y))), a, b);
+}
+vec2 _iv_max(vec2 a, vec2 b) {
+  return _iv_guard2(_iv_clamp(vec2(max(a.x, b.x), max(a.y, b.y))), a, b);
+}
+
+// mod(x, y) = x − y·floor(x/y). A modulus straddling 0 is a pole → entire. For
+// a constant (point) modulus the fast path is exact; otherwise compose (the
+// tight floor keeps it sound).
+vec2 _iv_mod(vec2 a, vec2 b) {
+  if (b.x <= 0.0 && b.y >= 0.0) return _iv_guard2(IV_ENTIRE, a, b);
+  if (b.x == b.y) {
+    float p = abs(b.x);
+    float flo = floor(a.x / p);
+    vec2 r = (flo == floor(a.y / p)) ? vec2(a.x - p * flo, a.y - p * flo)
+                                     : vec2(0.0, p);
+    return _iv_guard2(_iv_clamp(r), a, b);
+  }
+  return _iv_sub(a, _iv_mul(b, _iv_floor(_iv_div(a, b))));
+}
+`;
+
+/**
+ * Operator/function heads → `_iv_*` calls. Arithmetic routes through functions
+ * (never native infix), exactly like the `interval-js` target.
+ */
+const INTERVAL_GLSL_FUNCTIONS: CompiledFunctions<Expression> = {
+  Add: (args, compile) => {
+    if (args.length === 0) return 'vec2(0.0, 0.0)';
+    let r = compile(args[0]);
+    for (let i = 1; i < args.length; i++)
+      r = `_iv_add(${r}, ${compile(args[i])})`;
+    return r;
+  },
+  Subtract: ([a, b], compile) => {
+    if (a === null || b === null) throw new Error('Subtract: missing argument');
+    return `_iv_sub(${compile(a)}, ${compile(b)})`;
+  },
+  Multiply: (args, compile) => {
+    if (args.length === 0) return 'vec2(1.0, 1.0)';
+    let r = compile(args[0]);
+    for (let i = 1; i < args.length; i++)
+      r = `_iv_mul(${r}, ${compile(args[i])})`;
+    return r;
+  },
+  Divide: ([a, b], compile) => {
+    if (a === null || b === null) throw new Error('Divide: missing argument');
+    return `_iv_div(${compile(a)}, ${compile(b)})`;
+  },
+  Negate: ([a], compile) => {
+    if (a === null) throw new Error('Negate: no argument');
+    return `_iv_negate(${compile(a)})`;
+  },
+  Square: ([a], compile) => {
+    if (a === null) throw new Error('Square: no argument');
+    return `_iv_square(${compile(a)})`;
+  },
+  Sqrt: ([a], compile) => {
+    if (a === null) throw new Error('Sqrt: no argument');
+    return `_iv_sqrt(${compile(a)})`;
+  },
+  Abs: ([a], compile) => {
+    if (a === null) throw new Error('Abs: no argument');
+    return `_iv_abs(${compile(a)})`;
+  },
+  Exp: ([a], compile) => {
+    if (a === null) throw new Error('Exp: no argument');
+    return `_iv_exp(${compile(a)})`;
+  },
+  Ln: ([a], compile) => {
+    if (a === null) throw new Error('Ln: no argument');
+    return `_iv_ln(${compile(a)})`;
+  },
+  Log: (args, compile) => {
+    if (args.length === 1) return `_iv_log10(${compile(args[0])})`;
+    // Log(x, b) = log_b(x) = ln(x) / ln(b)
+    return `_iv_div(_iv_ln(${compile(args[0])}), _iv_ln(${compile(args[1])}))`;
+  },
+  Lb: ([a], compile) => {
+    if (a === null) throw new Error('Lb: no argument');
+    return `_iv_log2(${compile(a)})`;
+  },
+  Sin: ([a], compile) => {
+    if (a === null) throw new Error('Sin: no argument');
+    return `_iv_sin(${compile(a)})`;
+  },
+  Cos: ([a], compile) => {
+    if (a === null) throw new Error('Cos: no argument');
+    return `_iv_cos(${compile(a)})`;
+  },
+  Tan: ([a], compile) => {
+    if (a === null) throw new Error('Tan: no argument');
+    return `_iv_tan(${compile(a)})`;
+  },
+  Arcsin: ([a], compile) => {
+    if (a === null) throw new Error('Arcsin: no argument');
+    return `_iv_asin(${compile(a)})`;
+  },
+  Arccos: ([a], compile) => {
+    if (a === null) throw new Error('Arccos: no argument');
+    return `_iv_acos(${compile(a)})`;
+  },
+  Arctan: ([a], compile) => {
+    if (a === null) throw new Error('Arctan: no argument');
+    return `_iv_atan(${compile(a)})`;
+  },
+  Floor: ([a], compile) => {
+    if (a === null) throw new Error('Floor: no argument');
+    return `_iv_floor(${compile(a)})`;
+  },
+  Ceil: ([a], compile) => {
+    if (a === null) throw new Error('Ceil: no argument');
+    return `_iv_ceil(${compile(a)})`;
+  },
+  Round: ([a], compile) => {
+    if (a === null) throw new Error('Round: no argument');
+    return `_iv_round(${compile(a)})`;
+  },
+  Truncate: ([a], compile) => {
+    if (a === null) throw new Error('Truncate: no argument');
+    return `_iv_trunc(${compile(a)})`;
+  },
+  Fract: ([a], compile) => {
+    if (a === null) throw new Error('Fract: no argument');
+    return `_iv_fract(${compile(a)})`;
+  },
+  Sign: ([a], compile) => {
+    if (a === null) throw new Error('Sign: no argument');
+    return `_iv_sign(${compile(a)})`;
+  },
+  Heaviside: ([a], compile) => {
+    if (a === null) throw new Error('Heaviside: no argument');
+    return `_iv_heaviside(${compile(a)})`;
+  },
+  Mod: ([a, b], compile) => {
+    if (a === null || b === null) throw new Error('Mod: missing argument');
+    return `_iv_mod(${compile(a)}, ${compile(b)})`;
+  },
+  Min: (args, compile) => {
+    if (args.length === 0) throw new Error('Min: no argument');
+    let r = compile(args[0]);
+    for (let i = 1; i < args.length; i++)
+      r = `_iv_min(${r}, ${compile(args[i])})`;
+    return r;
+  },
+  Max: (args, compile) => {
+    if (args.length === 0) throw new Error('Max: no argument');
+    let r = compile(args[0]);
+    for (let i = 1; i < args.length; i++)
+      r = `_iv_max(${r}, ${compile(args[i])})`;
+    return r;
+  },
+  Power: ([base, exp], compile) => {
+    if (base === null || exp === null) throw new Error('Power: missing argument');
+    // e^x
+    if (isSymbol(base, 'ExponentialE')) return `_iv_exp(${compile(exp)})`;
+    if (isNumber(exp) && exp.im === 0) {
+      const v = exp.re;
+      if (v === 0.5) return `_iv_sqrt(${compile(base)})`;
+      if (v === 2) return `_iv_square(${compile(base)})`;
+      // Tight integer power (even/odd handled in _iv_powi).
+      if (Number.isInteger(v) && v >= 0)
+        return `_iv_powi(${compile(base)}, ${formatGPUNumber(v)})`;
+      // Positive non-integer (rational) power: real only for base ≥ 0.
+      if (!Number.isInteger(v) && v > 0)
+        return `_iv_powf(${compile(base)}, ${formatGPUNumber(v)})`;
+      // Negative exponents (reciprocal powers) are deferred → `unsupported`
+      // → CPU `interval-js` fallback. (Reciprocals via `Divide` are supported.)
+      throw new Error(
+        `interval-glsl: Power with exponent \`${exp.toString()}\` is not yet supported`
+      );
+    }
+    throw new Error(
+      'interval-glsl: Power with a variable exponent is not yet supported'
+    );
+  },
+};
+
+/** Mathematical constants as point intervals. */
+const INTERVAL_GLSL_CONSTANTS: Record<string, string> = {
+  Pi: 'vec2(3.14159265359, 3.14159265359)',
+  ExponentialE: 'vec2(2.71828182846, 2.71828182846)',
+  GoldenRatio: 'vec2(1.61803398875, 1.61803398875)',
+  CatalanConstant: 'vec2(0.91596559417, 0.91596559417)',
+  EulerGamma: 'vec2(0.57721566490, 0.57721566490)',
+};
+
+/**
+ * GLSL interval-arithmetic compilation target. Reuses `GLSLTarget`'s shader
+ * assembly; swaps in the interval function table, the `vec2` point-interval
+ * number/var hooks, and the `_iv_*` preamble.
+ */
+export class IntervalGLSLTarget extends GLSLTarget {
+  protected readonly languageId = 'interval-glsl';
+
+  getOperators(): CompiledOperators {
+    return {}; // arithmetic routes through functions, never native infix
+  }
+
+  getFunctions(): CompiledFunctions<Expression> {
+    return INTERVAL_GLSL_FUNCTIONS;
+  }
+
+  getConstants(): Record<string, string> {
+    return INTERVAL_GLSL_CONSTANTS;
+  }
+
+  createTarget(
+    options: Partial<CompileTarget<Expression>> = {}
+  ): CompileTarget<Expression> {
+    return super.createTarget({
+      operators: () => undefined,
+      functions: (id) => INTERVAL_GLSL_FUNCTIONS[id],
+      number: (n) => `vec2(${formatGPUNumber(n)}, ${formatGPUNumber(n)})`,
+      complex: () => {
+        throw new Error('interval-glsl: complex values are not supported');
+      },
+      var: (id) => INTERVAL_GLSL_CONSTANTS[id],
+      ...options,
+    });
+  }
+
+  compile(
+    expr: Expression,
+    options: CompilationOptions<Expression> = {}
+  ): CompilationResult {
+    const { vars } = options;
+
+    const target = this.createTarget({
+      var: (id) => {
+        if (vars && id in vars) return vars[id] as string;
+        if (id in INTERVAL_GLSL_CONSTANTS) return INTERVAL_GLSL_CONSTANTS[id];
+        // Assigned value (folded by BaseCompiler) or a genuinely free symbol
+        // (a bare `vec2` uniform the caller supplies as the cell's box).
+        return undefined;
+      },
+    });
+
+    const code = BaseCompiler.compile(expr, target);
+    const result: CompilationResult = {
+      target: 'interval-glsl',
+      success: true,
+      code,
+    };
+    if (code.includes('_iv_')) result.preamble = INTERVAL_GLSL_PREAMBLE;
+
+    return BaseCompiler.withReferences(
+      result,
+      expr,
+      target,
+      vars ? new Set(Object.keys(vars)) : undefined
+    );
+  }
+
+  /**
+   * Emit a complete, self-contained GLSL fragment shader implementing the
+   * **interval exclusion oracle** for the implicit curve `f = 0` (Phase 4).
+   *
+   * The shader is structured so the core contract — the interval evaluator —
+   * is cleanly separable from the render harness:
+   *
+   * - `vec2 _implicit(<vec2 per free variable>)` evaluates the interval of `f`
+   *   over a cell box (this is the part that matters; it is identical to
+   *   `compile(expr).code` wrapped in a function).
+   * - `main()` is a **reference harness**: it derives each fragment's cell box
+   *   from `gl_FragCoord` and the viewport uniforms, evaluates `_implicit`, and
+   *   writes the exclusion result. The renderer is free to replace `main()` /
+   *   the uniforms with its own conventions and keep `_implicit`.
+   *
+   * The first free variable maps to `u_domainX`, the second to `u_domainY`
+   * (≤ 2 free variables; a 2D implicit curve). The exclusion predicate is
+   * `f.lo > 0 || f.hi < 0` — which also excludes the `empty` (domain-undefined)
+   * interval, since its `lo` is the `+IV_INF` sentinel.
+   *
+   * @throws if the expression has more than two free variables, or cannot be
+   * lowered (an unsupported head propagates from `BaseCompiler.compile`).
+   */
+  compileExclusionShader(
+    expr: Expression,
+    options: { version?: string; precision?: string } = {}
+  ): string {
+    const { version = '300 es', precision = 'highp' } = options;
+    const compiled = this.compile(expr);
+    const vars = compiled.freeSymbols ?? [];
+    if (vars.length > 2)
+      throw new Error(
+        `interval-glsl exclusion shader supports at most 2 free variables ` +
+          `(got ${vars.length}: ${vars.join(', ')})`
+      );
+
+    const params = vars.map((v) => `vec2 ${v}`).join(', ');
+    const [axisX, axisY] = vars;
+
+    const main: string[] = ['void main() {'];
+    main.push('  vec2 _cell = gl_FragCoord.xy / u_resolution;');
+    main.push('  vec2 _step = 1.0 / u_resolution;');
+    const callArgs: string[] = [];
+    if (axisX !== undefined) {
+      main.push('  float _xlo = mix(u_domainX.x, u_domainX.y, _cell.x);');
+      main.push('  float _xhi = mix(u_domainX.x, u_domainX.y, _cell.x + _step.x);');
+      callArgs.push('vec2(_xlo, _xhi)');
+    }
+    if (axisY !== undefined) {
+      main.push('  float _ylo = mix(u_domainY.x, u_domainY.y, _cell.y);');
+      main.push('  float _yhi = mix(u_domainY.x, u_domainY.y, _cell.y + _step.y);');
+      callArgs.push('vec2(_ylo, _yhi)');
+    }
+    main.push(`  vec2 _f = _implicit(${callArgs.join(', ')});`);
+    // lo > 0 || hi < 0  ⇒  the curve cannot pass through this cell (also
+    // excludes `empty`, whose lo is +IV_INF). Live cells are kept (white).
+    main.push('  bool _excluded = (_f.x > 0.0 || _f.y < 0.0);');
+    main.push('  fragColor = _excluded ? vec4(0.0, 0.0, 0.0, 1.0) : vec4(1.0);');
+    main.push('}');
+
+    return [
+      `#version ${version}`,
+      `precision ${precision} float;`,
+      '',
+      INTERVAL_GLSL_PREAMBLE.trim(),
+      '',
+      'uniform vec2 u_domainX;    // [min, max] for the 1st free variable',
+      'uniform vec2 u_domainY;    // [min, max] for the 2nd free variable',
+      'uniform vec2 u_resolution; // render target size, in pixels',
+      '',
+      'out vec4 fragColor;',
+      '',
+      '// Interval evaluation of the implicit field f over a cell box.',
+      `vec2 _implicit(${params}) {`,
+      `  return ${compiled.code};`,
+      '}',
+      '',
+      main.join('\n'),
+      '',
+    ].join('\n');
+  }
+}

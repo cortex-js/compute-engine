@@ -2899,7 +2899,7 @@ const GPU_CONSTANTS: Record<string, string> = {
  *
  * Both GLSL and WGSL require float literals to have a decimal point.
  */
-function formatGPUNumber(n: number): string {
+export function formatGPUNumber(n: number): string {
   // GLSL and WGSL have no infinity or NaN literals (WGSL forbids them in
   // const-expressions outright). Emitting `Infinity.0` / `NaN.0` produces a
   // shader that silently fails to compile on the GPU, so reject it here — the

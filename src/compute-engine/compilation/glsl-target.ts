@@ -46,7 +46,9 @@ const GLSL_FUNCTIONS: CompiledFunctions<Expression> = {
  * C-style function declarations, and `#version`-based shader structure.
  */
 export class GLSLTarget extends GPUShaderTarget {
-  protected readonly languageId = 'glsl';
+  // Annotated `string` (not the literal `'glsl'`) so subclasses such as
+  // `IntervalGLSLTarget` can override it while reusing the GLSL shader assembly.
+  protected readonly languageId: string = 'glsl';
 
   protected getLanguageSpecificFunctions(): CompiledFunctions<Expression> {
     return GLSL_FUNCTIONS;

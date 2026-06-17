@@ -9,6 +9,7 @@ import { JavaScriptTarget } from './compilation/javascript-target';
 import { GLSLTarget } from './compilation/glsl-target';
 import { WGSLTarget } from './compilation/wgsl-target';
 import { IntervalJavaScriptTarget } from './compilation/interval-javascript-target';
+import { IntervalGLSLTarget } from './compilation/interval-glsl-target';
 
 /**
  * Internal registry for compilation targets.
@@ -43,5 +44,6 @@ export class CompilationTargetRegistry {
     this.register('glsl', new GLSLTarget());
     this.register('wgsl', new WGSLTarget());
     this.register('interval-js', new IntervalJavaScriptTarget());
+    this.register('interval-glsl', new IntervalGLSLTarget());
   }
 }

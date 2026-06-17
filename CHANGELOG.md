@@ -1,25 +1,58 @@
 ## [Unreleased]
 
+### New Features
+
+- **`interval-glsl` compilation target (preview).** A GPU compilation target
+  that evaluates an expression with **interval arithmetic** in GLSL — each value
+  is a `vec2 (lo, hi)` — so a robust implicit-curve renderer can run its
+  per-cell exclusion test (`lo > 0 || hi < 0`) on the GPU instead of CPU-side
+  via `interval-js`. (Reinstates the `interval-glsl` target removed in 0.52,
+  with a simpler `vec2`-only representation — the GPU acts as an exclusion
+  oracle and the CPU keeps curve extraction — instead of the former status-flag
+  struct.) `compile(expr, { to: 'interval-glsl' })` emits `_iv_*` helper calls
+  plus a preamble library. Coverage: arithmetic, integer and positive rational
+  powers, `Abs`, `Sqrt`, `Exp`, `Ln`/`Log`/`Lb`, trigonometry / inverse
+  trigonometry (`Sin`, `Cos`, `Tan`, `Arcsin`, `Arccos`, `Arctan`, with interval
+  range reduction), and the step / rounding family (`Floor`, `Ceil`, `Round`,
+  `Truncate`, `Fract`, `Sign`, `Heaviside`, `Mod`, `Min`, `Max`) — covering
+  polynomial, rational, algebraic, trigonometric, and lattice/periodic implicit
+  curves (conics, lemniscate, astroid, superellipse, trig lattices, floor/mod
+  grids, …). Jump-discontinuity functions return a tight, sound value-range
+  enclosure (so cells can still be excluded), with discontinuity classification
+  left to the CPU; only genuine poles widen to the full range. A head that is
+  not yet supported (e.g. hyperbolic functions) is reported in the result's
+  `unsupported` field, so a caller can fall back to another target
+  per-expression. Values use a finite ±∞ sentinel and a `lo > hi` encoding for
+  the empty (domain-undefined) interval, propagated through every operation;
+  domain-restricted functions (`sqrt`/`ln`/`asin`/rational `pow` of an
+  out-of-domain argument) yield `empty`, and a pole (zero-spanning denominator,
+  `tan` asymptote) yields the full range. Parity with the `interval-js` target
+  is verified against a shared corpus.
+  `IntervalGLSLTarget.compileExclusionShader()` emits a complete, self-contained
+  fragment shader (preamble + an `_implicit` interval evaluator + a reference
+  `main` that derives each fragment's cell box and applies the exclusion test)
+  ready to drop into a WebGL2 renderer.
+
 ### Resolved Issues
 
 - **A function parameter now shadows a same-named constant.** A parameter named
   like a constant (`i`, `e`, `Pi`/`\pi`, …) was rewritten to the constant while
-  the function body was canonicalized, so the binding was lost — `λi. 2i` applied
-  to `5` returned `2i` (the imaginary unit doubled) instead of `10`. Parameters
-  now shadow whatever their name means in the enclosing scope — a constant, an
-  assigned variable, or nothing — which is standard lexical scoping. A free
-  symbol that is *not* a parameter is unchanged (`i` outside a parameter is still
-  the imaginary unit), and closure capture is preserved (`λi. λz. (z + i)`
-  captures `i` correctly).
+  the function body was canonicalized, so the binding was lost — `λi. 2i`
+  applied to `5` returned `2i` (the imaginary unit doubled) instead of `10`.
+  Parameters now shadow whatever their name means in the enclosing scope — a
+  constant, an assigned variable, or nothing — which is standard lexical
+  scoping. A free symbol that is _not_ a parameter is unchanged (`i` outside a
+  parameter is still the imaginary unit), and closure capture is preserved
+  (`λi. λz. (z + i)` captures `i` correctly).
 
 - **`compile()` no longer emits a dangling reference to a symbol that has an
   assigned value (GLSL, WGSL, JavaScript, and interval-JS targets).** When an
   expression referenced a symbol with an assigned value in the engine
   (`ce.assign("a", 1.5)`), `compile()` emitted a bare `a` — an undeclared GLSL
   identifier (a shader that silently fails to compile) or a bare JS global (a
-  `ReferenceError` when the compiled function is called) — even though the symbol
-  is omitted from `expr.unknowns` and folded by `evaluate()`. The value is now
-  folded into the generated code (`sin(a·x)` → `sin(1.5 * x)`), making
+  `ReferenceError` when the compiled function is called) — even though the
+  symbol is omitted from `expr.unknowns` and folded by `evaluate()`. The value
+  is now folded into the generated code (`sin(a·x)` → `sin(1.5 * x)`), making
   `compile()`, `evaluate()`, and `unknowns` consistent. This also folds
   user-declared constants (`ce.declare("c", { value: 3 })`), and applies on the
   direct-target `compile(expr, { target })` path as well. A symbol supplied
@@ -50,12 +83,12 @@
   how other GPU-unsupported constructs are handled. The JavaScript target is
   unchanged (`Infinity` / `NaN` are valid there).
 
-- **The JavaScript compilation target now lowers the exponential,
-  trigonometric, and logarithmic integrals.** `SinIntegral` (Si),
-  `CosIntegral` (Ci), `ExpIntegralEi` (Ei), and `LogIntegral` (li) compile to
-  `_SYS` runtime helpers, matching the existing support for `Erf`, `FresnelS`,
-  `Gamma`, `BesselJ`, etc. These are the closed forms the antiderivative engine
-  emits (e.g. `∫ sin x / x dx = SinIntegral(x)`), so an "evaluate then compile"
+- **The JavaScript compilation target now lowers the exponential, trigonometric,
+  and logarithmic integrals.** `SinIntegral` (Si), `CosIntegral` (Ci),
+  `ExpIntegralEi` (Ei), and `LogIntegral` (li) compile to `_SYS` runtime
+  helpers, matching the existing support for `Erf`, `FresnelS`, `Gamma`,
+  `BesselJ`, etc. These are the closed forms the antiderivative engine emits
+  (e.g. `∫ sin x / x dx = SinIntegral(x)`), so an "evaluate then compile"
   pipeline — such as plotting `∫ f dx` from its closed form — no longer throws
   `Unknown operator` and falls back to numeric sampling. (GLSL/WGSL shader
   approximations of these are not yet provided.)
