@@ -16,23 +16,28 @@
   margin for the GLSL ES built-ins that are not correctly rounded — 8 ulp for
   `/`, `Sqrt`, `Exp`/`Ln`/`Log`, and inverse trigonometry, and 32 ulp for
   `Power` (`x^n` with `n ≥ 3`, and fractional powers such as the astroid
-  `x^{2/3}`). Crucially, the cell box passed to the `compileExclusionShader`
-  `_implicit` evaluator is itself outward-rounded: the float32 `mix` that builds
-  it rounds to nearest and is the actual source of the grazing miss, which
-  per-op widening alone cannot fix (with exact endpoints the op chain is exact).
-  Widening only ever moves a bound outward, so it cannot break soundness; the
-  `empty` (`lo > hi`) / `entire` (`±IV_INF`) encodings, the finite `IV_INF`
-  sentinel, the per-op clamp, and exact empty-propagation are all preserved.
-  `Sin`/`Cos` remain best-effort (see below).
+  `x^{2/3}`). Crucially, the cell box that `compileExclusionShader`'s `main()`
+  builds is itself outward-rounded (via the new `_iv_widen_box`): the float32
+  `mix` that constructs it rounds to nearest and is the actual source of the
+  grazing miss, which per-op widening alone cannot fix (with exact endpoints the
+  op chain is exact). That box pad is scaled to the **domain extent**, not the
+  edge value, since that is what bounds the `mix` error — a value-relative pad
+  would vanish for a box edge near 0 in a wide domain. Widening only ever moves a
+  bound outward, so it cannot break soundness; the `empty` (`lo > hi`) / `entire`
+  (`±IV_INF`) encodings, the finite `IV_INF` sentinel, the per-op clamp, and
+  exact empty-propagation are all preserved. `Sin`/`Cos` remain best-effort (see
+  below).
 
 ### New Features
 
 - **`interval-glsl`: public outward-rounding helpers and an opt-in absolute trig
   pad (preview).** The widen helpers `_iv_widen` / `_iv_widen_t` /
-  `_iv_widen_pow` / `_iv_widen_sc`, and their epsilons `IV_EPS` / `IV_EPS_FN` /
-  `IV_EPS_POW`, are a stable, public part of the emitted preamble: a renderer
-  that builds its own cell box (instead of using `compileExclusionShader`) can
-  outward-round it by calling `_iv_widen_t(vec2(lo, hi))` on each axis. The
+  `_iv_widen_pow` / `_iv_widen_sc` / `_iv_widen_box`, and their epsilons
+  `IV_EPS` / `IV_EPS_FN` / `IV_EPS_POW` / `IV_BOX_EPS`, are a stable, public part
+  of the emitted preamble: a renderer that builds its own cell box (instead of
+  using `compileExclusionShader`) outward-rounds it by calling
+  `_iv_widen_box(vec2(lo, hi), extent)` per axis, where `extent` is the domain
+  extent for that axis (the box pad is domain-scaled, not value-relative). The
   preamble is now emitted for any expression with free variables (not only ones
   that reference an `_iv_*` op), so those helpers are always available — e.g.
   for an axis line `f = x`. GLSL ES `Sin`/`Cos` carry an _absolute_,

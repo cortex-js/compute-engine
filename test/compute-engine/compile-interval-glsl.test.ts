@@ -321,14 +321,13 @@ describe('COMPILE interval-glsl — exclusion shader (Phase 4)', () => {
     expect(shader).toContain('uniform vec2 u_resolution;');
     expect(shader).toContain('out vec4 fragColor;');
     expect(shader).toContain('void main()');
-    // The evaluator is the compiled interval code, with its inputs
-    // outward-rounded at entry (float32 cell-box soundness, §13).
+    // The evaluator is exactly the compiled interval code; the cell box is
+    // outward-rounded by main() via _iv_widen_box (float32 soundness, §13).
     expect(shader).toContain(
-      `vec2 _implicit(vec2 x, vec2 y) {\n` +
-        `  x = _iv_widen_t(x);\n` +
-        `  y = _iv_widen_t(y);\n` +
-        `  return ${iv.compile(expr).code};`
+      `vec2 _implicit(vec2 x, vec2 y) {\n  return ${iv.compile(expr).code};`
     );
+    expect(shader).toContain('_iv_widen_box(vec2(_xlo, _xhi), _xext)');
+    expect(shader).toContain('float _xext = max(abs(u_domainX.x), abs(u_domainX.y));');
     // Exclusion predicate (also rejects `empty`, whose lo is +IV_INF).
     expect(shader).toContain('_f.x > 0.0 || _f.y < 0.0');
     // Balanced delimiters (cheap syntactic sanity).
@@ -379,63 +378,84 @@ describe('COMPILE interval-glsl — exclusion shader (Phase 4)', () => {
 // an un-widened float32 oracle drops it (`interval-glsl ⊉ interval-js`).
 //
 // The shared JS port runs in float64 and cannot reproduce this, so we model the
-// shader in float32 here (Math.fround) for the exact Tycho repro: the unit
-// circle's tangent corner (1,0). Outward rounding — leaf `_iv_widen_t` on the
-// input box (as `_implicit` now does) plus per-op `_iv_widen` — restores
-// `lo ≤ 0`. The production GLSL path is covered end-to-end by Tycho's on-GPU
-// parity harness.
+// shader in float32 here (Math.fround). Two fixes combine: per-op `_iv_widen`
+// (value-relative — each op's error scales with its result), and the cell-box
+// pad `_iv_widen_box`, scaled to the DOMAIN EXTENT (not the edge value), because
+// the `mix` construction error is ~ulp(extent). The production GLSL path is
+// covered end-to-end by Tycho's on-GPU parity harness.
 // ---------------------------------------------------------------------------
 describe('COMPILE interval-glsl — float32 grazing soundness (§13)', () => {
   const fr = Math.fround;
   const ULP = 2 ** -23; // float32 machine epsilon
   type F = [number, number];
-  // float32 outward-widen, mirroring _iv_widen (1 ulp) and _iv_widen_t (8 ulp).
+  // per-op pad (mirrors _iv_widen, 1 ulp, value-relative — correct for ops).
   const wd = (lo: number, hi: number): F => [
     fr(lo - fr(Math.abs(lo) * ULP + 1e-30)),
     fr(hi + fr(Math.abs(hi) * ULP + 1e-30)),
   ];
-  const wdt = (lo: number, hi: number): F => [
-    fr(lo - fr(Math.abs(lo) * 8 * ULP + 1e-30)),
-    fr(hi + fr(Math.abs(hi) * 8 * ULP + 1e-30)),
+  // Box pads (8 ulp). `boxRelative` is the WRONG value-relative shape (∝ |edge|);
+  // `boxDomain` is the shipped `_iv_widen_box` (∝ domain extent).
+  const boxRelative = (b: F): F => [
+    fr(b[0] - fr(Math.abs(b[0]) * 8 * ULP + 1e-30)),
+    fr(b[1] + fr(Math.abs(b[1]) * 8 * ULP + 1e-30)),
   ];
+  const boxDomain = (b: F, extent: number): F => {
+    const pad = fr(8 * ULP * extent + 1e-30);
+    return [fr(b[0] - pad), fr(b[1] + pad)];
+  };
 
-  // float32 interval evaluation of f = x² + y² − 1, with widening toggled.
-  const evalF32 = (xb: F, yb: F, widen: boolean): F => {
-    const [xl, xh] = widen ? wdt(xb[0], xb[1]) : xb; // leaf input rounding
-    const [yl, yh] = widen ? wdt(yb[0], yb[1]) : yb;
-    const sq = (lo: number, hi: number): F => {
-      const a = fr(lo * lo);
-      const b = fr(hi * hi);
-      const l = lo <= 0 && hi >= 0 ? 0 : Math.min(a, b);
-      const r: F = [l, Math.max(a, b)];
-      return widen ? wd(r[0], r[1]) : r;
-    };
-    const add = (A: F, B: F): F => {
-      const r: F = [fr(A[0] + B[0]), fr(A[1] + B[1])];
-      return widen ? wd(r[0], r[1]) : r;
-    };
-    return add(add(sq(xl, xh), sq(yl, yh)), [-1, -1]);
+  // float32 interval evaluation of f = x² + y² − 1 over (already padded) boxes,
+  // with per-op widening on.
+  const sq = (lo: number, hi: number): F => {
+    const a = fr(lo * lo);
+    const b = fr(hi * hi);
+    const l = lo <= 0 && hi >= 0 ? 0 : Math.min(a, b);
+    return wd(l, Math.max(a, b));
+  };
+  const evalCircle = (xb: F, yb: F): F => {
+    const add = (A: F, B: F): F => wd(fr(A[0] + B[0]), fr(A[1] + B[1]));
+    return add(add(sq(xb[0], xb[1]), sq(yb[0], yb[1])), [-1, -1]);
   };
   const excludes = (f: F) => f[0] > 0 || f[1] < 0;
 
-  // Unit circle tangent at (1,0): the box's true corner is (1,0), where f = 0,
-  // so the box must be KEPT. The float32 `mix` lands the left edge ~3 ulp above
-  // 1.0 — a benign few-ulp construction error.
-  const xb: F = [fr(1 + 3 * ULP), fr(1.05)];
-  const yb: F = [fr(-0.05), 0];
+  // (A) Unit circle tangent at (1,0): box corner (1,0), f = 0 → must be KEPT.
+  // The float32 `mix` lands the left edge ~3 ulp above 1.0. Domain ~[−2,2]×[−1,1].
+  const xbA: F = [fr(1 + 3 * ULP), fr(1.05)];
+  const ybA: F = [fr(-0.05), 0];
 
   it('un-widened float32 spuriously EXCLUDES the grazing cell (the bug)', () => {
-    const f = evalF32(xb, yb, false);
+    const sqRaw = (lo: number, hi: number): F => [
+      lo <= 0 && hi >= 0 ? 0 : Math.min(fr(lo * lo), fr(hi * hi)),
+      Math.max(fr(lo * lo), fr(hi * hi)),
+    ];
+    const addRaw = (A: F, B: F): F => [fr(A[0] + B[0]), fr(A[1] + B[1])];
+    const f = addRaw(
+      addRaw(sqRaw(xbA[0], xbA[1]), sqRaw(ybA[0], ybA[1])),
+      [-1, -1]
+    );
     expect(f[0]).toBeGreaterThan(0); // lo ≈ +6 ulp > 0 → wrongly excluded
-    expect(excludes(f)).toBe(true);
   });
 
-  it('outward rounding KEEPS the grazing cell (the fix), still sound', () => {
-    const f = evalF32(xb, yb, true);
-    expect(f[0]).toBeLessThanOrEqual(0); // lo ≈ −12 ulp ≤ 0 → kept
+  it('domain-scaled box pad + per-op widening KEEPS the grazing cell', () => {
+    const f = evalCircle(boxDomain(xbA, 2), boxDomain(ybA, 1));
+    expect(f[0]).toBeLessThanOrEqual(0); // kept
     expect(excludes(f)).toBe(false);
-    // Still an over-approximation (sound): hi ≥ the un-widened hi.
-    expect(f[1]).toBeGreaterThanOrEqual(evalF32(xb, yb, false)[1]);
+  });
+
+  // (B) The case that distinguishes the two box-pad shapes (Tycho's note): f = x²
+  // (the y-axis), with a cell whose TRUE x-edge is 0 in a WIDE domain x∈[−2,2].
+  // The mix error (~ulp of extent 2) dwarfs the edge (~0), so a value-relative
+  // pad (∝ |edge| ≈ 0) can't recover it; the domain-scaled pad does.
+  const xbB: F = [fr(3 * ULP * 2), fr(0.1)]; // true x-lo = 0; mix lands ~ulp(extent) above
+
+  it('value-relative box pad FAILS at a near-zero edge in a wide domain', () => {
+    const f = sq(...boxRelative(xbB));
+    expect(f[0]).toBeGreaterThan(0); // pad ∝ |edge| ≈ 0 → still excluded (wrong)
+  });
+
+  it('domain-scaled box pad (the shipped _iv_widen_box) recovers it', () => {
+    const f = sq(...boxDomain(xbB, 2)); // extent = max(|−2|, |2|) = 2
+    expect(f[0]).toBeLessThanOrEqual(0); // box now contains x = 0 → kept
   });
 });
 
@@ -459,6 +479,7 @@ describe('COMPILE interval-glsl — public widen helpers & pads (Q1–Q3)', () =
       'vec2 _iv_widen_t(',
       'vec2 _iv_widen_pow(',
       'vec2 _iv_widen_sc(',
+      'vec2 _iv_widen_box(',
     ])
       expect(p).toContain(s);
   });

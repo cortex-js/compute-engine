@@ -72,19 +72,26 @@ vec2 _iv_guard2(vec2 r, vec2 a, vec2 b) {
 // it empty (lo still ≫ hi) and \`IV_ENTIRE\` re-clamps to entire, so the guards
 // and sentinels are preserved.
 //
-// These four widen helpers and their epsilons are a **public, stable** part of
-// the preamble: a renderer that builds the cell box itself (rather than using
-// the \`compileExclusionShader\` \`_implicit\`) must outward-round its box, and can
-// do so by calling \`_iv_widen_t(vec2(lo, hi))\` on each axis (see §13/Q1).
+// These widen helpers and their epsilons are a **public, stable** part of the
+// preamble. The per-op pads (\`_iv_widen\`*) are *value-relative* — correct
+// because each op's rounding error scales with its own result. The cell-box pad
+// is different: see \`_iv_widen_box\` below.
 const float IV_EPS = 1.1920929e-7;   // 2^-23, float32 machine epsilon (1 ulp)
 const float IV_ABS_FLOOR = 1e-30;    // widen bounds that sit exactly at 0
 // \`_iv_widen_t\`: builtins GLSL ES does NOT round to ≤0.5 ulp — \`/\` (≈2.5 ulp),
-// \`sqrt\`/\`exp\`/\`log\` (≈3 ulp), inverse-trig (a few ulp). Also the input-box pad.
+// \`sqrt\`/\`exp\`/\`log\` (≈3 ulp), inverse-trig (a few ulp).
 const float IV_EPS_FN = 8.0 * IV_EPS;
 // \`_iv_widen_pow\`: GLSL ES \`pow\` is ~16 ulp (it is exp2(y·log2(x))); 32 ulp gives
 // headroom for moderate exponents. Very large exponents grow past this — keep a
 // CPU refine for those.
 const float IV_EPS_POW = 32.0 * IV_EPS;
+// \`_iv_widen_box\`: pad for a cell box built by \`mix(domainLo, domainHi, t)\`. The
+// mix construction error is bounded by ~ulp of the **domain extent**, NOT of the
+// local edge value (\`min + t·span\` rounds to ulp(|coord|) ≤ ulp(max|domain|)).
+// So the box pad is *absolute, scaled to the domain* — a value-relative pad
+// would vanish for an edge near 0 in a wide domain (e.g. a cell straddling the
+// y-axis at x≈0 in x∈[−2,2] still carries ~ulp(2) of error). 8 ulp of the extent.
+const float IV_BOX_EPS = 8.0 * IV_EPS;
 // \`_iv_widen_sc\`: \`sin\`/\`cos\` carry an *absolute* ~2^-11 error that is
 // implementation-defined (macOS ANGLE→Metal differs from desktop GL) — no
 // relative pad can cover it. \`IV_TRIG_ABS\` is an opt-in absolute pad (default 0
@@ -107,6 +114,13 @@ vec2 _iv_widen_sc(vec2 r) {
 vec2 _iv_widen_t(vec2 r) {
   return vec2(r.x - (abs(r.x) * IV_EPS_FN + IV_ABS_FLOOR),
               r.y + (abs(r.y) * IV_EPS_FN + IV_ABS_FLOOR));
+}
+// Outward-round a cell box. \`domainExtent\` = max(|domainLo|, |domainHi|) for that
+// axis; the pad is scaled to it, not to the box edges (see note above). A
+// renderer that builds its own boxes should call this on each axis.
+vec2 _iv_widen_box(vec2 box, float domainExtent) {
+  float pad = IV_BOX_EPS * domainExtent + IV_ABS_FLOOR;
+  return vec2(box.x - pad, box.y + pad);
 }
 
 // negate/abs/min/max and the step family are *exact* (sign flip / selection /
@@ -627,22 +641,23 @@ export class IntervalGLSLTarget extends GLSLTarget {
    * is cleanly separable from the render harness:
    *
    * - `vec2 _implicit(<vec2 per free variable>)` evaluates the interval of `f`
-   *   over a cell box (this is the part that matters; it is `compile(expr).code`
-   *   wrapped in a function, with its inputs **outward-rounded** at entry —
-   *   `_iv_widen_t` on each box, see below).
+   *   over a cell box (this is the part that matters; it is exactly
+   *   `compile(expr).code` wrapped in a function).
    * - `main()` is a **reference harness**: it derives each fragment's cell box
-   *   from `gl_FragCoord` and the viewport uniforms, evaluates `_implicit`, and
-   *   writes the exclusion result. The renderer is free to replace `main()` /
-   *   the uniforms with its own conventions and keep `_implicit`.
+   *   from `gl_FragCoord` and the viewport uniforms, **outward-rounds** that box
+   *   (see below), evaluates `_implicit`, and writes the exclusion result. The
+   *   renderer is free to replace `main()` / the uniforms with its own
+   *   conventions and keep `_implicit`.
    *
-   * **Input outward-rounding (float32 soundness, §13).** The cell box itself is
-   * built in float32 (`mix` of the domain uniforms), which rounds to nearest and
-   * can land a few ulp *inside* the true cell edge — enough to flip a grazing
-   * tangency's exclusion verdict, independent of the per-op widening. So
-   * `_implicit` widens each input box by `_iv_widen_t` (a few ulp) before
-   * evaluating, which absorbs that construction error for any harness that keeps
-   * `_implicit`. A renderer with a wilder coordinate map should still construct
-   * outward-rounded boxes (round each cell's `lo` down / `hi` up) of its own.
+   * **Box outward-rounding (float32 soundness, §13).** The cell box is built in
+   * float32 (`mix` of the domain uniforms), which rounds to nearest and can land
+   * a few ulp *inside* the true cell edge — enough to flip a grazing tangency's
+   * exclusion verdict, independent of the per-op widening. `main()` therefore
+   * widens each box with `_iv_widen_box(box, extent)` before evaluating. The pad
+   * is scaled to the **domain extent**, not the local edge value, because that is
+   * what bounds the `mix` error — a value-relative pad would vanish for an edge
+   * near 0 in a wide domain. A renderer that builds its own boxes must do the
+   * same (call `_iv_widen_box` per axis).
    *
    * The first free variable maps to `u_domainX`, the second to `u_domainY`
    * (≤ 2 free variables; a 2D implicit curve). The exclusion predicate is
@@ -680,14 +695,21 @@ export class IntervalGLSLTarget extends GLSLTarget {
       main.push(
         '  float _xhi = mix(u_domainX.x, u_domainX.y, _cell.x + _step.x);'
       );
-      callArgs.push('vec2(_xlo, _xhi)');
+      // Outward-round the box by a pad scaled to the domain extent (§13).
+      main.push(
+        '  float _xext = max(abs(u_domainX.x), abs(u_domainX.y));'
+      );
+      callArgs.push('_iv_widen_box(vec2(_xlo, _xhi), _xext)');
     }
     if (axisY !== undefined) {
       main.push('  float _ylo = mix(u_domainY.x, u_domainY.y, _cell.y);');
       main.push(
         '  float _yhi = mix(u_domainY.x, u_domainY.y, _cell.y + _step.y);'
       );
-      callArgs.push('vec2(_ylo, _yhi)');
+      main.push(
+        '  float _yext = max(abs(u_domainY.x), abs(u_domainY.y));'
+      );
+      callArgs.push('_iv_widen_box(vec2(_ylo, _yhi), _yext)');
     }
     main.push(`  vec2 _f = _implicit(${callArgs.join(', ')});`);
     // lo > 0 || hi < 0  ⇒  the curve cannot pass through this cell (also
@@ -710,11 +732,9 @@ export class IntervalGLSLTarget extends GLSLTarget {
       '',
       'out vec4 fragColor;',
       '',
-      '// Interval evaluation of the implicit field f over a cell box.',
+      '// Interval evaluation of the implicit field f over a cell box. The box is',
+      '// outward-rounded by the caller (main(), via _iv_widen_box).',
       `vec2 _implicit(${params}) {`,
-      // Outward-round the inputs first (absorbs float32 cell-box construction
-      // rounding — see the method doc / §13). No-op for a 0-variable curve.
-      ...vars.map((v) => `  ${v} = _iv_widen_t(${v});`),
       `  return ${compiled.code};`,
       '}',
       '',
