@@ -44,9 +44,7 @@ describe('TIMEOUT', () => {
 
   describe('Sum', () => {
     it('small sum completes within timeout', () => {
-      const result = ce
-        .expr(['Sum', 'k', ['Tuple', 'k', 1, 100]])
-        .evaluate();
+      const result = ce.expr(['Sum', 'k', ['Tuple', 'k', 1, 100]]).evaluate();
       expect(result.re).toBe(5050);
     });
 
@@ -55,11 +53,7 @@ describe('TIMEOUT', () => {
       // expensive, and there are 100K of them
       expect(() =>
         ce
-          .expr([
-            'Sum',
-            ['Power', 'k', 'k'],
-            ['Tuple', 'k', 1, 100_000],
-          ])
+          .expr(['Sum', ['Power', 'k', 'k'], ['Tuple', 'k', 1, 100_000]])
           .evaluate()
       ).toThrow(CancellationError);
     });
@@ -77,11 +71,7 @@ describe('TIMEOUT', () => {
     it('large product throws CancellationError', () => {
       expect(() =>
         ce
-          .expr([
-            'Product',
-            ['Power', 'k', 2],
-            ['Tuple', 'k', 1, 100_000],
-          ])
+          .expr(['Product', ['Power', 'k', 2], ['Tuple', 'k', 1, 100_000]])
           .evaluate()
       ).toThrow(CancellationError);
     });
@@ -108,11 +98,7 @@ describe('TIMEOUT', () => {
       // Body does expensive work per element
       expect(() =>
         ce
-          .expr([
-            'Loop',
-            ['Function', ['Power', 'x', 'x'], 'x'],
-            list,
-          ])
+          .expr(['Loop', ['Function', ['Power', 'x', 'x'], 'x'], list])
           .evaluate()
       ).toThrow(CancellationError);
     });
@@ -359,5 +345,56 @@ describe('TIMEOUT', () => {
       // _deadline should be undefined after completion
       expect(ce._deadline).toBeUndefined();
     });
+  });
+});
+
+describe('RECURSION LIMIT', () => {
+  // Declare the function name first so the recursive call in its body parses
+  // as a function application (not implicit multiplication), then bind it.
+  const define = (name: string, latex: string) => {
+    ce.declare(name, 'function');
+    ce.parse(latex).evaluate();
+  };
+
+  it('bounded recursion completes', () => {
+    define('g', 'g(x) := \\mathrm{If}(x \\le 1, 1, x \\cdot g(x-1))');
+    expect(ce.box(['g', 5]).evaluate().toString()).toBe('120');
+  });
+
+  it('runaway recursion throws a CancellationError, not a native RangeError', () => {
+    // A low limit fires well before any native stack limit, on any machine.
+    ce.recursionLimit = 64;
+    define('r', 'r(x) := r(x-1) + 1'); // no reachable base case
+    let error: unknown;
+    try {
+      ce.box(['r', 5]).evaluate();
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(CancellationError);
+    expect((error as CancellationError).cause).toBe('recursion-depth-exceeded');
+  });
+
+  it('respects a custom recursionLimit', () => {
+    ce.recursionLimit = 16;
+    define('g', 'g(x) := \\mathrm{If}(x \\le 1, 1, x \\cdot g(x-1))');
+    expect(ce.box(['g', 8]).evaluate().toString()).toBe('40320'); // depth 8 < 16
+    expect(() => ce.box(['g', 100]).evaluate()).toThrow(CancellationError);
+  });
+
+  it('recursion depth resets after a runaway error', () => {
+    ce.recursionLimit = 64;
+    define('r', 'r(x) := r(x-1) + 1');
+    expect(() => ce.box(['r', 5]).evaluate()).toThrow(CancellationError);
+    // A subsequent bounded recursion still works (depth counter not stuck).
+    define('g', 'g(x) := \\mathrm{If}(x \\le 1, 1, x \\cdot g(x-1))');
+    expect(ce.box(['g', 5]).evaluate().toString()).toBe('120');
+  });
+
+  it('iterating a user function is not counted as recursion', () => {
+    // Each f(i) is a depth-1 call; summing 200 of them must not hit the limit.
+    ce.recursionLimit = 32;
+    define('f', 'f(x) := x^2');
+    expect(ce.parse('\\sum_{i=1}^{200} f(i)').evaluate().re).toBe(2686700);
   });
 });

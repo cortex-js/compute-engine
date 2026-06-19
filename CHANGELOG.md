@@ -39,6 +39,20 @@
   is unchanged (it still includes bound variables). This is a behavior change
   for code that relied on the previous, over-inclusive result.
 
+- **Runaway user-function recursion now throws a catchable `CancellationError`
+  instead of a native `RangeError`.** A recursive definition with no reachable
+  base case (e.g. `f(x) := f(x-1) + 1`) previously overflowed the JavaScript
+  call stack with an uninformative `RangeError`. `recursionLimit` — previously
+  defined but never enforced — is now applied to user-function application:
+  exceeding it throws a `CancellationError` with
+  `cause: 'recursion-depth-exceeded'`, consistent with how `timeLimit` and
+  `iterationLimit` are surfaced. The default `recursionLimit` is now **256**
+  (was a nominal, unenforced 1024), chosen to fire below the native stack limit
+  on typical engines; raise `ce.recursionLimit` for legitimately deep recursion.
+  Iterating a user function (e.g. `\sum f(i)`) is **not** counted as recursion.
+  (A sufficiently complex single call can still exceed the native stack before
+  the limit is reached, so a robust caller catches `RangeError` as a backstop.)
+
 ### New Features
 
 - **`interval-glsl`: public outward-rounding helpers and an opt-in absolute trig

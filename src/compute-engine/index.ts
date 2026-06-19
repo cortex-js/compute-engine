@@ -734,6 +734,18 @@ export class ComputeEngine implements IComputeEngine {
     this._runtimeState.recursionLimit = t;
   }
 
+  /** @internal Enter a user-function application; throws a `CancellationError`
+   *  (`cause: 'recursion-depth-exceeded'`) when `recursionLimit` is exceeded.
+   *  Balanced with `_exitRecursion`. */
+  _enterRecursion(): void {
+    this._runtimeState.enterRecursion();
+  }
+  /** @internal Leave a user-function application. Balanced with
+   *  `_enterRecursion`. */
+  _exitRecursion(): void {
+    this._runtimeState.exitRecursion();
+  }
+
   /** Maximum number of elements a collection may have when materialized
    * (converted from a lazy form to a `List`). Default: 10,000.
    *

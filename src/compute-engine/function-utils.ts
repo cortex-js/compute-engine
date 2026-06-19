@@ -420,6 +420,24 @@ function captureClosures(
  * JavaScript function that can be called with arguments.
  */
 
+/** Wrap a lambda so each invocation is counted against `recursionLimit`: a
+ * runaway user-function recursion (`f(x) := … f(x-1) …` with no reachable base
+ * case) throws a `CancellationError` (`cause: 'recursion-depth-exceeded'`)
+ * instead of overflowing the native JS call stack with a `RangeError`. */
+function wrapRecursion(
+  ce: ComputeEngine,
+  fn: (params: ReadonlyArray<Expression>) => Expression | undefined
+): (params: ReadonlyArray<Expression>) => Expression | undefined {
+  return (params) => {
+    ce._enterRecursion();
+    try {
+      return fn(params);
+    } finally {
+      ce._exitRecursion();
+    }
+  };
+}
+
 function makeLambda(
   expr: Expression
 ): (params: ReadonlyArray<Expression>) => Expression | undefined {
@@ -447,7 +465,7 @@ function makeLambda(
   //
   if (fnExpr.ops.length === 1) {
     console.assert(fnExpr.ops[0] !== undefined);
-    return () => fnExpr.ops[0].evaluate();
+    return wrapRecursion(ce, () => fnExpr.ops[0].evaluate());
   }
 
   const [body, ...params] = fnExpr.ops;
@@ -459,7 +477,7 @@ function makeLambda(
   // body is a Block (scoped) — safe to access .ops and .localScope
   const bodyFn = body as Expression & FunctionInterface;
 
-  return (args) => {
+  const invoke = (args: ReadonlyArray<Expression>): Expression | undefined => {
     //
     // 1/ If there are more arguments than expected, exit
     //
@@ -607,6 +625,8 @@ function makeLambda(
 
     return result.isValid ? result : undefined;
   };
+
+  return wrapRecursion(ce, invoke);
 }
 
 /**

@@ -446,6 +446,14 @@ export interface IComputeEngine {
   /** True if `name` is an active shadowed parameter (see above). @internal */
   _isShadowedParameter(name: string): boolean;
 
+  /** Enter a user-function application, throwing a `CancellationError`
+   * (`cause: 'recursion-depth-exceeded'`) when `recursionLimit` is exceeded.
+   * Balanced with `_exitRecursion`. @internal */
+  _enterRecursion(): void;
+  /** Leave a user-function application. Balanced with `_enterRecursion`.
+   * @internal */
+  _exitRecursion(): void;
+
   /**
    * Use `ce.expr(id)` instead
    * @internal */
