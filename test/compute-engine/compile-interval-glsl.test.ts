@@ -14,7 +14,13 @@
 
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { runIntervalGLSL, isEmptyIV, IV_INF, type IV } from './interval-glsl-eval';
+import {
+  runIntervalGLSL,
+  isEmptyIV,
+  IV_INF,
+  setTrigAbsPad,
+  type IV,
+} from './interval-glsl-eval';
 
 const ce = new ComputeEngine();
 const iv = ce.getCompilationTarget('interval-glsl')!;
@@ -52,6 +58,10 @@ describe('COMPILE interval-glsl — registration & codegen', () => {
     expect(r.preamble).toContain('const float IV_INF = 1e18;');
     expect(r.preamble).toContain('vec2 _iv_add(');
     expect(r.preamble).toContain('IV_EMPTY = vec2(IV_INF, -IV_INF)');
+    // Outward-rounding helpers are present and wired into the inexact ops.
+    expect(r.preamble).toContain('vec2 _iv_widen(');
+    expect(r.preamble).toContain('vec2 _iv_widen_t(');
+    expect(r.preamble).toMatch(/_iv_add[\s\S]*_iv_widen\(/);
   });
 
   it('reports free symbols (the cell-box uniforms the caller supplies)', () => {
@@ -311,9 +321,13 @@ describe('COMPILE interval-glsl — exclusion shader (Phase 4)', () => {
     expect(shader).toContain('uniform vec2 u_resolution;');
     expect(shader).toContain('out vec4 fragColor;');
     expect(shader).toContain('void main()');
-    // The evaluator is exactly the compiled interval code.
+    // The evaluator is the compiled interval code, with its inputs
+    // outward-rounded at entry (float32 cell-box soundness, §13).
     expect(shader).toContain(
-      `vec2 _implicit(vec2 x, vec2 y) {\n  return ${iv.compile(expr).code};`
+      `vec2 _implicit(vec2 x, vec2 y) {\n` +
+        `  x = _iv_widen_t(x);\n` +
+        `  y = _iv_widen_t(y);\n` +
+        `  return ${iv.compile(expr).code};`
     );
     // Exclusion predicate (also rejects `empty`, whose lo is +IV_INF).
     expect(shader).toContain('_f.x > 0.0 || _f.y < 0.0');
@@ -354,5 +368,144 @@ describe('COMPILE interval-glsl — exclusion shader (Phase 4)', () => {
     expect(excludes([0.5, 1.5], [-0.5, 0.5])).toBe(false);
     // Cell well outside the disk → f ≫ 0 → excluded.
     expect(excludes([2.5, 3.0], [2.5, 3.0])).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Regression (§13): float32 grazing soundness. On the real GPU the cell box is
+// built with a float32 `mix` of the domain uniforms, which rounds to nearest and
+// can land the box edge a few ulp INSIDE the true cell — flipping the exclusion
+// verdict for a box the curve only grazes. interval-js (float64) keeps the box;
+// an un-widened float32 oracle drops it (`interval-glsl ⊉ interval-js`).
+//
+// The shared JS port runs in float64 and cannot reproduce this, so we model the
+// shader in float32 here (Math.fround) for the exact Tycho repro: the unit
+// circle's tangent corner (1,0). Outward rounding — leaf `_iv_widen_t` on the
+// input box (as `_implicit` now does) plus per-op `_iv_widen` — restores
+// `lo ≤ 0`. The production GLSL path is covered end-to-end by Tycho's on-GPU
+// parity harness.
+// ---------------------------------------------------------------------------
+describe('COMPILE interval-glsl — float32 grazing soundness (§13)', () => {
+  const fr = Math.fround;
+  const ULP = 2 ** -23; // float32 machine epsilon
+  type F = [number, number];
+  // float32 outward-widen, mirroring _iv_widen (1 ulp) and _iv_widen_t (8 ulp).
+  const wd = (lo: number, hi: number): F => [
+    fr(lo - fr(Math.abs(lo) * ULP + 1e-30)),
+    fr(hi + fr(Math.abs(hi) * ULP + 1e-30)),
+  ];
+  const wdt = (lo: number, hi: number): F => [
+    fr(lo - fr(Math.abs(lo) * 8 * ULP + 1e-30)),
+    fr(hi + fr(Math.abs(hi) * 8 * ULP + 1e-30)),
+  ];
+
+  // float32 interval evaluation of f = x² + y² − 1, with widening toggled.
+  const evalF32 = (xb: F, yb: F, widen: boolean): F => {
+    const [xl, xh] = widen ? wdt(xb[0], xb[1]) : xb; // leaf input rounding
+    const [yl, yh] = widen ? wdt(yb[0], yb[1]) : yb;
+    const sq = (lo: number, hi: number): F => {
+      const a = fr(lo * lo);
+      const b = fr(hi * hi);
+      const l = lo <= 0 && hi >= 0 ? 0 : Math.min(a, b);
+      const r: F = [l, Math.max(a, b)];
+      return widen ? wd(r[0], r[1]) : r;
+    };
+    const add = (A: F, B: F): F => {
+      const r: F = [fr(A[0] + B[0]), fr(A[1] + B[1])];
+      return widen ? wd(r[0], r[1]) : r;
+    };
+    return add(add(sq(xl, xh), sq(yl, yh)), [-1, -1]);
+  };
+  const excludes = (f: F) => f[0] > 0 || f[1] < 0;
+
+  // Unit circle tangent at (1,0): the box's true corner is (1,0), where f = 0,
+  // so the box must be KEPT. The float32 `mix` lands the left edge ~3 ulp above
+  // 1.0 — a benign few-ulp construction error.
+  const xb: F = [fr(1 + 3 * ULP), fr(1.05)];
+  const yb: F = [fr(-0.05), 0];
+
+  it('un-widened float32 spuriously EXCLUDES the grazing cell (the bug)', () => {
+    const f = evalF32(xb, yb, false);
+    expect(f[0]).toBeGreaterThan(0); // lo ≈ +6 ulp > 0 → wrongly excluded
+    expect(excludes(f)).toBe(true);
+  });
+
+  it('outward rounding KEEPS the grazing cell (the fix), still sound', () => {
+    const f = evalF32(xb, yb, true);
+    expect(f[0]).toBeLessThanOrEqual(0); // lo ≈ −12 ulp ≤ 0 → kept
+    expect(excludes(f)).toBe(false);
+    // Still an over-approximation (sound): hi ≥ the un-widened hi.
+    expect(f[1]).toBeGreaterThanOrEqual(evalF32(xb, yb, false)[1]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tycho reply (2026-06-18): public box-widen helpers (Q1), the `pow` pad (Q2),
+// and the configurable absolute trig pad (Q3).
+// ---------------------------------------------------------------------------
+describe('COMPILE interval-glsl — public widen helpers & pads (Q1–Q3)', () => {
+  const ivx = iv as unknown as {
+    getPreamble: (o?: { trigAbsPad?: number }) => string;
+    compileExclusionShader: (e: any, o?: any) => string;
+  };
+
+  it('Q1: the four widen helpers + epsilons are public preamble symbols', () => {
+    const p = iv.compile(ce.parse('x^2 + y^2 - 1')).preamble!;
+    for (const s of [
+      'const float IV_EPS = ',
+      'const float IV_EPS_FN = ',
+      'const float IV_EPS_POW = ',
+      'vec2 _iv_widen(',
+      'vec2 _iv_widen_t(',
+      'vec2 _iv_widen_pow(',
+      'vec2 _iv_widen_sc(',
+    ])
+      expect(p).toContain(s);
+  });
+
+  it('Q1: the preamble is emitted even for an op-free curve (so _iv_widen_t is callable)', () => {
+    // f = x (the y-axis) compiles to just `x` — no _iv_ op — but a renderer that
+    // boxes its own coordinates still needs _iv_widen_t to outward-round them.
+    const r = iv.compile(ce.parse('x'));
+    expect(r.code).toBe('x');
+    expect(r.preamble).toContain('vec2 _iv_widen_t(');
+  });
+
+  it('Q2a: x^2 → square (correctly rounded), x^3 → powi (via GLSL pow)', () => {
+    expect(iv.compile(ce.parse('x^2')).code).toBe('_iv_square(x)');
+    expect(iv.compile(ce.parse('x^3')).code).toBe('_iv_powi(x, 3.0)');
+  });
+
+  it('Q2b: powi and powf route through the 32-ulp _iv_widen_pow pad', () => {
+    const p = iv.compile(ce.parse('x^3')).preamble!;
+    expect(p).toContain('const float IV_EPS_POW = 32.0 * IV_EPS;');
+    expect(p).toMatch(/vec2 _iv_powi[\s\S]*?_iv_widen_pow\(/);
+    expect(p).toMatch(/vec2 _iv_powf[\s\S]*?_iv_widen_pow\(/);
+  });
+
+  it('Q3: trigAbsPad is off by default and configurable, wired into sin/cos', () => {
+    expect(ivx.getPreamble()).toContain('const float IV_TRIG_ABS = 0.0;');
+    const padded = ivx.getPreamble({ trigAbsPad: 5e-4 });
+    expect(padded).toContain('const float IV_TRIG_ABS = 0.0005;');
+    expect(padded).toMatch(/vec2 _iv_sin[\s\S]*?_iv_widen_sc\(/);
+    expect(padded).toMatch(/vec2 _iv_cos[\s\S]*?_iv_widen_sc\(/);
+    // The exclusion shader honors the option in its injected preamble.
+    const shader = ivx.compileExclusionShader(ce.parse('\\sin(x) - y'), {
+      trigAbsPad: 5e-4,
+    });
+    expect(shader).toContain('const float IV_TRIG_ABS = 0.0005;');
+  });
+
+  it('Q3: trigAbsPad numerically fattens sin/cos bounds (via the JS port)', () => {
+    const code = iv.compile(ce.parse('\\sin(x)')).code; // _iv_sin(x)
+    const base = runIntervalGLSL(code, { x: [0.1, 0.2] });
+    try {
+      setTrigAbsPad(0.01);
+      const padded = runIntervalGLSL(code, { x: [0.1, 0.2] });
+      expect(base[0] - padded[0]).toBeGreaterThan(0.009); // lo pushed down ~0.01
+      expect(padded[1] - base[1]).toBeGreaterThan(0.009); // hi pushed up ~0.01
+    } finally {
+      setTrigAbsPad(0); // restore module state for any later test
+    }
   });
 });

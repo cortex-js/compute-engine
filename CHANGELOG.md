@@ -1,3 +1,48 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **`interval-glsl` is now outward-rounded, making it a sound standalone
+  exclusion oracle in `float32` (preview).** As shipped in 0.61.0 the `_iv_*`
+  ops clamped to the sentinel range but rounded to nearest, so an operation — or
+  the cell box itself — could come back slightly **narrower** than the true
+  range. At a boundary that is enough to flip the exclusion verdict for a box
+  the curve only grazes (e.g. the unit circle's tangent corner at `(1, 0)`),
+  violating the containment contract that the GLSL interval must _contain_ the
+  `interval-js` (float64) result — a spuriously narrow interval can exclude a
+  box the curve actually passes through. Every inexact operation now widens its
+  result outward (`lo` toward −∞, `hi` toward +∞) before the clamp: by ~1 ulp
+  for the correctly-rounded ops (`+ − ×`, `Square`), and by a larger relative
+  margin for the GLSL ES built-ins that are not correctly rounded — 8 ulp for
+  `/`, `Sqrt`, `Exp`/`Ln`/`Log`, and inverse trigonometry, and 32 ulp for
+  `Power` (`x^n` with `n ≥ 3`, and fractional powers such as the astroid
+  `x^{2/3}`). Crucially, the cell box passed to the `compileExclusionShader`
+  `_implicit` evaluator is itself outward-rounded: the float32 `mix` that builds
+  it rounds to nearest and is the actual source of the grazing miss, which
+  per-op widening alone cannot fix (with exact endpoints the op chain is exact).
+  Widening only ever moves a bound outward, so it cannot break soundness; the
+  `empty` (`lo > hi`) / `entire` (`±IV_INF`) encodings, the finite `IV_INF`
+  sentinel, the per-op clamp, and exact empty-propagation are all preserved.
+  `Sin`/`Cos` remain best-effort (see below).
+
+### New Features
+
+- **`interval-glsl`: public outward-rounding helpers and an opt-in absolute trig
+  pad (preview).** The widen helpers `_iv_widen` / `_iv_widen_t` /
+  `_iv_widen_pow` / `_iv_widen_sc`, and their epsilons `IV_EPS` / `IV_EPS_FN` /
+  `IV_EPS_POW`, are a stable, public part of the emitted preamble: a renderer
+  that builds its own cell box (instead of using `compileExclusionShader`) can
+  outward-round it by calling `_iv_widen_t(vec2(lo, hi))` on each axis. The
+  preamble is now emitted for any expression with free variables (not only ones
+  that reference an `_iv_*` op), so those helpers are always available — e.g.
+  for an axis line `f = x`. GLSL ES `Sin`/`Cos` carry an _absolute_,
+  implementation-defined error (≈2⁻¹¹ in the worst case; macOS ANGLE→Metal
+  differs) that no relative pad can cover. A new `trigAbsPad` option (default
+  `0`, off) on `compile()`, `IntervalGLSLTarget.compileExclusionShader()`, and
+  the new `IntervalGLSLTarget.getPreamble()` adds an absolute `Sin`/`Cos` pad,
+  so a trigonometric implicit curve can be a strictly-sound standalone oracle at
+  the cost of fatter trig intervals.
+
 ## 0.61.0 _2026-06-17_
 
 ### New Features

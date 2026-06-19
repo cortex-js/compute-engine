@@ -40,11 +40,10 @@ import { isNumber, isSymbol } from '../boxed-expression/type-guards';
 const IV_INF = '1e18';
 
 /**
- * GLSL preamble: the `_iv_*` interval-arithmetic library. Injected whole when
- * the compiled code references any `_iv_` helper. (A later phase can split this
- * per-marker like the `_gpu_*` blocks to keep shaders lean.)
+ * GLSL preamble template: the `_iv_*` interval-arithmetic library. The
+ * `__IV_TRIG_ABS__` token is filled in by {@link intervalGLSLPreamble}.
  */
-export const INTERVAL_GLSL_PREAMBLE = `
+const INTERVAL_GLSL_PREAMBLE_TEMPLATE = `
 const float IV_INF = ${IV_INF};
 const vec2 IV_ENTIRE = vec2(-IV_INF, IV_INF);
 const vec2 IV_EMPTY = vec2(IV_INF, -IV_INF);
@@ -62,20 +61,70 @@ vec2 _iv_guard2(vec2 r, vec2 a, vec2 b) {
   return (_iv_is_empty(a) || _iv_is_empty(b)) ? IV_EMPTY : r;
 }
 
+// ── Outward rounding (float32 soundness) ────────────────────────────────────
+// GLSL ES has no \`nextafter\`, and float32 ops round to nearest — which can make
+// an op's result interval slightly *narrower* than the true range, violating the
+// exclusion contract (interval-glsl ⊇ true-range; INTERVAL_GLSL_PLAN.md §4 point
+// 4 / §13). So every *inexact* op widens its result outward — \`lo\` down, \`hi\`
+// up — by a relative ulp (plus a tiny absolute floor for bounds at 0) BEFORE
+// clamping. Widening only ever moves bounds outward, so it can never break
+// soundness; the cost is marginally fatter intervals. Widening \`IV_EMPTY\` keeps
+// it empty (lo still ≫ hi) and \`IV_ENTIRE\` re-clamps to entire, so the guards
+// and sentinels are preserved.
+//
+// These four widen helpers and their epsilons are a **public, stable** part of
+// the preamble: a renderer that builds the cell box itself (rather than using
+// the \`compileExclusionShader\` \`_implicit\`) must outward-round its box, and can
+// do so by calling \`_iv_widen_t(vec2(lo, hi))\` on each axis (see §13/Q1).
+const float IV_EPS = 1.1920929e-7;   // 2^-23, float32 machine epsilon (1 ulp)
+const float IV_ABS_FLOOR = 1e-30;    // widen bounds that sit exactly at 0
+// \`_iv_widen_t\`: builtins GLSL ES does NOT round to ≤0.5 ulp — \`/\` (≈2.5 ulp),
+// \`sqrt\`/\`exp\`/\`log\` (≈3 ulp), inverse-trig (a few ulp). Also the input-box pad.
+const float IV_EPS_FN = 8.0 * IV_EPS;
+// \`_iv_widen_pow\`: GLSL ES \`pow\` is ~16 ulp (it is exp2(y·log2(x))); 32 ulp gives
+// headroom for moderate exponents. Very large exponents grow past this — keep a
+// CPU refine for those.
+const float IV_EPS_POW = 32.0 * IV_EPS;
+// \`_iv_widen_sc\`: \`sin\`/\`cos\` carry an *absolute* ~2^-11 error that is
+// implementation-defined (macOS ANGLE→Metal differs from desktop GL) — no
+// relative pad can cover it. \`IV_TRIG_ABS\` is an opt-in absolute pad (default 0
+// = off; set via the \`trigAbsPad\` compile option / intervalGLSLPreamble). With
+// it 0, a sin/cos tangency is best-effort — CPU-refine if you need strict (§13).
+const float IV_TRIG_ABS = __IV_TRIG_ABS__;
+
+vec2 _iv_widen(vec2 r) {
+  return vec2(r.x - (abs(r.x) * IV_EPS + IV_ABS_FLOOR),
+              r.y + (abs(r.y) * IV_EPS + IV_ABS_FLOOR));
+}
+vec2 _iv_widen_pow(vec2 r) {
+  return vec2(r.x - (abs(r.x) * IV_EPS_POW + IV_ABS_FLOOR),
+              r.y + (abs(r.y) * IV_EPS_POW + IV_ABS_FLOOR));
+}
+vec2 _iv_widen_sc(vec2 r) {
+  return vec2(r.x - (abs(r.x) * IV_EPS_FN + IV_TRIG_ABS + IV_ABS_FLOOR),
+              r.y + (abs(r.y) * IV_EPS_FN + IV_TRIG_ABS + IV_ABS_FLOOR));
+}
+vec2 _iv_widen_t(vec2 r) {
+  return vec2(r.x - (abs(r.x) * IV_EPS_FN + IV_ABS_FLOOR),
+              r.y + (abs(r.y) * IV_EPS_FN + IV_ABS_FLOOR));
+}
+
+// negate/abs/min/max and the step family are *exact* (sign flip / selection /
+// integer results), so they are not widened — only ops that round are.
 vec2 _iv_negate(vec2 a) { return _iv_guard1(_iv_clamp(vec2(-a.y, -a.x)), a); }
 
 vec2 _iv_add(vec2 a, vec2 b) {
-  return _iv_guard2(_iv_clamp(vec2(a.x + b.x, a.y + b.y)), a, b);
+  return _iv_guard2(_iv_clamp(_iv_widen(vec2(a.x + b.x, a.y + b.y))), a, b);
 }
 
 vec2 _iv_sub(vec2 a, vec2 b) {
-  return _iv_guard2(_iv_clamp(vec2(a.x - b.y, a.y - b.x)), a, b);
+  return _iv_guard2(_iv_clamp(_iv_widen(vec2(a.x - b.y, a.y - b.x))), a, b);
 }
 
 vec2 _iv_mul(vec2 a, vec2 b) {
   float p1 = a.x * b.x, p2 = a.x * b.y, p3 = a.y * b.x, p4 = a.y * b.y;
   vec2 r = vec2(min(min(p1, p2), min(p3, p4)), max(max(p1, p2), max(p3, p4)));
-  return _iv_guard2(_iv_clamp(r), a, b);
+  return _iv_guard2(_iv_clamp(_iv_widen(r)), a, b);
 }
 
 vec2 _iv_div(vec2 a, vec2 b) {
@@ -85,14 +134,14 @@ vec2 _iv_div(vec2 a, vec2 b) {
   float q1 = a.x / b.x, q2 = a.x / b.y, q3 = a.y / b.x, q4 = a.y / b.y;
   vec2 r = vec2(min(min(q1, q2), min(q3, q4)), max(max(q1, q2), max(q3, q4)));
   r = spansZero ? IV_ENTIRE : r;
-  return _iv_guard2(_iv_clamp(r), a, b);
+  return _iv_guard2(_iv_clamp(_iv_widen_t(r)), a, b); // \`/\` is not ≤0.5 ulp
 }
 
 vec2 _iv_square(vec2 a) {
   float lo2 = a.x * a.x, hi2 = a.y * a.y;
   // Straddles 0 ⇒ min is 0; otherwise the smaller endpoint² is the min.
   float lo = (a.x <= 0.0 && a.y >= 0.0) ? 0.0 : min(lo2, hi2);
-  return _iv_guard1(_iv_clamp(vec2(lo, max(lo2, hi2))), a);
+  return _iv_guard1(_iv_clamp(_iv_widen(vec2(lo, max(lo2, hi2)))), a);
 }
 
 // Scalar integer power that is correct for negative bases (GLSL \`pow\` requires
@@ -109,7 +158,7 @@ vec2 _iv_powi(vec2 a, float n) {
   bool straddle = (a.x <= 0.0 && a.y >= 0.0);
   float lo = even ? (straddle ? 0.0 : min(pl, ph)) : pl;
   float hi = even ? max(pl, ph) : ph;
-  return _iv_guard1(_iv_clamp(vec2(lo, hi)), a);
+  return _iv_guard1(_iv_clamp(_iv_widen_pow(vec2(lo, hi))), a); // pow ~16 ulp
 }
 
 // ── Phase 2: elementary functions ──────────────────────────────────────────
@@ -124,11 +173,11 @@ vec2 _iv_abs(vec2 a) {
 vec2 _iv_sqrt(vec2 a) {
   vec2 r = vec2(sqrt(max(a.x, 0.0)), sqrt(max(a.y, 0.0)));
   r = (a.y < 0.0) ? IV_EMPTY : r;
-  return _iv_guard1(_iv_clamp(r), a);
+  return _iv_guard1(_iv_clamp(_iv_widen_t(r)), a);
 }
 
 vec2 _iv_exp(vec2 a) {
-  return _iv_guard1(_iv_clamp(vec2(exp(a.x), exp(a.y))), a);
+  return _iv_guard1(_iv_clamp(_iv_widen_t(vec2(exp(a.x), exp(a.y)))), a);
 }
 
 // Domain x > 0: fully-≤0 box → empty; straddling box → lo clamped to −IV_INF
@@ -136,7 +185,7 @@ vec2 _iv_exp(vec2 a) {
 vec2 _iv_ln(vec2 a) {
   vec2 r = vec2(a.x > 0.0 ? log(a.x) : -IV_INF, log(a.y));
   r = (a.y <= 0.0) ? IV_EMPTY : r;
-  return _iv_guard1(_iv_clamp(r), a);
+  return _iv_guard1(_iv_clamp(_iv_widen_t(r)), a);
 }
 
 const float _IV_INV_LN10 = 0.43429448190325176;
@@ -145,13 +194,13 @@ const float _IV_INV_LN2 = 1.4426950408889634;
 vec2 _iv_log10(vec2 a) {
   vec2 r = vec2(a.x > 0.0 ? log(a.x) * _IV_INV_LN10 : -IV_INF, log(a.y) * _IV_INV_LN10);
   r = (a.y <= 0.0) ? IV_EMPTY : r;
-  return _iv_guard1(_iv_clamp(r), a);
+  return _iv_guard1(_iv_clamp(_iv_widen_t(r)), a);
 }
 
 vec2 _iv_log2(vec2 a) {
   vec2 r = vec2(a.x > 0.0 ? log(a.x) * _IV_INV_LN2 : -IV_INF, log(a.y) * _IV_INV_LN2);
   r = (a.y <= 0.0) ? IV_EMPTY : r;
-  return _iv_guard1(_iv_clamp(r), a);
+  return _iv_guard1(_iv_clamp(_iv_widen_t(r)), a);
 }
 
 // Non-integer power. Real only for base ≥ 0: fully-negative box → empty; a box
@@ -162,14 +211,16 @@ vec2 _iv_powf(vec2 a, float p) {
   float e0 = pow(lob, p), e1 = pow(a.y, p);
   vec2 r = (p >= 0.0) ? vec2(e0, e1) : vec2(e1, e0);
   r = (a.y < 0.0) ? IV_EMPTY : r;
-  return _iv_guard1(_iv_clamp(r), a);
+  return _iv_guard1(_iv_clamp(_iv_widen_pow(r)), a); // pow ~16 ulp
 }
 
 // ── Phase 3: trigonometric & inverse-trigonometric functions ───────────────
-// Mirrors interval-js (interval/trigonometric.ts): exact endpoints with
-// extremum snapping (no outward epsilon). Per the Option-A contract, a tan pole
-// yields \`entire\` (interval-js returns \`singular\`; entire ⊇ singular and the
-// CPU classifies the asymptote).
+// Mirrors interval-js (interval/trigonometric.ts): endpoints with extremum
+// snapping, then outward-widened by the transcendental margin (\`_iv_widen_t\`).
+// CAVEAT: GLSL ES \`sin\`/\`cos\` carry an *absolute* error a relative pad cannot
+// fully cover, so a tangency verdict here is best-effort — CPU-refine if strict
+// (§13). Per the Option-A contract, a tan pole yields \`entire\` (interval-js
+// returns \`singular\`; entire ⊇ singular and the CPU classifies the asymptote).
 
 const float _IV_PI = 3.141592653589793;
 const float _IV_TWO_PI = 6.283185307179586;
@@ -193,7 +244,7 @@ vec2 _iv_sin(vec2 a) {
     if (_iv_has_ext(a, _IV_THREE_HALF_PI, _IV_TWO_PI)) lo = -1.0;
     r = vec2(lo, hi);
   }
-  return _iv_guard1(_iv_clamp(r), a);
+  return _iv_guard1(_iv_clamp(_iv_widen_sc(r)), a);
 }
 
 vec2 _iv_cos(vec2 a) {
@@ -206,7 +257,7 @@ vec2 _iv_cos(vec2 a) {
     if (_iv_has_ext(a, _IV_PI, _IV_TWO_PI)) lo = -1.0;
     r = vec2(lo, hi);
   }
-  return _iv_guard1(_iv_clamp(r), a);
+  return _iv_guard1(_iv_clamp(_iv_widen_sc(r)), a);
 }
 
 vec2 _iv_tan(vec2 a) {
@@ -217,7 +268,7 @@ vec2 _iv_tan(vec2 a) {
   // Floating-point branch-cross sanity (large opposite-sign endpoints).
   bool crossed = (tl > 1e10 && th < -1e10) || (tl < -1e10 && th > 1e10);
   vec2 r = (pole || crossed) ? IV_ENTIRE : vec2(tl, th);
-  return _iv_guard1(_iv_clamp(r), a);
+  return _iv_guard1(_iv_clamp(_iv_widen_t(r)), a);
 }
 
 // asin: domain [−1, 1]. Fully outside → empty; straddling clamps to the valid
@@ -225,18 +276,18 @@ vec2 _iv_tan(vec2 a) {
 vec2 _iv_asin(vec2 a) {
   vec2 r = vec2(asin(max(a.x, -1.0)), asin(min(a.y, 1.0)));
   r = (a.x > 1.0 || a.y < -1.0) ? IV_EMPTY : r;
-  return _iv_guard1(_iv_clamp(r), a);
+  return _iv_guard1(_iv_clamp(_iv_widen_t(r)), a);
 }
 
 // acos: domain [−1, 1], monotonic decreasing (bounds swap).
 vec2 _iv_acos(vec2 a) {
   vec2 r = vec2(acos(min(a.y, 1.0)), acos(max(a.x, -1.0)));
   r = (a.x > 1.0 || a.y < -1.0) ? IV_EMPTY : r;
-  return _iv_guard1(_iv_clamp(r), a);
+  return _iv_guard1(_iv_clamp(_iv_widen_t(r)), a);
 }
 
 vec2 _iv_atan(vec2 a) {
-  return _iv_guard1(_iv_clamp(vec2(atan(a.x), atan(a.y))), a);
+  return _iv_guard1(_iv_clamp(_iv_widen_t(vec2(atan(a.x), atan(a.y)))), a);
 }
 
 // ── Discontinuous / step functions ─────────────────────────────────────────
@@ -264,7 +315,7 @@ vec2 _iv_heaviside(vec2 a) {
 vec2 _iv_fract(vec2 a) {
   float fl = floor(a.x);
   vec2 r = (fl == floor(a.y)) ? vec2(a.x - fl, a.y - fl) : vec2(0.0, 1.0);
-  return _iv_guard1(_iv_clamp(r), a);
+  return _iv_guard1(_iv_clamp(_iv_widen(r)), a);
 }
 
 vec2 _iv_min(vec2 a, vec2 b) {
@@ -284,11 +335,45 @@ vec2 _iv_mod(vec2 a, vec2 b) {
     float flo = floor(a.x / p);
     vec2 r = (flo == floor(a.y / p)) ? vec2(a.x - p * flo, a.y - p * flo)
                                      : vec2(0.0, p);
-    return _iv_guard2(_iv_clamp(r), a, b);
+    return _iv_guard2(_iv_clamp(_iv_widen(r)), a, b);
   }
+  // Composed path widens via the inner _iv_sub/_iv_mul/_iv_div/_iv_floor.
   return _iv_sub(a, _iv_mul(b, _iv_floor(_iv_div(a, b))));
 }
 `;
+
+/** Options that shape the emitted interval-glsl preamble. */
+export interface IntervalGLSLPreambleOptions {
+  /**
+   * Absolute outward pad (in output units) added to `sin`/`cos` bounds, on top
+   * of the relative transcendental margin. GLSL ES `sin`/`cos` carry an
+   * *absolute*, implementation-defined error (~2⁻¹¹ in the worst case; macOS
+   * ANGLE→Metal differs) that no relative pad can cover. Default `0` (off) —
+   * opt in for a strictly-sound trig oracle without a CPU refine, at the cost of
+   * fatter trig intervals. A value around `5e-4` covers the ES worst case.
+   */
+  trigAbsPad?: number;
+}
+
+/**
+ * Build the `interval-glsl` `_iv_*` preamble. The widen helpers
+ * (`_iv_widen`/`_iv_widen_t`/`_iv_widen_pow`/`_iv_widen_sc`) and their epsilons
+ * (`IV_EPS`/`IV_EPS_FN`/`IV_EPS_POW`) are a stable, public part of the output: a
+ * renderer that boxes its own cell coordinates should outward-round them with
+ * `_iv_widen_t` (§13/Q1).
+ */
+export function intervalGLSLPreamble(
+  options: IntervalGLSLPreambleOptions = {}
+): string {
+  const trigAbsPad = options.trigAbsPad ?? 0;
+  return INTERVAL_GLSL_PREAMBLE_TEMPLATE.replace(
+    '__IV_TRIG_ABS__',
+    formatGPUNumber(trigAbsPad)
+  );
+}
+
+/** Default preamble (no absolute trig pad). */
+export const INTERVAL_GLSL_PREAMBLE = intervalGLSLPreamble();
 
 /**
  * Operator/function heads → `_iv_*` calls. Arithmetic routes through functions
@@ -491,11 +576,21 @@ export class IntervalGLSLTarget extends GLSLTarget {
     });
   }
 
+  /**
+   * The `_iv_*` interval-arithmetic preamble, optionally configured (e.g. an
+   * absolute `trigAbsPad`). A renderer that builds its own cell box and calls
+   * `iv.code` directly should inject this and outward-round its box inputs with
+   * the public `_iv_widen_t` helper (§13/Q1).
+   */
+  getPreamble(options: IntervalGLSLPreambleOptions = {}): string {
+    return intervalGLSLPreamble(options);
+  }
+
   compile(
     expr: Expression,
-    options: CompilationOptions<Expression> = {}
+    options: CompilationOptions<Expression> & IntervalGLSLPreambleOptions = {}
   ): CompilationResult {
-    const { vars } = options;
+    const { vars, trigAbsPad } = options;
 
     const target = this.createTarget({
       var: (id) => {
@@ -508,19 +603,20 @@ export class IntervalGLSLTarget extends GLSLTarget {
     });
 
     const code = BaseCompiler.compile(expr, target);
-    const result: CompilationResult = {
-      target: 'interval-glsl',
-      success: true,
-      code,
-    };
-    if (code.includes('_iv_')) result.preamble = INTERVAL_GLSL_PREAMBLE;
-
-    return BaseCompiler.withReferences(
-      result,
+    const result = BaseCompiler.withReferences(
+      { target: 'interval-glsl', success: true, code } as CompilationResult,
       expr,
       target,
       vars ? new Set(Object.keys(vars)) : undefined
     );
+
+    // Emit the preamble whenever an `_iv_` op is used OR the curve has free
+    // variables a renderer will box — so the public `_iv_widen_t` box-pad helper
+    // is always available even for an op-free curve like `f = x` (§13/Q1).
+    if (code.includes('_iv_') || (result.freeSymbols?.length ?? 0) > 0)
+      result.preamble = this.getPreamble({ trigAbsPad });
+
+    return result;
   }
 
   /**
@@ -531,12 +627,22 @@ export class IntervalGLSLTarget extends GLSLTarget {
    * is cleanly separable from the render harness:
    *
    * - `vec2 _implicit(<vec2 per free variable>)` evaluates the interval of `f`
-   *   over a cell box (this is the part that matters; it is identical to
-   *   `compile(expr).code` wrapped in a function).
+   *   over a cell box (this is the part that matters; it is `compile(expr).code`
+   *   wrapped in a function, with its inputs **outward-rounded** at entry —
+   *   `_iv_widen_t` on each box, see below).
    * - `main()` is a **reference harness**: it derives each fragment's cell box
    *   from `gl_FragCoord` and the viewport uniforms, evaluates `_implicit`, and
    *   writes the exclusion result. The renderer is free to replace `main()` /
    *   the uniforms with its own conventions and keep `_implicit`.
+   *
+   * **Input outward-rounding (float32 soundness, §13).** The cell box itself is
+   * built in float32 (`mix` of the domain uniforms), which rounds to nearest and
+   * can land a few ulp *inside* the true cell edge — enough to flip a grazing
+   * tangency's exclusion verdict, independent of the per-op widening. So
+   * `_implicit` widens each input box by `_iv_widen_t` (a few ulp) before
+   * evaluating, which absorbs that construction error for any harness that keeps
+   * `_implicit`. A renderer with a wilder coordinate map should still construct
+   * outward-rounded boxes (round each cell's `lo` down / `hi` up) of its own.
    *
    * The first free variable maps to `u_domainX`, the second to `u_domainY`
    * (≤ 2 free variables; a 2D implicit curve). The exclusion predicate is
@@ -548,9 +654,12 @@ export class IntervalGLSLTarget extends GLSLTarget {
    */
   compileExclusionShader(
     expr: Expression,
-    options: { version?: string; precision?: string } = {}
+    options: {
+      version?: string;
+      precision?: string;
+    } & IntervalGLSLPreambleOptions = {}
   ): string {
-    const { version = '300 es', precision = 'highp' } = options;
+    const { version = '300 es', precision = 'highp', trigAbsPad } = options;
     const compiled = this.compile(expr);
     const vars = compiled.freeSymbols ?? [];
     if (vars.length > 2)
@@ -593,7 +702,7 @@ export class IntervalGLSLTarget extends GLSLTarget {
       `#version ${version}`,
       `precision ${precision} float;`,
       '',
-      INTERVAL_GLSL_PREAMBLE.trim(),
+      this.getPreamble({ trigAbsPad }).trim(),
       '',
       'uniform vec2 u_domainX;    // [min, max] for the 1st free variable',
       'uniform vec2 u_domainY;    // [min, max] for the 2nd free variable',
@@ -603,6 +712,9 @@ export class IntervalGLSLTarget extends GLSLTarget {
       '',
       '// Interval evaluation of the implicit field f over a cell box.',
       `vec2 _implicit(${params}) {`,
+      // Outward-round the inputs first (absorbs float32 cell-box construction
+      // rounding — see the method doc / §13). No-op for a 0-variable curve.
+      ...vars.map((v) => `  ${v} = _iv_widen_t(${v});`),
       `  return ${compiled.code};`,
       '}',
       '',
