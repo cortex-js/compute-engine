@@ -1,3 +1,4 @@
+import { ComputeEngine } from '../../src/compute-engine';
 import { engine } from '../utils';
 
 describe('IS_CONSTANT', () => {
@@ -285,7 +286,6 @@ describe('FREE_VARIABLES', () => {
   });
 });
 
-
 describe('SCOPED_UNKNOWNS', () => {
   it('Block: should exclude locally assigned variables', () => {
     // x is free, y is locally assigned
@@ -295,7 +295,11 @@ describe('SCOPED_UNKNOWNS', () => {
   });
 
   it('Block: should exclude locally declared variables', () => {
-    const block = engine.expr(['Block', ['Declare', 'z', 'integer'], ['Add', 'x', 'z']]);
+    const block = engine.expr([
+      'Block',
+      ['Declare', 'z', 'integer'],
+      ['Add', 'x', 'z'],
+    ]);
     expect(block.unknowns).toContain('x');
     expect(block.unknowns).not.toContain('z');
   });
@@ -309,8 +313,132 @@ describe('SCOPED_UNKNOWNS', () => {
 
   it('ForAll: should exclude quantified variable', () => {
     // n is free, k is bound by the quantifier
-    const forall = engine.expr(['ForAll', ['Element', 'k', ['Range', 1, 'n']], ['Greater', 'k', 0]]);
+    const forall = engine.expr([
+      'ForAll',
+      ['Element', 'k', ['Range', 1, 'n']],
+      ['Greater', 'k', 0],
+    ]);
     expect(forall.unknowns).toContain('n');
     expect(forall.unknowns).not.toContain('k');
+  });
+});
+
+describe('FREE_VARIABLES (lambdas & integrals)', () => {
+  it('lambda: excludes its parameter', () => {
+    // (x) ↦ x^2 + b  — x is bound, b is free
+    const lambda = engine.parse('f(x) := x^2 + b').op2;
+    expect(lambda.freeVariables).toEqual(['b']);
+  });
+
+  it('lambda: excludes multiple parameters', () => {
+    const lambda = engine.box(['Function', ['Add', 'x', 'y', 'k'], 'x', 'y']);
+    expect(lambda.freeVariables).toEqual(['k']);
+  });
+
+  it('definition: parameter does not leak (regression)', () => {
+    // f(x) := x^2 + b  references b; the parameter x must NOT be reported
+    const def = engine.parse('f(x) := x^2 + b');
+    expect(def.freeVariables).not.toContain('x');
+    expect(def.freeVariables).toContain('b');
+  });
+
+  it('integral: excludes the integration variable', () => {
+    expect(engine.parse('\\int_0^\\pi \\sin(x) \\, dx').freeVariables).toEqual(
+      []
+    );
+  });
+
+  it('integral: keeps a free coefficient (regression)', () => {
+    // ∫ a·sin(x) dx depends on a, not x. The integrand Function over-lists
+    // `a` as a parameter, so naive parameter-exclusion would drop it.
+    const expr = engine.parse('\\int_0^\\pi a \\sin(x) \\, dx');
+    expect(expr.freeVariables).toContain('a');
+    expect(expr.freeVariables).not.toContain('x');
+  });
+
+  it('integral: keeps free bounds', () => {
+    expect(engine.parse('\\int_a^b \\sin(x) \\, dx').freeVariables).toEqual([
+      'a',
+      'b',
+    ]);
+  });
+
+  it('limit: excludes the limit variable', () => {
+    const expr = engine.parse('\\lim_{t \\to 0} (t + z)');
+    expect(expr.freeVariables).toContain('z');
+    expect(expr.freeVariables).not.toContain('t');
+  });
+
+  it('symbols still includes bound variables', () => {
+    // freeVariables excludes bound vars; symbols does not
+    expect(engine.parse('\\sum_{i=1}^{n} i').symbols).toContain('i');
+  });
+});
+
+describe('DEFINES', () => {
+  it('value assignment defines its target', () => {
+    expect(engine.parse('a := 3').defines).toEqual(['a']);
+  });
+
+  it('function definition defines the function name', () => {
+    expect(engine.parse('f(x) := x^2').defines).toEqual(['f']);
+  });
+
+  it('non-definitions define nothing', () => {
+    expect(engine.parse('2 + 2').defines).toEqual([]);
+    expect(engine.parse('f(1024)').defines).toEqual([]);
+  });
+
+  it('Block defines each assignment/declaration', () => {
+    const block = engine.box([
+      'Block',
+      ['Assign', 'a', 1],
+      ['Declare', 'b', 'integer'],
+      ['Add', 'a', 'b'],
+    ]);
+    expect(block.defines).toEqual(['a', 'b']);
+  });
+
+  it('references = freeVariables minus defines (notebook composition)', () => {
+    const cell = engine.parse('f(x) := x^2 + b');
+    const refs = cell.freeVariables.filter((s) => !cell.defines.includes(s));
+    expect(cell.defines).toEqual(['f']);
+    expect(refs).toEqual(['b']);
+  });
+});
+
+describe('APPLIED_NON_FUNCTIONS', () => {
+  it('reports an undefined function application, not a declared one', () => {
+    const ce = new ComputeEngine();
+    ce.declare('f', 'function');
+    expect(ce.appliedNonFunctions('f(x) + g(x)')).toEqual(['g']);
+  });
+
+  it('reports nested undefined applications', () => {
+    const ce = new ComputeEngine();
+    expect(ce.appliedNonFunctions('g(h(x))')).toEqual(['g', 'h']);
+  });
+
+  it('does not report numeric-coefficient multiplication', () => {
+    const ce = new ComputeEngine();
+    expect(ce.appliedNonFunctions('2(x+1)')).toEqual([]);
+  });
+
+  it('does not report a known builtin function', () => {
+    const ce = new ComputeEngine();
+    expect(ce.appliedNonFunctions('\\sin(x)')).toEqual([]);
+  });
+
+  it('is scope-aware: declaring as a function suppresses the report', () => {
+    const ce = new ComputeEngine();
+    expect(ce.appliedNonFunctions('g(x)')).toEqual(['g']);
+    ce.declare('g', 'function');
+    expect(ce.appliedNonFunctions('g(x)')).toEqual([]);
+  });
+
+  it('has no side effects (does not declare symbols)', () => {
+    const ce = new ComputeEngine();
+    ce.appliedNonFunctions('g(x)');
+    expect(ce.lookupDefinition('g')).toBeUndefined();
   });
 });

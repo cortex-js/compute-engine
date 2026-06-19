@@ -701,6 +701,12 @@ export abstract class _BoxedExpression implements Expression {
     return this.unknowns;
   }
 
+  get defines(): ReadonlyArray<string> {
+    const set = new Set<string>();
+    getDefines(this, set);
+    return Array.from(set).sort();
+  }
+
   get errors(): ReadonlyArray<Expression> {
     return this.getSubexpressions('Error');
   }
@@ -1019,37 +1025,87 @@ function getUnknowns(expr: Expression, result: Set<string>): void {
     return;
   }
 
-  if (isFunction(expr)) {
-    if (expr.isScoped && expr.localScope) {
-      // For scoped functions (Sum, Product, Integrate, Block, etc.),
-      // collect unknowns from ops then exclude the bound variables.
-      // The scope's bindings map includes all symbols referenced during
-      // canonicalization (including free variables like upper bounds),
-      // so we extract the actual bound variables from the structure.
-      const boundVars = new Set<string>();
-      for (const op of expr.ops) {
-        if (!isFunction(op)) continue;
-        // Sum/Product/Integrate: Limits(index, ...) or Element(index, ...)
-        if (
-          (op.operator === 'Limits' || op.operator === 'Element') &&
-          isSymbol(op.op1)
-        )
-          boundVars.add(op.op1.symbol);
-        // Block: Assign(symbol, value) or Declare(symbol, ...)
-        if (
-          (op.operator === 'Assign' || op.operator === 'Declare') &&
-          isSymbol(op.op1)
-        )
-          boundVars.add(op.op1.symbol);
-      }
+  if (!isFunction(expr)) return;
 
-      const inner = new Set<string>();
-      for (const op of expr.ops) getUnknowns(op, inner);
-      for (const s of inner) {
-        if (!boundVars.has(s)) result.add(s);
-      }
-    } else {
-      for (const op of expr.ops) getUnknowns(op, result);
+  // A `Function` literal `["Function", body, ...params]` binds its trailing
+  // operands (the parameters) in the body. Recurse into the body and drop the
+  // parameters. (Previously the parameters leaked, e.g. the `x` of
+  // `["Function", body, "x"]`.)
+  if (expr.operator === 'Function') {
+    const ops = expr.ops;
+    const params = new Set<string>();
+    for (let i = 1; i < ops.length; i++) {
+      const p = ops[i];
+      if (isSymbol(p)) params.add(p.symbol);
     }
+    const inner = new Set<string>();
+    if (ops.length > 0) getUnknowns(ops[0], inner);
+    for (const s of inner) if (!params.has(s)) result.add(s);
+    return;
   }
+
+  // Otherwise, collect the variables bound by this expression's structure.
+  // This must NOT be gated on `isScoped`: `Integrate` is not scoped yet binds
+  // its integration variable.
+  //   - index variables — Sum/Product/Integrate: an inner `Limits`/`Element`
+  //     carries the index/variable as its first operand.
+  //   - local variables — Block: inner `Assign`/`Declare` introduce locals.
+  const indexVars = new Set<string>();
+  const localVars = new Set<string>();
+  for (const op of expr.ops) {
+    if (!isFunction(op)) continue;
+    if (
+      (op.operator === 'Limits' || op.operator === 'Element') &&
+      isSymbol(op.op1)
+    )
+      indexVars.add(op.op1.symbol);
+    if (
+      (op.operator === 'Assign' || op.operator === 'Declare') &&
+      isSymbol(op.op1)
+    )
+      localVars.add(op.op1.symbol);
+  }
+
+  const inner = new Set<string>();
+  for (const op of expr.ops) {
+    // When this expression has index variables (e.g. an `Integrate`), a
+    // `Function` operand is the integrand. `Integrate` over-lists *every*
+    // referenced symbol as an integrand parameter (not just the integration
+    // variable), so its parameter list is unreliable: recurse into the body
+    // and rely on the index variables for binding. This keeps a free
+    // coefficient (e.g. `a` in `∫ a·sin(x) dx`) reported as free.
+    if (
+      indexVars.size > 0 &&
+      isFunction(op) &&
+      op.operator === 'Function' &&
+      op.ops.length > 0
+    )
+      getUnknowns(op.ops[0], inner);
+    else getUnknowns(op, inner);
+  }
+
+  if (indexVars.size === 0 && localVars.size === 0) {
+    for (const s of inner) result.add(s);
+  } else {
+    for (const s of inner)
+      if (!indexVars.has(s) && !localVars.has(s)) result.add(s);
+  }
+}
+
+/**
+ * Return the symbols **defined** by this expression: the target of a
+ * top-level `Assign` or `Declare`, recursing through `Block` sequences.
+ *
+ * Used by the `defines` accessor. Distinct from {@link getUnknowns}: a
+ * definition such as `f(x) := …` *defines* `f` while *referencing* whatever
+ * its body uses.
+ */
+function getDefines(expr: Expression, result: Set<string>): void {
+  if (!isFunction(expr)) return;
+  const operator = expr.operator;
+  if (operator === 'Assign' || operator === 'Declare') {
+    if (isSymbol(expr.op1)) result.add(expr.op1.symbol);
+    return;
+  }
+  if (operator === 'Block') for (const op of expr.ops) getDefines(op, result);
 }

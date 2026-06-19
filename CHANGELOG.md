@@ -28,6 +28,17 @@
   exact empty-propagation are all preserved. `Sin`/`Cos` remain best-effort (see
   below).
 
+- **`freeVariables` / `unknowns` no longer report the bound variables of
+  `Function` literals and integrals.** A function literal leaked its own
+  parameters, and `Integrate` / `Limit` leaked their variable — e.g.
+  `freeVariables` of `f(x) := x^2 + b` wrongly included the parameter `x`, and a
+  definite integral leaked its integration variable. They now return only
+  genuinely free symbols (`[b, f]` for that definition, `[]` for
+  `∫ sin(x) dx`), while a free coefficient is still reported
+  (`∫ a·sin(x) dx → [a]`). `Sum` / `Product` were already correct, and `symbols`
+  is unchanged (it still includes bound variables). This is a behavior change
+  for code that relied on the previous, over-inclusive result.
+
 ### New Features
 
 - **`interval-glsl`: public outward-rounding helpers and an opt-in absolute trig
@@ -47,6 +58,20 @@
   the new `IntervalGLSLTarget.getPreamble()` adds an absolute `Sin`/`Cos` pad,
   so a trigonometric implicit curve can be a strictly-sound standalone oracle at
   the cost of fatter trig intervals.
+
+- **`BoxedExpression.defines`.** A new accessor returning the symbols an
+  expression _defines_: the target of a top-level `Assign` / `Declare` (`a` in
+  `a := 3`, `f` in `f(x) := …`), recursing through `Block`. It complements
+  `freeVariables` (the symbols an expression _references_) — together they let
+  tooling build a definition/use dependency graph, with `references =
+  freeVariables` minus `defines`.
+
+- **`ComputeEngine.appliedNonFunctions(latex)`.** Returns the symbols written in
+  function-application syntax `f(…)` in `latex` that are **not** functions in the
+  current scope, and so parse as implicit multiplication (`f·x`) or are left
+  unresolved. The check is scope-aware (a symbol declared as a function is not
+  reported) and has no side effects. Useful for flagging a likely call to an
+  undefined function — e.g. warning that `f(x)` was read as `f·x`.
 
 ## 0.61.0 _2026-06-17_
 

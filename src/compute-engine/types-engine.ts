@@ -248,6 +248,16 @@ export interface IComputeEngine {
     options?: Partial<ParseLatexOptions> & { form?: FormOption }
   ): Expression | null;
 
+  /**
+   * The symbols that appear in function-application syntax `f(…)` in `latex`
+   * but are not defined as functions in the current scope (so they parse as
+   * implicit multiplication or are left unresolved). Scope-aware and
+   * side-effect-free. Intended to flag calls to undefined functions in tools
+   * such as notebooks; intersect with {@link BoxedExpression.freeVariables}
+   * to drop deliberate multiplication of defined values.
+   */
+  appliedNonFunctions(latex: string): string[];
+
   function(
     name: string,
     ops: ReadonlyArray<ExpressionInput>,

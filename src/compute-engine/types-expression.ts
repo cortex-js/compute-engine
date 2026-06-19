@@ -905,6 +905,23 @@ export interface Expression {
   readonly freeVariables: ReadonlyArray<string>;
 
   /**
+   * The symbols **defined** by this expression: the target of a top-level
+   * `["Assign", …]` or `["Declare", …]` (e.g. `a` in `a := 3`, `f` in
+   * `f(x) := …`), recursing through `["Block", …]` sequences. Empty for
+   * expressions that define nothing.
+   *
+   * Complements {@link freeVariables} (the symbols an expression
+   * *references*). A tool that builds a dependency graph keyed on cells —
+   * e.g. a notebook — can use `defines` for the out-edges and
+   * `freeVariables` minus `defines` for the in-edges.
+   *
+   * :::info[Note]
+   * Applicable to canonical and non-canonical expressions.
+   * :::
+   */
+  readonly defines: ReadonlyArray<string>;
+
+  /**
    * Attempt to factor a numeric coefficient `c` and a `rest` out of a
    * canonical expression such that `rest.mul(c)` is equal to `this`.
    *

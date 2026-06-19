@@ -253,6 +253,39 @@ import { fu as _fu } from './symbolic/fu';
  * @category Compute Engine
  *
  */
+/**
+ * Walk a raw (pre-canonicalization) MathJSON expression and collect the
+ * symbols that appear in function-application syntax `f(…)` — encoded as an
+ * `InvisibleOperator` with a symbol immediately followed by a `Delimiter`.
+ * In a scope-aware parse, a symbol known to be a function is parsed as an
+ * application instead, so only non-functions surface here.
+ */
+function collectAppliedNonFunctions(node: unknown, result: Set<string>): void {
+  if (Array.isArray(node)) {
+    if (node[0] === 'InvisibleOperator') {
+      for (let i = 1; i + 1 < node.length; i++) {
+        const head = node[i];
+        const next = node[i + 1];
+        if (
+          typeof head === 'string' &&
+          Array.isArray(next) &&
+          next[0] === 'Delimiter'
+        )
+          result.add(head);
+      }
+    }
+    for (const child of node) collectAppliedNonFunctions(child, result);
+    return;
+  }
+  if (
+    node !== null &&
+    typeof node === 'object' &&
+    'fn' in node &&
+    Array.isArray((node as { fn: unknown }).fn)
+  )
+    collectAppliedNonFunctions((node as { fn: unknown }).fn, result);
+}
+
 export class ComputeEngine implements IComputeEngine {
   /** @internal Factory for creating LatexSyntax instances. Registered by the
    *  full entry point (compute-engine.ts). When set, `new ComputeEngine()`
@@ -1634,6 +1667,42 @@ export class ComputeEngine implements IComputeEngine {
 
     const { canonical, structural } = formToInternal(form);
     return box(this, result, { canonical, structural });
+  }
+
+  /**
+   * The symbols that appear in function-application syntax — `f(…)` — in
+   * `latex` but are **not** defined as functions in the current scope, and so
+   * are interpreted as implicit multiplication (`f·x`) or left unresolved.
+   *
+   * Resolution is scope-aware: a name declared as a function (e.g. by a
+   * notebook's "declare every defined function first" pass) is not reported.
+   * This is a parse-time signal — the application-vs-multiplication
+   * distinction is erased by canonicalization — and the call has no side
+   * effects (it does not declare symbols). Intended to be intersected with
+   * {@link BoxedExpression.freeVariables} / unresolved symbols to warn that,
+   * say, `f(x)` looks like a call to an undefined function.
+   *
+   * ```js
+   * ce.declare('f', 'function');
+   * ce.appliedNonFunctions('f(x) + g(x)');  // -> ['g']  (f is a function)
+   * ```
+   */
+  appliedNonFunctions(latex: string): string[] {
+    const syntax = this.latexSyntax;
+    if (!syntax) return [];
+    const raw = syntax.parse(latex, {
+      getSymbolType: (id) => {
+        const def = this.lookupDefinition(id);
+        if (!def) return BoxedType.unknown;
+        if (isOperatorDef(def)) return def.operator.signature;
+        if (isValueDef(def)) return def.value.type;
+        return BoxedType.unknown;
+      },
+      ...this._latexOptions,
+    });
+    const result = new Set<string>();
+    if (raw !== null) collectAppliedNonFunctions(raw, result);
+    return Array.from(result).sort();
   }
 
   function(
