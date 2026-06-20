@@ -2,6 +2,35 @@
 
 ### Resolved Issues
 
+- **Arbitrary-precision sums of three or more terms no longer collapse to
+  machine precision.** `BigNumericValue.add` had a fast path that, when adding
+  to a zero value, cloned the other operand through a constructor that reads its
+  **machine** real part (`decimal.toNumber()`), silently truncating a
+  full-precision bignum to ~16 significant digits. The exact (rational/radical)
+  arithmetic path was unaffected, and two-term sums were unaffected, so this
+  only surfaced when summing **three or more inexact values** at a precision
+  above machine: `ExactNumericValue.sum` folds those starting from a zero
+  accumulator, and the very first `0 + xᵢ` step lost all extra precision. The
+  degradation was invisible when the terms were of similar magnitude (the result
+  was merely capped at ~16 digits), but became a wrong answer under
+  cancellation — e.g. numerically evaluating a high-order symbolic derivative at
+  a point (large factorial-scale terms cancelling to a small value) returned
+  garbage at any working precision. The zero-accumulator path now reads the
+  full-precision real part, matching the non-zero path. Coefficients were always
+  computed exactly; only the final numeric summation was affected.
+
+- **High-order derivatives are reduced instead of blowing up.** The `Derivative`
+  operator applies the differentiation rules iteratively, and the quotient and
+  product rules square the denominator at each step, so the r-th derivative of a
+  quotient carried an `x^(2ʳ)`-scale denominator — e.g. the 75th derivative of
+  `sin(x)/x` came back over `x^(2⁷⁵)`. The result was mathematically exact (the
+  integer coefficients are computed exactly), but the enormous exponent made it
+  unusable and overflowed to `NaN` when evaluated at a point. `Derivative` of
+  order ≥ 2 now runs a single simplification at the end, cancelling the common
+  factors back to a linear-degree denominator (`x^(2⁷⁵) → x⁷⁶`). It is applied
+  once, not per step, so it is cheap (~30 ms at order 75) and leaves first
+  derivatives and the existing low-order results unchanged.
+
 - **`interval-glsl` is now outward-rounded, making it a sound standalone
   exclusion oracle in `float32` (preview).** As shipped in 0.61.0 the `_iv_*`
   ops clamped to the sentinel range but rounded to nearest, so an operation — or

@@ -205,8 +205,20 @@ export function derivative(
     v = sym(fn.ops[1]) ?? '_';
     fn = fn.ops[0];
   }
+  const originalOrder = order;
   let result: Expression | undefined = fn;
   while (order-- > 0 && result) result = differentiate(result, v);
+
+  // The iterated product/quotient rule squares the denominator at each step,
+  // so an r-th derivative can carry x^(2^r)-scale exponents (e.g. the 75th
+  // derivative of sin(x)/x ends up over x^(2^75)). Left unreduced these
+  // overflow on evaluation. A single simplify at the end cancels the common
+  // factors back to a linear-degree denominator (x^(2^r) -> x^(r+1)); it is
+  // cheap (~30ms even at order 75) precisely because it runs once, not per
+  // step. The coefficients are already exact integers, so this only collapses
+  // structure, it does not change values. Only needed for order >= 2 (a single
+  // derivative cannot blow up), which also leaves the common case untouched.
+  if (result && originalOrder >= 2) result = result.simplify();
   return result;
 }
 

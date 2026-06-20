@@ -231,7 +231,14 @@ export class BigNumericValue extends NumericValue {
     }
 
     if (other.isZero) return this;
-    if (this.isZero) return this.clone(other);
+    // NOTE: must read `other.bignumRe` (full precision), not pass `other`
+    // directly to `clone()` — the BigNumericValue constructor reads `.re`,
+    // which is `decimal.toNumber()` (machine precision), silently truncating a
+    // full-precision bignum. This path is hit on the first iteration of any
+    // zero-seeded accumulator loop (e.g. ExactNumericValue.sum over ≥3 inexact
+    // values), which would otherwise cap the sum at ~16 digits.
+    if (this.isZero)
+      return this.clone({ re: other.bignumRe ?? other.re, im: other.im });
 
     return this.clone({
       re: this.decimal.add(other.bignumRe ?? other.re),
