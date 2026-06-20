@@ -469,10 +469,7 @@ describe('INDEFINITE INTEGRATION', () => {
     test('∫1/(x²(x+1)) dx', () => verify('\\frac{1}{x^2(x+1)}'));
     test('∫1/(x(1+x²)²) dx', () => verify('\\frac{1}{x(1+x^2)^2}'));
     test('∫(1+x²+x³)/((x-1)x(1+x²)²(1+x+x²)) dx (was wrongly 0)', () =>
-      verify(
-        '\\frac{1+x^2+x^3}{(x-1)x(1+x^2)^2(1+x+x^2)}',
-        10_000
-      ));
+      verify('\\frac{1+x^2+x^3}{(x-1)x(1+x^2)^2(1+x+x^2)}', 10_000));
   });
 
   // ∫xᵐ·(a+bx)^p — a radical or power of a linear function (Sqrt and Power
@@ -528,7 +525,11 @@ describe('INDEFINITE INTEGRATION', () => {
     // Symbolic radical sum matches the closed form (no numeric verification).
     test('∫1/(√(a+bx)+√(c+bx)) dx is closed', () => {
       const F = engine
-        .expr(['Integrate', engine.parse('\\frac{1}{\\sqrt{a+bx}+\\sqrt{c+bx}}'), 'x'])
+        .expr([
+          'Integrate',
+          engine.parse('\\frac{1}{\\sqrt{a+bx}+\\sqrt{c+bx}}'),
+          'x',
+        ])
         .evaluate();
       expect(F.has('Integrate')).toBe(false);
     });
@@ -619,9 +620,9 @@ describe('ROADMAP B2: fractional powers and exact partial-fraction coefficients'
   // (2·(1+x²)) was not pulled out, so the quadratic/arctan rules missed and it
   // hit the numeric fallback. The Divide branch now extracts it.
   test('∫x·arctan(x) dx is exact (by-parts coefficient no longer leaks)', () =>
-    expect(
-      noFloats(evaluate('\\int x \\arctan(x) dx'))
-    ).toMatchInlineSnapshot(`1/2 * arctan(x) * x^2 - 1/2 * x + 1/2 * arctan(x)`));
+    expect(noFloats(evaluate('\\int x \\arctan(x) dx'))).toMatchInlineSnapshot(
+      `1/2 * arctan(x) * x^2 - 1/2 * x + 1/2 * arctan(x)`
+    ));
 
   test('∫x²/(2(1+x²)) dx is exact (constant factor in Multiply denominator)', () =>
     expect(
@@ -640,17 +641,23 @@ describe('ROADMAP B2: fractional powers and exact partial-fraction coefficients'
   // arithmetic for the quadratics) now returns the exact closed form. A
   // genuinely ℚ-irreducible quartic (x⁴+x+1) still defers to the numeric path.
   test('∫1/(x⁴−1) dx is exact (two linear + one quadratic factor)', () =>
-    expect(noFloats(evaluate('\\int \\frac{1}{x^4-1} dx'))).toMatchInlineSnapshot(
+    expect(
+      noFloats(evaluate('\\int \\frac{1}{x^4-1} dx'))
+    ).toMatchInlineSnapshot(
       `-1/2 * arctan(x) - 1/4 * ln(|x + 1|) + 1/4 * ln(|x - 1|)`
     ));
 
   test('∫x/(x⁴−1) dx is exact (numerator with the index; was unevaluated)', () =>
-    expect(noFloats(evaluate('\\int \\frac{x}{x^4-1} dx'))).toMatchInlineSnapshot(
+    expect(
+      noFloats(evaluate('\\int \\frac{x}{x^4-1} dx'))
+    ).toMatchInlineSnapshot(
       `-1/4 * ln(x^2 + 1) + 1/4 * ln(|x - 1|) + 1/4 * ln(|x + 1|)`
     ));
 
   test('∫1/(x⁶−1) dx is exact (two linear + two quadratic factors)', () =>
-    expect(noFloats(evaluate('\\int \\frac{1}{x^6-1} dx'))).toMatchInlineSnapshot(
+    expect(
+      noFloats(evaluate('\\int \\frac{1}{x^6-1} dx'))
+    ).toMatchInlineSnapshot(
       `-1/6 * ln(|x + 1|) + 1/6 * ln(|x - 1|) - sqrt(3)/6 * arctan(sqrt(3)/3 * (2x - 1)) - sqrt(3)/6 * arctan(sqrt(3)/3 * (2x + 1)) - 1/12 * ln(x^2 + x + 1) + 1/12 * ln(x^2 - x + 1)`
     ));
 
@@ -665,7 +672,11 @@ describe('ROADMAP B2: fractional powers and exact partial-fraction coefficients'
   // resolvent cubic needs casus-irreducibilis radicals), so it stays on the
   // numeric fallback — value-correct, just not in exact radical form.
   test('∫1/(x⁴+x+1) dx stays on the numeric fallback (still value-correct)', () => {
-    const F = engine.expr(['Integrate', engine.parse('\\frac{1}{x^4+x+1}'), 'x']);
+    const F = engine.expr([
+      'Integrate',
+      engine.parse('\\frac{1}{x^4+x+1}'),
+      'x',
+    ]);
     const result = F.evaluate();
     expect(result.has('Integrate')).toBe(false);
     const dF = engine.expr(['D', result.json as any, 'x']).evaluate();
@@ -688,9 +699,7 @@ describe('ROADMAP B2: non-elementary & radical integrals (leftovers)', () => {
     ce.precision = 'machine';
     try {
       const integrand = ce.parse(integrandLatex);
-      const dAnti = ce
-        .expr(['D', ce.parse(antiderivLatex), 'x'])
-        .evaluate();
+      const dAnti = ce.expr(['D', ce.parse(antiderivLatex), 'x']).evaluate();
       for (const xv of sample) {
         const a = dAnti.subs({ x: xv }).N().re;
         const b = integrand.subs({ x: xv }).N().re;
@@ -805,9 +814,7 @@ describe('ROADMAP B2: non-elementary & radical integrals (leftovers)', () => {
 
   // Powers of tangent/cotangent via the reduction formulas.
   test('∫tan²x dx → tan x − x', () => {
-    expect(evaluate('\\int \\tan^2 x dx')).toMatchInlineSnapshot(
-      `-x + tan(x)`
-    );
+    expect(evaluate('\\int \\tan^2 x dx')).toMatchInlineSnapshot(`-x + tan(x)`);
     checkDeriv('\\tan^2 x', '\\tan x - x');
   });
 
@@ -834,9 +841,9 @@ describe('ROADMAP B2: non-elementary & radical integrals (leftovers)', () => {
   });
 
   test('∫ln²(x)/x dx → ⅓ln³x', () =>
-    expect(
-      evaluate('\\int \\frac{(\\ln x)^2}{x} dx')
-    ).toMatchInlineSnapshot(`1/3 * ln(x)^3`));
+    expect(evaluate('\\int \\frac{(\\ln x)^2}{x} dx')).toMatchInlineSnapshot(
+      `1/3 * ln(x)^3`
+    ));
 
   // Radical / trig-substitution families: xⁿ/√(1−x²).
   test('∫x/√(1−x²) dx → −√(1−x²) (derivative-in-numerator)', () => {
@@ -849,9 +856,7 @@ describe('ROADMAP B2: non-elementary & radical integrals (leftovers)', () => {
   test('∫x²/√(1−x²) dx → ½(arcsin x − x√(1−x²))', () => {
     expect(
       evaluate('\\int \\frac{x^2}{\\sqrt{1-x^2}} dx')
-    ).toMatchInlineSnapshot(
-      `-1/2 * x * sqrt(1 - x^2) + 1/2 * arcsin(x)`
-    );
+    ).toMatchInlineSnapshot(`-1/2 * x * sqrt(1 - x^2) + 1/2 * arcsin(x)`);
     checkDeriv(
       '\\frac{x^2}{\\sqrt{1-x^2}}',
       '\\frac12\\arcsin(x) - \\frac12 x\\sqrt{1-x^2}'
@@ -875,7 +880,10 @@ describe('ROADMAP B2: non-elementary & radical integrals (leftovers)', () => {
     expect(
       evaluate('\\int \\frac{1}{\\sqrt{x^2+x+1}} dx')
     ).toMatchInlineSnapshot(`arsinh(2/3sqrt(3) * x + sqrt(3)/3)`);
-    checkDeriv('\\frac{1}{\\sqrt{x^2+x+1}}', '\\operatorname{arsinh}(\\frac{2x+1}{\\sqrt3})');
+    checkDeriv(
+      '\\frac{1}{\\sqrt{x^2+x+1}}',
+      '\\operatorname{arsinh}(\\frac{2x+1}{\\sqrt3})'
+    );
   });
 
   test('∫x/√(x²+x+1) dx (linear numerator + linear term)', () => {
@@ -891,9 +899,9 @@ describe('ROADMAP B2: non-elementary & radical integrals (leftovers)', () => {
   });
 
   test('∫1/√(2−x²) dx → arcsin(x/√2) (non-unit constant)', () =>
-    expect(
-      evaluate('\\int \\frac{1}{\\sqrt{2-x^2}} dx')
-    ).toMatchInlineSnapshot(`arcsin(sqrt(2)/2 * x)`));
+    expect(evaluate('\\int \\frac{1}{\\sqrt{2-x^2}} dx')).toMatchInlineSnapshot(
+      `arcsin(sqrt(2)/2 * x)`
+    ));
 });
 
 describe('INTEGRATION REGRESSIONS (Rubi Phase-0 findings)', () => {
@@ -1027,11 +1035,11 @@ describe('DEFINITE INTEGRATION', () => {
     expect(evaluate('\\int_0^1 x^3 dx')).toMatchInlineSnapshot(`1/4`));
 
   test('power of n', () =>
-    // The limits are now applied even though the antiderivative is parametric
-    // in `n` (consistent with this block's contract). Without an assumption on
-    // `n`, the `0^(n+1)` / `1^(n+1)` powers can't reduce further.
+    // The limits are applied even though the antiderivative is parametric in
+    // `n` (consistent with this block's contract). `1^(n+1)` reduces to 1, but
+    // without an assumption on `n` the `0^(n+1)` term can't reduce further.
     expect(evaluate('\\int_0^1 x^n dx')).toMatchInlineSnapshot(
-      `-(0^(n + 1)) / (n + 1) + 1^(n + 1) / (n + 1)`
+      `1 / (n + 1) - (0^(n + 1)) / (n + 1)`
     ));
 
   test('sin', () =>
@@ -1135,10 +1143,10 @@ describe('∞ / finite-nonzero divide (B3 Fresnel unblock)', () => {
   test('indeterminate / undefined-sign cases are unchanged', () => {
     // ∞/∞ = NaN, ∞/0 = ~∞, and a could-be-zero constant denominator is left
     // alone (no definite sign ⇒ rule does not fire).
-    expect(engine.PositiveInfinity.div(engine.PositiveInfinity).isNaN).toBe(true);
-    expect(
-      engine.PositiveInfinity.div(engine.Zero).toString()
-    ).toBe('~oo');
+    expect(engine.PositiveInfinity.div(engine.PositiveInfinity).isNaN).toBe(
+      true
+    );
+    expect(engine.PositiveInfinity.div(engine.Zero).toString()).toBe('~oo');
   });
 });
 
@@ -1150,7 +1158,9 @@ describe('isFinite propagation (B3 latent finiteness gap)', () => {
   test('finite symbolic constants are known finite', () => {
     expect(engine.parse('\\sqrt{\\pi}').isFinite).toBe(true);
     expect(engine.parse('\\frac{1}{\\pi}').isFinite).toBe(true);
-    expect(engine.expr(['Power', 'Pi', ['Rational', 1, 3]]).isFinite).toBe(true);
+    expect(engine.expr(['Power', 'Pi', ['Rational', 1, 3]]).isFinite).toBe(
+      true
+    );
     expect(engine.expr(['Power', 'Pi', 2]).isFinite).toBe(true);
     expect(engine.expr(['Power', 'Pi', 'Pi']).isFinite).toBe(true);
     expect(engine.expr(['Power', 2, 1000]).isFinite).toBe(true);
@@ -1353,7 +1363,13 @@ describe('LIMIT', () => {
             'Multiply',
             'x',
             ['Ln', 'x'],
-            ['Square', ['Ln', ['Subtract', ['Multiply', 'x', ['Exp', 'x']], ['Square', 'x']]]],
+            [
+              'Square',
+              [
+                'Ln',
+                ['Subtract', ['Multiply', 'x', ['Exp', 'x']], ['Square', 'x']],
+              ],
+            ],
           ],
           [
             'Ln',
@@ -1365,7 +1381,10 @@ describe('LIMIT', () => {
                 [
                   'Multiply',
                   2,
-                  ['Exp', ['Exp', ['Multiply', 3, ['Power', 'x', 3], ['Ln', 'x']]]],
+                  [
+                    'Exp',
+                    ['Exp', ['Multiply', 3, ['Power', 'x', 3], ['Ln', 'x']]],
+                  ],
                 ],
               ],
             ],
@@ -1386,9 +1405,7 @@ describe('LIMIT', () => {
 
     test('finite point: removable singularity via L’Hôpital', () => {
       expect(lim(['Divide', ['Sin', 'x'], 'x'], 0).re).toBe(1);
-      expect(
-        lim(['Divide', ['Subtract', ['Exp', 'x'], 1], 'x'], 0).re
-      ).toBe(1);
+      expect(lim(['Divide', ['Subtract', ['Exp', 'x'], 1], 'x'], 0).re).toBe(1);
       // two L’Hôpital steps
       expect(
         lim(['Divide', ['Subtract', 1, ['Cos', 'x']], ['Power', 'x', 2]], 0).re
@@ -1406,12 +1423,15 @@ describe('LIMIT', () => {
     });
 
     test('at infinity: rational functions', () => {
-      const r = ['Divide', ['Add', ['Multiply', 2, ['Power', 'x', 2]], 3],
-        ['Subtract', ['Power', 'x', 2], 1]];
+      const r = [
+        'Divide',
+        ['Add', ['Multiply', 2, ['Power', 'x', 2]], 3],
+        ['Subtract', ['Power', 'x', 2], 1],
+      ];
       expect(lim(r, INF).re).toBe(2);
-      expect(
-        lim(['Divide', ['Add', 'x', 1], ['Power', 'x', 2]], INF).re
-      ).toBe(0);
+      expect(lim(['Divide', ['Add', 'x', 1], ['Power', 'x', 2]], INF).re).toBe(
+        0
+      );
       expect(
         lim(['Divide', ['Power', 'x', 2], ['Add', 'x', 1]], INF).isInfinity
       ).toBe(true);
@@ -1422,9 +1442,9 @@ describe('LIMIT', () => {
       expect(
         lim(['Divide', ['Exp', 'x'], ['Power', 'x', 100]], INF).isInfinity
       ).toBe(true);
-      expect(
-        lim(['Divide', ['Power', 'x', 100], ['Exp', 'x']], INF).re
-      ).toBe(0);
+      expect(lim(['Divide', ['Power', 'x', 100], ['Exp', 'x']], INF).re).toBe(
+        0
+      );
       expect(lim(['Divide', ['Ln', 'x'], 'x'], INF).re).toBe(0);
     });
 
@@ -1439,8 +1459,11 @@ describe('LIMIT', () => {
       // (3ˣ+5ˣ)^{1/x} → 5 (dominant exponential base)
       expect(
         lim(
-          ['Power', ['Add', ['Power', 3, 'x'], ['Power', 5, 'x']],
-            ['Divide', 1, 'x']],
+          [
+            'Power',
+            ['Add', ['Power', 3, 'x'], ['Power', 5, 'x']],
+            ['Divide', 1, 'x'],
+          ],
           INF
         ).re
       ).toBe(5);
@@ -1452,7 +1475,9 @@ describe('LIMIT', () => {
 
     test('oscillatory / non-evaluable stays out of the way (numeric NaN)', () => {
       // sin x at ∞ has no limit; symbolic returns undefined, numeric → NaN.
-      expect(engine.expr(['Limit', ['Function', ['Sin', 'x'], 'x'], INF]).N().re).toBeNaN();
+      expect(
+        engine.expr(['Limit', ['Function', ['Sin', 'x'], 'x'], INF]).N().re
+      ).toBeNaN();
     });
   });
 });

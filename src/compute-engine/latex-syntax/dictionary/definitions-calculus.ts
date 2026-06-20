@@ -34,42 +34,40 @@ import { LatexDictionary, Parser, Serializer } from '../types';
  */
 function parseIntegral(command: string, nIntegrals = 1) {
   return (parser: Parser): MathJsonExpression | null => {
-    let done = false;
-
     //
     // 1/ Capture the limits of integration
     //
-    const subs: MathJsonExpression[] = [];
-    const sups: MathJsonExpression[] = [];
-    while (!done) {
-      // Skip space or a `\limits` command
-      parser.skipVisualSpace();
-      parser.match('\\limits');
-      parser.skipSpace();
+    // A single integral sign carries one set of sub/super-script limits.
+    // Consecutive signs are NOT merged into one level here: stacked `\int`s
+    // parse as separate, recursively-nested `Integrate`s — each with its own
+    // limits and differential (see `nIntegrals`) — while `\iint` / `\iiint`
+    // pass nIntegrals=2/3 to bind several differentials to this one level.
 
-      // Are there some superscripts or subscripts?
+    // Skip space or a `\limits` command
+    parser.skipVisualSpace();
+    parser.match('\\limits');
+    parser.skipSpace();
 
-      let sup: MathJsonExpression | null = null;
-      let sub: MathJsonExpression | null = null;
-      while (
-        !(sub !== null && sup !== null) &&
-        (parser.peek === '_' || parser.peek === '^')
-      ) {
-        if (parser.match('_')) sub = parser.parseGroup() ?? parser.parseToken();
-        else if (parser.match('^')) {
-          sup = parser.parseGroup() ?? parser.parseToken();
-        }
-        parser.skipSpace();
+    // Are there some superscripts or subscripts?
+    let sup: MathJsonExpression | null = null;
+    let sub: MathJsonExpression | null = null;
+    while (
+      !(sub !== null && sup !== null) &&
+      (parser.peek === '_' || parser.peek === '^')
+    ) {
+      if (parser.match('_')) sub = parser.parseGroup() ?? parser.parseToken();
+      else if (parser.match('^')) {
+        sup = parser.parseGroup() ?? parser.parseToken();
       }
-      if (isEmptySequence(sub)) sub = null;
-      if (isEmptySequence(sup)) sup = null;
-
-      subs.push(sub ?? 'Nothing');
-      sups.push(sup ?? 'Nothing');
-
-      parser.skipVisualSpace();
-      done = !parser.match(command);
+      parser.skipSpace();
     }
+    if (isEmptySequence(sub)) sub = null;
+    if (isEmptySequence(sup)) sup = null;
+
+    const subs: MathJsonExpression[] = [sub ?? 'Nothing'];
+    const sups: MathJsonExpression[] = [sup ?? 'Nothing'];
+
+    parser.skipVisualSpace();
 
     //
     // 2/ Capture the body of the integral (the integrand)
@@ -355,7 +353,17 @@ function serializeIntegral(command: string) {
       }
 
       const h = operator(limit);
-      if (h === 'Tuple' || h === 'Pair' || h === 'Limits' || h === 'Range') {
+      // A 3-element `Tuple` limit serializes to MathJSON as `Triple` (see
+      // serialize.ts arity mapping), so it must be recognized here too —
+      // otherwise `CircularIntegrate`'s `Triple` limits fall through and emit
+      // `\ointundefined`.
+      if (
+        h === 'Tuple' ||
+        h === 'Triple' ||
+        h === 'Pair' ||
+        h === 'Limits' ||
+        h === 'Range'
+      ) {
         if (nops(limit) === 3) {
           const index = operand(limit, 1);
           indexes.push(symbol(index) ?? 'Nothing');
@@ -409,6 +417,16 @@ function serializeIntegral(command: string) {
     if (prefix.length === 0)
       return `${command}\\,${serializer.serialize(body)}\\!${suffix.join(' ')}`;
 
+    // A flat, single-level multiple integral (`["Integrate", f, limitsX,
+    // limitsY]`, as produced by `\iint` / `\iiint`) serializes back to the
+    // compact `\iint` / `\iiint` (or `\oiint` / `\oiiint`) sign rather than a
+    // stack of `\int`s, so it round-trips to the same structure.
+    const compactSign = compactMultiIntegralSign(command, prefix);
+    if (compactSign !== null)
+      return (
+        compactSign + '\\!' + serializer.serialize(body) + suffix.join(' ')
+      );
+
     // The order of the limits is reversed
     return (
       prefix
@@ -420,6 +438,28 @@ function serializeIntegral(command: string) {
       suffix.join(' ')
     );
   };
+}
+
+/** The compact multi-sign command (`\iint` / `\iiint` / `\oiint` / `\oiiint`)
+ * for a flat 2- or 3-limit integral whose extra limits are bare, or `null` to
+ * fall back to the iterated `\int…\int…` serialization. Those signs carry a
+ * single region subscript, so every limit past the first must be bare —
+ * otherwise the compact form would lose or garble per-variable bounds. (Nested
+ * integrals serialize one limit per level and never reach here.) */
+function compactMultiIntegralSign(
+  command: string,
+  prefix: ReadonlyArray<string | undefined>
+): string | null {
+  const n = prefix.length;
+  if (n !== 2 && n !== 3) return null;
+  const variants: Record<string, [twofold: string, threefold: string]> = {
+    '\\int': ['\\iint', '\\iiint'],
+    '\\oint': ['\\oiint', '\\oiiint'],
+  };
+  const variant = variants[command];
+  if (!variant) return null;
+  if (prefix.slice(1).some((p) => p)) return null;
+  return variant[n - 2] + (prefix[0] ?? '');
 }
 export const DEFINITIONS_CALCULUS: LatexDictionary = [
   {

@@ -169,9 +169,11 @@ describe('PATTERNS  MATCH - Universal wildcard', () => {
        *
        */
       pattern = ['_n', '_a', 'x'];
-      expect(match(pattern, ['Power', '1', 'x'])).toMatchInlineSnapshot(`
+      // Base ≠ 1: `1^x` canonicalizes to `1`, so use `2^x` to keep a 3-element
+      // `Power` to match against.
+      expect(match(pattern, ['Power', '2', 'x'])).toMatchInlineSnapshot(`
         {
-          _a: 1,
+          _a: 2,
           _n: Power,
         }
       `);
@@ -232,7 +234,8 @@ describe('PATTERNS  MATCH - Universal wildcard', () => {
 
     // Multiple wildcards
     pattern = ['_', '_', 'x'];
-    expect(match(pattern, ['Power', '1', 'x'])).toMatchInlineSnapshot(`{}`);
+    // Base ≠ 1: `1^x` canonicalizes to `1`; `2^x` stays a 3-element `Power`.
+    expect(match(pattern, ['Power', '2', 'x'])).toMatchInlineSnapshot(`{}`);
 
     pattern = ['Add', '_', 'n', '_'];
     expect(

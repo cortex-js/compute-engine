@@ -102,6 +102,22 @@
   previously left as an unevaluated `EvaluateAt`), nested definite integrals
   evaluate to a value: `∫_1^2∫_3^4 x·y dx dy → 21/4`.
 
+- **Multiple-integral and contour-integral serialization round-trips.**
+  `\iint` / `\iiint` (and `\oiint` / `\oiiint`) now serialize back to the
+  compact sign with a single region subscript (`\iint_{D}\!…`) instead of a
+  stack of `\int`s, so a flat multiple integral round-trips to the same
+  structure. A separate long-standing bug that emitted the literal text
+  `\ointundefined` for any `\oint` with a region (its limit is a 3-element
+  `Tuple`, serialized to MathJSON as `Triple`, which the serializer did not
+  recognize) is also fixed: `\oint_V f(s)\,ds` now serializes as
+  `\oint_{V}\!f(s)\, \mathrm{d}s`.
+
+- **`1^x` simplifies to `1` for any finite exponent.** A symbolic or function
+  exponent (e.g. `1^{n+1}`, `1^{\sin x}`) previously left `Power(1, x)`
+  un-reduced because the canonicalizer bailed before its base-1 rule. `1^x → 1`
+  now (matching SymPy / Mathematica); only a genuinely infinite or NaN exponent
+  stays indeterminate (`1^∞ → NaN`, unchanged).
+
 ### New Features
 
 - **`interval-glsl`: public outward-rounding helpers and an opt-in absolute trig

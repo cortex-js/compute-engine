@@ -2875,6 +2875,7 @@ export function antiderivative(fn: Expression, index: string): Expression {
   // integrate a concrete integrand: the inner `∫₃⁴ x·y dx` collapses to
   // `7/2·y` before we integrate it over `y`. If it stays unresolved (still an
   // `Integrate`), fall through to the inert path unchanged.
+  // See ../latex-syntax/dictionary/README.md (integral subsystem).
   if (isFunction(fn, 'Integrate')) {
     const inner = fn.evaluate();
     if (!isFunction(inner, 'Integrate')) return antiderivative(inner, index);

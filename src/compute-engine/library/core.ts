@@ -783,6 +783,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           ...ops.slice(1).map((x) => checkType(ce, x, 'value')),
         ]);
       },
+      // EvaluateAt(F, a, b) = F(b) - F(a); it is how a definite integral applies
+      // its limits. See ../latex-syntax/dictionary/README.md (integral subsystem).
       evaluate: ([f, lower, upper], { engine: ce }) => {
         if (upper === undefined) {
           //

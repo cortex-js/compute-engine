@@ -118,6 +118,16 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
     if (b.isNegative === true) return ce.ComplexInfinity;
   }
 
+  // 1^b = 1 for any finite exponent. This must precede the numeric-exponent
+  // guard below: that guard bails on a symbolic or function exponent (e.g.
+  // `1^(n+1)`), which would otherwise leave `1^(n+1)` un-reduced. A genuinely
+  // infinite or NaN exponent (`1^∞`, `1^NaN`) is indeterminate and is
+  // intentionally excluded — it has `isFinite === false` / `isNaN === true` and
+  // falls through to the NaN handling further down. (Matches SymPy / Mathematica,
+  // which both reduce `1^x → 1`.)
+  if (isNumber(a) && a.isSame(1) && b.isFinite !== false && b.isNaN !== true)
+    return ce.One;
+
   // Onwards, the focus on operations is where is a *numeric* exponent.
   // Therefore, exclude cases - which may otherwise be valid - of the exponent either: being a function (e.g.
   // '0 + 0'), a symbol, or of a non-numeric type.

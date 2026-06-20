@@ -97,7 +97,7 @@ D((x) |-> f, x)
 `;
 
 exports[`EXOTIC INTEGRALS \\iiint 1`] = `
-\\int\\int\\int_{V}\\!f(x, y, z)\\, \\mathrm{d}x \\mathrm{d}y \\mathrm{d}z
+\\iiint_{V}\\!f(x, y, z)\\, \\mathrm{d}x \\mathrm{d}y \\mathrm{d}z
 int_(V)(f(x, y, z) dx  dy  dz)
 [
   "Integrate",
@@ -109,7 +109,7 @@ int_(V)(f(x, y, z) dx  dy  dz)
 `;
 
 exports[`EXOTIC INTEGRALS \\iint 1`] = `
-\\int\\int_{D}\\!f(x, y)\\, \\mathrm{d}x \\mathrm{d}y
+\\iint_{D}\\!f(x, y)\\, \\mathrm{d}x \\mathrm{d}y
 int_(D)(f(x, y) dx  dy)
 [
   "Integrate",
@@ -135,13 +135,13 @@ exports[`EXOTIC INTEGRALS \\intop 1`] = `
 `;
 
 exports[`EXOTIC INTEGRALS \\oint - contour integral 1`] = `
-\\ointundefined\\!f(s)
+\\oint_{V}\\!f(s)\\, \\mathrm{d}s
 CircularIntegrate(f(s), (s, V, "Nothing"))
 ["CircularIntegrate", ["f", "s"], ["Triple", "s", "V", "Nothing"]]
 `;
 
 exports[`EXOTIC INTEGRALS \\oint - contour integral, no index 1`] = `
-\\ointundefined\\!f
+\\oint_{C}\\!f
 CircularIntegrate(f, ("Nothing", C, "Nothing"))
 ["CircularIntegrate", "f", ["Triple", "Nothing", "C", "Nothing"]]
 `;
