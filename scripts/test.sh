@@ -32,5 +32,7 @@ elif [ "$VARIANT" = "snapshot" ]  || [ "$VARIANT" = "-snapshot" ]; then
 else
     # Skip Declaration Type test for specific test files - run it directly
     echo "${1}".test.ts
-    npx jest --config ./config/jest.config.cjs ./test/"${1}" --verbose false
+    # Jest 30 changed positional path-pattern matching: a leading `./` no longer
+    # matches, so pass the path without it (e.g. `test/foo`, not `./test/foo`).
+    npx jest --config ./config/jest.config.cjs test/"${1}" --verbose false
 fi

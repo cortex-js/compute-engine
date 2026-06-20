@@ -625,8 +625,8 @@ export class IntervalGLSLTarget extends GLSLTarget {
     );
 
     // Emit the preamble whenever an `_iv_` op is used OR the curve has free
-    // variables a renderer will box — so the public `_iv_widen_t` box-pad helper
-    // is always available even for an op-free curve like `f = x` (§13/Q1).
+    // variables a renderer will box — so the public `_iv_widen_box` box-pad
+    // helper is always available even for an op-free curve like `f = x` (§13/Q1).
     if (code.includes('_iv_') || (result.freeSymbols?.length ?? 0) > 0)
       result.preamble = this.getPreamble({ trigAbsPad });
 

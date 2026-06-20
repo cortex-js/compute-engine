@@ -699,8 +699,11 @@ describe('SYMBOLS', () => {
       // An unknown environment is silently consumed; the key is that
       // \begin and \end names match so no 'unbalanced-environment' error.
       const expr = parse('\\begin{\\alpha}x\\end{\\alpha}');
-      // Unknown environment — content is discarded, but no unbalanced error
-      expect(expr).not.toContain('unbalanced-environment');
+      // Unknown environment — content is discarded, but the \begin and \end
+      // names match (both normalize to 'α'), so this is an `unknown-environment`
+      // error, not `unbalanced-environment`. (`expr` is a BoxedExpression, so
+      // assert against its serialized form, not the expression itself.)
+      expect(expr.toString()).not.toContain('unbalanced-environment');
     });
   });
 });

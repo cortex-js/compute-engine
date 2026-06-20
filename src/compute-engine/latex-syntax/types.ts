@@ -986,8 +986,13 @@ export interface Parser {
    *
    * If `optional` is true, this should be an optional group in square brackets
    * otherwise it is a regular group in braces.
+   *
+   * If `rawTokens` is provided, the raw (un-normalized) tokens of the group
+   * content are appended to it — useful when the same content must be matched
+   * verbatim later (the returned string normalizes commands such as `\alpha`
+   * to unicode, which is lossy).
    */
-  parseStringGroup(optional?: boolean): string | null;
+  parseStringGroup(optional?: boolean, rawTokens?: LatexToken[]): string | null;
 
   /**
    * A symbol can be:

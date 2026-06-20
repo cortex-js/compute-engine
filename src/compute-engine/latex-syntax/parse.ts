@@ -1291,15 +1291,29 @@ export class _Parser implements Parser {
     return result;
   }
 
-  /** Parse a group as a a string, for example for `\operatorname` or `\begin` */
-  parseStringGroup(optional?: boolean): string | null {
+  /** Parse a group as a a string, for example for `\operatorname` or `\begin`.
+   *
+   * If `rawTokens` is provided, the raw (un-normalized) tokens of the group
+   * content are appended to it. The returned string normalizes commands to
+   * unicode (e.g. `\alpha` → `α`), which is lossy; callers that need to match
+   * the same content verbatim later (e.g. the `\end` of an environment) must
+   * use the raw tokens instead.
+   */
+  parseStringGroup(optional?: boolean, rawTokens?: LatexToken[]): string | null {
     if (optional === undefined) optional = false;
     const start = this.index;
     while (this.match('<space>')) {}
     if (this.match(optional ? '[' : '<{>')) {
+      const contentStart = this.index;
       this.addBoundary([optional ? ']' : '<}>']);
       const arg = this.parseStringGroupContent();
-      if (this.matchBoundary()) return arg;
+      if (this.matchBoundary()) {
+        // `matchBoundary()` consumed the closing delimiter, so the content
+        // tokens are everything up to (but not including) it.
+        if (rawTokens)
+          rawTokens.push(...this._tokens.slice(contentStart, this.index - 1));
+        return arg;
+      }
       this.removeBoundary();
     }
 
@@ -1316,10 +1330,23 @@ export class _Parser implements Parser {
 
     if (!this.match('\\begin')) return null;
 
-    const name = this.parseStringGroup()?.trim();
+    // Capture the raw name tokens alongside the normalized name: the name is
+    // used for environment-definition lookup (commands normalized to unicode,
+    // e.g. `\alpha` → `α`), but the matching `\end` boundary must be built from
+    // the raw tokens. Otherwise `\end{\alpha}` — which tokenizes as the
+    // `\alpha` command, not the character `α` — would never match the boundary,
+    // and a balanced environment would be misreported as `unbalanced`. ASCII
+    // names like `cases` are unaffected (each letter tokenizes to itself).
+    const nameTokens: LatexToken[] = [];
+    const name = this.parseStringGroup(false, nameTokens)?.trim();
     if (!name) return this.error('expected-environment-name', index);
 
-    this.addBoundary(['\\end', '<{>', ...name.split(''), '<}>']);
+    // Mirror the `.trim()` applied to `name`: drop surrounding whitespace tokens
+    // so `\begin{ cases }` still matches `\end{cases}`.
+    while (nameTokens[0] === '<space>') nameTokens.shift();
+    while (nameTokens[nameTokens.length - 1] === '<space>') nameTokens.pop();
+
+    this.addBoundary(['\\end', '<{>', ...nameTokens, '<}>']);
 
     for (const def of this.getDefs('environment') as IndexedEnvironmentEntry[])
       if (def.symbolTrigger === name) {
