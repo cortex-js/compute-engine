@@ -545,6 +545,27 @@ parse(latex, options?): Expression | null
 
 <MemberCard>
 
+##### ExpressionComputeEngine.appliedNonFunctions()
+
+```ts
+appliedNonFunctions(latex): string[]
+```
+
+The symbols that appear in function-application syntax `f(…)` in `latex`
+but are not defined as functions in the current scope (so they parse as
+implicit multiplication or are left unresolved). Scope-aware and
+side-effect-free. Intended to flag calls to undefined functions in tools
+such as notebooks; intersect with BoxedExpression.freeVariables
+to drop deliberate multiplication of defined values.
+
+####### latex
+
+`string`
+
+</MemberCard>
+
+<MemberCard>
+
 ##### ExpressionComputeEngine.function()
 
 ```ts
@@ -5009,7 +5030,7 @@ Parse an enclosure (open paren/close paren, etc..) and return the expression ins
 ##### Parser.parseStringGroup()
 
 ```ts
-parseStringGroup(optional?): string | null
+parseStringGroup(optional?, rawTokens?): string | null
 ```
 
 Some LaTeX commands have arguments that are not interpreted as
@@ -5026,9 +5047,18 @@ LaTeX commands are typically not allowed inside a string group (for example,
 If `optional` is true, this should be an optional group in square brackets
 otherwise it is a regular group in braces.
 
+If `rawTokens` is provided, the raw (un-normalized) tokens of the group
+content are appended to it — useful when the same content must be matched
+verbatim later (the returned string normalizes commands such as `\alpha`
+to unicode, which is lossy).
+
 ####### optional?
 
 `boolean`
+
+####### rawTokens?
+
+`string`[]
 
 </MemberCard>
 
@@ -6995,6 +7025,27 @@ parse(latex, options?): Expression | null
 
 <MemberCard>
 
+##### IComputeEngine.appliedNonFunctions()
+
+```ts
+appliedNonFunctions(latex): string[]
+```
+
+The symbols that appear in function-application syntax `f(…)` in `latex`
+but are not defined as functions in the current scope (so they parse as
+implicit multiplication or are left unresolved). Scope-aware and
+side-effect-free. Intended to flag calls to undefined functions in tools
+such as notebooks; intersect with BoxedExpression.freeVariables
+to drop deliberate multiplication of defined values.
+
+####### latex
+
+`string`
+
+</MemberCard>
+
+<MemberCard>
+
 ##### IComputeEngine.function()
 
 ```ts
@@ -8857,6 +8908,30 @@ not operators, not bound to a value, and not locally scoped (e.g.,
 summation/product index variables are excluded).
 
 This is an alias for [unknowns](#unknowns).
+
+</MemberCard>
+
+<MemberCard>
+
+##### Expression.defines
+
+```ts
+readonly defines: readonly string[];
+```
+
+The symbols **defined** by this expression: the target of a top-level
+`["Assign", …]` or `["Declare", …]` (e.g. `a` in `a := 3`, `f` in
+`f(x) := …`), recursing through `["Block", …]` sequences. Empty for
+expressions that define nothing.
+
+Complements [freeVariables](#freevariables) (the symbols an expression
+*references*). A tool that builds a dependency graph keyed on cells —
+e.g. a notebook — can use `defines` for the out-edges and
+`freeVariables` minus `defines` for the in-edges.
+
+:::info[Note]
+Applicable to canonical and non-canonical expressions.
+:::
 
 </MemberCard>
 
