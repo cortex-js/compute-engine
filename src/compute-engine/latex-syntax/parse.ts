@@ -1299,7 +1299,10 @@ export class _Parser implements Parser {
    * the same content verbatim later (e.g. the `\end` of an environment) must
    * use the raw tokens instead.
    */
-  parseStringGroup(optional?: boolean, rawTokens?: LatexToken[]): string | null {
+  parseStringGroup(
+    optional?: boolean,
+    rawTokens?: LatexToken[]
+  ): string | null {
     if (optional === undefined) optional = false;
     const start = this.index;
     while (this.match('<space>')) {}

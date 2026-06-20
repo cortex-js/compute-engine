@@ -38,10 +38,10 @@ integrand is, recursively, the inner `\int`. The result nests:
 Integrate(Function(Integrate(Function(x·y, x), Limits(x,3,4)), y), Limits(y,1,2))
 ```
 
-The load-bearing rule is **`nIntegrals`** (the `parseIntegral(command,
-nIntegrals)` argument): it caps how many trailing differentials a level may
-consume. A single `\int` claims exactly one differential; the rest belong to the
-enclosing integrals.
+The load-bearing rule is **`nIntegrals`** (the
+`parseIntegral(command, nIntegrals)` argument): it caps how many trailing
+differentials a level may consume. A single `\int` claims exactly one
+differential; the rest belong to the enclosing integrals.
 
 - `\int` → 1, `\iint` → 2, `\iiint` → 3 (same for `\oint`/`\oiint`/`\oiiint`).
 - Without this cap the innermost integral greedily swallowed **all** the
@@ -49,12 +49,12 @@ enclosing integrals.
   variable — so the expression could not evaluate. This was the original bug.
 
 Convention: the **innermost** differential pairs with the **innermost** integral
-(`dx` ↔ `\int_3^4`), the next outward differential with the next integral
-(`dy` ↔ `\int_1^2`). Verify any change with **distinct** bounds (`\int_1^2\int_3^4`),
+(`dx` ↔ `\int_3^4`), the next outward differential with the next integral (`dy`
+↔ `\int_1^2`). Verify any change with **distinct** bounds (`\int_1^2\int_3^4`),
 never `\int_0^1\int_0^1`, which can't reveal a swap.
 
-`\iint` / `\iiint` are genuine multi-sign-at-one-level notations: they parse to a
-single, **flat** `Integrate` with 2/3 limits (`nIntegrals` lets one level bind
+`\iint` / `\iiint` are genuine multi-sign-at-one-level notations: they parse to
+a single, **flat** `Integrate` with 2/3 limits (`nIntegrals` lets one level bind
 several differentials). `\int\int` parses to a **nested** `Integrate`. Both are
 correct; they are different expressions.
 
@@ -78,15 +78,15 @@ Two invariants make nested and parametric integrals work:
    `Integrate` (`!result.has('Integrate')`). An older guard required a pure
    number and so left every parametric definite integral unevaluated.
 
-2. **`antiderivative()` collapses an inert nested integral before integrating it**
-   (`symbolic/antiderivative.ts`). The outer integrand of `∫∫ x·y dx dy` is the
-   inner `∫_3^4 x·y dx`, which arrives inert; it is `.evaluate()`d to `7/2·y`
-   first, so the outer integration sees a concrete integrand. Together with (1),
-   `∫_1^2∫_3^4 x·y dx dy → 21/4`.
+2. **`antiderivative()` collapses an inert nested integral before integrating
+   it** (`symbolic/antiderivative.ts`). The outer integrand of `∫∫ x·y dx dy` is
+   the inner `∫_3^4 x·y dx`, which arrives inert; it is `.evaluate()`d to
+   `7/2·y` first, so the outer integration sees a concrete integrand. Together
+   with (1), `∫_1^2∫_3^4 x·y dx dy → 21/4`.
 
 `evaluate()` vs `.N()` honors the exactness contract: an exact integrand stays
-exact/symbolic; only `numericApproximation` routes to `NIntegrate` (Monte-Carlo /
-quadrature). See the project `CLAUDE.md` "Evaluate vs N" section.
+exact/symbolic; only `numericApproximation` routes to `NIntegrate` (Monte-Carlo
+/ quadrature). See the project `CLAUDE.md` "Evaluate vs N" section.
 
 ## Serialization (`serializeIntegral`)
 
@@ -96,9 +96,9 @@ quadrature). See the project `CLAUDE.md` "Evaluate vs N" section.
   `boxed-expression/serialize.ts`), so `Triple` must be in that list — omitting
   it made `\oint` (whose limits are `Tuple`→`Triple`) serialize to the literal
   string `\ointundefined`.
-- A flat 2-/3-limit integral serializes back to the **compact** sign
-  (`\iint` / `\iiint` / `\oiint` / `\oiiint`) via `compactMultiIntegralSign`, so
-  it round-trips to the same structure instead of a `\int\int…` stack. This only
+- A flat 2-/3-limit integral serializes back to the **compact** sign (`\iint` /
+  `\iiint` / `\oiint` / `\oiiint`) via `compactMultiIntegralSign`, so it
+  round-trips to the same structure instead of a `\int\int…` stack. This only
   applies when the extra limits are bare (those signs take a single region
   subscript); otherwise it falls back to the iterated form. Nested integrals
   serialize one limit per level and never hit the compact path.

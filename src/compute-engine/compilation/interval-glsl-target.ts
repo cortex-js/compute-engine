@@ -696,9 +696,7 @@ export class IntervalGLSLTarget extends GLSLTarget {
         '  float _xhi = mix(u_domainX.x, u_domainX.y, _cell.x + _step.x);'
       );
       // Outward-round the box by a pad scaled to the domain extent (§13).
-      main.push(
-        '  float _xext = max(abs(u_domainX.x), abs(u_domainX.y));'
-      );
+      main.push('  float _xext = max(abs(u_domainX.x), abs(u_domainX.y));');
       callArgs.push('_iv_widen_box(vec2(_xlo, _xhi), _xext)');
     }
     if (axisY !== undefined) {
@@ -706,9 +704,7 @@ export class IntervalGLSLTarget extends GLSLTarget {
       main.push(
         '  float _yhi = mix(u_domainY.x, u_domainY.y, _cell.y + _step.y);'
       );
-      main.push(
-        '  float _yext = max(abs(u_domainY.x), abs(u_domainY.y));'
-      );
+      main.push('  float _yext = max(abs(u_domainY.x), abs(u_domainY.y));');
       callArgs.push('_iv_widen_box(vec2(_ylo, _yhi), _yext)');
     }
     main.push(`  vec2 _f = _implicit(${callArgs.join(', ')});`);
