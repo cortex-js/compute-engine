@@ -250,10 +250,37 @@ volumes
       canonical: (ops, { engine: ce }) => {
         if (!ops[0]) return null;
 
-        const f = canonicalFunctionLiteral(ops[0]);
+        const limits = canonicalLimitsSequence(ops.slice(1), { engine: ce });
+
+        let f = canonicalFunctionLiteral(ops[0]);
         if (!f) return null;
 
-        const limits = canonicalLimitsSequence(ops.slice(1), { engine: ce });
+        // Bind only the integration variable(s) from the limits, not every
+        // free symbol. `canonicalFunctionLiteral` infers a parameter for each
+        // free symbol in the body, so a free coefficient (e.g. `a` in
+        // `∫ a·sin(x) dx`, or the wrongly-inferred `F` in `∫ (G−F) dt`) would
+        // become a spurious integrand parameter. Reuse its already-processed
+        // body and re-bind with just the (de-duplicated) integration
+        // variable(s). Skip when the integrand is already an explicit
+        // `Function` (preserve user-supplied parameters) or a bare symbol.
+        if (isFunction(f, 'Function') && ops[0].operator !== 'Function') {
+          const seen = new Set<string>();
+          const vars: Expression[] = [];
+          for (const l of limits) {
+            const v = isFunction(l) ? l.op1 : undefined;
+            if (
+              v &&
+              isSymbol(v) &&
+              v.symbol !== 'Nothing' &&
+              !seen.has(v.symbol)
+            ) {
+              seen.add(v.symbol);
+              vars.push(v);
+            }
+          }
+          if (vars.length > 0) f = ce._fn('Function', [f.op1, ...vars]);
+        }
+
         return ce._fn('Integrate', [f, ...limits]);
       },
 

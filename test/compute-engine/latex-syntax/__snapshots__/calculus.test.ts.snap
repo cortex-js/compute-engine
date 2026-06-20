@@ -224,7 +224,7 @@ int(sin(x) dx) === 2
 
 exports[`INDEFINITE INTEGRAL Index in addition 1`] = `
 \\int\\!kx+3x\\, \\mathrm{d}x=2
-int(k * x + 3x dk  dx) === 2
+int(k * x + 3x dx) === 2
 [
   "Equal",
   [
@@ -232,7 +232,6 @@ int(k * x + 3x dk  dx) === 2
     [
       "Function",
       ["Add", ["Multiply", "k", "x"], ["Multiply", 3, "x"]],
-      "k",
       "x"
     ],
     ["Limits", "x", "Nothing", "Nothing"]
@@ -600,7 +599,7 @@ D(D(D((t) |-> y, t), t), t)
 
 exports[`REAL WORLD INTEGRALS Integral with non standard typesetting 1`] = `
 \\mathrm{S_{t}}=\\mathrm{S_0}+\\int_{\\mathrm{t_{i}}}^{\\mathrm{t_{e}}}\\!G-F\\, \\mathrm{d}t
-"S_t" === "S_0" + int_("t_i")^("t_e")(-F + "CatalanConstant" dF)
+"S_t" === "S_0" + int_("t_i")^("t_e")(-F + "CatalanConstant" dt)
 [
   "Equal",
   "S_t",
@@ -609,7 +608,7 @@ exports[`REAL WORLD INTEGRALS Integral with non standard typesetting 1`] = `
     "S_0",
     [
       "Integrate",
-      ["Function", ["Subtract", "CatalanConstant", "F"], "F"],
+      ["Function", ["Subtract", "CatalanConstant", "F"], "t"],
       ["Limits", "t", "t_i", "t_e"]
     ]
   ]

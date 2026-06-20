@@ -349,11 +349,19 @@ describe('FREE_VARIABLES (lambdas & integrals)', () => {
   });
 
   it('integral: keeps a free coefficient (regression)', () => {
-    // ∫ a·sin(x) dx depends on a, not x. The integrand Function over-lists
-    // `a` as a parameter, so naive parameter-exclusion would drop it.
+    // ∫ a·sin(x) dx depends on a, not x.
     const expr = engine.parse('\\int_0^\\pi a \\sin(x) \\, dx');
     expect(expr.freeVariables).toContain('a');
     expect(expr.freeVariables).not.toContain('x');
+  });
+
+  it('integral: integrand binds only the integration variable', () => {
+    // The canonical integrand Function binds only x (not the free coefficient
+    // a), so introspecting the integrand directly is correct — not just the
+    // whole integral.
+    const integrand = engine.parse('\\int_0^\\pi a \\sin(x) \\, dx').op1;
+    expect(integrand.operator).toBe('Function');
+    expect(integrand.unknowns).toEqual(['a']);
   });
 
   it('integral: keeps free bounds', () => {

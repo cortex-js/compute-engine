@@ -53,6 +53,13 @@
   (A sufficiently complex single call can still exceed the native stack before
   the limit is reached, so a robust caller catches `RangeError` as a backstop.)
 
+- **`Integrate` binds only the integration variable in its canonical
+  integrand.** `∫ a·sin(x) dx` previously canonicalized to
+  `Integrate(Function(body, a, x), …)`, listing the free coefficient `a` as a
+  spurious integrand parameter; it is now `Integrate(Function(body, x), …)`.
+  Introspecting the integrand (`expr.op1`) therefore reports `a` as free, and
+  the integrand is a proper single-variable function. Evaluation is unchanged.
+
 ### New Features
 
 - **`interval-glsl`: public outward-rounding helpers and an opt-in absolute trig
