@@ -2870,6 +2870,16 @@ export function antiderivative(fn: Expression, index: string): Expression {
 
   const ce = fn.engine;
 
+  // A nested definite integral — the inner `∫` of a multivariate
+  // `∫∫ f dx dy` — reaches the outer antiderivative inert. Evaluate it so we
+  // integrate a concrete integrand: the inner `∫₃⁴ x·y dx` collapses to
+  // `7/2·y` before we integrate it over `y`. If it stays unresolved (still an
+  // `Integrate`), fall through to the inert path unchanged.
+  if (isFunction(fn, 'Integrate')) {
+    const inner = fn.evaluate();
+    if (!isFunction(inner, 'Integrate')) return antiderivative(inner, index);
+  }
+
   // Is it the index?
   if (sym(fn) === index) return ce.expr(['Divide', ['Power', fn, 2], 2]);
 

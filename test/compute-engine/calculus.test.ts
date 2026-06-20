@@ -1027,8 +1027,11 @@ describe('DEFINITE INTEGRATION', () => {
     expect(evaluate('\\int_0^1 x^3 dx')).toMatchInlineSnapshot(`1/4`));
 
   test('power of n', () =>
+    // The limits are now applied even though the antiderivative is parametric
+    // in `n` (consistent with this block's contract). Without an assumption on
+    // `n`, the `0^(n+1)` / `1^(n+1)` powers can't reduce further.
     expect(evaluate('\\int_0^1 x^n dx')).toMatchInlineSnapshot(
-      `((x) |-> x^(n + 1) / (n + 1))|_(0)^(1)`
+      `-(0^(n + 1)) / (n + 1) + 1^(n + 1) / (n + 1)`
     ));
 
   test('sin', () =>

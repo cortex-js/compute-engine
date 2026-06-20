@@ -791,8 +791,11 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           // Let's try to evaluate the function
           const result = apply(f, [lower]);
 
-          // If we did get a number, return it
-          if (isNumber(result)) return result;
+          // Return the reduced value, including symbolic results (e.g. with
+          // free variables). Only keep the symbolic `EvaluateAt` form when the
+          // application stalled on an unresolved antiderivative (its body still
+          // contains an inert `Integrate`).
+          if (result && !result.has('Integrate')) return result;
 
           // Fallback: return unevaluated symbolic form
           return ce._fn('EvaluateAt', [f, lower]);
@@ -804,7 +807,17 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // Let's try to evaluate the function
         const fLower = apply(f, [lower]);
         const fUpper = apply(f, [upper]);
-        if (fLower && fUpper && isNumber(fLower.N()) && isNumber(fUpper.N())) {
+        // Reduce to `f(b) - f(a)` whenever both applications succeed and
+        // neither stalled on an unresolved antiderivative. The result may be
+        // symbolic — e.g. `7/2·k` when integrating `k·x`, or the outer
+        // variable of a nested integral (`∫∫ x·y dx dy`) — which is exactly
+        // what definite integration of a parametric integrand should yield.
+        if (
+          fLower &&
+          fUpper &&
+          !fLower.has('Integrate') &&
+          !fUpper.has('Integrate')
+        ) {
           return fUpper.sub(fLower);
         }
         // Fallback: return unevaluated symbolic form

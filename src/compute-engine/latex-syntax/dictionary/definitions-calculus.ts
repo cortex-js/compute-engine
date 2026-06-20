@@ -24,8 +24,15 @@ import { LatexDictionary, Parser, Serializer } from '../types';
  *
  * When this function is called, the first `\int` has already been matched.
  *
+ * `nIntegrals` is the number of integral signs the matched command stands for
+ * (`\int` → 1, `\iint` → 2, `\iiint` → 3, etc.). It bounds how many trailing
+ * differentials (`dx dy …`) this level may consume. Without this bound the
+ * innermost integral of a nested expression (`\int\int … dx dy`) would greedily
+ * swallow *all* the differentials, leaving the outer integrals with no
+ * integration variable.
+ *
  */
-function parseIntegral(command: string) {
+function parseIntegral(command: string, nIntegrals = 1) {
   return (parser: Parser): MathJsonExpression | null => {
     let done = false;
 
@@ -70,7 +77,7 @@ function parseIntegral(command: string) {
     //
 
     // eslint-disable-next-line prefer-const
-    let [fn, indexes] = parseIntegralBody(parser);
+    let [fn, indexes] = parseIntegralBody(parser, nIntegrals);
 
     if (fn && indexes.length === 0) {
       if (operator(fn) === 'Add' || operator(fn) === 'Subtract') {
@@ -184,9 +191,15 @@ function makeIntegral(
   return [command, fn, ...tuples];
 }
 
-/**  Parse the body of an integral (up to a relational operator, or the boundary) */
+/**  Parse the body of an integral (up to a relational operator, or the boundary)
+ *
+ * `maxIndexes` caps how many trailing differentials this integral level
+ * consumes (see `parseIntegral`). The remaining differentials are left in the
+ * stream for the enclosing integrals of a nested expression.
+ */
 function parseIntegralBody(
-  parser: Parser
+  parser: Parser,
+  maxIndexes = 1
 ): [body: MathJsonExpression | null, indexes: string[]] {
   let found = false;
 
@@ -204,15 +217,19 @@ function parseIntegralBody(
   // expression, perhaps it was in a subexpression, e.g. `\frac{dx}{x}` or `3xdx`
   if (fn !== null && !found) return parseSubintegrand(fn);
 
-  return [fn, parseIndexes(parser)];
+  return [fn, parseIndexes(parser, maxIndexes)];
 }
 
 /** Assuming we are at a differential operator, parse one
  * or more indexes that follow it.
+ *
+ * At most `maxIndexes` indexes are consumed: a single `\int` claims one
+ * differential, `\iint` two, etc. Any further differentials belong to the
+ * enclosing integral(s) of a nested expression and are left untouched.
  */
-function parseIndexes(parser: Parser): string[] {
+function parseIndexes(parser: Parser, maxIndexes: number): string[] {
   const indexes: string[] = [];
-  while (matchDifferentialOperator(parser)) {
+  while (indexes.length < maxIndexes && matchDifferentialOperator(parser)) {
     parser.skipVisualSpace();
     const index = symbol(parser.parseSymbol());
     if (index === null) return indexes;
@@ -416,12 +433,12 @@ export const DEFINITIONS_CALCULUS: LatexDictionary = [
   {
     kind: 'expression',
     latexTrigger: ['\\iint'],
-    parse: parseIntegral('Integrate'),
+    parse: parseIntegral('Integrate', 2),
   },
   {
     kind: 'expression',
     latexTrigger: ['\\iiint'],
-    parse: parseIntegral('Integrate'),
+    parse: parseIntegral('Integrate', 3),
   },
   {
     kind: 'expression',
@@ -433,12 +450,12 @@ export const DEFINITIONS_CALCULUS: LatexDictionary = [
   {
     kind: 'expression',
     latexTrigger: ['\\oiint'],
-    parse: parseIntegral('CircularIntegrate'),
+    parse: parseIntegral('CircularIntegrate', 2),
   },
   {
     kind: 'expression',
     latexTrigger: ['\\oiiint'],
-    parse: parseIntegral('CircularIntegrate'),
+    parse: parseIntegral('CircularIntegrate', 3),
   },
 ];
 

@@ -60,6 +60,19 @@
   Introspecting the integrand (`expr.op1`) therefore reports `a` as free, and
   the integrand is a proper single-variable function. Evaluation is unchanged.
 
+- **Nested (multivariate) integrals now parse and evaluate correctly.**
+  `\int_1^2\int_3^4 x y \, dx \, dy` previously attached _all_ the trailing
+  differentials to the innermost integral, leaving the outer integrals with a
+  `Nothing` integration variable — so the expression could not evaluate. Each
+  `\int` now consumes only its own differential (the innermost `dx` pairs with
+  the innermost `\int`, the next `dy` with the next), producing a properly
+  nested `Integrate` where every level carries its own variable and limits
+  (`\iint` / `\iiint` still bind 2 / 3 variables at one level). Combined with
+  the definite-integral evaluator now applying the limits to a _parametric_
+  antiderivative (e.g. `∫_3^4 k·x dx → 7/2·k`; the symbolic `f(b) - f(a)` was
+  previously left as an unevaluated `EvaluateAt`), nested definite integrals
+  evaluate to a value: `∫_1^2∫_3^4 x·y dx dy → 21/4`.
+
 ### New Features
 
 - **`interval-glsl`: public outward-rounding helpers and an opt-in absolute trig

@@ -458,26 +458,26 @@ D(g(t), t)
 `;
 
 exports[`MULTIPLE INTEGRALS Double integral 1`] = `
-\\int_{1}^{2}\\!\\int\\int_{0}^{1}\\!x^2+y^2\\, \\mathrm{d}x \\mathrm{d}y
-int_(1)^(2)(int_(0)^(1)(x^2 + y^2 dx  dy))
+\\int_{1}^{2}\\!\\int_{0}^{1}\\!x^2+y^2\\, \\mathrm{d}x\\, \\mathrm{d}y
+int_(1)^(2)(int_(0)^(1)(x^2 + y^2 dx) dy)
 [
   "Integrate",
   [
     "Function",
     [
       "Integrate",
-      ["Function", ["Add", ["Square", "x"], ["Square", "y"]], "x", "y"],
-      ["Limits", "x", 0, 1],
-      ["Limits", "y", "Nothing", "Nothing"]
-    ]
+      ["Function", ["Add", ["Square", "x"], ["Square", "y"]], "x"],
+      ["Limits", "x", 0, 1]
+    ],
+    "y"
   ],
-  ["Limits", "Nothing", 1, 2]
+  ["Limits", "y", 1, 2]
 ]
 `;
 
 exports[`MULTIPLE INTEGRALS Double integral with repeated index 1`] = `
-\\int_{1}^{2}\\!\\int\\int_{0}^{1}\\!x^2\\, \\mathrm{d}x \\mathrm{d}x
-int_(1)^(2)(int_(0)^(1)(x^2 dx))
+\\int_{1}^{2}\\!\\int_{0}^{1}\\!x^2\\, \\mathrm{d}x\\, \\mathrm{d}x
+int_(1)^(2)(int_(0)^(1)(x^2 dx) dx)
 [
   "Integrate",
   [
@@ -485,17 +485,17 @@ int_(1)^(2)(int_(0)^(1)(x^2 dx))
     [
       "Integrate",
       ["Function", ["Square", "x"], "x"],
-      ["Limits", "x", 0, 1],
-      ["Limits", "x", "Nothing", "Nothing"]
-    ]
+      ["Limits", "x", 0, 1]
+    ],
+    "x"
   ],
-  ["Limits", "Nothing", 1, 2]
+  ["Limits", "x", 1, 2]
 ]
 `;
 
 exports[`MULTIPLE INTEGRALS Triple integral 1`] = `
-\\int_{1}^{2}\\!\\int_{0}^{1}\\!\\int\\int\\int_{3}^{4}\\!x^2+y^2+z^2\\, \\mathrm{d}x \\mathrm{d}y \\mathrm{d}z
-int_(1)^(2)(int_(0)^(1)(int_(3)^(4)(x^2 + y^2 + z^2 dx  dy  dz)))
+\\int_{1}^{2}\\!\\int_{0}^{1}\\!\\int_{3}^{4}\\!x^2+y^2+z^2\\, \\mathrm{d}x\\, \\mathrm{d}y\\, \\mathrm{d}z
+int_(1)^(2)(int_(0)^(1)(int_(3)^(4)(x^2 + y^2 + z^2 dx) dy) dz)
 [
   "Integrate",
   [
@@ -509,25 +509,23 @@ int_(1)^(2)(int_(0)^(1)(int_(3)^(4)(x^2 + y^2 + z^2 dx  dy  dz)))
           [
             "Function",
             ["Add", ["Square", "x"], ["Square", "y"], ["Square", "z"]],
-            "x",
-            "y",
-            "z"
+            "x"
           ],
-          ["Limits", "x", 3, 4],
-          ["Limits", "y", "Nothing", "Nothing"],
-          ["Limits", "z", "Nothing", "Nothing"]
-        ]
+          ["Limits", "x", 3, 4]
+        ],
+        "y"
       ],
-      ["Limits", "Nothing", 0, 1]
-    ]
+      ["Limits", "y", 0, 1]
+    ],
+    "z"
   ],
-  ["Limits", "Nothing", 1, 2]
+  ["Limits", "z", 1, 2]
 ]
 `;
 
 exports[`MULTIPLE INTEGRALS Triple integral with \\limits and spacing 1`] = `
-\\int_{1}^{2}\\!\\int_{0}^{1}\\!\\int\\int\\int_{3}^{4}\\!x^2+y^2+z^2\\, \\mathrm{d}x \\mathrm{d}y \\mathrm{d}z
-int_(1)^(2)(int_(0)^(1)(int_(3)^(4)(x^2 + y^2 + z^2 dx  dy  dz)))
+\\int_{1}^{2}\\!\\int_{0}^{1}\\!\\int_{3}^{4}\\!x^2+y^2+z^2\\, \\mathrm{d}x\\, \\mathrm{d}y\\, \\mathrm{d}z
+int_(1)^(2)(int_(0)^(1)(int_(3)^(4)(x^2 + y^2 + z^2 dx) dy) dz)
 [
   "Integrate",
   [
@@ -541,19 +539,17 @@ int_(1)^(2)(int_(0)^(1)(int_(3)^(4)(x^2 + y^2 + z^2 dx  dy  dz)))
           [
             "Function",
             ["Add", ["Square", "x"], ["Square", "y"], ["Square", "z"]],
-            "x",
-            "y",
-            "z"
+            "x"
           ],
-          ["Limits", "x", 3, 4],
-          ["Limits", "y", "Nothing", "Nothing"],
-          ["Limits", "z", "Nothing", "Nothing"]
-        ]
+          ["Limits", "x", 3, 4]
+        ],
+        "y"
       ],
-      ["Limits", "Nothing", 0, 1]
-    ]
+      ["Limits", "y", 0, 1]
+    ],
+    "z"
   ],
-  ["Limits", "Nothing", 1, 2]
+  ["Limits", "z", 1, 2]
 ]
 `;
 
