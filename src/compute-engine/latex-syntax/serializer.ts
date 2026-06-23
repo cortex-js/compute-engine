@@ -403,10 +403,7 @@ export class Serializer {
     return this.options.numericSetStyle(expr, level);
   }
 
-  indexStyle(
-    expr: MathJsonExpression,
-    level: number
-  ): 'subscript' | 'bracket' {
+  indexStyle(expr: MathJsonExpression, level: number): 'subscript' | 'bracket' {
     return this.options.indexStyle(expr, level);
   }
 }
