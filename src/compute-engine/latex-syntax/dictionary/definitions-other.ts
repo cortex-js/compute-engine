@@ -55,6 +55,28 @@ function parseSingleArg(cmd: string): (parser: Parser) => MathJsonExpression {
   };
 }
 
+/** Build a dictionary entry for a LaTeX command that takes a single braced
+ *  argument and maps to a MathJSON decoration operator (accents, over/under
+ *  arrows and braces), e.g. `\hat{x}` ↔ `["OverHat", x]`. Defining parse and
+ *  serialize together keeps the two directions symmetric: without an explicit
+ *  serializer these fall back to function-call notation (`\hat(x)`), which does
+ *  not round-trip. */
+function singleArgCommand(
+  name: MathJsonSymbol,
+  cmd: string
+): LatexDictionary[number] {
+  return {
+    name,
+    latexTrigger: [cmd],
+    parse: parseSingleArg(name),
+    serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
+      const arg = operand(expr, 1);
+      if (arg === null) return cmd;
+      return `${cmd}{${serializer.serialize(arg)}}`;
+    },
+  };
+}
+
 /** Parse a LaTeX "switch" command that sets a math style for everything
  *  following it in the current group (e.g. `{\displaystyle x+y}`). */
 function parseMathStyleSwitch(
@@ -211,76 +233,20 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
     },
     precedence: 740,
   },
-  {
-    name: 'OverBar',
-    latexTrigger: ['\\overline'],
-    parse: parseSingleArg('OverBar'),
-  },
-  {
-    name: 'UnderBar',
-    latexTrigger: ['\\underline'],
-    parse: parseSingleArg('UnderBar'),
-  },
-  {
-    name: 'OverVector',
-    latexTrigger: ['\\vec'],
-    parse: parseSingleArg('OverVector'),
-  },
-  {
-    name: 'OverTilde',
-    latexTrigger: ['\\tilde'],
-    parse: parseSingleArg('OverTilde'),
-  },
-  {
-    name: 'OverHat',
-    latexTrigger: ['\\hat'],
-    parse: parseSingleArg('OverHat'),
-  },
-  {
-    name: 'OverRightArrow',
-    latexTrigger: ['\\overrightarrow'],
-    parse: parseSingleArg('OverRightArrow'),
-  },
-  {
-    name: 'OverLeftArrow',
-    latexTrigger: ['\\overleftarrow'],
-    parse: parseSingleArg('OverLeftArrow'),
-  },
-  {
-    name: 'OverRightDoubleArrow',
-    latexTrigger: ['\\Overrightarrow'],
-    parse: parseSingleArg('OverRightDoubleArrow'),
-  },
-  {
-    name: 'OverLeftHarpoon',
-    latexTrigger: ['\\overleftharpoon'],
-    parse: parseSingleArg('OverLeftHarpoon'),
-  },
-  {
-    name: 'OverRightHarpoon',
-    latexTrigger: ['\\overrightharpoon'],
-    parse: parseSingleArg('OverRightHarpoon'),
-  },
-  {
-    name: 'OverLeftRightArrow',
-    latexTrigger: ['\\overleftrightarrow'],
-    parse: parseSingleArg('OverLeftRightArrow'),
-  },
-  {
-    name: 'OverBrace',
-    latexTrigger: ['\\overbrace'],
-    parse: parseSingleArg('OverBrace'),
-  },
-  {
-    name: 'OverLineSegment',
-    latexTrigger: ['\\overlinesegment'],
-    parse: parseSingleArg('OverLineSegment'),
-  },
-  {
-    name: 'OverGroup',
-    latexTrigger: ['\\overgroup'],
-    parse: parseSingleArg('OverGroup'),
-  },
+  singleArgCommand('OverBar', '\\overline'),
+  singleArgCommand('UnderBar', '\\underline'),
+  singleArgCommand('OverVector', '\\vec'),
+  singleArgCommand('OverTilde', '\\tilde'),
+  singleArgCommand('OverHat', '\\hat'),
+  singleArgCommand('OverRightArrow', '\\overrightarrow'),
+  singleArgCommand('OverLeftArrow', '\\overleftarrow'),
+  singleArgCommand('OverRightDoubleArrow', '\\Overrightarrow'),
+  singleArgCommand('OverLeftHarpoon', '\\overleftharpoon'),
+  singleArgCommand('OverRightHarpoon', '\\overrightharpoon'),
+  singleArgCommand('OverLeftRightArrow', '\\overleftrightarrow'),
+  singleArgCommand('OverBrace', '\\overbrace'),
+  singleArgCommand('OverLineSegment', '\\overlinesegment'),
+  singleArgCommand('OverGroup', '\\overgroup'),
 
   {
     latexTrigger: ['\\textcolor'],

@@ -24,7 +24,7 @@ import {
   Serializer,
   Terminator,
 } from '../types';
-import { joinLatex } from '../tokenizer';
+import { joinLatex, supsub } from '../tokenizer';
 import { isEquationOperator, isInequalityOperator } from '../utils';
 import { BoxedType } from '../../../common/type/boxed-type';
 import { parseQuantifier } from './definitions-logic';
@@ -755,8 +755,20 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     precedence: 810,
     latexTrigger: ['['],
     parse: parseAt(']'),
-    serialize: (serializer, expr) =>
-      joinLatex(['\\lbrack', serializeOps(', ')(serializer, expr), '\\rbrack']),
+    serialize: (serializer, expr) => {
+      // `At(collection, index, ...)`: the first operand is the collection
+      // being indexed, the rest are the indices.
+      const ops = operands(expr);
+      const base = serializer.serialize(ops[0] ?? 'Nothing');
+      const indices = ops.slice(1).map((i) => serializer.serialize(i));
+      if (serializer.indexStyle(expr, serializer.level) === 'bracket') {
+        // Programming-style `v[1]` / `M[i,j]`. Uses literal brackets (not
+        // `\lbrack`), which is what the postfix `[` index parser accepts.
+        return joinLatex([base, '[', indices.join(', '), ']']);
+      }
+      // Subscript notation `v_1` / `M_{i,j}` (default).
+      return supsub('_', base, indices.join(','));
+    },
   },
   {
     kind: 'postfix',

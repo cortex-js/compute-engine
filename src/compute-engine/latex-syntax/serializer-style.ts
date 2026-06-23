@@ -112,6 +112,13 @@ export function getNumericSetStyle(
   return 'compact';
 }
 
+export function getIndexStyle(
+  _expr: MathJsonExpression,
+  _level: number
+): 'subscript' | 'bracket' {
+  return 'subscript';
+}
+
 // Apply template strings to the expression
 // The template string s is a LaTeX template string with two placeholders: #1 and #2
 // (if the placeholders are omitted, they are assumed to precede and follow the

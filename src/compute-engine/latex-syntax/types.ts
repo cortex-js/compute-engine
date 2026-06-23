@@ -1204,6 +1204,21 @@ export type SerializeLatexOptions = NumberSerializationFormat & {
   ) => 'compact' | 'regular' | 'interval' | 'set-builder';
 
   /**
+   * Notation used to serialize collection indexing (the `At` operator), e.g.
+   * `["At", v, 1]`.
+   *
+   * - `'subscript'` (default): `v_1`, `M_{i,j}` — conventional mathematical
+   *   notation, symmetric with how subscript indexing of an
+   *   `indexed_collection` parses.
+   * - `'bracket'`: `v[1]`, `M[i,j]` — programming-style indexing, which always
+   *   round-trips back to `At` even when the collection symbol is not declared.
+   */
+  indexStyle: (
+    expr: MathJsonExpression,
+    level: number
+  ) => 'subscript' | 'bracket';
+
+  /**
    * When `true`, member-access heads serialize to dot notation:
    * - `First(p)` → `p.x`
    * - `Second(p)` → `p.y`
@@ -1408,6 +1423,11 @@ export interface Serializer {
     expr: MathJsonExpression,
     level: number
   ) => 'compact' | 'regular' | 'interval' | 'set-builder';
+
+  indexStyle: (
+    expr: MathJsonExpression,
+    level: number
+  ) => 'subscript' | 'bracket';
 }
 
 /** The `serialize` handler of a custom LaTeX dictionary entry can be

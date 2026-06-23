@@ -673,6 +673,52 @@ describe('TYPE-AWARE SUBSCRIPT HANDLING', () => {
       ]
     `);
   });
+
+  test('At serializes as a subscript by default, brackets on request', () => {
+    const { ComputeEngine } = require('../../../src/compute-engine');
+    const ce2 = new ComputeEngine();
+    ce2.declare('v', 'list<number>');
+    ce2.declare('A', 'matrix<number>');
+
+    // Default: subscript notation (symmetric with how subscript indexing parses)
+    expect(ce2.box(['At', 'v', 1]).latex).toMatchInlineSnapshot(`v_1`);
+    expect(ce2.box(['At', 'A', 'k', 'j']).latex).toMatchInlineSnapshot(
+      `A_{k,j}`
+    );
+    expect(ce2.box(['At', 'v', ['Add', 'n', 1]]).latex).toMatchInlineSnapshot(
+      `v_{n+1}`
+    );
+
+    // Opt-in bracket (programming-style) notation
+    expect(
+      ce2.box(['At', 'v', 1]).toLatex({ indexStyle: () => 'bracket' })
+    ).toMatchInlineSnapshot(`v[1]`);
+    expect(
+      ce2.box(['At', 'A', 'k', 'j']).toLatex({ indexStyle: () => 'bracket' })
+    ).toMatchInlineSnapshot(`A[k, j]`);
+
+    // Both forms round-trip back to At (collection symbol in scope)
+    expect(ce2.parse(ce2.box(['At', 'v', 1]).latex).json)
+      .toMatchInlineSnapshot(`
+      [
+        At,
+        v,
+        1,
+      ]
+    `);
+    expect(
+      ce2.parse(
+        ce2.box(['At', 'A', 'k', 'j']).toLatex({ indexStyle: () => 'bracket' })
+      ).json
+    ).toMatchInlineSnapshot(`
+      [
+        At,
+        A,
+        k,
+        j,
+      ]
+    `);
+  });
 });
 
 describe('PRIME', () => {

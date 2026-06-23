@@ -402,6 +402,13 @@ export class Serializer {
   ): 'compact' | 'regular' | 'interval' | 'set-builder' {
     return this.options.numericSetStyle(expr, level);
   }
+
+  indexStyle(
+    expr: MathJsonExpression,
+    level: number
+  ): 'subscript' | 'bracket' {
+    return this.options.indexStyle(expr, level);
+  }
 }
 
 export function appendLatex(src: string, s: string): string {

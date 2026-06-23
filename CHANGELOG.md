@@ -1,6 +1,30 @@
 ## [Unreleased]
 
+### New Features
+
+- **`indexStyle` serialization option for collection indexing.** The `At`
+  operator (e.g. `["At", v, 1]`) can now be serialized either as a subscript
+  (`v_1`, `M_{i,j}`) or with programming-style brackets (`v[1]`, `M[i,j]`).
+  Like the other style options (`fractionStyle`, `rootStyle`, …) it is a
+  callback `(expr, level) => 'subscript' | 'bracket'`, settable engine-wide via
+  `ce.latexOptions.indexStyle` or per-call via `expr.toLatex({ indexStyle })`.
+  The default is `'subscript'`.
+
 ### Resolved Issues
+
+- **Collection indexing (`At`) now serializes to valid, round-tripping LaTeX.**
+  `["At", v, 1]` previously serialized to `\lbrack v, 1\rbrack` — i.e. the
+  _list_ `[v, 1]`, which re-parsed as `["List", v, 1]`, silently changing the
+  meaning on a serialize→parse cycle. It now serializes as `v_1` (or `v[1]`
+  with `indexStyle: 'bracket'`), both of which parse back to `At`.
+
+- **Accents and decorations serialize with brace notation and round-trip.**
+  `OverHat`, `OverVector`, `OverTilde`, `OverBar`, `UnderBar`, the over-arrows,
+  `OverBrace`, etc. had no serializer and fell back to function-call notation —
+  `\hat{x}` came back out as `\hat(x)`, which re-parsed to
+  `["Multiply", x, ["OverHat"]]` instead of `["OverHat", x]`. They now serialize
+  as `\hat{x}`, `\vec{v}`, `\overline{x}`, … and round-trip correctly,
+  including when subscripted (`\hat{x}_0`).
 
 - **Subscripted single-letter symbols serialize with an italic base instead of
   an upright one.** When a symbol name carried a subscript (e.g. `a_1`, `x_n`,

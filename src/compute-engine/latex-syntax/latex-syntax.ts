@@ -24,6 +24,7 @@ import {
   getApplyFunctionStyle,
   getFractionStyle,
   getGroupStyle,
+  getIndexStyle,
   getLogicStyle,
   getNumericSetStyle,
   getPowerStyle,
@@ -186,6 +187,7 @@ function defaultSerializeOptions(
     logicStyle: getLogicStyle,
     powerStyle: getPowerStyle,
     numericSetStyle: getNumericSetStyle,
+    indexStyle: getIndexStyle,
   };
 }
 

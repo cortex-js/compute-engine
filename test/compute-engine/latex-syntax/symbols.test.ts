@@ -735,3 +735,32 @@ describe('Prefixed symbol with invalid body (REVIEW.md C5)', () => {
     expect(exprToString(parse('\\mathrm{abc}'))).toBe('abc');
   });
 });
+
+describe('ACCENT COMMANDS', () => {
+  // Accents/decorations (\hat, \vec, \tilde, \overline, ...) serialize back to
+  // brace notation and round-trip, instead of falling back to function-call
+  // form (\hat(x)), which did not re-parse to the same expression.
+  test('accent commands serialize with braces and round-trip', () => {
+    for (const s of [
+      '\\hat{x}',
+      '\\vec{v}',
+      '\\tilde{y}',
+      '\\overline{x}',
+      '\\underline{x}',
+      '\\overrightarrow{AB}',
+      '\\overbrace{x}',
+    ]) {
+      const e = ce.parse(s);
+      expect(e.latex).toBe(s);
+      expect(JSON.stringify(ce.parse(e.latex).json)).toBe(
+        JSON.stringify(e.json)
+      );
+    }
+  });
+
+  test('accent with a subscript round-trips', () => {
+    const e = ce.parse('\\hat{x}_0');
+    expect(e.latex).toBe('\\hat{x}_{0}');
+    expect(JSON.stringify(ce.parse(e.latex).json)).toBe(JSON.stringify(e.json));
+  });
+});
