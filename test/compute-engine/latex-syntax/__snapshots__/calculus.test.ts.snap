@@ -594,7 +594,7 @@ D(D(D((t) |-> y, t), t), t)
 `;
 
 exports[`REAL WORLD INTEGRALS Integral with non standard typesetting 1`] = `
-\\mathrm{S_{t}}=\\mathrm{S_0}+\\int_{\\mathrm{t_{i}}}^{\\mathrm{t_{e}}}\\!G-F\\, \\mathrm{d}t
+S_{t}=S_0+\\int_{t_{i}}^{t_{e}}\\!G-F\\, \\mathrm{d}t
 "S_t" === "S_0" + int_("t_i")^("t_e")(-F + "CatalanConstant" dt)
 [
   "Equal",

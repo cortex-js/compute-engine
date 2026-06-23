@@ -574,6 +574,7 @@ function parseSymbolBody(
   }
 
   // Only the top level can have superscripts and subscripts
+  let baseBody = body;
   if (topLevel) {
     const sups: string[] = [];
     const subs: string[] = [];
@@ -612,6 +613,14 @@ function parseSymbolBody(
       }
     }
 
+    // Remember the base (without sub/superscripts) so the auto font style is
+    // decided from it alone: a single-token base such as `a` stays italic even
+    // when it carries a subscript, so `a_1` serializes as `a_1`, not
+    // `\mathrm{a_1}`. (A multi-letter base like `speed` is still wrapped, and
+    // the wrapper keeps enclosing the whole symbol so descriptive subscripts
+    // such as `speed_max` stay upright: `\mathrm{speed_{max}}`.)
+    baseBody = body;
+
     // Apply the superscripts and subscripts
     if (sups.length > 0) body = supsub('^', body, sups.join(','));
     if (subs.length > 0) body = supsub('_', body, subs.join(','));
@@ -624,7 +633,7 @@ function parseSymbolBody(
   if (styles.length === 0 && style !== 'none') {
     switch (style) {
       case 'auto':
-        if (countTokens(body) > 1) {
+        if (countTokens(baseBody) > 1) {
           // Use \operatorname for symbols containing \unicode escapes
           // (these are named symbols, not styled text)
           if (body.includes('\\unicode')) body = `\\operatorname{${body}}`;

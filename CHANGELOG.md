@@ -1,3 +1,20 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **Subscripted single-letter symbols serialize with an italic base instead of
+  an upright one.** When a symbol name carried a subscript (e.g. `a_1`, `x_n`,
+  `S_t`), the serializer chose its font style from the _decorated_ string rather
+  than the base: the subscript inflated the token count, so the multi-character
+  rule wrapped the whole thing in `\mathrm{…}` and rendered the base letter
+  upright (`\mathrm{a_1}`). A single-letter variable with a subscript is now
+  rendered italic, as a variable should be — `a_1` serializes to `a_1`, not
+  `\mathrm{a_1}`. The font style is now decided from the base alone: multi-letter
+  bases are still upright with the wrapper enclosing the whole symbol, so
+  descriptive subscripts stay roman (`speed_max → \mathrm{speed_{max}}`), and
+  explicit style modifiers (`\mathbf`, `\mathbb`, …) are unchanged. Greek
+  single-letter bases are likewise rendered with their default (italic) style.
+
 ## 0.62.0 _2026-06-20_
 
 ### Resolved Issues
@@ -12,12 +29,12 @@
   above machine: `ExactNumericValue.sum` folds those starting from a zero
   accumulator, and the very first `0 + xᵢ` step lost all extra precision. The
   degradation was invisible when the terms were of similar magnitude (the result
-  was merely capped at ~16 digits), but became a wrong answer under
-  cancellation — e.g. numerically evaluating a high-order symbolic derivative at
-  a point (large factorial-scale terms cancelling to a small value) returned
-  garbage at any working precision. The zero-accumulator path now reads the
-  full-precision real part, matching the non-zero path. Coefficients were always
-  computed exactly; only the final numeric summation was affected.
+  was merely capped at ~16 digits), but became a wrong answer under cancellation
+  — e.g. numerically evaluating a high-order symbolic derivative at a point
+  (large factorial-scale terms cancelling to a small value) returned garbage at
+  any working precision. The zero-accumulator path now reads the full-precision
+  real part, matching the non-zero path. Coefficients were always computed
+  exactly; only the final numeric summation was affected.
 
 - **High-order derivatives are reduced instead of blowing up.** The `Derivative`
   operator applies the differentiation rules iteratively, and the quotient and
@@ -51,22 +68,22 @@
   grazing miss, which per-op widening alone cannot fix (with exact endpoints the
   op chain is exact). That box pad is scaled to the **domain extent**, not the
   edge value, since that is what bounds the `mix` error — a value-relative pad
-  would vanish for a box edge near 0 in a wide domain. Widening only ever moves a
-  bound outward, so it cannot break soundness; the `empty` (`lo > hi`) / `entire`
-  (`±IV_INF`) encodings, the finite `IV_INF` sentinel, the per-op clamp, and
-  exact empty-propagation are all preserved. `Sin`/`Cos` remain best-effort (see
-  below).
+  would vanish for a box edge near 0 in a wide domain. Widening only ever moves
+  a bound outward, so it cannot break soundness; the `empty` (`lo > hi`) /
+  `entire` (`±IV_INF`) encodings, the finite `IV_INF` sentinel, the per-op
+  clamp, and exact empty-propagation are all preserved. `Sin`/`Cos` remain
+  best-effort (see below).
 
 - **`freeVariables` / `unknowns` no longer report the bound variables of
   `Function` literals and integrals.** A function literal leaked its own
   parameters, and `Integrate` / `Limit` leaked their variable — e.g.
   `freeVariables` of `f(x) := x^2 + b` wrongly included the parameter `x`, and a
   definite integral leaked its integration variable. They now return only
-  genuinely free symbols (`[b, f]` for that definition, `[]` for
-  `∫ sin(x) dx`), while a free coefficient is still reported
-  (`∫ a·sin(x) dx → [a]`). `Sum` / `Product` were already correct, and `symbols`
-  is unchanged (it still includes bound variables). This is a behavior change
-  for code that relied on the previous, over-inclusive result.
+  genuinely free symbols (`[b, f]` for that definition, `[]` for `∫ sin(x) dx`),
+  while a free coefficient is still reported (`∫ a·sin(x) dx → [a]`). `Sum` /
+  `Product` were already correct, and `symbols` is unchanged (it still includes
+  bound variables). This is a behavior change for code that relied on the
+  previous, over-inclusive result.
 
 - **Runaway user-function recursion now throws a catchable `CancellationError`
   instead of a native `RangeError`.** A recursive definition with no reachable
@@ -102,15 +119,14 @@
   previously left as an unevaluated `EvaluateAt`), nested definite integrals
   evaluate to a value: `∫_1^2∫_3^4 x·y dx dy → 21/4`.
 
-- **Multiple-integral and contour-integral serialization round-trips.**
-  `\iint` / `\iiint` (and `\oiint` / `\oiiint`) now serialize back to the
-  compact sign with a single region subscript (`\iint_{D}\!…`) instead of a
-  stack of `\int`s, so a flat multiple integral round-trips to the same
-  structure. A separate long-standing bug that emitted the literal text
-  `\ointundefined` for any `\oint` with a region (its limit is a 3-element
-  `Tuple`, serialized to MathJSON as `Triple`, which the serializer did not
-  recognize) is also fixed: `\oint_V f(s)\,ds` now serializes as
-  `\oint_{V}\!f(s)\, \mathrm{d}s`.
+- **Multiple-integral and contour-integral serialization round-trips.** `\iint`
+  / `\iiint` (and `\oiint` / `\oiiint`) now serialize back to the compact sign
+  with a single region subscript (`\iint_{D}\!…`) instead of a stack of `\int`s,
+  so a flat multiple integral round-trips to the same structure. A separate
+  long-standing bug that emitted the literal text `\ointundefined` for any
+  `\oint` with a region (its limit is a 3-element `Tuple`, serialized to
+  MathJSON as `Triple`, which the serializer did not recognize) is also fixed:
+  `\oint_V f(s)\,ds` now serializes as `\oint_{V}\!f(s)\, \mathrm{d}s`.
 
 - **`1^x` simplifies to `1` for any finite exponent.** A symbolic or function
   exponent (e.g. `1^{n+1}`, `1^{\sin x}`) previously left `Power(1, x)`
@@ -123,9 +139,9 @@
 - **`interval-glsl`: public outward-rounding helpers and an opt-in absolute trig
   pad (preview).** The widen helpers `_iv_widen` / `_iv_widen_t` /
   `_iv_widen_pow` / `_iv_widen_sc` / `_iv_widen_box`, and their epsilons
-  `IV_EPS` / `IV_EPS_FN` / `IV_EPS_POW` / `IV_BOX_EPS`, are a stable, public part
-  of the emitted preamble: a renderer that builds its own cell box (instead of
-  using `compileExclusionShader`) outward-rounds it by calling
+  `IV_EPS` / `IV_EPS_FN` / `IV_EPS_POW` / `IV_BOX_EPS`, are a stable, public
+  part of the emitted preamble: a renderer that builds its own cell box (instead
+  of using `compileExclusionShader`) outward-rounds it by calling
   `_iv_widen_box(vec2(lo, hi), extent)` per axis, where `extent` is the domain
   extent for that axis (the box pad is domain-scaled, not value-relative). The
   preamble is now emitted for any expression with free variables (not only ones
@@ -142,12 +158,12 @@
   expression _defines_: the target of a top-level `Assign` / `Declare` (`a` in
   `a := 3`, `f` in `f(x) := …`), recursing through `Block`. It complements
   `freeVariables` (the symbols an expression _references_) — together they let
-  tooling build a definition/use dependency graph, with `references =
-  freeVariables` minus `defines`.
+  tooling build a definition/use dependency graph, with
+  `references = freeVariables` minus `defines`.
 
 - **`ComputeEngine.appliedNonFunctions(latex)`.** Returns the symbols written in
-  function-application syntax `f(…)` in `latex` that are **not** functions in the
-  current scope, and so parse as implicit multiplication (`f·x`) or are left
+  function-application syntax `f(…)` in `latex` that are **not** functions in
+  the current scope, and so parse as implicit multiplication (`f·x`) or are left
   unresolved. The check is scope-aware (a symbol declared as a function is not
   reported) and has no side effects. Useful for flagging a likely call to an
   undefined function — e.g. warning that `f(x)` was read as `f·x`.

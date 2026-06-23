@@ -475,7 +475,7 @@ describe('SYMBOLS', () => {
       expect(latex('_')).toEqual(`\\operatorname{\\_}`);
       expect(latex('_0')).toEqual(`\\operatorname{\\_0}`);
       expect(latex('_abc')).toEqual(`\\operatorname{\\_abc}`);
-      expect(latex('o_o')).toEqual(`\\mathrm{o_{o}}`); // single char uses mathrm rather than operatorname
+      expect(latex('o_o')).toEqual(`o_{o}`); // single-letter base stays italic, even with a subscript
       expect(latex('`café`')).toEqual(`\\mathrm{café}`);
       // Catalan interpunct (·) is valid in a symbol
       expect(latex('`col·lecció`')).toEqual(`\\mathrm{col·lecció}`);
@@ -555,9 +555,11 @@ describe('SYMBOLS', () => {
     });
 
     test('numeric modifiers', () => {
-      expect(latex('x0')).toEqual(`\\mathrm{x_0}`);
-      expect(latex('x123')).toEqual(`\\mathrm{x_{123}}`);
-      expect(latex('`mu_123`')).toEqual(`\\mathrm{\\mu_{123}}`);
+      // Single-token bases keep their default (italic) style; only the
+      // subscript is attached. Multi-letter bases are still wrapped in \mathrm.
+      expect(latex('x0')).toEqual(`x_0`);
+      expect(latex('x123')).toEqual(`x_{123}`);
+      expect(latex('`mu_123`')).toEqual(`\\mu_{123}`);
     });
 
     test('special names', () => {
@@ -565,19 +567,15 @@ describe('SYMBOLS', () => {
       expect(latex('deltagamma')).toMatchInlineSnapshot(`\\mathrm{deltagamma}`);
       expect(latex('Alpha')).toEqual(`\\Alpha`);
       expect(latex('aleph')).toEqual(`\\aleph`);
-      expect(latex('`aleph__plus`')).toMatchInlineSnapshot(
-        `\\mathrm{\\aleph^{+}}`
-      );
-      expect(latex('`x_alpha`')).toEqual(`\\mathrm{x_{\\alpha}}`);
-      expect(latex('`alpha_gamma`')).toEqual(`\\mathrm{\\alpha_{\\gamma}}`);
-      expect(latex('`alpha_gamma_delta`')).toEqual(
-        `\\mathrm{\\alpha_{\\gamma,\\delta}}`
-      );
+      expect(latex('`aleph__plus`')).toMatchInlineSnapshot(`\\aleph^{+}`);
+      expect(latex('`x_alpha`')).toEqual(`x_{\\alpha}`);
+      expect(latex('`alpha_gamma`')).toEqual(`\\alpha_{\\gamma}`);
+      expect(latex('`alpha_gamma_delta`')).toEqual(`\\alpha_{\\gamma,\\delta}`);
       expect(latex('`beta_bold`')).toEqual(`\\mathbf{\\beta}`);
       expect(latex('`beta_calligraphic`')).toMatchInlineSnapshot(
         `\\mathcal{\\beta}`
       );
-      expect(latex('`x_plus`')).toEqual(`\\mathrm{x_{+}}`);
+      expect(latex('`x_plus`')).toEqual(`x_{+}`);
       expect(latex('`R_blackboard__0__plus`')).toEqual(`\\mathbb{R^{0,+}}`);
     });
   });
