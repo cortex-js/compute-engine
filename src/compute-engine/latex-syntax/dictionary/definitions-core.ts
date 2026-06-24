@@ -91,6 +91,21 @@ function parseComponentAccess(
 
   // Form 3: bare letter (single character a–z or A–Z)
   if (typeof tok === 'string' && /^[a-zA-Z]$/.test(tok)) {
+    // Dictionary key access: when the LHS is a symbol declared as a
+    // `dictionary`, `.member` reads a run of letters as a string key —
+    // `data.height` → `At(data, "height")`. The key is constrained to
+    // alphabetic, space-free names to keep `.` unambiguous. This is checked
+    // before the component-access heads, so a dictionary's `.x` / `.real` is a
+    // key lookup, not a `First` / `Real` component. Non-dictionary LHS keep the
+    // existing (deliberately tight) single-letter member behavior below.
+    const lhsSym = symbol(lhs);
+    if (lhsSym !== null && parser.getSymbolType(lhsSym).matches('dictionary')) {
+      let key = '';
+      while (typeof parser.peek === 'string' && /^[a-zA-Z]$/.test(parser.peek))
+        key += parser.nextToken();
+      return ['At', lhs, { str: key }] as MathJsonExpression;
+    }
+
     const head = memberHead(tok);
     if (head === null) return null;
     parser.nextToken(); // consume the letter

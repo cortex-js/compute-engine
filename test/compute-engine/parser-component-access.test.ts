@@ -116,4 +116,42 @@ describe('Parser: component access', () => {
       expect(result.operator).toBe('Error');
     });
   });
+
+  describe('dictionary key access via dot-notation', () => {
+    // A symbol declared as a `dictionary` gets `.member` key access; the key
+    // is an alphabetic, space-free run. Use a fresh engine so the dictionary
+    // declaration does not leak into the shared one.
+    const dictEngine = () => {
+      const e = new ComputeEngine();
+      const d = e.box({ dict: { height: 42, width: 7, x: 99, real: 5 } });
+      e.declare('data', d.type);
+      e.assign('data', d);
+      return e;
+    };
+
+    test('reads a multi-letter key', () => {
+      const e = dictEngine();
+      const expr = e.parse('\\mathrm{data}.height');
+      expect(expr.operator).toBe('At');
+      expect(expr.op1.symbol).toBe('data');
+      expect(expr.op2.string).toBe('height');
+      expect(expr.evaluate().valueOf()).toBe(42);
+    });
+
+    test('a single-letter key is a key, not a First/Second component', () => {
+      const e = dictEngine();
+      expect(e.parse('\\mathrm{data}.x').evaluate().valueOf()).toBe(99);
+    });
+
+    test('a key that shadows a component head is still a key', () => {
+      const e = dictEngine();
+      expect(e.parse('\\mathrm{data}.real').evaluate().valueOf()).toBe(5);
+    });
+
+    test('dot-access on a non-dictionary symbol is unchanged', () => {
+      // `p` is not a dictionary, so the deliberately-tight component rules apply.
+      expect(parse('p.x')).toEqual(['First', 'p']);
+      expect(ce.parse('p.q').isValid).toBe(false);
+    });
+  });
 });

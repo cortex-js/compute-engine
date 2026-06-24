@@ -17,7 +17,11 @@
   value type is now `indexed_collection | dictionary`. In LaTeX, the postfix
   bracket form accepts a string key, so `\mathrm{data}["height"]` (or
   `\mathrm{data}[\text{height}]`) parses to `["At", "data", "height"]`.
-  Positional indexing of indexed collections is unchanged.
+  Dot-notation also works when the base is a symbol declared as a dictionary:
+  `\mathrm{data}.height` → `["At", "data", "height"]` (the key is an
+  alphabetic, space-free name; for a dictionary base, `.x` / `.real` are key
+  lookups, not `First` / `Real` component access). Positional indexing of
+  indexed collections is unchanged.
 
 - **`BoxedExpression.referencedFunctions` and `BoxedExpression.references`.** Two
   accessors aimed at dependency graphs (e.g. notebooks). The operator head of a
